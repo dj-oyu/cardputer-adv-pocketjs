@@ -695,6 +695,17 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     pocketjs_guest_destroy(guest);
     return ESP_ERR_NO_MEM;
   }
+  /* Apps run hardened (docs/vm/harden.md): no eval or Function(), no
+   * prototype changes, read-only intrinsics, no species. Before the helpers
+   * and the firmware's surfaces, so only the intrinsics are locked -- what
+   * the host adds to the global object stays the host's. Fails only on OOM
+   * or a compiler that leaves no spare header bit; either way no app starts
+   * unhardened. tools/vmtest/vmrun.c --harden mirrors this. */
+  if (JS_PocketHarden(guest->context) < 0) {
+    JS_FreeValue(guest->context, JS_GetException(guest->context));
+    pocketjs_guest_destroy(guest);
+    return ESP_ERR_NO_MEM;
+  }
   js_std_add_helpers(guest->context, 0, NULL);
   /* js_std_add_helpers returns nothing and drops its own failures, so an OOM
    * here would start the app without console.log or print. JS_NewContext

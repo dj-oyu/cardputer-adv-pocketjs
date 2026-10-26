@@ -990,6 +990,7 @@ static void usage(void) {
           "  --require-frame        like the guest: no frame() -> no drain after eval\n"
           "  --module               evaluate FILE as a module\n"
           "  --strict               prefix FILE with \"use strict\";\n"
+          "  --harden               JS_PocketHarden the context, as the device (docs/vm/harden.md)\n"
           "  --test262              install $262, report 'vmrun: uncaught <phase> <Name>'\n"
           "  --force-yield          yield at every checkpoint: every job (= --budget-jobs 1) and, since\n"
           "                         L2, every opcode safepoint (kills the job until L2c can resume)\n"
@@ -1048,6 +1049,7 @@ int main(int argc, char **argv) {
   const char *file = NULL;
   int frames = 0;
   bool require_frame = false, module = false, strict = false, test262 = false;
+  bool harden = false;   // --harden: JS_PocketHarden (docs/vm/harden.md)
   bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
   size_t vm_seg_size = 0;  // --vm-seg-size; 0 = whatever the build compiled in
   size_t vm_seg_first = 0, vm_seg_max = 0;
@@ -1074,6 +1076,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--require-frame")) require_frame = true;
     else if (!strcmp(a, "--module")) module = true;
     else if (!strcmp(a, "--strict")) strict = true;
+    else if (!strcmp(a, "--harden")) harden = true;
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
     else if (!strcmp(a, "--force-reloc")) force_reloc = true;
@@ -1229,6 +1232,12 @@ int main(int argc, char **argv) {
   js_std_init_handlers(G.runtime);
   if (module) JS_SetModuleLoaderFunc2(G.runtime, NULL, js_module_loader, js_module_check_attributes, NULL);
   G.context = JS_NewContext(G.runtime);
+  // --harden: as pocketjs_guest_create() with CONFIG_POCKET_VM_HARDEN, before
+  // the helpers, so console/print stay the host's (docs/vm/harden.md).
+  if (G.context && harden && JS_PocketHarden(G.context) < 0) {
+    fprintf(stderr, "vmrun: JS_PocketHarden failed\n");
+    return 1;
+  }
   if (G.context) {
     js_std_add_helpers(G.context, 0, NULL);
     // Mirrors pocketjs_guest_create(): js_std_add_helpers drops its own

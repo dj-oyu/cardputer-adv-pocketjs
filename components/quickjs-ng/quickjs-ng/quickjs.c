@@ -329,6 +329,8 @@ struct JSRuntime {
     /* The lazy flag lives in a spare header bit; set once the runtime has
        checked that bit really is spare on this compiler (JS_NewRuntime2). */
     bool lazy_ok;
+    /* Same for the harden lock bit (js_obj_locked). */
+    bool lock_ok;
 #endif
 
     JSClassID js_class_id_alloc; /* counter for user defined classes */
@@ -645,6 +647,15 @@ struct JSContext {
        - the prototype of Object.prototype is null (always true as it is immutable)
     */
     uint8_t std_array_prototype : 1;
+    /* JS_PocketHarden ran (docs/vm/harden.md): no code from strings, no
+       [[Prototype]] changes, intrinsics locked, no species, failed writes
+       throw. Never cleared. */
+    uint8_t harden : 1;
+    /* Harden: a shared shape and its locked twin, so the intrinsics that
+       shared a shape (most C functions do: length, name) share the locked
+       one instead of each cloning it (js_harden_lock). Both referenced. */
+    uint8_t harden_shape_count;
+    struct { JSShape *from, *to; } harden_shapes[8];
 
     JSShape *array_shape;   /* initial shape for Array objects */
     JSShape *arguments_shape;  /* shape for arguments objects */
@@ -1329,6 +1340,23 @@ typedef struct JSLazyList {
     uint32_t done[2];                /* entry materialized, or deleted */
 } JSLazyList;
 #endif
+
+/* Harden (docs/vm/harden.md): an intrinsic that has been locked -- its
+   properties made non-writable and non-configurable, the object made
+   non-extensible. The attributes are what stop writes; this bit is read only
+   where builtins are made after the lock (autoinit, lazy lists, lazy
+   intrinsics), so that what a locked object hands out is born locked too.
+   Bit 1 of JSGCObjectHeader.dummy0, beside the lazy flag (bit 0) and proven
+   spare the same way (rt->lock_ok, JS_NewRuntime2). */
+static inline bool js_obj_locked(const JSObject *p)
+{
+    return p->header.dummy0 & 2;
+}
+
+static inline void js_obj_set_locked(JSObject *p, bool on)
+{
+    p->header.dummy0 = (p->header.dummy0 & ~2u) | (on ? 2 : 0);
+}
 
 typedef struct JSCallSiteData {
     JSValue filename;
@@ -2329,6 +2357,20 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
         ok = ok && o.is_prototype && o.header.mark &&
              o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT;
         rt->lazy_ok = ok;
+        /* The lock bit, by the same proof, and independent of the lazy one. */
+        memset(&o, 0, sizeof(o));
+        o.header.gc_obj_type = JS_GC_OBJ_TYPE_JS_OBJECT;
+        js_obj_set_locked(&o, true);
+        bool lk = o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT &&
+                  !o.header.mark && !o.is_prototype && !o.extensible && !js_obj_lazy(&o);
+        o.is_prototype = 1;
+        o.header.mark = 1;
+        js_obj_set_lazy(&o, true);
+        lk = lk && js_obj_locked(&o);
+        js_obj_set_locked(&o, false);
+        lk = lk && o.is_prototype && o.header.mark && js_obj_lazy(&o) &&
+             o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT;
+        rt->lock_ok = ok && lk;
     }
 #endif
     rt->mf = *mf;
@@ -3214,6 +3256,10 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     if (ctx->array_shape) {
         mark_func(rt, &ctx->array_shape->header);
     }
+    for (int i = 0; i < ctx->harden_shape_count; i++) {
+        mark_func(rt, &ctx->harden_shapes[i].from->header);
+        mark_func(rt, &ctx->harden_shapes[i].to->header);
+    }
 
     if (ctx->arguments_shape) {
         mark_func(rt, &ctx->arguments_shape->header);
@@ -3306,6 +3352,11 @@ void JS_FreeContext(JSContext *ctx)
     JS_FreeValue(ctx, ctx->function_proto);
 
     js_free_shape_null(ctx->rt, ctx->array_shape);
+    for (int i = 0; i < ctx->harden_shape_count; i++) {
+        js_free_shape(ctx->rt, ctx->harden_shapes[i].from);
+        js_free_shape(ctx->rt, ctx->harden_shapes[i].to);
+    }
+    ctx->harden_shape_count = 0;
     js_free_shape_null(ctx->rt, ctx->arguments_shape);
     js_free_shape_null(ctx->rt, ctx->mapped_arguments_shape);
     js_free_shape_null(ctx->rt, ctx->regexp_shape);
@@ -3363,6 +3414,15 @@ static inline bool is_strict_mode(JSContext *ctx)
 {
     JSStackFrame *sf = ctx->rt->current_stack_frame;
     return sf && sf->is_strict_mode;
+}
+
+/* A write, define or delete that fails with JS_PROP_THROW_STRICT: throw in
+   strict code, and always under harden -- a silent no-op is the surprise
+   harden exists to remove (docs/vm/harden.md). Only the failure reporting
+   follows strict mode; undeclared assignment, `this` and the rest do not. */
+static inline bool js_write_fail_throws(JSContext *ctx)
+{
+    return ctx->harden || is_strict_mode(ctx);
 }
 
 /* JSAtom support */
@@ -6788,6 +6848,7 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
        memory is not zero, as %ThrowTypeError% being "fully materialized"
        at startup (2026-09-25). */
     js_obj_set_lazy(p, false);
+    js_obj_set_locked(p, false);   /* the same reason, for the lock bit */
 #endif
     p->first_weak_ref = NULL;
     p->u.opaque = NULL;
@@ -7892,6 +7953,8 @@ static void js_lazy_forget(JSRuntime *rt, JSObject *p);
 #else
 #define js_obj_lazy(p) false
 #endif
+static int js_harden_lock(JSContext *ctx, JSObject *p);
+static int js_harden_lock_value(JSContext *ctx, JSValueConst v);
 
 static inline JSShapeProperty *find_own_property(JSProperty **ppr,
                                                  JSObject *p,
@@ -9587,6 +9650,20 @@ JS_ThrowError(JSContext *ctx, JSErrorEnum error_num,
     return JS_ThrowError2(ctx, error_num, add_backtrace, fmt, ap);
 }
 
+/* Harden refusals: an EvalError for code from strings (as V8 under
+   --disallow-code-generation-from-strings), a TypeError otherwise. */
+static JSValue JS_PRINTF_FORMAT_ATTR(3, 4)
+js_throw_harden(JSContext *ctx, JSErrorEnum error_num, JS_PRINTF_FORMAT const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, error_num, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
 #define JS_ERROR_MAP(X)     \
     X(Internal, INTERNAL)   \
     X(Plain, PLAIN)         \
@@ -9632,7 +9709,7 @@ static int JS_PRINTF_FORMAT_ATTR(3, 4) JS_ThrowTypeErrorOrFalse(JSContext *ctx, 
     va_list ap;
 
     if ((flags & JS_PROP_THROW) ||
-            ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
+            ((flags & JS_PROP_THROW_STRICT) && js_write_fail_throws(ctx))) {
         va_start(ap, fmt);
         JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
         va_end(ap);
@@ -9666,7 +9743,7 @@ static JSValue JS_ThrowSyntaxErrorAtom(JSContext *ctx, const char *fmt, JSAtom a
 static int JS_ThrowTypeErrorReadOnly(JSContext *ctx, int flags, JSAtom atom)
 {
     if ((flags & JS_PROP_THROW) ||
-            ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
+            ((flags & JS_PROP_THROW_STRICT) && js_write_fail_throws(ctx))) {
         JS_ThrowTypeErrorAtom(ctx, "'%s' is read-only", atom);
         return -1;
     } else {
@@ -10333,6 +10410,16 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
     js_autoinit_free(ctx->rt, pr);
     prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = val;
+    /* Harden: a locked intrinsic hands out locked objects. The global is
+       not locked; its intrinsic bindings are the ones JS_PocketHarden made
+       read-only, which the firmware's later ones are not. */
+    if (unlikely(ctx->harden) && JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT &&
+            (js_obj_locked(p) ||
+             (p == JS_VALUE_GET_OBJ(ctx->global_obj) &&
+              !(prs->flags & (JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE))))) {
+        if (js_harden_lock(ctx, JS_VALUE_GET_OBJ(val)))
+            return -1;
+    }
     return 0;
 }
 
@@ -11689,7 +11776,7 @@ static int call_setter(JSContext *ctx, JSObject *setter,
     } else {
         JS_FreeValue(ctx, val);
         if ((flags & JS_PROP_THROW) ||
-                ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
+                ((flags & JS_PROP_THROW_STRICT) && js_write_fail_throws(ctx))) {
             JS_ThrowTypeError(ctx, "no setter for property");
             return -1;
         }
@@ -12049,6 +12136,14 @@ retry2:
         if (prs) {
             if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
                 return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
+            } else if (unlikely(ctx->harden) && !(prs->flags & JS_PROP_WRITABLE)) {
+                /* Harden relaxes the "override mistake": a read-only data
+                   property up the chain does not stop the receiver from
+                   getting its own. Locked intrinsics are read-only, so
+                   without this `o.toString = f` on a plain object would
+                   fail (pocket_api.c's PocketError sets `name` this way).
+                   No instantiation needed: the value is not read. */
+                break;
             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
                 /* Instantiate property and retry (potentially useless) */
                 if (JS_AutoInitProperty(ctx, p1, prop, pr, prs)) {
@@ -13371,7 +13466,7 @@ int JS_DeleteProperty(JSContext *ctx, JSValueConst obj, JSAtom prop, int flags)
         return res;
     }
     if ((flags & JS_PROP_THROW) ||
-            ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
+            ((flags & JS_PROP_THROW_STRICT) && js_write_fail_throws(ctx))) {
         JS_ThrowTypeError(ctx, "could not delete property");
         return -1;
     }
@@ -41751,6 +41846,12 @@ static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
     if (!JS_IsString(val)) {
         return js_dup(val);
     }
+    /* Harden: direct eval, indirect eval and the Function constructors all
+       come through here; loading the app (JS_Eval from C) does not. */
+    if (unlikely(ctx->harden)) {
+        return js_throw_harden(ctx, JS_EVAL_ERROR,
+                               "code generation from strings is disabled");
+    }
     str = JS_ToCStringLen(ctx, &len, val);
     if (!str) {
         return JS_EXCEPTION;
@@ -44539,6 +44640,8 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
     JSProperty *pr;
     JSValue val;
     int prop_flags = e->prop_flags;
+    /* Harden: a locked object's entries enter the shape read-only. */
+    int lock_mask = js_obj_locked(p) ? ~(JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE) : ~0;
 
     switch (e->def_type) {
     case JS_DEF_CFUNC:
@@ -44550,7 +44653,7 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
         /* fall through */
     case JS_DEF_PROP_STRING:
     case JS_DEF_OBJECT:
-        pr = add_property(ctx, p, atom, (prop_flags & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
+        pr = add_property(ctx, p, atom, (prop_flags & lock_mask & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
         if (!pr)
             return -1;
         pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | JS_AUTOINIT_ID_PROP;
@@ -44578,7 +44681,13 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
                 return -1;
             }
         }
-        pr = add_property(ctx, p, atom, (prop_flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
+        if (lock_mask != ~0 &&
+                (js_harden_lock_value(ctx, getter) || js_harden_lock_value(ctx, setter))) {
+            JS_FreeValue(ctx, getter);
+            JS_FreeValue(ctx, setter);
+            return -1;
+        }
+        pr = add_property(ctx, p, atom, (prop_flags & lock_mask & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
                           JS_PROP_GETSET);
         if (!pr) {
             JS_FreeValue(ctx, getter);
@@ -44610,7 +44719,7 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
     default:
         abort();   /* JS_DEF_ALIAS is materialized at registration */
     }
-    pr = add_property(ctx, p, atom, prop_flags & JS_PROP_C_W_E);
+    pr = add_property(ctx, p, atom, prop_flags & lock_mask & JS_PROP_C_W_E);
     if (!pr) {
         JS_FreeValue(ctx, val);
         return -1;
@@ -44662,8 +44771,9 @@ static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom)
         for (int k = 0; k < l->len; k++) {
             if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
                 continue;
-            /* Symbol.hasInstance is made non-configurable by lazy_define. */
-            if (!(l->tab[k].prop_flags & JS_PROP_CONFIGURABLE) ||
+            /* Symbol.hasInstance is made non-configurable by lazy_define,
+               and so is every entry of a locked object (harden). */
+            if (js_obj_locked(p) || !(l->tab[k].prop_flags & JS_PROP_CONFIGURABLE) ||
                     (l->tab[k].def_type == JS_DEF_CFUNC && atom == JS_ATOM_Symbol_hasInstance))
                 return false;
             lazy_set_done(l, k);
@@ -44944,6 +45054,213 @@ static int lazy_register(JSContext *ctx, JSValueConst obj,
     return 0;
 }
 #endif
+
+/* ---- Harden (docs/vm/harden.md) ----
+
+   Intrinsics are made read-only by their attributes -- every property
+   non-writable and non-configurable (accessors: non-configurable), the
+   object non-extensible -- so every write path, bytecode or native, stops
+   on the check it already makes. Nothing new is read on a write.
+
+   What is not made yet is born locked instead of being made now (which
+   would undo the lazy builtins): a list entry of a locked object enters the
+   shape read-only (lazy_define), an autoinit slot of a locked object locks
+   the object it makes (JS_AutoInitProperty), and a lazy intrinsic class is
+   locked when it is made (js_lazy_make). The lock bit is how those places
+   know their holder is an intrinsic. */
+
+static void js_harden_strip(JSShape *sh)
+{
+    JSShapeProperty *prs = sh->prop;
+    for (int i = 0; i < sh->prop_count; i++, prs++) {
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET)
+            prs->flags &= ~JS_PROP_CONFIGURABLE;
+        else
+            prs->flags &= ~(JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+    }
+}
+
+/* p's shape is shared (ref_count > 1, so hashed: add_property relies on
+   that). Give p the locked twin of that shape, made once and hashed like
+   any shape, so every object that shared the original shares the twin.
+   Cloning per object cost about 2 KB of guest heap at the device layout
+   (25 of the 73 objects locked in a fresh context share a shape). */
+static int js_harden_share_shape(JSContext *ctx, JSObject *p)
+{
+    JSRuntime *rt = ctx->rt;
+    JSShape *sh = p->shape, *to = NULL;
+    JSShapeProperty *prs;
+    uint32_t h;
+    int i;
+
+    for (i = 0; i < ctx->harden_shape_count; i++) {
+        if (ctx->harden_shapes[i].from == sh) {
+            to = js_dup_shape(ctx->harden_shapes[i].to);
+            break;
+        }
+    }
+    if (!to) {
+        to = js_clone_shape(ctx, sh);   /* same prop_size: p->prop fits */
+        if (!to)
+            return -1;
+        js_harden_strip(to);
+        h = shape_initial_hash(to->proto);
+        for (i = 0, prs = to->prop; i < to->prop_count; i++, prs++)
+            h = shape_hash(shape_hash(h, prs->atom), prs->flags);
+        to->hash = h;
+        to->is_hashed = true;
+        js_shape_hash_link(rt, to);
+        if (ctx->harden_shape_count < countof(ctx->harden_shapes)) {
+            i = ctx->harden_shape_count++;
+            ctx->harden_shapes[i].from = js_dup_shape(sh);
+            ctx->harden_shapes[i].to = js_dup_shape(to);
+        }
+    }
+    p->shape = to;
+    js_free_shape(rt, sh);
+    return 0;
+}
+
+/* Lock p and, recursively, what it already holds: values made so far,
+   accessor functions, its prototype. The global object is not locked (the
+   firmware and the app add to it); JS_PocketHarden handles its bindings. */
+static int js_harden_lock(JSContext *ctx, JSObject *p)
+{
+    JSShapeProperty *prs;
+    JSProperty *pr;
+    int i;
+
+    if (js_obj_locked(p) || p == JS_VALUE_GET_OBJ(ctx->global_obj))
+        return 0;
+    js_obj_set_locked(p, true);
+    /* As JS_PreventExtensions: a fast array checks no extensible flag. */
+    if (p->class_id == JS_CLASS_ARRAY && p->fast_array &&
+            convert_fast_array_to_array(ctx, p))
+        return -1;
+    if (p->shape->header.ref_count > 1) {
+        if (js_harden_share_shape(ctx, p))
+            return -1;
+    } else {
+        if (js_shape_prepare_update(ctx, p, NULL))
+            return -1;
+        js_harden_strip(p->shape);
+    }
+    p->extensible = false;
+    /* Recursion locks other objects only, so p's shape stays as it is. */
+    for (i = 0; i < p->shape->prop_count; i++) {
+        prs = &p->shape->prop[i];
+        pr = &p->prop[i];
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        switch (prs->flags & JS_PROP_TMASK) {
+        case JS_PROP_NORMAL:
+            if (JS_VALUE_GET_TAG(pr->u.value) == JS_TAG_OBJECT &&
+                    js_harden_lock(ctx, JS_VALUE_GET_OBJ(pr->u.value)))
+                return -1;
+            break;
+        case JS_PROP_GETSET:
+            if (pr->u.getset.getter && js_harden_lock(ctx, pr->u.getset.getter))
+                return -1;
+            if (pr->u.getset.setter && js_harden_lock(ctx, pr->u.getset.setter))
+                return -1;
+            break;
+        default:   /* autoinit: locked when made; varref: global only */
+            break;
+        }
+    }
+    if (p->shape->proto)
+        return js_harden_lock(ctx, p->shape->proto);
+    return 0;
+}
+
+static int js_harden_lock_value(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return 0;
+    return js_harden_lock(ctx, JS_VALUE_GET_OBJ(v));
+}
+
+int JS_PocketHarden(JSContext *ctx)
+{
+    JSObject *g;
+    JSShapeProperty *prs;
+    int i;
+
+    if (ctx->harden)
+        return 0;
+#ifdef POCKET_VM_LAZY_BUILTINS
+    if (!ctx->rt->lock_ok)
+#endif
+    {
+        /* No proven-spare bit to say "born locked": refuse rather than
+           lock only what exists now and leave the rest writable. */
+        JS_ThrowInternalError(ctx, "harden: no lock bit on this build");
+        return -1;
+    }
+    ctx->harden = 1;
+    /* The global bindings that exist now are the intrinsics' (call this
+       before the firmware and the app add theirs): read-only, and what
+       they hold locked. Autoinit ones lock what they make on first use
+       (JS_AutoInitProperty knows them by these attributes). */
+    g = JS_VALUE_GET_OBJ(ctx->global_obj);
+    if (js_shape_prepare_update(ctx, g, NULL))
+        return -1;
+    prs = g->shape->prop;
+    for (i = 0; i < g->shape->prop_count; i++, prs++) {
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        switch (prs->flags & JS_PROP_TMASK) {
+        case JS_PROP_GETSET:
+            prs->flags &= ~JS_PROP_CONFIGURABLE;
+            break;
+        case JS_PROP_NORMAL:
+        case JS_PROP_AUTOINIT:
+            prs->flags &= ~(JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+            break;
+        }
+    }
+    for (i = 0; i < g->shape->prop_count; i++) {
+        JSProperty *pr = &g->prop[i];
+        prs = &g->shape->prop[i];
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        if ((prs->flags & JS_PROP_TMASK) == JS_PROP_NORMAL) {
+            if (js_harden_lock_value(ctx, pr->u.value))
+                return -1;
+        } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+            if ((pr->u.getset.getter && js_harden_lock(ctx, pr->u.getset.getter)) ||
+                    (pr->u.getset.setter && js_harden_lock(ctx, pr->u.getset.setter)))
+                return -1;
+        }
+    }
+    /* Intrinsics no global binding reaches (iterator prototypes, the
+       generator kinds, %ThrowTypeError%, ...). Lazy classes still JS_NULL
+       here are locked by js_lazy_make. */
+    for (i = 0; i < JS_CLASS_INIT_COUNT; i++) {
+        if (js_harden_lock_value(ctx, ctx->class_proto[i]))
+            return -1;
+    }
+    for (i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
+        if (js_harden_lock_value(ctx, ctx->native_error_proto[i]))
+            return -1;
+    }
+    if (js_harden_lock_value(ctx, ctx->function_proto) ||
+            js_harden_lock_value(ctx, ctx->function_ctor) ||
+            js_harden_lock_value(ctx, ctx->array_ctor) ||
+            js_harden_lock_value(ctx, ctx->regexp_ctor) ||
+            js_harden_lock_value(ctx, ctx->promise_ctor) ||
+            js_harden_lock_value(ctx, ctx->error_ctor) ||
+            js_harden_lock_value(ctx, ctx->iterator_ctor) ||
+            js_harden_lock_value(ctx, ctx->iterator_proto) ||
+            js_harden_lock_value(ctx, ctx->async_iterator_proto) ||
+            js_harden_lock_value(ctx, ctx->array_proto_values) ||
+            js_harden_lock_value(ctx, ctx->throw_type_error) ||
+            js_harden_lock_value(ctx, ctx->eval_obj))
+        return -1;
+    return 0;
+}
 
 int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
                                const JSCFunctionListEntry *tab, int len)
@@ -45519,11 +45836,27 @@ static JSValue js_object_getPrototypeOf(JSContext *ctx, JSValueConst this_val,
     return JS_GetPrototype(ctx, val);
 }
 
+/* Harden: an object's [[Prototype]] is fixed once it exists. Setting the
+   one it already has stays a no-op; creation-time forms (`{__proto__: p}`,
+   Object.create, class heritage) do not come through these entry points. */
+static int js_harden_proto_change(JSContext *ctx, JSValueConst obj, JSValueConst proto)
+{
+    if (likely(!ctx->harden) || JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return 0;
+    JSObject *np = JS_VALUE_GET_TAG(proto) == JS_TAG_OBJECT ? JS_VALUE_GET_OBJ(proto) : NULL;
+    JSObject *p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id != JS_CLASS_PROXY && p->shape->proto == np)
+        return 0;
+    js_throw_harden(ctx, JS_TYPE_ERROR, "changing an object's prototype is disabled");
+    return -1;
+}
+
 static JSValue js_object_setPrototypeOf(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv)
 {
     JSValueConst obj = argv[0];
-    if (JS_SetPrototypeInternal(ctx, obj, argv[1], true) < 0) {
+    if (js_harden_proto_change(ctx, obj, argv[1]) ||
+            JS_SetPrototypeInternal(ctx, obj, argv[1], true) < 0) {
         return JS_EXCEPTION;
     }
     return js_dup(obj);
@@ -46399,6 +46732,12 @@ static JSValue JS_SpeciesConstructor(JSContext *ctx, JSValueConst obj,
     if (!JS_IsObject(obj)) {
         return JS_ThrowTypeErrorNotAnObject(ctx);
     }
+    /* Harden: no species. The result is always the intrinsic kind, and
+       neither `constructor` nor Symbol.species is read -- so assigning
+       `constructor` cannot make a builtin call arbitrary code. */
+    if (unlikely(ctx->harden)) {
+        return js_dup(defaultConstructor);
+    }
     ctor = JS_GetProperty(ctx, obj, JS_ATOM_constructor);
     if (JS_IsException(ctor)) {
         return ctor;
@@ -46448,7 +46787,8 @@ static JSValue js_object_set___proto__(JSContext *ctx, JSValueConst this_val,
     if (!JS_IsObject(proto) && !JS_IsNull(proto)) {
         return JS_UNDEFINED;
     }
-    if (JS_SetPrototypeInternal(ctx, this_val, proto, true) < 0) {
+    if (js_harden_proto_change(ctx, this_val, proto) ||
+            JS_SetPrototypeInternal(ctx, this_val, proto, true) < 0) {
         return JS_EXCEPTION;
     } else {
         return JS_UNDEFINED;
@@ -47563,6 +47903,9 @@ static JSValue JS_ArraySpeciesCreate(JSContext *ctx, JSValueConst obj,
     int res;
     JSContext *realm;
 
+    if (unlikely(ctx->harden)) {   /* no species: see JS_SpeciesConstructor */
+        return js_array_constructor(ctx, JS_UNDEFINED, 1, &len_val);
+    }
     res = js_is_array(ctx, obj);
     if (res < 0) {
         return JS_EXCEPTION;
@@ -56883,6 +57226,8 @@ static JSValue js_reflect_setPrototypeOf(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv)
 {
     int ret;
+    if (js_harden_proto_change(ctx, argv[0], argv[1]))
+        return JS_EXCEPTION;
     ret = JS_SetPrototypeInternal(ctx, argv[0], argv[1], false);
     if (ret < 0) {
         return JS_EXCEPTION;
@@ -57287,7 +57632,7 @@ fail:
         }
     } else {
         if ((flags & JS_PROP_THROW) ||
-                ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
+                ((flags & JS_PROP_THROW_STRICT) && js_write_fail_throws(ctx))) {
             JS_ThrowTypeError(ctx, "proxy: cannot set property");
             return -1;
         }
@@ -61054,7 +61399,12 @@ static JSValue js_promise_finally(JSContext *ctx, JSValueConst this_val,
     JSValueConst func_data[2];
     int i;
 
-    ctor = JS_SpeciesConstructor(ctx, this_val, JS_UNDEFINED);
+    /* Harden returns the default without reading `constructor`, and the
+       thunks below resolve through ctor, so it must be a real one there
+       (spec: SpeciesConstructor(promise, %Promise%)). Upstream's undefined
+       is kept otherwise, so plain contexts behave exactly as before. */
+    ctor = JS_SpeciesConstructor(ctx, this_val,
+                                 ctx->harden ? ctx->promise_ctor : JS_UNDEFINED);
     if (JS_IsException(ctor)) {
         return ctor;
     }
@@ -69025,6 +69375,8 @@ static JSValue js_lazy_make(JSContext *ctx, int class_id)
             if (JS_IsException(proto))
                 return proto;
             ctx->class_proto[class_id] = proto;
+            if (unlikely(ctx->harden) && js_harden_lock_value(ctx, proto))
+                return JS_EXCEPTION;
             return JS_UNDEFINED;
         } else {
             int i = class_id - JS_CLASS_MAP;
@@ -69060,8 +69412,15 @@ static JSValue js_lazy_make(JSContext *ctx, int class_id)
     default:
         abort();
     }
-    if (JS_IsException(ctor))
+    if (JS_IsException(ctor)) {
         set_value(ctx, &ctx->class_proto[class_id], JS_NULL);
+    } else if (unlikely(ctx->harden) &&
+               (js_harden_lock_value(ctx, ctor) ||
+                js_harden_lock_value(ctx, ctx->class_proto[class_id]))) {
+        /* Made after the lock, so locked now (JS_PocketHarden saw JS_NULL). */
+        JS_FreeValue(ctx, ctor);
+        return JS_EXCEPTION;
+    }
     return ctor;
 }
 

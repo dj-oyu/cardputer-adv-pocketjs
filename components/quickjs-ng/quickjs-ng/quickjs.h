@@ -647,6 +647,9 @@ JS_EXTERN void JS_RunGC(JSRuntime *rt);
 JS_EXTERN bool JS_IsLiveObject(JSRuntime *rt, JSValueConst obj);
 
 JS_EXTERN JSContext *JS_NewContext(JSRuntime *rt);
+/* PocketJS (docs/vm/harden.md): lock the intrinsics of a fresh context and
+   switch it to the harden rules. Call before adding host globals. 0 or -1. */
+JS_EXTERN int JS_PocketHarden(JSContext *ctx);
 JS_EXTERN void JS_FreeContext(JSContext *s);
 JS_EXTERN JSContext *JS_DupContext(JSContext *ctx);
 JS_EXTERN void *JS_GetContextOpaque(JSContext *ctx);
