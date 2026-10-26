@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-  BASE_HEAD: 6471e535a3a0378590e8b0e1f1f54e9de22ae648
+  BASE_HEAD: d7d9d90050d172e176c0f3ddbe3666a07af1ff7f
 jobs:
   host:
     runs-on: ubuntu-24.04
