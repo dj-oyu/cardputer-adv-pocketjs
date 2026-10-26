@@ -9,7 +9,7 @@ def once(s,a,b):
  assert s.count(a)==1,a[:100]
  return s.replace(a,b)
 def inputs(out):
- changed=set(subprocess.check_output(['git','diff','--name-only',BASE,'--','apps'],cwd=R,text=True).splitlines());assert changed=={'apps/lcdcatch/lcd_catch.js'},changed
+ changed=set(subprocess.check_output(['git','diff','--name-only',BASE,'--','apps/lcdcatch'],cwd=R,text=True).splitlines());assert changed=={'apps/lcdcatch/lcd_catch.js'},changed
  out.mkdir(parents=True,exist_ok=True)
  rows={}
  for mode,data in [('baseline',subprocess.check_output(['git','show',BASE+':apps/lcdcatch/lcd_catch.js'],cwd=R)),('candidate',(R/'apps/lcdcatch/lcd_catch.js').read_bytes())]:
