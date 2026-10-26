@@ -1071,7 +1071,10 @@ int main(int argc,char **argv){
     if(app_chunks_host_read(list))return 2;
     atexit(app_chunks_host_clear);
     app_registry_select("local.derby");
-    rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
+    rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);
+    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
+    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
     pocket_kasane_install(ctx,NULL);

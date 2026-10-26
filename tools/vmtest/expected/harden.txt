@@ -1,0 +1,54 @@
+eval EvalError code generation from strings is disabled
+eval-indirect EvalError code generation from strings is disabled
+eval-nonstring ok 42
+Function EvalError code generation from strings is disabled
+new-Function EvalError code generation from strings is disabled
+ctor-of-arrow EvalError code generation from strings is disabled
+async-ctor EvalError code generation from strings is disabled
+gen-ctor EvalError code generation from strings is disabled
+setPrototypeOf TypeError changing an object's prototype is disabled
+setPrototypeOf-same ok true
+Reflect.setPrototypeOf TypeError changing an object's prototype is disabled
+__proto__= TypeError changing an object's prototype is disabled
+literal-__proto__ ok 1
+Object.create ok 1
+class-extends ok 2
+Array.prototype.x= TypeError object is not extensible
+Array.prototype.map= TypeError 'map' is read-only
+delete-map TypeError could not delete property
+Math.max= TypeError 'max' is read-only
+Math.newfn= TypeError object is not extensible
+Math.max.foo= TypeError object is not extensible
+Object.prototype.toString= TypeError 'toString' is read-only
+defineProperty-proto TypeError object is not extensible
+global-Math= TypeError 'Math' is read-only
+global-Array= TypeError 'Array' is read-only
+delete-global-JSON TypeError could not delete property
+isFrozen-Array.prototype ok true
+isFrozen-Math ok true
+shadow-toString ok mine
+shadow-name ok PocketError
+own-write ok 5
+user-freeze-throws TypeError 'a' is read-only
+user-proto-mutable ok 5
+globals-own ok 2
+lazy-entry ok false,false
+lazy-fn-locked ok false
+lazy-class ok true,2
+lazy-class-write TypeError 'get' is read-only
+lazy-typed TypeError object is not extensible
+lazy-typed-ok ok 2,4,6
+map-iter-proto TypeError 'next' is read-only
+species-map ok 2,3
+species-sym ok false
+promise-then ok true
+json ok {"a":[1,{"b":2}]}
+math ok 7
+array ok 2,3,4
+apply ok 9
+string ok ABC..
+iter ok 5
+regexp ok a|b|
+promise-finally ok queued
+finally-then 1 f
+exit=0

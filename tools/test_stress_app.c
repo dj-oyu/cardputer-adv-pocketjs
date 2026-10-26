@@ -180,7 +180,10 @@ int main(int argc,char **argv) {
     const char *trace_path=getenv("STRESS_ALLOC_TRACE");
     if(trace_path&&(alloc_trace=fopen(trace_path,"w"))) rt=JS_NewRuntime2(&TRACE_MF,NULL);
     else rt=JS_NewRuntime();
-    ctx=JS_NewContext(rt); host_capabilities_clear();
+    ctx=JS_NewContext(rt);
+    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
+    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
     pocket_kasane_install(ctx,NULL);
     pocket_memory_install(ctx,NULL);

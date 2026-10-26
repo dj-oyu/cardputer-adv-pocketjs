@@ -213,7 +213,10 @@ static void open_session(void){
     rt=JS_NewRuntime2(&PEAK_MF,NULL);
     JS_SetMemoryLimit(rt,163840);          /* main/app_session.c heap_limit */
     if(163840/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,163840/2);
-    ctx=JS_NewContext(rt);host_capabilities_clear();
+    ctx=JS_NewContext(rt);
+    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
+    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    host_capabilities_clear();
     pocket_kasane_install(ctx,NULL);
     pocket_input_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);

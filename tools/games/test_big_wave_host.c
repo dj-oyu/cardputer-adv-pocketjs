@@ -588,7 +588,10 @@ int main(int argc,char **argv){
     FILE *f=fopen(path,"rb");
     if(!f){printf("cannot open %s\n",path);return 2;}
     static char src[1<<16];size_t n=fread(src,1,sizeof src-1,f);fclose(f);src[n]=0;
-    rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
+    rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);
+    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
+    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    host_capabilities_clear();
     const char *limit_env=getenv("BW_HEAP_LIMIT");
     if(limit_env){
         size_t limit=(size_t)strtoul(limit_env,NULL,0);
