@@ -1073,7 +1073,8 @@ int main(int argc,char **argv){
     app_registry_select("local.derby");
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);
     // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
     host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}

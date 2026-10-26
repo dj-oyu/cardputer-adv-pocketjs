@@ -182,7 +182,8 @@ int main(int argc,char **argv) {
     else rt=JS_NewRuntime();
     ctx=JS_NewContext(rt);
     // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
     host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
     pocket_kasane_install(ctx,NULL);

@@ -215,7 +215,8 @@ static void open_session(void){
     if(163840/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,163840/2);
     ctx=JS_NewContext(rt);
     // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
     host_capabilities_clear();
     pocket_kasane_install(ctx,NULL);
     pocket_input_install(ctx,NULL);

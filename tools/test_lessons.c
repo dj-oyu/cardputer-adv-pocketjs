@@ -105,7 +105,8 @@ static unsigned distinct_colours(void) {
 static void open_session(void) {
     rt=JS_NewRuntime(); ctx=JS_NewContext(rt);
     // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    if(!ctx||JS_PocketHarden(ctx)<0){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
     host_capabilities_clear();
     memset(panel,0,sizeof panel); printed[0]=0;
     pocket_kasane_install(ctx,NULL);   // the stub hangs it on globalThis.kasane
