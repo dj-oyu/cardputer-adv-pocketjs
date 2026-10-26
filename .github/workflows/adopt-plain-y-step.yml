@@ -31,6 +31,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Isolate adopted candidate on current source
+        id: comparison
+        run: |
+          baseline=$(python3 tools/experiments/isolate_adopted_baseline.py plain66 --output validation-results/comparison-base.json)
+          echo "sha=$baseline" >> "$GITHUB_OUTPUT"
+          cat validation-results/comparison-base.json
       - name: Existing m32 CI dependencies
         if: matrix.abi == 'm32'
         run: |
@@ -42,7 +48,7 @@ jobs:
           from pathlib import Path
           import shutil
           dest=Path('tools/experiments/plain-y-step');shutil.copytree(Path('support')/dest,dest)
-          for p in dest.rglob('*.py'):p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','4b5a4c5d4eed2ca9d1a78ce5d0103e4e58c452d3'))
+          for p in dest.rglob('*.py'):p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','${{ steps.comparison.outputs.sha }}'))
           p=Path('tools/games/run_derby.py');s=p.read_text();old='defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]';assert s.count(old)==1
           p.write_text(s.replace(old,'defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE", "-DQJS_DISABLE_DUMPS"]'))
           p=dest/'renderer.py';s=p.read_text();old="'defines':['QUICKJS_NG_BUILD','_GNU_SOURCE']";assert s.count(old)==1
