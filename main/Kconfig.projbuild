@@ -150,6 +150,19 @@ menu "Pocket VM (diagnostics)"
             Measurement only. Build a separate build_* directory with its own
             sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
 
+    config POCKET_VM_ROM_INTRINSICS
+        bool "Keep the hardened builtins in flash instead of the guest heap"
+        default n
+        help
+            The JS builtins (Object, Array, Math, ... and every method) come
+            from const data in flash (quickjs-rom-intrinsics.h, written by
+            tools/vmtest/floor/gen_rom_intrinsics.sh) instead of being built
+            in the guest heap at each app start (docs/vm/rom-intrinsics.md
+            R2). The context is born hardened (docs/vm/harden.md), and
+            Array.fromAsync, Iterator.zip and Iterator.zipKeyed do not exist.
+
+            Regenerate the header after any change to the builtins.
+
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
         range -1 1
