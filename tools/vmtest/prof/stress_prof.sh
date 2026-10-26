@@ -28,7 +28,7 @@ done
 gcc -std=gnu11 -O2 -g -w $F -fno-omit-frame-pointer \
   -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
   -I main/text -I main/hal -I "$CACHE" \
-  tools/test_stress_app.c tools/hostshim/pocket_api_stub.c \
+  tools/test_stress_app.c tools/hostshim/pocket_api_stub.c tools/hostshim/pocket_surface_stubs.c \
   main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
   main/pocket/pocket_clock_source.c main/pocket/pocket_clock.c main/pocket/pocket_av_playback_source.c \
