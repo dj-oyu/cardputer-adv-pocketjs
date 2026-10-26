@@ -8,6 +8,7 @@ wsl -e bash tools/vmtest/floor/floor32.sh [VARIANT]   # intrinsic ごとの床�
 wsl -e bash tools/vmtest/floor/f3_faults.sh   # F3b の負の対照（f1_faults.sh・f2_faults.sh と同じ形）
 wsl -e bash tools/vmtest/floor/lazyfloor.sh   # heap walk と F1/F2 の節約（floor32.sh の後）
 wsl -e bash tools/vmtest/floor/lazyprobe.sh   # 出荷アプリでの組み込みオブジェクトの外れ回数
+wsl -e bash tools/vmtest/floor/rom_walk.sh    # docs/vm/rom-intrinsics.md §2: 生まれたての context・全展開・rom_touch/*.js の触った分（floor32.sh の後）
 ```
 
 生成物は `.cache/vmtest32/`（-m32 の objects と floor32・lazyfloor）と `.cache/vmtest-floor/`
