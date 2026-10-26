@@ -68,6 +68,8 @@ python -B tools/games/run_derby_projection.py --all-tiers --out artifacts/projec
 python -B tools/games/run_derby_projection.py --benchmark-only --out artifacts/projection-cost
 ```
 
+`--tier N`（繰り返し可）で tier を絞れる。CI はこれで tier ごとに別のランナーへ分けている（1台は4コアで、1つの tier の試行で埋まる）。every-call の oracle は tier 1 に付き、最も長いので最初に積む。
+
 The four switch combinations run the actual QuickJS, real adapter and
 renderer under ASan/UBSan, including the existing 4,000-case series oracle.
 At every tier, raw handle/input/surface/draw-order streams are byte-compared,

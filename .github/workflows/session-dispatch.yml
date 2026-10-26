@@ -10,6 +10,10 @@ on:
       - '.github/workflows/session-dispatch.yml'
 permissions:
   contents: read
+# New pushes replace a PR's older run; main runs finish so their caches are saved.
+concurrency:
+  group: session-dispatch-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   dispatch:
     runs-on: ubuntu-24.04

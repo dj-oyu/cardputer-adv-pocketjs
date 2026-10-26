@@ -1,5 +1,11 @@
 name: Opaque identity image copy comparison
 on:
+  push:
+    branches: [main]
+    paths:
+      - main/ui/kasane/ksn_render.c
+      - tools/kasane_contract/test_image_identity_copy.c
+      - .github/workflows/image-identity-copy.yml
   pull_request:
     paths:
       - main/ui/kasane/ksn_render.c
@@ -8,6 +14,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# New pushes replace a PR's older run; main runs finish so their caches are saved.
+concurrency:
+  group: image-identity-copy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
@@ -76,6 +86,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Build normal product with unchanged partition and security defaults
         shell: bash
         run: |
@@ -83,6 +102,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig build
+          ccache -s || true
           git rev-parse HEAD > build_image/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_image/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_image/CMakeCache.txt
@@ -140,6 +160,15 @@ jobs:
           node-version: '24'
       - name: Prepare finite diagnostic in disposable checkout
         run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Build with product settings and partition
         working-directory: diagnostic-source
         shell: bash
@@ -148,6 +177,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig build
+          ccache -s || true
           git rev-parse HEAD > build_diag/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_diag/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_diag/CMakeCache.txt

@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: derby-runner-affine-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
@@ -51,6 +51,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Build opt-in scalar candidate; no device-calibrated PIE threshold
         shell: bash
         run: |
@@ -58,6 +67,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_affine -DPOCKET_DERBY_RUNNER_AFFINE=ON -DPOCKET_DERBY_RUNNER_AFFINE_PIE_MIN=0 build
+          ccache -s || true
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=ON' build_affine/CMakeCache.txt
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE_PIE_MIN:STRING=0' build_affine/CMakeCache.txt
           sha256sum build_affine/cardputer_pocketjs.bin build_affine/cardputer_pocketjs.elf > build_affine/SHA256SUMS
