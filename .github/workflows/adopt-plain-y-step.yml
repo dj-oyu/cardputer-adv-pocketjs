@@ -1,0 +1,121 @@
+name: Adopt PR66 plain-band y-step
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: adopt-plain66-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [native, m32]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: a565940049b7434d75fe463e70f9a5d508dc1569
+          path: support
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Existing m32 CI dependencies
+        if: matrix.abi == 'm32'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+      - name: Exact public oracle and common product dump setting
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import shutil
+          dest=Path('tools/experiments/plain-y-step');shutil.copytree(Path('support')/dest,dest)
+          for p in dest.rglob('*.py'):p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','4b5a4c5d4eed2ca9d1a78ce5d0103e4e58c452d3'))
+          p=Path('tools/games/run_derby.py');s=p.read_text();old='defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]';assert s.count(old)==1
+          p.write_text(s.replace(old,'defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE", "-DQJS_DISABLE_DUMPS"]'))
+          p=dest/'renderer.py';s=p.read_text();old="'defines':['QUICKJS_NG_BUILD','_GNU_SOURCE']";assert s.count(old)==1
+          p.write_text(s.replace(old,"'defines':['QUICKJS_NG_BUILD','_GNU_SOURCE','QJS_DISABLE_DUMPS']"))
+          PYTHON
+      - name: Whole-walk oracle, zero-height negative and actual panels
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          set -euo pipefail
+          mkdir -p validation-results
+          flags=()
+          if test "$ABI" = m32; then flags+=(--m32); fi
+          python3 tools/experiments/plain-y-step/boundary.py "${flags[@]}" | tee validation-results/boundary.log
+          python3 tools/experiments/plain-y-step/boundary.py "${flags[@]}" --negative | tee validation-results/negative.log
+          if test "$ABI" = native; then python3 tools/experiments/plain-y-step/boundary.py --sanitize | tee validation-results/sanitized.log; fi
+          python3 tools/experiments/plain-y-step/verify.py "${flags[@]}" 2>&1 | tee validation-results/verify.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: adopt-plain66-${{ matrix.abi }}-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            validation-results/
+            .cache/plain-y-step-verify*/result.json
+          retention-days: 14
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Ordinary product build without stack-report instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_adopt -D SDKCONFIG="$PWD/build_adopt/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_adopt size > build_adopt/size.log
+          git diff --exit-code
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import hashlib,json,os
+          b=Path('build_adopt');names=['cardputer_pocketjs.elf','cardputer_pocketjs.bin','sdkconfig','partition_table/partition-table.bin']
+          (b/'adoption.json').write_text(json.dumps({'head':os.environ['SOURCE_HEAD'],'diagnostic':False,'hardware_tested':False,'images':{n:{'bytes':(b/n).stat().st_size,'sha256':hashlib.sha256((b/n).read_bytes()).hexdigest()} for n in names}},indent=2)+'\n')
+          obj=list(b.rglob('ksn_procedural.c.obj'));assert len(obj)==1
+          (b/'proc-object-path.txt').write_text(str(obj[0])+'\n')
+          PYTHON
+          object_path=$(cat build_adopt/proc-object-path.txt)
+          xtensa-esp32s3-elf-size -A "$object_path" > build_adopt/proc-object-sections.log
+          cat build_adopt/proc-object-sections.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: adopt-plain66-product-${{ env.SOURCE_HEAD }}
+          path: |
+            build_adopt/*.elf
+            build_adopt/*.bin
+            build_adopt/*.map
+            build_adopt/adoption.json
+            build_adopt/*.log
+            build_adopt/sdkconfig
+            build_adopt/partition_table/partition-table.bin
+          retention-days: 14
