@@ -45,10 +45,43 @@ static void put_c_string(FILE *f, const char *s, uint32_t len) {
     fputc('"', f);
 }
 
+/* Build the AUTOINIT objects (Math, JSON, Reflect, Atomics...): their method
+   names are builtin names too, interned only when the object is first read.
+   Without this they were missing from the table, and every app that touched
+   Math made heap atoms for its methods -- and the ROM intrinsics (R2) could
+   not hold those objects at all, an atom outside the table having no fixed
+   number. Bytecode builtins (Array.fromAsync...) are left alone: compiling
+   them interns their local names, which are not builtin names. */
+static int resolve_autoinit(JSContext *ctx) {
+    JSRuntime *rt = ctx->rt;
+    for (bool again = true; again;) {
+        again = false;
+        struct list_head *el;
+        list_for_each(el, &rt->gc_obj_list) {
+            JSGCObjectHeader *g = list_entry(el, JSGCObjectHeader, link);
+            if (g->gc_obj_type != JS_GC_OBJ_TYPE_JS_OBJECT) continue;
+            JSObject *p = (JSObject *)g;
+            for (int i = 0; i < p->shape->prop_count; i++) {
+                JSShapeProperty *prs = &p->shape->prop[i];
+                JSProperty *pr = &p->prop[i];
+                if ((prs->flags & JS_PROP_TMASK) != JS_PROP_AUTOINIT ||
+                    js_autoinit_get_id(pr) == JS_AUTOINIT_ID_BYTECODE)
+                    continue;
+                if (JS_AutoInitProperty(ctx, p, prs->atom, pr, prs) < 0) return -1;
+                again = true;  /* the lists changed under us: walk again */
+                break;
+            }
+            if (again) break;
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) { fprintf(stderr, "usage: %s OUT.h\n", argv[0]); return 2; }
     JSRuntime *rt = JS_NewRuntime();
     JSContext *ctx = JS_NewContext(rt);
+    if (!ctx || resolve_autoinit(ctx) < 0) { fprintf(stderr, "context setup failed\n"); return 1; }
 
     static ent_t pre[JS_ATOM_END], extra[4096];
     unsigned n_extra = 0;
