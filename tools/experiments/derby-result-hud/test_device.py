@@ -9,7 +9,7 @@ sys.path.insert(0,str(R/'tools/games'))
 import run_derby
 import run as protocol  # applies shared product host flags
 import prepare_device as device
-BASE='d7d9d90050d172e176c0f3ddbe3666a07af1ff7f'
+BASE=protocol.BASE
 
 def once(s,old,new):
  assert s.count(old)==1,old

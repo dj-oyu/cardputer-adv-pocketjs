@@ -31,6 +31,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Isolate adopted candidate on current source
+        id: comparison
+        run: |
+          baseline=$(python3 tools/experiments/isolate_adopted_baseline.py rock63 --output validation-results/comparison-base.json)
+          echo "sha=$baseline" >> "$GITHUB_OUTPUT"
+          cat validation-results/comparison-base.json
       - name: Existing m32 CI dependencies
         if: matrix.abi == 'm32'
         run: |
@@ -47,7 +53,7 @@ jobs:
           shutil.copytree(Path('support')/dest,dest)
           for p in dest.rglob('*'):
               if p.is_file() and p.suffix in ('.py','.mjs'):
-                  p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','af99783c02d0984f229708d985a51e3aebd71c97'))
+                  p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','${{ steps.comparison.outputs.sha }}'))
           p=dest/'common.py';s=p.read_text();old="flags=['-O2','-ffp-contract=off']";assert s.count(old)==1
           p.write_text(s.replace(old,"flags=['-O2','-ffp-contract=off','-DQJS_DISABLE_DUMPS']"))
           PYTHON
