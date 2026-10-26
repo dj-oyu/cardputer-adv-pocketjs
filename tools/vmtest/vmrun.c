@@ -37,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "pocketjs/vm_clock.h"
 #include "pocketjs/vm_sched.h"
@@ -991,6 +992,10 @@ static void usage(void) {
           "  --module               evaluate FILE as a module\n"
           "  --strict               prefix FILE with \"use strict\";\n"
           "  --harden               JS_PocketHarden the context, as the device (docs/vm/harden.md)\n"
+          "  --immortal             after --harden: build every lazy builtin, then make the intrinsics\n"
+          "                         immortal as in ROM (docs/vm/rom-intrinsics.md R1); exits without\n"
+          "                         teardown. --immortal=lazy skips the build: a negative control, the\n"
+          "                         first lazy builtin then writes into an immortal shape and asserts\n"
           "  --test262              install $262, report 'vmrun: uncaught <phase> <Name>'\n"
           "  --force-yield          yield at every checkpoint: every job (= --budget-jobs 1) and, since\n"
           "                         L2, every opcode safepoint (kills the job until L2c can resume)\n"
@@ -1050,6 +1055,7 @@ int main(int argc, char **argv) {
   int frames = 0;
   bool require_frame = false, module = false, strict = false, test262 = false;
   bool harden = false;   // --harden: JS_PocketHarden (docs/vm/harden.md)
+  int immortal = 0;      // --immortal: 2, --immortal=lazy: 1 (rom-intrinsics.md R1)
   bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
   size_t vm_seg_size = 0;  // --vm-seg-size; 0 = whatever the build compiled in
   size_t vm_seg_first = 0, vm_seg_max = 0;
@@ -1077,6 +1083,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--module")) module = true;
     else if (!strcmp(a, "--strict")) strict = true;
     else if (!strcmp(a, "--harden")) harden = true;
+    else if (!strcmp(a, "--immortal")) immortal = 2;
+    else if (!strcmp(a, "--immortal=lazy")) immortal = 1;
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
     else if (!strcmp(a, "--force-reloc")) force_reloc = true;
@@ -1238,6 +1246,32 @@ int main(int argc, char **argv) {
     fprintf(stderr, "vmrun: JS_PocketHarden failed\n");
     return 1;
   }
+  if (immortal && !harden) {
+    fprintf(stderr, "vmrun: --immortal needs --harden (ROM holds the hardened intrinsics)\n");
+    return 2;
+  }
+  if (G.context && immortal) {
+    // Building every lazy builtin costs ~70 KB of RAM here that ROM would
+    // not: raise the limit (and the first GC threshold) by exactly what it
+    // added, so a script sees the headroom it has under --harden alone.
+    JSMemoryUsage u0, u1;
+    // --fail-alloc counts attempts: hold it off during the build, then move
+    // it by the attempts the build made, so it still hits the script's own.
+    uint64_t fail_at = A.fail_at, attempts0 = A.attempts;
+    A.fail_at = 0;
+    JS_ComputeMemoryUsage(G.runtime, &u0);
+    JS_SetMemoryLimit(G.runtime, 0);
+    if (JS_PocketImmortalizeIntrinsics(G.context, immortal == 2) < 0) {
+      fprintf(stderr, "vmrun: JS_PocketImmortalizeIntrinsics failed\n");
+      return 1;
+    }
+    JS_ComputeMemoryUsage(G.runtime, &u1);
+    size_t added = (size_t)(u1.malloc_size - u0.malloc_size);
+    JS_SetMemoryLimit(G.runtime, heap_limit ? heap_limit + added : 0);
+    JS_SetGCThreshold(G.runtime, JS_GetGCThreshold(G.runtime) + added);
+    if (fail_at)
+      A.fail_at = fail_at + (A.attempts - attempts0);
+  }
   if (G.context) {
     js_std_add_helpers(G.context, 0, NULL);
     // Mirrors pocketjs_guest_create(): js_std_add_helpers drops its own
@@ -1259,6 +1293,8 @@ int main(int argc, char **argv) {
     // Not "context": the canary check above also catches a failure inside
     // js_std_init_handlers, which runs before JS_NewContext.
     fprintf(stderr, "vmrun: guest setup failed: out of memory\n");
+    if (immortal)
+      _exit(4);  // as at the end: immortals are never torn down
     js_std_free_handlers(G.runtime);
     JS_FreeRuntime(G.runtime);
     return 4;
@@ -1533,6 +1569,13 @@ int main(int argc, char **argv) {
   // job arguments (ledger 03 fact 9), so this leaks nothing -- LSan is the
   // check -- and the leftover rejections below are freed WITHOUT being
   // reported, because a catch may well have been in one of the dropped jobs.
+  // --immortal: the immortals are never freed and JS_FreeRuntime asserts an
+  // empty GC list, so stop here -- as ROM is never torn down either.
+  if (immortal) {
+    fflush(stdout);
+    fflush(stderr);
+    _exit(status);
+  }
   host_requests_free();
   js_std_free_handlers(G.runtime);
   while (G.rejections) {

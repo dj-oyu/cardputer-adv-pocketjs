@@ -40,7 +40,7 @@ EDITS = [
     # still a native call (its success tail; the fall-back is counted there).
     ("    default:\n        return false;\n    }\n    return true;\n}\n",
      "    default:\n        return false;\n    }\n"
-     "    if (unlikely(opprof_on)) opprof_ccall(p->u.cfunc.realm, func_obj);\n    return true;\n}\n"),
+     "    if (unlikely(opprof_on)) opprof_ccall(ctx, func_obj);\n    return true;\n}\n"),
     ("    s = JS_GetOpaque(func_obj, JS_CLASS_C_FUNCTION_DATA);\n    if (!s) {\n        return JS_EXCEPTION;    // can't really happen\n    }\n",
      "    s = JS_GetOpaque(func_obj, JS_CLASS_C_FUNCTION_DATA);\n    if (!s) {\n        return JS_EXCEPTION;    // can't really happen\n    }\n"
      "    if (unlikely(opprof_on)) opprof_ccall(ctx, func_obj);\n"),

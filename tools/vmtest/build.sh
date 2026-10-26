@@ -35,10 +35,16 @@ build_variant() {
   local reloc=""
   local base=${variant%-reloc}
   [ "$base" != "$variant" ] && reloc="-DCONFIG_POCKET_VM_RELOC=1"
+  # R2: the intrinsics from quickjs-rom-intrinsics.h (CONFIG_POCKET_VM_ROM_INTRINSICS
+  # on the device). The context is born hardened; run it with --harden.
+  local rom=""
+  local b2=${base%-rom}
+  [ "$b2" != "$base" ] && rom="-DPOCKET_VM_ROM_INTRINSICS_HOST=1"
+  base=$b2
   case "$base" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
     o2)   cflags="-O2 -g" ;;
-    *) echo "unknown variant $variant (asan, o2, either with -reloc)" >&2; exit 2 ;;
+    *) echo "unknown variant $variant (asan, o2, either with -rom and/or -reloc)" >&2; exit 2 ;;
   esac
   # VMTEST_CFLAGS: extra flags for every compile and the link, e.g. the -m32
   # sysroot flags from tools/vmtest/m32_sysroot.sh (with VMTEST_OUT pointing at
@@ -64,7 +70,10 @@ build_variant() {
   # pair it with its own VMTEST_OUT.
   local dumps="-DQJS_DISABLE_DUMPS"
   [ "${VMTEST_DUMPS:-0}" = 1 ] && dumps=""
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc -I $OUT/include -I $GUEST/include"
+  # POCKET_VM_IMMORTAL_TEST: the host-only JS_PocketImmortalizeIntrinsics
+  # behind vmrun --immortal (docs/vm/rom-intrinsics.md R1). An extra entry
+  # point only; the firmware never defines it.
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc $rom -DPOCKET_VM_IMMORTAL_TEST -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,

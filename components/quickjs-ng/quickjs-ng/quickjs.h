@@ -650,6 +650,11 @@ JS_EXTERN JSContext *JS_NewContext(JSRuntime *rt);
 /* PocketJS (docs/vm/harden.md): lock the intrinsics of a fresh context and
    switch it to the harden rules. Call before adding host globals. 0 or -1. */
 JS_EXTERN int JS_PocketHarden(JSContext *ctx);
+#ifdef POCKET_VM_IMMORTAL_TEST
+// Host only (docs/vm/rom-intrinsics.md R1): the intrinsics become immortal in
+// RAM, as a ROM snapshot will hold them. The runtime must not be freed after.
+JS_EXTERN int JS_PocketImmortalizeIntrinsics(JSContext *ctx, int full);
+#endif
 JS_EXTERN void JS_FreeContext(JSContext *s);
 JS_EXTERN JSContext *JS_DupContext(JSContext *ctx);
 JS_EXTERN void *JS_GetContextOpaque(JSContext *ctx);
