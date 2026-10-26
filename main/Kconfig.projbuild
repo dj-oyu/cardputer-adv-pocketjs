@@ -119,6 +119,21 @@ menu "Pocket VM (diagnostics)"
             Off by default: development builds keep exact positions. A
             shipping build may turn it on when an app needs the room.
 
+    config POCKET_VM_HELPER_IRAM
+        bool "Run the hottest QuickJS helpers from IRAM (about 8 KiB of DRAM)"
+        default y
+        help
+            Links main/vm/helper_iram8.lf: 93 QuickJS helpers (JS_FreeValue,
+            JS_GetProperty, js_malloc_rt, ...) that a JS turn fetches most per
+            byte move from flash to IRAM, which on the S3 is the same pool as
+            DRAM. Measured on DERBY (docs/vm/p1-iram-placement.md sec.9): the
+            JS turn drops 12.1 -> 10.5 ms with the same instruction count --
+            the saving is flash cache miss waits (I_STALL_BUSY -32%) -- and
+            the free heap drops by 7.8 KiB.
+
+            Turn it off to give an app those 8 KiB back. After changing the
+            fragment file, run idf.py reconfigure.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n
