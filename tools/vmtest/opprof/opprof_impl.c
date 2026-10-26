@@ -150,6 +150,135 @@ static int opprof_innermost(JSStackFrame *fr, int *visible)
     return inner;
 }
 
+/* (op, type) pairs: what a quickening tier would specialise on. One table for
+ * the visible app per window (TY rows), so a window's distinct pairs are the
+ * handlers a specialised interpreter would touch that turn. The code is read
+ * from the operands as the op is dispatched, before it runs; opprof_ty.py
+ * names the codes. Families:
+ *   binary arith/compare  ta*8+tb      (tag classes, OPPROF_T_*)
+ *   unary                 ta
+ *   property by atom      where the property is found (OPPROF_P_*)
+ *   element               object kind*4 + index class
+ *   global var            0 lexical, 1 global object data, 2 anything else
+ *   call                  callee kind
+ * Every other op is code 0: it has a single handler whatever the values. */
+#define OPPROF_TY 64
+static uint64_t opprof_ty[256][OPPROF_TY];
+
+enum { OPPROF_T_INT, OPPROF_T_FLOAT, OPPROF_T_BOOL, OPPROF_T_NULLISH, OPPROF_T_STRING,
+       OPPROF_T_OBJECT, OPPROF_T_OTHER };
+enum { OPPROF_P_OWN, OPPROF_P_OWN_SPECIAL, OPPROF_P_PROTO1, OPPROF_P_PROTO2, OPPROF_P_PROTO3,
+       OPPROF_P_MISSING, OPPROF_P_OWN_BIG,     /* own data in a shape of more than 16 props */
+       OPPROF_P_PRIM = 8,                      /* + tag class: primitive receiver */
+       OPPROF_P_FAST = 16 };                   /* + location: fast array / typed array receiver */
+
+static int opprof_tclass(JSValueConst v)
+{
+    int t = JS_VALUE_GET_TAG(v);
+    if (t == JS_TAG_INT) return OPPROF_T_INT;
+    if (JS_TAG_IS_FLOAT64(t)) return OPPROF_T_FLOAT;
+    if (t == JS_TAG_BOOL) return OPPROF_T_BOOL;
+    if (t == JS_TAG_NULL || t == JS_TAG_UNDEFINED) return OPPROF_T_NULLISH;
+    if (t == JS_TAG_STRING) return OPPROF_T_STRING;
+    if (t == JS_TAG_OBJECT) return OPPROF_T_OBJECT;
+    return OPPROF_T_OTHER;
+}
+
+/* Where get_field would find atom on v: own, which prototype level, or not
+ * at all. Walks shapes only (no getters run, no exotic hooks). The handler's
+ * own walk leaves for get_field_slow_path when it meets an accessor or
+ * special property, or an exotic or lazy object before the property: those
+ * are coded OPPROF_P_SLOW + reason (+ depth class), so the IC design can see
+ * what the generic path is actually paying for. */
+enum { OPPROF_P_SLOW = 32,         /* + 0 accessor/special, 8 exotic, 16 lazy; + min(depth, 7) */
+       OPPROF_P_SLOW_SPECIAL = 0, OPPROF_P_SLOW_EXOTIC = 8, OPPROF_P_SLOW_LAZY = 16 };
+static int opprof_where(JSValueConst v, JSAtom atom)
+{
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT) return OPPROF_P_PRIM + opprof_tclass(v);
+    JSObject *p = JS_VALUE_GET_OBJ(v);
+    int base = p->fast_array ? OPPROF_P_FAST : 0;
+    for (int depth = 0; p && depth < 8; depth++, p = p->shape->proto) {
+        JSProperty *pr;
+        JSShapeProperty *prs = find_own_property(&pr, p, atom);
+        int d = depth < 7 ? depth : 7;
+        if (prs && (prs->flags & JS_PROP_TMASK)) return OPPROF_P_SLOW + OPPROF_P_SLOW_SPECIAL + d;
+        if (!prs && p->is_exotic) return OPPROF_P_SLOW + OPPROF_P_SLOW_EXOTIC + d;
+        if (!prs && js_obj_lazy(p)) return OPPROF_P_SLOW + OPPROF_P_SLOW_LAZY + d;
+        if (!prs) continue;
+        if ((prs->flags & JS_PROP_TMASK) != JS_PROP_NORMAL) return base + (depth ? OPPROF_P_PROTO1 + (depth > 3 ? 2 : depth - 1) : OPPROF_P_OWN_SPECIAL);
+        if (depth == 0) return base + (p->shape->prop_count > 16 ? OPPROF_P_OWN_BIG : OPPROF_P_OWN);
+        return base + OPPROF_P_PROTO1 + (depth > 3 ? 2 : depth - 1);
+    }
+    return base + OPPROF_P_MISSING;
+}
+
+static int opprof_elem(JSValueConst o, JSValueConst idx)
+{
+    int kind, ic;
+    if (JS_VALUE_GET_TAG(o) != JS_TAG_OBJECT) kind = 4 + (JS_VALUE_GET_TAG(o) == JS_TAG_STRING ? 0 : 1);
+    else {
+        JSObject *p = JS_VALUE_GET_OBJ(o);
+        if (p->class_id == JS_CLASS_ARRAY) kind = p->fast_array ? 0 : 1;
+        else if (p->class_id >= JS_CLASS_UINT8C_ARRAY && p->class_id <= JS_CLASS_FLOAT64_ARRAY) kind = 2;
+        else kind = 3;
+    }
+    ic = opprof_tclass(idx);
+    ic = ic == OPPROF_T_INT ? 0 : ic == OPPROF_T_FLOAT ? 1 : ic == OPPROF_T_STRING ? 2 : 3;
+    return kind * 4 + ic;
+}
+
+static int opprof_callee(JSValueConst f)
+{
+    if (JS_VALUE_GET_TAG(f) != JS_TAG_OBJECT) return 4;
+    switch (JS_VALUE_GET_OBJ(f)->class_id) {
+    case JS_CLASS_BYTECODE_FUNCTION: return 0;
+    case JS_CLASS_C_FUNCTION: return 1;
+    case JS_CLASS_C_FUNCTION_DATA: case JS_CLASS_BOUND_FUNCTION: return 2;
+    default: return 3;
+    }
+}
+
+static int opprof_type(JSRuntime *rt, const uint8_t *pc, JSValue *sp)
+{
+    int op = *pc;
+    switch (op) {
+    case OP_add: case OP_sub: case OP_mul: case OP_div: case OP_mod: case OP_lt:
+    case OP_lte: case OP_gt: case OP_gte: case OP_strict_eq: case OP_strict_neq:
+    case OP_eq: case OP_neq: case OP_shl: case OP_sar: case OP_shr: case OP_and:
+    case OP_or: case OP_xor:
+        return opprof_tclass(sp[-2]) * 8 + opprof_tclass(sp[-1]);
+    case OP_neg: case OP_inc: case OP_dec: case OP_post_inc: case OP_post_dec: case OP_plus:
+    case OP_not: case OP_lnot: case OP_if_true: case OP_if_false: case OP_if_true8: case OP_if_false8:
+    case OP_to_propkey: case OP_typeof: case OP_is_undefined_or_null:
+        return opprof_tclass(sp[-1]);
+    case OP_get_field: case OP_get_field2:
+        return opprof_where(sp[-1], get_u32(pc + 1));
+    case OP_put_field:
+        return opprof_where(sp[-2], get_u32(pc + 1));
+    case OP_get_length:
+        return opprof_where(sp[-1], JS_ATOM_length);
+    case OP_get_array_el: case OP_get_array_el2:
+        return opprof_elem(sp[-2], sp[-1]);
+    case OP_put_array_el:
+        return opprof_elem(sp[-3], sp[-2]);
+    case OP_get_var: case OP_get_var_undef: case OP_put_var: {
+        JSContext *ctx = list_entry(rt->context_list.next, JSContext, link);
+        JSAtom atom = get_u32(pc + 1);
+        JSProperty *pr;
+        JSShapeProperty *prs;
+        if (find_own_property(&pr, JS_VALUE_GET_OBJ(ctx->global_var_obj), atom)) return 0;
+        prs = find_own_property(&pr, JS_VALUE_GET_OBJ(ctx->global_obj), atom);
+        return prs && (prs->flags & JS_PROP_TMASK) == JS_PROP_NORMAL ? 1 : 2;
+    }
+    case OP_call0: case OP_call1: case OP_call2: case OP_call3:
+        return opprof_callee(sp[-(op - OP_call0) - 1]);
+    case OP_call: case OP_tail_call: case OP_call_method: case OP_tail_call_method:
+        return opprof_callee(sp[-(int)get_u16(pc + 1) - 1]);
+    default:
+        return 0;
+    }
+}
+
 static void opprof_hit(JSRuntime *rt, JSFunctionBytecode *b, JSStackFrame *sf, const uint8_t *pc, JSValue *sp)
 {
     int op = *pc, i = opprof_bc(rt, b), fl = 0, arr = -1;
@@ -196,6 +325,7 @@ static void opprof_hit(JSRuntime *rt, JSFunctionBytecode *b, JSStackFrame *sf, c
     }
     }
     opprof_self[i][op]++;
+    opprof_ty[op][opprof_type(rt, pc, sp)]++;
     if (fl) opprof_sfop[i][op]++;
     if (arr >= 0) opprof_sarr[i][arr]++;
     OPPROF_CHAIN(sf, {
@@ -333,6 +463,17 @@ static void opprof_dump(JSContext *ctx, const char *tag)
         fprintf(o, "EDGE %d %d %llu\n", opprof_edge[e].caller, opprof_edge[e].callee,
                 (unsigned long long)opprof_edge[e].n);
     opprof_nedge = 0;
+    /* (op, type) pairs of the visible app, op name then code=count. */
+    for (int op = 0; op < 256; op++) {
+        bool any = false;
+        for (int k = 0; k < OPPROF_TY; k++) any |= opprof_ty[op][k] != 0;
+        if (!any) continue;
+        fprintf(o, "TY %s", opprof_opname[op] ? opprof_opname[op] : "?");
+        for (int k = 0; k < OPPROF_TY; k++)
+            if (opprof_ty[op][k]) fprintf(o, " %d=%llu", k, (unsigned long long)opprof_ty[op][k]);
+        fputc('\n', o);
+    }
+    memset(opprof_ty, 0, sizeof opprof_ty);
     fprintf(o, "END\n");
     fflush(o);
     for (int i = 0; i < opprof_nfn; i++) {

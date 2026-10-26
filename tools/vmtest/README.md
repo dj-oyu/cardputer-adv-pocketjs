@@ -26,6 +26,7 @@ bash tools/vmtest/run.sh --variant o2          # コーパス（-O2）
 bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか（L2: opcode 粒度。L2c まで赤、FORCED-YIELD の節）
 bash tools/vmtest/run.sh g5_gaps               # G5: 最長の中断禁止区間を info-<variant>.txt の "#info g5" 行に出す
 bash tools/vmtest/run.sh --budget-jobs 3      # L1: 全 drain を 3 件で切っても出力が同じか
+bash tools/vmtest/tdz_elision.sh               # TDZ 検査の消去: 残る検査の数を固定（docs/vm/tdz-elision.md）
 bash tools/vmtest/run.sh --trace               # 同時に .cache/vmtest/traces/<name>.trace を書く
 python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # トレースの検証と要約
 python3 tools/vmtest/test262.py --fetch        # 固定 revision を .cache/test262 へ（初回のみ、約2分）
@@ -161,6 +162,7 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 | `deep_recursion.js` | 7 MiB スタックでの再帰、相互再帰、500 段の finally 巻き戻し、溢れが捕捉可能な RangeError であること、溢れ後の回復 |
 | `deep_recursion_device.js` | 同じことを 20 KiB で。組み込み関数（`map`）のネイティブフレームを跨ぐ溢れ |
 | `closures.js` | 生存中・切り離し後のフレームを共有するクロージャ、3 段の捕捉、sloppy の mapped arguments、generator/async の中断中フレームを捕捉したクロージャ、eval が作った変数の捕捉 |
+| `global_lex_slot.js` | `get_var` → `get_var_lex`（グローバルの let/const の読みを、初回に `global_var_obj` の添字へ書き換える。docs/vm/interpreter-stages.md §9.2）: TDZ 中の読みは投げて書き換えない、書き換え後も値は毎回読む、const・class・`typeof`、global object のプロパティは書き換えない（削除後も正しい）、複数の箇所が交互に読む。各行が自分で期待値と比べる |
 | `promise_chain.js` | 3000 段の then、2000 回の await ループ、500 段の reject 伝播、all/allSettled/race/any、ジョブが次のジョブを積み続ける drain、1 つの resolve への 200 本の反応 |
 | `microtask_order.js` | then/catch/finally/await/thenable/queueMicrotask の実行順（`frame()` から出力するので drain 完了後の順序そのもの） |
 | `generators.js` | next/return/throw、finally 内の yield で止まる return、未開始の generator、yield* の転送、再入禁止、async generator の要求キュー・for await・break・throw |

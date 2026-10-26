@@ -111,7 +111,12 @@ static JSVMState *js_vm_armed;
 #define __extension__
 #endif
 
-#ifndef NDEBUG
+// Pocket: QJS_DISABLE_DUMPS drops the dump hooks without defining NDEBUG,
+// so assert() stays live. The firmware sets it (components/quickjs-ng/
+// CMakeLists.txt): with dumps on, every dispatch tests rt->dump_flags for
+// JS_DUMP_BYTECODE_STEP, which costs icache in JS_CallInternal
+// (docs/vm/interpreter-stages.md sec.4.1). Host builds choose either way.
+#if !defined(NDEBUG) && !defined(QJS_DISABLE_DUMPS)
 #define ENABLE_DUMPS
 #endif
 
@@ -16930,6 +16935,31 @@ exception:
     return -1;
 }
 
+/* Both operands are numbers, int or float64: their values as the slow
+   helpers would read them (ToFloat64 of an int is exact). The interpreter
+   tests int/int first, so here at least one is a float64. Used to keep mixed
+   int/float arithmetic and comparison out of js_*_slow, which produce the
+   same js_float64 / js_bool from the same doubles: DERBY mixes small int
+   literals into double math (about 470 such ops a turn). */
+static inline __attribute__((always_inline))
+bool js_both_number(JSValueConst a, JSValueConst b, double *pa, double *pb)
+{
+    int ta = JS_VALUE_GET_TAG(a), tb = JS_VALUE_GET_TAG(b);
+    if (ta == JS_TAG_INT)
+        *pa = JS_VALUE_GET_INT(a);
+    else if (JS_TAG_IS_FLOAT64(ta))
+        *pa = JS_VALUE_GET_FLOAT64(a);
+    else
+        return false;
+    if (tb == JS_TAG_INT)
+        *pb = JS_VALUE_GET_INT(b);
+    else if (JS_TAG_IS_FLOAT64(tb))
+        *pb = JS_VALUE_GET_FLOAT64(b);
+    else
+        return false;
+    return true;
+}
+
 static no_inline __exception int js_binary_arith_slow(JSContext *ctx, JSValue *sp,
                                                       OPCodeEnum op)
 {
@@ -19572,6 +19602,99 @@ not_a_constructor:
     return ret_val;
 }
 
+static JSValue js_math_min_max(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv, int magic);
+static JSValue js_math_imul(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv);
+
+// Math fast call (docs/vm/math-call-fast.md). The bytecode call opcodes try
+// this before the generic native call, which re-enters JS_CallInternal (a
+// 300 B window frame, the prologue poll, the class dispatch) and then runs
+// js_call_c_function (stack check, a pushed JSStackFrame, the cproto switch,
+// JS_ToFloat64 per argument, the frame pop): about ten C functions for one
+// Math.sin. Here it is one call to this function plus the libm call.
+//
+// The guard is the callee object itself, read at the moment of the call, so
+// nothing has to be invalidated: a reassigned Math, a replaced Math.sin, an
+// alias (`const sin = Math.sin`), or a Math.sin stored anywhere else all
+// reach the call opcode as whatever function value they are, and only the
+// builtins below match. It is taken only when skipping the native frame is
+// unobservable:
+//  - every argument is already a number, so no valueOf/toString runs, no
+//    conversion allocates or throws;
+//  - the callee is f_f / f_f_f (a pure double function that is never given
+//    a ctx, so it cannot throw, allocate, re-enter JS or read the stack), or
+//    Math.min / max / imul, which with number arguments do none of those
+//    either (they only use ctx for the conversions that cannot fail here).
+// So no exception can be raised from here, and a backtrace can never show
+// the missing native frame. What is skipped and is observable at all: one
+// decrement of the interrupt counter per call (the loop's own safepoints
+// still poll) and the opprof native-call hook (patched in by
+// tools/vmtest/opprof/patch_quickjs.py at this function too).
+// Returns false, with *pret untouched, for everything else.
+static no_inline bool js_call_math_fast(JSValueConst func_obj, int argc,
+                                        JSValueConst *argv, JSValue *pret)
+{
+    JSObject *p;
+    JSCFunctionType f;
+    double d1, d2;
+    int i;
+
+    if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(func_obj);
+    if (p->class_id != JS_CLASS_C_FUNCTION || argc < p->u.cfunc.length)
+        return false;
+    for (i = 0; i < argc; i++) {
+        uint32_t tag = JS_VALUE_GET_TAG(argv[i]);
+        if (tag != JS_TAG_INT && !JS_TAG_IS_FLOAT64(tag))
+            return false;
+    }
+    f = p->u.cfunc.c_function;
+    switch (p->u.cfunc.cproto) {
+    case JS_CFUNC_f_f:
+        // argc is tested, not just length: JS_NewCFunction2 lets an
+        // embedder declare an f_f with length 0.
+        if (argc < 1)
+            return false;
+        d1 = JS_VALUE_GET_TAG(argv[0]) == JS_TAG_INT ?
+            JS_VALUE_GET_INT(argv[0]) : JS_VALUE_GET_FLOAT64(argv[0]);
+        *pret = js_number(f.f_f(d1));
+        break;
+    case JS_CFUNC_f_f_f:
+        // Math.pow and Math.atan2.
+        if (argc < 2)
+            return false;
+        d1 = JS_VALUE_GET_TAG(argv[0]) == JS_TAG_INT ?
+            JS_VALUE_GET_INT(argv[0]) : JS_VALUE_GET_FLOAT64(argv[0]);
+        d2 = JS_VALUE_GET_TAG(argv[1]) == JS_TAG_INT ?
+            JS_VALUE_GET_INT(argv[1]) : JS_VALUE_GET_FLOAT64(argv[1]);
+        *pret = js_number(f.f_f_f(d1, d2));
+        break;
+    case JS_CFUNC_generic_magic:
+        if (f.generic_magic != js_math_min_max)
+            return false;
+        *pret = js_math_min_max(p->u.cfunc.realm, JS_UNDEFINED, argc, argv,
+                                p->u.cfunc.magic);
+        break;
+    case JS_CFUNC_generic:
+        if (f.generic != js_math_imul || argc < 2)
+            return false;
+        if (JS_VALUE_GET_TAG(argv[0]) == JS_TAG_INT &&
+            JS_VALUE_GET_TAG(argv[1]) == JS_TAG_INT) {
+            // ToUint32 of an int is its bit pattern; the product wraps.
+            *pret = js_int32((int32_t)((uint32_t)JS_VALUE_GET_INT(argv[0]) *
+                                       (uint32_t)JS_VALUE_GET_INT(argv[1])));
+        } else {
+            *pret = js_math_imul(p->u.cfunc.realm, JS_UNDEFINED, argc, argv);
+        }
+        break;
+    default:
+        return false;
+    }
+    return true;
+}
+
 static JSValue js_call_bound_function(JSContext *ctx, JSValueConst func_obj,
                                       JSValueConst this_obj,
                                       int argc, JSValueConst *argv, int flags)
@@ -20419,9 +20542,13 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-                ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
-                                          JS_UNDEFINED, call_argc,
-                                          vc(call_argv), 0);
+                // A pure Math builtin on numbers: no native frame (see
+                // js_call_math_fast). The frees below are the same.
+                if (!js_call_math_fast(call_argv[-1], call_argc, vc(call_argv),
+                                       &ret_val))
+                    ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
+                                              JS_UNDEFINED, call_argc,
+                                              vc(call_argv), 0);
                 if (unlikely(JS_IsException(ret_val))) {
                     goto exception;
                 }
@@ -20467,9 +20594,11 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-                ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
-                                          JS_UNDEFINED, call_argc,
-                                          vc(call_argv), 0);
+                if (!js_call_math_fast(call_argv[-1], call_argc, vc(call_argv),
+                                       &ret_val))
+                    ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
+                                              JS_UNDEFINED, call_argc,
+                                              vc(call_argv), 0);
                 if (unlikely(JS_IsException(ret_val))) {
                     goto exception;
                 }
@@ -20722,11 +20851,45 @@ non_ctor_call:
                 pc += 4;
                 sf->cur_pc = pc;
 
+                {
+                    /* A global lexical binding stays where it is for good
+                       (nothing deletes from global_var_obj: see
+                       OP_get_var_lex in quickjs-opcode.h), and it shadows
+                       the global object, which JS_GetGlobalVar looks at only
+                       after it. So once found, this instruction can
+                       read the slot directly: rewrite it in place, same
+                       length. The operand stops being an atom, so give back
+                       the bytecode's reference to it (the shape keeps its
+                       own). DERBY: ~890 reads a turn, each a hash lookup. */
+                    JSObject *gp = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+                    JSProperty *gpr;
+                    JSShapeProperty *gprs = find_own_property(&gpr, gp, atom);
+                    if (gprs && (gprs->flags & JS_PROP_TMASK) == JS_PROP_NORMAL &&
+                        !JS_IsUninitialized(gpr->u.value)) {
+                        uint32_t idx = gpr - gp->prop;
+                        pc[-5] = OP_get_var_lex;
+                        put_u32((uint8_t *)pc - 4, idx);
+                        JS_FreeAtom(ctx, atom);
+                        *sp++ = js_dup(gpr->u.value);
+                        BREAK;
+                    }
+                }
                 val = JS_GetGlobalVar(ctx, atom, opcode - OP_get_var_undef);
                 if (unlikely(JS_IsException(val))) {
                     goto exception;
                 }
                 *sp++ = val;
+            }
+            BREAK;
+
+            CASE(OP_get_var_lex): {
+                /* Rewritten from get_var only once the binding was
+                   initialized, and a binding never goes back to the TDZ, so
+                   no check is needed here. */
+                JSObject *gp = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+                uint32_t idx = get_u32(pc);
+                pc += 4;
+                *sp++ = js_dup(gp->prop[idx].u.value);
             }
             BREAK;
 
@@ -21630,6 +21793,23 @@ put_field_slow_path:
             CASE(OP_get_array_el): {
                 JSValue val;
 
+                /* Plain array, int index in range: what
+                   js_get_fast_array_element returns, without the two calls
+                   and its class switch. DERBY reads ~940 elements a turn,
+                   98% of them this way. */
+                if (likely(JS_VALUE_GET_TAG(sp[-2]) == JS_TAG_OBJECT &&
+                           JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_INT)) {
+                    JSObject *p = JS_VALUE_GET_OBJ(sp[-2]);
+                    uint32_t idx = JS_VALUE_GET_INT(sp[-1]);
+                    if (likely(p->class_id == JS_CLASS_ARRAY &&
+                               idx < (uint32_t)p->u.array.count)) {
+                        val = js_dup(p->u.array.u.values[idx]);
+                        JS_FreeValue(ctx, sp[-2]);
+                        sp[-2] = val;
+                        sp--;
+                        BREAK;
+                    }
+                }
                 sf->cur_pc = pc;
                 val = JS_GetPropertyValue(ctx, sp[-2], sp[-1]);
                 JS_FreeValue(ctx, sp[-2]);
@@ -21644,6 +21824,17 @@ put_field_slow_path:
             CASE(OP_get_array_el2): {
                 JSValue val;
 
+                /* obj prop -> obj value: same plain-array path as above. */
+                if (likely(JS_VALUE_GET_TAG(sp[-2]) == JS_TAG_OBJECT &&
+                           JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_INT)) {
+                    JSObject *p = JS_VALUE_GET_OBJ(sp[-2]);
+                    uint32_t idx = JS_VALUE_GET_INT(sp[-1]);
+                    if (likely(p->class_id == JS_CLASS_ARRAY &&
+                               idx < (uint32_t)p->u.array.count)) {
+                        sp[-1] = js_dup(p->u.array.u.values[idx]);
+                        BREAK;
+                    }
+                }
                 sf->cur_pc = pc;
                 val = JS_GetPropertyValue(ctx, sp[-2], sp[-1]);
                 sp[-1] = val;
@@ -21843,6 +22034,7 @@ put_field_slow_path:
 
             CASE(OP_add): {
                 JSValue op1, op2;
+                double d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -21854,10 +22046,9 @@ put_field_slow_path:
                         sp[-2] = js_int32(r);
                     }
                     sp--;
-                } else if (JS_VALUE_IS_BOTH_FLOAT(op1, op2)) {
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
                     JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
-                    sp[-2] = js_float64(JS_VALUE_GET_FLOAT64(op1) +
-                                        JS_VALUE_GET_FLOAT64(op2));
+                    sp[-2] = js_float64(d1 + d2);
                     JS_X87_FPCW_RESTORE(fpcw);
                     sp--;
                 } else {
@@ -21917,6 +22108,7 @@ put_field_slow_path:
             BREAK;
             CASE(OP_sub): {
                 JSValue op1, op2;
+                double d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -21928,10 +22120,9 @@ put_field_slow_path:
                         sp[-2] = js_int32(r);
                     }
                     sp--;
-                } else if (JS_VALUE_IS_BOTH_FLOAT(op1, op2)) {
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
                     JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
-                    sp[-2] = js_float64(JS_VALUE_GET_FLOAT64(op1) -
-                                        JS_VALUE_GET_FLOAT64(op2));
+                    sp[-2] = js_float64(d1 - d2);
                     JS_X87_FPCW_RESTORE(fpcw);
                     sp--;
                 } else {
@@ -21941,7 +22132,7 @@ put_field_slow_path:
             BREAK;
             CASE(OP_mul): {
                 JSValue op1, op2;
-                double d;
+                double d, d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -21961,9 +22152,9 @@ put_field_slow_path:
                     }
                     sp[-2] = js_int32(r);
                     sp--;
-                } else if (JS_VALUE_IS_BOTH_FLOAT(op1, op2)) {
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
                     JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
-                    d = JS_VALUE_GET_FLOAT64(op1) * JS_VALUE_GET_FLOAT64(op2);
+                    d = d1 * d2;
                     JS_X87_FPCW_RESTORE(fpcw);
 mul_fp_res:
                     sp[-2] = js_float64(d);
@@ -21975,6 +22166,7 @@ mul_fp_res:
             BREAK;
             CASE(OP_div): {
                 JSValue op1, op2;
+                double d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -21982,6 +22174,13 @@ mul_fp_res:
                     v1 = JS_VALUE_GET_INT(op1);
                     v2 = JS_VALUE_GET_INT(op2);
                     sp[-2] = js_number((double)v1 / (double)v2);
+                    sp--;
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
+                    /* js_binary_arith_slow's handle_float64: js_float64,
+                       not js_number (int/int above keeps js_number). */
+                    JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
+                    sp[-2] = js_float64(d1 / d2);
+                    JS_X87_FPCW_RESTORE(fpcw);
                     sp--;
                 } else {
                     goto binary_arith_slow;
@@ -22335,10 +22534,35 @@ dec_loc_slow:
                 }                                                       \
             BREAK
 
-            OP_CMP(OP_lt, <, js_relational_slow(ctx, sp, opcode));
-            OP_CMP(OP_lte, <=, js_relational_slow(ctx, sp, opcode));
-            OP_CMP(OP_gt, >, js_relational_slow(ctx, sp, opcode));
-            OP_CMP(OP_gte, >=, js_relational_slow(ctx, sp, opcode));
+            /* Relational: also compare int/float64 mixes and float64 pairs
+               here, as js_relational_slow's float64_compare does (NaN
+               compares false either way). */
+#define OP_CMP_NUM(opcode, binary_op)                                   \
+            CASE(opcode):                                               \
+                {                                                       \
+                JSValue op1, op2;                                       \
+                double d1, d2;                                          \
+                op1 = sp[-2];                                           \
+                op2 = sp[-1];                                           \
+                if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {           \
+                    sp[-2] = js_bool(JS_VALUE_GET_INT(op1) binary_op JS_VALUE_GET_INT(op2)); \
+                    sp--;                                               \
+                } else if (js_both_number(op1, op2, &d1, &d2)) {        \
+                    sp[-2] = js_bool(d1 binary_op d2);                  \
+                    sp--;                                               \
+                } else {                                                \
+                    sf->cur_pc = pc;                                    \
+                    if (js_relational_slow(ctx, sp, opcode))            \
+                        goto exception;                                 \
+                    sp--;                                               \
+                }                                                       \
+                }                                                       \
+            BREAK
+
+            OP_CMP_NUM(OP_lt, <);
+            OP_CMP_NUM(OP_lte, <=);
+            OP_CMP_NUM(OP_gt, >);
+            OP_CMP_NUM(OP_gte, >=);
             OP_CMP(OP_eq, ==, js_eq_slow(ctx, sp, 0));
             OP_CMP(OP_neq, !=, js_eq_slow(ctx, sp, 1));
             OP_CMP(OP_strict_eq, ==, js_strict_eq_slow(ctx, sp, 0));
@@ -22449,6 +22673,29 @@ dec_loc_slow:
                 break;
             }
             BREAK;
+            CASE(OP_to_propkey_obj):
+                /* obj key -> obj key': to_propkey2 without the throw. For
+                   obj[key] = val the key is converted before val only when
+                   obj is not null/undefined; otherwise put_array_el throws
+                   after val (js_parse_assign_expr2). */
+                if (JS_IsUndefined(sp[-2]) || JS_IsNull(sp[-2]))
+                    BREAK;
+                switch (JS_VALUE_GET_TAG(sp[-1])) {
+                case JS_TAG_INT:
+                case JS_TAG_STRING:
+                case JS_TAG_SYMBOL:
+                    break;
+                default:
+                    sf->cur_pc = pc;
+                    ret_val = JS_ToPropertyKey(ctx, sp[-1]);
+                    if (JS_IsException(ret_val)) {
+                        goto exception;
+                    }
+                    JS_FreeValue(ctx, sp[-1]);
+                    sp[-1] = ret_val;
+                    break;
+                }
+                BREAK;
             CASE(OP_with_get_var):
                 CASE(OP_with_put_var):
                 CASE(OP_with_delete_var):
@@ -31263,20 +31510,13 @@ next:
         // happy path; replace `dup is_undefined_or_null if_true` with new
         // opcode if_undefined_or_null? replace `swap dup` with over?
         if (op == '=' && opcode == OP_get_array_el) {
-            int label_next = -1;
+            /* Was `swap dup is_undefined_or_null if_true L swap to_propkey
+               swap L: swap` in place of the to_propkey2: the same
+               conversion-unless-nullish as one instruction (the FIXME's
+               suggestion), 8 dispatches -> 1. Same length as to_propkey2. */
             JSFunctionDef *fd = s->cur_func;
             assert(OP_to_propkey2 == fd->byte_code.buf[fd->last_opcode_pos]);
-            fd->byte_code.size = fd->last_opcode_pos;
-            fd->last_opcode_pos = -1;
-            emit_op(s, OP_swap); // obj key -> key obj
-            emit_op(s, OP_dup);
-            emit_op(s, OP_is_undefined_or_null);
-            label_next = emit_goto(s, OP_if_true, -1);
-            emit_op(s, OP_swap);
-            emit_op(s, OP_to_propkey);
-            emit_op(s, OP_swap);
-            emit_label(s, label_next);
-            emit_op(s, OP_swap);
+            fd->byte_code.buf[fd->last_opcode_pos] = OP_to_propkey_obj;
         }
 
         if (js_parse_assign_expr2(s, parse_flags)) {
@@ -38461,6 +38701,216 @@ static void put_short_code(DynBuf *bc_out, int op, int idx)
     dbuf_put_u16(bc_out, idx);
 }
 
+/* PocketJS: compile-time TDZ elision (docs/vm/tdz-elision.md).
+
+   Every read or assignment of a block-scoped local (let/const/class) is
+   emitted as get_loc_check / put_loc_check, and every entry into its block
+   as set_loc_uninitialized, which on the device is an out-of-line
+   set_value -> JS_FreeValue -> JS_FreeValueRT chain. In DERBY's frame these
+   are about a fifth of all dispatches, and almost all of them are reads that
+   come after the declaration in straight-line code.
+
+   This is a forward must-be-initialized dataflow over the bytecode that
+   resolve_variables produced (labels still symbolic, every variable access
+   already a concrete loc op). The state is a bit per local, for locals
+   0..31; higher locals are never tracked and keep every check. Facts:
+
+   - gen: get_loc_check / put_loc_check / put_loc_check_init (each either
+     finds the slot initialized or throws, leaving the path), put_loc and
+     set_loc (resolve_variables emits a lexical's initialization as put_loc;
+     closures and plain stores never write JS_UNINITIALIZED).
+   - kill: set_loc_uninitialized, the only instruction that puts
+     JS_UNINITIALIZED into a slot of this frame. (The derived-constructor
+     'this' kill is added later, in resolve_labels' prologue; this pass sees
+     no gen for it before its init and keeps its checks.)
+   - Function entry knows nothing. A label meets its forward and backward
+     edges (with_* jumps included). A catch handler knows nothing, since an
+     exception can arrive from anywhere in the try. After a gosub nothing is
+     known either (the finally body runs in between). The code after an
+     unconditional transfer is unreachable until the next label.
+
+   The per-label state lives in LabelSlot.addr, which resolve_labels asserts
+   is -1 before it assigns it; -1 is also "all bits set", the optimistic
+   start for a must-analysis. Passes repeat until no label changes (greatest
+   fixpoint); the state is reset to -1 before returning. No allocation, so
+   nothing is added to the guest's eval peak and --fail-alloc numbering is
+   unchanged.
+
+   On the fixpoint, a check whose bit is set on entry is proven not to
+   throw and is rewritten in place to get_loc / put_loc (same length, so no
+   position moves); resolve_labels' peepholes then also apply to it.
+
+   set_loc_uninitialized of a local is dropped (the returned mask) only when
+   nothing can observe the marker: the local is a plain let/const
+   (JS_VAR_NORMAL), not captured by any closure or eval (children are
+   compiled before their parent, so is_captured is final here), and every
+   access to it in this function was a proven check or a store. The proof of
+   each read does not depend on the kill: every path to a proven read passes
+   an initializing store after the last kill, and without the kill that same
+   store is still the last write before the read. The only difference is that
+   a value from the previous entry into the block is released at the next
+   store instead of at block entry.
+
+   Anything unexpected (an unknown label-carrying format, a truncated
+   instruction, no fixpoint within the pass bound) leaves the bytecode
+   unchanged. Top-level code runs once and is skipped. */
+#define TDZ_MAX_PASSES 8
+
+/* Meets st into a label's state; true if the state shrank. */
+static bool tdz_meet(LabelSlot *ls, uint32_t st)
+{
+    uint32_t old = (uint32_t)ls->addr;
+    if ((old & st) == old)
+        return false;
+    ls->addr = (int)(old & st);
+    return true;
+}
+
+/* One walk over the bytecode. Returns 1 if a label's state shrank, 0 if
+   not, -1 on an instruction this pass does not understand. With rewrite
+   (only on a fixpoint) it also turns proven checks into plain accesses and
+   collects the kill / observe masks. */
+static int tdz_walk(JSFunctionDef *s, bool rewrite, uint32_t *killed,
+                    uint32_t *observed)
+{
+    uint8_t *bc_buf = s->byte_code.buf;
+    int bc_len = s->byte_code.size;
+    LabelSlot *ls = s->label_slots;
+    uint32_t cur = 0, bit;  /* entry: nothing is initialized */
+    int pos, len, op, idx, label, changed = 0;
+
+    for (pos = 0; pos < bc_len; pos += len) {
+        op = bc_buf[pos];
+        len = opcode_info[op].size;
+        if (pos + len > bc_len)
+            return -1;
+        switch (opcode_info[op].fmt) {
+        case OP_FMT_label:
+            label = get_u32(bc_buf + pos + 1);
+            if (label < 0 || label >= s->label_count)
+                return -1;
+            if (op == OP_label) {
+                changed |= tdz_meet(&ls[label], cur);
+                cur = (uint32_t)ls[label].addr;
+            } else if (op == OP_catch) {
+                changed |= tdz_meet(&ls[label], 0);
+            } else {
+                /* if_false, if_true, goto, gosub */
+                changed |= tdz_meet(&ls[label], cur);
+                if (op == OP_goto)
+                    cur = UINT32_MAX;   /* unreachable until a label */
+                else if (op == OP_gosub)
+                    cur = 0;
+            }
+            continue;
+        case OP_FMT_atom_label_u8:      /* with_*: may jump */
+            label = get_u32(bc_buf + pos + 5);
+            if (label < 0 || label >= s->label_count)
+                return -1;
+            changed |= tdz_meet(&ls[label], cur);
+            continue;
+        case OP_FMT_label8:
+        case OP_FMT_label16:
+        case OP_FMT_label_u16:
+        case OP_FMT_atom_label_u16:
+            return -1;                  /* not expected before resolve_labels */
+        case OP_FMT_none_loc:
+        case OP_FMT_loc8:
+            /* Short forms are made by resolve_labels, not before it. A
+               store missed here only makes the analysis conservative; a
+               read would be an access the drop rule did not see. */
+            *observed = UINT32_MAX;
+            continue;
+        case OP_FMT_atom_u16:
+            if (op == OP_make_loc_ref) {
+                idx = get_u16(bc_buf + pos + 5);
+                if (idx < 32)
+                    *observed |= (uint32_t)1 << idx;
+            }
+            continue;
+        case OP_FMT_loc:
+            break;
+        default:
+            switch (op) {
+            case OP_return:
+            case OP_return_undef:
+            case OP_throw:
+            case OP_throw_error:
+            case OP_tail_call:
+            case OP_tail_call_method:
+            case OP_ret:
+                cur = UINT32_MAX;       /* unreachable until a label */
+                break;
+            }
+            continue;
+        }
+        idx = get_u16(bc_buf + pos + 1);
+        if (idx >= 32)
+            continue;
+        bit = (uint32_t)1 << idx;
+        switch (op) {
+        case OP_set_loc_uninitialized:
+            cur &= ~bit;
+            *killed |= bit;
+            break;
+        case OP_get_loc_check:
+        case OP_put_loc_check:
+            if (rewrite) {
+                if (cur & bit)
+                    bc_buf[pos] = (op == OP_get_loc_check) ? OP_get_loc : OP_put_loc;
+                else
+                    *observed |= bit;
+            }
+            cur |= bit;     /* past it the slot is initialized, or we threw */
+            break;
+        case OP_put_loc:
+        case OP_set_loc:
+            cur |= bit;
+            break;
+        case OP_put_loc_check_init:
+            *observed |= bit;
+            cur |= bit;
+            break;
+        default:            /* get_loc, close_loc, any other reader */
+            *observed |= bit;
+            break;
+        }
+    }
+    return changed;
+}
+
+/* Returns the locals whose set_loc_uninitialized resolve_labels may drop. */
+static uint32_t tdz_elide_checks(JSFunctionDef *s)
+{
+    uint32_t killed = 0, observed = 0, drop = 0;
+    int pass, i, r = -1;
+
+    if (!s->parent || dbuf_error(&s->byte_code))
+        return 0;
+    for (pass = 0; pass < TDZ_MAX_PASSES; pass++) {
+        r = tdz_walk(s, false, &killed, &observed);
+        if (r <= 0)
+            break;
+    }
+    if (r == 0) {
+        /* A fixpoint: this walk changes no label, so every state it reads
+           is final when it reads it. */
+        killed = observed = 0;
+        tdz_walk(s, true, &killed, &observed);
+        for (i = 0; i < 32 && i < s->var_count; i++) {
+            JSVarDef *vd = &s->vars[i];
+            if (vd->is_lexical && !vd->is_captured &&
+                vd->var_kind == JS_VAR_NORMAL)
+                drop |= (uint32_t)1 << i;
+        }
+        drop &= killed & ~observed;
+    }
+    /* Give LabelSlot.addr back to resolve_labels as it found it. */
+    for (i = 0; i < s->label_count; i++)
+        s->label_slots[i].addr = -1;
+    return drop;
+}
+
 /* peephole optimizations and resolve goto/labels */
 static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
 {
@@ -38472,8 +38922,11 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
     CodeContext cc;
     int label;
     JumpSlot *jp;
+    uint32_t tdz_drop;
 
     label_slots = s->label_slots;
+    /* PocketJS: before anything below reads the input or the labels */
+    tdz_drop = tdz_elide_checks(s);
 
     line_num = s->line_num;
     col_num = s->col_num;
@@ -38577,6 +39030,14 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
             line_num = get_u32(bc_buf + pos + 1);
             col_num = get_u32(bc_buf + pos + 5);
             break;
+
+        case OP_set_loc_uninitialized: {
+            /* PocketJS: a TDZ marker nothing can observe (tdz_elide_checks) */
+            int idx = get_u16(bc_buf + pos + 1);
+            if (idx < 32 && (tdz_drop >> idx) & 1)
+                break;
+        }
+            goto no_change;
 
         case OP_label: {
             label = get_u32(bc_buf + pos + 1);
@@ -39151,6 +39612,29 @@ has_constant_test:
                 }
                 pos_next = cc.pos;
                 break;
+            }
+            /* transformation: swap to_propkey swap [insert3] put_array_el
+               -> [insert3] put_array_el (obj[key] = val converts key again
+               after val; insert3 when the assignment's value is used).
+               put_array_el's slow path converts the key itself
+               (JS_ValueToAtom in JS_SetPropertyValue) before it stores or
+               throws, and swap / insert3 only move values, so the
+               conversion still happens once, after val, in the same order.
+               If obj is an object the key was already converted before val
+               and the triple was a no-op. */
+            if (code_match(&cc, pos_next, OP_to_propkey, OP_swap, -1)) {
+                CodeContext cc2 = cc;
+                if (code_match(&cc2, cc.pos, OP_put_array_el, -1) ||
+                    code_match(&cc2, cc.pos, OP_insert3, OP_put_array_el, -1)) {
+                    if (cc.line_num >= 0) {
+                        line_num = cc.line_num;
+                    }
+                    if (cc.col_num >= 0) {
+                        col_num = cc.col_num;
+                    }
+                    pos_next = cc.pos;      /* resume at put_array_el */
+                    break;
+                }
             }
             goto no_change;
 
@@ -41685,6 +42169,16 @@ static int JS_WriteFunctionBytecode(BCWriterState *s,
     pos = 0;
     while (pos < bc_len) {
         op = bc_buf[pos];
+        if (op == OP_get_var_lex) {
+            /* Runtime-only rewrite of get_var (same length): write the
+               original back, with the binding's name from the realm's
+               global_var_obj, so the output never depends on this
+               runtime's slot layout. */
+            JSObject *gp = JS_VALUE_GET_OBJ(b->realm->global_var_obj);
+            uint32_t idx = get_u32(bc_buf + pos + 1);
+            bc_buf[pos] = op = OP_get_var;
+            put_u32(bc_buf + pos + 1, gp->shape->prop[idx].atom);
+        }
         len = short_opcode_info(op).size;
         switch (short_opcode_info(op).fmt) {
         case OP_FMT_atom:

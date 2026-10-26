@@ -38,6 +38,18 @@ def symbols(nm, elf, flash_only=True):
             if n and (not flash_only or 0x42000000 <= a < 0x44000000):
                 funcs.append((a, n, p[3]))
     funcs.sort()
+    # Static functions share names across objects (get_u16, JS_NewString,
+    # utf8_decode, ...). Keyed by bare name, every copy was carried onto the
+    # last copy's address and scaled by its size, which scattered the trace
+    # over lines it never touched (+95 lines/turn, 2026-10-23,
+    # docs/vm/turn-working-set.md). The k-th flash copy in address order is
+    # "name#k" in both images, which link the same objects in the same order.
+    seen = collections.Counter()
+    for i, (a, n, name) in enumerate(funcs):
+        if in_flash(a):
+            k = seen[name]; seen[name] += 1
+            if k:
+                funcs[i] = (a, n, f'{name}#{k}')
     return funcs
 
 def in_flash(a):
@@ -137,9 +149,17 @@ def model(a):
             return n, (addr - s) * fz // z
         return (f[2] if f else '?'), None
 
+    # The block's last instruction may be 3 bytes, so its last byte (+2) is
+    # fetched too. When +2 is past the function's end, the instruction was a
+    # narrow one that ends the function: +2 is no fetch, and placing it as
+    # unknown code charged a phantom line (~93 lines/turn, 2026-10-23).
+    def last_byte(addrs):
+        e = addrs[-1] + 2
+        return e if not in_flash(e) or locate(e) or not locate(addrs[-1]) else addrs[-1] + 1
+    ends = [last_byte(addrs) for addrs in d['blocks']]
     blocks = []
-    for addrs in d['blocks']:
-        blocks.append([place(x) for x in list(addrs) + [addrs[-1] + 2]])
+    for addrs, e in zip(d['blocks'], ends):
+        blocks.append([place(x) for x in list(addrs) + [e]])
 
     # Per-function line use and first-pass miss attribution decide what the
     # variants move.
@@ -164,8 +184,23 @@ def model(a):
             chosen.append(n); used += fw[n][1]
         return chosen, used
 
-    iram, iram_bytes = pick(a.iram_kib) if a.iram_kib else ([], 0)
-    iram = set(iram)
+    # Forced functions go first and use the budget's bytes at their firmware
+    # size; --force-cost replaces that size (e.g. JS_CallInternal after its
+    # cold handlers are outlined, which this model cannot see: the outlined
+    # parts are not executed, so only the placement of the rest matters).
+    forced = [n for n in (a.force or []) if n in fw]
+    forced_bytes = int(a.force_cost) if a.force_cost else sum(fw[n][1] for n in forced)
+    iram, iram_bytes = [], 0
+    if a.iram_kib:
+        ranked = sorted((n for n in touched if n in fw and n not in forced), key=lambda n: -uses[n] / fw[n][1])
+        for n in ranked:
+            if forced_bytes + iram_bytes + fw[n][1] > a.iram_kib * 1024:
+                continue
+            iram.append(n); iram_bytes += fw[n][1]
+    if forced:
+        print(f'  forced: {", ".join(forced)} counted as {forced_bytes} B')
+    iram = set(iram) | set(forced)
+    iram_bytes += forced_bytes
     pack, pack_bytes = pick(a.pack_kib) if a.pack_kib else ([], 0)
     base = {}
     if pack:
@@ -180,6 +215,9 @@ def model(a):
         if off == 'iram':
             return None
         if off is None:
+            # IRAM/ROM in the trace (a -dfilter wider than flash): no cache line.
+            if not in_flash(raw):
+                return None
             return (raw | 0x80000000) >> 5
         if n in iram:
             return None
@@ -188,7 +226,7 @@ def model(a):
     tb_lines = []
     for bi, addrs in enumerate(blocks):
         ls = []
-        for (n, off), raw in zip(addrs, list(d['blocks'][bi]) + [d['blocks'][bi][-1] + 2]):
+        for (n, off), raw in zip(addrs, list(d['blocks'][bi]) + [ends[bi]]):
             l = line_of(n, off, raw)
             if l is not None and l not in ls:
                 ls.append(l)
@@ -237,6 +275,8 @@ def main():
     m.add_argument('--full', action='store_true', help='fully associative: no conflict misses')
     m.add_argument('--iram-kib', type=float, default=0, help='take the hottest functions out of the cache up to this size')
     m.add_argument('--pack-kib', type=float, default=0, help='pack the hottest functions contiguously up to this size')
+    m.add_argument('--force', action='append', help='put this function in IRAM first (repeatable)')
+    m.add_argument('--force-cost', type=float, default=0, help='bytes to charge for the forced functions (default: their size)')
     m.add_argument('--top', type=int, default=0)
     m.add_argument('--emit', help='write the packed (or IRAM) function names here, one per line')
     for p in (e, m):

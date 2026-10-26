@@ -51,14 +51,20 @@ build_variant() {
   # which is the shipping default. Written only if absent so objects are not
   # rebuilt for nothing.
   [ -f "$OUT/include/sdkconfig.h" ] || echo "/* vmtest host stub: no CONFIG_* set */" > "$OUT/include/sdkconfig.h"
-  # QUICKJS_NG_BUILD/_GNU_SOURCE: the same defines components/quickjs-ng/CMakeLists.txt passes.
+  # QUICKJS_NG_BUILD/_GNU_SOURCE/QJS_DISABLE_DUMPS: the same defines components/quickjs-ng/CMakeLists.txt passes.
   # GUEST: from L1 on the harness LINKS the firmware's scheduler
   # (components/pocketjs_guest/src/vm_sched.c, vm_clock.c) instead of copying
   # it, so a change to the drain cannot pass here and fail there. Those two
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $reloc -I $OUT/include -I $GUEST/include"
+  # QJS_DISABLE_DUMPS: the firmware passes it too, so the dispatch here has
+  # no per-opcode dump-flag test either. VMTEST_DUMPS=1 keeps the JS_DUMP_*
+  # hooks (JS_SetDumpFlags) for debugging; objects are not keyed on it, so
+  # pair it with its own VMTEST_OUT.
+  local dumps="-DQJS_DISABLE_DUMPS"
+  [ "${VMTEST_DUMPS:-0}" = 1 ] && dumps=""
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,

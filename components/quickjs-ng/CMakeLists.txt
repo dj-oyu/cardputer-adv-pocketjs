@@ -21,8 +21,13 @@ idf_component_register(
         vfs
 )
 
+# QJS_DISABLE_DUMPS: no JS_DUMP_* hooks (JS_SetDumpFlags becomes a no-op)
+# while assert() stays on. Without it, assertions-enabled builds (no NDEBUG)
+# get ENABLE_DUMPS and a dump-flag test on every opcode dispatch
+# (docs/vm/interpreter-stages.md sec.4.1).
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     QUICKJS_NG_BUILD
+    QJS_DISABLE_DUMPS
     _GNU_SOURCE
 )
 

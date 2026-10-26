@@ -31,14 +31,19 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [allocator-cost.md](vm/allocator-cost.md) | 記録 | ゲストのアロケータの値段を実機で測った（`CONFIG_POCKET_VM_ALLOCPROBE`、計測後に削除）: malloc→free 1 組 約 1,800 サイクル、STRESS の JS のターンの 20.6%。経路は `heap_caps` の走査・クリティカルセクション・flash 上の読み戻し |
 | [app-suspend-design.md](vm/app-suspend-design.md) | 設計 | アプリの常駐中断: Back でゲストを壊さずに止めて残し、同じアプリを開くと続きから。状態遷移、各面の中断・再開の扱い、API（`suspend`/`resume` フック、`stop("evict")`）、退去の条件、メモリの予算、段と検証。決めること 4 つ |
 | [r5-icache.md](vm/r5-icache.md) | 記録 | R5: STRESS のターンを QEMU で記録し、命令キャッシュの模型に通した（`tools/r5sim/`）。触るのは 45.5 KiB、衝突は 15%。flash 内の並べ替えは効かない。IRAM 8 KiB は実機で JS −15%・空き −8.7 KiB で、見送り |
+| [interpreter-stages.md](vm/interpreter-stages.md) | 設計・素案 | インタプリタの時間の段（S0 読み込み〜S4 ターン出口）と、最適化の段（tiered interpreter、T0〜T2）。どの段でも 1 ターンに触るコードを予算に収めて速くする方針、オペコードごとの呼び先と分類、ダンプ判定・TDZ・Math の試作結果、get_var・double の候補、後回しにしたもの（プロファイル・バイトコードの flash 保存） |
+| [turn-working-set.md](vm/turn-working-set.md) | 記録 | 段つきインタプリタの予算の下調べ: STRESS の 1 ターンが触るコードを部品ごとに分けた（`tools/r5sim/turnset.py`、模型の推定）。試作 3 つを入れても 42.5 → 41.8 KiB、インタプリタ（core＋helper）は 21.3 KiB で予算 14 KiB を超え、主因は helper。R5 の模型の行の水増し（45.5 → 42.5 KiB）を修正 |
 | [turn-cpi.md](vm/turn-cpi.md) | 記録 | R4: JS のターンを Xtensa の性能カウンタで測った（`CONFIG_POCKET_VM_TURNPERF`）。IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち。flash を QIO にして 1 フレームの JS 10.78 → 7.25 ms（同一配置） |
+| [p1-iram-placement.md](vm/p1-iram-placement.md) | 設計・素案 v2 | P1: 1ターンに触るコードを IRAM に置く。Xtensa の GCC は関数内の hot/cold 分割をしない（実測）。`JS_CallInternal` は冷たい命令を出しても 13〜16 KB 残り、1 KiB あたりの効きは helper 群の半分程度（推定）なので、本体・helper・両方を模型で同じ予算に並べてから実機へ。先に helper の `no_inline`。SLOW のレビューの要約（§8） |
 | [gc-cap-backoff.md](vm/gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
 | [builtin-floor-plan.md](vm/builtin-floor-plan.md) | 設計・計画 | F 系列（VM の段とは独立）: ゲストの起動床（実機レイアウトで js=64,420 B、うち組み込みの名前 21.7 KB と何も作っていない索引）を flash へ。F1 ROM atom・F2 遅延索引で 28,684 B（−55%、計算）。捨てた案 4 つ、`atom_array` 33 箇所の台帳、関所と負の対照。道具は `tools/vmtest/floor/` |
 | [spread-eval-oom.md](vm/spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
 | [aliasing-types.md](vm/aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
 | [eval-peak.md](vm/eval-peak.md) | 記録・比較 | 評価のピークの構成（pass-1 バイトコード 46%、JSFunctionDef 15%…、host の確保タグ）と下げる手段の実測: 分割（B 案）+18.5〜25.9 KB、事前コンパイル +26 KB・49 ms、パーサの余り返し host −11 KB、ES モジュール、遅延 import。推奨の順序と決めること。§7 製品化した `pocket.app.load`（チャンクの表・書き方・実機で 3 分割 +18.2 KB）、§8 静的 import への引き継ぎ |
 | [ゲストの行番号表を落とす](vm/strip-debug.md) | `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）: 行番号表なしのコンパイル。アプリごとの効果（DERBY の評価の余裕 +2.7 KB、実機）、失う位置情報、DERBY の首振り（段階 3）には足りないこと、運用案（2026-09-30）|
+| [tdz-elision.md](vm/tdz-elision.md) | 設計・記録 | TDZ 検査（`get_loc_check`・`put_loc_check`・`set_loc_uninitialized`）をコンパイル時のデータフロー解析で消す。DERBY の 1 フレーム 12,375 → 11,506 命令（host 計数）、評価のピーク −2.6 KB、確保なし。規則と正しさの根拠、検査 |
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
+| [math-call-fast.md](vm/math-call-fast.md) | 試作 | `Math.sin(x)` など純粋な組み込みを、数値の引数なら native フレームなしで呼ぶ（`js_call_math_fast`）。今の経路（C 関数約18種）、DERBY の Math 163.5 回/フレーム（host）、別名・IC・呼び出し箇所の特殊化との比較。host 検査済み、実機の速度は未測定 |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
 ## 主線2: PIE と描画の高速化 — [`perf/`](perf/)
