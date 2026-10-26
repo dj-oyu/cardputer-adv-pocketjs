@@ -224,10 +224,14 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 ## Test262
 
 - revision: `72faf8ec1445c55149615e8b35187830783aba1a`（2026-09-12 の main）。`test262.py` の `PINNED`。`--fetch` は `harness/` と対象ディレクトリだけを sparse checkout する。
-- 対象: `language/statements/{async-function,async-generator,generators,try,for-of}`、`language/expressions/{call,new,async-arrow-function,async-function,async-generator,await,yield,arrow-function}`、`language/eval-code/direct`、`built-ins/Promise`、`built-ins/Proxy/{apply,construct,get,set,has,revocable}`（JS へ再入する trap を選んだ標本）。4,099 ファイル。
+- 対象（L0 から）: `language/statements/{async-function,async-generator,generators,try,for-of}`、`language/expressions/{call,new,async-arrow-function,async-function,async-generator,await,yield,arrow-function}`、`language/eval-code/direct`、`built-ins/Promise`、`built-ins/Proxy/{apply,construct,get,set,has,revocable}`（JS へ再入する trap を選んだ標本）。4,099 ファイル。
 - 各ファイルを `onlyStrict` / `noStrict` / `raw` / `module` に従って sloppy と strict の両方（またはどちらか）で走らせる。`async` は `doneprintHandle.js` を足し `Test262:AsyncTestComplete` を待つ。`negative` はエラー名と、parse の場合は相（compile のみで失敗したか）を確かめる。`$262` は `global` / `evalScript` / `gc` / `detachArrayBuffer` / `createRealm` を持つ。`IsHTMLDDA`・`SharedArrayBuffer`・`Atomics` と `CanBlockIsTrue` は SKIP。
 - sync テストが意図的に未処理 rejection を残す場合（終了コード 2 で報告行だけ）は合格扱い。報告の時点はコーパスが見る。
 - L0 の結果（実測(host)、asan と o2 で同一、2 回実行で同一）: **7,501 pass / 194 fail / 0 skip**。失敗の内訳は未対応機能で、`Promise.allKeyed`/`allSettledKeyed`（174）、末尾呼び出し最適化（9）、`using`/`await using`（7）、`Promise.try` の一部（4）。
+- **2026-10-26 に足した 18 ディレクトリ**（T0 が評価順を変える範囲。`docs/vm/interpreter-stages.md` §9.2）: `language/expressions/{assignment,compound-assignment,logical-assignment,addition,subtraction,multiplication,division,less-than,less-than-or-equal,greater-than,greater-than-or-equal,member-expression,object}`、`language/statements/{for-in,let,const,class}`、`language/global-code`。7,352 ファイル、**14,170 pass / 53 fail / 1 skip**（実測(host)、asan）。
+  - **この分の基準は L0 で取っていない**（L0 のビルドはもう作れない。上流経路の variant は削除済み）。`main` の `467562d2` で記録し、`test262-baseline.txt` の末尾に注記付きで足した。L0 の行には触れていない。
+  - L0 で取らない代わりに、失敗 53 件（36 ファイル）を上流 quickjs-ng v0.14.0 と突き合わせた。8 ファイルは上流の `test262_errors.txt` に載り、残りは上流の `test262.conf` が外しているもの（`S11.13.1_A6`・`S11.13.2_A6.*` の 13 は `[exclude]` で名指し、decorators の 13 は `decorators=skip`、拡張不可オブジェクトへの private field の 2 は `nonextensible-applies-to-private=skip`）。VM の変更で落ちたものは無い。項目ごとの結果は T0 の前（`d8dd273`）と全部一致する。
+  - `--write-baseline` は全体を書き直すので、L0 の行を守るためにこの追加には使っていない。次にディレクトリを足すときも、通った行を末尾に注記付きで足す。
 
 ## 時間の基準
 

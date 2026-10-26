@@ -57,6 +57,27 @@ SUBSET = [
     "language/expressions/arrow-function",
     "language/eval-code/direct",
     "built-ins/Promise",
+    # T0 (docs/vm/interpreter-stages.md sec.9.2) rewrites evaluation order in
+    # assignment, arithmetic, comparison and global let/const reads. Their
+    # baseline lines were added 2026-10-26, not recorded at L0: see README.
+    "language/expressions/assignment",
+    "language/expressions/compound-assignment",
+    "language/expressions/logical-assignment",
+    "language/expressions/addition",
+    "language/expressions/subtraction",
+    "language/expressions/multiplication",
+    "language/expressions/division",
+    "language/expressions/less-than",
+    "language/expressions/less-than-or-equal",
+    "language/expressions/greater-than",
+    "language/expressions/greater-than-or-equal",
+    "language/expressions/member-expression",
+    "language/expressions/object",
+    "language/statements/for-in",
+    "language/statements/let",
+    "language/statements/const",
+    "language/statements/class",
+    "language/global-code",
 ]
 # Proxy is large and mostly trap-by-trap object-model checks; the call/
 # construct/get/set traps are what re-enter JS, so those are taken whole.
