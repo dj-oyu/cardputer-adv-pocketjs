@@ -56,9 +56,12 @@ function hud(tx) {
     s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
       STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
     for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]));
-    R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
-    const v = [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1];
-    for (let i = 0; i < 3; ++i) R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + rnd(52 * mx(0, mn(1, v[i]))), 49 + 12 * i]);
+    if (R.pick !== pick) {
+      R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
+      const v = [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1];
+      for (let i = 0; i < 3; ++i) R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + rnd(52 * mx(0, mn(1, v[i]))), 49 + 12 * i]);
+      R.pick = pick;
+    }
   } else if (scene === 'res') {
     if (R.t[3].s !== undefined) return;
     const o = fin.o, p = o.indexOf(pick);
