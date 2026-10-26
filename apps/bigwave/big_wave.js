@@ -321,7 +321,8 @@
     }
     // Obstacles, far to near.
     const ob = [], c = s.course;
-    c.rocks.forEach(r => { const f2 = face(r.p, curlAt(r.x), heightAt(r.x)), p = proj(r.x, f2[0], f2[1], far);
+    c.rocks.forEach(r => { const depth = r.x - s.cx; if (depth < C.dn || depth > far) return;
+      const f2 = face(r.p, curlAt(r.x), heightAt(r.x)), p = proj(r.x, f2[0], f2[1], far);
       if (p) ob.push([p[2], 'ro', [p[0], p[1], p[2] * co, p[2] * si]]); });
     c.riders.forEach(r => { const q = rider(r), f2 = face(q[1], curlAt(q[0]), heightAt(q[0])), p = proj(q[0], f2[0], f2[1], far);
       if (p) ob.push([p[2], 'ri', [p[0], p[1], p[2] * co, p[2] * si, 1, r.c]]); });

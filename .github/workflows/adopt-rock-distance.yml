@@ -1,0 +1,126 @@
+name: Adopt PR63 rock distance
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: adopt-rock-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [native, m32]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 95be9fb72dc1aab4a71752008acdec56532b7f10
+          path: support
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Existing m32 CI dependencies
+        if: matrix.abi == 'm32'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+      - name: Reuse public oracle with exact integration base
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import os,shutil
+          dest=Path('tools/experiments/bigwave-rock-distance')
+          shutil.copytree(Path('support')/dest,dest)
+          for p in dest.rglob('*'):
+              if p.is_file() and p.suffix in ('.py','.mjs'):
+                  p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','af99783c02d0984f229708d985a51e3aebd71c97'))
+          p=dest/'common.py';s=p.read_text();old="flags=['-O2','-ffp-contract=off']";assert s.count(old)==1
+          p.write_text(s.replace(old,"flags=['-O2','-ffp-contract=off','-DQJS_DISABLE_DUMPS']"))
+          PYTHON
+      - name: Boundary and actual composed panels
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          set -euo pipefail
+          mkdir -p validation-results
+          node tools/experiments/bigwave-rock-distance/boundary.mjs | tee validation-results/boundary.log
+          flags=()
+          if test "$ABI" = m32; then flags+=(--m32); fi
+          python3 tools/experiments/bigwave-rock-distance/verify.py "${flags[@]}" 2>&1 | tee validation-results/verify.log
+      - name: Finite diagnostic vs ordinary fixed-input bot
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if test "$ABI" = m32; then flags+=(--m32); fi
+          python3 tools/experiments/bigwave-rock-distance/test_device.py "${flags[@]}" 2>&1 | tee validation-results/finite.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: adopt-rock-${{ matrix.abi }}-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            validation-results/
+            .cache/bigwave-rock-verify*/result.json
+            .cache/bigwave-rock-device*/result.json
+          retention-days: 14
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Ordinary product configuration build
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_adopt -D SDKCONFIG="$PWD/build_adopt/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_adopt size > build_adopt/size.log
+          git diff --exit-code
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import hashlib,json,os
+          b=Path('build_adopt');names=['cardputer_pocketjs.elf','cardputer_pocketjs.bin','sdkconfig','partition_table/partition-table.bin']
+          (b/'adoption.json').write_text(json.dumps({'head':os.environ['SOURCE_HEAD'],'diagnostic':False,'hardware_tested':False,'images':{n:{'bytes':(b/n).stat().st_size,'sha256':hashlib.sha256((b/n).read_bytes()).hexdigest()} for n in names}},indent=2)+'\n')
+          PYTHON
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: adopt-rock-product-${{ env.SOURCE_HEAD }}
+          path: |
+            build_adopt/*.elf
+            build_adopt/*.bin
+            build_adopt/*.map
+            build_adopt/adoption.json
+            build_adopt/size.log
+            build_adopt/sdkconfig
+            build_adopt/partition_table/partition-table.bin
+          retention-days: 14
