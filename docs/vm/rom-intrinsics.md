@@ -544,20 +544,22 @@ R1 と R2 を実装した。区分は §0 と同じ（実測(host)／実測(devi
 
 **flash**: app の image が 2,275,376 → 2,344,752 B（+69.4 KB、F1 の表の +0.8 KB を含む）。推定は 75〜80 KB。
 
-**ほかのアプリ（R2 のファームで起動、エラー 0）**
+**ほかのアプリ（起動直後の `js=`、エラー 0）**: 比べる相手は通常の `main`（`60ec8639`、harden 無し）。harden の分（約 +0.5 KB）を含むので、ROM だけの効果はこれより少し大きい。
 
-| アプリ | `js=`（起動直後） |
-|---|---:|
-| hello | 23,912 |
-| imucal | 37,000 |
-| pet | 41,556 |
-| companion | 34,768 |
-| stress | 43,172 |
-| megademo | 79,456 |
-| gridlab | 76,428 |
-| videolab | 34,880 |
-| lcdcatch | 51,752 |
-| derby | 97,280 |
-| bigwave | 82,772 |
+| アプリ | main | ROM | 差 |
+|---|---:|---:|---:|
+| hello | 37,968 | 23,912 | −14.1 KB |
+| imucal | 51,812 | 37,000 | −14.8 KB |
+| pet | 57,432 | 41,556 | −15.9 KB |
+| companion | 49,092 | 34,768 | −14.3 KB |
+| stress | 58,216 | 43,172 | −15.0 KB |
+| megademo | 96,036 | 79,456 | −16.6 KB |
+| gridlab | 98,240 | 76,428 | −21.8 KB |
+| videolab | 49,368 | 34,880 | −14.5 KB |
+| lcdcatch | 68,092 | 51,752 | −16.3 KB |
+| derby | 115,812 | 97,280 | −18.5 KB |
+| bigwave | 99,644 | 82,772 | −16.9 KB |
 
-`tools/stress_app.py --seconds 15` は `STRESS_APP_PASS`（確保失敗からの回復を含む）。HELLO の broker の検査も通過した。測っていないもの: 各アプリの RAM 版との差（DERBY だけ測った）、`test_app_resume.py`、`memlog --check`。
+MEGADEMO は起動直後の空きが 32,200 B（最大の連続 7,680 B）→ 47,592 B（20,480 B）。
+
+`tools/stress_app.py --seconds 15` は `STRESS_APP_PASS`（確保失敗からの回復を含む）。HELLO の broker の検査も通過した。`tools/test_app_resume.py` も通過（imucal・pet・companion）。測っていないもの: `memlog --check`。
