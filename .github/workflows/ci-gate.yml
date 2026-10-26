@@ -31,16 +31,17 @@ jobs:
           # Give the other workflows time to register their check runs.
           sleep 60
           while :; do
-            # Latest run per check name (re-runs replace earlier attempts).
+            # Latest run per (workflow run, job name): several workflows have a
+            # job called "host", and a re-run replaces the earlier attempt.
             runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
                      --jq '.check_runs[]' \
                    | jq -s '[.[] | select(.name != "ci-gate")]
-                            | group_by(.name) | map(max_by(.id))')
+                            | group_by([.check_suite.id, .name]) | map(max_by(.id))')
             pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
             failed=$(jq -r '.[] | select(.status == "completed")
                             | select(.conclusion as $c
                                      | ["success","skipped","neutral"] | index($c) | not)
-                            | "\(.name): \(.conclusion)"' <<<"$runs")
+                            | "\(.name): \(.conclusion) \(.html_url)"' <<<"$runs")
             if [ -n "$failed" ]; then
               echo "Failed checks:"; echo "$failed"; exit 1
             fi
