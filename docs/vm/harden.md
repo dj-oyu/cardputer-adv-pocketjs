@@ -1,6 +1,6 @@
 # harden: アプリのコンテキストから「驚き」を消す（2026-10-26）
 
-**状態: 実装済み（`vm/harden`）。host の検査は通過。実機は未測定（§7）。** 数字の区分は、実測（host または実機で測った値）、推定、コード（ソースで確かめた事実）の3つ。
+**状態: 実装済み（`vm/harden`）。host の検査と、実機の全 JS アプリの起動は通過（§6、§7）。速さは未測定。** 数字の区分は、実測（host または実機で測った値）、推定、コード（ソースで確かめた事実）の3つ。
 
 ## 1. 結論
 
@@ -79,7 +79,7 @@ C の関数は、ほとんどが同じ shape（`length`・`name`）を共有し�
 | `components/quickjs-ng/quickjs-ng/quickjs.h` | `JS_PocketHarden()` |
 | `components/pocketjs_guest/src/guest.c` | コンテキストを作った直後、ヘルパーとファームの面より前に呼ぶ。失敗したらゲストを作らない |
 | `tools/vmtest/vmrun.c` | `--harden` |
-| `tools/test_stress_app.c`、`tools/games/test_{derby,lcd_catch,big_wave}_host.c` | 実機と同じく harden を掛ける |
+| `tools/test_stress_app.c`、`tools/test_lessons.c`、`tools/games/test_{derby,lcd_catch,big_wave}_host.c` | 実機と同じく harden を掛ける |
 | `tools/vmtest/corpus/harden.js` | 4つの規則、残るもの、遅延の経路 |
 
 Kconfig は足していない。この挙動は無くしたいもので、切り替えの口を残す理由が無い。host では `vmrun --harden` の有無で比べられる。
@@ -107,11 +107,24 @@ Kconfig は足していない。この挙動は無くしたいもので、切り
 
 ピークのバイト数。「harden なし」は `JSContext` の対応表（+64 B）を含む。対の shape を使い回す前は、それぞれ +2,120 B / +3,036 B だった。
 
-## 7. 実機（未実施）
+## 7. 実機（2026-10-26、`80ce1f69`）
 
-- 全アプリの起動（smoke_device.py）と、host のハーネスが無いアプリ（pet、deskclock、player など）の動作。
-- DERBY と BIG WAVE のゲストのピーク（BIG WAVE は host で評価のピーク 162,552 B と、上限 163,840 B に近い）。
-- 速さは変わらない見込み（書き込みの経路に確認を足していない。species の検索2回が消える分だけ速くなる）。
+broker でビルドと書き込み。テストは COM3 から直接（リースを持ったまま）。
+
+| アプリ | 確かめ方 | 結果 |
+|---|---|---|
+| HELLO | `kasane_hello_device_test.py --cycles 3`（broker の hello も） | PASS |
+| DERBY WATCH | broker の `derby`（デモ1周、写真判定、HOME に戻る）、`derby_fixed`（3レース） | 1周を観測、3レース完走、エラーなし |
+| STRESS TEST | `stress_app.py --seconds 60` | PASS（OOM の疑い 0） |
+| IMU CAL・POCKET PET・PET COMPANION | `test_app_resume.py`（中断→再開→退去） | PASS |
+| MEGADEMO・GRID LAB・VIDEO LAB・LCD CATCH・BIG WAVE | 行を順に起動して 8 秒（`EVAL_ERROR`・`START_FAILED`・例外の行を探す） | 例外・起動失敗なし |
+| TUTORIAL・PLAYGROUND の既定ソース | host の `test_lessons.c` を harden 付きで（教材に eval・prototype の書き換えは無い） | PASS（host） |
+
+ヒープ: DERBY の読み込み直後のゲスト `js=116,072`、空き 45,780 B（実測(device)）。前回の実機（`9433aba9`、harden なし）は 115,864 / 45,920 で、差は +208 B / −140 B。間に PR #80・#81 も入っているので、すべてが harden の分ではない。host の予想（+271〜424 B）と同じ桁。
+
+`tools/smoke_device.py` は失敗したが、harden とは無関係: 今のメニューは HELLO の行まで `u` を押す必要があり（`kasane_hello_device_test.py` はそうしている）、この古いスクリプトは別のアプリを開いて `HELLO_COUNT` を待っていた。
+
+速さは測っていない。書き込みの経路に確認を足していないので変わらない見込みで、species の検索2回が消える分だけ速くなる（推定）。
 
 ## 8. この先
 
