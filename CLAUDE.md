@@ -61,7 +61,7 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 
 ## この機体で繰り返し踏む制約
 
-- **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測274KiB（`idle_free=280,932`、Wi-Fiリンク後）。静的DIRAMを197,847→111,383Bまで削った結果で、**この数字は削減のたびに動くので `tools/memlog.py --port --check` の実測を見ること。** JSゲストの上限は160KiB（`main/app_session.c` の `heap_limit`。128→144→160KiB と上げてきた） — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減る。** 増減の記録は `tools/memlog.py` が持つ。
+- **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測274KiB（`idle_free=280,932`、Wi-Fiリンク後）。静的DIRAMを197,847→111,383Bまで削った結果で、**この数字は削減のたびに動くので `tools/memlog.py --port --check` の実測を見ること。** JSゲストの上限は160KiB（`main/app_session.c` の `heap_limit`。128→144→160KiB と上げてきた） — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減る。** 増減の記録は `tools/memlog.py` が持つ。 QuickJS の helper 約 8 KiB は IRAM に置いてあり（`CONFIG_POCKET_VM_HELPER_IRAM`、既定 y）、空きはその分少ない。外すと DERBY の JS が約 13% 遅くなる（docs/vm/p1-iram-placement.md §9）。
 - **ゲストは起動時にJSソースを解析するので、ソースのバイト数がヒープを食う。** 実測で6.5KBのアプリはゲスト107KiB、7.6KBは評価に失敗する。アプリのコメントは短く、理由は隣の `README.md` へ。
 - **Rust UIコアとTaffyレイアウトはファームから削除した（2026-09-17）。** 以前ここにあった「Rust UIコアはメモリ不足を報告せずパニックする」「taffyノード数で連続ブロックが段階的に跳ねる」という制約は、その経路と一緒に無くなった。
 - **`main/hal/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
