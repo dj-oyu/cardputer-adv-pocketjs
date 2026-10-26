@@ -67,7 +67,7 @@ function hud(tx) {
       'YOUR ' + num(pick) + ' ' + th(p) + (replay ? '' : '  ' + (fin.dp < 0 ? '' : '+') + fin.dp),
       'PTS ' + pts + '   1 NEXT RACE   R REPLAY'];
   } else {
-    const o = scene === 'photo' ? order(rs) : ro, lead = rs ? mx.apply(null, rs.x) : 0, ph2 = scene === 'photo';
+    const o = scene === 'photo' ? fin.o : ro, lead = rs ? mx.apply(null, rs.x) : 0, ph2 = scene === 'photo';
     s = [(o[0] + 1) + '-' + (o[1] + 1) + '-' + (o[2] + 1) + '   ' + num(pick) + ' ' + th(o.indexOf(pick)),
       scene === 'gate' ? 'GATE' : mx(0, rnd(D - lead)) + 'M', camT > 0 ? NAMES[cm] : '',
       ph2 ? (t < 50 ? (t & 8 ? 'PHOTO' : '') : num(fin.o[0])) : '', ph2 && t >= 50 ? fin.mg : ''];
