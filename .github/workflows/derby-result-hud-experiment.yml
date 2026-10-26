@@ -24,6 +24,18 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Isolate result HUD guard on current source
+        run: |
+          baseline=$(python3 tools/experiments/isolate_adopted_baseline.py result57 --output .cache/result-hud-comparison-base.json)
+          cat .cache/result-hud-comparison-base.json
+          BASELINE="$baseline" python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('tools/experiments/derby-result-hud/run.py')
+          s=p.read_text();old="BASE='d7d9d90050d172e176c0f3ddbe3666a07af1ff7f'"
+          assert s.count(old)==1
+          p.write_text(s.replace(old,"BASE='"+os.environ['BASELINE']+"'"))
+          PY
       - name: Common O2 binary actual MID compatibility and native A/B
         run: |
           set -euo pipefail
@@ -47,6 +59,7 @@ jobs:
           name: derby-result-hud-host-${{ env.SOURCE_HEAD }}
           include-hidden-files: true
           path: |
+            .cache/result-hud-comparison-base.json
             .cache/result-hud*/bench-*/*.json
             .cache/result-hud-verify*/result.json
             .cache/result-hud-verify*/*.csv
@@ -55,6 +68,8 @@ jobs:
             .cache/result-hud-device-host*/*/*.csv
             .cache/result-hud-device-host*/*/*.log
           retention-days: 14
+  # Only host arms use the isolated current-source baseline. Firmware keeps
+  # its historical d7 baseline; this matrix is not a single-change A/B.
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -85,7 +100,7 @@ jobs:
       - name: Prepare isolated finite result diagnostic
         if: matrix.profile == 'result'
         run: python3 tools/experiments/derby-result-hud/prepare_device.py --checkout diagnostic-source
-      - name: Product configuration and exact flash artifact
+      - name: Historical comparison product configuration and artifact
         working-directory: diagnostic-source
         shell: bash
         run: |
@@ -114,7 +129,7 @@ jobs:
               assert key+':BOOL=OFF' in cache,key
           names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
           images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
-          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],idf='6.0.1',diagnostic=diagnostic,hardware_tested=False,workload='derby-app-result-120-v2' if diagnostic else None,images=images),indent=2)+'\n')
+          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],comparison_scope='historical-d7-baseline-vs-current-source',isolated_ab=False,historical_baseline=os.environ['BASE_HEAD'],idf='6.0.1',diagnostic=diagnostic,hardware_tested=False,workload='derby-app-result-120-v2' if diagnostic else None,images=images),indent=2)+'\n')
           (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))
           print((b/'experiment.json').read_text())
           PY

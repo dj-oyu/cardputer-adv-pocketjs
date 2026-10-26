@@ -347,6 +347,8 @@
       to: {bounds: RAD, rotation: 360 * KN[tier].q[scene === 4 ? 0 : 2]}, durationMs: 4000,
       easing: 'linear', repeat: 'loop'});
     const boundsAt = step => {
+      if (step === 0) return FULL;
+      if (step === ZOOM) return MON;
       const u = step / ZOOM, e = u * u * (3 - 2 * u);
       return FULL.map((v, j) => rnd(v + (MON[j] - v) * e));
     };

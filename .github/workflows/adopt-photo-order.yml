@@ -31,6 +31,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Comparison baseline regression tests
+        if: matrix.abi == 'native'
+        run: python3 -B tools/experiments/test_isolate_adopted_baseline.py -v
+      - name: Isolate adopted candidate on current source
+        id: comparison
+        run: |
+          baseline=$(python3 tools/experiments/isolate_adopted_baseline.py photo59 --output validation-results/comparison-base.json)
+          echo "sha=$baseline" >> "$GITHUB_OUTPUT"
+          cat validation-results/comparison-base.json
       - name: Existing m32 CI dependencies
         if: matrix.abi == 'm32'
         run: |
@@ -47,7 +56,7 @@ jobs:
           shutil.copytree(Path('support')/dest,dest)
           for p in dest.rglob('*'):
               if p.is_file() and p.suffix in ('.py','.mjs'):
-                  p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','7da4f9087eedef69ea54063bb9a2c721e8ead8da'))
+                  p.write_text(p.read_text().replace('e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267','${{ steps.comparison.outputs.sha }}'))
           if os.environ['ABI']=='m32':
               p=dest/'verify.py';s=p.read_text();assert s.count("'DERBY_HEAP_LIMIT':'524288'")==1
               p.write_text(s.replace("'DERBY_HEAP_LIMIT':'524288'","'DERBY_HEAP_LIMIT':'163840'"))
