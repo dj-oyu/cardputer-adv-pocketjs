@@ -362,16 +362,18 @@ static inline __attribute__((always_inline)) int band_entry(const ksn_proc_segme
 }
 /* A plain line in a frame with pattern lines: ksn_proc_render_band's walk. */
 static inline __attribute__((always_inline)) void plain_band(const ksn_proc_segment *s,uint16_t *pixels,int y,int height){
+    if(!height)return;
     int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
     int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
     band_entry(s,s->x0,y,height,&x,&yy,&err);
     for(;;){
-        if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
-        if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
+        if(x>=0&&x<KSN_PROC_W)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
         if(x==s->x1&&yy==s->y1)break;
         int twice=2*err;
         if(twice>-dy){err-=dy;x+=sx;}
-        if(twice<dx){err+=dx;yy+=sy;}
+        if(twice<dx){err+=dx;yy+=sy;
+            if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
+        }
     }
 }
 /* One pixel of a pattern line: cell u >> 8 of the pattern. */
