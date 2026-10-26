@@ -1,0 +1,53 @@
+name: CI gate
+
+# Most workflows here run only for the paths they guard, so no single check
+# exists on every PR. Branch protection needs a check name that always runs;
+# this job is that name. It waits for every other check run on the PR head
+# and fails if any of them failed, so "ci-gate passed" means "all checks
+# that ran on this commit passed".
+on:
+  pull_request:
+
+permissions:
+  checks: read
+  contents: read
+
+concurrency:
+  group: ci-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Wait for all other checks on the head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Give the other workflows time to register their check runs.
+          sleep 60
+          while :; do
+            # Latest run per check name (re-runs replace earlier attempts).
+            runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+                     --jq '.check_runs[]' \
+                   | jq -s '[.[] | select(.name != "ci-gate")]
+                            | group_by(.name) | map(max_by(.id))')
+            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            failed=$(jq -r '.[] | select(.status == "completed")
+                            | select(.conclusion as $c
+                                     | ["success","skipped","neutral"] | index($c) | not)
+                            | "\(.name): \(.conclusion)"' <<<"$runs")
+            if [ -n "$failed" ]; then
+              echo "Failed checks:"; echo "$failed"; exit 1
+            fi
+            if [ "$pending" -eq 0 ]; then
+              echo "All $(jq length <<<"$runs") other checks passed."
+              exit 0
+            fi
+            echo "Waiting for $pending check(s)..."
+            sleep 30
+          done

@@ -38,3 +38,8 @@ venv/
 # Host-side lazy-namespace test: objects and binary, built by tools/build_lazy_test.sh
 tools/.lazytest/
 tools/test_lazy_namespace
+
+# Local MCP client config: machine paths and broker setup, never publish
+.mcp.json
+# Session handover notes (local working memos)
+handover*.md
