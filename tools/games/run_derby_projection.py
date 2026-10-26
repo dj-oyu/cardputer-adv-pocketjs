@@ -92,6 +92,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--out',type=Path,default=ROOT/'.cache/derby_projection')
     p.add_argument('--all-tiers',action='store_true')
+    p.add_argument('--tier',type=int,action='append',choices=(0,1,2),
+                   help='run only this tier (repeatable); lets CI spread tiers over runners')
     p.add_argument('--verify-only',action='store_true',help='recheck saved completed pipeline logs/CSVs')
     p.add_argument('--benchmark-only',action='store_true',help='optimized unsanitized complete boundary costs; serial trials')
     args=p.parse_args();out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
@@ -141,8 +143,10 @@ def main():
                     preflight=json.loads(pre[1]) if pre else None,
                     heap=re.search(r'^guest heap \(.+$',text,re.M)[0],
                     churn=re.findall(r'^guest heap churn in frame\(\), (.+)$',text,re.M))
-    jobs=[(label,tier,False) for tier in ((0,1,2) if args.all_tiers else (1,)) for label in binaries]
-    if not args.benchmark_only:jobs.append(('combined',1,True))
+    tiers=tuple(sorted(set(args.tier))) if args.tier else ((0,1,2) if args.all_tiers else (1,))
+    jobs=[(label,tier,False) for tier in tiers for label in binaries]
+    # The every-call oracle is the longest trial; queue it first so it overlaps the rest.
+    if not args.benchmark_only and 1 in tiers:jobs.insert(0,('combined',1,True))
     results=[]
     if args.benchmark_only:
         for label,tier,every in jobs:
@@ -153,7 +157,7 @@ def main():
         work={pool.submit(trial,*job):job for job in jobs}
         for f in concurrent.futures.as_completed(work):
             r=f.result();results.append(r);print('PROJECTION_PASS',r['mode'],r['tier'],'oracle',r['oracle'],r['pixel_hash'],flush=True)
-    for tier in ((0,1,2) if args.all_tiers else (1,)):
+    for tier in tiers:
         rows=[r for r in results if r['tier']==tier]
         for key in ('pixel_hash','finish','replay','csv_sha256','draw_sha256'):
             assert len({r[key] for r in rows})==1,(tier,key,[(r['mode'],r[key]) for r in rows])

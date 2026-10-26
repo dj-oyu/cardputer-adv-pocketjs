@@ -1,5 +1,7 @@
 name: BIG WAVE input literals experiment
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -86,6 +88,15 @@ jobs:
       - name: Prepare isolated finite BIG WAVE diagnostic
         if: matrix.profile == 'ride'
         run: python3 tools/experiments/bigwave-inputs/prepare_device.py --checkout diagnostic-source
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Product configuration and exact flash artifact
         working-directory: diagnostic-source
         shell: bash
@@ -95,6 +106,7 @@ jobs:
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           build_head=$(git rev-parse HEAD)
           idf.py -B build_result -D SDKCONFIG="$PWD/build_result/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" build
+          ccache -s || true
           idf.py -B build_result size > build_result/size.log
           python3 -B - '${{ matrix.mode }}' "$build_head" '${{ matrix.profile }}' <<'PY'
           import hashlib,json,os,subprocess,sys

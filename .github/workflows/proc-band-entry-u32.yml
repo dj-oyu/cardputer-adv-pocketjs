@@ -1,5 +1,12 @@
 name: Procedural band entry uint32 comparison
 on:
+  push:
+    branches: [main]
+    paths:
+      - main/ui/kasane/ksn_procedural.c
+      - main/ui/kasane/ksn_procedural.h
+      - tools/kasane_contract/test_proc_band_entry_u32.c
+      - .github/workflows/proc-band-entry-u32.yml
   pull_request:
     paths:
       - main/ui/kasane/ksn_procedural.c
@@ -103,6 +110,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Build normal product with unchanged partition and security defaults
         shell: bash
         run: |
@@ -110,6 +126,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_entry -D SDKCONFIG=build_entry/sdkconfig build
+          ccache -s || true
           git rev-parse HEAD > build_entry/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_entry/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_entry/CMakeCache.txt
@@ -167,6 +184,15 @@ jobs:
           node-version: '24'
       - name: Prepare finite diagnostic in disposable checkout
         run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Build with product settings and partition
         working-directory: diagnostic-source
         shell: bash
@@ -175,6 +201,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig build
+          ccache -s || true
           git rev-parse HEAD > build_diag/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_diag/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_diag/CMakeCache.txt

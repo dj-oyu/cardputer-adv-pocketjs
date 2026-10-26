@@ -1,0 +1,42 @@
+name: IDF compiler cache
+description: >-
+  Persist ccache across runs of one ESP-IDF build job. The espressif/idf image
+  already enables ccache (IDF_CCACHE_ENABLE=1); without this the cache starts
+  empty on every runner. Keep hash_dir on (ccache's default): objects then hit
+  only for the same build directory, so the key is per workflow, job and
+  matrix cell, and a cell never reads another cell's objects. The key holds
+  no branch name: a PR run restores the newest cache of its cell saved on
+  main (GitHub lets a PR read main's caches, never another PR's), so every
+  workflow that calls this also runs on push to main to keep that copy warm.
+inputs:
+  matrix:
+    description: Pass toJSON(matrix); composite actions cannot read the matrix context.
+    required: false
+    default: '{}'
+  max-size:
+    description: ccache size limit for this job's cache.
+    required: false
+    default: 400M
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      env:
+        CELL: ${{ inputs.matrix }}
+        WORKFLOW: ${{ github.workflow }}
+        JOB: ${{ github.job }}
+      run: |
+        dir=/github/home/.ccache
+        [ -d /github/home ] || dir="$HOME/.ccache"
+        echo "CCACHE_DIR=$dir" >> "$GITHUB_ENV"
+        echo "CCACHE_MAXSIZE=${{ inputs.max-size }}" >> "$GITHUB_ENV"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        cell=$(printf '%s' "$CELL" | tr -d ' \n\r' | sha256sum | cut -c1-12)
+        wf=$(printf '%s' "$WORKFLOW" | tr -c 'A-Za-z0-9' '-')
+        echo "prefix=ccache-idf601-$wf-$JOB-$cell-" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.prefix }}${{ github.sha }}
+        restore-keys: ${{ steps.key.outputs.prefix }}

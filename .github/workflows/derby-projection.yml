@@ -15,6 +15,17 @@ jobs:
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # One runner per tier (and one for the cost run): each runner has 4 cores and
+    # the tier trials already fill them, so splitting across runners is what
+    # shortens the wall time.
+    strategy:
+      fail-fast: false
+      matrix:
+        part:
+          - {name: tier0, args: --tier 0, out: projection}
+          - {name: tier1, args: --tier 1, out: projection}
+          - {name: tier2, args: --tier 2, out: projection}
+          - {name: cost, args: --benchmark-only, out: projection-cost}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -28,12 +39,25 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - run: python -B tools/games/run_derby_projection.py --all-tiers --out artifacts/projection
-      - run: python -B tools/games/run_derby_projection.py --benchmark-only --out artifacts/projection-cost
+      - name: Run ${{ matrix.part.name }}
+        shell: bash
+        env:
+          PART: ${{ matrix.part.name }}
+          ARGS: ${{ matrix.part.args }}
+          OUT: artifacts/${{ matrix.part.out }}
+        run: |
+          set -euo pipefail
+          runner=tools/games/run_derby_projection.py
+          # A PR head that predates --tier runs every tier in the tier1 cell.
+          if [ "$PART" != cost ] && ! grep -q -- "'--tier'" "$runner"; then
+            if [ "$PART" != tier1 ]; then echo "runner has no --tier; tier1 cell runs all tiers"; exit 0; fi
+            ARGS=--all-tiers
+          fi
+          python -B "$runner" $ARGS --out "$OUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: derby-projection-host-${{ env.SOURCE_HEAD }}
+          name: derby-projection-host-${{ matrix.part.name }}-${{ env.SOURCE_HEAD }}
           path: |
             artifacts/projection/result.json
             artifacts/projection/**/*.log
@@ -64,6 +88,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions
+          path: ci-actions
+          persist-credentials: false
+      - uses: ./ci-actions/.github/actions/idf-ccache
+        with:
+          matrix: ${{ toJSON(matrix) }}
       - name: Build exact source with independent comparison switches
         shell: bash
         run: |
@@ -71,6 +104,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_projection -DPOCKET_DERBY_COURSE_CACHE=${{ matrix.cache }} -DPOCKET_DERBY_PROJECT_BATCH=${{ matrix.batch }} build
+          ccache -s || true
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=${{ matrix.cache }}' build_projection/CMakeCache.txt
           grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=${{ matrix.batch }}' build_projection/CMakeCache.txt
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=OFF' build_projection/CMakeCache.txt
