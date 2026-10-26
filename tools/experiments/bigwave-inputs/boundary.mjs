@@ -3,10 +3,18 @@ import fs from 'node:fs';
 import cp from 'node:child_process';
 const base=cp.execFileSync('git',['show','e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267:apps/bigwave/big_wave.js'],{encoding:'utf8'}).split('\n');
 const candidate=fs.readFileSync('apps/bigwave/big_wave.js','utf8').split('\n');
-const indices=base.flatMap((s,i)=>s.includes('.concat(w,')?[i]:[]);
-if(indices.length!==5||base.length!==candidate.length)throw Error('unexpected source shape');
+// Select each actual input statement uniquely; unrelated source insertions must not
+// shift the five numeric conversion oracles onto different lines.
+const prefixes=["add('sk',","add('se',","add(sh ? 'sh' : 'cu',","if (fb >= m0) add('fo',","add('fo',"];
+function statements(lines){return prefixes.map(prefix=>{
+ const matches=lines.filter(s=>s.trim().startsWith(prefix));
+ if(matches.length!==1)throw Error('unexpected input statement shape: '+prefix);
+ return matches[0];
+});}
+const aforms=statements(base),bforms=statements(candidate);
+if(aforms.some(s=>!s.includes('.concat(w,')))throw Error('unexpected baseline input form');
 const names=['e','w','ex','sh','C','m0','m1','s','n','q0','dq','H','a0','fb','s0','y','add'];
-const forms=indices.map(i=>[base[i],candidate[i]].map(s=>new Function(...names,s)));
+const forms=aforms.map((s,i)=>[s,bforms[i]].map(s=>new Function(...names,s)));
 const values=[0,-0,NaN,Infinity,-Infinity,Number.MAX_VALUE,-Number.MAX_VALUE,Number.MIN_VALUE,-Number.MIN_VALUE,1,-1,.25];
 let checked=0;
 for(let phase=0;phase<values.length;phase++)for(const sh of [false,true])for(const foam of [false,true])for(const form of forms){
