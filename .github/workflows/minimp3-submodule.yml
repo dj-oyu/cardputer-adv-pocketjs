@@ -20,6 +20,10 @@ on:
       - 'components/opus/**'
 permissions:
   contents: read
+# New pushes replace a PR's older run; main runs finish so their caches are saved.
+concurrency:
+  group: minimp3-submodule-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   contract:
     runs-on: ubuntu-latest

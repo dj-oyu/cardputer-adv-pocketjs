@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: bigwave-inputs-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
   BASE_HEAD: e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267

@@ -16,6 +16,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# New pushes replace a PR's older run; main runs finish so their caches are saved.
+concurrency:
+  group: proc-band-entry-u32-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:

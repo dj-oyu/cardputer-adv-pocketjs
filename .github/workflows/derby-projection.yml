@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: derby-projection-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
