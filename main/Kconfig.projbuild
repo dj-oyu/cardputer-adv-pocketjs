@@ -152,7 +152,7 @@ menu "Pocket VM (diagnostics)"
 
     config POCKET_VM_ROM_INTRINSICS
         bool "Keep the hardened builtins in flash instead of the guest heap"
-        default n
+        default y
         help
             The JS builtins (Object, Array, Math, ... and every method) come
             from const data in flash (quickjs-rom-intrinsics.h, written by
@@ -160,6 +160,11 @@ menu "Pocket VM (diagnostics)"
             in the guest heap at each app start (docs/vm/rom-intrinsics.md
             R2). The context is born hardened (docs/vm/harden.md), and
             Array.fromAsync, Iterator.zip and Iterator.zipKeyed do not exist.
+
+            Measured (docs/vm/rom-intrinsics.md sec.12.5): every JS app
+            starts 14-22 KB smaller in the guest heap (DERBY -19.0 KB), the
+            JS turn is not slower, and the image grows by about 69 KB.
+            Turn it off to get the builtins built in RAM again.
 
             Regenerate the header after any change to the builtins.
 
