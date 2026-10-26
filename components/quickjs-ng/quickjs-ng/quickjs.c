@@ -1345,8 +1345,8 @@ typedef struct JSLazyList {
    properties made non-writable and non-configurable, the object made
    non-extensible. The attributes are what stop writes; this bit is read only
    where builtins are made after the lock (autoinit, lazy lists, lazy
-   intrinsics), so that what a locked object hands out is born locked too.
-   Bit 1 of JSGCObjectHeader.dummy0, beside the lazy flag (bit 0) and proven
+   intrinsics), so that what a locked object hands out is born locked too,
+   and where a weak reference is made (refused: rom-intrinsics.md RD6). Bit 1 of JSGCObjectHeader.dummy0, beside the lazy flag (bit 0) and proven
    spare the same way (rt->lock_ok, JS_NewRuntime2). */
 static inline bool js_obj_locked(const JSObject *p)
 {
@@ -1783,11 +1783,25 @@ static JSValue js_bool(bool v)
     return JS_MKVAL(JS_TAG_BOOL, (v != 0));
 }
 
+// Immortal values (docs/vm/rom-intrinsics.md sec.4.1, RD1): a negative
+// ref_count marks a value that is never freed and never written -- the ROM
+// intrinsics live in flash, where a store panics. The test is on the count
+// the code already loaded, not on the address, so the RAM path pays one
+// sign branch here and nothing in JS_FreeValueRT.
+#define JS_IMMORTAL_REF_COUNT (INT32_MIN / 2)
+
+static inline bool js_rc_immortal(int ref_count)
+{
+    return ref_count < 0;
+}
+
 static JSValue js_dup(JSValueConst v)
 {
     if (JS_VALUE_HAS_REF_COUNT(v)) {
         JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
-        p->ref_count++;
+        int rc = p->ref_count;
+        if (likely(!js_rc_immortal(rc)))
+            p->ref_count = rc + 1;
     }
     return unsafe_unconst(v);
 }
@@ -2718,9 +2732,16 @@ static inline void js_free_string0(JSRuntime *rt, JSString *str);
 /* same as JS_FreeValueRT() but faster */
 static inline void js_free_string(JSRuntime *rt, JSString *str)
 {
-    if (--str->header.ref_count <= 0) {
-        js_free_string0(rt, str);
+    // Same shape as JS_FreeValueRT: an immortal (ROM) string stores nothing.
+    int rc = str->header.ref_count - 1;
+    if (unlikely(rc <= 0)) {
+        if (rc == 0) {
+            str->header.ref_count = 0;
+            js_free_string0(rt, str);
+        }
+        return;
     }
+    str->header.ref_count = rc;
 }
 
 static inline void js_free_string0(JSRuntime *rt, JSString *str)
@@ -7271,6 +7292,15 @@ static int js_method_set_properties(JSContext *ctx, JSValue func_obj,
 
 /* Note: at least 'length' arguments will be readable in 'argv' */
 /* `name` may be NULL, pure ASCII or UTF-8 encoded */
+// A ROM C function has no realm (rom-intrinsics.md RD2): the snapshot holds
+// no pointer into RAM, and the firmware runs one context per runtime, so the
+// caller's context is the function's own.
+static inline JSContext *js_cfunc_realm(JSContext *caller, JSObject *p)
+{
+    JSContext *realm = p->u.cfunc.realm;
+    return realm ? realm : caller;
+}
+
 JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
                          const char *name,
                          int length, JSCFunctionEnum cproto, int magic,
@@ -8312,9 +8342,18 @@ void JS_FreeValueRT(JSRuntime *rt, JSValue v)
 {
     if (JS_VALUE_HAS_REF_COUNT(v)) {
         JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
-        if (--p->ref_count <= 0) {
-            js_free_value_rt(rt, v);
+        // The store moves after the branch upstream already has: a live RAM
+        // value (count >= 1) stores rc and falls through as before; an
+        // immortal one (negative) takes the branch and stores nothing.
+        int rc = p->ref_count - 1;
+        if (unlikely(rc <= 0)) {
+            if (rc == 0) {
+                p->ref_count = 0;
+                js_free_value_rt(rt, v);
+            }
+            return;
         }
+        p->ref_count = rc;
     }
 }
 
@@ -8478,8 +8517,13 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
     }
 }
 
+// The three child callbacks below are the only GC writes to a child's count.
+// An immortal child is not on any GC list and is never counted: a RAM parent
+// that points into ROM (Object.create(Math)) leaves it alone.
 static void gc_decref_child(JSRuntime *rt, JSGCObjectHeader *p)
 {
+    if (js_rc_immortal(p->ref_count))
+        return;
     assert(p->ref_count > 0);
     p->ref_count--;
     if (p->ref_count == 0 && p->mark == 1) {
@@ -8512,6 +8556,8 @@ static void gc_decref(JSRuntime *rt)
 
 static void gc_scan_incref_child(JSRuntime *rt, JSGCObjectHeader *p)
 {
+    if (js_rc_immortal(p->ref_count))
+        return;
     p->ref_count++;
     if (p->ref_count == 1) {
         /* ref_count was 0: remove from tmp_obj_list and add at the
@@ -8524,6 +8570,8 @@ static void gc_scan_incref_child(JSRuntime *rt, JSGCObjectHeader *p)
 
 static void gc_scan_incref_child2(JSRuntime *rt, JSGCObjectHeader *p)
 {
+    if (js_rc_immortal(p->ref_count))
+        return;
     p->ref_count++;
 }
 
@@ -10031,7 +10079,9 @@ not_obj:
         JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
     }
     sh->proto = proto;
-    if (proto) {
+    // Tested first: the ROM intrinsics are born with is_prototype set, and
+    // even a same-value store into flash panics (rom-intrinsics.md sec.4.9).
+    if (proto && !proto->is_prototype) {
         proto->is_prototype = true;
     }
     if (p->is_prototype) {
@@ -11236,7 +11286,10 @@ int JS_PreventExtensions(JSContext *ctx, JSValueConst obj)
     if (unlikely(p->class_id == JS_CLASS_PROXY)) {
         return js_proxy_preventExtensions(ctx, obj);
     }
-    p->extensible = false;
+    // Object.freeze(Math) on a ROM object: already non-extensible, and the
+    // same-value store would still hit flash (rom-intrinsics.md sec.4.9).
+    if (p->extensible)
+        p->extensible = false;
     return true;
 }
 
@@ -19592,7 +19645,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     prev_sf = rt->current_stack_frame;
     sf->prev_frame = prev_sf;
     rt->current_stack_frame = sf;
-    ctx = p->u.cfunc.realm; /* change the current realm */
+    ctx = js_cfunc_realm(ctx, p); /* change the current realm */
 
     sf->is_strict_mode = false;
     sf->cur_func = unsafe_unconst(func_obj);
@@ -19727,8 +19780,9 @@ static JSValue js_math_imul(JSContext *ctx, JSValueConst this_val,
 // still poll) and the opprof native-call hook (patched in by
 // tools/vmtest/opprof/patch_quickjs.py at this function too).
 // Returns false, with *pret untouched, for everything else.
-static no_inline bool js_call_math_fast(JSValueConst func_obj, int argc,
-                                        JSValueConst *argv, JSValue *pret)
+static no_inline bool js_call_math_fast(JSContext *ctx, JSValueConst func_obj,
+                                        int argc, JSValueConst *argv,
+                                        JSValue *pret)
 {
     JSObject *p;
     JSCFunctionType f;
@@ -19769,7 +19823,7 @@ static no_inline bool js_call_math_fast(JSValueConst func_obj, int argc,
     case JS_CFUNC_generic_magic:
         if (f.generic_magic != js_math_min_max)
             return false;
-        *pret = js_math_min_max(p->u.cfunc.realm, JS_UNDEFINED, argc, argv,
+        *pret = js_math_min_max(js_cfunc_realm(ctx, p), JS_UNDEFINED, argc, argv,
                                 p->u.cfunc.magic);
         break;
     case JS_CFUNC_generic:
@@ -19781,7 +19835,7 @@ static no_inline bool js_call_math_fast(JSValueConst func_obj, int argc,
             *pret = js_int32((int32_t)((uint32_t)JS_VALUE_GET_INT(argv[0]) *
                                        (uint32_t)JS_VALUE_GET_INT(argv[1])));
         } else {
-            *pret = js_math_imul(p->u.cfunc.realm, JS_UNDEFINED, argc, argv);
+            *pret = js_math_imul(js_cfunc_realm(ctx, p), JS_UNDEFINED, argc, argv);
         }
         break;
     default:
@@ -20639,7 +20693,7 @@ has_call_argc:
                 }
                 // A pure Math builtin on numbers: no native frame (see
                 // js_call_math_fast). The frees below are the same.
-                if (!js_call_math_fast(call_argv[-1], call_argc, vc(call_argv),
+                if (!js_call_math_fast(ctx, call_argv[-1], call_argc, vc(call_argv),
                                        &ret_val))
                     ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                               JS_UNDEFINED, call_argc,
@@ -20689,7 +20743,7 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-                if (!js_call_math_fast(call_argv[-1], call_argc, vc(call_argv),
+                if (!js_call_math_fast(ctx, call_argv[-1], call_argc, vc(call_argv),
                                        &ret_val))
                     ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
                                               JS_UNDEFINED, call_argc,
@@ -23658,7 +23712,7 @@ static JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
     p = JS_VALUE_GET_OBJ(func_obj);
     switch (p->class_id) {
     case JS_CLASS_C_FUNCTION:
-        realm = p->u.cfunc.realm;
+        realm = js_cfunc_realm(ctx, p);
         break;
     case JS_CLASS_BYTECODE_FUNCTION:
     case JS_CLASS_GENERATOR_FUNCTION:
@@ -42758,6 +42812,12 @@ static int JS_WriteObjectRec(BCWriterState *s, JSValueConst obj)
         } else {
             if (p->tmp_mark) {
                 JS_ThrowTypeError(s->ctx, "circular reference");
+                goto fail;
+            }
+            // tmp_mark is a store; an immortal (ROM) object cannot take it.
+            // The firmware never serializes (JS_ReadObject only), so refuse.
+            if (js_rc_immortal(p->header.ref_count)) {
+                JS_ThrowTypeError(s->ctx, "cannot serialize a builtin object");
                 goto fail;
             }
             p->tmp_mark = 1;
@@ -68584,6 +68644,10 @@ static bool is_valid_weakref_target(JSValueConst val)
 {
     switch (JS_VALUE_GET_TAG(val)) {
     case JS_TAG_OBJECT:
+        // A hardened intrinsic is refused too, so the answer does not depend
+        // on whether the build puts it in ROM (the immortal test below).
+        if (js_obj_locked(JS_VALUE_GET_OBJ(val)))
+            return false;
         break;
     case JS_TAG_SYMBOL: {
         // Per spec: prohibit symbols registered with Symbol.for()
@@ -68596,7 +68660,11 @@ static bool is_valid_weakref_target(JSValueConst val)
     default:
         return false;
     }
-
+    // An immortal (ROM) value cannot hold the weak list -- linking it is a
+    // store into flash -- and a weak reference to something that never dies
+    // is a strong one in disguise (rom-intrinsics.md RD6).
+    if (js_rc_immortal(((JSRefCountHeader *)JS_VALUE_GET_PTR(val))->ref_count))
+        return false;
     return true;
 }
 
@@ -69470,5 +69538,107 @@ static int js_lazy_class_ensure(JSContext *ctx, int class_id)
         return -1;
     JS_FreeValue(ctx, ctor);
     return 0;
+}
+#endif
+
+#ifdef POCKET_VM_IMMORTAL_TEST
+/* Host-only R1 check (docs/vm/rom-intrinsics.md sec.9 R1): turn the context's
+   intrinsics into the immortal objects a ROM snapshot would hold, in RAM, so
+   the corpus can run against them before any snapshot exists. full=1 first
+   materializes every lazy builtin and resolves every AUTOINIT slot, as the
+   snapshot generator will (the graph is then what flash would hold).
+
+   Immortal here means what it means in ROM: negative ref_count, off the GC
+   list, C functions with no realm. Kept in RAM: the global object and
+   global_var_obj (rom-intrinsics.md RD3), hashed shapes (templates new RAM
+   objects share), bytecode functions (RD5) and everything not an object or
+   a shape. The immortals are never freed, so the caller must not tear the
+   runtime down (JS_FreeRuntime asserts an empty GC list); the device frees
+   nothing in ROM either. Returns the number of objects made immortal. */
+static int js_immortal_resolve(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    for (size_t i = 0; i < countof(js_lazy_entries); i++) {
+        JSValue v = JS_GetProperty(ctx, ctx->global_obj,
+                                   js_lazy_atom(js_lazy_entries[i].magic));
+        if (JS_IsException(v))
+            return -1;
+        JS_FreeValue(ctx, v);
+    }
+    for (int round = 0; round < 8; round++) {
+        uint32_t n = 0;
+        JSObject *objs[512];
+        for (uint32_t i = 0; i < rt->lazy_count && n < 512; i++)
+            if (n == 0 || objs[n - 1] != rt->lazy[i].obj)
+                objs[n++] = rt->lazy[i].obj;
+        if (!n)
+            break;
+        for (uint32_t i = 0; i < n; i++)
+            if (js_lazy_all(ctx, objs[i], false) < 0)
+                return -1;
+    }
+    for (int round = 0; round < 4; round++) {
+        static JSObject *objs[2048];
+        int n = 0;
+        struct list_head *el;
+        list_for_each(el, &rt->gc_obj_list) {
+            JSGCObjectHeader *g = list_entry(el, JSGCObjectHeader, link);
+            if (g->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT && n < 2048)
+                objs[n++] = (JSObject *)g;
+        }
+        for (int i = 0; i < n; i++) {
+            JSValue o = JS_MKPTR(JS_TAG_OBJECT, objs[i]);
+            JSPropertyEnum *tab;
+            uint32_t len;
+            if (JS_GetOwnPropertyNames(ctx, &tab, &len, o,
+                                       JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK))
+                return -1;
+            for (uint32_t k = 0; k < len; k++) {
+                JSPropertyDescriptor d;
+                int r = JS_GetOwnProperty(ctx, &d, o, tab[k].atom);
+                if (r < 0)
+                    return -1;
+                if (r)
+                    js_free_desc(ctx, &d);
+            }
+            JS_FreePropertyEnum(ctx, tab, len);
+        }
+    }
+    return 0;
+}
+
+int JS_PocketImmortalizeIntrinsics(JSContext *ctx, int full)
+{
+    JSRuntime *rt = ctx->rt;
+    JSObject *keep1 = JS_VALUE_GET_OBJ(ctx->global_obj);
+    JSObject *keep2 = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+    struct list_head *el, *el1;
+    int count = 0;
+
+    if (full && js_immortal_resolve(ctx) < 0)
+        return -1;
+    JS_RunGC(rt);
+    list_for_each_safe(el, el1, &rt->gc_obj_list) {
+        JSGCObjectHeader *g = list_entry(el, JSGCObjectHeader, link);
+        if (g->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT) {
+            JSObject *p = (JSObject *)g;
+            if (p == keep1 || p == keep2 || p->class_id == JS_CLASS_BYTECODE_FUNCTION)
+                continue;
+            if (p->class_id == JS_CLASS_C_FUNCTION && p->u.cfunc.realm) {
+                JS_FreeContext(p->u.cfunc.realm);
+                p->u.cfunc.realm = NULL;
+            }
+        } else if (g->gc_obj_type == JS_GC_OBJ_TYPE_SHAPE) {
+            JSShape *sh = (JSShape *)g;
+            if (sh->is_hashed || sh == keep1->shape || sh == keep2->shape)
+                continue;
+        } else {
+            continue;
+        }
+        list_del(&g->link);
+        g->ref_count = JS_IMMORTAL_REF_COUNT;
+        count++;
+    }
+    return count;
 }
 #endif

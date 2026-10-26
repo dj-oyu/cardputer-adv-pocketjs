@@ -1,0 +1,24 @@
+create-Math ok 5
+create-ArrayProto ok 1
+extends-Array ok 2 true
+extends-Error ok m true
+extends-Map ok 2
+proto-identity ok true
+freeze-Math ok true
+preventExtensions-ArrayProto ok true
+seal-JSON ok true
+freeze-fn ok true
+WeakRef-Math TypeError invalid target
+WeakMap-ArrayProto TypeError invalid value used as WeakMap key
+WeakSet-fn TypeError invalid value used as WeakSet key
+FinReg-Math TypeError invalid target
+WeakRef-ram ok undefined
+WeakMap-ram ok 3
+churn ok 400000 425000
+gc-cycles ok 10 9 true
+after-gc ok 1,2,3 {"a":[1]}
+cfunc ok 2,15,AB,1,2,3,x
+getter ok 1,Symbol.iterator,true
+bound ok 10
+throw-native ok true
+exit=0

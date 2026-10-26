@@ -294,8 +294,12 @@ def main():
                     help="L1+: yield at every VM checkpoint; the pass set must not change")
     ap.add_argument("--force-reloc", action="store_true",
                     help="L3a: move the segments at every park; the pass set must not change")
+    ap.add_argument("--vmrun-flag", action="append", default=[],
+                    help="extra vmrun flag (repeatable), e.g. --harden: compare such runs "
+                         "with each other via the results file, not with the baseline")
     ap.add_argument("filters", nargs="*")
     a = ap.parse_args()
+    EXTRA_FLAGS.extend(a.vmrun_flag)
     if a.force_yield:
         EXTRA_FLAGS.append("--force-yield")
     if a.force_reloc:

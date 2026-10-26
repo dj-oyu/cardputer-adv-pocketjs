@@ -64,7 +64,10 @@ build_variant() {
   # pair it with its own VMTEST_OUT.
   local dumps="-DQJS_DISABLE_DUMPS"
   [ "${VMTEST_DUMPS:-0}" = 1 ] && dumps=""
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc -I $OUT/include -I $GUEST/include"
+  # POCKET_VM_IMMORTAL_TEST: the host-only JS_PocketImmortalizeIntrinsics
+  # behind vmrun --immortal (docs/vm/rom-intrinsics.md R1). An extra entry
+  # point only; the firmware never defines it.
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc -DPOCKET_VM_IMMORTAL_TEST -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
