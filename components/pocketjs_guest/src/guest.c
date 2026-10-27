@@ -1337,3 +1337,14 @@ void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
   (void)guest;
 #endif
 }
+
+void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
+                                            bool pressured) {
+#ifdef ESP_PLATFORM
+  if (guest_uses_block_cache(guest))
+    block_cache_set_enabled(&guest->block_cache, !pressured);
+#else
+  (void)guest;
+  (void)pressured;
+#endif
+}
