@@ -196,3 +196,5 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
 | [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |
+
+- [Copied DMA overlap](perf/kasane-dma-overlap.md) — #37 から通常 main へ抽出、既定 OFF・実機未受入。
