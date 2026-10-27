@@ -63,6 +63,12 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame);
 
+/** Puts a guest whose source defined no frame into the event-driven mode an
+ * explicit globalThis.frame = null selects, without touching the global, and
+ * drains the jobs its evaluation queued (docs/vm/event-loop-design.md E1).
+ * ESP_ERR_INVALID_STATE if a frame function is bound. */
+esp_err_t pocketjs_guest_run_without_frame(pocketjs_guest_t *guest);
+
 /** Arm this turn's job budget (docs/vm/vm-L1-design.md sec.1.3). NULL, or a
  * budget with limit_us <= 0, restores the pre-L1 "drain until empty"
  * behaviour exactly. Call once per turn, before any call into the guest. */
