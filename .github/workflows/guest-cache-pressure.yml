@@ -1,0 +1,32 @@
+name: Guest block-cache pressure retention
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  pressure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CACHE: ${{ runner.temp }}/pressure-cache-qjs
+      OUT: ${{ runner.temp }}/test-pressure-memory
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          persist-credentials: false
+      - name: Existing block-cache and pressure owner tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -I components/pocketjs_guest/include tools/test_block_cache.c \
+            components/pocketjs_guest/src/block_cache.c -o "$RUNNER_TEMP/test-block-cache"
+          "$RUNNER_TEMP/test-block-cache"
+          bash tools/build_memory_test.sh
+          "$OUT"
+          python3 -B tools/test_guest_cache_pressure.py
