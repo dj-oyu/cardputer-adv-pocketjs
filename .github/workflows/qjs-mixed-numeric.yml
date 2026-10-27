@@ -55,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ matrix.mode == 'base' && 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267' || env.SOURCE_HEAD }}
+          ref: ${{ matrix.mode == 'base' && '06523d9fe78c3bd1db293eb09ab17522954807f9' || env.SOURCE_HEAD }}
           submodules: recursive
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020

@@ -9,7 +9,9 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
-BASE = 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'
+# Both VM translation units must use the adopted header/ROM ABI.
+# The historical e0 A/B remains separate recorded evidence.
+BASE = '06523d9fe78c3bd1db293eb09ab17522954807f9'
 QJS = ROOT / 'components/quickjs-ng/quickjs-ng'
 sys.path.insert(0, str(ROOT / 'tools/games'))
 import run_big_wave as bw
