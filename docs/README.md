@@ -196,3 +196,5 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
 | [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |
+
+- [DERBY PAN depth order](apps/derby-pan-depth-order.md) — #19 から通常 main へ抽出した投影順序と受入条件。
