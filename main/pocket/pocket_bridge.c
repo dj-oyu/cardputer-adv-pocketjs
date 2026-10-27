@@ -1,6 +1,9 @@
 #include "pocket_bridge.h"
+#include "app_control.h"
+#include "pocket_wire.h"
 #include "pocket_api.h"
 #include "driver/usb_serial_jtag.h"
+#include "usb_console.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -31,13 +34,9 @@
 #define BRIDGE_STATUS_STOPPED   2   // close(), or a stop with no driver to wait for
 #define BRIDGE_STATUS_NO_MEMORY 3   // it answered and we could not keep the answer
 
-// Our own copy of the reflected CRC32 pet_hub_core.c uses. Five lines and no
-// table, against a build-time dependency on a file another session owns and is
-// editing; the duplication is the cheaper of the two.
+// The native endpoint and guest bridge share this bounded transport CRC.
 static uint32_t bridge_crc(const uint8_t *p, size_t n) {
-    uint32_t c=0xffffffffu;
-    while(n--) { c^=*p++; for(unsigned i=0;i<8;i++) c=(c>>1)^((0u-(c&1))&0xedb88320u); }
-    return c^0xffffffffu;
+    return pocket_wire_crc(p,n);
 }
 
 static uint32_t read32(const uint8_t *p) {
@@ -73,6 +72,9 @@ static uint8_t        rx_state;
 static uint8_t        rx_high;
 static uint16_t       rx_length;
 static bridge_slot_t *rx_slot;
+/* C has independent assembly and owner inbox, surviving guest teardown. */
+static bridge_slot_t control_slot;
+static uint8_t rx_namespace;
 
 static int hex_digit(uint8_t c) {
     if(c>='0'&&c<='9') return c-'0';
@@ -83,16 +85,21 @@ static int hex_digit(uint8_t c) {
 // A completed hex run. Everything structural is checked here, so the JS task
 // only ever sees frames that are whole, intact and self-consistent.
 static void rx_finish(void) {
+    bool whole=rx_state==RX_HIGH;
     rx_state=RX_IDLE;
     const uint8_t *d=rx_slot->data;
-    if(rx_length<POCKET_BRIDGE_HEADER+4) { atomic_fetch_add(&inbox_dropped,1); return; }
+    if(!whole || rx_length<POCKET_BRIDGE_HEADER+4) {
+        if(rx_namespace=='B')atomic_fetch_add(&inbox_dropped,1);
+        return;
+    }
     unsigned payload=(unsigned)d[2]|(unsigned)d[3]<<8;
     if(d[0]!=POCKET_BRIDGE_VERSION ||
        POCKET_BRIDGE_HEADER+payload+4u!=rx_length ||
        bridge_crc(d,rx_length-4u)!=read32(d+rx_length-4)) {
-        atomic_fetch_add(&inbox_dropped,1);
+        if(rx_namespace=='B')atomic_fetch_add(&inbox_dropped,1);
         return;
     }
+    if(rx_namespace=='C') { app_control_receive(d,rx_length-4u);return; }
     rx_slot->length=rx_length;
     // Published last: the consumer reads the slot only after this store.
     atomic_store(&inbox_head,atomic_load(&inbox_head)+1);
@@ -105,15 +112,16 @@ static void rx_feed(uint8_t c) {
         return;
     case RX_TYPE:
         if(c==0x1d) return;                   // a restart inside a restart
-        if(c!='B') { rx_state=RX_SKIP; return; }
-        if(atomic_load(&inbox_head)-atomic_load(&inbox_tail)>=2) {
+        if(c!='B' && c!='C') { rx_state=RX_SKIP; return; }
+        rx_namespace=c;
+        if(c=='B' && atomic_load(&inbox_head)-atomic_load(&inbox_tail)>=2) {
             // The JS task has not drained. Refusing the frame here rather than
             // overwriting a slot is what keeps the ring lock-free.
             atomic_fetch_add(&inbox_dropped,1);
             rx_state=RX_SKIP;
             return;
         }
-        rx_slot=&inbox[atomic_load(&inbox_head)&1u];
+        rx_slot=c=='C'?&control_slot:&inbox[atomic_load(&inbox_head)&1u];
         rx_length=0;
         rx_state=RX_HIGH;
         return;
@@ -157,7 +165,7 @@ bool pocket_bridge_usb(uint8_t byte) {
 
 // --------------------------------------------------------------- the way out
 
-esp_err_t pocket_bridge_emit(const uint8_t *body, size_t len) {
+esp_err_t pocket_bridge_emit_namespace(uint8_t ns, const uint8_t *body, size_t len) {
     static const char HEX[]="0123456789abcdef";
     if(!body || len<POCKET_BRIDGE_HEADER || len>POCKET_BRIDGE_MAX_FRAME-4u)
         return ESP_ERR_INVALID_SIZE;
@@ -167,7 +175,7 @@ esp_err_t pocket_bridge_emit(const uint8_t *body, size_t len) {
     uint8_t crc[4];
     size_t  at=0;
     wire[at++]=0x1d;
-    wire[at++]='B';
+    wire[at++]=ns;
     write32(crc,bridge_crc(body,len));
     for(size_t i=0;i<len;i++) {
         wire[at++]=(uint8_t)HEX[body[i]>>4];
@@ -178,12 +186,13 @@ esp_err_t pocket_bridge_emit(const uint8_t *body, size_t len) {
         wire[at++]=(uint8_t)HEX[crc[i]&15];
     }
     wire[at++]='\n';
-    // One call, so the driver's tx_mux and its all-or-nothing ring send keep the
-    // frame contiguous against anything else writing to the same stream. A
-    // refusal writes nothing at all, which is why a timeout here is honest to
-    // report as "not applied" rather than as a guess.
-    return usb_serial_jtag_write_bytes(wire,at,pdMS_TO_TICKS(50))==(int)at
-               ? ESP_OK : ESP_ERR_TIMEOUT;
+    // Share stdio's lock and line boundary; the driver queues the whole frame
+    // in one call or refuses it, without replaying an operation.
+    return usb_console_frame(wire,at);
+}
+
+esp_err_t pocket_bridge_emit(const uint8_t *body, size_t len) {
+    return pocket_bridge_emit_namespace('B',body,len);
 }
 
 // ------------------------------------------------------------------ the link
