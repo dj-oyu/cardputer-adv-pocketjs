@@ -83,7 +83,8 @@ def build_and_run(cc,objs,table,shipped,cases,label,flags,extra,plan_source,incl
     env=os.environ.copy()
     env.setdefault('ASAN_OPTIONS','detect_leaks=1:abort_on_error=1')
     env.setdefault('UBSAN_OPTIONS','halt_on_error=1:print_stacktrace=1')
-    return subprocess.run([str(binary),str(shipped),str(cases)],cwd=ROOT,env=env,
+    argument='--workspace-affine' if label=='workspace_affine' else str(cases)
+    return subprocess.run([str(binary),str(shipped),argument],cwd=ROOT,env=env,
                           capture_output=True,text=True)
 
 def main():
@@ -112,6 +113,12 @@ def main():
         r=build_and_run(cc,objs,table,shipped,a.cases,label,flags,extra,KASANE/'ksn_proc_plan.c',None)
         print(r.stdout,end='')
         if r.returncode:raise SystemExit(f'{label}: failed\n{r.stderr[-4000:]}')
+    r=build_and_run(cc,objs,table,shipped,a.cases,'workspace_affine',
+                    ['-DPOCKET_DERBY_RUNNER_AFFINE'],
+                    [KASANE/'ksn_proc_points_pie.c',ROOT/'main/pocket/derby_runner_affine.c'],
+                    KASANE/'ksn_proc_plan.c',None)
+    print(r.stdout,end='')
+    if r.returncode:raise SystemExit(f'workspace affine: failed\n{r.stderr[-4000:]}')
     if not a.mutate:return
     mut=OUT/'mutant';mut.mkdir(exist_ok=True)
     for what,source,old,new in MUTATIONS:
