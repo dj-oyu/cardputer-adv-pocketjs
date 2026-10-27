@@ -43,7 +43,7 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
     "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
-option(KASANE_DMA_OVERLAP "Experimental copied LCD DMA overlap with next Kasane band" OFF)
+option(KASANE_DMA_OVERLAP "Experimental copied LCD DMA overlap with next Kasane band" ON)
 if(KASANE_DMA_OVERLAP)
     add_compile_definitions(KASANE_DMA_OVERLAP=1)
 endif()

@@ -1,4 +1,15 @@
-# 通常 main への DMA 再提案（2026-10-27）
+# Source 選択による DMA ON 比較版（2026-10-27）
+
+この比較版は OFF 参照 `844b888bf3587572a704825fbcf1a79fe3843fe0` から、
+`KASANE_DMA_OVERLAP` の CMake 既定値だけを ON にする。通常 broker build は
+DMA selector を指定しなければこの既定値を使う。broker の追加 option は不要。
+CI は DMA 指定なしの実 build で cache の ON と compile command の `=1` を検査し、
+明示 OFF/ON の既存比較も維持する。OFF では C macro を定義しない（`=0` ではない）。
+OFF 参照は変更しない。両 source は main `45a06e0` 系であり、現在の main
+`05f472ecc9535b71aefbdd0ed73d8891dfb4aace` の #95 VM 変更を片側だけへ取り込まない。
+実機受入・速度・空き heap は未確認。以下は OFF 参照の抽出内容と履歴である。
+
+## OFF 参照の通常 main への再提案
 
 #37 head `578d552384c992cb852822d40e2635e7b317d498` から DMA の copied submit/finish、
 ACK 前 completion、descriptor 所有権、window 管理、単一 3,840 B TX payload を抽出。

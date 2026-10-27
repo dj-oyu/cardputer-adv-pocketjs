@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dma: ['OFF', 'ON']
+        dma: ['OFF', 'ON', 'default']
     container:
       image: espressif/idf:v6.0.1
       options: --user 1001:1001
@@ -42,9 +42,63 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - name: Ordinary source and opt-in DMA ESP-IDF links
+      - name: Ordinary source default and explicit OFF/ON ESP-IDF links
+        env:
+          DMA_SELECTION: ${{ matrix.dma }}
         shell: bash
         run: |
+          set -euo pipefail
           . "$IDF_PATH/export.sh"
-          idf.py -B build_dma -D SDKCONFIG="$PWD/build_dma/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_DMA_OVERLAP=${{ matrix.dma }} build
-          grep -qx 'KASANE_DMA_OVERLAP:BOOL=${{ matrix.dma }}' build_dma/CMakeCache.txt
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          python - <<'PY'
+          import hashlib,json,os,shlex,subprocess
+          from pathlib import Path
+          b=Path('build_dma').resolve()
+          selection=os.environ['DMA_SELECTION']
+          expected='ON' if selection=='default' else selection
+          command=['idf.py','-B',str(b),'-D','SDKCONFIG='+str(b/'sdkconfig'),
+                   '-D','PROJECT_VER='+os.environ['SOURCE_HEAD'][:12]]
+          if selection!='default':command+=['-D','KASANE_DMA_OVERLAP='+selection]
+          assert any(a.startswith('KASANE_DMA_OVERLAP=') for a in command)==(selection!='default')
+          command+=['build']
+          subprocess.run(command,check=True)
+          cache=(b/'CMakeCache.txt').read_text().splitlines()
+          assert 'KASANE_DMA_OVERLAP:BOOL='+expected in cache
+          for line in cache:
+              if ':BOOL=' not in line:continue
+              key,value=line.split(':BOOL=',1)
+              if key=='POCKET_PROBES' or (key.startswith('KASANE_') and any(x in key for x in ('PROBE','TRACE','DIAGNOSTIC'))):
+                  assert value=='OFF',(key,value)
+          entries=json.loads((b/'compile_commands.json').read_text())
+          definitions={}
+          for name in ('app_session.c','hal/board.c','pocket/pocket_kasane.c','ui/kasane/ksn_render.c'):
+              entry=next(c for c in entries if c['file'].endswith('/main/'+name))
+              defs=[a for a in shlex.split(entry['command']) if a=='-DKASANE_DMA_OVERLAP' or a.startswith('-DKASANE_DMA_OVERLAP=')]
+              assert defs==(['-DKASANE_DMA_OVERLAP=1'] if expected=='ON' else []),(name,defs)
+              definitions[name]=defs
+          assert hashlib.sha256((b/'sdkconfig').read_bytes()).hexdigest()=='9fea08cfca669fe6e033e1ceb9281c7e1f89f49536a4419393bbc4108182a04b'
+          assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
+          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','sdkconfig','CMakeCache.txt','compile_commands.json','bootloader/bootloader.bin','partition_table/partition-table.bin','flasher_args.json']
+          report=dict(source_head=os.environ['SOURCE_HEAD'],off_reference='844b888bf3587572a704825fbcf1a79fe3843fe0',
+              idf='6.0.1',selection=selection,effective_dma=expected,build_command=command,definitions=definitions,hardware_tested=False,
+              images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names})
+          (b/'dma-selection.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: copied-dma-${{ matrix.dma }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_dma/*.bin
+            build_dma/*.elf
+            build_dma/*.map
+            build_dma/dma-selection.json
+            build_dma/compile_commands.json
+            build_dma/sdkconfig
+            build_dma/CMakeCache.txt
+            build_dma/flasher_args.json
+            build_dma/bootloader/bootloader.bin
+            build_dma/partition_table/partition-table.bin
+          retention-days: 14
