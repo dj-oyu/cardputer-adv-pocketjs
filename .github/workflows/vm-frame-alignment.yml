@@ -1,0 +1,40 @@
+name: VM frame alignment
+on:
+  pull_request:
+    paths:
+      - 'components/quickjs-ng/quickjs-ng/quickjs-vmstack.h'
+      - 'tools/vmtest/frame_alignment/**'
+      - '.github/workflows/vm-frame-alignment.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vm-frame-alignment-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frame-alignment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [native, m32]
+        variant: [o2, asan]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prepare the existing m32 ABI sysroot
+        if: matrix.arch == 'm32'
+        run: |
+          mkdir -p .cache/vm_frame_alignment/m32sys
+          M32_SYSROOT="$PWD/.cache/vm_frame_alignment/m32sys" bash tools/vmtest/m32_sysroot.sh > .cache/vm_frame_alignment/m32-flags.txt 2> .cache/vm_frame_alignment/m32-prepare.log
+          echo "M32_SYSROOT=$PWD/.cache/vm_frame_alignment/m32sys" >> "$GITHUB_ENV"
+          echo "VMTEST_CFLAGS=$(cat .cache/vm_frame_alignment/m32-flags.txt)" >> "$GITHUB_ENV"
+      - name: Run frame contract and existing VM corpus
+        run: |
+          args=(--arch '${{ matrix.arch }}' --variant '${{ matrix.variant }}')
+          if [ '${{ matrix.arch }}' = native ] && [ '${{ matrix.variant }}' = asan ]; then args+=(--reloc); fi
+          python3 tools/vmtest/frame_alignment/run.py "${args[@]}"
+          git diff --exit-code

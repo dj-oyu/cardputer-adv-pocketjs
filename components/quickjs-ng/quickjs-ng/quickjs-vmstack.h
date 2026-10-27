@@ -106,13 +106,13 @@ extern "C" {
 
 #define JS_VM_SEG_ALIGN 16
 
-// A 32-bit host (tools/vmtest/m32_sysroot.sh) takes the device's value: its
-// frame link is one 4-byte pointer, and 8 would fail the assert below.
-#if defined(ESP_PLATFORM) || UINTPTR_MAX == 0xFFFFFFFFu
-#define JS_VM_FRAME_ALIGN 4
-#else
-#define JS_VM_FRAME_ALIGN 8
-#endif
+// JSStackFrame is defined later in quickjs.c; its alignment is the maximum
+// of these two member types, checked against the real type in the frame test.
+#define JS_VM_FRAME_ALIGN ((int)(_Alignof(JSValue) > _Alignof(void *) \
+                                ? _Alignof(JSValue) : _Alignof(void *)))
+_Static_assert((JS_VM_FRAME_ALIGN & (JS_VM_FRAME_ALIGN - 1)) == 0 &&
+               JS_VM_SEG_ALIGN % JS_VM_FRAME_ALIGN == 0,
+               "segment alignment must satisfy frame block alignment");
 
 // Ceiling on standard segment payload. 4096 is ledger 07's figure for the
 // general allocator; for frames the number that matters is "frames per
@@ -937,7 +937,10 @@ static inline void js_vm_stack_reloc_finish(JSRuntime *rt, JSVMStack *st,
 // on every pop for 8 bytes on the floor only). Generator frames live in a
 // JSAsyncFunctionState and have no link; the JS_SF_SEG bit tells them apart.
 typedef struct JSVMLink {
-    JSValue *caller_sp;     // the caller's sp at the call: func/this/args still on it
+    // Align the type, not just the prefix constant: link+1 and ((link*)sf)-1
+    // are used by call, return, GC and relocation walks. On a 32-bit ABI
+    // requiring 8-byte JSValue alignment this adds 4 bytes of tail padding.
+    _Alignas(JS_VM_FRAME_ALIGN) JSValue *caller_sp;
 } JSVMLink;
 #define JS_VM_FRAME_PREFIX sizeof(JSVMLink)
 
