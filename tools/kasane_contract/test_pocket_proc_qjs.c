@@ -95,6 +95,7 @@ static void eval_error(JSContext *ctx,const char *source){
     REQUIRE(JS_IsException(result));
     JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
 }
+#define APP_NEWS_TICKS (2u*PROC_MEGA_FRAMES)
 static void reference(unsigned tick){
     uint16_t color=proc_mega_backdrop(tick);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
@@ -198,11 +199,13 @@ int main(int argc,char **argv){
         JS_FreeValue(ctx,error);
     }
     REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
-    for(unsigned tick=0;tick<PROC_MEGA_FRAMES;tick++){
+    /* The app plays each 16-frame news beat twice: app tick k shows Act I
+     * frame (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
+    for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
         eval_ok(ctx,"frame()");
         REQUIRE(pocket_proc_pending());
         REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
-        reference(tick);
+        reference(tick/32u*16u+tick%16u);
         REQUIRE(memcmp(actual,expected,sizeof actual)==0);
         for(unsigned y=0;y<KSN_PROC_H;y++){
             REQUIRE(image.read_span(image.ctx,0,0,y,0,KSN_PROC_W,span,alpha)==KSN_OK);
@@ -214,9 +217,9 @@ int main(int argc,char **argv){
             REQUIRE(image.read_span(image.ctx,0,0,y,0,KSN_PROC_W,span,alpha)==KSN_OK);
         span_ticks+=clock()-span_start;
         check_image_rows(&image);
-        if(argc==3){
+        if(argc==3&&tick%32u<16u){ /* each Act I frame once, by its index */
             char path[1024];
-            REQUIRE(snprintf(path,sizeof path,"%s/frame-%02u.rgb565",argv[2],tick)>0);
+            REQUIRE(snprintf(path,sizeof path,"%s/frame-%02u.rgb565",argv[2],tick/32u*16u+tick%16u)>0);
             FILE *out=fopen(path,"wb");REQUIRE(out);
             for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++){
                 REQUIRE(fputc(expected[i]&255,out)!=EOF);
@@ -255,15 +258,18 @@ int main(int argc,char **argv){
             memcpy(previous,expected,sizeof previous);
         }
     }
-    REQUIRE(publishes==PROC_MEGA_FRAMES);
-    eval_ok(ctx,"if(megaReplaces!==1||megaBounds.join(',')!=='0,0,240,135')"
-                "throw Error('initial full-screen image or repeat replace')");
+    REQUIRE(publishes==APP_NEWS_TICKS);
+    /* The story starts in the room and its camera reaches full screen during
+     * the news; each news beat and the room leaving view rebuild the set. */
+    eval_ok(ctx,"if(megaReplaces<2||megaBounds.join(',')!=='0,0,240,135')"
+                "throw Error('story camera did not reach full screen');"
+                "globalThis.newsReplaces=megaReplaces");
     uint32_t scalar=0,pie=0;
     pocket_proc_batch_counts(&scalar,&pie);
 #ifdef KSN_PROC_HOST_FAKE_PIE
-    REQUIRE(scalar==0&&pie==PROC_MEGA_FRAMES);
+    REQUIRE(scalar==0&&pie==APP_NEWS_TICKS);
 #else
-    REQUIRE(scalar==PROC_MEGA_FRAMES&&pie==0);
+    REQUIRE(scalar==APP_NEWS_TICKS&&pie==0);
 #endif
     /* Two held Enter frames count as one press. The same resource reaches the
      * monitor and then returns to an exact full-screen rectangle. */
@@ -272,15 +278,16 @@ int main(int argc,char **argv){
         REQUIRE(pocket_proc_pending());
         pocket_proc_present_result(KSN_OK);
     }
-    /* Frame 48 enters TWIST, whose set is a new REPLACE; the zoom carries over. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==2)"
+    /* Frame 96 enters TWIST with the room in view: one new REPLACE. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==newsReplaces+1)"
                 "throw Error('Enter did not shrink into monitor')");
     for(unsigned i=0;i<44;i++){
         eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
         REQUIRE(pocket_proc_pending());
         pocket_proc_present_result(KSN_OK);
     }
-    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==2)"
+    /* Back at full screen the set is rebuilt without the room. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==newsReplaces+2)"
                 "throw Error('Enter did not restore full screen')");
     eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
     eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
