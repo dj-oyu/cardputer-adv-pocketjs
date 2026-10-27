@@ -16,8 +16,10 @@ const pr = new Float64Array(32), pp = new Float64Array(24),
     if (p[1] > .02 && n[1] > .02 && x > -40 && x < 280 && y > -400 && y < 640)
       dr('pole', x, 28 + 6 * r, 28 + (e ? 2 : 3.4) * r, (e ? .55 : .3) * r, y, 28 + 6 / n[1], x, 28 + 6 * r);
   }
+  const ps = xs.map((x, l) => pj(pose(x - 12.5 * U, lz[l])));
+  zo.sort((a, b) => ps[b][1] - ps[a][1]);
   for (const l of zo) {
-    const p = pj(pose(xs[l] - 12.5 * U, lz[l])), r = 1 / p[1], X = p[0] * r;
+    const p = ps[l], r = 1 / p[1], X = p[0] * r;
     if (p[1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r, ph[l]);
   }
 '''
@@ -28,6 +30,7 @@ const pr = new Float64Array(32), pp = new Float64Array(24),
       dr('pole', x, 28 + 6 * r, 28 + (e ? 2 : 3.4) * r, (e ? .55 : .3) * r, y, 28 + 6 / pp[n+1], x, 28 + 6 * r);
   }
   S.project(xs, lz, 12.5 * U, pr);
+  zo.sort((a, b) => pr[b*4+1] - pr[a*4+1]);
   for (const l of zo) {
     const p = l * 4, r = pr[p+3], X = pr[p+2];
     if (pr[p+1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r, ph[l]);

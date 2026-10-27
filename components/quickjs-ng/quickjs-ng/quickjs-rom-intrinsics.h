@@ -4574,13 +4574,13 @@ static const JSObject js_rom_obj[JS_ROM_OBJ_COUNT] = {
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[135],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = 100 },
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = offsetof(JSFunctionBytecode, line_num) },
     }, /* get lineNumber */
     [46] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[137],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = 104 },
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = offsetof(JSFunctionBytecode, col_num) },
     }, /* get columnNumber */
     [47] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,

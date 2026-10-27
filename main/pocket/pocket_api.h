@@ -254,6 +254,12 @@ JSValue pocket_api_sub_open(JSContext *ctx, pocket_sub_table_t *table,
 void pocket_api_sub_close(pocket_sub_table_t *table, int slot);
 void pocket_api_sub_close_all(pocket_sub_table_t *table);
 
+// Subscriptions open across every surface's table. A session without frame()
+// stays alive while any is open (docs/vm/event-loop-design.md sec.4.2), the way
+// Node keeps a process alive for a listening handle. pocket_api_reset() zeroes
+// it, since the surfaces' own resets may close their tables before or after it.
+unsigned pocket_api_sub_live(void);
+
 // Builds the payload one listener is about to receive. Return false to skip
 // this slot for this round -- that is where a surface's pacing lives.
 typedef bool (*pocket_sub_payload_fn)(JSContext *ctx, int slot, void *user,

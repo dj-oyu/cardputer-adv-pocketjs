@@ -257,6 +257,9 @@ static JSValue js_sub_close(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static unsigned sub_live;
+unsigned pocket_api_sub_live(void) { return sub_live; }
+
 JSValue pocket_api_sub_open(JSContext *ctx, pocket_sub_table_t *table,
                             JSValueConst listener, const char *operation,
                             const char *full, int *slot_out) {
@@ -272,6 +275,7 @@ JSValue pocket_api_sub_open(JSContext *ctx, pocket_sub_table_t *table,
     table->slots[slot].callback=JS_DupValue(ctx,listener);
     table->ctx=ctx;
     table->open++;
+    sub_live++;
     if(table->changed) table->changed(table);
     JSValue data[2]={JS_NewUint32(ctx,table->slots[slot].handle),
                      JS_NewInt64(ctx,(int64_t)(uintptr_t)table)};
@@ -290,6 +294,9 @@ void pocket_api_sub_close(pocket_sub_table_t *table, int slot) {
     if(table->ctx) JS_FreeValue(table->ctx,table->slots[slot].callback);
     table->slots[slot].callback=JS_UNDEFINED;
     table->open--;
+    // Saturating: a surface that closes its table after pocket_api_reset() has
+    // already zeroed the total must not wrap it.
+    if(sub_live) sub_live--;
     if(table->changed) table->changed(table);
 }
 
@@ -566,6 +573,7 @@ void pocket_api_reset(void) {
     // installed -- the wrong answer, and exactly the one section 2 exists to
     // prevent.
     override_count=0;
+    sub_live=0;
     for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
     for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
         pocket_promise_t *p=&promises[i];

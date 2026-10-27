@@ -47,6 +47,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [math-call-fast.md](vm/math-call-fast.md) | 試作 | `Math.sin(x)` など純粋な組み込みを、数値の引数なら native フレームなしで呼ぶ（`js_call_math_fast`）。今の経路（C 関数約18種）、DERBY の Math 163.5 回/フレーム（host）、別名・IC・呼び出し箇所の特殊化との比較。host 検査済み、実機の速度は未測定 |
 | [harden.md](vm/harden.md) | 設計・記録 | アプリのコンテキストから驚きを消す 4 規則: eval/Function 禁止、prototype の付け替え禁止、組み込みは生まれたときから書き換え不可（凍結せず属性で。遅延の組み込みも鍵付きで生まれる）、species を見ない。override mistake の緩和、shape の対の共有でヒープ +424 B（host）。実機で全 JS アプリの起動を確認、DERBY の JS +0.7%・命令 +0.25%（A/B/A） |
 | [c-builtins-zip-fromasync.md](vm/c-builtins-zip-fromasync.md) | 設計 | issue #91: ROM 版に無い `Iterator.zip` / `zipKeyed` / `Array.fromAsync`（上流は JS の bytecode、RD5 で落とした）を C で書き直す設計。zip は `JS_CLASS_ITERATOR_HELPER` に kind を 1 つ、fromAsync は async 関数の `await` と同じ部品（`js_promise_resolve` ＋ `perform_promise_then` に `undefined` の cap）で状態機械。test262 の 3 ディレクトリは今の RAM 版で 350/350、`--harden` で 314（36 件は規則どおり）、ROM 版は 10（理由違い）（実測 host）。flash は正味 ±1 KB 前後、使わないアプリの RAM は 0（推定）。zip を先に |
+| [event-loop-design.md](vm/event-loop-design.md) | 設計・素案 | 非同期の合流点を表示ループから外す（#98 の根）: 同期的な 3 層（fs の同期 I/O・pump 段の合流・`frame()` が中心のループ）のなぜなぜ分析、根本原因はターンの過積載。ui_task のままイベントループにし、`frame()` を描画の機会に降格、生存は参照カウント。L1 §4.2 との衝突は段階（E1 は `frame()` 無しのセッションだけ）で避ける |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
 ## 主線2: PIE と描画の高速化 — [`perf/`](perf/)
@@ -55,6 +56,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 | 文書 | 種別 | 中身 |
 | --- | --- | --- |
+| [kasane-dma-overlap.md](perf/kasane-dma-overlap.md) | 再提案 | #37 から通常 main へ抽出、既定 OFF・実機未受入。 |
 | [bigwave-inputs-local.md](perf/bigwave-inputs-local.md) | 実験 | BIG WAVEの入力配列5式、native A/Bと有限実機診断のローカル準備・未確認範囲 |
 | [pie-simd.md](perf/pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [flash-removals.md](perf/flash-removals.md) | 記録 | 「我々だけが参照元」のライブラリ会員を測った結果（`ui/shell.c` の `__divdf3` は ROM エイリアスで 0 B、`solar_sail.c` の `remainder` 402 B は落ちるが差し替えが +508 B、`sqrtf` は 294 B 落ちるがビット一致の差し替えが収まらない）。map の「理由」≠「根」、幻の取り込み、道具の過小カウント |
@@ -197,3 +199,5 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
 | [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |
+
+- [DERBY PAN depth order](apps/derby-pan-depth-order.md) — #19 から通常 main へ抽出した投影順序と受入条件。

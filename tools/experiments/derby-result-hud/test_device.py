@@ -125,7 +125,7 @@ def main():
  run_derby.EXTRA=[str(native) if x=='main/pocket/pocket_input.c' else x for x in run_derby.EXTRA]
  (out/'build').mkdir(exist_ok=True)
  binary=run_derby.build(['-O2']+(['-m32','-malign-double','-DRESULT_EXPECT_M32'] if args.m32 else []),out/'build',harness=h)
- rows={};workload_hashes={}
+ rows={};workload_hashes={};expected_inputs={}
  for mode in ('baseline','candidate'):
   src=out/mode/'source'
   if src.exists():shutil.rmtree(src)
@@ -133,6 +133,7 @@ def main():
   p=src/'derby_scene.js'
   if mode=='baseline':p.write_bytes(subprocess.check_output(['git','show',BASE+':apps/derby/derby_scene.js'],cwd=R))
   p=src/'derby_play.js'
+  expected_inputs[mode]=device.expected_input(p.read_text())
   workload=device.workload()
   workload_hashes[mode]=hashlib.sha256(workload.encode()).hexdigest()
   p.write_text(p.read_text()+'\n'+workload+'\n'+SETUP_OBSERVER)
@@ -150,12 +151,15 @@ def main():
   row['csv_sha256']=hashlib.sha256(csv.read_bytes()).hexdigest();rows[mode]=row
  a,b=rows.values()
  assert all(a[k]==b[k] for k in ('frames','pixels','panel_hash','csv_sha256','setup'))
- assert (a['down'],b['down'],a['queries'],b['queries'])==(120,120,1440,1440),rows
+ assert expected_inputs['baseline']==expected_inputs['candidate'],expected_inputs
+ for mode,row in rows.items():
+  assert all(row[k]==expected_inputs[mode][k] for k in ('frames','down','queries')),(mode,row,expected_inputs)
  # Fixed seed1/no-storage diagnostic result differs from the seed3 host race.
  assert a['requests']-b['requests']==32*120,rows
  assert a['charged_bytes']>b['charged_bytes'],rows
  # Charge sizes depend on the engine and ABI; retain actual counts instead of
  # transplanting the historical engine's1672B/frame charge expectation.
  report={'m32':args.m32,'compiler_flags':'-O2 -DQJS_DISABLE_DUMPS'+(' -m32 -malign-double -DRESULT_EXPECT_M32' if args.m32 else ''),'workload':device.WORKLOAD,'base':BASE,'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=R,text=True).strip(),'source_dirty':bool(subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=R,text=True)),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'workload_sha256':workload_hashes,'rows':rows}
+ report['expected_input']=expected_inputs
  (out/'result.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2));print('RESULT_HUD_DEVICE_WORKLOAD PASS')
 if __name__=='__main__':main()

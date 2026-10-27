@@ -69,11 +69,9 @@
 //
 // Alignment (design D7): the payload base is 16-byte aligned (the L4
 // compactor's PIE 128-bit moves want it; it costs 15 bytes per segment, once).
-// Individual blocks are 4-byte aligned on the target -- Xtensa LX7 has no
-// 64-bit load, a JSValue is two l32i.n either way -- and ABI-aligned (8) on
-// the host, where UBSan checks every JSValue / pointer access against the
-// declared alignment and would report a 4-aligned JSStackFrame as UB. The
-// difference is at most 4 bytes per frame with an odd var_ref_count.
+// Individual blocks must satisfy the declared alignment of both JSValue
+// and pointers, including on 32-bit hosts using -malign-double. The link
+// prefix below has that same alignment, so the frame after it stays aligned.
 #pragma once
 
 #include <assert.h>
@@ -106,13 +104,13 @@ extern "C" {
 
 #define JS_VM_SEG_ALIGN 16
 
-// A 32-bit host (tools/vmtest/m32_sysroot.sh) takes the device's value: its
-// frame link is one 4-byte pointer, and 8 would fail the assert below.
-#if defined(ESP_PLATFORM) || UINTPTR_MAX == 0xFFFFFFFFu
-#define JS_VM_FRAME_ALIGN 4
-#else
-#define JS_VM_FRAME_ALIGN 8
-#endif
+// JSStackFrame is defined later in quickjs.c; its alignment is the maximum
+// of these two member types, checked there against the actual definition.
+#define JS_VM_FRAME_ALIGN ((int)(_Alignof(JSValue) > _Alignof(void *) \
+                                ? _Alignof(JSValue) : _Alignof(void *)))
+_Static_assert((JS_VM_FRAME_ALIGN & (JS_VM_FRAME_ALIGN - 1)) == 0 &&
+               JS_VM_SEG_ALIGN % JS_VM_FRAME_ALIGN == 0,
+               "segment alignment must satisfy frame block alignment");
 
 // Ceiling on standard segment payload. 4096 is ledger 07's figure for the
 // general allocator; for frames the number that matters is "frames per
@@ -937,7 +935,10 @@ static inline void js_vm_stack_reloc_finish(JSRuntime *rt, JSVMStack *st,
 // on every pop for 8 bytes on the floor only). Generator frames live in a
 // JSAsyncFunctionState and have no link; the JS_SF_SEG bit tells them apart.
 typedef struct JSVMLink {
-    JSValue *caller_sp;     // the caller's sp at the call: func/this/args still on it
+    // Align the type, not just the prefix constant: link+1 and ((link*)sf)-1
+    // are used by call, return, GC and relocation walks. On a 32-bit ABI
+    // requiring 8-byte JSValue alignment this adds 4 bytes of tail padding.
+    _Alignas(JS_VM_FRAME_ALIGN) JSValue *caller_sp;
 } JSVMLink;
 #define JS_VM_FRAME_PREFIX sizeof(JSVMLink)
 

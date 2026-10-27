@@ -1,3 +1,4 @@
+#include "derby_detail.h"
 #include "app_session.h"
 #include "board.h"
 #include "pocketjs/guest.h"
@@ -236,14 +237,12 @@ static void sample_memory_pressure(void) {
         largest=heap_caps_get_largest_free_block(caps);
     }
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
-    // R3 (docs/vm/r3-small-block-cache.md sec.3.4): when the SYSTEM is short
-    // (free RAM or the largest free block), hand the guest allocator's cached
-    // small blocks back. Not on GUEST pressure: those blocks are already
-    // outside the guest's accounting, so returning them gives it no room.
-    static uint8_t last_mask;
+    // Return cached blocks and stop retaining later frees for the whole native
+    // pressure episode, including recovery hysteresis. A one-time flush lets
+    // the next JS turn retain them again while RAM is still short. GUEST-only
+    // pressure is different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
-    if(mask&~last_mask)pocketjs_guest_block_cache_flush(guest);
-    last_mask=mask;
+    pocketjs_guest_block_cache_set_pressure(guest,mask!=0);
 }
 static atomic_bool stop_requested;
 static int64_t deadline;
@@ -517,6 +516,12 @@ static bool names_kasane(const char *s, size_t n) {
 // Kasane still uses the APP lease; its display port receives the live home
 // scene as a backdrop instead of clearing to an opaque APP background.
 static bool overlay_session;
+// The source defined no frame() but left work behind, so the session runs on
+// in the guest's event-driven mode until nothing is left (docs/vm/
+// event-loop-design.md E1, issue #98). Cleared by the next start, not by
+// app_stop(): main.c reads it after the stop to report the run the way a
+// source without frame() has always been reported.
+static bool frameless;
 /* An animated native source may submit every display period. Mark the guest
  * due after 100 ms of native-only turns (plus the next UI scheduling delay)
  * without charging every native frame for a JS turn. Reset per session. */
@@ -557,7 +562,37 @@ void app_force_redraw_bands(uint32_t bands) {
     if(bands) pocket_kasane_invalidate_bands(bands);
 }
 static esp_err_t present_frame(void);
+#ifdef KASANE_DMA_OVERLAP
+typedef struct {
+    unsigned sent_us;
+} kasane_display_t;
+#else
 typedef struct { unsigned sent_us; } kasane_display_t;
+#endif
+#ifdef KASANE_DMA_OVERLAP
+/* Called inside the send's existing scopes, or the frame-final scopes below.
+ * No scope or sent_us accounting here: recursive DD_TX_SYNC would count twice. */
+static esp_err_t kasane_drain(kasane_display_t *display) {
+    esp_err_t result=board_present_finish();
+    (void)display;
+    return result;
+}
+static esp_err_t kasane_dma_submit(kasane_display_t *display,int x,int y,int cols,
+                                   int rows,uint16_t *pixels) {
+    esp_err_t result=kasane_drain(display);
+    if(result!=ESP_OK)return result;
+    result=board_present_submit(x,y,cols,rows,pixels);
+    return result;
+}
+static ksn_result kasane_finish(void *opaque) {
+    kasane_display_t *display=opaque;
+    int64_t began=esp_timer_get_time();
+    esp_err_t result;
+    { DD_SCOPE(DD_TX_SYNC);result=kasane_drain(display); }
+    display->sent_us+=(unsigned)(esp_timer_get_time()-began);
+    return result==ESP_OK?KSN_OK:KSN_IO;
+}
+#endif
 static uint16_t *kasane_strip(void *opaque) {
     (void)opaque;return board_strip();
 }
@@ -584,7 +619,12 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     // Kasane promotes its command bank only after acknowledged transfers.
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
-    esp_err_t result=board_present_sync(y,rows,(uint16_t *)pixels);
+    esp_err_t result;
+#ifdef KASANE_DMA_OVERLAP
+    { result=kasane_dma_submit(display,0,y,LCD_W,rows,(uint16_t *)pixels); }
+#else
+    { result=board_present_sync(y,rows,(uint16_t *)pixels); }
+#endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -611,7 +651,12 @@ static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t c
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
-    esp_err_t result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels);
+    esp_err_t result;
+#ifdef KASANE_DMA_OVERLAP
+    { result=kasane_dma_submit(display,x,y,cols,rows,(uint16_t *)pixels); }
+#else
+    { result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels); }
+#endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -799,6 +844,31 @@ static esp_err_t eval_reporting(const char *source, size_t length,
 // `module`: the source is an ES module entry (an app whose manifest entry ends
 // in .mjs). Its top-level declarations stay in the module, so FRAME_WRAP and
 // bind-frame.js find frame() only if the entry assigned globalThis.frame.
+// What keeps a session without frame() alive (docs/vm/event-loop-design.md
+// sec.4.2). The test is whether anything can still call back into JS: a job
+// queued or parked, a promise a surface has yet to settle, an open
+// subscription, or a text field whose onSubmit/onCancel is still due (pocket
+// _text holds those itself, outside both tables). A picture submitted and not
+// yet on the panel counts too, so the last thing drawn is shown.
+//
+// Not on the list: a running animation, whose every step is a fresh
+// submission and whose loop/pingpong never ends -- the same exclusion
+// app_tick()'s prior_submission makes -- nor sound that is still playing
+// (play() settles at once and nothing calls back), nor memory.onPressure,
+// which watches the session rather than asking for work.
+static bool frameless_alive(void) {
+    if(!guest) return false;
+    if(pocketjs_guest_work_pending(guest)) return true;
+    JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+    if(ctx && JS_IsJobPending(JS_GetRuntime(ctx))) return true;
+    if(pocket_api_open_count() || pocket_api_sub_live() || pocket_text_active())
+        return true;
+    return (pocket_kasane_has_submission() || pocket_kasane_needs_present()) &&
+           !pocket_kasane_animation_pending();
+}
+bool app_frameless(void) { return frameless; }
+bool app_frameless_done(void) { return guest && frameless && !frameless_alive(); }
+
 static esp_err_t eval_user_source(const char *source, size_t length, bool module) {
     JSContext *ctx=pocketjs_guest_quickjs_context(guest);
     if(!ctx) return ESP_ERR_INVALID_STATE;
@@ -815,7 +885,21 @@ static esp_err_t eval_user_source(const char *source, size_t length, bool module
 
     // ESP_ERR_NOT_FOUND here means the source defined no frame; that is the
     // caller's cue to run it as an expression rather than as an app.
-    return pocketjs_guest_eval(guest,"0",1,"bind-frame.js");
+    esp_err_t bound=pocketjs_guest_eval(guest,"0",1,"bind-frame.js");
+    // Not for an overlay: app_overlay_tick() has no end for it to reach.
+    if(bound!=ESP_ERR_NOT_FOUND || overlay_session) return bound;
+    // E1: what the evaluation queued -- a .then, an await, a sleep, a picker --
+    // used to be dropped here with the guest (issue #98). Run it instead, and
+    // keep the session only if something is still waiting afterwards; a
+    // source with nothing pending ends exactly as it always has.
+    esp_err_t drained=pocketjs_guest_run_without_frame(guest);
+    if(drained!=ESP_OK) return drained;
+    if(!frameless_alive()) return ESP_ERR_NOT_FOUND;
+    frameless=true;
+    ESP_LOGI("app","FRAMELESS waiting jobs=%d open=%u subs=%u",
+             (int)pocketjs_guest_work_pending(guest),pocket_api_open_count(),
+             pocket_api_sub_live());
+    return ESP_OK;
 }
 // The guest's stats, taken while the guest still exists. app_stop() destroys
 // it and NULLs the pointer BEFORE calling app_report(), so the live read below
@@ -1404,7 +1488,7 @@ esp_err_t app_start_test(char test) {
         shell_release_background_frames();
         scene_mem_release();
     }
-    atomic_store(&stop_requested,false); frames=0;
+    atomic_store(&stop_requested,false); frames=0; frameless=false;
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;
     // Cleared with them: a start that fails before a guest exists reaches
@@ -2431,7 +2515,13 @@ static esp_err_t present_frame(void) {
         }
 #endif
         int64_t began=esp_timer_get_time();
+#ifdef KASANE_DMA_OVERLAP
+        const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
+        ksn_result result=pocket_kasane_present_complete(&port,&completion,&stats);
+#else
         ksn_result result=pocket_kasane_present(&port,&stats);
+#endif
+        board_present_frame_end();
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",
