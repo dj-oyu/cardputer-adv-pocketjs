@@ -1,0 +1,96 @@
+name: QuickJS mixed numeric comparison
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  numeric-and-app:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [x64, m32, sanitize]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install 32-bit compiler libraries
+        if: matrix.model == 'm32'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - name: Compare numeric semantics and unchanged BIG WAVE
+        shell: bash
+        run: |
+          set -euo pipefail
+          options=()
+          if [ '${{ matrix.model }}' = m32 ]; then options+=(--m32); fi
+          if [ '${{ matrix.model }}' = sanitize ]; then options+=(--sanitize); fi
+          python3 tools/vmtest/mixed_numeric/compare.py "${options[@]}" --out artifacts/numeric
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: qjs-mixed-numeric-${{ matrix.model }}-${{ env.SOURCE_HEAD }}
+          path: |
+            artifacts/numeric/result.json
+            artifacts/numeric/**/*.log
+            artifacts/numeric/app.c
+          retention-days: 14
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [base, candidate]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'base' && 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267' || env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build normal product with unchanged partition and security defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_numeric -D SDKCONFIG=build_numeric/sdkconfig build
+          git rev-parse HEAD > build_numeric/source-head.txt
+          grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_numeric/sdkconfig
+          grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_numeric/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_numeric/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=OFF' build_numeric/CMakeCache.txt
+          python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_numeric/expected-partition.bin
+          cmp build_numeric/expected-partition.bin build_numeric/partition_table/partition-table.bin
+          python -c 'from pathlib import Path; e=Path("build_numeric/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e; c=Path("build_numeric/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+          sha256sum build_numeric/cardputer_pocketjs.bin build_numeric/cardputer_pocketjs.elf build_numeric/bootloader/bootloader.bin build_numeric/partition_table/partition-table.bin > build_numeric/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qjs-mixed-numeric-product-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_numeric/cardputer_pocketjs.bin
+            build_numeric/cardputer_pocketjs.elf
+            build_numeric/cardputer_pocketjs.map
+            build_numeric/bootloader/bootloader.bin
+            build_numeric/partition_table/partition-table.bin
+            build_numeric/ota_data_initial.bin
+            build_numeric/flasher_args.json
+            build_numeric/flash_args
+            build_numeric/sdkconfig
+            build_numeric/CMakeCache.txt
+            build_numeric/source-head.txt
+            build_numeric/SHA256SUMS
+          retention-days: 14
