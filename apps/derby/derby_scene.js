@@ -80,9 +80,11 @@ function hud(tx) {
 // The runners u of the way through the last sim step; their lanes (README
 // "レーンの横位置"): once a step the oval steers w at .8 m/s at most, lz sways.
 function at(u) {
-  const a = [], L = mx.apply(null, rs.x), w = rs.l, k = F.k, n = rs.t > (w.t || 0);
+  const a = [], w = rs.l, k = F.k, n = rs.t > (w.t || 0);
   w.t = rs.t;
-  for (let i = 0, x, s; i < 8; ++i) x = rs.x[i], s = F.h[i].sty, n && F.o && (w[i] += mx(-.04, mn(.04, 12 * M.pow(Q, x < 273 ? i * (.3 + .35 * s) : x < 650 ? k[i] : mn(7, k[i] + s)) - w[i]))), a[i] = rs.px[i] + (rs.x[i] - rs.px[i]) * u, lz[i] = w[i] + mn(.4, (L - a[i]) * .03) * sin(a[i] / 40 + 2.4 * i);
+  for (let i = 0; i < 8; ++i) a[i] = rs.px[i] + (rs.x[i] - rs.px[i]) * u;
+  const L = mx.apply(null, a);
+  for (let i = 0, x, s; i < 8; ++i) x = rs.x[i], s = F.h[i].sty, n && F.o && (w[i] += mx(-.04, mn(.04, 12 * M.pow(Q, x < 273 ? i * (.3 + .35 * s) : x < 650 ? k[i] : mn(7, k[i] + s)) - w[i]))), lz[i] = w[i] + mn(.4, (L - a[i]) * .03) * sin(a[i] / 40 + 2.4 * i);
   zo.sort((a, b) => lz[b] - lz[a]);
   return a;
 }

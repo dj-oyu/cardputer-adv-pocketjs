@@ -67,10 +67,11 @@ static bool is_ram_root(JSObject *p)
            p == JS_VALUE_GET_OBJ(G_ctx->global_var_obj);
 }
 
-/* RD5: the AUTOINIT_BYTECODE builtins (Array.fromAsync, Iterator.zip,
-   Iterator.zipKeyed) are left out; a property whose value is one is
-   dropped from its owner. */
-static bool dropped_value(JSValueConst v)
+/* A function made of bytecode cannot be in flash (IC and quickening write
+   to it). The three JS-defined builtins RD5 used to drop here are C now
+   (docs/vm/c-builtins-zip-fromasync.md), so meeting one again is an error,
+   not something to leave out quietly. */
+static bool is_bytecode_function(JSValueConst v)
 {
     if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
         return false;
@@ -79,10 +80,17 @@ static bool dropped_value(JSValueConst v)
     case JS_CLASS_GENERATOR_FUNCTION:
     case JS_CLASS_ASYNC_FUNCTION:
     case JS_CLASS_ASYNC_GENERATOR_FUNCTION:
-        return true;   /* Array.fromAsync is an async function */
+        return true;
     default:
         return false;
     }
+}
+
+/* Nothing is left out any more; kept for the property walk's shape. */
+static bool dropped_value(JSValueConst v)
+{
+    (void)v;
+    return false;
 }
 
 static void add_obj(JSObject *p);
@@ -102,6 +110,8 @@ static void add_value(JSValueConst v, const char *where)
         JSObject *p = JS_VALUE_GET_OBJ(v);
         if (is_ram_root(p))
             FAIL("%s: points at the global object", where);
+        else if (is_bytecode_function(v))
+            FAIL("%s: a bytecode function cannot be in flash", where);
         else if (!dropped_value(v))
             add_obj(p);
         break;
@@ -458,8 +468,21 @@ static void emit_object(FILE *f, int k)
     case JS_CLASS_ERROR:
         break;
     case JS_CLASS_C_FUNCTION:
-        fprintf(f, "           .u.cfunc = { .c_function.generic = (JSCFunction *)%s, .length = %u, .cproto = %u, .magic = %d },\n",
-                fn_name((void *)p->u.cfunc.c_function.generic), p->u.cfunc.length, p->u.cfunc.cproto, p->u.cfunc.magic);
+        fprintf(f, "           .u.cfunc = { .c_function.generic = (JSCFunction *)%s, .length = %u, .cproto = %u, .magic = ",
+                fn_name((void *)p->u.cfunc.c_function.generic), p->u.cfunc.length, p->u.cfunc.cproto);
+        /* These are private bytecode offsets, not ABI-independent integers.
+           Let the consuming compiler resolve its own layout. */
+        if (p->u.cfunc.c_function.generic == (JSCFunction *)js_function_proto_int32) {
+            if (p->u.cfunc.magic == offsetof(JSFunctionBytecode, line_num))
+                fprintf(f, "offsetof(JSFunctionBytecode, line_num)");
+            else if (p->u.cfunc.magic == offsetof(JSFunctionBytecode, col_num))
+                fprintf(f, "offsetof(JSFunctionBytecode, col_num)");
+            else
+                FAIL("unexpected function metadata offset %d", p->u.cfunc.magic);
+        } else {
+            fprintf(f, "%d", p->u.cfunc.magic);
+        }
+        fprintf(f, " },\n");
         break;
     case JS_CLASS_C_FUNCTION_DATA:
         fprintf(f, "           .u.c_function_data_record = (JSCFunctionDataRecord *)&js_rom_cfd_%d,\n", k);

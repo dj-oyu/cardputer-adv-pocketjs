@@ -806,6 +806,21 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
   return drain_jobs(guest);
 }
 
+esp_err_t pocketjs_guest_run_without_frame(pocketjs_guest_t *guest) {
+  if (guest == NULL || guest->context == NULL)
+    return ESP_ERR_INVALID_ARG;
+  if (guest->dormant || JS_IsFunction(guest->context, guest->frame))
+    return ESP_ERR_INVALID_STATE;
+  /* JS_NULL is the mode guest_frame_impl() already has for frame = null; the
+   * global keeps whatever the source left there (usually undefined), so the
+   * program cannot observe that the host chose this for it. */
+  JS_FreeValue(guest->context, guest->frame);
+  guest->frame = JS_NULL;
+  /* The same drain pocketjs_guest_eval() gives a source that does bind a
+   * frame, so what evaluation queued runs before the first turn either way. */
+  return drain_jobs(guest);
+}
+
 static JSValue make_u32_array(JSContext *context, const uint32_t *values,
                               size_t count) {
   JSValue array = JS_NewArray(context);
@@ -1320,5 +1335,16 @@ void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
     block_cache_flush(&guest->block_cache);
 #else
   (void)guest;
+#endif
+}
+
+void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
+                                            bool pressured) {
+#ifdef ESP_PLATFORM
+  if (guest_uses_block_cache(guest))
+    block_cache_set_enabled(&guest->block_cache, !pressured);
+#else
+  (void)guest;
+  (void)pressured;
 #endif
 }

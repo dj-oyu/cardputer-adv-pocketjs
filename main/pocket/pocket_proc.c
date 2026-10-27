@@ -147,13 +147,21 @@ typedef struct {
 static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
-static ksn_proc_frame *scratch;
+/* Plan execution and image rasterization are synchronous owner-task phases.
+ * Rasterization reads candidate/committed frames, never this workspace. */
+#define PROC_IMAGE_BAND_ROWS 8u
+typedef union {
+    ksn_proc_frame frame;
+    uint16_t band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS];
+} proc_workspace;
+_Static_assert(sizeof(proc_workspace)==sizeof(ksn_proc_frame),
+               "image raster cache must not enlarge the VM workspace");
+static proc_workspace *workspace;
 static ksn_proc_vm *vm;
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
-#define PROC_IMAGE_BAND_ROWS 8u
-static uint16_t image_band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS],image_band_y;
+static uint16_t image_band_y;
 static const ksn_proc_frame *image_band_frame;
 static uint16_t image_band_color;
 static unsigned image_band_surface;
@@ -271,10 +279,10 @@ static unsigned surface_segments(const proc_surface *surface){
 static bool buffers(proc_surface *surface){
     const size_t bytes=frame_bytes(surface_segments(surface));
     if(!surface->candidate)surface->candidate=calloc(1,bytes);
-    if(!scratch)scratch=calloc(1,sizeof *scratch);
+    if(!workspace)workspace=calloc(1,sizeof *workspace);
     if(!surface->committed)surface->committed=calloc(1,bytes);
     if(!vm)vm=calloc(1,sizeof *vm);
-    return surface->candidate&&scratch&&surface->committed&&vm;
+    return surface->candidate&&workspace&&surface->committed&&vm;
 }
 static bool any_pending(void){
     for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].pending)return true;
@@ -549,6 +557,10 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
     const char *op="kasane.procedural.draw";
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     const unsigned room=surface_segments(&surfaces[building_surface]);
+    ksn_proc_frame *scratch=&workspace->frame;
+    /* Both the affine fast path and the VM overwrite the cached raster,
+     * including draws that fail or are abandoned without commit(). */
+    image_band_valid=false;
 #ifndef KASANE_BGCOST_TRACE
     (void)handle;
 #endif
@@ -862,7 +874,7 @@ void pocket_proc_reset(void){
         free(surfaces[i].candidate);free(surfaces[i].committed);
         surfaces[i]=(proc_surface){0};
     }
-    free(scratch);free(vm);scratch=NULL;vm=NULL;
+    free(workspace);free(vm);workspace=NULL;vm=NULL;
     image_band_valid=false;image_band_frame=NULL;
     building=js_call_active=false;building_surface=pending_surface=0;
     scalar_batches=pie_batches=0;
@@ -916,10 +928,19 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         (surface->has_committed?surface->committed:NULL);
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
+    /* Before the first frame or after reset, a blank image needs no
+     * workspace allocation, including when allocations would fail. */
+    if(!frame){
+        for(unsigned i=0;i<count;i++)rgb565[i]=color;
+        memset(alpha,255,count);
+        goto span_done;
+    }
+    uint16_t *image_band=workspace->band;
     uint16_t band_y=(uint16_t)(y&~(PROC_IMAGE_BAND_ROWS-1u));
     if(!image_band_valid||image_band_surface!=index||
        image_band_y!=band_y||image_band_frame!=frame||
        image_band_color!=color){
+        image_band_valid=false;
         unsigned rows=KSN_PROC_H-band_y;
         if(rows>PROC_IMAGE_BAND_ROWS)rows=PROC_IMAGE_BAND_ROWS;
 #if defined(KASANE_PROC_JS_DIAGNOSTIC)||defined(KASANE_MEGADEMO_TRACE)
@@ -948,6 +969,7 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
     }
     memcpy(rgb565,image_band+(unsigned)(y-band_y)*KSN_PROC_W+x,count*sizeof *rgb565);
     memset(alpha,255,count);
+span_done:
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     image_span_cycles+=esp_cpu_get_cycle_count()-span_start;
     image_span_count++;

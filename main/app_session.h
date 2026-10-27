@@ -107,6 +107,12 @@ esp_err_t app_tick(uint32_t buttons);
 // such a turn has nothing to present and so must not be charged a display
 // period before the next one (docs/vm/vm-L1-report.md sec.2.4).
 bool app_turn_continued(void);
+// A source without frame() that left work pending keeps running until nothing
+// is left (docs/vm/event-loop-design.md E1). app_frameless(): this run is one,
+// still true after app_stop(). app_frameless_done(): it has nothing left, so
+// main.c ends it after the turn.
+bool app_frameless(void);
+bool app_frameless_done(void);
 void app_stop(void);
 void app_request_stop(void);
 // Swap the predicate QuickJS's single interrupt slot answers with

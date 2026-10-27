@@ -63,6 +63,12 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame);
 
+/** Puts a guest whose source defined no frame into the event-driven mode an
+ * explicit globalThis.frame = null selects, without touching the global, and
+ * drains the jobs its evaluation queued (docs/vm/event-loop-design.md E1).
+ * ESP_ERR_INVALID_STATE if a frame function is bound. */
+esp_err_t pocketjs_guest_run_without_frame(pocketjs_guest_t *guest);
+
 /** Arm this turn's job budget (docs/vm/vm-L1-design.md sec.1.3). NULL, or a
  * budget with limit_us <= 0, restores the pre-L1 "drain until empty"
  * behaviour exactly. Call once per turn, before any call into the guest. */
@@ -156,6 +162,13 @@ void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
  * guest, is short (pocket_memory FREE/LARGEST). A no-op from any task but the
  * one that created the guest. */
 void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
+
+/* Suspend small-block retention while native free/contiguous RAM is under
+ * pressure; false permits reuse again after the host's recovery hysteresis.
+ * Owner-task only, and never enables a cache rejected at guest creation.
+ * This does not change the guest's live allocation accounting or heap limit. */
+void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
+                                            bool pressured);
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
