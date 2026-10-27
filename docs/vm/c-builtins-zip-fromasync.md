@@ -1,6 +1,6 @@
 # `Iterator.zip` / `Iterator.zipKeyed` / `Array.fromAsync` を C で書き直し、ROM intrinsics に戻す（設計、2026-10-27）
 
-**状態: 設計のみ（issue #91）。実装は未着手。** 数字の区分は [harden.md](harden.md) と同じ 3 つ: **実測(host)**（この文書のために WSL で測った値。手順は §8）、**推定**、**コード**（ソースで確かめた事実、`quickjs.c` は `8a828059` の行番号）。
+**状態: 実装済み（issue #91、§9 に記録）。** 以下の §0〜§8 は実装前の設計で、数字は当時の測定と推定のまま。 数字の区分は [harden.md](harden.md) と同じ 3 つ: **実測(host)**（この文書のために WSL で測った値。手順は §8）、**推定**、**コード**（ソースで確かめた事実、`quickjs.c` は `8a828059` の行番号）。
 
 ## 0. 結論
 
@@ -414,3 +414,28 @@ nm --size-sort -S .cache/vmtest/obj-o2/quickjs.o | grep -E 'js_iterator_concat|j
 ```
 
 `.cache/test262` はルートの checkout を worktree へ symlink した（`test262.py` は `ROOT/.cache/test262` 固定）。
+
+## 9. 実装の記録（2026-10-27）
+
+決めたこと（§6.3 への答え）: 5 atom は predefined に足す。上流の bytecode の `.h` 3 本は削除。fromAsync まで入れる。test262 の 3 ディレクトリを SUBSET と基準線に足す。harden の 36 件は規則どおりとして受け入れる。継続は `JS_NewCFunctionData`（§6.3 の 7 の簡単な方）。
+
+### 9.1 何をしたか
+
+- **zip / zipKeyed**: §2.1 のとおり `JS_CLASS_ITERATOR_HELPER` の kind `ZIP`。レコードは `JSIteratorHelperData` を先頭に、列（iters・nexts・pads・keys）を後ろに置く。`js_iterator_helper_next` は実行中・完了の検査の後で zip を `js_iterator_zip_step` に渡す。
+  - 上流の JS から変えた点（仕様に合わせた）: `next()` が例外で抜けたら完了にする（上流は「実行中」のまま固まり、以後の呼び出しが TypeError）。`Symbol.iterator` の結果が object でなければ TypeError。`done` が真のとき `value` を読まない。
+- **fromAsync**: §2.2 の状態機械。**新しい class は足していない**。状態は fulfilled の継続（`JS_CLASS_C_FUNCTION_DATA`）の `data[]` に置き、rejected の継続はその関数を `data[0]` に持つ。await は `js_promise_resolve` ＋ `perform_promise_then(.., {undefined, undefined})`。
+- **closeOnRejection**（ES2025 の AsyncFromSyncIteratorContinuation）: 同期の iterable の値が reject されたら同期 iterator を閉じる。quickjs-ng のラッパーには無かったので足したが、**fromAsync が作るラッパーだけで有効**にした。`for await` は同じ場面でループの側から閉じるので、両方で有効にすると `return()` が 2 回呼ばれる（`yield_async_from_sync` が捉えた）。
+- 撤去: `JS_AUTOINIT_ID_BYTECODE`、`js_bytecode_autoinit`・`js_bytecode_eval` と補助の C 関数 3 つ、`builtin-*.h` 3 本、`JS_DefineAutoInitProperty` の 3 呼び出し。生成器の `dropped_value` は何も落とさなくなり、bytecode 関数に出会ったら FAIL する。F1 の生成器の bytecode の除外も消した。
+- ROM の表: オブジェクト 613 → 616、ROM atom 625 → 630。
+
+### 9.2 結果（実測(host)）
+
+| 検査 | 結果 |
+|---|---|
+| test262 の 3 ディレクトリ（350 項目）、RAM | 350 / 350（上流の JS 版と同じ集合） |
+| 同、RAM `--harden` | 314（落ちる 36 は §5.1 の内訳と同じ） |
+| 同、ROM `--harden` | 314（RAM `--harden` と一致。前は「関数が無い」で 10） |
+| コーパス（`iterator_zip`・`array_fromasync` を足して 87 本）、素・force-yield・budget-jobs 3 | 全通過。2 本の出力は asan-rom でも同じ |
+| `lazy_builtins` | `Array` のキーの並びが `...from,of,prototype,fromAsync` → `...from,fromAsync,of,prototype`（関数表に入ったため）。期待値を更新 |
+
+**`--fail-alloc` の 3 本**（`oom_resolving_functions`・`_module`・`oom_with_resolvers`）は、atom を 5 つ足したことで狙いの確保が 5〜7 回ずれた。出力は同じでも狙いを外すので、**修正を戻したエンジン（ASan）で報告が出る番号を探し直した**（550・487・572、`vmrun-rom-lb-li-flags` の行。桁を変えると源の長さが変わり、それだけで番号が動く）。今後のために `tools/vmtest/oom_targets.sh` を足した: 修正を戻した写しを作り、各試験の番号で ASan が実際に報告することを確かめる。

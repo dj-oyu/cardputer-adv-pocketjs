@@ -1,0 +1,16 @@
+typeof function 1 fromAsync
+sync ok [1,2,3]
+mapfn ok [10,21,32]
+async-gen ok [4,5]
+array-like ok ["a","b","c"]
+array-like-holes ok [null,null]
+bad-mapfn TypeError mapfn is not a function
+null TypeError cannot read property 'Symbol.asyncIterator' of null
+this-ctor ok [true,1,1]
+returns-promise ok true
+mapfn-throws-closes ok ["next","mapfn","return called","return settled","rejected m"]
+next-rejects-no-close ok ["rejected n"]
+sync-reject-closes ok ["yield 1","yield [object Object]","gen finally","rejected v"]
+done-no-return ok ["yield 1","yield 2","gen finally","got 1,2"]
+many ok 1999000
+exit=0

@@ -67,10 +67,11 @@ static bool is_ram_root(JSObject *p)
            p == JS_VALUE_GET_OBJ(G_ctx->global_var_obj);
 }
 
-/* RD5: the AUTOINIT_BYTECODE builtins (Array.fromAsync, Iterator.zip,
-   Iterator.zipKeyed) are left out; a property whose value is one is
-   dropped from its owner. */
-static bool dropped_value(JSValueConst v)
+/* A function made of bytecode cannot be in flash (IC and quickening write
+   to it). The three JS-defined builtins RD5 used to drop here are C now
+   (docs/vm/c-builtins-zip-fromasync.md), so meeting one again is an error,
+   not something to leave out quietly. */
+static bool is_bytecode_function(JSValueConst v)
 {
     if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
         return false;
@@ -79,10 +80,17 @@ static bool dropped_value(JSValueConst v)
     case JS_CLASS_GENERATOR_FUNCTION:
     case JS_CLASS_ASYNC_FUNCTION:
     case JS_CLASS_ASYNC_GENERATOR_FUNCTION:
-        return true;   /* Array.fromAsync is an async function */
+        return true;
     default:
         return false;
     }
+}
+
+/* Nothing is left out any more; kept for the property walk's shape. */
+static bool dropped_value(JSValueConst v)
+{
+    (void)v;
+    return false;
 }
 
 static void add_obj(JSObject *p);
@@ -102,6 +110,8 @@ static void add_value(JSValueConst v, const char *where)
         JSObject *p = JS_VALUE_GET_OBJ(v);
         if (is_ram_root(p))
             FAIL("%s: points at the global object", where);
+        else if (is_bytecode_function(v))
+            FAIL("%s: a bytecode function cannot be in flash", where);
         else if (!dropped_value(v))
             add_obj(p);
         break;
