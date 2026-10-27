@@ -46,6 +46,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
 | [math-call-fast.md](vm/math-call-fast.md) | 試作 | `Math.sin(x)` など純粋な組み込みを、数値の引数なら native フレームなしで呼ぶ（`js_call_math_fast`）。今の経路（C 関数約18種）、DERBY の Math 163.5 回/フレーム（host）、別名・IC・呼び出し箇所の特殊化との比較。host 検査済み、実機の速度は未測定 |
 | [harden.md](vm/harden.md) | 設計・記録 | アプリのコンテキストから驚きを消す 4 規則: eval/Function 禁止、prototype の付け替え禁止、組み込みは生まれたときから書き換え不可（凍結せず属性で。遅延の組み込みも鍵付きで生まれる）、species を見ない。override mistake の緩和、shape の対の共有でヒープ +424 B（host）。実機で全 JS アプリの起動を確認、DERBY の JS +0.7%・命令 +0.25%（A/B/A） |
+| [c-builtins-zip-fromasync.md](vm/c-builtins-zip-fromasync.md) | 設計 | issue #91: ROM 版に無い `Iterator.zip` / `zipKeyed` / `Array.fromAsync`（上流は JS の bytecode、RD5 で落とした）を C で書き直す設計。zip は `JS_CLASS_ITERATOR_HELPER` に kind を 1 つ、fromAsync は async 関数の `await` と同じ部品（`js_promise_resolve` ＋ `perform_promise_then` に `undefined` の cap）で状態機械。test262 の 3 ディレクトリは今の RAM 版で 350/350、`--harden` で 314（36 件は規則どおり）、ROM 版は 10（理由違い）（実測 host）。flash は正味 ±1 KB 前後、使わないアプリの RAM は 0（推定）。zip を先に |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
 ## 主線2: PIE と描画の高速化 — [`perf/`](perf/)

@@ -626,14 +626,7 @@ typedef enum {
     JS_AUTOINIT_ID_PROTOTYPE,
     JS_AUTOINIT_ID_MODULE_NS,
     JS_AUTOINIT_ID_PROP,
-    JS_AUTOINIT_ID_BYTECODE,
 } JSAutoInitIDEnum;
-
-enum {
-    JS_BUILTIN_ARRAY_FROMASYNC = 1,
-    JS_BUILTIN_ITERATOR_ZIP,
-    JS_BUILTIN_ITERATOR_ZIP_KEYED,
-};
 
 /* must be large enough to have a negligible runtime cost and small
    enough to call the interrupt callback often. */
@@ -998,6 +991,7 @@ typedef enum JSIteratorHelperKindEnum {
     JS_ITERATOR_HELPER_KIND_MAP,
     JS_ITERATOR_HELPER_KIND_SOME,
     JS_ITERATOR_HELPER_KIND_TAKE,
+    JS_ITERATOR_HELPER_KIND_ZIP, /* Iterator.zip / zipKeyed: a JSIteratorZipData */
 } JSIteratorHelperKindEnum;
 
 typedef struct JSForInIterator {
@@ -1682,6 +1676,9 @@ static bool js_get_fast_array(JSContext *ctx, JSValue obj,
 static int expand_fast_array(JSContext *ctx, JSObject *p, uint32_t new_len);
 static JSValue JS_CreateAsyncFromSyncIterator(JSContext *ctx,
                                               JSValue sync_iter);
+static JSValue js_create_async_from_sync_iterator(JSContext *ctx,
+                                                 JSValue sync_iter,
+                                                 bool close_on_rejection);
 static void js_c_function_data_finalizer(JSRuntime *rt, JSValueConst val);
 static void js_c_function_data_mark(JSRuntime *rt, JSValueConst val,
                                     JS_MarkFunc *mark_func);
@@ -10324,146 +10321,6 @@ fail:
     return JS_OrdinaryIsInstanceOf(ctx, val, obj);
 }
 
-#include "builtin-array-fromasync.h"
-#include "builtin-iterator-zip-keyed.h"
-#include "builtin-iterator-zip.h"
-
-// like Function.prototype.call but monkey patch-proof
-static JSValue js_call_function(JSContext *ctx, JSValueConst this_val,
-                                int argc, JSValueConst *argv)
-{
-    return JS_Call(ctx, argv[1], argv[0], argc - 2, argv + 2);
-}
-
-// returns enumerable and non-enumerable strings *and* symbols
-static JSValue js_getOwnPropertyKeys(JSContext *ctx, JSValueConst this_val,
-                                     int argc, JSValueConst *argv)
-{
-    int flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK;
-    return JS_GetOwnPropertyNames2(ctx, argv[0], flags, JS_ITERATOR_KIND_KEY);
-}
-
-static JSValue js_hasOwnEnumProperty(JSContext *ctx, JSValueConst this_val,
-                                     int argc, JSValueConst *argv)
-{
-    JSObject *p;
-    JSAtom key;
-    int flags, res;
-
-    if (JS_TAG_OBJECT != JS_VALUE_GET_TAG(argv[0])) {
-        return JS_ThrowTypeErrorNotAnObject(ctx);
-    }
-    p = JS_VALUE_GET_OBJ(argv[0]);
-    key = JS_ValueToAtomInternal(ctx, argv[1], JS_TO_STRING_NO_SIDE_EFFECTS);
-    if (key == JS_ATOM_NULL) {
-        return JS_EXCEPTION;
-    }
-    res = JS_GetOwnPropertyFlagsInternal(ctx, &flags, p, key);
-    JS_FreeAtom(ctx, key);
-    if (res < 0) {
-        return JS_EXCEPTION;
-    }
-    if (res > 0 && (flags & JS_PROP_ENUMERABLE)) {
-        return JS_TRUE;
-    }
-    return JS_FALSE;
-}
-
-// note: takes ownership of |argv|
-static JSValue js_bytecode_eval(JSContext *ctx, const uint8_t *bytecode,
-                                size_t len, int argc, JSValue *argv)
-{
-    JSValue obj, fun, result;
-    int i;
-
-    obj = JS_ReadObject(ctx, bytecode, len, JS_READ_OBJ_BYTECODE);
-    if (JS_IsException(obj)) {
-        return JS_EXCEPTION;
-    }
-    fun = JS_EvalFunction(ctx, obj);
-    if (JS_IsException(fun)) {
-        return JS_EXCEPTION;
-    }
-    assert(JS_IsFunction(ctx, fun));
-    result = JS_Call(ctx, fun, JS_UNDEFINED, argc, vc(argv));
-    for (i = 0; i < argc; i++) {
-        JS_FreeValue(ctx, argv[i]);
-    }
-    JS_FreeValue(ctx, fun);
-    if (JS_SetPrototypeInternal(ctx, result, ctx->function_proto,
-                                /*throw_flag*/true) < 0) {
-        JS_FreeValue(ctx, result);
-        return JS_EXCEPTION;
-    }
-    return result;
-}
-
-static JSValue js_bytecode_autoinit(JSContext *ctx, JSObject *p, JSAtom atom,
-                                    void *opaque)
-{
-    switch ((uintptr_t)opaque) {
-    default:
-        abort();
-    case JS_BUILTIN_ARRAY_FROMASYNC: {
-        JSValue argv[] = {
-            JS_NewCFunction(ctx, js_array_constructor, "Array", 0),
-            JS_NewCFunctionMagic(ctx, js_error_constructor, "TypeError",
-                                 1, JS_CFUNC_constructor_or_func_magic,
-                                 JS_TYPE_ERROR),
-            JS_AtomToValue(ctx, JS_ATOM_Symbol_asyncIterator),
-            JS_NewCFunctionMagic(ctx, js_object_defineProperty,
-                                 "Object.defineProperty", 3,
-                                 JS_CFUNC_generic_magic, 0),
-            JS_AtomToValue(ctx, JS_ATOM_Symbol_iterator),
-        };
-        return js_bytecode_eval(ctx, qjsc_builtin_array_fromasync,
-                                sizeof(qjsc_builtin_array_fromasync),
-                                countof(argv), argv);
-    }
-    case JS_BUILTIN_ITERATOR_ZIP: {
-        JSValue argv[] = {
-            js_dup(ctx->class_proto[JS_CLASS_ITERATOR_HELPER]),
-            JS_NewCFunctionMagic(ctx, js_error_constructor, "InternalError",
-                                 1, JS_CFUNC_constructor_or_func_magic,
-                                 JS_INTERNAL_ERROR),
-            JS_NewCFunctionMagic(ctx, js_error_constructor, "TypeError",
-                                 1, JS_CFUNC_constructor_or_func_magic,
-                                 JS_TYPE_ERROR),
-            JS_NewCFunction(ctx, js_call_function, "call", 2),
-            JS_AtomToValue(ctx, JS_ATOM_Symbol_iterator),
-        };
-        JSValue result = js_bytecode_eval(ctx, qjsc_builtin_iterator_zip,
-                                          sizeof(qjsc_builtin_iterator_zip),
-                                          countof(argv), argv);
-        JS_SetConstructorBit(ctx, result, false);
-        return result;
-    }
-    case JS_BUILTIN_ITERATOR_ZIP_KEYED: {
-        JSValue argv[] = {
-            js_dup(ctx->class_proto[JS_CLASS_ITERATOR_HELPER]),
-            JS_NewCFunctionMagic(ctx, js_error_constructor, "InternalError",
-                                 1, JS_CFUNC_constructor_or_func_magic,
-                                 JS_INTERNAL_ERROR),
-            JS_NewCFunctionMagic(ctx, js_error_constructor, "TypeError",
-                                 1, JS_CFUNC_constructor_or_func_magic,
-                                 JS_TYPE_ERROR),
-            JS_NewCFunction(ctx, js_call_function, "call", 2),
-            JS_NewCFunction(ctx, js_hasOwnEnumProperty,
-                            "hasOwnEnumProperty", 2),
-            JS_NewCFunction(ctx, js_getOwnPropertyKeys,
-                            "getOwnPropertyKeys", 1),
-            JS_AtomToValue(ctx, JS_ATOM_Symbol_iterator),
-        };
-        JSValue result = js_bytecode_eval(ctx, qjsc_builtin_iterator_zip_keyed,
-                                          sizeof(qjsc_builtin_iterator_zip_keyed),
-                                          countof(argv), argv);
-        JS_SetConstructorBit(ctx, result, false);
-        return result;
-    }
-    }
-    return JS_UNDEFINED;
-}
-
 /* return the value associated to the autoinit property or an exception */
 typedef JSValue JSAutoInitFunc(JSContext *ctx, JSObject *p, JSAtom atom, void *opaque);
 
@@ -10471,7 +10328,6 @@ static JSAutoInitFunc *const js_autoinit_func_table[] = {
     js_instantiate_prototype, /* JS_AUTOINIT_ID_PROTOTYPE */
     js_module_ns_autoinit, /* JS_AUTOINIT_ID_MODULE_NS */
     JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP */
-    js_bytecode_autoinit, /* JS_AUTOINIT_ID_BYTECODE */
 };
 
 /* warning: 'prs' is reallocated after it */
@@ -47957,6 +47813,401 @@ done:
     return r;
 }
 
+/* Array.fromAsync in C (docs/vm/c-builtins-zip-fromasync.md sec.2.2).
+   Upstream writes it as an async JS function; its bytecode cannot live in
+   the flash snapshot. A C function cannot be suspended at an await, so the
+   loop is an explicit state machine: each Await(v) wraps v with
+   PromiseResolve(%Promise%) and registers two continuations, fulfilled and
+   rejected, with no derived promise (the capability side is undefined, as
+   the interpreter's own await does). Each await is therefore one job
+   boundary, and nothing here blocks.
+
+   All the state lives in the data[] of the fulfilled continuation (a
+   JS_CLASS_C_FUNCTION_DATA, so the GC already marks and frees it); the
+   rejected one holds the fulfilled one in its data[0]. Both are made once
+   per call and reused for every await. The record points at both
+   continuations, a cycle that finish() breaks when the promise settles (and
+   the cycle collector, if it never does).
+
+   The continuations never throw: a throw from a reaction with an undefined
+   capability is dropped, and the promise would stay pending for ever. Every
+   failure goes to reject (or to closing the iterator first). */
+enum {
+    FA_RESOLVE, FA_REJECT,  /* the returned promise's resolving functions */
+    FA_CONT_F, FA_CONT_R,   /* the two continuations */
+    FA_RESULT,              /* A */
+    FA_ITER, FA_NEXT,       /* iterator path */
+    FA_ARRAY_LIKE,          /* array-like path */
+    FA_MAPFN, FA_THIS_ARG,
+    FA_ERROR,               /* closing: the completion to reject with */
+    FA_K, FA_LEN, FA_STATE,
+    FA_COUNT
+};
+
+enum {
+    FA_ON_NEXT,             /* awaiting next()'s result */
+    FA_ON_MAPPED,           /* awaiting mapfn's result (iterator path) */
+    FA_ON_CLOSED,           /* awaiting return()'s result, then reject */
+    FA_AL_ON_VALUE,         /* array-like: awaiting arrayLike[k] */
+    FA_AL_ON_MAPPED,        /* array-like: awaiting mapfn's result */
+};
+
+static void js_fa_set(JSContext *ctx, JSValue *d, int i, JSValue v)
+{
+    JSValue old = d[i];
+    d[i] = v;
+    JS_FreeValue(ctx, old);
+}
+
+/* Settle the promise and drop everything, breaking the record's cycle. */
+static void js_fa_finish(JSContext *ctx, JSValue *d, bool reject, JSValueConst v)
+{
+    JSValue f = d[reject ? FA_REJECT : FA_RESOLVE];
+    JSValue ret = JS_Call(ctx, f, JS_UNDEFINED, 1, &v);
+    /* a resolving function only throws on OOM; nothing more can be done */
+    if (JS_IsException(ret))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, ret);
+    for (int i = 0; i < FA_COUNT; i++)
+        js_fa_set(ctx, d, i, JS_UNDEFINED);
+}
+
+static void js_fa_reject_pending(JSContext *ctx, JSValue *d)
+{
+    JSValue e = JS_GetException(ctx);
+    js_fa_finish(ctx, d, true, e);
+    JS_FreeValue(ctx, e);
+}
+
+/* Await(v) (v is consumed): -1 with an exception pending if it cannot be
+   registered. */
+static int js_fa_await(JSContext *ctx, JSValue *d, int state, JSValue v)
+{
+    JSValue promise;
+    JSValueConst conts[2], none[2] = { JS_UNDEFINED, JS_UNDEFINED };
+    int ret;
+
+    js_fa_set(ctx, d, FA_STATE, js_int32(state));
+    promise = js_promise_resolve(ctx, ctx->promise_ctor, 1, vc(&v), 0);
+    JS_FreeValue(ctx, v);
+    if (JS_IsException(promise))
+        return -1;
+    conts[0] = d[FA_CONT_F];
+    conts[1] = d[FA_CONT_R];
+    ret = perform_promise_then(ctx, promise, conts, none);
+    JS_FreeValue(ctx, promise);
+    return ret;
+}
+
+/* AsyncIteratorClose(iter, throw completion): call return(), await its
+   result, then reject with the original error, which wins whatever return
+   does. The error is the pending exception. */
+static void js_fa_close(JSContext *ctx, JSValue *d)
+{
+    JSValue err = JS_GetException(ctx), method, r;
+
+    method = JS_GetProperty(ctx, d[FA_ITER], JS_ATOM_return);
+    if (JS_IsException(method) || JS_IsUndefined(method) || JS_IsNull(method)) {
+        if (JS_IsException(method))
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        goto reject;
+    }
+    r = JS_Call(ctx, method, d[FA_ITER], 0, NULL);
+    JS_FreeValue(ctx, method);
+    if (JS_IsException(r)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        goto reject;
+    }
+    js_fa_set(ctx, d, FA_ERROR, err);
+    if (js_fa_await(ctx, d, FA_ON_CLOSED, r) < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        err = js_dup(d[FA_ERROR]);
+        goto reject;
+    }
+    return;
+reject:
+    js_fa_finish(ctx, d, true, err);
+    JS_FreeValue(ctx, err);
+}
+
+/* GetMethod(v, atom): undefined for undefined/null, TypeError if not
+   callable. */
+static JSValue js_fa_get_method(JSContext *ctx, JSValueConst v, JSAtom atom)
+{
+    JSValue m = JS_GetProperty(ctx, v, atom);
+    if (JS_IsException(m) || JS_IsUndefined(m) || JS_IsNull(m))
+        return JS_IsNull(m) ? JS_UNDEFINED : m;
+    if (!JS_IsFunction(ctx, m)) {
+        JS_FreeValue(ctx, m);
+        return JS_ThrowTypeError(ctx, "not a function");
+    }
+    return m;
+}
+
+/* Run synchronously until the next await or the end. `how` is the state the
+   continuation found (or -1 to start), `rejected` whether the awaited value
+   was a rejection, `arg` the value or reason. */
+static void js_fa_run(JSContext *ctx, JSValue *d, int how, bool rejected,
+                      JSValueConst arg)
+{
+    JSValue v, r;
+    int64_t k;
+    int done;
+
+    switch (how) {
+    case FA_ON_NEXT:
+        /* next() rejected or misbehaved: the iterator is broken, not closed */
+        if (rejected)
+            goto reject_arg;
+        if (!JS_IsObject(arg)) {
+            JS_ThrowTypeError(ctx, "iterator must return an object");
+            goto reject;
+        }
+        v = JS_GetProperty(ctx, arg, JS_ATOM_done);
+        if (JS_IsException(v))
+            goto reject;
+        done = JS_ToBoolFree(ctx, v);
+        if (done) {
+            JS_ToInt64(ctx, &k, d[FA_K]);
+            if (JS_SetProperty(ctx, d[FA_RESULT], JS_ATOM_length, js_int64(k)) < 0)
+                goto reject;
+            goto resolve;
+        }
+        v = JS_GetProperty(ctx, arg, JS_ATOM_value);
+        if (JS_IsException(v))
+            goto reject;
+        if (!JS_IsUndefined(d[FA_MAPFN])) {
+            JSValueConst args[2] = { v, d[FA_K] };
+            r = JS_Call(ctx, d[FA_MAPFN], d[FA_THIS_ARG], 2, args);
+            JS_FreeValue(ctx, v);
+            if (JS_IsException(r))
+                goto close;
+            if (js_fa_await(ctx, d, FA_ON_MAPPED, r) < 0)
+                goto close;
+            return;
+        }
+        goto define;
+    case FA_ON_MAPPED:
+        if (rejected) {
+            JS_Throw(ctx, js_dup(arg));
+            goto close;
+        }
+        v = js_dup(arg);
+    define:
+        JS_ToInt64(ctx, &k, d[FA_K]);
+        if (JS_DefinePropertyValueInt64(ctx, d[FA_RESULT], k, v,
+                                        JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+            goto close;
+        js_fa_set(ctx, d, FA_K, js_int64(k + 1));
+    next:
+        r = JS_Call(ctx, d[FA_NEXT], d[FA_ITER], 0, NULL);
+        if (JS_IsException(r))
+            goto reject;
+        if (js_fa_await(ctx, d, FA_ON_NEXT, r) < 0)
+            goto reject;
+        return;
+    case FA_ON_CLOSED:
+        /* return() settled either way: the saved error wins */
+        v = js_dup(d[FA_ERROR]);
+        js_fa_finish(ctx, d, true, v);
+        JS_FreeValue(ctx, v);
+        return;
+    case FA_AL_ON_VALUE:
+        if (rejected)
+            goto reject_arg;
+        if (!JS_IsUndefined(d[FA_MAPFN])) {
+            JSValueConst args[2] = { arg, d[FA_K] };
+            r = JS_Call(ctx, d[FA_MAPFN], d[FA_THIS_ARG], 2, args);
+            if (JS_IsException(r))
+                goto reject;
+            if (js_fa_await(ctx, d, FA_AL_ON_MAPPED, r) < 0)
+                goto reject;
+            return;
+        }
+        /* fall through */
+    case FA_AL_ON_MAPPED:
+        if (rejected)
+            goto reject_arg;
+        JS_ToInt64(ctx, &k, d[FA_K]);
+        if (JS_DefinePropertyValueInt64(ctx, d[FA_RESULT], k, js_dup(arg),
+                                        JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+            goto reject;
+        js_fa_set(ctx, d, FA_K, js_int64(k + 1));
+    al_next: {
+        int64_t len;
+        JS_ToInt64(ctx, &k, d[FA_K]);
+        JS_ToInt64(ctx, &len, d[FA_LEN]);
+        if (k >= len) {
+            if (JS_SetProperty(ctx, d[FA_RESULT], JS_ATOM_length, js_int64(len)) < 0)
+                goto reject;
+            goto resolve;
+        }
+        v = JS_GetPropertyInt64(ctx, d[FA_ARRAY_LIKE], k);
+        if (JS_IsException(v))
+            goto reject;
+        if (js_fa_await(ctx, d, FA_AL_ON_VALUE, v) < 0)
+            goto reject;
+        return;
+    }
+    default: {
+        /* start: the synchronous part of Array.fromAsync */
+        JSValueConst items = d[FA_ARRAY_LIKE];
+        JSValue am, sm, iter;
+        if (!JS_IsUndefined(d[FA_MAPFN]) && !JS_IsFunction(ctx, d[FA_MAPFN])) {
+            JS_ThrowTypeError(ctx, "mapfn is not a function");
+            goto reject;
+        }
+        am = js_fa_get_method(ctx, items, JS_ATOM_Symbol_asyncIterator);
+        if (JS_IsException(am))
+            goto reject;
+        sm = JS_UNDEFINED;
+        if (JS_IsUndefined(am)) {
+            sm = js_fa_get_method(ctx, items, JS_ATOM_Symbol_iterator);
+            if (JS_IsException(sm))
+                goto reject;
+        }
+        if (!JS_IsUndefined(am) || !JS_IsUndefined(sm)) {
+            JSValueConst ctor = d[FA_ERROR];  /* C, parked by js_array_fromAsync */
+            r = JS_IsConstructor(ctx, ctor) ? JS_CallConstructor(ctx, ctor, 0, NULL)
+                                            : JS_NewArray(ctx);
+            if (JS_IsException(r)) {
+                JS_FreeValue(ctx, am);
+                JS_FreeValue(ctx, sm);
+                goto reject;
+            }
+            js_fa_set(ctx, d, FA_RESULT, r);
+            if (!JS_IsUndefined(am)) {
+                iter = JS_GetIterator2(ctx, items, am);
+                JS_FreeValue(ctx, am);
+            } else {
+                JSValue sync = JS_GetIterator2(ctx, items, sm);
+                JS_FreeValue(ctx, sm);
+                if (JS_IsException(sync))
+                    goto reject;
+                iter = js_create_async_from_sync_iterator(ctx, sync, true);
+                JS_FreeValue(ctx, sync);
+            }
+            if (JS_IsException(iter))
+                goto reject;
+            js_fa_set(ctx, d, FA_ITER, iter);
+            v = JS_GetProperty(ctx, iter, JS_ATOM_next);
+            if (JS_IsException(v))
+                goto reject;
+            js_fa_set(ctx, d, FA_NEXT, v);
+            js_fa_set(ctx, d, FA_ARRAY_LIKE, JS_UNDEFINED);
+            js_fa_set(ctx, d, FA_ERROR, JS_UNDEFINED);
+            js_fa_set(ctx, d, FA_K, js_int32(0));
+            goto next;
+        } else {
+            JSValue o = JS_ToObject(ctx, items);
+            int64_t len;
+            JSValueConst ctor = d[FA_ERROR], lenv;
+            if (JS_IsException(o))
+                goto reject;
+            js_fa_set(ctx, d, FA_ARRAY_LIKE, o);
+            if (js_get_length64(ctx, &len, d[FA_ARRAY_LIKE]) < 0)
+                goto reject;
+            v = js_int64(len);
+            lenv = v;
+            r = JS_IsConstructor(ctx, ctor) ? JS_CallConstructor(ctx, ctor, 1, &lenv)
+                                            : js_array_constructor(ctx, JS_UNDEFINED, 1, &lenv);
+            JS_FreeValue(ctx, v);
+            if (JS_IsException(r))
+                goto reject;
+            js_fa_set(ctx, d, FA_RESULT, r);
+            js_fa_set(ctx, d, FA_ERROR, JS_UNDEFINED);
+            js_fa_set(ctx, d, FA_K, js_int32(0));
+            js_fa_set(ctx, d, FA_LEN, js_int64(len));
+            goto al_next;
+        }
+    }
+    }
+
+resolve:
+    v = js_dup(d[FA_RESULT]);
+    js_fa_finish(ctx, d, false, v);
+    JS_FreeValue(ctx, v);
+    return;
+close:
+    js_fa_close(ctx, d);
+    return;
+reject_arg:
+    js_fa_finish(ctx, d, true, arg);
+    return;
+reject:
+    js_fa_reject_pending(ctx, d);
+}
+
+/* The continuations: magic 0 fulfilled (its own data[] is the state),
+   magic 1 rejected (data[0] is the fulfilled one). */
+static JSValue js_fa_continue(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv, int magic,
+                              JSValueConst *func_data)
+{
+    JSValue *d;
+    int32_t state;
+
+    if (magic) {
+        JSCFunctionDataRecord *s = JS_GetOpaque(func_data[0], JS_CLASS_C_FUNCTION_DATA);
+        if (!s)
+            return JS_UNDEFINED;
+        d = s->data;
+    } else {
+        d = (JSValue *)func_data;
+    }
+    if (JS_IsUndefined(d[FA_RESOLVE]))
+        return JS_UNDEFINED;    /* settled already */
+    JS_ToInt32(ctx, &state, d[FA_STATE]);
+    js_fa_run(ctx, d, state, magic, argc > 0 ? argv[0] : JS_UNDEFINED);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_array_fromAsync(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv)
+{
+    JSValue resolving[2], promise, cont_f, cont_r;
+    JSValueConst init[FA_COUNT];
+    JSCFunctionDataRecord *s;
+    JSValue *d;
+    int i;
+
+    promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise))
+        return JS_EXCEPTION;
+    for (i = 0; i < FA_COUNT; i++)
+        init[i] = JS_UNDEFINED;
+    cont_f = JS_NewCFunctionData(ctx, js_fa_continue, 1, 0, FA_COUNT, init);
+    if (JS_IsException(cont_f))
+        goto fail;
+    cont_r = JS_NewCFunctionData(ctx, js_fa_continue, 1, 1, 1, vc(&cont_f));
+    if (JS_IsException(cont_r)) {
+        JS_FreeValue(ctx, cont_f);
+        goto fail;
+    }
+    s = JS_GetOpaque(cont_f, JS_CLASS_C_FUNCTION_DATA);
+    d = s->data;
+    d[FA_RESOLVE] = resolving[0];
+    d[FA_REJECT] = resolving[1];
+    d[FA_CONT_F] = js_dup(cont_f);   /* the cycle finish() breaks */
+    d[FA_CONT_R] = cont_r;
+    d[FA_ARRAY_LIKE] = js_dup(argc > 0 ? argv[0] : JS_UNDEFINED);  /* items, until sorted */
+    d[FA_MAPFN] = js_dup(argc > 1 ? argv[1] : JS_UNDEFINED);
+    d[FA_THIS_ARG] = js_dup(argc > 2 ? argv[2] : JS_UNDEFINED);
+    d[FA_ERROR] = js_dup(this_val);  /* C, until the result exists */
+    d[FA_K] = js_int32(0);
+    d[FA_LEN] = js_int32(0);
+    d[FA_STATE] = js_int32(-1);
+    js_fa_run(ctx, d, -1, false, JS_UNDEFINED);
+    JS_FreeValue(ctx, cont_f);
+    return promise;
+fail:
+    JS_FreeValue(ctx, resolving[0]);
+    JS_FreeValue(ctx, resolving[1]);
+    JS_FreeValue(ctx, promise);
+    return JS_EXCEPTION;
+}
+
+
 static JSValue js_array_of(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
@@ -48060,6 +48311,7 @@ static JSValue JS_ArraySpeciesCreate(JSContext *ctx, JSValueConst obj,
 static const JSCFunctionListEntry js_array_funcs[] = {
     JS_CFUNC_DEF("isArray", 1, js_array_isArray),
     JS_CFUNC_DEF("from", 1, js_array_from),
+    JS_CFUNC_DEF("fromAsync", 1, js_array_fromAsync),
     JS_CFUNC_DEF("of", 0, js_array_of),
     JS_CGETSET_DEF("[Symbol.species]", js_get_this, NULL),
 };
@@ -50824,11 +51076,536 @@ static JSValue js_iterator_proto_set_toStringTag(JSContext *ctx, JSValueConst th
     return JS_UNDEFINED;
 }
 
+/* Iterator.zip / Iterator.zipKeyed in C (docs/vm/c-builtins-zip-fromasync.md).
+   Upstream writes them in JS and compiles the bytecode on first read; bytecode
+   cannot live in the flash snapshot (IC and quickening write to it), so the
+   ROM build had dropped both. Here they are one more Iterator Helper kind:
+   the result has %IteratorHelperPrototype% as the spec says, and its next and
+   return land in js_iterator_helper_next, which hands a zip to
+   js_iterator_zip_step.
+
+   The record starts with an ordinary JSIteratorHelperData (obj/next/func/
+   inner stay JS_UNDEFINED) and carries the columns after it: iters[count],
+   nexts[count], pads[count] for mode "longest", then keys[count] as atoms
+   for zipKeyed. A finished or closed iterator is JS_UNDEFINED in iters[]. */
+typedef enum JSZipMode {
+    JS_ZIP_SHORTEST,
+    JS_ZIP_LONGEST,
+    JS_ZIP_STRICT,
+} JSZipMode;
+
+typedef struct JSIteratorZipData {
+    JSIteratorHelperData h;  /* kind JS_ITERATOR_HELPER_KIND_ZIP */
+    uint32_t count;
+    uint32_t alive;          /* iterators not yet done (longest) */
+    uint8_t mode;            /* JSZipMode */
+    uint8_t keyed;
+    uint8_t started;         /* next() ran: return() then closes as suspended */
+    JSValue cols[];
+} JSIteratorZipData;
+_Static_assert(offsetof(JSIteratorZipData, h) == 0, "a zip record is a helper record");
+
+static uint32_t js_zip_ncols(const JSIteratorZipData *z)
+{
+    return 2 + (z->mode == JS_ZIP_LONGEST);
+}
+
+static JSAtom *js_zip_keys(JSIteratorZipData *z)
+{
+    return (JSAtom *)(z->cols + js_zip_ncols(z) * z->count);
+}
+
+static void js_iterator_zip_free(JSRuntime *rt, JSIteratorZipData *z)
+{
+    uint32_t n = js_zip_ncols(z) * z->count;
+    for (uint32_t i = 0; i < n; i++)
+        JS_FreeValueRT(rt, z->cols[i]);
+    if (z->keyed) {
+        for (uint32_t i = 0; i < z->count; i++)
+            JS_FreeAtomRT(rt, js_zip_keys(z)[i]);
+    }
+    js_free_rt(rt, z);
+}
+
+static void js_iterator_zip_mark(JSRuntime *rt, JSIteratorZipData *z,
+                                 JS_MarkFunc *mark_func)
+{
+    uint32_t n = js_zip_ncols(z) * z->count;
+    for (uint32_t i = 0; i < n; i++)
+        JS_MarkValue(rt, z->cols[i], mark_func);
+}
+
+/* IteratorCloseAll: reverse order; every return() runs, the first throw
+   wins. With an exception already pending, that one stays the result. */
+static int js_zip_close_all(JSContext *ctx, JSValue *iters, uint32_t count,
+                            bool pending)
+{
+    for (uint32_t i = count; i-- > 0;) {
+        JSValue it = iters[i];
+        if (JS_IsUndefined(it))
+            continue;
+        iters[i] = JS_UNDEFINED;
+        if (JS_IteratorClose(ctx, it, pending) < 0)
+            pending = true;
+        JS_FreeValue(ctx, it);
+    }
+    return pending ? -1 : 0;
+}
+
+/* GetIteratorFlattenable(value, reject-primitives): the value's iterator, or
+   the value itself when it has no @@iterator, and in *pnext its next method.
+   If reading next throws, *pnext is JS_EXCEPTION and the iterator is still
+   returned: the caller drops it without closing (it is not in the list). */
+static JSValue js_zip_flatten(JSContext *ctx, JSValueConst v, JSValue *pnext)
+{
+    JSValue method, iter;
+
+    *pnext = JS_UNDEFINED;
+    if (!JS_IsObject(v))
+        return JS_ThrowTypeError(ctx, "bad iterator");
+    method = JS_GetProperty(ctx, v, JS_ATOM_Symbol_iterator);
+    if (JS_IsException(method))
+        return JS_EXCEPTION;
+    if (JS_IsUndefined(method) || JS_IsNull(method)) {
+        iter = js_dup(v);
+    } else {
+        iter = JS_GetIterator2(ctx, v, method);
+        JS_FreeValue(ctx, method);
+        if (JS_IsException(iter))
+            return JS_EXCEPTION;
+    }
+    *pnext = JS_GetProperty(ctx, iter, JS_ATOM_next);
+    return iter;
+}
+
+/* One step of an iterator: 1 with *pval on a value, 0 when done, -1 on an
+   abrupt completion (the iterator is then done and must not be closed).
+   done is read before value, and value only when not done. */
+static int js_zip_iter_step(JSContext *ctx, JSValueConst iter, JSValueConst next,
+                            JSValue *pval)
+{
+    JSValue obj, v;
+    int done;
+
+    *pval = JS_UNDEFINED;
+    obj = JS_IteratorNext2(ctx, iter, next, 0, NULL, &done);
+    if (JS_IsException(obj))
+        return -1;
+    if (done == 0) {            /* a built-in iterator's fast path: the value */
+        *pval = obj;
+        return 1;
+    }
+    if (done == 1) {
+        JS_FreeValue(ctx, obj);
+        return 0;
+    }
+    v = JS_GetProperty(ctx, obj, JS_ATOM_done);
+    if (JS_IsException(v)) {
+        JS_FreeValue(ctx, obj);
+        return -1;
+    }
+    if (JS_ToBoolFree(ctx, v)) {
+        JS_FreeValue(ctx, obj);
+        return 0;
+    }
+    *pval = JS_GetProperty(ctx, obj, JS_ATOM_value);
+    JS_FreeValue(ctx, obj);
+    return JS_IsException(*pval) ? -1 : 1;
+}
+
+/* Append one (iterator, next) pair; on failure both are freed. */
+static int js_zip_push(JSContext *ctx, JSValue **iters, JSValue **nexts,
+                       uint32_t *count, uint32_t *cap, JSValue iter, JSValue next)
+{
+    if (*count == *cap) {
+        uint32_t n = *cap ? *cap * 2 : 4;
+        JSValue *a = js_realloc(ctx, *iters, n * sizeof(JSValue));
+        if (!a)
+            goto fail;
+        *iters = a;
+        a = js_realloc(ctx, *nexts, n * sizeof(JSValue));
+        if (!a)
+            goto fail;
+        *nexts = a;
+        *cap = n;
+    }
+    (*iters)[*count] = iter;
+    (*nexts)[*count] = next;
+    (*count)++;
+    return 0;
+fail:
+    JS_FreeValue(ctx, iter);
+    JS_FreeValue(ctx, next);
+    return -1;
+}
+
+/* Iterator.zip (magic 0) and Iterator.zipKeyed (magic 1). */
+static JSValue js_iterator_zip(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv, int keyed)
+{
+    JSValueConst iterables = argv[0];
+    JSValueConst options = argc > 1 ? argv[1] : JS_UNDEFINED;
+    JSValue mode_val = JS_UNDEFINED, padding = JS_UNDEFINED;
+    JSValue outer = JS_UNDEFINED, outer_next = JS_UNDEFINED;
+    JSValue *iters = NULL, *nexts = NULL, *pads = NULL;
+    JSAtom *keys = NULL;
+    JSPropertyEnum *tab = NULL;
+    uint32_t count = 0, cap = 0, tab_len = 0, i;
+    JSIteratorZipData *z;
+    JSValue obj;
+    int mode;
+
+    if (!JS_IsObject(iterables))
+        return JS_ThrowTypeError(ctx, "bad iterables");
+    if (!JS_IsUndefined(options)) {
+        if (!JS_IsObject(options))
+            return JS_ThrowTypeError(ctx, "bad options");
+        mode_val = JS_GetProperty(ctx, options, JS_ATOM_mode);
+        if (JS_IsException(mode_val))
+            return JS_EXCEPTION;
+    }
+    if (JS_IsUndefined(mode_val)) {
+        mode = JS_ZIP_SHORTEST;
+    } else {
+        /* the exact strings, no ToString: a String object is refused */
+        JSAtom a = JS_IsString(mode_val) ? JS_ValueToAtom(ctx, mode_val) : JS_ATOM_NULL;
+        JS_FreeValue(ctx, mode_val);
+        mode = a == JS_ATOM_shortest ? JS_ZIP_SHORTEST :
+               a == JS_ATOM_longest ? JS_ZIP_LONGEST :
+               a == JS_ATOM_strict ? JS_ZIP_STRICT : -1;
+        JS_FreeAtom(ctx, a);
+        if (mode < 0)
+            return JS_ThrowTypeError(ctx, "bad mode");
+    }
+    if (mode == JS_ZIP_LONGEST && !JS_IsUndefined(options)) {
+        padding = JS_GetProperty(ctx, options, JS_ATOM_padding);
+        if (JS_IsException(padding))
+            return JS_EXCEPTION;
+        if (!JS_IsUndefined(padding) && !JS_IsObject(padding)) {
+            JS_FreeValue(ctx, padding);
+            return JS_ThrowTypeError(ctx, "bad padding");
+        }
+    }
+
+    if (keyed) {
+        /* every own key first, then each one checked as it is reached: a
+           getter may change what the later keys look like */
+        JSObject *p = JS_VALUE_GET_OBJ(iterables);
+        if (JS_GetOwnPropertyNamesInternal(ctx, &tab, &tab_len, p,
+                                           JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK))
+            goto fail;
+        keys = js_malloc(ctx, max_int(tab_len, 1) * sizeof(JSAtom));
+        if (!keys)
+            goto fail;
+        for (i = 0; i < tab_len; i++) {
+            JSAtom key = tab[i].atom;
+            JSValue v, iter, next;
+            int flags, r = JS_GetOwnPropertyFlagsInternal(ctx, &flags, p, key);
+            if (r < 0)
+                goto fail;
+            if (!r || !(flags & JS_PROP_ENUMERABLE))
+                continue;
+            v = JS_GetProperty(ctx, iterables, key);
+            if (JS_IsException(v))
+                goto fail;
+            if (JS_IsUndefined(v))
+                continue;
+            iter = js_zip_flatten(ctx, v, &next);
+            JS_FreeValue(ctx, v);
+            if (JS_IsException(iter))
+                goto fail;
+            if (JS_IsException(next)) {
+                JS_FreeValue(ctx, iter);
+                goto fail;
+            }
+            keys[count] = JS_DupAtom(ctx, key);
+            if (js_zip_push(ctx, &iters, &nexts, &count, &cap, iter, next)) {
+                JS_FreeAtom(ctx, keys[count]);
+                goto fail;
+            }
+        }
+    } else {
+        outer = JS_GetIterator(ctx, iterables, false);
+        if (JS_IsException(outer)) {
+            outer = JS_UNDEFINED;
+            goto fail;
+        }
+        outer_next = JS_GetProperty(ctx, outer, JS_ATOM_next);
+        if (JS_IsException(outer_next)) {
+            outer_next = JS_UNDEFINED;
+            goto fail;
+        }
+        for (;;) {
+            JSValue v, iter, next;
+            int r = js_zip_iter_step(ctx, outer, outer_next, &v);
+            if (r < 0)
+                goto fail;      /* the outer iterator failed itself: not closed */
+            if (r == 0)
+                break;
+            iter = js_zip_flatten(ctx, v, &next);
+            JS_FreeValue(ctx, v);
+            if (JS_IsException(iter))
+                goto fail_close_outer;
+            if (JS_IsException(next)) {
+                JS_FreeValue(ctx, iter);
+                goto fail_close_outer;
+            }
+            if (js_zip_push(ctx, &iters, &nexts, &count, &cap, iter, next))
+                goto fail_close_outer;
+        }
+    }
+
+    if (mode == JS_ZIP_LONGEST) {
+        pads = js_malloc(ctx, max_int(count, 1) * sizeof(JSValue));
+        if (!pads)
+            goto fail;
+        for (i = 0; i < count; i++)
+            pads[i] = JS_UNDEFINED;
+        if (JS_IsObject(padding)) {
+            if (keyed) {
+                for (i = 0; i < count; i++) {
+                    JSValue v = JS_GetProperty(ctx, padding, keys[i]);
+                    if (JS_IsException(v))
+                        goto fail;
+                    pads[i] = v;
+                }
+            } else {
+                JSValue piter, pnext;
+                int r = 1;
+                piter = JS_GetIterator(ctx, padding, false);
+                if (JS_IsException(piter))
+                    goto fail;
+                pnext = JS_GetProperty(ctx, piter, JS_ATOM_next);
+                if (JS_IsException(pnext)) {
+                    JS_FreeValue(ctx, piter);
+                    goto fail;
+                }
+                for (i = 0; i < count; i++) {
+                    JSValue v;
+                    r = js_zip_iter_step(ctx, piter, pnext, &v);
+                    if (r < 0) {
+                        /* the padding iterator failed itself: not closed */
+                        JS_FreeValue(ctx, piter);
+                        JS_FreeValue(ctx, pnext);
+                        goto fail;
+                    }
+                    if (r == 0)
+                        break;
+                    pads[i] = v;
+                }
+                JS_FreeValue(ctx, pnext);
+                /* not exhausted: close it; a throw from its return() fails
+                   the whole call */
+                if (r != 0 && JS_IteratorClose(ctx, piter, false) < 0) {
+                    JS_FreeValue(ctx, piter);
+                    goto fail;
+                }
+                JS_FreeValue(ctx, piter);
+            }
+        }
+    }
+
+    {
+        uint32_t ncols = 2 + (mode == JS_ZIP_LONGEST);
+        size_t sz = sizeof(JSIteratorZipData) + ncols * count * sizeof(JSValue) +
+                    (keyed ? count * sizeof(JSAtom) : 0);
+        z = js_mallocz(ctx, sz);
+        if (!z)
+            goto fail;
+        z->h.obj = z->h.next = z->h.func = z->h.inner = JS_UNDEFINED;
+        z->h.kind = JS_ITERATOR_HELPER_KIND_ZIP;
+        z->count = z->alive = count;
+        z->mode = mode;
+        z->keyed = keyed;
+        for (i = 0; i < count; i++) {
+            z->cols[i] = iters[i];
+            z->cols[count + i] = nexts[i];
+            if (pads)
+                z->cols[2 * count + i] = pads[i];
+            if (keyed)
+                js_zip_keys(z)[i] = keys[i];
+        }
+    }
+    js_free(ctx, iters);
+    js_free(ctx, nexts);
+    js_free(ctx, pads);
+    js_free(ctx, keys);
+    if (tab)
+        js_free_prop_enum(ctx, tab, tab_len);
+    JS_FreeValue(ctx, padding);
+    JS_FreeValue(ctx, outer);
+    JS_FreeValue(ctx, outer_next);
+    obj = JS_NewObjectClass(ctx, JS_CLASS_ITERATOR_HELPER);
+    if (JS_IsException(obj)) {
+        js_zip_close_all(ctx, z->cols, z->count, true);
+        js_iterator_zip_free(ctx->rt, z);
+        return JS_EXCEPTION;
+    }
+    JS_SetOpaqueInternal(obj, z);
+    return obj;
+
+fail_close_outer:
+    /* the inner iterators first, then the outer one (IteratorCloseAll of
+       the list, then IteratorClose of iterables' iterator) */
+    js_zip_close_all(ctx, iters, count, true);
+    JS_IteratorClose(ctx, outer, true);
+fail:
+    js_zip_close_all(ctx, iters, count, true);
+    for (i = 0; i < count; i++) {
+        JS_FreeValue(ctx, nexts[i]);
+        if (keyed)
+            JS_FreeAtom(ctx, keys[i]);
+        if (pads)
+            JS_FreeValue(ctx, pads[i]);
+    }
+    js_free(ctx, iters);
+    js_free(ctx, nexts);
+    js_free(ctx, pads);
+    js_free(ctx, keys);
+    if (tab)
+        js_free_prop_enum(ctx, tab, tab_len);
+    JS_FreeValue(ctx, padding);
+    JS_FreeValue(ctx, outer);
+    JS_FreeValue(ctx, outer_next);
+    return JS_EXCEPTION;
+}
+
+/* next() and return() of a zip, entered from js_iterator_helper_next after
+   its running and done checks. Any abrupt completion leaves the zip
+   complete, as a generator's would. */
+static JSValue js_iterator_zip_step(JSContext *ctx, JSIteratorZipData *z,
+                                    int magic, int *pdone)
+{
+    uint32_t count = z->count, i, dones = 0, values = 0;
+    JSValue *iters = z->cols, *nexts = z->cols + count;
+    JSValue *pads = z->mode == JS_ZIP_LONGEST ? z->cols + 2 * count : NULL;
+    JSValue ret, results = JS_UNDEFINED, *vals = NULL;
+
+    *pdone = true;
+    if (magic == GEN_MAGIC_RETURN) {
+        if (!z->started) {
+            /* suspended-start: complete first, so a return() re-entered
+               from one of the closes answers {undefined, true} */
+            z->h.done = 1;
+            return js_zip_close_all(ctx, iters, count, false) < 0 ?
+                   JS_EXCEPTION : JS_UNDEFINED;
+        }
+        z->h.executing = 1;
+        ret = js_zip_close_all(ctx, iters, count, false) < 0 ?
+              JS_EXCEPTION : JS_UNDEFINED;
+        goto complete;
+    }
+
+    z->started = 1;
+    z->h.executing = 1;
+    if (z->keyed) {
+        results = JS_NewObjectProto(ctx, JS_NULL);
+        if (JS_IsException(results)) {
+            results = JS_UNDEFINED;
+            goto fail_close;
+        }
+    } else {
+        vals = js_malloc(ctx, max_int(count, 1) * sizeof(JSValue));
+        if (!vals)
+            goto fail_close;
+        for (i = 0; i < count; i++)
+            vals[i] = JS_UNDEFINED;
+    }
+    for (i = 0; i < count; i++) {
+        JSValue v;
+        int r;
+        if (JS_IsUndefined(iters[i])) {
+            /* only "longest" goes on past a finished iterator */
+            v = js_dup(pads[i]);
+            goto store;
+        }
+        r = js_zip_iter_step(ctx, iters[i], nexts[i], &v);
+        if (r < 0) {
+            /* the failing iterator is done, not closed; the others are */
+            JS_FreeValue(ctx, iters[i]);
+            iters[i] = JS_UNDEFINED;
+            z->alive = 0;
+            goto fail_close;
+        }
+        if (r > 0) {
+            if (z->mode == JS_ZIP_STRICT && dones > 0) {
+                JS_FreeValue(ctx, v);
+                goto mismatch;
+            }
+            values++;
+            goto store;
+        }
+        z->alive--;
+        dones++;
+        JS_FreeValue(ctx, iters[i]);
+        iters[i] = JS_UNDEFINED;
+        if (z->mode == JS_ZIP_SHORTEST) {
+            if (js_zip_close_all(ctx, iters, count, false) < 0)
+                goto fail;
+            goto finished;
+        }
+        if (z->mode == JS_ZIP_STRICT) {
+            if (values > 0)
+                goto mismatch;
+            continue;           /* the rest must all be done too */
+        }
+        if (z->alive < 1)
+            goto finished;
+        v = js_dup(pads[i]);
+    store:
+        if (z->keyed) {
+            if (JS_DefinePropertyValue(ctx, results, js_zip_keys(z)[i], v,
+                                       JS_PROP_C_W_E) < 0)
+                goto fail_close;
+        } else {
+            vals[i] = v;
+        }
+    }
+    if (values == 0)
+        goto finished;
+    if (!z->keyed) {
+        results = js_create_array(ctx, count, vc(vals));
+        if (JS_IsException(results)) {
+            results = JS_UNDEFINED;
+            goto fail_close;
+        }
+        for (i = 0; i < count; i++)
+            JS_FreeValue(ctx, vals[i]);
+        js_free(ctx, vals);
+    }
+    z->h.executing = 0;
+    *pdone = false;
+    return results;
+
+mismatch:
+    JS_ThrowTypeError(ctx, "mismatched inputs");
+fail_close:
+    js_zip_close_all(ctx, iters, count, true);
+fail:
+    ret = JS_EXCEPTION;
+    goto cleanup;
+finished:
+    ret = JS_UNDEFINED;
+cleanup:
+    JS_FreeValue(ctx, results);
+    if (vals) {
+        for (i = 0; i < count; i++)
+            JS_FreeValue(ctx, vals[i]);
+        js_free(ctx, vals);
+    }
+complete:
+    z->h.executing = 0;
+    z->h.done = 1;
+    return ret;
+}
+
 static void js_iterator_helper_finalizer(JSRuntime *rt, JSValueConst val)
 {
     JSObject *p = JS_VALUE_GET_OBJ(val);
     JSIteratorHelperData *it = p->u.iterator_helper_data;
-    if (it) {
+    if (it && it->kind == JS_ITERATOR_HELPER_KIND_ZIP) {
+        js_iterator_zip_free(rt, (JSIteratorZipData *)it);
+    } else if (it) {
         JS_FreeValueRT(rt, it->obj);
         JS_FreeValueRT(rt, it->func);
         JS_FreeValueRT(rt, it->next);
@@ -50842,7 +51619,9 @@ static void js_iterator_helper_mark(JSRuntime *rt, JSValueConst val,
 {
     JSObject *p = JS_VALUE_GET_OBJ(val);
     JSIteratorHelperData *it = p->u.iterator_helper_data;
-    if (it) {
+    if (it && it->kind == JS_ITERATOR_HELPER_KIND_ZIP) {
+        js_iterator_zip_mark(rt, (JSIteratorZipData *)it, mark_func);
+    } else if (it) {
         JS_MarkValue(rt, it->obj, mark_func);
         JS_MarkValue(rt, it->func, mark_func);
         JS_MarkValue(rt, it->next, mark_func);
@@ -50870,6 +51649,8 @@ static JSValue js_iterator_helper_next(JSContext *ctx, JSValueConst this_val,
         *pdone = true;
         return JS_UNDEFINED;
     }
+    if (it->kind == JS_ITERATOR_HELPER_KIND_ZIP)
+        return js_iterator_zip_step(ctx, (JSIteratorZipData *)it, magic, pdone);
 
     it->executing = 1;
 
@@ -51119,6 +51900,8 @@ fail:
 static const JSCFunctionListEntry js_iterator_funcs[] = {
     JS_CFUNC_DEF("concat", 0, js_iterator_concat),
     JS_CFUNC_DEF("from", 1, js_iterator_from),
+    JS_CFUNC_MAGIC_DEF("zip", 1, js_iterator_zip, 0),
+    JS_CFUNC_MAGIC_DEF("zipKeyed", 1, js_iterator_zip, 1),
 };
 
 static const JSCFunctionListEntry js_iterator_proto_funcs[] = {
@@ -61609,6 +62392,10 @@ static const JSCFunctionListEntry js_async_iterator_proto_funcs[] = {
 typedef struct JSAsyncFromSyncIteratorData {
     JSValue sync_iter;
     JSValue next_method;
+    /* AsyncFromSyncIteratorContinuation's closeOnRejection (ES2025), for
+       Array.fromAsync only: for await over a sync iterable closes the
+       iterator from the loop already, and both would call return() twice */
+    bool close_on_rejection;
 } JSAsyncFromSyncIteratorData;
 
 static void js_async_from_sync_iterator_finalizer(JSRuntime *rt,
@@ -61634,8 +62421,9 @@ static void js_async_from_sync_iterator_mark(JSRuntime *rt, JSValueConst val,
     }
 }
 
-static JSValue JS_CreateAsyncFromSyncIterator(JSContext *ctx,
-                                              JSValue sync_iter)
+static JSValue js_create_async_from_sync_iterator(JSContext *ctx,
+                                                 JSValue sync_iter,
+                                                 bool close_on_rejection)
 {
     JSValue async_iter, next_method;
     JSAsyncFromSyncIteratorData *s;
@@ -61657,8 +62445,31 @@ static JSValue JS_CreateAsyncFromSyncIterator(JSContext *ctx,
     }
     s->sync_iter = js_dup(sync_iter);
     s->next_method = next_method;
+    s->close_on_rejection = close_on_rejection;
     JS_SetOpaqueInternal(async_iter, s);
     return async_iter;
+}
+
+static JSValue JS_CreateAsyncFromSyncIterator(JSContext *ctx,
+                                              JSValue sync_iter)
+{
+    return js_create_async_from_sync_iterator(ctx, sync_iter, false);
+}
+
+/* AsyncFromSyncIteratorContinuation's closeOnRejection (ES2025): when the
+   value of a next() or throw() step is a promise that rejects, close the
+   sync iterator before passing the rejection on. data[0] is the iterator.
+   PocketJS: upstream quickjs-ng lacks it. Only the wrapper Array.fromAsync
+   makes has it on (test262 sync-iterable-with-rejecting-thenable-closes):
+   for await already closes from the loop. */
+static JSValue js_async_from_sync_iterator_close(JSContext *ctx,
+                                                 JSValueConst this_val,
+                                                 int argc, JSValueConst *argv,
+                                                 int magic, JSValueConst *func_data)
+{
+    JS_Throw(ctx, js_dup(argc > 0 ? argv[0] : JS_UNDEFINED));
+    JS_IteratorClose(ctx, func_data[0], true);  /* the rejection stays the error */
+    return JS_EXCEPTION;
 }
 
 static JSValue js_async_from_sync_iterator_next(JSContext *ctx, JSValueConst this_val,
@@ -61737,10 +62548,15 @@ done_resolve:
         JSValue value_wrapper_promise, resolve_reject[2];
         int res;
 
+        bool close_on_rejection = s->close_on_rejection && !done &&
+                                  magic != GEN_MAGIC_RETURN;
+
         value_wrapper_promise = js_promise_resolve(ctx, ctx->promise_ctor,
                                                    1, vc(&value), 0);
         if (JS_IsException(value_wrapper_promise)) {
             JS_FreeValue(ctx, value);
+            if (close_on_rejection)
+                JS_IteratorClose(ctx, s->sync_iter, true);
             goto reject;
         }
 
@@ -61752,11 +62568,22 @@ done_resolve:
         }
         JS_FreeValue(ctx, value);
         resolve_reject[1] = JS_UNDEFINED;
+        if (close_on_rejection) {
+            resolve_reject[1] = JS_NewCFunctionData(ctx, js_async_from_sync_iterator_close,
+                                                    1, 0, 1, vc(&s->sync_iter));
+            if (JS_IsException(resolve_reject[1])) {
+                JS_FreeValue(ctx, resolve_reject[0]);
+                JS_FreeValue(ctx, value_wrapper_promise);
+                value = JS_UNDEFINED;
+                goto fail;
+            }
+        }
 
         res = perform_promise_then(ctx, value_wrapper_promise,
                                    vc(resolve_reject),
                                    vc(resolving_funcs));
         JS_FreeValue(ctx, resolve_reject[0]);
+        JS_FreeValue(ctx, resolve_reject[1]);
         JS_FreeValue(ctx, value_wrapper_promise);
         JS_FreeValue(ctx, resolving_funcs[0]);
         JS_FreeValue(ctx, resolving_funcs[1]);
@@ -63891,12 +64718,6 @@ int JS_AddIntrinsicBaseObjects(JSContext *ctx)
     }
     JS_FreeValue(ctx, obj1);
     ctx->iterator_ctor = obj2;
-    JS_DefineAutoInitProperty(ctx, obj2, JS_ATOM_zip, JS_AUTOINIT_ID_BYTECODE,
-                              (void *)(uintptr_t)JS_BUILTIN_ITERATOR_ZIP,
-                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-    JS_DefineAutoInitProperty(ctx, obj2, JS_ATOM_zipKeyed, JS_AUTOINIT_ID_BYTECODE,
-                              (void *)(uintptr_t)JS_BUILTIN_ITERATOR_ZIP_KEYED,
-                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     ctx->class_proto[JS_CLASS_ITERATOR_CONCAT] =
         JS_NewObjectProtoList(ctx, ctx->class_proto[JS_CLASS_ITERATOR],
@@ -63933,10 +64754,6 @@ int JS_AddIntrinsicBaseObjects(JSContext *ctx)
         return -1;
     }
     ctx->array_ctor = obj1;
-    JS_DefineAutoInitProperty(ctx, obj1, JS_ATOM_fromAsync,
-                              JS_AUTOINIT_ID_BYTECODE,
-                              (void *)(uintptr_t)JS_BUILTIN_ARRAY_FROMASYNC,
-                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     /* needed to initialize arguments[Symbol.iterator] */
     ctx->array_proto_values =

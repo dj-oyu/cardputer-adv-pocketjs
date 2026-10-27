@@ -73,6 +73,13 @@ SUBSET = [
     "language/expressions/greater-than-or-equal",
     "language/expressions/member-expression",
     "language/expressions/object",
+    # Iterator.zip / zipKeyed and Array.fromAsync moved from upstream's JS to
+    # C (docs/vm/c-builtins-zip-fromasync.md). Baseline lines added
+    # 2026-10-27 from the RAM build (350/350, the upstream JS versions pass the
+    # same set). Under --harden 36 of them fail by the rules (sec.5.1 there).
+    "built-ins/Iterator/zip",
+    "built-ins/Iterator/zipKeyed",
+    "built-ins/Array/fromAsync",
     "language/statements/for-in",
     "language/statements/let",
     "language/statements/const",
