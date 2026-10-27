@@ -35,6 +35,7 @@
 #endif
 #include "pocket_bridge.h"
 #include "pocket_text.h"
+#include "jsconsole.h"
 #include "pocket_input.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
@@ -883,6 +884,11 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     }
     // Let the guest persist its last state before cancellation tears it down.
     if(leave) { e=app_tick(0x2000); app_request_stop(); }
+    // A source without frame() that Back cut short did not finish, so it must
+    // not read as one that did (code_ended() shows an error ahead of
+    // "EVALUATED (NO frame)").
+    if(leave && e==ESP_OK && app_frameless() && !app_error()[0])
+        jsconsole_set_error("STOPPED (NO frame)");
 
     bool shot=atomic_exchange(&capture,false);
     if(shot) { board_capture(true); app_force_redraw(); }

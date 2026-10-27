@@ -806,17 +806,26 @@ static esp_err_t eval_reporting(const char *source, size_t length,
 // in .mjs). Its top-level declarations stay in the module, so FRAME_WRAP and
 // bind-frame.js find frame() only if the entry assigned globalThis.frame.
 // What keeps a session without frame() alive (docs/vm/event-loop-design.md
-// sec.4.2): a job queued or parked, a promise a surface has yet to settle, an
-// open subscription, or a picture submitted and not yet on the panel. A
-// running animation is not on the list -- it would never end -- and neither is
-// memory.onPressure, which watches the session rather than asking for work.
+// sec.4.2). The test is whether anything can still call back into JS: a job
+// queued or parked, a promise a surface has yet to settle, an open
+// subscription, or a text field whose onSubmit/onCancel is still due (pocket
+// _text holds those itself, outside both tables). A picture submitted and not
+// yet on the panel counts too, so the last thing drawn is shown.
+//
+// Not on the list: a running animation, whose every step is a fresh
+// submission and whose loop/pingpong never ends -- the same exclusion
+// app_tick()'s prior_submission makes -- nor sound that is still playing
+// (play() settles at once and nothing calls back), nor memory.onPressure,
+// which watches the session rather than asking for work.
 static bool frameless_alive(void) {
     if(!guest) return false;
     if(pocketjs_guest_work_pending(guest)) return true;
     JSContext *ctx=pocketjs_guest_quickjs_context(guest);
     if(ctx && JS_IsJobPending(JS_GetRuntime(ctx))) return true;
-    return pocket_api_open_count() || pocket_api_sub_live() ||
-           pocket_kasane_has_submission() || pocket_kasane_needs_present();
+    if(pocket_api_open_count() || pocket_api_sub_live() || pocket_text_active())
+        return true;
+    return (pocket_kasane_has_submission() || pocket_kasane_needs_present()) &&
+           !pocket_kasane_animation_pending();
 }
 bool app_frameless(void) { return frameless; }
 bool app_frameless_done(void) { return guest && frameless && !frameless_alive(); }
