@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      CACHE: ${{ runner.temp }}/pressure-cache-qjs
-      OUT: ${{ runner.temp }}/test-pressure-memory
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: halt_on_error=1
     steps:
@@ -23,6 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export CACHE="$RUNNER_TEMP/pressure-cache-qjs"
+          export OUT="$RUNNER_TEMP/test-pressure-memory"
           gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
             -I components/pocketjs_guest/include tools/test_block_cache.c \
             components/pocketjs_guest/src/block_cache.c -o "$RUNNER_TEMP/test-block-cache"
