@@ -44,7 +44,8 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
     "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
 option(KASANE_DMA_OVERLAP "Experimental copied LCD DMA overlap with next Kasane band" ON)
-if(KASANE_DMA_OVERLAP)
+# IDF's dependency scan includes this file in script mode before targets exist.
+if(KASANE_DMA_OVERLAP AND NOT CMAKE_BUILD_EARLY_EXPANSION)
     add_compile_definitions(KASANE_DMA_OVERLAP=1)
 endif()
 option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
