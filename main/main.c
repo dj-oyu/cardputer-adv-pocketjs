@@ -1022,9 +1022,17 @@ static uint8_t native_tap(uint8_t action) {
     native_observe();
     return AC_OK;
 }
+static bool native_stop(void);
 static uint8_t native_suspend(void) {
     if(!running || home_modal() || pocket_text_active())return AC_BLOCKED;
-    if(!app_can_suspend() || app_suspend()!=ESP_OK)return AC_UNSUPPORTED;
+    if(!app_can_suspend())return AC_UNSUPPORTED;
+    if(app_suspend()!=ESP_OK) {
+        /* Suspension may already have released drivers. Follow the ordinary
+         * Back failure path: end the guest instead of ticking it half awake. */
+        if(!native_stop())return AC_TEARDOWN_FAILED;
+        native_observe();
+        return AC_UNSUPPORTED;
+    }
     suspend_run();return AC_OK;
 }
 static bool native_stop(void) {

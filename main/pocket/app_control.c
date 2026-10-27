@@ -91,6 +91,7 @@ static bool descriptor_for(const char *id,app_control_descriptor_t *out) {
         if(control.hooks.catalog(i,out) && !strcmp(out->id,id))return true;
     return false;
 }
+static void expire(void);
 static void handle(const request_t *r) {
     uint8_t result=AC_OK;
     uint32_t seq=rd(r->data+12),run=rd(r->data+8),fence=rd(r->data+16);
@@ -184,13 +185,23 @@ static void handle(const request_t *r) {
         else {
             entry->result=AC_ACCEPTED;entry->state=control.state;entry->run=control.run;
             reply(r,AC_ACCEPTED,control.state,control.run,NULL,0);
-            result=control.hooks.tap(arg);
-            if(result==AC_OK)result=AC_CONSUMED;
+            /* The shared USB writer can wait. Do not deliver new input after
+             * the lease expired while its ACCEPTED receipt was being sent. */
+            if(control.hooks.clock_ms)control.now=control.hooks.clock_ms();
+            if(control.now>=control.deadline) { expire();result=AC_EXPIRED; }
+            else {
+                result=control.hooks.tap(arg);
+                if(result==AC_OK)result=AC_CONSUMED;
+            }
         }
         break;
     case AC_SUSPEND:
         if(control.state!=AC_RUNNING)result=AC_BLOCKED;
-        else { result=control.hooks.suspend();if(!result)control.state=AC_SUSPENDED; }
+        else {
+            result=control.hooks.suspend();
+            if(!result)control.state=AC_SUSPENDED;
+            else if(result==AC_TEARDOWN_FAILED)control.state=AC_NEEDS_REVIEW;
+        }
         break;
     case AC_STOP:
         if(!control.hooks.stop()) { result=AC_TEARDOWN_FAILED;control.state=AC_NEEDS_REVIEW; }

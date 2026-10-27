@@ -20,6 +20,12 @@ def run():
     with tempfile.TemporaryDirectory(prefix="app-control-") as directory:
         out = Path(directory)
         (out / "app_control_transport.inc").write_text(transport)
+        native = []
+        for name in ("native_observe", "native_stop", "native_suspend"):
+            matches = re.findall(r"static (?:void|bool|uint8_t) " + name + r"\(void\) \{.*?^\}", owner, re.M | re.S)
+            assert len(matches) == 1, name
+            native.append(matches[0])
+        (out / "app_control_native.inc").write_text("\n".join(native))
         for flags in (["-O2", "-fstrict-aliasing"], ["-O1", "-g", "-fsanitize=address,undefined"]):
             exe = out / "control"
             subprocess.run([

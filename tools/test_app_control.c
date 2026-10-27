@@ -19,8 +19,30 @@ static unsigned reply_count,starts,taps,stops;
 static unsigned inject_remaining;
 static void inject_status(void);
 static uint32_t generation;
-static bool blocked,stop_fails,write_fails,jump_on_tap;
+static bool blocked,stop_fails,write_fails,jump_on_tap,jump_on_accepted;
 static uint64_t now_ms;
+static bool test_native_suspend,running,guest_present,can_suspend,services_suspended;
+static unsigned suspend_calls,suspend_runs,queue_resets,home_entries;
+static esp_err_t suspend_result;
+static uint32_t native_generation;
+enum { SCREEN_HOME, SCREEN_RUN };
+static int screen;
+static void *keys;
+static bool home_modal(void) { return false; }
+static bool pocket_text_active(void) { return false; }
+static bool app_can_suspend(void) { return can_suspend; }
+static esp_err_t app_suspend(void) { suspend_calls++;services_suspended=true;return suspend_result; }
+static bool app_guest_present(void) { return guest_present; }
+static uint32_t app_guest_generation(void) { return guest_present?generation+(stop_fails?1:0):0; }
+static void app_stop(void) { stops++;guest_present=false;services_suspended=false; }
+static const char *app_dormant_id(void) { return ""; }
+static const app_control_descriptor_t *app_registry_current(void) {
+    static const app_control_descriptor_t app={"local.hello","HELLO WORLD",5};return &app;
+}
+static void xQueueReset(void *queue) { assert(queue==keys);queue_resets++; }
+static void enter(int target) { assert(target==SCREEN_HOME);screen=target;home_entries++; }
+static void suspend_run(void) { suspend_runs++;running=false;screen=SCREEN_HOME; }
+#include "app_control_native.inc"
 bool usb_serial_jtag_is_driver_installed(void) { return true; }
 int usb_serial_jtag_read_bytes(void *data,size_t size,unsigned wait) {
     assert(size==1 && wait==0);
@@ -43,6 +65,7 @@ static bool catalog(unsigned i,app_control_descriptor_t *out) {
 static uint8_t start(const char *id,bool resume) {
     assert(!strcmp(id,"local.hello") || !strcmp(id,"local.stress") || !strcmp(id,"local.pet"));
     if(!resume)generation++;
+    native_generation=generation;running=guest_present=true;screen=SCREEN_RUN;
     starts++;return AC_OK;
 }
 static uint8_t tap(uint8_t action) {
@@ -51,7 +74,7 @@ static uint8_t tap(uint8_t action) {
     if(jump_on_tap)now_ms+=90000;
     taps++;return AC_OK;
 }
-static uint8_t suspend_guest(void) { return AC_OK; }
+static uint8_t suspend_guest(void) { return test_native_suspend?native_suspend():AC_OK; }
 static bool stop_guest(void) { stops++;return !stop_fails; }
 static uint32_t instance(void) { return generation; }
 static uint64_t clock_ms(void) { return now_ms; }
@@ -62,6 +85,7 @@ static bool emit(const uint8_t *body,size_t length) {
     assert(length==132 && reply_count<256);
     if(write_fails)return false;
     memcpy(replies[reply_count++],body,length);
+    if(jump_on_accepted && body[32]==AC_ACCEPTED)now_ms+=2;
     if(inject_remaining) { inject_remaining--;inject_status(); }
     return true;
 }
@@ -72,7 +96,10 @@ static void reset(void) {
     app_control_init(UINT64_C(0x123456780000002a),&hooks);
     reply_count=starts=taps=stops=0;generation=0;
     inject_remaining=0;
-    blocked=stop_fails=write_fails=jump_on_tap=false;now_ms=0;
+    blocked=stop_fails=write_fails=jump_on_tap=jump_on_accepted=false;now_ms=0;
+    test_native_suspend=running=guest_present=services_suspended=false;can_suspend=true;
+    suspend_calls=suspend_runs=queue_resets=home_entries=0;suspend_result=ESP_OK;
+    native_generation=0;screen=SCREEN_HOME;
     atomic_store(&inbox_head,0);atomic_store(&inbox_tail,0);rx_state=RX_IDLE;
 }
 static void make(uint8_t body[72],uint8_t op,uint32_t id,uint32_t seq,uint32_t run,uint8_t arg,const char *app) {
@@ -162,6 +189,33 @@ int main(void) {
     make(body,AC_TAP,2,2,1,1,NULL);feed(body,72);
     make(body,AC_TAP,3,3,1,1,NULL);feed(body,72);app_control_pump(now_ms);
     assert(taps==1 && stops==1 && result()==AC_STALE_SESSION); /* TTL across a blocking turn */
+    reset();open_session();send(AC_START,1,1,0,0,"local.hello");
+    now_ms=89999;jump_on_accepted=true;before=reply_count;
+    send(AC_TAP,2,2,1,1,NULL);
+    assert(reply_count==before+2 && replies[before][32]==AC_ACCEPTED);
+    assert(result()==AC_EXPIRED && state()==AC_STOPPED && taps==0 && stops==1);
+    send(AC_STATUS,2,2,1,0,NULL);assert(result()==AC_EXPIRED && taps==0 && stops==1);
+    send(AC_TAP,3,3,1,1,NULL);assert(result()==AC_STALE_SESSION && taps==0);
+
+    /* Actual main.c hooks: unsupported preflight keeps the guest; an attempted
+     * suspend that fails after releasing services must end it and return HOME. */
+    reset();open_session();send(AC_START,1,1,0,0,"local.hello");test_native_suspend=true;
+    can_suspend=false;send(AC_SUSPEND,2,2,1,0,NULL);
+    assert(result()==AC_UNSUPPORTED && state()==AC_RUNNING && running && guest_present);
+    assert(!suspend_calls && !stops && !services_suspended);
+    can_suspend=true;suspend_result=ESP_ERR_TIMEOUT;send(AC_SUSPEND,3,3,1,0,NULL);
+    assert(result()==AC_UNSUPPORTED && state()==AC_STOPPED && !running && !guest_present);
+    assert(suspend_calls==1 && stops==1 && !services_suspended && !suspend_runs);
+    assert(screen==SCREEN_HOME && queue_resets==1 && home_entries==1);
+    send(AC_TAP,4,4,1,1,NULL);assert(result()==AC_BLOCKED && !taps);
+    reset();open_session();send(AC_START,1,1,0,0,"local.hello");test_native_suspend=true;
+    suspend_result=ESP_ERR_TIMEOUT;stop_fails=true;send(AC_SUSPEND,2,2,1,0,NULL);
+    assert(result()==AC_TEARDOWN_FAILED && state()==AC_NEEDS_REVIEW && guest_present && !stops);
+    send(AC_TAP,3,3,1,1,NULL);assert(result()==AC_BLOCKED && !taps);
+    reset();open_session();send(AC_START,1,1,0,0,"local.hello");test_native_suspend=true;
+    send(AC_SUSPEND,2,2,1,0,NULL);
+    assert(result()==AC_OK && state()==AC_SUSPENDED && !running && guest_present);
+    assert(suspend_calls==1 && suspend_runs==1 && !stops);
     /* Fixed user rate and lifetime budget, with lifecycle cleanup reserved. */
     reset();open_session();send(AC_START,1,1,0,0,"local.hello");
     for(unsigned i=2;i<=10;i++)send(AC_TAP,i,i,1,1,NULL);
