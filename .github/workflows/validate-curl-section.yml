@@ -1,0 +1,70 @@
+name: Validate PR64 curl section integration
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [native, m32]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 2b00d15d96c7590498ccc3ec230049f888e358c0
+          path: curl-support
+          persist-credentials: false
+      - name: Existing m32 compiler libraries
+        if: matrix.abi == 'm32'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+      - name: Reuse fixed public compatibility oracle
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import shutil
+          for name in ('run_bigwave_curl.py','curl_boundary.py'):
+              shutil.copyfile(Path('curl-support/tools/games')/name,Path('tools/games')/name)
+          p=Path('tools/games/run_bigwave_curl.py');s=p.read_text()
+          old="BASE='e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'"
+          assert s.count(old)==1
+          s=s.replace(old,"BASE='b7f86ab28a87df8684c0b1670cb944ff60527ede'")
+          old=" if m32:\n";assert s.count(old)==1
+          s=s.replace(old,' flags += ["-DQJS_DISABLE_DUMPS"]\n'+old)
+          p.write_text(s)
+          PYTHON
+      - name: Exact doubles and full lifecycle composed panels
+        env:
+          ABI: ${{ matrix.abi }}
+          M32_CFLAGS: -m32 -malign-double
+        run: |
+          set -euo pipefail
+          flags=()
+          if test "$ABI" = m32; then flags+=(--m32 --heap-limit 163840); fi
+          python3 -B tools/games/run_bigwave_curl.py --verify-only "${flags[@]}" --out .cache/curl-current-${ABI}
+      - name: Sanitizer compatibility
+        if: matrix.abi == 'native'
+        run: python3 -B tools/games/run_bigwave_curl.py --sanitize --verify-only --out .cache/curl-current-asan
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: curl-integration-${{ matrix.abi }}-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/curl-current-*/result.json
+            .cache/curl-current-*/boundary-result.json
+            .cache/curl-current-*/*.log
+            .cache/curl-current-*/build-flags.json
+          retention-days: 14

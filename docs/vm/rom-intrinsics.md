@@ -1,6 +1,6 @@
 # ROM intrinsics: 固めた組み込みオブジェクトを flash に置く（考察と設計、2026-10-26）
 
-**状態: R1・R2 を実装（`vm/rom-builtins`、`CONFIG_POCKET_VM_ROM_INTRINSICS`、既定 n）。実機の DERBY でゲストが −19.0 KB、速さは落ちない（§12）。以下の §1〜§11 は実装前の考察で、数字は当時の推定のまま。** F 系列（[builtin-floor-plan.md](builtin-floor-plan.md)、F1 ROM atom・F2 遅延索引・F3 群の遅延）の次の段で、
+**状態: R1・R2 を実装し `main` に入った（PR #85）。`CONFIG_POCKET_VM_ROM_INTRINSICS` は既定 y（2026-10-27〜）。実機の DERBY でゲストが −19.0 KB、速さは落ちない（§12）。以下の §1〜§11 は実装前の考察で、数字は当時の推定のまま。** F 系列（[builtin-floor-plan.md](builtin-floor-plan.md)、F1 ROM atom・F2 遅延索引・F3 群の遅延）の次の段で、
 `vm/harden`（アプリの context を「生まれた時点で読み取り専用の intrinsic」にする線。設計書は未着手）に依存する。
 数字はすべて **実測(host, 実機レイアウト)**（`-m32 -malign-double`、JSValue 8 B・ポインタ 4 B、tlsf のブロック長で課金）／
 **実測(device)**（他文書からの引用、出典つき）／**計算**／**推定** のどれかを付ける。再現は §11。

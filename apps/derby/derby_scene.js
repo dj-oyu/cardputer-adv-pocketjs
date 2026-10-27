@@ -40,7 +40,7 @@ function build(up) {
       R.bar = [0, 1, 2].map(i => tx.rect({bounds: [180, 43 + 12 * i, 181, 49 + 12 * i], color: 0x05ffa1ff}));
       // The tote: a silk swatch per runner, then its odds.
       R.od = SILK.map((c, i) => (tx.rect({bounds: [3 + 30 * i, 15, 6 + 30 * i, 22], color: (c >> 8 & 248) * 16777216 + (c >> 3 & 252) * 65536 + (c << 3 & 248) * 256 + 255}),
-        tt([8 + 30 * i, 13, 32 + 30 * i, 24, 0xd8e8ffff, 4])));
+        tt([8 + 30 * i, 13, 32 + 30 * i, 24, 0xd8e8ffff, 4], od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]))));
     }
     R.t = TX[pad ? 0 : res0 ? 2 : 1].map(b => tt(b));
     // The curtain: a black rect over everything but DEMO.
@@ -55,7 +55,7 @@ function hud(tx) {
     const h = F.h[pick];
     s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
       STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
-    for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]));
+
     if (R.pick !== pick) {
       R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
       const v = [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1];
