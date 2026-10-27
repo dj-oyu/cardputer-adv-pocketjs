@@ -7,8 +7,8 @@ from pathlib import Path
 import argparse,difflib,hashlib,json,os,subprocess,tempfile
 
 CASES={
- 'result57':('d7d9d90050d172e176c0f3ddbe3666a07af1ff7f','931e4bac4d755bebf5fd7cc0b53a5e9a80f27299','apps/derby/derby_scene.js','function hud(tx) {\n','\nfunction at(u) {'),
- 'photo59':('7da4f9087eedef69ea54063bb9a2c721e8ead8da','af99783c02d0984f229708d985a51e3aebd71c97','apps/derby/derby_scene.js','function hud(tx) {\n','\nfunction at(u) {'),
+ 'result57':('d7d9d90050d172e176c0f3ddbe3666a07af1ff7f','931e4bac4d755bebf5fd7cc0b53a5e9a80f27299','apps/derby/derby_scene.js',"\n  } else if (scene === 'res') {\n","\n  } else {\n    const o = scene === 'photo' ?"),
+ 'photo59':('7da4f9087eedef69ea54063bb9a2c721e8ead8da','af99783c02d0984f229708d985a51e3aebd71c97','apps/derby/derby_scene.js',"\n      'PTS ' + pts + '   1 NEXT RACE   R REPLAY'];\n  } else {\n",'\n  for (let i = 0; i < s.length; ++i) if (R.t[i].s !== s[i])'),
  'rock63':('af99783c02d0984f229708d985a51e3aebd71c97','bd77c6aa9bd22fefd1edc1f4b5a7e367095b9d98','apps/bigwave/big_wave.js','  function draws(D) {\n','\n  const V = P && pocket.kasane;'),
  'plain66':('4b5a4c5d4eed2ca9d1a78ce5d0103e4e58c452d3','32910d4a114c16d9f065676e85528f172562f0c7','main/ui/kasane/ksn_procedural.c','static inline __attribute__((always_inline)) void plain_band(const ksn_proc_segment *s,uint16_t *pixels,int y,int height){\n','/* One pixel of a pattern line: cell u >> 8 of the pattern. */'),
 }

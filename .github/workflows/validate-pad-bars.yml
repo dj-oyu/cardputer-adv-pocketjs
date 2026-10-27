@@ -1,0 +1,69 @@
+name: Validate PR56 paddock bars integration
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [native, m32]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 146128065e81bb3493985e0b1b7123ff819baaf4
+          path: bars-support
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Existing m32 compiler libraries
+        if: matrix.abi == 'm32'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+      - name: Reuse public lifecycle and negative oracle
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import os
+          s=Path('bars-support/tools/games/run_derby_pad_bars.py').read_text()
+          old="BASE='e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'";assert s.count(old)==1
+          s=s.replace(old,"BASE='8e9771966a5ced7370facd07131c19adfd9b99b5'")
+          old="flags=['-O2']";assert s.count(old)==1
+          flags=['-O2','-DQJS_DISABLE_DUMPS']
+          if os.environ['ABI']=='m32':
+              flags+=['-m32','-malign-double']
+              old_heap="DERBY_HEAP_LIMIT='524288'";assert s.count(old_heap)==2
+              s=s.replace(old_heap,"DERBY_HEAP_LIMIT='163840'")
+          s=s.replace(old,'flags='+repr(flags))
+          Path('tools/games/run_derby_pad_bars.py').write_text(s)
+          PYTHON
+      - name: Fixed-base lifecycle selection rebuild and negative control
+        run: python3 -B tools/games/run_derby_pad_bars.py --verify-only --out .cache/bars-current-${{ matrix.abi }}
+      - name: Sanitizer lifecycle
+        if: matrix.abi == 'native'
+        run: python3 -B tools/games/run_derby_pad_bars.py --sanitize --verify-only --out .cache/bars-current-asan
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pad-bars-integration-${{ matrix.abi }}-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/bars-current-*/result.json
+            .cache/bars-current-*/*/*.log
+            .cache/bars-current-*/*/*.csv
+          retention-days: 14
