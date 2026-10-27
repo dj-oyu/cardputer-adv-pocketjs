@@ -114,6 +114,7 @@ typedef struct {
 } snap;
 static ksn_proc_segment seg_a[2][KSN_PROC_SEGMENTS],seg_b[2][KSN_PROC_SEGMENTS];
 static void take(snap *s,ksn_proc_segment seg[2][KSN_PROC_SEGMENTS],const char *code){
+    const ksn_proc_frame *scratch=&workspace->frame;
     memset(s,0,sizeof *s);
     snprintf(s->code,sizeof s->code,"%s",code);
     s->status=vm->status;s->steps=vm->steps;s->pc=vm->pc;s->last_pc=vm->last_pc;
@@ -432,6 +433,33 @@ static void slots_contract(void){
     pocket_proc_reset();
 }
 
+#ifdef POCKET_DERBY_RUNNER_AFFINE
+/* Both writers share the image-band workspace. A rejected fast path then
+ * uses the VM; either draw may be abandoned while its old image is read. */
+static void affine_workspace_contract(void){
+    eval_ok("globalThis.runner=proc.register('derby.runner',[0xdd8c,0xffff,0x7bef]);"
+            "proc.resource();proc.beginFrame(0x123);proc.commit()");
+    pocket_proc_present_result(KSN_OK);
+    ksn_image_port image;pocket_proc_image_port(&image);
+    uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
+    pocket_proc_runner_affine_counts(NULL,true);
+    for(unsigned fallback=0;fallback<2;fallback++){
+        REQUIRE(image.read_span(image.ctx,0,0,0,0,KSN_PROC_W,span,alpha)==KSN_OK);
+        eval_ok(fallback?"proc.beginFrame(0);proc.draw(runner,[100,50,9])":
+                         "proc.beginFrame(0);proc.draw(runner,[100,50,1])");
+        for(unsigned ended=0;ended<2;ended++){
+            REQUIRE(image.read_span(image.ctx,0,0,0,0,KSN_PROC_W,span,alpha)==KSN_OK);
+            for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0x123&&alpha[x]==255);
+            pocket_proc_end_turn();
+        }
+    }
+    DerbyRunnerAffineCounts counts;pocket_proc_runner_affine_counts(&counts,false);
+    REQUIRE(counts.attempts==2&&counts.accepted==1&&counts.fallback==1);
+    REQUIRE(counts.scalar_batches==1&&counts.pie_batches==0);
+    puts("PASS workspace cache: affine accepted and VM fallback, before/after abandoned turn; counters retained");
+}
+#endif
+
 int main(int argc,char **argv){
     REQUIRE(argc==3);
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
@@ -444,6 +472,13 @@ int main(int argc,char **argv){
     JS_FreeValue(ctx,global);
     eval_ok(prelude);
     char *app=slurp(argv[1]);eval_ok(app);(free)(app);
+#ifdef POCKET_DERBY_RUNNER_AFFINE
+    if(!strcmp(argv[2],"--workspace-affine")){
+        affine_workspace_contract();
+        pocket_proc_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        return 0;
+    }
+#endif
     /* The table's declared argument counts, by plan. */
     eval_ok("globalThis.ROMP={}");
     for(unsigned i=0;i<ksn_proc_rom_plans_count;i++){
