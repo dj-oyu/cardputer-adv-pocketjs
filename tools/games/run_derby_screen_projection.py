@@ -12,7 +12,8 @@ import subprocess
 import run_derby
 
 ROOT=Path(__file__).resolve().parents[2]
-BASE='e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'
+# Isolate paint() against the same adopted scene; retain historical e0 evidence separately.
+BASE='06523d9fe78c3bd1db293eb09ab17522954807f9'
 SOURCE='apps/derby/derby_scene.js'
 
 def replace(s,old,new):
