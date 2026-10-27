@@ -163,6 +163,13 @@ void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
  * one that created the guest. */
 void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
 
+/* Suspend small-block retention while native free/contiguous RAM is under
+ * pressure; false permits reuse again after the host's recovery hysteresis.
+ * Owner-task only, and never enables a cache rejected at guest creation.
+ * This does not change the guest's live allocation accounting or heap limit. */
+void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
+                                            bool pressured);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

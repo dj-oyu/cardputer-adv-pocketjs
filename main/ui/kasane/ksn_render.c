@@ -1,3 +1,4 @@
+#include "../../pocket/derby_detail.h"
 #include "ksn_render.h"
 #include "ksn_image_transform.h"
 #include "ksn_p0_probe.h"
@@ -1935,9 +1936,17 @@ static unsigned outside_opaque(ksn_rect box,ksn_rect opaque,ksn_rect out[4]){
     if(y1<box.y1)out[count++]=(ksn_rect){x0,y1,x1,box.y1};
     return count;
 }
+#ifdef KASANE_DMA_OVERLAP
+static ksn_result render_rects_body(ksn_core *core,const ksn_display_port *display,
+                               ksn_backdrop_loader load_backdrop,bool occlusion_safe,
+                               ksn_render_stats *stats,ksn_tx *prepared){
+#else
 static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
                                ksn_render_stats *stats){
+    DD_SCOPE(DD_RENDER);
+#endif
+    DD_OPEN(prepare,DD_RENDER_PREPARE);
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     stretch_map.active=false;
@@ -1948,10 +1957,17 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         ksn_core_opaque_system_bands(core):0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
+#ifdef KASANE_DMA_OVERLAP
+    *prepared=frame.ticket;
+#endif
     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
     damage.bands&=~occluded;
+#ifdef KASANE_DMA_OVERLAP
+    if(!damage.bands)return KSN_OK;
+#else
     if(!damage.bands)return ksn_core_presented(core,frame.ticket);
+#endif
     /* Narrowing is a decision taken here, before any pixel is written: a band
      * composited over part of its width leaves the rest of the shared strip
      * holding the previous band's pixels, so a port that can only send whole
@@ -2075,11 +2091,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     }
     uint16_t *pixels=display->strip(display->ctx);
     if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
+    DD_CLOSE(prepare);
     ksn_span_scratch scratch;
     for(unsigned band=0;band<17;band++){
         if(!(damage.bands&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
+        DD_OPEN(backdrop,DD_BACKDROP);
         if(load_backdrop&&!(next_system_opaque&(1u<<band))){
             result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
@@ -2091,6 +2109,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             else for(int r=0;r<rows;r++)
                 fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
             KSN_PROF_END(fill);}
+        DD_CLOSE(backdrop);
+        DD_OPEN(composite,DD_COMPOSITE);
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=layer==KSN_APP?app_start[band]:0;
                                                   i<frame.next[layer].commands;i++){
             if(layer==KSN_APP&&(next_system_opaque&(1u<<band)))break;
@@ -2335,22 +2355,60 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             KSN_PROF_END(blend);}
             }
         }
+        DD_CLOSE(composite);
+        DD_ADD(DD_SHARED_OUTPUT_BYTES,(uint64_t)rows*(unsigned)(dx1-dx0)*2u);
+        DD_OPEN(present,DD_TX_SYNC);
         result=(dx0==0&&dx1==240)?
             display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels):
             display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
+        DD_CLOSE(present);
         if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
         stats->bands|=1u<<band;
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
     }
+#ifndef KASANE_DMA_OVERLAP
     return ksn_core_presented(core,frame.ticket);
+#else
+    return KSN_OK;
+#endif
 }
+#ifdef KASANE_DMA_OVERLAP
+ksn_result ksn_render_rects_complete(ksn_core *core,const ksn_display_port *display,
+                                     ksn_backdrop_loader load,bool occlusion_safe,
+                                     const ksn_display_completion *completion,
+                                     ksn_render_stats *stats){
+    DD_SCOPE(DD_RENDER);
+    ksn_tx prepared={0};
+    ksn_result result=render_rects_body(core,display,load,occlusion_safe,stats,&prepared);
+    /* A rejected caller owns no display work and must not drain another frame. */
+    if(!prepared.value)return result;
+    /* Even a provider failure after an earlier band must release the display
+     * borrow. Preserve the first error; completion failure must never ACK. */
+    ksn_result finished=completion&&completion->finish?
+        completion->finish(completion->ctx):KSN_OK;
+    if(finished!=KSN_OK){
+        if(prepared.value)ksn_core_failed(core,prepared);
+        if(result==KSN_OK)result=finished;
+    }
+    if(result==KSN_OK)return ksn_core_presented(core,prepared);
+    return result;
+}
+#endif
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+#ifdef KASANE_DMA_OVERLAP
+    return ksn_render_rects_complete(core,display,NULL,false,NULL,stats);
+#else
     return render_rects(core,display,NULL,false,stats);
+#endif
 }
 ksn_result ksn_render_rects_backdrop(ksn_core *core,const ksn_display_port *display,
                                      ksn_backdrop_loader load,bool occlusion_safe,
                                      ksn_render_stats *stats){
     if(!load)return KSN_INVALID;
+#ifdef KASANE_DMA_OVERLAP
+    return ksn_render_rects_complete(core,display,load,occlusion_safe,NULL,stats);
+#else
     return render_rects(core,display,load,occlusion_safe,stats);
+#endif
 }

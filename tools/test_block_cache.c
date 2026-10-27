@@ -13,9 +13,10 @@
 #include <string.h>
 
 typedef struct { size_t length; size_t pad; } hdr_t;
-static unsigned backend_live, fail_next;
+static unsigned backend_live, fail_next, backend_calls;
 static void *be_malloc(void *ctx, size_t n) {
   (void)ctx;
+  backend_calls++;
   if (fail_next) { fail_next--; return NULL; }
   size_t len = (n + 3) & ~(size_t)3; if (len < 12) len = 12;
   hdr_t *h = malloc(sizeof(hdr_t) + len);
@@ -32,6 +33,68 @@ static unsigned failures;
 
 enum { SLOTS = 512 };
 static struct { unsigned char *p; size_t n; unsigned char tag; } live[SLOTS];
+
+static void pressure_retention(const uint16_t *sizes, unsigned n) {
+  block_cache_t cache;
+  block_cache_init(&cache, &BE, sizes, n, true);
+  unsigned char *live_block = block_cache_malloc(&cache, 48, 48);
+  memset(live_block, 0xa5, 48);
+  void *held[BLOCK_CACHE_CLASSES][BLOCK_CACHE_DEPTH];
+  size_t cap = 0;
+  for (unsigned c = 0; c < n; c++) {
+    cap += sizes[c] * BLOCK_CACHE_DEPTH;
+    for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++)
+      held[c][i] = block_cache_malloc(&cache, sizes[c], sizes[c]);
+  }
+  for (unsigned c = 0; c < n; c++)
+    for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++)
+      block_cache_free(&cache, held[c][i]);
+  CHECK(block_cache_held(&cache) == cap, "all pressure-test classes not full");
+  CHECK(backend_live == 1 + n * BLOCK_CACHE_DEPTH, "unexpected backend live count");
+
+  block_cache_set_enabled(&cache, false);
+  CHECK(!cache.enabled && block_cache_held(&cache) == 0 && backend_live == 1,
+        "pressure did not release all idle blocks");
+  unsigned flushes = cache.flushes;
+  for (unsigned turn = 0; turn < 1000; turn++) {
+    // A repeated pressure sample must not flush twice or let the next turn
+    // retain its frees again. A live guest allocation remains untouched.
+    block_cache_set_enabled(&cache, false);
+    for (unsigned c = 0; c < n; c++) {
+      void *p = block_cache_malloc(&cache, sizes[c], sizes[c]);
+      CHECK(p != NULL, "backend allocation failed during pressure");
+      block_cache_free(&cache, p);
+    }
+    CHECK(block_cache_held(&cache) == 0 && backend_live == 1,
+          "cache retained a freed block during sustained pressure");
+  }
+  CHECK(cache.flushes == flushes, "repeated pressure flushed an empty cache");
+  for (unsigned i = 0; i < 48; i++)
+    CHECK(live_block[i] == 0xa5, "pressure changed a live guest block");
+  unsigned calls = backend_calls;
+  fail_next = 1;
+  CHECK(block_cache_malloc(&cache, 48, 48) == NULL,
+        "disabled empty cache retried a backend failure");
+  CHECK(backend_calls == calls + 1 && cache.flushes == flushes,
+        "disabled cache performed an unnecessary flush/retry");
+  block_cache_flush(&cache); // Dormancy/cleanup never re-enables retention.
+  block_cache_free(&cache, live_block);
+  CHECK(!cache.enabled && backend_live == 0, "flush re-enabled or leaked");
+
+  block_cache_set_enabled(&cache, true);
+  void *p = block_cache_malloc(&cache, 48, 48);
+  block_cache_free(&cache, p);
+  CHECK(block_cache_held(&cache) == 48, "recovery did not restore retention");
+  unsigned hits = cache.hits;
+  void *q = block_cache_malloc(&cache, 48, 48);
+  CHECK(q == p && cache.hits == hits + 1, "recovery did not restore cache hits");
+  block_cache_set_enabled(&cache, true); // A live block survives this too.
+  block_cache_free(&cache, q);
+  block_cache_set_enabled(&cache, false);
+  CHECK(backend_live == 0 && block_cache_held(&cache) == 0,
+        "second pressure episode leaked");
+  printf("PRESSURE_RETENTION released_usable=%zu held_during_pressure=0 turns=1000\n", cap);
+}
 
 int main(int argc, char **argv) {
   static const uint16_t sizes[] = {12, 16, 32, 36, 48, 72, 80, 88};
@@ -90,6 +153,7 @@ int main(int argc, char **argv) {
   void *x = block_cache_malloc(&off, 48, 48);
   block_cache_free(&off, x);
   CHECK(block_cache_held(&off) == 0 && backend_live == 0, "disabled cache kept a block");
+  pressure_retention(sizes, sizeof(sizes) / sizeof(sizes[0]));
   printf("hits=%u misses=%u pushes=%u flushes=%u\n", cache.hits, cache.misses, cache.pushes, cache.flushes);
   printf("%s: %u failure(s)\n", failures ? "BLOCK_CACHE FAIL" : "BLOCK_CACHE PASS", failures);
   return failures ? 1 : 0;

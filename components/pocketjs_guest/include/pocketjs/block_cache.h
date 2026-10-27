@@ -47,6 +47,10 @@ typedef struct {
 void block_cache_init(block_cache_t *cache, const block_cache_backend_t *backend,
                       const uint16_t *sizes, unsigned n, bool enabled);
 
+// Disabling returns held blocks and routes subsequent calls to the backend.
+// Re-enabling starts empty. The caller retains any backend eligibility policy.
+void block_cache_set_enabled(block_cache_t *cache, bool enabled);
+
 // `rounded`: the length the backend would give the request (the caller's
 // rounding, e.g. tlsf's 4 B / 12 B minimum). A miss, or a length not listed,
 // goes to the backend; a backend NULL flushes the cache and retries once.

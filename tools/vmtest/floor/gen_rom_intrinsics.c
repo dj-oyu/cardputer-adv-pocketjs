@@ -468,8 +468,21 @@ static void emit_object(FILE *f, int k)
     case JS_CLASS_ERROR:
         break;
     case JS_CLASS_C_FUNCTION:
-        fprintf(f, "           .u.cfunc = { .c_function.generic = (JSCFunction *)%s, .length = %u, .cproto = %u, .magic = %d },\n",
-                fn_name((void *)p->u.cfunc.c_function.generic), p->u.cfunc.length, p->u.cfunc.cproto, p->u.cfunc.magic);
+        fprintf(f, "           .u.cfunc = { .c_function.generic = (JSCFunction *)%s, .length = %u, .cproto = %u, .magic = ",
+                fn_name((void *)p->u.cfunc.c_function.generic), p->u.cfunc.length, p->u.cfunc.cproto);
+        /* These are private bytecode offsets, not ABI-independent integers.
+           Let the consuming compiler resolve its own layout. */
+        if (p->u.cfunc.c_function.generic == (JSCFunction *)js_function_proto_int32) {
+            if (p->u.cfunc.magic == offsetof(JSFunctionBytecode, line_num))
+                fprintf(f, "offsetof(JSFunctionBytecode, line_num)");
+            else if (p->u.cfunc.magic == offsetof(JSFunctionBytecode, col_num))
+                fprintf(f, "offsetof(JSFunctionBytecode, col_num)");
+            else
+                FAIL("unexpected function metadata offset %d", p->u.cfunc.magic);
+        } else {
+            fprintf(f, "%d", p->u.cfunc.magic);
+        }
+        fprintf(f, " },\n");
         break;
     case JS_CLASS_C_FUNCTION_DATA:
         fprintf(f, "           .u.c_function_data_record = (JSCFunctionDataRecord *)&js_rom_cfd_%d,\n", k);
