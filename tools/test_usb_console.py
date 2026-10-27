@@ -16,7 +16,7 @@ def run(idf=None):
     with tempfile.TemporaryDirectory(prefix="usb-console-") as temporary:
         out = Path(temporary)
         headers = {
-            "esp_err.h": "#pragma once\ntypedef int esp_err_t;\nenum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_INVALID_STATE=1,ESP_ERR_NO_MEM,ESP_ERR_INVALID_SIZE,ESP_ERR_TIMEOUT};\n",
+            "esp_err.h": "#pragma once\ntypedef int esp_err_t;\nenum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_INVALID_STATE=1,ESP_ERR_NO_MEM,ESP_ERR_INVALID_SIZE,ESP_ERR_TIMEOUT,ESP_ERR_NOT_FOUND};\n",
             "esp_timer.h": "#include <stdint.h>\nint64_t esp_timer_get_time(void);\n",
             "freertos/FreeRTOS.h": "#pragma once\n#include <stdint.h>\ntypedef uint32_t TickType_t;\n#define portTICK_PERIOD_MS 1\n#define pdTRUE 1\n",
             "freertos/semphr.h": "#pragma once\n#include \"FreeRTOS.h\"\ntypedef struct {int held;} StaticSemaphore_t;\ntypedef StaticSemaphore_t *SemaphoreHandle_t;\nSemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *);\nint xSemaphoreTake(SemaphoreHandle_t,TickType_t);\nvoid xSemaphoreGive(SemaphoreHandle_t);\n",

@@ -54,10 +54,11 @@ static void clean(void) {
 static void wrote(int fd, const char *s) { assert(vfs.write(fd,s,strlen(s))==(ssize_t)strlen(s)); }
 
 // Actual main.c teardown, with guest/screen ports replaced by deterministic ones.
-static bool running;
+static bool running, frameless;
 static int keys,owner,restored,pending_calls;
 static const char *home_error;
-static int run_started;
+static int run_started, ended_status;
+static bool app_frameless(void) { return frameless; }
 typedef struct {void (*run_restore)(void);void (*ended)(int,const char *);} screen_ops_t;
 static screen_ops_t SCREENS[2];
 static void app_stop(void) { wrote(1,"APP_STOPPED\n"); }
@@ -66,7 +67,7 @@ static const char *app_error(void) { return ""; }
 static void sound_play(int n) { (void)n; }
 static void take_pending_run(void) { pending_calls++; }
 static void restore(void) { restored++; }
-static void editor_ended(int status,const char *why) { (void)status;(void)why;wrote(1,"EDITOR_READY\n"); }
+static void editor_ended(int status,const char *why) { ended_status=status;(void)why;wrote(1,"EDITOR_READY\n"); }
 #define ESP_LOGI(tag,message) wrote(1,message "\n")
 #include "end_run.inc"
 
@@ -122,5 +123,14 @@ int main(void) {
     clean();owner=1;running=true;SCREENS[1].ended=editor_ended;
     end_run(ESP_OK);
     assert(!strcmp(wire,"APP_STOPPED\nEDITOR_READY\n") && !strstr(wire,"HOME_READY"));
+    assert(ended_status==ESP_OK);
+    clean();running=true;frameless=true;run_started=ESP_OK;
+    end_run(ESP_OK);
+    assert(ended_status==ESP_ERR_NOT_FOUND);
+    assert(!strcmp(wire,"APP_STOPPED\nEDITOR_READY\n"));
+    clean();running=true;run_started=ESP_ERR_TIMEOUT;
+    end_run(ESP_OK);
+    assert(ended_status==ESP_ERR_TIMEOUT);
+    assert(!strcmp(wire,"APP_STOPPED\nEDITOR_READY\n"));
     puts("USB_CONSOLE_HOME PASS: finite refusal, recovery LF, streams, bridge, actual end_run");
 }
