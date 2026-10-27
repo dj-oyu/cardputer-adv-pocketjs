@@ -50,6 +50,17 @@ jobs:
               old_heap="DERBY_HEAP_LIMIT='524288'";assert s.count(old_heap)==2
               s=s.replace(old_heap,"DERBY_HEAP_LIMIT='163840'")
           s=s.replace(old,'flags='+repr(flags))
+          # Apply the lane interpolation fix to both image-comparison lanes.
+          # The bars implementation and its negative control remain distinct.
+          old="if label=='base':(src/'derby_scene.js').write_bytes(subprocess.check_output(['git','show',f'{BASE}:{SOURCE}'],cwd=ROOT))"
+          new="""if label=='base':
+                      baseline=subprocess.check_output(['git','show',f'{BASE}:{SOURCE}'],cwd=ROOT).decode()
+                      current=(ROOT/SOURCE).read_text()
+                      begin='function at(u) {';end='// Keep all projection inputs'
+                      baseline=baseline[:baseline.index(begin)]+current[current.index(begin):current.index(end)]+baseline[baseline.index(end):]
+                      (src/'derby_scene.js').write_text(baseline)"""
+          assert s.count(old)==1
+          s=s.replace(old,new)
           Path('tools/games/run_derby_pad_bars.py').write_text(s)
           PYTHON
       - name: Fixed-base lifecycle selection rebuild and negative control

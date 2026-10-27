@@ -71,9 +71,15 @@ def instrument(root: Path) -> None:
         view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
     # Every draw goes through dr() (derby_view.js), as it is made.
     anchor = "const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };"
-    assert anchor in view, "derby_view.js: draw line moved"
-    view = view.replace(anchor, "const dr = (n, a) => { if (live[n]) { __log('DRAW ' + n + ' ' + a.join(',')); "
-                                "H.draw(live[n], a); } };")
+    if anchor in view:
+        view = view.replace(anchor, "const dr = (n, a) => { if (live[n]) { __log('DRAW ' + n + ' ' + a.join(',')); "
+                                    "H.draw(live[n], a); } };")
+    else:
+        anchor = "const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) H.draw(live[n], a, b, c, d, e, f, g, h); };"
+        assert anchor in view, "derby_view.js: draw line moved"
+        view = view.replace(anchor, "const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) { "
+                            "__log('DRAW ' + n + ' ' + [a,b,c,d,e,f,g,h].map(v => v === undefined ? 0 : v).join(',')); "
+                            "H.draw(live[n], a, b, c, d, e, f, g, h); } };")
     (d / "derby_view.js").write_text(view, encoding="utf-8")
     # prog() as the app runs it (the decoder, or the text assembler of an
     # older DIR) records its arguments for the REG line.

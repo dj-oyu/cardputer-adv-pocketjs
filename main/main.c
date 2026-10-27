@@ -38,6 +38,7 @@
 #include "esp_app_desc.h"
 #include "esp_random.h"
 #include "pocket_text.h"
+#include "jsconsole.h"
 #include "pocket_input.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
@@ -686,7 +687,8 @@ static bool code_wants_run(const char **source, size_t *len) {
 static void code_ended(esp_err_t started, const char *error) {
     // A source with no frame drew what it drew and has nothing to run, so its
     // output is the result rather than a failure.
-    if(started==ESP_ERR_NOT_FOUND)  code_returned("EVALUATED (NO frame)");
+    // One that waited can still fail after its evaluation, so its error wins.
+    if(started==ESP_ERR_NOT_FOUND)  code_returned(error[0]?error:"EVALUATED (NO frame)");
     else if(started!=ESP_OK)        code_returned(error[0]?error:"START FAILED");
     else                            code_returned(error[0]?error:NULL);
 }
@@ -772,7 +774,11 @@ static void end_run(esp_err_t tick_err) {
     // editor's own ended() draws it.
     if(o->run_restore) o->run_restore();
     const char *why=app_error();
-    if(o->ended) o->ended(run_started, tick_err==ESP_OK?why:(why[0]?why:"EXECUTION FAILED"));
+    // Reported as what it is, a source without frame(): the screens tell that
+    // case apart by this code (the tutorial grades lesson 1 on it), and it
+    // reached them as a failed start before it could wait for anything.
+    esp_err_t started=run_started==ESP_OK && app_frameless()?ESP_ERR_NOT_FOUND:run_started;
+    if(o->ended) o->ended(started, tick_err==ESP_OK?why:(why[0]?why:"EXECUTION FAILED"));
     else {
         if(tick_err!=ESP_OK) home_error="EXECUTION FAILED";
         sound_play(2);
@@ -932,6 +938,11 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     }
     // Let the guest persist its last state before cancellation tears it down.
     if(leave) { e=app_tick(0x2000); app_request_stop(); }
+    // A source without frame() that Back cut short did not finish, so it must
+    // not read as one that did (code_ended() shows an error ahead of
+    // "EVALUATED (NO frame)").
+    if(leave && e==ESP_OK && app_frameless() && !app_error()[0])
+        jsconsole_set_error("STOPPED (NO frame)");
 
     bool shot=atomic_exchange(&capture,false);
     if(shot) { board_capture(true); app_force_redraw(); }
@@ -961,6 +972,9 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // Accepted this turn, so no further input reaches the app: the session ends
     // here and end_run() starts what it asked for.
     if(!leave && e==ESP_OK && pocket_workspace_run_requested()) { end_run(ESP_OK); return; }
+    // A source without frame() ends itself once its last promise settled and
+    // its last job ran -- the end it used to reach straight after evaluation.
+    if(!leave && e==ESP_OK && app_frameless_done()) { end_run(ESP_OK); return; }
     if(leave || e!=ESP_OK) end_run(e);
 }
 

@@ -3,11 +3,11 @@
  * Included at the end of quickjs.c; regenerate after any change to the
  * builtins, the ROM atom table or the structs it writes. */
 
-_Static_assert(JS_ROM_ATOM_END == 625, "quickjs-rom-intrinsics.h is stale (ROM atoms)");
-_Static_assert(JS_ATOM_END == 230, "quickjs-rom-intrinsics.h is stale (atoms)");
+_Static_assert(JS_ROM_ATOM_END == 630, "quickjs-rom-intrinsics.h is stale (ROM atoms)");
+_Static_assert(JS_ATOM_END == 235, "quickjs-rom-intrinsics.h is stale (atoms)");
 _Static_assert(JS_CLASS_INIT_COUNT == 65, "quickjs-rom-intrinsics.h is stale (classes)");
 
-/* strings: 531 */
+/* strings: 532 */
 static const ROM_STR_T(9) js_rom_str_0 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
 static const ROM_STR_T(15) js_rom_str_1 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
 static const ROM_STR_T(8) js_rom_str_2 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
@@ -48,371 +48,371 @@ static const ROM_STR_T(1) js_rom_str_36 = { .s = { .header = { JS_IMMORTAL_REF_C
 static const ROM_STR_T(5) js_rom_str_37 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "call" };
 static const ROM_STR_T(6) js_rom_str_38 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "apply" };
 static const ROM_STR_T(5) js_rom_str_39 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "bind" };
-static const ROM_STR_T(21) js_rom_str_40 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.hasInstance]" };
-static const ROM_STR_T(13) js_rom_str_41 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "get fileName" };
-static const ROM_STR_T(15) js_rom_str_42 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get lineNumber" };
-static const ROM_STR_T(17) js_rom_str_43 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 16, .kind = JS_STRING_KIND_NORMAL }, .c = "get columnNumber" };
-static const ROM_STR_T(9) js_rom_str_44 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "Function" };
-static const ROM_STR_T(6) js_rom_str_45 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Array" };
-static const ROM_STR_T(8) js_rom_str_46 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "isArray" };
-static const ROM_STR_T(5) js_rom_str_47 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "from" };
-static const ROM_STR_T(3) js_rom_str_48 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "of" };
-static const ROM_STR_T(21) js_rom_str_49 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "get [Symbol.species]" };
-static const ROM_STR_T(3) js_rom_str_50 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "at" };
-static const ROM_STR_T(5) js_rom_str_51 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "with" };
-static const ROM_STR_T(7) js_rom_str_52 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "concat" };
-static const ROM_STR_T(6) js_rom_str_53 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "every" };
-static const ROM_STR_T(5) js_rom_str_54 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "some" };
-static const ROM_STR_T(8) js_rom_str_55 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
-static const ROM_STR_T(4) js_rom_str_56 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "map" };
-static const ROM_STR_T(7) js_rom_str_57 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "filter" };
-static const ROM_STR_T(7) js_rom_str_58 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reduce" };
-static const ROM_STR_T(12) js_rom_str_59 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "reduceRight" };
-static const ROM_STR_T(5) js_rom_str_60 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "fill" };
-static const ROM_STR_T(5) js_rom_str_61 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "find" };
-static const ROM_STR_T(10) js_rom_str_62 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "findIndex" };
-static const ROM_STR_T(9) js_rom_str_63 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "findLast" };
-static const ROM_STR_T(14) js_rom_str_64 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "findLastIndex" };
-static const ROM_STR_T(8) js_rom_str_65 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "indexOf" };
-static const ROM_STR_T(12) js_rom_str_66 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "lastIndexOf" };
-static const ROM_STR_T(9) js_rom_str_67 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "includes" };
-static const ROM_STR_T(5) js_rom_str_68 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "join" };
-static const ROM_STR_T(9) js_rom_str_69 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
-static const ROM_STR_T(15) js_rom_str_70 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
-static const ROM_STR_T(4) js_rom_str_71 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "pop" };
-static const ROM_STR_T(5) js_rom_str_72 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "push" };
-static const ROM_STR_T(6) js_rom_str_73 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "shift" };
-static const ROM_STR_T(8) js_rom_str_74 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "unshift" };
-static const ROM_STR_T(8) js_rom_str_75 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "reverse" };
-static const ROM_STR_T(11) js_rom_str_76 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "toReversed" };
-static const ROM_STR_T(5) js_rom_str_77 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sort" };
-static const ROM_STR_T(9) js_rom_str_78 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toSorted" };
-static const ROM_STR_T(6) js_rom_str_79 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
-static const ROM_STR_T(7) js_rom_str_80 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "splice" };
-static const ROM_STR_T(10) js_rom_str_81 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "toSpliced" };
-static const ROM_STR_T(11) js_rom_str_82 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "copyWithin" };
-static const ROM_STR_T(8) js_rom_str_83 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "flatMap" };
-static const ROM_STR_T(5) js_rom_str_84 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "flat" };
-static const ROM_STR_T(7) js_rom_str_85 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "values" };
-static const ROM_STR_T(7) js_rom_str_86 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "RegExp" };
-static const ROM_STR_T(10) js_rom_str_87 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "get flags" };
-static const ROM_STR_T(11) js_rom_str_88 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get source" };
-static const ROM_STR_T(11) js_rom_str_89 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get global" };
-static const ROM_STR_T(15) js_rom_str_90 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get ignoreCase" };
-static const ROM_STR_T(14) js_rom_str_91 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "get multiline" };
-static const ROM_STR_T(11) js_rom_str_92 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get dotAll" };
-static const ROM_STR_T(12) js_rom_str_93 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "get unicode" };
-static const ROM_STR_T(16) js_rom_str_94 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "get unicodeSets" };
-static const ROM_STR_T(11) js_rom_str_95 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get sticky" };
-static const ROM_STR_T(15) js_rom_str_96 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get hasIndices" };
-static const ROM_STR_T(5) js_rom_str_97 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "exec" };
-static const ROM_STR_T(8) js_rom_str_98 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "compile" };
-static const ROM_STR_T(5) js_rom_str_99 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "test" };
-static const ROM_STR_T(9) js_rom_str_100 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
-static const ROM_STR_T(17) js_rom_str_101 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 16, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.replace]" };
-static const ROM_STR_T(15) js_rom_str_102 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.match]" };
-static const ROM_STR_T(18) js_rom_str_103 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.matchAll]" };
-static const ROM_STR_T(16) js_rom_str_104 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.search]" };
-static const ROM_STR_T(15) js_rom_str_105 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.split]" };
-static const ROM_STR_T(7) js_rom_str_106 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "escape" };
-static const ROM_STR_T(8) js_rom_str_107 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Promise" };
-static const ROM_STR_T(8) js_rom_str_108 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "resolve" };
-static const ROM_STR_T(7) js_rom_str_109 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reject" };
-static const ROM_STR_T(4) js_rom_str_110 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "all" };
-static const ROM_STR_T(11) js_rom_str_111 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "allSettled" };
-static const ROM_STR_T(4) js_rom_str_112 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "any" };
-static const ROM_STR_T(4) js_rom_str_113 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "try" };
-static const ROM_STR_T(5) js_rom_str_114 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "race" };
-static const ROM_STR_T(14) js_rom_str_115 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "withResolvers" };
-static const ROM_STR_T(5) js_rom_str_116 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "then" };
-static const ROM_STR_T(6) js_rom_str_117 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "catch" };
-static const ROM_STR_T(8) js_rom_str_118 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "finally" };
-static const ROM_STR_T(8) js_rom_str_119 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Promise" };
-static const ROM_STR_T(6) js_rom_str_120 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Error" };
+static const ROM_STR_T(9) js_rom_str_40 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
+static const ROM_STR_T(21) js_rom_str_41 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.hasInstance]" };
+static const ROM_STR_T(13) js_rom_str_42 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "get fileName" };
+static const ROM_STR_T(15) js_rom_str_43 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get lineNumber" };
+static const ROM_STR_T(17) js_rom_str_44 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 16, .kind = JS_STRING_KIND_NORMAL }, .c = "get columnNumber" };
+static const ROM_STR_T(9) js_rom_str_45 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "Function" };
+static const ROM_STR_T(6) js_rom_str_46 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Array" };
+static const ROM_STR_T(8) js_rom_str_47 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "isArray" };
+static const ROM_STR_T(5) js_rom_str_48 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "from" };
+static const ROM_STR_T(10) js_rom_str_49 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "fromAsync" };
+static const ROM_STR_T(3) js_rom_str_50 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "of" };
+static const ROM_STR_T(21) js_rom_str_51 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "get [Symbol.species]" };
+static const ROM_STR_T(3) js_rom_str_52 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "at" };
+static const ROM_STR_T(5) js_rom_str_53 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "with" };
+static const ROM_STR_T(7) js_rom_str_54 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "concat" };
+static const ROM_STR_T(6) js_rom_str_55 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "every" };
+static const ROM_STR_T(5) js_rom_str_56 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "some" };
+static const ROM_STR_T(8) js_rom_str_57 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
+static const ROM_STR_T(4) js_rom_str_58 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "map" };
+static const ROM_STR_T(7) js_rom_str_59 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "filter" };
+static const ROM_STR_T(7) js_rom_str_60 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reduce" };
+static const ROM_STR_T(12) js_rom_str_61 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "reduceRight" };
+static const ROM_STR_T(5) js_rom_str_62 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "fill" };
+static const ROM_STR_T(5) js_rom_str_63 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "find" };
+static const ROM_STR_T(10) js_rom_str_64 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "findIndex" };
+static const ROM_STR_T(9) js_rom_str_65 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "findLast" };
+static const ROM_STR_T(14) js_rom_str_66 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "findLastIndex" };
+static const ROM_STR_T(8) js_rom_str_67 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "indexOf" };
+static const ROM_STR_T(12) js_rom_str_68 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "lastIndexOf" };
+static const ROM_STR_T(9) js_rom_str_69 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "includes" };
+static const ROM_STR_T(5) js_rom_str_70 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "join" };
+static const ROM_STR_T(9) js_rom_str_71 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
+static const ROM_STR_T(4) js_rom_str_72 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "pop" };
+static const ROM_STR_T(5) js_rom_str_73 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "push" };
+static const ROM_STR_T(6) js_rom_str_74 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "shift" };
+static const ROM_STR_T(8) js_rom_str_75 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "unshift" };
+static const ROM_STR_T(8) js_rom_str_76 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "reverse" };
+static const ROM_STR_T(11) js_rom_str_77 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "toReversed" };
+static const ROM_STR_T(5) js_rom_str_78 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sort" };
+static const ROM_STR_T(9) js_rom_str_79 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toSorted" };
+static const ROM_STR_T(6) js_rom_str_80 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
+static const ROM_STR_T(7) js_rom_str_81 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "splice" };
+static const ROM_STR_T(10) js_rom_str_82 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "toSpliced" };
+static const ROM_STR_T(11) js_rom_str_83 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "copyWithin" };
+static const ROM_STR_T(8) js_rom_str_84 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "flatMap" };
+static const ROM_STR_T(5) js_rom_str_85 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "flat" };
+static const ROM_STR_T(7) js_rom_str_86 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "values" };
+static const ROM_STR_T(7) js_rom_str_87 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "RegExp" };
+static const ROM_STR_T(10) js_rom_str_88 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "get flags" };
+static const ROM_STR_T(11) js_rom_str_89 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get source" };
+static const ROM_STR_T(11) js_rom_str_90 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get global" };
+static const ROM_STR_T(15) js_rom_str_91 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get ignoreCase" };
+static const ROM_STR_T(14) js_rom_str_92 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "get multiline" };
+static const ROM_STR_T(11) js_rom_str_93 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get dotAll" };
+static const ROM_STR_T(12) js_rom_str_94 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "get unicode" };
+static const ROM_STR_T(16) js_rom_str_95 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "get unicodeSets" };
+static const ROM_STR_T(11) js_rom_str_96 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get sticky" };
+static const ROM_STR_T(15) js_rom_str_97 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get hasIndices" };
+static const ROM_STR_T(5) js_rom_str_98 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "exec" };
+static const ROM_STR_T(8) js_rom_str_99 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "compile" };
+static const ROM_STR_T(5) js_rom_str_100 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "test" };
+static const ROM_STR_T(9) js_rom_str_101 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
+static const ROM_STR_T(17) js_rom_str_102 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 16, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.replace]" };
+static const ROM_STR_T(15) js_rom_str_103 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.match]" };
+static const ROM_STR_T(18) js_rom_str_104 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.matchAll]" };
+static const ROM_STR_T(16) js_rom_str_105 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.search]" };
+static const ROM_STR_T(15) js_rom_str_106 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.split]" };
+static const ROM_STR_T(7) js_rom_str_107 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "escape" };
+static const ROM_STR_T(8) js_rom_str_108 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Promise" };
+static const ROM_STR_T(8) js_rom_str_109 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "resolve" };
+static const ROM_STR_T(7) js_rom_str_110 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reject" };
+static const ROM_STR_T(4) js_rom_str_111 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "all" };
+static const ROM_STR_T(11) js_rom_str_112 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "allSettled" };
+static const ROM_STR_T(4) js_rom_str_113 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "any" };
+static const ROM_STR_T(4) js_rom_str_114 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "try" };
+static const ROM_STR_T(5) js_rom_str_115 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "race" };
+static const ROM_STR_T(14) js_rom_str_116 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "withResolvers" };
+static const ROM_STR_T(5) js_rom_str_117 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "then" };
+static const ROM_STR_T(6) js_rom_str_118 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "catch" };
+static const ROM_STR_T(8) js_rom_str_119 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "finally" };
+static const ROM_STR_T(8) js_rom_str_120 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Promise" };
 static const ROM_STR_T(6) js_rom_str_121 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Error" };
-static const ROM_STR_T(8) js_rom_str_122 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "isError" };
-static const ROM_STR_T(18) js_rom_str_123 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "captureStackTrace" };
-static const ROM_STR_T(20) js_rom_str_124 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "get stackTraceLimit" };
-static const ROM_STR_T(20) js_rom_str_125 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "set stackTraceLimit" };
-static const ROM_STR_T(22) js_rom_str_126 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 21, .kind = JS_STRING_KIND_NORMAL }, .c = "get prepareStackTrace" };
-static const ROM_STR_T(22) js_rom_str_127 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 21, .kind = JS_STRING_KIND_NORMAL }, .c = "set prepareStackTrace" };
-static const ROM_STR_T(9) js_rom_str_128 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "Iterator" };
-static const ROM_STR_T(7) js_rom_str_129 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "concat" };
-static const ROM_STR_T(5) js_rom_str_130 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "from" };
-static const ROM_STR_T(5) js_rom_str_131 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "drop" };
-static const ROM_STR_T(7) js_rom_str_132 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "filter" };
-static const ROM_STR_T(8) js_rom_str_133 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "flatMap" };
-static const ROM_STR_T(4) js_rom_str_134 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "map" };
-static const ROM_STR_T(5) js_rom_str_135 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "take" };
-static const ROM_STR_T(6) js_rom_str_136 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "every" };
-static const ROM_STR_T(5) js_rom_str_137 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "find" };
-static const ROM_STR_T(8) js_rom_str_138 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
-static const ROM_STR_T(7) js_rom_str_139 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reduce" };
-static const ROM_STR_T(8) js_rom_str_140 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "toArray" };
-static const ROM_STR_T(18) js_rom_str_141 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.iterator]" };
-static const ROM_STR_T(25) js_rom_str_142 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 24, .kind = JS_STRING_KIND_NORMAL }, .c = "get [Symbol.toStringTag]" };
-static const ROM_STR_T(25) js_rom_str_143 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 24, .kind = JS_STRING_KIND_NORMAL }, .c = "set [Symbol.toStringTag]" };
-static const ROM_STR_T(23) js_rom_str_144 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 22, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.asyncIterator]" };
-static const ROM_STR_T(5) js_rom_str_145 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "eval" };
-static const ROM_STR_T(11) js_rom_str_146 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "TypedArray" };
-static const ROM_STR_T(5) js_rom_str_147 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "from" };
-static const ROM_STR_T(3) js_rom_str_148 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "of" };
-static const ROM_STR_T(11) js_rom_str_149 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get length" };
-static const ROM_STR_T(3) js_rom_str_150 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "at" };
-static const ROM_STR_T(5) js_rom_str_151 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "with" };
-static const ROM_STR_T(11) js_rom_str_152 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get buffer" };
-static const ROM_STR_T(15) js_rom_str_153 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get byteLength" };
-static const ROM_STR_T(15) js_rom_str_154 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get byteOffset" };
-static const ROM_STR_T(4) js_rom_str_155 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "set" };
-static const ROM_STR_T(5) js_rom_str_156 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "keys" };
-static const ROM_STR_T(8) js_rom_str_157 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "entries" };
-static const ROM_STR_T(11) js_rom_str_158 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "copyWithin" };
-static const ROM_STR_T(6) js_rom_str_159 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "every" };
-static const ROM_STR_T(5) js_rom_str_160 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "some" };
-static const ROM_STR_T(8) js_rom_str_161 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
-static const ROM_STR_T(4) js_rom_str_162 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "map" };
-static const ROM_STR_T(7) js_rom_str_163 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "filter" };
-static const ROM_STR_T(7) js_rom_str_164 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reduce" };
-static const ROM_STR_T(12) js_rom_str_165 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "reduceRight" };
-static const ROM_STR_T(5) js_rom_str_166 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "fill" };
-static const ROM_STR_T(5) js_rom_str_167 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "find" };
-static const ROM_STR_T(10) js_rom_str_168 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "findIndex" };
-static const ROM_STR_T(9) js_rom_str_169 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "findLast" };
-static const ROM_STR_T(14) js_rom_str_170 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "findLastIndex" };
-static const ROM_STR_T(8) js_rom_str_171 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "reverse" };
-static const ROM_STR_T(11) js_rom_str_172 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "toReversed" };
-static const ROM_STR_T(6) js_rom_str_173 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
-static const ROM_STR_T(9) js_rom_str_174 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "subarray" };
-static const ROM_STR_T(5) js_rom_str_175 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sort" };
-static const ROM_STR_T(9) js_rom_str_176 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toSorted" };
-static const ROM_STR_T(5) js_rom_str_177 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "join" };
-static const ROM_STR_T(15) js_rom_str_178 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
-static const ROM_STR_T(8) js_rom_str_179 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "indexOf" };
-static const ROM_STR_T(12) js_rom_str_180 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "lastIndexOf" };
-static const ROM_STR_T(9) js_rom_str_181 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "includes" };
-static const ROM_STR_T(10) js_rom_str_182 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "EvalError" };
-static const ROM_STR_T(11) js_rom_str_183 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "RangeError" };
-static const ROM_STR_T(15) js_rom_str_184 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "ReferenceError" };
-static const ROM_STR_T(12) js_rom_str_185 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "SyntaxError" };
-static const ROM_STR_T(10) js_rom_str_186 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "TypeError" };
-static const ROM_STR_T(9) js_rom_str_187 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "URIError" };
-static const ROM_STR_T(14) js_rom_str_188 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "InternalError" };
-static const ROM_STR_T(15) js_rom_str_189 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "AggregateError" };
-static const ROM_STR_T(14) js_rom_str_190 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "toExponential" };
-static const ROM_STR_T(8) js_rom_str_191 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "toFixed" };
-static const ROM_STR_T(12) js_rom_str_192 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toPrecision" };
-static const ROM_STR_T(9) js_rom_str_193 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
-static const ROM_STR_T(15) js_rom_str_194 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
-static const ROM_STR_T(8) js_rom_str_195 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
-static const ROM_STR_T(7) js_rom_str_196 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "Number" };
-static const ROM_STR_T(9) js_rom_str_197 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "parseInt" };
-static const ROM_STR_T(11) js_rom_str_198 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "parseFloat" };
-static const ROM_STR_T(6) js_rom_str_199 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "isNaN" };
-static const ROM_STR_T(9) js_rom_str_200 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "isFinite" };
-static const ROM_STR_T(10) js_rom_str_201 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "isInteger" };
-static const ROM_STR_T(14) js_rom_str_202 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "isSafeInteger" };
-static const ROM_STR_T(3) js_rom_str_203 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "at" };
-static const ROM_STR_T(11) js_rom_str_204 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "charCodeAt" };
-static const ROM_STR_T(7) js_rom_str_205 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "charAt" };
-static const ROM_STR_T(7) js_rom_str_206 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "concat" };
-static const ROM_STR_T(12) js_rom_str_207 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "codePointAt" };
-static const ROM_STR_T(13) js_rom_str_208 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "isWellFormed" };
-static const ROM_STR_T(13) js_rom_str_209 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "toWellFormed" };
-static const ROM_STR_T(8) js_rom_str_210 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "indexOf" };
-static const ROM_STR_T(12) js_rom_str_211 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "lastIndexOf" };
-static const ROM_STR_T(9) js_rom_str_212 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "includes" };
-static const ROM_STR_T(9) js_rom_str_213 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "endsWith" };
-static const ROM_STR_T(11) js_rom_str_214 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "startsWith" };
-static const ROM_STR_T(6) js_rom_str_215 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "match" };
-static const ROM_STR_T(9) js_rom_str_216 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "matchAll" };
-static const ROM_STR_T(7) js_rom_str_217 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "search" };
-static const ROM_STR_T(6) js_rom_str_218 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "split" };
-static const ROM_STR_T(10) js_rom_str_219 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "substring" };
-static const ROM_STR_T(7) js_rom_str_220 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "substr" };
-static const ROM_STR_T(6) js_rom_str_221 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
-static const ROM_STR_T(7) js_rom_str_222 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "repeat" };
-static const ROM_STR_T(8) js_rom_str_223 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "replace" };
-static const ROM_STR_T(11) js_rom_str_224 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "replaceAll" };
-static const ROM_STR_T(7) js_rom_str_225 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "padEnd" };
-static const ROM_STR_T(9) js_rom_str_226 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "padStart" };
-static const ROM_STR_T(5) js_rom_str_227 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "trim" };
-static const ROM_STR_T(8) js_rom_str_228 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "trimEnd" };
-static const ROM_STR_T(10) js_rom_str_229 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "trimStart" };
-static const ROM_STR_T(8) js_rom_str_230 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
-static const ROM_STR_T(14) js_rom_str_231 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "localeCompare" };
-static const ROM_STR_T(10) js_rom_str_232 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "normalize" };
-static const ROM_STR_T(12) js_rom_str_233 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toLowerCase" };
-static const ROM_STR_T(12) js_rom_str_234 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toUpperCase" };
-static const ROM_STR_T(18) js_rom_str_235 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleLowerCase" };
-static const ROM_STR_T(18) js_rom_str_236 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleUpperCase" };
-static const ROM_STR_T(18) js_rom_str_237 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.iterator]" };
-static const ROM_STR_T(7) js_rom_str_238 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "anchor" };
-static const ROM_STR_T(4) js_rom_str_239 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "big" };
-static const ROM_STR_T(6) js_rom_str_240 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "blink" };
-static const ROM_STR_T(5) js_rom_str_241 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "bold" };
-static const ROM_STR_T(6) js_rom_str_242 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "fixed" };
-static const ROM_STR_T(10) js_rom_str_243 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "fontcolor" };
-static const ROM_STR_T(9) js_rom_str_244 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "fontsize" };
-static const ROM_STR_T(8) js_rom_str_245 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "italics" };
-static const ROM_STR_T(5) js_rom_str_246 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "link" };
-static const ROM_STR_T(6) js_rom_str_247 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "small" };
-static const ROM_STR_T(7) js_rom_str_248 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "strike" };
-static const ROM_STR_T(4) js_rom_str_249 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sub" };
-static const ROM_STR_T(4) js_rom_str_250 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sup" };
-static const ROM_STR_T(7) js_rom_str_251 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "String" };
-static const ROM_STR_T(13) js_rom_str_252 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "fromCharCode" };
-static const ROM_STR_T(14) js_rom_str_253 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "fromCodePoint" };
-static const ROM_STR_T(4) js_rom_str_254 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "raw" };
-static const ROM_STR_T(8) js_rom_str_255 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Boolean" };
-static const ROM_STR_T(9) js_rom_str_256 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
-static const ROM_STR_T(21) js_rom_str_257 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.toPrimitive]" };
-static const ROM_STR_T(7) js_rom_str_258 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "Symbol" };
-static const ROM_STR_T(16) js_rom_str_259 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "get description" };
-static const ROM_STR_T(7) js_rom_str_260 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "Symbol" };
-static const ROM_STR_T(4) js_rom_str_261 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "for" };
-static const ROM_STR_T(7) js_rom_str_262 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "keyFor" };
-static const ROM_STR_T(21) js_rom_str_263 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.toPrimitive]" };
-static const ROM_STR_T(12) js_rom_str_264 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toUTCString" };
-static const ROM_STR_T(12) js_rom_str_265 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toISOString" };
-static const ROM_STR_T(13) js_rom_str_266 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "toDateString" };
-static const ROM_STR_T(13) js_rom_str_267 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "toTimeString" };
-static const ROM_STR_T(15) js_rom_str_268 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
-static const ROM_STR_T(19) js_rom_str_269 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleDateString" };
-static const ROM_STR_T(19) js_rom_str_270 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleTimeString" };
-static const ROM_STR_T(18) js_rom_str_271 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "getTimezoneOffset" };
-static const ROM_STR_T(8) js_rom_str_272 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getTime" };
-static const ROM_STR_T(8) js_rom_str_273 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getYear" };
-static const ROM_STR_T(12) js_rom_str_274 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getFullYear" };
-static const ROM_STR_T(15) js_rom_str_275 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCFullYear" };
-static const ROM_STR_T(9) js_rom_str_276 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getMonth" };
-static const ROM_STR_T(12) js_rom_str_277 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCMonth" };
-static const ROM_STR_T(8) js_rom_str_278 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getDate" };
-static const ROM_STR_T(11) js_rom_str_279 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCDate" };
-static const ROM_STR_T(9) js_rom_str_280 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getHours" };
-static const ROM_STR_T(12) js_rom_str_281 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCHours" };
-static const ROM_STR_T(11) js_rom_str_282 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getMinutes" };
-static const ROM_STR_T(14) js_rom_str_283 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCMinutes" };
-static const ROM_STR_T(11) js_rom_str_284 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getSeconds" };
-static const ROM_STR_T(14) js_rom_str_285 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCSeconds" };
-static const ROM_STR_T(16) js_rom_str_286 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "getMilliseconds" };
-static const ROM_STR_T(19) js_rom_str_287 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCMilliseconds" };
-static const ROM_STR_T(7) js_rom_str_288 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "getDay" };
-static const ROM_STR_T(10) js_rom_str_289 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCDay" };
-static const ROM_STR_T(8) js_rom_str_290 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setTime" };
-static const ROM_STR_T(16) js_rom_str_291 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "setMilliseconds" };
-static const ROM_STR_T(19) js_rom_str_292 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCMilliseconds" };
-static const ROM_STR_T(11) js_rom_str_293 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setSeconds" };
-static const ROM_STR_T(14) js_rom_str_294 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCSeconds" };
-static const ROM_STR_T(11) js_rom_str_295 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setMinutes" };
-static const ROM_STR_T(14) js_rom_str_296 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCMinutes" };
-static const ROM_STR_T(9) js_rom_str_297 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setHours" };
-static const ROM_STR_T(12) js_rom_str_298 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCHours" };
-static const ROM_STR_T(8) js_rom_str_299 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setDate" };
-static const ROM_STR_T(11) js_rom_str_300 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCDate" };
-static const ROM_STR_T(9) js_rom_str_301 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setMonth" };
-static const ROM_STR_T(12) js_rom_str_302 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCMonth" };
-static const ROM_STR_T(8) js_rom_str_303 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setYear" };
-static const ROM_STR_T(12) js_rom_str_304 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setFullYear" };
-static const ROM_STR_T(15) js_rom_str_305 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCFullYear" };
-static const ROM_STR_T(7) js_rom_str_306 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "toJSON" };
-static const ROM_STR_T(5) js_rom_str_307 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "Date" };
-static const ROM_STR_T(4) js_rom_str_308 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "now" };
-static const ROM_STR_T(6) js_rom_str_309 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "parse" };
-static const ROM_STR_T(4) js_rom_str_310 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "UTC" };
-static const ROM_STR_T(18) js_rom_str_311 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "GeneratorFunction" };
-static const ROM_STR_T(18) js_rom_str_312 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "GeneratorFunction" };
-static const ROM_STR_T(5) js_rom_str_313 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "next" };
-static const ROM_STR_T(7) js_rom_str_314 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "return" };
-static const ROM_STR_T(6) js_rom_str_315 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "throw" };
-static const ROM_STR_T(10) js_rom_str_316 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "Generator" };
-static const ROM_STR_T(18) js_rom_str_317 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "get maxByteLength" };
-static const ROM_STR_T(14) js_rom_str_318 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "get resizable" };
-static const ROM_STR_T(13) js_rom_str_319 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "get detached" };
-static const ROM_STR_T(14) js_rom_str_320 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "get immutable" };
-static const ROM_STR_T(7) js_rom_str_321 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "resize" };
-static const ROM_STR_T(6) js_rom_str_322 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
-static const ROM_STR_T(17) js_rom_str_323 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 16, .kind = JS_STRING_KIND_NORMAL }, .c = "sliceToImmutable" };
-static const ROM_STR_T(9) js_rom_str_324 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "transfer" };
-static const ROM_STR_T(20) js_rom_str_325 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "transferToImmutable" };
-static const ROM_STR_T(22) js_rom_str_326 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 21, .kind = JS_STRING_KIND_NORMAL }, .c = "transferToFixedLength" };
-static const ROM_STR_T(12) js_rom_str_327 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "ArrayBuffer" };
-static const ROM_STR_T(12) js_rom_str_328 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "ArrayBuffer" };
-static const ROM_STR_T(7) js_rom_str_329 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "isView" };
-static const ROM_STR_T(13) js_rom_str_330 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "get growable" };
-static const ROM_STR_T(5) js_rom_str_331 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "grow" };
-static const ROM_STR_T(18) js_rom_str_332 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "SharedArrayBuffer" };
-static const ROM_STR_T(18) js_rom_str_333 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "SharedArrayBuffer" };
-static const ROM_STR_T(18) js_rom_str_334 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint8ClampedArray" };
-static const ROM_STR_T(10) js_rom_str_335 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "Int8Array" };
-static const ROM_STR_T(11) js_rom_str_336 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint8Array" };
-static const ROM_STR_T(11) js_rom_str_337 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "Int16Array" };
-static const ROM_STR_T(12) js_rom_str_338 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint16Array" };
-static const ROM_STR_T(11) js_rom_str_339 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "Int32Array" };
-static const ROM_STR_T(12) js_rom_str_340 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint32Array" };
-static const ROM_STR_T(14) js_rom_str_341 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "BigInt64Array" };
-static const ROM_STR_T(15) js_rom_str_342 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "BigUint64Array" };
-static const ROM_STR_T(13) js_rom_str_343 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "Float16Array" };
-static const ROM_STR_T(13) js_rom_str_344 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "Float32Array" };
-static const ROM_STR_T(13) js_rom_str_345 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "Float64Array" };
-static const ROM_STR_T(8) js_rom_str_346 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getInt8" };
-static const ROM_STR_T(9) js_rom_str_347 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getUint8" };
-static const ROM_STR_T(9) js_rom_str_348 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getInt16" };
-static const ROM_STR_T(10) js_rom_str_349 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "getUint16" };
-static const ROM_STR_T(9) js_rom_str_350 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getInt32" };
-static const ROM_STR_T(10) js_rom_str_351 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "getUint32" };
-static const ROM_STR_T(12) js_rom_str_352 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getBigInt64" };
-static const ROM_STR_T(13) js_rom_str_353 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "getBigUint64" };
-static const ROM_STR_T(11) js_rom_str_354 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getFloat16" };
-static const ROM_STR_T(11) js_rom_str_355 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getFloat32" };
-static const ROM_STR_T(11) js_rom_str_356 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getFloat64" };
-static const ROM_STR_T(8) js_rom_str_357 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setInt8" };
-static const ROM_STR_T(9) js_rom_str_358 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setUint8" };
-static const ROM_STR_T(9) js_rom_str_359 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setInt16" };
-static const ROM_STR_T(10) js_rom_str_360 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "setUint16" };
-static const ROM_STR_T(9) js_rom_str_361 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setInt32" };
-static const ROM_STR_T(10) js_rom_str_362 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "setUint32" };
-static const ROM_STR_T(12) js_rom_str_363 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setBigInt64" };
-static const ROM_STR_T(13) js_rom_str_364 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "setBigUint64" };
-static const ROM_STR_T(11) js_rom_str_365 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setFloat16" };
-static const ROM_STR_T(11) js_rom_str_366 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setFloat32" };
-static const ROM_STR_T(11) js_rom_str_367 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setFloat64" };
-static const ROM_STR_T(9) js_rom_str_368 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "DataView" };
-static const ROM_STR_T(9) js_rom_str_369 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "DataView" };
-static const ROM_STR_T(7) js_rom_str_370 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "BigInt" };
-static const ROM_STR_T(7) js_rom_str_371 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "BigInt" };
-static const ROM_STR_T(8) js_rom_str_372 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "asUintN" };
-static const ROM_STR_T(7) js_rom_str_373 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "asIntN" };
-static const ROM_STR_T(4) js_rom_str_374 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "set" };
-static const ROM_STR_T(4) js_rom_str_375 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "get" };
-static const ROM_STR_T(12) js_rom_str_376 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getOrInsert" };
-static const ROM_STR_T(20) js_rom_str_377 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "getOrInsertComputed" };
-static const ROM_STR_T(4) js_rom_str_378 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "has" };
-static const ROM_STR_T(7) js_rom_str_379 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "delete" };
-static const ROM_STR_T(6) js_rom_str_380 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "clear" };
-static const ROM_STR_T(9) js_rom_str_381 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "get size" };
-static const ROM_STR_T(7) js_rom_str_382 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "values" };
-static const ROM_STR_T(5) js_rom_str_383 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "keys" };
-static const ROM_STR_T(8) js_rom_str_384 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "entries" };
-static const ROM_STR_T(4) js_rom_str_385 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Map" };
-static const ROM_STR_T(4) js_rom_str_386 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Map" };
-static const ROM_STR_T(8) js_rom_str_387 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "groupBy" };
-static const ROM_STR_T(4) js_rom_str_388 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "add" };
-static const ROM_STR_T(7) js_rom_str_389 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "delete" };
-static const ROM_STR_T(8) js_rom_str_390 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
-static const ROM_STR_T(15) js_rom_str_391 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "isDisjointFrom" };
-static const ROM_STR_T(11) js_rom_str_392 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "isSubsetOf" };
-static const ROM_STR_T(13) js_rom_str_393 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "isSupersetOf" };
-static const ROM_STR_T(13) js_rom_str_394 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "intersection" };
-static const ROM_STR_T(11) js_rom_str_395 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "difference" };
-static const ROM_STR_T(20) js_rom_str_396 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "symmetricDifference" };
-static const ROM_STR_T(6) js_rom_str_397 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "union" };
-static const ROM_STR_T(7) js_rom_str_398 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "values" };
-static const ROM_STR_T(8) js_rom_str_399 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "entries" };
-static const ROM_STR_T(4) js_rom_str_400 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Set" };
+static const ROM_STR_T(6) js_rom_str_122 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Error" };
+static const ROM_STR_T(8) js_rom_str_123 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "isError" };
+static const ROM_STR_T(18) js_rom_str_124 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "captureStackTrace" };
+static const ROM_STR_T(20) js_rom_str_125 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "get stackTraceLimit" };
+static const ROM_STR_T(20) js_rom_str_126 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "set stackTraceLimit" };
+static const ROM_STR_T(22) js_rom_str_127 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 21, .kind = JS_STRING_KIND_NORMAL }, .c = "get prepareStackTrace" };
+static const ROM_STR_T(22) js_rom_str_128 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 21, .kind = JS_STRING_KIND_NORMAL }, .c = "set prepareStackTrace" };
+static const ROM_STR_T(9) js_rom_str_129 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "Iterator" };
+static const ROM_STR_T(7) js_rom_str_130 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "concat" };
+static const ROM_STR_T(4) js_rom_str_131 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "zip" };
+static const ROM_STR_T(9) js_rom_str_132 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "zipKeyed" };
+static const ROM_STR_T(5) js_rom_str_133 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "drop" };
+static const ROM_STR_T(7) js_rom_str_134 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "filter" };
+static const ROM_STR_T(8) js_rom_str_135 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "flatMap" };
+static const ROM_STR_T(4) js_rom_str_136 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "map" };
+static const ROM_STR_T(5) js_rom_str_137 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "take" };
+static const ROM_STR_T(6) js_rom_str_138 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "every" };
+static const ROM_STR_T(5) js_rom_str_139 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "find" };
+static const ROM_STR_T(8) js_rom_str_140 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
+static const ROM_STR_T(7) js_rom_str_141 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reduce" };
+static const ROM_STR_T(8) js_rom_str_142 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "toArray" };
+static const ROM_STR_T(18) js_rom_str_143 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.iterator]" };
+static const ROM_STR_T(25) js_rom_str_144 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 24, .kind = JS_STRING_KIND_NORMAL }, .c = "get [Symbol.toStringTag]" };
+static const ROM_STR_T(25) js_rom_str_145 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 24, .kind = JS_STRING_KIND_NORMAL }, .c = "set [Symbol.toStringTag]" };
+static const ROM_STR_T(23) js_rom_str_146 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 22, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.asyncIterator]" };
+static const ROM_STR_T(5) js_rom_str_147 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "eval" };
+static const ROM_STR_T(11) js_rom_str_148 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "TypedArray" };
+static const ROM_STR_T(5) js_rom_str_149 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "from" };
+static const ROM_STR_T(3) js_rom_str_150 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "of" };
+static const ROM_STR_T(11) js_rom_str_151 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get length" };
+static const ROM_STR_T(3) js_rom_str_152 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "at" };
+static const ROM_STR_T(5) js_rom_str_153 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "with" };
+static const ROM_STR_T(11) js_rom_str_154 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "get buffer" };
+static const ROM_STR_T(15) js_rom_str_155 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get byteLength" };
+static const ROM_STR_T(15) js_rom_str_156 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "get byteOffset" };
+static const ROM_STR_T(4) js_rom_str_157 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "set" };
+static const ROM_STR_T(5) js_rom_str_158 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "keys" };
+static const ROM_STR_T(8) js_rom_str_159 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "entries" };
+static const ROM_STR_T(11) js_rom_str_160 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "copyWithin" };
+static const ROM_STR_T(6) js_rom_str_161 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "every" };
+static const ROM_STR_T(5) js_rom_str_162 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "some" };
+static const ROM_STR_T(8) js_rom_str_163 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "forEach" };
+static const ROM_STR_T(4) js_rom_str_164 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "map" };
+static const ROM_STR_T(7) js_rom_str_165 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "filter" };
+static const ROM_STR_T(7) js_rom_str_166 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "reduce" };
+static const ROM_STR_T(12) js_rom_str_167 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "reduceRight" };
+static const ROM_STR_T(5) js_rom_str_168 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "fill" };
+static const ROM_STR_T(5) js_rom_str_169 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "find" };
+static const ROM_STR_T(10) js_rom_str_170 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "findIndex" };
+static const ROM_STR_T(9) js_rom_str_171 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "findLast" };
+static const ROM_STR_T(14) js_rom_str_172 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "findLastIndex" };
+static const ROM_STR_T(8) js_rom_str_173 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "reverse" };
+static const ROM_STR_T(11) js_rom_str_174 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "toReversed" };
+static const ROM_STR_T(6) js_rom_str_175 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
+static const ROM_STR_T(9) js_rom_str_176 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "subarray" };
+static const ROM_STR_T(5) js_rom_str_177 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sort" };
+static const ROM_STR_T(9) js_rom_str_178 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toSorted" };
+static const ROM_STR_T(5) js_rom_str_179 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "join" };
+static const ROM_STR_T(15) js_rom_str_180 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
+static const ROM_STR_T(8) js_rom_str_181 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "indexOf" };
+static const ROM_STR_T(12) js_rom_str_182 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "lastIndexOf" };
+static const ROM_STR_T(9) js_rom_str_183 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "includes" };
+static const ROM_STR_T(10) js_rom_str_184 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "EvalError" };
+static const ROM_STR_T(11) js_rom_str_185 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "RangeError" };
+static const ROM_STR_T(15) js_rom_str_186 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "ReferenceError" };
+static const ROM_STR_T(12) js_rom_str_187 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "SyntaxError" };
+static const ROM_STR_T(10) js_rom_str_188 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "TypeError" };
+static const ROM_STR_T(9) js_rom_str_189 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "URIError" };
+static const ROM_STR_T(14) js_rom_str_190 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "InternalError" };
+static const ROM_STR_T(15) js_rom_str_191 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "AggregateError" };
+static const ROM_STR_T(14) js_rom_str_192 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "toExponential" };
+static const ROM_STR_T(8) js_rom_str_193 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "toFixed" };
+static const ROM_STR_T(12) js_rom_str_194 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toPrecision" };
+static const ROM_STR_T(9) js_rom_str_195 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
+static const ROM_STR_T(15) js_rom_str_196 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
+static const ROM_STR_T(8) js_rom_str_197 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
+static const ROM_STR_T(7) js_rom_str_198 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "Number" };
+static const ROM_STR_T(9) js_rom_str_199 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "parseInt" };
+static const ROM_STR_T(11) js_rom_str_200 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "parseFloat" };
+static const ROM_STR_T(6) js_rom_str_201 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "isNaN" };
+static const ROM_STR_T(9) js_rom_str_202 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "isFinite" };
+static const ROM_STR_T(10) js_rom_str_203 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "isInteger" };
+static const ROM_STR_T(14) js_rom_str_204 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "isSafeInteger" };
+static const ROM_STR_T(3) js_rom_str_205 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "at" };
+static const ROM_STR_T(11) js_rom_str_206 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "charCodeAt" };
+static const ROM_STR_T(7) js_rom_str_207 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "charAt" };
+static const ROM_STR_T(7) js_rom_str_208 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "concat" };
+static const ROM_STR_T(12) js_rom_str_209 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "codePointAt" };
+static const ROM_STR_T(13) js_rom_str_210 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "isWellFormed" };
+static const ROM_STR_T(13) js_rom_str_211 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "toWellFormed" };
+static const ROM_STR_T(8) js_rom_str_212 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "indexOf" };
+static const ROM_STR_T(12) js_rom_str_213 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "lastIndexOf" };
+static const ROM_STR_T(9) js_rom_str_214 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "includes" };
+static const ROM_STR_T(9) js_rom_str_215 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "endsWith" };
+static const ROM_STR_T(11) js_rom_str_216 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "startsWith" };
+static const ROM_STR_T(6) js_rom_str_217 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "match" };
+static const ROM_STR_T(9) js_rom_str_218 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "matchAll" };
+static const ROM_STR_T(7) js_rom_str_219 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "search" };
+static const ROM_STR_T(6) js_rom_str_220 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "split" };
+static const ROM_STR_T(10) js_rom_str_221 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "substring" };
+static const ROM_STR_T(7) js_rom_str_222 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "substr" };
+static const ROM_STR_T(6) js_rom_str_223 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "slice" };
+static const ROM_STR_T(7) js_rom_str_224 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "repeat" };
+static const ROM_STR_T(8) js_rom_str_225 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "replace" };
+static const ROM_STR_T(11) js_rom_str_226 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "replaceAll" };
+static const ROM_STR_T(7) js_rom_str_227 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "padEnd" };
+static const ROM_STR_T(9) js_rom_str_228 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "padStart" };
+static const ROM_STR_T(5) js_rom_str_229 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "trim" };
+static const ROM_STR_T(8) js_rom_str_230 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "trimEnd" };
+static const ROM_STR_T(10) js_rom_str_231 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "trimStart" };
+static const ROM_STR_T(8) js_rom_str_232 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
+static const ROM_STR_T(14) js_rom_str_233 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "localeCompare" };
+static const ROM_STR_T(10) js_rom_str_234 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "normalize" };
+static const ROM_STR_T(12) js_rom_str_235 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toLowerCase" };
+static const ROM_STR_T(12) js_rom_str_236 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toUpperCase" };
+static const ROM_STR_T(18) js_rom_str_237 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleLowerCase" };
+static const ROM_STR_T(18) js_rom_str_238 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleUpperCase" };
+static const ROM_STR_T(18) js_rom_str_239 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.iterator]" };
+static const ROM_STR_T(7) js_rom_str_240 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "anchor" };
+static const ROM_STR_T(4) js_rom_str_241 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "big" };
+static const ROM_STR_T(6) js_rom_str_242 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "blink" };
+static const ROM_STR_T(5) js_rom_str_243 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "bold" };
+static const ROM_STR_T(6) js_rom_str_244 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "fixed" };
+static const ROM_STR_T(10) js_rom_str_245 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "fontcolor" };
+static const ROM_STR_T(9) js_rom_str_246 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "fontsize" };
+static const ROM_STR_T(8) js_rom_str_247 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "italics" };
+static const ROM_STR_T(5) js_rom_str_248 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "link" };
+static const ROM_STR_T(6) js_rom_str_249 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "small" };
+static const ROM_STR_T(7) js_rom_str_250 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "strike" };
+static const ROM_STR_T(4) js_rom_str_251 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sub" };
+static const ROM_STR_T(4) js_rom_str_252 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sup" };
+static const ROM_STR_T(7) js_rom_str_253 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "String" };
+static const ROM_STR_T(13) js_rom_str_254 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "fromCharCode" };
+static const ROM_STR_T(14) js_rom_str_255 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "fromCodePoint" };
+static const ROM_STR_T(4) js_rom_str_256 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "raw" };
+static const ROM_STR_T(8) js_rom_str_257 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Boolean" };
+static const ROM_STR_T(9) js_rom_str_258 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "toString" };
+static const ROM_STR_T(8) js_rom_str_259 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
+static const ROM_STR_T(21) js_rom_str_260 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.toPrimitive]" };
+static const ROM_STR_T(7) js_rom_str_261 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "Symbol" };
+static const ROM_STR_T(16) js_rom_str_262 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "get description" };
+static const ROM_STR_T(7) js_rom_str_263 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "Symbol" };
+static const ROM_STR_T(4) js_rom_str_264 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "for" };
+static const ROM_STR_T(7) js_rom_str_265 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "keyFor" };
+static const ROM_STR_T(8) js_rom_str_266 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "valueOf" };
+static const ROM_STR_T(21) js_rom_str_267 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "[Symbol.toPrimitive]" };
+static const ROM_STR_T(12) js_rom_str_268 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toUTCString" };
+static const ROM_STR_T(12) js_rom_str_269 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "toISOString" };
+static const ROM_STR_T(13) js_rom_str_270 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "toDateString" };
+static const ROM_STR_T(13) js_rom_str_271 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "toTimeString" };
+static const ROM_STR_T(15) js_rom_str_272 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleString" };
+static const ROM_STR_T(19) js_rom_str_273 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleDateString" };
+static const ROM_STR_T(19) js_rom_str_274 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "toLocaleTimeString" };
+static const ROM_STR_T(18) js_rom_str_275 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "getTimezoneOffset" };
+static const ROM_STR_T(8) js_rom_str_276 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getTime" };
+static const ROM_STR_T(8) js_rom_str_277 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getYear" };
+static const ROM_STR_T(12) js_rom_str_278 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getFullYear" };
+static const ROM_STR_T(15) js_rom_str_279 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCFullYear" };
+static const ROM_STR_T(9) js_rom_str_280 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getMonth" };
+static const ROM_STR_T(12) js_rom_str_281 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCMonth" };
+static const ROM_STR_T(8) js_rom_str_282 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getDate" };
+static const ROM_STR_T(11) js_rom_str_283 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCDate" };
+static const ROM_STR_T(9) js_rom_str_284 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getHours" };
+static const ROM_STR_T(12) js_rom_str_285 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCHours" };
+static const ROM_STR_T(11) js_rom_str_286 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getMinutes" };
+static const ROM_STR_T(14) js_rom_str_287 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCMinutes" };
+static const ROM_STR_T(11) js_rom_str_288 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getSeconds" };
+static const ROM_STR_T(14) js_rom_str_289 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCSeconds" };
+static const ROM_STR_T(16) js_rom_str_290 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "getMilliseconds" };
+static const ROM_STR_T(19) js_rom_str_291 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCMilliseconds" };
+static const ROM_STR_T(7) js_rom_str_292 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "getDay" };
+static const ROM_STR_T(10) js_rom_str_293 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "getUTCDay" };
+static const ROM_STR_T(8) js_rom_str_294 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setTime" };
+static const ROM_STR_T(16) js_rom_str_295 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "setMilliseconds" };
+static const ROM_STR_T(19) js_rom_str_296 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCMilliseconds" };
+static const ROM_STR_T(11) js_rom_str_297 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setSeconds" };
+static const ROM_STR_T(14) js_rom_str_298 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCSeconds" };
+static const ROM_STR_T(11) js_rom_str_299 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setMinutes" };
+static const ROM_STR_T(14) js_rom_str_300 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCMinutes" };
+static const ROM_STR_T(9) js_rom_str_301 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setHours" };
+static const ROM_STR_T(12) js_rom_str_302 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCHours" };
+static const ROM_STR_T(8) js_rom_str_303 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setDate" };
+static const ROM_STR_T(11) js_rom_str_304 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCDate" };
+static const ROM_STR_T(9) js_rom_str_305 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setMonth" };
+static const ROM_STR_T(12) js_rom_str_306 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCMonth" };
+static const ROM_STR_T(8) js_rom_str_307 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setYear" };
+static const ROM_STR_T(12) js_rom_str_308 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setFullYear" };
+static const ROM_STR_T(15) js_rom_str_309 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "setUTCFullYear" };
+static const ROM_STR_T(7) js_rom_str_310 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "toJSON" };
+static const ROM_STR_T(5) js_rom_str_311 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "Date" };
+static const ROM_STR_T(4) js_rom_str_312 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "now" };
+static const ROM_STR_T(6) js_rom_str_313 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "parse" };
+static const ROM_STR_T(4) js_rom_str_314 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "UTC" };
+static const ROM_STR_T(18) js_rom_str_315 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "GeneratorFunction" };
+static const ROM_STR_T(18) js_rom_str_316 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "GeneratorFunction" };
+static const ROM_STR_T(5) js_rom_str_317 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "next" };
+static const ROM_STR_T(7) js_rom_str_318 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "return" };
+static const ROM_STR_T(6) js_rom_str_319 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "throw" };
+static const ROM_STR_T(10) js_rom_str_320 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "Generator" };
+static const ROM_STR_T(18) js_rom_str_321 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "get maxByteLength" };
+static const ROM_STR_T(14) js_rom_str_322 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "get resizable" };
+static const ROM_STR_T(13) js_rom_str_323 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "get detached" };
+static const ROM_STR_T(14) js_rom_str_324 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "get immutable" };
+static const ROM_STR_T(7) js_rom_str_325 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "resize" };
+static const ROM_STR_T(17) js_rom_str_326 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 16, .kind = JS_STRING_KIND_NORMAL }, .c = "sliceToImmutable" };
+static const ROM_STR_T(9) js_rom_str_327 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "transfer" };
+static const ROM_STR_T(20) js_rom_str_328 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "transferToImmutable" };
+static const ROM_STR_T(22) js_rom_str_329 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 21, .kind = JS_STRING_KIND_NORMAL }, .c = "transferToFixedLength" };
+static const ROM_STR_T(12) js_rom_str_330 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "ArrayBuffer" };
+static const ROM_STR_T(12) js_rom_str_331 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "ArrayBuffer" };
+static const ROM_STR_T(7) js_rom_str_332 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "isView" };
+static const ROM_STR_T(13) js_rom_str_333 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "get growable" };
+static const ROM_STR_T(5) js_rom_str_334 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "grow" };
+static const ROM_STR_T(18) js_rom_str_335 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "SharedArrayBuffer" };
+static const ROM_STR_T(18) js_rom_str_336 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "SharedArrayBuffer" };
+static const ROM_STR_T(18) js_rom_str_337 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint8ClampedArray" };
+static const ROM_STR_T(10) js_rom_str_338 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "Int8Array" };
+static const ROM_STR_T(11) js_rom_str_339 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint8Array" };
+static const ROM_STR_T(11) js_rom_str_340 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "Int16Array" };
+static const ROM_STR_T(12) js_rom_str_341 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint16Array" };
+static const ROM_STR_T(11) js_rom_str_342 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "Int32Array" };
+static const ROM_STR_T(12) js_rom_str_343 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "Uint32Array" };
+static const ROM_STR_T(14) js_rom_str_344 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "BigInt64Array" };
+static const ROM_STR_T(15) js_rom_str_345 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "BigUint64Array" };
+static const ROM_STR_T(13) js_rom_str_346 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "Float16Array" };
+static const ROM_STR_T(13) js_rom_str_347 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "Float32Array" };
+static const ROM_STR_T(13) js_rom_str_348 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "Float64Array" };
+static const ROM_STR_T(8) js_rom_str_349 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "getInt8" };
+static const ROM_STR_T(9) js_rom_str_350 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getUint8" };
+static const ROM_STR_T(9) js_rom_str_351 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getInt16" };
+static const ROM_STR_T(10) js_rom_str_352 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "getUint16" };
+static const ROM_STR_T(9) js_rom_str_353 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "getInt32" };
+static const ROM_STR_T(10) js_rom_str_354 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "getUint32" };
+static const ROM_STR_T(12) js_rom_str_355 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getBigInt64" };
+static const ROM_STR_T(13) js_rom_str_356 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "getBigUint64" };
+static const ROM_STR_T(11) js_rom_str_357 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getFloat16" };
+static const ROM_STR_T(11) js_rom_str_358 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getFloat32" };
+static const ROM_STR_T(11) js_rom_str_359 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "getFloat64" };
+static const ROM_STR_T(8) js_rom_str_360 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "setInt8" };
+static const ROM_STR_T(9) js_rom_str_361 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setUint8" };
+static const ROM_STR_T(9) js_rom_str_362 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setInt16" };
+static const ROM_STR_T(10) js_rom_str_363 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "setUint16" };
+static const ROM_STR_T(9) js_rom_str_364 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "setInt32" };
+static const ROM_STR_T(10) js_rom_str_365 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "setUint32" };
+static const ROM_STR_T(12) js_rom_str_366 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "setBigInt64" };
+static const ROM_STR_T(13) js_rom_str_367 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "setBigUint64" };
+static const ROM_STR_T(11) js_rom_str_368 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setFloat16" };
+static const ROM_STR_T(11) js_rom_str_369 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setFloat32" };
+static const ROM_STR_T(11) js_rom_str_370 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "setFloat64" };
+static const ROM_STR_T(9) js_rom_str_371 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "DataView" };
+static const ROM_STR_T(9) js_rom_str_372 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "DataView" };
+static const ROM_STR_T(7) js_rom_str_373 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "BigInt" };
+static const ROM_STR_T(7) js_rom_str_374 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "BigInt" };
+static const ROM_STR_T(8) js_rom_str_375 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "asUintN" };
+static const ROM_STR_T(7) js_rom_str_376 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "asIntN" };
+static const ROM_STR_T(4) js_rom_str_377 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "set" };
+static const ROM_STR_T(4) js_rom_str_378 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "get" };
+static const ROM_STR_T(12) js_rom_str_379 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getOrInsert" };
+static const ROM_STR_T(20) js_rom_str_380 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "getOrInsertComputed" };
+static const ROM_STR_T(4) js_rom_str_381 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "has" };
+static const ROM_STR_T(7) js_rom_str_382 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "delete" };
+static const ROM_STR_T(6) js_rom_str_383 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "clear" };
+static const ROM_STR_T(9) js_rom_str_384 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "get size" };
+static const ROM_STR_T(7) js_rom_str_385 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "values" };
+static const ROM_STR_T(8) js_rom_str_386 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "entries" };
+static const ROM_STR_T(4) js_rom_str_387 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Map" };
+static const ROM_STR_T(4) js_rom_str_388 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Map" };
+static const ROM_STR_T(8) js_rom_str_389 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "groupBy" };
+static const ROM_STR_T(4) js_rom_str_390 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "add" };
+static const ROM_STR_T(7) js_rom_str_391 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "delete" };
+static const ROM_STR_T(15) js_rom_str_392 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "isDisjointFrom" };
+static const ROM_STR_T(11) js_rom_str_393 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "isSubsetOf" };
+static const ROM_STR_T(13) js_rom_str_394 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "isSupersetOf" };
+static const ROM_STR_T(13) js_rom_str_395 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "intersection" };
+static const ROM_STR_T(11) js_rom_str_396 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "difference" };
+static const ROM_STR_T(20) js_rom_str_397 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "symmetricDifference" };
+static const ROM_STR_T(6) js_rom_str_398 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "union" };
+static const ROM_STR_T(7) js_rom_str_399 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "values" };
+static const ROM_STR_T(8) js_rom_str_400 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "entries" };
 static const ROM_STR_T(4) js_rom_str_401 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Set" };
-static const ROM_STR_T(4) js_rom_str_402 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "get" };
+static const ROM_STR_T(4) js_rom_str_402 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "Set" };
 static const ROM_STR_T(20) js_rom_str_403 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 19, .kind = JS_STRING_KIND_NORMAL }, .c = "getOrInsertComputed" };
-static const ROM_STR_T(4) js_rom_str_404 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "has" };
+static const ROM_STR_T(7) js_rom_str_404 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "delete" };
 static const ROM_STR_T(8) js_rom_str_405 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "WeakMap" };
 static const ROM_STR_T(8) js_rom_str_406 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "WeakMap" };
 static const ROM_STR_T(4) js_rom_str_407 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "add" };
@@ -432,164 +432,165 @@ static const ROM_STR_T(5) js_rom_str_420 = { .s = { .header = { JS_IMMORTAL_REF_
 static const ROM_STR_T(23) js_rom_str_421 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 22, .kind = JS_STRING_KIND_NORMAL }, .c = "RegExp String Iterator" };
 static const ROM_STR_T(14) js_rom_str_422 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncFunction" };
 static const ROM_STR_T(14) js_rom_str_423 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncFunction" };
-static const ROM_STR_T(7) js_rom_str_424 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "return" };
-static const ROM_STR_T(6) js_rom_str_425 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "throw" };
-static const ROM_STR_T(23) js_rom_str_426 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 22, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncGeneratorFunction" };
+static const ROM_STR_T(5) js_rom_str_424 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "next" };
+static const ROM_STR_T(7) js_rom_str_425 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "return" };
+static const ROM_STR_T(6) js_rom_str_426 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "throw" };
 static const ROM_STR_T(23) js_rom_str_427 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 22, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncGeneratorFunction" };
-static const ROM_STR_T(15) js_rom_str_428 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncGenerator" };
-static const ROM_STR_T(6) js_rom_str_429 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "deref" };
-static const ROM_STR_T(8) js_rom_str_430 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "WeakRef" };
+static const ROM_STR_T(23) js_rom_str_428 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 22, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncGeneratorFunction" };
+static const ROM_STR_T(15) js_rom_str_429 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "AsyncGenerator" };
+static const ROM_STR_T(6) js_rom_str_430 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "deref" };
 static const ROM_STR_T(8) js_rom_str_431 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "WeakRef" };
-static const ROM_STR_T(9) js_rom_str_432 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "register" };
-static const ROM_STR_T(11) js_rom_str_433 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "unregister" };
-static const ROM_STR_T(21) js_rom_str_434 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "FinalizationRegistry" };
+static const ROM_STR_T(8) js_rom_str_432 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "WeakRef" };
+static const ROM_STR_T(9) js_rom_str_433 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "register" };
+static const ROM_STR_T(11) js_rom_str_434 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "unregister" };
 static const ROM_STR_T(21) js_rom_str_435 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "FinalizationRegistry" };
-static const ROM_STR_T(9) js_rom_str_436 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "get name" };
-static const ROM_STR_T(12) js_rom_str_437 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "get message" };
-static const ROM_STR_T(9) js_rom_str_438 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "get code" };
-static const ROM_STR_T(13) js_rom_str_439 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "DOMException" };
+static const ROM_STR_T(21) js_rom_str_436 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .kind = JS_STRING_KIND_NORMAL }, .c = "FinalizationRegistry" };
+static const ROM_STR_T(9) js_rom_str_437 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "get name" };
+static const ROM_STR_T(12) js_rom_str_438 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "get message" };
+static const ROM_STR_T(9) js_rom_str_439 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "get code" };
 static const ROM_STR_T(13) js_rom_str_440 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "DOMException" };
-static const ROM_STR_T(9) js_rom_str_441 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "isNative" };
-static const ROM_STR_T(12) js_rom_str_442 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getFileName" };
-static const ROM_STR_T(12) js_rom_str_443 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getFunction" };
-static const ROM_STR_T(16) js_rom_str_444 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "getFunctionName" };
-static const ROM_STR_T(16) js_rom_str_445 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "getColumnNumber" };
-static const ROM_STR_T(14) js_rom_str_446 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "getLineNumber" };
-static const ROM_STR_T(9) js_rom_str_447 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "CallSite" };
-static const ROM_STR_T(6) js_rom_str_448 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "isNaN" };
-static const ROM_STR_T(9) js_rom_str_449 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "isFinite" };
-static const ROM_STR_T(15) js_rom_str_450 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "queueMicrotask" };
-static const ROM_STR_T(10) js_rom_str_451 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "decodeURI" };
-static const ROM_STR_T(19) js_rom_str_452 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "decodeURIComponent" };
-static const ROM_STR_T(10) js_rom_str_453 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "encodeURI" };
-static const ROM_STR_T(19) js_rom_str_454 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "encodeURIComponent" };
-static const ROM_STR_T(7) js_rom_str_455 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "escape" };
-static const ROM_STR_T(9) js_rom_str_456 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "unescape" };
-static const ROM_STR_T(7) js_rom_str_457 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "global" };
-static const ROM_STR_T(4) js_rom_str_458 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "min" };
-static const ROM_STR_T(4) js_rom_str_459 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "max" };
-static const ROM_STR_T(4) js_rom_str_460 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "abs" };
-static const ROM_STR_T(6) js_rom_str_461 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "floor" };
-static const ROM_STR_T(5) js_rom_str_462 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "ceil" };
-static const ROM_STR_T(6) js_rom_str_463 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "round" };
-static const ROM_STR_T(5) js_rom_str_464 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sqrt" };
-static const ROM_STR_T(5) js_rom_str_465 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "acos" };
-static const ROM_STR_T(5) js_rom_str_466 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "asin" };
-static const ROM_STR_T(5) js_rom_str_467 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "atan" };
-static const ROM_STR_T(6) js_rom_str_468 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "atan2" };
-static const ROM_STR_T(4) js_rom_str_469 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "cos" };
-static const ROM_STR_T(4) js_rom_str_470 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "exp" };
-static const ROM_STR_T(4) js_rom_str_471 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "log" };
-static const ROM_STR_T(4) js_rom_str_472 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "pow" };
-static const ROM_STR_T(4) js_rom_str_473 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sin" };
-static const ROM_STR_T(4) js_rom_str_474 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "tan" };
-static const ROM_STR_T(6) js_rom_str_475 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "trunc" };
-static const ROM_STR_T(5) js_rom_str_476 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sign" };
-static const ROM_STR_T(5) js_rom_str_477 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "cosh" };
-static const ROM_STR_T(5) js_rom_str_478 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sinh" };
-static const ROM_STR_T(5) js_rom_str_479 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "tanh" };
-static const ROM_STR_T(6) js_rom_str_480 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "acosh" };
-static const ROM_STR_T(6) js_rom_str_481 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "asinh" };
-static const ROM_STR_T(6) js_rom_str_482 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "atanh" };
-static const ROM_STR_T(6) js_rom_str_483 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "expm1" };
-static const ROM_STR_T(6) js_rom_str_484 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "log1p" };
-static const ROM_STR_T(5) js_rom_str_485 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "log2" };
-static const ROM_STR_T(6) js_rom_str_486 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "log10" };
-static const ROM_STR_T(5) js_rom_str_487 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "cbrt" };
-static const ROM_STR_T(6) js_rom_str_488 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "hypot" };
-static const ROM_STR_T(7) js_rom_str_489 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "random" };
-static const ROM_STR_T(9) js_rom_str_490 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "f16round" };
-static const ROM_STR_T(7) js_rom_str_491 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "fround" };
-static const ROM_STR_T(5) js_rom_str_492 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "imul" };
-static const ROM_STR_T(6) js_rom_str_493 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "clz32" };
-static const ROM_STR_T(11) js_rom_str_494 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "sumPrecise" };
-static const ROM_STR_T(5) js_rom_str_495 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "Math" };
-static const ROM_STR_T(6) js_rom_str_496 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "apply" };
-static const ROM_STR_T(10) js_rom_str_497 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "construct" };
-static const ROM_STR_T(15) js_rom_str_498 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "defineProperty" };
-static const ROM_STR_T(15) js_rom_str_499 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "deleteProperty" };
-static const ROM_STR_T(4) js_rom_str_500 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "get" };
-static const ROM_STR_T(25) js_rom_str_501 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 24, .kind = JS_STRING_KIND_NORMAL }, .c = "getOwnPropertyDescriptor" };
-static const ROM_STR_T(15) js_rom_str_502 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "getPrototypeOf" };
-static const ROM_STR_T(4) js_rom_str_503 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "has" };
-static const ROM_STR_T(13) js_rom_str_504 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "isExtensible" };
-static const ROM_STR_T(8) js_rom_str_505 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "ownKeys" };
-static const ROM_STR_T(18) js_rom_str_506 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "preventExtensions" };
-static const ROM_STR_T(4) js_rom_str_507 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "set" };
-static const ROM_STR_T(15) js_rom_str_508 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "setPrototypeOf" };
-static const ROM_STR_T(8) js_rom_str_509 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Reflect" };
-static const ROM_STR_T(10) js_rom_str_510 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "isRawJSON" };
-static const ROM_STR_T(6) js_rom_str_511 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "parse" };
-static const ROM_STR_T(8) js_rom_str_512 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "rawJSON" };
-static const ROM_STR_T(10) js_rom_str_513 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "stringify" };
-static const ROM_STR_T(5) js_rom_str_514 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "JSON" };
-static const ROM_STR_T(6) js_rom_str_515 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Proxy" };
-static const ROM_STR_T(10) js_rom_str_516 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "revocable" };
-static const ROM_STR_T(4) js_rom_str_517 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "add" };
-static const ROM_STR_T(4) js_rom_str_518 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "and" };
-static const ROM_STR_T(3) js_rom_str_519 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "or" };
-static const ROM_STR_T(4) js_rom_str_520 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sub" };
-static const ROM_STR_T(4) js_rom_str_521 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "xor" };
-static const ROM_STR_T(9) js_rom_str_522 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "exchange" };
-static const ROM_STR_T(16) js_rom_str_523 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "compareExchange" };
-static const ROM_STR_T(5) js_rom_str_524 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "load" };
-static const ROM_STR_T(6) js_rom_str_525 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "store" };
-static const ROM_STR_T(11) js_rom_str_526 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "isLockFree" };
-static const ROM_STR_T(6) js_rom_str_527 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "pause" };
-static const ROM_STR_T(5) js_rom_str_528 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "wait" };
-static const ROM_STR_T(7) js_rom_str_529 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "notify" };
-static const ROM_STR_T(8) js_rom_str_530 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Atomics" };
+static const ROM_STR_T(13) js_rom_str_441 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "DOMException" };
+static const ROM_STR_T(9) js_rom_str_442 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "isNative" };
+static const ROM_STR_T(12) js_rom_str_443 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getFileName" };
+static const ROM_STR_T(12) js_rom_str_444 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 11, .kind = JS_STRING_KIND_NORMAL }, .c = "getFunction" };
+static const ROM_STR_T(16) js_rom_str_445 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "getFunctionName" };
+static const ROM_STR_T(16) js_rom_str_446 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "getColumnNumber" };
+static const ROM_STR_T(14) js_rom_str_447 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .kind = JS_STRING_KIND_NORMAL }, .c = "getLineNumber" };
+static const ROM_STR_T(9) js_rom_str_448 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "CallSite" };
+static const ROM_STR_T(6) js_rom_str_449 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "isNaN" };
+static const ROM_STR_T(9) js_rom_str_450 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "isFinite" };
+static const ROM_STR_T(15) js_rom_str_451 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "queueMicrotask" };
+static const ROM_STR_T(10) js_rom_str_452 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "decodeURI" };
+static const ROM_STR_T(19) js_rom_str_453 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "decodeURIComponent" };
+static const ROM_STR_T(10) js_rom_str_454 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "encodeURI" };
+static const ROM_STR_T(19) js_rom_str_455 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .kind = JS_STRING_KIND_NORMAL }, .c = "encodeURIComponent" };
+static const ROM_STR_T(7) js_rom_str_456 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "escape" };
+static const ROM_STR_T(9) js_rom_str_457 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "unescape" };
+static const ROM_STR_T(7) js_rom_str_458 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "global" };
+static const ROM_STR_T(4) js_rom_str_459 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "min" };
+static const ROM_STR_T(4) js_rom_str_460 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "max" };
+static const ROM_STR_T(4) js_rom_str_461 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "abs" };
+static const ROM_STR_T(6) js_rom_str_462 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "floor" };
+static const ROM_STR_T(5) js_rom_str_463 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "ceil" };
+static const ROM_STR_T(6) js_rom_str_464 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "round" };
+static const ROM_STR_T(5) js_rom_str_465 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sqrt" };
+static const ROM_STR_T(5) js_rom_str_466 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "acos" };
+static const ROM_STR_T(5) js_rom_str_467 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "asin" };
+static const ROM_STR_T(5) js_rom_str_468 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "atan" };
+static const ROM_STR_T(6) js_rom_str_469 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "atan2" };
+static const ROM_STR_T(4) js_rom_str_470 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "cos" };
+static const ROM_STR_T(4) js_rom_str_471 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "exp" };
+static const ROM_STR_T(4) js_rom_str_472 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "log" };
+static const ROM_STR_T(4) js_rom_str_473 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "pow" };
+static const ROM_STR_T(4) js_rom_str_474 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sin" };
+static const ROM_STR_T(4) js_rom_str_475 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "tan" };
+static const ROM_STR_T(6) js_rom_str_476 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "trunc" };
+static const ROM_STR_T(5) js_rom_str_477 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sign" };
+static const ROM_STR_T(5) js_rom_str_478 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "cosh" };
+static const ROM_STR_T(5) js_rom_str_479 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "sinh" };
+static const ROM_STR_T(5) js_rom_str_480 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "tanh" };
+static const ROM_STR_T(6) js_rom_str_481 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "acosh" };
+static const ROM_STR_T(6) js_rom_str_482 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "asinh" };
+static const ROM_STR_T(6) js_rom_str_483 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "atanh" };
+static const ROM_STR_T(6) js_rom_str_484 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "expm1" };
+static const ROM_STR_T(6) js_rom_str_485 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "log1p" };
+static const ROM_STR_T(5) js_rom_str_486 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "log2" };
+static const ROM_STR_T(6) js_rom_str_487 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "log10" };
+static const ROM_STR_T(5) js_rom_str_488 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "cbrt" };
+static const ROM_STR_T(6) js_rom_str_489 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "hypot" };
+static const ROM_STR_T(7) js_rom_str_490 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "random" };
+static const ROM_STR_T(9) js_rom_str_491 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "f16round" };
+static const ROM_STR_T(7) js_rom_str_492 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "fround" };
+static const ROM_STR_T(5) js_rom_str_493 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "imul" };
+static const ROM_STR_T(6) js_rom_str_494 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "clz32" };
+static const ROM_STR_T(11) js_rom_str_495 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "sumPrecise" };
+static const ROM_STR_T(5) js_rom_str_496 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "Math" };
+static const ROM_STR_T(6) js_rom_str_497 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "apply" };
+static const ROM_STR_T(10) js_rom_str_498 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "construct" };
+static const ROM_STR_T(15) js_rom_str_499 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "defineProperty" };
+static const ROM_STR_T(15) js_rom_str_500 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "deleteProperty" };
+static const ROM_STR_T(4) js_rom_str_501 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "get" };
+static const ROM_STR_T(25) js_rom_str_502 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 24, .kind = JS_STRING_KIND_NORMAL }, .c = "getOwnPropertyDescriptor" };
+static const ROM_STR_T(15) js_rom_str_503 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "getPrototypeOf" };
+static const ROM_STR_T(4) js_rom_str_504 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "has" };
+static const ROM_STR_T(13) js_rom_str_505 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .kind = JS_STRING_KIND_NORMAL }, .c = "isExtensible" };
+static const ROM_STR_T(8) js_rom_str_506 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "ownKeys" };
+static const ROM_STR_T(18) js_rom_str_507 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 17, .kind = JS_STRING_KIND_NORMAL }, .c = "preventExtensions" };
+static const ROM_STR_T(4) js_rom_str_508 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "set" };
+static const ROM_STR_T(15) js_rom_str_509 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .kind = JS_STRING_KIND_NORMAL }, .c = "setPrototypeOf" };
+static const ROM_STR_T(8) js_rom_str_510 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Reflect" };
+static const ROM_STR_T(10) js_rom_str_511 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "isRawJSON" };
+static const ROM_STR_T(6) js_rom_str_512 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "parse" };
+static const ROM_STR_T(8) js_rom_str_513 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "rawJSON" };
+static const ROM_STR_T(10) js_rom_str_514 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "stringify" };
+static const ROM_STR_T(5) js_rom_str_515 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "JSON" };
+static const ROM_STR_T(6) js_rom_str_516 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "Proxy" };
+static const ROM_STR_T(10) js_rom_str_517 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 9, .kind = JS_STRING_KIND_NORMAL }, .c = "revocable" };
+static const ROM_STR_T(4) js_rom_str_518 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "add" };
+static const ROM_STR_T(4) js_rom_str_519 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "and" };
+static const ROM_STR_T(3) js_rom_str_520 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 2, .kind = JS_STRING_KIND_NORMAL }, .c = "or" };
+static const ROM_STR_T(4) js_rom_str_521 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "sub" };
+static const ROM_STR_T(4) js_rom_str_522 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 3, .kind = JS_STRING_KIND_NORMAL }, .c = "xor" };
+static const ROM_STR_T(9) js_rom_str_523 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 8, .kind = JS_STRING_KIND_NORMAL }, .c = "exchange" };
+static const ROM_STR_T(16) js_rom_str_524 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .kind = JS_STRING_KIND_NORMAL }, .c = "compareExchange" };
+static const ROM_STR_T(5) js_rom_str_525 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "load" };
+static const ROM_STR_T(6) js_rom_str_526 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "store" };
+static const ROM_STR_T(11) js_rom_str_527 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 10, .kind = JS_STRING_KIND_NORMAL }, .c = "isLockFree" };
+static const ROM_STR_T(6) js_rom_str_528 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 5, .kind = JS_STRING_KIND_NORMAL }, .c = "pause" };
+static const ROM_STR_T(5) js_rom_str_529 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 4, .kind = JS_STRING_KIND_NORMAL }, .c = "wait" };
+static const ROM_STR_T(7) js_rom_str_530 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 6, .kind = JS_STRING_KIND_NORMAL }, .c = "notify" };
+static const ROM_STR_T(8) js_rom_str_531 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 7, .kind = JS_STRING_KIND_NORMAL }, .c = "Atomics" };
 
 /* well-known symbols: 13 */
 static const ROM_STR_T(19) js_rom_sym_0 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 217 }, .c = "Symbol.toPrimitive" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 222 }, .c = "Symbol.toPrimitive" };
 static const ROM_STR_T(16) js_rom_sym_1 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 218 }, .c = "Symbol.iterator" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 223 }, .c = "Symbol.iterator" };
 static const ROM_STR_T(13) js_rom_sym_2 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 219 }, .c = "Symbol.match" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 224 }, .c = "Symbol.match" };
 static const ROM_STR_T(16) js_rom_sym_3 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 15, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 220 }, .c = "Symbol.matchAll" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 225 }, .c = "Symbol.matchAll" };
 static const ROM_STR_T(15) js_rom_sym_4 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 221 }, .c = "Symbol.replace" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 226 }, .c = "Symbol.replace" };
 static const ROM_STR_T(14) js_rom_sym_5 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 13, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 222 }, .c = "Symbol.search" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 227 }, .c = "Symbol.search" };
 static const ROM_STR_T(13) js_rom_sym_6 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 12, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 223 }, .c = "Symbol.split" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 228 }, .c = "Symbol.split" };
 static const ROM_STR_T(19) js_rom_sym_7 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 224 }, .c = "Symbol.toStringTag" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 229 }, .c = "Symbol.toStringTag" };
 static const ROM_STR_T(26) js_rom_sym_8 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 25, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 225 }, .c = "Symbol.isConcatSpreadable" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 230 }, .c = "Symbol.isConcatSpreadable" };
 static const ROM_STR_T(19) js_rom_sym_9 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 226 }, .c = "Symbol.hasInstance" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 231 }, .c = "Symbol.hasInstance" };
 static const ROM_STR_T(15) js_rom_sym_10 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 14, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 227 }, .c = "Symbol.species" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 232 }, .c = "Symbol.species" };
 static const ROM_STR_T(19) js_rom_sym_11 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 18, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 228 }, .c = "Symbol.unscopables" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 233 }, .c = "Symbol.unscopables" };
 static const ROM_STR_T(21) js_rom_sym_12 = { .s = { .header = { JS_IMMORTAL_REF_COUNT }, .len = 20, .hash = 0,
-    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 229 }, .c = "Symbol.asyncIterator" };
+    .kind = JS_STRING_KIND_NORMAL, .atom_type = JS_ATOM_TYPE_SYMBOL, .hash_next = 234 }, .c = "Symbol.asyncIterator" };
 
 static const JSRomSymbol js_rom_symbols[JS_ROM_SYMBOL_COUNT] = {
-    { 217, (JSString *)&js_rom_sym_0.s },
-    { 218, (JSString *)&js_rom_sym_1.s },
-    { 219, (JSString *)&js_rom_sym_2.s },
-    { 220, (JSString *)&js_rom_sym_3.s },
-    { 221, (JSString *)&js_rom_sym_4.s },
-    { 222, (JSString *)&js_rom_sym_5.s },
-    { 223, (JSString *)&js_rom_sym_6.s },
-    { 224, (JSString *)&js_rom_sym_7.s },
-    { 225, (JSString *)&js_rom_sym_8.s },
-    { 226, (JSString *)&js_rom_sym_9.s },
-    { 227, (JSString *)&js_rom_sym_10.s },
-    { 228, (JSString *)&js_rom_sym_11.s },
-    { 229, (JSString *)&js_rom_sym_12.s },
+    { 222, (JSString *)&js_rom_sym_0.s },
+    { 223, (JSString *)&js_rom_sym_1.s },
+    { 224, (JSString *)&js_rom_sym_2.s },
+    { 225, (JSString *)&js_rom_sym_3.s },
+    { 226, (JSString *)&js_rom_sym_4.s },
+    { 227, (JSString *)&js_rom_sym_5.s },
+    { 228, (JSString *)&js_rom_sym_6.s },
+    { 229, (JSString *)&js_rom_sym_7.s },
+    { 230, (JSString *)&js_rom_sym_8.s },
+    { 231, (JSString *)&js_rom_sym_9.s },
+    { 232, (JSString *)&js_rom_sym_10.s },
+    { 233, (JSString *)&js_rom_sym_11.s },
+    { 234, (JSString *)&js_rom_sym_12.s },
 };
 
-static const ROM_CFD_T(1) js_rom_cfd_157 = { .func = js_iterator_constructor_getset, .length = 0, .data_len = 1, .magic = 0, .data = { ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[139]), } };
-ROM_CFD_CHECK(js_rom_cfd_157);
+static const ROM_CFD_T(1) js_rom_cfd_160 = { .func = js_iterator_constructor_getset, .length = 0, .data_len = 1, .magic = 0, .data = { ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[140]), } };
+ROM_CFD_CHECK(js_rom_cfd_160);
 
 /* shapes: 101 */
 static const ROM_SHAPE_T(16, 13) js_rom_sh_0 = {
-    .hash = { [ROM_HPAD(16) - 1 - 0] = 3, [ROM_HPAD(16) - 1 - 2] = 9, [ROM_HPAD(16) - 1 - 6] = 12, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 8] = 8, [ROM_HPAD(16) - 1 - 11] = 6, [ROM_HPAD(16) - 1 - 12] = 5, [ROM_HPAD(16) - 1 - 13] = 13, [ROM_HPAD(16) - 1 - 14] = 4, [ROM_HPAD(16) - 1 - 15] = 11, },
+    .hash = { [ROM_HPAD(16) - 1 - 0] = 3, [ROM_HPAD(16) - 1 - 1] = 5, [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 4] = 11, [ROM_HPAD(16) - 1 - 7] = 9, [ROM_HPAD(16) - 1 - 8] = 8, [ROM_HPAD(16) - 1 - 11] = 12, [ROM_HPAD(16) - 1 - 13] = 13, [ROM_HPAD(16) - 1 - 14] = 4, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 13, .prop_count = 13,
             .proto = (JSObject *)&js_rom_obj[1] },
@@ -598,21 +599,21 @@ static const ROM_SHAPE_T(16, 13) js_rom_sh_0 = {
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x10, .atom = 80 }, /* caller */
         { .hash_next = 0, .flags = 0x10, .atom = 78 }, /* arguments */
-        { .hash_next = 0, .flags = 0x00, .atom = 316 }, /* call */
+        { .hash_next = 0, .flags = 0x00, .atom = 321 }, /* call */
         { .hash_next = 0, .flags = 0x00, .atom = 91 }, /* apply */
-        { .hash_next = 0, .flags = 0x00, .atom = 310 }, /* bind */
+        { .hash_next = 6, .flags = 0x00, .atom = 315 }, /* bind */
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
-        { .hash_next = 1, .flags = 0x00, .atom = 226 }, /* Symbol.hasInstance */
-        { .hash_next = 0, .flags = 0x10, .atom = 351 }, /* fileName */
-        { .hash_next = 10, .flags = 0x10, .atom = 479 }, /* lineNumber */
-        { .hash_next = 7, .flags = 0x10, .atom = 326 }, /* columnNumber */
+        { .hash_next = 2, .flags = 0x00, .atom = 231 }, /* Symbol.hasInstance */
+        { .hash_next = 0, .flags = 0x10, .atom = 356 }, /* fileName */
+        { .hash_next = 10, .flags = 0x10, .atom = 484 }, /* lineNumber */
+        { .hash_next = 7, .flags = 0x10, .atom = 331 }, /* columnNumber */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_0, 16);
 
 static const ROM_SHAPE_T(16, 12) js_rom_sh_1 = {
-    .hash = { [ROM_HPAD(16) - 1 - 0] = 9, [ROM_HPAD(16) - 1 - 1] = 10, [ROM_HPAD(16) - 1 - 2] = 11, [ROM_HPAD(16) - 1 - 3] = 5, [ROM_HPAD(16) - 1 - 5] = 7, [ROM_HPAD(16) - 1 - 8] = 1, [ROM_HPAD(16) - 1 - 9] = 2, [ROM_HPAD(16) - 1 - 10] = 3, [ROM_HPAD(16) - 1 - 11] = 6, [ROM_HPAD(16) - 1 - 13] = 12, [ROM_HPAD(16) - 1 - 15] = 8, },
+    .hash = { [ROM_HPAD(16) - 1 - 0] = 6, [ROM_HPAD(16) - 1 - 4] = 8, [ROM_HPAD(16) - 1 - 5] = 9, [ROM_HPAD(16) - 1 - 6] = 10, [ROM_HPAD(16) - 1 - 7] = 11, [ROM_HPAD(16) - 1 - 8] = 5, [ROM_HPAD(16) - 1 - 9] = 2, [ROM_HPAD(16) - 1 - 10] = 3, [ROM_HPAD(16) - 1 - 13] = 12, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 12, .prop_count = 12,
             .proto = NULL },
@@ -620,14 +621,14 @@ static const ROM_SHAPE_T(16, 12) js_rom_sh_1 = {
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
         { .hash_next = 0, .flags = 0x00, .atom = 57 }, /* toLocaleString */
         { .hash_next = 0, .flags = 0x00, .atom = 58 }, /* valueOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 448 }, /* hasOwnProperty */
-        { .hash_next = 0, .flags = 0x00, .atom = 467 }, /* isPrototypeOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 507 }, /* propertyIsEnumerable */
-        { .hash_next = 0, .flags = 0x10, .atom = 69 }, /* __proto__ */
-        { .hash_next = 0, .flags = 0x00, .atom = 287 }, /* __defineGetter__ */
-        { .hash_next = 4, .flags = 0x00, .atom = 288 }, /* __defineSetter__ */
-        { .hash_next = 0, .flags = 0x00, .atom = 289 }, /* __lookupGetter__ */
-        { .hash_next = 0, .flags = 0x00, .atom = 290 }, /* __lookupSetter__ */
+        { .hash_next = 0, .flags = 0x00, .atom = 453 }, /* hasOwnProperty */
+        { .hash_next = 1, .flags = 0x00, .atom = 472 }, /* isPrototypeOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 512 }, /* propertyIsEnumerable */
+        { .hash_next = 4, .flags = 0x10, .atom = 69 }, /* __proto__ */
+        { .hash_next = 0, .flags = 0x00, .atom = 292 }, /* __defineGetter__ */
+        { .hash_next = 7, .flags = 0x00, .atom = 293 }, /* __defineSetter__ */
+        { .hash_next = 0, .flags = 0x00, .atom = 294 }, /* __lookupGetter__ */
+        { .hash_next = 0, .flags = 0x00, .atom = 295 }, /* __lookupSetter__ */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
@@ -646,36 +647,36 @@ static const ROM_SHAPE_T(4, 2) js_rom_sh_2 = {
 ROM_SHAPE_CHECK(js_rom_sh_2, 4);
 
 static const ROM_SHAPE_T(32, 26) js_rom_sh_3 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 4, [ROM_HPAD(32) - 1 - 1] = 5, [ROM_HPAD(32) - 1 - 2] = 14, [ROM_HPAD(32) - 1 - 3] = 15, [ROM_HPAD(32) - 1 - 6] = 6, [ROM_HPAD(32) - 1 - 7] = 16, [ROM_HPAD(32) - 1 - 8] = 18, [ROM_HPAD(32) - 1 - 9] = 8, [ROM_HPAD(32) - 1 - 10] = 9, [ROM_HPAD(32) - 1 - 11] = 20, [ROM_HPAD(32) - 1 - 12] = 12, [ROM_HPAD(32) - 1 - 13] = 21, [ROM_HPAD(32) - 1 - 14] = 23, [ROM_HPAD(32) - 1 - 15] = 19, [ROM_HPAD(32) - 1 - 16] = 24, [ROM_HPAD(32) - 1 - 18] = 1, [ROM_HPAD(32) - 1 - 22] = 22, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 24] = 13, [ROM_HPAD(32) - 1 - 26] = 10, [ROM_HPAD(32) - 1 - 28] = 26, [ROM_HPAD(32) - 1 - 31] = 25, },
+    .hash = { [ROM_HPAD(32) - 1 - 0] = 4, [ROM_HPAD(32) - 1 - 1] = 5, [ROM_HPAD(32) - 1 - 2] = 14, [ROM_HPAD(32) - 1 - 3] = 15, [ROM_HPAD(32) - 1 - 4] = 25, [ROM_HPAD(32) - 1 - 6] = 6, [ROM_HPAD(32) - 1 - 7] = 16, [ROM_HPAD(32) - 1 - 12] = 12, [ROM_HPAD(32) - 1 - 13] = 18, [ROM_HPAD(32) - 1 - 14] = 8, [ROM_HPAD(32) - 1 - 15] = 9, [ROM_HPAD(32) - 1 - 16] = 20, [ROM_HPAD(32) - 1 - 17] = 3, [ROM_HPAD(32) - 1 - 18] = 21, [ROM_HPAD(32) - 1 - 19] = 23, [ROM_HPAD(32) - 1 - 20] = 19, [ROM_HPAD(32) - 1 - 21] = 24, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 26] = 7, [ROM_HPAD(32) - 1 - 27] = 22, [ROM_HPAD(32) - 1 - 28] = 26, [ROM_HPAD(32) - 1 - 29] = 13, [ROM_HPAD(32) - 1 - 31] = 10, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 26, .prop_count = 26,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 332 }, /* create */
+        { .hash_next = 0, .flags = 0x00, .atom = 337 }, /* create */
         { .hash_next = 0, .flags = 0x00, .atom = 96 }, /* getPrototypeOf */
         { .hash_next = 0, .flags = 0x00, .atom = 97 }, /* setPrototypeOf */
         { .hash_next = 0, .flags = 0x00, .atom = 102 }, /* defineProperty */
         { .hash_next = 0, .flags = 0x00, .atom = 90 }, /* defineProperties */
-        { .hash_next = 0, .flags = 0x00, .atom = 425 }, /* getOwnPropertyNames */
-        { .hash_next = 0, .flags = 0x00, .atom = 426 }, /* getOwnPropertySymbols */
-        { .hash_next = 7, .flags = 0x00, .atom = 442 }, /* groupBy */
+        { .hash_next = 0, .flags = 0x00, .atom = 430 }, /* getOwnPropertyNames */
+        { .hash_next = 0, .flags = 0x00, .atom = 431 }, /* getOwnPropertySymbols */
+        { .hash_next = 0, .flags = 0x00, .atom = 447 }, /* groupBy */
         { .hash_next = 0, .flags = 0x00, .atom = 48 }, /* keys */
-        { .hash_next = 3, .flags = 0x00, .atom = 108 }, /* values */
-        { .hash_next = 0, .flags = 0x00, .atom = 344 }, /* entries */
+        { .hash_next = 0, .flags = 0x00, .atom = 108 }, /* values */
+        { .hash_next = 0, .flags = 0x00, .atom = 349 }, /* entries */
         { .hash_next = 0, .flags = 0x00, .atom = 98 }, /* isExtensible */
         { .hash_next = 0, .flags = 0x00, .atom = 99 }, /* preventExtensions */
         { .hash_next = 0, .flags = 0x00, .atom = 103 }, /* getOwnPropertyDescriptor */
-        { .hash_next = 0, .flags = 0x00, .atom = 424 }, /* getOwnPropertyDescriptors */
-        { .hash_next = 17, .flags = 0x00, .atom = 456 }, /* is */
-        { .hash_next = 0, .flags = 0x00, .atom = 303 }, /* assign */
-        { .hash_next = 0, .flags = 0x00, .atom = 523 }, /* seal */
-        { .hash_next = 0, .flags = 0x00, .atom = 365 }, /* freeze */
-        { .hash_next = 0, .flags = 0x00, .atom = 470 }, /* isSealed */
-        { .hash_next = 0, .flags = 0x00, .atom = 462 }, /* isFrozen */
-        { .hash_next = 11, .flags = 0x00, .atom = 368 }, /* fromEntries */
-        { .hash_next = 0, .flags = 0x00, .atom = 447 }, /* hasOwn */
+        { .hash_next = 0, .flags = 0x00, .atom = 429 }, /* getOwnPropertyDescriptors */
+        { .hash_next = 17, .flags = 0x00, .atom = 461 }, /* is */
+        { .hash_next = 0, .flags = 0x00, .atom = 308 }, /* assign */
+        { .hash_next = 11, .flags = 0x00, .atom = 528 }, /* seal */
+        { .hash_next = 1, .flags = 0x00, .atom = 370 }, /* freeze */
+        { .hash_next = 0, .flags = 0x00, .atom = 475 }, /* isSealed */
+        { .hash_next = 0, .flags = 0x00, .atom = 467 }, /* isFrozen */
+        { .hash_next = 0, .flags = 0x00, .atom = 373 }, /* fromEntries */
+        { .hash_next = 0, .flags = 0x00, .atom = 452 }, /* hasOwn */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
@@ -706,103 +707,104 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_5 = {
 };
 ROM_SHAPE_CHECK(js_rom_sh_5, 4);
 
-static const ROM_SHAPE_T(16, 7) js_rom_sh_6 = {
-    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 3] = 6, [ROM_HPAD(16) - 1 - 4] = 5, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 9] = 3, [ROM_HPAD(16) - 1 - 12] = 7, },
+static const ROM_SHAPE_T(16, 8) js_rom_sh_6 = {
+    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 4] = 6, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 8] = 7, [ROM_HPAD(16) - 1 - 12] = 8, [ROM_HPAD(16) - 1 - 13] = 5, [ROM_HPAD(16) - 1 - 14] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
-            .prop_hash_mask = 15, .prop_size = 7, .prop_count = 7,
+            .prop_hash_mask = 15, .prop_size = 8, .prop_count = 8,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 457 }, /* isArray */
+        { .hash_next = 0, .flags = 0x00, .atom = 462 }, /* isArray */
         { .hash_next = 0, .flags = 0x00, .atom = 124 }, /* from */
+        { .hash_next = 0, .flags = 0x00, .atom = 125 }, /* fromAsync */
         { .hash_next = 0, .flags = 0x00, .atom = 68 }, /* of */
-        { .hash_next = 0, .flags = 0x10, .atom = 227 }, /* Symbol.species */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
         { .hash_next = 4, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_6, 16);
 
 static const ROM_SHAPE_T(64, 42) js_rom_sh_7 = {
-    .hash = { [ROM_HPAD(64) - 1 - 0] = 10, [ROM_HPAD(64) - 1 - 1] = 11, [ROM_HPAD(64) - 1 - 5] = 19, [ROM_HPAD(64) - 1 - 6] = 17, [ROM_HPAD(64) - 1 - 8] = 27, [ROM_HPAD(64) - 1 - 9] = 34, [ROM_HPAD(64) - 1 - 23] = 28, [ROM_HPAD(64) - 1 - 24] = 40, [ROM_HPAD(64) - 1 - 25] = 33, [ROM_HPAD(64) - 1 - 26] = 38, [ROM_HPAD(64) - 1 - 28] = 20, [ROM_HPAD(64) - 1 - 29] = 4, [ROM_HPAD(64) - 1 - 30] = 18, [ROM_HPAD(64) - 1 - 32] = 12, [ROM_HPAD(64) - 1 - 33] = 9, [ROM_HPAD(64) - 1 - 34] = 13, [ROM_HPAD(64) - 1 - 35] = 14, [ROM_HPAD(64) - 1 - 36] = 41, [ROM_HPAD(64) - 1 - 37] = 16, [ROM_HPAD(64) - 1 - 39] = 36, [ROM_HPAD(64) - 1 - 40] = 35, [ROM_HPAD(64) - 1 - 44] = 37, [ROM_HPAD(64) - 1 - 45] = 26, [ROM_HPAD(64) - 1 - 48] = 39, [ROM_HPAD(64) - 1 - 49] = 2, [ROM_HPAD(64) - 1 - 50] = 1, [ROM_HPAD(64) - 1 - 51] = 6, [ROM_HPAD(64) - 1 - 52] = 29, [ROM_HPAD(64) - 1 - 54] = 32, [ROM_HPAD(64) - 1 - 56] = 23, [ROM_HPAD(64) - 1 - 57] = 22, [ROM_HPAD(64) - 1 - 60] = 24, [ROM_HPAD(64) - 1 - 61] = 42, },
+    .hash = { [ROM_HPAD(64) - 1 - 1] = 24, [ROM_HPAD(64) - 1 - 5] = 10, [ROM_HPAD(64) - 1 - 6] = 11, [ROM_HPAD(64) - 1 - 10] = 19, [ROM_HPAD(64) - 1 - 11] = 17, [ROM_HPAD(64) - 1 - 13] = 27, [ROM_HPAD(64) - 1 - 14] = 34, [ROM_HPAD(64) - 1 - 28] = 28, [ROM_HPAD(64) - 1 - 29] = 40, [ROM_HPAD(64) - 1 - 30] = 33, [ROM_HPAD(64) - 1 - 31] = 38, [ROM_HPAD(64) - 1 - 35] = 18, [ROM_HPAD(64) - 1 - 37] = 12, [ROM_HPAD(64) - 1 - 38] = 9, [ROM_HPAD(64) - 1 - 39] = 13, [ROM_HPAD(64) - 1 - 40] = 14, [ROM_HPAD(64) - 1 - 41] = 41, [ROM_HPAD(64) - 1 - 42] = 16, [ROM_HPAD(64) - 1 - 44] = 37, [ROM_HPAD(64) - 1 - 45] = 35, [ROM_HPAD(64) - 1 - 48] = 39, [ROM_HPAD(64) - 1 - 49] = 25, [ROM_HPAD(64) - 1 - 50] = 26, [ROM_HPAD(64) - 1 - 53] = 31, [ROM_HPAD(64) - 1 - 54] = 2, [ROM_HPAD(64) - 1 - 56] = 21, [ROM_HPAD(64) - 1 - 57] = 29, [ROM_HPAD(64) - 1 - 59] = 32, [ROM_HPAD(64) - 1 - 61] = 42, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 63, .prop_size = 42, .prop_count = 42,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x08, .atom = 50 }, /* length */
-        { .hash_next = 0, .flags = 0x00, .atom = 305 }, /* at */
+        { .hash_next = 0, .flags = 0x00, .atom = 310 }, /* at */
         { .hash_next = 0, .flags = 0x00, .atom = 29 }, /* with */
         { .hash_next = 3, .flags = 0x00, .atom = 93 }, /* concat */
-        { .hash_next = 0, .flags = 0x00, .atom = 346 }, /* every */
-        { .hash_next = 0, .flags = 0x00, .atom = 563 }, /* some */
-        { .hash_next = 0, .flags = 0x00, .atom = 364 }, /* forEach */
-        { .hash_next = 0, .flags = 0x00, .atom = 487 }, /* map */
-        { .hash_next = 0, .flags = 0x00, .atom = 353 }, /* filter */
-        { .hash_next = 0, .flags = 0x00, .atom = 512 }, /* reduce */
-        { .hash_next = 0, .flags = 0x00, .atom = 513 }, /* reduceRight */
-        { .hash_next = 0, .flags = 0x00, .atom = 352 }, /* fill */
-        { .hash_next = 0, .flags = 0x00, .atom = 354 }, /* find */
-        { .hash_next = 0, .flags = 0x00, .atom = 355 }, /* findIndex */
-        { .hash_next = 0, .flags = 0x00, .atom = 356 }, /* findLast */
-        { .hash_next = 0, .flags = 0x00, .atom = 357 }, /* findLastIndex */
-        { .hash_next = 0, .flags = 0x00, .atom = 454 }, /* indexOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 478 }, /* lastIndexOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 453 }, /* includes */
+        { .hash_next = 0, .flags = 0x00, .atom = 351 }, /* every */
+        { .hash_next = 0, .flags = 0x00, .atom = 568 }, /* some */
+        { .hash_next = 0, .flags = 0x00, .atom = 369 }, /* forEach */
+        { .hash_next = 0, .flags = 0x00, .atom = 492 }, /* map */
+        { .hash_next = 0, .flags = 0x00, .atom = 358 }, /* filter */
+        { .hash_next = 0, .flags = 0x00, .atom = 517 }, /* reduce */
+        { .hash_next = 0, .flags = 0x00, .atom = 518 }, /* reduceRight */
+        { .hash_next = 0, .flags = 0x00, .atom = 357 }, /* fill */
+        { .hash_next = 0, .flags = 0x00, .atom = 359 }, /* find */
+        { .hash_next = 0, .flags = 0x00, .atom = 360 }, /* findIndex */
+        { .hash_next = 0, .flags = 0x00, .atom = 361 }, /* findLast */
+        { .hash_next = 0, .flags = 0x00, .atom = 362 }, /* findLastIndex */
+        { .hash_next = 0, .flags = 0x00, .atom = 459 }, /* indexOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 483 }, /* lastIndexOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 458 }, /* includes */
         { .hash_next = 0, .flags = 0x00, .atom = 92 }, /* join */
-        { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
+        { .hash_next = 6, .flags = 0x00, .atom = 56 }, /* toString */
         { .hash_next = 0, .flags = 0x00, .atom = 57 }, /* toLocaleString */
-        { .hash_next = 21, .flags = 0x00, .atom = 504 }, /* pop */
-        { .hash_next = 0, .flags = 0x00, .atom = 508 }, /* push */
-        { .hash_next = 7, .flags = 0x00, .atom = 556 }, /* shift */
-        { .hash_next = 0, .flags = 0x00, .atom = 621 }, /* unshift */
-        { .hash_next = 0, .flags = 0x00, .atom = 520 }, /* reverse */
-        { .hash_next = 0, .flags = 0x00, .atom = 599 }, /* toReversed */
-        { .hash_next = 0, .flags = 0x00, .atom = 564 }, /* sort */
-        { .hash_next = 0, .flags = 0x00, .atom = 600 }, /* toSorted */
-        { .hash_next = 0, .flags = 0x00, .atom = 560 }, /* slice */
-        { .hash_next = 0, .flags = 0x00, .atom = 566 }, /* splice */
-        { .hash_next = 0, .flags = 0x00, .atom = 601 }, /* toSpliced */
-        { .hash_next = 0, .flags = 0x00, .atom = 329 }, /* copyWithin */
-        { .hash_next = 0, .flags = 0x00, .atom = 360 }, /* flatMap */
-        { .hash_next = 8, .flags = 0x00, .atom = 359 }, /* flat */
-        { .hash_next = 25, .flags = 0x00, .atom = 108 }, /* values */
-        { .hash_next = 5, .flags = 0x00, .atom = 218 }, /* Symbol.iterator */
-        { .hash_next = 31, .flags = 0x00, .atom = 48 }, /* keys */
-        { .hash_next = 30, .flags = 0x00, .atom = 344 }, /* entries */
-        { .hash_next = 15, .flags = 0x00, .atom = 228 }, /* Symbol.unscopables */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 509 }, /* pop */
+        { .hash_next = 0, .flags = 0x00, .atom = 513 }, /* push */
+        { .hash_next = 7, .flags = 0x00, .atom = 561 }, /* shift */
+        { .hash_next = 1, .flags = 0x00, .atom = 626 }, /* unshift */
+        { .hash_next = 0, .flags = 0x00, .atom = 525 }, /* reverse */
+        { .hash_next = 20, .flags = 0x00, .atom = 604 }, /* toReversed */
+        { .hash_next = 22, .flags = 0x00, .atom = 569 }, /* sort */
+        { .hash_next = 4, .flags = 0x00, .atom = 605 }, /* toSorted */
+        { .hash_next = 0, .flags = 0x00, .atom = 565 }, /* slice */
+        { .hash_next = 0, .flags = 0x00, .atom = 571 }, /* splice */
+        { .hash_next = 0, .flags = 0x00, .atom = 606 }, /* toSpliced */
+        { .hash_next = 0, .flags = 0x00, .atom = 334 }, /* copyWithin */
+        { .hash_next = 0, .flags = 0x00, .atom = 365 }, /* flatMap */
+        { .hash_next = 8, .flags = 0x00, .atom = 364 }, /* flat */
+        { .hash_next = 36, .flags = 0x00, .atom = 108 }, /* values */
+        { .hash_next = 5, .flags = 0x00, .atom = 223 }, /* Symbol.iterator */
+        { .hash_next = 0, .flags = 0x00, .atom = 48 }, /* keys */
+        { .hash_next = 30, .flags = 0x00, .atom = 349 }, /* entries */
+        { .hash_next = 15, .flags = 0x00, .atom = 233 }, /* Symbol.unscopables */
+        { .hash_next = 23, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_7, 64);
 
 static const ROM_SHAPE_T(32, 16) js_rom_sh_8 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 4, [ROM_HPAD(32) - 1 - 2] = 5, [ROM_HPAD(32) - 1 - 3] = 6, [ROM_HPAD(32) - 1 - 4] = 7, [ROM_HPAD(32) - 1 - 5] = 11, [ROM_HPAD(32) - 1 - 7] = 9, [ROM_HPAD(32) - 1 - 8] = 10, [ROM_HPAD(32) - 1 - 9] = 2, [ROM_HPAD(32) - 1 - 12] = 16, [ROM_HPAD(32) - 1 - 16] = 12, [ROM_HPAD(32) - 1 - 17] = 1, [ROM_HPAD(32) - 1 - 23] = 13, [ROM_HPAD(32) - 1 - 24] = 14, [ROM_HPAD(32) - 1 - 25] = 15, },
+    .hash = { [ROM_HPAD(32) - 1 - 5] = 4, [ROM_HPAD(32) - 1 - 7] = 5, [ROM_HPAD(32) - 1 - 8] = 6, [ROM_HPAD(32) - 1 - 9] = 7, [ROM_HPAD(32) - 1 - 10] = 11, [ROM_HPAD(32) - 1 - 12] = 16, [ROM_HPAD(32) - 1 - 13] = 10, [ROM_HPAD(32) - 1 - 14] = 2, [ROM_HPAD(32) - 1 - 16] = 12, [ROM_HPAD(32) - 1 - 22] = 1, [ROM_HPAD(32) - 1 - 28] = 13, [ROM_HPAD(32) - 1 - 29] = 14, [ROM_HPAD(32) - 1 - 30] = 15, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 16, .prop_count = 16,
             .proto = NULL },
     .prop = {
-        { .hash_next = 0, .flags = 0x04, .atom = 305 }, /* at */
-        { .hash_next = 0, .flags = 0x04, .atom = 329 }, /* copyWithin */
-        { .hash_next = 0, .flags = 0x04, .atom = 344 }, /* entries */
-        { .hash_next = 0, .flags = 0x04, .atom = 352 }, /* fill */
-        { .hash_next = 0, .flags = 0x04, .atom = 354 }, /* find */
-        { .hash_next = 0, .flags = 0x04, .atom = 355 }, /* findIndex */
-        { .hash_next = 0, .flags = 0x04, .atom = 356 }, /* findLast */
-        { .hash_next = 0, .flags = 0x04, .atom = 357 }, /* findLastIndex */
-        { .hash_next = 0, .flags = 0x04, .atom = 359 }, /* flat */
-        { .hash_next = 0, .flags = 0x04, .atom = 360 }, /* flatMap */
-        { .hash_next = 8, .flags = 0x04, .atom = 453 }, /* includes */
+        { .hash_next = 0, .flags = 0x04, .atom = 310 }, /* at */
+        { .hash_next = 0, .flags = 0x04, .atom = 334 }, /* copyWithin */
+        { .hash_next = 0, .flags = 0x04, .atom = 349 }, /* entries */
+        { .hash_next = 0, .flags = 0x04, .atom = 357 }, /* fill */
+        { .hash_next = 0, .flags = 0x04, .atom = 359 }, /* find */
+        { .hash_next = 0, .flags = 0x04, .atom = 360 }, /* findIndex */
+        { .hash_next = 0, .flags = 0x04, .atom = 361 }, /* findLast */
+        { .hash_next = 0, .flags = 0x04, .atom = 362 }, /* findLastIndex */
+        { .hash_next = 0, .flags = 0x04, .atom = 364 }, /* flat */
+        { .hash_next = 0, .flags = 0x04, .atom = 365 }, /* flatMap */
+        { .hash_next = 8, .flags = 0x04, .atom = 458 }, /* includes */
         { .hash_next = 0, .flags = 0x04, .atom = 48 }, /* keys */
-        { .hash_next = 0, .flags = 0x04, .atom = 599 }, /* toReversed */
-        { .hash_next = 3, .flags = 0x04, .atom = 600 }, /* toSorted */
-        { .hash_next = 0, .flags = 0x04, .atom = 601 }, /* toSpliced */
-        { .hash_next = 0, .flags = 0x04, .atom = 108 }, /* values */
+        { .hash_next = 0, .flags = 0x04, .atom = 604 }, /* toReversed */
+        { .hash_next = 3, .flags = 0x04, .atom = 605 }, /* toSorted */
+        { .hash_next = 0, .flags = 0x04, .atom = 606 }, /* toSpliced */
+        { .hash_next = 9, .flags = 0x04, .atom = 108 }, /* values */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_8, 32);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_9 = {
-    .hash = { [ROM_HPAD(8) - 1 - 1] = 4, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 3] = 5, [ROM_HPAD(8) - 1 - 4] = 3, [ROM_HPAD(8) - 1 - 7] = 2, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 5, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 3, [ROM_HPAD(8) - 1 - 6] = 4, [ROM_HPAD(8) - 1 - 7] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[0] },
@@ -810,14 +812,14 @@ static const ROM_SHAPE_T(8, 5) js_rom_sh_9 = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
-        { .hash_next = 0, .flags = 0x00, .atom = 345 }, /* escape */
-        { .hash_next = 0, .flags = 0x10, .atom = 227 }, /* Symbol.species */
+        { .hash_next = 0, .flags = 0x00, .atom = 350 }, /* escape */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_9, 8);
 
 static const ROM_SHAPE_T(32, 20) js_rom_sh_10 = {
-    .hash = { [ROM_HPAD(32) - 1 - 2] = 4, [ROM_HPAD(32) - 1 - 8] = 13, [ROM_HPAD(32) - 1 - 9] = 11, [ROM_HPAD(32) - 1 - 12] = 5, [ROM_HPAD(32) - 1 - 13] = 2, [ROM_HPAD(32) - 1 - 14] = 1, [ROM_HPAD(32) - 1 - 15] = 3, [ROM_HPAD(32) - 1 - 16] = 7, [ROM_HPAD(32) - 1 - 19] = 6, [ROM_HPAD(32) - 1 - 24] = 14, [ROM_HPAD(32) - 1 - 26] = 9, [ROM_HPAD(32) - 1 - 27] = 16, [ROM_HPAD(32) - 1 - 28] = 17, [ROM_HPAD(32) - 1 - 29] = 20, [ROM_HPAD(32) - 1 - 30] = 18, [ROM_HPAD(32) - 1 - 31] = 19, },
+    .hash = { [ROM_HPAD(32) - 1 - 0] = 16, [ROM_HPAD(32) - 1 - 1] = 17, [ROM_HPAD(32) - 1 - 2] = 15, [ROM_HPAD(32) - 1 - 3] = 18, [ROM_HPAD(32) - 1 - 4] = 19, [ROM_HPAD(32) - 1 - 7] = 4, [ROM_HPAD(32) - 1 - 9] = 11, [ROM_HPAD(32) - 1 - 13] = 13, [ROM_HPAD(32) - 1 - 14] = 8, [ROM_HPAD(32) - 1 - 15] = 3, [ROM_HPAD(32) - 1 - 16] = 7, [ROM_HPAD(32) - 1 - 17] = 5, [ROM_HPAD(32) - 1 - 24] = 14, [ROM_HPAD(32) - 1 - 29] = 20, [ROM_HPAD(32) - 1 - 31] = 9, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 20, .prop_count = 20,
             .proto = (JSObject *)&js_rom_obj[1] },
@@ -825,29 +827,29 @@ static const ROM_SHAPE_T(32, 20) js_rom_sh_10 = {
         { .hash_next = 0, .flags = 0x10, .atom = 110 }, /* flags */
         { .hash_next = 0, .flags = 0x10, .atom = 109 }, /* source */
         { .hash_next = 0, .flags = 0x10, .atom = 111 }, /* global */
-        { .hash_next = 0, .flags = 0x10, .atom = 450 }, /* ignoreCase */
-        { .hash_next = 0, .flags = 0x10, .atom = 492 }, /* multiline */
-        { .hash_next = 0, .flags = 0x10, .atom = 339 }, /* dotAll */
+        { .hash_next = 0, .flags = 0x10, .atom = 455 }, /* ignoreCase */
+        { .hash_next = 0, .flags = 0x10, .atom = 497 }, /* multiline */
+        { .hash_next = 0, .flags = 0x10, .atom = 344 }, /* dotAll */
         { .hash_next = 0, .flags = 0x10, .atom = 112 }, /* unicode */
-        { .hash_next = 0, .flags = 0x10, .atom = 617 }, /* unicodeSets */
-        { .hash_next = 0, .flags = 0x10, .atom = 570 }, /* sticky */
-        { .hash_next = 0, .flags = 0x10, .atom = 445 }, /* hasIndices */
-        { .hash_next = 8, .flags = 0x00, .atom = 137 }, /* exec */
-        { .hash_next = 0, .flags = 0x00, .atom = 328 }, /* compile */
-        { .hash_next = 12, .flags = 0x00, .atom = 584 }, /* test */
-        { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
-        { .hash_next = 10, .flags = 0x00, .atom = 221 }, /* Symbol.replace */
-        { .hash_next = 0, .flags = 0x00, .atom = 219 }, /* Symbol.match */
-        { .hash_next = 0, .flags = 0x00, .atom = 220 }, /* Symbol.matchAll */
-        { .hash_next = 0, .flags = 0x00, .atom = 222 }, /* Symbol.search */
-        { .hash_next = 0, .flags = 0x00, .atom = 223 }, /* Symbol.split */
-        { .hash_next = 15, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 1, .flags = 0x10, .atom = 622 }, /* unicodeSets */
+        { .hash_next = 0, .flags = 0x10, .atom = 575 }, /* sticky */
+        { .hash_next = 0, .flags = 0x10, .atom = 450 }, /* hasIndices */
+        { .hash_next = 0, .flags = 0x00, .atom = 137 }, /* exec */
+        { .hash_next = 2, .flags = 0x00, .atom = 333 }, /* compile */
+        { .hash_next = 12, .flags = 0x00, .atom = 589 }, /* test */
+        { .hash_next = 6, .flags = 0x00, .atom = 56 }, /* toString */
+        { .hash_next = 10, .flags = 0x00, .atom = 226 }, /* Symbol.replace */
+        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.match */
+        { .hash_next = 0, .flags = 0x00, .atom = 225 }, /* Symbol.matchAll */
+        { .hash_next = 0, .flags = 0x00, .atom = 227 }, /* Symbol.search */
+        { .hash_next = 0, .flags = 0x00, .atom = 228 }, /* Symbol.split */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_10, 32);
 
 static const ROM_SHAPE_T(16, 12) js_rom_sh_11 = {
-    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 3] = 11, [ROM_HPAD(16) - 1 - 4] = 4, [ROM_HPAD(16) - 1 - 6] = 5, [ROM_HPAD(16) - 1 - 7] = 6, [ROM_HPAD(16) - 1 - 8] = 8, [ROM_HPAD(16) - 1 - 10] = 7, [ROM_HPAD(16) - 1 - 12] = 12, [ROM_HPAD(16) - 1 - 14] = 9, [ROM_HPAD(16) - 1 - 15] = 10, },
+    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 3] = 9, [ROM_HPAD(16) - 1 - 4] = 10, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 8] = 11, [ROM_HPAD(16) - 1 - 11] = 5, [ROM_HPAD(16) - 1 - 12] = 12, [ROM_HPAD(16) - 1 - 15] = 7, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 12, .prop_count = 12,
             .proto = (JSObject *)&js_rom_obj[0] },
@@ -856,20 +858,20 @@ static const ROM_SHAPE_T(16, 12) js_rom_sh_11 = {
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 131 }, /* resolve */
         { .hash_next = 0, .flags = 0x00, .atom = 132 }, /* reject */
-        { .hash_next = 0, .flags = 0x00, .atom = 294 }, /* all */
-        { .hash_next = 2, .flags = 0x00, .atom = 295 }, /* allSettled */
-        { .hash_next = 0, .flags = 0x00, .atom = 298 }, /* any */
+        { .hash_next = 0, .flags = 0x00, .atom = 299 }, /* all */
+        { .hash_next = 0, .flags = 0x00, .atom = 300 }, /* allSettled */
+        { .hash_next = 0, .flags = 0x00, .atom = 303 }, /* any */
         { .hash_next = 0, .flags = 0x00, .atom = 24 }, /* try */
-        { .hash_next = 0, .flags = 0x00, .atom = 510 }, /* race */
-        { .hash_next = 0, .flags = 0x00, .atom = 623 }, /* withResolvers */
-        { .hash_next = 3, .flags = 0x10, .atom = 227 }, /* Symbol.species */
-        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 3, .flags = 0x00, .atom = 515 }, /* race */
+        { .hash_next = 4, .flags = 0x00, .atom = 628 }, /* withResolvers */
+        { .hash_next = 8, .flags = 0x10, .atom = 232 }, /* Symbol.species */
+        { .hash_next = 6, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_11, 16);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_12 = {
-    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 1] = 2, [ROM_HPAD(8) - 1 - 2] = 3, [ROM_HPAD(8) - 1 - 5] = 5, },
+    .hash = { [ROM_HPAD(8) - 1 - 1] = 2, [ROM_HPAD(8) - 1 - 2] = 3, [ROM_HPAD(8) - 1 - 5] = 5, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[1] },
@@ -877,14 +879,14 @@ static const ROM_SHAPE_T(8, 5) js_rom_sh_12 = {
         { .hash_next = 0, .flags = 0x00, .atom = 130 }, /* then */
         { .hash_next = 0, .flags = 0x00, .atom = 25 }, /* catch */
         { .hash_next = 1, .flags = 0x00, .atom = 26 }, /* finally */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 4, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_12, 8);
 
 static const ROM_SHAPE_T(16, 7) js_rom_sh_13 = {
-    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 8] = 6, [ROM_HPAD(16) - 1 - 10] = 7, [ROM_HPAD(16) - 1 - 12] = 4, [ROM_HPAD(16) - 1 - 13] = 5, },
+    .hash = { [ROM_HPAD(16) - 1 - 1] = 4, [ROM_HPAD(16) - 1 - 2] = 5, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 12] = 3, [ROM_HPAD(16) - 1 - 13] = 6, [ROM_HPAD(16) - 1 - 15] = 7, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 7, .prop_count = 7,
             .proto = (JSObject *)&js_rom_obj[0] },
@@ -892,10 +894,10 @@ static const ROM_SHAPE_T(16, 7) js_rom_sh_13 = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
-        { .hash_next = 3, .flags = 0x00, .atom = 460 }, /* isError */
-        { .hash_next = 0, .flags = 0x00, .atom = 317 }, /* captureStackTrace */
-        { .hash_next = 0, .flags = 0x10, .atom = 568 }, /* stackTraceLimit */
-        { .hash_next = 0, .flags = 0x10, .atom = 506 }, /* prepareStackTrace */
+        { .hash_next = 0, .flags = 0x00, .atom = 465 }, /* isError */
+        { .hash_next = 1, .flags = 0x00, .atom = 322 }, /* captureStackTrace */
+        { .hash_next = 0, .flags = 0x10, .atom = 573 }, /* stackTraceLimit */
+        { .hash_next = 0, .flags = 0x10, .atom = 511 }, /* prepareStackTrace */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_13, 16);
@@ -914,58 +916,60 @@ static const ROM_SHAPE_T(4, 4) js_rom_sh_14 = {
 };
 ROM_SHAPE_CHECK(js_rom_sh_14, 4);
 
-static const ROM_SHAPE_T(16, 5) js_rom_sh_15 = {
-    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 12] = 5, [ROM_HPAD(16) - 1 - 13] = 3, },
+static const ROM_SHAPE_T(16, 7) js_rom_sh_15 = {
+    .hash = { [ROM_HPAD(16) - 1 - 2] = 1, [ROM_HPAD(16) - 1 - 5] = 5, [ROM_HPAD(16) - 1 - 6] = 6, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 12] = 7, [ROM_HPAD(16) - 1 - 13] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
-            .prop_hash_mask = 15, .prop_size = 5, .prop_count = 5,
+            .prop_hash_mask = 15, .prop_size = 7, .prop_count = 7,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 93 }, /* concat */
         { .hash_next = 0, .flags = 0x00, .atom = 124 }, /* from */
+        { .hash_next = 0, .flags = 0x00, .atom = 149 }, /* zip */
+        { .hash_next = 0, .flags = 0x00, .atom = 150 }, /* zipKeyed */
         { .hash_next = 4, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_15, 16);
 
 static const ROM_SHAPE_T(32, 14) js_rom_sh_16 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 13, [ROM_HPAD(32) - 1 - 1] = 2, [ROM_HPAD(32) - 1 - 2] = 7, [ROM_HPAD(32) - 1 - 5] = 5, [ROM_HPAD(32) - 1 - 7] = 4, [ROM_HPAD(32) - 1 - 8] = 3, [ROM_HPAD(32) - 1 - 10] = 11, [ROM_HPAD(32) - 1 - 12] = 8, [ROM_HPAD(32) - 1 - 19] = 9, [ROM_HPAD(32) - 1 - 20] = 1, [ROM_HPAD(32) - 1 - 26] = 12, [ROM_HPAD(32) - 1 - 29] = 14, },
+    .hash = { [ROM_HPAD(32) - 1 - 5] = 13, [ROM_HPAD(32) - 1 - 6] = 2, [ROM_HPAD(32) - 1 - 7] = 7, [ROM_HPAD(32) - 1 - 10] = 5, [ROM_HPAD(32) - 1 - 12] = 4, [ROM_HPAD(32) - 1 - 13] = 3, [ROM_HPAD(32) - 1 - 15] = 11, [ROM_HPAD(32) - 1 - 17] = 8, [ROM_HPAD(32) - 1 - 24] = 9, [ROM_HPAD(32) - 1 - 25] = 1, [ROM_HPAD(32) - 1 - 29] = 14, [ROM_HPAD(32) - 1 - 31] = 12, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 14, .prop_count = 14,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 340 }, /* drop */
-        { .hash_next = 0, .flags = 0x00, .atom = 353 }, /* filter */
-        { .hash_next = 0, .flags = 0x00, .atom = 360 }, /* flatMap */
-        { .hash_next = 0, .flags = 0x00, .atom = 487 }, /* map */
-        { .hash_next = 0, .flags = 0x00, .atom = 581 }, /* take */
-        { .hash_next = 0, .flags = 0x00, .atom = 346 }, /* every */
-        { .hash_next = 0, .flags = 0x00, .atom = 354 }, /* find */
-        { .hash_next = 0, .flags = 0x00, .atom = 364 }, /* forEach */
-        { .hash_next = 0, .flags = 0x00, .atom = 563 }, /* some */
-        { .hash_next = 0, .flags = 0x00, .atom = 512 }, /* reduce */
-        { .hash_next = 0, .flags = 0x00, .atom = 586 }, /* toArray */
-        { .hash_next = 6, .flags = 0x00, .atom = 218 }, /* Symbol.iterator */
-        { .hash_next = 10, .flags = 0x10, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 345 }, /* drop */
+        { .hash_next = 0, .flags = 0x00, .atom = 358 }, /* filter */
+        { .hash_next = 0, .flags = 0x00, .atom = 365 }, /* flatMap */
+        { .hash_next = 0, .flags = 0x00, .atom = 492 }, /* map */
+        { .hash_next = 0, .flags = 0x00, .atom = 586 }, /* take */
+        { .hash_next = 0, .flags = 0x00, .atom = 351 }, /* every */
+        { .hash_next = 0, .flags = 0x00, .atom = 359 }, /* find */
+        { .hash_next = 0, .flags = 0x00, .atom = 369 }, /* forEach */
+        { .hash_next = 0, .flags = 0x00, .atom = 568 }, /* some */
+        { .hash_next = 0, .flags = 0x00, .atom = 517 }, /* reduce */
+        { .hash_next = 0, .flags = 0x00, .atom = 591 }, /* toArray */
+        { .hash_next = 6, .flags = 0x00, .atom = 223 }, /* Symbol.iterator */
+        { .hash_next = 10, .flags = 0x10, .atom = 229 }, /* Symbol.toStringTag */
         { .hash_next = 0, .flags = 0x10, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_16, 32);
 
 static const ROM_SHAPE_T(4, 1) js_rom_sh_17 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 1, .prop_count = 1,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.asyncIterator */
+        { .hash_next = 0, .flags = 0x00, .atom = 234 }, /* Symbol.asyncIterator */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_17, 4);
 
 static const ROM_SHAPE_T(8, 6) js_rom_sh_18 = {
-    .hash = { [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 3] = 5, [ROM_HPAD(8) - 1 - 4] = 6, [ROM_HPAD(8) - 1 - 7] = 2, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 5, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 6, [ROM_HPAD(8) - 1 - 7] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 6, .prop_count = 6,
             .proto = (JSObject *)&js_rom_obj[0] },
@@ -974,56 +978,56 @@ static const ROM_SHAPE_T(8, 6) js_rom_sh_18 = {
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 124 }, /* from */
         { .hash_next = 3, .flags = 0x00, .atom = 68 }, /* of */
-        { .hash_next = 0, .flags = 0x10, .atom = 227 }, /* Symbol.species */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
         { .hash_next = 4, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_18, 8);
 
 static const ROM_SHAPE_T(64, 38) js_rom_sh_19 = {
-    .hash = { [ROM_HPAD(64) - 1 - 0] = 19, [ROM_HPAD(64) - 1 - 1] = 20, [ROM_HPAD(64) - 1 - 3] = 7, [ROM_HPAD(64) - 1 - 5] = 36, [ROM_HPAD(64) - 1 - 6] = 34, [ROM_HPAD(64) - 1 - 8] = 26, [ROM_HPAD(64) - 1 - 9] = 13, [ROM_HPAD(64) - 1 - 23] = 27, [ROM_HPAD(64) - 1 - 24] = 31, [ROM_HPAD(64) - 1 - 26] = 14, [ROM_HPAD(64) - 1 - 28] = 32, [ROM_HPAD(64) - 1 - 29] = 3, [ROM_HPAD(64) - 1 - 30] = 35, [ROM_HPAD(64) - 1 - 32] = 21, [ROM_HPAD(64) - 1 - 33] = 18, [ROM_HPAD(64) - 1 - 34] = 22, [ROM_HPAD(64) - 1 - 35] = 23, [ROM_HPAD(64) - 1 - 36] = 24, [ROM_HPAD(64) - 1 - 37] = 25, [ROM_HPAD(64) - 1 - 39] = 17, [ROM_HPAD(64) - 1 - 44] = 16, [ROM_HPAD(64) - 1 - 48] = 28, [ROM_HPAD(64) - 1 - 49] = 2, [ROM_HPAD(64) - 1 - 50] = 1, [ROM_HPAD(64) - 1 - 51] = 15, [ROM_HPAD(64) - 1 - 52] = 30, [ROM_HPAD(64) - 1 - 56] = 38, [ROM_HPAD(64) - 1 - 57] = 33, [ROM_HPAD(64) - 1 - 58] = 5, [ROM_HPAD(64) - 1 - 59] = 6, [ROM_HPAD(64) - 1 - 61] = 37, [ROM_HPAD(64) - 1 - 63] = 29, },
+    .hash = { [ROM_HPAD(64) - 1 - 0] = 6, [ROM_HPAD(64) - 1 - 3] = 7, [ROM_HPAD(64) - 1 - 4] = 29, [ROM_HPAD(64) - 1 - 5] = 19, [ROM_HPAD(64) - 1 - 6] = 20, [ROM_HPAD(64) - 1 - 10] = 36, [ROM_HPAD(64) - 1 - 11] = 34, [ROM_HPAD(64) - 1 - 13] = 26, [ROM_HPAD(64) - 1 - 14] = 13, [ROM_HPAD(64) - 1 - 28] = 32, [ROM_HPAD(64) - 1 - 29] = 31, [ROM_HPAD(64) - 1 - 31] = 14, [ROM_HPAD(64) - 1 - 35] = 35, [ROM_HPAD(64) - 1 - 37] = 21, [ROM_HPAD(64) - 1 - 38] = 18, [ROM_HPAD(64) - 1 - 39] = 22, [ROM_HPAD(64) - 1 - 40] = 23, [ROM_HPAD(64) - 1 - 41] = 24, [ROM_HPAD(64) - 1 - 42] = 25, [ROM_HPAD(64) - 1 - 44] = 17, [ROM_HPAD(64) - 1 - 48] = 10, [ROM_HPAD(64) - 1 - 49] = 16, [ROM_HPAD(64) - 1 - 50] = 1, [ROM_HPAD(64) - 1 - 53] = 28, [ROM_HPAD(64) - 1 - 54] = 2, [ROM_HPAD(64) - 1 - 56] = 38, [ROM_HPAD(64) - 1 - 57] = 33, [ROM_HPAD(64) - 1 - 61] = 37, [ROM_HPAD(64) - 1 - 62] = 4, [ROM_HPAD(64) - 1 - 63] = 5, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 63, .prop_size = 38, .prop_count = 38,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x10, .atom = 50 }, /* length */
-        { .hash_next = 0, .flags = 0x00, .atom = 305 }, /* at */
+        { .hash_next = 0, .flags = 0x00, .atom = 310 }, /* at */
         { .hash_next = 0, .flags = 0x00, .atom = 29 }, /* with */
-        { .hash_next = 0, .flags = 0x10, .atom = 313 }, /* buffer */
-        { .hash_next = 0, .flags = 0x10, .atom = 314 }, /* byteLength */
-        { .hash_next = 0, .flags = 0x10, .atom = 315 }, /* byteOffset */
+        { .hash_next = 0, .flags = 0x10, .atom = 318 }, /* buffer */
+        { .hash_next = 0, .flags = 0x10, .atom = 319 }, /* byteLength */
+        { .hash_next = 0, .flags = 0x10, .atom = 320 }, /* byteOffset */
         { .hash_next = 0, .flags = 0x00, .atom = 67 }, /* set */
         { .hash_next = 0, .flags = 0x00, .atom = 108 }, /* values */
-        { .hash_next = 0, .flags = 0x00, .atom = 218 }, /* Symbol.iterator */
+        { .hash_next = 0, .flags = 0x00, .atom = 223 }, /* Symbol.iterator */
         { .hash_next = 0, .flags = 0x00, .atom = 48 }, /* keys */
-        { .hash_next = 0, .flags = 0x00, .atom = 344 }, /* entries */
-        { .hash_next = 0, .flags = 0x10, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 329 }, /* copyWithin */
-        { .hash_next = 9, .flags = 0x00, .atom = 346 }, /* every */
-        { .hash_next = 0, .flags = 0x00, .atom = 563 }, /* some */
-        { .hash_next = 8, .flags = 0x00, .atom = 364 }, /* forEach */
-        { .hash_next = 0, .flags = 0x00, .atom = 487 }, /* map */
-        { .hash_next = 0, .flags = 0x00, .atom = 353 }, /* filter */
-        { .hash_next = 0, .flags = 0x00, .atom = 512 }, /* reduce */
-        { .hash_next = 0, .flags = 0x00, .atom = 513 }, /* reduceRight */
-        { .hash_next = 12, .flags = 0x00, .atom = 352 }, /* fill */
-        { .hash_next = 0, .flags = 0x00, .atom = 354 }, /* find */
-        { .hash_next = 0, .flags = 0x00, .atom = 355 }, /* findIndex */
-        { .hash_next = 0, .flags = 0x00, .atom = 356 }, /* findLast */
-        { .hash_next = 0, .flags = 0x00, .atom = 357 }, /* findLastIndex */
-        { .hash_next = 0, .flags = 0x00, .atom = 520 }, /* reverse */
-        { .hash_next = 0, .flags = 0x00, .atom = 599 }, /* toReversed */
-        { .hash_next = 10, .flags = 0x00, .atom = 560 }, /* slice */
-        { .hash_next = 0, .flags = 0x00, .atom = 575 }, /* subarray */
-        { .hash_next = 0, .flags = 0x00, .atom = 564 }, /* sort */
-        { .hash_next = 11, .flags = 0x00, .atom = 600 }, /* toSorted */
-        { .hash_next = 0, .flags = 0x00, .atom = 92 }, /* join */
-        { .hash_next = 4, .flags = 0x00, .atom = 57 }, /* toLocaleString */
-        { .hash_next = 0, .flags = 0x00, .atom = 454 }, /* indexOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 478 }, /* lastIndexOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 453 }, /* includes */
+        { .hash_next = 3, .flags = 0x00, .atom = 349 }, /* entries */
+        { .hash_next = 0, .flags = 0x10, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 334 }, /* copyWithin */
+        { .hash_next = 9, .flags = 0x00, .atom = 351 }, /* every */
+        { .hash_next = 0, .flags = 0x00, .atom = 568 }, /* some */
+        { .hash_next = 0, .flags = 0x00, .atom = 369 }, /* forEach */
+        { .hash_next = 8, .flags = 0x00, .atom = 492 }, /* map */
+        { .hash_next = 0, .flags = 0x00, .atom = 358 }, /* filter */
+        { .hash_next = 0, .flags = 0x00, .atom = 517 }, /* reduce */
+        { .hash_next = 0, .flags = 0x00, .atom = 518 }, /* reduceRight */
+        { .hash_next = 12, .flags = 0x00, .atom = 357 }, /* fill */
+        { .hash_next = 0, .flags = 0x00, .atom = 359 }, /* find */
+        { .hash_next = 0, .flags = 0x00, .atom = 360 }, /* findIndex */
+        { .hash_next = 0, .flags = 0x00, .atom = 361 }, /* findLast */
+        { .hash_next = 0, .flags = 0x00, .atom = 362 }, /* findLastIndex */
+        { .hash_next = 0, .flags = 0x00, .atom = 525 }, /* reverse */
+        { .hash_next = 0, .flags = 0x00, .atom = 604 }, /* toReversed */
+        { .hash_next = 0, .flags = 0x00, .atom = 565 }, /* slice */
+        { .hash_next = 0, .flags = 0x00, .atom = 580 }, /* subarray */
+        { .hash_next = 0, .flags = 0x00, .atom = 569 }, /* sort */
+        { .hash_next = 11, .flags = 0x00, .atom = 605 }, /* toSorted */
+        { .hash_next = 27, .flags = 0x00, .atom = 92 }, /* join */
+        { .hash_next = 30, .flags = 0x00, .atom = 57 }, /* toLocaleString */
+        { .hash_next = 0, .flags = 0x00, .atom = 459 }, /* indexOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 483 }, /* lastIndexOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 458 }, /* includes */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
-        { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
+        { .hash_next = 15, .flags = 0x00, .atom = 56 }, /* toString */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_19, 64);
@@ -1032,7 +1036,7 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_20 = {
     .hash = { [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
-            .proto = (JSObject *)&js_rom_obj[131] },
+            .proto = (JSObject *)&js_rom_obj[132] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 1, .flags = 0x00, .atom = 51 }, /* message */
@@ -1045,7 +1049,7 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_21 = {
     .hash = { [ROM_HPAD(4) - 1 - 0] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
-            .proto = (JSObject *)&js_rom_obj[130] },
+            .proto = (JSObject *)&js_rom_obj[131] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
@@ -1055,124 +1059,124 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_21 = {
 ROM_SHAPE_CHECK(js_rom_sh_21, 4);
 
 static const ROM_SHAPE_T(16, 7) js_rom_sh_22 = {
-    .hash = { [ROM_HPAD(16) - 1 - 5] = 3, [ROM_HPAD(16) - 1 - 8] = 4, [ROM_HPAD(16) - 1 - 9] = 5, [ROM_HPAD(16) - 1 - 10] = 6, [ROM_HPAD(16) - 1 - 12] = 1, [ROM_HPAD(16) - 1 - 13] = 7, },
+    .hash = { [ROM_HPAD(16) - 1 - 1] = 1, [ROM_HPAD(16) - 1 - 2] = 2, [ROM_HPAD(16) - 1 - 8] = 4, [ROM_HPAD(16) - 1 - 9] = 5, [ROM_HPAD(16) - 1 - 10] = 6, [ROM_HPAD(16) - 1 - 13] = 7, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 7, .prop_count = 7,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 588 }, /* toExponential */
-        { .hash_next = 0, .flags = 0x00, .atom = 589 }, /* toFixed */
-        { .hash_next = 0, .flags = 0x00, .atom = 597 }, /* toPrecision */
+        { .hash_next = 0, .flags = 0x00, .atom = 593 }, /* toExponential */
+        { .hash_next = 0, .flags = 0x00, .atom = 594 }, /* toFixed */
+        { .hash_next = 0, .flags = 0x00, .atom = 602 }, /* toPrecision */
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
         { .hash_next = 0, .flags = 0x00, .atom = 57 }, /* toLocaleString */
-        { .hash_next = 0, .flags = 0x00, .atom = 58 }, /* valueOf */
-        { .hash_next = 2, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 3, .flags = 0x00, .atom = 58 }, /* valueOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_22, 16);
 
 static const ROM_SHAPE_T(32, 17) js_rom_sh_23 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 15, [ROM_HPAD(32) - 1 - 6] = 14, [ROM_HPAD(32) - 1 - 8] = 16, [ROM_HPAD(32) - 1 - 13] = 11, [ROM_HPAD(32) - 1 - 15] = 7, [ROM_HPAD(32) - 1 - 17] = 5, [ROM_HPAD(32) - 1 - 18] = 1, [ROM_HPAD(32) - 1 - 20] = 4, [ROM_HPAD(32) - 1 - 21] = 8, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 27] = 12, [ROM_HPAD(32) - 1 - 28] = 17, [ROM_HPAD(32) - 1 - 29] = 13, [ROM_HPAD(32) - 1 - 30] = 10, },
+    .hash = { [ROM_HPAD(32) - 1 - 0] = 12, [ROM_HPAD(32) - 1 - 1] = 9, [ROM_HPAD(32) - 1 - 2] = 13, [ROM_HPAD(32) - 1 - 3] = 10, [ROM_HPAD(32) - 1 - 5] = 15, [ROM_HPAD(32) - 1 - 11] = 14, [ROM_HPAD(32) - 1 - 13] = 16, [ROM_HPAD(32) - 1 - 18] = 11, [ROM_HPAD(32) - 1 - 20] = 7, [ROM_HPAD(32) - 1 - 22] = 5, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 25] = 4, [ROM_HPAD(32) - 1 - 26] = 8, [ROM_HPAD(32) - 1 - 28] = 17, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 17, .prop_count = 17,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 501 }, /* parseInt */
-        { .hash_next = 0, .flags = 0x00, .atom = 500 }, /* parseFloat */
-        { .hash_next = 0, .flags = 0x00, .atom = 465 }, /* isNaN */
-        { .hash_next = 0, .flags = 0x00, .atom = 461 }, /* isFinite */
-        { .hash_next = 0, .flags = 0x00, .atom = 463 }, /* isInteger */
-        { .hash_next = 3, .flags = 0x00, .atom = 469 }, /* isSafeInteger */
-        { .hash_next = 0, .flags = 0x00, .atom = 252 }, /* MAX_VALUE */
-        { .hash_next = 0, .flags = 0x00, .atom = 254 }, /* MIN_VALUE */
-        { .hash_next = 6, .flags = 0x00, .atom = 237 }, /* EPSILON */
-        { .hash_next = 0, .flags = 0x00, .atom = 251 }, /* MAX_SAFE_INTEGER */
-        { .hash_next = 0, .flags = 0x00, .atom = 253 }, /* MIN_SAFE_INTEGER */
-        { .hash_next = 0, .flags = 0x00, .atom = 262 }, /* NaN */
-        { .hash_next = 0, .flags = 0x00, .atom = 256 }, /* NEGATIVE_INFINITY */
-        { .hash_next = 0, .flags = 0x00, .atom = 264 }, /* POSITIVE_INFINITY */
-        { .hash_next = 9, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x00, .atom = 506 }, /* parseInt */
+        { .hash_next = 0, .flags = 0x00, .atom = 505 }, /* parseFloat */
+        { .hash_next = 0, .flags = 0x00, .atom = 470 }, /* isNaN */
+        { .hash_next = 1, .flags = 0x00, .atom = 466 }, /* isFinite */
+        { .hash_next = 0, .flags = 0x00, .atom = 468 }, /* isInteger */
+        { .hash_next = 3, .flags = 0x00, .atom = 474 }, /* isSafeInteger */
+        { .hash_next = 0, .flags = 0x00, .atom = 257 }, /* MAX_VALUE */
+        { .hash_next = 0, .flags = 0x00, .atom = 259 }, /* MIN_VALUE */
+        { .hash_next = 6, .flags = 0x00, .atom = 242 }, /* EPSILON */
+        { .hash_next = 0, .flags = 0x00, .atom = 256 }, /* MAX_SAFE_INTEGER */
+        { .hash_next = 0, .flags = 0x00, .atom = 258 }, /* MIN_SAFE_INTEGER */
+        { .hash_next = 0, .flags = 0x00, .atom = 267 }, /* NaN */
+        { .hash_next = 0, .flags = 0x00, .atom = 261 }, /* NEGATIVE_INFINITY */
+        { .hash_next = 0, .flags = 0x00, .atom = 269 }, /* POSITIVE_INFINITY */
+        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_23, 32);
 
 static const ROM_SHAPE_T(64, 53) js_rom_sh_24 = {
-    .hash = { [ROM_HPAD(64) - 1 - 0] = 19, [ROM_HPAD(64) - 1 - 1] = 18, [ROM_HPAD(64) - 1 - 3] = 52, [ROM_HPAD(64) - 1 - 4] = 22, [ROM_HPAD(64) - 1 - 5] = 23, [ROM_HPAD(64) - 1 - 6] = 9, [ROM_HPAD(64) - 1 - 12] = 16, [ROM_HPAD(64) - 1 - 17] = 37, [ROM_HPAD(64) - 1 - 19] = 38, [ROM_HPAD(64) - 1 - 20] = 35, [ROM_HPAD(64) - 1 - 23] = 12, [ROM_HPAD(64) - 1 - 26] = 39, [ROM_HPAD(64) - 1 - 27] = 47, [ROM_HPAD(64) - 1 - 29] = 36, [ROM_HPAD(64) - 1 - 30] = 17, [ROM_HPAD(64) - 1 - 32] = 48, [ROM_HPAD(64) - 1 - 34] = 33, [ROM_HPAD(64) - 1 - 35] = 27, [ROM_HPAD(64) - 1 - 36] = 30, [ROM_HPAD(64) - 1 - 37] = 28, [ROM_HPAD(64) - 1 - 38] = 44, [ROM_HPAD(64) - 1 - 40] = 40, [ROM_HPAD(64) - 1 - 41] = 15, [ROM_HPAD(64) - 1 - 42] = 45, [ROM_HPAD(64) - 1 - 43] = 46, [ROM_HPAD(64) - 1 - 45] = 34, [ROM_HPAD(64) - 1 - 48] = 20, [ROM_HPAD(64) - 1 - 49] = 24, [ROM_HPAD(64) - 1 - 50] = 49, [ROM_HPAD(64) - 1 - 53] = 41, [ROM_HPAD(64) - 1 - 55] = 42, [ROM_HPAD(64) - 1 - 56] = 43, [ROM_HPAD(64) - 1 - 57] = 13, [ROM_HPAD(64) - 1 - 58] = 32, [ROM_HPAD(64) - 1 - 60] = 50, [ROM_HPAD(64) - 1 - 61] = 53, [ROM_HPAD(64) - 1 - 62] = 51, },
+    .hash = { [ROM_HPAD(64) - 1 - 1] = 50, [ROM_HPAD(64) - 1 - 3] = 51, [ROM_HPAD(64) - 1 - 5] = 19, [ROM_HPAD(64) - 1 - 6] = 18, [ROM_HPAD(64) - 1 - 8] = 52, [ROM_HPAD(64) - 1 - 9] = 22, [ROM_HPAD(64) - 1 - 10] = 23, [ROM_HPAD(64) - 1 - 11] = 9, [ROM_HPAD(64) - 1 - 17] = 16, [ROM_HPAD(64) - 1 - 22] = 37, [ROM_HPAD(64) - 1 - 24] = 38, [ROM_HPAD(64) - 1 - 25] = 35, [ROM_HPAD(64) - 1 - 28] = 12, [ROM_HPAD(64) - 1 - 29] = 5, [ROM_HPAD(64) - 1 - 30] = 17, [ROM_HPAD(64) - 1 - 31] = 39, [ROM_HPAD(64) - 1 - 32] = 47, [ROM_HPAD(64) - 1 - 34] = 36, [ROM_HPAD(64) - 1 - 35] = 10, [ROM_HPAD(64) - 1 - 37] = 48, [ROM_HPAD(64) - 1 - 39] = 33, [ROM_HPAD(64) - 1 - 40] = 27, [ROM_HPAD(64) - 1 - 41] = 30, [ROM_HPAD(64) - 1 - 42] = 28, [ROM_HPAD(64) - 1 - 43] = 44, [ROM_HPAD(64) - 1 - 45] = 40, [ROM_HPAD(64) - 1 - 46] = 15, [ROM_HPAD(64) - 1 - 47] = 45, [ROM_HPAD(64) - 1 - 48] = 46, [ROM_HPAD(64) - 1 - 50] = 34, [ROM_HPAD(64) - 1 - 53] = 20, [ROM_HPAD(64) - 1 - 54] = 24, [ROM_HPAD(64) - 1 - 55] = 49, [ROM_HPAD(64) - 1 - 56] = 31, [ROM_HPAD(64) - 1 - 58] = 41, [ROM_HPAD(64) - 1 - 60] = 42, [ROM_HPAD(64) - 1 - 61] = 53, [ROM_HPAD(64) - 1 - 62] = 13, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 63, .prop_size = 53, .prop_count = 53,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
-        { .hash_next = 0, .flags = 0x00, .atom = 305 }, /* at */
-        { .hash_next = 0, .flags = 0x00, .atom = 321 }, /* charCodeAt */
-        { .hash_next = 0, .flags = 0x00, .atom = 320 }, /* charAt */
+        { .hash_next = 0, .flags = 0x00, .atom = 310 }, /* at */
+        { .hash_next = 0, .flags = 0x00, .atom = 326 }, /* charCodeAt */
+        { .hash_next = 0, .flags = 0x00, .atom = 325 }, /* charAt */
         { .hash_next = 0, .flags = 0x00, .atom = 93 }, /* concat */
-        { .hash_next = 0, .flags = 0x00, .atom = 325 }, /* codePointAt */
-        { .hash_next = 0, .flags = 0x00, .atom = 474 }, /* isWellFormed */
-        { .hash_next = 0, .flags = 0x00, .atom = 606 }, /* toWellFormed */
-        { .hash_next = 0, .flags = 0x00, .atom = 454 }, /* indexOf */
-        { .hash_next = 8, .flags = 0x00, .atom = 478 }, /* lastIndexOf */
-        { .hash_next = 6, .flags = 0x00, .atom = 453 }, /* includes */
-        { .hash_next = 0, .flags = 0x00, .atom = 343 }, /* endsWith */
-        { .hash_next = 0, .flags = 0x00, .atom = 569 }, /* startsWith */
-        { .hash_next = 0, .flags = 0x00, .atom = 488 }, /* match */
-        { .hash_next = 0, .flags = 0x00, .atom = 489 }, /* matchAll */
-        { .hash_next = 0, .flags = 0x00, .atom = 524 }, /* search */
-        { .hash_next = 10, .flags = 0x00, .atom = 94 }, /* split */
-        { .hash_next = 3, .flags = 0x00, .atom = 577 }, /* substring */
-        { .hash_next = 4, .flags = 0x00, .atom = 576 }, /* substr */
-        { .hash_next = 0, .flags = 0x00, .atom = 560 }, /* slice */
-        { .hash_next = 0, .flags = 0x00, .atom = 515 }, /* repeat */
-        { .hash_next = 0, .flags = 0x00, .atom = 516 }, /* replace */
-        { .hash_next = 11, .flags = 0x00, .atom = 517 }, /* replaceAll */
-        { .hash_next = 2, .flags = 0x00, .atom = 497 }, /* padEnd */
-        { .hash_next = 1, .flags = 0x00, .atom = 498 }, /* padStart */
-        { .hash_next = 0, .flags = 0x00, .atom = 610 }, /* trim */
-        { .hash_next = 0, .flags = 0x00, .atom = 611 }, /* trimEnd */
-        { .hash_next = 0, .flags = 0x00, .atom = 613 }, /* trimRight */
-        { .hash_next = 0, .flags = 0x00, .atom = 614 }, /* trimStart */
-        { .hash_next = 0, .flags = 0x00, .atom = 612 }, /* trimLeft */
+        { .hash_next = 0, .flags = 0x00, .atom = 330 }, /* codePointAt */
+        { .hash_next = 0, .flags = 0x00, .atom = 479 }, /* isWellFormed */
+        { .hash_next = 0, .flags = 0x00, .atom = 611 }, /* toWellFormed */
+        { .hash_next = 0, .flags = 0x00, .atom = 459 }, /* indexOf */
+        { .hash_next = 8, .flags = 0x00, .atom = 483 }, /* lastIndexOf */
+        { .hash_next = 6, .flags = 0x00, .atom = 458 }, /* includes */
+        { .hash_next = 0, .flags = 0x00, .atom = 348 }, /* endsWith */
+        { .hash_next = 0, .flags = 0x00, .atom = 574 }, /* startsWith */
+        { .hash_next = 0, .flags = 0x00, .atom = 493 }, /* match */
+        { .hash_next = 0, .flags = 0x00, .atom = 494 }, /* matchAll */
+        { .hash_next = 0, .flags = 0x00, .atom = 529 }, /* search */
+        { .hash_next = 0, .flags = 0x00, .atom = 94 }, /* split */
+        { .hash_next = 3, .flags = 0x00, .atom = 582 }, /* substring */
+        { .hash_next = 4, .flags = 0x00, .atom = 581 }, /* substr */
+        { .hash_next = 0, .flags = 0x00, .atom = 565 }, /* slice */
+        { .hash_next = 0, .flags = 0x00, .atom = 520 }, /* repeat */
+        { .hash_next = 0, .flags = 0x00, .atom = 521 }, /* replace */
+        { .hash_next = 11, .flags = 0x00, .atom = 522 }, /* replaceAll */
+        { .hash_next = 2, .flags = 0x00, .atom = 502 }, /* padEnd */
+        { .hash_next = 0, .flags = 0x00, .atom = 503 }, /* padStart */
+        { .hash_next = 0, .flags = 0x00, .atom = 615 }, /* trim */
+        { .hash_next = 0, .flags = 0x00, .atom = 616 }, /* trimEnd */
+        { .hash_next = 0, .flags = 0x00, .atom = 618 }, /* trimRight */
+        { .hash_next = 0, .flags = 0x00, .atom = 619 }, /* trimStart */
+        { .hash_next = 0, .flags = 0x00, .atom = 617 }, /* trimLeft */
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
         { .hash_next = 0, .flags = 0x00, .atom = 58 }, /* valueOf */
-        { .hash_next = 26, .flags = 0x00, .atom = 482 }, /* localeCompare */
-        { .hash_next = 0, .flags = 0x00, .atom = 493 }, /* normalize */
-        { .hash_next = 0, .flags = 0x00, .atom = 596 }, /* toLowerCase */
-        { .hash_next = 5, .flags = 0x00, .atom = 605 }, /* toUpperCase */
-        { .hash_next = 0, .flags = 0x00, .atom = 593 }, /* toLocaleLowerCase */
-        { .hash_next = 0, .flags = 0x00, .atom = 595 }, /* toLocaleUpperCase */
-        { .hash_next = 7, .flags = 0x00, .atom = 218 }, /* Symbol.iterator */
-        { .hash_next = 14, .flags = 0x00, .atom = 296 }, /* anchor */
-        { .hash_next = 0, .flags = 0x00, .atom = 309 }, /* big */
-        { .hash_next = 0, .flags = 0x00, .atom = 311 }, /* blink */
-        { .hash_next = 31, .flags = 0x00, .atom = 312 }, /* bold */
-        { .hash_next = 29, .flags = 0x00, .atom = 358 }, /* fixed */
-        { .hash_next = 0, .flags = 0x00, .atom = 362 }, /* fontcolor */
-        { .hash_next = 0, .flags = 0x00, .atom = 363 }, /* fontsize */
-        { .hash_next = 0, .flags = 0x00, .atom = 475 }, /* italics */
-        { .hash_next = 0, .flags = 0x00, .atom = 480 }, /* link */
-        { .hash_next = 25, .flags = 0x00, .atom = 562 }, /* small */
-        { .hash_next = 0, .flags = 0x00, .atom = 572 }, /* strike */
-        { .hash_next = 0, .flags = 0x00, .atom = 574 }, /* sub */
-        { .hash_next = 21, .flags = 0x00, .atom = 579 }, /* sup */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 26, .flags = 0x00, .atom = 487 }, /* localeCompare */
+        { .hash_next = 1, .flags = 0x00, .atom = 498 }, /* normalize */
+        { .hash_next = 0, .flags = 0x00, .atom = 601 }, /* toLowerCase */
+        { .hash_next = 0, .flags = 0x00, .atom = 610 }, /* toUpperCase */
+        { .hash_next = 0, .flags = 0x00, .atom = 598 }, /* toLocaleLowerCase */
+        { .hash_next = 0, .flags = 0x00, .atom = 600 }, /* toLocaleUpperCase */
+        { .hash_next = 7, .flags = 0x00, .atom = 223 }, /* Symbol.iterator */
+        { .hash_next = 14, .flags = 0x00, .atom = 301 }, /* anchor */
+        { .hash_next = 32, .flags = 0x00, .atom = 314 }, /* big */
+        { .hash_next = 0, .flags = 0x00, .atom = 316 }, /* blink */
+        { .hash_next = 0, .flags = 0x00, .atom = 317 }, /* bold */
+        { .hash_next = 29, .flags = 0x00, .atom = 363 }, /* fixed */
+        { .hash_next = 0, .flags = 0x00, .atom = 367 }, /* fontcolor */
+        { .hash_next = 0, .flags = 0x00, .atom = 368 }, /* fontsize */
+        { .hash_next = 0, .flags = 0x00, .atom = 480 }, /* italics */
+        { .hash_next = 0, .flags = 0x00, .atom = 485 }, /* link */
+        { .hash_next = 25, .flags = 0x00, .atom = 567 }, /* small */
+        { .hash_next = 0, .flags = 0x00, .atom = 577 }, /* strike */
+        { .hash_next = 0, .flags = 0x00, .atom = 579 }, /* sub */
+        { .hash_next = 21, .flags = 0x00, .atom = 584 }, /* sup */
+        { .hash_next = 43, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_24, 64);
 
 static const ROM_SHAPE_T(8, 6) js_rom_sh_25 = {
-    .hash = { [ROM_HPAD(8) - 1 - 1] = 5, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 6, [ROM_HPAD(8) - 1 - 6] = 3, [ROM_HPAD(8) - 1 - 7] = 4, },
+    .hash = { [ROM_HPAD(8) - 1 - 1] = 5, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 3] = 3, [ROM_HPAD(8) - 1 - 4] = 6, [ROM_HPAD(8) - 1 - 7] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 6, .prop_count = 6,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 366 }, /* fromCharCode */
-        { .hash_next = 2, .flags = 0x00, .atom = 367 }, /* fromCodePoint */
+        { .hash_next = 0, .flags = 0x00, .atom = 371 }, /* fromCharCode */
+        { .hash_next = 0, .flags = 0x00, .atom = 372 }, /* fromCodePoint */
         { .hash_next = 0, .flags = 0x00, .atom = 113 }, /* raw */
-        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 4, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_25, 8);
@@ -1204,23 +1208,23 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_27 = {
 ROM_SHAPE_CHECK(js_rom_sh_27, 4);
 
 static const ROM_SHAPE_T(8, 6) js_rom_sh_28 = {
-    .hash = { [ROM_HPAD(8) - 1 - 0] = 5, [ROM_HPAD(8) - 1 - 1] = 3, [ROM_HPAD(8) - 1 - 2] = 2, [ROM_HPAD(8) - 1 - 5] = 6, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 1, [ROM_HPAD(8) - 1 - 2] = 2, [ROM_HPAD(8) - 1 - 5] = 6, [ROM_HPAD(8) - 1 - 6] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 6, .prop_count = 6,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
         { .hash_next = 0, .flags = 0x00, .atom = 58 }, /* valueOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 217 }, /* Symbol.toPrimitive */
-        { .hash_next = 1, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 4, .flags = 0x10, .atom = 336 }, /* description */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 222 }, /* Symbol.toPrimitive */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 4, .flags = 0x10, .atom = 341 }, /* description */
+        { .hash_next = 5, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_28, 8);
 
 static const ROM_SHAPE_T(32, 18) js_rom_sh_29 = {
-    .hash = { [ROM_HPAD(32) - 1 - 4] = 9, [ROM_HPAD(32) - 1 - 8] = 7, [ROM_HPAD(32) - 1 - 9] = 8, [ROM_HPAD(32) - 1 - 10] = 13, [ROM_HPAD(32) - 1 - 12] = 16, [ROM_HPAD(32) - 1 - 16] = 17, [ROM_HPAD(32) - 1 - 17] = 3, [ROM_HPAD(32) - 1 - 18] = 1, [ROM_HPAD(32) - 1 - 21] = 15, [ROM_HPAD(32) - 1 - 22] = 5, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 26] = 12, [ROM_HPAD(32) - 1 - 28] = 18, [ROM_HPAD(32) - 1 - 29] = 4, [ROM_HPAD(32) - 1 - 30] = 14, },
+    .hash = { [ROM_HPAD(32) - 1 - 1] = 6, [ROM_HPAD(32) - 1 - 2] = 4, [ROM_HPAD(32) - 1 - 3] = 14, [ROM_HPAD(32) - 1 - 9] = 9, [ROM_HPAD(32) - 1 - 13] = 7, [ROM_HPAD(32) - 1 - 14] = 8, [ROM_HPAD(32) - 1 - 15] = 13, [ROM_HPAD(32) - 1 - 17] = 16, [ROM_HPAD(32) - 1 - 18] = 1, [ROM_HPAD(32) - 1 - 21] = 17, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 26] = 15, [ROM_HPAD(32) - 1 - 27] = 5, [ROM_HPAD(32) - 1 - 28] = 18, [ROM_HPAD(32) - 1 - 30] = 11, [ROM_HPAD(32) - 1 - 31] = 12, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 18, .prop_count = 18,
             .proto = (JSObject *)&js_rom_obj[0] },
@@ -1228,95 +1232,95 @@ static const ROM_SHAPE_T(32, 18) js_rom_sh_29 = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 17 }, /* for */
-        { .hash_next = 0, .flags = 0x00, .atom = 477 }, /* keyFor */
-        { .hash_next = 0, .flags = 0x00, .atom = 598 }, /* toPrimitive */
-        { .hash_next = 0, .flags = 0x00, .atom = 476 }, /* iterator */
-        { .hash_next = 0, .flags = 0x00, .atom = 488 }, /* match */
-        { .hash_next = 0, .flags = 0x00, .atom = 489 }, /* matchAll */
-        { .hash_next = 0, .flags = 0x00, .atom = 516 }, /* replace */
-        { .hash_next = 0, .flags = 0x00, .atom = 524 }, /* search */
+        { .hash_next = 0, .flags = 0x00, .atom = 482 }, /* keyFor */
+        { .hash_next = 0, .flags = 0x00, .atom = 603 }, /* toPrimitive */
+        { .hash_next = 0, .flags = 0x00, .atom = 481 }, /* iterator */
+        { .hash_next = 0, .flags = 0x00, .atom = 493 }, /* match */
+        { .hash_next = 0, .flags = 0x00, .atom = 494 }, /* matchAll */
+        { .hash_next = 0, .flags = 0x00, .atom = 521 }, /* replace */
+        { .hash_next = 3, .flags = 0x00, .atom = 529 }, /* search */
         { .hash_next = 0, .flags = 0x00, .atom = 94 }, /* split */
-        { .hash_next = 0, .flags = 0x00, .atom = 602 }, /* toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 458 }, /* isConcatSpreadable */
-        { .hash_next = 11, .flags = 0x00, .atom = 446 }, /* hasInstance */
-        { .hash_next = 0, .flags = 0x00, .atom = 565 }, /* species */
-        { .hash_next = 10, .flags = 0x00, .atom = 620 }, /* unscopables */
-        { .hash_next = 0, .flags = 0x00, .atom = 304 }, /* asyncIterator */
-        { .hash_next = 6, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x00, .atom = 607 }, /* toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 463 }, /* isConcatSpreadable */
+        { .hash_next = 0, .flags = 0x00, .atom = 451 }, /* hasInstance */
+        { .hash_next = 0, .flags = 0x00, .atom = 570 }, /* species */
+        { .hash_next = 10, .flags = 0x00, .atom = 625 }, /* unscopables */
+        { .hash_next = 0, .flags = 0x00, .atom = 309 }, /* asyncIterator */
+        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_29, 32);
 
 static const ROM_SHAPE_T(64, 48) js_rom_sh_30 = {
-    .hash = { [ROM_HPAD(64) - 1 - 11] = 7, [ROM_HPAD(64) - 1 - 14] = 5, [ROM_HPAD(64) - 1 - 15] = 6, [ROM_HPAD(64) - 1 - 16] = 10, [ROM_HPAD(64) - 1 - 18] = 11, [ROM_HPAD(64) - 1 - 19] = 47, [ROM_HPAD(64) - 1 - 21] = 19, [ROM_HPAD(64) - 1 - 22] = 29, [ROM_HPAD(64) - 1 - 23] = 45, [ROM_HPAD(64) - 1 - 24] = 38, [ROM_HPAD(64) - 1 - 25] = 3, [ROM_HPAD(64) - 1 - 27] = 15, [ROM_HPAD(64) - 1 - 28] = 32, [ROM_HPAD(64) - 1 - 29] = 36, [ROM_HPAD(64) - 1 - 30] = 42, [ROM_HPAD(64) - 1 - 31] = 34, [ROM_HPAD(64) - 1 - 32] = 31, [ROM_HPAD(64) - 1 - 33] = 41, [ROM_HPAD(64) - 1 - 34] = 46, [ROM_HPAD(64) - 1 - 35] = 39, [ROM_HPAD(64) - 1 - 36] = 33, [ROM_HPAD(64) - 1 - 37] = 37, [ROM_HPAD(64) - 1 - 38] = 43, [ROM_HPAD(64) - 1 - 39] = 35, [ROM_HPAD(64) - 1 - 43] = 44, [ROM_HPAD(64) - 1 - 44] = 13, [ROM_HPAD(64) - 1 - 45] = 12, [ROM_HPAD(64) - 1 - 46] = 20, [ROM_HPAD(64) - 1 - 47] = 30, [ROM_HPAD(64) - 1 - 48] = 16, [ROM_HPAD(64) - 1 - 49] = 22, [ROM_HPAD(64) - 1 - 50] = 28, [ROM_HPAD(64) - 1 - 51] = 24, [ROM_HPAD(64) - 1 - 52] = 18, [ROM_HPAD(64) - 1 - 53] = 26, [ROM_HPAD(64) - 1 - 56] = 2, [ROM_HPAD(64) - 1 - 57] = 14, [ROM_HPAD(64) - 1 - 58] = 1, [ROM_HPAD(64) - 1 - 61] = 48, },
+    .hash = { [ROM_HPAD(64) - 1 - 16] = 7, [ROM_HPAD(64) - 1 - 19] = 47, [ROM_HPAD(64) - 1 - 20] = 6, [ROM_HPAD(64) - 1 - 21] = 10, [ROM_HPAD(64) - 1 - 23] = 11, [ROM_HPAD(64) - 1 - 24] = 40, [ROM_HPAD(64) - 1 - 26] = 19, [ROM_HPAD(64) - 1 - 27] = 29, [ROM_HPAD(64) - 1 - 28] = 45, [ROM_HPAD(64) - 1 - 29] = 38, [ROM_HPAD(64) - 1 - 30] = 3, [ROM_HPAD(64) - 1 - 32] = 15, [ROM_HPAD(64) - 1 - 33] = 32, [ROM_HPAD(64) - 1 - 34] = 36, [ROM_HPAD(64) - 1 - 35] = 42, [ROM_HPAD(64) - 1 - 36] = 34, [ROM_HPAD(64) - 1 - 37] = 31, [ROM_HPAD(64) - 1 - 38] = 41, [ROM_HPAD(64) - 1 - 39] = 46, [ROM_HPAD(64) - 1 - 40] = 39, [ROM_HPAD(64) - 1 - 41] = 33, [ROM_HPAD(64) - 1 - 42] = 37, [ROM_HPAD(64) - 1 - 43] = 43, [ROM_HPAD(64) - 1 - 44] = 35, [ROM_HPAD(64) - 1 - 48] = 44, [ROM_HPAD(64) - 1 - 49] = 13, [ROM_HPAD(64) - 1 - 50] = 12, [ROM_HPAD(64) - 1 - 51] = 20, [ROM_HPAD(64) - 1 - 52] = 30, [ROM_HPAD(64) - 1 - 53] = 16, [ROM_HPAD(64) - 1 - 54] = 22, [ROM_HPAD(64) - 1 - 55] = 28, [ROM_HPAD(64) - 1 - 56] = 24, [ROM_HPAD(64) - 1 - 57] = 18, [ROM_HPAD(64) - 1 - 58] = 26, [ROM_HPAD(64) - 1 - 61] = 48, [ROM_HPAD(64) - 1 - 62] = 14, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 63, .prop_size = 48, .prop_count = 48,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 58 }, /* valueOf */
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
-        { .hash_next = 0, .flags = 0x00, .atom = 217 }, /* Symbol.toPrimitive */
-        { .hash_next = 0, .flags = 0x00, .atom = 604 }, /* toUTCString */
-        { .hash_next = 0, .flags = 0x00, .atom = 590 }, /* toGMTString */
-        { .hash_next = 0, .flags = 0x00, .atom = 591 }, /* toISOString */
-        { .hash_next = 0, .flags = 0x00, .atom = 587 }, /* toDateString */
-        { .hash_next = 0, .flags = 0x00, .atom = 603 }, /* toTimeString */
+        { .hash_next = 0, .flags = 0x00, .atom = 222 }, /* Symbol.toPrimitive */
+        { .hash_next = 0, .flags = 0x00, .atom = 609 }, /* toUTCString */
+        { .hash_next = 0, .flags = 0x00, .atom = 595 }, /* toGMTString */
+        { .hash_next = 0, .flags = 0x00, .atom = 596 }, /* toISOString */
+        { .hash_next = 0, .flags = 0x00, .atom = 592 }, /* toDateString */
+        { .hash_next = 0, .flags = 0x00, .atom = 608 }, /* toTimeString */
         { .hash_next = 0, .flags = 0x00, .atom = 57 }, /* toLocaleString */
-        { .hash_next = 0, .flags = 0x00, .atom = 592 }, /* toLocaleDateString */
-        { .hash_next = 0, .flags = 0x00, .atom = 594 }, /* toLocaleTimeString */
-        { .hash_next = 0, .flags = 0x00, .atom = 429 }, /* getTimezoneOffset */
-        { .hash_next = 0, .flags = 0x00, .atom = 428 }, /* getTime */
-        { .hash_next = 9, .flags = 0x00, .atom = 441 }, /* getYear */
-        { .hash_next = 8, .flags = 0x00, .atom = 411 }, /* getFullYear */
-        { .hash_next = 0, .flags = 0x00, .atom = 432 }, /* getUTCFullYear */
-        { .hash_next = 0, .flags = 0x00, .atom = 421 }, /* getMonth */
-        { .hash_next = 0, .flags = 0x00, .atom = 436 }, /* getUTCMonth */
-        { .hash_next = 0, .flags = 0x00, .atom = 405 }, /* getDate */
-        { .hash_next = 0, .flags = 0x00, .atom = 430 }, /* getUTCDate */
-        { .hash_next = 0, .flags = 0x00, .atom = 414 }, /* getHours */
-        { .hash_next = 0, .flags = 0x00, .atom = 433 }, /* getUTCHours */
-        { .hash_next = 0, .flags = 0x00, .atom = 420 }, /* getMinutes */
-        { .hash_next = 0, .flags = 0x00, .atom = 435 }, /* getUTCMinutes */
-        { .hash_next = 0, .flags = 0x00, .atom = 427 }, /* getSeconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 437 }, /* getUTCSeconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 419 }, /* getMilliseconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 434 }, /* getUTCMilliseconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 406 }, /* getDay */
-        { .hash_next = 0, .flags = 0x00, .atom = 431 }, /* getUTCDay */
-        { .hash_next = 0, .flags = 0x00, .atom = 544 }, /* setTime */
-        { .hash_next = 4, .flags = 0x00, .atom = 540 }, /* setMilliseconds */
-        { .hash_next = 23, .flags = 0x00, .atom = 548 }, /* setUTCMilliseconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 543 }, /* setSeconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 551 }, /* setUTCSeconds */
-        { .hash_next = 0, .flags = 0x00, .atom = 541 }, /* setMinutes */
-        { .hash_next = 17, .flags = 0x00, .atom = 549 }, /* setUTCMinutes */
-        { .hash_next = 0, .flags = 0x00, .atom = 536 }, /* setHours */
-        { .hash_next = 27, .flags = 0x00, .atom = 547 }, /* setUTCHours */
-        { .hash_next = 0, .flags = 0x00, .atom = 531 }, /* setDate */
-        { .hash_next = 0, .flags = 0x00, .atom = 545 }, /* setUTCDate */
-        { .hash_next = 21, .flags = 0x00, .atom = 542 }, /* setMonth */
-        { .hash_next = 0, .flags = 0x00, .atom = 550 }, /* setUTCMonth */
-        { .hash_next = 25, .flags = 0x00, .atom = 555 }, /* setYear */
-        { .hash_next = 0, .flags = 0x00, .atom = 535 }, /* setFullYear */
-        { .hash_next = 0, .flags = 0x00, .atom = 546 }, /* setUTCFullYear */
-        { .hash_next = 40, .flags = 0x00, .atom = 147 }, /* toJSON */
+        { .hash_next = 0, .flags = 0x00, .atom = 597 }, /* toLocaleDateString */
+        { .hash_next = 0, .flags = 0x00, .atom = 599 }, /* toLocaleTimeString */
+        { .hash_next = 0, .flags = 0x00, .atom = 434 }, /* getTimezoneOffset */
+        { .hash_next = 0, .flags = 0x00, .atom = 433 }, /* getTime */
+        { .hash_next = 0, .flags = 0x00, .atom = 446 }, /* getYear */
+        { .hash_next = 8, .flags = 0x00, .atom = 416 }, /* getFullYear */
+        { .hash_next = 0, .flags = 0x00, .atom = 437 }, /* getUTCFullYear */
+        { .hash_next = 0, .flags = 0x00, .atom = 426 }, /* getMonth */
+        { .hash_next = 9, .flags = 0x00, .atom = 441 }, /* getUTCMonth */
+        { .hash_next = 0, .flags = 0x00, .atom = 410 }, /* getDate */
+        { .hash_next = 0, .flags = 0x00, .atom = 435 }, /* getUTCDate */
+        { .hash_next = 0, .flags = 0x00, .atom = 419 }, /* getHours */
+        { .hash_next = 0, .flags = 0x00, .atom = 438 }, /* getUTCHours */
+        { .hash_next = 0, .flags = 0x00, .atom = 425 }, /* getMinutes */
+        { .hash_next = 2, .flags = 0x00, .atom = 440 }, /* getUTCMinutes */
+        { .hash_next = 0, .flags = 0x00, .atom = 432 }, /* getSeconds */
+        { .hash_next = 1, .flags = 0x00, .atom = 442 }, /* getUTCSeconds */
+        { .hash_next = 0, .flags = 0x00, .atom = 424 }, /* getMilliseconds */
+        { .hash_next = 0, .flags = 0x00, .atom = 439 }, /* getUTCMilliseconds */
+        { .hash_next = 0, .flags = 0x00, .atom = 411 }, /* getDay */
+        { .hash_next = 0, .flags = 0x00, .atom = 436 }, /* getUTCDay */
+        { .hash_next = 0, .flags = 0x00, .atom = 549 }, /* setTime */
+        { .hash_next = 4, .flags = 0x00, .atom = 545 }, /* setMilliseconds */
+        { .hash_next = 23, .flags = 0x00, .atom = 553 }, /* setUTCMilliseconds */
+        { .hash_next = 0, .flags = 0x00, .atom = 548 }, /* setSeconds */
+        { .hash_next = 0, .flags = 0x00, .atom = 556 }, /* setUTCSeconds */
+        { .hash_next = 0, .flags = 0x00, .atom = 546 }, /* setMinutes */
+        { .hash_next = 17, .flags = 0x00, .atom = 554 }, /* setUTCMinutes */
+        { .hash_next = 0, .flags = 0x00, .atom = 541 }, /* setHours */
+        { .hash_next = 27, .flags = 0x00, .atom = 552 }, /* setUTCHours */
+        { .hash_next = 0, .flags = 0x00, .atom = 536 }, /* setDate */
+        { .hash_next = 0, .flags = 0x00, .atom = 550 }, /* setUTCDate */
+        { .hash_next = 21, .flags = 0x00, .atom = 547 }, /* setMonth */
+        { .hash_next = 0, .flags = 0x00, .atom = 555 }, /* setUTCMonth */
+        { .hash_next = 25, .flags = 0x00, .atom = 560 }, /* setYear */
+        { .hash_next = 0, .flags = 0x00, .atom = 540 }, /* setFullYear */
+        { .hash_next = 0, .flags = 0x00, .atom = 551 }, /* setUTCFullYear */
+        { .hash_next = 5, .flags = 0x00, .atom = 147 }, /* toJSON */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_30, 64);
 
 static const ROM_SHAPE_T(8, 6) js_rom_sh_31 = {
-    .hash = { [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 3] = 5, [ROM_HPAD(8) - 1 - 4] = 6, [ROM_HPAD(8) - 1 - 7] = 3, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 5, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 6, [ROM_HPAD(8) - 1 - 7] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 6, .prop_count = 6,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 2, .flags = 0x00, .atom = 495 }, /* now */
-        { .hash_next = 0, .flags = 0x00, .atom = 499 }, /* parse */
-        { .hash_next = 4, .flags = 0x00, .atom = 275 }, /* UTC */
-        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x00, .atom = 500 }, /* now */
+        { .hash_next = 0, .flags = 0x00, .atom = 504 }, /* parse */
+        { .hash_next = 4, .flags = 0x00, .atom = 280 }, /* UTC */
+        { .hash_next = 3, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_31, 8);
@@ -1327,9 +1331,9 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_32 = {
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
-        { .hash_next = 1, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_32, 4);
@@ -1348,434 +1352,434 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_33 = {
 ROM_SHAPE_CHECK(js_rom_sh_33, 4);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_34 = {
-    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 3] = 1, [ROM_HPAD(8) - 1 - 5] = 5, [ROM_HPAD(8) - 1 - 6] = 2, [ROM_HPAD(8) - 1 - 7] = 3, },
+    .hash = { [ROM_HPAD(8) - 1 - 3] = 1, [ROM_HPAD(8) - 1 - 5] = 5, [ROM_HPAD(8) - 1 - 6] = 2, [ROM_HPAD(8) - 1 - 7] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
         { .hash_next = 0, .flags = 0x00, .atom = 6 }, /* return */
         { .hash_next = 0, .flags = 0x00, .atom = 23 }, /* throw */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 4, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_34, 8);
 
 static const ROM_SHAPE_T(16, 13) js_rom_sh_35 = {
-    .hash = { [ROM_HPAD(16) - 1 - 0] = 12, [ROM_HPAD(16) - 1 - 1] = 10, [ROM_HPAD(16) - 1 - 3] = 5, [ROM_HPAD(16) - 1 - 4] = 2, [ROM_HPAD(16) - 1 - 6] = 3, [ROM_HPAD(16) - 1 - 7] = 6, [ROM_HPAD(16) - 1 - 10] = 1, [ROM_HPAD(16) - 1 - 13] = 13, [ROM_HPAD(16) - 1 - 15] = 9, },
+    .hash = { [ROM_HPAD(16) - 1 - 4] = 9, [ROM_HPAD(16) - 1 - 5] = 12, [ROM_HPAD(16) - 1 - 6] = 10, [ROM_HPAD(16) - 1 - 8] = 5, [ROM_HPAD(16) - 1 - 11] = 3, [ROM_HPAD(16) - 1 - 12] = 6, [ROM_HPAD(16) - 1 - 13] = 13, [ROM_HPAD(16) - 1 - 15] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 13, .prop_count = 13,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x10, .atom = 314 }, /* byteLength */
+        { .hash_next = 0, .flags = 0x10, .atom = 319 }, /* byteLength */
         { .hash_next = 0, .flags = 0x10, .atom = 148 }, /* maxByteLength */
-        { .hash_next = 0, .flags = 0x10, .atom = 518 }, /* resizable */
-        { .hash_next = 0, .flags = 0x10, .atom = 337 }, /* detached */
-        { .hash_next = 0, .flags = 0x10, .atom = 451 }, /* immutable */
-        { .hash_next = 0, .flags = 0x00, .atom = 519 }, /* resize */
-        { .hash_next = 0, .flags = 0x00, .atom = 560 }, /* slice */
-        { .hash_next = 4, .flags = 0x00, .atom = 561 }, /* sliceToImmutable */
-        { .hash_next = 0, .flags = 0x00, .atom = 607 }, /* transfer */
-        { .hash_next = 8, .flags = 0x00, .atom = 609 }, /* transferToImmutable */
-        { .hash_next = 7, .flags = 0x00, .atom = 608 }, /* transferToFixedLength */
-        { .hash_next = 11, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x10, .atom = 523 }, /* resizable */
+        { .hash_next = 0, .flags = 0x10, .atom = 342 }, /* detached */
+        { .hash_next = 0, .flags = 0x10, .atom = 456 }, /* immutable */
+        { .hash_next = 0, .flags = 0x00, .atom = 524 }, /* resize */
+        { .hash_next = 0, .flags = 0x00, .atom = 565 }, /* slice */
+        { .hash_next = 4, .flags = 0x00, .atom = 566 }, /* sliceToImmutable */
+        { .hash_next = 2, .flags = 0x00, .atom = 612 }, /* transfer */
+        { .hash_next = 8, .flags = 0x00, .atom = 614 }, /* transferToImmutable */
+        { .hash_next = 7, .flags = 0x00, .atom = 613 }, /* transferToFixedLength */
+        { .hash_next = 11, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_35, 16);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_36 = {
-    .hash = { [ROM_HPAD(8) - 1 - 1] = 3, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 3] = 4, [ROM_HPAD(8) - 1 - 4] = 5, [ROM_HPAD(8) - 1 - 7] = 2, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 5, [ROM_HPAD(8) - 1 - 6] = 3, [ROM_HPAD(8) - 1 - 7] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 473 }, /* isView */
-        { .hash_next = 0, .flags = 0x10, .atom = 227 }, /* Symbol.species */
+        { .hash_next = 0, .flags = 0x00, .atom = 478 }, /* isView */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_36, 8);
 
 static const ROM_SHAPE_T(16, 7) js_rom_sh_37 = {
-    .hash = { [ROM_HPAD(16) - 1 - 0] = 6, [ROM_HPAD(16) - 1 - 4] = 2, [ROM_HPAD(16) - 1 - 10] = 1, [ROM_HPAD(16) - 1 - 11] = 4, [ROM_HPAD(16) - 1 - 12] = 3, [ROM_HPAD(16) - 1 - 13] = 7, },
+    .hash = { [ROM_HPAD(16) - 1 - 0] = 4, [ROM_HPAD(16) - 1 - 1] = 3, [ROM_HPAD(16) - 1 - 4] = 2, [ROM_HPAD(16) - 1 - 5] = 6, [ROM_HPAD(16) - 1 - 13] = 7, [ROM_HPAD(16) - 1 - 15] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 7, .prop_count = 7,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x10, .atom = 314 }, /* byteLength */
+        { .hash_next = 0, .flags = 0x10, .atom = 319 }, /* byteLength */
         { .hash_next = 0, .flags = 0x10, .atom = 148 }, /* maxByteLength */
-        { .hash_next = 0, .flags = 0x10, .atom = 444 }, /* growable */
-        { .hash_next = 0, .flags = 0x00, .atom = 443 }, /* grow */
-        { .hash_next = 0, .flags = 0x00, .atom = 560 }, /* slice */
-        { .hash_next = 5, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x10, .atom = 449 }, /* growable */
+        { .hash_next = 0, .flags = 0x00, .atom = 448 }, /* grow */
+        { .hash_next = 0, .flags = 0x00, .atom = 565 }, /* slice */
+        { .hash_next = 5, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_37, 16);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_38 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 3, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 2, .flags = 0x10, .atom = 227 }, /* Symbol.species */
-        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
+        { .hash_next = 3, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_38, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_39 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_39, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_40 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_40, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_41 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_41, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_42 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_42, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_43 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_43, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_44 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_44, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_45 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_45, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_46 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_46, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_47 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_47, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_48 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_48, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_49 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_49, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_50 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_50, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_51 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_51, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_52 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_52, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_53 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_53, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_54 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_54, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_55 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_55, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_56 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_56, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_57 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_57, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_58 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_58, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_59 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_59, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_60 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_60, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_61 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 2] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[165] },
+            .proto = (JSObject *)&js_rom_obj[168] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
-        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_61, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_62 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
-            .proto = (JSObject *)&js_rom_obj[161] },
+            .proto = (JSObject *)&js_rom_obj[164] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 233 }, /* BYTES_PER_ELEMENT */
+        { .hash_next = 1, .flags = 0x00, .atom = 238 }, /* BYTES_PER_ELEMENT */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_62, 4);
 
 static const ROM_SHAPE_T(32, 27) js_rom_sh_63 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 26, [ROM_HPAD(32) - 1 - 1] = 4, [ROM_HPAD(32) - 1 - 8] = 18, [ROM_HPAD(32) - 1 - 9] = 20, [ROM_HPAD(32) - 1 - 10] = 16, [ROM_HPAD(32) - 1 - 17] = 21, [ROM_HPAD(32) - 1 - 18] = 22, [ROM_HPAD(32) - 1 - 19] = 11, [ROM_HPAD(32) - 1 - 20] = 23, [ROM_HPAD(32) - 1 - 21] = 24, [ROM_HPAD(32) - 1 - 22] = 25, [ROM_HPAD(32) - 1 - 23] = 9, [ROM_HPAD(32) - 1 - 24] = 12, [ROM_HPAD(32) - 1 - 25] = 17, [ROM_HPAD(32) - 1 - 26] = 19, [ROM_HPAD(32) - 1 - 27] = 15, [ROM_HPAD(32) - 1 - 29] = 27, [ROM_HPAD(32) - 1 - 31] = 6, },
+    .hash = { [ROM_HPAD(32) - 1 - 0] = 15, [ROM_HPAD(32) - 1 - 4] = 6, [ROM_HPAD(32) - 1 - 5] = 26, [ROM_HPAD(32) - 1 - 6] = 4, [ROM_HPAD(32) - 1 - 13] = 18, [ROM_HPAD(32) - 1 - 14] = 20, [ROM_HPAD(32) - 1 - 15] = 16, [ROM_HPAD(32) - 1 - 22] = 21, [ROM_HPAD(32) - 1 - 23] = 22, [ROM_HPAD(32) - 1 - 24] = 11, [ROM_HPAD(32) - 1 - 25] = 23, [ROM_HPAD(32) - 1 - 26] = 24, [ROM_HPAD(32) - 1 - 27] = 25, [ROM_HPAD(32) - 1 - 28] = 9, [ROM_HPAD(32) - 1 - 29] = 27, [ROM_HPAD(32) - 1 - 30] = 17, [ROM_HPAD(32) - 1 - 31] = 19, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 27, .prop_count = 27,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x10, .atom = 313 }, /* buffer */
-        { .hash_next = 0, .flags = 0x10, .atom = 314 }, /* byteLength */
-        { .hash_next = 0, .flags = 0x10, .atom = 315 }, /* byteOffset */
-        { .hash_next = 0, .flags = 0x00, .atom = 417 }, /* getInt8 */
-        { .hash_next = 0, .flags = 0x00, .atom = 440 }, /* getUint8 */
-        { .hash_next = 0, .flags = 0x00, .atom = 415 }, /* getInt16 */
-        { .hash_next = 0, .flags = 0x00, .atom = 438 }, /* getUint16 */
-        { .hash_next = 0, .flags = 0x00, .atom = 416 }, /* getInt32 */
-        { .hash_next = 0, .flags = 0x00, .atom = 439 }, /* getUint32 */
-        { .hash_next = 0, .flags = 0x00, .atom = 402 }, /* getBigInt64 */
-        { .hash_next = 0, .flags = 0x00, .atom = 403 }, /* getBigUint64 */
-        { .hash_next = 5, .flags = 0x00, .atom = 408 }, /* getFloat16 */
-        { .hash_next = 1, .flags = 0x00, .atom = 409 }, /* getFloat32 */
-        { .hash_next = 2, .flags = 0x00, .atom = 410 }, /* getFloat64 */
-        { .hash_next = 3, .flags = 0x00, .atom = 539 }, /* setInt8 */
-        { .hash_next = 0, .flags = 0x00, .atom = 554 }, /* setUint8 */
-        { .hash_next = 13, .flags = 0x00, .atom = 537 }, /* setInt16 */
-        { .hash_next = 0, .flags = 0x00, .atom = 552 }, /* setUint16 */
-        { .hash_next = 14, .flags = 0x00, .atom = 538 }, /* setInt32 */
-        { .hash_next = 0, .flags = 0x00, .atom = 553 }, /* setUint32 */
-        { .hash_next = 0, .flags = 0x00, .atom = 529 }, /* setBigInt64 */
-        { .hash_next = 10, .flags = 0x00, .atom = 530 }, /* setBigUint64 */
-        { .hash_next = 0, .flags = 0x00, .atom = 532 }, /* setFloat16 */
-        { .hash_next = 0, .flags = 0x00, .atom = 533 }, /* setFloat32 */
-        { .hash_next = 7, .flags = 0x00, .atom = 534 }, /* setFloat64 */
-        { .hash_next = 8, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x10, .atom = 318 }, /* buffer */
+        { .hash_next = 0, .flags = 0x10, .atom = 319 }, /* byteLength */
+        { .hash_next = 0, .flags = 0x10, .atom = 320 }, /* byteOffset */
+        { .hash_next = 0, .flags = 0x00, .atom = 422 }, /* getInt8 */
+        { .hash_next = 0, .flags = 0x00, .atom = 445 }, /* getUint8 */
+        { .hash_next = 0, .flags = 0x00, .atom = 420 }, /* getInt16 */
+        { .hash_next = 0, .flags = 0x00, .atom = 443 }, /* getUint16 */
+        { .hash_next = 0, .flags = 0x00, .atom = 421 }, /* getInt32 */
+        { .hash_next = 0, .flags = 0x00, .atom = 444 }, /* getUint32 */
+        { .hash_next = 0, .flags = 0x00, .atom = 407 }, /* getBigInt64 */
+        { .hash_next = 0, .flags = 0x00, .atom = 408 }, /* getBigUint64 */
+        { .hash_next = 5, .flags = 0x00, .atom = 413 }, /* getFloat16 */
+        { .hash_next = 1, .flags = 0x00, .atom = 414 }, /* getFloat32 */
+        { .hash_next = 2, .flags = 0x00, .atom = 415 }, /* getFloat64 */
+        { .hash_next = 3, .flags = 0x00, .atom = 544 }, /* setInt8 */
+        { .hash_next = 0, .flags = 0x00, .atom = 559 }, /* setUint8 */
+        { .hash_next = 13, .flags = 0x00, .atom = 542 }, /* setInt16 */
+        { .hash_next = 0, .flags = 0x00, .atom = 557 }, /* setUint16 */
+        { .hash_next = 14, .flags = 0x00, .atom = 543 }, /* setInt32 */
+        { .hash_next = 0, .flags = 0x00, .atom = 558 }, /* setUint32 */
+        { .hash_next = 0, .flags = 0x00, .atom = 534 }, /* setBigInt64 */
+        { .hash_next = 10, .flags = 0x00, .atom = 535 }, /* setBigUint64 */
+        { .hash_next = 0, .flags = 0x00, .atom = 537 }, /* setFloat16 */
+        { .hash_next = 0, .flags = 0x00, .atom = 538 }, /* setFloat32 */
+        { .hash_next = 7, .flags = 0x00, .atom = 539 }, /* setFloat64 */
+        { .hash_next = 8, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 12, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_63, 32);
@@ -1794,76 +1798,76 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_64 = {
 ROM_SHAPE_CHECK(js_rom_sh_64, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_65 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 3, [ROM_HPAD(4) - 1 - 1] = 4, [ROM_HPAD(4) - 1 - 2] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 1, [ROM_HPAD(4) - 1 - 1] = 4, [ROM_HPAD(4) - 1 - 2] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 56 }, /* toString */
         { .hash_next = 0, .flags = 0x00, .atom = 58 }, /* valueOf */
-        { .hash_next = 1, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 3, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_65, 4);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_66 = {
-    .hash = { [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 3] = 4, [ROM_HPAD(8) - 1 - 4] = 5, [ROM_HPAD(8) - 1 - 7] = 2, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 1] = 3, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 5, [ROM_HPAD(8) - 1 - 7] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 300 }, /* asUintN */
-        { .hash_next = 0, .flags = 0x00, .atom = 299 }, /* asIntN */
-        { .hash_next = 3, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x00, .atom = 305 }, /* asUintN */
+        { .hash_next = 0, .flags = 0x00, .atom = 304 }, /* asIntN */
+        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_66, 8);
 
 static const ROM_SHAPE_T(32, 15) js_rom_sh_67 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 14, [ROM_HPAD(32) - 1 - 2] = 7, [ROM_HPAD(32) - 1 - 3] = 1, [ROM_HPAD(32) - 1 - 4] = 5, [ROM_HPAD(32) - 1 - 6] = 3, [ROM_HPAD(32) - 1 - 7] = 4, [ROM_HPAD(32) - 1 - 9] = 6, [ROM_HPAD(32) - 1 - 12] = 10, [ROM_HPAD(32) - 1 - 16] = 11, [ROM_HPAD(32) - 1 - 17] = 8, [ROM_HPAD(32) - 1 - 24] = 12, [ROM_HPAD(32) - 1 - 26] = 13, [ROM_HPAD(32) - 1 - 29] = 15, },
+    .hash = { [ROM_HPAD(32) - 1 - 2] = 2, [ROM_HPAD(32) - 1 - 3] = 1, [ROM_HPAD(32) - 1 - 4] = 5, [ROM_HPAD(32) - 1 - 5] = 14, [ROM_HPAD(32) - 1 - 7] = 7, [ROM_HPAD(32) - 1 - 9] = 6, [ROM_HPAD(32) - 1 - 11] = 3, [ROM_HPAD(32) - 1 - 12] = 10, [ROM_HPAD(32) - 1 - 16] = 11, [ROM_HPAD(32) - 1 - 17] = 9, [ROM_HPAD(32) - 1 - 29] = 15, [ROM_HPAD(32) - 1 - 31] = 13, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 15, .prop_count = 15,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 67 }, /* set */
         { .hash_next = 0, .flags = 0x00, .atom = 66 }, /* get */
-        { .hash_next = 0, .flags = 0x00, .atom = 422 }, /* getOrInsert */
-        { .hash_next = 0, .flags = 0x00, .atom = 423 }, /* getOrInsertComputed */
+        { .hash_next = 0, .flags = 0x00, .atom = 427 }, /* getOrInsert */
+        { .hash_next = 0, .flags = 0x00, .atom = 428 }, /* getOrInsertComputed */
         { .hash_next = 0, .flags = 0x00, .atom = 100 }, /* has */
         { .hash_next = 0, .flags = 0x00, .atom = 9 }, /* delete */
-        { .hash_next = 2, .flags = 0x00, .atom = 322 }, /* clear */
+        { .hash_next = 0, .flags = 0x00, .atom = 327 }, /* clear */
         { .hash_next = 0, .flags = 0x10, .atom = 49 }, /* size */
-        { .hash_next = 0, .flags = 0x00, .atom = 364 }, /* forEach */
-        { .hash_next = 9, .flags = 0x00, .atom = 108 }, /* values */
+        { .hash_next = 8, .flags = 0x00, .atom = 369 }, /* forEach */
+        { .hash_next = 4, .flags = 0x00, .atom = 108 }, /* values */
         { .hash_next = 0, .flags = 0x00, .atom = 48 }, /* keys */
-        { .hash_next = 0, .flags = 0x00, .atom = 344 }, /* entries */
-        { .hash_next = 0, .flags = 0x00, .atom = 218 }, /* Symbol.iterator */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 349 }, /* entries */
+        { .hash_next = 0, .flags = 0x00, .atom = 223 }, /* Symbol.iterator */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 12, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_67, 32);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_68 = {
-    .hash = { [ROM_HPAD(8) - 1 - 2] = 3, [ROM_HPAD(8) - 1 - 3] = 4, [ROM_HPAD(8) - 1 - 4] = 5, [ROM_HPAD(8) - 1 - 7] = 2, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 2] = 1, [ROM_HPAD(8) - 1 - 4] = 5, [ROM_HPAD(8) - 1 - 7] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 1, .flags = 0x00, .atom = 442 }, /* groupBy */
-        { .hash_next = 0, .flags = 0x10, .atom = 227 }, /* Symbol.species */
+        { .hash_next = 2, .flags = 0x00, .atom = 447 }, /* groupBy */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_68, 8);
 
 static const ROM_SHAPE_T(32, 19) js_rom_sh_69 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 18, [ROM_HPAD(32) - 1 - 2] = 4, [ROM_HPAD(32) - 1 - 4] = 12, [ROM_HPAD(32) - 1 - 7] = 10, [ROM_HPAD(32) - 1 - 9] = 3, [ROM_HPAD(32) - 1 - 10] = 13, [ROM_HPAD(32) - 1 - 11] = 7, [ROM_HPAD(32) - 1 - 12] = 14, [ROM_HPAD(32) - 1 - 16] = 15, [ROM_HPAD(32) - 1 - 17] = 5, [ROM_HPAD(32) - 1 - 18] = 11, [ROM_HPAD(32) - 1 - 23] = 8, [ROM_HPAD(32) - 1 - 24] = 17, [ROM_HPAD(32) - 1 - 26] = 16, [ROM_HPAD(32) - 1 - 29] = 19, },
+    .hash = { [ROM_HPAD(32) - 1 - 4] = 2, [ROM_HPAD(32) - 1 - 5] = 18, [ROM_HPAD(32) - 1 - 7] = 4, [ROM_HPAD(32) - 1 - 9] = 12, [ROM_HPAD(32) - 1 - 12] = 14, [ROM_HPAD(32) - 1 - 15] = 13, [ROM_HPAD(32) - 1 - 16] = 15, [ROM_HPAD(32) - 1 - 17] = 6, [ROM_HPAD(32) - 1 - 23] = 11, [ROM_HPAD(32) - 1 - 28] = 8, [ROM_HPAD(32) - 1 - 29] = 19, [ROM_HPAD(32) - 1 - 31] = 16, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 19, .prop_count = 19,
             .proto = (JSObject *)&js_rom_obj[1] },
@@ -1871,53 +1875,53 @@ static const ROM_SHAPE_T(32, 19) js_rom_sh_69 = {
         { .hash_next = 0, .flags = 0x00, .atom = 105 }, /* add */
         { .hash_next = 0, .flags = 0x00, .atom = 100 }, /* has */
         { .hash_next = 1, .flags = 0x00, .atom = 9 }, /* delete */
-        { .hash_next = 0, .flags = 0x00, .atom = 322 }, /* clear */
+        { .hash_next = 0, .flags = 0x00, .atom = 327 }, /* clear */
         { .hash_next = 0, .flags = 0x10, .atom = 49 }, /* size */
-        { .hash_next = 0, .flags = 0x00, .atom = 364 }, /* forEach */
-        { .hash_next = 0, .flags = 0x00, .atom = 459 }, /* isDisjointFrom */
-        { .hash_next = 0, .flags = 0x00, .atom = 471 }, /* isSubsetOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 472 }, /* isSupersetOf */
-        { .hash_next = 0, .flags = 0x00, .atom = 455 }, /* intersection */
-        { .hash_next = 0, .flags = 0x00, .atom = 338 }, /* difference */
-        { .hash_next = 2, .flags = 0x00, .atom = 580 }, /* symmetricDifference */
-        { .hash_next = 0, .flags = 0x00, .atom = 618 }, /* union */
-        { .hash_next = 6, .flags = 0x00, .atom = 108 }, /* values */
-        { .hash_next = 0, .flags = 0x00, .atom = 48 }, /* keys */
-        { .hash_next = 0, .flags = 0x00, .atom = 218 }, /* Symbol.iterator */
-        { .hash_next = 9, .flags = 0x00, .atom = 344 }, /* entries */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 5, .flags = 0x00, .atom = 369 }, /* forEach */
+        { .hash_next = 0, .flags = 0x00, .atom = 464 }, /* isDisjointFrom */
+        { .hash_next = 0, .flags = 0x00, .atom = 476 }, /* isSubsetOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 477 }, /* isSupersetOf */
+        { .hash_next = 0, .flags = 0x00, .atom = 460 }, /* intersection */
+        { .hash_next = 0, .flags = 0x00, .atom = 343 }, /* difference */
+        { .hash_next = 3, .flags = 0x00, .atom = 585 }, /* symmetricDifference */
+        { .hash_next = 0, .flags = 0x00, .atom = 623 }, /* union */
+        { .hash_next = 10, .flags = 0x00, .atom = 108 }, /* values */
+        { .hash_next = 7, .flags = 0x00, .atom = 48 }, /* keys */
+        { .hash_next = 0, .flags = 0x00, .atom = 223 }, /* Symbol.iterator */
+        { .hash_next = 9, .flags = 0x00, .atom = 349 }, /* entries */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 17, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_69, 32);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_70 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 3, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 4, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 2, .flags = 0x10, .atom = 227 }, /* Symbol.species */
-        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x10, .atom = 232 }, /* Symbol.species */
+        { .hash_next = 3, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_70, 4);
 
 static const ROM_SHAPE_T(16, 8) js_rom_sh_71 = {
-    .hash = { [ROM_HPAD(16) - 1 - 0] = 7, [ROM_HPAD(16) - 1 - 2] = 2, [ROM_HPAD(16) - 1 - 3] = 1, [ROM_HPAD(16) - 1 - 4] = 5, [ROM_HPAD(16) - 1 - 6] = 3, [ROM_HPAD(16) - 1 - 7] = 4, [ROM_HPAD(16) - 1 - 9] = 6, [ROM_HPAD(16) - 1 - 13] = 8, },
+    .hash = { [ROM_HPAD(16) - 1 - 2] = 2, [ROM_HPAD(16) - 1 - 3] = 1, [ROM_HPAD(16) - 1 - 4] = 5, [ROM_HPAD(16) - 1 - 5] = 7, [ROM_HPAD(16) - 1 - 9] = 6, [ROM_HPAD(16) - 1 - 11] = 3, [ROM_HPAD(16) - 1 - 12] = 4, [ROM_HPAD(16) - 1 - 13] = 8, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 8, .prop_count = 8,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 67 }, /* set */
         { .hash_next = 0, .flags = 0x00, .atom = 66 }, /* get */
-        { .hash_next = 0, .flags = 0x00, .atom = 422 }, /* getOrInsert */
-        { .hash_next = 0, .flags = 0x00, .atom = 423 }, /* getOrInsertComputed */
+        { .hash_next = 0, .flags = 0x00, .atom = 427 }, /* getOrInsert */
+        { .hash_next = 0, .flags = 0x00, .atom = 428 }, /* getOrInsertComputed */
         { .hash_next = 0, .flags = 0x00, .atom = 100 }, /* has */
         { .hash_next = 0, .flags = 0x00, .atom = 9 }, /* delete */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
@@ -1937,7 +1941,7 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_72 = {
 ROM_SHAPE_CHECK(js_rom_sh_72, 4);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_73 = {
-    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 1] = 3, [ROM_HPAD(8) - 1 - 4] = 2, [ROM_HPAD(8) - 1 - 5] = 5, },
+    .hash = { [ROM_HPAD(8) - 1 - 1] = 3, [ROM_HPAD(8) - 1 - 4] = 2, [ROM_HPAD(8) - 1 - 5] = 5, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[1] },
@@ -1945,8 +1949,8 @@ static const ROM_SHAPE_T(8, 5) js_rom_sh_73 = {
         { .hash_next = 0, .flags = 0x00, .atom = 105 }, /* add */
         { .hash_next = 0, .flags = 0x00, .atom = 100 }, /* has */
         { .hash_next = 1, .flags = 0x00, .atom = 9 }, /* delete */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 4, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_73, 8);
@@ -1965,27 +1969,27 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_74 = {
 ROM_SHAPE_CHECK(js_rom_sh_74, 4);
 
 static const ROM_SHAPE_T(4, 3) js_rom_sh_75 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 3, [ROM_HPAD(4) - 1 - 2] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
         { .hash_next = 0, .flags = 0x00, .atom = 6 }, /* return */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_75, 4);
 
 static const ROM_SHAPE_T(4, 3) js_rom_sh_76 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 3, [ROM_HPAD(4) - 1 - 2] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
         { .hash_next = 0, .flags = 0x00, .atom = 6 }, /* return */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_76, 4);
@@ -1994,7 +1998,7 @@ static const ROM_SHAPE_T(4, 2) js_rom_sh_77 = {
     .hash = { [ROM_HPAD(4) - 1 - 2] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
         { .hash_next = 0, .flags = 0x00, .atom = 6 }, /* return */
@@ -2003,73 +2007,73 @@ static const ROM_SHAPE_T(4, 2) js_rom_sh_77 = {
 ROM_SHAPE_CHECK(js_rom_sh_77, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_78 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_78, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_79 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_79, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_80 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_80, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_81 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_81, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_82 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
-            .proto = (JSObject *)&js_rom_obj[142] },
+            .proto = (JSObject *)&js_rom_obj[145] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_82, 4);
 
 static const ROM_SHAPE_T(4, 2) js_rom_sh_83 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 1, [ROM_HPAD(4) - 1 - 1] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 1] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 2, .prop_count = 2,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_83, 4);
@@ -2091,7 +2095,7 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_85 = {
     .hash = { [ROM_HPAD(4) - 1 - 2] = 2, [ROM_HPAD(4) - 1 - 3] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
-            .proto = (JSObject *)&js_rom_obj[158] },
+            .proto = (JSObject *)&js_rom_obj[161] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
         { .hash_next = 0, .flags = 0x00, .atom = 6 }, /* return */
@@ -2106,9 +2110,9 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_86 = {
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
-        { .hash_next = 1, .flags = 0x00, .atom = 60 }, /* prototype */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 1, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_86, 4);
@@ -2127,29 +2131,29 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_87 = {
 ROM_SHAPE_CHECK(js_rom_sh_87, 4);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_88 = {
-    .hash = { [ROM_HPAD(8) - 1 - 0] = 4, [ROM_HPAD(8) - 1 - 3] = 1, [ROM_HPAD(8) - 1 - 5] = 5, [ROM_HPAD(8) - 1 - 6] = 2, [ROM_HPAD(8) - 1 - 7] = 3, },
+    .hash = { [ROM_HPAD(8) - 1 - 3] = 1, [ROM_HPAD(8) - 1 - 5] = 5, [ROM_HPAD(8) - 1 - 6] = 2, [ROM_HPAD(8) - 1 - 7] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
-            .proto = (JSObject *)&js_rom_obj[158] },
+            .proto = (JSObject *)&js_rom_obj[161] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 107 }, /* next */
         { .hash_next = 0, .flags = 0x00, .atom = 6 }, /* return */
         { .hash_next = 0, .flags = 0x00, .atom = 23 }, /* throw */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 4, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_88, 8);
 
 static const ROM_SHAPE_T(4, 3) js_rom_sh_89 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 3] = 1, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 1, [ROM_HPAD(4) - 1 - 1] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 335 }, /* deref */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 340 }, /* deref */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 2, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_89, 4);
@@ -2168,15 +2172,15 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_90 = {
 ROM_SHAPE_CHECK(js_rom_sh_90, 4);
 
 static const ROM_SHAPE_T(4, 4) js_rom_sh_91 = {
-    .hash = { [ROM_HPAD(4) - 1 - 0] = 3, [ROM_HPAD(4) - 1 - 1] = 4, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 0] = 2, [ROM_HPAD(4) - 1 - 1] = 4, [ROM_HPAD(4) - 1 - 3] = 1, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 4, .prop_count = 4,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 514 }, /* register */
-        { .hash_next = 0, .flags = 0x00, .atom = 619 }, /* unregister */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
+        { .hash_next = 0, .flags = 0x00, .atom = 519 }, /* register */
+        { .hash_next = 0, .flags = 0x00, .atom = 624 }, /* unregister */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 3, .flags = 0x00, .atom = 61 }, /* constructor */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_91, 4);
@@ -2195,47 +2199,47 @@ static const ROM_SHAPE_T(4, 3) js_rom_sh_92 = {
 ROM_SHAPE_CHECK(js_rom_sh_92, 4);
 
 static const ROM_SHAPE_T(64, 30) js_rom_sh_93 = {
-    .hash = { [ROM_HPAD(64) - 1 - 1] = 24, [ROM_HPAD(64) - 1 - 2] = 13, [ROM_HPAD(64) - 1 - 3] = 14, [ROM_HPAD(64) - 1 - 4] = 11, [ROM_HPAD(64) - 1 - 5] = 12, [ROM_HPAD(64) - 1 - 9] = 27, [ROM_HPAD(64) - 1 - 11] = 23, [ROM_HPAD(64) - 1 - 14] = 17, [ROM_HPAD(64) - 1 - 15] = 28, [ROM_HPAD(64) - 1 - 16] = 22, [ROM_HPAD(64) - 1 - 18] = 26, [ROM_HPAD(64) - 1 - 20] = 21, [ROM_HPAD(64) - 1 - 21] = 9, [ROM_HPAD(64) - 1 - 32] = 4, [ROM_HPAD(64) - 1 - 38] = 25, [ROM_HPAD(64) - 1 - 42] = 30, [ROM_HPAD(64) - 1 - 43] = 7, [ROM_HPAD(64) - 1 - 46] = 8, [ROM_HPAD(64) - 1 - 47] = 6, [ROM_HPAD(64) - 1 - 48] = 15, [ROM_HPAD(64) - 1 - 49] = 20, [ROM_HPAD(64) - 1 - 50] = 10, [ROM_HPAD(64) - 1 - 51] = 18, [ROM_HPAD(64) - 1 - 52] = 29, [ROM_HPAD(64) - 1 - 53] = 16, [ROM_HPAD(64) - 1 - 55] = 1, [ROM_HPAD(64) - 1 - 61] = 5, [ROM_HPAD(64) - 1 - 63] = 19, },
+    .hash = { [ROM_HPAD(64) - 1 - 4] = 19, [ROM_HPAD(64) - 1 - 6] = 24, [ROM_HPAD(64) - 1 - 7] = 13, [ROM_HPAD(64) - 1 - 8] = 14, [ROM_HPAD(64) - 1 - 9] = 11, [ROM_HPAD(64) - 1 - 10] = 12, [ROM_HPAD(64) - 1 - 14] = 27, [ROM_HPAD(64) - 1 - 16] = 23, [ROM_HPAD(64) - 1 - 19] = 17, [ROM_HPAD(64) - 1 - 20] = 28, [ROM_HPAD(64) - 1 - 21] = 22, [ROM_HPAD(64) - 1 - 23] = 26, [ROM_HPAD(64) - 1 - 25] = 21, [ROM_HPAD(64) - 1 - 26] = 9, [ROM_HPAD(64) - 1 - 37] = 4, [ROM_HPAD(64) - 1 - 43] = 25, [ROM_HPAD(64) - 1 - 47] = 30, [ROM_HPAD(64) - 1 - 48] = 7, [ROM_HPAD(64) - 1 - 51] = 8, [ROM_HPAD(64) - 1 - 52] = 6, [ROM_HPAD(64) - 1 - 53] = 15, [ROM_HPAD(64) - 1 - 54] = 20, [ROM_HPAD(64) - 1 - 55] = 10, [ROM_HPAD(64) - 1 - 56] = 18, [ROM_HPAD(64) - 1 - 57] = 29, [ROM_HPAD(64) - 1 - 58] = 16, [ROM_HPAD(64) - 1 - 61] = 5, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 63, .prop_size = 30, .prop_count = 30,
-            .proto = (JSObject *)&js_rom_obj[131] },
+            .proto = (JSObject *)&js_rom_obj[132] },
     .prop = {
         { .hash_next = 0, .flags = 0x10, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x10, .atom = 51 }, /* message */
-        { .hash_next = 0, .flags = 0x10, .atom = 324 }, /* code */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x10, .atom = 329 }, /* code */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
         { .hash_next = 0, .flags = 0x00, .atom = 61 }, /* constructor */
-        { .hash_next = 0, .flags = 0x04, .atom = 239 }, /* INDEX_SIZE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 235 }, /* DOMSTRING_SIZE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 238 }, /* HIERARCHY_REQUEST_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 277 }, /* WRONG_DOCUMENT_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 242 }, /* INVALID_CHARACTER_ERR */
-        { .hash_next = 3, .flags = 0x04, .atom = 260 }, /* NO_DATA_ALLOWED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 261 }, /* NO_MODIFICATION_ALLOWED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 258 }, /* NOT_FOUND_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 259 }, /* NOT_SUPPORTED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 240 }, /* INUSE_ATTRIBUTE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 245 }, /* INVALID_STATE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 270 }, /* SYNTAX_ERR */
-        { .hash_next = 2, .flags = 0x04, .atom = 243 }, /* INVALID_MODIFICATION_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 255 }, /* NAMESPACE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 241 }, /* INVALID_ACCESS_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 276 }, /* VALIDATION_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 272 }, /* TYPE_MISMATCH_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 267 }, /* SECURITY_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 257 }, /* NETWORK_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 230 }, /* ABORT_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 274 }, /* URL_MISMATCH_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 265 }, /* QUOTA_EXCEEDED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 271 }, /* TIMEOUT_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 244 }, /* INVALID_NODE_TYPE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 234 }, /* DATA_CLONE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 244 }, /* INDEX_SIZE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 240 }, /* DOMSTRING_SIZE_ERR */
+        { .hash_next = 2, .flags = 0x04, .atom = 243 }, /* HIERARCHY_REQUEST_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 282 }, /* WRONG_DOCUMENT_ERR */
+        { .hash_next = 1, .flags = 0x04, .atom = 247 }, /* INVALID_CHARACTER_ERR */
+        { .hash_next = 3, .flags = 0x04, .atom = 265 }, /* NO_DATA_ALLOWED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 266 }, /* NO_MODIFICATION_ALLOWED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 263 }, /* NOT_FOUND_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 264 }, /* NOT_SUPPORTED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 245 }, /* INUSE_ATTRIBUTE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 250 }, /* INVALID_STATE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 275 }, /* SYNTAX_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 248 }, /* INVALID_MODIFICATION_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 260 }, /* NAMESPACE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 246 }, /* INVALID_ACCESS_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 281 }, /* VALIDATION_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 277 }, /* TYPE_MISMATCH_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 272 }, /* SECURITY_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 262 }, /* NETWORK_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 235 }, /* ABORT_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 279 }, /* URL_MISMATCH_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 270 }, /* QUOTA_EXCEEDED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 276 }, /* TIMEOUT_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 249 }, /* INVALID_NODE_TYPE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 239 }, /* DATA_CLONE_ERR */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_93, 64);
 
 static const ROM_SHAPE_T(32, 28) js_rom_sh_94 = {
-    .hash = { [ROM_HPAD(32) - 1 - 1] = 22, [ROM_HPAD(32) - 1 - 2] = 11, [ROM_HPAD(32) - 1 - 3] = 12, [ROM_HPAD(32) - 1 - 4] = 9, [ROM_HPAD(32) - 1 - 5] = 10, [ROM_HPAD(32) - 1 - 6] = 23, [ROM_HPAD(32) - 1 - 9] = 25, [ROM_HPAD(32) - 1 - 10] = 28, [ROM_HPAD(32) - 1 - 11] = 21, [ROM_HPAD(32) - 1 - 14] = 15, [ROM_HPAD(32) - 1 - 15] = 26, [ROM_HPAD(32) - 1 - 16] = 20, [ROM_HPAD(32) - 1 - 17] = 18, [ROM_HPAD(32) - 1 - 18] = 24, [ROM_HPAD(32) - 1 - 19] = 16, [ROM_HPAD(32) - 1 - 20] = 27, [ROM_HPAD(32) - 1 - 21] = 14, [ROM_HPAD(32) - 1 - 23] = 2, [ROM_HPAD(32) - 1 - 28] = 3, [ROM_HPAD(32) - 1 - 31] = 17, },
+    .hash = { [ROM_HPAD(32) - 1 - 4] = 17, [ROM_HPAD(32) - 1 - 6] = 22, [ROM_HPAD(32) - 1 - 7] = 11, [ROM_HPAD(32) - 1 - 8] = 12, [ROM_HPAD(32) - 1 - 9] = 9, [ROM_HPAD(32) - 1 - 10] = 10, [ROM_HPAD(32) - 1 - 11] = 23, [ROM_HPAD(32) - 1 - 14] = 25, [ROM_HPAD(32) - 1 - 15] = 28, [ROM_HPAD(32) - 1 - 16] = 21, [ROM_HPAD(32) - 1 - 18] = 1, [ROM_HPAD(32) - 1 - 19] = 15, [ROM_HPAD(32) - 1 - 20] = 26, [ROM_HPAD(32) - 1 - 21] = 20, [ROM_HPAD(32) - 1 - 22] = 18, [ROM_HPAD(32) - 1 - 23] = 24, [ROM_HPAD(32) - 1 - 24] = 16, [ROM_HPAD(32) - 1 - 25] = 27, [ROM_HPAD(32) - 1 - 26] = 14, [ROM_HPAD(32) - 1 - 28] = 3, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 28, .prop_count = 28,
             .proto = (JSObject *)&js_rom_obj[0] },
@@ -2243,110 +2247,110 @@ static const ROM_SHAPE_T(32, 28) js_rom_sh_94 = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
         { .hash_next = 0, .flags = 0x00, .atom = 60 }, /* prototype */
-        { .hash_next = 0, .flags = 0x04, .atom = 239 }, /* INDEX_SIZE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 235 }, /* DOMSTRING_SIZE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 238 }, /* HIERARCHY_REQUEST_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 277 }, /* WRONG_DOCUMENT_ERR */
-        { .hash_next = 1, .flags = 0x04, .atom = 242 }, /* INVALID_CHARACTER_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 260 }, /* NO_DATA_ALLOWED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 261 }, /* NO_MODIFICATION_ALLOWED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 258 }, /* NOT_FOUND_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 259 }, /* NOT_SUPPORTED_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 240 }, /* INUSE_ATTRIBUTE_ERR */
-        { .hash_next = 7, .flags = 0x04, .atom = 245 }, /* INVALID_STATE_ERR */
-        { .hash_next = 6, .flags = 0x04, .atom = 270 }, /* SYNTAX_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 243 }, /* INVALID_MODIFICATION_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 255 }, /* NAMESPACE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 241 }, /* INVALID_ACCESS_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 276 }, /* VALIDATION_ERR */
-        { .hash_next = 13, .flags = 0x04, .atom = 272 }, /* TYPE_MISMATCH_ERR */
-        { .hash_next = 5, .flags = 0x04, .atom = 267 }, /* SECURITY_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 257 }, /* NETWORK_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 230 }, /* ABORT_ERR */
-        { .hash_next = 8, .flags = 0x04, .atom = 274 }, /* URL_MISMATCH_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 265 }, /* QUOTA_EXCEEDED_ERR */
-        { .hash_next = 4, .flags = 0x04, .atom = 271 }, /* TIMEOUT_ERR */
-        { .hash_next = 19, .flags = 0x04, .atom = 244 }, /* INVALID_NODE_TYPE_ERR */
-        { .hash_next = 0, .flags = 0x04, .atom = 234 }, /* DATA_CLONE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 244 }, /* INDEX_SIZE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 240 }, /* DOMSTRING_SIZE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 243 }, /* HIERARCHY_REQUEST_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 282 }, /* WRONG_DOCUMENT_ERR */
+        { .hash_next = 2, .flags = 0x04, .atom = 247 }, /* INVALID_CHARACTER_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 265 }, /* NO_DATA_ALLOWED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 266 }, /* NO_MODIFICATION_ALLOWED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 263 }, /* NOT_FOUND_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 264 }, /* NOT_SUPPORTED_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 245 }, /* INUSE_ATTRIBUTE_ERR */
+        { .hash_next = 7, .flags = 0x04, .atom = 250 }, /* INVALID_STATE_ERR */
+        { .hash_next = 6, .flags = 0x04, .atom = 275 }, /* SYNTAX_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 248 }, /* INVALID_MODIFICATION_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 260 }, /* NAMESPACE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 246 }, /* INVALID_ACCESS_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 281 }, /* VALIDATION_ERR */
+        { .hash_next = 13, .flags = 0x04, .atom = 277 }, /* TYPE_MISMATCH_ERR */
+        { .hash_next = 5, .flags = 0x04, .atom = 272 }, /* SECURITY_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 262 }, /* NETWORK_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 235 }, /* ABORT_ERR */
+        { .hash_next = 8, .flags = 0x04, .atom = 279 }, /* URL_MISMATCH_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 270 }, /* QUOTA_EXCEEDED_ERR */
+        { .hash_next = 4, .flags = 0x04, .atom = 276 }, /* TIMEOUT_ERR */
+        { .hash_next = 19, .flags = 0x04, .atom = 249 }, /* INVALID_NODE_TYPE_ERR */
+        { .hash_next = 0, .flags = 0x04, .atom = 239 }, /* DATA_CLONE_ERR */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_94, 32);
 
 static const ROM_SHAPE_T(16, 7) js_rom_sh_95 = {
-    .hash = { [ROM_HPAD(16) - 1 - 0] = 7, [ROM_HPAD(16) - 1 - 2] = 6, [ROM_HPAD(16) - 1 - 4] = 5, [ROM_HPAD(16) - 1 - 7] = 2, [ROM_HPAD(16) - 1 - 12] = 3, [ROM_HPAD(16) - 1 - 13] = 4, },
+    .hash = { [ROM_HPAD(16) - 1 - 1] = 3, [ROM_HPAD(16) - 1 - 2] = 4, [ROM_HPAD(16) - 1 - 5] = 7, [ROM_HPAD(16) - 1 - 7] = 6, [ROM_HPAD(16) - 1 - 9] = 5, [ROM_HPAD(16) - 1 - 12] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 15, .prop_size = 7, .prop_count = 7,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 466 }, /* isNative */
-        { .hash_next = 0, .flags = 0x00, .atom = 407 }, /* getFileName */
-        { .hash_next = 0, .flags = 0x00, .atom = 412 }, /* getFunction */
-        { .hash_next = 0, .flags = 0x00, .atom = 413 }, /* getFunctionName */
-        { .hash_next = 0, .flags = 0x00, .atom = 404 }, /* getColumnNumber */
-        { .hash_next = 1, .flags = 0x00, .atom = 418 }, /* getLineNumber */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 471 }, /* isNative */
+        { .hash_next = 0, .flags = 0x00, .atom = 412 }, /* getFileName */
+        { .hash_next = 0, .flags = 0x00, .atom = 417 }, /* getFunction */
+        { .hash_next = 0, .flags = 0x00, .atom = 418 }, /* getFunctionName */
+        { .hash_next = 0, .flags = 0x00, .atom = 409 }, /* getColumnNumber */
+        { .hash_next = 1, .flags = 0x00, .atom = 423 }, /* getLineNumber */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_95, 16);
 
 static const ROM_SHAPE_T(64, 46) js_rom_sh_96 = {
-    .hash = { [ROM_HPAD(64) - 1 - 1] = 31, [ROM_HPAD(64) - 1 - 2] = 37, [ROM_HPAD(64) - 1 - 3] = 36, [ROM_HPAD(64) - 1 - 4] = 35, [ROM_HPAD(64) - 1 - 6] = 17, [ROM_HPAD(64) - 1 - 7] = 44, [ROM_HPAD(64) - 1 - 10] = 12, [ROM_HPAD(64) - 1 - 11] = 20, [ROM_HPAD(64) - 1 - 12] = 45, [ROM_HPAD(64) - 1 - 13] = 46, [ROM_HPAD(64) - 1 - 28] = 13, [ROM_HPAD(64) - 1 - 29] = 26, [ROM_HPAD(64) - 1 - 30] = 33, [ROM_HPAD(64) - 1 - 32] = 38, [ROM_HPAD(64) - 1 - 35] = 14, [ROM_HPAD(64) - 1 - 36] = 29, [ROM_HPAD(64) - 1 - 37] = 27, [ROM_HPAD(64) - 1 - 38] = 28, [ROM_HPAD(64) - 1 - 39] = 18, [ROM_HPAD(64) - 1 - 41] = 4, [ROM_HPAD(64) - 1 - 42] = 2, [ROM_HPAD(64) - 1 - 43] = 1, [ROM_HPAD(64) - 1 - 44] = 39, [ROM_HPAD(64) - 1 - 45] = 19, [ROM_HPAD(64) - 1 - 46] = 24, [ROM_HPAD(64) - 1 - 47] = 21, [ROM_HPAD(64) - 1 - 49] = 34, [ROM_HPAD(64) - 1 - 50] = 10, [ROM_HPAD(64) - 1 - 51] = 11, [ROM_HPAD(64) - 1 - 52] = 25, [ROM_HPAD(64) - 1 - 55] = 40, [ROM_HPAD(64) - 1 - 56] = 41, [ROM_HPAD(64) - 1 - 57] = 43, [ROM_HPAD(64) - 1 - 58] = 42, [ROM_HPAD(64) - 1 - 62] = 30, [ROM_HPAD(64) - 1 - 63] = 32, },
+    .hash = { [ROM_HPAD(64) - 1 - 3] = 30, [ROM_HPAD(64) - 1 - 4] = 32, [ROM_HPAD(64) - 1 - 6] = 31, [ROM_HPAD(64) - 1 - 7] = 37, [ROM_HPAD(64) - 1 - 8] = 36, [ROM_HPAD(64) - 1 - 9] = 35, [ROM_HPAD(64) - 1 - 11] = 17, [ROM_HPAD(64) - 1 - 12] = 44, [ROM_HPAD(64) - 1 - 15] = 12, [ROM_HPAD(64) - 1 - 16] = 20, [ROM_HPAD(64) - 1 - 17] = 45, [ROM_HPAD(64) - 1 - 18] = 46, [ROM_HPAD(64) - 1 - 33] = 13, [ROM_HPAD(64) - 1 - 34] = 26, [ROM_HPAD(64) - 1 - 35] = 33, [ROM_HPAD(64) - 1 - 37] = 38, [ROM_HPAD(64) - 1 - 40] = 14, [ROM_HPAD(64) - 1 - 41] = 29, [ROM_HPAD(64) - 1 - 42] = 27, [ROM_HPAD(64) - 1 - 43] = 28, [ROM_HPAD(64) - 1 - 44] = 18, [ROM_HPAD(64) - 1 - 46] = 4, [ROM_HPAD(64) - 1 - 47] = 2, [ROM_HPAD(64) - 1 - 48] = 1, [ROM_HPAD(64) - 1 - 49] = 39, [ROM_HPAD(64) - 1 - 50] = 19, [ROM_HPAD(64) - 1 - 51] = 24, [ROM_HPAD(64) - 1 - 52] = 21, [ROM_HPAD(64) - 1 - 54] = 34, [ROM_HPAD(64) - 1 - 55] = 10, [ROM_HPAD(64) - 1 - 56] = 11, [ROM_HPAD(64) - 1 - 57] = 25, [ROM_HPAD(64) - 1 - 60] = 40, [ROM_HPAD(64) - 1 - 61] = 41, [ROM_HPAD(64) - 1 - 62] = 43, [ROM_HPAD(64) - 1 - 63] = 42, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 63, .prop_size = 46, .prop_count = 46,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 491 }, /* min */
-        { .hash_next = 0, .flags = 0x00, .atom = 490 }, /* max */
-        { .hash_next = 0, .flags = 0x00, .atom = 291 }, /* abs */
-        { .hash_next = 0, .flags = 0x00, .atom = 361 }, /* floor */
-        { .hash_next = 0, .flags = 0x00, .atom = 319 }, /* ceil */
-        { .hash_next = 0, .flags = 0x00, .atom = 522 }, /* round */
-        { .hash_next = 0, .flags = 0x00, .atom = 567 }, /* sqrt */
-        { .hash_next = 0, .flags = 0x00, .atom = 292 }, /* acos */
-        { .hash_next = 0, .flags = 0x00, .atom = 301 }, /* asin */
-        { .hash_next = 0, .flags = 0x00, .atom = 306 }, /* atan */
-        { .hash_next = 0, .flags = 0x00, .atom = 307 }, /* atan2 */
-        { .hash_next = 6, .flags = 0x00, .atom = 330 }, /* cos */
-        { .hash_next = 0, .flags = 0x00, .atom = 348 }, /* exp */
-        { .hash_next = 3, .flags = 0x00, .atom = 483 }, /* log */
-        { .hash_next = 0, .flags = 0x00, .atom = 505 }, /* pow */
-        { .hash_next = 0, .flags = 0x00, .atom = 558 }, /* sin */
-        { .hash_next = 0, .flags = 0x00, .atom = 582 }, /* tan */
-        { .hash_next = 0, .flags = 0x00, .atom = 615 }, /* trunc */
-        { .hash_next = 9, .flags = 0x00, .atom = 557 }, /* sign */
-        { .hash_next = 0, .flags = 0x00, .atom = 331 }, /* cosh */
-        { .hash_next = 0, .flags = 0x00, .atom = 559 }, /* sinh */
-        { .hash_next = 0, .flags = 0x00, .atom = 583 }, /* tanh */
-        { .hash_next = 0, .flags = 0x00, .atom = 293 }, /* acosh */
-        { .hash_next = 16, .flags = 0x00, .atom = 302 }, /* asinh */
-        { .hash_next = 0, .flags = 0x00, .atom = 308 }, /* atanh */
-        { .hash_next = 0, .flags = 0x00, .atom = 349 }, /* expm1 */
-        { .hash_next = 23, .flags = 0x00, .atom = 485 }, /* log1p */
-        { .hash_next = 0, .flags = 0x00, .atom = 486 }, /* log2 */
-        { .hash_next = 8, .flags = 0x00, .atom = 484 }, /* log10 */
-        { .hash_next = 0, .flags = 0x00, .atom = 318 }, /* cbrt */
-        { .hash_next = 0, .flags = 0x00, .atom = 449 }, /* hypot */
-        { .hash_next = 5, .flags = 0x00, .atom = 511 }, /* random */
-        { .hash_next = 0, .flags = 0x00, .atom = 350 }, /* f16round */
-        { .hash_next = 0, .flags = 0x00, .atom = 369 }, /* fround */
-        { .hash_next = 0, .flags = 0x00, .atom = 452 }, /* imul */
-        { .hash_next = 0, .flags = 0x00, .atom = 323 }, /* clz32 */
-        { .hash_next = 0, .flags = 0x00, .atom = 578 }, /* sumPrecise */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
-        { .hash_next = 0, .flags = 0x00, .atom = 236 }, /* E */
-        { .hash_next = 7, .flags = 0x00, .atom = 247 }, /* LN10 */
-        { .hash_next = 0, .flags = 0x00, .atom = 248 }, /* LN2 */
-        { .hash_next = 0, .flags = 0x00, .atom = 250 }, /* LOG2E */
-        { .hash_next = 15, .flags = 0x00, .atom = 249 }, /* LOG10E */
-        { .hash_next = 22, .flags = 0x00, .atom = 263 }, /* PI */
-        { .hash_next = 0, .flags = 0x00, .atom = 268 }, /* SQRT1_2 */
-        { .hash_next = 0, .flags = 0x00, .atom = 269 }, /* SQRT2 */
+        { .hash_next = 0, .flags = 0x00, .atom = 496 }, /* min */
+        { .hash_next = 0, .flags = 0x00, .atom = 495 }, /* max */
+        { .hash_next = 0, .flags = 0x00, .atom = 296 }, /* abs */
+        { .hash_next = 0, .flags = 0x00, .atom = 366 }, /* floor */
+        { .hash_next = 0, .flags = 0x00, .atom = 324 }, /* ceil */
+        { .hash_next = 0, .flags = 0x00, .atom = 527 }, /* round */
+        { .hash_next = 0, .flags = 0x00, .atom = 572 }, /* sqrt */
+        { .hash_next = 0, .flags = 0x00, .atom = 297 }, /* acos */
+        { .hash_next = 0, .flags = 0x00, .atom = 306 }, /* asin */
+        { .hash_next = 0, .flags = 0x00, .atom = 311 }, /* atan */
+        { .hash_next = 0, .flags = 0x00, .atom = 312 }, /* atan2 */
+        { .hash_next = 6, .flags = 0x00, .atom = 335 }, /* cos */
+        { .hash_next = 0, .flags = 0x00, .atom = 353 }, /* exp */
+        { .hash_next = 3, .flags = 0x00, .atom = 488 }, /* log */
+        { .hash_next = 0, .flags = 0x00, .atom = 510 }, /* pow */
+        { .hash_next = 0, .flags = 0x00, .atom = 563 }, /* sin */
+        { .hash_next = 0, .flags = 0x00, .atom = 587 }, /* tan */
+        { .hash_next = 0, .flags = 0x00, .atom = 620 }, /* trunc */
+        { .hash_next = 9, .flags = 0x00, .atom = 562 }, /* sign */
+        { .hash_next = 0, .flags = 0x00, .atom = 336 }, /* cosh */
+        { .hash_next = 0, .flags = 0x00, .atom = 564 }, /* sinh */
+        { .hash_next = 0, .flags = 0x00, .atom = 588 }, /* tanh */
+        { .hash_next = 0, .flags = 0x00, .atom = 298 }, /* acosh */
+        { .hash_next = 16, .flags = 0x00, .atom = 307 }, /* asinh */
+        { .hash_next = 0, .flags = 0x00, .atom = 313 }, /* atanh */
+        { .hash_next = 0, .flags = 0x00, .atom = 354 }, /* expm1 */
+        { .hash_next = 23, .flags = 0x00, .atom = 490 }, /* log1p */
+        { .hash_next = 0, .flags = 0x00, .atom = 491 }, /* log2 */
+        { .hash_next = 8, .flags = 0x00, .atom = 489 }, /* log10 */
+        { .hash_next = 0, .flags = 0x00, .atom = 323 }, /* cbrt */
+        { .hash_next = 0, .flags = 0x00, .atom = 454 }, /* hypot */
+        { .hash_next = 5, .flags = 0x00, .atom = 516 }, /* random */
+        { .hash_next = 0, .flags = 0x00, .atom = 355 }, /* f16round */
+        { .hash_next = 0, .flags = 0x00, .atom = 374 }, /* fround */
+        { .hash_next = 0, .flags = 0x00, .atom = 457 }, /* imul */
+        { .hash_next = 0, .flags = 0x00, .atom = 328 }, /* clz32 */
+        { .hash_next = 0, .flags = 0x00, .atom = 583 }, /* sumPrecise */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 241 }, /* E */
+        { .hash_next = 7, .flags = 0x00, .atom = 252 }, /* LN10 */
+        { .hash_next = 0, .flags = 0x00, .atom = 253 }, /* LN2 */
+        { .hash_next = 0, .flags = 0x00, .atom = 255 }, /* LOG2E */
+        { .hash_next = 15, .flags = 0x00, .atom = 254 }, /* LOG10E */
+        { .hash_next = 22, .flags = 0x00, .atom = 268 }, /* PI */
+        { .hash_next = 0, .flags = 0x00, .atom = 273 }, /* SQRT1_2 */
+        { .hash_next = 0, .flags = 0x00, .atom = 274 }, /* SQRT2 */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_96, 64);
 
 static const ROM_SHAPE_T(32, 14) js_rom_sh_97 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 14, [ROM_HPAD(32) - 1 - 1] = 13, [ROM_HPAD(32) - 1 - 2] = 9, [ROM_HPAD(32) - 1 - 3] = 12, [ROM_HPAD(32) - 1 - 4] = 8, [ROM_HPAD(32) - 1 - 5] = 4, [ROM_HPAD(32) - 1 - 6] = 3, [ROM_HPAD(32) - 1 - 7] = 6, [ROM_HPAD(32) - 1 - 8] = 10, [ROM_HPAD(32) - 1 - 27] = 1, [ROM_HPAD(32) - 1 - 31] = 2, },
+    .hash = { [ROM_HPAD(32) - 1 - 0] = 7, [ROM_HPAD(32) - 1 - 1] = 13, [ROM_HPAD(32) - 1 - 2] = 9, [ROM_HPAD(32) - 1 - 3] = 12, [ROM_HPAD(32) - 1 - 4] = 8, [ROM_HPAD(32) - 1 - 5] = 14, [ROM_HPAD(32) - 1 - 6] = 3, [ROM_HPAD(32) - 1 - 7] = 6, [ROM_HPAD(32) - 1 - 8] = 10, [ROM_HPAD(32) - 1 - 27] = 1, [ROM_HPAD(32) - 1 - 31] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 14, .prop_count = 14,
             .proto = (JSObject *)&js_rom_obj[1] },
@@ -2364,65 +2368,65 @@ static const ROM_SHAPE_T(32, 14) js_rom_sh_97 = {
         { .hash_next = 0, .flags = 0x00, .atom = 99 }, /* preventExtensions */
         { .hash_next = 11, .flags = 0x00, .atom = 67 }, /* set */
         { .hash_next = 0, .flags = 0x00, .atom = 97 }, /* setPrototypeOf */
-        { .hash_next = 7, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 4, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_97, 32);
 
 static const ROM_SHAPE_T(8, 5) js_rom_sh_98 = {
-    .hash = { [ROM_HPAD(8) - 1 - 0] = 5, [ROM_HPAD(8) - 1 - 2] = 3, [ROM_HPAD(8) - 1 - 3] = 2, [ROM_HPAD(8) - 1 - 4] = 1, [ROM_HPAD(8) - 1 - 5] = 4, },
+    .hash = { [ROM_HPAD(8) - 1 - 0] = 2, [ROM_HPAD(8) - 1 - 1] = 1, [ROM_HPAD(8) - 1 - 2] = 4, [ROM_HPAD(8) - 1 - 5] = 5, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 7, .prop_size = 5, .prop_count = 5,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
-        { .hash_next = 0, .flags = 0x00, .atom = 468 }, /* isRawJSON */
-        { .hash_next = 0, .flags = 0x00, .atom = 499 }, /* parse */
+        { .hash_next = 0, .flags = 0x00, .atom = 473 }, /* isRawJSON */
+        { .hash_next = 0, .flags = 0x00, .atom = 504 }, /* parse */
         { .hash_next = 0, .flags = 0x00, .atom = 114 }, /* rawJSON */
-        { .hash_next = 0, .flags = 0x00, .atom = 573 }, /* stringify */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 3, .flags = 0x00, .atom = 578 }, /* stringify */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_98, 8);
 
 static const ROM_SHAPE_T(4, 3) js_rom_sh_99 = {
-    .hash = { [ROM_HPAD(4) - 1 - 1] = 3, [ROM_HPAD(4) - 1 - 2] = 1, [ROM_HPAD(4) - 1 - 3] = 2, },
+    .hash = { [ROM_HPAD(4) - 1 - 2] = 3, [ROM_HPAD(4) - 1 - 3] = 2, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 3, .prop_size = 3, .prop_count = 3,
             .proto = (JSObject *)&js_rom_obj[0] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 50 }, /* length */
         { .hash_next = 0, .flags = 0x00, .atom = 55 }, /* name */
-        { .hash_next = 0, .flags = 0x00, .atom = 521 }, /* revocable */
+        { .hash_next = 1, .flags = 0x00, .atom = 526 }, /* revocable */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_99, 4);
 
 static const ROM_SHAPE_T(32, 14) js_rom_sh_100 = {
-    .hash = { [ROM_HPAD(32) - 1 - 0] = 14, [ROM_HPAD(32) - 1 - 1] = 8, [ROM_HPAD(32) - 1 - 7] = 7, [ROM_HPAD(32) - 1 - 9] = 2, [ROM_HPAD(32) - 1 - 14] = 13, [ROM_HPAD(32) - 1 - 16] = 10, [ROM_HPAD(32) - 1 - 22] = 11, [ROM_HPAD(32) - 1 - 27] = 9, [ROM_HPAD(32) - 1 - 30] = 4, },
+    .hash = { [ROM_HPAD(32) - 1 - 0] = 9, [ROM_HPAD(32) - 1 - 3] = 4, [ROM_HPAD(32) - 1 - 5] = 14, [ROM_HPAD(32) - 1 - 6] = 8, [ROM_HPAD(32) - 1 - 9] = 1, [ROM_HPAD(32) - 1 - 12] = 7, [ROM_HPAD(32) - 1 - 14] = 2, [ROM_HPAD(32) - 1 - 19] = 13, [ROM_HPAD(32) - 1 - 21] = 10, [ROM_HPAD(32) - 1 - 27] = 11, },
     .sh = { .header = { .ref_count = JS_IMMORTAL_REF_COUNT, .gc_obj_type = JS_GC_OBJ_TYPE_SHAPE },
             .prop_hash_mask = 31, .prop_size = 14, .prop_count = 14,
             .proto = (JSObject *)&js_rom_obj[1] },
     .prop = {
         { .hash_next = 0, .flags = 0x00, .atom = 105 }, /* add */
-        { .hash_next = 1, .flags = 0x00, .atom = 297 }, /* and */
-        { .hash_next = 0, .flags = 0x00, .atom = 496 }, /* or */
-        { .hash_next = 0, .flags = 0x00, .atom = 574 }, /* sub */
-        { .hash_next = 3, .flags = 0x00, .atom = 624 }, /* xor */
-        { .hash_next = 0, .flags = 0x00, .atom = 347 }, /* exchange */
-        { .hash_next = 0, .flags = 0x00, .atom = 327 }, /* compareExchange */
-        { .hash_next = 0, .flags = 0x00, .atom = 481 }, /* load */
-        { .hash_next = 6, .flags = 0x00, .atom = 571 }, /* store */
-        { .hash_next = 5, .flags = 0x00, .atom = 464 }, /* isLockFree */
-        { .hash_next = 0, .flags = 0x00, .atom = 502 }, /* pause */
-        { .hash_next = 0, .flags = 0x00, .atom = 622 }, /* wait */
-        { .hash_next = 12, .flags = 0x00, .atom = 494 }, /* notify */
-        { .hash_next = 0, .flags = 0x00, .atom = 224 }, /* Symbol.toStringTag */
+        { .hash_next = 0, .flags = 0x00, .atom = 302 }, /* and */
+        { .hash_next = 0, .flags = 0x00, .atom = 501 }, /* or */
+        { .hash_next = 0, .flags = 0x00, .atom = 579 }, /* sub */
+        { .hash_next = 3, .flags = 0x00, .atom = 629 }, /* xor */
+        { .hash_next = 0, .flags = 0x00, .atom = 352 }, /* exchange */
+        { .hash_next = 0, .flags = 0x00, .atom = 332 }, /* compareExchange */
+        { .hash_next = 0, .flags = 0x00, .atom = 486 }, /* load */
+        { .hash_next = 6, .flags = 0x00, .atom = 576 }, /* store */
+        { .hash_next = 5, .flags = 0x00, .atom = 469 }, /* isLockFree */
+        { .hash_next = 0, .flags = 0x00, .atom = 507 }, /* pause */
+        { .hash_next = 0, .flags = 0x00, .atom = 627 }, /* wait */
+        { .hash_next = 12, .flags = 0x00, .atom = 499 }, /* notify */
+        { .hash_next = 0, .flags = 0x00, .atom = 229 }, /* Symbol.toStringTag */
     },
 };
 ROM_SHAPE_CHECK(js_rom_sh_100, 32);
 
-/* properties: 1861 */
-static const JSProperty js_rom_props[1861] = {
+/* properties: 1870 */
+static const JSProperty js_rom_props[1870] = {
     ROM_PV_INT(0, 0), /* 0.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 0.name */
     { .u.getset = { (JSObject *)&js_rom_obj[38], (JSObject *)&js_rom_obj[38] } }, /* 0.caller */
@@ -2553,134 +2557,135 @@ static const JSProperty js_rom_props[1861] = {
     ROM_PV_INT(0, 1), /* 41.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_39.s), /* 41.name */
     ROM_PV_INT(0, 0), /* 42.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_0.s), /* 42.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_40.s), /* 42.name */
     ROM_PV_INT(0, 1), /* 43.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_40.s), /* 43.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_41.s), /* 43.name */
     ROM_PV_INT(0, 0), /* 44.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_41.s), /* 44.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_42.s), /* 44.name */
     ROM_PV_INT(0, 0), /* 45.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_42.s), /* 45.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_43.s), /* 45.name */
     ROM_PV_INT(0, 0), /* 46.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_43.s), /* 46.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_44.s), /* 46.name */
     ROM_PV_INT(0, 1), /* 47.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_44.s), /* 47.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_45.s), /* 47.name */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[0]), /* 47.prototype */
     ROM_PV_INT(0, 1), /* 48.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_45.s), /* 48.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_46.s), /* 48.name */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[49]), /* 48.isArray */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[50]), /* 48.from */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[51]), /* 48.of */
-    { .u.getset = { (JSObject *)&js_rom_obj[52], NULL } }, /* 48.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[53]), /* 48.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[51]), /* 48.fromAsync */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[52]), /* 48.of */
+    { .u.getset = { (JSObject *)&js_rom_obj[53], NULL } }, /* 48.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[54]), /* 48.prototype */
     ROM_PV_INT(0, 1), /* 49.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_46.s), /* 49.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_47.s), /* 49.name */
     ROM_PV_INT(0, 1), /* 50.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_47.s), /* 50.name */
-    ROM_PV_INT(0, 0), /* 51.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_48.s), /* 51.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_48.s), /* 50.name */
+    ROM_PV_INT(0, 1), /* 51.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 51.name */
     ROM_PV_INT(0, 0), /* 52.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 52.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_50.s), /* 52.name */
     ROM_PV_INT(0, 0), /* 53.length */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[54]), /* 53.at */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[55]), /* 53.with */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[56]), /* 53.concat */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[57]), /* 53.every */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[58]), /* 53.some */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[59]), /* 53.forEach */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[60]), /* 53.map */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[61]), /* 53.filter */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[62]), /* 53.reduce */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[63]), /* 53.reduceRight */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[64]), /* 53.fill */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[65]), /* 53.find */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[66]), /* 53.findIndex */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[67]), /* 53.findLast */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[68]), /* 53.findLastIndex */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[69]), /* 53.indexOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[70]), /* 53.lastIndexOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[71]), /* 53.includes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[72]), /* 53.join */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[73]), /* 53.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[74]), /* 53.toLocaleString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[75]), /* 53.pop */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[76]), /* 53.push */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[77]), /* 53.shift */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[78]), /* 53.unshift */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[79]), /* 53.reverse */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[80]), /* 53.toReversed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[81]), /* 53.sort */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[82]), /* 53.toSorted */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[83]), /* 53.slice */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[84]), /* 53.splice */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[85]), /* 53.toSpliced */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[86]), /* 53.copyWithin */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[87]), /* 53.flatMap */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[88]), /* 53.flat */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[89]), /* 53.values */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[89]), /* 53.Symbol.iterator */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[90]), /* 53.keys */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[91]), /* 53.entries */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[92]), /* 53.Symbol.unscopables */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[48]), /* 53.constructor */
-    ROM_PV_INT(0, 1), /* 54.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_50.s), /* 54.name */
-    ROM_PV_INT(0, 2), /* 55.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 55.name */
-    ROM_PV_INT(0, 1), /* 56.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_52.s), /* 56.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 53.name */
+    ROM_PV_INT(0, 0), /* 54.length */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[55]), /* 54.at */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[56]), /* 54.with */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[57]), /* 54.concat */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[58]), /* 54.every */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[59]), /* 54.some */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[60]), /* 54.forEach */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[61]), /* 54.map */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[62]), /* 54.filter */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[63]), /* 54.reduce */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[64]), /* 54.reduceRight */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[65]), /* 54.fill */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[66]), /* 54.find */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[67]), /* 54.findIndex */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[68]), /* 54.findLast */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[69]), /* 54.findLastIndex */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[70]), /* 54.indexOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[71]), /* 54.lastIndexOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[72]), /* 54.includes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[73]), /* 54.join */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[74]), /* 54.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[75]), /* 54.toLocaleString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[76]), /* 54.pop */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[77]), /* 54.push */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[78]), /* 54.shift */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[79]), /* 54.unshift */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[80]), /* 54.reverse */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[81]), /* 54.toReversed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[82]), /* 54.sort */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[83]), /* 54.toSorted */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[84]), /* 54.slice */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[85]), /* 54.splice */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[86]), /* 54.toSpliced */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[87]), /* 54.copyWithin */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[88]), /* 54.flatMap */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[89]), /* 54.flat */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[90]), /* 54.values */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[90]), /* 54.Symbol.iterator */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[91]), /* 54.keys */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[92]), /* 54.entries */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[93]), /* 54.Symbol.unscopables */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[48]), /* 54.constructor */
+    ROM_PV_INT(0, 1), /* 55.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_52.s), /* 55.name */
+    ROM_PV_INT(0, 2), /* 56.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_53.s), /* 56.name */
     ROM_PV_INT(0, 1), /* 57.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_53.s), /* 57.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_54.s), /* 57.name */
     ROM_PV_INT(0, 1), /* 58.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_54.s), /* 58.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_55.s), /* 58.name */
     ROM_PV_INT(0, 1), /* 59.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_55.s), /* 59.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_56.s), /* 59.name */
     ROM_PV_INT(0, 1), /* 60.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_56.s), /* 60.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_57.s), /* 60.name */
     ROM_PV_INT(0, 1), /* 61.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_57.s), /* 61.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_58.s), /* 61.name */
     ROM_PV_INT(0, 1), /* 62.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_58.s), /* 62.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_59.s), /* 62.name */
     ROM_PV_INT(0, 1), /* 63.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_59.s), /* 63.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_60.s), /* 63.name */
     ROM_PV_INT(0, 1), /* 64.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_60.s), /* 64.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_61.s), /* 64.name */
     ROM_PV_INT(0, 1), /* 65.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_61.s), /* 65.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_62.s), /* 65.name */
     ROM_PV_INT(0, 1), /* 66.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_62.s), /* 66.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_63.s), /* 66.name */
     ROM_PV_INT(0, 1), /* 67.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_63.s), /* 67.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_64.s), /* 67.name */
     ROM_PV_INT(0, 1), /* 68.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_64.s), /* 68.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_65.s), /* 68.name */
     ROM_PV_INT(0, 1), /* 69.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_65.s), /* 69.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_66.s), /* 69.name */
     ROM_PV_INT(0, 1), /* 70.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_66.s), /* 70.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_67.s), /* 70.name */
     ROM_PV_INT(0, 1), /* 71.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_67.s), /* 71.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_68.s), /* 71.name */
     ROM_PV_INT(0, 1), /* 72.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_68.s), /* 72.name */
-    ROM_PV_INT(0, 0), /* 73.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_69.s), /* 73.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_69.s), /* 72.name */
+    ROM_PV_INT(0, 1), /* 73.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_70.s), /* 73.name */
     ROM_PV_INT(0, 0), /* 74.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_70.s), /* 74.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_71.s), /* 74.name */
     ROM_PV_INT(0, 0), /* 75.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_71.s), /* 75.name */
-    ROM_PV_INT(0, 1), /* 76.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_1.s), /* 75.name */
+    ROM_PV_INT(0, 0), /* 76.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_72.s), /* 76.name */
-    ROM_PV_INT(0, 0), /* 77.length */
+    ROM_PV_INT(0, 1), /* 77.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_73.s), /* 77.name */
-    ROM_PV_INT(0, 1), /* 78.length */
+    ROM_PV_INT(0, 0), /* 78.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_74.s), /* 78.name */
-    ROM_PV_INT(0, 0), /* 79.length */
+    ROM_PV_INT(0, 1), /* 79.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_75.s), /* 79.name */
     ROM_PV_INT(0, 0), /* 80.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_76.s), /* 80.name */
-    ROM_PV_INT(0, 1), /* 81.length */
+    ROM_PV_INT(0, 0), /* 81.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_77.s), /* 81.name */
     ROM_PV_INT(0, 1), /* 82.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_78.s), /* 82.name */
-    ROM_PV_INT(0, 2), /* 83.length */
+    ROM_PV_INT(0, 1), /* 83.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_79.s), /* 83.name */
     ROM_PV_INT(0, 2), /* 84.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_80.s), /* 84.name */
@@ -2688,59 +2693,59 @@ static const JSProperty js_rom_props[1861] = {
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_81.s), /* 85.name */
     ROM_PV_INT(0, 2), /* 86.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_82.s), /* 86.name */
-    ROM_PV_INT(0, 1), /* 87.length */
+    ROM_PV_INT(0, 2), /* 87.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_83.s), /* 87.name */
-    ROM_PV_INT(0, 0), /* 88.length */
+    ROM_PV_INT(0, 1), /* 88.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_84.s), /* 88.name */
     ROM_PV_INT(0, 0), /* 89.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_85.s), /* 89.name */
     ROM_PV_INT(0, 0), /* 90.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_21.s), /* 90.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_86.s), /* 90.name */
     ROM_PV_INT(0, 0), /* 91.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_23.s), /* 91.name */
-    ROM_PV_INT(1, 1), /* 92.at */
-    ROM_PV_INT(1, 1), /* 92.copyWithin */
-    ROM_PV_INT(1, 1), /* 92.entries */
-    ROM_PV_INT(1, 1), /* 92.fill */
-    ROM_PV_INT(1, 1), /* 92.find */
-    ROM_PV_INT(1, 1), /* 92.findIndex */
-    ROM_PV_INT(1, 1), /* 92.findLast */
-    ROM_PV_INT(1, 1), /* 92.findLastIndex */
-    ROM_PV_INT(1, 1), /* 92.flat */
-    ROM_PV_INT(1, 1), /* 92.flatMap */
-    ROM_PV_INT(1, 1), /* 92.includes */
-    ROM_PV_INT(1, 1), /* 92.keys */
-    ROM_PV_INT(1, 1), /* 92.toReversed */
-    ROM_PV_INT(1, 1), /* 92.toSorted */
-    ROM_PV_INT(1, 1), /* 92.toSpliced */
-    ROM_PV_INT(1, 1), /* 92.values */
-    ROM_PV_INT(0, 2), /* 93.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_86.s), /* 93.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[94]), /* 93.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[114]), /* 93.escape */
-    { .u.getset = { (JSObject *)&js_rom_obj[115], NULL } }, /* 93.Symbol.species */
-    { .u.getset = { (JSObject *)&js_rom_obj[95], NULL } }, /* 94.flags */
-    { .u.getset = { (JSObject *)&js_rom_obj[96], NULL } }, /* 94.source */
-    { .u.getset = { (JSObject *)&js_rom_obj[97], NULL } }, /* 94.global */
-    { .u.getset = { (JSObject *)&js_rom_obj[98], NULL } }, /* 94.ignoreCase */
-    { .u.getset = { (JSObject *)&js_rom_obj[99], NULL } }, /* 94.multiline */
-    { .u.getset = { (JSObject *)&js_rom_obj[100], NULL } }, /* 94.dotAll */
-    { .u.getset = { (JSObject *)&js_rom_obj[101], NULL } }, /* 94.unicode */
-    { .u.getset = { (JSObject *)&js_rom_obj[102], NULL } }, /* 94.unicodeSets */
-    { .u.getset = { (JSObject *)&js_rom_obj[103], NULL } }, /* 94.sticky */
-    { .u.getset = { (JSObject *)&js_rom_obj[104], NULL } }, /* 94.hasIndices */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[105]), /* 94.exec */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[106]), /* 94.compile */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[107]), /* 94.test */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[108]), /* 94.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[109]), /* 94.Symbol.replace */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[110]), /* 94.Symbol.match */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[111]), /* 94.Symbol.matchAll */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[112]), /* 94.Symbol.search */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[113]), /* 94.Symbol.split */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[93]), /* 94.constructor */
-    ROM_PV_INT(0, 0), /* 95.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_87.s), /* 95.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_21.s), /* 91.name */
+    ROM_PV_INT(0, 0), /* 92.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_23.s), /* 92.name */
+    ROM_PV_INT(1, 1), /* 93.at */
+    ROM_PV_INT(1, 1), /* 93.copyWithin */
+    ROM_PV_INT(1, 1), /* 93.entries */
+    ROM_PV_INT(1, 1), /* 93.fill */
+    ROM_PV_INT(1, 1), /* 93.find */
+    ROM_PV_INT(1, 1), /* 93.findIndex */
+    ROM_PV_INT(1, 1), /* 93.findLast */
+    ROM_PV_INT(1, 1), /* 93.findLastIndex */
+    ROM_PV_INT(1, 1), /* 93.flat */
+    ROM_PV_INT(1, 1), /* 93.flatMap */
+    ROM_PV_INT(1, 1), /* 93.includes */
+    ROM_PV_INT(1, 1), /* 93.keys */
+    ROM_PV_INT(1, 1), /* 93.toReversed */
+    ROM_PV_INT(1, 1), /* 93.toSorted */
+    ROM_PV_INT(1, 1), /* 93.toSpliced */
+    ROM_PV_INT(1, 1), /* 93.values */
+    ROM_PV_INT(0, 2), /* 94.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_87.s), /* 94.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[95]), /* 94.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[115]), /* 94.escape */
+    { .u.getset = { (JSObject *)&js_rom_obj[116], NULL } }, /* 94.Symbol.species */
+    { .u.getset = { (JSObject *)&js_rom_obj[96], NULL } }, /* 95.flags */
+    { .u.getset = { (JSObject *)&js_rom_obj[97], NULL } }, /* 95.source */
+    { .u.getset = { (JSObject *)&js_rom_obj[98], NULL } }, /* 95.global */
+    { .u.getset = { (JSObject *)&js_rom_obj[99], NULL } }, /* 95.ignoreCase */
+    { .u.getset = { (JSObject *)&js_rom_obj[100], NULL } }, /* 95.multiline */
+    { .u.getset = { (JSObject *)&js_rom_obj[101], NULL } }, /* 95.dotAll */
+    { .u.getset = { (JSObject *)&js_rom_obj[102], NULL } }, /* 95.unicode */
+    { .u.getset = { (JSObject *)&js_rom_obj[103], NULL } }, /* 95.unicodeSets */
+    { .u.getset = { (JSObject *)&js_rom_obj[104], NULL } }, /* 95.sticky */
+    { .u.getset = { (JSObject *)&js_rom_obj[105], NULL } }, /* 95.hasIndices */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[106]), /* 95.exec */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[107]), /* 95.compile */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[108]), /* 95.test */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[109]), /* 95.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[110]), /* 95.Symbol.replace */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[111]), /* 95.Symbol.match */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[112]), /* 95.Symbol.matchAll */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[113]), /* 95.Symbol.search */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[114]), /* 95.Symbol.split */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[94]), /* 95.constructor */
     ROM_PV_INT(0, 0), /* 96.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_88.s), /* 96.name */
     ROM_PV_INT(0, 0), /* 97.length */
@@ -2759,42 +2764,42 @@ static const JSProperty js_rom_props[1861] = {
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_95.s), /* 103.name */
     ROM_PV_INT(0, 0), /* 104.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_96.s), /* 104.name */
-    ROM_PV_INT(0, 1), /* 105.length */
+    ROM_PV_INT(0, 0), /* 105.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_97.s), /* 105.name */
-    ROM_PV_INT(0, 2), /* 106.length */
+    ROM_PV_INT(0, 1), /* 106.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_98.s), /* 106.name */
-    ROM_PV_INT(0, 1), /* 107.length */
+    ROM_PV_INT(0, 2), /* 107.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_99.s), /* 107.name */
-    ROM_PV_INT(0, 0), /* 108.length */
+    ROM_PV_INT(0, 1), /* 108.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_100.s), /* 108.name */
-    ROM_PV_INT(0, 2), /* 109.length */
+    ROM_PV_INT(0, 0), /* 109.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_101.s), /* 109.name */
-    ROM_PV_INT(0, 1), /* 110.length */
+    ROM_PV_INT(0, 2), /* 110.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_102.s), /* 110.name */
     ROM_PV_INT(0, 1), /* 111.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_103.s), /* 111.name */
     ROM_PV_INT(0, 1), /* 112.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_104.s), /* 112.name */
-    ROM_PV_INT(0, 2), /* 113.length */
+    ROM_PV_INT(0, 1), /* 113.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_105.s), /* 113.name */
-    ROM_PV_INT(0, 1), /* 114.length */
+    ROM_PV_INT(0, 2), /* 114.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_106.s), /* 114.name */
-    ROM_PV_INT(0, 0), /* 115.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 115.name */
-    ROM_PV_INT(0, 1), /* 116.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_107.s), /* 116.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[117]), /* 116.resolve */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[118]), /* 116.reject */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[119]), /* 116.all */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[120]), /* 116.allSettled */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[121]), /* 116.any */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[122]), /* 116.try */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[123]), /* 116.race */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[124]), /* 116.withResolvers */
-    { .u.getset = { (JSObject *)&js_rom_obj[125], NULL } }, /* 116.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[126]), /* 116.prototype */
+    ROM_PV_INT(0, 1), /* 115.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_107.s), /* 115.name */
+    ROM_PV_INT(0, 0), /* 116.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 116.name */
     ROM_PV_INT(0, 1), /* 117.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_108.s), /* 117.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[118]), /* 117.resolve */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[119]), /* 117.reject */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[120]), /* 117.all */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[121]), /* 117.allSettled */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[122]), /* 117.any */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[123]), /* 117.try */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[124]), /* 117.race */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[125]), /* 117.withResolvers */
+    { .u.getset = { (JSObject *)&js_rom_obj[126], NULL } }, /* 117.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[127]), /* 117.prototype */
     ROM_PV_INT(0, 1), /* 118.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_109.s), /* 118.name */
     ROM_PV_INT(0, 1), /* 119.length */
@@ -2807,876 +2812,878 @@ static const JSProperty js_rom_props[1861] = {
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_113.s), /* 122.name */
     ROM_PV_INT(0, 1), /* 123.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_114.s), /* 123.name */
-    ROM_PV_INT(0, 0), /* 124.length */
+    ROM_PV_INT(0, 1), /* 124.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_115.s), /* 124.name */
     ROM_PV_INT(0, 0), /* 125.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 125.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[127]), /* 126.then */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[128]), /* 126.catch */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[129]), /* 126.finally */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_119.s), /* 126.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[116]), /* 126.constructor */
-    ROM_PV_INT(0, 2), /* 127.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_116.s), /* 127.name */
-    ROM_PV_INT(0, 1), /* 128.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_116.s), /* 125.name */
+    ROM_PV_INT(0, 0), /* 126.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 126.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[128]), /* 127.then */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[129]), /* 127.catch */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[130]), /* 127.finally */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_120.s), /* 127.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[117]), /* 127.constructor */
+    ROM_PV_INT(0, 2), /* 128.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_117.s), /* 128.name */
     ROM_PV_INT(0, 1), /* 129.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_118.s), /* 129.name */
     ROM_PV_INT(0, 1), /* 130.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_120.s), /* 130.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[131]), /* 130.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[133]), /* 130.isError */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[134]), /* 130.captureStackTrace */
-    { .u.getset = { (JSObject *)&js_rom_obj[135], (JSObject *)&js_rom_obj[136] } }, /* 130.stackTraceLimit */
-    { .u.getset = { (JSObject *)&js_rom_obj[137], (JSObject *)&js_rom_obj[138] } }, /* 130.prepareStackTrace */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[132]), /* 131.toString */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_119.s), /* 130.name */
+    ROM_PV_INT(0, 1), /* 131.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_121.s), /* 131.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 131.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[130]), /* 131.constructor */
-    ROM_PV_INT(0, 0), /* 132.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_0.s), /* 132.name */
-    ROM_PV_INT(0, 1), /* 133.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_122.s), /* 133.name */
-    ROM_PV_INT(0, 2), /* 134.length */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[132]), /* 131.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[134]), /* 131.isError */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[135]), /* 131.captureStackTrace */
+    { .u.getset = { (JSObject *)&js_rom_obj[136], (JSObject *)&js_rom_obj[137] } }, /* 131.stackTraceLimit */
+    { .u.getset = { (JSObject *)&js_rom_obj[138], (JSObject *)&js_rom_obj[139] } }, /* 131.prepareStackTrace */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[133]), /* 132.toString */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_122.s), /* 132.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 132.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[131]), /* 132.constructor */
+    ROM_PV_INT(0, 0), /* 133.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_40.s), /* 133.name */
+    ROM_PV_INT(0, 1), /* 134.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_123.s), /* 134.name */
-    ROM_PV_INT(0, 0), /* 135.length */
+    ROM_PV_INT(0, 2), /* 135.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_124.s), /* 135.name */
-    ROM_PV_INT(0, 1), /* 136.length */
+    ROM_PV_INT(0, 0), /* 136.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_125.s), /* 136.name */
-    ROM_PV_INT(0, 0), /* 137.length */
+    ROM_PV_INT(0, 1), /* 137.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_126.s), /* 137.name */
-    ROM_PV_INT(0, 1), /* 138.length */
+    ROM_PV_INT(0, 0), /* 138.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_127.s), /* 138.name */
-    ROM_PV_INT(0, 0), /* 139.length */
+    ROM_PV_INT(0, 1), /* 139.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_128.s), /* 139.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[140]), /* 139.concat */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[141]), /* 139.from */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[142]), /* 139.prototype */
     ROM_PV_INT(0, 0), /* 140.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_129.s), /* 140.name */
-    ROM_PV_INT(0, 1), /* 141.length */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[141]), /* 140.concat */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[142]), /* 140.from */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[143]), /* 140.zip */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[144]), /* 140.zipKeyed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[145]), /* 140.prototype */
+    ROM_PV_INT(0, 0), /* 141.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_130.s), /* 141.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[143]), /* 142.drop */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[144]), /* 142.filter */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[145]), /* 142.flatMap */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[146]), /* 142.map */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[147]), /* 142.take */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[148]), /* 142.every */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[149]), /* 142.find */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[150]), /* 142.forEach */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[151]), /* 142.some */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[152]), /* 142.reduce */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[153]), /* 142.toArray */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[154]), /* 142.Symbol.iterator */
-    { .u.getset = { (JSObject *)&js_rom_obj[155], (JSObject *)&js_rom_obj[156] } }, /* 142.Symbol.toStringTag */
-    { .u.getset = { (JSObject *)&js_rom_obj[157], (JSObject *)&js_rom_obj[157] } }, /* 142.constructor */
+    ROM_PV_INT(0, 1), /* 142.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_48.s), /* 142.name */
     ROM_PV_INT(0, 1), /* 143.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_131.s), /* 143.name */
     ROM_PV_INT(0, 1), /* 144.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_132.s), /* 144.name */
-    ROM_PV_INT(0, 1), /* 145.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_133.s), /* 145.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[146]), /* 145.drop */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[147]), /* 145.filter */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[148]), /* 145.flatMap */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[149]), /* 145.map */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[150]), /* 145.take */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[151]), /* 145.every */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[152]), /* 145.find */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[153]), /* 145.forEach */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[154]), /* 145.some */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[155]), /* 145.reduce */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[156]), /* 145.toArray */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[157]), /* 145.Symbol.iterator */
+    { .u.getset = { (JSObject *)&js_rom_obj[158], (JSObject *)&js_rom_obj[159] } }, /* 145.Symbol.toStringTag */
+    { .u.getset = { (JSObject *)&js_rom_obj[160], (JSObject *)&js_rom_obj[160] } }, /* 145.constructor */
     ROM_PV_INT(0, 1), /* 146.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_134.s), /* 146.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_133.s), /* 146.name */
     ROM_PV_INT(0, 1), /* 147.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_135.s), /* 147.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_134.s), /* 147.name */
     ROM_PV_INT(0, 1), /* 148.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_136.s), /* 148.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_135.s), /* 148.name */
     ROM_PV_INT(0, 1), /* 149.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_137.s), /* 149.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_136.s), /* 149.name */
     ROM_PV_INT(0, 1), /* 150.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_138.s), /* 150.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_137.s), /* 150.name */
     ROM_PV_INT(0, 1), /* 151.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_54.s), /* 151.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_138.s), /* 151.name */
     ROM_PV_INT(0, 1), /* 152.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_139.s), /* 152.name */
-    ROM_PV_INT(0, 0), /* 153.length */
+    ROM_PV_INT(0, 1), /* 153.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_140.s), /* 153.name */
-    ROM_PV_INT(0, 0), /* 154.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_141.s), /* 154.name */
-    ROM_PV_INT(0, 0), /* 155.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_142.s), /* 155.name */
-    ROM_PV_INT(0, 1), /* 156.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_143.s), /* 156.name */
+    ROM_PV_INT(0, 1), /* 154.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_56.s), /* 154.name */
+    ROM_PV_INT(0, 1), /* 155.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_141.s), /* 155.name */
+    ROM_PV_INT(0, 0), /* 156.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_142.s), /* 156.name */
     ROM_PV_INT(0, 0), /* 157.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 157.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[159]), /* 158.Symbol.asyncIterator */
-    ROM_PV_INT(0, 0), /* 159.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_144.s), /* 159.name */
-    ROM_PV_INT(0, 1), /* 160.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_145.s), /* 160.name */
-    ROM_PV_INT(0, 0), /* 161.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_146.s), /* 161.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[162]), /* 161.from */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[163]), /* 161.of */
-    { .u.getset = { (JSObject *)&js_rom_obj[164], NULL } }, /* 161.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[165]), /* 161.prototype */
-    ROM_PV_INT(0, 1), /* 162.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_147.s), /* 162.name */
-    ROM_PV_INT(0, 0), /* 163.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_148.s), /* 163.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_143.s), /* 157.name */
+    ROM_PV_INT(0, 0), /* 158.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_144.s), /* 158.name */
+    ROM_PV_INT(0, 1), /* 159.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_145.s), /* 159.name */
+    ROM_PV_INT(0, 0), /* 160.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 160.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[162]), /* 161.Symbol.asyncIterator */
+    ROM_PV_INT(0, 0), /* 162.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_146.s), /* 162.name */
+    ROM_PV_INT(0, 1), /* 163.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_147.s), /* 163.name */
     ROM_PV_INT(0, 0), /* 164.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 164.name */
-    { .u.getset = { (JSObject *)&js_rom_obj[166], NULL } }, /* 165.length */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[167]), /* 165.at */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[168]), /* 165.with */
-    { .u.getset = { (JSObject *)&js_rom_obj[169], NULL } }, /* 165.buffer */
-    { .u.getset = { (JSObject *)&js_rom_obj[170], NULL } }, /* 165.byteLength */
-    { .u.getset = { (JSObject *)&js_rom_obj[171], NULL } }, /* 165.byteOffset */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[172]), /* 165.set */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[173]), /* 165.values */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[173]), /* 165.Symbol.iterator */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[174]), /* 165.keys */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[175]), /* 165.entries */
-    { .u.getset = { (JSObject *)&js_rom_obj[176], NULL } }, /* 165.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[177]), /* 165.copyWithin */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[178]), /* 165.every */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[179]), /* 165.some */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[180]), /* 165.forEach */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[181]), /* 165.map */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[182]), /* 165.filter */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[183]), /* 165.reduce */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[184]), /* 165.reduceRight */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[185]), /* 165.fill */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[186]), /* 165.find */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[187]), /* 165.findIndex */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[188]), /* 165.findLast */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[189]), /* 165.findLastIndex */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[190]), /* 165.reverse */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[191]), /* 165.toReversed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[192]), /* 165.slice */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[193]), /* 165.subarray */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[194]), /* 165.sort */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[195]), /* 165.toSorted */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[196]), /* 165.join */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[197]), /* 165.toLocaleString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[198]), /* 165.indexOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[199]), /* 165.lastIndexOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[200]), /* 165.includes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[161]), /* 165.constructor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[73]), /* 165.toString */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_148.s), /* 164.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[165]), /* 164.from */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[166]), /* 164.of */
+    { .u.getset = { (JSObject *)&js_rom_obj[167], NULL } }, /* 164.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[168]), /* 164.prototype */
+    ROM_PV_INT(0, 1), /* 165.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_149.s), /* 165.name */
     ROM_PV_INT(0, 0), /* 166.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_149.s), /* 166.name */
-    ROM_PV_INT(0, 1), /* 167.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_150.s), /* 167.name */
-    ROM_PV_INT(0, 2), /* 168.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_151.s), /* 168.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_150.s), /* 166.name */
+    ROM_PV_INT(0, 0), /* 167.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 167.name */
+    { .u.getset = { (JSObject *)&js_rom_obj[169], NULL } }, /* 168.length */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[170]), /* 168.at */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[171]), /* 168.with */
+    { .u.getset = { (JSObject *)&js_rom_obj[172], NULL } }, /* 168.buffer */
+    { .u.getset = { (JSObject *)&js_rom_obj[173], NULL } }, /* 168.byteLength */
+    { .u.getset = { (JSObject *)&js_rom_obj[174], NULL } }, /* 168.byteOffset */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[175]), /* 168.set */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[176]), /* 168.values */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[176]), /* 168.Symbol.iterator */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[177]), /* 168.keys */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[178]), /* 168.entries */
+    { .u.getset = { (JSObject *)&js_rom_obj[179], NULL } }, /* 168.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[180]), /* 168.copyWithin */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[181]), /* 168.every */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[182]), /* 168.some */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[183]), /* 168.forEach */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[184]), /* 168.map */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[185]), /* 168.filter */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[186]), /* 168.reduce */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[187]), /* 168.reduceRight */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[188]), /* 168.fill */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[189]), /* 168.find */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[190]), /* 168.findIndex */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[191]), /* 168.findLast */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[192]), /* 168.findLastIndex */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[193]), /* 168.reverse */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[194]), /* 168.toReversed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[195]), /* 168.slice */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[196]), /* 168.subarray */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[197]), /* 168.sort */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[198]), /* 168.toSorted */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[199]), /* 168.join */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[200]), /* 168.toLocaleString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[201]), /* 168.indexOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[202]), /* 168.lastIndexOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[203]), /* 168.includes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[164]), /* 168.constructor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[74]), /* 168.toString */
     ROM_PV_INT(0, 0), /* 169.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_152.s), /* 169.name */
-    ROM_PV_INT(0, 0), /* 170.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_153.s), /* 170.name */
-    ROM_PV_INT(0, 0), /* 171.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_154.s), /* 171.name */
-    ROM_PV_INT(0, 1), /* 172.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_155.s), /* 172.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_151.s), /* 169.name */
+    ROM_PV_INT(0, 1), /* 170.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_152.s), /* 170.name */
+    ROM_PV_INT(0, 2), /* 171.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_153.s), /* 171.name */
+    ROM_PV_INT(0, 0), /* 172.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_154.s), /* 172.name */
     ROM_PV_INT(0, 0), /* 173.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_85.s), /* 173.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_155.s), /* 173.name */
     ROM_PV_INT(0, 0), /* 174.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_156.s), /* 174.name */
-    ROM_PV_INT(0, 0), /* 175.length */
+    ROM_PV_INT(0, 1), /* 175.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_157.s), /* 175.name */
     ROM_PV_INT(0, 0), /* 176.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_142.s), /* 176.name */
-    ROM_PV_INT(0, 2), /* 177.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_86.s), /* 176.name */
+    ROM_PV_INT(0, 0), /* 177.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_158.s), /* 177.name */
-    ROM_PV_INT(0, 1), /* 178.length */
+    ROM_PV_INT(0, 0), /* 178.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_159.s), /* 178.name */
-    ROM_PV_INT(0, 1), /* 179.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_160.s), /* 179.name */
-    ROM_PV_INT(0, 1), /* 180.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_161.s), /* 180.name */
+    ROM_PV_INT(0, 0), /* 179.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_144.s), /* 179.name */
+    ROM_PV_INT(0, 2), /* 180.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_160.s), /* 180.name */
     ROM_PV_INT(0, 1), /* 181.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_162.s), /* 181.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_161.s), /* 181.name */
     ROM_PV_INT(0, 1), /* 182.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_163.s), /* 182.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_162.s), /* 182.name */
     ROM_PV_INT(0, 1), /* 183.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_164.s), /* 183.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_163.s), /* 183.name */
     ROM_PV_INT(0, 1), /* 184.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_165.s), /* 184.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_164.s), /* 184.name */
     ROM_PV_INT(0, 1), /* 185.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_166.s), /* 185.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_165.s), /* 185.name */
     ROM_PV_INT(0, 1), /* 186.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_167.s), /* 186.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_166.s), /* 186.name */
     ROM_PV_INT(0, 1), /* 187.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_168.s), /* 187.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_167.s), /* 187.name */
     ROM_PV_INT(0, 1), /* 188.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_169.s), /* 188.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_168.s), /* 188.name */
     ROM_PV_INT(0, 1), /* 189.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_170.s), /* 189.name */
-    ROM_PV_INT(0, 0), /* 190.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_171.s), /* 190.name */
-    ROM_PV_INT(0, 0), /* 191.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_172.s), /* 191.name */
-    ROM_PV_INT(0, 2), /* 192.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_173.s), /* 192.name */
-    ROM_PV_INT(0, 2), /* 193.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_174.s), /* 193.name */
-    ROM_PV_INT(0, 1), /* 194.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_175.s), /* 194.name */
-    ROM_PV_INT(0, 1), /* 195.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_176.s), /* 195.name */
-    ROM_PV_INT(0, 1), /* 196.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_177.s), /* 196.name */
-    ROM_PV_INT(0, 0), /* 197.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_178.s), /* 197.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_169.s), /* 189.name */
+    ROM_PV_INT(0, 1), /* 190.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_170.s), /* 190.name */
+    ROM_PV_INT(0, 1), /* 191.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_171.s), /* 191.name */
+    ROM_PV_INT(0, 1), /* 192.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_172.s), /* 192.name */
+    ROM_PV_INT(0, 0), /* 193.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_173.s), /* 193.name */
+    ROM_PV_INT(0, 0), /* 194.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_174.s), /* 194.name */
+    ROM_PV_INT(0, 2), /* 195.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_175.s), /* 195.name */
+    ROM_PV_INT(0, 2), /* 196.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_176.s), /* 196.name */
+    ROM_PV_INT(0, 1), /* 197.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_177.s), /* 197.name */
     ROM_PV_INT(0, 1), /* 198.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_179.s), /* 198.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_178.s), /* 198.name */
     ROM_PV_INT(0, 1), /* 199.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_180.s), /* 199.name */
-    ROM_PV_INT(0, 1), /* 200.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_181.s), /* 200.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_182.s), /* 201.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 201.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[202]), /* 201.constructor */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_179.s), /* 199.name */
+    ROM_PV_INT(0, 0), /* 200.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_180.s), /* 200.name */
+    ROM_PV_INT(0, 1), /* 201.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_181.s), /* 201.name */
     ROM_PV_INT(0, 1), /* 202.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_182.s), /* 202.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[201]), /* 202.prototype */
+    ROM_PV_INT(0, 1), /* 203.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_183.s), /* 203.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 203.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[204]), /* 203.constructor */
-    ROM_PV_INT(0, 1), /* 204.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_183.s), /* 204.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[203]), /* 204.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_184.s), /* 204.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 204.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[205]), /* 204.constructor */
+    ROM_PV_INT(0, 1), /* 205.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_184.s), /* 205.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 205.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[206]), /* 205.constructor */
-    ROM_PV_INT(0, 1), /* 206.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_184.s), /* 206.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[205]), /* 206.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[204]), /* 205.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_185.s), /* 206.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 206.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[207]), /* 206.constructor */
+    ROM_PV_INT(0, 1), /* 207.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_185.s), /* 207.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 207.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[208]), /* 207.constructor */
-    ROM_PV_INT(0, 1), /* 208.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_185.s), /* 208.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[207]), /* 208.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[206]), /* 207.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_186.s), /* 208.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 208.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[209]), /* 208.constructor */
+    ROM_PV_INT(0, 1), /* 209.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_186.s), /* 209.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 209.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[210]), /* 209.constructor */
-    ROM_PV_INT(0, 1), /* 210.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_186.s), /* 210.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[209]), /* 210.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[208]), /* 209.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_187.s), /* 210.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 210.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[211]), /* 210.constructor */
+    ROM_PV_INT(0, 1), /* 211.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_187.s), /* 211.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 211.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[212]), /* 211.constructor */
-    ROM_PV_INT(0, 1), /* 212.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_187.s), /* 212.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[211]), /* 212.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[210]), /* 211.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_188.s), /* 212.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 212.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[213]), /* 212.constructor */
+    ROM_PV_INT(0, 1), /* 213.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_188.s), /* 213.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 213.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[214]), /* 213.constructor */
-    ROM_PV_INT(0, 1), /* 214.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_188.s), /* 214.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[213]), /* 214.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[212]), /* 213.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_189.s), /* 214.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 214.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[215]), /* 214.constructor */
+    ROM_PV_INT(0, 1), /* 215.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_189.s), /* 215.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 215.message */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[216]), /* 215.constructor */
-    ROM_PV_INT(0, 2), /* 216.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_189.s), /* 216.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[215]), /* 216.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[218]), /* 217.toExponential */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[219]), /* 217.toFixed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[220]), /* 217.toPrecision */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[221]), /* 217.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[222]), /* 217.toLocaleString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[223]), /* 217.valueOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[224]), /* 217.constructor */
-    ROM_PV_INT(0, 1), /* 218.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_190.s), /* 218.name */
-    ROM_PV_INT(0, 1), /* 219.length */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[214]), /* 215.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_190.s), /* 216.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 216.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[217]), /* 216.constructor */
+    ROM_PV_INT(0, 1), /* 217.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_190.s), /* 217.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[216]), /* 217.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_191.s), /* 218.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_36.s), /* 218.message */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[219]), /* 218.constructor */
+    ROM_PV_INT(0, 2), /* 219.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_191.s), /* 219.name */
-    ROM_PV_INT(0, 1), /* 220.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_192.s), /* 220.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[218]), /* 219.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[221]), /* 220.toExponential */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[222]), /* 220.toFixed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[223]), /* 220.toPrecision */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[224]), /* 220.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[225]), /* 220.toLocaleString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[226]), /* 220.valueOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[227]), /* 220.constructor */
     ROM_PV_INT(0, 1), /* 221.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_193.s), /* 221.name */
-    ROM_PV_INT(0, 0), /* 222.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_194.s), /* 222.name */
-    ROM_PV_INT(0, 0), /* 223.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_195.s), /* 223.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_192.s), /* 221.name */
+    ROM_PV_INT(0, 1), /* 222.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_193.s), /* 222.name */
+    ROM_PV_INT(0, 1), /* 223.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_194.s), /* 223.name */
     ROM_PV_INT(0, 1), /* 224.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_196.s), /* 224.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[225]), /* 224.parseInt */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[226]), /* 224.parseFloat */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[227]), /* 224.isNaN */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[228]), /* 224.isFinite */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[229]), /* 224.isInteger */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[230]), /* 224.isSafeInteger */
-    ROM_PV_F64(0x7fefffffffffffffull, 0x1.fffffffffffffp+1023), /* 224.MAX_VALUE */
-    ROM_PV_F64(0x0000000000000001ull, 0x0.0000000000001p-1022), /* 224.MIN_VALUE */
-    ROM_PV_F64(0x3cb0000000000000ull, 0x1p-52), /* 224.EPSILON */
-    ROM_PV_F64(0x433fffffffffffffull, 0x1.fffffffffffffp+52), /* 224.MAX_SAFE_INTEGER */
-    ROM_PV_F64(0xc33fffffffffffffull, -0x1.fffffffffffffp+52), /* 224.MIN_SAFE_INTEGER */
-    ROM_PV_NAN(), /* 224.NaN */
-    ROM_PV_F64(0xfff0000000000000ull, -__builtin_inf()), /* 224.NEGATIVE_INFINITY */
-    ROM_PV_F64(0x7ff0000000000000ull, __builtin_inf()), /* 224.POSITIVE_INFINITY */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[217]), /* 224.prototype */
-    ROM_PV_INT(0, 2), /* 225.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_197.s), /* 225.name */
-    ROM_PV_INT(0, 1), /* 226.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_198.s), /* 226.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_195.s), /* 224.name */
+    ROM_PV_INT(0, 0), /* 225.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_196.s), /* 225.name */
+    ROM_PV_INT(0, 0), /* 226.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_197.s), /* 226.name */
     ROM_PV_INT(0, 1), /* 227.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_199.s), /* 227.name */
-    ROM_PV_INT(0, 1), /* 228.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_200.s), /* 228.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_198.s), /* 227.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[228]), /* 227.parseInt */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[229]), /* 227.parseFloat */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[230]), /* 227.isNaN */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[231]), /* 227.isFinite */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[232]), /* 227.isInteger */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[233]), /* 227.isSafeInteger */
+    ROM_PV_F64(0x7fefffffffffffffull, 0x1.fffffffffffffp+1023), /* 227.MAX_VALUE */
+    ROM_PV_F64(0x0000000000000001ull, 0x0.0000000000001p-1022), /* 227.MIN_VALUE */
+    ROM_PV_F64(0x3cb0000000000000ull, 0x1p-52), /* 227.EPSILON */
+    ROM_PV_F64(0x433fffffffffffffull, 0x1.fffffffffffffp+52), /* 227.MAX_SAFE_INTEGER */
+    ROM_PV_F64(0xc33fffffffffffffull, -0x1.fffffffffffffp+52), /* 227.MIN_SAFE_INTEGER */
+    ROM_PV_NAN(), /* 227.NaN */
+    ROM_PV_F64(0xfff0000000000000ull, -__builtin_inf()), /* 227.NEGATIVE_INFINITY */
+    ROM_PV_F64(0x7ff0000000000000ull, __builtin_inf()), /* 227.POSITIVE_INFINITY */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[220]), /* 227.prototype */
+    ROM_PV_INT(0, 2), /* 228.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_199.s), /* 228.name */
     ROM_PV_INT(0, 1), /* 229.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_201.s), /* 229.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_200.s), /* 229.name */
     ROM_PV_INT(0, 1), /* 230.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_202.s), /* 230.name */
-    ROM_PV_INT(0, 0), /* 231.length */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[232]), /* 231.at */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[233]), /* 231.charCodeAt */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[234]), /* 231.charAt */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[235]), /* 231.concat */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[236]), /* 231.codePointAt */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[237]), /* 231.isWellFormed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[238]), /* 231.toWellFormed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[239]), /* 231.indexOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[240]), /* 231.lastIndexOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[241]), /* 231.includes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[242]), /* 231.endsWith */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[243]), /* 231.startsWith */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[244]), /* 231.match */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[245]), /* 231.matchAll */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[246]), /* 231.search */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[247]), /* 231.split */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[248]), /* 231.substring */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[249]), /* 231.substr */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[250]), /* 231.slice */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[251]), /* 231.repeat */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[252]), /* 231.replace */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[253]), /* 231.replaceAll */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[254]), /* 231.padEnd */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[255]), /* 231.padStart */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[256]), /* 231.trim */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[257]), /* 231.trimEnd */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[257]), /* 231.trimRight */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[258]), /* 231.trimStart */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[258]), /* 231.trimLeft */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[259]), /* 231.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[260]), /* 231.valueOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[261]), /* 231.localeCompare */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[262]), /* 231.normalize */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[263]), /* 231.toLowerCase */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[264]), /* 231.toUpperCase */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[265]), /* 231.toLocaleLowerCase */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[266]), /* 231.toLocaleUpperCase */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[267]), /* 231.Symbol.iterator */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[268]), /* 231.anchor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[269]), /* 231.big */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[270]), /* 231.blink */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[271]), /* 231.bold */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[272]), /* 231.fixed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[273]), /* 231.fontcolor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[274]), /* 231.fontsize */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[275]), /* 231.italics */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[276]), /* 231.link */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[277]), /* 231.small */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[278]), /* 231.strike */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[279]), /* 231.sub */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[280]), /* 231.sup */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[281]), /* 231.constructor */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_201.s), /* 230.name */
+    ROM_PV_INT(0, 1), /* 231.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_202.s), /* 231.name */
     ROM_PV_INT(0, 1), /* 232.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_203.s), /* 232.name */
     ROM_PV_INT(0, 1), /* 233.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_204.s), /* 233.name */
-    ROM_PV_INT(0, 1), /* 234.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_205.s), /* 234.name */
+    ROM_PV_INT(0, 0), /* 234.length */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[235]), /* 234.at */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[236]), /* 234.charCodeAt */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[237]), /* 234.charAt */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[238]), /* 234.concat */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[239]), /* 234.codePointAt */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[240]), /* 234.isWellFormed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[241]), /* 234.toWellFormed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[242]), /* 234.indexOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[243]), /* 234.lastIndexOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[244]), /* 234.includes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[245]), /* 234.endsWith */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[246]), /* 234.startsWith */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[247]), /* 234.match */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[248]), /* 234.matchAll */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[249]), /* 234.search */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[250]), /* 234.split */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[251]), /* 234.substring */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[252]), /* 234.substr */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[253]), /* 234.slice */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[254]), /* 234.repeat */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[255]), /* 234.replace */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[256]), /* 234.replaceAll */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[257]), /* 234.padEnd */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[258]), /* 234.padStart */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[259]), /* 234.trim */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[260]), /* 234.trimEnd */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[260]), /* 234.trimRight */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[261]), /* 234.trimStart */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[261]), /* 234.trimLeft */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[262]), /* 234.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[263]), /* 234.valueOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[264]), /* 234.localeCompare */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[265]), /* 234.normalize */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[266]), /* 234.toLowerCase */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[267]), /* 234.toUpperCase */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[268]), /* 234.toLocaleLowerCase */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[269]), /* 234.toLocaleUpperCase */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[270]), /* 234.Symbol.iterator */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[271]), /* 234.anchor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[272]), /* 234.big */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[273]), /* 234.blink */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[274]), /* 234.bold */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[275]), /* 234.fixed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[276]), /* 234.fontcolor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[277]), /* 234.fontsize */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[278]), /* 234.italics */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[279]), /* 234.link */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[280]), /* 234.small */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[281]), /* 234.strike */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[282]), /* 234.sub */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[283]), /* 234.sup */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[284]), /* 234.constructor */
     ROM_PV_INT(0, 1), /* 235.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_206.s), /* 235.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_205.s), /* 235.name */
     ROM_PV_INT(0, 1), /* 236.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_207.s), /* 236.name */
-    ROM_PV_INT(0, 0), /* 237.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_208.s), /* 237.name */
-    ROM_PV_INT(0, 0), /* 238.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_209.s), /* 238.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_206.s), /* 236.name */
+    ROM_PV_INT(0, 1), /* 237.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_207.s), /* 237.name */
+    ROM_PV_INT(0, 1), /* 238.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_208.s), /* 238.name */
     ROM_PV_INT(0, 1), /* 239.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_210.s), /* 239.name */
-    ROM_PV_INT(0, 1), /* 240.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_211.s), /* 240.name */
-    ROM_PV_INT(0, 1), /* 241.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_212.s), /* 241.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_209.s), /* 239.name */
+    ROM_PV_INT(0, 0), /* 240.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_210.s), /* 240.name */
+    ROM_PV_INT(0, 0), /* 241.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_211.s), /* 241.name */
     ROM_PV_INT(0, 1), /* 242.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_213.s), /* 242.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_212.s), /* 242.name */
     ROM_PV_INT(0, 1), /* 243.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_214.s), /* 243.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_213.s), /* 243.name */
     ROM_PV_INT(0, 1), /* 244.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_215.s), /* 244.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_214.s), /* 244.name */
     ROM_PV_INT(0, 1), /* 245.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_216.s), /* 245.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_215.s), /* 245.name */
     ROM_PV_INT(0, 1), /* 246.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_217.s), /* 246.name */
-    ROM_PV_INT(0, 2), /* 247.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_218.s), /* 247.name */
-    ROM_PV_INT(0, 2), /* 248.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_219.s), /* 248.name */
-    ROM_PV_INT(0, 2), /* 249.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_220.s), /* 249.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_216.s), /* 246.name */
+    ROM_PV_INT(0, 1), /* 247.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_217.s), /* 247.name */
+    ROM_PV_INT(0, 1), /* 248.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_218.s), /* 248.name */
+    ROM_PV_INT(0, 1), /* 249.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_219.s), /* 249.name */
     ROM_PV_INT(0, 2), /* 250.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_221.s), /* 250.name */
-    ROM_PV_INT(0, 1), /* 251.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_222.s), /* 251.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_220.s), /* 250.name */
+    ROM_PV_INT(0, 2), /* 251.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_221.s), /* 251.name */
     ROM_PV_INT(0, 2), /* 252.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_223.s), /* 252.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_222.s), /* 252.name */
     ROM_PV_INT(0, 2), /* 253.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_224.s), /* 253.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_223.s), /* 253.name */
     ROM_PV_INT(0, 1), /* 254.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_225.s), /* 254.name */
-    ROM_PV_INT(0, 1), /* 255.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_226.s), /* 255.name */
-    ROM_PV_INT(0, 0), /* 256.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_227.s), /* 256.name */
-    ROM_PV_INT(0, 0), /* 257.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_228.s), /* 257.name */
-    ROM_PV_INT(0, 0), /* 258.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_229.s), /* 258.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_224.s), /* 254.name */
+    ROM_PV_INT(0, 2), /* 255.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_225.s), /* 255.name */
+    ROM_PV_INT(0, 2), /* 256.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_226.s), /* 256.name */
+    ROM_PV_INT(0, 1), /* 257.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_227.s), /* 257.name */
+    ROM_PV_INT(0, 1), /* 258.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_228.s), /* 258.name */
     ROM_PV_INT(0, 0), /* 259.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_193.s), /* 259.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_229.s), /* 259.name */
     ROM_PV_INT(0, 0), /* 260.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_230.s), /* 260.name */
-    ROM_PV_INT(0, 1), /* 261.length */
+    ROM_PV_INT(0, 0), /* 261.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_231.s), /* 261.name */
     ROM_PV_INT(0, 0), /* 262.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_232.s), /* 262.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_195.s), /* 262.name */
     ROM_PV_INT(0, 0), /* 263.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_233.s), /* 263.name */
-    ROM_PV_INT(0, 0), /* 264.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_234.s), /* 264.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_232.s), /* 263.name */
+    ROM_PV_INT(0, 1), /* 264.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_233.s), /* 264.name */
     ROM_PV_INT(0, 0), /* 265.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_235.s), /* 265.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_234.s), /* 265.name */
     ROM_PV_INT(0, 0), /* 266.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_236.s), /* 266.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_235.s), /* 266.name */
     ROM_PV_INT(0, 0), /* 267.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_237.s), /* 267.name */
-    ROM_PV_INT(0, 1), /* 268.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_238.s), /* 268.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_236.s), /* 267.name */
+    ROM_PV_INT(0, 0), /* 268.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_237.s), /* 268.name */
     ROM_PV_INT(0, 0), /* 269.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_239.s), /* 269.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_238.s), /* 269.name */
     ROM_PV_INT(0, 0), /* 270.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_240.s), /* 270.name */
-    ROM_PV_INT(0, 0), /* 271.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_241.s), /* 271.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_239.s), /* 270.name */
+    ROM_PV_INT(0, 1), /* 271.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_240.s), /* 271.name */
     ROM_PV_INT(0, 0), /* 272.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_242.s), /* 272.name */
-    ROM_PV_INT(0, 1), /* 273.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_243.s), /* 273.name */
-    ROM_PV_INT(0, 1), /* 274.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_244.s), /* 274.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_241.s), /* 272.name */
+    ROM_PV_INT(0, 0), /* 273.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_242.s), /* 273.name */
+    ROM_PV_INT(0, 0), /* 274.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_243.s), /* 274.name */
     ROM_PV_INT(0, 0), /* 275.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_245.s), /* 275.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_244.s), /* 275.name */
     ROM_PV_INT(0, 1), /* 276.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_246.s), /* 276.name */
-    ROM_PV_INT(0, 0), /* 277.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_247.s), /* 277.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_245.s), /* 276.name */
+    ROM_PV_INT(0, 1), /* 277.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_246.s), /* 277.name */
     ROM_PV_INT(0, 0), /* 278.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_248.s), /* 278.name */
-    ROM_PV_INT(0, 0), /* 279.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_249.s), /* 279.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_247.s), /* 278.name */
+    ROM_PV_INT(0, 1), /* 279.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_248.s), /* 279.name */
     ROM_PV_INT(0, 0), /* 280.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_250.s), /* 280.name */
-    ROM_PV_INT(0, 1), /* 281.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_251.s), /* 281.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[282]), /* 281.fromCharCode */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[283]), /* 281.fromCodePoint */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[284]), /* 281.raw */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[231]), /* 281.prototype */
-    ROM_PV_INT(0, 1), /* 282.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_252.s), /* 282.name */
-    ROM_PV_INT(0, 1), /* 283.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_253.s), /* 283.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_249.s), /* 280.name */
+    ROM_PV_INT(0, 0), /* 281.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_250.s), /* 281.name */
+    ROM_PV_INT(0, 0), /* 282.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_251.s), /* 282.name */
+    ROM_PV_INT(0, 0), /* 283.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_252.s), /* 283.name */
     ROM_PV_INT(0, 1), /* 284.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_254.s), /* 284.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[286]), /* 285.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[287]), /* 285.valueOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[288]), /* 285.constructor */
-    ROM_PV_INT(0, 0), /* 286.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_193.s), /* 286.name */
-    ROM_PV_INT(0, 0), /* 287.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_195.s), /* 287.name */
-    ROM_PV_INT(0, 1), /* 288.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_255.s), /* 288.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[285]), /* 288.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[290]), /* 289.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[291]), /* 289.valueOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[292]), /* 289.Symbol.toPrimitive */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_258.s), /* 289.Symbol.toStringTag */
-    { .u.getset = { (JSObject *)&js_rom_obj[293], NULL } }, /* 289.description */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[294]), /* 289.constructor */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_253.s), /* 284.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[285]), /* 284.fromCharCode */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[286]), /* 284.fromCodePoint */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[287]), /* 284.raw */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[234]), /* 284.prototype */
+    ROM_PV_INT(0, 1), /* 285.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_254.s), /* 285.name */
+    ROM_PV_INT(0, 1), /* 286.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_255.s), /* 286.name */
+    ROM_PV_INT(0, 1), /* 287.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_256.s), /* 287.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[289]), /* 288.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[290]), /* 288.valueOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[291]), /* 288.constructor */
+    ROM_PV_INT(0, 0), /* 289.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_195.s), /* 289.name */
     ROM_PV_INT(0, 0), /* 290.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_256.s), /* 290.name */
-    ROM_PV_INT(0, 0), /* 291.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_230.s), /* 291.name */
-    ROM_PV_INT(0, 1), /* 292.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_257.s), /* 292.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_232.s), /* 290.name */
+    ROM_PV_INT(0, 1), /* 291.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_257.s), /* 291.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[288]), /* 291.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[293]), /* 292.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[294]), /* 292.valueOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[295]), /* 292.Symbol.toPrimitive */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_261.s), /* 292.Symbol.toStringTag */
+    { .u.getset = { (JSObject *)&js_rom_obj[296], NULL } }, /* 292.description */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[297]), /* 292.constructor */
     ROM_PV_INT(0, 0), /* 293.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_259.s), /* 293.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_258.s), /* 293.name */
     ROM_PV_INT(0, 0), /* 294.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_260.s), /* 294.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[295]), /* 294.for */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[296]), /* 294.keyFor */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_0.s), /* 294.toPrimitive */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_1.s), /* 294.iterator */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_2.s), /* 294.match */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_3.s), /* 294.matchAll */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_4.s), /* 294.replace */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_5.s), /* 294.search */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_6.s), /* 294.split */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_7.s), /* 294.toStringTag */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_8.s), /* 294.isConcatSpreadable */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_9.s), /* 294.hasInstance */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_10.s), /* 294.species */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_11.s), /* 294.unscopables */
-    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_12.s), /* 294.asyncIterator */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[289]), /* 294.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_259.s), /* 294.name */
     ROM_PV_INT(0, 1), /* 295.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_261.s), /* 295.name */
-    ROM_PV_INT(0, 1), /* 296.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_260.s), /* 295.name */
+    ROM_PV_INT(0, 0), /* 296.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_262.s), /* 296.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[298]), /* 297.valueOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[299]), /* 297.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[300]), /* 297.Symbol.toPrimitive */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[301]), /* 297.toUTCString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[301]), /* 297.toGMTString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[302]), /* 297.toISOString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[303]), /* 297.toDateString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[304]), /* 297.toTimeString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[305]), /* 297.toLocaleString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[306]), /* 297.toLocaleDateString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[307]), /* 297.toLocaleTimeString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[308]), /* 297.getTimezoneOffset */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[309]), /* 297.getTime */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[310]), /* 297.getYear */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[311]), /* 297.getFullYear */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[312]), /* 297.getUTCFullYear */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[313]), /* 297.getMonth */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[314]), /* 297.getUTCMonth */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[315]), /* 297.getDate */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[316]), /* 297.getUTCDate */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[317]), /* 297.getHours */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[318]), /* 297.getUTCHours */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[319]), /* 297.getMinutes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[320]), /* 297.getUTCMinutes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[321]), /* 297.getSeconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[322]), /* 297.getUTCSeconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[323]), /* 297.getMilliseconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[324]), /* 297.getUTCMilliseconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[325]), /* 297.getDay */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[326]), /* 297.getUTCDay */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[327]), /* 297.setTime */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[328]), /* 297.setMilliseconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[329]), /* 297.setUTCMilliseconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[330]), /* 297.setSeconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[331]), /* 297.setUTCSeconds */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[332]), /* 297.setMinutes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[333]), /* 297.setUTCMinutes */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[334]), /* 297.setHours */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[335]), /* 297.setUTCHours */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[336]), /* 297.setDate */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[337]), /* 297.setUTCDate */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[338]), /* 297.setMonth */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[339]), /* 297.setUTCMonth */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[340]), /* 297.setYear */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[341]), /* 297.setFullYear */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[342]), /* 297.setUTCFullYear */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[343]), /* 297.toJSON */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[344]), /* 297.constructor */
-    ROM_PV_INT(0, 0), /* 298.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_230.s), /* 298.name */
-    ROM_PV_INT(0, 0), /* 299.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_256.s), /* 299.name */
-    ROM_PV_INT(0, 1), /* 300.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_263.s), /* 300.name */
+    ROM_PV_INT(0, 0), /* 297.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_263.s), /* 297.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[298]), /* 297.for */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[299]), /* 297.keyFor */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_0.s), /* 297.toPrimitive */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_1.s), /* 297.iterator */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_2.s), /* 297.match */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_3.s), /* 297.matchAll */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_4.s), /* 297.replace */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_5.s), /* 297.search */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_6.s), /* 297.split */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_7.s), /* 297.toStringTag */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_8.s), /* 297.isConcatSpreadable */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_9.s), /* 297.hasInstance */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_10.s), /* 297.species */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_11.s), /* 297.unscopables */
+    ROM_PV_PTR(JS_TAG_SYMBOL, &js_rom_sym_12.s), /* 297.asyncIterator */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[292]), /* 297.prototype */
+    ROM_PV_INT(0, 1), /* 298.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_264.s), /* 298.name */
+    ROM_PV_INT(0, 1), /* 299.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_265.s), /* 299.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[301]), /* 300.valueOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[302]), /* 300.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[303]), /* 300.Symbol.toPrimitive */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[304]), /* 300.toUTCString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[304]), /* 300.toGMTString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[305]), /* 300.toISOString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[306]), /* 300.toDateString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[307]), /* 300.toTimeString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[308]), /* 300.toLocaleString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[309]), /* 300.toLocaleDateString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[310]), /* 300.toLocaleTimeString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[311]), /* 300.getTimezoneOffset */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[312]), /* 300.getTime */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[313]), /* 300.getYear */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[314]), /* 300.getFullYear */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[315]), /* 300.getUTCFullYear */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[316]), /* 300.getMonth */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[317]), /* 300.getUTCMonth */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[318]), /* 300.getDate */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[319]), /* 300.getUTCDate */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[320]), /* 300.getHours */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[321]), /* 300.getUTCHours */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[322]), /* 300.getMinutes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[323]), /* 300.getUTCMinutes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[324]), /* 300.getSeconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[325]), /* 300.getUTCSeconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[326]), /* 300.getMilliseconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[327]), /* 300.getUTCMilliseconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[328]), /* 300.getDay */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[329]), /* 300.getUTCDay */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[330]), /* 300.setTime */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[331]), /* 300.setMilliseconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[332]), /* 300.setUTCMilliseconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[333]), /* 300.setSeconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[334]), /* 300.setUTCSeconds */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[335]), /* 300.setMinutes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[336]), /* 300.setUTCMinutes */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[337]), /* 300.setHours */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[338]), /* 300.setUTCHours */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[339]), /* 300.setDate */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[340]), /* 300.setUTCDate */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[341]), /* 300.setMonth */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[342]), /* 300.setUTCMonth */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[343]), /* 300.setYear */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[344]), /* 300.setFullYear */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[345]), /* 300.setUTCFullYear */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[346]), /* 300.toJSON */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[347]), /* 300.constructor */
     ROM_PV_INT(0, 0), /* 301.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_264.s), /* 301.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_266.s), /* 301.name */
     ROM_PV_INT(0, 0), /* 302.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_265.s), /* 302.name */
-    ROM_PV_INT(0, 0), /* 303.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_266.s), /* 303.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_258.s), /* 302.name */
+    ROM_PV_INT(0, 1), /* 303.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_267.s), /* 303.name */
     ROM_PV_INT(0, 0), /* 304.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_267.s), /* 304.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_268.s), /* 304.name */
     ROM_PV_INT(0, 0), /* 305.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_268.s), /* 305.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_269.s), /* 305.name */
     ROM_PV_INT(0, 0), /* 306.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_269.s), /* 306.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_270.s), /* 306.name */
     ROM_PV_INT(0, 0), /* 307.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_270.s), /* 307.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_271.s), /* 307.name */
     ROM_PV_INT(0, 0), /* 308.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_271.s), /* 308.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_272.s), /* 308.name */
     ROM_PV_INT(0, 0), /* 309.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_272.s), /* 309.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_273.s), /* 309.name */
     ROM_PV_INT(0, 0), /* 310.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_273.s), /* 310.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_274.s), /* 310.name */
     ROM_PV_INT(0, 0), /* 311.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_274.s), /* 311.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_275.s), /* 311.name */
     ROM_PV_INT(0, 0), /* 312.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_275.s), /* 312.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_276.s), /* 312.name */
     ROM_PV_INT(0, 0), /* 313.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_276.s), /* 313.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_277.s), /* 313.name */
     ROM_PV_INT(0, 0), /* 314.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_277.s), /* 314.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_278.s), /* 314.name */
     ROM_PV_INT(0, 0), /* 315.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_278.s), /* 315.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_279.s), /* 315.name */
     ROM_PV_INT(0, 0), /* 316.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_279.s), /* 316.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_280.s), /* 316.name */
     ROM_PV_INT(0, 0), /* 317.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_280.s), /* 317.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_281.s), /* 317.name */
     ROM_PV_INT(0, 0), /* 318.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_281.s), /* 318.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_282.s), /* 318.name */
     ROM_PV_INT(0, 0), /* 319.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_282.s), /* 319.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_283.s), /* 319.name */
     ROM_PV_INT(0, 0), /* 320.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_283.s), /* 320.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_284.s), /* 320.name */
     ROM_PV_INT(0, 0), /* 321.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_284.s), /* 321.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_285.s), /* 321.name */
     ROM_PV_INT(0, 0), /* 322.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_285.s), /* 322.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_286.s), /* 322.name */
     ROM_PV_INT(0, 0), /* 323.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_286.s), /* 323.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_287.s), /* 323.name */
     ROM_PV_INT(0, 0), /* 324.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_287.s), /* 324.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_288.s), /* 324.name */
     ROM_PV_INT(0, 0), /* 325.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_288.s), /* 325.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_289.s), /* 325.name */
     ROM_PV_INT(0, 0), /* 326.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_289.s), /* 326.name */
-    ROM_PV_INT(0, 1), /* 327.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_290.s), /* 327.name */
-    ROM_PV_INT(0, 1), /* 328.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_291.s), /* 328.name */
-    ROM_PV_INT(0, 1), /* 329.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_292.s), /* 329.name */
-    ROM_PV_INT(0, 2), /* 330.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_293.s), /* 330.name */
-    ROM_PV_INT(0, 2), /* 331.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_294.s), /* 331.name */
-    ROM_PV_INT(0, 3), /* 332.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_295.s), /* 332.name */
-    ROM_PV_INT(0, 3), /* 333.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_296.s), /* 333.name */
-    ROM_PV_INT(0, 4), /* 334.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_297.s), /* 334.name */
-    ROM_PV_INT(0, 4), /* 335.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_298.s), /* 335.name */
-    ROM_PV_INT(0, 1), /* 336.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_299.s), /* 336.name */
-    ROM_PV_INT(0, 1), /* 337.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_300.s), /* 337.name */
-    ROM_PV_INT(0, 2), /* 338.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_301.s), /* 338.name */
-    ROM_PV_INT(0, 2), /* 339.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_302.s), /* 339.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_290.s), /* 326.name */
+    ROM_PV_INT(0, 0), /* 327.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_291.s), /* 327.name */
+    ROM_PV_INT(0, 0), /* 328.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_292.s), /* 328.name */
+    ROM_PV_INT(0, 0), /* 329.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_293.s), /* 329.name */
+    ROM_PV_INT(0, 1), /* 330.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_294.s), /* 330.name */
+    ROM_PV_INT(0, 1), /* 331.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_295.s), /* 331.name */
+    ROM_PV_INT(0, 1), /* 332.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_296.s), /* 332.name */
+    ROM_PV_INT(0, 2), /* 333.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_297.s), /* 333.name */
+    ROM_PV_INT(0, 2), /* 334.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_298.s), /* 334.name */
+    ROM_PV_INT(0, 3), /* 335.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_299.s), /* 335.name */
+    ROM_PV_INT(0, 3), /* 336.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_300.s), /* 336.name */
+    ROM_PV_INT(0, 4), /* 337.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_301.s), /* 337.name */
+    ROM_PV_INT(0, 4), /* 338.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_302.s), /* 338.name */
+    ROM_PV_INT(0, 1), /* 339.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_303.s), /* 339.name */
     ROM_PV_INT(0, 1), /* 340.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_303.s), /* 340.name */
-    ROM_PV_INT(0, 3), /* 341.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_304.s), /* 341.name */
-    ROM_PV_INT(0, 3), /* 342.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_305.s), /* 342.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_304.s), /* 340.name */
+    ROM_PV_INT(0, 2), /* 341.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_305.s), /* 341.name */
+    ROM_PV_INT(0, 2), /* 342.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_306.s), /* 342.name */
     ROM_PV_INT(0, 1), /* 343.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_306.s), /* 343.name */
-    ROM_PV_INT(0, 7), /* 344.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_307.s), /* 344.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[345]), /* 344.now */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[346]), /* 344.parse */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[347]), /* 344.UTC */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[297]), /* 344.prototype */
-    ROM_PV_INT(0, 0), /* 345.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_308.s), /* 345.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_307.s), /* 343.name */
+    ROM_PV_INT(0, 3), /* 344.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_308.s), /* 344.name */
+    ROM_PV_INT(0, 3), /* 345.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_309.s), /* 345.name */
     ROM_PV_INT(0, 1), /* 346.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_309.s), /* 346.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_310.s), /* 346.name */
     ROM_PV_INT(0, 7), /* 347.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_310.s), /* 347.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_311.s), /* 348.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[349]), /* 348.constructor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[350]), /* 348.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_311.s), /* 347.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[348]), /* 347.now */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[349]), /* 347.parse */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[350]), /* 347.UTC */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[300]), /* 347.prototype */
+    ROM_PV_INT(0, 0), /* 348.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_312.s), /* 348.name */
     ROM_PV_INT(0, 1), /* 349.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_312.s), /* 349.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[348]), /* 349.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[351]), /* 350.next */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[352]), /* 350.return */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[353]), /* 350.throw */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_316.s), /* 350.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[348]), /* 350.constructor */
-    ROM_PV_INT(0, 1), /* 351.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_313.s), /* 351.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_313.s), /* 349.name */
+    ROM_PV_INT(0, 7), /* 350.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_314.s), /* 350.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_315.s), /* 351.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[352]), /* 351.constructor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[353]), /* 351.prototype */
     ROM_PV_INT(0, 1), /* 352.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_314.s), /* 352.name */
-    ROM_PV_INT(0, 1), /* 353.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_315.s), /* 353.name */
-    { .u.getset = { (JSObject *)&js_rom_obj[355], NULL } }, /* 354.byteLength */
-    { .u.getset = { (JSObject *)&js_rom_obj[356], NULL } }, /* 354.maxByteLength */
-    { .u.getset = { (JSObject *)&js_rom_obj[357], NULL } }, /* 354.resizable */
-    { .u.getset = { (JSObject *)&js_rom_obj[358], NULL } }, /* 354.detached */
-    { .u.getset = { (JSObject *)&js_rom_obj[359], NULL } }, /* 354.immutable */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[360]), /* 354.resize */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[361]), /* 354.slice */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[362]), /* 354.sliceToImmutable */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[363]), /* 354.transfer */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[364]), /* 354.transferToImmutable */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[365]), /* 354.transferToFixedLength */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_327.s), /* 354.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[366]), /* 354.constructor */
-    ROM_PV_INT(0, 0), /* 355.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_153.s), /* 355.name */
-    ROM_PV_INT(0, 0), /* 356.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_317.s), /* 356.name */
-    ROM_PV_INT(0, 0), /* 357.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_318.s), /* 357.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_316.s), /* 352.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[351]), /* 352.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[354]), /* 353.next */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[355]), /* 353.return */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[356]), /* 353.throw */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_320.s), /* 353.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[351]), /* 353.constructor */
+    ROM_PV_INT(0, 1), /* 354.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_317.s), /* 354.name */
+    ROM_PV_INT(0, 1), /* 355.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_318.s), /* 355.name */
+    ROM_PV_INT(0, 1), /* 356.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_319.s), /* 356.name */
+    { .u.getset = { (JSObject *)&js_rom_obj[358], NULL } }, /* 357.byteLength */
+    { .u.getset = { (JSObject *)&js_rom_obj[359], NULL } }, /* 357.maxByteLength */
+    { .u.getset = { (JSObject *)&js_rom_obj[360], NULL } }, /* 357.resizable */
+    { .u.getset = { (JSObject *)&js_rom_obj[361], NULL } }, /* 357.detached */
+    { .u.getset = { (JSObject *)&js_rom_obj[362], NULL } }, /* 357.immutable */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[363]), /* 357.resize */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[364]), /* 357.slice */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[365]), /* 357.sliceToImmutable */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[366]), /* 357.transfer */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[367]), /* 357.transferToImmutable */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[368]), /* 357.transferToFixedLength */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_330.s), /* 357.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[369]), /* 357.constructor */
     ROM_PV_INT(0, 0), /* 358.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_319.s), /* 358.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_155.s), /* 358.name */
     ROM_PV_INT(0, 0), /* 359.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_320.s), /* 359.name */
-    ROM_PV_INT(0, 1), /* 360.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_321.s), /* 360.name */
-    ROM_PV_INT(0, 2), /* 361.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_322.s), /* 361.name */
-    ROM_PV_INT(0, 2), /* 362.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_323.s), /* 362.name */
-    ROM_PV_INT(0, 0), /* 363.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_324.s), /* 363.name */
-    ROM_PV_INT(0, 0), /* 364.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_325.s), /* 364.name */
-    ROM_PV_INT(0, 0), /* 365.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_321.s), /* 359.name */
+    ROM_PV_INT(0, 0), /* 360.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_322.s), /* 360.name */
+    ROM_PV_INT(0, 0), /* 361.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_323.s), /* 361.name */
+    ROM_PV_INT(0, 0), /* 362.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_324.s), /* 362.name */
+    ROM_PV_INT(0, 1), /* 363.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_325.s), /* 363.name */
+    ROM_PV_INT(0, 2), /* 364.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_175.s), /* 364.name */
+    ROM_PV_INT(0, 2), /* 365.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_326.s), /* 365.name */
-    ROM_PV_INT(0, 1), /* 366.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_328.s), /* 366.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[367]), /* 366.isView */
-    { .u.getset = { (JSObject *)&js_rom_obj[368], NULL } }, /* 366.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[354]), /* 366.prototype */
-    ROM_PV_INT(0, 1), /* 367.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_329.s), /* 367.name */
+    ROM_PV_INT(0, 0), /* 366.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_327.s), /* 366.name */
+    ROM_PV_INT(0, 0), /* 367.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_328.s), /* 367.name */
     ROM_PV_INT(0, 0), /* 368.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 368.name */
-    { .u.getset = { (JSObject *)&js_rom_obj[370], NULL } }, /* 369.byteLength */
-    { .u.getset = { (JSObject *)&js_rom_obj[371], NULL } }, /* 369.maxByteLength */
-    { .u.getset = { (JSObject *)&js_rom_obj[372], NULL } }, /* 369.growable */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[373]), /* 369.grow */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[374]), /* 369.slice */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_332.s), /* 369.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[375]), /* 369.constructor */
-    ROM_PV_INT(0, 0), /* 370.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_153.s), /* 370.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_329.s), /* 368.name */
+    ROM_PV_INT(0, 1), /* 369.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_331.s), /* 369.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[370]), /* 369.isView */
+    { .u.getset = { (JSObject *)&js_rom_obj[371], NULL } }, /* 369.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[357]), /* 369.prototype */
+    ROM_PV_INT(0, 1), /* 370.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_332.s), /* 370.name */
     ROM_PV_INT(0, 0), /* 371.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_317.s), /* 371.name */
-    ROM_PV_INT(0, 0), /* 372.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_330.s), /* 372.name */
-    ROM_PV_INT(0, 1), /* 373.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_331.s), /* 373.name */
-    ROM_PV_INT(0, 2), /* 374.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_173.s), /* 374.name */
-    ROM_PV_INT(0, 1), /* 375.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 371.name */
+    { .u.getset = { (JSObject *)&js_rom_obj[373], NULL } }, /* 372.byteLength */
+    { .u.getset = { (JSObject *)&js_rom_obj[374], NULL } }, /* 372.maxByteLength */
+    { .u.getset = { (JSObject *)&js_rom_obj[375], NULL } }, /* 372.growable */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[376]), /* 372.grow */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[377]), /* 372.slice */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_335.s), /* 372.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[378]), /* 372.constructor */
+    ROM_PV_INT(0, 0), /* 373.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_155.s), /* 373.name */
+    ROM_PV_INT(0, 0), /* 374.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_321.s), /* 374.name */
+    ROM_PV_INT(0, 0), /* 375.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_333.s), /* 375.name */
-    { .u.getset = { (JSObject *)&js_rom_obj[376], NULL } }, /* 375.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[369]), /* 375.prototype */
-    ROM_PV_INT(0, 0), /* 376.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 376.name */
-    ROM_PV_INT(0, 1), /* 377.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[378]), /* 377.constructor */
-    ROM_PV_INT(0, 3), /* 378.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_334.s), /* 378.name */
-    ROM_PV_INT(0, 1), /* 378.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[377]), /* 378.prototype */
-    ROM_PV_INT(0, 1), /* 379.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[380]), /* 379.constructor */
-    ROM_PV_INT(0, 3), /* 380.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_335.s), /* 380.name */
+    ROM_PV_INT(0, 1), /* 376.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_334.s), /* 376.name */
+    ROM_PV_INT(0, 2), /* 377.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_175.s), /* 377.name */
+    ROM_PV_INT(0, 1), /* 378.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_336.s), /* 378.name */
+    { .u.getset = { (JSObject *)&js_rom_obj[379], NULL } }, /* 378.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[372]), /* 378.prototype */
+    ROM_PV_INT(0, 0), /* 379.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 379.name */
     ROM_PV_INT(0, 1), /* 380.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[379]), /* 380.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[381]), /* 380.constructor */
+    ROM_PV_INT(0, 3), /* 381.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_337.s), /* 381.name */
     ROM_PV_INT(0, 1), /* 381.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[382]), /* 381.constructor */
-    ROM_PV_INT(0, 3), /* 382.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_336.s), /* 382.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[380]), /* 381.prototype */
     ROM_PV_INT(0, 1), /* 382.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[381]), /* 382.prototype */
-    ROM_PV_INT(0, 2), /* 383.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[384]), /* 383.constructor */
-    ROM_PV_INT(0, 3), /* 384.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_337.s), /* 384.name */
-    ROM_PV_INT(0, 2), /* 384.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[383]), /* 384.prototype */
-    ROM_PV_INT(0, 2), /* 385.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[386]), /* 385.constructor */
-    ROM_PV_INT(0, 3), /* 386.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_338.s), /* 386.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[383]), /* 382.constructor */
+    ROM_PV_INT(0, 3), /* 383.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_338.s), /* 383.name */
+    ROM_PV_INT(0, 1), /* 383.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[382]), /* 383.prototype */
+    ROM_PV_INT(0, 1), /* 384.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[385]), /* 384.constructor */
+    ROM_PV_INT(0, 3), /* 385.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_339.s), /* 385.name */
+    ROM_PV_INT(0, 1), /* 385.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[384]), /* 385.prototype */
     ROM_PV_INT(0, 2), /* 386.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[385]), /* 386.prototype */
-    ROM_PV_INT(0, 4), /* 387.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[388]), /* 387.constructor */
-    ROM_PV_INT(0, 3), /* 388.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_339.s), /* 388.name */
-    ROM_PV_INT(0, 4), /* 388.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[387]), /* 388.prototype */
-    ROM_PV_INT(0, 4), /* 389.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[390]), /* 389.constructor */
-    ROM_PV_INT(0, 3), /* 390.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_340.s), /* 390.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[387]), /* 386.constructor */
+    ROM_PV_INT(0, 3), /* 387.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_340.s), /* 387.name */
+    ROM_PV_INT(0, 2), /* 387.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[386]), /* 387.prototype */
+    ROM_PV_INT(0, 2), /* 388.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[389]), /* 388.constructor */
+    ROM_PV_INT(0, 3), /* 389.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_341.s), /* 389.name */
+    ROM_PV_INT(0, 2), /* 389.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[388]), /* 389.prototype */
     ROM_PV_INT(0, 4), /* 390.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[389]), /* 390.prototype */
-    ROM_PV_INT(0, 8), /* 391.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[392]), /* 391.constructor */
-    ROM_PV_INT(0, 3), /* 392.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_341.s), /* 392.name */
-    ROM_PV_INT(0, 8), /* 392.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[391]), /* 392.prototype */
-    ROM_PV_INT(0, 8), /* 393.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[394]), /* 393.constructor */
-    ROM_PV_INT(0, 3), /* 394.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_342.s), /* 394.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[391]), /* 390.constructor */
+    ROM_PV_INT(0, 3), /* 391.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_342.s), /* 391.name */
+    ROM_PV_INT(0, 4), /* 391.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[390]), /* 391.prototype */
+    ROM_PV_INT(0, 4), /* 392.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[393]), /* 392.constructor */
+    ROM_PV_INT(0, 3), /* 393.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_343.s), /* 393.name */
+    ROM_PV_INT(0, 4), /* 393.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[392]), /* 393.prototype */
     ROM_PV_INT(0, 8), /* 394.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[393]), /* 394.prototype */
-    ROM_PV_INT(0, 2), /* 395.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[396]), /* 395.constructor */
-    ROM_PV_INT(0, 3), /* 396.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_343.s), /* 396.name */
-    ROM_PV_INT(0, 2), /* 396.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[395]), /* 396.prototype */
-    ROM_PV_INT(0, 4), /* 397.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[398]), /* 397.constructor */
-    ROM_PV_INT(0, 3), /* 398.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_344.s), /* 398.name */
-    ROM_PV_INT(0, 4), /* 398.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[397]), /* 398.prototype */
-    ROM_PV_INT(0, 8), /* 399.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[400]), /* 399.constructor */
-    ROM_PV_INT(0, 3), /* 400.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_345.s), /* 400.name */
-    ROM_PV_INT(0, 8), /* 400.BYTES_PER_ELEMENT */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[399]), /* 400.prototype */
-    { .u.getset = { (JSObject *)&js_rom_obj[402], NULL } }, /* 401.buffer */
-    { .u.getset = { (JSObject *)&js_rom_obj[403], NULL } }, /* 401.byteLength */
-    { .u.getset = { (JSObject *)&js_rom_obj[404], NULL } }, /* 401.byteOffset */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[405]), /* 401.getInt8 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[406]), /* 401.getUint8 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[407]), /* 401.getInt16 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[408]), /* 401.getUint16 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[409]), /* 401.getInt32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[410]), /* 401.getUint32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[411]), /* 401.getBigInt64 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[412]), /* 401.getBigUint64 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[413]), /* 401.getFloat16 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[414]), /* 401.getFloat32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[415]), /* 401.getFloat64 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[416]), /* 401.setInt8 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[417]), /* 401.setUint8 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[418]), /* 401.setInt16 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[419]), /* 401.setUint16 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[420]), /* 401.setInt32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[421]), /* 401.setUint32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[422]), /* 401.setBigInt64 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[423]), /* 401.setBigUint64 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[424]), /* 401.setFloat16 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[425]), /* 401.setFloat32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[426]), /* 401.setFloat64 */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_368.s), /* 401.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[427]), /* 401.constructor */
-    ROM_PV_INT(0, 0), /* 402.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_152.s), /* 402.name */
-    ROM_PV_INT(0, 0), /* 403.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_153.s), /* 403.name */
-    ROM_PV_INT(0, 0), /* 404.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_154.s), /* 404.name */
-    ROM_PV_INT(0, 1), /* 405.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_346.s), /* 405.name */
-    ROM_PV_INT(0, 1), /* 406.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_347.s), /* 406.name */
-    ROM_PV_INT(0, 1), /* 407.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_348.s), /* 407.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[395]), /* 394.constructor */
+    ROM_PV_INT(0, 3), /* 395.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_344.s), /* 395.name */
+    ROM_PV_INT(0, 8), /* 395.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[394]), /* 395.prototype */
+    ROM_PV_INT(0, 8), /* 396.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[397]), /* 396.constructor */
+    ROM_PV_INT(0, 3), /* 397.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_345.s), /* 397.name */
+    ROM_PV_INT(0, 8), /* 397.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[396]), /* 397.prototype */
+    ROM_PV_INT(0, 2), /* 398.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[399]), /* 398.constructor */
+    ROM_PV_INT(0, 3), /* 399.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_346.s), /* 399.name */
+    ROM_PV_INT(0, 2), /* 399.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[398]), /* 399.prototype */
+    ROM_PV_INT(0, 4), /* 400.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[401]), /* 400.constructor */
+    ROM_PV_INT(0, 3), /* 401.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_347.s), /* 401.name */
+    ROM_PV_INT(0, 4), /* 401.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[400]), /* 401.prototype */
+    ROM_PV_INT(0, 8), /* 402.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[403]), /* 402.constructor */
+    ROM_PV_INT(0, 3), /* 403.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_348.s), /* 403.name */
+    ROM_PV_INT(0, 8), /* 403.BYTES_PER_ELEMENT */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[402]), /* 403.prototype */
+    { .u.getset = { (JSObject *)&js_rom_obj[405], NULL } }, /* 404.buffer */
+    { .u.getset = { (JSObject *)&js_rom_obj[406], NULL } }, /* 404.byteLength */
+    { .u.getset = { (JSObject *)&js_rom_obj[407], NULL } }, /* 404.byteOffset */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[408]), /* 404.getInt8 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[409]), /* 404.getUint8 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[410]), /* 404.getInt16 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[411]), /* 404.getUint16 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[412]), /* 404.getInt32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[413]), /* 404.getUint32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[414]), /* 404.getBigInt64 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[415]), /* 404.getBigUint64 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[416]), /* 404.getFloat16 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[417]), /* 404.getFloat32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[418]), /* 404.getFloat64 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[419]), /* 404.setInt8 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[420]), /* 404.setUint8 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[421]), /* 404.setInt16 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[422]), /* 404.setUint16 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[423]), /* 404.setInt32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[424]), /* 404.setUint32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[425]), /* 404.setBigInt64 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[426]), /* 404.setBigUint64 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[427]), /* 404.setFloat16 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[428]), /* 404.setFloat32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[429]), /* 404.setFloat64 */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_371.s), /* 404.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[430]), /* 404.constructor */
+    ROM_PV_INT(0, 0), /* 405.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_154.s), /* 405.name */
+    ROM_PV_INT(0, 0), /* 406.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_155.s), /* 406.name */
+    ROM_PV_INT(0, 0), /* 407.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_156.s), /* 407.name */
     ROM_PV_INT(0, 1), /* 408.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_349.s), /* 408.name */
     ROM_PV_INT(0, 1), /* 409.length */
@@ -3693,11 +3700,11 @@ static const JSProperty js_rom_props[1861] = {
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_355.s), /* 414.name */
     ROM_PV_INT(0, 1), /* 415.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_356.s), /* 415.name */
-    ROM_PV_INT(0, 2), /* 416.length */
+    ROM_PV_INT(0, 1), /* 416.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_357.s), /* 416.name */
-    ROM_PV_INT(0, 2), /* 417.length */
+    ROM_PV_INT(0, 1), /* 417.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_358.s), /* 417.name */
-    ROM_PV_INT(0, 2), /* 418.length */
+    ROM_PV_INT(0, 1), /* 418.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_359.s), /* 418.name */
     ROM_PV_INT(0, 2), /* 419.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_360.s), /* 419.name */
@@ -3715,578 +3722,584 @@ static const JSProperty js_rom_props[1861] = {
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_366.s), /* 425.name */
     ROM_PV_INT(0, 2), /* 426.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_367.s), /* 426.name */
-    ROM_PV_INT(0, 1), /* 427.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_369.s), /* 427.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[401]), /* 427.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[429]), /* 428.toString */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[430]), /* 428.valueOf */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_370.s), /* 428.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[431]), /* 428.constructor */
-    ROM_PV_INT(0, 0), /* 429.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_256.s), /* 429.name */
-    ROM_PV_INT(0, 0), /* 430.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_230.s), /* 430.name */
-    ROM_PV_INT(0, 1), /* 431.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_371.s), /* 431.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[432]), /* 431.asUintN */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[433]), /* 431.asIntN */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[428]), /* 431.prototype */
-    ROM_PV_INT(0, 2), /* 432.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_372.s), /* 432.name */
-    ROM_PV_INT(0, 2), /* 433.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_373.s), /* 433.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[435]), /* 434.set */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[436]), /* 434.get */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[437]), /* 434.getOrInsert */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[438]), /* 434.getOrInsertComputed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[439]), /* 434.has */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[440]), /* 434.delete */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[441]), /* 434.clear */
-    { .u.getset = { (JSObject *)&js_rom_obj[442], NULL } }, /* 434.size */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[443]), /* 434.forEach */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[444]), /* 434.values */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[445]), /* 434.keys */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[446]), /* 434.entries */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[446]), /* 434.Symbol.iterator */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_385.s), /* 434.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[447]), /* 434.constructor */
+    ROM_PV_INT(0, 2), /* 427.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_368.s), /* 427.name */
+    ROM_PV_INT(0, 2), /* 428.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_369.s), /* 428.name */
+    ROM_PV_INT(0, 2), /* 429.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_370.s), /* 429.name */
+    ROM_PV_INT(0, 1), /* 430.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_372.s), /* 430.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[404]), /* 430.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[432]), /* 431.toString */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[433]), /* 431.valueOf */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_373.s), /* 431.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[434]), /* 431.constructor */
+    ROM_PV_INT(0, 0), /* 432.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_258.s), /* 432.name */
+    ROM_PV_INT(0, 0), /* 433.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_259.s), /* 433.name */
+    ROM_PV_INT(0, 1), /* 434.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_374.s), /* 434.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[435]), /* 434.asUintN */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[436]), /* 434.asIntN */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[431]), /* 434.prototype */
     ROM_PV_INT(0, 2), /* 435.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_374.s), /* 435.name */
-    ROM_PV_INT(0, 1), /* 436.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_375.s), /* 436.name */
-    ROM_PV_INT(0, 2), /* 437.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_376.s), /* 437.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_375.s), /* 435.name */
+    ROM_PV_INT(0, 2), /* 436.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_376.s), /* 436.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[438]), /* 437.set */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[439]), /* 437.get */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[440]), /* 437.getOrInsert */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[441]), /* 437.getOrInsertComputed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[442]), /* 437.has */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[443]), /* 437.delete */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[444]), /* 437.clear */
+    { .u.getset = { (JSObject *)&js_rom_obj[445], NULL } }, /* 437.size */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[446]), /* 437.forEach */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[447]), /* 437.values */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[448]), /* 437.keys */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[449]), /* 437.entries */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[449]), /* 437.Symbol.iterator */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_387.s), /* 437.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[450]), /* 437.constructor */
     ROM_PV_INT(0, 2), /* 438.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_377.s), /* 438.name */
     ROM_PV_INT(0, 1), /* 439.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_378.s), /* 439.name */
-    ROM_PV_INT(0, 1), /* 440.length */
+    ROM_PV_INT(0, 2), /* 440.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_379.s), /* 440.name */
-    ROM_PV_INT(0, 0), /* 441.length */
+    ROM_PV_INT(0, 2), /* 441.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_380.s), /* 441.name */
-    ROM_PV_INT(0, 0), /* 442.length */
+    ROM_PV_INT(0, 1), /* 442.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_381.s), /* 442.name */
     ROM_PV_INT(0, 1), /* 443.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_161.s), /* 443.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_382.s), /* 443.name */
     ROM_PV_INT(0, 0), /* 444.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_382.s), /* 444.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_383.s), /* 444.name */
     ROM_PV_INT(0, 0), /* 445.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_383.s), /* 445.name */
-    ROM_PV_INT(0, 0), /* 446.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_384.s), /* 446.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_384.s), /* 445.name */
+    ROM_PV_INT(0, 1), /* 446.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_163.s), /* 446.name */
     ROM_PV_INT(0, 0), /* 447.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_386.s), /* 447.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[448]), /* 447.groupBy */
-    { .u.getset = { (JSObject *)&js_rom_obj[449], NULL } }, /* 447.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[434]), /* 447.prototype */
-    ROM_PV_INT(0, 2), /* 448.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_387.s), /* 448.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_385.s), /* 447.name */
+    ROM_PV_INT(0, 0), /* 448.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_158.s), /* 448.name */
     ROM_PV_INT(0, 0), /* 449.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 449.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[451]), /* 450.add */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[452]), /* 450.has */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[453]), /* 450.delete */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[454]), /* 450.clear */
-    { .u.getset = { (JSObject *)&js_rom_obj[455], NULL } }, /* 450.size */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[456]), /* 450.forEach */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[457]), /* 450.isDisjointFrom */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[458]), /* 450.isSubsetOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[459]), /* 450.isSupersetOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[460]), /* 450.intersection */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[461]), /* 450.difference */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[462]), /* 450.symmetricDifference */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[463]), /* 450.union */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[464]), /* 450.values */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[464]), /* 450.keys */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[464]), /* 450.Symbol.iterator */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[465]), /* 450.entries */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_400.s), /* 450.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[466]), /* 450.constructor */
-    ROM_PV_INT(0, 1), /* 451.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_388.s), /* 451.name */
-    ROM_PV_INT(0, 1), /* 452.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_378.s), /* 452.name */
-    ROM_PV_INT(0, 1), /* 453.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_389.s), /* 453.name */
-    ROM_PV_INT(0, 0), /* 454.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_380.s), /* 454.name */
-    ROM_PV_INT(0, 0), /* 455.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_386.s), /* 449.name */
+    ROM_PV_INT(0, 0), /* 450.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_388.s), /* 450.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[451]), /* 450.groupBy */
+    { .u.getset = { (JSObject *)&js_rom_obj[452], NULL } }, /* 450.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[437]), /* 450.prototype */
+    ROM_PV_INT(0, 2), /* 451.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_389.s), /* 451.name */
+    ROM_PV_INT(0, 0), /* 452.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 452.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[454]), /* 453.add */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[455]), /* 453.has */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[456]), /* 453.delete */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[457]), /* 453.clear */
+    { .u.getset = { (JSObject *)&js_rom_obj[458], NULL } }, /* 453.size */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[459]), /* 453.forEach */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[460]), /* 453.isDisjointFrom */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[461]), /* 453.isSubsetOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[462]), /* 453.isSupersetOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[463]), /* 453.intersection */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[464]), /* 453.difference */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[465]), /* 453.symmetricDifference */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[466]), /* 453.union */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[467]), /* 453.values */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[467]), /* 453.keys */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[467]), /* 453.Symbol.iterator */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[468]), /* 453.entries */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_401.s), /* 453.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[469]), /* 453.constructor */
+    ROM_PV_INT(0, 1), /* 454.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_390.s), /* 454.name */
+    ROM_PV_INT(0, 1), /* 455.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_381.s), /* 455.name */
     ROM_PV_INT(0, 1), /* 456.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_390.s), /* 456.name */
-    ROM_PV_INT(0, 1), /* 457.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_391.s), /* 457.name */
-    ROM_PV_INT(0, 1), /* 458.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_392.s), /* 458.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_391.s), /* 456.name */
+    ROM_PV_INT(0, 0), /* 457.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_383.s), /* 457.name */
+    ROM_PV_INT(0, 0), /* 458.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_384.s), /* 458.name */
     ROM_PV_INT(0, 1), /* 459.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_393.s), /* 459.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_163.s), /* 459.name */
     ROM_PV_INT(0, 1), /* 460.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_394.s), /* 460.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_392.s), /* 460.name */
     ROM_PV_INT(0, 1), /* 461.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_395.s), /* 461.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_393.s), /* 461.name */
     ROM_PV_INT(0, 1), /* 462.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_396.s), /* 462.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_394.s), /* 462.name */
     ROM_PV_INT(0, 1), /* 463.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_397.s), /* 463.name */
-    ROM_PV_INT(0, 0), /* 464.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_398.s), /* 464.name */
-    ROM_PV_INT(0, 0), /* 465.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_399.s), /* 465.name */
-    ROM_PV_INT(0, 0), /* 466.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_401.s), /* 466.name */
-    { .u.getset = { (JSObject *)&js_rom_obj[467], NULL } }, /* 466.Symbol.species */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[450]), /* 466.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_395.s), /* 463.name */
+    ROM_PV_INT(0, 1), /* 464.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_396.s), /* 464.name */
+    ROM_PV_INT(0, 1), /* 465.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_397.s), /* 465.name */
+    ROM_PV_INT(0, 1), /* 466.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_398.s), /* 466.name */
     ROM_PV_INT(0, 0), /* 467.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_49.s), /* 467.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[469]), /* 468.set */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[470]), /* 468.get */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[471]), /* 468.getOrInsert */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[472]), /* 468.getOrInsertComputed */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[473]), /* 468.has */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[474]), /* 468.delete */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_405.s), /* 468.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[475]), /* 468.constructor */
-    ROM_PV_INT(0, 2), /* 469.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_374.s), /* 469.name */
-    ROM_PV_INT(0, 1), /* 470.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_402.s), /* 470.name */
-    ROM_PV_INT(0, 2), /* 471.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_376.s), /* 471.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_399.s), /* 467.name */
+    ROM_PV_INT(0, 0), /* 468.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_400.s), /* 468.name */
+    ROM_PV_INT(0, 0), /* 469.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_402.s), /* 469.name */
+    { .u.getset = { (JSObject *)&js_rom_obj[470], NULL } }, /* 469.Symbol.species */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[453]), /* 469.prototype */
+    ROM_PV_INT(0, 0), /* 470.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_51.s), /* 470.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[472]), /* 471.set */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[473]), /* 471.get */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[474]), /* 471.getOrInsert */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[475]), /* 471.getOrInsertComputed */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[476]), /* 471.has */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[477]), /* 471.delete */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_405.s), /* 471.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[478]), /* 471.constructor */
     ROM_PV_INT(0, 2), /* 472.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_403.s), /* 472.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_377.s), /* 472.name */
     ROM_PV_INT(0, 1), /* 473.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_404.s), /* 473.name */
-    ROM_PV_INT(0, 1), /* 474.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_389.s), /* 474.name */
-    ROM_PV_INT(0, 0), /* 475.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_406.s), /* 475.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[468]), /* 475.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[477]), /* 476.add */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[478]), /* 476.has */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[479]), /* 476.delete */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_409.s), /* 476.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[480]), /* 476.constructor */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_378.s), /* 473.name */
+    ROM_PV_INT(0, 2), /* 474.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_379.s), /* 474.name */
+    ROM_PV_INT(0, 2), /* 475.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_403.s), /* 475.name */
+    ROM_PV_INT(0, 1), /* 476.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_381.s), /* 476.name */
     ROM_PV_INT(0, 1), /* 477.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_407.s), /* 477.name */
-    ROM_PV_INT(0, 1), /* 478.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_404.s), /* 478.name */
-    ROM_PV_INT(0, 1), /* 479.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_408.s), /* 479.name */
-    ROM_PV_INT(0, 0), /* 480.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_410.s), /* 480.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[476]), /* 480.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[482]), /* 481.next */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[483]), /* 481.return */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_413.s), /* 481.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_404.s), /* 477.name */
+    ROM_PV_INT(0, 0), /* 478.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_406.s), /* 478.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[471]), /* 478.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[480]), /* 479.add */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[481]), /* 479.has */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[482]), /* 479.delete */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_409.s), /* 479.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[483]), /* 479.constructor */
+    ROM_PV_INT(0, 1), /* 480.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_407.s), /* 480.name */
+    ROM_PV_INT(0, 1), /* 481.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_381.s), /* 481.name */
     ROM_PV_INT(0, 1), /* 482.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_411.s), /* 482.name */
-    ROM_PV_INT(0, 1), /* 483.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_412.s), /* 483.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_408.s), /* 482.name */
+    ROM_PV_INT(0, 0), /* 483.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_410.s), /* 483.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[479]), /* 483.prototype */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[485]), /* 484.next */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[486]), /* 484.return */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_414.s), /* 484.Symbol.toStringTag */
-    ROM_PV_INT(0, 0), /* 485.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_413.s), /* 484.Symbol.toStringTag */
+    ROM_PV_INT(0, 1), /* 485.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_411.s), /* 485.name */
-    ROM_PV_INT(0, 0), /* 486.length */
+    ROM_PV_INT(0, 1), /* 486.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_412.s), /* 486.name */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[488]), /* 487.next */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[489]), /* 487.return */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_414.s), /* 487.Symbol.toStringTag */
     ROM_PV_INT(0, 0), /* 488.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_411.s), /* 488.name */
     ROM_PV_INT(0, 0), /* 489.length */
     ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_412.s), /* 489.name */
     ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[491]), /* 490.next */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_416.s), /* 490.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[492]), /* 490.return */
     ROM_PV_INT(0, 0), /* 491.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_415.s), /* 491.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[493]), /* 492.next */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_417.s), /* 492.Symbol.toStringTag */
-    ROM_PV_INT(0, 0), /* 493.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_415.s), /* 493.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[495]), /* 494.next */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_418.s), /* 494.Symbol.toStringTag */
-    ROM_PV_INT(0, 0), /* 495.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_411.s), /* 495.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[497]), /* 496.next */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_419.s), /* 496.Symbol.toStringTag */
-    ROM_PV_INT(0, 0), /* 497.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_313.s), /* 497.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[499]), /* 498.next */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_421.s), /* 498.Symbol.toStringTag */
-    ROM_PV_INT(0, 0), /* 499.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_420.s), /* 499.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_422.s), /* 500.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[501]), /* 500.constructor */
-    ROM_PV_INT(0, 1), /* 501.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_423.s), /* 501.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[500]), /* 501.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[503]), /* 502.next */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[504]), /* 502.return */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[505]), /* 502.throw */
-    ROM_PV_INT(0, 1), /* 503.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_420.s), /* 503.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_411.s), /* 491.name */
+    ROM_PV_INT(0, 0), /* 492.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_412.s), /* 492.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[494]), /* 493.next */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_416.s), /* 493.Symbol.toStringTag */
+    ROM_PV_INT(0, 0), /* 494.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_415.s), /* 494.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[496]), /* 495.next */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_417.s), /* 495.Symbol.toStringTag */
+    ROM_PV_INT(0, 0), /* 496.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_415.s), /* 496.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[498]), /* 497.next */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_418.s), /* 497.Symbol.toStringTag */
+    ROM_PV_INT(0, 0), /* 498.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_411.s), /* 498.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[500]), /* 499.next */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_419.s), /* 499.Symbol.toStringTag */
+    ROM_PV_INT(0, 0), /* 500.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_317.s), /* 500.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[502]), /* 501.next */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_421.s), /* 501.Symbol.toStringTag */
+    ROM_PV_INT(0, 0), /* 502.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_420.s), /* 502.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_422.s), /* 503.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[504]), /* 503.constructor */
     ROM_PV_INT(0, 1), /* 504.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_424.s), /* 504.name */
-    ROM_PV_INT(0, 1), /* 505.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_425.s), /* 505.name */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_426.s), /* 506.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[507]), /* 506.constructor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[508]), /* 506.prototype */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_423.s), /* 504.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[503]), /* 504.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[506]), /* 505.next */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[507]), /* 505.return */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[508]), /* 505.throw */
+    ROM_PV_INT(0, 1), /* 506.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_424.s), /* 506.name */
     ROM_PV_INT(0, 1), /* 507.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_427.s), /* 507.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[506]), /* 507.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[509]), /* 508.next */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[510]), /* 508.return */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[511]), /* 508.throw */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_428.s), /* 508.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[506]), /* 508.constructor */
-    ROM_PV_INT(0, 1), /* 509.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_420.s), /* 509.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_425.s), /* 507.name */
+    ROM_PV_INT(0, 1), /* 508.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_426.s), /* 508.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_427.s), /* 509.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[510]), /* 509.constructor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[511]), /* 509.prototype */
     ROM_PV_INT(0, 1), /* 510.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_424.s), /* 510.name */
-    ROM_PV_INT(0, 1), /* 511.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_425.s), /* 511.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[513]), /* 512.deref */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_430.s), /* 512.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[514]), /* 512.constructor */
-    ROM_PV_INT(0, 0), /* 513.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_429.s), /* 513.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_428.s), /* 510.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[509]), /* 510.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[512]), /* 511.next */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[513]), /* 511.return */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[514]), /* 511.throw */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_429.s), /* 511.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[509]), /* 511.constructor */
+    ROM_PV_INT(0, 1), /* 512.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_424.s), /* 512.name */
+    ROM_PV_INT(0, 1), /* 513.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_425.s), /* 513.name */
     ROM_PV_INT(0, 1), /* 514.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_431.s), /* 514.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[512]), /* 514.prototype */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[516]), /* 515.register */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[517]), /* 515.unregister */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_434.s), /* 515.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[518]), /* 515.constructor */
-    ROM_PV_INT(0, 2), /* 516.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_432.s), /* 516.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_426.s), /* 514.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[516]), /* 515.deref */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_431.s), /* 515.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[517]), /* 515.constructor */
+    ROM_PV_INT(0, 0), /* 516.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_430.s), /* 516.name */
     ROM_PV_INT(0, 1), /* 517.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_433.s), /* 517.name */
-    ROM_PV_INT(0, 1), /* 518.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_435.s), /* 518.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[515]), /* 518.prototype */
-    { .u.getset = { (JSObject *)&js_rom_obj[520], NULL } }, /* 519.name */
-    { .u.getset = { (JSObject *)&js_rom_obj[521], NULL } }, /* 519.message */
-    { .u.getset = { (JSObject *)&js_rom_obj[522], NULL } }, /* 519.code */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_439.s), /* 519.Symbol.toStringTag */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[523]), /* 519.constructor */
-    ROM_PV_INT(0, 1), /* 519.INDEX_SIZE_ERR */
-    ROM_PV_INT(0, 2), /* 519.DOMSTRING_SIZE_ERR */
-    ROM_PV_INT(0, 3), /* 519.HIERARCHY_REQUEST_ERR */
-    ROM_PV_INT(0, 4), /* 519.WRONG_DOCUMENT_ERR */
-    ROM_PV_INT(0, 5), /* 519.INVALID_CHARACTER_ERR */
-    ROM_PV_INT(0, 6), /* 519.NO_DATA_ALLOWED_ERR */
-    ROM_PV_INT(0, 7), /* 519.NO_MODIFICATION_ALLOWED_ERR */
-    ROM_PV_INT(0, 8), /* 519.NOT_FOUND_ERR */
-    ROM_PV_INT(0, 9), /* 519.NOT_SUPPORTED_ERR */
-    ROM_PV_INT(0, 10), /* 519.INUSE_ATTRIBUTE_ERR */
-    ROM_PV_INT(0, 11), /* 519.INVALID_STATE_ERR */
-    ROM_PV_INT(0, 12), /* 519.SYNTAX_ERR */
-    ROM_PV_INT(0, 13), /* 519.INVALID_MODIFICATION_ERR */
-    ROM_PV_INT(0, 14), /* 519.NAMESPACE_ERR */
-    ROM_PV_INT(0, 15), /* 519.INVALID_ACCESS_ERR */
-    ROM_PV_INT(0, 16), /* 519.VALIDATION_ERR */
-    ROM_PV_INT(0, 17), /* 519.TYPE_MISMATCH_ERR */
-    ROM_PV_INT(0, 18), /* 519.SECURITY_ERR */
-    ROM_PV_INT(0, 19), /* 519.NETWORK_ERR */
-    ROM_PV_INT(0, 20), /* 519.ABORT_ERR */
-    ROM_PV_INT(0, 21), /* 519.URL_MISMATCH_ERR */
-    ROM_PV_INT(0, 22), /* 519.QUOTA_EXCEEDED_ERR */
-    ROM_PV_INT(0, 23), /* 519.TIMEOUT_ERR */
-    ROM_PV_INT(0, 24), /* 519.INVALID_NODE_TYPE_ERR */
-    ROM_PV_INT(0, 25), /* 519.DATA_CLONE_ERR */
-    ROM_PV_INT(0, 0), /* 520.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_436.s), /* 520.name */
-    ROM_PV_INT(0, 0), /* 521.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_437.s), /* 521.name */
-    ROM_PV_INT(0, 0), /* 522.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_438.s), /* 522.name */
-    ROM_PV_INT(0, 2), /* 523.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_440.s), /* 523.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[519]), /* 523.prototype */
-    ROM_PV_INT(0, 1), /* 523.INDEX_SIZE_ERR */
-    ROM_PV_INT(0, 2), /* 523.DOMSTRING_SIZE_ERR */
-    ROM_PV_INT(0, 3), /* 523.HIERARCHY_REQUEST_ERR */
-    ROM_PV_INT(0, 4), /* 523.WRONG_DOCUMENT_ERR */
-    ROM_PV_INT(0, 5), /* 523.INVALID_CHARACTER_ERR */
-    ROM_PV_INT(0, 6), /* 523.NO_DATA_ALLOWED_ERR */
-    ROM_PV_INT(0, 7), /* 523.NO_MODIFICATION_ALLOWED_ERR */
-    ROM_PV_INT(0, 8), /* 523.NOT_FOUND_ERR */
-    ROM_PV_INT(0, 9), /* 523.NOT_SUPPORTED_ERR */
-    ROM_PV_INT(0, 10), /* 523.INUSE_ATTRIBUTE_ERR */
-    ROM_PV_INT(0, 11), /* 523.INVALID_STATE_ERR */
-    ROM_PV_INT(0, 12), /* 523.SYNTAX_ERR */
-    ROM_PV_INT(0, 13), /* 523.INVALID_MODIFICATION_ERR */
-    ROM_PV_INT(0, 14), /* 523.NAMESPACE_ERR */
-    ROM_PV_INT(0, 15), /* 523.INVALID_ACCESS_ERR */
-    ROM_PV_INT(0, 16), /* 523.VALIDATION_ERR */
-    ROM_PV_INT(0, 17), /* 523.TYPE_MISMATCH_ERR */
-    ROM_PV_INT(0, 18), /* 523.SECURITY_ERR */
-    ROM_PV_INT(0, 19), /* 523.NETWORK_ERR */
-    ROM_PV_INT(0, 20), /* 523.ABORT_ERR */
-    ROM_PV_INT(0, 21), /* 523.URL_MISMATCH_ERR */
-    ROM_PV_INT(0, 22), /* 523.QUOTA_EXCEEDED_ERR */
-    ROM_PV_INT(0, 23), /* 523.TIMEOUT_ERR */
-    ROM_PV_INT(0, 24), /* 523.INVALID_NODE_TYPE_ERR */
-    ROM_PV_INT(0, 25), /* 523.DATA_CLONE_ERR */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[525]), /* 524.isNative */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[526]), /* 524.getFileName */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[527]), /* 524.getFunction */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[528]), /* 524.getFunctionName */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[529]), /* 524.getColumnNumber */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[530]), /* 524.getLineNumber */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_447.s), /* 524.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_432.s), /* 517.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[515]), /* 517.prototype */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[519]), /* 518.register */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[520]), /* 518.unregister */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_435.s), /* 518.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[521]), /* 518.constructor */
+    ROM_PV_INT(0, 2), /* 519.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_433.s), /* 519.name */
+    ROM_PV_INT(0, 1), /* 520.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_434.s), /* 520.name */
+    ROM_PV_INT(0, 1), /* 521.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_436.s), /* 521.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[518]), /* 521.prototype */
+    { .u.getset = { (JSObject *)&js_rom_obj[523], NULL } }, /* 522.name */
+    { .u.getset = { (JSObject *)&js_rom_obj[524], NULL } }, /* 522.message */
+    { .u.getset = { (JSObject *)&js_rom_obj[525], NULL } }, /* 522.code */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_440.s), /* 522.Symbol.toStringTag */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[526]), /* 522.constructor */
+    ROM_PV_INT(0, 1), /* 522.INDEX_SIZE_ERR */
+    ROM_PV_INT(0, 2), /* 522.DOMSTRING_SIZE_ERR */
+    ROM_PV_INT(0, 3), /* 522.HIERARCHY_REQUEST_ERR */
+    ROM_PV_INT(0, 4), /* 522.WRONG_DOCUMENT_ERR */
+    ROM_PV_INT(0, 5), /* 522.INVALID_CHARACTER_ERR */
+    ROM_PV_INT(0, 6), /* 522.NO_DATA_ALLOWED_ERR */
+    ROM_PV_INT(0, 7), /* 522.NO_MODIFICATION_ALLOWED_ERR */
+    ROM_PV_INT(0, 8), /* 522.NOT_FOUND_ERR */
+    ROM_PV_INT(0, 9), /* 522.NOT_SUPPORTED_ERR */
+    ROM_PV_INT(0, 10), /* 522.INUSE_ATTRIBUTE_ERR */
+    ROM_PV_INT(0, 11), /* 522.INVALID_STATE_ERR */
+    ROM_PV_INT(0, 12), /* 522.SYNTAX_ERR */
+    ROM_PV_INT(0, 13), /* 522.INVALID_MODIFICATION_ERR */
+    ROM_PV_INT(0, 14), /* 522.NAMESPACE_ERR */
+    ROM_PV_INT(0, 15), /* 522.INVALID_ACCESS_ERR */
+    ROM_PV_INT(0, 16), /* 522.VALIDATION_ERR */
+    ROM_PV_INT(0, 17), /* 522.TYPE_MISMATCH_ERR */
+    ROM_PV_INT(0, 18), /* 522.SECURITY_ERR */
+    ROM_PV_INT(0, 19), /* 522.NETWORK_ERR */
+    ROM_PV_INT(0, 20), /* 522.ABORT_ERR */
+    ROM_PV_INT(0, 21), /* 522.URL_MISMATCH_ERR */
+    ROM_PV_INT(0, 22), /* 522.QUOTA_EXCEEDED_ERR */
+    ROM_PV_INT(0, 23), /* 522.TIMEOUT_ERR */
+    ROM_PV_INT(0, 24), /* 522.INVALID_NODE_TYPE_ERR */
+    ROM_PV_INT(0, 25), /* 522.DATA_CLONE_ERR */
+    ROM_PV_INT(0, 0), /* 523.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_437.s), /* 523.name */
+    ROM_PV_INT(0, 0), /* 524.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_438.s), /* 524.name */
     ROM_PV_INT(0, 0), /* 525.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_441.s), /* 525.name */
-    ROM_PV_INT(0, 0), /* 526.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_442.s), /* 526.name */
-    ROM_PV_INT(0, 0), /* 527.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_443.s), /* 527.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_439.s), /* 525.name */
+    ROM_PV_INT(0, 2), /* 526.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_441.s), /* 526.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[522]), /* 526.prototype */
+    ROM_PV_INT(0, 1), /* 526.INDEX_SIZE_ERR */
+    ROM_PV_INT(0, 2), /* 526.DOMSTRING_SIZE_ERR */
+    ROM_PV_INT(0, 3), /* 526.HIERARCHY_REQUEST_ERR */
+    ROM_PV_INT(0, 4), /* 526.WRONG_DOCUMENT_ERR */
+    ROM_PV_INT(0, 5), /* 526.INVALID_CHARACTER_ERR */
+    ROM_PV_INT(0, 6), /* 526.NO_DATA_ALLOWED_ERR */
+    ROM_PV_INT(0, 7), /* 526.NO_MODIFICATION_ALLOWED_ERR */
+    ROM_PV_INT(0, 8), /* 526.NOT_FOUND_ERR */
+    ROM_PV_INT(0, 9), /* 526.NOT_SUPPORTED_ERR */
+    ROM_PV_INT(0, 10), /* 526.INUSE_ATTRIBUTE_ERR */
+    ROM_PV_INT(0, 11), /* 526.INVALID_STATE_ERR */
+    ROM_PV_INT(0, 12), /* 526.SYNTAX_ERR */
+    ROM_PV_INT(0, 13), /* 526.INVALID_MODIFICATION_ERR */
+    ROM_PV_INT(0, 14), /* 526.NAMESPACE_ERR */
+    ROM_PV_INT(0, 15), /* 526.INVALID_ACCESS_ERR */
+    ROM_PV_INT(0, 16), /* 526.VALIDATION_ERR */
+    ROM_PV_INT(0, 17), /* 526.TYPE_MISMATCH_ERR */
+    ROM_PV_INT(0, 18), /* 526.SECURITY_ERR */
+    ROM_PV_INT(0, 19), /* 526.NETWORK_ERR */
+    ROM_PV_INT(0, 20), /* 526.ABORT_ERR */
+    ROM_PV_INT(0, 21), /* 526.URL_MISMATCH_ERR */
+    ROM_PV_INT(0, 22), /* 526.QUOTA_EXCEEDED_ERR */
+    ROM_PV_INT(0, 23), /* 526.TIMEOUT_ERR */
+    ROM_PV_INT(0, 24), /* 526.INVALID_NODE_TYPE_ERR */
+    ROM_PV_INT(0, 25), /* 526.DATA_CLONE_ERR */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[528]), /* 527.isNative */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[529]), /* 527.getFileName */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[530]), /* 527.getFunction */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[531]), /* 527.getFunctionName */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[532]), /* 527.getColumnNumber */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[533]), /* 527.getLineNumber */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_448.s), /* 527.Symbol.toStringTag */
     ROM_PV_INT(0, 0), /* 528.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_444.s), /* 528.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_442.s), /* 528.name */
     ROM_PV_INT(0, 0), /* 529.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_445.s), /* 529.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_443.s), /* 529.name */
     ROM_PV_INT(0, 0), /* 530.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_446.s), /* 530.name */
-    ROM_PV_INT(0, 1), /* 531.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_448.s), /* 531.name */
-    ROM_PV_INT(0, 1), /* 532.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_449.s), /* 532.name */
-    ROM_PV_INT(0, 1), /* 533.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_450.s), /* 533.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_444.s), /* 530.name */
+    ROM_PV_INT(0, 0), /* 531.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_445.s), /* 531.name */
+    ROM_PV_INT(0, 0), /* 532.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_446.s), /* 532.name */
+    ROM_PV_INT(0, 0), /* 533.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_447.s), /* 533.name */
     ROM_PV_INT(0, 1), /* 534.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_451.s), /* 534.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_449.s), /* 534.name */
     ROM_PV_INT(0, 1), /* 535.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_452.s), /* 535.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_450.s), /* 535.name */
     ROM_PV_INT(0, 1), /* 536.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_453.s), /* 536.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_451.s), /* 536.name */
     ROM_PV_INT(0, 1), /* 537.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_454.s), /* 537.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_452.s), /* 537.name */
     ROM_PV_INT(0, 1), /* 538.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_455.s), /* 538.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_453.s), /* 538.name */
     ROM_PV_INT(0, 1), /* 539.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_456.s), /* 539.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[541]), /* 540.min */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[542]), /* 540.max */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[543]), /* 540.abs */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[544]), /* 540.floor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[545]), /* 540.ceil */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[546]), /* 540.round */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[547]), /* 540.sqrt */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[548]), /* 540.acos */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[549]), /* 540.asin */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[550]), /* 540.atan */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[551]), /* 540.atan2 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[552]), /* 540.cos */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[553]), /* 540.exp */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[554]), /* 540.log */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[555]), /* 540.pow */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[556]), /* 540.sin */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[557]), /* 540.tan */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[558]), /* 540.trunc */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[559]), /* 540.sign */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[560]), /* 540.cosh */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[561]), /* 540.sinh */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[562]), /* 540.tanh */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[563]), /* 540.acosh */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[564]), /* 540.asinh */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[565]), /* 540.atanh */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[566]), /* 540.expm1 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[567]), /* 540.log1p */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[568]), /* 540.log2 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[569]), /* 540.log10 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[570]), /* 540.cbrt */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[571]), /* 540.hypot */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[572]), /* 540.random */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[573]), /* 540.f16round */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[574]), /* 540.fround */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[575]), /* 540.imul */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[576]), /* 540.clz32 */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[577]), /* 540.sumPrecise */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_495.s), /* 540.Symbol.toStringTag */
-    ROM_PV_F64(0x4005bf0a8b145769ull, 0x1.5bf0a8b145769p+1), /* 540.E */
-    ROM_PV_F64(0x40026bb1bbb55516ull, 0x1.26bb1bbb55516p+1), /* 540.LN10 */
-    ROM_PV_F64(0x3fe62e42fefa39efull, 0x1.62e42fefa39efp-1), /* 540.LN2 */
-    ROM_PV_F64(0x3ff71547652b82feull, 0x1.71547652b82fep+0), /* 540.LOG2E */
-    ROM_PV_F64(0x3fdbcb7b1526e50eull, 0x1.bcb7b1526e50ep-2), /* 540.LOG10E */
-    ROM_PV_F64(0x400921fb54442d18ull, 0x1.921fb54442d18p+1), /* 540.PI */
-    ROM_PV_F64(0x3fe6a09e667f3bcdull, 0x1.6a09e667f3bcdp-1), /* 540.SQRT1_2 */
-    ROM_PV_F64(0x3ff6a09e667f3bcdull, 0x1.6a09e667f3bcdp+0), /* 540.SQRT2 */
-    ROM_PV_INT(0, 2), /* 541.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_458.s), /* 541.name */
-    ROM_PV_INT(0, 2), /* 542.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_459.s), /* 542.name */
-    ROM_PV_INT(0, 1), /* 543.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_460.s), /* 543.name */
-    ROM_PV_INT(0, 1), /* 544.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_461.s), /* 544.name */
-    ROM_PV_INT(0, 1), /* 545.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_462.s), /* 545.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_454.s), /* 539.name */
+    ROM_PV_INT(0, 1), /* 540.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_455.s), /* 540.name */
+    ROM_PV_INT(0, 1), /* 541.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_456.s), /* 541.name */
+    ROM_PV_INT(0, 1), /* 542.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_457.s), /* 542.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[544]), /* 543.min */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[545]), /* 543.max */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[546]), /* 543.abs */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[547]), /* 543.floor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[548]), /* 543.ceil */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[549]), /* 543.round */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[550]), /* 543.sqrt */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[551]), /* 543.acos */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[552]), /* 543.asin */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[553]), /* 543.atan */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[554]), /* 543.atan2 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[555]), /* 543.cos */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[556]), /* 543.exp */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[557]), /* 543.log */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[558]), /* 543.pow */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[559]), /* 543.sin */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[560]), /* 543.tan */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[561]), /* 543.trunc */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[562]), /* 543.sign */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[563]), /* 543.cosh */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[564]), /* 543.sinh */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[565]), /* 543.tanh */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[566]), /* 543.acosh */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[567]), /* 543.asinh */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[568]), /* 543.atanh */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[569]), /* 543.expm1 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[570]), /* 543.log1p */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[571]), /* 543.log2 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[572]), /* 543.log10 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[573]), /* 543.cbrt */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[574]), /* 543.hypot */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[575]), /* 543.random */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[576]), /* 543.f16round */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[577]), /* 543.fround */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[578]), /* 543.imul */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[579]), /* 543.clz32 */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[580]), /* 543.sumPrecise */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_496.s), /* 543.Symbol.toStringTag */
+    ROM_PV_F64(0x4005bf0a8b145769ull, 0x1.5bf0a8b145769p+1), /* 543.E */
+    ROM_PV_F64(0x40026bb1bbb55516ull, 0x1.26bb1bbb55516p+1), /* 543.LN10 */
+    ROM_PV_F64(0x3fe62e42fefa39efull, 0x1.62e42fefa39efp-1), /* 543.LN2 */
+    ROM_PV_F64(0x3ff71547652b82feull, 0x1.71547652b82fep+0), /* 543.LOG2E */
+    ROM_PV_F64(0x3fdbcb7b1526e50eull, 0x1.bcb7b1526e50ep-2), /* 543.LOG10E */
+    ROM_PV_F64(0x400921fb54442d18ull, 0x1.921fb54442d18p+1), /* 543.PI */
+    ROM_PV_F64(0x3fe6a09e667f3bcdull, 0x1.6a09e667f3bcdp-1), /* 543.SQRT1_2 */
+    ROM_PV_F64(0x3ff6a09e667f3bcdull, 0x1.6a09e667f3bcdp+0), /* 543.SQRT2 */
+    ROM_PV_INT(0, 2), /* 544.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_459.s), /* 544.name */
+    ROM_PV_INT(0, 2), /* 545.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_460.s), /* 545.name */
     ROM_PV_INT(0, 1), /* 546.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_463.s), /* 546.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_461.s), /* 546.name */
     ROM_PV_INT(0, 1), /* 547.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_464.s), /* 547.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_462.s), /* 547.name */
     ROM_PV_INT(0, 1), /* 548.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_465.s), /* 548.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_463.s), /* 548.name */
     ROM_PV_INT(0, 1), /* 549.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_466.s), /* 549.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_464.s), /* 549.name */
     ROM_PV_INT(0, 1), /* 550.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_467.s), /* 550.name */
-    ROM_PV_INT(0, 2), /* 551.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_468.s), /* 551.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_465.s), /* 550.name */
+    ROM_PV_INT(0, 1), /* 551.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_466.s), /* 551.name */
     ROM_PV_INT(0, 1), /* 552.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_469.s), /* 552.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_467.s), /* 552.name */
     ROM_PV_INT(0, 1), /* 553.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_470.s), /* 553.name */
-    ROM_PV_INT(0, 1), /* 554.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_471.s), /* 554.name */
-    ROM_PV_INT(0, 2), /* 555.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_472.s), /* 555.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_468.s), /* 553.name */
+    ROM_PV_INT(0, 2), /* 554.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_469.s), /* 554.name */
+    ROM_PV_INT(0, 1), /* 555.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_470.s), /* 555.name */
     ROM_PV_INT(0, 1), /* 556.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_473.s), /* 556.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_471.s), /* 556.name */
     ROM_PV_INT(0, 1), /* 557.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_474.s), /* 557.name */
-    ROM_PV_INT(0, 1), /* 558.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_475.s), /* 558.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_472.s), /* 557.name */
+    ROM_PV_INT(0, 2), /* 558.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_473.s), /* 558.name */
     ROM_PV_INT(0, 1), /* 559.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_476.s), /* 559.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_474.s), /* 559.name */
     ROM_PV_INT(0, 1), /* 560.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_477.s), /* 560.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_475.s), /* 560.name */
     ROM_PV_INT(0, 1), /* 561.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_478.s), /* 561.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_476.s), /* 561.name */
     ROM_PV_INT(0, 1), /* 562.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_479.s), /* 562.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_477.s), /* 562.name */
     ROM_PV_INT(0, 1), /* 563.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_480.s), /* 563.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_478.s), /* 563.name */
     ROM_PV_INT(0, 1), /* 564.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_481.s), /* 564.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_479.s), /* 564.name */
     ROM_PV_INT(0, 1), /* 565.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_482.s), /* 565.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_480.s), /* 565.name */
     ROM_PV_INT(0, 1), /* 566.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_483.s), /* 566.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_481.s), /* 566.name */
     ROM_PV_INT(0, 1), /* 567.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_484.s), /* 567.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_482.s), /* 567.name */
     ROM_PV_INT(0, 1), /* 568.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_485.s), /* 568.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_483.s), /* 568.name */
     ROM_PV_INT(0, 1), /* 569.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_486.s), /* 569.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_484.s), /* 569.name */
     ROM_PV_INT(0, 1), /* 570.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_487.s), /* 570.name */
-    ROM_PV_INT(0, 2), /* 571.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_488.s), /* 571.name */
-    ROM_PV_INT(0, 0), /* 572.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_489.s), /* 572.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_485.s), /* 570.name */
+    ROM_PV_INT(0, 1), /* 571.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_486.s), /* 571.name */
+    ROM_PV_INT(0, 1), /* 572.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_487.s), /* 572.name */
     ROM_PV_INT(0, 1), /* 573.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_490.s), /* 573.name */
-    ROM_PV_INT(0, 1), /* 574.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_491.s), /* 574.name */
-    ROM_PV_INT(0, 2), /* 575.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_492.s), /* 575.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_488.s), /* 573.name */
+    ROM_PV_INT(0, 2), /* 574.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_489.s), /* 574.name */
+    ROM_PV_INT(0, 0), /* 575.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_490.s), /* 575.name */
     ROM_PV_INT(0, 1), /* 576.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_493.s), /* 576.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_491.s), /* 576.name */
     ROM_PV_INT(0, 1), /* 577.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_494.s), /* 577.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[579]), /* 578.apply */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[580]), /* 578.construct */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[581]), /* 578.defineProperty */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[582]), /* 578.deleteProperty */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[583]), /* 578.get */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[584]), /* 578.getOwnPropertyDescriptor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[585]), /* 578.getPrototypeOf */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[586]), /* 578.has */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[587]), /* 578.isExtensible */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[588]), /* 578.ownKeys */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[589]), /* 578.preventExtensions */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[590]), /* 578.set */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[591]), /* 578.setPrototypeOf */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_509.s), /* 578.Symbol.toStringTag */
-    ROM_PV_INT(0, 3), /* 579.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_496.s), /* 579.name */
-    ROM_PV_INT(0, 2), /* 580.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_497.s), /* 580.name */
-    ROM_PV_INT(0, 3), /* 581.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_498.s), /* 581.name */
-    ROM_PV_INT(0, 2), /* 582.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_499.s), /* 582.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_492.s), /* 577.name */
+    ROM_PV_INT(0, 2), /* 578.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_493.s), /* 578.name */
+    ROM_PV_INT(0, 1), /* 579.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_494.s), /* 579.name */
+    ROM_PV_INT(0, 1), /* 580.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_495.s), /* 580.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[582]), /* 581.apply */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[583]), /* 581.construct */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[584]), /* 581.defineProperty */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[585]), /* 581.deleteProperty */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[586]), /* 581.get */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[587]), /* 581.getOwnPropertyDescriptor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[588]), /* 581.getPrototypeOf */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[589]), /* 581.has */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[590]), /* 581.isExtensible */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[591]), /* 581.ownKeys */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[592]), /* 581.preventExtensions */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[593]), /* 581.set */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[594]), /* 581.setPrototypeOf */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_510.s), /* 581.Symbol.toStringTag */
+    ROM_PV_INT(0, 3), /* 582.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_497.s), /* 582.name */
     ROM_PV_INT(0, 2), /* 583.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_500.s), /* 583.name */
-    ROM_PV_INT(0, 2), /* 584.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_501.s), /* 584.name */
-    ROM_PV_INT(0, 1), /* 585.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_502.s), /* 585.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_498.s), /* 583.name */
+    ROM_PV_INT(0, 3), /* 584.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_499.s), /* 584.name */
+    ROM_PV_INT(0, 2), /* 585.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_500.s), /* 585.name */
     ROM_PV_INT(0, 2), /* 586.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_503.s), /* 586.name */
-    ROM_PV_INT(0, 1), /* 587.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_504.s), /* 587.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_501.s), /* 586.name */
+    ROM_PV_INT(0, 2), /* 587.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_502.s), /* 587.name */
     ROM_PV_INT(0, 1), /* 588.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_505.s), /* 588.name */
-    ROM_PV_INT(0, 1), /* 589.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_506.s), /* 589.name */
-    ROM_PV_INT(0, 3), /* 590.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_507.s), /* 590.name */
-    ROM_PV_INT(0, 2), /* 591.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_508.s), /* 591.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[593]), /* 592.isRawJSON */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[594]), /* 592.parse */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[595]), /* 592.rawJSON */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[596]), /* 592.stringify */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_514.s), /* 592.Symbol.toStringTag */
-    ROM_PV_INT(0, 1), /* 593.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_510.s), /* 593.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_503.s), /* 588.name */
+    ROM_PV_INT(0, 2), /* 589.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_504.s), /* 589.name */
+    ROM_PV_INT(0, 1), /* 590.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_505.s), /* 590.name */
+    ROM_PV_INT(0, 1), /* 591.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_506.s), /* 591.name */
+    ROM_PV_INT(0, 1), /* 592.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_507.s), /* 592.name */
+    ROM_PV_INT(0, 3), /* 593.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_508.s), /* 593.name */
     ROM_PV_INT(0, 2), /* 594.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_511.s), /* 594.name */
-    ROM_PV_INT(0, 1), /* 595.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_512.s), /* 595.name */
-    ROM_PV_INT(0, 3), /* 596.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_513.s), /* 596.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_509.s), /* 594.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[596]), /* 595.isRawJSON */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[597]), /* 595.parse */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[598]), /* 595.rawJSON */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[599]), /* 595.stringify */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_515.s), /* 595.Symbol.toStringTag */
+    ROM_PV_INT(0, 1), /* 596.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_511.s), /* 596.name */
     ROM_PV_INT(0, 2), /* 597.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_515.s), /* 597.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[598]), /* 597.revocable */
-    ROM_PV_INT(0, 2), /* 598.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_516.s), /* 598.name */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[600]), /* 599.add */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[601]), /* 599.and */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[602]), /* 599.or */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[603]), /* 599.sub */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[604]), /* 599.xor */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[605]), /* 599.exchange */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[606]), /* 599.compareExchange */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[607]), /* 599.load */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[608]), /* 599.store */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[609]), /* 599.isLockFree */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[610]), /* 599.pause */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[611]), /* 599.wait */
-    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[612]), /* 599.notify */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_530.s), /* 599.Symbol.toStringTag */
-    ROM_PV_INT(0, 3), /* 600.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_517.s), /* 600.name */
-    ROM_PV_INT(0, 3), /* 601.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_518.s), /* 601.name */
-    ROM_PV_INT(0, 3), /* 602.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_519.s), /* 602.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_512.s), /* 597.name */
+    ROM_PV_INT(0, 1), /* 598.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_513.s), /* 598.name */
+    ROM_PV_INT(0, 3), /* 599.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_514.s), /* 599.name */
+    ROM_PV_INT(0, 2), /* 600.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_516.s), /* 600.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[601]), /* 600.revocable */
+    ROM_PV_INT(0, 2), /* 601.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_517.s), /* 601.name */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[603]), /* 602.add */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[604]), /* 602.and */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[605]), /* 602.or */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[606]), /* 602.sub */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[607]), /* 602.xor */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[608]), /* 602.exchange */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[609]), /* 602.compareExchange */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[610]), /* 602.load */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[611]), /* 602.store */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[612]), /* 602.isLockFree */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[613]), /* 602.pause */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[614]), /* 602.wait */
+    ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[615]), /* 602.notify */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_531.s), /* 602.Symbol.toStringTag */
     ROM_PV_INT(0, 3), /* 603.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_520.s), /* 603.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_518.s), /* 603.name */
     ROM_PV_INT(0, 3), /* 604.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_521.s), /* 604.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_519.s), /* 604.name */
     ROM_PV_INT(0, 3), /* 605.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_522.s), /* 605.name */
-    ROM_PV_INT(0, 4), /* 606.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_523.s), /* 606.name */
-    ROM_PV_INT(0, 2), /* 607.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_524.s), /* 607.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_520.s), /* 605.name */
+    ROM_PV_INT(0, 3), /* 606.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_521.s), /* 606.name */
+    ROM_PV_INT(0, 3), /* 607.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_522.s), /* 607.name */
     ROM_PV_INT(0, 3), /* 608.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_525.s), /* 608.name */
-    ROM_PV_INT(0, 1), /* 609.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_526.s), /* 609.name */
-    ROM_PV_INT(0, 0), /* 610.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_527.s), /* 610.name */
-    ROM_PV_INT(0, 4), /* 611.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_528.s), /* 611.name */
-    ROM_PV_INT(0, 3), /* 612.length */
-    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_529.s), /* 612.name */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_523.s), /* 608.name */
+    ROM_PV_INT(0, 4), /* 609.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_524.s), /* 609.name */
+    ROM_PV_INT(0, 2), /* 610.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_525.s), /* 610.name */
+    ROM_PV_INT(0, 3), /* 611.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_526.s), /* 611.name */
+    ROM_PV_INT(0, 1), /* 612.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_527.s), /* 612.name */
+    ROM_PV_INT(0, 0), /* 613.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_528.s), /* 613.name */
+    ROM_PV_INT(0, 4), /* 614.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_529.s), /* 614.name */
+    ROM_PV_INT(0, 3), /* 615.length */
+    ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_530.s), /* 615.name */
 };
 
-/* objects: 613 */
+/* objects: 616 */
 static const JSObject js_rom_obj[JS_ROM_OBJ_COUNT] = {
     [0] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
@@ -4561,13 +4574,13 @@ static const JSObject js_rom_obj[JS_ROM_OBJ_COUNT] = {
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[135],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = 100 },
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = offsetof(JSFunctionBytecode, line_num) },
     }, /* get lineNumber */
     [46] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[137],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = 104 },
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_proto_int32, .length = 0, .cproto = 10, .magic = offsetof(JSFunctionBytecode, col_num) },
     }, /* get columnNumber */
     [47] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
@@ -4584,3325 +4597,3343 @@ static const JSObject js_rom_obj[JS_ROM_OBJ_COUNT] = {
     [49] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[149],
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[150],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_isArray, .length = 1, .cproto = 0, .magic = 0 },
     }, /* isArray */
     [50] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[151],
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[152],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_from, .length = 1, .cproto = 0, .magic = 0 },
     }, /* from */
     [51] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[153],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_of, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* of */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[154],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_fromAsync, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* fromAsync */
     [52] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[155],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[156],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_of, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* of */
     [53] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 1, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 2,
-           .shape = (JSShape *)&js_rom_sh_7.sh, .prop = (JSProperty *)&js_rom_props[157],
-    }, /*  */
-    [54] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[199],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_at, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* at */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[158],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
+    [54] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 1, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 2,
+           .shape = (JSShape *)&js_rom_sh_7.sh, .prop = (JSProperty *)&js_rom_props[160],
+    }, /*  */
     [55] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[201],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_with, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* with */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[202],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_at, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* at */
     [56] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[203],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_concat, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* concat */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[204],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_with, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* with */
     [57] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[205],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* every */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[206],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_concat, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* concat */
     [58] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[207],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* some */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[208],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* every */
     [59] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[209],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* forEach */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[210],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* some */
     [60] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[211],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 3 },
-    }, /* map */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[212],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* forEach */
     [61] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[213],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 4 },
-    }, /* filter */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[214],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* map */
     [62] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[215],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* reduce */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[216],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 4 },
+    }, /* filter */
     [63] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[217],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* reduceRight */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[218],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* reduce */
     [64] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[219],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_fill, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* fill */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[220],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* reduceRight */
     [65] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[221],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* find */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[222],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_fill, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* fill */
     [66] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[223],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* findIndex */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[224],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* find */
     [67] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[225],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* findLast */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[226],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* findIndex */
     [68] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[227],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 3 },
-    }, /* findLastIndex */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[228],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* findLast */
     [69] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[229],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_indexOf, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* indexOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[230],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_find, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* findLastIndex */
     [70] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[231],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_lastIndexOf, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* lastIndexOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[232],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_indexOf, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* indexOf */
     [71] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[233],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_includes, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* includes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[234],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_lastIndexOf, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* lastIndexOf */
     [72] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[235],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_join, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* join */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[236],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_includes, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* includes */
     [73] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[237],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[238],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_join, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* join */
     [74] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[239],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_join, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* toLocaleString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[240],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [75] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[241],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_pop, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* pop */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[242],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_join, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* toLocaleString */
     [76] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[243],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_push, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* push */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[244],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_pop, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* pop */
     [77] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[245],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_pop, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* shift */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[246],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_push, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* push */
     [78] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[247],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_push, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* unshift */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[248],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_pop, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* shift */
     [79] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[249],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reverse, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* reverse */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[250],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_push, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* unshift */
     [80] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[251],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toReversed, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toReversed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[252],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reverse, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* reverse */
     [81] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[253],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_sort, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* sort */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[254],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toReversed, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toReversed */
     [82] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[255],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toSorted, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* toSorted */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[256],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_sort, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* sort */
     [83] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[257],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_slice, .length = 2, .cproto = 1, .magic = 0 },
-    }, /* slice */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[258],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toSorted, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* toSorted */
     [84] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[259],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_slice, .length = 2, .cproto = 1, .magic = 1 },
-    }, /* splice */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[260],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_slice, .length = 2, .cproto = 1, .magic = 0 },
+    }, /* slice */
     [85] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[261],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toSpliced, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* toSpliced */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[262],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_slice, .length = 2, .cproto = 1, .magic = 1 },
+    }, /* splice */
     [86] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[263],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_copyWithin, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* copyWithin */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[264],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_toSpliced, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* toSpliced */
     [87] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[265],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_flatten, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* flatMap */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[266],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_copyWithin, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* copyWithin */
     [88] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[267],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_flatten, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* flat */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[268],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_flatten, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* flatMap */
     [89] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[269],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* values */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[270],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_flatten, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* flat */
     [90] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[271],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* keys */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[272],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* values */
     [91] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[273],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 2 },
-    }, /* entries */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[274],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* keys */
     [92] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_8.sh, .prop = (JSProperty *)&js_rom_props[275],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[276],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 2 },
+    }, /* entries */
     [93] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_8.sh, .prop = (JSProperty *)&js_rom_props[278],
+    }, /*  */
+    [94] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_9.sh, .prop = (JSProperty *)&js_rom_props[291],
+           .shape = (JSShape *)&js_rom_sh_9.sh, .prop = (JSProperty *)&js_rom_props[294],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_constructor, .length = 2, .cproto = 4, .magic = 0 },
     }, /* RegExp */
-    [94] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_10.sh, .prop = (JSProperty *)&js_rom_props[296],
-    }, /*  */
     [95] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[316],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flags, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get flags */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_10.sh, .prop = (JSProperty *)&js_rom_props[299],
+    }, /*  */
     [96] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[318],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_source, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get source */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[319],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flags, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get flags */
     [97] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[320],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 1 },
-    }, /* get global */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[321],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_source, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get source */
     [98] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[322],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 2 },
-    }, /* get ignoreCase */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[323],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 1 },
+    }, /* get global */
     [99] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[324],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 4 },
-    }, /* get multiline */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[325],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 2 },
+    }, /* get ignoreCase */
     [100] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[326],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 8 },
-    }, /* get dotAll */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[327],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 4 },
+    }, /* get multiline */
     [101] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[328],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 16 },
-    }, /* get unicode */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[329],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 8 },
+    }, /* get dotAll */
     [102] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[330],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 256 },
-    }, /* get unicodeSets */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[331],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 16 },
+    }, /* get unicode */
     [103] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[332],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 32 },
-    }, /* get sticky */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[333],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 256 },
+    }, /* get unicodeSets */
     [104] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[334],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 64 },
-    }, /* get hasIndices */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[335],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 32 },
+    }, /* get sticky */
     [105] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[336],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_exec, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* exec */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[337],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_get_flag, .length = 0, .cproto = 10, .magic = 64 },
+    }, /* get hasIndices */
     [106] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[338],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_compile, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* compile */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[339],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_exec, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* exec */
     [107] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[340],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_test, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* test */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[341],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_compile, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* compile */
     [108] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[342],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[343],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_test, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* test */
     [109] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[344],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_replace, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.replace] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[345],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [110] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[346],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_match, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.match] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[347],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_replace, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.replace] */
     [111] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[348],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_matchAll, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.matchAll] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[349],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_match, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.match] */
     [112] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[350],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_search, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.search] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[351],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_matchAll, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.matchAll] */
     [113] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[352],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_split, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.split] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[353],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_search, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.search] */
     [114] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[354],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_escape, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* escape */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[355],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_Symbol_split, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.split] */
     [115] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[356],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[357],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_escape, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* escape */
     [116] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_11.sh, .prop = (JSProperty *)&js_rom_props[358],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_constructor, .length = 1, .cproto = 2, .magic = 0 },
-    }, /* Promise */
-    [117] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[370],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_resolve, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* resolve */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[359],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
+    [117] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_11.sh, .prop = (JSProperty *)&js_rom_props[361],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_constructor, .length = 1, .cproto = 2, .magic = 0 },
+    }, /* Promise */
     [118] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[372],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_resolve, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* reject */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[373],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_resolve, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* resolve */
     [119] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[374],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_all, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* all */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[375],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_resolve, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* reject */
     [120] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[376],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_all, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* allSettled */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[377],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_all, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* all */
     [121] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[378],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_all, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* any */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[379],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_all, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* allSettled */
     [122] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[380],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_try, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* try */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[381],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_all, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* any */
     [123] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[382],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_race, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* race */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[383],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_try, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* try */
     [124] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[384],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_withResolvers, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* withResolvers */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[385],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_race, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* race */
     [125] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[386],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[387],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_withResolvers, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* withResolvers */
     [126] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_12.sh, .prop = (JSProperty *)&js_rom_props[388],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[389],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
     [127] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[393],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_then, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* then */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_12.sh, .prop = (JSProperty *)&js_rom_props[391],
+    }, /*  */
     [128] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[395],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_catch, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* catch */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[396],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_then, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* then */
     [129] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[397],
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[398],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_catch, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* catch */
+    [130] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[400],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_promise_finally, .length = 1, .cproto = 0, .magic = 0 },
     }, /* finally */
-    [130] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [131] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_13.sh, .prop = (JSProperty *)&js_rom_props[399],
+           .shape = (JSShape *)&js_rom_sh_13.sh, .prop = (JSProperty *)&js_rom_props[402],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = -1 },
-    }, /* Error */
-    [131] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_14.sh, .prop = (JSProperty *)&js_rom_props[406],
     }, /* Error */
     [132] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[410],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_14.sh, .prop = (JSProperty *)&js_rom_props[409],
+    }, /* Error */
     [133] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[412],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_isError, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isError */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[413],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [134] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[414],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_capture_stack_trace, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* captureStackTrace */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[415],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_isError, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isError */
     [135] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[416],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_get_stackTraceLimit, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get stackTraceLimit */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[417],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_capture_stack_trace, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* captureStackTrace */
     [136] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[418],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_set_stackTraceLimit, .length = 1, .cproto = 9, .magic = 0 },
-    }, /* set stackTraceLimit */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[419],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_get_stackTraceLimit, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get stackTraceLimit */
     [137] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[420],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_get_prepareStackTrace, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get prepareStackTrace */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[421],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_set_stackTraceLimit, .length = 1, .cproto = 9, .magic = 0 },
+    }, /* set stackTraceLimit */
     [138] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[422],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_set_prepareStackTrace, .length = 1, .cproto = 9, .magic = 0 },
-    }, /* set prepareStackTrace */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[423],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_get_prepareStackTrace, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get prepareStackTrace */
     [139] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_15.sh, .prop = (JSProperty *)&js_rom_props[424],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_constructor, .length = 0, .cproto = 4, .magic = 0 },
-    }, /* Iterator */
-    [140] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[429],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_concat, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* concat */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[425],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_set_prepareStackTrace, .length = 1, .cproto = 9, .magic = 0 },
+    }, /* set prepareStackTrace */
+    [140] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_15.sh, .prop = (JSProperty *)&js_rom_props[427],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_constructor, .length = 0, .cproto = 4, .magic = 0 },
+    }, /* Iterator */
     [141] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[431],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_from, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* from */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[434],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_concat, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* concat */
     [142] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_16.sh, .prop = (JSProperty *)&js_rom_props[433],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[436],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_from, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* from */
     [143] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[447],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* drop */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[438],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_zip, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* zip */
     [144] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[449],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* filter */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[440],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_zip, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* zipKeyed */
     [145] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[451],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 4 },
-    }, /* flatMap */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_16.sh, .prop = (JSProperty *)&js_rom_props[442],
+    }, /*  */
     [146] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[453],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 6 },
-    }, /* map */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[456],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* drop */
     [147] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[455],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 8 },
-    }, /* take */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[458],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* filter */
     [148] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[457],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* every */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[460],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 4 },
+    }, /* flatMap */
     [149] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[459],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 3 },
-    }, /* find */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[462],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 6 },
+    }, /* map */
     [150] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[461],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 5 },
-    }, /* forEach */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[464],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_iterator_helper, .length = 1, .cproto = 1, .magic = 8 },
+    }, /* take */
     [151] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[463],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 7 },
-    }, /* some */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[466],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* every */
     [152] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[465],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_reduce, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* reduce */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[468],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* find */
     [153] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[467],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_toArray, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toArray */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[470],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 5 },
+    }, /* forEach */
     [154] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[469],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_iterator, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.iterator] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[472],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_func, .length = 1, .cproto = 1, .magic = 7 },
+    }, /* some */
     [155] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[471],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_get_toStringTag, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.toStringTag] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[474],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_reduce, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* reduce */
     [156] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[473],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_set_toStringTag, .length = 1, .cproto = 9, .magic = 0 },
-    }, /* set [Symbol.toStringTag] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[476],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_toArray, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toArray */
     [157] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 15,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[475],
-           .u.c_function_data_record = (JSCFunctionDataRecord *)&js_rom_cfd_157,
-    }, /*  */
-    [158] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_17.sh, .prop = (JSProperty *)&js_rom_props[477],
-    }, /*  */
-    [159] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[478],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_iterator, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.asyncIterator] */
-    [160] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    }, /* [Symbol.iterator] */
+    [158] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[480],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_eval, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* eval */
-    [161] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_get_toStringTag, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.toStringTag] */
+    [159] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_18.sh, .prop = (JSProperty *)&js_rom_props[482],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_base_constructor, .length = 0, .cproto = 4, .magic = 0 },
-    }, /* TypedArray */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[482],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_set_toStringTag, .length = 1, .cproto = 9, .magic = 0 },
+    }, /* set [Symbol.toStringTag] */
+    [160] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 15,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[484],
+           .u.c_function_data_record = (JSCFunctionDataRecord *)&js_rom_cfd_160,
+    }, /*  */
+    [161] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_17.sh, .prop = (JSProperty *)&js_rom_props[486],
+    }, /*  */
     [162] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[488],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_from, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* from */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[487],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_proto_iterator, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.asyncIterator] */
     [163] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[490],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_of, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* of */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[489],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_eval, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* eval */
     [164] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[492],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .shape = (JSShape *)&js_rom_sh_18.sh, .prop = (JSProperty *)&js_rom_props[491],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_base_constructor, .length = 0, .cproto = 4, .magic = 0 },
+    }, /* TypedArray */
     [165] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_19.sh, .prop = (JSProperty *)&js_rom_props[494],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[497],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_from, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* from */
     [166] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[532],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_length, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get length */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[499],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_of, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* of */
     [167] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[534],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_at, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* at */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[501],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
     [168] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[536],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_with, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* with */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_19.sh, .prop = (JSProperty *)&js_rom_props[503],
+    }, /*  */
     [169] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[538],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_buffer, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get buffer */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[541],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_length, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get length */
     [170] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[540],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_byteLength, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get byteLength */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[543],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_at, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* at */
     [171] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[542],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_byteOffset, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get byteOffset */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[545],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_with, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* with */
     [172] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[544],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_set, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* set */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[547],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_buffer, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get buffer */
     [173] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[546],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_typed_array_iterator, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* values */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[549],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_byteLength, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get byteLength */
     [174] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[548],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_typed_array_iterator, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* keys */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[551],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_byteOffset, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get byteOffset */
     [175] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[550],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_typed_array_iterator, .length = 0, .cproto = 1, .magic = 2 },
-    }, /* entries */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[553],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_set, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* set */
     [176] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[552],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_toStringTag, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.toStringTag] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[555],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_typed_array_iterator, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* values */
     [177] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[554],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_copyWithin, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* copyWithin */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[557],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_typed_array_iterator, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* keys */
     [178] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[556],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 8 },
-    }, /* every */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[559],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_typed_array_iterator, .length = 0, .cproto = 1, .magic = 2 },
+    }, /* entries */
     [179] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[558],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 9 },
-    }, /* some */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[561],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_get_toStringTag, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.toStringTag] */
     [180] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[560],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 10 },
-    }, /* forEach */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[563],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_copyWithin, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* copyWithin */
     [181] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[562],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 11 },
-    }, /* map */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[565],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 8 },
+    }, /* every */
     [182] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[564],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 12 },
-    }, /* filter */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[567],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 9 },
+    }, /* some */
     [183] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[566],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 8 },
-    }, /* reduce */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[569],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 10 },
+    }, /* forEach */
     [184] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[568],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 9 },
-    }, /* reduceRight */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[571],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 11 },
+    }, /* map */
     [185] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[570],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_fill, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* fill */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[573],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_every, .length = 1, .cproto = 1, .magic = 12 },
+    }, /* filter */
     [186] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[572],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* find */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[575],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 8 },
+    }, /* reduce */
     [187] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[574],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* findIndex */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[577],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_reduce, .length = 1, .cproto = 1, .magic = 9 },
+    }, /* reduceRight */
     [188] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[576],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* findLast */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[579],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_fill, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* fill */
     [189] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[578],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 3 },
-    }, /* findLastIndex */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[581],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* find */
     [190] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[580],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_reverse, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* reverse */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[583],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* findIndex */
     [191] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[582],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_toReversed, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toReversed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[585],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* findLast */
     [192] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[584],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_slice, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* slice */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[587],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_find, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* findLastIndex */
     [193] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[586],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_subarray, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* subarray */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[589],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_reverse, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* reverse */
     [194] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[588],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_sort, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* sort */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[591],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_toReversed, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toReversed */
     [195] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[590],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_toSorted, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* toSorted */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[593],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_slice, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* slice */
     [196] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[592],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_join, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* join */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[595],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_subarray, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* subarray */
     [197] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[594],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_join, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* toLocaleString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[597],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_sort, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* sort */
     [198] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[596],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_indexOf, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* indexOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[599],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_toSorted, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* toSorted */
     [199] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[598],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_indexOf, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* lastIndexOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[601],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_join, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* join */
     [200] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[600],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_indexOf, .length = 1, .cproto = 1, .magic = -1 },
-    }, /* includes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[603],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_join, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* toLocaleString */
     [201] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[602],
-    }, /* EvalError */
-    [202] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[605],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 0 },
-    }, /* EvalError */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[605],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_indexOf, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* indexOf */
+    [202] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[607],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_indexOf, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* lastIndexOf */
     [203] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[608],
-    }, /* RangeError */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[609],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_indexOf, .length = 1, .cproto = 1, .magic = -1 },
+    }, /* includes */
     [204] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[611],
+    }, /* EvalError */
+    [205] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[611],
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[614],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 0 },
+    }, /* EvalError */
+    [206] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[617],
+    }, /* RangeError */
+    [207] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[620],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 1 },
     }, /* RangeError */
-    [205] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [208] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[614],
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[623],
     }, /* ReferenceError */
-    [206] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [209] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[617],
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[626],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 2 },
     }, /* ReferenceError */
-    [207] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [210] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[620],
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[629],
     }, /* SyntaxError */
-    [208] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [211] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[623],
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[632],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 3 },
     }, /* SyntaxError */
-    [209] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [212] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[626],
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[635],
     }, /* TypeError */
-    [210] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [213] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[629],
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[638],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 4 },
     }, /* TypeError */
-    [211] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [214] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[632],
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[641],
     }, /* URIError */
-    [212] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [215] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[635],
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[644],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 5 },
     }, /* URIError */
-    [213] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [216] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[638],
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[647],
     }, /* InternalError */
-    [214] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [217] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[641],
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[650],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 1, .cproto = 5, .magic = 6 },
     }, /* InternalError */
-    [215] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[644],
-    }, /* AggregateError */
-    [216] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[647],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 2, .cproto = 5, .magic = 7 },
-    }, /* AggregateError */
-    [217] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 4,
-           .shape = (JSShape *)&js_rom_sh_22.sh, .prop = (JSProperty *)&js_rom_props[650],
-           ROM_OBJDATA_INT(0, 0),
-    }, /*  */
     [218] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[657],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toExponential, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* toExponential */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_20.sh, .prop = (JSProperty *)&js_rom_props[653],
+    }, /* AggregateError */
     [219] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[659],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toFixed, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* toFixed */
+           .shape = (JSShape *)&js_rom_sh_21.sh, .prop = (JSProperty *)&js_rom_props[656],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_error_constructor, .length = 2, .cproto = 5, .magic = 7 },
+    }, /* AggregateError */
     [220] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[661],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toPrecision, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* toPrecision */
+           .is_HTMLDDA = 0, .class_id = 4,
+           .shape = (JSShape *)&js_rom_sh_22.sh, .prop = (JSProperty *)&js_rom_props[659],
+           ROM_OBJDATA_INT(0, 0),
+    }, /*  */
     [221] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[663],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toString, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* toString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[666],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toExponential, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* toExponential */
     [222] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[665],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toString, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* toLocaleString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[668],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toFixed, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* toFixed */
     [223] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[667],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_valueOf, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* valueOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[670],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toPrecision, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* toPrecision */
     [224] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_23.sh, .prop = (JSProperty *)&js_rom_props[669],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_constructor, .length = 1, .cproto = 4, .magic = 0 },
-    }, /* Number */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[672],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toString, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* toString */
     [225] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[686],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_parseInt, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* parseInt */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[674],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_toString, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* toLocaleString */
     [226] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[688],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_parseFloat, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* parseFloat */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[676],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_valueOf, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* valueOf */
     [227] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[690],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isNaN, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isNaN */
+           .shape = (JSShape *)&js_rom_sh_23.sh, .prop = (JSProperty *)&js_rom_props[678],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_constructor, .length = 1, .cproto = 4, .magic = 0 },
+    }, /* Number */
     [228] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[692],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isFinite, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isFinite */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[695],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_parseInt, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* parseInt */
     [229] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[694],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isInteger, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isInteger */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[697],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_parseFloat, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* parseFloat */
     [230] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[696],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isSafeInteger, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isSafeInteger */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[699],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isNaN, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isNaN */
     [231] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 1, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 5,
-           .shape = (JSShape *)&js_rom_sh_24.sh, .prop = (JSProperty *)&js_rom_props[698],
-           ROM_OBJDATA_PTR(JS_TAG_STRING, &js_rom_str_36.s),
-    }, /*  */
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[701],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isFinite, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isFinite */
     [232] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[751],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_at, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* at */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[703],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isInteger, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isInteger */
     [233] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[753],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_charCodeAt, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* charCodeAt */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[705],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_number_isSafeInteger, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isSafeInteger */
     [234] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[755],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_charAt, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* charAt */
+           .extensible = 0, .is_exotic = 1, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 5,
+           .shape = (JSShape *)&js_rom_sh_24.sh, .prop = (JSProperty *)&js_rom_props[707],
+           ROM_OBJDATA_PTR(JS_TAG_STRING, &js_rom_str_36.s),
+    }, /*  */
     [235] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[757],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_concat, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* concat */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[760],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_at, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* at */
     [236] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[759],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_codePointAt, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* codePointAt */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[762],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_charCodeAt, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* charCodeAt */
     [237] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[761],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_isWellFormed, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* isWellFormed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[764],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_charAt, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* charAt */
     [238] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[763],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toWellFormed, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toWellFormed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[766],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_concat, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* concat */
     [239] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[765],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_indexOf, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* indexOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[768],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_codePointAt, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* codePointAt */
     [240] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[767],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_indexOf, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* lastIndexOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[770],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_isWellFormed, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* isWellFormed */
     [241] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[769],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_includes, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* includes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[772],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toWellFormed, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toWellFormed */
     [242] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[771],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_includes, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* endsWith */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[774],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_indexOf, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* indexOf */
     [243] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[773],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_includes, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* startsWith */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[776],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_indexOf, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* lastIndexOf */
     [244] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[775],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_match, .length = 1, .cproto = 1, .magic = 219 },
-    }, /* match */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[778],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_includes, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* includes */
     [245] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[777],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_match, .length = 1, .cproto = 1, .magic = 220 },
-    }, /* matchAll */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[780],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_includes, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* endsWith */
     [246] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[779],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_match, .length = 1, .cproto = 1, .magic = 222 },
-    }, /* search */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[782],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_includes, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* startsWith */
     [247] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[781],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_split, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* split */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[784],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_match, .length = 1, .cproto = 1, .magic = 224 },
+    }, /* match */
     [248] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[783],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_substring, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* substring */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[786],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_match, .length = 1, .cproto = 1, .magic = 225 },
+    }, /* matchAll */
     [249] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[785],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_substr, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* substr */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[788],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_match, .length = 1, .cproto = 1, .magic = 227 },
+    }, /* search */
     [250] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[787],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_slice, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* slice */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[790],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_split, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* split */
     [251] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[789],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_repeat, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* repeat */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[792],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_substring, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* substring */
     [252] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[791],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_replace, .length = 2, .cproto = 1, .magic = 0 },
-    }, /* replace */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[794],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_substr, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* substr */
     [253] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[793],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_replace, .length = 2, .cproto = 1, .magic = 1 },
-    }, /* replaceAll */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[796],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_slice, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* slice */
     [254] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[795],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_pad, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* padEnd */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[798],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_repeat, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* repeat */
     [255] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[797],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_pad, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* padStart */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[800],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_replace, .length = 2, .cproto = 1, .magic = 0 },
+    }, /* replace */
     [256] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[799],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_trim, .length = 0, .cproto = 1, .magic = 3 },
-    }, /* trim */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[802],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_replace, .length = 2, .cproto = 1, .magic = 1 },
+    }, /* replaceAll */
     [257] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[801],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_trim, .length = 0, .cproto = 1, .magic = 2 },
-    }, /* trimEnd */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[804],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_pad, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* padEnd */
     [258] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[803],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_trim, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* trimStart */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[806],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_pad, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* padStart */
     [259] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[805],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[808],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_trim, .length = 0, .cproto = 1, .magic = 3 },
+    }, /* trim */
     [260] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[807],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* valueOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[810],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_trim, .length = 0, .cproto = 1, .magic = 2 },
+    }, /* trimEnd */
     [261] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[809],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_localeCompare, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* localeCompare */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[812],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_trim, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* trimStart */
     [262] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[811],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_normalize, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* normalize */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[814],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [263] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[813],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* toLowerCase */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[816],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* valueOf */
     [264] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[815],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* toUpperCase */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[818],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_localeCompare, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* localeCompare */
     [265] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[817],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* toLocaleLowerCase */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[820],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_normalize, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* normalize */
     [266] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[819],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* toLocaleUpperCase */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[822],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* toLowerCase */
     [267] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[821],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 5 },
-    }, /* [Symbol.iterator] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[824],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* toUpperCase */
     [268] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[823],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* anchor */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[826],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* toLocaleLowerCase */
     [269] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[825],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* big */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[828],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_toLowerCase, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* toLocaleUpperCase */
     [270] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[827],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 2 },
-    }, /* blink */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[830],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_array_iterator, .length = 0, .cproto = 1, .magic = 5 },
+    }, /* [Symbol.iterator] */
     [271] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[829],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 3 },
-    }, /* bold */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[832],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* anchor */
     [272] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[831],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 4 },
-    }, /* fixed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[834],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* big */
     [273] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[833],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 5 },
-    }, /* fontcolor */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[836],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 2 },
+    }, /* blink */
     [274] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[835],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 6 },
-    }, /* fontsize */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[838],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 3 },
+    }, /* bold */
     [275] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[837],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 7 },
-    }, /* italics */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[840],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 4 },
+    }, /* fixed */
     [276] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[839],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 8 },
-    }, /* link */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[842],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 5 },
+    }, /* fontcolor */
     [277] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[841],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 9 },
-    }, /* small */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[844],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 6 },
+    }, /* fontsize */
     [278] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[843],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 10 },
-    }, /* strike */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[846],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 7 },
+    }, /* italics */
     [279] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[845],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 11 },
-    }, /* sub */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[848],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 1, .cproto = 1, .magic = 8 },
+    }, /* link */
     [280] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[847],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 12 },
-    }, /* sup */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[850],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 9 },
+    }, /* small */
     [281] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_25.sh, .prop = (JSProperty *)&js_rom_props[849],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_constructor, .length = 1, .cproto = 4, .magic = 0 },
-    }, /* String */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[852],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 10 },
+    }, /* strike */
     [282] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[855],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_fromCharCode, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* fromCharCode */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[854],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 11 },
+    }, /* sub */
     [283] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[857],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_fromCodePoint, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* fromCodePoint */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[856],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_CreateHTML, .length = 0, .cproto = 1, .magic = 12 },
+    }, /* sup */
     [284] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[859],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_raw, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* raw */
+           .shape = (JSShape *)&js_rom_sh_25.sh, .prop = (JSProperty *)&js_rom_props[858],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_constructor, .length = 1, .cproto = 4, .magic = 0 },
+    }, /* String */
     [285] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 6,
-           .shape = (JSShape *)&js_rom_sh_26.sh, .prop = (JSProperty *)&js_rom_props[861],
-           ROM_OBJDATA_INT(1, 0),
-    }, /*  */
-    [286] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[864],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_boolean_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
-    [287] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_fromCharCode, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* fromCharCode */
+    [286] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[866],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_boolean_valueOf, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* valueOf */
-    [288] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_fromCodePoint, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* fromCodePoint */
+    [287] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_27.sh, .prop = (JSProperty *)&js_rom_props[868],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_boolean_constructor, .length = 1, .cproto = 4, .magic = 0 },
-    }, /* Boolean */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[868],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_raw, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* raw */
+    [288] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 6,
+           .shape = (JSShape *)&js_rom_sh_26.sh, .prop = (JSProperty *)&js_rom_props[870],
+           ROM_OBJDATA_INT(1, 0),
+    }, /*  */
     [289] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_28.sh, .prop = (JSProperty *)&js_rom_props[871],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[873],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_boolean_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [290] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[877],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
-    [291] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[879],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_valueOf, .length = 0, .cproto = 0, .magic = 0 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[875],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_boolean_valueOf, .length = 0, .cproto = 0, .magic = 0 },
     }, /* valueOf */
+    [291] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_27.sh, .prop = (JSProperty *)&js_rom_props[877],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_boolean_constructor, .length = 1, .cproto = 4, .magic = 0 },
+    }, /* Boolean */
     [292] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[881],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_valueOf, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.toPrimitive] */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_28.sh, .prop = (JSProperty *)&js_rom_props[880],
+    }, /*  */
     [293] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[883],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_get_description, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get description */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[886],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [294] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_29.sh, .prop = (JSProperty *)&js_rom_props[885],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_constructor, .length = 0, .cproto = 4, .magic = 0 },
-    }, /* Symbol */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[888],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_valueOf, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* valueOf */
     [295] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[903],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_for, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* for */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[890],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_valueOf, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.toPrimitive] */
     [296] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[905],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_keyFor, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* keyFor */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[892],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_get_description, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get description */
     [297] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_30.sh, .prop = (JSProperty *)&js_rom_props[907],
-    }, /*  */
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_29.sh, .prop = (JSProperty *)&js_rom_props[894],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_constructor, .length = 0, .cproto = 4, .magic = 0 },
+    }, /* Symbol */
     [298] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[955],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_getTime, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* valueOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[912],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_for, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* for */
     [299] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[957],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 19 },
-    }, /* toString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[914],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_symbol_keyFor, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* keyFor */
     [300] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[959],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_Symbol_toPrimitive, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* [Symbol.toPrimitive] */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_30.sh, .prop = (JSProperty *)&js_rom_props[916],
+    }, /*  */
     [301] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[961],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 3 },
-    }, /* toUTCString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[964],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_getTime, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* valueOf */
     [302] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[963],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 35 },
-    }, /* toISOString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[966],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 19 },
+    }, /* toString */
     [303] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[965],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 17 },
-    }, /* toDateString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[968],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_Symbol_toPrimitive, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* [Symbol.toPrimitive] */
     [304] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[967],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 18 },
-    }, /* toTimeString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[970],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 3 },
+    }, /* toUTCString */
     [305] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[969],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 51 },
-    }, /* toLocaleString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[972],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 35 },
+    }, /* toISOString */
     [306] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[971],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 49 },
-    }, /* toLocaleDateString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[974],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 17 },
+    }, /* toDateString */
     [307] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[973],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 50 },
-    }, /* toLocaleTimeString */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[976],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 18 },
+    }, /* toTimeString */
     [308] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[975],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_getTimezoneOffset, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* getTimezoneOffset */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[978],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 51 },
+    }, /* toLocaleString */
     [309] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[977],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_getTime, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* getTime */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[980],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 49 },
+    }, /* toLocaleDateString */
     [310] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[979],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 257 },
-    }, /* getYear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[982],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_string, .length = 0, .cproto = 1, .magic = 50 },
+    }, /* toLocaleTimeString */
     [311] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[981],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* getFullYear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[984],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_getTimezoneOffset, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* getTimezoneOffset */
     [312] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[983],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* getUTCFullYear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[986],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_getTime, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* getTime */
     [313] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[985],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 17 },
-    }, /* getMonth */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[988],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 257 },
+    }, /* getYear */
     [314] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[987],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 16 },
-    }, /* getUTCMonth */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[990],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* getFullYear */
     [315] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[989],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 33 },
-    }, /* getDate */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[992],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* getUTCFullYear */
     [316] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[991],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 32 },
-    }, /* getUTCDate */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[994],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 17 },
+    }, /* getMonth */
     [317] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[993],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 49 },
-    }, /* getHours */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[996],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 16 },
+    }, /* getUTCMonth */
     [318] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[995],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 48 },
-    }, /* getUTCHours */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[998],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 33 },
+    }, /* getDate */
     [319] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[997],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 65 },
-    }, /* getMinutes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1000],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 32 },
+    }, /* getUTCDate */
     [320] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[999],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 64 },
-    }, /* getUTCMinutes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1002],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 49 },
+    }, /* getHours */
     [321] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1001],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 81 },
-    }, /* getSeconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1004],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 48 },
+    }, /* getUTCHours */
     [322] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1003],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 80 },
-    }, /* getUTCSeconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1006],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 65 },
+    }, /* getMinutes */
     [323] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1005],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 97 },
-    }, /* getMilliseconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1008],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 64 },
+    }, /* getUTCMinutes */
     [324] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1007],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 96 },
-    }, /* getUTCMilliseconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1010],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 81 },
+    }, /* getSeconds */
     [325] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1009],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 113 },
-    }, /* getDay */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1012],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 80 },
+    }, /* getUTCSeconds */
     [326] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1011],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 112 },
-    }, /* getUTCDay */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1014],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 97 },
+    }, /* getMilliseconds */
     [327] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1013],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_setTime, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* setTime */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1016],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 96 },
+    }, /* getUTCMilliseconds */
     [328] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1015],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 1649 },
-    }, /* setMilliseconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1018],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 113 },
+    }, /* getDay */
     [329] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1017],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 1648 },
-    }, /* setUTCMilliseconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1020],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)get_date_field, .length = 0, .cproto = 1, .magic = 112 },
+    }, /* getUTCDay */
     [330] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1019],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 1393 },
-    }, /* setSeconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1022],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_setTime, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* setTime */
     [331] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1021],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 1392 },
-    }, /* setUTCSeconds */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1024],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 1649 },
+    }, /* setMilliseconds */
     [332] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1023],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 1137 },
-    }, /* setMinutes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1026],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 1648 },
+    }, /* setUTCMilliseconds */
     [333] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1025],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 1136 },
-    }, /* setUTCMinutes */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1028],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 1393 },
+    }, /* setSeconds */
     [334] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1027],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 4, .cproto = 1, .magic = 881 },
-    }, /* setHours */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1030],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 1392 },
+    }, /* setUTCSeconds */
     [335] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1029],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 4, .cproto = 1, .magic = 880 },
-    }, /* setUTCHours */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1032],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 1137 },
+    }, /* setMinutes */
     [336] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1031],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 561 },
-    }, /* setDate */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1034],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 1136 },
+    }, /* setUTCMinutes */
     [337] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1033],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 560 },
-    }, /* setUTCDate */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1036],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 4, .cproto = 1, .magic = 881 },
+    }, /* setHours */
     [338] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1035],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 305 },
-    }, /* setMonth */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1038],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 4, .cproto = 1, .magic = 880 },
+    }, /* setUTCHours */
     [339] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1037],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 304 },
-    }, /* setUTCMonth */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1040],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 561 },
+    }, /* setDate */
     [340] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1039],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_setYear, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* setYear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1042],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 1, .cproto = 1, .magic = 560 },
+    }, /* setUTCDate */
     [341] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1041],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 49 },
-    }, /* setFullYear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1044],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 305 },
+    }, /* setMonth */
     [342] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1043],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 48 },
-    }, /* setUTCFullYear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1046],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 2, .cproto = 1, .magic = 304 },
+    }, /* setUTCMonth */
     [343] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1045],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_toJSON, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* toJSON */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1048],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_setYear, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* setYear */
     [344] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_31.sh, .prop = (JSProperty *)&js_rom_props[1047],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_constructor, .length = 7, .cproto = 4, .magic = 0 },
-    }, /* Date */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1050],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 49 },
+    }, /* setFullYear */
     [345] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1053],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_Date_now, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* now */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1052],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)set_date_field, .length = 3, .cproto = 1, .magic = 48 },
+    }, /* setUTCFullYear */
     [346] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1055],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_Date_parse, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* parse */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1054],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_toJSON, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* toJSON */
     [347] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1057],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_Date_UTC, .length = 7, .cproto = 0, .magic = 0 },
-    }, /* UTC */
-    [348] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_32.sh, .prop = (JSProperty *)&js_rom_props[1059],
-    }, /*  */
-    [349] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_33.sh, .prop = (JSProperty *)&js_rom_props[1062],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_constructor, .length = 1, .cproto = 5, .magic = 1 },
-    }, /* GeneratorFunction */
+           .shape = (JSShape *)&js_rom_sh_31.sh, .prop = (JSProperty *)&js_rom_props[1056],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_date_constructor, .length = 7, .cproto = 4, .magic = 0 },
+    }, /* Date */
+    [348] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1062],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_Date_now, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* now */
+    [349] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1064],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_Date_parse, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* parse */
     [350] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_34.sh, .prop = (JSProperty *)&js_rom_props[1065],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1066],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_Date_UTC, .length = 7, .cproto = 0, .magic = 0 },
+    }, /* UTC */
     [351] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1070],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_generator_next, .length = 1, .cproto = 12, .magic = 0 },
-    }, /* next */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_32.sh, .prop = (JSProperty *)&js_rom_props[1068],
+    }, /*  */
     [352] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1072],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_generator_next, .length = 1, .cproto = 12, .magic = 1 },
-    }, /* return */
+           .shape = (JSShape *)&js_rom_sh_33.sh, .prop = (JSProperty *)&js_rom_props[1071],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_constructor, .length = 1, .cproto = 5, .magic = 1 },
+    }, /* GeneratorFunction */
     [353] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1074],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_generator_next, .length = 1, .cproto = 12, .magic = 2 },
-    }, /* throw */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_34.sh, .prop = (JSProperty *)&js_rom_props[1074],
+    }, /*  */
     [354] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_35.sh, .prop = (JSProperty *)&js_rom_props[1076],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1079],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_generator_next, .length = 1, .cproto = 12, .magic = 0 },
+    }, /* next */
     [355] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1089],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_byteLength, .length = 0, .cproto = 10, .magic = 20 },
-    }, /* get byteLength */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1081],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_generator_next, .length = 1, .cproto = 12, .magic = 1 },
+    }, /* return */
     [356] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1091],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_maxByteLength, .length = 0, .cproto = 10, .magic = 20 },
-    }, /* get maxByteLength */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1083],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_generator_next, .length = 1, .cproto = 12, .magic = 2 },
+    }, /* throw */
     [357] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1093],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_resizable, .length = 0, .cproto = 10, .magic = 20 },
-    }, /* get resizable */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_35.sh, .prop = (JSProperty *)&js_rom_props[1085],
+    }, /*  */
     [358] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1095],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_detached, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get detached */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1098],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_byteLength, .length = 0, .cproto = 10, .magic = 20 },
+    }, /* get byteLength */
     [359] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1097],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_immutable, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get immutable */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1100],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_maxByteLength, .length = 0, .cproto = 10, .magic = 20 },
+    }, /* get maxByteLength */
     [360] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1099],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_resize, .length = 1, .cproto = 1, .magic = 20 },
-    }, /* resize */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1102],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_resizable, .length = 0, .cproto = 10, .magic = 20 },
+    }, /* get resizable */
     [361] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1101],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_slice, .length = 2, .cproto = 1, .magic = 40 },
-    }, /* slice */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1104],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_detached, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get detached */
     [362] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1103],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_slice, .length = 2, .cproto = 1, .magic = 41 },
-    }, /* sliceToImmutable */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1106],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_immutable, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get immutable */
     [363] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1105],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_transfer, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* transfer */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1108],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_resize, .length = 1, .cproto = 1, .magic = 20 },
+    }, /* resize */
     [364] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1107],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_transfer, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* transferToImmutable */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1110],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_slice, .length = 2, .cproto = 1, .magic = 40 },
+    }, /* slice */
     [365] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1109],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_transfer, .length = 0, .cproto = 1, .magic = 2 },
-    }, /* transferToFixedLength */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1112],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_slice, .length = 2, .cproto = 1, .magic = 41 },
+    }, /* sliceToImmutable */
     [366] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_36.sh, .prop = (JSProperty *)&js_rom_props[1111],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_constructor, .length = 1, .cproto = 2, .magic = 0 },
-    }, /* ArrayBuffer */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1114],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_transfer, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* transfer */
     [367] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1116],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_isView, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isView */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_transfer, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* transferToImmutable */
     [368] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1118],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_transfer, .length = 0, .cproto = 1, .magic = 2 },
+    }, /* transferToFixedLength */
     [369] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_37.sh, .prop = (JSProperty *)&js_rom_props[1120],
-    }, /*  */
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_36.sh, .prop = (JSProperty *)&js_rom_props[1120],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_constructor, .length = 1, .cproto = 2, .magic = 0 },
+    }, /* ArrayBuffer */
     [370] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1127],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_byteLength, .length = 0, .cproto = 10, .magic = 21 },
-    }, /* get byteLength */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1125],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_isView, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isView */
     [371] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1129],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_maxByteLength, .length = 0, .cproto = 10, .magic = 21 },
-    }, /* get maxByteLength */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1127],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
     [372] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1131],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_resizable, .length = 0, .cproto = 10, .magic = 21 },
-    }, /* get growable */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_37.sh, .prop = (JSProperty *)&js_rom_props[1129],
+    }, /*  */
     [373] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1133],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_resize, .length = 1, .cproto = 1, .magic = 21 },
-    }, /* grow */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1136],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_byteLength, .length = 0, .cproto = 10, .magic = 21 },
+    }, /* get byteLength */
     [374] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1135],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_slice, .length = 2, .cproto = 1, .magic = 42 },
-    }, /* slice */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1138],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_maxByteLength, .length = 0, .cproto = 10, .magic = 21 },
+    }, /* get maxByteLength */
     [375] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_38.sh, .prop = (JSProperty *)&js_rom_props[1137],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_shared_array_buffer_constructor, .length = 1, .cproto = 2, .magic = 0 },
-    }, /* SharedArrayBuffer */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1140],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_get_resizable, .length = 0, .cproto = 10, .magic = 21 },
+    }, /* get growable */
     [376] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1141],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1142],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_resize, .length = 1, .cproto = 1, .magic = 21 },
+    }, /* grow */
     [377] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_39.sh, .prop = (JSProperty *)&js_rom_props[1143],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1144],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_buffer_slice, .length = 2, .cproto = 1, .magic = 42 },
+    }, /* slice */
     [378] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_40.sh, .prop = (JSProperty *)&js_rom_props[1145],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 22 },
-    }, /* Uint8ClampedArray */
+           .shape = (JSShape *)&js_rom_sh_38.sh, .prop = (JSProperty *)&js_rom_props[1146],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_shared_array_buffer_constructor, .length = 1, .cproto = 2, .magic = 0 },
+    }, /* SharedArrayBuffer */
     [379] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_41.sh, .prop = (JSProperty *)&js_rom_props[1149],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1150],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
     [380] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_39.sh, .prop = (JSProperty *)&js_rom_props[1152],
+    }, /*  */
+    [381] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_42.sh, .prop = (JSProperty *)&js_rom_props[1151],
+           .shape = (JSShape *)&js_rom_sh_40.sh, .prop = (JSProperty *)&js_rom_props[1154],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 22 },
+    }, /* Uint8ClampedArray */
+    [382] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_41.sh, .prop = (JSProperty *)&js_rom_props[1158],
+    }, /*  */
+    [383] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_42.sh, .prop = (JSProperty *)&js_rom_props[1160],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 23 },
     }, /* Int8Array */
-    [381] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [384] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_43.sh, .prop = (JSProperty *)&js_rom_props[1155],
+           .shape = (JSShape *)&js_rom_sh_43.sh, .prop = (JSProperty *)&js_rom_props[1164],
     }, /*  */
-    [382] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [385] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_44.sh, .prop = (JSProperty *)&js_rom_props[1157],
+           .shape = (JSShape *)&js_rom_sh_44.sh, .prop = (JSProperty *)&js_rom_props[1166],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 24 },
     }, /* Uint8Array */
-    [383] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [386] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_45.sh, .prop = (JSProperty *)&js_rom_props[1161],
+           .shape = (JSShape *)&js_rom_sh_45.sh, .prop = (JSProperty *)&js_rom_props[1170],
     }, /*  */
-    [384] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [387] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_46.sh, .prop = (JSProperty *)&js_rom_props[1163],
+           .shape = (JSShape *)&js_rom_sh_46.sh, .prop = (JSProperty *)&js_rom_props[1172],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 25 },
     }, /* Int16Array */
-    [385] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [388] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_47.sh, .prop = (JSProperty *)&js_rom_props[1167],
+           .shape = (JSShape *)&js_rom_sh_47.sh, .prop = (JSProperty *)&js_rom_props[1176],
     }, /*  */
-    [386] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [389] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_48.sh, .prop = (JSProperty *)&js_rom_props[1169],
+           .shape = (JSShape *)&js_rom_sh_48.sh, .prop = (JSProperty *)&js_rom_props[1178],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 26 },
     }, /* Uint16Array */
-    [387] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [390] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_49.sh, .prop = (JSProperty *)&js_rom_props[1173],
+           .shape = (JSShape *)&js_rom_sh_49.sh, .prop = (JSProperty *)&js_rom_props[1182],
     }, /*  */
-    [388] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [391] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_50.sh, .prop = (JSProperty *)&js_rom_props[1175],
+           .shape = (JSShape *)&js_rom_sh_50.sh, .prop = (JSProperty *)&js_rom_props[1184],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 27 },
     }, /* Int32Array */
-    [389] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [392] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_51.sh, .prop = (JSProperty *)&js_rom_props[1179],
+           .shape = (JSShape *)&js_rom_sh_51.sh, .prop = (JSProperty *)&js_rom_props[1188],
     }, /*  */
-    [390] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [393] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_52.sh, .prop = (JSProperty *)&js_rom_props[1181],
+           .shape = (JSShape *)&js_rom_sh_52.sh, .prop = (JSProperty *)&js_rom_props[1190],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 28 },
     }, /* Uint32Array */
-    [391] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [394] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_53.sh, .prop = (JSProperty *)&js_rom_props[1185],
+           .shape = (JSShape *)&js_rom_sh_53.sh, .prop = (JSProperty *)&js_rom_props[1194],
     }, /*  */
-    [392] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [395] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_54.sh, .prop = (JSProperty *)&js_rom_props[1187],
+           .shape = (JSShape *)&js_rom_sh_54.sh, .prop = (JSProperty *)&js_rom_props[1196],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 29 },
     }, /* BigInt64Array */
-    [393] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [396] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_55.sh, .prop = (JSProperty *)&js_rom_props[1191],
+           .shape = (JSShape *)&js_rom_sh_55.sh, .prop = (JSProperty *)&js_rom_props[1200],
     }, /*  */
-    [394] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [397] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_56.sh, .prop = (JSProperty *)&js_rom_props[1193],
+           .shape = (JSShape *)&js_rom_sh_56.sh, .prop = (JSProperty *)&js_rom_props[1202],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 30 },
     }, /* BigUint64Array */
-    [395] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [398] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_57.sh, .prop = (JSProperty *)&js_rom_props[1197],
+           .shape = (JSShape *)&js_rom_sh_57.sh, .prop = (JSProperty *)&js_rom_props[1206],
     }, /*  */
-    [396] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [399] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_58.sh, .prop = (JSProperty *)&js_rom_props[1199],
+           .shape = (JSShape *)&js_rom_sh_58.sh, .prop = (JSProperty *)&js_rom_props[1208],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 31 },
     }, /* Float16Array */
-    [397] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [400] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_59.sh, .prop = (JSProperty *)&js_rom_props[1203],
+           .shape = (JSShape *)&js_rom_sh_59.sh, .prop = (JSProperty *)&js_rom_props[1212],
     }, /*  */
-    [398] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [401] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_60.sh, .prop = (JSProperty *)&js_rom_props[1205],
+           .shape = (JSShape *)&js_rom_sh_60.sh, .prop = (JSProperty *)&js_rom_props[1214],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 32 },
     }, /* Float32Array */
-    [399] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_61.sh, .prop = (JSProperty *)&js_rom_props[1209],
-    }, /*  */
-    [400] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_62.sh, .prop = (JSProperty *)&js_rom_props[1211],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 33 },
-    }, /* Float64Array */
-    [401] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_63.sh, .prop = (JSProperty *)&js_rom_props[1215],
-    }, /*  */
     [402] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1242],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_get_buffer, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get buffer */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_61.sh, .prop = (JSProperty *)&js_rom_props[1218],
+    }, /*  */
     [403] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1244],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_get_byteLength, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get byteLength */
+           .shape = (JSShape *)&js_rom_sh_62.sh, .prop = (JSProperty *)&js_rom_props[1220],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_typed_array_constructor, .length = 3, .cproto = 3, .magic = 33 },
+    }, /* Float64Array */
     [404] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1246],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_get_byteOffset, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get byteOffset */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_63.sh, .prop = (JSProperty *)&js_rom_props[1224],
+    }, /*  */
     [405] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1248],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 23 },
-    }, /* getInt8 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1251],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_get_buffer, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get buffer */
     [406] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1250],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 24 },
-    }, /* getUint8 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1253],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_get_byteLength, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get byteLength */
     [407] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1252],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 25 },
-    }, /* getInt16 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1255],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_get_byteOffset, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get byteOffset */
     [408] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1254],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 26 },
-    }, /* getUint16 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1257],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 23 },
+    }, /* getInt8 */
     [409] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1256],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 27 },
-    }, /* getInt32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1259],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 24 },
+    }, /* getUint8 */
     [410] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1258],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 28 },
-    }, /* getUint32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1261],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 25 },
+    }, /* getInt16 */
     [411] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1260],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 29 },
-    }, /* getBigInt64 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1263],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 26 },
+    }, /* getUint16 */
     [412] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1262],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 30 },
-    }, /* getBigUint64 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1265],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 27 },
+    }, /* getInt32 */
     [413] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1264],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 31 },
-    }, /* getFloat16 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1267],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 28 },
+    }, /* getUint32 */
     [414] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1266],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 32 },
-    }, /* getFloat32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1269],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 29 },
+    }, /* getBigInt64 */
     [415] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1268],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 33 },
-    }, /* getFloat64 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1271],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 30 },
+    }, /* getBigUint64 */
     [416] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1270],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 23 },
-    }, /* setInt8 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1273],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 31 },
+    }, /* getFloat16 */
     [417] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1272],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 24 },
-    }, /* setUint8 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1275],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 32 },
+    }, /* getFloat32 */
     [418] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1274],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 25 },
-    }, /* setInt16 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1277],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_getValue, .length = 1, .cproto = 1, .magic = 33 },
+    }, /* getFloat64 */
     [419] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1276],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 26 },
-    }, /* setUint16 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1279],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 23 },
+    }, /* setInt8 */
     [420] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1278],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 27 },
-    }, /* setInt32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1281],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 24 },
+    }, /* setUint8 */
     [421] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1280],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 28 },
-    }, /* setUint32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1283],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 25 },
+    }, /* setInt16 */
     [422] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1282],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 29 },
-    }, /* setBigInt64 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1285],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 26 },
+    }, /* setUint16 */
     [423] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1284],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 30 },
-    }, /* setBigUint64 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1287],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 27 },
+    }, /* setInt32 */
     [424] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1286],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 31 },
-    }, /* setFloat16 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1289],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 28 },
+    }, /* setUint32 */
     [425] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1288],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 32 },
-    }, /* setFloat32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1291],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 29 },
+    }, /* setBigInt64 */
     [426] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1290],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 33 },
-    }, /* setFloat64 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1293],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 30 },
+    }, /* setBigUint64 */
     [427] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_64.sh, .prop = (JSProperty *)&js_rom_props[1292],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_constructor, .length = 1, .cproto = 2, .magic = 0 },
-    }, /* DataView */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1295],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 31 },
+    }, /* setFloat16 */
     [428] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_65.sh, .prop = (JSProperty *)&js_rom_props[1295],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1297],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 32 },
+    }, /* setFloat32 */
     [429] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1299],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_toString, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* toString */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_setValue, .length = 2, .cproto = 1, .magic = 33 },
+    }, /* setFloat64 */
     [430] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1301],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_valueOf, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* valueOf */
-    [431] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_66.sh, .prop = (JSProperty *)&js_rom_props[1303],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_constructor, .length = 1, .cproto = 4, .magic = 0 },
-    }, /* BigInt */
+           .shape = (JSShape *)&js_rom_sh_64.sh, .prop = (JSProperty *)&js_rom_props[1301],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_dataview_constructor, .length = 1, .cproto = 2, .magic = 0 },
+    }, /* DataView */
+    [431] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_65.sh, .prop = (JSProperty *)&js_rom_props[1304],
+    }, /*  */
     [432] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1308],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_asUintN, .length = 2, .cproto = 1, .magic = 0 },
-    }, /* asUintN */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_toString, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* toString */
     [433] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1310],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_asUintN, .length = 2, .cproto = 1, .magic = 1 },
-    }, /* asIntN */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_valueOf, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* valueOf */
     [434] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_67.sh, .prop = (JSProperty *)&js_rom_props[1312],
-    }, /*  */
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_66.sh, .prop = (JSProperty *)&js_rom_props[1312],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_constructor, .length = 1, .cproto = 4, .magic = 0 },
+    }, /* BigInt */
     [435] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1327],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 2, .cproto = 1, .magic = 0 },
-    }, /* set */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1317],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_asUintN, .length = 2, .cproto = 1, .magic = 0 },
+    }, /* asUintN */
     [436] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1329],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* get */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1319],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_bigint_asUintN, .length = 2, .cproto = 1, .magic = 1 },
+    }, /* asIntN */
     [437] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1331],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 72 },
-    }, /* getOrInsert */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_67.sh, .prop = (JSProperty *)&js_rom_props[1321],
+    }, /*  */
     [438] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1333],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 73 },
-    }, /* getOrInsertComputed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1336],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 2, .cproto = 1, .magic = 0 },
+    }, /* set */
     [439] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1335],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* has */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1338],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* get */
     [440] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1337],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* delete */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1340],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 72 },
+    }, /* getOrInsert */
     [441] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1339],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_clear, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* clear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1342],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 73 },
+    }, /* getOrInsertComputed */
     [442] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1341],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get_size, .length = 0, .cproto = 10, .magic = 0 },
-    }, /* get size */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1344],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* has */
     [443] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1343],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_forEach, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* forEach */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1346],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* delete */
     [444] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1345],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 4 },
-    }, /* values */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1348],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_clear, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* clear */
     [445] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1347],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* keys */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1350],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get_size, .length = 0, .cproto = 10, .magic = 0 },
+    }, /* get size */
     [446] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1349],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 8 },
-    }, /* entries */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1352],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_forEach, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* forEach */
     [447] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_68.sh, .prop = (JSProperty *)&js_rom_props[1351],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 0 },
-    }, /* Map */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1354],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 4 },
+    }, /* values */
     [448] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1356],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_groupBy, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* groupBy */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* keys */
     [449] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1358],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 8 },
+    }, /* entries */
     [450] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_69.sh, .prop = (JSProperty *)&js_rom_props[1360],
-    }, /*  */
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_68.sh, .prop = (JSProperty *)&js_rom_props[1360],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 0 },
+    }, /* Map */
     [451] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1379],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* add */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1365],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_groupBy, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* groupBy */
     [452] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1381],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* has */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1367],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
     [453] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1383],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* delete */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_69.sh, .prop = (JSProperty *)&js_rom_props[1369],
+    }, /*  */
     [454] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1385],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_clear, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* clear */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1388],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* add */
     [455] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1387],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get_size, .length = 0, .cproto = 10, .magic = 1 },
-    }, /* get size */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1390],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* has */
     [456] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1389],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_forEach, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* forEach */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1392],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* delete */
     [457] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1391],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_isDisjointFrom, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isDisjointFrom */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1394],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_clear, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* clear */
     [458] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1393],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_isSubsetOf, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isSubsetOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1396],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get_size, .length = 0, .cproto = 10, .magic = 1 },
+    }, /* get size */
     [459] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1395],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_isSupersetOf, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isSupersetOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1398],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_forEach, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* forEach */
     [460] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1397],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_intersection, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* intersection */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1400],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_isDisjointFrom, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isDisjointFrom */
     [461] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1399],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_difference, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* difference */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1402],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_isSubsetOf, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isSubsetOf */
     [462] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1401],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_symmetricDifference, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* symmetricDifference */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1404],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_isSupersetOf, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isSupersetOf */
     [463] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1403],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_union, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* union */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1406],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_intersection, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* intersection */
     [464] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1405],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 1 },
-    }, /* values */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1408],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_difference, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* difference */
     [465] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1407],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 9 },
-    }, /* entries */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1410],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_symmetricDifference, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* symmetricDifference */
     [466] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_70.sh, .prop = (JSProperty *)&js_rom_props[1409],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 1 },
-    }, /* Set */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1412],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_set_union, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* union */
     [467] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1413],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get [Symbol.species] */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1414],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 1 },
+    }, /* values */
     [468] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_71.sh, .prop = (JSProperty *)&js_rom_props[1415],
-    }, /*  */
-    [469] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1423],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 2, .cproto = 1, .magic = 2 },
-    }, /* set */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1416],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_create_map_iterator, .length = 0, .cproto = 1, .magic = 9 },
+    }, /* entries */
+    [469] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_70.sh, .prop = (JSProperty *)&js_rom_props[1418],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 1 },
+    }, /* Set */
     [470] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1425],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* get */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1422],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_get_this, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get [Symbol.species] */
     [471] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1427],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 76 },
-    }, /* getOrInsert */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_71.sh, .prop = (JSProperty *)&js_rom_props[1424],
+    }, /*  */
     [472] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1429],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 77 },
-    }, /* getOrInsertComputed */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1432],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 2, .cproto = 1, .magic = 2 },
+    }, /* set */
     [473] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1431],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* has */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1434],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_get, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* get */
     [474] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1433],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* delete */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1436],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 76 },
+    }, /* getOrInsert */
     [475] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_72.sh, .prop = (JSProperty *)&js_rom_props[1435],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 2 },
-    }, /* WeakMap */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1438],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_getOrInsert, .length = 2, .cproto = 1, .magic = 77 },
+    }, /* getOrInsertComputed */
     [476] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_73.sh, .prop = (JSProperty *)&js_rom_props[1438],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1440],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* has */
     [477] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1443],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 1, .cproto = 1, .magic = 3 },
-    }, /* add */
-    [478] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1445],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 3 },
-    }, /* has */
-    [479] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1447],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 3 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1442],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 2 },
     }, /* delete */
-    [480] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [478] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_74.sh, .prop = (JSProperty *)&js_rom_props[1449],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 3 },
-    }, /* WeakSet */
-    [481] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .shape = (JSShape *)&js_rom_sh_72.sh, .prop = (JSProperty *)&js_rom_props[1444],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 2 },
+    }, /* WeakMap */
+    [479] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_75.sh, .prop = (JSProperty *)&js_rom_props[1452],
+           .shape = (JSShape *)&js_rom_sh_73.sh, .prop = (JSProperty *)&js_rom_props[1447],
     }, /*  */
+    [480] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1452],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_set, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* add */
+    [481] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1454],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_has, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* has */
     [482] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1455],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_concat_next, .length = 1, .cproto = 12, .magic = 0 },
-    }, /* next */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1456],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_delete, .length = 1, .cproto = 1, .magic = 3 },
+    }, /* delete */
     [483] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1457],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_concat_return, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* return */
+           .shape = (JSShape *)&js_rom_sh_74.sh, .prop = (JSProperty *)&js_rom_props[1458],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_constructor, .length = 0, .cproto = 3, .magic = 3 },
+    }, /* WeakSet */
     [484] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_76.sh, .prop = (JSProperty *)&js_rom_props[1459],
+           .shape = (JSShape *)&js_rom_sh_75.sh, .prop = (JSProperty *)&js_rom_props[1461],
     }, /*  */
     [485] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1462],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_helper_next, .length = 0, .cproto = 12, .magic = 0 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1464],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_concat_next, .length = 1, .cproto = 12, .magic = 0 },
     }, /* next */
     [486] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1464],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_helper_next, .length = 0, .cproto = 12, .magic = 1 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1466],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_concat_return, .length = 1, .cproto = 0, .magic = 0 },
     }, /* return */
     [487] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_77.sh, .prop = (JSProperty *)&js_rom_props[1466],
+           .shape = (JSShape *)&js_rom_sh_76.sh, .prop = (JSProperty *)&js_rom_props[1468],
     }, /*  */
     [488] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1468],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_wrap_next, .length = 0, .cproto = 12, .magic = 0 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1471],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_helper_next, .length = 0, .cproto = 12, .magic = 0 },
     }, /* next */
     [489] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1470],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_wrap_next, .length = 0, .cproto = 12, .magic = 1 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1473],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_helper_next, .length = 0, .cproto = 12, .magic = 1 },
     }, /* return */
     [490] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_78.sh, .prop = (JSProperty *)&js_rom_props[1472],
+           .shape = (JSShape *)&js_rom_sh_77.sh, .prop = (JSProperty *)&js_rom_props[1475],
     }, /*  */
     [491] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1474],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1477],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_wrap_next, .length = 0, .cproto = 12, .magic = 0 },
     }, /* next */
     [492] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_79.sh, .prop = (JSProperty *)&js_rom_props[1476],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1479],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_iterator_wrap_next, .length = 0, .cproto = 12, .magic = 1 },
+    }, /* return */
     [493] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1478],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_iterator_next, .length = 0, .cproto = 12, .magic = 1 },
-    }, /* next */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_78.sh, .prop = (JSProperty *)&js_rom_props[1481],
+    }, /*  */
     [494] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_80.sh, .prop = (JSProperty *)&js_rom_props[1480],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1483],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
+    }, /* next */
     [495] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1482],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
-    }, /* next */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_79.sh, .prop = (JSProperty *)&js_rom_props[1485],
+    }, /*  */
     [496] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_81.sh, .prop = (JSProperty *)&js_rom_props[1484],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1487],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_map_iterator_next, .length = 0, .cproto = 12, .magic = 1 },
+    }, /* next */
     [497] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1486],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
-    }, /* next */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_80.sh, .prop = (JSProperty *)&js_rom_props[1489],
+    }, /*  */
     [498] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_82.sh, .prop = (JSProperty *)&js_rom_props[1488],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1491],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_array_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
+    }, /* next */
     [499] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1490],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_string_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
-    }, /* next */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_81.sh, .prop = (JSProperty *)&js_rom_props[1493],
+    }, /*  */
     [500] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_83.sh, .prop = (JSProperty *)&js_rom_props[1492],
-    }, /*  */
-    [501] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_84.sh, .prop = (JSProperty *)&js_rom_props[1494],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_constructor, .length = 1, .cproto = 5, .magic = 2 },
-    }, /* AsyncFunction */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1495],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_string_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
+    }, /* next */
+    [501] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_82.sh, .prop = (JSProperty *)&js_rom_props[1497],
+    }, /*  */
     [502] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_85.sh, .prop = (JSProperty *)&js_rom_props[1497],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1499],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_regexp_string_iterator_next, .length = 0, .cproto = 12, .magic = 0 },
+    }, /* next */
     [503] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1500],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_from_sync_iterator_next, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* next */
-    [504] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1502],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_from_sync_iterator_next, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* return */
-    [505] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1504],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_from_sync_iterator_next, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* throw */
-    [506] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_86.sh, .prop = (JSProperty *)&js_rom_props[1506],
+           .shape = (JSShape *)&js_rom_sh_83.sh, .prop = (JSProperty *)&js_rom_props[1501],
     }, /*  */
-    [507] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [504] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_87.sh, .prop = (JSProperty *)&js_rom_props[1509],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_constructor, .length = 1, .cproto = 5, .magic = 3 },
-    }, /* AsyncGeneratorFunction */
+           .shape = (JSShape *)&js_rom_sh_84.sh, .prop = (JSProperty *)&js_rom_props[1503],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_constructor, .length = 1, .cproto = 5, .magic = 2 },
+    }, /* AsyncFunction */
+    [505] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_85.sh, .prop = (JSProperty *)&js_rom_props[1506],
+    }, /*  */
+    [506] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1509],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_from_sync_iterator_next, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* next */
+    [507] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1511],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_from_sync_iterator_next, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* return */
     [508] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_88.sh, .prop = (JSProperty *)&js_rom_props[1512],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1513],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_from_sync_iterator_next, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* throw */
     [509] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1517],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_generator_next, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* next */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_86.sh, .prop = (JSProperty *)&js_rom_props[1515],
+    }, /*  */
     [510] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1519],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_generator_next, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* return */
+           .shape = (JSShape *)&js_rom_sh_87.sh, .prop = (JSProperty *)&js_rom_props[1518],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_function_constructor, .length = 1, .cproto = 5, .magic = 3 },
+    }, /* AsyncGeneratorFunction */
     [511] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1521],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_generator_next, .length = 1, .cproto = 1, .magic = 2 },
-    }, /* throw */
-    [512] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_89.sh, .prop = (JSProperty *)&js_rom_props[1523],
+           .shape = (JSShape *)&js_rom_sh_88.sh, .prop = (JSProperty *)&js_rom_props[1521],
     }, /*  */
-    [513] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+    [512] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1526],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_weakref_deref, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* deref */
-    [514] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_generator_next, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* next */
+    [513] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_90.sh, .prop = (JSProperty *)&js_rom_props[1528],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_weakref_constructor, .length = 1, .cproto = 4, .magic = 0 },
-    }, /* WeakRef */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1528],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_generator_next, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* return */
+    [514] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1530],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_async_generator_next, .length = 1, .cproto = 1, .magic = 2 },
+    }, /* throw */
     [515] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_91.sh, .prop = (JSProperty *)&js_rom_props[1531],
+           .shape = (JSShape *)&js_rom_sh_89.sh, .prop = (JSProperty *)&js_rom_props[1532],
     }, /*  */
     [516] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1535],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_finrec_register, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* register */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_weakref_deref, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* deref */
     [517] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1537],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_finrec_unregister, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* unregister */
-    [518] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_92.sh, .prop = (JSProperty *)&js_rom_props[1539],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_finrec_constructor, .length = 1, .cproto = 4, .magic = 0 },
-    }, /* FinalizationRegistry */
+           .shape = (JSShape *)&js_rom_sh_90.sh, .prop = (JSProperty *)&js_rom_props[1537],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_weakref_constructor, .length = 1, .cproto = 4, .magic = 0 },
+    }, /* WeakRef */
+    [518] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_91.sh, .prop = (JSProperty *)&js_rom_props[1540],
+    }, /*  */
     [519] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 3,
-           .shape = (JSShape *)&js_rom_sh_93.sh, .prop = (JSProperty *)&js_rom_props[1542],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1544],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_finrec_register, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* register */
     [520] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1572],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_getfield, .length = 0, .cproto = 10, .magic = 0 },
-    }, /* get name */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1546],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_finrec_unregister, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* unregister */
     [521] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1574],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_getfield, .length = 0, .cproto = 10, .magic = 16 },
-    }, /* get message */
-    [522] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1576],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_get_code, .length = 0, .cproto = 8, .magic = 0 },
-    }, /* get code */
-    [523] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_94.sh, .prop = (JSProperty *)&js_rom_props[1578],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_constructor, .length = 2, .cproto = 4, .magic = 0 },
-    }, /* DOMException */
+           .shape = (JSShape *)&js_rom_sh_92.sh, .prop = (JSProperty *)&js_rom_props[1548],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_finrec_constructor, .length = 1, .cproto = 4, .magic = 0 },
+    }, /* FinalizationRegistry */
+    [522] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 3,
+           .shape = (JSShape *)&js_rom_sh_93.sh, .prop = (JSProperty *)&js_rom_props[1551],
+    }, /*  */
+    [523] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1581],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_getfield, .length = 0, .cproto = 10, .magic = 0 },
+    }, /* get name */
     [524] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_95.sh, .prop = (JSProperty *)&js_rom_props[1606],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1583],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_getfield, .length = 0, .cproto = 10, .magic = 16 },
+    }, /* get message */
     [525] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1613],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_isnative, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* isNative */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1585],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_get_code, .length = 0, .cproto = 8, .magic = 0 },
+    }, /* get code */
     [526] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1615],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getfield, .length = 0, .cproto = 1, .magic = 0 },
-    }, /* getFileName */
+           .shape = (JSShape *)&js_rom_sh_94.sh, .prop = (JSProperty *)&js_rom_props[1587],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_domexception_constructor, .length = 2, .cproto = 4, .magic = 0 },
+    }, /* DOMException */
     [527] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1617],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getfield, .length = 0, .cproto = 1, .magic = 16 },
-    }, /* getFunction */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_95.sh, .prop = (JSProperty *)&js_rom_props[1615],
+    }, /*  */
     [528] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1619],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getfield, .length = 0, .cproto = 1, .magic = 32 },
-    }, /* getFunctionName */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1622],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_isnative, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* isNative */
     [529] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1621],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getnumber, .length = 0, .cproto = 1, .magic = 56 },
-    }, /* getColumnNumber */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1624],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getfield, .length = 0, .cproto = 1, .magic = 0 },
+    }, /* getFileName */
     [530] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1623],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getnumber, .length = 0, .cproto = 1, .magic = 52 },
-    }, /* getLineNumber */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1626],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getfield, .length = 0, .cproto = 1, .magic = 16 },
+    }, /* getFunction */
     [531] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1625],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_isNaN, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isNaN */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1628],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getfield, .length = 0, .cproto = 1, .magic = 32 },
+    }, /* getFunctionName */
     [532] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1627],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_isFinite, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isFinite */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1630],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getnumber, .length = 0, .cproto = 1, .magic = 56 },
+    }, /* getColumnNumber */
     [533] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1629],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_queueMicrotask, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* queueMicrotask */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1632],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_callsite_getnumber, .length = 0, .cproto = 1, .magic = 52 },
+    }, /* getLineNumber */
     [534] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1631],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_decodeURI, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* decodeURI */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1634],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_isNaN, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isNaN */
     [535] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1633],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_decodeURI, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* decodeURIComponent */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1636],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_isFinite, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isFinite */
     [536] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1635],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_encodeURI, .length = 1, .cproto = 1, .magic = 0 },
-    }, /* encodeURI */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1638],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_queueMicrotask, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* queueMicrotask */
     [537] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1637],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_encodeURI, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* encodeURIComponent */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1640],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_decodeURI, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* decodeURI */
     [538] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1639],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_escape, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* escape */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1642],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_decodeURI, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* decodeURIComponent */
     [539] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1641],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_unescape, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* unescape */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1644],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_encodeURI, .length = 1, .cproto = 1, .magic = 0 },
+    }, /* encodeURI */
     [540] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_96.sh, .prop = (JSProperty *)&js_rom_props[1643],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1646],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_encodeURI, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* encodeURIComponent */
     [541] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1689],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_min_max, .length = 2, .cproto = 1, .magic = 0 },
-    }, /* min */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1648],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_escape, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* escape */
     [542] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1691],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_min_max, .length = 2, .cproto = 1, .magic = 1 },
-    }, /* max */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1650],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_global_unescape, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* unescape */
     [543] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1693],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_fabs, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* abs */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_96.sh, .prop = (JSProperty *)&js_rom_props[1652],
+    }, /*  */
     [544] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1695],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_floor, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* floor */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1698],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_min_max, .length = 2, .cproto = 1, .magic = 0 },
+    }, /* min */
     [545] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1697],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_ceil, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* ceil */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1700],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_min_max, .length = 2, .cproto = 1, .magic = 1 },
+    }, /* max */
     [546] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1699],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_round, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* round */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1702],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_fabs, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* abs */
     [547] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1701],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sqrt, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* sqrt */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1704],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_floor, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* floor */
     [548] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1703],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_acos, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* acos */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1706],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_ceil, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* ceil */
     [549] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1705],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_asin, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* asin */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1708],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_round, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* round */
     [550] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1707],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_atan, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* atan */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1710],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sqrt, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* sqrt */
     [551] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1709],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_atan2, .length = 2, .cproto = 7, .magic = 0 },
-    }, /* atan2 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1712],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_acos, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* acos */
     [552] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1711],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_cos, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* cos */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1714],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_asin, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* asin */
     [553] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1713],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_exp, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* exp */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1716],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_atan, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* atan */
     [554] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1715],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* log */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1718],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_atan2, .length = 2, .cproto = 7, .magic = 0 },
+    }, /* atan2 */
     [555] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1717],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_pow, .length = 2, .cproto = 7, .magic = 0 },
-    }, /* pow */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1720],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_cos, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* cos */
     [556] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1719],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sin, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* sin */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1722],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_exp, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* exp */
     [557] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1721],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_tan, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* tan */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1724],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* log */
     [558] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1723],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_trunc, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* trunc */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1726],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_pow, .length = 2, .cproto = 7, .magic = 0 },
+    }, /* pow */
     [559] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1725],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sign, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* sign */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1728],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sin, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* sin */
     [560] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1727],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_cosh, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* cosh */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1730],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_tan, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* tan */
     [561] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1729],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sinh, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* sinh */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1732],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_trunc, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* trunc */
     [562] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1731],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_tanh, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* tanh */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1734],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sign, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* sign */
     [563] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1733],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_acosh, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* acosh */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1736],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_cosh, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* cosh */
     [564] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1735],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_asinh, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* asinh */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1738],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sinh, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* sinh */
     [565] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1737],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_atanh, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* atanh */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1740],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_tanh, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* tanh */
     [566] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1739],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_expm1, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* expm1 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1742],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_acosh, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* acosh */
     [567] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1741],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log1p, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* log1p */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1744],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_asinh, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* asinh */
     [568] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1743],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log2, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* log2 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1746],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_atanh, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* atanh */
     [569] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1745],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log10, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* log10 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1748],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_expm1, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* expm1 */
     [570] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1747],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_cbrt, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* cbrt */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1750],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log1p, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* log1p */
     [571] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1749],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_hypot, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* hypot */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1752],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log2, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* log2 */
     [572] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1751],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_random, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* random */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1754],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_log10, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* log10 */
     [573] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1753],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_f16round, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* f16round */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1756],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_cbrt, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* cbrt */
     [574] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1755],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_fround, .length = 1, .cproto = 6, .magic = 0 },
-    }, /* fround */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1758],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_hypot, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* hypot */
     [575] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1757],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_imul, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* imul */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1760],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_random, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* random */
     [576] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1759],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_clz32, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* clz32 */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1762],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_f16round, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* f16round */
     [577] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1761],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sumPrecise, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* sumPrecise */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1764],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_fround, .length = 1, .cproto = 6, .magic = 0 },
+    }, /* fround */
     [578] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_97.sh, .prop = (JSProperty *)&js_rom_props[1763],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1766],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_imul, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* imul */
     [579] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1777],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_apply, .length = 3, .cproto = 0, .magic = 0 },
-    }, /* apply */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1768],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_clz32, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* clz32 */
     [580] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1779],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_construct, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* construct */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1770],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_math_sumPrecise, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* sumPrecise */
     [581] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1781],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_defineProperty, .length = 3, .cproto = 1, .magic = 1 },
-    }, /* defineProperty */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_97.sh, .prop = (JSProperty *)&js_rom_props[1772],
+    }, /*  */
     [582] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1783],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_deleteProperty, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* deleteProperty */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1786],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_apply, .length = 3, .cproto = 0, .magic = 0 },
+    }, /* apply */
     [583] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1785],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_get, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* get */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1788],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_construct, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* construct */
     [584] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1787],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_getOwnPropertyDescriptor, .length = 2, .cproto = 1, .magic = 1 },
-    }, /* getOwnPropertyDescriptor */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1790],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_defineProperty, .length = 3, .cproto = 1, .magic = 1 },
+    }, /* defineProperty */
     [585] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1789],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_getPrototypeOf, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* getPrototypeOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1792],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_deleteProperty, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* deleteProperty */
     [586] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1791],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_has, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* has */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1794],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_get, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* get */
     [587] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1793],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_isExtensible, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* isExtensible */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1796],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_getOwnPropertyDescriptor, .length = 2, .cproto = 1, .magic = 1 },
+    }, /* getOwnPropertyDescriptor */
     [588] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1795],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_ownKeys, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* ownKeys */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1798],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_getPrototypeOf, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* getPrototypeOf */
     [589] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1797],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_preventExtensions, .length = 1, .cproto = 1, .magic = 1 },
-    }, /* preventExtensions */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1800],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_has, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* has */
     [590] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1799],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_set, .length = 3, .cproto = 0, .magic = 0 },
-    }, /* set */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1802],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_isExtensible, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* isExtensible */
     [591] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1801],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_setPrototypeOf, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* setPrototypeOf */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1804],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_ownKeys, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* ownKeys */
     [592] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_98.sh, .prop = (JSProperty *)&js_rom_props[1803],
-    }, /*  */
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1806],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_object_preventExtensions, .length = 1, .cproto = 1, .magic = 1 },
+    }, /* preventExtensions */
     [593] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1808],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_isRawJSON, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isRawJSON */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_set, .length = 3, .cproto = 0, .magic = 0 },
+    }, /* set */
     [594] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1810],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_parse, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* parse */
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_reflect_setPrototypeOf, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* setPrototypeOf */
     [595] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1812],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_rawJSON, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* rawJSON */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_98.sh, .prop = (JSProperty *)&js_rom_props[1812],
+    }, /*  */
     [596] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1814],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_stringify, .length = 3, .cproto = 0, .magic = 0 },
-    }, /* stringify */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1817],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_isRawJSON, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isRawJSON */
     [597] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_99.sh, .prop = (JSProperty *)&js_rom_props[1816],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_proxy_constructor, .length = 2, .cproto = 2, .magic = 0 },
-    }, /* Proxy */
-    [598] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
            .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1819],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_proxy_revocable, .length = 2, .cproto = 0, .magic = 0 },
-    }, /* revocable */
-    [599] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
-           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 1,
-           .shape = (JSShape *)&js_rom_sh_100.sh, .prop = (JSProperty *)&js_rom_props[1821],
-    }, /*  */
-    [600] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_parse, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* parse */
+    [598] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1835],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 0 },
-    }, /* add */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1821],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_rawJSON, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* rawJSON */
+    [599] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1823],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_json_stringify, .length = 3, .cproto = 0, .magic = 0 },
+    }, /* stringify */
+    [600] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 1,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_99.sh, .prop = (JSProperty *)&js_rom_props[1825],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_proxy_constructor, .length = 2, .cproto = 2, .magic = 0 },
+    }, /* Proxy */
     [601] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1837],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 1 },
-    }, /* and */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1828],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_proxy_revocable, .length = 2, .cproto = 0, .magic = 0 },
+    }, /* revocable */
     [602] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
-           .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1839],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 2 },
-    }, /* or */
+           .is_HTMLDDA = 0, .class_id = 1,
+           .shape = (JSShape *)&js_rom_sh_100.sh, .prop = (JSProperty *)&js_rom_props[1830],
+    }, /*  */
     [603] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1841],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 3 },
-    }, /* sub */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1844],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 0 },
+    }, /* add */
     [604] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1843],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 4 },
-    }, /* xor */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1846],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 1 },
+    }, /* and */
     [605] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1845],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 5 },
-    }, /* exchange */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1848],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 2 },
+    }, /* or */
     [606] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1847],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 4, .cproto = 1, .magic = 6 },
-    }, /* compareExchange */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1850],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 3 },
+    }, /* sub */
     [607] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1849],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 2, .cproto = 1, .magic = 7 },
-    }, /* load */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1852],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 4 },
+    }, /* xor */
     [608] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1851],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_store, .length = 3, .cproto = 0, .magic = 0 },
-    }, /* store */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1854],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 3, .cproto = 1, .magic = 5 },
+    }, /* exchange */
     [609] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1853],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_isLockFree, .length = 1, .cproto = 0, .magic = 0 },
-    }, /* isLockFree */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1856],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 4, .cproto = 1, .magic = 6 },
+    }, /* compareExchange */
     [610] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1855],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_pause, .length = 0, .cproto = 0, .magic = 0 },
-    }, /* pause */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1858],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_op, .length = 2, .cproto = 1, .magic = 7 },
+    }, /* load */
     [611] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1857],
-           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_wait, .length = 4, .cproto = 0, .magic = 0 },
-    }, /* wait */
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1860],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_store, .length = 3, .cproto = 0, .magic = 0 },
+    }, /* store */
     [612] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
            .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
            .is_HTMLDDA = 0, .class_id = 12,
-           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1859],
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1862],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_isLockFree, .length = 1, .cproto = 0, .magic = 0 },
+    }, /* isLockFree */
+    [613] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1864],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_pause, .length = 0, .cproto = 0, .magic = 0 },
+    }, /* pause */
+    [614] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1866],
+           .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_wait, .length = 4, .cproto = 0, .magic = 0 },
+    }, /* wait */
+    [615] = { .__gc_ref_count = JS_IMMORTAL_REF_COUNT, .__gc_mark = 0x40, .is_prototype = 1,
+           .extensible = 0, .is_exotic = 0, .fast_array = 0, .is_constructor = 0,
+           .is_HTMLDDA = 0, .class_id = 12,
+           .shape = (JSShape *)&js_rom_sh_2.sh, .prop = (JSProperty *)&js_rom_props[1868],
            .u.cfunc = { .c_function.generic = (JSCFunction *)js_atomics_notify, .length = 3, .cproto = 0, .magic = 0 },
     }, /* notify */
 };
@@ -7912,141 +7943,141 @@ static void js_rom_wire(JSContext *ctx)
     ctx->function_proto = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[0]);
     ctx->function_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[47]);
     ctx->array_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[48]);
-    ctx->regexp_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[93]);
-    ctx->promise_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[116]);
-    ctx->error_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[130]);
-    ctx->iterator_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[139]);
-    ctx->iterator_ctor_getset = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[157]);
+    ctx->regexp_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[94]);
+    ctx->promise_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[117]);
+    ctx->error_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[131]);
+    ctx->iterator_ctor = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[140]);
+    ctx->iterator_ctor_getset = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[160]);
     ctx->iterator_proto = ROM_JSV_INT(0, 0);
-    ctx->async_iterator_proto = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[158]);
-    ctx->array_proto_values = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[89]);
+    ctx->async_iterator_proto = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[161]);
+    ctx->array_proto_values = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[90]);
     ctx->throw_type_error = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[38]);
-    ctx->eval_obj = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[160]);
-    ctx->ta_base = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[161]);
-    ctx->native_error_proto[0] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[201]);
-    ctx->native_error_proto[1] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[203]);
-    ctx->native_error_proto[2] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[205]);
-    ctx->native_error_proto[3] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[207]);
-    ctx->native_error_proto[4] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[209]);
-    ctx->native_error_proto[5] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[211]);
-    ctx->native_error_proto[6] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[213]);
-    ctx->native_error_proto[7] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[215]);
+    ctx->eval_obj = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[163]);
+    ctx->ta_base = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[164]);
+    ctx->native_error_proto[0] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[204]);
+    ctx->native_error_proto[1] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[206]);
+    ctx->native_error_proto[2] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[208]);
+    ctx->native_error_proto[3] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[210]);
+    ctx->native_error_proto[4] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[212]);
+    ctx->native_error_proto[5] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[214]);
+    ctx->native_error_proto[6] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[216]);
+    ctx->native_error_proto[7] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[218]);
     ctx->class_proto[1] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[1]);
-    ctx->class_proto[2] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[53]);
-    ctx->class_proto[3] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[131]);
-    ctx->class_proto[4] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[217]);
-    ctx->class_proto[5] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[231]);
-    ctx->class_proto[6] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[285]);
-    ctx->class_proto[7] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[289]);
-    ctx->class_proto[10] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[297]);
+    ctx->class_proto[2] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[54]);
+    ctx->class_proto[3] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[132]);
+    ctx->class_proto[4] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[220]);
+    ctx->class_proto[5] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[234]);
+    ctx->class_proto[6] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[288]);
+    ctx->class_proto[7] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[292]);
+    ctx->class_proto[10] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[300]);
     ctx->class_proto[13] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[0]);
-    ctx->class_proto[17] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[348]);
-    ctx->class_proto[19] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[94]);
-    ctx->class_proto[20] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[354]);
-    ctx->class_proto[21] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[369]);
-    ctx->class_proto[22] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[377]);
-    ctx->class_proto[23] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[379]);
-    ctx->class_proto[24] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[381]);
-    ctx->class_proto[25] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[383]);
-    ctx->class_proto[26] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[385]);
-    ctx->class_proto[27] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[387]);
-    ctx->class_proto[28] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[389]);
-    ctx->class_proto[29] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[391]);
-    ctx->class_proto[30] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[393]);
-    ctx->class_proto[31] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[395]);
-    ctx->class_proto[32] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[397]);
-    ctx->class_proto[33] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[399]);
-    ctx->class_proto[34] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[401]);
-    ctx->class_proto[35] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[428]);
-    ctx->class_proto[36] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[434]);
-    ctx->class_proto[37] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[450]);
-    ctx->class_proto[38] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[468]);
-    ctx->class_proto[39] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[476]);
-    ctx->class_proto[40] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[142]);
-    ctx->class_proto[41] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[481]);
-    ctx->class_proto[42] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[484]);
-    ctx->class_proto[43] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[487]);
-    ctx->class_proto[44] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[490]);
-    ctx->class_proto[45] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[492]);
-    ctx->class_proto[46] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[494]);
-    ctx->class_proto[47] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[496]);
-    ctx->class_proto[48] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[498]);
-    ctx->class_proto[49] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[350]);
-    ctx->class_proto[51] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[126]);
-    ctx->class_proto[54] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[500]);
-    ctx->class_proto[57] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[502]);
-    ctx->class_proto[58] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[506]);
-    ctx->class_proto[59] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[508]);
-    ctx->class_proto[60] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[512]);
-    ctx->class_proto[61] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[515]);
-    ctx->class_proto[62] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[519]);
-    ctx->class_proto[63] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[524]);
+    ctx->class_proto[17] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[351]);
+    ctx->class_proto[19] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[95]);
+    ctx->class_proto[20] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[357]);
+    ctx->class_proto[21] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[372]);
+    ctx->class_proto[22] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[380]);
+    ctx->class_proto[23] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[382]);
+    ctx->class_proto[24] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[384]);
+    ctx->class_proto[25] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[386]);
+    ctx->class_proto[26] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[388]);
+    ctx->class_proto[27] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[390]);
+    ctx->class_proto[28] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[392]);
+    ctx->class_proto[29] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[394]);
+    ctx->class_proto[30] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[396]);
+    ctx->class_proto[31] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[398]);
+    ctx->class_proto[32] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[400]);
+    ctx->class_proto[33] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[402]);
+    ctx->class_proto[34] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[404]);
+    ctx->class_proto[35] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[431]);
+    ctx->class_proto[36] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[437]);
+    ctx->class_proto[37] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[453]);
+    ctx->class_proto[38] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[471]);
+    ctx->class_proto[39] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[479]);
+    ctx->class_proto[40] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[145]);
+    ctx->class_proto[41] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[484]);
+    ctx->class_proto[42] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[487]);
+    ctx->class_proto[43] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[490]);
+    ctx->class_proto[44] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[493]);
+    ctx->class_proto[45] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[495]);
+    ctx->class_proto[46] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[497]);
+    ctx->class_proto[47] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[499]);
+    ctx->class_proto[48] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[501]);
+    ctx->class_proto[49] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[353]);
+    ctx->class_proto[51] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[127]);
+    ctx->class_proto[54] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[503]);
+    ctx->class_proto[57] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[505]);
+    ctx->class_proto[58] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[509]);
+    ctx->class_proto[59] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[511]);
+    ctx->class_proto[60] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[515]);
+    ctx->class_proto[61] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[518]);
+    ctx->class_proto[62] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[522]);
+    ctx->class_proto[63] = ROM_JSV_PTR(JS_TAG_OBJECT, &js_rom_obj[527]);
 }
 
 static const JSRomGlobal js_rom_global[JS_ROM_GLOBAL_COUNT] = {
-    { 151, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[14]) }, /* Object */
-    { 162, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[47]) }, /* Function */
-    { 153, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[130]) }, /* Error */
-    { 207, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[202]) }, /* EvalError */
-    { 208, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[204]) }, /* RangeError */
-    { 209, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[206]) }, /* ReferenceError */
-    { 210, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[208]) }, /* SyntaxError */
-    { 211, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[210]) }, /* TypeError */
-    { 212, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[212]) }, /* URIError */
-    { 213, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[214]) }, /* InternalError */
-    { 231, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[216]) }, /* AggregateError */
-    { 188, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[139]) }, /* Iterator */
-    { 152, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[48]) }, /* Array */
-    { 501, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[225]) }, /* parseInt */
-    { 500, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[226]) }, /* parseFloat */
-    { 465, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[531]) }, /* isNaN */
-    { 461, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[532]) }, /* isFinite */
-    { 509, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[533]) }, /* queueMicrotask */
-    { 333, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[534]) }, /* decodeURI */
-    { 334, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[535]) }, /* decodeURIComponent */
-    { 341, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[536]) }, /* encodeURI */
-    { 342, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[537]) }, /* encodeURIComponent */
-    { 345, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[538]) }, /* escape */
-    { 616, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[539]) }, /* unescape */
-    { 246, 0x00, 0, ROM_PV_F64(0x7ff0000000000000ull, __builtin_inf()) }, /* Infinity */
-    { 262, 0x00, 0, ROM_PV_NAN() }, /* NaN */
+    { 156, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[14]) }, /* Object */
+    { 167, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[47]) }, /* Function */
+    { 158, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[131]) }, /* Error */
+    { 212, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[205]) }, /* EvalError */
+    { 213, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[207]) }, /* RangeError */
+    { 214, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[209]) }, /* ReferenceError */
+    { 215, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[211]) }, /* SyntaxError */
+    { 216, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[213]) }, /* TypeError */
+    { 217, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[215]) }, /* URIError */
+    { 218, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[217]) }, /* InternalError */
+    { 236, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[219]) }, /* AggregateError */
+    { 193, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[140]) }, /* Iterator */
+    { 157, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[48]) }, /* Array */
+    { 506, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[228]) }, /* parseInt */
+    { 505, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[229]) }, /* parseFloat */
+    { 470, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[534]) }, /* isNaN */
+    { 466, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[535]) }, /* isFinite */
+    { 514, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[536]) }, /* queueMicrotask */
+    { 338, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[537]) }, /* decodeURI */
+    { 339, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[538]) }, /* decodeURIComponent */
+    { 346, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[539]) }, /* encodeURI */
+    { 347, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[540]) }, /* encodeURIComponent */
+    { 350, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[541]) }, /* escape */
+    { 621, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[542]) }, /* unescape */
+    { 251, 0x00, 0, ROM_PV_F64(0x7ff0000000000000ull, __builtin_inf()) }, /* Infinity */
+    { 267, 0x00, 0, ROM_PV_NAN() }, /* NaN */
     { 70, 0x00, 0, ROM_PV_INT(3, 0) }, /* undefined */
-    { 224, 0x00, 0, ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_457.s) }, /* Symbol.toStringTag */
-    { 59, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[160]) }, /* eval */
-    { 154, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[224]) }, /* Number */
-    { 156, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[288]) }, /* Boolean */
-    { 155, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[281]) }, /* String */
-    { 159, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[540]) }, /* Math */
-    { 266, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[578]) }, /* Reflect */
-    { 157, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[294]) }, /* Symbol */
+    { 229, 0x00, 0, ROM_PV_PTR(JS_TAG_STRING, &js_rom_str_458.s) }, /* Symbol.toStringTag */
+    { 59, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[163]) }, /* eval */
+    { 159, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[227]) }, /* Number */
+    { 161, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[291]) }, /* Boolean */
+    { 160, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[284]) }, /* String */
+    { 164, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[543]) }, /* Math */
+    { 271, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[581]) }, /* Reflect */
+    { 162, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[297]) }, /* Symbol */
     { 142, 0x00, 1, ROM_PV_INT(JS_TAG_UNDEFINED, 0) }, /* globalThis */
-    { 181, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[431]) }, /* BigInt */
-    { 161, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[344]) }, /* Date */
-    { 165, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[93]) }, /* RegExp */
-    { 160, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[592]) }, /* JSON */
-    { 198, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[597]) }, /* Proxy */
-    { 184, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[447]) }, /* Map */
-    { 185, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[466]) }, /* Set */
-    { 186, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[475]) }, /* WeakMap */
-    { 187, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[480]) }, /* WeakSet */
-    { 166, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[366]) }, /* ArrayBuffer */
-    { 167, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[375]) }, /* SharedArrayBuffer */
-    { 168, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[378]) }, /* Uint8ClampedArray */
-    { 169, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[380]) }, /* Int8Array */
-    { 170, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[382]) }, /* Uint8Array */
-    { 171, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[384]) }, /* Int16Array */
-    { 172, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[386]) }, /* Uint16Array */
-    { 173, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[388]) }, /* Int32Array */
-    { 174, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[390]) }, /* Uint32Array */
-    { 175, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[392]) }, /* BigInt64Array */
-    { 176, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[394]) }, /* BigUint64Array */
-    { 177, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[396]) }, /* Float16Array */
-    { 178, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[398]) }, /* Float32Array */
-    { 179, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[400]) }, /* Float64Array */
-    { 180, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[427]) }, /* DataView */
-    { 232, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[599]) }, /* Atomics */
-    { 199, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[116]) }, /* Promise */
-    { 182, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[514]) }, /* WeakRef */
-    { 183, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[518]) }, /* FinalizationRegistry */
-    { 214, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[523]) }, /* DOMException */
+    { 186, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[434]) }, /* BigInt */
+    { 166, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[347]) }, /* Date */
+    { 170, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[94]) }, /* RegExp */
+    { 165, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[595]) }, /* JSON */
+    { 203, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[600]) }, /* Proxy */
+    { 189, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[450]) }, /* Map */
+    { 190, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[469]) }, /* Set */
+    { 191, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[478]) }, /* WeakMap */
+    { 192, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[483]) }, /* WeakSet */
+    { 171, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[369]) }, /* ArrayBuffer */
+    { 172, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[378]) }, /* SharedArrayBuffer */
+    { 173, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[381]) }, /* Uint8ClampedArray */
+    { 174, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[383]) }, /* Int8Array */
+    { 175, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[385]) }, /* Uint8Array */
+    { 176, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[387]) }, /* Int16Array */
+    { 177, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[389]) }, /* Uint16Array */
+    { 178, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[391]) }, /* Int32Array */
+    { 179, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[393]) }, /* Uint32Array */
+    { 180, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[395]) }, /* BigInt64Array */
+    { 181, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[397]) }, /* BigUint64Array */
+    { 182, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[399]) }, /* Float16Array */
+    { 183, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[401]) }, /* Float32Array */
+    { 184, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[403]) }, /* Float64Array */
+    { 185, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[430]) }, /* DataView */
+    { 237, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[602]) }, /* Atomics */
+    { 204, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[117]) }, /* Promise */
+    { 187, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[517]) }, /* WeakRef */
+    { 188, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[521]) }, /* FinalizationRegistry */
+    { 219, 0x00, 0, ROM_PV_PTR(JS_TAG_OBJECT, &js_rom_obj[526]) }, /* DOMException */
 };

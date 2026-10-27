@@ -1,0 +1,151 @@
+name: Procedural workspace reuse
+on:
+  pull_request:
+    paths:
+      - 'main/pocket/pocket_proc.*'
+      - 'main/pocket/derby_runner_affine.*'
+      - 'main/ui/kasane/ksn_proc*'
+      - 'apps/derby/derby_prog.js'
+      - 'apps/derby/derby_view.js'
+      - 'tools/kasane_contract/*pocket_proc*'
+      - 'tools/kasane_contract/proc_alloc_hook.h'
+      - 'tools/kasane_ir/check_equivalence.py'
+      - '.github/workflows/procedural-workspace.yml'
+permissions:
+  contents: read
+concurrency:
+  group: procedural-workspace-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_HEAD: 45a06e09606fec234b5c7241a004bbd9cce0e4e2
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Existing ROM capture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+      - name: Existing limits, turn, image and ROM contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p workspace-results
+          python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py 2>&1 | tee workspace-results/limits-turn.log
+          git show "$BASE_HEAD:main/pocket/pocket_proc.c" > workspace-results/baseline.c
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --proc-source "$PWD/workspace-results/baseline.c" --out workspace-results/baseline 2>&1 | tee workspace-results/image-baseline.log
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --out workspace-results/candidate 2>&1 | tee workspace-results/image-candidate.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=Path('workspace-results')
+          a=json.loads((r/'baseline/sha256.json').read_text())
+          b=json.loads((r/'candidate/sha256.json').read_text())
+          assert len(a)==48 and a==b
+          print('PASS 48 complete procedural RGB565 baseline/candidate rasters')
+          PY
+          python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py 2>&1 | tee workspace-results/rom.log
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: procedural-workspace-contracts-${{ env.SOURCE_HEAD }}
+          path: workspace-results/
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Normal product link and paired Xtensa objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_workspace -D SDKCONFIG="$PWD/build_workspace/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_workspace size > build_workspace/size.log
+          python3 - <<'PY'
+          import hashlib,json,os,shlex,subprocess
+          from pathlib import Path
+          b=Path('build_workspace').resolve()
+          config=(b/'sdkconfig').read_text()
+          for value in ('CONFIG_LOG_DEFAULT_LEVEL_INFO=y','CONFIG_COMPILER_OPTIMIZATION_SIZE=y',
+                        'CONFIG_POCKET_VM_ROM_INTRINSICS=y','CONFIG_POCKET_VM_HELPER_IRAM=y'):
+              assert value in config,value
+          assert not any(k+'=y' in config for k in ('CONFIG_SECURE_BOOT','CONFIG_SECURE_BOOT_V2_ENABLED',
+              'CONFIG_SECURE_FLASH_ENC_ENABLED','CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK'))
+          assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
+          cache=(b/'CMakeCache.txt').read_text().splitlines()
+          for key in ('POCKET_PROBES','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+              assert key+':BOOL=OFF' in cache,key
+          baseline=b/'baseline-pocket_proc.c'
+          baseline.write_bytes(subprocess.check_output(['git','show',os.environ['BASE_HEAD']+':main/pocket/pocket_proc.c']))
+          entry=next(c for c in json.loads((b/'compile_commands.json').read_text()) if c['file'].endswith('/main/pocket/pocket_proc.c'))
+          args=shlex.split(entry['command'])
+          compiler=next(Path(a) for a in args if Path(a).name.endswith('-gcc'))
+          size=compiler.with_name(compiler.name[:-3]+'size')
+          arms={}
+          for affine in (False,True):
+              arm={}
+              for label,source in (('baseline',baseline),('candidate',Path(entry['file']))):
+                  obj=b/(label+'-affine'+str(int(affine))+'.o')
+                  command=args.copy();command[command.index('-o')+1]=str(obj)
+                  assert command[-1]==entry['file']
+                  command[-1]=str(source)
+                  if affine:command.insert(1,'-DPOCKET_DERBY_RUNNER_AFFINE=1')
+                  subprocess.run(command,cwd=entry['directory'],check=True)
+                  output=subprocess.check_output([str(size),'-A',str(obj)],text=True)
+                  (b/(obj.stem+'.size.txt')).write_text(output)
+                  arm[label]=sum(int(v[1],0) for line in output.splitlines() if (v:=line.split()) and v[0].startswith(('.bss','.sbss')))
+              arm['delta']=arm['candidate']-arm['baseline']
+              assert arm['delta']==-3840,arm
+              arms['affine_on' if affine else 'default']=arm
+          names=['cardputer_pocketjs.elf','cardputer_pocketjs.bin','sdkconfig','partition_table/partition-table.bin']
+          report=dict(source_head=os.environ['SOURCE_HEAD'],base_head=os.environ['BASE_HEAD'],idf='6.0.1',
+              hardware_tested=False,object_bss=arms,images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names})
+          (b/'workspace.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: procedural-workspace-product-${{ env.SOURCE_HEAD }}
+          path: |
+            build_workspace/*.bin
+            build_workspace/*.elf
+            build_workspace/*.map
+            build_workspace/*.json
+            build_workspace/*.log
+            build_workspace/*.size.txt
+            build_workspace/sdkconfig
+            build_workspace/CMakeCache.txt
+            build_workspace/bootloader/bootloader.bin
+            build_workspace/partition_table/partition-table.bin
+          retention-days: 14

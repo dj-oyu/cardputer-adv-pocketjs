@@ -307,7 +307,7 @@ ctx の値は ROM を指す。`JS_NewContext` は「ROM の番地を ctx に配�
 `_Static_assert(offsetof(...))` でフィールド位置を固定する。生成物はリポジトリに入れ、`--check`（F1 の `gen_rom_atoms.sh` と同じ）で
 陳腐化を止める。ROM atom の番号を埋め込むので、`quickjs-atom.h`／ROM atom 表が変わったら再生成。
 
-**RD5. bytecode の組み込み（`Array.fromAsync`、`Iterator.zip`、`Iterator.zipKeyed`）は harden の下で定義しない**（§6.5）。
+**RD5. bytecode の組み込み（`Array.fromAsync`、`Iterator.zip`、`Iterator.zipKeyed`）は harden の下で定義しない**（§6.5）。 **→ 2026-10-27 に 3 つとも C で書き直し、ROM に戻した（[c-builtins-zip-fromasync.md](c-builtins-zip-fromasync.md)）。**
 ROM の `Array` コンストラクタに「初回に RAM へ書く」プロパティは置けない。3 つとも出荷アプリは使わず、意味的にも ES2025〜 の付録。
 残す道は「context ごとに RAM で即時に作る」（評価のたびに 3 関数のコンパイル、数 KB）か「RAM の overlay」（XS の alias、hot path に判定）で、
 どちらも払わない。

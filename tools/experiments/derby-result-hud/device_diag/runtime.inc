@@ -17,7 +17,7 @@ static double diag_lead_first,diag_lead_last;
 static unsigned diag_views,diag_ou,diag_sqrt;
 static int diag_cmp(const void *a,const void *b){unsigned x=*(const unsigned*)a,y=*(const unsigned*)b;return (x>y)-(x<y);}
 bool derby_diag_finished(void){return diag_done;}
-bool derby_diag_valid(void){return diag_n==120&&diag_down==120&&diag_queries==1440;}
+bool derby_diag_valid(void){return diag_n==@EXPECTED_FRAMES@&&diag_down==@EXPECTED_DOWN@&&diag_queries==@EXPECTED_QUERIES@;}
 void derby_diag_owner_tick(unsigned us,bool continued){
     if(diag_sampling){diag_ticks++;diag_tick_sum+=us;diag_cont+=continued;}
 }

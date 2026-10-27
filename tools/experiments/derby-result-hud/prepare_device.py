@@ -21,6 +21,28 @@ def input_source(s):
 def workload():
     return (TEMPLATE/'workload.js').read_text()
 
+def expected_input(play):
+    # Fixed manual RESULT: three pressed() calls remain outside attract().
+    # Select from the target source, including the historical firmware arm.
+    start='function attract(b) {\n'
+    end='  let hit = b || k && k !== kp;\n'
+    full=start+'  const k = K.down().join(), n = nw = pocket.time ? pocket.time.now() : 0;\n'+end
+    skip=start+'''  const n = nw = pocket.time ? pocket.time.now() : 0;
+  if (!dm && scene !== 'pad') { dk = 0; idle = n; return; }
+  const k = K.down().join();
+'''+end
+    assert play.count(start)==1 and play.count('K.down().join()')==1
+    if full in play:
+        return dict(profile='full-attract-scan',frames=120,down=120,queries=1440)
+    assert skip in play,'unrecognized attract input path'
+    return dict(profile='manual-nonpad-skip',frames=120,down=0,queries=360)
+
+def runtime_source(expected):
+    runtime=(TEMPLATE/'runtime.inc').read_text()
+    for key in ('frames','down','queries'):
+        runtime=change(runtime,'@EXPECTED_'+key.upper()+'@',str(expected[key]))
+    return runtime
+
 def prepare(dst):
     profile="oval"
     assert dst!=ROOT,'use a separate clean checkout'
@@ -33,7 +55,8 @@ def prepare(dst):
     def read(name):return (dst/name).read_text()
     play=read('apps/derby/derby_play.js')
     assert play.count('    attract(b);')==1 and play.count('K.down().join()')==1
-    runtime=(TEMPLATE/'runtime.inc').read_text()
+    expected=expected_input(play)
+    runtime=runtime_source(expected)
     s=read('main/pocket/pocket_derby.c')
     s=change(s,'#include <math.h>','#include <math.h>\n'+runtime)
     s=change(s,'static bool ou(unsigned j,double w,double m,double zf){','static bool ou(unsigned j,double w,double m,double zf){\n    ++derby_diag_ou;')
@@ -67,7 +90,7 @@ static void *diag_realloc(void *p,void *v,size_t n){++derby_diag_realloc;derby_d
     write('apps/derby/derby_play.js',read('apps/derby/derby_play.js')+'\n'+s)
     diff=subprocess.check_output(['git','diff','--binary'],cwd=dst)
     (dst/'diagnostic.patch').write_bytes(diff)
-    manifest=dict(source=head,workload=WORKLOAD,setup_steps_per_turn=8,setup_total_step_limit=6000,product_scene_sha256=hashlib.sha256((dst/'apps/derby/derby_scene.js').read_bytes()).hexdigest(),allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
+    manifest=dict(source=head,workload=WORKLOAD,expected_input=expected,product_play_sha256=hashlib.sha256(play.encode()).hexdigest(),setup_steps_per_turn=8,setup_total_step_limit=6000,product_scene_sha256=hashlib.sha256((dst/'apps/derby/derby_scene.js').read_bytes()).hexdigest(),allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
                   sha256={name:hashlib.sha256((dst/name).read_bytes()).hexdigest() for name in modified},patch_sha256=hashlib.sha256(diff).hexdigest())
     (dst/'diagnostic.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps(manifest,indent=2))

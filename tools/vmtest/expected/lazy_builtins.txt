@@ -6,7 +6,7 @@ Math min,max,abs,floor,ceil,round,sqrt,acos,asin,atan,atan2,cos,exp,log,pow,sin,
 Object.prototype toString,toLocaleString,valueOf,hasOwnProperty,isPrototypeOf,propertyIsEnumerable,__proto__,__defineGetter__,__defineSetter__,__lookupGetter__,__lookupSetter__,constructor
 Map.prototype set,get,getOrInsert,getOrInsertComputed,has,delete,clear,size,forEach,values,keys,entries,constructor,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
 String.prototype length,at,charCodeAt,charAt,concat,codePointAt,isWellFormed,toWellFormed,indexOf,lastIndexOf,includes,endsWith,startsWith,match,matchAll,search,split,substring,substr,slice,repeat,replace,replaceAll,padEnd,padStart,trim,trimEnd,trimRight,trimStart,trimLeft,toString,valueOf,localeCompare,normalize,toLowerCase,toUpperCase,toLocaleLowerCase,toLocaleUpperCase,anchor,big,blink,bold,fixed,fontcolor,fontsize,italics,link,small,strike,sub,sup,constructor,Symbol(Symbol.iterator)
-Array length,name,isArray,from,of,prototype,fromAsync,Symbol(Symbol.species)
+Array length,name,isArray,from,fromAsync,of,prototype,Symbol(Symbol.species)
 Object length,name,create,getPrototypeOf,setPrototypeOf,defineProperty,defineProperties,getOwnPropertyNames,getOwnPropertySymbols,groupBy,keys,values,entries,isExtensible,preventExtensions,getOwnPropertyDescriptor,getOwnPropertyDescriptors,is,assign,seal,freeze,isSealed,isFrozen,fromEntries,hasOwn,prototype
 Number length,name,parseInt,parseFloat,isNaN,isFinite,isInteger,isSafeInteger,MAX_VALUE,MIN_VALUE,EPSILON,MAX_SAFE_INTEGER,MIN_SAFE_INTEGER,NaN,NEGATIVE_INFINITY,POSITIVE_INFINITY,prototype
 Promise length,name,resolve,reject,all,allSettled,any,try,race,withResolvers,prototype,Symbol(Symbol.species)
@@ -24,8 +24,8 @@ identity true true true true
 has true true false true false
 delete true false  false 3.141592653589793
 after delete min,max,abs,floor,ceil,round,sqrt,acos,asin,atan,atan2,cos,exp,log,pow,sin,tan,trunc,sign,cosh,sinh,tanh,acosh,asinh,atanh,expm1,log1p,log2,log10,hypot,random,f16round,fround,imul,clz32,sumPrecise,E,LN10,LN2,LOG2E,LOG10E,PI,SQRT1_2,SQRT2,Symbol(Symbol.toStringTag)
-ctor before length,name,isArray,from,of,prototype,fromAsync,Symbol(Symbol.species)
-ctor after length,isArray,from,of,prototype,fromAsync,Symbol(Symbol.species)
+ctor before length,name,isArray,from,fromAsync,of,prototype,Symbol(Symbol.species)
+ctor after length,isArray,from,fromAsync,of,prototype,Symbol(Symbol.species)
 mine
 define fixed functionWC
 non-extensible function false

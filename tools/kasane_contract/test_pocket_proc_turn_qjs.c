@@ -360,6 +360,12 @@ static void cap_contract(JSContext *ctx){
     const size_t full=sizeof(ksn_proc_frame);
     REQUIRE(head==6u&&sizeof(ksn_proc_segment)==10u&&full==10246u);
     pocket_proc_reset(); /* sizing_contract left surface 0's buffers allocated */
+    ksn_image_port image;pocket_proc_image_port(&image);
+    uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
+    fail_alloc=true;calloc_n=0;
+    REQUIRE(image.read_span(image.ctx,0,0,134,0,KSN_PROC_W,span,alpha)==KSN_OK);
+    for(unsigned i=0;i<KSN_PROC_W;i++)REQUIRE(span[i]==0&&alpha[i]==255);
+    REQUIRE(calloc_n==0);fail_alloc=false;
     /* 128 PLOTs per draw: SET r0,r1; REPEAT 128 { PLOT } END. */
     eval_ok(ctx,
         "globalThis.p128=proc.register([[0,0,0,0,5,0],[0,1,0,0,7,0],"
@@ -405,7 +411,6 @@ static void cap_contract(JSContext *ctx){
         "proc.beginFrame(0,small);proc.draw(p128,[]);proc.draw(typed,[]);proc.draw(dot,[]);"
         "proc.commit()");
     ksn_image_port port;pocket_proc_image_port_at(&port,1);
-    uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
     REQUIRE(port.read_span(port.ctx,0,0,40,0,KSN_PROC_W,span,alpha)==KSN_OK);
     REQUIRE(span[40]==0xf800);
     REQUIRE(port.read_span(port.ctx,0,0,7,0,KSN_PROC_W,span,alpha)==KSN_OK);

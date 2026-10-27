@@ -50,8 +50,7 @@ static void put_c_string(FILE *f, const char *s, uint32_t len) {
    Without this they were missing from the table, and every app that touched
    Math made heap atoms for its methods -- and the ROM intrinsics (R2) could
    not hold those objects at all, an atom outside the table having no fixed
-   number. Bytecode builtins (Array.fromAsync...) are left alone: compiling
-   them interns their local names, which are not builtin names. */
+   number. */
 static int resolve_autoinit(JSContext *ctx) {
     JSRuntime *rt = ctx->rt;
     for (bool again = true; again;) {
@@ -64,8 +63,7 @@ static int resolve_autoinit(JSContext *ctx) {
             for (int i = 0; i < p->shape->prop_count; i++) {
                 JSShapeProperty *prs = &p->shape->prop[i];
                 JSProperty *pr = &p->prop[i];
-                if ((prs->flags & JS_PROP_TMASK) != JS_PROP_AUTOINIT ||
-                    js_autoinit_get_id(pr) == JS_AUTOINIT_ID_BYTECODE)
+                if ((prs->flags & JS_PROP_TMASK) != JS_PROP_AUTOINIT)
                     continue;
                 if (JS_AutoInitProperty(ctx, p, prs->atom, pr, prs) < 0) return -1;
                 again = true;  /* the lists changed under us: walk again */
