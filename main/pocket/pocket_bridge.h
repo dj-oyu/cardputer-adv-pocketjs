@@ -70,6 +70,8 @@
 // when the USB driver is not installed, ESP_ERR_TIMEOUT when the TX ring stayed
 // full (nothing is written in that case: the driver's send is all or nothing).
 esp_err_t pocket_bridge_emit(const uint8_t *body, size_t len);
+// C native control and B guest bridge share the same bounded encoder/writer.
+esp_err_t pocket_bridge_emit_namespace(uint8_t ns, const uint8_t *body, size_t len);
 
 // The entrance, called from main.c's USB reading with every byte. Returns true
 // when the byte belonged to a bridge frame and must not become a keystroke.

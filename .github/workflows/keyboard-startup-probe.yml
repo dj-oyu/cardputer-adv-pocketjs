@@ -59,7 +59,9 @@ jobs:
           assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in c
           assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in c
           assert not any(k+'=y' in c for k in ('CONFIG_SECURE_BOOT','CONFIG_SECURE_BOOT_V2_ENABLED','CONFIG_SECURE_FLASH_ENC_ENABLED','CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK'))
-          assert hashlib.sha256((b/'sdkconfig').read_bytes()).hexdigest()=='1ea8c8646f64c3b101373c41c76013fce22d252a279d72ef4d6a97dc2596ee93'
+          # Ordinary IDF 6.0.1 config after main enabled ROM intrinsics by default.
+          # Compared with the prior pin, only its default marker and CONFIG_POCKET_VM_ROM_INTRINSICS=y were added.
+          assert hashlib.sha256((b/'sdkconfig').read_bytes()).hexdigest()=='9fea08cfca669fe6e033e1ceb9281c7e1f89f49536a4419393bbc4108182a04b'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
           for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):

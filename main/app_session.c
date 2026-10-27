@@ -956,6 +956,10 @@ void app_report(void) {
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)stats.heap_used,frames);
 }
+static uint32_t guest_generation;
+bool app_guest_present(void) { return guest!=NULL; }
+uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
+
 void app_stop(void) {
     bool p0_had_guest=guest!=NULL;
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -1498,6 +1502,7 @@ esp_err_t app_start_test(char test) {
     // every session; pocket_proc_reset() keeps it.
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     TRY(pocketjs_guest_create(&gc,&guest));
+    if(++guest_generation==0)++guest_generation;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
     // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
