@@ -56,6 +56,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 | 文書 | 種別 | 中身 |
 | --- | --- | --- |
+| [kasane-dma-overlap.md](perf/kasane-dma-overlap.md) | 再提案 | #37 から通常 main へ抽出、既定 OFF・実機未受入。 |
 | [bigwave-inputs-local.md](perf/bigwave-inputs-local.md) | 実験 | BIG WAVEの入力配列5式、native A/Bと有限実機診断のローカル準備・未確認範囲 |
 | [pie-simd.md](perf/pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [flash-removals.md](perf/flash-removals.md) | 記録 | 「我々だけが参照元」のライブラリ会員を測った結果（`ui/shell.c` の `__divdf3` は ROM エイリアスで 0 B、`solar_sail.c` の `remainder` 402 B は落ちるが差し替えが +508 B、`sqrtf` は 294 B 落ちるがビット一致の差し替えが収まらない）。map の「理由」≠「根」、幻の取り込み、道具の過小カウント |

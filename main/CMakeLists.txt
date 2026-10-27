@@ -43,6 +43,10 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
     "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
+option(KASANE_DMA_OVERLAP "Experimental copied LCD DMA overlap with next Kasane band" OFF)
+if(KASANE_DMA_OVERLAP)
+    add_compile_definitions(KASANE_DMA_OVERLAP=1)
+endif()
 option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
 option(KASANE_FLOWER_FRAME_PROBE "Measure two captured FLOWER frames on the device" OFF)
 option(KASANE_FLOWER_D1_PROBE "Verify fixed FLOWER species and heap-pressure repair on device" OFF)

@@ -3011,9 +3011,26 @@ uint32_t pocket_kasane_opaque_system_bands(void){
 void pocket_kasane_invalidate(void) {
     ksn_runtime_invalidate();
 }
+#ifdef KASANE_DMA_OVERLAP
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
+    return pocket_kasane_present_complete(display,NULL,stats);
+}
+ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
+                                          const ksn_display_completion *completion,
+                                          ksn_render_stats *stats) {
+#else
+ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
+#endif
     if(!stats) return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+#ifdef KASANE_DMA_OVERLAP
+    /* No renderer will run on the empty path below. Complete any earlier
+     * board work before its no-damage native acknowledgements as well. */
+    if(!pocket_kasane_needs_present()&&completion&&completion->finish){
+        ksn_result done=completion->finish(completion->ctx);
+        if(done!=KSN_OK)return done;
+    }
+#endif
     if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
         if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
         else pocket_proc_present_result(KSN_OK);
@@ -3026,9 +3043,15 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
         pocket_pixel_present_result(KSN_OK);
     if(!pocket_kasane_needs_present()) return KSN_OK;
     bool proc_candidate=pocket_proc_pending();
+#ifdef KASANE_DMA_OVERLAP
+    ksn_backdrop_loader load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
+        pocket_proc_backdrop:NULL;
+    ksn_result result=ksn_runtime_present_complete(display,load,false,completion,stats);
+#else
     ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
         ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
         ksn_runtime_present(display,stats);
+#endif
     if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
         ksn_runtime_invalidate();
     else pocket_proc_present_result(result);
