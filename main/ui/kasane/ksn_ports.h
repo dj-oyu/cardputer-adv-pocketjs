@@ -36,6 +36,15 @@ typedef struct {
     ksn_result (*present_rect)(void *,uint16_t x,uint16_t y,uint16_t cols,
                                uint16_t rows,const uint16_t *pixels);
 } ksn_display_port;
+/* Owner-task completion boundary for a copied asynchronous display port.
+ * present callbacks must release their input before returning. finish drains
+ * all submitted work, including after a raster/send error, before frame ACK.
+ * It must not reenter presentation or mutate the core. Kept separate from the
+ * stable display-port layout and its positional initializers. */
+typedef struct {
+    void *ctx;
+    ksn_result (*finish)(void *);
+} ksn_display_completion;
 /* Optional host backdrop for ksn_render_rects_backdrop. Called once per band
  * instead of clearing to the APP background. It must fill width*rows pixels. */
 typedef ksn_result (*ksn_backdrop_loader)(void *,uint16_t y,uint16_t rows,uint16_t *pixels);

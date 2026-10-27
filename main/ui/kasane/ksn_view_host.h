@@ -46,6 +46,9 @@ void ksn_view_host_end_turn(ksn_view_host *);
 /* Render then resolve cache/modal before guest/input resumes. IO retains the
  * submission for retry/cancel; partial transfer blocks app input until repair.
  * Without a submission, redraw the committed bank when repair is pending. */
+ksn_result ksn_view_host_present_complete(ksn_view_host *,const ksn_display_port *,
+                                          ksn_backdrop_loader,bool,
+                                          const ksn_display_completion *,ksn_render_stats *);
 ksn_result ksn_view_host_present(ksn_view_host *,const ksn_display_port *,ksn_render_stats *);
 ksn_result ksn_view_host_present_backdrop(ksn_view_host *,const ksn_display_port *,
                                           ksn_backdrop_loader,bool occlusion_safe,ksn_render_stats *);

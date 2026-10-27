@@ -1,0 +1,50 @@
+name: Copied DMA extraction
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          persist-credentials: false
+      - run: |
+          python tools/test_board_dma_overlap.py
+          python tools/test_board_transport.py
+          python tools/test_board_transport_report.py
+          python tools/test_kasane_dma_overlap.py
+          python tools/test_dma_completion_owners.py
+          python tools/test_session_dispatch.py
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        dma: ['OFF', 'ON']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Ordinary source and opt-in DMA ESP-IDF links
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -B build_dma -D SDKCONFIG="$PWD/build_dma/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_DMA_OVERLAP=${{ matrix.dma }} build
+          grep -qx 'KASANE_DMA_OVERLAP:BOOL=${{ matrix.dma }}' build_dma/CMakeCache.txt
