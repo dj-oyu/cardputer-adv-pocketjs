@@ -17119,10 +17119,12 @@ static no_inline __exception int js_binary_arith_slow(JSContext *ctx, JSValue *s
     op2 = sp[-1];
     tag1 = JS_VALUE_GET_NORM_TAG(op1);
     tag2 = JS_VALUE_GET_NORM_TAG(op2);
-    /* fast path for float operations */
-    if (tag1 == JS_TAG_FLOAT64 && tag2 == JS_TAG_FLOAT64) {
-        d1 = JS_VALUE_GET_FLOAT64(op1);
-        d2 = JS_VALUE_GET_FLOAT64(op2);
+    /* Primitive number pairs with at least one float need no coercion. */
+    if ((tag1 == JS_TAG_FLOAT64 &&
+         (tag2 == JS_TAG_FLOAT64 || tag2 == JS_TAG_INT)) ||
+        (tag1 == JS_TAG_INT && tag2 == JS_TAG_FLOAT64)) {
+        d1 = tag1 == JS_TAG_INT ? JS_VALUE_GET_INT(op1) : JS_VALUE_GET_FLOAT64(op1);
+        d2 = tag2 == JS_TAG_INT ? JS_VALUE_GET_INT(op2) : JS_VALUE_GET_FLOAT64(op2);
         goto handle_float64;
     }
     /* fast path for short big int operations */
