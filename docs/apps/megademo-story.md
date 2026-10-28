@@ -249,11 +249,12 @@ PR #93（ブローカーからアプリを起動する app-control-v1、ドラ�
 | 序 WAKE（新、最初に再生） | 104 | 0〜74: 暗闇の中、右から覗き込むタマ（逆光のシルエット、シアンのリム、光る目。下の節）。まぶた（全画面のシャッター）が半分開き、まばたきし、開く。タマは身を引いてこちらへ向き直り、ゆっくりまばたきし、首をかしげ、顔を寄せる。69〜80: まぶたが閉じて開く（体を起こす）間、74（`WCUT`）で部屋へ切り替わる。80〜100: タマがクッションへ歩く。テレビは消えたまま（手続き面は何も描かない）。字幕なし |
 | I BRIEFING（NEWS ×3） | 32×3 | テレビが勝手に点く（今までのシャッター）。テロップは `INCOMING ORDER  SORTIE 742` / `RECEIVER: ASTRAL FIGHTER` → `TARGET: LETHE` / `ROUTE SYNC COMPLETE` → `PILOT CONFIRMED` / `LEAVE THE BODY. CROSS THE RIVER`（3 拍目は `P1L0T C0NF1RM3D` と交互に化ける）。14 からカメラが画面へ入る（心が体を離れる）。左上の札は `RX` / `ASTRAL COMMAND` |
 | II CROSSING（TWIST） | 128 | 語り `LEAVING THE BODY` → `DEEPER` → `INTO LETHE` |
-| III LETHE（ZENITH） | 96 | 左上の得点の札が `LETHE`。通信窓のタマ（旧「操縦席の猫」）と `TAMA: ONLINE` → `EVADE!` → `TARGET LOCKED`。48 で被弾（残機が減る）と、部屋の体がびくりと動く（48〜51） |
+| III LETHE（ZENITH） | 96 | 左上の得点の札が `LETHE`。通信窓のタマ（旧「操縦席の猫」）と `TAMA: ONLINE` → `EVADE!` → `TARGET LOCKED`。48 で被弾（残機が減る） |
 | IV CORE | 140 | 変えていない |
-| V SIGNAL LOST（LOST） | 64 | 部屋に引くと、タマも体もいない。NO SIGNAL と電源ランプだけ |
+| V SIGNAL LOST（LOST） | 24 | 全画面のまま、横線が点になって消え（0〜19）、数フレームの黒のあと、WAKE の閉じたまぶた（同じ黒）へそのまま続く。部屋へは引かない。部屋に固定して見ているときだけ、空のクッションと NO SIGNAL・電源ランプの明滅が見える |
 
-- **部屋の体**: briefing の 14（心が抜けた後）から CORE まで、キーボードに突っ伏して眠る体（肩と頭の角丸 2 つ）。WAKE ではわたしが視点なので出ない。LOST にもいない。
+- **部屋の体は出さない**（ユーザーの指示、2026-10-28）。以前は briefing の 14 から CORE まで、キーボードに突っ伏して眠る体（角丸 2 つ）があり、ZENITH の被弾でびくりと動いた。
+- **LOST は部屋へ引かない**（ユーザーの指示）: 臨界 → 炸裂 → 画面がぷつんと切れたら、そのまま WAKE の暗闇と、覗き込むタマにつなぐ。LOST は 64 → 24 フレーム、字幕 NO SIGNAL もやめた。
 - **タマ**: briefing から CORE まではクッションに座り、ときどきまばたき。LOST にはいない。WAKE の後半で歩いて来る。
 
 ### 周回ごとに変わるもの（説明はしない）

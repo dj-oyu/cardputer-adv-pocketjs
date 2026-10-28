@@ -35,13 +35,11 @@ const CHAP = [0, 0, 0, 1, 2, 3, 4, 5], TITLE = 'I BRIEFING|II CROSSING|III LETHE
 // lines a beat; ~ is the sortie number, 742 on the first night).
 const SAY = [, , , '6 122 234 133|10|LEAVING THE BODY|56|DEEPER|92|INTO LETHE',
 '150 121 236 132|10|TAMA: ONLINE|40|EVADE!|72|TARGET LOCKED',
-'6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|115|AND BREAKS',
-'94 62 160 73|20|NO SIGNAL'];
+'6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|115|AND BREAKS'];
 const NEWS = 'INCOMING ORDER  SORTIE ~|RECEIVER: ASTRAL FIGHTER|TARGET: LETHE|ROUTE SYNC COMPLETE|\
 PILOT CONFIRMED|LEAVE THE BODY. CROSS THE RIVER|P1L0T C0NF1RM3D';
-// Tama sits on the cushion; the body (the viewer's own) sleeps over the
-// keyboard while the mind is away: shoulders, then the head.
-const HOME = [196, 70, 228, 102], BODY = [[90, 104, 150, 117, 5, 0x56506eff], [112, 98, 130, 112, 7, 0x2c2638ff]];
+// Tama sits on the cushion.
+const HOME = [196, 70, 228, 102];
 // The sortie number goes up every night (each WAKE); the memory of the
 // briefing clouds with it: letters turn to digits, more each night.
 let sortie = 741;

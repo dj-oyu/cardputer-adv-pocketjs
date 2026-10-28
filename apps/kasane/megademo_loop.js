@@ -16,14 +16,13 @@ globalThis.frame = function (buttons) {
   const press = buttons & ~held;
   held = buttons;
   // Enter: full screen <-> the monitor in the room. The story's own
-  // camera (into the screen in I, out in V; on waking, Tama's face over
-  // the whole view, then a cut to the room) never overrides a pinned room.
-  // WAKE's t < 2: a scene starts after this check (the second night's t = 0
-  // went by unseen, and its WAKE played in the room, inside the dead TV).
+  // camera (into the screen in I; V cuts out on the full screen straight
+  // into WAKE; on waking, Tama's face over the whole view, then a cut to
+  // the room) never overrides a pinned room. WAKE's t < 2: a scene starts
+  // after this check, so its t = 0 goes by unseen here.
   if (press & 0x4000) { target = target ? 0 : ZOOM; pin = target > 0; spd = 1; }
   if (scene === 7 && (t < 2 || t === WCUT) && !pin) { target = t === WCUT ? ZOOM : 0; spd = ZOOM; }
   if (!scene && t === 14 && !pin) { target = 0; spd = 2; }
-  if (scene === 6 && t === 12 && !target) { target = ZOOM; spd = 2; }
   zoom += M.max(-spd, M.min(spd, target - zoom));
   let f = null;
   try {

@@ -54,12 +54,9 @@ function build(tx, room) {
       tx.rect({bounds: [x, 18, x + 1, 28], color: 0x8a7c66ff});
     }
     R.led = tx.roundRect({bounds: [62, 89, 66, 92], radius: 1, color: 0x17a7ffff});
-    // The body and Tama from the briefing to CORE; in LOST the room is empty
-    // (where did Tama go?); in WAKE the viewer is the body.
-    if (scene < 6) {
-      R.body = BODY.map(b => tx.roundRect({bounds: b.slice(0, 4), radius: b[4], color: b[5]}));
-      R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
-    }
+    // Tama from the briefing to CORE; in LOST (seen only from a pinned
+    // room) the cushion is empty.
+    if (scene < 6) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
     text([6, 116, 234, 125], 'SORTIE ' + sortie + '   ' + T[ch], 'caption', 0xd8ccb0ff);
     text([6, 125, 234, 134], 'ENTER ZOOM  L/R CHAPTER  U/D LOAD', 'caption', 0x8a7c66ff);
   }
@@ -143,15 +140,9 @@ function patch(tx, f) {
     R.pet.setImageFrame(tx, 3, t % 40 > 37 ? 1 : 0);
     if (scene === 7) R.pet.setVisible(tx, t >= WCUT);
   }
-  // The body sleeps on from the news's dive; it flinches when LETHE hits.
-  if (R.body) for (let i = 0; i < 2; ++i) {
-    const b = BODY[i], d = scene === 4 && t >= 48 && t < 52 ? (t & 1) * 2 - 3 : 0;
-    R.body[i].setRect(tx, [b[0], b[1] + d, b[2], b[3] + d]);
-    R.body[i].setVisible(tx, scene > 0 || t >= 14);
-  }
   if (R.off) {
-    R.off.setVisible(tx, fix && t >= 20 && (t & 8) > 0);
-    R.led.setColor(tx, t & 16 ? 0xfb47ffff : 0x401010ff);
+    R.off.setVisible(tx, fix && t >= 8 && (t & 4) > 0);
+    R.led.setColor(tx, t & 4 ? 0xfb47ffff : 0x401010ff);
   }
   if (R.card) R.card.setReveal(tx, M.max(0, M.min(R.T.length, (t - 4) >> 1)));
   if (scene < 3) {

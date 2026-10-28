@@ -161,7 +161,7 @@ const RC = [28, 108];
 const A2 = {
   // WAKE (the prologue, played first) draws nothing: the TV is off and the
   // view layer shows the room in the first person.
-  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [128, 96, 140, 64, 104],
+  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [128, 96, 140, 24, 104],
   // Plan list of scene i: [template, args...]; sh carries points.
   plans: function (i, tier) {
     const k = KN[tier], z = k.z;
@@ -189,7 +189,8 @@ const A2 = {
     if (i === 2) return core(k.k, t);
     if (i === 4) return wake(t, emit);
     if (i === 3) {
-      // CRT off: the line shrinks to a dot, then the dot goes.
+      // CRT off: the line shrinks to a dot, then the dot goes; a few dark
+      // frames, and WAKE's closed eyelids go on from the same black.
       const w = t < 10 ? 2 + 118 * (1 - t / 10) ** 2 : 2.5 - (t - 10) / 4;
       return {b: 0, s: 0, d: w > 0 ? [[0, [120 - w, 67, 120 + w, 67]],
         [1, [120 - w * .8, 66, 120 + w * .8, 66]], [1, [120 - w * .8, 68, 120 + w * .8, 68]]] : []};
