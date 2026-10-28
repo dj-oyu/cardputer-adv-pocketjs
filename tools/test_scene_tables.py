@@ -1,4 +1,5 @@
-"""Diff the baked scene tables against the C that used to build them at boot.
+"""Diff the baked sine table against the C that used to build it at boot, and
+range-check the LEVEL WAVE tables the row kernel reads.
 
 tools/make_scene_tables.py transcribes shell.c's build_tables() into Python.
 Python's math.sin and math.exp are double routines rounded to float; the device
@@ -30,9 +31,6 @@ REFERENCE = r'''
 #include <stdint.h>
 int main(void) {
     for(int i=0;i<256;i++) printf("%d\n",(int)(int16_t)(sinf(i*6.2831853f/256)*256));
-    const float widths[]={18,5,24};const float brightness[]={14,32,21};
-    for(int l=0;l<3;l++)for(int d=0;d<64;d++)
-        printf("%d\n",(int)(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l]))));
     return 0;
 }
 '''
@@ -49,7 +47,7 @@ def main():
         got = [int(v) for v in subprocess.run(
             [str(exe)], check=True, capture_output=True, text=True).stdout.split()]
 
-    want = gen.sine() + [v for row in gen.softness() for v in row]
+    want = gen.sine()
     if len(want) != len(got):
         raise SystemExit(f'{len(want)} baked values against {len(got)} from C')
 
@@ -60,13 +58,21 @@ def main():
             differing += 1
         if d > worst:
             worst, worst_at = d, i
-    table = 'sine' if worst_at is not None and worst_at < 256 else 'softness'
-    print(f'sine+softness: {len(want)} entries, {differing} differ, '
-          f'worst |delta| = {worst}' + (f' in {table}[{worst_at}]' if worst else ''))
+    print(f'sine: {len(want)} entries, {differing} differ, '
+          f'worst |delta| = {worst}' + (f' at [{worst_at}]' if worst else ''))
 
-    # wave_lut is packed from softness by integer arithmetic alone, so it is
-    # exact once softness is; saying so beats leaving it unmentioned.
-    print('wave_lut: integer packing of softness, no float of its own')
+    # The LEVEL WAVE tables (wave_lut, wave_water_*) have no C predecessor to
+    # diff against: they were redrawn in the generator itself. What can still
+    # go wrong is the range the row kernel depends on, so check that.
+    lut = gen.wave_lut()
+    assert len(lut) == 6 and all(len(t) == 256 for t in lut)
+    for t in lut:
+        assert t[255] == 0, 'the clamped distance must read as no light'
+        for v in t:
+            assert (v & 0xFFFF) <= 32640 and (v >> 16) <= 32640
+    body, light = gen.water()
+    assert all(0 <= v <= 32767 for row in body + light for v in row)
+    print('wave tables: in range for the saturating row (<= 255*128 per entry)')
     if worst > 1:
         raise SystemExit(f'baked table differs from the C reference by {worst}: '
                          'that is a transcription error, not a libm difference')

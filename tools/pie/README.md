@@ -37,7 +37,7 @@ stalls.py       … 「その並びは速いか」      データ依存ストー
 ```sh
 # ストール解析（関数名は C ソース内の名前）
 python tools/pie/stalls.py main/shell.c ocean_row_pie
-python tools/pie/stalls.py main/shell.c wave_row_pie
+python tools/pie/stalls.py main/scene/wave.c wave_row_pie
 
 # 実行検証（4 カーネル）
 python tools/pie/test_kernels.py
@@ -87,7 +87,7 @@ cycles/block = 命令数 + 0.6 x ストア数 + ストール数
 
 - `piesim.py` は**機能モデル**です。タイミングは持たず、対応命令は各カーネルが使うものだけ（ファイル冒頭の一覧）。QACC は 8 レーン × 40bit、`EE.SRCMB.S16.QACC` はシフト結果を QACC に書き戻す仕様（TRM 1.8.54）まで模倣しています。
 - `stalls.py` は TRM 表 1.7-2 の QR オペランドの def/use 段だけを見ます。QACC と SAR の依存は表に無いため扱いません。本体サイズは通常のエンコード（EE 命令 3B、`EE.LDXQ.32` 4B、`mov`/`addi` 2B）からの見積もりで、境界付近は `objdump` で確認してください。
-- テーブル（正弦、softness）は Python の倍精度で生成しており、`sinf`/`expf` と 1 ずれる要素があり得ます。比較の両側が同じ表を使うので判定には影響しません。
+- 正弦表は Python の倍精度で生成しており、`sinf` と 1 ずれる要素があり得ます。比較の両側が同じ表を使うので判定には影響しません。LEVEL WAVE の表（`wave_lut`）は `tools/make_scene_tables.py` の値をそのまま使います。
 - `test_kernels.py` の海面テストは、`shell.c` に `ocean_sine16`（表引き版）があればビット一致を要求し、無ければ放物線近似版とみなして、そのカーネルのコメントが約束する範囲（r/b は 1 段、g は 2 段まで、動く画素は 2 割未満）で判定します。近似の許容を変えたらテスト側の閾値も更新すること。
 - C の `/` は `extract_constants()` で `//` に置き換えます。現在の `k[]` に負の被除数はありませんが、増やすときは注意してください。
 - 資料: [ESP32-S3 TRM](https://documentation.espressif.com/esp32-s3_technical_reference_manual_en.pdf) 第 1 章（1.7 パイプライン、表 1.7-2、1.8 各命令）。表 1.7-2 はテキスト抽出で列が崩れるので `pdftotext -raw` で読むこと。
