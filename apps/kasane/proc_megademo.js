@@ -78,18 +78,17 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   const WH = 0xffff, VI = 0xfa3f, GR = 0x17a7, BL = 0x167f, OR = 0xfb47;
   // [LIGHT, MID, HEAVY]. c: TWIST corridor (n frames, r ratio, m rungs per
   // frame, s arch segments, kf/ka first frame/arch, D twist); z: ZENITH;
-  // k: CORE (r rays a draw, d ray draws, n noise lines); q: rotate ZENITH's
-  // radar, ~23 ms of band re-renders a frame on the device. Derivation:
+  // k: CORE (r rays a draw, d ray draws, n noise lines). Derivation:
   // docs/kasane/megademo-limit-scenes.md, megademo-device-limits.md,
   // docs/apps/megademo-story.md (CORE).
   // TWIST and ZENITH hold the display rate at HEAVY's load, so MID shares it.
   const CH = {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 3, D: 6},
     ZH = {st: 60, gl: 14, ln: 15, cr: 3, cc: 8, sa: 4, ts: 16, rr: 4};
   const KN = [
-    {q: 0, c: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 4}, z: {st: 24, gl: 8, ln: 7, cr: 2, cc: 4, sa: 2, ts: 6, rr: 2},
+    {c: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 4}, z: {st: 24, gl: 8, ln: 7, cr: 2, cc: 4, sa: 2, ts: 6, rr: 2},
      k: {r: 20, d: 1, n: 12}},
-    {q: 0, c: CH, z: ZH, k: {r: 40, d: 1, n: 24}},
-    {q: 1, c: CH, z: ZH, k: {r: 40, d: 2, n: 40}}
+    {c: CH, z: ZH, k: {r: 40, d: 1, n: 24}},
+    {c: CH, z: ZH, k: {r: 40, d: 2, n: 40}}
   ];
   // Programs are text, decoded by one function (a generator function per
   // plan costs guest heap at compile time). A letter per ksn_proc_op in
@@ -119,7 +118,8 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   }
   // fr frames (16 registers), ra two polylines, ru rungs, ar CUBIC arches,
   // st stars, gr ground, la lanes, ci skyline, sa octahedra (one path over
-  // 12 edges), tr CUBIC trails, sh ship flame, sc/sw radar, ln a line; CORE:
+  // 12 edges), tr CUBIC trails, sh ship flame, rd/sw radar rings and sweep
+  // (drawn in the image's corner: a second surface cost two 10 KB frames), ln a line; CORE:
   // tri a triangle (colour from input 6), qd a closed quad, sg two segments,
   // ry rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT).
   const T = {
@@ -140,8 +140,8 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     sg: 'U8 V0,1 L2,3,$0 V4,5 L6,7,$0',
     ry: 'U8 S8,1.5707963 Q5 A9,4,8 N9,9 N10,4 M11,9,2 A11,11,0 M12,10,2 A12,12,1 V11,12 M11,9,3 A11,11,0 M12,10,3 A12,12,1 l7,11,12 A4,4,6 E',
     nz: 'U3 S3,0 S4,1 S5,67 S6,120 S7,7.31 S8,3.97 R$0 A3,3,4 B3,1 M9,3,7 A9,9,0 N9,9 M9,9,5 A9,9,5 M10,3,8 A10,10,0 N10,10 M10,10,6 A10,10,6 V10,9 A11,10,2 L11,9,33808 E',
-    sc: 'S8,120 S9,67 S10,20 S11,11.05 S12,-20 S13,-11.05 S14,1.45 R$0 A0,8,10 S1,67 A2,8,10 A3,9,11 A4,8,11 A5,9,10 S6,120 A7,9,10 C8,6055 S0,120 A1,9,10 A2,8,13 A3,9,10 A4,8,12 A5,9,11 A6,8,12 S7,67 C8,6055 A0,8,12 S1,67 A2,8,12 A3,9,13 A4,8,13 A5,9,12 S6,120 A7,9,12 C8,6055 S0,120 A1,9,12 A2,8,11 A3,9,12 A4,8,10 A5,9,13 A6,8,10 S7,67 C8,6055 M10,10,14 M11,11,14 M12,12,14 M13,13,14 E S0,40 S1,67 V0,1 S0,200 L0,1,6055 S0,120 S1,7 V0,1 S1,127 L0,1,6055',
-    sw: 'S8,120 S9,67 V8,9 I0,0 I1,1 L0,1,65535 I2,2 I3,3 I4,4 I5,5 S10,65535 S11,129862 S12,-1 R$0 p10,2,3 A2,2,4 A3,3,5 M10,10,12 A10,10,11 E',
+    rd: 'U3 S4,1.5707963 S5,.3926991 S6,1.45 R$0 S3,0 A8,3,4 N8,8 M8,8,2 A8,8,0 N9,3 M9,9,2 A9,9,1 V8,9 R16 A3,3,5 A8,3,4 N8,8 M8,8,2 A8,8,0 N9,3 M9,9,2 A9,9,1 L8,9,6055 E M2,2,6 E S10,-1 M11,2,10 A12,11,0 A13,2,0 V12,1 L13,1,6055 A12,11,1 A13,2,1 V0,12 L0,13,6055',
+    sw: 'S8,$1 S9,$2 V8,9 I0,0 I1,1 L0,1,65535 I2,2 I3,3 I4,4 I5,5 S10,65535 S11,129862 S12,-1 R$0 p10,2,3 A2,2,4 A3,3,5 M10,10,12 A10,10,11 E',
   };
   const Q14 = 16384, rnd = Math.round, M = Math;
   function affine(x, y, s, t, tx, ty, col) {
@@ -263,6 +263,7 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     if (nn) d.push([6, [t * 1.7, nn, 10 + 40 * crit]]);
     return {b: fl ? 0x5acc : 0, s: 0, d: d};
   }
+  const RC = [28, 108];
   const A2 = {
     names: ['TWIST', 'ZENITH', 'CORE', 'LOST'], len: [128, 96, 112, 64],
     // Plan list of scene i: [template, args...]; sh carries points.
@@ -274,7 +275,7 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
       const p = [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa],
         ['tr', z.sa, z.ts]];
       for (let b = 0; b < 8; ++b) p.push(['sh', b]);
-      return p.concat([['sc', z.rr], ['sw', z.sa]]);
+      return p.concat([['rd', z.rr], ['sw', z.sa, RC[0], RC[1]]]);
     },
     // {b: backdrop, s: surface, d: [[plan, inputs]...]}
     frame: function (i, tier, t) {
@@ -298,9 +299,6 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
       const f = flight(t), c = f.c, s = f.s, H = f.H;
       const x = 34 + 24 * M.sin(t * .09) - 120, y = 28 + 10 * M.cos(t * .05) - 67;
       const P = [120 + x * c - y * s, 67 + x * s + y * c], st = [46 * c - 6 * s, 46 * s + 6 * c];
-      if ((t & 3) === 3) return {b: 0, s: 1, d: [[14, []], [15,
-        [120 + 60 * M.cos(t * .3), 67 + 60 * M.sin(t * .3), 120 + (P[0] - 120) * .4, 67 + (P[1] - 67) * .4,
-          st[0] * .4, st[1] * .4]]]};
       const u = [c, s], b = M.max(0, M.min(7, rnd(-M.atan2(s, c) / .14 + 3.5)));
       const d = [[0, [190 * c, 190 * s, -70 * s, 70 * c, t * .05, 120, 67]],
         [1, H.concat([260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl])],
@@ -308,7 +306,10 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
         [3, H.concat(u, [4.5, M.min(1, t / 70) * 2.2])],
         [4, P.concat(st, [10 * M.cos(t * .3), 10 * M.sin(t * .3), .35, 10])]];
       if (t % 16 < 5) d.push([5, [120, 100].concat(P, st, [20, -40])]);
-      d.push([6 + b, [120, 120, 120, 123 + (t % 3) * 2]]);
+      d.push([6 + b, [120, 120, 120, 123 + (t % 3) * 2]],
+        // The radar: rings, a sweep and the formation's blips, in the corner.
+        [14, [RC[0], RC[1], 22 / 1.45 ** (z.rr - 1)]], [15, [RC[0] + 22 * M.cos(t * .3), RC[1] + 22 * M.sin(t * .3),
+          RC[0] + (P[0] - 120) * .15, RC[1] + (P[1] - 67) * .15, st[0] * .15, st[1] * .15]]);
       return {b: 0, s: 0, d: d};
     }
   };
@@ -341,14 +342,14 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
 
   if (typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.procedural) {
     const V = pocket.kasane, H = V.procedural, G = V.grid;
-    const res0 = H.resource(), surf1 = H.createSurface(), res1 = H.resource(surf1);
+    const res0 = H.resource();
     // The settled monitor: a registered image-to-image resize (bilinear).
     // ZENITH's radar thumbnail and munching squares went for the story's
     // heap (typed arrays alone keep ~1.3 KB): docs/apps/megademo-story.md
     const monRes = G.resource(G.registerResizeSource({source: res0, width: 112, height: 63}));
     const pets = V.resource('pets');
     const lives = V.cache.create([[0, 2, 9, 7], [0, 0, 2, 2], [7, 0, 9, 2]].map(b => ({bounds: b, color: 0x14f53cff})));
-    const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], RAD = [4, 84, 52, 132], ZOOM = 44;
+    const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
     // Loader: the next scene registers from LOAD[0] frames before the switch,
     // LOAD[1] plans a frame, while the internal heap has LOAD[2] bytes free
     // (a registration dips it by up to 14 KB on the device); the rest
@@ -379,7 +380,7 @@ SOURCE: ZENITH, THE UNFINISHED CITY|EXPERTS SAY IT IS LOOKING FOR A PILOT|\
 IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS A P1L0T. 1T WANTS Y0UR C4T';
     const HOME = [196, 70, 228, 102], NEAR = [150, 72, 182, 104];
     let tier = KN.length - 1, scene = 0, t = 0, tick = 0, live = [], pend = [], next = null, loaded = 0;
-    let img, mon, hud = [], hw = [], R = {}, anim = null, built = -1, vis = false, shown = true, said = -1;
+    let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1;
     let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
     const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
     const reg = th => { const p = th(); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
@@ -401,13 +402,10 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
       console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length +
         ' freed=' + old + ' registered=' + loaded);
     }
-    const spin = tx => R.radar.animate(tx, {from: {bounds: RAD, rotation: 0},
-      to: {bounds: RAD, rotation: 360 * KN[tier].q}, durationMs: 4000,
-      easing: 'linear', repeat: 'loop'});
     const boundsAt = step => step === 0 ? FULL : step === ZOOM ? MON :
       lerp4(FULL, MON, step / ZOOM * step / ZOOM * (3 - 2 * step / ZOOM));
     function build(tx, room) {
-      hud = []; hw = []; R = {}; anim = null; vis = false; shown = true; said = -1;
+      hud = []; hw = []; R = {}; vis = false; said = -1;
       // A HUD ref shows on the full screen while from <= t < to.
       const add = (r, from, to) => { hud.push(r); hw.push(from || 0, to || 1e9, 1); return r; };
       const text = (b, s, f, c, n) => tx.text({bounds: b, text: s, font: f, color: c, capacity: n});
@@ -448,10 +446,7 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         R.score = add(text([4, 2, 150, 13], NAMES[scene], 'caption', 0xffffffff, 20));
         R.lamp = add(tx.roundRect({bounds: [226, 3, 236, 11], radius: 3, color: 0xfb47ffff}));
         if (scene === 4) {
-          R.radar = add(tx.image({resource: res1, bounds: RAD, clip: FULL, sourceX: 60, sourceY: 7,
-            sourceWidth: 120, sourceHeight: 120}));
           R.ring = add(tx.strokeRect({bounds: [3, 83, 53, 133], width: 1, color: 0x17a7ffff}));
-          anim = spin(tx);
           // The pilot: the cat from the room, in the cockpit.
           add(tx.strokeRect({bounds: [3, 15, 22, 34], width: 1, color: 0x17a7ffff}));
           add(tx.image({resource: pets, bounds: [4, 16, 21, 33], variant: 3, frame: 0}));
@@ -503,10 +498,6 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         const v = on && t >= hw[3 * i] && t < hw[3 * i + 1] ? 1 : 0;
         if (v !== hw[3 * i + 2]) { hud[i].setVisible(tx, v > 0); hw[3 * i + 2] = v; }
       }
-      if (on !== shown) {
-        if (anim) { if (on) anim = spin(tx); else anim.finish(tx); }
-        shown = on;
-      }
       // The cat: asleep, awake, into the screen (news), away, home asleep.
       if (R.pet) {
         R.pet.setRect(tx, scene === 2 && t >= 16 ? t < 24 ? lerp4(HOME, NEAR, (t - 16) / 8) :
@@ -552,20 +543,16 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
           if (v !== !!R.tv[i]) { r.setVisible(tx, v); R.tv[i] = v; }
         }
       }
-      if (t === 90 && anim && on) { anim.stop(tx); console.log('MEGADEMO ANIM ' + anim.poll()); }
     }
     enter(0);
     let boot = true;
     globalThis.frame = function (buttons) {
       buttons |= 0;
       if (boot) {
-        // Both surfaces' frames (5 x 10 KB) and the first scene's plans on
-        // the first frame, while the heap still has 10 KB holes (ZENITH's
-        // first beginFrame(surf1) found none later on the device) but after
-        // the compile's peak is gone: during evaluation, CORE's larger
-        // compile left no such hole (frame allocation failed, 2026-10-28).
+        // The frames (3 x 10 KB) and the first scene's plans on the first
+        // frame, after the compile's memory is gone (during evaluation the
+        // CORE build found no 10 KB holes on the device, 2026-10-28).
         boot = false;
-        H.beginFrame(0, surf1);
         H.beginFrame(0);
         while (pend.length) live.push(reg(pend.shift()));
       }
@@ -591,8 +578,7 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
         if (b && t >= PLAY[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
         f = frameOf(scene, tier, t % LEN[scene]);
-        if (f.s) H.beginFrame(f.b, surf1);
-        else H.beginFrame(f.b);
+        H.beginFrame(f.b);
         for (let i = 0; i < f.d.length; ++i) {
           const h = live[f.d[i][0]];
           if (h) H.draw(h, f.d[i][1]);
