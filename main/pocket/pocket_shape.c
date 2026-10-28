@@ -183,7 +183,7 @@ static JSValue strips(JSContext *ctx,const region *s,real y0,real y1,uint32_t h,
  * same index. pose = [cos yaw, sin yaw, cos pitch, sin pitch, cos roll,
  * sin roll, camera distance, scale, x0, y0]: turn, nod, perspective (nearer
  * is bigger), roll. */
-static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+static JSValue js_shape_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="shapes.project";
     double from,count;
@@ -211,7 +211,7 @@ static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst
  * trapezoid plan: x0, x1, y, dx0, dx1, rows) every step rows. base is
  * [start, count] (a convex polygon of the buffer) or [cx, cy, rx, ry] (an
  * ellipse); holes are [start, count, ...] pairs, at most 6. */
-static JSValue js_fill(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+static JSValue js_shape_fill(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="shapes.fill";
     uint32_t h,hp[2*SHAPE_HOLES],bp[4];
@@ -279,7 +279,7 @@ static JSValue line(JSContext *ctx,uint32_t h,real ax,real ay,real bx,real by){
  * `parts` pieces, drawn with plan (a line: x0, y0, x1, y1) unless the piece's
  * middle is inside one of the hidden polygons ([start, count, ...] pairs).
  * Pieces wholly off one side of the screen are left out. */
-static JSValue js_outline(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+static JSValue js_shape_outline(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="shapes.outline";
     uint32_t h,hp[2*SHAPE_HOLES];
@@ -319,9 +319,9 @@ static JSValue js_outline(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 esp_err_t pocket_shape_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
-        JS_CFUNC_DEF("project",5,js_project),
-        JS_CFUNC_DEF("fill",7,js_fill),
-        JS_CFUNC_DEF("outline",7,js_outline),
+        JS_CFUNC_DEF("project",5,js_shape_project),
+        JS_CFUNC_DEF("fill",7,js_shape_fill),
+        JS_CFUNC_DEF("outline",7,js_shape_outline),
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?
            ESP_ERR_NO_MEM:ESP_OK;
