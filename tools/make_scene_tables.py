@@ -102,7 +102,10 @@ def wave_lut():
 # first and green next, so the transmitted light runs from white-cyan under
 # the surface to deep blue; the body of the water darkens the same way.
 WATER_BODY = (46.0, 26.0, 1.0)        # b, g, r just under the surface
-WATER_REACH = (110.0, 52.0, 12.0)     # rows to fall to 1/e, b, g, r
+# Beer-Lambert: a shaft loses a fixed fraction of itself per row, red first.
+# Short enough that the rays visibly die out before the bottom of the screen
+# (50-90 rows of water): by 32 rows blue is at 1/e, green near 1/5, red gone.
+WATER_REACH = (32.0, 20.0, 8.0)       # rows to fall to 1/e, b, g, r
 WATER_SUN = (240.0, 215.0, 120.0)     # b, g, r of one full ray at depth 0
 
 
@@ -111,7 +114,9 @@ def water():
     for d in range(LCD_H + 1):
         body.append([int(WAVE_SCALE * (WATER_BODY[c] * (0.25 + 0.75 * math.exp(-d / 70.0))
                                        + (6 if c == 0 else 0))) for c in range(3)])
-        light.append([int(WAVE_SCALE * WATER_SUN[c] * 0.55 * math.exp(-d / WATER_REACH[c]))
+        # 0.7 at the surface rather than 0.55 so the top stays as bright as it
+        # was while the depth takes the light away faster.
+        light.append([int(WAVE_SCALE * WATER_SUN[c] * 0.7 * math.exp(-d / WATER_REACH[c]))
                       for c in range(3)])
     return body, light
 
