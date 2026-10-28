@@ -9,7 +9,6 @@ globalThis.frame = function (buttons) {
     // frame, after the compile's memory is gone (during evaluation the
     // CORE build found no 10 KB holes on the device, 2026-10-28).
     boot = false;
-    FACE = face();
     H.beginFrame(0);
     while (pend.length) live.push(reg(pend.shift()));
   }

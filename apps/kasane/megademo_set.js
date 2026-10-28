@@ -68,12 +68,7 @@ function build(tx, room) {
   mon = tx.image({resource: monRes, bounds: MON, clip: FULL, sourceWidth: 112, sourceHeight: 63});
   mon.setVisible(tx, false);
   // WAKE: Tama walks to the cushion in front of the TV (over its image).
-  if (scene === 7) {
-    R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
-    // The face only in the full-screen set (the room's has no room for it).
-    if (!room) R.face = FACE.map(c => tx.instantiate(c, {offset: [0, 0]}))
-      .concat(MOUTH.map(b => tx.roundRect({bounds: b.slice(0, 4), radius: b[4], color: b[5]})));
-  }
+  if (scene === 7) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
   if (room && scene === 6) R.off = text([96, 46, 150, 58], 'NO SIGNAL', 'caption', 0xffffffff);
   if (scene < 3) {
     const N = NEWS.replace('~', sortie).split('|').map(gb);
@@ -140,20 +135,6 @@ function patch(tx, f) {
   for (let i = 0; i < hud.length; ++i) {
     const v = on && t >= hw[3 * i] && t < hw[3 * i + 1] ? 1 : 0;
     if (v !== hw[3 * i + 2]) { hud[i].setVisible(tx, v > 0); hw[3 * i + 2] = v; }
-  }
-  // WAKE's face moves with the ears (wakeAt); a slow blink at 30 (the eyes
-  // close to a line). Shown at full screen until the cut at 42.
-  if (R.face) {
-    const o = wakeAt(t), v = on && t < 42, bl = t >= 30 && t < 34;
-    for (let i = 0; i < 3; ++i) {
-      R.face[i].place(tx, {offset: o});
-      R.face[i].setVisible(tx, v && (i < 1 || bl === (i > 1)));
-    }
-    for (let i = 0; i < 3; ++i) {
-      const b = MOUTH[i], r = R.face[3 + i];
-      r.setRect(tx, [b[0] + o[0], b[1] + o[1], b[2] + o[0], b[3] + o[1]]);
-      r.setVisible(tx, v);
-    }
   }
   // Tama: in WAKE (after its face, act2's wake(), and the blink of sitting
   // up) it walks to the cushion; elsewhere it sits there and blinks.

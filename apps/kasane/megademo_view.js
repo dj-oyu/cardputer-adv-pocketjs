@@ -42,33 +42,6 @@ PILOT CONFIRMED|LEAVE THE BODY. CROSS THE RIVER|P1L0T C0NF1RM3D';
 // Tama sits on the cushion; the body (the viewer's own) sleeps over the
 // keyboard while the mind is away: shoulders, then the head.
 const HOME = [196, 70, 228, 102], BODY = [[90, 104, 150, 117, 5, 0x56506eff], [112, 98, 130, 112, 7, 0x2c2638ff]];
-// WAKE's face, over act2's ears. A roundRect's radius is at most 8, so
-// the round parts are horizontal bands (an ellipse, shaded down its rows)
-// in cache templates: one instance ref moves a whole part. Head with
-// cheeks; open eyes (iris, slit pupil, highlight); closed eyes (a line).
-const mix = (a, b, u) => [24, 16, 8, 0].reduce((s, k) =>
-  s + (rnd(((a >>> k) & 255) * (1 - u) + ((b >>> k) & 255) * u) << k >>> 0), 0);
-function bands(cx, cy, rx, ry, n, c0, c1) {
-  const r = [];
-  for (let i = 0; i < n; ++i) {
-    const y0 = cy - ry + 2 * ry * i / n, y1 = y0 + 2 * ry / n, w = rx * M.sqrt(1 - ((y0 + y1) / 2 - cy) ** 2 / ry / ry);
-    r.push({bounds: [rnd(cx - w), rnd(y0), rnd(cx + w), rnd(y1)], color: mix(c0, c1, i / (n - 1))});
-  }
-  return r;
-}
-const IRIS = [0xb8e070ff, 0x6ea838ff], CREAM = 0xfdebd2ff, LID = 0x7a4a2aff;
-// Nose and a small mouth (plain refs: the 48 rect commands shared by every
-// template are used up; lives has 3).
-const MOUTH = [[162, 89, 178, 98, 4, 0xf0889aff], [162, 100, 170, 103, 1, LID], [170, 100, 178, 103, 1, LID]];
-// Built by the first frame(), not while the app evaluates (its arrays would
-// add to the compile's peak) nor inside a replace (cache.create is BUSY).
-let FACE = null;
-const face = () => [V.cache.create(bands(170, 86, 94, 74, 20, 0xf8c884ff, 0xd0803eff)
-    .concat(bands(157, 108, 19, 12, 3, CREAM, CREAM), bands(183, 108, 19, 12, 3, CREAM, CREAM))),
-  V.cache.create(bands(135, 77, 15, 16, 6, IRIS[0], IRIS[1]).concat(bands(205, 75, 15, 16, 6, IRIS[0], IRIS[1]),
-    [[132, 64, 138, 90], [202, 62, 208, 88]].map(b => ({bounds: b, color: 0x241a14ff})),
-    [[125, 67, 131, 73], [195, 65, 201, 71]].map(b => ({bounds: b, color: 0xffffffff})))),
-  V.cache.create([[120, 76, 150, 79], [190, 74, 220, 77]].map(b => ({bounds: b, color: LID})))];
 // The sortie number goes up every night (each WAKE); the memory of the
 // briefing clouds with it: letters turn to digits, more each night.
 let sortie = 741;
