@@ -276,9 +276,18 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
       const nb = rnd(k.r * (1 - e));
       if (nb) d.push([4, [120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, nb, 2 * M.PI / nb, OR ^ iv]]);
     } else {
-      const nr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - im));
+      const nr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - im) * (1 - .6 * smooth(ramp(t, 78, 88))));
       for (let j = 0; j < k.d && nr; ++j)
         d.push([4, [120, 67, cs * .4, 30 + 120 * crit, g * .07 + j * M.PI / nr, nr, 2 * M.PI / nr, (fl ? OR : WH) ^ iv]]);
+    }
+    // Dust falls into the core on the real clock (stop-motion is the shell's,
+    // not dropped frames; the rays thin out to show it): 8 rings of streaks, r = sqrt of the fall so it
+    // speeds up near the core, swirling as it goes in; held in the stop,
+    // crushed in the fall.
+    const np = rnd(k.r / 4 * smooth(ramp(t, 76, 86)) * (1 - im)), tp = t < 100 ? t : 100;
+    for (let i = 0; i < 8 && np && t < 115; ++i) {
+      const u = (i / 8 - tp / 36) % 1 + 1, f = M.sqrt(u % 1), r = (24 + 116 * f) * (1 - im);
+      d.push([4, [120, 67, r, r + 4 + 12 * (1 - f), i * 1.7 + 30 / (r + 9), np, 2 * M.PI / np, (i & 1 ? 0x07ff : 0xfd20) ^ iv]]);
     }
     // Stars stretch outwards in the dolly zoom and rush past in the burst;
     // the noise is still in the stop and spends itself in the burst.
