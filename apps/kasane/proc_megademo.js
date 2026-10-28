@@ -342,10 +342,6 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   if (typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.procedural) {
     const V = pocket.kasane, H = V.procedural, G = V.grid;
     const res0 = H.resource(), surf1 = H.createSurface(), res1 = H.resource(surf1);
-    // Both surfaces' frames (5 x 10 KB) now, while the heap still has holes
-    // that size; ZENITH's first beginFrame(surf1) found none on the device.
-    H.beginFrame(0, surf1);
-    H.beginFrame(0);
     // The settled monitor: a registered image-to-image resize (bilinear).
     // ZENITH's radar thumbnail and munching squares went for the story's
     // heap (typed arrays alone keep ~1.3 KB): docs/apps/megademo-story.md
@@ -559,9 +555,20 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
       if (t === 90 && anim && on) { anim.stop(tx); console.log('MEGADEMO ANIM ' + anim.poll()); }
     }
     enter(0);
-    while (pend.length) live.push(reg(pend.shift()));
+    let boot = true;
     globalThis.frame = function (buttons) {
       buttons |= 0;
+      if (boot) {
+        // Both surfaces' frames (5 x 10 KB) and the first scene's plans on
+        // the first frame, while the heap still has 10 KB holes (ZENITH's
+        // first beginFrame(surf1) found none later on the device) but after
+        // the compile's peak is gone: during evaluation, CORE's larger
+        // compile left no such hole (frame allocation failed, 2026-10-28).
+        boot = false;
+        H.beginFrame(0, surf1);
+        H.beginFrame(0);
+        while (pend.length) live.push(reg(pend.shift()));
+      }
       const press = buttons & ~held;
       held = buttons;
       // Enter: full screen <-> the monitor in the room. The story's own

@@ -219,8 +219,12 @@ int main(int argc, char **argv) {
      * next phase over the last frames of the running one. Each 16-frame news
      * beat plays twice (frames 0..95), the same draws both times. */
     static const char playback_check[] =
-        "if(__procCalls.registered.length!==5||__procCalls.live.size!==5||typeof frame!=='function')"
-        "throw Error('registration');"
+        /* Nothing is registered or allocated while the app evaluates: the
+         * first frame registers Act I phase 0 (docs/apps/megademo-story.md). */
+        "if(__procCalls.registered.length!==0||typeof frame!=='function')"
+        "throw Error('registration during evaluation');"
+        "frame();if(__procCalls.registered.length!==5||__procCalls.live.size!==5)"
+        "throw Error('registration on the first frame');"
         "const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);"
         "for(let layer=0;layer<5;layer++){const r=__procCalls.registered[layer];"
         "if(!same(r.program,procMegademo.program(0,layer)))throw Error('registered program');"
@@ -236,7 +240,7 @@ int main(int argc, char **argv) {
         "const x=Math.floor((b.coeff[0]*b.x[i]+b.coeff[1]*b.y[i]+b.coeff[4])/16384);"
         "const y=Math.floor((b.coeff[2]*b.x[i]+b.coeff[3]*b.y[i]+b.coeff[5])/16384);"
         "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}}"
-        "for(let tick=0;tick<97;tick++)frame();"
+        "for(let tick=1;tick<97;tick++)frame();"
         "if(__procCalls.frames.length!==97)throw Error('frame count');"
         "for(let tick=0;tick<96;tick++){"
         "const f=__procCalls.frames[tick],phase=Math.floor(tick/32);"
