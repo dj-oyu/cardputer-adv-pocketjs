@@ -1,5 +1,7 @@
 # MEGADEMO Act II — 上限を叩く3場面と動的 plan 読み込み
 
+> **2026-10-27 追記**: 物語の器（部屋・猫・章立て・場面のつなぎ）を被せ、場面 LOST を足した。ZENITH のレーダーの縮小画像と munching squares（`pixel`）はメモリのために外し、TWIST に星の plan を 1 本足し、LIMIT は層を拍ごとに足す（46 フレーム以降は下の全負荷）。台本と変更点・新しい計数は [docs/apps/megademo-story.md](../apps/megademo-story.md)。下の表と網羅表は 2026-09-29 時点の版のもの。
+
 2026-09-29。対象は [apps/kasane/proc_megademo.js](../../apps/kasane/proc_megademo.js)（APPS の MEGADEMO、`local.megademo`）。**ここにある数値はすべて host のもの**（実 QuickJS、実 `pocket_proc.c`／`pocket_kasane.c`、m32 は i386 で device と同じ 8 B JSValue）。実機の描画時間・heap・LCD 転送は [megademo-device-limits.md](megademo-device-limits.md) で測り、その結果で `KN`（MID と LIMIT HEAVY）と `LOAD`（読み込み方式）を改訂した。下の表は改訂後の host 計数に直してある（改訂前の値は括弧内）。美的な評価はしない。見比べ用の画像を用意した。
 
 ## 結論

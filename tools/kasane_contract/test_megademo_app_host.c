@@ -264,7 +264,13 @@ int main(int argc,char **argv){
              * zoom into the Act II monitor set (796..); MID tier (936..). */
             static const unsigned picks[]={10,52,100,150,190,220,250,290,330,360,
                                            820,850,880,960,1000,1040};
-            for(unsigned i=0;i<sizeof picks/sizeof picks[0];i++)if(picks[i]==t)ppm(ppm_dir,t);
+            /* MEGA_PICKS="t,t,..." overrides the frames written. */
+            const char *pk=getenv("MEGA_PICKS");
+            if(pk){for(const char *c=pk;*c;){char *e;unsigned long v=strtoul(c,&e,10);
+                    if(e==c)break;
+                    if(v==t)ppm(ppm_dir,t);
+                    c=*e?e+1:e;}}
+            else for(unsigned i=0;i<sizeof picks/sizeof picks[0];i++)if(picks[i]==t)ppm(ppm_dir,t);
         }
     }
     if(!baseline){
