@@ -29,7 +29,7 @@ jobs:
           ref: 146128065e81bb3493985e0b1b7123ff819baaf4
           path: guard-source
           persist-credentials: false
-      - run: python3 -B guard-source/tools/games/prepare_derby_pad_bars_diag.py --common tools-source/tools/games/prepare_derby_app_diag.py --self-test
+      - run: python3 -B tools/games/prepare_derby_pad_diag_compat.py --common tools-source/tools/games/prepare_derby_app_diag.py --guard guard-source/tools/games/prepare_derby_pad_bars_diag.py --self-test
       - run: python3 -B tools/games/run_derby_screen_projection.py --sanitize --verify-only --out .cache/screen-asan
       - run: python3 -B tools/games/run_derby_screen_projection.py --pairs 15 --out .cache/screen-timing
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -57,6 +57,12 @@ jobs:
       IDF_COMPONENT_MANAGER: '0'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        if: matrix.profile == 'pad'
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          path: compat-source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: 1e68b268a4b91ec54e88f408118de3e39b8b6bc5
           path: tools-source
@@ -77,7 +83,7 @@ jobs:
           node-version: '24'
       - name: Prepare finite diagnostic in disposable checkout
         if: matrix.profile == 'pad'
-        run: python3 -B guard-source/tools/games/prepare_derby_pad_bars_diag.py --common tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source
+        run: python3 -B compat-source/tools/games/prepare_derby_pad_diag_compat.py --common tools-source/tools/games/prepare_derby_app_diag.py --guard guard-source/tools/games/prepare_derby_pad_bars_diag.py --checkout diagnostic-source
       - name: Build with product settings and partition
         working-directory: diagnostic-source
         shell: bash
