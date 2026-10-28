@@ -288,7 +288,7 @@ def summarize_turns(turns, jheap, visits) -> None:
 W, H = 240, 135
 # Distinct host frames per scene (the app holds each news beat for two
 # beats, so a news frame t matches host frame t % 16).
-LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 128, "ZENITH": 96, "CORE": 112, "LOST": 64}
+LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 128, "ZENITH": 96, "CORE": 140, "LOST": 64}
 TOTAL = {"NEWS0": 5, "NEWS1": 5, "NEWS2": 5, "TWIST": 8, "ZENITH": 16, "CORE": 7, "LOST": 2}
 INDEX = {"NEWS0": 0, "NEWS1": 1, "NEWS2": 2, "TWIST": 3, "ZENITH": 4, "CORE": 5, "LOST": 6}
 # HUD rectangles over the full-screen procedural image (x0, y0, x1, y1), with
@@ -300,7 +300,7 @@ MASKS = {"NEWS0": NEWS_HUD, "NEWS1": NEWS_HUD, "NEWS2": NEWS_HUD,
          "TWIST": [(6, 34, 234, 58), (4, 120, 236, 135)],
          "ZENITH": [(2, 0, 152, 15), (158, 2, 198, 13), (224, 1, 238, 13), (0, 72, 64, 135),
                     (2, 14, 23, 35), (6, 34, 234, 58), (148, 119, 238, 134)],
-         # CORE also tears bands of the image sideways (frames 60..103): those
+         # CORE also tears bands of the image sideways (60..100, held to 112, 115..127): those
          # frames differ outside the masks by design.
          "CORE": [(2, 0, 152, 15), (224, 1, 238, 13), (4, 104, 238, 135), (6, 34, 234, 58)],
          "LOST": [(92, 60, 162, 75)]}

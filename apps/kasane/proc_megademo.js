@@ -227,45 +227,72 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     return [plan, o];
   }
   function core(k, t) {
-    const crit = ramp(t, 60, 100), dz = ramp(t, 84, 100) ** 2, gone = smooth(ramp(t, 100, 110));
-    const sc = (18 + 44 * smooth(ramp(t, 0, 40))) * (1 - gone);
-    const op = smooth(ramp(t, 40, 56)) + .6 * smooth(ramp(t, 76, 100)), tw = op * (.5 + 1.5 * crit);
-    const ya = t * .03 + 2 * crit ** 3, pa = .5 + t * .011, d = [];
-    // Grey flashes: one frame each time 9 u^3 crosses an integer, u over 60..100.
-    const fl = t === 60 || t > 60 && t <= 100 && (9 * crit ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0);
-    Ycy = M.cos(ya); Ysy = M.sin(ya); Pcp = M.cos(pa); Psp = M.sin(pa); Dd = 3.2 - 1.6 * dz;
+    // Clock g: steps every 3 frames from 86 (stop-motion), stops at 100.
+    // At 112 the shell falls in (im), at 115 it bursts (e). Negative frames:
+    // the stop and the burst.
+    const g = t < 86 ? t : t < 100 ? 86 + 3 * ((t - 86) / 3 | 0) : 100, step = t >= 86 && t < 100 && g === t;
+    const neg = t === 100 || t === 101 || t === 115 || t === 116, im = smooth(ramp(t, 112, 115));
+    const crit = ramp(g, 60, 100), dz = ramp(g, 84, 100) ** 2, e = ramp(t, 115, 133), ee = 1 - (1 - e) ** 3;
+    const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * im), o0 = smooth(ramp(g, 40, 56)) + .6 * smooth(ramp(g, 76, 100));
+    const op = o0 * (1 - im) + 3.6 * ee, tw = o0 * (.5 + 1.5 * crit) * (1 - im) + 5 * ee;
+    const ya = g * .03 + 2 * crit ** 3, pa = .5 + g * .011, d = [], iv = neg ? 0xffff : 0;
+    let cost = 0;
+    // Grey flashes: one frame each time 9 u^3 crosses an integer, u over 60..86.
+    const fl = t === 60 || t > 60 && t < 86 && (9 * crit ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0);
+    // The dolly zoom snaps back in the fall.
+    Ycy = M.cos(ya); Ysy = M.sin(ya); Pcp = M.cos(pa); Psp = M.sin(pa); Dd = 3.2 - 1.6 * dz * (1 - im);
     for (let i = 0; i < 20; ++i) {
       // Shrink each face, push it out along its normal, twist it like a petal.
-      let cx = 0, cy = 0, cz = 0, zs = 0;
+      let cx = 0, cy = 0, cz = 0, zs = 0, far = 0;
       for (let j = 0; j < 3; ++j) {
         const v = 3 * parseInt(IFS[3 * i + j], 16);
         cx += IV[v] / 3; cy += IV[v + 1] / 3; cz += IV[v + 2] / 3;
       }
-      const l = op * .8 / M.hypot(cx, cy, cz), a = tw * (i & 1 ? 1 : -1), ca = M.cos(a), sa = M.sin(a), o = [];
+      const l = op * (.8 + .3 * (i % 4)) / M.hypot(cx, cy, cz), a = tw * (i & 1 ? 1 : -1), ca = M.cos(a), sa = M.sin(a), o = [];
       for (let j = 0; j < 3; ++j) {
-        const v = 3 * parseInt(IFS[3 * i + j], 16), h = 1 - .35 * op;
+        const v = 3 * parseInt(IFS[3 * i + j], 16), h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee);
         const x = cx + (IV[v] - cx) * h + cx * l, y = cy + (IV[v + 1] - cy) * h + cy * l, z = cz + (IV[v + 2] - cz) * h + cz * l;
         zs += pj(x * ca + z * sa, y, z * ca - x * sa, sc, o);
+        if (M.abs(o[2 * j] - 120) > 200 || M.abs(o[2 * j + 1] - 67) > 140) far = 1e4;
       }
-      o.push(zs > 0 ? BL : i % 3 ? VI : WH);
+      // Lines are not clipped and cost their length (8192 a frame): shards
+      // off the screen, or past 4000 steps in the burst, are not drawn.
+      for (let j = 0; j < 6; j += 2)
+        far += M.max(M.abs(o[j] - o[(j + 2) % 6]), M.abs(o[j + 1] - o[(j + 3) % 6]));
+      if (far >= 1e4 || e > 0 && (cost += far) > 4000) continue;
+      o.push((zs > 0 ? BL : i % 3 ? VI : WH) ^ iv);
       d.push([0, o]);
     }
-    // The core: cube (green) and octahedron (orange), counter-rotating, pulsing.
-    const cs = sc * smooth(ramp(t, 40, 56)) * (1 + .15 * M.sin(t * .5)) * (1 + .5 * crit);
+    // The core: cube (green) and octahedron (orange), counter-rotating,
+    // pulsing; the falling shell crushes it.
+    const cs = sc * smooth(ramp(g, 40, 56)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * crit) * (1 - im);
     if (cs > 1) d.push(quad(1, '0132', 0, cs * .33), quad(1, '4576', 0, cs * .33), quad(3, '0415', 0, cs * .33),
       quad(3, '2637', 0, cs * .33), quad(2, '0143', 1, cs * .55), quad(2, '0253', 1, cs * .55), quad(2, '1245', 1, cs * .55));
-    // Rays from frame 64; stars stretch outwards in the dolly zoom.
-    const nr = rnd(k.r * smooth(ramp(t, 64, 96)) * (1 - gone));
-    for (let j = 0; j < k.d && nr; ++j)
-      d.push([4, [120, 67, cs * .4, 30 + 120 * crit, t * .07 + j * M.PI / nr, nr, 2 * M.PI / nr, fl ? OR : WH]]);
-    const g = 1 + .8 * dz, nn = rnd(k.n * crit ** 1.5 * (1 - gone));
-    d.push([5, [190 * g, 0, 0, 70 * g, t * .05, 120, 67]]);
+    // Rays from frame 64; in the burst, a shockwave ring and the rays thrown
+    // out to the edges.
+    if (e > 0) {
+      const R = 6 + 150 * ee, nr = M.max(8, k.r);
+      d.push([4, [120, 67, R, R + 3 + 9 * (1 - e), t * .02, nr, 2 * M.PI / nr, (e < .3 ? OR : WH) ^ iv]]);
+      const nb = rnd(k.r * (1 - e));
+      if (nb) d.push([4, [120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, nb, 2 * M.PI / nb, OR ^ iv]]);
+    } else {
+      const nr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - im));
+      for (let j = 0; j < k.d && nr; ++j)
+        d.push([4, [120, 67, cs * .4, 30 + 120 * crit, g * .07 + j * M.PI / nr, nr, 2 * M.PI / nr, (fl ? OR : WH) ^ iv]]);
+    }
+    // Stars stretch outwards in the dolly zoom and rush past in the burst;
+    // the noise is still in the stop and spends itself in the burst.
+    const gs = 1 + .8 * dz * (1 - im) + 1.4 * ee, nn = rnd(k.n * (t < 100 ? crit ** 1.5 : t < 115 ? 0 : 1 - e));
+    if (t < 132) d.push([5, [190 * gs, 0, 0, 70 * gs, g * .05 + 2 * ee, 120, 67]]);
     if (nn) d.push([6, [t * 1.7, nn, 10 + 40 * crit]]);
-    return {b: fl ? 0x5acc : 0, s: 0, d: d};
+    // Backdrop: grey flashes, dark grey on the steps, light grey negatives,
+    // and the burst's glow fading back to black.
+    const glow = rnd(9 * (1 - ramp(t, 117, 129)) ** 2);
+    return {b: neg ? 0xad55 : fl ? 0x5acc : step ? 0x2945 : t >= 117 && glow ? glow << 11 | glow << 6 | glow : 0, s: 0, d: d};
   }
   const RC = [28, 108];
   const A2 = {
-    names: ['TWIST', 'ZENITH', 'CORE', 'LOST'], len: [128, 96, 112, 64],
+    names: ['TWIST', 'ZENITH', 'CORE', 'LOST'], len: [128, 96, 140, 64],
     // Plan list of scene i: [template, args...]; sh carries points.
     plans: function (i, tier) {
       const k = KN[tier], z = k.z;
@@ -373,7 +400,7 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     // Narration per scene: "bounds|first frame|line|..."; news headlines.
     const SAY = [, , , '6 122 234 133|10|THE CAT FALLS DOWN THE WIRE|56|IT TWISTS... AND STRAIGHTENS|\
 92|AND OPENS ONTO THE STARS', '150 121 236 132|10|PILOT: THE CAT|40|BARREL ROLL!|72|SOURCE LOCKED',
-    '6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL',
+    '6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|115|AND BREAKS',
     '94 62 160 73|20|NO SIGNAL'];
     const NEWS = 'BREAKING: A SIGNAL FROM ORBIT|IT REPEATS EVERY NIGHT AT MIDNIGHT|\
 SOURCE: ZENITH, THE UNFINISHED CITY|EXPERTS SAY IT IS LOOKING FOR A PILOT|\
@@ -479,7 +506,7 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
       img.setRect(tx, [B[0] + j, B[1], B[2] + j, B[3]]);
       if (fix !== vis) { img.setVisible(tx, !fix); mon.setVisible(tx, fix); vis = fix; }
       // Shutters: open over the first news frames, close at the end of CORE.
-      const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((110 - t) / 8) : 1;
+      const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((140 - t) / 8) : 1;
       if (o < 1 || R.cv < 1) {
         const m = (B[1] + B[3]) / 2, h = (B[3] - B[1]) * o / 2;
         R.top.setRect(tx, [B[0], B[1], B[2], rnd(m - h)]);
@@ -521,6 +548,8 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         return;
       }
       if (scene > 5) return;
+      // CORE's time stop: the HUD and the torn bands hold where they are.
+      if (scene === 5 && t >= 100 && t < 112) return;
       if (!(t & 7)) R.score.setText(tx, NAMES[scene] + ' ' + String(1e6 + tick * 10).slice(1));
       R.lamp.setColor(tx, t & (t > 71 ? 2 : 8) ? 0xfb47ffff : 0x167fffff);
       if (scene === 4) {
@@ -532,7 +561,7 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         R.stat.setText(tx, 'SIGNAL ' + p + ' PLANS ' + live.length + ' DRAWS ' + n);
         // Tear: each band shows when a per-frame hash is under the eased
         // interference level, at a hashed height and offset.
-        const nz = on ? ramp(t, 60, 100) ** 1.5 * (1 - ramp(t, 100, 104)) : 0;
+        const nz = on ? t < 100 ? ramp(t, 60, 100) ** 1.5 : t < 115 ? 0 : 1 - ramp(t, 115, 127) : 0;
         for (let i = 0; i < 3; ++i) {
           const r = R.tear[i], h = M.sin(t * 12.9898 + i * 78.233) * 43758.5453, u = h - M.floor(h), v = u < nz;
           if (v) {
