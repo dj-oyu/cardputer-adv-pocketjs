@@ -35,6 +35,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_scene_tables.py .cache/generated && gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/scene_stub -Imain/scene -I.cache/generated tools/test_wave.c -lm -o /tmp/tw && /tmp/tw"   # LEVEL WAVE: 水の体積保存・静止時の勾配・strip一致・傾きの全範囲（docs/scenes/level-wave.md）。tools/preview_wave.c は連番PPMのプレビュー
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasaneで900フレーム（Kasaneが断るシーンを焼く前に、WSLのみ）
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳

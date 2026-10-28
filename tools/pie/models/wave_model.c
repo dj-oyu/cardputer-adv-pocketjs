@@ -1,54 +1,51 @@
-/* Exhaustive proof that the wave kernel's arithmetic equals wave_row_scalar
- * (main/scene/wave.c): all 135 rows x all three |y-ribbon| in 0..70, both signs
- * (386,543,880 pixels). Models the lookup table layout light | (weighted<<16),
- * the min(d,64) clamp and the SAR=11 multiply pack. Build: see run_models.py. */
+/* Exhaustive proof of the arithmetic the LEVEL WAVE row (main/scene/wave.c,
+ * wave_row_pie) relies on, lane by lane, with the TRM's semantics:
+ *
+ *  1. The distance. For every 4y in 0..536, every line centre 4c in -2048..2047
+ *     and every pulse o in 0..8, min(max(subs(4y, 4c-o), subs(4c+o, 4y)), 255)
+ *     equals min(|4y-4c| + o, 255) -- the saturating subtracts never saturate
+ *     on these ranges, and the result is a valid index into a 256-word table.
+ *  2. The sum. Adding four non-negative channel*128 terms with VADDS.S16
+ *     (saturating, 1.8.70) in the kernel's order gives min(32767, sum) for every
+ *     term in 0..32767 -- checked over every pair at the saturation boundary and
+ *     a grid of the rest, which is what "clips to white, never wraps" means.
+ *  3. The pack. For every accumulator 0..32767 and SAR=11, the masked multiply
+ *     (VMUL.U16: 32-bit product >> SAR, low 16 bits, 1.8.128) puts red, green
+ *     and blue in their RGB565 fields exactly: (acc & 0x7C00)*4096>>11 is
+ *     (acc>>10)<<11, (acc & 0x7E00)*128>>11 is (acc>>9)<<5, (acc & 0x7C00)*2>>11
+ *     is acc>>10.
+ * Build: see run_models.py. */
 #include <stdio.h>
 #include <stdint.h>
-#include <math.h>
-#include <stdlib.h>
-/* Lane models with TRM semantics: VADDS/VSUBS saturate (1.8.70/198), VMAX/VMIN.S16 (1.8.130/1.8.141),
-   VMUL.U16 = 32-bit product >> SAR logical, low 16 (1.8.128). */
-static int16_t sat(int v){return v>32767?32767:v<-32768?-32768:v;}
+static int16_t sat(int v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}
 static int16_t adds(int16_t a,int16_t b){return sat(a+b);}
 static int16_t subs(int16_t a,int16_t b){return sat(a-b);}
-static int16_t vmax(int16_t a,int16_t b){return a>b?a:b;}
-static int16_t vmin(int16_t a,int16_t b){return a<b?a:b;}
-static uint16_t mulu(uint16_t a,uint16_t b,int sar){return (uint16_t)(((uint32_t)a*(uint32_t)b)>>sar);}
-static uint16_t rgb(unsigned r,unsigned g,unsigned b){return ((r>>3)<<11)|((g>>2)<<5)|(b>>3);}
-int main(){
-  uint8_t softness[3][64]; uint32_t lut[3][65];
-  const float widths[]={18,5,24};const float brightness[]={14,32,21};
-  for(int l=0;l<3;l++)for(int d=0;d<64;d++)softness[l][d]=(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l])));
-  for(int l=0;l<3;l++){for(int d=0;d<64;d++){unsigned lo=softness[l][d],hi=l==0?lo/4:l==1?lo/3:lo/2; lut[l][d]=lo|(hi<<16);} lut[l][64]=0;}
-  long total=0,mism=0;
-  for(int y=0;y<135;y++){
-    unsigned green=14+y/7, blue=30+y/5;
-    for(int s0=-1;s0<=1;s0+=2)for(int s1=-1;s1<=1;s1+=2)for(int s2=-1;s2<=1;s2+=2)
-    for(int d0=0;d0<=70;d0++)for(int d1=0;d1<=70;d1++)for(int d2=0;d2<=70;d2++){
-      int16_t rib[3]={(int16_t)(y+s0*d0),(int16_t)(y+s1*d1),(int16_t)(y+s2*d2)};
-      /* scalar reference */
-      unsigned light[3];
-      for(int l=0;l<3;l++){int d=y-rib[l];if(d<0)d=-d;light[l]=d<64?softness[l][d]:0;}
-      unsigned sum=light[0]+light[1];
-      uint16_t ref=rgb(5+light[0]/4+light[1]/3+light[2]/2,green+sum+light[2]/2,blue+sum+light[2]);
-      /* vector model */
-      int16_t lo[3],hi[3];
-      for(int l=0;l<3;l++){
-        int16_t q0=rib[l], q2=(int16_t)y;
-        int16_t q1=subs(q2,q0); q0=subs(q0,q2); q0=vmax(q0,q1); q0=vmin(q0,64);
-        uint32_t e=lut[l][q0]; lo[l]=(int16_t)(e&0xFFFF); hi[l]=(int16_t)(e>>16);
-      }
-      int16_t acclo=adds(lo[0],lo[1]), acchi=adds(hi[0],hi[1]);
-      int16_t b=adds(adds(acclo,lo[2]),(int16_t)blue);
-      int16_t g=adds(adds(acclo,hi[2]),(int16_t)green);
-      int16_t r=adds(adds(acchi,hi[2]),5);
-      uint16_t pr=mulu(mulu((uint16_t)(r&0xF8),32768,11),32768,11);
-      uint16_t pg=mulu((uint16_t)(g&0xFC),16384,11);
-      uint16_t pb=mulu((uint16_t)b,256,11);
-      uint16_t out=pr|pg|pb;
-      total++; if(out!=ref){if(mism<5)printf("y=%d rib=%d,%d,%d ref=%04x out=%04x\n",y,rib[0],rib[1],rib[2],ref,out);mism++;}
-    }
+static uint16_t mulu(uint16_t a,uint16_t b,int s){return (uint16_t)(((uint32_t)a*(uint32_t)b)>>s);}
+int main(void){
+  long bad=0,n=0;
+  for(int y4=0;y4<=536;y4+=4)for(int c=-2048;c<2048;c++)for(int o=0;o<=8;o++){
+    int16_t lo=(int16_t)(c-o),hi=(int16_t)(c+o);
+    int16_t a=subs((int16_t)y4,lo),b=subs(hi,(int16_t)y4);
+    int16_t d=a>b?a:b; if(d>255)d=255;
+    int want=(y4>c?y4-c:c-y4)+o; if(want>255)want=255;
+    n++; if(d!=want||d<0){if(bad<5)printf("distance y4=%d c=%d o=%d got %d want %d\n",y4,c,o,d,want);bad++;}
   }
-  printf("total=%ld mismatches=%ld\n",total,mism);
-  return 0;
+  printf("distance: %ld cases, %ld wrong\n",n,bad);
+  long bad2=0,n2=0;
+  for(int a=0;a<=32767;a+=(a<32000?127:1))for(int b=0;b<=32767;b+=(b<32000?131:1)){
+    int16_t s=adds(adds(adds((int16_t)a,(int16_t)b),(int16_t)(b/2)),(int16_t)(a/3));
+    long want=(long)a+b+b/2+a/3; if(want>32767)want=32767;
+    n2++; if(s!=want){if(bad2<5)printf("sum a=%d b=%d got %d\n",a,b,s);bad2++;}
+  }
+  printf("sum: %ld cases, %ld wrong\n",n2,bad2);
+  long bad3=0;
+  for(int acc=0;acc<=32767;acc++){
+    uint16_t r=mulu((uint16_t)(acc&0x7C00),4096,11), g=mulu((uint16_t)(acc&0x7E00),128,11),
+             b=mulu((uint16_t)(acc&0x7C00),2,11);
+    if(r!=(uint16_t)((acc>>10)<<11)||g!=(uint16_t)((acc>>9)<<5)||b!=(uint16_t)(acc>>10)){
+      if(bad3<5)printf("pack acc=%d\n",acc);bad3++;}
+  }
+  printf("pack: 32768 accumulators, %ld wrong\n",bad3);
+  printf("total=%ld mismatches=%ld\n",n+n2+32768,bad+bad2+bad3);
+  return bad||bad2||bad3;
 }

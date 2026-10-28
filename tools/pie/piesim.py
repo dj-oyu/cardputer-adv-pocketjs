@@ -12,7 +12,7 @@ It is a functional model only. It knows nothing about timing; see `stalls.py`
 for the pipeline side.
 
 Supported instructions (TRM section in brackets):
-    wsr.sar, mov, addi, bnez, loopgtz                         (Xtensa core)
+    wsr.sar, mov, addi, addmi, bnez, loopgtz                         (Xtensa core)
     ee.vld.128.ip [1.8.88]   ee.vst.128.ip [1.8.192]  ee.vld.l.64.ip [1.8.92]
     ee.vld.128.usar.ip [1.8.90]  ee.src.q [1.8.52]  ee.srs.accx [1.8.65]
     ee.st.qacc_l.l.128.ip [1.8.145]
@@ -182,6 +182,13 @@ class Sim:
                 arset(a[0], arv(a[1]))
             elif op == 'addi':
                 arset(a[0], arv(a[1]) + int(a[2]))
+            elif op == 'addmi':
+                # ADDMI's immediate is a multiple of 256 in -32768..32512; one
+                # that is not would not assemble, so say so here too.
+                imm = int(a[2])
+                if imm % 256 or not -32768 <= imm <= 32512:
+                    raise ValueError(f'addmi immediate {imm} is not encodable')
+                arset(a[0], arv(a[1]) + imm)
             elif op == 'bnez':
                 if arv(a[0]) != 0:
                     pc = labels[a[1][:-1]] + 1

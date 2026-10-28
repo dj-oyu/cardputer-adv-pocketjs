@@ -264,7 +264,7 @@ void ocean_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
         // Plane 2 is |x-160|, constant for the life of the display but living
         // inside this block because the row walks all three planes with one
         // pointer. It is the only part of build_tables() that could not be
-        // baked into flash with the sine and the softness curves.
+        // baked into flash with the sine table.
         for(int x=0;x<W;x++)
             ocean_cols[x>>3][2][x&7]=(int16_t)(x<160?160-x:x-160);
     }

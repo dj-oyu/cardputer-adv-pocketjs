@@ -566,6 +566,8 @@ LEVEL WAVE     mode=0 fps=30.3 draw=21.11 | prep=0.99 loop=1.75 (kernel=1.67) hu
 OCEAN + STARS  mode=1 fps=30.3 draw=19.93 | prep=1.06 loop=0.89 (kernel=0.69) hud=2.44 send=15.47
 ```
 
+LEVEL WAVE の行は2026-10の作り直し（[level-wave.md](../scenes/level-wave.md)）より前の値で、新しいカーネル（3線×2表、光の面の加算、`bnez`ループ）と行ごとの光の計算は実機で未測定。
+
 `kernel`はベクトル行だけの時間。波は全135行を描くので`loop`とほぼ一致し、海面は水平線より上の37行をスカラーで塗るぶんだけ差が出る（§2.6）。
 
 JSアプリ（組み込みHello World）の内訳。`kernel_ms`はPIEカーネルが自分で数えたサイクル（**SFXによる水増しの経緯は§6.5**、修正後の実測は`turn 1.62 / render 7.92 / send 7.67`、80MHz）:

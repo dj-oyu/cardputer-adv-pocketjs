@@ -1,0 +1,72 @@
+name: Native app control
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: app-control-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Real controller and shared legacy/native codec, optimized and sanitizers
+        run: python tools/test_app_control.py
+      - name: Real console writer, spoof protection, and existing owner dispatch
+        run: |
+          python tools/test_usb_console.py
+          python tools/test_session_dispatch.py
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: dj-oyu/esp-device-broker-mcp
+          ref: e7a3ce647e61dcccb354c540e3c15bd34a5747e0
+          path: broker-source
+          persist-credentials: false
+      - name: Offline interoperability with merged broker source
+        run: python tools/test_app_control_broker_interop.py --broker-source broker-source
+      - name: Record exact tested source
+        run: |
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/source-head.txt
+          test "$(cat artifacts/source-head.txt)" = "$SOURCE_HEAD"
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: app-control-${{ env.SOURCE_HEAD }}
+          path: artifacts/
+          retention-days: 14
+
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Ordinary defaults ESP-IDF link
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -B build_control -D SDKCONFIG="$PWD/build_control/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" build

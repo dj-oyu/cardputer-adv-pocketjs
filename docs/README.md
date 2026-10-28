@@ -139,6 +139,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [hardware-constraints.md](platform/hardware-constraints.md) | 仕様 | ハードウェア仕様と開発上の制約（RAM 表、配線、UI ノード数の崖） |
 | [build-environment.md](platform/build-environment.md) | 仕様 | Windows / EIM の開発環境とビルド手順 |
 | [test-commands.md](platform/test-commands.md) | 仕様 | 実機テストとホスト側テスト（PIE 3層、WSL のみのもの）のコマンド一覧。守る規則は CLAUDE.md |
+| [native-app-control.md](platform/native-app-control.md) | 仕様 | 通常 main への #47 再提案と USB console 前提。 |
 | [wifi-autostart.md](platform/wifi-autostart.md) | 設計 | Wi-Fi の自動起動: ホームのアイドルで一過性の時刻同期（アプリ優先で中断）、参照カウントの接続サービス `net_service`、常駐の背景サービスへの方針候補と実機で測る項目 |
 | [keystate.md](platform/keystate.md) | 設計 | 物理キーの押下集合（HAL の keystate）と `pocket.input.keys`: 入力経路と消費者の一覧、ライフサイクル、却下案、実機で測る同時押し・ゴースト・FIFO あふれ |
 | [idf-tls-txbuffer-report.md](platform/idf-tls-txbuffer-report.md) | 記録 | ESP-IDF の TLS 送信バッファの二重計上（上流への報告草稿、未送信） |
@@ -152,6 +153,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [xmb-settings-sound.md](scenes/xmb-settings-sound.md) | 仕様 | XMB の設定項目と操作音（起動時に焼き込む効果音テーブル） |
 | [flower.md](scenes/flower.md) | 設計・仕様 | FLOWER 背景: 花の種、カメラとショット、森・光・雨、シーン遷移、装飾光線、メモリ |
 | [solar-sail.md](scenes/solar-sail.md) | 設計 | SOLAR SAIL 背景: 惑星と衛星の軌道モデル、時刻同期の境界 |
+| [level-wave.md](scenes/level-wave.md) | 設計 | LEVEL WAVE 背景: 浅水波の水面、光の屈折とコースティクス、ネオンのオーロラ |
 
 ## アプリと機能 — [`apps/`](apps/)
 
