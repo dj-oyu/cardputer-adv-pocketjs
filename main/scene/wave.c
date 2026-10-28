@@ -366,20 +366,55 @@ static float sine_at(float i) {
     return sine[k&255]+(sine[(k+1)&255]-sine[k&255])*f;
 }
 
-// The surface at column x for this frame: the simulated water plus wind
-// ripples, so the caustics keep moving on a board lying still.
+// The swell: the slow, broad heaving under the ripples. Three long waves
+// that obey the deep-water dispersion relation, omega = sqrt(g k), so the
+// longest runs fastest and they drift through each other rather than
+// marching in step; g is in px/s^2, picked so the 240 px wave takes 4 s.
+// Two run right and one left, which makes the swell rise and fall in place
+// as much as it travels. Amplitudes are px before the envelope below.
+#define SWELL_G 94.0f
+static const float swell_k[3]={0.0196f,0.0331f,0.0524f};    // 320, 190, 120 px
+static const float swell_a[3]={8.0f,6.5f,3.5f};
+static const float swell_dir[3]={1,-1,1};
+static const float swell_phase0[3]={0.0f,2.1f,4.4f};
+// Per frame: each wave's phase and amplitude. The amplitudes breathe
+// independently over 30-60 s, so the sea has calm spells and heavier sets
+// instead of one fixed pattern.
+static float swell_phase[3], swell_amp[3];
+
+static void swell_prepare(double clock) {
+    for(int l=0;l<3;l++) {
+        // sqrt(g k) as g k * rsqrt(g k): sqrtf is a call out of this file.
+        float gk=SWELL_G*swell_k[l], w=gk*rsqrt(gk);
+        swell_phase[l]=(float)fmod(clock*w,6.283185307)+swell_phase0[l];
+        float slow=fx_sinf((float)fmod(clock*(0.11+0.04*l),6.283185307)+l*1.9f);
+        swell_amp[l]=swell_a[l]*(0.7f+0.3f*slow);
+    }
+}
+
+// The surface at column x for this frame: the simulated water, the swell,
+// and wind ripples on top, so the caustics keep moving on a board lying
+// still.
 static float surface_lift, surface_t, surface_shift;
 static float surface_y(float x) {
     float px=x+surface_shift, t=surface_t;
-    return surface_lift+water_at(x)
-        +(sine_at((px*0.031f+t*0.9f)*40.7437f)*3.2f
-         +sine_at((px*0.047f-t*1.3f+1.7f)*40.7437f)*1.6f
-         // The short ripples are the ones that focus: a sine of amplitude A
-         // and wavenumber k curves the surface by A k^2, and the light it
-         // refracts comes to a focus about 4/(A k^2) rows down -- here 20 to
-         // 60, inside the water. The long swells above only steer.
-         +sine_at((px*0.224f-t*2.1f)*40.7437f)*1.1f
-         +sine_at((px*0.331f+t*1.7f+0.6f)*40.7437f)*0.55f)*(1.0f/256);
+    float swell=0;
+    for(int l=0;l<3;l++)
+        swell+=sine_at((swell_dir[l]*px*swell_k[l]-swell_phase[l])*40.7437f)*swell_amp[l];
+    swell*=1.0f/256;
+    // Ripples ride the swell: wind catches the crests (y up is negative) and
+    // the troughs lie in their lee, so the small chop is up to half again as
+    // strong on top and half as strong below.
+    float chop=1.0f-swell*(0.5f/10.0f);
+    if(chop<0.5f)chop=0.5f;
+    if(chop>1.5f)chop=1.5f;
+    // The short ripples are the ones that focus: a sine of amplitude A and
+    // wavenumber k curves the surface by A k^2, and the light it refracts
+    // comes to a focus about 4/(A k^2) rows down -- here 20 to 60, inside
+    // the water. The swell only steers the light.
+    float ripple=(sine_at((px*0.224f-t*2.1f)*40.7437f)*1.1f
+                 +sine_at((px*0.331f+t*1.7f+0.6f)*40.7437f)*0.55f)*(1.0f/256);
+    return surface_lift+water_at(x)+swell+ripple*chop;
 }
 
 // The comet that runs along each line: 0 at the head, rising over 70 steps of
@@ -424,6 +459,7 @@ void wave_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
     // The surface, for every ray column, and its slope from the unrounded
     // curve either side (rounding to 1/16 px first would add a jitter of
     // the slope that the depth magnifies into streaks).
+    swell_prepare(elapsed);
     surface_lift=WATER_LEVEL+tilt_y*12/256.0f;
     surface_t=t;
     surface_shift=tilt_x*12/256.0f;

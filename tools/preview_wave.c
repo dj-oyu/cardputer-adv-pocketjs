@@ -4,7 +4,7 @@
 //   python tools/make_scene_tables.py .cache/generated
 //   gcc -O2 -Wall -Wextra -Werror -Itools/scene_stub -Imain/scene
 //       -I.cache/generated tools/preview_wave.c -lm -o .cache/preview_wave
-//   .cache/preview_wave [frames] [outdir]
+//   .cache/preview_wave [frames] [outdir] [still]
 //
 // The board lies still for a second, then tips 0.35 rad right and back left,
 // so the frames show the slosh, the bend of the shafts and the caustics.
@@ -16,15 +16,20 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static uint16_t frame[W*H];
 
 int main(int argc, char **argv) {
     int frames=argc>1?atoi(argv[1]):90;
     const char *dir=argc>2?argv[2]:".cache";
+    // A third argument of "still" keeps the board level throughout, to judge
+    // the swell and ripples on their own.
+    bool still=argc>3&&!strcmp(argv[3],"still");
     for(int i=0;i<frames;i++) {
         float t=i/30.0f, tilt=0;
-        if(t>1.0f&&t<2.0f)tilt=0.35f;
+        if(still);
+        else if(t>1.0f&&t<2.0f)tilt=0.35f;
         else if(t>=2.0f&&t<3.0f)tilt=-0.2f;
         wave_prepare(1.0f/30,(int)(tilt*256),0,0);
         for(int y=0;y<H;y+=STRIP_H) {
