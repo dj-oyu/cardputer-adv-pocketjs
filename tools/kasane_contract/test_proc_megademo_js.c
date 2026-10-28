@@ -222,8 +222,8 @@ int main(int argc, char **argv) {
         }
     }
     /* Plans are registered per scene now, the next scene's over the last
-     * frames of the running one. The app opens with WAKE (72 frames, 7
-     * plans: Tama's backlit silhouette, drawn until frame 42, then
+     * frames of the running one. The app opens with WAKE (104 frames, 7
+     * plans: Tama's backlit silhouette, drawn until frame 74, then
      * nothing), which
      * prefetches Act I phase 0; then each
      * 16-frame news beat plays twice (frames 0..95), the same draws both
@@ -233,9 +233,9 @@ int main(int argc, char **argv) {
          * (docs/apps/megademo-story.md). */
         "if(__procCalls.registered.length!==0||typeof frame!=='function')"
         "throw Error('registration during evaluation');"
-        "if(procMegademo.names[7]!=='WAKE'||procMegademo.len[7]!==72)throw Error('WAKE');"
-        "for(let i=0;i<72;i++){frame();const f=__procCalls.frames[i];"
-        "if(!f||(f.draws.length>0)!==(i<42))throw Error('WAKE frame '+i)}"
+        "if(procMegademo.names[7]!=='WAKE'||procMegademo.len[7]!==104)throw Error('WAKE');"
+        "for(let i=0;i<104;i++){frame();const f=__procCalls.frames[i];"
+        "if(!f||(f.draws.length>0)!==(i<74))throw Error('WAKE frame '+i)}"
         "__procCalls.frames.length=0;"
         "frame();if(__procCalls.registered.length!==12||__procCalls.live.size!==5)"
         "throw Error('registration by the first news frame');"

@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QJS = ROOT / "components/quickjs-ng/quickjs-ng"
 OUT = ROOT / ".cache/kasane_megademo_scenes"
 W, H = 240, 135
-LENS = {0: 16, 1: 16, 2: 16, 3: 128, 4: 96, 5: 140, 6: 64, 7: 72}
+LENS = {0: 16, 1: 16, 2: 16, 3: 128, 4: 96, 5: 140, 6: 64, 7: 104}
 GREY = bytes((0x30, 0x30, 0x30))
 
 

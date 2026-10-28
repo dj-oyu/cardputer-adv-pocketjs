@@ -96,7 +96,7 @@ static void eval_error(JSContext *ctx,const char *source){
     JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
 }
 #define APP_NEWS_TICKS (2u*PROC_MEGA_FRAMES)
-#define APP_WAKE_TICKS 72u
+#define APP_WAKE_TICKS 104u
 static void reference(unsigned tick){
     uint16_t color=proc_mega_backdrop(tick);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
@@ -207,7 +207,7 @@ int main(int argc,char **argv){
     }
     /* The app opens with WAKE: APP_WAKE_TICKS frames (Tama backlit, then the
      * TV off), which prefetch the news. The last frame is black. */
-    eval_ok(ctx,"if(procMegademo.len[7]!==72)throw Error('WAKE length')");
+    eval_ok(ctx,"if(procMegademo.len[7]!==104)throw Error('WAKE length')");
     for(unsigned tick=0;tick<APP_WAKE_TICKS;tick++){
         eval_ok(ctx,"frame()");
         REQUIRE(pocket_proc_pending());

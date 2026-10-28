@@ -26,10 +26,10 @@ function enter(s, fresh) {
     ' freed=' + old + ' registered=' + loaded);
 }
 const LBL = s => s === 4 ? 'LETHE' : NAMES[s];
-// WAKE's eyelids (0 shut .. 1 open): open halfway, a blink, open; shut and
-// open again for sitting up.
+// WAKE's eyelids (0 shut .. 1 open): open halfway, a blink, open; shut
+// over the cut to the room (WCUT) and open again, sitting up.
 const lid = t => t < 10 ? 0 : t < 18 ? .55 * smooth((t - 10) / 8) : t < 21 ? .55 - (t - 18) / 6 :
-  t < 30 ? .05 + .95 * smooth((t - 21) / 9) : t < 40 ? 1 : t < 43 ? (43 - t) / 3 : t < 48 ? (t - 43) / 5 : 1;
+  t < 30 ? .05 + .95 * smooth((t - 21) / 9) : t < 69 ? 1 : t < 72 ? (72 - t) / 3 : t < 75 ? 0 : t < 80 ? (t - 75) / 5 : 1;
 const boundsAt = step => step === 0 ? FULL : step === ZOOM ? MON :
   lerp4(FULL, MON, step / ZOOM * step / ZOOM * (3 - 2 * step / ZOOM));
 function build(tx, room) {
@@ -139,9 +139,9 @@ function patch(tx, f) {
   // Tama: in WAKE (after its face, act2's wake(), and the blink of sitting
   // up) it walks to the cushion; elsewhere it sits there and blinks.
   if (R.pet) {
-    R.pet.setRect(tx, scene !== 7 ? HOME : lerp4([150, 92, 182, 124], HOME, smooth(clamp((t - 46) / 20))));
+    R.pet.setRect(tx, scene !== 7 ? HOME : lerp4([150, 92, 182, 124], HOME, smooth(clamp((t - WCUT - 6) / 20))));
     R.pet.setImageFrame(tx, 3, t % 40 > 37 ? 1 : 0);
-    if (scene === 7) R.pet.setVisible(tx, t >= 42);
+    if (scene === 7) R.pet.setVisible(tx, t >= WCUT);
   }
   // The body sleeps on from the news's dive; it flinches when LETHE hits.
   if (R.body) for (let i = 0; i < 2; ++i) {

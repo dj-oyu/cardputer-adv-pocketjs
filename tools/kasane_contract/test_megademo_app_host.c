@@ -276,6 +276,14 @@ int main(int argc,char **argv){
                 if(u==340)b=0x80;                     /* previous scene */
             }
         }else if(t==60||t==120)b=0x4000;
+        /* MEGA_KEYS="t:buttons,t:buttons,..." replaces the script (frames to
+         * picture a story beat; "0:0" for no keys). */
+        const char *keys=getenv("MEGA_KEYS");
+        if(keys){b=0;for(const char *c=keys;*c;){char *e;unsigned long k=strtoul(c,&e,10);
+                if(e==c||*e!=':')break;
+                unsigned long v=strtoul(e+1,&e,0);
+                if(k==t)b=(unsigned)v;
+                c=*e?e+1:e;}}
         char call[160];snprintf(call,sizeof call,"__mega.frameReg=0;__mega.frameUnreg=0;__mega.frameRegNs=0;__mega.frameDrawNs=0;frame(%u)",b);
         eval(call,strlen(call),"frame.js");
         present((uint64_t)t*33333u);

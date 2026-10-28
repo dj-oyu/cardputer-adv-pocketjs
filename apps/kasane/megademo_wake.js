@@ -1,31 +1,38 @@
 // MEGADEMO chunk 3: WAKE, the prologue (Tama in the dark). act2's scene
 // table calls wake(); the frame loop draws it through emit.
 'use strict';
-// WAKE: Tama peering in, backlit in the dark, in close-up: the head fills
-// the view, so only the eyes, the ears and part of the outline show (never
-// the whole simple shape). The backdrop is the silhouette and the lit room
-// behind it is the fill (screen minus head and ears: the smaller area, kept
-// under the 8192 raster steps a frame), in tz trapezoids of horizontal
-// lines. A cyan rim on the outer edges, magenta inner ears (the icon's
-// cyber coat), glowing eyes. The head acts Live2D-like on flat shapes: a
-// turn (yaw) moves the eyes across and the ears the other way, narrows the
-// far eye and ear and compresses the far side; a nod (pitch) moves them up
-// and down; roll tilts it; the pupils glance on their own. POSE keys:
-// [t, scale, yaw, pitch, roll, gaze]. wakeAt(t) slides it in, then breathes.
-// From 42 (after the viewer sits up) the TV is off.
-const wakeAt = t => [rnd(8 * (1 - smooth(ramp(t, 4, 18))) + 2 * M.sin(t * .11)), rnd(1.5 * M.sin(t * .2))];
-const POSE = [[0, 1.36, .3, 0, -.08, 0], [15, 1.36, .3, 0, -.08, 0], [17, 1.36, .3, 0, -.08, -1],
-  [22, 1.38, -.45, .05, -.02, -1], [27, 1.48, .05, -.2, -.1, 0], [31, 1.52, .05, -.25, -.12, 0],
-  [37, 1.48, .12, -.12, -.24, .25], [42, 1.48, .12, -.12, -.24, .25]];
+// WAKE: Tama peering in, backlit in the dark, in close-up: the head is
+// bigger than the view, so only the eyes, the ears, the whiskers and part
+// of the outline show (never the whole shape). The backdrop is the
+// silhouette and the lit room behind it is the fill (the glow minus the
+// head and ears, under the 8192 raster steps a frame), in tz trapezoids.
+// A cyan rim on the outer edges, magenta inner ears (the icon's cyber
+// coat), glowing eyes. The head is 3D points on an ellipsoid, turned and
+// seen in perspective: a turn slides the eyes across and folds the ears
+// (an ear edge-on hides its inside), leaning in swells the near parts; the
+// outline is the hull of the turned points (cheek tufts give it corners).
+// POSE keys: [t, scale, yaw, pitch, roll, gaze, eye open, ear spread,
+// camera distance, x, y]. Peering from the side; noticing you wake; facing
+// you; a slow blink (a cat's "all is well"); a tilt; leaning in. At WCUT
+// the viewer has blinked and sat up: the room, and the TV is off.
+const WCUT = 74;
+const POSE = [[0, 1.9, .5, .05, -.38, -1, 1, 0, 260, 60, -16], [17, 1.9, .5, .05, -.38, -1, 1, 0, 260, 56, -14],
+  [24, 1.85, .42, 0, -.32, -.6, 1, 0, 260, 50, 4], [36, 1.6, .06, -.06, -.1, 0, 1, 0, 240, 6, 18],
+  [41, 1.6, .04, -.06, -.1, 0, 1, .5, 240, 6, 18], [45, 1.6, .04, -.04, -.1, 0, .06, 1, 240, 6, 18],
+  [49, 1.6, .04, -.04, -.1, 0, .06, 1, 240, 6, 18], [54, 1.6, .06, -.08, .2, .3, .75, .6, 240, 0, 18],
+  [60, 1.6, .06, -.1, .24, .3, .75, .4, 240, 0, 18], [68, 2.1, .1, -.2, .08, 0, .85, 0, 150, 0, 14],
+  [74, 2.1, .1, -.2, .08, 0, .85, 0, 150, 0, 14]];
 // The back light: an elliptical glow behind the head's top left; the rest
 // of the room stays as dark as the cat, outlined only by its rim.
-const BACK = [128, 36, 84, 38];
-// Ear bases sit just inside the head's outline.
-const HEAD = [], EARS = [[[-43, -22], [-42, -70], [-10, -40]], [[10, -42], [40, -72], [44, -24]]];
-for (let i = 0; i < 24; ++i) {
-  const a = i / 24 * 2 * M.PI, s = M.sin(a);
-  HEAD.push([52 * M.cos(a) * (1 + .06 * s), 41 * s + (s > 0 ? 6 * s * s : 0)]);
-}
+const BACK = [124, 32, 88, 34];
+// The head: an ellipsoid (radii WRAD); its outline is worked out for the
+// turn (the points whose normal is across the view), furred at the
+// cheeks. Ears: base out, outer edge, tip, inner edge, base in (the left
+// one; the right mirrors it). Whiskers: root, tip.
+const WRAD = [52, 44, 46], EAR = [[-46, -22, 8], [-52, -48, 2], [-44, -74, -4], [-25, -60, 8], [-14, -40, 18]],
+  WHISK = [[10, 16, 78, 4], [12, 20, 80, 18], [11, 24, 72, 32]];
+// A point on the face (z on the ellipsoid's front).
+const wsurf = (x, y, d) => [x, y, WRAD[2] * M.sqrt(M.max(0, 1 - (x / WRAD[0]) ** 2 - (y / WRAD[1]) ** 2)) + d];
 // WAKE draws ~150 times a frame: on the device each draw goes straight to
 // the loop's emit(plan, inputs) with one reused inputs array (a list of
 // fresh arrays held ~25 KB of guest heap and ran it out between
@@ -39,13 +46,13 @@ function wtz(k, x0, x1, y, d0, d1, n) {
   if (WEMIT) WEMIT(k, v); else WD.push([k, v]);
 }
 function wln(k, a, b) {
-  if (a[0] > 239 && b[0] > 239 || a[1] < 0 && b[1] < 0 || a[0] < 0 && b[0] < 0) return;
+  if (a[0] > 239 && b[0] > 239 || a[1] < 0 && b[1] < 0 || a[0] < 0 && b[0] < 0 || a[1] > 134 && b[1] > 134) return;
   const v = WEMIT ? WLA : [0, 0, 0, 0];
   v[0] = a[0]; v[1] = a[1]; v[2] = b[0]; v[3] = b[1];
   if (WEMIT) WEMIT(k, v); else WD.push([k, v]);
 }
 // WAKE's backdrop: the silhouette, until the TV is off.
-const wakeB = t => t < 42 ? 0x0043 : 0;
+const wakeB = t => t < WCUT ? 0x0043 : 0;
 // The x span of a convex polygon on row y into WR; false if none.
 function wspan(Q, y) {
   let l = 1e9, r = -1e9;
@@ -106,25 +113,65 @@ function winside(Q, p) {
   }
   return !pos || !neg;
 }
-const WCORE = [], WRIM = [];
+const WCORE = [];
 for (let j = 0; j < 16; ++j) WCORE.push([BACK[0] + BACK[2] * .68 * M.cos(j * M.PI / 8), BACK[1] + BACK[3] * .68 * M.sin(j * M.PI / 8)]);
 function wake(t, emit) {
   WD = []; WEMIT = emit || null;
-  if (t >= 42) return {b: 0, s: 0, d: WD};
+  if (t >= WCUT) return {b: 0, s: 0, d: WD};
   let i = 0;
   while (i < POSE.length - 2 && POSE[i + 1][0] <= t) ++i;
   const A = POSE[i], B = POSE[i + 1], u = smooth(ramp(t, A[0], B[0])), q = A.map((v, j) => v + (B[j] - v) * u);
-  const S = q[1], Y = q[2], P = q[3], c = M.cos(q[4]), sn = M.sin(q[4]), o = wakeAt(t);
-  // Flat to screen: the far side compresses, a point at depth z (1: the
-  // eyes, in front; < 0: the ears, behind) slides with the turn and nod.
+  // Breathing, and a slow sway.
+  const S = q[1] * (1 + .012 * M.sin(t * .2)), cy = M.cos(q[2]), sy = M.sin(q[2]), cp = M.cos(q[3]), sp = M.sin(q[3]),
+    c = M.cos(q[4] + .03 * M.sin(t * .11)), sn = M.sin(q[4] + .03 * M.sin(t * .11)), D = q[8],
+    X0 = 120 + q[9], Y0 = 100 + q[10] + 1.5 * M.sin(t * .2);
+  // Head space (x right, y down, z to the viewer) to the screen: turn,
+  // nod, perspective (nearer is bigger), roll.
   const tf = (x, y, z) => {
-    x = x * (x * Y > 0 ? 1 - .2 * M.abs(Y) : 1 + .06 * M.abs(Y)) + 14 * Y * z;
-    y += -12 * P * z;
-    return [130 + o[0] + (x * c - y * sn) * S, 104 + o[1] + (x * sn + y * c) * S];
+    const x1 = x * cy + z * sy, z1 = z * cy - x * sy, y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp, k = D / (D - z2) * S;
+    return [X0 + (x1 * c - y2 * sn) * k, Y0 + (x1 * sn + y2 * c) * k, z2];
   };
-  const head = HEAD.map(p => tf(p[0], p[1], 0));
-  const ear = EARS.map((e, k) => e.map((p, j) => tf(p[0] + (k && j === 1 && t >= 21 && t < 24 ? 7 : 0),
-    p[1] + (k && j === 1 && t >= 21 && t < 24 ? 4 : 0), j === 1 ? -.7 : -.2)));
+  // The view direction in head space, scaled by the radii (w): the
+  // outline is the radii times the unit circle across w (e1, e2).
+  const w = [-sy * cp / 52, sp / 44, cy * cp / 46], wl = M.hypot(w[0], w[1], w[2]);
+  w[0] /= wl; w[1] /= wl; w[2] /= wl;
+  const e1 = [w[2], 0, -w[0]], l1 = M.hypot(e1[0], e1[2]);
+  e1[0] /= l1; e1[2] /= l1;
+  const e2 = [w[1] * e1[2], w[2] * e1[0] - w[0] * e1[2], -w[1] * e1[0]], head = [];
+  for (let k = 0; k < 28; ++k) {
+    const g = k * M.PI / 14, cg = M.cos(g), sg = M.sin(g);
+    let x = 52 * (cg * e1[0] + sg * e2[0]), y = 44 * (cg * e1[1] + sg * e2[1]), z = 46 * (cg * e1[2] + sg * e2[2]);
+    // Fur: the cheeks tufted (every other point out), the jaw fuller.
+    const f = y > 0 && M.abs(x) > 30 ? (k & 1 ? 1.13 : 1.02) : y > 20 ? 1.05 : 1;
+    head.push(tf(x * f, y * f, z * f));
+  }
+  // Ears: spread out when at ease; the near ear flicks as you wake, the
+  // far one in the tilt. Each is a plane: facing away, its inside hides.
+  const ear = [], inner = [];
+  for (let k = 0; k < 2; ++k) {
+    const sg = k ? -1 : 1, fl = k ? t >= 56 && t < 59 : t >= 21 && t < 24, P = [], Q = [];
+    for (let j = 0; j < 5; ++j) {
+      const e = EAR[j], w = j && j < 4 ? 1 : 0, tip = j === 2 ? 1 : .5;
+      let x = e[0] - sg * 7 * q[7] * w * tip, y = e[1] + 4 * q[7] * w * tip, z = e[2];
+      if (fl && w) { x -= sg * 8 * tip; z -= 14 * tip; }
+      P.push([x * sg, y, z]);
+    }
+    const m = [0, 1, 2].map(a => (P[0][a] + P[4][a] + P[2][a] * .6) / 2.6);
+    // The inside: the ear drawn in towards its middle, its corners cut
+    // once (Chaikin) so it reads as a soft hollow, not a triangle.
+    const N = P.map((p, j) => {
+      const f = j === 2 ? .38 : j === 0 || j === 4 ? .6 : .5;
+      return [0, 1, 2].map(d => p[d] + (m[d] - p[d]) * f);
+    });
+    for (let j = 0; j < 5; ++j) {
+      const a = N[j], b = N[(j + 1) % 5];
+      for (const v of [.25, .75]) Q.push(tf(a[0] + (b[0] - a[0]) * v, a[1] + (b[1] - a[1]) * v, a[2] + (b[2] - a[2]) * v + 1));
+    }
+    const e = P.map(p => tf(p[0], p[1], p[2]));
+    // Facing: the sign of the projected inside's winding.
+    const a = e[0], b = e[2], d = e[4], fc = ((b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])) * sg;
+    ear.push(e); if (fc > 400) inner.push(Q);
+  }
   const cut = [head, ear[0], ear[1]];
   // The lit room: the glow minus the head and the ears, soft at its edge:
   // the core (.68 of it) every row, the ring outside every other row.
@@ -142,35 +189,42 @@ function wake(t, emit) {
     wstrips(y0 + .01, y1 - .01, (y, g) => wspan(Q, y) ? wminus(WR[0], WR[1], holes, y, g) : (g.length = 0), k, 1);
   };
   // The rim on the outer edges only: a head edge inside an ear is not lit.
-  for (let k = 0; k < 24; ++k) {
-    const a = head[k], b = head[(k + 1) % 24], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  for (let k = 0; k < head.length; ++k) {
+    const a = head[k], b = head[(k + 1) % head.length], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     if (!winside(ear[0], m) && !winside(ear[1], m)) wln(4, a, b);
   }
-  for (const e of ear) {
-    // An ear's edges in quarters, those inside the head left dark.
-    for (let s = 0; s < 2; ++s) {
-      const a = e[s], b = e[s + 1];
-      for (let j = 0; j < 4; ++j) {
-        const p = [a[0] + (b[0] - a[0]) * j / 4, a[1] + (b[1] - a[1]) * j / 4];
-        const r = [a[0] + (b[0] - a[0]) * (j + 1) / 4, a[1] + (b[1] - a[1]) * (j + 1) / 4];
-        if (!winside(head, [(p[0] + r[0]) / 2, (p[1] + r[1]) / 2])) wln(4, p, r);
-      }
+  for (const e of ear) for (let s = 0; s < 4; ++s) {
+    // An ear's edges in halves, those inside the head left dark.
+    const a = e[s], b = e[s + 1];
+    for (let j = 0; j < 2; ++j) {
+      const p = [a[0] + (b[0] - a[0]) * j / 2, a[1] + (b[1] - a[1]) * j / 2];
+      const r = [a[0] + (b[0] - a[0]) * (j + 1) / 2, a[1] + (b[1] - a[1]) * (j + 1) / 2];
+      if (!winside(head, [(p[0] + r[0]) / 2, (p[1] + r[1]) / 2])) wln(4, p, r);
     }
-    const m = [(e[0][0] + e[2][0]) / 2, (e[0][1] + e[2][1]) / 2];
-    fill([[e[0][0] * .45 + m[0] * .55, e[0][1] * .45 + m[1] * .55], [e[1][0] * .6 + m[0] * .4, e[1][1] * .6 + m[1] * .4],
-      [e[2][0] * .45 + m[0] * .55, e[2][1] * .45 + m[1] * .55]], 3, []);
   }
-  // Eyes: open (watching, pupils wide in the dark), a slow blink at 30,
-  // then at ease. The far eye narrows with the turn.
-  const op = t < 30 ? 1 : t < 34 ? M.abs(t - 32) / 2 : .55;
-  for (const ex of [-22, 22]) {
-    const w = 10 * (ex * Y > 0 ? 1 - .45 * M.abs(Y) : 1), ey = ex < 0 ? -6 : -8, h = 7 * op;
-    const E = (x, y) => tf(ex + x, ey + y, 1);
-    if (op < .2) { wln(4, E(-w, 0), E(0, 2)); wln(4, E(0, 2), E(w, 0)); continue; }
-    const px = q[5] * w * .45, pw = w * (t < 34 ? .38 : .28), ph = h * .88;
-    fill([E(-w, 0), E(-w * .4, -h), E(w * .4, -h), E(w, 0), E(w * .4, h), E(-w * .4, h)], 1,
-      [[E(px - pw, -ph), E(px + pw, -ph), E(px + pw * 1.25, 0), E(px + pw, ph), E(px - pw, ph), E(px - pw * 1.25, 0)]]);
-    wln(5, E(px - pw * .7, -h * .4), E(px - pw * .2, -h * .4));
+  for (const Q of inner) fill(Q, 3, []);
+  // Whiskers catch the back light past the cheeks; they twitch.
+  for (let k = 0; k < 6; ++k) {
+    const w = WHISK[k % 3], sg = k < 3 ? -1 : 1, x = sg * (w[0] + w[2]) / 2, y = (w[1] + w[3]) / 2;
+    wln(4, tf(x, y, 22), tf(sg * w[2], w[3] + 2 * M.sin(t * .3 + k), 14));
+  }
+  // Eyes (almonds on the face, slanted): wide in the dark, the pupils big;
+  // the far eye narrows with the turn by itself. Shut: a line.
+  const op = q[6], h = 8 * op;
+  for (const sg of [-1, 1]) {
+    const E = (x, y) => {
+      const p = wsurf(sg * 21 + x, -7 + y - sg * x * .18, 1);
+      return tf(p[0], p[1], p[2]);
+    };
+    if (op < .2) { wln(4, E(-11, 0), E(-4, 2)); wln(4, E(-4, 2), E(4, 2)); wln(4, E(4, 2), E(11, 0)); continue; }
+    const px = q[5] * 4.4, pw = t < 40 ? 4.4 : 3, ph = h * .92, I = [], O = [];
+    for (let k = 0; k < 12; ++k) {
+      const g = k * M.PI / 6, cg = M.cos(g), s1 = M.sin(g);
+      I.push(E(11 * cg, h * s1 * (1 - .3 * cg * cg)));
+      O.push(E(px + pw * cg, ph * s1));
+    }
+    fill(I, 1, [O]);
+    wln(5, E(px - pw * .8, -h * .45), E(px - pw * .2, -h * .45));
   }
   return {b: wakeB(t), s: 0, d: WD};
 }

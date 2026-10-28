@@ -161,7 +161,7 @@ const RC = [28, 108];
 const A2 = {
   // WAKE (the prologue, played first) draws nothing: the TV is off and the
   // view layer shows the room in the first person.
-  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [128, 96, 140, 64, 72],
+  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [128, 96, 140, 64, 104],
   // Plan list of scene i: [template, args...]; sh carries points.
   plans: function (i, tier) {
     const k = KN[tier], z = k.z;
