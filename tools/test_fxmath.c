@@ -121,8 +121,10 @@ static void table_matches_libm(void) {
            checked, shift, FX_LUT_INTERVALS);
 }
 
-// wave.c: level_slope = (int)(tanf(tilt_x/256.0f) * 256), and motion.c clamps
-// tilt_x to +-180. Every value the firmware can produce is in this loop.
+// wave.c used to form level_slope = (int)(tanf(tilt_x/256.0f) * 256); it now
+// keeps the float (the water's rest slope, and tilt+0.30 for the light, still
+// inside +-1.27 rad). The integer check stays as a check of the tangent over
+// the range motion.c clamps tilt_x to (+-180).
 static void wave_level_slope(void) {
     long bad = 0;
     for (int t = -180; t <= 180; t++) {

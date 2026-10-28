@@ -229,10 +229,11 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_sfx.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_sfx.py")
-# The same argument for the home screen's three constant scene tables: sine,
-# softness and wave_lut were 1,484 B of .bss built once at the first frame from
-# nothing but literals. tools/test_scene_tables.py diffs the baked values
-# against the C expressions that used to build them.
+# The same argument for the home screen's constant scene tables: sine and the
+# first wave tables were 1,484 B of .bss built once at the first frame from
+# nothing but literals. LEVEL WAVE's light and water tables (about 7.7 KB) are
+# now defined in the generator itself. tools/test_scene_tables.py diffs sine
+# against the C that used to build it and range-checks the rest.
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_scene_tables.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_scene_tables.py")

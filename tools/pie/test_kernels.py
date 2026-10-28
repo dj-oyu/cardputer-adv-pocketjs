@@ -28,6 +28,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 from piesim import Sim, extract_asm, extract_constants, store16, store32, load16  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import make_scene_tables  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
 # The two vector rows left shell.c when each background became its own
@@ -51,9 +53,6 @@ def cdiv(a, b):
 # precision may differ from sinf/expf by one unit in a few entries; that does
 # not matter because both sides of the comparison use the same table.
 SINE = [int(math.sin(i * 6.2831853 / 256) * 256) for i in range(256)]
-WIDTHS, BRIGHT = (18, 5, 24), (14, 32, 21)
-SOFTNESS = [[int(BRIGHT[l] * math.exp(-d * d / (2 * WIDTHS[l] * WIDTHS[l]))) for d in range(64)]
-            for l in range(3)]
 
 
 class OceanRow(unittest.TestCase):
@@ -125,47 +124,65 @@ class OceanRow(unittest.TestCase):
 
 
 class WaveRow(unittest.TestCase):
-    """wave_row_pie against its scalar model (scene/wave.c)."""
+    """wave_row_pie against the C row beside it (scene/wave.c, the #else branch).
+
+    Three distance lookups into the baked tables, the row's light plane added,
+    every add saturating at 32767, then the RGB565 pack. The tables are the
+    generator's own, so this checks the assembly, not the table values.
+    """
 
     @staticmethod
-    def scalar(y, ribbons):
-        green, blue = 14 + y // 7, 30 + y // 5
+    def scalar(y, cols, light, lut):
         out = []
         for x in range(LCD_W):
-            light = []
+            acc = [0, 0, 0]                                   # blue, green, red
             for l in range(3):
-                d = abs(y - ribbons[l][x])
-                light.append(SOFTNESS[l][d] if d < 64 else 0)
-            s = light[0] + light[1]
-            out.append(rgb565(5 + light[0] // 4 + light[1] // 3 + light[2] // 2,
-                              green + s + light[2] // 2, blue + s + light[2]))
+                lo, hi = cols[2 * l][x], cols[2 * l + 1][x]
+                d = min(max(4 * y - lo, hi - 4 * y), 255)
+                gb, r = lut[2 * l][d], lut[2 * l + 1][d]
+                acc[0] += gb & 0xFFFF
+                acc[1] += gb >> 16
+                acc[2] += r & 0xFFFF
+            acc = [min(32767, acc[c] + light[c][x]) for c in range(3)]
+            out.append(((acc[2] & 0x7C00) << 1) | ((acc[1] & 0x7E00) >> 4) | ((acc[0] & 0x7C00) >> 10))
         return out
 
     def test_rows(self):
         asm = extract_asm(WAVE, 'wave_row_pie(')
+        lut = make_scene_tables.wave_lut()
+        flat = [v for table in lut for v in table]
         rng = random.Random(5)
-        for _ in range(40):
+        for case in range(48):
             y = rng.randint(0, 134)
-            ribbons = [[rng.randint(-40, 200) for _ in range(LCD_W)] for _ in range(3)]
+            cols = []
+            for l in range(3):
+                # Lines near the row (so the lookups walk the whole table),
+                # far off it (the clamp), and pulse offsets of 0..8.
+                centre = [rng.randint(-60, 600) if case % 3 else 4 * y + rng.randint(-40, 40)
+                          for _ in range(LCD_W)]
+                pulse = [rng.randint(0, 8) for _ in range(LCD_W)]
+                cols.append([c - p for c, p in zip(centre, pulse)])
+                cols.append([c + p for c, p in zip(centre, pulse)])
+            # Light planes from dark to past saturation on their own.
+            top = (0, 2000, 32767)[case % 3]
+            light = [[rng.randint(0, top) for _ in range(LCD_W)] for _ in range(3)]
             mem = bytearray(1 << 16)
-            ROW, COLS, T, K = 0x1000, 0x2000, 0x4000, 0x6000
+            ROW, COLS, LT, T, K = 0x1000, 0x2000, 0x3000, 0x4000, 0xE000
             for x in range(LCD_W):
-                for l in range(3):
-                    store16(mem, COLS + ((x >> 3) * 3 + l) * 16 + 2 * (x & 7), [ribbons[l][x] & 0xFFFF])
-            lut = []
-            for l in range(3):                            # wave_lut[l][d] = light | (weighted << 16), [64] = 0
-                for d in range(65):
-                    lo = SOFTNESS[l][d] if d < 64 else 0
-                    hi = (lo // 4, lo // 3, lo // 2)[l]
-                    lut.append(lo | (hi << 16))
-            store32(mem, T, lut)
-            k = extract_constants(WAVE, 'wave_row_pie(', dict(y=y, green=14 + y // 7, blue=30 + y // 5))
+                for p in range(6):
+                    store16(mem, COLS + ((x >> 3) * 6 + p) * 16 + 2 * (x & 7), [cols[p][x] & 0xFFFF])
+                for c in range(3):
+                    store16(mem, LT + ((x >> 3) * 3 + c) * 16 + 2 * (x & 7), [light[c][x]])
+            store32(mem, T, flat)
+            k = extract_constants(WAVE, 'wave_row_pie(', dict(y=y))
             store16(mem, K, k)
             sim = Sim(mem)
-            sim.run(asm, {'row': ROW, 'in': COLS, 'k': K, 't0': T, 't1': T + 65 * 4, 't2': T + 130 * 4,
-                          'blocks': LCD_W // 8, 'sar': 11})
-            self.assertEqual(load16(mem, ROW, LCD_W), self.scalar(y, ribbons), f'row y={y}')
+            sim.run(asm, {'row': ROW, 'in': COLS, 'lt': LT, 'k': K, 't': T,
+                          'n': LCD_W // 8, 'sar': 11, 'kp': 0, 'tp': 0})
+            self.assertEqual(load16(mem, ROW, LCD_W), self.scalar(y, cols, light, lut), f'row y={y} case={case}')
             self.assertEqual(sim.ar['row'], ROW + LCD_W * 2)
+            self.assertEqual(sim.ar['in'], COLS + LCD_W * 12)
+            self.assertEqual(sim.ar['lt'], LT + LCD_W * 6)
 
 
 class SolarFillRow(unittest.TestCase):

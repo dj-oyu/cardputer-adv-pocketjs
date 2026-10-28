@@ -31,7 +31,7 @@ XMBの横カテゴリ・縦リストを文字で表現する。
 
 BACKGROUND設定は3択（LEVEL WAVE / OCEAN + STARS / SOLAR SAIL、`main/ui/shell.c` の `SCENES[]`）。いずれもその場で計算して描画し、動画や全画面の大きな画像列は使わない。半透明に見える配色はstrip内で計算し、巨大な透過レイヤーを常駐させない。ネイティブShellで描画し、JSアプリと同時には動かさない。
 
-波と海面はPIEカーネルで背景行をベクトル化している（[pie-simd.md](../perf/pie-simd.md) §7に実測）。SOLAR SAILの詳細は[SOLAR SAIL](solar-sail.md)、FLOWERの詳細は[FLOWER背景](flower.md)。
+波と海面はPIEカーネルで背景行をベクトル化している（[pie-simd.md](../perf/pie-simd.md) §7に実測）。LEVEL WAVEの詳細は[LEVEL WAVE](level-wave.md)、SOLAR SAILの詳細は[SOLAR SAIL](solar-sail.md)、FLOWERの詳細は[FLOWER背景](flower.md)。
 
 ui_taskのフレーム目標は約30Hz。背景が動くと画面の広い範囲が毎回更新されるため、damage描画だけで転送が小さくなるとは仮定しない。描画とSPI転送の合計時間を測り、負荷が高ければ背景の更新頻度・波の本数を下げる。
 

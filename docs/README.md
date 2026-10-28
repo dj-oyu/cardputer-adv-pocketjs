@@ -152,6 +152,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [xmb-settings-sound.md](scenes/xmb-settings-sound.md) | 仕様 | XMB の設定項目と操作音（起動時に焼き込む効果音テーブル） |
 | [flower.md](scenes/flower.md) | 設計・仕様 | FLOWER 背景: 花の種、カメラとショット、森・光・雨、シーン遷移、装飾光線、メモリ |
 | [solar-sail.md](scenes/solar-sail.md) | 設計 | SOLAR SAIL 背景: 惑星と衛星の軌道モデル、時刻同期の境界 |
+| [level-wave.md](scenes/level-wave.md) | 設計 | LEVEL WAVE 背景: 浅水波の水面、光の屈折とコースティクス、ネオンのオーロラ |
 
 ## アプリと機能 — [`apps/`](apps/)
 
