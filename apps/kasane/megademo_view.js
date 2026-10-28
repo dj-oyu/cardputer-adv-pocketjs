@@ -25,20 +25,29 @@ const ROOM = '10 14 46 58 2a2440ff,12 16 44 56 0a1230ff,33 20 40 27 f0e8c8ff 3,3
 60 16 180 87 6a6050ff -2,150 89 176 92 6a6050ff,70 104 170 113 c8bca0ff 2,74 106 166 111 a89c80ff,\
 192 99 232 105 8a3050ff 3';
 const TV = '0 110 240 135 061521ff 0 210,0 110 240 112 45cddaff,6 5 32 16 d93436ff 2,\
-9 6 31 15 ffffffff LIVE,36 6 120 15 d7f4ffff POCKET_NEWS';
-// Chapters: title, room glow, card ink. Scene -> chapter is CHAP.
-const CHAP = [0, 0, 0, 1, 2, 3, 4], TITLE = 'I ON AIR|II THE LINE|III ZENITH|IV CORE|V SIGNAL LOST',
-  GLOW = [0x1e3a62ff, 0x3a1856ff, 0x12402aff, 0x58301aff, 0x101428ff],
+9 6 31 15 ffffffff RX,36 6 120 15 d7f4ffff ASTRAL_COMMAND';
+// Chapters: title, room glow, card ink. Scene -> chapter is CHAP (WAKE, the
+// prologue, has no title).
+const CHAP = [0, 0, 0, 1, 2, 3, 4, 5], TITLE = 'I BRIEFING|II CROSSING|III LETHE|IV CORE|V SIGNAL LOST|',
+  GLOW = [0x1e3a62ff, 0x3a1856ff, 0x12402aff, 0x58301aff, 0x101428ff, 0x0c0a1cff],
   INK = [0, 0xf848ffff, 0x18f038ff, 0xff6838ff];
-// Narration per scene: "bounds|first frame|line|..."; news headlines.
-const SAY = [, , , '6 122 234 133|10|THE CAT FALLS DOWN THE WIRE|56|IT TWISTS... AND STRAIGHTENS|\
-92|AND OPENS ONTO THE STARS', '150 121 236 132|10|PILOT: THE CAT|40|BARREL ROLL!|72|SOURCE LOCKED',
+// Narration per scene: "bounds|first frame|line|..."; the briefing (two
+// lines a beat; ~ is the sortie number, 742 on the first night).
+const SAY = [, , , '6 122 234 133|10|LEAVING THE BODY|56|DEEPER|92|INTO LETHE',
+'150 121 236 132|10|TAMA: ONLINE|40|EVADE!|72|TARGET LOCKED',
 '6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|115|AND BREAKS',
 '94 62 160 73|20|NO SIGNAL'];
-const NEWS = 'BREAKING: A SIGNAL FROM ORBIT|IT REPEATS EVERY NIGHT AT MIDNIGHT|\
-SOURCE: ZENITH, THE UNFINISHED CITY|EXPERTS SAY IT IS LOOKING FOR A PILOT|\
-IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS A P1L0T. 1T WANTS Y0UR C4T';
-const HOME = [196, 70, 228, 102], NEAR = [150, 72, 182, 104];
+const NEWS = 'INCOMING ORDER  SORTIE ~|RECEIVER: ASTRAL FIGHTER|TARGET: LETHE|ROUTE SYNC COMPLETE|\
+PILOT CONFIRMED|LEAVE THE BODY. CROSS THE RIVER|P1L0T C0NF1RM3D';
+// Tama sits on the cushion; the body (the viewer's own) sleeps over the
+// keyboard while the mind is away: shoulders, then the head.
+const HOME = [196, 70, 228, 102], BODY = [[90, 104, 150, 117, 5, 0x56506eff], [112, 98, 130, 112, 7, 0x2c2638ff]];
+// The sortie number goes up every night (each WAKE); the memory of the
+// briefing clouds with it: letters turn to digits, more each night.
+let sortie = 741;
+const GB = {E: '3', I: '1', O: '0', A: '4', S: '5', T: '7'};
+const gb = s => s.replace(/[EIOAST]/g, (c, i) =>
+  (M.sin(i * 12.9898 + sortie * 78.233) * 43758.5453 % 1 + 1) % 1 < M.min(.5, (sortie - 742) * .08) ? GB[c] : c);
 let tier = KN.length - 1, scene = 0, t = 0, tick = 0, live = [], pend = [], next = null, loaded = 0;
 let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1;
 let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
@@ -58,10 +67,16 @@ function enter(s, fresh) {
   if (fresh && next) { drop(next.h); next = null; }
   prefetch(s, 0);
   const old = live.length;
+  if (s === 7 && scene !== 7) ++sortie;
   drop(live); live = next.h; pend = next.sp.slice(live.length); next = null; scene = s; t = 0;
   console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length +
     ' freed=' + old + ' registered=' + loaded);
 }
+const LBL = s => s === 4 ? 'LETHE' : NAMES[s];
+// WAKE's eyelids (0 shut .. 1 open): open halfway, a blink, open; shut and
+// open again for sitting up.
+const lid = t => t < 10 ? 0 : t < 18 ? .55 * smooth((t - 10) / 8) : t < 21 ? .55 - (t - 18) / 6 :
+  t < 30 ? .05 + .95 * smooth((t - 21) / 9) : t < 40 ? 1 : t < 43 ? (43 - t) / 3 : t < 48 ? (t - 43) / 5 : 1;
 const boundsAt = step => step === 0 ? FULL : step === ZOOM ? MON :
   lerp4(FULL, MON, step / ZOOM * step / ZOOM * (3 - 2 * step / ZOOM));
 function build(tx, room) {
@@ -80,21 +95,30 @@ function build(tx, room) {
   if (room) {
     tx.gradient({bounds: [0, 0, 240, 100], axis: 'y', from: 0x0a0618ff, to: GLOW[ch], dither: true});
     ROOM.split(',').forEach(box);
+    // A tally on the wall, a mark a night (three before the first).
+    for (let i = 0; i < M.min(12, sortie - 739); ++i) {
+      const x = 198 + i * 3 + (i >> 2) * 3;
+      tx.rect({bounds: [x, 18, x + 1, 28], color: 0x8a7c66ff});
+    }
     R.led = tx.roundRect({bounds: [62, 89, 66, 92], radius: 1, color: 0x17a7ffff});
-    if (!ch || ch > 3) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 1});
-    text([6, 116, 234, 125], 'NIGHT SIGNAL   ' + T[ch], 'caption', 0xd8ccb0ff);
+    // The body and Tama from the briefing to CORE; in LOST the room is empty
+    // (where did Tama go?); in WAKE the viewer is the body.
+    if (scene < 6) {
+      R.body = BODY.map(b => tx.roundRect({bounds: b.slice(0, 4), radius: b[4], color: b[5]}));
+      R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
+    }
+    text([6, 116, 234, 125], 'SORTIE ' + sortie + '   ' + T[ch], 'caption', 0xd8ccb0ff);
     text([6, 125, 234, 134], 'ENTER ZOOM  L/R CHAPTER  U/D LOAD', 'caption', 0x8a7c66ff);
   }
   // The opaque image is last: at full size it exactly covers the set.
   img = tx.image({resource: res0, bounds: boundsAt(zoom), clip: FULL, sourceWidth: 240, sourceHeight: 135});
   mon = tx.image({resource: monRes, bounds: MON, clip: FULL, sourceWidth: 112, sourceHeight: 63});
   mon.setVisible(tx, false);
-  if (room && ch > 3) {
-    R.zz = text([206, 56, 238, 68], 'z Z z', 'caption', 0xb0c8ffff);
-    R.off = text([96, 46, 150, 58], 'NO SIGNAL', 'caption', 0xffffffff);
-  }
+  // WAKE: Tama walks to the cushion in front of the TV (over its image).
+  if (scene === 7) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
+  if (room && scene === 6) R.off = text([96, 46, 150, 58], 'NO SIGNAL', 'caption', 0xffffffff);
   if (scene < 3) {
-    const N = NEWS.split('|');
+    const N = NEWS.replace('~', sortie).split('|').map(gb);
     TV.split(',').forEach(e => add(box(e)));
     R.head = add(text([6, 114, 234, 124], N[2 * scene], 'caption', 0xffffffff, 40));
     add(text([6, 124, 234, 134], N[2 * scene + 1], 'caption', 0x80d9e8ff));
@@ -103,11 +127,11 @@ function build(tx, room) {
   if (S) R.say = add(text(S[0].split(' ').map(Number), '', 'caption', 0xffffffff, 40), +S[1]);
   if (ch < 4) R.card = add(text([8, 36, 232, 56], R.T = T[ch], 'display', INK[ch], 16), 4, 60);
   if (scene > 3 && ch < 4) {
-    R.score = add(text([4, 2, 150, 13], NAMES[scene], 'caption', 0xffffffff, 20));
+    R.score = add(text([4, 2, 150, 13], LBL(scene), 'caption', 0xffffffff, 20));
     R.lamp = add(tx.roundRect({bounds: [226, 3, 236, 11], radius: 3, color: 0xfb47ffff}));
     if (scene === 4) {
       R.ring = add(tx.strokeRect({bounds: [3, 83, 53, 133], width: 1, color: 0x17a7ffff}));
-      // The pilot: the cat from the room, in the cockpit.
+      // Tama on the comm window: the cat from the room.
       add(tx.strokeRect({bounds: [3, 15, 22, 34], width: 1, color: 0x17a7ffff}));
       add(tx.image({resource: pets, bounds: [4, 16, 21, 33], variant: 3, frame: 0}));
       R.lives = [0, 1, 2].map(i => add(tx.instantiate(lives, {offset: [160 + i * 12, 4]}), 0, i > 1 ? 48 : 1e9));
@@ -138,12 +162,13 @@ function patch(tx, f) {
   const j = on && scene === 2 && t >= 16 && (t * 7) % 5 < 2 ? (t * 3) % 7 - 3 : 0;
   img.setRect(tx, [B[0] + j, B[1], B[2] + j, B[3]]);
   if (fix !== vis) { img.setVisible(tx, !fix); mon.setVisible(tx, fix); vis = fix; }
-  // Shutters: open over the first news frames, close at the end of CORE.
-  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((140 - t) / 8) : 1;
+  // Shutters: the TV turns on in the first news frames and off at the end
+  // of CORE; in WAKE they are eyelids over the whole view.
+  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((140 - t) / 8) : scene === 7 ? lid(t) : 1;
   if (o < 1 || R.cv < 1) {
-    const m = (B[1] + B[3]) / 2, h = (B[3] - B[1]) * o / 2;
-    R.top.setRect(tx, [B[0], B[1], B[2], rnd(m - h)]);
-    R.bot.setRect(tx, [B[0], rnd(m + h), B[2], B[3]]);
+    const E = scene === 7 ? FULL : B, m = (E[1] + E[3]) / 2, h = (E[3] - E[1]) * o / 2;
+    R.top.setRect(tx, [E[0], E[1], E[2], rnd(m - h)]);
+    R.bot.setRect(tx, [E[0], rnd(m + h), E[2], E[3]]);
     if ((o < 1) !== (R.cv < 1)) { R.top.setVisible(tx, o < 1); R.bot.setVisible(tx, o < 1); }
     R.cv = o;
   }
@@ -158,15 +183,20 @@ function patch(tx, f) {
     const v = on && t >= hw[3 * i] && t < hw[3 * i + 1] ? 1 : 0;
     if (v !== hw[3 * i + 2]) { hud[i].setVisible(tx, v > 0); hw[3 * i + 2] = v; }
   }
-  // The cat: asleep, awake, into the screen (news), away, home asleep.
+  // Tama: in WAKE (after its face, act2's wake(), and the blink of sitting
+  // up) it walks to the cushion; elsewhere it sits there and blinks.
   if (R.pet) {
-    R.pet.setRect(tx, scene === 2 && t >= 16 ? t < 24 ? lerp4(HOME, NEAR, (t - 16) / 8) :
-      lerp4(NEAR, [117, 49, 123, 55], (t - 24) / 7) : HOME);
-    R.pet.setImageFrame(tx, 3, scene > 5 || !scene && t < 12 || t % 40 > 37 ? 1 : 0);
-    R.pet.setVisible(tx, scene !== 2 || t < 31);
+    R.pet.setRect(tx, scene !== 7 ? HOME : lerp4([150, 92, 182, 124], HOME, smooth(clamp((t - 46) / 20))));
+    R.pet.setImageFrame(tx, 3, t % 40 > 37 ? 1 : 0);
+    if (scene === 7) R.pet.setVisible(tx, t >= 42);
   }
-  if (R.zz) {
-    R.zz.setReveal(tx, fix ? (t >> 3) % 6 : 0);
+  // The body sleeps on from the news's dive; it flinches when LETHE hits.
+  if (R.body) for (let i = 0; i < 2; ++i) {
+    const b = BODY[i], d = scene === 4 && t >= 48 && t < 52 ? (t & 1) * 2 - 3 : 0;
+    R.body[i].setRect(tx, [b[0], b[1] + d, b[2], b[3] + d]);
+    R.body[i].setVisible(tx, scene > 0 || t >= 14);
+  }
+  if (R.off) {
     R.off.setVisible(tx, fix && t >= 20 && (t & 8) > 0);
     R.led.setColor(tx, t & 16 ? 0xfb47ffff : 0x401010ff);
   }

@@ -1,6 +1,6 @@
-// MEGADEMO chunk 4: the first scene and frame().
+// MEGADEMO chunk 4: the first scene (WAKE, the prologue) and frame().
 'use strict';
-enter(0);
+enter(7);
 let boot = true;
 globalThis.frame = function (buttons) {
   buttons |= 0;
@@ -15,8 +15,10 @@ globalThis.frame = function (buttons) {
   const press = buttons & ~held;
   held = buttons;
   // Enter: full screen <-> the monitor in the room. The story's own
-  // camera (into the screen in I, out in V) never overrides a pinned room.
+  // camera (into the screen in I, out in V; on waking, Tama's face over
+  // the whole view, then a cut to the room) never overrides a pinned room.
   if (press & 0x4000) { target = target ? 0 : ZOOM; pin = target > 0; spd = 1; }
+  if (scene === 7 && (!t || t === 42) && !pin) { target = t ? ZOOM : 0; spd = ZOOM; }
   if (!scene && t === 14 && !pin) { target = 0; spd = 2; }
   if (scene === 6 && t === 12 && !target) { target = ZOOM; spd = 2; }
   zoom += M.max(-spd, M.min(spd, target - zoom));

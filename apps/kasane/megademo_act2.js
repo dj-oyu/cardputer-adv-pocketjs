@@ -157,15 +157,47 @@ function core(k, t) {
   const glow = rnd(9 * (1 - ramp(t, 117, 129)) ** 2);
   return {b: neg ? 0xad55 : fl ? 0x5acc : step ? 0x2945 : t >= 117 && glow ? glow << 11 | glow << 6 | glow : 0, s: 0, d: d};
 }
+// WAKE: Tama's face peering in sideways, filling the view, as line art: the
+// ship's outline (SHIP is the same head) turned FA and scaled FS about FC,
+// with eyes (a slow blink at 30), slit pupils, nose, mouth and whiskers.
+// From 42 (after the blink of sitting up) the TV is off: nothing is drawn.
+const FA = -.4, FS = 6, FC = [158, 74];
+const fp = (x, y) => [FC[0] + FS * (x * M.cos(FA) - y * M.sin(FA)), FC[1] + FS * (x * M.sin(FA) + y * M.cos(FA))];
+function face() {
+  const x = [], y = [];
+  // Scaled in the source points: Q14 coefficients hold under 2.
+  for (let i = 0; i < SHIP.length; i += 2) { x.push(SHIP[i] * FS); y.push(SHIP[i + 1] * FS); }
+  return affine(x, y, 1, FA, FC[0], FC[1], WH);
+}
+function wake(t) {
+  if (t >= 42) return {b: 0, s: 0, d: []};
+  const h = 2.4 * (t >= 30 && t < 34 ? .15 : 1), d = [];
+  const seg = (p, q) => d.push([d.length ? 3 : 0, fp(p[0], p[1]).concat(fp(q[0], q[1]))]);
+  seg([2.6, 5], [11, 4]);
+  for (let s = -1; s <= 1; s += 2) {
+    const e = 4.6 * s;
+    d.push([1, fp(e, .5 - h).concat(fp(e + 2, .5), fp(e, .5 + h), fp(e - 2, .5))]);
+    seg([e, .5 - h * .8], [e, .5 + h * .8]);
+    seg([2.6 * s, 5.6], [11 * s, 6]);
+    seg([2.6 * s, 6.2], [10 * s, 8]);
+    seg([0, 4.8], [1.2 * s, 6]);
+  }
+  seg([-2.6, 5], [-11, 4]);
+  d.push([2, fp(-1, 3.6).concat(fp(1, 3.6), fp(0, 4.8), [0xfb56])]);
+  return {b: 0, s: 0, d: d};
+}
 const RC = [28, 108];
 const A2 = {
-  names: ['TWIST', 'ZENITH', 'CORE', 'LOST'], len: [128, 96, 140, 64],
+  // WAKE (the prologue, played first) draws nothing: the TV is off and the
+  // view layer shows the room in the first person.
+  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [128, 96, 140, 64, 72],
   // Plan list of scene i: [template, args...]; sh carries points.
   plans: function (i, tier) {
     const k = KN[tier], z = k.z;
     if (!i) return corrList(k.c).concat([['st', z.st]]);
     if (i === 2) return [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]];
     if (i === 3) return [['ln', WH], ['ln', BL]];
+    if (i === 4) return [['ln', WH, 1], ['qd', 0xd7e6], ['tri'], ['ln', 0xd6ba]];
     const p = [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa],
       ['tr', z.sa, z.ts]];
     for (let b = 0; b < 8; ++b) p.push(['sh', b]);
@@ -184,6 +216,7 @@ const A2 = {
       return {b: 0, s: 0, d: d};
     }
     if (i === 2) return core(k.k, t);
+    if (i === 4) return wake(t);
     if (i === 3) {
       // CRT off: the line shrinks to a dot, then the dot goes.
       const w = t < 10 ? 2 + 118 * (1 - t / 10) ** 2 : 2.5 - (t - 10) / 4;
@@ -215,7 +248,7 @@ const NAMES = ['NEWS', 'NEWS', 'NEWS'].concat(A2.names), LEN = [16, 16, 16].conc
 function specs(s, tier) {
   return (s > 2 ? A2.plans(s - 3, tier) : [0, 1, 2, 3, 4]).map(e => () => s < 3 ?
     [program(s, e), pointBatch(s, e)] :
-    [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null]);
+    [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : e[2] ? face() : null]);
 }
 function frameOf(s, tier, t) {
   if (s > 2) return A2.frame(s - 3, tier, t);

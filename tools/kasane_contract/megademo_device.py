@@ -216,7 +216,7 @@ def summarize_turns(turns, jheap, visits) -> None:
         interval[i1] = (b["t"] + b["js"] + b["rn"] + b["sd"] - a["t"] - a["js"] - a["rn"] - a["sd"]) / 1000
     print("  tier scene    frames  js_ms(med/p95/max)  render_ms(med/max)  send_ms(med/max)  "
           "draw_ms(med/max) band_ms(med/max) bands  int_ms(med/p95/max)  fps  parks  free_min lg_min mn_min  gu_max")
-    order = {"NEWS": 0, "TWIST": 1, "ZENITH": 2, "CORE": 3, "LOST": 4}
+    order = {"WAKE": -1, "NEWS": 0, "TWIST": 1, "ZENITH": 2, "CORE": 3, "LOST": 4}
     for key in sorted(groups, key=lambda k: (k[0], order.get(k[1].split("[")[0], 9), k[1])):
         rows = [r for _, r in groups[key]]
         frames = [r for r in rows if r["kind"] in "FC"]
@@ -288,9 +288,10 @@ def summarize_turns(turns, jheap, visits) -> None:
 W, H = 240, 135
 # Distinct host frames per scene (the app holds each news beat for two
 # beats, so a news frame t matches host frame t % 16).
-LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 128, "ZENITH": 96, "CORE": 140, "LOST": 64}
-TOTAL = {"NEWS0": 5, "NEWS1": 5, "NEWS2": 5, "TWIST": 8, "ZENITH": 16, "CORE": 7, "LOST": 2}
-INDEX = {"NEWS0": 0, "NEWS1": 1, "NEWS2": 2, "TWIST": 3, "ZENITH": 4, "CORE": 5, "LOST": 6}
+LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 128, "ZENITH": 96, "CORE": 140, "LOST": 64,
+        "WAKE": 72}
+TOTAL = {"NEWS0": 5, "NEWS1": 5, "NEWS2": 5, "TWIST": 8, "ZENITH": 16, "CORE": 7, "LOST": 2, "WAKE": 4}
+INDEX = {"NEWS0": 0, "NEWS1": 1, "NEWS2": 2, "TWIST": 3, "ZENITH": 4, "CORE": 5, "LOST": 6, "WAKE": 7}
 # HUD rectangles over the full-screen procedural image (x0, y0, x1, y1), with
 # the rotated radar's swept extent; pixels inside are not compared. The
 # chapter card and the narration line are masked where a scene has them
@@ -303,7 +304,9 @@ MASKS = {"NEWS0": NEWS_HUD, "NEWS1": NEWS_HUD, "NEWS2": NEWS_HUD,
          # CORE also tears bands of the image sideways (60..100, held to 112, 115..127): those
          # frames differ outside the masks by design.
          "CORE": [(2, 0, 152, 15), (224, 1, 238, 13), (4, 104, 238, 135), (6, 34, 234, 58)],
-         "LOST": [(92, 60, 162, 75)]}
+         "LOST": [(92, 60, 162, 75)],
+         # WAKE: the eyelids (full-width shutters) are the view's, not the image's.
+         "WAKE": [(0, 0, 240, 135)]}
 
 
 def png(path: Path, width: int, height: int, rgb: bytes) -> None:

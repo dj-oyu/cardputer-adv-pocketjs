@@ -96,6 +96,7 @@ static void eval_error(JSContext *ctx,const char *source){
     JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
 }
 #define APP_NEWS_TICKS (2u*PROC_MEGA_FRAMES)
+#define APP_WAKE_TICKS 72u
 static void reference(unsigned tick){
     uint16_t color=proc_mega_backdrop(tick);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
@@ -204,8 +205,21 @@ int main(int argc,char **argv){
         }
         REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
     }
-    /* The app plays each 16-frame news beat twice: app tick k shows Act I
-     * frame (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
+    /* The app opens with WAKE: APP_WAKE_TICKS frames (Tama's face as line art,
+     * then the TV off), which prefetch the news. The last frame is black. */
+    eval_ok(ctx,"if(procMegademo.len[7]!==72)throw Error('WAKE length')");
+    for(unsigned tick=0;tick<APP_WAKE_TICKS;tick++){
+        eval_ok(ctx,"frame()");
+        REQUIRE(pocket_proc_pending());
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+        if(tick+1==APP_WAKE_TICKS)for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
+        pocket_proc_present_result(KSN_OK);
+    }
+    publishes=0;
+    uint32_t wake_scalar=0,wake_pie=0;
+    pocket_proc_batch_counts(&wake_scalar,&wake_pie); /* WAKE's face is a batch too */
+    /* Then each 16-frame news beat twice: news tick k shows Act I frame
+     * (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
     for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
         eval_ok(ctx,"frame()");
         REQUIRE(pocket_proc_pending());
@@ -271,6 +285,7 @@ int main(int argc,char **argv){
                 "globalThis.newsReplaces=megaReplaces");
     uint32_t scalar=0,pie=0;
     pocket_proc_batch_counts(&scalar,&pie);
+    scalar-=wake_scalar;pie-=wake_pie;
 #ifdef KSN_PROC_HOST_FAKE_PIE
     REQUIRE(scalar==0&&pie==APP_NEWS_TICKS);
 #else

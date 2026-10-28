@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QJS = ROOT / "components/quickjs-ng/quickjs-ng"
 OUT = ROOT / ".cache/kasane_megademo_scenes"
 W, H = 240, 135
-LENS = {0: 16, 1: 16, 2: 16, 3: 128, 4: 96, 5: 140, 6: 64}
+LENS = {0: 16, 1: 16, 2: 16, 3: 128, 4: 96, 5: 140, 6: 64, 7: 72}
 GREY = bytes((0x30, 0x30, 0x30))
 
 
@@ -104,7 +104,7 @@ def sheet(path: Path, cells: list, columns: int) -> None:
 def sheets(out: Path, tier: int) -> None:
     # Per scene: 16 frames spread over the scene, left to right, top to
     # bottom. Radar (surface 1) frames appear where they fall.
-    for scene, name in ((3, "twist"), (4, "zenith"), (5, "core"), (6, "lost")):
+    for scene, name in ((3, "twist"), (4, "zenith"), (5, "core"), (6, "lost"), (7, "wake")):
         n = LENS[scene]
         picks = [round(i * (n - 1) / 15) for i in range(16)]
         sheet(out / f"sheet_{name}_tier{tier}.png", [(tier, scene, f) for f in picks], 4)

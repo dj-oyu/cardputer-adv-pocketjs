@@ -1,5 +1,7 @@
-// MEGADEMO: NIGHT SIGNAL. A room, a cat, a monitor; the story plays on the
-// screen: Act I news (3x16 frames, held twice), TWIST, ZENITH, CORE, LOST.
+// MEGADEMO: ASTRAL FIGHTER. A room, Tama the cat, a TV. Each night the
+// viewer wakes (WAKE), is briefed (Act I, 3x16 frames held twice), leaves the
+// body (TWIST), fights over LETHE (ZENITH), breaks the core (CORE) and the
+// signal is lost (LOST); then wakes again, one sortie later.
 // Story: docs/apps/megademo-story.md; limits: docs/kasane/megademo-limit-scenes.md
 // The app is in chunks (apps/kasane/chunks.txt), loaded here one parse at a
 // time. This entry names pocket.kasane, so the session reserves its arena.
