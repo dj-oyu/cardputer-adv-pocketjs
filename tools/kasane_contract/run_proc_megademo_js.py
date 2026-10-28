@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 
+from megademo_chunks import chunk_arg
 ROOT = Path(__file__).resolve().parents[2]
 QJS = ROOT / "components/quickjs-ng/quickjs-ng"
 OUT = ROOT / ".cache/kasane_megademo_js"
@@ -45,7 +46,7 @@ def main() -> None:
     env = os.environ.copy()
     env["PATH"] = str(Path(cc).parent) + os.pathsep + env.get("PATH", "")
     subprocess.run(command, cwd=ROOT, env=env, check=True)
-    subprocess.run([str(binary), str(ROOT / "apps/kasane/proc_megademo.js")],
+    subprocess.run([str(binary), chunk_arg()],
                    cwd=ROOT, env=env, check=True)
 
 

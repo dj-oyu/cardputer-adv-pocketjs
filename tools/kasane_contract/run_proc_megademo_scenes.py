@@ -18,6 +18,7 @@ import sys
 import zlib
 from pathlib import Path
 
+from megademo_chunks import chunk_arg
 ROOT = Path(__file__).resolve().parents[2]
 QJS = ROOT / "components/quickjs-ng/quickjs-ng"
 OUT = ROOT / ".cache/kasane_megademo_scenes"
@@ -126,11 +127,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, help="write every frame as PPM and PNG sheets here")
     parser.add_argument("--opt", choices=("0", "2"), default="2")
-    parser.add_argument("--source", type=Path, default=ROOT / "apps/kasane/proc_megademo.js")
+    parser.add_argument("--source", help="comma-separated files to evaluate (default: the "
+                        "app's Act chunks, tools/kasane_contract/megademo_chunks.py)")
     parser.add_argument("--sheet-tier", type=int, default=2, help="tier of the per-scene sheets")
     args = parser.parse_args()
     binary = build(args.opt)
-    command = [str(binary), str(args.source.resolve())]
+    command = [str(binary), args.source or chunk_arg(act_only=True)]
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
         command.append(str(args.out.resolve()))

@@ -161,12 +161,18 @@ int main(int argc, char **argv) {
     JSValue mock_result = JS_Eval(ctx, mock, sizeof mock - 1, "mock.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(mock_result));
     JS_FreeValue(ctx, mock_result);
-    size_t source_size = 0;
-    char *source = read_file(argv[1], &source_size);
-    JSValue result = JS_Eval(ctx, source, source_size, argv[1], JS_EVAL_TYPE_GLOBAL);
-    REQUIRE(!JS_IsException(result));
-    JS_FreeValue(ctx, result);
-    free(source);
+    /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
+     * order (what the entry's pocket.app.load() calls evaluate). */
+    char list[4096];
+    snprintf(list, sizeof list, "%s", argv[1]);
+    for (char *file = strtok(list, ","); file; file = strtok(NULL, ",")) {
+        size_t source_size = 0;
+        char *source = read_file(file, &source_size);
+        JSValue result = JS_Eval(ctx, source, source_size, file, JS_EVAL_TYPE_GLOBAL);
+        REQUIRE(!JS_IsException(result));
+        JS_FreeValue(ctx, result);
+        free(source);
+    }
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue demo = JS_GetPropertyStr(ctx, global, "procMegademo");
     REQUIRE(!JS_IsException(demo) && JS_IsObject(demo));

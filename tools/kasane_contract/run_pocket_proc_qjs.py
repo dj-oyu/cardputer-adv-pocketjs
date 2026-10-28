@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 
+from megademo_chunks import chunk_arg
 ROOT=Path(__file__).resolve().parents[2]
 QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 OUT=ROOT/'.cache/kasane_pocket_proc_qjs'
@@ -48,7 +49,7 @@ def main():
              *(str(s) for s in sources),'-lm','-o',str(binary)]
     env=os.environ.copy();env['PATH']=str(Path(cc).parent)+os.pathsep+env.get('PATH','')
     subprocess.run(command,cwd=ROOT,env=env,check=True)
-    invocation=[str(binary),str(ROOT/'apps/kasane/proc_megademo.js')]
+    invocation=[str(binary),chunk_arg()]
     if args.out:
         args.out.mkdir(parents=True,exist_ok=True)
         invocation.append(str(args.out.resolve()))
@@ -59,7 +60,7 @@ def main():
     fake_command[1:1]=['-D__XTENSA__','-DCONFIG_IDF_TARGET_ESP32S3=1',
                        '-DKSN_PROC_HOST_FAKE_PIE']
     subprocess.run(fake_command,cwd=ROOT,env=env,check=True)
-    subprocess.run([str(fake_binary),str(ROOT/'apps/kasane/proc_megademo.js')],
+    subprocess.run([str(fake_binary),chunk_arg()],
                    cwd=ROOT,env=env,check=True)
     if args.out:
         hashes={f'frame-{i:02d}.rgb565':hashlib.sha256(

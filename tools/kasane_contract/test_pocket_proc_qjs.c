@@ -189,16 +189,21 @@ int main(int argc,char **argv){
     for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
     eval_ok(ctx,"pocket.kasane.procedural.resource()");
     REQUIRE(pocket_proc_is_image_mode());
-    size_t bytes;char *source=read_file(argv[1],&bytes);
-    JSValue result=JS_Eval(ctx,source,bytes,argv[1],JS_EVAL_TYPE_GLOBAL);
-    if(JS_IsException(result)){
-        JSValue error=JS_GetException(ctx);
-        const char *message=JS_ToCString(ctx,error);
-        fprintf(stderr,"megademo JS eval: %s\n",message?message:"<non-string exception>");
-        if(message)JS_FreeCString(ctx,message);
-        JS_FreeValue(ctx,error);
+    /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
+     * order (what the entry's pocket.app.load() calls evaluate). */
+    char list[4096];snprintf(list,sizeof list,"%s",argv[1]);
+    for(char *file=strtok(list,",");file;file=strtok(NULL,",")){
+        size_t bytes;char *source=read_file(file,&bytes);
+        JSValue result=JS_Eval(ctx,source,bytes,file,JS_EVAL_TYPE_GLOBAL);
+        if(JS_IsException(result)){
+            JSValue error=JS_GetException(ctx);
+            const char *message=JS_ToCString(ctx,error);
+            fprintf(stderr,"megademo JS eval %s: %s\n",file,message?message:"<non-string exception>");
+            if(message)JS_FreeCString(ctx,message);
+            JS_FreeValue(ctx,error);
+        }
+        REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
     }
-    REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
     /* The app plays each 16-frame news beat twice: app tick k shows Act I
      * frame (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
     for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
@@ -324,10 +329,10 @@ int main(int argc,char **argv){
         "catch(e){nestedRegisterBusy=String(e).includes('BUSY')}return 0}});"
         "let guarded=proc.register([row]);"
         "if(!nestedRegisterBusy||!Number.isInteger(guarded))throw Error('register reentrancy');"
-        "proc.beginFrame(7);let nestedCommitBusy=false;let inputs=[0,0,0,0];"
-        "Object.defineProperty(inputs,0,{get(){try{proc.commit()}"
+        "proc.beginFrame(7);let nestedCommitBusy=false;let guardIn=[0,0,0,0];"
+        "Object.defineProperty(guardIn,0,{get(){try{proc.commit()}"
         "catch(e){nestedCommitBusy=String(e).includes('BUSY')}return 0}});"
-        "proc.draw(guarded,inputs);"
+        "proc.draw(guarded,guardIn);"
         "if(!nestedCommitBusy)throw Error('draw reentrancy');proc.commit()");
     REQUIRE(pocket_proc_pending());
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);

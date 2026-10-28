@@ -283,16 +283,22 @@ int main(int argc, char **argv) {
     const char *out = argc == 3 ? argv[2] : NULL;
     JSRuntime *rt = JS_NewRuntime();
     ctx = JS_NewContext(rt);
-    size_t n;
-    char *src = read_file(argv[1], &n);
-    JSValue r = JS_Eval(ctx, src, n, argv[1], JS_EVAL_TYPE_GLOBAL);
-    if (JS_IsException(r)) {
-        JSValue e = JS_GetException(ctx);
-        const char *m = JS_ToCString(ctx, e);
-        fprintf(stderr, "eval: %s\n", m ? m : "?");
-        return 1;
+    /* argv[1]: the app's chunks, comma-separated, evaluated in order as the
+     * entry's pocket.app.load() calls do (apps/kasane/chunks.txt). */
+    char list[4096];
+    snprintf(list, sizeof list, "%s", argv[1]);
+    for (char *file = strtok(list, ","); file; file = strtok(NULL, ",")) {
+        size_t n;
+        char *src = read_file(file, &n);
+        JSValue r = JS_Eval(ctx, src, n, file, JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(r)) {
+            JSValue e = JS_GetException(ctx);
+            const char *m = JS_ToCString(ctx, e);
+            fprintf(stderr, "eval %s: %s\n", file, m ? m : "?");
+            return 1;
+        }
+        JS_FreeValue(ctx, r); free(src);
     }
-    JS_FreeValue(ctx, r); free(src);
     JSValue g = JS_GetGlobalObject(ctx);
     demo = JS_GetPropertyStr(ctx, g, "procMegademo");
     JS_FreeValue(ctx, g);

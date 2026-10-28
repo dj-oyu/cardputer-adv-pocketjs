@@ -129,6 +129,20 @@ def main() -> None:
     elif not old.exists():
         raise SystemExit(f"cannot read the baseline app: {shown.stderr.decode().strip()}")
     env.pop("MEGA_PPM", None)
+    # A chunked baseline: its chunks.txt and chunk files, as of that revision.
+    listed = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/chunks.txt"],
+                            cwd=ROOT, capture_output=True)
+    if listed.returncode == 0:
+        base = CACHE / "baseline_chunks"
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "chunks.txt").write_bytes(listed.stdout)
+        for raw in listed.stdout.decode().splitlines():
+            words = raw.split("#", 1)[0].split()
+            if len(words) == 2 and words[0] != "app":
+                got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
+                                     cwd=ROOT, capture_output=True, check=True)
+                (base / words[1]).write_bytes(got.stdout)
+        env["MEGA_CHUNKS"] = str(base / "chunks.txt")
     print(f"baseline: {old.name} ({old.stat().st_size} B)")
     subprocess.run([str(binary), str(old), "--baseline"], cwd=ROOT, env=env, check=True)
 
