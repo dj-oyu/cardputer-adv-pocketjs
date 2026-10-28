@@ -35,11 +35,14 @@ def main() -> None:
         ROOT / "main/ui/kasane/ksn_procedural.c",
         ROOT / "main/ui/kasane/ksn_proc_analysis.c",
         ROOT / "main/ui/kasane/ksn_proc_plan.c",
+        ROOT / "main/pocket/pocket_shape.c", ROOT / "tools/hostshim/pocket_api_stub.c",
+        ROOT / "tools/kasane_contract/shape_draw_shim.c",
         ROOT / "tools/kasane_contract/test_proc_megademo_js.c",
     ]
     command = [
         cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
-        "-I", str(QJS), "-I", str(ROOT / "main/ui/kasane"),
+        "-I", str(QJS), "-I", str(ROOT / "main/ui/kasane"), "-ffp-contract=off",
+        "-I", str(ROOT / "main/pocket"), "-I", str(ROOT / "main"), "-I", str(ROOT / "tools/hostshim"),
         "-I", str(ROOT / "tools/kasane_contract"),
         *(str(source) for source in sources), "-lm", "-o", str(binary),
     ]

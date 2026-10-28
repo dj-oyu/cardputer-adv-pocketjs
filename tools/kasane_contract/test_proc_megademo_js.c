@@ -1,3 +1,5 @@
+#include "pocket_shape.h"
+#include "shape_draw_shim.h"
 #include "quickjs.h"
 #include "ksn_proc_plan.h"
 #include "proc_megademo.h"
@@ -161,6 +163,18 @@ int main(int argc, char **argv) {
     JSValue mock_result = JS_Eval(ctx, mock, sizeof mock - 1, "mock.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(mock_result));
     JS_FreeValue(ctx, mock_result);
+    /* WAKE draws through pocket.shapes; shape_draw_shim.c hands its draws to
+     * the procedural mock above. */
+    {
+        JSValue g = JS_GetGlobalObject(ctx), pocket = JS_GetPropertyStr(ctx, g, "pocket");
+        JSValue shapes = JS_NewObject(ctx);
+        REQUIRE(pocket_shape_fill(ctx, shapes, NULL) == ESP_OK);
+        JS_SetPropertyStr(ctx, pocket, "shapes", shapes);
+        JS_FreeValue(ctx, pocket); JS_FreeValue(ctx, g);
+        JSValue r = JS_Eval(ctx, SHAPE_DRAW_JS, sizeof SHAPE_DRAW_JS - 1, "shim.js", JS_EVAL_TYPE_GLOBAL);
+        REQUIRE(!JS_IsException(r));
+        JS_FreeValue(ctx, r);
+    }
     /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
      * order (what the entry's pocket.app.load() calls evaluate). */
     char list[4096];

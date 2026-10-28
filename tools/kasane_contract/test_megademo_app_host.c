@@ -17,6 +17,7 @@
  *
  *   python3 tools/kasane_contract/run_megademo_app_host.py
  */
+#include "pocket_shape.h"
 #include "pocket_kasane.h"
 #include "pocket_proc.h"
 #include "pocket_video.h"
@@ -202,7 +203,7 @@ static size_t heap_req(void){
  * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-device-limits.md). */
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,app:{load:globalThis.__load},memory:{info(){"
+    "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
     "(function(){const P=pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"
@@ -238,6 +239,7 @@ int main(int argc,char **argv){
         if(limit/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,limit/2);
     }
     pocket_kasane_install(ctx,NULL);
+    pocket_shape_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));

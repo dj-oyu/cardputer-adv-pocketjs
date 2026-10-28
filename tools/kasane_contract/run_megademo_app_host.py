@@ -27,7 +27,8 @@ QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
          "main/ui/kasane/ksn_proc_grid_pie.c", "main/ui/kasane/ksn_proc_grid_image.c",
          "main/ui/kasane/ksn_proc_grid_resize.c", "main/pocket/pocket_pixel.c",
-         "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c"]
+         "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c",
+         "main/pocket/pocket_shape.c"]
 
 
 def kasane_sources() -> list[str]:

@@ -1,6 +1,7 @@
 #include "quickjs.h"
 #include "pocket_proc.h"
 #include "pocket_api.h"
+#include "pocket_shape.h"
 #include "proc_megademo.h"
 #include "ksn_proc_plan.h"
 #include "core_fixture.h"
@@ -151,6 +152,12 @@ static void check_image_rows(const ksn_image_port *image){
         }
     }
 }
+/* pocket_shape.c's install, never called here (main() fills pocket.shapes
+ * itself). */
+esp_err_t pocket_api_register(const pocket_capability_t *capability){(void)capability;return ESP_OK;}
+esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn,void *user){
+    (void)ctx;(void)name;(void)fn;(void)user;return ESP_OK;
+}
 int main(int argc,char **argv){
     REQUIRE(argc==2||argc==3);
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
@@ -158,6 +165,10 @@ int main(int argc,char **argv){
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);
     REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK);
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
+    /* WAKE draws through pocket.shapes into the real pocket_proc.c. */
+    JSValue shapes=JS_NewObject(ctx);
+    REQUIRE(pocket_shape_fill(ctx,shapes,NULL)==ESP_OK);
+    REQUIRE(JS_SetPropertyStr(ctx,pocket,"shapes",shapes)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);
     /* The view side is a permissive mock; megaBounds follows the image of

@@ -19,6 +19,7 @@ static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 // DERBY WATCH's panning series run in C (pocket.derby, docs/apps/derby-ser-native.md);
 // naming it is what gets the session that surface, as pet.companion does.
 static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", NULL};
+static const char *const CAPS_SHAPES[]= {"kasane.shapes", NULL};
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -73,7 +74,7 @@ static const app_manifest_t MANIFESTS[] = {
     // session with fresh procedural plans.
     {.id="local.megademo", .title="MEGADEMO", .entry="apps/kasane/proc_megademo.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
-     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+     .required=CAPS_KASANE, .optional=CAPS_SHAPES, .works=APP_WORKS_NONE},
 
     {.id="local.gridlab", .title="GRID LAB", .entry="apps/kasane/grid_lab.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,

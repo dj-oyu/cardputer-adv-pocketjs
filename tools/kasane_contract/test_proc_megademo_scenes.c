@@ -19,6 +19,8 @@
  *
  *   python3 tools/kasane_contract/run_proc_megademo_scenes.py [--out DIR]
  */
+#include "pocket_shape.h"
+#include "shape_draw_shim.h"
 #include "quickjs.h"
 #include "ksn_proc_plan.h"
 #include "ksn_proc_points_pie.h"
@@ -283,6 +285,17 @@ int main(int argc, char **argv) {
     const char *out = argc == 3 ? argv[2] : NULL;
     JSRuntime *rt = JS_NewRuntime();
     ctx = JS_NewContext(rt);
+    /* WAKE draws through pocket.shapes (shape_draw_shim.c lists its draws). */
+    {
+        JSValue g = JS_GetGlobalObject(ctx), pocket = JS_NewObject(ctx), shapes = JS_NewObject(ctx);
+        REQUIRE(pocket_shape_fill(ctx, shapes, NULL) == ESP_OK);
+        JS_SetPropertyStr(ctx, pocket, "shapes", shapes);
+        JS_SetPropertyStr(ctx, g, "pocket", pocket);
+        JS_FreeValue(ctx, g);
+        JSValue r = JS_Eval(ctx, SHAPE_DRAW_JS, sizeof SHAPE_DRAW_JS - 1, "shim.js", JS_EVAL_TYPE_GLOBAL);
+        REQUIRE(!JS_IsException(r));
+        JS_FreeValue(ctx, r);
+    }
     /* argv[1]: the app's chunks, comma-separated, evaluated in order as the
      * entry's pocket.app.load() calls do (apps/kasane/chunks.txt). */
     char list[4096];

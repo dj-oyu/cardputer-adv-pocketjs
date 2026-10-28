@@ -178,6 +178,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [derby-ser-native.md](apps/derby-ser-native.md) | 設計・記録 | DERBY WATCH の首振りの列 `ser()` を倍精度の C（`pocket.derby`、DERBY のセッションだけの面、capability `derby.series`）に写し `draw` を数値引数にした（S1b）: 境目の API、host の oracle（JS と C の draw の入力をビット単位で照合）、楕円コーナーの WIDE 2 が実機 15.9 → 24.6 fps、ゲスト −5.2 KB・評価の余裕 30.6 KB、画素・結果は全行一致（2026-10-02） |
 | [derby-native-survey.md](apps/derby-native-survey.md) | 設計・調査 | DERBY WATCH の首振り（楕円コーナーの WIDE 2）で native に下ろす候補 30 個の利得・費用・メモリ・工数・画素への影響、シナリオ別の fps（`ser()` に触らないと 20 fps に届かない、ウォーカーだけでは 27 fps の境目）、API の 3 案の比較と推奨（道の登録を共有する `path`／`pose`／`project`／`walk`）、実機で確かめる項目（2026-10-01、推定のみ・測定なし） |
 | [megademo-story.md](apps/megademo-story.md) | 設計・記録 | MEGADEMO — ASTRAL FIGHTER（2026-10-28 からの物語: 目覚め WAKE・出撃番号・記憶の濁り・猫のタマ）と、その前の NIGHT SIGNAL: 部屋と猫とモニターの物語として 5 章に組み直した台本、場面のつなぎ、Enter の小窓を物語の装置に使う設計、IV CORE（正二十面体の殻が開く 3D、グレーのフラッシュ・電波障害・めまいズーム）への差し替え、`pocket.app.load` の 4 チャンクへの分割（評価のピーク −39.5 KB）、メモリ（host m32）と実機の 90 秒の記録 |
+| [megademo-shapes.md](apps/megademo-shapes.md) | 設計・記録 | MEGADEMO の WAKE（3D の点＋透視のタマ）が実機 7 fps（JS のターン 130 ms）だったので、走査変換・投影・輪郭を C（`pocket.shapes`、MEGADEMO のセッションだけの面、capability `kasane.shapes`）へ移した: 倍精度ビルドで JS と draw がビット単位で一致する oracle、単精度の差、メモリ |
 | [big-wave.md](apps/big-wave.md) | 設計・記録 | BIG WAVE: 線分の疑似3Dで大波に乗るゲーム。世界固定の断面と 1/d の級数、host の台本とボット、全画素検証、負荷と上限の使用率、実機で詰める項目 |
 | [backlog.md](apps/backlog.md) | backlog | チュートリアルの見直し、オーバーレイの残り、日本語入力の残り |
 
