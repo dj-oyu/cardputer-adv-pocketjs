@@ -26,7 +26,7 @@ static void *diag_realloc(void *p,void *v,size_t n){++lcd_diag_realloc;lcd_diag_
  write('components/pocketjs_guest/src/guest.c',s)
  owner=(TEMPLATE/'owner.inc').read_text().replace('@WORKLOAD@',WORKLOAD).replace('@SOURCE@',head)
  s=change(read('main/main.c'),'static void ui_task(void *arg) {',owner+'\nstatic void ui_task(void *arg) {')
- s=change(s,'    while(1) {\n        /* App teardown','    while(1) {\n        diag_owner_step();\n        /* App teardown')
+ s=change(s,'        /* App teardown can time out while an SD read is in progress. Reap its\n','        diag_owner_step();\n        /* App teardown can time out while an SD read is in progress. Reap its\n')
  s=change(s,'            tick_run(have,&stroke);','''            const int64_t diag_start=esp_timer_get_time();
             tick_run(diag_owner_active?false:have,&stroke);
             if(diag_owner_active)lcd_diag_owner_tick((unsigned)(esp_timer_get_time()-diag_start),app_turn_continued());''')

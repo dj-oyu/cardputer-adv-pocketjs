@@ -34,6 +34,9 @@
 #include "ui/kasane/ksn_render.h"
 #endif
 #include "pocket_bridge.h"
+#include "app_control.h"
+#include "esp_app_desc.h"
+#include "esp_random.h"
 #include "pocket_text.h"
 #include "jsconsole.h"
 #include "pocket_input.h"
@@ -42,6 +45,7 @@
 #include "vmprobe.h"
 #include "sdkconfig.h"
 #include "driver/usb_serial_jtag.h"
+#include "usb_console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -625,6 +629,56 @@ static bool home_key(const keystroke_t *k) {
     return true;
 }
 
+/* Native API descriptors bind stable IDs to actual embedded launch sources.
+ * Dynamic editors/works and diagnostic VM workloads are not arbitrary launch
+ * capabilities. Even a VM PROBE build advertises unsupported until typed
+ * workload options have their own contract. */
+typedef struct {
+    app_control_descriptor_t info;
+    const char *source, *end;
+} native_app_t;
+#define NATIVE_APP(id,title,source,end,flags) {{id,title,flags},source,end}
+static const native_app_t native_apps[]={
+    NATIVE_APP("local.hello","HELLO WORLD",NULL,NULL,5),
+    NATIVE_APP("local.imucal","IMU CALIBRATION",imucal_start,imucal_end,7),
+    NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),
+    NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,7),
+    NATIVE_APP("local.stress","STRESS TEST",stress_start,stress_end,5),
+    NATIVE_APP("local.megademo","MEGADEMO",proc_megademo_start,proc_megademo_end,5),
+    NATIVE_APP("local.gridlab","GRID LAB",grid_lab_start,grid_lab_end,5),
+    NATIVE_APP("local.videolab","VIDEO LAB",video_lab_start,video_lab_end,5),
+    NATIVE_APP("local.lcdcatch","LCD CATCH",lcd_catch_start,lcd_catch_end,5),
+    NATIVE_APP("local.derby","DERBY WATCH",derby_watch_start,derby_watch_end,5),
+    NATIVE_APP("local.bigwave","BIG WAVE",big_wave_start,big_wave_end,5),
+    NATIVE_APP("local.player","MUSIC PLAYER (host launch unsupported)",NULL,NULL,0),
+    NATIVE_APP("local.playground","PLAYGROUND (dynamic source unsupported)",NULL,NULL,0),
+    NATIVE_APP("local.tutorial","TUTORIAL (dynamic source unsupported)",NULL,NULL,0),
+    NATIVE_APP("local.deskclock","DESK CLOCK (overlay unsupported)",NULL,NULL,0),
+    NATIVE_APP("local.work","WORK (dynamic source unsupported)",NULL,NULL,0),
+    NATIVE_APP("local.vmprobe","VM PROBE (typed workloads unsupported)",NULL,NULL,0),
+};
+static unsigned native_catalog_count(void) { return sizeof(native_apps)/sizeof(native_apps[0]); }
+static uint32_t native_generation;
+static bool native_catalog(unsigned index,app_control_descriptor_t *out) {
+    if(index>=native_catalog_count())return false;
+    *out=native_apps[index].info;return true;
+}
+static uint8_t native_start(const char *id,bool resume) {
+    const native_app_t *d=NULL;
+    for(unsigned i=0;i<native_catalog_count();i++)
+        if(!strcmp(native_apps[i].info.id,id)) { d=&native_apps[i];break; }
+    if(!d || !app_registry_find(id))return AC_UNKNOWN_APP;
+    if(!(d->info.flags&1))return AC_UNSUPPORTED;
+    if(running || screen!=SCREEN_HOME || home_modal() || pocket_text_active())return AC_BUSY;
+    if(resume) {
+        if(strcmp(app_dormant_id(),id))return AC_STALE_RUN;
+    } else if(app_dormant_id()[0])app_stop();
+    home_error=NULL;
+    begin_run(id,NULL,0,d->source,d->source?(size_t)(d->end-d->source-1):0);
+    if(running && run_started==ESP_OK)native_generation=app_guest_generation();
+    return running && run_started==ESP_OK ? AC_OK:AC_UNSUPPORTED;
+}
+
 static bool code_wants_run(const char **source, size_t *len) {
     if(code_state()!=CODE_RUNNING) return false;
     *source=code_source(len);
@@ -967,6 +1021,54 @@ static bool ui_key_receive(keystroke_t *stroke) {
     return have;
 }
 
+static void native_observe(void) {
+    app_control_observe(running,app_dormant_id(),app_registry_current()->id,app_guest_generation());
+}
+static uint8_t native_tap(uint8_t action) {
+    if(!running || app_guest_generation()!=native_generation || home_modal() || pocket_text_active() ||
+       pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return AC_BLOCKED;
+    static const board_key_t nav[]={KEY_NONE,KEY_ENTER,KEY_BACK,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
+    if(action<1 || action>6)return AC_UNSUPPORTED;
+    keystroke_t stroke={.nav=nav[action]};
+    /* This is delivery to the existing action path. tick_run may defer a JS
+     * turn or fail; consumed does not assert JS/drawing/storage completion. */
+    tick_run(true,&stroke);
+    native_observe();
+    return AC_OK;
+}
+static bool native_stop(void);
+static uint8_t native_suspend(void) {
+    if(!running || home_modal() || pocket_text_active())return AC_BLOCKED;
+    if(!app_can_suspend())return AC_UNSUPPORTED;
+    if(app_suspend()!=ESP_OK) {
+        /* Suspension may already have released drivers. Follow the ordinary
+         * Back failure path: end the guest instead of ticking it half awake. */
+        if(!native_stop())return AC_TEARDOWN_FAILED;
+        native_observe();
+        return AC_UNSUPPORTED;
+    }
+    suspend_run();return AC_OK;
+}
+static bool native_stop(void) {
+    /* app_stop destroys the guest before returning, including dormant guests.
+     * No BACK/HOME marker is interpreted as a teardown acknowledgment. */
+    if(app_guest_present() && (!native_generation || app_guest_generation()!=native_generation))return false;
+    app_stop();running=false;xQueueReset(keys);
+    if(screen!=SCREEN_HOME)enter(SCREEN_HOME);
+    return !app_guest_present();
+}
+static bool native_emit(const uint8_t *body,size_t size) {
+    return pocket_bridge_emit_namespace('C',body,size)==ESP_OK;
+}
+static uint64_t native_clock_ms(void) { return (uint64_t)esp_timer_get_time()/1000; }
+static void native_fingerprint(uint8_t hash[32],char version[48]) {
+    const esp_app_desc_t *description=esp_app_get_description();
+    memcpy(hash,description->app_elf_sha256,32);
+    size_t n=strnlen(description->version,sizeof(description->version));
+    if(n>47)n=47;
+    memcpy(version,description->version,n);version[n]=0;
+}
+
 static void ui_task(void *arg) {
     (void)arg;
     // Before anything can post: every producer of a completion runs on a task
@@ -978,6 +1080,8 @@ static void ui_task(void *arg) {
     int64_t previous_overlay_frame_started=0;
 #endif
     while(1) {
+        native_observe();
+        app_control_pump((uint64_t)esp_timer_get_time()/1000);
         /* App teardown can time out while an SD read is in progress. Reap its
          * acknowledged lease even when HOME has no guest turns to pump. */
         pocket_video_sd_stream_reap();
@@ -1400,6 +1504,9 @@ static void nvs_init(void) {
 }
 
 void app_main(void) {
+    usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
+    ESP_ERROR_CHECK(usb_console_init());
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
 #if POCKET_PROBES
     { extern void ble_probe(void); ble_probe(); }
@@ -1419,8 +1526,6 @@ void app_main(void) {
     // and the editors show which one is missing.
     jpfont_init();
     skk_session_init();
-    usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
 #if POCKET_PROBES
     { extern void opus_probe(void); opus_probe(); }
 #endif
@@ -1428,6 +1533,15 @@ void app_main(void) {
     { extern void sd_probe(void); sd_probe(); }
 #endif
     keys=xQueueCreate(16,sizeof(keystroke_t));configASSERT(keys);
+    const app_control_hooks_t native_hooks={
+        .catalog_count=native_catalog_count,.catalog=native_catalog,.start=native_start,
+        .tap=native_tap,.suspend=native_suspend,.stop=native_stop,.emit=native_emit,
+        .fingerprint=native_fingerprint,
+        .instance=app_guest_generation,
+        .clock_ms=native_clock_ms,
+    };
+    uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
+    app_control_init(boot_id,&native_hooks);
     configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
     // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
