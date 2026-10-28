@@ -216,7 +216,8 @@ int main(int argc, char **argv) {
         }
     }
     /* Plans are registered per scene now: only Act I phase 0 at start, the
-     * next phase over the last frames of the running one. */
+     * next phase over the last frames of the running one. Each 16-frame news
+     * beat plays twice (frames 0..95), the same draws both times. */
     static const char playback_check[] =
         "if(__procCalls.registered.length!==5||__procCalls.live.size!==5||typeof frame!=='function')"
         "throw Error('registration');"
@@ -237,9 +238,9 @@ int main(int argc, char **argv) {
         "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}}"
         "for(let tick=0;tick<97;tick++)frame();"
         "if(__procCalls.frames.length!==97)throw Error('frame count');"
-        "for(let tick=0;tick<48;tick++){"
-        "const f=__procCalls.frames[tick],phase=Math.floor(tick/16);"
-        "if(f.backdrop!==procMegademo.backdrop(tick)||f.draws.length!==5||f.surface)"
+        "for(let tick=0;tick<96;tick++){"
+        "const f=__procCalls.frames[tick],phase=Math.floor(tick/32);"
+        "if(f.backdrop!==procMegademo.backdrop(phase*16)||f.draws.length!==5||f.surface)"
         "throw Error('frame structure '+tick);"
         "for(let layer=0;layer<5;layer++){const d=f.draws[layer],r=__procCalls.registered[d[0]-1];"
         "if(!same(r.program,procMegademo.program(phase,layer))||d[1].length!==4)"
@@ -248,19 +249,21 @@ int main(int argc, char **argv) {
                             "playback-check.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(check));
     JS_FreeValue(ctx, check);
-    /* Frame 97 is inside TWIST, whose set holds exactly two images: the
-     * procedural image and the resized monitor, the last two created. */
+    /* Frame 97 is inside TWIST, at full screen (the story's camera went into
+     * the screen during the news). Its set holds exactly two images: the
+     * procedural image and the resized monitor. Leaving full screen rebuilds
+     * the set with the room, so the images are looked up after each press. */
     static const char resize_check[] =
         "const rs=__procCalls.resize;"
-        "if(rs.length!==2||rs[0].width!==112||rs[0].height!==63||rs[0].sampling!==undefined||"
-        "rs[1].width!==60||rs[1].height!==34||rs[1].sampling!=='nearest')"
+        "if(rs.length!==1||rs[0].width!==112||rs[0].height!==63||rs[0].sampling!==undefined)"
         "throw Error('resize registration');"
-        "const im=__procCalls.images,main=im[im.length-2],mon=im[im.length-1];"
-        "if(!main.visible||mon.visible)throw Error('initial images');"
+        "const pick=w=>{const im=__procCalls.images;for(let i=im.length-1;i>=0;i--)"
+        "if(im[i].spec.sourceWidth===w)return im[i]};"
+        "if(!pick(240).visible||pick(112).visible)throw Error('initial images');"
         "frame(0x4000);for(let i=1;i<44;i++)frame(0);"
-        "if(main.visible||!mon.visible)throw Error('fixed monitor selection');"
+        "if(pick(240).visible||!pick(112).visible)throw Error('fixed monitor selection');"
         "frame(0x4000);"
-        "if(!main.visible||mon.visible)throw Error('dynamic zoom selection');"
+        "if(!pick(240).visible||pick(112).visible)throw Error('dynamic zoom selection');"
         /* Two more loops: live plans never above 32, more than 32 in total. */
         "for(let i=0;i<800;i++)frame(0);"
         "if(__procCalls.peak>32||__procCalls.registered.length<=32||!__procCalls.unregistered)"
