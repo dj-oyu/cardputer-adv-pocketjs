@@ -1,7 +1,8 @@
-// MEGADEMO chunk 5: the first scene (WAKE, the prologue) and frame().
+// MEGADEMO chunk 6: the first scene (WAKE, the prologue) and frame().
 'use strict';
 enter(7);
 let boot = true;
+const DRAW = (k, a) => { const h = live[k]; if (h) H.draw(h, a); };
 globalThis.frame = function (buttons) {
   buttons |= 0;
   if (boot) {
@@ -35,11 +36,15 @@ globalThis.frame = function (buttons) {
     let b = LOAD[1];
     for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
     if (b && t >= PLAY[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
-    f = frameOf(scene, tier, t % LEN[scene]);
-    H.beginFrame(f.b);
-    for (let i = 0; i < f.d.length; ++i) {
-      const h = live[f.d[i][0]];
-      if (h) H.draw(h, f.d[i][1]);
+    // WAKE draws as it goes (act2's wake(): no list kept), so its frame
+    // begins first.
+    if (scene === 7) {
+      H.beginFrame(wakeB(t % LEN[7]));
+      f = frameOf(7, tier, t % LEN[7], DRAW);
+    } else {
+      f = frameOf(scene, tier, t % LEN[scene]);
+      H.beginFrame(f.b);
+      for (let i = 0; i < f.d.length; ++i) DRAW(f.d[i][0], f.d[i][1]);
     }
     H.commit();
   } catch (e) {

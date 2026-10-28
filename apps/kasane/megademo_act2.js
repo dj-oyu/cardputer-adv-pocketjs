@@ -157,81 +157,6 @@ function core(k, t) {
   const glow = rnd(9 * (1 - ramp(t, 117, 129)) ** 2);
   return {b: neg ? 0xad55 : fl ? 0x5acc : step ? 0x2945 : t >= 117 && glow ? glow << 11 | glow << 6 | glow : 0, s: 0, d: d};
 }
-// WAKE: Tama peering in from the right, backlit in the dark: a filled
-// silhouette (paths filled by tz trapezoids of horizontal lines), a cyan
-// rim and a faint halo (the icon's cyber coat), magenta inner ears, and
-// the eyes acting: a glance aside, back at you, a slow blink, then half
-// closed. wakeAt(t) slides the head in, then breathes. From 42 (after the
-// viewer sits up) the TV is off. Fill area is kept under the 8192 raster
-// steps a frame: the head is clipped by the screen's right edge.
-const wakeAt = t => [rnd(56 * (1 - smooth(ramp(t, 6, 22))) + 2 * M.sin(t * .11)), rnd(1.5 * M.sin(t * .2))];
-const WA = -.22, WC = [194, 80], WS = .84;
-// Ear bases reach into the head, so a head rim never shows inside an ear.
-const HEAD = [], EARS = [[[-54, -8], [-42, -70], [-12, -42]], [[12, -44], [40, -72], [55, -8]]];
-for (let i = 0; i < 24; ++i) {
-  const a = i / 24 * 2 * M.PI, s = M.sin(a);
-  HEAD.push([52 * M.cos(a) * (1 + .06 * s), 41 * s + (s > 0 ? 6 * s * s : 0)]);
-}
-function wake(t) {
-  if (t >= 42) return {b: 0, s: 0, d: []};
-  const o = wakeAt(t), c = M.cos(WA), sn = M.sin(WA), d = [];
-  const tf = p => [WC[0] + o[0] + (p[0] * c - p[1] * sn) * WS, WC[1] + o[1] + (p[0] * sn + p[1] * c) * WS];
-  // A convex path, filled: spans every 6 rows, a trapezoid between each pair.
-  const span = (P, y) => {
-    let l = 1e9, r = -1e9;
-    for (let i = 0; i < P.length; ++i) {
-      const a = P[i], b = P[(i + 1) % P.length];
-      if ((a[1] - y) * (b[1] - y) <= 0 && a[1] !== b[1]) {
-        const x = a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]);
-        l = M.min(l, x); r = M.max(r, x);
-      }
-    }
-    return [M.max(0, l), M.min(239, r)];
-  };
-  const fill = (Q, k) => {
-    const P = Q.map(tf);
-    let y0 = 1e9, y1 = -1e9;
-    for (const p of P) { y0 = M.min(y0, p[1]); y1 = M.max(y1, p[1]); }
-    y0 = M.max(0, M.ceil(y0 + .01)); y1 = M.min(134, M.floor(y1 - .01));
-    for (let y = y0; y < y1; y += 6) {
-      const n = M.min(6, y1 - y), a = span(P, y), b = span(P, y + n);
-      if (a[0] <= a[1] && b[0] <= b[1]) d.push([k, [a[0], a[1], y, (b[0] - a[0]) / n, (b[1] - a[1]) / n, n]]);
-    }
-  };
-  const line = (Q, k, closed, g) => {
-    const P = Q.map(q => tf([q[0] * g, q[1] * g]));
-    for (let i = 0; i < P.length - (closed ? 0 : 1); ++i) {
-      const a = P[i], b = P[(i + 1) % P.length];
-      if (a[0] < 240 || b[0] < 240) d.push([k, a.concat(b)]);
-    }
-  };
-  const ear = EARS.map((e, i) => i && t >= 24 && t < 28 ? [e[0], [e[1][0] + 6, e[1][1] + 3], e[2]] : e);
-  // The rim first, just outside the edges (the halo outside it on the upper
-  // half only: raster budget); the fills then cover where a head edge runs
-  // inside an ear, so only the outline stays lit.
-  line(HEAD.slice(12).concat([HEAD[0]]), 3, false, 1.1);
-  line(HEAD, 2, true, 1.04);
-  for (const e of ear) { line(e, 3, false, 1.1); line(e, 2, false, 1.04); }
-  fill(ear[0], 0); fill(ear[1], 0); fill(HEAD, 0);
-  // The inner ear's crease, magenta like the coat's stripes.
-  for (const e of ear) {
-    const m = [(e[0][0] + e[2][0]) / 2, (e[0][1] + e[2][1]) / 2];
-    line([m, [m[0] * .35 + e[1][0] * .65, m[1] * .35 + e[1][1] * .65]], 4, false, 1);
-  }
-  // Eyes: open 1 (watching), a slow blink at 30, then .6 (at ease); the
-  // pupils wide in the dark, glancing aside at 18..24.
-  const op = t < 30 ? 1 : t < 34 ? M.abs(t - 32) / 2 : .6, gx = t >= 18 && t < 24 ? -3 : 0;
-  for (const ex of [-22, 22]) {
-    const ey = ex < 0 ? -6 : -8;
-    if (op < .2) { line([[ex - 9, ey], [ex, ey + 2], [ex + 9, ey]], 2, false, 1); continue; }
-    const h = 7 * op;
-    fill([[ex - 10, ey], [ex - 4, ey - h], [ex + 4, ey - h], [ex + 10, ey], [ex + 4, ey + h], [ex - 4, ey + h]], 1);
-    const px = ex + gx, ph = h * .85;
-    fill([[px - 3, ey - ph], [px + 3, ey - ph], [px + 4, ey], [px + 3, ey + ph], [px - 3, ey + ph], [px - 4, ey]], 0);
-    line([[px - 2, ey - h * .45], [px - 1, ey - h * .45]], 5, false, 1);
-  }
-  return {b: 0x218b, s: 0, d: d};
-}
 const RC = [28, 108];
 const A2 = {
   // WAKE (the prologue, played first) draws nothing: the TV is off and the
@@ -243,14 +168,14 @@ const A2 = {
     if (!i) return corrList(k.c).concat([['st', z.st]]);
     if (i === 2) return [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]];
     if (i === 3) return [['ln', WH], ['ln', BL]];
-    if (i === 4) return [['tz', 0x0043], ['tz', 0xbf9f], ['ln', 0x067f], ['ln', 0x0a4d], ['ln', 0xf917], ['ln', WH]];
+    if (i === 4) return [['tz', 0x218b], ['tz', 0xbf9f], ['tz', 0x0043], ['tz', 0x68aa], ['ln', 0x067f], ['ln', WH], ['tz2', 0x218b]];
     const p = [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa],
       ['tr', z.sa, z.ts]];
     for (let b = 0; b < 8; ++b) p.push(['sh', b]);
     return p.concat([['rd', z.rr], ['sw', z.sa, RC[0], RC[1]]]);
   },
   // {b: backdrop, s: surface, d: [[plan, inputs]...]}
-  frame: function (i, tier, t) {
+  frame: function (i, tier, t, emit) {
     const k = KN[tier], z = k.z;
     if (!i) {
       // The wire opens: stars burst from the vanishing point while the
@@ -262,7 +187,7 @@ const A2 = {
       return {b: 0, s: 0, d: d};
     }
     if (i === 2) return core(k.k, t);
-    if (i === 4) return wake(t);
+    if (i === 4) return wake(t, emit);
     if (i === 3) {
       // CRT off: the line shrinks to a dot, then the dot goes.
       const w = t < 10 ? 2 + 118 * (1 - t / 10) ** 2 : 2.5 - (t - 10) / 4;
@@ -296,8 +221,8 @@ function specs(s, tier) {
     [program(s, e), pointBatch(s, e)] :
     [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null]);
 }
-function frameOf(s, tier, t) {
-  if (s > 2) return A2.frame(s - 3, tier, t);
+function frameOf(s, tier, t, emit) {
+  if (s > 2) return A2.frame(s - 3, tier, t, emit);
   const d = [];
   for (let l = 0; l < 5; ++l) d.push([l, inputs(s * 16 + t, l)]);
   return {b: backdrops[s], s: 0, d: d};

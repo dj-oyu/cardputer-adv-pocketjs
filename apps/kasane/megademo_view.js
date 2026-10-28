@@ -1,4 +1,4 @@
-// MEGADEMO chunk 3: the pocket.kasane view's tables (room, HUD, story text,
+// MEGADEMO chunk 4: the pocket.kasane view's tables (room, HUD, story text,
 // WAKE's face). Loaded only on the device (or a host with pocket.kasane).
 'use strict';
 const V = pocket.kasane, H = V.procedural, G = V.grid;

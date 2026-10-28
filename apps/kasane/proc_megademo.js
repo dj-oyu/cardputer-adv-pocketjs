@@ -8,6 +8,7 @@
 'use strict';
 pocket.app.load('act1');
 pocket.app.load('act2');
+pocket.app.load('wake');
 if (pocket.kasane && pocket.kasane.procedural) {
   pocket.app.load('view');
   pocket.app.load('set');

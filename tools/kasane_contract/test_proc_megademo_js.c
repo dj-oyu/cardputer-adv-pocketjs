@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
         }
     }
     /* Plans are registered per scene now, the next scene's over the last
-     * frames of the running one. The app opens with WAKE (72 frames, 6
+     * frames of the running one. The app opens with WAKE (72 frames, 7
      * plans: Tama's backlit silhouette, drawn until frame 42, then
      * nothing), which
      * prefetches Act I phase 0; then each
@@ -237,10 +237,10 @@ int main(int argc, char **argv) {
         "for(let i=0;i<72;i++){frame();const f=__procCalls.frames[i];"
         "if(!f||(f.draws.length>0)!==(i<42))throw Error('WAKE frame '+i)}"
         "__procCalls.frames.length=0;"
-        "frame();if(__procCalls.registered.length!==11||__procCalls.live.size!==5)"
+        "frame();if(__procCalls.registered.length!==12||__procCalls.live.size!==5)"
         "throw Error('registration by the first news frame');"
         "const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);"
-        "for(let layer=0;layer<5;layer++){const r=__procCalls.registered[6+layer];"
+        "for(let layer=0;layer<5;layer++){const r=__procCalls.registered[7+layer];"
         "if(!same(r.program,procMegademo.program(0,layer)))throw Error('registered program');"
         "if((r.batch===undefined)!==(layer!==3))throw Error('unexpected batch')}"
         "for(let phase=0;phase<3;phase++){const b=procMegademo.pointBatch(phase,3);"
@@ -265,6 +265,11 @@ int main(int argc, char **argv) {
         "throw Error('layer '+tick+','+layer)}}";
     JSValue check = JS_Eval(ctx, playback_check, sizeof playback_check - 1,
                             "playback-check.js", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(check)) {
+        JSValue e = JS_GetException(ctx);
+        const char *m = JS_ToCString(ctx, e);
+        fprintf(stderr, "playback check: %s\n", m ? m : "?");
+    }
     REQUIRE(!JS_IsException(check));
     JS_FreeValue(ctx, check);
     /* Frame 97 is inside TWIST, at full screen (the story's camera went into

@@ -1,4 +1,4 @@
-// MEGADEMO chunk 4: the view's state, the plan loader and the set's build
+// MEGADEMO chunk 5: the view's state, the plan loader and the set's build
 // and patch (megademo_view.js has its tables).
 'use strict';
 let tier = KN.length - 1, scene = 0, t = 0, tick = 0, live = [], pend = [], next = null, loaded = 0;

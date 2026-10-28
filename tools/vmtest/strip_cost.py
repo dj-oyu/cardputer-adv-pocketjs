@@ -27,7 +27,7 @@ DERBY = ["derby_watch.js", "derby_prog.js", "derby_view.js", "derby_scene.js", "
 APPS = {
     "hello": ["apps/hello/main.js"],
     "kasane demo": ["apps/kasane/demo.js"],
-    "MEGADEMO": ["apps/kasane/proc_megademo.js"] + [f"apps/kasane/megademo_{n}.js" for n in ("act1", "act2", "view", "set", "loop")],
+    "MEGADEMO": ["apps/kasane/proc_megademo.js"] + [f"apps/kasane/megademo_{n}.js" for n in ("act1", "act2", "wake", "view", "set", "loop")],
     "news zoom": ["apps/kasane/proc_news_zoom.js"],
     "grid fold": ["apps/kasane/grid_fold.js"],
     "grid lab": ["apps/kasane/grid_lab.js"],
