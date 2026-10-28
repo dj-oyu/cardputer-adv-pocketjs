@@ -10,5 +10,6 @@ pocket.app.load('act1');
 pocket.app.load('act2');
 if (pocket.kasane && pocket.kasane.procedural) {
   pocket.app.load('view');
+  pocket.app.load('set');
   pocket.app.load('loop');
 }

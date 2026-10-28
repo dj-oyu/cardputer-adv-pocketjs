@@ -205,8 +205,9 @@ int main(int argc,char **argv){
         }
         REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
     }
-    /* The app opens with WAKE: APP_WAKE_TICKS frames (Tama's face as line art,
-     * then the TV off), which prefetch the news. The last frame is black. */
+    /* The app opens with WAKE: APP_WAKE_TICKS frames (Tama's ears under the
+     * view's face, then the TV off), which prefetch the news. The last frame
+     * is black. */
     eval_ok(ctx,"if(procMegademo.len[7]!==72)throw Error('WAKE length')");
     for(unsigned tick=0;tick<APP_WAKE_TICKS;tick++){
         eval_ok(ctx,"frame()");
@@ -217,7 +218,7 @@ int main(int argc,char **argv){
     }
     publishes=0;
     uint32_t wake_scalar=0,wake_pie=0;
-    pocket_proc_batch_counts(&wake_scalar,&wake_pie); /* WAKE's face is a batch too */
+    pocket_proc_batch_counts(&wake_scalar,&wake_pie); /* none in WAKE now; kept as a guard */
     /* Then each 16-frame news beat twice: news tick k shows Act I frame
      * (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
     for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){

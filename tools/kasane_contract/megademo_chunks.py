@@ -8,7 +8,7 @@ need pocket.kasane; a test without it takes act_only=True.
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VIEW = ('view', 'loop')
+VIEW = ('view', 'set', 'loop')
 
 
 def chunk_files(act_only=False):
