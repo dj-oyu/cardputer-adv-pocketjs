@@ -15,12 +15,15 @@ globalThis.frame = function (buttons) {
   }
   const press = buttons & ~held;
   held = buttons;
-  // Enter: full screen <-> the monitor in the room. The story's own
-  // camera (into the screen in I; V cuts out on the full screen straight
-  // into WAKE; on waking, Tama's face over the whole view, then a cut to
-  // the room) never overrides a pinned room. WAKE's t < 2: a scene starts
-  // after this check, so its t = 0 goes by unseen here.
-  if (press & 0x4000) { target = target ? 0 : ZOOM; pin = target > 0; spd = 1; }
+  // Enter: full screen <-> the monitor in the room, except while the
+  // story owns the camera (locked(), set). Into I the camera dives into the
+  // screen; on waking, Tama's face over the whole view, then a cut to the
+  // room. A pinned room is let go when a locked stretch starts: CORE's
+  // critical beat pulls the view back into the TV. WAKE's t < 2: a scene
+  // starts after this check, so its t = 0 goes by unseen here.
+  const lk = locked();
+  if (press & 0x4000 && !lk) { target = target ? 0 : ZOOM; pin = target > 0; spd = 1; }
+  if (lk && pin) { pin = false; target = 0; spd = scene === 5 ? 2 : ZOOM; }
   if (scene === 7 && (t < 2 || t === WCUT) && !pin) { target = t === WCUT ? ZOOM : 0; spd = ZOOM; }
   if (!scene && t === 14 && !pin) { target = 0; spd = 2; }
   zoom += M.max(-spd, M.min(spd, target - zoom));

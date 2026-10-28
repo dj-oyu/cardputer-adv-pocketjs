@@ -26,6 +26,11 @@ function enter(s, fresh) {
     ' freed=' + old + ' registered=' + loaded);
 }
 const LBL = s => s === 4 ? 'LETHE' : NAMES[s];
+// Enter is dead while the story owns the camera: on waking (first person,
+// the TV is off), the first news beat (the TV turns itself on, the dive
+// into it), and from SIGNAL CRITICAL in CORE through the cut-out (LOST),
+// which must play on the full screen straight into WAKE's dark.
+const LOCK_CORE = 84, locked = () => scene === 7 || scene === 0 || scene === 6 || scene === 5 && t >= LOCK_CORE;
 // WAKE's eyelids (0 shut .. 1 open): open halfway, a blink, open; shut
 // over the cut to the room (WCUT) and open again, sitting up.
 const lid = t => t < 10 ? 0 : t < 18 ? .55 * smooth((t - 10) / 8) : t < 21 ? .55 - (t - 18) / 6 :
@@ -53,12 +58,12 @@ function build(tx, room) {
       const x = 198 + i * 3 + (i >> 2) * 3;
       tx.rect({bounds: [x, 18, x + 1, 28], color: 0x8a7c66ff});
     }
-    R.led = tx.roundRect({bounds: [62, 89, 66, 92], radius: 1, color: 0x17a7ffff});
-    // Tama from the briefing to CORE; in LOST (seen only from a pinned
-    // room) the cushion is empty.
+    tx.roundRect({bounds: [62, 89, 66, 92], radius: 1, color: 0x17a7ffff});
+    // Tama from the briefing to CORE.
     if (scene < 6) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
     text([6, 116, 234, 125], 'SORTIE ' + sortie + '   ' + T[ch], 'caption', 0xd8ccb0ff);
-    text([6, 125, 234, 134], 'ENTER ZOOM  L/R CHAPTER  U/D LOAD', 'caption', 0x8a7c66ff);
+    R.hint = text([6, 125, 234, 134], '', 'caption', 0x8a7c66ff, 33);
+    R.lk = -1;
   }
   // The opaque image is last: at full size it exactly covers the set.
   img = tx.image({resource: res0, bounds: boundsAt(zoom), clip: FULL, sourceWidth: 240, sourceHeight: 135});
@@ -66,7 +71,6 @@ function build(tx, room) {
   mon.setVisible(tx, false);
   // WAKE: Tama walks to the cushion in front of the TV (over its image).
   if (scene === 7) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
-  if (room && scene === 6) R.off = text([96, 46, 150, 58], 'NO SIGNAL', 'caption', 0xffffffff);
   if (scene < 3) {
     const N = NEWS.replace('~', sortie).split('|').map(gb);
     TV.split(',').forEach(e => add(box(e)));
@@ -140,9 +144,10 @@ function patch(tx, f) {
     R.pet.setImageFrame(tx, 3, t % 40 > 37 ? 1 : 0);
     if (scene === 7) R.pet.setVisible(tx, t >= WCUT);
   }
-  if (R.off) {
-    R.off.setVisible(tx, fix && t >= 8 && (t & 4) > 0);
-    R.led.setColor(tx, t & 4 ? 0xfb47ffff : 0x401010ff);
+  // The hint drops ENTER ZOOM while Enter is dead.
+  if (R.hint && +locked() !== R.lk) {
+    R.lk = +locked();
+    R.hint.setText(tx, (R.lk ? '            ' : 'ENTER ZOOM  ') + 'L/R CHAPTER  U/D LOAD');
   }
   if (R.card) R.card.setReveal(tx, M.max(0, M.min(R.T.length, (t - 4) >> 1)));
   if (scene < 3) {
