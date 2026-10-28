@@ -1,5 +1,5 @@
 // MEGADEMO: NIGHT SIGNAL. A room, a cat, a monitor; the story plays on the
-// screen: Act I news (3x16 frames, held twice), TWIST, ZENITH, LIMIT, LOST.
+// screen: Act I news (3x16 frames, held twice), TWIST, ZENITH, CORE, LOST.
 // Story: docs/apps/megademo-story.md; limits: docs/kasane/megademo-limit-scenes.md
 (function () {
   'use strict';
@@ -78,19 +78,18 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   const WH = 0xffff, VI = 0xfa3f, GR = 0x17a7, BL = 0x167f, OR = 0xfb47;
   // [LIGHT, MID, HEAVY]. c: TWIST corridor (n frames, r ratio, m rungs per
   // frame, s arch segments, kf/ka first frame/arch, D twist); z: ZENITH;
-  // l: LIMIT; q: rotate the radar (q[0] ZENITH, q[2] LIMIT; q[1] was the thumbnail), each
-  // ~23 ms of band re-renders a frame on the device. Derivation:
-  // docs/kasane/megademo-limit-scenes.md, megademo-device-limits.md
+  // k: CORE (r rays a draw, d ray draws, n noise lines); q: rotate ZENITH's
+  // radar, ~23 ms of band re-renders a frame on the device. Derivation:
+  // docs/kasane/megademo-limit-scenes.md, megademo-device-limits.md,
+  // docs/apps/megademo-story.md (CORE).
   // TWIST and ZENITH hold the display rate at HEAVY's load, so MID shares it.
   const CH = {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 3, D: 6},
     ZH = {st: 60, gl: 14, ln: 15, cr: 3, cc: 8, sa: 4, ts: 16, rr: 4};
   const KN = [
-    {q: [0, 0, 0], c: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 4}, z: {st: 24, gl: 8, ln: 7, cr: 2, cc: 4, sa: 2, ts: 6, rr: 2},
-     l: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 6, gl: 8, ln: 7, dn: 150, ai: 6, ao: 12, lt: 1.5}},
-    {q: [0, 0, 0], c: CH, z: ZH,
-     l: {n: 18, r: .76, m: 3, s: 6, kf: 2, ka: 3, D: 7, gl: 11, ln: 11, dn: 200, ai: 12, ao: 22, lt: 2.5}},
-    {q: [1, 0, 0], c: CH, z: ZH,
-     l: {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 2, D: 8, gl: 14, ln: 15, dn: 285, ai: 16, ao: 37, lt: 5.7}}
+    {q: 0, c: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 4}, z: {st: 24, gl: 8, ln: 7, cr: 2, cc: 4, sa: 2, ts: 6, rr: 2},
+     k: {r: 20, d: 1, n: 12}},
+    {q: 0, c: CH, z: ZH, k: {r: 40, d: 1, n: 24}},
+    {q: 1, c: CH, z: ZH, k: {r: 40, d: 2, n: 40}}
   ];
   // Programs are text, decoded by one function (a generator function per
   // plan costs guest heap at compile time). A letter per ksn_proc_op in
@@ -120,8 +119,9 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   }
   // fr frames (16 registers), ra two polylines, ru rungs, ar CUBIC arches,
   // st stars, gr ground, la lanes, ci skyline, sa octahedra (one path over
-  // 12 edges), tr CUBIC trails, sh ship flame, sc/sw radar, at attractor
-  // (BREAK_IF_GT), lt eight nested REPEAT 2, sp empty (points only).
+  // 12 edges), tr CUBIC trails, sh ship flame, sc/sw radar, ln a line; CORE:
+  // tri a triangle (colour from input 6), qd a closed quad, sg two segments,
+  // ry rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT).
   const T = {
     fr: 'U6 I8,6 I9,7 S13,-1 M10,9,13 M14,2,13 A6,0,4 A6,6,14 M14,3,13 A7,1,5 A7,7,14 S11,120 S12,67 R$0 A13,11,0 A14,12,1 V13,14 A13,11,2 A14,12,3 L13,14,$1 A13,11,4 A14,12,5 L13,14,$1 A13,11,6 A14,12,7 L13,14,$1 A13,11,0 A14,12,1 L13,14,$1 X0,1,8,9,10,13,14,15 X2,3,8,9,10,13,14,15 X4,5,8,9,10,13,14,15 X6,7,8,9,10,13,14,15 E',
     ra: 'U6 S9,-1 M6,5,9 S7,120 S8,67 R$0 A9,7,0 A10,8,1 V9,10 X0,1,4,5,6,9,10,11 A9,7,0 A10,8,1 L9,10,$1 A9,7,2 A10,8,3 V9,10 X2,3,4,5,6,9,10,11 A9,7,2 A10,8,3 L9,10,$1 E',
@@ -135,11 +135,13 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     tr: 'U8,8 R$0 S0,0 A0,0,8 S1,0 A1,1,9 S2,0 A2,2,8 A3,9,15 S4,0 A4,4,10 A5,11,14 S6,0 A6,6,10 S7,0 A7,7,11 C$1,64327 A10,10,12 A11,11,13 E',
     sh: 'U4 V0,1 L2,3,64327',
     ln: 'U4 V0,1 L2,3,$0',
+    tri: 'U7 V0,1 l6,2,3 l6,4,5 l6,0,1',
+    qd: 'U8 V0,1 L2,3,$0 L4,5,$0 L6,7,$0 L0,1,$0',
+    sg: 'U8 V0,1 L2,3,$0 V4,5 L6,7,$0',
+    ry: 'U8 S8,1.5707963 Q5 A9,4,8 N9,9 N10,4 M11,9,2 A11,11,0 M12,10,2 A12,12,1 V11,12 M11,9,3 A11,11,0 M12,10,3 A12,12,1 l7,11,12 A4,4,6 E',
+    nz: 'U3 S3,0 S4,1 S5,67 S6,120 S7,7.31 S8,3.97 R$0 A3,3,4 B3,1 M9,3,7 A9,9,0 N9,9 M9,9,5 A9,9,5 M10,3,8 A10,10,0 N10,10 M10,10,6 A10,10,6 V10,9 A11,10,2 L11,9,33808 E',
     sc: 'S8,120 S9,67 S10,20 S11,11.05 S12,-20 S13,-11.05 S14,1.45 R$0 A0,8,10 S1,67 A2,8,10 A3,9,11 A4,8,11 A5,9,10 S6,120 A7,9,10 C8,6055 S0,120 A1,9,10 A2,8,13 A3,9,10 A4,8,12 A5,9,11 A6,8,12 S7,67 C8,6055 A0,8,12 S1,67 A2,8,12 A3,9,13 A4,8,13 A5,9,12 S6,120 A7,9,12 C8,6055 S0,120 A1,9,12 A2,8,11 A3,9,12 A4,8,10 A5,9,13 A6,8,10 S7,67 C8,6055 M10,10,14 M11,11,14 M12,12,14 M13,13,14 E S0,40 S1,67 V0,1 S0,200 L0,1,6055 S0,120 S1,7 V0,1 S1,127 L0,1,6055',
     sw: 'S8,120 S9,67 V8,9 I0,0 I1,1 L0,1,65535 I2,2 I3,3 I4,4 I5,5 S10,65535 S11,129862 S12,-1 R$0 p10,2,3 A2,2,4 A3,3,5 M10,10,12 A10,10,11 E',
-    at: 'U8 S12,1.5707963267948966 S15,-1 S8,.1 S9,.1 R255 R$0 M10,0,9 N10,10 M11,1,8 A11,11,12 N11,11 M11,11,15 A10,10,11 M11,2,8 N11,11 A8,10,14 M10,3,9 A10,10,12 N10,10 M10,10,15 A9,11,10 E M10,8,6 A10,10,4 M11,9,6 A11,11,5 L10,11,64063 A13,13,12 B13,7 E',
-    lt: 'U8 S8,$0 S9,$1 S10,-1 S11,5759 S12,71294 R2 R2 R2 R2 R2 R2 R2 R2 l11,8,9 A8,8,0 M0,0,10 E A9,9,1 M1,1,10 E A8,8,2 M2,2,10 E A9,9,3 M3,3,10 M11,11,10 A11,11,12 E A8,8,4 M4,4,10 E A9,9,5 M5,5,10 E A8,8,6 M6,6,10 E A9,9,7 M7,7,10 E',
-    sp: 'S0,0'
   };
   const Q14 = 16384, rnd = Math.round, M = Math;
   function affine(x, y, s, t, tx, ty, col) {
@@ -150,31 +152,24 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   // The cat's ship: a head with two ears, seen from behind.
   const SHIP = [0, -4, 5, -12, 7, -5, 13, 0, 10, 5, 5, 8, 2, 6, 0, 9, -2, 6, -5, 8, -10, 5,
     -13, 0, -7, -5, -5, -12, 0, -4];
-  function points(b, n) {
+  // The ship in 8 roll bins (a rotated sprite table).
+  function points(b) {
     const x = [], y = [];
-    for (let i = 0; i < n; ++i) {
-      const r = 300 * M.pow(.974, i);
-      if (b < 8) { x.push(SHIP[2 * i]); y.push(SHIP[2 * i + 1]); }
-      else { x.push(rnd(-r * M.cos(i * .35))); y.push(rnd(-r * M.sin(i * .35))); }
-    }
-    // Ship: 8 roll bins; spiral: rotating by one point step equals shrinking.
-    return b < 8 ? affine(x, y, 2, (b - 3.5) * .14, 120, 110, WH) :
-      affine(x, y, 1.9, (b - 8) * .175, 120, 67, OR);
+    for (let i = 0; i < SHIP.length; i += 2) { x.push(SHIP[i]); y.push(SHIP[i + 1]); }
+    return affine(x, y, 2, (b - 3.5) * .14, 120, 110, WH);
   }
   const Q0 = [[1.2, .95], [-.8, .95], [-.8, -1.55], [1.2, -1.55]];
   const cmul = (p, z) => [p[0] * z[0] - p[1] * z[1], p[0] * z[1] + p[1] * z[0]];
   const zp = (r, d, e) => [M.pow(r, e) * M.cos(d * e), M.pow(r, e) * M.sin(d * e)];
   const lerp = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
   // TWIST: frames, rails, arches, planks, 2nd rails, 2 wall courses.
-  // LIMIT: frames, rails, arches, planks, ceiling and wall rungs.
-  function corrList(k, lim) {
-    const n = k.n, m = k.m;
-    return [['fr', n - k.kf, VI], ['ra', n, GR], ['ar', n - k.ka, k.s, WH], ['ru', n * m, OR, OR + WH]]
-      .concat(lim ? [['ru', n * m, VI, VI + BL], ['ru', (n - 1) * m, GR, GR + BL]] :
-        [['ra', n, GR], ['ra', n, BL], ['ra', n, BL]]);
+  function corrList(k) {
+    const n = k.n;
+    return [['fr', n - k.kf, VI], ['ra', n, GR], ['ar', n - k.ka, k.s, WH], ['ru', n * k.m, OR, OR + WH],
+      ['ra', n, GR], ['ra', n, BL], ['ra', n, BL]];
   }
   // The corridor: every point of a cross-section is multiplied by z per frame.
-  function corrDraws(k, t, len, sp, lim) {
+  function corrDraws(k, t, len, sp) {
     const r = k.r, w = M.sin(M.PI * t / len), dl = k.D / k.n * w * w;
     const ph = (t * sp) % 1, g = M.pow(r, 1 - ph) * 265;
     const an = .5 * M.sin(2 * M.PI * t / len) - ph * dl;
@@ -184,8 +179,7 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     const A = cmul([(P[2][0] - P[1][0]) / 2, (P[2][1] - P[1][1]) / 2], za);
     const d = [[0, cmul(P[0], zk).concat(cmul(P[1], zk), cmul(P[2], zk), z)],
       [1, P[0].concat(P[1], z)], [3, P[0].concat(P[1], zf)]];
-    if (lim) d.push([4, P[2].concat(P[3], zf)], [5, cmul(P[0], z).concat(cmul(P[3], z), zf)]);
-    else d.push([4, P[2].concat(P[3], z)], [5, lerp(P[1], P[2], 1 / 3).concat(lerp(P[0], P[3], 1 / 3), z)],
+    d.push([4, P[2].concat(P[3], z)], [5, lerp(P[1], P[2], 1 / 3).concat(lerp(P[0], P[3], 1 / 3), z)],
       [6, lerp(P[1], P[2], 2 / 3).concat(lerp(P[0], P[3], 2 / 3), z)]);
     d.push([2, cmul(P[2], za).concat(cmul(P[3], za), A, z)]);
     return d;
@@ -198,67 +192,124 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     const c = M.cos(roll), s = M.sin(roll), hz = 8 * M.sin(2 * T);
     return {roll: roll, c: c, s: s, H: [120 - hz * s, 67 + hz * c, -s, c]};
   }
-  const CORE = [0, 0, 0, 0, 0, 0, 10, 18, 46, 36, 26, 26];
-  const A2 = {
-    names: ['TWIST', 'ZENITH', 'LIMIT', 'LOST'], len: [128, 96, 96, 64],
-    // Plan list of scene i: [template, args...]; sh and sp carry points.
-    plans: function (i, tier) {
-      const k = KN[tier], z = k.z, l = k.l;
-      if (!i) return corrList(k.c, 0).concat([['st', z.st]]);
-      if (i === 3) return [['ln', WH], ['ln', BL]];
-      if (i === 1) {
-        const p = [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa],
-          ['tr', z.sa, z.ts]];
-        for (let b = 0; b < 8; ++b) p.push(['sh', b]);
-        return p.concat([['sc', z.rr], ['sw', z.sa]]);
+  // CORE: an icosahedral shell opens round a pulsing core (cube and
+  // octahedron); the climax adds grey flashes, scan noise and a short dolly
+  // zoom, each eased in cubically towards frame 100. The 3D is projected
+  // here; the plans only draw lines.
+  // Icosahedron: vertices as sign/golden-ratio codes (i = -1, p/q = +/-phi),
+  // faces as hex vertex triples; the cube and octahedron are made from bits.
+  const IV = [], IFS = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a867981';
+  {
+    const p = (1 + M.sqrt(5)) / 2, n = M.sqrt(1 + p * p), C = {i: -1, '0': 0, '1': 1, p: p, q: -p};
+    const S = 'ip01p0iq01q00ip01p0iq01qp0ip01q0iq01';
+    for (let i = 0; i < 36; ++i) IV.push(C[S[i]] / n);
+  }
+  const ramp = (t, a, b) => M.max(0, M.min(1, (t - a) / (b - a))), smooth = u => u * u * (3 - 2 * u);
+  // Projection state for this frame: yaw, pitch, camera distance D.
+  let Ycy, Ysy, Pcp, Psp, Dd;
+  // Rotate (yaw, then pitch), project at scale s, append x, y to o; returns z
+  // (> 0 is away from the camera). A petal past the lens must not blow up.
+  function pj(x, y, z, s, o) {
+    const x1 = x * Ycy + z * Ysy, z0 = z * Ycy - x * Ysy, y1 = y * Pcp - z0 * Psp, z1 = y * Psp + z0 * Pcp;
+    const f = s * Dd / M.max(Dd + z1, Dd * .4);
+    o.push(120 + x1 * f, 67 + y1 * f);
+    return z1;
+  }
+  // A quad (or two segments) through vertices named by hex digits: cube
+  // vertex i is the bits of i, octahedron vertex i the axis i % 3 signed by i < 3.
+  function quad(plan, ids, oct, s) {
+    const o = [];
+    for (let j = 0; j < 4; ++j) {
+      const i = parseInt(ids[j], 16);
+      if (oct) pj(i % 3 ? 0 : i < 3 ? 1 : -1, i % 3 === 1 ? i < 3 ? 1 : -1 : 0, i % 3 === 2 ? i < 3 ? 1 : -1 : 0, s, o);
+      else pj(i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1, s, o);
+    }
+    return [plan, o];
+  }
+  function core(k, t) {
+    const crit = ramp(t, 60, 100), dz = ramp(t, 84, 100) ** 2, gone = smooth(ramp(t, 100, 110));
+    const sc = (18 + 44 * smooth(ramp(t, 0, 40))) * (1 - gone);
+    const op = smooth(ramp(t, 40, 56)) + .6 * smooth(ramp(t, 76, 100)), tw = op * (.5 + 1.5 * crit);
+    const ya = t * .03 + 2 * crit ** 3, pa = .5 + t * .011, d = [];
+    // Grey flashes: one frame each time 9 u^3 crosses an integer, u over 60..100.
+    const fl = t === 60 || t > 60 && t <= 100 && (9 * crit ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0);
+    Ycy = M.cos(ya); Ysy = M.sin(ya); Pcp = M.cos(pa); Psp = M.sin(pa); Dd = 3.2 - 1.6 * dz;
+    for (let i = 0; i < 20; ++i) {
+      // Shrink each face, push it out along its normal, twist it like a petal.
+      let cx = 0, cy = 0, cz = 0, zs = 0;
+      for (let j = 0; j < 3; ++j) {
+        const v = 3 * parseInt(IFS[3 * i + j], 16);
+        cx += IV[v] / 3; cy += IV[v + 1] / 3; cz += IV[v + 2] / 3;
       }
-      return corrList(l, 1).concat([['gr'], ['la', l.ln], ['at', l.ai],
-        ['lt', 120 - 22.5 * l.lt, 67 - 22.5 * l.lt], ['sp', 8], ['sp', 9], ['sc', 4], ['sw', 4]]);
+      const l = op * .8 / M.hypot(cx, cy, cz), a = tw * (i & 1 ? 1 : -1), ca = M.cos(a), sa = M.sin(a), o = [];
+      for (let j = 0; j < 3; ++j) {
+        const v = 3 * parseInt(IFS[3 * i + j], 16), h = 1 - .35 * op;
+        const x = cx + (IV[v] - cx) * h + cx * l, y = cy + (IV[v + 1] - cy) * h + cy * l, z = cz + (IV[v + 2] - cz) * h + cz * l;
+        zs += pj(x * ca + z * sa, y, z * ca - x * sa, sc, o);
+      }
+      o.push(zs > 0 ? BL : i % 3 ? VI : WH);
+      d.push([0, o]);
+    }
+    // The core: cube (green) and octahedron (orange), counter-rotating, pulsing.
+    const cs = sc * smooth(ramp(t, 40, 56)) * (1 + .15 * M.sin(t * .5)) * (1 + .5 * crit);
+    if (cs > 1) d.push(quad(1, '0132', 0, cs * .33), quad(1, '4576', 0, cs * .33), quad(3, '0415', 0, cs * .33),
+      quad(3, '2637', 0, cs * .33), quad(2, '0143', 1, cs * .55), quad(2, '0253', 1, cs * .55), quad(2, '1245', 1, cs * .55));
+    // Rays from frame 64; stars stretch outwards in the dolly zoom.
+    const nr = rnd(k.r * smooth(ramp(t, 64, 96)) * (1 - gone));
+    for (let j = 0; j < k.d && nr; ++j)
+      d.push([4, [120, 67, cs * .4, 30 + 120 * crit, t * .07 + j * M.PI / nr, nr, 2 * M.PI / nr, fl ? OR : WH]]);
+    const g = 1 + .8 * dz, nn = rnd(k.n * crit ** 1.5 * (1 - gone));
+    d.push([5, [190 * g, 0, 0, 70 * g, t * .05, 120, 67]]);
+    if (nn) d.push([6, [t * 1.7, nn, 10 + 40 * crit]]);
+    return {b: fl ? 0x5acc : 0, s: 0, d: d};
+  }
+  const A2 = {
+    names: ['TWIST', 'ZENITH', 'CORE', 'LOST'], len: [128, 96, 112, 64],
+    // Plan list of scene i: [template, args...]; sh carries points.
+    plans: function (i, tier) {
+      const k = KN[tier], z = k.z;
+      if (!i) return corrList(k.c).concat([['st', z.st]]);
+      if (i === 2) return [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]];
+      if (i === 3) return [['ln', WH], ['ln', BL]];
+      const p = [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa],
+        ['tr', z.sa, z.ts]];
+      for (let b = 0; b < 8; ++b) p.push(['sh', b]);
+      return p.concat([['sc', z.rr], ['sw', z.sa]]);
     },
     // {b: backdrop, s: surface, d: [[plan, inputs]...]}
     frame: function (i, tier, t) {
-      const k = KN[tier], z = k.z, l = k.l;
+      const k = KN[tier], z = k.z;
       if (!i) {
-        // The wire opens: stars burst from the vanishing point.
         // The wire opens: stars burst from the vanishing point while the
         // corridor thins to its frames and arches, then to nothing; at the cut
         // the field is ZENITH's own (g = 1).
         const e = (t - 88) / 40, g = e * e;
-        const d = corrDraws(k.c, t, 128, 1 / 6, 0).filter(q => t < 108 || t < 120 && q[0] % 2 === 0);
+        const d = corrDraws(k.c, t, 128, 1 / 6).filter(q => t < 108 || t < 120 && q[0] % 2 === 0);
         if (e > 0) d.push([7, [190 * g, 0, 0, 70 * g, (t - 128) * .05, 120, 67]]);
         return {b: 0, s: 0, d: d};
       }
+      if (i === 2) return core(k.k, t);
       if (i === 3) {
         // CRT off: the line shrinks to a dot, then the dot goes.
         const w = t < 10 ? 2 + 118 * (1 - t / 10) ** 2 : 2.5 - (t - 10) / 4;
         return {b: 0, s: 0, d: w > 0 ? [[0, [120 - w, 67, 120 + w, 67]],
           [1, [120 - w * .8, 66, 120 + w * .8, 66]], [1, [120 - w * .8, 68, 120 + w * .8, 68]]] : []};
       }
-      const f = flight(i === 1 ? t : t * 1.5 % 96), c = f.c, s = f.s, H = f.H;
+      const f = flight(t), c = f.c, s = f.s, H = f.H;
       const x = 34 + 24 * M.sin(t * .09) - 120, y = 28 + 10 * M.cos(t * .05) - 67;
       const P = [120 + x * c - y * s, 67 + x * s + y * c], st = [46 * c - 6 * s, 46 * s + 6 * c];
-      const u = [c, s], gl = i === 1 ? z.gl : l.gl, ln = i === 1 ? z.ln : l.ln, g = i === 1 ? 1 : 6;
-      if ((t & 3) === 3) return {b: 0, s: 1, d: [[i === 1 ? 14 : 12, []], [i === 1 ? 15 : 13,
+      if ((t & 3) === 3) return {b: 0, s: 1, d: [[14, []], [15,
         [120 + 60 * M.cos(t * .3), 67 + 60 * M.sin(t * .3), 120 + (P[0] - 120) * .4, 67 + (P[1] - 67) * .4,
           st[0] * .4, st[1] * .4]]]};
-      const d = [[g, H.concat([260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), gl])],
-        [g + 1, H.concat(u, [-(ln - 1) * .11 - ((t * .04) % 1) * .22, i === 1 ? 150 : l.dn])]];
-      if (i === 1) {
-        d.unshift([0, [190 * c, 190 * s, -70 * s, 70 * c, t * .05, 120, 67]]);
-        d.push([3, H.concat(u, [4.5, M.min(1, t / 70) * 2.2])],
-          [4, P.concat(st, [10 * M.cos(t * .3), 10 * M.sin(t * .3), .35, 10])]);
-        if (t % 16 < 5) d.push([5, [120, 100].concat(P, st, [20, -40])]);
-        const b = M.max(0, M.min(7, rnd(-M.atan2(s, c) / .14 + 3.5)));
-        d.push([6 + b, [120, 120, 120, 123 + (t % 3) * 2]]);
-        return {b: 0, s: 0, d: d};
-      }
-      const q = [];
-      for (let j = 0; j < 8; ++j) q.push((3 << (j >> 1)) * l.lt * (1 + .35 * M.sin(t * .1 * (j + 1))));
-      d.push([10 + (t & 1), []]);
-      // The core builds up a layer a beat (CORE), full load from frame 46.
-      return {b: t > 83 && t < 86 ? 0x780f : 0, s: 0, d: d.concat(corrDraws(l, t, 96, 1 / 4, 1), [[9, q],
-        [8, [1.4 + .2 * M.sin(t * .05), -2.3, 2.4, -2.1 + .2 * M.cos(t * .04), 120, 67, 36,
-          (l.ao - .5) * M.PI / 2]]]).filter(e => t >= CORE[e[0]])};
+      const u = [c, s], b = M.max(0, M.min(7, rnd(-M.atan2(s, c) / .14 + 3.5)));
+      const d = [[0, [190 * c, 190 * s, -70 * s, 70 * c, t * .05, 120, 67]],
+        [1, H.concat([260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl])],
+        [2, H.concat(u, [-(z.ln - 1) * .11 - ((t * .04) % 1) * .22, 150])],
+        [3, H.concat(u, [4.5, M.min(1, t / 70) * 2.2])],
+        [4, P.concat(st, [10 * M.cos(t * .3), 10 * M.sin(t * .3), .35, 10])]];
+      if (t % 16 < 5) d.push([5, [120, 100].concat(P, st, [20, -40])]);
+      d.push([6 + b, [120, 120, 120, 123 + (t % 3) * 2]]);
+      return {b: 0, s: 0, d: d};
     }
   };
 
@@ -269,7 +320,7 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
   function specs(s, tier) {
     return (s > 2 ? A2.plans(s - 3, tier) : [0, 1, 2, 3, 4]).map(e => () => s < 3 ?
       [program(s, e), pointBatch(s, e)] :
-      [prog(T[e[0]], e.slice(1)), e[0] === 'sh' || e[0] === 'sp' ? points(e[1], e[0] === 'sh' ? 15 : 120) : null]);
+      [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null]);
   }
   function frameOf(s, tier, t) {
     if (s > 2) return A2.frame(s - 3, tier, t);
@@ -325,7 +376,8 @@ A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5
     // Narration per scene: "bounds|first frame|line|..."; news headlines.
     const SAY = [, , , '6 122 234 133|10|THE CAT FALLS DOWN THE WIRE|56|IT TWISTS... AND STRAIGHTENS|\
 92|AND OPENS ONTO THE STARS', '150 121 236 132|10|PILOT: THE CAT|40|BARREL ROLL!|72|SOURCE LOCKED',
-    '58 106 234 117|10|EVERY WORLD AT ONCE|46|THE SIGNAL HITS THE LIMIT', '94 62 160 73|20|NO SIGNAL'];
+    '6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL',
+    '94 62 160 73|20|NO SIGNAL'];
     const NEWS = 'BREAKING: A SIGNAL FROM ORBIT|IT REPEATS EVERY NIGHT AT MIDNIGHT|\
 SOURCE: ZENITH, THE UNFINISHED CITY|EXPERTS SAY IT IS LOOKING FOR A PILOT|\
 IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS A P1L0T. 1T WANTS Y0UR C4T';
@@ -354,7 +406,7 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         ' freed=' + old + ' registered=' + loaded);
     }
     const spin = tx => R.radar.animate(tx, {from: {bounds: RAD, rotation: 0},
-      to: {bounds: RAD, rotation: 360 * KN[tier].q[scene === 4 ? 0 : 2]}, durationMs: 4000,
+      to: {bounds: RAD, rotation: 360 * KN[tier].q}, durationMs: 4000,
       easing: 'linear', repeat: 'loop'});
     const boundsAt = step => step === 0 ? FULL : step === ZOOM ? MON :
       lerp4(FULL, MON, step / ZOOM * step / ZOOM * (3 - 2 * step / ZOOM));
@@ -399,11 +451,11 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
       if (scene > 3 && ch < 4) {
         R.score = add(text([4, 2, 150, 13], NAMES[scene], 'caption', 0xffffffff, 20));
         R.lamp = add(tx.roundRect({bounds: [226, 3, 236, 11], radius: 3, color: 0xfb47ffff}));
-        R.radar = add(tx.image({resource: res1, bounds: RAD, clip: FULL, sourceX: 60, sourceY: 7,
-          sourceWidth: 120, sourceHeight: 120}));
-        R.ring = add(tx.strokeRect({bounds: [3, 83, 53, 133], width: 1, color: 0x17a7ffff}));
-        anim = spin(tx);
         if (scene === 4) {
+          R.radar = add(tx.image({resource: res1, bounds: RAD, clip: FULL, sourceX: 60, sourceY: 7,
+            sourceWidth: 120, sourceHeight: 120}));
+          R.ring = add(tx.strokeRect({bounds: [3, 83, 53, 133], width: 1, color: 0x17a7ffff}));
+          anim = spin(tx);
           // The pilot: the cat from the room, in the cockpit.
           add(tx.strokeRect({bounds: [3, 15, 22, 34], width: 1, color: 0x17a7ffff}));
           add(tx.image({resource: pets, bounds: [4, 16, 21, 33], variant: 3, frame: 0}));
@@ -414,6 +466,12 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
           tx.group(R.plate, 2, 170);
           R.meter = add(tx.gradient({bounds: [64, 128, 65, 130], axis: 'x', from: 0x17a7ffff, to: 0xfb47ffff}));
           R.stat = add(text([64, 119, 234, 128], 'SIGNAL', 'caption', 0xffffffff, 40));
+          // Interference: bands of the image, torn sideways (shown by patch).
+          R.tear = []; R.tv = [];
+          for (let i = 0; i < 3; ++i) {
+            R.tear.push(tx.image({resource: res0, bounds: FULL, clip: [0, 0, 240, 1], sourceWidth: 240, sourceHeight: 135}));
+            R.tear[i].setVisible(tx, false);
+          }
         }
       }
       // Shutters last: the set turns on and off from its middle line, HUD too.
@@ -430,7 +488,7 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
       img.setRect(tx, [B[0] + j, B[1], B[2] + j, B[3]]);
       if (fix !== vis) { img.setVisible(tx, !fix); mon.setVisible(tx, fix); vis = fix; }
       // Shutters: open over the first news frames, close at the end of CORE.
-      const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((94 - t) / 8) : 1;
+      const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((110 - t) / 8) : 1;
       if (o < 1 || R.cv < 1) {
         const m = (B[1] + B[3]) / 2, h = (B[3] - B[1]) * o / 2;
         R.top.setRect(tx, [B[0], B[1], B[2], rnd(m - h)]);
@@ -482,9 +540,21 @@ IT WANTS A PILOT. IT WANTS YOUR CAT|KEEP YOUR PETS AWAY FROM THE SCREEN|1T WANTS
         for (let i = 0; i < 3; ++i) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
         R.ring.setColor(tx, t > 71 ? 0xfb47ffff : 0x17a7ffff);
       } else {
-        const n = f ? f.d.length : 0, p = M.min(100, rnd(t * 2.2));
+        const n = f ? f.d.length : 0, p = M.min(100, t);
         R.meter.setRect(tx, [64, 128, 65 + rnd(1.69 * p), 130]);
         R.stat.setText(tx, 'SIGNAL ' + p + ' PLANS ' + live.length + ' DRAWS ' + n);
+        // Tear: each band shows when a per-frame hash is under the eased
+        // interference level, at a hashed height and offset.
+        const nz = on ? ramp(t, 60, 100) ** 1.5 * (1 - ramp(t, 100, 104)) : 0;
+        for (let i = 0; i < 3; ++i) {
+          const r = R.tear[i], h = M.sin(t * 12.9898 + i * 78.233) * 43758.5453, u = h - M.floor(h), v = u < nz;
+          if (v) {
+            const y = rnd(u / nz * 124), dx = rnd(((u * 7) % 1 - .5) * 36 * nz);
+            r.setRect(tx, [dx, 0, 240 + dx, 135]);
+            r.setClip(tx, [0, y, 240, y + 3 + i * 4]);
+          }
+          if (v !== !!R.tv[i]) { r.setVisible(tx, v); R.tv[i] = v; }
+        }
       }
       if (t === 90 && anim && on) { anim.stop(tx); console.log('MEGADEMO ANIM ' + anim.poll()); }
     }

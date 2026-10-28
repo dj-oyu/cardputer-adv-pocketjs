@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QJS = ROOT / "components/quickjs-ng/quickjs-ng"
 OUT = ROOT / ".cache/kasane_megademo_scenes"
 W, H = 240, 135
-LENS = {0: 16, 1: 16, 2: 16, 3: 128, 4: 96, 5: 96, 6: 64}
+LENS = {0: 16, 1: 16, 2: 16, 3: 128, 4: 96, 5: 112, 6: 64}
 GREY = bytes((0x30, 0x30, 0x30))
 
 
@@ -103,7 +103,7 @@ def sheet(path: Path, cells: list, columns: int) -> None:
 def sheets(out: Path, tier: int) -> None:
     # Per scene: 16 frames spread over the scene, left to right, top to
     # bottom. Radar (surface 1) frames appear where they fall.
-    for scene, name in ((3, "twist"), (4, "zenith"), (5, "limit"), (6, "lost")):
+    for scene, name in ((3, "twist"), (4, "zenith"), (5, "core"), (6, "lost")):
         n = LENS[scene]
         picks = [round(i * (n - 1) / 15) for i in range(16)]
         sheet(out / f"sheet_{name}_tier{tier}.png", [(tier, scene, f) for f in picks], 4)
@@ -111,13 +111,13 @@ def sheets(out: Path, tier: int) -> None:
     sheet(out / "sheet_act1.png", [(tier, s, f) for s in range(3) for f in range(0, 16, 2)], 4)
     # Tiers side by side (columns LIGHT, MID, HEAVY), one row per moment.
     cells = []
-    for scene, frame in ((3, 64), (4, 30), (4, 52), (5, 20), (5, 60)):
+    for scene, frame in ((3, 64), (4, 30), (4, 52), (5, 50), (5, 90)):
         cells += [(t, scene, frame) for t in range(3)]
     sheet(out / "sheet_tiers.png", cells, 3)
     # Consecutive frames: the motion itself.
     sheet(out / "sheet_twist_motion.png", [(tier, 3, f) for f in range(56, 72)], 4)
     sheet(out / "sheet_zenith_motion.png", [(tier, 4, f) for f in range(40, 56)], 4)
-    sheet(out / "sheet_limit_motion.png", [(tier, 5, f) for f in range(40, 56)], 4)
+    sheet(out / "sheet_core_motion.png", [(tier, 5, f) for f in range(84, 100)], 4)
 
 
 def main() -> None:
