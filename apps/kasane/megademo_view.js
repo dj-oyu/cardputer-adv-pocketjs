@@ -4,7 +4,10 @@
 const V = pocket.kasane, H = V.procedural, G = V.grid;
 // Surface 0's frames sized for 768 segments (the busiest frame, TWIST at
 // HEAVY, is 648): 2 x 7.7 KB instead of 2 x 10.2 KB, in smaller holes.
-const res0 = H.resource({maxSegments: 768});
+// Firmware without the option (and the baseline the contracts compare
+// against) refuses it: the full 1,024 then.
+let res0;
+try { res0 = H.resource({maxSegments: 768}); } catch (e) { res0 = H.resource(); }
 // The settled monitor: a registered image-to-image resize (bilinear).
 // ZENITH's radar thumbnail and munching squares went for the story's
 // heap (typed arrays alone keep ~1.3 KB): docs/apps/megademo-story.md
