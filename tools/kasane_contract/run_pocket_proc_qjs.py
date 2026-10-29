@@ -41,6 +41,7 @@ def main():
              ROOT/'main/ui/kasane/ksn_blend_pie.c',
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
              ROOT/'main/pocket/pocket_shape.c',
+             ROOT/'tools/kasane_contract/proc_native_weak.c',
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
     command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
              '-DKSN_PROC_HOST_TEST',
