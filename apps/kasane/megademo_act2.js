@@ -38,52 +38,90 @@ function twist(k, t) {
   const ng = t > 121 && t < 196, e = (t - 200) / 40;
   BG((t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045) ^ (ng ? 0xffff : 0));
   if (t < 232) {
-    const o = ng ? 8 : 0, all = t < 220, w = M.sin(PI * t / 240), dl = k.D / k.n * w * w,
+    // L: all the plans (the corridor thins to frames and arches from 220).
+    const o = ng ? 8 : 0, L = t < 220, w = M.sin(PI * t / 240), d = k.D / k.n * w * w,
       r = k.r - (k.r - .43) * (1 - smooth(ramp(t, 0, 48))), ph = (t * .16666666666666666) % 1,
-      g = M.pow(r, 1 - ph) * 265, an = .5 * M.sin(2 * PI * t / 240) - ph * dl, c = M.cos(an) * g, s = M.sin(an) * g;
-    // The cross-section's corners, turned and scaled.
-    const ax = 1.2 * c - .95 * s, ay = 1.2 * s + .95 * c, bx = -.8 * c - .95 * s, by = -.8 * s + .95 * c,
-      cx = -.8 * c + 1.55 * s, cy = -.8 * s - 1.55 * c, dx = 1.2 * c + 1.55 * s, dy = 1.2 * s - 1.55 * c;
-    // z = r e^(i dl); zf its m-th root (a rung's step); zk, za: .8^kf, .8^ka.
-    const zr = r * M.cos(dl), zi = r * M.sin(dl), fm = M.pow(r, 1 / k.m), fa = dl * (1 / k.m),
-      km = M.pow(.8, k.kf), ka = dl * k.kf, kr = km * M.cos(ka), ki = km * M.sin(ka),
-      am = M.pow(.8, k.ka), aa = dl * k.ka, ar = am * M.cos(aa), ai = am * M.sin(aa);
-    E(o, ax * kr - ay * ki, ax * ki + ay * kr, bx * kr - by * ki, bx * ki + by * kr, cx * kr - cy * ki, cx * ki + cy * kr, zr, zi);
-    if (all) {
-      E(o + 1, ax, ay, bx, by, zr, zi);
-      E(o + 3, ax, ay, bx, by, fm * M.cos(fa), fm * M.sin(fa));
+      g = M.pow(r, 1 - ph) * 265, A = .5 * M.sin(2 * PI * t / 240) - ph * d, c = M.cos(A) * g, s = M.sin(A) * g;
+    // The cross-section's corners P, S, C, Q, turned and scaled. (Names
+    // are reused across the app's functions: each distinct one is a
+    // resident atom.)
+    const px = 1.2 * c - .95 * s, py = 1.2 * s + .95 * c, sx = -.8 * c - .95 * s, sy = -.8 * s + .95 * c,
+      cx = -.8 * c + 1.55 * s, cy = -.8 * s - 1.55 * c, qx = 1.2 * c + 1.55 * s, qy = 1.2 * s - 1.55 * c;
+    // h = r e^(i d), the step per frame; l e^(i a) its m-th root (a rung's
+    // step); x + iy = .8^kf e^(i d kf) (the first frame drawn), u + iv =
+    // .8^ka e^(i d ka) (the first arch).
+    const h0 = r * M.cos(d), h1 = r * M.sin(d), l = M.pow(r, 1 / k.m), a = d * (1 / k.m),
+      n = M.pow(.8, k.kf), b = d * k.kf, x = n * M.cos(b), y = n * M.sin(b),
+      m = M.pow(.8, k.ka), q = d * k.ka, u = m * M.cos(q), v = m * M.sin(q);
+    E(o, px * x - py * y, px * y + py * x, sx * x - sy * y, sx * y + sy * x, cx * x - cy * y, cx * y + cy * x, h0, h1);
+    if (L) {
+      E(o + 1, px, py, sx, sy, h0, h1);
+      E(o + 3, px, py, sx, sy, l * M.cos(a), l * M.sin(a));
     }
-    E(o + 4, cx, cy, dx, dy, zr, zi);
-    if (all) E(o + 5, bx + (cx - bx) * .3333333333333333, by + (cy - by) * .3333333333333333,
-      ax + (dx - ax) * .3333333333333333, ay + (dy - ay) * .3333333333333333, zr, zi);
-    E(o + 6, bx + (cx - bx) * .6666666666666666, by + (cy - by) * .6666666666666666,
-      ax + (dx - ax) * .6666666666666666, ay + (dy - ay) * .6666666666666666, zr, zi);
-    const hx = (cx - bx) / 2, hy = (cy - by) / 2;
-    E(o + 2, cx * ar - cy * ai, cx * ai + cy * ar, dx * ar - dy * ai, dx * ai + dy * ar, hx * ar - hy * ai, hx * ai + hy * ar, zr, zi);
+    E(o + 4, cx, cy, qx, qy, h0, h1);
+    if (L) E(o + 5, sx + (cx - sx) * .3333333333333333, sy + (cy - sy) * .3333333333333333,
+      px + (qx - px) * .3333333333333333, py + (qy - py) * .3333333333333333, h0, h1);
+    E(o + 6, sx + (cx - sx) * .6666666666666666, sy + (cy - sy) * .6666666666666666,
+      px + (qx - px) * .6666666666666666, py + (qy - py) * .6666666666666666, h0, h1);
+    const X = (cx - sx) / 2, Y = (cy - sy) / 2;
+    E(o + 2, cx * u - cy * v, cx * v + cy * u, qx * u - qy * v, qx * v + qy * u, X * u - Y * v, X * v + Y * u, h0, h1);
   }
   if (e > 0) { const g = e * e; E(7, 190 * g, 0, 0, 70 * g, (t - 240) * .05, 120, 67); }
+  // The wire opens: three rings of warp streaks rush out of the vanishing
+  // point (faster and longer as they go), from 196 to the cut.
+  if (t >= 196) for (let j = 0; j < 3; ++j) {
+    const f = ((t - 196) * .06 + j / 3) % 1, r = 6 + 150 * f * f;
+    E(15, 120, 67, r, r + 3 + 40 * f * f, j * 1.1 + t * .01, 24, PI / 12, f < .4 ? RV[0] : WH);
+  }
   river(t);
 }
 // ZENITH (LETHE on screen): the ship rolls (a barrel roll in 40..63) and
-// pitches; the radar is drawn in the image's corner (a second surface cost
-// two 10 KB frames).
+// pitches over the city, lasers at the formation; 72 locks on. Then a
+// salvo (96..111: four trails grow from the ship to the octahedra), the
+// hit at 112 (a grey flash, a shockwave ring and streaks thrown out, the
+// formation scattered spinning), a roll the other way out of the blast
+// (128..147), and from 160 the ship pulls up: the city falls away until
+// only the stars are left (CORE opens on them). The radar is drawn in the
+// image's corner (a second surface cost two 10 KB frames).
 const RC0 = 28, RC1 = 108;
 function zen(z, t) {
-  BG(0);
-  const T = 2 * PI * t / 96;
+  const k = t - 112, e = ramp(t, 112, 150), ee = 1 - (1 - e) ** 3, up = smooth(ramp(t, 160, 190)), T = 2 * PI * t / 96;
+  // The hit: two grey frames, then a warm glow fading out.
+  const glow = k > 1 ? rnd(10 * (1 - ramp(k, 2, 16)) ** 2) : 0;
+  BG(k === 0 || k === 1 ? 0x5acc : glow << 11 | glow << 5);
   let roll = .55 * M.sin(T);
   if (t >= 40 && t < 64) { const u = (t - 40) / 24; roll += 2 * PI * u * u * (3 - 2 * u); }
-  const c = M.cos(roll), s = M.sin(roll), hz = 8 * M.sin(2 * T), h0 = 120 - hz * s, h1 = 67 + hz * c,
+  if (t >= 128 && t < 148) { const u = (t - 128) / 20; roll -= 2 * PI * u * u * (3 - 2 * u); }
+  const c = M.cos(roll), s = M.sin(roll), hz = 8 * M.sin(2 * T) + 160 * up, h0 = 120 - hz * s, h1 = 67 + hz * c,
     x = 34 + 24 * M.sin(t * .09) - 120, y = 28 + 10 * M.cos(t * .05) - 67,
     px = 120 + x * c - y * s, py = 67 + x * s + y * c, sx = 46 * c - 6 * s, sy = 46 * s + 6 * c,
     b = M.max(0, M.min(7, rnd(-M.atan2(s, c) / .14 + 3.5))), cw = M.cos(t * .3), sw = M.sin(t * .3);
   E(0, 190 * c, 190 * s, -70 * s, 70 * c, t * .05, 120, 67);
-  E(1, h0, h1, -s, c, 260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl);
-  E(2, h0, h1, -s, c, c, s, -(z.ln - 1) * .11 - ((t * .04) % 1) * .22, 150);
-  E(3, h0, h1, -s, c, c, s, 4.5, M.min(1, t / 70) * 2.2);
-  E(4, px, py, sx, sy, 10 * cw, 10 * sw, .35, 10);
-  if (t % 16 < 5) E(5, 120, 100, px, py, sx, sy, 20, -40);
+  if (up < 1) {
+    E(1, h0, h1, -s, c, 260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl);
+    E(2, h0, h1, -s, c, c, s, -(z.ln - 1) * .11 - ((t * .04) % 1) * .22, 150);
+    E(3, h0, h1, -s, c, c, s, 4.5, M.min(1, t / 70) * 2.2);
+  }
+  // The formation; after the hit it scatters, spinning, and shrinks away.
+  if (e < 1) {
+    const g = 1 + 3 * ee, a = t * .3 + 9 * ee, r = 10 * (1 - e);
+    E(4, px, py, sx * g, sy * g, r * M.cos(a), r * M.sin(a), .35, r);
+  }
+  if (t < 96 && t % 16 < 5) E(5, 120, 100, px, py, sx, sy, 20, -40);
+  else if (t >= 96 && k < 0) {
+    const u = smooth(ramp(t, 96, 111));
+    E(5, 120, 100, 120 + (px - 120) * u, 100 + (py - 100) * u, sx * u, sy * u, 20 + 40 * (1 - u), -40 - 30 * u);
+  }
   E(6 + b, 120, 120, 120, 123 + (t % 3) * 2);
+  // The blast: a white starburst (8 frames), a double ring of short rays
+  // (orange, then white) and streaks thrown out.
+  if (k >= 0 && e < 1) {
+    const R = 4 + 140 * ee, m = (z.sa - 1) / 2, qx = px + sx * m, qy = py + sy * m;
+    if (k < 8) E(16, qx, qy, 2, 12 + 50 * smooth(k / 8) * (1 - k / 8), k * .2, 24, PI / 12, WH);
+    E(16, qx, qy, R, R + 4, t * .05, 64, PI / 32, e < .3 ? OR : WH);
+    E(16, qx, qy, R * .8, R * .8 + 3, -t * .05, 48, PI / 24, OR);
+    E(16, qx, qy, 6 + 90 * ee, 20 + 150 * ee, k * .03, 16, PI / 8, e < .5 ? WH : OR);
+  }
   E(14, RC0, RC1, 22 / 1.45 ** (z.rr - 1));
   E(15, RC0 + 22 * cw, RC1 + 22 * sw, RC0 + (px - 120) * .15, RC1 + (py - 67) * .15, sx * .15, sy * .15);
 }
@@ -203,23 +241,22 @@ function lost(t) {
 // Act I (CALL, ROUTE, VOYAGE: megademo_brief.js) keeps the scene name NEWS
 // for the logs' readers; WAKE (megademo_wake.js) plays first. LEN: frames.
 const NAMES = ['NEWS', 'NEWS', 'NEWS', 'TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'],
-  LEN = [64, 56, 96, 240, 96, 140, 24, 104];
+  LEN = [64, 56, 96, 240, 192, 140, 24, 104];
 // Scene s's plans as [template, args...] (sh: the ship's roll bin, its
-// points). Act I's scenes share one set (its HUD; the world is
-// pocket.shapes'). cap: how many the prefetch takes (TWIST's negative
-// registers during TWIST, not in VOYAGE's dive). The loader builds plan i
-// when it registers it (plan()), so no list is kept while it waits.
+// points). Act I's scenes share one set: its HUD (the world is
+// pocket.shapes'), then TWIST's first 8 (the river and the stars), which
+// register with it at the end of WAKE, where the heap is lowest, and pass
+// to TWIST at the cut (enter()). The loader builds plan i when it
+// registers it (plan()), so no list is kept while it waits.
 function plist(s, tier) {
-  const k = KN[tier], z = k.z;
-  const L = s < 3 ? [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]] :
-    s === 3 ? corrList(k.c, 0).concat([['st', z.st]], corrList(k.c, 0xffff)) :
+  const k = KN[tier], z = k.z, w = s < 4 ? corrList(k.c, 0).concat([['st', z.st]]) : null;
+  return s < 3 ? [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]].concat(w) :
+    s === 3 ? w.concat(corrList(k.c, 0xffff), [['ry']]) :
     s === 5 ? [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]] :
     s === 6 ? [['ln', WH], ['ln', BL]] : s === 7 ? [] :
     [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa], ['tr', z.sa, z.ts],
       ['sh', 0], ['sh', 1], ['sh', 2], ['sh', 3], ['sh', 4], ['sh', 5], ['sh', 6], ['sh', 7],
-      ['rd', z.rr], ['sw', z.sa, RC0, RC1]];
-  if (s === 3) L.cap = 8;
-  return L;
+      ['rd', z.rr], ['sw', z.sa, RC0, RC1], ['ry']];
 }
 // [program, points or null] of a plan entry.
 const plan = e => [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null];

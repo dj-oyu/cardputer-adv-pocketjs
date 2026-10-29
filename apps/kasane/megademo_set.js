@@ -5,19 +5,19 @@
 // The full screen, the monitor in the room, and the camera's steps between.
 const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
 // scene starts at WAKE, so the loop's first enter(7) is not a new night.
-// live: the running scene's plan handles (PN plans; the loader adds the
-// rest a frame at a time); next: the next scene's, prefetched.
-let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, next = null, loaded = 0, nd = 0;
+// live: the running scene's plan handles (PN plans at tier LT; the loader
+// adds the rest a frame at a time); next: the next scene's, prefetched.
+let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, LT = 0, next = null, loaded = 0, nd = 0;
 let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1, zb = -1, ZB = FULL;
 let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
 const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
 const reg = (s, i) => { const p = plan(plist(s, tier)[i]); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
 const lerp4 = (a, b, e) => a.map((v, j) => rnd(v + (b[j] - v) * e)), clamp = v => v < 0 ? 0 : v > 1 ? 1 : v;
 function prefetch(s, max) {
-  if (s < 3 && scene < 3) return;
+  if (s < 3 && scene < 3 || s === 3 && scene === 2) return;
   if (next && (next.s !== s || next.k !== tier)) { drop(next.h); next = null; }
-  if (!next) { const L = plist(s, tier); next = {s: s, k: tier, h: [], n: L.length, c: L.cap || L.length}; }
-  while (max-- > 0 && next.h.length < next.c && MEM.info().internalFreeBytes >= LOAD[2])
+  if (!next) next = {s: s, k: tier, h: [], n: plist(s, tier).length};
+  while (max-- > 0 && next.h.length < next.n && MEM.info().internalFreeBytes >= LOAD[2])
     next.h.push(reg(s, next.h.length));
 }
 // fresh: drop the prefetched set too (tier change, recovery). The old set
@@ -30,10 +30,18 @@ function enter(s, fresh) {
     return console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length + ' freed=0 registered=' + loaded);
   }
   if (fresh && next) { drop(next.h); next = null; }
-  prefetch(s, 0);
   const old = live.length;
-  if (s === 7 && scene !== 7) ++sortie;
-  drop(live); live = next.h; PN = next.n; next = null; scene = s; t = 0;
+  if (s === 3 && scene === 2 && LT === tier && !fresh) {
+    // TWIST takes over its plans from Act I's set; the HUD's go.
+    if (next) { drop(next.h); next = null; }
+    const h = live.splice(6);
+    drop(live); live = h; PN = plist(3, tier).length;
+  } else {
+    prefetch(s, 0);
+    if (s === 7 && scene !== 7) ++sortie;
+    drop(live); live = next.h; PN = next.n; LT = next.k; next = null;
+  }
+  scene = s; t = 0;
   console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length +
     ' freed=' + old + ' registered=' + loaded);
 }
@@ -143,6 +151,13 @@ function patch(tx) {
   const on = zoom === 0, fix = zoom === ZOOM, S = R.S;
   if (zoom !== zb) { zb = zoom; ZB = boundsAt(zoom); img.setRect(tx, ZB); }
   if (fix !== vis) { img.setVisible(tx, !fix); mon.setVisible(tx, fix); vis = fix; }
+  // ZENITH's hit shakes the full-screen image for 12 frames (zb = -1 puts
+  // it back on the next frame).
+  if (scene === 4 && on && t >= 112 && t < 124) {
+    const a = 6 * (1 - (t - 112) / 12), x = rnd(a * M.sin(t * 2.7)), y = rnd(a * M.cos(t * 3.9));
+    img.setRect(tx, [x, y, 240 + x, 135 + y]);
+    zb = -1;
+  }
   // Shutters: the TV turns on in the first news frames and off at the end
   // of CORE; in WAKE they are eyelids over the whole view.
   const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((140 - t) / 8) : scene === 7 ? lid(t) : 1;
@@ -209,7 +224,7 @@ function patch(tx) {
   if (scene > 5) return;
   // CORE's time stop: the HUD and the torn bands hold where they are.
   if (scene === 5 && t >= 100 && t < 112) return;
-  if (!(t & 7)) R.score.setText(tx, NAMES[scene] + ' ' + String(1e6 + tick * 10).slice(1));
+  if (!(t & 7)) R.score.setText(tx, (scene === 4 ? 'LETHE' : NAMES[scene]) + ' ' + String(1e6 + tick * 10).slice(1));
   const lc = t & (t > 71 ? 2 : 8) ? 0xfb47ffff : 0x167fffff;
   if (lc !== R.lc) { R.lamp.setColor(tx, lc); R.lc = lc; }
   if (scene === 4) {
