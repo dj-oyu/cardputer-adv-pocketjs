@@ -41,3 +41,16 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
 python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```
+
+## ドキュメント検証（実機・ネットワーク不要）
+
+リポジトリルートで実行する。Python 標準ライブラリのみを使い、SDK・submodule の取得は不要。
+
+```sh
+python tools/check_docs.py
+git diff --check
+```
+
+`check_docs.py` は authored Markdown のローカルリンク・画像・見出しアンカーと、
+`docs/README.md` から全 docs 文書への到達性を検査する。外部 URL と vendored 文書は対象外。
+文書を読み込むスクリプトの参照を変えたときは、そのスクリプトの host 検証も実行する。

@@ -10,7 +10,9 @@
  *   bc     each written with JS_WriteObject(BYTECODE) and read back with
  *          JS_ReadObject, the compiled one freed (precompiled bytecode with
  *          its line tables);
- *   strip  the same, written with STRIP_DEBUG | STRIP_SOURCE.
+ *   strip  the same, written with STRIP_DEBUG | STRIP_SOURCE;
+ *   harden as src in a hardened context (JS_PocketHarden first), as the
+ *          device compiles an app: compact variables, docs/vm/compact-vars.md.
  * The write buffer is freed before measuring (JS_ReadObject copies it: the
  * bytecode is rewritten for the runtime's atoms, docs/vm/eval-peak.md 3.5).
  * These are the scripts' functions before they run: the top-level bodies
@@ -73,12 +75,17 @@ static char *slurp(const char *path, size_t *len) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) { fprintf(stderr, "retain_cost src|bc|strip FILE...\n"); return 2; }
+    if (argc < 3) { fprintf(stderr, "retain_cost src|harden|bc|strip FILE...\n"); return 2; }
     const char *mode = argv[1];
     const int flags = !strcmp(mode, "strip") ? JS_WRITE_OBJ_BYTECODE | JS_WRITE_OBJ_STRIP_DEBUG | JS_WRITE_OBJ_STRIP_SOURCE
                                              : JS_WRITE_OBJ_BYTECODE;
     JSRuntime *rt = JS_NewRuntime2(&MF, NULL);
     JSContext *ctx = JS_NewContext(rt);
+    /* harden: the app's context as the device makes it (JS_PocketHarden
+       before any app code), so functions compile with compact variables
+       (docs/vm/compact-vars.md); otherwise as src. */
+    const bool harden = !strcmp(mode, "harden");
+    if (harden && JS_PocketHarden(ctx) < 0) { fprintf(stderr, "JS_PocketHarden failed\n"); return 1; }
     JS_RunGC(rt);
     const size_t before = cur;
     JSValue keep[64];
@@ -89,7 +96,7 @@ int main(int argc, char **argv) {
         JSValue fn = JS_Eval(ctx, src, len, argv[i], JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
         free(src);
         if (JS_IsException(fn)) { fprintf(stderr, "compile failed: %s\n", argv[i]); return 1; }
-        if (strcmp(mode, "src")) {
+        if (strcmp(mode, "src") && !harden) {
             size_t bl;
             uint8_t *buf = JS_WriteObject(ctx, &bl, fn, flags);
             JS_FreeValue(ctx, fn);

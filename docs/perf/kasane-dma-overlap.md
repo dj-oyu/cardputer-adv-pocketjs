@@ -1,5 +1,8 @@
 # 通常 main への DMA 再提案（2026-10-27）
 
+> **比較の状態（2026-10-29）**: source-selected ON 比較の #99 は比較未完で closed / unmerged。既定 ON の実機優位は未確認で、性能不良を理由とする不採用ではない。[終了理由と再比較の条件](../archive/proposals/dma-source-on-pr99.md)。既定 OFF を維持する。
+
+
 #37 head `578d552384c992cb852822d40e2635e7b317d498` から DMA の copied submit/finish、
 ACK 前 completion、descriptor 所有権、window 管理、単一 3,840 B TX payload を抽出。
 通常 main `45a06e0` 上で `KASANE_DMA_OVERLAP` は既定 OFF。

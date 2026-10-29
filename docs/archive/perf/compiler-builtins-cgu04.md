@@ -1,5 +1,7 @@
 # compiler_builtins の cgu.04（`__gedf2`）は我々の側からは落とせない
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 ## 結論
 
 `main/pocket/pocket_av.c` の `gain>=0.0` が `__gedf2` を出しており、それが Rust

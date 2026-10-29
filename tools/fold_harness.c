@@ -2,7 +2,7 @@
 //
 //   cc -O2 tools/fold_harness.c -lm -o /tmp/fold_harness && /tmp/fold_harness 50000000
 //
-// This is the proof for the `fold_tau()` in docs/perf/flash-removals.md 2.1. That
+// This is the proof for the `fold_tau()` in docs/archive/perf/flash-removals.md 2.1. That
 // fold replaces the one call main/scene/solar_sail.c makes to picolibc's
 // `remainder`, which is 402 bytes of the image and which we are the only referrer
 // of -- but the replacement's own code is 508 bytes in the object, so the change

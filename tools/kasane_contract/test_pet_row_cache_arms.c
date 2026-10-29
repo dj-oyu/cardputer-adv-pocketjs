@@ -13,7 +13,7 @@
  * the arms fixed and with the arm alternating per frame, so a dependence on
  * which arm drew the previous frame cannot hide. `measure_rotate` then prints
  * the fetch/decode table for the rotated 64x64 scene at a fixed key, which is
- * the scene docs/perf/kasane-image-transform-recon.md §4 counted.
+ * the scene docs/archive/perf/kasane-image-transform-recon.md §4 counted.
  *
  * Built against the pre-change provider with -DKSN_PET_ROW_STATE_ABSENT this is
  * the same test with no switch and no counters: its printed hashes are the
@@ -317,7 +317,7 @@ static unsigned long long animated_track(bool alternate,unsigned long long *wors
 }
 
 /* 6. The rotated 64x64 scene at a fixed key, one line per frame and arm: this
- *    is the measurement docs/perf/kasane-image-transform-recon.md §4 quotes
+ *    is the measurement docs/archive/perf/kasane-image-transform-recon.md §4 quotes
  *    (2,112 fetches per frame, a re-decoded row for each of them). */
 #if STATS
 static void measure_rotate(void){

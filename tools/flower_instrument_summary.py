@@ -68,7 +68,7 @@ def main():
             r["fps"] = float(m.group(1))
     # The panel-transfer A/B: the PERF report flips the mode every window and
     # prints which one it used, so adjacent windows are a paired measurement in
-    # one binary (see docs/flower-optimisation-options.md A).
+    # one binary (see docs/archive/perf/flower-optimisation-options.md A).
     if perf and "async" in perf[0]:
         print("-- panel transfer A/B (adjacent PERF windows, same binary)")
         pairs = [(a, b) for a, b in zip(perf, perf[1:]) if a.get("async") != b.get("async")]

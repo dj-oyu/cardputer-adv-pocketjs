@@ -1,5 +1,7 @@
 # Keyboard startup probe recovery
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 Base: main `6ca8058dd5756790211d4baff73c35268a0bdbf1`. This is independent
 of PR57's result HUD optimization. Its baseline and candidate both encountered
 an abort before the guest/UI task started. Exact-ELF disassembly identified the

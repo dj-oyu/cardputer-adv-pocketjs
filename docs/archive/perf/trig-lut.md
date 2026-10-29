@@ -1,5 +1,7 @@
 # シーンの三角関数: 近似＋LUT への置き換え（perf/size-trig）
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 記録。2026-09-16、枝 `perf/trig-lut`（`perf/size-trig` から分岐）。
 対象は `main/scene/fxmath.c`。前段（`c66f401`）で libm の sinf/cosf/tanf を
 消したときの実装が「1 象限 65 エントリの Q31 cos 表 ＋ degree-5 補正、

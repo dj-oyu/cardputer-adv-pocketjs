@@ -142,7 +142,7 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
 
 ## 3. host 試作と試験
 
-- [`test_proc_crowd_prim.c`](../../tools/kasane_contract/test_proc_crowd_prim.c)（`run.sh` に登録、ASan/UBSan と `-O2`）: 模様線の全画素を試験の側の式と照合（周期 5・24、端数の刻み、右から左、画面外のクリップ）、8 方向の斜線が同じ形の `LINE` と同じ画素になること、3 画素ごとの模様が歩数どおりであること、ノイズ（密度 0 は何も描かない）、遠近の弦（割り目の座標と u）、タイル（1:1、拡大、逆向きの角、コマの床と巻き、キー色）、**1・7・8・9 行の帯を下から描いても全画面と一致**、重ね順（線 → タイル → 線 → 模様線）、歩く側が見る形と費用、surface の damage、途中で切れたフレームの拒否、上限（512 個、ラスタ）、値域の拒否 約 20 通り、解析と融合した plan の一致。
+- 旧試作 `test_proc_crowd_prim.c`（現行の採用範囲の試験は [`test_proc_pattern_line.c`](../../tools/kasane_contract/test_proc_pattern_line.c)、§7 の比較表を参照）（`run.sh` に登録、ASan/UBSan と `-O2`）: 模様線の全画素を試験の側の式と照合（周期 5・24、端数の刻み、右から左、画面外のクリップ）、8 方向の斜線が同じ形の `LINE` と同じ画素になること、3 画素ごとの模様が歩数どおりであること、ノイズ（密度 0 は何も描かない）、遠近の弦（割り目の座標と u）、タイル（1:1、拡大、逆向きの角、コマの床と巻き、キー色）、**1・7・8・9 行の帯を下から描いても全画面と一致**、重ね順（線 → タイル → 線 → 模様線）、歩く側が見る形と費用、surface の damage、途中で切れたフレームの拒否、上限（512 個、ラスタ）、値域の拒否 約 20 通り、解析と融合した plan の一致。
 - 既存: 手続き描画の host 試験 13 本、`run_pocket_proc_qjs.py`、`run_pocket_proc_limits_qjs.py`、`tools/games/run_derby.py`、`tools/kasane_ir/check_equivalence.py` が通る。`run_pocket_proc_rom_qjs.py` は **6098c13 のままでも同じ箇所で落ちる**（`register: invalid instruction entry`。この変更とは無関係、WSL の環境で確認）。
 - 画の経路の検査（`crowd_prim.mjs check`）: 今の観客の 96 枚（12 場面 × 8 フレーム）が、`crowd_look.mjs` の実行器の線分を帯ラスタライザと同じ歩き方で描いたものと全画素一致。なお `crowd_look.mjs` 自身の描画は Bresenham の同点の扱いが逆で、86 枚で斜線が 1 px 違う（以前の資料の画の側の差で、実機の画ではない）。
 

@@ -1,7 +1,7 @@
 # 容量削減メソッド: cref でランキングを作り、薄いところから潰す
 
 対象は ESP32-S3 のファーム（`cardputer-adv-pocketjs`）。目的はフラッシュを小さくすること。
-この文書は**手順書**で、実測した事実は [builtins-census.md](builtins-census.md) にある。
+この文書は**手順書**で、実測した事実は [builtins-census.md](../archive/perf/builtins-census.md) にある。
 数値はすべて `origin/vm/main` の基点 `bd0fa43`（素の `idf.py build`）時点のもの。
 
 ## 0. 原則（3行）

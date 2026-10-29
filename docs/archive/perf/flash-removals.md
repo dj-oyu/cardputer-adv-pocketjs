@@ -1,5 +1,7 @@
 # フラッシュ削減: 「我々だけが参照元」のライブラリ会員を3つ測って、1つも減らなかった記録
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 枝 `perf/size-shell`（基点 `origin/vm/main` = `bd0fa43`、ワークツリー `/workspace/pjs-size-shell`）。
 基準ビルドは `/workspace/pjs-vm/build_base`。**実機は無い**ので、以下はすべて bin / flash /
 DIRAM / 配置バイト / ホスト実行の話で、ミリ秒は主張しない。

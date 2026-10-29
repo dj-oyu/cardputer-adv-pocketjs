@@ -1,5 +1,7 @@
 # Kasane 系統の一本化 — 12 分岐・14 コミットの行き先
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 対象は `perf/kasane-opt`（基点 `origin/vm/design-contracts`）。2026-09-16、`/workspace/pjs-kasane`。
 **実機には触れていない**（`/dev/ttyACM0` 不在）。この文書に新しいミリ秒は 1 つも無い。引用した
 時間の話はすべて「どの分岐のコミットが測ったか」「どの文書にあるか」を添えてある。
@@ -19,7 +21,7 @@
 | `git cherry perf/kasane-opt origin/perf/kasane-<b>` の `+` | 12 枝で合計 **18 行**（重複を除くと 14 本）。**これは patch-id の産物で、「内容が無い」意味ではない**（§1） |
 | `+` 行を 0 にする方法 | topic 枝を消すことだけ（§6）。履歴の書き換えでは 0 にできない |
 
-前の 3 次にわたる統合（`docs/perf/kasane-opt-integration.md` §1 / §5 / §6）は、衝突を
+前の 3 次にわたる統合（`docs/archive/perf/kasane-opt-integration.md` §1 / §5 / §6）は、衝突を
 **「両側を残して」**解いている。そのため統合コミットの patch は元コミットの patch と
 （内容が同じでも）一致せず、`git cherry` は恒久的に `+` を出す。`+` は「未取り込み」ではなく
 「cherry-pick の形跡が patch-id として一致しない」だけである。
@@ -31,7 +33,7 @@
 1. **列挙**: 12 枝それぞれについて `git cherry perf/kasane-opt origin/perf/kasane-<b>` を実行し、
    `+` を集める。合計 18 行、重複（前提コミット `8e57dcb` が anchor / imgopt / pet / stretch /
    tile の 5 枝に載っている）を除いて **14 本**。§2 の表はこの 14 本である。
-2. **対応する統合コミットの特定**: `docs/perf/kasane-opt-integration.md` の「元 → 統合後」表
+2. **対応する統合コミットの特定**: `docs/archive/perf/kasane-opt-integration.md` の「元 → 統合後」表
    （§1 の段 1〜5、§5.1 の段 1〜5、§6.1 の段 1〜5）と subject の一致で対応を決め、
    **その統合コミットが `perf/kasane-opt`（= `HEAD`）の祖先であること**を
    `git merge-base --is-ancestor <統合コミット> HEAD` で確かめた（14 本すべて yes）。
