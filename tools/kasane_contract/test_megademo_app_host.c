@@ -41,10 +41,12 @@
  * The current and peak totals also give the peak inside one JS_Eval. */
 typedef struct { size_t n; size_t pad[3]; } pk_hdr;   /* keeps 16 B alignment */
 static size_t cur_bytes,peak_bytes;
+static unsigned long long alloc_calls,alloc_bytes; /* MEGA_SCENESTATS: what frame() allocates */
 static size_t tlsf_len(size_t n){n=(n+3)&~(size_t)3;return n<12?12:n;}
 static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;}
 static void *pk_malloc(void *o,size_t n){(void)o;if(!n)return NULL;
-    pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;pk_count(tlsf_len(n),0);return h+1;}
+    pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;pk_count(tlsf_len(n),0);
+    alloc_calls++;alloc_bytes+=tlsf_len(n);return h+1;}
 static void *pk_calloc(void *o,size_t c,size_t n){void *p=pk_malloc(o,c*n);if(p)memset(p,0,c*n);return p;}
 static void pk_free(void *o,void *p){(void)o;if(!p)return;pk_hdr *h=(pk_hdr *)p-1;pk_count(0,tlsf_len(h->n));free(h);}
 static void *pk_realloc(void *o,void *p,size_t n){
@@ -52,7 +54,8 @@ static void *pk_realloc(void *o,void *p,size_t n){
     if(!n){pk_free(o,p);return NULL;}
     pk_hdr *h=(pk_hdr *)p-1;size_t old=h->n;
     pk_hdr *q=realloc(h,sizeof *q+tlsf_len(n));if(!q)return NULL;
-    q->n=n;pk_count(tlsf_len(n),tlsf_len(old));return q+1;}
+    q->n=n;pk_count(tlsf_len(n),tlsf_len(old));
+    alloc_calls++;alloc_bytes+=tlsf_len(n);return q+1;}
 static size_t pk_usable(const void *p){return p?tlsf_len(((const pk_hdr *)p-1)->n):0;}
 static const JSMallocFunctions PEAK_MF={pk_calloc,pk_malloc,pk_free,pk_realloc,pk_usable};
 
@@ -81,6 +84,7 @@ static uint16_t strip_pixels[240*8],panel[240*135];
 static unsigned long long panel_bytes; /* what the panel was sent, as the device's SPI would */
 static unsigned exceptions,degrades,scene_lines,present_failures;
 static char scene_log[4096];
+static unsigned long long st_frames[8],st_calls[8],st_bytes[8];static double st_us[8],st_usmax[8];
 
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
@@ -213,7 +217,7 @@ static const char PRELUDE[]=
     "const d=__now()-t;M.regNs+=d;M.frameRegNs=(M.frameRegNs||0)+d;"
     "M.live++;M.total++;M.frameReg++;if(M.live>M.peak)M.peak=M.live;return h};"
     "P.unregister=function(h){U.call(P,h);M.live--;M.unreg++;M.frameUnreg++};"
-    "P.draw=function(h,i){const t=__now();D.call(P,h,i);M.frameDrawNs+=__now()-t};"
+    "P.draw=function(h,a,b,c,d,e,f,g,i){const t=__now();D.call(P,h,a,b,c,d,e,f,g,i);M.frameDrawNs+=__now()-t};"
     "})();";
 
 static JSValue js_now(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -288,7 +292,17 @@ int main(int argc,char **argv){
                 if(k==t)b=(unsigned)v;
                 c=*e?e+1:e;}}
         char call[160];snprintf(call,sizeof call,"__mega.frameReg=0;__mega.frameUnreg=0;__mega.frameRegNs=0;__mega.frameDrawNs=0;frame(%u)",b);
+        /* MEGA_SCENESTATS: per scene (the app's `scene`, before the call),
+         * allocations and bytes frame() asks the guest heap for, and its
+         * host time (plans' draws included, the present not). Loops 1-2 only. */
+        const unsigned sc=t<loop*2?(unsigned)num("scene")&7:8;
+        const unsigned long long a0=alloc_calls,b0=alloc_bytes;
+        struct timespec ts0,ts1;clock_gettime(CLOCK_MONOTONIC,&ts0);
         eval(call,strlen(call),"frame.js");
+        clock_gettime(CLOCK_MONOTONIC,&ts1);
+        if(sc<8){st_frames[sc]++;st_calls[sc]+=alloc_calls-a0;st_bytes[sc]+=alloc_bytes-b0;
+            const double us=(ts1.tv_sec-ts0.tv_sec)*1e6+(ts1.tv_nsec-ts0.tv_nsec)/1e3;
+            st_us[sc]+=us;if(us>st_usmax[sc])st_usmax[sc]=us;}
         present((uint64_t)t*33333u);
         if(!baseline){
             unsigned live=(unsigned)num("__mega.live"),reg=(unsigned)num("__mega.frameReg");
@@ -332,6 +346,15 @@ int main(int argc,char **argv){
         printf("host time: max register() per frame %.3f ms, max draw() per frame %.3f ms "
                "(host CPU, not device time)\n",reg_ns_max/1e6,draw_ns_max/1e6);
         printf("scenes: %s\n",scene_log);
+        if(getenv("MEGA_SCENESTATS")){
+            static const char *nm[8]={"CALL","ROUTE","VOYAGE","TWIST","ZENITH","CORE","LOST","WAKE"};
+            unsigned long long tf=0,tc=0,tb=0;double tu=0;
+            for(unsigned i=0;i<8;i++){if(!st_frames[i])continue;
+                printf("scene %-6s frames %4llu allocs/frame %7.1f bytes/frame %8.0f host us/frame %7.1f max %7.1f\n",nm[i],
+                       st_frames[i],(double)st_calls[i]/st_frames[i],(double)st_bytes[i]/st_frames[i],st_us[i]/st_frames[i],st_usmax[i]);
+                tf+=st_frames[i];tc+=st_calls[i];tb+=st_bytes[i];tu+=st_us[i];}
+            if(tf)printf("scene ALL    frames %4llu allocs/frame %7.1f bytes/frame %8.0f host us/frame %7.1f\n",tf,(double)tc/tf,(double)tb/tf,tu/tf);
+        }
         ok=ok&&peak<=32&&total>32&&coexist_frames>0&&!degrades;
     }
     printf("guest heap (malloc_size = TLSF model, %zu-bit host): runtime %zu, after prelude %zu, after eval %zu (+%zu), "

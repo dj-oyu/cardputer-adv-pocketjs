@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
         "beginFrame(c,s){if(__procCalls.active!==null&&__procCalls.active.draws.length)"
         "throw Error('nested frame');"
         "__procCalls.active={backdrop:c,surface:s||0,draws:[]}},"
-        "draw(h,i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
+        "draw(h,...i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
         "__procCalls.active.draws.push([h,i])},"
         "commit(){__procCalls.frames.push(__procCalls.active);__procCalls.active=null},"
         /* pocket.shapes' segments (shape_draw_shim.c). */

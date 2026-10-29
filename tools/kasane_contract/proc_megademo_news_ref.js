@@ -12,14 +12,13 @@ const backdrops = [0x080c, 0x000d, 0x100b];
 
 // Act I layers in the text form decoded by prog() below: a gate, a
 // highway, rising bars, a sine, scanlines and a faceted crystal.
-const ACT1 = ['U2 S2,$0 S3,$1 S4,$2 S5,$3 S6,$4 S7,-7 R$5 V0,2 L1,2,$6 L1,3,$6 L0,3,$6 L0,2,$6 \
-A0,0,4 A1,1,5 A2,2,6 A3,3,7 E', 'U2 S2,$0 S3,134 S4,23 S5,4.8 R12 V1,2 L0,3,$1 A0,0,4 A1,1,5 E',
-  'S0,0 S1,239 I2,0 S3,1.5 S4,1.47 R10 V0,2 L1,2,$0 A2,2,3 M3,3,4 E',
-  'S0,0 S1,4 S2,$0 I3,0 S4,$1 S5,$2 R60 M6,0,2 A6,6,3 N6,6 M7,6,4 A7,7,5 L0,7,$3 A0,0,1 E',
-  'I0,0 S1,29 S2,0 S3,239 I4,1 S6,2 R4 V2,0 L3,0,$2 A5,0,6 V2,5 L3,5,$0 A0,0,1 A2,2,4 A3,3,4 E \
-S0,88 S1,152 S2,32 S3,98 S4,120 S5,65 I6,2 I7,3 V4,2 L1,5,$2 L4,3,$2 L0,5,$2 L4,2,$2 V4,2 \
-L4,3,$3 V0,5 L1,5,$3 V4,2 A4,4,6 A2,2,7 L4,2,$3 V1,5 A1,1,6 A5,5,7 L1,5,$3 S4,120 V4,3 \
-A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5,$1 L4,2,$1'];
+const ACT1 = ['U2 S2$0 S3$1 S4$2 S5$3 S6$4 S7-7 R$5 V02 L12$6 L13$6 L03$6 L02$6 A004 A115 A226 A337 E',
+  'U2 S2$0 S3134 S423 S54.8 R12 V12 L03$1 A004 A115 E',
+  'S00 S1239 I20 S31.5 S41.47 R10 V02 L12$0 A223 M334 E',
+  'S00 S14 S2$0 I30 S4$1 S5$2 R60 M602 A663 N66 M764 A775 L07$3 A001 E',
+  'I00 S129 S20 S3239 I41 S62 R4 V20 L30$2 A506 V25 L35$0 A001 A224 A334 E S088 S1152 S232 S398 S4120 \
+S565 I62 I73 V42 L15$2 L43$2 L05$2 L42$2 V42 L43$3 V05 L15$3 V42 A446 A227 L42$3 V15 A116 A557 L15$3 \
+S4120 V43 A446 A337 L43$3 S565 V05 A006 A557 L05$3 V42 L15$1 L43$1 L05$1 L42$1'];
 function newsProgram(phase, layer) {
   const n = colors[phase], a = phase === 1;
   return prog(ACT1[layer], [
