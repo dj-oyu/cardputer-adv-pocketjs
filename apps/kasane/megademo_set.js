@@ -98,35 +98,41 @@ function build(tx, m) {
   R.pf = 0;
   // Act I: the HUD boots on CALL once the camera is in the screen, a piece
   // every other frame; VOYAGE's dive takes it down again. LETHE's tag
-  // follows its octahedron (patch).
+  // follows its octahedron (patch), here and in ZENITH and CORE.
   if (scene < 3) {
     const p = scene ? 0 : 1, e0 = scene > 1 ? 82 : 1e9;
     HUDI.split(',').forEach((e, i) => add(box(e), 36 * p + 2 * i * p, e0 + 2 * i));
     R.rd = RDB.map((b, i) => add(text(b, '', 'caption', i > 1 ? 0xd7f4ffff : 0x50ffc8ff, 5), (42 + 2 * i) * p, e0 + 3 * i));
+  }
+  if (scene < 6 && scene !== 3) {
     // It moves: its clip is the screen (setRect keeps the clip).
     R.tag = tx.text({bounds: [0, 0, 40, 9], clip: FULL, text: gb('LETHE'), font: 'caption', color: 0xf81fffff});
     R.tag.setVisible(tx, false);
     R.tgv = false;
   }
-  if (S) R.say = add(text(S[0].split(' ').map(Number), '', 'caption', 0xffffffff, 40), +S[1]);
+  // CORE's HUD goes with the canopy at the ram (112).
+  const z = scene === 5 ? 120 : 1e9, y = scene === 5 ? 112 : 1e9;
+  if (S) R.say = add(text(S[0].split(' ').map(Number), '', 'caption', 0xffffffff, 40), +S[1], z);
   if (ch < 4) R.card = add(text([8, 36, 232, 56], R.T = T[ch], 'display', INK[ch], 16), 4, 60);
   R.rv = R.cr = -1;
   if (scene > 3 && ch < 4) {
-    R.score = add(text([4, 2, 150, 13], scene === 4 ? 'LETHE' : NAMES[scene], 'caption', 0xffffffff, 20));
-    R.lamp = add(tx.roundRect({bounds: [226, 3, 236, 11], radius: 3, color: 0xfb47ffff}));
+    R.score = add(text([4, 2, 150, 13], scene === 4 ? 'LETHE' : NAMES[scene], 'caption', 0xffffffff, 20), 0, y);
+    R.lamp = add(tx.roundRect({bounds: [226, 3, 236, 11], radius: 3, color: 0xfb47ffff}), 0, y);
+    // Tama on the comm window: the cat from the room. In CORE it blinks
+    // in the time stop (patch) and goes at the ram.
+    add(tx.strokeRect({bounds: [3, 15, 22, 34], width: 1, color: 0x17a7ffff}), 0, y);
+    R.cm = add(tx.image({resource: pets, bounds: [4, 16, 21, 33], variant: 3, frame: 0}), 0, y);
+    R.cf = 0;
     R.lc = 0xfb47ffff; R.rc = 0x17a7ffff; R.k = -1;
     if (scene === 4) {
       R.ring = add(tx.strokeRect({bounds: [3, 83, 53, 133], width: 1, color: 0x17a7ffff}));
-      // Tama on the comm window: the cat from the room.
-      add(tx.strokeRect({bounds: [3, 15, 22, 34], width: 1, color: 0x17a7ffff}));
-      add(tx.image({resource: pets, bounds: [4, 16, 21, 33], variant: 3, frame: 0}));
-      R.lives = [0, 1, 2].map(i => add(tx.instantiate(lives, {offset: [160 + i * 12, 4]}), 0, i > 1 ? 48 : 1e9));
+      R.lives = [0, 1, 2].map(i => add(tx.instantiate(lives, {offset: [160 + i * 12, 4]}), 0, i > 1 ? 72 : 1e9));
     } else {
-      R.plate = add(tx.rect({bounds: [60, 118, 236, 133], color: 255}));
-      add(tx.rect({bounds: [62, 120, 234, 131], color: 0xfa3fffff, opacity: 90}));
+      R.plate = add(tx.rect({bounds: [60, 118, 236, 133], color: 255}), 0, y);
+      add(tx.rect({bounds: [62, 120, 234, 131], color: 0xfa3fffff, opacity: 90}), 0, y);
       tx.group(R.plate, 2, 170);
-      R.meter = add(tx.gradient({bounds: [64, 128, 65, 130], axis: 'x', from: 0x17a7ffff, to: 0xfb47ffff}));
-      R.stat = add(text([64, 119, 234, 128], 'SIGNAL', 'caption', 0xffffffff, 40));
+      R.meter = add(tx.gradient({bounds: [64, 128, 65, 130], axis: 'x', from: 0x17a7ffff, to: 0xfb47ffff}), 0, y);
+      R.stat = add(text([64, 119, 234, 128], 'SIGNAL', 'caption', 0xffffffff, 40), 0, y);
       // Interference: bands of the image, torn sideways (shown by patch).
       R.tear = []; R.tv = [];
       for (let i = 0; i < 3; ++i) {
@@ -147,17 +153,18 @@ function patch(tx) {
   const on = zoom === 0, f = zoom === ZOOM, S = R.S;
   if (zoom !== zb) { zb = zoom; ZB = boundsAt(zoom); img.setRect(tx, ZB); }
   if (f !== vis) { img.setVisible(tx, !f); mon.setVisible(tx, f); vis = f; }
-  // ZENITH's hit and CORE's burst shake the full-screen image for 12
-  // frames (zb = -1 puts it back on the next frame).
-  const k = scene === 4 ? t - 112 : scene === 5 ? t - 115 : -1;
+  // CORE's ram shakes the full-screen image for 12 frames (zb = -1 puts
+  // it back on the next frame).
+  const k = scene === 5 ? t - 112 : -1;
   if (on && k >= 0 && k < 12) {
     const a = 6 * (1 - k / 12), x = rnd(a * M.sin(t * 2.7)), y = rnd(a * M.cos(t * 3.9));
     img.setRect(tx, [x, y, 240 + x, 135 + y]);
     zb = -1;
   }
   // Shutters: the TV turns on in the first news frames and off at the end
-  // of CORE; in WAKE they are eyelids over the whole view.
-  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((140 - t) / 8) : scene === 7 ? lid(t) : 1;
+  // of CORE (on its white, a CRT switched off); in WAKE they are eyelids
+  // over the whole view.
+  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((154 - t) / 8) : scene === 7 ? lid(t) : 1;
   if (o < 1 || R.cv < 1) {
     const E = scene === 7 ? FULL : ZB, m = (E[1] + E[3]) / 2, h = (E[3] - E[1]) * o / 2;
     R.top.setRect(tx, [E[0], E[1], E[2], rnd(m - h)]);
@@ -206,11 +213,13 @@ function patch(tx) {
       R.rd[1].setText(tx, String(rnd(BR[1] * 2) + 1e4).slice(1));
       R.rd[2].setText(tx, String(BR[2] * 7919 % 9000 + 1e3));
     }
+  }
+  if (R.tag) {
     const g = on && TGX === TGX;
     if (g) R.tag.setRect(tx, [rnd(TGX) + 7, rnd(TGY) - 11, rnd(TGX) + 47, rnd(TGY) - 2]);
     if (g !== R.tgv) { R.tag.setVisible(tx, g); R.tgv = g; }
-    return;
   }
+  if (scene < 3) return;
   // TWIST goes on from VOYAGE's last frame (no iris). Its lines go black
   // in the negative past the wall (twist()).
   if (scene === 3) {
@@ -219,10 +228,13 @@ function patch(tx) {
     return;
   }
   if (scene > 5) return;
+  // Tama blinks once, slowly, in CORE's time stop (as on waking).
+  const cf = scene === 5 && t >= 103 && t < 109 ? 1 : 0;
+  if (cf !== R.cf) { R.cm.setImageFrame(tx, 3, cf); R.cf = cf; }
   // CORE's time stop: the HUD and the torn bands hold where they are.
   if (scene === 5 && t >= 100 && t < 112) return;
   if (!(t & 7)) R.score.setText(tx, (scene === 4 ? 'LETHE' : NAMES[scene]) + ' ' + String(1e6 + tick * 10).slice(1));
-  const lc = t & (t > 71 ? 2 : 8) ? 0xfb47ffff : 0x167fffff;
+  const lc = t & (t > (scene === 4 ? 95 : 71) ? 2 : 8) ? 0xfb47ffff : 0x167fffff;
   if (lc !== R.lc) { R.lamp.setColor(tx, lc); R.lc = lc; }
   if (scene === 4) {
     // The lives bob every 4 frames; the ring turns orange on the lock.
@@ -231,7 +243,7 @@ function patch(tx) {
       R.k = k;
       for (let i = 0; i < 3; ++i) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
     }
-    const rc = t > 71 ? 0xfb47ffff : 0x17a7ffff;
+    const rc = t > 95 ? 0xfb47ffff : 0x17a7ffff;
     if (rc !== R.rc) { R.ring.setColor(tx, rc); R.rc = rc; }
   } else {
     const p = M.min(100, t);
@@ -239,7 +251,7 @@ function patch(tx) {
     R.stat.setText(tx, 'SIGNAL ' + p + ' PLANS ' + live.length + ' DRAWS ' + nd);
     // Tear: each band shows when a per-frame hash is under the eased
     // interference level, at a hashed height and offset.
-    const nz = on ? t < 100 ? ramp(t, 60, 100) ** 1.5 : t < 115 ? 0 : 1 - ramp(t, 115, 127) : 0;
+    const nz = on ? t < 100 ? ramp(t, 60, 100) ** 1.5 : t < 112 ? 0 : 1 - ramp(t, 112, 124) : 0;
     for (let i = 0; i < 3; ++i) {
       const r = R.tear[i], h = M.sin(t * 12.9898 + i * 78.233) * 43758.5453, u = h - M.floor(h), v = u < nz;
       if (v) {

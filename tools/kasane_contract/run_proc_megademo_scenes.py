@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QJS = ROOT / "components/quickjs-ng/quickjs-ng"
 OUT = ROOT / ".cache/kasane_megademo_scenes"
 W, H = 240, 135
-LENS = {0: 64, 1: 56, 2: 96, 3: 240, 4: 192, 5: 140, 6: 24, 7: 104}
+LENS = {0: 64, 1: 56, 2: 96, 3: 240, 4: 216, 5: 154, 6: 24, 7: 104}
 GREY = bytes((0x30, 0x30, 0x30))
 
 
@@ -123,7 +123,7 @@ def sheets(out: Path, tier: int) -> None:
     sheet(out / "sheet_zenith_motion.png", [(tier, 4, f) for f in range(40, 56)], 4)
     sheet(out / "sheet_core_motion.png", [(tier, 5, f) for f in range(84, 100)], 4)
     # The climax: stop-motion, the stop (negative), the burst, every other frame.
-    sheet(out / "sheet_core_climax.png", [(tier, 5, f) for f in range(84, 140, 2)], 4)
+    sheet(out / "sheet_core_climax.png", [(tier, 5, f) for f in range(84, 154, 2)], 4)
 
 
 def main() -> None:
