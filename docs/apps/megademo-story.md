@@ -537,3 +537,23 @@ host の glibc の丸めは実機の TLSF より粗い（上の節: 実機のゲ
 ### 実機で確かめること（残り）
 
 - 白 `0xd71e` の見え方（撮影）。タメとツメを入れた版（CORE 226 フレーム）の通し。
+
+## plan を firmware の組み込みの表へ（2026-10-29）
+
+III・IV の作り直しで、ゲストの heap の余裕がほぼ無くなった（上限 163,840 B の host 実行が、評価後 140,900〜141,396 B の間で落ちる）。落ちる理由は、GC 後の live に、plan 1 本の登録で `prog()` が作る行の配列（63 命令で約 7.7 KB）が乗ること。DERBY が先に使っている組み込みの表（docs/kasane/flash-plan.md）に MEGADEMO の plan も入れて、名前で登録するようにした。
+
+- **テンプレートは `apps/kasane/megademo_plans.js`**（`T` と復号器 `prog`）。アプリのチャンクではない: `chunks.txt` の `rom-text megademo_plans.js` の行を見て、`tools/make_app_chunks.py` が `APP_CHUNK_ROM` に `kasane=text:…` を足し、`tools/kasane_ir/emit_rom_plans.mjs` の `textEntries()` が 24 本を `kasane.<名前>` として DERBY と同じ表（`ksn_proc_rom_plans.c`）に書く。引数（`$n`）の欄は、引数を 1 つずつ 0 → 7 に変えて変わった欄（a・value・color のどれか）を patch にする。全部の引数を同時に変えた行と、patch を当てた行が一致しなければビルドが止まる。
+- **アプリ**は `H.register('kasane.' + 名前, 引数)`（`sh` だけは点列: `H.register('kasane.sh', [], points(b))`）。`prog`・`T`・`plan()` はゲストに無い（`megademo_act1.js` は 7.0 → 1.7 KB）。
+- **host の試験**: `megademo_chunks.py` が `megademo_plans.js` を act1 の次に、`megademo_host.js`（`procMegademo` と `plan()`）を最後に読ませる。`rom_table()` が同じ生成器で表を書き、`run_megademo_app_host.py`・`run_pocket_proc_qjs.py` がリンクして `pocket_proc_rom_plans()` に渡す（`app_session.c` と同じ）。`test_proc_megademo_js.c` の代役の `register` は名前・引数・点列を受け、`kasane.` で始まる名前を求める。
+- **CMake**: Node を探す条件を `APP_CHUNK_LOWER OR APP_CHUNK_ROM` にした（`@plan` のアプリが無くなっても、テンプレートがあれば表を作る）。
+
+| host m32（同じハーネス、上限 163,840 B） | 配列で登録（6b33404） | 名前で登録 |
+| --- | ---: | ---: |
+| 評価後 | 141,384 B | 135,076 B（−6.3 KB） |
+| 評価のピーク | 140,148 B | 132,964 B（−7.2 KB） |
+| 実行中の live 最大（GC 後） | 155,432 B | 148,796 B（−6.6 KB） |
+| 実行全体のピーク（ごみ込み） | 149,732 B | 137,668 B（−12.1 KB） |
+
+- **画は同じ**: 同じバイナリで、6b33404 のチャンク（配列の登録）とこの版（名前の登録）の合成画面 2,200 フレームの md5 が全件一致。場面の検査（`run_proc_megademo_scenes.py`）の行は `megademo_plans.js` の `prog` から作るので、programs のハッシュも同じ道。
+- **native（推定）**: 配列で登録した plan は命令を heap に持つ（1 命令 12 B）。組み込みは 40 + 4 × 引数 B。場面ごとの差は、Act I の組 −5.4 KB、TWIST −7.6 KB、ZENITH −3.6 KB、CORE −1.8 KB（命令数 × 12 − 引数 × 4 の和。ヘッダは同じ大きさとして）。場面の切り替えで 2 組が重なる間はその和。
+- **flash**: 表に 24 本、665 命令、patch 39 個（約 8 KB の `.rodata`、推定）。
