@@ -240,14 +240,15 @@ static unsigned category,setting,app;
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
                           "IMU CALIBRATION","POCKET PET","PET COMPANION","STRESS TEST",
                           "MEGADEMO","GRID LAB","VIDEO LAB",
-                          "LCD CATCH","DERBY WATCH","BIG WAVE"};
+                          "LCD CATCH","DERBY WATCH","BIG WAVE","CHARACTER LAB"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
                                   "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD",
                                   "PROCEDURAL 3D / GLITCH","TYPED GRID / AUTO PIE",
                                   "RGB565 STREAM / UI",
-                                  "LCD SEGMENT ARCADE","WATCH THE RACE","3D SURF / EASD"};
+                                  "LCD SEGMENT ARCADE","WATCH THE RACE","3D SURF / EASD",
+                                  "BODY / LIGHT / CAMERA"};
 // AUDIO STREAM / OPUS STREAM / OPUS + WI-FI / MP3 PLAYBACK used to be appended
 // here (apps/streamplay, apps/opusplay, apps/opusfit, apps/mp3play) -- dev/test
 // apps for the MP3 and Opus decoders, removed once those decoders were verified
@@ -260,7 +261,7 @@ static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL"
 static const char *const app_ids[]={"local.hello",NULL,NULL,NULL,"local.imucal",
                                     "local.pet","local.companion","local.stress",
                                     "local.megademo","local.gridlab","local.videolab",
-                                    "local.lcdcatch","local.derby","local.bigwave"};
+                                    "local.lcdcatch","local.derby","local.bigwave","local.character"};
 _Static_assert(sizeof app_ids/sizeof app_ids[0]==APP_N,"app_ids follows apps[]");
 static float app_pos;
 unsigned shell_app(void) { return app; }

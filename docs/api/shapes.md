@@ -11,6 +11,7 @@ manifest の `required` か `optional` に `kasane.shapes` があるセッショ
 | `maxPoints` | 1024 | 1 つの配列で指せる点の数 |
 | `maxPolygonPoints` | 256 | 1 つの多角形の頂点の数 |
 | `maxHoles` | 6 | 1 回の塗りで抜く穴、または輪郭を隠す多角形の数 |
+| `maxShadeSamples` | 1024 | `shade` 1 回の配列の標本数 |
 
 ## 点と多角形
 
@@ -71,3 +72,57 @@ Y = (bx·x + by·y + bz·z + bt) / w
 ## 費用（実機、MEGADEMO の WAKE）
 
 1 フレームに `project` 2 回・`fill` 4〜6 回・`outline` 13 回。plan を通していた前の版で JS のターン約 22 ms（同じ絵を JS で描くと約 130 ms）。数値の内訳は [megademo-shapes.md](../apps/megademo-shapes.md)。
+
+## `shade(normals, albedo, thickness, lighting, material, output[, from[, count]])`
+
+材質と照明の小さな標本カーネル。**実装中の拡張**であり、実機性能と最終的な3体の見た目は未検証。画像・frame・描画順・物体名は所有せず、標本ごとの色だけを計算する。既存の `project/fill/outline` の意味は変えない。
+
+| 引数 | 型と長さ | 意味 |
+| --- | --- | --- |
+| normals | Int16Array、3n | 世界座標の法線xyz。SNORM16、各成分−32767..32767。−32768とゼロベクトルは拒否。方向を単位化して使う |
+| albedo | Uint16Array、n | 物体に属する固有色/模様、RGB565 |
+| thickness | Uint8Array、n | 0は薄い、255は厚いというモデルの透過減衰係数。距離の物理単位ではない |
+| lighting | Float32Array、9 | 光へ向く方向xyz、観測者へ向く方向xyz、光RGB。方向各成分−1..1（非ゼロ、単位化）、RGBは0..1 |
+| material | Float32Array、8 | ambient,diffuse,specular,shininess,transmission,透過色RGB。shininessは1..128、他は0..1 |
+| output | 書込み可Uint16Array、n | 出力RGB565。入力とは別配列、またはalbedoと完全に同一のview |
+
+nは0..1024。fromは既定0、countは既定残り全部。いずれも整数で範囲を越えるとLIMIT_EXCEEDED。他の型/長さ/値/重複bufferの違反はINVALID_ARGUMENT。requested rangeの法線を全て検証してから書くので、遅い標本に不正値があってもoutputは変わらない。範囲外標本は読まず書かない（lighting/materialと配列形の検証は毎回行う）。
+
+全bufferは同期呼出しの間だけ借り、保持・コピーしない。typed viewと値を読み終えてから計算し、その間JS/callbackを実行しない。outputはalbedoの同一viewだけin-placeを許し、他入力とのbyte領域の重複、albedoとの部分重複は拒否する。出力への書込は2×count byteで、返り値はundefined。frameを開く必要はない。
+
+Nは単位法線、Lは光方向、Vは視点方向、Hはnormalize(L+V)。front=max(0,N·L)、back=max(0,−N·L)、thin=1−thickness/255。L+Vがゼロならspec=0、ほかはfront>0のときだけspec=max(0,N·H)^shininess。
+
+各RGB成分の式は次のとおり。baseはRGB565の各成分を31/63/31で割った値。
+
+```
+C = base*(ambient + diffuse*front*lightRGB)
+  + lightRGB*(specular*spec + transmission*thin*back*transmitRGB)
+```
+
+Cを0..1へclampし、31/63/31を掛けて四捨五入する。これは表示RGB上の様式化近似で、線形色空間PBRや物理的内部散乱ではない。厚みは裏側光の減衰だけを変え、表面ツヤの強さを厚みから決めない。world法線の逆転置変換、テクスチャUVから固有色への評価、光/視点変更に応じた再評価範囲はutilityの責務。実際の背景の透過合成や落影はこのカーネルだけでは実現しない。
+
+法線の量子化幅は1/32767（約0.0000305）。位置/変換を整数化するAPIではない。法線再正規化の後に照明を計算する。標本数以外の動的確保はなく、常駐モデルcacheも持たない。既存のWAKE計測をこの追加カーネルのfps保証へ流用しない。
+
+## `ellipsoid(screen, normalMatrix, lighting, material, surface, texture)`
+
+滑らかな材質と透過合成を検証する、**実装中の解析的パッチ**。投影された単位球を走査帯の各画素で評価する。三角形の平面塗りへ分割せず、全画面bufferも持たない。既存の `fill/outline` と同じ候補frame/順序/上限を使い、appがbeginFrame/commitする。
+
+| 引数 | 型/長さ | 内容 |
+| --- | --- | --- |
+| screen | Float32Array/8 | Ax,Ay,Az,cx,Bx,By,Bz,cy。単位球のlocal点qを画面x=A·q+cx、y=B·q+cyへ写す直交affine投影 |
+| normalMatrix | Float32Array/9 | local球面法線を世界法線へ写す行優先3×3。モデル線形変換の逆転置 |
+| lighting/material | Float32Array/9、8 | shadeと同じ方向・光色・材質の契約 |
+| surface | Uint16Array/5 | colorA565、colorB565、opacity0..255、thickness0..255、pattern0..3 |
+| texture | Float32Array/9 | uScale,uShear,uOffset,vShear,vScale,vOffset,edgeSoftness,bandStart,bandEnd |
+
+screen各成分は有限±4096、normalMatrixは有限±1,000,000で非特異。投影の2行は独立（Gram行列のdet > 1e−6×対角積）。texture affineの6値は有限±4096、softness/start/endは0..1、start<=end。不正型/長さ/値/近特異投影はINVALID_ARGUMENT。offscreenとopacity0は有効な空描画。
+
+球面の身体UVはu=atan2(qx,qz)/(2π)+0.5、v=qy/2+0.5。textureの2×3 affineを掛ける。pattern0はAのみ、1はUの小数部が[start,end]ならB、2はVで同判定、3はfloor(U)+floor(V)の奇数cellならB。画像textureはこのprimitiveでは未対応で、未知patternを黙って無視せず拒否する。模様は球体local座標に固定し、照明と独立に評価する。
+
+screenの2行の擬似逆行列で各画素から球内の点を求め、2行の外積方向にsqrt(1−r²)だけ進めて表面を復元する。normalMatrixと世界視線で前面を選ぶため、負scaleの反転でも背面を描かない。透過減衰はshadeのthinの代わりに `1−thickness/255×sqrt(1−r²)` を使い、光路の長さの近似とする。表面ツヤとは独立で、物理的subsurface/PBRではない。
+
+alphaはopacityにedge coverageを掛け、現在の走査帯の下地へRGB565成分ごとに合成する。coverageは `min(1,(1−r²)/max(edgeSoftness,2/min(radiusX,radiusY)))`。softness0でも輪郭の約1pxを滑らかにする。softnessを増すと柔らかな縁になる。真の体積多重散乱、光の落影、透明物体の自動depth sortは未対応。draw順はapp/utilityが決める。
+
+呼出時に184Bの数値packetをcandidateへコピーして凍結する（詰物もゼロ化）。1パッチは既存frameの20entry=200Bを使い、clipped AABBの画素数をraster予算へ保守的に課金する。フレームごとのJS bufferコピー0とは異なり、この所有権確定のコピーは必要。caller配列を後で変えてもcommit済み画像は変わらない。render帯でpacketをstackへ読み出すが、継続参照・動的確保・全画面cacheはない。packet全byteを帯damage署名へ含めるため、光/材質/模様だけの変更も再描画される。
+
+上限失敗はLIMIT_EXCEEDED、候補frame破棄、呼出の部分結果なし、次beginFrameが必要。実機のrender時間/heap/画質は未検証。ホスト契約試験は `tools/kasane_contract/run_proc_ellipsoid.py` の実renderer O0/O2・全画面/8行帯一致、alpha/光/視点/UV/負scale/特異入力/切れたpacketを扱う。

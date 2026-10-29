@@ -42,9 +42,11 @@
 typedef struct { size_t n; size_t pad[3]; } pk_hdr;   /* keeps 16 B alignment */
 static size_t cur_bytes,peak_bytes;
 static unsigned long long alloc_calls,alloc_bytes; /* MEGA_SCENESTATS: what frame() allocates */
+static size_t largest_guest_request; /* requested guest allocation, not native free/largest */
 static size_t tlsf_len(size_t n){n=(n+3)&~(size_t)3;return n<12?12:n;}
 static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;}
 static void *pk_malloc(void *o,size_t n){(void)o;if(!n)return NULL;
+    if(n>largest_guest_request)largest_guest_request=n;
     pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;pk_count(tlsf_len(n),0);
     alloc_calls++;alloc_bytes+=tlsf_len(n);return h+1;}
 static void *pk_calloc(void *o,size_t c,size_t n){void *p=pk_malloc(o,c*n);if(p)memset(p,0,c*n);return p;}
@@ -53,6 +55,7 @@ static void *pk_realloc(void *o,void *p,size_t n){
     if(!p)return pk_malloc(o,n);
     if(!n){pk_free(o,p);return NULL;}
     pk_hdr *h=(pk_hdr *)p-1;size_t old=h->n;
+    if(n>largest_guest_request)largest_guest_request=n;
     pk_hdr *q=realloc(h,sizeof *q+tlsf_len(n));if(!q)return NULL;
     q->n=n;pk_count(tlsf_len(n),tlsf_len(old));
     alloc_calls++;alloc_bytes+=tlsf_len(n);return q+1;}

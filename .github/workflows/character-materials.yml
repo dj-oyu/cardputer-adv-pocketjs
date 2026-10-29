@@ -1,0 +1,98 @@
+name: Character materials
+on:
+  pull_request:
+    paths:
+      - 'apps/character/**'
+      - 'apps/kasane/megademo_wake.js'
+      - 'apps/kasane/chunks.txt'
+      - 'main/pocket/pocket_shape.*'
+      - 'main/pocket/pocket_proc.*'
+      - 'main/ui/kasane/ksn_procedural.*'
+      - 'tools/character*'
+      - 'tools/character/**'
+      - 'tools/kasane_contract/*character*'
+      - 'tools/kasane_contract/*ellipsoid*'
+      - 'tools/kasane_contract/shape_contract.js'
+      - '.github/workflows/character-materials.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: character-materials-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Visual API and exact WAKE inputs
+        run: |
+          node tools/character_motion_test.cjs
+          node tools/character_wake_oracle.cjs
+          node tools/kasane_contract/test_character_utility.cjs
+          node tools/character/test_lab.cjs
+          python3 tools/check_docs.py
+      - name: Actual native contracts and app
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          python3 tools/kasane_contract/run_pocket_shape.py
+          python3 tools/kasane_contract/run_proc_ellipsoid.py
+          python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
+          python3 tools/character/native_contact.py .cache/character-native/frames
+          python3 tools/kasane_contract/run_proc_megademo_scenes.py
+          node tools/character/coverage_study.cjs
+      - name: Device-sized guest heap gate (host, not hardware)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          CHARACTER_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_character_app_host.py --m32
+          MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: character-native-${{ github.sha }}
+          path: .cache/character-native/frames/
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Product link without flash
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 build
+          idf.py -B build_character size > build_character/size.log
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: character-firmware-${{ github.sha }}
+          path: |
+            build_character/*.bin
+            build_character/*.elf
+            build_character/*.map
+            build_character/*.log

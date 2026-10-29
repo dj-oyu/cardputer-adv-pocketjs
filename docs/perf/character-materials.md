@@ -1,0 +1,43 @@
+# Character materials 縦切り実装とhost検証
+
+2026-10-29開始。基準main843496c。実装・試験中の記録で、実機測定ではない。[utility契約](../api/character-utility.md)、[低API契約](../api/shapes.md)、[app操作](../../apps/character/README.md)。
+
+## 実装した範囲と変更理由
+
+既存の単色面分割では雲が硬い多面体に見え、人/キツネの圧縮伸長は1024線分を超えた。そこでshapes互換を維持し、汎用の解析的楕円体を184Bの不変packetとして候補frameへ凍結する低APIを追加した。保持費用は20entry=200B/物体。走査帯で連続法線・body UV模様・世界光・視線・光路厚み・alphaを評価し、全画面bufferや点ごとのJS drawcallを増やさない。
+
+この方式は直交投影、方向光近似、二色band/checkerに限定する。画像texture、PBR、物理体積散乱、落影、自動depth sortは未実装。設定図と同等の髪/毛/雲の美術品質は未達で、楕円体の小さな縦切りモデルとして比較する。
+
+utilityは配置/材質/UV変形/光/カメラのhandleを公開し、型変換・dirty依存・native提出を隠す。v0.2の全文実装ではなく、full clip/layer、morph、2D補正は未実装。WAKEのpose・呼吸・揺れ・耳flickのscheduleは軽量な名前付きperformanceへ移し、固有形状はモデル側に残した。全scene強制移行はしていない。
+
+点描/漫画トーン/アミカケは[比較試作](../../tools/character/coverage-study.md)として分離した。毎frame乱数を使わず位相/平均被覆/移動/伸縮/停止を調べるが、nativeへ未採用。moireや知覚的ちらつき、実LCDでの効果は未検証で、速度改善も主張しない。
+
+## 今回の計測と通過範囲
+
+| 検査 | 結果・条件 |
+| --- | --- |
+| Node utility | 更新なし、局所/親/光/視点/UV/材質の依存、コンパクトbuffer共有、invalid setterと失敗後復帰を照合 |
+| WAKE oracle | 基準843496cの全104frameと、モデル座標・投影行列・描画入力/順序が一致。Node mockの入力照合で、device timingではない |
+| 低API | 実QuickJS ASan/UBSan、楕円体C renderer O0/O2、全frame/8行帯一致、alpha/光/視点/厚み/UV/負scale/不正packetを検証 |
+| 実app/64bit host | 実QuickJS・native proc・Kasaneで3体×6mode×301frame=5418frame、例外/表示失敗0。背景必須・text capacity不備をこの試験で発見し修正 |
+| 実app/m32 host | 同5418frame。初版はlive最大214096B（無制限run）。共有prototype・group省資源・backing buffer共有後、heap上限163840Bを課して通過、live最大162036B、評価peak96880B、独自allocator追跡peak143864B |
+
+m32は8B JSValue/4B pointer/8byte double alignmentのhostモデル。liveはQuickJS malloc_size、評価peak/allocator peakはfixtureのTLSF丸め追跡であり、指標を足し引きしない。既定上限との差は1804Bしかなく、実機の総空き・最大連続領域やロード/GC条件の余裕を保証しない。native frame等は別領域。実機fps/heap/largest/最大単一allocは未測定。
+
+統合段階の未解決: 新motion層を加えたMEGADEMOは無制限hostの2232frameと16枚の合成capture一致を通ったが、m32/163840B制約ではDEGRADE/OOMを検出した。WAKE移行の完了条件にはこの制約での回帰を含め、単なる画素一致だけで完了としない。共通motionの常駐費用を削減して再測定する。
+
+低APIのshadeは同期借用・コピーなしだが、遅延描画ellipsoidは所有権のため184Bをnativeへコピーする。utilityのcopiedBytes=0はJS内部bulk copyの範囲で、アプリ全体のコピー0ではない。更新なしのevaluateは幾何等を再計算しないが、renderは候補frameへのpacket提出を行い、帯damageが転送要否を決める。
+
+## 既存MEGADEMO perfとの関係
+
+[shapes導入記録](../apps/megademo-shapes.md)のdd3bfba WAKEはturn127.6〜133.6ms、841e23eは17.1〜22.9ms、3d3ea63は17.5〜19.1msという著者報告。HEAVY/broker/30frame窓で世代が異なる。3d3ea63のbytes54048〜56096は窓最終frameで、平均ではない。APIと帯damage等の寄与は分離不能。
+
+[演出記録](../apps/megademo-story.md)のe9e7fbfはHEAVY/broker90秒/2.9周、WAKE turn15.5、CORE10〜19ms、評価後app全体free69196/largest31744/JS121760Bの著者報告。新方式の実測値ではない。今回raw receiptの独立照合はしていない。
+
+turnにはJSから同期呼出ししたC処理も含む。session render/send、frame間隔、host CPU時間、JS heap、native free/largestを混同せず、新APIのfps保証へ流用しない。GCが旧WAKEの主因だったとも断定しない。
+
+## 続く工程
+
+最終headでhost/CI/firmware linkを確認し、実機のロード余裕・描画時間・入力応答・質感を別工程で測る。flash/restartは今回行わない。身体だけ/光だけ/カメラだけと停止後の安定を連続frameで見て、光が模様に貼り付く問題を切り分ける。
+
+低API設計・実装後は、同utilityをHOME background sceneから使う工程をユーザー指定の後続範囲として扱う。時計/描画先/開始停止/資源ownerを環境adapterへ分け、現Cのscene_ops_t/strip描画/背景解放と照合する。現時点でHOMEから利用できるとはしない。前景UI、scene切替、app起動/復帰時の停止再開と解放、予算を検証する。3体常駐や生活シミュレーション全体には広げない。

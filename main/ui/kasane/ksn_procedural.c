@@ -441,6 +441,105 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
     }
 }
 #undef PATTERN_PIXEL
+static bool ell_finite(const float *p,unsigned n,float limit){
+    for(unsigned i=0;i<n;i++)if(!isfinite(p[i])||fabsf(p[i])>limit)return false;
+    return true;
+}
+static bool ell_unit(float v[3]){
+    const float s=fmaxf(fabsf(v[0]),fmaxf(fabsf(v[1]),fabsf(v[2])));
+    if(!(s>0))return false;
+    v[0]/=s;v[1]/=s;v[2]/=s;
+    const float d=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+    for(unsigned i=0;i<3;i++)v[i]/=d;
+    return true;
+}
+bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,int *right,int *bottom){
+    if(!p||!ell_finite(p->screen,8,4096)||!ell_finite(p->normal,9,1e6f)||
+       !ell_finite(p->light,9,1)||!ell_finite(p->material,8,128)||
+       !ell_finite(p->texture,9,4096)||p->surface[2]>255||p->surface[3]>255||p->surface[4]>3||p->reserved)return false;
+    const float *a=p->screen,*b=p->screen+4,*n=p->normal;
+    const float aa=a[0]*a[0]+a[1]*a[1]+a[2]*a[2],bb=b[0]*b[0]+b[1]*b[1]+b[2]*b[2],
+        ab=a[0]*b[0]+a[1]*b[1]+a[2]*b[2],det=aa*bb-ab*ab;
+    const float nd=n[0]*(n[4]*n[8]-n[5]*n[7])-n[1]*(n[3]*n[8]-n[5]*n[6])+n[2]*(n[3]*n[7]-n[4]*n[6]);
+    if(!(aa>0&&bb>0&&det>aa*bb*1e-6f)||!isfinite(nd)||nd==0)return false;
+    float l[3]={p->light[0],p->light[1],p->light[2]},v[3]={p->light[3],p->light[4],p->light[5]};
+    if(!ell_unit(l)||!ell_unit(v))return false;
+    for(unsigned i=6;i<9;i++)if(p->light[i]<0)return false;
+    for(unsigned i=0;i<8;i++)if(i==3?(p->material[i]<1||p->material[i]>128):
+        (p->material[i]<0||p->material[i]>1))return false;
+    if(p->texture[6]<0||p->texture[6]>1||p->texture[7]<0||p->texture[8]>1||p->texture[7]>p->texture[8])return false;
+    const float rx=sqrtf(aa),ry=sqrtf(bb);
+    *left=(int)ceilf(a[3]-rx);*right=(int)floorf(a[3]+rx);
+    *top=(int)ceilf(b[3]-ry);*bottom=(int)floorf(b[3]+ry);
+    if(*left<0)*left=0;
+    if(*top<0)*top=0;
+    if(*right>=KSN_PROC_W)*right=KSN_PROC_W-1;
+    if(*bottom>=KSN_PROC_H)*bottom=KSN_PROC_H-1;
+    if(!p->surface[2]){*left=1;*right=0;}
+    return true;
+}
+static unsigned ell_colour(float base,float light,float tint,float front,float spec,float back,float thin,
+                           const float *m,unsigned max){
+    float c=base*(m[0]+m[1]*front*light)+light*(m[2]*spec+m[4]*thin*back*tint);
+    c=fmaxf(0,fminf(1,c));
+    return (unsigned)lroundf(c*max);
+}
+/* A unit sphere projected by two affine rows. Reconstruct its front surface
+ * analytically, so geometry storage does not grow with pixel resolution. */
+static void ellipsoid_band(const ksn_proc_segment *g,const ksn_proc_segment *data,
+                           uint16_t *pixels,int y,int height){
+    ksn_proc_ellipsoid p;memcpy(&p,data,sizeof p);
+    int left,top,right,bottom;
+    if(!ksn_proc_ellipsoid_bounds(&p,&left,&top,&right,&bottom))return;
+    if(top<y)top=y;
+    if(bottom>=y+height)bottom=y+height-1;
+    if(left>right||top>bottom)return;
+    (void)g;
+    const float *a=p.screen,*b=p.screen+4,*nm=p.normal,*m=p.material,*uv=p.texture;
+    const float aa=a[0]*a[0]+a[1]*a[1]+a[2]*a[2],bb=b[0]*b[0]+b[1]*b[1]+b[2]*b[2],
+        ab=a[0]*b[0]+a[1]*b[1]+a[2]*b[2],inv=1/(aa*bb-ab*ab);
+    float axis[3]={a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};
+    (void)ell_unit(axis);
+    float l[3]={p.light[0],p.light[1],p.light[2]},v[3]={p.light[3],p.light[4],p.light[5]};
+    (void)ell_unit(l);(void)ell_unit(v);
+    float sign=0;
+    for(unsigned k=0;k<3;k++)sign+=(nm[3*k]*axis[0]+nm[3*k+1]*axis[1]+nm[3*k+2]*axis[2])*v[k];
+    if(sign<0)for(unsigned k=0;k<3;k++)axis[k]=-axis[k];
+    float half[3]={l[0]+v[0],l[1]+v[1],l[2]+v[2]};const bool has_half=ell_unit(half);
+    const float edge=fmaxf(uv[6],2/fminf(sqrtf(aa),sqrtf(bb)));
+    for(int yy=top;yy<=bottom;yy++)for(int x=left;x<=right;x++){
+        const float dx=x-a[3],dy=yy-b[3],u=(bb*dx-ab*dy)*inv,w=(aa*dy-ab*dx)*inv;
+        float q[3]={a[0]*u+b[0]*w,a[1]*u+b[1]*w,a[2]*u+b[2]*w};
+        const float residual=1-q[0]*q[0]-q[1]*q[1]-q[2]*q[2];
+        if(!(residual>0))continue;
+        const float chord=sqrtf(residual);
+        for(unsigned k=0;k<3;k++)q[k]+=axis[k]*chord;
+        float n[3];
+        for(unsigned k=0;k<3;k++)n[k]=nm[3*k]*q[0]+nm[3*k+1]*q[1]+nm[3*k+2]*q[2];
+        if(!ell_unit(n))continue;
+        uint16_t base=p.surface[0];
+        if(p.surface[4]){
+            const float tu=atan2f(q[0],q[2])*(1.0f/6.283185307179586f)+0.5f,tv=q[1]*0.5f+0.5f;
+            const float U=uv[0]*tu+uv[1]*tv+uv[2],V=uv[3]*tu+uv[4]*tv+uv[5];
+            bool second;
+            if(p.surface[4]==3)second=((int)floorf(U)+(int)floorf(V))&1;
+            else{const float t=p.surface[4]==1?U:V,f=t-floorf(t);second=f>=uv[7]&&f<=uv[8];}
+            if(second)base=p.surface[1];
+        }
+        const float dot=n[0]*l[0]+n[1]*l[1]+n[2]*l[2],front=fmaxf(0,dot),back=fmaxf(0,-dot),
+            nh=has_half?fmaxf(0,n[0]*half[0]+n[1]*half[1]+n[2]*half[2]):0,
+            spec=front>0&&nh>0?powf(nh,m[3]):0,thin=1-p.surface[3]*(1.0f/255)*chord;
+        unsigned r=ell_colour(((base>>11)&31)*(1.0f/31),p.light[6],m[5],front,spec,back,thin,m,31),
+            gg=ell_colour(((base>>5)&63)*(1.0f/63),p.light[7],m[6],front,spec,back,thin,m,63),
+            blue=ell_colour((base&31)*(1.0f/31),p.light[8],m[7],front,spec,back,thin,m,31);
+        const unsigned alpha=(unsigned)lroundf(p.surface[2]*fminf(1,residual/edge)),ia=255-alpha;
+        uint16_t *dest=pixels+(yy-y)*KSN_PROC_W+x;
+        r=(r*alpha+((*dest>>11)&31)*ia+127)/255;
+        gg=(gg*alpha+((*dest>>5)&63)*ia+127)/255;
+        blue=(blue*alpha+(*dest&31)*ia+127)/255;
+        *dest=(uint16_t)((r<<11)|(gg<<5)|blue);
+    }
+}
 /* A frame with pattern lines: the same order, the same plain lines. A
  * parameter entry's negative rows fail the range test; the bias is looked at
  * only for an entry that reached the band. Out of line, so a frame without
@@ -448,6 +547,11 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
 static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
     for(unsigned j=0;j<frame->count;j++){
         const ksn_proc_segment *s=&frame->segments[j];
+        if(s->x0>=KSN_PROC_EXT_ELLIPSOID-480){
+            if(KSN_PROC_ELLIPSOID_WORDS>frame->count-j-1)return;
+            ellipsoid_band(s,s+1,pixels,y,height);
+            j+=(unsigned)KSN_PROC_ELLIPSOID_WORDS;continue;
+        }
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;
         if(ymax<y||ymin>=y+height)continue;

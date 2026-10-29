@@ -79,6 +79,14 @@ static void test_admission(void) {
     CHECK(megademo && !strcmp(megademo->title,"MEGADEMO"));
     CHECK(megademo && !strcmp(megademo->entry,"apps/kasane/proc_megademo.js"));
     CHECK(megademo && megademo->works==APP_WORKS_NONE);
+    const app_manifest_t *character=app_registry_find("local.character");
+    CHECK(character && !strcmp(character->title,"CHARACTER LAB"));
+    CHECK(character && !strcmp(character->entry,"apps/character/character_lab.js"));
+    CHECK(character && character->works==APP_WORKS_NONE);
+    missing="kasane.shapes";
+    CHECK(!app_registry_admit(character,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(!strcmp(reason,"NEEDS kasane.shapes"));
+    missing=NULL;
     // The games: one row each, started from the home menu, no works library.
     static const struct { const char *id, *title, *entry; } games[]={
         {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},

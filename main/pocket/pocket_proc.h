@@ -38,6 +38,7 @@ extern bool pocket_proc_hook_dry;
 typedef struct { uint16_t count,raster; uint8_t ext,surface; } pocket_proc_mark;
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark);
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color);
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch);
 void pocket_proc_native_rollback(const pocket_proc_mark *mark);
 /* The 8-row bands (17) of the image a just-committed frame changes, and on
  * each its columns [x0, x1): the bands whose ordered entries differ from the

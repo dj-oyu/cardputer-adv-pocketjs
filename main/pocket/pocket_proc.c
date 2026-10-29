@@ -777,6 +777,29 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     if(!c)return;
     c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;
 }
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *p){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_ellipsoid_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid or singular analytic ellipsoid");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1);
+    if(KSN_PROC_ELLIPSOID_ENTRIES>surface_segments(&surfaces[building_surface])-c->count||
+       cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"analytic patch frame limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_ELLIPSOID),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    /* Zero the final entry's unused bytes as well as explicit packet padding:
+     * band hashes must not depend on previous frame storage. */
+    memset(c->segments+c->count,0,KSN_PROC_ELLIPSOID_WORDS*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,sizeof *p);
+    c->count+=(uint16_t)KSN_PROC_ELLIPSOID_WORDS;
+    c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    return JS_UNDEFINED;
+}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";

@@ -13,6 +13,14 @@ const POSE = [0, 1.9, .5, .05, -.38, -1, 1, 0, 260, 60, -16, 17, 1.9, .5, .05, -
   49, 1.6, .04, -.04, -.1, 0, .06, 1, 240, 6, 18, 54, 1.6, .06, -.08, .2, .3, .75, .6, 240, 0, 18,
   60, 1.6, .06, -.1, .24, .3, .75, .4, 240, 0, 18, 68, 2.1, .1, -.2, .08, 0, .85, 0, 150, 0, 14,
   74, 2.1, .1, -.2, .08, 0, .85, 0, 150, 0, 14];
+const WPOSE = CharacterMotion.performance({
+  track: CharacterMotion.track(POSE, {stride: 11, timeColumn: 0, interpolation: 'smooth', timeUnit: 'frame'}),
+  channels: ['time', 'scale', 'yaw', 'pitch', 'roll', 'gaze', 'open', 'earSpread', 'distance', 'x', 'y'],
+  waves: [{channel: 'scale', amplitude: .012, rate: .2, mode: 'multiply'},
+    {channel: 'roll', amplitude: .03, rate: .11, mode: 'add'},
+    {channel: 'bob', amplitude: 1.5, rate: .2, mode: 'add'}],
+  gates: [{channel: 'leftFlick', from: 21, to: 24, value: 1}, {channel: 'rightFlick', from: 56, to: 59, value: 1}]
+});
 // The back light: an elliptical glow (cx, cy, rx, ry).
 const BACK = [124, 32, 88, 34];
 // The head: an ellipsoid (radii 52, 44, 46). Ears (x, y, z each): base out,
@@ -28,7 +36,7 @@ const EAR = [-46, -22, 8, -52, -48, 2, -44, -74, -4, -25, -60, 8, -14, -40, 18],
 // 4, highlight 2). Act I and TWIST reuse the arrays. QQ: this frame's
 // pose; EP: an ear's 5 points.
 const SH = pocket.shapes, WM = new Float32Array(3 * 146), WP = new Float32Array(2 * 146), WQ = new Float32Array(12);
-const QQ = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], EP = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const EP = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 const W_EAR = 28, W_CORE = 58, W_WH = 74, W_EYE = 86;
 // Colours: the lit room 0x218b, the glowing iris 0xbf9f, the magenta inner
 // ear 0x68aa, the cyan rim C_RIM.
@@ -54,18 +62,15 @@ function wake(t) {
     WP[2 * (W_CORE + j)] = BACK[0] + BACK[2] * .68 * M.cos(j * PI / 8);
     WP[2 * (W_CORE + j) + 1] = BACK[1] + BACK[3] * .68 * M.sin(j * PI / 8);
   }
-  let a = 0;
-  while (a < 99 && POSE[a + 11] <= t) a += 11;
-  const u = smooth(ramp(t, POSE[a], POSE[a + 11]));
-  for (let j = 0; j < 11; ++j) QQ[j] = POSE[a + j] + (POSE[a + 11 + j] - POSE[a + j]) * u;
+  const pose = WPOSE.evaluate(t);
   // Breathing, and a slow sway.
-  const S = QQ[1] * (1 + .012 * M.sin(t * .2)), cy = M.cos(QQ[2]), sy = M.sin(QQ[2]), cp = M.cos(QQ[3]),
-    sp = M.sin(QQ[3]), r = QQ[4] + .03 * M.sin(t * .11), c = M.cos(r), sn = M.sin(r);
+  const S = pose.scale, cy = M.cos(pose.yaw), sy = M.sin(pose.yaw), cp = M.cos(pose.pitch),
+    sp = M.sin(pose.pitch), r = pose.roll, c = M.cos(r), sn = M.sin(r);
   // Head space to the screen as one projective matrix: yaw, pitch, the
   // camera D in front (x, y over D - z), then roll and scale about (X, Y).
   // Rotation rows (cy, 0, sy), (sp sy, cp, -sp cy); view (cp sy, -sp, -cp cy).
   {
-    const D = QQ[8], K = D * S, X = 120 + QQ[9], Y = 100 + QQ[10] + 1.5 * M.sin(t * .2),
+    const D = pose.distance, K = D * S, X = 120 + pose.x, Y = 100 + pose.y + pose.bob,
       a1 = sp * sy, b = -sp * cy, e = cp * sy, l = -sp, s = -cp * cy;
     WQ[0] = X * e + K * (c * cy - sn * a1); WQ[1] = X * l + K * -(sn * cp); WQ[2] = X * s + K * (c * sy - sn * b);
     WQ[4] = Y * e + K * (sn * cy + c * a1); WQ[5] = Y * l + K * (c * cp); WQ[6] = Y * s + K * (sn * sy + c * b);
@@ -84,14 +89,14 @@ function wake(t) {
       wpt(k, x * f, y * f, z * f);
     }
   }
-  // Ears: spread at ease (QQ[7]), each flicks once. The inside: the ear
+  // Ears: spread at ease, each flicks once. The inside: the ear
   // drawn in towards its middle, corners cut once (Chaikin).
   for (let k = 0; k < 2; ++k) {
-    const sg = k ? -1 : 1, fl = k ? t >= 56 && t < 59 : t >= 21 && t < 24;
+    const sg = k ? -1 : 1, fl = k ? pose.rightFlick : pose.leftFlick;
     for (let j = 0; j < 5; ++j) {
       const w = j && j < 4 ? 1 : 0, H = j === 2 ? 1 : .5;
-      let x = EAR[3 * j] - sg * 7 * QQ[7] * w * H, z = EAR[3 * j + 2];
-      const y = EAR[3 * j + 1] + 4 * QQ[7] * w * H;
+      let x = EAR[3 * j] - sg * 7 * pose.earSpread * w * H, z = EAR[3 * j + 2];
+      const y = EAR[3 * j + 1] + 4 * pose.earSpread * w * H;
       if (fl && w) { x -= sg * 8 * H; z -= 14 * H; }
       EP[3 * j] = x * sg; EP[3 * j + 1] = y; EP[3 * j + 2] = z;
       wpt(W_EAR + 5 * k + j, x * sg, y, z);
@@ -117,7 +122,7 @@ function wake(t) {
   }
   // Eyes (almonds, slanted): wide in the dark, the pupils big; the far eye
   // narrows with the turn by itself. Shut: a line.
-  const op = QQ[6], h = 8 * op, px = QQ[5] * 4.4, q = t < 40 ? 4.4 : 3, ph = h * .92;
+  const op = pose.open, h = 8 * op, px = pose.gaze * 4.4, q = t < 40 ? 4.4 : 3, ph = h * .92;
   for (let k = 0; k < 2; ++k) {
     const sg = k ? 1 : -1, o = W_EYE + 30 * k;
     for (let j = 0; j < 12; ++j) {

@@ -141,6 +141,126 @@ static JSValue js_shape_project(JSContext *ctx,JSValueConst self,int argc,JSValu
     return JS_UNDEFINED;
 }
 
+/* shade() separates body-attached albedo from world-space lighting. These
+ * borrowed views last only for this synchronous call; no JS is run after
+ * validation and no buffer or callback is retained. */
+typedef struct { uint8_t *data;size_t bytes; } shade_view;
+static bool shade_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,
+                         bool writable,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    uint8_t *raw=JS_GetArrayBuffer(ctx,&size,ab);
+    const bool immutable=JS_IsImmutableArrayBuffer(ab)>0;
+    bool ok=raw&&offset<=size&&bytes<=size-offset&&(!writable||!immutable);
+    if(ok)*out=(shade_view){raw+offset,bytes};
+    JS_FreeValue(ctx,ab);
+    return ok;
+}
+static bool shade_overlap(const shade_view *a,const shade_view *b){
+    const uintptr_t x=(uintptr_t)a->data,y=(uintptr_t)b->data;
+    return a->bytes&&b->bytes&&(x<=y?y-x<a->bytes:x-y<b->bytes);
+}
+static bool shade_unit(float *x,float *y,float *z){
+    /* Scale first: a finite nonzero Float32 direction can be subnormal. */
+    const float scale=fmaxf(fabsf(*x),fmaxf(fabsf(*y),fabsf(*z)));
+    if(!(scale>0)||!isfinite(scale))return false;
+    *x/=scale;*y/=scale;*z/=scale;
+    const float length=sqrtf((*x)*(*x)+(*y)*(*y)+(*z)*(*z));
+    *x/=length;*y/=length;*z/=length;
+    return true;
+}
+static unsigned shade_channel(float base,float light,float tint,float front,float spec,
+                              float back,float thin,const float *m,unsigned max){
+    float v=base*(m[0]+m[1]*front*light)+light*(m[2]*spec+m[4]*thin*back*tint);
+    if(v<0)v=0;
+    if(v>1)v=1;
+    return (unsigned)lroundf(v*(float)max);
+}
+/* shade(normals, albedo, thickness, lighting, material, output[,from[,count]])
+ * A bounded vertex/cell kernel, independent of frame drawing. Normals are
+ * SNORM16 rather than quantised positions; float remains for transforms. */
+static JSValue js_shape_shade(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.shade";
+    if(argc<6||argc>8)return invalid(ctx,op,"expected normals, albedo, thickness, lighting, material, output[, from[, count]]");
+    double from=0,count=-1;
+    if((argc>6&&(!number(ctx,argv[6],&from)||!whole(from,0,SHAPE_POINTS)))||
+       (argc>7&&(!number(ctx,argv[7],&count)||!whole(count,0,SHAPE_POINTS))))
+        return invalid(ctx,op,"from and count must be integers 0..1024");
+    shade_view v[6];
+    const JSTypedArrayEnum types[6]={JS_TYPED_ARRAY_INT16,JS_TYPED_ARRAY_UINT16,
+        JS_TYPED_ARRAY_UINT8,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16};
+    for(unsigned i=0;i<6;i++)if(!shade_buffer(ctx,argv[i],types[i],i==5,&v[i]))
+        return invalid(ctx,op,"expected Int16, Uint16, Uint8, Float32, Float32, writable Uint16 arrays");
+    const size_t n=v[1].bytes/2;
+    if(n>SHAPE_POINTS)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"at most 1024 shading samples");
+    if(v[0].bytes!=n*6||v[2].bytes!=n||v[3].bytes!=9*4||v[4].bytes!=8*4||v[5].bytes!=n*2)
+        return invalid(ctx,op,"buffer lengths must be normals 3n, albedo n, thickness n, lighting 9, material 8, output n");
+    const size_t begin=(size_t)from,len=count<0?(begin<n?n-begin:0):(size_t)count;
+    if(begin>n||len>n-begin)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"sample range past buffers");
+    for(unsigned i=0;i<5;i++)if(shade_overlap(&v[5],&v[i])&&
+        !(i==1&&v[5].data==v[1].data&&v[5].bytes==v[1].bytes))
+        return invalid(ctx,op,"output may only overlap an exactly identical albedo view");
+    const float *light=(const float *)v[3].data,*m=(const float *)v[4].data;
+    for(unsigned i=0;i<9;i++)if(!isfinite(light[i])||
+        (i<6?(light[i]<-1||light[i]>1):(light[i]<0||light[i]>1)))
+        return invalid(ctx,op,"lighting directions must be -1..1, RGB 0..1, all finite");
+    for(unsigned i=0;i<8;i++)if(!isfinite(m[i])||
+        (i==3?(m[i]<1||m[i]>128):(m[i]<0||m[i]>1)))
+        return invalid(ctx,op,"material coefficients must be 0..1, shininess 1..128");
+    float lx=light[0],ly=light[1],lz=light[2],vx=light[3],vy=light[4],vz=light[5];
+    if(!shade_unit(&lx,&ly,&lz)||!shade_unit(&vx,&vy,&vz))
+        return invalid(ctx,op,"light and view directions must be nonzero");
+    float hx=lx+vx,hy=ly+vy,hz=lz+vz;
+    const bool half=shade_unit(&hx,&hy,&hz);
+    const int16_t *normal=(const int16_t *)v[0].data;
+    /* Validate the requested range before its first write: even a late bad
+     * normal leaves all output unchanged. Unrequested samples are untouched. */
+    for(size_t i=begin;i<begin+len;i++){
+        const int16_t x=normal[3*i],y=normal[3*i+1],z=normal[3*i+2];
+        if(x==INT16_MIN||y==INT16_MIN||z==INT16_MIN||(!x&&!y&&!z))
+            return invalid(ctx,op,"normals must be nonzero SNORM16 (-32767..32767)");
+    }
+    const uint16_t *albedo=(const uint16_t *)v[1].data;
+    const uint8_t *thickness=v[2].data;
+    uint16_t *output=(uint16_t *)v[5].data;
+    for(size_t i=begin;i<begin+len;i++){
+        float x=normal[3*i]*(1.0f/32767),y=normal[3*i+1]*(1.0f/32767),z=normal[3*i+2]*(1.0f/32767);
+        (void)shade_unit(&x,&y,&z);
+        const float dot=x*lx+y*ly+z*lz,front=fmaxf(0,dot),back=fmaxf(0,-dot);
+        const float nh=half?fmaxf(0,x*hx+y*hy+z*hz):0;
+        const float spec=front>0&&nh>0?powf(nh,m[3]):0,thin=1-thickness[i]*(1.0f/255);
+        const uint16_t c=albedo[i];
+        const unsigned r=shade_channel(((c>>11)&31)*(1.0f/31),light[6],m[5],front,spec,back,thin,m,31);
+        const unsigned g=shade_channel(((c>>5)&63)*(1.0f/63),light[7],m[6],front,spec,back,thin,m,63);
+        const unsigned b=shade_channel((c&31)*(1.0f/31),light[8],m[7],front,spec,back,thin,m,31);
+        output[i]=(uint16_t)((r<<11)|(g<<5)|b);
+    }
+    return JS_UNDEFINED;
+}
+
+/* Freeze one small numeric patch into the candidate, never the caller's
+ * mutable buffers. The rasterizer evaluates its continuous surface by band. */
+static JSValue js_shape_ellipsoid(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.ellipsoid";
+    if(argc!=6)return invalid(ctx,op,"expected screen8, normal9, light9, material8, surface5, texture9");
+    shade_view v[6];
+    const size_t sizes[6]={32,36,36,32,10,36};
+    for(unsigned i=0;i<6;i++)if(!shade_buffer(ctx,argv[i],i==4?JS_TYPED_ARRAY_UINT16:JS_TYPED_ARRAY_FLOAT32,false,&v[i])||v[i].bytes!=sizes[i])
+        return invalid(ctx,op,"expected Float32 arrays 8/9/9/8, Uint16 surface5, Float32 texture9");
+    ksn_proc_ellipsoid p={0};
+    memcpy(p.screen,v[0].data,32);memcpy(p.normal,v[1].data,36);
+    memcpy(p.light,v[2].data,36);memcpy(p.material,v[3].data,32);
+    memcpy(p.surface,v[4].data,10);memcpy(p.texture,v[5].data,36);
+    pocket_proc_mark mark;
+    JSValue r=pocket_proc_native_begin(ctx,op,&mark);
+    if(JS_IsException(r))return r;
+    r=pocket_proc_native_ellipsoid(ctx,op,&p);
+    if(JS_IsException(r))pocket_proc_native_rollback(&mark);
+    return r;
+}
+
 /* ---- fill */
 /* A convex polygon's span on row y; false if none. */
 static bool span(const poly *q,float y,float *l,float *r){
@@ -348,6 +468,8 @@ esp_err_t pocket_shape_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("project",3,js_shape_project),
+        JS_CFUNC_DEF("shade",6,js_shape_shade),
+        JS_CFUNC_DEF("ellipsoid",6,js_shape_ellipsoid),
         JS_CFUNC_DEF("fill",4,js_shape_fill),
         JS_CFUNC_DEF("outline",4,js_shape_outline),
     };
@@ -359,6 +481,8 @@ static const pocket_limit_t shape_limits[]={
     {.name="maxPoints",.kind=POCKET_LIMIT_INT,.number=SHAPE_POINTS},
     {.name="maxPolygonPoints",.kind=POCKET_LIMIT_INT,.number=SHAPE_POLY},
     {.name="maxHoles",.kind=POCKET_LIMIT_INT,.number=SHAPE_HOLES},
+    {.name="maxShadeSamples",.kind=POCKET_LIMIT_INT,.number=SHAPE_POINTS},
+    {.name="ellipsoidEntries",.kind=POCKET_LIMIT_INT,.number=KSN_PROC_ELLIPSOID_ENTRIES},
     {0},
 };
 static const pocket_capability_t capability={.name="kasane.shapes",.supported=true,

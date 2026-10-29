@@ -10,6 +10,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [character-materials.md](character-materials.md) | 実装・host検証 | 3体の材質utility、解析的楕円体、WAKE移行、m32 heap、点描等の比較と未検証範囲 |
 | [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [pie-opt-plan.md](pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |
 | [flash-size-method.md](flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |

@@ -4,7 +4,13 @@
  * harnesses define it as SHAPE_DRAW_JS (shape_draw_shim.h).
  * docs/api/shapes.md. */
 #include "quickjs.h"
+#include "pocket_api.h"
 #include "pocket_proc.h"
+
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches need a native renderer",false,NULL);
+}
 
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
     (void)ctx;(void)op;*mark=(pocket_proc_mark){0};return JS_UNDEFINED;

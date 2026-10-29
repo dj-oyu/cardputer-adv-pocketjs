@@ -2,6 +2,7 @@
 #define KSN_PROCEDURAL_H
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 /* Host-first experiment. This is separate from the v1 UI command quota and is
  * not yet a JS or Kasane core API. The VM owns a validated program copy during
@@ -50,9 +51,23 @@ typedef struct { int16_t x0,y0,x1,y1; uint16_t color; } ksn_proc_segment;
  * padding) says whether a frame holds any; a frame without takes the loop it
  * always took. */
 #define KSN_PROC_EXT_PATTERN 4096
+#define KSN_PROC_EXT_ELLIPSOID 8192
 #define KSN_PROC_EXT_MIN 2048
 #define KSN_PROC_PATTERN_BITS 24
 #define KSN_PROC_PATTERN_BLOCK 6
+
+/* Inline, immutable analytic patch. A candidate owns this numeric snapshot,
+ * not a JS buffer or a framebuffer. Padding is explicit for stable hashes. */
+typedef struct {
+    float screen[8],normal[9],light[9],material[8],texture[9];
+    uint16_t surface[5],reserved;
+} ksn_proc_ellipsoid;
+#define KSN_PROC_ELLIPSOID_WORDS ((sizeof(ksn_proc_ellipsoid)+sizeof(ksn_proc_segment)-1)/sizeof(ksn_proc_segment))
+#define KSN_PROC_ELLIPSOID_ENTRIES (1+KSN_PROC_ELLIPSOID_WORDS)
+_Static_assert(sizeof(ksn_proc_ellipsoid)==184,"analytic packet layout");
+/* Bounds are clipped pixel centres. False means invalid; an offscreen patch
+ * has right<left or bottom<top and no raster cost. */
+bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,int *right,int *bottom);
 typedef struct {
     uint16_t count;
     uint16_t raster_steps;
@@ -74,6 +89,19 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
     *geometry=frame->segments[(*i)++];
     *pattern=frame->ext&&geometry->x0>=KSN_PROC_EXT_MIN;
     if(*pattern){
+        if(geometry->x0>=KSN_PROC_EXT_ELLIPSOID-480){
+            if(KSN_PROC_ELLIPSOID_WORDS>frame->count-*i){*i=frame->count+1u;return false;}
+            ksn_proc_ellipsoid p;memcpy(&p,frame->segments+*i,sizeof p);
+            int left,top,right,bottom;
+            const bool valid=ksn_proc_ellipsoid_bounds(&p,&left,&top,&right,&bottom);
+            *i+=(unsigned)KSN_PROC_ELLIPSOID_WORDS;
+            geometry->x0=(int16_t)(geometry->x0-KSN_PROC_EXT_ELLIPSOID);
+            if(!valid||left!=geometry->x0||top!=geometry->y0||right!=geometry->x1||bottom!=geometry->y1||left>right||top>bottom){
+                *i=frame->count+1u;return false;
+            }
+            *cost=(unsigned)(geometry->x1-geometry->x0+1)*(unsigned)(geometry->y1-geometry->y0+1);
+            return true;
+        }
         if(*i>=frame->count)return false;
         const ksn_proc_segment *q=&frame->segments[(*i)++];
         const unsigned period=(uint16_t)q->y0>>8&31u;

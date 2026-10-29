@@ -1,0 +1,4 @@
+app local.character
+utility character.js
+models character_models.js
+lab character_lab_scene.js
