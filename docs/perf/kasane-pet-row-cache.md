@@ -4,7 +4,7 @@
 （`/dev/ttyACM0` は別セッション）。**ミリ秒は 1 つも無い**。ここにある数は target ツールチェーンの
 `objdump` / `size` / `fstack-usage` の実測と、ホストで走らせたテストの出力である。
 調査（1 取得あたり約 480 命令、回転 1 フレーム 2,112 取得）は
-`docs/perf/kasane-image-transform-recon.md` §4。
+`docs/archive/perf/kasane-image-transform-recon.md` §4。
 
 ---
 

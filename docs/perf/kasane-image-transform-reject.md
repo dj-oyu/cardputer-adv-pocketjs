@@ -4,7 +4,7 @@
 実機には触れていない（`/dev/ttyACM0` は別セッション）。**ミリ秒は 1 つも無い**。
 ここにある数は target ツールチェーンの `objdump`/`size` の実測、ホストで走らせた
 テストの出力、`/tmp` の使い捨て掃引プログラムの出力である。
-候補の位置づけは `docs/perf/kasane-image-transform-recon.md` §6 候補 B。
+候補の位置づけは `docs/archive/perf/kasane-image-transform-recon.md` §6 候補 B。
 
 ---
 

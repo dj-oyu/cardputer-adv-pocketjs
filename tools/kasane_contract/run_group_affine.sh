@@ -4,7 +4,7 @@
 #
 # This is the entry point for tools/kasane_contract/test_group_affine.c alone. It
 # deliberately does not touch tools/kasane_contract/run.sh: this container cannot
-# finish that script's sanitizer arm (docs/perf/kasane-opt-integration.md 0,
+# finish that script's sanitizer arm (docs/archive/perf/kasane-opt-integration.md 0,
 # AddressSanitizer:DEADLYSIGNAL in an endless loop on pristine HEAD too), and the
 # suite is run from a /tmp copy of run.sh with only the sanitizer flag stripped.
 # Wiring this case into run.sh belongs to a session that can run the sanitizer

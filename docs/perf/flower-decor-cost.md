@@ -1,5 +1,8 @@
 # Decorative ray cost estimate (2026-09-09)
 
+> **統合した過去の計測記録（2026-09-09〜15）**: 旧ルート版の全内容を保存。数値・実験条件は当時のもの。
+> 本文の「FPU がない」「変換が soft-float」という解釈は後続実測と整合しない。[FPU の性質](fpu-latency.md) と [平方根の再測定](flower-shade.md) を現行判断の入口にする。
+
 This is a workload estimate, not an ESP32-S3 frame-time measurement. Rendering
 behaviour was not changed for this measurement. Reproduce the host comparison
 with `python tools/bench_decor_cost.py` (MSYS2 UCRT64 GCC on this workstation).
@@ -38,6 +41,34 @@ row decisions and a conditional narrow-fragment operation, partly offset by
 skipped reveal rows. A sub-millisecond event budget is a hypothesis to measure,
 not a validated upper bound.
 
+## The fixed-point square root bought the picture's 0.02% and no time (2026-09-15)
+
+`sqrtf` is the largest named single cost in the scene: 154 cycles a call, 4,010
+calls a frame, 2.1 ms of a 45 ms frame. Replacing it with an integer restoration
+root is a nine-fold cut in *instructions* (7 a step against 88; tools/flower_sqrt_variants.c)
+and costs the picture 0.02% of its pixels -- a few white pixels where the ellipsoid
+root feeds the depth test at a silhouette, and at B=14 one pixel of 32,400 differing
+by <=4/255 (tools/flower_frame_dump.c).
+
+On the board it is worth nothing. 79 adjacent 60-frame windows, only
+`g_flower_fixed_sqrt` moving (`sq=` in SPLIT3), paired differences in ms/frame:
+
+    ellipsoid root (sqrt=)     +0.03      bell root (bell:sqrt=)   -0.08
+    shade (control)            +0.31      garden (control)         -0.37
+    total                      -0.11      decor (control)          -0.36
+
+The signal is a tenth of the control band, so the answer is "no difference", not
+"a small win". The reason is in the code and not in the timing: `d` arrives as a
+float and the root leaves as one, and on a part with no FPU each conversion in and
+out of the integer loop is a call into soft-float. The loop got nine times cheaper
+and the two conversions around it cost what the loop used to.
+
+So the fixed point has to be carried by the caller -- `d` computed as an integer and
+the root consumed as one -- or the round trip eats the saving. That is the same
+conclusion the PIE work reached from the other side: the root is now integer and
+ready to sit in a lane (56 PIE instructions for eight roots, at the lane width's
+precision), and what is missing is the integer geometry around it.
+
 ## Measured on the device (2026-09-15)
 
 The 6..12 ms band above is an estimate built from instruction counts. It now has a
@@ -70,6 +101,33 @@ Three things follow.
    105 of 135 gave veg 9.61 ms with 240 passes and rest 3.37 ms, against 5.7 ms /
    135 passes / 0.26 ms for the settled windows. A bare cycles-per-row average
    would have been the mean of two different amounts of work.
+
+### Attempted: gating the profiles by their support (2026-09-15, branch `perf/flower-decor`)
+
+`garden_decor_profile()` returns exactly 0 outside its radius, so the light and
+the shadow are each a compact support, and the span the loop walks is their
+union -- up to 3.5 radii where each profile owns part of it. A gate that
+evaluates a profile only inside its own reach is exact (**both arms byte-identical
+to the previous revision over 120 frames x 135 rows x 7.8 MB**, harness
+`tools/flower_decor_identity.c`), and on the host it removes **35.6% of the
+profile evaluations** (4,304,780 -> 2,772,750 over the same 120 frames, counted
+with `-DGARDEN_COUNT_PROFILE`).
+
+On the device it is **not measurable**. The switch was alternated once per
+60-frame window inside one binary (`SPLIT3 gate=`) so the pairs differ only by
+the gate, 41 pairs: rays delta mean **-0.19 ms**, median -0.03, with the
+*unchanged* vegetation pass as a control at mean -0.09 ms. The effect is inside
+the noise, and a ~0.7 ms effect is what the removed instruction count predicts
+(12,767 evaluations a frame at ~14 instructions).
+
+What that means: **the decorative-ray pass is not bound by the profile
+arithmetic.** Removing a third of it moves nothing, so the per-pixel cost is
+dominated by the rest of the pipeline (the dither, the pack, the load/store) or
+by stalls -- consistent with the pass running ~60..150 cycles per visited pixel
+against a ~70-instruction body. Micro-optimising this loop further is a dead end;
+the way to move `rays` is to vectorise the whole per-pixel pipeline, not to shave
+its arithmetic.
+
 
 
 The existing `SPLIT decor` is garden minus pixels and includes vegetation as

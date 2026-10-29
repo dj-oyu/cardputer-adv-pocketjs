@@ -19,12 +19,12 @@
 | vm/main | 実機が走らせているファーム本体（VM の L0〜L2、pocket、UI、scene） | `main/` 全体 | ファームのビルド rc=0（§2）。**実機での確認はこの枝では未** |
 | MP3 FIR の PIE カーネル | `fir8_pie`（8出力をまとめる 174 命令/8出力、0 ストール）と補間の int32 化 | `main/pocket/fir_pie.c`, `fir_pie.h`, `mp3_decode.c` | ホスト: `test_kernels.py` の `FirKernel` 緑、実 MP3 10 本で `block==scalar`（§2） |
 | garden の装飾光線 PIE（`perf/pie-opt` の9本） | 8レーン混合 `garden_decor_mix8`、グループ幅の実行時スイッチ（既定8）、行の整列位相グリッド、`SCENE_AB` の腕 | `main/scene/garden_decor_pie.c/h`, `main/scene/garden.c`, `main/ui/shell.c`, `tools/test_garden_decor_pie_ab.c` | ホスト: 契約スイープ緑（§2）。実機の幅4→8の効果は §3 の引用（T2 着地時） |
-| 容量削減（`perf/size-census`） | cref census と削減手順（「我々だけが理由でリンクに入っている」ところから潰す） | `docs/perf/builtins-census.md`, `docs/perf/flash-size-method.md`, `tools/size/` | 手順と計器のみ。**削減そのものは未実施** |
-| システム API の調査（`perf/system-pie`） | システムAPIに PIE の余地があるか／libgcc と 64bit 除算の出所 | `docs/perf/system-pie-survey.md`, `docs/perf/libgcc-64bit-division.md` | 分析のみ（実装なし） |
+| 容量削減（`perf/size-census`） | cref census と削減手順（「我々だけが理由でリンクに入っている」ところから潰す） | `docs/archive/perf/builtins-census.md`, `docs/perf/flash-size-method.md`, `tools/size/` | 手順と計器のみ。**削減そのものは未実施** |
+| システム API の調査（`perf/system-pie`） | システムAPIに PIE の余地があるか／libgcc と 64bit 除算の出所 | `docs/archive/perf/system-pie-survey.md`, `docs/archive/perf/libgcc-64bit-division.md` | 分析のみ（実装なし） |
 | FLOWER / board（`perf/flower-decor` の性能19本） | 下の §4。canopy カーネル、装飾プロファイルの support gate、整数平方根、board の転送キュー | `main/scene/canopy_pie.c/h`, `main/scene/fixed_sqrt.h`, `main/scene/flower.c`, `main/scene/garden.c`, `main/hal/board.c/h`, `main/ui/shell.c`, `tools/flower_*`, `tools/pie/models/canopy_model.c`, `tools/pie/models/disc_model.c`, `docs/flower-*.md` | ホスト: byte 一致の系を含めて緑（§2）。実機の数字は §3 の引用（incoming の計測） |
 
-`perf/flower-decor` が持ってきた文書は `docs/flower-decor-cost.md`・`docs/flower-optimisation-options.md`・
-`docs/flower-fixed-point-pipeline.md` の3本で、**`docs/` の直下に置いてある**。この枝の `docs/` は
+`perf/flower-decor` が持ってきた文書は `docs/flower-decor-cost.md`・`docs/archive/perf/flower-optimisation-options.md`・
+`docs/archive/perf/flower-fixed-point-pipeline.md` の3本で、**`docs/` の直下に置いてある**。この枝の `docs/` は
 2026-09-15 に「主線3本＋参照5領域」へ組み替え済み（`docs/README.md`）で、そこでは同じ内容が
 `docs/perf/pie-simd.md` §2・§7 と `docs/scenes/flower.md` に吸収されている。動かしていないのは、
 3本が互いを `docs/flower-decor-cost.md` の名前で参照しているため（`docs/README.md` の「ファイル名は
@@ -40,7 +40,7 @@
 しても 0.987 … 表では多項式の 0.27 に届かない）、シーン 84,661,200 画素の比較で**差は 14 画素**
 （flower 5 / solar_sail 9、すべて 1 段の陰影差、輪郭の移動 0）。線形補間では同じ規則
 （動く画素 ≤0.1% かつ最大段差 ≤1）に入らず、9,104 B/2,276 エントリでも 32 画素・段差 11 だったため
-**2次補間が採用条件**。掃引表と決定の記録は [trig-lut.md](trig-lut.md)、生成器は `tools/gen_fx_lut.py`。
+**2次補間が採用条件**。掃引表と決定の記録は [trig-lut.md](../archive/perf/trig-lut.md)、生成器は `tools/gen_fx_lut.py`。
 
 **VM の中断・復帰（`codex/vm-improve` の3本、2026-09-16 追加）**: QuickJS VM の中断と遅延復帰
 （L2c stage 3a）＋ `tools/vmtest` の整備（segment growth / tco / async audit / build failures /

@@ -9,7 +9,7 @@ from stalls import analyse, parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'main/ui/kasane/ksn_proc_points_pie.c'
-NOTE = ROOT / 'docs/kasane/proc-pie-stall-options.md'
+NOTE = ROOT / 'docs/archive/kasane/proc-pie-stall-options.md'
 TERMS = ('neg_32768', 'xr', 'xa', 'xb', 'xc', 'm00', 'm01',
          'yr', 'ya', 'yb', 'yc', 'm10', 'm11')
 

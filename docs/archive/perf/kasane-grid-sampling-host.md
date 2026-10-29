@@ -1,5 +1,7 @@
 # Fixed-window sampling: host evidence
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 The 240×135 source to 112×63 window has a scale factor of about 2.14 on
 each axis. The current `registerResizeSource` stream reads two complete RGB565
 rows whenever the bilinear plan's vertical base changes, then serves output

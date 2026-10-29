@@ -3,7 +3,7 @@
 対象: `perf/kasane-imgopt`、基点 `origin/vm/design-contracts` = `e323e56`。
 実機には触れていない（`/dev/ttyACM0` は別セッション）。**ミリ秒は 1 つも無い**。ここにある数は
 target ツールチェーンの `objdump`/`size`/`nm` の実測と、ホストで走らせたテストの出力である。
-調査と候補の判断は `docs/perf/kasane-image-transform-recon.md`。
+調査と候補の判断は `docs/archive/perf/kasane-image-transform-recon.md`。
 
 ---
 
