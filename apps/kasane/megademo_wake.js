@@ -37,16 +37,17 @@ const EAR = [-46, -22, 8, -52, -48, 2, -44, -74, -4, -25, -60, 8, -14, -40, 18],
 // each), eyes 86 (30 each: iris 12, pupil 12, the shut lid 4, the
 // highlight 2). The briefing and TWIST (megademo_brief.js) draw with the
 // same arrays. QQ: this frame's pose; EP: an ear's 5 points.
-const SH = pocket.shapes, WN = 146, WM = new Float32Array(3 * WN), WP = new Float32Array(2 * WN), WQ = new Float32Array(12);
+const SH = pocket.shapes, WM = new Float32Array(3 * 146), WP = new Float32Array(2 * 146), WQ = new Float32Array(12);
 const QQ = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], EP = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-const W_EAR = 28, W_IN = 38, W_CORE = 58, W_WH = 74, W_EYE = 86;
-// Colours: the lit room, the glowing iris, the magenta inner ear, the cyan rim.
-const C_GLOW = 0x218b, C_IRIS = 0xbf9f, C_EAR = 0x68aa, C_RIM = 0x067f;
+const W_EAR = 28, W_CORE = 58, W_WH = 74, W_EYE = 86;
+// Colours: the lit room 0x218b, the glowing iris 0xbf9f, the magenta inner
+// ear 0x68aa, the cyan rim C_RIM.
+const C_RIM = 0x067f;
 // Polygons as [start, count] pairs, and the options of each draw.
 const W_CUT = [0, 28, W_EAR, 5, W_EAR + 5, 5], W_GLOW = [W_CORE, 16],
   O_CORE = {top: BACK[1] - BACK[3] * .68, bottom: BACK[1] + BACK[3] * .68},
   W_RINGH = W_CUT.concat(W_GLOW), O_RING = {step: 2}, O_HEAD = {closed: true, hidden: W_CUT.slice(2)},
-  O_EAR = {pieces: 2, hidden: [0, 28]}, W_INS = [[W_IN, 10], [W_IN + 10, 10]],
+  O_EAR = {pieces: 2, hidden: [0, 28]}, W_INS = [[38, 10], [48, 10]],
   W_IRIS = [[W_EYE, 12], [W_EYE + 30, 12]], W_PUP = [[W_EYE + 12, 12], [W_EYE + 42, 12]];
 const wpt = (i, x, y, z) => { WM[3 * i] = x; WM[3 * i + 1] = y; WM[3 * i + 2] = z; };
 // A point of eye k's almond (sg its side): on the face, z on the
@@ -114,7 +115,7 @@ function wake(t) {
       const i = 3 * j, n = 3 * ((j + 1) % 5), f = j === 2 ? .38 : j === 0 || j === 4 ? .6 : .5,
         g = n === 6 ? .38 : n === 0 || n === 12 ? .6 : .5;
       for (let h = 0; h < 2; ++h) {
-        const v = h ? .75 : .25, o = 3 * (W_IN + 10 * k + 2 * j + h);
+        const v = h ? .75 : .25, o = 3 * (38 + 10 * k + 2 * j + h);
         for (let d = 0; d < 3; ++d) {
           const m = (EP[d] + EP[12 + d] + EP[6 + d] * .6) / 2.6, A = EP[i + d] + (m - EP[i + d]) * f,
             B = EP[n + d] + (m - EP[n + d]) * g;
@@ -143,11 +144,11 @@ function wake(t) {
     eye(o + 28, sg, px - q * .8, -h * .45); eye(o + 29, sg, px - q * .2, -h * .45);
   }
   SH.project(WQ, WM, WP, 0, W_CORE);
-  SH.project(WQ, WM, WP, W_WH, WN - W_WH);
+  SH.project(WQ, WM, WP, W_WH, 146 - W_WH);
   // The lit room: the glow minus the head and the ears, soft at its edge:
   // the core (.68 of it) every row, the ring outside every other row.
-  SH.fill(WP, W_GLOW, W_CUT, C_GLOW, O_CORE);
-  SH.fill(WP, BACK, W_RINGH, C_GLOW, O_RING);
+  SH.fill(WP, W_GLOW, W_CUT, 0x218b, O_CORE);
+  SH.fill(WP, BACK, W_RINGH, 0x218b, O_RING);
   // The rim on the outer edges only: a head edge inside an ear is not lit,
   // nor the halves of an ear's edges inside the head.
   SH.outline(WP, 0, 28, C_RIM, O_HEAD);
@@ -157,14 +158,14 @@ function wake(t) {
   // projected winding).
   for (let k = 0; k < 2; ++k) {
     const a = 2 * (W_EAR + 5 * k), C = ((WP[a + 4] - WP[a]) * (WP[a + 9] - WP[a + 1]) - (WP[a + 5] - WP[a + 1]) * (WP[a + 8] - WP[a])) * (k ? -1 : 1);
-    if (C > 400) SH.fill(WP, W_INS[k], undefined, C_EAR);
+    if (C > 400) SH.fill(WP, W_INS[k], undefined, 0x68aa);
   }
   for (let k = 0; k < 6; ++k) SH.outline(WP, W_WH + 2 * k, 2, C_RIM);
   // The dark pupils are the backdrop: only the glowing iris round them is drawn.
   for (let k = 0; k < 2; ++k) {
     const o = W_EYE + 30 * k;
     if (op < .2) { SH.outline(WP, o + 24, 4, C_RIM); continue; }
-    SH.fill(WP, W_IRIS[k], W_PUP[k], C_IRIS);
+    SH.fill(WP, W_IRIS[k], W_PUP[k], 0xbf9f);
     SH.outline(WP, o + 28, 2, WH);
   }
 }

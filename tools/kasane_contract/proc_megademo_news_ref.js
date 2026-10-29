@@ -1,8 +1,9 @@
 // The briefing as it was before pocket.shapes (Act I's VM programs and
 // inputs): the reference workload of the procedural VM's contract tests,
 // equal to proc_megademo.h. Evaluated after apps/kasane/megademo_act1.js
-// (its prog() and f32); the app no longer draws it.
+// (its prog()); the app no longer draws it.
 'use strict';
+const f32 = Math.fround;
 const colors = [
   [0x07ff, 0x3dff, 0xb81f, 0xffff],
   [0xfde0, 0xfb00, 0x07ff, 0xffff],

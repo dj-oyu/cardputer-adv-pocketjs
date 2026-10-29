@@ -49,7 +49,7 @@ function enter(s, f) {
 // the TV is off), CALL (the TV turns itself on, the dive into it), and
 // from SIGNAL CRITICAL in CORE through the cut-out (LOST), which must play
 // on the full screen straight into WAKE's dark.
-const LOCK_CORE = 84, locked = () => scene === 7 || scene === 0 || scene === 6 || scene === 5 && t >= LOCK_CORE;
+const locked = () => scene === 7 || scene === 0 || scene === 6 || scene === 5 && t >= 84;
 // WAKE's eyelids (0 shut .. 1 open): open halfway, a blink, open; shut
 // over the cut to the room (WCUT) and open again, sitting up.
 const lid = t => t < 10 ? 0 : t < 18 ? .55 * smooth((t - 10) / 8) : t < 21 ? .55 - (t - 18) / 6 :
@@ -80,7 +80,7 @@ function build(tx, m) {
     // a view command (80 a scene; the room's set is 43 without the tally
     // in ZENITH), so the wall holds four gates (20 nights; 75 commands);
     // the SORTIE line keeps counting.
-    for (let i = 0; i < M.min(TALLY, night()); ++i) {
+    for (let i = 0; i < M.min(20, night()); ++i) {
       const g = (i / 5) | 0, k = i % 5, x = 197 + (g % 3) * 14, y = 16 + ((g / 3) | 0) * 14;
       if (k < 4) tx.rect({bounds: [x + 3 * k, y, x + 3 * k + 1, y + 10], color: 0x8a7c66ff});
       else for (let s = 0; s < 4; ++s)
@@ -151,10 +151,11 @@ function patch(tx) {
   const on = zoom === 0, f = zoom === ZOOM, S = R.S;
   if (zoom !== zb) { zb = zoom; ZB = boundsAt(zoom); img.setRect(tx, ZB); }
   if (f !== vis) { img.setVisible(tx, !f); mon.setVisible(tx, f); vis = f; }
-  // ZENITH's hit shakes the full-screen image for 12 frames (zb = -1 puts
-  // it back on the next frame).
-  if (scene === 4 && on && t >= 112 && t < 124) {
-    const a = 6 * (1 - (t - 112) / 12), x = rnd(a * M.sin(t * 2.7)), y = rnd(a * M.cos(t * 3.9));
+  // ZENITH's hit and CORE's burst shake the full-screen image for 12
+  // frames (zb = -1 puts it back on the next frame).
+  const k = scene === 4 ? t - 112 : scene === 5 ? t - 115 : -1;
+  if (on && k >= 0 && k < 12) {
+    const a = 6 * (1 - k / 12), x = rnd(a * M.sin(t * 2.7)), y = rnd(a * M.cos(t * 3.9));
     img.setRect(tx, [x, y, 240 + x, 135 + y]);
     zb = -1;
   }

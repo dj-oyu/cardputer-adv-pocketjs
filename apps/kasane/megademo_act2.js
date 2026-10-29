@@ -190,7 +190,7 @@ function core(k, t) {
     D += M.max(M.abs(PJ[2] - PJ[4]), M.abs(PJ[3] - PJ[5]));
     D += M.max(M.abs(PJ[4] - PJ[0]), M.abs(PJ[5] - PJ[1]));
     if (D >= 1e4 || e > 0 && (c += D) > 4000) continue;
-    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], (ts > 0 ? BL : i % 3 ? VI : WH) ^ X);
+    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
   }
   // The core: cube (green) and octahedron (orange), counter-rotating,
   // pulsing; the falling shell crushes it. Cube vertex i is the bits of i,
@@ -230,6 +230,14 @@ function core(k, t) {
   const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 115 ? 0 : 1 - e));
   if (t < 132) E(5, 190 * G, 0, 0, 70 * G, g * .05 + 2 * ee, 120, 67);
   if (L) E(6, t * 1.7, L, 10 + 40 * cr);
+  // The burst's lens flare: a white streak across the core and a short
+  // one down it, flung wide and gone in 10 frames (the triangle plan,
+  // folded flat).
+  if (e > 0 && t < 125) {
+    const w = 30 + 230 * smooth(ramp(t, 115, 120)), v = (1 - ramp(t, 117, 125)) * 40;
+    E(0, 120 - w, 67, 120 + w, 67, 120, 67, WH ^ X);
+    if (v > 1) E(0, 120, 67 - v, 120, 67 + v, 120, 67, WH ^ X);
+  }
 }
 // LOST: CRT off. The line shrinks to a dot, then the dot goes; a few dark
 // frames, and WAKE's closed eyelids go on from the same black.
@@ -252,8 +260,8 @@ function plist(s, tier) {
   const k = KN[tier], z = k.z, w = s < 4 ? corrList(k.c, 0).concat([['st', z.st]]) : null;
   return s < 3 ? [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]].concat(w) :
     s === 3 ? w.concat(corrList(k.c, 0xffff), [['ry']]) :
-    s === 5 ? [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]] :
-    s === 6 ? [['ln', WH], ['ln', BL]] : s === 7 ? [] :
+    s === 5 ? [['tri'], ['qd', 0x17a7], ['qd', OR], ['sg', 0x17a7], ['ry'], ['st', z.st], ['nz', k.k.n]] :
+    s === 6 ? [['ln', WH], ['ln', 0x167f]] : s === 7 ? [] :
     [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa], ['tr', z.sa, z.ts],
       ['sh', 0], ['sh', 1], ['sh', 2], ['sh', 3], ['sh', 4], ['sh', 5], ['sh', 6], ['sh', 7],
       ['rd', z.rr], ['sw', z.sa, RC0, RC1], ['ry']];

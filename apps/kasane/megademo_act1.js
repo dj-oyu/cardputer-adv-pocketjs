@@ -3,10 +3,11 @@
 // pocket.shapes (megademo_brief.js); its old VM programs are the contract
 // tests' workload (tools/kasane_contract/proc_megademo_news_ref.js).
 'use strict';
-const M = Math, f32 = M.fround, rnd = M.round, PI = M.PI;
+const M = Math, rnd = M.round, PI = M.PI;
 const ramp = (t, a, b) => t <= a ? 0 : t >= b ? 1 : (t - a) / (b - a), smooth = u => u * u * (3 - 2 * u);
-// Apple II hi-res palette.
-const WH = 0xffff, VI = 0xfa3f, GR = 0x17a7, BL = 0x167f, OR = 0xfb47;
+// Apple II hi-res palette (violet 0xfa3f, green 0x17a7 and blue 0x167f are
+// written out where used: each global name is a resident atom).
+const WH = 0xffff, OR = 0xfb47;
 // A scene draws through E(plan, inputs...) after BG(backdrop): the loop
 // points them at pocket.kasane (no array per draw: draw() takes numbers);
 // procMegademo.frame() (the host tests) at a list.
@@ -26,12 +27,11 @@ const KN = [
 ];
 // Programs are text, decoded by one function (a generator function per
 // plan costs guest heap at compile time). A letter per ksn_proc_op in
-// opcode order, then its fields: F2 lists the row slot of each, a digit
+// opcode order, then its fields: f lists the row slot of each, a digit
 // for a register (one hex character), a letter for a number (b = 2, d = 4,
 // e = 5; comma-separated, $n is an argument). X x y r zi zn t0 t1 z0 is
 // (x, y) *= z in place (registers; z0 reads zero); Un[o] loads n inputs
 // from register o.
-const OPS = 'SIAMNREVPLQBplC', F2 = ['1d', '12', '123', '123', '12', 'b', '', '23', '23e', '23e', '2', '23', '123', '123', 'be'];
 const hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };
 function prog(S, A) {
   const c = [];
@@ -46,7 +46,8 @@ function prog(S, A) {
       c.push([3, a, x, r, 0, 0], [3, b, y, hx(S, p + 5), 0, 0], [2, a, a, b, 0, 0], [3, b, x, hx(S, p + 4), 0, 0],
         [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, hx(S, p + 8), 0, 0]);
     } else {
-      const k = OPS.indexOf(o), f = F2[k], R = [k, 0, 0, 0, 0, 0];
+      const k = 'SIAMNREVPLQBplC'.indexOf(o), R = [k, 0, 0, 0, 0, 0],
+        f = ['1d', '12', '123', '123', '12', 'b', '', '23', '23e', '23e', '2', '23', '123', '123', 'be'][k];
       let i = p + 1, m = null;
       for (let j = 0; j < f.length; ++j) {
         const r = f.charCodeAt(j);
@@ -57,7 +58,7 @@ function prog(S, A) {
           R[r - 96] = x[0] === '$' ? A[x[1]] : +x;
         }
       }
-      R[4] = f32(R[4]);
+      R[4] = M.fround(R[4]);
       c.push(R);
     }
   }

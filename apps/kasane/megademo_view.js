@@ -45,10 +45,9 @@ const SAY = [, , , '6 122 234 133|10|CROSSING THE RIVER|96|DEEPER|180|INTO LETHE
 '6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|115|AND BREAKS'];
 // Tama sits on the cushion.
 const HOME = [196, 70, 228, 102];
-// The wall's tally shows TALLY nights (night(), megademo_act2.js); the
+// The wall's tally shows 20 nights (night(), megademo_act2.js; build()); the
 // memory clouds with them (LETHE's letters turn to digits, more each night
 // after the first).
-const TALLY = 20;
 const GB = {E: '3', I: '1', O: '0', A: '4', S: '5', T: '7'};
 const gb = s => s.replace(/[EIOAST]/g, (c, i) =>
   (M.sin(i * 12.9898 + sortie * 78.233) * 43758.5453 % 1 + 1) % 1 < M.min(.5, (night() - 1) * .08) ? GB[c] : c);
