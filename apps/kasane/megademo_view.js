@@ -43,6 +43,7 @@ const HOME = [196, 70, 228, 102];
 // The sortie number goes up every night (each WAKE); the memory of the
 // briefing clouds with it: letters turn to digits, more each night.
 let sortie = 741;
+const TALLY = 20;
 const GB = {E: '3', I: '1', O: '0', A: '4', S: '5', T: '7'};
 const gb = s => s.replace(/[EIOAST]/g, (c, i) =>
   (M.sin(i * 12.9898 + sortie * 78.233) * 43758.5453 % 1 + 1) % 1 < M.min(.5, (sortie - 742) * .08) ? GB[c] : c);

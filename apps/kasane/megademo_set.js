@@ -53,10 +53,16 @@ function build(tx, room) {
   if (room) {
     tx.gradient({bounds: [0, 0, 240, 100], axis: 'y', from: 0x0a0618ff, to: GLOW[ch], dither: true});
     ROOM.split(',').forEach(box);
-    // A tally on the wall, a mark a night (three before the first).
-    for (let i = 0; i < M.min(12, sortie - 739); ++i) {
-      const x = 198 + i * 3 + (i >> 2) * 3;
-      tx.rect({bounds: [x, 18, x + 1, 28], color: 0x8a7c66ff});
+    // A tally on the wall, a mark a night (three before the first): four
+    // strokes and a fifth across them (four steps, corner to corner), three
+    // gates a row. Each rect is a view command (80 a scene; the room's set
+    // is 43 without the tally in ZENITH), so the wall holds four gates
+    // (20 nights; 75 commands); the SORTIE line keeps counting.
+    for (let i = 0; i < M.min(TALLY, sortie - 739); ++i) {
+      const g = (i / 5) | 0, k = i % 5, x = 197 + (g % 3) * 14, y = 16 + ((g / 3) | 0) * 14;
+      if (k < 4) tx.rect({bounds: [x + 3 * k, y, x + 3 * k + 1, y + 10], color: 0x8a7c66ff});
+      else for (let s = 0; s < 4; ++s)
+        tx.rect({bounds: [x - 1 + 3 * s, y + 8 - 2 * s, x + 2 + 3 * s, y + 10 - 2 * s], color: 0x8a7c66ff});
     }
     tx.roundRect({bounds: [62, 89, 66, 92], radius: 1, color: 0x17a7ffff});
     // Tama from the briefing to CORE.
