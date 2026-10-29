@@ -225,7 +225,20 @@ function core(k, t) {
     if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, gy ? 0x8410 : OR ^ X);
     // The core's light: dense rays from the middle, a blot of white that
     // swells over the screen.
-    if (t > 146) E(4, 120, 67, 0, t < 156 ? 4 + 2 * (t - 147) : 22 + 128 * smooth(ramp(t, 156, 166)), t * .3, rr, 2 * PI / rr, WH);
+    if (t > 146) {
+      E(4, 120, 67, 0, t < 156 ? 4 + 2 * (t - 147) : 22 + 128 * smooth(ramp(t, 156, 166)), t * .3, rr, 2 * PI / rr, WH);
+      // The ship's after-image near the eye, against the light, in its
+      // yellow's complement (blue), sinking into the white as it swells (a), its faces
+      // drifting apart and dropping out (q).
+      const a = 1 - ramp(t, 156, 166), q = 1.6 * ramp(t, 147, 166);
+      Ycy = 0; Ysy = .6; Dd = 12; Rc = Pcp = 1; Rs = Psp = 0;
+      for (let i = 0; i < 8; ++i)
+        if (q < 1 + i % 3 * .3 && st3(i)) {
+          const x = 30 * q * M.sin(i * 2.3), y = q * (12 * M.cos(i * 1.7) + 4);
+          E(0, PJ[0] + x, PJ[1] + y, PJ[2] + x, PJ[3] + y, PJ[4] + x, PJ[5] + y,
+            rnd(26 * u * (1 - a)) << 11 | rnd(56 * u * (1 - a)) << 5 | rnd(30 * u * (1 - a) + 18 * a));
+        }
+    }
   } else {
     const rr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - .6 * smooth(ramp(t, 78, 88))));
     for (let j = 0; j < k.d && rr; ++j)

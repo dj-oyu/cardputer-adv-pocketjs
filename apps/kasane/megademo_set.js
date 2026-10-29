@@ -238,14 +238,7 @@ function patch(tx) {
   if (!(t & 7)) R.score.setText(tx, (scene === 4 ? 'LETHE' : NAMES[scene]) + ' ' + String(1e6 + tick * 10).slice(1));
   const lc = t & (t > (scene === 4 ? 95 : 71) ? 2 : 8) ? 0xfb47ffff : 0x167fffff;
   if (lc !== R.lc) { R.lamp.setColor(tx, lc); R.lc = lc; }
-  if (scene === 4) {
-    // The lives bob every 4 frames.
-    const k = (t >> 2 & 1) | ((t + 3) >> 2 & 1) << 1 | ((t + 6) >> 2 & 1) << 2;
-    if (k !== R.k) {
-      R.k = k;
-      for (let i = 0; i < 3; ++i) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
-    }
-  } else {
+  if (scene !== 4) {
     const p = M.min(100, t);
     if (p !== R.k) { R.k = p; R.meter.setRect(tx, [64, 128, 65 + rnd(1.69 * p), 130]); }
     if (!(t & 1)) R.stat.setText(tx, 'SIGNAL ' + p);
