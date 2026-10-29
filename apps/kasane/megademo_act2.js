@@ -127,16 +127,23 @@ function zen(z, t) {
 }
 // CORE: an icosahedral shell opens round a pulsing core (cube and
 // octahedron); grey flashes, scan noise and a dolly zoom build to 100
-// (docs/apps/megademo-story.md). JS projects, the plans draw lines.
-// Icosahedron: vertices as sign/golden-ratio codes (i = -1, p/q = +/-phi),
-// faces as hex vertex triples; Q: the cube's and octahedron's quads.
+// (docs/apps/megademo-story.md). pocket.shapes projects (pr), the plans
+// draw lines. Icosahedron: vertices as sign/golden-ratio codes (i = -1,
+// p/q = +/-phi), faces as hex vertex triples; Q: the cube's and
+// octahedron's quads (cube corner i is the bits of i, octahedron corner i
+// the axis i % 3 signed by i < 3); the ship: V its vertices (x right, y
+// down, z ahead; the tail at -3), a character each, (code - 79) / 5 (nose,
+// tail left/right/top/bottom, wing roots and tips, the two ears' base,
+// base and tip, the flame), T its triangles as hex vertex triples (body
+// x4, wings, ears, flame).
 // FC, the fixed numbers, worked out once (no string decoded in a frame):
 // per face its centre, |centre| and corners less the centre (13 a face,
-// 0..259); the ship's vertices (260..313) and triangles (314..340, as
-// offsets in SP); the quads' corners (341..368, offsets in SP); the
-// cube's and octahedron's 14 corners (369..410: cube corner i is the bits
-// of i, octahedron corner i the axis i % 3 signed by i < 3).
-const FC = new Float32Array(411);
+// 0..259); then model points, copied into WM each frame (QV, SV): the
+// quads' corners (28 points) and the ship's triangles' (27).
+// WM / WP points: shell 0..59 (even faces first, then odd: each set has
+// its own twist), quads 60..87, ship 88..114 and again 115..141 (projected
+// with the depth less .8: NaN marks a corner too near the lens).
+const FC = new Float32Array(425), QV = FC.subarray(260, 344), SV = FC.subarray(344);
 {
   const p = (1 + M.sqrt(5)) / 2, n = M.sqrt(1 + p * p), C = {i: -1, '0': 0, '1': 1, p: p, q: -p};
   const S = 'ip01p0iq01q00ip01p0iq01qp0ip01q0iq01', F = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a867981', V = [];
@@ -147,20 +154,30 @@ const FC = new Float32Array(411);
     FC[o + 3] = M.hypot(FC[o], FC[o + 1], FC[o + 2]);
     for (let a = 0; a < 9; ++a) FC[o + 4 + a] = V[(a < 3 ? u : a < 6 ? v : w) + a % 3] - FC[o + a % 3];
   }
-  const Q = '0132457604152637014302531245';
-  for (let i = 0; i < 28; ++i) FC[341 + i] = 2 * hx(Q, i) + (i > 15 ? 16 : 0);
-  for (let i = 0; i < 14; ++i) {
-    const o = i - 8, n = o < 3 ? 1 : -1;
-    FC[369 + 3 * i] = o < 0 ? i & 1 ? 1 : -1 : o % 3 ? 0 : n;
-    FC[370 + 3 * i] = o < 0 ? i & 2 ? 1 : -1 : o % 3 === 1 ? n : 0;
-    FC[371 + 3 * i] = o < 0 ? i & 4 ? 1 : -1 : o % 3 === 2 ? n : 0;
+  const Q = '0132457604152637014302531245', W = 'OOrGO@WO@OI@OS@IOW1QBUOWmQBIM@MKIGAAUM@QKIWAALN?RN?OS=',
+    T = '0130230140245167289abcdefgh';
+  for (let i = 0, o = 260; i < 28; ++i, o += 3) {
+    const c = hx(Q, i), n = c < 3 ? 1 : -1;
+    FC[o] = i < 16 ? c & 1 ? 1 : -1 : c % 3 ? 0 : n;
+    FC[o + 1] = i < 16 ? c & 2 ? 1 : -1 : c % 3 === 1 ? n : 0;
+    FC[o + 2] = i < 16 ? c & 4 ? 1 : -1 : c % 3 === 2 ? n : 0;
   }
+  for (let i = 0; i < 81; ++i) FC[344 + i] = (W.charCodeAt(3 * hx(T, i / 3 | 0) + i % 3) - 79) / 5;
 }
 // The projection: yaw (Ycy, Ysy), pitch (Pcp, Psp), depth Dd, roll (Rc,
-// Rs); a point past the lens must not blow up (the depth is held at
-// 0.4 Dd). PJ: a draw's corners.
+// Rs). pr() puts it, with the yaw (cw, sa) and screen scale K at depth
+// Dd, as pocket.shapes' matrix into WQ (x Rc - w Rs, x Rs + w Rc over
+// Dd + q, round (120, 67)), and projects n points of WM from i into WP.
 let Ycy, Ysy, Pcp, Psp, Dd, Rc = 1, Rs = 0;
-const PJ = [0, 0, 0, 0, 0, 0, 0, 0];
+function pr(cw, sa, K, i, n) {
+  const x = -sa * Pcp, z = cw * Pcp;
+  WQ[0] = 120 * x + K * (Rc * cw - Rs * sa * Psp); WQ[1] = 120 * Psp - K * Rs * Pcp;
+  WQ[2] = 120 * z + K * (Rc * sa + Rs * cw * Psp); WQ[3] = 120 * Dd;
+  WQ[4] = 67 * x + K * (Rs * cw + Rc * sa * Psp); WQ[5] = 67 * Psp + K * Rc * Pcp;
+  WQ[6] = 67 * z + K * (Rs * sa - Rc * cw * Psp); WQ[7] = 67 * Dd;
+  WQ[8] = x; WQ[9] = Psp; WQ[10] = z; WQ[11] = Dd;
+  SH.project(WQ, WM, WP, i, n);
+}
 function core(k, t) {
   // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The ship
   // rams the core at 112: the shell falls in, slow then sudden (m,
@@ -196,50 +213,45 @@ function core(k, t) {
   // The dolly zoom snaps back on the ram.
   Ycy = M.cos(A); Ysy = M.sin(A); Pcp = M.cos(B); Psp = M.sin(B); Dd = 3.2 - 1.6 * d * (1 - m);
   Rc = M.cos(l); Rs = M.sin(l);
-  // Each face shrunk (h), pushed out along its normal (k) and twisted by
-  // b, one way or the other: the twist and the yaw are one turn (cw, sa).
-  // The projection inline (the shell is most of CORE's JS).
+  // Each face shrunk (h) and pushed out along its normal (k), into WM
+  // (face i at point 3 (i % 2 * 10 + i / 2)); twisted by b, one way or
+  // the other, which is one turn with the yaw (the two sets' pr()). A
+  // face's depth sum (ts, light or shade) is its centre's.
   const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee), Cp = M.cos(A + b), Sp = M.sin(A + b), Cm = M.cos(A - b),
-    Sm = M.sin(A - b), SD = sc * Dd, D4 = Dd * .4;
-  let c = 0;
+    Sm = M.sin(A - b);
+  let c = 0, tm = 0;
   for (let i = 0, o = 0; i < 20; ++i, o += 13) {
-    const k = 1 + op * (.8 + .3 * (i % 4)) / FC[o + 3], cx = FC[o] * k, cy = FC[o + 1] * k, H = FC[o + 2] * k,
-      cw = i & 1 ? Cp : Cm, sa = i & 1 ? Sp : Sm;
-    let ts = 0, D = 0;
-    for (let j = 0, p = o + 4; j < 6; j += 2, p += 3) {
-      const x = cx + FC[p] * h, y = cy + FC[p + 1] * h, z = H + FC[p + 2] * h, u = x * cw + z * sa, v = z * cw - x * sa,
-        w = y * Pcp - v * Psp, q = y * Psp + v * Pcp, g = Dd + q, f = SD / (g > D4 ? g : D4),
-        X = PJ[j] = 120 + (u * Rc - w * Rs) * f, Y = PJ[j + 1] = 67 + (u * Rs + w * Rc) * f;
-      ts += q;
-      if (X < -80 || X > 320 || Y < -73 || Y > 207) D = 1e4;
+    const k = 1 + op * (.8 + .3 * (i % 4)) / FC[o + 3], cx = FC[o] * k, cy = FC[o + 1] * k, H = FC[o + 2] * k;
+    if (cy * Psp + (H * (i & 1 ? Cp : Cm) - cx * (i & 1 ? Sp : Sm)) * Pcp > 0) tm |= 1 << i;
+    for (let j = 0, p = o + 4, w = 9 * (i % 2 * 10 + (i >> 1)); j < 3; ++j, p += 3, w += 3) {
+      WM[w] = cx + FC[p] * h; WM[w + 1] = cy + FC[p + 1] * h; WM[w + 2] = H + FC[p + 2] * h;
     }
-    // Lines cost their length unclipped: shards off the screen, or past
-    // 4000 steps in the burst, are not drawn (D).
-    D += M.max(M.abs(PJ[0] - PJ[2]), M.abs(PJ[1] - PJ[3]));
-    D += M.max(M.abs(PJ[2] - PJ[4]), M.abs(PJ[3] - PJ[5]));
-    D += M.max(M.abs(PJ[4] - PJ[0]), M.abs(PJ[5] - PJ[1]));
-    if (D >= 1e4 || e > 0 && (c += D) > 4000) continue;
+  }
+  pr(Cm, Sm, sc * Dd, 0, 30); pr(Cp, Sp, sc * Dd, 30, 30);
+  for (let i = 0; i < 20; ++i) {
+    const w = 6 * (i % 2 * 10 + (i >> 1)), x0 = WP[w], y0 = WP[w + 1], x1 = WP[w + 2], y1 = WP[w + 3], x2 = WP[w + 4],
+      y2 = WP[w + 5];
+    // Shards off the screen (or behind the lens: NaN) are not drawn, nor,
+    // in the burst, past 4000 steps: lines cost their length unclipped.
+    if (!(x0 > -80 && x0 < 320 && y0 > -73 && y0 < 207 && x1 > -80 && x1 < 320 && y1 > -73 && y1 < 207 &&
+      x2 > -80 && x2 < 320 && y2 > -73 && y2 < 207) || e > 0 && (c += M.max(M.abs(x0 - x1), M.abs(y0 - y1)) +
+      M.max(M.abs(x1 - x2), M.abs(y1 - y2)) + M.max(M.abs(x2 - x0), M.abs(y2 - y0))) > 4000) continue;
     // In the burst's glare only light and shade are left: shards grey,
     // light facing the eye, dark turned away (the ring is the one colour).
-    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], gy ? ts > 0 ? 0x4208 : 0xad55 : (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
+    const ts = tm >> i & 1;
+    E(0, x0, y0, x1, y1, x2, y2, gy ? ts ? 0x4208 : 0xad55 : (ts ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
   }
-  // The core (cc): cube and octahedron (LETHE's magenta), pulsing. The
-  // 14 corners are projected once at scale 1 into SP (the ship's buffer,
-  // free until sp()); a quad's scale only multiplies.
+  // The core (cc): cube and octahedron (LETHE's magenta), pulsing; a quad
+  // with a corner behind the lens (NaN) is not drawn.
   const cc = sc * smooth(ramp(g, 58, 72)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * cr) * (1 - m);
   if (cc > 1) {
-    for (let i = 0, p = 369; i < 28; i += 2, p += 3) {
-      const x = FC[p], y = FC[p + 1], z = FC[p + 2], u = x * Ycy + z * Ysy, v = z * Ycy - x * Ysy, w = y * Pcp - v * Psp,
-        q = Dd + y * Psp + v * Pcp, f = Dd / (q > D4 ? q : D4);
-      SP[i] = (u * Rc - w * Rs) * f; SP[i + 1] = (u * Rs + w * Rc) * f;
-    }
-    for (let q = 0; q < 7; ++q) {
-      const O = q > 3, s = cc * (O ? .55 : .33);
-      for (let j = 0; j < 8; j += 2) {
-        const i = FC[341 + 4 * q + j / 2];
-        PJ[j] = 120 + SP[i] * s; PJ[j + 1] = 67 + SP[i + 1] * s;
-      }
-      E(O ? 2 : q < 2 ? 1 : 3, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], PJ[6], PJ[7]);
+    WM.set(QV, 180);
+    pr(Ycy, Ysy, cc * .33 * Dd, 60, 16); pr(Ycy, Ysy, cc * .55 * Dd, 76, 12);
+    for (let q = 0, w = 120; q < 7; ++q, w += 8) {
+      const x0 = WP[w], y0 = WP[w + 1], x1 = WP[w + 2], y1 = WP[w + 3], x2 = WP[w + 4], y2 = WP[w + 5], x3 = WP[w + 6],
+        y3 = WP[w + 7];
+      if (x0 + y0 + x1 + y1 + x2 + y2 + x3 + y3 === x0 + y0 + x1 + y1 + x2 + y2 + x3 + y3)
+        E(q > 3 ? 2 : q < 2 ? 1 : 3, x0, y0, x1, y1, x2, y2, x3, y3);
     }
   }
   // In the burst, a shockwave ring and rays thrown out; before it, rays
@@ -261,10 +273,10 @@ function core(k, t) {
       const a = 1 - ramp(t, 194, 206) ** 2, q = 1.6 * ramp(t, 178, 206);
       Ycy = 0; Ysy = .6; Dd = 12; Rc = Pcp = 1; Rs = Psp = 0;
       const sm = sp();
-      for (let i = 0, o = 54; i < 8; ++i, o += 6)
+      for (let i = 0, w = 176; i < 8; ++i, w += 6)
         if (q < 1 + i % 3 * .3 && sm >> i & 1) {
           const x = 30 * q * M.sin(i * 2.3), y = q * (12 * M.cos(i * 1.7) + 4);
-          E(0, SP[o] + x, SP[o + 1] + y, SP[o + 2] + x, SP[o + 3] + y, SP[o + 4] + x, SP[o + 5] + y,
+          E(0, WP[w] + x, WP[w + 1] + y, WP[w + 2] + x, WP[w + 3] + y, WP[w + 4] + x, WP[w + 5] + y,
             rnd(26 * u * (1 - a)) << 11 | rnd(56 * u * (1 - a)) << 5 | rnd(30 * u * (1 - a) + 18 * a));
         }
     }
@@ -322,55 +334,46 @@ function core(k, t) {
   const r = a + (T >= 72 && T < 84 ? .4 * M.sin((T - 72) * .5) : 0);
   Rc = M.cos(r); Rs = M.sin(r); Pcp = M.cos(a); Psp = -M.sin(a);
   const sm = sp();
-  // Four volleys (58..72): a beam from each wing root and tip, a quarter
-  // of the way at a time, to the shell's middle.
+  // Four volleys (58..72): a beam from each wing root and tip (vertices
+  // 5..8: the wings' first and last corners, WP 200, 204, 206, 210), a
+  // quarter of the way at a time, to the shell's middle.
   for (let v = 58, f; v < 72; v += 4)
     if ((f = (t - v) / 4) >= 0 && f < 1)
       for (let j = 5; j < 9; ++j) {
-        const X = SP[3 * j], Y = SP[3 * j + 1], b = .7 * f, e = b + .3, x = 120 + 4 * (j - 6.5) - X, y = 67 - Y;
+        const n = j < 7 ? 200 + 4 * (j - 5) : 206 + 4 * (j - 7), X = WP[n], Y = WP[n + 1], b = .7 * f, e = b + .3,
+          x = 120 + 4 * (j - 6.5) - X, y = 67 - Y;
         E(0, X + x * b, Y + y * b, X + x * e, Y + y * e, X + x * e, Y + y * e, OR);
       }
   // Screentone first (a manga's dot tone): the underside, wings and ears,
   // the faces that lie under or against another, as 8 rows of dots (plan
   // 7; 36 a face, the dots are segments), so the tone coarsens as the
   // ship looms. Then every outline over it.
-  for (let i = 2, o = 66; i < 8; ++i, o += 6)
-    if (sm >> i & 1) E(7, SP[o], SP[o + 1], (SP[o + 2] - SP[o]) / 8, (SP[o + 3] - SP[o + 1]) / 8, (SP[o + 4] - SP[o + 2]) / 8,
-      (SP[o + 5] - SP[o + 3]) / 8, 8, 1);
-  for (let i = 0, o = 54; i < 9; ++i, o += 6)
-    if (sm >> i & 1) E(0, SP[o], SP[o + 1], SP[o + 2], SP[o + 3], SP[o + 4], SP[o + 5], i > 7 ? T % 3 ? OR : 0xfd20 : 0xffe0);
+  for (let i = 2, w = 188; i < 8; ++i, w += 6)
+    if (sm >> i & 1) E(7, WP[w], WP[w + 1], (WP[w + 2] - WP[w]) / 8, (WP[w + 3] - WP[w + 1]) / 8, (WP[w + 4] - WP[w + 2]) / 8,
+      (WP[w + 5] - WP[w + 3]) / 8, 8, 1);
+  for (let i = 0, w = 176; i < 9; ++i, w += 6)
+    if (sm >> i & 1) E(0, WP[w], WP[w + 1], WP[w + 2], WP[w + 3], WP[w + 4], WP[w + 5], i > 7 ? T % 3 ? OR : 0xfd20 : 0xffe0);
 }
-// The ship: V its vertices (x right, y down, z ahead; the tail at -3),
-// a character each, (code - 79) / 5:
-// nose, tail left/right/top/bottom, wing roots and tips, the two ears
-// (base, base, tip), the flame. T: its triangles as hex vertex triples
-// (body x4, wings, ears, flame). sp() rolls (Rc, Rs), turns (Pcp, Psp),
-// places at (Ycy, Ysy, Dd) and projects every vertex into SP (x, y,
-// depth; 0..53) once a frame, then each triangle's corners (54 + 6 i);
-// returns a bit per triangle that can be drawn: no corner near or behind
-// the lens or past the plans' -480..720. (The shell's projection
-// globals: core() sets them again before the shell each frame, and every
-// name is a resident atom.)
-const SP = new Float32Array(108);
-{
-  const V = 'OOrGO@WO@OI@OS@IOW1QBUOWmQBIM@MKIGAAUM@QKIWAALN?RN?OS=', T = '0130230140245167289abcdefgh';
-  for (let i = 0; i < 54; ++i) FC[260 + i] = (V.charCodeAt(i) - 79) / 5;
-  for (let i = 0; i < 27; ++i) FC[314 + i] = 3 * hx(T, i);
-}
+// sp(): the ship's 9 triangles (WM 88..114, a copy at 115..141) rolled
+// (Rc, Rs), turned (Pcp, Psp), placed at (Ycy, Ysy, Dd) and projected
+// (focal 110) into WP; returns a bit per triangle that can be drawn: no
+// corner within .8 of the lens (the copy, projected with the depth less
+// .8, is NaN there) or past the plans' -480..720.
 function sp() {
-  for (let i = 0; i < 54; i += 3) {
-    const a = FC[260 + i], b = FC[261 + i], c = FC[262 + i], x = a * Rc - b * Rs, y = a * Rs + b * Rc,
-      Z = SP[i + 2] = Dd + c * Pcp - x * Psp;
-    SP[i] = 120 + 110 * (Ycy + x * Pcp + c * Psp) / Z; SP[i + 1] = 67 + 110 * (Ysy + y) / Z;
-  }
+  WM.set(SV, 264); WM.set(SV, 345);
+  const a = -Psp * Rc, b = Psp * Rs;
+  WQ[0] = 120 * a + 110 * Pcp * Rc; WQ[1] = 120 * b - 110 * Pcp * Rs; WQ[2] = 120 * Pcp + 110 * Psp;
+  WQ[3] = 120 * Dd + 110 * Ycy; WQ[4] = 67 * a + 110 * Rs; WQ[5] = 67 * b + 110 * Rc; WQ[6] = 67 * Pcp;
+  WQ[7] = 67 * Dd + 110 * Ysy; WQ[8] = a; WQ[9] = b; WQ[10] = Pcp; WQ[11] = Dd - .8;
+  SH.project(WQ, WM, WP, 115, 27);
+  WQ[11] = Dd;
+  SH.project(WQ, WM, WP, 88, 27);
   let m = 0;
-  for (let i = 0, o = 54, p = 314; i < 9; ++i) {
-    let k = 1;
-    for (let j = 0; j < 3; ++j, ++p, o += 2) {
-      const q = FC[p], x = SP[o] = SP[q], y = SP[o + 1] = SP[q + 1];
-      k &= SP[q + 2] >= .8 && x > -400 && x < 640 && y > -400 && y < 640;
-    }
-    m |= k << i;
+  for (let i = 0, w = 176; i < 9; ++i, w += 6) {
+    const x0 = WP[w], y0 = WP[w + 1], x1 = WP[w + 2], y1 = WP[w + 3], x2 = WP[w + 4], y2 = WP[w + 5];
+    if (WP[w + 54] === WP[w + 54] && WP[w + 56] === WP[w + 56] && WP[w + 58] === WP[w + 58] && x0 > -400 && x0 < 640 &&
+      y0 > -400 && y0 < 640 && x1 > -400 && x1 < 640 && y1 > -400 && y1 < 640 && x2 > -400 && x2 < 640 && y2 > -400 &&
+      y2 < 640) m |= 1 << i;
   }
   return m;
 }
