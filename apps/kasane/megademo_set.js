@@ -59,12 +59,12 @@ function build(tx, room) {
   if (room) {
     tx.gradient({bounds: [0, 0, 240, 100], axis: 'y', from: 0x0a0618ff, to: GLOW[ch], dither: true});
     ROOM.split(',').forEach(box);
-    // A tally on the wall, a mark a night (three before the first): four
+    // A tally on the wall, a mark a night (night()): four
     // strokes and a fifth across them (four steps, corner to corner), three
     // gates a row. Each rect is a view command (80 a scene; the room's set
     // is 43 without the tally in ZENITH), so the wall holds four gates
     // (20 nights; 75 commands); the SORTIE line keeps counting.
-    for (let i = 0; i < M.min(TALLY, sortie - 739); ++i) {
+    for (let i = 0; i < M.min(TALLY, night()); ++i) {
       const g = (i / 5) | 0, k = i % 5, x = 197 + (g % 3) * 14, y = 16 + ((g / 3) | 0) * 14;
       if (k < 4) tx.rect({bounds: [x + 3 * k, y, x + 3 * k + 1, y + 10], color: 0x8a7c66ff});
       else for (let s = 0; s < 4; ++s)
