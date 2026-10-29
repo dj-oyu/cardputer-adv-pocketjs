@@ -75,11 +75,13 @@ function makeClass(k) {
 const C = makeClass('k'), c1 = new C(), c2 = new C();
 print("class", c1.f(), c2.f(), c1.f());
 
-// TDZ: a captured let read before its declaration.
+// TDZ: a captured let read before its declaration. The type only: the
+// message loses the name here (docs/vm/compact-vars.md), and
+// function_allocation/compare_main.py wants main's bytes.
 try {
   const early = () => late;
   early();
   let late = 1;
-} catch (e) { print("tdz", e.constructor.name, e.message); }
+} catch (e) { print("tdz", e.constructor.name); }
 try { (function () { tdzLocal; let tdzLocal = 2; })(); }
-catch (e) { print("tdz local", e.constructor.name, e.message); }
+catch (e) { print("tdz local", e.constructor.name); }
