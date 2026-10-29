@@ -119,6 +119,9 @@ static bool eval(const char *source,size_t len,const char *name){
     JS_FreeValue(ctx,v);
     JSContext *c;
     while(JS_ExecutePendingJob(rt,&c)>0){}
+    /* The turn is over: the firmware returns the cached frame segments
+     * (components/pocketjs_guest/src/guest.c, D43). */
+    JS_VMStackTrim(rt);
     pocket_kasane_end_turn();
     return ok;
 }
@@ -227,6 +230,7 @@ static JSValue js_now(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
     return JS_NewFloat64(c,(double)ts.tv_sec*1e9+(double)ts.tv_nsec);
 }
 
+void vmtest_vmstack_report(JSRuntime *rt,void *out); /* quickjs-vm.c */
 int main(int argc,char **argv){
     const char *path=argc>1?argv[1]:"apps/kasane/proc_megademo.js";
     const bool baseline=argc>2&&!strcmp(argv[2],"--baseline");
@@ -304,6 +308,9 @@ int main(int argc,char **argv){
         struct timespec ts0,ts1;clock_gettime(CLOCK_MONOTONIC,&ts0);
         eval(call,strlen(call),"frame.js");
         clock_gettime(CLOCK_MONOTONIC,&ts1);
+        /* MEGA_TIMES: one line a frame (scene, its t, host us of frame()). */
+        if(getenv("MEGA_TIMES"))printf("TIME %u %u %.1f\n",(unsigned)num("scene")&7,(unsigned)num("t"),
+            (ts1.tv_sec-ts0.tv_sec)*1e6+(ts1.tv_nsec-ts0.tv_nsec)/1e3);
         if(sc<8){st_frames[sc]++;st_calls[sc]+=alloc_calls-a0;st_bytes[sc]+=alloc_bytes-b0;
             const double us=(ts1.tv_sec-ts0.tv_sec)*1e6+(ts1.tv_nsec-ts0.tv_nsec)/1e3;
             st_us[sc]+=us;if(us>st_usmax[sc])st_usmax[sc]=us;}
@@ -325,6 +332,10 @@ int main(int argc,char **argv){
         size_t h=heap_used();if(h>heap_peak)heap_peak=h;
         JS_RunGC(rt);
         h=heap_used();if(h>heap_live_peak)heap_live_peak=h;{size_t r=heap_req();if(r>req_live_peak)req_live_peak=r;}
+        /* MEGA_MEMDUMP_AT=t: the collected heap's breakdown after frame t. */
+        if(getenv("MEGA_MEMDUMP_AT")&&strtoul(getenv("MEGA_MEMDUMP_AT"),NULL,0)==t){
+            JSMemoryUsage mu;JS_ComputeMemoryUsage(rt,&mu);JS_DumpMemoryUsage(stdout,&mu,rt);
+            vmtest_vmstack_report(rt,stdout);}
         if(getenv("MEGA_HEAPTRACE")&&!(t%8))
             printf("heap t=%u live=%zu ...%s\n",t,h,strlen(scene_log)>12?scene_log+strlen(scene_log)-12:scene_log);
         if(ppm_dir){

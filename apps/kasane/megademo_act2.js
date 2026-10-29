@@ -129,24 +129,38 @@ function zen(z, t) {
 // octahedron); grey flashes, scan noise and a dolly zoom build to 100
 // (docs/apps/megademo-story.md). JS projects, the plans draw lines.
 // Icosahedron: vertices as sign/golden-ratio codes (i = -1, p/q = +/-phi),
-// faces as hex vertex triples; QD: the cube's and octahedron's quads.
-const IV = [], IFS = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a867981',
-  QD = '0132457604152637014302531245';
+// faces as hex vertex triples; Q: the cube's and octahedron's quads.
+// FC, the fixed numbers, worked out once (no string decoded in a frame):
+// per face its centre, |centre| and corners less the centre (13 a face,
+// 0..259); the ship's vertices (260..313) and triangles (314..340, as
+// offsets in SP); the quads' corners (341..368, offsets in SP); the
+// cube's and octahedron's 14 corners (369..410: cube corner i is the bits
+// of i, octahedron corner i the axis i % 3 signed by i < 3).
+const FC = new Float32Array(411);
 {
   const p = (1 + M.sqrt(5)) / 2, n = M.sqrt(1 + p * p), C = {i: -1, '0': 0, '1': 1, p: p, q: -p};
-  const S = 'ip01p0iq01q00ip01p0iq01qp0ip01q0iq01';
-  for (let i = 0; i < 36; ++i) IV.push(C[S[i]] / n);
+  const S = 'ip01p0iq01q00ip01p0iq01qp0ip01q0iq01', F = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a867981', V = [];
+  for (let i = 0; i < 36; ++i) V.push(C[S[i]] / n);
+  for (let i = 0, o = 0; i < 20; ++i, o += 13) {
+    const u = 3 * hx(F, 3 * i), v = 3 * hx(F, 3 * i + 1), w = 3 * hx(F, 3 * i + 2);
+    for (let a = 0; a < 3; ++a) FC[o + a] = V[u + a] / 3 + V[v + a] / 3 + V[w + a] / 3;
+    FC[o + 3] = M.hypot(FC[o], FC[o + 1], FC[o + 2]);
+    for (let a = 0; a < 9; ++a) FC[o + 4 + a] = V[(a < 3 ? u : a < 6 ? v : w) + a % 3] - FC[o + a % 3];
+  }
+  const Q = '0132457604152637014302531245';
+  for (let i = 0; i < 28; ++i) FC[341 + i] = 2 * hx(Q, i) + (i > 15 ? 16 : 0);
+  for (let i = 0; i < 14; ++i) {
+    const o = i - 8, n = o < 3 ? 1 : -1;
+    FC[369 + 3 * i] = o < 0 ? i & 1 ? 1 : -1 : o % 3 ? 0 : n;
+    FC[370 + 3 * i] = o < 0 ? i & 2 ? 1 : -1 : o % 3 === 1 ? n : 0;
+    FC[371 + 3 * i] = o < 0 ? i & 4 ? 1 : -1 : o % 3 === 2 ? n : 0;
+  }
 }
-// pj(): yaw, pitch, project at scale s into PJ[j], PJ[j + 1]; returns z
-// (> 0: away). A petal past the lens must not blow up.
+// The projection: yaw (Ycy, Ysy), pitch (Pcp, Psp), depth Dd, roll (Rc,
+// Rs); a point past the lens must not blow up (the depth is held at
+// 0.4 Dd). PJ: a draw's corners.
 let Ycy, Ysy, Pcp, Psp, Dd, Rc = 1, Rs = 0;
 const PJ = [0, 0, 0, 0, 0, 0, 0, 0];
-function pj(x, y, z, s, j) {
-  const u = x * Ycy + z * Ysy, v = z * Ycy - x * Ysy, w = y * Pcp - v * Psp, q = y * Psp + v * Pcp,
-    f = s * Dd / M.max(Dd + q, Dd * .4);
-  PJ[j] = 120 + (u * Rc - w * Rs) * f; PJ[j + 1] = 67 + (u * Rs + w * Rc) * f;
-  return q;
-}
 function core(k, t) {
   // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The ship
   // rams the core at 112: the shell falls in, slow then sudden (m,
@@ -182,20 +196,22 @@ function core(k, t) {
   // The dolly zoom snaps back on the ram.
   Ycy = M.cos(A); Ysy = M.sin(A); Pcp = M.cos(B); Psp = M.sin(B); Dd = 3.2 - 1.6 * d * (1 - m);
   Rc = M.cos(l); Rs = M.sin(l);
-  const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee);
+  // Each face shrunk (h), pushed out along its normal (k) and twisted by
+  // b, one way or the other: the twist and the yaw are one turn (cw, sa).
+  // The projection inline (the shell is most of CORE's JS).
+  const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee), Cp = M.cos(A + b), Sp = M.sin(A + b), Cm = M.cos(A - b),
+    Sm = M.sin(A - b), SD = sc * Dd, D4 = Dd * .4;
   let c = 0;
-  for (let i = 0; i < 20; ++i) {
-    // Shrink each face (h), push it out along its normal (l), twist it (a).
-    const u = 3 * hx(IFS, 3 * i), v = 3 * hx(IFS, 3 * i + 1), w = 3 * hx(IFS, 3 * i + 2),
-      cx = IV[u] / 3 + IV[v] / 3 + IV[w] / 3, cy = IV[u + 1] / 3 + IV[v + 1] / 3 + IV[w + 1] / 3,
-      H = IV[u + 2] / 3 + IV[v + 2] / 3 + IV[w + 2] / 3,
-      l = op * (.8 + .3 * (i % 4)) / M.hypot(cx, cy, H), a = b * (i & 1 ? 1 : -1), cw = M.cos(a), sa = M.sin(a);
+  for (let i = 0, o = 0; i < 20; ++i, o += 13) {
+    const k = 1 + op * (.8 + .3 * (i % 4)) / FC[o + 3], cx = FC[o] * k, cy = FC[o + 1] * k, H = FC[o + 2] * k,
+      cw = i & 1 ? Cp : Cm, sa = i & 1 ? Sp : Sm;
     let ts = 0, D = 0;
-    for (let j = 0; j < 3; ++j) {
-      const q = j ? j > 1 ? w : v : u, x = cx + (IV[q] - cx) * h + cx * l, y = cy + (IV[q + 1] - cy) * h + cy * l,
-        z = H + (IV[q + 2] - H) * h + H * l;
-      ts += pj(x * cw + z * sa, y, z * cw - x * sa, sc, 2 * j);
-      if (M.abs(PJ[2 * j] - 120) > 200 || M.abs(PJ[2 * j + 1] - 67) > 140) D = 1e4;
+    for (let j = 0, p = o + 4; j < 6; j += 2, p += 3) {
+      const x = cx + FC[p] * h, y = cy + FC[p + 1] * h, z = H + FC[p + 2] * h, u = x * cw + z * sa, v = z * cw - x * sa,
+        w = y * Pcp - v * Psp, q = y * Psp + v * Pcp, g = Dd + q, f = SD / (g > D4 ? g : D4),
+        X = PJ[j] = 120 + (u * Rc - w * Rs) * f, Y = PJ[j + 1] = 67 + (u * Rs + w * Rc) * f;
+      ts += q;
+      if (X < -80 || X > 320 || Y < -73 || Y > 207) D = 1e4;
     }
     // Lines cost their length unclipped: shards off the screen, or past
     // 4000 steps in the burst, are not drawn (D).
@@ -207,18 +223,24 @@ function core(k, t) {
     // light facing the eye, dark turned away (the ring is the one colour).
     E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], gy ? ts > 0 ? 0x4208 : 0xad55 : (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
   }
-  // The core (cc): cube and octahedron (LETHE's magenta), pulsing. Cube
-  // vertex i is the bits of i, octahedron vertex i the axis i % 3 signed
-  // by i < 3.
+  // The core (cc): cube and octahedron (LETHE's magenta), pulsing. The
+  // 14 corners are projected once at scale 1 into SP (the ship's buffer,
+  // free until sp()); a quad's scale only multiplies.
   const cc = sc * smooth(ramp(g, 58, 72)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * cr) * (1 - m);
-  if (cc > 1) for (let q = 0; q < 7; ++q) {
-    const O = q > 3, s = cc * (O ? .55 : .33);
-    for (let j = 0; j < 4; ++j) {
-      const i = hx(QD, 4 * q + j), n = i < 3 ? 1 : -1;
-      if (O) pj(i % 3 ? 0 : n, i % 3 === 1 ? n : 0, i % 3 === 2 ? n : 0, s, 2 * j);
-      else pj(i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1, s, 2 * j);
+  if (cc > 1) {
+    for (let i = 0, p = 369; i < 28; i += 2, p += 3) {
+      const x = FC[p], y = FC[p + 1], z = FC[p + 2], u = x * Ycy + z * Ysy, v = z * Ycy - x * Ysy, w = y * Pcp - v * Psp,
+        q = Dd + y * Psp + v * Pcp, f = Dd / (q > D4 ? q : D4);
+      SP[i] = (u * Rc - w * Rs) * f; SP[i + 1] = (u * Rs + w * Rc) * f;
     }
-    E(O ? 2 : q < 2 ? 1 : 3, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], PJ[6], PJ[7]);
+    for (let q = 0; q < 7; ++q) {
+      const O = q > 3, s = cc * (O ? .55 : .33);
+      for (let j = 0; j < 8; j += 2) {
+        const i = FC[341 + 4 * q + j / 2];
+        PJ[j] = 120 + SP[i] * s; PJ[j + 1] = 67 + SP[i + 1] * s;
+      }
+      E(O ? 2 : q < 2 ? 1 : 3, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], PJ[6], PJ[7]);
+    }
   }
   // In the burst, a shockwave ring and rays thrown out; before it, rays
   // from 64 and three beams sweeping round (64..84) to dodge.
@@ -238,10 +260,11 @@ function core(k, t) {
       // drifting apart and dropping out (q).
       const a = 1 - ramp(t, 194, 206) ** 2, q = 1.6 * ramp(t, 178, 206);
       Ycy = 0; Ysy = .6; Dd = 12; Rc = Pcp = 1; Rs = Psp = 0;
-      for (let i = 0; i < 8; ++i)
-        if (q < 1 + i % 3 * .3 && st3(i)) {
+      const sm = sp();
+      for (let i = 0, o = 54; i < 8; ++i, o += 6)
+        if (q < 1 + i % 3 * .3 && sm >> i & 1) {
           const x = 30 * q * M.sin(i * 2.3), y = q * (12 * M.cos(i * 1.7) + 4);
-          E(0, PJ[0] + x, PJ[1] + y, PJ[2] + x, PJ[3] + y, PJ[4] + x, PJ[5] + y,
+          E(0, SP[o] + x, SP[o + 1] + y, SP[o + 2] + x, SP[o + 3] + y, SP[o + 4] + x, SP[o + 5] + y,
             rnd(26 * u * (1 - a)) << 11 | rnd(56 * u * (1 - a)) << 5 | rnd(30 * u * (1 - a) + 18 * a));
         }
     }
@@ -298,49 +321,58 @@ function core(k, t) {
   Ycy = 3.4 * (1 - q); Ysy = 1.6 + 1.4 * (1 - q) - 1.6 * w; Dd = 4.6 + 5.4 * q + 300 * w * w;
   const r = a + (T >= 72 && T < 84 ? .4 * M.sin((T - 72) * .5) : 0);
   Rc = M.cos(r); Rs = M.sin(r); Pcp = M.cos(a); Psp = -M.sin(a);
+  const sm = sp();
   // Four volleys (58..72): a beam from each wing root and tip, a quarter
   // of the way at a time, to the shell's middle.
   for (let v = 58, f; v < 72; v += 4)
     if ((f = (t - v) / 4) >= 0 && f < 1)
       for (let j = 5; j < 9; ++j) {
-        sv(j, 6);
-        const b = .7 * f, e = b + .3, x = 120 + 4 * (j - 6.5) - PJ[6], y = 67 - PJ[7];
-        E(0, PJ[6] + x * b, PJ[7] + y * b, PJ[6] + x * e, PJ[7] + y * e, PJ[6] + x * e, PJ[7] + y * e, OR);
+        const X = SP[3 * j], Y = SP[3 * j + 1], b = .7 * f, e = b + .3, x = 120 + 4 * (j - 6.5) - X, y = 67 - Y;
+        E(0, X + x * b, Y + y * b, X + x * e, Y + y * e, X + x * e, Y + y * e, OR);
       }
   // Screentone first (a manga's dot tone): the underside, wings and ears,
   // the faces that lie under or against another, as 8 rows of dots (plan
   // 7; 36 a face, the dots are segments), so the tone coarsens as the
   // ship looms. Then every outline over it.
-  for (let i = 2; i < 8; ++i)
-    if (st3(i)) E(7, PJ[0], PJ[1], (PJ[2] - PJ[0]) / 8, (PJ[3] - PJ[1]) / 8, (PJ[4] - PJ[2]) / 8, (PJ[5] - PJ[3]) / 8, 8, 1);
-  for (let i = 0; i < 9; ++i)
-    if (st3(i)) E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], i > 7 ? T % 3 ? OR : 0xfd20 : 0xffe0);
+  for (let i = 2, o = 66; i < 8; ++i, o += 6)
+    if (sm >> i & 1) E(7, SP[o], SP[o + 1], (SP[o + 2] - SP[o]) / 8, (SP[o + 3] - SP[o + 1]) / 8, (SP[o + 4] - SP[o + 2]) / 8,
+      (SP[o + 5] - SP[o + 3]) / 8, 8, 1);
+  for (let i = 0, o = 54; i < 9; ++i, o += 6)
+    if (sm >> i & 1) E(0, SP[o], SP[o + 1], SP[o + 2], SP[o + 3], SP[o + 4], SP[o + 5], i > 7 ? T % 3 ? OR : 0xfd20 : 0xffe0);
 }
-// st3(): the ship's triangle i into PJ[0..5]; false when a corner is near
-// or behind the lens or its point is past the plans' -480..720.
-function st3(i) {
-  let k = 1;
-  for (let j = 0; j < 3; ++j) {
-    if (sv(hx(STR, 3 * i + j), 2 * j) < .8) return false;
-    k &= PJ[2 * j] > -400 && PJ[2 * j] < 640 && PJ[2 * j + 1] > -400 && PJ[2 * j + 1] < 640;
-  }
-  return k > 0;
-}
-// The ship: SV its vertices (x right, y down, z ahead; the tail at -3),
+// The ship: V its vertices (x right, y down, z ahead; the tail at -3),
 // a character each, (code - 79) / 5:
 // nose, tail left/right/top/bottom, wing roots and tips, the two ears
-// (base, base, tip), the flame. STR: its triangles as hex vertex triples
-// (body x4, wings, ears, flame). sv() rolls (Rc, Rs), turns (Pcp, Psp),
-// places at (Ycy, Ysy, Dd) and projects vertex i into PJ[j], PJ[j + 1];
-// returns its depth. (The shell's projection globals: core() sets them
-// again before the shell each frame, and every name is a resident atom.)
-const SV = 'OOrGO@WO@OI@OS@IOW1QBUOWmQBIM@MKIGAAUM@QKIWAALN?RN?OS=',
-  STR = '0130230140245167289abcdefgh';
-function sv(i, j) {
-  const a = (SV.charCodeAt(3 * i) - 79) / 5, b = (SV.charCodeAt(3 * i + 1) - 79) / 5,
-    c = (SV.charCodeAt(3 * i + 2) - 79) / 5, x = a * Rc - b * Rs, y = a * Rs + b * Rc, Z = Dd + c * Pcp - x * Psp;
-  PJ[j] = 120 + 110 * (Ycy + x * Pcp + c * Psp) / Z; PJ[j + 1] = 67 + 110 * (Ysy + y) / Z;
-  return Z;
+// (base, base, tip), the flame. T: its triangles as hex vertex triples
+// (body x4, wings, ears, flame). sp() rolls (Rc, Rs), turns (Pcp, Psp),
+// places at (Ycy, Ysy, Dd) and projects every vertex into SP (x, y,
+// depth; 0..53) once a frame, then each triangle's corners (54 + 6 i);
+// returns a bit per triangle that can be drawn: no corner near or behind
+// the lens or past the plans' -480..720. (The shell's projection
+// globals: core() sets them again before the shell each frame, and every
+// name is a resident atom.)
+const SP = new Float32Array(108);
+{
+  const V = 'OOrGO@WO@OI@OS@IOW1QBUOWmQBIM@MKIGAAUM@QKIWAALN?RN?OS=', T = '0130230140245167289abcdefgh';
+  for (let i = 0; i < 54; ++i) FC[260 + i] = (V.charCodeAt(i) - 79) / 5;
+  for (let i = 0; i < 27; ++i) FC[314 + i] = 3 * hx(T, i);
+}
+function sp() {
+  for (let i = 0; i < 54; i += 3) {
+    const a = FC[260 + i], b = FC[261 + i], c = FC[262 + i], x = a * Rc - b * Rs, y = a * Rs + b * Rc,
+      Z = SP[i + 2] = Dd + c * Pcp - x * Psp;
+    SP[i] = 120 + 110 * (Ycy + x * Pcp + c * Psp) / Z; SP[i + 1] = 67 + 110 * (Ysy + y) / Z;
+  }
+  let m = 0;
+  for (let i = 0, o = 54, p = 314; i < 9; ++i) {
+    let k = 1;
+    for (let j = 0; j < 3; ++j, ++p, o += 2) {
+      const q = FC[p], x = SP[o] = SP[q], y = SP[o + 1] = SP[q + 1];
+      k &= SP[q + 2] >= .8 && x > -400 && x < 640 && y > -400 && y < 640;
+    }
+    m |= k << i;
+  }
+  return m;
 }
 // LOST: CRT off, a line to a dot to black; WAKE's closed eyes follow.
 function lost(t) {
