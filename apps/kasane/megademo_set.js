@@ -1,6 +1,5 @@
-// MEGADEMO chunk 5: the view's state, the plan loader and the set's build
-// and patch (megademo_view.js has its tables). patch() writes a ref only
-// when its value changes: every write is a view command to re-check.
+// MEGADEMO chunk: the view's state, the plan loader and the set's build
+// and patch. patch() writes a ref only when its value changes.
 'use strict';
 // The full screen, the monitor in the room, and the camera's steps between.
 const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
@@ -75,11 +74,8 @@ function build(tx, m) {
   if (m) {
     tx.gradient({bounds: [0, 0, 240, 100], axis: 'y', from: 0x0a0618ff, to: GLOW[ch], dither: true});
     ROOM.split(',').forEach(box);
-    // A tally on the wall, a mark a night: four strokes and a fifth across
-    // them (four steps, corner to corner), three gates a row. Each rect is
-    // a view command (80 a scene; the room's set is 43 without the tally
-    // in ZENITH), so the wall holds four gates (20 nights; 75 commands);
-    // the SORTIE line keeps counting.
+    // A tally on the wall, a mark a night, five to a gate. Each rect is a
+    // view command (80 a scene; ZENITH's room is 43 without it): 20 nights.
     for (let i = 0; i < M.min(20, night()); ++i) {
       const g = (i / 5) | 0, k = i % 5, x = 197 + (g % 3) * 14, y = 16 + ((g / 3) | 0) * 14;
       if (k < 4) tx.rect({bounds: [x + 3 * k, y, x + 3 * k + 1, y + 10], color: 0x8a7c66ff});

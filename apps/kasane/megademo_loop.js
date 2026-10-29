@@ -1,15 +1,12 @@
-// MEGADEMO chunk 6: the draw plumbing and frame(). WAKE plays first.
+// MEGADEMO chunk: the draw plumbing and frame(). WAKE plays first.
 'use strict';
 enter(7);
 let boot = true;
-// A plan's draw: its inputs as numbers (no array), skipped until the plan
-// is registered (the loader spreads registrations over frames). nd counts
-// a frame's draws for CORE's readout.
+// A plan's draw, skipped until the plan is registered; nd counts draws.
 E = (k, a, b, c, d, e, f, g, h) => { const p = live[k]; ++nd; if (p) H.draw(p, a, b, c, d, e, f, g, h); };
 BG = b => { H.beginFrame(b); };
-// The set per scene and tier, rebuilt when the room comes into view; the
-// same transaction patches it, so a scene's first frame never shows
-// build()'s defaults.
+// The set per scene and tier, rebuilt (and patched in the same
+// transaction) when the key changes.
 const PATCH = tx => patch(tx), REBUILD = tx => { build(tx, zoom > 0); patch(tx); };
 globalThis.frame = function (buttons) {
   buttons |= 0;

@@ -1,11 +1,8 @@
 // MEGADEMO chunk: Act I (the briefing) and TWIST's overlays, drawn with
-// pocket.shapes into WAKE's arrays. The TV is a cockpit display: the world
-// (a floor grid, the route's gates, LETHE far off) under a HUD (tapes, a
-// pitch ladder, five brain waves, a spectrum, a scope), all on one beat.
-// CALL boots it from a lone carrier; ROUTE lights the gates near to far;
-// VOYAGE cranes up over the whole route, the ship sets out and the camera
-// drops in behind it. Words: numbers no one reads, and LETHE.
-// docs/apps/megademo-story.md (the code is dense: its bytecode is heap).
+// pocket.shapes into WAKE's arrays: a cockpit display, the world (floor
+// grid, the route's gates, LETHE) under a HUD on one beat. CALL boots it,
+// ROUTE lights the gates, VOYAGE cranes over the route and drops in behind
+// the ship (docs/apps/megademo-story.md; dense code: its bytecode is heap).
 'use strict';
 const OCT = [0, 1, 2, 3, 0, 4, 1, 5, 2, 4, 3, 5, 0], BS = [108, 61, 113, 61, 116, 65, 120, 62, 124, 65, 127, 61, 132, 61],
   ARW = [0, 26, 16, -12, 0, -4, -16, -12, 0, 26];
@@ -31,13 +28,10 @@ function world() {
   for (let j = 0; j < 24; ++j) wpt(72 + j, j % 6 > 4 ? NaN : -120 + 120 * (j / 6 | 0), 0, -60 + 400 * (j % 6));
   for (let m = 0; m < 18; ++m) wpt(96 + m, m % 3 > 1 ? NaN : m % 3 ? 240 : -120, 0, 100 + 280 * (m / 3 | 0));
 }
-// The camera keys, 7 numbers each [t, target x y z, distance, yaw, pitch]:
-// down the route; VOYAGE goes up and round over all of it, holds while
-// the ship sets out, then drops in behind the ship looking ahead (TWIST is
-// next). The last key flies along the route: it closes on the sixth gate
-// (s 700) along its normal at 12.6 a frame, 123 short at the cut: TWIST's
-// first frame, at its speed (gates are TWIST's cross-section: Q0, 2 x 2.5
-// at 60 units, the camera 12 left of the middle and 57 up). CC: this frame's.
+// The camera keys, 7 numbers each [t, target x y z, distance, yaw, pitch].
+// The last flies along the route: it closes on the sixth gate at 12.6 a
+// frame, 123 short at the cut, which is TWIST's first frame at its speed
+// (the gates are TWIST's cross-section). CC: this frame's camera.
 const K = [0, 0, 57, 120, 200, 0, 0, 44, 52, 0, 830, 1250, -1.5708, 1.05, 78, 70, 0, 880, 1150, -1.5708, 1,
   96, 0, 57, 0, 100, 0, 0], CC = [0, 0, 0, 0, 0, 0, 0];
 // The readouts (speed, height, a code) and LETHE's tag on screen (x NaN:
@@ -111,12 +105,9 @@ function brief(s, t) {
     if (w > 0 && x > -30 && x < 236 && y > 10 && y < 134 && !(s > 1 && t > 80)) { TGX = x; TGY = y; }
   }
   if (s > 1 && (t >= 40 || t >= 30 && t & 2)) { SH.outline(WP, 127, 5, WH); SH.outline(WP, 132, 9, 0x57f9); }
-  // The HUD, plans over the world (megademo_act1.js, T): the carrier
-  // (alone mid-screen on CALL, then up into the top strip, modulated),
-  // heading, speed and height tapes, the pitch ladder (a rung each 10
-  // degrees, the horizon long), five brain waves (their own rhythms, one
-  // spike together on the beat; the middle one flattens as the ship
-  // leaves), a spectrum and a scope.
+  // The HUD (plans): the carrier, heading/speed/height tapes, the pitch
+  // ladder, five brain waves (one spike together on the beat; the middle
+  // one flattens as the ship leaves), a spectrum and a scope.
   const A = s ? 1 : smooth(ramp(t, 20, 36)), spd = g * .2 + (s > 1 ? 30 * ramp(t, 40, 96) ** 3 : 0), B = (CC[6] * 103 - 35) / 18;
   E(3, 67 - 58 * A, 14 - 11 * A, -g * .45, s ? .4 : .4 * ramp(t, 12, 20), g * .21);
   if (on(s, t, 26)) comb(1, 70, 170, 17, CC[5] * 11.5, -4, 5);

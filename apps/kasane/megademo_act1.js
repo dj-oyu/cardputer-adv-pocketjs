@@ -1,16 +1,14 @@
-// MEGADEMO chunk 1 (proc_megademo.js loads it): shared maths, the load
-// tiers, the plan text decoder and the plan templates. Act I draws with
-// pocket.shapes (megademo_brief.js); its old VM programs are the contract
-// tests' workload (tools/kasane_contract/proc_megademo_news_ref.js).
+// MEGADEMO chunk 1: shared maths, the load tiers, the plan text decoder and
+// the plan templates. Every distinct name (global or local) is a resident
+// atom (~60 B): the chunks reuse short names and write out numbers used
+// once (docs/apps/megademo-story.md, 2026-10-29).
 'use strict';
 const M = Math, rnd = M.round, PI = M.PI;
 const ramp = (t, a, b) => t <= a ? 0 : t >= b ? 1 : (t - a) / (b - a), smooth = u => u * u * (3 - 2 * u);
-// Apple II hi-res palette (violet 0xfa3f, green 0x17a7 and blue 0x167f are
-// written out where used: each global name is a resident atom).
+// Apple II hi-res palette (violet 0xfa3f, green 0x17a7, blue 0x167f inline).
 const WH = 0xffff, OR = 0xfb47;
-// A scene draws through E(plan, inputs...) after BG(backdrop): the loop
-// points them at pocket.kasane (no array per draw: draw() takes numbers);
-// procMegademo.frame() (the host tests) at a list.
+// Scenes draw through E(plan, inputs...) after BG(backdrop): the loop's
+// draw (numbers, no array per draw), or procMegademo.frame()'s list.
 let E = null, BG = null;
 // [LIGHT, MID, HEAVY]. c: TWIST corridor (n frames, r ratio, m rungs per
 // frame, s arch segments, kf/ka first frame/arch, D twist); z: ZENITH;
@@ -25,8 +23,7 @@ const KN = [
   {c: CH, z: ZH, k: {r: 40, d: 1, n: 24}},
   {c: CH, z: ZH, k: {r: 40, d: 2, n: 40}}
 ];
-// Programs are text, decoded by one function (a generator function per
-// plan costs guest heap at compile time). A letter per ksn_proc_op in
+// Programs are text, decoded by one function. A letter per ksn_proc_op in
 // opcode order, then its fields: f lists the row slot of each, a digit
 // for a register (one hex character), a letter for a number (b = 2, d = 4,
 // e = 5; comma-separated, $n is an argument). X x y r zi zn t0 t1 z0 is

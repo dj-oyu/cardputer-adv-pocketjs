@@ -1,5 +1,5 @@
-// MEGADEMO chunk 4: the pocket.kasane view's tables (room, HUD, story text,
-// WAKE's face). Loaded only on the device (or a host with pocket.kasane).
+// MEGADEMO chunk: the pocket.kasane view's resources and tables (room,
+// HUD, story text). Loaded only with pocket.kasane.
 'use strict';
 const V = pocket.kasane, H = V.procedural, G = V.grid;
 // Surface 0's frames sized for 768 segments (the busiest frame, TWIST at
