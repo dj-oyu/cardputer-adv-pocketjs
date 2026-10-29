@@ -49,6 +49,10 @@ QuickJS の実行中の命令は、局所変数を番号で読み書きする（
 
 MEGADEMO の軽量化で、局所変数の名前を関数をまたいで使い回して atom を減らした（63 個、常駐 −4.5 KB）。この変更の後は局所変数の名前が heap に残らないので、その使い回しは不要になる（読みやすい名前に戻せる）。
 
-## 実機（未検証）
+## 実機
 
-c985bf93 のビルドを焼いた（ブローカーのジョブ `cv-flash-c985bf93`）。書き込み後の読み戻しが途中（2.4 MB のうち 1.25 MB）で止まり、ジョブは `needs_review` で終わった。機体は新しいファームで普通に起動する（ELF の先頭 1813e6b0b がビルドと一致、HOME_READY）。ただしブローカーは LKG の ELF を期待しているので、アプリの実行は `firmware_identity_mismatch` で断られる。焼き直しも `lkg_current_firmware_changed_needs_review` で断られる（ブローカー再起動の後も同じ）。**実機の A/B（MEGADEMO・DERBY を、この版と `main` b290fa5 で比べる）は、ブローカーでこのジョブのレビューが済むまで保留。**
+c985bf93 のビルドを焼いた（ブローカーのジョブ `cv-flash-c985bf93`）。書き込みは済んだが、読み戻しが途中（2.4 MB のうち 1.25 MB）で止まり、ジョブは `needs_review` で終わった。その後、機体の電源が落ちているのが見つかったので、読み戻し中の給電・USB の断が最も筋の通る説明（ROM の読み戻し中はアプリのファームは動かないので、ファームの中身は関係しない）。リセット後、機体はこの版で起動する（ELF 1813e6b0b、`HOME_READY`、常駐 player 30 fps、自動時刻同期も成功）。
+
+**DERBY WATCH（実測(実機)、`derby_smoke` `cv-derby-1`）**: デモを1周、最後まで通った（pad → gate → race → photo → res → `DERBY SAVE` → `HOME_READY`）。カメラの切り替え（FIELD・WIDE・CLOSE・VISION・FINISH）、photo の取り込み、終了も正常。チャンクの読み込みは `prog` `view` `scene` `pan` `play` の後で JS が `used=94,160`、`MEM ... js=90,100`、デモ後に `used=98,848`。**同じ日の `main` の数字は無いので、ここから差は言えない**（`derby-watch.md` の `used=122,792` は 9/30 の版で、DERBY がその後変わっている）。
+
+**まだ:** ブローカーはこのジョブのレビューが済むまで、アプリの実行（`app_session`、`firmware_identity_mismatch`）と焼き直し（`lkg_current_firmware_changed_needs_review`）を断る。MEGADEMO の実機確認と、`main` b290fa5 との A/B は、その後。
