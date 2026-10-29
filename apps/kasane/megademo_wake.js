@@ -37,14 +37,11 @@ const WRAD = [52, 44, 46], EAR = [[-46, -22, 8], [-52, -48, 2], [-44, -74, -4], 
 // geometry in JS cost ~130 ms a frame on the device,
 // docs/apps/megademo-shapes.md). Ranges: head 0 (28), ears 28 (5 each),
 // their insides 38 (10 each), the glow's core 58 (16, screen points, set
-// once), whiskers 74 (2 each), eyes 86 (30 each: iris 12, pupil 12, the shut
+// each frame), whiskers 74 (2 each), eyes 86 (30 each: iris 12, pupil 12, the shut
 // lid 4, the highlight 2).
+// The briefing and TWIST (megademo_brief.js) draw with the same arrays.
 const SH = pocket.shapes, WN = 146, WM = new Float32Array(3 * WN), WP = new Float32Array(2 * WN), WQ = new Float32Array(12);
 const W_EAR = 28, W_IN = 38, W_CORE = 58, W_WH = 74, W_EYE = 86;
-for (let j = 0; j < 16; ++j) {
-  WP[2 * (W_CORE + j)] = BACK[0] + BACK[2] * .68 * M.cos(j * M.PI / 8);
-  WP[2 * (W_CORE + j) + 1] = BACK[1] + BACK[3] * .68 * M.sin(j * M.PI / 8);
-}
 // Colours: the lit room, the glowing iris, the magenta inner ear, the cyan
 // rim, the eye's highlight.
 const C_GLOW = 0x218b, C_IRIS = 0xbf9f, C_EAR = 0x68aa, C_RIM = 0x067f;
@@ -63,8 +60,13 @@ let WD = null, WEMIT = null;
 // WAKE's backdrop: the silhouette, until the TV is off.
 const wakeB = t => t < WCUT ? 0x0043 : 0;
 function wake(t, emit) {
-  WD = []; WEMIT = emit || null;
+  WD = []; WEMIT = emit || null; BW = 0;
   if (t >= WCUT) return {b: 0, s: 0, d: WD};
+  // The glow's core is set each frame: the briefing writes over WP.
+  for (let j = 0; j < 16; ++j) {
+    WP[2 * (W_CORE + j)] = BACK[0] + BACK[2] * .68 * M.cos(j * M.PI / 8);
+    WP[2 * (W_CORE + j) + 1] = BACK[1] + BACK[3] * .68 * M.sin(j * M.PI / 8);
+  }
   let i = 0;
   while (i < POSE.length - 2 && POSE[i + 1][0] <= t) ++i;
   const A = POSE[i], B = POSE[i + 1], u = smooth(ramp(t, A[0], B[0])), q = A.map((v, j) => v + (B[j] - v) * u);

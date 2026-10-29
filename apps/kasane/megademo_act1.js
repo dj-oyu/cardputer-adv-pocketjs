@@ -1,78 +1,9 @@
-// MEGADEMO chunk 1 (proc_megademo.js loads it): Act I's programs and inputs
-// (the news; equal to tools/kasane_contract/proc_megademo.h), the load tiers
-// and the plan text decoder with Act II's templates.
+// MEGADEMO chunk 1 (proc_megademo.js loads it): the load tiers and the plan
+// text decoder with Act II's templates. (Act I draws with pocket.shapes,
+// megademo_brief.js; its old VM programs are the contract tests' workload,
+// tools/kasane_contract/proc_megademo_news_ref.js.)
 'use strict';
-const colors = [
-  [0x07ff, 0x3dff, 0xb81f, 0xffff],
-  [0xfde0, 0xfb00, 0x07ff, 0xffff],
-  [0xf81f, 0x781f, 0x07ff, 0xffff]
-];
-const backdrops = [0x080c, 0x000d, 0x100b];
 const f32 = Math.fround;
-
-// Act I layers in the text form decoded by prog() below: a gate, a
-// highway, rising bars, a sine, scanlines and a faceted crystal.
-const ACT1 = ['U2 S2,$0 S3,$1 S4,$2 S5,$3 S6,$4 S7,-7 R$5 V0,2 L1,2,$6 L1,3,$6 L0,3,$6 L0,2,$6 \
-A0,0,4 A1,1,5 A2,2,6 A3,3,7 E', 'U2 S2,$0 S3,134 S4,23 S5,4.8 R12 V1,2 L0,3,$1 A0,0,4 A1,1,5 E',
-  'S0,0 S1,239 I2,0 S3,1.5 S4,1.47 R10 V0,2 L1,2,$0 A2,2,3 M3,3,4 E',
-  'S0,0 S1,4 S2,$0 I3,0 S4,$1 S5,$2 R60 M6,0,2 A6,6,3 N6,6 M7,6,4 A7,7,5 L0,7,$3 A0,0,1 E',
-  'I0,0 S1,29 S2,0 S3,239 I4,1 S6,2 R4 V2,0 L3,0,$2 A5,0,6 V2,5 L3,5,$0 A0,0,1 A2,2,4 A3,3,4 E \
-S0,88 S1,152 S2,32 S3,98 S4,120 S5,65 I6,2 I7,3 V4,2 L1,5,$2 L4,3,$2 L0,5,$2 L4,2,$2 V4,2 \
-L4,3,$3 V0,5 L1,5,$3 V4,2 A4,4,6 A2,2,7 L4,2,$3 V1,5 A1,1,6 A5,5,7 L1,5,$3 S4,120 V4,3 \
-A4,4,6 A3,3,7 L4,3,$3 S5,65 V0,5 A0,0,6 A5,5,7 L0,5,$3 V4,2 L1,5,$1 L4,3,$1 L0,5,$1 L4,2,$1'];
-function program(phase, layer) {
-  const n = colors[phase], a = phase === 1;
-  return prog(ACT1[layer], [
-    [a ? 42 : 5, a ? 125 : 129, a ? 13 : 12, a ? -13 : -12, a ? 3 : 7, a ? 6 : 8, n[0]],
-    [a ? 64 : 68, n[1]], [n[2]],
-    [f32(f32(.073) + f32(phase * .015)), a ? 7 : 13, phase === 2 ? 42 : 28, n[3]], n][layer]);
-}
-
-function inputs(frame, layer) {
-  const phase = Math.floor(frame / 16);
-  const beat = frame % 16;
-  const pulse = f32(Math.sin(f32(f32(beat) * f32(0.3926990817))));
-  const result = [0, 0, 0, 0];
-  if (layer === 0) {
-    const inset = phase === 1 ? 19 : (phase === 2 ? 3 : 8);
-    const sway = f32(pulse * (phase === 2 ? 9 : 3));
-    result[0] = f32(inset + sway);
-    result[1] = f32(f32(239 - inset) + sway);
-  } else if (layer === 1) {
-    result[0] = f32(-18 + f32(pulse * 4));
-    result[1] = f32(91 + f32(pulse * 3));
-  } else if (layer === 2) {
-    result[0] = phase === 1 ? f32(70 + pulse) : f32(65 + f32(pulse * 2));
-  } else if (layer === 3) {
-    result[0] = f32(f32(beat) * f32(0.31));
-  } else {
-    result[0] = (phase === 2 ? 9 : 17) + ((frame * 7) % 19);
-    result[1] = (frame % 5 - 2) * (phase === 2 ? 2 : 1);
-    result[2] = f32(f32(pulse * 12) +
-      (phase === 2 ? (((frame * 3) % 5) - 2) * 2 : 0));
-    result[3] = f32(f32(1 - Math.abs(pulse)) * 8);
-  }
-  return result;
-}
-
-// A fixed connected trace, transformed by the native Q14 batch path once
-// per draw. Source points and coefficients are built only at registration.
-function pointBatch(phase, layer) {
-  if (layer !== 3) return null;
-  const x = [], y = [];
-  for (let i = 0; i < 40; ++i) {
-    x.push(18 + i * 5);
-    y.push(92 + ((i * 13) % 23) - 11);
-  }
-  const coeff = [
-    [16384, 0, 0, 16384, 0, 0],
-    [16000, 1600, -1000, 16384, -6 * 16384, 6 * 16384],
-    [15360, -2304, 1300, 15500, 18 * 16384, -10 * 16384]
-  ];
-  return {kind: 'affineQ14Points', x: x, y: y,
-    coeff: coeff[phase].slice(), color: colors[phase][0]};
-}
-
 // ---- Act II. Apple II hi-res palette; scene cost is set only in KN.
 const WH = 0xffff, VI = 0xfa3f, GR = 0x17a7, BL = 0x167f, OR = 0xfb47;
 // [LIGHT, MID, HEAVY]. c: TWIST corridor (n frames, r ratio, m rungs per
@@ -123,6 +54,23 @@ function prog(src, arg) {
 // ry rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT). WAKE
 // has no plans (pocket.shapes draws it).
 const T = {
+  // Act I's HUD (megademo_brief.js). cv/ch: n ticks of length L across
+  // the line at, from p0 every sp (inputs at, L, p0, sp, n), drawn across
+  // or down. eg: a brain wave (y0, amplitude, sample, rhythm, noise, colour):
+  // two sines, the second chirped, and sin^16 a spike every 32 samples.
+  // cw: the carrier (y0, amplitude, phase, depth and phase of its
+  // modulation). sp: a spectrum's 15 bars, one skyline (noise phase,
+  // gain). sc: a Lissajous 3:2 (phase).
+  cv: 'U5 A5,0,1 Q4 V0,2 L5,2,$0 A2,2,3 E',
+  ch: 'U5 A5,0,1 Q4 V2,0 L2,5,$0 A2,2,3 E',
+  eg: 'U6 S6,6 S7,2.4 S8,1 S9,.0981748 R48 M10,2,3 N10,10 M11,2,2 M11,11,4 N11,11 A10,10,11 M11,2,9 N11,11 \
+M11,11,11 M11,11,11 M11,11,11 M11,11,11 A10,10,11 A10,10,11 M10,10,1 A10,10,0 l5,6,10 A6,6,7 A2,2,8 E',
+  cw: 'U5 S5,0 S6,5 S7,.55 S8,.13 S9,0 S10,1 R49 M11,9,7 A11,11,2 N11,11 M12,9,8 A12,12,4 N12,12 M12,12,3 \
+A12,12,10 M11,11,12 M11,11,1 A11,11,0 L5,11,$0 A5,5,6 A9,9,10 E',
+  sp: 'U2 S2,128 S3,131 S4,28.6 S5,-1.3 S6,0 S7,7.31 S8,3 S9,1 S10,-1 R15 A11,6,0 N11,11 M11,11,11 M11,11,4 \
+M11,11,1 A11,11,9 A11,11,9 M11,11,10 A11,11,3 L2,3,$0 L2,11,$0 A2,2,8 L2,11,$0 L2,3,$0 A2,2,9 A6,6,7 A4,4,5 E',
+  sc: 'U1 S1,0 S2,.4712 S3,0 S4,.3142 S5,214 S6,18 S7,119 S8,11 R41 A9,1,0 N9,9 M9,9,6 A9,9,5 N10,3 M10,10,8 \
+A10,10,7 L9,10,$0 A1,1,2 A3,3,4 E',
   fr: 'U6 I8,6 I9,7 S13,-1 M10,9,13 M14,2,13 A6,0,4 A6,6,14 M14,3,13 A7,1,5 A7,7,14 S11,120 S12,67 R$0 A13,11,0 A14,12,1 V13,14 A13,11,2 A14,12,3 L13,14,$1 A13,11,4 A14,12,5 L13,14,$1 A13,11,6 A14,12,7 L13,14,$1 A13,11,0 A14,12,1 L13,14,$1 X0,1,8,9,10,13,14,15 X2,3,8,9,10,13,14,15 X4,5,8,9,10,13,14,15 X6,7,8,9,10,13,14,15 E',
   ra: 'U6 S9,-1 M6,5,9 S7,120 S8,67 R$0 A9,7,0 A10,8,1 V9,10 X0,1,4,5,6,9,10,11 A9,7,0 A10,8,1 L9,10,$1 A9,7,2 A10,8,3 V9,10 X2,3,4,5,6,9,10,11 A9,7,2 A10,8,3 L9,10,$1 E',
   ru: 'U6 S14,-1 M6,5,14 S7,120 S8,67 S12,$1 S13,$2 R$0 A9,7,0 A10,8,1 V9,10 A9,7,2 A10,8,3 l12,9,10 M12,12,14 A12,12,13 X0,1,4,5,6,9,10,11 X2,3,4,5,6,9,10,11 E',

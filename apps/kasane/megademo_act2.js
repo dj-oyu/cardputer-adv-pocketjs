@@ -178,12 +178,17 @@ const A2 = {
   frame: function (i, tier, t, emit) {
     const k = KN[tier], z = k.z;
     if (!i) {
-      // The wire opens: stars burst from the vanishing point while the
-      // corridor thins to its frames and arches, then to nothing; at the cut
-      // the field is ZENITH's own (g = 1).
+      // The river. At its deepest (the twist's peak) one white frame: the
+      // last tie to the body goes. Memories go by (river(), brief.js).
+      // Then the wire opens: stars burst from the vanishing point while
+      // the corridor thins to its frames and arches, then to nothing; at
+      // the cut the field is ZENITH's own (g = 1).
+      if (t === 64) return {b: WH, s: 0, d: []};
       const e = (t - 88) / 40, g = e * e;
       const d = corrDraws(k.c, t, 128, 1 / 6).filter(q => t < 108 || t < 120 && q[0] % 2 === 0);
       if (e > 0) d.push([7, [190 * g, 0, 0, 70 * g, (t - 128) * .05, 120, 67]]);
+      if (emit) return {b: 0, s: 0, d: d, post: () => river(t, emit)};
+      WD = d; river(t);
       return {b: 0, s: 0, d: d};
     }
     if (i === 2) return core(k.k, t);
@@ -213,28 +218,19 @@ const A2 = {
   }
 };
 
-// LEN: distinct frames; PLAY: frames on screen (each news beat twice).
-const NAMES = ['NEWS', 'NEWS', 'NEWS'].concat(A2.names), LEN = [16, 16, 16].concat(A2.len),
-  PLAY = LEN.map((n, s) => s < 3 ? 2 * n : n);
-// One thunk per plan: the loader builds one program array at a time.
+// Act I (CALL, ROUTE, VOYAGE: megademo_brief.js) keeps the scene name
+// NEWS for the logs' readers. PLAY: frames on screen.
+const NAMES = ['NEWS', 'NEWS', 'NEWS'].concat(A2.names), LEN = [64, 56, 96].concat(A2.len), PLAY = LEN;
+// One thunk per plan: the loader builds one program array at a time. Act I's
+// scenes share one set: its HUD (the world is pocket.shapes').
 function specs(s, tier) {
-  return (s > 2 ? A2.plans(s - 3, tier) : [0, 1, 2, 3, 4]).map(e => () => s < 3 ?
-    [program(s, e), pointBatch(s, e)] :
+  return (s > 2 ? A2.plans(s - 3, tier) : [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]]).map(e => () =>
     [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null]);
 }
+// emit: draw as it goes (Act I, WAKE), or, for TWIST, the draws over its
+// plans in the result's post().
 function frameOf(s, tier, t, emit) {
-  if (s > 2) return A2.frame(s - 3, tier, t, emit);
-  const d = [];
-  for (let l = 0; l < 5; ++l) d.push([l, inputs(s * 16 + t, l)]);
-  return {b: backdrops[s], s: 0, d: d};
+  return s > 2 ? A2.frame(s - 3, tier, t, emit) : brief(s, t, emit);
 }
 
-globalThis.procMegademo = {
-  program: program,
-  inputs: inputs,
-  pointBatch: pointBatch,
-  backdrop: function (frame) {
-      return backdrops[Math.floor(frame / 16)];
-  },
-  names: NAMES, len: LEN, specs: specs, frame: frameOf, tiers: KN.length
-};
+globalThis.procMegademo = {names: NAMES, len: LEN, specs: specs, frame: frameOf, tiers: KN.length};

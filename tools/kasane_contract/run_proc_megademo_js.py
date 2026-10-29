@@ -49,7 +49,9 @@ def main() -> None:
     env = os.environ.copy()
     env["PATH"] = str(Path(cc).parent) + os.pathsep + env.get("PATH", "")
     subprocess.run(command, cwd=ROOT, env=env, check=True)
-    subprocess.run([str(binary), chunk_arg()],
+    # The app's chunks, then Act I's former programs (the VM reference).
+    ref = ROOT / "tools/kasane_contract/proc_megademo_news_ref.js"
+    subprocess.run([str(binary), chunk_arg() + "," + str(ref)],
                    cwd=ROOT, env=env, check=True)
 
 

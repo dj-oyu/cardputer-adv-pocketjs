@@ -9,7 +9,9 @@
  *   vm      ksn_proc_begin + ksn_proc_step until done (single-step debugger)
  * Typed point batches run scalar, the PIE model and the plan dispatcher. The
  * frame is then rendered from the plan segments and from the VM segments and
- * compared pixel for pixel; Act I is also compared with proc_megademo.h.
+ * compared pixel for pixel. (Act I's former programs, still the VM's
+ * reference workload, are compared with proc_megademo.h by
+ * test_proc_megademo_js.c; the app now draws Act I with pocket.shapes.)
  *
  * The same pass enforces the adapter's limits (pocket_proc.c draw_impl):
  * 1,024 segments and 65,535 raster steps per committed frame, 8,192 raster
@@ -24,7 +26,6 @@
 #include "quickjs.h"
 #include "ksn_proc_plan.h"
 #include "ksn_proc_points_pie.h"
-#include "proc_megademo.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,7 +60,7 @@ static spec specs[MAX_PLANS];
 static ksn_proc_frame f_plan, f_debug, f_vm;
 static ksn_proc_frame cand_plan, cand_vm;
 static uint16_t pix_plan[KSN_PROC_W * KSN_PROC_H], pix_vm[KSN_PROC_W * KSN_PROC_H];
-static uint16_t pix_ref[KSN_PROC_W * KSN_PROC_H];
+
 
 typedef struct {
     unsigned frames, surf1_frames, plans, draws_max;
@@ -336,7 +337,7 @@ int main(int argc, char **argv) {
     JS_FreeValue(ctx, g);
     JSValue names = prop(demo, "names"), lens = prop(demo, "len"), tiers_v = prop(demo, "tiers");
     const unsigned scenes = len(names), tiers = (unsigned)num(tiers_v);
-    unsigned all_ops = 0, frames_checked = 0, draws_checked = 0, act1_frames = 0;
+    unsigned all_ops = 0, frames_checked = 0, draws_checked = 0;
     unsigned long long pixels_checked = 0;
     printf("tier scene       frames plans draws seg_max seg_avg raster_max draw_raster_max "
            "draw_steps_max frame_steps_max instr_max regs_max depth_max inputs_max points_max "
@@ -410,31 +411,6 @@ int main(int argc, char **argv) {
                 REQUIRE(!memcmp(pix_plan, pix_vm, sizeof pix_plan));
                 pixel_hash = fnv(pixel_hash, pix_plan, sizeof pix_plan);
                 pixels_checked += KSN_PROC_W * KSN_PROC_H;
-                if (g_scene < 3) {
-                    /* Act I must stay the 48-frame C reference, pixel for pixel. */
-                    const unsigned tick = g_scene * 16 + g_frame;
-                    REQUIRE(backdrop == proc_mega_backdrop(tick));
-                    for (unsigned i = 0; i < KSN_PROC_W * KSN_PROC_H; ++i) pix_ref[i] = backdrop;
-                    for (unsigned layer = 0; layer < PROC_MEGA_LAYERS; ++layer) {
-                        ksn_proc_inst code[KSN_PROC_CODE]; ksn_proc_program p; float in[KSN_PROC_INPUTS];
-                        ksn_proc_plan plan; ksn_proc_vm vm;
-                        REQUIRE(proc_mega_build(tick, layer, code, &p, in));
-                        REQUIRE(ksn_proc_plan_prepare(&plan, &p));
-                        REQUIRE(ksn_proc_plan_begin(&vm, &plan, in, &f_plan) == KSN_PROC_RUNNING);
-                        REQUIRE(ksn_proc_plan_run(&vm, &plan, false) == KSN_PROC_DONE);
-                        REQUIRE(ksn_proc_render_band(&f_plan, pix_ref, 0, KSN_PROC_H));
-                        if (layer == 3) {
-                            const spec *s3 = &specs[3];
-                            ksn_proc_frame typed = {.ready = true};
-                            for (unsigned i = 1; i < s3->points; ++i)
-                                typed.segments[typed.count++] = (ksn_proc_segment){s3->sx[i - 1], s3->sy[i - 1],
-                                    s3->sx[i], s3->sy[i], s3->color};
-                            REQUIRE(ksn_proc_render_band(&typed, pix_ref, 0, KSN_PROC_H));
-                        }
-                    }
-                    REQUIRE(!memcmp(pix_ref, pix_plan, sizeof pix_ref));
-                    ++act1_frames;
-                }
                 if (out) write_ppm(out, g_tier, g_scene, g_frame, surface, pix_plan);
                 if (surface) ++st.surf1_frames;
                 ++st.frames; ++frames_checked;
@@ -473,9 +449,9 @@ int main(int argc, char **argv) {
     JS_FreeValue(ctx, demo);
     JS_FreeContext(ctx); JS_FreeRuntime(rt);
     printf("hash programs %016llx pixels %016llx\n", (unsigned long long)program_hash, (unsigned long long)pixel_hash);
-    printf("PASS megademo scenes: %u tiers, %u frames (%u Act I frames equal to proc_megademo.h), "
+    printf("PASS megademo scenes: %u tiers, %u frames, "
            "%u draws, plan == debug-step plan == single-step VM, scalar == PIE model == dispatcher "
            "points, %llu pixels compared, every ksn_proc_op used\n",
-           tiers, frames_checked, act1_frames, draws_checked, pixels_checked);
+           tiers, frames_checked, draws_checked, pixels_checked);
     return 0;
 }

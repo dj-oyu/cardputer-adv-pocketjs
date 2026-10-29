@@ -40,15 +40,16 @@ globalThis.frame = function (buttons) {
     let b = LOAD[1];
     for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
     if (b && t >= PLAY[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
-    // WAKE draws as it goes (act2's wake(): no list kept), so its frame
-    // begins first.
-    if (scene === 7) {
-      H.beginFrame(wakeB(t % LEN[7]));
-      f = frameOf(7, tier, t % LEN[7], DRAW);
+    // WAKE and Act I draw as they go (pocket.shapes: no list kept), so
+    // their frame begins first; TWIST draws over its plans in post().
+    if (scene === 7 || scene < 3) {
+      H.beginFrame(scene === 7 ? wakeB(t % LEN[7]) : BRIEF_B);
+      f = frameOf(scene, tier, t % LEN[scene], DRAW);
     } else {
-      f = frameOf(scene, tier, t % LEN[scene]);
+      f = frameOf(scene, tier, t % LEN[scene], DRAW);
       H.beginFrame(f.b);
       for (let i = 0; i < f.d.length; ++i) DRAW(f.d[i][0], f.d[i][1]);
+      if (f.post) f.post();
     }
     H.commit();
   } catch (e) {

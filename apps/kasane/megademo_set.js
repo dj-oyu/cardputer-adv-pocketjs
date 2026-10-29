@@ -8,6 +8,7 @@ const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
 const reg = th => { const p = th(); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
 const lerp4 = (a, b, e) => a.map((v, j) => rnd(v + (b[j] - v) * e)), clamp = v => M.max(0, M.min(1, v));
 function prefetch(s, max) {
+  if (s < 3 && scene < 3) return;
   if (next && (next.s !== s || next.k !== tier)) { drop(next.h); next = null; }
   if (!next) next = {s: s, k: tier, h: [], sp: specs(s, tier)};
   while (max-- > 0 && next.h.length < next.sp.length && MEM.info().internalFreeBytes >= LOAD[2])
@@ -17,6 +18,11 @@ function prefetch(s, max) {
 // goes before the rest registers: they overlap only as far as the
 // memory gate let the prefetch run.
 function enter(s, fresh) {
+  // Act I's scenes share one plan set.
+  if (s < 3 && scene < 3 && live.length + pend.length) {
+    scene = s; t = 0;
+    return console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length + ' freed=0 registered=' + loaded);
+  }
   if (fresh && next) { drop(next.h); next = null; }
   prefetch(s, 0);
   const old = live.length;
@@ -27,7 +33,7 @@ function enter(s, fresh) {
 }
 const LBL = s => s === 4 ? 'LETHE' : NAMES[s];
 // Enter is dead while the story owns the camera: on waking (first person,
-// the TV is off), the first news beat (the TV turns itself on, the dive
+// the TV is off), CALL (the TV turns itself on, the dive
 // into it), and from SIGNAL CRITICAL in CORE through the cut-out (LOST),
 // which must play on the full screen straight into WAKE's dark.
 const LOCK_CORE = 84, locked = () => scene === 7 || scene === 0 || scene === 6 || scene === 5 && t >= LOCK_CORE;
@@ -77,12 +83,16 @@ function build(tx, room) {
   mon.setVisible(tx, false);
   // WAKE: Tama walks to the cushion in front of the TV (over its image).
   if (scene === 7) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});
+  // Act I: the HUD boots on CALL once the camera is in the screen, a piece
+  // every other frame; LETHE's tag follows its octahedron (patch).
   if (scene < 3) {
-    const N = NEWS.replace('~', sortie).split('|').map(gb);
-    TV.split(',').forEach(e => add(box(e)));
-    R.head = add(text([6, 114, 234, 124], N[2 * scene], 'caption', 0xffffffff, 40));
-    add(text([6, 124, 234, 134], N[2 * scene + 1], 'caption', 0x80d9e8ff));
-    R.N = N;
+    const b0 = scene ? 0 : 1;
+    HUDI.split(',').forEach((e, i) => add(box(e), 36 * b0 + 2 * i * b0));
+    R.rd = RDB.map((b, i) => add(text(b, '', 'caption', i > 1 ? 0xd7f4ffff : 0x50ffc8ff, 5), (42 + 2 * i) * b0));
+    // It moves: its clip is the screen (setRect keeps the clip).
+    R.tag = tx.text({bounds: [0, 0, 40, 9], clip: FULL, text: gb('LETHE'), font: 'caption', color: 0xf81fffff});
+    R.tag.setVisible(tx, false);
+    R.tgv = false;
   }
   if (S) R.say = add(text(S[0].split(' ').map(Number), '', 'caption', 0xffffffff, 40), +S[1]);
   if (ch < 4) R.card = add(text([8, 36, 232, 56], R.T = T[ch], 'display', INK[ch], 16), 4, 60);
@@ -118,9 +128,7 @@ function build(tx, room) {
 }
 function patch(tx, f) {
   const on = zoom === 0, fix = zoom === ZOOM, B = boundsAt(zoom), S = R.S;
-  // Interference in the last news beat, full screen only.
-  const j = on && scene === 2 && t >= 16 && (t * 7) % 5 < 2 ? (t * 3) % 7 - 3 : 0;
-  img.setRect(tx, [B[0] + j, B[1], B[2] + j, B[3]]);
+  img.setRect(tx, B);
   if (fix !== vis) { img.setVisible(tx, !fix); mon.setVisible(tx, fix); vis = fix; }
   // Shutters: the TV turns on in the first news frames and off at the end
   // of CORE; in WAKE they are eyelids over the whole view.
@@ -157,7 +165,10 @@ function patch(tx, f) {
   }
   if (R.card) R.card.setReveal(tx, M.max(0, M.min(R.T.length, (t - 4) >> 1)));
   if (scene < 3) {
-    if (scene === 2 && t >= 16) R.head.setText(tx, R.N[t & 4 ? 4 : 6]);
+    if (f && !(t & 1)) for (let i = 0; i < 3; ++i) R.rd[i].setText(tx, f.rd[i]);
+    const g = on && f && f.tag;
+    if (g) R.tag.setRect(tx, [rnd(g[0]) + 7, rnd(g[1]) - 11, rnd(g[0]) + 47, rnd(g[1]) - 2]);
+    if (!!g !== R.tgv) { R.tag.setVisible(tx, !!g); R.tgv = !!g; }
     return;
   }
   if (scene === 3) {

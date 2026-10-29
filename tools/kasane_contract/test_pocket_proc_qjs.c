@@ -98,6 +98,7 @@ static void eval_error(JSContext *ctx,const char *source){
 }
 #define APP_NEWS_TICKS (2u*PROC_MEGA_FRAMES)
 #define APP_WAKE_TICKS 104u
+#define APP_ACT1_TICKS 216u
 static void reference(unsigned tick){
     uint16_t color=proc_mega_backdrop(tick);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
@@ -226,13 +227,56 @@ int main(int argc,char **argv){
         if(tick+1==APP_WAKE_TICKS)for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
         pocket_proc_present_result(KSN_OK);
     }
-    publishes=0;
-    uint32_t wake_scalar=0,wake_pie=0;
-    pocket_proc_batch_counts(&wake_scalar,&wake_pie); /* none in WAKE now; kept as a guard */
-    /* Then each 16-frame news beat twice: news tick k shows Act I frame
-     * (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
-    for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
+    /* Act I (CALL, ROUTE, VOYAGE: APP_ACT1_TICKS frames) draws with
+     * pocket.shapes and its HUD plans; each frame is presented. The story
+     * starts in the room and its camera reaches full screen during CALL;
+     * each scene and the room leaving view rebuild the set. */
+    for(unsigned tick=0;tick<APP_ACT1_TICKS;tick++){
         eval_ok(ctx,"frame()");
+        REQUIRE(pocket_proc_pending());
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+        memcpy(expected,actual,sizeof expected);check_image_rows(&image);
+        pocket_proc_present_result(KSN_OK);
+        REQUIRE(!pocket_proc_pending());
+    }
+    eval_ok(ctx,"if(megaReplaces<2||megaBounds.join(',')!=='0,0,240,135')"
+                "throw Error('story camera did not reach full screen');"
+                "globalThis.newsReplaces=megaReplaces");
+    /* Two held Enter frames count as one press. The same resource reaches the
+     * monitor and then returns to an exact full-screen rectangle. */
+    for(unsigned i=0;i<44;i++){
+        eval_ok(ctx,i<2?"frame(0x4000)":"frame(0)");
+        REQUIRE(pocket_proc_pending());
+        pocket_proc_present_result(KSN_OK);
+    }
+    /* Act I's last frame was before these: TWIST starts with the room in
+     * view, one new REPLACE. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==newsReplaces+1)"
+                "throw Error('Enter did not shrink into monitor')");
+    for(unsigned i=0;i<44;i++){
+        eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
+        REQUIRE(pocket_proc_pending());
+        pocket_proc_present_result(KSN_OK);
+    }
+    /* Back at full screen the set is rebuilt without the room. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==newsReplaces+2)"
+                "throw Error('Enter did not restore full screen')");
+    /* The adapter's pixel contract on Act I's former programs (the VM's
+     * reference workload, proc_megademo_news_ref.js, equal to
+     * proc_megademo.h): each 16-frame beat twice, news tick k showing
+     * reference frame (k / 32) * 16 + k % 16, as the app played it. */
+    eval_ok(ctx,
+        "const NP=pocket.kasane.procedural,NR=procMegademoNews,NH=[];"
+        "for(let ph=0;ph<3;ph++){NH.push([]);for(let l=0;l<5;l++){const b=NR.pointBatch(ph,l);"
+        "NH[ph].push(b?NP.register(NR.program(ph,l),b):NP.register(NR.program(ph,l)))}}"
+        "globalThis.newsFrame=k=>{const f=(k/32|0)*16+k%16,ph=f/16|0;NP.beginFrame(NR.backdrop(f));"
+        "for(let l=0;l<5;l++)NP.draw(NH[ph][l],NR.inputs(f,l));NP.commit()}");
+    publishes=0;
+    const unsigned invalidates0=invalidates;
+    uint32_t news_scalar=0,news_pie=0;
+    pocket_proc_batch_counts(&news_scalar,&news_pie);
+    for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
+        char call[48];snprintf(call,sizeof call,"newsFrame(%u)",tick);eval_ok(ctx,call);
         REQUIRE(pocket_proc_pending());
         REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
         reference(tick/32u*16u+tick%16u);
@@ -272,7 +316,7 @@ int main(int argc,char **argv){
             check_image_rows(&image);
             /* The image node's core ticket owns IO retry; no backdrop-wide
              * invalidation is needed for its candidate. */
-            REQUIRE(invalidates==0);
+            REQUIRE(invalidates==invalidates0);
             pocket_proc_present_result(KSN_OK); /* UI ticket and image ACK */
             REQUIRE(!pocket_proc_pending());
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
@@ -289,37 +333,14 @@ int main(int argc,char **argv){
         }
     }
     REQUIRE(publishes==APP_NEWS_TICKS);
-    /* The story starts in the room and its camera reaches full screen during
-     * the news; each news beat and the room leaving view rebuild the set. */
-    eval_ok(ctx,"if(megaReplaces<2||megaBounds.join(',')!=='0,0,240,135')"
-                "throw Error('story camera did not reach full screen');"
-                "globalThis.newsReplaces=megaReplaces");
     uint32_t scalar=0,pie=0;
     pocket_proc_batch_counts(&scalar,&pie);
-    scalar-=wake_scalar;pie-=wake_pie;
+    scalar-=news_scalar;pie-=news_pie;
 #ifdef KSN_PROC_HOST_FAKE_PIE
     REQUIRE(scalar==0&&pie==APP_NEWS_TICKS);
 #else
     REQUIRE(scalar==APP_NEWS_TICKS&&pie==0);
 #endif
-    /* Two held Enter frames count as one press. The same resource reaches the
-     * monitor and then returns to an exact full-screen rectangle. */
-    for(unsigned i=0;i<44;i++){
-        eval_ok(ctx,i<2?"frame(0x4000)":"frame(0)");
-        REQUIRE(pocket_proc_pending());
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Frame 96 enters TWIST with the room in view: one new REPLACE. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==newsReplaces+1)"
-                "throw Error('Enter did not shrink into monitor')");
-    for(unsigned i=0;i<44;i++){
-        eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
-        REQUIRE(pocket_proc_pending());
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Back at full screen the set is rebuilt without the room. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==newsReplaces+2)"
-                "throw Error('Enter did not restore full screen')");
     eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
     eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
     eval_error(ctx,"pocket.kasane.procedural.draw(1,[NaN,0,0,0])");

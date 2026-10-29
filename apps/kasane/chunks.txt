@@ -6,6 +6,7 @@ app local.megademo
 act1   megademo_act1.js
 act2   megademo_act2.js
 wake   megademo_wake.js
+brief  megademo_brief.js
 view   megademo_view.js
 set    megademo_set.js
 loop   megademo_loop.js
