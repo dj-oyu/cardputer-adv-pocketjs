@@ -154,7 +154,7 @@ typedef struct {
     bool sig_ready; /* candidate_sig describes the candidate (commit .. next beginFrame) */
     uint32_t handle;
     ksn_rect damage;
-    uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (surface 0, or no option) */
+    uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (no option) */
 } proc_surface;
 static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
@@ -900,12 +900,36 @@ static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return guarded(ctx,self,argc,argv,commit_impl);
 #endif
 }
+/* {maxSegments: 1..1024} (absent or undefined: 0, the 1,024 default). */
+static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segments){
+    *segments=0;
+    JSValue v=JS_GetPropertyStr(ctx,object,"maxSegments");
+    bool ok=!JS_IsException(v)&&(JS_IsUndefined(v)||
+            (integer(ctx,v,KSN_PROC_SEGMENTS,segments)&&*segments>0));
+    JS_FreeValue(ctx,v);
+    if(!ok)*segments=0;
+    return ok;
+}
 static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+    const char *op="kasane.procedural.resource";
     unsigned index=0;
+    /* resource({maxSegments}): surface 0's image, its two frames sized for
+     * maxSegments (createSurface()'s option for surface 1). Decided before
+     * surface 0's first beginFrame allocates them; after that only the same
+     * value is accepted. */
+    if(argc==1&&JS_IsObject(argv[0])){
+        uint32_t segments=0;
+        if(!segments_option(ctx,argv[0],&segments))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"maxSegments must be an integer 1..1024");
+        if(surfaces[0].candidate&&surface_segments(&surfaces[0])!=(segments?segments:KSN_PROC_SEGMENTS))
+            return failure(ctx,op,POCKET_ERR_BUSY,"surface 0's frames are already allocated");
+        surfaces[0].max_segments=(uint16_t)segments;
+        return pocket_kasane_proc_resource(ctx);
+    }
     if(argc>1||(argc==1&&!surface_index(ctx,argv[0],&index)))
-        return failure(ctx,"kasane.procedural.resource",POCKET_ERR_INVALID_ARGUMENT,
-                       "expected optional live surface ID");
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
+                       "expected optional live surface ID or {maxSegments}");
     return index?pocket_kasane_proc_resource_at(ctx,index):pocket_kasane_proc_resource(ctx);
 }
 static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -925,12 +949,9 @@ static JSValue create_surface_impl(JSContext *ctx,JSValueConst self,int argc,JSV
     if(argc==1&&!JS_IsUndefined(argv[0])){
         if(!JS_IsObject(argv[0]))
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected optional {maxSegments}");
-        JSValue v=JS_GetPropertyStr(ctx,argv[0],"maxSegments");
-        bool ok=!JS_IsException(v)&&(JS_IsUndefined(v)||
-                (integer(ctx,v,KSN_PROC_SEGMENTS,&segments)&&segments>0));
-        JS_FreeValue(ctx,v);
-        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
-                              "maxSegments must be an integer 1..1024");
+        if(!segments_option(ctx,argv[0],&segments))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
+                           "maxSegments must be an integer 1..1024");
     }
     if(surfaces[1].handle||next_surface_handle==INT32_MAX)
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"two surfaces maximum");

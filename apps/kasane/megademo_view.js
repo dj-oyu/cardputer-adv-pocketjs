@@ -2,7 +2,9 @@
 // WAKE's face). Loaded only on the device (or a host with pocket.kasane).
 'use strict';
 const V = pocket.kasane, H = V.procedural, G = V.grid;
-const res0 = H.resource();
+// Surface 0's frames sized for 768 segments (the busiest frame, TWIST at
+// HEAVY, is 648): 2 x 7.7 KB instead of 2 x 10.2 KB, in smaller holes.
+const res0 = H.resource({maxSegments: 768});
 // The settled monitor: a registered image-to-image resize (bilinear).
 // ZENITH's radar thumbnail and munching squares went for the story's
 // heap (typed arrays alone keep ~1.3 KB): docs/apps/megademo-story.md

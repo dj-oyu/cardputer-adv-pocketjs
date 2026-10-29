@@ -108,3 +108,13 @@ image は `build_surfcap`（この節の変更＋測定用コピー）。測定�
 ## 追記: DERBY に適用した試作（2026-09-30、ブランチ `vm/derby-surface1`、見送り）
 
 上の「DERBY に適用するには」の 1〜4 を測定用コピーで入れて実機で測った（n = 256、4 フレームに 1 回の更新）。評価中の確保は通った（1 回）。面0を描くターンの JS は 2.9〜3.3 ms 減ったが、面1を `commit()` したターンは面0が止まる（表示待ちの候補は全面で 1 枚）ので、画面が映る間の面0の絵は 1 秒に 21.2〜22.7 枚（現行 25.7〜29.8 枚）、止まる時間は 67 ms だった。拡縮つきの image ノードで合成が 1.1 ms 増え、ターン内の空きの最小は約 6 KB 減った。見送った。数値と代わりの案（面ごとの表示待ち候補）は [derby-watch.md](../apps/derby-watch.md) の「大型画面を面1へ移す試作」。
+
+## 面0: `resource({maxSegments})`（2026-10-29）
+
+MEGADEMO の I・II を作り直した版が、実機で最初の `beginFrame` の `frame allocation failed` になった（評価後の空き 65,312 B、最大の連続 31,744 B。候補・確定フレームと scratch の 3 × 10,246 B が取れない）。フレームを評価の前に取ると、今度は `set` チャンクの解析が 8 KB の連続を取れずに落ちた。そこで面0にも同じ上限を宣言できるようにした。
+
+- `pocket.kasane.procedural.resource({maxSegments: n})`（n = 1〜1,024）は、面0の画像を返し、面0の候補・確定フレームを `6 + 10·n` B にする。scratch（1 回の `draw()` の出力、10,246 B）と VM は変わらない。
+- 面0の最初の `beginFrame` より前に呼ぶ。フレームがもうあるときは、同じ値なら通り、違う値（`{}` = 1,024 を含む）は `BUSY`。不正な値は `INVALID_ARGUMENT`。`resource()`・`resource(id)` は従来どおり。`reset()` で上限は 1,024 に戻る。
+- 強制は面1と同じ（`draw()` が超えると `LIMIT_EXCEEDED`、フレームは閉じる）。
+- 検査: `test_pocket_proc_turn_qjs.c` の `cap_contract`（確保量 `6 + 10·96`、上限での `LIMIT_EXCEEDED`、確保後の `BUSY`、`reset()` 後の 1,024）。
+- MEGADEMO は 768（いちばん多いフレームは HEAVY の TWIST で 648 本、`run_proc_megademo_scenes.py`）。フレーム 2 枚が 10,246 → 7,686 B（計 5,120 B 減）、要る連続領域も 7.7 KB になる。

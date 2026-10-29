@@ -455,6 +455,37 @@ static void cap_contract(JSContext *ctx){
         pocket_proc_end_turn();
         pocket_proc_reset();
     }
+    /* Surface 0 through resource({maxSegments}): its two frames shrink, the
+     * workspace (scratch) stays full; draw() enforces the cap; once the
+     * frames exist only the same value is accepted. */
+    eval_ok(ctx,
+        "for(const bad of [{maxSegments:0},{maxSegments:1025},{maxSegments:1.5},"
+        "{maxSegments:'8'},{maxSegments:null}])"
+        "expect(()=>proc.resource(bad),'INVALID_ARGUMENT');"
+        "proc.resource({maxSegments:96});"
+        "globalThis.p32=proc.register([[0,0,0,0,5,0],[0,1,0,0,7,0],"
+        "[5,0,32,0,0,0],[8,0,0,1,0,0xffe0],[6,0,0,0,0,0]]);"
+        "globalThis.dot=proc.register(dotAt(40,40,0xf800))");
+    calloc_n=0;
+    eval_ok(ctx,"proc.beginFrame(0)");
+    REQUIRE(calloc_n==4&&callocs[0]==head+96u*10u&&callocs[1]==full&&callocs[2]==head+96u*10u);
+    eval_ok(ctx,
+        "for(let i=0;i<3;i++)proc.draw(p32,[]);"
+        "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
+        "expect(()=>proc.resource({maxSegments:200}),'BUSY');"
+        "expect(()=>proc.resource({}),'BUSY');"
+        "proc.resource({maxSegments:96})");
+    pocket_proc_end_turn();
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(dot,[]);proc.commit()");
+    settle(actual);
+    REQUIRE(actual[40*KSN_PROC_W+40]==0xf800);
+    pocket_proc_reset();
+    /* reset() forgets the cap: the next frames are full again. */
+    calloc_n=0;
+    eval_ok(ctx,"proc.beginFrame(0)");
+    REQUIRE(calloc_n==4&&callocs[0]==full&&callocs[2]==full);
+    pocket_proc_end_turn();
+    pocket_proc_reset();
 }
 
 int main(void){
