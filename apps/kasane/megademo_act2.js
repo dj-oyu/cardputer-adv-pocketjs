@@ -117,7 +117,7 @@ function zen(z, t) {
   // The missile (150): out of the belly, weaving up after the mark, its
   // smoke a trail from the ship.
   if (t >= 150) {
-    const u = smooth(ramp(t, 150, 190)) * .8, q = 8 * M.sin((t - 150) * .4) * (1 - u),
+    const u = smooth(ramp(t, 150, 190)) * .55, q = 8 * M.sin((t - 150) * .4) * (1 - u),
       cx = 120 + (X - 120) * u + q, cy = 112 + (Y - 112) * u;
     E(6, 120, 114, cx, cy, 0, 0, 6, -12);
     E(2, cx, cy, 0, 4 - 2 * u, M.atan2(Y - cy, X - cx), 2, PI, WH);
@@ -146,6 +146,14 @@ function pj(x, y, z, s, j) {
     f = s * Dd / M.max(Dd + q, Dd * .4);
   PJ[j] = 120 + (u * Rc - w * Rs) * f; PJ[j + 1] = 67 + (u * Rs + w * Rc) * f;
   return q;
+}
+// ms(): CORE's missile at frame t into PJ[j], PJ[j + 1]: weaving, then
+// shuddering (PJ[2], 22..28) and thrown off to the right (28..44).
+function ms(t, j) {
+  const v = ramp(t, 28, 44), w = ramp(t, 22, 28) * (1 - v);
+  PJ[j] = 120 + 7 * M.sin(t * .25) * (1 - ramp(t, 0, 44)) + 170 * v * v + 2.5 * w * M.sin(t * 2.9);
+  PJ[j + 1] = 104 - 46 * v + 2 * w * M.cos(t * 3.7);
+  if (!j) PJ[2] = w;
 }
 function core(k, t) {
   // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The ship
@@ -241,16 +249,27 @@ function core(k, t) {
   const R = t < 44 ? sc * 1.05 : sc * 1.05 + (cc * .75 - sc * 1.05) * smooth(ramp(t, 44, 56));
   TGX = NaN;
   if (t < 56) { E(4, 120, 67, R, R + 6, PI / 4, 4, PI / 2, OR); TGX = 120 + R * .7; TGY = 67 - R * .7; }
-  // The missile, chased from behind (0..56): it weaves, and from 44 comes
-  // apart from its nose into points the core draws in (as the memories
-  // crumbled in the river); the flame goes last.
+  // The missile, chased from behind (0..56). It never reaches the shell:
+  // a ripple runs out of the shell (18..40), the missile shudders, and
+  // something unseen bends it away to the right, turning over, out of the
+  // frame (28..44); it flickers violet in the grip. The shell opens after
+  // it has gone (40..56).
   if (t < 56) {
-    const q = ramp(t, 44, 53), x = 120 + 7 * M.sin(t * .25) * (1 - ramp(t, 0, 44)), y = 104;
-    if (q < 1) E(0, x, y - 10 + 13 * q, x - 4, y + 3, x + 4, y + 3, WH);
-    E(0, x - 2, y + 4, x + 2, y + 4, x, y + 8 + (t % 3) * 2, OR);
-    for (let j = 0; j < 7; ++j) {
-      const f = ramp(q, j / 8, j / 8 + .5), a = y - 10 + 13 * j / 8;
-      if (f > 0 && f < 1) E(4, x + (120 - x) * f + 3 * M.sin(j * 2.3), a + (67 - a) * f, 0, 1.5, j, 1, 0, WH);
+    for (let j = 0; j < 2; ++j) {
+      const f = ramp(t, 18 + 6 * j, 34 + 6 * j), r = sc * 1.1 + 90 * f;
+      if (f > 0 && f < 1) E(4, 120, 67, r, r + 2 + 5 * f, t * .05, 24, PI / 12, 0xc81f);
+    }
+    if (t < 46) {
+      ms(t, 0);
+      const x = PJ[0], y = PJ[1], v = ramp(t, 28, 44), r = 2.4 * v * v + .3 * PJ[2] * M.sin(t * 2.3),
+        c = M.cos(r), s = M.sin(r), f = 8 + (t % 3) * 2;
+      for (let k = 1; k < 6; ++k) {
+        ms(t - 2 * k + 2, 4); ms(t - 2 * k, 6);
+        E(0, PJ[4], PJ[5] + 4, PJ[6], PJ[7] + 4, PJ[6], PJ[7] + 4, 0x8c71);
+      }
+      E(0, x + 10 * s, y - 10 * c, x - 4 * c - 3 * s, y - 4 * s + 3 * c, x + 4 * c - 3 * s, y + 4 * s + 3 * c,
+        t > 21 && t < 36 && t & 1 ? 0xc81f : WH);
+      E(0, x - 2 * c - 4 * s, y - 2 * s + 4 * c, x + 2 * c - 4 * s, y + 2 * s + 4 * c, x - f * s, y + f * c, OR);
     }
     return;
   }
