@@ -14,7 +14,7 @@ manifest の `required` か `optional` に `kasane.shapes` があるセッショ
 
 ## 点と多角形
 
-- **点の配列**は `Float32Array` か `Float64Array`（書き込み可）。2 次元の点は `x, y` の 2 つ、3 次元の点は `x, y, z` の 3 つで 1 点。点 `i` は配列の `2i`（3 次元は `3i`）から。
+- **点の配列**は `Float32Array`（書き込み可）だけ。計算は単精度なので、`Float64Array` はメモリが倍になるだけで精度は上がらない（渡すと `INVALID_ARGUMENT`）。2 次元の点は `x, y` の 2 つ、3 次元の点は `x, y, z` の 3 つで 1 点。点 `i` は配列の `2i`（3 次元は `3i`）から。
 - **多角形**は `[start, count]`: 点 `start` から `count` 個（3..256）。凸多角形として扱う（回りの向きはどちらでもよい）。凸でないと、各行の左端から右端までが塗られる。
 - **複数の多角形**は `[start, count, start, count, ...]` と平たく並べる。
 - 頂点に有限でない値（`NaN`、`Infinity`）を含む多角形は**空**として扱う（塗る形なら何も描かず、穴・隠す形なら無視する）。`project()` がカメラの後ろの点に `NaN` を書くので、そのまま渡してよい。
@@ -22,7 +22,7 @@ manifest の `required` か `optional` に `kasane.shapes` があるセッショ
 
 ## `project(matrix, source, target[, from[, count]])`
 
-3 次元の点を画面へ写す。`matrix` は 3×4 の射影行列（行優先の 12 個の数。配列か型付き配列）`[ax, ay, az, at, bx, by, bz, bt, wx, wy, wz, wt]` で、
+3 次元の点を画面へ写す。`matrix` は 3×4 の射影行列（行優先の 12 個の数。配列か `Float32Array`）`[ax, ay, az, at, bx, by, bz, bt, wx, wy, wz, wt]` で、
 
 ```
 w = wx·x + wy·y + wz·z + wt
@@ -61,7 +61,7 @@ Y = (bx·x + by·y + bz·z + bt) / w
 
 | code | とき |
 | --- | --- |
-| `INVALID_ARGUMENT` | 引数の形が違う（行列が 12 個の有限の数でない、点が書き込み可の `Float32Array`/`Float64Array` でない、多角形の頂点数・穴の数・色・`step`・`pieces` が範囲外、オプションが object でない） |
+| `INVALID_ARGUMENT` | 引数の形が違う（行列が 12 個の有限の数でない、点が書き込み可の `Float32Array` でない、多角形の頂点数・穴の数・色・`step`・`pieces` が範囲外、オプションが object でない） |
 | `LIMIT_EXCEEDED` | 多角形や点の範囲が配列の終わりを越える。または描いている途中でフレームの上限（面の線分数、ラスタ 65,535 step）に達した |
 | `BUSY` | `beginFrame()` の前、または前のフレームが上限で捨てられた後（`draw()` と同じ）、または他の手続き面の呼び出しの最中 |
 

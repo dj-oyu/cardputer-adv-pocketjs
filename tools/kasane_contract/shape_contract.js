@@ -7,12 +7,12 @@ const throws = (f, code, what) => {
   try { f(); } catch (e) { if (e.code === code) return; throw Error(what + ': threw ' + e.code + ' ' + e.message); }
   throw Error(what + ': did not throw ' + code);
 };
-const P = new Float32Array(64), D = new Float64Array(64);
+const P = new Float32Array(64), D = new Float32Array(64);
 const put = (a, i, pts) => pts.forEach((p, k) => { a[2 * (i + k)] = p[0]; a[2 * (i + k) + 1] = p[1]; });
 
-// project: x, y over w; w <= 0 gives NaN; both array types; ranges.
+// project: x, y over w; w <= 0 gives NaN; ranges; Float32Array only.
 {
-  const src = new Float32Array([1, 2, 3, 4, 5, 6, 0, 0, -1]), dst = new Float64Array(6);
+  const src = new Float32Array([1, 2, 3, 4, 5, 6, 0, 0, -1]), dst = new Float32Array(6);
   // x' = (2x + 10) / (z + 2), y' = (3y) / (z + 2)
   shapes.project([2, 0, 0, 10, 0, 3, 0, 0, 0, 0, 1, 2], src, dst);
   near(dst[0], 12 / 5, 'project x'); near(dst[1], 6 / 5, 'project y');
@@ -22,6 +22,9 @@ const put = (a, i, pts) => pts.forEach((p, k) => { a[2 * (i + k)] = p[0]; a[2 * 
   eq(Number.isNaN(dst[4]) && Number.isNaN(dst[5]), true, 'w <= 0 is NaN');
   throws(() => shapes.project([1, 2, 3], src, dst), 'INVALID_ARGUMENT', 'short matrix');
   throws(() => shapes.project(new Float32Array(12), src, [0, 0]), 'INVALID_ARGUMENT', 'plain target');
+  throws(() => shapes.project(new Float32Array(12), src, new Float64Array(6)), 'INVALID_ARGUMENT', 'Float64Array target');
+  throws(() => shapes.project(new Float64Array(12), src, dst), 'INVALID_ARGUMENT', 'Float64Array matrix');
+  throws(() => shapes.fill(new Float64Array(8), [0, 4], [], 1), 'INVALID_ARGUMENT', 'Float64Array points');
   throws(() => shapes.project(new Float32Array(12), src, dst, 2, 2), 'LIMIT_EXCEEDED', 'past the end');
 }
 

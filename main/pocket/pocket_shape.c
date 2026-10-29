@@ -9,8 +9,9 @@
 /* pocket.shapes: flat vector drawing into the procedural frame being built,
  * in C (docs/api/shapes.md is the contract; docs/apps/megademo-shapes.md the
  * reason: MEGADEMO's WAKE spent ~130 ms a frame of JS on this geometry).
- * Points live in the caller's Float32Array or Float64Array and are named by
- * index, so a frame allocates nothing. fill() and outline() write segments
+ * Points live in the caller's Float32Array (float is what the geometry is
+ * computed in; a Float64Array would only double the memory) and are named
+ * by index, so a frame allocates nothing. fill() and outline() write segments
  * straight into the candidate frame (pocket_proc_native_*): no plan, no VM,
  * the frame's own limits. Everything is computed in float -- the S3 has a
  * float unit and does doubles in software -- and the build keeps the
@@ -23,9 +24,8 @@
 #define SHAPE_H 135
 
 typedef struct {
-    const void *data;
+    float *data;
     unsigned points;  /* whole points the buffer holds */
-    bool f64;
 } buffer;
 typedef struct { const buffer *b; unsigned start,count; bool empty; } poly;
 
@@ -39,12 +39,11 @@ static bool number(JSContext *ctx,JSValueConst v,double *out){
     return JS_IsNumber(v)&&JS_ToFloat64(ctx,out,v)==0;
 }
 static bool whole(double n,double low,double high){return n>=low&&n<=high&&n==floor(n);}
-/* A Float32Array or Float64Array as `stride` numbers a point, borrowed:
- * nothing may run JS between this and the last use, so every other argument
- * is read before. Mutable: project() writes through it. */
+/* A Float32Array as `stride` numbers a point, borrowed: nothing may run JS
+ * between this and the last use, so every other argument is read before.
+ * Mutable: project() writes through it. */
 static bool view(JSContext *ctx,JSValueConst v,unsigned stride,buffer *out){
-    const int type=JS_GetTypedArrayType(v);
-    if(type!=JS_TYPED_ARRAY_FLOAT32&&type!=JS_TYPED_ARRAY_FLOAT64)return false;
+    if(JS_GetTypedArrayType(v)!=JS_TYPED_ARRAY_FLOAT32)return false;
     size_t offset=0,bytes=0,per=0,size=0;
     JSValue ab=JS_GetTypedArrayBuffer(ctx,v,&offset,&bytes,&per);
     if(JS_IsException(ab))return false;
@@ -52,17 +51,12 @@ static bool view(JSContext *ctx,JSValueConst v,unsigned stride,buffer *out){
     const bool immutable=JS_IsImmutableArrayBuffer(ab)>0;
     JS_FreeValue(ctx,ab);
     if(!data||immutable||offset>size||bytes>size-offset)return false;
-    out->data=data+offset;
-    out->f64=type==JS_TYPED_ARRAY_FLOAT64;
+    out->data=(float *)(data+offset);
     out->points=(unsigned)(bytes/per/stride);
     return true;
 }
-static inline float get(const buffer *b,unsigned i){
-    return b->f64?(float)((const double *)b->data)[i]:((const float *)b->data)[i];
-}
-static inline void set(const buffer *b,unsigned i,float v){
-    if(b->f64)((double *)b->data)[i]=v;else((float *)b->data)[i]=v;
-}
+static inline float get(const buffer *b,unsigned i){return b->data[i];}
+static inline void set(const buffer *b,unsigned i,float v){b->data[i]=v;}
 static inline float X(const poly *q,unsigned k){return get(q->b,2u*(q->start+k%q->count));}
 static inline float Y(const poly *q,unsigned k){return get(q->b,2u*(q->start+k%q->count)+1u);}
 /* [start, count, start, count, ...] from a plain array: pairs naming
@@ -120,9 +114,8 @@ static JSValue js_shape_project(JSContext *ctx,JSValueConst self,int argc,JSValu
     if((argc>3&&!(number(ctx,argv[3],&from)&&whole(from,0,SHAPE_POINTS)))||
        (argc>4&&!(number(ctx,argv[4],&count)&&whole(count,0,SHAPE_POINTS))))
         return invalid(ctx,op,"from and count must be integers 0..1024");
-    /* The matrix: 12 finite numbers, a plain array or a typed array. */
-    const int mt=JS_GetTypedArrayType(argv[0]);
-    if(!JS_IsArray(argv[0])&&mt!=JS_TYPED_ARRAY_FLOAT32&&mt!=JS_TYPED_ARRAY_FLOAT64)
+    /* The matrix: 12 finite numbers, a plain array or a Float32Array. */
+    if(!JS_IsArray(argv[0])&&JS_GetTypedArrayType(argv[0])!=JS_TYPED_ARRAY_FLOAT32)
         return invalid(ctx,op,"matrix must be 12 numbers");
     for(unsigned i=0;i<12;i++){
         JSValue v=JS_GetPropertyUint32(ctx,argv[0],i);
@@ -132,7 +125,7 @@ static JSValue js_shape_project(JSContext *ctx,JSValueConst self,int argc,JSValu
     }
     buffer src,dst;
     if(!view(ctx,argv[1],3,&src)||!view(ctx,argv[2],2,&dst))
-        return invalid(ctx,op,"source and target must be mutable Float32Array or Float64Array");
+        return invalid(ctx,op,"source and target must be mutable Float32Arrays");
     const unsigned i0=(unsigned)from,n=count<0?(i0<src.points?src.points-i0:0):(unsigned)count;
     if(i0+n>src.points||i0+n>dst.points||i0+n>SHAPE_POINTS)
         return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"points past the end of source or target");
@@ -247,7 +240,7 @@ static JSValue js_shape_fill(JSContext *ctx,JSValueConst self,int argc,JSValueCo
     if(ns==4&&!(e[2]>0&&e[3]>0))ns=0;
     if(!ns)return invalid(ctx,op,"shape must be [start, count] (3..256 points) or [cx, cy, rx, ry] (radii > 0)");
     buffer pts;
-    if(!view(ctx,argv[0],2,&pts))return invalid(ctx,op,"points must be a mutable Float32Array or Float64Array");
+    if(!view(ctx,argv[0],2,&pts))return invalid(ctx,op,"points must be a mutable Float32Array");
     poly holes[SHAPE_HOLES];
     fill_job j={.ellipse=ns==4,.holes=holes,.nh=nh,.color=(uint16_t)color};
     const uint32_t bp[2]={(uint32_t)e[0],(uint32_t)e[1]};
@@ -325,7 +318,7 @@ static JSValue js_shape_outline(JSContext *ctx,JSValueConst self,int argc,JSValu
        !whole(pieces,1,8))
         return invalid(ctx,op,"options: closed, pieces 1..8, hidden [start, count, ...] (up to 6)");
     buffer pts;
-    if(!view(ctx,argv[0],2,&pts))return invalid(ctx,op,"points must be a mutable Float32Array or Float64Array");
+    if(!view(ctx,argv[0],2,&pts))return invalid(ctx,op,"points must be a mutable Float32Array");
     poly hide[SHAPE_HOLES];
     const poly line={&pts,(unsigned)start,(unsigned)count,false};
     if(line.start+line.count>pts.points||!polys(hp,nh,&pts,hide))

@@ -39,7 +39,7 @@ const WRAD = [52, 44, 46], EAR = [[-46, -22, 8], [-52, -48, 2], [-44, -74, -4], 
 // their insides 38 (10 each), the glow's core 58 (16, screen points, set
 // once), whiskers 74 (2 each), eyes 86 (30 each: iris 12, pupil 12, the shut
 // lid 4, the highlight 2).
-const SH = pocket.shapes, WN = 146, WM = new Float32Array(3 * WN), WP = new Float32Array(2 * WN), WQ = new Float64Array(12);
+const SH = pocket.shapes, WN = 146, WM = new Float32Array(3 * WN), WP = new Float32Array(2 * WN), WQ = new Float32Array(12);
 const W_EAR = 28, W_IN = 38, W_CORE = 58, W_WH = 74, W_EYE = 86;
 for (let j = 0; j < 16; ++j) {
   WP[2 * (W_CORE + j)] = BACK[0] + BACK[2] * .68 * M.cos(j * M.PI / 8);
