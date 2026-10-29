@@ -120,10 +120,8 @@ function prog(src, arg) {
 // 12 edges), tr CUBIC trails, sh ship flame, rd/sw radar rings and sweep
 // (drawn in the image's corner: a second surface cost two 10 KB frames), ln a line; CORE:
 // tri a triangle (colour from input 6), qd a closed quad, sg two segments,
-// ry rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT); WAKE:
-// tz a filled trapezoid (input 5 rows of horizontal lines, x0..x1 at y,
-// stepping by inputs 3 and 4): a path filled like a bucket fill; tz2 the
-// same every other row (a dithered half tone).
+// ry rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT). WAKE
+// has no plans (pocket.shapes draws it).
 const T = {
   fr: 'U6 I8,6 I9,7 S13,-1 M10,9,13 M14,2,13 A6,0,4 A6,6,14 M14,3,13 A7,1,5 A7,7,14 S11,120 S12,67 R$0 A13,11,0 A14,12,1 V13,14 A13,11,2 A14,12,3 L13,14,$1 A13,11,4 A14,12,5 L13,14,$1 A13,11,6 A14,12,7 L13,14,$1 A13,11,0 A14,12,1 L13,14,$1 X0,1,8,9,10,13,14,15 X2,3,8,9,10,13,14,15 X4,5,8,9,10,13,14,15 X6,7,8,9,10,13,14,15 E',
   ra: 'U6 S9,-1 M6,5,9 S7,120 S8,67 R$0 A9,7,0 A10,8,1 V9,10 X0,1,4,5,6,9,10,11 A9,7,0 A10,8,1 L9,10,$1 A9,7,2 A10,8,3 V9,10 X2,3,4,5,6,9,10,11 A9,7,2 A10,8,3 L9,10,$1 E',
@@ -140,8 +138,6 @@ const T = {
   tri: 'U7 V0,1 l6,2,3 l6,4,5 l6,0,1',
   qd: 'U8 V0,1 L2,3,$0 L4,5,$0 L6,7,$0 L0,1,$0',
   sg: 'U8 V0,1 L2,3,$0 V4,5 L6,7,$0',
-  tz: 'U6 S6,1 Q5 V0,2 L1,2,$0 A0,0,3 A1,1,4 A2,2,6 E',
-  tz2: 'U6 S6,2 Q5 V0,2 L1,2,$0 A0,0,3 A1,1,4 A2,2,6 E',
   ry: 'U8 S8,1.5707963 Q5 A9,4,8 N9,9 N10,4 M11,9,2 A11,11,0 M12,10,2 A12,12,1 V11,12 M11,9,3 A11,11,0 M12,10,3 A12,12,1 l7,11,12 A4,4,6 E',
   nz: 'U3 S3,0 S4,1 S5,67 S6,120 S7,7.31 S8,3.97 R$0 A3,3,4 B3,1 M9,3,7 A9,9,0 N9,9 M9,9,5 A9,9,5 M10,3,8 A10,10,0 N10,10 M10,10,6 A10,10,6 V10,9 A11,10,2 L11,9,33808 E',
   rd: 'U3 S4,1.5707963 S5,.3926991 S6,1.45 R$0 S3,0 A8,3,4 N8,8 M8,8,2 A8,8,0 N9,3 M9,9,2 A9,9,1 V8,9 R16 A3,3,5 A8,3,4 N8,8 M8,8,2 A8,8,0 N9,3 M9,9,2 A9,9,1 L8,9,6055 E M2,2,6 E S10,-1 M11,2,10 A12,11,0 A13,2,0 V12,1 L13,1,6055 A12,11,1 A13,2,1 V0,12 L0,13,6055',

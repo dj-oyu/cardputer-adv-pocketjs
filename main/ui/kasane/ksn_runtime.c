@@ -165,6 +165,9 @@ bool ksn_runtime_invalidate_image(ksn_resource resource){
 bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect source_rect){
     return runtime&&ksn_view_host_invalidate_image_source_rect(&runtime->host,resource,source_rect);
 }
+bool ksn_runtime_invalidate_image_source_damage(ksn_resource resource,const ksn_damage *source){
+    return runtime&&ksn_view_host_invalidate_image_source_damage(&runtime->host,resource,source);
+}
 uint32_t ksn_runtime_opaque_system_bands(void){
     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
 }

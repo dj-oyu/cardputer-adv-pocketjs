@@ -27,6 +27,24 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
 void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n);
 extern bool pocket_proc_hook_dry;
 #endif
+/* Native drawing into the frame being built (pocket_shape.c): segments go
+ * straight into the candidate under draw()'s frame limits -- the surface's
+ * segment count and 65,535 raster steps -- and coordinate range (-480..720),
+ * without a plan or the VM. begin() checks beginFrame and reentrancy and
+ * marks the candidate; a failing line() abandons the frame as a failing
+ * draw() does (LIMIT_EXCEEDED / INVALID_ARGUMENT, beginFrame again), and the
+ * caller rolls back to the mark so the candidate keeps no part of the call.
+ * Each returns JS_UNDEFINED or JS_EXCEPTION. */
+typedef struct { uint16_t count,raster; uint8_t ext,surface; } pocket_proc_mark;
+JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark);
+JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color);
+void pocket_proc_native_rollback(const pocket_proc_mark *mark);
+/* The 8-row bands (17) of the image a just-committed frame changes, and on
+ * each its columns [x0, x1): the bands whose ordered entries differ from the
+ * frame on the panel (all of them without one, or with a new backdrop
+ * colour). False outside commit(). pocket_kasane.c turns it into image
+ * damage instead of commit()'s one bounding rectangle. */
+bool pocket_proc_band_damage(unsigned surface,uint32_t *bands,int16_t x0[],int16_t x1[]);
 bool pocket_proc_has_frame(void);
 bool pocket_proc_pending(void);
 bool pocket_proc_backdrop_pending(void);

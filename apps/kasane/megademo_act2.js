@@ -168,7 +168,7 @@ const A2 = {
     if (!i) return corrList(k.c).concat([['st', z.st]]);
     if (i === 2) return [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]];
     if (i === 3) return [['ln', WH], ['ln', BL]];
-    if (i === 4) return [['tz', 0x218b], ['tz', 0xbf9f], ['tz', 0x0043], ['tz', 0x68aa], ['ln', 0x067f], ['ln', WH], ['tz2', 0x218b]];
+    if (i === 4) return [];
     const p = [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa],
       ['tr', z.sa, z.ts]];
     for (let b = 0; b < 8; ++b) p.push(['sh', b]);

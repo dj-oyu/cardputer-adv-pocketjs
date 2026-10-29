@@ -136,10 +136,22 @@ static uint32_t next_handle;
 static const ksn_proc_rom_entry *rom_table;
 static unsigned rom_count;
 static uint32_t scalar_batches,pie_batches;
+/* What a frame shows on each 8-row band of the image: a hash of the ordered
+ * entries that touch the band (its pixels are a function of the backdrop
+ * colour and that list alone, ksn_proc_render_band) and their columns. Two
+ * frames whose band hashes match draw the band alike, so commit() damages
+ * only the bands whose hash changed (pocket_proc_band_damage). */
+#define PROC_BANDS ((KSN_PROC_H+7)/8)
+typedef struct {
+    uint32_t hash[PROC_BANDS];
+    uint8_t x0[PROC_BANDS],x1[PROC_BANDS];
+} proc_band_sig;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
+    proc_band_sig candidate_sig,committed_sig;
     uint16_t candidate_color,committed_color;
     bool pending,has_committed,repair_required,image_mode;
+    bool sig_ready; /* candidate_sig describes the candidate (commit .. next beginFrame) */
     uint32_t handle;
     ksn_rect damage;
     uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (surface 0, or no option) */
@@ -339,6 +351,52 @@ static ksn_rect frame_damage(const proc_surface *surface){
     if(x1>KSN_PROC_W)x1=KSN_PROC_W;
     if(y1>KSN_PROC_H)y1=KSN_PROC_H;
     return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
+}
+static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
+    for(unsigned b=0;b<PROC_BANDS;b++){sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;}
+    unsigned i=0,cost;
+    ksn_proc_segment geometry;
+    bool pattern;
+    for(;;){
+        const unsigned start=i;
+        if(!ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost))break;
+        const int ya=geometry.y0<geometry.y1?geometry.y0:geometry.y1,yb=geometry.y0^geometry.y1^ya;
+        int xa=geometry.x0<geometry.x1?geometry.x0:geometry.x1,xb=(geometry.x0^geometry.x1^xa)+1;
+        if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)continue;
+        if(xa<0)xa=0;
+        if(xb>KSN_PROC_W)xb=KSN_PROC_W;
+        const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
+        for(unsigned b=b0;b<=b1;b++){
+            /* The raw entries, a pattern line's parameters included. */
+            const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
+            uint32_t h=sig->hash[b];
+            for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)h=(h^bytes[k])*16777619u;
+            sig->hash[b]=h;
+            if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
+            if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
+        }
+    }
+}
+bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
+#ifdef POCKET_PROC_NO_BAND_DAMAGE
+    /* Host A/B only (run_megademo_app_host.py --no-band-damage). */
+    (void)bands;(void)x0;(void)x1;(void)index;
+    return false;
+#endif
+    if(index>=PROC_SURFACES||!surfaces[index].sig_ready)return false;
+    const proc_surface *s=&surfaces[index];
+    const bool all=!s->has_committed||s->candidate_color!=s->committed_color;
+    *bands=0;
+    for(unsigned b=0;b<PROC_BANDS;b++){
+        const proc_band_sig *n=&s->candidate_sig,*o=&s->committed_sig;
+        if(!all&&n->hash[b]==o->hash[b])continue;
+        *bands|=1u<<b;
+        if(all){x0[b]=0;x1[b]=KSN_PROC_W;continue;}
+        /* The columns either frame drew on the band. */
+        const unsigned a=n->x0[b]<o->x0[b]?n->x0[b]:o->x0[b],z=n->x1[b]>o->x1[b]?n->x1[b]:o->x1[b];
+        x0[b]=(int16_t)(a<z?a:0);x1[b]=(int16_t)(a<z?z:0);
+    }
+    return true;
 }
 /* Typed points for a plan just prepared: none, attached, or the failure the
  * caller returns (the plan is not yet in a slot, so the caller frees it). */
@@ -543,6 +601,7 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     surface->candidate->raster_steps=0;
     surface->candidate->ready=false;
     surface->candidate->ext=0;
+    surface->sig_ready=false;
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
     building=true;
@@ -686,12 +745,46 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     }
     return draw_run(ctx,slot,handle,input);
 }
+/* Native drawing straight into the candidate (pocket_shape.c): draw()'s
+ * frame limits without a plan or the VM. */
+JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
+    if(js_call_active)return failure(ctx,"kasane.procedural",POCKET_ERR_BUSY,"reentrant procedural call");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    const ksn_proc_frame *c=surfaces[building_surface].candidate;
+    *mark=(pocket_proc_mark){c->count,c->raster_steps,c->ext,(uint8_t)building_surface};
+    image_band_valid=false;
+    return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    if(x0< -480||x0>720||y0< -480||y0>720||x1< -480||x1>720||y1< -480||y1>720){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"segment outside -480..720");
+    }
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned dx=(unsigned)abs(x1-x0),dy=(unsigned)abs(y1-y0),cost=(dx>dy?dx:dy)+1u;
+    if(c->count>=surface_segments(&surfaces[building_surface])||
+       cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1,color};
+    c->raster_steps=(uint16_t)(c->raster_steps+cost);
+    return JS_UNDEFINED;
+}
+void pocket_proc_native_rollback(const pocket_proc_mark *mark){
+    ksn_proc_frame *c=surfaces[mark->surface<PROC_SURFACES?mark->surface:0].candidate;
+    if(!c)return;
+    c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;
+}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
     surface->damage=frame_damage(surface);
+    band_signature(surface->candidate,&surface->candidate_sig);
+    surface->sig_ready=true;
     if(building_surface&&!surface->image_mode)
         return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
     ksn_result result=building_surface||surface->image_mode?
@@ -1042,6 +1135,7 @@ void pocket_proc_present_result(ksn_result result){
             ksn_proc_frame *old=surface->committed;
             surface->committed=surface->candidate;surface->candidate=old;
             surface->committed_color=surface->candidate_color;
+            surface->committed_sig=surface->candidate_sig;
             surface->has_committed=true;surface->pending=false;
             image_band_valid=false;
         }

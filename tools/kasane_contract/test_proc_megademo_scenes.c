@@ -188,6 +188,25 @@ static void append(ksn_proc_frame *cand, const ksn_proc_frame *f) {
     cand->raster_steps = (uint16_t)(cand->raster_steps + f->raster_steps);
 }
 
+/* A segment drawn natively (pocket.shapes, shape_draw_shim.c): plan -1,
+ * inputs [x0, y0, x1, y1, color], into both candidates as pocket_proc.c's
+ * native line puts it into the frame. */
+static void raw_segment(JSValue in) {
+    REQUIRE(len(in) == 5);
+    int v[5];
+    for (unsigned i = 0; i < 5; ++i) {
+        const double n = at(in, i);
+        REQUIRE(n == floor(n) && (i == 4 ? n >= 0 && n <= 65535 : n >= -480 && n <= 720));
+        v[i] = (int)n;
+    }
+    ksn_proc_frame one = {.count = 1};
+    one.segments[0] = (ksn_proc_segment){(int16_t)v[0], (int16_t)v[1], (int16_t)v[2], (int16_t)v[3], (uint16_t)v[4]};
+    const int dx = abs(v[2] - v[0]), dy = abs(v[3] - v[1]);
+    one.raster_steps = (uint16_t)((dx > dy ? dx : dy) + 1);
+    append(&cand_plan, &one);
+    append(&cand_vm, &one);
+}
+
 /* One draw, three executors; returns VM steps. */
 static unsigned run_draw(spec *s, const float in[KSN_PROC_INPUTS], stats *st) {
     ksn_proc_vm vm_plan, vm_debug, vm_raw;
@@ -358,6 +377,12 @@ int main(int argc, char **argv) {
                 for (g_draw = 0; g_draw < draws; ++g_draw) {
                     JSValue one = JS_GetPropertyUint32(ctx, d, g_draw);
                     JSValue in = JS_GetPropertyUint32(ctx, one, 1);
+                    if (at(one, 0) == -1) {
+                        raw_segment(in);
+                        JS_FreeValue(ctx, in); JS_FreeValue(ctx, one);
+                        ++draws_checked;
+                        continue;
+                    }
                     const unsigned plan = (unsigned)ival(at(one, 0)), ni = len(in);
                     REQUIRE(plan < st.plans && ni <= KSN_PROC_INPUTS);
                     /* A program must not read an input the draw leaves zero-filled. */

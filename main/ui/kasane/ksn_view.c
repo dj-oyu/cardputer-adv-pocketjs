@@ -269,6 +269,10 @@ bool ksn_view_host_invalidate_image_source_rect(ksn_view_host *h,ksn_resource re
                                                 ksn_rect source_rect){
     return h&&ksn_core_invalidate_image_source_rect(h->core,resource,source_rect);
 }
+bool ksn_view_host_invalidate_image_source_damage(ksn_view_host *h,ksn_resource resource,
+                                                  const ksn_damage *source){
+    return h&&ksn_core_invalidate_image_source_damage(h->core,resource,source);
+}
 bool ksn_view_host_needs_present(const ksn_view_host *h){
     return h&&h->core&&(ksn_core_has_submission(h->core)||ksn_core_needs_repair(h->core));
 }

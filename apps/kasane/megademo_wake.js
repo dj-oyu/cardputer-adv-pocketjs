@@ -1,11 +1,11 @@
 // MEGADEMO chunk 3: WAKE, the prologue (Tama in the dark). act2's scene
-// table calls wake(); its geometry runs in C (pocket.shapes).
+// table calls wake(); it draws with pocket.shapes (docs/api/shapes.md).
 'use strict';
 // WAKE: Tama peering in, backlit in the dark, in close-up: the head is
 // bigger than the view, so only the eyes, the ears, the whiskers and part
 // of the outline show (never the whole shape). The backdrop is the
 // silhouette and the lit room behind it is the fill (the glow minus the
-// head and ears), in tz trapezoids.
+// head and ears).
 // A cyan rim on the outer edges, magenta inner ears (the icon's cyber
 // coat), glowing eyes. The head is 3D points on an ellipsoid, turned and
 // seen in perspective: a turn slides the eyes across and folds the ears
@@ -32,30 +32,34 @@ const BACK = [124, 32, 88, 34];
 const WRAD = [52, 44, 46], EAR = [[-46, -22, 8], [-52, -48, 2], [-44, -74, -4], [-25, -60, 8], [-14, -40, 18]],
   WHISK = [[10, 16, 78, 4], [12, 20, 80, 18], [11, 24, 72, 32]];
 // WAKE's points: JS builds a frame's model points (x right, y down, z to the
-// viewer) into WM; pocket.shapes projects them into screen points in WP
-// (same index) and scan-converts and draws them, in C: the same geometry in
-// JS cost ~130 ms a frame on the device (docs/apps/megademo-shapes.md).
-// Ranges: head 0 (28), ears 28 (5 each), their insides 38 (10 each), the
-// glow's core 58 (16, screen points, set once), whiskers 74 (2 each), eyes
-// 86 (30 each: iris 12, pupil 12, the shut lid 4, the highlight 2).
-const SH = pocket.shapes, WN = 146, WM = new Float64Array(3 * WN), WP = new Float64Array(2 * WN), WQ = new Float64Array(10);
+// viewer) into WM; shapes.project puts them on the screen in WP (same
+// index) and shapes.fill / outline draw them into the frame, in C (the same
+// geometry in JS cost ~130 ms a frame on the device,
+// docs/apps/megademo-shapes.md). Ranges: head 0 (28), ears 28 (5 each),
+// their insides 38 (10 each), the glow's core 58 (16, screen points, set
+// once), whiskers 74 (2 each), eyes 86 (30 each: iris 12, pupil 12, the shut
+// lid 4, the highlight 2).
+const SH = pocket.shapes, WN = 146, WM = new Float32Array(3 * WN), WP = new Float32Array(2 * WN), WQ = new Float64Array(12);
 const W_EAR = 28, W_IN = 38, W_CORE = 58, W_WH = 74, W_EYE = 86;
 for (let j = 0; j < 16; ++j) {
   WP[2 * (W_CORE + j)] = BACK[0] + BACK[2] * .68 * M.cos(j * M.PI / 8);
   WP[2 * (W_CORE + j) + 1] = BACK[1] + BACK[3] * .68 * M.sin(j * M.PI / 8);
 }
-// Polygons as [start, count] pairs: what each fill or rim leaves out.
-const W_CUT = [0, 28, W_EAR, 5, W_EAR + 5, 5], W_CUT4 = W_CUT.concat([W_CORE, 16]), W_EARS = W_CUT.slice(2),
-  W_HD = [0, 28], W_NO = [], W_GLOW = [W_CORE, 16], W_RING = [BACK[0], BACK[1], BACK[2], BACK[3]],
-  W_INS = [[W_IN, 10], [W_IN + 10, 10]], W_IRIS = [[W_EYE, 12], [W_EYE + 30, 12]],
-  W_PUP = [[W_EYE + 12, 12], [W_EYE + 42, 12]];
+// Colours: the lit room, the glowing iris, the magenta inner ear, the cyan
+// rim, the eye's highlight.
+const C_GLOW = 0x218b, C_IRIS = 0xbf9f, C_EAR = 0x68aa, C_RIM = 0x067f;
+// Polygons as [start, count] pairs, and the options of each draw.
+const W_CUT = [0, 28, W_EAR, 5, W_EAR + 5, 5], W_RING = [BACK[0], BACK[1], BACK[2], BACK[3]],
+  O_CORE = {top: BACK[1] - BACK[3] * .68, bottom: BACK[1] + BACK[3] * .68},
+  W_RINGH = W_CUT.concat([W_CORE, 16]), O_RING = {step: 2}, O_HEAD = {closed: true, hidden: W_CUT.slice(2)},
+  O_EAR = {pieces: 2, hidden: [0, 28]}, W_INS = [[W_IN, 10], [W_IN + 10, 10]],
+  W_IRIS = [[W_EYE, 12], [W_EYE + 30, 12]], W_PUP = [[W_EYE + 12, 12], [W_EYE + 42, 12]];
 const wpt = (i, x, y, z) => { WM[3 * i] = x; WM[3 * i + 1] = y; WM[3 * i + 2] = z; };
 // A point on the face (z on the ellipsoid's front).
 const wsurf = (i, x, y, d) => wpt(i, x, y, WRAD[2] * M.sqrt(M.max(0, 1 - (x / WRAD[0]) ** 2 - (y / WRAD[1]) ** 2)) + d);
-// Without emit (the host tests) the draws are a list: plan k goes to C as
-// k + 1 (0 draws nothing) and the harness's __shapeDraw lists it as k.
+// Without emit (the host tests) the drawing is listed: the harness's shapes
+// put each segment in WD.
 let WD = null, WEMIT = null;
-const wh = k => WEMIT ? live[k] : k + 1;
 // WAKE's backdrop: the silhouette, until the TV is off.
 const wakeB = t => t < WCUT ? 0x0043 : 0;
 function wake(t, emit) {
@@ -67,10 +71,19 @@ function wake(t, emit) {
   // Breathing, and a slow sway.
   const S = q[1] * (1 + .012 * M.sin(t * .2)), cy = M.cos(q[2]), sy = M.sin(q[2]), cp = M.cos(q[3]), sp = M.sin(q[3]),
     c = M.cos(q[4] + .03 * M.sin(t * .11)), sn = M.sin(q[4] + .03 * M.sin(t * .11));
-  // Head space to the screen (shapes.project): turn, nod, perspective
-  // (nearer is bigger), roll.
-  WQ[0] = cy; WQ[1] = sy; WQ[2] = cp; WQ[3] = sp; WQ[4] = c; WQ[5] = sn; WQ[6] = q[8]; WQ[7] = S;
-  WQ[8] = 120 + q[9]; WQ[9] = 100 + q[10] + 1.5 * M.sin(t * .2);
+  // Head space to the screen as one projective matrix (shapes.project):
+  // turn (yaw), nod (pitch), the camera D in front (nearer is bigger, x
+  // and y over w = D - z), then roll and scale about (X0, Y0).
+  {
+    const D = q[8], K = D * S, X0 = 120 + q[9], Y0 = 100 + q[10] + 1.5 * M.sin(t * .2),
+      R0 = [cy, 0, sy], R1 = [sp * sy, cp, -sp * cy], W = [cp * sy, -sp, -cp * cy];
+    for (let j = 0; j < 3; ++j) {
+      WQ[j] = X0 * W[j] + K * (c * R0[j] - sn * R1[j]);
+      WQ[4 + j] = Y0 * W[j] + K * (sn * R0[j] + c * R1[j]);
+      WQ[8 + j] = W[j];
+    }
+    WQ[3] = X0 * D; WQ[7] = Y0 * D; WQ[11] = D;
+  }
   // The view direction in head space, scaled by the radii (w): the
   // outline is the radii times the unit circle across w (e1, e2).
   const w = [-sy * cp / 52, sp / 44, cy * cp / 46], wl = M.hypot(w[0], w[1], w[2]);
@@ -130,31 +143,31 @@ function wake(t, emit) {
     E(24, -11, 0); E(25, -4, 2); E(26, 4, 2); E(27, 11, 0);
     E(28, px - pw * .8, -h * .45); E(29, px - pw * .2, -h * .45);
   }
-  SH.project(WM, WP, 0, W_CORE, WQ);
-  SH.project(WM, WP, W_WH, WN - W_WH, WQ);
+  SH.project(WQ, WM, WP, 0, W_CORE);
+  SH.project(WQ, WM, WP, W_WH, WN - W_WH);
   // The lit room: the glow minus the head and the ears, soft at its edge:
   // the core (.68 of it) every row, the ring outside every other row.
-  SH.fill(WP, wh(0), 1, BACK[1] - BACK[3] * .68, BACK[1] + BACK[3] * .68, W_GLOW, W_CUT);
-  SH.fill(WP, wh(6), 2, BACK[1] - BACK[3], BACK[1] + BACK[3], W_RING, W_CUT4);
+  SH.fill(WP, [W_CORE, 16], W_CUT, C_GLOW, O_CORE);
+  SH.fill(WP, W_RING, W_RINGH, C_GLOW, O_RING);
   // The rim on the outer edges only: a head edge inside an ear is not lit,
   // nor the halves of an ear's edges inside the head.
-  SH.outline(WP, wh(4), 0, 28, true, 1, W_EARS);
-  SH.outline(WP, wh(4), W_EAR, 5, false, 2, W_HD);
-  SH.outline(WP, wh(4), W_EAR + 5, 5, false, 2, W_HD);
+  SH.outline(WP, 0, 28, C_RIM, O_HEAD);
+  SH.outline(WP, W_EAR, 5, C_RIM, O_EAR);
+  SH.outline(WP, W_EAR + 5, 5, C_RIM, O_EAR);
   // An ear's inside shows while the ear faces the viewer (the sign of its
   // projected winding).
   for (let k = 0; k < 2; ++k) {
     const a = 2 * (W_EAR + 5 * k), fc = ((WP[a + 4] - WP[a]) * (WP[a + 9] - WP[a + 1]) - (WP[a + 5] - WP[a + 1]) * (WP[a + 8] - WP[a])) * (k ? -1 : 1);
-    if (fc > 400) SH.fill(WP, wh(3), 1, null, null, W_INS[k], W_NO);
+    if (fc > 400) SH.fill(WP, W_INS[k], undefined, C_EAR);
   }
-  for (let k = 0; k < 6; ++k) SH.outline(WP, wh(4), W_WH + 2 * k, 2, false, 1, W_NO);
+  for (let k = 0; k < 6; ++k) SH.outline(WP, W_WH + 2 * k, 2, C_RIM);
   // The dark pupils are the backdrop: only the glowing iris around them is
   // drawn.
   for (let k = 0; k < 2; ++k) {
     const o = W_EYE + 30 * k;
-    if (op < .2) { SH.outline(WP, wh(4), o + 24, 4, false, 1, W_NO); continue; }
-    SH.fill(WP, wh(1), 1, null, null, W_IRIS[k], W_PUP[k]);
-    SH.outline(WP, wh(5), o + 28, 2, false, 1, W_NO);
+    if (op < .2) { SH.outline(WP, o + 24, 4, C_RIM); continue; }
+    SH.fill(WP, W_IRIS[k], W_PUP[k], C_IRIS);
+    SH.outline(WP, o + 28, 2, WH);
   }
   return {b: wakeB(t), s: 0, d: WD};
 }

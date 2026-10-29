@@ -78,6 +78,7 @@ const char grid_fold_js_end[] asm("_binary_grid_fold_js_end") = "";
 static JSRuntime *rt;
 static JSContext *ctx;
 static uint16_t strip_pixels[240*8],panel[240*135];
+static unsigned long long panel_bytes; /* what the panel was sent, as the device's SPI would */
 static unsigned exceptions,degrades,scene_lines,present_failures;
 static char scene_log[4096];
 
@@ -155,7 +156,7 @@ static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *arg
 }
 static uint16_t *get_strip(void *o){(void)o;return strip_pixels;}
 static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pixels){
-    (void)o;memcpy(panel+y*240,pixels,rows*240*sizeof *pixels);return KSN_OK;
+    (void)o;memcpy(panel+y*240,pixels,rows*240*sizeof *pixels);panel_bytes+=rows*240u*2u;return KSN_OK;
 }
 static void present(uint64_t now_us){
     pocket_kasane_set_animation_time(now_us);
@@ -344,6 +345,8 @@ int main(int argc,char **argv){
            req_after_eval,req_live_peak,heap_req_peak);
     printf("frames %u: exceptions=%u degrades=%u present_failures=%u scene_lines=%u\n",
            frames,exceptions,degrades,present_failures,scene_lines);
+    printf("panel: %llu bytes sent over %u frames (%.0f a frame; a whole frame is 64800)\n",
+           panel_bytes,frames,frames?(double)panel_bytes/frames:0.0);
     ok=ok&&!exceptions&&!present_failures;
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",ok?"MEGADEMO_HOST PASS":"MEGADEMO_HOST FAIL");

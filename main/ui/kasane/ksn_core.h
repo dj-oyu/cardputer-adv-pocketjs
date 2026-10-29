@@ -194,6 +194,13 @@ typedef struct {
     uint32_t bands;
     int16_t x0[17],x1[17];
 } ksn_damage;
+/* Invalidate the image pixels a source-space damage names (its bands are the
+ * source's 8-row bands, each with its columns), on nodes that show the source
+ * 1:1: KSN_IMAGE_1X, or an unrotated stretch to its own size. Other nodes of
+ * the resource conservatively invalidate their displayed bounds. Returns
+ * false if the resource has no node or the damage is empty. */
+bool ksn_core_invalidate_image_source_damage(ksn_core *core,ksn_resource resource,
+                                             const ksn_damage *source);
 ksn_result ksn_core_discard_reason(ksn_core *core,ksn_tx ticket,ksn_result reason);
 /* Read-only transaction check for cache no-op updates. */
 ksn_result ksn_core_check_transaction(const ksn_core *core,ksn_tx ticket,ksn_layer layer);

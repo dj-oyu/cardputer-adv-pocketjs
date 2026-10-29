@@ -2932,7 +2932,12 @@ ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect source_damage
     state->active=true;
     ksn_runtime_app_activate(state->lease);
     if(source_damage.x0<source_damage.x1&&source_damage.y0<source_damage.y1){
-        ksn_runtime_invalidate_image_source_rect(state->proc_resource[surface],source_damage);
+        /* The bands whose drawing changed, where the frame says (a 1:1 node
+         * then sends only those), else the one bounding rectangle. */
+        ksn_damage bands={0};
+        if(pocket_proc_band_damage(surface,&bands.bands,bands.x0,bands.x1)){
+            if(bands.bands)ksn_runtime_invalidate_image_source_damage(state->proc_resource[surface],&bands);
+        }else ksn_runtime_invalidate_image_source_rect(state->proc_resource[surface],source_damage);
         pocket_grid_source_invalidated(state->proc_resource[surface].value);
     }
     return KSN_OK;
