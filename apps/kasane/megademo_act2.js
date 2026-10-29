@@ -149,28 +149,33 @@ function pj(x, y, z, s, j) {
 }
 function core(k, t) {
   // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The ship
-  // rams the core at 112 (m): the shell, thrown small, bursts (e) and the
-  // screen fills with CRT white. cr: criticality, d: dolly zoom, o/op:
-  // opening, b: twist, A/B: yaw/pitch, ng: negative frames, l: the roll
-  // dodging the core's beams (64..84; one whole turn 72..82).
+  // rams the core at 112: the shell falls in (m, 112..115) and bursts in
+  // slow motion on its own clock (e over 115..145) that freezes 119..124
+  // (a still in greys, the ring the one colour); then the light (145..).
+  // cr: criticality, d: dolly zoom, o/op: opening, b: twist, A/B: yaw/
+  // pitch, ng: negative frames, l: the roll dodging the core's beams
+  // (64..84; one whole turn 74..84), gy: greys.
   const g = t < 86 ? t : t < 100 ? 86 + 3 * ((t - 86) / 3 | 0) : 100, step = t >= 86 && t < 100 && g === t;
-  const ng = t === 100 || t === 101 || t === 112, m = t < 112 ? 0 : 1;
-  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t, 112, 130), ee = 1 - (1 - e) ** 3;
+  const ng = t === 100 || t === 101 || t === 115 || t === 116, m = smooth(ramp(t, 112, 115)),
+    gy = t > 118 && t < 125 || t > 144;
+  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t < 119 ? t : t < 125 ? 119 : t - 6, 115, 139),
+    ee = 1 - (1 - e) ** 3;
   const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * m), o = smooth(ramp(g, 58, 72)) + .6 * smooth(ramp(g, 76, 100));
   const op = o * (1 - m) + 3.6 * ee, b = o * (.5 + 1.5 * cr) * (1 - m) + 5 * ee;
   const A = g * .03 + 2 * cr ** 3, B = .5 + g * .011, X = ng ? 0xffff : 0,
     l = t >= 72 && t < 84 ? 2 * PI * smooth(ramp(t, 74, 84)) + .4 * M.sin((t - 72) * .5) * M.sin(PI * (t - 72) / 12) : 0;
   // Grey flashes as 9 cr^3 crosses an integer (60..86: the beams grazing),
-  // dark grey on the steps, light grey negatives. After the ram, light
-  // past the panel's white, told as an eye's (a sensor's) answer to it:
-  // blown out to CRT white (0xd71e, 113..114, nothing drawn), the iris
-  // stopping down to show the burst (115..123; the lids squint, patch),
-  // then the core's light swelling over everything (124..134) and held
-  // until the set shuts (no lens-flare lines).
+  // dark grey on the steps, light grey negatives, the burst's afterglow.
+  // Then the core's light past the panel's white, told as an eye's (a
+  // sensor's) answer to it: blown out to CRT white (0xd71e, 145..146,
+  // nothing drawn), the iris stopping down to its light (147..155; the
+  // lids squint, patch), the light swelling over everything (156..166),
+  // held until the set shuts.
   const fl = t === 60 || t > 60 && t < 86 && (9 * cr ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0),
-    u = t < 115 ? 1 : t < 124 ? 1 - ramp(t, 114, 120) : ramp(t, 124, 134);
-  BG(ng ? 0xad55 : t > 112 ? rnd(26 * u) << 11 | rnd(56 * u) << 5 | rnd(30 * u) : fl ? 0x5acc : step ? 0x2945 : 0);
-  if (t > 112 && t < 115 || t > 133) return;
+    u = t < 147 ? 1 : t < 156 ? 1 - ramp(t, 146, 152) : ramp(t, 156, 166), v = rnd(9 * (1 - e) ** 2);
+  BG(ng ? 0xad55 : t > 144 ? rnd(26 * u) << 11 | rnd(56 * u) << 5 | rnd(30 * u) : fl ? 0x5acc : step ? 0x2945 :
+    t > 116 ? v << 11 | v << 6 | v : 0);
+  if (t > 144 && t < 147 || t > 165) return;
   // The dolly zoom snaps back on the ram.
   Ycy = M.cos(A); Ysy = M.sin(A); Pcp = M.cos(B); Psp = M.sin(B); Dd = 3.2 - 1.6 * d * (1 - m);
   Rc = M.cos(l); Rs = M.sin(l);
@@ -197,7 +202,7 @@ function core(k, t) {
     if (D >= 1e4 || e > 0 && (c += D) > 4000) continue;
     // In the burst's glare only light and shade are left: shards grey,
     // light facing the eye, dark turned away (the ring is the one colour).
-    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], e > 0 ? ts > 0 ? 0x4208 : 0xad55 : (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
+    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], gy ? ts > 0 ? 0x4208 : 0xad55 : (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
   }
   // The core (cc): cube and octahedron (LETHE's magenta), pulsing. Cube
   // vertex i is the bits of i, octahedron vertex i the axis i % 3 signed
@@ -216,11 +221,11 @@ function core(k, t) {
   // from 64 and three beams sweeping round (64..84) to dodge.
   if (e > 0) {
     const R = 6 + 150 * ee, rr = M.max(8, k.r), ln = rnd(k.r * (1 - e));
-    E(4, 120, 67, R, R + 3 + 9 * (1 - e), t * .02, rr, 2 * PI / rr, OR);
-    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, 0x8410);
+    E(4, 120, 67, R, R + 3 + 9 * (1 - e), e * 3, rr, 2 * PI / rr, gy || e < .3 ? OR : WH ^ X);
+    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, gy ? 0x8410 : OR ^ X);
     // The core's light: dense rays from the middle, a blot of white that
     // swells over the screen.
-    E(4, 120, 67, 0, t < 124 ? 4 + 2 * (t - 115) : 22 + 128 * smooth(ramp(t, 124, 134)), t * .3, rr, 2 * PI / rr, WH);
+    if (t > 146) E(4, 120, 67, 0, t < 156 ? 4 + 2 * (t - 147) : 22 + 128 * smooth(ramp(t, 156, 166)), t * .3, rr, 2 * PI / rr, WH);
   } else {
     const rr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - .6 * smooth(ramp(t, 78, 88))));
     for (let j = 0; j < k.d && rr; ++j)
@@ -235,7 +240,7 @@ function core(k, t) {
     E(4, 120, 67, r, r + 4 + 12 * (1 - f), i * 1.7 + 30 / (r + 9), p, 2 * PI / p, (i & 1 ? 0x07ff : 0xfd20) ^ X);
   }
   // Stars stretch in the zoom and rush past in the burst (G); noise (L).
-  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 112 ? 0 : 1 - e));
+  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 115 ? 0 : 1 - e));
   E(5, 190 * G * Rc, 190 * G * Rs, -70 * G * Rs, 70 * G * Rc, g * .05 + 2 * ee, 120, 67);
   if (L) E(6, t * 1.7, L, 10 + 40 * cr);
   if (e > 0) return;
@@ -326,7 +331,7 @@ function lost(t) {
 }
 // Act I (CALL, ROUTE, VOYAGE) keeps the log name NEWS; WAKE plays first.
 const NAMES = ['NEWS', 'NEWS', 'NEWS', 'TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'],
-  LEN = [64, 56, 96, 240, 216, 154, 24, 104];
+  LEN = [64, 56, 96, 240, 216, 186, 24, 104];
 // Scene s's plans as [template, args...]. Act I's set is its HUD, then
 // TWIST's first 8: they register at the end of WAKE (the heap is lowest
 // there) and pass to TWIST at the cut (enter()). The loader builds plan i
