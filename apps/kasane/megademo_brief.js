@@ -7,7 +7,8 @@
 // drops in behind it. Words: numbers no one reads, and LETHE.
 // docs/apps/megademo-story.md (the code is dense: its bytecode is heap).
 'use strict';
-const BRIEF_B = 0x0827, OCT = [0, 1, 2, 3, 0, 4, 1, 5, 2, 4, 3, 5, 0], BS = [108, 61, 113, 61, 116, 65, 120, 62, 124, 65, 127, 61, 132, 61];
+// The backdrop: navy, going to the river's near-black in the dive.
+const briefB = (s, t) => s > 1 && t > 84 ? 0x0021 : 0x0827, OCT = [0, 1, 2, 3, 0, 4, 1, 5, 2, 4, 3, 5, 0], BS = [108, 61, 113, 61, 116, 65, 120, 62, 124, 65, 127, 61, 132, 61];
 const P2 = (i, x, y) => { WP[2 * i] = x; WP[2 * i + 1] = y; }, nz = i => (M.sin(i * 12.9898) * 43758.5453 % 1 + 1) % 1 - .5;
 // The route on the floor (x across, z ahead, y up); LETHE at z 1660.
 const rx = s => 110 * (1 - M.cos(s * .0042)) - 50 * (1 - M.cos(s * .009)), rdx = s => .462 * M.sin(s * .0042) - .45 * M.sin(s * .009);
@@ -22,7 +23,7 @@ function world() {
     const s = 60 + 128 * i, x = rx(s), d = rdx(s), l = 60 / M.hypot(1, d);
     for (let j = 0; j < 6; ++j) {
       const g = (j & 3) % 3 ? l : -l;
-      wpt(6 * i + j, j > 4 ? NaN : x + g, j & 2 && j < 4 ? 70 : 0, s - g * d);
+      wpt(6 * i + j, j > 4 ? NaN : x + 12 + g, j & 2 && j < 4 ? 150 : 0, s - g * d);
     }
   }
   for (let j = 0; j < 24; ++j) wpt(72 + j, j % 6 > 4 ? NaN : -120 + 120 * (j / 6 | 0), 0, -60 + 400 * (j % 6));
@@ -31,8 +32,16 @@ function world() {
 // The camera [t, target x y z, distance, yaw, pitch]: down the route;
 // VOYAGE goes up and round over all of it, holds while the ship sets out,
 // then drops in behind the ship looking ahead (TWIST is next).
-const K = [[0, 0, 35, 120, 200, 0, 0], [44, 52, 0, 830, 1250, -1.5708, 1.05], [78, 70, 0, 880, 1150, -1.5708, 1],
-  [96, rx(390), 30, 390, 140, M.atan(rdx(330)), .1]];
+// The last key flies along the route (fly()). Gates are TWIST's cross-
+// section (megademo_act2.js, Q0: 2 x 2.5 at 60 units, the camera 12 left
+// of the middle and 57 up), so the cut finds the river's first frames.
+const K = [[0, 0, 57, 120, 200, 0, 0], [44, 52, 0, 830, 1250, -1.5708, 1.05], [78, 70, 0, 880, 1150, -1.5708, 1], 0];
+// It closes on the sixth gate (s 700) along its normal at 12.6 a frame,
+// 123 short at the cut: TWIST's first frame, at its speed.
+function fly(t) {
+  const d = rdx(700), l = M.hypot(1, d), a = -23 - 12.6 * (96 - t);
+  return [96, rx(700) + a * d / l, 57, 700 + a / l, 100, M.atan(d), 0];
+}
 // Scene s (0 CALL, 1 ROUTE, 2 VOYAGE) at t; emit as in wake() (a plan
 // draw too: emit(plan, inputs), else [plan, inputs] in the list). The result
 // carries LETHE's place on screen (its tag) and three readouts.
@@ -41,8 +50,11 @@ function brief(s, t, emit) {
   if (!BW) world();
   // g: Act I's clock (the beat runs on across its scenes). on(t0): an
   // instrument boots at t0 on CALL, flickering for 6 frames.
-  const g = [0, 64, 120][s] + t, p = M.sin((g & 15) * .3927), on = t0 => s || t >= t0 + 6 || t >= t0 && t & 1,
-    sw = s > 1 ? 1 - smooth(ramp(t, 0, 20)) : 1, sh = 330 * ramp(t, 40, 96) ** 2;
+  // VOYAGE powers them down again in the dive (off at 82 + a stagger).
+  const g = [0, 64, 120][s] + t, p = M.sin((g & 15) * .3927),
+    on = t0 => s > 1 ? t < 82 + t0 % 9 || t < 88 + t0 % 9 && t & 1 : s || t >= t0 + 6 || t >= t0 && t & 1,
+    sw = s > 1 ? 1 - smooth(ramp(t, 0, 20)) : 1, sh = 760 * ramp(t, 40, 96) ** 2;
+  K[3] = fly(t);
   let i = 0;
   while (s > 1 && i < 2 && K[i + 1][0] <= t) ++i;
   const u = s > 1 ? smooth(ramp(t, K[i][0], K[i + 1][0])) : 0,
@@ -50,7 +62,7 @@ function brief(s, t, emit) {
     yw = c[5] + .03 * p * sw, cy = M.cos(yw), sy = M.sin(yw), cp = M.cos(c[6]), sp = M.sin(c[6]),
     F = [sy * cp, -sp, cy * cp], R = [cy, 0, -sy], U = [sy * sp, cp, cy * sp],
     C = [c[1] - F[0] * c[4], c[2] + 2 * p * sw - F[1] * c[4], c[3] - F[2] * c[4]];
-  for (let j = 0; j < 3; ++j) { WQ[j] = 120 * F[j] + 150 * R[j]; WQ[4 + j] = 61 * F[j] - 150 * U[j]; WQ[8 + j] = F[j]; }
+  for (let j = 0; j < 3; ++j) { WQ[j] = 120 * F[j] + 150 * R[j]; WQ[4 + j] = 67 * F[j] - 150 * U[j]; WQ[8 + j] = F[j]; }
   for (let r = 0; r < 12; r += 4) WQ[r + 3] = -(WQ[r] * C[0] + WQ[r + 1] * C[1] + WQ[r + 2] * C[2]);
   // LETHE (an octahedron turning, one stroke over its edges), the ship
   // (an arrowhead) and its dashes.
@@ -61,14 +73,16 @@ function brief(s, t, emit) {
   }
   for (let j = 0; j < 14; ++j) {
     const a = sh - 34 * (j / 3 | 0) - 14 * (j % 3), b = j < 5 ? A[2 * j + 1] : 0, q = j < 5 ? A[2 * j] : 0;
-    wpt(127 + j, j > 4 && (j % 3 > 1 || a < -20) ? NaN : j < 5 ? sx + (sd * b + q) / sl : rx(a + 20), 25, j < 5 ? sh + (b - sd * q) / sl : a + 20);
+    wpt(127 + j, j > 4 && (j % 3 > 1 || a < -20) ? NaN : j < 5 ? sx + (sd * b + q) / sl : rx(a + 20), 45, j < 5 ? sh + (b - sd * q) / sl : a + 20);
   }
   SH.project(WQ, WM, WP, 0, 141);
   // The world: the grid boots on CALL; ROUTE lights the gates near to far
   // (the newest flashes); VOYAGE shows them all as the camera rises.
-  if (on(50)) SH.outline(WP, 72, 41, 0x29f4);
+  if (s > 1 || on(50)) SH.outline(WP, 72, 41, 0x29f4);
   const n = s > 1 ? 7 + rnd(5 * smooth(ramp(t, 8, 40))) : 7, lit = s > 1 ? n : s ? M.max(0, M.min(7, (t - 2) / 6 | 0)) : 0;
-  if (lit) SH.outline(WP, 0, 6 * lit - 1, 0x07ff);
+  // Into the river: the gates turn its violet as the camera comes down.
+  const v = s > 1 ? smooth(ramp(t, 70, 92)) : 0, gc = rnd(24 * v) << 11 | rnd(63 - 37 * v) << 5 | 31;
+  if (lit) SH.outline(WP, 0, 6 * lit - 1, gc);
   if (s && n > lit) SH.outline(WP, 6 * lit, 6 * (n - lit) - 1, 0x394f);
   if (s === 1 && lit && t < 46 && (t - 2) % 6 < 2) SH.outline(WP, 6 * lit - 6, 5, WH);
   let tag = null;
@@ -110,7 +124,7 @@ function brief(s, t, emit) {
       [.37, .21, .53, .11, .29][q], [0x57f9, 0x07ff, 0xce59, 0xb81f, 0x5d7f][q]]);
   if (on(44)) D(4, [g * 2.9, .7 + .3 * p]);
   if (on(48)) D(5, [g * .07]);
-  return {b: BRIEF_B, s: 0, d: WD, tag: tag,
+  return {b: briefB(s, t), s: 0, d: WD, tag: s > 1 && t > 80 ? null : tag,
     rd: [String(240 + rnd(spd * 3) % 760), String(rnd(C[1] * 2) + 1e4).slice(1), String(g * 7919 % 9000 + 1e3)]};
 }
 // TWIST, the river: memories come down the corridor, turning with it, and
@@ -124,8 +138,10 @@ const GL = ['0006  4046  0343', '0040460600', '0600234046', '40000646  0333', '1
   FR = [-1.4, .8, 1.2, .6, -.3, 1.1], FL = [-30, -8, 22, -14, 8, 10, -14, 12, 38, 4];
 function river(t, emit) {
   WEMIT = emit || null; BW = 0;
-  const q = (t - 18) / 30 | 0, u = (t - 18) / 30 - q;
-  if (t >= 18 && q < 3) {
+  // Memories at 20, 64 and 150 (after the white frame), 40 frames each;
+  // pale, dim while far (the storyboard's colours).
+  const q = t < 64 ? 0 : t < 150 ? 1 : 2, u = (t - [20, 64, 150][q]) / 40, mc = u < .3 ? 0x8c71 : 0xe71a;
+  if (u >= 0 && u < 1) {
     // Memory q's strokes into WM (a break after each).
     let n = 0, x = 0;
     const put = (w, dx) => {
@@ -141,7 +157,7 @@ function river(t, emit) {
     WQ.set([c, -sn, 0, 120 + c * ox - sn * oy, sn, c, 0, 67 + sn * ox + c * oy, 0, 0, 0, 1]);
     SH.project(WQ, WM, WP, 0, n);
     // Bold: drawn again a pixel to the right.
-    if (u < .62) { SH.outline(WP, 0, n, 0xffe0); WQ[3] += 1; SH.project(WQ, WM, WP, 0, n); SH.outline(WP, 0, n, 0xffe0); }
+    if (u < .62) { SH.outline(WP, 0, n, mc); WQ[3] += 1; SH.project(WQ, WM, WP, 0, n); SH.outline(WP, 0, n, mc); }
     else {
       // Crumbling: dots on the edges (two, or one for a long memory),
       // pushed out and thinned.
@@ -156,15 +172,16 @@ function river(t, emit) {
         P2(m + 2, NaN, 0);
         m += 3;
       }
-      if (m > n + 2) SH.outline(WP, n, m - n - 1, 0xffe0);
+      if (m > n + 2) SH.outline(WP, n, m - n - 1, mc);
     }
   }
-  if (t >= 104) {
+  // The fleet, pink, as the stars open.
+  if (t >= 216) {
     let n = 0;
     for (let j = 0; j < 30; ++j) {
-      const i = j / 6 | 0, v = 1 + (t - 104) * .03, r = (1.5 + (t - 104) * .06) * [0, 1, 0, -1, 0][j % 6 % 5];
-      P2(n++, j % 6 > 4 || (t + 3 * i) % 6 > 3 ? NaN : 120 + FL[2 * i] * v + r, 67 + FL[2 * i + 1] * v + (j % 6 & 1 ? 0 : (j % 6 & 2 ? 1.6 : -1.6) * (1.5 + (t - 104) * .06)));
+      const i = j / 6 | 0, v = 1 + (t - 216) * .03, r = (1.5 + (t - 216) * .06) * [0, 1, 0, -1, 0][j % 6 % 5];
+      P2(n++, j % 6 > 4 || (t + 3 * i) % 6 > 3 ? NaN : 120 + FL[2 * i] * v + r, 67 + FL[2 * i + 1] * v + (j % 6 & 1 ? 0 : (j % 6 & 2 ? 1.6 : -1.6) * (1.5 + (t - 216) * .06)));
     }
-    SH.outline(WP, 0, 29, 0xbdff);
+    SH.outline(WP, 0, 29, 0xfcda);
   }
 }

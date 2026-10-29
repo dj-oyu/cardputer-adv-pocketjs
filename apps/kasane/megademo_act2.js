@@ -20,20 +20,26 @@ const Q0 = [[1.2, .95], [-.8, .95], [-.8, -1.55], [1.2, -1.55]];
 const cmul = (p, z) => [p[0] * z[0] - p[1] * z[1], p[0] * z[1] + p[1] * z[0]];
 const zp = (r, d, e) => [M.pow(r, e) * M.cos(d * e), M.pow(r, e) * M.sin(d * e)];
 const lerp = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
-// TWIST: frames, rails, arches, planks, 2nd rails, 2 wall courses.
+// TWIST: frames, rails, arches, planks, 2nd rails, 2 wall courses, in the
+// river's violets (the storyboard: one colour on near-black); planks
+// alternate two (the plan swaps c for (c + c2) - c).
+const RV = [0xc35f, 0x7a1a, 0xde5f, 0x5954];
 function corrList(k) {
   const n = k.n;
-  return [['fr', n - k.kf, VI], ['ra', n, GR], ['ar', n - k.ka, k.s, WH], ['ru', n * k.m, OR, OR + WH],
-    ['ra', n, GR], ['ra', n, BL], ['ra', n, BL]];
+  return [['fr', n - k.kf, RV[0]], ['ra', n, RV[1]], ['ar', n - k.ka, k.s, RV[2]], ['ru', n * k.m, RV[3], RV[3] + RV[1]],
+    ['ra', n, RV[1]], ['ra', n, RV[3]], ['ra', n, RV[3]]];
 }
 // The corridor: every point of a cross-section is multiplied by z per frame.
+// The first frame and arch drawn (kf, ka) keep their place as r changes.
+// The first 48 frames tighten the spacing from Act I's gates (.43, as
+// VOYAGE's last frame sees them) to the river's.
 function corrDraws(k, t, len, sp) {
-  const r = k.r, w = M.sin(M.PI * t / len), dl = k.D / k.n * w * w;
+  const r = k.r - (k.r - .43) * (1 - smooth(ramp(t, 0, 48))), w = M.sin(M.PI * t / len), dl = k.D / k.n * w * w;
   const ph = (t * sp) % 1, g = M.pow(r, 1 - ph) * 265;
   const an = .5 * M.sin(2 * M.PI * t / len) - ph * dl;
   const c = M.cos(an) * g, s = M.sin(an) * g;
   const P = Q0.map(q => [q[0] * c - q[1] * s, q[0] * s + q[1] * c]);
-  const z = zp(r, dl, 1), zf = zp(r, dl, 1 / k.m), zk = zp(r, dl, k.kf), za = zp(r, dl, k.ka);
+  const z = zp(r, dl, 1), zf = zp(r, dl, 1 / k.m), zk = zp(.8, dl, k.kf), za = zp(.8, dl, k.ka);
   const A = cmul([(P[2][0] - P[1][0]) / 2, (P[2][1] - P[1][1]) / 2], za);
   const d = [[0, cmul(P[0], zk).concat(cmul(P[1], zk), cmul(P[2], zk), z)],
     [1, P[0].concat(P[1], z)], [3, P[0].concat(P[1], zf)]];
@@ -161,7 +167,7 @@ const RC = [28, 108];
 const A2 = {
   // WAKE (the prologue, played first) draws nothing: the TV is off and the
   // view layer shows the room in the first person.
-  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [128, 96, 140, 24, 104],
+  names: ['TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'], len: [240, 96, 140, 24, 104],
   // Plan list of scene i: [template, args...]; sh carries points.
   plans: function (i, tier) {
     const k = KN[tier], z = k.z;
@@ -183,13 +189,16 @@ const A2 = {
       // Then the wire opens: stars burst from the vanishing point while
       // the corridor thins to its frames and arches, then to nothing; at
       // the cut the field is ZENITH's own (g = 1).
-      if (t === 64) return {b: WH, s: 0, d: []};
-      const e = (t - 88) / 40, g = e * e;
-      const d = corrDraws(k.c, t, 128, 1 / 6).filter(q => t < 108 || t < 120 && q[0] % 2 === 0);
-      if (e > 0) d.push([7, [190 * g, 0, 0, 70 * g, (t - 128) * .05, 120, 67]]);
-      if (emit) return {b: 0, s: 0, d: d, post: () => river(t, emit)};
+      // 240 frames: the storyboard's lines at 2 frames a letter, each held a
+      // second. Near-black going violet towards the white frame (120),
+      // then black for the stars.
+      if (t === 120) return {b: WH, s: 0, d: []};
+      const e = (t - 200) / 40, g = e * e, b = t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045;
+      const d = corrDraws(k.c, t, 240, 1 / 6).filter(q => t < 220 || t < 232 && q[0] % 2 === 0);
+      if (e > 0) d.push([7, [190 * g, 0, 0, 70 * g, (t - 240) * .05, 120, 67]]);
+      if (emit) return {b: b, s: 0, d: d, post: () => river(t, emit)};
       WD = d; river(t);
-      return {b: 0, s: 0, d: d};
+      return {b: b, s: 0, d: d};
     }
     if (i === 2) return core(k.k, t);
     if (i === 4) return wake(t, emit);

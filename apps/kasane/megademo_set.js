@@ -86,9 +86,10 @@ function build(tx, room) {
   // Act I: the HUD boots on CALL once the camera is in the screen, a piece
   // every other frame; LETHE's tag follows its octahedron (patch).
   if (scene < 3) {
-    const b0 = scene ? 0 : 1;
-    HUDI.split(',').forEach((e, i) => add(box(e), 36 * b0 + 2 * i * b0));
-    R.rd = RDB.map((b, i) => add(text(b, '', 'caption', i > 1 ? 0xd7f4ffff : 0x50ffc8ff, 5), (42 + 2 * i) * b0));
+    // VOYAGE's dive takes it down again, a piece at a time.
+    const b0 = scene ? 0 : 1, e0 = scene > 1 ? 82 : 1e9;
+    HUDI.split(',').forEach((e, i) => add(box(e), 36 * b0 + 2 * i * b0, e0 + 2 * i));
+    R.rd = RDB.map((b, i) => add(text(b, '', 'caption', i > 1 ? 0xd7f4ffff : 0x50ffc8ff, 5), (42 + 2 * i) * b0, e0 + 3 * i));
     // It moves: its clip is the screen (setRect keeps the clip).
     R.tag = tx.text({bounds: [0, 0, 40, 9], clip: FULL, text: gb('LETHE'), font: 'caption', color: 0xf81fffff});
     R.tag.setVisible(tx, false);
@@ -145,7 +146,8 @@ function patch(tx, f) {
     for (let i = 1; i < S.length; i += 2) if (t >= +S[i]) k = i;
     if (k !== said && k > 0) R.say.setText(tx, S[k + 1]);
     said = k;
-    if (k > 0) R.say.setReveal(tx, M.min(S[k + 1].length, t - S[k]));
+    // TWIST's lines type at 2 frames a letter (the storyboard).
+    if (k > 0) R.say.setReveal(tx, M.min(S[k + 1].length, (t - S[k]) >> (scene === 3)));
   }
   for (let i = 0; i < hud.length; ++i) {
     const v = on && t >= hw[3 * i] && t < hw[3 * i + 1] ? 1 : 0;
@@ -171,11 +173,8 @@ function patch(tx, f) {
     if (!!g !== R.tgv) { R.tag.setVisible(tx, !!g); R.tgv = !!g; }
     return;
   }
-  if (scene === 3) {
-    const e = M.min(1, t / 20), w = 20 + 100 * e, h = 12 + 56 * e;
-    img.setClip(tx, [rnd(120 - w), rnd(67 - h), rnd(120 + w), rnd(68 + h)]);
-    return;
-  }
+  // TWIST goes on from VOYAGE's last frame (no iris).
+  if (scene === 3) return;
   if (scene > 5) return;
   // CORE's time stop: the HUD and the torn bands hold where they are.
   if (scene === 5 && t >= 100 && t < 112) return;

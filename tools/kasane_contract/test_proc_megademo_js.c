@@ -261,7 +261,7 @@ int main(int argc, char **argv) {
         "if(__procCalls.frames.length!==216)throw Error('frame count');"
         "for(let tick=0;tick<216;tick++){const f=__procCalls.frames[tick];"
         "const plans=f.draws.filter(d=>d[0]!=='seg'),segs=f.draws.length-plans.length;"
-        "if(f.backdrop!==0x0827||f.surface||!plans.length||tick>=120&&!segs)"
+        "if(f.backdrop!==(tick>204?0x0021:0x0827)||f.surface||!plans.length||tick>=120&&!segs)"
         "throw Error('Act I frame '+tick);"
         "for(const d of plans)if(d[0]<1||d[0]>6||!Array.isArray(d[1])||d[1].length>8)"
         "throw Error('Act I draw '+tick)}"

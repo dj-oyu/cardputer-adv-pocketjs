@@ -43,7 +43,7 @@ globalThis.frame = function (buttons) {
     // WAKE and Act I draw as they go (pocket.shapes: no list kept), so
     // their frame begins first; TWIST draws over its plans in post().
     if (scene === 7 || scene < 3) {
-      H.beginFrame(scene === 7 ? wakeB(t % LEN[7]) : BRIEF_B);
+      H.beginFrame(scene === 7 ? wakeB(t % LEN[7]) : briefB(scene, t));
       f = frameOf(scene, tier, t % LEN[scene], DRAW);
     } else {
       f = frameOf(scene, tier, t % LEN[scene], DRAW);
