@@ -1020,6 +1020,34 @@ static inline JSValue *fa_cpool(const JSFunctionBytecode *b)
 { return b->cpool_count ? (JSValue *)(b + 1) : NULL; }
 static inline JSVarDef *fa_vardefs(const JSFunctionBytecode *b)
 { return fa_get_has_vardefs(b) ? (JSVarDef *)((JSValue *)(b + 1) + b->cpool_count) : NULL; }
+/* Pocket (docs/vm/compact-vars.md): a function compiled in a hardened
+   context, where no code is made from strings (no eval), keeps per
+   argument and local only what running code reads: the JSVarRef slot of a
+   captured variable, or JS_COMPACT_NO_REF. 2 B instead of a JSVarDef (20 B
+   on the device) and its name's atom. fa_vardefs() is NULL for it, as for
+   a stripped function, so the name readers (errors, dumps, the writer)
+   take their stripped paths. */
+#define JS_COMPACT_NO_REF 0xffff
+static inline unsigned fa_get_compact_vars(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 13) & 1; }
+static inline void fa_set_compact_vars(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 13)) | ((v & 1u) << 13); }
+static inline uint16_t *fa_compact_vars(const JSFunctionBytecode *b)
+{ return fa_get_compact_vars(b) ? (uint16_t *)((JSValue *)(b + 1) + b->cpool_count) : NULL; }
+/* Its size, rounded for the JSClosureVar array that follows. */
+static inline size_t js_compact_vars_size(int n)
+{ return ((size_t)n * sizeof(uint16_t) + 3) & ~(size_t)3; }
+/* The JSVarRef slot of argument-or-local i (args first), -1 if the
+   variable is not captured. */
+static inline int fa_var_ref_slot(const JSFunctionBytecode *b, int i)
+{
+    const uint16_t *c = fa_compact_vars(b);
+    if (c) {
+        return c[i] == JS_COMPACT_NO_REF ? -1 : c[i];
+    }
+    const JSVarDef *vd = &fa_vardefs(b)[i];
+    return vd->is_captured ? vd->var_ref_idx : -1;
+}
 
 typedef struct JSBoundFunction {
     JSValue func_obj;
@@ -8847,6 +8875,9 @@ static void compute_bytecode_size(JSFunctionBytecode *b, JSMemoryUsage_helper *h
     js_func_size = sizeof(*b);
     if (fa_vardefs(b)) {
         js_func_size += (b->arg_count + b->var_count) * sizeof(JSVarDef);
+    }
+    if (fa_compact_vars(b)) {
+        js_func_size += js_compact_vars_size(b->arg_count + b->var_count);
     }
     if (fa_cpool(b)) {
         js_func_size += b->cpool_count * sizeof(JSValue);
@@ -19257,22 +19288,20 @@ static JSVarRef *get_var_ref(JSContext *ctx, JSStackFrame *sf, int var_idx,
     JSVarRef *var_ref;
     JSValue *pvalue;
     int var_ref_idx;
-    JSVarDef *vd;
 
     p = JS_VALUE_GET_OBJ(sf->cur_func);
     b = p->u.func.function_bytecode;
 
     if (is_arg) {
-        vd = &fa_vardefs(b)[var_idx];
+        var_ref_idx = fa_var_ref_slot(b, var_idx);
         pvalue = &sf->arg_buf[var_idx];
     } else {
-        vd = &fa_vardefs(b)[b->arg_count + var_idx];
+        var_ref_idx = fa_var_ref_slot(b, b->arg_count + var_idx);
         pvalue = &sf->var_buf[var_idx];
     }
 
     /* If the variable is captured, use the pre-computed index for O(1) lookup */
-    if (vd->is_captured) {
-        var_ref_idx = vd->var_ref_idx;
+    if (var_ref_idx >= 0) {
         var_ref = sf->var_refs[var_ref_idx];
         if (var_ref) {
             /* reference to the already created local variable */
@@ -19610,7 +19639,8 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
     JSVarRef *var_ref;
     int var_ref_idx;
 
-    var_ref_idx = fa_vardefs(b)[b->arg_count + var_idx].var_ref_idx;
+    /* close_loc is only emitted for a captured variable */
+    var_ref_idx = fa_var_ref_slot(b, b->arg_count + var_idx);
     var_ref = sf->var_refs[var_ref_idx];
     if (var_ref) {
         close_var_ref(ctx->rt, var_ref);
@@ -36310,10 +36340,12 @@ has_pool_idx:
         case OP_FMT_none_loc:
             if (op == OP_get_loc0_loc1) {
                 printf(" 0, 1 ; ");
-                if (var_count > 0) {
+                /* vars is NULL for a function that keeps no JSVarDef
+                   (stripped, or compact: docs/vm/compact-vars.md). */
+                if (vars && var_count > 0) {
                     print_atom(ctx, vars[0].var_name);
                 }
-                if (var_count > 1) {
+                if (vars && var_count > 1) {
                     print_atom(ctx, vars[1].var_name);
                 }
             } else {
@@ -36328,7 +36360,7 @@ has_pool_idx:
             idx = get_u16(tab + pos);
 has_loc:
             printf(" %-4d ; ", idx);
-            if (idx < var_count) {
+            if (vars && idx < var_count) {
                 print_atom(ctx, vars[idx].var_name);
             }
             break;
@@ -36339,7 +36371,7 @@ has_loc:
             idx = get_u16(tab + pos);
 has_arg:
             printf(" %-4d ; ", idx);
-            if (idx < arg_count) {
+            if (args && idx < arg_count) {
                 print_atom(ctx, args[idx].var_name);
             }
             break;
@@ -40644,7 +40676,13 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     cpool_offset = function_size;
     function_size += fd->cpool_count * sizeof(*fd->cpool);
     vardefs_offset = function_size;
-    function_size += (fd->arg_count + fd->var_count) * sizeof(JSVarDef);
+    /* compact: harden ran, so no eval can ever need the names and scopes */
+    const bool compact = ctx->harden;
+    if (compact) {
+        function_size += js_compact_vars_size(fd->arg_count + fd->var_count);
+    } else {
+        function_size += (fd->arg_count + fd->var_count) * sizeof(JSVarDef);
+    }
     closure_var_offset = function_size;
     function_size += fd->closure_var_count * sizeof(*fd->closure_var);
     byte_code_offset = function_size;
@@ -40669,7 +40707,23 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 
     b->cpool_count = fd->cpool_count;
     b->func_name = fd->func_name;
-    if (fd->arg_count + fd->var_count > 0) {
+    if (fd->arg_count + fd->var_count > 0 && compact) {
+        fa_set_compact_vars(b, 1);
+        uint16_t *slot = fa_compact_vars(b);
+        const int n = fd->arg_count + fd->var_count;
+        /* memcpy, padding included: the allocation is not zeroed, and every
+           byte of it is written exactly once (tools/vmtest/function_allocation). */
+        for (int k = 0; k < n; k++) {
+            JSVarDef *vd = k < fd->arg_count ? &fd->args[k] : &fd->vars[k - fd->arg_count];
+            const uint16_t v = vd->is_captured ? vd->var_ref_idx : JS_COMPACT_NO_REF;
+            memcpy(slot + k, &v, sizeof(v));
+            JS_FreeAtom(ctx, vd->var_name);
+        }
+        if (n & 1) {
+            static const uint16_t pad = 0;
+            memcpy(slot + n, &pad, sizeof(pad));
+        }
+    } else if (fd->arg_count + fd->var_count > 0) {
         fa_set_has_vardefs(b, 1);
         if (fd->arg_count > 0) {
             memcpy(fa_vardefs(b), fd->args, fd->arg_count * sizeof(fd->args[0]));
@@ -40677,6 +40731,8 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
         if (fd->var_count > 0) {
             memcpy(fa_vardefs(b) + fd->arg_count, fd->vars, fd->var_count * sizeof(fd->vars[0]));
         }
+    }
+    if (fd->arg_count + fd->var_count > 0) {
         b->var_count = fd->var_count;
         b->arg_count = fd->arg_count;
         b->defined_arg_count = fd->defined_arg_count;
@@ -40724,6 +40780,18 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     if (b->closure_var_count) {
         b->closure_var = (void *)((uint8_t*)b + closure_var_offset);
         memcpy(b->closure_var, fd->closure_var, b->closure_var_count * sizeof(*b->closure_var));
+        /* compact: a closure variable is reached by its index; the name
+           of one that captures a local, an argument or the parent's
+           closure variable is read only by eval and the TDZ message.
+           Global and module ones keep theirs. */
+        for (int k = 0; compact && k < b->closure_var_count; k++) {
+            JSClosureVar *cv = &b->closure_var[k];
+            if (cv->closure_type == JS_CLOSURE_LOCAL || cv->closure_type == JS_CLOSURE_ARG ||
+                cv->closure_type == JS_CLOSURE_REF) {
+                JS_FreeAtom(ctx, cv->var_name);
+                cv->var_name = JS_ATOM_NULL;
+            }
+        }
     }
     js_free(ctx, fd->closure_var);
     fd->closure_var = NULL;
@@ -42441,6 +42509,13 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     uint32_t flags;
     int idx, i;
 
+    /* A compact function (hardened context) has no JSVarDefs to write,
+       and one read back without them could not find its captured
+       variables. */
+    if (fa_get_compact_vars(b)) {
+        JS_ThrowTypeError(s->ctx, "cannot write a function compiled in a hardened context");
+        return -1;
+    }
     bc_put_u8(s, BC_TAG_FUNCTION_BYTECODE);
     flags = idx = 0;
     bc_set_flags(&flags, &idx, fa_get_has_prototype(b), 1);
