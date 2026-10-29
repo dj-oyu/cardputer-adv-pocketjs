@@ -1,3 +1,5 @@
+#include "pocket_shape.h"
+#include "shape_draw_shim.h"
 #include "quickjs.h"
 #include "ksn_proc_plan.h"
 #include "proc_megademo.h"
@@ -156,19 +158,41 @@ int main(int argc, char **argv) {
         "__procCalls.active={backdrop:c,surface:s||0,draws:[]}},"
         "draw(h,i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
         "__procCalls.active.draws.push([h,i])},"
-        "commit(){__procCalls.frames.push(__procCalls.active);__procCalls.active=null}"
+        "commit(){__procCalls.frames.push(__procCalls.active);__procCalls.active=null},"
+        /* pocket.shapes' segments (shape_draw_shim.c). */
+        "__seg(s){__procCalls.active.draws.push(['seg',s])}"
         "}}};";
     JSValue mock_result = JS_Eval(ctx, mock, sizeof mock - 1, "mock.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(mock_result));
     JS_FreeValue(ctx, mock_result);
-    size_t source_size = 0;
-    char *source = read_file(argv[1], &source_size);
-    JSValue result = JS_Eval(ctx, source, source_size, argv[1], JS_EVAL_TYPE_GLOBAL);
-    REQUIRE(!JS_IsException(result));
-    JS_FreeValue(ctx, result);
-    free(source);
+    /* WAKE draws through pocket.shapes; shape_draw_shim.c hands its draws to
+     * the procedural mock above. */
+    {
+        JSValue g = JS_GetGlobalObject(ctx), pocket = JS_GetPropertyStr(ctx, g, "pocket");
+        JSValue shapes = JS_NewObject(ctx);
+        REQUIRE(pocket_shape_fill(ctx, shapes, NULL) == ESP_OK);
+        JS_SetPropertyStr(ctx, pocket, "shapes", shapes);
+        JS_FreeValue(ctx, pocket); JS_FreeValue(ctx, g);
+        JSValue r = JS_Eval(ctx, SHAPE_DRAW_JS, sizeof SHAPE_DRAW_JS - 1, "shim.js", JS_EVAL_TYPE_GLOBAL);
+        REQUIRE(!JS_IsException(r));
+        JS_FreeValue(ctx, r);
+    }
+    /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
+     * order (what the entry's pocket.app.load() calls evaluate). */
+    char list[4096];
+    snprintf(list, sizeof list, "%s", argv[1]);
+    for (char *file = strtok(list, ","); file; file = strtok(NULL, ",")) {
+        size_t source_size = 0;
+        char *source = read_file(file, &source_size);
+        JSValue result = JS_Eval(ctx, source, source_size, file, JS_EVAL_TYPE_GLOBAL);
+        REQUIRE(!JS_IsException(result));
+        JS_FreeValue(ctx, result);
+        free(source);
+    }
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue demo = JS_GetPropertyStr(ctx, global, "procMegademo");
+    /* Act I's former programs (the VM's reference workload, the last file
+     * in the list: tools/kasane_contract/proc_megademo_news_ref.js). */
+    JSValue demo = JS_GetPropertyStr(ctx, global, "procMegademoNews");
     REQUIRE(!JS_IsException(demo) && JS_IsObject(demo));
 
     unsigned programs = 0, layers_run = 0;
@@ -215,17 +239,36 @@ int main(int argc, char **argv) {
             ++layers_run;
         }
     }
-    /* Plans are registered per scene now: only Act I phase 0 at start, the
-     * next phase over the last frames of the running one. Each 16-frame news
-     * beat plays twice (frames 0..95), the same draws both times. */
+    /* Plans are registered per scene, the next scene's over the last frames
+     * of the running one. The app opens with WAKE (104 frames, no plans:
+     * Tama's backlit silhouette, drawn by pocket.shapes until frame 74, then
+     * nothing), which prefetches Act I's six HUD plans; Act I's three scenes
+     * (CALL 64, ROUTE 56, VOYAGE 96 frames) share them and draw the world
+     * with pocket.shapes, and VOYAGE prefetches eight of TWIST's fifteen (the river
+     * and the stars; its negative registers in TWIST). */
     static const char playback_check[] =
-        "if(__procCalls.registered.length!==5||__procCalls.live.size!==5||typeof frame!=='function')"
-        "throw Error('registration');"
-        "const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);"
-        "for(let layer=0;layer<5;layer++){const r=__procCalls.registered[layer];"
-        "if(!same(r.program,procMegademo.program(0,layer)))throw Error('registered program');"
-        "if((r.batch===undefined)!==(layer!==3))throw Error('unexpected batch')}"
-        "for(let phase=0;phase<3;phase++){const b=procMegademo.pointBatch(phase,3);"
+        /* Nothing is registered or allocated while the app evaluates
+         * (docs/apps/megademo-story.md). */
+        "if(__procCalls.registered.length!==0||typeof frame!=='function')"
+        "throw Error('registration during evaluation');"
+        "if(procMegademo.names[7]!=='WAKE'||procMegademo.len[7]!==104)throw Error('WAKE');"
+        "for(let i=0;i<104;i++){frame();const f=__procCalls.frames[i];"
+        "if(!f||(f.draws.length>0)!==(i<74))throw Error('WAKE frame '+i)}"
+        "__procCalls.frames.length=0;"
+        "frame();if(__procCalls.registered.length!==6||__procCalls.live.size!==6)"
+        "throw Error('registration by the first Act I frame');"
+        "for(const r of __procCalls.registered)if(r.batch!==undefined)throw Error('unexpected batch');"
+        "for(let tick=1;tick<216;tick++)frame();"
+        "if(__procCalls.frames.length!==216)throw Error('frame count');"
+        "for(let tick=0;tick<216;tick++){const f=__procCalls.frames[tick];"
+        "const plans=f.draws.filter(d=>d[0]!=='seg'),segs=f.draws.length-plans.length;"
+        "if(f.backdrop!==(tick>204?0x0021:0x0827)||f.surface||!plans.length||tick>=120&&!segs)"
+        "throw Error('Act I frame '+tick);"
+        "for(const d of plans)if(d[0]<1||d[0]>6||!Array.isArray(d[1])||d[1].length>8)"
+        "throw Error('Act I draw '+tick)}"
+        "if(__procCalls.registered.length!==14)throw Error('TWIST prefetch '+__procCalls.registered.length);"
+        /* The reference's Q14 point batches stay in bounds. */
+        "for(let phase=0;phase<3;phase++){const b=procMegademoNews.pointBatch(phase,3);"
         "if(!b||b.kind!=='affineQ14Points'||b.x.length!==40||b.y.length!==40||"
         "b.coeff.length!==6||!Number.isInteger(b.color)||b.color<0||b.color>65535)"
         "throw Error('batch shape');"
@@ -235,21 +278,17 @@ int main(int argc, char **argv) {
         "throw Error('source point');"
         "const x=Math.floor((b.coeff[0]*b.x[i]+b.coeff[1]*b.y[i]+b.coeff[4])/16384);"
         "const y=Math.floor((b.coeff[2]*b.x[i]+b.coeff[3]*b.y[i]+b.coeff[5])/16384);"
-        "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}}"
-        "for(let tick=0;tick<97;tick++)frame();"
-        "if(__procCalls.frames.length!==97)throw Error('frame count');"
-        "for(let tick=0;tick<96;tick++){"
-        "const f=__procCalls.frames[tick],phase=Math.floor(tick/32);"
-        "if(f.backdrop!==procMegademo.backdrop(phase*16)||f.draws.length!==5||f.surface)"
-        "throw Error('frame structure '+tick);"
-        "for(let layer=0;layer<5;layer++){const d=f.draws[layer],r=__procCalls.registered[d[0]-1];"
-        "if(!same(r.program,procMegademo.program(phase,layer))||d[1].length!==4)"
-        "throw Error('layer '+tick+','+layer)}}";
+        "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}}";
     JSValue check = JS_Eval(ctx, playback_check, sizeof playback_check - 1,
                             "playback-check.js", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(check)) {
+        JSValue e = JS_GetException(ctx);
+        const char *m = JS_ToCString(ctx, e);
+        fprintf(stderr, "playback check: %s\n", m ? m : "?");
+    }
     REQUIRE(!JS_IsException(check));
     JS_FreeValue(ctx, check);
-    /* Frame 97 is inside TWIST, at full screen (the story's camera went into
+    /* The next frame is inside TWIST, at full screen (the story's camera went into
      * the screen during the news). Its set holds exactly two images: the
      * procedural image and the resized monitor. Leaving full screen rebuilds
      * the set with the room, so the images are looked up after each press. */
@@ -277,7 +316,7 @@ int main(int argc, char **argv) {
     JS_FreeValue(ctx, global);
     JS_FreeContext(ctx);
     JS_FreeRuntime(runtime);
-    printf("PASS JS megademo: %u Act I programs equal to the C reference, 3 bounded Q14 batches, %u reference frames, %u native plan layer runs, exact base RGB565 pixels, per-scene plan loading over 942 playback calls\n",
+    printf("PASS JS megademo: %u Act I programs equal to the C reference, 3 bounded Q14 batches, %u reference frames, %u native plan layer runs, exact base RGB565 pixels, per-scene plan loading over 1134 playback calls\n",
            programs, PROC_MEGA_FRAMES, layers_run);
     return 0;
 }

@@ -57,6 +57,7 @@ void ksn_view_host_invalidate(ksn_view_host *);
 void ksn_view_host_invalidate_bands(ksn_view_host *,uint32_t bands);
 bool ksn_view_host_invalidate_image(ksn_view_host *,ksn_resource);
 bool ksn_view_host_invalidate_image_source_rect(ksn_view_host *,ksn_resource,ksn_rect);
+bool ksn_view_host_invalidate_image_source_damage(ksn_view_host *,ksn_resource,const ksn_damage *);
 bool ksn_view_host_needs_present(const ksn_view_host *);
 ksn_input_scope ksn_view_host_route(const ksn_view_host *,bool host_priority);
 ksn_result ksn_view_host_focus(ksn_view_host *,const uint32_t *,uint16_t);

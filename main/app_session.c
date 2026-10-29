@@ -96,6 +96,7 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#include "pocket_shape.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "ui/shell.h"
@@ -1632,6 +1633,11 @@ surfaces_done:
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
     if(app_registry_wants(app_registry_current(),"derby.series"))
         TRY(pocketjs_guest_quickjs_install_once(guest,"derby",pocket_derby_install,NULL));
+    // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
+    // 'J' diagnostic, which runs MEGADEMO without a manifest).
+    // docs/apps/megademo-shapes.md.
+    if(app_registry_wants(app_registry_current(),"kasane.shapes")||test=='J')
+        TRY(pocketjs_guest_quickjs_install_once(guest,"shapes",pocket_shape_install,NULL));
 source_ready:;
     const char *source=user_source?user_source:hello_start;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);

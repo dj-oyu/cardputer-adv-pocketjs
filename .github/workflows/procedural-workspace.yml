@@ -124,7 +124,9 @@ jobs:
                   (b/(obj.stem+'.size.txt')).write_text(output)
                   arm[label]=sum(int(v[1],0) for line in output.splitlines() if (v:=line.split()) and v[0].startswith(('.bss','.sbss')))
               arm['delta']=arm['candidate']-arm['baseline']
-              assert arm['delta']==-3840,arm
+              # -3840: the shared workspace; +424: band damage's per-surface
+              # band signatures (docs/apps/megademo-shapes.md).
+              assert arm['delta']==-3840+424,arm
               arms['affine_on' if affine else 'default']=arm
           names=['cardputer_pocketjs.elf','cardputer_pocketjs.bin','sdkconfig','partition_table/partition-table.bin']
           report=dict(source_head=os.environ['SOURCE_HEAD'],base_head=os.environ['BASE_HEAD'],idf='6.0.1',

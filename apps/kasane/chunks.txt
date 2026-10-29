@@ -1,0 +1,12 @@
+# MEGADEMO's chunks (pocket.app.load; docs/vm/eval-peak.md section 7).
+# proc_megademo.js (the entry) loads them in this order while it evaluates:
+# one parse at a time, so the evaluation peak is the largest chunk's, not
+# the whole source's. The host tests evaluate the same files in this order.
+app local.megademo
+act1   megademo_act1.js
+act2   megademo_act2.js
+wake   megademo_wake.js
+brief  megademo_brief.js
+view   megademo_view.js
+set    megademo_set.js
+loop   megademo_loop.js

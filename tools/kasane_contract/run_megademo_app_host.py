@@ -27,7 +27,8 @@ QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
          "main/ui/kasane/ksn_proc_grid_pie.c", "main/ui/kasane/ksn_proc_grid_image.c",
          "main/ui/kasane/ksn_proc_grid_resize.c", "main/pocket/pocket_pixel.c",
-         "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c"]
+         "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c",
+         "main/pocket/pocket_shape.c"]
 
 
 def kasane_sources() -> list[str]:
@@ -100,15 +101,18 @@ def main() -> None:
     parser.add_argument("--baseline-rev", default="HEAD")
     parser.add_argument("--ppm", type=Path, help="write composited panels here")
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
+    parser.add_argument("--no-band-damage", action="store_true",
+                        help="damage commit()'s bounding rectangle, as before band damage (A/B)")
     args = parser.parse_args()
+    extra = ["-DPOCKET_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
     if args.m32:
         # A sysroot under .cache survives WSL restarts, which empty /tmp.
         sysroot = dict(os.environ, M32_SYSROOT=str(CACHE / "m32sys"))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=sysroot,
                                capture_output=True, text=True).stdout.split()
-        binary = build(flags, CACHE / "m32")
+        binary = build(flags + extra, CACHE / ("m32" + ("_nobd" if extra else "")))
     else:
-        binary = build(["-fsanitize=address,undefined"], CACHE / "asan")
+        binary = build(["-fsanitize=address,undefined"] + extra, CACHE / ("asan" + ("_nobd" if extra else "")))
     env = os.environ.copy()
     # Boot-lifetime singletons in the Kasane fixture are intentionally kept.
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
@@ -129,6 +133,20 @@ def main() -> None:
     elif not old.exists():
         raise SystemExit(f"cannot read the baseline app: {shown.stderr.decode().strip()}")
     env.pop("MEGA_PPM", None)
+    # A chunked baseline: its chunks.txt and chunk files, as of that revision.
+    listed = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/chunks.txt"],
+                            cwd=ROOT, capture_output=True)
+    if listed.returncode == 0:
+        base = CACHE / "baseline_chunks"
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "chunks.txt").write_bytes(listed.stdout)
+        for raw in listed.stdout.decode().splitlines():
+            words = raw.split("#", 1)[0].split()
+            if len(words) == 2 and words[0] != "app":
+                got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
+                                     cwd=ROOT, capture_output=True, check=True)
+                (base / words[1]).write_bytes(got.stdout)
+        env["MEGA_CHUNKS"] = str(base / "chunks.txt")
     print(f"baseline: {old.name} ({old.stat().st_size} B)")
     subprocess.run([str(binary), str(old), "--baseline"], cwd=ROOT, env=env, check=True)
 

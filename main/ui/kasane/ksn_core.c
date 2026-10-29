@@ -1188,6 +1188,46 @@ bool ksn_core_invalidate_image(ksn_core *storage,ksn_resource resource){
     invalidate_rect_damage(core,&found);
     return found.bands!=0;
 }
+bool ksn_core_invalidate_image_source_damage(ksn_core *storage,ksn_resource resource,
+                                             const ksn_damage *source){
+    if(!storage||!resource.value||!source||!source->bands)return false;
+    ksn_core_impl *core=impl(storage);
+    ksn_damage found={0};
+    unsigned banks=core->submitted?2u:1u;
+    for(unsigned bank_no=0;bank_no<banks;bank_no++){
+        const ksn_bank *bank=&core->banks[bank_no?core->building_bank:core->active];
+        for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<bank->count[layer];i++){
+            const ksn_command_storage *command=bank_command_const(bank,command_base((ksn_layer)layer)+i);
+            if(command->kind!=KSN_IMAGE)continue;
+            image_payload p;payload_read(command,&p,sizeof(p));
+            if(p.resource!=resource.value)continue;
+            const ksn_rect box=command_box(command);
+            const unsigned scale=command->flags>>KSN_IMAGE_SCALE_SHIFT;
+            int sx=p.source_x,sy=p.source_y;
+            bool exact=scale==KSN_IMAGE_1X;
+            if(scale==KSN_IMAGE_STRETCH){
+                stretch_payload s;payload_read(command,&s,sizeof(s));
+                exact=!s.rotation&&s.w+1==command->bounds.x1-command->bounds.x0&&
+                      s.h+1==command->bounds.y1-command->bounds.y0;
+                sx=s.x;sy=s.y;
+            }
+            if(!exact){damage_add(&found,box);continue;}
+            for(unsigned band=0;band<17;band++)if(source->bands&(1u<<band)){
+                int32_t x0=(int32_t)command->bounds.x0+source->x0[band]-sx;
+                int32_t x1=(int32_t)command->bounds.x0+source->x1[band]-sx;
+                int32_t y0=(int32_t)command->bounds.y0+(int32_t)band*8-sy;
+                int32_t y1=y0+8;
+                if(x0<box.x0)x0=box.x0;
+                if(x1>box.x1)x1=box.x1;
+                if(y0<box.y0)y0=box.y0;
+                if(y1>box.y1)y1=box.y1;
+                if(x0<x1&&y0<y1)damage_add(&found,(ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1});
+            }
+        }
+    }
+    invalidate_rect_damage(core,&found);
+    return found.bands!=0;
+}
 bool ksn_core_invalidate_image_source_rect(ksn_core *storage,ksn_resource resource,
                                            ksn_rect source_rect){
     if(!storage||!resource.value||source_rect.x0>=source_rect.x1||

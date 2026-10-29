@@ -17,6 +17,7 @@
  *
  *   python3 tools/kasane_contract/run_megademo_app_host.py
  */
+#include "pocket_shape.h"
 #include "pocket_kasane.h"
 #include "pocket_proc.h"
 #include "pocket_video.h"
@@ -77,6 +78,7 @@ const char grid_fold_js_end[] asm("_binary_grid_fold_js_end") = "";
 static JSRuntime *rt;
 static JSContext *ctx;
 static uint16_t strip_pixels[240*8],panel[240*135];
+static unsigned long long panel_bytes; /* what the panel was sent, as the device's SPI would */
 static unsigned exceptions,degrades,scene_lines,present_failures;
 static char scene_log[4096];
 
@@ -115,9 +117,46 @@ static bool eval(const char *source,size_t len,const char *name){
     pocket_kasane_end_turn();
     return ok;
 }
+/* pocket.app.load() as main/pocket/pocket_app_load.c does it for this app:
+ * apps/kasane/chunks.txt names the chunks; each loads once, as its own
+ * global script, so the compile peak is per chunk (docs/vm/eval-peak.md 7). */
+static struct {char name[32],path[512];bool done;} chunk[16];
+static unsigned chunks;
+static void read_chunks(void){
+    /* MEGA_CHUNKS: another chunks.txt (the runner's baseline, extracted). */
+    const char *list=getenv("MEGA_CHUNKS");if(!list)list="apps/kasane/chunks.txt";
+    char dir[200];snprintf(dir,sizeof dir,"%s",list);
+    char *slash=strrchr(dir,'/');if(slash)*slash=0;else snprintf(dir,sizeof dir,".");
+    FILE *f=fopen(list,"r");if(!f)return;
+    char line[512],a[32],b[200];
+    while(fgets(line,sizeof line,f)){
+        char *h=strchr(line,'#');if(h)*h=0;
+        if(sscanf(line,"%31s %199s",a,b)!=2||!strcmp(a,"app")||chunks==16)continue;
+        snprintf(chunk[chunks].name,sizeof chunk[0].name,"%s",a);
+        snprintf(chunk[chunks].path,sizeof chunk[0].path,"%s/%s",dir,b);
+        chunks++;
+    }
+    fclose(f);
+}
+static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *name=argc?JS_ToCString(c,argv[0]):NULL;
+    if(!name)return JS_EXCEPTION;
+    unsigned i=0;while(i<chunks&&strcmp(chunk[i].name,name))i++;
+    JS_FreeCString(c,name);
+    if(i==chunks)return JS_ThrowReferenceError(c,"no chunk");
+    if(chunk[i].done)return JS_FALSE;
+    FILE *f=fopen(chunk[i].path,"rb");if(!f)return JS_ThrowReferenceError(c,"no file");
+    static char body[1<<16];size_t n=fread(body,1,sizeof body-1,f);fclose(f);body[n]=0;
+    chunk[i].done=true;
+    JSValue v=JS_Eval(c,body,n,chunk[i].path,JS_EVAL_TYPE_GLOBAL);
+    if(JS_IsException(v))return v;
+    JS_FreeValue(c,v);
+    return JS_TRUE;
+}
 static uint16_t *get_strip(void *o){(void)o;return strip_pixels;}
 static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pixels){
-    (void)o;memcpy(panel+y*240,pixels,rows*240*sizeof *pixels);return KSN_OK;
+    (void)o;memcpy(panel+y*240,pixels,rows*240*sizeof *pixels);panel_bytes+=rows*240u*2u;return KSN_OK;
 }
 static void present(uint64_t now_us){
     pocket_kasane_set_animation_time(now_us);
@@ -165,7 +204,7 @@ static size_t heap_req(void){
  * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-device-limits.md). */
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,memory:{info(){"
+    "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
     "(function(){const P=pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"
@@ -201,9 +240,12 @@ int main(int argc,char **argv){
         if(limit/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,limit/2);
     }
     pocket_kasane_install(ctx,NULL);
+    pocket_shape_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
+    JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));
+    read_chunks();
     JS_FreeValue(ctx,g);
     JS_RunGC(rt);
     const size_t heap_before=heap_used();
@@ -237,6 +279,14 @@ int main(int argc,char **argv){
                 if(u==340)b=0x80;                     /* previous scene */
             }
         }else if(t==60||t==120)b=0x4000;
+        /* MEGA_KEYS="t:buttons,t:buttons,..." replaces the script (frames to
+         * picture a story beat; "0:0" for no keys). */
+        const char *keys=getenv("MEGA_KEYS");
+        if(keys){b=0;for(const char *c=keys;*c;){char *e;unsigned long k=strtoul(c,&e,10);
+                if(e==c||*e!=':')break;
+                unsigned long v=strtoul(e+1,&e,0);
+                if(k==t)b=(unsigned)v;
+                c=*e?e+1:e;}}
         char call[160];snprintf(call,sizeof call,"__mega.frameReg=0;__mega.frameUnreg=0;__mega.frameRegNs=0;__mega.frameDrawNs=0;frame(%u)",b);
         eval(call,strlen(call),"frame.js");
         present((uint64_t)t*33333u);
@@ -295,6 +345,8 @@ int main(int argc,char **argv){
            req_after_eval,req_live_peak,heap_req_peak);
     printf("frames %u: exceptions=%u degrades=%u present_failures=%u scene_lines=%u\n",
            frames,exceptions,degrades,present_failures,scene_lines);
+    printf("panel: %llu bytes sent over %u frames (%.0f a frame; a whole frame is 64800)\n",
+           panel_bytes,frames,frames?(double)panel_bytes/frames:0.0);
     ok=ok&&!exceptions&&!present_failures;
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",ok?"MEGADEMO_HOST PASS":"MEGADEMO_HOST FAIL");

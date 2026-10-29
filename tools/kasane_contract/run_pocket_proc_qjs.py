@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 
+from megademo_chunks import chunk_arg
 ROOT=Path(__file__).resolve().parents[2]
 QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 OUT=ROOT/'.cache/kasane_pocket_proc_qjs'
@@ -39,6 +40,8 @@ def main():
              ROOT/'main/ui/kasane/ksn_render.c',
              ROOT/'main/ui/kasane/ksn_blend_pie.c',
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
+             ROOT/'main/pocket/pocket_shape.c',
+             ROOT/'tools/kasane_contract/proc_native_weak.c',
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
     command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
              '-DKSN_PROC_HOST_TEST',
@@ -48,7 +51,9 @@ def main():
              *(str(s) for s in sources),'-lm','-o',str(binary)]
     env=os.environ.copy();env['PATH']=str(Path(cc).parent)+os.pathsep+env.get('PATH','')
     subprocess.run(command,cwd=ROOT,env=env,check=True)
-    invocation=[str(binary),str(ROOT/'apps/kasane/proc_megademo.js')]
+    # The app's chunks, then Act I's former programs (the VM reference).
+    files=chunk_arg()+','+str(ROOT/'tools/kasane_contract/proc_megademo_news_ref.js')
+    invocation=[str(binary),files]
     if args.out:
         args.out.mkdir(parents=True,exist_ok=True)
         invocation.append(str(args.out.resolve()))
@@ -59,7 +64,7 @@ def main():
     fake_command[1:1]=['-D__XTENSA__','-DCONFIG_IDF_TARGET_ESP32S3=1',
                        '-DKSN_PROC_HOST_FAKE_PIE']
     subprocess.run(fake_command,cwd=ROOT,env=env,check=True)
-    subprocess.run([str(fake_binary),str(ROOT/'apps/kasane/proc_megademo.js')],
+    subprocess.run([str(fake_binary),files],
                    cwd=ROOT,env=env,check=True)
     if args.out:
         hashes={f'frame-{i:02d}.rgb565':hashlib.sha256(

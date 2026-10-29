@@ -1,6 +1,7 @@
 #include "quickjs.h"
 #include "pocket_proc.h"
 #include "pocket_api.h"
+#include "pocket_shape.h"
 #include "proc_megademo.h"
 #include "ksn_proc_plan.h"
 #include "core_fixture.h"
@@ -96,6 +97,8 @@ static void eval_error(JSContext *ctx,const char *source){
     JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
 }
 #define APP_NEWS_TICKS (2u*PROC_MEGA_FRAMES)
+#define APP_WAKE_TICKS 104u
+#define APP_ACT1_TICKS 216u
 static void reference(unsigned tick){
     uint16_t color=proc_mega_backdrop(tick);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
@@ -150,6 +153,12 @@ static void check_image_rows(const ksn_image_port *image){
         }
     }
 }
+/* pocket_shape.c's install, never called here (main() fills pocket.shapes
+ * itself). */
+esp_err_t pocket_api_register(const pocket_capability_t *capability){(void)capability;return ESP_OK;}
+esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn,void *user){
+    (void)ctx;(void)name;(void)fn;(void)user;return ESP_OK;
+}
 int main(int argc,char **argv){
     REQUIRE(argc==2||argc==3);
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
@@ -157,6 +166,10 @@ int main(int argc,char **argv){
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);
     REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK);
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
+    /* WAKE draws through pocket.shapes into the real pocket_proc.c. */
+    JSValue shapes=JS_NewObject(ctx);
+    REQUIRE(pocket_shape_fill(ctx,shapes,NULL)==ESP_OK);
+    REQUIRE(JS_SetPropertyStr(ctx,pocket,"shapes",shapes)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);
     /* The view side is a permissive mock; megaBounds follows the image of
@@ -189,20 +202,81 @@ int main(int argc,char **argv){
     for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
     eval_ok(ctx,"pocket.kasane.procedural.resource()");
     REQUIRE(pocket_proc_is_image_mode());
-    size_t bytes;char *source=read_file(argv[1],&bytes);
-    JSValue result=JS_Eval(ctx,source,bytes,argv[1],JS_EVAL_TYPE_GLOBAL);
-    if(JS_IsException(result)){
-        JSValue error=JS_GetException(ctx);
-        const char *message=JS_ToCString(ctx,error);
-        fprintf(stderr,"megademo JS eval: %s\n",message?message:"<non-string exception>");
-        if(message)JS_FreeCString(ctx,message);
-        JS_FreeValue(ctx,error);
+    /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
+     * order (what the entry's pocket.app.load() calls evaluate). */
+    char list[4096];snprintf(list,sizeof list,"%s",argv[1]);
+    for(char *file=strtok(list,",");file;file=strtok(NULL,",")){
+        size_t bytes;char *source=read_file(file,&bytes);
+        JSValue result=JS_Eval(ctx,source,bytes,file,JS_EVAL_TYPE_GLOBAL);
+        if(JS_IsException(result)){
+            JSValue error=JS_GetException(ctx);
+            const char *message=JS_ToCString(ctx,error);
+            fprintf(stderr,"megademo JS eval %s: %s\n",file,message?message:"<non-string exception>");
+            if(message)JS_FreeCString(ctx,message);
+            JS_FreeValue(ctx,error);
+        }
+        REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
     }
-    REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
-    /* The app plays each 16-frame news beat twice: app tick k shows Act I
-     * frame (k / 32) * 16 + k % 16 (docs/apps/megademo-story.md). */
-    for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
+    /* The app opens with WAKE: APP_WAKE_TICKS frames (Tama backlit, then the
+     * TV off), which prefetch the news. The last frame is black. */
+    eval_ok(ctx,"if(procMegademo.len[7]!==104)throw Error('WAKE length')");
+    for(unsigned tick=0;tick<APP_WAKE_TICKS;tick++){
         eval_ok(ctx,"frame()");
+        REQUIRE(pocket_proc_pending());
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+        if(tick+1==APP_WAKE_TICKS)for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
+        pocket_proc_present_result(KSN_OK);
+    }
+    /* Act I (CALL, ROUTE, VOYAGE: APP_ACT1_TICKS frames) draws with
+     * pocket.shapes and its HUD plans; each frame is presented. The story
+     * starts in the room and its camera reaches full screen during CALL;
+     * each scene and the room leaving view rebuild the set. */
+    for(unsigned tick=0;tick<APP_ACT1_TICKS;tick++){
+        eval_ok(ctx,"frame()");
+        REQUIRE(pocket_proc_pending());
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+        memcpy(expected,actual,sizeof expected);check_image_rows(&image);
+        pocket_proc_present_result(KSN_OK);
+        REQUIRE(!pocket_proc_pending());
+    }
+    eval_ok(ctx,"if(megaReplaces<2||megaBounds.join(',')!=='0,0,240,135')"
+                "throw Error('story camera did not reach full screen');"
+                "globalThis.newsReplaces=megaReplaces");
+    /* Two held Enter frames count as one press. The same resource reaches the
+     * monitor and then returns to an exact full-screen rectangle. */
+    for(unsigned i=0;i<44;i++){
+        eval_ok(ctx,i<2?"frame(0x4000)":"frame(0)");
+        REQUIRE(pocket_proc_pending());
+        pocket_proc_present_result(KSN_OK);
+    }
+    /* Act I's last frame was before these: TWIST starts with the room in
+     * view, one new REPLACE. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==newsReplaces+1)"
+                "throw Error('Enter did not shrink into monitor')");
+    for(unsigned i=0;i<44;i++){
+        eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
+        REQUIRE(pocket_proc_pending());
+        pocket_proc_present_result(KSN_OK);
+    }
+    /* Back at full screen the set is rebuilt without the room. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==newsReplaces+2)"
+                "throw Error('Enter did not restore full screen')");
+    /* The adapter's pixel contract on Act I's former programs (the VM's
+     * reference workload, proc_megademo_news_ref.js, equal to
+     * proc_megademo.h): each 16-frame beat twice, news tick k showing
+     * reference frame (k / 32) * 16 + k % 16, as the app played it. */
+    eval_ok(ctx,
+        "const NP=pocket.kasane.procedural,NR=procMegademoNews,NH=[];"
+        "for(let ph=0;ph<3;ph++){NH.push([]);for(let l=0;l<5;l++){const b=NR.pointBatch(ph,l);"
+        "NH[ph].push(b?NP.register(NR.program(ph,l),b):NP.register(NR.program(ph,l)))}}"
+        "globalThis.newsFrame=k=>{const f=(k/32|0)*16+k%16,ph=f/16|0;NP.beginFrame(NR.backdrop(f));"
+        "for(let l=0;l<5;l++)NP.draw(NH[ph][l],NR.inputs(f,l));NP.commit()}");
+    publishes=0;
+    const unsigned invalidates0=invalidates;
+    uint32_t news_scalar=0,news_pie=0;
+    pocket_proc_batch_counts(&news_scalar,&news_pie);
+    for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
+        char call[48];snprintf(call,sizeof call,"newsFrame(%u)",tick);eval_ok(ctx,call);
         REQUIRE(pocket_proc_pending());
         REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
         reference(tick/32u*16u+tick%16u);
@@ -242,7 +316,7 @@ int main(int argc,char **argv){
             check_image_rows(&image);
             /* The image node's core ticket owns IO retry; no backdrop-wide
              * invalidation is needed for its candidate. */
-            REQUIRE(invalidates==0);
+            REQUIRE(invalidates==invalidates0);
             pocket_proc_present_result(KSN_OK); /* UI ticket and image ACK */
             REQUIRE(!pocket_proc_pending());
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
@@ -259,36 +333,14 @@ int main(int argc,char **argv){
         }
     }
     REQUIRE(publishes==APP_NEWS_TICKS);
-    /* The story starts in the room and its camera reaches full screen during
-     * the news; each news beat and the room leaving view rebuild the set. */
-    eval_ok(ctx,"if(megaReplaces<2||megaBounds.join(',')!=='0,0,240,135')"
-                "throw Error('story camera did not reach full screen');"
-                "globalThis.newsReplaces=megaReplaces");
     uint32_t scalar=0,pie=0;
     pocket_proc_batch_counts(&scalar,&pie);
+    scalar-=news_scalar;pie-=news_pie;
 #ifdef KSN_PROC_HOST_FAKE_PIE
     REQUIRE(scalar==0&&pie==APP_NEWS_TICKS);
 #else
     REQUIRE(scalar==APP_NEWS_TICKS&&pie==0);
 #endif
-    /* Two held Enter frames count as one press. The same resource reaches the
-     * monitor and then returns to an exact full-screen rectangle. */
-    for(unsigned i=0;i<44;i++){
-        eval_ok(ctx,i<2?"frame(0x4000)":"frame(0)");
-        REQUIRE(pocket_proc_pending());
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Frame 96 enters TWIST with the room in view: one new REPLACE. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==newsReplaces+1)"
-                "throw Error('Enter did not shrink into monitor')");
-    for(unsigned i=0;i<44;i++){
-        eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
-        REQUIRE(pocket_proc_pending());
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Back at full screen the set is rebuilt without the room. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==newsReplaces+2)"
-                "throw Error('Enter did not restore full screen')");
     eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
     eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
     eval_error(ctx,"pocket.kasane.procedural.draw(1,[NaN,0,0,0])");
@@ -324,10 +376,10 @@ int main(int argc,char **argv){
         "catch(e){nestedRegisterBusy=String(e).includes('BUSY')}return 0}});"
         "let guarded=proc.register([row]);"
         "if(!nestedRegisterBusy||!Number.isInteger(guarded))throw Error('register reentrancy');"
-        "proc.beginFrame(7);let nestedCommitBusy=false;let inputs=[0,0,0,0];"
-        "Object.defineProperty(inputs,0,{get(){try{proc.commit()}"
+        "proc.beginFrame(7);let nestedCommitBusy=false;let guardIn=[0,0,0,0];"
+        "Object.defineProperty(guardIn,0,{get(){try{proc.commit()}"
         "catch(e){nestedCommitBusy=String(e).includes('BUSY')}return 0}});"
-        "proc.draw(guarded,inputs);"
+        "proc.draw(guarded,guardIn);"
         "if(!nestedCommitBusy)throw Error('draw reentrancy');proc.commit()");
     REQUIRE(pocket_proc_pending());
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
