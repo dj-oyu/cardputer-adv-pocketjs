@@ -70,29 +70,29 @@ function wake(t) {
   for (let j = 0; j < 11; ++j) QQ[j] = POSE[a + j] + (POSE[a + 11 + j] - POSE[a + j]) * u;
   // Breathing, and a slow sway.
   const S = QQ[1] * (1 + .012 * M.sin(t * .2)), cy = M.cos(QQ[2]), sy = M.sin(QQ[2]), cp = M.cos(QQ[3]),
-    sp = M.sin(QQ[3]), ro = QQ[4] + .03 * M.sin(t * .11), c = M.cos(ro), sn = M.sin(ro);
+    sp = M.sin(QQ[3]), r = QQ[4] + .03 * M.sin(t * .11), c = M.cos(r), sn = M.sin(r);
   // Head space to the screen as one projective matrix (shapes.project):
   // turn (yaw), nod (pitch), the camera D in front (nearer is bigger, x
   // and y over w = D - z), then roll and scale about (X0, Y0). Rows of the
   // rotation: (cy, 0, sy), (sp sy, cp, -sp cy); the view w = (cp sy, -sp, -cp cy).
   {
-    const D = QQ[8], K = D * S, X0 = 120 + QQ[9], Y0 = 100 + QQ[10] + 1.5 * M.sin(t * .2),
-      a1 = sp * sy, a2 = -sp * cy, w0 = cp * sy, w1 = -sp, w2 = -cp * cy;
-    WQ[0] = X0 * w0 + K * (c * cy - sn * a1); WQ[1] = X0 * w1 + K * -(sn * cp); WQ[2] = X0 * w2 + K * (c * sy - sn * a2);
-    WQ[4] = Y0 * w0 + K * (sn * cy + c * a1); WQ[5] = Y0 * w1 + K * (c * cp); WQ[6] = Y0 * w2 + K * (sn * sy + c * a2);
-    WQ[8] = w0; WQ[9] = w1; WQ[10] = w2; WQ[3] = X0 * D; WQ[7] = Y0 * D; WQ[11] = D;
+    const D = QQ[8], K = D * S, X = 120 + QQ[9], Y = 100 + QQ[10] + 1.5 * M.sin(t * .2),
+      a1 = sp * sy, b = -sp * cy, e = cp * sy, l = -sp, s = -cp * cy;
+    WQ[0] = X * e + K * (c * cy - sn * a1); WQ[1] = X * l + K * -(sn * cp); WQ[2] = X * s + K * (c * sy - sn * b);
+    WQ[4] = Y * e + K * (sn * cy + c * a1); WQ[5] = Y * l + K * (c * cp); WQ[6] = Y * s + K * (sn * sy + c * b);
+    WQ[8] = e; WQ[9] = l; WQ[10] = s; WQ[3] = X * D; WQ[7] = Y * D; WQ[11] = D;
   }
   // The outline: the view direction in head space scaled by the radii (w),
   // and the radii times the unit circle across it (e1, e2). Fur: the
   // cheeks tufted (every other point out), the jaw fuller.
   {
-    let w0 = -sy * cp / 52, w1 = sp / 44, w2 = cy * cp / 46;
-    const wl = M.hypot(w0, w1, w2);
-    w0 /= wl; w1 /= wl; w2 /= wl;
-    const l1 = M.hypot(w2, -w0), e0 = w2 / l1, e2 = -w0 / l1, f0 = w1 * e2, f1 = w2 * e0 - w0 * e2, f2 = -w1 * e0;
+    let e = -sy * cp / 52, l = sp / 44, s = cy * cp / 46;
+    const L = M.hypot(e, l, s);
+    e /= L; l /= L; s /= L;
+    const O = M.hypot(s, -e), e0 = s / O, T = -e / O, f0 = l * T, f1 = s * e0 - e * T, f2 = -l * e0;
     for (let k = 0; k < 28; ++k) {
-      const g = k * PI / 14, cg = M.cos(g), sg = M.sin(g), x = 52 * (cg * e0 + sg * f0), y = 44 * (sg * f1),
-        z = 46 * (cg * e2 + sg * f2), f = y > 0 && M.abs(x) > 30 ? (k & 1 ? 1.13 : 1.02) : y > 20 ? 1.05 : 1;
+      const g = k * PI / 14, G = M.cos(g), sg = M.sin(g), x = 52 * (G * e0 + sg * f0), y = 44 * (sg * f1),
+        z = 46 * (G * T + sg * f2), f = y > 0 && M.abs(x) > 30 ? (k & 1 ? 1.13 : 1.02) : y > 20 ? 1.05 : 1;
       wpt(k, x * f, y * f, z * f);
     }
   }
@@ -103,10 +103,10 @@ function wake(t) {
   for (let k = 0; k < 2; ++k) {
     const sg = k ? -1 : 1, fl = k ? t >= 56 && t < 59 : t >= 21 && t < 24;
     for (let j = 0; j < 5; ++j) {
-      const w = j && j < 4 ? 1 : 0, tip = j === 2 ? 1 : .5;
-      let x = EAR[3 * j] - sg * 7 * QQ[7] * w * tip, z = EAR[3 * j + 2];
-      const y = EAR[3 * j + 1] + 4 * QQ[7] * w * tip;
-      if (fl && w) { x -= sg * 8 * tip; z -= 14 * tip; }
+      const w = j && j < 4 ? 1 : 0, H = j === 2 ? 1 : .5;
+      let x = EAR[3 * j] - sg * 7 * QQ[7] * w * H, z = EAR[3 * j + 2];
+      const y = EAR[3 * j + 1] + 4 * QQ[7] * w * H;
+      if (fl && w) { x -= sg * 8 * H; z -= 14 * H; }
       EP[3 * j] = x * sg; EP[3 * j + 1] = y; EP[3 * j + 2] = z;
       wpt(W_EAR + 5 * k + j, x * sg, y, z);
     }
@@ -131,16 +131,16 @@ function wake(t) {
   }
   // Eyes (almonds, slanted): wide in the dark, the pupils big; the far eye
   // narrows with the turn by itself. Shut: a line.
-  const op = QQ[6], h = 8 * op, px = QQ[5] * 4.4, pw = t < 40 ? 4.4 : 3, ph = h * .92;
+  const op = QQ[6], h = 8 * op, px = QQ[5] * 4.4, q = t < 40 ? 4.4 : 3, ph = h * .92;
   for (let k = 0; k < 2; ++k) {
     const sg = k ? 1 : -1, o = W_EYE + 30 * k;
     for (let j = 0; j < 12; ++j) {
-      const g = j * PI / 6, cg = M.cos(g), s1 = M.sin(g);
-      eye(o + j, sg, 11 * cg, h * s1 * (1 - .3 * cg * cg));
-      eye(o + 12 + j, sg, px + pw * cg, ph * s1);
+      const g = j * PI / 6, G = M.cos(g), R = M.sin(g);
+      eye(o + j, sg, 11 * G, h * R * (1 - .3 * G * G));
+      eye(o + 12 + j, sg, px + q * G, ph * R);
     }
     eye(o + 24, sg, -11, 0); eye(o + 25, sg, -4, 2); eye(o + 26, sg, 4, 2); eye(o + 27, sg, 11, 0);
-    eye(o + 28, sg, px - pw * .8, -h * .45); eye(o + 29, sg, px - pw * .2, -h * .45);
+    eye(o + 28, sg, px - q * .8, -h * .45); eye(o + 29, sg, px - q * .2, -h * .45);
   }
   SH.project(WQ, WM, WP, 0, W_CORE);
   SH.project(WQ, WM, WP, W_WH, WN - W_WH);
@@ -156,8 +156,8 @@ function wake(t) {
   // An ear's inside shows while the ear faces the viewer (the sign of its
   // projected winding).
   for (let k = 0; k < 2; ++k) {
-    const a = 2 * (W_EAR + 5 * k), fc = ((WP[a + 4] - WP[a]) * (WP[a + 9] - WP[a + 1]) - (WP[a + 5] - WP[a + 1]) * (WP[a + 8] - WP[a])) * (k ? -1 : 1);
-    if (fc > 400) SH.fill(WP, W_INS[k], undefined, C_EAR);
+    const a = 2 * (W_EAR + 5 * k), C = ((WP[a + 4] - WP[a]) * (WP[a + 9] - WP[a + 1]) - (WP[a + 5] - WP[a + 1]) * (WP[a + 8] - WP[a])) * (k ? -1 : 1);
+    if (C > 400) SH.fill(WP, W_INS[k], undefined, C_EAR);
   }
   for (let k = 0; k < 6; ++k) SH.outline(WP, W_WH + 2 * k, 2, C_RIM);
   // The dark pupils are the backdrop: only the glowing iris round them is drawn.

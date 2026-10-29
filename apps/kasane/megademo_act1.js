@@ -33,32 +33,32 @@ const KN = [
 // from register o.
 const OPS = 'SIAMNREVPLQBplC', F2 = ['1d', '12', '123', '123', '12', 'b', '', '23', '23e', '23e', '2', '23', '123', '123', 'be'];
 const hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };
-function prog(src, arg) {
+function prog(S, A) {
   const c = [];
-  for (let p = 0, q = 0; p < src.length; p = q + 1) {
-    q = src.indexOf(' ', p);
-    if (q < 0) q = src.length;
-    const o = src[p];
+  for (let p = 0, q = 0; p < S.length; p = q + 1) {
+    q = S.indexOf(' ', p);
+    if (q < 0) q = S.length;
+    const o = S[p];
     if (o === 'U') {
-      for (let j = 0, n = hx(src, p + 1), b = q > p + 2 ? hx(src, p + 2) : 0; j < n; ++j) c.push([1, b + j, j, 0, 0, 0]);
+      for (let j = 0, n = hx(S, p + 1), b = q > p + 2 ? hx(S, p + 2) : 0; j < n; ++j) c.push([1, b + j, j, 0, 0, 0]);
     } else if (o === 'X') {
-      const x = hx(src, p + 1), y = hx(src, p + 2), r = hx(src, p + 3), a = hx(src, p + 6), b = hx(src, p + 7);
-      c.push([3, a, x, r, 0, 0], [3, b, y, hx(src, p + 5), 0, 0], [2, a, a, b, 0, 0], [3, b, x, hx(src, p + 4), 0, 0],
-        [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, hx(src, p + 8), 0, 0]);
+      const x = hx(S, p + 1), y = hx(S, p + 2), r = hx(S, p + 3), a = hx(S, p + 6), b = hx(S, p + 7);
+      c.push([3, a, x, r, 0, 0], [3, b, y, hx(S, p + 5), 0, 0], [2, a, a, b, 0, 0], [3, b, x, hx(S, p + 4), 0, 0],
+        [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, hx(S, p + 8), 0, 0]);
     } else {
-      const k = OPS.indexOf(o), f = F2[k], row = [k, 0, 0, 0, 0, 0];
+      const k = OPS.indexOf(o), f = F2[k], R = [k, 0, 0, 0, 0, 0];
       let i = p + 1, m = null;
       for (let j = 0; j < f.length; ++j) {
         const r = f.charCodeAt(j);
-        if (r < 58) row[r - 48] = hx(src, i++);
+        if (r < 58) R[r - 48] = hx(S, i++);
         else {
-          if (!m) m = src.slice(i, q).split(',');
+          if (!m) m = S.slice(i, q).split(',');
           const x = m.shift();
-          row[r - 96] = x[0] === '$' ? arg[x[1]] : +x;
+          R[r - 96] = x[0] === '$' ? A[x[1]] : +x;
         }
       }
-      row[4] = f32(row[4]);
-      c.push(row);
+      R[4] = f32(R[4]);
+      c.push(R);
     }
   }
   if (c.length > 64) throw RangeError('64 instructions');

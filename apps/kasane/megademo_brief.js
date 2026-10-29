@@ -49,10 +49,10 @@ let TGX = NaN, TGY = 0;
 const on = (s, t, t0) => s > 1 ? t < 82 + t0 % 9 || t < 88 + t0 % 9 && t & 1 : s || t >= t0 + 6 || t >= t0 && t & 1;
 // Ticks from a0 to a1 across the line at: the short ones, then every
 // m-th long (plans cv / ch).
-function comb(k, a0, a1, at, v, len, m) {
+function comb(k, a, a1, x, v, len, m) {
   for (let r = 0, sp = 6 * (m > 5 ? 3 : 1); r < 2; ++r, v /= m, sp *= m) {
-    const f = v - M.floor(v), p0 = a0 + (f > 0 ? 1 - f : 0) * sp;
-    E(k, at, r ? len : len * .45, p0, sp, M.max(0, M.floor((a1 - p0) / sp) + 1));
+    const f = v - M.floor(v), p = a + (f > 0 ? 1 - f : 0) * sp;
+    E(k, x, r ? len : len * .45, p, sp, M.max(0, M.floor((a1 - p) / sp) + 1));
   }
 }
 // Scene s (0 CALL, 1 ROUTE, 2 VOYAGE) at t. The backdrop: navy, going to
@@ -75,34 +75,34 @@ function brief(s, t) {
     CC[j] = j === 4 ? v * M.pow(w / v, u) : v + (w - v) * u;
   }
   // The view: forward f, right r, up v; C the eye.
-  const yw = CC[5] + .03 * p * sw, cy = M.cos(yw), sy = M.sin(yw), cp = M.cos(CC[6]), sp = M.sin(CC[6]),
-    f0 = sy * cp, f1 = -sp, f2 = cy * cp, v0 = sy * sp, v1 = cp, v2 = cy * sp,
-    C0 = CC[1] - f0 * CC[4], C1 = CC[2] + 2 * p * sw - f1 * CC[4], C2 = CC[3] - f2 * CC[4];
+  const Y = CC[5] + .03 * p * sw, cy = M.cos(Y), sy = M.sin(Y), cp = M.cos(CC[6]), sp = M.sin(CC[6]),
+    f0 = sy * cp, f1 = -sp, f2 = cy * cp, e = sy * sp, h = cp, k = cy * sp,
+    m = CC[1] - f0 * CC[4], o = CC[2] + 2 * p * sw - f1 * CC[4], z = CC[3] - f2 * CC[4];
   WQ[0] = 120 * f0 + 150 * cy; WQ[1] = 120 * f1; WQ[2] = 120 * f2 + 150 * -sy;
-  WQ[4] = 67 * f0 - 150 * v0; WQ[5] = 67 * f1 - 150 * v1; WQ[6] = 67 * f2 - 150 * v2;
+  WQ[4] = 67 * f0 - 150 * e; WQ[5] = 67 * f1 - 150 * h; WQ[6] = 67 * f2 - 150 * k;
   WQ[8] = f0; WQ[9] = f1; WQ[10] = f2;
-  for (let r = 0; r < 12; r += 4) WQ[r + 3] = -(WQ[r] * C0 + WQ[r + 1] * C1 + WQ[r + 2] * C2);
+  for (let r = 0; r < 12; r += 4) WQ[r + 3] = -(WQ[r] * m + WQ[r + 1] * o + WQ[r + 2] * z);
   // LETHE (an octahedron turning, one stroke over its edges), the ship
   // (an arrowhead) and its dashes.
-  const X = rx(1660), sx = rx(sh), sd = rdx(sh), sl = M.hypot(1, sd);
+  const X = rx(1660), sx = rx(sh), D = rdx(sh), L = M.hypot(1, D);
   for (let j = 0; j < 13; ++j) {
     const v = OCT[j], a = g * .04 + v * 1.5708;
     wpt(114 + j, v < 4 ? X + 46 * M.cos(a) : X, v < 4 ? 70 : v > 4 ? 10 : 130, v < 4 ? 1660 + 46 * M.sin(a) : 1660);
   }
   for (let j = 0; j < 14; ++j) {
     const a = sh - 34 * (j / 3 | 0) - 14 * (j % 3), b = j < 5 ? ARW[2 * j + 1] : 0, q = j < 5 ? ARW[2 * j] : 0;
-    wpt(127 + j, j > 4 && (j % 3 > 1 || a < -20) ? NaN : j < 5 ? sx + (sd * b + q) / sl : rx(a + 20), 45, j < 5 ? sh + (b - sd * q) / sl : a + 20);
+    wpt(127 + j, j > 4 && (j % 3 > 1 || a < -20) ? NaN : j < 5 ? sx + (D * b + q) / L : rx(a + 20), 45, j < 5 ? sh + (b - D * q) / L : a + 20);
   }
   SH.project(WQ, WM, WP, 0, 141);
   // The world: the grid boots on CALL; ROUTE lights the gates near to far
   // (the newest flashes); VOYAGE shows them all as the camera rises. Into
   // the river: the gates turn its violet as the camera comes down.
   if (s > 1 || on(s, t, 50)) SH.outline(WP, 72, 41, 0x29f4);
-  const n = s > 1 ? 7 + rnd(5 * smooth(ramp(t, 8, 40))) : 7, lit = s > 1 ? n : s ? M.max(0, M.min(7, (t - 2) / 6 | 0)) : 0,
+  const n = s > 1 ? 7 + rnd(5 * smooth(ramp(t, 8, 40))) : 7, f = s > 1 ? n : s ? M.max(0, M.min(7, (t - 2) / 6 | 0)) : 0,
     v = s > 1 ? smooth(ramp(t, 70, 92)) : 0;
-  if (lit) SH.outline(WP, 0, 6 * lit - 1, rnd(24 * v) << 11 | rnd(63 - 37 * v) << 5 | 31);
-  if (s && n > lit) SH.outline(WP, 6 * lit, 6 * (n - lit) - 1, 0x394f);
-  if (s === 1 && lit && t < 46 && (t - 2) % 6 < 2) SH.outline(WP, 6 * lit - 6, 5, WH);
+  if (f) SH.outline(WP, 0, 6 * f - 1, rnd(24 * v) << 11 | rnd(63 - 37 * v) << 5 | 31);
+  if (s && n > f) SH.outline(WP, 6 * f, 6 * (n - f) - 1, 0x394f);
+  if (s === 1 && f && t < 46 && (t - 2) % 6 < 2) SH.outline(WP, 6 * f - 6, 5, WH);
   TGX = NaN;
   if (s > 1 || s && (t >= 48 || t >= 42 && t & 1)) {
     SH.outline(WP, 114, 13, 0xf81f);
@@ -117,14 +117,14 @@ function brief(s, t) {
   // degrees, the horizon long), five brain waves (their own rhythms, one
   // spike together on the beat; the middle one flattens as the ship
   // leaves), a spectrum and a scope.
-  const cu = s ? 1 : smooth(ramp(t, 20, 36)), spd = g * .2 + (s > 1 ? 30 * ramp(t, 40, 96) ** 3 : 0), lv = (CC[6] * 103 - 35) / 18;
-  E(3, 67 - 58 * cu, 14 - 11 * cu, -g * .45, s ? .4 : .4 * ramp(t, 12, 20), g * .21);
+  const A = s ? 1 : smooth(ramp(t, 20, 36)), spd = g * .2 + (s > 1 ? 30 * ramp(t, 40, 96) ** 3 : 0), B = (CC[6] * 103 - 35) / 18;
+  E(3, 67 - 58 * A, 14 - 11 * A, -g * .45, s ? .4 : .4 * ramp(t, 12, 20), g * .21);
   if (on(s, t, 26)) comb(1, 70, 170, 17, CC[5] * 11.5, -4, 5);
   if (on(s, t, 28)) comb(0, 26, 96, 3, spd, 6, 5);
-  if (on(s, t, 30)) comb(0, 26, 96, 237, C1 * .03, -6, 5);
+  if (on(s, t, 30)) comb(0, 26, 96, 237, o * .03, -6, 5);
   if (on(s, t, 34)) {
-    comb(0, 26, 96, 108, lv, -34, 18);
-    comb(0, 26, 96, 132, lv, 34, 18);
+    comb(0, 26, 96, 108, B, -34, 18);
+    comb(0, 26, 96, 132, B, 34, 18);
     for (let j = 0; j < 7; ++j) P2(j, BS[2 * j], BS[2 * j + 1]);
     SH.outline(WP, 0, 7, 0x57f9);
   }
@@ -132,7 +132,7 @@ function brief(s, t) {
     E(2, 109 + 5 * q, q === 2 && s > 1 ? 1.3 - 1.3 * smooth(ramp(t, 48, 80)) : 1.3, 2 * g, WV[q], WV[5 + q], WV[10 + q]);
   if (on(s, t, 44)) E(4, g * 2.9, .7 + .3 * p);
   if (on(s, t, 48)) E(5, g * .07);
-  BR[0] = spd; BR[1] = C1; BR[2] = g;
+  BR[0] = spd; BR[1] = o; BR[2] = g;
 }
 // TWIST, the river: memories come down the corridor, turning with it, and
 // fall apart into dots as they go by: HOME, the sortie number (seven
@@ -151,7 +151,7 @@ function river(t) {
   // Memories at 20, 64 and 150 (after the white frame), 40 frames each;
   // pale, dim while far (the storyboard's colours).
   const q = t < 64 ? 0 : t < 150 ? 1 : 2, u = (t - (q ? q > 1 ? 150 : 64 : 20)) / 40,
-    mc = (u < .3 ? 0x8c71 : 0xe71a) ^ (t > 121 && t < 196 ? 0xffff : 0);
+    b = (u < .3 ? 0x8c71 : 0xe71a) ^ (t > 121 && t < 196 ? 0xffff : 0);
   if (u >= 0 && u < 1) {
     let x = 0;
     RN = 0;
@@ -164,27 +164,27 @@ function river(t) {
       }
     }
     const n = RN, k = 2.6 / (6 * (1 - u) ** 2 + .25), a = .5 * M.sin(t * .049) + u * (q & 1 ? 1.2 : -1.2),
-      c = M.cos(a) * k, sn = M.sin(a) * k, ox = FR[2 * q] * 14 - x / 2 + 1, oy = FR[2 * q + 1] * 10 - 3;
-    WQ[0] = c; WQ[1] = -sn; WQ[2] = 0; WQ[3] = 120 + c * ox - sn * oy;
-    WQ[4] = sn; WQ[5] = c; WQ[6] = 0; WQ[7] = 67 + sn * ox + c * oy; WQ[8] = WQ[9] = WQ[10] = 0; WQ[11] = 1;
+      c = M.cos(a) * k, sn = M.sin(a) * k, o = FR[2 * q] * 14 - x / 2 + 1, p = FR[2 * q + 1] * 10 - 3;
+    WQ[0] = c; WQ[1] = -sn; WQ[2] = 0; WQ[3] = 120 + c * o - sn * p;
+    WQ[4] = sn; WQ[5] = c; WQ[6] = 0; WQ[7] = 67 + sn * o + c * p; WQ[8] = WQ[9] = WQ[10] = 0; WQ[11] = 1;
     SH.project(WQ, WM, WP, 0, n);
     // Bold: drawn again a pixel to the right.
-    if (u < .62) { SH.outline(WP, 0, n, mc); WQ[3] += 1; SH.project(WQ, WM, WP, 0, n); SH.outline(WP, 0, n, mc); }
+    if (u < .62) { SH.outline(WP, 0, n, b); WQ[3] += 1; SH.project(WQ, WM, WP, 0, n); SH.outline(WP, 0, n, b); }
     else {
       // Crumbling: dots on the edges (two, or one for a long memory),
       // pushed out and thinned.
       const e = (u - .62) / .38, h = n > 40 ? 2 : 3;
       let m = n;
       for (let i = 0; i + 1 < n && m < 140; ++i) for (let j = 1; j < h; ++j) {
-        const z = nz(7 * i + 31 * j), x0 = WP[2 * i], y0 = WP[2 * i + 1];
-        if (z + .5 < e || !(x0 + WP[2 * i + 2] > -1e9)) continue;
-        const X = x0 + (WP[2 * i + 2] - x0) * j / h, Y = y0 + (WP[2 * i + 3] - y0) * j / h;
+        const z = nz(7 * i + 31 * j), f = WP[2 * i], g = WP[2 * i + 1];
+        if (z + .5 < e || !(f + WP[2 * i + 2] > -1e9)) continue;
+        const X = f + (WP[2 * i + 2] - f) * j / h, Y = g + (WP[2 * i + 3] - g) * j / h;
         P2(m, X + (X - 120) * e * .5 + z * e * 16, Y + (Y - 67) * e * .5 + z * e * 9);
         P2(m + 1, WP[2 * m] + 1, WP[2 * m + 1]);
         P2(m + 2, NaN, 0);
         m += 3;
       }
-      if (m > n + 2) SH.outline(WP, n, m - n - 1, mc);
+      if (m > n + 2) SH.outline(WP, n, m - n - 1, b);
     }
   }
   // The wall: a veil across the river comes at the camera (92..119), half

@@ -85,19 +85,19 @@ function twist(k, t) {
 // image's corner (a second surface cost two 10 KB frames).
 const RC0 = 28, RC1 = 108;
 function zen(z, t) {
-  const k = t - 112, e = ramp(t, 112, 150), ee = 1 - (1 - e) ** 3, up = smooth(ramp(t, 160, 190)), T = 2 * PI * t / 96;
+  const k = t - 112, e = ramp(t, 112, 150), ee = 1 - (1 - e) ** 3, U = smooth(ramp(t, 160, 190)), T = 2 * PI * t / 96;
   // The hit: two grey frames, then a warm glow fading out.
   const glow = k > 1 ? rnd(10 * (1 - ramp(k, 2, 16)) ** 2) : 0;
   BG(k === 0 || k === 1 ? 0x5acc : glow << 11 | glow << 5);
-  let roll = .55 * M.sin(T);
-  if (t >= 40 && t < 64) { const u = (t - 40) / 24; roll += 2 * PI * u * u * (3 - 2 * u); }
-  if (t >= 128 && t < 148) { const u = (t - 128) / 20; roll -= 2 * PI * u * u * (3 - 2 * u); }
-  const c = M.cos(roll), s = M.sin(roll), hz = 8 * M.sin(2 * T) + 160 * up, h0 = 120 - hz * s, h1 = 67 + hz * c,
+  let w = .55 * M.sin(T);
+  if (t >= 40 && t < 64) { const u = (t - 40) / 24; w += 2 * PI * u * u * (3 - 2 * u); }
+  if (t >= 128 && t < 148) { const u = (t - 128) / 20; w -= 2 * PI * u * u * (3 - 2 * u); }
+  const c = M.cos(w), s = M.sin(w), h = 8 * M.sin(2 * T) + 160 * U, h0 = 120 - h * s, h1 = 67 + h * c,
     x = 34 + 24 * M.sin(t * .09) - 120, y = 28 + 10 * M.cos(t * .05) - 67,
     px = 120 + x * c - y * s, py = 67 + x * s + y * c, sx = 46 * c - 6 * s, sy = 46 * s + 6 * c,
     b = M.max(0, M.min(7, rnd(-M.atan2(s, c) / .14 + 3.5))), cw = M.cos(t * .3), sw = M.sin(t * .3);
   E(0, 190 * c, 190 * s, -70 * s, 70 * c, t * .05, 120, 67);
-  if (up < 1) {
+  if (U < 1) {
     E(1, h0, h1, -s, c, 260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl);
     E(2, h0, h1, -s, c, c, s, -(z.ln - 1) * .11 - ((t * .04) % 1) * .22, 150);
     E(3, h0, h1, -s, c, c, s, 4.5, M.min(1, t / 70) * 2.2);
@@ -145,91 +145,91 @@ const IV = [], IFS = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a8679
 let Ycy, Ysy, Pcp, Psp, Dd;
 const PJ = [0, 0, 0, 0, 0, 0, 0, 0];
 function pj(x, y, z, s, j) {
-  const x1 = x * Ycy + z * Ysy, z0 = z * Ycy - x * Ysy, y1 = y * Pcp - z0 * Psp, z1 = y * Psp + z0 * Pcp,
-    f = s * Dd / M.max(Dd + z1, Dd * .4);
-  PJ[j] = 120 + x1 * f; PJ[j + 1] = 67 + y1 * f;
-  return z1;
+  const u = x * Ycy + z * Ysy, v = z * Ycy - x * Ysy, w = y * Pcp - v * Psp, q = y * Psp + v * Pcp,
+    f = s * Dd / M.max(Dd + q, Dd * .4);
+  PJ[j] = 120 + u * f; PJ[j + 1] = 67 + w * f;
+  return q;
 }
 function core(k, t) {
   // Clock g: steps every 3 frames from 86 (stop-motion), stops at 100.
   // At 112 the shell falls in (im), at 115 it bursts (e). Negative frames:
   // the stop and the burst.
   const g = t < 86 ? t : t < 100 ? 86 + 3 * ((t - 86) / 3 | 0) : 100, step = t >= 86 && t < 100 && g === t;
-  const neg = t === 100 || t === 101 || t === 115 || t === 116, im = smooth(ramp(t, 112, 115));
-  const crit = ramp(g, 60, 100), dz = ramp(g, 84, 100) ** 2, e = ramp(t, 115, 133), ee = 1 - (1 - e) ** 3;
-  const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * im), o0 = smooth(ramp(g, 40, 56)) + .6 * smooth(ramp(g, 76, 100));
-  const op = o0 * (1 - im) + 3.6 * ee, tw = o0 * (.5 + 1.5 * crit) * (1 - im) + 5 * ee;
-  const ya = g * .03 + 2 * crit ** 3, pa = .5 + g * .011, iv = neg ? 0xffff : 0;
+  const ng = t === 100 || t === 101 || t === 115 || t === 116, m = smooth(ramp(t, 112, 115));
+  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t, 115, 133), ee = 1 - (1 - e) ** 3;
+  const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * m), o = smooth(ramp(g, 40, 56)) + .6 * smooth(ramp(g, 76, 100));
+  const op = o * (1 - m) + 3.6 * ee, b = o * (.5 + 1.5 * cr) * (1 - m) + 5 * ee;
+  const A = g * .03 + 2 * cr ** 3, B = .5 + g * .011, X = ng ? 0xffff : 0;
   // Grey flashes: one frame each time 9 u^3 crosses an integer, u over
   // 60..86. Backdrop: those flashes, dark grey on the steps, light grey
   // negatives, and the burst's glow fading back to black.
-  const fl = t === 60 || t > 60 && t < 86 && (9 * crit ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0),
+  const fl = t === 60 || t > 60 && t < 86 && (9 * cr ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0),
     glow = rnd(9 * (1 - ramp(t, 117, 129)) ** 2);
-  BG(neg ? 0xad55 : fl ? 0x5acc : step ? 0x2945 : t >= 117 && glow ? glow << 11 | glow << 6 | glow : 0);
+  BG(ng ? 0xad55 : fl ? 0x5acc : step ? 0x2945 : t >= 117 && glow ? glow << 11 | glow << 6 | glow : 0);
   // The dolly zoom snaps back in the fall.
-  Ycy = M.cos(ya); Ysy = M.sin(ya); Pcp = M.cos(pa); Psp = M.sin(pa); Dd = 3.2 - 1.6 * dz * (1 - im);
+  Ycy = M.cos(A); Ysy = M.sin(A); Pcp = M.cos(B); Psp = M.sin(B); Dd = 3.2 - 1.6 * d * (1 - m);
   const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee);
-  let cost = 0;
+  let c = 0;
   for (let i = 0; i < 20; ++i) {
     // Shrink each face (h), push it out along its normal (l), twist it
     // like a petal (a).
     const u = 3 * hx(IFS, 3 * i), v = 3 * hx(IFS, 3 * i + 1), w = 3 * hx(IFS, 3 * i + 2),
       cx = IV[u] / 3 + IV[v] / 3 + IV[w] / 3, cy = IV[u + 1] / 3 + IV[v + 1] / 3 + IV[w + 1] / 3,
-      cz = IV[u + 2] / 3 + IV[v + 2] / 3 + IV[w + 2] / 3,
-      l = op * (.8 + .3 * (i % 4)) / M.hypot(cx, cy, cz), a = tw * (i & 1 ? 1 : -1), ca = M.cos(a), sa = M.sin(a);
-    let zs = 0, far = 0;
+      H = IV[u + 2] / 3 + IV[v + 2] / 3 + IV[w + 2] / 3,
+      l = op * (.8 + .3 * (i % 4)) / M.hypot(cx, cy, H), a = b * (i & 1 ? 1 : -1), cw = M.cos(a), sa = M.sin(a);
+    let ts = 0, D = 0;
     for (let j = 0; j < 3; ++j) {
       const q = j ? j > 1 ? w : v : u, x = cx + (IV[q] - cx) * h + cx * l, y = cy + (IV[q + 1] - cy) * h + cy * l,
-        z = cz + (IV[q + 2] - cz) * h + cz * l;
-      zs += pj(x * ca + z * sa, y, z * ca - x * sa, sc, 2 * j);
-      if (M.abs(PJ[2 * j] - 120) > 200 || M.abs(PJ[2 * j + 1] - 67) > 140) far = 1e4;
+        z = H + (IV[q + 2] - H) * h + H * l;
+      ts += pj(x * cw + z * sa, y, z * cw - x * sa, sc, 2 * j);
+      if (M.abs(PJ[2 * j] - 120) > 200 || M.abs(PJ[2 * j + 1] - 67) > 140) D = 1e4;
     }
     // Lines are not clipped and cost their length (8192 a frame): shards
     // off the screen, or past 4000 steps in the burst, are not drawn.
-    far += M.max(M.abs(PJ[0] - PJ[2]), M.abs(PJ[1] - PJ[3]));
-    far += M.max(M.abs(PJ[2] - PJ[4]), M.abs(PJ[3] - PJ[5]));
-    far += M.max(M.abs(PJ[4] - PJ[0]), M.abs(PJ[5] - PJ[1]));
-    if (far >= 1e4 || e > 0 && (cost += far) > 4000) continue;
-    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], (zs > 0 ? BL : i % 3 ? VI : WH) ^ iv);
+    D += M.max(M.abs(PJ[0] - PJ[2]), M.abs(PJ[1] - PJ[3]));
+    D += M.max(M.abs(PJ[2] - PJ[4]), M.abs(PJ[3] - PJ[5]));
+    D += M.max(M.abs(PJ[4] - PJ[0]), M.abs(PJ[5] - PJ[1]));
+    if (D >= 1e4 || e > 0 && (c += D) > 4000) continue;
+    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], (ts > 0 ? BL : i % 3 ? VI : WH) ^ X);
   }
   // The core: cube (green) and octahedron (orange), counter-rotating,
   // pulsing; the falling shell crushes it. Cube vertex i is the bits of i,
   // octahedron vertex i the axis i % 3 signed by i < 3.
-  const cs = sc * smooth(ramp(g, 40, 56)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * crit) * (1 - im);
-  if (cs > 1) for (let q = 0; q < 7; ++q) {
-    const oct = q > 3, s = cs * (oct ? .55 : .33);
+  const cc = sc * smooth(ramp(g, 40, 56)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * cr) * (1 - m);
+  if (cc > 1) for (let q = 0; q < 7; ++q) {
+    const O = q > 3, s = cc * (O ? .55 : .33);
     for (let j = 0; j < 4; ++j) {
       const i = hx(QD, 4 * q + j), n = i < 3 ? 1 : -1;
-      if (oct) pj(i % 3 ? 0 : n, i % 3 === 1 ? n : 0, i % 3 === 2 ? n : 0, s, 2 * j);
+      if (O) pj(i % 3 ? 0 : n, i % 3 === 1 ? n : 0, i % 3 === 2 ? n : 0, s, 2 * j);
       else pj(i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1, s, 2 * j);
     }
-    E(oct ? 2 : q < 2 ? 1 : 3, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], PJ[6], PJ[7]);
+    E(O ? 2 : q < 2 ? 1 : 3, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], PJ[6], PJ[7]);
   }
   // Rays from frame 64; in the burst, a shockwave ring and the rays thrown
   // out to the edges.
   if (e > 0) {
-    const R = 6 + 150 * ee, nr = M.max(8, k.r), nb = rnd(k.r * (1 - e));
-    E(4, 120, 67, R, R + 3 + 9 * (1 - e), t * .02, nr, 2 * PI / nr, (e < .3 ? OR : WH) ^ iv);
-    if (nb) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, nb, 2 * PI / nb, OR ^ iv);
+    const R = 6 + 150 * ee, rr = M.max(8, k.r), ln = rnd(k.r * (1 - e));
+    E(4, 120, 67, R, R + 3 + 9 * (1 - e), t * .02, rr, 2 * PI / rr, (e < .3 ? OR : WH) ^ X);
+    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, OR ^ X);
   } else {
-    const nr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - im) * (1 - .6 * smooth(ramp(t, 78, 88))));
-    for (let j = 0; j < k.d && nr; ++j)
-      E(4, 120, 67, cs * .4, 30 + 120 * crit, g * .07 + j * PI / nr, nr, 2 * PI / nr, (fl ? OR : WH) ^ iv);
+    const rr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - m) * (1 - .6 * smooth(ramp(t, 78, 88))));
+    for (let j = 0; j < k.d && rr; ++j)
+      E(4, 120, 67, cc * .4, 30 + 120 * cr, g * .07 + j * PI / rr, rr, 2 * PI / rr, (fl ? OR : WH) ^ X);
   }
   // Dust falls into the core on the real clock (stop-motion is the shell's,
   // not dropped frames): 8 rings of streaks, r = sqrt of the fall so it
   // speeds up near the core, swirling as it goes in; held in the stop,
   // crushed in the fall.
-  const np = rnd(k.r / 4 * smooth(ramp(t, 76, 86)) * (1 - im)), tp = t < 100 ? t : 100;
-  for (let i = 0; i < 8 && np && t < 115; ++i) {
-    const u = (i / 8 - tp / 36) % 1 + 1, f = M.sqrt(u % 1), r = (24 + 116 * f) * (1 - im);
-    E(4, 120, 67, r, r + 4 + 12 * (1 - f), i * 1.7 + 30 / (r + 9), np, 2 * PI / np, (i & 1 ? 0x07ff : 0xfd20) ^ iv);
+  const p = rnd(k.r / 4 * smooth(ramp(t, 76, 86)) * (1 - m)), T = t < 100 ? t : 100;
+  for (let i = 0; i < 8 && p && t < 115; ++i) {
+    const u = (i / 8 - T / 36) % 1 + 1, f = M.sqrt(u % 1), r = (24 + 116 * f) * (1 - m);
+    E(4, 120, 67, r, r + 4 + 12 * (1 - f), i * 1.7 + 30 / (r + 9), p, 2 * PI / p, (i & 1 ? 0x07ff : 0xfd20) ^ X);
   }
   // Stars stretch outwards in the dolly zoom and rush past in the burst;
   // the noise is still in the stop and spends itself in the burst.
-  const gs = 1 + .8 * dz * (1 - im) + 1.4 * ee, nn = rnd(k.n * (t < 100 ? crit ** 1.5 : t < 115 ? 0 : 1 - e));
-  if (t < 132) E(5, 190 * gs, 0, 0, 70 * gs, g * .05 + 2 * ee, 120, 67);
-  if (nn) E(6, t * 1.7, nn, 10 + 40 * crit);
+  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 115 ? 0 : 1 - e));
+  if (t < 132) E(5, 190 * G, 0, 0, 70 * G, g * .05 + 2 * ee, 120, 67);
+  if (L) E(6, t * 1.7, L, 10 + 40 * cr);
 }
 // LOST: CRT off. The line shrinks to a dot, then the dot goes; a few dark
 // frames, and WAKE's closed eyelids go on from the same black.

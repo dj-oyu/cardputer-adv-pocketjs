@@ -23,15 +23,15 @@ function prefetch(s, max) {
 // fresh: drop the prefetched set too (tier change, recovery). The old set
 // goes before the rest registers: they overlap only as far as the
 // memory gate let the prefetch run.
-function enter(s, fresh) {
+function enter(s, f) {
   // Act I's scenes share one plan set.
   if (s < 3 && scene < 3 && PN) {
     scene = s; t = 0;
     return console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length + ' freed=0 registered=' + loaded);
   }
-  if (fresh && next) { drop(next.h); next = null; }
-  const old = live.length;
-  if (s === 3 && scene === 2 && LT === tier && !fresh) {
+  if (f && next) { drop(next.h); next = null; }
+  const o = live.length;
+  if (s === 3 && scene === 2 && LT === tier && !f) {
     // TWIST takes over its plans from Act I's set; the HUD's go.
     if (next) { drop(next.h); next = null; }
     const h = live.splice(6);
@@ -43,7 +43,7 @@ function enter(s, fresh) {
   }
   scene = s; t = 0;
   console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length +
-    ' freed=' + old + ' registered=' + loaded);
+    ' freed=' + o + ' registered=' + loaded);
 }
 // Enter is dead while the story owns the camera: on waking (first person,
 // the TV is off), CALL (the TV turns itself on, the dive into it), and
@@ -68,11 +68,11 @@ function box(s) {
     r > 0 ? bt.roundRect({bounds: b, radius: r, color: c}) : r < 0 ?
       bt.strokeRect({bounds: b, width: -r, color: c}) : bt.rect({bounds: b, color: c, opacity: +e[6] || 255});
 }
-function build(tx, room) {
+function build(tx, m) {
   bt = tx; hud = []; hw = []; R = {}; vis = false; said = -1; zb = zoom; ZB = boundsAt(zoom);
   const ch = CHAP[scene], S = R.S = SAY[scene] && SAY[scene].split('|'), T = TITLE.split('|');
   tx.background(255);
-  if (room) {
+  if (m) {
     tx.gradient({bounds: [0, 0, 240, 100], axis: 'y', from: 0x0a0618ff, to: GLOW[ch], dither: true});
     ROOM.split(',').forEach(box);
     // A tally on the wall, a mark a night: four strokes and a fifth across
@@ -104,9 +104,9 @@ function build(tx, room) {
   // every other frame; VOYAGE's dive takes it down again. LETHE's tag
   // follows its octahedron (patch).
   if (scene < 3) {
-    const b0 = scene ? 0 : 1, e0 = scene > 1 ? 82 : 1e9;
-    HUDI.split(',').forEach((e, i) => add(box(e), 36 * b0 + 2 * i * b0, e0 + 2 * i));
-    R.rd = RDB.map((b, i) => add(text(b, '', 'caption', i > 1 ? 0xd7f4ffff : 0x50ffc8ff, 5), (42 + 2 * i) * b0, e0 + 3 * i));
+    const p = scene ? 0 : 1, e0 = scene > 1 ? 82 : 1e9;
+    HUDI.split(',').forEach((e, i) => add(box(e), 36 * p + 2 * i * p, e0 + 2 * i));
+    R.rd = RDB.map((b, i) => add(text(b, '', 'caption', i > 1 ? 0xd7f4ffff : 0x50ffc8ff, 5), (42 + 2 * i) * p, e0 + 3 * i));
     // It moves: its clip is the screen (setRect keeps the clip).
     R.tag = tx.text({bounds: [0, 0, 40, 9], clip: FULL, text: gb('LETHE'), font: 'caption', color: 0xf81fffff});
     R.tag.setVisible(tx, false);
@@ -148,9 +148,9 @@ function build(tx, room) {
   bt = null;
 }
 function patch(tx) {
-  const on = zoom === 0, fix = zoom === ZOOM, S = R.S;
+  const on = zoom === 0, f = zoom === ZOOM, S = R.S;
   if (zoom !== zb) { zb = zoom; ZB = boundsAt(zoom); img.setRect(tx, ZB); }
-  if (fix !== vis) { img.setVisible(tx, !fix); mon.setVisible(tx, fix); vis = fix; }
+  if (f !== vis) { img.setVisible(tx, !f); mon.setVisible(tx, f); vis = f; }
   // ZENITH's hit shakes the full-screen image for 12 frames (zb = -1 puts
   // it back on the next frame).
   if (scene === 4 && on && t >= 112 && t < 124) {
