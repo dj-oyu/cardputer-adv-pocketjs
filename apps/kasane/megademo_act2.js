@@ -149,33 +149,36 @@ function pj(x, y, z, s, j) {
 }
 function core(k, t) {
   // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The ship
-  // rams the core at 112: the shell falls in (m, 112..115) and bursts in
-  // slow motion on its own clock (e over 115..145) that freezes 119..124
-  // (a still in greys, the ring the one colour); then the light (145..).
+  // rams the core at 112: the shell falls in, slow then sudden (m,
+  // 112..118), and bursts in slow motion on its own clock (e over 118..168,
+  // eased out: a pop, then a long drift) that freezes 124..129 (a still in
+  // greys, the ring the one colour); then the light (168..).
   // cr: criticality, d: dolly zoom, o/op: opening, b: twist, A/B: yaw/
   // pitch, ng: negative frames, l: the roll dodging the core's beams
   // (64..84; one whole turn 74..84), gy: greys.
   const g = t < 86 ? t : t < 100 ? 86 + 3 * ((t - 86) / 3 | 0) : 100, step = t >= 86 && t < 100 && g === t;
-  const ng = t === 100 || t === 101 || t === 115 || t === 116, m = smooth(ramp(t, 112, 115)),
-    gy = t > 118 && t < 125 || t > 144;
-  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t < 119 ? t : t < 125 ? 119 : t - 6, 115, 139),
-    ee = 1 - (1 - e) ** 3;
+  const ng = t === 100 || t === 101 || t === 118 || t === 119, m = ramp(t, 112, 118) ** 2,
+    gy = t > 123 && t < 130 || t > 175;
+  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t < 124 ? t : t < 130 ? 124 : t - 6, 118, 162),
+    ee = 1 - (1 - e) ** 2;
   const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * m), o = smooth(ramp(g, 58, 72)) + .6 * smooth(ramp(g, 76, 100));
-  const op = o * (1 - m) + 3.6 * ee, b = o * (.5 + 1.5 * cr) * (1 - m) + 5 * ee;
+  const op = o * (1 - m) + 2.2 * ee, b = o * (.5 + 1.5 * cr) * (1 - m) + 4 * ee;
   const A = g * .03 + 2 * cr ** 3, B = .5 + g * .011, X = ng ? 0xffff : 0,
     l = t >= 72 && t < 84 ? 2 * PI * smooth(ramp(t, 74, 84)) + .4 * M.sin((t - 72) * .5) * M.sin(PI * (t - 72) / 12) : 0;
   // Grey flashes as 9 cr^3 crosses an integer (60..86: the beams grazing),
   // dark grey on the steps, light grey negatives, the burst's afterglow.
-  // Then the core's light past the panel's white, told as an eye's (a
-  // sensor's) answer to it: blown out to CRT white (0xd71e, 145..146,
-  // nothing drawn), the iris stopping down to its light (147..155; the
-  // lids squint, patch), the light swelling over everything (156..166),
-  // held until the set shuts.
+  // A held breath (168..175: the debris all but still, a point of light
+  // trembling in the middle), then the core's light past the panel's
+  // white, told as an eye's (a sensor's) answer to it: blown out to CRT
+  // white at once (0xd71e, 176..177, nothing drawn), the iris easing down
+  // to its light (178..189; the lids squint, patch), the light swelling
+  // slowly and then all at once (190..205, cubed), held until the set
+  // shuts.
   const fl = t === 60 || t > 60 && t < 86 && (9 * cr ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0),
-    u = t < 147 ? 1 : t < 156 ? 1 - ramp(t, 146, 152) : ramp(t, 156, 166), v = rnd(9 * (1 - e) ** 2);
-  BG(ng ? 0xad55 : t > 144 ? rnd(26 * u) << 11 | rnd(56 * u) << 5 | rnd(30 * u) : fl ? 0x5acc : step ? 0x2945 :
-    t > 116 ? v << 11 | v << 6 | v : 0);
-  if (t > 144 && t < 147 || t > 165) return;
+    u = t < 178 ? 1 : t < 190 ? 1 - smooth(ramp(t, 177, 186)) : ramp(t, 190, 206) ** 2, v = rnd(9 * (1 - e) ** 2);
+  BG(ng ? 0xad55 : t > 175 ? rnd(26 * u) << 11 | rnd(56 * u) << 5 | rnd(30 * u) : fl ? 0x5acc : step ? 0x2945 :
+    t > 119 ? v << 11 | v << 6 | v : 0);
+  if (t > 175 && t < 178 || t > 205) return;
   // The dolly zoom snaps back on the ram.
   Ycy = M.cos(A); Ysy = M.sin(A); Pcp = M.cos(B); Psp = M.sin(B); Dd = 3.2 - 1.6 * d * (1 - m);
   Rc = M.cos(l); Rs = M.sin(l);
@@ -225,12 +228,15 @@ function core(k, t) {
     if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, gy ? 0x8410 : OR ^ X);
     // The core's light: dense rays from the middle, a blot of white that
     // swells over the screen.
-    if (t > 146) {
-      E(4, 120, 67, 0, t < 156 ? 4 + 2 * (t - 147) : 22 + 128 * smooth(ramp(t, 156, 166)), t * .3, rr, 2 * PI / rr, WH);
+    if (t > 167) {
+      E(4, 120, 67, 0, t < 176 ? 2 + .4 * (t - 168) + M.sin(t * 2.1) : t < 190 ? 6 + 1.2 * (t - 178) :
+        22 + 128 * ramp(t, 190, 206) ** 3, t * .3, rr, 2 * PI / rr, WH);
+    }
+    if (t > 177) {
       // The ship's after-image near the eye, against the light, in its
       // yellow's complement (blue), sinking into the white as it swells (a), its faces
       // drifting apart and dropping out (q).
-      const a = 1 - ramp(t, 156, 166), q = 1.6 * ramp(t, 147, 166);
+      const a = 1 - ramp(t, 194, 206) ** 2, q = 1.6 * ramp(t, 178, 206);
       Ycy = 0; Ysy = .6; Dd = 12; Rc = Pcp = 1; Rs = Psp = 0;
       for (let i = 0; i < 8; ++i)
         if (q < 1 + i % 3 * .3 && st3(i)) {
@@ -253,7 +259,7 @@ function core(k, t) {
     E(4, 120, 67, r, r + 4 + 12 * (1 - f), i * 1.7 + 30 / (r + 9), p, 2 * PI / p, (i & 1 ? 0x07ff : 0xfd20) ^ X);
   }
   // Stars stretch in the zoom and rush past in the burst (G); noise (L).
-  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 115 ? 0 : 1 - e));
+  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 118 ? 0 : 1 - e));
   E(5, 190 * G * Rc, 190 * G * Rs, -70 * G * Rs, 70 * G * Rc, g * .05 + 2 * ee, 120, 67);
   if (L) E(6, t * 1.7, L, 10 + 40 * cr);
   if (e > 0) return;
@@ -344,7 +350,7 @@ function lost(t) {
 }
 // Act I (CALL, ROUTE, VOYAGE) keeps the log name NEWS; WAKE plays first.
 const NAMES = ['NEWS', 'NEWS', 'NEWS', 'TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'],
-  LEN = [64, 56, 96, 240, 216, 186, 24, 104];
+  LEN = [64, 56, 96, 240, 216, 226, 24, 104];
 // Scene s's plans as [template, args...]. Act I's set is its HUD, then
 // TWIST's first 8: they register at the end of WAKE (the heap is lowest
 // there) and pass to TWIST at the cut (enter()). The loader builds plan i

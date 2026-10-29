@@ -117,7 +117,7 @@ function build(tx, m) {
     R.tgv = false;
   }
   // CORE's HUD goes with the canopy at the ram (112).
-  const z = scene === 5 ? 145 : 1e9, y = scene === 5 ? 112 : 1e9;
+  const z = scene === 5 ? 176 : 1e9, y = scene === 5 ? 112 : 1e9;
   if (S) R.say = add(text(S[0].split(' ').map(Number), '', 'caption', 0xffffffff, 40), +S[1], z);
   if (ch < 4) R.card = add(text([8, 36, 232, 56], R.T = T[ch], 'display', INK[ch], 16), 4, 60);
   R.rv = R.cr = -1;
@@ -160,7 +160,7 @@ function patch(tx) {
   if (f !== vis) { img.setVisible(tx, !f); mon.setVisible(tx, f); vis = f; }
   // CORE's burst shakes the full-screen image for 12 frames (zb = -1 puts
   // it back on the next frame).
-  const k = scene === 5 ? t - 115 : -1;
+  const k = scene === 5 ? t - 118 : -1;
   if (on && k >= 0 && k < 12) {
     const a = 6 * (1 - k / 12), x = rnd(a * M.sin(t * 2.7)), y = rnd(a * M.cos(t * 3.9));
     img.setRect(tx, [x, y, 240 + x, 135 + y]);
@@ -169,9 +169,9 @@ function patch(tx) {
   // Shutters: the TV turns on in the first news frames and off at the end
   // of CORE (on its white, a CRT switched off); in WAKE they are eyelids
   // over the whole view, and in CORE's burst they squint, trembling,
-  // against the light (145..165), then give up to it.
-  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 7 ? lid(t) : scene !== 5 ? 1 : t > 177 ? clamp((186 - t) / 8) :
-    t > 144 && t < 166 ? .3 + .05 * M.sin(t * 2.3) : 1;
+  // against the light (176..205), then give up to it.
+  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 7 ? lid(t) : scene !== 5 ? 1 : t > 217 ? clamp((226 - t) / 8) :
+    t > 175 && t < 206 ? .3 + .05 * M.sin(t * 2.3) : 1;
   if (o < 1 || R.cv < 1) {
     const E = scene === 7 ? FULL : ZB, m = (E[1] + E[3]) / 2, h = (E[3] - E[1]) * o / 2;
     R.top.setRect(tx, [E[0], E[1], E[2], rnd(m - h)]);
@@ -240,7 +240,7 @@ function patch(tx) {
   if (cf !== R.cf) { R.cm.setImageFrame(tx, 3, cf); R.cf = cf; }
   // CORE's time stop and the burst's still: the HUD and the torn bands
   // hold where they are.
-  if (scene === 5 && (t >= 100 && t < 112 || t > 118 && t < 125)) return;
+  if (scene === 5 && (t >= 100 && t < 112 || t > 123 && t < 130)) return;
   if (!(t & 7)) R.score.setText(tx, (scene === 4 ? 'LETHE' : NAMES[scene]) + ' ' + String(1e6 + tick * 10).slice(1));
   const lc = t & (t > (scene === 4 ? 95 : 71) ? 2 : 8) ? 0xfb47ffff : 0x167fffff;
   if (lc !== R.lc) { R.lamp.setColor(tx, lc); R.lc = lc; }
@@ -250,7 +250,7 @@ function patch(tx) {
     if (!(t & 1)) R.stat.setText(tx, 'SIGNAL ' + p);
     // Tear: each band shows when a per-frame hash is under the eased
     // interference level, at a hashed height and offset.
-    const nz = on ? t < 100 ? ramp(t, 60, 100) ** 1.5 : t < 115 ? 0 : 1 - ramp(t, 115, 145) : 0;
+    const nz = on ? t < 100 ? ramp(t, 60, 100) ** 1.5 : t < 118 ? 0 : 1 - ramp(t, 118, 160) : 0;
     for (let i = 0; i < 3; ++i) {
       const r = R.tear[i], h = M.sin(t * 12.9898 + i * 78.233) * 43758.5453, u = h - M.floor(h), v = u < nz;
       if (v) {
