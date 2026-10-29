@@ -4,6 +4,9 @@
 # what the earlier ones keep: the big chunks go first. The host tests
 # evaluate the same files in this order.
 app local.megademo
+# No line tables (docs/vm/strip-debug.md): a runtime error names each
+# function's first line; the heap keeps ~5 KB less.
+option strip-debug
 act1   megademo_act1.js
 # Not a chunk: the plan templates, compiled into the firmware's built-in
 # plan table as kasane.<name> (tools/make_app_chunks.py). The host tests

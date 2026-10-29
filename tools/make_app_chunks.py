@@ -47,6 +47,10 @@ ksn_proc_rom_plans.c. With no such app, OUTDIR/ksn_proc_rom_plans_none.c
 (an empty table) is written here, so a build without @plan needs no Node;
 APP_CHUNK_ROM_C names whichever file the build compiles.
 
+`option strip-debug` compiles the app's chunks without line tables
+(JS_PocketSetStripDebug, docs/vm/strip-debug.md): a runtime error then names
+each function's first line, and the app keeps less heap.
+
 A list may also name a file of plan templates in text, `rom-text FILE`
 (MEGADEMO's megademo_plans.js: T and its decoder prog): not a chunk, never
 embedded, its templates go into the same table as 'APP.name', APP being the
@@ -86,8 +90,11 @@ def c_string(s):
     return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
+OPTIONS = ('strip-debug',)
+
+
 def read_list(path):
-    app, chunks, texts = None, [], []
+    app, chunks, texts, options = None, [], [], set()
     for n, raw in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
         line = raw.split('#', 1)[0].strip()
         if not line:
@@ -102,6 +109,11 @@ def read_list(path):
             continue
         if len(words) != 2:
             fail(f'{path}:{n}: expected "<name> <file>"')
+        if words[0] == 'option':
+            if words[1] not in OPTIONS:
+                fail(f'{path}:{n}: unknown option {words[1]!r} (known: {", ".join(OPTIONS)})')
+            options.add(words[1])
+            continue
         if words[0] == 'rom-text':
             file = (path.parent / words[1]).resolve()
             if not file.is_file():
@@ -122,7 +134,7 @@ def read_list(path):
         chunks.append((name, file))
     if not app:
         fail(f'{path}: no "app <id>" line')
-    return app, chunks, texts
+    return app, chunks, texts, options
 
 
 def main():
@@ -133,9 +145,11 @@ def main():
     apps = {}          # id -> [(name, file)]
     bases = {}         # base name -> file
     texts = []         # (APP, file): rom-text templates
+    options = {}       # id -> {option}
     for lst in lists:
-        app, chunks, more = read_list(lst)
+        app, chunks, more, opts = read_list(lst)
         texts += more
+        options.setdefault(app, set()).update(opts)
         have = apps.setdefault(app, [])
         for name, file in chunks:
             if any(name == n for n, _ in have):
@@ -198,7 +212,8 @@ def main():
         c.append(f'static const app_chunk_t {var}[] = {{')
         c += rows
         c.append('};')
-        sets.append(f'    {{{c_string(app)}, {var}, {len(rows)}}},')
+        strip = 1 if 'strip-debug' in options.get(app, ()) else 0
+        sets.append(f'    {{{c_string(app)}, {var}, {len(rows)}, {strip}}},')
     c.append('')
     if sets:
         c.append('static const app_chunk_set_t SETS[] = {')

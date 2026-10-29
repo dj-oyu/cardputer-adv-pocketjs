@@ -52,6 +52,9 @@ typedef struct {
     const char        *app_id;   // an app_registry.c id, "local.derby"
     const app_chunk_t *chunks;
     uint32_t           count;
+    // 1: the chunks compile without line tables (chunks.txt `option
+    // strip-debug`; JS_PocketSetStripDebug, docs/vm/strip-debug.md).
+    uint8_t            strip_debug;
 } app_chunk_set_t;
 
 // The set for one app id, or NULL when that app has no chunks -- which is

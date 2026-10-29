@@ -130,6 +130,7 @@ static bool eval(const char *source,size_t len,const char *name){
  * global script, so the compile peak is per chunk (docs/vm/eval-peak.md 7). */
 static struct {char name[32],path[512];bool done;} chunk[16];
 static unsigned chunks;
+static bool strip_debug;   /* chunks.txt `option strip-debug`, as pocket_app_load.c */
 static void read_chunks(void){
     /* MEGA_CHUNKS: another chunks.txt (the runner's baseline, extracted). */
     const char *list=getenv("MEGA_CHUNKS");if(!list)list="apps/kasane/chunks.txt";
@@ -140,6 +141,7 @@ static void read_chunks(void){
     while(fgets(line,sizeof line,f)){
         char *h=strchr(line,'#');if(h)*h=0;
         if(sscanf(line,"%31s %199s",a,b)!=2||!strcmp(a,"app")||chunks==16)continue;
+        if(!strcmp(a,"option")){if(!strcmp(b,"strip-debug"))strip_debug=true;continue;}
         snprintf(chunk[chunks].name,sizeof chunk[0].name,"%s",a);
         snprintf(chunk[chunks].path,sizeof chunk[0].path,"%s/%s",dir,b);
         chunks++;
@@ -157,7 +159,9 @@ static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *arg
     FILE *f=fopen(chunk[i].path,"rb");if(!f)return JS_ThrowReferenceError(c,"no file");
     static char body[1<<16];size_t n=fread(body,1,sizeof body-1,f);fclose(f);body[n]=0;
     chunk[i].done=true;
+    JS_PocketSetStripDebug(c,strip_debug);
     JSValue v=JS_Eval(c,body,n,chunk[i].path,JS_EVAL_TYPE_GLOBAL);
+    JS_PocketSetStripDebug(c,0);
     if(JS_IsException(v))return v;
     JS_FreeValue(c,v);
     return JS_TRUE;
