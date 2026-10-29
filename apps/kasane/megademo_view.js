@@ -14,7 +14,6 @@ try { res0 = H.resource({maxSegments: 768}); } catch (e) { res0 = H.resource(); 
 const monRes = G.resource(G.registerResizeSource({source: res0, width: 112, height: 63}));
 const pets = V.resource('pets');
 const lives = V.cache.create([[0, 2, 9, 7], [0, 0, 2, 2], [7, 0, 9, 2]].map(b => ({bounds: b, color: 0x14f53cff})));
-const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
 // Loader: the next scene registers from LOAD[0] frames before the switch,
 // LOAD[1] plans a frame, while the internal heap has LOAD[2] bytes free
 // (a registration dips it by up to 14 KB on the device); the rest

@@ -19,7 +19,7 @@ globalThis.frame = function (buttons) {
     // CORE build found no 10 KB holes on the device, 2026-10-28).
     boot = false;
     H.beginFrame(0);
-    while (pend.length) live.push(reg(pend.shift()));
+    while (live.length < PN) live.push(reg(scene, live.length));
   }
   const press = buttons & ~held;
   held = buttons;
@@ -45,7 +45,7 @@ globalThis.frame = function (buttons) {
     // first, then the next scene's over the last frames. Before the
     // frame: a park here must not show a new image under the old view.
     let b = LOAD[1];
-    for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
+    for (; b > 0 && live.length < PN; --b) live.push(reg(scene, live.length));
     if (b && t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
     nd = 0;
     play(scene, tier, t);

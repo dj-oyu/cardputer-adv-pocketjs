@@ -32,26 +32,29 @@ const KN = [
 // (x, y) *= z in place (registers; z0 reads zero); Un[o] loads n inputs
 // from register o.
 const OPS = 'SIAMNREVPLQBplC', F2 = ['1d', '12', '123', '123', '12', 'b', '', '23', '23e', '23e', '2', '23', '123', '123', 'be'];
+const hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };
 function prog(src, arg) {
-  const c = [], w = src.split(' ');
-  for (let i = 0; i < w.length; ++i) {
-    const t = w[i], o = t[0];
+  const c = [];
+  for (let p = 0, q = 0; p < src.length; p = q + 1) {
+    q = src.indexOf(' ', p);
+    if (q < 0) q = src.length;
+    const o = src[p];
     if (o === 'U') {
-      for (let j = 0, n = +t[1], b = t.length > 2 ? parseInt(t[2], 16) : 0; j < n; ++j) c.push([1, b + j, j, 0, 0, 0]);
+      for (let j = 0, n = hx(src, p + 1), b = q > p + 2 ? hx(src, p + 2) : 0; j < n; ++j) c.push([1, b + j, j, 0, 0, 0]);
     } else if (o === 'X') {
-      const h = j => parseInt(t[j], 16), x = h(1), y = h(2), r = h(3), a = h(6), b = h(7);
-      c.push([3, a, x, r, 0, 0], [3, b, y, h(5), 0, 0], [2, a, a, b, 0, 0], [3, b, x, h(4), 0, 0],
-        [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, h(8), 0, 0]);
+      const x = hx(src, p + 1), y = hx(src, p + 2), r = hx(src, p + 3), a = hx(src, p + 6), b = hx(src, p + 7);
+      c.push([3, a, x, r, 0, 0], [3, b, y, hx(src, p + 5), 0, 0], [2, a, a, b, 0, 0], [3, b, x, hx(src, p + 4), 0, 0],
+        [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, hx(src, p + 8), 0, 0]);
     } else {
       const k = OPS.indexOf(o), f = F2[k], row = [k, 0, 0, 0, 0, 0];
-      let p = 1, m = null;
+      let i = p + 1, m = null;
       for (let j = 0; j < f.length; ++j) {
-        const q = f.charCodeAt(j);
-        if (q < 58) row[q - 48] = parseInt(t[p++], 16);
+        const r = f.charCodeAt(j);
+        if (r < 58) row[r - 48] = hx(src, i++);
         else {
-          if (!m) m = t.slice(p).split(',');
+          if (!m) m = src.slice(i, q).split(',');
           const x = m.shift();
-          row[q - 96] = x[0] === '$' ? arg[x[1]] : +x;
+          row[r - 96] = x[0] === '$' ? arg[x[1]] : +x;
         }
       }
       row[4] = f32(row[4]);

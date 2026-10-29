@@ -100,7 +100,6 @@ const IV = [], IFS = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a8679
   const S = 'ip01p0iq01q00ip01p0iq01qp0ip01q0iq01';
   for (let i = 0; i < 36; ++i) IV.push(C[S[i]] / n);
 }
-const hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };
 // Projection state for this frame: yaw, pitch, camera distance D. pj()
 // rotates (yaw, then pitch), projects at scale s into PJ[j], PJ[j + 1] and
 // returns z (> 0 is away from the camera); a petal past the lens must not
@@ -205,11 +204,12 @@ function lost(t) {
 // for the logs' readers; WAKE (megademo_wake.js) plays first. LEN: frames.
 const NAMES = ['NEWS', 'NEWS', 'NEWS', 'TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'],
   LEN = [64, 56, 96, 240, 96, 140, 24, 104];
-// Scene s's plans, one thunk each: the loader builds one program array at a
-// time. Act I's scenes share one set (its HUD; the world is pocket.shapes').
-// cap: how many the prefetch takes (TWIST's negative registers during
-// TWIST, not in VOYAGE's dive).
-function specs(s, tier) {
+// Scene s's plans as [template, args...] (sh: the ship's roll bin, its
+// points). Act I's scenes share one set (its HUD; the world is
+// pocket.shapes'). cap: how many the prefetch takes (TWIST's negative
+// registers during TWIST, not in VOYAGE's dive). The loader builds plan i
+// when it registers it (plan()), so no list is kept while it waits.
+function plist(s, tier) {
   const k = KN[tier], z = k.z;
   const L = s < 3 ? [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]] :
     s === 3 ? corrList(k.c, 0).concat([['st', z.st]], corrList(k.c, 0xffff)) :
@@ -218,10 +218,11 @@ function specs(s, tier) {
     [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa], ['tr', z.sa, z.ts],
       ['sh', 0], ['sh', 1], ['sh', 2], ['sh', 3], ['sh', 4], ['sh', 5], ['sh', 6], ['sh', 7],
       ['rd', z.rr], ['sw', z.sa, RC0, RC1]];
-  const r = L.map(e => () => [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null]);
-  if (s === 3) r.cap = 8;
-  return r;
+  if (s === 3) L.cap = 8;
+  return L;
 }
+// [program, points or null] of a plan entry.
+const plan = e => [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null];
 // Scene s at tier and frame t, through E and BG.
 function play(s, tier, t) {
   const k = KN[tier];
@@ -230,7 +231,9 @@ function play(s, tier, t) {
 }
 // The host tests' form: {b: backdrop, s: surface, d: [[plan, [inputs]]...]}
 // (plan -1: a pocket.shapes segment, tools/kasane_contract/shape_draw_shim.h).
-globalThis.procMegademo = {names: NAMES, len: LEN, specs: specs, tiers: KN.length, frame: function (s, tier, t) {
+// specs(): a thunk per plan, the form the tests read.
+globalThis.procMegademo = {names: NAMES, len: LEN, tiers: KN.length, specs: (s, tier) => plist(s, tier).map(e => () => plan(e)),
+  frame: function (s, tier, t) {
   const r = {b: 0, s: 0, d: []}, e = E, g = BG;
   E = (k, ...a) => { r.d.push([k, a]); };
   BG = b => { r.b = b; };

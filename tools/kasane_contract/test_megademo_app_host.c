@@ -337,6 +337,7 @@ int main(int argc,char **argv){
             else for(unsigned i=0;i<sizeof picks/sizeof picks[0];i++)if(picks[i]==t)ppm(ppm_dir,t);
         }
     }
+    if(getenv("MEGA_MEMDUMP_END")){JS_RunGC(rt);JSMemoryUsage m;JS_ComputeMemoryUsage(rt,&m);JS_DumpMemoryUsage(stdout,&m,rt);}
     if(!baseline){
         unsigned peak=(unsigned)num("__mega.peak"),total=(unsigned)num("__mega.total");
         unsigned maxreg=max_frame_reg;

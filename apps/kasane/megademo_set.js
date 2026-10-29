@@ -2,26 +2,30 @@
 // and patch (megademo_view.js has its tables). patch() writes a ref only
 // when its value changes: every write is a view command to re-check.
 'use strict';
+// The full screen, the monitor in the room, and the camera's steps between.
+const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
 // scene starts at WAKE, so the loop's first enter(7) is not a new night.
-let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], pend = [], next = null, loaded = 0, nd = 0;
+// live: the running scene's plan handles (PN plans; the loader adds the
+// rest a frame at a time); next: the next scene's, prefetched.
+let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, next = null, loaded = 0, nd = 0;
 let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1, zb = -1, ZB = FULL;
 let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
 const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
-const reg = th => { const p = th(); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
+const reg = (s, i) => { const p = plan(plist(s, tier)[i]); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
 const lerp4 = (a, b, e) => a.map((v, j) => rnd(v + (b[j] - v) * e)), clamp = v => v < 0 ? 0 : v > 1 ? 1 : v;
 function prefetch(s, max) {
   if (s < 3 && scene < 3) return;
   if (next && (next.s !== s || next.k !== tier)) { drop(next.h); next = null; }
-  if (!next) next = {s: s, k: tier, h: [], sp: specs(s, tier)};
-  while (max-- > 0 && next.h.length < (next.sp.cap || next.sp.length) && MEM.info().internalFreeBytes >= LOAD[2])
-    next.h.push(reg(next.sp[next.h.length]));
+  if (!next) { const L = plist(s, tier); next = {s: s, k: tier, h: [], n: L.length, c: L.cap || L.length}; }
+  while (max-- > 0 && next.h.length < next.c && MEM.info().internalFreeBytes >= LOAD[2])
+    next.h.push(reg(s, next.h.length));
 }
 // fresh: drop the prefetched set too (tier change, recovery). The old set
 // goes before the rest registers: they overlap only as far as the
 // memory gate let the prefetch run.
 function enter(s, fresh) {
   // Act I's scenes share one plan set.
-  if (s < 3 && scene < 3 && live.length + pend.length) {
+  if (s < 3 && scene < 3 && PN) {
     scene = s; t = 0;
     return console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length + ' freed=0 registered=' + loaded);
   }
@@ -29,7 +33,7 @@ function enter(s, fresh) {
   prefetch(s, 0);
   const old = live.length;
   if (s === 7 && scene !== 7) ++sortie;
-  drop(live); live = next.h; pend = next.sp.slice(live.length); next = null; scene = s; t = 0;
+  drop(live); live = next.h; PN = next.n; next = null; scene = s; t = 0;
   console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length +
     ' freed=' + old + ' registered=' + loaded);
 }
