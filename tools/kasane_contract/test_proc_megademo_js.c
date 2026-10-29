@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
         "beginFrame(c,s){if(__procCalls.active!==null&&__procCalls.active.draws.length)"
         "throw Error('nested frame');"
         "__procCalls.active={backdrop:c,surface:s||0,draws:[]}},"
-        "draw(h,i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
+        "draw(h,...i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
         "__procCalls.active.draws.push([h,i])},"
         "commit(){__procCalls.frames.push(__procCalls.active);__procCalls.active=null},"
         /* pocket.shapes' segments (shape_draw_shim.c). */
@@ -242,10 +242,11 @@ int main(int argc, char **argv) {
     /* Plans are registered per scene, the next scene's over the last frames
      * of the running one. The app opens with WAKE (104 frames, no plans:
      * Tama's backlit silhouette, drawn by pocket.shapes until frame 74, then
-     * nothing), which prefetches Act I's six HUD plans; Act I's three scenes
-     * (CALL 64, ROUTE 56, VOYAGE 96 frames) share them and draw the world
-     * with pocket.shapes, and VOYAGE prefetches eight of TWIST's fifteen (the river
-     * and the stars; its negative registers in TWIST). */
+     * nothing), which prefetches Act I's set: its six HUD plans and the first
+     * eight of TWIST's sixteen (the river and the stars), registered while
+     * the heap is low and handed to TWIST at the cut (its negative and the
+     * streaks register in TWIST). Act I's three scenes (CALL 64, ROUTE 56,
+     * VOYAGE 96 frames) draw the HUD plans and the world with pocket.shapes. */
     static const char playback_check[] =
         /* Nothing is registered or allocated while the app evaluates
          * (docs/apps/megademo-story.md). */
@@ -255,7 +256,7 @@ int main(int argc, char **argv) {
         "for(let i=0;i<104;i++){frame();const f=__procCalls.frames[i];"
         "if(!f||(f.draws.length>0)!==(i<74))throw Error('WAKE frame '+i)}"
         "__procCalls.frames.length=0;"
-        "frame();if(__procCalls.registered.length!==6||__procCalls.live.size!==6)"
+        "frame();if(__procCalls.registered.length!==14||__procCalls.live.size!==14)"
         "throw Error('registration by the first Act I frame');"
         "for(const r of __procCalls.registered)if(r.batch!==undefined)throw Error('unexpected batch');"
         "for(let tick=1;tick<216;tick++)frame();"

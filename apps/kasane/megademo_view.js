@@ -1,5 +1,5 @@
-// MEGADEMO chunk 4: the pocket.kasane view's tables (room, HUD, story text,
-// WAKE's face). Loaded only on the device (or a host with pocket.kasane).
+// MEGADEMO chunk: the pocket.kasane view's resources and tables (room,
+// HUD, story text). Loaded only with pocket.kasane.
 'use strict';
 const V = pocket.kasane, H = V.procedural, G = V.grid;
 // Surface 0's frames sized for 768 segments (the busiest frame, TWIST at
@@ -14,7 +14,6 @@ try { res0 = H.resource({maxSegments: 768}); } catch (e) { res0 = H.resource(); 
 const monRes = G.resource(G.registerResizeSource({source: res0, width: 112, height: 63}));
 const pets = V.resource('pets');
 const lives = V.cache.create([[0, 2, 9, 7], [0, 0, 2, 2], [7, 0, 9, 2]].map(b => ({bounds: b, color: 0x14f53cff})));
-const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
 // Loader: the next scene registers from LOAD[0] frames before the switch,
 // LOAD[1] plans a frame, while the internal heap has LOAD[2] bytes free
 // (a registration dips it by up to 14 KB on the device); the rest
@@ -42,16 +41,13 @@ const CHAP = [0, 0, 0, 1, 2, 3, 4, 5], TITLE = 'I BRIEFING|II CROSSING|III LETHE
   INK = [0, 0xf848ffff, 0x18f038ff, 0xff6838ff];
 // Narration per scene: "bounds|first frame|line|..." (the briefing has none).
 const SAY = [, , , '6 122 234 133|10|CROSSING THE RIVER|96|DEEPER|180|INTO LETHE',
-'150 121 236 132|10|TAMA: ONLINE|40|EVADE!|72|TARGET LOCKED',
+'150 121 236 132|10|TAMA: ONLINE|40|EVADE!|72|TARGET LOCKED|96|FIRE!|116|DIRECT HIT|164|CORE AHEAD',
 '6 106 234 117|10|THE SOURCE OF THE SIGNAL|56|THE SIGNAL OPENS ITS EYE|84|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|115|AND BREAKS'];
 // Tama sits on the cushion.
 const HOME = [196, 70, 228, 102];
-// The nights: night() is 1 on the first (each WAKE adds one). Everything
-// that counts them reads it: the wall's tally (a mark a night), the
-// sortie number (742 on the first), and the memory clouding with them
-// (LETHE's letters turn to digits, more each night after the first).
-let sortie = 741;
-const night = () => sortie - 741, TALLY = 20;
+// The wall's tally shows 20 nights (night(), megademo_act2.js; build()); the
+// memory clouds with them (LETHE's letters turn to digits, more each night
+// after the first).
 const GB = {E: '3', I: '1', O: '0', A: '4', S: '5', T: '7'};
 const gb = s => s.replace(/[EIOAST]/g, (c, i) =>
   (M.sin(i * 12.9898 + sortie * 78.233) * 43758.5453 % 1 + 1) % 1 < M.min(.5, (night() - 1) * .08) ? GB[c] : c);

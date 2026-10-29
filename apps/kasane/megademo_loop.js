@@ -1,8 +1,13 @@
-// MEGADEMO chunk 6: the first scene (WAKE, the prologue) and frame().
+// MEGADEMO chunk: the draw plumbing and frame(). WAKE plays first.
 'use strict';
 enter(7);
 let boot = true;
-const DRAW = (k, a) => { const h = live[k]; if (h) H.draw(h, a); };
+// A plan's draw, skipped until the plan is registered; nd counts draws.
+E = (k, a, b, c, d, e, f, g, h) => { const p = live[k]; ++nd; if (p) H.draw(p, a, b, c, d, e, f, g, h); };
+BG = b => { H.beginFrame(b); };
+// The set per scene and tier, rebuilt (and patched in the same
+// transaction) when the key changes.
+const PATCH = tx => patch(tx), REBUILD = tx => { build(tx, zoom > 0); patch(tx); };
 globalThis.frame = function (buttons) {
   buttons |= 0;
   if (boot) {
@@ -11,7 +16,7 @@ globalThis.frame = function (buttons) {
     // CORE build found no 10 KB holes on the device, 2026-10-28).
     boot = false;
     H.beginFrame(0);
-    while (pend.length) live.push(reg(pend.shift()));
+    while (live.length < PN) live.push(reg(scene, live.length));
   }
   const press = buttons & ~held;
   held = buttons;
@@ -27,48 +32,36 @@ globalThis.frame = function (buttons) {
   if (scene === 7 && (t < 2 || t === WCUT) && !pin) { target = t === WCUT ? ZOOM : 0; spd = ZOOM; }
   if (!scene && t === 14 && !pin) { target = 0; spd = 2; }
   zoom += M.max(-spd, M.min(spd, target - zoom));
-  let f = null;
   try {
     // UP/DOWN: load tier. LEFT/RIGHT: previous/next scene.
     const k = tier + (press & 0x10 ? 1 : press & 0x40 ? -1 : 0);
     if (k !== tier && k >= 0 && k < KN.length) { tier = k; enter(scene, 1); }
     if (press & 0xa0) enter((scene + (press & 0x20 ? 1 : NAMES.length - 1)) % NAMES.length);
-    else if (t >= PLAY[scene]) enter((scene + 1) % NAMES.length);
+    else if (t >= LEN[scene]) enter((scene + 1) % NAMES.length);
     // A plan decodes in ~13 ms on the device: one a frame, this scene's
     // first, then the next scene's over the last frames. Before the
     // frame: a park here must not show a new image under the old view.
     let b = LOAD[1];
-    for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
-    if (b && t >= PLAY[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
-    // WAKE and Act I draw as they go (pocket.shapes: no list kept), so
-    // their frame begins first; TWIST draws over its plans in post().
-    if (scene === 7 || scene < 3) {
-      H.beginFrame(scene === 7 ? wakeB(t % LEN[7]) : briefB(scene, t));
-      f = frameOf(scene, tier, t % LEN[scene], DRAW);
-    } else {
-      f = frameOf(scene, tier, t % LEN[scene], DRAW);
-      H.beginFrame(f.b);
-      for (let i = 0; i < f.d.length; ++i) DRAW(f.d[i][0], f.d[i][1]);
-      if (f.post) f.post();
-    }
+    for (; b > 0 && live.length < PN; --b) live.push(reg(scene, live.length));
+    if (b && t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
+    nd = 0;
+    play(scene, tier, t);
     H.commit();
   } catch (e) {
     if (!tier) throw e;
     --tier;
     console.log('MEGADEMO DEGRADE tier=' + tier + ' ' + e);
     enter(scene, 1);
-    f = null;
+    TGX = NaN;
   }
-  // A set per scene and tier, rebuilt when the room comes into view.
-  const room = zoom > 0, key = scene + 8 * tier + 64 * room;
+  const key = scene + 8 * tier + 64 * (zoom > 0);
   if (built !== key) {
-    // Same tx: a scene's first frame must not show build()'s defaults.
-    V.replace(tx => (build(tx, room), patch(tx, f)));
+    V.replace(REBUILD);
     built = key;
   } else {
     // The set built at t = 0 has been presented by now.
     if (t === 1) console.log('MEGADEMO VIEW ' + NAMES[scene] + ' commands=' + V.stats().displayed.commands);
-    V.patch(tx => patch(tx, f));
+    V.patch(PATCH);
   }
   if ((zoom === ZOOM) !== fixed) {
     fixed = !fixed;

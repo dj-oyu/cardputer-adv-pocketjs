@@ -288,9 +288,11 @@ def summarize_turns(turns, jheap, visits) -> None:
 W, H = 240, 135
 # Distinct host frames per scene (the app holds each news beat for two
 # beats, so a news frame t matches host frame t % 16).
-LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 128, "ZENITH": 96, "CORE": 140, "LOST": 24,
+# (TWIST and ZENITH as of 2026-10-29; the NEWS entries predate Act I's
+# pocket.shapes rewrite and still need updating.)
+LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 240, "ZENITH": 192, "CORE": 140, "LOST": 24,
         "WAKE": 104}
-TOTAL = {"NEWS0": 5, "NEWS1": 5, "NEWS2": 5, "TWIST": 8, "ZENITH": 16, "CORE": 7, "LOST": 2, "WAKE": 4}
+TOTAL = {"NEWS0": 5, "NEWS1": 5, "NEWS2": 5, "TWIST": 16, "ZENITH": 17, "CORE": 7, "LOST": 2, "WAKE": 4}
 INDEX = {"NEWS0": 0, "NEWS1": 1, "NEWS2": 2, "TWIST": 3, "ZENITH": 4, "CORE": 5, "LOST": 6, "WAKE": 7}
 # HUD rectangles over the full-screen procedural image (x0, y0, x1, y1), with
 # the rotated radar's swept extent; pixels inside are not compared. The

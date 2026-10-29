@@ -1,16 +1,19 @@
-// MEGADEMO chunk 1 (proc_megademo.js loads it): the load tiers and the plan
-// text decoder with Act II's templates. (Act I draws with pocket.shapes,
-// megademo_brief.js; its old VM programs are the contract tests' workload,
-// tools/kasane_contract/proc_megademo_news_ref.js.)
+// MEGADEMO chunk 1: shared maths, the load tiers, the plan text decoder and
+// the plan templates. Every distinct name (global or local) is a resident
+// atom (~60 B): the chunks reuse short names and write out numbers used
+// once (docs/apps/megademo-story.md, 2026-10-29).
 'use strict';
-const f32 = Math.fround;
-// ---- Act II. Apple II hi-res palette; scene cost is set only in KN.
-const WH = 0xffff, VI = 0xfa3f, GR = 0x17a7, BL = 0x167f, OR = 0xfb47;
+const M = Math, rnd = M.round, PI = M.PI;
+const ramp = (t, a, b) => t <= a ? 0 : t >= b ? 1 : (t - a) / (b - a), smooth = u => u * u * (3 - 2 * u);
+// Apple II hi-res palette (violet 0xfa3f, green 0x17a7, blue 0x167f inline).
+const WH = 0xffff, OR = 0xfb47;
+// Scenes draw through E(plan, inputs...) after BG(backdrop): the loop's
+// draw (numbers, no array per draw), or procMegademo.frame()'s list.
+let E = null, BG = null;
 // [LIGHT, MID, HEAVY]. c: TWIST corridor (n frames, r ratio, m rungs per
 // frame, s arch segments, kf/ka first frame/arch, D twist); z: ZENITH;
 // k: CORE (r rays a draw, d ray draws, n noise lines). Derivation:
-// docs/kasane/megademo-limit-scenes.md, megademo-device-limits.md,
-// docs/apps/megademo-story.md (CORE).
+// docs/kasane/megademo-limit-scenes.md, megademo-device-limits.md.
 // TWIST and ZENITH hold the display rate at HEAVY's load, so MID shares it.
 const CH = {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 3, D: 6},
   ZH = {st: 60, gl: 14, ln: 15, cr: 3, cc: 8, sa: 4, ts: 16, rr: 4};
@@ -20,39 +23,45 @@ const KN = [
   {c: CH, z: ZH, k: {r: 40, d: 1, n: 24}},
   {c: CH, z: ZH, k: {r: 40, d: 2, n: 40}}
 ];
-// Programs are text, decoded by one function (a generator function per
-// plan costs guest heap at compile time). A letter per ksn_proc_op in
-// opcode order, then its fields; $n is an argument. X x,y,zr,zi,zn,t0,t1,z0
-// is (x,y) *= z in place (zn = -zi, z0 reads zero); U n,o loads inputs.
-const OPS = 'SIAMNREVPLQBplC';
-const FIELDS = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'];
-function prog(src, arg) {
-  const c = [], w = src.split(' ');
-  for (let i = 0; i < w.length; ++i) {
-    const t = w[i], v = t.slice(1).split(',').map(x => x[0] === '$' ? arg[x[1]] : +x);
-    if (t[0] === 'U') {
-      for (let j = 0; j < v[0]; ++j) c.push([1, (v[1] || 0) + j, j, 0, 0, 0]);
-    } else if (t[0] === 'X') {
-      const x = v[0], y = v[1], r = v[2], a = v[5], b = v[6];
-      c.push([3, a, x, r, 0, 0], [3, b, y, v[4], 0, 0], [2, a, a, b, 0, 0], [3, b, x, v[3], 0, 0],
-        [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, v[7], 0, 0]);
+// Programs are text, decoded by one function. A letter per ksn_proc_op in
+// opcode order, then its fields: f lists the row slot of each, a digit
+// for a register (one hex character), a letter for a number (b = 2, d = 4,
+// e = 5; comma-separated, $n is an argument). X x y r zi zn t0 t1 z0 is
+// (x, y) *= z in place (registers; z0 reads zero); Un[o] loads n inputs
+// from register o.
+const hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };
+function prog(S, A) {
+  const c = [];
+  for (let p = 0, q = 0; p < S.length; p = q + 1) {
+    q = S.indexOf(' ', p);
+    if (q < 0) q = S.length;
+    const o = S[p];
+    if (o === 'U') {
+      for (let j = 0, n = hx(S, p + 1), b = q > p + 2 ? hx(S, p + 2) : 0; j < n; ++j) c.push([1, b + j, j, 0, 0, 0]);
+    } else if (o === 'X') {
+      const x = hx(S, p + 1), y = hx(S, p + 2), r = hx(S, p + 3), a = hx(S, p + 6), b = hx(S, p + 7);
+      c.push([3, a, x, r, 0, 0], [3, b, y, hx(S, p + 5), 0, 0], [2, a, a, b, 0, 0], [3, b, x, hx(S, p + 4), 0, 0],
+        [3, y, y, r, 0, 0], [2, y, y, b, 0, 0], [2, x, a, hx(S, p + 8), 0, 0]);
     } else {
-      const o = OPS.indexOf(t[0]), f = FIELDS[o], row = [o, 0, 0, 0, 0, 0];
-      for (let j = 0; j < f.length; ++j) row[+f[j]] = v[j];
-      row[4] = f32(row[4]);
-      c.push(row);
+      const k = 'SIAMNREVPLQBplC'.indexOf(o), R = [k, 0, 0, 0, 0, 0],
+        f = ['1d', '12', '123', '123', '12', 'b', '', '23', '23e', '23e', '2', '23', '123', '123', 'be'][k];
+      let i = p + 1, m = null;
+      for (let j = 0; j < f.length; ++j) {
+        const r = f.charCodeAt(j);
+        if (r < 58) R[r - 48] = hx(S, i++);
+        else {
+          if (!m) m = S.slice(i, q).split(',');
+          const x = m.shift();
+          R[r - 96] = x[0] === '$' ? A[x[1]] : +x;
+        }
+      }
+      R[4] = M.fround(R[4]);
+      c.push(R);
     }
   }
   if (c.length > 64) throw RangeError('64 instructions');
   return c;
 }
-// fr frames (16 registers), ra two polylines, ru rungs, ar CUBIC arches,
-// st stars, gr ground, la lanes, ci skyline, sa octahedra (one path over
-// 12 edges), tr CUBIC trails, sh ship flame, rd/sw radar rings and sweep
-// (drawn in the image's corner: a second surface cost two 10 KB frames), ln a line; CORE:
-// tri a triangle (colour from input 6), qd a closed quad, sg two segments,
-// ry rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT). WAKE
-// has no plans (pocket.shapes draws it).
 const T = {
   // Act I's HUD (megademo_brief.js). cv/ch: n ticks of length L across
   // the line at, from p0 every sp (inputs at, L, p0, sp, n), drawn across
@@ -61,33 +70,49 @@ const T = {
   // cw: the carrier (y0, amplitude, phase, depth and phase of its
   // modulation). sp: a spectrum's 15 bars, one skyline (noise phase,
   // gain). sc: a Lissajous 3:2 (phase).
-  cv: 'U5 A5,0,1 Q4 V0,2 L5,2,$0 A2,2,3 E',
-  ch: 'U5 A5,0,1 Q4 V2,0 L2,5,$0 A2,2,3 E',
-  eg: 'U6 S6,6 S7,2.4 S8,1 S9,.0981748 R48 M10,2,3 N10,10 M11,2,2 M11,11,4 N11,11 A10,10,11 M11,2,9 N11,11 \
-M11,11,11 M11,11,11 M11,11,11 M11,11,11 A10,10,11 A10,10,11 M10,10,1 A10,10,0 l5,6,10 A6,6,7 A2,2,8 E',
-  cw: 'U5 S5,0 S6,5 S7,.55 S8,.13 S9,0 S10,1 R49 M11,9,7 A11,11,2 N11,11 M12,9,8 A12,12,4 N12,12 M12,12,3 \
-A12,12,10 M11,11,12 M11,11,1 A11,11,0 L5,11,$0 A5,5,6 A9,9,10 E',
-  sp: 'U2 S2,128 S3,131 S4,28.6 S5,-1.3 S6,0 S7,7.31 S8,3 S9,1 S10,-1 R15 A11,6,0 N11,11 M11,11,11 M11,11,4 \
-M11,11,1 A11,11,9 A11,11,9 M11,11,10 A11,11,3 L2,3,$0 L2,11,$0 A2,2,8 L2,11,$0 L2,3,$0 A2,2,9 A6,6,7 A4,4,5 E',
-  sc: 'U1 S1,0 S2,.4712 S3,0 S4,.3142 S5,214 S6,18 S7,119 S8,11 R41 A9,1,0 N9,9 M9,9,6 A9,9,5 N10,3 M10,10,8 \
-A10,10,7 L9,10,$0 A1,1,2 A3,3,4 E',
-  fr: 'U6 I8,6 I9,7 S13,-1 M10,9,13 M14,2,13 A6,0,4 A6,6,14 M14,3,13 A7,1,5 A7,7,14 S11,120 S12,67 R$0 A13,11,0 A14,12,1 V13,14 A13,11,2 A14,12,3 L13,14,$1 A13,11,4 A14,12,5 L13,14,$1 A13,11,6 A14,12,7 L13,14,$1 A13,11,0 A14,12,1 L13,14,$1 X0,1,8,9,10,13,14,15 X2,3,8,9,10,13,14,15 X4,5,8,9,10,13,14,15 X6,7,8,9,10,13,14,15 E',
-  ra: 'U6 S9,-1 M6,5,9 S7,120 S8,67 R$0 A9,7,0 A10,8,1 V9,10 X0,1,4,5,6,9,10,11 A9,7,0 A10,8,1 L9,10,$1 A9,7,2 A10,8,3 V9,10 X2,3,4,5,6,9,10,11 A9,7,2 A10,8,3 L9,10,$1 E',
-  ru: 'U6 S14,-1 M6,5,14 S7,120 S8,67 S12,$1 S13,$2 R$0 A9,7,0 A10,8,1 V9,10 A9,7,2 A10,8,3 l12,9,10 M12,12,14 A12,12,13 X0,1,4,5,6,9,10,11 X2,3,4,5,6,9,10,11 E',
-  ar: 'U8,8 R$0 S4,120 S5,67 A0,4,8 A1,5,9 A6,4,10 A7,5,11 A2,0,12 A3,1,13 A4,6,12 A5,7,13 C$1,$2 S3,-1 M2,15,3 S3,0 X8,9,14,15,2,0,1,3 X10,11,14,15,2,0,1,3 X12,13,14,15,2,0,1,3 E',
-  st: 'U7 S8,1 S9,1.618034 S14,.6 S15,-.4 R$0 A7,7,8 A10,7,4 N10,10 M11,7,9 N11,11 M11,11,14 A11,11,15 M12,10,0 A12,12,5 M13,11,2 A12,12,13 M13,10,1 A13,13,6 M10,11,3 A13,13,10 P12,13,65535 E',
-  gr: 'U8 S8,1.32 S9,-1 S14,6055 S15,70382 Q7 M10,2,6 A10,10,0 M11,3,6 A11,11,1 A12,10,4 A13,11,5 V12,13 M12,4,9 A12,12,10 M13,5,9 A13,13,11 l14,12,13 M14,14,9 A14,14,15 M6,6,8 E',
-  la: 'U8 S8,.22 S9,1.5 R$0 M11,4,6 A11,11,2 M12,5,6 A12,12,3 M13,11,9 A13,13,0 M14,12,9 A14,14,1 V13,14 M13,11,7 A13,13,0 M14,12,7 A14,14,1 L13,14,5759 A6,6,8 E',
-  ci: 'U8 S13,$2 S14,1.6 S15,-1 R$0 S8,-1.6 M11,8,4 A11,11,2 M9,11,6 A9,9,0 M11,8,5 A11,11,3 M10,11,6 A10,10,1 V9,10 R$1 M12,8,6 N12,12 M12,12,12 M12,12,7 M12,12,6 M12,12,15 M11,8,4 A11,11,2 M9,11,6 A9,9,0 M11,8,5 A11,11,3 M10,11,6 A10,10,1 M11,12,2 A9,9,11 M11,12,3 A10,10,11 L9,10,64063 A8,8,13 M11,8,4 A11,11,2 M9,11,6 A9,9,0 M11,8,5 A11,11,3 M10,11,6 A10,10,1 M11,12,2 A9,9,11 M11,12,3 A10,10,11 L9,10,64063 E M6,6,14 E',
-  sa: 'U8 S13,-1 S10,1.3 M8,7,10 M9,8,13 M12,6,5 M7,6,4 M6,5,13 M14,4,13 M15,12,13 R$0 A10,1,9 V0,10 A10,0,4 A11,1,12 L10,11,65535 A10,1,8 L0,10,64063 A10,0,6 A11,1,7 L10,11,65535 A10,1,9 L0,10,64063 A10,0,14 A11,1,15 L10,11,65535 A10,1,8 L0,10,64063 M11,6,13 A10,0,11 M11,7,13 A11,1,11 L10,11,65535 A10,0,4 A11,1,12 L10,11,65535 A10,0,6 A11,1,7 L10,11,65535 A10,0,14 A11,1,15 L10,11,65535 M11,6,13 A10,0,11 M11,7,13 A11,1,11 L10,11,65535 A10,1,9 L0,10,64063 A0,0,2 A1,1,3 E',
-  tr: 'U8,8 R$0 S0,0 A0,0,8 S1,0 A1,1,9 S2,0 A2,2,8 A3,9,15 S4,0 A4,4,10 A5,11,14 S6,0 A6,6,10 S7,0 A7,7,11 C$1,64327 A10,10,12 A11,11,13 E',
-  sh: 'U4 V0,1 L2,3,64327',
-  ln: 'U4 V0,1 L2,3,$0',
-  tri: 'U7 V0,1 l6,2,3 l6,4,5 l6,0,1',
-  qd: 'U8 V0,1 L2,3,$0 L4,5,$0 L6,7,$0 L0,1,$0',
-  sg: 'U8 V0,1 L2,3,$0 V4,5 L6,7,$0',
-  ry: 'U8 S8,1.5707963 Q5 A9,4,8 N9,9 N10,4 M11,9,2 A11,11,0 M12,10,2 A12,12,1 V11,12 M11,9,3 A11,11,0 M12,10,3 A12,12,1 l7,11,12 A4,4,6 E',
-  nz: 'U3 S3,0 S4,1 S5,67 S6,120 S7,7.31 S8,3.97 R$0 A3,3,4 B3,1 M9,3,7 A9,9,0 N9,9 M9,9,5 A9,9,5 M10,3,8 A10,10,0 N10,10 M10,10,6 A10,10,6 V10,9 A11,10,2 L11,9,33808 E',
-  rd: 'U3 S4,1.5707963 S5,.3926991 S6,1.45 R$0 S3,0 A8,3,4 N8,8 M8,8,2 A8,8,0 N9,3 M9,9,2 A9,9,1 V8,9 R16 A3,3,5 A8,3,4 N8,8 M8,8,2 A8,8,0 N9,3 M9,9,2 A9,9,1 L8,9,6055 E M2,2,6 E S10,-1 M11,2,10 A12,11,0 A13,2,0 V12,1 L13,1,6055 A12,11,1 A13,2,1 V0,12 L0,13,6055',
-  sw: 'S8,$1 S9,$2 V8,9 I0,0 I1,1 L0,1,65535 I2,2 I3,3 I4,4 I5,5 S10,65535 S11,129862 S12,-1 R$0 p10,2,3 A2,2,4 A3,3,5 M10,10,12 A10,10,11 E',
+  cv: 'U5 A501 Q4 V02 L52$0 A223 E',
+  ch: 'U5 A501 Q4 V20 L25$0 A223 E',
+  eg: 'U6 S66 S72.4 S81 S9.0981748 R48 Ma23 Naa Mb22 Mbb4 Nbb Aaab Mb29 Nbb Mbbb Mbbb Mbbb Mbbb Aaab Aaab Maa1 \
+Aaa0 l56a A667 A228 E',
+  cw: 'U5 S50 S65 S7.55 S8.13 S90 Sa1 R49 Mb97 Abb2 Nbb Mc98 Acc4 Ncc Mcc3 Acca Mbbc Mbb1 Abb0 L5b$0 A556 A99a \
+E',
+  sp: 'U2 S2128 S3131 S428.6 S5-1.3 S60 S77.31 S83 S91 Sa-1 R15 Ab60 Nbb Mbbb Mbb4 Mbb1 Abb9 Abb9 Mbba Abb3 \
+L23$0 L2b$0 A228 L2b$0 L23$0 A229 A667 A445 E',
+  sc: 'U1 S10 S2.4712 S30 S4.3142 S5214 S618 S7119 S811 R41 A910 N99 M996 A995 Na3 Maa8 Aaa7 L9a$0 A112 A334 E',
+  // TWIST: fr frames (16 registers), ra two polylines, ru rungs, ar CUBIC
+  // arches. ZENITH: st stars, gr ground, la lanes, ci skyline, sa octahedra
+  // (one path over 12 edges), tr CUBIC trails, sh ship flame, rd/sw radar
+  // rings and sweep (in the image's corner), ln a line. CORE: tri a
+  // triangle (colour from input 6), qd a closed quad, sg two segments, ry
+  // rays round a centre (REPEAT_REG), nz scan noise (BREAK_IF_GT).
+  fr: 'U6 I86 I97 Sd-1 Ma9d Me2d A604 A66e Me3d A715 A77e Sb120 Sc67 R$0 Adb0 Aec1 Vde Adb2 Aec3 Lde$1 Adb4 \
+Aec5 Lde$1 Adb6 Aec7 Lde$1 Adb0 Aec1 Lde$1 X0189adef X2389adef X4589adef X6789adef E',
+  ra: 'U6 S9-1 M659 S7120 S867 R$0 A970 Aa81 V9a X014569ab A970 Aa81 L9a$1 A972 Aa83 V9a X234569ab A972 Aa83 \
+L9a$1 E',
+  ru: 'U6 Se-1 M65e S7120 S867 Sc$1 Sd$2 R$0 A970 Aa81 V9a A972 Aa83 lc9a Mcce Accd X014569ab X234569ab E',
+  ar: 'U88 R$0 S4120 S567 A048 A159 A64a A75b A20c A31d A46c A57d C$1,$2 S3-1 M2f3 S30 X89ef2013 Xabef2013 \
+Xcdef2013 E',
+  st: 'U7 S81 S91.618034 Se.6 Sf-.4 R$0 A778 Aa74 Naa Mb79 Nbb Mbbe Abbf Mca0 Acc5 Mdb2 Accd Mda1 Add6 Mab3 \
+Adda Pcd65535 E',
+  gr: 'U8 S81.32 S9-1 Se6055 Sf70382 Q7 Ma26 Aaa0 Mb36 Abb1 Aca4 Adb5 Vcd Mc49 Acca Md59 Addb lecd Mee9 Aeef \
+M668 E',
+  la: 'U8 S8.22 S91.5 R$0 Mb46 Abb2 Mc56 Acc3 Mdb9 Add0 Mec9 Aee1 Vde Mdb7 Add0 Mec7 Aee1 Lde5759 A668 E',
+  ci: 'U8 Sd$2 Se1.6 Sf-1 R$0 S8-1.6 Mb84 Abb2 M9b6 A990 Mb85 Abb3 Mab6 Aaa1 V9a R$1 Mc86 Ncc Mccc Mcc7 Mcc6 \
+Mccf Mb84 Abb2 M9b6 A990 Mb85 Abb3 Mab6 Aaa1 Mbc2 A99b Mbc3 Aaab L9a64063 A88d Mb84 Abb2 M9b6 A990 Mb85 \
+Abb3 Mab6 Aaa1 Mbc2 A99b Mbc3 Aaab L9a64063 E M66e E',
+  sa: 'U8 Sd-1 Sa1.3 M87a M98d Mc65 M764 M65d Me4d Mfcd R$0 Aa19 V0a Aa04 Ab1c Lab65535 Aa18 L0a64063 Aa06 Ab17 \
+Lab65535 Aa19 L0a64063 Aa0e Ab1f Lab65535 Aa18 L0a64063 Mb6d Aa0b Mb7d Ab1b Lab65535 Aa04 Ab1c Lab65535 \
+Aa06 Ab17 Lab65535 Aa0e Ab1f Lab65535 Mb6d Aa0b Mb7d Ab1b Lab65535 Aa19 L0a64063 A002 A113 E',
+  tr: 'U88 R$0 S00 A008 S10 A119 S20 A228 A39f S40 A44a A5be S60 A66a S70 A77b C$1,64327 Aaac Abbd E',
+  sh: 'U4 V01 L2364327',
+  ln: 'U4 V01 L23$0',
+  tri: 'U7 V01 l623 l645 l601',
+  qd: 'U8 V01 L23$0 L45$0 L67$0 L01$0',
+  sg: 'U8 V01 L23$0 V45 L67$0',
+  ry: 'U8 S81.5707963 Q5 A948 N99 Na4 Mb92 Abb0 Mca2 Acc1 Vbc Mb93 Abb0 Mca3 Acc1 l7bc A446 E',
+  nz: 'U3 S30 S41 S567 S6120 S77.31 S83.97 R$0 A334 B31 M937 A990 N99 M995 A995 Ma38 Aaa0 Naa Maa6 Aaa6 Va9 \
+Aba2 Lb933808 E',
+  rd: 'U3 S41.5707963 S5.3926991 S61.45 R$0 S30 A834 N88 M882 A880 N93 M992 A991 V89 R16 A335 A834 N88 M882 \
+A880 N93 M992 A991 L896055 E M226 E Sa-1 Mb2a Acb0 Ad20 Vc1 Ld16055 Acb1 Ad21 V0c L0d6055',
+  sw: 'S8$1 S9$2 V89 I00 I11 L0165535 I22 I33 I44 I55 Sa65535 Sb129862 Sc-1 R$0 pa23 A224 A335 Maac Aaab E'
 };
