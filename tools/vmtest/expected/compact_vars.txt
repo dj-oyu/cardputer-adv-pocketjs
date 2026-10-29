@@ -1,0 +1,13 @@
+arg+local 21 22
+arg written 113
+loop 0:0,1:1,2:4,3:9
+mixed 37
+chain om o!m?
+rec 54321
+gen 1,2,3
+arguments via-arguments
+class k1 k2 k3
+tdz ReferenceError lexical variable is not initialized
+tdz local ReferenceError lexical variable is not initialized
+async changed-while-suspended
+exit=0
