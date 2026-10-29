@@ -140,7 +140,7 @@ function river(t, emit) {
   WEMIT = emit || null; BW = 0;
   // Memories at 20, 64 and 150 (after the white frame), 40 frames each;
   // pale, dim while far (the storyboard's colours).
-  const q = t < 64 ? 0 : t < 150 ? 1 : 2, u = (t - [20, 64, 150][q]) / 40, mc = u < .3 ? 0x8c71 : 0xe71a;
+  const q = t < 64 ? 0 : t < 150 ? 1 : 2, u = (t - [20, 64, 150][q]) / 40, mc = (u < .3 ? 0x8c71 : 0xe71a) ^ (t > 121 && t < 196 ? 0xffff : 0);
   if (u >= 0 && u < 1) {
     // Memory q's strokes into WM (a break after each).
     let n = 0, x = 0;

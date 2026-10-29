@@ -23,11 +23,12 @@ const lerp = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
 // TWIST: frames, rails, arches, planks, 2nd rails, 2 wall courses, in the
 // river's violets (the storyboard: one colour on near-black); planks
 // alternate two (the plan swaps c for (c + c2) - c).
+// x: the negative (past the wall), the same plans in inverted colours.
 const RV = [0xc35f, 0x7a1a, 0xde5f, 0x5954];
-function corrList(k) {
-  const n = k.n;
-  return [['fr', n - k.kf, RV[0]], ['ra', n, RV[1]], ['ar', n - k.ka, k.s, RV[2]], ['ru', n * k.m, RV[3], RV[3] + RV[1]],
-    ['ra', n, RV[1]], ['ra', n, RV[3]], ['ra', n, RV[3]]];
+function corrList(k, x) {
+  const n = k.n, V = RV.map(c => c ^ x);
+  return [['fr', n - k.kf, V[0]], ['ra', n, V[1]], ['ar', n - k.ka, k.s, V[2]], ['ru', n * k.m, V[3], V[3] + V[1]],
+    ['ra', n, V[1]], ['ra', n, V[3]], ['ra', n, V[3]]];
 }
 // The corridor: every point of a cross-section is multiplied by z per frame.
 // The first frame and arch drawn (kf, ka) keep their place as r changes.
@@ -171,7 +172,7 @@ const A2 = {
   // Plan list of scene i: [template, args...]; sh carries points.
   plans: function (i, tier) {
     const k = KN[tier], z = k.z;
-    if (!i) return corrList(k.c).concat([['st', z.st]]);
+    if (!i) return corrList(k.c, 0).concat([['st', z.st]], corrList(k.c, 0xffff));
     if (i === 2) return [['tri'], ['qd', GR], ['qd', OR], ['sg', GR], ['ry'], ['st', z.st], ['nz', k.k.n]];
     if (i === 3) return [['ln', WH], ['ln', BL]];
     if (i === 4) return [];
@@ -192,12 +193,13 @@ const A2 = {
       // 240 frames: the storyboard's lines at 2 frames a letter, each held a
       // second. Near-black going violet towards the white frame (120),
       // then black for the stars.
-      // The wall (river(), 92..119) hits at 120: two white frames, then the
-      // light fades through lavender while the corridor comes back.
+      // The wall (river(), 92..119) hits at 120: two white frames, and past
+      // it the river is a negative (plans 8..14) until the stars.
       if (t === 120 || t === 121) return {b: WH, s: 0, d: []};
-      const e = (t - 200) / 40, g = e * e, b = t > 121 && t < 126 ? [0xdefb, 0xb59f, 0x7b3d, 0x4115][t - 122] :
-        t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045;
+      const e = (t - 200) / 40, g = e * e, ng = t > 121 && t < 196,
+        b = (t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045) ^ (ng ? 0xffff : 0);
       const d = corrDraws(k.c, t, 240, 1 / 6).filter(q => t < 220 || t < 232 && q[0] % 2 === 0);
+      if (ng) for (const q of d) q[0] += 8;
       if (e > 0) d.push([7, [190 * g, 0, 0, 70 * g, (t - 240) * .05, 120, 67]]);
       if (emit) return {b: b, s: 0, d: d, post: () => river(t, emit)};
       WD = d; river(t);
@@ -235,9 +237,13 @@ const A2 = {
 const NAMES = ['NEWS', 'NEWS', 'NEWS'].concat(A2.names), LEN = [64, 56, 96].concat(A2.len), PLAY = LEN;
 // One thunk per plan: the loader builds one program array at a time. Act I's
 // scenes share one set: its HUD (the world is pocket.shapes').
+// cap: how many the prefetch takes (TWIST's negative registers during
+// TWIST, not in VOYAGE's dive).
 function specs(s, tier) {
-  return (s > 2 ? A2.plans(s - 3, tier) : [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]]).map(e => () =>
+  const L = (s > 2 ? A2.plans(s - 3, tier) : [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]]).map(e => () =>
     [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null]);
+  if (s === 3) L.cap = 8;
+  return L;
 }
 // emit: draw as it goes (Act I, WAKE), or, for TWIST, the draws over its
 // plans in the result's post().

@@ -11,7 +11,7 @@ function prefetch(s, max) {
   if (s < 3 && scene < 3) return;
   if (next && (next.s !== s || next.k !== tier)) { drop(next.h); next = null; }
   if (!next) next = {s: s, k: tier, h: [], sp: specs(s, tier)};
-  while (max-- > 0 && next.h.length < next.sp.length && MEM.info().internalFreeBytes >= LOAD[2])
+  while (max-- > 0 && next.h.length < (next.sp.cap || next.sp.length) && MEM.info().internalFreeBytes >= LOAD[2])
     next.h.push(reg(next.sp[next.h.length]));
 }
 // fresh: drop the prefetched set too (tier change, recovery). The old set
@@ -173,8 +173,13 @@ function patch(tx, f) {
     if (!!g !== R.tgv) { R.tag.setVisible(tx, !!g); R.tgv = !!g; }
     return;
   }
-  // TWIST goes on from VOYAGE's last frame (no iris).
-  if (scene === 3) return;
+  // TWIST goes on from VOYAGE's last frame (no iris). Its lines go black
+  // in the negative past the wall (act2).
+  if (scene === 3) {
+    const ng = t > 121 && t < 196;
+    if (R.say && ng !== !!R.ng) { R.say.setColor(tx, ng ? 0x000000ff : 0xffffffff); R.ng = ng; }
+    return;
+  }
   if (scene > 5) return;
   // CORE's time stop: the HUD and the torn bands hold where they are.
   if (scene === 5 && t >= 100 && t < 112) return;

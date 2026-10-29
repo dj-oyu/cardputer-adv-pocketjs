@@ -244,7 +244,8 @@ int main(int argc, char **argv) {
      * Tama's backlit silhouette, drawn by pocket.shapes until frame 74, then
      * nothing), which prefetches Act I's six HUD plans; Act I's three scenes
      * (CALL 64, ROUTE 56, VOYAGE 96 frames) share them and draw the world
-     * with pocket.shapes, and VOYAGE prefetches TWIST's eight. */
+     * with pocket.shapes, and VOYAGE prefetches eight of TWIST's fifteen (the river
+     * and the stars; its negative registers in TWIST). */
     static const char playback_check[] =
         /* Nothing is registered or allocated while the app evaluates
          * (docs/apps/megademo-story.md). */
