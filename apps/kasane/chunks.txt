@@ -5,6 +5,10 @@
 # evaluate the same files in this order.
 app local.megademo
 act1   megademo_act1.js
+# Not a chunk: the plan templates, compiled into the firmware's built-in
+# plan table as kasane.<name> (tools/make_app_chunks.py). The host tests
+# evaluate it here, after act1.
+rom-text megademo_plans.js
 act2   megademo_act2.js
 set    megademo_set.js
 brief  megademo_brief.js

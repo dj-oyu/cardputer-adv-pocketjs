@@ -409,9 +409,9 @@ target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunk
 # the @planDecoder by the decoder, into build/generated/apps/<app>/ under the
 # same base name, so the symbol and the chunk table do not change. Editing
 # the chunk re-lowers it without a reconfigure. Only then does the build need
-# Node, 16 or later (docs/platform/build-environment.md); without @plan it
-# does not look for it.
-if(APP_CHUNK_LOWER)
+# Node, 16 or later (docs/platform/build-environment.md); without @plan (or a
+# chunks.txt rom-text line: MEGADEMO's templates) it does not look for it.
+if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
     find_program(POCKET_NODE node)
     set(_node_version "")
     if(POCKET_NODE)

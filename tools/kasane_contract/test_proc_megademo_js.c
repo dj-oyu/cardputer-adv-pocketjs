@@ -147,8 +147,11 @@ int main(int argc, char **argv) {
         "grid:{registerResizeSource(s){__procCalls.resize.push(s);return 76+__procCalls.resize.length},"
         "resource(h){if(h!==77&&h!==78)throw Error('resize handle');return {resized:h}}},procedural:{"
         "resource(){return {}},createSurface(){return 9},"
-        "register(p,b){const id=__procCalls.registered.length+1;"
-        "__procCalls.registered.push({program:p,batch:b});__procCalls.live.add(id);"
+        /* The app registers the firmware's built-in plans by name: */
+        /* register('kasane.<template>', args, points?). */
+        "register(p,a,b){const id=__procCalls.registered.length+1;"
+        "if(typeof p!=='string'||!p.startsWith('kasane.')||!Array.isArray(a))throw Error('register '+p);"
+        "__procCalls.registered.push({program:p,args:a,batch:b});__procCalls.live.add(id);"
         "if(__procCalls.live.size>__procCalls.peak)__procCalls.peak=__procCalls.live.size;return id},"
         "unregister(h){if(!__procCalls.live.delete(h))throw Error('stale '+h);__procCalls.unregistered++},"
         /* A beginFrame with nothing drawn yet restarts, as the native one

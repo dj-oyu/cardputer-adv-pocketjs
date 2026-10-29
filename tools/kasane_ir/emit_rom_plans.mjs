@@ -1,7 +1,7 @@
 // The firmware's built-in plan table: an app's @plan functions compiled to
 // const C (docs/kasane/flash-plan.md). Host only (Node 16 or later).
 //
-//   node tools/kasane_ir/emit_rom_plans.mjs OUT.c APP=FILE.js [APP=FILE.js ...]
+//   node tools/kasane_ir/emit_rom_plans.mjs OUT.c APP=FILE.js [APP=FILE.js | APP=text:FILE.js ...]
 //        [--symbol NAME] [--json OUT.json]
 //
 // Each plan becomes an entry named 'APP.name' (the id lower_plans.mjs --ids
@@ -78,6 +78,48 @@ export function romEntries(app, file) {
   return out;
 }
 
+// An app's text templates instead of @plan functions (MEGADEMO,
+// apps/kasane/megademo_plans.js, given as APP=text:FILE): the file defines
+// T (name -> template) and prog(text, args) -> rows, the decoder the app
+// shipped before its plans moved here; hx and M are given. Each template
+// becomes 'APP.name'. Its arguments are the $n it names (params = the
+// largest n + 1); a patch is a field that changes when one argument alone
+// changes, and must be field a, value or color. Every argument at once
+// must give the rows the patches give, or the build stops.
+export function textEntries(app, file) {
+  if (!/^[a-z][a-z0-9_]*$/.test(app)) throw new Error(`${app}: an app id is [a-z][a-z0-9_]*`);
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext('const M = Math, hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };\n' +
+    fs.readFileSync(file, 'utf8') + '\nglobalThis.__T = T; globalThis.__prog = prog;', ctx);
+  const T = ctx.__T, prog = (t, a) => ctx.__prog(t, a).map(r => r.map(Number)), out = [];
+  const SLOT = {2: FIELD.a, 4: FIELD.value, 5: FIELD.color};
+  for (const name of Object.keys(T)) {
+    const text = T[name], params = Math.max(0, ...[...text.matchAll(/\$(\d)/g)].map(m => +m[1] + 1));
+    if (params > PARAMS) throw new Error(`${app}.${name}: ${params} arguments (a plan takes ${PARAMS})`);
+    const zero = new Array(params).fill(0), rows = prog(text, zero);
+    if (rows.length < 1 || rows.length > CODE) throw new Error(`${app}.${name}: ${rows.length} instructions`);
+    const patch = [];
+    for (let n = 0; n < params; ++n) {
+      const a = zero.slice(); a[n] = 7;
+      prog(text, a).forEach((r, pc) => r.forEach((v, j) => {
+        if (Object.is(v, rows[pc][j])) return;
+        if (!(j in SLOT)) throw new Error(`${app}.${name}: $${n} in slot ${j} of instruction ${pc}`);
+        patch.push({pc, field: SLOT[j], param: n});
+      }));
+    }
+    patch.sort((x, y) => x.pc - y.pc || x.field - y.field);
+    // All arguments together, against the patches applied to the zero rows.
+    const test = [3, 5, 7, 11, 13, 17, 19, 23].slice(0, params), got = prog(text, test),
+      want = rows.map(r => r.slice());
+    for (const p of patch) want[p.pc][p.field === FIELD.a ? 2 : p.field === FIELD.value ? 4 : 5] = test[p.param];
+    if (got.some((r, i) => r.some((x, j) => !Object.is(x, j === 4 ? Math.fround(want[i][j]) : want[i][j]))))
+      throw new Error(`${app}.${name}: its arguments do not reach the rows as patches`);
+    out.push({name: `${app}.${name}`, sym: `${app}_${name}`, rows, patch, params, ir: text});
+  }
+  return out;
+}
+
 export function emitC(entries, symbol = 'ksn_proc_rom_plans', sources = []) {
   const seen = new Set();
   for (const e of entries) {
@@ -115,8 +157,9 @@ function main() {
   for (const s of specs) {
     const at = s.indexOf('=');
     if (at < 1) throw new Error(`${s}: expected APP=FILE.js`);
-    entries.push(...romEntries(s.slice(0, at), s.slice(at + 1)));
-    sources.push(path.basename(s.slice(at + 1)));
+    const app = s.slice(0, at), src = s.slice(at + 1), text = src.startsWith('text:');
+    entries.push(...(text ? textEntries(app, src.slice(5)) : romEntries(app, src)));
+    sources.push(path.basename(text ? src.slice(5) : src));
   }
   const c = emitC(entries, symbol, sources);
   if (!fs.existsSync(out) || fs.readFileSync(out, 'utf8') !== c) fs.writeFileSync(out, c);

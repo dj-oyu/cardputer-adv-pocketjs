@@ -360,8 +360,6 @@ function plist(s, tier) {
     [['st', z.st], ['sa', z.sa], ['ry'], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['tr', z.sa, z.ts],
       ['sh', 0], ['sh', 1], ['sh', 2], ['sh', 3], ['sh', 4], ['sh', 5], ['sh', 6], ['sh', 7]];
 }
-// [program, points or null] of a plan entry.
-const plan = e => [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null];
 // Scene s at tier and frame t, through E and BG.
 function play(s, tier, t) {
   const k = KN[tier];

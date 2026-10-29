@@ -202,6 +202,9 @@ int main(int argc,char **argv){
     for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
     eval_ok(ctx,"pocket.kasane.procedural.resource()");
     REQUIRE(pocket_proc_is_image_mode());
+    /* The built-in plan table, as app_session.c hands it over: the app
+     * registers MEGADEMO's plans by name (run_pocket_proc_qjs.py generates it). */
+    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
      * order (what the entry's pocket.app.load() calls evaluate). */
     char list[4096];snprintf(list,sizeof list,"%s",argv[1]);

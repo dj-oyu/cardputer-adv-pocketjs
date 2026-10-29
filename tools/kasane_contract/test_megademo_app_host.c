@@ -27,6 +27,7 @@
 #include "text/ksn_font.h"
 #include "sound.h"
 #include "pocket_av.h"
+#include "ksn_proc_plan.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -249,6 +250,9 @@ int main(int argc,char **argv){
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));
+    /* The built-in plan table, as app_session.c hands it over (the runner
+     * generates it from megademo_plans.js: megademo_chunks.rom_table). */
+    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     read_chunks();
     JS_FreeValue(ctx,g);
     JS_RunGC(rt);
