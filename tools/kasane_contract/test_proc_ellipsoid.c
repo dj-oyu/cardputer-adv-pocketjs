@@ -60,5 +60,12 @@ int main(void){
     // Subsequent plain draws retain ordering in frames containing patches.
     frame.segments[frame.count++]=(ksn_proc_segment){40,30,40,30,0x07e0};frame.raster_steps++;
     draw(0);CHECK(full[30*240+40]==0x07e0);
+    // An off-band pattern's bits can resemble an ellipsoid packet marker.
+    // Consume its parameter entry before walking a later visible primitive.
+    frame.segments[frame.count++]=(ksn_proc_segment){KSN_PROC_EXT_PATTERN+10,2,15,2,0xffff};
+    frame.segments[frame.count++]=(ksn_proc_segment){32767,(int16_t)0x8100,0,(int16_t)0x8000,0};
+    frame.segments[frame.count++]=(ksn_proc_segment){40,80,40,80,0x07e0};
+    frame.raster_steps+=7;
+    draw(0);CHECK(full[80*240+40]==0x07e0);
     puts("PASS analytic ellipsoid continuous light/alpha/UV/limits/band oracle");return 0;
 }

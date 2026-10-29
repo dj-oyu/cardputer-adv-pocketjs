@@ -179,6 +179,13 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ env.SOURCE_HEAD }}
+          sparse-checkout: tools/experiments/adapt_legacy_oracles.py
+          sparse-checkout-cone-mode: false
+          path: compat-source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
           ref: ${{ matrix.mode == 'base' && 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267' || env.SOURCE_HEAD }}
           path: diagnostic-source
           submodules: recursive
@@ -187,7 +194,9 @@ jobs:
         with:
           node-version: '24'
       - name: Prepare finite diagnostic in disposable checkout
-        run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
+        run: |
+          python3 -B compat-source/tools/experiments/adapt_legacy_oracles.py diagnostic tools-source/tools/games/prepare_derby_app_diag.py --target diagnostic-source/main/main.c
+          python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.sha }}

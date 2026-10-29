@@ -1,5 +1,9 @@
 // MEGADEMO chunk: the draw plumbing and frame(). WAKE plays first.
 'use strict';
+// The running app submits through E/BG; standalone scene inspection keeps
+// these helpers by loading act2 without this runtime plumbing chunk.
+delete procMegademo.specs;
+delete procMegademo.frame;
 enter(7);
 let boot = true;
 // A plan's draw, skipped until the plan is registered; nd counts draws.

@@ -554,11 +554,13 @@ static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *fram
         }
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;
-        if(ymax<y||ymin>=y+height)continue;
         if(s->x0>=KSN_PROC_EXT_MIN){
-            if(j+1<frame->count)pattern_band(s,s+1,pixels,y,height);
+            /* Consume the pair even outside this band. Its parameter x0 is
+             * pattern bits, which may otherwise look like a packet marker. */
+            if(j+1<frame->count&&ymax>=y&&ymin<y+height)
+                pattern_band(s,s+1,pixels,y,height);
             j++;
-        }else plain_band(s,pixels,y,height);
+        }else if(ymax>=y&&ymin<y+height)plain_band(s,pixels,y,height);
     }
 }
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){

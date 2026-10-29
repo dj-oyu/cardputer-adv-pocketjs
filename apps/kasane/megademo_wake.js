@@ -21,6 +21,9 @@ const WPOSE = CharacterMotion.performance({
     {channel: 'bob', amplitude: 1.5, rate: .2, mode: 'add'}],
   gates: [{channel: 'leftFlick', from: 21, to: 24, value: 1}, {channel: 'rightFlick', from: 56, to: 59, value: 1}]
 });
+// Only playback state survives setup; this app has no later motion declarations.
+// The actor retains its sampler, while unused builder bytecode can be collected.
+delete globalThis.CharacterMotion;
 // The back light: an elliptical glow (cx, cy, rx, ry).
 const BACK = [124, 32, 88, 34];
 // The head: an ellipsoid (radii 52, 44, 46). Ears (x, y, z each): base out,

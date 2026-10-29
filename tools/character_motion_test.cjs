@@ -29,4 +29,21 @@ assert.deepEqual({...safe},previous,'failed sample keeps last published channels
 const overlaps=Motion.performance({track,channels:['t','v'],gates:[
   {channel:'gate',from:0,to:4,value:1},{channel:'gate',from:2,to:6,value:2}]});
 assert.equal(overlaps.evaluate(3).gate,3,'overlapping gate values add');
+// Startup declarations are not a dependency of playback; an app can release
+// its builder namespace after declaring all actors without losing their state.
+const declaration={channel:'sway',amplitude:2,rate:.3,mode:'add'};
+const playback=Motion.performance({track,channels:['time','scale'],waves:[declaration]});
+const beforeRelease={...playback.evaluate(5)};
+declaration.amplitude=200;
+delete globalThis.CharacterMotion;
+assert.deepEqual({...playback.evaluate(5)},beforeRelease,'playback snapshots declarations and survives builder release');
+for(const interpolation of ['linear','smooth','step']){
+  const curve=Motion.track([0,-0, 10,4, 20,3],{stride:2,timeUnit:'ms',interpolation});
+  const compiled=Motion.performance({track:curve,channels:['time','value']}), row=new Array(2);
+  for(const time of [-1,0,3,10,17,20,21]){
+    Motion.sample(curve,time,row);
+    const result=compiled.evaluate(time);
+    assert.ok(Object.is(result.time,row[0])&&Object.is(result.value,row[1]),'compiled and raw sampler preserve every mode/endpoint');
+  }
+}
 console.log('CHARACTER_MOTION_PASS named channels, deterministic waves/gates, borrowed keys, reused output');

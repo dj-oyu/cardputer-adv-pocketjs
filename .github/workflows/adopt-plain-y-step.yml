@@ -54,6 +54,7 @@ jobs:
           p=dest/'renderer.py';s=p.read_text();old="'defines':['QUICKJS_NG_BUILD','_GNU_SOURCE']";assert s.count(old)==1
           p.write_text(s.replace(old,"'defines':['QUICKJS_NG_BUILD','_GNU_SOURCE','QJS_DISABLE_DUMPS']"))
           PYTHON
+          python3 tools/experiments/adapt_legacy_oracles.py plain tools/experiments/plain-y-step/renderer.py
       - name: Whole-walk oracle, zero-height negative and actual panels
         env:
           ABI: ${{ matrix.abi }}

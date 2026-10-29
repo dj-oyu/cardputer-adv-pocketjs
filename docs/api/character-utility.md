@@ -14,7 +14,7 @@ const scene = Character.scene({
 });
 const body = scene.add({name: 'body', geometry: null});
 const tail = scene.add({name: 'tail', parent: body,
-  geometry: {kind: 'ellipsoid', radii: [12, 30, 10], columns: 6, rows: 4},
+  geometry: {kind: 'ellipsoid', radii: [12, 30, 10]},
   position: [-20, 0, 0],
   material: {color: 0xd97727, ambient: 0.25, diffuse: 0.75,
     roughness: 0.8, specular: 0.05, transmission: 0.2,
@@ -71,6 +71,14 @@ setterは入力検証後に状態を更新する。evaluate失敗後はpartial p
 
 renderはappがbeginFrameした候補へnative ellipsoidを提出し、frameを所有しない。描画順は作者のadd順で、一般の相互遮蔽/depth sortは未実装。native analyticのalpha合成と透過光項は別入力。実機のメモリ・時間、細い髪の様式化や雲の完成品質は別途受入が必要で、primitiveの存在だけで合格にしない。
 
+## AIエージェントが扱う順序と失敗契約
+
+入力は副作用のない通常のdata object/Array/TypedArrayを使う。setter→evaluate(time)→appのbeginFrame→render→commit→提示完了の順序を守る。setter/add/可視性/光/カメラが実際に変わった後、evaluateを省いて古いpacketをrender/visitするとTypeErrorになる。値が同じsetterは再評価を要求しない。不正setterや失敗したaddは既存の公開状態を変えない。
+
+全utility操作とbackend/visit callbackは同期契約で、timer/Promise/sleepによる隠れた進行はない。render/visit中の同sceneへの変更・再入・disposeはbusy sceneで拒否し、callbackがthrowしてもguardを解除する。別sceneの評価/描画は可能で、光/カメラ/work/破棄状態を共有しない。backendがthrowしたらappは候補をcommitせず、次のbeginFrameから作り直す。utilityは外側のnative transactionを勝手に公開・巻き戻ししない。
+
+disposeは二重呼出し可能。破棄後のscene/handle操作はdisposed sceneで拒否する。appはhandleも手放す（handleを保持するとそのnodeのworkはGCされない）。visitは同期の読取専用診断で、借用packetを変更/保持しない。appをまたぐnative resourceやJS realmの共有、HOMEとの同時利用は後続adapterの責任であり、現APIの複数JS sceneの分離だけから安全性を保証しない。後続では開始/停止/提示ACK/世代/破棄の状態遷移と資源ownerを明示し、時間待ちの調整でraceを隠さない。
+
 ## 検証と観測
 
 `node tools/kasane_contract/test_character_utility.cjs` はruntimeの依存、work同一性、invalid setter未適用、失敗後の描画拒否/復帰、analytic descriptor型・容量・reuse・UV区間を検証する。初期meshの逆転置法線等は別のhost参照として照合する。`stats(out)`は累積geometryUpdates/normalUpdates/projectionUpdates/albedoUpdates/shadeUpdates/analyticUpdates、直近renderedPatches、typedBytes/copiedBytes/objectsを書く。初期参照との比較用shadeSamples/renderedFacesはruntimeでは0。analyticUpdatesをpixel shader実行回数と取り違えない。
@@ -80,6 +88,8 @@ typedBytesはこのutilityのtyped workで、JS object/配列・allocator overhe
 motion.jsは別chunkの`CharacterMotion.track(keys,{stride,timeColumn,interpolation,timeUnit})`と`sample(track,time,out)`。keysはplain Array/Float32Arrayを変更禁止で借用し、outへ同じ演算順で補間する。timeUnitはms/frameの明示必須で、frame入力は実時間尺の保証ではない。MEGADEMOにはmaterial engineをロードせずこの小さい共有層を使える。
 
 `CharacterMotion.performance({track,channels,waves,gates})`はtrackの列を意味のある名前へ結び、add/multiplyの正弦waveと半開区間[from,to)のgateを重ねる。waveはchannel/amplitude/rate/phase/mode、gateはchannel/from/to/value。rateは宣言timeUnitあたりのrad。multiplyは既存track channelだけ、複数gateの重なりは加算。`performance.evaluate(time)`は再利用する借用・読取専用objectを返し、積分時計や毎回の配列生成を持たない。overflowは最後の公開結果を変えず拒否する。WAKEはpose・呼吸・揺れ・耳flickのscheduleをこれへ移し、形状生成はモデル側へ残した。full clip/layer、morph、2D補正等はこの縦切りには未実装である。
+
+motion chunkは`globalThis.CharacterMotion`へbuilderを公開する。performance構築時にchannel名・wave/gate値・再生設定をsnapshotし、keysだけを変更禁止で借用する。WAKEは全宣言を終えた後、app所有のこのglobal参照を削除し、不要なbuilder bytecodeを解放可能にする。再生actorは必要な補間関数と状態を保持するのでseek/周回は継続できる。後から宣言するappはbuilderを保持する。これはapp固有の寿命選択で、共有moduleを自動で破棄するAPIではない。
 
 ## 後続工程: HOME background sceneからの利用
 
@@ -93,6 +103,6 @@ motion.jsは別chunkの`CharacterMotion.track(keys,{stride,timeColumn,interpolat
 
 ## hostのメモリ門（実機未測定）
 
-統合中の作業ツリーで、実QuickJSとnative rendererを使う`test_character_app_host.c`のm32実行を確認した。`CHARACTER_HEAP_LIMIT=163840`、3モデル×6モード×301フレーム=5,418フレームで例外0・提示失敗0、`CHARACTER_NATIVE_PASS`。ログは`.cache/character-native-m32/cap.log`。compile_peak=96,880 B、live_max=162,036 B、追跡allocator_peak=143,864 B、host_pointer_bits=32。これらはハーネスの異なる計数であり、相互に足したりdevice総空きへ読み替えない。
+統合中の作業ツリーで、実QuickJSとnative rendererを使う`test_character_app_host.c`のm32実行を確認した。`CHARACTER_HEAP_LIMIT=163840`、3モデル×6モード×301フレーム=5,418フレームで例外0・提示失敗0、`CHARACTER_NATIVE_PASS`。再入/評価順guard追加後のログは`.cache/character-native-m32/lifecycle-cap.log`。compile_peak=98,636 B、live_max=161,956 B、追跡allocator_peak=143,816 B、host_pointer_bits=32。これらはハーネスの異なる計数であり、相互に足したりdevice総空きへ読み替えない。
 
-shared prototypeと1本のbacking storeへの変更ではモデル部品を削っていない。typed work264 B/有形node・84 B/group・scene132 BだけでJSのlive最大を予測せず、typed view/object/closure/allocatorの実際の費用を合わせて検証した。live_maxと163,840 Bの差は1,804 Bしかなく、拡張の一般予算や実機の確保保証ではない。deviceのnative free/largest、最大単一alloc、初回frame確保とロード時の余裕は未測定のまま残す。
+shared prototypeと1本のbacking storeへの変更ではモデル部品を削っていない。typed work264 B/有形node・84 B/group・scene132 BだけでJSのlive最大を予測せず、typed view/object/closure/allocatorの実際の費用を合わせて検証した。live_maxと163,840 Bの差は1,884 Bしかなく、拡張の一般予算や実機の確保保証ではない。deviceのnative free/largest、最大単一alloc、初回frame確保とロード時の余裕は未測定のまま残す。

@@ -162,6 +162,36 @@ hierarchy.stats(h0); group.place({rotation: [0, 0, 0.1]}); hierarchy.evaluate(0)
 assert.equal(h1.geometryUpdates - h0.geometryUpdates, 3, 'runtime parent dependencies reach both children');
 hierarchy.dispose();
 
+// A backend/visitor cannot mutate or reenter its active scene. Other scenes
+// remain independent, and callback failure releases the per-scene guard.
+let onDraw = () => {};
+const guarded = Character.scene({backend: {ellipsoid() { onDraw(); }}});
+const guardedPart = guarded.add({name: 'part', geometry: {kind: 'ellipsoid', radii: [2, 2, 2]}});
+guarded.evaluate(0);
+const isolated = Character.scene({backend: {ellipsoid() {}}});
+const isolatedPart = isolated.add({name: 'part', geometry: {kind: 'ellipsoid', radii: [1, 1, 1]}});
+isolated.evaluate(0);
+onDraw = () => {
+  for (const action of [() => guarded.render(), () => guarded.evaluate(0), () => guarded.dispose(),
+    () => guardedPart.place({position: [1, 0, 0]})]) assert.throws(action, /busy scene/);
+  isolatedPart.place({position: [2, 0, 0]}); isolated.evaluate(0); isolated.render();
+};
+guarded.render();
+guardedPart.place({position: [1, 0, 0]});
+assert.throws(() => guarded.render(), /evaluate before render/, 'mutation requires a fresh evaluation');
+guarded.evaluate(0);
+assert.throws(() => guarded.visit(() => guarded.light({color: 0})), /busy scene/);
+onDraw = () => { throw Error('backend failure'); };
+assert.throws(() => guarded.render(), /backend failure/);
+onDraw = () => {}; guarded.render();
+assert.throws(() => guardedPart.material({color: 0, opacity: NaN}));
+guarded.render(); // Rejected input did not invalidate or change the packet.
+assert.throws(() => guarded.add({name: 'bad', position: [1, 2, 3], geometry: {kind: 'ellipsoid', radii: [1, 1, 1]},
+  pattern: {kind: 'unknown'}}));
+guarded.render();
+isolated.dispose(); guarded.render(); guarded.dispose(); guarded.dispose();
+assert.throws(() => guardedPart.visible(true), /disposed scene/);
+
 const track = Motion.track([0, 2, 10, 4, 20, 6], {stride: 2, timeUnit: 'frame', interpolation: 'smooth'}), pose = [0, 0];
 Motion.sample(track, 5, pose); same(pose, [5, 3], 'frame positions, not elapsed seconds');
 Motion.sample(track, -1, pose); same(pose, [0, 2], 'clamped start');

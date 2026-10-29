@@ -17,6 +17,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
   group: character-materials-${{ github.ref }}
   cancel-in-progress: true
@@ -27,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ env.SOURCE_HEAD }}
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
@@ -55,12 +58,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib
-          CHARACTER_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_character_app_host.py --m32
+          CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: character-native-${{ github.sha }}
+          name: character-native-${{ env.SOURCE_HEAD }}
           path: .cache/character-native/frames/
   firmware:
     runs-on: ubuntu-24.04
@@ -73,6 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ env.SOURCE_HEAD }}
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
@@ -90,7 +96,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: character-firmware-${{ github.sha }}
+          name: character-firmware-${{ env.SOURCE_HEAD }}
           path: |
             build_character/*.bin
             build_character/*.elf
