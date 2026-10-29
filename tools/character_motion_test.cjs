@@ -31,6 +31,19 @@ assert.deepEqual({...safe},previous,'failed sample keeps last published channels
 const overlaps=Motion.performance({track,channels:['t','v'],gates:[
   {channel:'gate',from:0,to:4,value:1},{channel:'gate',from:2,to:6,value:2}]});
 assert.equal(overlaps.evaluate(3).gate,3,'overlapping gate values add');
+// Integer-like properties enumerate before other object keys. That order
+// must never change the declared track-column or added wave correspondence.
+const integerTrack=Motion.track([0,2,10,4],{stride:2,timeUnit:'frame'});
+const integerChannel=Motion.performance({track:integerTrack,channels:['time','0']});
+assert.deepEqual({...integerChannel.evaluate(5)},{time:5,'0':3},'integer channel keeps its declared column');
+const integerWave=Motion.performance({track:integerTrack,channels:['time','x'],
+  waves:[{channel:'0',amplitude:0,rate:1,mode:'add'}]});
+assert.deepEqual({...integerWave.evaluate(5)},{time:5,x:3,'0':0},'integer wave does not reorder track columns');
+const reversedIntegers=Motion.performance({track:integerTrack,channels:['9','2']});
+assert.deepEqual({...reversedIntegers.evaluate(5)},{'9':5,'2':3},'numeric names keep declared reverse order');
+const integerGate=Motion.performance({track:integerTrack,channels:['time','x'],
+  gates:[{channel:'0',from:0,to:10,value:7}]});
+assert.deepEqual({...integerGate.evaluate(5)},{time:5,x:3,'0':7},'integer gate does not reorder track columns');
 // Startup declarations are not a dependency of playback; an app can release
 // its builder namespace after declaring all actors without losing their state.
 const declaration={channel:'sway',amplitude:2,rate:.3,mode:'add'};

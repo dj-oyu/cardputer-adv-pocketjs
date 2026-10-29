@@ -77,6 +77,42 @@ static bool primitive_contract(void){
     return eval(cleanup,strlen(cleanup),"ellipsoid-contract.js");
 }
 
+static bool native_range_contract(void){
+    const char *setup=
+      "globalThis.__rangeTest=(()=>{"
+      "const H=pocket.kasane.procedural;let scene,part;"
+      "return {bad:(kind)=>{"
+      "scene=Ayatsuri.scene({backend:pocket.hone});"
+      "part=scene.add({name:'range',geometry:{kind:'ellipsoid',radii:[8,8,8]},"
+      "material:{color:0x44aa55,ambient:1,diffuse:0},"
+      "pattern:kind===4?{kind:'checker',color:0xffffff,repeats:1e308}:undefined});"
+      "if(kind===0||kind===2)scene.camera({zoom:kind===0?1e4:1e38});"
+      "if(kind===1||kind===3){const scale=kind===1?1e4:1e38;part.place({scale:[scale,scale,scale]})}"
+      "scene.evaluate(0);H.beginFrame(0);"
+      "try{scene.render()}catch(e){if(e.code==='INVALID_ARGUMENT')return;throw e}"
+      "throw Error('native accepted oversized packet');"
+      "},good:()=>{"
+      "scene.camera({zoom:1});part.place({scale:[1,1,1]});"
+      "part.texture({scale:[0,0],offset:[-.5,-.5]});"
+      "scene.evaluate(0);H.beginFrame(0);scene.render();H.commit();scene.dispose();"
+      "}}})();";
+    if(!eval(setup,strlen(setup),"native-range.js"))return false;
+    static uint16_t previous[240*135];
+    for(unsigned kind=0;kind<5;++kind){
+        memcpy(previous,panel,sizeof previous);
+        char call[40];snprintf(call,sizeof call,"__rangeTest.bad(%u)",kind);
+        if(!eval(call,strlen(call),"native-range.js"))return false;
+        pocket_kasane_invalidate();present(0);
+        if(memcmp(previous,panel,sizeof previous))return false;
+        const char *recover="__rangeTest.good();";
+        if(!eval(recover,strlen(recover),"native-range.js"))return false;
+        present(1);
+        if(panel[75*240+120]!=0x454a||!full_reference(1))return false;
+    }
+    const char *cleanup="delete globalThis.__rangeTest;";
+    return eval(cleanup,strlen(cleanup),"native-range.js");
+}
+
 int main(int argc,char **argv){
     const char *path="apps/character/character_lab.js";
     FILE *f=fopen(path,"rb");if(!f)return 2;
@@ -144,6 +180,13 @@ int main(int argc,char **argv){
         JS_RunGC(rt);
         printf("CHARACTER_NATIVE switch_failure_recovery=%s before=%zu failed=%zu recovered=%zu\n",
                ok?"PASS":"FAIL",before_switch,failed_switch,heap_used());
+    }
+    /* Separate geometric/native failure testing from the guest-cap gate above:
+     * this phase must reach native validation rather than fail in JS allocation. */
+    if(ok){
+        JS_SetMemoryLimit(rt,(size_t)-1);
+        ok=native_range_contract();
+        printf("CHARACTER_NATIVE native_range_failure_recovery=%s cases=5 cap=unlimited\n",ok?"PASS":"FAIL");
     }
     ok=ok&&!exceptions&&!present_failures;
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);

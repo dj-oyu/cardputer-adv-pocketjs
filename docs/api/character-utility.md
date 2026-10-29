@@ -94,6 +94,10 @@ motion.jsは別chunkの`AyatsuriMotion.track(keys,{stride,timeColumn,interpolati
 
 motion chunkは`globalThis.AyatsuriMotion`へbuilderを公開し、`globalThis.CharacterMotion`は同じobjectを指す。performance構築時にchannel名・wave/gate値・再生設定をsnapshotし、keysだけを変更禁止で借用する。WAKEは全宣言を終えた後、app所有の正規名と互換名の両global参照を削除し、不要なbuilder bytecodeを解放可能にする。再生actorは必要な補間関数と状態を保持するのでseek/周回は継続できる。後から宣言するappはbuilderを保持する。これはapp固有の寿命選択で、共有moduleを自動で破棄するAPIではない。
 
+channelとtrack列の対応は宣言した配列順で固定する。整数形式の名前（`'0'`等）やそのwave/gateを追加しても、Object.keysの列挙順によって列が入れ替わることはない。返却objectの列挙自体はJS標準の順序であり、利用側もObject.valuesをtrack列として扱わず名前で読む。
+
+visitのpacketとperformanceの返却objectはいずれも再利用される**borrowed view**で、immutable snapshotではない。読取専用は利用側の契約でありfreezeではない。visitのpacketはcallback内だけで参照し、performanceの結果は次の成功evaluateで内容が更新される。履歴が必要なら利用側が必要な値をその場でコピーする。このコピーはutilityのcopiedBytesには含めない。
+
 ## 後続工程: HOME background sceneからの利用
 
 ユーザーが指定した後続範囲として、ベアメタルAPIの設計・実装後に、同じ配置・材質・変形・演技のutilityをJS appとHOME背景の双方で利用できる工程を置く。現在HOMEから利用可能という意味ではなく、3体常駐や生活シミュレーション全体を実装する要求へ広げない。
