@@ -146,7 +146,7 @@ def main() -> None:
         (base / "chunks.txt").write_bytes(listed.stdout)
         for raw in listed.stdout.decode().splitlines():
             words = raw.split("#", 1)[0].split()
-            if len(words) == 2 and words[0] != "app":
+            if len(words) == 2 and words[0] not in ("app", "option"):
                 got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
                                      cwd=ROOT, capture_output=True, check=True)
                 (base / words[1]).write_bytes(got.stdout)
