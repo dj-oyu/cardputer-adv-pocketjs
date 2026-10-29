@@ -1,4 +1,6 @@
-# Character utility — 照明因果を試す縦切り実装
+# ayatsuri — 照明因果を試すJS縦切り実装
+
+正式な責務とJS/Cの構成は[hone / ayatsuri](hone-ayatsuri.md)を参照。以下の旧Character名は公開名移行前の実装記録で、C APIの実装完了を意味しない。
 
 追加ヒントの[点描・漫画トーン・ハッチング小比較](../../tools/character/coverage-study.md)はhost専用・未採用。固有模様とpost-lighting coverageを区別して検討する。
 

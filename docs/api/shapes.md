@@ -1,5 +1,7 @@
 # `pocket.shapes` — 平面のベクター描画
 
+正式な低層名は[hone](hone-ayatsuri.md)。この既存shapes契約とcapabilityは互換として保持し、hone endpointへ段階移行する。ayatsuriのC APIは別の高層であり、ここに同一視しない。
+
 手続き面（`pocket.kasane.procedural`）の、組み立て中のフレームへ、塗りと線を C で描く。点は呼び出し側の型付き配列に置き、番号で指す（フレームごとに配列を作らない）。設計の経緯は [megademo-shapes.md](../apps/megademo-shapes.md)、実装は `main/pocket/pocket_shape.c`、契約の試験は `tools/kasane_contract/run_pocket_shape.py`。
 
 ## 使えるアプリ
