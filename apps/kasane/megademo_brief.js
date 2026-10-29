@@ -175,6 +175,15 @@ function river(t, emit) {
       if (m > n + 2) SH.outline(WP, n, m - n - 1, mc);
     }
   }
+  // The wall: a veil across the river comes at the camera (92..119), half
+  // drawn (every other row), solid in its last 4 frames, and the white
+  // frames are the hit (act2). Q0's shape, turned with the corridor.
+  if (t >= 92 && t < 120) {
+    const u = (t - 92) / 28, k = 14 * M.exp(2.6 * u), a = .5 * M.sin(t * .0262), c = M.cos(a) * k, sn = M.sin(a) * k;
+    for (let j = 0; j < 4; ++j) P2(j, 120 + c * Q0[j][0] - sn * Q0[j][1], 67 + sn * Q0[j][0] + c * Q0[j][1]);
+    SH.fill(WP, [0, 4], undefined, 0xde5f, t < 116 ? {step: 2} : undefined);
+    SH.outline(WP, 0, 4, WH, {closed: true});
+  }
   // The fleet, pink, as the stars open.
   if (t >= 216) {
     let n = 0;

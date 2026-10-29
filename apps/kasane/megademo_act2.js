@@ -192,8 +192,11 @@ const A2 = {
       // 240 frames: the storyboard's lines at 2 frames a letter, each held a
       // second. Near-black going violet towards the white frame (120),
       // then black for the stars.
-      if (t === 120) return {b: WH, s: 0, d: []};
-      const e = (t - 200) / 40, g = e * e, b = t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045;
+      // The wall (river(), 92..119) hits at 120: two white frames, then the
+      // light fades through lavender while the corridor comes back.
+      if (t === 120 || t === 121) return {b: WH, s: 0, d: []};
+      const e = (t - 200) / 40, g = e * e, b = t > 121 && t < 126 ? [0xdefb, 0xb59f, 0x7b3d, 0x4115][t - 122] :
+        t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045;
       const d = corrDraws(k.c, t, 240, 1 / 6).filter(q => t < 220 || t < 232 && q[0] % 2 === 0);
       if (e > 0) d.push([7, [190 * g, 0, 0, 70 * g, (t - 240) * .05, 120, 67]]);
       if (emit) return {b: b, s: 0, d: d, post: () => river(t, emit)};
