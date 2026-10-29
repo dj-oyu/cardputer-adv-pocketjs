@@ -211,7 +211,7 @@ static size_t heap_req(void){
  * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-device-limits.md). */
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
+    "globalThis.pocket={kasane:globalThis.kasane,hone:globalThis.hone,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
     "(function(){const P=pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"

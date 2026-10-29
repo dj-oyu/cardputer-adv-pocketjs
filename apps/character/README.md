@@ -1,6 +1,6 @@
 # CHARACTER LAB
 
-3体を同じ光・カメラ・操作で比較する、材質/配置ユーティリティの最初の縦切り実装。APPS末尾に追加し、既存メニュー番号は変えない。`local.character` は `kasane.shapes` を必須とする。3体を同時常駐させず、切替時に旧sceneをdisposeする。
+3体を同じ光・カメラ・操作で比較する、ayatsuriの材質/配置JS APIを検証する最初の縦切り実装。APPS末尾に追加し、既存メニュー番号は変えない。`local.character` は互換capability `kasane.shapes` を必須とし、正規endpoint `pocket.hone` を使う。`pocket.shapes` は同じnamespace objectの互換alias。3体を同時常駐させず、切替時に旧sceneをdisposeする。
 
 ## 操作と時計
 
@@ -23,7 +23,7 @@ BODYは固定世界光・固定カメラで、待機2秒 → 左右傾き3秒 �
 - キツネ: 四足、大耳、丸い胸毛、曲がる大きな尾、せり出した二つのマズル。白い尾先はbody UVの固有模様。光方向を変えても白模様そのものは照明から独立している。
 - 雲: 白～淡青の重なる体積、脚なし、離れた手。頭上の薄い水平な彩雲は空隙を保つ別node。materialの透過項は形状/法線/世界光へ応答する。
 
-native `shapes.ellipsoid` とorthographic cameraで解析的な曲面を描く。雲の材質にはopacity/edgeSoftnessを指定し、境界を背景へ合成する。低分割facetによる初期試作は品質上受け入れず、製品pathから削除した。現在のutilityは解析rendererのないbackendを明示的に拒否する。
+native `hone.ellipsoid` とorthographic cameraで解析的な曲面を描く。雲の材質にはopacity/edgeSoftnessを指定し、境界を背景へ合成する。低分割facetによる初期試作は品質上受け入れず、製品pathから削除した。現在のutilityは解析rendererのないbackendを明示的に拒否する。
 
 ![実QuickJSとCの帯rendererによる3体のhost描画。左から基準・傾き・伸長・光だけ・カメラだけ](../../docs/apps/character-lab-native.png)
 
@@ -38,8 +38,10 @@ node tools/character/test_lab.cjs
 python tools/kasane_contract/run_character_app_host.py
 ```
 
-Nodeは実際のentry/chunkを読み、model/mode切替・reset・呼吸と固定text容量をAPI stubで確認する。ネイティブ描画の正しさを代用する検査ではない。Python runnerは実QuickJS・native shapes・Kasaneの帯描画を使うhost検査で、ビルドにLinuxのC環境が必要。実行結果と未検証項目は最終headの報告を優先する。
+Nodeは実際のentry/chunkを読み、model/mode切替・reset・呼吸と固定text容量をAPI stubで確認する。ネイティブ描画の正しさを代用する検査ではない。Python runnerは実QuickJS・native hone・Kasaneの帯描画を使うhost検査で、ビルドにLinuxのC環境が必要。実行結果と未検証項目は最終headの報告を優先する。
 
 hostの通過はdevice時間・native総空き/最大連続・コンパイルpeakの合格ではない。typedBytesもutility typed配列だけで、JS全heapやnative frame確保を含まない。fps/実機メモリの保証値はまだない。
 
 `main/CMakeLists.txt` はentryを埋め込み、`chunks.txt` でutility/model/labを別評価する。hostはNodeのVMで同じ3chunkを評価する。frame構築/commitとviewの所有者はapp、geometry/dirty依存/型変換の所有者はutility、native shadeは汎用数値処理でキャラ名を知らない。
+
+正式な枠組みは[hone / ayatsuri](../../docs/api/hone-ayatsuri.md)。JSは`Ayatsuri.scene`、演技用の軽量chunkは`AyatsuriMotion`、model/labは`AyatsuriModels`/`AyatsuriLab`。既存filenameとapp IDは変えず、旧`Character`/`CharacterMotion`は同一実装のaliasを残す。ayatsuriのC APIとHOME adapterは未実装で、このlabの通過だけで汎用性の検証完了とはしない。

@@ -1,6 +1,6 @@
 // A deterministic 10-second body test separates motion from light and view.
 'use strict';
-globalThis.CharacterLab = (() => {
+globalThis.AyatsuriLab = (() => {
   const modes=['BODY','LIGHT','CAMERA','TEXTURE','EXPRESSION','STILL'];
   const body={tilt:0,turn:0,stretch:1,lift:0,head:0,tail:0,haloOffset:0},
     expression={open:1,blink:0}, light={direction:[-.5,-.4,.8],color:0xffffff},
@@ -37,8 +37,8 @@ globalThis.CharacterLab = (() => {
   }
   function create(index,backend){
     resetInputs();
-    const scene=Character.scene({backend,light,camera});
-    const model=CharacterModels.create(scene,index);
+    const scene=Ayatsuri.scene({backend,light,camera});
+    const model=AyatsuriModels.create(scene,index);
     function evaluate(timeMs,mode,breathing){
       sample(timeMs,mode,breathing);
       model.update(timeMs,body,expression);
@@ -57,7 +57,7 @@ if(typeof pocket!=='undefined'&&pocket.kasane){
   let actor=null,index=0,mode=0,tick=0,held=0,breathing=false,rebuild=true;
   const stats={};
   let title,shown=-1;
-  function label(){return CharacterModels.names[index]+'  '+CharacterLab.modes[mode]+(breathing?'  BREATHE':'');}
+  function label(){return AyatsuriModels.names[index]+'  '+AyatsuriLab.modes[mode]+(breathing?'  BREATHE':'');}
   function build(tx){
     tx.background(0xe4ece0ff);
     tx.image({resource,bounds:[0,0,240,135],sourceWidth:240,sourceHeight:135});
@@ -81,7 +81,7 @@ if(typeof pocket!=='undefined'&&pocket.kasane){
     if(press&0xa0){mode=(mode+(press&0x20?1:5))%6;tick=0;}
     if(press&0x10)tick=0;
     if(press&0x40){breathing=!breathing;tick=0;}
-    if(!actor)actor=CharacterLab.create(index,pocket.shapes);
+    if(!actor)actor=AyatsuriLab.create(index,pocket.hone);
     actor.evaluate(tick*1000/30,mode,breathing);
     H.beginFrame(0xe77c);
     actor.scene.render();

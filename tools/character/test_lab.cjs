@@ -19,6 +19,7 @@ const context=vm.createContext({console:{log(){}},pocket:{
     beginFrame(){assert.ok(!active);active=true;},commit(){assert.ok(active);active=false;++commits;}},
     replace(callback){background=false;callback(tx);assert.ok(background);++replaces;},patch(callback){callback(tx);++patches;}}
 }});
+context.pocket.hone=context.pocket.shapes;
 vm.runInContext(fs.readFileSync(path.join(root,'apps/character/character_lab.js'),'utf8'),context,{filename:'character_lab.js'});
 assert.deepEqual(Array.from(loaded),['utility','models','lab']);
 const frame=context.frame;

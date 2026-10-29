@@ -169,6 +169,7 @@ int main(int argc,char **argv){
     /* WAKE draws through pocket.shapes into the real pocket_proc.c. */
     JSValue shapes=JS_NewObject(ctx);
     REQUIRE(pocket_shape_fill(ctx,shapes,NULL)==ESP_OK);
+    REQUIRE(JS_SetPropertyStr(ctx,pocket,"hone",JS_DupValue(ctx,shapes))>=0);
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"shapes",shapes)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);

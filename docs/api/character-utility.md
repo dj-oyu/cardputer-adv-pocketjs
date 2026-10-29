@@ -1,15 +1,16 @@
 # ayatsuri — 照明因果を試すJS縦切り実装
 
-正式な責務とJS/Cの構成は[hone / ayatsuri](hone-ayatsuri.md)を参照。以下の旧Character名は公開名移行前の実装記録で、C APIの実装完了を意味しない。
+正式な責務とJS/Cの構成は[hone / ayatsuri](hone-ayatsuri.md)を参照。JSの正規名はAyatsuri/AyatsuriMotion。旧Character/CharacterMotionは同一objectの互換aliasとして保持する。C APIの実装完了を意味しない。
 
 追加ヒントの[点描・漫画トーン・ハッチング小比較](../../tools/character/coverage-study.md)はhost専用・未採用。固有模様とpost-lighting coverageを区別して検討する。
 
-`apps/character/character.js`。これはv0.2仕様案の全面実装ではなく、配置・階層・材質・身体座標の模様・世界の光・視点を分離して検証する実験版。最初の粗い面分割は雲の柔らかな目標品質とフレーム容量に不適合だったため、runtimeはnative `shapes.ellipsoid` を必須とし、連続曲面のcompact descriptorだけを保持する。大きなmesh配列やJS shader fallbackをdevice chunkへ含めない。実機のメモリ・fps合格や設定図の完成品質を意味しない。
+`apps/character/character.js`。これはv0.2仕様案の全面実装ではなく、配置・階層・材質・身体座標の模様・世界の光・視点を分離して検証する実験版。最初の粗い面分割は雲の柔らかな目標品質とフレーム容量に不適合だったため、runtimeはnative `hone.ellipsoid` を必須とし、連続曲面のcompact descriptorだけを保持する。大きなmesh配列やJS shader fallbackをdevice chunkへ含めない。実機のメモリ・fps合格や設定図の完成品質を意味しない。
 
 ## 視覚に対応する操作
 
 ```js
-const scene = Character.scene({
+const H = pocket.kasane.procedural; // The app owns begin/commit and its image view.
+const scene = Ayatsuri.scene({
   light: {direction: [-0.5, -0.4, 0.8], color: 0xffffff},
   camera: {position: [0, 0, 400], target: [0, 0, 0],
            zoom: 1, center: [120, 75]}
@@ -87,11 +88,11 @@ disposeは二重呼出し可能。破棄後のscene/handle操作はdisposed scen
 
 typedBytesはこのutilityのtyped workで、JS object/配列・allocator overhead・native frame費用を含まない。copiedBytesはJS評価内のmesh/descriptor bulkコピー量で現在0。setterのscalar state書込・native frameへのdescriptorコピー・hostのsliceを含めず、全アプリのコピー0を主張しない。通常評価は新work/closureを作らない設計だが、実QuickJS heap計測前にalloc0と断定しない。
 
-motion.jsは別chunkの`CharacterMotion.track(keys,{stride,timeColumn,interpolation,timeUnit})`と`sample(track,time,out)`。keysはplain Array/Float32Arrayを変更禁止で借用し、outへ同じ演算順で補間する。timeUnitはms/frameの明示必須で、frame入力は実時間尺の保証ではない。MEGADEMOにはmaterial engineをロードせずこの小さい共有層を使える。
+motion.jsは別chunkの`AyatsuriMotion.track(keys,{stride,timeColumn,interpolation,timeUnit})`と`sample(track,time,out)`。keysはplain Array/Float32Arrayを変更禁止で借用し、outへ同じ演算順で補間する。timeUnitはms/frameの明示必須で、frame入力は実時間尺の保証ではない。MEGADEMOにはmaterial engineをロードせずこの小さい共有層を使える。
 
-`CharacterMotion.performance({track,channels,waves,gates})`はtrackの列を意味のある名前へ結び、add/multiplyの正弦waveと半開区間[from,to)のgateを重ねる。waveはchannel/amplitude/rate/phase/mode、gateはchannel/from/to/value。rateは宣言timeUnitあたりのrad。multiplyは既存track channelだけ、複数gateの重なりは加算。`performance.evaluate(time)`は再利用する借用・読取専用objectを返し、積分時計や毎回の配列生成を持たない。overflowは最後の公開結果を変えず拒否する。WAKEはpose・呼吸・揺れ・耳flickのscheduleをこれへ移し、形状生成はモデル側へ残した。full clip/layer、morph、2D補正等はこの縦切りには未実装である。
+`AyatsuriMotion.performance({track,channels,waves,gates})`はtrackの列を意味のある名前へ結び、add/multiplyの正弦waveと半開区間[from,to)のgateを重ねる。waveはchannel/amplitude/rate/phase/mode、gateはchannel/from/to/value。rateは宣言timeUnitあたりのrad。multiplyは既存track channelだけ、複数gateの重なりは加算。`performance.evaluate(time)`は再利用する借用・読取専用objectを返し、積分時計や毎回の配列生成を持たない。overflowは最後の公開結果を変えず拒否する。WAKEはpose・呼吸・揺れ・耳flickのscheduleをこれへ移し、形状生成はモデル側へ残した。full clip/layer、morph、2D補正等はこの縦切りには未実装である。
 
-motion chunkは`globalThis.CharacterMotion`へbuilderを公開する。performance構築時にchannel名・wave/gate値・再生設定をsnapshotし、keysだけを変更禁止で借用する。WAKEは全宣言を終えた後、app所有のこのglobal参照を削除し、不要なbuilder bytecodeを解放可能にする。再生actorは必要な補間関数と状態を保持するのでseek/周回は継続できる。後から宣言するappはbuilderを保持する。これはapp固有の寿命選択で、共有moduleを自動で破棄するAPIではない。
+motion chunkは`globalThis.AyatsuriMotion`へbuilderを公開し、`globalThis.CharacterMotion`は同じobjectを指す。performance構築時にchannel名・wave/gate値・再生設定をsnapshotし、keysだけを変更禁止で借用する。WAKEは全宣言を終えた後、app所有の正規名と互換名の両global参照を削除し、不要なbuilder bytecodeを解放可能にする。再生actorは必要な補間関数と状態を保持するのでseek/周回は継続できる。後から宣言するappはbuilderを保持する。これはapp固有の寿命選択で、共有moduleを自動で破棄するAPIではない。
 
 ## 後続工程: HOME background sceneからの利用
 
@@ -105,6 +106,6 @@ motion chunkは`globalThis.CharacterMotion`へbuilderを公開する。performan
 
 ## hostのメモリ門（実機未測定）
 
-統合中の作業ツリーで、実QuickJSとnative rendererを使う`test_character_app_host.c`のm32実行を確認した。`CHARACTER_HEAP_LIMIT=163840`、3モデル×6モード×301フレーム=5,418フレームで例外0・提示失敗0、`CHARACTER_NATIVE_PASS`。再入/評価順guard追加後のログは`.cache/character-native-m32/lifecycle-cap.log`。compile_peak=98,636 B、live_max=161,956 B、追跡allocator_peak=143,816 B、host_pointer_bits=32。これらはハーネスの異なる計数であり、相互に足したりdevice総空きへ読み替えない。
+統合中の作業ツリーで、実QuickJSとnative rendererを使う`test_character_app_host.c`のm32実行を確認した。`CHARACTER_HEAP_LIMIT=163840`、3モデル×6モード×301フレーム=5,418フレームで例外0・提示失敗0、`CHARACTER_NATIVE_PASS`。正式名とhone alias追加後のログは`.cache/character-native-m32/hone-ayatsuri.log`。compile_peak=98,604 B、live_max=162,088 B、追跡allocator_peak=143,932 B、host_pointer_bits=32。これらはハーネスの異なる計数であり、相互に足したりdevice総空きへ読み替えない。
 
-shared prototypeと1本のbacking storeへの変更ではモデル部品を削っていない。typed work264 B/有形node・84 B/group・scene132 BだけでJSのlive最大を予測せず、typed view/object/closure/allocatorの実際の費用を合わせて検証した。live_maxと163,840 Bの差は1,884 Bしかなく、拡張の一般予算や実機の確保保証ではない。deviceのnative free/largest、最大単一alloc、初回frame確保とロード時の余裕は未測定のまま残す。
+shared prototypeと1本のbacking storeへの変更ではモデル部品を削っていない。typed work264 B/有形node・84 B/group・scene132 BだけでJSのlive最大を予測せず、typed view/object/closure/allocatorの実際の費用を合わせて検証した。live_maxと163,840 Bの差は1,752 Bしかなく、拡張の一般予算や実機の確保保証ではない。deviceのnative free/largest、最大単一alloc、初回frame確保とロード時の余裕は未測定のまま残す。

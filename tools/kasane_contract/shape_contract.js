@@ -9,6 +9,8 @@ const throws = (f, code, what) => {
 };
 const P = new Float32Array(64), D = new Float32Array(64);
 const put = (a, i, pts) => pts.forEach((p, k) => { a[2 * (i + k)] = p[0]; a[2 * (i + k) + 1] = p[1]; });
+eq(hone, shapes, 'hone and legacy shapes have one namespace/owner');
+eq(hone.ellipsoid, shapes.ellipsoid, 'hone shares native methods');
 
 // project: x, y over w; w <= 0 gives NaN; ranges; Float32Array only.
 {

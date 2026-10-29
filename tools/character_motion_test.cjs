@@ -2,6 +2,8 @@
 'use strict';
 const assert=require('node:assert/strict');
 const Motion=require('../apps/character/motion.js');
+assert.strictEqual(globalThis.AyatsuriMotion, Motion);
+assert.strictEqual(globalThis.CharacterMotion, Motion, 'old motion name is an object alias');
 const keys=[0,2, 10,4, 20,3];
 const track=Motion.track(keys,{stride:2,timeUnit:'frame',interpolation:'smooth'});
 const actor=Motion.performance({track,channels:['time','scale'],
@@ -35,6 +37,7 @@ const declaration={channel:'sway',amplitude:2,rate:.3,mode:'add'};
 const playback=Motion.performance({track,channels:['time','scale'],waves:[declaration]});
 const beforeRelease={...playback.evaluate(5)};
 declaration.amplitude=200;
+delete globalThis.AyatsuriMotion;
 delete globalThis.CharacterMotion;
 assert.deepEqual({...playback.evaluate(5)},beforeRelease,'playback snapshots declarations and survives builder release');
 for(const interpolation of ['linear','smooth','step']){

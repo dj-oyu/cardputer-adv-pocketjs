@@ -1,4 +1,4 @@
-// MEGADEMO chunk: WAKE, the prologue, drawn with pocket.shapes. Tama
+// MEGADEMO chunk: WAKE, the prologue, drawn with pocket.hone. Tama
 // peers in, backlit, in close-up (only eyes, ears, whiskers and part of
 // the outline show): the backdrop is the silhouette, the lit room the
 // fill. The head is 3D points on an ellipsoid seen in perspective, so a
@@ -13,8 +13,8 @@ const POSE = [0, 1.9, .5, .05, -.38, -1, 1, 0, 260, 60, -16, 17, 1.9, .5, .05, -
   49, 1.6, .04, -.04, -.1, 0, .06, 1, 240, 6, 18, 54, 1.6, .06, -.08, .2, .3, .75, .6, 240, 0, 18,
   60, 1.6, .06, -.1, .24, .3, .75, .4, 240, 0, 18, 68, 2.1, .1, -.2, .08, 0, .85, 0, 150, 0, 14,
   74, 2.1, .1, -.2, .08, 0, .85, 0, 150, 0, 14];
-const WPOSE = CharacterMotion.performance({
-  track: CharacterMotion.track(POSE, {stride: 11, timeColumn: 0, interpolation: 'smooth', timeUnit: 'frame'}),
+const WPOSE = AyatsuriMotion.performance({
+  track: AyatsuriMotion.track(POSE, {stride: 11, timeColumn: 0, interpolation: 'smooth', timeUnit: 'frame'}),
   channels: ['time', 'scale', 'yaw', 'pitch', 'roll', 'gaze', 'open', 'earSpread', 'distance', 'x', 'y'],
   waves: [{channel: 'scale', amplitude: .012, rate: .2, mode: 'multiply'},
     {channel: 'roll', amplitude: .03, rate: .11, mode: 'add'},
@@ -23,6 +23,7 @@ const WPOSE = CharacterMotion.performance({
 });
 // Only playback state survives setup; this app has no later motion declarations.
 // The actor retains its sampler, while unused builder bytecode can be collected.
+delete globalThis.AyatsuriMotion;
 delete globalThis.CharacterMotion;
 // The back light: an elliptical glow (cx, cy, rx, ry).
 const BACK = [124, 32, 88, 34];
@@ -31,14 +32,14 @@ const BACK = [124, 32, 88, 34];
 // it). Whiskers: root x y, tip x y.
 const EAR = [-46, -22, 8, -52, -48, 2, -44, -74, -4, -25, -60, 8, -14, -40, 18],
   WHISK = [10, 16, 78, 4, 12, 20, 80, 18, 11, 24, 72, 32];
-// Model points (x right, y down, z to the viewer) go in WM, shapes.project
+// Model points (x right, y down, z to the viewer) go in WM, hone.project
 // puts them in WP and fill / outline draw them in C (in JS this was ~130
 // ms a frame, docs/apps/megademo-shapes.md). Ranges: head 0 (28), ears 28
 // (5 each), their insides 38 (10 each), the glow's core 58 (16 screen
 // points), whiskers 74 (2 each), eyes 86 (30 each: iris 12, pupil 12, lid
 // 4, highlight 2). Act I and TWIST reuse the arrays. QQ: this frame's
 // pose; EP: an ear's 5 points.
-const SH = pocket.shapes, WM = new Float32Array(3 * 146), WP = new Float32Array(2 * 146), WQ = new Float32Array(12);
+const SH = pocket.hone, WM = new Float32Array(3 * 146), WP = new Float32Array(2 * 146), WQ = new Float32Array(12);
 const EP = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 const W_EAR = 28, W_CORE = 58, W_WH = 74, W_EYE = 86;
 // Colours: the lit room 0x218b, the glowing iris 0xbf9f, the magenta inner

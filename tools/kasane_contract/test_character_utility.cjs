@@ -1,6 +1,8 @@
 'use strict';
 const assert = require('node:assert/strict');
-const Character = require('../../apps/character/character.js');
+const Ayatsuri = require('../../apps/character/character.js');
+assert.strictEqual(globalThis.Ayatsuri, Ayatsuri);
+assert.strictEqual(globalThis.Character, Ayatsuri, 'old name aliases the same visual implementation');
 const MeshReference = require('../character/mesh_reference.cjs');
 const Motion = require('../../apps/character/motion.js');
 // The rejected coarse experiment remains an independent numerical reference,
@@ -75,7 +77,7 @@ assert.throws(() => body.material({color: 0, roughness: NaN}));
 scene.evaluate(5000);
 scene.render(); assert.ok(stats().renderedFaces > 0);
 assert.throws(() => scene.add({name: 'body', geometry: null}));
-const other = Character.scene({backend: {ellipsoid() {}}});
+const other = Ayatsuri.scene({backend: {ellipsoid() {}}});
 assert.throws(() => other.add({name: 'bad', parent: body, geometry: null}));
 assert.throws(() => other.add({name: 'typo', parent: {}, geometry: null}));
 assert.throws(() => other.add({name: 'typo', parent: 'root', geometry: null}));
@@ -87,7 +89,7 @@ scene.dispose(); scene.dispose(); assert.throws(() => scene.evaluate(0));
 
 // Native analytic rendering must not allocate the per-face experiment buffers.
 let analyticCalls = 0, packetScreen, packetNormal, packetTexture;
-const compact = Character.scene({backend: {ellipsoid(screen, normal, lighting, material, surface, texture) {
+const compact = Ayatsuri.scene({backend: {ellipsoid(screen, normal, lighting, material, surface, texture) {
   ++analyticCalls;
   assert.ok(screen instanceof Float32Array && screen.length === 8);
   assert.ok(normal instanceof Float32Array && normal.length === 9);
@@ -148,8 +150,8 @@ assert.throws(() => compact.evaluate(1)); assert.throws(() => compact.render());
 compact.camera({position: [0, 0, 400]}); compact.evaluate(1); compact.render();
 assert.throws(() => compact.add({name: 'bad-parent', parent: {}, geometry: null}));
 compact.dispose();
-assert.throws(() => Character.scene({backend: {fill() {}}}), /analytic shapes backend/, 'no silent coarse device fallback');
-const hierarchy = Character.scene({backend: {ellipsoid() {}}});
+assert.throws(() => Ayatsuri.scene({backend: {fill() {}}}), /analytic hone backend/, 'no silent coarse device fallback');
+const hierarchy = Ayatsuri.scene({backend: {ellipsoid() {}}});
 const group = hierarchy.add({name: 'group', geometry: null}), leaf = hierarchy.add({name: 'leaf', parent: group, geometry: {kind: 'ellipsoid', radii: [1, 2, 3]}});
 hierarchy.add({name: 'sibling', parent: group, geometry: {kind: 'ellipsoid', radii: [1, 1, 1]}});
 const h0 = {}, h1 = {}; hierarchy.evaluate(0); hierarchy.stats(h0);
@@ -165,10 +167,10 @@ hierarchy.dispose();
 // A backend/visitor cannot mutate or reenter its active scene. Other scenes
 // remain independent, and callback failure releases the per-scene guard.
 let onDraw = () => {};
-const guarded = Character.scene({backend: {ellipsoid() { onDraw(); }}});
+const guarded = Ayatsuri.scene({backend: {ellipsoid() { onDraw(); }}});
 const guardedPart = guarded.add({name: 'part', geometry: {kind: 'ellipsoid', radii: [2, 2, 2]}});
 guarded.evaluate(0);
-const isolated = Character.scene({backend: {ellipsoid() {}}});
+const isolated = Ayatsuri.scene({backend: {ellipsoid() {}}});
 const isolatedPart = isolated.add({name: 'part', geometry: {kind: 'ellipsoid', radii: [1, 1, 1]}});
 isolated.evaluate(0);
 onDraw = () => {

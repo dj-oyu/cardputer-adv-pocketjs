@@ -1,7 +1,7 @@
 // A small borrowed-key sampler; MEGADEMO need not load the material engine.
 'use strict';
-globalThis.CharacterMotion = (() => {
-  function fail(message) { throw new TypeError('CharacterMotion: ' + message); }
+globalThis.AyatsuriMotion = (() => {
+  function fail(message) { throw new TypeError('AyatsuriMotion: ' + message); }
   function finite(value) { return typeof value==='number' && value-value===0; }
   function track(keys, options) {
     const stride = options.stride, column = options.timeColumn === undefined ? 0 : options.timeColumn;
@@ -69,7 +69,7 @@ globalThis.CharacterMotion = (() => {
       mode=keyTrack.interpolation==='smooth'?1:keyTrack.interpolation==='step'?2:0, timeUnit=keyTrack.timeUnit;
     for(let i=0;i<names.length;++i)output[names[i]]=0;
     function evaluate(time) {
-      if(typeof time!=='number'||time-time!==0)throw new TypeError('CharacterMotion: invalid time');
+      if(typeof time!=='number'||time-time!==0)throw new TypeError('AyatsuriMotion: invalid time');
       for(let i=0;i<values.length;++i)values[i]=0;
       // Keep playback self-contained so setup-only helpers can be collected.
       const end=keys.length-stride;
@@ -90,7 +90,7 @@ globalThis.CharacterMotion = (() => {
           if(kind)values[at]*=1+v;else values[at]+=v;
         }
       }
-      for(let i=0;i<values.length;++i)if(values[i]-values[i]!==0)throw new TypeError('CharacterMotion: performance overflow');
+      for(let i=0;i<values.length;++i)if(values[i]-values[i]!==0)throw new TypeError('AyatsuriMotion: performance overflow');
       for(let i=0;i<values.length;++i)output[names[i]]=values[i];
       return output;
     }
@@ -98,4 +98,5 @@ globalThis.CharacterMotion = (() => {
   }
   return {track, sample, performance};
 })();
-if (typeof module !== 'undefined') module.exports = globalThis.CharacterMotion;
+globalThis.CharacterMotion = globalThis.AyatsuriMotion; // Compatibility alias.
+if (typeof module !== 'undefined') module.exports = globalThis.AyatsuriMotion;

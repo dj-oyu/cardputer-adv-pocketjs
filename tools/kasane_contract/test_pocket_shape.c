@@ -63,9 +63,8 @@ static char *read_file(const char *path,size_t *size){
 int main(int argc,char **argv){
     REQUIRE(argc==2);
     JSRuntime *rt=JS_NewRuntime();JSContext *ctx=JS_NewContext(rt);
-    JSValue g=JS_GetGlobalObject(ctx),shapes=JS_NewObject(ctx);
-    REQUIRE(pocket_shape_fill(ctx,shapes,NULL)==ESP_OK);
-    JS_SetPropertyStr(ctx,g,"shapes",shapes);
+    REQUIRE(pocket_shape_install(ctx,NULL)==ESP_OK);
+    JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__segs",JS_NewCFunction(ctx,js_segs,"__segs",0));
     JS_SetPropertyStr(ctx,g,"__limit",JS_NewCFunction(ctx,js_limit,"__limit",1));
     JS_SetPropertyStr(ctx,g,"__begin",JS_NewCFunction(ctx,js_begin,"__begin",0));

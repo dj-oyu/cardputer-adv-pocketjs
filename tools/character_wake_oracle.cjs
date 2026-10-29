@@ -27,7 +27,7 @@ function harness(source, utility) {
     },
     fill(...args){capture('fill',args);}, outline(...args){capture('outline',args);}
   };
-  const context=vm.createContext({Math,Float32Array,pocket:{shapes},M:Math,PI:Math.PI,WH:65535,
+  const context=vm.createContext({Math,Float32Array,pocket:{shapes,hone:shapes},M:Math,PI:Math.PI,WH:65535,
     BG(value){calls.push(['BG',value]);},
     smooth:u=>u*u*(3-2*u),ramp:(t,a,b)=>t<=a?0:t>=b?1:(t-a)/(b-a)});
   if(utility) vm.runInContext(fs.readFileSync(path.join(root,'apps/character/motion.js'),'utf8'),context);

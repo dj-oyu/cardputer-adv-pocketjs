@@ -14,7 +14,7 @@
 
 | 旧/現行の識別子 | 正式名・移行方針 | 状態 |
 | --- | --- | --- |
-| `pocket.shapes.project/fill/outline` | `pocket.hone.project/fill/outline`、既存shapesを互換として保持 | honeの公開aliasを実装・検証する工程 |
+| `pocket.shapes.project/fill/outline` | `pocket.hone.project/fill/outline`、既存shapesを互換として保持 | 同じnamespaceのaliasを実装、同head検証へ |
 | 新設の`pocket.shapes.shade/ellipsoid` | `pocket.hone.shade/ellipsoid`を新利用例の正規表記へ | 同上、古い呼出しも保持 |
 | Cの`pocket_shape_*` binding | JS bridge内部。公開hone C面と区別して段階移行 | 既存名の一括置換はしない |
 | `ksn_proc_*` | kasaneのframe/renderer内部。honeのpacket提出先 | 無関係な識別子は改名しない |
@@ -23,7 +23,7 @@
 | `CharacterLab/CharacterModels` | 試験app固有。`AyatsuriLab/AyatsuriModels`へ関連範囲だけ移行 | キャラクター種類の意味はmodelに残す |
 | Cのayatsuri scene/handle/evaluate/submit | `ayatsuri_*` | 今回は意味/所有権設計、C共通核の実装とJS接続は未完 |
 
-既存`kasane.shapes` capabilityは互換性を維持する。新hone endpointのcapability/aliasが同じ実装を参照することを試験し、旧アプリのfeature-testを壊さない。既存JS、ホストshim、firmwareの入口を照合してから実装状態を更新する。filenameとC内部名の全置換を完了条件にしない。
+既存`kasane.shapes` capabilityは互換性を維持する。初期hone endpointも同じmanifest gateを使い、新しい権限やcapability名を増やさない。`pocket.hone === pocket.shapes`で、honeを先に読んでも旧namespaceを一度だけ構築し、同じmethod/resource ownerを参照する。古いエラーのoperation名`shapes.*`も互換のまま残す。既存JS、ホストshim、firmwareの入口を照合して実装状態を更新する。filenameとC内部名の全置換を完了条件にしない。
 
 ## 共通の意味契約
 
@@ -41,3 +41,7 @@ allocatorとsceneは環境ownerに属し、同一owner taskからのみ操作す
 現在のJS評価器は縦切り試作で、Cフレームワークはまだ存在しない。次段階で評価核を共有化し、JS adapterとC利用側が同じ座標・法線・材質・seek・失敗fixtureを通ることを条件にする。CとJSを別々の完成実装として公開してから差異を吸収する進め方は採らない。HOMEでは前景UI、app起動/復帰、停止/解放、共有strip/資源衝突を別途検証する。
 
 関連: [低APIとpacket](shapes.md)、[現utilityとライフサイクル](character-utility.md)、[計測と制約](../perf/character-materials.md)。正式名称への変更は機能・品質・実機検証の合格を意味しない。
+
+## 反復の記録単位
+
+仕様の意図、実装済みの入口、同headのsimulation/実測事実、未検証を別に記録する。[実装と計測記録](../perf/character-materials.md)では対象commit・条件・指標・失敗原因・修正後比較を追い、実機で制約/raceが出たら契約まで戻って見直す。仕様→実装→simulation/実機→仕様の反復であり、名称変更や一枚の静止画だけで完了としない。

@@ -309,6 +309,7 @@ int main(int argc, char **argv) {
     {
         JSValue g = JS_GetGlobalObject(ctx), pocket = JS_NewObject(ctx), shapes = JS_NewObject(ctx);
         REQUIRE(pocket_shape_fill(ctx, shapes, NULL) == ESP_OK);
+        JS_SetPropertyStr(ctx, pocket, "hone", JS_DupValue(ctx, shapes));
         JS_SetPropertyStr(ctx, pocket, "shapes", shapes);
         JS_SetPropertyStr(ctx, g, "pocket", pocket);
         JS_FreeValue(ctx, g);

@@ -1,6 +1,6 @@
 // Models own visual semantics; light and camera stay in the app's scene.
 'use strict';
-globalThis.CharacterModels = (() => {
+globalThis.AyatsuriModels = (() => {
   const names = ['HUMAN', 'FOX', 'CLOUD'];
   const skin = {color:0xe9a87f,ambient:.38,diffuse:.62,specular:.12,roughness:.7,
                 transmission:.14,transmissionColor:0xffad79,thickness:.65};

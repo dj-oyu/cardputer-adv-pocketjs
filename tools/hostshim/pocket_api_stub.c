@@ -13,6 +13,12 @@
 static const pocket_capability_t *caps[16];
 static int ncaps;
 
+JSValue pocket_api_root(JSContext *ctx) {
+    JSValue global=JS_GetGlobalObject(ctx),root=JS_GetPropertyStr(ctx,global,"pocket");
+    if(JS_IsObject(root)){JS_FreeValue(ctx,global);return root;}
+    JS_FreeValue(ctx,root);return global;
+}
+
 esp_err_t pocket_api_register(const pocket_capability_t *capability) {
     for(int i=0;i<ncaps;i++)
         if(!strcmp(caps[i]->name,capability->name)) { caps[i]=capability; return ESP_OK; }

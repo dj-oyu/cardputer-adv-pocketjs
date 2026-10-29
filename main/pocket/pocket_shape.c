@@ -487,8 +487,34 @@ static const pocket_limit_t shape_limits[]={
 };
 static const pocket_capability_t capability={.name="kasane.shapes",.supported=true,
     .available=true,.limits=shape_limits};
+/* Both names resolve to one namespace: no second method table or work owner. */
+static JSValue js_hone_namespace(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)argc;(void)argv;
+    JSValue ns=JS_GetPropertyStr(ctx,self,"shapes");
+    if(JS_IsException(ns))return ns;
+    if(!JS_IsObject(ns)){
+        JS_FreeValue(ctx,ns);
+        return invalid(ctx,"hone","shapes namespace unavailable");
+    }
+    if(JS_DefinePropertyValueStr(ctx,self,"hone",JS_DupValue(ctx,ns),JS_PROP_ENUMERABLE)<0){
+        JS_FreeValue(ctx,ns);return JS_EXCEPTION;
+    }
+    return ns;
+}
 esp_err_t pocket_shape_install(JSContext *ctx,void *unused){
     (void)unused;
     esp_err_t err=pocket_api_register(&capability);
-    return err==ESP_OK?pocket_api_lazy(ctx,"shapes",pocket_shape_fill,NULL):err;
+    if(err!=ESP_OK)return err;
+    err=pocket_api_lazy(ctx,"shapes",pocket_shape_fill,NULL);
+    if(err!=ESP_OK)return err;
+    JSValue root=pocket_api_root(ctx);
+    if(!JS_IsObject(root)){JS_FreeValue(ctx,root);return ESP_ERR_INVALID_STATE;}
+    JSValue getter=JS_NewCFunction(ctx,js_hone_namespace,"hone",0);
+    if(JS_IsException(getter)){JS_FreeValue(ctx,root);return ESP_ERR_NO_MEM;}
+    JSAtom atom=JS_NewAtom(ctx,"hone");
+    if(atom==JS_ATOM_NULL){JS_FreeValue(ctx,getter);JS_FreeValue(ctx,root);return ESP_ERR_NO_MEM;}
+    int ok=JS_DefinePropertyGetSet(ctx,root,atom,getter,JS_UNDEFINED,
+                                JS_PROP_ENUMERABLE|JS_PROP_CONFIGURABLE);
+    JS_FreeAtom(ctx,atom);JS_FreeValue(ctx,root);
+    return ok<0?ESP_ERR_NO_MEM:ESP_OK;
 }

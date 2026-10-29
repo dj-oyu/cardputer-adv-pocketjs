@@ -1,8 +1,8 @@
 // Visual authoring handles own the typed packets and their dependency graph.
 'use strict';
-const Character = (() => {
+globalThis.Ayatsuri = (() => {
   const PI = Math.PI, TAU = PI * 2;
-  function fail(text) { throw new TypeError('Character: ' + text); }
+  function fail(text) { throw new TypeError('Ayatsuri: ' + text); }
   function finite(x) { if (typeof x !== 'number' || x - x !== 0) fail('finite number required'); return x; }
   function unit(x) { finite(x); if (x < 0 || x > 1) fail('coefficient outside 0..1'); return x; }
   function rgb(x) { if (x !== (x >>> 0) || x > 0xffffff) fail('RGB24 required'); return x; }
@@ -111,7 +111,7 @@ const Character = (() => {
   const HandlePrototype = {place, material, texture, visible};
   function scene(options) {
     options = options || {};
-    const backend = options.backend || (typeof pocket !== 'undefined' ? pocket.shapes : null), objects = [],
+    const backend = options.backend || (typeof pocket !== 'undefined' ? pocket.hone : null), objects = [],
       lightState = new Float32Array([-0.5, -0.4, 0.8, 1, 1, 1]),
       cameraState = new Float32Array([0, 0, 400, 0, 0, 0, 1, 120, 75]),
       lighting = new Float32Array(9),
@@ -119,7 +119,7 @@ const Character = (() => {
       counts = {geometryUpdates: 0, normalUpdates: 0, projectionUpdates: 0, albedoUpdates: 0,
         shadeUpdates: 0, shadeSamples: 0, analyticUpdates: 0, renderedFaces: 0, renderedPatches: 0, copiedBytes: 0,
         typedBytes: lightState.byteLength + cameraState.byteLength + lighting.byteLength + right.byteLength + down.byteLength + forward.byteLength};
-    if (!backend || typeof backend.ellipsoid !== 'function') fail('analytic shapes backend required');
+    if (!backend || typeof backend.ellipsoid !== 'function') fail('analytic hone backend required');
     const owner = {disposed: false, busy: false, dirty: true};
     let lightVersion = 1, cameraVersion = 1, evaluatedLight = 0, evaluatedCamera = 0, evaluated = false;
     function alive() { if (owner.disposed || owner.busy) fail(owner.disposed ? 'disposed scene' : 'busy scene'); }
@@ -295,7 +295,7 @@ const Character = (() => {
 
     function render() {
       alive(); if (!evaluated || owner.dirty) fail('evaluate before render');
-      if (!backend || !backend.ellipsoid) fail('analytic shapes backend required');
+      if (!backend || !backend.ellipsoid) fail('analytic hone backend required');
       counts.renderedFaces = 0; counts.renderedPatches = 0;
       owner.busy = true;
       try {
@@ -316,6 +316,7 @@ const Character = (() => {
   }
   return {scene, pack};
 })();
-if (typeof module !== 'undefined') module.exports = Character;
+globalThis.Character = globalThis.Ayatsuri; // Compatibility alias; one shared implementation.
+if (typeof module !== 'undefined') module.exports = globalThis.Ayatsuri;
 
 
