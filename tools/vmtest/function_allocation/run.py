@@ -77,8 +77,10 @@ def main():
 } while (0)
     assert(cpool_offset == sizeof(*b));
     assert(vardefs_offset == cpool_offset + fd->cpool_count * sizeof(*fd->cpool));
-    assert(closure_var_offset == vardefs_offset +
-           (fd->arg_count + fd->var_count) * sizeof(*fa_vardefs(b)));
+    /* docs/vm/compact-vars.md: a hardened context keeps 2 B per variable. */
+    assert(closure_var_offset == vardefs_offset + (ctx->harden ?
+           js_compact_vars_size(fd->arg_count + fd->var_count) :
+           (fd->arg_count + fd->var_count) * sizeof(*fa_vardefs(b))));
     assert(byte_code_offset == closure_var_offset +
            fd->closure_var_count * sizeof(*fd->closure_var));
     assert(function_size == byte_code_offset + fd->byte_code.size);''')
@@ -86,7 +88,9 @@ def main():
             # Existing copies cover each interval exactly; zero counts need NULLs.
             modified = modified.replace('        memcpy(', '        FA_COPY(').replace('    memcpy(b->byte_code_buf', '    FA_COPY(b->byte_code_buf')
             modified = modified.replace('    b->stack_size = stack_size;', '''    assert((b->cpool_count != 0) == (fa_cpool(b) != NULL));
-    assert((b->arg_count + b->var_count != 0) == (fa_vardefs(b) != NULL));
+    assert((b->arg_count + b->var_count != 0) ==
+           ((ctx->harden ? (void *)fa_compact_vars(b) : (void *)fa_vardefs(b)) != NULL));
+    assert(!(fa_vardefs(b) && fa_compact_vars(b)));
     b->stack_size = stack_size;''')
             modified = modified.replace('    fa_set_has_prototype(b, fd->has_prototype);', '''    for (size_t test_i = sizeof(*b); test_i < function_size; test_i++)
         assert(test_coverage[test_i] == 1);

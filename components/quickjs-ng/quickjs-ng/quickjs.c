@@ -36340,10 +36340,12 @@ has_pool_idx:
         case OP_FMT_none_loc:
             if (op == OP_get_loc0_loc1) {
                 printf(" 0, 1 ; ");
-                if (var_count > 0) {
+                /* vars is NULL for a function that keeps no JSVarDef
+                   (stripped, or compact: docs/vm/compact-vars.md). */
+                if (vars && var_count > 0) {
                     print_atom(ctx, vars[0].var_name);
                 }
-                if (var_count > 1) {
+                if (vars && var_count > 1) {
                     print_atom(ctx, vars[1].var_name);
                 }
             } else {
@@ -36358,7 +36360,7 @@ has_pool_idx:
             idx = get_u16(tab + pos);
 has_loc:
             printf(" %-4d ; ", idx);
-            if (idx < var_count) {
+            if (vars && idx < var_count) {
                 print_atom(ctx, vars[idx].var_name);
             }
             break;
@@ -36369,7 +36371,7 @@ has_loc:
             idx = get_u16(tab + pos);
 has_arg:
             printf(" %-4d ; ", idx);
-            if (idx < arg_count) {
+            if (args && idx < arg_count) {
                 print_atom(ctx, args[idx].var_name);
             }
             break;
@@ -40708,10 +40710,18 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     if (fd->arg_count + fd->var_count > 0 && compact) {
         fa_set_compact_vars(b, 1);
         uint16_t *slot = fa_compact_vars(b);
-        for (int k = 0; k < fd->arg_count + fd->var_count; k++) {
+        const int n = fd->arg_count + fd->var_count;
+        /* memcpy, padding included: the allocation is not zeroed, and every
+           byte of it is written exactly once (tools/vmtest/function_allocation). */
+        for (int k = 0; k < n; k++) {
             JSVarDef *vd = k < fd->arg_count ? &fd->args[k] : &fd->vars[k - fd->arg_count];
-            slot[k] = vd->is_captured ? vd->var_ref_idx : JS_COMPACT_NO_REF;
+            const uint16_t v = vd->is_captured ? vd->var_ref_idx : JS_COMPACT_NO_REF;
+            memcpy(slot + k, &v, sizeof(v));
             JS_FreeAtom(ctx, vd->var_name);
+        }
+        if (n & 1) {
+            static const uint16_t pad = 0;
+            memcpy(slot + n, &pad, sizeof(pad));
         }
     } else if (fd->arg_count + fd->var_count > 0) {
         fa_set_has_vardefs(b, 1);
