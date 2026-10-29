@@ -6,9 +6,9 @@ const DRAW = (k, a) => { const h = live[k]; if (h) H.draw(h, a); };
 globalThis.frame = function (buttons) {
   buttons |= 0;
   if (boot) {
-    // The frames (3 x 10 KB) and the first scene's plans on the first
-    // frame, after the compile's memory is gone (during evaluation the
-    // CORE build found no 10 KB holes on the device, 2026-10-28).
+    // The first scene's plans on the first frame, after the compile's
+    // memory is gone. The frames were taken by the entry, before the compile
+    // (proc_megademo.js); this beginFrame only opens one.
     boot = false;
     H.beginFrame(0);
     while (pend.length) live.push(reg(pend.shift()));

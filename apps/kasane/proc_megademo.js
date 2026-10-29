@@ -6,6 +6,10 @@
 // The app is in chunks (apps/kasane/chunks.txt), loaded here one parse at a
 // time. This entry names pocket.kasane, so the session reserves its arena.
 'use strict';
+// The procedural frames (2 x 10 KB and the VM's workspace) before any chunk
+// compiles, while the internal heap is whole: after the compile its largest
+// block was 31,744 B and they failed (device, 2026-10-29).
+if (pocket.kasane && pocket.kasane.procedural) pocket.kasane.procedural.beginFrame(0);
 pocket.app.load('act1');
 pocket.app.load('act2');
 pocket.app.load('wake');
