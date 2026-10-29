@@ -1,5 +1,7 @@
 # Kasane 画像変換（crop / stretch / rotate / アニメーション）の最適化調査
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 基点 `e323e56`（`perf/kasane-imgopt`、`origin/vm/design-contracts` 上）。2026-09-15。
 対象は直近で入った画像プリミティブ 5 コミット（`ec37a10` crop、`bb18d1d` provider、
 `4a5495c` stretch、`7f84e93` rotate、`8e6b251` animated tracks、`1c0d8c5` rotate の加算化）。

@@ -1,5 +1,8 @@
 # Carrying the fixed point through the flower pipeline
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+> **旧解釈の注意**: 本文の「FPU がない」「float 変換が soft-float」という説明を現行判断に用いない。後続の [FPU 実測](../../perf/fpu-latency.md) と [平方根の再測定](../../perf/flower-shade.md) を参照。
+
 Where this stands after the B=8 measurement (docs/flower-decor-cost.md): replacing
 `sqrtf` with an integer restoration root bought nothing, and the reason was not the
 loop. `d` arrives as a float and the root leaves as one, and each of those two

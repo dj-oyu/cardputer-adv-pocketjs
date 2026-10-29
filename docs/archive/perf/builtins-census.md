@@ -1,9 +1,11 @@
 # ライブラリを生かしているのは誰か（cref census）
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 リンクマップを3つの視点で突き合わせた調査。目的は「フラッシュを減らすとき、どのシンボルが
 **我々の C の参照だけを理由にリンクに入っている**のか」を、推測ではなく数字で特定すること。
-計器は [`tools/size/`](../../tools/size/) の2本（`member_bytes.py` / `map_census.py`）。
-手順そのものは [flash-size-method.md](flash-size-method.md) にある。
+計器は [`tools/size/`](../../../tools/size) の2本（`member_bytes.py` / `map_census.py`）。
+手順そのものは [flash-size-method.md](../../perf/flash-size-method.md) にある。
 
 ## 1. 方法 — マップの3箇所を突き合わせる
 

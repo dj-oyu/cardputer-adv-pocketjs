@@ -4,7 +4,7 @@
 実機には触れていない（`/dev/ttyACM0` は別セッション）。**ミリ秒は 1 つも無い**。ここにある数は
 target ツールチェーンの `objdump`/`size`/`nm`/`objdump -d` の実測、ホストで走らせたテストの出力、
 そして gcov の行カウント（gcc 12.2 host）である。調査と候補の判断は
-`docs/perf/kasane-image-transform-recon.md`、回転側の同型の仕事は
+`docs/archive/perf/kasane-image-transform-recon.md`、回転側の同型の仕事は
 `docs/perf/kasane-image-transform-step.md`。
 
 ---

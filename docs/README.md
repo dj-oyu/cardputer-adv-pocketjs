@@ -1,208 +1,43 @@
-# docs 索引
+# ドキュメントの入口
 
-このディレクトリの入口。**いま動いている主線は3本**（VM の高速化、PIE による描画の高速化、デザインシステム Kasane）で、それぞれにディレクトリがある。
+導入・操作・アプリ開発のための資料と、設計判断・過去の計測記録を目的別に探す。
+数値は対象 commit・image・workload に限る。host の検証、実機の測定、推定を読み分ける。
 
-- **仕様**: いま守る契約。コードが従う。
-- **設計**: 実装済み・実装中の方針と判断。決定と未決を書く。
-- **記録**: 実測・調査の結果。測った時点の値と出所（日付・commit・実測/推定の別）を持つ。
-- **backlog**: 開いている作業だけ。終わった項目は消す。各ディレクトリに1つ。
+## はじめに読む
 
-新しい文書は該当ディレクトリに置き、この表に1行足す。ファイル名は動かさない（本文や C のコメントが名前と節番号で参照している）。節番号を変えたら `git grep -n "<ファイル名>"` で参照元を直す。
-
-## 主線1: VM の高速化 — [`vm/`](vm/)
-
-QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替える（L0〜L5）。
-
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [quickjs-freertos-vm-spec.md](vm/quickjs-freertos-vm-spec.md) | 仕様 | L0〜L5 の全体仕様。各段の現状と、実装で確定した値 |
-| [vm-branching.md](vm/vm-branching.md) | 仕様 | `vm/*` ブランチとワークツリーの運用 |
-| [vm-L1-design.md](vm/vm-L1-design.md) | 設計 | L1: ジョブ境界の実行制御と起床 |
-| [vm-L2-design.md](vm/vm-L2-design.md) | 設計 | L2: 移動しない VM スタックと中断・再開。決定表 D1〜D43、整列（§2.2） |
-| [vm-L3-design.md](vm/vm-L3-design.md) | 設計 | L3: 相対参照と移動可能スタック。決定表 D44〜D55、移動は中断中のみ（§2）、差分表（§3） |
-| [vm-tco-design.md](vm/vm-tco-design.md) | 設計・検証記録 | strict末尾呼び出し最適化の実験実装。host/device検証済み、互換性維持のため既定n |
-| [task-allocation-facade.md](vm/task-allocation-facade.md) | 設計 | FreeRTOS タスクの配置ファサード（`standalone/fp_ticket`、未接続） |
-| [vm-L0-report.md](vm/vm-L0-report.md) | 記録 | L0 の実機計測（ターン内訳、ヒープ、ジョブ単価） |
-| [vm-L1-report.md](vm/vm-L1-report.md) | 記録 | L1 の実測。時計読み出しのコスト（§8.7）、コア移行（§8.8）、スケジューラ定数の調律（§10） |
-| [vm-L2-results.md](vm/vm-L2-results.md) | 記録 | L2 の実測と関所の結果（段ごと、host/device の別つき） |
-| [vm-L3-results.md](vm/vm-L3-results.md) | 記録 | L3a の実測。コーパス74件バイト一致、枝ごとの踏まれ方、毒の負の対照3種、Test262 7,036ファイル、移動の単価。**実機のサイズは `--gc-sections` で落ちるので測れない**（§2） |
-| [oom-parse-safety.md](vm/oom-parse-safety.md) | 記録 | 確保失敗時のコンパイル経路（VM の段とは独立）。全点掃引で見つけたメモリ安全性の穴（closures 71 点・generators 133 点 → 0）と、変数の捕捉が黙ってグローバル読みになる誤コンパイル。`DynBuf` のエラーが余りへの書き込みに効いていなかった根本原因。上流2系統とも未修正 |
-| [r3-small-block-cache.md](vm/r3-small-block-cache.md) | 設計 | R3: ゲストのアロケータの下に小ブロックの再利用リストを置く設計。確保の大きさの分布（上位 6 つで 92%）とキャッシュ方式ごとの命中率のシミュレーション、置き場所・上限の外に出る量・手放す時点・検査の仕方 |
-| [allocator-cost.md](vm/allocator-cost.md) | 記録 | ゲストのアロケータの値段を実機で測った（`CONFIG_POCKET_VM_ALLOCPROBE`、計測後に削除）: malloc→free 1 組 約 1,800 サイクル、STRESS の JS のターンの 20.6%。経路は `heap_caps` の走査・クリティカルセクション・flash 上の読み戻し |
-| [app-suspend-design.md](vm/app-suspend-design.md) | 設計 | アプリの常駐中断: Back でゲストを壊さずに止めて残し、同じアプリを開くと続きから。状態遷移、各面の中断・再開の扱い、API（`suspend`/`resume` フック、`stop("evict")`）、退去の条件、メモリの予算、段と検証。決めること 4 つ |
-| [r5-icache.md](vm/r5-icache.md) | 記録 | R5: STRESS のターンを QEMU で記録し、命令キャッシュの模型に通した（`tools/r5sim/`）。触るのは 45.5 KiB、衝突は 15%。flash 内の並べ替えは効かない。IRAM 8 KiB は実機で JS −15%・空き −8.7 KiB で、見送り |
-| [interpreter-stages.md](vm/interpreter-stages.md) | 設計・素案 | インタプリタの時間の段（S0 読み込み〜S4 ターン出口）と、最適化の段（tiered interpreter、T0〜T2）。どの段でも 1 ターンに触るコードを予算に収めて速くする方針、オペコードごとの呼び先と分類、ダンプ判定・TDZ・Math の試作結果、get_var・double の候補、後回しにしたもの（プロファイル・バイトコードの flash 保存） |
-| [turn-working-set.md](vm/turn-working-set.md) | 記録 | 段つきインタプリタの予算の下調べ: STRESS の 1 ターンが触るコードを部品ごとに分けた（`tools/r5sim/turnset.py`、模型の推定）。試作 3 つを入れても 42.5 → 41.8 KiB、インタプリタ（core＋helper）は 21.3 KiB で予算 14 KiB を超え、主因は helper。R5 の模型の行の水増し（45.5 → 42.5 KiB）を修正 |
-| [turn-cpi.md](vm/turn-cpi.md) | 記録 | R4: JS のターンを Xtensa の性能カウンタで測った（`CONFIG_POCKET_VM_TURNPERF`）。IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち。flash を QIO にして 1 フレームの JS 10.78 → 7.25 ms（同一配置） |
-| [p1-iram-placement.md](vm/p1-iram-placement.md) | 設計・素案 v2 | P1: 1ターンに触るコードを IRAM に置く。Xtensa の GCC は関数内の hot/cold 分割をしない（実測）。`JS_CallInternal` は冷たい命令を出しても 13〜16 KB 残り、1 KiB あたりの効きは helper 群の半分程度（推定）なので、本体・helper・両方を模型で同じ予算に並べてから実機へ。先に helper の `no_inline`。SLOW のレビューの要約（§8） |
-| [gc-cap-backoff.md](vm/gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
-| [builtin-floor-plan.md](vm/builtin-floor-plan.md) | 設計・計画 | F 系列（VM の段とは独立）: ゲストの起動床（実機レイアウトで js=64,420 B、うち組み込みの名前 21.7 KB と何も作っていない索引）を flash へ。F1 ROM atom・F2 遅延索引で 28,684 B（−55%、計算）。捨てた案 4 つ、`atom_array` 33 箇所の台帳、関所と負の対照。道具は `tools/vmtest/floor/` |
-| [rom-intrinsics.md](vm/rom-intrinsics.md) | 設計・考察 | F 系列の次: harden（読み取り専用の intrinsic）の下で、組み込みオブジェクトのグラフ全体をビルド時 snapshot として flash に置く。F1〜F3 後の床 24,512 B（context 17,904）のうち約 14.0 KB と、アプリが触ったメソッド 4〜7 KB が対象（実測 host、実機レイアウト）、DERBY で約 20 KB（推定）。参照数は符号で不死を表し（dup +1 命令、free ±0）、`realm` は NULL。壊れるもの 9 項の台帳、候補 4 つの比較、T1 の guard との関係、段 R1〜R4。道具は `tools/vmtest/floor/rom_walk.sh` |
-| [spread-eval-oom.md](vm/spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
-| [aliasing-types.md](vm/aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
-| [eval-peak.md](vm/eval-peak.md) | 記録・比較 | 評価のピークの構成（pass-1 バイトコード 46%、JSFunctionDef 15%…、host の確保タグ）と下げる手段の実測: 分割（B 案）+18.5〜25.9 KB、事前コンパイル +26 KB・49 ms、パーサの余り返し host −11 KB、ES モジュール、遅延 import。推奨の順序と決めること。§7 製品化した `pocket.app.load`（チャンクの表・書き方・実機で 3 分割 +18.2 KB）、§8 静的 import への引き継ぎ |
-| [ゲストの行番号表を落とす](vm/strip-debug.md) | `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）: 行番号表なしのコンパイル。アプリごとの効果（DERBY の評価の余裕 +2.7 KB、実機）、失う位置情報、DERBY の首振り（段階 3）には足りないこと、運用案（2026-09-30）|
-| [tdz-elision.md](vm/tdz-elision.md) | 設計・記録 | TDZ 検査（`get_loc_check`・`put_loc_check`・`set_loc_uninitialized`）をコンパイル時のデータフロー解析で消す。DERBY の 1 フレーム 12,375 → 11,506 命令（host 計数）、評価のピーク −2.6 KB、確保なし。規則と正しさの根拠、検査 |
-| [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
-| [math-call-fast.md](vm/math-call-fast.md) | 試作 | `Math.sin(x)` など純粋な組み込みを、数値の引数なら native フレームなしで呼ぶ（`js_call_math_fast`）。今の経路（C 関数約18種）、DERBY の Math 163.5 回/フレーム（host）、別名・IC・呼び出し箇所の特殊化との比較。host 検査済み、実機の速度は未測定 |
-| [harden.md](vm/harden.md) | 設計・記録 | アプリのコンテキストから驚きを消す 4 規則: eval/Function 禁止、prototype の付け替え禁止、組み込みは生まれたときから書き換え不可（凍結せず属性で。遅延の組み込みも鍵付きで生まれる）、species を見ない。override mistake の緩和、shape の対の共有でヒープ +424 B（host）。実機で全 JS アプリの起動を確認、DERBY の JS +0.7%・命令 +0.25%（A/B/A） |
-| [c-builtins-zip-fromasync.md](vm/c-builtins-zip-fromasync.md) | 設計 | issue #91: ROM 版に無い `Iterator.zip` / `zipKeyed` / `Array.fromAsync`（上流は JS の bytecode、RD5 で落とした）を C で書き直す設計。zip は `JS_CLASS_ITERATOR_HELPER` に kind を 1 つ、fromAsync は async 関数の `await` と同じ部品（`js_promise_resolve` ＋ `perform_promise_then` に `undefined` の cap）で状態機械。test262 の 3 ディレクトリは今の RAM 版で 350/350、`--harden` で 314（36 件は規則どおり）、ROM 版は 10（理由違い）（実測 host）。flash は正味 ±1 KB 前後、使わないアプリの RAM は 0（推定）。zip を先に |
-| [event-loop-design.md](vm/event-loop-design.md) | 設計・素案 | 非同期の合流点を表示ループから外す（#98 の根）: 同期的な 3 層（fs の同期 I/O・pump 段の合流・`frame()` が中心のループ）のなぜなぜ分析、根本原因はターンの過積載。ui_task のままイベントループにし、`frame()` を描画の機会に降格、生存は参照カウント。L1 §4.2 との衝突は段階（E1 は `frame()` 無しのセッションだけ）で避ける |
-| [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
-
-## 主線2: PIE と描画の高速化 — [`perf/`](perf/)
-
-ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適化。PIE 命令の一次情報（TRM 抽出、実機で確かめた命令の意味とストール）は別リポジトリ [esp32s3-hw-mcp](https://github.com/dj-oyu/esp32s3-hw-mcp) にある。
-
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [kasane-dma-overlap.md](perf/kasane-dma-overlap.md) | 再提案 | #37 から通常 main へ抽出、既定 OFF・実機未受入。 |
-| [bigwave-inputs-local.md](perf/bigwave-inputs-local.md) | 実験 | BIG WAVEの入力配列5式、native A/Bと有限実機診断のローカル準備・未確認範囲 |
-| [pie-simd.md](perf/pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
-| [flash-removals.md](perf/flash-removals.md) | 記録 | 「我々だけが参照元」のライブラリ会員を測った結果（`ui/shell.c` の `__divdf3` は ROM エイリアスで 0 B、`solar_sail.c` の `remainder` 402 B は落ちるが差し替えが +508 B、`sqrtf` は 294 B 落ちるがビット一致の差し替えが収まらない）。map の「理由」≠「根」、幻の取り込み、道具の過小カウント |
-| [trig-lut.md](perf/trig-lut.md) | 記録 | シーンの三角関数の LUT 化（`main/scene/fxmath.c`）: 表の大きさ×型×次数の掃引、Q31/Q15 の精度の床、採用した 216 区間 2 次、tan の除算を消した結果、ダンプハーネスの罠、**実機の1呼び出しコスト**（lut 171 / poly 237 / libm 1,550 サイクル） |
-| [pie-opt-plan.md](perf/pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |
-| [builtins-census.md](perf/builtins-census.md) | 記録 | マップの3視点（配置・取り込み理由・`--cref`）で「我々だけが理由でリンクに入っているライブラリ」を全数調査。`compiler_builtins` 16 会員 46,329 B の取り込み理由と、我々が入口になっている 3 会員（13,680 B） |
-| [flash-size-method.md](perf/flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |
-| [kasane-image-transform-stretch-step.md](perf/kasane-image-transform-stretch-step.md) | 記録 | 拡大縮小画像スパンの画素ごとの 32bit 除算 2 本を、商と剰余の加算ステップ（切替つき・厳密・既定は有効）へ。1 画素 18 命令/除算 2 本 → 15-16 命令/0 本。調査は [kasane-image-transform-recon.md](perf/kasane-image-transform-recon.md)、回転側の同型の仕事は [kasane-image-transform-step.md](perf/kasane-image-transform-step.md) |
-| [kasane-grid-sampling-host.md](perf/kasane-grid-sampling-host.md) | 記録 | 固定小窓の最近傍・bilinear・面積平均のhost画質と元画像アクセス量。登録時sampling policyの判断根拠と実機未測定の範囲 |
-| [kasane-image-transform-anchor.md](perf/kasane-image-transform-anchor.md) | 記録 | 回転スパンのアンカーを行ごとの表にし、libgcc の `__divdi3` 2 本を消した（切替つき・厳密・既定は有効）。アンカー代 37.8 → 10.0 命令/画素、表は実行時構築で `.bss` +308 B（flash は 0 B 増） |
-| [kasane-image-transform-reject.md](perf/kasane-image-transform-reject.md) | 記録 | 回転スパンの域外判定をスパン単位の区間判定にした（切替つき・厳密・既定は有効）。棄却画素の処理 −5.0 命令/転送画素、新しいデータは 1 バイトも持たない |
-| [kasane-blend-pie.md](perf/kasane-blend-pie.md) | 記録 | 565 ブレンド／パックの PIE カーネル（候補 4a）: 16bit レーンモデル、恒等式の総当たり、`piesim` での全画素一致、命令数とストール。文書自体は結線前のホスト記録で、結線（`g_ksn_blend_pie`、既定 ON）は後続コミット |
-| [compiler-builtins.md](perf/compiler-builtins.md) | 記録 | compiler_builtins cgu.13（10,244 B）は `__fixdfsi` の参照を消しても落ちない: マップの取り込み理由は会員ごとに1本しか出ず、参照元は18本、しかも `__fixdfsi` 自体は ROM に解決されている |
-| [compiler-builtins-cgu04.md](perf/compiler-builtins-cgu04.md) | 記録 | cgu.04（`__gedf2`、2,248 B）も我々の側からは落とせない: 我々の5ファイルを置き換えても取り込み理由が `quickjs.c.obj` へ移るだけ（実測 −2 B） |
-| [backlog.md](perf/backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
-| [kasane-pet-row-cache.md](perf/kasane-pet-row-cache.md) | 記録 | PET 画像 provider の重複復号を 64 行キャッシュで消した（切替つき、8,208 B、−70.4%） |
-| [kasane-tile.md](perf/kasane-tile.md) | 記録 | 群のタイル面: 到達判定（3a）・ブロック幅（3b、16 画素は却下）・滑らかな層のブロック定数＋画素増分（厳密と近似の 2 段、命令数と動く画素の実測） |
-| [kasane-lut.md](perf/kasane-lut.md) | 記録 | 群の直接ブレンド連鎖を量子化キーの表へ（solid は厳密・既定 ON、TEXT は 16 段の近似・既定 OFF。画素あたり命令と動く画素の実測） |
-| [fpu-latency.md](perf/fpu-latency.md) | 記録 | **この石のスカラー FPU の性質**（`main/hal/fpu_latency.c`、ホーム画面で `F`）: 依存 4.07 / 独立 1.02 cy＝3サイクルのストール、パイプライン4段（2本織れば 2.04、4本で飽和）、FPU へ入る往復は **0**、`madd.s` は **fused**。手書きの順序は1画素で −24%・2画素で1.08倍。`-fschedule-insns` は10%遅い。**手書き版は書いて測って戻した** —— fused 縮約・検査インスタンス違い・ホストの第3の意味論という検証の穴3つが 0.3% に見合わなかった。浮動小数を書き直す前に読む必須手順つき |
-| [flower-shade.md](perf/flower-shade.md) | 記録 | FLOWER の単項最大 `shade`（748 cy/hit）を割った結果。死んだ `garden_dither` 呼び出しで `rgbd` 214 → 139 cy/call。`sqrtf`/`__divsf3` の逆アセンブル（どちらも FPU の Newton 列で、整数平方根は実機 A/B で**遅い**）。`lsi` による定数の直接ロードは命令 688 → 587・flash −344 B だが**時間は動かず**。§10 にこのシーンで実行間比較が成立しない理由（`rays` が位相で 4,700〜7,067 cy/行）と、初出時の fps 主張の取り下げ |
-| [ray-stall-census.md](perf/ray-stall-census.md) | 記録 | 「rays に余地は無い」をハードウェアカウンタで検算したら、**余地は rays の外にあった**。CPI 1.75 の内訳は命令退役0.55 / 命令RAM・ROMビジー0.28 / バブル0.10 / データ待ち0.02 で、**反復除算0.4%・反復乗算0%** —— 算術に余地は無い。そして §2.5: その「ビジー」は**16KBの命令キャッシュ**で、32KBにすると 0.28 → 0.05、IPC 0.55 → 0.75、**draw 31.38 → 23.56 ms（−25%、コード0行）**。代償は DRAM 16 KiB（`app_largest` 110,592 → 94,208、JSアプリ4本は通る）。`I_MEM_CACHE_MISSES` が常に0なのは「ミスが無い」ではなく S3 の flash キャッシュを LX7 のカウンタが見ていないからで、**`I_STALL_BUSY` はこの石では flash キャッシュミス待ちと読む**。§0 と §2.5 は同じ失敗を2回した記録 —— 厳密な0を「無い」と読んだ話 。§2.6 は**出荷ビルドに入っていたシーン自身の計測コード**（`ray_row` 内に14本の `esp_cpu_get_cycle_count`＋`"memory"` クロバー）を `SCENE_PROF` にして −1.87 ms、§2.7 は `flower_draw` の span 分割（2,991 → 1,199 B ＋ `bell_span` 1,463 B、bell を持つのは14種中4種だけ）で −0.5〜0.7 ms と、**種もビューも固定しないと2 msの差が測れない**ことを3回間違えて学んだ記録 。§2.8 で IRAM を単価比較して却下（0.28 対 0.33 ms/KiB）したあと、§2.9 で**結論が引っくり返る**: 作業集合は行ループ11 KBではなく**per-frame 27.5 KB 対 16 KB**で、1フレーム1回の `flower_build_botanicals`（9,725 B）を外すだけで crocus −3.18 / daffodil −4.72 ms —— 行ループ全体を外すより効く。§2.6 でこれを「実行時間0.4 msだから」と候補から外していたのが誤りで、**占有と実行時間は同じバイトの別の値段** 。**そして §2.10 で §2.6〜2.9 の時間の数字をほぼ全部撤回する**: `FLOWER_PREP_PAD`（IRAMへ移したうえで空いた番地に同サイズの nop を詰める）で勝ちが消え、占有ではなく配置だった。決定打は再測 —— **同じフラグ・同じ種・同じビューで 23.25 が 28.80 になった**。差分はピクセル完全一致・仕事不変・354 B 減のプリミティブ実体化だけ。**16 KB のままでは、絵を変えない変更がフレーム時間を5.5 ms（約20%）動かす**ので、削った効果を測る手段が無い。生き残るのは 32 KB の結果だけで、その価値は平均5.3 msより**フレーム時間がコード変更に対して安定すること** 。§2.11 が機構: 16 KB / 8 way / 32 B ライン = **64セット**で番地は **2,048 B ごとにエイリアス**、1フレームの命令フットプリント約20.6 KB = 643ラインは **1セット 10.1 ライン対 8 way** —— コンフリクトミスは構造的で、どれが誰を追い出すかは `番地 mod 2048` だけで決まる。32 KB なら 128セット・5.0ラインで収まり、**平均が速くなるだけでなく配置が意味を失う** |
-| [flower-row-invariants.md](perf/flower-row-invariants.md) | 記録 | 5体の並行調査＋Fableの査定から実装した3件と、外した1件。植生の行不変量を1フレーム1回へ（`GardenVeg`、veg 11,219 → 4,636 cy/行、−3.3〜3.7 ms/frame、`GardenFrame` 448 → 1,244 B）、bell の高さ窓を平方根なしで事前判定（ホスト 83.2% 不要／誤棄却0、実機 bell 832 → 580 cy/visit・bell内sqrt −81%）、`garden_mix` の強制インライン（−316 cy/行、ただしビルド間比較）。**楕円体スパンの当たり区間は代数もホスト検査（40.9%棄却・取りこぼし0）も通ったが実機で測定限界以下で、外した** —— 落とすのがループ中で最も安い画素だったため |
-| [kasane-text-damage.md](perf/kasane-text-damage.md) | 記録 | テキストの過剰再描画を3段で潰した記録。編集欄の1打鍵が全画面64,800Bだった件（`ksn_core_invalidate_bands`）、damage が帯ごとの列範囲を持つ件（`ksn_damage` / `present_rect` / 16画素丸めと閾値192、狭い窓が転送経路を落とす実測つき）、TEXT の damage が変わった字だけになる件（`ksn_text_port.advance`）。hello の1桁更新で 11,520 B → 768 B、3.22 → 1.92 ms |
-| [kasane-text-span.md](perf/kasane-text-span.md) | 記録 | テキスト span のインクループをセルの列範囲へ（厳密。1 列 70→27 命令・除算 4→0、歩く列はアプリの 4 テキストで 7.6%。実機の計器が span を render_ms の 48% と指したのが根拠で、実機のミリ秒は未取得） |
-| [system-pie-survey.md](perf/system-pie-survey.md) | 調査 | システムAPI（`main/system/`）に PIE の余地があるか。結論はほぼ無い —— 728 行は 4〜9 エントリの有界な帳簿処理で、1 フレーム 700〜1,500 命令 ≒ `render_ms` の 0.2%。唯一の大きい項は `sys_clock_snapshot` の 64bit 除算 2 本（libgcc 223 命令/本）で、採算はゲストの呼び出し回数が決める |
-| [libgcc-64bit-division.md](perf/libgcc-64bit-division.md) | 調査 | libgcc はこのイメージで **102 B** しか無い（要求しているのは IDF の gpio/efuse）。64bit 除算は Rust の compiler_builtins から来て、そのメンバは別の理由で既に入っているので **C 側を消しても 0 B**。C 側の呼び出し 36 箇所 / 17 ファイルの一覧と、本当に大きいのは compiler_builtins の 46,381 B（libm の数学関数が主）であること |
-| [kasane-alpha256.md](perf/kasane-alpha256.md) | 記録 | スカラー 565 ブレンド／パックの /255 を 255→256 の粗スケールへ（切替つき・既定は厳密。α は両アームで不変、動く画素の実測） |
-| [kasane-opt-survey.md](perf/kasane-opt-survey.md) | 調査 | 描画経路の棚卸しと候補の選別（境界ごとに「何が律速か」と却下の理由） |
-| [kasane-opt-integration.md](perf/kasane-opt-integration.md) | 記録 | 最適化分岐の統合記録（順序・衝突の解決・各段の数値・オブジェクト増減・既定値の一覧） |
-| [kasane-consolidation.md](perf/kasane-consolidation.md) | 記録 | kasane 系統の一本化の判定。12 分岐のユニーク 14 コミットは **すべて `perf/kasane-opt` に内容として入っており cherry-pick は 0 本**（`git cherry` の `+` 18 行は統合が衝突を両側残しで解いたため patch-id が一致しないだけ）。元→統合コミットの対応・切替と既定・ホスト検証（suite 71 PASS / ビルド rc=0 / bin 2,210,544 B）・削除してよい 12 枝の一覧 |
-| [pie-consolidation.md](perf/pie-consolidation.md) | 記録 | **`perf/mp3-fir` に何が入っているかの一覧と検証状態**（実機で測った値／ホストだけ／未計測の別、数字の出所つき）。flower-decor の性能19本の取り込みで何を両立させ、何を no-op とし、何を入れなかったか |
-| [flower-decor-cost.md](flower-decor-cost.md)（docs 直下） | 記録 | 装飾光線のコストを `decor` の内訳（rays / vegetation / rest）まで割った実機計測。`perf/flower-decor` の性能コミットが足し込み続ける文書なので、`docs/` の組み替えで `pie-simd.md` に吸収された後も名前ごと残している（`docs/perf/pie-consolidation.md`） |
-| [flower-optimisation-options.md](flower-optimisation-options.md)（docs 直下） | 記録 | flower のフレームをこれ以上どう縮めるかの検討。各候補に「実機 / [obj] / 推定」の別と上限がつく |
-| [flower-fixed-point-pipeline.md](flower-fixed-point-pipeline.md)（docs 直下） | 設計 | 固定小数点平方根を caller まで整数で持ち回す案（B=8 の実測が「時間は動かない」だった理由の続き。未実装） |
-
-作業ブランチの装飾光線コストと部分別計測は[flower-decor-cost.md](perf/flower-decor-cost.md)に保持する。
-群の合成を 1 枚のアフィン写像へ畳む候補 3c（不透明群はビット一致、非不透明への近似拡張は別段）は
-[kasane-group-affine.md](perf/kasane-group-affine.md)。
-検証の道具は [`tools/pie/README.md`](../tools/pie/README.md)。
-
-## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
-
-固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、動的描画の構想は現行 v1 の判断資料と分けて置く。
-
-| 文書 | 内容 |
+| 目的 | 入口 |
 | --- | --- |
-| [入口](kasane/README.md) | 読む順番、現在地、機械可読の旧スキーマ例の扱い |
-| [境界と契約](kasane/architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
-| [判断台帳](kasane/decisions.md) | トレードオフ、不採用案と再検討条件 |
-| [検証](kasane/verification.md) | 固定実機ゲート、実測の達成範囲、計測の落とし穴 |
-| [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
-| [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
-| [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
-| [手続き型描画の上限緩和の実機検証](kasane/procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
-| [MEGADEMO Act II](kasane/megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29） |
-| [MEGADEMO の負荷を実機で決める](kasane/megademo-device-limits.md) | 実機で初めて動かした結果（ZENITH で落ちていた）、場面×段階の JS/帯描画/転送/fps/heap 実測、破綻の境界（面の確保・plan の同時数・回転読み出し・登録時間・ゲストヒープ）、決めた `KN`/`LOAD` と既定段階、仕様上限が先に効く項目（2026-09-29 実測） |
-| [DERBY WATCH の背景は何が重いか](kasane/derby-background-cost.md) | 観客席・観客・柵・刈り目の plan を外した差（カメラ×段階）、帯描画の費用モデル（1 線分・1 帯・1 画素）、VM の SIN が引数約 201 超で約 7〜9 倍遅い発見、画素キャッシュと透明な面の効果の上限とメモリ（2026-09-30 実測）。追記に観客をフレームごとに半分描く試作（q27、出荷しない）の画・GIF・実機の費用 |
-| [DERBY の観客の見え方の候補](kasane/derby-background-cost.md) | 「点が観客に見えない」への候補 8 つ（人影の密度 3 段、頭の稜線＋塗り、服の帯＋明るい点、塗り＋紙吹雪、ウェーブ、手前の段だけ人影）を横見・首振りの @plan 対で作り、host の画・GIF（`docs/apps/derby-crowd-look-*`）、命令数（全部 64 以内）、費用の推定（今の 0.68〜2.4 倍）、首振りの区画内線形の誤差（6 m 以下で 1.8 px 以内）（2026-10-01、host のみ）|
-| [観客を「模様の線」と「タイル」で描く（試作）と、模様線 P24 の本実装](kasane/crowd-primitives-design.md) | 手続き描画の新しい命令 `LINE_PATTERN`（24 ビットの模様と 2 色目、遠近の弦）の設計・試作（タイルとノイズ線も）、実機の帯の単価（水平 0.061〜0.088 µs/画素、見積もりの 1.0〜1.4 倍）、本実装で変えたこと（パラメータのエントリの行を負に、色 A を命令に）、DERBY の観客の置き換えの費用（横見の VM draw + 帯 −0.27〜−1.18 ms）と画・GIF（`docs/apps/derby-crowd-p24-*`、2026-10-01）|
-| [面ごとの線分上限](kasane/surface-segment-cap.md) | `createSurface({maxSegments})` で面1のフレームを n 本分に縮める API、1 面の確保量（256 本で 5.4 KB、既定 1,024 本で 21.5 KB）、DERBY WATCH の評価直後に面1が確保できる境目と plan 登録への影響（2026-09-30 実測）|
-| [JS 風の言語 → 手続き型 IR](kasane/js-to-ir.md) | plan を名前と式で書くコンパイラの試作（`tools/kasane_ir/`、手書き 13 本と出力一致、命令 −3%）、plan の文字列と `prog()` のゲスト常駐（評価後 7.1 KB、段階 3 で 8.1 KB。文字列を詰めても −1.6〜2.4 KB）、native の plan が命令数に依らず 872 B である点、flash の plan を id で登録する設計と優先順位、plan を普通の JS の関数（`@plan`）で書きビルドが詰めた IR へ置き換える実装（DERBY で実装、Node 16 以上がそのときだけ要る。2026-09-30 host・実機実測、推定）|
-| [組み込みの plan を flash に置き名前で登録する](kasane/flash-plan.md) | `register('derby.crowd', args)` の API と誤り、表の生成器（`emit_rom_plans.mjs`）、引数を begin で当てる設計、`ksn_proc_rom_plan`（40 + 4 × 引数 B）、DERBY で native 9.9 → 1.2 KB（推定）・ゲスト −3.1〜5.7 KB（host 実測）、配列登録との全件一致の試験。firmware への組み込みと DERBY の 14 本の移行、実機でターン内の最小 +18 KB・評価の余裕 +4.8 KB・登録 1,252 → 570 µs・描画 +9〜17%（2026-10-01）|
-| [同、段階 3（首振り）を載せた実機](kasane/flash-plan.md) | `register('derby.crowd', args)` の API と誤り、表の生成器（`emit_rom_plans.mjs`）、引数を begin で当てる設計、`ksn_proc_rom_plan`（40 + 4 × 引数 B）、DERBY で native 9.9 → 1.2 KB（推定）・ゲスト −3.1〜5.7 KB（host 実測）、配列登録との全件一致の試験。firmware への組み込みと DERBY の移行、実機で登録 1,252 → 570 µs・ターン内の最小 +3.3 KB（2026-10-01）|
-| [plan を命令数ぶんだけ確保する](kasane/plan-sized-alloc.md) | `ksn_proc_sized_plan`（40 + 12n B、以前は 872 B）、命令数ごとの heap のブロック、DERBY の 25 本 22.5 → 9.7 KB とターン内の最小 +11.4 KB、首振り段階 3 の LOADSTALL の解消、断片化（`lg`）、flash の id 登録への見通し（2026-09-30 実測）|
-| [楕円・首振りの描画を速くする設計の考察](kasane/oval-pie-design.md) | 曲線 93 ms の内訳（`pose()` が 1 回 12 個の三角関数で 56%、計数と推定）、Möbius 変換と Newton の段数の条件、円弧の回転の漸化式（float32 の誤差）、有理ベジエ・チェビシェフを棄却した理由、VM の DIV の効果（+0.3 fps）、PIE が向く所と向かない所、区間の表（P0）と native のウォーカー（P5）の順序と合格基準、host の数値実験 `tools/games/ovalcost/` |
+| プロジェクトと基本操作 | [プロジェクト README](../README.md)、[ホーム UI](scenes/home-ui.md) |
+| 初回取得・依存関係 | [clean checkout の依存一覧](platform/clean-checkout-dependencies.md) |
+| 環境構築・ビルド | [Windows / EIM 開発環境](platform/build-environment.md) |
+| テストを実行する | [テストコマンド](platform/test-commands.md)、[作業時の規則](../CLAUDE.md) |
+| JS アプリを書く | [共通 API](api/common-api.md)、[ファイルシステム API](api/filesystem-api.md)、[Kasane](kasane/README.md) |
+| 日本語入力・PC 連携を使う | [SKK 日本語入力](apps/japanese-input.md)、[Pet Companion](apps/pet-companion.md)、[app-control v1](api/app-control-v1.md) |
 
-## JS API — [`api/`](api/)
+## 分野別の索引
 
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [common-api.md](api/common-api.md) | 仕様 | 共通 JS API `pocket.*`。冒頭に節ごとの実装状況（BLE 以外は実装済み）。`main/pocket/` はこれの実装 |
-| [filesystem-api.md](api/filesystem-api.md) | 仕様 | `pocket.fs`。`app:` / `assets:` / `sd:` の3ボリュームとも実装済み |
-| [shapes.md](api/shapes.md) | 仕様 | `pocket.shapes`（capability `kasane.shapes`、名乗ったアプリだけ）: 射影行列で 3D の点を写す `project`、多角形・楕円から穴を抜いて塗る `fill`、隠す形つきの `outline`。手続き面のフレームへ直接描く |
-| [backlog.md](api/backlog.md) | backlog | BLE、Opus の採否、SD の帯域、PC bridge の wire 形式など |
+| 分野 | 内容 |
+| --- | --- |
+| [API](api/README.md) | `pocket.*` の仕様、capability、未実装の面 |
+| [基盤・開発環境](platform/README.md) | 取得、ビルド、テスト、ハードウェア、起動・終了・入力 |
+| [ホームと背景](scenes/README.md) | XMB、設定、FLOWER・SOLAR SAIL・LEVEL WAVE |
+| [アプリと機能](apps/README.md) | 操作・機能設計、DERBY・MEGADEMO・音声の実装と比較記録 |
+| [VM](vm/README.md) | QuickJS / FreeRTOS の仕様・設計、L0〜L3 の記録・台帳 |
+| [性能と描画](perf/README.md) | PIE、Flash、画像変換、測定方法と実験記録 |
+| [Kasane](kasane/README.md) | 描画の契約、判断台帳、検証ゲート、動的描画 |
+| [過去の調査・実験・提案](archive/README.md) | 移動先一覧、旧手順・重複の扱い、比較未完の理由 |
 
-## 基盤と環境 — [`platform/`](platform/)
+## 文書の状態と更新方法
 
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [architecture.md](platform/architecture.md) | 設計 | 現在のディレクトリ構成、責務、アプリの状態遷移、起動と終了 |
-| [hardware-constraints.md](platform/hardware-constraints.md) | 仕様 | ハードウェア仕様と開発上の制約（RAM 表、配線、UI ノード数の崖） |
-| [build-environment.md](platform/build-environment.md) | 仕様 | Windows / EIM の開発環境とビルド手順 |
-| [test-commands.md](platform/test-commands.md) | 仕様 | 実機テストとホスト側テスト（PIE 3層、WSL のみのもの）のコマンド一覧。守る規則は CLAUDE.md |
-| [native-app-control.md](platform/native-app-control.md) | 仕様 | 通常 main への #47 再提案と USB console 前提。 |
-| [wifi-autostart.md](platform/wifi-autostart.md) | 設計 | Wi-Fi の自動起動: ホームのアイドルで一過性の時刻同期（アプリ優先で中断）、参照カウントの接続サービス `net_service`、常駐の背景サービスへの方針候補と実機で測る項目 |
-| [keystate.md](platform/keystate.md) | 設計 | 物理キーの押下集合（HAL の keystate）と `pocket.input.keys`: 入力経路と消費者の一覧、ライフサイクル、却下案、実機で測る同時押し・ゴースト・FIFO あふれ |
-| [idf-tls-txbuffer-report.md](platform/idf-tls-txbuffer-report.md) | 記録 | ESP-IDF の TLS 送信バッファの二重計上（上流への報告草稿、未送信） |
-| [backlog.md](platform/backlog.md) | backlog | srcstore とエディタの保存まわりの不具合2件（コードで再現確認済み）、入力キュー、Docs 機能 |
+- **仕様**は公開契約。実装済み範囲と未実装の面を明記する。
+- **設計**は判断と理由。素案・未接続・既定 OFF・未受入を実装完了と混同しない。
+- **記録**は対象 source と当時の結果。旧手順や訂正前の解釈を現行仕様として使わない。
+- **backlog / roadmap** は未解決の項目。各分野の索引から辿り、完了項目の根拠は元資料に残す。
 
-## ホームと背景 — [`scenes/`](scenes/)
+新しい文書は分野別の索引へ追加する。過去の記録は削除せず `archive/` へ保存するか、コードから参照される場合は元の場所に残して記録と明示する。
+API の節番号・設計の決定番号はコードから参照されるので動かさない。移動時はリポジトリ全体を検索して参照を修復する。
+ゲスト JS のソースサイズはヒープへ影響するため、文書整理のために JS コメントを変更しない。上流パッチも原本を保つ。
+旧パスの互換案内と保存先は [archive の索引](archive/README.md) に記す。
 
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [home-ui.md](scenes/home-ui.md) | 仕様 | ホーム UI: XMB 操作、Apps / Settings、背景の選択、遷移、エラー画面 |
-| [xmb-settings-sound.md](scenes/xmb-settings-sound.md) | 仕様 | XMB の設定項目と操作音（起動時に焼き込む効果音テーブル） |
-| [flower.md](scenes/flower.md) | 設計・仕様 | FLOWER 背景: 花の種、カメラとショット、森・光・雨、シーン遷移、装飾光線、メモリ |
-| [solar-sail.md](scenes/solar-sail.md) | 設計 | SOLAR SAIL 背景: 惑星と衛星の軌道モデル、時刻同期の境界 |
-| [level-wave.md](scenes/level-wave.md) | 設計 | LEVEL WAVE 背景: 浅水波の水面、光の屈折とコースティクス、ネオンのオーロラ |
-
-## アプリと機能 — [`apps/`](apps/)
-
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [japanese-input.md](apps/japanese-input.md) | 仕様 | SKK 日本語入力と `pocket.input.text` |
-| [player-overlay.md](apps/player-overlay.md) | 設計 | ホーム画面プレイヤー: オーバーレイの仕組みと費用の管理 |
-| [pet-companion.md](apps/pet-companion.md) | 仕様 | Pet Companion: PC 連携、API、実装メモ |
-| [pet-asset-design.md](apps/pet-asset-design.md) | 設計 | ペット画像の省容量化（PPT2 形式） |
-| [mp3-implementation.md](apps/mp3-implementation.md) | 記録 | MP3 実装と実測 |
-| [opus-feasibility.md](apps/opus-feasibility.md) | 記録 | Opus 復号の実現性調査と、実装後の答え合わせ |
-| [lcd-catch.md](apps/lcd-catch.md) | 設計・記録 | LCD CATCH: 固定セグメントの液晶ゲーム。Kasane の ref 32・コマンド 80 に収める設計、host の台本再生、実機で調整する項目 |
-| [derby-watch.md](apps/derby-watch.md) | 設計・記録 | DERBY WATCH: 線画の疑似 3D で観る競馬、再現できるレースのモデル、起動ごとの種、較正したオッズ、場面ごとの plan、host の全画素検証、`pocket.app.load` のチャンクへの分割 |
-| [derby-corner-model.md](apps/derby-corner-model.md) | 試算 | DERBY WATCH の楕円コース案: カーブだけの内外差とばらつきの乗数、枠・本命・入れ替わりへの効き、楕円用のオッズの再推定（host の Monte Carlo）、実装の結果（中・(c)、直線は全桁一致） |
-| [derby-pan-camera-cost.md](apps/derby-pan-camera-cost.md) | 記録 | DERBY WATCH の首振りカメラ・楕円コースの計算コスト: JS 演算と投影の単価（実機）、VM の Newton 逆数による投影、台数・自動ズーム・LOD 別のフレーム費用の見積もり（2026-09-30） |
-| [derby-pan-memory.md](apps/derby-pan-memory.md) | 記録 | DERBY WATCH の首振りカメラ（段階 3）が常駐させるゲストのヒープの内訳（関数・atom・plan の文字列）、事前コンパイルと行番号表の削除の効果の上限、規模を削る案と受け入れ条件との差（2026-09-30、host 実測）、flash の plan を載せた再挑戦で (e) の fps だけが不足（§10、2026-10-01 実機）、`vm/main` b184202 への追従とマージ前の再測定・楕円（段階 4）への引き継ぎ（§11）、楕円（段階 4）の実装・増分・曲線の首振りの fps を上げた手順と実機の表（§12、2026-10-01）、列を C にした S1b の増分（§14、2026-10-02） |
-| [derby-wide2-profile.md](apps/derby-wide2-profile.md) | 記録 | DERBY WATCH の楕円コーナーの首振り WIDE 2 の 1 フレームを、host の QuickJS の計装（`tools/vmtest/opprof/`）で命令・関数・配列・`Math` 単位に数え、実機の単価で µs に換算。実機の JS ターンとの一次式（4 構成で ±0.06 ms）、P5 の見積もりの検算（2026-10-01、host のみ） |
-| [derby-finish-fx.md](apps/derby-finish-fx.md) | 記録 | DERBY WATCH の FINISH のスローと HEAD ON のダスト（奥・中間・手前のボケ、馬群の範囲だけ）と手描き風の帯、スロー中の脚の位相の補間: plan 3 本（枠 31/32）、スクロールしても粒が保たれるスロットの列、既定 FINISH D・HEAD ON ①、調整前後と脚の補間の画と GIF、ser-native 統合後の実機の費用（FINISH JS +1.78 ms・render +0.48 ms、HEAD ON +0.71 ms、脚 +0.14 ms）、ゲストと評価の余裕（2026-10-02） |
-| [derby-trig-cull.md](apps/derby-trig-cull.md) | 記録 | DERBY WATCH の楕円の首振り: pose・三角関数の呼び出し元別の回数、キャッシュ・LUT・漸化式・固定点の表の比較、弦の culling と結合の本体数・画素差（画像・GIF）、弦の端を sin 9 個から対称性で作る変更（コードは tag `archive/trig-cull-B`。ゲスト +820 B で余裕を食うので vm/main には入れていない）。WIDE 2 の台は w −100・−14・−3（u=14）（2026-10-01、host のみ） |
-| [derby-trig-cull-device.md](apps/derby-trig-cull-device.md) | 記録 | trig-cull と WIDE 2 の u=14（w=−3）を実機で: 楕円コーナーの首振りの fps・JS・VM draw（4 構成、固定種）、ゲスト最大・評価余裕、u=14 の台の画像（2026-10-01） |
-| [derby-lane-offset.md](apps/derby-lane-offset.md) | 試作・記録 | DERBY WATCH の馬ごとの横位置（q26）: 楕円は脚質・区間・カーブの乗数で舵、後ろの馬はゆっくり揺れる、毎フレームの奥行き順。結果は main と全行一致、host m32 で評価のピーク +1.5 KB・生存ピーク +1.7〜2.8 KB（実機は推定のみ、2026-10-02） |
-| [derby-ser-native.md](apps/derby-ser-native.md) | 設計・記録 | DERBY WATCH の首振りの列 `ser()` を倍精度の C（`pocket.derby`、DERBY のセッションだけの面、capability `derby.series`）に写し `draw` を数値引数にした（S1b）: 境目の API、host の oracle（JS と C の draw の入力をビット単位で照合）、楕円コーナーの WIDE 2 が実機 15.9 → 24.6 fps、ゲスト −5.2 KB・評価の余裕 30.6 KB、画素・結果は全行一致（2026-10-02） |
-| [derby-native-survey.md](apps/derby-native-survey.md) | 設計・調査 | DERBY WATCH の首振り（楕円コーナーの WIDE 2）で native に下ろす候補 30 個の利得・費用・メモリ・工数・画素への影響、シナリオ別の fps（`ser()` に触らないと 20 fps に届かない、ウォーカーだけでは 27 fps の境目）、API の 3 案の比較と推奨（道の登録を共有する `path`／`pose`／`project`／`walk`）、実機で確かめる項目（2026-10-01、推定のみ・測定なし） |
-| [megademo-story.md](apps/megademo-story.md) | 設計・記録 | MEGADEMO — ASTRAL FIGHTER（2026-10-28 からの物語: 目覚め WAKE・出撃番号・記憶の濁り・猫のタマ）と、その前の NIGHT SIGNAL: 部屋と猫とモニターの物語として 5 章に組み直した台本、場面のつなぎ、Enter の小窓を物語の装置に使う設計、IV CORE（正二十面体の殻が開く 3D、グレーのフラッシュ・電波障害・めまいズーム）への差し替え、`pocket.app.load` の 4 チャンクへの分割（評価のピーク −39.5 KB）、メモリ（host m32）と実機の 90 秒の記録 |
-| [megademo-shapes.md](apps/megademo-shapes.md) | 設計・記録 | MEGADEMO の WAKE（3D の点＋透視のタマ）が実機 7 fps（JS のターン 130 ms）だったので、走査変換・投影・輪郭を C（`pocket.shapes`、MEGADEMO のセッションだけの面、capability `kasane.shapes`）へ移した: 倍精度ビルドで JS と draw がビット単位で一致する oracle、単精度の差、メモリ |
-| [big-wave.md](apps/big-wave.md) | 設計・記録 | BIG WAVE: 線分の疑似3Dで大波に乗るゲーム。世界固定の断面と 1/d の級数、host の台本とボット、全画素検証、負荷と上限の使用率、実機で詰める項目 |
-| [backlog.md](apps/backlog.md) | backlog | チュートリアルの見直し、オーバーレイの残り、日本語入力の残り |
-
-## 過去の知見 — [`archive/`](archive/)
-
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [findings.md](archive/findings.md) | 記録 | 削除した過去の記録から残した知見（M1 の受け入れ結果、背景描画の最適化手順、傾き連動と被写界深度で退けた案、XMB の設計根拠） |
-
-過去の文書そのものは git の履歴にある（2026-09-15 の整理で削除）。
-
-## 古いパスをわざと残した場所
-
-`docs/<名前>` の参照はリポジトリ全体で新しいパスに書き換えた。次の2種類だけはパスを書き換えていない。ファイル名は変えていないので、名前で検索すれば見つかる。
-
-- **JS のソース**（`apps/**/*.js`、`tools/vmtest/**/*.js`）。ゲストは起動時にソースを解析するので、バイト数がそのままヒープを使う。OOM の境界を突くテストは、ヒープの余りがバイト単位で動くと結果が変わる。節番号の書き換えは同じバイト長で行った。
-- **上流へ出すパッチ**（`reports/upstream/*.patch`）。レビューした内容のまま保つ。
-
-### DERBY opt-in experiments
-
-| Document | Kind | Scope |
-| --- | --- | --- |
-| [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
-| [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |
-
-- [DERBY PAN depth order](apps/derby-pan-depth-order.md) — #19 から通常 main へ抽出した投影順序と受入条件。
+文書・索引を変えたら、リポジトリルートで `python tools/check_docs.py` と `git diff --check` を実行する。
+ローカル Markdown リンク・画像・見出しアンカーと索引到達性を検査する。外部 URL の到達性や実機の挙動はこの検査の対象外。

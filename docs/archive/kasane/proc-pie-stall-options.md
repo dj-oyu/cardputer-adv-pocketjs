@@ -1,12 +1,14 @@
 # PIE block8 schedule (host verification)
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 The original `block8` issued twelve
 `EE.VLDBC.16.IP` loads of `q2` immediately before an instruction consuming
 `q2`: the two `MOV.S16.QACC` and ten `VMULAS.S16.QACC` instructions. The
 ESP32-S3 TRM table 1.7-2 places QR load definition in stage 2 and QR use
 in stage 1. The project's measured load-use rule says one independent
 instruction between producer and consumer removes that specific interlock
-([PIE survey §2.2](../perf/pie-simd.md)). The pre-change `build_api` object
+([PIE survey §2.2](../../perf/pie-simd.md)). The pre-change `build_api` object
 disassembled in source order, with no assembler scheduling inserted.
 
 This **host-verified, device-unmeasured schedule** is now used in
@@ -96,7 +98,7 @@ The C host contract for the point PIE arithmetic model also passes at `-O2`.
 
 This schedule makes **no device-speed claim**. The project's measured
 `VMULAS.S16.QACC` to `SRCMB.S16.QACC` pair has zero stalls despite a
-one-stall table prediction ([PIE survey §2.4](../perf/pie-simd.md)); no
+one-stall table prediction ([PIE survey §2.4](../../perf/pie-simd.md)); no
 filler is needed there. QACC timing for other pairs and resource conflicts
 are not modelled by `tools/pie/stalls.py`. Confirm PIE semantics and timing
 on the device when COM3 is available, then calibrate the dispatch threshold.

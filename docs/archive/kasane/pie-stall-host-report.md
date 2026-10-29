@@ -1,5 +1,7 @@
 # Compiled PIE stall check (host only)
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 The **pre-scheduling** `build_api` object `esp-idf/main/CMakeFiles/__idf_main.dir/ui/kasane/ksn_proc_points_pie.c.obj` was disassembled with Espressif's `xtensa-esp32s3-elf-objdump` on 2026-09-27. Its SHA256 was `e74ec3c5053c65b7bb17214d880da9f1a4ae4c5e6fce1e1d2007a94326b99543`. The `block8` symbol contains 31 actual PIE instructions, from `ee.vld.128.ip q0, a4, 0` through `ee.vst.128.ip q4, a3, 0`. The disassembly, rather than the C assembly string, supplies the sequence in this check.
 
 `esp32s3-hw-mcp`'s `analyze_sequence` reports **2 modelled data stalls**: one each for the two adjacent `EE.VMULAS.S16.QACC -> EE.SRCMB.S16.QACC` pairs. Both carry a separate **measured pair anchor of 0.0 stalls** on silicon against Table 1.7-2's 1-cycle prediction. The upstream model total is thus not a measured kernel total.

@@ -15,7 +15,7 @@ SDKはESP-IDF 6.0.1を使います。
 
 ## 設計ドキュメント
 
-入口は [docs/README.md](docs/README.md) です。いまの主線は VM の高速化（[docs/vm/](docs/vm/)）、PIE と描画の高速化（[docs/perf/](docs/perf/)）、デザインシステム Kasane（[docs/kasane/](docs/kasane/)）の3本です。よく使うもの:
+入口は [docs/README.md](docs/README.md) です。導入・ビルド・操作から、API・設計・過去の調査まで目的別に辿れます。過去の計測値と比較未完の提案は [記録の索引](docs/archive/README.md) を参照してください。よく使うもの:
 
 - [共通JS API](docs/api/common-api.md)：`pocket.*` の仕様。冒頭に節ごとの実装状況。
 - [ファイルシステムAPI](docs/api/filesystem-api.md)：`pocket.fs`、`app:` / `assets:` / `sd:`。

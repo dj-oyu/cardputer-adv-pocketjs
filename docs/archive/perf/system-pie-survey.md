@@ -1,9 +1,11 @@
 # システムAPI（`main/system/`）に PIE の余地があるか — 調査
 
+> **保存記録**: 当時の source・計測条件・未確認範囲を残す資料。現行仕様や最新 main の測定値ではない。[記録の索引](../README.md)。
+
 2026-09-16、ブランチ `perf/system-pie`（親 `origin/perf/kasane-opt` = `d3fc8ba`）。
 対象は `vm/design-contracts` が 2026-09-16 に足したシステムAPI・通知ランタイム
 （`main/system/sys_{state,clock,wall,timer,notify,ringer,device}.{c,h}`、14 ファイル 728 行）。
-[Kasaneの境界と契約](../kasane/architecture.md) が現在の設計要約、本書は**分析のみ**で、ソース・挙動・
+[Kasaneの境界と契約](../../kasane/architecture.md) が現在の設計要約、本書は**分析のみ**で、ソース・挙動・
 実機には一切触れていない。したがってここにある数は「読んだ行」「実行したコマンドの出力」
 「既存ドキュメントの値」のいずれかで、**このモジュールの実機時間を新たに測ったものは 1 つも無い**。
 
@@ -47,7 +49,7 @@ libgcc の重い補助関数を呼ぶのは 3 関数だけで、`nm -u` と relo
 `__divdi3` が **223 命令**という値は本リポジトリの実測
 （[kasane-image-transform-recon.md](kasane-image-transform-recon.md):62、
 `objdump -d libgcc/_divdi3.o`）からの引用である。このコアの 32bit 除算はハードウェア
-（`quou` 16〜18 サイクル、[pie-simd.md](pie-simd.md):233）だが、**64bit は libgcc のループ**
+（`quou` 16〜18 サイクル、[pie-simd.md](../../perf/pie-simd.md):233）だが、**64bit は libgcc のループ**
 なので値段の桁が違う。
 
 ## 2. 回数（コードから読んだ値。この節の数だけが「1 フレーム」に効く）

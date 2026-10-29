@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 M5Stack Cardputer ADV（ESP32-S3FN8、PSRAMなし、240×135 LCD）向けのESP-IDFファームウェア。QuickJS版PocketJSでJSアプリを1つずつ実行する。設計ドキュメントは日本語、**コード内のコメントは英語**で、密度と「なぜ」を説明する文体に揃える。
 
-**ドキュメントの入口は `docs/README.md`。** 主線は VM の高速化（`docs/vm/`、開発は `vm/main`）、PIE と描画の高速化（`docs/perf/`）、デザインシステム Kasane（`docs/kasane/`、開発は `feature/kasane`）の3本で、どちらのブランチも `main` へマージする。ほかは `api/` `platform/` `scenes/` `apps/` `archive/` に分けてある。新しい文書は該当ディレクトリに置いて索引に1行足す。**ファイル名は変えない** — 本文とCのコメントが名前で参照している。JSソース（`apps/**/*.js`、`tools/vmtest/**/*.js`）のコメントは、ゲストのヒープに効くので2026-09-15の移動前の古いパスのまま残してある。
+**ドキュメントの入口は `docs/README.md`。** 導入・操作と分野別索引を入口で分け、`api/` `platform/` `scenes/` `apps/` `vm/` `perf/` `kasane/` の索引から仕様・設計と計測記録を辿る。過去資料と移動先は `docs/archive/README.md`。新しい文書は分野別の索引へ追加する。コードが参照するファイル名・節番号・決定番号は保つ。移動時はリポジトリ全体の参照を修復し `python tools/check_docs.py` を実行する。JSソースのコメントと上流パッチはヒープ・原本性のため変更せず、必要なら元パスに移動案内を残す。
 
 ## ビルドと書き込み
 
