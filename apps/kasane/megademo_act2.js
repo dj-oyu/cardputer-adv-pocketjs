@@ -195,7 +195,9 @@ function core(k, t) {
     D += M.max(M.abs(PJ[2] - PJ[4]), M.abs(PJ[3] - PJ[5]));
     D += M.max(M.abs(PJ[4] - PJ[0]), M.abs(PJ[5] - PJ[1]));
     if (D >= 1e4 || e > 0 && (c += D) > 4000) continue;
-    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
+    // In the burst's glare only light and shade are left: shards grey,
+    // light facing the eye, dark turned away (the ring is the one colour).
+    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], e > 0 ? ts > 0 ? 0x4208 : 0xad55 : (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
   }
   // The core (cc): cube and octahedron (LETHE's magenta), pulsing. Cube
   // vertex i is the bits of i, octahedron vertex i the axis i % 3 signed
@@ -214,8 +216,8 @@ function core(k, t) {
   // from 64 and three beams sweeping round (64..84) to dodge.
   if (e > 0) {
     const R = 6 + 150 * ee, rr = M.max(8, k.r), ln = rnd(k.r * (1 - e));
-    E(4, 120, 67, R, R + 3 + 9 * (1 - e), t * .02, rr, 2 * PI / rr, (e < .3 ? OR : WH) ^ X);
-    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, OR ^ X);
+    E(4, 120, 67, R, R + 3 + 9 * (1 - e), t * .02, rr, 2 * PI / rr, OR);
+    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, 0x8410);
     // The core's light: dense rays from the middle, a blot of white that
     // swells over the screen.
     E(4, 120, 67, 0, t < 124 ? 4 + 2 * (t - 115) : 22 + 128 * smooth(ramp(t, 124, 134)), t * .3, rr, 2 * PI / rr, WH);
