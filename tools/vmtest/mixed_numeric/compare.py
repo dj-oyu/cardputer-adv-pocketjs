@@ -123,7 +123,16 @@ def main():
         assert 'BIGWAVE_HOST PASS' in (folder / 'app.log').read_text()
         result['variants'][mode] = {'source_sha256': hashlib.sha256(source).hexdigest(),
                                     'elf_class': elf_class}
-    for name in ('numeric.log', 'app.log', 'panels.bin'):
+    # The guest-heap lines are the VM's memory, not BIG WAVE's behaviour:
+    # a VM change may move them (docs/vm/compact-vars.md). Every other line,
+    # the panels and numeric.log stay byte for byte; the heap is recorded.
+    for mode in ('base', 'candidate'):
+        lines = (out / mode / 'app.log').read_text().splitlines(keepends=True)
+        heap = [x for x in lines if x.startswith('guest heap')]
+        assert len(heap) == 2, (mode, heap)
+        (out / mode / 'app-behaviour.log').write_text(''.join(x for x in lines if x not in heap))
+        result['variants'][mode]['guest_heap'] = [x.rstrip('\n') for x in heap]
+    for name in ('numeric.log', 'app-behaviour.log', 'panels.bin'):
         result[name] = equal_files(out / 'base' / name, out / 'candidate' / name)
     result['panels'] = result['panels.bin']['bytes'] // (240 * 135 * 2)
     (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
