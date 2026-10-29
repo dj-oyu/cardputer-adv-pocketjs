@@ -6,7 +6,7 @@ const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
 // scene starts at WAKE, so the loop's first enter(7) is not a new night.
 // live: the running scene's plan handles (PN plans at tier LT; the loader
 // adds the rest a frame at a time); next: the next scene's, prefetched.
-let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, LT = 0, next = null, loaded = 0, nd = 0;
+let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, LT = 0, next = null, loaded = 0;
 let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1, zb = -1, ZB = FULL;
 let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
 const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
@@ -123,9 +123,8 @@ function build(tx, m) {
     add(tx.strokeRect({bounds: [3, 15, 22, 34], width: 1, color: 0x17a7ffff}), 0, y);
     R.cm = add(tx.image({resource: pets, bounds: [4, 16, 21, 33], variant: 3, frame: 0}), 0, y);
     R.cf = 0;
-    R.lc = 0xfb47ffff; R.rc = 0x17a7ffff; R.k = -1;
+    R.lc = 0xfb47ffff; R.k = -1;
     if (scene === 4) {
-      R.ring = add(tx.strokeRect({bounds: [3, 83, 53, 133], width: 1, color: 0x17a7ffff}));
       R.lives = [0, 1, 2].map(i => add(tx.instantiate(lives, {offset: [160 + i * 12, 4]}), 0, i > 1 ? 72 : 1e9));
     } else {
       R.plate = add(tx.rect({bounds: [60, 118, 236, 133], color: 255}), 0, y);
@@ -163,8 +162,10 @@ function patch(tx) {
   }
   // Shutters: the TV turns on in the first news frames and off at the end
   // of CORE (on its white, a CRT switched off); in WAKE they are eyelids
-  // over the whole view.
-  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 5 ? clamp((154 - t) / 8) : scene === 7 ? lid(t) : 1;
+  // over the whole view, and in CORE's burst they squint, trembling,
+  // against the light (113..133), then give up to it.
+  const o = scene === 0 ? clamp((t - 2) / 8) : scene === 7 ? lid(t) : scene !== 5 ? 1 : t > 145 ? clamp((154 - t) / 8) :
+    t > 112 && t < 134 ? .3 + .05 * M.sin(t * 2.3) : 1;
   if (o < 1 || R.cv < 1) {
     const E = scene === 7 ? FULL : ZB, m = (E[1] + E[3]) / 2, h = (E[3] - E[1]) * o / 2;
     R.top.setRect(tx, [E[0], E[1], E[2], rnd(m - h)]);
@@ -237,18 +238,16 @@ function patch(tx) {
   const lc = t & (t > (scene === 4 ? 95 : 71) ? 2 : 8) ? 0xfb47ffff : 0x167fffff;
   if (lc !== R.lc) { R.lamp.setColor(tx, lc); R.lc = lc; }
   if (scene === 4) {
-    // The lives bob every 4 frames; the ring turns orange on the lock.
+    // The lives bob every 4 frames.
     const k = (t >> 2 & 1) | ((t + 3) >> 2 & 1) << 1 | ((t + 6) >> 2 & 1) << 2;
     if (k !== R.k) {
       R.k = k;
       for (let i = 0; i < 3; ++i) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
     }
-    const rc = t > 95 ? 0xfb47ffff : 0x17a7ffff;
-    if (rc !== R.rc) { R.ring.setColor(tx, rc); R.rc = rc; }
   } else {
     const p = M.min(100, t);
     if (p !== R.k) { R.k = p; R.meter.setRect(tx, [64, 128, 65 + rnd(1.69 * p), 130]); }
-    R.stat.setText(tx, 'SIGNAL ' + p + ' PLANS ' + live.length + ' DRAWS ' + nd);
+    if (!(t & 1)) R.stat.setText(tx, 'SIGNAL ' + p);
     // Tear: each band shows when a per-frame hash is under the eased
     // interference level, at a hashed height and offset.
     const nz = on ? t < 100 ? ramp(t, 60, 100) ** 1.5 : t < 112 ? 0 : 1 - ramp(t, 112, 124) : 0;

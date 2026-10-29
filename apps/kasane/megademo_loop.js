@@ -2,8 +2,8 @@
 'use strict';
 enter(7);
 let boot = true;
-// A plan's draw, skipped until the plan is registered; nd counts draws.
-E = (k, a, b, c, d, e, f, g, h) => { const p = live[k]; ++nd; if (p) H.draw(p, a, b, c, d, e, f, g, h); };
+// A plan's draw, skipped until the plan is registered.
+E = (k, a, b, c, d, e, f, g, h) => { const p = live[k]; if (p) H.draw(p, a, b, c, d, e, f, g, h); };
 BG = b => { H.beginFrame(b); };
 // The set per scene and tier, rebuilt (and patched in the same
 // transaction) when the key changes.
@@ -41,10 +41,11 @@ globalThis.frame = function (buttons) {
     // A plan decodes in ~13 ms on the device: one a frame, this scene's
     // first, then the next scene's over the last frames. Before the
     // frame: a park here must not show a new image under the old view.
+    // TWIST's negative set (drawn from 122) waits for 60: registered at its
+    // start it stacked on the handover from Act I, the run's tightest heap.
     let b = LOAD[1];
-    for (; b > 0 && live.length < PN; --b) live.push(reg(scene, live.length));
+    for (; b > 0 && live.length < PN && (scene !== 3 || t >= 60); --b) live.push(reg(scene, live.length));
     if (b && t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
-    nd = 0;
     play(scene, tier, t);
     H.commit();
   } catch (e) {
