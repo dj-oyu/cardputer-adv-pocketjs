@@ -58,7 +58,7 @@ wrong.ctx.Ayatsuri={scene(){return {add(){raw={_node:{owner:{},analytic:{kind:'e
 const unsupported=wrong.scene(),bad=unsupported.add({});assert.throws(()=>unsupported.aperture(bad,rest),/ABI/);unsupported.dispose();
 // The fake native provider below uses the frozen authoring fixture as an oracle.
 // It checks JS protocol/numerical controllers, not C floating-point or pixels.
-const FIXTURE=path.join(root,'tools/ayatsuri/model/fixtures/fox_face_25.js');
+const FIXTURE=path.join(root,'tools/ayatsuri/model/fixtures/fox_face_v2.js');
 function oracle(){
   const handles=[],clips=[],entries=[],byBuffer=new Map();let selected=null;
   const ctx=vm.createContext({ArrayBuffer,Float32Array,Float64Array,Uint16Array,Uint8Array,Int16Array,pocket:{ayatsuri:Transform}});
@@ -80,13 +80,13 @@ function oracle(){
 function nativeSetup(){
   const models=[];let published=null,onSubmit=null;
   function makeModel(){
-    const names=['fox-head','skull','ear-outer-1','ear-outer1','jaw-hinge','lower-jaw','cream-face','oral-volume','nose-bridge','eye-socket-1','sclera-1','iris-1','pupil-1','lid-arc-left-1','lid-arc-right-1','brow-1','eye-socket1','sclera1','iris1','pupil1','lid-arc-left1','lid-arc-right1','brow1','lip','nose'];
-    const m={count:25,closed:false,disposeCalls:0,instances:[],node(name){if(m.closed)throw Error('model disposed');return names.indexOf(name);},dispose(){m.closed=true;++m.disposeCalls;},instance(){
+    const names=['fox-head','skull','ear-outer-1','ear-outer1','jaw-hinge','lower-jaw','cream-face','oral-volume','nose-bridge','eye-socket-1','sclera-1','iris-1','pupil-1','lid-arc-left-1','lid-arc-right-1','brow-1','eye-socket1','sclera1','iris1','pupil1','lid-arc-left1','lid-arc-right1','brow1','lip','nose','ear-inner-1','ear-tuft-1','ear-inner1','ear-tuft1'];
+    const m={count:29,closed:false,disposeCalls:0,instances:[],node(name){if(m.closed)throw Error('model disposed');return names.indexOf(name);},dispose(){m.closed=true;++m.disposeCalls;},instance(){
       if(m.closed)throw Error('model disposed');const o=oracle();
       const i={o,evaluated:false,closed:false,readCalls:0,submitCalls:0,last:null,lastRefs:null,failRead:false,failSubmit:false,
-        targets(mask,pose,colors,opacity){assert.equal(mask.length,25);assert.equal(pose.length,225);
-          for(let n=0;n<25;n++){assert.notEqual(mask[n]&24,24);assert.equal(mask[n]&~127,0);for(let k=0;k<9;k++)if(mask[n]&(1<<Math.floor(k/3)))assert.ok(Number.isFinite(pose[n*9+k]));}
-          for(let n=0;n<25;n++){const h=o.handles[n],p={};if(mask[n]&1)p.position=Array.from(pose.slice(n*9,n*9+3));if(mask[n]&2)p.rotation=Array.from(pose.slice(n*9+3,n*9+6));if(mask[n]&4)p.scale=Array.from(pose.slice(n*9+6,n*9+9));
+        targets(mask,pose,colors,opacity){assert.equal(mask.length,29);assert.equal(pose.length,261);
+          for(let n=0;n<29;n++){assert.notEqual(mask[n]&24,24);assert.equal(mask[n]&~127,0);for(let k=0;k<9;k++)if(mask[n]&(1<<Math.floor(k/3)))assert.ok(Number.isFinite(pose[n*9+k]));}
+          for(let n=0;n<29;n++){const h=o.handles[n],p={};if(mask[n]&1)p.position=Array.from(pose.slice(n*9,n*9+3));if(mask[n]&2)p.rotation=Array.from(pose.slice(n*9+3,n*9+6));if(mask[n]&4)p.scale=Array.from(pose.slice(n*9+6,n*9+9));
             if(mask[n]&7)h.place(p);if(mask[n]&8)h.visible(true);if(mask[n]&16)h.visible(false);if(mask[n]&32)h.material({color:colors[n]});if(mask[n]&64)h.material({opacity:opacity[n]});}
           i.evaluated=false;
         },evaluate(camera,light){o.evaluate(Array.from(camera),Array.from(light));i.evaluated=true;},
@@ -102,7 +102,7 @@ function nativeSetup(){
           }
           if(onSubmit)onSubmit();i.lastRefs=[ids,counts,xy];i.last={ids:Array.from(ids),counts:Array.from(counts),xy:Array.from(xy),entries:o.render(map)};++i.submitCalls;
           published=structuredClone(i.last);
-        },submit(){throw Error('clip path must use submitClipped');},stats(out){out.nodes=25;out.evaluated=i.evaluated;return out;},
+        },submit(){throw Error('clip path must use submitClipped');},stats(out){out.nodes=29;out.evaluated=i.evaluated;return out;},
         dispose(){if(!i.closed){i.closed=true;o.scene.dispose();}}};
       m.instances.push(i);return i;
     }};models.push(m);return m;
@@ -117,25 +117,27 @@ const native=nativeSetup(),created=native.create(),ns=created.scene,controller=n
 assert.equal(typeof native.ctx.Ayatsuri,'undefined');assert.equal(typeof native.ctx.AyatsuriBlend,'undefined','native app imports no SourceA geometry utility');
 assert.equal(instance.readCalls,0,'registration must not auto-evaluate');
 assert.equal(ns.handle(10),ns.node('sclera-1'),'handle lookup preserves identity');
-const expectedOracle=oracle(),pose={yaw:0,pitch:0,smile:0,surprise:0,jawOpen:0},lidIds=[13,14,20,21];let frames=0,refs=null,eyeArtDiff=false;
+const expectedOracle=oracle(),pose={yaw:0,pitch:0,smile:0,surprise:0,jawOpen:0},lidIds=[13,14,20,21];let frames=0,refs=null;
 for(const yaw of [-35,0,35])for(const pitch of [-10,0,10])for(let j=0;j<=20;j++){
   pose.yaw=yaw*Math.PI/180;pose.pitch=pitch*Math.PI/180;pose.smile=j/20;pose.surprise=0;pose.jawOpen=0;
   controller.update(pose);ns.evaluate(0);ns.render();expectedOracle.model.update(pose);
-  for(let id=0;id<25;id++){
-    if(!lidIds.includes(id)||j===20)assert.deepEqual(Array.from(instance.o.handles[id]._node.matrix.slice(12,21)),Array.from(expectedOracle.handles[id]._node.matrix.slice(12,21)),'non-lid/full-smile original pose node'+id);
+  for(let id=0;id<29;id++){
+    if(!lidIds.includes(id))assert.deepEqual(Array.from(instance.o.handles[id]._node.matrix.slice(12,21)),Array.from(expectedOracle.handles[id]._node.matrix.slice(12,21)),'non-lid v2 authoring pose node'+id);
     if(!lidIds.includes(id))assert.equal(instance.o.handles[id]._node.enabled,expectedOracle.handles[id]._node.enabled);
   }
-  if(j===0)assert.ok(lidIds.every(id=>!instance.o.handles[id]._node.enabled),'neutral hides ink roof');
+  if(j===0)assert.ok(lidIds.every(id=>instance.o.handles[id]._node.enabled),'neutral has a thin fur-colored upper rim');
   if(j===20)assert.ok(lidIds.every(id=>instance.o.handles[id]._node.enabled),'full smile keeps the original visible arc');
-  if(j===0){const old=expectedOracle.clips[2].vertices,w=instance.o.handles[10]._node.analytic.work;
-    for(let k=0;k<8;k++)if(instance.last.xy[32+k*2]!==Math.fround(w[24]*old[k*3]+w[25]*old[k*3+1]+w[26]*old[k*3+2]+w[27]))eyeArtDiff=true;
-  }
   if(refs)assert.ok(instance.lastRefs.every((x,k)=>x===refs[k]),'fixed submit buffers reused per frame');else refs=instance.lastRefs;
   if(j===20)assert.equal(instance.last.counts.filter(n=>n===0).length,6,'closed eyes are six EMPTY rows');++frames;
 }
-assert.deepEqual(instance.last.ids,[2,3,10,11,12,17,18,19]);
-assert.equal(eyeArtDiff,true,'rounded aperture is an intentional eye-art difference, not whole-model parity');
-let out={};ns.stats(out);assert.equal(out.objects,25);assert.equal(out.apertures,4);assert.equal(out.clipTargets,8);
+assert.deepEqual(instance.last.ids,[2,25,26,3,27,28,10,11,12,17,18,19]);
+function width(id){const row=instance.last.ids.indexOf(id),n=instance.last.counts[row],xs=[];for(let k=0;k<n;k++)xs.push(instance.last.xy[row*16+k*2]);return Math.max(...xs)-Math.min(...xs);}
+for(const yaw of [-35,35]){
+  const p={yaw:yaw*Math.PI/180,viewYaw:0};controller.update(p);ns.evaluate(0);ns.render();const before=[width(10),width(17)];
+  p.viewYaw=p.yaw;controller.update(p);ns.evaluate(0);ns.render();const far=yaw>0?1:0,after=[width(10),width(17)];
+  assert.ok(after[far]<before[far]*.85,'relative view reduces the far-eye exposure');assert.equal(after[1-far],before[1-far],'near-eye exposure does not shrink');
+}
+let out={};ns.stats(out);assert.equal(out.objects,29);assert.equal(out.apertures,8);assert.equal(out.clipTargets,12);
 assert.throws(()=>ns.add({}),/immutable/);assert.throws(()=>ns.aperture(ns.handle(10),rest),/fixed/);
 const old=native.picture();assert.throws(()=>controller.eyes[0].aperture.setVertices(reversed),/vector|Float32|winding/);assert.throws(()=>ns.render(),/evaluate/);assert.equal(native.picture(),old);
 controller.update({});ns.evaluate(0);ns.render();ns.stats(out);const nprojects=out.clipProjects;
@@ -156,4 +158,4 @@ ns.dispose();ns.dispose();assert.equal(created.model.closed,false,'scene borrows
 secondController.update({yaw:-.2});second.scene.evaluate(0);second.scene.render();
 for(const call of [()=>ns.evaluate(0),()=>ns.render(),()=>controller.root.place({}),()=>controller.eyes[0].aperture.setEmpty(null)])assert.throws(call,/disposed/);
 second.scene.dispose();created.model.dispose();expectedOracle.scene.dispose();
-console.log('AYATSURI_CLIP_NODE_PASS sourceA=true nativeModel=true sameFrame=true lightOnly=no-project atomicMorph=true EMPTY=explicit getterReentry=guarded dispose=guarded foxSweeps='+frames+' nodes=25 controllerNonLid=exact fullSmileLid=exact eyeArt=intentionalDiff buffers=reused nativePixels=UNMEASURED warmGuestAlloc=UNMEASURED');
+console.log('AYATSURI_CLIP_NODE_PASS sourceA=true nativeModel=true sameFrame=true lightOnly=no-project atomicMorph=true EMPTY=explicit getterReentry=guarded dispose=guarded foxSweeps='+frames+' nodes=29 controllerNonLid=v2-authoring-exact farEye=relative-view buffers=reused nativePixels=UNMEASURED warmGuestAlloc=UNMEASURED');

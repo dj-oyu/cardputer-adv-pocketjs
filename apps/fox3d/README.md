@@ -21,7 +21,7 @@ frameは入力→model更新→scene.evaluate→beginFrame→scene.render→comm
 
 utilityはoptionalな`apps/lib/ayatsuri_clip.js`。既存`character.js`のprivate packed layoutへ依存する実験adapterで、一般的なmesh/UV/skin/morph基盤の完成とはしない。実装と制約は[API文書](../../docs/api/ayatsuri-clip.md)を参照。
 
-固定25nodeは[既存AYNM資産](assets/README.md)としてnative側が直接読み、個体Instanceの可変poseとJSの演技・開口指示を分ける。形状/材質の大きなJS定義graphへ戻さず、同一Instance内の元の順序で提出する。native投影の読み取りも呼出元の固定bufferへ同期copyし、Cの可変pointerをJSへ貸し出さない。
+固定29nodeは[既存AYNM資産](assets/README.md)としてnative側が直接読み、個体Instanceの可変poseとJSの演技・開口指示を分ける。旧25nodeのIDを保ち、内耳・耳毛4nodeを追加した。形状/材質の大きなJS定義graphへ戻さず、同一Instance内の元の順序で提出する。native投影の読み取りも呼出元の固定bufferへ同期copyし、Cの可変pointerをJSへ貸し出さない。
 
 全JSの25node版と、native7node/JS19nodeへ部分分離した版はいずれも163840Bのquotaを超えた（allocator拒否0）。後者を遅延生成にしても初frameの眼生成で失敗した。それを実機の物理heap不足や、画像bin一般の非有効性とは呼ばない。全25nodeを固定native資産にした版では、SourceA/blend JS moduleと固定定義graphの復元を省く。native arenaも同じguest capへ課金され、生bufferや描画snapshotがゼロになる方式ではない。
 
@@ -34,3 +34,7 @@ utilityはoptionalな`apps/lib/ayatsuri_clip.js`。既存`character.js`のprivat
 造形受入は試験のPASSと別。設定図に対する頭/耳/頬のシルエット、眼の突出、喜びと驚きの可読性、鼻口吻のdepth、接合や白目の漏れを画像で評価する。全身・尾/胸毛の柔らかさ、実機画質・実機時間/stackは後続の未完項目。
 
 起動失敗も含む容量の比較条件と証拠の限界は[host検証記録](../../docs/perf/fox-native-face-study.md)を参照。
+
+現在の造形は[顔v2](../../docs/perf/fox-face-v2.md)。app所有selectのlightYawは−180..180度へ広げ、左右150度の背面光を比較する。通常キーの光切替は0/60/−60度を維持する。hostは4表情×yawの12枚、24枚のpitch比較、6枚の背面光を含む237frameを2回実行し、capture指定時には42枚すべての長さと反復hashを確認する。
+
+眼の方向補正は`model.update({viewYaw})`のカメラ相対yawから決まる。省略時は固定正面カメラを前提にbody yawを使う。新しいカメラ配置へ組み込む側は相対角を渡す。一般の自動depth遮蔽ではなく、対応角度内での作者による露出補正である。

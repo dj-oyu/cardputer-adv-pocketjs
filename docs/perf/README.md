@@ -12,6 +12,7 @@
 | --- | --- | --- |
 | [cloud-native-model-study.md](cloud-native-model-study.md) | host比較C | readonly Model/個体Instanceの共有、160KiBのA/C容量と301frame画像ハッシュ一致、未実機の境界 |
 | [fox-native-face-study.md](fox-native-face-study.md) | host比較・顔の最小実証 | 狐のnative25node/凸clip、160KiB起動比較、表情・角度・画像回帰と未達品質 |
+| [fox-face-v2.md](fox-face-v2.md) | 顔の造形反復 | 眼窩と方向補正、細い口吻、内耳・耳毛、同条件とpitch/背面光の比較 |
 | [cloud-memory-fixture.md](cloud-memory-fixture.md) | 診断次候補 | 明示cold回収、製品A/C有限fixture、guest/ESP/cacheを分ける最小実機計測と未検証 |
 | [cloud-finite-fixture.md](cloud-finite-fixture.md) | ローカル次候補 | Enter/Uで選ぶ外乱・途中retarget・pause/replay有限診断と検証境界 |
 | [cloud-static-asset-study.md](cloud-static-asset-study.md) | ローカル比較・未採用 | 雲の静的定義bin化、所有権、source/packedの実測方法と実機境界 |

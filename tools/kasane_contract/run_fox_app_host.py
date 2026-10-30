@@ -58,12 +58,12 @@ def main():
         match=re.search(r'FOX_HOST frames=(\d+) pointer_bits=(\d+) peak_requested=(\d+) max_request=(\d+) cap=(\d+) eager_gc=0 full_reference=1 quota=(\d+) allocator=(\d+)',result.stdout)
         metric_names=('frames','pointer_bits','peak_requested','max_request','cap','quota','allocator')
         metrics=dict(zip(metric_names,map(int,match.groups()))) if match else None
-        profile_valid=bool(metrics and metrics['frames']==231 and metrics['pointer_bits']==(32 if args.m32 else 64)
+        profile_valid=bool(metrics and metrics['frames']==237 and metrics['pointer_bits']==(32 if args.m32 else 64)
                            and metrics['cap']==(163840 if args.m32 else 0) and not metrics['quota'] and not metrics['allocator'])
         complete=True;images=[]
         if folder:
             header=b'P6\n240 135\n255\n'
-            for i in range(12):
+            for i in range(42):
                 path=folder/f'app_{i:04}.ppm';data=path.read_bytes() if path.exists() else b''
                 complete=complete and data.startswith(header) and len(data)==len(header)+240*135*3
                 images.append(hashlib.sha256(data).hexdigest())
@@ -79,8 +79,10 @@ def main():
     (cache/'result.json').write_text(json.dumps(proof,indent=2)+'\n')
     if args.capture_dir and all(r['captures_complete'] for r in runs):
         sys.path.insert(0,str(ROOT/'tools/character'))
-        from fox_contact import write_contact
-        for index in range(2):print(write_contact(args.capture_dir/f'run-{index}'))
+        from fox_contact import write_contact,write_aux_contact
+        for index in range(2):
+            print(write_contact(args.capture_dir/f'run-{index}'))
+            print(write_aux_contact(args.capture_dir/f'run-{index}'))
     if not proof['passed']:raise SystemExit(1)
 
 

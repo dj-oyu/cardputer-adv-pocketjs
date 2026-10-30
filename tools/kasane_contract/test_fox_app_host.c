@@ -25,7 +25,7 @@ static bool fox_draw(unsigned expression,double yaw,double pitch,double light){
     if(!eval(call,strlen(call),"fox-frame.js"))return false;
     const uint64_t time=(uint64_t)fox_frames*33333u;
     present(time);if(present_failures||!full_reference(time))return false;
-    const char *folder=getenv("FOX_CAPTURE_DIR");if(folder&&fox_frames<12)ppm(folder,fox_frames);
+    const char *folder=getenv("FOX_CAPTURE_DIR");if(folder&&fox_frames<42)ppm(folder,fox_frames);
     ++fox_frames;return true;
 }
 static bool fox_button(unsigned buttons){
@@ -50,6 +50,8 @@ int main(void){
     for(unsigned e=0;ok&&e<4;++e)for(int yaw=-35;ok&&yaw<=35;yaw+=35)ok=fox_draw(e,yaw,0,0);
     for(unsigned e=0;ok&&e<4;++e)for(int pitch=-10;ok&&pitch<=10;pitch+=20)
         for(int yaw=-35;ok&&yaw<=35;yaw+=35)ok=fox_draw(e,yaw,pitch,0);
+    for(int light=-150;ok&&light<=150;light+=300)
+        for(int yaw=-35;ok&&yaw<=35;yaw+=35)ok=fox_draw(0,yaw,0,light);
     for(unsigned i=0;ok&&i<=120;++i)ok=fox_draw(i<61?1:2,-35.+70.*(i%61)/60.,0,0);
     for(unsigned i=0;ok&&i<=60;++i)ok=fox_draw(0,0,0,-60.+2.*i);
     static uint16_t stopped[240*135];

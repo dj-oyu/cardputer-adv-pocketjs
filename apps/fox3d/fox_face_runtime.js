@@ -21,7 +21,7 @@
   function select(e,y,p,l){
     if(busy)throw new Error('FoxFaceLab: active');
     finite(e,0,3);if(e%1)throw new RangeError('FoxFaceLab: expression');
-    finite(y,-35,35);finite(p,-10,10);finite(l,-60,60);
+    finite(y,-35,35);finite(p,-10,10);finite(l,-180,180);
     expression=e;yaw=y;pitch=p;lightYaw=l;
   }
   // App-owned deterministic comparison input, unrelated to the framework clock.

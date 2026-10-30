@@ -119,6 +119,7 @@ jobs:
         if: always()
         with:
           name: character-native-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
           path: |
             .cache/character-native/frames/
             .cache/character-capture/

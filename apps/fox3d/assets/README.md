@@ -1,10 +1,10 @@
 # 狐face固定資産
 
-`fox_face.aynm` は既存AYNM v1の全25node資産。builtin名は `fox-face`。頭・眼球・虹彩・瞳・瞼・眉・鼻口吻・顎・耳を元の順に保持する。clipの頂点と更新制御はJS側に残し、新しいgeometry形式やsectionは追加しない。
+`fox_face.aynm` は既存AYNM v1の全29node資産。builtin名は `fox-face`。頭・眼球・虹彩・瞳・瞼・眉・鼻口吻・顎・耳を旧25nodeのIDを保ち、内耳・耳毛の4nodeを末尾へ追加する。clipの頂点と更新制御はJS側に残し、新しいgeometry形式やsectionは追加しない。
 
-初期値は25node版FoxFaceModelの `create()` → `update({})` 後のneutral状態。口（ID7）は非表示、position `[0,15,24]`、scale `[1,Float32(.15),1]`。ほかは表示。rest TRS・geometry・正規化材質は既存utilityと同じF32、thickness/opacity/edgeSoftnessはF64を保持する。
+初期値はv2 authoringのFoxFaceModelの `create()` → `update({})` 後のneutral状態。口（ID7）は非表示、position `[0,15,22]`、scale `[1,Float32(.15),1]`。ほかは表示。rest TRS・geometry・正規化材質は既存utilityと同じF32、thickness/opacity/edgeSoftnessはF64を保持する。
 
-authoringの正本はoffline専用の `tools/ayatsuri/model/fixtures/fox_face_25.js`。実utilityで正規化し、既存 `pack_model.cjs` で符号化する。runtimeでJS定義graphを復元しない。
+authoringの正本はoffline専用の `tools/ayatsuri/model/fixtures/fox_face_v2.js`。実utilityで正規化し、既存 `pack_model.cjs` で符号化する。runtimeでJS定義graphを復元しない。旧 `fox_face_25.js` は変更せず比較用に保持する。
 
 ```sh
 node tools/ayatsuri/model/export_fox_face.cjs --write
@@ -28,9 +28,13 @@ node tools/ayatsuri/model/test_fox_face.cjs
 | 17, 18, 19 | sclera1, iris1, pupil1 |
 | 20, 21, 22 | lid-arc-left1, lid-arc-right1, brow1 |
 | 23, 24 | lip, nose |
+| 25, 26 | ear-inner-1, ear-tuft-1（parent 2） |
+| 27, 28 | ear-inner1, ear-tuft1（parent 3） |
 
-apertureのanchor→描画対象は `2→[2]`、`3→[3]`、`10→[10,11,12]`、`17→[17,18,19]`。exporterは照合用のclip情報も返すが、binaryへは保存しない。
+apertureのanchor→描画対象は `2→[2]`、`3→[3]`、`10→[10,11,12]`、`17→[17,18,19]`、`25→[25]`、`26→[26]`、`27→[27]`、`28→[28]`。exporterは照合用のclip情報も返すが、binaryへは保存しない。
 
-資産は3148 B、SHA256 `3c296648c459ff0cc1b03849febfbd93f96e8cf64345ede2c28e8f7bde691888`。抽出元の保存byte SHA256は `0bb4e5e8c79f32df9f6a003483738ee9b3f0f506ff142a1b1662015f72650503`、LF正規化後は `ee4dfdddf14b88da8d97bf8c6758644de89fc4e7f343ff15372c926e19039ffa`。Git checkoutの改行差は生成byteへ影響しない。
+資産は3620 B、SHA256 `91c22dc9865bdc79625a9b8ecb9fbecb631abb370a2c5d67cc7c96baee917285`。v2抽出元のLF正規化SHA256は `84829228c40a45021f77fd839e42698828ba89f515750a2a30861a3d68abcb33`。Git checkoutの改行差は生成byteへ影響しない。旧25node資産の3148 B・SHA256 `3c296648c459ff0cc1b03849febfbd93f96e8cf64345ede2c28e8f7bde691888` は前候補の記録であり、現資産と混同しない。
 
-native workは7440 B、Instance arenaは8040 B、geometric nodeは21（neutral表示20）。Model/Actor metadata・allocator整列・JS target配列・描画packetは別費用。構造値であり、guest peakや実機速度の測定結果ではない。旧7node＋JS19node方式は容量不足で未採用とし、製品asset/providerから外した。
+native workは8496 B、Instance arenaは9192 B、geometric nodeは25（neutral表示24）。Model/Actor metadata・allocator整列・JS target配列・描画packetは別費用。構造値であり、guest peakや実機速度の測定結果ではない。旧7node＋JS19node方式は容量不足で未採用とし、製品asset/providerから外した。
+
+眼球の奥行きを1.5へ薄くし眼窩を(±11.5,-4.5,11)へ収め、鼻筋の独立した球を細長い低いbridgeへ変更した。白い頬は中心口吻から左右の細い端へ連続する8lobeの同一材質field。耳は幅広いouterに、桃色の薄いinnerとcreamのroot tuftを重ねる。内耳のtransmission .64 / thickness .12は既存光源評価による様式化近似で、時刻による明滅ではない。edgeSoftness .08は解析曲面の縁の設定であり、凸clip境界へ追加AAを実装した意味ではない。耳の後描きが頭へ漏れないclip域・前後関係、最終画像と背面光の品質受入はruntime側の比較で確認する。

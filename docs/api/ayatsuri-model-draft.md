@@ -30,7 +30,7 @@ Model.disposeは新規利用をcloseし、生存Instanceは保護する。close�
 
 ## native評価済み投影と凸clip提出
 
-狐の固定25nodeはAYNM v1のまま保持し、clipのunit-local頂点と表情制御はJS utilityが所有する。次のInstance入口は、既存Cの`ayatsuri_model_instance_next`が返す評価済みpacketとhoneのclipped ellipsoidを組み合わせる。数値評価器やasset形式をもう一つ作らない。
+狐の固定資産はAYNM v1のまま保持し、clipのunit-local頂点と表情制御はJS utilityが所有する。顔v2は旧25nodeのIDを保ち内耳・耳毛4nodeを追加した29node。次のInstance入口は、既存Cの`ayatsuri_model_instance_next`が返す評価済みpacketとhoneのclipped ellipsoidを組み合わせる。数値評価器やasset形式をもう一つ作らない。
 
 | JS入口 | 型と意味 |
 | --- | --- |
