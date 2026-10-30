@@ -288,13 +288,14 @@ const packedPart=packedOnly.add({name:'packed',geometry:{kind:'ellipsoid',radii:
   position:[3,4,5],material:{color:0xff8800,opacity:.8,edgeSoftness:.2},
   pattern:{kind:'band',axis:'v',start:.6,end:1,color:0xffffff}});
 const packedPatch=packedPart._node.analytic;
-for(const name of ['radii','screen','normalMatrix','texture'])assert.equal(Object.hasOwn(packedPatch,name),false);
+for(const name of ['radii','screen','normalMatrix','texture','material'])assert.equal(Object.hasOwn(packedPatch,name),false);
 packedOnly.evaluate(0);packedOnly.render();packedOnly.evaluate(1);packedOnly.render();
 assert.equal(packedCalls,2);assert.equal(packedPart._node.pose.buffer,packedBuffer);
-for(const name of ['radii','screen','normalMatrix','texture'])assert.equal(Object.hasOwn(packedPatch,name),false,
+for(const name of ['radii','screen','normalMatrix','texture','material'])assert.equal(Object.hasOwn(packedPatch,name),false,
   'native packed frames never allocate compatibility views');
-assert.equal(packedPart._node.textureData.byteOffset,244);
-assert.equal(packedPart._node.materialData.byteOffset,164);
+assert.equal(Object.hasOwn(packedPart._node,'textureData'),false);
+assert.equal(Object.hasOwn(packedPart._node,'materialData'),false);
+assert.equal(packedPatch.work[63],1);assert.equal(packedPatch.work[64],1);
 assert.equal(packedPatch.surface.byteOffset,232);
 same(new Float32Array(packedBuffer,96,8),[20,0,0,123,0,30,0,79]);
 const packedMaterial=new Float32Array(packedBuffer,164,8),packedTexture=new Float32Array(packedBuffer,196,9);
@@ -305,16 +306,17 @@ packedOnly.visit(packet=>{borrowed=packet;});
 assert.strictEqual(borrowed,packedPatch);assert.equal(borrowed.radii.byteOffset,84);
 assert.equal(borrowed.screen.byteOffset,96);assert.equal(borrowed.normalMatrix.byteOffset,128);
 assert.equal(borrowed.texture.byteOffset,196);
-const stableScreen=borrowed.screen,stableNormal=borrowed.normalMatrix,stableTexture=borrowed.texture;
+assert.equal(borrowed.material.byteOffset,164);assert.equal(borrowed.material.length,8);
+const stableScreen=borrowed.screen,stableNormal=borrowed.normalMatrix,stableTexture=borrowed.texture,stableMaterial=borrowed.material;
 packedOnly.visit(packet=>{assert.strictEqual(packet.screen,stableScreen);assert.strictEqual(packet.normalMatrix,stableNormal);
-  assert.strictEqual(packet.texture,stableTexture);});
+  assert.strictEqual(packet.texture,stableTexture);assert.strictEqual(packet.material,stableMaterial);});
 packedPart.texture({offset:[0,.2]});assert.throws(()=>packedOnly.render(),/evaluate before render/);
 packedOnly.evaluate(1);packedOnly.render();assert.strictEqual(packedPatch.texture,stableTexture);
-assert.equal(packedPart._node.textureData[1],Math.fround(.2));
+assert.equal(packedPart._node.analytic.work[62],Math.fround(.2));
 packedOnly.dispose();
 
-// Lazy compatibility publishes all four views only after every allocation succeeds.
-for(let failAt=1;failAt<=4;++failAt){
+// Lazy compatibility publishes all five views only after every allocation succeeds.
+for(let failAt=1;failAt<=5;++failAt){
   const candidate=analyticScene({backend:{ellipsoidPacked(){}}}),
     part=candidate.add({name:'compat-oom',geometry:{kind:'ellipsoid',radii:[2,3,4]}});
   candidate.evaluate(0);candidate.render();
@@ -327,17 +329,18 @@ for(let failAt=1;failAt<=4;++failAt){
   try{assert.throws(()=>candidate.visit(()=>{}),/injected compatibility OOM/);}
   finally{globalThis.Float32Array=RealFloat32Array;}
   assert.equal(allocations,failAt);
-  for(const name of ['radii','screen','normalMatrix','texture'])assert.equal(Object.hasOwn(patch,name),false,
+  for(const name of ['radii','screen','normalMatrix','texture','material'])assert.equal(Object.hasOwn(patch,name),false,
     'failed lazy allocation publishes no partial compatibility packet');
   candidate.render(); // Failed visit released the guard; packed rendering still works.
   candidate.visit(packet=>{
-    for(const name of ['radii','screen','normalMatrix','texture'])assert.strictEqual(packet[name].buffer,buffer);
+    for(const name of ['radii','screen','normalMatrix','texture','material'])assert.strictEqual(packet[name].buffer,buffer);
   });
-  const views=[patch.radii,patch.screen,patch.normalMatrix,patch.texture];
+  const views=[patch.radii,patch.screen,patch.normalMatrix,patch.texture,patch.material];
   globalThis.Float32Array=new Proxy(RealFloat32Array,{construct(){throw Error('initialized packet allocated again');}});
   try{candidate.visit(packet=>{
     assert.strictEqual(packet.radii,views[0]);assert.strictEqual(packet.screen,views[1]);
     assert.strictEqual(packet.normalMatrix,views[2]);assert.strictEqual(packet.texture,views[3]);
+    assert.strictEqual(packet.material,views[4]);
   });candidate.render();}
   finally{globalThis.Float32Array=RealFloat32Array;}
   candidate.dispose();

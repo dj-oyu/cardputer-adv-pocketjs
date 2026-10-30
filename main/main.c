@@ -493,6 +493,8 @@ extern const char big_wave_start[] asm("_binary_big_wave_js_start");
 extern const char big_wave_end[] asm("_binary_big_wave_js_end");
 extern const char character_lab_start[] asm("_binary_character_lab_js_start");
 extern const char character_lab_end[] asm("_binary_character_lab_js_end");
+extern const char cloud_probe_start[] asm("_binary_cloud_probe_js_start");
+extern const char cloud_probe_end[] asm("_binary_cloud_probe_js_end");
 extern const char cloud_act_start[] asm("_binary_cloud_act_js_start");
 extern const char cloud_act_end[] asm("_binary_cloud_act_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
@@ -632,6 +634,8 @@ static bool home_key(const keystroke_t *k) {
                            (size_t)(character_lab_end-character_lab_start-1)); break;
         case 15: begin_run("local.cloud",NULL,0,cloud_act_start,
                            (size_t)(cloud_act_end-cloud_act_start-1)); break;
+        case 16: begin_run("local.cloudprobe",NULL,0,cloud_probe_start,
+                           (size_t)(cloud_probe_end-cloud_probe_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
@@ -666,6 +670,7 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.work","WORK (dynamic source unsupported)",NULL,NULL,0),
     NATIVE_APP("local.vmprobe","VM PROBE (typed workloads unsupported)",NULL,NULL,0),
     NATIVE_APP("local.cloud","CLOUD ACT",cloud_act_start,cloud_act_end,5),
+    NATIVE_APP("local.cloudprobe","CLOUD PROBE",cloud_probe_start,cloud_probe_end,5),
 };
 static unsigned native_catalog_count(void) { return sizeof(native_apps)/sizeof(native_apps[0]); }
 static uint32_t native_generation;

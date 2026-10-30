@@ -94,6 +94,10 @@ static void test_admission(void) {
     CHECK(!strcmp(reason,"NEEDS kasane.shapes"));
     missing=NULL;
     CHECK(app_registry_admit(cloud,"0.1.0",supported,NULL,reason,sizeof reason));
+    const app_manifest_t *probe=app_registry_find("local.cloudprobe");
+    CHECK(probe && !strcmp(probe->title,"CLOUD PROBE"));
+    CHECK(probe && !strcmp(probe->entry,"apps/cloudprobe/cloud_probe.js"));
+    CHECK(app_registry_admit(probe,"0.1.0",supported,NULL,reason,sizeof reason));
     // The games: one row each, started from the home menu, no works library.
     static const struct { const char *id, *title, *entry; } games[]={
         {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},

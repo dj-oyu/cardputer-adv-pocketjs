@@ -18,7 +18,7 @@ globalThis.AyatsuriCloudDynamic=(()=>{
   function step(s,b){
     let i=s.i<0?0:s.i;
     while(i+9<keys.length&&keys[i+9]<=s.n+1)i+=9;
-    if(i!==s.i){
+    if(!s.fixture&&i!==s.i){
       for(let k=0;k<4;k++){s.g[0]=keys[i+1+k*2];s.g[1]=keys[i+2+k*2];s.a[k].retarget(s.g);}
       s.i=i;
     }
@@ -41,11 +41,11 @@ globalThis.AyatsuriCloudDynamic=(()=>{
     const s={a:[],g:new Float32Array(2),f:new Float32Array(2),q:new Float32Array(24),
       v:{position:new Float32Array(2),velocity:new Float32Array(2),goal:new Float32Array(2)},
       d:AyatsuriFollow.drive({seed},o),seed,n:0,i:-1,t:null,b:false,
-      l:0,r:0,w:0,z:false,busy:false,external:false};
+      l:0,r:0,w:0,z:false,busy:false,external:false,fixture:false};
+    // Config is already packed; the native factory snapshots each narrow view.
+    const backend=options.backend||pocket.ayatsuri,initial=new Float32Array(6);
     for(let i=0;i<4;i++){
-      const k=i*8;
-      s.a.push(AyatsuriFollow.create({inertia:[config[k],config[k+1]],stiffness:[config[k+2],config[k+3]],
-        damping:[config[k+4],config[k+5]],couplingStiffness:config[k+6],couplingDamping:config[k+7]},o));
+      s.a.push(backend.followCreate(new Float32Array(config.buffer,i*32,8),initial));
       read(s,i);
     }
     function sample(t,m,b,out){
@@ -70,6 +70,7 @@ globalThis.AyatsuriCloudDynamic=(()=>{
     }
     sample.dynamic=true;
     if(typeof AyatsuriCloudDynamicDiagnostics!=='undefined')AyatsuriCloudDynamicDiagnostics.attach(sample,s,reset,read);
+    if(typeof AyatsuriCloudFixtureDynamic!=='undefined')AyatsuriCloudFixtureDynamic.attach(sample,s,reset,read);
     return sample;
   }
   return {create,stepHz:60,maxReplaySteps:1200,maxForwardSteps:120,maxTimeMs:86400000};

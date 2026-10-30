@@ -117,3 +117,10 @@ a30b2a2では[実機担当の機能smoke](../perf/character-device-smoke.md)で3
 統合中の作業ツリーで、実QuickJSとnative rendererを使う`test_character_app_host.c`のm32実行を確認した。`CHARACTER_HEAP_LIMIT=163840`、3モデル×6モード×301フレーム=5,418フレームで例外0・提示失敗0、`CHARACTER_NATIVE_PASS`。正式名とhone alias追加後のログは`.cache/character-native-m32/hone-ayatsuri.log`。compile_peak=98,604 B、live_max=162,088 B、追跡allocator_peak=143,932 B、host_pointer_bits=32。これらはハーネスの異なる計数であり、相互に足したりdevice総空きへ読み替えない。
 
 shared prototypeと1本のbacking storeへの変更ではモデル部品を削っていない。typed work264 B/有形node・84 B/group・scene132 BだけでJSのlive最大を予測せず、typed view/object/closure/allocatorの実際の費用を合わせて検証した。live_maxと163,840 Bの差は1,752 Bしかなく、拡張の一般予算や実機の確保保証ではない。deviceのnative free/largest、最大単一alloc、初回frame確保とロード時の余裕は未測定のまま残す。
+
+
+### Packed経路のprivate view再利用
+
+通常楕円体の材質・UV setterはscene所有work bufferへ直接書く。材質8値とUV5値のためだけの重複TypedArray viewは保持しない。native packed packetの264 B配置、同期snapshot、材質/模様の依存更新、既存のmaterial/texture操作は同じ。blendの材質viewは別形式のため維持する。
+
+従来backendまたはvisitが必要とするscreen/normal/material/texture等のviewは、全生成成功後にまとめて公開する。返却は再利用されるborrowed viewでありimmutable snapshotではない。`handle._node`のprivate field配置に依存するアプリコードは契約外。削減対象はview objectの保持費用で、backing bufferの画素情報や描画snapshotを削ったものではない。

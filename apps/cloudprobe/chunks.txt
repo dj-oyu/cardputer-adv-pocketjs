@@ -1,0 +1,10 @@
+app local.cloudprobe
+option strip-debug
+utility ../character/character.js
+blend ../character/character_blend.js
+follow ../lib/ayatsuri_follow.js
+motion ../cloud/cloud_pose.js
+dynamic ../cloud/cloud_dynamic.js
+model ../cloud/cloud_model.js
+probe cloud_probe_runtime.js
+fixture ../cloud/cloud_fixture.js

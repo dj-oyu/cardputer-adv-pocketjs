@@ -79,7 +79,7 @@ def git(root, *args):
 def provenance(root, binary, flags):
     paths = set()
     for directory in ('apps/character', 'apps/lib', 'main', 'tools/hostshim', 'components/pocketjs_guest/include', 'components/quickjs-ng/quickjs-ng',
-                      'apps/kasane', 'apps/cloud'):
+                      'apps/kasane', 'apps/cloud', 'apps/cloudprobe'):
         paths.update(p for p in (root / directory).rglob('*') if p.suffix in ('.c', '.h', '.inc', '.js', '.txt'))
     for name in ('tools/kasane_contract/test_character_app_host.c',
                  'tools/kasane_contract/test_megademo_app_host.c',

@@ -37,8 +37,8 @@ globalThis.Ayatsuri = (() => {
     if (patch.kind === 'ellipsoid' && !patch.screen) {
       const storage = patch.work.buffer, radii = new Float32Array(storage, 84, 3),
         screen = new Float32Array(storage, 96, 8), normalMatrix = new Float32Array(storage, 128, 9),
-        texture = new Float32Array(storage, 196, 9);
-      patch.radii = radii; patch.screen = screen; patch.normalMatrix = normalMatrix; patch.texture = texture;
+        texture = new Float32Array(storage, 196, 9), material = new Float32Array(storage, 164, 8);
+      patch.radii = radii; patch.screen = screen; patch.normalMatrix = normalMatrix; patch.texture = texture; patch.material = material;
     }
     return patch;
   }
@@ -65,20 +65,21 @@ globalThis.Ayatsuri = (() => {
         else if (patch.ambientColor !== undefined) fail('ambientColor requires blendEllipsoids');
         for (const key of ['ambient', 'diffuse', 'specular', 'roughness', 'transmission', 'thickness', 'opacity', 'edgeSoftness']) if (patch[key] !== undefined) unit(patch[key]);
         if (patch.color !== undefined && rgb(patch.color) !== node.color) { node.color = patch.color; ++node.albedoVersion; node.owner.dirty = true; }
+        const data = node.geometryExtension ? node.materialData : node.analytic.work, base = node.geometryExtension ? 0 : 41;
         let changed = false;
-        changed = coefficient(node.materialData, 0, patch, 'ambient') || changed;
-        changed = coefficient(node.materialData, 1, patch, 'diffuse') || changed;
-        changed = coefficient(node.materialData, 2, patch, 'specular') || changed;
-        changed = coefficient(node.materialData, 4, patch, 'transmission') || changed;
+        changed = coefficient(data, base, patch, 'ambient') || changed;
+        changed = coefficient(data, base + 1, patch, 'diffuse') || changed;
+        changed = coefficient(data, base + 2, patch, 'specular') || changed;
+        changed = coefficient(data, base + 4, patch, 'transmission') || changed;
         if (patch.roughness !== undefined) {
           const r = unit(patch.roughness), exponent = Math.fround(1 + 127 * (1 - r) * (1 - r));
-          if (exponent !== node.materialData[3]) { node.materialData[3] = exponent; changed = true; }
+          if (exponent !== data[base + 3]) { data[base + 3] = exponent; changed = true; }
         }
         if (patch.transmissionColor !== undefined) {
           const c = rgb(patch.transmissionColor);
           for (let i = 0; i < 3; ++i) {
             const v = Math.fround(((c >> ((2 - i) * 8)) & 255) / 255);
-            if (v !== node.materialData[5 + i]) { node.materialData[5 + i] = v; changed = true; }
+            if (v !== data[base + 5 + i]) { data[base + 5 + i] = v; changed = true; }
           }
         }
         if (node.geometryExtension) changed = node.geometryExtension.material(node, patch) || changed;
@@ -94,10 +95,10 @@ globalThis.Ayatsuri = (() => {
         if (patch.offset) vector(patch.offset, 2);
         if (patch.scale) vector(patch.scale, 2);
         if (patch.rotation !== undefined) finite(Math.fround(finite(patch.rotation)));
-        if (patch.offset) changed = vec(node.textureData, 0, patch.offset, 2) || changed;
-        if (patch.scale) changed = vec(node.textureData, 2, patch.scale, 2) || changed;
+        if (patch.offset) changed = vec(node.analytic.work, 61, patch.offset, 2) || changed;
+        if (patch.scale) changed = vec(node.analytic.work, 63, patch.scale, 2) || changed;
         if (patch.rotation !== undefined) {
-          const v = Math.fround(finite(patch.rotation)); if (v !== node.textureData[4]) { node.textureData[4] = v; changed = true; }
+          const v = Math.fround(finite(patch.rotation)); if (v !== node.analytic.work[65]) { node.analytic.work[65] = v; changed = true; }
         }
         if (changed) { ++node.albedoVersion; node.owner.dirty = true; }
       }
@@ -184,14 +185,14 @@ globalThis.Ayatsuri = (() => {
         node.pose = new Float32Array(storage, 48, 9); node.compatMatrix = new Float32Array(storage, 0, 12);
       }
       if (analytic) {
-        node.materialData = new Float32Array(storage, extension ? extension.materialOffset : 164, extension ? extension.materialLength : 8);
+        if (extension) node.materialData = new Float32Array(storage, extension.materialOffset, extension.materialLength);
+        const data = extension ? node.materialData : node.analytic.work, base = extension ? 0 : 41;
         node.color = 0xffffff; node.thickness = 0.5; node.opacity = 1; node.edgeSoftness = 0.04; node.pattern = null;
-        node.textureData = !extension ? new Float32Array(storage, 244, 5) : null;
         node.albedoVersion = 1; node.evaluatedAlbedo = 0; node.shadingVersion = 1; node.evaluatedShading = 0;
-        node.materialData[0] = 0.25; node.materialData[1] = 0.75; node.materialData[3] = 32;
-        node.materialData[5] = node.materialData[6] = node.materialData[7] = 1;
+        data[base] = 0.25; data[base + 1] = 0.75; data[base + 3] = 32;
+        data[base + 5] = data[base + 6] = data[base + 7] = 1;
         if (extension) extension.initializeMaterial(node.materialData);
-        else node.textureData[2] = node.textureData[3] = 1;
+        else data[63] = data[64] = 1;
       }
       const handle = Object.create(HandlePrototype); handle._node = node;
       if (def.position || def.rotation || def.scale) handle.place(def);
@@ -268,13 +269,13 @@ globalThis.Ayatsuri = (() => {
           }
           const albedoChanged = node.evaluatedAlbedo !== node.albedoVersion;
           if (albedoChanged || node.evaluatedShading !== node.shadingVersion || geometryChanged) {
-            const surface = patch.surface, t = patch.work, uv = node.textureData, cs = Math.cos(uv[4]), sn = Math.sin(uv[4]), pattern = node.pattern;
+            const surface = patch.surface, t = patch.work, cs = Math.cos(t[65]), sn = Math.sin(t[65]), pattern = node.pattern;
             surface[0] = pack(node.color); surface[1] = pattern ? pack(pattern.color) : surface[0];
             surface[2] = Math.round(node.opacity * 255);
             surface[3] = Math.round(Math.min(1, node.thickness * Math.hypot(m[2], m[6], m[10])) * 255);
             surface[4] = !pattern ? 0 : pattern.kind === 'checker' ? 3 : pattern.axis === 'u' ? 1 : 2;
-            t[49] = cs * uv[2]; t[50] = -sn * uv[3]; t[51] = 0.5 + uv[0] - (t[49] + t[50]) * 0.5;
-            t[52] = sn * uv[2]; t[53] = cs * uv[3]; t[54] = 0.5 + uv[1] - (t[52] + t[53]) * 0.5;
+            t[49] = cs * t[63]; t[50] = -sn * t[64]; t[51] = 0.5 + t[61] - (t[49] + t[50]) * 0.5;
+            t[52] = sn * t[63]; t[53] = cs * t[64]; t[54] = 0.5 + t[62] - (t[52] + t[53]) * 0.5;
             if (pattern && pattern.kind === 'checker') for (let k = 0; k < 6; ++k) t[49 + k] *= pattern.repeats;
             t[55] = node.edgeSoftness; t[56] = pattern ? pattern.start : 0; t[57] = pattern ? pattern.end : 1;
             if (albedoChanged) ++counts.albedoUpdates;
@@ -323,7 +324,7 @@ globalThis.Ayatsuri = (() => {
           else if (typeof backend.ellipsoidPacked === 'function') backend.ellipsoidPacked(patch.work.buffer, 96, lighting);
           else {
             compatibility(patch);
-            backend.ellipsoid(patch.screen, patch.normalMatrix, lighting, node.materialData, patch.surface, patch.texture);
+            backend.ellipsoid(patch.screen, patch.normalMatrix, lighting, patch.material, patch.surface, patch.texture);
           }
           ++counts.renderedPatches; continue;
         }

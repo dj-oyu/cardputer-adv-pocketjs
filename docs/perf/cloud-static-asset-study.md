@@ -80,3 +80,6 @@ UIを除いたmodel構築・301frame・dispose・reloadも196608 Bで別実行�
 pattern拒否修正後も製品link PASS、DIRAM179924 B／mapped flash1590000 B。このuncommitted試作のbuildであり、公開db4の実機成果物と混同しない。
 
 SOURCEとowned-copyの192KiB追加診断は未実施。runnerのm32_sysroot.sh準備がexit2となり、試験binaryへ到達していない（`.cache/cloud-memory-ab-source-diagnostic192.log`、`...packed-copy-diagnostic192.log`）。これはappの追加FAILではない。最小4条件の160KiB比較とstatic192/model比較は完了しているため、この準備失敗を迂回・再試行せず区切った。以後は同一sysrootの並行準備を避け、reuse binary時の不要な準備を整理する。
+
+
+未採用runtime/sourceのコピーとtracked patchは `.cache/cloud-bin-rejected-db4/` に退避し、製品ツリーから除外した。後続CLOUD PROBE候補には比較記録だけを含める。

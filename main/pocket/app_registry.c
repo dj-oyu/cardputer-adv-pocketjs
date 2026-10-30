@@ -159,6 +159,9 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.cloud", .title="CLOUD ACT", .entry="apps/cloud/cloud_act.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.cloudprobe", .title="CLOUD PROBE", .entry="apps/cloudprobe/cloud_probe.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 };
 
 #define MANIFEST_N (sizeof(MANIFESTS)/sizeof(MANIFESTS[0]))

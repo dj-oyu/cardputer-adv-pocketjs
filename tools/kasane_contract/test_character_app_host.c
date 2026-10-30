@@ -1,9 +1,60 @@
 /* Reuse the real Kasane presentation/allocator fixture, without its
  * MEGADEMO-specific scene and plan assertions. No device or serial I/O. */
 #define main fixture_megademo_main
+#define js_log character_fixture_base_log
+#define js_load character_fixture_base_load
 #include "test_megademo_app_host.c"
 #undef main
+#undef js_log
+#undef js_load
 #include <float.h>
+#include "pocket_api.h"
+
+static unsigned fixture_starts,fixture_completes,fixture_passes,fixture_returns,fixture_return_complete,fixture_return_failure;
+static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    if(getenv("CHARACTER_FIXTURE")&&argc&&JS_IsString(argv[0])){
+        const char *line=JS_ToCString(c,argv[0]);
+        if(line){
+            if(!strncmp(line,"CLOUD_FIXTURE START seed=42 ",28))++fixture_starts;
+            if(!strncmp(line,"CLOUD_FIXTURE COMPLETE ",23)){++fixture_completes;if(strstr(line,"result=PASS "))++fixture_passes;}
+            if(!strncmp(line,"CLOUD_FIXTURE RETURN ",21)){++fixture_returns;if(strstr(line,"reason=complete"))++fixture_return_complete;if(strstr(line,"reason=failure"))++fixture_return_failure;}
+            JS_FreeCString(c,line);
+        }
+    }
+    return character_fixture_base_log(c,self,argc,argv);
+}
+
+
+
+/* Host-only observation, not another JS call frame. Canary reads consume only
+ * diagnostic counters; they neither collect garbage nor mutate app clocks. */
+static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    if(!getenv("CHARACTER_FIXTURE"))return character_fixture_base_load(c,self,argc,argv);
+    char name[40]="?";
+    if(argc&&JS_IsString(argv[0])){
+        const char *value=JS_ToCString(c,argv[0]);
+        if(value){snprintf(name,sizeof name,"%s",value);JS_FreeCString(c,value);}
+    }
+    size_t used_before=0,limit=0;JS_GetMemoryCounters(JS_GetRuntime(c),&used_before,&limit);
+    JSMemoryUsage before;JS_ComputeMemoryUsage(JS_GetRuntime(c),&before);
+    JSOOMCanary prior;JS_TakeOOMCanary(JS_GetRuntime(c),&prior);
+    JSValue result=character_fixture_base_load(c,self,argc,argv);
+    JSMemoryUsage m;JS_ComputeMemoryUsage(JS_GetRuntime(c),&m);
+    JSOOMCanary canary;JS_TakeOOMCanary(JS_GetRuntime(c),&canary);
+    fprintf(stderr,"CHARACTER_FIXTURE_LOAD name=%s exception=%u used_before=%zu used_after=%lld memory_used=%lld blocks=%lld limit=%zu pk_current=%zu pk_peak=%zu max_request=%zu prior_quota_rejections=%u prior_allocator_rejections=%u quota_rejections=%u allocator_rejections=%u first_req=%zu first_used=%zu\n",
+        name,(unsigned)JS_IsException(result),used_before,(long long)m.malloc_size,
+        (long long)m.memory_used_size,(long long)m.malloc_count,limit,cur_bytes,peak_bytes,
+        largest_guest_request,prior.quota_count,prior.allocator_count,canary.quota_count,canary.allocator_count,canary.first_req,canary.first_used);
+    fprintf(stderr,"CHARACTER_FIXTURE_LOAD_CATEGORIES name=%s",name);
+#define FIXTURE_MEMORY_PAIR(field) fprintf(stderr," " #field "_before=%lld " #field "_after=%lld",(long long)before.field,(long long)m.field)
+    FIXTURE_MEMORY_PAIR(js_func_size);FIXTURE_MEMORY_PAIR(js_func_code_size);FIXTURE_MEMORY_PAIR(js_func_count);
+    FIXTURE_MEMORY_PAIR(obj_size);FIXTURE_MEMORY_PAIR(obj_count);FIXTURE_MEMORY_PAIR(prop_size);
+    FIXTURE_MEMORY_PAIR(shape_size);FIXTURE_MEMORY_PAIR(atom_size);FIXTURE_MEMORY_PAIR(str_size);
+    FIXTURE_MEMORY_PAIR(memory_used_size);FIXTURE_MEMORY_PAIR(array_count);FIXTURE_MEMORY_PAIR(binary_object_size);
+#undef FIXTURE_MEMORY_PAIR
+    fputs(" vm_segment_bytes=UNMEASURED\n",stderr);
+    return result;
+}
 
 static unsigned long long core_alloc_start,core_loop_alloc_calls;
 static JSValue js_core_alloc_checkpoint(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -357,6 +408,100 @@ static bool capture_images(void){
     return ok;
 }
 
+
+/* This bounded path only sends real frame buttons. No diagnostics controller,
+ * arbitrary JS control script, sleeps, or per-frame forced GC are involved. */
+static uint32_t fixture_panel_hash=UINT32_C(2166136261);
+static unsigned fixture_presented;
+static void fixture_record_presented(void){
+    for(unsigned i=0;i<240*135;++i){
+        fixture_panel_hash=(fixture_panel_hash^(panel[i]&255u))*UINT32_C(16777619);
+        fixture_panel_hash=(fixture_panel_hash^(panel[i]>>8))*UINT32_C(16777619);
+    }
+    ++fixture_presented;
+}
+static bool fixture_real_frame(unsigned buttons){
+    if(fixture_presented>=360)return false;
+    char call[32];snprintf(call,sizeof call,"frame(%u)",buttons);
+    if(!eval(call,strlen(call),"fixture-frame.js")){
+        JSOOMCanary canary;JS_TakeOOMCanary(rt,&canary);size_t used=0,limit=0;JS_GetMemoryCounters(rt,&used,&limit);
+        fprintf(stderr,"CHARACTER_FIXTURE_FRAME_FAILED buttons=%u presented=%u used=%zu limit=%zu quota_rejections=%u allocator_rejections=%u first_req=%zu first_used=%zu\n",
+            buttons,fixture_presented,used,limit,canary.quota_count,canary.allocator_count,canary.first_req,canary.first_used);
+        return false;
+    }
+    const unsigned before=present_failures;present((uint64_t)fixture_presented*33333u);
+    const bool valid=present_failures==before&&full_reference((uint64_t)fixture_presented*33333u);
+    fixture_record_presented();return valid;
+}
+
+static unsigned fixture_commit_hook_calls;
+static JSValue fixture_commit_throw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;++fixture_commit_hook_calls;
+    return pocket_api_throw(c,POCKET_ERR_LIMIT_EXCEEDED,"kasane.procedural.commit",
+        "fixture commit injection",false,POCKET_OUTCOME_NOT_APPLIED);
+}
+static bool fixture_inject_commit_failure(void){
+    JSValue global=JS_GetGlobalObject(ctx),pocket=JS_UNDEFINED,kasane=JS_UNDEFINED,
+        procedural=JS_UNDEFINED,original=JS_UNDEFINED;
+    bool valid=!JS_IsException(global),installed=false,ok=false;
+    if(valid){pocket=JS_GetPropertyStr(ctx,global,"pocket");valid=!JS_IsException(pocket);}
+    if(valid){kasane=JS_GetPropertyStr(ctx,pocket,"kasane");valid=!JS_IsException(kasane);}
+    if(valid){procedural=JS_GetPropertyStr(ctx,kasane,"procedural");valid=!JS_IsException(procedural);}
+    if(valid){original=JS_GetPropertyStr(ctx,procedural,"commit");valid=!JS_IsException(original)&&JS_IsFunction(ctx,original);}
+    if(valid){
+        JSValue hook=JS_NewCFunction(ctx,fixture_commit_throw,"fixtureCommitFailure",0);
+        if(!JS_IsException(hook))installed=JS_SetPropertyStr(ctx,procedural,"commit",hook)>=0;
+    }
+    fixture_commit_hook_calls=0;
+    if(installed)ok=fixture_real_frame(0);
+    if(installed&&JS_SetPropertyStr(ctx,procedural,"commit",JS_DupValue(ctx,original))<0)ok=false;
+    JS_FreeValue(ctx,original);JS_FreeValue(ctx,procedural);JS_FreeValue(ctx,kasane);
+    JS_FreeValue(ctx,pocket);JS_FreeValue(ctx,global);
+    return ok&&fixture_commit_hook_calls==1;
+}
+static int finite_fixture_contract(bool ok){
+    const char *maximum=getenv("CHARACTER_FIXTURE_MAX_FRAMES");char *end=NULL;
+    const unsigned long parsed=maximum?strtoul(maximum,&end,10):360;
+    const bool valid_bound=parsed>=1&&parsed<=360&&(!maximum||(*maximum&&end&&!*end));
+    unsigned fixture_frames=0;
+    ok=ok&&valid_bound&&app_model_count==1;
+    if(ok)ok=fixture_real_frame(0)&&fixture_starts==0;
+    if(ok){ok=fixture_real_frame(0x4000);fixture_frames=1;}
+    while(ok&&!fixture_completes&&!fixture_returns&&fixture_frames<parsed){
+        ok=fixture_real_frame(0);++fixture_frames;
+    }
+    const bool completed=fixture_starts==1&&fixture_completes==1&&fixture_passes==1;
+    /* Allow the normal app to process its completion transition, then send
+     * U through its ordinary input path and release it. Both must render. */
+    if(ok)ok=fixture_real_frame(0)&&fixture_real_frame(0);
+    if(ok)ok=fixture_real_frame(0x10)&&fixture_real_frame(0);
+    ok=ok&&completed&&fixture_return_complete==1&&fixture_returns==1&&fixture_starts==1;
+    if(ok){
+        /* Inject one prepublication failure only in this host test. The app
+         * must catch it, retain the previous native picture and return BODY. */
+        ok=fixture_real_frame(0x4000)&&fixture_real_frame(0)&&fixture_real_frame(0);
+        static uint16_t previous[240*135];memcpy(previous,panel,sizeof previous);
+        if(ok)ok=fixture_inject_commit_failure();
+        if(ok)ok=!memcmp(previous,panel,sizeof previous);
+        ok=ok&&fixture_return_failure==0&&fixture_starts==2&&fixture_completes==1;
+        /* Failed-frame exception values have been retired before cleanup;
+         * the next real frame performs the deferred ordinary return. */
+        if(ok)ok=fixture_real_frame(0);
+        ok=ok&&fixture_return_failure==1;
+        if(ok)ok=fixture_real_frame(0);
+        printf("CHARACTER_FIXTURE injected_commit_failure=%s previous_picture_unchanged=%u ordinary_recovery=%u\n",ok?"PASS":"FAIL",ok,ok);
+    }
+    ok=ok&&!exceptions&&!present_failures;
+    printf("CHARACTER_FIXTURE_PANEL fnv32=%08x presented=%u\n",(unsigned)fixture_panel_hash,fixture_presented);
+    printf("CHARACTER_FIXTURE frames=%u bound=%lu starts=%u completes=%u pass=%u returns=%u ordinary_return=%u full_reference=1 eager_gc=0 live=%zu peak_requested=%zu max_request=%zu\n",
+        fixture_frames,parsed,fixture_starts,fixture_completes,fixture_passes,fixture_returns,
+        fixture_return_complete,heap_used(),peak_bytes,largest_guest_request);
+    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    if(cur_bytes)ok=false;
+    printf("CHARACTER_FIXTURE released_guest=%zu\n",cur_bytes);
+    printf("%s\n",ok?"CHARACTER_FIXTURE_PASS":"CHARACTER_FIXTURE_FAIL");return ok?0:1;
+}
+
 int main(int argc,char **argv){
     const char *path=getenv("CHARACTER_APP_ENTRY");if(!path)path="apps/character/character_lab.js";
     FILE *f=fopen(path,"rb");if(!f)return 2;
@@ -384,6 +529,7 @@ int main(int argc,char **argv){
         app_model_count=(unsigned)count;
         printf("CHARACTER_NATIVE app=%s chunks=%s models=%u\n",path,app_chunks,app_model_count);
     }
+    if(getenv("CHARACTER_FIXTURE"))return finite_fixture_contract(ok);
     if(getenv("CHARACTER_CAPTURE_DIR")){
         const size_t app_peak=peak_bytes,app_live=heap_used(),app_request=largest_guest_request;
         peak_bytes=cur_bytes;largest_guest_request=0;
@@ -447,18 +593,28 @@ int main(int argc,char **argv){
          * retaining the native picture; then restore the ordinary guest cap. */
         memcpy(stopped,panel,sizeof stopped);
         const size_t before_switch=heap_used();
-        JS_SetMemoryLimit(rt,151000);
+        const size_t ordinary_cap=strtoul(limit,NULL,0);
+        const size_t parser_budget=4096;
+        size_t forced_cap=before_switch+parser_budget;
+        if(forced_cap>=ordinary_cap)forced_cap=ordinary_cap-1;
+        /* Leave room for the tiny try/catch script, while denying the larger
+         * model construction. A boolean result proves frame, not compilation,
+         * threw the exception. */
+        ok=forced_cap>before_switch&&forced_cap-before_switch>=parser_budget;
+        JS_SetMemoryLimit(rt,forced_cap);
         const char *attempt="(()=>{try{frame(16384)}catch(e){return true}return false})()";
-        JSValue result=JS_Eval(ctx,attempt,strlen(attempt),"switch-oom.js",JS_EVAL_TYPE_GLOBAL);
-        JS_SetMemoryLimit(rt,strtoul(limit,NULL,0));
-        ok=!JS_IsException(result)&&JS_ToBool(ctx,result)==1;
+        JSValue result=ok?JS_Eval(ctx,attempt,strlen(attempt),"switch-oom.js",JS_EVAL_TYPE_GLOBAL):JS_UNDEFINED;
+        JS_SetMemoryLimit(rt,ordinary_cap);
+        const int compile_exception=JS_IsException(result);
+        const int caught_frame=JS_IsBool(result)&&JS_ToBool(ctx,result)==1;
+        ok=ok&&!compile_exception&&caught_frame;
         JS_FreeValue(ctx,result);JS_RunGC(rt);present((uint64_t)frames*33333u);
         ok=ok&&memcmp(stopped,panel,sizeof stopped)==0;
         const size_t failed_switch=heap_used();
         ok=ok&&eval("frame(0)",8,"switch-retry.js");present((uint64_t)(frames+1)*33333u);
         JS_RunGC(rt);
-        printf("CHARACTER_NATIVE switch_failure_recovery=%s before=%zu failed=%zu recovered=%zu\n",
-               ok?"PASS":"FAIL",before_switch,failed_switch,heap_used());
+        printf("CHARACTER_NATIVE switch_failure_recovery=%s forced_cap=%zu before=%zu caught_frame=%d compile_exception=%d failed=%zu recovered=%zu\n",
+               ok?"PASS":"FAIL",forced_cap,before_switch,caught_frame,compile_exception,failed_switch,heap_used());
     }
     /* Separate geometric/native failure testing from the guest-cap gate above:
      * this phase must reach native validation rather than fail in JS allocation. */

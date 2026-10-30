@@ -123,7 +123,8 @@ console.log('CLOUD_COMPACT_POSE_PARITY_PASS values='+values+' fullFrameExpressio
 // Narrowing immutable tables early must match the former plain-table route:
 // native goal/config storage was already Float32 before any numerical step.
 const typedSource=fs.readFileSync(path.join(root,'apps/cloud/cloud_dynamic.js'),'utf8'),
-  plainSource=typedSource.replace(/new Float32Array\((\[[\s\S]*?\])\)/g,'$1'),
+  plainSource=typedSource.replace(/new Float32Array\((\[[\s\S]*?\])\)/g,'$1')
+    .replace('new Float32Array(config.buffer,i*32,8)','new Float32Array(config.slice(i*8,i*8+8))'),
   plainContext=vm.createContext({AyatsuriFollow:Follow});
 assert.notEqual(plainSource,typedSource,'exercise both table representations');
 vm.runInContext(plainSource,plainContext);

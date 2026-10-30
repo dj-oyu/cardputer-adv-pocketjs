@@ -10,6 +10,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [cloud-finite-fixture.md](cloud-finite-fixture.md) | ローカル次候補 | Enter/Uで選ぶ外乱・途中retarget・pause/replay有限診断と検証境界 |
 | [cloud-static-asset-study.md](cloud-static-asset-study.md) | ローカル比較・未採用 | 雲の静的定義bin化、所有権、source/packedの実測方法と実機境界 |
 | [dynamic-follow-integration.md](dynamic-follow-integration.md) | ローカル実装・host検証 | 2DOF共通核、数値精度・収束FAIL保持、雲接続と容量試験 |
 | [character-materials.md](character-materials.md) | 実装・host検証 | 3体の材質utility、解析的楕円体、WAKE移行、m32 heap、点描等の比較と未検証範囲 |

@@ -4,6 +4,9 @@ on:
     paths:
       - 'apps/character/**'
       - 'apps/cloud/**'
+      - 'apps/cloudprobe/**'
+      - 'main/pocket/app_registry.c'
+      - 'tools/test_app_registry.c'
       - 'apps/lib/ayatsuri_follow.js'
       - 'apps/kasane/megademo_wake.js'
       - 'apps/kasane/chunks.txt'
@@ -43,10 +46,13 @@ jobs:
           node-version: '24'
       - name: Visual API and exact WAKE inputs
         run: |
+          gcc -std=c11 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -I main/text tools/test_app_registry.c main/pocket/app_registry.c -o /tmp/character-app-registry
+          /tmp/character-app-registry
           python3 tools/ayatsuri/run_transform.py
           python3 tools/ayatsuri/run_follow.py
           node tools/character/test_follow.cjs
           node tools/character/test_cloud_dynamic.cjs
+          node tools/character/test_cloud_fixture.cjs
           node tools/character/transform_oracle.cjs
           node tools/character_motion_test.cjs
           node tools/character_wake_oracle.cjs
@@ -76,6 +82,7 @@ jobs:
           node tools/character/transform_oracle.cjs
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
+          python3 tools/kasane_contract/run_character_app_host.py --cloud --fixture --m32
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
           git diff --exit-code
