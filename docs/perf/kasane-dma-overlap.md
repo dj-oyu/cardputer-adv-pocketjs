@@ -100,3 +100,20 @@ CI `kasane-dma-overlap.yml` はexact headのhost契約とESP-IDF v6.0.1 target D
 4. 単独受入後、専用integration branchでPR24/native/batch等と組合せる。組合せだけの結果をDMA単独効果としない。
 
 MISO未配線のため、host panel oracleとboard_captureはglassへの電気的到達・表示完了を保証しない。
+
+## MEGADEMO での実機 A/B（2026-10-30）
+
+PR #111 の head `13e5d3e`（既定 OFF）と、同じソースで既定だけを ON にした probe（`7b5a95e`、`main/CMakeLists.txt` の `option` を ON にし、`add_compile_definitions` を `NOT CMAKE_BUILD_EARLY_EXPANSION` で囲んだだけ）を、broker 経由で同じ機体に焼き、MEGADEMO を最初から通しで 1 回ずつ流した（各条件 1 boot、交互化なし。上の手順 2 の統計受入ではない）。`KASANE_PAINT` の 30 frame 窓で読む。
+
+| 実測 | OFF | ON |
+| --- | --- | --- |
+| `send_ms`（大半の場面） | 6.5〜7.4 ms | 1.4〜3.3 ms |
+| CORE の最重窓の間隔 | 1.041 s（約 28.8 fps） | 0.991 s（約 30 fps） |
+| 同じ窓の turn / render / send | 15.23 / 10.17 / 6.24 ms | 15.36 / 10.08 / 1.51 ms |
+| 評価後の空き / JS | 88,292 / 102,204 B | 88,292 / 102,204 B |
+
+- turn と render は変わらず、転送待ちだけが 1 frame あたり約 5 ms 消える。全場面で同じ傾向。
+- 両条件とも error・DEGRADE なし。目視で破綻なし（MISO 未配線なので glass の正しさはソフトでは確かめられない）。
+- 単独 boot・1 回ずつの比較なので、15% 未満の差は主張しない（命令キャッシュの配置差）。send の 5 ms はそれを大きく超える。
+
+既定を ON にするかは、この記録を根拠に別 PR で決める。
