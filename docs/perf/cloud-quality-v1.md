@@ -37,4 +37,12 @@ packedの互換viewは旧backend/visit初回だけ生成する。独立レビュ
 
 ログは`.cache/cloud-final-character-m32.log`、`.cache/cloud-final-dedicated-m32.log`、`.cache/cloud-final-asan.log`、`.cache/cloud-quality-{packed,motion,before,motion-final}/`。source hash/binary hash/dirty情報は各captureのmanifestにある。上記m32値はlazy互換viewの原子的公開修正後に再実行したもの。301枚も修正後のsourceで再生成して全RGB hash一致を確認した。最終head CIは別に確認する。
 
-上記guestの値をnative free/largest/stackへ読み替えない。最大group payload768 Bをコピーするbridge/renderer/walkerとprojection cacheはnative stackを使う。構造体sizeを単純加算してstack peakとせず、実機で別測定する。新候補の物理LCD、実機repair、操作応答/時間/最小free/largest/stackは未確認。
+上記guestの値をnative free/largest/stackへ読み替えない。最大group payload768 Bをコピーするbridge/renderer/walkerとprojection cacheはnative stackを使う。構造体sizeを単純加算してstack peakとせず、実機で別測定する。
+
+## 固定候補3512529のCI・実機機能smoke
+
+対象は`3512529b6f47a609b8041833f9c7e8e0bccb6ccc`。同headの72 CI checks成功、[gate run41005709035](https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/41005709035)と製品link成功。CI firmware artifact12955237904のbinは2,497,648 B、SHA256 `b57031e5bdcebd40cc0519995166214e6e5f1155592fb325275130d1a2acfa43`。
+
+実機担当から2026-10-30に受領した連結flowの報告: build06:31:31、flash06:35:13、3領域readbackと起動catalog一致。CLOUD ACT約80秒で6mode/reset/呼吸/STOP/CLOSE、既存CHARACTERの人/狐/雲切替、MEGADEMO60秒（WAKE→WAKE34.404秒）、HELLO→HOME_READYを確認。lease/sessionは解放済み。本記録の編集担当が独立に再flashした結果ではない。
+
+CLOUD/CHARACTER終了時native free207796 B、largest69632 B、JS0。これは終了時の標本であり、実行中最小値やpeakではない。CLOUDの7個の30-frame集計窓のrender値は15.57–108.52 ms。個別frame最大・JS時間・LCD転送時間・FPSへ読み替えず、処理要因は別に測る。seek/pause/stepは正式MCPに露出しておらず実機未試験、capture未取得、物理LCDの材質品質/実機repair/stack peakも未受入。後続の画質変更は別SHAで検証し、このheadの成功を流用しない。
