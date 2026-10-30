@@ -156,6 +156,10 @@ static void check_image_rows(const ksn_image_port *image){
 /* pocket_shape.c's install, never called here (main() fills pocket.shapes
  * itself). */
 esp_err_t pocket_api_register(const pocket_capability_t *capability){(void)capability;return ESP_OK;}
+JSValue pocket_api_root(JSContext *ctx){
+    JSValue global=JS_GetGlobalObject(ctx),root=JS_GetPropertyStr(ctx,global,"pocket");
+    JS_FreeValue(ctx,global);return root;
+}
 esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn,void *user){
     (void)ctx;(void)name;(void)fn;(void)user;return ESP_OK;
 }
