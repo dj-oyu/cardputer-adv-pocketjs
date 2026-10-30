@@ -1,7 +1,13 @@
 // How far Q16.16 fixed point moves DERBY's plans from exact arithmetic,
 // beside float32 (what the VM computes today). Host, Node only.
 //
-//   node tools/kasane_ir/q16_error.mjs PLANS.js CASES.json [CASES.json ...]
+//   node tools/kasane_ir/q16_error.mjs [--alt ALT.js] PLANS.js CASES.json [CASES.json ...]
+//
+// --alt: plans of the same names in ALT.js (e.g. plans_q16/derby_pan.js) run
+// in f32 and q16 instead, on inputs multiplied as their doc's
+// `@inputScale name=k, ...` says; f64 still runs the original, so the
+// error is against what the plan was meant to draw. The alternative's own
+// f64 is compared too (alt f64): a rewrite that is exact in double shows 0.
 //
 // CASES.json: [{plan, tag, args, inputs: [[8 numbers], ...]}] (derby_plans.mjs
 // --cases, or q16_error.py's capture of the panning draws). Each vector runs
@@ -20,7 +26,7 @@
 // the largest error in pixels, the 99.9th percentile, and how many endpoints
 // land on a different pixel once both are rounded the same way (lround).
 // Vectors whose status or number of coordinates differs between modes are
-// counted, not compared. docs/kasane/shiki.md sec.5.5 has the results.
+// counted, not compared. docs/kasane/shiki.md sec.5.5 and 5.6 have the results.
 import fs from 'node:fs';
 import path from 'node:path';
 import {findPlans, planAst} from './plan_js.mjs';
@@ -122,10 +128,25 @@ function run(fn, mode, input, args) {
   return {status: 'DONE', xy: r.xy};
 }
 
-const [plansFile, ...caseFiles] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const altFile = argv[0] === '--alt' ? (argv.shift(), argv.shift()) : null;
+const [plansFile, ...caseFiles] = argv;
 if (!plansFile || !caseFiles.length) throw new Error('usage: q16_error.mjs PLANS.js CASES.json...');
 const plans = new Map(findPlans(fs.readFileSync(plansFile, 'utf8'), path.basename(plansFile)).map(p => [p.name, p]));
 const M = modes();
+const alt = new Map();
+if (altFile) {
+  const text = fs.readFileSync(altFile, 'utf8');
+  for (const p of findPlans(text, path.basename(altFile))) {
+    const doc = new RegExp(`@plan\\s+${p.name}\\b[^/]*?@inputScale\\s+([^\\n*]*)`).exec(text);
+    const scale = p.inputs.map(() => 1);
+    for (const [n, k] of (doc?.[1] ?? '').split(',').map(t => t.trim().split('=')).filter(t => t[0])) {
+      if (!p.inputs.includes(n)) throw new Error(`${p.name}: @inputScale names ${n}, not an input`);
+      scale[p.inputs.indexOf(n)] = Number(k);
+    }
+    alt.set(p.name, {plan: p, scale, fn: emit(planAst(p), p.params)});
+  }
+}
 const lround = v => Math.sign(v) * Math.floor(Math.abs(v) + .5);
 const rows = new Map(), compiled = new Map();
 for (const file of caseFiles) for (const c of JSON.parse(fs.readFileSync(file, 'utf8'))) {
@@ -133,15 +154,22 @@ for (const file of caseFiles) for (const c of JSON.parse(fs.readFileSync(file, '
   if (!plan) throw new Error(`no @plan ${c.plan}`);
   if (!compiled.has(plan)) compiled.set(plan, emit(planAst(plan), plan.params));
   const fn = compiled.get(plan);
-  const key = `${c.plan} ${c.tag.replace(/\d+$/, '')}`;
+  const A = alt.get(c.plan);
+  const key = `${c.plan}${A ? '*' : ''} ${c.tag.replace(/\d+$/, '')}`;
   const row = rows.get(key) ?? {plan: c.plan, tag: c.tag.replace(/\d+$/, ''), vectors: 0, both: 0, status: {f32: 0, q16: 0},
-    shape: {f32: 0, q16: 0}, coords: 0, err: {f32: [], q16: []}, px: {f32: 0, q16: 0}, sat: 0, satIn: 0, peak: 0, worst: null};
+    shape: {f32: 0, q16: 0}, coords: 0, err: {f32: [], q16: []}, px: {f32: 0, q16: 0}, sat: 0, satIn: 0, peak: 0, worst: null, altF64: 0};
   rows.set(key, row);
   for (const input of c.inputs) {
     row.vectors++;
     const ref = run(fn, M.f64, input, c.args);
     M.q16.state.sat = 0; M.q16.state.satIn = 0;
-    const got = {f32: run(fn, M.f32, input, c.args), q16: run(fn, M.q16, input, c.args)};
+    const own = A ? A.fn : fn, scaled = A ? input.map((v, k) => v * (A.scale[k] ?? 1)) : input;
+    const got = {f32: run(own, M.f32, scaled, c.args), q16: run(own, M.q16, scaled, c.args)};
+    if (A) {
+      const d = run(A.fn, M.f64, scaled, c.args);
+      if (ref.status === 'DONE' && d.status === 'DONE' && d.xy.length === ref.xy.length)
+        for (let i = 0; i < d.xy.length; i++) row.altF64 = Math.max(row.altF64, Math.abs(d.xy[i] - ref.xy[i]));
+    }
     row.sat += M.q16.state.sat; row.satIn += M.q16.state.satIn;
     row.peak = Math.max(row.peak, M.q16.state.peak);
     if (ref.status !== 'DONE') continue;
@@ -164,12 +192,13 @@ const pct = (a, p) => { if (!a.length) return 0; const s = Float64Array.from(a).
 const max = a => a.reduce((m, v) => v > m ? v : m, 0);
 const f = v => v === 0 ? '0' : v < 1e-3 ? v.toExponential(1) : v.toFixed(3);
 console.log('plan    source  vectors compared coords | f32 max   p99.9  px-diff | q16 max   p99.9  px-diff | q16 status/shape diff, saturations in arithmetic / of literals and inputs');
-console.log(`fixed point: Q${31 - FRAC}.${FRAC} (1/${ONE}, up to ${2 ** (31 - FRAC)})`);
+console.log(`fixed point: Q${31 - FRAC}.${FRAC} (1/${ONE}, up to ${2 ** (31 - FRAC)})` + (altFile ? `; plan* = ${path.basename(altFile)}` : ''));
 for (const r of [...rows.values()].sort((a, b) => a.plan.localeCompare(b.plan) || a.tag.localeCompare(b.tag))) {
   console.log(`${r.plan.padEnd(7)} ${r.tag.padEnd(7)} ${String(r.vectors).padStart(7)} ${String(r.both).padStart(8)} ${String(r.coords).padStart(6)} | ` +
     `${f(max(r.err.f32)).padStart(7)} ${f(pct(r.err.f32, .999)).padStart(7)} ${String(r.px.f32).padStart(6)} | ` +
     `${f(max(r.err.q16)).padStart(7)} ${f(pct(r.err.q16, .999)).padStart(7)} ${String(r.px.q16).padStart(6)} | ` +
-    `${r.status.q16}/${r.shape.q16} (f32 ${r.status.f32}/${r.shape.f32}), ${r.sat} / ${r.satIn}`);
+    `${r.status.q16}/${r.shape.q16} (f32 ${r.status.f32}/${r.shape.f32}), ${r.sat} / ${r.satIn}` +
+    (alt.has(r.plan) ? `, alt f64 ${f(r.altF64)}` : ''));
 }
 const worst = [...rows.values()].filter(r => r.worst).sort((a, b) => b.worst.d - a.worst.d).slice(0, 3);
 for (const r of worst) console.log(`worst q16 ${r.plan} ${r.tag}: ${f(r.worst.d)} px at coordinate ${r.worst.i}, input ${JSON.stringify(r.worst.input)} args ${JSON.stringify(r.worst.args)}`);

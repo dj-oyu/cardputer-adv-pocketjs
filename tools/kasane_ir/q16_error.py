@@ -1,7 +1,7 @@
 """Q16.16 against float32 on DERBY's plans, panning ones included (host,
 WSL or Linux; node on PATH).
 
-  python3 tools/kasane_ir/q16_error.py [--fuzz N] [--reuse]
+  python3 tools/kasane_ir/q16_error.py [--fuzz N] [--reuse] [--alt ALT.js]
 
 1. Captures the panning draws. pocket.derby.ser() draws from C, so the
    captured game of check_equivalence.py never sees pt, prail or hl. The
@@ -16,7 +16,8 @@ WSL or Linux; node on PATH).
 2. node tools/kasane_ir/q16_error.mjs runs the plans of apps/derby/derby_prog.js
    on those and on .cache/kasane_ir/cases.json (check_equivalence.py's
    capture, if present) in double, float32 and Q16.16, and reports the
-   coordinate errors (docs/kasane/shiki.md sec.5.5).
+   coordinate errors (docs/kasane/shiki.md sec.5.5). --alt passes rewritten
+   plans (e.g. tools/kasane_ir/plans_q16/derby_pan.js, sec.5.6) through.
 """
 from __future__ import annotations
 
@@ -101,12 +102,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fuzz", type=int, default=1500, help="random ser() cases (DERBY_SER_FUZZ)")
     ap.add_argument("--reuse", action="store_true", help="reuse .cache/kasane_ir/q16_pan_cases.json")
+    ap.add_argument("--alt", help="rewritten plans run in f32/q16 instead (q16_error.mjs --alt)")
     a = ap.parse_args()
     pan = CACHE / "q16_pan_cases.json"
     if not a.reuse or not pan.exists():
         pan = capture(a.fuzz)
     files = [str(pan)] + ([str(CACHE / "cases.json")] if (CACHE / "cases.json").exists() else [])
-    subprocess.run(["node", str(HERE / "q16_error.mjs"), str(ROOT / "apps/derby/derby_prog.js"), *files],
+    subprocess.run(["node", str(HERE / "q16_error.mjs"), *(["--alt", a.alt] if a.alt else []),
+                    str(ROOT / "apps/derby/derby_prog.js"), *files],
                    cwd=ROOT, check=True)
 
 
