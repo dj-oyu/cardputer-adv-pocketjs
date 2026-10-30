@@ -54,7 +54,24 @@ globalThis.AyatsuriLab = (() => {
 if(typeof pocket!=='undefined'&&pocket.kasane){
   const V=pocket.kasane,H=V.procedural;
   const resource=H.resource({maxSegments:1024});
-  let actor=null,index=0,mode=0,tick=0,held=0,breathing=false,rebuild=true;
+  let actor=null,actorIndex=-1,index=0,mode=0,tick=0,held=0,breathing=false,rebuild=true;
+  let busy=false,diagnostics=null;
+  function idle(){if(busy)throw new Error('AyatsuriLab.control: frame is active');}
+  // Only the explicitly loaded diagnostics chunk constructs these hooks/state.
+  AyatsuriLab.attachControl=function(factory){
+    idle();
+    if(diagnostics)throw new Error('AyatsuriLab.control: already attached');
+    diagnostics=factory(function(operation,value){
+      if(operation==='lock'){idle();busy=true;}
+      else if(operation==='unlock')busy=false;
+      else if(operation==='write'){
+        index=value.model;mode=value.mode;tick=value.tick;breathing=value.breathing;
+      }else{
+        value.model=index;value.mode=mode;value.tick=tick;value.breathing=breathing;
+      }
+    });
+    return diagnostics.control;
+  };
   const stats={};
   let title,shown=-1;
   function label(){return AyatsuriModels.names[index]+'  '+AyatsuriLab.modes[mode]+(breathing?'  BREATHE':'');}
@@ -73,25 +90,30 @@ if(typeof pocket!=='undefined'&&pocket.kasane){
     if(shown!==key){title.setText(tx,label());shown=key;}
   };
   globalThis.frame=function(buttons){
+    idle();busy=true;
+    try{
     const press=(buttons|0)&~held;held=buttons|0;
     if(press&0x4000){
-      if(actor)actor.scene.dispose();
-      index=(index+1)%3;actor=null;tick=0;rebuild=true;
+      index=(index+1)%3;tick=0;
     }
     if(press&0xa0){mode=(mode+(press&0x20?1:5))%6;tick=0;}
     if(press&0x10)tick=0;
     if(press&0x40){breathing=!breathing;tick=0;}
-    if(!actor)actor=AyatsuriLab.create(index,pocket.hone);
-    actor.evaluate(tick*1000/30,mode,breathing);
+    if(diagnostics&&(press&0x40f0))diagnostics.reset();
+    if(actor&&actorIndex!==index){actor.scene.dispose();actor=null;rebuild=true;}
+    if(!actor){actor=AyatsuriLab.create(index,pocket.hone);actorIndex=index;}
+    const sampleTick=diagnostics?diagnostics.sample(tick):tick;
+    actor.evaluate(sampleTick*1000/30,mode,breathing);
     H.beginFrame(0xe77c);
     actor.scene.render();
     H.commit();
+    tick=diagnostics?diagnostics.submitted(sampleTick,index,mode,breathing):tick+1;
     if(rebuild){V.replace(rebuildView);rebuild=false;}else V.patch(patchView);
-    if(tick%90===0){
+    if(sampleTick%90===0){
       actor.scene.stats(stats);
-      console.log('CHARACTER LAB model='+index+' test='+mode+' frame='+tick+
+      console.log('CHARACTER LAB model='+index+' test='+mode+' frame='+sampleTick+
         ' geometry='+stats.geometryUpdates+' shade='+stats.shadeUpdates);
     }
-    ++tick;
+    }finally{busy=false;}
   };
 }

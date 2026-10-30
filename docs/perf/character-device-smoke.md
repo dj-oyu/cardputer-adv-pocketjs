@@ -21,6 +21,8 @@ free207800 Bは終了時の一点で、実行中最小free、最大連続領域�
 
 機能smokeと表示品質の合格は別である。物理LCD上の材質/陰影、設定図への到達、実機での転送repairは未受入。HOME復帰の成功はayatsuri HOME background adapterの実装・検証を意味しない。画像texture、相互落影、物理散乱も未実装のまま。
 
+後続の実機担当確認では、現正式APIはcaptureとapp_sessionを同時実行できず、session終了のSTOPはguestを破棄する。app_session内capture/表示保持handoffがないため、今回のapp画像は未取得。下記の実機capture工程は現APIで実行可能とした手順ではなく後続条件である。broker改修や待ち時間による固定frame推定は行わず、独立して可能なapp時計とhost画像の整備を先行する。
+
 ## 次の判断: 画質の再現可能な比較
 
 比較単位はcommit・binary hash・model・mode・sample tick・breathing・固定光/カメラ/背景・capture経路。論理時刻は`tick*1000/30`であり、実時間30fpsを前提にしない。同じ入力をhostとdeviceで評価し、render-bufferと物理LCD写真/動画を別の証拠として保存する。render-bufferは転送前の画素であり、LCD発色・転送・ちらつきを単独では証明しない。
@@ -31,7 +33,9 @@ free207800 Bは終了時の一点で、実行中最小free、最大連続領域�
 2. hostの`run_character_app_host.py --ppm <folder>`は3体×6modeのtick `0,60,90,171,240,300`を出す。既定301frame/modeで、ファイル番号は`(model*6+mode)*301+tick`（0始まり）。`native_contact.py`はその一部だけの一覧とする。全連続frame動画を出す機能とは呼ばない。
 3. 実機担当の既存の認可されたcapture経路で静止render-bufferを取得し、同時に物理LCDを撮影する。HOME用`tools/capture_home.py`はHOMEへ遷移するため、このappのcapture手順へ流用しない。capture完了を待たず次状態へ進めたり、sleep秒数だけでframeを推定しない。
 
-### 次候補で必要な最小修正（未実装）
+### a30b2a2時点で必要だった最小修正
+
+後続ローカル版ではapp controllerとhost固定入力captureを[実装・検証](character-capture-host.md)した。以下の提示完了/世代IDによる実機capture同期は依然未実装であり、native commit識別で置き換えていない。
 
 - app所有の試験controllerにmodel/mode/呼吸の明示選択、整数tickへのseek、pause、1tick stepを加える。utilityにtimer/入力/capture依存を入れず、既存の純粋`sample`と評価経路を使う。
 - 選択→評価→commit→提示完了→capture可能、を世代IDとsample tickで識別する。失敗時は最後の成功画像を保ち、失敗した新状態のREADYを出さない。連続要求は前の完了/取消を確認し、遅いACKを次要求の成功と誤認しない。具体的な提示完了hookは実コードと実機担当の経路を照合して決め、現APIに存在すると仮定しない。

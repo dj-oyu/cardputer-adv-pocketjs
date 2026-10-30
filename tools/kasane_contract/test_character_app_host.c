@@ -144,6 +144,113 @@ static bool native_range_contract(void){
     return eval(cleanup,strlen(cleanup),"native-range.js");
 }
 
+
+/* Diagnostic branch uses the app's own clock controller and real native present.
+ * Captures are host simulation, never LCD/device evidence. */
+static bool capture_call(unsigned model,unsigned mode,unsigned tick){
+    char call[256];
+    snprintf(call,sizeof call,
+        "AyatsuriLab.control.set({model:%u,mode:%u,tick:%u,breathing:false,paused:true});frame(0)",
+        model,mode,tick);
+    if(!eval(call,strlen(call),"capture-seek.js"))return false;
+    present((uint64_t)tick*1000000u/30u);
+    return num("AyatsuriLab.control.read({}).lastSubmittedTick")==tick &&
+           num("AyatsuriLab.control.read({}).tick")==tick &&
+           num("AyatsuriLab.control.read({}).lastSubmittedModel")==model &&
+           num("AyatsuriLab.control.read({}).lastSubmittedMode")==mode &&
+           num("AyatsuriLab.control.read({}).lastSubmittedBreathing")==0;
+}
+static bool capture_clock_contract(void){
+    static uint16_t expected[240*135];
+    if(!capture_call(0,0,82))return false;
+    memcpy(expected,panel,sizeof expected);
+    if(!capture_call(0,0,90)||!capture_call(0,0,20)||!capture_call(0,0,82))return false;
+    if(memcmp(expected,panel,sizeof expected))return false;
+    if(!eval("frame(0)",8,"capture-pause.js"))return false;
+    present(1);
+    if(memcmp(expected,panel,sizeof expected)||num("AyatsuriLab.control.read({}).tick")!=82)return false;
+    const char *step="AyatsuriLab.control.step();frame(0)";
+    if(!eval(step,strlen(step),"capture-step.js"))return false;
+    present(2);
+    if(num("AyatsuriLab.control.read({}).tick")!=83||
+       num("AyatsuriLab.control.read({}).lastSubmittedTick")!=83||
+       num("AyatsuriLab.control.read({}).pendingSteps")!=0)return false;
+    if(!eval("frame(0)",8,"capture-step-paused.js"))return false;
+    present(3);
+    if(num("AyatsuriLab.control.read({}).tick")!=83||
+       num("AyatsuriLab.control.read({}).lastSubmittedTick")!=83)return false;
+    const char *resume="AyatsuriLab.control.pause(false);frame(0)";
+    if(!eval(resume,strlen(resume),"capture-resume.js"))return false;
+    present(4);
+    if(num("AyatsuriLab.control.read({}).tick")!=84||
+       num("AyatsuriLab.control.read({}).lastSubmittedTick")!=83)return false;
+    const char *pause="AyatsuriLab.control.pause()";
+    if(!eval(pause,strlen(pause),"capture-pause.js"))return false;
+    for(unsigned kind=0;kind<3;++kind){
+        printf("CHARACTER_CAPTURE injection_stage=%s baseline_tick=90 candidate_tick=91\n",
+            kind==0?"evaluate":kind==1?"render":"commit");
+        if(!capture_call(0,0,90))return false;
+        memcpy(expected,panel,sizeof expected);
+        char script[1200];
+        snprintf(script,sizeof script,
+          "(()=>{const C=AyatsuriLab.control,o=%s,k='%s',f=o[k],s={};"
+          "C.step();let calls=0,caught=false;o[k]=()=>{++calls;throw Error('injected native submission failure')};"
+          "try{frame(0)}catch(e){caught=true}finally{o[k]=f}"
+          "C.read(s);if(!caught||calls!==1||s.tick!==90||s.pendingSteps!==1||s.lastSubmittedTick!==90)throw Error('failure clock calls='+calls+' tick='+s.tick+' credits='+s.pendingSteps+' last='+s.lastSubmittedTick);"
+          "})();",kind==0?"pocket.ayatsuri":kind==1?"pocket.hone":"pocket.kasane.procedural",
+          kind==0?"compose":kind==1?"ellipsoid":"commit");
+        if(!eval(script,strlen(script),"capture-failure.js"))return false;
+        pocket_kasane_invalidate();present(2);
+        if(memcmp(expected,panel,sizeof expected))return false;
+        if(!eval("frame(0)",8,"capture-recovery.js"))return false;
+        present(3);
+        if(num("AyatsuriLab.control.read({}).tick")!=91||num("AyatsuriLab.control.read({}).lastSubmittedTick")!=91)return false;
+        memcpy(expected,panel,sizeof expected);
+        if(!capture_call(0,0,91)||memcmp(expected,panel,sizeof expected))return false;
+    }
+    printf("CHARACTER_CAPTURE clock_seek_reverse_pause_step_resume=PASS evaluate_render_commit_failure_recovery=PASS\n");
+    return true;
+}
+static bool capture_images(void){
+    const char *dir=getenv("CHARACTER_CAPTURE_DIR"),*plan=getenv("CHARACTER_CAPTURE_PLAN");
+    if(!dir||!plan)return false;
+    FILE *f=fopen(plan,"r");if(!f)return false;
+    bool ok=capture_clock_contract();
+    unsigned model,mode,tick,count=0;char name[180];
+    static uint16_t expected[240*135];
+    while(ok&&fscanf(f,"%u %u %u %179s",&model,&mode,&tick,name)==4){
+        if(model>2||mode>5||tick>1000000000u||strchr(name,'/')||strchr(name,'\\')){ok=false;break;}
+        ok=capture_call(model,mode,tick);
+        if(!ok)break;
+        memcpy(expected,panel,sizeof expected);
+        /* Change the requested sample, then return: no history-sensitive poses. */
+        ok=capture_call(model,mode,tick?tick-1:1)&&capture_call(model,mode,tick);
+        if(!ok||memcmp(expected,panel,sizeof expected)){ok=false;break;}
+        if(!full_reference((uint64_t)tick*1000000u/30u)){ok=false;break;}
+        char path[1024];
+        if(snprintf(path,sizeof path,"%s/%s",dir,name)>=(int)sizeof path){ok=false;break;}
+        FILE *image=fopen(path,"wb");if(!image){ok=false;break;}
+        fprintf(image,"P6\n240 135\n255\n");
+        for(size_t i=0;i<240*135;++i){
+            const uint16_t p=panel[i];
+            unsigned char rgb[3]={(unsigned char)((((p>>11)&31u)*255u+15u)/31u),
+                (unsigned char)((((p>>5)&63u)*255u+31u)/63u),(unsigned char)(((p&31u)*255u+15u)/31u)};
+            if(fwrite(rgb,1,3,image)!=3){ok=false;break;}
+        }
+        if(fclose(image))ok=false;
+        printf("HOST SIMULATION capture=%u model=%u mode=%u tick=%u breathing=false\n",count++,model,mode,tick);
+        if(getenv("CHARACTER_NO_EAGER_GC")==NULL)JS_RunGC(rt);
+    }
+    if(!feof(f))ok=false;
+    fclose(f);
+    ok=ok&&count>0&&!exceptions&&!present_failures;
+    printf("CHARACTER_CAPTURE allocator_peak=%zu max_request=%zu live=%zu\n",peak_bytes,largest_guest_request,heap_used());
+    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    ok=ok&&cur_bytes==0;
+    printf("CHARACTER_CAPTURE frames=%u released_guest=%zu %s\n",count,cur_bytes,ok?"CHARACTER_CAPTURE_PASS":"CHARACTER_CAPTURE_FAIL");
+    return ok;
+}
+
 int main(int argc,char **argv){
     const char *path="apps/character/character_lab.js";
     FILE *f=fopen(path,"rb");if(!f)return 2;
@@ -164,6 +271,18 @@ int main(int argc,char **argv){
     bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract()&&core_transform_contract();
     JS_RunGC(rt);peak_bytes=cur_bytes;largest_guest_request=0;
     ok=ok&&eval(src,n,path);
+    if(getenv("CHARACTER_CAPTURE_DIR")){
+        const size_t app_peak=peak_bytes,app_live=heap_used(),app_request=largest_guest_request;
+        peak_bytes=cur_bytes;largest_guest_request=0;
+        const char *diagnostics="pocket.app.load('diagnostics')";
+        ok=ok&&eval(diagnostics,strlen(diagnostics),"capture-diagnostics.js");
+        printf("CHARACTER_CAPTURE app_compile_peak=%zu app_live=%zu app_load_max_request=%zu "
+            "diagnostic_compile_peak=%zu diagnostic_live=%zu diagnostic_load_max_request=%zu "
+            "host_pointer_bits=%zu heap_limit=%s\n",
+            app_peak,app_live,app_request,peak_bytes,heap_used(),largest_guest_request,
+            sizeof(void*)*8,limit?limit:"unlimited");
+        return ok&&capture_images()?0:1;
+    }
     size_t compile_peak=peak_bytes,load_request=largest_guest_request,live_max=0;unsigned frames=0;
     largest_guest_request=0;
     const unsigned per_mode=argc>1?(unsigned)strtoul(argv[1],NULL,0):301;

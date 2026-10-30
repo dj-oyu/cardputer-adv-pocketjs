@@ -3,6 +3,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import sys
 from run_megademo_app_host import ROOT, build
 
 
@@ -11,7 +12,17 @@ def main():
     parser.add_argument('--frames-per-mode', type=int, default=301)
     parser.add_argument('--ppm', type=Path)
     parser.add_argument('--m32', action='store_true', help='device-sized JSValue/pointers, no sanitizers')
+    parser.add_argument('--capture-dir', type=Path, help='host-only diagnostic images and provenance manifest; separate from the 5418-frame regression')
+    parser.add_argument('--capture-ticks', help='override default per-mode ticks: comma list or inclusive start:stop[:step], including reverse ranges')
     args = parser.parse_args()
+    if args.capture_ticks and not args.capture_dir:
+        parser.error('--capture-ticks requires --capture-dir')
+    sys.path.insert(0, str(ROOT / 'tools/character'))
+    import capture_character as capture
+    try:
+        selected_ticks = capture.ticks(args.capture_ticks) if args.capture_ticks else None
+    except ValueError as error:
+        parser.error(str(error))
     if args.frames_per_mode < 2:
         parser.error('--frames-per-mode must be at least 2 to release mode-switch keys')
     flags = ['-fsanitize=address,undefined']
@@ -32,7 +43,21 @@ def main():
     if args.ppm:
         args.ppm.mkdir(parents=True, exist_ok=True)
         env['MEGA_PPM'] = str(args.ppm.resolve())
-    subprocess.run([str(binary),str(args.frames_per_mode)],cwd=ROOT,env=env,check=True)
+    if args.capture_dir:
+        folder = args.capture_dir.resolve()
+        plan, records = capture.prepare(folder, selected_ticks)
+        env['CHARACTER_CAPTURE_DIR'] = str(folder)
+        env['CHARACTER_CAPTURE_PLAN'] = str(plan)
+        source = capture.provenance(ROOT, binary, flags)
+        run = subprocess.run([str(binary), str(args.frames_per_mode)], cwd=ROOT, env=env,
+                             text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        print(run.stdout, end='')
+        passed = run.returncode == 0 and 'CHARACTER_CAPTURE_PASS' in run.stdout
+        print('Wrote', capture.finish(folder, records, source, passed, run.stdout))
+        if not passed:
+            raise SystemExit(run.returncode or 1)
+    else:
+        subprocess.run([str(binary),str(args.frames_per_mode)],cwd=ROOT,env=env,check=True)
 
 
 if __name__ == '__main__':

@@ -13,9 +13,29 @@
 
 BODYは固定世界光・固定カメラで、待機2秒 → 左右傾き3秒 → 圧縮伸長して基準形へ戻る3秒 → 停止2秒。以後は基準姿勢を保持する。雲の彩雲には解析的な0.18秒の遅れを付ける。乱数や積分状態には依存しない。LIGHTは光方向だけ、CAMERAは視点だけ、TEXTUREはキツネの尾の模様座標だけを変える。EXPRESSIONは半眼の変化に独立閉眼係数を重ねる。
 
-`frame * 1000 / 30` は試験の補間位置を定義する時計で、実機で10秒になる保証ではない。a30b2a2の[実機smokeと画質capture計画](../../docs/perf/character-device-smoke.md)は機能確認と限定した時間観測で、実時間尺・FPS・画質の保証ではない。任意tickのseek/pause/stepとcapture完了同期は現appに未実装。
+`frame * 1000 / 30` は試験の補間位置を定義する時計で、実機で10秒になる保証ではない。a30b2a2の[実機smokeと画質capture計画](../../docs/perf/character-device-smoke.md)は機能確認と限定した時間観測で、実時間尺・FPS・画質の保証ではない。後続ローカル版のseek/pause/stepは下記の任意ロード診断で、a30b2a2実機には未搭載。実機capture完了同期は未実装。
 
 ## モデルと因果関係
+
+### ローカル診断controller（a30b2a2の実機には未搭載）
+
+`AyatsuriLab.control`はapp所有の試験入口で、汎用utility APIではない。正式capture/session経路や既存キー操作を変更しない。通常起動は診断chunkをロードしない。
+
+```js
+pocket.app.load('diagnostics'); // 1回だけ明示ロード
+const control = AyatsuriLab.control;
+control.set({model: 2, mode: 0, tick: 82, breathing: false, paused: true});
+frame(0); // app/host ownerが通常のframeと提示を実行する
+const status = {};
+control.read(status); // caller所有objectを再利用
+control.step(); // 次のframeでtick83を描く。描画を自身で起動しない
+```
+
+`set`は指定fieldだけを原子的に検証/更新し、未知field、不正model/mode/tick/boolを拒否する。modelは0..2、modeは0..5、tickは非負safe整数。`seek(tick)`/`pause(bool=true)`は部分設定で、いずれも待機stepを取消す。`step(count=1)`はpause中だけ、合計600以下の正整数を予約する。各frameはtick+1を描き、`H.commit`成功時だけtickと残数を進め、失敗時は次frameで再試行できる。
+
+pause中のframeも同一tickを再評価/描画する。通常再生の`read.tick`は次sampleのcursorで、停止中は保持したcursor。再開最初のframeはそのcursorを描くため、最後の停止画像と重なることがある。`lastSubmittedTick/model/mode/breathing`は最後の`H.commit`成功入力を表し、cursorや実機提示ACKとは区別する。初回のlastSubmittedTickは-1。commit前の評価/render/commit拒否では提出済み識別子と時計/stepを保つ。commit後のview patch/log失敗はnative候補と時計を巻き戻さない。frame中や設定validation中の再入変更を拒否する。
+
+host静止/連番の再現コマンドと証拠は[host capture記録](../../docs/perf/character-capture-host.md)を参照。
 
 参照図3枚を実際に取得・目視してからモデルを作った。設定図の画素を描画assetとして使わず、楕円体の親子配置から形状/法線を生成する。
 

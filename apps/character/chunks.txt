@@ -1,4 +1,6 @@
 app local.character
+option strip-debug
 utility character.js
 models character_models.js
 lab character_lab_scene.js
+diagnostics character_lab_control.js

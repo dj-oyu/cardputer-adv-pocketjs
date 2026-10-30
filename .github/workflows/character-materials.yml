@@ -46,6 +46,7 @@ jobs:
           node tools/character_wake_oracle.cjs
           node tools/kasane_contract/test_character_utility.cjs
           node tools/character/test_lab.cjs
+          python3 tools/character/test_capture_plan.py
           python3 tools/check_docs.py
       - name: Actual native contracts and app
         env:
@@ -55,6 +56,7 @@ jobs:
           python3 tools/kasane_contract/run_pocket_shape.py
           python3 tools/kasane_contract/run_proc_ellipsoid.py
           python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
+          python3 tools/kasane_contract/run_character_app_host.py --capture-dir .cache/character-capture
           python3 tools/character/native_contact.py .cache/character-native/frames
           python3 tools/kasane_contract/run_proc_megademo_scenes.py
           node tools/character/coverage_study.cjs
@@ -72,7 +74,9 @@ jobs:
         if: always()
         with:
           name: character-native-${{ env.SOURCE_HEAD }}
-          path: .cache/character-native/frames/
+          path: |
+            .cache/character-native/frames/
+            .cache/character-capture/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
