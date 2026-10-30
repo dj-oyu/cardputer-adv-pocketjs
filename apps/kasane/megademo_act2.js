@@ -1,5 +1,6 @@
 // MEGADEMO chunk 2: Act II's scenes (TWIST, ZENITH, CORE, LOST), the plan
-// lists and procMegademo (what the host tests read).
+// lists (procMegademo, what the host tests read, is host-only:
+// tools/kasane_contract/megademo_host.js).
 'use strict';
 // night() is 1 on the first night; each WAKE adds one.
 let sortie = 742;
@@ -26,7 +27,7 @@ function corrList(k, x) {
 // to the river's over 48 frames. 120: the wall hits (white), then the
 // negative (plans 8..14) until the stars burst out (196).
 function twist(k, t) {
-  if (t === 120 || t === 121) return BG(WH);
+  if (t === 120 || t === 121) return BG(0xd71e);
   const ng = t > 121 && t < 196, e = (t - 200) / 40;
   BG((t < 60 || t > 120 ? t > 196 ? 0 : 0x0021 : t < 100 ? 0x0823 : 0x1045) ^ (ng ? 0xffff : 0));
   if (t < 232) {
@@ -64,16 +65,16 @@ function twist(k, t) {
   }
   river(t);
 }
-// ZENITH (LETHE on screen): rolls (40..63), lasers, the lock (72); a salvo
-// (96..111), the hit (112), a roll out of the blast (128..147), and the
-// pull-up from 160 (U) until only the stars are left. The radar is drawn
-// in the image's corner (a second surface cost two 10 KB frames).
-const RC0 = 28, RC1 = 108;
+// ZENITH (LETHE on screen), t from -24: the dive from LETHE's mark down to
+// the fleet (U, the pull-up run backwards); rolls (40..63), lasers, the
+// lock (72); a salvo (96..111), the hit (112, kept small: the burst is
+// CORE's), a roll out of it (128..147); the missile (150) and the pull-up
+// after it (160) back to the mark. (The corner radar went for the heap
+// the ship's model and tone needed, 2026-10-29.)
 function zen(z, t) {
-  const k = t - 112, e = ramp(t, 112, 150), ee = 1 - (1 - e) ** 3, U = smooth(ramp(t, 160, 190)), T = 2 * PI * t / 96;
-  // The hit: two grey frames, then an orange glow fading out.
-  const glow = k > 1 ? rnd(10 * (1 - ramp(k, 2, 16)) ** 2) : 0;
-  BG(k === 0 || k === 1 ? 0x5acc : glow << 11 | glow << 5);
+  const k = t - 112, e = ramp(t, 112, 150), ee = 1 - (1 - e) ** 3, T = 2 * PI * t / 96,
+    U = t < 0 ? smooth(ramp(-t, 0, 16)) : smooth(ramp(t, 160, 190));
+  BG(0);
   let w = .55 * M.sin(T);
   if (t >= 40 && t < 64) { const u = (t - 40) / 24; w += 2 * PI * u * u * (3 - 2 * u); }
   if (t >= 128 && t < 148) { const u = (t - 128) / 20; w -= 2 * PI * u * u * (3 - 2 * u); }
@@ -83,32 +84,46 @@ function zen(z, t) {
     b = M.max(0, M.min(7, rnd(-M.atan2(s, c) / .14 + 3.5))), cw = M.cos(t * .3), sw = M.sin(t * .3);
   E(0, 190 * c, 190 * s, -70 * s, 70 * c, t * .05, 120, 67);
   if (U < 1) {
-    E(1, h0, h1, -s, c, 260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl);
-    E(2, h0, h1, -s, c, c, s, -(z.ln - 1) * .11 - ((t * .04) % 1) * .22, 150);
-    E(3, h0, h1, -s, c, c, s, 4.5, M.min(1, t / 70) * 2.2);
+    E(3, h0, h1, -s, c, 260 * c, 260 * s, 2.2 * M.pow(1.32, (t * .25) % 1), z.gl);
+    E(4, h0, h1, -s, c, c, s, -(z.ln - 1) * .11 - ((t * .04) % 1) * .22, 150);
+    // The city, and four more of it along the horizon to either side.
+    for (let j = -2; j < 3; ++j)
+      E(5, h0 + 58 * j * c, h1 + 58 * j * s, -s, c, c, s, 4.5 - .3 * j * j, M.min(1, t / 70) * 2.2);
   }
   // The formation; after the hit it scatters, spinning, and shrinks away.
   if (e < 1) {
     const g = 1 + 3 * ee, a = t * .3 + 9 * ee, r = 10 * (1 - e);
-    E(4, px, py, sx * g, sy * g, r * M.cos(a), r * M.sin(a), .35, r);
+    E(1, px, py, sx * g, sy * g, r * M.cos(a), r * M.sin(a), .35, r);
   }
-  if (t < 96 && t % 16 < 5) E(5, 120, 100, px, py, sx, sy, 20, -40);
+  if (t >= 0 && t < 96 && t % 16 < 5) E(6, 120, 100, px, py, sx, sy, 20, -40);
   else if (t >= 96 && k < 0) {
     const u = smooth(ramp(t, 96, 111));
-    E(5, 120, 100, 120 + (px - 120) * u, 100 + (py - 100) * u, sx * u, sy * u, 20 + 40 * (1 - u), -40 - 30 * u);
+    E(6, 120, 100, 120 + (px - 120) * u, 100 + (py - 100) * u, sx * u, sy * u, 20 + 40 * (1 - u), -40 - 30 * u);
   }
-  E(6 + b, 120, 120, 120, 123 + (t % 3) * 2);
-  // The blast at the formation's middle: a starburst, a double ring of
-  // short rays, streaks thrown out.
+  E(7 + b, 120, 120, 120, 123 + (t % 3) * 2);
+  // The blast at the formation's middle: one ring of short rays, streaks.
   if (k >= 0 && e < 1) {
-    const R = 4 + 140 * ee, m = (z.sa - 1) / 2, qx = px + sx * m, qy = py + sy * m;
-    if (k < 8) E(16, qx, qy, 2, 12 + 50 * smooth(k / 8) * (1 - k / 8), k * .2, 24, PI / 12, WH);
-    E(16, qx, qy, R, R + 4, t * .05, 64, PI / 32, e < .3 ? OR : WH);
-    E(16, qx, qy, R * .8, R * .8 + 3, -t * .05, 48, PI / 24, OR);
-    E(16, qx, qy, 6 + 90 * ee, 20 + 150 * ee, k * .03, 16, PI / 8, e < .5 ? WH : OR);
+    const R = 4 + 70 * ee, m = (z.sa - 1) / 2, qx = px + sx * m, qy = py + sy * m;
+    E(2, qx, qy, R, R + 3, t * .05, 32, PI / 16, e < .3 ? OR : WH);
+    E(2, qx, qy, 6 + 40 * ee, 14 + 70 * ee, k * .03, 12, PI / 6, OR);
   }
-  E(14, RC0, RC1, 22 / 1.45 ** (z.rr - 1));
-  E(15, RC0 + 22 * cw, RC1 + 22 * sw, RC0 + (px - 120) * .15, RC1 + (py - 67) * .15, sx * .15, sy * .15);
+  // LETHE's mark: 160 above the horizon (overhead in the fight, ahead at
+  // either end), an octahedron in the reticle; the tag follows (TGX).
+  const a = 160 - h, X = 120 + a * s, Y = 67 - a * c;
+  TGX = NaN;
+  if (Y > -20 && Y < 150) {
+    E(1, X, Y, 0, 0, 7 * cw, 7 * sw, .35, 7);
+    E(2, X, Y, 11, 16, PI / 4, 4, PI / 2, OR);
+    TGX = X + 10; TGY = Y - 6;
+  }
+  // The missile (150): out of the belly, weaving up after the mark, its
+  // smoke a trail from the ship.
+  if (t >= 150) {
+    const u = smooth(ramp(t, 150, 190)) * .55, q = 8 * M.sin((t - 150) * .4) * (1 - u),
+      cx = 120 + (X - 120) * u + q, cy = 112 + (Y - 112) * u;
+    E(6, 120, 114, cx, cy, 0, 0, 6, -12);
+    E(2, cx, cy, 0, 4 - 2 * u, M.atan2(Y - cy, X - cx), 2, PI, WH);
+  }
 }
 // CORE: an icosahedral shell opens round a pulsing core (cube and
 // octahedron); grey flashes, scan noise and a dolly zoom build to 100
@@ -124,31 +139,49 @@ const IV = [], IFS = '0b505101707a0ab1595b4ba2a7671839434232636838949524b62a8679
 }
 // pj(): yaw, pitch, project at scale s into PJ[j], PJ[j + 1]; returns z
 // (> 0: away). A petal past the lens must not blow up.
-let Ycy, Ysy, Pcp, Psp, Dd;
+let Ycy, Ysy, Pcp, Psp, Dd, Rc = 1, Rs = 0;
 const PJ = [0, 0, 0, 0, 0, 0, 0, 0];
 function pj(x, y, z, s, j) {
   const u = x * Ycy + z * Ysy, v = z * Ycy - x * Ysy, w = y * Pcp - v * Psp, q = y * Psp + v * Pcp,
     f = s * Dd / M.max(Dd + q, Dd * .4);
-  PJ[j] = 120 + u * f; PJ[j + 1] = 67 + w * f;
+  PJ[j] = 120 + (u * Rc - w * Rs) * f; PJ[j + 1] = 67 + (u * Rs + w * Rc) * f;
   return q;
 }
 function core(k, t) {
-  // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The shell
-  // falls in from 112 (m), bursts at 115 (e); cr: criticality, d: dolly
-  // zoom, o/op: opening, b: twist, A/B: yaw/pitch, ng: negative frames.
+  // Clock g: stop-motion from 86 (every 3 frames), stops at 100. The ship
+  // rams the core at 112: the shell falls in, slow then sudden (m,
+  // 112..118), and bursts in slow motion on its own clock (e over 118..168,
+  // eased out: a pop, then a long drift) that freezes 124..129 (a still in
+  // greys, the ring the one colour); then the light (168..).
+  // cr: criticality, d: dolly zoom, o/op: opening, b: twist, A/B: yaw/
+  // pitch, ng: negative frames, l: the roll dodging the core's beams
+  // (64..84; one whole turn 74..84), gy: greys.
   const g = t < 86 ? t : t < 100 ? 86 + 3 * ((t - 86) / 3 | 0) : 100, step = t >= 86 && t < 100 && g === t;
-  const ng = t === 100 || t === 101 || t === 115 || t === 116, m = smooth(ramp(t, 112, 115));
-  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t, 115, 133), ee = 1 - (1 - e) ** 3;
-  const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * m), o = smooth(ramp(g, 40, 56)) + .6 * smooth(ramp(g, 76, 100));
-  const op = o * (1 - m) + 3.6 * ee, b = o * (.5 + 1.5 * cr) * (1 - m) + 5 * ee;
-  const A = g * .03 + 2 * cr ** 3, B = .5 + g * .011, X = ng ? 0xffff : 0;
-  // Grey flashes as 9 cr^3 crosses an integer (60..86), dark grey on the
-  // steps, light grey negatives, the burst's glow fading.
+  const ng = t === 100 || t === 101 || t === 118 || t === 119, m = ramp(t, 112, 118) ** 2,
+    gy = t > 123 && t < 130 || t > 175;
+  const cr = ramp(g, 60, 100), d = ramp(g, 84, 100) ** 2, e = ramp(t < 124 ? t : t < 130 ? 124 : t - 6, 118, 162),
+    ee = 1 - (1 - e) ** 2;
+  const sc = (18 + 44 * smooth(ramp(g, 0, 40))) * (1 - .5 * m), o = smooth(ramp(g, 58, 72)) + .6 * smooth(ramp(g, 76, 100));
+  const op = o * (1 - m) + 2.2 * ee, b = o * (.5 + 1.5 * cr) * (1 - m) + 4 * ee;
+  const A = g * .03 + 2 * cr ** 3, B = .5 + g * .011, X = ng ? 0xffff : 0,
+    l = t >= 72 && t < 84 ? 2 * PI * smooth(ramp(t, 74, 84)) + .4 * M.sin((t - 72) * .5) * M.sin(PI * (t - 72) / 12) : 0;
+  // Grey flashes as 9 cr^3 crosses an integer (60..86: the beams grazing),
+  // dark grey on the steps, light grey negatives, the burst's afterglow.
+  // A held breath (168..175: the debris all but still, a point of light
+  // trembling in the middle), then the core's light past the panel's
+  // white, told as an eye's (a sensor's) answer to it: blown out to CRT
+  // white at once (0xd71e, 176..177, nothing drawn), the iris easing down
+  // to its light (178..189; the lids squint, patch), the light swelling
+  // slowly and then all at once (190..205, cubed), held until the set
+  // shuts.
   const fl = t === 60 || t > 60 && t < 86 && (9 * cr ** 3 | 0) > (9 * ramp(t - 1, 60, 100) ** 3 | 0),
-    glow = rnd(9 * (1 - ramp(t, 117, 129)) ** 2);
-  BG(ng ? 0xad55 : fl ? 0x5acc : step ? 0x2945 : t >= 117 && glow ? glow << 11 | glow << 6 | glow : 0);
-  // The dolly zoom snaps back in the fall.
+    u = t < 178 ? 1 : t < 190 ? 1 - smooth(ramp(t, 177, 186)) : ramp(t, 190, 206) ** 2, v = rnd(9 * (1 - e) ** 2);
+  BG(ng ? 0xad55 : t > 175 ? rnd(26 * u) << 11 | rnd(56 * u) << 5 | rnd(30 * u) : fl ? 0x5acc : step ? 0x2945 :
+    t > 119 ? v << 11 | v << 6 | v : 0);
+  if (t > 175 && t < 178 || t > 205) return;
+  // The dolly zoom snaps back on the ram.
   Ycy = M.cos(A); Ysy = M.sin(A); Pcp = M.cos(B); Psp = M.sin(B); Dd = 3.2 - 1.6 * d * (1 - m);
+  Rc = M.cos(l); Rs = M.sin(l);
   const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee);
   let c = 0;
   for (let i = 0; i < 20; ++i) {
@@ -170,11 +203,14 @@ function core(k, t) {
     D += M.max(M.abs(PJ[2] - PJ[4]), M.abs(PJ[3] - PJ[5]));
     D += M.max(M.abs(PJ[4] - PJ[0]), M.abs(PJ[5] - PJ[1]));
     if (D >= 1e4 || e > 0 && (c += D) > 4000) continue;
-    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
+    // In the burst's glare only light and shade are left: shards grey,
+    // light facing the eye, dark turned away (the ring is the one colour).
+    E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], gy ? ts > 0 ? 0x4208 : 0xad55 : (ts > 0 ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
   }
-  // The core (cc): cube and octahedron, pulsing. Cube vertex i is the bits
-  // of i, octahedron vertex i the axis i % 3 signed by i < 3.
-  const cc = sc * smooth(ramp(g, 40, 56)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * cr) * (1 - m);
+  // The core (cc): cube and octahedron (LETHE's magenta), pulsing. Cube
+  // vertex i is the bits of i, octahedron vertex i the axis i % 3 signed
+  // by i < 3.
+  const cc = sc * smooth(ramp(g, 58, 72)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * cr) * (1 - m);
   if (cc > 1) for (let q = 0; q < 7; ++q) {
     const O = q > 3, s = cc * (O ? .55 : .33);
     for (let j = 0; j < 4; ++j) {
@@ -184,33 +220,127 @@ function core(k, t) {
     }
     E(O ? 2 : q < 2 ? 1 : 3, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], PJ[6], PJ[7]);
   }
-  // Rays from 64; in the burst, a shockwave ring and rays thrown out.
+  // In the burst, a shockwave ring and rays thrown out; before it, rays
+  // from 64 and three beams sweeping round (64..84) to dodge.
   if (e > 0) {
     const R = 6 + 150 * ee, rr = M.max(8, k.r), ln = rnd(k.r * (1 - e));
-    E(4, 120, 67, R, R + 3 + 9 * (1 - e), t * .02, rr, 2 * PI / rr, (e < .3 ? OR : WH) ^ X);
-    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, OR ^ X);
+    E(4, 120, 67, R, R + 3 + 9 * (1 - e), e * 3, rr, 2 * PI / rr, gy || e < .3 ? OR : WH ^ X);
+    if (ln) E(4, 120, 67, 10 + 260 * ee, 40 + 300 * ee, g * .07, ln, 2 * PI / ln, gy ? 0x8410 : OR ^ X);
+    // The core's light: dense rays from the middle, a blot of white that
+    // swells over the screen.
+    if (t > 167) {
+      E(4, 120, 67, 0, t < 176 ? 2 + .4 * (t - 168) + M.sin(t * 2.1) : t < 190 ? 6 + 1.2 * (t - 178) :
+        22 + 128 * ramp(t, 190, 206) ** 3, t * .3, rr, 2 * PI / rr, WH);
+    }
+    if (t > 177) {
+      // The ship's after-image near the eye, against the light, in its
+      // yellow's complement (blue), sinking into the white as it swells (a), its faces
+      // drifting apart and dropping out (q).
+      const a = 1 - ramp(t, 194, 206) ** 2, q = 1.6 * ramp(t, 178, 206);
+      Ycy = 0; Ysy = .6; Dd = 12; Rc = Pcp = 1; Rs = Psp = 0;
+      for (let i = 0; i < 8; ++i)
+        if (q < 1 + i % 3 * .3 && st3(i)) {
+          const x = 30 * q * M.sin(i * 2.3), y = q * (12 * M.cos(i * 1.7) + 4);
+          E(0, PJ[0] + x, PJ[1] + y, PJ[2] + x, PJ[3] + y, PJ[4] + x, PJ[5] + y,
+            rnd(26 * u * (1 - a)) << 11 | rnd(56 * u * (1 - a)) << 5 | rnd(30 * u * (1 - a) + 18 * a));
+        }
+    }
   } else {
-    const rr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - m) * (1 - .6 * smooth(ramp(t, 78, 88))));
+    const rr = rnd(k.r * smooth(ramp(g, 64, 96)) * (1 - .6 * smooth(ramp(t, 78, 88))));
     for (let j = 0; j < k.d && rr; ++j)
-      E(4, 120, 67, cc * .4, 30 + 120 * cr, g * .07 + j * PI / rr, rr, 2 * PI / rr, (fl ? OR : WH) ^ X);
+      E(4, 120, 67, cc * .4, 30 + 120 * cr, g * .07 + j * PI / rr + l, rr, 2 * PI / rr, (fl ? OR : WH) ^ X);
+    if (t >= 72 && t < 84) E(4, 120, 67, cc * .5, 260, t * .09 + l, 3, 2 * PI / 3, OR);
   }
   // Dust falls in on the real clock (the stop-motion is the shell's, not
   // dropped frames): 8 rings, r = sqrt of the fall, swirling.
   const p = rnd(k.r / 4 * smooth(ramp(t, 76, 86)) * (1 - m)), T = t < 100 ? t : 100;
-  for (let i = 0; i < 8 && p && t < 115; ++i) {
-    const u = (i / 8 - T / 36) % 1 + 1, f = M.sqrt(u % 1), r = (24 + 116 * f) * (1 - m);
+  for (let i = 0; i < 8 && p; ++i) {
+    const u = (i / 8 - T / 36) % 1 + 1, f = M.sqrt(u % 1), r = 24 + 116 * f;
     E(4, 120, 67, r, r + 4 + 12 * (1 - f), i * 1.7 + 30 / (r + 9), p, 2 * PI / p, (i & 1 ? 0x07ff : 0xfd20) ^ X);
   }
   // Stars stretch in the zoom and rush past in the burst (G); noise (L).
-  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 115 ? 0 : 1 - e));
-  if (t < 132) E(5, 190 * G, 0, 0, 70 * G, g * .05 + 2 * ee, 120, 67);
+  const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 118 ? 0 : 1 - e));
+  E(5, 190 * G * Rc, 190 * G * Rs, -70 * G * Rs, 70 * G * Rc, g * .05 + 2 * ee, 120, 67);
   if (L) E(6, t * 1.7, L, 10 + 40 * cr);
-  // The burst's lens flare: the triangle plan folded flat.
-  if (e > 0 && t < 125) {
-    const w = 30 + 230 * smooth(ramp(t, 115, 120)), v = (1 - ramp(t, 117, 125)) * 40;
-    E(0, 120 - w, 67, 120 + w, 67, 120, 67, WH ^ X);
-    if (v > 1) E(0, 120, 67 - v, 120, 67 + v, 120, 67, WH ^ X);
+  if (e > 0) return;
+  // LETHE's reticle: on the shell, onto the core as the lasers open it
+  // (58..72); the tag follows (TGX) until the charge.
+  const R = sc * 1.05 + (cc * .75 - sc * 1.05) * smooth(ramp(t, 58, 72));
+  TGX = NaN;
+  if (t < 84) { E(4, 120, 67, R, R + 6, PI / 4, 4, PI / 2, OR); TGX = 120 + R * .7; TGY = 67 - R * .7; }
+  // The missile, chased from behind (0..46). It never reaches the shell:
+  // a ripple runs out of the shell (18..40), the missile shudders, and
+  // something unseen bends it away to the right, turning over, out of the
+  // frame (28..44); it flickers violet in the grip.
+  {
+    const f = ramp(t, 18, 40), r = sc * 1.1 + 90 * f;
+    if (f > 0 && f < 1) E(4, 120, 67, r, r + 2 + 5 * f, t * .05, 24, PI / 12, 0xc81f);
   }
+  if (t < 46) {
+    // Weaving, shuddering (w, 22..28), thrown off to the right (v); the
+    // smoke a line back along its heading.
+    const v = ramp(t, 28, 44), w = ramp(t, 22, 28) * (1 - v), r = 2.4 * v * v + .3 * w * M.sin(t * 2.3),
+      x = 120 + 7 * M.sin(t * .25) * (1 - ramp(t, 0, 44)) + 170 * v * v + 2.5 * w * M.sin(t * 2.9),
+      y = 104 - 46 * v + 2 * w * M.cos(t * 3.7), c = M.cos(r), s = M.sin(r), f = 8 + (t % 3) * 2;
+    E(0, x, y + 4, x - 30 * s, y + 30 * c, x - 30 * s, y + 30 * c, 0x8c71);
+    E(0, x + 10 * s, y - 10 * c, x - 4 * c - 3 * s, y - 4 * s + 3 * c, x + 4 * c - 3 * s, y + 4 * s + 3 * c,
+      t > 21 && t < 36 && t & 1 ? 0xc81f : WH);
+    E(0, x - 2 * c - 4 * s, y - 2 * s + 4 * c, x + 2 * c - 4 * s, y + 2 * s + 4 * c, x - f * s, y + f * c, OR);
+  }
+  if (t < 44) return;
+  // The ship from behind, a 3D model in a wide lens (focal 110): it sweeps
+  // in from beside the camera, its tail looming (44..56), fires four
+  // volleys (58..72) that open the shell, banks through the beams, and
+  // charges (84..100) 300 units deep, so perspective alone shrinks it to
+  // a point while the dolly zoom throws the rest outward. It hangs there
+  // in the time stop; at 112 it hits.
+  const q = smooth(ramp(t, 44, 56)), w = ramp(T, 84, 100), a = .35 * (1 - q);
+  Ycy = 3.4 * (1 - q); Ysy = 1.6 + 1.4 * (1 - q) - 1.6 * w; Dd = 4.6 + 5.4 * q + 300 * w * w;
+  const r = a + (T >= 72 && T < 84 ? .4 * M.sin((T - 72) * .5) : 0);
+  Rc = M.cos(r); Rs = M.sin(r); Pcp = M.cos(a); Psp = -M.sin(a);
+  // Four volleys (58..72): a beam from each wing root and tip, a quarter
+  // of the way at a time, to the shell's middle.
+  for (let v = 58, f; v < 72; v += 4)
+    if ((f = (t - v) / 4) >= 0 && f < 1)
+      for (let j = 5; j < 9; ++j) {
+        sv(j, 6);
+        const b = .7 * f, e = b + .3, x = 120 + 4 * (j - 6.5) - PJ[6], y = 67 - PJ[7];
+        E(0, PJ[6] + x * b, PJ[7] + y * b, PJ[6] + x * e, PJ[7] + y * e, PJ[6] + x * e, PJ[7] + y * e, OR);
+      }
+  // Screentone first (a manga's dot tone): the underside, wings and ears,
+  // the faces that lie under or against another, as 8 rows of dots (plan
+  // 7; 36 a face, the dots are segments), so the tone coarsens as the
+  // ship looms. Then every outline over it.
+  for (let i = 2; i < 8; ++i)
+    if (st3(i)) E(7, PJ[0], PJ[1], (PJ[2] - PJ[0]) / 8, (PJ[3] - PJ[1]) / 8, (PJ[4] - PJ[2]) / 8, (PJ[5] - PJ[3]) / 8, 8, 1);
+  for (let i = 0; i < 9; ++i)
+    if (st3(i)) E(0, PJ[0], PJ[1], PJ[2], PJ[3], PJ[4], PJ[5], i > 7 ? T % 3 ? OR : 0xfd20 : 0xffe0);
+}
+// st3(): the ship's triangle i into PJ[0..5]; false when a corner is near
+// or behind the lens or its point is past the plans' -480..720.
+function st3(i) {
+  let k = 1;
+  for (let j = 0; j < 3; ++j) {
+    if (sv(hx(STR, 3 * i + j), 2 * j) < .8) return false;
+    k &= PJ[2 * j] > -400 && PJ[2 * j] < 640 && PJ[2 * j + 1] > -400 && PJ[2 * j + 1] < 640;
+  }
+  return k > 0;
+}
+// The ship: SV its vertices (x right, y down, z ahead; the tail at -3),
+// a character each, (code - 79) / 5:
+// nose, tail left/right/top/bottom, wing roots and tips, the two ears
+// (base, base, tip), the flame. STR: its triangles as hex vertex triples
+// (body x4, wings, ears, flame). sv() rolls (Rc, Rs), turns (Pcp, Psp),
+// places at (Ycy, Ysy, Dd) and projects vertex i into PJ[j], PJ[j + 1];
+// returns its depth. (The shell's projection globals: core() sets them
+// again before the shell each frame, and every name is a resident atom.)
+const SV = 'OOrGO@WO@OI@OS@IOW1QBUOWmQBIM@MKIGAAUM@QKIWAALN?RN?OS=',
+  STR = '0130230140245167289abcdefgh';
+function sv(i, j) {
+  const a = (SV.charCodeAt(3 * i) - 79) / 5, b = (SV.charCodeAt(3 * i + 1) - 79) / 5,
+    c = (SV.charCodeAt(3 * i + 2) - 79) / 5, x = a * Rc - b * Rs, y = a * Rs + b * Rc, Z = Dd + c * Pcp - x * Psp;
+  PJ[j] = 120 + 110 * (Ycy + x * Pcp + c * Psp) / Z; PJ[j + 1] = 67 + 110 * (Ysy + y) / Z;
+  return Z;
 }
 // LOST: CRT off, a line to a dot to black; WAKE's closed eyes follow.
 function lost(t) {
@@ -220,7 +350,7 @@ function lost(t) {
 }
 // Act I (CALL, ROUTE, VOYAGE) keeps the log name NEWS; WAKE plays first.
 const NAMES = ['NEWS', 'NEWS', 'NEWS', 'TWIST', 'ZENITH', 'CORE', 'LOST', 'WAKE'],
-  LEN = [64, 56, 96, 240, 192, 140, 24, 104];
+  LEN = [64, 56, 96, 240, 216, 226, 24, 104];
 // Scene s's plans as [template, args...]. Act I's set is its HUD, then
 // TWIST's first 8: they register at the end of WAKE (the heap is lowest
 // there) and pass to TWIST at the cut (enter()). The loader builds plan i
@@ -229,28 +359,18 @@ function plist(s, tier) {
   const k = KN[tier], z = k.z, w = s < 4 ? corrList(k.c, 0).concat([['st', z.st]]) : null;
   return s < 3 ? [['cv', 0x57f9], ['ch', 0x57f9], ['eg'], ['cw', WH], ['sp', 0xfde0], ['sc', 0x57f9]].concat(w) :
     s === 3 ? w.concat(corrList(k.c, 0xffff), [['ry']]) :
-    s === 5 ? [['tri'], ['qd', 0x17a7], ['qd', OR], ['sg', 0x17a7], ['ry'], ['st', z.st], ['nz', k.k.n]] :
-    s === 6 ? [['ln', WH], ['ln', 0x167f]] : s === 7 ? [] :
-    [['st', z.st], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['sa', z.sa], ['tr', z.sa, z.ts],
-      ['sh', 0], ['sh', 1], ['sh', 2], ['sh', 3], ['sh', 4], ['sh', 5], ['sh', 6], ['sh', 7],
-      ['rd', z.rr], ['sw', z.sa, RC0, RC1], ['ry']];
+    s === 5 ? [['tri'], ['qd', 0x17a7], ['qd', 0xf81f], ['sg', 0x17a7], ['ry'], ['st', z.st], ['nz', k.k.n], ['ht', 0xa4e0]] :
+    s === 6 ? [['ln', 0xef9f], ['ln', 0x167f]] : s === 7 ? [] :
+    // ZENITH: what its opening shot draws (stars, LETHE's octahedron and
+    // reticle) first, as the plans register a frame at a time.
+    [['st', z.st], ['sa', z.sa], ['ry'], ['gr'], ['la', z.ln], ['ci', z.cr, z.cc, 3.2 / z.cc], ['tr', z.sa, z.ts],
+      ['sh', 0], ['sh', 1], ['sh', 2], ['sh', 3], ['sh', 4], ['sh', 5], ['sh', 6], ['sh', 7]];
 }
 // [program, points or null] of a plan entry.
 const plan = e => [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null];
 // Scene s at tier and frame t, through E and BG.
 function play(s, tier, t) {
   const k = KN[tier];
-  if (s < 3) brief(s, t); else if (s === 3) twist(k.c, t); else if (s === 4) zen(k.z, t);
+  if (s < 3) brief(s, t); else if (s === 3) twist(k.c, t); else if (s === 4) zen(k.z, t - 24);
   else if (s === 5) core(k.k, t); else if (s === 6) lost(t); else wake(t);
 }
-// The host tests' form: specs() a thunk per plan; frame() {b: backdrop, s,
-// d: [[plan, [inputs]]...]} (plan -1: a pocket.shapes segment).
-globalThis.procMegademo = {names: NAMES, len: LEN, tiers: KN.length, specs: (s, tier) => plist(s, tier).map(e => () => plan(e)),
-  frame: function (s, tier, t) {
-  const r = {b: 0, s: 0, d: []}, e = E, g = BG;
-  E = (k, ...a) => { r.d.push([k, a]); };
-  BG = b => { r.b = b; };
-  play(s, tier, t);
-  E = e; BG = g;
-  return r;
-}};

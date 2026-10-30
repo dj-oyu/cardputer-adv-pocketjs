@@ -18,6 +18,9 @@ def chunk_files(act_only=False):
         if len(words) != 2 or words[0] == 'app' or act_only and words[0] in VIEW:
             continue
         out.append(ROOT / 'apps/kasane' / words[1])
+    # procMegademo (the host tests' form) is not an app chunk: the device
+    # does not need it (megademo_host.js).
+    out.append(ROOT / 'tools/kasane_contract/megademo_host.js')
     return out
 
 

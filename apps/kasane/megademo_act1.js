@@ -109,10 +109,11 @@ Aa06 Ab17 Lab65535 Aa0e Ab1f Lab65535 Mb6d Aa0b Mb7d Ab1b Lab65535 Aa19 L0a64063
   tri: 'U7 V01 l623 l645 l601',
   qd: 'U8 V01 L23$0 L45$0 L67$0 L01$0',
   sg: 'U8 V01 L23$0 V45 L67$0',
+  // ht: dot tone in a triangle: n rows (6) from the apex (0, 1) down one
+  // edge (2, 3), row i i * k dots (k: 7) a step (4, 5) apart; the colour
+// from a register (PLOT_COLOR_REG, which the radar's sweep used).
+  ht: 'U8 Sd1 Se0 Sf$0 Q6 A002 A113 Aee7 M90d Ma1d Qe pf9a A994 Aaa5 E E',
   ry: 'U8 S81.5707963 Q5 A948 N99 Na4 Mb92 Abb0 Mca2 Acc1 Vbc Mb93 Abb0 Mca3 Acc1 l7bc A446 E',
   nz: 'U3 S30 S41 S567 S6120 S77.31 S83.97 R$0 A334 B31 M937 A990 N99 M995 A995 Ma38 Aaa0 Naa Maa6 Aaa6 Va9 \
-Aba2 Lb933808 E',
-  rd: 'U3 S41.5707963 S5.3926991 S61.45 R$0 S30 A834 N88 M882 A880 N93 M992 A991 V89 R16 A335 A834 N88 M882 \
-A880 N93 M992 A991 L896055 E M226 E Sa-1 Mb2a Acb0 Ad20 Vc1 Ld16055 Acb1 Ad21 V0c L0d6055',
-  sw: 'S8$1 S9$2 V89 I00 I11 L0165535 I22 I33 I44 I55 Sa65535 Sb129862 Sc-1 R$0 pa23 A224 A335 Maac Aaab E'
+Aba2 Lb933808 E'
 };

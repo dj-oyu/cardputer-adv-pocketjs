@@ -266,7 +266,7 @@ int main(int argc,char **argv){
     printf("%s eval + first present; source %zu B\n",ok?"ok  ":"FAIL",n);
     /* Buttons: two plain loops, then Enter zoom out/in inside Act II, a tier
      * down/up, and a scene skip in each direction. */
-    const unsigned loop=baseline?48:(unsigned)num("procMegademo.len.reduce((a,b)=>a+b,0)");
+    const unsigned loop=baseline?48:(unsigned)num("LEN.reduce((a,b)=>a+b,0)");
     const char *frames_env=getenv("MEGA_FRAMES");
     const unsigned frames=frames_env?(unsigned)strtoul(frames_env,NULL,0):baseline?200:loop*2+400;
     size_t heap_peak=0,heap_live_peak=0;unsigned max_live_seen=0,coexist_frames=0,max_frame_reg=0;
