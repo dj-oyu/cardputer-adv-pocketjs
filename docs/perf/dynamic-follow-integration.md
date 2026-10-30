@@ -63,3 +63,5 @@ Nodeの同step描画cadence、seed再現、retarget q/v保持、J/I、外乱後�
 binを読み込んで同じJS objectへ再展開するだけの方式と、Cが検証済みpacked dataを直接参照する方式を比較する。共有sin LUTは既にCの不変int16 tableであり、同様に不変性が明確なデータから検討する。新asset経路は未実装。
 
 直接参照にはversion/byte order/型・精度/長さ・count・offsetのoverflow/整列を定義し、範囲を検証してから公開する。file I/OがいったんArrayBufferへcopyするか、Cが不変領域をmapできるかは未調査で、現時点でzero-copy可能と断定しない。actorと転送完了までasset所有者を保持し、読込bufferの解放・差替え・unmapでdangling参照を作らない。JS可変bufferの後借用やcandidate/committedの不変性を壊す省略はしない。失敗時は旧committed画像を保持し、生成時peak・最大単一確保・保持量・読込/検証copyを別々に測る。
+
+追補の読取りでは、現在のJS FS readは1024 Bのstack bufferから`JS_NewUint8ArrayCopy`、Cのread_all/read_atもcaller bufferへのcopyで、mmapではないことを確認した（`main/pocket/pocket_fs.c`）。既存pet assetのEMBED_FILESとasset tableは候補だがcloud binは未対応。最初はcloudのnode/parent/初期TRS、radii/blend local lobes、材質表をversioned binから既存bufferへ直接初期化し、巨大なJS definition graphを復元しない比較を行う。既存backing storeはellipsoid264 B/group84 B、blend316+108×lobeと既にpackedなので、第一候補は生成時のdefinition graph peakであり、動的stateの大幅削減は未立証。tongueの色/opacityは可変として残す。初期化copyを認めてdispose/reloadと画素一致を測り、shared immutable参照はその後に検討する。
