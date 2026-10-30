@@ -502,7 +502,93 @@ static int finite_fixture_contract(bool ok){
     printf("%s\n",ok?"CHARACTER_FIXTURE_PASS":"CHARACTER_FIXTURE_FAIL");return ok?0:1;
 }
 
+#ifdef CHARACTER_MODEL_STUDY
+#ifdef CHARACTER_MODEL_BLOB
+#include "model_study_blob.h"
+extern JSValue pocket_ayatsuri_model_from_static(JSContext *,const uint8_t *,size_t);
+static JSValue model_study_static_model(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argv;if(argc)return JS_ThrowTypeError(c,"static model takes no arguments");
+    return pocket_ayatsuri_model_from_static(c,model_study_blob,sizeof model_study_blob);
+}
+#endif
+static FILE *model_study_pixels;
+static unsigned model_study_frame;
+static uint64_t model_study_panel_hash(void){
+    uint64_t hash=UINT64_C(14695981039346656037);
+    for(size_t i=0;i<240*135;i++){
+        hash^=panel[i]&255u;hash*=UINT64_C(1099511628211);
+        hash^=panel[i]>>8;hash*=UINT64_C(1099511628211);
+    }return hash;
+}
+static bool model_study_script(const char *script,const char *phase){
+    const bool ok=eval(script,strlen(script),"model-study-phase.js");character_memory_record(phase,false);return ok;
+}
+static bool model_study_tick(unsigned slot,unsigned tick){
+    JSValue global=JS_GetGlobalObject(ctx),object=JS_GetPropertyStr(ctx,global,"__modelStudy"),
+      function=JS_GetPropertyStr(ctx,object,"frame"),args[2]={JS_NewUint32(ctx,slot),JS_NewUint32(ctx,tick)};
+    JS_FreeValue(ctx,global);JSValue result=JS_Call(ctx,function,object,2,args);
+    const bool ok=!JS_IsException(result);
+    if(!ok){JSValue error=JS_GetException(ctx);const char *text=JS_ToCString(ctx,error);
+        fprintf(stderr,"MODEL_STUDY_FRAME_FAIL slot=%u tick=%u %s\n",slot,tick,text?text:"null");
+        JS_FreeCString(ctx,text);JS_FreeValue(ctx,error);++exceptions;}
+    JS_FreeValue(ctx,result);JS_FreeValue(ctx,function);JS_FreeValue(ctx,object);
+    JSContext *pending;while(JS_ExecutePendingJob(rt,&pending)>0){}
+    JS_VMStackTrim(rt);pocket_kasane_end_turn();
+    if(ok){
+        const uint64_t time=(uint64_t)tick*1000000u/30u;present(time);
+        if(getenv("CHARACTER_FULL_REFERENCE"))return full_reference(time)&&
+          (!model_study_pixels||fprintf(model_study_pixels,"%u,%u,%u,%016llx\n",model_study_frame++,slot,tick,(unsigned long long)model_study_panel_hash())>0);
+    }return ok;
+}
+static int model_study_run(bool ok){
+    const char *driver=getenv("CHARACTER_MODEL_DRIVER");
+    if(!driver)return 2;
+    FILE *file=fopen(driver,"rb");if(!file)return 2;
+    static char script[16384];const size_t bytes=fread(script,1,sizeof script-1,file);bool read_ok=!ferror(file)&&feof(file);fclose(file);script[bytes]=0;
+    ok=ok&&read_ok&&eval(script,bytes,driver);character_memory_record("driver_loaded",false);
+    const char *frames_value=getenv("CHARACTER_MODEL_FRAMES");const unsigned frames=frames_value?(unsigned)strtoul(frames_value,NULL,10):301;
+    if(!frames||frames>3600)ok=false;
+    if(ok)ok=model_study_script("__modelStudy.create(0)","instance1_created");
+    if(ok){ok=model_study_tick(0,0);character_memory_record("instance1_first_frame",false);}
+    for(unsigned tick=1;ok&&tick<frames;++tick)ok=model_study_tick(0,tick);
+    character_memory_record("instance1_steady",false);
+    bool second=false;
+    if(ok){
+        ok=model_study_script("__modelStudy.trySecond()","two_instances_attempted");
+        second=ok&&num("__studySecondOk")==1;
+        printf("MODEL_STUDY_TWO_INSTANCES result=%s\n",second?"PASS":"CAPACITY_REJECTED");
+        if(second){ok=model_study_tick(1,0);character_memory_record("instance2_first_frame",false);}
+        else {const uint64_t before=model_study_panel_hash();ok=model_study_tick(0,frames-1)&&before==model_study_panel_hash();character_memory_record("failed_second_survivor_unchanged",false);}
+    }
+    if(ok)ok=model_study_script("__modelStudy.dispose(0)","instance1_disposed_other_alive");
+    if(ok&&second)ok=model_study_tick(1,1);
+    if(ok)ok=model_study_script("__modelStudy.create(0)","instance1_reloaded");
+    if(ok)ok=model_study_tick(0,0);
+    if(ok)ok=model_study_script("__modelStudy.dispose(0);__modelStudy.dispose(1);delete globalThis.__modelStudy","instances_disposed_before_gc");
+    if(ok&&getenv("CHARACTER_MODEL_GC_PROBE")){JS_RunGC(rt);character_memory_record("instances_disposed_explicit_gc_SECONDARY",true);}
+    pocket_kasane_reset();character_memory_record("presenter_reset",false);
+    JS_FreeContext(ctx);ctx=NULL;character_memory_record("context_released",false);
+    JS_FreeRuntime(rt);rt=NULL;character_memory_record("runtime_released",false);
+    ok=ok&&!cur_bytes&&!character_memory_live_blocks&&!exceptions&&!present_failures&&!study_native_overflow;
+    character_memory_close();if(model_study_pixels&&fclose(model_study_pixels))ok=false;
+    model_study_pixels=NULL;ok=ok&&!character_memory_failed;
+    printf("MODEL_STUDY_%s frames=%u guest_released=%zu native_requested_current=%zu native_requested_peak=%zu observer_registry_bytes=%zu\n",
+        ok?"PASS":"FAIL",frames,cur_bytes,study_native_current,study_native_peak,sizeof study_native_blocks);
+    return ok?0:1;
+}
+#endif
+
 int main(int argc,char **argv){
+#ifdef CHARACTER_MODEL_STUDY
+    study_native_active=getenv("CHARACTER_MEMORY_STUDY")!=NULL;
+    if(study_native_active&&!study_allocator_selftest())return 2;
+    const char *pixel_path=getenv("CHARACTER_MODEL_PIXELS");
+    if(study_native_active&&pixel_path){++study_observer_depth;model_study_pixels=fopen(pixel_path,"w");
+        if(model_study_pixels)setvbuf(model_study_pixels,NULL,_IONBF,0);
+        --study_observer_depth;
+        if(!model_study_pixels)return 2;}
+
+#endif
     const char *path=getenv("CHARACTER_APP_ENTRY");if(!path)path="apps/character/character_lab.js";
     FILE *f=fopen(path,"rb");if(!f)return 2;
     char src[4096];size_t n=fread(src,1,sizeof(src)-1,f);
@@ -510,6 +596,9 @@ int main(int argc,char **argv){
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
     const char *limit=getenv("CHARACTER_HEAP_LIMIT");
     if(limit){size_t cap=strtoul(limit,NULL,0);JS_SetMemoryLimit(rt,cap);JS_SetGCThreshold(rt,cap/2);}
+#ifdef CHARACTER_MODEL_STUDY
+    if(getenv("CHARACTER_MEMORY_STUDY"))character_memory_record("runtime_context",false);
+#endif
     pocket_kasane_install(ctx,NULL);pocket_shape_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
@@ -517,9 +606,21 @@ int main(int argc,char **argv){
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));JS_FreeValue(ctx,g);
     g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__coreAlloc",JS_NewCFunction(ctx,js_core_alloc_checkpoint,"checkpoint",1));JS_FreeValue(ctx,g);
+#if defined(CHARACTER_MODEL_STUDY) && defined(CHARACTER_MODEL_BLOB)
+    g=JS_GetGlobalObject(ctx);JS_SetPropertyStr(ctx,g,"__nativeCloudModelCreate",JS_NewCFunction(ctx,model_study_static_model,"nativeCloudModelCreate",0));JS_FreeValue(ctx,g);
+#endif
     const char *app_chunks=getenv("CHARACTER_APP_CHUNKS");if(!app_chunks)app_chunks="apps/character/chunks.txt";
     if(setenv("MEGA_CHUNKS",app_chunks,1))return 2;
     read_chunks();
+#ifdef CHARACTER_MODEL_STUDY
+    if(getenv("CHARACTER_MEMORY_STUDY")){
+        character_memory_record("api_installed",false);
+        bool loaded=eval(PRELUDE,strlen(PRELUDE),"prelude.js");character_memory_record("prelude_loaded",false);
+        if(loaded)loaded=eval(src,n,path);
+        character_memory_record("app_loaded",false);
+        return model_study_run(loaded);
+    }
+#endif
     bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract()&&blend_primitive_contract()&&core_transform_contract();
     JS_RunGC(rt);peak_bytes=cur_bytes;largest_guest_request=0;
     ok=ok&&eval(src,n,path);

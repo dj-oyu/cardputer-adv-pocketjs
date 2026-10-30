@@ -168,6 +168,7 @@ static bool shade_overlap(const shade_view *a,const shade_view *b){
  * small bridge beside the existing typed-view checks, without linking a
  * second implementation or retaining guest buffers after this call. */
 #include "pocket_ayatsuri_follow.inc"
+#include "pocket_ayatsuri_model.inc"
 static JSValue js_ayatsuri_compose(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;const char *op="ayatsuri.compose";
     if(argc!=3)return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, output[12]");
@@ -264,6 +265,7 @@ static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *un
         JS_CFUNC_DEF("followImpulse",3,js_ayatsuri_follow_impulse),
         JS_CFUNC_DEF("followDrive",3,js_ayatsuri_follow_drive),
         JS_CFUNC_DEF("followCreate",2,js_ayatsuri_follow_create),
+        JS_CFUNC_DEF("modelOpen",1,js_ayatsuri_model_open),
         JS_CFUNC_DEF("driveCreate",1,js_ayatsuri_drive_create)};
     return JS_SetPropertyFunctionList(ctx,ns,methods,sizeof methods/sizeof methods[0])<0?ESP_ERR_NO_MEM:ESP_OK;
 }

@@ -12,6 +12,8 @@ on:
       - 'apps/kasane/chunks.txt'
       - 'main/pocket/pocket_shape.*'
       - 'main/pocket/pocket_ayatsuri_follow.inc'
+      - 'main/pocket/pocket_ayatsuri_model.inc'
+      - 'apps/lib/ayatsuri_model.js'
       - 'main/pocket/pocket_proc.*'
       - 'main/ui/kasane/ksn_procedural.*'
       - 'main/ayatsuri/**'
@@ -53,6 +55,9 @@ jobs:
           node tools/character/test_follow.cjs
           node tools/character/test_cloud_dynamic.cjs
           node tools/character/test_cloud_fixture.cjs
+          node tools/ayatsuri/model/test_pack_model.cjs
+          node tools/ayatsuri/model/test_native_scene.cjs
+          python3 tools/ayatsuri/model/run_model_contracts.py
           node tools/character/transform_oracle.cjs
           node tools/character_motion_test.cjs
           node tools/character_wake_oracle.cjs
@@ -83,6 +88,7 @@ jobs:
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
           python3 tools/kasane_contract/run_character_app_host.py --cloud --fixture --m32
+          python3 tools/ayatsuri/model/run_model_comparison.py --m32
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
           git diff --exit-code
@@ -94,6 +100,7 @@ jobs:
             .cache/character-native/frames/
             .cache/character-capture/
             .cache/cloud-capture/
+            .cache/native-model-study/ci/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

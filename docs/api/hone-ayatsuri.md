@@ -45,4 +45,6 @@ allocatorとsceneは環境ownerに属し、同一owner taskからのみ操作す
 
 ## 反復の記録単位
 
+固定bin/native共有Model、個体別mutable Instance、JSの演技/target指示を併用するハイブリッド方針とする。既存JS動的作成は残し、解析楕円体/blendと将来meshの選択は資産の置き場所と分離する。[native Model比較案](ayatsuri-model-draft.md)で現試作と未実装範囲を追う。同資料の凸多角形部品/必要時triangle経路も後続範囲であり、現比較の合格条件へmesh全実装を追加しない。
+
 仕様の意図、実装済みの入口、同headのsimulation/実測事実、未検証を別に記録する。[実装と計測記録](../perf/character-materials.md)では対象commit・条件・指標・失敗原因・修正後比較を追い、実機で制約/raceが出たら契約まで戻って見直す。仕様→実装→simulation/実機→仕様の反復であり、名称変更や一枚の静止画だけで完了としない。
