@@ -47,3 +47,19 @@ Nodeの同step描画cadence、seed再現、retarget q/v保持、J/I、外乱後�
 画像は `.cache/dynamic-cloud-packed/` のHOST SIMULATION。固定tick0,60,90,120,177,240,300の4mode計28枚、native damage/full reference、pause/seek/失敗再試行、realm解放がPASS。全28枚は容量修正前 `.cache/dynamic-cloud-capture/` とbyte一致。眼の親子統合では602frameの送信用packetの33成分に最大7.63e-6の差（F32結合順序）があり、全frameのpacket bit一致とは呼ばない。固定tick28枚のnative画素一致を確認した範囲で見た目を維持した。
 
 `dynamic_debug`はactor生成前の明示ロードでstatus/reset/impulseを同じcore状態へ付加する。本番ではロードしない。compact poseは従来の顔/補助形状169388値・表情10812 objectと一致、production/診断あり経路も301frame一致。物理LCD、実機の動的演技・時間・native peak/stackは未確認。
+
+## 後続: 不変データの事前変換
+
+ユーザーのbin事前変換案は次の比較候補とする。今回の最終試験の完了条件に新形式への全面移行を加えない。160144 Bは全guestのmalloc_sizeであり、下記分類別のlive/peak内訳はまだ計測していない。差分全体から特定分類の費用を逆算しない。
+
+| 分類 | 現状と事前変換候補 | 分類別の実測 |
+| --- | --- | --- |
+| 形状 | 不変のlobe位置/半径、親子情報はpacked asset候補。現在はJS descriptorからscene所有bufferへコピー | 未計測 |
+| 材質 | 固有色・不変係数はpacked候補。光/視点/変形後の評価結果は動的 | 未計測 |
+| メソッド | C共有核/管理objectへ移した部分とJS評価コードを分ける。dataのbin化だけではJS bytecodeを消せない | 未計測 |
+| 追従state | q/v/goal/位相は可変のためROMには置かない。初期係数/初期値のみ候補。C raw型はstate16 B、prepared112 Bだがguest全費用ではない | raw型のみ確認、分類全体は未計測 |
+| 一時buffer | 同期native呼出しで再利用済み。ファイル読込・検証・publishに必要な一時コピーは別途評価 | 未計測 |
+
+binを読み込んで同じJS objectへ再展開するだけの方式と、Cが検証済みpacked dataを直接参照する方式を比較する。共有sin LUTは既にCの不変int16 tableであり、同様に不変性が明確なデータから検討する。新asset経路は未実装。
+
+直接参照にはversion/byte order/型・精度/長さ・count・offsetのoverflow/整列を定義し、範囲を検証してから公開する。file I/OがいったんArrayBufferへcopyするか、Cが不変領域をmapできるかは未調査で、現時点でzero-copy可能と断定しない。actorと転送完了までasset所有者を保持し、読込bufferの解放・差替え・unmapでdangling参照を作らない。JS可変bufferの後借用やcandidate/committedの不変性を壊す省略はしない。失敗時は旧committed画像を保持し、生成時peak・最大単一確保・保持量・読込/検証copyを別々に測る。
