@@ -1,6 +1,6 @@
 # CLOUD PROBE 有限動的診断
 
-状態: 実装・host検証済み。db4fbb82の通常smokeと区別し、外乱/pause/replayの実機検証は未完。
+状態: 実装・host検証済み。7d21b302の外乱/pause/replay実機検証は下記の担当者報告で確認。後続native Model試作とは別の候補である。
 
 ## 実行操作
 
@@ -24,7 +24,7 @@ snapshotはq/v/goal24個のF32と、3つのuint32位相をlow/high16へ分割し
 
 ## 検証境界
 
-Node実adapterの297回・pause15・retarget q/v保持・replay30値一致、通常301frameのCLOUD ACT BODY描画packet一致、load中を含む再入拒否はPASS（基準digest e12e1890）。既存native APIの不正入力検査は別のfollow/utility回帰で維持する。CIと最終commitの製品linkはChecksと引渡し結果を参照。新機能の実機検証は候補完成後に担当へ引き渡す。
+Node実adapterの297回・pause15・retarget q/v保持・replay30値一致、通常301frameのCLOUD ACT BODY描画packet一致、load中を含む再入拒否はPASS（基準digest e12e1890）。既存native APIの不正入力検査は別のfollow/utility回帰で維持する。CIと最終commitの製品linkはChecksと引渡し結果を参照。7d21b302の実機結果は下記担当報告として分けて記録する。
 
 開始前にactorと時計を基準へ戻す。chunk load/attach失敗でも旧時刻から長時間replayを要求しない。native loaderでtop-level実行後に失敗したchunkはrealm内で再実行できないため、fixture再挑戦にCLOSE後のfresh STARTが必要な場合がある。通常表示への復帰とfixture再試行成功は別契約。
 
@@ -38,3 +38,11 @@ m32/SSE2、163840 B cap、自動GCあり/毎frame強制GCなし、incremental/fu
 Astraの独立read-only比較48ケースで、従来版と264 B storage/packed span/legacy引数が完全一致。private material/UV view各1本を省き、native snapshot copyは残した。CLOUD ACTの旧sampled live_max160144 Bから157148 Bへの差は、同条件アプリ全体の変化でありviewだけの単独寄与とは断定しない。実機fps/native free/largest/stackは今回未計測。
 
 内部証拠は `.cache/character-fixture-m32/fixture-result.json`、`.cache/cloud-probe-final-reentry-cli160.log`、`.cache/cloud-act-final-regression160.log`、`.cache/character-final-forcedcap-regression160.log`。プロトタイプbin loaderは製品へ含めず、[不採用記録](cloud-static-asset-study.md)と `.cache/cloud-bin-rejected-db4/` に保存した。
+
+## 実機担当報告: 7d21b302（2026-10-30）
+
+別担当による同SHAのbuild→flash→app実行報告。flashは16:28:24、flow ID `hone110-flow-flash-7d21b302-20261030`、3領域readback後に検証した。90秒の実行上限内で有限fixtureを2回実行し、両方PASS、digest=e12e1890、pause=15。START→COMPLETEは32.816秒/32.819秒だった。途中retarget、impulse、pause/replay、再開始、通常表示復帰、STOP/CLOSE、HELLO1→fresh HOMEも成功した。
+
+終了時free=207772 B、largest=69632 B、JS=0。30-frame集計18窓のrenderは101.25–102.40 msであり、FPS、最大frame時間、ピークメモリへ読み替えない。途中up中断、実機の故障注入、物理LCD画質は未試験。db4fbb82の一般smoke全体は重複実行していない。終了時owner/job/queue/sessionなし、serial closed、uncertainty=false。
+
+対象BIN SHA256は `017630d805338ba0605eea0284e62d11022ca5ec5695ae1937608dd48b752062`、ELFは `0082714da04a9fc0cb6c16bb0042ae36ee336b23caeb15bc666911c214dd2b81`、receiptは `7cbd2d05e63b565f2d8fbb7dc1403e52d73e11a166a27a6aa2cbbe3dca5276aa`。この記録は実機担当からの証跡であり、本資料作者の独立実測ではない。
