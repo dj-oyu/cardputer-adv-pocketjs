@@ -4,6 +4,9 @@
 // where the device kept ~1.5 KB of it resident for nothing
 // (docs/apps/megademo-story.md, 2026-10-29).
 'use strict';
+// [rows, points or null] of a plan entry: the template decoded
+// (megademo_plans.js), as the firmware's table holds it.
+const plan = e => [prog(T[e[0]], e.slice(1)), e[0] === 'sh' ? points(e[1]) : null];
 // The host tests' form: specs() a thunk per plan; frame() {b: backdrop, s,
 // d: [[plan, [inputs]]...]} (plan -1: a pocket.shapes segment).
 globalThis.procMegademo = {names: NAMES, len: LEN, tiers: KN.length, specs: (s, tier) => plist(s, tier).map(e => () => plan(e)),

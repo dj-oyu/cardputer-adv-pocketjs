@@ -650,6 +650,12 @@ JS_EXTERN JSContext *JS_NewContext(JSRuntime *rt);
 /* PocketJS (docs/vm/harden.md): lock the intrinsics of a fresh context and
    switch it to the harden rules. Call before adding host globals. 0 or -1. */
 JS_EXTERN int JS_PocketHarden(JSContext *ctx);
+/* PocketJS (docs/vm/strip-debug.md): while on, the functions this context
+   compiles keep no line table (a runtime error names each function's first
+   line); parse errors keep their position. pocket_app_load.c sets it around
+   the compile of an app's chunks when its chunks.txt has `option
+   strip-debug`. Default off. */
+JS_EXTERN void JS_PocketSetStripDebug(JSContext *ctx, int on);
 #ifdef POCKET_VM_IMMORTAL_TEST
 // Host only (docs/vm/rom-intrinsics.md R1): the intrinsics become immortal in
 // RAM, as a ROM snapshot will hold them. The runtime must not be freed after.

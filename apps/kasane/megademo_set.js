@@ -10,7 +10,13 @@ let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, LT = 0,
 let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1, zb = -1, ZB = FULL;
 let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
 const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
-const reg = (s, i) => { const p = plan(plist(s, tier)[i]); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
+// Plans are the firmware's built-in table (megademo_plans.js, kasane.<name>):
+// an entry's arguments, and the ship's points ('sh' takes only those).
+const reg = (s, i) => {
+  const e = plist(s, tier)[i];
+  ++loaded;
+  return e[0] === 'sh' ? H.register('kasane.sh', [], points(e[1])) : H.register('kasane.' + e[0], e.slice(1));
+};
 const lerp4 = (a, b, e) => a.map((v, j) => rnd(v + (b[j] - v) * e)), clamp = v => v < 0 ? 0 : v > 1 ? 1 : v;
 function prefetch(s, max) {
   if (s < 3 && scene < 3 || s === 3 && scene === 2) return;
@@ -74,14 +80,11 @@ function build(tx, m) {
   if (m) {
     tx.gradient({bounds: [0, 0, 240, 100], axis: 'y', from: 0x0a0618ff, to: GLOW[ch], dither: true});
     ROOM.split(',').forEach(box);
-    // A tally on the wall, a mark a night, five to a gate. Each rect is a
-    // view command (80 a scene; ZENITH's room is 43 without it): 20 nights.
-    for (let i = 0; i < M.min(20, night()); ++i) {
-      const g = (i / 5) | 0, k = i % 5, x = 197 + (g % 3) * 14, y = 16 + ((g / 3) | 0) * 14;
-      if (k < 4) tx.rect({bounds: [x + 3 * k, y, x + 3 * k + 1, y + 10], color: 0x8a7c66ff});
-      else for (let s = 0; s < 4; ++s)
-        tx.rect({bounds: [x - 1 + 3 * s, y + 8 - 2 * s, x + 2 + 3 * s, y + 10 - 2 * s], color: 0x8a7c66ff});
-    }
+    // A tally on the wall, a mark a night, five to a gate: the firmware's
+    // "tally" image, frame n for n nights, one view command at any count
+    // (as rects, 80 a scene held 20 nights). 90 fit; the last row is
+    // behind the cat.
+    tx.image({resource: tally, bounds: [196, 16, 238, 98], frame: M.min(90, night())});
     tx.roundRect({bounds: [62, 89, 66, 92], radius: 1, color: 0x17a7ffff});
     // Tama from the briefing to CORE.
     if (scene < 6) R.pet = tx.image({resource: pets, bounds: HOME, variant: 3, frame: 0});

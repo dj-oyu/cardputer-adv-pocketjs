@@ -95,7 +95,7 @@ static ksn_proc_status scalar_step(ksn_proc_vm *vm,const ksn_proc_inst *i){
     switch(i->op){
     case KSN_PROC_ADD:vm->reg[i->dst]=vm->reg[i->a]+vm->reg[i->b];break;
     case KSN_PROC_MUL:vm->reg[i->dst]=vm->reg[i->a]*vm->reg[i->b];break;
-    case KSN_PROC_SIN:vm->reg[i->dst]=sinf(vm->reg[i->a]);break;
+    case KSN_PROC_SIN:vm->reg[i->dst]=ksn_proc_sinf(vm->reg[i->a]);break;
     default:return vm->status=KSN_PROC_INVALID;
     }
     /* Only dst can change; begin and prior steps already checked every reg. */

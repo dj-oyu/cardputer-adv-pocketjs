@@ -43,8 +43,10 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
     "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
-option(KASANE_DMA_OVERLAP "Experimental copied LCD DMA overlap with next Kasane band" OFF)
-if(KASANE_DMA_OVERLAP)
+# Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
+# turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
+option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
+if(KASANE_DMA_OVERLAP AND NOT CMAKE_BUILD_EARLY_EXPANSION)
     add_compile_definitions(KASANE_DMA_OVERLAP=1)
 endif()
 option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
@@ -409,9 +411,9 @@ target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunk
 # the @planDecoder by the decoder, into build/generated/apps/<app>/ under the
 # same base name, so the symbol and the chunk table do not change. Editing
 # the chunk re-lowers it without a reconfigure. Only then does the build need
-# Node, 16 or later (docs/platform/build-environment.md); without @plan it
-# does not look for it.
-if(APP_CHUNK_LOWER)
+# Node, 16 or later (docs/platform/build-environment.md); without @plan (or a
+# chunks.txt rom-text line: MEGADEMO's templates) it does not look for it.
+if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
     find_program(POCKET_NODE node)
     set(_node_version "")
     if(POCKET_NODE)

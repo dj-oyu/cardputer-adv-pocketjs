@@ -290,6 +290,50 @@ const pocket_app_view_asset *pocket_app_view_lookup(const char *name){
     return NULL;
 }
 static const pocket_app_image_asset pet_image_asset={"pets",64,64,12,6,ksn_pet_builtin_image};
+
+/* "tally": MEGADEMO's wall tally (apps/kasane/megademo_set.js), frame n
+ * showing n nights: a mark a night, five to a gate (four bars, then a
+ * stepped stroke across them), three gates a row 14 px apart, rows 14 px
+ * apart. It was one view command a mark (a gate eight), so a scene's 80
+ * fitted 20 nights; as one image node it is one command at any count.
+ * Computed per span, no bitmap; transparent off the marks. Placed 1:1 at
+ * (196, 16), the marks land where the rects did. */
+#define TALLY_W 42
+#define TALLY_H 82
+#define TALLY_NIGHTS 90   /* six rows: the last runs behind the cat */
+#define TALLY_COLOR 0x8BECu   /* 0x8a7c66 */
+static bool tally_on(unsigned nights,unsigned x,unsigned y){
+    const unsigned c=x/14,yy=y%14,g=(y/14)*3+c;
+    if(c>2||5*g>=nights)return false;
+    const unsigned marks=nights-5*g>5?5:nights-5*g;
+    const int xx=(int)x-(int)(14*c+1);   /* from the gate's first bar */
+    for(unsigned k=0;k<marks&&k<4;k++)
+        if(xx==(int)(3*k)&&yy<10)return true;
+    if(marks==5)
+        for(int s=0;s<4;s++)
+            if(xx>=3*s-1&&xx<3*s+2&&(int)yy>=8-2*s&&(int)yy<10-2*s)return true;
+    return false;
+}
+static ksn_result tally_span(void *ctx,uint16_t variant,uint16_t frame,uint16_t y,uint16_t x,
+                             uint16_t count,uint16_t *rgb565,uint8_t *alpha){
+    (void)ctx;
+    if(variant||frame>TALLY_NIGHTS||y>=TALLY_H||x>TALLY_W||count>TALLY_W-x||
+       (count&&(!rgb565||!alpha)))return KSN_INVALID;
+    for(unsigned i=0;i<count;i++){
+        const bool on=tally_on(frame,x+i,y);
+        rgb565[i]=on?TALLY_COLOR:0;alpha[i]=on?255:0;
+    }
+    return KSN_OK;
+}
+static ksn_result tally_open(ksn_image_port *out){
+    *out=(ksn_image_port){.width=TALLY_W,.height=TALLY_H,.variants=1,.frames=TALLY_NIGHTS+1,
+        .read_span=tally_span,.opaque=false};
+    return KSN_OK;
+}
+static const pocket_app_image_asset tally_image_asset={"tally",TALLY_W,TALLY_H,1,TALLY_NIGHTS+1,tally_open};
 const pocket_app_image_asset *pocket_app_image_lookup(const char *name){
-    return name&&strcmp(name,"pets")==0?&pet_image_asset:NULL;
+    if(!name)return NULL;
+    if(strcmp(name,"pets")==0)return &pet_image_asset;
+    if(strcmp(name,"tally")==0)return &tally_image_asset;
+    return NULL;
 }

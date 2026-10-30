@@ -186,8 +186,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      # The pinned generator anchors on the old owner loop; the runner from
+      # this workflow's commit swaps only that anchor (current main.c calls
+      # native_observe() and app_control_pump() before the teardown).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: tools/games
+          path: compat-source
+          persist-credentials: false
       - name: Prepare finite diagnostic in disposable checkout
-        run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
+        run: python3 -B compat-source/tools/games/prepare_derby_app_diag_compat.py --common tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.sha }}

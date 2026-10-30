@@ -77,6 +77,15 @@ ON で段階 3 のゲストは 3〜4 KB 減ったが、ターン内の最小は�
 2. ON でも、ファイル名と関数の先頭行は残る。実機のログで「どの関数か」は分かる（関数名も出る）。行が必要なときは OFF のイメージで再現する。
 3. host の試験は OFF のまま（`sdkconfig.h` が無い）。ON を出荷に使うなら、`test_app_load.c`・`test_app_import.c` の「投げた行」の検査を、ON のときはファイル名だけにする分岐が要る。
 
+## アプリごとの指定（`option strip-debug`、2026-10-29）
+
+Kconfig は全アプリに効く。行番号を残したいアプリ（開発中のもの、Playground）を巻き込まずに、DRAM が足りないアプリだけで表を落とせるように、チャンクの一覧で指定できるようにした。
+
+- **`chunks.txt` に `option strip-debug`** と書くと、そのアプリのチャンク（`pocket.app.load()` と静的 `import`）を、行番号表なしでコンパイルする。入口のファイルと、他のアプリは今までどおり。
+- 作り: `JSContext` の 1 ビット（`strip_debug`）と `JS_PocketSetStripDebug(ctx, on)`（`quickjs.c`）。`compute_pc2line_info()` と `js_create_function()` は、Kconfig のときと同じ道を通る。`tools/make_app_chunks.py` が `app_chunk_set_t.strip_debug` に書き、`pocket_app_load.c` がチャンクの `JS_Eval` の前後でだけ立てる。host の `tools/hostshim/app_chunks_host.c` も同じ行を読む。
+- 検査: `tools/test_app_load.c` が、指定した集合の実行時エラーが関数の先頭行（5）を指し、投げた行（7）を指さないこと、指定のない集合は正確な行のままであること、知らない `option` を断ることを確かめる。
+- 使っているアプリ: MEGADEMO（`apps/kasane/chunks.txt`）。host（m32）で評価後 −6.8 KB（136,476 → 129,660 B）、上限で通る最小の heap −6.9 KB（153,125 → 146,250 B）。
+
 ## 確信の低い点
 
 - 段階 3 の実機の値は、plan が全部は載らない（`LOADSTALL`）状態の値。全部載れば、ターン内の最小はさらに下がる。

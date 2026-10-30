@@ -658,6 +658,10 @@ struct JSContext {
        [[Prototype]] changes, intrinsics locked, no species, failed writes
        throw. Never cleared. */
     uint8_t harden : 1;
+    /* JS_PocketSetStripDebug (docs/vm/strip-debug.md): what this context
+       compiles while it is set keeps no line table, as under
+       CONFIG_POCKET_VM_STRIP_DEBUG, but for one app's chunks. */
+    uint8_t strip_debug : 1;
     /* Harden: a shared shape and its locked twin, so the intrinsics that
        shared a shape (most C functions do: length, name) share the locked
        one instead of each cloning it (js_harden_lock). Both referenced. */
@@ -7600,6 +7604,11 @@ JSVMState *js_vm_state(JSRuntime *rt)
 JSVMStack *js_vm_stack_get(JSRuntime *rt)
 {
     return &rt->vm_stack;
+}
+
+void JS_PocketSetStripDebug(JSContext *ctx, int on)
+{
+    ctx->strip_debug = on != 0;
 }
 
 void JS_VMStackTrim(JSRuntime *rt)
@@ -38676,6 +38685,8 @@ static void compute_pc2line_info(JSFunctionDef *s)
        keep their exact position, which comes from the tokenizer. */
     return;
 #endif
+    if (s->ctx->strip_debug)
+        return;
     if (s->source_loc_slots) {
         int last_line_num = s->line_num;
         int last_col_num = s->col_num;
@@ -40763,11 +40774,18 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->pc2line_buf = NULL;
     b->pc2line_len = 0;
 #else
-    b->pc2line_buf = js_realloc(ctx, fd->pc2line.buf, fd->pc2line.size);
-    if (!b->pc2line_buf) {
-        b->pc2line_buf = fd->pc2line.buf;
+    if (ctx->strip_debug) {
+        /* The same, for JS_PocketSetStripDebug: compute_pc2line_info()
+           wrote nothing and fd->pc2line holds no block. */
+        b->pc2line_buf = NULL;
+        b->pc2line_len = 0;
+    } else {
+        b->pc2line_buf = js_realloc(ctx, fd->pc2line.buf, fd->pc2line.size);
+        if (!b->pc2line_buf) {
+            b->pc2line_buf = fd->pc2line.buf;
+        }
+        b->pc2line_len = fd->pc2line.size;
     }
-    b->pc2line_len = fd->pc2line.size;
 #endif
     b->source = fd->source;
     b->source_len = fd->source_len;

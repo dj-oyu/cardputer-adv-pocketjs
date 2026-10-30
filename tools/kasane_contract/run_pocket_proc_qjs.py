@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 
-from megademo_chunks import chunk_arg
+from megademo_chunks import chunk_arg, rom_table
 ROOT=Path(__file__).resolve().parents[2]
 QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 OUT=ROOT/'.cache/kasane_pocket_proc_qjs'
@@ -42,7 +42,9 @@ def main():
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
              ROOT/'main/pocket/pocket_shape.c',
              ROOT/'tools/kasane_contract/proc_native_weak.c',
-             ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
+             ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c',
+             # MEGADEMO's built-in plans (the app registers kasane.<name>).
+             rom_table(OUT/'ksn_proc_rom_plans.c')]
     command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
              '-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),

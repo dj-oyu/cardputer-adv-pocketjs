@@ -12,7 +12,7 @@ try { res0 = H.resource({maxSegments: 768}); } catch (e) { res0 = H.resource(); 
 // ZENITH's radar thumbnail and munching squares went for the story's
 // heap (typed arrays alone keep ~1.3 KB): docs/apps/megademo-story.md
 const monRes = G.resource(G.registerResizeSource({source: res0, width: 112, height: 63}));
-const pets = V.resource('pets');
+const pets = V.resource('pets'), tally = V.resource('tally');
 const lives = V.cache.create([[0, 2, 9, 7], [0, 0, 2, 2], [7, 0, 9, 2]].map(b => ({bounds: b, color: 0x14f53cff})));
 // Loader: the next scene registers from LOAD[0] frames before the switch,
 // LOAD[1] plans a frame, while the internal heap has LOAD[2] bytes free
@@ -45,7 +45,7 @@ const SAY = [, , , '6 122 234 133|10|CROSSING THE RIVER|96|DEEPER|180|INTO LETHE
 '6 106 234 117|10|THE SOURCE OF THE SIGNAL|46|ONLY I CAN REACH IT|60|THE SIGNAL OPENS ITS EYE|74|SIGNAL CRITICAL|100|IT HOLDS ITS BREATH|118|AND BREAKS'];
 // Tama sits on the cushion.
 const HOME = [196, 70, 228, 102];
-// The wall's tally shows 20 nights (night(), megademo_act2.js; build()); the
+// The wall's tally shows the nights (night(), megademo_act2.js; build()); the
 // memory clouds with them (LETHE's letters turn to digits, more each night
 // after the first).
 const GB = {E: '3', I: '1', O: '0', A: '4', S: '5', T: '7'};

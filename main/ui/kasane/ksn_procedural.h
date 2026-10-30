@@ -2,6 +2,7 @@
 #define KSN_PROCEDURAL_H
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 
 /* Host-first experiment. This is separate from the v1 UI command quota and is
  * not yet a JS or Kasane core API. The VM owns a validated program copy during
@@ -182,4 +183,24 @@ bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int
  * was before LINE_PATTERN, in the same binary. */
 bool ksn_proc_render_band_base(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
 #endif
+/* SIN. newlib's sinf switches to a slow argument reduction above
+ * 2^7*pi/2 (about 201): about 10 us more a call on the board
+ * (docs/kasane/derby-background-cost.md), and MEGADEMO's Act I passed
+ * hundreds of such arguments a frame (docs/apps/megademo-story.md). An
+ * argument up to 201 goes to sinf as it is, bit for bit as before; a larger
+ * one (below 2e5, |k| < 2^15) is first folded by 2*pi: 2*pi split as
+ * C1 + C2 + C3 with C1 and C2 of 8 significant bits, so k*C1 and k*C2 are
+ * exact in float32 and x - k*C1 is too (the two are close). What is left
+ * is the rounding of the last two steps, about 1e-5 at the top of the
+ * range: a large argument's result may move a few ulp, not the pattern. */
+static inline float ksn_proc_sinf(float x){
+    const float a=fabsf(x);
+    if(!(a>201.0f&&a<2.0e5f))return sinf(x);
+    const float k=(float)(int32_t)(x*0.159154943f+(x<0.0f?-0.5f:0.5f));
+    x-=k*6.28125f;
+    x-=k*0.0019378662109375f;
+    x-=k*-2.55903137e-06f;
+    return sinf(x);
+}
+
 #endif
