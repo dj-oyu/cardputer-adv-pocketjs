@@ -100,7 +100,8 @@ jobs:
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
           python3 tools/kasane_contract/run_character_app_host.py --cloud --fixture --m32
           python3 tools/ayatsuri/model/run_model_comparison.py --m32
-          python3 tools/ayatsuri/model/run_cloud_memory.py --m32
+          python3 tools/ayatsuri/model/run_cloud_memory.py --m32 --profile DEVICE_SHORT
+          python3 tools/ayatsuri/model/run_cloud_memory.py --m32 --profile HOST_LONG
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
           git diff --exit-code
@@ -113,7 +114,7 @@ jobs:
             .cache/character-capture/
             .cache/cloud-capture/
             .cache/native-model-study/ci/
-            .cache/cloud-memory-m32/
+            .cache/cloud-memory-*/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -137,7 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           . "$IDF_PATH/export.sh"
-          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 build
+          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=OFF build
           idf.py -B build_character size > build_character/size.log
           idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON build
           idf.py -B build_character_memory size > build_character_memory/size.log

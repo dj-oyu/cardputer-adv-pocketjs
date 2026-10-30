@@ -596,11 +596,19 @@ static unsigned memory_frames;
 static bool memory_frame(unsigned buttons){
     char script[32];snprintf(script,sizeof script,"frame(%u)",buttons);
     if(!eval(script,strlen(script),"memory-frame.js"))return false;
+    JSOOMCanary oom;JS_TakeOOMCanary(rt,&oom);
+    if(oom.count){size_t used=0,limit=0;JS_GetMemoryCounters(rt,&used,&limit);
+        fprintf(stderr,"CLOUD_MEMORY_HOST_OOM frame=%u quota=%u allocator=%u first_req=%zu first_used=%zu used=%zu limit=%zu\n",
+                memory_frames,oom.quota_count,oom.allocator_count,oom.first_req,oom.first_used,used,limit);return false;}
     present((uint64_t)memory_frames*33333u);++memory_frames;
     return !present_failures&&full_reference((uint64_t)(memory_frames-1)*33333u);
 }
 static int memory_app_contract(bool loaded){
     const char *choice=getenv("CHARACTER_MEMORY_APP"),*path=getenv("CHARACTER_MEMORY_PIXELS");
+    const char *profile=getenv("CHARACTER_MEMORY_PROFILE");
+    if(profile&&strcmp(profile,"DEVICE_SHORT")&&strcmp(profile,"HOST_LONG"))return 2;
+    const bool long_profile=profile&&!strcmp(profile,"HOST_LONG");
+    const unsigned expected_draws=long_profile?1115:63;
     FILE *pixels=path?fopen(path,"w"):NULL;
     bool ok=loaded&&(!path||pixels)&&eval("globalThis.__memoryRead={}",26,"memory-read.js");
     if(ok)ok=memory_frame(0)&&num("AyatsuriCloudMemory.read(__memoryRead).variant===null")==1;
@@ -617,8 +625,8 @@ static int memory_app_contract(bool loaded){
             if(num("AyatsuriCloudMemory.read(__memoryRead).phase==='COMPLETE'")==1)break;
             ok=memory_frame(0);
         }
-        ok=ok&&turn<1300&&last==1115&&num("AyatsuriCloudMemory.read(__memoryRead).released&&__memoryRead.retained")==1;
-        printf("CLOUD_MEMORY_HOST variant=%c run=%u draws=%u turns=%u peak_requested=%zu largest_request=%zu\n",*choice,repeat+1,last,turn,peak_bytes,largest_guest_request);
+        ok=ok&&turn<1300&&last==expected_draws&&num("AyatsuriCloudMemory.read(__memoryRead).released&&__memoryRead.retained")==1;
+        printf("CLOUD_MEMORY_HOST variant=%c profile=%s run=%u draws=%u turns=%u peak_requested=%zu largest_request=%zu\n",*choice,long_profile?"HOST_LONG":"DEVICE_SHORT",repeat+1,last,turn,peak_bytes,largest_guest_request);
         if(ok)ok=memory_frame(0);
     }
     if(pixels)fclose(pixels);
@@ -675,6 +683,13 @@ int main(int argc,char **argv){
     bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&(memory_app||(primitive_contract()&&blend_primitive_contract()&&core_transform_contract()));
     if(!memory_app)JS_RunGC(rt);
     peak_bytes=cur_bytes;largest_guest_request=0;
+    if(memory_app){
+        const char *profile=getenv("CHARACTER_MEMORY_PROFILE");
+        if(profile&&strcmp(profile,"DEVICE_SHORT")&&strcmp(profile,"HOST_LONG"))return 2;
+        if(profile){JSValue global=JS_GetGlobalObject(ctx);
+            ok=ok&&JS_SetPropertyStr(ctx,global,"__cloudMemoryProfile",JS_NewString(ctx,profile))>=0;
+            JS_FreeValue(ctx,global);}
+    }
     ok=ok&&eval(src,n,path);
     if(memory_app)return memory_app_contract(ok);
     if(ok){

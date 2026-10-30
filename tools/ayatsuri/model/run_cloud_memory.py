@@ -76,12 +76,14 @@ def selftest_inputs():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32', action='store_true')
+    parser.add_argument('--profile', choices=('DEVICE_SHORT', 'HOST_LONG'), default='DEVICE_SHORT')
     parser.add_argument('--self-test-inputs', action='store_true')
     args = parser.parse_args()
     if args.self_test_inputs:
         selftest_inputs()
         return
-    folder = ROOT / '.cache' / ('cloud-memory-m32' if args.m32 else 'cloud-memory-asan')
+    draws = 1115 if args.profile == 'HOST_LONG' else 63
+    folder = ROOT / '.cache' / f'cloud-memory-{args.profile.lower()}-{"m32" if args.m32 else "asan"}'
     flags = ['-fsanitize=address,undefined', '-ffp-contract=off']
     if args.m32:
         env = dict(os.environ, M32_SYSROOT=os.environ.get('M32_SYSROOT', '/tmp/m32sys'))
@@ -106,6 +108,7 @@ def main():
     rows, results = [], []
     for variant in ('A', 'C'):
         env = dict(os.environ, CHARACTER_MEMORY_APP=variant,
+                   CHARACTER_MEMORY_PROFILE=args.profile,
                    CHARACTER_APP_ENTRY='apps/cloudmem/cloud_memory.js',
                    CHARACTER_APP_CHUNKS='apps/cloudmem/chunks.txt',
                    CHARACTER_MEMORY_PIXELS=str(folder / (variant + '-pixels.csv')),
@@ -121,9 +124,9 @@ def main():
         rows.append((folder / (variant + '-pixels.csv')).read_bytes())
     current = study_inputs(ROOT)
     unchanged = inputs == current
-    passed = unchanged and all(results) and rows[0] == rows[1] and len(rows[0].splitlines()) == 2230
+    passed = unchanged and all(results) and rows[0] == rows[1] and len(rows[0].splitlines()) == draws*2
     proof = dict(kind='HOST SIMULATION', passed=passed, variants_passed=results,
-                 frame_rows=2230, runs_per_variant=2, full_reference_every_frame=True,
+                 profile=args.profile, frame_rows=draws*2, runs_per_variant=2, full_reference_every_frame=True,
                  same_binary=True, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                  source_hashes=inputs, sources_unchanged_during_run=unchanged,
                  image_sequence_equal=rows[0] == rows[1],
