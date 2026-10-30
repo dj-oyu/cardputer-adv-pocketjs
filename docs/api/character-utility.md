@@ -102,6 +102,8 @@ visitのpacketとperformanceの返却objectはいずれも再利用される**bo
 
 ## 後続工程: HOME background sceneからの利用
 
+a30b2a2では[実機担当の機能smoke](../perf/character-device-smoke.md)で3体×6mode・停止/reset/呼吸・終了後guest解放が確認された。これは下記HOME adapterや物理LCDの材質品質の受入ではない。次の画質試験ではapp所有の明示tick/seek/pauseと提示完了同期を追加する計画で、utilityに隠れた時計やcaptureの副作用を持たせない。現APIへ追加済みの機能とは区別する。
+
 ユーザーが指定した後続範囲として、ベアメタルAPIの設計・実装後に、同じ配置・材質・変形・演技のutilityをJS appとHOME背景の双方で利用できる工程を置く。現在HOMEから利用可能という意味ではなく、3体常駐や生活シミュレーション全体を実装する要求へ広げない。
 
 実コードのHOME入口は `main/scene/scene.h` のscene_ops_t（prepare/draw/overlay）と `main/ui/shell.c` のscene table/背景frame解放。現行はCのstrip callbackであり、JS appのrealm/frameとは異なる。直接pocket名前空間を注入するだけで共有できると仮定しない。

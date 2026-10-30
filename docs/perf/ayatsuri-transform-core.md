@@ -4,6 +4,8 @@
 
 ## 意図と実装済み境界
 
+後続の[実機担当報告](character-device-smoke.md)ではa30b2a2の機能smokeが通過した。以下はhost測定として保持し、実機のturn/render観測、終了時free、未受入の画質/repairと分ける。
+
 最初の題材は3体のroot/頭/手/尾等の親子配置。JSはmodel・handle・親子graph・dirty依存・時計とframe所有権を維持し、TRS数式だけを`ayatsuri_transform_evaluate`へ移した。JSのdevice用数式は削除し、JS bridgeと直接C利用が同じheader実装を使う。host専用の独立JS referenceは検算用である。
 
 C APIはcaller所有のpose36B、親matrix48B（省略可）、出力48Bを同期借用し、失敗時は出力を変えない。JS bridgeは入力snapshotと成功時の反映を行うため、完全なcopy 0ではない。C scene/handle/allocator、材質/UV/法線/投影の共通核、HOME adapterは未実装。実機を待たず進められる最小境界として分けたもので、汎用framework全体の完成は宣言しない。

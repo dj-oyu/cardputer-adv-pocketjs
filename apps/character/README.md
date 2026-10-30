@@ -13,7 +13,7 @@
 
 BODYは固定世界光・固定カメラで、待機2秒 → 左右傾き3秒 → 圧縮伸長して基準形へ戻る3秒 → 停止2秒。以後は基準姿勢を保持する。雲の彩雲には解析的な0.18秒の遅れを付ける。乱数や積分状態には依存しない。LIGHTは光方向だけ、CAMERAは視点だけ、TEXTUREはキツネの尾の模様座標だけを変える。EXPRESSIONは半眼の変化に独立閉眼係数を重ねる。
 
-`frame * 1000 / 30` は試験の補間位置を定義する時計で、実機で10秒になる保証ではない。実時間による評価と実機性能は未計測。
+`frame * 1000 / 30` は試験の補間位置を定義する時計で、実機で10秒になる保証ではない。a30b2a2の[実機smokeと画質capture計画](../../docs/perf/character-device-smoke.md)は機能確認と限定した時間観測で、実時間尺・FPS・画質の保証ではない。任意tickのseek/pause/stepとcapture完了同期は現appに未実装。
 
 ## モデルと因果関係
 
@@ -44,4 +44,4 @@ hostの通過はdevice時間・native総空き/最大連続・コンパイルpea
 
 `main/CMakeLists.txt` はentryを埋め込み、`chunks.txt` でutility/model/labを別評価する。hostはNodeのVMで同じ3chunkを評価する。frame構築/commitとviewの所有者はapp、geometry/dirty依存/型変換の所有者はutility、native shadeは汎用数値処理でキャラ名を知らない。
 
-正式な枠組みは[hone / ayatsuri](../../docs/api/hone-ayatsuri.md)。JSは`Ayatsuri.scene`、演技用の軽量chunkは`AyatsuriMotion`、model/labは`AyatsuriModels`/`AyatsuriLab`。既存filenameとapp IDは変えず、旧`Character`/`CharacterMotion`は同一実装のaliasを残す。ayatsuriのC APIとHOME adapterは未実装で、このlabの通過だけで汎用性の検証完了とはしない。
+正式な枠組みは[hone / ayatsuri](../../docs/api/hone-ayatsuri.md)。JSは`Ayatsuri.scene`、演技用の軽量chunkは`AyatsuriMotion`、model/labは`AyatsuriModels`/`AyatsuriLab`。既存filenameとapp IDは変えず、旧`Character`/`CharacterMotion`は同一実装のaliasを残す。[C共通TRS核](../../docs/api/ayatsuri-transform-core.md)は実装済みだが、C scene全体とHOME adapterは未実装で、このlabの通過だけで汎用性の検証完了とはしない。

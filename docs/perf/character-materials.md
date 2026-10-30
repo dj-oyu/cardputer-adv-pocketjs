@@ -2,6 +2,8 @@
 
 2026-10-29開始。基準main843496c。実装・試験中の記録で、実機測定ではない。[utility契約](../api/character-utility.md)、[低API契約](../api/shapes.md)、[app操作](../../apps/character/README.md)。
 
+後続a30b2a2の[実機担当smoke報告と画質受入計画](character-device-smoke.md)を追加した。以下のhost値・当時の未測定表記は歴史的条件として保持する。機能smokeは通過したが、物理LCDの材質品質・実機repair・FPS/peak/largestは未受入であり、hostと実機の値を統合した性能保証ではない。
+
 ## 実装した範囲と変更理由
 
 既存の単色面分割では雲が硬い多面体に見え、人/キツネの圧縮伸長は1024線分を超えた。そこでshapes互換を維持し、汎用の解析的楕円体を184Bの不変packetとして候補frameへ凍結する低APIを追加した。保持費用は20entry=200B/物体。走査帯で連続法線・body UV模様・世界光・視線・光路厚み・alphaを評価し、全画面bufferや点ごとのJS drawcallを増やさない。
