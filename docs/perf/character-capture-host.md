@@ -2,6 +2,10 @@
 
 この手順の画像は実QuickJSとnative Kasane rendererによる**シミュレーション画像**であり、実機LCDのcaptureではない。[a30b2a2の実機smoke](character-device-smoke.md)とも区別する。実機の正式APIはcaptureとapp_sessionを同時利用できず、STOPでguestを破棄するため、今回の実機app画像は未取得。
 
+![HOST SIMULATION — 実機captureではない。3体それぞれ基準、身体だけ、光だけ、カメラだけの12条件](../apps/character-capture-host.png)
+
+一覧はローカル検証した12枚を無拡大で配置し、条件とシミュレーション表記を外側へ付けたもの。元PNGは文字を焼き込まずmanifestのRGB hashで比較する。設定図品質の受入を意味しない。
+
 ## 実装の境界
 
 app所有の`AyatsuriLab.control`を診断時だけ明示ロードする。通常のapp時計/キー/描画先/提示経路は保持し、utilityへtimer/capture/入力依存を持ち込まない。[controller契約](../../apps/character/README.md)はcommit前失敗とcommit後view失敗を区別する。`lastSubmittedTick`はnative候補へのcommit成功であり、LCD提示ACKではない。
