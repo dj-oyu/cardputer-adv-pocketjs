@@ -66,7 +66,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_affine -DPOCKET_DERBY_RUNNER_AFFINE=ON -DPOCKET_DERBY_RUNNER_AFFINE_PIE_MIN=0 build
+          idf.py -B build_affine -DPOCKET_DERBY_RUNNER_AFFINE=ON -DPOCKET_DERBY_RUNNER_AFFINE_PIE_MIN=0 -D KASANE_MEGADEMO_TRACE=OFF build
           ccache -s || true
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=ON' build_affine/CMakeCache.txt
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE_PIE_MIN:STRING=0' build_affine/CMakeCache.txt

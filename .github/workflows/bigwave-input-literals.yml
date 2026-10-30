@@ -105,7 +105,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           build_head=$(git rev-parse HEAD)
-          idf.py -B build_result -D SDKCONFIG="$PWD/build_result/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" build
+          idf.py -B build_result -D SDKCONFIG="$PWD/build_result/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" -D KASANE_MEGADEMO_TRACE=OFF build
           ccache -s || true
           idf.py -B build_result size > build_result/size.log
           python3 -B - '${{ matrix.mode }}' "$build_head" '${{ matrix.profile }}' <<'PY'

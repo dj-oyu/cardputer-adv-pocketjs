@@ -50,7 +50,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
-          idf.py -B build_keyboard -D SDKCONFIG="$PWD/build_keyboard/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_keyboard -D SDKCONFIG="$PWD/build_keyboard/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_MEGADEMO_TRACE=OFF build
           idf.py -B build_keyboard size > build_keyboard/size.log
           python3 - <<'PY'
           import hashlib,json,os,subprocess

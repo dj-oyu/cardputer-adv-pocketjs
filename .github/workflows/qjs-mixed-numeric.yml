@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_numeric -D SDKCONFIG=build_numeric/sdkconfig build
+          idf.py -B build_numeric -D SDKCONFIG=build_numeric/sdkconfig -D KASANE_MEGADEMO_TRACE=OFF build
           git rev-parse HEAD > build_numeric/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_numeric/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_numeric/CMakeCache.txt

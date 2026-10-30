@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_projection -DPOCKET_DERBY_COURSE_CACHE=${{ matrix.cache }} -DPOCKET_DERBY_PROJECT_BATCH=${{ matrix.batch }} build
+          idf.py -B build_projection -DPOCKET_DERBY_COURSE_CACHE=${{ matrix.cache }} -DPOCKET_DERBY_PROJECT_BATCH=${{ matrix.batch }} -D KASANE_MEGADEMO_TRACE=OFF build
           ccache -s || true
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=${{ matrix.cache }}' build_projection/CMakeCache.txt
           grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=${{ matrix.batch }}' build_projection/CMakeCache.txt

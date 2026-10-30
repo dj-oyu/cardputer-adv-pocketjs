@@ -69,4 +69,4 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          idf.py -B build_control -D SDKCONFIG="$PWD/build_control/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_control -D SDKCONFIG="$PWD/build_control/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_MEGADEMO_TRACE=OFF build

@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig build
+          idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig -D KASANE_MEGADEMO_TRACE=OFF build
           ccache -s || true
           git rev-parse HEAD > build_image/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_image/sdkconfig
@@ -185,7 +185,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig build
+          idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig -D KASANE_MEGADEMO_TRACE=OFF build
           ccache -s || true
           git rev-parse HEAD > build_diag/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_diag/sdkconfig
