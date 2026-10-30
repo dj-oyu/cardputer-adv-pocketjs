@@ -51,9 +51,9 @@ globalThis.Ayatsuri = (() => {
           vector(patch.scale, 3);
           for (let i = 0; i < 3; ++i) if (Math.fround(patch.scale[i]) === 0) fail('nonzero finite scale');
         }
-        if (patch.position) changed = vec(node.pose, 0, patch.position, 3) || changed;
-        if (patch.rotation) changed = vec(node.pose, 3, patch.rotation, 3) || changed;
-        if (patch.scale) changed = vec(node.pose, 6, patch.scale, 3) || changed;
+        if (patch.position) changed = vec(node.matrix, 12, patch.position, 3) || changed;
+        if (patch.rotation) changed = vec(node.matrix, 15, patch.rotation, 3) || changed;
+        if (patch.scale) changed = vec(node.matrix, 18, patch.scale, 3) || changed;
         if (changed) { ++node.transformVersion; node.owner.dirty = true; }
       }
       function material(patch) {
@@ -117,7 +117,7 @@ globalThis.Ayatsuri = (() => {
         shadeUpdates: 0, shadeSamples: 0, analyticUpdates: 0, renderedFaces: 0, renderedPatches: 0, copiedBytes: 0,
         typedBytes: lightState.byteLength + cameraState.byteLength + lighting.byteLength + right.byteLength + down.byteLength + forward.byteLength};
     if (!backend || (typeof backend.ellipsoid !== 'function' && typeof backend.ellipsoidPacked !== 'function')) fail('analytic hone backend required');
-    if (!evaluator || typeof evaluator.compose !== 'function') fail('shared ayatsuri evaluator required');
+    if (!evaluator || (typeof evaluator.compose !== 'function' && typeof evaluator.composeNode !== 'function')) fail('shared ayatsuri evaluator required');
     const owner = {disposed: false, busy: false, dirty: true};
     let geometryContext = geometries ? {cameraState, right, down, forward, counts, pack} : null;
     if (geometries && geometries.some(g => !g || typeof g.kind !== 'string')) fail('geometry extensions');
@@ -174,17 +174,20 @@ globalThis.Ayatsuri = (() => {
       // One backing store removes per-field ArrayBuffer headers. The typed
       // views are stable for synchronous native calls and never escape as API.
       const storage = new ArrayBuffer(bytes);
-      const node = {name: def.name, parent, owner, pose: new Float32Array(storage, 0, 9),
-        matrix: new Float32Array(storage, 36, 12),
+      const node = {name: def.name, parent, owner, matrix: new Float32Array(storage, 0, 21),
         analytic: extension ? extension.create(def.geometry, storage) : geometry(def.geometry, storage),
-        materialData: analytic ? new Float32Array(storage, extension ? extension.materialOffset : 164, extension ? extension.materialLength : 8) : null,
-        color: 0xffffff, thickness: 0.5, opacity: 1, edgeSoftness: 0.04, pattern: null,
-        textureData: analytic && !extension ? new Float32Array(storage, 244, 5) : null, enabled: true, worldEnabled: true,
-        transformVersion: 1, evaluatedTransform: 0, worldVersion: 0, parentVersion: -1,
-        albedoVersion: 1, evaluatedAlbedo: 0, shadingVersion: 1, evaluatedShading: 0};
+        enabled: true, worldEnabled: true,
+        transformVersion: 1, evaluatedTransform: 0, worldVersion: 0, parentVersion: -1};
       if (extension) node.geometryExtension = extension;
-      node.pose[6] = node.pose[7] = node.pose[8] = 1;
+      node.matrix[18] = node.matrix[19] = node.matrix[20] = 1;
+      if (typeof evaluator.composeNode !== 'function') {
+        node.pose = new Float32Array(storage, 48, 9); node.compatMatrix = new Float32Array(storage, 0, 12);
+      }
       if (analytic) {
+        node.materialData = new Float32Array(storage, extension ? extension.materialOffset : 164, extension ? extension.materialLength : 8);
+        node.color = 0xffffff; node.thickness = 0.5; node.opacity = 1; node.edgeSoftness = 0.04; node.pattern = null;
+        node.textureData = !extension ? new Float32Array(storage, 244, 5) : null;
+        node.albedoVersion = 1; node.evaluatedAlbedo = 0; node.shadingVersion = 1; node.evaluatedShading = 0;
         node.materialData[0] = 0.25; node.materialData[1] = 0.75; node.materialData[3] = 32;
         node.materialData[5] = node.materialData[6] = node.materialData[7] = 1;
         if (extension) extension.initializeMaterial(node.materialData);
@@ -231,7 +234,8 @@ globalThis.Ayatsuri = (() => {
           geometryChanged = node.evaluatedTransform !== node.transformVersion || (parent && node.parentVersion !== parent.worldVersion);
         node.worldEnabled = node.enabled && (!parent || parent.worldEnabled);
         if (geometryChanged) {
-          evaluator.compose(node.pose, parent ? parent.matrix : null, m);
+          if (typeof evaluator.composeNode === 'function') evaluator.composeNode(m, parent ? parent.matrix : null);
+          else evaluator.compose(node.pose, parent ? parent.compatMatrix : null, node.compatMatrix);
           node.evaluatedTransform = node.transformVersion; node.parentVersion = parent ? parent.worldVersion : 0; ++node.worldVersion;
           ++counts.geometryUpdates;
         }
@@ -292,7 +296,8 @@ globalThis.Ayatsuri = (() => {
         // recover, while the app keeps its previously committed image.
         evaluated = false; evaluatedCamera = 0; evaluatedLight = 0;
         for (let i = 0; i < objects.length; ++i) {
-          objects[i].evaluatedTransform = 0; objects[i].evaluatedAlbedo = 0; objects[i].evaluatedShading = 0;
+          const node = objects[i]; node.evaluatedTransform = 0;
+          if (node.analytic) { node.evaluatedAlbedo = 0; node.evaluatedShading = 0; }
         }
         throw error;
       } finally { owner.busy = false; }

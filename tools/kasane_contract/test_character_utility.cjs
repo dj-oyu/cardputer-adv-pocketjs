@@ -156,15 +156,25 @@ compact.dispose();
 assert.throws(() => Ayatsuri.scene({backend: {fill() {}}}), /analytic hone backend/, 'no silent coarse device fallback');
 const hierarchy = analyticScene({backend: {ellipsoid() {}}});
 const group = hierarchy.add({name: 'group', geometry: null}), leaf = hierarchy.add({name: 'leaf', parent: group, geometry: {kind: 'ellipsoid', radii: [1, 2, 3]}});
+const groupKeys=Object.keys(group._node).sort();
+for(const key of ['materialData','color','thickness','opacity','edgeSoftness','pattern','textureData',
+    'albedoVersion','evaluatedAlbedo','shadingVersion','evaluatedShading'])
+  assert.ok(!Object.hasOwn(group._node,key),'group omits analytic-only '+key);
 hierarchy.add({name: 'sibling', parent: group, geometry: {kind: 'ellipsoid', radii: [1, 1, 1]}});
 const h0 = {}, h1 = {}; hierarchy.evaluate(0); hierarchy.stats(h0);
 assert.strictEqual(leaf.place, group.place, 'shared visual handle method, no per-node closure');
 assert.strictEqual(leaf.material, group.material);
 assert.throws(() => group.material({color: 0xffffff}), /group has no material/);
+assert.throws(() => group.texture({offset: [0,0]}), /group has no texture/);
 leaf.place({position: [1, 0, 0]}); hierarchy.evaluate(0); hierarchy.stats(h1);
 assert.equal(h1.geometryUpdates - h0.geometryUpdates, 1, 'runtime local placement is local');
 hierarchy.stats(h0); group.place({rotation: [0, 0, 0.1]}); hierarchy.evaluate(0); hierarchy.stats(h1);
 assert.equal(h1.geometryUpdates - h0.geometryUpdates, 3, 'runtime parent dependencies reach both children');
+hierarchy.camera({position:[0,0,0],target:[0,0,0]});
+assert.throws(()=>hierarchy.evaluate(0));
+assert.deepEqual(Object.keys(group._node).sort(),groupKeys,'failure invalidation does not add analytic fields to groups');
+hierarchy.camera({position:[0,0,400]});hierarchy.evaluate(0);hierarchy.render();
+assert.deepEqual(Object.keys(group._node).sort(),groupKeys,'recovery keeps compact group storage');
 hierarchy.dispose();
 
 // A backend/visitor cannot mutate or reenter its active scene. Other scenes
@@ -218,11 +228,11 @@ delegated.evaluate(5000);assert.equal(composeCalls,2,'time alone does not call t
 delegated.light({color:0x88aacc});delegated.evaluate(5000);assert.equal(composeCalls,2,'lighting does not call the transform kernel');
 delegatedRoot.place({position:[3,0,0]});delegated.evaluate(5000);
 assert.equal(composeCalls,4,'parent update evaluates the parent before its child');
-const successfulMatrix=delegatedPart._node.matrix.slice();
+const successfulMatrix=delegatedPart._node.matrix.slice(0,12);
 composeHook=()=>{throw Error('evaluator failure');};
 delegatedPart.place({position:[7,0,0]});
 assert.throws(()=>delegated.evaluate(5000),/evaluator failure/);
-same(delegatedPart._node.matrix,successfulMatrix,'failed kernel did not publish output');
+same(delegatedPart._node.matrix.slice(0,12),successfulMatrix,'failed kernel did not publish world output');
 const renderedBefore=renderCalls;
 assert.throws(()=>delegated.render(),/evaluate before render/);
 assert.throws(()=>delegated.visit(()=>{}),/evaluate before render/);
@@ -230,6 +240,41 @@ assert.equal(renderCalls,renderedBefore,'failed evaluation reaches no render bac
 composeHook=()=>{};delegated.evaluate(5000);delegated.render();
 assert.equal(delegatedPart._node.matrix[3],10,'retry uses the latest authored pose and parent');
 delegated.dispose();
+
+// Packed native transform path owns one stable 21-float view: world matrix
+// first, authored TRS last. Only this host reference creates temporary views.
+let packedComposeCalls=0,packedComposeFailure=false;
+const packedTransforms=Ayatsuri.scene({backend:{ellipsoid(){}},evaluator:{
+  compose(){throw new Error('legacy compose must not run');},
+  composeNode(node,parent){
+    ++packedComposeCalls;
+    if(packedComposeFailure)throw new Error('packed evaluator failure');
+    assert.equal(node.length,21);
+    const pose=new Float32Array(node.buffer,node.byteOffset+48,9),
+      world=new Float32Array(node.buffer,node.byteOffset,12),
+      parentWorld=parent?new Float32Array(parent.buffer,parent.byteOffset,12):null;
+    TransformReference.compose(pose,parentWorld,world);
+  }
+}});
+const packedRoot=packedTransforms.add({name:'root',geometry:null,position:[2,0,0]}),
+  packedLeaf=packedTransforms.add({name:'leaf',parent:packedRoot,position:[3,0,0],geometry:{kind:'ellipsoid',radii:[2,3,4]}});
+for(const handle of [packedRoot,packedLeaf]){
+  assert.equal(handle._node.matrix.length,21);
+  assert.ok(!Object.hasOwn(handle._node,'pose')&&!Object.hasOwn(handle._node,'compatMatrix'),
+    'packed path never allocates the two legacy compatibility views');
+}
+packedTransforms.evaluate(0);packedTransforms.render();assert.equal(packedComposeCalls,2);
+assert.equal(packedLeaf._node.matrix[3],5);assert.equal(packedLeaf._node.matrix[12],3);
+const packedWorld=packedLeaf._node.matrix.slice(0,12),packedStableView=packedLeaf._node.matrix;
+packedLeaf.place({position:[7,0,0]});packedComposeFailure=true;
+assert.throws(()=>packedTransforms.evaluate(1),/packed evaluator failure/);
+same(packedLeaf._node.matrix.slice(0,12),packedWorld,'packed failure leaves last world matrix intact');
+assert.equal(packedLeaf._node.matrix[12],7,'authored pose remains the requested input');
+assert.throws(()=>packedTransforms.render(),/evaluate before render/);
+packedComposeFailure=false;packedTransforms.evaluate(1);packedTransforms.render();
+assert.equal(packedLeaf._node.matrix[3],9);assert.strictEqual(packedLeaf._node.matrix,packedStableView);
+assert.ok(!Object.hasOwn(packedRoot._node,'pose')&&!Object.hasOwn(packedLeaf._node,'compatMatrix'));
+packedTransforms.dispose();
 
 
 // Packed native submission avoids retaining four compatibility views per node.

@@ -17,14 +17,14 @@ globalThis.AyatsuriModels=(()=>{
       p[0]=x;p[1]=y;p[2]=z;r[0]=0;r[1]=yaw;r[2]=roll;s[0]=sx;s[1]=sy;s[2]=sz;h.place(scratch);
     }
     function group(name,parent,position) {
-      return scene.add({name,parent,geometry:null,position,rotation:[0,0,0],scale:[1,1,1]});
+      return scene.add({name,parent,geometry:null,position});
     }
     function lobe(name,parent,position,radii,material,rotation,pattern,detail) {
       const h = scene.add({name,parent,position,rotation:rotation || [0,0,0],scale:[1,1,1],
         geometry:{kind:'ellipsoid',radii,columns:detail ? 8 : 4,rows:detail ? 4 : 2},material,pattern});
       parts.push(h);if(pattern)patterns.push(h);return h;
     }
-    let head, halo, leftEye, rightEye, cloud;
+    let head, halo, cloud;
       const vapor=Object.assign({},mist,{color:0xf5fbff,ambient:.82,diffuse:.38,
         ambientColor:0xc9e1ff,specular:0,transmission:.46,thickness:.44,opacity:.97,edgeSoftness:.15});
       function volume(name,parent,position,lobes,blend) {
@@ -45,18 +45,15 @@ globalThis.AyatsuriModels=(()=>{
       cloud={hands:[],pupils:[],brows:[],cheeks:[],wisps:[],tongueMaterial:{opacity:0,color:0xf29b99}};
       const ink={color:0x30243e,ambient:.6,diffuse:.4,specular:.08,roughness:.85};
       for(let s=-1;s<=1;s+=2) {
-        const hand=group('floating-hand'+s,root,[s*40,20,2]);
-        cloud.hands.push(hand);
-        volume('hand-volume'+s,hand,[0,0,0],[
+        const hand=volume('hand-volume'+s,root,[s*40,20,2],[
           {position:[0,1,0],radii:[9,10,7]},
           {position:[-4,-3,0],radii:[6,7,6]},
           {position:[4,-2,0],radii:[6,7,6]}],6);
-        const eyeGroup=group('eye'+s,head,[s*8,-3,0]);
+        cloud.hands.push(hand);
         // Large ink eyes read against the white body without a second white shell.
-        const pupil=lobe('pupil'+s,eyeGroup,[s*.4,.1,1.5],[4.7,7.3,2],
+        const pupil=lobe('pupil'+s,head,[s*8+s*.4,-2.9,1.5],[4.7,7.3,2],
           Object.assign({},eye,{color:0x292137,specular:.85,roughness:.16}),undefined,undefined,true);
         cloud.pupils.push(pupil);
-        if(s<0)leftEye=eyeGroup;else rightEye=eyeGroup;
         cloud.brows.push(lobe('brow'+s,head,[s*8,-14,1],[4,1.1,.8],ink,[0,0,-s*.13]));
         cloud.cheeks.push(lobe('cheek'+s,head,[s*14,5,.8],[4,2.2,.6],
           Object.assign({},mist,{color:0xaecff0,opacity:.55,specular:0})));
@@ -82,12 +79,15 @@ globalThis.AyatsuriModels=(()=>{
       pose(head,0,-12*body.stretch,20,body.head);
       const smile=expression.smile||0,surprise=expression.surprise||0,brow=expression.brow||0,
         open=Math.max(.04,expression.open*(1-expression.blink)*(1-.28*smile+.12*surprise));
-      pose(leftEye,-8,-3,0,0,1,open);pose(rightEye,8,-3,0,0,1,open);
       if(cloud) {
         for(let k=0;k<2;k++) {
           const s=k?1:-1,gesture=(k?body.handRight:body.handLeft)||0;
           pose(cloud.hands[k],s*(40-gesture*8),20-gesture*22,2,s*gesture);
-          pose(cloud.pupils[k],s*.4+(expression.gazeX||0)*1.1,.1+(expression.gazeY||0)*1.2,1.5,0);
+          // Match the former child's F32 local position and parent F32 scale
+          // before folding their identity rotation into the pupil transform.
+          const x=Math.fround(s*.4+(expression.gazeX||0)*1.1),
+            y=Math.fround(.1+(expression.gazeY||0)*1.2),h=Math.fround(open);
+          pose(cloud.pupils[k],s*8+x,-3+h*y,1.5,0,1,h);
           pose(cloud.brows[k],s*8,-14-brow*2-3.5*surprise-1.2*smile,1,s*(.1+.08*smile-.05*surprise));
           pose(cloud.cheeks[k],s*14,5-2.8*smile+.7*surprise,.8,s*.12*smile);
         }
@@ -113,7 +113,9 @@ globalThis.AyatsuriModels=(()=>{
         }
       }
     }
-    return {root,parts,patterns,update,name:names[index],index,sample:AyatsuriCloudMotion};
+    return {root,parts,patterns,update,name:names[index],index,
+      sample:AyatsuriCloudMotion,
+      sampleFactory:typeof AyatsuriCloudDynamic==='undefined'?null:AyatsuriCloudDynamic.create};
   }
   return {names,create:make,needsBlend:true};
 })();

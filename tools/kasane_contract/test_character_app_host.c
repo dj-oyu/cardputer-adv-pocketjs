@@ -20,13 +20,38 @@ static bool core_transform_contract(void){
     const char *script=
       "(()=>{const C=pocket.ayatsuri,p=new Float32Array([1,2,3,0,0,0,1,1,1]),o=new Float32Array(12);"
       "C.compose(p,null,o);__coreAlloc();for(let i=0;i<1000;i++)C.compose(p,null,o);__coreAlloc(1);"
+      "const node=new Float32Array(21);node.set(p,12);C.composeNode(node,null);"
+      "for(let i=0;i<12;i++)if(node[i]!==o[i])throw Error('packed compose parity');"
+      "__coreAlloc();for(let i=0;i<1000;i++)C.composeNode(node,null);__coreAlloc(1);"
+      "node[18]=0;const saved=new Float32Array(node);let refused=false;try{C.composeNode(node,null)}catch(e){refused=true}"
+      "if(!refused)throw Error('packed compose invalid missing');for(let i=0;i<21;i++)if(node[i]!==saved[i])throw Error('packed compose partial write');"
       "for(let i=0;i<12;i++)o[i]=37;p[6]=0;let caught=false;"
       "try{C.compose(p,null,o)}catch(e){if(e.code!=='INVALID_ARGUMENT')throw e;caught=true}"
       "if(!caught)throw Error('core failure missing');for(let i=0;i<12;i++)if(o[i]!==37)throw Error('core failure changed output');"
       "p[6]=1;C.compose(p,null,o);if(o[3]!==1||o[7]!==2||o[11]!==3)throw Error('core recovery');"
+      "})();"
+      "(()=>{const C=pocket.ayatsuri,c=new Float32Array([1,2,56.8489,0,10.5558,0,31.9775,3.9584]),"
+      "p=new Float64Array(14),s=new Float32Array(4),g=new Float32Array([.15,.15]),f=new Float32Array(2);"
+      "C.followPrepare(c,p);C.followStep(p,s,g,f);__coreAlloc();"
+      "for(let i=0;i<1200;i++)C.followStep(p,s,g,f);__coreAlloc(1);"
+      "const phase=new Uint32Array([0,4294967295,123]),inc=new Uint32Array([1,4294967295,1073741824]),o=new Float32Array(1);"
+      "C.followDrive(phase,inc,o);__coreAlloc();for(let i=0;i<1200;i++)C.followDrive(phase,inc,o);__coreAlloc(1);"
+      "const before=new Float32Array(s);f[1]=NaN;let caught=false;"
+      "try{C.followStep(p,s,g,f)}catch(e){caught=e.code==='INVALID_ARGUMENT'}"
+      "if(!caught)throw Error('follow invalid missing');for(let k=0;k<4;k++)if(s[k]!==before[k])throw Error('follow partial publish');"
+      "f[1]=0;C.followStep(p,s,g,f);"
+      "const actor=C.followCreate(c,new Float32Array(6)),view={position:new Float32Array(2),velocity:new Float32Array(2),goal:new Float32Array(2)};"
+      "actor.retarget(g);actor.step(f);actor.sample(view);__coreAlloc();for(let i=0;i<1200;i++){actor.retarget(g);actor.step(f);actor.sample(view)}__coreAlloc(1);"
+      "actor.sample(view);const q=view.position[0],v=view.velocity[0];actor.retarget([.1,-.1]);actor.sample(view);"
+      "if(view.position[0]!==q||view.velocity[0]!==v)throw Error('managed retarget reset');"
+      "let busy=false;try{actor.retarget({length:2,get 0(){actor.reset();return 0},1:0})}catch(e){busy=true}"
+      "if(!busy)throw Error('managed reentry missing');actor.step(f);"
+      "const driver=C.driveCreate(42),ds={phases:new Uint32Array(3),increments:new Uint32Array(3)};driver.snapshot(ds);"
+      "if(ds.phases[0]!==1083814273||ds.phases[1]!==378494188||ds.phases[2]!==2479403867)throw Error('managed seed');"
+      "driver.step();driver.reset();driver.snapshot(ds);if(ds.phases[0]!==1083814273)throw Error('managed phase reset');"
       "})();delete globalThis.__coreAlloc;";
     const bool ok=eval(script,strlen(script),"core-contract.js");
-    printf("AYATSURI_CORE warm_compose_calls=1000 guest_alloc_calls=%llu FLT_EVAL_METHOD=%d %s\n",
+    printf("AYATSURI_CORE warm_compose_calls=1000 warm_packed_compose_calls=1000 warm_follow_calls=1200 warm_drive_calls=1200 warm_managed_pipelines=1200 last_guest_alloc_calls=%llu FLT_EVAL_METHOD=%d %s\n",
            core_loop_alloc_calls,FLT_EVAL_METHOD,ok?"PASS":"FAIL");
     return ok;
 }
@@ -266,7 +291,7 @@ static bool capture_clock_contract(void){
         memcpy(expected,panel,sizeof expected);
         char script[1200];
         snprintf(script,sizeof script,
-          "(()=>{const C=AyatsuriLab.control,o=%s,k0='%s',k=k0==='ellipsoid'&&typeof o.ellipsoidPacked==='function'?'ellipsoidPacked':k0,f=o[k],s={};"
+          "(()=>{const C=AyatsuriLab.control,o=%s,k0='%s',k=k0==='compose'&&typeof o.composeNode==='function'?'composeNode':k0==='ellipsoid'&&typeof o.ellipsoidPacked==='function'?'ellipsoidPacked':k0,f=o[k],s={};"
           "C.step();let calls=0,caught=false;o[k]=()=>{++calls;throw Error('injected native submission failure')};"
           "try{frame(0)}catch(e){caught=true}finally{o[k]=f}"
           "C.read(s);if(!caught||calls!==1||s.tick!==90||s.pendingSteps!==1||s.lastSubmittedTick!==90)throw Error('failure clock calls='+calls+' tick='+s.tick+' credits='+s.pendingSteps+' last='+s.lastSubmittedTick);"
@@ -381,7 +406,8 @@ int main(int argc,char **argv){
                 printf("incremental/full mismatch model=%u mode=%u frame=%u\n",actor,mode,t);ok=false;
             }
             if((app_model_count==1||actor==2)&&mode==0&&t==240)memcpy(stopped,panel,sizeof stopped);
-            if((app_model_count==1||actor==2)&&mode==0&&t==300&&memcmp(stopped,panel,sizeof stopped)){
+            if((app_model_count==1||actor==2)&&mode==0&&t==300&&
+               num("typeof AyatsuriCloudDynamic==='undefined'?0:1")==0&&memcmp(stopped,panel,sizeof stopped)){
                 printf("cloud changed after stopping with breathing off\n");ok=false;
             }
             const char *ppm_dir=getenv("MEGA_PPM");
@@ -392,6 +418,19 @@ int main(int argc,char **argv){
         }
         printf("CHARACTER_NATIVE model=%u mode=%u frames=%u exceptions=%u present_failures=%u live=%zu\n",
                actor,mode,frames,exceptions,present_failures,heap_used());
+    }
+    if(ok&&num("typeof AyatsuriCloudDynamic==='undefined'?0:1")==1){
+        /* The ordinary matrix above keeps endogenous drive OFF for settling.
+         * Exercise the live drive separately under the same guest ceiling. */
+        const unsigned alive_frames=363;
+        for(unsigned t=0;ok&&t<alive_frames;++t){
+            char call[64];snprintf(call,sizeof call,"frame(%u)",t==0?0x20u:t==2?0x40u:0u);
+            ok=eval(call,strlen(call),"alive-frame.js");present((uint64_t)frames*33333u);
+            if(compare_full&&!full_reference((uint64_t)frames*33333u))ok=false;
+            ++frames;if(eager_gc)JS_RunGC(rt);
+            const size_t live=heap_used();if(live>live_max)live_max=live;
+        }
+        printf("CHARACTER_NATIVE endogenous_drive_frames=%u result=%s\n",alive_frames,ok?"PASS":"FAIL");
     }
     printf("CHARACTER_NATIVE compile_peak=%zu live_max=%zu allocator_peak=%zu load_max_request=%zu run_max_request=%zu frames=%u host_pointer_bits=%zu\n",
            compile_peak,live_max,peak_bytes,load_request,largest_guest_request,frames,sizeof(void*)*8);

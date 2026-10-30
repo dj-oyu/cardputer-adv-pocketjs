@@ -8,6 +8,8 @@
 
 利用者のJSは従来どおり`part.place({position, rotation, scale})`と`scene.evaluate(time)`を呼ぶ。内部の`pocket.ayatsuri.compose`が共通核へ接続し、device側に別のJS合成数式を残さない。host専用の数値referenceは検証用で、native API不足を埋めるdevice fallbackには使わない。honeの描画/変形APIとayatsuriの評価adapterは別の名前空間とする。
 
+動的追従の縦切りで、内部ノードはmatrix[12]＋pose[9]を1本のFloat32Array(21)に統合した。`pocket.ayatsuri.composeNode(node,parent)`は同じC評価関数を呼び、成功時だけmatrix先頭12値を更新する。prefixはutility内部であり利用者がoffsetを指定する必要はない。既存composeの9/12要素契約は維持し、composeNodeがない評価backendでは互換viewを一度だけ構築する。詳細と容量試験は[動的追従の記録](../perf/dynamic-follow-integration.md)を参照。
+
 最初の題材は人・キツネ・雲の親groupの傾き、部位の配置、圧縮伸長。モデル固有の名前や演技をC核へ入れない。HOMEへの接続、C sceneの生成/破棄・世代handle、材質/UV/clip全体の共通化は後続であり、broker/登録flowやflashの問題を回避するための入口を追加しない。
 
 ## 数値と座標

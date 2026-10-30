@@ -10,6 +10,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [dynamic-follow-integration.md](dynamic-follow-integration.md) | ローカル実装・host検証 | 2DOF共通核、数値精度・収束FAIL保持、雲接続と容量試験 |
 | [character-materials.md](character-materials.md) | 実装・host検証 | 3体の材質utility、解析的楕円体、WAKE移行、m32 heap、点描等の比較と未検証範囲 |
 | [character-device-smoke.md](character-device-smoke.md) | 実機担当報告・次期計画 | a30b2a2の機能smoke、測定範囲と未受入、再現可能な画質captureの必要変更 |
 | [character-capture-host.md](character-capture-host.md) | host診断手順 | app所有seek/pause/step、明示ロード診断、固定入力12枚/連番と実機証拠の区別 |
@@ -17,6 +18,7 @@
 | [cloud-quality-v2.md](cloud-quality-v2.md) | 視覚改善候補 | 顔比率を保つ胴体変形、彩雲の端ごとの流れ、3512529との同条件比較 |
 | [cloud-quality-v3.md](cloud-quality-v3.md) | ローカル視覚改善 | cap境界の陰影補正、柔らかな量感、32a3336との分離比較と回帰 |
 | [cloud-quality-v4.md](cloud-quality-v4.md) | ローカル演技改善 | 喜び/驚きの口角・頬・眉と彩雲の広がり、TRS再利用と160KiB門 |
+| [dynamic-motion-host-study.md](dynamic-motion-host-study.md) | 机上・host試験 | 小LUTと状態付き相互連成、保持近似、非対称/順序不変、算術/bytesと未達収束 |
 | [ayatsuri-transform-core.md](ayatsuri-transform-core.md) | 実装・host検証 | JS/C共通TRS核、失敗時不変、408 vectors/実QuickJS/3体の回帰、m32精度profileと未実測の区別 |
 | [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [pie-opt-plan.md](pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |

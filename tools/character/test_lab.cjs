@@ -140,7 +140,7 @@ const shapeScene=shapeContext.Ayatsuri.scene({backend:{ellipsoid(){},blendEllips
 const shapeModel=shapeContext.AyatsuriModels.create({add(def){
   const handle=shapeScene.add(def);shapeNodes.set(def.name,handle);return handle;
 }},0);
-const rigidNames=['actor','face','floating-hand-1','floating-hand1','hand-volume-1','hand-volume1',
+const rigidNames=['actor','face','hand-volume-1','hand-volume1',
   'pupil-1','pupil1','brow-1','brow1','cheek-1','cheek1','smile','tongue'];
 const norm=(m,column)=>Math.hypot(m[column],m[column+4],m[column+8]);
 const close=(a,b,label)=>assert.ok(Math.abs(a-b)<.000002,label+': '+a+' vs '+b);
@@ -163,7 +163,7 @@ for(const stretch of [.84,1,1.19]){
   close(shapeNodes.get('face')._node.pose[1],-12*stretch,'face translates with body surface');
   close(shapeNodes.get('face')._node.pose[5],.31,'head rotation remains nonzero');
 }
-const actingNames=['smile','tongue','cheek-1','cheek1','brow-1','brow1','eye-1','eye1',
+const actingNames=['smile','tongue','cheek-1','cheek1','brow-1','brow1','pupil-1','pupil1',
   'halo-wisp0','halo-wisp1','halo-wisp2','halo-wisp3','halo-wisp4'];
 function actingSnapshot(tick){
   const ms=tick*1000/30,{body,expression}=sampled(ms);
@@ -199,7 +199,7 @@ assert.ok(leftStroke.right[0]>rightStroke.left[0],'joy strokes overlap at the ce
 for(const side of [-1,1]){
   assert.ok(actingJoy['cheek'+side].pose[1]<actingSurprise['cheek'+side].pose[1],'joy lifts cheeks');
   assert.ok(actingJoy['brow'+side].pose[1]>actingSurprise['brow'+side].pose[1],'surprise raises brows more');
-  assert.ok(actingJoy['eye'+side].pose[7]<actingSurprise['eye'+side].pose[7],'joy narrows eyes');
+  assert.ok(actingJoy['pupil'+side].pose[7]<actingSurprise['pupil'+side].pose[7],'joy narrows eyes');
 }
 assert.deepEqual(actingSnapshot(240),actingRest,'mouth/cheeks/wisps return exactly to rest');
 assert.deepEqual(actingSnapshot(300),actingRest,'rest remains stable');

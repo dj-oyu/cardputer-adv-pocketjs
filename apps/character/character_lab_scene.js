@@ -40,6 +40,9 @@ globalThis.AyatsuriLab = (() => {
     const scene=Ayatsuri.scene({backend,light,camera,
       geometries:AyatsuriModels.needsBlend?[AyatsuriBlend]:undefined});
     const model=AyatsuriModels.create(scene,index);
+    // Finish visual construction before allocating persistent motion state.
+    // Model-building scratch and closures need not overlap actor setup.
+    if(model.sampleFactory)model.sample=model.sampleFactory(model.sample);
     function evaluate(timeMs,mode,breathing){
       sample(timeMs,mode,breathing);
       if(model.sample)model.sample(timeMs,mode,breathing,inputs);

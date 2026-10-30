@@ -2,6 +2,7 @@
 #include "pocket_api.h"
 #include "pocket_proc.h"
 #include "ayatsuri/ayatsuri_transform.h"
+#include "ayatsuri/ayatsuri_follow.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -166,6 +167,7 @@ static bool shade_overlap(const shade_view *a,const shade_view *b){
 /* Ayatsuri owns evaluation semantics; hone still owns drawing. Keep this
  * small bridge beside the existing typed-view checks, without linking a
  * second implementation or retaining guest buffers after this call. */
+#include "pocket_ayatsuri_follow.inc"
 static JSValue js_ayatsuri_compose(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;const char *op="ayatsuri.compose";
     if(argc!=3)return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, output[12]");
@@ -184,10 +186,86 @@ static JSValue js_ayatsuri_compose(JSContext *ctx,JSValueConst self,int argc,JSV
     memcpy(output_view.data,&result,sizeof result);
     return JS_UNDEFINED;
 }
+/* Utility-private packed node: matrix[12], pose[9]. One stable view replaces
+ * two ArrayBuffer view headers per object without changing scalar semantics. */
+static JSValue js_ayatsuri_compose_node(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.composeNode";shade_view node,parent;
+    const bool has_parent=argc==2&&!JS_IsNull(argv[1])&&!JS_IsUndefined(argv[1]);
+    if(argc!=2||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT32,true,&node)||node.bytes!=84||
+       (has_parent&&(!shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,false,&parent)||(parent.bytes!=84&&parent.bytes!=48))))
+        return invalid(ctx,op,"expected writable node Float32[21], parent Float32[21/12] or null");
+    ayatsuri_pose pose;ayatsuri_transform p,result;
+    memcpy(&pose,node.data+48,sizeof pose);
+    if(has_parent)memcpy(&p,parent.data,sizeof p);
+    const ayatsuri_status status=ayatsuri_transform_evaluate(&pose,has_parent?&p:NULL,&result);
+    if(status==AYATSURI_INVALID)return invalid(ctx,op,"invalid node pose/parent");
+    if(status!=AYATSURI_OK)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 transform overflow");
+    memcpy(node.data,&result,sizeof result);return JS_UNDEFINED;
+}
+/* All packets are synchronously borrowed. Stack snapshots make aliasing safe;
+ * only a fully validated result is copied back into guest-owned storage. */
+static JSValue js_ayatsuri_follow_prepare(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followPrepare";shade_view input,output;
+    if(argc!=2||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT32,false,&input)||input.bytes!=32||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,true,&output)||output.bytes!=112)
+        return invalid(ctx,op,"expected config Float32[8], writable prepared Float64[14]");
+    ayatsuri_follow_config config;ayatsuri_follow_coeff prepared;
+    memcpy(&config,input.data,sizeof config);
+    const ayatsuri_status status=ayatsuri_follow_prepare(&config,&prepared);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"follow coefficient range");
+    if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow coefficients");
+    memcpy(output.data,&prepared,sizeof prepared);return JS_UNDEFINED;
+}
+static JSValue js_ayatsuri_follow_step(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followStep";shade_view coeff,state,goal,force;
+    if(argc!=4||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT64,false,&coeff)||coeff.bytes!=112||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,true,&state)||state.bytes!=16||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&goal)||goal.bytes!=8||
+       !shade_buffer(ctx,argv[3],JS_TYPED_ARRAY_FLOAT32,false,&force)||force.bytes!=8)
+        return invalid(ctx,op,"expected prepared Float64[14], state Float32[4], goal/force Float32[2]");
+    ayatsuri_follow_coeff c;ayatsuri_follow_state s;ayatsuri_follow_goal g;float f[2];
+    memcpy(&c,coeff.data,sizeof c);memcpy(&s,state.data,sizeof s);memcpy(&g,goal.data,sizeof g);memcpy(f,force.data,sizeof f);
+    const ayatsuri_status status=ayatsuri_follow_step(&c,&g,f,&s);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 follow overflow");
+    if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow step");
+    memcpy(state.data,&s,sizeof s);return JS_UNDEFINED;
+}
+static JSValue js_ayatsuri_follow_impulse(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followImpulse";shade_view coeff,state,impulse;
+    if(argc!=3||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT64,false,&coeff)||coeff.bytes!=112||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,true,&state)||state.bytes!=16||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&impulse)||impulse.bytes!=8)
+        return invalid(ctx,op,"expected prepared Float64[14], state Float32[4], impulse Float32[2]");
+    ayatsuri_follow_coeff c;ayatsuri_follow_state s;float j[2];
+    memcpy(&c,coeff.data,sizeof c);memcpy(&s,state.data,sizeof s);memcpy(j,impulse.data,sizeof j);
+    const ayatsuri_status status=ayatsuri_follow_impulse(&c,j,&s);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 impulse overflow");
+    if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow impulse");
+    memcpy(state.data,&s,sizeof s);return JS_UNDEFINED;
+}
+static JSValue js_ayatsuri_follow_drive(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followDrive";shade_view phase,increment,output;
+    if(argc!=3||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_UINT32,true,&phase)||phase.bytes!=12||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_UINT32,false,&increment)||increment.bytes!=12||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,true,&output)||output.bytes!=4||
+       shade_overlap(&phase,&output))
+        return invalid(ctx,op,"expected phase/increment Uint32[3], nonoverlapping output Float32[1]");
+    uint32_t p[3],inc[3];float value;
+    memcpy(p,phase.data,sizeof p);memcpy(inc,increment.data,sizeof inc);
+    if(ayatsuri_follow_drive(p,inc,&value)!=AYATSURI_OK)return invalid(ctx,op,"invalid drive");
+    memcpy(output.data,&value,sizeof value);memcpy(phase.data,p,sizeof p);return JS_UNDEFINED;
+}
 static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
-    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("compose",3,js_ayatsuri_compose)};
-    return JS_SetPropertyFunctionList(ctx,ns,methods,1)<0?ESP_ERR_NO_MEM:ESP_OK;
+    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("compose",3,js_ayatsuri_compose),
+        JS_CFUNC_DEF("composeNode",2,js_ayatsuri_compose_node),
+        JS_CFUNC_DEF("followPrepare",2,js_ayatsuri_follow_prepare),
+        JS_CFUNC_DEF("followStep",4,js_ayatsuri_follow_step),
+        JS_CFUNC_DEF("followImpulse",3,js_ayatsuri_follow_impulse),
+        JS_CFUNC_DEF("followDrive",3,js_ayatsuri_follow_drive),
+        JS_CFUNC_DEF("followCreate",2,js_ayatsuri_follow_create),
+        JS_CFUNC_DEF("driveCreate",1,js_ayatsuri_drive_create)};
+    return JS_SetPropertyFunctionList(ctx,ns,methods,sizeof methods/sizeof methods[0])<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 static bool shade_unit(float *x,float *y,float *z){
     /* Scale first: a finite nonzero Float32 direction can be subnormal. */
