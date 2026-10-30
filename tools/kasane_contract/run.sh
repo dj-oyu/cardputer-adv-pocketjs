@@ -53,6 +53,11 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_plan.c \
     -lm -o "$out/proc-plan"
   "$out/proc-plan"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+    main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_plan_draw.c \
+    -lm -o "$out/proc-plan-draw"
+  "$out/proc-plan-draw"
   for point_gate in '' '-D__XTENSA__ -DCONFIG_IDF_TARGET_ESP32S3 -DKSN_PROC_PLAN_POINTS_STUB_PIE'; do
     point_pie_source=main/ui/kasane/ksn_proc_points_pie.c
     if [[ -n "$point_gate" ]]; then point_pie_source=; fi

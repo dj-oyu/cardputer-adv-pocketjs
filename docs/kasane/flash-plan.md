@@ -245,6 +245,40 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 - 模様線の色 A は命令の `color` 欄なので、引数（`$n`）は既存の COLOR パッチで入る。周期は `value` 欄なので VALUE パッチで入る。`begin_bound` は当てた後に検証するので、範囲外（周期 0 や 25）の引数は登録後の draw で INVALID になる（`test_proc_pattern_line.c`）。
 - 表の生成（`emit_rom_plans.mjs`）は変えていない。nibble 形式の op 15 のエスケープ（[js-to-ir.md](js-to-ir.md) §5.2.1）は、生成器が通す decoder の往復の検査（kir の `assemble()` と全件一致）で確かめている。
 
+## 13. draw ごとの準備を省く（2026-10-30、ブランチ `claude/epic-ptolemy-wyvhym`）
+
+§10 の「描画が 9〜17% 遅い」の候補だった、draw のたびに繰り返していた準備を省いた。**実機では測っていない**（この作業の環境に ESP-IDF と実機が無い）。下の数値はすべて host の検査の件数で、時間の主張は無い。
+
+**前（draw 1 回ごと）**: `begin_core` が VM 全体（約 1 KB）を `memset` → 命令を VM へコピー（名前登録は flash から）→ 引数を当てる → `valid_program()` で全命令を検証 → `run` が「VM の命令がこの plan と同じか」を確かめる（配列登録は `memcmp`、名前登録は `rom_matches()` で flash と 1 命令ずつ）。
+
+**後**: `pocket_proc.c` の `draw_run` は `ksn_proc_sized_plan_draw` / `ksn_proc_rom_plan_draw`（`ksn_proc_plan.c`）を 1 回呼ぶ。begin と run を 1 つの呼び出しにまとめた。
+
+| 処理 | 前 | 後 | 理由 |
+| --- | --- | --- | --- |
+| VM 全体の `memset` | 毎回 | 省く。レジスタ（64 B）・pc・depth・steps・ペンだけ初期化 | `loop[]`・`last_pc`・count より後ろの `owned_code` は、run が書く前に読まない |
+| 命令のコピー（配列登録） | 毎回 | 省く。plan 自身の命令を直接実行 | plan の命令は native の heap にあり、書くのは prepare だけ。draw の中ではゲストのコードが走らない |
+| 命令のコピー＋引数（名前登録） | 毎回 | 残す | 表は const（flash）で、実行する行には引数が入っていなければならない |
+| `valid_program()` | 毎回 | 省く | `plan->valid` は prepare の `ksn_proc_analyze()` が同じ行を受け入れたときだけ立つ。analyze は `valid_program()` と同じ検査をする（下の試験で一致を確認） |
+| `loop_end` | 検証の副産物 | REPEAT/END だけを見る 1 回の走査で作る | plan に持たせると 1 本 64 B（最大 32 本）の DRAM が増える |
+| 入力の有限性 | 毎回 | 残す | draw ごとに変わる |
+| plan との照合（`memcmp`・`rom_matches()`） | 毎回 | 省く | begin と run の間に何も無いので、VM が別の登録の行を持つことは構造的に起きない。呼び出しをまたいで残る状態が無いので、同じ番地・同じスロットへの再登録と取り違える余地もなく、世代番号は要らない |
+
+- 旧い `*_plan_begin` / `*_plan_run` は残した（step 実行・状態の持ち越し・既存の試験が使う）。新しい関数には参照経路への fallback が無い（照合が無いので、落ちる分岐そのものが無い）。
+- RAM: 構造体は変えていない（静的 DRAM・plan 1 本の大きさは不変）。スタックは draw の中の `open[8]` だけ。flash は新しい関数 2 つ分増える（Xtensa のビルドで測っていない）。
+
+**検証（host、`tools/kasane_contract/test_proc_plan_draw.c`、`run.sh` に追加）**: 乱数の命令列 60,000 本（4 本に 1 本は範囲外の欄も混ぜる）で、`ksn_proc_analyze()` と `valid_program()`（`ksn_proc_begin` 経由）の受け入れが 60,000/60,000 一致。受け入れた 44,473 本で、配列登録と名前登録（最大 8 個の欄を引数にした表）のそれぞれについて、draw と begin + run の status・フレーム（線分・ラスタ step・ext）・レジスタ・ペン・steps・pc・depth が 320,343 回の実行すべてで一致（DONE 315,717 回、残りは実行時の INVALID・LIMIT）。draw 側の VM は最初に 0xA5 で埋め、plan をまたいで一度も消さない。ASan/UBSan、`-O2 -fstrict-aliasing`、`-m32 -O2` の 3 通り。試験自体が効くことは、draw の初期化からレジスタの消去・ペンの無効化・`loop_end` の書き込みを 1 つずつ外すと FAIL になることで確かめた。
+
+**検証（host、アプリ全体）**: `tools/kasane_contract/run.sh` の DERBY まで（`run_pocket_proc_rom_qjs.py` の名前登録＝配列登録 14,663 ベクトル、MEGADEMO の全場面、LCD CATCH を含む）、`run_derby.py`、`run_derby.py --m32`、`run_big_wave.py`（と `--m32`）が PASS。DERBY は、変更前（`7ee19cc`）の同じ試験と、全画素ハッシュ（64-bit 14 個・m32 11 個）・着順と時刻・オッズが全行一致した。ゲストの heap の行だけが 44 B ずれたが、変更前を別のディレクトリ（パスが 44 文字長い）で走らせたためで、native の変更とは関係しない。`tools/kasane_ir/check_equivalence.py`（crowd・pt・hl の手書き IR が古い）と `check_lowered.py` は、変更前でも同じく失敗する（この作業の範囲外）。
+
+### 13.1 実機で測る手順（未実施）
+
+同じバイナリの中で新旧を比べる。`KASANE_BGCOST_TRACE` の image では、`BGP` の行（30 ターンごと）を出すたびに経路が入れ替わり、窓ごとに旧い begin + run と新しい draw を交互に通る。その呼び出しだけのサイクル数を `BGP` の直後の行 `BGD draw=回数/サイクル begin+run=回数/サイクル` に出す（片方は 0。JS の引数の読みは含まない）。フレーム単位で交互にしないのは、1 フレームに複数の面の `beginFrame` を呼ぶアプリで、面ごとに片方の経路に固定されうるため。ビルドを分けないのは、命令キャッシュで同じカーネルが 15% 動くため。
+
+1. `-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON` で、ビルドディレクトリと `-DSDKCONFIG` を分けてビルドし書き込む。
+2. DERBY を開き、§10 と同じくデモで MID 420 秒・HEAVY 250 秒。MEGADEMO も全場面を回す。
+3. `BGD` の行を合計し、1 回あたりのサイクル（÷ 240 で µs）を 2 経路で比べる。フレームあたりの差は `BGP` の draw 回数を掛ける。
+4. 合否: 新しい経路が遅くないこと、`LOADSTALL`・`FRAMEFAIL` が無いこと、host の `run_derby.py` の全画素ハッシュが不変なこと。§10 の +0.17〜0.40 ms のうちどれだけがこの準備だったかは、ここで初めて分かる。
+
 ## 確信の低い点
 
 - 実機の値は各 1 回（基準も同じ日に 1 回）。

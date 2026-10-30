@@ -64,6 +64,12 @@ void pocket_proc_bgcost_view_us(uint32_t us){bg_view_us+=us;}
  * js_draw can charge its wall time to it. */
 static struct { uint32_t handle,n,us,steps,seg; } bg_plan[32];
 static int bg_last=-1;
+/* Per-draw VM setup A/B: [0] the combined draw, [1] begin + run; cycles of
+ * those calls alone (no JS argument reading). bg_ab_mode flips at each BGP
+ * line, so a window is all one path. esp_cpu.h comes with
+ * KASANE_MEGADEMO_TRACE, which this trace requires (main/CMakeLists.txt). */
+static struct { uint32_t n,cy; } bg_ab[2];
+static unsigned bg_ab_mode;
 #endif
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
@@ -644,11 +650,32 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
     if(affine)status=KSN_PROC_DONE;
     else
 #endif
-    status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
-                                     ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
-    if(status==KSN_PROC_RUNNING)
-        status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
-                         ksn_proc_sized_plan_run(vm,slot->plan,false);
+#ifdef KASANE_BGCOST_TRACE
+    {
+    /* Same-binary A/B of the per-draw VM setup (docs/kasane/flash-plan.md
+     * sec.13): BGP windows alternate between begin + run as before and the
+     * combined draw. Whole windows, not frames: an app may begin more than
+     * one surface a frame, which would pin a surface's plans to one parity.
+     * One binary because the instruction cache moves a kernel ~15% between
+     * builds. */
+    const unsigned ab=bg_ab_mode;
+    const uint32_t ab_began=esp_cpu_get_cycle_count();
+    if(ab){
+        status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
+                         ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
+        if(status==KSN_PROC_RUNNING)
+            status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
+                             ksn_proc_sized_plan_run(vm,slot->plan,false);
+    }else
+#endif
+    /* Begin and run as one call: prepare already validated the rows, so the
+     * draw neither revalidates nor checks that the VM holds this plan. */
+    status=slot->rom?ksn_proc_rom_plan_draw(vm,slot->plan,input,scratch):
+                     ksn_proc_sized_plan_draw(vm,slot->plan,input,scratch);
+#ifdef KASANE_BGCOST_TRACE
+    bg_ab[ab].cy+=esp_cpu_get_cycle_count()-ab_began;bg_ab[ab].n++;
+    }
+#endif
     if(status!=KSN_PROC_DONE){
         building=false;
         return failure(ctx,op,status==KSN_PROC_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:
@@ -1133,6 +1160,11 @@ void pocket_proc_bgcost_plans_emit(void){
     }
     memset(bg_plan,0,sizeof bg_plan);
     ESP_LOGI("app","%s",line);
+    /* BGD draw=n/cycles begin+run=n/cycles (same window as BGP). */
+    ESP_LOGI("app","BGD draw=%u/%u begin+run=%u/%u",(unsigned)bg_ab[0].n,(unsigned)bg_ab[0].cy,
+             (unsigned)bg_ab[1].n,(unsigned)bg_ab[1].cy);
+    memset(bg_ab,0,sizeof bg_ab);
+    bg_ab_mode^=1u;
 }
 #endif
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
