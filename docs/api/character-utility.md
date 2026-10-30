@@ -2,7 +2,7 @@
 
 正式な責務とJS/Cの構成は[hone / ayatsuri](hone-ayatsuri.md)を参照。JSの正規名はAyatsuri/AyatsuriMotion。旧Character/CharacterMotionは同一objectの互換aliasとして保持する。C APIの実装完了を意味しない。
 
-後続branchの[共通TRS評価核](ayatsuri-transform-core.md)では、配置/親子行列の数式をCへ移した。sceneは既定で`pocket.ayatsuri.compose`を使い、未対応firmwareではconstructorで明示エラーにする。host検算は明示的な`evaluator`を注入し、device用JS数式fallbackは持たない。C kernelのINVALID/RANGEはPocketErrorのINVALID_ARGUMENT/LIMIT_EXCEEDEDとしてevaluateから伝わる（旧JS compose固有のTypeErrorとは異なる）。setterの入力検証と既存frame所有権は変えない。C scene全体やmaterial/UVの共通評価まで完了したわけではない。
+PR #110へ統合した[共通TRS評価核](ayatsuri-transform-core.md)では、配置/親子行列の数式をCへ移した。sceneは既定で`pocket.ayatsuri.compose`を使い、未対応firmwareではconstructorで明示エラーにする。host検算は明示的な`evaluator`を注入し、device用JS数式fallbackは持たない。C kernelのINVALID/RANGEはPocketErrorのINVALID_ARGUMENT/LIMIT_EXCEEDEDとしてevaluateから伝わる（旧JS compose固有のTypeErrorとは異なる）。setterの入力検証と既存frame所有権は変えない。C scene全体やmaterial/UVの共通評価まで完了したわけではない。
 
 追加ヒントの[点描・漫画トーン・ハッチング小比較](../../tools/character/coverage-study.md)はhost専用・未採用。固有模様とpost-lighting coverageを区別して検討する。
 

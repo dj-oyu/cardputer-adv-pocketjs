@@ -1,6 +1,6 @@
 # ayatsuri 共通TRS核の縦切りとhost検証
 
-基準はPR110の`1a712359658b160dcf29079dc8d7afeb6a014cb1`。検証候補は変更せず、`feat/ayatsuri-common-core`へ分離した。仕様は[共通核](../api/ayatsuri-transform-core.md)、authoring側は[JS API](../api/character-utility.md)。broker flowの再投入・単独flashは行っていない。
+基準はPR110の`1a712359658b160dcf29079dc8d7afeb6a014cb1`。共通核の実装`cbd509b`を、ユーザー指定により既存`feat/character-material-lab`へfast-forward統合した。以前の候補・成果物と試験実績は`1a71235`の記録として保持し、新headのCIへ流用しない。仕様は[共通核](../api/ayatsuri-transform-core.md)、authoring側は[JS API](../api/character-utility.md)。broker flowの再投入・単独flashは行っていない。
 
 ## 意図と実装済み境界
 

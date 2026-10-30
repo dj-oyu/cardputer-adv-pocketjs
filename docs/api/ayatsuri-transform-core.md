@@ -1,6 +1,6 @@
 # ayatsuri 親子変換の共通評価核
 
-`feat/ayatsuri-common-core`、基準`1a71235`からの最小縦断実装。PR #110の検証候補を変更せず、3体のキャラappが使う配置と親子変換だけをC/JS共通にする。host simulation、製品リンク、実機の結果は[計測記録](../perf/character-materials.md)で区別する。実機での性能改善は未確認。
+基準`1a71235`からの最小縦断実装を、既存`feat/character-material-lab` / PR #110へ統合する。3体のキャラappが使う配置と親子変換だけをC/JS共通にし、以前の検証候補・成果物は`1a71235`の記録として保持する。host simulation、製品リンク、実機の結果は[計測記録](../perf/ayatsuri-transform-core.md)で区別する。実機での性能改善は未確認。
 
 ## 実装する境界と残る範囲
 
