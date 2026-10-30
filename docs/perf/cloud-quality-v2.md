@@ -13,7 +13,7 @@ build `hone110-build-32-approved-20261030`、flash `hone110-flow-flash-32-approv
 
 初回app admissionの`catalog_changed`はOPEN/START未送信を確認し、新bootに一致するfresh catalogで回復した。cloud終了時native free207800 B、largest69632 B、JS0。30-frame集計8窓のrender値は17.06–111.63 msで、個別frame最大/JS時間/FPS/実行中最小freeへ読み替えない。実画面captureと物理LCD画質は未確認。この結果を前候補3512529や後続9e1e611の実測と混ぜない。
 
-2026-10-30。比較元は実機機能smoke済みの`3512529b6f47a609b8041833f9c7e8e0bccb6ccc`。[前候補のCI/実機記録](cloud-quality-v1.md)はそのSHAの結果として保持する。本変更の実機書換えは行っていない。
+以下は2026-10-30の実機検証前に作成したhost比較。比較元は実機機能smoke済みの`3512529b6f47a609b8041833f9c7e8e0bccb6ccc`。[前候補のCI/実機記録](cloud-quality-v1.md)はそのSHAの結果として保持し、32a3336の実機追補は上節へ分けた。
 
 ## 同条件の視覚比較 — HOST SIMULATION
 
