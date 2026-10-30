@@ -66,3 +66,29 @@ b.dispose();
 let cycleModel = staticModel(), cycleActor = cycleModel.instance();
 cycleModel.actor = cycleActor; cycleActor = null; cycleModel = null;
 assert(typeof staticModel === 'function', 'static path exists');
+// Load and exercise the actual checked-in visual wrapper against the real
+// native classes. A JS-only mock cannot establish the 8/16 visibility ABI.
+const visualModel = staticModel(), visual = AyatsuriNative.scene({model: visualModel}), part = visual.handle(1);
+function visualFrame(time) { visual.evaluate(time); clearPackets(); visual.render(); return packetCount(); }
+const visualBaseline = visualFrame(0);
+assert(visualBaseline === visual.stats({}).packets && visualBaseline > 1, 'wrapper native baseline');
+part.visible(false); assert(visualFrame(1) === visualBaseline - 1, 'wrapper hide');
+part.visible(true); assert(visualFrame(2) === visualBaseline, 'wrapper show');
+part.visible(false); assert(visualFrame(3) === visualBaseline - 1, 'wrapper hide again');
+part.place({position:[2,3,4]}); part.material({color:0x80b0ff,opacity:0.7});
+part.visible(true); part.visible(false);
+assert((visual.mask[1] & 127) === (1|16|32|64), 'visibility replaces only its own dirty bits');
+assert(visualFrame(4) === visualBaseline - 1, 'combined hidden position/material batch');
+part.visible(true); assert(visualFrame(5) === visualBaseline, 'recover show after combined batch');
+const visualPose = new Float32Array(9); visual.instance.readPose(1,visualPose);
+assert(equal(visualPose.subarray(0,3),new Float32Array([2,3,4])), 'combined position reached native');
+const visualStable = snapshotHash();
+rejects(() => part.place({position:[99,88,77],scale:[1,0,1]}));
+rejects(() => part.material({color:0xff0000,opacity:2}));
+assert(visualFrame(6) === visualBaseline && snapshotHash() === visualStable, 'invalid wrapper patches preserve native frame');
+forceSubmitFailure(2); rejects(() => visual.render());
+assert(snapshotHash() === visualStable, 'wrapper submit failure preserves previous recorder packets');
+forceSubmitFailure(0); clearPackets(); visual.render(); assert(snapshotHash() === visualStable, 'wrapper submit recovery');
+part.visible(false); assert(visualFrame(7) === visualBaseline - 1, 'wrapper hide remains usable after failure');
+part.visible(true); assert(visualFrame(8) === visualBaseline, 'wrapper final show recovery');
+visual.dispose(); visualModel.dispose();

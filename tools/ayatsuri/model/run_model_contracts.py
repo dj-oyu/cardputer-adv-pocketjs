@@ -110,6 +110,7 @@ def main():
     sources = [core, ROOT / 'main/ayatsuri/ayatsuri_model.h',
                ROOT / 'main/ayatsuri/ayatsuri_transform.h',
                ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, qjs_test,
+               ROOT / 'apps/lib/ayatsuri_model.js',
                ROOT / 'tools/ayatsuri/model/test_model_qjs.js', Path(__file__).resolve()]
     proof = dict(kind='HOST SIMULATION', passed=True, profile=profile,
                  compiler=version.splitlines()[0], flags=flags, commands=commands,

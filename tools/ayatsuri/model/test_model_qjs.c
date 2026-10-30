@@ -51,6 +51,9 @@ static JSValue snapshot_hash(JSContext *c,JSValueConst self,int argc,JSValueCons
 static JSValue clear_packets(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;(void)argv;packet_count=0;return JS_UNDEFINED;
 }
+static JSValue recorded_packet_count(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;return JS_NewUint32(c,packet_count);
+}
 static JSValue force_failure(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;CHECK(argc==1);CHECK(JS_ToUint32(c,&fail_submission,argv[0])==0);submit_calls=0;return JS_UNDEFINED;
 }
@@ -100,6 +103,7 @@ static void install(JSContext *ctx){
     JS_SetPropertyStr(ctx,global,"staticModel",JS_NewCFunction(ctx,static_model,"staticModel",0));
     JS_SetPropertyStr(ctx,global,"snapshotHash",JS_NewCFunction(ctx,snapshot_hash,"snapshotHash",0));
     JS_SetPropertyStr(ctx,global,"clearPackets",JS_NewCFunction(ctx,clear_packets,"clearPackets",0));
+    JS_SetPropertyStr(ctx,global,"packetCount",JS_NewCFunction(ctx,recorded_packet_count,"packetCount",0));
     JS_SetPropertyStr(ctx,global,"forceSubmitFailure",JS_NewCFunction(ctx,force_failure,"forceSubmitFailure",1));
     JS_SetPropertyStr(ctx,global,"sourceBuffer",JS_NewArrayBufferCopy(ctx,fixture,fixture_bytes));
     ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
@@ -189,6 +193,7 @@ static void unaligned_opacity_contract(JSContext *ctx){
 int main(int argc,char **argv){
     CHECK(argc>=2);fixture=(uint8_t *)read_file(argv[1],&fixture_bytes);
     size_t source_bytes;char *source=read_file(argc>2?argv[2]:"tools/ayatsuri/model/test_model_qjs.js",&source_bytes);
+    size_t wrapper_bytes;char *wrapper=read_file("apps/lib/ayatsuri_model.js",&wrapper_bytes);
     for(unsigned run=0;run<4;run++){
         JSRuntime *rt=JS_NewRuntime2(&allocator,NULL);CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx);
         /* Surface sets can differ between sessions; reserve unrelated class
@@ -196,7 +201,8 @@ int main(int argc,char **argv){
         if(run&1){JSClassID id=0;JS_NewClassID(rt,&id);const JSClassDef d={.class_name="OtherSurface"};CHECK(JS_NewClass(rt,id,&d)==0);}
         ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
         const size_t before_skew=skew_count;skew_bytes=ayatsuri_model_instance_bytes(&model)+7u;
-        packet_count=submit_calls=fail_submission=0;install(ctx);eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);JS_RunGC(rt);
+        packet_count=submit_calls=fail_submission=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
+        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);JS_RunGC(rt);
         CHECK(skew_count>before_skew);skew_bytes=0;
         JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }
@@ -215,5 +221,5 @@ int main(int argc,char **argv){
         a=managed_model_instance(ctx,m,0,NULL);CHECK(!JS_IsException(a));
         JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }
-    free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
+    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, actual JS wrapper visibility/dirty/atomicity, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
 }

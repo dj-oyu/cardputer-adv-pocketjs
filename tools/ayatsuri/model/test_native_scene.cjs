@@ -9,10 +9,11 @@ function mockModel(){
   const model={count:19,node(name){if(disposed)throw Error('disposed');return manifest.nodes.findIndex(n=>n.name===name);},dispose(){disposed=true;},instance(){
     if(disposed)throw Error('disposed');
     const pose=manifest.nodes.flatMap(n=>n.pose),colors=manifest.nodes.map(n=>n.color||0),opacity=manifest.nodes.map(n=>n.opacity||0);
-    const i={pose,colors,opacity,targetsCount:0,evalCount:0,submitted:0,dead:false,failTargets:false,
+    const visible=manifest.nodes.map(n=>n.enabled);
+    const i={pose,colors,opacity,visible,targetsCount:0,evalCount:0,submitted:0,dead:false,failTargets:false,
       targets(mask,p,c,a){if(i.failTargets)throw Error('target injected');
-        for(let n=0;n<19;n++){const f=mask[n];assert.ok((f&~127)===0);for(let k=0;k<9;k++)if(f&(1<<Math.floor(k/3)))assert.ok(Number.isFinite(p[n*9+k]));}
-        for(let n=0;n<19;n++){const f=mask[n];for(let k=0;k<9;k++)if(f&(1<<Math.floor(k/3)))pose[n*9+k]=p[n*9+k];if(f&32)colors[n]=c[n];if(f&64)opacity[n]=a[n];}
+        for(let n=0;n<19;n++){const f=mask[n];assert.ok((f&~127)===0);assert.notEqual(f&24,24,'show and hide are exclusive');for(let k=0;k<9;k++)if(f&(1<<Math.floor(k/3)))assert.ok(Number.isFinite(p[n*9+k]));}
+        for(let n=0;n<19;n++){const f=mask[n];for(let k=0;k<9;k++)if(f&(1<<Math.floor(k/3)))pose[n*9+k]=p[n*9+k];if(f&32)colors[n]=c[n];if(f&64)opacity[n]=a[n];if(f&8)visible[n]=true;if(f&16)visible[n]=false;}
         ++i.targetsCount;
       },evaluate(camera,light){assert.equal(camera.length,9);assert.equal(light.length,6);i.camera=Array.from(camera);i.light=Array.from(light);++i.evalCount;},
       submit(){++i.submitted;},stats(out){out.nodes=19;out.evaluated=!!i.evalCount;return out;},readPose(id,out){out.set(pose.slice(id*9,id*9+9));},dispose(){i.dead=true;}};
@@ -25,9 +26,18 @@ a.handle(1).place({position:[1,2,3]});assert.throws(()=>a.handle(1).place({posit
 assert.deepEqual(Array.from(a.poses.slice(9,12)),[1,2,3],'invalid patch leaves pending target intact');
 assert.throws(()=>a.handle(1).material({opacity:.3,roughness:.2}));assert.equal(a.mask[1],1);
 assert.throws(()=>a.handle(1).material({color:0xffffff,opacity:NaN}));assert.equal(a.mask[1],1);
-a.handle(1).material({color:0x123456,opacity:.4});a.handle(1).visible(false);assert.equal(a.mask[1],1+32+64+8+16);
+a.handle(1).material({color:0x123456,opacity:.4});a.handle(1).visible(false);assert.equal(a.mask[1],1+32+64+16);
+const pending=Array.from(a.mask);assert.throws(()=>a.handle(1).visible(0));assert.deepEqual(Array.from(a.mask),pending,'invalid visibility preserves pending fields');
 assert.throws(()=>a.render(),/evaluate/);f.instances[0].failTargets=true;assert.throws(()=>a.evaluate(0),/injected/);assert.ok(a.mask[1]);
 f.instances[0].failTargets=false;a.evaluate(0);assert.equal(a.mask[1],0);a.render();assert.equal(f.instances[0].submitted,1);
+assert.equal(f.instances[0].visible[1],false,'hide applies');
+a.handle(1).visible(true);assert.equal(a.mask[1],8);a.evaluate(0);assert.equal(f.instances[0].visible[1],true,'show applies');
+a.handle(1).place({rotation:[0,.2,0]});a.handle(1).visible(false);a.handle(1).visible(true);a.handle(1).visible(false);
+assert.equal(a.mask[1],2+16,'last visibility wins without losing other dirty fields');
+a.evaluate(0);assert.equal(f.instances[0].visible[1],false);
+const badMask=new Uint8Array(19);badMask[1]=24;const visibleBefore=f.instances[0].visible.slice(),poseBefore=f.instances[0].pose.slice();
+assert.throws(()=>f.instances[0].targets(badMask,a.poses,a.colors,a.opacity),/exclusive/);
+assert.deepEqual(f.instances[0].visible,visibleBefore,'invalid native visibility is atomic');assert.deepEqual(f.instances[0].pose,poseBefore);
 assert.deepEqual(f.instances[1].pose,manifest.nodes.flatMap(n=>n.pose),'shared model instances have independent poses');
 const before=Array.from(a.cameraState);assert.throws(()=>a.camera({position:[4,5,6],zoom:0}));assert.deepEqual(Array.from(a.cameraState),before);
 a.light({direction:[-.5,-.4,.8],color:0xffffff});a.camera({zoom:.85,center:[120,68],projection:'orthographic'});a.evaluate(1);

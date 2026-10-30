@@ -27,7 +27,7 @@ globalThis.AyatsuriNative=(()=>{
     }finally{s.busy=false;}
   },visible(value){
     const s=this.scene;alive(s);if(typeof value!=='boolean')fail();
-    s.mask[this.id]=(s.mask[this.id]&~24)|8|(value?0:16);s.ready=false;
+    s.mask[this.id]=(s.mask[this.id]&~24)|(value?8:16);s.ready=false;
   }};
   function scene(options){
     const model=options.model,n=model.count,instance=model.instance(),
