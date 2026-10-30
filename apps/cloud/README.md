@@ -32,3 +32,5 @@ CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 p
 診断seek/pause/stepは既存labと同じ明示ロード入口。captureとapp_sessionの正式API同時利用は未対応のままで、host画像を実機LCD画像と混同しない。実機候補は同head CI/製品リンク/hostを確認したSHAで引き渡す。今回の新しい実機書換えは未実施。
 
 [顔比率保持と彩雲の次段改善・3512529との比較](../../docs/perf/cloud-quality-v2.md)も参照。
+
+[cap境界の陰影補正・柔らかな量感のローカル比較](../../docs/perf/cloud-quality-v3.md)では、32a3336を基準にnative修正と材質調整を分離して評価する。公開候補のCI/実機結果とは区別する。

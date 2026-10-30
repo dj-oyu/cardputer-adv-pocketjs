@@ -23,21 +23,21 @@ globalThis.AyatsuriModels=(()=>{
     const headPose = {rotation:[0,0,0]},
       haloPose = {position:[0,-38,0],rotation:[0,0,0],scale:[1,1,1]},
       leftEyePose = {scale:[1,1,1]}, rightEyePose = {scale:[1,1,1]};
-      const vapor=Object.assign({},mist,{color:0xf5fbff,ambient:.8,diffuse:.55,
-        ambientColor:0xaecff4,specular:.012,transmission:.46,thickness:.44,opacity:.97,edgeSoftness:.09});
+      const vapor=Object.assign({},mist,{color:0xf5fbff,ambient:.82,diffuse:.38,
+        ambientColor:0xc9e1ff,specular:0,transmission:.46,thickness:.44,opacity:.97,edgeSoftness:.15});
       function volume(name,parent,position,lobes,blend) {
         const h=scene.add({name,parent,position,geometry:{kind:'blendEllipsoids',lobes,blend},material:vapor});
         parts.push(h);return h;
       }
       // A broad continuous pear is the primary form; small lobes shape its outline.
       const bodyShape=volume('cloud-body',root,[0,0,0],[
-        {position:[0,16,0],radii:[29,30,18]},
+        {position:[0,16,0],radii:[24,29,18]},
         {position:[0,-15,-1],radii:[25,24,17]},
         {position:[-21,-9,-5],radii:[18,20,14]},
         {position:[20,-7,-5],radii:[17,20,14]},
-        {position:[-20,22,-4],radii:[20,20,14]},
-        {position:[20,24,-4],radii:[21,22,14]},
-        {position:[1,36,-3],radii:[24,15,14]},
+        {position:[-18,22,3],radii:[21,20,18]},
+        {position:[19,24,2],radii:[21,22,17]},
+        {position:[1,36,-1],radii:[24,15,14]},
         {position:[-7,-29,-8],radii:[20,17,12]}],12);
       head=group('face',root,[0,-12,20]);
       headPose.position=[0,-12,20];
@@ -69,9 +69,9 @@ globalThis.AyatsuriModels=(()=>{
       halo=group('iridescent-cloud',null,haloPose.position);
       const colors=[0xaacbfa,0xd3c1f3,0xefc1e6,0xb6e5f1,0xeee2bc];
       for(let k=0;k<5;k++) {
-        const p={position:[(k-2)*9,(k-2)*(k-2)*.55-1,k*.25],rotation:[0,0,(k-2)*.1],scale:[1,1,1]};
+        const p={position:[(k-2)*9,(k-2)*(k-2)*.55-1+(k%2)*2,k*.25],rotation:[0,0,(k-2)*.1],scale:[1,1,1]};
         cloud.wispPoses.push(p);
-        cloud.wisps.push(lobe('halo-wisp'+k,halo,p.position,[14-k*.6,1.5+(k%2)*.6,2.6],
+        cloud.wisps.push(lobe('halo-wisp'+k,halo,p.position,[14-k*.6,1.7+(k%2)*.7,2.6],
           Object.assign({},mist,{color:colors[k],transmission:.7,thickness:.04,
             opacity:.7,edgeSoftness:.26}),p.rotation));
       }
@@ -110,9 +110,9 @@ globalThis.AyatsuriModels=(()=>{
         if(cloud)for(let k=0;k<cloud.wisps.length;k++) {
           const p=cloud.wispPoses[k],side=k-2,lag=body.haloFollow||0;
           const center=body.wispCenter||0,tip=(side<0?body.wispLeft:body.wispRight)||0,
-            bend=center+(tip-center)*Math.abs(side)/2;
-          p.position[1]=side*side*.55-1+bend;
-          p.rotation[2]=side*.1+(side<0?center-tip:tip-center)/18;
+            bend=center+(tip-center)*side*side/4;
+          p.position[1]=side*side*.55-1+(k%2)*2+bend;
+          p.rotation[2]=side*.1+(tip-center)*side/18;
           p.scale[0]=1+Math.abs(lag)*(.4+Math.abs(side)*.15);
           cloud.wisps[k].place(p);
         }

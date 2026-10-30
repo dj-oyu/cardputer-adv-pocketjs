@@ -584,7 +584,8 @@ typedef struct {
 } blend_projection;
 /* Blend analytic front heights, not independently composited sphere colours.
  * This has bounded work and no depth buffer. The projected silhouette remains
- * the union of the lobes, while shared world normals make joins light smoothly. */
+ * the union of the lobes. Support-regularized shading normals suppress grazing
+ * cap seams; they approximate, rather than differentiate, the blended height. */
 static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *pixels,int y,int height){
     int left,top,right,bottom;if(!ksn_proc_blend_bounds(p,&left,&top,&right,&bottom))return;
     if(top<y)top=y;
@@ -611,7 +612,7 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *p
         s->edge=fmaxf(h->controls[1],2/fminf(rx,ry));
     }
     for(int yy=top;yy<=bottom;yy++)for(int x=left;x<=right;x++){
-        bool found=false;float depth=0,normal[3]={0},chord=0,coverage=0;
+        bool found=false;float depth=0,normal[3]={0},chord=0,mass=0,coverage=0;
         for(unsigned i=0;i<h->count;i++){
             const blend_projection *s=&projection[i];
             if(x<s->left||x>s->right||yy<s->top||yy>s->bottom)continue;
@@ -620,6 +621,7 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *p
             float q[3]={a[0]*u+b[0]*w,a[1]*u+b[1]*w,a[2]*u+b[2]*w};
             const float residual=1-q[0]*q[0]-q[1]*q[1]-q[2]*q[2];
             if(!(residual>0))continue;
+            const float support=h->controls[0]>0&&h->count>1?residual:1;
             const float z=sqrtf(residual);
             for(unsigned k=0;k<3;k++)q[k]+=s->axis[k]*z;
             float n[3];
@@ -633,16 +635,22 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *p
             if(nv<0){nv=-nv;for(unsigned k=0;k<3;k++)n[k]=-n[k];}
             nv=fmaxf(nv,1e-4f);
             for(unsigned k=0;k<3;k++)n[k]/=nv;
+            /* A cap enters with finite height weight but unbounded slope.
+             * Vanishing support removes its rim from interior shading without
+             * changing coverage or depth. Hard/single surfaces retain normals. */
+            if(support!=1)for(unsigned k=0;k<3;k++)n[k]*=support;
             const float d=l->depth[0]*q[0]+l->depth[1]*q[1]+l->depth[2]*q[2]+l->depth[3];
             coverage=fmaxf(coverage,fminf(1,residual/s->edge));
-            if(!found){depth=d;memcpy(normal,n,sizeof normal);chord=z;found=true;continue;}
+            if(!found){depth=d;memcpy(normal,n,sizeof normal);chord=z*support;mass=support;found=true;continue;}
             const float blend=h->controls[0];
             const float weight=blend>0?fmaxf(0,fminf(1,0.5f+0.5f*(d-depth)/blend)):(d>depth?1:0);
             depth=depth*(1-weight)+d*weight+blend*weight*(1-weight);
             for(unsigned k=0;k<3;k++)normal[k]=normal[k]*(1-weight)+n[k]*weight;
-            chord=chord*(1-weight)+z*weight;
+            chord=chord*(1-weight)+z*support*weight;
+            mass=mass*(1-weight)+support*weight;
         }
         if(!found||!ell_unit(normal))continue;
+        chord/=mass;
         const float dot=normal[0]*light[0]+normal[1]*light[1]+normal[2]*light[2],front=fmaxf(0,dot),back=fmaxf(0,-dot),
             nh=has_half?fmaxf(0,normal[0]*half[0]+normal[1]*half[1]+normal[2]*half[2]):0,
             spec=front>0&&nh>0&&m[2]>0?powf(nh,m[3]):0,thin=1-h->surface[2]*(1.0f/255)*chord;

@@ -18,7 +18,9 @@ pocket.hone.blendEllipsoids(lobes, light, material, surface, controls);
 
 screen8は既存楕円体の2×4投影、normal9はworld逆転置。depth4はカメラへ向かう単位方向とworldの各半径basisとの内積3個、および同方向と(world中心-camera target)の内積。screen/depthの絶対値は4096以下、normalは1e6以下かつ非縮退。全値はfinite、light/materialの既存制約も検査する。
 
-複数の解析的前面深度をsmooth-maxし、深度勾配に対応する法線を混合して一度だけ照明/alpha合成する。blend=0は前方の面を選択し、同深度は決定的な順序で扱う。輪郭は元の投影楕円の和集合を越えず、隙間を埋めるsurfaceや一般の3D booleanではない。小さい周縁lobeを主volumeより奥へ置くなど、形の設計も必要。
+複数の解析的前面深度をsmooth-maxし、共有する近似陰影法線で一度だけ照明/alpha合成する。blend=0は前方の面を選択し、同深度は決定的な順序で扱う。輪郭は元の投影楕円の和集合を越えず、隙間を埋めるsurfaceや一般の3D booleanではない。小さい周縁lobeを主volumeより奥へ置くなど、形の設計も必要。
+
+複数lobeかつblend>0では、各capの陰影法線と透過chordへの寄与を投影内の残余`1-q·q`で減衰し、chordは寄与量で正規化する。capの出入りで傾きが発散して内部に青い筋が生じることを抑える様式化近似であり、smooth-maxした深度の厳密な微分法線ではない。幾何深度/輪郭/coverage/alphaは変えない。単一lobeとblend=0はこの補正を通さず、以前の法線/陰影を保持する。光と視線は引き続きworld入力で、固定した陰影画像へ置き換えるものではない。
 
 透過項は混合した正規化chordによる厚み近似。体積散乱/多重透過/相互落影/全sceneのdepth bufferはない。group内の材質は共通で、個別の色・UV patternは未対応。模様が必要な従来形状は既存ellipsoidを使う。
 

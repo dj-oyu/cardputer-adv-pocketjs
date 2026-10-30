@@ -28,7 +28,41 @@ static void draw(uint16_t bg){
     for(int y=0;y<KSN_PROC_H;y+=8){int h=KSN_PROC_H-y;if(h>8)h=8;CHECK(ksn_proc_render_band(&frame,strips+y*KSN_PROC_W,y,h));}
     CHECK(memcmp(full,strips,sizeof full)==0);
 }
+static uint32_t image_hash(void){
+    uint32_t h=2166136261u;
+    for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)h=(h^full[i])*16777619u;
+    return h;
+}
+static void grazing_support(void){
+    // Frozen pre-regularization images: single/hard surfaces keep exact pixels
+    // under front, side and transmitted back light, including antialiased rims.
+    const uint32_t hashes[2][3]={{0xed5b07c4,0xec061620,0x6139686b},
+                                 {0xbc961b8a,0x77537f9a,0x3e4cbd71}};
+    for(unsigned count=1;count<=2;count++)for(unsigned light=0;light<3;light++){
+        ksn_proc_blend_ellipsoids p=sample();p.header.count=count;p.header.controls[0]=count==1?12:0;
+        p.header.light[0]=light==1?1:0;p.header.light[2]=light==2?-1:light==0?1:0;
+        p.header.material[0]=.2f;p.header.material[4]=.4f;
+        put(&p);draw(0x1234);CHECK(image_hash()==hashes[count-1][light]);
+    }
+    ksn_proc_blend_ellipsoids p=sample();p.header.controls[0]=12;
+    p.lobes[0]=(ksn_proc_blend_lobe){.screen={20,0,0,40,0,20,0,30},
+        .normal={.05f,0,0,0,.05f,0,0,0,.1f},.depth={0,0,10,0}};
+    p.lobes[1]=(ksn_proc_blend_lobe){.screen={15,0,0,55.001f,0,15,0,30},
+        .normal={1.f/15,0,0,0,1.f/15,0,0,0,.1f},.depth={0,0,10,0}};
+    put(&p);draw(0);CHECK(full[30*240+40]==0xffff);
+    // A tiny rear-cap entry must not turn a front-lit interior nearly black.
+    p.lobes[1].screen[3]=54.999f;put(&p);draw(0);CHECK(full[30*240+40]==0xffff);
+    // Light remains directional; support does not replace normals with a fill.
+    p.header.light[2]=-1;put(&p);draw(0);CHECK(full[30*240+40]==0);
+    // Nor may a vanishing rear cap abruptly shorten the thick front chord.
+    p.header.material[4]=1;put(&p);draw(0);CHECK(full[30*240+40]==0);
+    // With uniform ambient, smoothing must preserve coverage and silhouette.
+    p.header.material[0]=1;p.header.material[1]=0;p.header.surface[1]=191;
+    put(&p);draw(0x1234);const uint32_t smooth=image_hash();
+    p.header.controls[0]=0;put(&p);draw(0x1234);CHECK(image_hash()==smooth);
+}
 int main(void){
+    grazing_support();
     ksn_proc_blend_ellipsoids p=sample();int l,t,r,b;
     CHECK(ksn_proc_blend_bounds(&p,&l,&t,&r,&b));CHECK(l==21&&r==59&&t==18&&b==42);
     p.header.controls[0]=0;put(&p);draw(0);const uint16_t hard=full[30*240+40];
