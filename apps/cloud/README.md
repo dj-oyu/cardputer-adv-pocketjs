@@ -34,3 +34,5 @@ CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 p
 [顔比率保持と彩雲の次段改善・3512529との比較](../../docs/perf/cloud-quality-v2.md)も参照。
 
 [cap境界の陰影補正・柔らかな量感のローカル比較](../../docs/perf/cloud-quality-v3.md)では、32a3336を基準にnative修正と材質調整を分離して評価する。公開候補のCI/実機結果とは区別する。
+
+[喜び/驚きの演技比較とTRS再利用](../../docs/perf/cloud-quality-v4.md)では、55f025fと同条件で表情・彩雲を比較し、163840 Bのhost門を維持する。

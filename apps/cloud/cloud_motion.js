@@ -14,11 +14,16 @@ globalThis.AyatsuriCloudMotion = (() => {
     return phrase(t,2.35,3.05,3.48,4.28)-.28*phrase(t,5,5.28,5.4,5.66)+
       .4*phrase(t,5.45,5.9,6.05,6.5)+.6*recoil+.6*settle(t);
   }
+  function spread(t){
+    return Math.max(.65*phrase(t,2.28,2.6,3.05,3.8),.8*phrase(t,5.65,6.02,6.25,6.85));
+  }
   return function(timeMs,mode,breathing,inputs){
     const body=inputs.body,expression=inputs.expression;
     body.shiftX=body.handLeft=body.handRight=body.haloFollow=0;
     body.wispCenter=body.wispLeft=body.wispRight=0;
+    body.wispSpreadCenter=body.wispSpreadLeft=body.wispSpreadRight=0;
     expression.gazeX=expression.gazeY=expression.smile=expression.brow=0;
+    expression.surprise=0;
     if(mode===0){
       body.tilt=body.turn=body.lift=body.head=body.tail=body.haloOffset=0;
       body.stretch=1;expression.open=1;expression.blink=0;
@@ -45,9 +50,14 @@ globalThis.AyatsuriCloudMotion = (() => {
       body.wispCenter=-.45*wisp(t)||0;
       body.wispLeft=1.6*wisp(t-.08);
       body.wispRight=-2.2*wisp(t-.16)||0;
+      // Dimensionless expansion, distinct from the local-Y bending above.
+      body.wispSpreadCenter=spread(t);
+      body.wispSpreadLeft=spread(t-.1);
+      body.wispSpreadRight=spread(t-.2);
       expression.gazeX=.68*look;
       expression.gazeY=-.18*phrase(t,5.2,5.6,6.1,6.65);
-      expression.smile=.6*phrase(t,2.5,3.15,6.5,7.35);
+      expression.surprise=phrase(t,2.16,2.3,2.47,2.78);
+      expression.smile=.9*phrase(t,2.9,3.22,3.65,4.14)+.8*phrase(t,5.6,5.95,6.25,6.75);
       expression.brow=.32*look-.16*compress;
       expression.open=1-.12*anticipate+.035*extend;
       expression.blink=.8*phrase(t,4.35,4.43,4.48,4.6);

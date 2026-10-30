@@ -8,8 +8,14 @@ globalThis.AyatsuriModels=(()=>{
                 transmission:.62,transmissionColor:0xe4f5ff,thickness:.5,
                 opacity:.93,edgeSoftness:.15};
   function make(scene,index) {
-    const parts = [], patterns = [], pose = {position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
-    const root = scene.add({name:'actor',geometry:null,position:pose.position,rotation:pose.rotation,scale:pose.scale});
+    const parts = [], patterns = [], scratch = {position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
+    const root = scene.add({name:'actor',geometry:null});
+    // place() synchronously copies all components into scene-owned storage.
+    // Reuse one complete TRS without retaining a record/arrays for every part.
+    function pose(h,x,y,z,roll,sx=1,sy=1,sz=1,yaw=0) {
+      const p=scratch.position,r=scratch.rotation,s=scratch.scale;
+      p[0]=x;p[1]=y;p[2]=z;r[0]=0;r[1]=yaw;r[2]=roll;s[0]=sx;s[1]=sy;s[2]=sz;h.place(scratch);
+    }
     function group(name,parent,position) {
       return scene.add({name,parent,geometry:null,position,rotation:[0,0,0],scale:[1,1,1]});
     }
@@ -19,10 +25,6 @@ globalThis.AyatsuriModels=(()=>{
       parts.push(h);if(pattern)patterns.push(h);return h;
     }
     let head, halo, leftEye, rightEye, cloud;
-    const bodyPose={scale:[1,1,1]};
-    const headPose = {rotation:[0,0,0]},
-      haloPose = {position:[0,-38,0],rotation:[0,0,0],scale:[1,1,1]},
-      leftEyePose = {scale:[1,1,1]}, rightEyePose = {scale:[1,1,1]};
       const vapor=Object.assign({},mist,{color:0xf5fbff,ambient:.82,diffuse:.38,
         ambientColor:0xc9e1ff,specular:0,transmission:.46,thickness:.44,opacity:.97,edgeSoftness:.15});
       function volume(name,parent,position,lobes,blend) {
@@ -40,13 +42,11 @@ globalThis.AyatsuriModels=(()=>{
         {position:[1,36,-1],radii:[24,15,14]},
         {position:[-7,-29,-8],radii:[20,17,12]}],12);
       head=group('face',root,[0,-12,20]);
-      headPose.position=[0,-12,20];
-      cloud={hands:[],handPoses:[],pupils:[],gaze:[],brows:[],browPoses:[],wisps:[],wispPoses:[],
-        mouthPose:{scale:[1,1,1]},tongueMaterial:{opacity:0}};
+      cloud={hands:[],pupils:[],brows:[],cheeks:[],wisps:[],tongueMaterial:{opacity:0,color:0xf29b99}};
       const ink={color:0x30243e,ambient:.6,diffuse:.4,specular:.08,roughness:.85};
       for(let s=-1;s<=1;s+=2) {
         const hand=group('floating-hand'+s,root,[s*40,20,2]);
-        cloud.hands.push(hand);cloud.handPoses.push({position:[s*40,20,2],rotation:[0,0,0]});
+        cloud.hands.push(hand);
         volume('hand-volume'+s,hand,[0,0,0],[
           {position:[0,1,0],radii:[9,10,7]},
           {position:[-4,-3,0],radii:[6,7,6]},
@@ -55,66 +55,61 @@ globalThis.AyatsuriModels=(()=>{
         // Large ink eyes read against the white body without a second white shell.
         const pupil=lobe('pupil'+s,eyeGroup,[s*.4,.1,1.5],[4.7,7.3,2],
           Object.assign({},eye,{color:0x292137,specular:.85,roughness:.16}),undefined,undefined,true);
-        cloud.pupils.push(pupil);cloud.gaze.push({position:[s*.4,.1,1.5]});
+        cloud.pupils.push(pupil);
         if(s<0)leftEye=eyeGroup;else rightEye=eyeGroup;
         cloud.brows.push(lobe('brow'+s,head,[s*8,-14,1],[4,1.1,.8],ink,[0,0,-s*.13]));
-        cloud.browPoses.push({position:[s*8,-14,1],rotation:[0,0,-s*.13]});
-        lobe('cheek'+s,head,[s*14,5,.8],[4,2.2,.6],
-          Object.assign({},mist,{color:0xaecff0,opacity:.55,specular:0}));
+        cloud.cheeks.push(lobe('cheek'+s,head,[s*14,5,.8],[4,2.2,.6],
+          Object.assign({},mist,{color:0xaecff0,opacity:.55,specular:0})));
       }
-      cloud.mouth=lobe('smile',head,[0,10,1.5],[4.2,1.3,.8],ink);
+      cloud.mouth=lobe('smile',head,[0,10,1.5],[4.2,1.3,.8],Object.assign({},ink,{specular:0}));
       cloud.tongue=lobe('tongue',head,[0,11,2.3],[2.8,.9,.5],
-        {color:0xf29b99,ambient:.8,diffuse:.2,opacity:0,specular:0});
-      haloPose.position[1]=-61;
-      halo=group('iridescent-cloud',null,haloPose.position);
+        {color:0xf29b99,ambient:.6,diffuse:.4,opacity:0,specular:0});
+      halo=group('iridescent-cloud',null,[0,-61,0]);
       const colors=[0xaacbfa,0xd3c1f3,0xefc1e6,0xb6e5f1,0xeee2bc];
       for(let k=0;k<5;k++) {
         const p={position:[(k-2)*9,(k-2)*(k-2)*.55-1+(k%2)*2,k*.25],rotation:[0,0,(k-2)*.1],scale:[1,1,1]};
-        cloud.wispPoses.push(p);
         cloud.wisps.push(lobe('halo-wisp'+k,halo,p.position,[14-k*.6,1.7+(k%2)*.7,2.6],
           Object.assign({},mist,{color:colors[k],transmission:.7,thickness:.04,
             opacity:.7,edgeSoftness:.26}),p.rotation));
       }
     function update(timeMs,body,expression) {
       // Inputs are explicit so body-only scripts do not smuggle in breathing.
-      pose.rotation[2]=body.tilt;pose.rotation[1]=body.turn;
       const size=.9;
       // Actor motion is rigid; only the body volume receives squash/stretch.
       // Facial proportions and detached hands must not inherit a rubber scale.
-      pose.scale[0]=pose.scale[1]=pose.scale[2]=size;
-      bodyPose.scale[0]=1/body.stretch;bodyPose.scale[1]=body.stretch;bodyShape.place(bodyPose);
-      pose.position[0]=(body.shiftX||0)*size;pose.position[1]=body.lift*size+(cloud?4:0);root.place(pose);
-      headPose.position[1]=-12*body.stretch;
-      headPose.rotation[2]=body.head;head.place(headPose);
-      const open=Math.max(.04,expression.open*(1-expression.blink));
-      leftEyePose.scale[1]=open;rightEyePose.scale[1]=open;
-      leftEye.place(leftEyePose);rightEye.place(rightEyePose);
+      pose(bodyShape,0,0,0,0,1/body.stretch,body.stretch);
+      pose(root,(body.shiftX||0)*size,body.lift*size+4,0,body.tilt,size,size,size,body.turn);
+      pose(head,0,-12*body.stretch,20,body.head);
+      const smile=expression.smile||0,surprise=expression.surprise||0,brow=expression.brow||0,
+        open=Math.max(.04,expression.open*(1-expression.blink)*(1-.28*smile+.12*surprise));
+      pose(leftEye,-8,-3,0,0,1,open);pose(rightEye,8,-3,0,0,1,open);
       if(cloud) {
-        const smile=expression.smile||0,brow=expression.brow||0;
         for(let k=0;k<2;k++) {
-          const s=k?1:-1,h=cloud.handPoses[k],gesture=(k?body.handRight:body.handLeft)||0;
-          h.position[0]=s*(40-gesture*8);h.position[1]=20-gesture*22;
-          h.rotation[2]=s*gesture;cloud.hands[k].place(h);
-          cloud.gaze[k].position[0]=s*.4+(expression.gazeX||0)*1.1;
-          cloud.gaze[k].position[1]=.1+(expression.gazeY||0)*1.2;cloud.pupils[k].place(cloud.gaze[k]);
-          const b=cloud.browPoses[k];b.position[1]=-14-brow*3;b.rotation[2]=-s*(.13+brow*.3);
-          cloud.brows[k].place(b);
+          const s=k?1:-1,gesture=(k?body.handRight:body.handLeft)||0;
+          pose(cloud.hands[k],s*(40-gesture*8),20-gesture*22,2,s*gesture);
+          pose(cloud.pupils[k],s*.4+(expression.gazeX||0)*1.1,.1+(expression.gazeY||0)*1.2,1.5,0);
+          pose(cloud.brows[k],s*8,-14-brow*2-3.5*surprise-1.2*smile,1,s*(.1+.08*smile-.05*surprise));
+          pose(cloud.cheeks[k],s*14,5-2.8*smile+.7*surprise,.8,s*.12*smile);
         }
-        cloud.mouthPose.scale[0]=1+smile*.9;cloud.mouthPose.scale[1]=1+smile*3;cloud.mouth.place(cloud.mouthPose);
-        cloud.tongueMaterial.opacity=Math.min(1,smile*2);cloud.tongue.material(cloud.tongueMaterial);
+        // Reuse the two mouth surfaces: joined upturned strokes for joy,
+        // a tall dark opening with a pink interior for surprise. No new parts.
+        pose(cloud.mouth,-2.4*smile,10,1.5,.35*smile,1+.2*smile-.13*surprise,1-.25*smile+4*surprise);
+        pose(cloud.tongue,2.4*smile,11-.8*smile+1.4*surprise,2.3,-.35*smile,1+.8*smile-.2*surprise,1+.15*smile+1.7*surprise);
+        const inkMix=smile+surprise>0?smile/(smile+surprise):0;
+        cloud.tongueMaterial.color=(Math.round(242-194*inkMix)<<16)|(Math.round(155-119*inkMix)<<8)|Math.round(153-91*inkMix);
+        cloud.tongueMaterial.opacity=Math.min(1,(smile+surprise)*2);cloud.tongue.material(cloud.tongueMaterial);
       }
       if(halo) {
-        haloPose.position[0]=body.haloOffset+(body.shiftX||0)*.3;
-        haloPose.position[1]=-61+body.lift*.2;haloPose.rotation[2]=body.tilt*.12+(body.haloFollow||0);
-        haloPose.scale[0]=1+.08*Math.abs(body.tilt);halo.place(haloPose);
+        pose(halo,body.haloOffset+(body.shiftX||0)*.3,-61+body.lift*.2,0,body.tilt*.12+(body.haloFollow||0),1+.08*Math.abs(body.tilt));
         if(cloud)for(let k=0;k<cloud.wisps.length;k++) {
-          const p=cloud.wispPoses[k],side=k-2,lag=body.haloFollow||0;
+          const side=k-2,lag=body.haloFollow||0;
           const center=body.wispCenter||0,tip=(side<0?body.wispLeft:body.wispRight)||0,
             bend=center+(tip-center)*side*side/4;
-          p.position[1]=side*side*.55-1+(k%2)*2+bend;
-          p.rotation[2]=side*.1+(tip-center)*side/18;
-          p.scale[0]=1+Math.abs(lag)*(.4+Math.abs(side)*.15);
-          cloud.wisps[k].place(p);
+          const spreadCenter=body.wispSpreadCenter||0,
+            spreadTip=(side<0?body.wispSpreadLeft:body.wispSpreadRight)||0,
+            spread=spreadCenter+(spreadTip-spreadCenter)*side*side/4;
+          pose(cloud.wisps[k],side*9*(1+.12*spread),side*side*.55-1+(k%2)*2+bend,k*.25,
+            side*.1+(tip-center)*side/18,1+Math.abs(lag)*(.4+Math.abs(side)*.15)+.2*spread);
         }
       }
     }

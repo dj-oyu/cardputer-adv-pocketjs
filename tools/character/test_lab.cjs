@@ -52,6 +52,18 @@ assert.ok(sampled(3000).body.tilt>.2,'main lean has readable weight');
 assert.ok(sampled(5300).body.stretch<.9,'compression precedes extension');
 assert.ok(sampled(5900).body.stretch>1.15,'release stretches upward');
 assert.ok(sampled(2100).expression.gazeX>0,'gaze leads the main lean');
+assert.equal(sampled(2100).expression.surprise,0,'gaze precedes surprise');
+assert.equal(sampled(2350).expression.surprise,1,'brief surprise peaks before joy');
+assert.equal(sampled(2350).expression.smile,0,'surprise has no joy mouth');
+assert.equal(sampled(3300).expression.smile,.9,'main lean reaches joy');
+assert.equal(sampled(3300).expression.surprise,0,'joy has no surprise mouth');
+assert.equal(sampled(6100).expression.smile,.8,'buoyant release has a second joy phrase');
+const spreadFields=['wispSpreadCenter','wispSpreadLeft','wispSpreadRight'];
+assert.ok(sampled(2330).body.wispSpreadCenter>0,'spread begins at center');
+assert.equal(sampled(2330).body.wispSpreadLeft,0);assert.equal(sampled(2330).body.wispSpreadRight,0);
+assert.ok(sampled(2430).body.wispSpreadLeft>0,'spread reaches first tip after100ms');
+assert.equal(sampled(2430).body.wispSpreadRight,0);
+assert.ok(sampled(2530).body.wispSpreadRight>0,'spread reaches other tip after200ms');
 assert.notEqual(sampled(3100).body.handLeft,sampled(3100).body.handRight,'hands phrase asymmetrically');
 const wispFields=['wispCenter','wispLeft','wispRight'];
 assert.ok(Math.abs(sampled(2390).body.wispCenter)>0,'wisp center starts first');
@@ -64,10 +76,14 @@ assert.notEqual(Math.sign(sampled(4450).body.wispLeft),Math.sign(sampled(4600).b
 for(const ms of [0,2000,7820,8000,10000])for(const key of wispFields)
   assert.equal(sampled(ms).body[key],0,'wisps rest at '+ms);
 for(let ms=0;ms<=10000;ms+=1000/240){
-  const body=sampled(ms).body;
+  const {body,expression}=sampled(ms);
   assert.ok(body.wispCenter>=-.46&&body.wispCenter<=.14);
   assert.ok(body.wispLeft>=-.49&&body.wispLeft<=1.61);
   assert.ok(body.wispRight>=-2.21&&body.wispRight<=.67);
+  assert.ok(expression.surprise>=0&&expression.surprise<=1);
+  assert.ok(expression.smile>=0&&expression.smile<=.9);
+  assert.equal(expression.surprise*expression.smile,0,'joy and surprise never blend into one mouth');
+  for(const key of spreadFields)assert.ok(body[key]>=0&&body[key]<=.8,'bounded spread '+key);
 }
 const cloudSamples=[];
 for(let ms=0;ms<=10000;ms+=1000/60){
@@ -78,6 +94,8 @@ for(let ms=0;ms<=10000;ms+=1000/60){
 }
 for(const [ms,pose] of cloudSamples.reverse())assert.deepEqual(sampled(ms),pose,'reverse seeking is history independent');
 for(const ms of [2000,2220,2350,2660,3050,3480,4280,4350,4430,4480,4600,
+    2160,2300,2470,2780,2900,3220,3650,4140,5600,5950,6250,6750,
+    2280,2380,2480,2600,2700,2800,3800,3900,4000,5650,5750,5850,6020,6120,6220,6850,6950,7050,
     4360,4440,4950,5030,5110,5000,5280,5400,5450,5660,5900,6050,6500,7650,7740,7810]){
   const a=sampled(ms-.0001),b=sampled(ms+.0001);
   for(const group of ['body','expression'])for(const key of Object.keys(a[group]))
@@ -99,6 +117,8 @@ for(const mode of [1,2,3,4,5]){
   for(const key of Object.keys(base.expression))assert.equal(cloud.expression[key],base.expression[key]);
   assert.deepEqual(cloud.light,base.light);assert.deepEqual(cloud.camera,base.camera);
   assert.deepEqual(cloud.texture,base.texture);
+  assert.equal(cloud.expression.surprise,0);
+  for(const key of spreadFields)assert.equal(cloud.body[key],0,'nonBODY resets '+key);
 }
 const hookOrder=[],blend={},hookScene={light(){},camera(){},evaluate(){hookOrder.push('evaluate');}},
   hookContext=vm.createContext({AyatsuriBlend:blend,
@@ -143,7 +163,78 @@ for(const stretch of [.84,1,1.19]){
   close(shapeNodes.get('face')._node.pose[1],-12*stretch,'face translates with body surface');
   close(shapeNodes.get('face')._node.pose[5],.31,'head rotation remains nonzero');
 }
+const actingNames=['smile','tongue','cheek-1','cheek1','brow-1','brow1','eye-1','eye1',
+  'halo-wisp0','halo-wisp1','halo-wisp2','halo-wisp3','halo-wisp4'];
+function actingSnapshot(tick){
+  const ms=tick*1000/30,{body,expression}=sampled(ms);
+  shapeModel.update(ms,body,expression);shapeScene.evaluate(ms);
+  return Object.fromEntries(actingNames.map(name=>{
+    const node=shapeNodes.get(name)._node;
+    // Authoring equality treats signed zero alike; canonicalize it for semantic
+    // snapshots while retaining exact Float32 values everywhere else.
+    return [name,{pose:Array.from(node.pose,v=>v===0?0:v),matrix:Array.from(node.matrix,v=>v===0?0:v),
+      color:node.color,opacity:node.opacity}];
+  }));
+}
+const actingRest=actingSnapshot(0),actingSurprise=actingSnapshot(72),actingJoy=actingSnapshot(100),
+  actingRelease=actingSnapshot(183);
+const mouthAspect=state=>{
+  const radii=shapeNodes.get('smile')._node.analytic.work;
+  return radii[22]*state.smile.pose[7]/(radii[21]*state.smile.pose[6]);
+};
+assert.ok(mouthAspect(actingSurprise)>1,'surprise mouth is a tall opening');
+assert.ok(mouthAspect(actingSurprise)>mouthAspect(actingJoy)*4,'joy is visibly wider than surprise in face coordinates');
+assert.notEqual(actingSurprise.tongue.color,actingSurprise.smile.color,'surprise keeps pink interior');
+assert.equal(actingJoy.tongue.color,actingJoy.smile.color,'joy uses two joined ink strokes');
+assert.ok(actingJoy.tongue.opacity>0,'second joy stroke is visible');
+const endpoints=name=>{
+  const node=shapeNodes.get(name)._node,p=actingJoy[name].pose,
+    radius=node.analytic.work[21]*p[6],dx=Math.cos(p[5])*radius,dy=Math.sin(p[5])*radius;
+  return {left:[p[0]-dx,p[1]-dy],right:[p[0]+dx,p[1]+dy]};
+};
+const leftStroke=endpoints('smile'),rightStroke=endpoints('tongue');
+assert.ok(leftStroke.left[1]<leftStroke.right[1],'joy left outer corner rises');
+assert.ok(rightStroke.right[1]<rightStroke.left[1],'joy right outer corner rises');
+assert.ok(leftStroke.right[0]>rightStroke.left[0],'joy strokes overlap at the center');
+for(const side of [-1,1]){
+  assert.ok(actingJoy['cheek'+side].pose[1]<actingSurprise['cheek'+side].pose[1],'joy lifts cheeks');
+  assert.ok(actingJoy['brow'+side].pose[1]>actingSurprise['brow'+side].pose[1],'surprise raises brows more');
+  assert.ok(actingJoy['eye'+side].pose[7]<actingSurprise['eye'+side].pose[7],'joy narrows eyes');
+}
+assert.deepEqual(actingSnapshot(240),actingRest,'mouth/cheeks/wisps return exactly to rest');
+assert.deepEqual(actingSnapshot(300),actingRest,'rest remains stable');
+for(const [tick,expected] of [[183,actingRelease],[100,actingJoy],[72,actingSurprise],[0,actingRest],
+    [100,actingJoy],[72,actingSurprise]])
+  assert.deepEqual(actingSnapshot(tick),expected,'model expression snapshots are seek-order independent at '+tick);
 shapeScene.dispose();
+// Real utility ownership: model-level scratch reuse must never alias authored
+// arrays into another node, and invalid reuse must not partially publish a pose.
+const ownershipScene=shapeContext.Ayatsuri.scene({backend:{ellipsoidPacked(){}},evaluator:TransformReference});
+const firstOwned=ownershipScene.add({name:'first',geometry:{kind:'ellipsoid',radii:[1,1,1]}}),
+  secondOwned=ownershipScene.add({name:'second',geometry:{kind:'ellipsoid',radii:[1,1,1]}});
+const sharedTRS={position:[1,2,3],rotation:[.1,.2,.3],scale:[1,2,3]};
+firstOwned.place(sharedTRS);
+sharedTRS.position[0]=7;sharedTRS.position[1]=8;sharedTRS.position[2]=9;
+sharedTRS.rotation[0]=-.1;sharedTRS.rotation[1]=-.2;sharedTRS.rotation[2]=-.3;
+sharedTRS.scale[0]=4;sharedTRS.scale[1]=5;sharedTRS.scale[2]=6;
+secondOwned.place(sharedTRS);
+const firstSubmitted=Array.from(new Float32Array([1,2,3,.1,.2,.3,1,2,3])),
+  secondSubmitted=Array.from(new Float32Array([7,8,9,-.1,-.2,-.3,4,5,6]));
+sharedTRS.position[0]=99;sharedTRS.scale[1]=0;
+assert.throws(()=>firstOwned.place(sharedTRS),/nonzero finite scale/);
+assert.deepEqual(Array.from(firstOwned._node.pose),firstSubmitted,'rejected scratch update copies no position or scale');
+sharedTRS.position.fill(NaN);sharedTRS.rotation.fill(NaN);sharedTRS.scale.fill(NaN);
+ownershipScene.evaluate(0);ownershipScene.render();
+assert.deepEqual(Array.from(firstOwned._node.pose),firstSubmitted,'later scratch mutation cannot alter first submitted pose');
+assert.deepEqual(Array.from(secondOwned._node.pose),secondSubmitted,'second submission owns its own nine scalar components');
+const secondWorld=Array.from(secondOwned._node.matrix);
+sharedTRS.position.fill(0);sharedTRS.rotation.fill(0);sharedTRS.scale.fill(1);
+firstOwned.place(sharedTRS);assert.throws(()=>ownershipScene.render(),/evaluate before render/);
+ownershipScene.evaluate(1);ownershipScene.render();
+assert.deepEqual(Array.from(secondOwned._node.matrix),secondWorld,'scratch recovery updates only its submitted node');
+assert.deepEqual(Array.from(firstOwned._node.pose),[0,0,0,0,0,0,1,1,1]);
+ownershipScene.dispose();
+
 const frame=context.frame;
 for(let model=0;model<3;model++){
   for(let mode=0;mode<6;mode++){
