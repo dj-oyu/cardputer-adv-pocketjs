@@ -34,7 +34,8 @@ a.light({direction:[-.5,-.4,.8],color:0xffffff});a.camera({zoom:.85,center:[120,
 const l=Math.hypot(-.5,-.4,.8);assert.deepEqual(f.instances[0].light.slice(0,3),[-.5,-.4,.8].map(x=>Math.fround(x/l)));
 assert.throws(()=>a.handle(1).place({get position(){a.dispose();return [0,0,0];}}),/busy/);
 f.model.dispose();b.handle(2).place({rotation:[0,.1,0]});b.evaluate(0);b.render();assert.equal(f.instances[1].submitted,1,'existing instances survive model disposal');
-a.dispose();assert.throws(()=>a.handle(1));assert.throws(()=>a.evaluate(0));assert.equal(f.instances[0].dead,true);b.dispose();
+a.dispose();assert.doesNotThrow(()=>a.dispose(),'scene dispose is idempotent');
+assert.throws(()=>a.handle(1));assert.throws(()=>a.evaluate(0));assert.equal(f.instances[0].dead,true);b.dispose();
 // Compare every authored operation and its order to the original pinned updater.
 function updater(native){
   const operations=[],ctx=vm.createContext({AyatsuriCloudMotion(){}}),handles=[];

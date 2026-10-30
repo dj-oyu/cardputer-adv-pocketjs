@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = '7d21b3020b649aadc343c367f60948eca4abaf62'
@@ -17,6 +18,116 @@ from run_megademo_app_host import build
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+BUILD_SCHEMA = 2
+GENERATED = ('fonts.h', 'kasane_pet_test_data.h', 'ksn_proc_rom_plans.c', 'model_study_blob.h')
+OBJECTS = ('dtoa.o', 'libregexp.o', 'libunicode.o', 'quickjs.o', 'quickjs-vm.o')
+
+
+def compile_sources(root):
+    """Conservative repository input closure, including generators' real inputs."""
+    files = set()
+    for name in ('main', 'tools', 'components/quickjs-ng/quickjs-ng',
+                 'components/pocketjs_guest', 'apps/kasane'):
+        for file in (root / name).rglob('*'):
+            if not file.is_file() or any(p in ('.git', '.cache', '__pycache__', 'node_modules', 'build') for p in file.relative_to(root).parts):
+                continue
+            if file.suffix in ('.o', '.a', '.so', '.su', '.pyc', '.exe'):
+                continue
+            files.add(file)
+    files.add(root / 'apps/pet/assets/pets-compact.bin')
+    return {file.relative_to(root).as_posix(): sha(file) for file in sorted(files)}
+
+
+def content_key(sources, flags, blob_hash, toolchain):
+    payload = dict(schema=BUILD_SCHEMA, sources=sources, flags=flags,
+                   blob_sha256=blob_hash, toolchain=toolchain)
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def artifact_hashes(cache):
+    return {name: sha(cache / name) for name in (*GENERATED, *OBJECTS)}
+
+
+def object_cache_valid(cache, manifest, key):
+    return bool(manifest and manifest.get('schema') == BUILD_SCHEMA and manifest.get('content_key') == key and
+                all((cache / name).is_file() and sha(cache / name) == manifest.get('artifacts', {}).get(name) for name in OBJECTS))
+
+
+def verify_reuse(manifest, binary, key):
+    if manifest.get('schema') != BUILD_SCHEMA or manifest.get('content_key') != key:
+        raise RuntimeError('reused binary has an obsolete schema or changed compile inputs/profile/blob')
+    if manifest.get('binary_sha256') != sha(binary) or manifest.get('artifacts') != artifact_hashes(binary.parent):
+        raise RuntimeError('reused binary, generated headers/ROM table, or cached objects changed')
+
+
+def compiler_identity():
+    result = {}
+    for name in ('gcc', 'node'):
+        executable = shutil.which(name)
+        if not executable:
+            raise RuntimeError(f'{name} is required')
+        file = Path(executable).resolve()
+        result[name] = dict(path=str(file), sha256=sha(file),
+                            version=subprocess.check_output([name, '--version'], text=True).splitlines()[0])
+    return result
+
+
+def manifest_selftest():
+    """One-factor stale-input tests in fresh temporary trees, never ROOT."""
+    source_names = ('main/pocket/pocket_proc.c', 'main/ui/kasane/ksn_procedural.h',
+                    'components/quickjs-ng/quickjs-ng/quickjs.c',
+                    'components/quickjs-ng/quickjs-ng/quickjs.h', 'tools/build_kasane_test.sh',
+                    'tools/make_font.py', 'apps/pet/assets/pets-compact.bin',
+                    'apps/kasane/megademo_plans.js', 'tools/kasane_ir/emit_rom_plans.mjs')
+    cases = [('source', name) for name in source_names] + [('artifact', name) for name in (*GENERATED, *OBJECTS)] + [
+        ('binary', ''), ('flags', ''), ('blob', ''), ('toolchain', ''), ('schema', ''), ('added_header', '')]
+    with tempfile.TemporaryDirectory(prefix='ayatsuri-manifest-') as tmp:
+        for index, (kind, name) in enumerate(cases):
+            root = Path(tmp) / str(index)
+            cache = root / '.cache/build'
+            cache.mkdir(parents=True)
+            for source in source_names:
+                file = root / source
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(source.encode())
+            for artifact in (*GENERATED, *OBJECTS):
+                (cache / artifact).write_bytes(artifact.encode())
+            binary = cache / 'binary'
+            binary.write_bytes(b'binary')
+            flags, blob, toolchain = ['-m32'], 'blob', {'gcc': 'fixture'}
+            key = content_key(compile_sources(root), flags, blob, toolchain)
+            manifest = dict(schema=BUILD_SCHEMA, content_key=key, binary_sha256=sha(binary), artifacts=artifact_hashes(cache))
+            verify_reuse(manifest, binary, key)
+            assert object_cache_valid(cache, manifest, key)
+            if kind == 'source':
+                with (root / name).open('ab') as f:
+                    f.write(b' changed')
+            elif kind == 'artifact':
+                (cache / name).write_bytes(b'changed')
+            elif kind == 'binary':
+                binary.write_bytes(b'changed')
+            elif kind == 'flags':
+                flags.append('-O2')
+            elif kind == 'blob':
+                blob = 'changed'
+            elif kind == 'toolchain':
+                toolchain = {'gcc': 'changed'}
+            elif kind == 'schema':
+                manifest['schema'] = 1
+            else:
+                (root / 'main/pocket/new.h').write_bytes(b'new header')
+            new_key = content_key(compile_sources(root), flags, blob, toolchain)
+            try:
+                verify_reuse(manifest, binary, new_key)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError(f'stale input accepted: {kind} {name}')
+            if kind in ('source', 'flags', 'blob', 'toolchain', 'schema', 'added_header') or kind == 'artifact' and name in OBJECTS:
+                assert not object_cache_valid(cache, manifest, new_key)
+    print(f'MODEL_MANIFEST_SELFTEST_PASS unchanged_positive={len(cases)} stale_negative={len(cases)} shared_tree_writes=0')
 
 
 def git(*args):
@@ -72,7 +183,15 @@ globalThis.__modelStudy=(()=>{
    const model=AyatsuriModels.create(scene,0);if(model.sampleFactory)model.sample=model.sampleFactory(model.sample);
    a[i]={scene,model,input:{body:{},expression:{}}};
   }catch(error){if(scene)scene.dispose();throw error;}
- },trySecond(){try{this.create(1);globalThis.__studySecondOk=true;}catch(error){globalThis.__studySecondOk=false;}
+ },trySecond(){this.secondName='';this.secondCode='';this.secondReason='';
+  try{this.create(1);globalThis.__studySecondOk=true;}catch(error){
+   globalThis.__studySecondOk=false;this.secondReason=error===null?'null':typeof error;
+   try{if(error&&typeof error==='object'){
+    this.secondName=String(error.name||'').slice(0,80);this.secondCode=String(error.code||'').slice(0,80);
+    this.secondReason=(this.secondName+'/'+this.secondCode).slice(0,161);
+   }}catch(ignored){this.secondReason='unreadable error metadata';}
+   if(typeof AyatsuriNative!=='undefined')throw error;
+  }
  },frame(i,tick){const x=a[i],t=tick*1000/30;
   x.model.sample(t,0,false,x.input);x.model.update(t,x.input.body,x.input.expression);x.scene.evaluate(t);
   H.beginFrame(0xe77c);x.scene.render();H.commit();
@@ -92,7 +211,11 @@ def main():
     p.add_argument('--heap-limit', type=int, default=163840)
     p.add_argument('--m32', action='store_true')
     p.add_argument('--gc-probe', action='store_true', help='secondary post-dispose explicit GC only')
+    p.add_argument('--self-test-manifest', action='store_true', help='pure temporary-tree positive/stale-input tests; no build/run')
     args = p.parse_args()
+    if args.self_test_manifest:
+        manifest_selftest()
+        return
     if not 1 <= args.frames <= 3600:
         p.error('frames must be in 1..3600')
     folder = args.output.resolve()
@@ -103,11 +226,15 @@ def main():
     entry = app_root / ('apps/cloudprobe/cloud_probe.js' if args.variant == 'A' else 'apps/cloudprobe/native_probe.js')
     chunks = app_root / ('apps/cloudprobe/chunks.txt' if args.variant == 'A' else 'apps/cloudprobe/native_chunks.txt')
     cache = folder / ('build-m32' if args.m32 else 'build-asan')
+    if args.reuse_binary:
+        cache = args.reuse_binary.resolve().parent
     cache.mkdir(parents=True, exist_ok=True)
     blob = args.model_bin.resolve()
     data = blob.read_bytes()
     header = cache / 'model_study_blob.h'
-    header.write_text('static const uint8_t model_study_blob[]={' + ','.join(map(str, data)) + '};\n')
+    header_bytes = ('static const uint8_t model_study_blob[]={' + ','.join(map(str, data)) + '};\n').encode()
+    if not args.reuse_binary:
+        header.write_bytes(header_bytes)
     flags = ['-DCHARACTER_MODEL_STUDY=1', '-DCHARACTER_MODEL_BLOB=1', '-fstack-usage', '-ffp-contract=off',
              '-Wl,--wrap=malloc', '-Wl,--wrap=realloc']
     if args.m32:
@@ -119,27 +246,28 @@ def main():
     compat = ROOT / '.cache/ci-compat/bin'
     if compat.is_dir():
         os.environ['PATH'] = str(compat) + os.pathsep + os.environ.get('PATH', '')
-    stamp = cache / 'model-study-flags.json'
-    build_inputs = set(ROOT.glob('main/ayatsuri/*')) | set(ROOT.glob('main/pocket/*.inc'))
-    build_inputs.update(ROOT / name for name in ('main/pocket/pocket_shape.c',
-        'tools/kasane_contract/test_character_app_host.c', 'tools/kasane_contract/test_megademo_app_host.c',
-        'tools/kasane_contract/run_megademo_app_host.py'))
-    build_hashes = {str(x): sha(x) for x in sorted(build_inputs) if x.is_file()}
+    build_hashes, toolchain, blob_hash = compile_sources(ROOT), compiler_identity(), sha(blob)
+    key = content_key(build_hashes, flags, blob_hash, toolchain)
+    manifest_path = cache / 'model-study-build.json'
     if not args.reuse_binary:
-        if not stamp.exists() or json.loads(stamp.read_text()) != flags:
+        previous = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
+        if not object_cache_valid(cache, previous, key):
             for obj in cache.glob('*.o'):
                 obj.unlink()
-        stamp.write_text(json.dumps(flags))
         binary = build(flags, cache, 'tools/kasane_contract/test_character_app_host.c')
-        if any(sha(Path(name)) != value for name, value in build_hashes.items()):
+        if compile_sources(ROOT) != build_hashes or compiler_identity() != toolchain or sha(blob) != blob_hash:
             raise RuntimeError('compiled inputs changed during build; rerun after source freeze')
-        (binary.parent / 'model-study-build.json').write_text(json.dumps(dict(
-            binary_sha256=sha(binary), flags=flags, blob_sha256=sha(blob), source_hashes=build_hashes), indent=2))
+        if header.read_bytes() != header_bytes:
+            raise RuntimeError('generated model header differs from the requested blob')
+        manifest_path.write_text(json.dumps(dict(schema=BUILD_SCHEMA, content_key=key,
+            binary_sha256=sha(binary), flags=flags, blob_sha256=blob_hash, source_hashes=build_hashes,
+            toolchain=toolchain, artifacts=artifact_hashes(cache)), indent=2) + '\n')
     else:
         binary = args.reuse_binary.resolve()
-        compiled = json.loads((binary.parent / 'model-study-build.json').read_text())
-        if compiled['binary_sha256'] != sha(binary) or compiled['blob_sha256'] != sha(blob) or compiled['flags'] != flags or compiled['source_hashes'] != build_hashes:
-            raise RuntimeError('reused binary/build profile/blob/source hashes do not match its build manifest')
+        compiled = json.loads(manifest_path.read_text())
+        verify_reuse(compiled, binary, key)
+        if header.read_bytes() != header_bytes:
+            raise RuntimeError('reused generated model header differs from the requested blob')
     script = folder / 'study_driver.js'
     script.write_text(driver())
     inputs = {entry, chunks, script, blob, Path(__file__)}
@@ -155,8 +283,8 @@ def main():
                CHARACTER_MODEL_DRIVER=str(script), CHARACTER_MODEL_FRAMES=str(args.frames),
                CHARACTER_MODEL_PIXELS=str(folder / (args.variant + '-pixels.csv')),
                CHARACTER_HEAP_LIMIT=str(args.heap_limit), CHARACTER_NO_EAGER_GC='1', CHARACTER_FULL_REFERENCE='1')
-    for key in ('CHARACTER_CAPTURE_DIR', 'CHARACTER_CAPTURE_PLAN', 'CHARACTER_FIXTURE'):
-        env.pop(key, None)
+    for env_key in ('CHARACTER_CAPTURE_DIR', 'CHARACTER_CAPTURE_PLAN', 'CHARACTER_FIXTURE'):
+        env.pop(env_key, None)
     if args.gc_probe:
         env['CHARACTER_MODEL_GC_PROBE'] = '1'
     else:
@@ -175,6 +303,7 @@ def main():
         build_head=git('rev-parse', 'HEAD').decode().strip(), passed=run.returncode == 0 and 'MODEL_STUDY_PASS' in run.stdout,
         returncode=run.returncode, source_hashes=hashes, sources_unchanged_during_run=hashes == current_hashes,
         binary=str(binary), binary_sha256=sha(binary), flags=flags, model_rom_const_bytes=len(data),
+        build_manifest_schema=BUILD_SCHEMA, build_content_key=key, build_manifest_sha256=sha(manifest_path),
         explicit_gc_primary=False, explicit_gc_secondary=args.gc_probe, rows=rows,
         B='UNMEASURED: rejected old importer not ported to current runtime',
         scope='link-wrapped explicit requested native bytes include fixture; libc-internal allocations outside linked calls are unmeasured',

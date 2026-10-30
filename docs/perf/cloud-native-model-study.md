@@ -2,6 +2,8 @@
 
 状態: ローカルhost比較。対照JSソースは7d21b302、製品CLOUD PROBEのnative asset切替・同head CI・この方式の実機確認は未完。7d21b302の実機fixture成功は[別記録](cloud-finite-fixture.md)を参照。
 
+本表は初回native比較（公開bb97749相当のローカルsource、詳細SHAはresult.json）の記録。後続の再利用guard・例外分類・二重dispose修正後のCI結果は別headとして確認し、旧表の数値を新headの実測へ読み替えない。
+
 ## 比較条件
 
 Aは固定した7d21b302のJS scene/形状定義、Cは同じ雲をoffline exportしたreadonly AYNMとnative Instance。19nodes、16描画packet、14blend lobes。Cのblobは2766 B、Instance arenaは6600 B（既存work slot6144 B＋metadata456 B）。arenaはjs_malloc経由でguest会計へ含める。速度/位相は既存個体別follow actorを維持し、JSが演技とtargetを指示する。
@@ -9,6 +11,10 @@ Aは固定した7d21b302のJS scene/形状定義、Cは同じ雲をoffline expor
 Linux host i386/m32・SSE2、FMA contraction OFF、160 KiB=163840 B quota、通常GCあり・明示GCなし。両経路で同じ単一バイナリを使い、同じcamera/世界光、BODY・呼吸OFF、tick 0..300を30Hzのapp clockへ変換して提出する。カメラ倍率は両方とも明示F32値。一般のJS Number cameraとの完全同義性や全表情の受入ではない。UI controllerは構築せず、同じdriverで個体生成/描画/破棄を行う容量比較であり、通常app全体の測定と混同しない。
 
 Aも新bindingを含む共通バイナリである。旧製品bin対新版binの総差ではない。バイナリSHA256は `9b77f9b6884d129a3daf3a63e185a9cf600a23e7ddcd0785acf3f29e1ab123ac`。最終C核SHA256は `70435e4cb35949c8fb8436fcd84a9297662fbd194ac6ccc0547f939551b57893`。実行前後の関連source hashは不変、再利用時に埋込みblob/flags/source/build manifestを照合した。
+
+計測後の独立レビューで、初版build manifestのsource対象にはrenderer/QuickJS等の不足が見つかった。今回のA/C間でこれらを変更した事実はなく、同一バイナリの画像/容量結果は保持するが、旧manifestを一般のstale-source拒否証拠には使わない。再利用guardは別の修正で広いcompile入力と生成物/object/binaryを対象にし、旧schemaは拒否する。新guardと旧計測の実行事実を区別する。
+
+schema2 guardはTemporaryDirectory内の24 positive/24 stale-inputケースで検証し、独立レビューでも再実行PASS。renderer、QuickJS/header、generator入力、生成物、object、binary、flags、blob、toolchain、旧schemaの変更で再利用を拒否する。新C経路の2個体目構築例外は再throwして試験FAILとし、source Aの拒否も理由を記録してCONSTRUCTION_REJECTEDと呼ぶ。null例外だけでOOMとは断定しない。
 
 ## Guest容量
 

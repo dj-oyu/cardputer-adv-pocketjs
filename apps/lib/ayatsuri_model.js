@@ -62,7 +62,8 @@ globalThis.AyatsuriNative=(()=>{
       }finally{s.busy=false;}};
     s.render=function(){alive(s);if(!s.ready)throw new Error('AyatsuriNative: evaluate before render');s.busy=true;try{instance.submit();}finally{s.busy=false;}};
     s.stats=function(out){alive(s);s.busy=true;try{return instance.stats(out);}finally{s.busy=false;}};
-    s.dispose=function(){alive(s);s.busy=true;try{instance.dispose();s.dead=true;s.handles.length=0;s.model=null;}finally{s.busy=false;}};
+    s.dispose=function(){if(s.busy)throw new Error('AyatsuriNative: disposed/busy scene');if(s.dead)return;
+      s.busy=true;try{instance.dispose();s.dead=true;s.handles.length=0;s.model=null;}finally{s.busy=false;}};
     try{if(options.light)s.light(options.light);if(options.camera)s.camera(options.camera);return s;}catch(e){instance.dispose();throw e;}
   }
   return {scene};

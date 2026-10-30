@@ -555,10 +555,19 @@ static int model_study_run(bool ok){
     bool second=false;
     if(ok){
         ok=model_study_script("__modelStudy.trySecond()","two_instances_attempted");
+        if(ok){
         second=ok&&num("__studySecondOk")==1;
-        printf("MODEL_STUDY_TWO_INSTANCES result=%s\n",second?"PASS":"CAPACITY_REJECTED");
+        JSValue global=JS_GetGlobalObject(ctx),study=JS_GetPropertyStr(ctx,global,"__modelStudy"),
+          reason=JS_GetPropertyStr(ctx,study,"secondReason");
+        const char *text=JS_ToCString(ctx,reason);
+        if(!text)ok=false;
+        printf("MODEL_STUDY_TWO_INSTANCES result=%s reason=%s\n",second?"PASS":"CONSTRUCTION_REJECTED",text?text:"reason_unavailable");
+        JS_FreeCString(ctx,text);JS_FreeValue(ctx,reason);JS_FreeValue(ctx,study);JS_FreeValue(ctx,global);
+        if(ok){
         if(second){ok=model_study_tick(1,0);character_memory_record("instance2_first_frame",false);}
         else {const uint64_t before=model_study_panel_hash();ok=model_study_tick(0,frames-1)&&before==model_study_panel_hash();character_memory_record("failed_second_survivor_unchanged",false);}
+        }
+        }
     }
     if(ok)ok=model_study_script("__modelStudy.dispose(0)","instance1_disposed_other_alive");
     if(ok&&second)ok=model_study_tick(1,1);
