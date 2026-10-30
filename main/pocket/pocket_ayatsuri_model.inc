@@ -27,8 +27,13 @@ static bool managed_model_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayE
      * validated and borrowed atomically. Reject it for both inputs/outputs. */
     const bool ordinary=JS_IsArrayBuffer(ab);
     uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
-    const bool ok=data&&offset<=size&&bytes<=size-offset&&
+    bool ok=data&&offset<=size&&bytes<=size-offset&&
         (!writable||JS_IsImmutableArrayBuffer(ab)<=0);
+    /* Float32/Uint32 paths borrow typed C pointers. Foreign ArrayBuffers may
+     * have weaker base alignment than their JS byteOffset suggests. Float64
+     * opacity stays byte-addressed in the core and needs no alignment here. */
+    if(ok&&(type==JS_TYPED_ARRAY_FLOAT32||type==JS_TYPED_ARRAY_UINT32))
+        ok=((uintptr_t)(data+offset)&3u)==0;
     if(ok)*out=(shade_view){data+offset,bytes};
     JS_FreeValue(ctx,ab);return ok;
 }

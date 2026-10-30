@@ -133,7 +133,7 @@ static void warm_contract(JSContext *ctx){
     for(unsigned n=0;n<4;n++)JS_FreeValue(ctx,target[n]);
     JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,actor);JS_FreeValue(ctx,global);
 }
-static size_t foreign_buffers,opacity_skew_count;
+static size_t foreign_buffers,opacity_skew_count,f32_alignment_rejections;
 static void foreign_buffer_free(JSRuntime *rt,void *opaque,void *data){
     (void)rt;(void)data;CHECK(foreign_buffers);--foreign_buffers;free(opaque);
 }
@@ -161,6 +161,20 @@ static void unaligned_opacity_contract(JSContext *ctx){
     CHECK(ayatsuri_model_instance_next(&native->core,native,1,&cursor,&packet)==AYATSURI_MODEL_OK&&packet.node_id==1);
     uint16_t quantized;memcpy(&quantized,packet.storage+(packet.kind==1?236:254),2);CHECK(quantized==128);
     packet_count=0;r=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+    uint32_t old_hash,new_hash;r=snapshot_hash(ctx,JS_UNDEFINED,0,NULL);CHECK(JS_ToUint32(ctx,&old_hash,r)==0);JS_FreeValue(ctx,r);
+    uint8_t *pose_raw=malloc(count*36+2);CHECK(pose_raw);uint8_t *pose_data=pose_raw+2;
+    CHECK(((uintptr_t)pose_data&3u)==2u);memset(pose_data,0,count*36);++foreign_buffers;
+    JSValue pose_ab=JS_NewArrayBuffer(ctx,pose_data,count*36,foreign_buffer_free,pose_raw,false);CHECK(!JS_IsException(pose_ab));
+    JSValue pose_args[3]={pose_ab,JS_NewInt32(ctx,0),JS_NewUint32(ctx,(uint32_t)count*9)};
+    JSValue pose_view=JS_NewTypedArray(ctx,3,pose_args,JS_TYPED_ARRAY_FLOAT32);CHECK(!JS_IsException(pose_view));
+    JSValue misaligned[4]={target[0],pose_view,target[2],target[3]};dirty.data[1]=AYATSURI_TARGET_POSITION;
+    r=managed_instance_targets(ctx,actor,4,misaligned);CHECK(JS_IsException(r));JS_FreeValue(ctx,r);
+    JSValue alignment_error=JS_GetException(ctx);const char *message=JS_ToCString(ctx,alignment_error);
+    CHECK(message&&strstr(message,"INVALID_ARGUMENT"));JS_FreeCString(ctx,message);JS_FreeValue(ctx,alignment_error);
+    packet_count=0;r=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+    r=snapshot_hash(ctx,JS_UNDEFINED,0,NULL);CHECK(JS_ToUint32(ctx,&new_hash,r)==0);JS_FreeValue(ctx,r);CHECK(new_hash==old_hash);
+    JS_FreeValue(ctx,pose_view);JS_FreeValue(ctx,pose_ab);CHECK(foreign_buffers==1);++f32_alignment_rejections;
+    dirty.data[1]=AYATSURI_TARGET_OPACITY;
     const double changed=.25,invalid_alpha=NAN;
     memcpy(data+8,&changed,8);memcpy(data+(count-1)*8,&invalid_alpha,8);dirty.data[count-1]=AYATSURI_TARGET_OPACITY;
     r=managed_instance_targets(ctx,actor,4,target);CHECK(JS_IsException(r));JS_FreeValue(ctx,r);
@@ -201,5 +215,5 @@ int main(int argc,char **argv){
         a=managed_model_instance(ctx,m,0,NULL);CHECK(!JS_IsException(a));
         JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }
-    free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,injected_ooms);return 0;
+    free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
 }

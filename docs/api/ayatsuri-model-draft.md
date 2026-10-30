@@ -26,6 +26,8 @@ CのModelは検証済みreadonly spanを借用する。spanとModel構造体は�
 
 C arenaは8-byte整列を要求する。JS adapterはguest allocatorの4-byte整列だけを前提に元allocationへ7 B足して確保し、整列後のspanを核へ渡す。解放は必ず元allocationへ戻す。targetのopacityはN個のLE binary64値を持つbyte spanで、double alignmentを要求しない。JS公開引数の型はFloat64Arrayのまま、同期borrowと全件validationを保つ。
 
+F32/U32入力は4-byte整列を要求し、JS adapterも外部ArrayBuffer由来の未整列viewを拒否する。型名だけを根拠に未整列pointerをCへcastしない。U8とF64 byte spanにはこの4-byte制約を課さない。
+
 AYNM v1試作はLE、offset/length付きsection directory。nodes、rest TRS、radii、local lobes、materials、target bindings、ASCII名のsectionを持つ。未知required sectionは拒否、optionalは境界検証してskip。長さ・積・offsetのoverflow、重なり、stride/count、親の順序、ID、finite値を検証する。1MiB、256nodes、64sectionsが現試作上限で、製品予算の保証ではない。
 
 保存TRSはF32、計算中間と丸め順は既存共通C核とJS実装に合わせる。thickness/opacity/edge softnessは既存JS Numberの量子化結果を保つためF64を保持する。一律のF32化やPIE用量子化を同時に導入しない。packed保存形式と将来のPIE実行layoutは同一でなくてよい。毎frameの詰め替えや余分な全state copyを増やさない。
