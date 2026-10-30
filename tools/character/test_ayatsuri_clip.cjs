@@ -58,7 +58,7 @@ wrong.ctx.Ayatsuri={scene(){return {add(){raw={_node:{owner:{},analytic:{kind:'e
 const unsupported=wrong.scene(),bad=unsupported.add({});assert.throws(()=>unsupported.aperture(bad,rest),/ABI/);unsupported.dispose();
 // The fake native provider below uses the frozen authoring fixture as an oracle.
 // It checks JS protocol/numerical controllers, not C floating-point or pixels.
-const FIXTURE=path.join(root,'tools/ayatsuri/model/fixtures/fox_face_v2.js');
+const FIXTURE=path.join(root,'tools/ayatsuri/model/fixtures/fox_face_v3.js');
 function oracle(){
   const handles=[],clips=[],entries=[],byBuffer=new Map();let selected=null;
   const ctx=vm.createContext({ArrayBuffer,Float32Array,Float64Array,Uint16Array,Uint8Array,Int16Array,pocket:{ayatsuri:Transform}});
@@ -158,4 +158,4 @@ ns.dispose();ns.dispose();assert.equal(created.model.closed,false,'scene borrows
 secondController.update({yaw:-.2});second.scene.evaluate(0);second.scene.render();
 for(const call of [()=>ns.evaluate(0),()=>ns.render(),()=>controller.root.place({}),()=>controller.eyes[0].aperture.setEmpty(null)])assert.throws(call,/disposed/);
 second.scene.dispose();created.model.dispose();expectedOracle.scene.dispose();
-console.log('AYATSURI_CLIP_NODE_PASS sourceA=true nativeModel=true sameFrame=true lightOnly=no-project atomicMorph=true EMPTY=explicit getterReentry=guarded dispose=guarded foxSweeps='+frames+' nodes=29 controllerNonLid=v2-authoring-exact farEye=relative-view buffers=reused nativePixels=UNMEASURED warmGuestAlloc=UNMEASURED');
+console.log('AYATSURI_CLIP_NODE_PASS sourceA=true nativeModel=true sameFrame=true lightOnly=no-project atomicMorph=true EMPTY=explicit getterReentry=guarded dispose=guarded foxSweeps='+frames+' nodes=29 controllerNonLid=v3-authoring-exact farEye=relative-view buffers=reused nativePixels=UNMEASURED warmGuestAlloc=UNMEASURED');

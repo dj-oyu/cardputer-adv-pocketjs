@@ -35,6 +35,8 @@ utilityはoptionalな`apps/lib/ayatsuri_clip.js`。既存`character.js`のprivat
 
 起動失敗も含む容量の比較条件と証拠の限界は[host検証記録](../../docs/perf/fox-native-face-study.md)を参照。
 
-現在の造形は[顔v2](../../docs/perf/fox-face-v2.md)。app所有selectのlightYawは−180..180度へ広げ、左右150度の背面光を比較する。通常キーの光切替は0/60/−60度を維持する。hostは4表情×yawの12枚、24枚のpitch比較、6枚の背面光を含む237frameを2回実行し、capture指定時には42枚すべての長さと反復hashを確認する。
+現在の造形は[顔v3](../../docs/perf/fox-face-v3.md)（[前段v2](../../docs/perf/fox-face-v2.md)を比較用に保持）。app所有selectのlightYawは−180..180度へ広げ、左右150度の背面光を比較する。通常キーの光切替は0/60/−60度を維持する。hostは4表情×yawの12枚、24枚のpitch比較、6枚の背面光と6回のrelease/recreateを含む243frameを2回実行し、capture指定時には42枚すべての長さと反復hashを確認する。
+
+`FoxFaceLab.release()`はモデル・個体・clip作業領域を閉じ、表示resourceとpreset/clockは保つ。busy時は拒否し、複数回呼んでもよい。次のframeが同じ入力からactorを再生成する。モデルの寿命を表示snapshotの寿命と分けるapp固有の入口であり、HOME共用APIの実装ではない。
 
 眼の方向補正は`model.update({viewYaw})`のカメラ相対yawから決まる。省略時は固定正面カメラを前提にbody yawを使う。新しいカメラ配置へ組み込む側は相対角を渡す。一般の自動depth遮蔽ではなく、対応角度内での作者による露出補正である。

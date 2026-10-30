@@ -2,9 +2,9 @@
 
 `fox_face.aynm` は既存AYNM v1の全29node資産。builtin名は `fox-face`。頭・眼球・虹彩・瞳・瞼・眉・鼻口吻・顎・耳を旧25nodeのIDを保ち、内耳・耳毛の4nodeを末尾へ追加する。clipの頂点と更新制御はJS側に残し、新しいgeometry形式やsectionは追加しない。
 
-初期値はv2 authoringのFoxFaceModelの `create()` → `update({})` 後のneutral状態。口（ID7）は非表示、position `[0,15,22]`、scale `[1,Float32(.15),1]`。ほかは表示。rest TRS・geometry・正規化材質は既存utilityと同じF32、thickness/opacity/edgeSoftnessはF64を保持する。
+初期値はv3 authoringのFoxFaceModelの `create()` → `update({})` 後のneutral状態。口（ID7）は非表示、position `[0,15,22]`、scale `[1,Float32(.15),1]`。ほかは表示。rest TRS・geometry・正規化材質は既存utilityと同じF32、thickness/opacity/edgeSoftnessはF64を保持する。
 
-authoringの正本はoffline専用の `tools/ayatsuri/model/fixtures/fox_face_v2.js`。実utilityで正規化し、既存 `pack_model.cjs` で符号化する。runtimeでJS定義graphを復元しない。旧 `fox_face_25.js` は変更せず比較用に保持する。
+authoringの正本はoffline専用の `tools/ayatsuri/model/fixtures/fox_face_v3.js`。実utilityで正規化し、既存 `pack_model.cjs` で符号化する。runtimeでJS定義graphを復元しない。旧 `fox_face_25.js` と `fox_face_v2.js` は変更せず比較用に保持する。
 
 ```sh
 node tools/ayatsuri/model/export_fox_face.cjs --write
@@ -33,8 +33,8 @@ node tools/ayatsuri/model/test_fox_face.cjs
 
 apertureのanchor→描画対象は `2→[2]`、`3→[3]`、`10→[10,11,12]`、`17→[17,18,19]`、`25→[25]`、`26→[26]`、`27→[27]`、`28→[28]`。exporterは照合用のclip情報も返すが、binaryへは保存しない。
 
-資産は3620 B、SHA256 `91c22dc9865bdc79625a9b8ecb9fbecb631abb370a2c5d67cc7c96baee917285`。v2抽出元のLF正規化SHA256は `84829228c40a45021f77fd839e42698828ba89f515750a2a30861a3d68abcb33`。Git checkoutの改行差は生成byteへ影響しない。旧25node資産の3148 B・SHA256 `3c296648c459ff0cc1b03849febfbd93f96e8cf64345ede2c28e8f7bde691888` は前候補の記録であり、現資産と混同しない。
+資産は3620 B、SHA256 `6bb3214811d25d61349a2bd34078adc5f50a0fa047717e94f5523eb5a04f93e3`。v3抽出元のLF正規化SHA256は `88baa1d39a867fdbffe11ee8d79558de125f67ddd2ff22dc1bd057b0f252f6d7`。Git checkoutの改行差は生成byteへ影響しない。旧25node資産の3148 B・SHA256 `3c296648c459ff0cc1b03849febfbd93f96e8cf64345ede2c28e8f7bde691888` は前候補の記録であり、現資産と混同しない。
 
 native workは8496 B、Instance arenaは9192 B、geometric nodeは25（neutral表示24）。Model/Actor metadata・allocator整列・JS target配列・描画packetは別費用。構造値であり、guest peakや実機速度の測定結果ではない。旧7node＋JS19node方式は容量不足で未採用とし、製品asset/providerから外した。
 
-眼球の奥行きを1.5へ薄くし眼窩を(±11.5,-4.5,11)へ収め、鼻筋の独立した球を細長い低いbridgeへ変更した。白い頬は中心口吻から左右の細い端へ連続する8lobeの同一材質field。耳は幅広いouterに、桃色の薄いinnerとcreamのroot tuftを重ねる。内耳のtransmission .64 / thickness .12は既存光源評価による様式化近似で、時刻による明滅ではない。edgeSoftness .08は解析曲面の縁の設定であり、凸clip境界へ追加AAを実装した意味ではない。耳の後描きが頭へ漏れないclip域・前後関係、最終画像と背面光の品質受入はruntime側の比較で確認する。
+眼球の奥行きを1.1・高さを8.5へ薄くし眼窩を(±11.5,-4.5,11)へ収め、虹彩の幅を5.8へ広げてlocal Zを1.0、瞳のlocal Zを1.5へ収めた。鼻筋の独立した球を細長い低いbridgeへ変更した。白い頬は中心口吻から左右の細い端へ連続する8lobeの同一材質field。耳は幅広いouterに、桃色の薄いinnerとcreamのroot tuftを重ねる。内耳のtransmission .64 / thickness .12は既存光源評価による様式化近似で、時刻による明滅ではない。edgeSoftness .08は解析曲面の縁の設定であり、凸clip境界へ追加AAを実装した意味ではない。耳の後描きが頭へ漏れないclip域・前後関係、最終画像と背面光の品質受入はruntime側の比較で確認する。

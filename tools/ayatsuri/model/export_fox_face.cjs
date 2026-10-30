@@ -3,12 +3,12 @@
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto');
 const {compile}=require('./pack_model.cjs');
 const ROOT=path.resolve(__dirname,'../../..'),FOLDER=path.join(ROOT,'apps/fox3d/assets');
-const SOURCE_SHA256='84829228c40a45021f77fd839e42698828ba89f515750a2a30861a3d68abcb33';
-const SOURCE_LF_SHA256='84829228c40a45021f77fd839e42698828ba89f515750a2a30861a3d68abcb33';
-const SOURCE=path.join(__dirname,'fixtures/fox_face_v2.js');
+const SOURCE_SHA256='88baa1d39a867fdbffe11ee8d79558de125f67ddd2ff22dc1bd057b0f252f6d7';
+const SOURCE_LF_SHA256='88baa1d39a867fdbffe11ee8d79558de125f67ddd2ff22dc1bd057b0f252f6d7';
+const SOURCE=path.join(__dirname,'fixtures/fox_face_v3.js');
 function exportFoxFace(file=SOURCE){
   const source=fs.readFileSync(file,'utf8');
-  if(crypto.createHash('sha256').update(source.replace(/\r\n/g,'\n')).digest('hex')!==SOURCE_LF_SHA256)throw Error('expected v2 29-node authoring fixture');
+  if(crypto.createHash('sha256').update(source.replace(/\r\n/g,'\n')).digest('hex')!==SOURCE_LF_SHA256)throw Error('expected v3 29-node authoring fixture');
   const ctx=vm.createContext({}),provenance=[],handles=[],apertures=[];
   for(const name of ['apps/character/character.js','apps/character/character_blend.js']){
     const code=fs.readFileSync(path.join(ROOT,name),'utf8');

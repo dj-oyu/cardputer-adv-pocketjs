@@ -2,15 +2,14 @@
 'use strict';
 globalThis.FoxFaceModel=(()=>{
   // The upper rim covers part of the globe; the lower opening stays rounded.
-  const eyeXY=new Float32Array([-1,-.25,-.55,-.7,.55,-.7,1,-.25,1,.45,.5,.9,-.5,.9,-1,.45]);
+  const eyeXY=new Float32Array([-1,-.25,-.55,-.7,.55,-.7,1,-.25,1,.4,.5,.76,-.5,.76,-1,.4]);
   function finite(v){if(typeof v!=='number'||!Number.isFinite(v))throw new TypeError('FoxFace: finite value');return v;}
   function unit(v){finite(v);if(v<0||v>1)throw new RangeError('FoxFace: expression 0..1');return v;}
   function create(scene){
     if(typeof scene.aperture!=='function'||typeof scene.handle!=='function')throw new TypeError('FoxFace: native clip scene required');
     const h=[];for(let i=0;i<29;i++)h.push(scene.handle(i));
-    const root=h[0],jaw=h[4],creamFace=h[6],mouth=h[7],lip=h[23],nose=h[24],parts=[],eyes=[],
+    const root=h[0],jaw=h[4],creamFace=h[6],mouth=h[7],lip=h[23],nose=h[24],eyes=[],
       vertices=new Float32Array(24),scratch={position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
-    for(let i=1;i<29;i++)if(i!==4&&i!==9&&i!==16)parts.push(h[i]);
     function pose(handle,x,y,z,rx,ry,rz,sx=1,sy=1,sz=1){
       const p=scratch.position,r=scratch.rotation,s=scratch.scale;
       p[0]=x;p[1]=y;p[2]=z;r[0]=rx;r[1]=ry;r[2]=rz;s[0]=sx;s[1]=sy;s[2]=sz;handle.place(scratch);
@@ -40,8 +39,8 @@ globalThis.FoxFaceModel=(()=>{
         }
         aperture.setVertices(vertices);aperture.setEmpty(closed?'closed':null);
         const arc=Math.max(0,Math.min(1,(smile-.7)/.28)),endpoint=width*8.4,
-          corner=closed?.4:(1-arc)*(-.25*height*9.2-.4*smile)+arc*.4,
-          peak=closed?-2.8:(1-arc)*(-.72*height*9.2-.4*smile)-arc*2.8,z=1.25,
+          corner=closed?.4:(1-arc)*(-.25*height*8.5-.4*smile)+arc*.4,
+          peak=closed?-2.8:(1-arc)*(-.72*height*8.5-.4*smile)-arc*2.8,z=1,
           color=smile>.7?closedColor:openColor;
         if(color!==lastColor){material.color=color;lidLeft.material(material);lidRight.material(material);lastColor=color;}
         lidLeft.visible(true);lidRight.visible(true);
@@ -64,7 +63,7 @@ globalThis.FoxFaceModel=(()=>{
       eyes[0].update(smile,surprise,viewYaw);eyes[1].update(smile,surprise,viewYaw);
     }
     update({});
-    return {root,parts,eyes,nose,jaw,update,eyeClip:true,pointedEar:true,innerEar:true,tongue:false,convexNose:false};
+    return {root,eyes,nose,jaw,update,eyeClip:true,pointedEar:true,innerEar:true,tongue:false,convexNose:false};
   }
   return {create};
 })();

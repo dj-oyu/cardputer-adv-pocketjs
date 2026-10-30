@@ -58,7 +58,7 @@ def main():
         match=re.search(r'FOX_HOST frames=(\d+) pointer_bits=(\d+) peak_requested=(\d+) max_request=(\d+) cap=(\d+) eager_gc=0 full_reference=1 quota=(\d+) allocator=(\d+)',result.stdout)
         metric_names=('frames','pointer_bits','peak_requested','max_request','cap','quota','allocator')
         metrics=dict(zip(metric_names,map(int,match.groups()))) if match else None
-        profile_valid=bool(metrics and metrics['frames']==237 and metrics['pointer_bits']==(32 if args.m32 else 64)
+        profile_valid=bool(metrics and metrics['frames']==243 and metrics['pointer_bits']==(32 if args.m32 else 64)
                            and metrics['cap']==(163840 if args.m32 else 0) and not metrics['quota'] and not metrics['allocator'])
         complete=True;images=[]
         if folder:
@@ -67,8 +67,14 @@ def main():
                 path=folder/f'app_{i:04}.ppm';data=path.read_bytes() if path.exists() else b''
                 complete=complete and data.startswith(header) and len(data)==len(header)+240*135*3
                 images.append(hashlib.sha256(data).hexdigest())
-        runs.append(dict(exit_code=result.returncode,captures_complete=complete,image_sha256=images,metrics=metrics,
-                         passed=result.returncode==0 and 'FOX_HOST_PASS' in result.stdout and complete and profile_valid))
+        phases=[dict(name=m.group(1),**dict(zip(('rounded_request_current','rounded_request_peak_so_far','single_request_max','guest_accounted_current','cap','alloc_calls','alloc_bytes'),map(int,m.groups()[1:]))))
+                for m in re.finditer(r'FOX_PHASE name=(\S+) rounded_request_current=(\d+) rounded_request_peak_so_far=(\d+) single_request_max=(\d+) guest_accounted_current=(\d+) cap=(\d+) alloc_calls=(\d+) alloc_bytes=(\d+)',result.stdout)]
+        phase_valid=sum(p['name']=='released' for p in phases)==6 and sum(p['name']=='recreated' for p in phases)==6
+        account=re.search(r'FOX_ACCOUNTING peak=(\d+) overhead_per_block=(\d+) formula_verified=(\d+) live_blocks=(\d+)',result.stdout)
+        accounting=dict(zip(('peak','overhead_per_block','formula_verified','live_blocks'),map(int,account.groups()))) if account else None
+        account_valid=bool(accounting and accounting['formula_verified']==1 and (not args.m32 or accounting['peak']<=163840))
+        runs.append(dict(exit_code=result.returncode,captures_complete=complete,image_sha256=images,metrics=metrics,phases=phases,accounting=accounting,
+                         passed=result.returncode==0 and 'FOX_HOST_PASS' in result.stdout and complete and profile_valid and phase_valid and account_valid))
     unchanged=inputs()==before
     same_images=runs[0]['image_sha256']==runs[1]['image_sha256'] if args.capture_dir else None
     proof=dict(kind='HOST SIMULATION',device_capture=False,passed=all(r['passed'] for r in runs) and unchanged and same_images is not False,

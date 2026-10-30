@@ -24,8 +24,14 @@
     finite(y,-35,35);finite(p,-10,10);finite(l,-180,180);
     expression=e;yaw=y;pitch=p;lightYaw=l;
   }
+  function release(){
+    if(busy)throw new Error('FoxFaceLab: active');busy=true;
+    try{const oldScene=scene,oldAsset=asset;model=scene=asset=null;
+      try{if(oldScene)oldScene.dispose();}finally{if(oldAsset)oldAsset.dispose();}
+    }finally{busy=false;}
+  }
   // App-owned deterministic comparison input, unrelated to the framework clock.
-  globalThis.FoxFaceLab={select,read(out){
+  globalThis.FoxFaceLab={select,release,read(out){
     if(busy)throw new Error('FoxFaceLab: active');
     if(!out||typeof out!=='object')throw new TypeError('FoxFaceLab: output');
     busy=true;try{out.expression=expression;out.yaw=yaw;out.pitch=pitch;out.lightYaw=lightYaw;out.tick=tick;}finally{busy=false;}
