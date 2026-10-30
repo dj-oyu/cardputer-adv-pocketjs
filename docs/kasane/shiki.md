@@ -159,6 +159,34 @@
 
 **DERBY・MEGADEMO・BIG WAVE で Shiki の native 側が使う量の最大は、まだ誰も記録していない。** まず確保を 1 か所に集めて数える（現在量・最大・最大の 1 個・確保の回数を、上の表の種類ごとに）。その最大で、予算の既定値と、区画にする利益（最大の連続ブロック `lg` とターン内の最小 `mn` がどれだけ戻るか）を判断する。計数は製品 image に残さない（既定 OFF のビルドの選択肢にする）。
 
+### 4.6 ゼロコピーの寿命の規則（計画、2026-10-30 ユーザー合意）
+
+専用ヒープの寿命を制御すれば、**JS アプリ ↔ Shiki の受け渡しと Shiki の内側はゼロコピーにできる**。LCD までの全経路をゼロにするものではない。
+
+**今のコピー（コードで確認）**
+
+| 区間 | 今 | ゼロコピーにする方法 |
+| --- | --- | --- |
+| ① draw の入力（数 8 個） | 呼ぶたびに JS の数を float へ（`draw_impl`） | 入力を Shiki 所有の `Float32Array` に置き、draw がその場で読む |
+| ② 登録の行・点 | JS の配列を 1 要素ずつ読んで native へ（登録時 1 回、`register_impl`・`read_points`） | JS が Shiki のメモリへ直接書き、登録は領域を指すだけにする |
+| ③ 格子の入力 | `run` のたびに 16 B 境界の native 領域へコピー（`profile` の `copyUs`、[grid-js-notation.md](grid-js-notation.md)） | Shiki が 16 B 境界で確保した領域へ JS が直接書く |
+| ④ 式の命令 → エンジン | draw のたびにコピー（`begin_core`） | 描画ごとの無駄の削減（別作業、実装中）で消す |
+| ⑤ エンジンの出力 → フレーム | 作業用フレームに書いてから組み立て中のフレームへ `memcpy`（`draw_run`） | 組み立て中のフレームへ直接書き、失敗したら線分の数を戻す（`pocket_proc_native_rollback` がすでにある）。作業用フレームの 10,246 B も不要になりうるが、今は画像モードの画素キャッシュと共用（`proc_workspace`）なので、その置き場所を先に決める |
+| ⑥ フレーム → LCD | 帯へラスタ化 → バイトを入れ替えて転送用バッファへ → DMA | 消さない。ラスタ化と形式の変換で、コピーではない（[README](README.md) の「全経路 1 copy 以下は必須目標にしない」） |
+
+**規則**
+
+1. **呼び出しの中だけなら、ゲストのメモリを借りてよい。** `pocket.derby` と `pocket_pixel.c` は今も JS の型付き配列をその場で読む。同期の呼び出しの中で読み終えるなら安全。**Shiki は戻った後にゲストのポインタを持たない。**
+2. **呼び出しをまたぐメモリは Shiki が持ち、JS には窓として見せる。** QuickJS-ng の `JS_NewArrayBuffer(ctx, buf, len, free_func, opaque, …)` で、Shiki のヒープ上のメモリを ArrayBuffer として渡す。外部メモリは JS の確保量の上限（`JS_SetMemoryLimit`）に数えられない見込みで、Shiki の予算で管理する（**数えられないことは未確認**）。
+3. **解放は持ち主が 2 人とも手放してから。** `free_func` は「JS が手放した」という合図にとどめ、その時点では解放しない。Shiki の登録も外れて初めて解放する。JS の `buf.transfer()` は元の ArrayBuffer を detach し、`free_func` をすぐ呼ぶ（`components/quickjs-ng/quickjs-ng/quickjs.c` の `JS_DetachArrayBuffer`）ので、登録中の式のメモリが消えうる。逆に `unregister` では Shiki から `JS_DetachArrayBuffer` を呼び、古い窓を長さ 0 にする（解放済みのメモリへの読み書きにならない）。
+4. **Shiki がデータを読むのは draw／run の中だけ。** 描画タスクは 1 つで draw は同期なので、JS の書き込みと Shiki の読み込みは重ならない。後の段階（commit 後の帯の描画など）でデータを読むなら、その時点で値を固める（コピーか 2 面）必要があり、ゼロコピーではなくなる。結果はフレームが持つ形を保つ。
+
+**セッションの終了の順番**: ゲストを先に壊し（ここで `free_func` が呼ばれ切る）、Shiki の区画をその後に丸ごと捨てる。CLAUDE.md の「ゲストのコールバックを保持するモジュールはゲストより先に reset」とは逆向きの順序になるので、実装時に `app_stop()` へ明記する。
+
+**効き目（見込み）**: `memcpy` 自体は数百 B で小さい。大きいのは JS 側で配列を作る費用（入力の配列 23 µs、配列の読み 2.75 µs／要素、実測、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）が消えることと、データ領域を式から読めれば 1 回の draw で列を回せて draw の回数が減ること（§3 の 1）。
+
+**確かめること**: 外部 ArrayBuffer が `JS_SetMemoryLimit` の計数に入らないこと、`transfer()`・`structuredClone` 相当で外部 ArrayBuffer がどう扱われるか（コピーか、detach だけか）、ガベージコレクタが `free_func` を呼ぶ時期。いずれも host の試験で先に見る。
+
 ## 5. 次の作業
 
 0. **Shiki の native 側のメモリを実機で数える**（§4.5）。専用ヒープの予算と利益の判断材料。
