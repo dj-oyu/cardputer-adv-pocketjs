@@ -230,6 +230,7 @@ static JSValue js_ayatsuri_follow_create(JSContext *ctx,JSValueConst self,int ar
         for(unsigned i=0;i<6;++i)if(!isfinite(candidate.initial[i]))return invalid(ctx,op,"finite initial q/v/goal required");
     }else return invalid(ctx,op,"expected follow description or config/initial Float32 packets");
     status=ayatsuri_follow_prepare(&raw,&candidate.coeff);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported follow coefficients: condition must be <= 1000000");
     if(status!=AYATSURI_OK)return managed_follow_error(ctx,op,status);
     memcpy(&candidate.state,candidate.initial,16);memcpy(&candidate.goal,candidate.initial+4,8);
     if(!managed_follow_class_ready(ctx,false))return JS_HasException(ctx)?JS_EXCEPTION:JS_ThrowOutOfMemory(ctx);

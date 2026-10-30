@@ -104,6 +104,85 @@ static double energy(const ayatsuri_follow_config *c,const ayatsuri_follow_state
     return .5*(c->inertia[0]*v0*v0+c->inertia[1]*v1*v1+
         c->stiffness[0]*q0*q0+c->stiffness[1]*q1*q1+c->coupling_stiffness*delta*delta);
 }
+
+/* Independent binary64 reference with non-cancelling determinant and expanded
+ * A^-1 K terms; used only to probe the newly declared conditioning boundary. */
+static void stable_reference_step(const ayatsuri_follow_config *c,double s[4]){
+    const double h=AYATSURI_FOLLOW_DT,i0=c->inertia[0],i1=c->inertia[1],
+      k0=c->stiffness[0],k1=c->stiffness[1],c0=c->damping[0],c1=c->damping[1],
+      kc=c->coupling_stiffness,cc=c->coupling_damping,
+      d0=i0+h*c0+h*h*k0,d1=i1+h*c1+h*h*k1,u=h*cc+h*h*kc,
+      determinant=d0*d1+u*(d0+d1),
+      b00=(d1+u)*i0/determinant,b01=u*i1/determinant,
+      b10=u*i0/determinant,b11=(d0+u)*i1/determinant,
+      f00=h*((d1+u)*k0+d1*kc)/determinant,
+      f01=h*(h*cc*k1-(i1+h*c1)*kc)/determinant,
+      f10=h*(h*cc*k0-(i0+h*c0)*kc)/determinant,
+      f11=h*((d0+u)*k1+d0*kc)/determinant,
+      v0=b00*s[2]+b01*s[3]-f00*s[0]-f01*s[1],
+      v1=b10*s[2]+b11*s[3]-f10*s[0]-f11*s[1];
+    s[0]+=h*v0;s[1]+=h*v1;s[2]=v0;s[3]=v1;
+}
+static void conditioning_boundary(void){
+    ayatsuri_follow_config raw={{1,1},{0,0},{0,0},0,0};
+    ayatsuri_follow_coeff c;CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_OK);
+    const ayatsuri_follow_coeff unchanged=c;
+    ayatsuri_follow_state state={{0,0},{1,1}},prior=state;
+    const ayatsuri_follow_goal goal={{0,0}};
+    const float rejected_couplings[3]={1e18f,1.8e9f,FLT_MAX};
+    for(unsigned i=0;i<3;++i){
+        raw.coupling_stiffness=rejected_couplings[i];
+        CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_RANGE);
+        CHECK(!memcmp(&c,&unchanged,sizeof c)&&!memcmp(&state,&prior,sizeof state));
+    }
+    raw.coupling_stiffness=0;raw.coupling_damping=1e18f;
+    CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_RANGE&&!memcmp(&c,&unchanged,sizeof c));
+    raw.coupling_damping=0;raw.inertia[0]=1e-20f;raw.inertia[1]=1e20f;
+    CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_RANGE&&!memcmp(&c,&unchanged,sizeof c));
+    raw=(ayatsuri_follow_config){{1,1},{0,0},{0,0},0,0};
+    CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_OK);
+    CHECK(ayatsuri_follow_step(&c,&goal,NULL,&state)==AYATSURI_OK&&state.v[0]==1&&state.v[1]==1);
+    /* Adjacent binary32 stiffness values straddle kappa=1e6 for I0=I1=1.
+     * The rejected value's kappa is 1000000.0044..., not rounded to 1e6. */
+    const float above=(float)((AYATSURI_FOLLOW_MAX_CONDITION-1)/(2*AYATSURI_FOLLOW_DT*AYATSURI_FOLLOW_DT)),
+      below=nextafterf(above,0);
+    raw.coupling_stiffness=above;c=unchanged;
+    CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_RANGE&&!memcmp(&c,&unchanged,sizeof c));
+    raw.coupling_stiffness=below;
+    CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_OK);
+    state=prior;
+    for(unsigned tick=0;tick<1200;++tick){
+        CHECK(ayatsuri_follow_step(&c,&goal,NULL,&state)==AYATSURI_OK);
+        CHECK(state.v[0]==1&&state.v[1]==1&&state.q[0]==state.q[1]);
+        CHECK(energy(&raw,&state)==1);
+    }
+    CHECK(fabs(state.q[0]-20)<1e-3);
+    /* Unequal anchored stiffness/damping close to the same limit exercises
+     * restoring coefficients, not merely the B common-velocity eigenmode. */
+    raw=(ayatsuri_follow_config){{1,2},{3,7},{.2f,.5f},2.6e9f,.1f};
+    CHECK(ayatsuri_follow_prepare(&raw,&c)==AYATSURI_OK);
+    double maximum_q_error=0,maximum_v_error=0,maximum_single_q=0,maximum_single_v=0;
+    for(unsigned run=0;run<2;++run){
+        state=(ayatsuri_follow_state){{run?1:.2f,run?1:.2f},{run?0:.1f,run?0:-.2f}};
+        double reference[4]={state.q[0],state.q[1],state.v[0],state.v[1]},previous=energy(&raw,&state);
+        for(unsigned tick=0;tick<1200;++tick){
+            double single[4]={state.q[0],state.q[1],state.v[0],state.v[1]};
+            stable_reference_step(&raw,single);stable_reference_step(&raw,reference);
+            CHECK(ayatsuri_follow_step(&c,&goal,NULL,&state)==AYATSURI_OK);
+            maximum_q_error=fmax(maximum_q_error,fmax(fabs(state.q[0]-reference[0]),fabs(state.q[1]-reference[1])));
+            maximum_v_error=fmax(maximum_v_error,fmax(fabs(state.v[0]-reference[2]),fabs(state.v[1]-reference[3])));
+            maximum_single_q=fmax(maximum_single_q,fmax(fabs(state.q[0]-single[0]),fabs(state.q[1]-single[1])));
+            maximum_single_v=fmax(maximum_single_v,fmax(fabs(state.v[0]-single[2]),fabs(state.v[1]-single[3])));
+            const double current=energy(&raw,&state);
+            CHECK(current<=previous+1e-5);previous=current;
+            CHECK(fabs(state.q[0])<=1.01&&fabs(state.q[1])<=1.01&&fabs(state.v[0])<3&&fabs(state.v[1])<3);
+        }
+    }
+    CHECK(maximum_q_error<1e-5&&maximum_v_error<1e-5&&maximum_single_q<1e-6&&maximum_single_v<1e-6);
+    fprintf(stderr,"FOLLOW_CONDITION_BOUNDARY max_kappa=1000000 adjacent_accept_kc=%.9g adjacent_reject_kc=%.9g common_v1200=1 energy1200=1 unequal_q_error=%.9g unequal_v_error=%.9g single_q_error=%.9g single_v_error=%.9g\n",
+      below,above,maximum_q_error,maximum_v_error,maximum_single_q,maximum_single_v);
+}
+
 static void numerical_probes(void){
     const double pi=3.141592653589793;
     for(unsigned kind=0;kind<2;++kind)for(unsigned heavy=0;heavy<2;++heavy){
@@ -197,11 +276,31 @@ static void vectors(void){
         separator();printf("{\"op\":\"drive\",\"phase\":[%u,%u,%u],\"increment\":[%u,%u,%u],\"expectedPhase\":[%u,%u,%u],\"expected\":[%.9g],\"status\":\"OK\"}",
             prior[0],prior[1],prior[2],inc[0],inc[1],inc[2],phase[0],phase[1],phase[2],sample);
     }
+
+    const ayatsuri_follow_config boundary_configs[]={
+      {{1,1},{0,0},{0,0},1e18f,0},{{1,1},{0,0},{0,0},1.8e9f,0},
+      {{1e-20f,1e20f},{0,0},{0,0},0,0},{{1,1},{0,0},{0,0},0,1e18f},
+      {{1,1},{0,0},{0,0},1.7e9f,0},{{1,2},{3,7},{.2f,.5f},2.6e9f,.1f}};
+    for(unsigned i=0;i<sizeof boundary_configs/sizeof boundary_configs[0];++i){
+        float raw[8];memcpy(raw,&boundary_configs[i],sizeof raw);
+        ayatsuri_follow_coeff c;const ayatsuri_status code=ayatsuri_follow_prepare(&boundary_configs[i],&c);
+        CHECK(code==(i<4?AYATSURI_RANGE:AYATSURI_OK));
+        separator();printf("{\"op\":\"prepare\",\"config\":");floats(raw,8);
+        if(code==AYATSURI_OK){double prepared[14];memcpy(prepared,&c,sizeof c);printf(",\"expected\":");doubles(prepared,14);}
+        printf(",\"status\":\"%s\"}",status(code));
+        if(code==AYATSURI_OK){
+            ayatsuri_follow_state s={{1,1},{1,1}};const ayatsuri_follow_goal goal={{0,0}};const float force[2]={0,0};
+            CHECK(ayatsuri_follow_step(&c,&goal,force,&s)==AYATSURI_OK);float after[4];state_array(&s,after);
+            separator();printf("{\"op\":\"step\",\"config\":");floats(raw,8);
+            printf(",\"state\":[1,1,1,1],\"goal\":[0,0],\"force\":[0,0],\"expected\":");floats(after,4);
+            printf(",\"status\":\"OK\"}");
+        }
+    }
     puts("]");
 }
 
 int main(int argc,char **argv){
-    contracts();numerical_probes();
+    contracts();conditioning_boundary();numerical_probes();
     if(argc>1&&!strcmp(argv[1],"--json"))vectors();
     fprintf(stderr,"AYATSURI_FOLLOW_%s checks=%u allocations=%u vectors=%u config=%zu prepared=%zu state=%zu\n",
         failures?"FAIL":"PASS",checks,allocations,json_records,sizeof(ayatsuri_follow_config),sizeof(ayatsuri_follow_coefficients),sizeof(ayatsuri_follow_state));

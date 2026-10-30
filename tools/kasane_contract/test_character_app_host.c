@@ -49,6 +49,14 @@ static bool core_transform_contract(void){
       "const driver=C.driveCreate(42),ds={phases:new Uint32Array(3),increments:new Uint32Array(3)};driver.snapshot(ds);"
       "if(ds.phases[0]!==1083814273||ds.phases[1]!==378494188||ds.phases[2]!==2479403867)throw Error('managed seed');"
       "driver.step();driver.reset();driver.snapshot(ds);if(ds.phases[0]!==1083814273)throw Error('managed phase reset');"
+      "const wide=new Float32Array([1,1,0,0,0,0,1e18,0]),sentinel=new Float64Array(14);sentinel.fill(37);"
+      "let bounded=false;try{C.followPrepare(wide,sentinel)}catch(e){bounded=e.code==='LIMIT_EXCEEDED'}"
+      "if(!bounded)throw Error('condition rejection missing');for(let i=0;i<14;i++)if(sentinel[i]!==37)throw Error('condition partial prepare');"
+      "actor.sample(view);const oldState=new Float32Array([view.position[0],view.position[1],view.velocity[0],view.velocity[1]]);"
+      "bounded=false;try{C.followCreate({inertia:[1,1],stiffness:[0,0],damping:[0,0],couplingStiffness:1e18})}catch(e){bounded=e.code==='LIMIT_EXCEEDED'}"
+      "if(!bounded)throw Error('managed condition rejection missing');actor.sample(view);"
+      "if(view.position[0]!==oldState[0]||view.position[1]!==oldState[1]||view.velocity[0]!==oldState[2]||view.velocity[1]!==oldState[3])throw Error('condition damaged existing actor');"
+      "C.followPrepare(c,sentinel);actor.step(f);"
       "})();delete globalThis.__coreAlloc;";
     const bool ok=eval(script,strlen(script),"core-contract.js");
     printf("AYATSURI_CORE warm_compose_calls=1000 warm_packed_compose_calls=1000 warm_follow_calls=1200 warm_drive_calls=1200 warm_managed_pipelines=1200 last_guest_alloc_calls=%llu FLT_EVAL_METHOD=%d %s\n",

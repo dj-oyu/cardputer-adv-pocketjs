@@ -212,7 +212,7 @@ static JSValue js_ayatsuri_follow_prepare(JSContext *ctx,JSValueConst self,int a
     ayatsuri_follow_config config;ayatsuri_follow_coeff prepared;
     memcpy(&config,input.data,sizeof config);
     const ayatsuri_status status=ayatsuri_follow_prepare(&config,&prepared);
-    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"follow coefficient range");
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported follow coefficients: condition must be <= 1000000");
     if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow coefficients");
     memcpy(output.data,&prepared,sizeof prepared);return JS_UNDEFINED;
 }

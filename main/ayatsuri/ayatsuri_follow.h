@@ -19,9 +19,15 @@
  * synchronously borrowed; caller prevents concurrent writes. Prepared
  * coefficients are caller-owned and immutable between prepare and step.
  * Every failure leaves output/state unchanged; in-place state is supported.
+ * Preparation supports only kappa-infinity(A) <= 1e6. This conservative
+ * numerical domain leaves kappa*epsilon64 <= 2.23e-10, well below binary32
+ * unit roundoff (about 5.96e-8), with headroom for the coefficient arithmetic.
+ * It is not a proof of energy monotonicity for every finite state or forcing.
+ * Outside that domain preparation returns RANGE without publishing output.
  * Retarget changes only goal: neither q nor v resets. J is generalized impulse,
  * applied as v += J/I. There is no automatic settling or clamping of state. */
 #define AYATSURI_FOLLOW_DT (1.0 / 60.0)
+#define AYATSURI_FOLLOW_MAX_CONDITION 1000000.0
 
 typedef struct {
     float inertia[2], stiffness[2], damping[2];
@@ -66,8 +72,18 @@ static inline ayatsuri_status ayatsuri_follow_prepare(
     if(!isfinite(c->coupling_stiffness)||c->coupling_stiffness<0||
        !isfinite(c->coupling_damping)||c->coupling_damping<0)return AYATSURI_INVALID;
     const double h=AYATSURI_FOLLOW_DT,i0=c->inertia[0],i1=c->inertia[1],
-        kc=c->coupling_stiffness,cc=c->coupling_damping,
-        k00=(double)c->stiffness[0]+kc,k01=-kc,k11=(double)c->stiffness[1]+kc,
+        kc=c->coupling_stiffness,cc=c->coupling_damping;
+    /* A=[[d0+u,-u],[-u,d1+u]]. All determinant terms below are
+     * nonnegative, so the condition check does not subtract nearly equal
+     * products. ||A||inf=||adj(A)||inf=max(d0,d1)+2u. Keep the existing
+     * coefficient expression order after this gate for accepted inputs. */
+    const double d0=i0+h*c->damping[0]+h*h*c->stiffness[0],
+        d1=i1+h*c->damping[1]+h*h*c->stiffness[1],u=h*cc+h*h*kc,
+        stable_determinant=d0*d1+u*(d0+d1),norm=fmax(d0,d1)+2*u,
+        condition=norm*norm/stable_determinant;
+    if(!isfinite(stable_determinant)||stable_determinant<=0||!isfinite(condition)||
+       condition>AYATSURI_FOLLOW_MAX_CONDITION)return AYATSURI_RANGE;
+    const double k00=(double)c->stiffness[0]+kc,k01=-kc,k11=(double)c->stiffness[1]+kc,
         a00=i0+h*((double)c->damping[0]+cc)+h*h*k00,
         a01=-h*cc-h*h*kc,a11=i1+h*((double)c->damping[1]+cc)+h*h*k11,
         determinant=a00*a11-a01*a01;

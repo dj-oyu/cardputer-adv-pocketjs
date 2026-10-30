@@ -12,7 +12,12 @@ const backend={
   followPrepare(c,out){
     valid(c,8);if(c[0]<=0||c[1]<=0)error('INVALID');
     for(let i=2;i<8;i++)if(c[i]<0)error('INVALID');
-    const i0=c[0],i1=c[1],kc=c[6],cc=c[7],k00=c[2]+kc,k01=-kc,k11=c[3]+kc,
+    const i0=c[0],i1=c[1],kc=c[6],cc=c[7],
+      d0=i0+h*c[4]+h*h*c[2],d1=i1+h*c[5]+h*h*c[3],u=h*cc+h*h*kc,
+      stableDet=d0*d1+u*(d0+d1),s=Math.max(d0,d1)+2*u,condition=s*s/stableDet;
+    if(!Number.isFinite(stableDet)||stableDet<=0||!Number.isFinite(s)||
+        !Number.isFinite(condition)||condition>1e6)error('RANGE');
+    const k00=c[2]+kc,k01=-kc,k11=c[3]+kc,
       a00=i0+h*(c[4]+cc)+h*h*k00,a01=-h*cc-h*h*kc,a11=i1+h*(c[5]+cc)+h*h*k11,
       det=a00*a11-a01*a01;
     if(!Number.isFinite(det)||det<=0)error('RANGE');
@@ -66,6 +71,38 @@ function run(){
   for(const key of ['position','velocity','goal'])for(const invalid of [null,false,NaN,[0],[0,Infinity]])
     assert.throws(()=>make({...desc,[key]:invalid}),/two components|finite Float32/);
   const actor=make(),start=read(actor),target=new Float32Array([.15,.15]);
+  // Conservative supported-condition boundary, matched to the C preparation
+  // guard. Rejected preparation must not overwrite the last valid coefficients.
+  const prepared=new Float64Array(14),normalConfig=new Float32Array([1,1.6,56,0,10,0,128,16]);
+  backend.followPrepare(normalConfig,prepared);
+  const preparedBefore=Array.from(prepared),stableState=new Float32Array([.1,-.2,.3,-.4]),
+    stateBefore=Array.from(stableState),stableGoal=new Float32Array([.2,.2]),zero=new Float32Array(2);
+  const rejectedConfigs=[
+    new Float32Array([1,1,0,0,0,0,1e18,0]),
+    new Float32Array([1e-20,1e20,0,0,0,0,0,0]),
+    new Float32Array([1,1,0,0,0,0,1.8e9,0]),
+    new Float32Array([1,1,0,0,0,0,0,1e18])
+  ];
+  for(const config of rejectedConfigs){
+    assert.throws(()=>backend.followPrepare(config,prepared),e=>e.code==='RANGE');
+    assert.deepEqual(Array.from(prepared),preparedBefore,'condition rejection preserves prepared output');
+    assert.deepEqual(Array.from(stableState),stateBefore,'preparation never changes a running state');
+  }
+  const expectedRecovery=stableState.slice();
+  backend.followStep(new Float64Array(preparedBefore),expectedRecovery,stableGoal,zero);
+  backend.followStep(prepared,stableState,stableGoal,zero);
+  assert.deepEqual(stableState,expectedRecovery,'prior valid coefficients remain usable after rejected prepare');
+  const boundedConfig=new Float32Array([1,1,0,0,0,0,1.7e9,0]),boundedPrepared=new Float64Array(14),
+    commonMode=new Float32Array([0,0,1,1]);
+  backend.followPrepare(boundedConfig,boundedPrepared);
+  backend.followStep(boundedPrepared,commonMode,zero,zero);
+  assert.deepEqual(Array.from(commonMode),[Math.fround(1/60),Math.fround(1/60),1,1],
+    'supported high coupling preserves common-mode velocity');
+  for(const bad of [rejectedConfigs[0],rejectedConfigs[1]]){
+    assert.throws(()=>make({inertia:[bad[0],bad[1]],stiffness:[bad[2],bad[3]],damping:[bad[4],bad[5]],
+      couplingStiffness:bad[6],couplingDamping:bad[7]}),e=>e.code==='RANGE');
+    assert.deepEqual(read(actor),start,'rejected factory cannot corrupt an existing follower');
+  }
   const sharingProbe=make();
   for(const method of ['retarget','impulse','step','sample','reset'])assert.equal(actor[method],sharingProbe[method]);
   assert.ok(!Object.values(actor).some(value=>typeof value==='function'),'no per-instance method closures');

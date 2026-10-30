@@ -12,7 +12,7 @@
 - 顔: 大きな瞳、実際の照明へ応答する瞳のツヤ、眉、広がる口/舌/頬。表情と瞬き、視線を別入力で合成し、顔と手を胴体の伸縮から独立させる。
 - 材質: 高明度白、青い環境光、世界の直接光と透過近似を分離。固定した照明textureや時間brightnessで代用しない。
 - 手/彩雲: 手を身体から離し、彩雲も独立したworld配置にして空隙を保つ。中心と端で異なる変形を与える。
-- 動き: 視線先行、予備squash、非対称の傾き/重心移動、手と彩雲の遅れ、上昇/open mouth、減衰settle。呼吸OFFでは8秒以後に完全停止し、seek順に依存しない。
+- 動き: 視線先行、予備squash、非対称の傾き/重心移動、手と彩雲の遅れ、上昇/open mouth。現在のBODYは保持目標へ4組の動的追従を行い、呼吸OFFでは漸近的に収束する。8秒でstateをsnapして完全停止させる契約ではない。
 
 8個までのlobeを使う[汎用前面ブレンド](../../docs/api/blended-surfaces.md)は雲専用rendererではない。薄い縁や複雑な内部密度、体積散乱、設定図の絵のような細かなfluffまでは再現していない。改善前後の画像を比較して調整中で、目標品質の受入済みとはしない。
 
@@ -25,11 +25,13 @@
 ```sh
 # 固定入力4枚（HOST SIMULATION）
 python3 tools/kasane_contract/run_character_app_host.py --cloud --capture-dir .cache/cloud-capture
-# 1体×6modeの1806frame、通常再生のhost資源門
+# 1体×6modeの1806frame＋駆動ON363frame、host資源門
 CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
 ```
 
 診断seek/pause/stepは既存labと同じ明示ロード入口。captureとapp_sessionの正式API同時利用は未対応のままで、host画像を実機LCD画像と混同しない。実機候補は同head CI/製品リンク/hostを確認したSHAで引き渡す。今回の新しい実機書換えは未実施。
+
+動的核の[契約](../../docs/api/ayatsuri-follow-core.md)と[容量/数値検証](../../docs/perf/dynamic-follow-integration.md)を参照。clockは引き続きapp所有で、描画再試行の同時刻ではq/v/位相を進めない。大きなseekは1200 step以内のreplay。外乱/status/resetの詳細診断はactor生成前に`dynamic_debug`を明示ロードし、通常起動ではロードしない。顔や補助形状の解析的表現は残り、全演技の動的化や一般IKの完成ではない。
 
 [顔比率保持と彩雲の次段改善・3512529との比較](../../docs/perf/cloud-quality-v2.md)も参照。
 
