@@ -1,5 +1,18 @@
 # CLOUD ACT: 顔の比率を保つ胴体変形
 
+## 固定候補32a3336の公開CI・実機機能smoke
+
+対象は`32a333698b98db490adbd63644b010d3dab5b2d0`。[同headの72 CI成功](https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/41025820980)と製品リンクを確認。以下は2026-10-30に実機担当から受領した結果で、本記録の編集担当が再flashした測定ではない。後続の陰影修正候補`9e1e6118ead2894f12fe1fbce101f5a8bf5ba060`の実機結果ではない。
+
+build `hone110-build-32-approved-20261030`、flash `hone110-flow-flash-32-approved-20261030`は08:52:24成功、3領域readback。実機buildのBIN SHA256 `424d8a2dd20811044c2d2cf87142ea4adacf8ded5bd7a3c37f060d78de9119f8`、ELF `6e042b70f99461283228004dbdcc8b520670fab3f07639cda0e248ee8fa62e2c`、receipt `87c6647e803dd25aa6aa061671e70915624fa62b63e9dc1f322210496c3b0f10`。CI取得binとはbuild条件/成果物の識別が異なるため、hashを同一としない。
+
+- `hone110-cloud-32-fresh-20261030`: 約73秒、6mode/reset/呼吸/STOP/CLOSE成功。
+- `hone110-character-32-switch-20261030`: 人→狐→雲の切替成功。
+- `hone110-megademo-32-smoke-20261030`: 60秒、WAKE間34.409秒。
+- `hone110-home-hello-32-20261030`: HELLO後HOME_READY。終了時fresh HOME、owner/job/queue/sessionなし、uncertainty=false。
+
+初回app admissionの`catalog_changed`はOPEN/START未送信を確認し、新bootに一致するfresh catalogで回復した。cloud終了時native free207800 B、largest69632 B、JS0。30-frame集計8窓のrender値は17.06–111.63 msで、個別frame最大/JS時間/FPS/実行中最小freeへ読み替えない。実画面captureと物理LCD画質は未確認。この結果を前候補3512529や後続9e1e611の実測と混ぜない。
+
 2026-10-30。比較元は実機機能smoke済みの`3512529b6f47a609b8041833f9c7e8e0bccb6ccc`。[前候補のCI/実機記録](cloud-quality-v1.md)はそのSHAの結果として保持する。本変更の実機書換えは行っていない。
 
 ## 同条件の視覚比較 — HOST SIMULATION
