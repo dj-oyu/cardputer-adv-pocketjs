@@ -3,6 +3,33 @@
 #define main fixture_megademo_main
 #include "test_megademo_app_host.c"
 #undef main
+#include <float.h>
+
+static unsigned long long core_alloc_start,core_loop_alloc_calls;
+static JSValue js_core_alloc_checkpoint(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argv;
+    if(!argc)core_alloc_start=alloc_calls;
+    else{
+        core_loop_alloc_calls=alloc_calls-core_alloc_start;
+        if(core_loop_alloc_calls)return JS_ThrowInternalError(c,"compose loop allocated guest memory");
+    }
+    return JS_UNDEFINED;
+}
+
+static bool core_transform_contract(void){
+    const char *script=
+      "(()=>{const C=pocket.ayatsuri,p=new Float32Array([1,2,3,0,0,0,1,1,1]),o=new Float32Array(12);"
+      "C.compose(p,null,o);__coreAlloc();for(let i=0;i<1000;i++)C.compose(p,null,o);__coreAlloc(1);"
+      "for(let i=0;i<12;i++)o[i]=37;p[6]=0;let caught=false;"
+      "try{C.compose(p,null,o)}catch(e){if(e.code!=='INVALID_ARGUMENT')throw e;caught=true}"
+      "if(!caught)throw Error('core failure missing');for(let i=0;i<12;i++)if(o[i]!==37)throw Error('core failure changed output');"
+      "p[6]=1;C.compose(p,null,o);if(o[3]!==1||o[7]!==2||o[11]!==3)throw Error('core recovery');"
+      "})();delete globalThis.__coreAlloc;";
+    const bool ok=eval(script,strlen(script),"core-contract.js");
+    printf("AYATSURI_CORE warm_compose_calls=1000 guest_alloc_calls=%llu FLT_EVAL_METHOD=%d %s\n",
+           core_loop_alloc_calls,FLT_EVAL_METHOD,ok?"PASS":"FAIL");
+    return ok;
+}
 
 static unsigned failure_strip;
 static ksn_result fail_second_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pixels){
@@ -80,25 +107,29 @@ static bool primitive_contract(void){
 static bool native_range_contract(void){
     const char *setup=
       "globalThis.__rangeTest=(()=>{"
-      "const H=pocket.kasane.procedural;let scene,part;"
+      "const H=pocket.kasane.procedural;let scene,part,group;"
       "return {bad:(kind)=>{"
       "scene=Ayatsuri.scene({backend:pocket.hone});"
-      "part=scene.add({name:'range',geometry:{kind:'ellipsoid',radii:[8,8,8]},"
+      "group=kind===5?scene.add({name:'parent',geometry:null,scale:[1e30,1e30,1e30]}):null;"
+      "part=scene.add({name:'range',parent:group,geometry:{kind:'ellipsoid',radii:[8,8,8]},"
       "material:{color:0x44aa55,ambient:1,diffuse:0},"
       "pattern:kind===4?{kind:'checker',color:0xffffff,repeats:1e308}:undefined});"
       "if(kind===0||kind===2)scene.camera({zoom:kind===0?1e4:1e38});"
       "if(kind===1||kind===3){const scale=kind===1?1e4:1e38;part.place({scale:[scale,scale,scale]})}"
-      "scene.evaluate(0);H.beginFrame(0);"
-      "try{scene.render()}catch(e){if(e.code==='INVALID_ARGUMENT')return;throw e}"
+      "if(kind===5)part.place({scale:[1e30,1e30,1e30]});"
+      "try{scene.evaluate(0);H.beginFrame(0);scene.render()}catch(e){"
+      "if(e.code!==(kind===5?'LIMIT_EXCEEDED':'INVALID_ARGUMENT'))throw e;"
+      "if(kind===5){try{scene.render()}catch(reentry){return}throw Error('failed core was renderable')}return}"
       "throw Error('native accepted oversized packet');"
       "},good:()=>{"
       "scene.camera({zoom:1});part.place({scale:[1,1,1]});"
+      "if(group)group.place({scale:[1,1,1]});"
       "part.texture({scale:[0,0],offset:[-.5,-.5]});"
       "scene.evaluate(0);H.beginFrame(0);scene.render();H.commit();scene.dispose();"
       "}}})();";
     if(!eval(setup,strlen(setup),"native-range.js"))return false;
     static uint16_t previous[240*135];
-    for(unsigned kind=0;kind<5;++kind){
+    for(unsigned kind=0;kind<6;++kind){
         memcpy(previous,panel,sizeof previous);
         char call[40];snprintf(call,sizeof call,"__rangeTest.bad(%u)",kind);
         if(!eval(call,strlen(call),"native-range.js"))return false;
@@ -126,9 +157,11 @@ int main(int argc,char **argv){
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));JS_FreeValue(ctx,g);
+    g=JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx,g,"__coreAlloc",JS_NewCFunction(ctx,js_core_alloc_checkpoint,"checkpoint",1));JS_FreeValue(ctx,g);
     if(setenv("MEGA_CHUNKS","apps/character/chunks.txt",1))return 2;
     read_chunks();
-    bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract();
+    bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract()&&core_transform_contract();
     JS_RunGC(rt);peak_bytes=cur_bytes;largest_guest_request=0;
     ok=ok&&eval(src,n,path);
     size_t compile_peak=peak_bytes,load_request=largest_guest_request,live_max=0;unsigned frames=0;
@@ -186,7 +219,7 @@ int main(int argc,char **argv){
     if(ok){
         JS_SetMemoryLimit(rt,(size_t)-1);
         ok=native_range_contract();
-        printf("CHARACTER_NATIVE native_range_failure_recovery=%s cases=5 cap=unlimited\n",ok?"PASS":"FAIL");
+        printf("CHARACTER_NATIVE native_range_failure_recovery=%s cases=6 cap=unlimited\n",ok?"PASS":"FAIL");
     }
     ok=ok&&!exceptions&&!present_failures;
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);

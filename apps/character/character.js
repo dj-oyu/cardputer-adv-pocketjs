@@ -24,24 +24,6 @@ globalThis.Ayatsuri = (() => {
     if (target[index] === value) return false;
     target[index] = value; return true;
   }
-  function compose(out, pose, parent) {
-    const x = pose[3], y = pose[4], z = pose[5], cx = Math.cos(x), sx = Math.sin(x),
-      cy = Math.cos(y), sy = Math.sin(y), cz = Math.cos(z), sz = Math.sin(z);
-    const a = cz * cy * pose[6], b = (cz * sy * sx - sz * cx) * pose[7], c = (cz * sy * cx + sz * sx) * pose[8],
-      d = sz * cy * pose[6], e = (sz * sy * sx + cz * cx) * pose[7], f = (sz * sy * cx - cz * sx) * pose[8],
-      g = -sy * pose[6], h = cy * sx * pose[7], j = cy * cx * pose[8];
-    if (!parent) {
-      out[0] = a; out[1] = b; out[2] = c; out[3] = pose[0];
-      out[4] = d; out[5] = e; out[6] = f; out[7] = pose[1];
-      out[8] = g; out[9] = h; out[10] = j; out[11] = pose[2];
-    } else for (let k = 0; k < 12; k += 4) {
-      out[k] = parent[k] * a + parent[k + 1] * d + parent[k + 2] * g;
-      out[k + 1] = parent[k] * b + parent[k + 1] * e + parent[k + 2] * h;
-      out[k + 2] = parent[k] * c + parent[k + 1] * f + parent[k + 2] * j;
-      out[k + 3] = parent[k] * pose[0] + parent[k + 1] * pose[1] + parent[k + 2] * pose[2] + parent[k + 3];
-    }
-    for (let i = 0; i < 12; ++i) if (out[i] - out[i] !== 0) fail('transform overflow');
-  }
   function geometry(def, storage) {
     if (!def) return null;
     if (def.kind !== 'ellipsoid') fail('geometry must be ellipsoid or null');
@@ -111,7 +93,8 @@ globalThis.Ayatsuri = (() => {
   const HandlePrototype = {place, material, texture, visible};
   function scene(options) {
     options = options || {};
-    const backend = options.backend || (typeof pocket !== 'undefined' ? pocket.hone : null), objects = [],
+    const backend = options.backend || (typeof pocket !== 'undefined' ? pocket.hone : null),
+      evaluator = options.evaluator || (typeof pocket !== 'undefined' ? pocket.ayatsuri : null), objects = [],
       lightState = new Float32Array([-0.5, -0.4, 0.8, 1, 1, 1]),
       cameraState = new Float32Array([0, 0, 400, 0, 0, 0, 1, 120, 75]),
       lighting = new Float32Array(9),
@@ -120,6 +103,7 @@ globalThis.Ayatsuri = (() => {
         shadeUpdates: 0, shadeSamples: 0, analyticUpdates: 0, renderedFaces: 0, renderedPatches: 0, copiedBytes: 0,
         typedBytes: lightState.byteLength + cameraState.byteLength + lighting.byteLength + right.byteLength + down.byteLength + forward.byteLength};
     if (!backend || typeof backend.ellipsoid !== 'function') fail('analytic hone backend required');
+    if (!evaluator || typeof evaluator.compose !== 'function') fail('shared ayatsuri evaluator required');
     const owner = {disposed: false, busy: false, dirty: true};
     let lightVersion = 1, cameraVersion = 1, evaluatedLight = 0, evaluatedCamera = 0, evaluated = false;
     function alive() { if (owner.disposed || owner.busy) fail(owner.disposed ? 'disposed scene' : 'busy scene'); }
@@ -224,7 +208,7 @@ globalThis.Ayatsuri = (() => {
           geometryChanged = node.evaluatedTransform !== node.transformVersion || (parent && node.parentVersion !== parent.worldVersion);
         node.worldEnabled = node.enabled && (!parent || parent.worldEnabled);
         if (geometryChanged) {
-          compose(m, node.pose, parent ? parent.matrix : null);
+          evaluator.compose(node.pose, parent ? parent.matrix : null, m);
           node.evaluatedTransform = node.transformVersion; node.parentVersion = parent ? parent.worldVersion : 0; ++node.worldVersion;
           ++counts.geometryUpdates;
         }

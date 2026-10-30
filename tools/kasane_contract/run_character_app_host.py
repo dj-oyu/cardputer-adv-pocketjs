@@ -21,6 +21,9 @@ def main():
         sysroot = dict(os.environ, M32_SYSROOT=os.environ.get('M32_SYSROOT', str(cache / 'm32sys')))
         flags = subprocess.run(['bash','tools/vmtest/m32_sysroot.sh'],cwd=ROOT,env=sysroot,
                                check=True,capture_output=True,text=True).stdout.split()
+        # Shared TRS intermediates are binary64, as on S3 and JS Number.
+        # i386 x87's excess precision is a different numerical profile.
+        flags += ['-msse2', '-mfpmath=sse']
     binary = build(flags, cache,
                    'tools/kasane_contract/test_character_app_host.c')
     env = os.environ.copy()

@@ -2,6 +2,7 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const root=path.resolve(__dirname,'../..'),chunks={utility:'character.js',models:'character_models.js',lab:'character_lab_scene.js'};
+const TransformReference=require('./transform_reference.cjs');
 let active=false,commits=0,replaces=0,patches=0,textChanges=0,background=false;
 const loaded=new Set();
 const tx={background(color){assert.equal(color,0xe4ece0ff);background=true;},
@@ -20,6 +21,7 @@ const context=vm.createContext({console:{log(){}},pocket:{
     replace(callback){background=false;callback(tx);assert.ok(background);++replaces;},patch(callback){callback(tx);++patches;}}
 }});
 context.pocket.hone=context.pocket.shapes;
+context.pocket.ayatsuri=TransformReference;
 vm.runInContext(fs.readFileSync(path.join(root,'apps/character/character_lab.js'),'utf8'),context,{filename:'character_lab.js'});
 assert.deepEqual(Array.from(loaded),['utility','models','lab']);
 const frame=context.frame;

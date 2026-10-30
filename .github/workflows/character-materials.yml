@@ -8,6 +8,8 @@ on:
       - 'main/pocket/pocket_shape.*'
       - 'main/pocket/pocket_proc.*'
       - 'main/ui/kasane/ksn_procedural.*'
+      - 'main/ayatsuri/**'
+      - 'tools/ayatsuri/**'
       - 'tools/character*'
       - 'tools/character/**'
       - 'tools/kasane_contract/*character*'
@@ -38,6 +40,8 @@ jobs:
           node-version: '24'
       - name: Visual API and exact WAKE inputs
         run: |
+          python3 tools/ayatsuri/run_transform.py
+          node tools/character/transform_oracle.cjs
           node tools/character_motion_test.cjs
           node tools/character_wake_oracle.cjs
           node tools/kasane_contract/test_character_utility.cjs
@@ -58,6 +62,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib
+          python3 tools/ayatsuri/run_transform.py --m32
+          node tools/character/transform_oracle.cjs
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"

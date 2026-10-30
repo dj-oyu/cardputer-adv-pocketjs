@@ -5,6 +5,8 @@ assert.strictEqual(globalThis.Ayatsuri, Ayatsuri);
 assert.strictEqual(globalThis.Character, Ayatsuri, 'old name aliases the same visual implementation');
 const MeshReference = require('../character/mesh_reference.cjs');
 const Motion = require('../../apps/character/motion.js');
+const TransformReference = require('../character/transform_reference.cjs');
+const analyticScene = options => Ayatsuri.scene({...options, evaluator: TransformReference});
 // The rejected coarse experiment remains an independent numerical reference,
 // not an implicit production fallback when the native capability is absent.
 const backend = {shade: MeshReference.shadeReference, fill() {}};
@@ -77,7 +79,7 @@ assert.throws(() => body.material({color: 0, roughness: NaN}));
 scene.evaluate(5000);
 scene.render(); assert.ok(stats().renderedFaces > 0);
 assert.throws(() => scene.add({name: 'body', geometry: null}));
-const other = Ayatsuri.scene({backend: {ellipsoid() {}}});
+const other = analyticScene({backend: {ellipsoid() {}}});
 assert.throws(() => other.add({name: 'bad', parent: body, geometry: null}));
 assert.throws(() => other.add({name: 'typo', parent: {}, geometry: null}));
 assert.throws(() => other.add({name: 'typo', parent: 'root', geometry: null}));
@@ -89,7 +91,7 @@ scene.dispose(); scene.dispose(); assert.throws(() => scene.evaluate(0));
 
 // Native analytic rendering must not allocate the per-face experiment buffers.
 let analyticCalls = 0, packetScreen, packetNormal, packetTexture;
-const compact = Ayatsuri.scene({backend: {ellipsoid(screen, normal, lighting, material, surface, texture) {
+const compact = analyticScene({backend: {ellipsoid(screen, normal, lighting, material, surface, texture) {
   ++analyticCalls;
   assert.ok(screen instanceof Float32Array && screen.length === 8);
   assert.ok(normal instanceof Float32Array && normal.length === 9);
@@ -151,7 +153,7 @@ compact.camera({position: [0, 0, 400]}); compact.evaluate(1); compact.render();
 assert.throws(() => compact.add({name: 'bad-parent', parent: {}, geometry: null}));
 compact.dispose();
 assert.throws(() => Ayatsuri.scene({backend: {fill() {}}}), /analytic hone backend/, 'no silent coarse device fallback');
-const hierarchy = Ayatsuri.scene({backend: {ellipsoid() {}}});
+const hierarchy = analyticScene({backend: {ellipsoid() {}}});
 const group = hierarchy.add({name: 'group', geometry: null}), leaf = hierarchy.add({name: 'leaf', parent: group, geometry: {kind: 'ellipsoid', radii: [1, 2, 3]}});
 hierarchy.add({name: 'sibling', parent: group, geometry: {kind: 'ellipsoid', radii: [1, 1, 1]}});
 const h0 = {}, h1 = {}; hierarchy.evaluate(0); hierarchy.stats(h0);
@@ -167,10 +169,10 @@ hierarchy.dispose();
 // A backend/visitor cannot mutate or reenter its active scene. Other scenes
 // remain independent, and callback failure releases the per-scene guard.
 let onDraw = () => {};
-const guarded = Ayatsuri.scene({backend: {ellipsoid() { onDraw(); }}});
+const guarded = analyticScene({backend: {ellipsoid() { onDraw(); }}});
 const guardedPart = guarded.add({name: 'part', geometry: {kind: 'ellipsoid', radii: [2, 2, 2]}});
 guarded.evaluate(0);
-const isolated = Ayatsuri.scene({backend: {ellipsoid() {}}});
+const isolated = analyticScene({backend: {ellipsoid() {}}});
 const isolatedPart = isolated.add({name: 'part', geometry: {kind: 'ellipsoid', radii: [1, 1, 1]}});
 isolated.evaluate(0);
 onDraw = () => {
@@ -196,6 +198,37 @@ assert.throws(() => guarded.add({name: 'bad', position: [1, 2, 3], geometry: {ki
 guarded.render();
 isolated.dispose(); guarded.render(); guarded.dispose(); guarded.dispose();
 assert.throws(() => guardedPart.visible(true), /disposed scene/);
+
+// Shared transform evaluation stays within the scene's synchronous guard.
+assert.throws(() => Ayatsuri.scene({backend: {ellipsoid() {}}}), /shared ayatsuri evaluator/,
+  'a device scene never silently falls back to a separate JS transform implementation');
+let composeCalls=0, composeHook=()=>{}, renderCalls=0;
+const delegated=Ayatsuri.scene({backend:{ellipsoid(){++renderCalls;}},evaluator:{compose(pose,parent,out){
+  ++composeCalls;composeHook();TransformReference.compose(pose,parent,out);
+}}});
+const delegatedRoot=delegated.add({name:'root',geometry:null}),
+  delegatedPart=delegated.add({name:'leaf',parent:delegatedRoot,geometry:{kind:'ellipsoid',radii:[2,3,4]}});
+composeHook=()=>{
+  for(const action of [()=>delegated.evaluate(0),()=>delegated.render(),()=>delegated.dispose(),
+    ()=>delegatedPart.place({position:[3,0,0]})]) assert.throws(action,/busy scene/);
+};
+delegated.evaluate(0);delegated.render();assert.equal(composeCalls,2);
+delegated.evaluate(5000);assert.equal(composeCalls,2,'time alone does not call the shared transform kernel');
+delegated.light({color:0x88aacc});delegated.evaluate(5000);assert.equal(composeCalls,2,'lighting does not call the transform kernel');
+delegatedRoot.place({position:[3,0,0]});delegated.evaluate(5000);
+assert.equal(composeCalls,4,'parent update evaluates the parent before its child');
+const successfulMatrix=delegatedPart._node.matrix.slice();
+composeHook=()=>{throw Error('evaluator failure');};
+delegatedPart.place({position:[7,0,0]});
+assert.throws(()=>delegated.evaluate(5000),/evaluator failure/);
+same(delegatedPart._node.matrix,successfulMatrix,'failed kernel did not publish output');
+const renderedBefore=renderCalls;
+assert.throws(()=>delegated.render(),/evaluate before render/);
+assert.throws(()=>delegated.visit(()=>{}),/evaluate before render/);
+assert.equal(renderCalls,renderedBefore,'failed evaluation reaches no render backend');
+composeHook=()=>{};delegated.evaluate(5000);delegated.render();
+assert.equal(delegatedPart._node.matrix[3],10,'retry uses the latest authored pose and parent');
+delegated.dispose();
 
 const track = Motion.track([0, 2, 10, 4, 20, 6], {stride: 2, timeUnit: 'frame', interpolation: 'smooth'}), pose = [0, 0];
 Motion.sample(track, 5, pose); same(pose, [5, 3], 'frame positions, not elapsed seconds');

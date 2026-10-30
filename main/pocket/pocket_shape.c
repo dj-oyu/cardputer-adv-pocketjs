@@ -1,6 +1,7 @@
 #include "pocket_shape.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
+#include "ayatsuri/ayatsuri_transform.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -161,6 +162,32 @@ static bool shade_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type
 static bool shade_overlap(const shade_view *a,const shade_view *b){
     const uintptr_t x=(uintptr_t)a->data,y=(uintptr_t)b->data;
     return a->bytes&&b->bytes&&(x<=y?y-x<a->bytes:x-y<b->bytes);
+}
+/* Ayatsuri owns evaluation semantics; hone still owns drawing. Keep this
+ * small bridge beside the existing typed-view checks, without linking a
+ * second implementation or retaining guest buffers after this call. */
+static JSValue js_ayatsuri_compose(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.compose";
+    if(argc!=3)return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, output[12]");
+    shade_view pose_view,parent_view,output_view;
+    const bool has_parent=!JS_IsNull(argv[1])&&!JS_IsUndefined(argv[1]);
+    if(!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT32,false,&pose_view)||pose_view.bytes!=36||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,true,&output_view)||output_view.bytes!=48||
+       (has_parent&&(!shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,false,&parent_view)||parent_view.bytes!=48)))
+        return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, writable output[12]");
+    ayatsuri_pose pose;ayatsuri_transform parent,result;
+    memcpy(&pose,pose_view.data,sizeof pose);
+    if(has_parent)memcpy(&parent,parent_view.data,sizeof parent);
+    const ayatsuri_status status=ayatsuri_transform_evaluate(&pose,has_parent?&parent:NULL,&result);
+    if(status==AYATSURI_INVALID)return invalid(ctx,op,"finite pose/parent and nonzero scale required");
+    if(status!=AYATSURI_OK)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 transform overflow");
+    memcpy(output_view.data,&result,sizeof result);
+    return JS_UNDEFINED;
+}
+static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *unused){
+    (void)unused;
+    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("compose",3,js_ayatsuri_compose)};
+    return JS_SetPropertyFunctionList(ctx,ns,methods,1)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 static bool shade_unit(float *x,float *y,float *z){
     /* Scale first: a finite nonzero Float32 direction can be subnormal. */
@@ -516,5 +543,6 @@ esp_err_t pocket_shape_install(JSContext *ctx,void *unused){
     int ok=JS_DefinePropertyGetSet(ctx,root,atom,getter,JS_UNDEFINED,
                                 JS_PROP_ENUMERABLE|JS_PROP_CONFIGURABLE);
     JS_FreeAtom(ctx,atom);JS_FreeValue(ctx,root);
-    return ok<0?ESP_ERR_NO_MEM:ESP_OK;
+    if(ok<0)return ESP_ERR_NO_MEM;
+    return pocket_api_lazy(ctx,"ayatsuri",ayatsuri_namespace_fill,NULL);
 }

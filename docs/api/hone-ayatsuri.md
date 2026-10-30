@@ -21,7 +21,8 @@
 | JS `Character.scene` | `Ayatsuri.scene` | 新公開名へ移行、旧名の互換範囲を明示 |
 | JS `CharacterMotion.track/sample/performance` | `AyatsuriMotion.track/sample/performance` | 軽量な別chunkを維持し、material engineを強制ロードしない |
 | `CharacterLab/CharacterModels` | 試験app固有。`AyatsuriLab/AyatsuriModels`へ関連範囲だけ移行 | キャラクター種類の意味はmodelに残す |
-| Cのayatsuri scene/handle/evaluate/submit | `ayatsuri_*` | 今回は意味/所有権設計、C共通核の実装とJS接続は未完 |
+| Cの親子TRS評価とJS接続 | `ayatsuri_transform_evaluate` / 内部`pocket.ayatsuri.compose` | [最小共通核](ayatsuri-transform-core.md)として実装・検証。C scene全体とは区別 |
+| Cのayatsuri scene/handle/evaluate/submit | `ayatsuri_*` | 意味/所有権設計。scene全体のC APIは未実装 |
 
 既存`kasane.shapes` capabilityは互換性を維持する。初期hone endpointも同じmanifest gateを使い、新しい権限やcapability名を増やさない。`pocket.hone === pocket.shapes`で、honeを先に読んでも旧namespaceを一度だけ構築し、同じmethod/resource ownerを参照する。古いエラーのoperation名`shapes.*`も互換のまま残す。既存JS、ホストshim、firmwareの入口を照合して実装状態を更新する。filenameとC内部名の全置換を完了条件にしない。
 
@@ -32,13 +33,13 @@
 - 同期評価の再入を拒否する。二重disposeは可能、破棄済みhandleは拒否。失敗した評価を描かず、nativeの最後の成功画像を保持する。別instanceの光/視点/workを共有しない。隠れたtimer/sleep/乱数を持たない。
 - 入力dataは副作用のない通常object/配列、Cは長さ/型付きspan。借用keys/packetと所有workを分ける。JSとCで同じ意味のfixtureと許容誤差を使い、似た数式を独立に育てない。
 
-## ayatsuri C APIの設計境界（未実装）
+## ayatsuri C APIの設計境界（scene全体は未実装）
 
 公開prefixは`ayatsuri_`、opaqueな`ayatsuri_scene`/scene所属handleを使う案とする。`create(config, allocator, out_scene)`、`add(scene, desc, out_handle)`、`place/material/texture/light/camera`、`evaluate(scene,time)`、`submit(scene,hone_sink)`、`destroy(scene)`がJSの操作に対応する。具体的なABI、構造体packing、arenaサイズ照会は実装レビューで固定する。
 
 allocatorとsceneは環境ownerに属し、同一owner taskからのみ操作する。handleはscene識別と世代で他scene/破棄済み利用を拒否する。setterはscalar/configを取り込み、評価workはscene所有、submitは同期借用しhone側の候補へ小packetをsnapshotする。提示ACK前のsource解放/書換えを許す設計にしない。native失敗時にC/JSのどちらが候補を破棄するかをadapter契約で一意化する。
 
-現在のJS評価器は縦切り試作で、Cフレームワークはまだ存在しない。次段階で評価核を共有化し、JS adapterとC利用側が同じ座標・法線・材質・seek・失敗fixtureを通ることを条件にする。CとJSを別々の完成実装として公開してから差異を吸収する進め方は採らない。HOMEでは前景UI、app起動/復帰、停止/解放、共有strip/資源衝突を別途検証する。
+最初の共通化は[親子TRSの純粋C評価関数](ayatsuri-transform-core.md)に絞る。JS authoringがその同じ核を使うため、device側で似た合成数式を独立に維持しない。Cのscene/handle/material/UV/submit全体はまだ実装しておらず、上記のallocator/世代handle案は現在の関数に存在する機能とは区別する。次段階もJS adapterとC利用側が同じ座標・法線・材質・seek・失敗fixtureを通ることを条件にする。CとJSを別々の完成実装として公開してから差異を吸収する進め方は採らない。HOMEでは前景UI、app起動/復帰、停止/解放、共有strip/資源衝突を別途検証する。
 
 関連: [低APIとpacket](shapes.md)、[現utilityとライフサイクル](character-utility.md)、[計測と制約](../perf/character-materials.md)。正式名称への変更は機能・品質・実機検証の合格を意味しない。
 

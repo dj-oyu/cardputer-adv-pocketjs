@@ -12,6 +12,34 @@ const put = (a, i, pts) => pts.forEach((p, k) => { a[2 * (i + k)] = p[0]; a[2 * 
 eq(hone, shapes, 'hone and legacy shapes have one namespace/owner');
 eq(hone.ellipsoid, shapes.ellipsoid, 'hone shares native methods');
 
+// The framework bridge shares its C TRS evaluator; drawing remains hone's job.
+{
+  const pose=new Float32Array([1,2,3,0,0,0,2,3,4]), out=new Float32Array(12);
+  ayatsuri.compose(pose,null,out);
+  eq(out.join(','),'2,0,0,1,0,3,0,2,0,0,4,3','C root pose');
+  const child=new Float32Array([1,2,3,0,0,0,1,1,1]);
+  ayatsuri.compose(child,out,out);
+  eq(out.join(','),'2,0,0,3,0,3,0,8,0,0,4,15','C parent/output alias');
+  const memory=new Float32Array(16), sharedPose=memory.subarray(0,9), sharedOut=memory.subarray(4);
+  sharedPose.set(pose);ayatsuri.compose(sharedPose,undefined,sharedOut);
+  eq(sharedOut.join(','),'2,0,0,1,0,3,0,2,0,0,4,3','C overlapping JS views snapshot inputs');
+  out.fill(37);const previous=out.join(',');
+  pose[6]=0;throws(()=>ayatsuri.compose(pose,null,out),'INVALID_ARGUMENT','C zero scale');
+  eq(out.join(','),previous,'invalid C input leaves output unchanged');pose[6]=2;
+  const parent=new Float32Array([3e38,0,0,0,0,1,0,0,0,0,1,0]);
+  throws(()=>ayatsuri.compose(pose,parent,out),'LIMIT_EXCEEDED','C float32 overflow');
+  eq(out.join(','),previous,'C overflow leaves every output byte unchanged');
+  parent[0]=NaN;throws(()=>ayatsuri.compose(pose,parent,out),'INVALID_ARGUMENT','C nonfinite parent');
+  throws(()=>ayatsuri.compose(new Float32Array(8),null,out),'INVALID_ARGUMENT','C short pose');
+  throws(()=>ayatsuri.compose(pose,null,new Float64Array(12)),'INVALID_ARGUMENT','C narrow output');
+  if(typeof out.buffer.sliceToImmutable==='function'){
+    const readonly=new Float32Array(out.buffer.sliceToImmutable());
+    throws(()=>ayatsuri.compose(pose,null,readonly),'INVALID_ARGUMENT','C readonly output');
+  }
+  ayatsuri.compose(child,null,out);
+  eq(out[3],1,'C evaluation recovers without hidden state');
+}
+
 // project: x, y over w; w <= 0 gives NaN; ranges; Float32Array only.
 {
   const src = new Float32Array([1, 2, 3, 4, 5, 6, 0, 0, -1]), dst = new Float32Array(6);
