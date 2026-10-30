@@ -6,6 +6,26 @@
 #include "quickjs.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
+#include <stdlib.h>
+
+/* This minimal raster harness does not link pocket_api.c. Match its runtime
+ * owner bookkeeping, including pointer reuse after the fixture's teardown.
+ * A real pocket_api implementation overrides this weak stand-in. */
+static JSRuntime **proc_host_class_owners[16];
+static unsigned proc_host_class_owner_count;
+__attribute__((weak)) bool pocket_api_class_ready(JSRuntime *rt,JSRuntime **owner,JSClassID *id){
+    if(*owner==rt)return true;
+    *owner=rt;*id=0;
+    for(unsigned i=0;i<proc_host_class_owner_count;++i)
+        if(proc_host_class_owners[i]==owner)return false;
+    if(proc_host_class_owner_count==sizeof proc_host_class_owners/sizeof proc_host_class_owners[0])abort();
+    proc_host_class_owners[proc_host_class_owner_count++]=owner;
+    return false;
+}
+void pocket_proc_host_classes_reset(void){
+    for(unsigned i=0;i<proc_host_class_owner_count;++i)*proc_host_class_owners[i]=NULL;
+    proc_host_class_owner_count=0;
+}
 
 __attribute__((weak)) JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch){
     (void)patch;

@@ -12,6 +12,7 @@
 #include <time.h>
 
 #define REQUIRE(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
+void pocket_proc_host_classes_reset(void);
 static uint16_t actual[KSN_PROC_W*KSN_PROC_H], expected[KSN_PROC_W*KSN_PROC_H];
 static uint16_t previous[KSN_PROC_W*KSN_PROC_H];
 static unsigned publishes,invalidates;
@@ -166,6 +167,11 @@ esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn
 int main(int argc,char **argv){
     REQUIRE(argc==2||argc==3);
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
+    JSRuntime *class_owner=NULL;JSClassID class_id=123;
+    REQUIRE(!pocket_api_class_ready(rt,&class_owner,&class_id)&&class_id==0);
+    class_id=123;REQUIRE(pocket_api_class_ready(rt,&class_owner,&class_id)&&class_id==123);
+    pocket_proc_host_classes_reset();REQUIRE(class_owner==NULL);
+    REQUIRE(!pocket_api_class_ready(rt,&class_owner,&class_id)&&class_id==0);
     JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);
     REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK);
@@ -558,6 +564,7 @@ int main(int argc,char **argv){
     eval_ok(ctx,"const newLayerId=proc.createSurface();"
                 "if(newLayerId===layerId)throw Error('stale surface ID reused')");
     pocket_proc_reset();
+    pocket_proc_host_classes_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS real QuickJS procedural adapter: 48 exact RGB565 frames, two independent image surfaces, 256 B rectangle damage, IO repair, stale resources, Enter toggle; image span CPU %.1f ms\n",
            1000.0*(double)span_ticks/CLOCKS_PER_SEC);
