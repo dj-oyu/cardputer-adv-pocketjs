@@ -83,3 +83,13 @@ SOURCEとowned-copyの192KiB追加診断は未実施。runnerのm32_sysroot.sh�
 
 
 未採用runtime/sourceのコピーとtracked patchは `.cache/cloud-bin-rejected-db4/` に退避し、製品ツリーから除外した。後続CLOUD PROBE候補には比較記録だけを含める。
+
+## 非採用の範囲と次の比較
+
+今回採用しなかったのは、source定義をbinへ変換して既存JS runtime node構造へ直接初期化するラッパー試作である。画像bin一般の可否や、静的parameterをnative immutable assetとして保持・共有する設計を評価・棄却した結果ではない。
+
+次の最小比較ではstatic assetとmutable pose/velocityを分離し、JSはopaque handleとdirty targetだけを渡す境界を検討する。既存native snapshot/validation/失敗時committed不変を守り、guestの外へ移したbytesも別計測する。packed保存形式とPIE向け実行layoutは同一でなくてよく、必要な変換はload/prepare側で行い、毎frameの詰替えを増やさない。Astraのlayout評価と合わせ、fixtureの検証・公開・引渡し後に進める。
+
+画像側の具体例は[petのPPT2設計](../apps/pet-asset-design.md)、`tools/pack_pet_compact.py`、`main/pet/pet_pixels.c`、`main/pet/ksn_pet.c`。現assetは7601 B。PPT2は共有基本形・palette・模様差分をnative providerで読むため、PNG等の元画像形式や大きなJS object graphへの復元と違う。RLE行の復号は残る。現providerの[64行cache](kasane-pet-row-cache.md)は8192 Bの静的RAMを使い、heap確保0をRAM使用量0と混同しない。文書の98304→7601 Bは既存報告で今回の独立再測定ではない。
+
+狐2.5Dの画像・coverage/material mask等は引き続き画像bin化の適用候補。今回のfixture作業で画像warpや別方式の実装を始めたわけではない。
