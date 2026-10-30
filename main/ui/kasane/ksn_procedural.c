@@ -233,7 +233,7 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
      * sweep of all registers doubled when the file grew from 8 to 16. */
     case KSN_PROC_ADD:vm->reg[i->dst]=vm->reg[i->a]+vm->reg[i->b];goto finite;
     case KSN_PROC_MUL:vm->reg[i->dst]=vm->reg[i->a]*vm->reg[i->b];goto finite;
-    case KSN_PROC_SIN:vm->reg[i->dst]=sinf(vm->reg[i->a]);
+    case KSN_PROC_SIN:vm->reg[i->dst]=ksn_proc_sinf(vm->reg[i->a]);
     finite:
         if(!isfinite(vm->reg[i->dst]))return vm->status=KSN_PROC_INVALID;
         break;

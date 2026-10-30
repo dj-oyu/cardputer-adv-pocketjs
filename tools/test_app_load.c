@@ -128,6 +128,16 @@ int main(void) {
     write_file(list,"app local.hello\nuses appload_uses.js\nspin appload_spin.js\n"
                     "frame appload_frame.js # a comment\ndup appload_dup.js\n");
     REQUIRE(app_chunks_host_read(list)==0);
+    // `option strip-debug` (docs/vm/strip-debug.md): local.player's chunks
+    // compile without line tables. sdThr throws on line 7, in sdG (line 5).
+    snprintf(path,sizeof path,"%s/appload_sthrow.js",dir);
+    write_file(path,"// Throws on line 7, in sdG, whose first line is 5.\n"
+                    "function sdF() {\n  return 1;\n}\n"
+                    "function sdG() {\n  sdF();\n  null.boom;\n}\n"
+                    "globalThis.sdCall = sdG;\n");
+    snprintf(list,sizeof list,"%s/strip_chunks.txt",dir);
+    write_file(list,"app local.player\noption strip-debug\nsthr appload_sthrow.js\n");
+    REQUIRE(app_chunks_host_read(list)==0);
     // The shim refuses what the build refuses.
     snprintf(path,sizeof path,"%s/bad.txt",dir);
     write_file(path,"app local.hello\nok appload_frame.js\n");
@@ -138,6 +148,8 @@ int main(void) {
     REQUIRE(app_chunks_host_read(path)!=0);   // not a chunk name
     write_file(path,"app local.x\nnofile nothing.js\n");
     REQUIRE(app_chunks_host_read(path)!=0);   // a missing file
+    write_file(path,"app local.x\noption fast\n");
+    REQUIRE(app_chunks_host_read(path)!=0);   // not an option
 
     // Three sessions: the loaded/failed state is the session's, so the same
     // loads succeed again in a fresh realm.
@@ -208,6 +220,23 @@ int main(void) {
         JS_FreeCString(ctx,text);
         JS_FreeValue(ctx,e);
         checks++;
+        session_end();
+    }
+
+    // strip-debug: the error names the function's first line, not the line
+    // that threw; local.hello's chunks (no option) keep exact lines.
+    {
+        session_begin("local.player");
+        run("strip.js",
+            "check(pocket.app.load('sthr')===true,'loads');"
+            "let s='';try{sdCall()}catch(e){s=String(e.stack)}"
+            "check(/appload_sthrow\\.js:5/.test(s)&&!/appload_sthrow\\.js:7/.test(s),s);");
+        printf("  strip-debug: a runtime error names the function's first line\n");
+        session_end();
+        session_begin("local.hello");
+        run("exact.js",
+            "let e=null;try{pocket.app.load('thr')}catch(x){e=x}"
+            "check(/appload_throw\\.js:4/.test(e.message),'exact line without the option '+e.message);");
         session_end();
     }
 

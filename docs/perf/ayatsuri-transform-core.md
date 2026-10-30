@@ -35,6 +35,16 @@ m32 runnerは`-msse2 -mfpmath=sse`を追加して`FLT_EVAL_METHOD=0`とした。
 
 ## 資源の観測と限界
 
+### main `7ee19cc` 同期後の回帰
+
+`ba660a3` にmainのROM plan・strip-debug等を統合した状態で再検証した。MEGADEMOのhost専用helper移動に合わせ、device loopに残っていた`procMegademo` helper解放を除去した。これはPRのmergeではなく、feature branchの同期である。
+
+- キャラapp: m32・163840B cap・強制GCなし・全描画referenceあり、5418 frames、例外/提示失敗0、差分一致、切替/範囲失敗から復帰、解放後guest 0。malloc_size最大158268B、評価peak93384B、fixture allocator peak142496B、最大単一要求はload10912B/run1571B。
+- MEGADEMO: 同capのcandidate 2452 frames、例外/degrade/提示失敗0。比較元843496cの200 framesも同ハーネスでPASS。candidateのmalloc_size最大146140B、評価peak137804B。試験窓が違うためcandidate/baselineの性能比較ではない。
+- C O0/O2各2071 checks、独立JS oracleの408 vectors/4860成分は全bit一致。WAKE104 frame入力一致、motion/utility/lab、docs検査もPASS。
+
+ログは`.cache/core-main-sync-{m32,mega}.log`。以下の数値は同期前の測定として保持する。同期後の実機性能、native free/largest、stackは未計測である。
+
 m32のQuickJS malloc_size最大は160916B、評価中TLSFモデルpeak93384B、fixture allocator peak142792B。load最大単一guest要求10912B、run中1571B。比較元の旧記録はmalloc_size最大162088Bだが、今回のbridge warm-upやcompiler profileも違うため、差を実機の速度/総空き改善と呼ばない。capとの差2924Bも一般の拡張予算ではない。
 
 64bit側はmalloc_size最大226840B、評価peak120124B、allocator peak208928B。これらをm32やnative free/largestと足し引きしない。範囲失敗試験は通常のheap gate後にcapを解除してnative validatorへ到達させる別phaseで、160KiBで極端な入力を生成できる保証ではない。

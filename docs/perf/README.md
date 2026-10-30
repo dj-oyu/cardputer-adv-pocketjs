@@ -28,7 +28,7 @@
 | [kasane-group-affine.md](kasane-group-affine.md) | 最適化記録 | 群の affine 描画の比較と検証条件。 |
 | [lcdcatch-stable-digits.md](lcdcatch-stable-digits.md) | 最適化記録 | LCD CATCH の安定した数字描画の比較と受入範囲。 |
 | [procedural-workspace-memory.md](procedural-workspace-memory.md) | 実験・比較記録 | 手続き描画 workspace のメモリ比較、固定条件と未測定範囲。 |
-| [kasane-dma-overlap.md](kasane-dma-overlap.md) | 再提案 | #37 から通常 main へ抽出、既定 OFF・実機未受入。 |
+| [kasane-dma-overlap.md](kasane-dma-overlap.md) | 既定 ON | #37 から通常 main へ抽出。MEGADEMO の実機 A/B で send −5 ms/frame、#111 で既定 ON。 |
 | [bigwave-inputs-local.md](bigwave-inputs-local.md) | 実験 | BIG WAVEの入力配列5式、native A/Bと有限実機診断のローカル準備・未確認範囲 |
 | [flash-removals.md](../archive/perf/flash-removals.md) | 記録 | 「我々だけが参照元」のライブラリ会員を測った結果（`ui/shell.c` の `__divdf3` は ROM エイリアスで 0 B、`solar_sail.c` の `remainder` 402 B は落ちるが差し替えが +508 B、`sqrtf` は 294 B 落ちるがビット一致の差し替えが収まらない）。map の「理由」≠「根」、幻の取り込み、道具の過小カウント |
 | [trig-lut.md](../archive/perf/trig-lut.md) | 記録 | シーンの三角関数の LUT 化（`main/scene/fxmath.c`）: 表の大きさ×型×次数の掃引、Q31/Q15 の精度の床、採用した 216 区間 2 次、tan の除算を消した結果、ダンプハーネスの罠、**実機の1呼び出しコスト**（lut 171 / poly 237 / libm 1,550 サイクル） |

@@ -27,6 +27,7 @@
 #include "text/ksn_font.h"
 #include "sound.h"
 #include "pocket_av.h"
+#include "ksn_proc_plan.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,6 +122,9 @@ static bool eval(const char *source,size_t len,const char *name){
     JS_FreeValue(ctx,v);
     JSContext *c;
     while(JS_ExecutePendingJob(rt,&c)>0){}
+    /* The turn is over: the firmware returns the cached frame segments
+     * (components/pocketjs_guest/src/guest.c, D43). */
+    JS_VMStackTrim(rt);
     pocket_kasane_end_turn();
     return ok;
 }
@@ -129,6 +133,7 @@ static bool eval(const char *source,size_t len,const char *name){
  * global script, so the compile peak is per chunk (docs/vm/eval-peak.md 7). */
 static struct {char name[32],path[512];bool done;} chunk[16];
 static unsigned chunks;
+static bool strip_debug;   /* chunks.txt `option strip-debug`, as pocket_app_load.c */
 static void read_chunks(void){
     /* MEGA_CHUNKS: another chunks.txt (the runner's baseline, extracted). */
     const char *list=getenv("MEGA_CHUNKS");if(!list)list="apps/kasane/chunks.txt";
@@ -139,6 +144,7 @@ static void read_chunks(void){
     while(fgets(line,sizeof line,f)){
         char *h=strchr(line,'#');if(h)*h=0;
         if(sscanf(line,"%31s %199s",a,b)!=2||!strcmp(a,"app")||chunks==16)continue;
+        if(!strcmp(a,"option")){if(!strcmp(b,"strip-debug"))strip_debug=true;continue;}
         snprintf(chunk[chunks].name,sizeof chunk[0].name,"%s",a);
         snprintf(chunk[chunks].path,sizeof chunk[0].path,"%s/%s",dir,b);
         chunks++;
@@ -156,7 +162,9 @@ static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *arg
     FILE *f=fopen(chunk[i].path,"rb");if(!f)return JS_ThrowReferenceError(c,"no file");
     static char body[1<<16];size_t n=fread(body,1,sizeof body-1,f);fclose(f);body[n]=0;
     chunk[i].done=true;
+    JS_PocketSetStripDebug(c,strip_debug);
     JSValue v=JS_Eval(c,body,n,chunk[i].path,JS_EVAL_TYPE_GLOBAL);
+    JS_PocketSetStripDebug(c,0);
     if(JS_IsException(v))return v;
     JS_FreeValue(c,v);
     return JS_TRUE;
@@ -229,6 +237,7 @@ static JSValue js_now(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
     return JS_NewFloat64(c,(double)ts.tv_sec*1e9+(double)ts.tv_nsec);
 }
 
+void vmtest_vmstack_report(JSRuntime *rt,void *out); /* quickjs-vm.c */
 int main(int argc,char **argv){
     const char *path=argc>1?argv[1]:"apps/kasane/proc_megademo.js";
     const bool baseline=argc>2&&!strcmp(argv[2],"--baseline");
@@ -252,6 +261,9 @@ int main(int argc,char **argv){
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));
+    /* The built-in plan table, as app_session.c hands it over (the runner
+     * generates it from megademo_plans.js: megademo_chunks.rom_table). */
+    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     read_chunks();
     JS_FreeValue(ctx,g);
     JS_RunGC(rt);
@@ -269,7 +281,7 @@ int main(int argc,char **argv){
     printf("%s eval + first present; source %zu B\n",ok?"ok  ":"FAIL",n);
     /* Buttons: two plain loops, then Enter zoom out/in inside Act II, a tier
      * down/up, and a scene skip in each direction. */
-    const unsigned loop=baseline?48:(unsigned)num("procMegademo.len.reduce((a,b)=>a+b,0)");
+    const unsigned loop=baseline?48:(unsigned)num("LEN.reduce((a,b)=>a+b,0)");
     const char *frames_env=getenv("MEGA_FRAMES");
     const unsigned frames=frames_env?(unsigned)strtoul(frames_env,NULL,0):baseline?200:loop*2+400;
     size_t heap_peak=0,heap_live_peak=0;unsigned max_live_seen=0,coexist_frames=0,max_frame_reg=0;
@@ -303,6 +315,9 @@ int main(int argc,char **argv){
         struct timespec ts0,ts1;clock_gettime(CLOCK_MONOTONIC,&ts0);
         eval(call,strlen(call),"frame.js");
         clock_gettime(CLOCK_MONOTONIC,&ts1);
+        /* MEGA_TIMES: one line a frame (scene, its t, host us of frame()). */
+        if(getenv("MEGA_TIMES"))printf("TIME %u %u %.1f\n",(unsigned)num("scene")&7,(unsigned)num("t"),
+            (ts1.tv_sec-ts0.tv_sec)*1e6+(ts1.tv_nsec-ts0.tv_nsec)/1e3);
         if(sc<8){st_frames[sc]++;st_calls[sc]+=alloc_calls-a0;st_bytes[sc]+=alloc_bytes-b0;
             const double us=(ts1.tv_sec-ts0.tv_sec)*1e6+(ts1.tv_nsec-ts0.tv_nsec)/1e3;
             st_us[sc]+=us;if(us>st_usmax[sc])st_usmax[sc]=us;}
@@ -324,6 +339,10 @@ int main(int argc,char **argv){
         size_t h=heap_used();if(h>heap_peak)heap_peak=h;
         JS_RunGC(rt);
         h=heap_used();if(h>heap_live_peak)heap_live_peak=h;{size_t r=heap_req();if(r>req_live_peak)req_live_peak=r;}
+        /* MEGA_MEMDUMP_AT=t: the collected heap's breakdown after frame t. */
+        if(getenv("MEGA_MEMDUMP_AT")&&strtoul(getenv("MEGA_MEMDUMP_AT"),NULL,0)==t){
+            JSMemoryUsage mu;JS_ComputeMemoryUsage(rt,&mu);JS_DumpMemoryUsage(stdout,&mu,rt);
+            vmtest_vmstack_report(rt,stdout);}
         if(getenv("MEGA_HEAPTRACE")&&!(t%8))
             printf("heap t=%u live=%zu ...%s\n",t,h,strlen(scene_log)>12?scene_log+strlen(scene_log)-12:scene_log);
         if(ppm_dir){

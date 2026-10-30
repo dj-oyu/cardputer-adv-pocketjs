@@ -18,10 +18,13 @@ import os
 import re
 import struct
 import subprocess
+import sys
 import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from megademo_chunks import rom_table  # noqa: E402
 CACHE = ROOT / ".cache/kasane_megademo_app"
 QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
@@ -61,6 +64,7 @@ def build(flags: list[str], cache: Path, entry: str = "tools/kasane_contract/tes
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_GRID_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     entry, *kasane_sources(), *EXTRA,
+                    str(rom_table(cache / "ksn_proc_rom_plans.c")),
                     *objects, "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -142,7 +146,7 @@ def main() -> None:
         (base / "chunks.txt").write_bytes(listed.stdout)
         for raw in listed.stdout.decode().splitlines():
             words = raw.split("#", 1)[0].split()
-            if len(words) == 2 and words[0] != "app":
+            if len(words) == 2 and words[0] not in ("app", "option"):
                 got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
                                      cwd=ROOT, capture_output=True, check=True)
                 (base / words[1]).write_bytes(got.stdout)

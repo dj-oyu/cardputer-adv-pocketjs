@@ -96,6 +96,12 @@ int app_chunks_host_read(const char *list_path) {
             }
             continue;
         }
+        // `option strip-debug` (tools/make_app_chunks.py's OPTIONS).
+        if(!strcmp(a,"option")) {
+            if(words!=2 || !current || strcmp(b,"strip-debug")) { result=-1; break; }
+            current->set.strip_debug=1;
+            continue;
+        }
         if(words!=2 || !current || !good_name(a)) { result=-1; break; }
         for(uint32_t k=0;k<current->set.count;k++)
             if(!strcmp(current->chunks[k].name,a)) result=-1;

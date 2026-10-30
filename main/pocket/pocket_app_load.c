@@ -183,8 +183,10 @@ static JSValue js_load(JSContext *ctx, JSValueConst this_val,
     // The parse does not poll the interrupt handler -- a 30 KB chunk parses in
     // about 150 ms on the board, measured, inside a turn's 250 ms -- so the
     // deadline is met, if at all, at the first safepoint of the run.
+    JS_PocketSetStripDebug(ctx,set->strip_debug);
     JSValue fn=JS_Eval(ctx,chunk->start,bytes,chunk->file,
                        JS_EVAL_TYPE_GLOBAL|JS_EVAL_FLAG_COMPILE_ONLY);
+    JS_PocketSetStripDebug(ctx,0);
     if(JS_IsException(fn)) return fail(ctx,chunk,false);
     const int64_t t1=esp_timer_get_time();
     JS_GetMemoryCounters(rt,&used1,&limit);
@@ -290,8 +292,12 @@ static JSModuleDef *module_load(JSContext *ctx, const char *file, void *opaque,
     // through module_normalize/module_load for them before it returns --
     // with this module's parse temporaries already freed.
     depth++;
+    // The flag is the set's, for this compile only (an import nested in it
+    // is the same set's chunk).
+    JS_PocketSetStripDebug(ctx,set->strip_debug);
     JSValue module=JS_Eval(ctx,chunk->start,bytes,chunk->file,
                            JS_EVAL_TYPE_MODULE|JS_EVAL_FLAG_COMPILE_ONLY);
+    JS_PocketSetStripDebug(ctx,0);
     depth--;
     if(JS_IsException(module)) return NULL;   // its SyntaxError, OOM or refusal stays pending
     const int64_t t1=esp_timer_get_time();
