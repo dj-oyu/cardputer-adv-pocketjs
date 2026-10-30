@@ -165,6 +165,9 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.cloudmem", .title="CLOUD MEMORY", .entry="apps/cloudmem/cloud_memory.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.fox3d", .title="FOX FACE", .entry="apps/fox3d/fox_face.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 };
 
 #define MANIFEST_N (sizeof(MANIFESTS)/sizeof(MANIFESTS[0]))

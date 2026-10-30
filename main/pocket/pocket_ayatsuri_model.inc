@@ -29,14 +29,14 @@ static bool managed_model_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayE
      * validated and borrowed atomically. Reject it for both inputs/outputs. */
     const bool ordinary=JS_IsArrayBuffer(ab);
     uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
-    bool ok=data&&offset<=size&&bytes<=size-offset&&
+    bool ok=ordinary&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&(data||(!size&&!bytes))&&
         (!writable||JS_IsImmutableArrayBuffer(ab)<=0);
     /* Float32/Uint32 paths borrow typed C pointers. Foreign ArrayBuffers may
      * have weaker base alignment than their JS byteOffset suggests. Float64
      * opacity stays byte-addressed in the core and needs no alignment here. */
     if(ok&&(type==JS_TYPED_ARRAY_FLOAT32||type==JS_TYPED_ARRAY_UINT32))
-        ok=((uintptr_t)(data+offset)&3u)==0;
-    if(ok)*out=(shade_view){data+offset,bytes};
+        ok=!data||((uintptr_t)(data+offset)&3u)==0;
+    if(ok)*out=(shade_view){data?data+offset:NULL,bytes};
     JS_FreeValue(ctx,ab);return ok;
 }
 
@@ -169,6 +169,12 @@ static JSValue managed_instance_evaluate(JSContext *ctx,JSValueConst self,int ar
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
 }
+static void managed_packet_ellipsoid(const ayatsuri_model_packet *packet,ksn_proc_ellipsoid *p){
+    memset(p,0,sizeof *p);
+    memcpy(p->screen,packet->storage+96,32);memcpy(p->normal,packet->storage+128,36);
+    memcpy(p->material,packet->storage+164,32);memcpy(p->texture,packet->storage+196,36);
+    memcpy(p->surface,packet->storage+232,10);memcpy(p->light,packet->lighting,36);
+}
 static JSValue managed_instance_submit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)argv;const char *op="ayatsuri.instance.submit";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
     if(!a)return JS_EXCEPTION;
@@ -180,10 +186,7 @@ static JSValue managed_instance_submit(JSContext *ctx,JSValueConst self,int argc
     if(JS_IsException(result)){a->busy=false;return result;}
     while(status==AYATSURI_MODEL_OK){
         if(packet.kind==1){
-            ksn_proc_ellipsoid p={0};
-            memcpy(p.screen,packet.storage+96,32);memcpy(p.normal,packet.storage+128,36);
-            memcpy(p.material,packet.storage+164,32);memcpy(p.texture,packet.storage+196,36);
-            memcpy(p.surface,packet.storage+232,10);memcpy(p.light,packet.lighting,36);
+            ksn_proc_ellipsoid p;managed_packet_ellipsoid(&packet,&p);
             result=pocket_proc_native_ellipsoid(ctx,op,&p);
         }else if(packet.kind==2){
             ksn_proc_blend_ellipsoids p={0};p.header.count=packet.lobe_count;
@@ -193,6 +196,65 @@ static JSValue managed_instance_submit(JSContext *ctx,JSValueConst self,int argc
             memcpy(p.header.material,packet.storage+264,44);memcpy(p.header.controls,packet.storage+308,8);
             memcpy(p.lobes,packet.storage+316+24*packet.lobe_count,84*packet.lobe_count);
             result=pocket_proc_native_blend_ellipsoids(ctx,op,&p);
+        }else result=invalid(ctx,op,"invalid model packet kind");
+        if(JS_IsException(result))break;
+        status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
+    }
+    if(!JS_IsException(result)&&status!=AYATSURI_MODEL_DONE)result=managed_model_error(ctx,op,status);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    a->busy=false;return result;
+}
+static uint16_t managed_clip_id(const shade_view *ids,size_t index){
+    uint16_t id;memcpy(&id,ids->data+index*2,2);return id;
+}
+static void managed_packet_clip(const ayatsuri_model_packet *packet,const shade_view *counts,
+        const shade_view *xy,size_t index,ksn_proc_clipped_ellipsoid *p){
+    managed_packet_ellipsoid(packet,&p->patch);memset(&p->clip,0,sizeof p->clip);
+    p->clip.count=counts->data[index];
+    if(p->clip.count)memcpy(p->clip.xy,xy->data+index*64,(size_t)p->clip.count*8);
+}
+static JSValue managed_instance_submit_clipped(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="ayatsuri.instance.submitClipped";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+    if(!a)return JS_EXCEPTION;
+    shade_view ids,counts,xy;
+    bool valid=argc==3&&managed_model_buffer(ctx,argv[0],JS_TYPED_ARRAY_UINT16,false,&ids)&&ids.bytes%2==0&&
+        managed_model_buffer(ctx,argv[1],JS_TYPED_ARRAY_UINT8,false,&counts)&&
+        managed_model_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&xy);
+    const size_t k=valid?ids.bytes/2:0;
+    if(valid)valid=k<=a->core.model->node_count&&counts.bytes==k&&xy.bytes==k*64;
+    /* One reusable native packet, never a stack copy of all k clip rows. All
+     * source views remain synchronous borrows; no JS runs after validation. */
+    union {ksn_proc_clipped_ellipsoid clipped;ksn_proc_blend_ellipsoids blend;} scratch;
+    ayatsuri_model_packet packet;ayatsuri_model_status status=AYATSURI_MODEL_OK;
+    for(size_t j=0;valid&&j<k;j++){
+        const uint16_t id=managed_clip_id(&ids,j);const unsigned count=counts.data[j];
+        valid=id<a->core.model->node_count&&(count==0||(count>=3&&count<=8));
+        for(size_t previous=0;valid&&previous<j;previous++)if(managed_clip_id(&ids,previous)==id)valid=false;
+        if(!valid)break;
+        uint32_t at=id;status=ayatsuri_model_instance_next(&a->core,a,1,&at,&packet);
+        if(status!=AYATSURI_MODEL_OK||packet.node_id!=id||packet.kind!=1){valid=false;break;}
+        managed_packet_clip(&packet,&counts,&xy,j,&scratch.clipped);
+        int l,t,r,b;valid=ksn_proc_clipped_ellipsoid_bounds(&scratch.clipped,&l,&t,&r,&b);
+    }
+    if(!valid){a->busy=false;return managed_model_error(ctx,op,status==AYATSURI_MODEL_STATE?status:AYATSURI_MODEL_INVALID);}
+    uint32_t cursor=0;status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
+    if(status!=AYATSURI_MODEL_OK&&status!=AYATSURI_MODEL_DONE){a->busy=false;return managed_model_error(ctx,op,status);}
+    pocket_proc_mark mark;JSValue result=pocket_proc_native_begin(ctx,op,&mark);
+    if(JS_IsException(result)){a->busy=false;return result;}
+    while(status==AYATSURI_MODEL_OK){
+        size_t selected=k;for(size_t j=0;j<k;j++)if(managed_clip_id(&ids,j)==packet.node_id){selected=j;break;}
+        if(selected<k){
+            managed_packet_clip(&packet,&counts,&xy,selected,&scratch.clipped);
+            result=pocket_proc_native_clipped_ellipsoid(ctx,op,&scratch.clipped);
+        }else if(packet.kind==1){
+            managed_packet_ellipsoid(&packet,&scratch.clipped.patch);
+            result=pocket_proc_native_ellipsoid(ctx,op,&scratch.clipped.patch);
+        }else if(packet.kind==2){
+            memset(&scratch.blend,0,sizeof scratch.blend);scratch.blend.header.count=packet.lobe_count;
+            memcpy(scratch.blend.header.light,packet.lighting,36);memcpy(scratch.blend.header.surface,packet.storage+252,6);
+            memcpy(scratch.blend.header.material,packet.storage+264,44);memcpy(scratch.blend.header.controls,packet.storage+308,8);
+            memcpy(scratch.blend.lobes,packet.storage+316+24*packet.lobe_count,84*packet.lobe_count);
+            result=pocket_proc_native_blend_ellipsoids(ctx,op,&scratch.blend);
         }else result=invalid(ctx,op,"invalid model packet kind");
         if(JS_IsException(result))break;
         status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
@@ -233,6 +295,19 @@ static JSValue managed_instance_read_pose(JSContext *ctx,JSValueConst self,int a
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_DupValue(ctx,argv[1]):managed_model_error(ctx,op,status);
 }
+static JSValue managed_instance_read_projection(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="ayatsuri.instance.readProjection";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+    if(!a)return JS_EXCEPTION;
+    double index;shade_view output;ayatsuri_model_status status=AYATSURI_MODEL_INVALID;
+    if(argc==2&&number(ctx,argv[0],&index)&&whole(index,0,a->core.model->node_count-1)&&
+       managed_model_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,true,&output)&&output.bytes==32){
+        uint32_t cursor=(uint32_t)index;ayatsuri_model_packet packet;
+        status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
+        if(status==AYATSURI_MODEL_OK&&packet.node_id==(uint16_t)index&&packet.kind==1)memcpy(output.data,packet.storage+96,32);
+        else if(status!=AYATSURI_MODEL_STATE)status=AYATSURI_MODEL_INVALID;
+    }
+    a->busy=false;return status==AYATSURI_MODEL_OK?JS_DupValue(ctx,argv[1]):managed_model_error(ctx,op,status);
+}
 static JSValue managed_model_instance(JSContext *,JSValueConst,int,JSValueConst *);
 static const JSCFunctionListEntry managed_model_methods[]={
     JS_CGETSET_DEF("count",managed_model_count,NULL),JS_CFUNC_DEF("node",1,managed_model_node),
@@ -241,6 +316,8 @@ static const JSCFunctionListEntry managed_model_methods[]={
 static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("targets",4,managed_instance_targets),JS_CFUNC_DEF("evaluate",2,managed_instance_evaluate),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),
+    JS_CFUNC_DEF("submitClipped",3,managed_instance_submit_clipped),
+    JS_CFUNC_DEF("readProjection",2,managed_instance_read_projection),
     JS_CFUNC_DEF("readPose",2,managed_instance_read_pose),JS_CFUNC_DEF("dispose",0,managed_instance_dispose)};
 static const JSClassDef managed_model_definition={.class_name="AyatsuriModel",.finalizer=managed_model_finalizer};
 static const JSClassDef managed_instance_definition={.class_name="AyatsuriInstance",.finalizer=managed_instance_finalizer,.gc_mark=managed_instance_mark};

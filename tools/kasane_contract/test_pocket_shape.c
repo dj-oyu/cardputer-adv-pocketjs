@@ -40,6 +40,10 @@ JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_pro
     (void)patch;
     return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches need the renderer harness",false,NULL);
 }
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"clipped patches need the renderer harness",false,NULL);
+}
 
 /* __segs(): the recorded segments as "x0,y0,x1,y1,c;..." and cleared;
  * __limit(n) caps them; __begin() opens a frame again. */

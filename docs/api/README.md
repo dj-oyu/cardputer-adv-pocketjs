@@ -18,5 +18,6 @@
 | [shapes.md](shapes.md) | 仕様 | `pocket.shapes`（capability `kasane.shapes`、名乗ったアプリだけ）: 射影行列で 3D の点を写す `project`、多角形・楕円から穴を抜いて塗る `fill`、隠す形つきの `outline`。手続き面のフレームへ直接描く |
 | [blended-surfaces.md](blended-surfaces.md) | 造形の縦切り | 汎用の連続前面ブレンド、ambient RGB、同画素のpacked楕円体と借用/資源制約 |
 | [character-utility.md](character-utility.md) | 実験版 | キャラクターの配置・材質・身体座標の模様・世界光・視点を分離するJS utility。縦切りの実装範囲・依存更新・資源と未達品質を明示 |
+| [ayatsuri-clip.md](ayatsuri-clip.md) | 最小adapter | 同frameの3D開口投影と解析楕円体の凸clip。失敗・EMPTY・資源寿命と未対応depthを分離 |
 | [backlog.md](backlog.md) | backlog | BLE、Opus の採否、SD の帯域、PC bridge の wire 形式など |
 | [app-control-v1.md](app-control-v1.md) | 仕様 | HOME の native app-control と broker の共通契約。 |

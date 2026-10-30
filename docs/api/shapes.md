@@ -128,3 +128,19 @@ alphaはopacityにedge coverageを掛け、現在の走査帯の下地へRGB565�
 呼出時に184Bの数値packetをcandidateへコピーして凍結する（詰物もゼロ化）。1パッチは既存frameの20entry=200Bを使い、clipped AABBの画素数をraster予算へ保守的に課金する。フレームごとのJS bufferコピー0とは異なり、この所有権確定のコピーは必要。caller配列を後で変えてもcommit済み画像は変わらない。render帯でpacketをstackへ読み出すが、継続参照・動的確保・全画面cacheはない。packet全byteを帯damage署名へ含めるため、光/材質/模様だけの変更も再描画される。
 
 上限失敗はLIMIT_EXCEEDED、候補frame破棄、呼出の部分結果なし、次beginFrameが必要。実機のrender時間/heap/画質は未検証。ホスト契約試験は `tools/kasane_contract/run_proc_ellipsoid.py` の実renderer O0/O2・全画面/8行帯一致、alpha/光/視点/UV/負scale/特異入力/切れたpacketを扱う。
+
+## `ellipsoidClippedPacked(data, byteOffset, lighting, xy)`
+
+凸の包含領域で解析楕円体を切る汎用低層。`pocket.hone`と既存shapes互換namespaceへ同じ入口を公開する。眼・狐専用の意味、持続するclip stack、深度bufferは持たない。
+
+`data`は通常ArrayBuffer、`byteOffset`は非負整数。既存`ellipsoidPacked`の148B配置（screen32B、normal36B、material32B、texture36B、surface10Bと末尾2B）を同期で読む。`lighting`は通常ArrayBufferを裏付けに持つFloat32Array/9、`xy`も通常Float32Arrayで、長さ0または6/8/10/12/14/16。shared/detached backingは拒否する。非整列のbyteOffsetもmemcpyで読むため許可し、typed pointerへcastしない。
+
+`xy`は画面座標の3〜8頂点。全active座標は有限±4096、重複・同一直線・凹・自己交差を拒否する。全辺に対する全頂点の同側性を検査し、両windingを許す。morphのrest方向維持や可視角度域はutility/modelの責任であり、両winding対応を反転許可へ読み替えない。長さ0は**明示EMPTY**で、clipなしではない。EMPTYでも元の楕円体・材質・光を検証し、不正値を隠さない。有効EMPTYは0append。
+
+各行の凸spanを先に求め、覆われない画素の法線・UV・陰影計算を省く。境界は既存rendererの整数画面標本を含むclosed edge。球面側のsoft edgeは維持するが、clip辺に追加AAはない。surfaceを切った平面のcap、物理交差、頭や頬による自動遮蔽、depth sortにはならない。配置順と前後関係は別途評価する。
+
+新packetは252B、27entry=270B。旧184B/20entry ABIは不変。reserved、未使用頂点、最終paddingはゼロ化し、全描画パラメータを帯署名に含める。clip bboxと楕円体bboxの共通AABBへ保守的にraster課金し、正確なpolygon面積とは呼ばない。
+
+この新入口は入力とsegment/raster総量を**append前**に全検査する。INVALID_ARGUMENT/LIMIT_EXCEEDEDはNOT_APPLIEDでbuilding/count/raster/既存candidateを保ち、後続の有効append/commitを許す。既存ellipsoidの予算失敗時poison契約は変更しない。描画はcandidate所有snapshotを使い、呼出後のJS配列変更を参照しない。present失敗時の旧committed/repairも従来どおり。
+
+低層試験は`run_proc_ellipsoid.py`と`run_pocket_proc_qjs.py --clip-only`。ASan/UBSan、整数境界、padding、EMPTY、shared入力、非整列、snapshot、頂点のみのdamage、IO repair、quota復帰を対象とする。画質・実機時間・stackの受入とは区別する。

@@ -6,6 +6,8 @@ on:
       - 'apps/cloud/**'
       - 'apps/cloudprobe/**'
       - 'apps/cloudmem/**'
+      - 'apps/fox3d/**'
+      - 'apps/lib/ayatsuri_clip.js'
       - 'components/pocketjs_guest/src/guest.c'
       - 'components/pocketjs_guest/include/pocketjs/guest.h'
       - 'main/app_session.*'
@@ -62,9 +64,13 @@ jobs:
           node tools/character/test_cloud_dynamic.cjs
           node tools/character/test_cloud_fixture.cjs
           node tools/character/test_cloud_memory.cjs
+          node tools/character/test_ayatsuri_clip.cjs
           python3 tools/test_guest_allocator_metrics.py
           node tools/ayatsuri/model/test_pack_model.cjs
           node tools/ayatsuri/model/builtin_asset.cjs
+          node tools/ayatsuri/model/test_fox_face.cjs
+          gcc -std=c11 -O1 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -I main tools/ayatsuri/model/test_builtin_assets.c main/pocket/pocket_ayatsuri_assets.c main/ayatsuri/ayatsuri_model.c -lm -o /tmp/fox-builtin-assets
+          /tmp/fox-builtin-assets
           node tools/ayatsuri/model/test_native_scene.cjs
           python3 tools/ayatsuri/model/run_model_contracts.py
           python3 tools/ayatsuri/model/run_model_study.py --self-test-manifest
@@ -83,6 +89,8 @@ jobs:
         run: |
           python3 tools/kasane_contract/run_pocket_shape.py
           python3 tools/kasane_contract/run_proc_ellipsoid.py
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2
+          python3 tools/kasane_contract/run_fox_app_host.py
           python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
           python3 tools/kasane_contract/run_character_app_host.py --capture-dir .cache/character-capture
           python3 tools/kasane_contract/run_character_app_host.py --cloud --capture-dir .cache/cloud-capture
@@ -95,6 +103,8 @@ jobs:
           sudo apt-get install -y gcc-multilib
           python3 tools/ayatsuri/run_transform.py --m32
           python3 tools/ayatsuri/run_follow.py --m32
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2 --m32
+          python3 tools/kasane_contract/run_fox_app_host.py --m32 --capture-dir .cache/fox-capture
           node tools/character/transform_oracle.cjs
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
@@ -115,6 +125,9 @@ jobs:
             .cache/cloud-capture/
             .cache/native-model-study/ci/
             .cache/cloud-memory-*/
+            .cache/fox-capture/
+            .cache/fox-app-m32/result.json
+            .cache/fox-app-m32/*.log
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

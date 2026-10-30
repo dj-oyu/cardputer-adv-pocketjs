@@ -478,6 +478,79 @@ bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,in
     if(!p->surface[2]){*left=1;*right=0;}
     return true;
 }
+static bool clip_prepare(const ksn_proc_ellipsoid_clip *p,int *winding){
+    if(p->reserved[0]||p->reserved[1]||p->reserved[2]||
+       (p->count!=0&&(p->count<3||p->count>KSN_PROC_CLIP_VERTICES)))return false;
+    for(unsigned k=0;k<2u*p->count;k++)if(!isfinite(p->xy[k])||fabsf(p->xy[k])>4096)return false;
+    for(unsigned k=2u*p->count;k<16;k++){uint32_t bits;memcpy(&bits,p->xy+k,4);if(bits)return false;}
+    if(!p->count){*winding=0;return true;}
+    int orientation=0;
+    for(unsigned i=0;i<p->count;i++){
+        const unsigned next=(i+1u)%p->count;
+        const double ax=p->xy[2*i],ay=p->xy[2*i+1],dx=(double)p->xy[2*next]-ax,dy=(double)p->xy[2*next+1]-ay;
+        if(dx==0&&dy==0)return false;
+        /* Checking all vertices, not just adjacent turns, rejects stars. */
+        for(unsigned j=0;j<p->count;j++)if(j!=i&&j!=next){
+            const double cross=dx*((double)p->xy[2*j+1]-ay)-dy*((double)p->xy[2*j]-ax);
+            const int sign=(cross>0)-(cross<0);
+            if(!sign||(orientation&&sign!=orientation))return false;
+            orientation=sign;
+        }
+    }
+    *winding=orientation;return true;
+}
+static bool clip_contains(const ksn_proc_ellipsoid_clip *p,int winding,int x,int y){
+    for(unsigned i=0;i<p->count;i++){
+        const unsigned next=(i+1u)%p->count;
+        const double ax=p->xy[2*i],ay=p->xy[2*i+1],dx=(double)p->xy[2*next]-ax,dy=(double)p->xy[2*next+1]-ay;
+        if(winding*(dx*((double)y-ay)-dy*((double)x-ax))<0)return false;
+    }
+    return p->count!=0;
+}
+/* Closed integer pixel centres. Double intersection work is per row, not
+ * per shaded pixel; endpoint halfplanes repair division rounding at ties. */
+static bool clip_span(const ksn_proc_ellipsoid_clip *p,int winding,int y,int *left,int *right){
+    if(!p->count)return false;
+    double lo=*left,hi=*right;
+    for(unsigned i=0;i<p->count;i++){
+        const unsigned next=(i+1u)%p->count;
+        const double ax=p->xy[2*i],ay=p->xy[2*i+1],dx=(double)p->xy[2*next]-ax,dy=(double)p->xy[2*next+1]-ay;
+        if(dy==0){if(winding*dx*((double)y-ay)<0)return false;continue;}
+        const double intersection=ax+((double)y-ay)*dx/dy;
+        if(winding*dy>0)hi=fmin(hi,intersection);else lo=fmax(lo,intersection);
+    }
+    const double first=fmax(*left,ceil(lo)-1),last=fmin(*right,floor(hi)+1);
+    if(first>last||first>*right||last<*left)return false;
+    int a=(int)first,b=(int)last;
+    while(a<=b&&!clip_contains(p,winding,a,y))++a;
+    while(b>=a&&!clip_contains(p,winding,b,y))--b;
+    if(a>b)return false;
+    *left=a;*right=b;return true;
+}
+bool ksn_proc_clipped_ellipsoid_read(const ksn_proc_segment *data,unsigned words,ksn_proc_clipped_ellipsoid *out){
+    if(!data||!out||words<KSN_PROC_CLIPPED_WORDS)return false;
+    const uint8_t *raw=(const uint8_t *)data;
+    for(size_t k=sizeof *out;k<KSN_PROC_CLIPPED_WORDS*sizeof *data;k++)if(raw[k])return false;
+    memcpy(out,data,sizeof *out);return true;
+}
+bool ksn_proc_clipped_ellipsoid_bounds(const ksn_proc_clipped_ellipsoid *p,int *left,int *top,int *right,int *bottom){
+    int l,t,r,b,winding;
+    /* EMPTY never hides invalid analytic geometry. */
+    if(!p||!ksn_proc_ellipsoid_bounds(&p->patch,&l,&t,&r,&b)||!clip_prepare(&p->clip,&winding))return false;
+    if(!p->clip.count){l=1;r=0;}
+    else{
+        float x0=p->clip.xy[0],x1=x0,y0=p->clip.xy[1],y1=y0;
+        for(unsigned k=1;k<p->clip.count;k++){
+            x0=fminf(x0,p->clip.xy[2*k]);x1=fmaxf(x1,p->clip.xy[2*k]);
+            y0=fminf(y0,p->clip.xy[2*k+1]);y1=fmaxf(y1,p->clip.xy[2*k+1]);
+        }
+        if(ceilf(x0)>l)l=(int)ceilf(x0);
+        if(floorf(x1)<r)r=(int)floorf(x1);
+        if(ceilf(y0)>t)t=(int)ceilf(y0);
+        if(floorf(y1)<b)b=(int)floorf(y1);
+    }
+    *left=l;*top=t;*right=r;*bottom=b;return true;
+}
 bool ksn_proc_blend_read(const ksn_proc_segment *data,unsigned words,ksn_proc_blend_ellipsoids *p,unsigned *used){
     if(!data||!p||!used||words*sizeof *data<sizeof p->header)return false;
     memcpy(&p->header,data,sizeof p->header);
@@ -524,28 +597,29 @@ static unsigned ell_colour(float base,float light,float tint,float front,float s
 }
 /* A unit sphere projected by two affine rows. Reconstruct its front surface
  * analytically, so geometry storage does not grow with pixel resolution. */
-static void ellipsoid_band(const ksn_proc_segment *g,const ksn_proc_segment *data,
+static void ellipsoid_band(const ksn_proc_ellipsoid *p,const ksn_proc_ellipsoid_clip *clip,int winding,
                            uint16_t *pixels,int y,int height){
-    ksn_proc_ellipsoid p;memcpy(&p,data,sizeof p);
     int left,top,right,bottom;
-    if(!ksn_proc_ellipsoid_bounds(&p,&left,&top,&right,&bottom))return;
+    if(!ksn_proc_ellipsoid_bounds(p,&left,&top,&right,&bottom))return;
     if(top<y)top=y;
     if(bottom>=y+height)bottom=y+height-1;
     if(left>right||top>bottom)return;
-    (void)g;
-    const float *a=p.screen,*b=p.screen+4,*nm=p.normal,*m=p.material,*uv=p.texture;
+    const float *a=p->screen,*b=p->screen+4,*nm=p->normal,*m=p->material,*uv=p->texture;
     const float aa=a[0]*a[0]+a[1]*a[1]+a[2]*a[2],bb=b[0]*b[0]+b[1]*b[1]+b[2]*b[2],
         ab=a[0]*b[0]+a[1]*b[1]+a[2]*b[2],inv=1/(aa*bb-ab*ab);
     float axis[3]={a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};
     (void)ell_unit(axis);
-    float l[3]={p.light[0],p.light[1],p.light[2]},v[3]={p.light[3],p.light[4],p.light[5]};
+    float l[3]={p->light[0],p->light[1],p->light[2]},v[3]={p->light[3],p->light[4],p->light[5]};
     (void)ell_unit(l);(void)ell_unit(v);
     float sign=0;
     for(unsigned k=0;k<3;k++)sign+=(nm[3*k]*axis[0]+nm[3*k+1]*axis[1]+nm[3*k+2]*axis[2])*v[k];
     if(sign<0)for(unsigned k=0;k<3;k++)axis[k]=-axis[k];
     float half[3]={l[0]+v[0],l[1]+v[1],l[2]+v[2]};const bool has_half=ell_unit(half);
     const float edge=fmaxf(uv[6],2/fminf(sqrtf(aa),sqrtf(bb)));
-    for(int yy=top;yy<=bottom;yy++)for(int x=left;x<=right;x++){
+    for(int yy=top;yy<=bottom;yy++){
+      int row_left=left,row_right=right;
+      if(clip&&!clip_span(clip,winding,yy,&row_left,&row_right))continue;
+      for(int x=row_left;x<=row_right;x++){
         const float dx=x-a[3],dy=yy-b[3],u=(bb*dx-ab*dy)*inv,w=(aa*dy-ab*dx)*inv;
         float q[3]={a[0]*u+b[0]*w,a[1]*u+b[1]*w,a[2]*u+b[2]*w};
         const float residual=1-q[0]*q[0]-q[1]*q[1]-q[2]*q[2];
@@ -555,27 +629,28 @@ static void ellipsoid_band(const ksn_proc_segment *g,const ksn_proc_segment *dat
         float n[3];
         for(unsigned k=0;k<3;k++)n[k]=nm[3*k]*q[0]+nm[3*k+1]*q[1]+nm[3*k+2]*q[2];
         if(!ell_unit(n))continue;
-        uint16_t base=p.surface[0];
-        if(p.surface[4]){
+        uint16_t base=p->surface[0];
+        if(p->surface[4]){
             const float tu=atan2f(q[0],q[2])*(1.0f/6.283185307179586f)+0.5f,tv=q[1]*0.5f+0.5f;
             const float U=uv[0]*tu+uv[1]*tv+uv[2],V=uv[3]*tu+uv[4]*tv+uv[5];
             bool second;
-            if(p.surface[4]==3)second=((int)floorf(U)+(int)floorf(V))&1;
-            else{const float t=p.surface[4]==1?U:V,f=t-floorf(t);second=f>=uv[7]&&f<=uv[8];}
-            if(second)base=p.surface[1];
+            if(p->surface[4]==3)second=((int)floorf(U)+(int)floorf(V))&1;
+            else{const float t=p->surface[4]==1?U:V,f=t-floorf(t);second=f>=uv[7]&&f<=uv[8];}
+            if(second)base=p->surface[1];
         }
         const float dot=n[0]*l[0]+n[1]*l[1]+n[2]*l[2],front=fmaxf(0,dot),back=fmaxf(0,-dot),
             nh=has_half?fmaxf(0,n[0]*half[0]+n[1]*half[1]+n[2]*half[2]):0,
-            spec=front>0&&nh>0?powf(nh,m[3]):0,thin=1-p.surface[3]*(1.0f/255)*chord;
-        unsigned r=ell_colour(((base>>11)&31)*(1.0f/31),p.light[6],m[5],front,spec,back,thin,m,31),
-            gg=ell_colour(((base>>5)&63)*(1.0f/63),p.light[7],m[6],front,spec,back,thin,m,63),
-            blue=ell_colour((base&31)*(1.0f/31),p.light[8],m[7],front,spec,back,thin,m,31);
-        const unsigned alpha=(unsigned)lroundf(p.surface[2]*fminf(1,residual/edge)),ia=255-alpha;
+            spec=front>0&&nh>0?powf(nh,m[3]):0,thin=1-p->surface[3]*(1.0f/255)*chord;
+        unsigned r=ell_colour(((base>>11)&31)*(1.0f/31),p->light[6],m[5],front,spec,back,thin,m,31),
+            gg=ell_colour(((base>>5)&63)*(1.0f/63),p->light[7],m[6],front,spec,back,thin,m,63),
+            blue=ell_colour((base&31)*(1.0f/31),p->light[8],m[7],front,spec,back,thin,m,31);
+        const unsigned alpha=(unsigned)lroundf(p->surface[2]*fminf(1,residual/edge)),ia=255-alpha;
         uint16_t *dest=pixels+(yy-y)*KSN_PROC_W+x;
         r=(r*alpha+((*dest>>11)&31)*ia+127)/255;
         gg=(gg*alpha+((*dest>>5)&63)*ia+127)/255;
         blue=(blue*alpha+(*dest&31)*ia+127)/255;
         *dest=(uint16_t)((r<<11)|(gg<<5)|blue);
+      }
     }
 }
 typedef struct {
@@ -676,6 +751,12 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *p
 static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
     for(unsigned j=0;j<frame->count;j++){
         const ksn_proc_segment *s=&frame->segments[j];
+        if(s->x0>=KSN_PROC_EXT_CLIPPED_ELLIPSOID-480){
+            ksn_proc_clipped_ellipsoid p;int winding;
+            if(!ksn_proc_clipped_ellipsoid_read(s+1,frame->count-j-1,&p)||!clip_prepare(&p.clip,&winding))return;
+            if(s->y1>=y&&s->y0<y+height)ellipsoid_band(&p.patch,&p.clip,winding,pixels,y,height);
+            j+=(unsigned)KSN_PROC_CLIPPED_WORDS;continue;
+        }
         if(s->x0>=KSN_PROC_EXT_BLEND_ELLIPSOIDS-480){
             ksn_proc_blend_ellipsoids p;unsigned used;
             if(!ksn_proc_blend_read(s+1,frame->count-j-1,&p,&used))return;
@@ -684,7 +765,8 @@ static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *fram
         }
         if(s->x0>=KSN_PROC_EXT_ELLIPSOID-480){
             if(KSN_PROC_ELLIPSOID_WORDS>frame->count-j-1)return;
-            ellipsoid_band(s,s+1,pixels,y,height);
+            ksn_proc_ellipsoid p;memcpy(&p,s+1,sizeof p);
+            ellipsoid_band(&p,NULL,0,pixels,y,height);
             j+=(unsigned)KSN_PROC_ELLIPSOID_WORDS;continue;
         }
         int ymin=s->y0<s->y1?s->y0:s->y1;

@@ -102,6 +102,11 @@ static void test_admission(void) {
     CHECK(memory && !strcmp(memory->entry,"apps/cloudmem/cloud_memory.js"));
     CHECK(memory && !strcmp(memory->title,"CLOUD MEMORY"));
     CHECK(app_registry_admit(memory,"0.1.0",supported,NULL,reason,sizeof reason));
+    const app_manifest_t *fox=app_registry_find("local.fox3d");
+    CHECK(fox && !strcmp(fox->entry,"apps/fox3d/fox_face.js"));
+    CHECK(fox && !strcmp(fox->title,"FOX FACE"));
+    CHECK(fox && fox->works==APP_WORKS_NONE);
+    CHECK(app_registry_admit(fox,"0.1.0",supported,NULL,reason,sizeof reason));
     // The games: one row each, started from the home menu, no works library.
     static const struct { const char *id, *title, *entry; } games[]={
         {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},

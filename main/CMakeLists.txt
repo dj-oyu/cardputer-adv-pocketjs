@@ -58,10 +58,9 @@ option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation f
 option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
-# Dedicated CLOUD MEMORY diagnostic candidate: the registered device builder
-# cannot pass CMake overrides. Verify ON in its fresh cache before measuring.
-# Restore OFF in the later normal candidate; this default is not a release setting.
-option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" ON)
+# Normal products do not carry the CLOUD MEMORY diagnostic instrumentation.
+# The dedicated fde49fb candidate keeps its measured build identity separately.
+option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
 option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
 set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
 if(POCKET_DERBY_RUNNER_AFFINE)
@@ -221,7 +220,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "scene/fxmat
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/character/character_lab.js" "../apps/cloud/cloud_act.js" "../apps/cloudprobe/cloud_probe.js" "../apps/cloudmem/cloud_memory.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/character/character_lab.js" "../apps/cloud/cloud_act.js" "../apps/cloudprobe/cloud_probe.js" "../apps/cloudmem/cloud_memory.js" "../apps/fox3d/fox_face.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE

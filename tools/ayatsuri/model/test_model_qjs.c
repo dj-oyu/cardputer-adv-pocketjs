@@ -23,10 +23,10 @@ bool pocket_api_class_ready(JSRuntime *rt,JSRuntime **owner,JSClassID *id){
     *owner=rt;*id=0;return false;
 }
 static void reset_classes(void){for(unsigned n=0;n<class_owner_count;n++)*class_owners[n]=NULL;}
-static union {ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;} packets[512];
-static unsigned packet_count,submit_calls,fail_submission;
+static union {ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;ksn_proc_clipped_ellipsoid clipped;} packets[512];
+static unsigned packet_count,submit_calls,fail_submission,begin_calls;
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
-    (void)ctx;(void)op;*mark=(pocket_proc_mark){.count=(uint16_t)packet_count};return JS_UNDEFINED;
+    (void)ctx;(void)op;++begin_calls;*mark=(pocket_proc_mark){.count=(uint16_t)packet_count};return JS_UNDEFINED;
 }
 void pocket_proc_native_rollback(const pocket_proc_mark *mark){packet_count=mark->count;}
 JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *p){
@@ -36,6 +36,12 @@ JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_pro
 JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p){
     if(fail_submission&&++submit_calls==fail_submission)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"injected submit");
     CHECK(packet_count<512);memset(&packets[packet_count],0,sizeof packets[0]);packets[packet_count++].blend=*p;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *p){
+    int l,t,r,b;if(!ksn_proc_clipped_ellipsoid_bounds(p,&l,&t,&r,&b))return invalid(ctx,op,"invalid clip");
+    if(l>r||t>b)return JS_UNDEFINED;
+    if(fail_submission&&++submit_calls==fail_submission)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"injected submit");
+    CHECK(packet_count<512);memset(&packets[packet_count],0,sizeof packets[0]);packets[packet_count++].clipped=*p;return JS_UNDEFINED;
 }
 #include "../../../main/pocket/pocket_ayatsuri_model.inc"
 static uint8_t *fixture;static size_t fixture_bytes;
@@ -58,6 +64,9 @@ static JSValue clear_packets(JSContext *c,JSValueConst self,int argc,JSValueCons
 }
 static JSValue recorded_packet_count(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;return JS_NewUint32(c,packet_count);
+}
+static JSValue recorded_begin_count(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;return JS_NewUint32(c,begin_calls);
 }
 static JSValue force_failure(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;CHECK(argc==1);CHECK(JS_ToUint32(c,&fail_submission,argv[0])==0);submit_calls=0;return JS_UNDEFINED;
@@ -110,6 +119,7 @@ static void install(JSContext *ctx){
     JS_SetPropertyStr(ctx,global,"snapshotHash",JS_NewCFunction(ctx,snapshot_hash,"snapshotHash",0));
     JS_SetPropertyStr(ctx,global,"clearPackets",JS_NewCFunction(ctx,clear_packets,"clearPackets",0));
     JS_SetPropertyStr(ctx,global,"packetCount",JS_NewCFunction(ctx,recorded_packet_count,"packetCount",0));
+    JS_SetPropertyStr(ctx,global,"beginCount",JS_NewCFunction(ctx,recorded_begin_count,"beginCount",0));
     JS_SetPropertyStr(ctx,global,"forceSubmitFailure",JS_NewCFunction(ctx,force_failure,"forceSubmitFailure",1));
     JS_SetPropertyStr(ctx,global,"sourceBuffer",JS_NewArrayBufferCopy(ctx,fixture,fixture_bytes));
     ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
@@ -125,7 +135,10 @@ static void warm_contract(JSContext *ctx){
         "globalThis.warmDirty=new Uint8Array(warmModel.count);"
         "globalThis.warmPose=new Float32Array(warmModel.count*9);"
         "globalThis.warmColor=new Uint32Array(warmModel.count);"
-        "globalThis.warmOpacity=new Float64Array(warmModel.count);warmActor.evaluate(warmCamera,warmLight);";
+        "globalThis.warmOpacity=new Float64Array(warmModel.count);warmActor.evaluate(warmCamera,warmLight);"
+        "globalThis.warmProjection=new Float32Array(8);globalThis.warmClipIds=new Uint16Array(1);"
+        "globalThis.warmClipCounts=new Uint8Array([4]);globalThis.warmClipXY=new Float32Array(16);"
+        "warmClipXY.set([-500,-500,500,-500,500,500,-500,500]);";
     eval_ok(ctx,source,strlen(source));
     JSValue global=JS_GetGlobalObject(ctx),actor=JS_GetPropertyStr(ctx,global,"warmActor");
     pocket_model_actor *native=JS_GetOpaque(actor,pocket_model_instance_class);CHECK(native);
@@ -133,14 +146,23 @@ static void warm_contract(JSContext *ctx){
     JSValue eval[2]={JS_GetPropertyStr(ctx,global,"warmCamera"),JS_GetPropertyStr(ctx,global,"warmLight")};
     JSValue target[4]={JS_GetPropertyStr(ctx,global,"warmDirty"),JS_GetPropertyStr(ctx,global,"warmPose"),
         JS_GetPropertyStr(ctx,global,"warmColor"),JS_GetPropertyStr(ctx,global,"warmOpacity")};
+    uint32_t cursor=0;ayatsuri_model_packet packet;ayatsuri_model_status status;
+    do{status=ayatsuri_model_instance_next(&native->core,native,1,&cursor,&packet);CHECK(status==AYATSURI_MODEL_OK);}while(packet.kind!=1);
+    JSValue projection[2]={JS_NewUint32(ctx,packet.node_id),JS_GetPropertyStr(ctx,global,"warmProjection")};
+    JSValue clips[3]={JS_GetPropertyStr(ctx,global,"warmClipIds"),JS_GetPropertyStr(ctx,global,"warmClipCounts"),JS_GetPropertyStr(ctx,global,"warmClipXY")};
+    shade_view id_view;CHECK(managed_model_buffer(ctx,clips[0],JS_TYPED_ARRAY_UINT16,true,&id_view));memcpy(id_view.data,&packet.node_id,2);
     const size_t before=allocation_calls;
     for(unsigned n=0;n<1000;n++){
         JSValue r=managed_instance_targets(ctx,actor,4,target);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
         r=managed_instance_evaluate(ctx,actor,2,eval);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
         packet_count=0;r=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+        r=managed_instance_read_projection(ctx,actor,2,projection);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+        packet_count=0;r=managed_instance_submit_clipped(ctx,actor,3,clips);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
     }
     CHECK(allocation_calls==before);
     for(unsigned n=0;n<4;n++)JS_FreeValue(ctx,target[n]);
+    for(unsigned n=0;n<3;n++)JS_FreeValue(ctx,clips[n]);
+    JS_FreeValue(ctx,projection[0]);JS_FreeValue(ctx,projection[1]);
     JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,actor);JS_FreeValue(ctx,global);
 }
 static size_t foreign_buffers,opacity_skew_count,f32_alignment_rejections;
@@ -232,7 +254,7 @@ int main(int argc,char **argv){
         if(run&1){JSClassID id=0;JS_NewClassID(rt,&id);const JSClassDef d={.class_name="OtherSurface"};CHECK(JS_NewClass(rt,id,&d)==0);}
         ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
         const size_t before_skew=skew_count;skew_bytes=ayatsuri_model_instance_bytes(&model)+7u;
-        packet_count=submit_calls=fail_submission=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
+        packet_count=submit_calls=fail_submission=begin_calls=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
         eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);JS_RunGC(rt);
         CHECK(skew_count>before_skew);skew_bytes=0;
         JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
@@ -252,5 +274,5 @@ int main(int argc,char **argv){
         a=managed_model_instance(ctx,m,0,NULL);CHECK(!JS_IsException(a));
         JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }
-    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, explicit cold release/both finalizer orders, actual JS wrapper visibility/dirty/atomicity, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
+    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, explicit cold release/both finalizer orders, actual JS wrapper visibility/dirty/atomicity, projection/clipped batch prevalidation, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit/readProjection/submitClipped zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
 }

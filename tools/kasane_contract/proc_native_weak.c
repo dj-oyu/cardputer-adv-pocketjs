@@ -36,6 +36,10 @@ __attribute__((weak)) JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const 
     (void)patch;
     return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches unavailable in this harness",false,NULL);
 }
+__attribute__((weak)) JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"clipped patches unavailable in this harness",false,NULL);
+}
 
 __attribute__((weak)) JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
     (void)ctx;(void)op;*mark=(pocket_proc_mark){0};return JS_UNDEFINED;

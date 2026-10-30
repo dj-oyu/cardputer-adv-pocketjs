@@ -405,6 +405,36 @@ static JSValue js_shape_ellipsoid_packed(JSContext *ctx,JSValueConst self,int ar
     return result;
 }
 
+static bool clipped_float_view(JSContext *ctx,JSValueConst value,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=JS_TYPED_ARRAY_FLOAT32)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    const bool ordinary=JS_IsArrayBuffer(ab);
+    uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
+    const bool ok=ordinary&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&(data||(!size&&!bytes));
+    if(ok)*out=(shade_view){data?data+offset:NULL,bytes};
+    JS_FreeValue(ctx,ab);return ok;
+}
+/* Four stateless inputs; EMPTY is a zero-length clip, not absent clipping.
+ * Read all arguments, then memcpy into an aligned stack snapshot. Even foreign
+ * unaligned buffers need no C typed-pointer dereference. No guest pointer or
+ * global clip state is retained, and failed append leaves building intact. */
+static JSValue js_shape_ellipsoid_clipped_packed(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.ellipsoidClippedPacked";
+    double offset;shade_view light,clip;
+    if(argc!=4||!JS_IsArrayBuffer(argv[0])||!number(ctx,argv[1],&offset)||!whole(offset,0,UINT32_MAX)||
+       !clipped_float_view(ctx,argv[2],&light)||light.bytes!=36||!clipped_float_view(ctx,argv[3],&clip)||
+       (clip.bytes&&(clip.bytes<24||clip.bytes>64||clip.bytes%8)))
+        return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"expected ArrayBuffer, byte offset, Float32 light9, Float32 convex xy[0 or 6..16]");
+    size_t size=0;const uint8_t *data=JS_GetArrayBuffer(ctx,&size,argv[0]);const size_t start=(size_t)offset;
+    if(!data||start>size||148u>size-start)return invalid(ctx,op,"packed ellipsoid needs 148 bytes at offset");
+    data+=start;ksn_proc_clipped_ellipsoid p={0};
+    memcpy(p.patch.screen,data,32);memcpy(p.patch.normal,data+32,36);memcpy(p.patch.material,data+68,32);
+    memcpy(p.patch.texture,data+100,36);memcpy(p.patch.surface,data+136,10);memcpy(p.patch.light,light.data,36);
+    p.clip.count=(uint8_t)(clip.bytes/8);if(clip.bytes)memcpy(p.clip.xy,clip.data,clip.bytes);
+    return pocket_proc_native_clipped_ellipsoid(ctx,op,&p);
+}
 static JSValue js_shape_blend_ellipsoids(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;const char *op="shapes.blendEllipsoids";
     if(argc!=5)return invalid(ctx,op,"expected lobes21n, light9, material11, surface3, controls2");
@@ -635,6 +665,7 @@ esp_err_t pocket_shape_fill(JSContext *ctx,JSValueConst ns,void *unused){
         JS_CFUNC_DEF("shade",6,js_shape_shade),
         JS_CFUNC_DEF("ellipsoid",6,js_shape_ellipsoid),
         JS_CFUNC_DEF("ellipsoidPacked",3,js_shape_ellipsoid_packed),
+        JS_CFUNC_DEF("ellipsoidClippedPacked",4,js_shape_ellipsoid_clipped_packed),
         JS_CFUNC_DEF("blendEllipsoids",5,js_shape_blend_ellipsoids),
         JS_CFUNC_DEF("fill",4,js_shape_fill),
         JS_CFUNC_DEF("outline",4,js_shape_outline),

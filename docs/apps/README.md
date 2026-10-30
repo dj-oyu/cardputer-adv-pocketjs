@@ -13,6 +13,7 @@
 | [CHARACTER LAB](../../apps/character/README.md) | 試作・検証 | 人・キツネ・雲を同じ世界光/視点で比較する材質APIの縦切り。BODY/LIGHT/CAMERA/TEXTURE/EXPRESSIONの原因を分離し、hostの描画予算と静止更新を検査する。柔らかい材質表現と実機性能は未検証 |
 | [CLOUD PROBE](../../apps/cloudprobe/README.md) | 有限診断 | 同じ完全な雲モデルでretarget・外乱・pause/replayを既存typed tapから実行 |
 | [CLOUD ACT](../../apps/cloud/README.md) | 造形・演技の縦切り | 雲1体の主volume・顔・青い陰影と、気づき/喜び/減衰停止を共通APIで磨く専用app |
+| [FOX FACE](../../apps/fox3d/README.md) | 狐3Dの最小造形 | 鼻口吻・眼の3D開口・表情を設定図と比較する縦切り。全身/尾/完成演技は後続 |
 | [japanese-input.md](japanese-input.md) | 仕様 | SKK 日本語入力と `pocket.input.text` |
 | [player-overlay.md](player-overlay.md) | 設計 | ホーム画面プレイヤー: オーバーレイの仕組みと費用の管理 |
 | [pet-companion.md](pet-companion.md) | 仕様 | Pet Companion: PC 連携、API、実装メモ |

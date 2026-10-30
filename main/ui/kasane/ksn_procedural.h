@@ -54,6 +54,7 @@ typedef struct { int16_t x0,y0,x1,y1; uint16_t color; } ksn_proc_segment;
 #define KSN_PROC_EXT_PATTERN 4096
 #define KSN_PROC_EXT_ELLIPSOID 8192
 #define KSN_PROC_EXT_BLEND_ELLIPSOIDS 12288
+#define KSN_PROC_EXT_CLIPPED_ELLIPSOID 16384
 #define KSN_PROC_EXT_MIN 2048
 #define KSN_PROC_PATTERN_BITS 24
 #define KSN_PROC_PATTERN_BLOCK 6
@@ -70,6 +71,19 @@ _Static_assert(sizeof(ksn_proc_ellipsoid)==184,"analytic packet layout");
 /* Bounds are clipped pixel centres. False means invalid; an offscreen patch
  * has right<left or bottom<top and no raster cost. */
 bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,int *right,int *bottom);
+/* Screen-space inclusion, not volume intersection or depth occlusion. Empty
+ * count means draw nothing; 3..8 vertices form a strictly convex polygon in
+ * either winding. Finite float32 coordinates are in -4096..4096 screen pixels;
+ * inclusion/row intersections use binary64 intermediates, closed pixel edges.
+ * Unused vertices/reserved bytes are canonical zero. */
+#define KSN_PROC_CLIP_VERTICES 8
+typedef struct {uint8_t count,reserved[3];float xy[16];} ksn_proc_ellipsoid_clip;
+typedef struct {ksn_proc_ellipsoid patch;ksn_proc_ellipsoid_clip clip;} ksn_proc_clipped_ellipsoid;
+_Static_assert(sizeof(ksn_proc_clipped_ellipsoid)==252,"clipped packet layout");
+#define KSN_PROC_CLIPPED_WORDS ((sizeof(ksn_proc_clipped_ellipsoid)+sizeof(ksn_proc_segment)-1)/sizeof(ksn_proc_segment))
+#define KSN_PROC_CLIPPED_ENTRIES (1+KSN_PROC_CLIPPED_WORDS)
+bool ksn_proc_clipped_ellipsoid_read(const ksn_proc_segment *data,unsigned words,ksn_proc_clipped_ellipsoid *out);
+bool ksn_proc_clipped_ellipsoid_bounds(const ksn_proc_clipped_ellipsoid *p,int *left,int *top,int *right,int *bottom);
 /* A shared surface over bounded analytic lobes. The serialized packet holds
  * only count lobes; memcpy is required at segment boundaries (10-byte stride). */
 #define KSN_PROC_BLEND_LOBES 8
@@ -110,6 +124,20 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
     *geometry=frame->segments[(*i)++];
     *pattern=frame->ext&&geometry->x0>=KSN_PROC_EXT_MIN;
     if(*pattern){
+        if(geometry->x0>=KSN_PROC_EXT_CLIPPED_ELLIPSOID-480){
+            ksn_proc_clipped_ellipsoid p;
+            if(!ksn_proc_clipped_ellipsoid_read(frame->segments+*i,frame->count-*i,&p)){
+                *i=frame->count+1u;return false;
+            }
+            *i+=(unsigned)KSN_PROC_CLIPPED_WORDS;
+            int left,top,right,bottom;
+            const bool valid=ksn_proc_clipped_ellipsoid_bounds(&p,&left,&top,&right,&bottom);
+            geometry->x0=(int16_t)(geometry->x0-KSN_PROC_EXT_CLIPPED_ELLIPSOID);
+            if(!valid||left!=geometry->x0||top!=geometry->y0||right!=geometry->x1||bottom!=geometry->y1||left>right||top>bottom){
+                *i=frame->count+1u;return false;
+            }
+            *cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1);return true;
+        }
         if(geometry->x0>=KSN_PROC_EXT_BLEND_ELLIPSOIDS-480){
             ksn_proc_blend_ellipsoids p;unsigned used;
             if(!ksn_proc_blend_read(frame->segments+*i,frame->count-*i,&p,&used)){

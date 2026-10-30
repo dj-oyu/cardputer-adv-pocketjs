@@ -117,3 +117,60 @@ forceSubmitFailure(0); clearPackets(); visual.render(); assert(snapshotHash() ==
 part.visible(false); assert(visualFrame(7) === visualBaseline - 1, 'wrapper hide remains usable after failure');
 part.visible(true); assert(visualFrame(8) === visualBaseline, 'wrapper final show recovery');
 visual.dispose(); visualModel.dispose();
+// Native-only projection and clip batch. No Fox/eye semantics live in C.
+const clipModel = staticModel(), clipActor = clipModel.instance(), projection = new Float32Array(8).fill(777);
+rejects(() => clipActor.readProjection(0,projection), 'CLOSED');
+assert(projection.every(v=>v===777), 'projection output unchanged before evaluation');
+clipActor.evaluate(camera,light);
+const ellipses=[];
+for(let id=0;id<clipModel.count;id++){
+  try { clipActor.readProjection(id,projection); ellipses.push(id); } catch(e) { assert(String(e).includes('INVALID_ARGUMENT'),'unsupported projection type'); }
+}
+assert(ellipses.length>0,'fixture has visible ellipsoid');
+const selected=ellipses[0], ids=new Uint16Array([selected]), clipCounts=new Uint8Array([4]), clipXY=new Float32Array(16);
+clipXY.fill(NaN); clipXY.set([-500,-500,500,-500,500,500,-500,500]);
+clipActor.readProjection(selected,projection); const projectionSaved=projection.slice();
+rejects(()=>clipActor.readProjection(0,projection),'INVALID_ARGUMENT');
+rejects(()=>clipActor.readProjection(clipModel.node('cloud-body'),projection),'INVALID_ARGUMENT');
+assert(equal(projection,projectionSaved),'group/blend projection failure preserves output');
+rejects(()=>clipActor.readProjection(selected,new Float32Array(7)),'INVALID_ARGUMENT');
+clearPackets();clipActor.submit();const normalHash=snapshotHash(), normalCount=packetCount();
+clearPackets();clipActor.submitClipped(new Uint16Array(0),new Uint8Array(0),new Float32Array(0));
+assert(snapshotHash()===normalHash,'zero selection is exactly old submit');
+clearPackets();clipActor.submitClipped(ids,clipCounts,clipXY);const clippedHash=snapshotHash();
+assert(packetCount()===normalCount,'unselected blend and normal ellipsoids remain');
+ids[0]=65535;clipCounts[0]=9;clipXY.fill(NaN);
+assert(snapshotHash()===clippedHash,'clipped source views never retained');
+ids[0]=selected;clipCounts[0]=4;clipXY.set([-500,-500,500,-500,500,500,-500,500]);
+function prebeginFailure(fn){const before=beginCount(),hash=snapshotHash();rejects(fn);assert(beginCount()===before&&snapshotHash()===hash,'whole input batch rejected before begin');}
+prebeginFailure(()=>clipActor.submitClipped(new Uint32Array([selected]),clipCounts,clipXY));
+prebeginFailure(()=>clipActor.submitClipped(ids,new Uint8Array(2),clipXY));
+prebeginFailure(()=>clipActor.submitClipped(ids,clipCounts,new Float32Array(8)));
+prebeginFailure(()=>clipActor.submitClipped(new Uint16Array([clipModel.count]),clipCounts,clipXY));
+prebeginFailure(()=>clipActor.submitClipped(new Uint16Array([0]),clipCounts,clipXY));
+prebeginFailure(()=>clipActor.submitClipped(new Uint16Array([clipModel.node('cloud-body')]),clipCounts,clipXY));
+const duplicateXY=new Float32Array(32);duplicateXY.set(clipXY);duplicateXY.set(clipXY,16);
+prebeginFailure(()=>clipActor.submitClipped(new Uint16Array([selected,selected]),new Uint8Array([4,4]),duplicateXY));
+clipCounts[0]=9;prebeginFailure(()=>clipActor.submitClipped(ids,clipCounts,clipXY));clipCounts[0]=4;
+clipXY[0]=Infinity;prebeginFailure(()=>clipActor.submitClipped(ids,clipCounts,clipXY));clipXY[0]=-500;
+if(ellipses.length>1){
+  const twoXY=new Float32Array(32);twoXY.set(clipXY);twoXY.set(clipXY,16);twoXY[16]=NaN;
+  prebeginFailure(()=>clipActor.submitClipped(new Uint16Array(ellipses.slice(0,2)),new Uint8Array([4,4]),twoXY));
+}
+if(typeof SharedArrayBuffer==='function'){
+  const sharedIds=new Uint16Array(new SharedArrayBuffer(2));sharedIds[0]=selected;
+  prebeginFailure(()=>clipActor.submitClipped(sharedIds,clipCounts,clipXY));
+}
+clipActor.stats({set nodes(value){assert(value===clipModel.count,'busy probe node count');rejects(()=>clipActor.readProjection(selected,projection),'BUSY');rejects(()=>clipActor.submitClipped(ids,clipCounts,clipXY),'BUSY');}});
+const visibility=new Uint8Array(clipModel.count), blankPoses=new Float32Array(clipModel.count*9), blankColors=new Uint32Array(clipModel.count),blankAlpha=new Float64Array(clipModel.count);
+visibility[selected]=16;clipActor.targets(visibility,blankPoses,blankColors,blankAlpha);clipActor.evaluate(camera,light);
+projection.fill(777);rejects(()=>clipActor.readProjection(selected,projection),'INVALID_ARGUMENT');assert(projection.every(v=>v===777),'hidden projection output unchanged');
+prebeginFailure(()=>clipActor.submitClipped(ids,clipCounts,clipXY));
+visibility[selected]=8;clipActor.targets(visibility,blankPoses,blankColors,blankAlpha);clipActor.evaluate(camera,light);
+clipCounts[0]=0;clipXY.fill(NaN);clearPackets();clipActor.submitClipped(ids,clipCounts,clipXY);
+assert(packetCount()===normalCount-1,'explicit empty omits selected visible ellipsoid');
+clipCounts[0]=4;clipXY.set([-500,-500,500,-500,500,500,-500,500]);clearPackets();clipActor.submitClipped(ids,clipCounts,clipXY);
+assert(snapshotHash()===clippedHash,'EMPTY to visible clip recovers');
+forceSubmitFailure(2);rejects(()=>clipActor.submitClipped(ids,clipCounts,clipXY));assert(snapshotHash()===clippedHash,'clipped batch backend failure rolls back appended packets');forceSubmitFailure(0);
+clearPackets();clipActor.submitClipped(ids,clipCounts,clipXY);assert(snapshotHash()===clippedHash,'clipped batch recovery');
+clipModel.dispose();clipActor.readProjection(selected,projection);clipActor.dispose();rejects(()=>clipActor.readProjection(selected,projection),'CLOSED');rejects(()=>clipActor.submitClipped(ids,clipCounts,clipXY),'CLOSED');

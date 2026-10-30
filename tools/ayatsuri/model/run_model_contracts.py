@@ -103,13 +103,15 @@ def main():
     core_binary, qjs_binary = cache / 'test-model-core', cache / 'test-model-qjs'
     strict = ['-Wall', '-Wextra', '-Werror']
     run([compiler, *flags, *strict, *includes, core, core_test, '-lm', '-o', core_binary])
-    run([compiler, *flags, *strict, *defines, *includes, core, qjs_test, *objects, '-lm', '-o', qjs_binary])
+    renderer = ROOT / 'main/ui/kasane/ksn_procedural.c'
+    run([compiler, *flags, *strict, *defines, *includes, core, renderer, qjs_test, *objects, '-lm', '-o', qjs_binary])
     run([core_binary, fixtures[1]], 'core.log')  # Core fixture asserts the 19-node cloud.
     run([qjs_binary, fixtures[0]], 'qjs-tiny.log')
     run([qjs_binary, fixtures[1]], 'qjs-cloud.log')
     sources = [core, ROOT / 'main/ayatsuri/ayatsuri_model.h',
                ROOT / 'main/ayatsuri/ayatsuri_transform.h',
                ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, qjs_test,
+               renderer, ROOT / 'main/ui/kasane/ksn_procedural.h',
                ROOT / 'apps/lib/ayatsuri_model.js',
                ROOT / 'tools/ayatsuri/model/test_model_qjs.js', Path(__file__).resolve()]
     proof = dict(kind='HOST SIMULATION', passed=True, profile=profile,

@@ -26,7 +26,24 @@ Model.disposeは新規利用をcloseし、生存Instanceは保護する。close�
 
 `model.stats(out)`はclose後も呼べ、`closed`、`instances`、`ownedBytes`、`staticBytes`、`released`を返す。後二つのbytesは現在attach中のspanで、`released=true`はdetach済みを意味する。static flashの物理回収やESP heap増加の保証ではない。Instance.disposeは個体arenaを返す。native scene.disposeは自分のInstanceとJS buffer/参照を切るが、借用Modelを勝手にcloseしない。二重disposeは成功、disposed handleの操作は拒否する。既存描画packetはsnapshotなので、cold回収にpresent待ちやsleepを加えない。
 
-製品の `pocket.ayatsuri.modelBuiltin('cloud')` は検証済みの組込みAYNMをModelとして開く。固定byte列は直接参照し、巨大なJS定義graphへ戻さない。unknown名と無効形式は公開前に拒否する。現試作のregistryはcloudのみで、汎用FS loaderや任意assetの認可設計まで含まない。[有限メモリ比較](../perf/cloud-memory-fixture.md)は同一firmware内でJS定義Aと組込みCを選択する。
+製品の `pocket.ayatsuri.modelBuiltin('cloud')` / `modelBuiltin('fox-face')` は検証済みの組込みAYNMをModelとして開く。固定byte列は直接参照し、巨大なJS定義graphへ戻さない。unknown名と無効形式は公開前に拒否する。汎用FS loaderや任意assetの認可設計まで含まない。[有限メモリ比較](../perf/cloud-memory-fixture.md)は同一firmware内でJS定義Aと組込みCを選択する。
+
+## native評価済み投影と凸clip提出
+
+狐の固定25nodeはAYNM v1のまま保持し、clipのunit-local頂点と表情制御はJS utilityが所有する。次のInstance入口は、既存Cの`ayatsuri_model_instance_next`が返す評価済みpacketとhoneのclipped ellipsoidを組み合わせる。数値評価器やasset形式をもう一つ作らない。
+
+| JS入口 | 型と意味 |
+| --- | --- |
+| `readProjection(id, out)` | idは範囲内整数。outは通常Float32Array/8。evaluate済みで可視のellipsoidのscreen8を同期copyしoutを返す。group/blend/hidden/未評価は拒否、失敗時out不変 |
+| `submitClipped(ids, counts, xy)` | idsはUint16Array/k、countsはUint8Array/k、xyはFloat32Array/(16k)。k<=node数、id重複なし。1行は最大8点の画面XY。countは0または3..8。指定idは可視ellipsoidのみ。全行を検査してから提出 |
+
+全backingは通常ArrayBufferで、shared/detachedを拒否する。Cは呼出中だけborrowし、JS/C pointerを返したり描画まで借り続けない。readProjectionは32Bの明示copyでありゼロcopyではない。clip行はscene所有の固定bufferを再利用する。未使用座標は描画へ使わず、native packetのreserved/tailはゼロ化する。idsの並びで描画順を変更せず、元のnode順を維持する。k=0は通常submitと同じ描画。
+
+閉眼/poseによる非表示は、bindされた眼・耳自体をhiddenにせずcount0（EMPTY）で指定する。hiddenなbound nodeや祖先はこの最小入口では対応外で、無言でclipを外さない。通常の非bound nodeの可視性は従来どおり。
+
+型・全行・重複・clip値の不正はbegin前に拒否する。提出中のnative append失敗は既存markへcount/raster/extを戻し、旧committed表示を変更しない。ただし混合する通常ellipsoid/blendの予算失敗は従来どおりcandidateをpoisonし得るため、次beginから復帰する。単独hone `ellipsoidClippedPacked`の強いNOT_APPLIED契約と混同しない。
+
+高層利用者は[optional clip utility](ayatsuri-clip.md)でnode handle/apertureを使う。dirty mask、id tableのstride、転送準備をアプリへ要求しない。C利用者は同じinstance iteratorのborrow期限と既存hone C snapshot入口を使う。
 
 C arenaは8-byte整列を要求する。JS adapterはguest allocatorの4-byte整列だけを前提に元allocationへ7 B足して確保し、整列後のspanを核へ渡す。解放は必ず元allocationへ戻す。targetのopacityはN個のLE binary64値を持つbyte spanで、double alignmentを要求しない。JS公開引数の型はFloat64Arrayのまま、同期borrowと全件validationを保つ。
 

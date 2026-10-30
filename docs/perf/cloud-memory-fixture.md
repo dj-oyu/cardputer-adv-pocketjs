@@ -2,7 +2,7 @@
 
 基準は3d31fb86。ここからの明示回収・組込みprovider・診断counterを次候補として扱う。実機7d21b302の実績を流用しない。実機メモリ値・GC時間・物理LCD品質は未測定である。
 
-現在の後続headは**専用診断候補**で、TRACEのCMake既定をONにする。登録device builderが任意CMake引数/CI artifact指定を受け付けないためのsource側対応であり、通常リリース設定ではない。計測後の通常候補ではOFFへ戻す。既定fixtureはDEVICE_SHORTへ変更し、旧1115drawのHOST_LONGと区別する。ba078e39のbuild成功と未着手の実機測定を混同しない。
+`fde49fb8348742058138fa573554e775ec0dd4f6`は**専用診断候補**で、TRACEのCMake既定をONにした。登録device builderが任意CMake引数/CI artifact指定を受け付けないためのsource側対応であり、通常リリース設定ではない。同headの24 workflows/82 jobsは成功し、実機担当へ引き渡した。この文書更新後の通常候補では既定OFFへ戻しているため、診断版の実測を新headの結果と呼ばない。既定fixtureはDEVICE_SHORT、旧1115drawのHOST_LONGと区別する。ba078e39のbuild成功と実機測定を混同しない。
 
 ## 寿命と観測範囲
 
