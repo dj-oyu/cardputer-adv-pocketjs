@@ -68,6 +68,7 @@ jobs:
           node tools/ayatsuri/model/test_native_scene.cjs
           python3 tools/ayatsuri/model/run_model_contracts.py
           python3 tools/ayatsuri/model/run_model_study.py --self-test-manifest
+          python3 tools/ayatsuri/model/run_cloud_memory.py --self-test-inputs
           node tools/character/transform_oracle.cjs
           node tools/character_motion_test.cjs
           node tools/character_wake_oracle.cjs

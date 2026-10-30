@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools/kasane_contract'))
@@ -14,10 +15,72 @@ from run_megademo_app_host import build
 from run_model_study import compile_sources, compiler_identity, content_key
 
 
+def runtime_inputs(root):
+    """Resolve every source the production chunk table can load, both routes."""
+    folder = root / 'apps/cloudmem'
+    files = {folder / 'cloud_memory.js', folder / 'chunks.txt'}
+    for line in (folder / 'chunks.txt').read_text().splitlines():
+        words = line.split('#', 1)[0].split()
+        if not words:
+            continue
+        if len(words) != 2:
+            raise ValueError('unsupported cloud memory chunk declaration')
+        if words[0] in ('app', 'option'):
+            continue
+        source = (folder / words[1]).resolve()
+        source.relative_to(root.resolve())
+        files.add(source)
+    return {file.resolve().relative_to(root.resolve()).as_posix():
+            hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(files)}
+
+
+def study_inputs(root):
+    return dict(compile_sources(root), **runtime_inputs(root))
+
+
+def selftest_inputs():
+    with tempfile.TemporaryDirectory(prefix='cloud-memory-inputs-') as temporary:
+        root = Path(temporary)
+        folder = root / 'apps/cloudmem'
+        folder.mkdir(parents=True)
+        (folder / 'cloud_memory.js').write_text("pocket.app.load('runtime');")
+        declarations = ['app local.cloudmem', 'option strip-debug']
+        targets = ['memory_runtime.js', '../lib/ayatsuri_model.js', '../lib/ayatsuri_follow.js',
+                   '../cloud/cloud_model.js', '../cloud/cloud_shared_update.js',
+                   '../cloud/cloud_pose.js', '../cloud/cloud_dynamic.js',
+                   '../character/character.js', '../character/character_blend.js']
+        for index, name in enumerate(targets):
+            file = (folder / name).resolve()
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(f'fixture {index}')
+            declarations.append(f'chunk{index} {name}')
+        manifest = folder / 'chunks.txt'
+        manifest.write_text('\n'.join(declarations))
+        expected = runtime_inputs(root)
+        assert len(expected) == len(targets) + 2
+        for name in expected:
+            file = root / name
+            original = file.read_bytes()
+            file.write_bytes(original + b'\n# changed\n')
+            assert runtime_inputs(root) != expected, name
+            file.write_bytes(original)
+            assert runtime_inputs(root) == expected
+        extra = folder / 'late.js'
+        extra.write_text('new source')
+        manifest.write_text(manifest.read_text() + '\nlate late.js')
+        assert 'apps/cloudmem/late.js' in runtime_inputs(root)
+        assert runtime_inputs(root) != expected
+    print(f'CLOUD_MEMORY_INPUTS_PASS resolved={len(expected)} stale_negative={len(expected)+1} shared_tree_writes=0')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32', action='store_true')
+    parser.add_argument('--self-test-inputs', action='store_true')
     args = parser.parse_args()
+    if args.self_test_inputs:
+        selftest_inputs()
+        return
     folder = ROOT / '.cache' / ('cloud-memory-m32' if args.m32 else 'cloud-memory-asan')
     flags = ['-fsanitize=address,undefined', '-ffp-contract=off']
     if args.m32:
@@ -25,10 +88,7 @@ def main():
         flags = subprocess.check_output(['bash', 'tools/vmtest/m32_sysroot.sh'], cwd=ROOT, env=env, text=True).split()
         flags += ['-msse2', '-mfpmath=sse', '-ffp-contract=off']
     folder.mkdir(parents=True, exist_ok=True)
-    inputs = compile_sources(ROOT)
-    for file in (ROOT / 'apps/cloudmem').glob('*'):
-        if file.is_file():
-            inputs[file.relative_to(ROOT).as_posix()] = hashlib.sha256(file.read_bytes()).hexdigest()
+    inputs = study_inputs(ROOT)
     profile = compiler_identity()
     key = content_key(inputs, flags, hashlib.sha256((ROOT / 'apps/cloud/assets/cloud.aynm').read_bytes()).hexdigest(), profile)
     manifest_path = folder / 'build-manifest.json'
@@ -59,7 +119,7 @@ def main():
         print(run.stdout, end='')
         results.append(run.returncode == 0 and 'CLOUD_MEMORY_HOST_PASS' in run.stdout)
         rows.append((folder / (variant + '-pixels.csv')).read_bytes())
-    current = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in inputs}
+    current = study_inputs(ROOT)
     unchanged = inputs == current
     passed = unchanged and all(results) and rows[0] == rows[1] and len(rows[0].splitlines()) == 2230
     proof = dict(kind='HOST SIMULATION', passed=passed, variants_passed=results,

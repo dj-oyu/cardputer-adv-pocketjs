@@ -51,7 +51,9 @@ runtime.ready、module.before/ready、fixture各phaseを記録する。既存MDT
 
 初回fixtureのrequested peakはA 145820 B/C 100412 B、最大成功guest要求は8496/6607 B。これはhost allocatorのrequested量で、device TLSF usableやESP heap、QuickJS会計総peakではない。画像一致も設定したBODY/変更fixtureの範囲であり、全表情や全cameraの保証ではない。
 
-provenance guardとcounter gateを含むローカル最終再試験もPASSした。実行中の全関連source hash不変、binary SHA256は`af5e49e330d34f29562d89e65949725d94248e1c15c3d8cdd3e1c28f56fba137`、画像列SHA256は`eee4b13bc33e579e2d08869156c24087453de97d9f2de59caaa869059c2407f3`。capacity/画像の結果は初回と一致。local trace ON製品linkも成功したが、公開最終headのCIと実機は別工程である。
+counter gate後のローカル再試験もPASSした。binary SHA256は`af5e49e330d34f29562d89e65949725d94248e1c15c3d8cdd3e1c28f56fba137`、画像列SHA256は`eee4b13bc33e579e2d08869156c24087453de97d9f2de59caaa869059c2407f3`。capacity/画像の結果は初回と一致。ただし当時のguardはcompiled sourceとcloudmem直下だけを対象にしており、参照先JS chunkの一部が不足していた。このguardのtrue値を全関連source不変の証拠には使わない。
+
+修正版はentry/manifestに加え、chunks.txtから解決した両経路の全JS sourceをhashする。実行後に依存集合も取り直し、追加chunkと参照先変更を検出する。`--self-test-inputs`は共有treeを触らず、一時fixtureの全11入力の変更と追加依存（12負例）を検証する。修正後の最終head CI/再試験と旧画像結果は区別する。local trace ON製品linkの成功と実機確認も別工程である。
 
 証拠は`.cache/cloud-memory-m32/{A,C}.log`、`{A,C}-pixels.csv`、`result.json`。モデル単独のASan/UBSanはRAM即時返却、2Instance共有、static detach、GC cycleの両finalizer順、再入/OOM復帰を確認する。計測counterはhost/device相当×ON/OFFと実QuickJS診断bridgeを独立試験する。
 
