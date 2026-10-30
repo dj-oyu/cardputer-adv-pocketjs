@@ -9,6 +9,7 @@ from run_megademo_app_host import ROOT, build
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--cloud', action='store_true', help='run the dedicated one-model CLOUD ACT app')
     parser.add_argument('--frames-per-mode', type=int, default=301)
     parser.add_argument('--ppm', type=Path)
     parser.add_argument('--m32', action='store_true', help='device-sized JSValue/pointers, no sanitizers')
@@ -38,6 +39,11 @@ def main():
     binary = build(flags, cache,
                    'tools/kasane_contract/test_character_app_host.c')
     env = os.environ.copy()
+    entry = 'apps/cloud/cloud_act.js' if args.cloud else 'apps/character/character_lab.js'
+    chunks = 'apps/cloud/chunks.txt' if args.cloud else 'apps/character/chunks.txt'
+    models = ('cloud',) if args.cloud else capture.MODELS
+    env['CHARACTER_APP_ENTRY'] = entry
+    env['CHARACTER_APP_CHUNKS'] = chunks
     env.setdefault('ASAN_OPTIONS', 'detect_leaks=0:abort_on_error=1')
     env.setdefault('UBSAN_OPTIONS', 'halt_on_error=1:print_stacktrace=1')
     if args.ppm:
@@ -45,10 +51,11 @@ def main():
         env['MEGA_PPM'] = str(args.ppm.resolve())
     if args.capture_dir:
         folder = args.capture_dir.resolve()
-        plan, records = capture.prepare(folder, selected_ticks)
+        plan, records = capture.prepare(folder, selected_ticks, models=models)
         env['CHARACTER_CAPTURE_DIR'] = str(folder)
         env['CHARACTER_CAPTURE_PLAN'] = str(plan)
         source = capture.provenance(ROOT, binary, flags)
+        source.update(app_entry=entry, app_chunks=chunks, model_names=models)
         run = subprocess.run([str(binary), str(args.frames_per_mode)], cwd=ROOT, env=env,
                              text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         print(run.stdout, end='')

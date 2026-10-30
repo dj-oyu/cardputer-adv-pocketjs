@@ -288,6 +288,49 @@ static JSValue js_shape_ellipsoid(JSContext *ctx,JSValueConst self,int argc,JSVa
     return r;
 }
 
+/* The packed input avoids retaining separate views for each analytic field.
+ * Byte offsets are wire layout, not C layout; even an unaligned source is
+ * copied into the same aligned, zero-padded snapshot as ellipsoid(). */
+static JSValue js_shape_ellipsoid_packed(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.ellipsoidPacked";
+    double offset;shade_view light;
+    if(argc!=3||!JS_IsArrayBuffer(argv[0])||!number(ctx,argv[1],&offset)||!whole(offset,0,UINT32_MAX)||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&light)||light.bytes!=36)
+        return invalid(ctx,op,"expected ArrayBuffer, integer byte offset, Float32 light9");
+    size_t size=0;const uint8_t *data=JS_GetArrayBuffer(ctx,&size,argv[0]);
+    const size_t start=(size_t)offset;
+    if(!data||start>size||148u>size-start)return invalid(ctx,op,"packed ellipsoid needs 148 bytes at offset");
+    data+=start;
+    ksn_proc_ellipsoid p={0};
+    memcpy(p.screen,data,32);memcpy(p.normal,data+32,36);memcpy(p.material,data+68,32);
+    memcpy(p.texture,data+100,36);memcpy(p.surface,data+136,10);memcpy(p.light,light.data,36);
+    pocket_proc_mark mark;
+    JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
+    result=pocket_proc_native_ellipsoid(ctx,op,&p);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    return result;
+}
+
+static JSValue js_shape_blend_ellipsoids(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.blendEllipsoids";
+    if(argc!=5)return invalid(ctx,op,"expected lobes21n, light9, material11, surface3, controls2");
+    shade_view v[5];
+    const size_t sizes[5]={0,36,44,6,8};
+    for(unsigned i=0;i<5;i++)if(!shade_buffer(ctx,argv[i],i==3?JS_TYPED_ARRAY_UINT16:JS_TYPED_ARRAY_FLOAT32,false,&v[i])||
+        (i&&v[i].bytes!=sizes[i]))return invalid(ctx,op,"expected Float32 lobes/light/material, Uint16 surface3, Float32 controls2");
+    if(!v[0].bytes||v[0].bytes%sizeof(ksn_proc_blend_lobe))return invalid(ctx,op,"lobes must contain complete 21-float rows");
+    const size_t count=v[0].bytes/sizeof(ksn_proc_blend_lobe);
+    if(count>KSN_PROC_BLEND_LOBES)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"at most eight blended ellipsoids");
+    ksn_proc_blend_ellipsoids p={0};p.header.count=(uint8_t)count;
+    memcpy(p.lobes,v[0].data,v[0].bytes);memcpy(p.header.light,v[1].data,36);
+    memcpy(p.header.material,v[2].data,44);memcpy(p.header.surface,v[3].data,6);memcpy(p.header.controls,v[4].data,8);
+    pocket_proc_mark mark;
+    JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
+    result=pocket_proc_native_blend_ellipsoids(ctx,op,&p);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    return result;
+}
+
 /* ---- fill */
 /* A convex polygon's span on row y; false if none. */
 static bool span(const poly *q,float y,float *l,float *r){
@@ -497,6 +540,8 @@ esp_err_t pocket_shape_fill(JSContext *ctx,JSValueConst ns,void *unused){
         JS_CFUNC_DEF("project",3,js_shape_project),
         JS_CFUNC_DEF("shade",6,js_shape_shade),
         JS_CFUNC_DEF("ellipsoid",6,js_shape_ellipsoid),
+        JS_CFUNC_DEF("ellipsoidPacked",3,js_shape_ellipsoid_packed),
+        JS_CFUNC_DEF("blendEllipsoids",5,js_shape_blend_ellipsoids),
         JS_CFUNC_DEF("fill",4,js_shape_fill),
         JS_CFUNC_DEF("outline",4,js_shape_outline),
     };
@@ -510,6 +555,7 @@ static const pocket_limit_t shape_limits[]={
     {.name="maxHoles",.kind=POCKET_LIMIT_INT,.number=SHAPE_HOLES},
     {.name="maxShadeSamples",.kind=POCKET_LIMIT_INT,.number=SHAPE_POINTS},
     {.name="ellipsoidEntries",.kind=POCKET_LIMIT_INT,.number=KSN_PROC_ELLIPSOID_ENTRIES},
+    {.name="blendEllipsoidLobes",.kind=POCKET_LIMIT_INT,.number=KSN_PROC_BLEND_LOBES},
     {0},
 };
 static const pocket_capability_t capability={.name="kasane.shapes",.supported=true,

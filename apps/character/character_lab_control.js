@@ -15,7 +15,7 @@ AyatsuriLab.control=AyatsuriLab.attachControl(function(access){
       let nextPaused=paused;
       for(const key of Object.keys(values)){
         const value=values[key];
-        if((key==='model'&&integer(value,2))||(key==='mode'&&integer(value,5))||
+        if((key==='model'&&integer(value,AyatsuriModels.names.length-1))||(key==='mode'&&integer(value,5))||
             (key==='tick'&&integer(value,Number.MAX_SAFE_INTEGER))||
             (key==='breathing'&&typeof value==='boolean'))state[key]=value;
         else if(key==='paused'&&typeof value==='boolean')nextPaused=value;

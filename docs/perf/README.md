@@ -13,6 +13,7 @@
 | [character-materials.md](character-materials.md) | 実装・host検証 | 3体の材質utility、解析的楕円体、WAKE移行、m32 heap、点描等の比較と未検証範囲 |
 | [character-device-smoke.md](character-device-smoke.md) | 実機担当報告・次期計画 | a30b2a2の機能smoke、測定範囲と未受入、再現可能な画質captureの必要変更 |
 | [character-capture-host.md](character-capture-host.md) | host診断手順 | app所有seek/pause/step、明示ロード診断、固定入力12枚/連番と実機証拠の区別 |
+| [cloud-quality-v1.md](cloud-quality-v1.md) | 視覚改善候補 | 雲1体のbefore/afterと301sample動作画像、造形/材質/演技の変更と未達品質、m32観測 |
 | [ayatsuri-transform-core.md](ayatsuri-transform-core.md) | 実装・host検証 | JS/C共通TRS核、失敗時不変、408 vectors/実QuickJS/3体の回帰、m32精度profileと未実測の区別 |
 | [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [pie-opt-plan.md](pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |

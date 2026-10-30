@@ -86,7 +86,14 @@ static void test_admission(void) {
     missing="kasane.shapes";
     CHECK(!app_registry_admit(character,"0.1.0",supported,NULL,reason,sizeof reason));
     CHECK(!strcmp(reason,"NEEDS kasane.shapes"));
+    const app_manifest_t *cloud=app_registry_find("local.cloud");
+    CHECK(cloud && !strcmp(cloud->title,"CLOUD ACT"));
+    CHECK(cloud && !strcmp(cloud->entry,"apps/cloud/cloud_act.js"));
+    CHECK(cloud && cloud->works==APP_WORKS_NONE);
+    CHECK(!app_registry_admit(cloud,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(!strcmp(reason,"NEEDS kasane.shapes"));
     missing=NULL;
+    CHECK(app_registry_admit(cloud,"0.1.0",supported,NULL,reason,sizeof reason));
     // The games: one row each, started from the home menu, no works library.
     static const struct { const char *id, *title, *entry; } games[]={
         {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},

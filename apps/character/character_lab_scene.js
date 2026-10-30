@@ -37,10 +37,12 @@ globalThis.AyatsuriLab = (() => {
   }
   function create(index,backend){
     resetInputs();
-    const scene=Ayatsuri.scene({backend,light,camera});
+    const scene=Ayatsuri.scene({backend,light,camera,
+      geometries:AyatsuriModels.needsBlend?[AyatsuriBlend]:undefined});
     const model=AyatsuriModels.create(scene,index);
     function evaluate(timeMs,mode,breathing){
       sample(timeMs,mode,breathing);
+      if(model.sample)model.sample(timeMs,mode,breathing,inputs);
       model.update(timeMs,body,expression);
       scene.light(light);scene.camera(camera);
       for(let i=0;i<model.patterns.length;i++)model.patterns[i].texture(texture);
@@ -94,7 +96,7 @@ if(typeof pocket!=='undefined'&&pocket.kasane){
     try{
     const press=(buttons|0)&~held;held=buttons|0;
     if(press&0x4000){
-      index=(index+1)%3;tick=0;
+      index=(index+1)%AyatsuriModels.names.length;tick=0;
     }
     if(press&0xa0){mode=(mode+(press&0x20?1:5))%6;tick=0;}
     if(press&0x10)tick=0;

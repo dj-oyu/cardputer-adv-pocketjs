@@ -13,6 +13,7 @@
 | [hone-ayatsuri.md](hone-ayatsuri.md) | 正式方針・移行 | honeの汎用低層と、JS/Cを持つayatsuriの責務・命名・現状対応・共通評価核への工程 |
 | [ayatsuri-transform-core.md](ayatsuri-transform-core.md) | 最小共通核 | 親子TRS合成をC/JSで共有する境界、数値/借用/失敗時不変性と未実装範囲 |
 | [shapes.md](shapes.md) | 仕様 | `pocket.shapes`（capability `kasane.shapes`、名乗ったアプリだけ）: 射影行列で 3D の点を写す `project`、多角形・楕円から穴を抜いて塗る `fill`、隠す形つきの `outline`。手続き面のフレームへ直接描く |
+| [blended-surfaces.md](blended-surfaces.md) | 造形の縦切り | 汎用の連続前面ブレンド、ambient RGB、同画素のpacked楕円体と借用/資源制約 |
 | [character-utility.md](character-utility.md) | 実験版 | キャラクターの配置・材質・身体座標の模様・世界光・視点を分離するJS utility。縦切りの実装範囲・依存更新・資源と未達品質を明示 |
 | [backlog.md](backlog.md) | backlog | BLE、Opus の採否、SD の帯域、PC bridge の wire 形式など |
 | [app-control-v1.md](app-control-v1.md) | 仕様 | HOME の native app-control と broker の共通契約。 |

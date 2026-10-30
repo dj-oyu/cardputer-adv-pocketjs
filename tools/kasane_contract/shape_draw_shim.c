@@ -7,6 +7,11 @@
 #include "pocket_api.h"
 #include "pocket_proc.h"
 
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"blended surfaces need a native renderer",false,NULL);
+}
+
 JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch){
     (void)patch;
     return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches need a native renderer",false,NULL);

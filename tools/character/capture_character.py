@@ -40,15 +40,15 @@ def ticks(text):
     return result
 
 
-def prepare(folder, selected_ticks=None):
+def prepare(folder, selected_ticks=None, models=MODELS):
     folder.mkdir(parents=True, exist_ok=True)
     records = []
-    for model in range(3):
+    for model, name in enumerate(models):
         for mode, default_tick in ((5, 0), (0, 82), (1, 90), (2, 90)):
             for tick in selected_ticks if selected_ticks is not None else [default_tick]:
                 i = len(records)
-                stem = f'HOST_SIMULATION_{i:05d}_{MODELS[model]}_{MODES[mode]}_tick{tick}'
-                records.append(dict(sequence=i, model=MODELS[model], model_index=model,
+                stem = f'HOST_SIMULATION_{i:05d}_{name}_{MODES[mode]}_tick{tick}'
+                records.append(dict(sequence=i, model=name, model_index=model,
                                     mode=MODES[mode], mode_index=mode, tick=tick,
                                     last_submitted_tick=tick, last_submitted_boundary='H.commit; not hardware ACK',
                                     time_ms=tick * 1000 / 30, breathing=False,
@@ -79,7 +79,7 @@ def git(root, *args):
 def provenance(root, binary, flags):
     paths = set()
     for directory in ('apps/character', 'main', 'tools/hostshim', 'components/pocketjs_guest/include', 'components/quickjs-ng/quickjs-ng',
-                      'apps/kasane'):
+                      'apps/kasane', 'apps/cloud'):
         paths.update(p for p in (root / directory).rglob('*') if p.suffix in ('.c', '.h', '.js', '.txt'))
     for name in ('tools/kasane_contract/test_character_app_host.c',
                  'tools/kasane_contract/test_megademo_app_host.c',

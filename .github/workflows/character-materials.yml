@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'apps/character/**'
+      - 'apps/cloud/**'
       - 'apps/kasane/megademo_wake.js'
       - 'apps/kasane/chunks.txt'
       - 'main/pocket/pocket_shape.*'
@@ -57,6 +58,7 @@ jobs:
           python3 tools/kasane_contract/run_proc_ellipsoid.py
           python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
           python3 tools/kasane_contract/run_character_app_host.py --capture-dir .cache/character-capture
+          python3 tools/kasane_contract/run_character_app_host.py --cloud --capture-dir .cache/cloud-capture
           python3 tools/character/native_contact.py .cache/character-native/frames
           python3 tools/kasane_contract/run_proc_megademo_scenes.py
           node tools/character/coverage_study.cjs
@@ -67,6 +69,7 @@ jobs:
           python3 tools/ayatsuri/run_transform.py --m32
           node tools/character/transform_oracle.cjs
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
+          CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
           git diff --exit-code
@@ -77,6 +80,7 @@ jobs:
           path: |
             .cache/character-native/frames/
             .cache/character-capture/
+            .cache/cloud-capture/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

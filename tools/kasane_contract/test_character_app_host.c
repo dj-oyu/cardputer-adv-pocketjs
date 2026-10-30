@@ -54,6 +54,8 @@ static bool primitive_contract(void){
       "const surface=new Uint16Array([0xf800,0,255,128,0]);"
       "const texture=new Float32Array([1,0,0,0,1,0,0,0,1]);"
       "const draw=()=>S.ellipsoid(screen,normal,light,material,surface,texture);"
+      "const packed=()=>{const b=new ArrayBuffer(148),f=new Float32Array(b,0,34);"
+      "f.set(screen);f.set(normal,8);f.set(material,17);f.set(texture,25);new Uint16Array(b,136,5).set(surface);return b};"
       "const mustThrow=(f,code)=>{try{f()}catch(e){if(e.code===code)return;throw e}throw Error('missing '+code)};"
       "const resource=H.resource({maxSegments:1024});"
       "pocket.kasane.replace(tx=>{tx.background(0x000000ff);tx.image({resource,bounds:[0,0,240,135]})});"
@@ -63,11 +65,20 @@ static bool primitive_contract(void){
       "normal[8]=0;mustThrow(draw,'INVALID_ARGUMENT');normal[8]=1;"
       "surface[4]=4;mustThrow(draw,'INVALID_ARGUMENT');surface[4]=0;"
       "mustThrow(()=>S.ellipsoid(screen,normal,light,material,surface,new Float32Array(8)),'INVALID_ARGUMENT');"
-      "draw();"
+      "const b=packed();for(const offset of [-1,.5,NaN,Infinity,4294967296,1])"
+      "mustThrow(()=>S.ellipsoidPacked(b,offset,light),'INVALID_ARGUMENT');"
+      "mustThrow(()=>S.ellipsoidPacked(new ArrayBuffer(147),0,light),'INVALID_ARGUMENT');"
+      "mustThrow(()=>S.ellipsoidPacked(new Uint8Array(b),0,light),'INVALID_ARGUMENT');"
+      "mustThrow(()=>S.ellipsoidPacked(b,0,new Float32Array(8)),'INVALID_ARGUMENT');"
+      "new Float32Array(b)[0]=NaN;mustThrow(()=>S.ellipsoidPacked(b,0,light),'INVALID_ARGUMENT');"
+      "new Float32Array(b)[0]=10;light[0]=NaN;mustThrow(()=>S.ellipsoidPacked(b,0,light),'INVALID_ARGUMENT');light[0]=0;"
+      "S.ellipsoidPacked(b,0,light);"
       "screen[0]=120;screen[5]=67;draw();draw();mustThrow(draw,'LIMIT_EXCEEDED');"
       "mustThrow(()=>H.commit(),'BUSY');H.beginFrame(0);screen[0]=10;screen[5]=10;draw();H.commit();"
       "},light:(front)=>{material[0]=.25;material[1]=.75;light[0]=front?0:-1;light[2]=front?1:0;H.beginFrame(0);draw();H.commit()},"
-      "uv:(offset)=>{surface[1]=0xf800;surface[4]=2;texture[5]=offset;texture[7]=0;texture[8]=.4;H.beginFrame(0);draw();H.commit()}"
+      "uv:(offset)=>{surface[1]=0xf800;surface[4]=2;texture[5]=offset;texture[7]=0;texture[8]=.4;H.beginFrame(0);draw();H.commit()},"
+      "packed:(offset)=>{const b=new ArrayBuffer(offset+148),raw=new Uint8Array(b);raw.set(new Uint8Array(packed()),offset);"
+      "raw[offset+146]=73;raw[offset+147]=91;H.beginFrame(0);S.ellipsoidPacked(b,offset,light);raw.fill(0);H.commit()}"
       "}})();";
     if(!eval(script,strlen(script),"ellipsoid-contract.js"))return false;
     present(0);
@@ -100,8 +111,69 @@ static bool primitive_contract(void){
     if(!eval(busy,strlen(busy),"ellipsoid-repair.js"))return false;
     present(6);
     if(!full_reference(6))return false;
+    static uint16_t packed_reference[240*135];memcpy(packed_reference,panel,sizeof panel);
+    for(unsigned offset=0;offset<2;offset++){
+        const char *call=offset?"__ellipsoidTest.packed(1)":"__ellipsoidTest.packed(0)";
+        if(!eval(call,strlen(call),"ellipsoid-packed.js"))return false;
+        present(7+offset);
+        if(memcmp(packed_reference,panel,sizeof panel)||!full_reference(7+offset))return false;
+    }
+    printf("ELLIPSOID_PACKED aligned/unaligned/parity/snapshot/padding/span/validation PASS\n");
     const char *cleanup="delete globalThis.__ellipsoidTest;";
     return eval(cleanup,strlen(cleanup),"ellipsoid-contract.js");
+}
+
+static bool blend_primitive_contract(void){
+    const char *script=
+      "globalThis.__blendTest=(()=>{"
+      "const H=pocket.kasane.procedural,S=pocket.hone;"
+      "const row=[10,0,0,116,0,10,0,67,.1,0,0,0,.1,0,0,0,.1,0,0,10,0];"
+      "const lobes=new Float32Array(row.concat(row));lobes[24]=124;"
+      "const light=new Float32Array([0,0,1,0,0,1,1,1,1]);"
+      "const material=new Float32Array([1,0,0,16,0,1,1,1,1,1,1]);"
+      "const surface=new Uint16Array([0xf800,255,128]),controls=new Float32Array([6,.08]);"
+      "const draw=()=>S.blendEllipsoids(lobes,light,material,surface,controls);"
+      "const mustThrow=(f,code)=>{try{f()}catch(e){if(e.code===code)return;throw e}throw Error('missing '+code)};"
+      "const resource=H.resource({maxSegments:1024});"
+      "pocket.kasane.replace(tx=>{tx.background(0x000000ff);tx.image({resource,bounds:[0,0,240,135]})});"
+      "H.beginFrame(0);draw();surface[0]=0x001f;H.commit();"
+      "return {check:()=>{H.beginFrame(0);"
+      "lobes[21]=NaN;mustThrow(draw,'INVALID_ARGUMENT');lobes[21]=10;"
+      "lobes[40]=0;mustThrow(draw,'INVALID_ARGUMENT');lobes[40]=10;"
+      "material[10]=2;mustThrow(draw,'INVALID_ARGUMENT');material[10]=1;"
+      "controls[0]=-1;mustThrow(draw,'INVALID_ARGUMENT');controls[0]=6;"
+      "surface[1]=256;mustThrow(draw,'INVALID_ARGUMENT');surface[1]=255;"
+      "mustThrow(()=>S.blendEllipsoids(new Float32Array(22),light,material,surface,controls),'INVALID_ARGUMENT');"
+      "mustThrow(()=>S.blendEllipsoids(new Float32Array(21*9),light,material,surface,controls),'LIMIT_EXCEEDED');"
+      "mustThrow(()=>S.blendEllipsoids(lobes,light,material,new Uint8Array(3),controls),'INVALID_ARGUMENT');"
+      "draw();const huge=new Float32Array(21*8);for(let i=0;i<8;i++){huge.set(row,21*i);huge[21*i]=120;huge[21*i+5]=67}"
+      "mustThrow(()=>S.blendEllipsoids(huge,light,material,surface,controls),'LIMIT_EXCEEDED');"
+      "mustThrow(()=>H.commit(),'BUSY');H.beginFrame(0);draw();H.commit();"
+      "},ambient:(blue)=>{surface[0]=0xffff;material[8]=blue?.25:1;material[9]=blue?.5:1;H.beginFrame(0);draw();H.commit()}"
+      "}})();";
+    if(!eval(script,strlen(script),"blend-contract.js"))return false;
+    present(0);if(panel[67*240+120]!=0xf800)return false;
+    const char *check="__blendTest.check();";
+    if(!eval(check,strlen(check),"blend-contract.js"))return false;
+    present(1);if(panel[67*240+120]!=0x001f||!full_reference(1))return false;
+    const char *blue="__blendTest.ambient(true);",*white="__blendTest.ambient(false);";
+    if(!eval(blue,strlen(blue),"blend-ambient.js"))return false;
+    present(2);if(panel[67*240+120]!=0x441f||!full_reference(2))return false;
+    if(!eval(white,strlen(white),"blend-ambient.js"))return false;
+    present(3);if(panel[67*240+120]!=0xffff||!full_reference(3))return false;
+    if(!eval(blue,strlen(blue),"blend-repair.js"))return false;
+    pocket_kasane_invalidate();failure_strip=0;
+    ksn_display_port failing={.strip=get_strip,.present=fail_second_strip,
+        .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
+    ksn_render_stats stats;
+    if(pocket_kasane_present(&failing,&stats)!=KSN_IO)return false;
+    const char *busy="(()=>{try{pocket.kasane.procedural.beginFrame(0)}catch(e){if(e.code==='BUSY')return;throw e}throw Error('missing repair BUSY')})()";
+    if(!eval(busy,strlen(busy),"blend-repair.js"))return false;
+    present(4);if(!full_reference(4))return false;
+    const char *cleanup="delete globalThis.__blendTest;";
+    const bool ok=eval(cleanup,strlen(cleanup),"blend-contract.js");
+    printf("BLEND_PRIMITIVE immutable/validation/budget/ambient-damage/repair %s\n",ok?"PASS":"FAIL");
+    return ok;
 }
 
 static bool native_range_contract(void){
@@ -147,6 +219,7 @@ static bool native_range_contract(void){
 
 /* Diagnostic branch uses the app's own clock controller and real native present.
  * Captures are host simulation, never LCD/device evidence. */
+static unsigned app_model_count;
 static bool capture_call(unsigned model,unsigned mode,unsigned tick){
     char call[256];
     snprintf(call,sizeof call,
@@ -193,7 +266,7 @@ static bool capture_clock_contract(void){
         memcpy(expected,panel,sizeof expected);
         char script[1200];
         snprintf(script,sizeof script,
-          "(()=>{const C=AyatsuriLab.control,o=%s,k='%s',f=o[k],s={};"
+          "(()=>{const C=AyatsuriLab.control,o=%s,k0='%s',k=k0==='ellipsoid'&&typeof o.ellipsoidPacked==='function'?'ellipsoidPacked':k0,f=o[k],s={};"
           "C.step();let calls=0,caught=false;o[k]=()=>{++calls;throw Error('injected native submission failure')};"
           "try{frame(0)}catch(e){caught=true}finally{o[k]=f}"
           "C.read(s);if(!caught||calls!==1||s.tick!==90||s.pendingSteps!==1||s.lastSubmittedTick!==90)throw Error('failure clock calls='+calls+' tick='+s.tick+' credits='+s.pendingSteps+' last='+s.lastSubmittedTick);"
@@ -219,7 +292,7 @@ static bool capture_images(void){
     unsigned model,mode,tick,count=0;char name[180];
     static uint16_t expected[240*135];
     while(ok&&fscanf(f,"%u %u %u %179s",&model,&mode,&tick,name)==4){
-        if(model>2||mode>5||tick>1000000000u||strchr(name,'/')||strchr(name,'\\')){ok=false;break;}
+        if(model>=app_model_count||mode>5||tick>1000000000u||strchr(name,'/')||strchr(name,'\\')){ok=false;break;}
         ok=capture_call(model,mode,tick);
         if(!ok)break;
         memcpy(expected,panel,sizeof expected);
@@ -252,7 +325,7 @@ static bool capture_images(void){
 }
 
 int main(int argc,char **argv){
-    const char *path="apps/character/character_lab.js";
+    const char *path=getenv("CHARACTER_APP_ENTRY");if(!path)path="apps/character/character_lab.js";
     FILE *f=fopen(path,"rb");if(!f)return 2;
     char src[4096];size_t n=fread(src,1,sizeof(src)-1,f);
     if(ferror(f)||!feof(f)){fclose(f);return 2;}fclose(f);src[n]=0;
@@ -266,11 +339,18 @@ int main(int argc,char **argv){
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));JS_FreeValue(ctx,g);
     g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__coreAlloc",JS_NewCFunction(ctx,js_core_alloc_checkpoint,"checkpoint",1));JS_FreeValue(ctx,g);
-    if(setenv("MEGA_CHUNKS","apps/character/chunks.txt",1))return 2;
+    const char *app_chunks=getenv("CHARACTER_APP_CHUNKS");if(!app_chunks)app_chunks="apps/character/chunks.txt";
+    if(setenv("MEGA_CHUNKS",app_chunks,1))return 2;
     read_chunks();
-    bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract()&&core_transform_contract();
+    bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract()&&blend_primitive_contract()&&core_transform_contract();
     JS_RunGC(rt);peak_bytes=cur_bytes;largest_guest_request=0;
     ok=ok&&eval(src,n,path);
+    if(ok){
+        const double count=num("AyatsuriModels.names.length");
+        if(!isfinite(count)||count<1||count>3||count!=(unsigned)count)return 2;
+        app_model_count=(unsigned)count;
+        printf("CHARACTER_NATIVE app=%s chunks=%s models=%u\n",path,app_chunks,app_model_count);
+    }
     if(getenv("CHARACTER_CAPTURE_DIR")){
         const size_t app_peak=peak_bytes,app_live=heap_used(),app_request=largest_guest_request;
         peak_bytes=cur_bytes;largest_guest_request=0;
@@ -291,7 +371,7 @@ int main(int argc,char **argv){
     printf("CHARACTER_NATIVE eager_gc=%u full_reference=%u repair_injection=PASS\n",eager_gc,compare_full);
     if(per_mode<2)return 2;
     static uint16_t stopped[240*135];
-    for(unsigned actor=0;ok&&actor<3;actor++)for(unsigned mode=0;ok&&mode<6;mode++){
+    for(unsigned actor=0;ok&&actor<app_model_count;actor++)for(unsigned mode=0;ok&&mode<6;mode++){
         for(unsigned t=0;ok&&t<per_mode;t++){
             unsigned buttons=0;
             if(t==0&&(actor||mode))buttons=mode?0x20:0x4020;
@@ -300,8 +380,8 @@ int main(int argc,char **argv){
             if(compare_full&&!full_reference((uint64_t)frames*33333u)){
                 printf("incremental/full mismatch model=%u mode=%u frame=%u\n",actor,mode,t);ok=false;
             }
-            if(actor==2&&mode==0&&t==240)memcpy(stopped,panel,sizeof stopped);
-            if(actor==2&&mode==0&&t==300&&memcmp(stopped,panel,sizeof stopped)){
+            if((app_model_count==1||actor==2)&&mode==0&&t==240)memcpy(stopped,panel,sizeof stopped);
+            if((app_model_count==1||actor==2)&&mode==0&&t==300&&memcmp(stopped,panel,sizeof stopped)){
                 printf("cloud changed after stopping with breathing off\n");ok=false;
             }
             const char *ppm_dir=getenv("MEGA_PPM");
@@ -315,7 +395,7 @@ int main(int argc,char **argv){
     }
     printf("CHARACTER_NATIVE compile_peak=%zu live_max=%zu allocator_peak=%zu load_max_request=%zu run_max_request=%zu frames=%u host_pointer_bits=%zu\n",
            compile_peak,live_max,peak_bytes,load_request,largest_guest_request,frames,sizeof(void*)*8);
-    if(ok&&sizeof(void*)==4&&limit){
+    if(ok&&app_model_count==3&&sizeof(void*)==4&&limit){
         /* The smaller cloud is resident. Force human construction to fail,
          * retaining the native picture; then restore the ordinary guest cap. */
         memcpy(stopped,panel,sizeof stopped);

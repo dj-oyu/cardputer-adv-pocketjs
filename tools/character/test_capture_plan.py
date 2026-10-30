@@ -29,6 +29,17 @@ class CapturePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'step'):
             capture.ticks('80:92:-1')
 
+    def test_cloud_plan_has_one_model_and_four_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, records = capture.prepare(Path(directory), models=('cloud',))
+            self.assertEqual([(r['model'], r['model_index'], r['mode'], r['tick']) for r in records],
+                             [('cloud', 0, 'STILL', 0), ('cloud', 0, 'BODY', 82),
+                              ('cloud', 0, 'LIGHT', 90), ('cloud', 0, 'CAMERA', 90)])
+            _, sequence = capture.prepare(Path(directory), [92, 80, 92], models=('cloud',))
+            self.assertEqual(len(sequence), 12)
+            self.assertEqual([r['tick'] for r in sequence[:3]], [92, 80, 92])
+            self.assertTrue(all(r['model_index'] == 0 for r in sequence))
+
     def test_prepare_removes_only_planned_images_on_rerun(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)

@@ -17,16 +17,16 @@ def main() -> None:
     env = os.environ.copy()
     env["PATH"] = str(Path(cc).parent) + os.pathsep + env.get("PATH", "")
     src = ROOT / "main/ui/kasane"
-    for opt in ("0", "2"):
-        binary = OUT / (f"ellipsoid_O{opt}" + (".exe" if os.name == "nt" else ""))
+    for test, opt in ((name, opt) for name in ("ellipsoid", "blend_ellipsoids") for opt in ("0", "2")):
+        binary = OUT / (f"{test}_O{opt}" + (".exe" if os.name == "nt" else ""))
         flags = [] if os.name == "nt" else ["-fsanitize=address,undefined"]
         subprocess.run([cc, "-std=gnu11", f"-O{opt}", "-g", "-Wall", "-Wextra", "-Werror",
                         "-ffp-contract=off", *flags, "-I", str(src),
-                        str(ROOT / "tools/kasane_contract/test_proc_ellipsoid.c"),
+                        str(ROOT / f"tools/kasane_contract/test_proc_{test}.c"),
                         str(src / "ksn_procedural.c"), str(src / "ksn_procedural_surface.c"),
                         "-lm", "-o", str(binary)], cwd=ROOT, env=env, check=True)
         subprocess.run([str(binary)], cwd=ROOT, env=env, check=True)
-        print(f"ELLIPSOID O{opt} PASS" + (" (ASan/UBSan)" if flags else " (native Windows)"))
+        print(f"{test.upper()} O{opt} PASS" + (" (ASan/UBSan)" if flags else " (native Windows)"))
 
 
 if __name__ == "__main__":

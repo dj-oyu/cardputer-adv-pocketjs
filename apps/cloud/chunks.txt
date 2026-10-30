@@ -1,0 +1,8 @@
+app local.cloud
+option strip-debug
+utility ../character/character.js
+blend ../character/character_blend.js
+motion cloud_motion.js
+model cloud_model.js
+lab ../character/character_lab_scene.js
+diagnostics ../character/character_lab_control.js

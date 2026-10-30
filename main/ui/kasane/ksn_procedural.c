@@ -478,6 +478,44 @@ bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,in
     if(!p->surface[2]){*left=1;*right=0;}
     return true;
 }
+bool ksn_proc_blend_read(const ksn_proc_segment *data,unsigned words,ksn_proc_blend_ellipsoids *p,unsigned *used){
+    if(!data||!p||!used||words*sizeof *data<sizeof p->header)return false;
+    memcpy(&p->header,data,sizeof p->header);
+    if(!p->header.count||p->header.count>KSN_PROC_BLEND_LOBES)return false;
+    *used=(unsigned)KSN_PROC_BLEND_WORDS(p->header.count);
+    if(*used>words)return false;
+    memcpy(p,data,KSN_PROC_BLEND_BYTES(p->header.count));
+    return true;
+}
+bool ksn_proc_blend_bounds(const ksn_proc_blend_ellipsoids *p,int *left,int *top,int *right,int *bottom){
+    if(!p||!p->header.count||p->header.count>KSN_PROC_BLEND_LOBES||p->header.reserved||
+       p->header.surface[1]>255||p->header.surface[2]>255||
+       !ell_finite(p->header.material,11,128)||!ell_finite(p->header.controls,2,128)||
+       p->header.controls[0]<0||p->header.controls[1]<0||p->header.controls[1]>1)return false;
+    for(unsigned i=8;i<11;i++)if(p->header.material[i]<0||p->header.material[i]>1)return false;
+    ksn_proc_ellipsoid q={.texture={1,0,0,0,1,0,0,0,1},.surface={0,0,255,255,0}};
+    memcpy(q.light,p->header.light,sizeof q.light);memcpy(q.material,p->header.material,sizeof q.material);
+    *left=KSN_PROC_W;*top=KSN_PROC_H;*right=-1;*bottom=-1;
+    for(unsigned i=0;i<p->header.count;i++){
+        const ksn_proc_blend_lobe *l=&p->lobes[i];
+        if(!ell_finite(l->depth,4,4096))return false;
+        memcpy(q.screen,l->screen,sizeof q.screen);memcpy(q.normal,l->normal,sizeof q.normal);
+        int x0,y0,x1,y1;if(!ksn_proc_ellipsoid_bounds(&q,&x0,&y0,&x1,&y1))return false;
+        const float *a=l->screen,*b=a+4,*d=l->depth;
+        const float aa=a[0]*a[0]+a[1]*a[1]+a[2]*a[2],bb=b[0]*b[0]+b[1]*b[1]+b[2]*b[2],
+            ab=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+        if(!isfinite(1/(aa*bb-ab*ab)))return false;
+        const float volume=(a[1]*b[2]-a[2]*b[1])*d[0]+(a[2]*b[0]-a[0]*b[2])*d[1]+(a[0]*b[1]-a[1]*b[0])*d[2];
+        if(!isfinite(volume)||volume==0)return false;
+        if(x0>x1||y0>y1)continue;
+        if(x0<*left)*left=x0;
+        if(y0<*top)*top=y0;
+        if(x1>*right)*right=x1;
+        if(y1>*bottom)*bottom=y1;
+    }
+    if(!p->header.surface[1]){*left=1;*right=0;}
+    return true;
+}
 static unsigned ell_colour(float base,float light,float tint,float front,float spec,float back,float thin,
                            const float *m,unsigned max){
     float c=base*(m[0]+m[1]*front*light)+light*(m[2]*spec+m[4]*thin*back*tint);
@@ -540,6 +578,89 @@ static void ellipsoid_band(const ksn_proc_segment *g,const ksn_proc_segment *dat
         *dest=(uint16_t)((r<<11)|(gg<<5)|blue);
     }
 }
+typedef struct {
+    float aa,bb,ab,inv,axis[3],edge;
+    int left,top,right,bottom;
+} blend_projection;
+/* Blend analytic front heights, not independently composited sphere colours.
+ * This has bounded work and no depth buffer. The projected silhouette remains
+ * the union of the lobes, while shared world normals make joins light smoothly. */
+static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *pixels,int y,int height){
+    int left,top,right,bottom;if(!ksn_proc_blend_bounds(p,&left,&top,&right,&bottom))return;
+    if(top<y)top=y;
+    if(bottom>=y+height)bottom=y+height-1;
+    if(left>right||top>bottom)return;
+    const ksn_proc_blend_header *h=&p->header;
+    const float *m=h->material;
+    float light[3]={h->light[0],h->light[1],h->light[2]},view[3]={h->light[3],h->light[4],h->light[5]};
+    (void)ell_unit(light);(void)ell_unit(view);
+    float half[3]={light[0]+view[0],light[1]+view[1],light[2]+view[2]};const bool has_half=ell_unit(half);
+    blend_projection projection[KSN_PROC_BLEND_LOBES];
+    for(unsigned i=0;i<h->count;i++){
+        const float *a=p->lobes[i].screen,*b=a+4,*d=p->lobes[i].depth;
+        blend_projection *s=&projection[i];
+        s->aa=a[0]*a[0]+a[1]*a[1]+a[2]*a[2];s->bb=b[0]*b[0]+b[1]*b[1]+b[2]*b[2];
+        s->ab=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];s->inv=1/(s->aa*s->bb-s->ab*s->ab);
+        s->axis[0]=a[1]*b[2]-a[2]*b[1];s->axis[1]=a[2]*b[0]-a[0]*b[2];s->axis[2]=a[0]*b[1]-a[1]*b[0];
+        (void)ell_unit(s->axis);
+        if(d[0]*s->axis[0]+d[1]*s->axis[1]+d[2]*s->axis[2]<0)
+            for(unsigned k=0;k<3;k++)s->axis[k]=-s->axis[k];
+        const float rx=sqrtf(s->aa),ry=sqrtf(s->bb);
+        s->left=(int)ceilf(a[3]-rx);s->right=(int)floorf(a[3]+rx);
+        s->top=(int)ceilf(b[3]-ry);s->bottom=(int)floorf(b[3]+ry);
+        s->edge=fmaxf(h->controls[1],2/fminf(rx,ry));
+    }
+    for(int yy=top;yy<=bottom;yy++)for(int x=left;x<=right;x++){
+        bool found=false;float depth=0,normal[3]={0},chord=0,coverage=0;
+        for(unsigned i=0;i<h->count;i++){
+            const blend_projection *s=&projection[i];
+            if(x<s->left||x>s->right||yy<s->top||yy>s->bottom)continue;
+            const ksn_proc_blend_lobe *l=&p->lobes[i];const float *a=l->screen,*b=a+4;
+            const float dx=x-a[3],dy=yy-b[3],u=(s->bb*dx-s->ab*dy)*s->inv,w=(s->aa*dy-s->ab*dx)*s->inv;
+            float q[3]={a[0]*u+b[0]*w,a[1]*u+b[1]*w,a[2]*u+b[2]*w};
+            const float residual=1-q[0]*q[0]-q[1]*q[1]-q[2]*q[2];
+            if(!(residual>0))continue;
+            const float z=sqrtf(residual);
+            for(unsigned k=0;k<3;k++)q[k]+=s->axis[k]*z;
+            float n[3];
+            for(unsigned k=0;k<3;k++)n[k]=l->normal[3*k]*q[0]+l->normal[3*k+1]*q[1]+l->normal[3*k+2]*q[2];
+            /* A grazing cap has an infinite height slope. Bound that slope
+             * before interpolation so malformed/extreme inputs stay finite. */
+            const float scale=fmaxf(fabsf(n[0]),fmaxf(fabsf(n[1]),fabsf(n[2])));
+            if(!(scale>0))continue;
+            for(unsigned k=0;k<3;k++)n[k]/=scale;
+            float nv=n[0]*view[0]+n[1]*view[1]+n[2]*view[2];
+            if(nv<0){nv=-nv;for(unsigned k=0;k<3;k++)n[k]=-n[k];}
+            nv=fmaxf(nv,1e-4f);
+            for(unsigned k=0;k<3;k++)n[k]/=nv;
+            const float d=l->depth[0]*q[0]+l->depth[1]*q[1]+l->depth[2]*q[2]+l->depth[3];
+            coverage=fmaxf(coverage,fminf(1,residual/s->edge));
+            if(!found){depth=d;memcpy(normal,n,sizeof normal);chord=z;found=true;continue;}
+            const float blend=h->controls[0];
+            const float weight=blend>0?fmaxf(0,fminf(1,0.5f+0.5f*(d-depth)/blend)):(d>depth?1:0);
+            depth=depth*(1-weight)+d*weight+blend*weight*(1-weight);
+            for(unsigned k=0;k<3;k++)normal[k]=normal[k]*(1-weight)+n[k]*weight;
+            chord=chord*(1-weight)+z*weight;
+        }
+        if(!found||!ell_unit(normal))continue;
+        const float dot=normal[0]*light[0]+normal[1]*light[1]+normal[2]*light[2],front=fmaxf(0,dot),back=fmaxf(0,-dot),
+            nh=has_half?fmaxf(0,normal[0]*half[0]+normal[1]*half[1]+normal[2]*half[2]):0,
+            spec=front>0&&nh>0&&m[2]>0?powf(nh,m[3]):0,thin=1-h->surface[2]*(1.0f/255)*chord;
+        const uint16_t base=h->surface[0];unsigned color[3];
+        const unsigned channels[3]={(base>>11)&31,(base>>5)&63,base&31},max[3]={31,63,31};
+        for(unsigned k=0;k<3;k++){
+            const float c=channels[k]*(1.0f/max[k])*(m[0]*m[8+k]+m[1]*front*h->light[6+k])+
+                h->light[6+k]*(m[2]*spec+m[4]*thin*back*m[5+k]);
+            color[k]=(unsigned)lroundf(fmaxf(0,fminf(1,c))*max[k]);
+        }
+        const unsigned alpha=(unsigned)lroundf(h->surface[1]*coverage),ia=255-alpha;
+        uint16_t *dest=pixels+(yy-y)*KSN_PROC_W+x;
+        color[0]=(color[0]*alpha+((*dest>>11)&31)*ia+127)/255;
+        color[1]=(color[1]*alpha+((*dest>>5)&63)*ia+127)/255;
+        color[2]=(color[2]*alpha+(*dest&31)*ia+127)/255;
+        *dest=(uint16_t)((color[0]<<11)|(color[1]<<5)|color[2]);
+    }
+}
 /* A frame with pattern lines: the same order, the same plain lines. A
  * parameter entry's negative rows fail the range test; the bias is looked at
  * only for an entry that reached the band. Out of line, so a frame without
@@ -547,6 +668,12 @@ static void ellipsoid_band(const ksn_proc_segment *g,const ksn_proc_segment *dat
 static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
     for(unsigned j=0;j<frame->count;j++){
         const ksn_proc_segment *s=&frame->segments[j];
+        if(s->x0>=KSN_PROC_EXT_BLEND_ELLIPSOIDS-480){
+            ksn_proc_blend_ellipsoids p;unsigned used;
+            if(!ksn_proc_blend_read(s+1,frame->count-j-1,&p,&used))return;
+            if(s->y1>=y&&s->y0<y+height)blend_ellipsoids_band(&p,pixels,y,height);
+            j+=used;continue;
+        }
         if(s->x0>=KSN_PROC_EXT_ELLIPSOID-480){
             if(KSN_PROC_ELLIPSOID_WORDS>frame->count-j-1)return;
             ellipsoid_band(s,s+1,pixels,y,height);

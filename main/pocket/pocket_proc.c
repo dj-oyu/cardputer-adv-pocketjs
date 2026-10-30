@@ -800,6 +800,26 @@ JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_pro
     c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
     return JS_UNDEFINED;
 }
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_blend_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid or singular blended ellipsoids");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p->header.count,
+        words=(unsigned)KSN_PROC_BLEND_WORDS(p->header.count);
+    if(words+1u>surface_segments(&surfaces[building_surface])-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"blended surface frame limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_BLEND_ELLIPSOIDS),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,words*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,KSN_PROC_BLEND_BYTES(p->header.count));
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    return JS_UNDEFINED;
+}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";

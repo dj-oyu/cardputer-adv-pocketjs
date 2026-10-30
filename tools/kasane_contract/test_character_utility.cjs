@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const Ayatsuri = require('../../apps/character/character.js');
+const AyatsuriBlend = require('../../apps/character/character_blend.js');
 assert.strictEqual(globalThis.Ayatsuri, Ayatsuri);
 assert.strictEqual(globalThis.Character, Ayatsuri, 'old name aliases the same visual implementation');
 const MeshReference = require('../character/mesh_reference.cjs');
@@ -230,6 +231,163 @@ composeHook=()=>{};delegated.evaluate(5000);delegated.render();
 assert.equal(delegatedPart._node.matrix[3],10,'retry uses the latest authored pose and parent');
 delegated.dispose();
 
+
+// Packed native submission avoids retaining four compatibility views per node.
+let packedBuffer, packedLight, packedCalls=0;
+const packedOnly=analyticScene({backend:{ellipsoidPacked(storage,offset,light){
+  assert.ok(storage instanceof ArrayBuffer);assert.equal(offset,96);assert.equal(storage.byteLength,264);
+  if(packedBuffer)assert.strictEqual(storage,packedBuffer);
+  packedBuffer=storage;packedLight=light;++packedCalls;
+}}});
+const packedPart=packedOnly.add({name:'packed',geometry:{kind:'ellipsoid',radii:[20,30,10]},
+  position:[3,4,5],material:{color:0xff8800,opacity:.8,edgeSoftness:.2},
+  pattern:{kind:'band',axis:'v',start:.6,end:1,color:0xffffff}});
+const packedPatch=packedPart._node.analytic;
+for(const name of ['radii','screen','normalMatrix','texture'])assert.equal(Object.hasOwn(packedPatch,name),false);
+packedOnly.evaluate(0);packedOnly.render();packedOnly.evaluate(1);packedOnly.render();
+assert.equal(packedCalls,2);assert.equal(packedPart._node.pose.buffer,packedBuffer);
+for(const name of ['radii','screen','normalMatrix','texture'])assert.equal(Object.hasOwn(packedPatch,name),false,
+  'native packed frames never allocate compatibility views');
+assert.equal(packedPart._node.textureData.byteOffset,244);
+assert.equal(packedPart._node.materialData.byteOffset,164);
+assert.equal(packedPatch.surface.byteOffset,232);
+same(new Float32Array(packedBuffer,96,8),[20,0,0,123,0,30,0,79]);
+const packedMaterial=new Float32Array(packedBuffer,164,8),packedTexture=new Float32Array(packedBuffer,196,9);
+assert.equal(packedMaterial[0],.25);assert.equal(packedTexture[6],Math.fround(.2));
+assert.equal(packedPatch.surface[2],204);assert.ok(packedLight instanceof Float32Array);
+let borrowed;
+packedOnly.visit(packet=>{borrowed=packet;});
+assert.strictEqual(borrowed,packedPatch);assert.equal(borrowed.radii.byteOffset,84);
+assert.equal(borrowed.screen.byteOffset,96);assert.equal(borrowed.normalMatrix.byteOffset,128);
+assert.equal(borrowed.texture.byteOffset,196);
+const stableScreen=borrowed.screen,stableNormal=borrowed.normalMatrix,stableTexture=borrowed.texture;
+packedOnly.visit(packet=>{assert.strictEqual(packet.screen,stableScreen);assert.strictEqual(packet.normalMatrix,stableNormal);
+  assert.strictEqual(packet.texture,stableTexture);});
+packedPart.texture({offset:[0,.2]});assert.throws(()=>packedOnly.render(),/evaluate before render/);
+packedOnly.evaluate(1);packedOnly.render();assert.strictEqual(packedPatch.texture,stableTexture);
+assert.equal(packedPart._node.textureData[1],Math.fround(.2));
+packedOnly.dispose();
+
+// Lazy compatibility publishes all four views only after every allocation succeeds.
+for(let failAt=1;failAt<=4;++failAt){
+  const candidate=analyticScene({backend:{ellipsoidPacked(){}}}),
+    part=candidate.add({name:'compat-oom',geometry:{kind:'ellipsoid',radii:[2,3,4]}});
+  candidate.evaluate(0);candidate.render();
+  const patch=part._node.analytic,buffer=patch.work.buffer,RealFloat32Array=globalThis.Float32Array;
+  let allocations=0;
+  globalThis.Float32Array=new Proxy(RealFloat32Array,{construct(target,args){
+    if(++allocations===failAt)throw Error('injected compatibility OOM');
+    return Reflect.construct(target,args,target);
+  }});
+  try{assert.throws(()=>candidate.visit(()=>{}),/injected compatibility OOM/);}
+  finally{globalThis.Float32Array=RealFloat32Array;}
+  assert.equal(allocations,failAt);
+  for(const name of ['radii','screen','normalMatrix','texture'])assert.equal(Object.hasOwn(patch,name),false,
+    'failed lazy allocation publishes no partial compatibility packet');
+  candidate.render(); // Failed visit released the guard; packed rendering still works.
+  candidate.visit(packet=>{
+    for(const name of ['radii','screen','normalMatrix','texture'])assert.strictEqual(packet[name].buffer,buffer);
+  });
+  const views=[patch.radii,patch.screen,patch.normalMatrix,patch.texture];
+  globalThis.Float32Array=new Proxy(RealFloat32Array,{construct(){throw Error('initialized packet allocated again');}});
+  try{candidate.visit(packet=>{
+    assert.strictEqual(packet.radii,views[0]);assert.strictEqual(packet.screen,views[1]);
+    assert.strictEqual(packet.normalMatrix,views[2]);assert.strictEqual(packet.texture,views[3]);
+  });candidate.render();}
+  finally{globalThis.Float32Array=RealFloat32Array;}
+  candidate.dispose();
+}
+
+// A blended volume is one visual object, one native call and one alpha layer.
+let blendCalls=0, blendComposeCalls=0, blendPacket, blendLighting, blendMaterial, blendSurface, blendControls;
+let blendDrawHook=()=>{};
+const geometryExtensions=[AyatsuriBlend];
+const blended=Ayatsuri.scene({geometries:geometryExtensions,backend:{ellipsoid(){throw Error('wrong backend');},
+  blendEllipsoids(lobes,light,material,surface,controls){
+    ++blendCalls;blendDrawHook();
+    assert.equal(lobes.length,42);assert.equal(light.length,9);assert.equal(material.length,11);
+    assert.equal(surface.length,3);assert.equal(controls.length,2);
+    assert.ok(lobes instanceof Float32Array&&surface instanceof Uint16Array);
+    assert.strictEqual(lobes.buffer,material.buffer);assert.strictEqual(material.buffer,surface.buffer);
+    assert.strictEqual(surface.buffer,controls.buffer);
+    if(blendPacket){assert.strictEqual(lobes,blendPacket);assert.strictEqual(material,blendMaterial);
+      assert.strictEqual(surface,blendSurface);assert.strictEqual(controls,blendControls);}
+    blendPacket=lobes;blendLighting=light;blendMaterial=material;blendSurface=surface;blendControls=controls;
+  }},evaluator:{compose(p,parent,out){++blendComposeCalls;TransformReference.compose(p,parent,out);}}});
+geometryExtensions.length=0;delete globalThis.AyatsuriBlend;
+const blendParent=blended.add({name:'root',geometry:null,position:[10,5,3]});
+const sourceLobes=[{position:[-5,0,0],radii:[10,20,30]},{position:[5,0,2],radii:[8,12,16]}];
+const volume=blended.add({name:'volume',parent:blendParent,
+  geometry:{kind:'blendEllipsoids',lobes:sourceLobes,blend:8},
+  material:{color:0xffffff,ambientColor:0x80c0ff,opacity:.5,edgeSoftness:.2}});
+sourceLobes[0].position[0]=999;sourceLobes[0].radii[0]=999;
+blended.evaluate(0);blended.render();
+assert.equal(blendCalls,1);assert.equal(blendComposeCalls,2,'one C TRS per node, never per lobe');
+same(blendPacket.slice(0,8),[10,0,0,125,0,20,0,80],'copied local lobe projected through parent');
+same(blendPacket.slice(17,21),[0,0,30,3],'depth is world-distance along view relative to target');
+same(blendPacket.slice(38,42),[0,0,16,5],'each lobe has its own transformed center and basis');
+assert.equal(blendSurface[0],0xffff);assert.equal(blendSurface[1],128);assert.equal(blendSurface[2],128);
+same(blendMaterial.slice(8),new Float32Array([128/255,192/255,1]),'ambient RGB is distinct from albedo');
+assert.equal(blendControls[0],8);assert.equal(blendControls[1],Math.fround(.2));
+const blendStats0={},blendStats1={};blended.stats(blendStats0);
+assert.equal(blendStats0.renderedPatches,1);assert.equal(blendStats0.renderedFaces,0);assert.equal(blendStats0.shadeSamples,0);
+assert.equal(blendStats0.copiedBytes,0,'utility stores descriptors; native snapshot copying is measured by native');
+const stablePacket=blendPacket.slice();
+blended.light({direction:[.8,-.2,.5]});blended.evaluate(10);blended.render();blended.stats(blendStats1);
+assert.equal(blendComposeCalls,2);same(blendPacket,stablePacket,'light does not alter geometric packet');
+assert.equal(blendStats1.normalUpdates,blendStats0.normalUpdates);
+assert.equal(blendStats1.projectionUpdates,blendStats0.projectionUpdates);
+assert.equal(blendStats1.analyticUpdates-blendStats0.analyticUpdates,1);
+blended.stats(blendStats0);volume.material({ambientColor:0x1122aa,opacity:.7});
+assert.throws(()=>blended.render(),/evaluate before render/);
+blended.evaluate(10);blended.render();blended.stats(blendStats1);
+assert.equal(blendStats1.geometryUpdates,blendStats0.geometryUpdates);
+assert.equal(blendStats1.projectionUpdates,blendStats0.projectionUpdates);
+assert.equal(blendStats1.albedoUpdates,blendStats0.albedoUpdates);
+same(blendMaterial.slice(8),new Float32Array([17/255,34/255,170/255]));
+assert.equal(blendSurface[1],179);
+const materialBefore=blendMaterial.slice();
+assert.throws(()=>volume.material({color:0,ambientColor:0x1000000}),/RGB24/);
+blended.render();same(blendMaterial,materialBefore,'invalid shading setter validates before changing material');
+for(const def of [
+  {kind:'blendEllipsoids',lobes:[]},
+  {kind:'blendEllipsoids',lobes:Array(9).fill({position:[0,0,0],radii:[1,1,1]})},
+  {kind:'blendEllipsoids',lobes:[{position:[0,0,0],radii:[0,1,1]}]},
+  {kind:'blendEllipsoids',lobes:[{position:[NaN,0,0],radii:[1,1,1]}]},
+  {kind:'blendEllipsoids',lobes:[{position:[0,0,0],radii:[1,1,1]}],blend:129}
+]) {assert.throws(()=>blended.add({name:'invalid',geometry:def}));blended.render();}
+assert.throws(()=>blended.add({name:'pattern',geometry:{kind:'blendEllipsoids',lobes:sourceLobes},
+  pattern:{kind:'checker',color:0}}),/no pattern or texture/);blended.render();
+assert.throws(()=>volume.texture({offset:[0,.2]}),/no texture/);blended.render();
+blendParent.place({scale:[-2,1,.5]});blended.evaluate(10);blended.render();
+assert.ok(Math.abs(blendPacket[8]+.05)<1e-7&&Math.abs(blendPacket[16]-1/15)<1e-7,
+  'inverse transpose supports reflection and nonuniform scale');
+const beforeCamera=blendPacket.slice();blended.stats(blendStats0);
+blended.camera({position:[400,0,0]});blended.evaluate(10);blended.render();blended.stats(blendStats1);
+assert.equal(blendComposeCalls,4);assert.equal(blendStats1.normalUpdates,blendStats0.normalUpdates);
+assert.equal(blendStats1.projectionUpdates-blendStats0.projectionUpdates,1);
+same(blendPacket.slice(8,17),beforeCamera.slice(8,17),'camera does not rebuild world normals');
+same(blendPacket.slice(17,21),[-20,0,0,20],'camera changes view depth, including reflected basis');
+blendDrawHook=()=>{assert.throws(()=>volume.material({opacity:.2}),/busy scene/);
+  assert.throws(()=>blended.evaluate(0),/busy scene/);};blended.render();blendDrawHook=()=>{};
+volume.place({scale:[10000,1,1]});assert.throws(()=>blended.evaluate(10),/packet range/);
+assert.throws(()=>blended.render(),/evaluate before render/);
+volume.place({scale:[1,1,1]});blended.evaluate(10);blended.render();
+blended.stats(blendStats0);blended.evaluate(1000);blended.stats(blendStats1);
+assert.deepEqual(blendStats1,blendStats0,'time alone reuses all blend descriptors');
+blended.dispose();assert.equal(volume._node.geometryExtension,null,'dispose releases descriptor even while author retains handle');
+assert.throws(()=>volume.material({opacity:1}),/disposed scene/);
+const explicitOnly=analyticScene({backend:{ellipsoid(){},blendEllipsoids(){}}});
+assert.throws(()=>explicitOnly.add({name:'implicit',geometry:{kind:'blendEllipsoids',lobes:sourceLobes}}),/geometry must/);
+explicitOnly.dispose();
+const noBlend=analyticScene({geometries:[AyatsuriBlend],backend:{ellipsoid(){}}});
+const ordinary=noBlend.add({name:'ordinary',geometry:{kind:'ellipsoid',radii:[1,1,1]}});
+assert.equal(Object.hasOwn(ordinary._node,'geometryExtension'),false,'ordinary nodes keep the original compact property shape');
+noBlend.evaluate(0);assert.throws(()=>ordinary.material({ambientColor:0}),/requires blendEllipsoids/);noBlend.render();
+assert.throws(()=>noBlend.add({name:'unsupported',geometry:{kind:'blendEllipsoids',lobes:sourceLobes}}),/backend required/);
+noBlend.render();noBlend.dispose();
+assert.equal(Object.hasOwn(ordinary._node,'geometryExtension'),false,'dispose does not add extension state to ordinary nodes');
+
 const track = Motion.track([0, 2, 10, 4, 20, 6], {stride: 2, timeUnit: 'frame', interpolation: 'smooth'}), pose = [0, 0];
 Motion.sample(track, 5, pose); same(pose, [5, 3], 'frame positions, not elapsed seconds');
 Motion.sample(track, -1, pose); same(pose, [0, 2], 'clamped start');
@@ -240,4 +398,4 @@ let expression = 0.5;
 const blink = Motion.track([0, 0, 80, 1, 120, 1, 240, 0], {stride: 2, timeUnit: 'ms', interpolation: 'smooth'});
 Motion.sample(blink, 80, pose); assert.equal(expression * (1 - pose[1]), 0);
 expression = 0.3; Motion.sample(blink, 240, pose); assert.equal(expression * (1 - pose[1]), 0.3);
-console.log('CHARACTER_UTILITY PASS: analytic runtime dependency isolation/compact borrowed packets/failure recovery; coarse numerical reference; motion sampling');
+console.log('CHARACTER_UTILITY PASS: analytic runtime dependency isolation/compact borrowed packets/blended-volume ownership and projection/failure recovery; coarse numerical reference; motion sampling');

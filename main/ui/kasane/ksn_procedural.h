@@ -53,6 +53,7 @@ typedef struct { int16_t x0,y0,x1,y1; uint16_t color; } ksn_proc_segment;
  * always took. */
 #define KSN_PROC_EXT_PATTERN 4096
 #define KSN_PROC_EXT_ELLIPSOID 8192
+#define KSN_PROC_EXT_BLEND_ELLIPSOIDS 12288
 #define KSN_PROC_EXT_MIN 2048
 #define KSN_PROC_PATTERN_BITS 24
 #define KSN_PROC_PATTERN_BLOCK 6
@@ -69,6 +70,25 @@ _Static_assert(sizeof(ksn_proc_ellipsoid)==184,"analytic packet layout");
 /* Bounds are clipped pixel centres. False means invalid; an offscreen patch
  * has right<left or bottom<top and no raster cost. */
 bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,int *right,int *bottom);
+/* A shared surface over bounded analytic lobes. The serialized packet holds
+ * only count lobes; memcpy is required at segment boundaries (10-byte stride). */
+#define KSN_PROC_BLEND_LOBES 8
+typedef struct { float screen[8],normal[9],depth[4]; } ksn_proc_blend_lobe;
+typedef struct {
+    float light[9],material[11],controls[2];
+    uint16_t surface[3];
+    uint8_t count,reserved;
+} ksn_proc_blend_header;
+typedef struct {
+    ksn_proc_blend_header header;
+    ksn_proc_blend_lobe lobes[KSN_PROC_BLEND_LOBES];
+} ksn_proc_blend_ellipsoids;
+_Static_assert(sizeof(ksn_proc_blend_header)==96,"blend header layout");
+_Static_assert(sizeof(ksn_proc_blend_lobe)==84,"blend lobe layout");
+#define KSN_PROC_BLEND_BYTES(n) (sizeof(ksn_proc_blend_header)+(n)*sizeof(ksn_proc_blend_lobe))
+#define KSN_PROC_BLEND_WORDS(n) ((KSN_PROC_BLEND_BYTES(n)+sizeof(ksn_proc_segment)-1)/sizeof(ksn_proc_segment))
+bool ksn_proc_blend_bounds(const ksn_proc_blend_ellipsoids *p,int *left,int *top,int *right,int *bottom);
+bool ksn_proc_blend_read(const ksn_proc_segment *data,unsigned words,ksn_proc_blend_ellipsoids *p,unsigned *used);
 typedef struct {
     uint16_t count;
     uint16_t raster_steps;
@@ -90,6 +110,21 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
     *geometry=frame->segments[(*i)++];
     *pattern=frame->ext&&geometry->x0>=KSN_PROC_EXT_MIN;
     if(*pattern){
+        if(geometry->x0>=KSN_PROC_EXT_BLEND_ELLIPSOIDS-480){
+            ksn_proc_blend_ellipsoids p;unsigned used;
+            if(!ksn_proc_blend_read(frame->segments+*i,frame->count-*i,&p,&used)){
+                *i=frame->count+1u;return false;
+            }
+            *i+=used;
+            int left,top,right,bottom;
+            const bool valid=ksn_proc_blend_bounds(&p,&left,&top,&right,&bottom);
+            geometry->x0=(int16_t)(geometry->x0-KSN_PROC_EXT_BLEND_ELLIPSOIDS);
+            if(!valid||left!=geometry->x0||top!=geometry->y0||right!=geometry->x1||bottom!=geometry->y1||left>right||top>bottom){
+                *i=frame->count+1u;return false;
+            }
+            *cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p.header.count;
+            return true;
+        }
         if(geometry->x0>=KSN_PROC_EXT_ELLIPSOID-480){
             if(KSN_PROC_ELLIPSOID_WORDS>frame->count-*i){*i=frame->count+1u;return false;}
             ksn_proc_ellipsoid p;memcpy(&p,frame->segments+*i,sizeof p);

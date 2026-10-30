@@ -32,6 +32,10 @@ JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int 
     return JS_UNDEFINED;
 }
 void pocket_proc_native_rollback(const pocket_proc_mark *mark){nsegs=mark->count;}
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"blended surfaces need the renderer harness",false,NULL);
+}
 JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch){
     (void)patch;
     return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches need the renderer harness",false,NULL);

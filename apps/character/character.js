@@ -29,10 +29,18 @@ globalThis.Ayatsuri = (() => {
     if (def.kind !== 'ellipsoid') fail('geometry must be ellipsoid or null');
     vector(def.radii, 3);
     for (let i = 0; i < 3; ++i) if (!(Math.fround(def.radii[i]) > 0)) fail('positive radii required');
-    const radii = new Float32Array(storage, 84, 3);
-    radii.set(def.radii);
-    return {kind: 'ellipsoid', radii, screen: new Float32Array(storage, 96, 8),
-      normalMatrix: new Float32Array(storage, 128, 9), surface: new Uint16Array(storage, 252, 5), texture: new Float32Array(storage, 216, 9)};
+    const work = new Float32Array(storage);
+    for (let i = 0; i < 3; ++i) work[21 + i] = def.radii[i];
+    return {kind: 'ellipsoid', work, surface: new Uint16Array(storage, 232, 5)};
+  }
+  function compatibility(patch) {
+    if (patch.kind === 'ellipsoid' && !patch.screen) {
+      const storage = patch.work.buffer, radii = new Float32Array(storage, 84, 3),
+        screen = new Float32Array(storage, 96, 8), normalMatrix = new Float32Array(storage, 128, 9),
+        texture = new Float32Array(storage, 196, 9);
+      patch.radii = radii; patch.screen = screen; patch.normalMatrix = normalMatrix; patch.texture = texture;
+    }
+    return patch;
   }
   function nodeAlive(node) { if (node.owner.disposed || node.owner.busy) fail(node.owner.disposed ? 'disposed scene' : 'busy scene'); }
       function place(patch) {
@@ -53,6 +61,8 @@ globalThis.Ayatsuri = (() => {
         if (!node.analytic) fail('group has no material');
         if (patch.color !== undefined) rgb(patch.color);
         if (patch.transmissionColor !== undefined) rgb(patch.transmissionColor);
+        if (node.geometryExtension) node.geometryExtension.validateMaterial(patch);
+        else if (patch.ambientColor !== undefined) fail('ambientColor requires blendEllipsoids');
         for (const key of ['ambient', 'diffuse', 'specular', 'roughness', 'transmission', 'thickness', 'opacity', 'edgeSoftness']) if (patch[key] !== undefined) unit(patch[key]);
         if (patch.color !== undefined && rgb(patch.color) !== node.color) { node.color = patch.color; ++node.albedoVersion; node.owner.dirty = true; }
         let changed = false;
@@ -71,6 +81,7 @@ globalThis.Ayatsuri = (() => {
             if (v !== node.materialData[5 + i]) { node.materialData[5 + i] = v; changed = true; }
           }
         }
+        if (node.geometryExtension) changed = node.geometryExtension.material(node, patch) || changed;
         if (patch.thickness !== undefined && unit(patch.thickness) !== node.thickness) { node.thickness = patch.thickness; changed = true; }
         if (patch.opacity !== undefined && patch.opacity !== node.opacity) { node.opacity = patch.opacity; changed = true; }
         if (patch.edgeSoftness !== undefined && patch.edgeSoftness !== node.edgeSoftness) { node.edgeSoftness = patch.edgeSoftness; changed = true; }
@@ -79,6 +90,7 @@ globalThis.Ayatsuri = (() => {
       function texture(patch) {
         const node = this._node; nodeAlive(node); let changed = false;
         if (!node.analytic) fail('group has no texture');
+        if (node.geometryExtension) fail('geometry has no texture');
         if (patch.offset) vector(patch.offset, 2);
         if (patch.scale) vector(patch.scale, 2);
         if (patch.rotation !== undefined) finite(Math.fround(finite(patch.rotation)));
@@ -93,6 +105,8 @@ globalThis.Ayatsuri = (() => {
   const HandlePrototype = {place, material, texture, visible};
   function scene(options) {
     options = options || {};
+    if (options.geometries && !Array.isArray(options.geometries)) fail('geometry extensions');
+    let geometries = options.geometries ? options.geometries.slice() : null;
     const backend = options.backend || (typeof pocket !== 'undefined' ? pocket.hone : null),
       evaluator = options.evaluator || (typeof pocket !== 'undefined' ? pocket.ayatsuri : null), objects = [],
       lightState = new Float32Array([-0.5, -0.4, 0.8, 1, 1, 1]),
@@ -102,9 +116,11 @@ globalThis.Ayatsuri = (() => {
       counts = {geometryUpdates: 0, normalUpdates: 0, projectionUpdates: 0, albedoUpdates: 0,
         shadeUpdates: 0, shadeSamples: 0, analyticUpdates: 0, renderedFaces: 0, renderedPatches: 0, copiedBytes: 0,
         typedBytes: lightState.byteLength + cameraState.byteLength + lighting.byteLength + right.byteLength + down.byteLength + forward.byteLength};
-    if (!backend || typeof backend.ellipsoid !== 'function') fail('analytic hone backend required');
+    if (!backend || (typeof backend.ellipsoid !== 'function' && typeof backend.ellipsoidPacked !== 'function')) fail('analytic hone backend required');
     if (!evaluator || typeof evaluator.compose !== 'function') fail('shared ayatsuri evaluator required');
     const owner = {disposed: false, busy: false, dirty: true};
+    let geometryContext = geometries ? {cameraState, right, down, forward, counts, pack} : null;
+    if (geometries && geometries.some(g => !g || typeof g.kind !== 'string')) fail('geometry extensions');
     let lightVersion = 1, cameraVersion = 1, evaluatedLight = 0, evaluatedCamera = 0, evaluated = false;
     function alive() { if (owner.disposed || owner.busy) fail(owner.disposed ? 'disposed scene' : 'busy scene'); }
     function light(patch) {
@@ -151,21 +167,28 @@ globalThis.Ayatsuri = (() => {
       const parent = def.parent === undefined || def.parent === null ? null : def.parent._node;
       if (def.parent !== undefined && def.parent !== null && (!parent || !objects.includes(parent))) fail('parent must be a handle in this scene');
       const analytic = !!def.geometry;
+      let extension = null;
+      if (analytic && geometries) for (let i = 0; i < geometries.length; ++i) if (geometries[i].kind === def.geometry.kind) extension = geometries[i];
+      const bytes = extension ? extension.bytes(def.geometry, backend) : analytic ? 264 : 84;
+      if (extension && (def.pattern || def.textureTransform)) fail('geometry has no pattern or texture');
       // One backing store removes per-field ArrayBuffer headers. The typed
       // views are stable for synchronous native calls and never escape as API.
-      const storage = new ArrayBuffer(analytic ? 264 : 84);
+      const storage = new ArrayBuffer(bytes);
       const node = {name: def.name, parent, owner, pose: new Float32Array(storage, 0, 9),
-        matrix: new Float32Array(storage, 36, 12), analytic: geometry(def.geometry, storage),
-        materialData: analytic ? new Float32Array(storage, 164, 8) : null,
+        matrix: new Float32Array(storage, 36, 12),
+        analytic: extension ? extension.create(def.geometry, storage) : geometry(def.geometry, storage),
+        materialData: analytic ? new Float32Array(storage, extension ? extension.materialOffset : 164, extension ? extension.materialLength : 8) : null,
         color: 0xffffff, thickness: 0.5, opacity: 1, edgeSoftness: 0.04, pattern: null,
-        textureData: analytic ? new Float32Array(storage, 196, 5) : null, enabled: true, worldEnabled: true,
+        textureData: analytic && !extension ? new Float32Array(storage, 244, 5) : null, enabled: true, worldEnabled: true,
         transformVersion: 1, evaluatedTransform: 0, worldVersion: 0, parentVersion: -1,
         albedoVersion: 1, evaluatedAlbedo: 0, shadingVersion: 1, evaluatedShading: 0};
+      if (extension) node.geometryExtension = extension;
       node.pose[6] = node.pose[7] = node.pose[8] = 1;
       if (analytic) {
         node.materialData[0] = 0.25; node.materialData[1] = 0.75; node.materialData[3] = 32;
         node.materialData[5] = node.materialData[6] = node.materialData[7] = 1;
-        node.textureData[2] = node.textureData[3] = 1;
+        if (extension) extension.initializeMaterial(node.materialData);
+        else node.textureData[2] = node.textureData[3] = 1;
       }
       const handle = Object.create(HandlePrototype); handle._node = node;
       if (def.position || def.rotation || def.scale) handle.place(def);
@@ -214,38 +237,42 @@ globalThis.Ayatsuri = (() => {
         }
         if (node.analytic) {
           const patch = node.analytic;
+          if (node.geometryExtension) {
+            node.geometryExtension.evaluate(node, geometryChanged, cameraChanged, lightChanged, geometryContext);
+            continue;
+          }
           if (geometryChanged) {
-            const r = patch.radii, a = m[0] * r[0], b = m[1] * r[1], c = m[2] * r[2],
-              d = m[4] * r[0], e = m[5] * r[1], f = m[6] * r[2], g = m[8] * r[0], h = m[9] * r[1], j = m[10] * r[2],
-              determinant = a * (e * j - f * h) - b * (d * j - f * g) + c * (d * h - e * g), n = patch.normalMatrix;
+            const r = patch.work, a = m[0] * r[21], b = m[1] * r[22], c = m[2] * r[23],
+              d = m[4] * r[21], e = m[5] * r[22], f = m[6] * r[23], g = m[8] * r[21], h = m[9] * r[22], j = m[10] * r[23],
+              determinant = a * (e * j - f * h) - b * (d * j - f * g) + c * (d * h - e * g), n = patch.work;
             if (determinant - determinant !== 0 || Math.abs(determinant) < 1e-12) fail('singular transform');
-            n[0] = (e * j - f * h) / determinant; n[1] = (f * g - d * j) / determinant; n[2] = (d * h - e * g) / determinant;
-            n[3] = (c * h - b * j) / determinant; n[4] = (a * j - c * g) / determinant; n[5] = (b * g - a * h) / determinant;
-            n[6] = (b * f - c * e) / determinant; n[7] = (c * d - a * f) / determinant; n[8] = (a * e - b * d) / determinant;
+            n[32] = (e * j - f * h) / determinant; n[33] = (f * g - d * j) / determinant; n[34] = (d * h - e * g) / determinant;
+            n[35] = (c * h - b * j) / determinant; n[36] = (a * j - c * g) / determinant; n[37] = (b * g - a * h) / determinant;
+            n[38] = (b * f - c * e) / determinant; n[39] = (c * d - a * f) / determinant; n[40] = (a * e - b * d) / determinant;
             ++counts.normalUpdates;
           }
           if (geometryChanged || cameraChanged) {
-            const r = patch.radii, s = patch.screen, zoom = cameraState[6];
+            const r = patch.work, s = patch.work, zoom = cameraState[6];
             for (let k = 0; k < 3; ++k) {
-              s[k] = zoom * (right[0] * m[k] + right[1] * m[4 + k] + right[2] * m[8 + k]) * r[k];
-              s[4 + k] = zoom * (down[0] * m[k] + down[1] * m[4 + k] + down[2] * m[8 + k]) * r[k];
+              s[24 + k] = zoom * (right[0] * m[k] + right[1] * m[4 + k] + right[2] * m[8 + k]) * r[21 + k];
+              s[28 + k] = zoom * (down[0] * m[k] + down[1] * m[4 + k] + down[2] * m[8 + k]) * r[21 + k];
             }
             const x = m[3] - cameraState[3], y = m[7] - cameraState[4], z = m[11] - cameraState[5];
-            s[3] = cameraState[7] + zoom * (right[0] * x + right[1] * y + right[2] * z);
-            s[7] = cameraState[8] + zoom * (down[0] * x + down[1] * y + down[2] * z);
+            s[27] = cameraState[7] + zoom * (right[0] * x + right[1] * y + right[2] * z);
+            s[31] = cameraState[8] + zoom * (down[0] * x + down[1] * y + down[2] * z);
             ++counts.projectionUpdates;
           }
           const albedoChanged = node.evaluatedAlbedo !== node.albedoVersion;
           if (albedoChanged || node.evaluatedShading !== node.shadingVersion || geometryChanged) {
-            const surface = patch.surface, t = patch.texture, uv = node.textureData, cs = Math.cos(uv[4]), sn = Math.sin(uv[4]), pattern = node.pattern;
+            const surface = patch.surface, t = patch.work, uv = node.textureData, cs = Math.cos(uv[4]), sn = Math.sin(uv[4]), pattern = node.pattern;
             surface[0] = pack(node.color); surface[1] = pattern ? pack(pattern.color) : surface[0];
             surface[2] = Math.round(node.opacity * 255);
             surface[3] = Math.round(Math.min(1, node.thickness * Math.hypot(m[2], m[6], m[10])) * 255);
             surface[4] = !pattern ? 0 : pattern.kind === 'checker' ? 3 : pattern.axis === 'u' ? 1 : 2;
-            t[0] = cs * uv[2]; t[1] = -sn * uv[3]; t[2] = 0.5 + uv[0] - (t[0] + t[1]) * 0.5;
-            t[3] = sn * uv[2]; t[4] = cs * uv[3]; t[5] = 0.5 + uv[1] - (t[3] + t[4]) * 0.5;
-            if (pattern && pattern.kind === 'checker') for (let k = 0; k < 6; ++k) t[k] *= pattern.repeats;
-            t[6] = node.edgeSoftness; t[7] = pattern ? pattern.start : 0; t[8] = pattern ? pattern.end : 1;
+            t[49] = cs * uv[2]; t[50] = -sn * uv[3]; t[51] = 0.5 + uv[0] - (t[49] + t[50]) * 0.5;
+            t[52] = sn * uv[2]; t[53] = cs * uv[3]; t[54] = 0.5 + uv[1] - (t[52] + t[53]) * 0.5;
+            if (pattern && pattern.kind === 'checker') for (let k = 0; k < 6; ++k) t[49 + k] *= pattern.repeats;
+            t[55] = node.edgeSoftness; t[56] = pattern ? pattern.start : 0; t[57] = pattern ? pattern.end : 1;
             if (albedoChanged) ++counts.albedoUpdates;
           }
           if (geometryChanged || cameraChanged || lightChanged || albedoChanged || node.evaluatedShading !== node.shadingVersion) {
@@ -273,13 +300,13 @@ globalThis.Ayatsuri = (() => {
     function visit(visitor) {
       alive(); if (!evaluated || owner.dirty) fail('evaluate before render');
       owner.busy = true;
-      try { for (let i = 0; i < objects.length; ++i) if (objects[i].worldEnabled && objects[i].analytic) visitor(objects[i].analytic, objects[i].name); }
+      try { for (let i = 0; i < objects.length; ++i) if (objects[i].worldEnabled && objects[i].analytic) visitor(compatibility(objects[i].analytic), objects[i].name); }
       finally { owner.busy = false; }
     }
 
     function render() {
       alive(); if (!evaluated || owner.dirty) fail('evaluate before render');
-      if (!backend || !backend.ellipsoid) fail('analytic hone backend required');
+      if (!backend || (!backend.ellipsoid && !backend.ellipsoidPacked)) fail('analytic hone backend required');
       counts.renderedFaces = 0; counts.renderedPatches = 0;
       owner.busy = true;
       try {
@@ -287,14 +314,25 @@ globalThis.Ayatsuri = (() => {
         const node = objects[i];
         if (node.analytic && node.worldEnabled) {
           const patch = node.analytic;
-          backend.ellipsoid(patch.screen, patch.normalMatrix, lighting, node.materialData, patch.surface, patch.texture);
+          if (node.geometryExtension) node.geometryExtension.render(node, lighting, backend);
+          else if (typeof backend.ellipsoidPacked === 'function') backend.ellipsoidPacked(patch.work.buffer, 96, lighting);
+          else {
+            compatibility(patch);
+            backend.ellipsoid(patch.screen, patch.normalMatrix, lighting, node.materialData, patch.surface, patch.texture);
+          }
           ++counts.renderedPatches; continue;
         }
       }
       } finally { owner.busy = false; }
     }
     function stats(out) { alive(); for (const key in counts) out[key] = counts[key]; out.objects = objects.length; }
-    function dispose() { if (owner.busy) fail('busy scene'); if (!owner.disposed) { objects.length = 0; owner.disposed = true; } }
+    function dispose() {
+      if (owner.busy) fail('busy scene');
+      if (!owner.disposed) {
+        for (let i = 0; i < objects.length; ++i) if (objects[i].geometryExtension) objects[i].geometryExtension = null;
+        objects.length = 0; geometries = geometryContext = null; owner.disposed = true;
+      }
+    }
     light(options.light || {direction: [-0.5, -0.4, 0.8]}); if (options.camera) camera(options.camera);
     return {add, light, camera, evaluate, render, visit, stats, dispose};
   }
