@@ -495,6 +495,8 @@ extern const char character_lab_start[] asm("_binary_character_lab_js_start");
 extern const char character_lab_end[] asm("_binary_character_lab_js_end");
 extern const char cloud_probe_start[] asm("_binary_cloud_probe_js_start");
 extern const char cloud_probe_end[] asm("_binary_cloud_probe_js_end");
+extern const char cloud_memory_start[] asm("_binary_cloud_memory_js_start");
+extern const char cloud_memory_end[] asm("_binary_cloud_memory_js_end");
 extern const char cloud_act_start[] asm("_binary_cloud_act_js_start");
 extern const char cloud_act_end[] asm("_binary_cloud_act_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
@@ -671,6 +673,7 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.vmprobe","VM PROBE (typed workloads unsupported)",NULL,NULL,0),
     NATIVE_APP("local.cloud","CLOUD ACT",cloud_act_start,cloud_act_end,5),
     NATIVE_APP("local.cloudprobe","CLOUD PROBE",cloud_probe_start,cloud_probe_end,5),
+    NATIVE_APP("local.cloudmem","CLOUD MEMORY",cloud_memory_start,cloud_memory_end,5),
 };
 static unsigned native_catalog_count(void) { return sizeof(native_apps)/sizeof(native_apps[0]); }
 static uint32_t native_generation;

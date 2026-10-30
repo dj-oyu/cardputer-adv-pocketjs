@@ -98,6 +98,10 @@ static void test_admission(void) {
     CHECK(probe && !strcmp(probe->title,"CLOUD PROBE"));
     CHECK(probe && !strcmp(probe->entry,"apps/cloudprobe/cloud_probe.js"));
     CHECK(app_registry_admit(probe,"0.1.0",supported,NULL,reason,sizeof reason));
+    const app_manifest_t *memory=app_registry_find("local.cloudmem");
+    CHECK(memory && !strcmp(memory->entry,"apps/cloudmem/cloud_memory.js"));
+    CHECK(memory && !strcmp(memory->title,"CLOUD MEMORY"));
+    CHECK(app_registry_admit(memory,"0.1.0",supported,NULL,reason,sizeof reason));
     // The games: one row each, started from the home menu, no works library.
     static const struct { const char *id, *title, *entry; } games[]={
         {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},

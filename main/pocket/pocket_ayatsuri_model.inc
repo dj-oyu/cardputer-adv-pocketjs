@@ -6,11 +6,13 @@
 typedef struct {
     ayatsuri_model model;
     uint8_t *owned;
-    bool closed,busy;
+    uint32_t references,instances;
+    bool closed,busy,released;
 } pocket_model_owner;
 typedef struct {
     ayatsuri_model_instance core;
     JSValue owner;
+    pocket_model_owner *shared;
     void *arena;
     bool closed,busy;
 } pocket_model_actor;
@@ -60,16 +62,32 @@ static pocket_model_actor *managed_instance_enter(JSContext *ctx,JSValueConst se
     if(a->closed&&!allow_closed){fail(ctx,op,POCKET_ERR_CLOSED,"model instance disposed");return NULL;}
     a->busy=true;return a;
 }
+static void managed_model_detach(JSRuntime *rt,pocket_model_owner *m){
+    if(m->closed&&!m->instances&&!m->released){
+        js_free_rt(rt,m->owned);m->owned=NULL;
+        /* A static span is detached, never freed. No published procedural
+         * packet borrows it: submission already copied all numeric fields. */
+        m->model.data=NULL;m->released=true;
+    }
+}
+static void managed_model_unref(JSRuntime *rt,pocket_model_owner *m){
+    if(--m->references==0){m->closed=true;managed_model_detach(rt,m);js_free_rt(rt,m);}
+}
 static void managed_instance_release(JSRuntime *rt,pocket_model_actor *a){
     if(!a->closed){
+        pocket_model_owner *m=a->shared;
         (void)ayatsuri_model_instance_dispose(&a->core,a,1);
         js_free_rt(rt,a->arena);a->arena=NULL;
-        JS_FreeValueRT(rt,a->owner);a->owner=JS_UNDEFINED;a->closed=true;
+        JSValue owner=a->owner;a->owner=JS_UNDEFINED;a->shared=NULL;a->closed=true;
+        --m->instances;managed_model_detach(rt,m);
+        /* JS_FreeValueRT may finalize Model first in a collected expando
+         * cycle. Keep the actor's separate C reference until it returns. */
+        JS_FreeValueRT(rt,owner);managed_model_unref(rt,m);
     }
 }
 static void managed_model_finalizer(JSRuntime *rt,JSValue object){
     pocket_model_owner *m=JS_GetOpaque(object,pocket_model_class);
-    if(m){js_free_rt(rt,m->owned);js_free_rt(rt,m);}
+    if(m){m->closed=true;managed_model_detach(rt,m);managed_model_unref(rt,m);}
 }
 static void managed_instance_finalizer(JSRuntime *rt,JSValue object){
     pocket_model_actor *a=JS_GetOpaque(object,pocket_model_instance_class);
@@ -99,8 +117,25 @@ static JSValue managed_model_dispose(JSContext *ctx,JSValueConst self,int argc,J
     (void)argv;const char *op="ayatsuri.model.dispose";pocket_model_owner *m=managed_model_enter(ctx,self,op,true);
     if(!m)return JS_EXCEPTION;
     if(argc){m->busy=false;return invalid(ctx,op,"dispose takes no arguments");}
-    /* Existing instances retain this owner and its immutable bytes. */
-    m->closed=true;m->busy=false;return JS_UNDEFINED;
+    /* Live actors retain the cold span until their last explicit release. */
+    m->closed=true;managed_model_detach(JS_GetRuntime(ctx),m);m->busy=false;return JS_UNDEFINED;
+}
+static JSValue managed_model_stats(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="ayatsuri.model.stats";pocket_model_owner *m=managed_model_enter(ctx,self,op,true);
+    if(!m)return JS_EXCEPTION;
+    /* Snapshot before invoking any output setter. A setter may legitimately
+     * dispose another actor, but cannot reenter this Model while busy. */
+    const bool closed=m->closed,released=m->released;
+    const uint32_t instances=m->instances;
+    const uint32_t owned=!released&&m->owned?m->model.bytes:0;
+    const uint32_t external=!released&&!m->owned?m->model.bytes:0;
+    bool valid=argc==1&&JS_IsObject(argv[0]);
+    if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"closed",JS_NewBool(ctx,closed))>=0;
+    if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"instances",JS_NewUint32(ctx,instances))>=0;
+    if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"ownedBytes",JS_NewUint32(ctx,owned))>=0;
+    if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"staticBytes",JS_NewUint32(ctx,external))>=0;
+    if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"released",JS_NewBool(ctx,released))>=0;
+    m->busy=false;return valid?JS_DupValue(ctx,argv[0]):managed_model_error(ctx,op,AYATSURI_MODEL_INVALID);
 }
 static JSValue managed_instance_dispose(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)argv;const char *op="ayatsuri.instance.dispose";pocket_model_actor *a=managed_instance_enter(ctx,self,op,true);
@@ -201,7 +236,8 @@ static JSValue managed_instance_read_pose(JSContext *ctx,JSValueConst self,int a
 static JSValue managed_model_instance(JSContext *,JSValueConst,int,JSValueConst *);
 static const JSCFunctionListEntry managed_model_methods[]={
     JS_CGETSET_DEF("count",managed_model_count,NULL),JS_CFUNC_DEF("node",1,managed_model_node),
-    JS_CFUNC_DEF("instance",0,managed_model_instance),JS_CFUNC_DEF("dispose",0,managed_model_dispose)};
+    JS_CFUNC_DEF("instance",0,managed_model_instance),JS_CFUNC_DEF("stats",1,managed_model_stats),
+    JS_CFUNC_DEF("dispose",0,managed_model_dispose)};
 static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("targets",4,managed_instance_targets),JS_CFUNC_DEF("evaluate",2,managed_instance_evaluate),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),
@@ -229,6 +265,7 @@ static JSValue managed_model_instance(JSContext *ctx,JSValueConst self,int argc,
     (void)argv;const char *op="ayatsuri.model.instance";pocket_model_owner *m=managed_model_enter(ctx,self,op,false);
     if(!m)return JS_EXCEPTION;
     if(argc){m->busy=false;return invalid(ctx,op,"instance takes no arguments");}
+    if(m->references==UINT32_MAX||m->instances==UINT32_MAX){m->busy=false;return managed_model_error(ctx,op,AYATSURI_MODEL_RANGE);}
     if(!managed_model_class_ready(ctx,true)){m->busy=false;return JS_HasException(ctx)?JS_EXCEPTION:JS_ThrowOutOfMemory(ctx);}
     pocket_model_actor *a=js_mallocz(ctx,sizeof *a);
     if(!a){m->busy=false;return JS_ThrowOutOfMemory(ctx);}
@@ -245,6 +282,7 @@ static JSValue managed_model_instance(JSContext *ctx,JSValueConst self,int argc,
     if(status!=AYATSURI_MODEL_OK){js_free(ctx,a->arena);js_free(ctx,a);m->busy=false;return managed_model_error(ctx,op,status);}
     JSValue object=JS_NewObjectClass(ctx,pocket_model_instance_class);
     if(JS_IsException(object)){js_free(ctx,a->arena);js_free(ctx,a);m->busy=false;return object;}
+    ++m->references;++m->instances;a->shared=m;
     a->owner=JS_DupValue(ctx,self);a->closed=false;JS_SetOpaque(object,a);m->busy=false;return object;
 }
 static JSValue managed_model_publish(JSContext *ctx,const uint8_t *data,size_t bytes,uint8_t *owned){
@@ -254,7 +292,7 @@ static JSValue managed_model_publish(JSContext *ctx,const uint8_t *data,size_t b
     if(!managed_model_class_ready(ctx,false)){js_free(ctx,owned);return JS_HasException(ctx)?JS_EXCEPTION:JS_ThrowOutOfMemory(ctx);}
     pocket_model_owner *m=js_mallocz(ctx,sizeof *m);
     if(!m){js_free(ctx,owned);return JS_ThrowOutOfMemory(ctx);}
-    m->model=candidate;m->owned=owned;
+    m->model=candidate;m->owned=owned;m->references=1;
     JSValue object=JS_NewObjectClass(ctx,pocket_model_class);
     if(JS_IsException(object)){js_free(ctx,owned);js_free(ctx,m);return object;}
     JS_SetOpaque(object,m);return object;

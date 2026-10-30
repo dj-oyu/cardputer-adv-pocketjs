@@ -37,6 +37,8 @@ def compile_sources(root):
                 continue
             files.add(file)
     files.add(root / 'apps/pet/assets/pets-compact.bin')
+    files.add(root / 'apps/cloud/assets/cloud.aynm')
+    files.add(root / 'apps/cloud/assets/cloud_model_bytes.inc')
     return {file.relative_to(root).as_posix(): sha(file) for file in sorted(files)}
 
 
@@ -80,6 +82,7 @@ def manifest_selftest():
                     'components/quickjs-ng/quickjs-ng/quickjs.c',
                     'components/quickjs-ng/quickjs-ng/quickjs.h', 'tools/build_kasane_test.sh',
                     'tools/make_font.py', 'apps/pet/assets/pets-compact.bin',
+                    'apps/cloud/assets/cloud.aynm', 'apps/cloud/assets/cloud_model_bytes.inc',
                     'apps/kasane/megademo_plans.js', 'tools/kasane_ir/emit_rom_plans.mjs')
     cases = [('source', name) for name in source_names] + [('artifact', name) for name in (*GENERATED, *OBJECTS)] + [
         ('binary', ''), ('flags', ''), ('blob', ''), ('toolchain', ''), ('schema', ''), ('added_header', '')]

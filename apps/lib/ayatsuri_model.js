@@ -29,15 +29,16 @@ globalThis.AyatsuriNative=(()=>{
     const s=this.scene;alive(s);if(typeof value!=='boolean')fail();
     s.mask[this.id]=(s.mask[this.id]&~24)|(value?8:16);s.ready=false;
   }};
-  function scene(options){
-    const model=options.model,n=model.count,instance=model.instance(),
-      s={instance,model,n,mask:new Uint8Array(n),poses:new Float32Array(n*9),colors:new Uint32Array(n),opacity:new Float64Array(n),
-        cameraState:new Float32Array([0,0,400,0,0,0,1,120,75]),lightState:new Float32Array([-.5,-.4,.8,1,1,1]),scratch:new Float64Array(9),
-        handles:[],dead:false,busy:false,ready:false};
-    s.handle=function(id){alive(s);if(!Number.isInteger(id)||id<0||id>=n)fail();
-      if(!s.handles[id])s.handles[id]=Object.assign(Object.create(Handle),{id,scene:s});return s.handles[id];};
-    s.node=function(name){return s.handle(model.node(name));};
-    s.light=function(patch){alive(s);s.busy=true;try{
+  // Shared methods never close over a scene's borrowed model or native instance.
+  const Scene={handle(id){
+    const s=this;alive(s);if(!Number.isInteger(id)||id<0||id>=s.n)fail();
+    if(!s.handles[id])s.handles[id]=Object.assign(Object.create(Handle),{id,scene:s});return s.handles[id];
+  },node(name){
+    const s=this;alive(s);s.busy=true;let id;
+    try{id=s.model.node(name);}finally{s.busy=false;}
+    return s.handle(id);
+  },light(patch){
+    const s=this;alive(s);s.busy=true;try{
       const d=patch.direction,c=patch.color,tmp=s.scratch;
       if(c!==undefined)rgb(c);
       if(d){if(d.length!==3)fail();const x=finite(d[0]),y=finite(d[1]),z=finite(d[2]),l=Math.hypot(x,y,z);
@@ -46,25 +47,42 @@ globalThis.AyatsuriNative=(()=>{
       if(d)for(let k=0;k<3;k++)s.lightState[k]=tmp[k];
       if(c!==undefined)for(let k=0;k<3;k++)s.lightState[k+3]=((c>>((2-k)*8))&255)/255;
       s.ready=false;
-    }finally{s.busy=false;}};
-    s.camera=function(patch){alive(s);s.busy=true;try{
+    }finally{s.busy=false;}
+  },camera(patch){
+    const s=this;alive(s);s.busy=true;try{
       const p=patch.position,t=patch.target,c=patch.center,z=patch.zoom,tmp=s.scratch,projection=patch.projection;
       if(projection!==undefined&&projection!=='orthographic')fail();
       if(p)read(tmp,0,p,3);if(t)read(tmp,3,t,3);if(c)read(tmp,7,c,2);
       if(z!==undefined){tmp[6]=Math.fround(finite(z));if(!(finite(tmp[6])>0))fail();}
       if(p)for(let k=0;k<3;k++)s.cameraState[k]=tmp[k];if(t)for(let k=3;k<6;k++)s.cameraState[k]=tmp[k];
       if(c){s.cameraState[7]=tmp[7];s.cameraState[8]=tmp[8];}if(z!==undefined)s.cameraState[6]=tmp[6];s.ready=false;
-    }finally{s.busy=false;}};
-    s.evaluate=function(timeMs){alive(s);if(timeMs!==undefined)finite(timeMs);s.busy=true;s.ready=false;
-      try{let dirty=false;for(let k=0;k<n;k++)if(s.mask[k]){dirty=true;break;}
-        if(dirty){instance.targets(s.mask,s.poses,s.colors,s.opacity);s.mask.fill(0);}
-        instance.evaluate(s.cameraState,s.lightState);s.ready=true;
-      }finally{s.busy=false;}};
-    s.render=function(){alive(s);if(!s.ready)throw new Error('AyatsuriNative: evaluate before render');s.busy=true;try{instance.submit();}finally{s.busy=false;}};
-    s.stats=function(out){alive(s);s.busy=true;try{return instance.stats(out);}finally{s.busy=false;}};
-    s.dispose=function(){if(s.busy)throw new Error('AyatsuriNative: disposed/busy scene');if(s.dead)return;
-      s.busy=true;try{instance.dispose();s.dead=true;s.handles.length=0;s.model=null;}finally{s.busy=false;}};
-    try{if(options.light)s.light(options.light);if(options.camera)s.camera(options.camera);return s;}catch(e){instance.dispose();throw e;}
+    }finally{s.busy=false;}
+  },evaluate(timeMs){
+    const s=this;alive(s);if(timeMs!==undefined)finite(timeMs);s.busy=true;s.ready=false;
+    try{let dirty=false;for(let k=0;k<s.n;k++)if(s.mask[k]){dirty=true;break;}
+      if(dirty){s.instance.targets(s.mask,s.poses,s.colors,s.opacity);s.mask.fill(0);}
+      s.instance.evaluate(s.cameraState,s.lightState);s.ready=true;
+    }finally{s.busy=false;}
+  },render(){
+    const s=this;alive(s);if(!s.ready)throw new Error('AyatsuriNative: evaluate before render');s.busy=true;
+    try{s.instance.submit();}finally{s.busy=false;}
+  },stats(out){
+    const s=this;alive(s);s.busy=true;try{return s.instance.stats(out);}finally{s.busy=false;}
+  },dispose(){
+    const s=this;if(s.busy)throw new Error('AyatsuriNative: disposed/busy scene');if(s.dead)return;
+    s.busy=true;try{
+      s.instance.dispose();s.dead=true;s.ready=false;s.handles.length=0;
+      s.instance=s.model=s.mask=s.poses=s.colors=s.opacity=s.cameraState=s.lightState=s.scratch=s.handles=null;
+    }finally{s.busy=false;}
+  }};
+  function scene(options){
+    const s=Object.create(Scene);s.dead=false;s.busy=false;s.ready=false;s.instance=null;
+    try{
+      s.model=options.model;s.n=s.model.count;s.instance=s.model.instance();
+      s.mask=new Uint8Array(s.n);s.poses=new Float32Array(s.n*9);s.colors=new Uint32Array(s.n);s.opacity=new Float64Array(s.n);
+      s.cameraState=new Float32Array([0,0,400,0,0,0,1,120,75]);s.lightState=new Float32Array([-.5,-.4,.8,1,1,1]);s.scratch=new Float64Array(9);s.handles=[];
+      if(options.light)s.light(options.light);if(options.camera)s.camera(options.camera);return s;
+    }catch(e){if(s.instance)s.instance.dispose();throw e;}
   }
   return {scene};
 })();

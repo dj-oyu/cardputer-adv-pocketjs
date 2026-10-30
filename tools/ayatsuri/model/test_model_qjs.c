@@ -42,6 +42,11 @@ static uint8_t *fixture;static size_t fixture_bytes;
 static JSValue static_model(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;return pocket_ayatsuri_model_from_static(c,fixture,fixture_bytes);
 }
+static JSValue owned_model(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;JSValue input=JS_NewArrayBufferCopy(c,fixture,fixture_bytes);
+    if(JS_IsException(input))return input;
+    JSValue result=js_ayatsuri_model_open(c,JS_UNDEFINED,1,&input);JS_FreeValue(c,input);return result;
+}
 static JSValue snapshot_hash(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;uint32_t hash=2166136261u;
     const uint8_t *p=(const uint8_t *)packets;
@@ -101,6 +106,7 @@ static void install(JSContext *ctx){
     JSValue global=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,global,"modelOpen",JS_NewCFunction(ctx,js_ayatsuri_model_open,"modelOpen",1));
     JS_SetPropertyStr(ctx,global,"staticModel",JS_NewCFunction(ctx,static_model,"staticModel",0));
+    JS_SetPropertyStr(ctx,global,"ownedModel",JS_NewCFunction(ctx,owned_model,"ownedModel",0));
     JS_SetPropertyStr(ctx,global,"snapshotHash",JS_NewCFunction(ctx,snapshot_hash,"snapshotHash",0));
     JS_SetPropertyStr(ctx,global,"clearPackets",JS_NewCFunction(ctx,clear_packets,"clearPackets",0));
     JS_SetPropertyStr(ctx,global,"packetCount",JS_NewCFunction(ctx,recorded_packet_count,"packetCount",0));
@@ -190,6 +196,31 @@ static void unaligned_opacity_contract(JSContext *ctx){
     JS_FreeValue(ctx,ab);JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);
     JS_FreeValue(ctx,actor);JS_FreeValue(ctx,global);CHECK(foreign_buffers==0);++opacity_skew_count;
 }
+static void finalizer_order_contract(JSContext *ctx){
+    JSValue global=JS_GetGlobalObject(ctx);
+    JSValue eval[2]={JS_GetPropertyStr(ctx,global,"warmCamera"),JS_GetPropertyStr(ctx,global,"warmLight")};
+    for(unsigned model_first=0;model_first<2;model_first++){
+        JSValue model=owned_model(ctx,JS_UNDEFINED,0,NULL);CHECK(!JS_IsException(model));
+        JSValue actor=managed_model_instance(ctx,model,0,NULL);CHECK(!JS_IsException(actor));
+        pocket_model_owner *m=JS_GetOpaque(model,pocket_model_class);CHECK(m&&m->references==2&&m->instances==1);
+        /* Deliberately invoke the real class cleanup in both orders and clear
+         * opaque afterward to prevent a second cleanup by QuickJS. Actual JS
+         * expando cycles are also collected normally in the script tests. */
+        if(model_first){
+            managed_model_finalizer(JS_GetRuntime(ctx),model);JS_SetOpaque(model,NULL);
+            CHECK(m->closed&&!m->released&&m->references==1&&m->instances==1&&m->owned);
+            JSValue result=managed_instance_evaluate(ctx,actor,2,eval);CHECK(!JS_IsException(result));JS_FreeValue(ctx,result);
+            packet_count=0;result=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(result));JS_FreeValue(ctx,result);
+            managed_instance_finalizer(JS_GetRuntime(ctx),actor);JS_SetOpaque(actor,NULL);
+        }else{
+            managed_instance_finalizer(JS_GetRuntime(ctx),actor);JS_SetOpaque(actor,NULL);
+            CHECK(!m->closed&&!m->released&&m->references==1&&!m->instances&&m->owned);
+            managed_model_finalizer(JS_GetRuntime(ctx),model);JS_SetOpaque(model,NULL);
+        }
+        JS_FreeValue(ctx,actor);JS_FreeValue(ctx,model);
+    }
+    JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,global);
+}
 int main(int argc,char **argv){
     CHECK(argc>=2);fixture=(uint8_t *)read_file(argv[1],&fixture_bytes);
     size_t source_bytes;char *source=read_file(argc>2?argv[2]:"tools/ayatsuri/model/test_model_qjs.js",&source_bytes);
@@ -202,7 +233,7 @@ int main(int argc,char **argv){
         ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
         const size_t before_skew=skew_count;skew_bytes=ayatsuri_model_instance_bytes(&model)+7u;
         packet_count=submit_calls=fail_submission=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
-        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);JS_RunGC(rt);
+        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);JS_RunGC(rt);
         CHECK(skew_count>before_skew);skew_bytes=0;
         JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }
@@ -221,5 +252,5 @@ int main(int argc,char **argv){
         a=managed_model_instance(ctx,m,0,NULL);CHECK(!JS_IsException(a));
         JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }
-    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, actual JS wrapper visibility/dirty/atomicity, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
+    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, explicit cold release/both finalizer orders, actual JS wrapper visibility/dirty/atomicity, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
 }

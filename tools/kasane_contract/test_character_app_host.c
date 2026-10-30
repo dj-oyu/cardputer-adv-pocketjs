@@ -587,6 +587,47 @@ static int model_study_run(bool ok){
 }
 #endif
 
+static uint64_t memory_panel_hash(void){
+    uint64_t h=UINT64_C(14695981039346656037);
+    for(unsigned i=0;i<240*135;++i){h=(h^(panel[i]&255u))*UINT64_C(1099511628211);h=(h^(panel[i]>>8))*UINT64_C(1099511628211);}
+    return h;
+}
+static unsigned memory_frames;
+static bool memory_frame(unsigned buttons){
+    char script[32];snprintf(script,sizeof script,"frame(%u)",buttons);
+    if(!eval(script,strlen(script),"memory-frame.js"))return false;
+    present((uint64_t)memory_frames*33333u);++memory_frames;
+    return !present_failures&&full_reference((uint64_t)(memory_frames-1)*33333u);
+}
+static int memory_app_contract(bool loaded){
+    const char *choice=getenv("CHARACTER_MEMORY_APP"),*path=getenv("CHARACTER_MEMORY_PIXELS");
+    FILE *pixels=path?fopen(path,"w"):NULL;
+    bool ok=loaded&&(!path||pixels)&&eval("globalThis.__memoryRead={}",26,"memory-read.js");
+    if(ok)ok=memory_frame(0)&&num("AyatsuriCloudMemory.read(__memoryRead).variant===null")==1;
+    if(ok)ok=memory_frame(*choice=='A'?0x80:0x20)&&memory_frame(0);
+    for(unsigned repeat=0;ok&&repeat<2;++repeat){
+        unsigned last=0,turn=0;ok=memory_frame(0x4000);
+        while(ok&&turn++<1300){
+            const unsigned count=(unsigned)num("AyatsuriCloudMemory.read(__memoryRead).draws");
+            if(count>last){
+                if(count!=last+1){ok=false;break;}
+                if(pixels)fprintf(pixels,"%u,%u,%016llx\n",repeat,count,(unsigned long long)memory_panel_hash());
+                last=count;
+            }
+            if(num("AyatsuriCloudMemory.read(__memoryRead).phase==='COMPLETE'")==1)break;
+            ok=memory_frame(0);
+        }
+        ok=ok&&turn<1300&&last==1115&&num("AyatsuriCloudMemory.read(__memoryRead).released&&__memoryRead.retained")==1;
+        printf("CLOUD_MEMORY_HOST variant=%c run=%u draws=%u turns=%u peak_requested=%zu largest_request=%zu\n",*choice,repeat+1,last,turn,peak_bytes,largest_guest_request);
+        if(ok)ok=memory_frame(0);
+    }
+    if(pixels)fclose(pixels);
+    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);ctx=NULL;rt=NULL;
+    ok=ok&&!cur_bytes&&!present_failures;
+    printf("CLOUD_MEMORY_HOST_%s released_guest=%zu\n",ok?"PASS":"FAIL",cur_bytes);
+    return ok?0:1;
+}
+
 int main(int argc,char **argv){
 #ifdef CHARACTER_MODEL_STUDY
     study_native_active=getenv("CHARACTER_MEMORY_STUDY")!=NULL;
@@ -630,9 +671,12 @@ int main(int argc,char **argv){
         return model_study_run(loaded);
     }
 #endif
-    bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&primitive_contract()&&blend_primitive_contract()&&core_transform_contract();
-    JS_RunGC(rt);peak_bytes=cur_bytes;largest_guest_request=0;
+    const bool memory_app=getenv("CHARACTER_MEMORY_APP")!=NULL;
+    bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&(memory_app||(primitive_contract()&&blend_primitive_contract()&&core_transform_contract()));
+    if(!memory_app)JS_RunGC(rt);
+    peak_bytes=cur_bytes;largest_guest_request=0;
     ok=ok&&eval(src,n,path);
+    if(memory_app)return memory_app_contract(ok);
     if(ok){
         const double count=num("AyatsuriModels.names.length");
         if(!isfinite(count)||count<1||count>3||count!=(unsigned)count)return 2;

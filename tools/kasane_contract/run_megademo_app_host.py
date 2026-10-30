@@ -31,7 +31,7 @@ EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
          "main/ui/kasane/ksn_proc_grid_pie.c", "main/ui/kasane/ksn_proc_grid_image.c",
          "main/ui/kasane/ksn_proc_grid_resize.c", "main/pocket/pocket_pixel.c",
          "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c",
-         "main/pocket/pocket_shape.c", "main/ayatsuri/ayatsuri_model.c"]
+         "main/pocket/pocket_shape.c", "main/ayatsuri/ayatsuri_model.c", "main/pocket/pocket_ayatsuri_assets.c"]
 
 
 def kasane_sources() -> list[str]:

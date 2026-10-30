@@ -8,6 +8,18 @@ function rejects(fn, code) {
 function equal(a, b) { return a.length === b.length && a.every((x, i) => Object.is(x, b[i])); }
 const model = modelOpen(sourceBuffer), count = model.count;
 assert(count > 1, 'fixture has hierarchy');
+const coldBytes = sourceBuffer.byteLength, initially = model.stats({});
+assert(!initially.closed && !initially.released && initially.instances === 0 && initially.ownedBytes === coldBytes && initially.staticBytes === 0, 'owned model initial lifetime');
+let modelGuarded = false;
+model.stats({set closed(value) { rejects(() => model.dispose(), 'BUSY'); modelGuarded = value === false; }});
+assert(modelGuarded, 'model stats output busy guard');
+rejects(() => model.stats({set closed(value) { throw Error('model setter failure'); }}));
+assert(!model.stats({}).closed, 'model stats exception releases busy');
+const noActors = ownedModel(); noActors.dispose(); noActors.dispose();
+assert(noActors.stats({}).released && noActors.stats({}).ownedBytes === 0, 'owned bytes released with no actors despite live Model object');
+const staticOnly = staticModel();
+assert(staticOnly.stats({}).staticBytes === coldBytes && staticOnly.stats({}).ownedBytes === 0, 'static span attached without ownership');
+staticOnly.dispose(); assert(staticOnly.stats({}).released && staticOnly.stats({}).staticBytes === 0, 'static span detached without freeing flash');
 rejects(() => modelOpen(new ArrayBuffer(4)), 'INVALID_ARGUMENT');
 if (typeof SharedArrayBuffer === 'function') rejects(() => modelOpen(new SharedArrayBuffer(64)), 'INVALID_ARGUMENT');
 const detached = new ArrayBuffer(8);
@@ -16,6 +28,7 @@ rejects(() => { model.count = 0; });
 assert(model.node(firstName) === 0, 'stable named node');
 rejects(() => model.node({toString() { throw Error('must not coerce'); }}), 'INVALID_ARGUMENT');
 const a = model.instance(), b = model.instance(), before = new Float32Array(9), other = new Float32Array(9);
+assert(model.stats({}).instances === 2, 'two live actors counted');
 a.readPose(0, before); b.readPose(0, other);
 assert(equal(before, other), 'shared model independent initialization');
 new Uint8Array(sourceBuffer).fill(0);
@@ -54,6 +67,7 @@ forceSubmitFailure(2); rejects(() => a.submit());
 assert(snapshotHash() === packetSnapshot, 'whole multi-packet candidate rollback');
 forceSubmitFailure(0);
 model.dispose(); model.dispose();
+assert(model.stats({}).closed && model.stats({}).instances === 2 && !model.stats({}).released && model.stats({}).ownedBytes === coldBytes, 'close retains cold bytes for live actors');
 rejects(() => model.instance(), 'CLOSED');
 rejects(() => model.node(firstName), 'CLOSED');
 // Closing Model prohibits new owners; its two existing actors remain usable.
@@ -61,10 +75,21 @@ a.evaluate(camera, light); b.evaluate(camera, light);
 clearPackets(); b.submit();
 a.dispose(); rejects(() => a.evaluate(camera, light), 'CLOSED');
 rejects(() => a.stats({}), 'CLOSED');
+assert(model.stats({}).instances === 1 && model.stats({}).ownedBytes === coldBytes, 'first actor release protects last actor');
+const beforeColdRelease = snapshotHash();
 b.dispose();
+assert(model.stats({}).instances === 0 && model.stats({}).released && model.stats({}).ownedBytes === 0, 'last actor releases closed owned bytes immediately');
+assert(snapshotHash() === beforeColdRelease, 'published numeric snapshot survives cold release');
+const duringStats = ownedModel(), duringActor = duringStats.instance(); duringStats.dispose();
+const entrySnapshot = {set closed(value) { assert(value === true, 'closed snapshot'); duringActor.dispose(); }};
+duringStats.stats(entrySnapshot);
+assert(entrySnapshot.instances === 1 && entrySnapshot.ownedBytes === coldBytes && !entrySnapshot.released, 'stats remains entry snapshot across actor release callback');
+assert(duringStats.stats({}).released && duringStats.stats({}).instances === 0, 'callback release completed safely');
 // A user expando may close a cycle across the native retained Model value.
-let cycleModel = staticModel(), cycleActor = cycleModel.instance();
+let cycleModel = ownedModel(), cycleActor = cycleModel.instance();
 cycleModel.actor = cycleActor; cycleActor = null; cycleModel = null;
+let closedCycle = ownedModel(), closedActor = closedCycle.instance();
+closedCycle.actor = closedActor; closedCycle.dispose(); closedActor = null; closedCycle = null;
 assert(typeof staticModel === 'function', 'static path exists');
 // Load and exercise the actual checked-in visual wrapper against the real
 // native classes. A JS-only mock cannot establish the 8/16 visibility ABI.

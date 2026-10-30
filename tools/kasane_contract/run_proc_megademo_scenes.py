@@ -47,7 +47,7 @@ def build(opt: str) -> Path:
                *(kasane / n for n in ("ksn_procedural.c", "ksn_proc_analysis.c", "ksn_proc_plan.c",
                                       "ksn_proc_plan_points.c", "ksn_proc_points.c",
                                       "ksn_proc_points_pie.c", "ksn_proc_points_dispatch.c")),
-               ROOT / "main/pocket/pocket_shape.c", ROOT / "main/ayatsuri/ayatsuri_model.c", ROOT / "tools/hostshim/pocket_api_stub.c",
+               ROOT / "main/pocket/pocket_shape.c", ROOT / "main/ayatsuri/ayatsuri_model.c", ROOT / "main/pocket/pocket_ayatsuri_assets.c", ROOT / "tools/hostshim/pocket_api_stub.c",
                ROOT / "tools/kasane_contract/shape_draw_shim.c",
                ROOT / "tools/kasane_contract/test_proc_megademo_scenes.c"]
     command = [cc, "-std=gnu11", f"-O{opt}", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",

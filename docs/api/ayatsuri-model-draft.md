@@ -1,6 +1,6 @@
 # ayatsuri: 共有Modelと個体Instance
 
-状態: 7d21b302を対照とするローカル比較C。形式・APIは試作中で、採用効果と製品組込みは未確定。既存のJS動的作成経路は維持する。
+状態: 7d21b302を対照とする比較Cから、明示回収と製品CLOUD MEMORYへの組込みを進める試作。通常CLOUD PROBEの既定経路は維持し、native資産経路の実機確認は未完。既存のJS動的作成経路は維持する。
 
 [host比較結果](../perf/cloud-native-model-study.md)では単体accounted peakを156124→110572 Bへ削減し、301frame画像ハッシュ一致を確認した。製品のnative cloud切替とこの経路の実機検証は未完である。
 
@@ -22,7 +22,11 @@ CのModelは検証済みreadonly spanを借用する。spanとModel構造体は�
 
 ## 数値と試作形式
 
-試作のModel.disposeは論理closeである。callerが閉鎖済みModelを保持する間、copy版のcold blobはGC finalizerまで残る。Instance.disposeは個体arenaとModel参照を解放するが、cold資産の即時回収を保証しない。容量比較ではclosed保持中と全参照破棄/GC後を分ける。static版のcold spanはfirmware領域として残る。
+Model.disposeは新規利用をcloseし、生存Instanceは保護する。close済みかつ最後のInstanceが退役した時点で、copy版cold blobを同期的にguest allocatorへ返す。保持中のModel tombstoneやdisposed scene/handleがあってもcold blobを保持しない。static版はspanの参照を外し、flash自体はfreeしない。Modelをopenのまま保持した場合は再利用のためcold blobも保持する。最後のJS参照のfinalizerも保険として働く。GC cycleのfinalizer順に依存しないC側参照管理を持つ。
+
+`model.stats(out)`はclose後も呼べ、`closed`、`instances`、`ownedBytes`、`staticBytes`、`released`を返す。後二つのbytesは現在attach中のspanで、`released=true`はdetach済みを意味する。static flashの物理回収やESP heap増加の保証ではない。Instance.disposeは個体arenaを返す。native scene.disposeは自分のInstanceとJS buffer/参照を切るが、借用Modelを勝手にcloseしない。二重disposeは成功、disposed handleの操作は拒否する。既存描画packetはsnapshotなので、cold回収にpresent待ちやsleepを加えない。
+
+製品の `pocket.ayatsuri.modelBuiltin('cloud')` は検証済みの組込みAYNMをModelとして開く。固定byte列は直接参照し、巨大なJS定義graphへ戻さない。unknown名と無効形式は公開前に拒否する。現試作のregistryはcloudのみで、汎用FS loaderや任意assetの認可設計まで含まない。[有限メモリ比較](../perf/cloud-memory-fixture.md)は同一firmware内でJS定義Aと組込みCを選択する。
 
 C arenaは8-byte整列を要求する。JS adapterはguest allocatorの4-byte整列だけを前提に元allocationへ7 B足して確保し、整列後のspanを核へ渡す。解放は必ず元allocationへ戻す。targetのopacityはN個のLE binary64値を持つbyte spanで、double alignmentを要求しない。JS公開引数の型はFloat64Arrayのまま、同期borrowと全件validationを保つ。
 

@@ -5,6 +5,11 @@ on:
       - 'apps/character/**'
       - 'apps/cloud/**'
       - 'apps/cloudprobe/**'
+      - 'apps/cloudmem/**'
+      - 'components/pocketjs_guest/src/guest.c'
+      - 'components/pocketjs_guest/include/pocketjs/guest.h'
+      - 'main/app_session.*'
+      - 'main/pocket/pocket_app.c'
       - 'main/pocket/app_registry.c'
       - 'tools/test_app_registry.c'
       - 'apps/lib/ayatsuri_follow.js'
@@ -13,6 +18,7 @@ on:
       - 'main/pocket/pocket_shape.*'
       - 'main/pocket/pocket_ayatsuri_follow.inc'
       - 'main/pocket/pocket_ayatsuri_model.inc'
+      - 'main/pocket/pocket_ayatsuri_assets.*'
       - 'apps/lib/ayatsuri_model.js'
       - 'main/pocket/pocket_proc.*'
       - 'main/ui/kasane/ksn_procedural.*'
@@ -55,7 +61,10 @@ jobs:
           node tools/character/test_follow.cjs
           node tools/character/test_cloud_dynamic.cjs
           node tools/character/test_cloud_fixture.cjs
+          node tools/character/test_cloud_memory.cjs
+          python3 tools/test_guest_allocator_metrics.py
           node tools/ayatsuri/model/test_pack_model.cjs
+          node tools/ayatsuri/model/builtin_asset.cjs
           node tools/ayatsuri/model/test_native_scene.cjs
           python3 tools/ayatsuri/model/run_model_contracts.py
           python3 tools/ayatsuri/model/run_model_study.py --self-test-manifest
@@ -90,6 +99,7 @@ jobs:
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
           python3 tools/kasane_contract/run_character_app_host.py --cloud --fixture --m32
           python3 tools/ayatsuri/model/run_model_comparison.py --m32
+          python3 tools/ayatsuri/model/run_cloud_memory.py --m32
           MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
           git diff --exit-code
@@ -102,6 +112,7 @@ jobs:
             .cache/character-capture/
             .cache/cloud-capture/
             .cache/native-model-study/ci/
+            .cache/cloud-memory-m32/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -127,6 +138,8 @@ jobs:
           . "$IDF_PATH/export.sh"
           idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 build
           idf.py -B build_character size > build_character/size.log
+          idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON build
+          idf.py -B build_character_memory size > build_character_memory/size.log
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -137,3 +150,12 @@ jobs:
             build_character/*.elf
             build_character/*.map
             build_character/*.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: character-memory-firmware-${{ env.SOURCE_HEAD }}
+          path: |
+            build_character_memory/*.bin
+            build_character_memory/*.elf
+            build_character_memory/*.map
+            build_character_memory/*.log

@@ -169,6 +169,19 @@ static bool shade_overlap(const shade_view *a,const shade_view *b){
  * second implementation or retaining guest buffers after this call. */
 #include "pocket_ayatsuri_follow.inc"
 #include "pocket_ayatsuri_model.inc"
+#include "pocket_ayatsuri_assets.h"
+
+static JSValue js_ayatsuri_model_builtin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.modelBuiltin";
+    if(argc!=1||!JS_IsString(argv[0]))return invalid(ctx,op,"expected builtin asset name");
+    size_t name_bytes=0;const char *name=JS_ToCStringLen(ctx,&name_bytes,argv[0]);
+    if(!name)return JS_EXCEPTION;
+    const uint8_t *data=NULL;size_t bytes=0;
+    const bool found=name_bytes==strlen(name)&&pocket_ayatsuri_builtin_asset(name,&data,&bytes);
+    JS_FreeCString(ctx,name);
+    if(!found)return invalid(ctx,op,"unknown builtin model");
+    return pocket_ayatsuri_model_from_static(ctx,data,bytes);
+}
 static JSValue js_ayatsuri_compose(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;const char *op="ayatsuri.compose";
     if(argc!=3)return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, output[12]");
@@ -266,6 +279,7 @@ static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *un
         JS_CFUNC_DEF("followDrive",3,js_ayatsuri_follow_drive),
         JS_CFUNC_DEF("followCreate",2,js_ayatsuri_follow_create),
         JS_CFUNC_DEF("modelOpen",1,js_ayatsuri_model_open),
+        JS_CFUNC_DEF("modelBuiltin",1,js_ayatsuri_model_builtin),
         JS_CFUNC_DEF("driveCreate",1,js_ayatsuri_drive_create)};
     return JS_SetPropertyFunctionList(ctx,ns,methods,sizeof methods/sizeof methods[0])<0?ESP_ERR_NO_MEM:ESP_OK;
 }

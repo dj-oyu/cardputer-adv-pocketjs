@@ -1,5 +1,7 @@
 # Cloud native Model/Instance比較C
 
+本稿は初回host比較の履歴。3d31fb86後の明示回収・製品provider・実機比較用計測は[後続fixture](cloud-memory-fixture.md)を参照する。
+
 状態: ローカルhost比較。対照JSソースは7d21b302、製品CLOUD PROBEのnative asset切替・同head CI・この方式の実機確認は未完。7d21b302の実機fixture成功は[別記録](cloud-finite-fixture.md)を参照。
 
 本表は初回native比較（公開bb97749相当のローカルsource、詳細SHAはresult.json）の記録。後続の再利用guard・例外分類・二重dispose修正後のCI結果は別headとして確認し、旧表の数値を新headの実測へ読み替えない。

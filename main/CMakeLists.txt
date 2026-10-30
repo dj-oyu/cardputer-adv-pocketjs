@@ -36,6 +36,7 @@ set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane
 list(APPEND KASANE_SOURCES
     "pocket/pocket_proc.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "ayatsuri/ayatsuri_model.c"
+    "pocket/pocket_ayatsuri_assets.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
@@ -217,7 +218,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "scene/fxmat
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/character/character_lab.js" "../apps/cloud/cloud_act.js" "../apps/cloudprobe/cloud_probe.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/character/character_lab.js" "../apps/cloud/cloud_act.js" "../apps/cloudprobe/cloud_probe.js" "../apps/cloudmem/cloud_memory.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
@@ -269,6 +270,8 @@ if(KASANE_PROC_JS_DIAGNOSTIC)
 endif()
 if(KASANE_MEGADEMO_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_TRACE=1)
+    idf_component_get_property(_guest_metrics_lib pocketjs_guest COMPONENT_LIB)
+    target_compile_definitions(${_guest_metrics_lib} PRIVATE POCKET_GUEST_ALLOCATOR_METRICS=1)
 endif()
 if(KASANE_BGCOST_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_BGCOST_TRACE=1)

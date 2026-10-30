@@ -1,0 +1,11 @@
+app local.cloudmem
+option strip-debug
+runtime memory_runtime.js
+follow ../lib/ayatsuri_follow.js
+motion ../cloud/cloud_pose.js
+dynamic ../cloud/cloud_dynamic.js
+a_utility ../character/character.js
+a_blend ../character/character_blend.js
+a_model ../cloud/cloud_model.js
+c_utility ../lib/ayatsuri_model.js
+c_update ../cloud/cloud_shared_update.js

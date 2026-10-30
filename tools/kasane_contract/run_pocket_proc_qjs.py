@@ -40,7 +40,7 @@ def main():
              ROOT/'main/ui/kasane/ksn_render.c',
              ROOT/'main/ui/kasane/ksn_blend_pie.c',
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
-             ROOT/'main/pocket/pocket_shape.c', ROOT/'main/ayatsuri/ayatsuri_model.c',
+             ROOT/'main/pocket/pocket_shape.c', ROOT/'main/ayatsuri/ayatsuri_model.c', ROOT/'main/pocket/pocket_ayatsuri_assets.c',
              ROOT/'tools/kasane_contract/proc_native_weak.c',
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c',
              # MEGADEMO's built-in plans (the app registers kasane.<name>).

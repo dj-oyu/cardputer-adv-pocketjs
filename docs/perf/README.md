@@ -11,6 +11,7 @@
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
 | [cloud-native-model-study.md](cloud-native-model-study.md) | host比較C | readonly Model/個体Instanceの共有、160KiBのA/C容量と301frame画像ハッシュ一致、未実機の境界 |
+| [cloud-memory-fixture.md](cloud-memory-fixture.md) | 診断次候補 | 明示cold回収、製品A/C有限fixture、guest/ESP/cacheを分ける最小実機計測と未検証 |
 | [cloud-finite-fixture.md](cloud-finite-fixture.md) | ローカル次候補 | Enter/Uで選ぶ外乱・途中retarget・pause/replay有限診断と検証境界 |
 | [cloud-static-asset-study.md](cloud-static-asset-study.md) | ローカル比較・未採用 | 雲の静的定義bin化、所有権、source/packedの実測方法と実機境界 |
 | [dynamic-follow-integration.md](dynamic-follow-integration.md) | ローカル実装・host検証 | 2DOF共通核、数値精度・収束FAIL保持、雲接続と容量試験 |
