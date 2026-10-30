@@ -2,13 +2,11 @@
 'use strict';
 globalThis.AyatsuriModels=(()=>{
   const names=['CLOUD'];
-  const cream={color:0xfffaeb,ambient:.5,diffuse:.5,specular:.02,roughness:.9};
   const eye = {color:0x211b24,ambient:.24,diffuse:.6,specular:.7,roughness:.2,
                transmission:0,transmissionColor:0xffffff,thickness:.8};
   const mist = {color:0xeefaff,ambient:.68,diffuse:.32,specular:.03,roughness:.95,
                 transmission:.62,transmissionColor:0xe4f5ff,thickness:.5,
                 opacity:.93,edgeSoftness:.15};
-  function recolor(material,color) { return Object.assign({},material,{color}); }
   function make(scene,index) {
     const parts = [], patterns = [], pose = {position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
     const root = scene.add({name:'actor',geometry:null,position:pose.position,rotation:pose.rotation,scale:pose.scale});
@@ -21,6 +19,7 @@ globalThis.AyatsuriModels=(()=>{
       parts.push(h);if(pattern)patterns.push(h);return h;
     }
     let head, halo, leftEye, rightEye, cloud;
+    const bodyPose={scale:[1,1,1]};
     const headPose = {rotation:[0,0,0]},
       haloPose = {position:[0,-38,0],rotation:[0,0,0],scale:[1,1,1]},
       leftEyePose = {scale:[1,1,1]}, rightEyePose = {scale:[1,1,1]};
@@ -31,16 +30,17 @@ globalThis.AyatsuriModels=(()=>{
         parts.push(h);return h;
       }
       // A broad continuous pear is the primary form; small lobes shape its outline.
-      volume('cloud-body',root,[0,0,0],[
-        {position:[0,17,0],radii:[28,33,19]},
-        {position:[-2,-15,0],radii:[25,32,18]},
-        {position:[-19,-26,-9],radii:[16,19,13]},
-        {position:[16,-23,-8],radii:[17,20,13]},
-        {position:[-21,22,-7],radii:[16,21,12]},
-        {position:[21,24,-7],radii:[17,21,12]},
-        {position:[2,37,-5],radii:[22,15,12]}],6);
+      const bodyShape=volume('cloud-body',root,[0,0,0],[
+        {position:[0,16,0],radii:[29,30,18]},
+        {position:[0,-15,-1],radii:[25,24,17]},
+        {position:[-21,-9,-5],radii:[18,20,14]},
+        {position:[20,-7,-5],radii:[17,20,14]},
+        {position:[-20,22,-4],radii:[20,20,14]},
+        {position:[20,24,-4],radii:[21,22,14]},
+        {position:[1,36,-3],radii:[24,15,14]},
+        {position:[-7,-29,-8],radii:[20,17,12]}],12);
       head=group('face',root,[0,-12,20]);
-      headPose.scale=[1,1,1];
+      headPose.position=[0,-12,20];
       cloud={hands:[],handPoses:[],pupils:[],gaze:[],brows:[],browPoses:[],wisps:[],wispPoses:[],
         mouthPose:{scale:[1,1,1]},tongueMaterial:{opacity:0}};
       const ink={color:0x30243e,ambient:.6,diffuse:.4,specular:.08,roughness:.85};
@@ -52,8 +52,8 @@ globalThis.AyatsuriModels=(()=>{
           {position:[-4,-3,0],radii:[6,7,6]},
           {position:[4,-2,0],radii:[6,7,6]}],6);
         const eyeGroup=group('eye'+s,head,[s*8,-3,0]);
-        lobe('eye-rim'+s,eyeGroup,[0,0,0],[5.3,7.7,1.8],recolor(cream,0xfffaeb));
-        const pupil=lobe('pupil'+s,eyeGroup,[s*.4,.1,1.5],[3.9,6.4,2],
+        // Large ink eyes read against the white body without a second white shell.
+        const pupil=lobe('pupil'+s,eyeGroup,[s*.4,.1,1.5],[4.7,7.3,2],
           Object.assign({},eye,{color:0x292137,specular:.85,roughness:.16}),undefined,undefined,true);
         cloud.pupils.push(pupil);cloud.gaze.push({position:[s*.4,.1,1.5]});
         if(s<0)leftEye=eyeGroup;else rightEye=eyeGroup;
@@ -69,9 +69,9 @@ globalThis.AyatsuriModels=(()=>{
       halo=group('iridescent-cloud',null,haloPose.position);
       const colors=[0xaacbfa,0xd3c1f3,0xefc1e6,0xb6e5f1,0xeee2bc];
       for(let k=0;k<5;k++) {
-        const p={position:[(k-2)*9,Math.sin(k*1.7)*.8,k*.25],rotation:[0,0,0],scale:[1,1,1]};
+        const p={position:[(k-2)*9,(k-2)*(k-2)*.55-1,k*.25],rotation:[0,0,(k-2)*.1],scale:[1,1,1]};
         cloud.wispPoses.push(p);
-        cloud.wisps.push(lobe('halo-wisp'+k,halo,p.position,[16-k*.7,2,2.6],
+        cloud.wisps.push(lobe('halo-wisp'+k,halo,p.position,[14-k*.6,1.5+(k%2)*.6,2.6],
           Object.assign({},mist,{color:colors[k],transmission:.7,thickness:.04,
             opacity:.7,edgeSoftness:.26}),p.rotation));
       }
@@ -79,9 +79,12 @@ globalThis.AyatsuriModels=(()=>{
       // Inputs are explicit so body-only scripts do not smuggle in breathing.
       pose.rotation[2]=body.tilt;pose.rotation[1]=body.turn;
       const size=.9;
-      pose.scale[0]=size/body.stretch;pose.scale[1]=size*body.stretch;pose.scale[2]=size;
+      // Actor motion is rigid; only the body volume receives squash/stretch.
+      // Facial proportions and detached hands must not inherit a rubber scale.
+      pose.scale[0]=pose.scale[1]=pose.scale[2]=size;
+      bodyPose.scale[0]=1/body.stretch;bodyPose.scale[1]=body.stretch;bodyShape.place(bodyPose);
       pose.position[0]=(body.shiftX||0)*size;pose.position[1]=body.lift*size+(cloud?4:0);root.place(pose);
-      if(cloud){headPose.scale[0]=Math.pow(body.stretch,.65);headPose.scale[1]=Math.pow(body.stretch,-.75);}
+      headPose.position[1]=-12*body.stretch;
       headPose.rotation[2]=body.head;head.place(headPose);
       const open=Math.max(.04,expression.open*(1-expression.blink));
       leftEyePose.scale[1]=open;rightEyePose.scale[1]=open;
@@ -106,8 +109,11 @@ globalThis.AyatsuriModels=(()=>{
         haloPose.scale[0]=1+.08*Math.abs(body.tilt);halo.place(haloPose);
         if(cloud)for(let k=0;k<cloud.wisps.length;k++) {
           const p=cloud.wispPoses[k],side=k-2,lag=body.haloFollow||0;
-          p.position[1]=Math.sin(k*1.7)*.8+lag*side*8;
-          p.rotation[2]=lag*side*.32;p.scale[0]=1+Math.abs(lag)*(.4+Math.abs(side)*.15);
+          const center=body.wispCenter||0,tip=(side<0?body.wispLeft:body.wispRight)||0,
+            bend=center+(tip-center)*Math.abs(side)/2;
+          p.position[1]=side*side*.55-1+bend;
+          p.rotation[2]=side*.1+(side<0?center-tip:tip-center)/18;
+          p.scale[0]=1+Math.abs(lag)*(.4+Math.abs(side)*.15);
           cloud.wisps[k].place(p);
         }
       }

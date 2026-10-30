@@ -8,9 +8,16 @@ globalThis.AyatsuriCloudMotion = (() => {
     const u=t-6.5;
     return Math.sin(u*14)*Math.exp(-u*3)*(1-ease(t,6.5,7.65));
   }
+  function wisp(t){
+    const u=t-4.28,recoil=u>0&&u<.67?
+      Math.sin(u*14)*Math.exp(-u*5)*(1-ease(t,4.28,4.95)):0;
+    return phrase(t,2.35,3.05,3.48,4.28)-.28*phrase(t,5,5.28,5.4,5.66)+
+      .4*phrase(t,5.45,5.9,6.05,6.5)+.6*recoil+.6*settle(t);
+  }
   return function(timeMs,mode,breathing,inputs){
     const body=inputs.body,expression=inputs.expression;
     body.shiftX=body.handLeft=body.handRight=body.haloFollow=0;
+    body.wispCenter=body.wispLeft=body.wispRight=0;
     expression.gazeX=expression.gazeY=expression.smile=expression.brow=0;
     if(mode===0){
       body.tilt=body.turn=body.lift=body.head=body.tail=body.haloOffset=0;
@@ -34,6 +41,10 @@ globalThis.AyatsuriCloudMotion = (() => {
       body.handRight=-.07*anticipate-.15*phrase(t-.26,2.35,3.05,3.48,4.28)+.16*extend;
       body.haloOffset=-4*delayed+1.2*settle(t-.16);
       body.haloFollow=-.12*delayed+.035*settle(t-.16);
+      // Local-Y pixel offsets: the tips bend after the center, not as one plate.
+      body.wispCenter=-.45*wisp(t)||0;
+      body.wispLeft=1.6*wisp(t-.08);
+      body.wispRight=-2.2*wisp(t-.16)||0;
       expression.gazeX=.68*look;
       expression.gazeY=-.18*phrase(t,5.2,5.6,6.1,6.65);
       expression.smile=.6*phrase(t,2.5,3.15,6.5,7.35);

@@ -53,6 +53,22 @@ assert.ok(sampled(5300).body.stretch<.9,'compression precedes extension');
 assert.ok(sampled(5900).body.stretch>1.15,'release stretches upward');
 assert.ok(sampled(2100).expression.gazeX>0,'gaze leads the main lean');
 assert.notEqual(sampled(3100).body.handLeft,sampled(3100).body.handRight,'hands phrase asymmetrically');
+const wispFields=['wispCenter','wispLeft','wispRight'];
+assert.ok(Math.abs(sampled(2390).body.wispCenter)>0,'wisp center starts first');
+assert.equal(sampled(2390).body.wispLeft,0);assert.equal(sampled(2390).body.wispRight,0);
+assert.ok(sampled(2470).body.wispLeft>0,'near tip follows center');
+assert.equal(sampled(2470).body.wispRight,0,'far tip waits longer');
+assert.ok(sampled(2550).body.wispRight<0,'far tip bends after its own delay');
+assert.notEqual(Math.sign(sampled(4450).body.wispLeft),Math.sign(sampled(4600).body.wispLeft),
+  'wisp recoil crosses rest instead of freezing at lean endpoint');
+for(const ms of [0,2000,7820,8000,10000])for(const key of wispFields)
+  assert.equal(sampled(ms).body[key],0,'wisps rest at '+ms);
+for(let ms=0;ms<=10000;ms+=1000/240){
+  const body=sampled(ms).body;
+  assert.ok(body.wispCenter>=-.46&&body.wispCenter<=.14);
+  assert.ok(body.wispLeft>=-.49&&body.wispLeft<=1.61);
+  assert.ok(body.wispRight>=-2.21&&body.wispRight<=.67);
+}
 const cloudSamples=[];
 for(let ms=0;ms<=10000;ms+=1000/60){
   const pose=sampled(ms);cloudSamples.push([ms,pose]);
@@ -62,7 +78,7 @@ for(let ms=0;ms<=10000;ms+=1000/60){
 }
 for(const [ms,pose] of cloudSamples.reverse())assert.deepEqual(sampled(ms),pose,'reverse seeking is history independent');
 for(const ms of [2000,2220,2350,2660,3050,3480,4280,4350,4430,4480,4600,
-    5000,5280,5400,5450,5660,5900,6050,6500,7650,7740,7810]){
+    4360,4440,4950,5030,5110,5000,5280,5400,5450,5660,5900,6050,6500,7650,7740,7810]){
   const a=sampled(ms-.0001),b=sampled(ms+.0001);
   for(const group of ['body','expression'])for(const key of Object.keys(a[group]))
     assert.ok(Math.abs(a[group][key]-b[group][key])<.0001,'continuous cloud '+group+'.'+key+' at '+ms);
@@ -93,6 +109,41 @@ const hookOrder=[],blend={},hookScene={light(){},camera(){},evaluate(){hookOrder
 vm.runInContext(fs.readFileSync(path.join(root,'apps/character/character_lab_scene.js'),'utf8'),hookContext);
 hookContext.AyatsuriLab.create(0,{}).evaluate(0,0,false);
 assert.deepEqual(hookOrder,['sample','update','evaluate'],'model sampling is explicit and precedes model update');
+// Use the real utility transform tree: rotated face/hands stay rigid while the
+// separate body volume inherits squash/stretch. No rendered pixels are implied.
+const shapeContext=vm.createContext({});
+for(const file of ['apps/character/character.js','apps/character/character_blend.js',
+    'apps/cloud/cloud_motion.js','apps/cloud/cloud_model.js'])
+  vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),shapeContext,{filename:file});
+const shapeScene=shapeContext.Ayatsuri.scene({backend:{ellipsoid(){},blendEllipsoids(){}},
+  evaluator:TransformReference,geometries:[shapeContext.AyatsuriBlend]}),shapeNodes=new Map();
+const shapeModel=shapeContext.AyatsuriModels.create({add(def){
+  const handle=shapeScene.add(def);shapeNodes.set(def.name,handle);return handle;
+}},0);
+const rigidNames=['actor','face','floating-hand-1','floating-hand1','hand-volume-1','hand-volume1',
+  'pupil-1','pupil1','brow-1','brow1','cheek-1','cheek1','smile','tongue'];
+const norm=(m,column)=>Math.hypot(m[column],m[column+4],m[column+8]);
+const close=(a,b,label)=>assert.ok(Math.abs(a-b)<.000002,label+': '+a+' vs '+b);
+for(const stretch of [.84,1,1.19]){
+  const {body,expression}=sampled(0);
+  Object.assign(body,{stretch,head:.31,turn:.23,tilt:-.17,handLeft:.22,handRight:-.16});
+  shapeModel.update(0,body,expression);shapeScene.evaluate(0);
+  for(const name of rigidNames){
+    const m=shapeNodes.get(name)._node.matrix;
+    for(let axis=0;axis<3;axis++)close(norm(m,axis),.9,name+' rigid axis '+axis+' stretch '+stretch);
+    close(norm(m,0)/norm(m,1),1,name+' world aspect stretch '+stretch);
+    close(m[0]*m[1]+m[4]*m[5]+m[8]*m[9],0,name+' no world shear');
+  }
+  for(const name of ['cloud-body']){
+    const m=shapeNodes.get(name)._node.matrix;
+    close(norm(m,0),.9/stretch,name+' changes width');
+    close(norm(m,1),.9*stretch,name+' changes height');
+    close(norm(m,0)/norm(m,1),1/(stretch*stretch),name+' changes world aspect');
+  }
+  close(shapeNodes.get('face')._node.pose[1],-12*stretch,'face translates with body surface');
+  close(shapeNodes.get('face')._node.pose[5],.31,'head rotation remains nonzero');
+}
+shapeScene.dispose();
 const frame=context.frame;
 for(let model=0;model<3;model++){
   for(let mode=0;mode<6;mode++){
