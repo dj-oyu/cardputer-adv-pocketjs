@@ -1,5 +1,7 @@
 # 通常 main への DMA 再提案（2026-10-27）
 
+> **既定 ON（2026-10-30）**: MEGADEMO の実機 A/B（末尾の節）で send が約 5 ms/frame 減り、turn・render・heap は不変だったので、PR #111 で既定を ON にした。OFF は `-D KASANE_DMA_OVERLAP=OFF` で残る。以下の「既定 OFF」は当時の記述。
+>
 > **比較の状態（2026-10-29）**: source-selected ON 比較の #99 は比較未完で closed / unmerged。既定 ON の実機優位は未確認で、性能不良を理由とする不採用ではない。[終了理由と再比較の条件](../archive/proposals/dma-source-on-pr99.md)。既定 OFF を維持する。
 
 
@@ -116,4 +118,4 @@ PR #111 の head `13e5d3e`（既定 OFF）と、同じソースで既定だけ�
 - 両条件とも error・DEGRADE なし。目視で破綻なし（MISO 未配線なので glass の正しさはソフトでは確かめられない）。
 - 単独 boot・1 回ずつの比較なので、15% 未満の差は主張しない（命令キャッシュの配置差）。send の 5 ms はそれを大きく超える。
 
-既定を ON にするかは、この記録を根拠に別 PR で決める。
+この記録を根拠に、同じ PR #111 で既定を ON にした（`main/CMakeLists.txt`）。

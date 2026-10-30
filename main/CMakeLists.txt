@@ -43,8 +43,10 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
     "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
-option(KASANE_DMA_OVERLAP "Experimental copied LCD DMA overlap with next Kasane band" OFF)
-if(KASANE_DMA_OVERLAP)
+# Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
+# turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
+option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
+if(KASANE_DMA_OVERLAP AND NOT CMAKE_BUILD_EARLY_EXPANSION)
     add_compile_definitions(KASANE_DMA_OVERLAP=1)
 endif()
 option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
