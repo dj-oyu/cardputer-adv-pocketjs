@@ -48,7 +48,7 @@ typedef struct {
     const uint8_t *dirty;
     const float *pose;
     const uint32_t *color;
-    const double *opacity;
+    const void *opacity;
     size_t count;
 } ayatsuri_model_targets;
 typedef struct {
@@ -70,9 +70,11 @@ ayatsuri_model_status ayatsuri_model_instance_init(const ayatsuri_model *model,
         ayatsuri_model_instance *out);
 ayatsuri_model_status ayatsuri_model_instance_dispose(ayatsuri_model_instance *instance,
         const void *owner,uint32_t generation);
-/* Every source array has count=N entries (pose has N*9 floats). Validate all
- * selected values before any write. A rejected batch leaves cached packets
- * publishable; a same-value batch preserves the mutation epoch. */
+/* Every source array has count=N entries (pose has N*9 floats). Opacity is
+ * a byte-addressed span of N little-endian IEEE binary64 values; its base
+ * need not be double-aligned. All inputs are borrowed only during the call.
+ * Validate all selected values before any write. A rejected batch leaves
+ * cached packets publishable; a same-value batch preserves the epoch. */
 ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *instance,
         const void *owner,uint32_t generation,const ayatsuri_model_targets *targets);
 ayatsuri_model_status ayatsuri_model_instance_read_pose(ayatsuri_model_instance *instance,

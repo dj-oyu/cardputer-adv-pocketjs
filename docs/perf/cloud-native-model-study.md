@@ -4,6 +4,10 @@
 
 本表は初回native比較（公開bb97749相当のローカルsource、詳細SHAはresult.json）の記録。後続の再利用guard・例外分類・二重dispose修正後のCI結果は別headとして確認し、旧表の数値を新headの実測へ読み替えない。
 
+実機前の境界確認で、IDF6.0.1のguest allocatorが4-byte整列である一方、C核arenaは8-byte整列を要求する差も見つかった。JS bridgeは元allocationを保持して7 B余分に確保し、整列したarenaを渡す方式へ修正する。arena自体は6600 Bのままだが、新bridgeの要求は6607 Bとなるため、本表の6600 B最大要求を修正後の値と呼ばない。host fixtureの通常allocatorは16-byte整列で、この差を隠していた。
+
+同じ境界で、F64 opacity入力もdoubleポインタの整列を仮定せず、LE binary64のbyte spanとして読む。選択値だけをscalarで読み、全配列の追加copy/確保は入れない。installed Xtensa compilerのcompile-only probeではdouble alignment=8、pointer alignment=4。IDFの `heap_caps_base.c` の既定4-byte alignmentとguest.cの呼出経路を読んで確認した。意図的な4 mod 8 arenaと外部ArrayBufferの試験はASan/UBSan PASS、C核の未整列入力/NaN atomic回帰はm32もPASS。最終核SHAは `5b256aea2a199d23d2c44afe56d8969487ebf8a381953845734ff4e09e29648d`、旧表の核70435e4cとは区別する。
+
 ## 比較条件
 
 Aは固定した7d21b302のJS scene/形状定義、Cは同じ雲をoffline exportしたreadonly AYNMとnative Instance。19nodes、16描画packet、14blend lobes。Cのblobは2766 B、Instance arenaは6600 B（既存work slot6144 B＋metadata456 B）。arenaはjs_malloc経由でguest会計へ含める。速度/位相は既存個体別follow actorを維持し、JSが演技とtargetを指示する。

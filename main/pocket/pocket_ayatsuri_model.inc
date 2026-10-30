@@ -113,7 +113,7 @@ static JSValue managed_instance_targets(JSContext *ctx,JSValueConst self,int arg
     ayatsuri_model_status status=AYATSURI_MODEL_INVALID;
     if(valid){
         const ayatsuri_model_targets batch={v[0].data,(const float *)v[1].data,
-            (const uint32_t *)v[2].data,(const double *)v[3].data,n};
+            (const uint32_t *)v[2].data,v[3].data,n};
         status=ayatsuri_model_instance_targets(&a->core,a,1,&batch);
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
@@ -229,9 +229,14 @@ static JSValue managed_model_instance(JSContext *ctx,JSValueConst self,int argc,
     if(!a){m->busy=false;return JS_ThrowOutOfMemory(ctx);}
     a->owner=JS_UNDEFINED;a->closed=true;
     const size_t bytes=ayatsuri_model_instance_bytes(&m->model);
-    a->arena=js_mallocz(ctx,bytes);
+    if(bytes>SIZE_MAX-7u){js_free(ctx,a);m->busy=false;return managed_model_error(ctx,op,AYATSURI_MODEL_RANGE);}
+    /* The guest heap promises only four-byte alignment on the device. Keep
+     * the allocator's original pointer for free, but align the core arena's
+     * double-bearing work records explicitly. All padding stays guest-charged. */
+    a->arena=js_mallocz(ctx,bytes+7u);
     if(!a->arena){js_free(ctx,a);m->busy=false;return JS_ThrowOutOfMemory(ctx);}
-    ayatsuri_model_status status=ayatsuri_model_instance_init(&m->model,a->arena,bytes,a,1,&a->core);
+    void *aligned=(void *)(((uintptr_t)a->arena+7u)&~(uintptr_t)7u);
+    ayatsuri_model_status status=ayatsuri_model_instance_init(&m->model,aligned,bytes,a,1,&a->core);
     if(status!=AYATSURI_MODEL_OK){js_free(ctx,a->arena);js_free(ctx,a);m->busy=false;return managed_model_error(ctx,op,status);}
     JSValue object=JS_NewObjectClass(ctx,pocket_model_instance_class);
     if(JS_IsException(object)){js_free(ctx,a->arena);js_free(ctx,a);m->busy=false;return object;}

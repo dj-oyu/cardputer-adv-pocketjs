@@ -24,6 +24,8 @@ CのModelは検証済みreadonly spanを借用する。spanとModel構造体は�
 
 試作のModel.disposeは論理closeである。callerが閉鎖済みModelを保持する間、copy版のcold blobはGC finalizerまで残る。Instance.disposeは個体arenaとModel参照を解放するが、cold資産の即時回収を保証しない。容量比較ではclosed保持中と全参照破棄/GC後を分ける。static版のcold spanはfirmware領域として残る。
 
+C arenaは8-byte整列を要求する。JS adapterはguest allocatorの4-byte整列だけを前提に元allocationへ7 B足して確保し、整列後のspanを核へ渡す。解放は必ず元allocationへ戻す。targetのopacityはN個のLE binary64値を持つbyte spanで、double alignmentを要求しない。JS公開引数の型はFloat64Arrayのまま、同期borrowと全件validationを保つ。
+
 AYNM v1試作はLE、offset/length付きsection directory。nodes、rest TRS、radii、local lobes、materials、target bindings、ASCII名のsectionを持つ。未知required sectionは拒否、optionalは境界検証してskip。長さ・積・offsetのoverflow、重なり、stride/count、親の順序、ID、finite値を検証する。1MiB、256nodes、64sectionsが現試作上限で、製品予算の保証ではない。
 
 保存TRSはF32、計算中間と丸め順は既存共通C核とJS実装に合わせる。thickness/opacity/edge softnessは既存JS Numberの量子化結果を保つためF64を保持する。一律のF32化やPIE用量子化を同時に導入しない。packed保存形式と将来のPIE実行layoutは同一でなくてよい。毎frameの詰め替えや余分な全state copyを増やさない。

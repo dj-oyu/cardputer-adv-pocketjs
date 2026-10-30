@@ -123,6 +123,21 @@ int main(int argc,char **argv){
     assert(ayatsuri_model_instance_evaluate(&i,&owner,1,camera,light)==AYATSURI_MODEL_OK);
     uint32_t cursor=0;ayatsuri_model_packet packet;assert(ayatsuri_model_instance_next(&i,&owner,1,&cursor,&packet)==AYATSURI_MODEL_OK);
     uint16_t alpha;memcpy(&alpha,packet.storage+254,2);assert(alpha==179);
+    /* A device ArrayBuffer may be four-byte aligned even for Float64 data.
+     * Decode byte-addressed values without a double load or batch scratch. */
+    _Alignas(8) uint8_t opacity_storage[sizeof opacity+8];uint8_t *unaligned_opacity=opacity_storage+4;
+    assert(((uintptr_t)unaligned_opacity&7)==4);memcpy(unaligned_opacity,opacity,sizeof opacity);
+    t.opacity=unaligned_opacity;memset(dirty,0,sizeof dirty);dirty[1]=dirty[18]=AYATSURI_TARGET_OPACITY;
+    const double half=.5,bad=NAN;memcpy(unaligned_opacity+8,&half,8);memcpy(unaligned_opacity+18*8,&bad,8);
+    memcpy(saved_instance,&i,sizeof i);memcpy(saved_arena,arena,arena_bytes);
+    assert(ayatsuri_model_instance_targets(&i,&owner,1,&t)==AYATSURI_MODEL_INVALID);
+    assert(!memcmp(saved_instance,&i,sizeof i)&&!memcmp(saved_arena,arena,arena_bytes));
+    dirty[18]=0;assert(ayatsuri_model_instance_targets(&i,&owner,1,&t)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_instance_evaluate(&i,&owner,1,camera,light)==AYATSURI_MODEL_OK);
+    cursor=0;assert(ayatsuri_model_instance_next(&i,&owner,1,&cursor,&packet)==AYATSURI_MODEL_OK);
+    memcpy(&alpha,packet.storage+254,2);assert(alpha==128);
+    const uint32_t epoch=i.mutation_epoch;assert(ayatsuri_model_instance_targets(&i,&owner,1,&t)==AYATSURI_MODEL_OK);
+    assert(i.mutation_epoch==epoch&&i.evaluated);
     assert(ayatsuri_model_instance_read_pose(&i,&other_owner,1,0,second_pose)==AYATSURI_MODEL_STATE);
     assert(ayatsuri_model_instance_read_pose(&i,&owner,2,0,second_pose)==AYATSURI_MODEL_STATE);
     i.busy=true;assert(ayatsuri_model_instance_dispose(&i,&owner,1)==AYATSURI_MODEL_BUSY);i.busy=false;

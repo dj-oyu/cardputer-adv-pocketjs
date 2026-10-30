@@ -170,7 +170,7 @@ ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *i
         for(unsigned k=0;k<9;++k)if(flags&(1u<<(k/3))){const float v=t->pose[j*9+k];
             if(!isfinite(v)||(k>=6&&v==0))return leave(i,AYATSURI_MODEL_INVALID);}
         if((flags&32)&&t->color[j]>0xffffff)return leave(i,AYATSURI_MODEL_INVALID);
-        if((flags&64)&&!unit(t->opacity[j]))return leave(i,AYATSURI_MODEL_INVALID);
+        if((flags&64)&&!unit(md((const uint8_t *)t->opacity+8*j)))return leave(i,AYATSURI_MODEL_INVALID);
     }
     bool changed=false;
     for(unsigned j=0;j<count;++j){
@@ -180,7 +180,8 @@ ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *i
             pose[k]=t->pose[j*9+k];node_changed=true;add_count(&i->stats.target_copy_bytes,4);}
         if((flags&24)&&s->enabled!=!!(flags&8)){s->enabled=!!(flags&8);node_changed=true;add_count(&i->stats.target_copy_bytes,1);}
         if((flags&32)&&s->color!=t->color[j]){s->color=t->color[j];node_changed=true;add_count(&i->stats.target_copy_bytes,4);}
-        if((flags&64)&&s->opacity!=t->opacity[j]){s->opacity=t->opacity[j];node_changed=true;add_count(&i->stats.target_copy_bytes,8);}
+        if(flags&64){const double value=md((const uint8_t *)t->opacity+8*j);
+            if(s->opacity!=value){s->opacity=value;node_changed=true;add_count(&i->stats.target_copy_bytes,8);}}
         if(node_changed){changed=true;add_count(&i->stats.target_changed,1);}
     }
     if(changed){add_count(&i->mutation_epoch,1);i->evaluated=false;}
