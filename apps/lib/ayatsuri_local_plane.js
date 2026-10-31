@@ -26,11 +26,15 @@ globalThis.AyatsuriLocalPlane=(()=>{
     if(s.busy||(s.owner&&s.owner.busy))fail('busy scene');
   }
   function ready(s){alive(s);if(!s.ready||(s.owner&&s.owner.dirty))fail('evaluate before render');}
-  function rejectTexture(){
-    const n=this._node,o=n&&n.owner;
-    if(!o||o.disposed)fail('disposed scene');if(o.busy)fail('busy scene');
-    fail('localPlane has no UV transform');
+  function mutate(h,method,value){
+    const s=h._plane;alive(s);s.busy=true;
+    try{
+      if(method==='texture'&&h._region)fail('localPlane has no UV transform');
+      h._raw[method](value);
+    }finally{s.busy=false;}
   }
+  const Handle={place(value){mutate(this,'place',value);},material(value){mutate(this,'material',value);},
+    visible(value){mutate(this,'visible',value);},texture(value){mutate(this,'texture',value);}};
   function change(s,method,patch){
     alive(s);s.busy=true;
     try{s.base[method](patch);s.ready=false;}finally{s.busy=false;}
@@ -55,9 +59,11 @@ globalThis.AyatsuriLocalPlane=(()=>{
       const h=s.base.add(copy);if(!s.owner)s.owner=h._node.owner;
       if(record){
         record.work=h._node.analytic.work;record.surface=h._node.analytic.surface;
-        h.texture=rejectTexture;s.records.push(record);
+        s.records.push(record);
       }
-      s.ready=false;return h;
+      const handle=Object.create(Handle);
+      handle._node=h._node;handle._raw=h;handle._plane=s;handle._region=!!record;
+      s.ready=false;return handle;
     }finally{s.busy=false;}
   },light(patch){change(this._plane,'light',patch);},camera(patch){change(this._plane,'camera',patch);},
   evaluate(timeMs){
