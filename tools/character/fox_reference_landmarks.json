@@ -1,0 +1,463 @@
+{
+  "kind": "MANUAL VISUAL APPROXIMATE REFERENCE LANDMARKS / NOT EXACT MULTIVIEW RECONSTRUCTION",
+  "source": ".cache/fox-reference-posix/fox-character-sheet-volume-muzzle-v2.png",
+  "sourceSha256": "3c1d6d81ca613d501277898fc2bcda220931694a67687e294b9c9a7dc02870a5",
+  "imagePixels": [
+    1536,
+    1024
+  ],
+  "coordinateConvention": "original PNG pixel coordinates, origin upper left, x right, y down",
+  "estimatedUncertaintyPx": {
+    "featureCenters": 3,
+    "furBoundaryAndForehead": 8
+  },
+  "views": {
+    "FRONT": {
+      "forehead_top_no_ears": [
+        291,
+        82
+      ],
+      "forelock_tuft_tip_excluded_from_face_height": [
+        291,
+        63
+      ],
+      "face_outer_left": [
+        204,
+        164
+      ],
+      "face_outer_right": [
+        376,
+        164
+      ],
+      "eye_center_left": [
+        262,
+        141
+      ],
+      "eye_center_right": [
+        318,
+        142
+      ],
+      "nose_tip": [
+        289,
+        164
+      ],
+      "chin": [
+        289,
+        191
+      ],
+      "white_fur_boundary_left_to_right": [
+        [
+          207,
+          158
+        ],
+        [
+          227,
+          157
+        ],
+        [
+          244,
+          157
+        ],
+        [
+          258,
+          159
+        ],
+        [
+          271,
+          164
+        ],
+        [
+          280,
+          168
+        ],
+        [
+          290,
+          169
+        ],
+        [
+          300,
+          166
+        ],
+        [
+          309,
+          158
+        ],
+        [
+          325,
+          156
+        ],
+        [
+          346,
+          157
+        ],
+        [
+          368,
+          166
+        ]
+      ],
+      "face_outline_without_ears_clockwise": [
+        [
+          291,
+          82
+        ],
+        [
+          320,
+          92
+        ],
+        [
+          343,
+          118
+        ],
+        [
+          356,
+          143
+        ],
+        [
+          376,
+          164
+        ],
+        [
+          348,
+          178
+        ],
+        [
+          319,
+          186
+        ],
+        [
+          289,
+          191
+        ],
+        [
+          260,
+          187
+        ],
+        [
+          231,
+          179
+        ],
+        [
+          204,
+          164
+        ],
+        [
+          221,
+          143
+        ],
+        [
+          235,
+          113
+        ],
+        [
+          262,
+          93
+        ]
+      ]
+    },
+    "THREE_QUARTER": {
+      "forehead_top_no_ears": [
+        650,
+        81
+      ],
+      "forelock_tuft_tip_excluded_from_face_height": [
+        648,
+        62
+      ],
+      "face_outer_left": [
+        564,
+        163
+      ],
+      "face_outer_right": [
+        716,
+        161
+      ],
+      "eye_center_near_left": [
+        626,
+        136
+      ],
+      "eye_center_far_right": [
+        684,
+        136
+      ],
+      "nose_tip": [
+        679,
+        160
+      ],
+      "chin": [
+        652,
+        189
+      ],
+      "white_fur_boundary_left_to_right": [
+        [
+          568,
+          158
+        ],
+        [
+          588,
+          156
+        ],
+        [
+          610,
+          155
+        ],
+        [
+          627,
+          157
+        ],
+        [
+          646,
+          163
+        ],
+        [
+          659,
+          169
+        ],
+        [
+          675,
+          169
+        ],
+        [
+          686,
+          158
+        ],
+        [
+          698,
+          154
+        ],
+        [
+          711,
+          158
+        ]
+      ],
+      "face_outline_without_ears_clockwise": [
+        [
+          650,
+          81
+        ],
+        [
+          675,
+          91
+        ],
+        [
+          695,
+          115
+        ],
+        [
+          705,
+          144
+        ],
+        [
+          716,
+          161
+        ],
+        [
+          700,
+          177
+        ],
+        [
+          678,
+          185
+        ],
+        [
+          652,
+          189
+        ],
+        [
+          621,
+          184
+        ],
+        [
+          592,
+          177
+        ],
+        [
+          564,
+          163
+        ],
+        [
+          584,
+          143
+        ],
+        [
+          603,
+          114
+        ],
+        [
+          625,
+          91
+        ]
+      ]
+    },
+    "SIDE": {
+      "forehead_top_no_ears": [
+        850,
+        86
+      ],
+      "forelock_tuft_tip_excluded_from_face_height": [
+        837,
+        73
+      ],
+      "face_outer_front_muzzle": [
+        786,
+        164
+      ],
+      "face_outer_back_cheek": [
+        931,
+        163
+      ],
+      "eye_center_visible": [
+        825,
+        140
+      ],
+      "eye_center_hidden": null,
+      "nose_tip": [
+        787,
+        163
+      ],
+      "chin": [
+        830,
+        191
+      ],
+      "white_fur_boundary_front_to_back": [
+        [
+          790,
+          165
+        ],
+        [
+          805,
+          159
+        ],
+        [
+          822,
+          157
+        ],
+        [
+          840,
+          158
+        ],
+        [
+          859,
+          164
+        ],
+        [
+          880,
+          169
+        ],
+        [
+          906,
+          177
+        ]
+      ],
+      "profile_forehead_to_nose": [
+        [
+          850,
+          86
+        ],
+        [
+          833,
+          103
+        ],
+        [
+          819,
+          120
+        ],
+        [
+          814,
+          144
+        ],
+        [
+          805,
+          155
+        ],
+        [
+          787,
+          163
+        ]
+      ],
+      "face_outline_without_ears_clockwise": [
+        [
+          850,
+          86
+        ],
+        [
+          880,
+          110
+        ],
+        [
+          914,
+          139
+        ],
+        [
+          931,
+          163
+        ],
+        [
+          914,
+          178
+        ],
+        [
+          874,
+          186
+        ],
+        [
+          850,
+          190
+        ],
+        [
+          830,
+          191
+        ],
+        [
+          815,
+          184
+        ],
+        [
+          802,
+          177
+        ],
+        [
+          787,
+          163
+        ],
+        [
+          805,
+          155
+        ],
+        [
+          814,
+          144
+        ],
+        [
+          819,
+          120
+        ],
+        [
+          833,
+          103
+        ]
+      ]
+    }
+  },
+  "frontRatios": {
+    "definition": "2D manual image-space estimates; x right/y down. Width is outer cheek-tip span, height forehead surface top to chin, excludes ears and separate forelock tuft tip. Not a recovered 3D measurement.",
+    "face_width_px": 172,
+    "face_height_px": 109,
+    "width_over_height": 1.5779816513761469,
+    "eye_center_distance_px": 56.00892785976178,
+    "eye_distance_over_face_width": 0.32563330151024295,
+    "eye_mean_y_from_forehead_over_height": 0.5458715596330275,
+    "nose_x_from_left_over_width": 0.4941860465116279,
+    "nose_y_from_forehead_over_height": 0.7522935779816514,
+    "nose_to_chin_over_height": 0.24770642201834864
+  },
+  "notesJa": [
+    "目視手動近似。点の目安誤差は輪郭/眼/鼻で概ね±3px、毛先/白毛境界/額の定義で±5〜8px。自動抽出や精密測定ではない。",
+    "複数の設定画は厳密な投影整合を持たない。FRONT自体も瞳・頬・鼻に軽い非対称があり、3/4の眼間隔を正面同一3Dの射影条件として強制しない。",
+    "顔幅は耳幅でも頭蓋の球幅でもなく、左右のクリーム頬の毛先を含む。額頂点は橙色の額面と前髪房の先端を分けて記録した。",
+    "3/4では目の横から頬が広がり、口吻は鼻へ短く絞られる。鼻へ続く橙色の太い円筒や縦長の鼻梁棒を作らない。",
+    "眼の上から額までを大きな半球ドームにしない。大眼は上顔面の下寄りに十分な幅を占め、眉から額上端の帯は耳を除けば比較的短い。",
+    "白毛は左右の独立した球ではない。眼下から左右の頬毛へ連続する広い下顔面で、中央の鼻下へ寄りながら顎の下まで回る。",
+    "SIDEでは鼻が眼より前へ出るが、鼻先から後頭へ戻る下側輪郭は短い顎へ連続する。長い円筒口吻や丸い顎髭の別塊を避ける。",
+    "白毛境界点は色境界であり、投影輪郭/稜線/陰影境界ではない。陰影を形状点へ読み替えない。"
+  ]
+}

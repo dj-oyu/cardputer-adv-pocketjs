@@ -81,3 +81,4 @@
 | [flower-fixed-point-pipeline.md](../archive/perf/flower-fixed-point-pipeline.md)（docs 直下） | 設計 | 固定小数点平方根を caller まで整数で持ち回す案（B=8 の実測が「時間は動かない」だった理由の続き。未実装） |
 
 - [狐の頬・口吻の造形診断](fox-cheek-authoring-study.md) — 両モデルの切り分け、同条件画像と未採用試作。
+- [設定図から取り直した狐顔の無陰影実証](fox-reference-redesign.md) — 手動参照点、新規固定資産、輪郭と固有色の制作比較。
