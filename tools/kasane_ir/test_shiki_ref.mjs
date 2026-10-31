@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import {
   assemble, register, draw, format, runCase, toHex, SIN_TABLE, sinQ16, toFixed,
-  mul32, shift32, mulH, shiftH, addH, subH, OPS,
+  mul32, shift32, mulH, shiftH, addH, subH, OPS, makeRegion, parseCase,
 } from './shiki_ref.mjs';
 
 let passed = 0, failed = 0;
@@ -380,7 +380,7 @@ test('§6.1 header rejections', () => {
   rejects(code, { inputs: [31] });
   rejects(code, { args: [31] }, [0]);
   assert.ok(register(prog(code, { inputs: [30], args: [30] }), [0]));
-  rejects(code, { regions: [[0, 0, 1, 0]] }); // stage 1: no data regions
+  rejects(code, { regions: [[0, 0, 1, 0]] }); // a declared region with none passed (§5.1)
   rejects(code, { inputs: [0], pad: 1 }); // padding must be 0
   const b = prog(code);
   assert.equal(register(b.subarray(0, b.length - 1), []), null);
@@ -443,6 +443,313 @@ test('CASE line round trip', () => {
   assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 1 Infinity INPUTS 0`), 'REJECT');
   assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 0 INPUTS 0`), 'REJECT');
   assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 1 -0 INPUTS 1 -Infinity`).split(' ')[1], 'BADINPUT');
+});
+
+// ---- data regions (v1.3, §5) ------------------------------------------------------
+
+// Region table rows are [type, q, k_rec, flags]; `regs` are makeRegion() objects.
+const rg = (type, q, k, els) => { const g = makeRegion(type, q, k, els); assert.ok(g, 'bad region'); return g; };
+const runD = (code, table, regs, args = [], inputs = []) => {
+  const plan = register(prog(code, { regions: table, args: args.map(() => 0) }), args, regs);
+  assert.ok(plan, 'expected registration to succeed');
+  return draw(plan, inputs);
+};
+const rejectsD = (code, table, regs) =>
+  assert.equal(register(prog(code, { regions: table }), [], regs), null, 'expected REJECT');
+const EACH = (a, b = 0, aux = 0) => ({ op: 'EACH', a, b, aux });
+const FETCH = (dst, a, b, m, k = 0) => ({ op: 'FETCH', dst, a, b, aux: m, imm: k });
+const PUT = (dst, a, b, m, k = 0) => ({ op: 'PUT', dst, a, b, aux: m, imm: k });
+const LOOKUP = (dst, a, b, g, k = 0) => ({ op: 'LOOKUP', dst, a, b, aux: g, imm: k });
+const ADD = (dst, a, b) => ({ op: 'ADD', dst, a, b });
+const END = { op: 'END' };
+const I32T = [2, 0, 1, 0];
+
+test('EACH over all records (aux=0) with FETCH', () => {
+  const r = runD([EACH(0), FETCH(1, 0, 0, 1), ADD(2, 2, 1), END], [I32T], [rg(2, 0, 1, [10, 20, 30])]);
+  // EACH 1 + 3 × (FETCH, ADD, END)
+  assert.deepEqual([r.status, r.steps, r.regs[1], r.regs[2]], ['DONE', 10, 30, 60]);
+});
+
+test('EACH aux=1: N = r[b] read once; 0 skips; records ok; out of range INVALID', () => {
+  const code = (n) => [SET(5, n), EACH(0, 5, 1), FETCH(1, 0, 0, 1), ADD(2, 2, 1), SET(5, 0), END, SET(7, 9)];
+  const g = () => rg(2, 0, 1, [10, 20, 30]);
+  const r2 = runD(code(2), [I32T], [g()]);
+  // SET, EACH, 2 × (FETCH, ADD, SET, END), SET; changing r5 in the body does not cut the loop
+  assert.deepEqual([r2.status, r2.steps, r2.regs[2], r2.regs[7]], ['DONE', 11, 30, 9]);
+  const r0 = runD(code(0), [I32T], [g()]);
+  assert.deepEqual([r0.status, r0.steps, r0.regs[1], r0.regs[2], r0.regs[7]], ['DONE', 3, 0, 0, 9]);
+  const r3 = runD(code(3), [I32T], [g()]);
+  assert.deepEqual([r3.status, r3.regs[2]], ['DONE', 60]);
+  const r4 = runD(code(4), [I32T], [g()]);
+  assert.deepEqual([r4.status, r4.steps, r4.regs[7]], ['INVALID', 2, 0]);
+  const rn = runD(code(-1), [I32T], [g()]);
+  assert.deepEqual([rn.status, rn.steps], ['INVALID', 2]);
+  // N = 0 on the last loop of the program ends with DONE
+  const rl = runD([SET(5, 0), EACH(0, 5, 1), FETCH(1, 0, 0, 1), END], [I32T], [g()]);
+  assert.deepEqual([rl.status, rl.steps], ['DONE', 2]);
+});
+
+test('BREAK_IF_GT leaves an EACH and pops its frame', () => {
+  const r = runD([SET(3, 4), EACH(0), FETCH(1, 0, 0, 1), { op: 'BREAK_IF_GT', a: 1, b: 3 }, ADD(2, 2, 1), END,
+    SET(6, 1), SET(8, 1), EACH(0, 8, 1), FETCH(9, 0, 0, 1), END], [I32T], [rg(2, 0, 1, [1, 5, 2, 7])]);
+  // SET, EACH, rec0 (FETCH, BRK, ADD, END), rec1 (FETCH, BRK taken), SET, SET, EACH, FETCH, END
+  assert.deepEqual([r.status, r.steps, r.regs[2], r.regs[6], r.regs[9]], ['DONE', 13, 1, 1, 1]);
+});
+
+test('nested EACH of different regions reads both cursors', () => {
+  const r = runD([EACH(0), EACH(1), FETCH(1, 0, 0, 1), FETCH(2, 1, 0, 2), ADD(4, 4, 1), ADD(4, 4, 2),
+    ADD(6, 6, 3), END, END], [I32T, [2, 0, 2, 0]], [rg(2, 0, 1, [1, 2]), rg(2, 0, 2, [10, 20, 30, 40])]);
+  // (1+10)+(1+30)+(2+10)+(2+30) = 86; 2·(20+40) = 120. Steps 1 + 2·(1 + 2·6 + 1).
+  assert.deepEqual([r.status, r.steps, r.regs[4], r.regs[6]], ['DONE', 29, 86, 120]);
+});
+
+test('self-nested EACH of one region: FETCH resolves the innermost lexical EACH', () => {
+  const r = runD([EACH(0), FETCH(1, 0, 0, 1), EACH(0), FETCH(2, 0, 0, 1), { op: 'MUL', dst: 4, a: 1, b: 2, aux: 0 },
+    ADD(5, 5, 4), END, FETCH(6, 0, 0, 1), ADD(7, 7, 6), END], [I32T], [rg(2, 0, 1, [3, 4])]);
+  // pairs (3,3)(3,4)(4,3)(4,4): 9+12+12+16 = 49; the FETCH after the inner END reads the outer: 3+4
+  assert.deepEqual([r.status, r.regs[5], r.regs[7]], ['DONE', 49, 7]);
+});
+
+test('FETCH: u16 ≥ 32768 unsigned, i16 negative, ±k, saturation', () => {
+  const r = runD([EACH(0), EACH(1),
+    FETCH(0, 0, 0, 2), // 40000, 65535
+    FETCH(2, 0, 0, 1, 16), // 40000·2^16 > 2^31 → MAX
+    FETCH(3, 0, 1, 1, -1), // ⌊65535/2⌋
+    FETCH(4, 1, 0, 1, -1), // ⌊−3/2⌋ = −2
+    FETCH(5, 1, 1, 1, 16), // −2^15·2^16 = −2^31 exactly
+    FETCH(6, 1, 1, 1, 17), // −2^32 → MIN
+    FETCH(7, 1, 2, 2), // 32767, 5
+    FETCH(9, 1, 0, 1, -31), // ⌊−3/2^31⌋ = −1
+    FETCH(10, 0, 2, 1, 31), // 1·2^31 → MAX
+    FETCH(11, 0, 3, 1, 31), // 0
+    END, END], [[1, 0, 4, 0], [0, 0, 4, 0]],
+  [rg(1, 0, 4, [40000, 65535, 1, 0]), rg(0, 0, 4, [-3, -32768, 32767, 5])]);
+  assert.equal(r.status, 'DONE');
+  assert.deepEqual(Array.from(r.regs.slice(0, 12)),
+    [40000, 65535, MAX, 32767, -2, MIN, MIN, 32767, 5, -1, MAX, 0]);
+});
+
+test('PUT: i16 / u16 saturation, i32 passthrough, k shift', () => {
+  const a = rg(0, 0, 3, [0, 0, 0]), b = rg(1, 0, 3, [0, 0, 0]), c = rg(2, 0, 2, [0, 0]), d = rg(2, 0, 2, [0, 0]);
+  const r = runD([SET(0, 40000), SET(1, -40000), SET(2, -5), SET(3, 3), SET(4, MAX),
+    EACH(0), PUT(0, 0, 0, 3), END,
+    EACH(1), PUT(0, 1, 0, 3), END,
+    EACH(2), PUT(1, 2, 0, 2), END,
+    EACH(3), PUT(3, 3, 0, 2, 1), END], // 3·2 = 6; MAX·2 → MAX
+  [[0, 0, 3, 1], [1, 0, 3, 1], [2, 0, 2, 1], [2, 0, 2, 1]], [a, b, c, d]);
+  assert.equal(r.status, 'DONE');
+  assert.deepEqual(Array.from(a.mem), [32767, -32768, -5]);
+  assert.deepEqual(Array.from(b.mem), [40000, 0, 0]);
+  assert.deepEqual(Array.from(c.mem), [-40000, -5]);
+  assert.deepEqual(Array.from(d.mem), [6, MAX]);
+  // u16 with k < 0: ⌊3/2⌋ = 1, ⌊MAX/2⌋ → 65535; i16 ⌊−5/4⌋ = −2
+  const e = rg(1, 0, 2, [9, 9]), f = rg(0, 0, 1, [9]);
+  runD([SET(3, 3), SET(4, MAX), SET(5, -5), EACH(0), PUT(3, 0, 0, 2, -1), END, EACH(1), PUT(5, 1, 0, 1, -2), END],
+    [[1, 0, 2, 1], [0, 0, 1, 1]], [e, f]);
+  assert.deepEqual([...e.mem, ...f.mem], [1, 65535, -2]);
+});
+
+test('PUT then FETCH in the same draw, and in a later loop; b offset keeps other elements', () => {
+  const g = rg(2, 0, 2, [1, 2, 3, 4]);
+  const r = runD([SET(9, 100), EACH(0), FETCH(0, 0, 0, 1), ADD(1, 0, 9), PUT(1, 0, 1, 1), FETCH(2, 0, 1, 1),
+    ADD(3, 3, 2), END, EACH(0), FETCH(4, 0, 1, 1), ADD(5, 5, 4), END], [[2, 0, 2, 1]], [g]);
+  assert.deepEqual([r.status, r.regs[3], r.regs[5]], ['DONE', 204, 204]);
+  assert.deepEqual(Array.from(g.mem), [1, 101, 3, 103]);
+});
+
+test('LOOKUP: clamp both ends, g = 0 / 16 / 31, k, u16, dst == b', () => {
+  const r = runD([
+    SET(0, -1), LOOKUP(1, 0, 0, 0), // index −1 → 0 → −7
+    SET(0, 2), LOOKUP(2, 0, 0, 0), // 200
+    SET(0, 4), LOOKUP(3, 0, 0, 0), // past n − 1 → 3 → 300
+    SET(0, MAX), LOOKUP(4, 0, 0, 31), // ⌊MAX/2^31⌋ = 0 → −7
+    SET(0, MIN), LOOKUP(5, 0, 0, 31, 1), // ⌊MIN/2^31⌋ = −1 → 0 → −14
+    SET(0, 3 << 16), LOOKUP(6, 0, 0, 16, 1), // 3 → 600
+    SET(0, -65536), LOOKUP(7, 0, 0, 16, -1), // −1 → 0 → ⌊−7/2⌋ = −4
+    SET(0, 196607), LOOKUP(8, 0, 0, 16), // ⌊2.99…⌋ = 2 → 200
+    SET(9, 1), LOOKUP(9, 0, 9, 0), // reads r9 before writing it → 100
+    LOOKUP(10, 1, 0, 0), // u16 65535 (n = 1: any index → 0)
+    LOOKUP(11, 1, 0, 0, 16), // 65535·2^16 → MAX
+    SET(0, MIN), LOOKUP(12, 0, 0, 0), // most negative index → 0
+  ], [[0, 0, 1, 0], [1, 0, 1, 0]], [rg(0, 0, 1, [-7, 100, 200, 300]), rg(1, 0, 1, [65535])]);
+  assert.equal(r.status, 'DONE');
+  assert.deepEqual(Array.from(r.regs.slice(1, 13)), [-7, 200, 300, -7, -14, 600, -4, 200, 100, 65535, MAX, -7]);
+});
+
+test('LIMIT in the middle of an EACH keeps earlier PUTs', () => {
+  const g = rg(2, 0, 1, [0, 0, 0]);
+  const r = runD([SET(0, 1), SET(1, 1), EACH(0), PUT(0, 0, 0, 1), ADD(0, 0, 1),
+    { op: 'REPEAT', imm: 125 }, { op: 'REPEAT', imm: 19 }, SET(2, 7), END, END, END], [[2, 0, 1, 1]], [g]);
+  // rec0: PUT at step 4, burn 5,001, END 5,007; rec1: PUT at 5,008, burn passes 10,000
+  assert.deepEqual([r.status, r.steps, r.regs[0]], ['LIMIT', 10000, 3]);
+  assert.deepEqual(Array.from(g.mem), [1, 2, 0]);
+});
+
+test('aliased regions share memory', () => {
+  const g = rg(2, 0, 1, [5, 6]);
+  const table = [[2, 0, 1, 1], [2, 0, 1, 0]];
+  const code = [SET(0, 9), SET(7, 1), EACH(0, 7, 1), PUT(0, 0, 0, 1), END, LOOKUP(1, 1, 2, 0),
+    EACH(1), FETCH(3, 1, 0, 1), ADD(4, 4, 3), END];
+  const plan = register(prog(code, { regions: table }), [], [g, g]);
+  const r = draw(plan, []);
+  assert.deepEqual([r.status, r.regs[1], r.regs[4]], ['DONE', 9, 15]);
+  assert.equal(format(r, [g, g]).split(' D ')[1], '2 2 9 6 2 9 6');
+  // An alias carries its target's type/q/k_rec, so a mismatching entry rejects.
+  assert.equal(register(prog(code, { regions: [[2, 0, 1, 1], [2, 1, 1, 0]] }), [], [g, g]), null);
+});
+
+test('region descriptors (shiki.data model)', () => {
+  assert.equal(makeRegion(2, 0, 1, []), null); // 0 records
+  assert.equal(makeRegion(2, 0, 2, [1, 2, 3]), null); // n not a multiple of k_rec
+  assert.ok(makeRegion(1, 30, 1, new Array(65535).fill(0)));
+  assert.equal(makeRegion(1, 0, 1, new Array(65536).fill(0)), null);
+  assert.ok(makeRegion(1, 0, 8, new Array(8 * 65535).fill(0))); // 65,535 records of 8
+  assert.equal(makeRegion(3, 0, 1, [0]), null);
+  assert.equal(makeRegion(0, 31, 1, [0]), null);
+  assert.equal(makeRegion(0, 0, 0, [0]), null);
+  assert.equal(makeRegion(0, 0, 9, new Array(9).fill(0)), null);
+  assert.equal(makeRegion(0, 0, 1, [32768]), null);
+  assert.equal(makeRegion(0, 0, 1, [-32769]), null);
+  assert.equal(makeRegion(1, 0, 1, [-1]), null);
+  assert.equal(makeRegion(1, 0, 1, [65536]), null);
+  assert.equal(makeRegion(2, 0, 1, [MAX + 1]), null);
+  assert.equal(makeRegion(2, 0, 1, [1.5]), null);
+  assert.ok(makeRegion(2, 0, 1, [MIN, MAX]));
+});
+
+test('§6.1 / §5.1 region registration rejects', () => {
+  const g1 = () => rg(2, 0, 1, [1, 2]);
+  const ok = [EACH(0), FETCH(0, 0, 0, 1), END];
+  assert.ok(register(prog(ok, { regions: [I32T] }), [], [g1()]));
+  // count mismatch
+  rejectsD(ok, [I32T], []);
+  rejectsD(ok, [I32T], [g1(), g1()]);
+  rejectsD([SET(0, 0)], [], [g1()]);
+  // type / q / k_rec mismatch
+  rejectsD(ok, [[1, 0, 1, 0]], [g1()]);
+  rejectsD(ok, [[2, 1, 1, 0]], [g1()]);
+  rejectsD(ok, [[2, 0, 2, 0]], [g1()]);
+  // table values: type, q, k_rec, flags (bit0 only)
+  rejectsD(ok, [[3, 0, 1, 0]], [g1()]);
+  rejectsD(ok, [[2, 31, 1, 0]], [g1()]);
+  rejectsD(ok, [[2, 0, 0, 0]], [g1()]);
+  rejectsD(ok, [[2, 0, 9, 0]], [g1()]);
+  rejectsD(ok, [[2, 0, 1, 2]], [g1()]);
+  rejectsD(ok, [[2, 0, 1, 3]], [g1()]);
+  assert.ok(register(prog(ok, { regions: [[2, 0, 1, 1]] }), [], [g1()])); // write flag alone is fine
+  rejectsD(ok, Array(5).fill(I32T), Array(5).fill(g1())); // more than 4 regions
+  // region number ≥ declared
+  rejectsD([EACH(1), FETCH(0, 1, 0, 1), END], [I32T], [g1()]);
+  rejectsD([LOOKUP(0, 1, 0, 0)], [I32T], [g1()]);
+  // PUT needs the write flag
+  rejectsD([EACH(0), PUT(0, 0, 0, 1), END], [I32T], [g1()]);
+  assert.ok(register(prog([EACH(0), PUT(0, 0, 0, 1), END], { regions: [[2, 0, 1, 1]] }), [], [g1()]));
+  // LOOKUP needs k_rec = 1
+  const g2 = rg(2, 0, 2, [1, 2]);
+  rejectsD([LOOKUP(0, 0, 0, 0)], [[2, 0, 2, 0]], [g2]);
+  assert.ok(register(prog([LOOKUP(0, 0, 0, 31, -31)], { regions: [I32T] }), [], [g1()]));
+  rejectsD([LOOKUP(0, 0, 0, 32)], [I32T], [g1()]);
+  rejectsD([LOOKUP(0, 0, 16, 0)], [I32T], [g1()]);
+  rejectsD([LOOKUP(16, 0, 0, 0)], [I32T], [g1()]);
+  rejectsD([LOOKUP(0, 0, 0, 0, 32)], [I32T], [g1()]);
+  rejectsD([LOOKUP(0, 0, 0, 0, -32)], [I32T], [g1()]);
+  // FETCH / PUT outside an EACH of the same region (inside a REPEAT or another region's EACH)
+  rejectsD([FETCH(0, 0, 0, 1)], [I32T], [g1()]);
+  rejectsD([{ op: 'REPEAT', imm: 1 }, FETCH(0, 0, 0, 1), END], [I32T], [g1()]);
+  rejectsD([EACH(1), FETCH(0, 0, 0, 1), END], [I32T, I32T], [g1(), g1()]);
+  rejectsD([EACH(0), END, FETCH(0, 0, 0, 1)], [I32T], [g1()]);
+  // inside a REPEAT inside the EACH is fine
+  assert.ok(register(prog([EACH(0), { op: 'REPEAT', imm: 2 }, FETCH(0, 0, 0, 1), END, END], { regions: [I32T] }), [], [g1()]));
+  // b + m ≤ k_rec, m ≥ 1, dst + m − 1 ≤ 15, k range
+  const g4 = () => rg(2, 0, 4, [1, 2, 3, 4]);
+  const T4 = [[2, 0, 4, 1]];
+  assert.ok(register(prog([EACH(0), FETCH(12, 0, 0, 4), PUT(13, 0, 1, 3), END], { regions: T4 }), [], [g4()]));
+  rejectsD([EACH(0), FETCH(0, 0, 1, 4), END], T4, [g4()]);
+  rejectsD([EACH(0), PUT(0, 0, 4, 1), END], T4, [g4()]);
+  rejectsD([EACH(0), FETCH(0, 0, 0, 0), END], T4, [g4()]);
+  rejectsD([EACH(0), FETCH(14, 0, 0, 3), END], T4, [g4()]);
+  rejectsD([EACH(0), PUT(13, 0, 0, 4), END], T4, [g4()]);
+  rejectsD([EACH(0), FETCH(0, 0, 0, 1, 32), END], T4, [g4()]);
+  rejectsD([EACH(0), PUT(0, 0, 0, 1, -32), END], T4, [g4()]);
+  // EACH fields: aux 0/1; aux 0 ⇒ b = 0; aux 1 ⇒ b ≤ 15; dst = imm = 0
+  rejectsD([EACH(0, 1, 0), END], [I32T], [g1()]);
+  rejectsD([EACH(0, 0, 2), END], [I32T], [g1()]);
+  rejectsD([EACH(0, 16, 1), END], [I32T], [g1()]);
+  assert.ok(register(prog([EACH(0, 15, 1), END], { regions: [I32T] }), [], [g1()]));
+  rejectsD([{ ...EACH(0), dst: 1 }, END], [I32T], [g1()]);
+  rejectsD([{ ...EACH(0), imm: 1 }, END], [I32T], [g1()]);
+  rejectsD([EACH(0)], [I32T], [g1()]); // no END
+  rejectsD([{ ...LOOKUP(0, 0, 0, 0), rsv: 1 }], [I32T], [g1()]);
+  // EACH counts toward the 8-deep stack
+  const nest = (d) => [...Array.from({ length: d }, (_, i) => (i % 2 ? { op: 'REPEAT', imm: 1 } : EACH(0))),
+    ...Array.from({ length: d }, () => END)];
+  assert.ok(register(prog(nest(8), { regions: [I32T] }), [], [g1()]));
+  rejectsD(nest(9), [I32T], [g1()]);
+  // BREAK_IF_GT inside an EACH is inside a loop
+  assert.ok(register(prog([EACH(0), { op: 'BREAK_IF_GT', a: 0, b: 1 }, END], { regions: [I32T] }), [], [g1()]));
+});
+
+test('patches into data-region ops: k and m are Q0, checked after patching', () => {
+  const T4 = [[2, 0, 4, 0]];
+  const g4 = () => rg(2, 0, 4, [1, 2, 3, 4]);
+  const code = [EACH(0), FETCH(0, 0, 0, 1, 0), END];
+  const reg = (argQ, patches, args) => register(prog(code, { regions: T4, args: argQ, patches }), args, [g4()]);
+  const plan = reg([0, 0], [[1, 0, 0], [1, 1, 1]], [-1, 3]); // k = −1, m = 3
+  assert.ok(plan);
+  assert.deepEqual(Array.from(draw(plan, []).regs.slice(0, 3)), [0, 1, 1]); // ⌊1/2⌋, ⌊2/2⌋, ⌊3/2⌋
+  assert.equal(reg([1, 0], [[1, 0, 0], [1, 1, 1]], [0, 3]), null); // k not Q0
+  assert.equal(reg([0, 0], [[1, 0, 0], [1, 1, 1]], [0, 5]), null); // m = 5: b + m > k_rec
+  assert.equal(reg([0, 0], [[1, 0, 0], [1, 1, 1]], [32, 1]), null); // k = 32
+  // EACH's imm is unused: any Q patches it, but it must be 0 afterwards
+  assert.ok(register(prog(code, { regions: T4, args: [16], patches: [[0, 0, 0]] }), [0], [g4()]));
+  assert.equal(register(prog(code, { regions: T4, args: [16], patches: [[0, 0, 0]] }), [1], [g4()]), null);
+});
+
+// ---- text contract: DATA / ALIAS / D ------------------------------------------------
+
+test('CASE DATA / ALIAS parse and D output', () => {
+  const bytes = assemble({ regions: [[0, 0, 1, 1], [0, 0, 1, 0]],
+    code: [LOOKUP(0, 1, 15, 0), SET(3, -100000), EACH(0), PUT(3, 0, 0, 1), END] });
+  const hex = toHex(bytes);
+  const line = `CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 2 -5 7 ALIAS 0`;
+  const c = parseCase(line);
+  assert.equal(c.regions.length, 2);
+  assert.equal(c.regions[0], c.regions[1]); // same memory
+  assert.deepEqual(Array.from(c.regions[0].mem), [-5, 7]);
+  // LOOKUP via the alias reads −5, then PUT −100000 saturates to −32768 in both records
+  assert.equal(runCase(line),
+    'RUN DONE 7 0 0 0 R -5 0 0 -100000 0 0 0 0 0 0 0 0 0 0 0 0 S 0 D 2 2 -32768 -32768 2 -32768 -32768');
+  // invalid descriptors make the whole case REJECT
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 2 32768 7 ALIAS 0`), 'REJECT');
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 31 1 2 -5 7 ALIAS 0`), 'REJECT');
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 2 3 1 2 3 ALIAS 0`), 'REJECT');
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 0 ALIAS 0`), 'REJECT'); // 0 records
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 ALIAS 0 0 0 1 1 1`), 'REJECT'); // alias forward
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 1 1 ALIAS 1`), 'REJECT'); // alias to itself
+  // registration failures: count, flags of the target via the alias
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 1 0 0 1 1 1`), 'REJECT');
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0`), 'REJECT');
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 1 0 1 1 1 ALIAS 0`), 'REJECT'); // u16 ≠ i16
+  // two separate regions: only the first is written
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 1 4 0 0 1 3 1 2 3`),
+    'RUN DONE 5 0 0 0 R 1 0 0 -100000 0 0 0 0 0 0 0 0 0 0 0 0 S 0 D 2 1 -32768 3 1 2 3');
+  // u16 prints unsigned; BADINPUT prints D unchanged
+  const ub = toHex(assemble({ inputs: [0], regions: [[1, 0, 1, 1]], code: [EACH(0), PUT(0, 0, 0, 1), END] }));
+  assert.equal(runCase(`CASE ${ub} ARGS 0 INPUTS 1 NaN DATA 1 1 0 1 2 65535 40000`),
+    'RUN BADINPUT 0 0 0 0 R 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 S 0 D 1 2 65535 40000');
+  assert.equal(runCase(`CASE ${ub} ARGS 0 INPUTS 0 DATA 1 1 0 1 2 65535 40000`).split(' D ')[1], '1 2 0 0');
+  // no DATA → no D; DATA 0 behaves as no regions (and no D)
+  const plain = toHex(assemble({ code: [SET(0, 1)] }));
+  assert.equal(runCase(`CASE ${plain} ARGS 0 INPUTS 0`), 'RUN DONE 1 0 0 0 R 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 S 0');
+  assert.equal(runCase(`CASE ${plain} ARGS 0 INPUTS 0 DATA 0`), 'RUN DONE 1 0 0 0 R 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 S 0');
+  // i32 extremes round-trip
+  const i32 = toHex(assemble({ regions: [I32T], code: [LOOKUP(0, 0, 0, 0)] }));
+  assert.equal(runCase(`CASE ${i32} ARGS 0 INPUTS 0 DATA 1 2 0 1 2 -2147483648 2147483647`),
+    'RUN DONE 1 0 0 0 R -2147483648 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 S 0 D 1 2 -2147483648 2147483647');
+  // malformed lines throw
+  assert.throws(() => parseCase(`CASE ${plain} ARGS 0 INPUTS 0 DATA 1 2 0 1 1`));
+  assert.throws(() => parseCase(`CASE ${plain} ARGS 0 INPUTS 0 DATA 1 2 0 1 1 5 extra`));
+  assert.throws(() => parseCase(`CASE ${plain} ARGS 0 INPUTS 0 DATA 1 2 0 1 1 x`));
 });
 
 test('OPS names cover the v1 table', () => {

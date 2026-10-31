@@ -7,13 +7,15 @@
 // conversion (§2.4) is done in double exactly as written, because the C side
 // does it in double too and a "better" rounding here would be a mismatch.
 //
-// Scope: registration (§3, argument patches, §6.1) and execution of ops 0–22
-// (§4.3–§4.8; CUBIC and LINE_PATTERN as of spec v1.2). The data-region ops
-// 23–26 are not implemented (stage 4), so registration rejects them, and
-// rejects any header declaring regions.
+// Scope: spec v1.3 — registration (§3 incl. the region table, argument patches,
+// §5.1 binding, §6.1) and execution of ops 0–26 (§4.3–§4.8; CUBIC and
+// LINE_PATTERN as of v1.2; the data-region ops EACH/FETCH/PUT/LOOKUP per §5.2–
+// §5.4). A data region is modelled as {type, q, k, n, mem}: `mem` is the typed
+// array of the element type, and two region numbers bound to the same object
+// share memory (a PUT through one is visible through the other at once, §5.1).
 //
 // CLI: node tools/kasane_ir/shiki_ref.mjs CASES.txt  (one result line per case;
-// the text contract is shared with the C runner, see format()).
+// the text contract is shared with the C runner, see parseCase() / format()).
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -97,7 +99,8 @@ export function sinQ16(r) {
 // Field usage per op. reg = register 0..15, inp = input index (< declared
 // inputs), imm 'any' = full int32 (SET), 'int' = an int-taking imm (Q0 patch
 // rule, §3), aux 'u16' = colour / shift amount. Unlisted fields must be 0.
-// Ops 23–26 exist in v1 but are out of scope until stage 4 (rejected).
+// The data-region ops 23–26 have region-dependent field rules and are checked
+// by checkRegionOp() instead of this table.
 export const OPS = {
   SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8,
   LINE: 9, REPEAT_REG: 10, BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14,
@@ -131,9 +134,38 @@ const OPDEF = new Map([
   [21, F(true, 'reg', true, false, 's31')], // MUL.H aux=s
   [22, F(true, 'reg', false, 'int', false)], // SHIFT.H imm=k
 ]);
-// ints taken by imm per op for the Q0 patch rule — includes the out-of-scope
-// ones for completeness, though those never reach the check.
+// ints taken by imm per op for the Q0 patch rule (§3): REPEAT count, CUBIC
+// segments, LINE_PATTERN period, and the k of SHIFT/SHIFT.H/FETCH/PUT/LOOKUP.
+// EACH's imm is unused (must be 0 after patching), so it is not listed.
 const INT_IMM_OPS = new Set([5, 14, 15, 18, 22, 24, 25, 26]);
+
+// ---- §5.1 data regions --------------------------------------------------------
+
+// Element types (§3 region table): 0 i16, 1 u16, 2 i32.
+const ELEM = [
+  { min: -32768, max: 32767, Arr: Int16Array },
+  { min: 0, max: 65535, Arr: Uint16Array },
+  { min: I32_MIN, max: I32_MAX, Arr: Int32Array },
+];
+const MAX_RECORDS = 65535;
+
+// Models shiki.data(): a region of `type`, Q `q`, `k` elements per record and
+// the given elements. null if the descriptor is invalid (§5.1: type 0..2, q
+// 0..30, k_rec 1..8, n a multiple of k_rec, n / k_rec in 1..65,535, every
+// element an integer inside its type's range).
+export function makeRegion(type, q, k, elements) {
+  if (![type, q, k].every(Number.isInteger)) return null;
+  if (type < 0 || type > 2 || q < 0 || q > 30 || k < 1 || k > 8) return null;
+  const n = elements.length;
+  if (n % k !== 0 || n / k < 1 || n / k > MAX_RECORDS) return null;
+  const { min, max, Arr } = ELEM[type];
+  for (const e of elements) if (!Number.isInteger(e) || e < min || e > max) return null;
+  return { type, q, k, n, mem: Arr.from(elements) };
+}
+
+// §5.2 / §5.4.4: PUT saturates to the element type (i32 passes through, the
+// register is already int32).
+const satElem = (type, v) => (type === 0 ? sat16(v) : type === 1 ? (v < 0 ? 0 : v > 65535 ? 65535 : v) : v);
 
 // ---- §3 assembler (shared with the differential driver) -------------------
 
@@ -188,8 +220,33 @@ export function assemble(spec) {
 
 const MAX_INSTR = 64, MAX_IO = 8, MAX_REGIONS = 4, MAX_PATCHES = 32, LOOP_DEPTH = 8;
 
+// §6.1 field rules of the data-region ops on the patched instruction I, given
+// the region table entry R it names (a < nr checked by the caller). The loop
+// rules (EACH/END pairing, FETCH/PUT inside an EACH of the same region) are
+// checked in register()'s pass. Returns true when the fields are valid.
+function checkRegionOp(I, R) {
+  const kOk = I.imm >= -31 && I.imm <= 31;
+  switch (I.op) {
+    case 23: // EACH a, b, aux=f: f 0 → b = 0; f 1 → b a register. dst, imm unused.
+      if (I.dst !== 0 || I.imm !== 0 || I.aux > 1) return false;
+      return I.aux === 0 ? I.b === 0 : I.b <= 15;
+    case 24: // FETCH dst, a, b=position, aux=m, imm=k
+    case 25: { // PUT: the same, and the region must be declared writable
+      const m = I.aux;
+      if (m < 1 || I.b + m > R.k || I.dst + m - 1 > 15 || !kOk) return false;
+      return I.op === 24 || (R.flags & 1) === 1;
+    }
+    case 26: // LOOKUP dst, a, b (register), aux=g, imm=k; k_rec = 1 only
+      return R.k === 1 && I.dst <= 15 && I.b <= 15 && I.aux <= 31 && kOk;
+  }
+  return false;
+}
+
 // Returns the plan, or null on any §6.1 failure (INVALID_ARGUMENT).
-export function register(code, args = []) {
+// `regions` are the data regions passed (makeRegion() objects; the same object
+// twice = the same memory under two region numbers); the i-th binds to region
+// number i and must match the program's table entry i in type, Q and k_rec.
+export function register(code, args = [], regions = []) {
   if (!(code instanceof Uint8Array)) return null;
   const len = code.length;
   if (len < 12) return null;
@@ -199,8 +256,6 @@ export function register(code, args = []) {
   const n = code[6], ni = code[7], na = code[8], nr = code[9], np = code[10];
   if (n < 1 || n > MAX_INSTR || ni > MAX_IO || na > MAX_IO || nr > MAX_REGIONS) return null;
   if (np > MAX_PATCHES || code[11] !== 0) return null;
-  // Stage 1: data regions are not implemented, so any declared region is refused.
-  if (nr !== 0) return null;
   const headLen = 12 + ni + na + 4 * nr + 4 * np;
   const padLen = (4 - (headLen % 4)) % 4;
   if (len !== headLen + padLen + 12 * n) return null;
@@ -209,7 +264,13 @@ export function register(code, args = []) {
   const inQ = [], argQ = [];
   for (let i = 0; i < ni; i++) { const q = code[o++]; if (q > 30) return null; inQ.push(q); }
   for (let i = 0; i < na; i++) { const q = code[o++]; if (q > 30) return null; argQ.push(q); }
-  o += 4 * nr;
+  // §3 region table: type 0..2, Q 0..30, k_rec 1..8, flags bit0 (write) only.
+  const regTab = [];
+  for (let i = 0; i < nr; i++, o += 4) {
+    const type = code[o], q = code[o + 1], k = code[o + 2], flags = code[o + 3];
+    if (type > 2 || q > 30 || k < 1 || k > 8 || (flags & ~1) !== 0) return null;
+    regTab.push({ type, q, k, flags });
+  }
   const patches = [];
   let lastKey = -1;
   for (let i = 0; i < np; i++) {
@@ -227,6 +288,16 @@ export function register(code, args = []) {
   if (!Array.isArray(args) || args.length !== na) return null;
   for (const v of args) if (typeof v !== 'number' || !Number.isFinite(v)) return null;
   const argFixed = args.map((v, i) => toFixed(v, argQ[i]));
+
+  // §5.1 binding: exactly as many regions as declared, each matching its
+  // table entry in type, Q and k_rec. The shape is re-checked defensively.
+  if (!Array.isArray(regions) || regions.length !== nr) return null;
+  for (let i = 0; i < nr; i++) {
+    const g = regions[i], t = regTab[i];
+    if (!g || g.type !== t.type || g.q !== t.q || g.k !== t.k) return null;
+    if (!(g.mem instanceof ELEM[g.type].Arr) || g.mem.length !== g.n || g.n % g.k !== 0) return null;
+    if (g.n / g.k < 1 || g.n / g.k > MAX_RECORDS) return null;
+  }
 
   const ins = [];
   for (let i = 0; i < n; i++, o += 12) {
@@ -250,11 +321,27 @@ export function register(code, args = []) {
   }
 
   const matchEnd = new Int32Array(n).fill(-1);
+  // eachOf[i]: for FETCH/PUT at i, the lexically innermost enclosing EACH of
+  // the same region (§5.4.3); its runtime frame supplies the cursor.
+  const eachOf = new Int32Array(n).fill(-1);
   const stack = [];
   for (let i = 0; i < n; i++) {
     const I = ins[i];
+    if (I.op >= 23 && I.op <= 26) {
+      if (I.a >= nr || !checkRegionOp(I, regTab[I.a])) return null;
+      if (I.op === 23) {
+        if (stack.length >= LOOP_DEPTH) return null;
+        stack.push(i);
+      } else if (I.op !== 26) {
+        let s = stack.length - 1;
+        while (s >= 0 && !(ins[stack[s]].op === 23 && ins[stack[s]].a === I.a)) s--;
+        if (s < 0) return null; // FETCH/PUT outside an EACH of its region
+        eachOf[i] = stack[s];
+      }
+      continue;
+    }
     const d = OPDEF.get(I.op);
-    if (!d) return null; // reserved, or out of scope until stage 4 (23–26)
+    if (!d) return null; // reserved op number
     // §6.1: a block must fit the 16 registers (CUBIC 8 → dst 0..8, LINE_PATTERN 6 → 0..10).
     const dstMax = d.dst === 'cubic' ? 8 : d.dst === 'pattern' ? 10 : 15;
     if (d.dst ? I.dst > dstMax : I.dst !== 0) return null;
@@ -283,7 +370,7 @@ export function register(code, args = []) {
     }
   }
   if (stack.length !== 0) return null;
-  return Object.freeze({ n, inQ, ins, matchEnd });
+  return Object.freeze({ n, inQ, ins, matchEnd, eachOf, regions: regions.slice() });
 }
 
 // ---- §4 execution -----------------------------------------------------------
@@ -406,8 +493,18 @@ export function draw(plan, inputs = []) {
     inp[i] = toFixed(v, plan.inQ[i]);
   }
 
-  const { ins, matchEnd, n } = plan;
-  const loops = []; // {start, left}
+  const { ins, matchEnd, eachOf, n } = plan;
+  const regions = plan.regions ?? [];
+  // One shared stack of 8 (§4.1): {start, left} for REPEAT/REPEAT_REG, plus a
+  // `cursor` (record index) for EACH frames.
+  const loops = [];
+  // The record cursor for FETCH/PUT at pc: the frame of its lexical EACH
+  // (§5.4.3). That frame is always live — EACH with N = 0 skips its body and
+  // BREAK_IF_GT jumps past the END — so the search always finds it.
+  const cursorOf = (pc) => {
+    for (let s = loops.length - 1; s >= 0; s--) if (loops[s].start === eachOf[pc]) return loops[s].cursor;
+    throw new Error(`no EACH frame for instruction ${pc}`);
+  };
   let steps = 0, pc = 0;
   const end = (status) => ({ status, steps, pen, regs, segs });
   const ctx = { segs, pen, raster: 0 };
@@ -457,6 +554,7 @@ export function draw(plan, inputs = []) {
       }
       case 6: {
         const top = loops[loops.length - 1];
+        if (top.cursor !== undefined) top.cursor++; // §5.4.2: EACH advances its cursor
         top.left--;
         if (top.left !== 0) next = top.start + 1;
         else loops.pop();
@@ -487,6 +585,40 @@ export function draw(plan, inputs = []) {
       case 20: regs[I.dst] = subH(regs[I.a], regs[I.b]); break;
       case 21: regs[I.dst] = mulH(regs[I.a], regs[I.b], I.aux); break;
       case 22: regs[I.dst] = shiftH(regs[I.a], I.imm); break;
+      case 23: { // §5.4.1 EACH: N read once on entry; 0 skips past END unstacked
+        const g = regions[I.a];
+        const records = g.n / g.k;
+        let count = records;
+        if (I.aux === 1) {
+          count = regs[I.b];
+          if (count < 0 || count > records) { err = 'INVALID'; break; }
+        }
+        if (count === 0) next = matchEnd[pc] + 1;
+        else loops.push({ start: pc, left: count, cursor: 0 });
+        break;
+      }
+      case 24: { // §5.4.3 FETCH: r[dst+j] = SHIFT(e_j, k), ascending j
+        const g = regions[I.a];
+        const base = cursorOf(pc) * g.k + I.b;
+        for (let j = 0; j < I.aux; j++) regs[I.dst + j] = shift32(g.mem[base + j], I.imm);
+        break;
+      }
+      case 25: { // §5.4.4 PUT: every v_j first, then saturate and write ascending j
+        const g = regions[I.a];
+        const base = cursorOf(pc) * g.k + I.b;
+        const v = [];
+        for (let j = 0; j < I.aux; j++) v.push(satElem(g.type, shift32(regs[I.dst + j], I.imm)));
+        for (let j = 0; j < I.aux; j++) g.mem[base + j] = v[j];
+        break;
+      }
+      case 26: { // §5.4.5 LOOKUP: i = clamp(⌊r[b] / 2^g⌋, 0, n − 1)
+        const g = regions[I.a];
+        let i = Math.floor(regs[I.b] / 2 ** I.aux);
+        if (i < 0) i = 0;
+        if (i > g.n - 1) i = g.n - 1;
+        regs[I.dst] = shift32(g.mem[i], I.imm);
+        break;
+      }
       default: throw new Error(`unreachable op ${I.op}`);
     }
     if (err) return end(err);
@@ -497,16 +629,27 @@ export function draw(plan, inputs = []) {
 
 // ---- shared text contract ---------------------------------------------------
 
-export function format(result) {
+// `data` = the regions the case passed (aliases appear again as the same
+// object). With one or more, ` D <r>` and each region's contents after the
+// run (` <n> <e0> ... `) follow the segments; signedness is the typed array's.
+export function format(result, data = []) {
   if (result === null) return 'REJECT';
   const p = result.pen;
   const parts = ['RUN', result.status, result.steps, p.valid ? 1 : 0, p.valid ? p.x : 0,
     p.valid ? p.y : 0, 'R', ...Array.from(result.regs, (r) => r | 0), 'S', result.segs.length];
   for (const s of result.segs) parts.push(...s);
+  if (data.length > 0) {
+    parts.push('D', data.length);
+    for (const g of data) parts.push(g.n, ...g.mem);
+  }
   return parts.join(' ');
 }
 
-// Parses one `CASE <hex> ARGS <n> ... INPUTS <m> ...` line.
+// Parses one `CASE <hex> ARGS <n> ... INPUTS <m> ... [DATA <r> <region>...]`
+// line, <region> := <type> <q> <k_rec> <n> <e0> ... | ALIAS <j> (j < its own
+// index). `regions` is the list passed, or null when a descriptor is invalid
+// (the case is then REJECT: it models shiki.data() failing). A malformed line
+// throws.
 export function parseCase(line) {
   const t = line.trim().split(/\s+/);
   if (t[0] !== 'CASE' || t[2] !== 'ARGS') throw new Error(`bad case line: ${line}`);
@@ -521,13 +664,42 @@ export function parseCase(line) {
   if (t[k++] !== 'INPUTS') throw new Error(`missing INPUTS: ${line}`);
   const ni = Number(t[k++]);
   const inputs = t.slice(k, k + ni).map(Number);
-  return { code, args, inputs };
+  k += ni;
+  let regions = [];
+  if (k < t.length) {
+    if (t[k++] !== 'DATA') throw new Error(`expected DATA: ${line}`);
+    const int = (s) => {
+      if (s === undefined || !/^[+-]?\d+$/.test(s)) throw new Error(`bad integer '${s}': ${line}`);
+      return Number(s);
+    };
+    const r = int(t[k++]);
+    for (let i = 0; i < r; i++) {
+      if (t[k] === 'ALIAS') {
+        const j = int(t[k + 1]);
+        k += 2;
+        // An out-of-order target is an invalid descriptor; push null to keep
+        // indices aligned for later ALIASes.
+        regions.push(j >= 0 && j < i ? regions[j] : null);
+        continue;
+      }
+      const type = int(t[k]), q = int(t[k + 1]), kr = int(t[k + 2]), n = int(t[k + 3]);
+      k += 4;
+      if (n < 0 || k + n > t.length) throw new Error(`short region: ${line}`);
+      const els = t.slice(k, k + n).map(int);
+      k += n;
+      regions.push(makeRegion(type, q, kr, els));
+    }
+    if (k !== t.length) throw new Error(`trailing tokens: ${line}`);
+    if (regions.includes(null)) regions = null;
+  }
+  return { code, args, inputs, regions };
 }
 
 export function runCase(line) {
-  const { code, args, inputs } = parseCase(line);
-  const plan = register(code, args);
-  return plan === null ? 'REJECT' : format(draw(plan, inputs));
+  const { code, args, inputs, regions } = parseCase(line);
+  if (regions === null) return 'REJECT';
+  const plan = register(code, args, regions);
+  return plan === null ? 'REJECT' : format(draw(plan, inputs), regions);
 }
 
 export const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');

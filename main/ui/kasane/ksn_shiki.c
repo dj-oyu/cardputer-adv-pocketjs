@@ -97,7 +97,7 @@ typedef struct { uint8_t type,q,k_rec,write; } region_decl;
 /* imm fields that take an int (sec.3): a patched argument must be Q0. */
 static bool int_imm(uint8_t op){
     return op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_SHIFT||op==KSN_SHIKI_SHIFT_H||
-           op==KSN_SHIKI_EACH||op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT||
+           op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT||
            op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_CUBIC||op==KSN_SHIKI_LINE_PATTERN;
 }
 static bool region_op(uint8_t op){

@@ -321,7 +321,8 @@ function dataProgram() {
   for (let n = 0; n < ri(0, 2); n++) {
     const pc = ri(0, code.length - 1), i = code[pc];
     let field, q = pick([0, 0, 0, 16]), v;
-    if (i.op === OP.EACH) { field = 1; v = q ? 1 / 65536 : pick([0, 1, 2]); }
+    // EACH's imm is unused but not an int field (sec.3): any Q, must end up 0.
+    if (i.op === OP.EACH) { field = rnd() < .7 ? 1 : 0; v = field ? (q ? 1 / 65536 : pick([0, 1, 2])) : pick([0, 0, 1 / 131072, 1]); }
     else if (i.op === OP.FETCH || i.op === OP.PUT || i.op === OP.LOOKUP) { field = 0; v = q ? ri(-31, 31) / 2 ** q : pick([-31, 0, 31, 32, ri(-31, 31)]); }
     else continue;
     if (patches.some(p => p.pc === pc && p.field === field)) continue;
