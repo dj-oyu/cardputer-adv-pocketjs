@@ -7,11 +7,17 @@
  *       tools/kasane_contract/shiki_run.c -lm -o shiki_run
  *   ./shiki_run CASES.txt
  *
- * Case:   CASE <hex> ARGS <n> <v...> INPUTS <m> <u...>
+ * Case:   CASE <hex> ARGS <n> <v...> INPUTS <m> <u...> [DATA <r> <region>...]
+ *         <region> = <type> <q> <k_rec> <n> <e...> | ALIAS <j>  (j: an earlier region)
  * Output: REJECT
  *         RUN <STATUS> <steps> <penValid> <penX> <penY> R <r0..r15> S <n> <x0 y0 x1 y1 c>...
+ *             [D <r> (<n> <e...>)...]   (only when the case had DATA)
+ * A malformed region (what shiki.data() would refuse: type, q, k_rec, a
+ * length that is not whole records or not 1..65,535 of them, an element out
+ * of its type's range) makes the case REJECT.
  * With SHIKI_SIN_TABLE=1 it prints the sine table instead (one line). */
 #include "ksn_shiki.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,7 +40,7 @@ int main(int argc,char **argv){
     }
     FILE *f=argc>1?fopen(argv[1],"r"):stdin;
     if(!f){perror(argv[1]);return 2;}
-    static char line[1<<16];
+    static char line[1<<22];
     static uint8_t code[4096];
     static ksn_shiki_plan plan;
     static ksn_shiki_vm vm;
@@ -53,11 +59,48 @@ int main(int argc,char **argv){
         word(&p);                                   /* INPUTS */
         unsigned ni=(unsigned)atoi(word(&p));
         for(unsigned k=0;k<ni&&k<64;k++)in[k]=strtod(word(&p),NULL);
-        const bool ok=ksn_shiki_register(code,len,args,na,&plan);
+        ksn_shiki_region reg[KSN_SHIKI_REGIONS+4];
+        void *owned[KSN_SHIKI_REGIONS+4]={0};
+        unsigned nr=0;
+        bool well=true,data=false;
+        if(!strcmp(word(&p),"DATA")){
+            data=true;
+            nr=(unsigned)atoi(word(&p));
+            if(nr>KSN_SHIKI_REGIONS+4){well=false;nr=0;}
+            for(unsigned k=0;k<nr;k++){
+                const char *w=word(&p);
+                if(!strcmp(w,"ALIAS")){
+                    const unsigned j=(unsigned)atoi(word(&p));
+                    if(j>=k){well=false;reg[k]=(ksn_shiki_region){0};continue;}
+                    reg[k]=reg[j];
+                    continue;
+                }
+                const long type=atol(w),q=atol(word(&p)),kr=atol(word(&p));
+                const long n=atol(word(&p));
+                const size_t es=type==KSN_SHIKI_I32?4:2;
+                if(type<0||type>2||q<0||q>30||kr<1||kr>8||n<kr||n%kr||n/kr>KSN_SHIKI_RECORDS)well=false;
+                void *mem=well?calloc((size_t)n,es):NULL;
+                owned[k]=mem;
+                for(long e=0;e<n;e++){
+                    const long long v=strtoll(word(&p),NULL,10);
+                    const bool in_range=type==0?v>=-32768&&v<=32767:type==1?v>=0&&v<=65535
+                                                :v>=INT32_MIN&&v<=INT32_MAX;
+                    if(!in_range)well=false;
+                    if(!mem)continue;
+                    if(type==0)((int16_t *)mem)[e]=(int16_t)v;
+                    else if(type==1)((uint16_t *)mem)[e]=(uint16_t)v;
+                    else ((int32_t *)mem)[e]=(int32_t)v;
+                }
+                reg[k]=(ksn_shiki_region){mem,(uint32_t)(n>0?n:0),(uint8_t)type,(uint8_t)q,(uint8_t)kr};
+            }
+        }
+        const bool ok=well&&ksn_shiki_register(code,len,args,na,reg,nr,&plan);
         const ksn_shiki_status s=ok?ksn_shiki_draw(&plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
                                    :KSN_SHIKI_INVALID;
         ksn_shiki_result(ok,s,&vm,seg,put_stdout,NULL);
+        if(ok&&data)ksn_shiki_result_regions(reg,nr,put_stdout,NULL);
         putchar('\n');
+        for(unsigned k=0;k<KSN_SHIKI_REGIONS+4;k++)free(owned[k]);
     }
     return 0;
 }

@@ -9,8 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* run(code, args, inputs): registers code (a Uint8Array in the sec.3 byte
- * format) with args, draws once with inputs, and returns "<hash> <status>":
+/* run(code, args, inputs[, data]): registers code (a Uint8Array in the sec.3
+ * byte format) with args and data regions, draws once with inputs, and
+ * returns "<hash> <status>":
  * the FNV-1a 32 of the shared text contract's result line (ksn_shiki_result,
  * the line tools/kasane_contract/shiki_run.c prints) in 8 hex digits, and
  * DONE / INVALID / LIMIT / BADINPUT / REJECT. The line itself can be 30 KB
@@ -18,9 +19,16 @@
  * guest string; the host (tools/kasane_ir/shiki_device.mjs) hashes the line
  * its own engines print and compares.
  *
- * The plan and the segments (about 11 KB) are allocated per call and freed
- * before returning: the surface exists only in the test app's session, and
- * nothing of it may sit in every build's .bss. */
+ *
+ * data (v1.3, apps/shikitest/shiki_data_test.js) is an array of regions, each
+ * {t, q, k, v} (type, Q, record size, the elements as numbers) or a number j,
+ * the same memory as region j. It is the case line's DATA part as values;
+ * the result line then carries the regions' contents (" D ..."), and a
+ * malformed region makes the case REJECT, as in shiki_run.c.
+ *
+ * The plan, the segments (about 11 KB) and the regions are allocated per
+ * call and freed before returning: the surface exists only in the test app's
+ * session, and nothing of it may sit in every build's .bss. */
 
 #define MAX_NUMBERS 64   /* as shiki_run.c: extra inputs reach the engine, which ignores them */
 
@@ -44,6 +52,65 @@ static bool numbers(JSContext *ctx,JSValueConst v,double *out,unsigned *n){
     *n=count;
     return true;
 }
+/* An integer property, or false. */
+static bool int_prop(JSContext *ctx,JSValueConst o,const char *name,int64_t *out){
+    JSValue v=JS_GetPropertyStr(ctx,o,name);
+    const bool ok=JS_IsNumber(v)&&JS_ToInt64(ctx,out,v)==0;
+    JS_FreeValue(ctx,v);
+    return ok;
+}
+#define MAX_REGIONS (KSN_SHIKI_REGIONS+4)
+typedef struct { ksn_shiki_region r[MAX_REGIONS]; void *owned[MAX_REGIONS]; unsigned n; bool well; } regions_t;
+/* Reads data into rs: false only if data is not an array of regions at all
+ * (the caller's mistake); a region shiki.data() would refuse sets well = false. */
+static bool read_regions(JSContext *ctx,JSValueConst data,regions_t *rs){
+    memset(rs,0,sizeof *rs);
+    rs->well=true;
+    int64_t count=0;
+    if(!JS_IsArray(data)||!int_prop(ctx,data,"length",&count)||count<0||count>MAX_REGIONS)return false;
+    rs->n=(unsigned)count;
+    for(unsigned k=0;k<rs->n;k++){
+        JSValue g=JS_GetPropertyUint32(ctx,data,k);
+        bool ok=true;
+        if(JS_IsNumber(g)){
+            int64_t j=-1;
+            JS_ToInt64(ctx,&j,g);
+            if(j<0||j>=(int64_t)k)rs->well=false;
+            else rs->r[k]=rs->r[j];
+        }else{
+            int64_t t=-1,q=-1,kr=0,n=-1;
+            JSValue v=JS_GetPropertyStr(ctx,g,"v");
+            ok=int_prop(ctx,g,"t",&t)&&int_prop(ctx,g,"q",&q)&&int_prop(ctx,g,"k",&kr)&&
+               JS_IsArray(v)&&int_prop(ctx,v,"length",&n);
+            if(ok){
+                if(t<0||t>2||q<0||q>30||kr<1||kr>8||n<kr||n%kr||n/kr>KSN_SHIKI_RECORDS)rs->well=false;
+                void *mem=rs->well?calloc((size_t)n,t==KSN_SHIKI_I32?4:2):NULL;
+                if(rs->well&&!mem)rs->well=false;
+                rs->owned[k]=mem;
+                for(int64_t e=0;mem&&e<n;e++){
+                    JSValue x=JS_GetPropertyUint32(ctx,v,(uint32_t)e);
+                    int64_t val=0;
+                    const bool num=JS_IsNumber(x)&&JS_ToInt64(ctx,&val,x)==0;
+                    JS_FreeValue(ctx,x);
+                    const bool in=num&&(t==0?val>=-32768&&val<=32767:t==1?val>=0&&val<=65535
+                                                :val>=INT32_MIN&&val<=INT32_MAX);
+                    if(!in){rs->well=false;break;}
+                    if(t==0)((int16_t *)mem)[e]=(int16_t)val;
+                    else if(t==1)((uint16_t *)mem)[e]=(uint16_t)val;
+                    else ((int32_t *)mem)[e]=(int32_t)val;
+                }
+                rs->r[k]=(ksn_shiki_region){mem,(uint32_t)n,(uint8_t)t,(uint8_t)q,(uint8_t)kr};
+            }
+            JS_FreeValue(ctx,v);
+        }
+        JS_FreeValue(ctx,g);
+        if(!ok)return false;
+    }
+    return true;
+}
+static void free_regions(regions_t *rs){
+    for(unsigned k=0;k<MAX_REGIONS;k++)free(rs->owned[k]);
+}
 static void fnv(void *ctx,const char *text,size_t len){
     uint32_t *h=ctx;
     for(size_t k=0;k<len;k++){*h^=(uint8_t)text[k];*h*=16777619u;}
@@ -56,18 +123,26 @@ static JSValue js_run(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     unsigned na=0,ni=0;
     if(!code||argc<3||!numbers(ctx,argv[1],args,&na)||!numbers(ctx,argv[2],in,&ni)){
         JS_FreeValue(ctx,JS_GetException(ctx));   /* a non-Uint8Array leaves one pending */
-        return fail(ctx,POCKET_ERR_INVALID_ARGUMENT,"expected (Uint8Array, number[], number[])");
+        return fail(ctx,POCKET_ERR_INVALID_ARGUMENT,"expected (Uint8Array, number[], number[][, data])");
+    }
+    const bool data=argc>3&&!JS_IsUndefined(argv[3]);
+    regions_t *rs=calloc(1,sizeof *rs);
+    if(!rs)return fail(ctx,POCKET_ERR_OUT_OF_MEMORY,"no room for a run");
+    if(data&&!read_regions(ctx,argv[3],rs)){
+        free_regions(rs);free(rs);
+        return fail(ctx,POCKET_ERR_INVALID_ARGUMENT,"expected data as [{t, q, k, v} | index, ...]");
     }
     ksn_shiki_plan *plan=malloc(sizeof *plan);
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
-    if(!plan||!seg){free(plan);free(seg);return fail(ctx,POCKET_ERR_OUT_OF_MEMORY,"no room for a run");}
+    if(!plan||!seg){free(plan);free(seg);free_regions(rs);free(rs);return fail(ctx,POCKET_ERR_OUT_OF_MEMORY,"no room for a run");}
     ksn_shiki_vm vm={0};
-    const bool ok=ksn_shiki_register(code,len,args,na,plan);
+    const bool ok=rs->well&&ksn_shiki_register(code,len,args,na,rs->r,rs->n,plan);
     const ksn_shiki_status s=ok?ksn_shiki_draw(plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
                                :KSN_SHIKI_INVALID;
     uint32_t h=2166136261u;
     ksn_shiki_result(ok,s,&vm,seg,fnv,&h);
-    free(plan);free(seg);
+    if(ok&&data)ksn_shiki_result_regions(rs->r,rs->n,fnv,&h);
+    free(plan);free(seg);free_regions(rs);free(rs);
     static const char *const name[]={"RUNNING","DONE","INVALID","LIMIT","BADINPUT"};
     char out[32];
     snprintf(out,sizeof out,"%08lx %s",(unsigned long)h,ok?name[s]:"REJECT");
@@ -119,7 +194,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
     put_inst(p,KSN_SHIKI_END,0,0,0,0,0);
     ksn_shiki_plan *plan=malloc(sizeof *plan);
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
-    bool ok=plan&&seg&&ksn_shiki_register(code,sizeof code,NULL,0,plan);
+    bool ok=plan&&seg&&ksn_shiki_register(code,sizeof code,NULL,0,NULL,0,plan);
     uint32_t best=UINT32_MAX;
     ksn_shiki_status s=KSN_SHIKI_INVALID;
     for(unsigned r=0;ok&&r<7;r++){
@@ -170,7 +245,7 @@ static JSValue js_bench_build(JSContext *ctx,JSValueConst self,int argc,JSValueC
 
 esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
-    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",3,js_run),JS_CFUNC_DEF("bench",1,js_bench),
+    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",4,js_run),JS_CFUNC_DEF("bench",1,js_bench),
         JS_CFUNC_DEF("benchCount",0,js_bench_count),
         JS_CFUNC_DEF("benchBuild",0,js_bench_build)};
     return JS_SetPropertyFunctionList(ctx,ns,methods,4)<0?ESP_ERR_NO_MEM:ESP_OK;

@@ -1,15 +1,14 @@
 #ifndef KSN_SHIKI_H
 #define KSN_SHIKI_H
-/* Shiki v1.2 line programs: registration and the integer engine
- * (docs/kasane/shiki-spec.md). Stage 1 of the spec's migration (sec.11):
- * the 32-bit and .H instructions, CUBIC and LINE_PATTERN (v1.2's integer
- * procedures, sec.4.6/4.7: run-time divisions are int32 by int32 only,
- * sec.2.2), the sec.3 byte format and every sec.6.1 check. The data-region
- * instructions (stage 4) are refused at registration for now, as is a
- * header that declares data regions.
+/* Shiki v1.3 line programs: registration and the integer engine
+ * (docs/kasane/shiki-spec.md). The 32-bit and .H instructions, CUBIC and
+ * LINE_PATTERN (v1.2's integer procedures, sec.4.6/4.7: run-time divisions
+ * are int32 by int32 only, sec.2.2), the data-region instructions EACH,
+ * FETCH, PUT and LOOKUP (v1.3, sec.5), the sec.3 byte format and every
+ * sec.6.1 check.
  *
- * Nothing here allocates: the caller asks ksn_shiki_plan_bytes() and hands
- * over that much memory (the Shiki heap of sec.9.2 comes later). No float
+ * Nothing here allocates: the caller owns the plan, the vm and the regions'
+ * memory (the Shiki heap of sec.9.2 is the JS API's business). No float
  * appears except the double inputs and arguments, converted once by the
  * sec.2.4 rule. */
 #include <stdbool.h>
@@ -26,6 +25,8 @@
 #define KSN_SHIKI_STEPS 10000
 #define KSN_SHIKI_SEGMENTS 1024
 #define KSN_SHIKI_RASTER 8192
+#define KSN_SHIKI_REGIONS 4
+#define KSN_SHIKI_RECORDS 65535
 
 enum {
     KSN_SHIKI_SET, KSN_SHIKI_INPUT, KSN_SHIKI_ADD, KSN_SHIKI_MUL, KSN_SHIKI_SIN,
@@ -38,6 +39,19 @@ enum {
     KSN_SHIKI_OPS
 };
 
+/* Element types of a data region (sec.3's region table). */
+enum { KSN_SHIKI_I16, KSN_SHIKI_U16, KSN_SHIKI_I32 };
+
+/* A data region as the caller hands it to registration (sec.5.1): n elements
+ * of type at data, k_rec to a record. The binding is fixed at registration;
+ * the caller keeps the memory alive and unmoved while the plan exists. Two
+ * entries may point at the same memory (sec.5.1). */
+typedef struct {
+    void *data;
+    uint32_t n;
+    uint8_t type,q,k_rec;
+} ksn_shiki_region;
+
 /* One instruction as the engine keeps it: the sec.4.2 fields, decoded from
  * little-endian bytes so the engine never reads the caller's buffer again. */
 typedef struct {
@@ -48,11 +62,22 @@ typedef struct {
 
 /* A registered program: its own patched copy (sec.6.1: the caller's bytes
  * and arguments are not read after registration), the inputs' Q formats,
- * and each loop opener's matching END, found once here instead of per draw. */
+ * each loop opener's matching END and, for FETCH/PUT, the loop-stack level
+ * of the EACH they read (sec.5.4.3: the lexically innermost EACH of their
+ * region, which is also its run-time level), all found once here instead of
+ * per draw; and the bound regions. */
+typedef struct {
+    void *data;
+    uint16_t records;
+    uint8_t type,k_rec;
+    uint32_t n;
+} ksn_shiki_bound;
 typedef struct {
     uint8_t count,inputs;
     uint8_t input_q[KSN_SHIKI_INPUTS];
     uint8_t loop_end[KSN_SHIKI_CODE];
+    uint8_t level[KSN_SHIKI_CODE];
+    ksn_shiki_bound region[KSN_SHIKI_REGIONS];
     ksn_shiki_inst code[KSN_SHIKI_CODE];
 } ksn_shiki_plan;
 
@@ -61,7 +86,9 @@ typedef enum { KSN_SHIKI_RUNNING, KSN_SHIKI_DONE, KSN_SHIKI_INVALID,
 
 typedef struct {
     int32_t reg[KSN_SHIKI_REGS];
-    struct { uint8_t pc; uint16_t remaining; } loop[KSN_SHIKI_LOOP_DEPTH];
+    /* total is set by EACH only: its cursor is total - remaining, so END
+     * stays the same instruction for every loop. */
+    struct { uint8_t pc; uint16_t remaining,total; } loop[KSN_SHIKI_LOOP_DEPTH];
     uint8_t depth;
     uint16_t steps,raster;
     int16_t pen_x,pen_y;
@@ -75,11 +102,13 @@ extern const int32_t ksn_shiki_sin_table[257];
 /* sec.2.4: a double to Q f, false for a non-finite v. */
 bool ksn_shiki_from_double(double v,unsigned f,int32_t *out);
 
-/* Registers code (len bytes, sec.3) with nargs arguments into *plan. False
- * on any sec.3/sec.6.1 failure, a wrong argument count or a non-finite
- * argument; *plan is then unspecified. */
+/* Registers code (len bytes, sec.3) with nargs arguments and nregions data
+ * regions into *plan. False on any sec.3/sec.6.1 failure, a wrong argument
+ * or region count, a region that does not match the program's region table
+ * or is malformed (sec.5.1), or a non-finite argument; *plan is then
+ * unspecified. */
 bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsigned nargs,
-                        ksn_shiki_plan *plan);
+                        const ksn_shiki_region *regions,unsigned nregions,ksn_shiki_plan *plan);
 
 /* Runs one draw: up to KSN_SHIKI_INPUTS inputs (n of them; missing ones are
  * 0, extra ones ignored, sec.4.8.7). Segments go to out[0..vm->count), a
@@ -94,4 +123,8 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
 typedef void (*ksn_shiki_put)(void *ctx,const char *text,size_t len);
 void ksn_shiki_result(bool registered,ksn_shiki_status status,const ksn_shiki_vm *vm,
                       const ksn_proc_segment *seg,ksn_shiki_put put,void *ctx);
+/* The contract's region part, appended to a registered case's result line
+ * when the case passed regions: " D <n>" and, per region, " <n> <e...>"
+ * (i16/i32 signed, u16 unsigned, decimal). */
+void ksn_shiki_result_regions(const ksn_shiki_region *regions,unsigned n,ksn_shiki_put put,void *ctx);
 #endif

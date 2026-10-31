@@ -78,6 +78,12 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
+    // The data-region half of the same test (apps/shikitest/shiki_data_test.js,
+    // spec v1.3 sec.5): the same way, one hash per case with its regions.
+    {.id="local.shikidata", .title="SHIKI DATA", .entry="apps/shikitest/shiki_data_test.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
     // The integer instruction latency probe (apps/shikitest/cycle_bench.js,
     // docs/perf/int-latency.md): not on the menu, started by the USB broker;
     // it logs one line of cycle counts per case.

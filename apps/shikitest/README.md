@@ -16,6 +16,10 @@
 
 `pocket.shikiDebug` は仕様 §9 の API ではない。manifest で `kasane.shiki.debug` を要求したセッションにだけ入る（`pocket.derby` と同じ形）。1 回の `run` ごとに式と線分（約 11 KB）を確保して返す前に解放するので、通常のファームの `.bss` は増えない。
 
+## SHIKI DATA（`local.shikidata`、仕様 v1.3 のデータ領域）
+
+同じ流れで、データ領域を持つ式を試す（`shiki_data_test.js`、`shikiDataGen`）。式は 1〜4 個の領域を宣言し、ケースは型・Q 形式・`k_rec`・中身（または前の領域と同じメモリ）を持つ。`run(code, args, inputs, data)` の `data` は `[{t, q, k, v} | 番号, ...]` で、結果の行には実行後の全領域の中身が付く（` D ...`）。ケースの行・結果の行の書式は `tools/kasane_contract/shiki_run.c` の先頭。ログは `SD ...`、最後に `SD END`。host は `node tools/kasane_ir/shiki_device.mjs ログ.txt --data`。4 分の 1 の式は、登録で拒否される誤り（`PUT` の書く旗、型の不一致、レコード 0 件、範囲外の `FETCH`）を混ぜ、1 割はバイト列を 1 ビット壊す。
+
 ## CYCLE BENCH（`local.cyclebench`）
 
 同じ試験専用の面の `pocket.shikiDebug.bench(i)`（ケースの数は `benchCount()`）で、整数の命令（`mull`・`mulsh`・`quos` など、値の大きさ別）と、GCC が呼ぶ 64 ビットのライブラリ関数（`__divdi3` など）と、Shiki エンジンの命令 1 つ（`ksn_shiki_draw` の中）のサイクル数を測る。画面には蓋絵（題、進み具合の棒、終わったケースの数）を出す。LCD の転送は非同期なので、ケースは 2 フレームに 1 回だけ測り、間のフレームで前の絵の転送を終わらせる（転送と測定を重ねない）。ログへ `CB ...` を 1 行ずつ出し、最後に `CB END`。方法は `main/hal/int_latency.c`、結果は [docs/perf/int-latency.md](../../docs/perf/int-latency.md)。これもメニューには出さず、USB broker の `app_session` で起動する。

@@ -88,23 +88,28 @@ static const uint8_t used[KSN_SHIKI_OPS]={
     [KSN_SHIKI_SUB_H]=F_DST|F_A|F_B,         [KSN_SHIKI_MUL_H]=F_DST|F_A|F_B|F_AUX,
     [KSN_SHIKI_SHIFT_H]=F_DST|F_A|F_IMM,
     [KSN_SHIKI_CUBIC]=F_DST|F_IMM|F_AUX,     [KSN_SHIKI_LINE_PATTERN]=F_DST|F_A|F_B|F_IMM|F_AUX,
+    /* a is a region number here, b of FETCH/PUT a position: check_inst(). */
+    [KSN_SHIKI_EACH]=F_A|F_B|F_AUX,          [KSN_SHIKI_FETCH]=F_DST|F_A|F_B|F_IMM|F_AUX,
+    [KSN_SHIKI_PUT]=F_DST|F_A|F_B|F_IMM|F_AUX,[KSN_SHIKI_LOOKUP]=F_DST|F_A|F_B|F_IMM|F_AUX,
 };
-/* The data-region instructions (stage 4) are still refused (header comment). */
-static bool stage1(uint8_t op){
-    return op<KSN_SHIKI_EACH;
-}
+/* The region table as registration reads it (sec.3). */
+typedef struct { uint8_t type,q,k_rec,write; } region_decl;
 /* imm fields that take an int (sec.3): a patched argument must be Q0. */
 static bool int_imm(uint8_t op){
     return op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_SHIFT||op==KSN_SHIKI_SHIFT_H||
            op==KSN_SHIKI_EACH||op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT||
            op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_CUBIC||op==KSN_SHIKI_LINE_PATTERN;
 }
-static bool check_inst(const ksn_shiki_inst *i,unsigned inputs){
-    if(!stage1(i->op))return false;
+static bool region_op(uint8_t op){
+    return op>=KSN_SHIKI_EACH&&op<=KSN_SHIKI_LOOKUP;
+}
+static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl *rd,unsigned nr){
+    if(i->op>=KSN_SHIKI_OPS)return false;
     const uint8_t u=used[i->op];
     if((!(u&F_DST)&&i->dst)||(!(u&F_A)&&i->a)||(!(u&F_B)&&i->b)||
        (!(u&F_IMM)&&i->imm)||(!(u&F_AUX)&&i->aux))return false;
     if(i->op==KSN_SHIKI_INPUT){if(i->a>=inputs)return false;}
+    else if(region_op(i->op)){if(i->a>=nr)return false;}
     else if((u&F_A)&&i->a>=KSN_SHIKI_REGS)return false;
     if((u&F_DST)&&i->dst>=KSN_SHIKI_REGS)return false;
     if((u&F_B)&&i->b>=KSN_SHIKI_REGS)return false;
@@ -118,23 +123,42 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs){
     case KSN_SHIKI_CUBIC: return i->dst<=KSN_SHIKI_REGS-8&&i->imm>=1&&i->imm<=255;
     case KSN_SHIKI_LINE_PATTERN:
         return i->dst<=KSN_SHIKI_REGS-KSN_PROC_PATTERN_BLOCK&&i->imm>=1&&i->imm<=KSN_PROC_PATTERN_BITS;
+    /* sec.6.1, v1.3. aux = 0 counts every record and names no register. */
+    case KSN_SHIKI_EACH: return i->aux==1||(i->aux==0&&i->b==0);
+    case KSN_SHIKI_FETCH: case KSN_SHIKI_PUT:
+        if(i->op==KSN_SHIKI_PUT&&!rd[i->a].write)return false;
+        return i->aux>=1&&i->b+i->aux<=rd[i->a].k_rec&&i->dst+i->aux-1u<KSN_SHIKI_REGS&&
+               i->imm>=-31&&i->imm<=31;
+    case KSN_SHIKI_LOOKUP:
+        return rd[i->a].k_rec==1&&i->aux<=31&&i->imm>=-31&&i->imm<=31;
     default: return true;
     }
 }
 /* Loop structure: openers matched with ENDs, at most 8 deep, BREAK_IF_GT
- * inside a loop. loop_end[opener] = its END. */
+ * inside a loop, FETCH/PUT inside an EACH of their region. loop_end[opener]
+ * = its END; level[FETCH/PUT] = the stack level of the innermost such EACH.
+ * At run time the stack is always the lexical nesting (a loop is entered
+ * only at its opener and left only at its END or a BREAK_IF_GT, which pops
+ * exactly the innermost one), so the level found here is the frame to read. */
 static bool check_loops(ksn_shiki_plan *p){
     uint8_t stack[KSN_SHIKI_LOOP_DEPTH];
     unsigned depth=0;
     for(unsigned pc=0;pc<p->count;pc++){
-        const uint8_t op=p->code[pc].op;
-        if(op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_REPEAT_REG){
+        const ksn_shiki_inst *i=&p->code[pc];
+        const uint8_t op=i->op;
+        if(op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_REPEAT_REG||op==KSN_SHIKI_EACH){
             if(depth==KSN_SHIKI_LOOP_DEPTH)return false;
             stack[depth++]=(uint8_t)pc;
         }else if(op==KSN_SHIKI_END){
             if(!depth)return false;
             p->loop_end[stack[--depth]]=(uint8_t)pc;
         }else if(op==KSN_SHIKI_BREAK_IF_GT&&!depth)return false;
+        else if(op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT){
+            unsigned d=depth;
+            while(d&&!(p->code[stack[d-1]].op==KSN_SHIKI_EACH&&p->code[stack[d-1]].a==i->a))d--;
+            if(!d)return false;
+            p->level[pc]=(uint8_t)(d-1);
+        }
     }
     return depth==0;
 }
@@ -144,23 +168,38 @@ static int32_t le32(const uint8_t *b){
 }
 
 bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsigned nargs,
-                        ksn_shiki_plan *plan){
+                        const ksn_shiki_region *regions,unsigned nregions,ksn_shiki_plan *plan){
     if(!code||!plan||len<12||memcmp(code,"SKI1",4)||code[4]!=1||code[5]!=0||code[11])return false;
     const unsigned n=code[6],nin=code[7],narg=code[8],ndata=code[9],npatch=code[10];
     if(n<1||n>KSN_SHIKI_CODE||nin>KSN_SHIKI_INPUTS||narg>KSN_SHIKI_ARGS||ndata>4||
        npatch>KSN_SHIKI_PATCHES)return false;
-    if(ndata)return false;                       /* stage 1: no data regions */
     if(nargs!=narg||(narg&&!args))return false;
+    if(nregions!=ndata||(ndata&&!regions))return false;   /* sec.5.1 */
     size_t off=12;
     const uint8_t *in_q=code+off;   off+=nin;
     const uint8_t *arg_q=code+off;  off+=narg;
-    off+=4*ndata;
+    const uint8_t *reg_t=code+off;  off+=4*ndata;
     const uint8_t *patch=code+off;  off+=4*npatch;
     const size_t body=(off+3)&~(size_t)3;
     if(len!=body+12*(size_t)n)return false;      /* exactly the computed size */
     for(size_t k=off;k<body;k++)if(code[k])return false;
     for(unsigned k=0;k<nin;k++)if(in_q[k]>30)return false;
     for(unsigned k=0;k<narg;k++)if(arg_q[k]>30)return false;
+    /* The region table, then the binding (sec.3, sec.5.1): the passed region
+     * must be well formed (what shiki.data() guarantees for a window) and
+     * match the declaration's type, Q and record size. */
+    region_decl rd[KSN_SHIKI_REGIONS];
+    memset(plan->region,0,sizeof plan->region);
+    for(unsigned k=0;k<ndata;k++){
+        const uint8_t *t=reg_t+4*k;
+        if(t[0]>KSN_SHIKI_I32||t[1]>30||t[2]<1||t[2]>8||t[3]>1)return false;
+        rd[k]=(region_decl){t[0],t[1],t[2],t[3]};
+        const ksn_shiki_region *g=&regions[k];
+        if(!g->data||g->type!=t[0]||g->q!=t[1]||g->k_rec!=t[2]||g->n%t[2])return false;
+        const uint32_t records=g->n/t[2];
+        if(records<1||records>KSN_SHIKI_RECORDS)return false;
+        plan->region[k]=(ksn_shiki_bound){g->data,(uint16_t)records,t[0],t[2],g->n};
+    }
     int32_t arg[KSN_SHIKI_ARGS];
     for(unsigned k=0;k<narg;k++)if(!ksn_shiki_from_double(args[k],arg_q[k],&arg[k]))return false;
     plan->count=(uint8_t)n;
@@ -189,7 +228,7 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
             i->imm=arg[a];
         }
     }
-    for(unsigned pc=0;pc<n;pc++)if(!check_inst(&plan->code[pc],nin))return false;
+    for(unsigned pc=0;pc<n;pc++)if(!check_inst(&plan->code[pc],nin,rd,ndata))return false;
     return check_loops(plan);
 }
 
@@ -367,6 +406,53 @@ static __attribute__((noinline)) ksn_shiki_status pattern_line(ksn_shiki_vm *vm,
     return KSN_SHIKI_RUNNING;
 }
 
+/* ---- data regions (sec.5.4, v1.3) */
+/* SHIFT(v, k) of sec.2.2, the same arithmetic as the SHIFT instruction. */
+static int32_t shift32(int32_t v,int32_t k){
+    return k>=0?sat32((int64_t)v*((int64_t)1<<k)):(int32_t)floor_shift(v,(unsigned)-k);
+}
+static int32_t load(const ksn_shiki_bound *g,uint32_t e){
+    switch(g->type){
+    case KSN_SHIKI_I16: return ((const int16_t *)g->data)[e];
+    case KSN_SHIKI_U16: return ((const uint16_t *)g->data)[e];
+    default: return ((const int32_t *)g->data)[e];
+    }
+}
+static void store(const ksn_shiki_bound *g,uint32_t e,int32_t v){
+    switch(g->type){
+    case KSN_SHIKI_I16: ((int16_t *)g->data)[e]=(int16_t)sat16(v); break;
+    case KSN_SHIKI_U16: ((uint16_t *)g->data)[e]=(uint16_t)(v<0?0:v>65535?65535:v); break;
+    default: ((int32_t *)g->data)[e]=v; break;
+    }
+}
+/* FETCH, PUT and LOOKUP, none of which can fail: registration proved every
+ * address in range (b + m <= k_rec, cursor < records; LOOKUP clamps).
+ * noinline for the reason CUBIC is: the dispatch loop keeps its registers. */
+static __attribute__((noinline)) void data_op(ksn_shiki_vm *vm,const ksn_shiki_plan *plan,unsigned pc){
+    const ksn_shiki_inst *i=&plan->code[pc];
+    const ksn_shiki_bound *g=&plan->region[i->a];
+    int32_t *r=vm->reg;
+    if(i->op==KSN_SHIKI_LOOKUP){
+        int64_t e=floor_shift(r[i->b],i->aux);
+        if(e<0)e=0;
+        if(e>(int64_t)g->n-1)e=(int64_t)g->n-1;
+        r[i->dst]=shift32(load(g,(uint32_t)e),i->imm);
+        return;
+    }
+    const unsigned lv=plan->level[pc];
+    const uint32_t cursor=(uint32_t)vm->loop[lv].total-vm->loop[lv].remaining;
+    const uint32_t base=cursor*g->k_rec+i->b;
+    const unsigned m=i->aux;
+    if(i->op==KSN_SHIKI_FETCH){
+        for(unsigned j=0;j<m;j++)r[i->dst+j]=shift32(load(g,base+j),i->imm);
+        return;
+    }
+    /* PUT: every value first, then the writes in ascending j (sec.5.4.4). */
+    int32_t v[8];
+    for(unsigned j=0;j<m;j++)v[j]=shift32(r[i->dst+j],i->imm);
+    for(unsigned j=0;j<m;j++)store(g,base+j,v[j]);
+}
+
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     memset(vm,0,sizeof *vm);
@@ -413,6 +499,25 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
             vm->depth++;
             break;
         }
+        case KSN_SHIKI_EACH: {
+            /* sec.5.4.1: one step on entry, r[b] read once, N = 0 skips the
+             * body without a frame. */
+            const uint32_t records=plan->region[i->a].records;
+            int32_t count=(int32_t)records;
+            if(i->aux){
+                count=r[i->b];
+                if(count<0||(uint32_t)count>records)return KSN_SHIKI_INVALID;
+            }
+            if(!count){next=plan->loop_end[pc]+1u;break;}
+            vm->loop[vm->depth].pc=(uint8_t)pc;
+            vm->loop[vm->depth].remaining=(uint16_t)count;
+            vm->loop[vm->depth].total=(uint16_t)count;
+            vm->depth++;
+            break;
+        }
+        case KSN_SHIKI_FETCH: case KSN_SHIKI_PUT: case KSN_SHIKI_LOOKUP:
+            data_op(vm,plan,pc);
+            break;
         case KSN_SHIKI_END:
             if(--vm->loop[vm->depth-1].remaining)next=vm->loop[vm->depth-1].pc+1u;
             else vm->depth--;
@@ -466,6 +571,20 @@ static void put_int(ksn_shiki_put put,void *ctx,long v){
     char b[16];
     const int n=snprintf(b,sizeof b," %ld",v);
     put(ctx,b,(size_t)n);
+}
+void ksn_shiki_result_regions(const ksn_shiki_region *regions,unsigned n,ksn_shiki_put put,void *ctx){
+    put(ctx," D",2);
+    put_int(put,ctx,(long)n);
+    for(unsigned k=0;k<n;k++){
+        const ksn_shiki_region *g=&regions[k];
+        put_int(put,ctx,(long)g->n);
+        for(uint32_t e=0;e<g->n;e++){
+            const long v=g->type==KSN_SHIKI_I16?((const int16_t *)g->data)[e]
+                        :g->type==KSN_SHIKI_U16?((const uint16_t *)g->data)[e]
+                        :((const int32_t *)g->data)[e];
+            put_int(put,ctx,v);
+        }
+    }
 }
 void ksn_shiki_result(bool registered,ksn_shiki_status status,const ksn_shiki_vm *vm,
                       const ksn_proc_segment *seg,ksn_shiki_put put,void *ctx){

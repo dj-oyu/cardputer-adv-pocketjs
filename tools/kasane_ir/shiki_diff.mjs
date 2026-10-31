@@ -19,6 +19,15 @@
 // of nested loops, argument patches, lround halves at the JS boundary. A
 // fifth of the programs are mutated byte for byte so registration's
 // accept/reject is compared too.
+//
+// Data regions (v1.3, sec.5, sec.10.1): a share of the cases (--data, 0.4)
+// declare 1-4 regions and pass them in the case's DATA part, and the result
+// line carries every region's contents after the run. They cover EACH with
+// both count modes (N = 0, N = the record count, out of range), FETCH/PUT at
+// the types' edges (u16 >= 32768, negative i16, +-k, saturation), LOOKUP's
+// clamps and g = 0/31, nested and self-nested EACH, BREAK_IF_GT out of an
+// EACH, LIMIT in the middle of one (writes made so far stay), aliased
+// regions, and binding mismatches (count, type, Q, record size, malformed).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +35,7 @@ import {execFileSync} from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
 const opt = (name, d) => { const i = process.argv.indexOf(name); return i < 0 ? d : process.argv[i + 1]; };
-const N = Number(opt('--cases', 20000)), SEED = Number(opt('--seed', 1));
+const N = Number(opt('--cases', 20000)), SEED = Number(opt('--seed', 1)), DATA = Number(opt('--data', 0.4));
 const dir = opt('--keep', fs.mkdtempSync(path.join(os.tmpdir(), 'shiki-diff-')));
 fs.mkdirSync(dir, {recursive: true});
 
@@ -102,13 +111,14 @@ function prim(code, heavy, loop) {
 const OP = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9, REPEAT_REG: 10,
   BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14, LINE_PATTERN: 15, SUB: 16, NEG: 17, SHIFT: 18,
   ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26};
-function encode({inputs = [], args = [], patches = [], code}) {
-  const head = 12 + inputs.length + args.length + 4 * patches.length, body = (head + 3) & ~3;
+function encode({inputs = [], args = [], regions = [], patches = [], code}) {
+  const head = 12 + inputs.length + args.length + 4 * regions.length + 4 * patches.length, body = (head + 3) & ~3;
   const b = new Uint8Array(body + 12 * code.length);
-  b.set([0x53, 0x4b, 0x49, 0x31, 1, 0, code.length, inputs.length, args.length, 0, patches.length, 0]);
+  b.set([0x53, 0x4b, 0x49, 0x31, 1, 0, code.length, inputs.length, args.length, regions.length, patches.length, 0]);
   let o = 12;
   for (const q of inputs) b[o++] = q;
   for (const q of args) b[o++] = q;
+  for (const r of regions) { b.set([r.type, r.q, r.k, r.write], o); o += 4; }
   for (const p of patches) { b.set([p.pc, p.arg, p.field, 0], o); o += 4; }
   const dv = new DataView(b.buffer);
   code.forEach((i, k) => {
@@ -217,12 +227,122 @@ function program() {
   return {bytes, argv, inv};
 }
 
+// ------------------------------------------------- data regions (v1.3)
+const ELEM = [
+  () => pick([-32768, -32767, -1, 0, 1, 255, 256, 32767, ri(-32768, 32767), ri(-300, 300)]),
+  () => pick([0, 1, 32767, 32768, 32769, 65535, ri(0, 65535), ri(0, 300)]),
+  () => pick([-(2 ** 31), 2 ** 31 - 1, -1, 0, 1, 65536, -65536, ri(-(2 ** 31), 2 ** 31 - 1), ri(-70000, 70000)]),
+];
+function dataProgram() {
+  const heavy = rnd() < .12;
+  // Most programs register, so that execution is compared; the rest carry
+  // mistakes (bad = the chance per instruction or field).
+  const bad = rnd() < .7 ? 0 : .06;
+  const no = () => rnd() < bad;
+  const nr = ri(1, 4);
+  const decl = Array.from({length: nr}, () => ({type: ri(0, 2), q: pick([0, 8, 14, 16, 30, ri(0, 30)]),
+    k: rnd() < .35 ? 1 : ri(1, 8), write: !bad || rnd() < .85 ? 1 : 0}));
+  if (!decl.some(d => d.k === 1) && rnd() < .7) decl[ri(0, nr - 1)].k = 1;
+  // What the case passes: usually the declaration with records of its own.
+  const pass = decl.map((d, i) => {
+    if (i && rnd() < .08) {                         // the same memory under two numbers
+      const j = ri(0, i - 1);
+      if (decl[j].type === d.type && decl[j].q === d.q && decl[j].k === d.k) return {alias: j};
+      if (rnd() < .5) { Object.assign(d, {type: decl[j].type, q: decl[j].q, k: decl[j].k}); return {alias: j}; }
+    }
+    const records = heavy ? ri(300, 3000) : pick([1, 1, 2, 3, 7, 8, 9, 17, ri(1, 40)]);
+    const g = {type: d.type, q: d.q, k: d.k, n: records * d.k};
+    const m = bad ? rnd() : 1;
+    if (m < .015) g.type = (g.type + 1) % 3;
+    else if (m < .03) g.q = (g.q + 1) % 31;
+    else if (m < .045) g.k = g.k % 8 + 1, g.n = records * g.k;
+    else if (m < .05) g.n = 0;                       // no records: shiki.data() refuses it
+    else if (m < .055) g.n += 1;                     // not whole records
+    g.e = Array.from({length: g.n}, ELEM[g.type]);
+    return g;
+  });
+  if (bad && rnd() < .05) pass.pop();               // a count mismatch
+  else if (bad && rnd() < .05) pass.push({type: 0, q: 0, k: 1, n: 1, e: [0]});
+  const k1 = decl.map((d, i) => i).filter(i => decl[i].k === 1);
+  const rec = i => { const g = pass[i]; return g ? (g.alias !== undefined ? pass[g.alias] : g) : null; };
+  const records = i => { const g = rec(i); return g ? Math.max(1, Math.floor(g.n / Math.max(1, g.k))) : 1; };
+  const code = [], open = [];                        // open: {region|-1}
+  const target = ri(6, 64);
+  const shiftK = () => pick([0, 0, 0, -1, 1, -8, 8, 16, -16, 31, -31, ri(-31, 31)]);
+  while (code.length < target) {
+    const room = target - code.length - open.length;
+    if (room <= 0) break;
+    const inside = open.filter(o => o >= 0);
+    const r = rnd();
+    if (r < .16 && open.length < 8 && room > 3) {
+      // EACH: the outer ones mostly differ, but a self-nested one now and then.
+      const a = inside.length && rnd() < .2 ? pick(inside) : ri(0, nr - 1);
+      if (rnd() < .45) code.push({op: OP.EACH, a});
+      else {
+        const c = reg(), n = records(a);
+        if (rnd() < .85) code.push({op: OP.SET, dst: c, imm: pick([0, 1, n, n, n - 1, n + 1, -1, 2 ** 31 - 1, ri(0, n)])});
+        code.push({op: OP.EACH, a, b: c, aux: 1});
+      }
+      open.push(a);
+    } else if (r < .2 && open.length < 8 && room > 2) {
+      code.push({op: OP.REPEAT, imm: heavy ? ri(50, 255) : pick([1, 2, 3])}); open.push(-1);
+    } else if (r < .3 && open.length) { code.push({op: OP.END}); open.pop(); }
+    else if (r < .34 && open.length) code.push({op: OP.BREAK_IF_GT, a: reg(), b: reg()});
+    else if (r < .52 && (inside.length || no())) {
+      // FETCH / PUT: a valid span of the record, or (bad) one past it.
+      const a = inside.length ? pick(inside) : ri(0, nr - 1), k = decl[a].k;
+      const m = no() ? ri(0, 9) : ri(1, k), b = no() ? ri(0, 8) : ri(0, Math.max(0, k - m));
+      const dst = no() ? ri(0, 15) : ri(0, 16 - Math.max(1, m));
+      const put = rnd() < .5 && (decl[a].write || no());
+      code.push({op: put ? OP.PUT : OP.FETCH, dst, a, b, aux: m, imm: shiftK()});
+    } else if (r < .58 && (k1.length || no())) {
+      const a = k1.length && !no() ? pick(k1) : ri(0, nr - 1), i = reg();
+      if (rnd() < .5) code.push({op: OP.SET, dst: i, imm: pick([-1, 0, 1, -65536, 2 ** 31 - 1, -(2 ** 31), ri(-5, 50), ri(-5, 50) * 65536 + ri(0, 65535)])});
+      code.push({op: OP.LOOKUP, dst: reg(), a, b: i, aux: pick([0, 0, 16, 31, 1, ri(0, 31)]), imm: shiftK()});
+    } else if (r < .8) {
+      const op = pick([OP.ADD, OP.SUB, OP.NEG, OP.MUL, OP.SHIFT, OP.ADD_H, OP.MUL_H, OP.SHIFT_H]);
+      const i = {op, dst: reg(), a: reg()};
+      if ([OP.ADD, OP.SUB, OP.MUL, OP.ADD_H, OP.MUL_H].includes(op)) i.b = reg();
+      if (op === OP.MUL) i.aux = pick([0, 8, 16, ri(0, 62)]);
+      if (op === OP.MUL_H) i.aux = pick([0, 8, 15, ri(0, 31)]);
+      if (op === OP.SHIFT) i.imm = shiftK();
+      if (op === OP.SHIFT_H) i.imm = pick([-15, -1, 0, 1, 14, ri(-15, 14)]);
+      code.push(i);
+    } else if (r < .88) code.push({op: OP.SET, dst: reg(), imm: rnd() < .4 ? coordRaw() : imm32()});
+    else {
+      const op = pick([OP.PLOT, OP.LINE, OP.MOVE]);
+      code.push({op, a: reg(), b: reg(), aux: op === OP.MOVE ? 0 : ri(0, 65535)});
+    }
+  }
+  while (open.length) { code.push({op: OP.END}); open.pop(); }
+  if (code.length > 64) code.length = 64;
+  // Arguments patched into EACH's aux (the count mode) and FETCH/PUT/LOOKUP's k.
+  const args = [], argv = [], patches = [];
+  for (let n = 0; n < ri(0, 2); n++) {
+    const pc = ri(0, code.length - 1), i = code[pc];
+    let field, q = pick([0, 0, 0, 16]), v;
+    if (i.op === OP.EACH) { field = 1; v = q ? 1 / 65536 : pick([0, 1, 2]); }
+    else if (i.op === OP.FETCH || i.op === OP.PUT || i.op === OP.LOOKUP) { field = 0; v = q ? ri(-31, 31) / 2 ** q : pick([-31, 0, 31, 32, ri(-31, 31)]); }
+    else continue;
+    if (patches.some(p => p.pc === pc && p.field === field)) continue;
+    patches.push({pc, arg: args.length, field}); args.push(q); argv.push(v);
+  }
+  patches.sort((x, y) => x.pc - y.pc || x.field - y.field);
+  const bytes = encode({regions: decl, args, patches, code});
+  if (rnd() < .15) {
+    const k = ri(0, bytes.length - 1);
+    bytes[k] = rnd() < .5 ? ri(0, 255) : bytes[k] ^ (1 << ri(0, 7));
+  }
+  const data = pass.map(g => g.alias !== undefined ? `ALIAS ${g.alias}` : `${g.type} ${g.q} ${g.k} ${g.n} ${g.e.join(' ')}`);
+  return {bytes, argv, inv: [], data: `DATA ${data.length} ${data.join(' ')}`};
+}
+
 // --------------------------------------------------------------- run
 const hex = b => Buffer.from(b).toString('hex');
 const lines = [];
 for (let n = 0; n < N; n++) {
-  const {bytes, argv, inv} = program();
-  lines.push(`CASE ${hex(bytes)} ARGS ${argv.length} ${argv.map(String).join(' ')} INPUTS ${inv.length} ${inv.map(String).join(' ')}`.replace(/  +/g, ' '));
+  const {bytes, argv, inv, data} = rnd() < DATA ? dataProgram() : program();
+  lines.push(`CASE ${hex(bytes)} ARGS ${argv.length} ${argv.map(String).join(' ')} INPUTS ${inv.length} ${inv.map(String).join(' ')}${data ? ' ' + data : ''}`.replace(/  +/g, ' ').trim());
 }
 const cases = path.join(dir, 'cases.txt');
 fs.writeFileSync(cases, lines.join('\n') + '\n');
