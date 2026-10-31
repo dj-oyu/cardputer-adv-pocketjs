@@ -135,8 +135,8 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl
     }
 }
 /* Loop structure: openers matched with ENDs, at most 8 deep, BREAK_IF_GT
- * inside a loop, FETCH/PUT inside an EACH of their region. loop_end[opener]
- * = its END; level[FETCH/PUT] = the stack level of the innermost such EACH.
+ * inside a loop, FETCH/PUT inside an EACH of their region. code[opener].end
+ * = its END; code[FETCH/PUT].level = the stack level of the innermost such EACH.
  * At run time the stack is always the lexical nesting (a loop is entered
  * only at its opener and left only at its END or a BREAK_IF_GT, which pops
  * exactly the innermost one), so the level found here is the frame to read. */
@@ -151,13 +151,13 @@ static bool check_loops(ksn_shiki_plan *p){
             stack[depth++]=(uint8_t)pc;
         }else if(op==KSN_SHIKI_END){
             if(!depth)return false;
-            p->loop_end[stack[--depth]]=(uint8_t)pc;
+            p->code[stack[--depth]].end=(uint8_t)pc;
         }else if(op==KSN_SHIKI_BREAK_IF_GT&&!depth)return false;
         else if(op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT){
             unsigned d=depth;
             while(d&&!(p->code[stack[d-1]].op==KSN_SHIKI_EACH&&p->code[stack[d-1]].a==i->a))d--;
             if(!d)return false;
-            p->level[pc]=(uint8_t)(d-1);
+            p->code[pc].level=(uint8_t)(d-1);
         }
     }
     return depth==0;
@@ -167,6 +167,10 @@ static int32_t le32(const uint8_t *b){
     return (int32_t)((uint32_t)b[0]|(uint32_t)b[1]<<8|(uint32_t)b[2]<<16|(uint32_t)b[3]<<24);
 }
 
+size_t ksn_shiki_plan_bytes_for(const uint8_t *code,size_t len){
+    if(!code||len<12||memcmp(code,"SKI1",4)||code[6]<1||code[6]>KSN_SHIKI_CODE)return 0;
+    return ksn_shiki_plan_bytes(code[6]);
+}
 bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsigned nargs,
                         const ksn_shiki_region *regions,unsigned nregions,ksn_shiki_plan *plan){
     if(!code||!plan||len<12||memcmp(code,"SKI1",4)||code[4]!=1||code[5]!=0||code[11])return false;
@@ -208,7 +212,7 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
     for(unsigned pc=0;pc<n;pc++){
         const uint8_t *b=code+body+12*pc;
         if(b[10]||b[11])return false;            /* reserved */
-        plan->code[pc]=(ksn_shiki_inst){b[0],b[1],b[2],b[3],le32(b+4),le16(b+8)};
+        plan->code[pc]=(ksn_shiki_inst){b[0],b[1],b[2],b[3],le32(b+4),le16(b+8),0,0};
     }
     /* Patches: strictly ascending (pc, field), into imm or aux only. */
     int last=-1;
@@ -439,7 +443,7 @@ static __attribute__((noinline)) void data_op(ksn_shiki_vm *vm,const ksn_shiki_p
         r[i->dst]=shift32(load(g,(uint32_t)e),i->imm);
         return;
     }
-    const unsigned lv=plan->level[pc];
+    const unsigned lv=i->level;
     const uint32_t cursor=(uint32_t)vm->loop[lv].total-vm->loop[lv].remaining;
     const uint32_t base=cursor*g->k_rec+i->b;
     const unsigned m=i->aux;
@@ -493,7 +497,7 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
                 count=r[i->a];
                 if(count<0||count>255)return KSN_SHIKI_INVALID;
             }
-            if(!count){next=plan->loop_end[pc]+1u;break;}
+            if(!count){next=i->end+1u;break;}
             vm->loop[vm->depth].pc=(uint8_t)pc;
             vm->loop[vm->depth].remaining=(uint16_t)count;
             vm->depth++;
@@ -508,7 +512,7 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
                 count=r[i->b];
                 if(count<0||(uint32_t)count>records)return KSN_SHIKI_INVALID;
             }
-            if(!count){next=plan->loop_end[pc]+1u;break;}
+            if(!count){next=i->end+1u;break;}
             vm->loop[vm->depth].pc=(uint8_t)pc;
             vm->loop[vm->depth].remaining=(uint16_t)count;
             vm->loop[vm->depth].total=(uint16_t)count;
@@ -524,7 +528,7 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
             break;
         case KSN_SHIKI_BREAK_IF_GT:
             if(r[i->a]>r[i->b]){
-                next=plan->loop_end[vm->loop[vm->depth-1].pc]+1u;
+                next=plan->code[vm->loop[vm->depth-1].pc].end+1u;
                 vm->depth--;
             }
             break;

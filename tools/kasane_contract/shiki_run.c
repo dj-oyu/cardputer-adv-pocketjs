@@ -42,7 +42,6 @@ int main(int argc,char **argv){
     if(!f){perror(argv[1]);return 2;}
     static char line[1<<22];
     static uint8_t code[4096];
-    static ksn_shiki_plan plan;
     static ksn_shiki_vm vm;
     static ksn_proc_segment seg[KSN_SHIKI_SEGMENTS];
     while(fgets(line,sizeof line,f)){
@@ -94,13 +93,18 @@ int main(int argc,char **argv){
                 reg[k]=(ksn_shiki_region){mem,(uint32_t)(n>0?n:0),(uint8_t)type,(uint8_t)q,(uint8_t)kr};
             }
         }
-        const bool ok=well&&ksn_shiki_register(code,len,args,na,reg,nr,&plan);
-        const ksn_shiki_status s=ok?ksn_shiki_draw(&plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
+        /* Exactly what the header asks for, so ASan sees an engine that writes
+         * past a short plan. */
+        const size_t pb=ksn_shiki_plan_bytes_for(code,len);
+        ksn_shiki_plan *plan=malloc(pb?pb:sizeof(ksn_shiki_plan));
+        const bool ok=well&&pb&&ksn_shiki_register(code,len,args,na,reg,nr,plan);
+        const ksn_shiki_status s=ok?ksn_shiki_draw(plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
                                    :KSN_SHIKI_INVALID;
         ksn_shiki_result(ok,s,&vm,seg,put_stdout,NULL);
         if(ok&&data)ksn_shiki_result_regions(reg,nr,put_stdout,NULL);
         putchar('\n');
         for(unsigned k=0;k<KSN_SHIKI_REGIONS+4;k++)free(owned[k]);
+        free(plan);
     }
     return 0;
 }

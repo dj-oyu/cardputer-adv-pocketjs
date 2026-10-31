@@ -53,19 +53,24 @@ typedef struct {
 } ksn_shiki_region;
 
 /* One instruction as the engine keeps it: the sec.4.2 fields, decoded from
- * little-endian bytes so the engine never reads the caller's buffer again. */
+ * little-endian bytes so the engine never reads the caller's buffer again,
+ * and what registration works out once in the struct's two spare bytes: a
+ * loop opener's matching END (end) and, for FETCH/PUT, the loop-stack level
+ * of the EACH they read (sec.5.4.3: the lexically innermost EACH of their
+ * region, which is also its run-time level). 12 B either way. */
 typedef struct {
     uint8_t op,dst,a,b;
     int32_t imm;
     uint16_t aux;
+    uint8_t end,level;
 } ksn_shiki_inst;
+_Static_assert(sizeof(ksn_shiki_inst)==12,"the spare bytes hold end and level");
 
 /* A registered program: its own patched copy (sec.6.1: the caller's bytes
- * and arguments are not read after registration), the inputs' Q formats,
- * each loop opener's matching END and, for FETCH/PUT, the loop-stack level
- * of the EACH they read (sec.5.4.3: the lexically innermost EACH of their
- * region, which is also its run-time level), all found once here instead of
- * per draw; and the bound regions. */
+ * and arguments are not read after registration), the inputs' Q formats and
+ * the bound regions. Sized by its instruction count (ksn_shiki_plan_bytes):
+ * a Shiki heap of 48 KiB holds BIG WAVE's 22 programs only if a short
+ * program costs what it holds (docs/kasane/shiki.md sec.4.5.1). */
 typedef struct {
     void *data;
     uint16_t records;
@@ -75,11 +80,16 @@ typedef struct {
 typedef struct {
     uint8_t count,inputs;
     uint8_t input_q[KSN_SHIKI_INPUTS];
-    uint8_t loop_end[KSN_SHIKI_CODE];
-    uint8_t level[KSN_SHIKI_CODE];
     ksn_shiki_bound region[KSN_SHIKI_REGIONS];
-    ksn_shiki_inst code[KSN_SHIKI_CODE];
+    ksn_shiki_inst code[];
 } ksn_shiki_plan;
+/* The bytes a plan of count instructions takes; KSN_SHIKI_PLAN_MAX holds any. */
+#define ksn_shiki_plan_bytes(count) (sizeof(ksn_shiki_plan)+(size_t)(count)*sizeof(ksn_shiki_inst))
+#define KSN_SHIKI_PLAN_MAX ksn_shiki_plan_bytes(KSN_SHIKI_CODE)
+/* The bytes code (len bytes, sec.3) needs as a plan, from its header alone,
+ * or 0 when the header is not a Shiki header (registration then fails
+ * anyway): what to allocate before ksn_shiki_register(). */
+size_t ksn_shiki_plan_bytes_for(const uint8_t *code,size_t len);
 
 typedef enum { KSN_SHIKI_RUNNING, KSN_SHIKI_DONE, KSN_SHIKI_INVALID,
                KSN_SHIKI_LIMIT, KSN_SHIKI_BADINPUT } ksn_shiki_status;
@@ -103,7 +113,7 @@ extern const int32_t ksn_shiki_sin_table[257];
 bool ksn_shiki_from_double(double v,unsigned f,int32_t *out);
 
 /* Registers code (len bytes, sec.3) with nargs arguments and nregions data
- * regions into *plan. False on any sec.3/sec.6.1 failure, a wrong argument
+ * regions into *plan, which must hold ksn_shiki_plan_bytes_for(code, len). False on any sec.3/sec.6.1 failure, a wrong argument
  * or region count, a region that does not match the program's region table
  * or is malformed (sec.5.1), or a non-finite argument; *plan is then
  * unspecified. */

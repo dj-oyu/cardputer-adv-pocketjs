@@ -133,7 +133,7 @@ static JSValue js_run(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         free_regions(rs);free(rs);
         return fail(ctx,POCKET_ERR_INVALID_ARGUMENT,"expected data as [{t, q, k, v} | index, ...]");
     }
-    ksn_shiki_plan *plan=malloc(sizeof *plan);
+    ksn_shiki_plan *plan=malloc(KSN_SHIKI_PLAN_MAX);
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
     if(!plan||!seg){free(plan);free(seg);free_regions(rs);free(rs);return fail(ctx,POCKET_ERR_OUT_OF_MEMORY,"no room for a run");}
     ksn_shiki_vm vm={0};
@@ -193,7 +193,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
     put_inst(p,KSN_SHIKI_REPEAT,0,0,0,TURNS,0);p+=12;
     for(unsigned k=0;k<COPIES;k++){put_inst(p,c->op,3,c->a,c->b,c->imm,c->aux);p+=12;}
     put_inst(p,KSN_SHIKI_END,0,0,0,0,0);
-    ksn_shiki_plan *plan=malloc(sizeof *plan);
+    ksn_shiki_plan *plan=malloc(KSN_SHIKI_PLAN_MAX);
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
     bool ok=plan&&seg&&ksn_shiki_register(code,sizeof code,NULL,0,NULL,0,plan);
     uint32_t best=UINT32_MAX;
