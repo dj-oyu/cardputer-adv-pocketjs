@@ -24,8 +24,20 @@ def plain(path):
         "'ksn_proc_blend_read','ksn_proc_blend_bounds','blend_projection','blend_ellipsoids_band',"
         "'ksn_proc_blend_region_read','ksn_proc_blend_region_bounds',"
         "'clip_prepare','clip_contains','clip_span','ksn_proc_clipped_ellipsoid_read',"
-        "'ksn_proc_clipped_ellipsoid_bounds')")
+        "'ksn_proc_clipped_ellipsoid_bounds',"
+        "'gouraud_zero','gouraud_header','ksn_proc_gouraud_read','gouraud_area','gouraud_box',"
+        "'ksn_proc_gouraud_bounds','ksn_proc_gouraud_frame_next','gouraud_edge',"
+        "'gouraud_make_edge','gouraud_edge_value','gouraud_band','gouraud_render_entry')")
     text = once(text, "bool plain_step_candidate;\n", """bool plain_step_candidate;
+bool ksn_proc_gouraud_read(const ksn_proc_segment *data,unsigned words,ksn_proc_gouraud_patch *p,unsigned *used){
+ return cand_ksn_proc_gouraud_read(data,words,p,used);
+}
+bool ksn_proc_gouraud_bounds(const ksn_proc_gouraud_patch *p,int *l,int *t,int *r,int *b,unsigned *cost){
+ return cand_ksn_proc_gouraud_bounds(p,l,t,r,b,cost);
+}
+bool ksn_proc_gouraud_frame_next(const ksn_proc_frame *f,unsigned *i,ksn_proc_segment *g,unsigned *cost){
+ return cand_ksn_proc_gouraud_frame_next(f,i,g,cost);
+}
 bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *l,int *t,int *r,int *b){
  return cand_ksn_proc_ellipsoid_bounds(p,l,t,r,b);
 }
