@@ -85,4 +85,11 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
  * vm is fully reset here; its state after the call is sec.4.8.8's. */
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
+/* The result line of the shared text contract (tools/kasane_ir/shiki_ref.mjs
+ * format(), tools/kasane_contract/shiki_run.c), handed to put in pieces so a
+ * caller can print it or hash it without holding a line that 1,024 segments
+ * make some 30 KB long. registered false gives "REJECT". No trailing newline. */
+typedef void (*ksn_shiki_put)(void *ctx,const char *text,size_t len);
+void ksn_shiki_result(bool registered,ksn_shiki_status status,const ksn_shiki_vm *vm,
+                      const ksn_proc_segment *seg,ksn_shiki_put put,void *ctx);
 #endif

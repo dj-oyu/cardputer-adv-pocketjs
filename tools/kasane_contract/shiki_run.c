@@ -23,6 +23,7 @@ static const char *word(char **p){
     if(**p)*(*p)++=0;
     return s;
 }
+static void put_stdout(void *ctx,const char *t,size_t n){(void)ctx;fwrite(t,1,n,stdout);}
 static unsigned hexval(char c){return c<='9'?(unsigned)(c-'0'):(unsigned)((c|32)-'a'+10);}
 
 int main(int argc,char **argv){
@@ -38,7 +39,6 @@ int main(int argc,char **argv){
     static ksn_shiki_plan plan;
     static ksn_shiki_vm vm;
     static ksn_proc_segment seg[KSN_SHIKI_SEGMENTS];
-    static const char *const status[]={"RUNNING","DONE","INVALID","LIMIT","BADINPUT"};
     while(fgets(line,sizeof line,f)){
         char *p=line;
         if(strcmp(word(&p),"CASE"))continue;
@@ -53,15 +53,11 @@ int main(int argc,char **argv){
         word(&p);                                   /* INPUTS */
         unsigned ni=(unsigned)atoi(word(&p));
         for(unsigned k=0;k<ni&&k<64;k++)in[k]=strtod(word(&p),NULL);
-        if(!ksn_shiki_register(code,len,args,na,&plan)){printf("REJECT\n");continue;}
-        const ksn_shiki_status s=ksn_shiki_draw(&plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg);
-        printf("RUN %s %u %d %d %d R",status[s],vm.steps,vm.pen_valid?1:0,
-               vm.pen_valid?vm.pen_x:0,vm.pen_valid?vm.pen_y:0);
-        for(unsigned k=0;k<KSN_SHIKI_REGS;k++)printf(" %ld",(long)vm.reg[k]);
-        printf(" S %u",vm.count);
-        for(unsigned k=0;k<vm.count;k++)
-            printf(" %d %d %d %d %u",seg[k].x0,seg[k].y0,seg[k].x1,seg[k].y1,seg[k].color);
-        printf("\n");
+        const bool ok=ksn_shiki_register(code,len,args,na,&plan);
+        const ksn_shiki_status s=ok?ksn_shiki_draw(&plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
+                                   :KSN_SHIKI_INVALID;
+        ksn_shiki_result(ok,s,&vm,seg,put_stdout,NULL);
+        putchar('\n');
     }
     return 0;
 }

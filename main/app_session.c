@@ -96,6 +96,7 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#include "pocket_shiki.h"
 #include "pocket_shape.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
@@ -1633,6 +1634,10 @@ surfaces_done:
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
     if(app_registry_wants(app_registry_current(),"derby.series"))
         TRY(pocketjs_guest_quickjs_install_once(guest,"derby",pocket_derby_install,NULL));
+    // pocket.shikiDebug, the Shiki engine for the on-device differential test
+    // (apps/shikitest), the same way: only for kasane.shiki.debug.
+    if(app_registry_wants(app_registry_current(),"kasane.shiki.debug"))
+        TRY(pocketjs_guest_quickjs_install_once(guest,"shiki-debug",pocket_shiki_debug_install,NULL));
     // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
     // 'J' diagnostic, which runs MEGADEMO without a manifest).
     // docs/apps/megademo-shapes.md.

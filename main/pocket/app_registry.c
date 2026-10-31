@@ -20,6 +20,8 @@ static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 // naming it is what gets the session that surface, as pet.companion does.
 static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", NULL};
 static const char *const CAPS_SHAPES[]= {"kasane.shapes", NULL};
+// The Shiki test (apps/shikitest): the engine through its test-only surface.
+static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -68,6 +70,13 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.stress", .title="STRESS TEST", .entry="apps/stress/stress.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The on-device half of Shiki's differential test (apps/shikitest/README.md,
+    // docs/kasane/shiki-spec.md sec.10): not on the menu, started by the USB
+    // broker's app_session; it logs one hash per generated case.
+    {.id="local.shikitest", .title="SHIKI TEST", .entry="apps/shikitest/shiki_test.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The procedural megademo is an ordinary foreground app. Its frame loop
     // wraps after 48 frames; leaving it with Back and reopening starts a new
