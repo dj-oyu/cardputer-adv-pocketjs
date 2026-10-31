@@ -1,8 +1,8 @@
 # Cloud native Model/Instance比較C
 
-本稿は初回host比較の履歴。3d31fb86後の明示回収・製品provider・実機比較用計測は[後続fixture](cloud-memory-fixture.md)を参照する。
+本稿は初回host比較の履歴。3d31fb86後の明示回収・製品provider・実機比較は[後続fixture](cloud-memory-fixture.md)を参照する。2026-10-31の固定診断a4185e2bでは、同一bootのA→C→A→C、cold/warm計8run/504drawが実機PASS。CのSTEADY guest86000..86652 Bに対しA125696..130872 B、ESP largestはC34816 B/A23552..29696 B。これは当該診断条件の報告値で、下表の初回host値や後続の狐headへ転用しない。highwater/minimumのcold/warm累積、EXIT2残存、GC/stack/画質未計測は後続記録を優先する。
 
-状態: ローカルhost比較。対照JSソースは7d21b302、製品CLOUD PROBEのnative asset切替・同head CI・この方式の実機確認は未完。7d21b302の実機fixture成功は[別記録](cloud-finite-fixture.md)を参照。
+初回記録時の状態: ローカルhost比較。対照JSソースは7d21b302、当時は製品CLOUD PROBEのnative asset切替・同head CI・この方式の実機確認は未完だった。7d21b302の実機fixture成功は[別記録](cloud-finite-fixture.md)を参照。
 
 本表は初回native比較（公開bb97749相当のローカルsource、詳細SHAはresult.json）の記録。後続の再利用guard・例外分類・二重dispose修正後のCI結果は別headとして確認し、旧表の数値を新headの実測へ読み替えない。
 

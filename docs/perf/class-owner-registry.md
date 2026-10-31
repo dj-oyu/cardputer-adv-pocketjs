@@ -2,7 +2,7 @@
 
 [性能文書](README.md) / [CLOUD MEMORY fixture](cloud-memory-fixture.md)
 
-対象基準は診断791c95df。狐顔面の未採用host prototypeと通常OFF復帰差分は別保存し、この修正候補は障害時と同じTRACE/phase-only ON/ONを保つ。新候補のflash・実機再試験はまだ行っていない。
+対象基準は診断791c95df。狐顔面の未採用host prototypeと通常OFF復帰差分は別保存し、この修正候補は障害時と同じTRACE/phase-only ON/ONを保つ。初回記録時は新候補のflash・実機再試験が未実施だった。後述の2026-10-31追記で実機結果を区別する。
 
 ## 実機報告と観測範囲
 
@@ -93,3 +93,10 @@ host shim、proc weak fixture、Model単独fixtureも同じheader実装を使う
 | 修正版の実機A/C | 未実施 | 791のC失敗を修復後の成功へ読み替えない |
 
 Character materials CIへregistry試験と実session順序試験（sanitizer/m32）を追加する。生成binary・関連source hash・反復protocol同値のguardを成果物へ残す。CI完了は公開headと対応付けて別途報告し、旧headの成功を流用しない。
+
+
+## 2026-10-31 実機修正受入（a4185e2b）
+
+実機担当報告では09:33:08 UTCの同診断SHA flash後、同一bootのA→C→A→C、各cold/warmの計8run・504drawが完走した。旧`pocket_api_class_ready` assert、panic、allocator callback failureは観測なし。各STOP/CLOSEでJS0、09:39:10 UTCにHELLO→APP_STOPPED→HOME_READYとowner/job/queue/sessionなしを照合済み。固定16owner超過の修正がこの実機のapp順序で通過した結果であり、全hardware namespaceの全機能動作を検証したという意味ではない。
+
+根拠は実機担当の`hone110-a418-memory-measurements-20261031.json`ほか。[同SHAのA/C計測](cloud-memory-fixture.md)にguest/ESP/usable highwater、EXIT2の残存、cold/warm累積、未計測のGC/stack/物理LCD品質をまとめた。後続通常OFF/OFF版や狐候補の実測として扱わない。

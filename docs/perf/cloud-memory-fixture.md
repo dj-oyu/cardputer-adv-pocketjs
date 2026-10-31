@@ -73,7 +73,7 @@ AのSTART=85986ms、`cloudmem.loaded`=86234msで、loadまで248ms。その直�
 
 profile検査script、通常CIの明示OFF、初期化分割、phase-only機能自体は残す。診断候補commit全体を機械的にrevertしてこれらを消す手順ではない。a8eccbfbは通常既定OFF/OFFの参照SHAとして保持する。
 
-791のassert後は実機担当がHOME復帰とowner/job/queue/sessionなしを報告した。a4185e2bの実機再測定は別工程であり、この後続sourceのbuild成功を実機A/C完走や安全なflash条件の確認に代えない。実機への操作は別担当が状態を照合して行う。分割によりwall時間・callback境界・GC機会が変わり、phase-onlyは観測処理も変えるため、旧fdeと性能条件が同一とは扱わない。同じ固定tick/draw payloadの回帰一致と実機性能比較を区別する。
+791のassert後は実機担当がHOME復帰とowner/job/queue/sessionなしを報告した。当初a4185e2bの実機再測定は別工程であり、この後続sourceのbuild成功を実機A/C完走や安全なflash条件の確認に代えなかった。実機完走後の結果は末尾の2026-10-31記録へ分離した。実機への操作は別担当が状態を照合して行う。分割によりwall時間・callback境界・GC機会が変わり、phase-onlyは観測処理も変えるため、旧fdeと性能条件が同一とは扱わない。同じ固定tick/draw payloadの回帰一致と実機性能比較を区別する。
 
 `KASANE_MEGADEMO_TRACE=ON`で製品linkする。同一SHA・同一binary・160 KiB設定でA/Cを選ぶ。登録buildと同じ`idf.py -B output -D SDKCONFIG=output/sdkconfig build`のfresh構成で、CMakeCacheのTRACE=ONとguest compile define `POCKET_GUEST_ALLOCATOR_METRICS=1`を確認してから実機へ渡す。既存cacheのOFFを既定値だけで上書きできるとは仮定しない。通常版CIは`-D KASANE_MEGADEMO_TRACE=OFF`を明示する。trace OFFでは通常allocatorの余分なcounter処理/保存領域を除き、`memoryMark`も公開しない。比較appはその場合`METRICS UNAVAILABLE`を明示し、計測成功にしない。計測用binaryの時刻を通常buildの性能と呼ばない。
 
@@ -126,3 +126,25 @@ SHORT初版はAの最初の再生成（45draw後）で失敗した。canaryはqu
 実機担当へ最終SHA、trace ONのbinary/ELF、CIとflagsを渡す。正式AppSessionOptionsの上限は90000ms（default30000/min1000）。300000msはvalidationで拒否され未実行だった。既定DEVICE_SHORTで起動→create→steady→burst→exit→recreateのMMK/MDTを同条件で取得し、phase終端、瞬間highwater、runtime終了を分ける。63drawも90秒以内完了を事前保証せず、COMPLETE前timeoutは未完と記録する。scene exitで不要なcold/work参照が戻ること、生存共有Instanceを壊さないこと、再生成反復のpostphase残留推移を受け入れる。終了JS0だけでpeak/断片化改善としない。broker/profile/認可変更や非正式flashを代替経路にしない。
 
 強制GC後/cache flush後の追加測定やGC詳細計装は今回未実装。通常frameごとのGC無効化・強制GCは行わない。計測自身の完全な負荷比較と物理LCDの品質も未受入のまま残す。
+
+
+## 2026-10-31 実機a4185e2bのA/C受入結果
+
+実機担当の報告（`hone110-a418-memory-measurements-20261031.json`ほか）を転記する。本稿作者による独立した再測定ではない。対象は固定診断SHA `a4185e2b4f4b7072a40c8988fd3f9ded159502cf`、TRACE/phase-only ON/ON。後続の通常OFF/OFF版や狐patchのhost候補へ数値を読み替えない。2026-10-31 09:33:08 UTCに正式flashが成功し、同一bootでfresh sessionのA→C→A→C、各sessionのcold/warmを計8run、各63draw（計504draw）完走した。coldは新guest、warmは同guest内の再runであり別条件として記録する。
+
+| 指標（B、報告範囲） | A: JS定義 | C: native共有資産 |
+| --- | ---: | ---: |
+| STEADY guest会計 | 125696..130872 | 86000..86652 |
+| STEADY ESP free | 33780..38672 | 75412..76308 |
+| STEADY ESP largest block | 23552..29696 | 34816 |
+| session usable highwater | 118772..118796 | 79304..79376 |
+| session ESP minimum free | 31328..31392 | 75016..75108 |
+| EXIT2 guest会計 | 90784..90880 | 65988..66020 |
+
+範囲は複数cold/warm・反復sessionの報告値で、paired平均や同一瞬間の差ではない。guest会計、allocator usable highwater、ESP free/largest/minimumは別指標であり足し合わせない。highwater/minimumはcold/warm累積なのでwarm単独peakとは呼ばない。EXIT2はscene終了後もアプリのcode・共有資源等が残る段階で、guest全解放ではない。最大連続freeだけからQuickJSの断片化率やGC走査削減量を計算しない。
+
+各STOP/CLOSEはJS0、旧class-owner assert・panic・allocator callback failureは観測なし。最終09:39:10 UTCのHELLO→APP_STOPPED→HOME_READYとowner/job/queue/sessionなしを実機担当が照合した。最終ESP free207608 B/largest69632 B。最終idleの値をアニメ動作中のpeakと呼ばない。これにより[owner registry修正](class-owner-registry.md)のA→C起動回帰を実機でも通過した。
+
+63drawのphase所要時間はA4.078..4.191秒、C3.836..3.864秒。診断・初期化分割・phase境界を含む有限試験のwall時間であり、描画FPSや定常frame時間ではない。旧fdeの中断条件と同一の性能試験ではなく、Cの速度改善率をここから保証しない。
+
+この実機条件ではCのguest使用量とESP空き/連続領域がAより有利に観測された。固定資産をflashから直接使い、可変Instanceを分ける方針を支持するが、全キャラ/表情/長時間負荷での一般保証ではない。GC回数/時間・stack peak・物理LCD画質、計測ON/OFFの全負荷比較、強制GC/cache flush後の内訳は未計測のまま残す。終了JS0だけで起動peakや断片化改善を宣言しない。
