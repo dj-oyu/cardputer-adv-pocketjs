@@ -1,6 +1,6 @@
-# 設定図から取り直した狐顔の無陰影実証
+# 設定図から取り直した狐顔の無陰影・native陰影実証
 
-既存モデルの頬幅や頭の楕円体係数だけを調整する方法は打ち切り、設定図から輪郭・眼・鼻・白毛境界を取り直した。既定FOX FACE／FOX SHEETと実機023559fは変更していない。これは**オフラインのアセット制作比較**であり、native rendererの画素・順序・実機性能の受入ではない。
+既存モデルの頬幅や頭の楕円体係数だけを調整する方法は打ち切り、設定図から輪郭・眼・鼻・白毛境界を取り直した。既定FOX FACE／FOX SHEETと実機023559fは変更していない。前半はオフラインの無陰影制作比較、後半は実QuickJS／native rendererのホスト試験。実機性能や造形の合格とは分ける。
 
 ![固定3D形状の無陰影投影と顔シルエット](../apps/fox-redesign-unlit-host.png)
 
@@ -33,9 +33,9 @@ python tools/character/fox_asset_redesign.py
 python tools/character/fox_asset_redesign.py --out-dir .cache/fox-asset-redesign-repeat
 ```
 
-出力は `model.json`／`model.aynm`／`authoring.json`／2枚のPNG／`proof.json`。2回の生成で全6ファイルのbyte一致を確認した。既存AYNM packerで16 node、8960 Bの固定native資産へコンパイルできた。資産SHA256は `13e9eabafb3931edf376f3188e2c1823cd582945fbee2618d72ff271c636687d`。native各meshの32頂点／64面制限内で事前分割し、計算した法線と固有色データも固定資産に含める。
+基本出力は `model.json`／`model.aynm`／`authoring.json`／2枚のPNG／`proof.json`、照明用の派生資産は `lit/`／`clay/`。既存AYNM packerで16 node、8960 Bの固定native資産へコンパイルできる。正面windingと口の明示的な2面分割を整理した無陰影資産SHA256は `44e166fcd72eae8bcf87c27437bad18688cc16ff8f6421fb868a3070ba572d29`。native各meshの32頂点／64面制限内で事前分割し、計算した法線と固有色データも固定資産に含める。
 
-表示PNGは制作確認用の**オフラインdepth-buffer投影**であり、製品へZbufferを追加したものではない。AYNMがcompileできた事実から、製品の面順・眼clip・morph・メモリ予算が通ったとは言わない。製品providerへは登録せず、JS appへの巨大な頂点graph展開も行っていない。後続は固定native資産を共有し、pose／表情を個体別mutable instanceに持たせる既存方針を維持する。
+前半PNGは制作確認用の**オフラインdepth-buffer投影**であり、製品へZbufferを追加したものではない。AYNMがcompileできた事実だけから面順・眼clip・morph・メモリ予算が通ったとは言わない。製品providerへは登録せず、JS appへの巨大な頂点graph展開も行っていない。固定native資産を共有し、pose／表情を個体別mutable instanceに持たせる既存方針を維持する。
 
 ## 画像判定と次の受入
 
@@ -46,6 +46,27 @@ rootと独立画像レビューは、旧円頭・白頬球・円筒状の独立�
 - 口吻：斜めで鼻先が前へ出る。丸い量感が出るかは同geometryのclay／固定光で判定する。
 - 白毛：水平な帯から曲線へ変えたが、斜めでは横長の扇にも見える。陰影で隠して合格にしない。
 
-次は同じgeometryの単色clayと固有色表示、固定世界光のyaw −35/0/+35°を比較する。その後にnative rendererの面順・眼clip・差分一致・160 KiB・明示解放を検証し、通った面だけをmorphへ進める。現時点ではmorph、実機RAM・速度・画質、全身・他キャラ・2.5Dの完成は主張しない。
+## 同じ形状のnative陰影試験
+
+![実QuickJSとnative rendererのホスト描画](../apps/fox-redesign-native-host.png)
+
+上は固有色＋照明、下は同じgeometry／normal／maskを持つ単色clay。固定世界光と同じcameraでyaw −35/0/+35°を描画した。実機captureでもESP速度でもない。
+
+native用生成では正面の全206面を正のwindingに統一し、凸polygonのfanは凸性を検査、凹形の口は非重複2面を明示する。runtimeで裏面を反転したりvisibility検査を緩めたりしていない。無陰影のambient1材質を光変化検査へ流用せず、lit／clayにambient .28・diffuse .72の同一材質を持たせる。資産SHA256はlit `46e063fc4fb9a7e42667dbf5514bd92e5fa0cc9eebd8b38df2ec7f53c3a179a6`、clay `8b6ebb62baa0c4823dcee58e8eee3507842548aab3e5d52854ef1025e3f21ede`。
+
+専用fixtureはroot ID 0と世界光だけを更新する。旧狐の眼・鼻・耳・extra75のnode契約は使用しない。固定資産はhost専用provider、poseと参照寿命は既存Model／Instanceが所有し、scene→modelの順に明示disposeする。既定製品のprovider・描画kernel・資産は変更していない。
+
+```text
+python tools/character/fox_asset_redesign.py
+python tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-asset-redesign/lit --result-dir .cache/fox-redesign-m32-lit
+python tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-asset-redesign/clay --result-dir .cache/fox-redesign-m32-clay
+python tools/character/fox_redesign_contact.py --lit-result .cache/fox-redesign-m32-lit/result.json --clay-result .cache/fox-redesign-m32-clay/result.json --out .cache/fox-redesign-native-host.png
+```
+
+最終m32試験ではlit／clayそれぞれ78frame×2process、全frame incremental/full-reference一致、光±90°による画像変化、無効yaw／光入力時の旧commit保持、停止8回の画素一致、3回release/recreate、終了guest/live0、2process全framehashとcapture一致を通過した。ASan／UBSanの64bit litも78frame×2processを通過。旧compiled-combined経路のm32回帰も78frame×2processを通し、保存した旧結果と全framehash／capture一致を確認した。資産と無陰影画像の2回再生成もbyte一致した。
+
+m32 lit／clay各guest会計peak83596 B、rounded request peak77040 B、最大単一request19731 B、native arena payload19724 B。arenaはguest会計に含まれ、別RAMへ逃がした数字ではない。これは**専用fixtureの会計**であり、旧FOX appより省メモリになったという比較ではない。JS app全体・表情追加後やESP heap／stackの余裕は未測定。停止中のdirty counter不変、全角度の遮蔽の正しさも別の未検証項目である。
+
+陰影レビューでは、独立球・円筒の組立感が消えた一方、白面全幅が横へ張り出す楔／顎板、頭頂の釣鐘状の曲率が明確になった。clayでも形状そのものを判定し、毛色を変えて隠す案は採用しない。**native試験のPASSと製品造形の受入を分け、現案は製品へ採用しない。** 次の造形は頬全幅の奥行きと中央マズルの丸い量感を分けて設計し、合格した形状をmorphへ進める。現時点ではmorph、実機RAM・速度・画質、全身・他キャラ・2.5Dの完成は主張しない。
 
 [既存頬造形の比較](fox-cheek-authoring-study.md) · [native mesh契約](../api/ayatsuri-native-mesh.md)

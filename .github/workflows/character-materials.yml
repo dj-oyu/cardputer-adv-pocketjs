@@ -253,6 +253,10 @@ jobs:
               assert y['metrics']['guest_peak']<x['metrics']['guest_peak']<=163840
           print('COMPILED_FOX_SAME_IMAGE_LOWER_GUEST_PASS')
           PY
+          python3 tools/character/fox_asset_redesign.py
+          python3 tools/kasane_contract/run_fox_patch_host.py --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-asset-redesign/lit --result-dir .cache/fox-redesign-asan-lit
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-asset-redesign/lit --result-dir .cache/fox-redesign-m32-lit
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-asset-redesign/clay --result-dir .cache/fox-redesign-m32-clay
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -264,6 +268,10 @@ jobs:
             .cache/fox-compiled-assets/
             .cache/fox-sheet-app-asan/
             .cache/fox-sheet-app-m32/
+            .cache/fox-asset-redesign/
+            .cache/fox-redesign-asan-lit/
+            .cache/fox-redesign-m32-lit/
+            .cache/fox-redesign-m32-clay/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

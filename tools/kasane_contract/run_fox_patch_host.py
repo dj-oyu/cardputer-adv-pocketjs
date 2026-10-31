@@ -40,6 +40,8 @@ def inputs():
     for name in ('apps/lib/ayatsuri_model.js', 'apps/lib/ayatsuri_clip.js', 'apps/lib/ayatsuri_visibility.js',
                  'tools/character/fox_patch_fixture.js', 'tools/character/fox_retopology_fixture.js',
                  'tools/character/fox_compiled_patch_fixture.js', 'apps/fox3d/fox_sheet_scene.js',
+                 'tools/character/fox_redesign_fixture.js', 'tools/character/fox_asset_redesign.py',
+                 'tools/character/fox_reference_landmarks.json',
                  'tools/kasane_contract/test_fox_patch_host.c',
                  'tools/kasane_contract/run_fox_patch_host.py'):
         result[name] = sha(ROOT / name)
@@ -60,26 +62,40 @@ def numeric_fields(line):
 
 
 def main():
+    global COMPILED_ASSETS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32', action='store_true')
     parser.add_argument('--capture-dir', type=Path)
     parser.add_argument('--compiled-provider',action='store_true',help='use the same native-asset binary for a source-A comparison')
+    parser.add_argument('--compiled-assets-dir',type=Path,help='pre-generated bounded study assets; do not regenerate product assets')
+    parser.add_argument('--result-dir',type=Path,help='isolated study results instead of the standard comparison folder')
+    parser.add_argument('--redesign',action='store_true',help='explicit new-root fixture; never load legacy fox bindings')
     parser.add_argument('--variant',choices=('baseline','unlit','clay','dense-clay','dense','socket','socket-only','gouraud','gouraud-socket','retopology','retopology-clay',*COMPILED_NAMES),default='baseline')
     args = parser.parse_args()
+    if args.redesign and (not args.compiled_assets_dir or args.variant!='compiled-combined'):
+        parser.error('--redesign requires --compiled-assets-dir and --variant compiled-combined')
     if sys.platform == 'win32':
         parser.error('Use Linux/WSL for ASan or the existing m32 sysroot')
     profile = 'm32' if args.m32 else 'asan64'
-    cache = ROOT / '.cache/fox-patch-host' / profile / args.variant
+    if args.compiled_assets_dir:
+        COMPILED_ASSETS=args.compiled_assets_dir.resolve()
+        if args.variant not in COMPILED_NAMES:
+            parser.error('--compiled-assets-dir requires a compiled variant')
+        if not COMPILED_ASSETS.is_relative_to(ROOT):
+            parser.error('study assets must be inside the checkout for source guards')
+    cache = args.result_dir.resolve() if args.result_dir else ROOT / '.cache/fox-patch-host' / profile / args.variant
     cache.mkdir(parents=True, exist_ok=True)
     (cache / 'result.json').unlink(missing_ok=True)
     captures = (args.capture_dir or cache / 'captures').resolve()
     flags = ['-Itools/kasane_contract', '-ffp-contract=off', '-fno-fast-math']
+    if args.compiled_assets_dir:flags.append('-DFOX_PATCH_CUSTOM_STUDY')
+    if args.redesign:flags.append('-DFOX_PATCH_REDESIGN')
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',
                UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
     env['FOX_PATCH_VARIANT']=args.variant
     compiled_provider=args.compiled_provider or args.variant in COMPILED_NAMES
     if compiled_provider:
-        generate_compiled_assets()
+        if not args.compiled_assets_dir:generate_compiled_assets()
         flags.append('-DAYATSURI_FOX_COMPILED_STUDY')
     if args.variant in COMPILED_NAMES:
         name=COMPILED_NAMES[args.variant]
@@ -164,7 +180,8 @@ def main():
     repeated = runs[0]['image_sha256'] == runs[1]['image_sha256'] and runs[0]['frame_hashes'] == runs[1]['frame_hashes']
     proof = dict(kind='HOST SIMULATION', device_capture=False, device_fps_claim=False,
                  passed=all(r['passed'] for r in runs) and unchanged and repeated,
-                 profile=profile, variant=args.variant, compiled_provider=compiled_provider, cap=163840 if args.m32 else None,
+                 profile=profile, variant=args.variant, redesign_fixture=args.redesign,
+                 compiled_provider=compiled_provider, cap=163840 if args.m32 else None,
                  forced_frame_gc=False, captures=str(captures), runs=runs,
                  source_sha256=before, sources_and_artifacts_unchanged=unchanged,
                  binary=str(binary), binary_sha256=binary_before,

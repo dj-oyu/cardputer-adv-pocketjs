@@ -50,6 +50,15 @@ def normals(vertices,triangles):
    for i in range(3):result[k][i]+=n[i]
  return [[x/math.hypot(*n) for x in n] for n in result]
 
+def front_winding(vertices,triangles):
+ result=[]
+ for a,b,c in triangles:
+  p,q,r=vertices[a],vertices[b],vertices[c]
+  area=(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0])
+  assert abs(area)>1e-8,'front-projected triangle must not degenerate'
+  result.append((a,b,c) if area>0 else (a,c,b))
+ return result
+
 def author():
  vertices=[];rings=[];triangles=[]
  for y,width,_,_ in ROWS:
@@ -62,11 +71,17 @@ def author():
   elif len(b)==1:triangles.extend((a[i],b[0],a[i+1]) for i in range(8))
   else:
    for i in range(8):triangles.extend(((a[i],b[i],b[i+1]),(a[i],b[i+1],a[i+1])))
- ns=normals(vertices,triangles)
+ triangles=front_winding(vertices,triangles);ns=normals(vertices,triangles)
  masks=[y-interpolate(BOUNDARY,abs(x)) for x,y,z in vertices]
  shapes=[dict(name='continuous-face',vertices=vertices,triangles=triangles,normals=ns,mask=masks,a=ORANGE,b=CREAM)]
- def polygon(name,points,color):
-  shapes.append(dict(name=name,vertices=points,triangles=[(0,i,i+1) for i in range(1,len(points)-1)],
+ def polygon(name,points,color,triangles=None):
+  if triangles is None:
+   crosses=[]
+   for a,b,c in zip(points,points[1:]+points[:1],points[2:]+points[:2]):
+    crosses.append((b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]))
+   assert all(v>0 for v in crosses) or all(v<0 for v in crosses),'fan requires convex authoring polygon'
+   triangles=[(0,i,i+1) for i in range(1,len(points)-1)]
+  shapes.append(dict(name=name,vertices=points,triangles=front_winding(points,triangles),
                      normals=[[0,0,1] for _ in points],mask=[-1]*len(points),a=color,b=color))
  for side in (-1,1):
   # Ear root is behind the face. Silhouette and inner ear are separate cold parts.
@@ -81,10 +96,10 @@ def author():
     points.append([x,y,surface(x,y)+lift])
    polygon(f'{name}-{side}',points,color)
  polygon('nose',[[-3.3,6.3,27.5],[0,5.7,28.5],[3.3,6.3,27.5],[2.2,8.5,27.2],[0,9.3,27],[-2.2,8.5,27.2]],DARK)
- polygon('mouth',[[-5,12,24.0],[0,13,24.5],[5,12,24.0],[0,13.5,24.4]],DARK)
+ polygon('mouth',[[-5,12,24.0],[0,13,24.5],[5,12,24.0],[0,13.5,24.4]],DARK,[(0,1,3),(1,2,3)])
  return shapes
 
-def native_model(shapes):
+def native_model(shapes,mode='unlit'):
  nodes=[dict(index=0,name='fox-redesign-root',parent=-1,kind='group',enabled=True,pose=[0,0,0,0,0,0,1,1,1])]
  for shape in shapes:
   batches=[];ids=[];tris=[]
@@ -98,9 +113,9 @@ def native_model(shapes):
   for batch,(ids,tris) in enumerate(batches):
    nodes.append(dict(index=len(nodes),name=f"{shape['name']}-{batch}",parent=0,kind='gouraudMesh',enabled=True,
     pose=[0,0,0,0,0,0,1,1,1],color=shape['a'],thickness=1,opacity=1,edgeSoftness=0,
-    material=[1,0,0,32,0,1,1,1,0,0,0],mesh=dict(vertices=[v for i in ids for v in shape['vertices'][i]],
+    material=[1,0,0,32,0,1,1,1,0,0,0] if mode=='unlit' else [.28,.72,0,32,0,1,1,1,0,0,0],mesh=dict(vertices=[v for i in ids for v in shape['vertices'][i]],
     normals=[v for i in ids for v in shape['normals'][i]],mask=[shape['mask'][i] for i in ids],
-    indices=[v for t in tris for v in t],order='centroid-depth',holes=[],albedoA=rgb565(shape['a']),albedoB=rgb565(shape['b']),thickness=175)))
+    indices=[v for t in tris for v in t],order='centroid-depth',holes=[],albedoA=rgb565(CREAM if mode=='clay' else shape['a']),albedoB=rgb565(CREAM if mode=='clay' else shape['b']),thickness=175)))
  return dict(schema='ayatsuri-native-model-design-v1',nodes=nodes)
 
 def raster(shapes,yaw,silhouette=False):
@@ -175,6 +190,16 @@ def main():
  (out/'authoring.json').write_text(json.dumps(dict(rows=ROWS,boundary=BOUNDARY,shapes=shapes),indent=2)+'\n')
  # Preserve the static native boundary before any mutable-pose integration.
  subprocess.run(['node','-e',"const fs=require('fs'),{compile}=require('./tools/ayatsuri/model/pack_model.cjs');fs.writeFileSync(process.argv[2],compile(JSON.parse(fs.readFileSync(process.argv[1],'utf8'))));",str(out/'model.json'),str(out/'model.aynm')],cwd=ROOT,check=True)
+ for mode in ('lit','clay'):
+  folder=out/mode;folder.mkdir(exist_ok=True);derived=native_model(shapes,mode)
+  (folder/'model.json').write_text(json.dumps(derived,indent=2)+'\n')
+  subprocess.run(['node','-e',"const fs=require('fs'),{compile}=require('./tools/ayatsuri/model/pack_model.cjs');fs.writeFileSync(process.argv[2],compile(JSON.parse(fs.readFileSync(process.argv[1],'utf8'))));",str(folder/'model.json'),str(folder/'model.aynm')],cwd=ROOT,check=True)
+  data=(folder/'model.aynm').read_bytes()
+  for stem in ('fox-patch-compiled','fox-patch-eye','fox-patch-mask','fox-patch-shape','fox-patch-combined'):
+   (folder/(stem+'.aynm')).write_bytes(data)
+  counts=dict(asset='fox-patch-combined',vertices=sum(len(n['mesh']['vertices'])//3 for n in derived['nodes'][1:]),
+              triangles=sum(len(n['mesh']['indices'])//3 for n in derived['nodes'][1:]),meshes=len(derived['nodes'])-1)
+  (folder/'fox-patch-combined_data.js').write_text('globalThis.__foxCompiledData='+json.dumps(counts)+';\n')
  w,h=1440,600;pixels=bytearray(bytes((24,28,32))*(w*h))
  def text(x,y,value):
   for char in value:

@@ -91,13 +91,21 @@ int main(void){
     ok=ok&&eval(prelude,strlen(prelude),"fox-patch-prelude.js");
     const char *variant=getenv("FOX_PATCH_VARIANT");
     if(variant){JSValue g=JS_GetGlobalObject(ctx);JS_SetPropertyStr(ctx,g,"__foxPatchVariant",JS_NewString(ctx,variant));JS_FreeValue(ctx,g);}
+#ifndef FOX_PATCH_REDESIGN
     const bool retopology=variant&&(!strcmp(variant,"retopology")||!strcmp(variant,"retopology-clay"));
+#endif
     const bool compiled=variant&&!strncmp(variant,"compiled",8);patch_compiled=compiled;
-    ok=ok&&patch_load("apps/lib/ayatsuri_model.js")&&patch_load("apps/lib/ayatsuri_clip.js");
+    ok=ok&&patch_load("apps/lib/ayatsuri_model.js");
+#ifdef FOX_PATCH_REDESIGN
+    const char *metadata=getenv("FOX_PATCH_COMPILED_META");
+    ok=ok&&compiled&&metadata&&patch_load(metadata)&&patch_load("tools/character/fox_redesign_fixture.js");
+#else
+    ok=ok&&patch_load("apps/lib/ayatsuri_clip.js");
     if(retopology)ok=ok&&patch_load("apps/lib/ayatsuri_visibility.js");
     if(compiled){const char *metadata=getenv("FOX_PATCH_COMPILED_META");ok=ok&&metadata&&patch_load(metadata)&&patch_load("apps/fox3d/fox_sheet_scene.js");}
     ok=ok&&patch_load(compiled?"tools/character/fox_compiled_patch_fixture.js":
         retopology?"tools/character/fox_retopology_fixture.js":"tools/character/fox_patch_fixture.js");
+#endif
     JSValue global=JS_GetGlobalObject(ctx);study=JS_GetPropertyStr(ctx,global,"FoxPatchStudy");JS_FreeValue(ctx,global);
     draw_fn=JS_GetPropertyStr(ctx,study,"draw");stats_fn=JS_GetPropertyStr(ctx,study,"stats");release_fn=JS_GetPropertyStr(ctx,study,"release");stats_out=JS_NewObject(ctx);
     ok=ok&&JS_IsFunction(ctx,draw_fn)&&JS_IsFunction(ctx,stats_fn)&&JS_IsFunction(ctx,release_fn)&&patch_phase("fixture",false);
