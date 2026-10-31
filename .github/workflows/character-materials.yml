@@ -42,6 +42,9 @@ on:
       - 'tools/kasane_contract/run_pocket_proc_qjs.py'
       - 'tools/kasane_contract/proc_native_weak.c'
       - 'tools/kasane_contract/shape_contract.js'
+      - 'tools/kasane_contract/test_pocket_shape.c'
+      - 'tools/kasane_contract/shape_draw_shim.*'
+      - 'tools/kasane_contract/run_pocket_shape.py'
       - '.github/workflows/character-materials.yml'
   workflow_dispatch:
 permissions:
