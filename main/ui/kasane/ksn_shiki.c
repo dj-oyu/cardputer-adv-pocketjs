@@ -256,9 +256,16 @@ static int32_t mul16(int32_t a,int32_t b){
     return sat32(floor_shift((int64_t)a*b,16));
 }
 
+/* CUBIC and LINE_PATTERN below are noinline on purpose. Inlined into
+ * ksn_shiki_draw they made it 8.1 KB and pushed the dispatch loop's step
+ * counter, plan and register-file pointers onto the stack (stack loads in the
+ * function 12 -> 250, objdump); every Shiki instruction then paid for it
+ * (docs/perf/int-latency.md). One call per CUBIC / LINE_PATTERN is cheap next
+ * to that. */
+
 /* CUBIC: n segments through B(1..n) from P0 = r[dst], r[dst+1]. The status
  * to stop with, or RUNNING; the pen moves only on RUNNING. */
-static ksn_shiki_status cubic(ksn_shiki_vm *vm,ksn_proc_segment *out,const ksn_shiki_inst *i){
+static __attribute__((noinline)) ksn_shiki_status cubic(ksn_shiki_vm *vm,ksn_proc_segment *out,const ksn_shiki_inst *i){
     const int32_t *p=&vm->reg[i->dst];
     int16_t px[8];
     for(unsigned k=0;k<8;k++)if(!coord(p[k],&px[k]))return KSN_SHIKI_INVALID;
@@ -291,7 +298,7 @@ static ksn_shiki_status cubic(ksn_shiki_vm *vm,ksn_proc_segment *out,const ksn_s
  * KSN_PROC_EXT_PATTERN, then the parameters). The status to stop with, or
  * RUNNING; the caller moves the pen only on RUNNING, and chords already
  * added stay (sec.4.7.7). */
-static ksn_shiki_status pattern_line(ksn_shiki_vm *vm,ksn_proc_segment *out,
+static __attribute__((noinline)) ksn_shiki_status pattern_line(ksn_shiki_vm *vm,ksn_proc_segment *out,
                                      const ksn_shiki_inst *i,int16_t x,int16_t y){
     const int32_t *r=&vm->reg[i->dst];
     const int32_t bits=r[0],other=r[1],u0=r[2],u1=r[3],w0=r[4],w1=r[5];
