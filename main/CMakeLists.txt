@@ -42,7 +42,8 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
-    "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
+    "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c"
+    "ui/kasane/ksn_shiki.c")
 # Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
 # turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
 option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
@@ -582,6 +583,10 @@ set_source_files_properties(ui/kasane/ksn_procedural.c
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # pocket.shapes: the same scan conversion on host and device (no fused madd.s).
 set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# Shiki (docs/kasane/shiki-spec.md): integer engine; the only floating point is
+# the sec.2.4 conversion of inputs, which must match the host reference bit
+# for bit, so no contraction there either.
+set_source_files_properties(ui/kasane/ksn_shiki.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
     set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
