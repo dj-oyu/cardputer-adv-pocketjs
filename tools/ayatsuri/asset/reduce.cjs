@@ -80,6 +80,7 @@ function partition(surface,{maxVertices=32,maxTriangles=64}={}){
   validate(surface);if(!Number.isInteger(maxVertices)||maxVertices<3||maxVertices>32||!Number.isInteger(maxTriangles)||maxTriangles<1||maxTriangles>64)fail('INVALID_PARTITION_PROFILE');
   const parts=[];let tris=[],ids=new Set();
   const flush=()=>{if(!tris.length)return;const p=compact(surface,tris,surface.sourceVertexIds||surface.positions.map((_,i)=>i));
+    p.sourceSurfaceId=surface.stableId;p.semanticId=surface.semanticId||surface.extras?.semanticId||surface.stableId;
     p.stableId=surface.stableId+'/part/'+parts.length;p.sourceTriangleIds=tris.map(t=>{const i=surface.triangles.indexOf(t);return surface.sourceTriangleIds?.[i]??i;});parts.push(p);tris=[];ids=new Set();};
   for(const t of surface.triangles){if(tris.length===maxTriangles||new Set([...ids,...t]).size>maxVertices)flush();tris.push(t);for(const i of t)ids.add(i);}
   flush();return parts;

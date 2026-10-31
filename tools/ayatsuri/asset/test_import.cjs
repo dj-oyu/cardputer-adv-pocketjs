@@ -49,13 +49,35 @@ function runTests(){let tests=0;const test=(name,fn)=>{try{fn();tests++;}catch(e
     assert.equal(ir.nodes[0].extras.nested[0].signed,0);assert.ok(b.equals(before));
     assert.equal(ir.source.sha256,require('node:crypto').createHash('sha256').update(before).digest('hex'));
   });
+  for(const [label,locate,expectedPath] of [
+    ['node extras',g=>g.nodes[0],'nodes/0/extras/nested/0/value'],
+    ['material extras',g=>g.materials[0],'materials/0/extras/nested/0/value'],
+    ['mesh extras',g=>g.meshes[0],'meshes/0/extras/nested/0/value'],
+    ['primitive extras',g=>g.meshes[0].primitives[0],'meshes/0/primitives/0/extras/nested/0/value'],
+    ['scene extras',g=>g.scenes[0],'scenes/0/extras/nested/0/value']])test('reject nonfinite '+label,()=>{
+      const f=triangleFixture();locate(f.json).extras={nested:[{value:12345}]};
+      const b=makeGlb(f.json,f.bin),length=b.readUInt32LE(12);
+      b.write(b.toString('utf8',20,20+length).replace('12345','1e999'),20,'utf8');
+      assert.throws(()=>importGlb(b),e=>e instanceof ImportError&&e.code==='INVALID_GLB'&&e.path===expectedPath);
+    });
   for(const type of [5121,5123,5125])test(`index type ${type}`,()=>assert.deepEqual(importGlb(triangleFixture({indexType:type}).glb).surfaces[0].triangles,[[0,2,1]]));
   test('interleaved attributes',()=>assert.deepEqual(importGlb(triangleFixture({interleaved:true}).glb).surfaces[0].positions,[[0,0,0],[1,0,0],[0,-1,0]]));
   test('nonindexed triangles',()=>{const f=triangleFixture();delete f.json.meshes[0].primitives[0].indices;assert.deepEqual(importGlb(makeGlb(f.json,f.bin)).surfaces[0].triangles,[[0,2,1]]);});
   test('negative scale cancels basis reflection once',()=>{const f=triangleFixture();f.json.nodes[0].scale=[-1,1,1];const s=importGlb(makeGlb(f.json,f.bin)).surfaces[0];assert.deepEqual(s.triangles,[[0,1,2]]);approx(s.normals[0],[0,0,1]);});
   test('parent hierarchy and quaternion',()=>{const f=triangleFixture();f.json.nodes=[{translation:[1,2,3],children:[1]},{mesh:0,rotation:[0,0,Math.SQRT1_2,Math.SQRT1_2]}];const ir=importGlb(makeGlb(f.json,f.bin));assert.equal(ir.nodes[1].parentId,'node/0');approx(ir.surfaces[0].positions[1],[1,-3,3]);});
   test('inverse transpose under nonuniform scale',()=>{const f=triangleFixture({normals:Array(3).fill([1/Math.sqrt(3),1/Math.sqrt(3),1/Math.sqrt(3)])});f.json.nodes[0].scale=[2,3,4];const n=[.5,-1/3,.25],len=Math.hypot(...n);approx(importGlb(makeGlb(f.json,f.bin)).surfaces[0].normals[0],n.map(v=>v/len));});
-  test('static matrix/shear',()=>{const f=triangleFixture({normals:Array(3).fill([1,0,0])});f.json.nodes[0].matrix=[1,0,0,0,1,1,0,0,0,0,1,0,4,5,6,1];const s=importGlb(makeGlb(f.json,f.bin)).surfaces[0];approx(s.positions[2],[5,-6,6]);approx(s.normals[0],[Math.SQRT1_2,Math.SQRT1_2,0]);});
+  test('static TRS matrix with reflection and nonuniform scale',()=>{const f=triangleFixture({normals:Array(3).fill([1,0,0])});f.json.nodes[0].matrix=[0,-2,0,0,-3,0,0,0,0,0,4,0,4,5,6,1];const s=importGlb(makeGlb(f.json,f.bin)).surfaces[0];approx(s.positions[2],[1,-5,6]);approx(s.normals[0],[0,1,0]);assert.deepEqual(s.triangles,[[0,1,2]]);});
+  test('valid TRS hierarchy may produce global shear',()=>{const f=triangleFixture({normals:Array(3).fill([1,0,0])});
+    f.json.nodes=[{scale:[2,1,1],children:[1]},{mesh:0,rotation:[0,0,Math.sin(Math.PI/8),Math.cos(Math.PI/8)]}];
+    const ir=importGlb(makeGlb(f.json,f.bin)),s=ir.surfaces[0],m=ir.nodes[1].worldMatrix;
+    assert(Math.abs(m[0]*m[4]+m[1]*m[5]+m[2]*m[6])>1);
+    approx(s.positions[1],[Math.SQRT2,-Math.SQRT1_2,0]);approx(s.normals[0],[1/Math.sqrt(5),-2/Math.sqrt(5),0]);});
+  test('local matrix orthogonality tolerates authored rounding',()=>{const f=triangleFixture();f.json.nodes[0].matrix=[1,0,0,0,5e-6,1,0,0,0,0,1,0,0,0,0,1];assert.equal(importGlb(makeGlb(f.json,f.bin)).surfaces.length,1);});
+  test('POSITION extrema use declared F32 interpretation',()=>{const f=triangleFixture({positions:[[.1,.2,0],[.9,.2,0],[.1,.8,0]]});
+    const ir=importGlb(f.glb);assert.equal(ir.surfaces[0].positions[0][0],Math.fround(.1));assert.notEqual(Math.fround(.1),.1);});
+  test('POSITION bound ordering uses F32 interpretation',()=>{const f=triangleFixture({positions:[[.1,0,0],[.1,1,0],[.1,0,1]]});
+    f.json.accessors[0].min[0]=.1+1e-10;assert.equal(Math.fround(f.json.accessors[0].min[0]),Math.fround(f.json.accessors[0].max[0]));
+    assert.equal(importGlb(makeGlb(f.json,f.bin)).surfaces[0].positions[0][0],Math.fround(.1));});
   test('mesh instancing preserves source IDs',()=>{const f=triangleFixture();f.json.nodes.push({mesh:0,translation:[10,0,0]});f.json.scenes[0].nodes.push(1);const ir=importGlb(makeGlb(f.json,f.bin));assert.equal(ir.surfaces.length,2);assert.equal(ir.counts.vertices,6);assert.equal(ir.surfaces[1].sourceMesh,0);assert.equal(ir.surfaces[1].positions[0][0],10);});
   test('deterministic and default material retained',()=>{const f=triangleFixture();delete f.json.meshes[0].primitives[0].material;const b=makeGlb(f.json,f.bin);assert.deepEqual(importGlb(b),importGlb(b));assert.equal(importGlb(b).surfaces[0].materialId,null);assert.equal(importGlb(b).defaultMaterial.baseColor[3],1);});
   reject('out of bounds view',g=>g.bufferViews[0].byteLength=g.buffers[0].byteLength+1);
@@ -74,6 +96,11 @@ function runTests(){let tests=0;const test=(name,fn)=>{try{fn();tests++;}catch(e
   reject('infinite normal',(_g,b)=>b.writeFloatLE(Infinity,36));
   reject('zero normal',(_g,b)=>b.writeFloatLE(0,44));
   reject('min bounds violated',g=>g.accessors[0].min=[.5,0,0]);
+  reject('missing POSITION min',g=>delete g.accessors[0].min);
+  reject('missing POSITION max',g=>delete g.accessors[0].max);
+  reject('missing both POSITION bounds',g=>{delete g.accessors[0].min;delete g.accessors[0].max;});
+  reject('enclosing but inexact POSITION min',g=>g.accessors[0].min=[-1,0,0]);
+  reject('enclosing but inexact POSITION max',g=>g.accessors[0].max=[2,1,0]);
   reject('normal count mismatch',g=>g.accessors[1].count=2);
   reject('missing normals',g=>delete g.meshes[0].primitives[0].attributes.NORMAL);
   reject('mode',g=>g.meshes[0].primitives[0].mode=5,'UNSUPPORTED');
@@ -98,6 +125,11 @@ function runTests(){let tests=0;const test=(name,fn)=>{try{fn();tests++;}catch(e
   reject('unpaired surrogate name',g=>g.nodes[0].name='\ud800');
   reject('matrix plus TRS',g=>{g.nodes[0].matrix=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];g.nodes[0].scale=[1,1,1];});
   reject('non affine',g=>g.nodes[0].matrix=[1,0,0,1,0,1,0,0,0,0,1,0,0,0,0,1]);
+  reject('local shear matrix',g=>g.nodes[0].matrix=[1,0,0,0,1,1,0,0,0,0,1,0,4,5,6,1]);
+  reject('local matrix exceeds orthogonality tolerance',g=>g.nodes[0].matrix=[1,0,0,0,2e-5,1,0,0,0,0,1,0,0,0,0,1]);
+  reject('zero local matrix column',g=>g.nodes[0].matrix=[0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
+  reject('overflowing local column length',g=>g.nodes[0].matrix=[1.7e308,1.7e308,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
+  reject('underflowing matrix determinant',g=>g.nodes[0].matrix=[1e-200,0,0,0,0,1e-200,0,0,0,0,1e-200,0,0,0,0,1]);
   reject('singular scale',g=>g.nodes[0].scale=[0,1,1]);
   reject('nonunit quaternion',g=>g.nodes[0].rotation=[0,0,0,2]);
   reject('duplicate root',g=>g.scenes[0].nodes=[0,0]);

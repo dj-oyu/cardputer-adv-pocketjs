@@ -73,6 +73,15 @@ jobs:
           node tools/ayatsuri/asset/test_pipeline.cjs .cache/asset-pipeline/synthetic-v1
           python3 tools/ayatsuri/asset/verify_native.py .cache/asset-pipeline/synthetic-v1/candidate.aynm --asan --output .cache/asset-pipeline/synthetic-v1/native-64.json
           python3 tools/ayatsuri/asset/verify_native.py .cache/asset-pipeline/synthetic-v1/curved-candidate.aynm --asan --output .cache/asset-pipeline/synthetic-v1/curved-native-64.json
+          python3 tools/ayatsuri/asset/verify_pixels.py --output-dir .cache/asset-pipeline/native-image-study --asan
+          python3 tools/ayatsuri/asset/contact.py .cache/asset-pipeline/native-image-study .cache/asset-pipeline/native-image-study/contact.png
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: source-asset-study-${{ env.SOURCE_HEAD }}
+          path: |
+            .cache/asset-pipeline/synthetic-v1/
+            .cache/asset-pipeline/native-image-study/
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

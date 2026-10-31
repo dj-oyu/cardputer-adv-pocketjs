@@ -73,12 +73,37 @@ probeは本物のC reader/arena estimator/init/disposeを使用し、全truncate
 `report.json` のstatusは常に `generated-experimental-not-accepted`。
 Blender export損失、native最終RGB565/Gouraud色差、同semantic内のdepth/原本surface対応を含む遮蔽、
 source自体の狐造形、guest peak、実機は未受入項目として明示される。
+別工程の `verify_pixels.py` は下記の人工source native画像検証を追加したが、
+この単独compiler reportを自動的に製品受入へ変更しない。
 表情morph/skin/UVtexture/一般材質graph/両面指定など未対応を黙って除去せず拒否する。
 実Blender原本によるexport/roundtrip受入を人工GLBの合格で代用しない。
 
 ## 次の最小工程
 
 まず実Blender exportと編集可能な狐sourceの眼窩→頬→口吻を整える。
-source自体の造形レビュー後、同じreduction profileでnative画像の色/depth/対応ゲートを追加する。
+人工sourceで成立した下記native画像gateを実sourceへ適用する。
 sourceを固定した比較で、原本・縮小・量子化・native描画の誤差を分離する。
 形状が美術的に不合格なら、縮小誤差PASSでも製品候補へ採用しない。
+
+## 実native画像のsource参照検証
+
+```sh
+python3 tools/ayatsuri/asset/verify_pixels.py --output-dir .cache/asset-pipeline/native-study --asan
+python3 tools/ayatsuri/asset/contact.py .cache/asset-pipeline/native-study .cache/asset-pipeline/native-study/contact.png
+```
+
+[計測条件と結果](../../../docs/perf/asset-native-image-study.md)。
+既存Linux/WSLのgcc/Nodeを使用し、新installは行わない。実Model評価と実band rendererで
+RGB565・white coverage・診断用triangle tag画像を出し、F64 source ray/Gouraud参照と比較する。
+colourは各R5/G6/B5成分別、depthはsource単位、元surface/component/vertex anchor/cold face lineageを記録。
+全native被覆pixelのtag存在・triangle内判定と、native/bin/source/出力hashを検証する。
+未知tagやtriangle外へのbarycentric外挿でsource対応を偽装しない。
+
+source全ray hitの同depth曖昧性は拒否する。同source共有vertex/edge上の同一物理点だけは同値とし、
+epsilon内かを3D距離で確認する。seamでindexが分かれたedge等は未対応として保守的に拒否する。
+source bbox訪問上限100万を超えればFAIL。一般Z-bufferを製品へ追加したという意味ではない。
+
+人工曲面の49頂点版は斜めviewのdepth gateでFAILし、同じ閾値で65頂点版を選ぶ。
+前後二面の逆順（同semantic/同sourceSurface）、tag潰し、source外未知tag、各G+1/+4の色負例を検査。
+13正常caseのうち49頂点のFAILも保持して候補を比較する。正常という語は入力が妥当な比較条件を指し、
+49頂点候補が全条件で合格という意味ではない。Blender/狐造形/実機の受入は別に残る。

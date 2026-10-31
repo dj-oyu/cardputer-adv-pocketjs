@@ -31,7 +31,8 @@ function run(ir,profile){
   number(quality.maxSampleDistance,0,1e6);number(quality.maxNormalDegrees,0,180);number(quality.minSilhouetteIoU,0,1);
   for(const view of profile.views){number(view.yaw,-180,180);number(view.pitch,-90,90);number(view.scale,1e-6,4096);}
   const reduced=[],parts=[],surfaceReports=[];
-  for(const s of ir.surfaces){
+  for(const original of ir.surfaces){
+    const s={...original,semanticId:original.semanticId||original.extras?.semanticId||ir.nodes?.find(n=>n.stableId===original.nodeId)?.extras?.semanticId||original.stableId};
     const r=reduceSurface(s,{targetVertices:profile.targetVertices,maxCollapses:profile.maxCollapses??10000,maxTriangleTests:profile.maxTriangleTests??2000000,protectedVertices:profile.protectedVertices?.[s.stableId]||[]}),errors=sampleErrors(s,r.surface);
     if(errors.distance.max>quality.maxSampleDistance||errors.normalDegrees.max>quality.maxNormalDegrees)fail('QUALITY_SURFACE');
     reduced.push(r.surface);const partitioned=partition(r.surface);if(parts.length+partitioned.length+1>budget.maxNodes)fail('BUDGET_NODES');parts.push(...partitioned);surfaceReports.push({id:s.stableId,...r.stats,parts:partitioned.length,errors});
@@ -62,7 +63,7 @@ function run(ir,profile){
   if(hash(JSON.stringify(ir))!==inputHash)fail('INPUT_MUTATED');
   return {bytes,manifest,decoded,report:{schema:'hone-asset-report-v1',status:'generated-experimental-not-accepted',source:structuredClone(ir.source),irHash:inputHash,profileHash:hash(JSON.stringify(profile)),binSha256:hash(bytes),profile:structuredClone(profile),toolchain:toolchain(),surfaceReports,quantization,finalErrors,views,
     coldBytes:bytes.length,nodes:nodes.length,parts:parts.length,segmentsUpperBound:segments,arenaConservativeEstimate:arenaEstimate,maxBboxPixelVisitsObserved:Math.max(...views.map(v=>v.bboxPixelVisits)),
-    correspondence:parts.map(s=>({partId:s.stableId,sourceVertices:s.sourceVertexIds,sourceTriangles:s.sourceTriangleIds})),
+    correspondence:parts.map((s,i)=>({nodeId:i+1,partId:s.stableId,sourceSurfaceId:s.sourceSurfaceId,semanticId:s.semanticId,sourceVertices:s.sourceVertexIds,sourceTriangles:s.sourceTriangleIds,outputTriangles:s.triangles})),
     gates:{sampledGeometry:true,sampledNormal:true,sampledSilhouette:true,coldAndEstimatedBudgets:true,blenderExportLoss:'NOT_TESTED',nativeReader:'NOT_TESTED',nativeFinalColour:'NOT_TESTED',occlusionDepthAndCorrespondence:'NOT_TESTED',sourceArt:'NOT_ACCEPTED',guestPeak:'NOT_MEASURED',device:'NOT_TESTED'}}};
 }
 function readBounded(file,limit){
@@ -85,7 +86,7 @@ function readCandidate(directory){
   if(marker.schema!=='hone-experimental-candidate-v1'||marker.accepted!==false||marker.files?.length!==4)fail('INCOMPLETE_CANDIDATE');
   const files={},names=new Set();for(const entry of marker.files){if(!Object.hasOwn(FILE_LIMITS,entry.name)||names.has(entry.name))fail('INCOMPLETE_CANDIDATE');names.add(entry.name);const data=readBounded(path.join(directory,entry.name),FILE_LIMITS[entry.name]);if(data.length!==entry.bytes||hash(data)!==entry.sha256)fail('CANDIDATE_INTEGRITY');files[entry.name]=data;}return files;
 }
-module.exports={run,coverage,publish,readCandidate};
+module.exports={run,coverage,publish,readCandidate,readBounded};
 if(require.main===module){
   try{const {importGlb,DEFAULT_LIMITS}=require('./import_glb.cjs'),[input,profileFile,output]=process.argv.slice(2);if(!input||!profileFile||!output)fail('USAGE_INPUT_PROFILE_NEW_OUTPUT_DIRECTORY');
     // Refuse replacement of an existing candidate or accepted artifact directory.

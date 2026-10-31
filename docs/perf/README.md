@@ -10,6 +10,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [asset-native-image-study.md](asset-native-image-study.md) | source縮小・native画像 | 固定光/colour/depth/原本対応、49頂点FAILと65頂点選択、同semantic負例とsynthetic/Blenderの区別 |
 | [cloud-native-model-study.md](cloud-native-model-study.md) | host比較C | readonly Model/個体Instanceの共有、160KiBのA/C容量と301frame画像ハッシュ一致、未実機の境界 |
 | [fox-native-face-study.md](fox-native-face-study.md) | host比較・顔の最小実証 | 狐のnative25node/凸clip、160KiB起動比較、表情・角度・画像回帰と未達品質 |
 | [fox-face-v2.md](fox-face-v2.md) | 顔の造形反復 | 眼窩と方向補正、細い口吻、内耳・耳毛、同条件とpitch/背面光の比較 |

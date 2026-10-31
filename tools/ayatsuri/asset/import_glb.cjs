@@ -24,7 +24,17 @@ function multiply(a,b,p){const out=Array(16).fill(0);for(let c=0;c<4;c++)for(let
   for(let k=0;k<4;k++)out[c*4+r]+=a[k*4+r]*b[c*4+k];finite(out[c*4+r],p);}return out;}
 function matrix(n,p){
   if(own(n,'matrix')){check(!['translation','rotation','scale'].some(k=>own(n,k)),p,'matrix and TRS are exclusive');const m=vector(n.matrix,16,p+'/matrix').slice();
-    check(m[3]===0&&m[7]===0&&m[11]===0&&m[15]===1,p+'/matrix','affine matrix required');return m;}
+    check(m[3]===0&&m[7]===0&&m[11]===0&&m[15]===1,p+'/matrix','affine matrix required');
+    // glTF local matrices must decompose to TRS. Normalized column dots use
+    // absolute tolerance 1e-5 for authored rounding, independent of axis scale.
+    // Reflections are valid; composed world matrices may shear and are not tested.
+    const columns=[0,4,8].map(at=>{const c=m.slice(at,at+3),length=Math.hypot(...c);
+      check(Number.isFinite(length)&&length>0,p+'/matrix','finite nonzero column length required');
+      return c.map(v=>finite(v/length,p+'/matrix'));});
+    for(let a=0;a<3;a++)for(let b=a+1;b<3;b++){
+      const dot=columns[a].reduce((sum,v,i)=>sum+v*columns[b][i],0);
+      check(Number.isFinite(dot)&&Math.abs(dot)<=1e-5,p+'/matrix','local matrix must be TRS-decomposable');}
+    return m;}
   const t=vector(n.translation===undefined?[0,0,0]:n.translation,3,p+'/translation'),s=vector(n.scale===undefined?[1,1,1]:n.scale,3,p+'/scale');
   check(s.every(x=>x!==0),p+'/scale','singular scale');const q=vector(n.rotation===undefined?[0,0,0,1]:n.rotation,4,p+'/rotation');
   const len=Math.hypot(...q);check(Math.abs(len-1)<=1e-5,p+'/rotation','unit quaternion required');
@@ -39,15 +49,15 @@ function inverseTranspose(m,p){
   const det=a*co[0]+b*co[1]+c*co[2];check(Number.isFinite(det)&&det!==0,p,'singular or nonfinite transform');
   const out=co.map(v=>v/det);out.forEach(v=>finite(v,p));return {normal:out,det};
 }
-function canonicalZeros(ir){
+function canonicalZeros(ir,normalize=true){
   // JSON preserves every finite number except signed zero. Normalize the owned
   // output tree, including retained metadata, without serializing or recursing.
-  const stack=[{value:ir,keys:Object.keys(ir),at:0}];
+  const stack=[{value:ir,keys:Object.keys(ir),at:0,path:''}];
   while(stack.length){const frame=stack[stack.length-1];
     if(frame.at===frame.keys.length){stack.pop();continue;}
-    const key=frame.keys[frame.at++],value=frame.value[key];
-    if(Object.is(value,-0))frame.value[key]=0;
-    else if(value!==null&&typeof value==='object')stack.push({value,keys:Object.keys(value),at:0});
+    const key=frame.keys[frame.at++],value=frame.value[key],p=frame.path?frame.path+'/'+key:key;
+    if(typeof value==='number'){finite(value,p);if(normalize&&Object.is(value,-0))frame.value[key]=0;}
+    else if(value!==null&&typeof value==='object')stack.push({value,keys:Object.keys(value),at:0,path:p});
   }
   return ir;
 }
@@ -66,6 +76,9 @@ function importGlb(input,options={}){
     if(jsonBytes===null){check(type===0x4e4f534a,'chunk','JSON must be first');check(size<=limits.maxJsonBytes,'chunk/JSON','JSON byte limit','LIMIT');jsonBytes=bytes.subarray(at,at+size);}
     else{check(type===0x004e4942&&bin===null,'chunk','only one BIN chunk is supported','UNSUPPORTED');bin=bytes.subarray(at,at+size);}at+=size;}
   let g;try{g=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(jsonBytes));}catch{fail('INVALID_GLB','JSON','invalid UTF-8 or JSON');}
+  // JSON permits exponent overflow. Reject it even in currently unretained
+  // extras, before an IR roundtrip could silently replace Infinity with null.
+  if(g!==null&&typeof g==='object')canonicalZeros(g,false);
   keys(g,['asset','scene','scenes','nodes','meshes','buffers','bufferViews','accessors','materials','skins','animations','cameras','images','textures','samplers','extensionsUsed','extensionsRequired','extensions','extras'],'root');extensions(g,'root');
   for(const k of ['extensionsUsed','extensionsRequired','skins','animations','cameras','images','textures','samplers'])if(own(g,k))check(Array.isArray(g[k])&&g[k].length===0,k,'unsupported content','UNSUPPORTED');
   keys(g.asset,['version','minVersion','generator','copyright','extensions','extras'],'asset');extensions(g.asset,'asset');
@@ -91,18 +104,23 @@ function importGlb(input,options={}){
     for(const k of ['min','max'])if(a[k]!==undefined){vector(a[k],components,p+'/'+k);for(const v of a[k]){
       if(a.componentType===5126)check(Number.isFinite(Math.fround(v)),p+'/'+k,'finite F32 bound');
       else integer(v,0,2**(8*size)-1,p+'/'+k);}}
-    if(a.min&&a.max)for(let j=0;j<components;j++)check(a.min[j]<=a.max[j],p,'invalid min/max');
+    if(a.min&&a.max)for(let j=0;j<components;j++)check((a.componentType===5126?Math.fround(a.min[j]):a.min[j])<=(a.componentType===5126?Math.fround(a.max[j]):a.max[j]),p,'invalid min/max');
     return {a,view,count,offset:view.offset+offset,stride,size,components,path:p};});
   let decoded=0,totalV=0,totalT=0,surfaceCount=0;
   function charge(n,p){check(Number.isSafeInteger(n)&&n>=0&&n<=limits.maxDecodedBytes-decoded,p,'decoded numeric payload budget','LIMIT');decoded+=n;}
   function decode(index,role){const p=`accessors/${index}`,d=accessors[integer(index,0,accessors.length-1,p)],{a,view,count,stride}=d;
     if(role==='indices')check(a.type==='SCALAR'&&[5121,5123,5125].includes(a.componentType)&&view.byteStride===undefined&&(view.target===undefined||view.target===34963),p,'unsigned scalar index required');
     else check(a.type==='VEC3'&&a.componentType===5126&&(view.target===undefined||view.target===34962),p,'FLOAT VEC3 vertex attribute required');
-    charge(count*d.components*8,p);const result=Array(count);
+    if(role==='POSITION'){check(own(a,'min'),p+'/min','POSITION min required');check(own(a,'max'),p+'/max','POSITION max required');}
+    charge(count*d.components*8,p);const result=Array(count),minimum=Array(d.components).fill(Infinity),maximum=Array(d.components).fill(-Infinity);
     for(let i=0;i<count;i++){const row=[];for(let j=0;j<d.components;j++){const off=d.offset+i*stride+j*d.size;let value;
       if(a.componentType===5126)value=bin.readFloatLE(off);else if(d.size===1)value=bin[off];else if(d.size===2)value=bin.readUInt16LE(off);else value=bin.readUInt32LE(off);
       finite(value,p);if(a.min)check(value>=(a.componentType===5126?Math.fround(a.min[j]):a.min[j]),p,'data below min');
-      if(a.max)check(value<=(a.componentType===5126?Math.fround(a.max[j]):a.max[j]),p,'data above max');row.push(value);}result[i]=d.components===1?row[0]:row;}
+      if(a.max)check(value<=(a.componentType===5126?Math.fround(a.max[j]):a.max[j]),p,'data above max');
+      minimum[j]=Math.min(minimum[j],value);maximum[j]=Math.max(maximum[j],value);row.push(value);}result[i]=d.components===1?row[0]:row;}
+    // Declared extrema describe actual binary values, not merely enclosing bounds.
+    for(const [key,actual] of [['min',minimum],['max',maximum]])if(a[key])for(let j=0;j<d.components;j++)
+      check(actual[j]===(a.componentType===5126?Math.fround(a[key][j]):a[key][j]),p+'/'+key,'bound must equal actual accessor extremum');
     return result;}
   const materials=mats.map((m,i)=>{const p=`materials/${i}`;keys(m,['name','pbrMetallicRoughness','normalTexture','occlusionTexture','emissiveTexture','emissiveFactor','alphaMode','alphaCutoff','doubleSided','extensions','extras'],p);extensions(m,p);
     for(const k of ['normalTexture','occlusionTexture','emissiveTexture','alphaCutoff'])check(!own(m,k),p+'/'+k,'unsupported material feature','UNSUPPORTED');

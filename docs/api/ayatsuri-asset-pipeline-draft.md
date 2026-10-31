@@ -4,8 +4,8 @@
 実装基準は `03f24827ae02421fc3d4bdd897425e5e9a19a43b`。
 この文書の初版追加時点で、新importer・自動縮小器・Blender実行経路は未実装。
 現在の最小実装範囲は、synthetic GLB→IR→endpoint QEM縮小→32/64 partition→既存AYNMと、
-native reader/arena検証である。着手範囲と完了実績を区別し、実Blender取り込みと
-native画像の品質ゲートを、この範囲への着手だけで達成済みとはしない。
+native reader/arena検証（§10）、人工sourceの実native画像検証（§12）である。
+実Blender取り込みや狐造形の受入を、synthetic試験の合格で代用しない。
 既定FOX FACE / FOX SHEET、製品API、実機023559fを変更しない。
 
 ## 1. 制作入力と実行形式を分ける
@@ -69,6 +69,12 @@ sourceの高密度制限はruntimeと独立したoffline safety capとして設�
 | skin、bone animation、shape key/morph | IRと対応情報の設計対象。初版runtime出力は拒否、黙ってrestだけにしない |
 | armature/modifier等の一時刻の静的評価 | ユーザーが選んだstatic-bake profileだけ許可。失う可動性をreport |
 | compression extension、未知required extension、外部network URI | 初版拒否。任意スクリプト・式を実行しない |
+
+glTFのPOSITIONにはmin/maxを必須とし、実componentのF32 extremaと一致させる。
+glTF local matrixはTRS分解可能なものに限定する（正規化した列の直交許容差1e-5）。
+parent非一様scaleとchild回転から生じるglobal shearは有効なので、その合成結果をbakeできる。
+local skewをそのまま標準GLBの正例として扱わず、Blender評価後meshや有効な階層から取り込む。
+出典: [glTF仕様のmesh attribute/transform規定](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html)。
 
 GLB chunk境界、bufferView/accessorのstride・offset・count・型・component・indexを
 overflow-safeに検証する。sparse等は対応実装と試験がない限り拒否する。
@@ -365,3 +371,106 @@ CLIは入力GLB/profileを上限付きで読み、生成先を排他的に確保
 statusは常に `generated-experimental-not-accepted` とし、実Blender export損失、
 native最終色/depth/原本対応、狐造形、guest peak、実機は未検証のまま残す。
 これらが未完であるため、人工fixtureの数値PASSを縮小器一般や狐の品質合格へ拡大しない。
+
+## 11. 編集可能な狐sourceの制作計画（未制作、既存環境で独立して進める工程）
+
+この節は次の制作工程の定義であり、高自由度の狐原本を作成済みとする記録ではない。
+§9の限定探索では利用可能な原本とBlender環境を未発見であり、機械全体での不存在は断定しない。
+新install、Blender起動、実exportは行っていない。Blenderの利用可否に依存しない原本仕様・
+形状レビューを先行できるが、コード生成やsynthetic GLBの成功を実Blender export受入へ置き換えない。
+
+### 11.1 次段階に必要な入力と制作範囲
+
+最初は狐の頭部neutralを対象にする。設定PNGの正面・斜め・側面を参照し、
+原画のhash/版、各crop、手動landmarkの由来と不確かさを原本manifestへ記録する。
+原画は同一cameraによる整合した正投影図ではないため、全図へ厳密一致することを要求しない。
+正面の輪郭・眼位置・鼻位置だけで合格にせず、斜めで眼窩→頬→鼻口吻の量感が成立するかを
+独立にレビューする。参照camera推定は記録し、source/reduced比較用cameraとは区別する。
+
+制作開始時に用意する入力は、(1) 参照画像と頭部crop、(2) 造形の主眼と保護領域、
+(3) sourceの単位・軸・原点・基準pose、(4) 当面のview域、(5) 固有色と材質の対応、
+(6) 原本revisionとstable IDの採番規則である。参照PNGは存在するが、制作済みmesh・
+原本対応・編集履歴はまだない。view域は§5の候補yaw ±35°/pitch ±10°から開始し、
+側面原画は形状解釈に使っても±90°のruntime対応済みとはしない。
+
+### 11.2 最小原本形式と編集可能性
+
+Blender利用前の中間原本も、最終binや係数生成器だけではなく、独立に編集できるmeshとして保持する。
+最小bundle案は `fox-source.mesh.json` とmetadata/参照manifestである。これは制作形式案であり、
+このファイルが存在する、または現importerがそのまま読めるという意味ではない。
+`.blend`が利用可能になった後は編集原本とこの中間表現の往復/対応を検証する。
+
+```text
+EditableSourceMesh {
+  schemaVersion, revision, sourceId, units, basis, referencePose,
+  vertices: {stableId, positionXYZ}[],
+  triangles: {stableId, vertexIds[3], cornerNormals[3], materialId, semanticId}[],
+  materials: {stableId, albedoDefinition, authoredProperties, intendedMapping}[],
+  anchors: {stableId, semanticRole, surfaceId, triangleId, barycentric}[],
+  features: {stableId, role, vertexOrEdgeIds, protectionRule}[],
+  sourceCorrespondence, references, diagnostics,
+  futureDeformation?: {loops, regionIds, pivotAnchors, morphTargets}
+}
+```
+
+positions/normals/trianglesとstable IDを最低限持ち、shapeの自由度を手動多項式係数へ戻さない。
+normalはcorner単位で保持でき、geometryから導いたnormalと明示したcrease/編集normalの由来を区別する。
+同positionのnormal/material境界を勝手にweldしない。編集時のquad/ngon等を別に保持する場合も、
+評価用三角形化と元face/vertexへの対応を固定する。IDを配列indexの別名とせず、
+topology編集で廃止・新設したIDと親revisionを記録し、旧anchorが黙って別面を指さないようにする。
+有限値、index、normal、winding、縮退、接続を原本段階でも検査する。
+
+原本には32頂点/64面やAYNMのnode配置を強制しない。十分な曲率・輪郭・featureを表現できる密度で
+制作し、不要に密な点を増やすこと自体も品質とはしない。offline safety capとruntimeの上限を分ける。
+自動縮小器がその原本から候補を作り、品質が予算へ入らなければFAILを返す。
+runtimeへ入れるために原本の眼窩・口吻を先に粗い棚や球へ作り替えない。
+
+### 11.3 造形レビューから縮小へ渡す順序
+
+1. **比率と輪郭**: 頭部を編集可能meshで起こし、正面・±35°の無陰影とsilhouetteを確認する。
+   額・頬端・顎・鼻の比率を先に評価する。手動landmarkとの一致は補助で、形状合格の代用にしない。
+2. **眼窩〜頬〜口吻**: 同じmeshの3D曲率として接続を作り、gray clayと固定世界光で確認する。
+   独立した頬球、白面全幅の棚、箱状口吻を再発させず、中央口吻の前突と頬の量感を分けて読む。
+   sourceの形状をnormalや焼込み陰影で隠して合格にしない。
+3. **耳と毛束**: 耳根・耳の幅と厚み・頭との接続を確認する。必要な毛束は意味付けした部位として
+   原本で保持し、頭蓋の輪郭を尖らせて毛先を代用したり、細い水平線を柔らかい頬毛の完成としない。
+   接続surfaceとanchorを明示し、別部品であることを隠れた重なり順へ依存させない。
+4. **固有色境界と材質**: 形状を固定したalbedo-only、clay、litを並べる。白毛境界の誤りと
+   curvature/normalの誤りを分離し、材質mappingで失う表現を明記する。原画の照明を固有色へ焼き込まない。
+5. **原本を固定して自動縮小**: review済みrevision/hashを固定し、identity対照と複数予算の縮小候補を
+   §7へ通す。原本造形不合格と縮小誤差不合格を別に返し、候補ごとの原本再fitは行わない。
+
+各段階で不合格なら、その原本revisionと画像・理由を残す。係数の微調整反復へ戻らず、
+surface/featureを編集できる原本上で変更理由を追えることを制作条件とする。
+
+### 11.4 原本に残す意味と将来morphへの準備
+
+眼窩、上下瞼loop、目頭目尻、鼻、鼻口吻接合、上唇/下唇、口角、顎pivot、頬毛根、耳根、
+固有色境界、意図したcreaseにstable IDとsemantic roleを付ける。保護は一律collapse禁止ではなく、
+禁止edge・許容誤差weight・接続保持・境界複製等の明示ruleとして縮小器へ渡す。
+将来のblink/gaze/smile/surprise/jawOpenを想定したloopと可動領域を原本に保持し、
+単なるneutral三角形集合へ意味を落とさない。ただし表情targetが未制作なら未制作と記録する。
+この準備だけでmorph出力やnative実行を実装済みとはしない。
+
+最終Blender受入では、実際の編集原本のID/feature/anchor/materialと評価meshがGLB/IRへ対応し、
+export損失と縮小損失を分離できることを確認する。Blender版/exporter設定と実行証跡が揃うまでは、
+synthetic GLBの技術試験と原本制作レビューを独立した進捗として報告する。
+
+## 12. 実native画像の検証器（人工sourceの小実証）
+
+[検証条件・候補比較・負例](../perf/asset-native-image-study.md)を追加した。
+固定camera/世界光/root poseで、実C evaluator/Gouraud rendererのRGB565と、
+source高密度面のF64 ray/Gouraud参照を比較する。
+同semantic内でも、可視depth、元surface/component、vertex anchorとcold triangle lineageを追う。
+nativeの診断tagは全被覆pixelで存在/実triangle内判定を検査し、
+white coverage一致だけで対応が正しいと判定しない。
+
+色はR5/G6/B5各成分の絶対差でgateし、pool平均は参考値に限定する。
+source同depthの異なる面は拒否するが、同じsource共有vertex/edge上の実hitは同一物理点として扱う。
+この判定もepsilonと3D距離を明示し、単なるcomponent一致で曖昧性を隠さない。
+source seam等への一般対応は未検証で、保守的に拒否され得る。
+
+49頂点版の斜めviewでdepth誤差が上限.01を超えたことをFAILとして残し、
+同じsource/閾値/予算で65頂点版を自動比較する。生成式の係数追い込みへ戻らない。
+これは最終Hone材質表現に対する人工sourceの検証であり、Blender export損失、狐原本の造形、
+native morph/skin/UV、実機画質や総guest peakの受入は引き続き別工程である。
