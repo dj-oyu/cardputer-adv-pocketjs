@@ -21,7 +21,7 @@ import {findPlans, planAst} from './plan_js.mjs';
 import {qdecls} from './shiki_q.mjs';
 import {Fail, FIXM, emitFix} from './shiki_fix.mjs';
 import {compileShiki} from './shiki_compile.mjs';
-import {register, draw} from './shiki_ref.mjs';
+import {register, draw, addSeg, cubicOp, patternOp} from './shiki_ref.mjs';
 
 const argv = process.argv.slice(2);
 const altFile = argv[0] === '--alt' ? (argv.shift(), argv.shift()) : null;
@@ -32,25 +32,30 @@ const load = file => {
 };
 const plans = load(plansFile), alt = altFile ? load(altFile) : new Map();
 
-// shiki_fix's evaluation, drawn as the engine draws.
+// shiki_fix's evaluation, drawn as the engine draws. cubic() and
+// linePattern() go through the reference's own procedures (sec.4.6, 4.7) on
+// the raw Q16 values: what is checked there is that the compiler put the
+// right values in the right registers, not the procedures themselves (those
+// are shiki_diff.mjs's).
+const RAW = v => Math.round(v * 65536);
 function expected(fn, input, args) {
-  const seg = [];
-  let pen = null, raster = 0;
+  const ctx = {segs: [], pen: {valid: false, x: 0, y: 0}, raster: 0};
   const px = v => { const p = Math.floor(v + .5); if (p < -480 || p > 720) throw new Fail('INVALID'); return p; };
-  const add = (x0, y0, x1, y1, c) => {
-    if (seg.length === 1024) throw new Fail('LIMIT');
-    const cost = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) + 1;
-    if (raster + cost > 8192) throw new Fail('LIMIT');
-    raster += cost; seg.push([x0, y0, x1, y1, c]);
-  };
+  const add = seg => { const e = addSeg(ctx, seg); if (e) throw new Fail(e); };
   const colour = c => { if (c < 0 || c > 65535) throw new Fail('INVALID'); return c; };
+  const at = (X, Y) => { ctx.pen.valid = true; ctx.pen.x = X; ctx.pen.y = Y; };
   const api = {
-    move: (x, y) => { const X = px(x), Y = px(y); pen = [X, Y]; },
-    plot: (x, y, c) => { c = colour(c); const X = px(x), Y = px(y); add(X, Y, X, Y, c); pen = [X, Y]; },
-    line: (x, y, c) => { c = colour(c); const X = px(x), Y = px(y); if (pen) add(pen[0], pen[1], X, Y, c); pen = [X, Y]; },
+    move: (x, y) => { const X = px(x), Y = px(y); at(X, Y); },
+    plot: (x, y, c) => { c = colour(c); const X = px(x), Y = px(y); add([X, Y, X, Y, c]); at(X, Y); },
+    line: (x, y, c) => { c = colour(c); const X = px(x), Y = px(y); if (ctx.pen.valid) add([ctx.pen.x, ctx.pen.y, X, Y, c]); at(X, Y); },
+    cubic: (n, c, ...P) => { const e = cubicOp(ctx, P.map(RAW), n, c); if (e) throw new Fail(e); },
+    linePattern: (x, y, bits, cA, cB, u0, u1, w0, w1, N) => {
+      const e = patternOp(ctx, RAW(x), RAW(y), [bits, cB, ...[u0, u1, w0, w1].map(RAW)], N, cA);
+      if (e) throw new Fail(e);
+    },
   };
-  try { fn(FIXM, api, Fail, input, args); } catch (e) { if (!(e instanceof Fail)) throw e; return {status: e.status, seg}; }
-  return {status: 'DONE', seg};
+  try { fn(FIXM, api, Fail, input, args); } catch (e) { if (!(e instanceof Fail)) throw e; return {status: e.status, seg: ctx.segs}; }
+  return {status: 'DONE', seg: ctx.segs};
 }
 
 const cases = caseFiles.flatMap(f => JSON.parse(fs.readFileSync(f, 'utf8')));

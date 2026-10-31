@@ -7,10 +7,10 @@
 // conversion (§2.4) is done in double exactly as written, because the C side
 // does it in double too and a "better" rounding here would be a mismatch.
 //
-// Stage 1 scope: registration (§3, argument patches, §6.1) and execution of
-// ops 0–13 and 16–22 (§4.3–§4.5, §4.8). CUBIC / LINE_PATTERN (integer recipe
-// still undecided, §4.6/§12) and the data-region ops 23–26 are not implemented,
-// so registration rejects them, and rejects any header declaring regions.
+// Scope: registration (§3, argument patches, §6.1) and execution of ops 0–22
+// (§4.3–§4.8; CUBIC and LINE_PATTERN as of spec v1.2). The data-region ops
+// 23–26 are not implemented (stage 4), so registration rejects them, and
+// rejects any header declaring regions.
 //
 // CLI: node tools/kasane_ir/shiki_ref.mjs CASES.txt  (one result line per case;
 // the text contract is shared with the C runner, see format()).
@@ -97,7 +97,7 @@ export function sinQ16(r) {
 // Field usage per op. reg = register 0..15, inp = input index (< declared
 // inputs), imm 'any' = full int32 (SET), 'int' = an int-taking imm (Q0 patch
 // rule, §3), aux 'u16' = colour / shift amount. Unlisted fields must be 0.
-// Ops 14, 15, 23–26 exist in v1 but are out of stage-1 scope (rejected).
+// Ops 23–26 exist in v1 but are out of scope until stage 4 (rejected).
 export const OPS = {
   SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8,
   LINE: 9, REPEAT_REG: 10, BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14,
@@ -121,6 +121,8 @@ const OPDEF = new Map([
   [11, F(false, 'reg', true, false, false)], // BREAK_IF_GT a, b
   [12, F(true, 'reg', true, false, false)], // PLOT_C a, b, dst
   [13, F(true, 'reg', true, false, false)], // LINE_C
+  [14, F('cubic', false, false, 'int', 'col')], // CUBIC dst (r[dst..dst+7]), imm=n, aux=colour (v1.2)
+  [15, F('pattern', 'reg', true, 'int', 'col')], // LINE_PATTERN dst (block), a, b, imm=N, aux=colour A
   [16, F(true, 'reg', true, false, false)], // SUB
   [17, F(true, 'reg', false, false, false)], // NEG
   [18, F(true, 'reg', false, 'int', false)], // SHIFT imm=k
@@ -131,7 +133,7 @@ const OPDEF = new Map([
 ]);
 // ints taken by imm per op for the Q0 patch rule — includes the out-of-scope
 // ones for completeness, though those never reach the check.
-const INT_IMM_OPS = new Set([5, 15, 18, 22, 24, 25, 26]);
+const INT_IMM_OPS = new Set([5, 14, 15, 18, 22, 24, 25, 26]);
 
 // ---- §3 assembler (shared with the differential driver) -------------------
 
@@ -252,8 +254,10 @@ export function register(code, args = []) {
   for (let i = 0; i < n; i++) {
     const I = ins[i];
     const d = OPDEF.get(I.op);
-    if (!d) return null; // reserved, or out of stage-1 scope (14, 15, 23–26)
-    if (d.dst ? I.dst > 15 : I.dst !== 0) return null;
+    if (!d) return null; // reserved, or out of scope until stage 4 (23–26)
+    // §6.1: a block must fit the 16 registers (CUBIC 8 → dst 0..8, LINE_PATTERN 6 → 0..10).
+    const dstMax = d.dst === 'cubic' ? 8 : d.dst === 'pattern' ? 10 : 15;
+    if (d.dst ? I.dst > dstMax : I.dst !== 0) return null;
     if (d.a === 'reg') { if (I.a > 15) return null; }
     else if (d.a === 'inp') { if (I.a >= ni) return null; }
     else if (I.a !== 0) return null;
@@ -263,7 +267,8 @@ export function register(code, args = []) {
     else if (d.aux === false && I.aux !== 0) return null;
     if (d.imm === false && I.imm !== 0) return null;
     switch (I.op) {
-      case 5: if (I.imm < 1 || I.imm > 255) return null; break;
+      case 5: case 14: if (I.imm < 1 || I.imm > 255) return null; break;
+      case 15: if (I.imm < 1 || I.imm > 24) return null; break;
       case 18: if (I.imm < -31 || I.imm > 31) return null; break;
       case 22: if (I.imm < -15 || I.imm > 14) return null; break;
     }
@@ -287,6 +292,102 @@ const MAX_STEPS = 10000, MAX_SEGS = 1024, MAX_RASTER = 8192;
 
 const px = (raw) => Math.floor((raw + 32768) / 65536); // §4.5 (v1.1): nearest, halves up; exact in double
 const inRange = (p) => p >= -480 && p <= 720;
+// §4.7: R(p, q) = the integer nearest p / q, halves toward +∞, ⌊(2p + q) / 2q⌋
+// with both signs flipped for a negative q; M(v, m) = v − m·⌊v / m⌋. BigInt in,
+// Number out (every result here fits an int32).
+const floorDiv = (a, b) => { const q = a / b; return a % b !== 0n && (a < 0n) !== (b < 0n) ? q - 1n : q; };
+const R = (p, q) => { if (q < 0n) { p = -p; q = -q; } return Number(floorDiv(2n * p + q, 2n * q)); };
+const M = (v, m) => v - m * Math.floor(v / m);
+const bitLength = (v) => v.toString(2).length; // v ≥ 1
+const i16 = (v) => (v << 16) >> 16;            // the frame entry's int16 field
+
+// ---- §4.6 / §4.7 / §4.8.4 drawing, on a context {segs, pen, raster} --------
+// Exported so test_shiki_compile.mjs can draw shiki_fix's values the same way.
+
+// §4.8.4 for one plain segment; the status to stop with, or null.
+export function addSeg(ctx, seg) {
+  const cost = Math.max(Math.abs(seg[2] - seg[0]), Math.abs(seg[3] - seg[1])) + 1;
+  if (ctx.segs.length >= MAX_SEGS || ctx.raster + cost > MAX_RASTER) return 'LIMIT';
+  ctx.raster += cost;
+  ctx.segs.push(seg);
+  return null;
+}
+
+// §4.6 CUBIC (v1.2): P = the 8 raw Q16 control coordinates. t in Q16, the
+// weights and the sum by §2.2's MUL (s = 16) and ADD, every point
+// range-checked; the pen moves only when every segment is added.
+export function cubicOp(ctx, P, n, colour) {
+  for (const r of P) if (!inRange(px(r))) return 'INVALID';
+  let prevX = px(P[0]), prevY = px(P[1]);
+  for (let k = 1; k <= n; k++) {
+    const t = Math.floor((k * 65536) / n), u = 65536 - t;
+    const uu = mul32(u, u, 16), tt = mul32(t, t, 16);
+    const w = [mul32(uu, u, 16), 3 * mul32(uu, t, 16), 3 * mul32(u, tt, 16), mul32(tt, t, 16)];
+    const coord = (o) => {
+      let acc = mul32(w[0], P[o], 16);
+      for (let i = 1; i < 4; i++) acc = add32(acc, mul32(w[i], P[2 * i + o], 16));
+      return px(acc);
+    };
+    const x = coord(0), y = coord(1);
+    if (!inRange(x) || !inRange(y)) return 'INVALID';
+    const e = addSeg(ctx, [prevX, prevY, x, y, colour]);
+    if (e) return e;
+    prevX = x; prevY = y;
+  }
+  ctx.pen.valid = true; ctx.pen.x = prevX; ctx.pen.y = prevY;
+  return null;
+}
+
+// §4.7 LINE_PATTERN (v1.2): xr, yr = the end's raw Q16 coordinates, block =
+// the six block registers, N = the period, colourA = aux.
+export function patternOp(ctx, xr, yr, block, N, colourA) {
+  const { pen } = ctx;
+  const x = px(xr);
+  if (!inRange(x)) return 'INVALID';
+  const y = px(yr);
+  if (!inRange(y)) return 'INVALID';
+  if (!pen.valid) { pen.valid = true; pen.x = x; pen.y = y; return null; }
+  const [bits, colB, u0, u1, w0, w1] = block;
+  if (bits < 0 || bits > 0xffffff) return 'INVALID';
+  if (colB < -1 || colB > 65535) return 'INVALID';
+  if (u0 < -(2 ** 29) || u0 > 2 ** 29 || u1 < -(2 ** 29) || u1 > 2 ** 29) return 'INVALID';
+  if (w0 < -(2 ** 24) || w0 > 2 ** 24 || w1 < -(2 ** 24) || w1 > 2 ** 24) return 'INVALID';
+  let c = 1;
+  if ((w0 > 0 && w1 > 0) || (w0 < 0 && w1 < 0)) {
+    const W = Math.max(Math.abs(w0), Math.abs(w1)), V = Math.min(Math.abs(w0), Math.abs(w1));
+    c = 50 * W < 51 * V ? 1 : 5 * W < 6 * V ? 2 : 5 * W < 8 * V ? 4 : 8;
+  }
+  const pX = pen.x, pY = pen.y, wrap = 256 * N, hasB = colB >= 0 ? 1 : 0;
+  let ax = pX, ay = pY, ua = u0;
+  for (let j = 1; j <= c; j++) {
+    let bx = x, by = y, ub = u1;
+    if (j < c) {
+      bx = pX + R(BigInt((x - pX) * j), BigInt(c));
+      by = pY + R(BigInt((y - pY) * j), BigInt(c));
+      const A = Math.abs(w0), B = Math.abs(w1);
+      const e = Math.max(0, bitLength(Math.max(A, B)) - 13);
+      const A2 = Math.floor(A / 2 ** e), B2 = Math.floor(B / 2 ** e);
+      const lam = R(BigInt(B2 * j) * 16384n, BigInt(A2 * (c - j) + B2 * j));
+      ub = u0 + R(BigInt(u1 - u0) * BigInt(lam), 16384n);
+    }
+    const s = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+    const u0q = M(R(BigInt(ua), 256n), wrap);
+    let duq = 0;
+    if (s !== 0) {
+      const d = R(BigInt(ub - ua), BigInt(256 * s));
+      if (Math.abs(d) >= 65536) return 'INVALID';
+      duq = M(d, wrap);
+    }
+    if (ctx.segs.length >= MAX_SEGS - 1 || ctx.raster + s + 1 > MAX_RASTER) return 'LIMIT';
+    ctx.raster += s + 1;
+    ctx.segs.push([ax + 4096, ay, bx, by, colourA]);
+    ctx.segs.push([i16(bits & 0xffff), i16(0x8000 | (bits >> 16) | (N << 8) | (hasB << 13)), i16(u0q),
+      i16(0x8000 | duq), hasB ? colB : 0]);
+    ax = bx; ay = by; ua = ub;
+  }
+  pen.valid = true; pen.x = x; pen.y = y;
+  return null;
+}
 
 export function draw(plan, inputs = []) {
   const regs = new Int32Array(16);
@@ -304,8 +405,9 @@ export function draw(plan, inputs = []) {
 
   const { ins, matchEnd, n } = plan;
   const loops = []; // {start, left}
-  let steps = 0, raster = 0, pc = 0;
+  let steps = 0, pc = 0;
   const end = (status) => ({ status, steps, pen, regs, segs });
+  const ctx = { segs, pen, raster: 0 };
 
   // §4.8.3/4: colour → a → b → segment → pen; a failure stops before the pen.
   // `seg` false = MOVE (no segment); for LINE with an invalid pen it is a move.
@@ -319,10 +421,8 @@ export function draw(plan, inputs = []) {
     else if (kind === 'line' && pen.valid) seg = [pen.x, pen.y, x, y, colour];
     if (seg) {
       const cost = Math.max(Math.abs(seg[2] - seg[0]), Math.abs(seg[3] - seg[1])) + 1;
-      if (segs.length >= MAX_SEGS) return 'LIMIT';
-      if (raster + cost > MAX_RASTER) return 'LIMIT';
-      raster += cost;
-      segs.push(seg);
+      const e = addSeg(ctx, seg);
+      if (e) return e;
     }
     pen.valid = true; pen.x = x; pen.y = y;
     return null;
@@ -375,6 +475,8 @@ export function draw(plan, inputs = []) {
         err = plotLine(I, c, I.op === 12 ? 'plot' : 'line');
         break;
       }
+      case 14: err = cubicOp(ctx, Array.from({ length: 8 }, (_, k) => regs[I.dst + k]), I.imm, I.aux); break;
+      case 15: err = patternOp(ctx, regs[I.a], regs[I.b], Array.from({ length: 6 }, (_, k) => regs[I.dst + k]), I.imm, I.aux); break;
       case 16: regs[I.dst] = sub32(regs[I.a], regs[I.b]); break;
       case 17: regs[I.dst] = neg32(regs[I.a]); break;
       case 18: regs[I.dst] = shift32(regs[I.a], I.imm); break;

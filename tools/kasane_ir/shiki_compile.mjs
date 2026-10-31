@@ -5,9 +5,15 @@
 //   import {compileShiki} from './shiki_compile.mjs';
 //   const {bytes, count, inputsQ, argsQ, warnings} = compileShiki(plan, qdecl);
 //
-// Stage 1 of sec.11: the 32-bit instructions, SIN, loops, breaks and
-// MOVE/PLOT/LINE. cubic(), linePattern() and data regions throw (their
-// engine instructions are not there yet).
+// Stage 1 of sec.11: the 32-bit instructions, SIN, loops, breaks,
+// MOVE/PLOT/LINE, and cubic() / linePattern() (sec.4.6, 4.7, v1.2). Data
+// regions throw (their engine instructions are not there yet).
+//
+// CUBIC reads r0..r7 and LINE_PATTERN's block r10..r15 (dst 0 and 10, as
+// kir.mjs did, so the two never meet). Each operand is computed into a fresh
+// value pinned to its register right before the instruction; colouring puts
+// the pinned values first, and a copy whose source lands in the same
+// register disappears.
 //
 // The passes follow kir.mjs (the float compiler): lower to virtual registers
 // with every value computed at the Q its consumer asks for (sec.8.3 rule 2,
@@ -42,9 +48,11 @@ const READS = {
   [OP.ADD]: ['a', 'b'], [OP.SUB]: ['a', 'b'], [OP.MUL]: ['a', 'b'], [OP.NEG]: ['a'], [OP.SHIFT]: ['a'], [OP.SIN]: ['a'],
   [OP.REPEAT_REG]: ['a'], [OP.BREAK_IF_GT]: ['a', 'b'], [OP.MOVE]: ['a', 'b'], [OP.PLOT]: ['a', 'b'], [OP.LINE]: ['a', 'b'],
   [OP.PLOT_C]: ['a', 'b', 'dst'], [OP.LINE_C]: ['a', 'b', 'dst'],
+  [OP.CUBIC]: [], [OP.LINE_PATTERN]: ['a', 'b'],
 };
+const BASE = {[OP.CUBIC]: 0, [OP.LINE_PATTERN]: 10};
 const WRITES = new Set([OP.SET, OP.INPUT, OP.ADD, OP.SUB, OP.MUL, OP.NEG, OP.SHIFT, OP.SIN]);
-const uses = i => (READS[i.op] ?? []).map(f => i[f]);
+const uses = i => (READS[i.op] ?? []).map(f => i[f]).concat(i.args ?? []);
 const defines = i => WRITES.has(i.op);
 
 // ------------------------------------------------------------- lowering
@@ -159,6 +167,25 @@ function lower(ast, qdecl) {
   }
   // A coordinate: at Q16; the engine rounds it (sec.4.5, v1.1).
   const coord = e => mat(ev(e, 16));
+  // A value pinned to register k (CUBIC's points, LINE_PATTERN's block): a
+  // fresh temporary takes the pin itself; anything else is copied into one.
+  function pinned(x, k) {
+    const t = vreg('pin');
+    vregs[t].pin = k;
+    if (x.inst && !x.var) { x.inst.dst = t; cse.delete(x.key); return t; }
+    // A constant, input or argument is copied from its hoisted value, so that
+    // one held in the pinned register for the whole draw costs nothing here.
+    const v = mat(x);
+    emit({op: OP.SHIFT, dst: t, a: v, imm: 0, copy: v});
+    return t;
+  }
+  // An immediate field (imm or aux) that only takes a constant or an argument.
+  function field(e, what, lo, hi, f, i) {
+    const c = int(e, what, lo, hi);
+    if (c.reg !== undefined) throw new Error(`${what} must be a constant or an argument`);
+    if (c.patch !== undefined) { i[f] = 0; (i.patch ??= []).push({arg: c.patch, field: f === 'imm' ? 0 : 1}); }
+    else i[f] = c.imm;
+  }
   // An integer argument (colour, count): an immediate, a patched argument or
   // a register.
   function int(e, what, lo, hi) {
@@ -212,7 +239,28 @@ function lower(ast, qdecl) {
         }
         case 'draw': {
           const f = s.f, A = s.args;
-          if (f === 'cubic' || f === 'linePattern') throw new Error(`${f}() is not in stage 1 (shiki-spec.md sec.4.6, 4.7)`);
+          if (f === 'cubic') {
+            if (A.length !== 10) throw new Error('cubic(segments, colour, x0, y0, x1, y1, x2, y2, x3, y3)');
+            const i = {op: OP.CUBIC, dst: BASE[OP.CUBIC]};
+            field(A[0], 'cubic segments', 1, 255, 'imm', i);
+            field(A[1], 'cubic colour', 0, 65535, 'aux', i);
+            const xs = A.slice(2).map(e => ev(e, 16));
+            i.args = xs.map((x, k) => pinned(x, BASE[OP.CUBIC] + k));
+            emit(i);
+            break;
+          }
+          if (f === 'linePattern') {
+            if (A.length !== 10) throw new Error('linePattern(x, y, pattern, colourA, colourB, u0, u1, w0, w1, period)');
+            const i = {op: OP.LINE_PATTERN, dst: BASE[OP.LINE_PATTERN]};
+            field(A[3], 'linePattern colourA', 0, 65535, 'aux', i);
+            field(A[9], 'linePattern period', 1, 24, 'imm', i);
+            const x = coord(A[0]), y = coord(A[1]);
+            const vals = [ev(A[2], 0), ev(A[4], 0), ...A.slice(5, 9).map(e => ev(e, 16))];
+            i.args = vals.map((v, k) => pinned(v, BASE[OP.LINE_PATTERN] + k));
+            i.a = x; i.b = y;
+            emit(i);
+            break;
+          }
           const o = {move: OP.MOVE, plot: OP.PLOT, line: OP.LINE}[f];
           if (o === undefined) throw new Error(`unknown statement ${f}`);
           const x = coord(A[0]), y = coord(A[1]);
@@ -293,18 +341,21 @@ function remat(code, vregs, vr) {
   const out = [];
   for (const i of code) {
     if (defines(i) && i.dst === vr) continue;
+    // A copy into a pinned value takes the definition itself (one instruction).
+    if (i.copy === vr && i.op === OP.SHIFT && i.imm === 0) { out.push({...vregs[vr].def, dst: i.dst}); continue; }
     if (uses(i).includes(vr)) {
       const t = vregs.push({kind: 'remat', name: vregs[vr].name}) - 1;
       out.push({...vregs[vr].def, dst: t});
       const j = {...i};
       for (const f of READS[i.op] ?? []) if (j[f] === vr) j[f] = t;
+      if (j.args) j.args = j.args.map(a => a === vr ? t : a);
       out.push(j);
     } else out.push(i);
   }
   vregs[vr].gone = true;
   return out;
 }
-function color(code) {
+function color(code, vregs) {
   const {liveOut} = liveness(code), adj = new Map(), nodes = new Set();
   const edge = (a, b) => {
     if (a === b) return;
@@ -315,7 +366,12 @@ function color(code) {
     for (const u of uses(i)) nodes.add(u);
     if (defines(i)) { nodes.add(i.dst); for (const v of liveOut[pc]) if (v !== i.copy) edge(i.dst, v); }
   });
-  const rest = new Set(nodes), stack = [];
+  // Pinned values take their registers first; two of them live together on
+  // one register cannot be coloured (a re-materialisation will not help).
+  const reg = new Map();
+  for (const v of nodes) if (vregs[v].pin !== undefined) reg.set(v, vregs[v].pin);
+  for (const [v, r] of reg) for (const w of adj.get(v) ?? []) if (reg.get(w) === r) throw new Error(`two values pinned to r${r} are live together`);
+  const rest = new Set([...nodes].filter(v => !reg.has(v))), stack = [];
   const deg = v => [...(adj.get(v) ?? [])].filter(w => rest.has(w)).length;
   while (rest.size) {
     let pick = null;
@@ -325,7 +381,6 @@ function color(code) {
   }
   const copyOf = new Map();
   code.forEach(i => { if (i.copy !== undefined) { copyOf.set(i.dst, i.copy); copyOf.set(i.copy, i.dst); } });
-  const reg = new Map();
   while (stack.length) {
     const v = stack.pop(), taken = new Set([...(adj.get(v) ?? [])].map(w => reg.get(w)));
     const want = reg.get(copyOf.get(v));
@@ -340,7 +395,7 @@ function color(code) {
 // ------------------------------------------------------------------ bytes
 function encode(code, inputsQ, argsQ) {
   const patches = [];
-  code.forEach((i, pc) => { if (i.patch) patches.push([pc, i.patch.arg, i.patch.field]); });
+  code.forEach((i, pc) => { for (const p of [i.patch ?? []].flat()) patches.push([pc, p.arg, p.field]); });
   patches.sort((x, y) => x[0] - y[0] || x[2] - y[2]);
   const head = 12 + inputsQ.length + argsQ.length + 4 * patches.length, body = (head + 3) & ~3;
   const b = new Uint8Array(body + 12 * code.length), dv = new DataView(b.buffer);
@@ -364,7 +419,7 @@ export function compileShiki(plan, qdecl = {}) {
   let code = removeDead(placePools(lowered, vregs));
   const rematerialised = [];
   let reg;
-  while (!(reg = color(code))) {
+  while (!(reg = color(code, vregs))) {
     // Re-materialise the hoisted value with the fewest uses.
     const counts = new Map();
     code.forEach(i => { for (const u of uses(i)) if (vregs[u].kind === 'pool') counts.set(u, (counts.get(u) ?? 0) + 1); });
@@ -378,6 +433,10 @@ export function compileShiki(plan, qdecl = {}) {
     const j = {...i};
     if (defines(i)) j.dst = R(i.dst);
     for (const f of READS[i.op] ?? []) j[f] = R(i[f]);
+    if (i.args) {
+      j.args = i.args.map(R);
+      j.args.forEach((r, k) => { if (r !== BASE[i.op] + k) throw new Error(`operand ${k} not in r${BASE[i.op] + k}`); });
+    }
     return j;
   }).filter(j => !(j.copy !== undefined && j.op === OP.SHIFT && j.imm === 0 && j.a === j.dst));
   // Registers start at 0 each draw: a top-level SET 0 before any write to its
