@@ -13,6 +13,8 @@ on:
       - 'components/pocketjs_guest/include/pocketjs/guest.h'
       - 'main/app_session.*'
       - 'main/pocket/pocket_app.c'
+      - 'main/pocket/pocket_api.*'
+      - 'main/pocket/pocket_class_registry.h'
       - 'main/pocket/app_registry.c'
       - 'tools/test_app_registry.c'
       - 'apps/lib/ayatsuri_follow.js'
@@ -27,6 +29,8 @@ on:
       - 'main/ui/kasane/ksn_procedural.*'
       - 'main/ayatsuri/**'
       - 'tools/ayatsuri/**'
+      - 'tools/pocket/**'
+      - 'tools/hostshim/pocket_api_stub.c'
       - 'tools/character*'
       - 'tools/character/**'
       - 'tools/kasane_contract/*character*'
@@ -61,6 +65,8 @@ jobs:
           /tmp/character-app-registry
           python3 tools/ayatsuri/run_transform.py
           python3 tools/ayatsuri/run_follow.py
+          python3 tools/pocket/run_class_registry.py
+          python3 tools/kasane_contract/run_class_session_order.py
           node tools/character/test_follow.cjs
           node tools/character/test_cloud_dynamic.cjs
           node tools/character/test_cloud_fixture.cjs
@@ -109,6 +115,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib
+          python3 tools/kasane_contract/run_class_session_order.py --m32
           python3 tools/ayatsuri/run_transform.py --m32
           python3 tools/ayatsuri/run_follow.py --m32
           python3 tools/ayatsuri/model/run_model_contracts.py --m32
@@ -152,6 +159,8 @@ jobs:
             .cache/fox-local-plane-assets/
             .cache/source-plane-render-*/
             .cache/ayatsuri-model-contracts/
+            .cache/class-owner-regression/
+            .cache/class-session-order/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

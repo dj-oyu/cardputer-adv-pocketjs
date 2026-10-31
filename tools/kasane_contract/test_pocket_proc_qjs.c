@@ -167,10 +167,10 @@ esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn
 int main(int argc,char **argv){
     REQUIRE(argc==2||argc==3);
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
-    JSRuntime *class_owner=NULL;JSClassID class_id=123;
+    pocket_class_owner_t class_owner={0};JSClassID class_id=123;
     REQUIRE(!pocket_api_class_ready(rt,&class_owner,&class_id)&&class_id==0);
     class_id=123;REQUIRE(pocket_api_class_ready(rt,&class_owner,&class_id)&&class_id==123);
-    pocket_proc_host_classes_reset();REQUIRE(class_owner==NULL);
+    pocket_proc_host_classes_reset();REQUIRE(class_owner.runtime==NULL&&class_owner.next==NULL);
     REQUIRE(!pocket_api_class_ready(rt,&class_owner,&class_id)&&class_id==0);
     JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);

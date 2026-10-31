@@ -15,7 +15,7 @@ typedef struct {
     bool busy;
 } pocket_follow_driver;
 static JSClassID pocket_follow_class,pocket_drive_class;
-static JSRuntime *pocket_follow_runtime,*pocket_drive_runtime;
+static pocket_class_owner_t pocket_follow_class_owner, pocket_drive_class_owner;
 
 static JSValue managed_follow_error(JSContext *ctx,const char *op,ayatsuri_status status){
     if(JS_HasException(ctx))return JS_EXCEPTION;
@@ -167,7 +167,7 @@ static const JSCFunctionListEntry managed_drive_methods[]={
     JS_CFUNC_DEF("snapshot",1,managed_drive_snapshot),JS_CFUNC_DEF("reset",1,managed_drive_reset)};
 static bool managed_follow_class_ready(JSContext *ctx,bool drive){
     JSRuntime *rt=JS_GetRuntime(ctx);JSClassID *id=drive?&pocket_drive_class:&pocket_follow_class;
-    JSRuntime **owner=drive?&pocket_drive_runtime:&pocket_follow_runtime;
+    pocket_class_owner_t *owner=drive?&pocket_drive_class_owner:&pocket_follow_class_owner;
     if(!pocket_api_class_ready(rt,owner,id))JS_NewClassID(rt,id);
     /* Registration can fail after the session owner/id were recorded. Retry
      * that allocated id instead of treating an owner match as registration. */

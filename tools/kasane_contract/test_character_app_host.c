@@ -657,7 +657,7 @@ static int memory_app_contract(bool loaded){
         if(ok)ok=memory_frame(0);
     }
     if(pixels)fclose(pixels);
-    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);ctx=NULL;rt=NULL;
+    pocket_kasane_reset();host_capabilities_clear();JS_FreeContext(ctx);JS_FreeRuntime(rt);ctx=NULL;rt=NULL;
     ok=ok&&!cur_bytes&&!present_failures;
     printf("CLOUD_MEMORY_HOST_%s released_guest=%zu\n",ok?"PASS":"FAIL",cur_bytes);
     return ok?0:1;
@@ -711,7 +711,7 @@ static bool source_plane_renderer_contract(void){
     const char *cleanup="delete globalThis.__sourcePlaneFixture;delete globalThis.AyatsuriLocalPlane;delete globalThis.AyatsuriBlend;delete globalThis.Ayatsuri;delete globalThis.Character;";
     return eval(cleanup,strlen(cleanup),"source-plane-cleanup.js")&&!exceptions&&!present_failures;
 }
-int main(int argc,char **argv){
+static int character_host_run(int argc,char **argv){
 #ifdef CHARACTER_MODEL_STUDY
     study_native_active=getenv("CHARACTER_MEMORY_STUDY")!=NULL;
     if(study_native_active&&!study_allocator_selftest())return 2;
@@ -886,3 +886,6 @@ int main(int argc,char **argv){
     printf("CHARACTER_NATIVE released_guest=%zu\n",cur_bytes);
     printf("%s\n",ok?"CHARACTER_NATIVE_PASS":"CHARACTER_NATIVE_FAIL");return ok?0:1;
 }
+#ifndef CHARACTER_HOST_NO_MAIN
+int main(int argc,char **argv){return character_host_run(argc,argv);}
+#endif

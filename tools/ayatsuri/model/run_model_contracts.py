@@ -122,6 +122,7 @@ def main():
     run([qjs_binary, fixtures[1]], 'qjs-cloud.log')
     run([source_plane_binary, fixtures[6]], 'source-plane-qjs.log')
     sources = [core, ROOT / 'main/ayatsuri/ayatsuri_model.h',
+               ROOT / 'main/pocket/pocket_api.h', ROOT / 'main/pocket/pocket_class_registry.h',
                ROOT / 'main/ayatsuri/ayatsuri_transform.h',
                ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, region_test, blend_region_test, qjs_test,
                renderer, ROOT / 'main/ui/kasane/ksn_procedural.h',

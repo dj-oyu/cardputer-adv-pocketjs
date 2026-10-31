@@ -15,14 +15,13 @@ static JSValue fail(JSContext *c,const char *op,const char *code,const char *s){
 static JSValue invalid(JSContext *c,const char *op,const char *s){return fail(c,op,POCKET_ERR_INVALID_ARGUMENT,s);}
 static bool number(JSContext *c,JSValueConst v,double *out){return JS_IsNumber(v)&&JS_ToFloat64(c,out,v)==0;}
 static bool whole(double n,double a,double b){return n>=a&&n<=b&&n==floor(n);}
-static JSRuntime **class_owners[8];static unsigned class_owner_count;
-bool pocket_api_class_ready(JSRuntime *rt,JSRuntime **owner,JSClassID *id){
-    bool found=false;for(unsigned n=0;n<class_owner_count;n++)if(class_owners[n]==owner)found=true;
-    if(!found){CHECK(class_owner_count<8);class_owners[class_owner_count++]=owner;}
-    if(*owner==rt)return true;
-    *owner=rt;*id=0;return false;
+static pocket_class_registry_t class_registry;
+bool pocket_api_class_ready(JSRuntime *rt,pocket_class_owner_t *owner,JSClassID *id){
+    return pocket_class_registry_ready(&class_registry,rt,owner,id);
 }
-static void reset_classes(void){for(unsigned n=0;n<class_owner_count;n++)*class_owners[n]=NULL;}
+void pocket_api_class_forget(pocket_class_owner_t *owner){pocket_class_registry_forget(&class_registry,owner);}
+static void reset_classes(void){pocket_class_registry_reset(&class_registry);}
+
 static union {ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;ksn_proc_clipped_ellipsoid clipped;
     struct {ksn_proc_blend_ellipsoids patch;ksn_proc_blend_region_mask mask;} region;} packets[512];
 static unsigned packet_count,submit_calls,fail_submission,begin_calls;
@@ -275,12 +274,28 @@ static void blend_region_contract(JSContext *ctx){
     JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,global);free(data);
     CHECK(!memcmp(&saved,&packets[1].region.mask,24));
 }
+/* Deliberately exceed the old process-global owner limit before exercising
+ * the REAL Model/Instance constructors. These unrelated QuickJS classes are
+ * a registry stress fixture, not substitutes for physical device surfaces. */
+static pocket_class_owner_t history_owners[24];
+static JSClassID history_ids[24];
+static void seed_class_history(JSContext *ctx){
+    JSRuntime *rt=JS_GetRuntime(ctx);
+    const JSClassDef definition={.class_name="RegistryHistory"};
+    for(unsigned i=0;i<24;i++){
+        CHECK(!pocket_api_class_ready(rt,&history_owners[i],&history_ids[i]));
+        JS_NewClassID(rt,&history_ids[i]);CHECK(JS_NewClass(rt,history_ids[i],&definition)==0);
+        JSClassID saved=history_ids[i];
+        CHECK(pocket_api_class_ready(rt,&history_owners[i],&history_ids[i])&&history_ids[i]==saved);
+    }
+}
 int main(int argc,char **argv){
     CHECK(argc>=2);fixture=(uint8_t *)read_file(argv[1],&fixture_bytes);
     size_t source_bytes;char *source=read_file(argc>2?argv[2]:"tools/ayatsuri/model/test_model_qjs.js",&source_bytes);
     size_t wrapper_bytes;char *wrapper=read_file("apps/lib/ayatsuri_model.js",&wrapper_bytes);
     for(unsigned run=0;run<4;run++){
         JSRuntime *rt=JS_NewRuntime2(&allocator,NULL);CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx);
+        seed_class_history(ctx);
         /* Surface sets can differ between sessions; reserve unrelated class
          * ids so accidentally reused process-global ids cannot pass by luck. */
         if(run&1){JSClassID id=0;JS_NewClassID(rt,&id);const JSClassDef d={.class_name="OtherSurface"};CHECK(JS_NewClass(rt,id,&d)==0);}
@@ -289,7 +304,7 @@ int main(int argc,char **argv){
         packet_count=submit_calls=fail_submission=begin_calls=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
         eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);blend_region_contract(ctx);JS_RunGC(rt);
         CHECK(skew_count>before_skew);skew_bytes=0;
-        JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
+        reset_classes();JS_FreeContext(ctx);JS_FreeRuntime(rt);CHECK(retained==0);
     }
     /* Force every allocation site in class/model/arena construction once;
      * after restoring allocation, the same runtime must recover. */
@@ -304,7 +319,7 @@ int main(int argc,char **argv){
         fail_at=0;JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);JS_FreeValue(ctx,input);
         m=static_model(ctx,JS_UNDEFINED,0,NULL);CHECK(!JS_IsException(m));
         a=managed_model_instance(ctx,m,0,NULL);CHECK(!JS_IsException(a));
-        JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
+        JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);reset_classes();JS_FreeContext(ctx);JS_FreeRuntime(rt);CHECK(retained==0);
     }
-    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes, explicit cold release/both finalizer orders, actual JS wrapper visibility/dirty/atomicity, projection/clipped batch prevalidation, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit/readProjection/submitClipped zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
+    free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes after 24 preexisting class owners, explicit cold release/both finalizer orders, actual JS wrapper visibility/dirty/atomicity, projection/clipped batch prevalidation, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit/readProjection/submitClipped zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
 }

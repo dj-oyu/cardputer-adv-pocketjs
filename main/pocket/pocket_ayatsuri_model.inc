@@ -17,7 +17,7 @@ typedef struct {
     bool closed,busy;
 } pocket_model_actor;
 static JSClassID pocket_model_class,pocket_model_instance_class;
-static JSRuntime *pocket_model_runtime,*pocket_model_instance_runtime;
+static pocket_class_owner_t pocket_model_class_owner, pocket_model_instance_class_owner;
 
 static bool managed_model_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,
                                  bool writable,shade_view *out){
@@ -327,7 +327,7 @@ static const JSClassDef managed_model_definition={.class_name="AyatsuriModel",.f
 static const JSClassDef managed_instance_definition={.class_name="AyatsuriInstance",.finalizer=managed_instance_finalizer,.gc_mark=managed_instance_mark};
 static bool managed_model_class_ready(JSContext *ctx,bool instance){
     JSRuntime *rt=JS_GetRuntime(ctx);JSClassID *id=instance?&pocket_model_instance_class:&pocket_model_class;
-    JSRuntime **owner=instance?&pocket_model_instance_runtime:&pocket_model_runtime;
+    pocket_class_owner_t *owner=instance?&pocket_model_instance_class_owner:&pocket_model_class_owner;
     if(!pocket_api_class_ready(rt,owner,id))JS_NewClassID(rt,id);
     if(!JS_IsRegisteredClass(rt,*id)&&JS_NewClass(rt,*id,instance?&managed_instance_definition:&managed_model_definition)<0){
         if(!JS_HasException(ctx))JS_ThrowOutOfMemory(ctx);
