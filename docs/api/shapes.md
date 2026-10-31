@@ -114,12 +114,12 @@ Cを0..1へclampし、31/63/31を掛けて四捨五入する。これは表示RG
 | screen | Float32Array/8 | Ax,Ay,Az,cx,Bx,By,Bz,cy。単位球のlocal点qを画面x=A·q+cx、y=B·q+cyへ写す直交affine投影 |
 | normalMatrix | Float32Array/9 | local球面法線を世界法線へ写す行優先3×3。モデル線形変換の逆転置 |
 | lighting/material | Float32Array/9、8 | shadeと同じ方向・光色・材質の契約 |
-| surface | Uint16Array/5 | colorA565、colorB565、opacity0..255、thickness0..255、pattern0..3 |
+| surface | Uint16Array/5 | colorA565、colorB565、opacity0..255、thickness0..255、pattern0..4 |
 | texture | Float32Array/9 | uScale,uShear,uOffset,vShear,vScale,vOffset,edgeSoftness,bandStart,bandEnd |
 
 screen各成分は有限±4096、normalMatrixは有限±1,000,000で非特異。投影の2行は独立（Gram行列のdet > 1e−6×対角積）。texture affineの6値は有限±4096、softness/start/endは0..1、start<=end。不正型/長さ/値/近特異投影はINVALID_ARGUMENT。offscreenとopacity0は有効な空描画。
 
-球面の身体UVはu=atan2(qx,qz)/(2π)+0.5、v=qy/2+0.5。textureの2×3 affineを掛ける。pattern0はAのみ、1はUの小数部が[start,end]ならB、2はVで同判定、3はfloor(U)+floor(V)の奇数cellならB。画像textureはこのprimitiveでは未対応で、未知patternを黙って無視せず拒否する。模様は球体local座標に固定し、照明と独立に評価する。
+球面の身体UVはu=atan2(qx,qz)/(2π)+0.5、v=qy/2+0.5。textureの2×3 affineを掛ける。pattern0はAのみ、1はUの小数部が[start,end]ならB、2はVで同判定、3はfloor(U)+floor(V)の奇数cellならB。pattern4は[localPlane材質領域](material-regions.md)で、texture9の意味とvalidationをmode別に切り替える。画像textureはこのprimitiveでは未対応で、未知patternを黙って無視せず拒否する。模様は球体local座標に固定し、照明と独立に評価する。
 
 screenの2行の擬似逆行列で各画素から球内の点を求め、2行の外積方向にsqrt(1−r²)だけ進めて表面を復元する。normalMatrixと世界視線で前面を選ぶため、負scaleの反転でも背面を描かない。透過減衰はshadeのthinの代わりに `1−thickness/255×sqrt(1−r²)` を使い、光路の長さの近似とする。表面ツヤとは独立で、物理的subsurface/PBRではない。
 

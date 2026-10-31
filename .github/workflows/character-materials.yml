@@ -66,6 +66,8 @@ jobs:
           node tools/character/test_cloud_memory.cjs
           node tools/character/test_ayatsuri_clip.cjs
           python3 tools/character/test_fox_lifetime.py
+          node tools/character/test_material_region.cjs
+          python3 tools/character/test_material_study_inputs.py
           python3 tools/test_guest_allocator_metrics.py
           node tools/ayatsuri/model/test_pack_model.cjs
           node tools/ayatsuri/model/builtin_asset.cjs
@@ -92,6 +94,7 @@ jobs:
           python3 tools/kasane_contract/run_proc_ellipsoid.py
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2
           python3 tools/kasane_contract/run_fox_app_host.py
+          python3 tools/kasane_contract/run_fox_app_host.py --material-study mask-inset --capture-dir .cache/fox-material-asan
           python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
           python3 tools/kasane_contract/run_character_app_host.py --capture-dir .cache/character-capture
           python3 tools/kasane_contract/run_character_app_host.py --cloud --capture-dir .cache/cloud-capture
@@ -106,6 +109,7 @@ jobs:
           python3 tools/ayatsuri/run_follow.py --m32
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2 --m32
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --capture-dir .cache/fox-capture
+          python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-inset --capture-dir .cache/fox-material-m32
           node tools/character/transform_oracle.cjs
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
@@ -130,6 +134,11 @@ jobs:
             .cache/fox-capture/
             .cache/fox-app-m32/result.json
             .cache/fox-app-m32/*.log
+            .cache/fox-material-asan/
+            .cache/fox-material-m32/
+            .cache/fox-app-asan-mask-inset/
+            .cache/fox-app-m32-mask-inset/
+            .cache/fox-local-plane-assets/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

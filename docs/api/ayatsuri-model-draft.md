@@ -22,6 +22,8 @@ CのModelは検証済みreadonly spanを借用する。spanとModel構造体は�
 
 ## 数値と試作形式
 
+ellipsoidの固定2色領域を使うassetだけ、required section8を追加できる。[material領域のwire/所有権](material-regions.md)を参照。従来のModel blobとInstance work量は維持し、Model descriptorは8B増える。C headerの構造体サイズが変わるためC callerは同じheaderで再buildする。既存binの全書換えや、blend共通座標のmask対応を意味しない。
+
 Model.disposeは新規利用をcloseし、生存Instanceは保護する。close済みかつ最後のInstanceが退役した時点で、copy版cold blobを同期的にguest allocatorへ返す。保持中のModel tombstoneやdisposed scene/handleがあってもcold blobを保持しない。static版はspanの参照を外し、flash自体はfreeしない。Modelをopenのまま保持した場合は再利用のためcold blobも保持する。最後のJS参照のfinalizerも保険として働く。GC cycleのfinalizer順に依存しないC側参照管理を持つ。
 
 `model.stats(out)`はclose後も呼べ、`closed`、`instances`、`ownedBytes`、`staticBytes`、`released`を返す。後二つのbytesは現在attach中のspanで、`released=true`はdetach済みを意味する。static flashの物理回収やESP heap増加の保証ではない。Instance.disposeは個体arenaを返す。native scene.disposeは自分のInstanceとJS buffer/参照を切るが、借用Modelを勝手にcloseしない。二重disposeは成功、disposed handleの操作は拒否する。既存描画packetはsnapshotなので、cold回収にpresent待ちやsleepを加えない。

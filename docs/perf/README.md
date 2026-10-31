@@ -14,6 +14,7 @@
 | [fox-native-face-study.md](fox-native-face-study.md) | host比較・顔の最小実証 | 狐のnative25node/凸clip、160KiB起動比較、表情・角度・画像回帰と未達品質 |
 | [fox-face-v2.md](fox-face-v2.md) | 顔の造形反復 | 眼窩と方向補正、細い口吻、内耳・耳毛、同条件とpitch/背面光の比較 |
 | [fox-face-v4.md](fox-face-v4.md) | 下顔と重複buffer | 同条件4候補の採否、開口の所有copy削減、6回の回収/再生成の同値assertとhost会計 |
+| [material-region-study.md](material-region-study.md) | 同一曲面の固有色 | localPlaneと旧UV/単色の比較、片側狐fixture、native共有資産とhost費用/未達 |
 | [fox-face-v3.md](fox-face-v3.md) | 眼と寿命・会計計測 | 部品数を維持した白輪/突出の改善、6回のrelease/recreate、host会計peakと未分離の内訳 |
 | [cloud-memory-fixture.md](cloud-memory-fixture.md) | 診断次候補 | 明示cold回収、製品A/C有限fixture、guest/ESP/cacheを分ける最小実機計測と未検証 |
 | [cloud-finite-fixture.md](cloud-finite-fixture.md) | ローカル次候補 | Enter/Uで選ぶ外乱・途中retarget・pause/replay有限診断と検証境界 |

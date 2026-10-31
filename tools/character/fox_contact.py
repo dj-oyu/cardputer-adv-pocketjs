@@ -19,7 +19,7 @@ def write_aux_contact(folder):
     return write_panels(folder,panels,'HOST_SIMULATION_fox_pitch_backlight.png')
 
 
-def write_panels(folder,panels,filename):
+def write_panels(folder,panels,filename,title=None):
     root=Path(__file__).resolve().parents[2]
     table=next(n.value for n in ast.parse((root/'tools/make_font.py').read_text()).body
                if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='GLYPHS' for t in n.targets))
@@ -36,7 +36,7 @@ def write_panels(folder,panels,filename):
                             for dx in range(2):
                                 at=((y+gy*2+dy)*width+x+gx*2+dx)*3;rgb[at:at+3]=bytes([255,215,170])
             x+=12
-    text(10,5,'HOST SIMULATION / FOX 3D FACE SLICE / NOT DEVICE CAPTURE / PIXELS ENLARGED 2X')
+    text(10,5,title or 'HOST SIMULATION / FOX 3D FACE SLICE / NOT DEVICE CAPTURE / PIXELS ENLARGED 2X')
     for panel,(frame,label) in enumerate(panels):
             file=folder/f'app_{frame:04}.ppm';data=file.read_bytes();header=b'P6\n240 135\n255\n'
             if not data.startswith(header) or len(data)!=len(header)+240*135*3:raise ValueError(str(file))

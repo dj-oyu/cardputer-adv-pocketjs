@@ -25,7 +25,9 @@ typedef struct {
     uint32_t bytes;
     uint16_t node_count, packet_count;
     uint32_t slot_bytes;
-    ayatsuri_model_section section[7];
+    /* Sections 1..7 are mandatory; optional localPlane rows use required
+     * section 8. Its descriptor adds eight bytes, never instance work. */
+    ayatsuri_model_section section[8];
 } ayatsuri_model;
 
 typedef struct {

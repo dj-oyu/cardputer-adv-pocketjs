@@ -8,11 +8,21 @@ function unit(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>1)throw Typ
 function floats(a,n){if(!a||a.length!==n)throw TypeError('vector length');a.forEach(f32);return a;}
 function compile(m){
   if(!m||m.schema!=='ayatsuri-native-model-design-v1'||!Array.isArray(m.nodes))throw TypeError('manifest');
-  const count=int(m.nodes.length,1,256),nodes=Buffer.alloc(count*16),poses=Buffer.alloc(count*36),radii=[],lobes=[],materials=[],bindings=Buffer.alloc(count*8),names=[];
+  const count=int(m.nodes.length,1,256),nodes=Buffer.alloc(count*16),poses=Buffer.alloc(count*36),radii=[],lobes=[],materials=[],bindings=Buffer.alloc(count*8),names=[],regions=[];
   let nameBytes=0,ellipseCount=0,lobeCount=0;
   for(let i=0;i<count;i++){
     const n=m.nodes[i],kind={group:0,ellipsoid:1,blendEllipsoids:2}[n.kind];
     int(kind,0,2);if(n.index!==i||typeof n.enabled!=='boolean'||typeof n.name!=='string'||!(/^[\x20-\x7e]{1,127}$/).test(n.name)||names.includes(n.name))throw TypeError('identity');
+    if(n.pattern!==undefined&&n.pattern!==null){
+      const p=n.pattern;if(kind!==1||p.kind!=='localPlane')throw TypeError('ellipsoid localPlane pattern');
+      const normal=Array.from(floats(p.normal,3),Math.fround),length=normal.reduce((s,v)=>s+v*v,0);
+      if(Math.abs(length-1)>1e-4)throw TypeError('unit localPlane normal');
+      f32(p.offset);f32(p.feather);
+      if(p.offset< -2||p.offset>2||(p.feather!==0&&(p.feather<1e-4||p.feather>2)))throw TypeError('localPlane range');
+      const region=Buffer.alloc(32);region.writeUInt16LE(i,0);region[2]=4;
+      normal.forEach((v,k)=>region.writeFloatLE(v,4+k*4));region.writeFloatLE(p.offset,16);region.writeFloatLE(p.feather,20);
+      region.writeUInt32LE(int(p.color,0,0xffffff),24);regions.push(region);
+    }
     int(n.parent,-1,i-1);floats(n.pose,9);for(let k=6;k<9;k++)if(Math.fround(n.pose[k])===0)throw TypeError('zero scale');
     n.pose.forEach((v,k)=>poses.writeFloatLE(v,i*36+k*4));
     let shape=65535,material=65535,lc=0,blend=0;
@@ -30,8 +40,9 @@ function compile(m){
     bindings.writeUInt16LE(i,i*8);bindings.writeUInt16LE(n.name.length,i*8+2);bindings.writeUInt32LE(nameBytes,i*8+4);nameBytes+=n.name.length;names.push(n.name);
   }
   const sections=[{data:nodes,count,stride:16},{data:poses,count,stride:36},{data:Buffer.concat(radii),count:ellipseCount,stride:12},{data:Buffer.concat(lobes),count:lobeCount,stride:24},{data:Buffer.concat(materials),count:materials.length,stride:72},{data:bindings,count,stride:8},{data:Buffer.from(names.join(''),'ascii'),count:nameBytes,stride:1}];
+  if(regions.length)sections.push({data:Buffer.concat(regions),count:regions.length,stride:32});
   let total=32+sections.length*20;for(const s of sections){total=(total+7)&~7;s.offset=total;total+=s.data.length;}int(total,32,512*1024);
-  const out=Buffer.alloc(total);out.write('AYNM');out.writeUInt16LE(1,4);out.writeUInt16LE(32,6);out.writeUInt32LE(total,8);out.writeUInt32LE(7,12);out.writeUInt32LE(32,16);out.writeUInt32LE(20,20);
+  const out=Buffer.alloc(total);out.write('AYNM');out.writeUInt16LE(1,4);out.writeUInt16LE(32,6);out.writeUInt32LE(total,8);out.writeUInt32LE(sections.length,12);out.writeUInt32LE(32,16);out.writeUInt32LE(20,20);
   sections.forEach((s,i)=>{const o=32+i*20;out.writeUInt16LE(i+1,o);out.writeUInt16LE(1,o+2);[s.offset,s.data.length,s.count,s.stride].forEach((v,k)=>out.writeUInt32LE(v,o+4+k*4));s.data.copy(out,s.offset);});return out;
 }
 module.exports={compile};

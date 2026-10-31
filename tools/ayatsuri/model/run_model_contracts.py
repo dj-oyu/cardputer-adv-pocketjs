@@ -61,7 +61,8 @@ def main():
     # The compiler's fixture export is pinned to its recorded source commit.
     run([node, 'tools/ayatsuri/model/test_pack_model.cjs'], 'pack.log')
     run([node, 'tools/ayatsuri/model/pack_model.cjs', '.cache/ayatsuri-native/cloud.aynm'], 'export.log')
-    fixtures = [ROOT / '.cache/ayatsuri-native' / name for name in ('tiny.aynm', 'cloud.aynm')]
+    fixtures = [ROOT / '.cache/ayatsuri-native' / name for name in
+                ('tiny.aynm', 'cloud.aynm', 'region.aynm', 'region-plain.aynm')]
     extra = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
     if args.m32:
         # The helper and all executions share this process/call; /tmp can be
@@ -99,21 +100,26 @@ def main():
         objects.append(obj)
     core = ROOT / 'main/ayatsuri/ayatsuri_model.c'
     core_test = ROOT / 'tools/ayatsuri/model/test_model_core.c'
+    region_test = ROOT / 'tools/ayatsuri/model/test_model_region.c'
     qjs_test = ROOT / 'tools/ayatsuri/model/test_model_qjs.c'
     core_binary, qjs_binary = cache / 'test-model-core', cache / 'test-model-qjs'
     strict = ['-Wall', '-Wextra', '-Werror']
     run([compiler, *flags, *strict, *includes, core, core_test, '-lm', '-o', core_binary])
+    region_binary = cache / 'test-model-region'
+    run([compiler, *flags, *strict, *includes, core, region_test, '-lm', '-o', region_binary])
     renderer = ROOT / 'main/ui/kasane/ksn_procedural.c'
     run([compiler, *flags, *strict, *defines, *includes, core, renderer, qjs_test, *objects, '-lm', '-o', qjs_binary])
     run([core_binary, fixtures[1]], 'core.log')  # Core fixture asserts the 19-node cloud.
+    run([region_binary, fixtures[2], fixtures[3]], 'region.log')
     run([qjs_binary, fixtures[0]], 'qjs-tiny.log')
     run([qjs_binary, fixtures[1]], 'qjs-cloud.log')
     sources = [core, ROOT / 'main/ayatsuri/ayatsuri_model.h',
                ROOT / 'main/ayatsuri/ayatsuri_transform.h',
-               ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, qjs_test,
+               ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, region_test, qjs_test,
                renderer, ROOT / 'main/ui/kasane/ksn_procedural.h',
                ROOT / 'apps/lib/ayatsuri_model.js',
                ROOT / 'tools/ayatsuri/model/test_model_qjs.js', Path(__file__).resolve()]
+    sources += [ROOT / 'tools/ayatsuri/model/pack_model.cjs', ROOT / 'tools/ayatsuri/model/test_pack_model.cjs']
     proof = dict(kind='HOST SIMULATION', passed=True, profile=profile,
                  compiler=version.splitlines()[0], flags=flags, commands=commands,
                  qjs_cache_key=key.hexdigest(),

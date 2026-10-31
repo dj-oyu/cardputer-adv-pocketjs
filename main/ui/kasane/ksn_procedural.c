@@ -456,7 +456,13 @@ static bool ell_unit(float v[3]){
 bool ksn_proc_ellipsoid_bounds(const ksn_proc_ellipsoid *p,int *left,int *top,int *right,int *bottom){
     if(!p||!ell_finite(p->screen,8,4096)||!ell_finite(p->normal,9,1e6f)||
        !ell_finite(p->light,9,1)||!ell_finite(p->material,8,128)||
-       !ell_finite(p->texture,9,4096)||p->surface[2]>255||p->surface[3]>255||p->surface[4]>3||p->reserved)return false;
+       !ell_finite(p->texture,9,4096)||p->surface[2]>255||p->surface[3]>255||p->surface[4]>4||p->reserved)return false;
+    if(p->surface[4]==4){
+        const float *t=p->texture;
+        const double n2=(double)t[0]*t[0]+(double)t[1]*t[1]+(double)t[2]*t[2];
+        if(fabs(n2-1)>1e-4||fabsf(t[3])>2||t[4]<0||t[4]>2||
+           (t[4]>0&&t[4]<1e-4f)||t[5]!=0||t[7]!=0||t[8]!=1)return false;
+    }
     const float *a=p->screen,*b=p->screen+4,*n=p->normal;
     const float aa=a[0]*a[0]+a[1]*a[1]+a[2]*a[2],bb=b[0]*b[0]+b[1]*b[1]+b[2]*b[2],
         ab=a[0]*b[0]+a[1]*b[1]+a[2]*b[2],det=aa*bb-ab*ab;
@@ -616,6 +622,7 @@ static void ellipsoid_band(const ksn_proc_ellipsoid *p,const ksn_proc_ellipsoid_
     if(sign<0)for(unsigned k=0;k<3;k++)axis[k]=-axis[k];
     float half[3]={l[0]+v[0],l[1]+v[1],l[2]+v[2]};const bool has_half=ell_unit(half);
     const float edge=fmaxf(uv[6],2/fminf(sqrtf(aa),sqrtf(bb)));
+    const float region_inverse=p->surface[4]==4&&uv[4]>0?1/uv[4]:0;
     for(int yy=top;yy<=bottom;yy++){
       int row_left=left,row_right=right;
       if(clip&&!clip_span(clip,winding,yy,&row_left,&row_right))continue;
@@ -630,7 +637,13 @@ static void ellipsoid_band(const ksn_proc_ellipsoid *p,const ksn_proc_ellipsoid_
         for(unsigned k=0;k<3;k++)n[k]=nm[3*k]*q[0]+nm[3*k+1]*q[1]+nm[3*k+2]*q[2];
         if(!ell_unit(n))continue;
         uint16_t base=p->surface[0];
-        if(p->surface[4]){
+        float region_mix=0;
+        if(p->surface[4]==4){
+            /* Body-local albedo only: do not derive markings from lighting or normals. */
+            const float distance=uv[0]*q[0]+uv[1]*q[1]+uv[2]*q[2]-uv[3];
+            region_mix=uv[4]>0?fmaxf(0,fminf(1,.5f+distance*region_inverse)):(distance>=0?1:0);
+            if(region_mix>=1)base=p->surface[1];
+        }else if(p->surface[4]){
             const float tu=atan2f(q[0],q[2])*(1.0f/6.283185307179586f)+0.5f,tv=q[1]*0.5f+0.5f;
             const float U=uv[0]*tu+uv[1]*tv+uv[2],V=uv[3]*tu+uv[4]*tv+uv[5];
             bool second;
@@ -641,9 +654,16 @@ static void ellipsoid_band(const ksn_proc_ellipsoid *p,const ksn_proc_ellipsoid_
         const float dot=n[0]*l[0]+n[1]*l[1]+n[2]*l[2],front=fmaxf(0,dot),back=fmaxf(0,-dot),
             nh=has_half?fmaxf(0,n[0]*half[0]+n[1]*half[1]+n[2]*half[2]):0,
             spec=front>0&&nh>0?powf(nh,m[3]):0,thin=1-p->surface[3]*(1.0f/255)*chord;
-        unsigned r=ell_colour(((base>>11)&31)*(1.0f/31),p->light[6],m[5],front,spec,back,thin,m,31),
-            gg=ell_colour(((base>>5)&63)*(1.0f/63),p->light[7],m[6],front,spec,back,thin,m,63),
-            blue=ell_colour((base&31)*(1.0f/31),p->light[8],m[7],front,spec,back,thin,m,31);
+        float red=((base>>11)&31)*(1.0f/31),green=((base>>5)&63)*(1.0f/63),blue_base=(base&31)*(1.0f/31);
+        if(p->surface[4]==4&&region_mix>0&&region_mix<1){
+            const uint16_t second=p->surface[1];
+            red+=((((second>>11)&31)*(1.0f/31))-red)*region_mix;
+            green+=((((second>>5)&63)*(1.0f/63))-green)*region_mix;
+            blue_base+=(((second&31)*(1.0f/31))-blue_base)*region_mix;
+        }
+        unsigned r=ell_colour(red,p->light[6],m[5],front,spec,back,thin,m,31),
+            gg=ell_colour(green,p->light[7],m[6],front,spec,back,thin,m,63),
+            blue=ell_colour(blue_base,p->light[8],m[7],front,spec,back,thin,m,31);
         const unsigned alpha=(unsigned)lroundf(p->surface[2]*fminf(1,residual/edge)),ia=255-alpha;
         uint16_t *dest=pixels+(yy-y)*KSN_PROC_W+x;
         r=(r*alpha+((*dest>>11)&31)*ia+127)/255;

@@ -83,6 +83,7 @@ int main(void){
     CHECK(!ksn_proc_clipped_ellipsoid_bounds(&p,&l,&t,&r,&b));
     for(unsigned k=0;k<120;k++){
         p.patch=sample();if(k&2)p.patch.surface[4]=3;
+        if(k&4){p.patch.surface[4]=4;const float region[9]={0,1,0,.1f,.1f,0,.08f,0,1};memcpy(p.patch.texture,region,sizeof region);}
         p.clip=(ksn_proc_ellipsoid_clip){.count=(uint8_t)(3+k%6)};
         float cx=(float)(k*43%300)-30,cy=(float)(k*29%190)-25,rx=3+(float)(k*17%90),ry=2+(float)(k*13%70);
         for(unsigned v=0;v<p.clip.count;v++){

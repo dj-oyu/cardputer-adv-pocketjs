@@ -17,7 +17,7 @@ def main() -> None:
     env = os.environ.copy()
     env["PATH"] = str(Path(cc).parent) + os.pathsep + env.get("PATH", "")
     src = ROOT / "main/ui/kasane"
-    for test, opt in ((name, opt) for name in ("ellipsoid", "blend_ellipsoids", "clipped_ellipsoid") for opt in ("0", "2")):
+    for test, opt in ((name, opt) for name in ("ellipsoid", "blend_ellipsoids", "clipped_ellipsoid", "material_region") for opt in ("0", "2")):
         binary = OUT / (f"{test}_O{opt}" + (".exe" if os.name == "nt" else ""))
         flags = [] if os.name == "nt" else ["-fsanitize=address,undefined"]
         subprocess.run([cc, "-std=gnu11", f"-O{opt}", "-g", "-Wall", "-Wextra", "-Werror",

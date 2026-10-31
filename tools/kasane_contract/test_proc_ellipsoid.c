@@ -40,7 +40,7 @@ int main(void){
     p.screen[4]=20;p.screen[5]=1e-8f;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
     p=sample();p.normal[8]=0;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
     p=sample();p.material[0]=NAN;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
-    p=sample();p.surface[4]=4;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
+    p=sample();p.surface[4]=5;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
     p=sample();p.screen[3]=-1000;CHECK(ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b)&&l>r);
     p=sample();p.surface[2]=0;CHECK(ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b)&&l>r);
     p=sample();p.surface[2]=128;put(&p);draw(0);CHECK(full[30*240+40]==0x8410);
@@ -54,6 +54,24 @@ int main(void){
     p=sample();p.surface[4]=2;p.texture[7]=0.6f;p.texture[8]=0.9f;put(&p);draw(0);
     CHECK(full[30*240+40]==0xffff);CHECK(full[40*240+40]==0xf800);
     p.texture[5]=-0.5f;put(&p);draw(0);CHECK(full[40*240+40]==0xffff);
+    // Body-local colour selection shares the exact surface, normal and shade.
+    p=sample();p.surface[4]=4;p.texture[0]=0;p.texture[1]=1;p.texture[2]=0;p.texture[3]=0;p.texture[4]=0;
+    put(&p);draw(0);CHECK(full[29*240+40]==0xffff&&full[31*240+40]==0xf800);
+    p.texture[4]=.4f;put(&p);draw(0);CHECK(full[30*240+40]==0xfc10);
+    CHECK(full[27*240+40]!=0xffff&&full[33*240+40]!=0xf800);
+    p.texture[3]=2;put(&p);draw(0);CHECK(full[31*240+40]==0xffff);
+    p.texture[3]=-2;put(&p);draw(0);CHECK(full[29*240+40]==0xf800);
+    p.surface[0]=1u<<11;p.surface[1]=18u<<11;p.material[0]=1.0f/36;
+    put(&p);draw(0);CHECK(full[30*240+40]==1u<<11);
+    p.texture[0]=NAN;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
+    p.texture[0]=0;p.texture[1]=0;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
+    p.texture[1]=1;p.texture[4]=1e-5f;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
+    p.texture[4]=1e-4f;CHECK(ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
+    p.texture[5]=1;CHECK(!ksn_proc_ellipsoid_bounds(&p,&l,&t,&r,&b));
+    // Equal albedos preserve all shading pixels, including the specular lobe.
+    p=sample();p.material[2]=.5f;p.material[3]=8;put(&p);draw(0x2137);uint16_t old_pixels[KSN_PROC_W*KSN_PROC_H];memcpy(old_pixels,full,sizeof full);
+    p.surface[1]=p.surface[0];p.surface[4]=4;p.texture[0]=0;p.texture[1]=1;p.texture[2]=0;p.texture[3]=0;p.texture[4]=.4f;
+    put(&p);draw(0x2137);CHECK(!memcmp(old_pixels,full,sizeof full));
     // Reflection must keep the front surface facing the camera.
     p=sample();p.screen[0]=-20;p.normal[0]=-1;p.material[0]=0;p.material[1]=1;
     put(&p);draw(0);CHECK(full[30*240+40]==0xffff);

@@ -41,7 +41,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
        sections>(bytes-32)/20)return AYATSURI_MODEL_INVALID;
     const uint32_t directory_end=32+20*sections;
     ayatsuri_model candidate={.data=p,.bytes=(uint32_t)bytes};unsigned seen=0;
-    static const uint32_t strides[7]={16,36,12,24,72,8,1};
+    static const uint32_t strides[8]={16,36,12,24,72,8,1,32};
     for(uint32_t i=0;i<sections;++i){
         const uint8_t *d=p+32+20*i;const uint16_t type=m16(d),flags=m16(d+2);
         const uint32_t offset=m32(d+4),length=m32(d+8),count=m32(d+12),stride=m32(d+16);
@@ -51,7 +51,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
             const uint8_t *prior=p+32+20*j;
             if(overlaps(p+offset,length,p+m32(prior+4),m32(prior+8)))return AYATSURI_MODEL_INVALID;
         }
-        if(type>=1&&type<=7){
+        if(type>=1&&type<=8){
             const unsigned bit=1u<<(type-1);
             if(flags!=1||(seen&bit)||stride!=strides[type-1]||(uint64_t)count*stride!=length)
                 return AYATSURI_MODEL_INVALID;
@@ -59,11 +59,12 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
         }else if(flags&1)return AYATSURI_MODEL_INVALID;
         else if(stride&&(uint64_t)count*stride>length)return AYATSURI_MODEL_INVALID;
     }
-    if(seen!=127)return AYATSURI_MODEL_INVALID;
+    if((seen&127)!=127)return AYATSURI_MODEL_INVALID;
     const uint32_t count=candidate.section[0].count;
     if(!count||count>AYATSURI_MODEL_MAX_NODES||candidate.section[1].count!=count||candidate.section[5].count!=count||
        candidate.section[2].count>count||candidate.section[3].count>8*count||candidate.section[4].count>count||
-       candidate.section[6].count>127*count)return AYATSURI_MODEL_INVALID;
+       candidate.section[6].count>127*count||
+       ((seen&128)&&(!candidate.section[7].count||candidate.section[7].count>count)))return AYATSURI_MODEL_INVALID;
     candidate.node_count=(uint16_t)count;
     for(uint32_t k=0;k<candidate.section[6].count;++k){const uint8_t c=*row(&candidate,7,k,1);
         if(c<32||c>126)return AYATSURI_MODEL_INVALID;}
@@ -104,6 +105,18 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
             if(m16(prior+2)==length&&!memcmp(name,row(&candidate,7,m32(prior+4),1),length))return AYATSURI_MODEL_INVALID;
         }
         candidate.slot_bytes+=slot_bytes(n);
+    }
+    /* Validate all cold region rows before publishing any model metadata.
+     * A normal is already unit length on the wire; never silently normalize. */
+    for(uint32_t k=0;k<candidate.section[7].count;++k){
+        const uint8_t *region=row(&candidate,8,k,32);const uint16_t id=m16(region);
+        const double x=mf(region+4),y=mf(region+8),z=mf(region+12);
+        const float offset=mf(region+16),feather=mf(region+20);
+        if(id>=count||row(&candidate,1,id,16)[2]!=1||region[2]!=4||region[3]||m32(region+28)||
+           !isfinite(x)||!isfinite(y)||!isfinite(z)||fabs(x*x+y*y+z*z-1)>1e-4||
+           !isfinite(offset)||offset< -2||offset>2||!isfinite(feather)||
+           (feather!=0&&(feather<1e-4f||feather>2))||m32(region+24)>0xffffff)return AYATSURI_MODEL_INVALID;
+        for(uint32_t j=0;j<k;++j)if(m16(row(&candidate,8,j,32))==id)return AYATSURI_MODEL_INVALID;
     }
     *out=candidate;return AYATSURI_MODEL_OK;
 }
@@ -242,11 +255,19 @@ static bool ellipse_packet(ayatsuri_model_instance *i,unsigned id,const float ri
         thickness=(uint16_t)floor(fmin(1,md(material+48)*hypot3(m[2],m[6],m[10]))*255+0.5);
     surface_write(w,232,0,color);surface_write(w,232,1,color);surface_write(w,232,2,opacity);
     surface_write(w,232,3,thickness);surface_write(w,232,4,0);
-    /* No patterns or UV overrides in v1. Match default JS arithmetic,
+    /* No UV overrides. Match default JS arithmetic,
      * including the negative zero produced by -sin(0). */
     w[49]=1;w[50]=-0.0f;w[51]=0;w[52]=0;w[53]=1;w[54]=0;
     if(!narrow(md(material+64),w+55))return false;
-    w[56]=0;w[57]=1;return true;
+    w[56]=0;w[57]=1;
+    for(uint32_t k=0;k<model->section[7].count;++k){
+        const uint8_t *region=row(model,8,k,32);
+        if(m16(region)!=id)continue;
+        surface_write(w,232,1,pack_rgb(m32(region+24)));surface_write(w,232,4,4);
+        for(unsigned j=0;j<5;++j)w[49+j]=mf(region+4+4*j);
+        w[54]=0;break;
+    }
+    return true;
 }
 static bool blend_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3]){
     const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*material=row(model,5,m16(node+8),72);

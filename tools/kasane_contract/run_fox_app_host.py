@@ -13,7 +13,7 @@ sys.path.insert(0,str(ROOT/'tools/ayatsuri/model'))
 from run_model_study import compile_sources, compiler_identity, content_key
 
 
-def inputs():
+def inputs(material_study=None):
     found=compile_sources(ROOT)
     folder=ROOT/'apps/fox3d'
     paths={folder/'fox_face.js',folder/'chunks.txt',Path(__file__).resolve(),
@@ -22,6 +22,11 @@ def inputs():
         words=line.split('#',1)[0].split()
         if len(words)==2 and words[0] not in ('app','option'):
             path=(folder/words[1]).resolve();path.relative_to(ROOT.resolve());paths.add(path)
+    if material_study:
+        asset=ROOT/'.cache/fox-local-plane-assets'
+        paths.update(asset/(material_study+extension) for extension in ('.inc','.aynm','.json'))
+        paths.add(asset/'manifest.json')
+        paths.update(ROOT/'apps/character'/name for name in ('character.js','character_blend.js'))
     found.update({str(p.resolve().relative_to(ROOT.resolve())).replace('\\','/'):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
     return found
 
@@ -38,16 +43,23 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32',action='store_true')
     parser.add_argument('--capture-dir',type=Path)
+    parser.add_argument('--material-study',choices=('mask-only','mask-inset'),help='host-only cold asset override; leaves the product asset unchanged')
     args=parser.parse_args()
-    cache=ROOT/('.cache/fox-app-m32' if args.m32 else '.cache/fox-app-asan');cache.mkdir(parents=True,exist_ok=True)
+    suffix=('-'+args.material_study) if args.material_study else ''
+    cache=ROOT/(('.cache/fox-app-m32' if args.m32 else '.cache/fox-app-asan')+suffix);cache.mkdir(parents=True,exist_ok=True)
     (cache/'result.json').unlink(missing_ok=True)
     flags=['-Itools/kasane_contract','-ffp-contract=off']
+    captures=48 if args.material_study else 42
+    if args.material_study:
+        subprocess.run(['node','tools/ayatsuri/model/studies/fox_local_plane.cjs'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
+        asset=(ROOT/'.cache/fox-local-plane-assets'/(args.material_study+'.inc')).resolve()
+        flags+=['-DFOX_MATERIAL_ASSET="'+str(asset)+'"','-Wl,--wrap=pocket_ayatsuri_builtin_asset']
     env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
     if args.m32:
         env.setdefault('M32_SYSROOT','/tmp/m32sys')
         flags+=subprocess.check_output(['bash','tools/vmtest/m32_sysroot.sh'],cwd=ROOT,env=env,text=True).split()+['-msse2','-mfpmath=sse']
     else:flags+=['-fsanitize=address,undefined']
-    before=inputs();toolchain=compiler_identity()
+    before=inputs(args.material_study);toolchain=compiler_identity()
     # build() always recompiles/links the fixture and native C. Only its QuickJS
     # objects are cached: their source/header, compiler and flag closure is fixed.
     qjs={k:v for k,v in before.items() if k.startswith(('components/quickjs-ng/','components/pocketjs_guest/include/'))
@@ -66,12 +78,12 @@ def main():
         match=re.search(r'FOX_HOST frames=(\d+) pointer_bits=(\d+) peak_requested=(\d+) max_request=(\d+) cap=(\d+) eager_gc=0 full_reference=1 quota=(\d+) allocator=(\d+)',result.stdout)
         metric_names=('frames','pointer_bits','peak_requested','max_request','cap','quota','allocator')
         metrics=dict(zip(metric_names,map(int,match.groups()))) if match else None
-        profile_valid=bool(metrics and metrics['frames']==243 and metrics['pointer_bits']==(32 if args.m32 else 64)
+        profile_valid=bool(metrics and metrics['frames']==(249 if args.material_study else 243) and metrics['pointer_bits']==(32 if args.m32 else 64)
                            and metrics['cap']==(163840 if args.m32 else 0) and not metrics['quota'] and not metrics['allocator'])
         complete=True;images=[]
         if folder:
             header=b'P6\n240 135\n255\n'
-            for i in range(42):
+            for i in range(captures):
                 path=folder/f'app_{i:04}.ppm';data=path.read_bytes() if path.exists() else b''
                 complete=complete and data.startswith(header) and len(data)==len(header)+240*135*3
                 images.append(hashlib.sha256(data).hexdigest())
@@ -83,20 +95,24 @@ def main():
         account_valid=bool(accounting and accounting['formula_verified']==1 and (not args.m32 or accounting['peak']<=163840))
         runs.append(dict(exit_code=result.returncode,captures_complete=complete,image_sha256=images,metrics=metrics,phases=phases,accounting=accounting,
                          passed=result.returncode==0 and 'FOX_HOST_PASS' in result.stdout and complete and profile_valid and phase_valid and account_valid))
-    unchanged=inputs()==before
+    unchanged=inputs(args.material_study)==before
     same_images=runs[0]['image_sha256']==runs[1]['image_sha256'] if args.capture_dir else None
     proof=dict(kind='HOST SIMULATION',device_capture=False,passed=all(r['passed'] for r in runs) and unchanged and same_images is not False,
-               cap=163840 if args.m32 else None,forced_frame_gc=False,pointer_profile=32 if args.m32 else 64,runs=runs,
+               material_study=args.material_study,cap=163840 if args.m32 else None,forced_frame_gc=False,pointer_profile=32 if args.m32 else 64,runs=runs,
                binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),flags=flags,toolchain=toolchain,
                source_sha256=before,sources_unchanged_during_run=unchanged,repeat_images_equal=same_images,
                repeat_image_comparison_performed=bool(args.capture_dir))
     (cache/'result.json').write_text(json.dumps(proof,indent=2)+'\n')
     if args.capture_dir and all(r['captures_complete'] for r in runs):
         sys.path.insert(0,str(ROOT/'tools/character'))
-        from fox_contact import write_contact,write_aux_contact
+        from fox_contact import write_contact,write_aux_contact,write_panels
         for index in range(2):
             print(write_contact(args.capture_dir/f'run-{index}'))
             print(write_aux_contact(args.capture_dir/f'run-{index}'))
+            if args.material_study:
+                panels=[(42+j*3+k,f'SMILE YAW {yaw:+d} LIGHT {light:+d}')
+                        for j,light in enumerate((-150,150)) for k,yaw in enumerate((-35,0,35))]
+                print(write_panels(args.capture_dir/f'run-{index}',panels,'HOST_SIMULATION_fox_smile_backlight.png'))
     if not proof['passed']:raise SystemExit(1)
 
 

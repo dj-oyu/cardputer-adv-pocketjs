@@ -10,6 +10,8 @@ PR #110へ統合した[共通TRS評価核](ayatsuri-transform-core.md)では、�
 
 ## 視覚に対応する操作
 
+単一楕円体の同じ面上で毛色を分ける最小`pattern.kind='localPlane'`は[材質領域](material-regions.md)を参照。法線・艶と固有色を分け、blendへの適用は含めない。
+
 ```js
 const H = pocket.kasane.procedural; // The app owns begin/commit and its image view.
 const scene = Ayatsuri.scene({
