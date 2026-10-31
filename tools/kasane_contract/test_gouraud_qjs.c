@@ -1,7 +1,17 @@
 /* Actual QuickJS boundary for the bounded indexed colour patch. */
+#define pocket_api_lazy gouraud_unused_lazy
 #define main procedural_baseline_fixture_main
 #include "test_pocket_proc_qjs.c"
 #undef main
+#undef pocket_api_lazy
+/* This suite installs the real namespace; the included legacy fixture never did. */
+esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn,void *user){
+ JSValue root=pocket_api_root(ctx),ns=JS_NewObject(ctx);
+ if(JS_IsException(ns)){JS_FreeValue(ctx,root);return ESP_ERR_NO_MEM;}
+ esp_err_t status=fn(ctx,ns,user);
+ if(status==ESP_OK&&JS_SetPropertyStr(ctx,root,name,JS_DupValue(ctx,ns))<0)status=ESP_ERR_NO_MEM;
+ JS_FreeValue(ctx,ns);JS_FreeValue(ctx,root);return status;
+}
 #include <math.h>
 #include <malloc.h>
 static size_t ga_calls,ga_live;
@@ -60,6 +70,99 @@ static void packet_contracts(void){
  puts("GOURAUD_PACKET_PASS truncation alignment padding range cost mutation512");
 }
 
+static void immutable_named(JSContext *ctx,const char *name,bool immutable){
+ JSValue g=JS_GetGlobalObject(ctx),v=JS_GetPropertyStr(ctx,g,name);
+ JSValue b=JS_GetTypedArrayBuffer(ctx,v,NULL,NULL,NULL);REQUIRE(!JS_IsException(b));
+ REQUIRE(JS_SetImmutableArrayBuffer(b,immutable)==0);JS_FreeValue(ctx,b);JS_FreeValue(ctx,v);JS_FreeValue(ctx,g);
+}
+static void visibility_contracts(JSContext *ctx){
+ eval_ok(ctx,
+  "globalThis.V=pocket.ayatsuri;globalThis.vxy=new Float32Array([10,10,30,10,30,30,10,30]);"
+  "globalThis.vz=new Float32Array([0,0,-3,0]);globalThis.vi=new Uint16Array([0,1,3,1,2,3,0,3,1,0,0,1]);"
+  "globalThis.vo=new Uint16Array(12);globalThis.vc=new Uint32Array(3);"
+  "globalThis.vreset=()=>{vo.fill(65535);vc.fill(77)};"
+  "globalThis.vcheck=()=>{if(vc.join()!=='2,1,1'||vo.slice(6).some(x=>x!==65535))throw Error('counts/tail');};"
+  "globalThis.vbad=(f)=>{vreset();let caught=false;try{f()}catch(e){caught=e instanceof TypeError}"
+  "if(!caught||vo.some(x=>x!==65535)||vc.some(x=>x!==77))throw Error('validation atomic/type');};"
+  "vreset();V.selectVisible(vxy,vz,vi,vo,vc,0);vcheck();if(vo.slice(0,6).join()!=='0,1,3,1,2,3')throw Error('authored');"
+  "vreset();V.selectVisible(vxy,vz,vi,vo,vc,1);vcheck();if(vo.slice(0,6).join()!=='1,2,3,0,1,3')throw Error('depth');"
+  "vz.fill(0);vreset();V.selectVisible(vxy,vz,vi,vo,vc,1);vcheck();if(vo.slice(0,6).join()!=='0,1,3,1,2,3')throw Error('stable tie');vz[2]=-3;"
+  "for(const order of [-1,2,0.5,NaN,Infinity,'0',true])vbad(()=>V.selectVisible(vxy,vz,vi,vo,vc,order));"
+  "vbad(()=>V.selectVisible(vxy,vz,vi,vo,vc));"
+  "vbad(()=>V.selectVisible(new Float64Array(8),vz,vi,vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,new Float32Array(3),vi,vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,new Uint32Array(12),vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,vi,new Uint16Array(11),vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,vi,vo,new Uint32Array(2),0));"
+  "vbad(()=>V.selectVisible(new Float32Array(0),new Float32Array(0),vi,vo,vc,0));"
+  "vbad(()=>V.selectVisible(new Float32Array(66),new Float32Array(33),vi,vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,new Uint16Array(0),vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,new Uint16Array(195),new Uint16Array(195),vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,new Uint16Array(4),vo,vc,0));"
+  "for(const x of [NaN,Infinity,4097]){vxy[7]=x;vbad(()=>V.selectVisible(vxy,vz,vi,vo,vc,0));}vxy[7]=30;"
+  "vz[3]=NaN;vbad(()=>V.selectVisible(vxy,vz,vi,vo,vc,0));vz[3]=0;"
+  "vi[11]=4;vbad(()=>V.selectVisible(vxy,vz,vi,vo,vc,0));vi[11]=1;"
+  "{let bytes=new ArrayBuffer(96),x=new Float32Array(bytes,0,8),z=new Float32Array(bytes,32,4),"
+  "i=new Uint16Array(bytes,48,12),o=new Uint16Array(bytes,72,12);x.set(vxy);z.set(vz);i.set(vi);"
+  "let reject=(out,counts)=>{const before=Array.from(new Uint8Array(bytes)).join();let caught=false;"
+  "try{V.selectVisible(x,z,i,out,counts,0)}catch(e){caught=true}if(!caught||before!==Array.from(new Uint8Array(bytes)).join())throw Error('alias atomic');};"
+  "reject(i,vc);reject(new Uint16Array(bytes,0,12),vc);reject(new Uint16Array(bytes,32,12),vc);"
+  "reject(o,new Uint32Array(bytes,72,3));reject(o,new Uint32Array(bytes,0,3));}"
+  "if(typeof SharedArrayBuffer==='function'){vbad(()=>V.selectVisible(new Float32Array(new SharedArrayBuffer(32)),vz,vi,vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,new Float32Array(new SharedArrayBuffer(16)),vi,vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,new Uint16Array(new SharedArrayBuffer(24)),vo,vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,vi,new Uint16Array(new SharedArrayBuffer(24)),vc,0));"
+  "vbad(()=>V.selectVisible(vxy,vz,vi,vo,new Uint32Array(new SharedArrayBuffer(12)),0));}"
+  "globalThis.detachedView=new Float32Array(8);");
+ JSValue g=JS_GetGlobalObject(ctx),d=JS_GetPropertyStr(ctx,g,"detachedView"),ab=JS_GetTypedArrayBuffer(ctx,d,NULL,NULL,NULL);
+ JS_DetachArrayBuffer(ctx,ab);JS_FreeValue(ctx,ab);JS_FreeValue(ctx,d);JS_FreeValue(ctx,g);
+ eval_ok(ctx,"vbad(()=>V.selectVisible(detachedView,vz,vi,vo,vc,0))");
+ /* Force shared backing through the C API even when no JS SAB constructor is installed. */
+ const char *shared_calls[5]={
+  "vbad(()=>V.selectVisible(new Float32Array(forcedShared),vz,vi,vo,vc,0))",
+  "vbad(()=>V.selectVisible(vxy,new Float32Array(forcedShared),vi,vo,vc,0))",
+  "vbad(()=>V.selectVisible(vxy,vz,new Uint16Array(forcedShared),vo,vc,0))",
+  "vbad(()=>V.selectVisible(vxy,vz,vi,new Uint16Array(forcedShared),vc,0))",
+  "vbad(()=>V.selectVisible(vxy,vz,vi,vo,new Uint32Array(forcedShared),0))"};
+ const size_t shared_sizes[5]={32,16,24,24,12};
+ for(unsigned k=0;k<5;k++){
+  uint8_t *raw=calloc(1,shared_sizes[k]);REQUIRE(raw);
+  g=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,g,"forcedShared",JS_NewArrayBuffer(ctx,raw,shared_sizes[k],odd_free,raw,true))>=0);
+  JS_FreeValue(ctx,g);eval_ok(ctx,shared_calls[k]);
+  for(size_t i=0;i<shared_sizes[k];i++)REQUIRE(raw[i]==0);
+ }
+ eval_ok(ctx,"forcedShared=null");
+ /* Immutable ordinary inputs are valid, but neither output may be immutable. */
+ immutable_named(ctx,"vxy",true);immutable_named(ctx,"vz",true);immutable_named(ctx,"vi",true);
+ eval_ok(ctx,"vreset();V.selectVisible(vxy,vz,vi,vo,vc,0);vcheck()");
+ immutable_named(ctx,"vo",true);
+ eval_ok(ctx,"vc.fill(77);let rejected=false;try{V.selectVisible(vxy,vz,vi,vo,vc,0)}catch(e){rejected=true}if(!rejected||vc.some(x=>x!==77))throw Error('readonly output')");
+ immutable_named(ctx,"vo",false);immutable_named(ctx,"vc",true);
+ eval_ok(ctx,"vo.fill(65535);let rejectedCounts=false;try{V.selectVisible(vxy,vz,vi,vo,vc,0)}catch(e){rejectedCounts=true}if(!rejectedCounts||vo.some(x=>x!==65535))throw Error('readonly counts')");
+ immutable_named(ctx,"vc",false);immutable_named(ctx,"vxy",false);immutable_named(ctx,"vz",false);immutable_named(ctx,"vi",false);
+ uint8_t *odd=malloc(33);REQUIRE(odd);const float xy[8]={10,10,30,10,30,30,10,30};memcpy(odd+1,xy,32);
+ g=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,g,"visibilityOdd",JS_NewArrayBuffer(ctx,odd+1,32,odd_free,odd,false))>=0);JS_FreeValue(ctx,g);
+ eval_ok(ctx,"vbad(()=>V.selectVisible(new Float32Array(visibilityOdd),vz,vi,vo,vc,0));"
+  "{let x=new Float32Array([1,1]),z=new Float32Array([0]),i=new Uint16Array([0,0,0]),o=new Uint16Array(3),c=new Uint32Array(3);"
+  "V.selectVisible(x,z,i,o,c,0);if(c.join()!=='0,0,1')throw Error('minimum');}"
+  "{let x=new Float32Array(64),z=new Float32Array(32),i=new Uint16Array(192),o=new Uint16Array(192),c=new Uint32Array(3);"
+  "V.selectVisible(x,z,i,o,c,1);if(c.join()!=='0,0,64')throw Error('maximum');}");
+ size_t bytes;char *source=read_file("apps/lib/ayatsuri_visibility.js",&bytes);
+ JSValue value=JS_Eval(ctx,source,bytes,"apps/lib/ayatsuri_visibility.js",JS_EVAL_TYPE_GLOBAL);free(source);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
+ eval_ok(ctx,
+  "globalThis.selectorA=AyatsuriVisibility.create({vertexCount:4,indices:vi,order:'centroid-depth'});"
+  "globalThis.selectorB=AyatsuriVisibility.create({vertexCount:4,indices:vi});"
+  "globalThis.resultA=selectorA.evaluate(vxy,vz);globalThis.resultB=selectorB.evaluate(vxy,vz);"
+  "if(resultA===resultB||resultA.indices===resultB.indices||resultA.indices[0]!==1||resultB.indices[0]!==0)throw Error('independent actor');"
+  "vi.fill(99);if(selectorA.evaluate(vxy,vz)!==resultA||resultA.triangleCount!==2)throw Error('source snapshot');vi.set([0,1,3,1,2,3,0,3,1,0,0,1]);"
+  "{let before=resultA.indices.join(),counts=[resultA.triangleCount,resultA.backfaceCount,resultA.degenerateCount].join();vz[3]=NaN;let rejected=false;"
+  "try{selectorA.evaluate(vxy,vz)}catch(e){rejected=true}vz[3]=0;if(!rejected||resultA.indices.join()!==before||[resultA.triangleCount,resultA.backfaceCount,resultA.degenerateCount].join()!==counts)throw Error('utility atomic');}"
+  "vz.fill(0);if(selectorA.evaluate(vxy,vz)!==resultA||resultA.indices[0]!==0||resultB.indices[0]!==0)throw Error('borrowed dynamic result');vz[2]=-3;"
+  "selectorB.dispose();selectorB.dispose();for(const f of [()=>selectorB.evaluate(vxy,vz),()=>resultB.indices,()=>resultB.triangleCount]){let bad=false;try{f()}catch(e){bad=true}if(!bad)throw Error('disposed');}"
+  "selectorA.evaluate(vxy,vz);");
+ puts("VISIBILITY_QJS_PASS counts order stable atomic alias immutable detach foreign_alignment utility_ownership");
+}
+
 int main(void){
  packet_contracts();
  JSRuntime *rt=JS_NewRuntime2(&GA_MF,NULL);REQUIRE(rt);JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
@@ -68,6 +171,8 @@ int main(void){
  REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK&&pocket_shape_fill(ctx,hone,NULL)==ESP_OK);
  REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0&&JS_SetPropertyStr(ctx,pocket,"hone",hone)>=0);
  REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);JS_FreeValue(ctx,global);
+ REQUIRE(pocket_shape_install(ctx,NULL)==ESP_OK);
+ visibility_contracts(ctx);
  eval_ok(ctx,"globalThis.P=pocket.kasane.procedural;globalThis.H=pocket.hone;"
   "globalThis.xy=new Float32Array([10,10,30,10,30,30,10,30]);globalThis.ix=new Uint16Array([0,1,3,1,2,3]);"
   "globalThis.ca=new Uint16Array([63488,63488,63488,63488]);globalThis.cb=new Uint16Array([31,31,31,31]);"
@@ -100,15 +205,42 @@ int main(void){
  eval_ok(ctx,"xy=new Float32Array(8);init();globalThis.red=new Uint16Array([63488,63488,63488,63488]);globalThis.blue=new Uint16Array([31,31,31,31]);globalThis.ia=new Uint16Array([0,1,3]);globalThis.ib=new Uint16Array([1,2,3]);mask.fill(-1);"
   "P.beginFrame(2016);H.gouraudPatch(xy,ia,red,red,mask,hxy,hc);H.gouraudPatch(xy,ib,blue,blue,mask,hxy,hc);P.commit()");band_equal();memcpy(previous,expected,sizeof previous);pocket_proc_present_result(KSN_OK);
  eval_ok(ctx,"P.beginFrame(2016);H.gouraudPatch(xy,ib,blue,blue,mask,hxy,hc);H.gouraudPatch(xy,ia,red,red,mask,hxy,hc);P.commit()");REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(previous,actual,sizeof actual));pocket_proc_present_result(KSN_OK);
+
+ /* Explicit triangleCount selects a prefix; the legacy seven-argument call
+  * still validates every source triple, including an otherwise unused tail. */
+ eval_ok(ctx,"init();ix[5]=99;P.beginFrame(2016);H.gouraudPatch(xy,ix,ca,cb,mask,hxy,hc,1);P.commit()");
+ band_equal();memcpy(previous,expected,sizeof previous);pocket_proc_present_result(KSN_OK);
+ eval_ok(ctx,"ix[5]=3;P.beginFrame(2016);H.gouraudPatch(xy,ix,ca,cb,mask,hxy,hc,2);P.commit()");
+ REQUIRE(pocket_proc_band_damage(0,&damage,x0,x1)&&damage);
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&memcmp(previous,actual,sizeof actual));pocket_proc_present_result(KSN_IO);
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(previous,actual,sizeof actual));pocket_proc_present_result(KSN_OK);
+ eval_ok(ctx,"P.beginFrame(2016);H.gouraudPatch(xy,ix,ca,cb,mask,hxy,hc,1)");
+ value=pocket_proc_native_begin(ctx,"gouraud-test",&mark);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
+ const char *bad_count[]={"0","-1","3","1.5","NaN","Infinity","'1'","true","undefined"};
+ for(unsigned i=0;i<sizeof bad_count/sizeof bad_count[0];i++){
+  char call[160];snprintf(call,sizeof call,"H.gouraudPatch(xy,ix,ca,cb,mask,hxy,hc,%s)",bad_count[i]);eval_error(ctx,call);mark_unchanged(ctx,&mark);
+ }
+ eval_ok(ctx,"ix[5]=99");eval_error(ctx,"draw()");mark_unchanged(ctx,&mark);
+ eval_ok(ctx,"P.commit();ix[5]=3");band_equal();pocket_proc_present_result(KSN_OK);
  /* Direct calls isolate update allocation from eval/parser/capture costs. */
  eval_ok(ctx,"init()");global=JS_GetGlobalObject(ctx);JSValue gP=JS_GetPropertyStr(ctx,global,"P"),gH=JS_GetPropertyStr(ctx,global,"H"),begin=JS_GetPropertyStr(ctx,gP,"beginFrame"),commit=JS_GetPropertyStr(ctx,gP,"commit"),fn=JS_GetPropertyStr(ctx,gH,"gouraudPatch");const char *names[]={"xy","ix","ca","cb","mask","hxy","hc"};JSValue args[7];for(unsigned i=0;i<7;i++)args[i]=JS_GetPropertyStr(ctx,global,names[i]);JSValue color=JS_NewInt32(ctx,2016);
+ JSValue gV=JS_GetPropertyStr(ctx,global,"V"),select=JS_GetPropertyStr(ctx,gV,"selectVisible");
+ const char *vnames[]={"vxy","vz","vi","vo","vc"};JSValue vargs[6];
+ for(unsigned i=0;i<5;i++)vargs[i]=JS_GetPropertyStr(ctx,global,vnames[i]);vargs[5]=JS_NewInt32(ctx,1);
+ JSValue selector=JS_GetPropertyStr(ctx,global,"selectorA"),evaluate=JS_GetPropertyStr(ctx,selector,"evaluate"),retained=JS_GetPropertyStr(ctx,global,"resultA");
  size_t calls=0;for(unsigned tick=0;tick<1004;tick++){
   if(tick==4)calls=ga_calls;
   value=JS_Call(ctx,begin,gP,1,&color);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
+  value=JS_Call(ctx,select,gV,6,vargs);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
+  value=JS_Call(ctx,evaluate,selector,2,vargs);REQUIRE(!JS_IsException(value));REQUIRE(JS_VALUE_GET_PTR(value)==JS_VALUE_GET_PTR(retained));JS_FreeValue(ctx,value);
   value=JS_Call(ctx,fn,gH,7,args);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
   value=JS_Call(ctx,commit,gP,0,NULL);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);pocket_proc_present_result(KSN_OK);
  }
- REQUIRE(ga_calls==calls);for(unsigned i=0;i<7;i++)JS_FreeValue(ctx,args[i]);JS_FreeValue(ctx,color);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,commit);JS_FreeValue(ctx,begin);JS_FreeValue(ctx,gP);JS_FreeValue(ctx,gH);JS_FreeValue(ctx,global);
+ REQUIRE(ga_calls==calls);
+ for(unsigned i=0;i<6;i++)JS_FreeValue(ctx,vargs[i]);JS_FreeValue(ctx,select);JS_FreeValue(ctx,gV);
+ JS_FreeValue(ctx,retained);JS_FreeValue(ctx,evaluate);JS_FreeValue(ctx,selector);
+ eval_ok(ctx,"selectorA.dispose()");
+ for(unsigned i=0;i<7;i++)JS_FreeValue(ctx,args[i]);JS_FreeValue(ctx,color);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,commit);JS_FreeValue(ctx,begin);JS_FreeValue(ctx,gP);JS_FreeValue(ctx,gH);JS_FreeValue(ctx,global);
  pocket_proc_reset();pocket_proc_host_classes_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);REQUIRE(!ga_live);
  printf("GOURAUD_QJS_PASS pointer_bits=%zu patch_max_bytes=%zu appended=%u warm_allocations=0 live_blocks=%zu\n",sizeof(void*)*8,sizeof(ksn_proc_gouraud_patch),appended,ga_live);return 0;
 }

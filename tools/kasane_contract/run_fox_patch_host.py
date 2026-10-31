@@ -19,8 +19,8 @@ def sha(path):
 
 def inputs():
     result = compile_sources(ROOT)
-    for name in ('apps/lib/ayatsuri_model.js', 'apps/lib/ayatsuri_clip.js',
-                 'tools/character/fox_patch_fixture.js',
+    for name in ('apps/lib/ayatsuri_model.js', 'apps/lib/ayatsuri_clip.js', 'apps/lib/ayatsuri_visibility.js',
+                 'tools/character/fox_patch_fixture.js', 'tools/character/fox_retopology_fixture.js',
                  'tools/kasane_contract/test_fox_patch_host.c',
                  'tools/kasane_contract/run_fox_patch_host.py'):
         result[name] = sha(ROOT / name)
@@ -41,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32', action='store_true')
     parser.add_argument('--capture-dir', type=Path)
-    parser.add_argument('--variant',choices=('baseline','unlit','clay','dense-clay','dense','socket','socket-only','gouraud','gouraud-socket'),default='baseline')
+    parser.add_argument('--variant',choices=('baseline','unlit','clay','dense-clay','dense','socket','socket-only','gouraud','gouraud-socket','retopology','retopology-clay'),default='baseline')
     args = parser.parse_args()
     if sys.platform == 'win32':
         parser.error('Use Linux/WSL for ASan or the existing m32 sysroot')

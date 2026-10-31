@@ -105,7 +105,7 @@ Cを0..1へclampし、31/63/31を掛けて四捨五入する。これは表示RG
 
 法線の量子化幅は1/32767（約0.0000305）。位置/変換を整数化するAPIではない。法線再正規化の後に照明を計算する。標本数以外の動的確保はなく、常駐モデルcacheも持たない。既存のWAKE計測をこの追加カーネルのfps保証へ流用しない。
 
-## `gouraudPatch(xy, indices, colorsA, colorsB, mask, holeXY, holeCounts)`
+## `gouraudPatch(xy, indices, colorsA, colorsB, mask, holeXY, holeCounts[, triangleCount])`
 
 **実装中のbounded補間パッチ**。既存`shade`で求めた頂点色を三角形内でscreen-linear補間する。光源・カメラ・asset・frame時計は所有せず、全画面buffer/Z buffer/alpha/自動depth sortを追加しない。appがbeginFrame/commitし、他の描画との前後順を決める。一般の自己遮蔽meshやimage warpの完成APIではない。
 
@@ -117,6 +117,8 @@ Cを0..1へclampし、31/63/31を掛けて四捨五入する。これは表示RG
 | mask | Float32Array、n | 有限、−4096..4096のsigned scalar。補間結果≥0でB、負でAを選択。光の向きから作る値ではない |
 | holeXY | Float32Array、2ΣholeCounts | screen xy、有限−4096..4096。最大2個の厳密凸polygon |
 | holeCounts | Uint8Array、0..2要素、各3..8 | 穴の点数。0要素は穴なし。穴の境界も描かず、巻き方向は両方可 |
+
+省略可能な第8引数`triangleCount`は整数1..t。省略時は全t面、指定時はindicesの先頭3×triangleCount要素だけを検証・snapshotする。固定容量bufferの末尾は読まない。0面は描画を呼ばず、[可視面utility](ayatsuri-visibility.md)の結果で明示的に分岐する。入力bufferの長さ自体は常に1..64個の完全なindex tripleとする。旧7引数の検証は変わらない。
 
 全てordinary ArrayBufferを持つreadonly入力。immutable backingと入力間のaliasは許し、SharedArrayBuffer・detached bufferは拒否する。foreign backingの非整列addressもmemcpyで読む。7入力を検証後、数値snapshotをcandidateへコピーし、呼出し後のJS bufferは保持しない。入力を変更しても提出済みframeへ影響しない。正常呼出し中にJS/callbackを呼ばず、warm反復中のheap確保を要求しない。型・長さ・値・topology違反はINVALID_ARGUMENT、frame予算はLIMIT_EXCEEDED、beginFrame前/再入はBUSY。失敗はcandidate/building/committed frameへ未適用で、同じcandidateへ別の有効描画を続けられる。
 

@@ -3,6 +3,7 @@
 #include "pocket_proc.h"
 #include "ayatsuri/ayatsuri_transform.h"
 #include "ayatsuri/ayatsuri_follow.h"
+#include "ayatsuri/ayatsuri_visibility.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -269,10 +270,45 @@ static JSValue js_ayatsuri_follow_drive(JSContext *ctx,JSValueConst self,int arg
     if(ayatsuri_follow_drive(p,inc,&value)!=AYATSURI_OK)return invalid(ctx,op,"invalid drive");
     memcpy(output.data,&value,sizeof value);memcpy(phase.data,p,sizeof p);return JS_UNDEFINED;
 }
+static bool visibility_view(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,bool writable,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    const bool ordinary=JS_IsArrayBuffer(ab);
+    uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
+    const bool ok=data&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&
+        (!writable||!JS_IsImmutableArrayBuffer(ab));
+    if(ok)*out=(shade_view){data+offset,bytes};
+    JS_FreeValue(ctx,ab);return ok;
+}
+/* No input snapshot is needed: this pure kernel validates all borrowed spans
+ * before publishing either output, and never calls JS or retains a pointer. */
+static JSValue js_ayatsuri_select_visible(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.selectVisible";shade_view v[5];double order;
+    const JSTypedArrayEnum types[5]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,
+        JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT32};
+    if(argc!=6||!number(ctx,argv[5],&order)||order!=floor(order)||order<0||order>1)
+        return invalid(ctx,op,"expected xy, depth, source indices, output indices, counts and order 0/1");
+    for(unsigned k=0;k<5;k++){
+        if(!visibility_view(ctx,argv[k],types[k],k>=3,&v[k]))
+            return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"ordinary typed views F32/F32/U16/U16/U32 required");
+        const size_t alignment=k==2||k==3?2:4;
+        if((uintptr_t)v[k].data%alignment)return invalid(ctx,op,"naturally aligned backing store required");
+    }
+    if(v[0].bytes%8||v[1].bytes!=v[0].bytes/2||v[2].bytes%6||v[3].bytes%2||v[4].bytes!=12)
+        return invalid(ctx,op,"matching xy/depth, complete source triangles, output capacity and counts[3] required");
+    const ayatsuri_visibility_status status=ayatsuri_visibility_select((const float *)v[0].data,
+        (const float *)v[1].data,v[0].bytes/8,(const uint16_t *)v[2].data,v[2].bytes/6,
+        (ayatsuri_visibility_order)(int)order,(uint16_t *)v[3].data,v[3].bytes/2,(uint32_t *)v[4].data);
+    if(status!=AYATSURI_VISIBILITY_OK)return invalid(ctx,op,"invalid size/value, short output or overlapping spans");
+    return JS_UNDEFINED;
+}
 static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("compose",3,js_ayatsuri_compose),
         JS_CFUNC_DEF("composeNode",2,js_ayatsuri_compose_node),
+        JS_CFUNC_DEF("selectVisible",6,js_ayatsuri_select_visible),
         JS_CFUNC_DEF("followPrepare",2,js_ayatsuri_follow_prepare),
         JS_CFUNC_DEF("followStep",4,js_ayatsuri_follow_step),
         JS_CFUNC_DEF("followImpulse",3,js_ayatsuri_follow_impulse),
@@ -451,16 +487,23 @@ static bool gouraud_view(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type
 }
 static JSValue js_shape_gouraud(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;const char *op="hone.gouraudPatch";
-    if(argc!=7)return invalid(ctx,op,"expected xy, indices, colorsA, colorsB, mask, holeXY, holeCounts");
+    if(argc!=7&&argc!=8)return invalid(ctx,op,"expected xy, indices, colorsA, colorsB, mask, holeXY, holeCounts and optional triangleCount");
     const JSTypedArrayEnum types[7]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16,
         JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT8};
     shade_view v[7];
     for(unsigned k=0;k<7;k++)if(!gouraud_view(ctx,argv[k],types[k],&v[k]))
         return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"ordinary typed views F32/U16/U16/U16/F32/F32/U8 required");
-    const size_t n=v[0].bytes/8,t=v[1].bytes/6,h=v[6].bytes;
-    if(v[0].bytes%8||n<3||n>32||v[1].bytes%6||!t||t>64||h>2||
+    const size_t n=v[0].bytes/8,capacity=v[1].bytes/6,h=v[6].bytes;
+    size_t t=capacity;
+    if(v[0].bytes%8||n<3||n>32||v[1].bytes%6||!capacity||capacity>64||h>2||
        v[2].bytes!=n*2||v[3].bytes!=n*2||v[4].bytes!=n*4)
         return invalid(ctx,op,"3..32 vertices, 1..64 index triples, 0..2 holes and matching vertex fields required");
+    if(argc==8){
+        double count;
+        if(!number(ctx,argv[7],&count)||count!=floor(count)||count<1||count>(double)capacity)
+            return invalid(ctx,op,"triangleCount must be an integer within 1..index capacity");
+        t=(size_t)count;
+    }
     size_t hole_points=0;
     for(size_t k=0;k<h;k++){if(v[6].data[k]<3||v[6].data[k]>8)return invalid(ctx,op,"hole counts must be 3..8");hole_points+=v[6].data[k];}
     if(v[5].bytes!=hole_points*8)return invalid(ctx,op,"holeXY length must match holeCounts");
@@ -470,7 +513,7 @@ static JSValue js_shape_gouraud(JSContext *ctx,JSValueConst self,int argc,JSValu
         memcpy(&p.vertices[k].mask,v[4].data+k*4,4);
         memcpy(&p.vertices[k].color_a,v[2].data+k*2,2);memcpy(&p.vertices[k].color_b,v[3].data+k*2,2);
     }
-    memcpy(p.indices,v[1].data,v[1].bytes);hole_points=0;
+    memcpy(p.indices,v[1].data,t*6);hole_points=0;
     for(size_t k=0;k<h;k++){
         p.clips[k].count=v[6].data[k];memcpy(p.clips[k].xy,v[5].data+hole_points*8,(size_t)p.clips[k].count*8);
         hole_points+=p.clips[k].count;

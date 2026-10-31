@@ -90,7 +90,10 @@ int main(void){
     ok=ok&&eval(prelude,strlen(prelude),"fox-patch-prelude.js");
     const char *variant=getenv("FOX_PATCH_VARIANT");
     if(variant){JSValue g=JS_GetGlobalObject(ctx);JS_SetPropertyStr(ctx,g,"__foxPatchVariant",JS_NewString(ctx,variant));JS_FreeValue(ctx,g);}
-    ok=ok&&patch_load("apps/lib/ayatsuri_model.js")&&patch_load("apps/lib/ayatsuri_clip.js")&&patch_load("tools/character/fox_patch_fixture.js");
+    const bool retopology=variant&&(!strcmp(variant,"retopology")||!strcmp(variant,"retopology-clay"));
+    ok=ok&&patch_load("apps/lib/ayatsuri_model.js")&&patch_load("apps/lib/ayatsuri_clip.js");
+    if(retopology)ok=ok&&patch_load("apps/lib/ayatsuri_visibility.js");
+    ok=ok&&patch_load(retopology?"tools/character/fox_retopology_fixture.js":"tools/character/fox_patch_fixture.js");
     JSValue global=JS_GetGlobalObject(ctx);study=JS_GetPropertyStr(ctx,global,"FoxPatchStudy");JS_FreeValue(ctx,global);
     draw_fn=JS_GetPropertyStr(ctx,study,"draw");stats_fn=JS_GetPropertyStr(ctx,study,"stats");release_fn=JS_GetPropertyStr(ctx,study,"release");stats_out=JS_NewObject(ctx);
     ok=ok&&JS_IsFunction(ctx,draw_fn)&&JS_IsFunction(ctx,stats_fn)&&JS_IsFunction(ctx,release_fn)&&patch_phase("fixture",false);

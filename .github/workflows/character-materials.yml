@@ -83,6 +83,8 @@ jobs:
           node tools/character/test_ayatsuri_clip.cjs
           python3 tools/character/test_fox_lifetime.py
           node tools/character/test_material_region.cjs
+          python3 tools/character/test_fox_depth.py
+          node tools/character/test_fox_retopology.cjs
           node tools/character/test_fox_patch.cjs
           FOX_PATCH_VARIANT=gouraud node tools/character/test_fox_patch.cjs
           FOX_PATCH_VARIANT=gouraud-socket node tools/character/test_fox_patch.cjs
@@ -192,6 +194,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib
+          gcc -std=c11 -O2 -Wall -Wextra -Werror -fno-fast-math -ffp-contract=off -fsanitize=address,undefined -DAYATSURI_VISIBILITY_ALLOC_TEST -Imain/ayatsuri tools/ayatsuri/test_visibility.c main/ayatsuri/ayatsuri_visibility.c -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free -lm -o /tmp/test_visibility
+          /tmp/test_visibility
+          python3 tools/kasane_contract/run_fox_patch_host.py --variant retopology
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant retopology
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant retopology-clay
           python3 tools/kasane_contract/run_fox_patch_host.py --variant gouraud-socket
           python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant baseline
           python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant gouraud

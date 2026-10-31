@@ -48,7 +48,7 @@ def main():
              ROOT/'main/ui/kasane/ksn_render.c',
              ROOT/'main/ui/kasane/ksn_blend_pie.c',
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
-             ROOT/'main/pocket/pocket_shape.c', ROOT/'main/ayatsuri/ayatsuri_model.c', ROOT/'main/pocket/pocket_ayatsuri_assets.c',
+             ROOT/'main/pocket/pocket_shape.c', ROOT/'main/ayatsuri/ayatsuri_model.c', ROOT/'main/ayatsuri/ayatsuri_visibility.c', ROOT/'main/pocket/pocket_ayatsuri_assets.c',
              ROOT/'tools/kasane_contract/proc_native_weak.c',
              ROOT/('tools/kasane_contract/test_gouraud_qjs.c' if args.gouraud_only else 'tools/kasane_contract/test_pocket_proc_clip_qjs.c' if args.clip_only else 'tools/kasane_contract/test_pocket_proc_qjs.c'),
              # MEGADEMO's built-in plans (the app registers kasane.<name>).
@@ -71,7 +71,12 @@ def main():
     if args.gouraud_only:
         sys.path.insert(0,str(ROOT/'tools/ayatsuri/model'))
         from run_model_study import compile_sources
-        inputs=compile_sources(ROOT)
+        def gouraud_inputs():
+            result=compile_sources(ROOT)
+            source=ROOT/'apps/lib/ayatsuri_visibility.js'
+            result[source.relative_to(ROOT).as_posix()]=hashlib.sha256(source.read_bytes()).hexdigest()
+            return result
+        inputs=gouraud_inputs()
     subprocess.run(command,cwd=ROOT,env=env,check=True)
     if args.gouraud_only:
         profile='m32' if args.m32 else 'windows64' if sys.platform=='win32' else 'asan64'
@@ -79,7 +84,7 @@ def main():
         env.setdefault('ASAN_OPTIONS','detect_leaks=0:abort_on_error=1');env.setdefault('UBSAN_OPTIONS','halt_on_error=1:print_stacktrace=1')
         r=subprocess.run([str(binary)],cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
         (proof_dir/'run.log').write_text(r.stdout);print(r.stdout,end='')
-        unchanged=inputs==compile_sources(ROOT)
+        unchanged=inputs==gouraud_inputs()
         passed=r.returncode==0 and unchanged and 'GOURAUD_QJS_PASS ' in r.stdout and 'warm_allocations=0 live_blocks=0' in r.stdout
         proof=dict(kind='ACTUAL QUICKJS GOURAUD CONTRACT',profile=profile,passed=passed,exit_code=r.returncode,
                    source_sha256=inputs,sources_unchanged=unchanged,binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
