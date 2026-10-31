@@ -141,6 +141,7 @@ def raster(shapes,yaw,silhouette=False):
  return pixels
 
 def png(path,w,h,pixels):
+ assert len(pixels)==w*h*3,'RGB output must exactly match the declared dimensions'
  def chunk(t,b):return struct.pack('>I',len(b))+t+b+struct.pack('>I',zlib.crc32(t+b)&0xffffffff)
  raw=b''.join(b'\0'+pixels[y*w*3:(y+1)*w*3] for y in range(h))
  path.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(raw,9))+chunk(b'IEND',b''))

@@ -69,9 +69,9 @@ def main():
    image=bytearray(bytes(base.unpack(base.rgb565(base.BG)))*(240*135))
    for y in range(135):
     for x in range(240):
-     sx=round((x-120)/scale+cx);sy=round((y-54.5)/scale+top)
-     if bounds[0]<=sx<bounds[2] and bounds[1]<=sy<bounds[3] and 0<=sx<rw and 0<=sy<rh:
-      image[(y*240+x)*3:(y*240+x)*3+3]=reference[(sy*rw+sx)*3:(sy*rw+sx)*3+3]
+     ref_x=round((x-120)/scale+cx);ref_y=round((y-54.5)/scale+top)
+     if bounds[0]<=ref_x<bounds[2] and bounds[1]<=ref_y<bounds[3] and 0<=ref_x<rw and 0<=ref_y<rh:
+      image[(y*240+x)*3:(y*240+x)*3+3]=reference[(ref_y*rw+ref_x)*3:(ref_y*rw+ref_x)*3+3]
    panel(image,0,col,label)
  else:text(column_width+5,20,'REFERENCE NOT SUPPLIED')
  for row,(label,shapes) in enumerate([('OLD UNLIT',prior.new_author()),('NEW UNLIT',proposed.author())],start=1):
