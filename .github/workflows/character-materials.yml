@@ -261,6 +261,12 @@ jobs:
           python3 tools/kasane_contract/run_fox_patch_host.py --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-surface-separated/lit --result-dir .cache/fox-separated-asan-lit
           python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-surface-separated/lit --result-dir .cache/fox-separated-m32-lit
           python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-surface-separated/clay --result-dir .cache/fox-separated-m32-clay
+          python3 tools/character/fox_cheek_surfaces.py
+          python3 tools/character/fox_cheek_surfaces.py --root-attachment analytic --out-dir .cache/fox-cheek-analytic-control
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-cheek-analytic-control/lit --result-dir .cache/fox-cheek-control-m32
+          python3 tools/kasane_contract/run_fox_patch_host.py --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-cheek-joined/lit --result-dir .cache/fox-cheek-joined-asan-lit
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-cheek-joined/lit --result-dir .cache/fox-cheek-joined-m32-lit
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --redesign --variant compiled-combined --compiled-assets-dir .cache/fox-cheek-joined/clay --result-dir .cache/fox-cheek-joined-m32-clay
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -280,6 +286,12 @@ jobs:
             .cache/fox-separated-asan-lit/
             .cache/fox-separated-m32-lit/
             .cache/fox-separated-m32-clay/
+            .cache/fox-cheek-joined/
+            .cache/fox-cheek-analytic-control/
+            .cache/fox-cheek-control-m32/
+            .cache/fox-cheek-joined-asan-lit/
+            .cache/fox-cheek-joined-m32-lit/
+            .cache/fox-cheek-joined-m32-clay/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

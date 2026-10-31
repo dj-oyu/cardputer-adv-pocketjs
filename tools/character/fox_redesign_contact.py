@@ -15,11 +15,14 @@ def main():
  parser.add_argument('--lit-result',type=Path,required=True)
  parser.add_argument('--clay-result',type=Path,required=True)
  parser.add_argument('--old-lit-result',type=Path,help='optional prior geometry at the same camera/light')
+ parser.add_argument('--face-crop',action='store_true',help='fixed face region, no resampling except nearest-neighbour 2x')
  parser.add_argument('--out',type=Path,required=True)
  args=parser.parse_args()
  rows=[('LIT',args.lit_result),('CLAY',args.clay_result)]
  if args.old_lit_result:rows=[('OLD LIT',args.old_lit_result),('NEW LIT',args.lit_result),('NEW CLAY',args.clay_result)]
- w,h=1440,28+292*len(rows)
+ sx,sy,sw,sh=(75,10,100,105) if args.face_crop else (0,0,240,135)
+ column_width=sw*2;row_height=230 if args.face_crop else 292
+ w,h=column_width*3,28+row_height*len(rows)
  pixels=bytearray(bytes((24,28,32))*(w*h))
  def text(x,y,s):
   for c in s:
@@ -30,6 +33,7 @@ def main():
    x+=6
  header='REAL QUICKJS / NATIVE RENDERER / HOST SIMULATION / NOT DEVICE CAPTURE OR FPS / SAME GEOMETRY, CAMERA AND WORLD LIGHT'
  if args.old_lit_result:header='REAL QUICKJS / NATIVE HOST / NOT DEVICE CAPTURE OR FPS / SAME CAMERA + WORLD LIGHT / GEOMETRY BY ROW'
+ if args.face_crop:header='NATIVE HOST / NOT DEVICE CAPTURE / SAME CAMERA+LIGHT / FACE CROP 2X'
  text(5,5,header)
  for row,(label,path) in enumerate(rows):
   result=json.loads(path.read_text());assert result['passed'] and not result['device_capture']
@@ -37,13 +41,13 @@ def main():
   if sys.platform=='win32' and folder.startswith('/mnt/c/'):folder='C:/'+folder[7:]
   folder=Path(folder)/'run-0'
   for col,yaw in enumerate((-35,0,35)):
-   y0=28+row*292;x0=col*480;text(x0+5,y0,label+f' YAW {yaw:+d} / PIXELS 2X')
+   y0=28+row*row_height;x0=col*column_width;text(x0+5,y0,label+f' YAW {yaw:+d} / PIXELS 2X')
    data=(folder/f'app_{col:04}.ppm').read_bytes();header=b'P6\n240 135\n255\n'
    assert data.startswith(header) and len(data)==len(header)+240*135*3
    data=data[len(header):]
-   for y in range(135):
-    for x in range(240):
-     rgb=data[(y*240+x)*3:(y*240+x)*3+3]
+   for y in range(sh):
+    for x in range(sw):
+     rgb=data[((y+sy)*240+x+sx)*3:((y+sy)*240+x+sx)*3+3]
      for dy in (0,1):
       for dx in (0,1):
        p=((y0+12+y*2+dy)*w+x0+x*2+dx)*3;pixels[p:p+3]=rgb
