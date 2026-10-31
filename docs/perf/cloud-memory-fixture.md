@@ -2,7 +2,7 @@
 
 基準は3d31fb86。ここからの明示回収・組込みprovider・診断counterを次候補として扱う。実機7d21b302の実績を流用しない。実機でのA/C完了比較・GC時間・物理LCD品質は未測定である。下記fde49fbの初期phase報告をsteadyや完了結果へ拡張しない。
 
-`fde49fb8348742058138fa573554e775ec0dd4f6`は**専用診断候補**で、TRACEのCMake既定をONにした。登録device builderが任意CMake引数/CI artifact指定を受け付けないためのsource側対応であり、通常リリース設定ではない。同headの24 workflows/82 jobsは成功し、実機担当へ引き渡した。その後の通常候補a8eccbfbではTRACE/phase-onlyの既定をOFF/OFFへ戻している。今回のphase-only診断候補では再びsource既定をON/ONにするが、fde実測を新headの結果と呼ばない。既定fixtureはDEVICE_SHORT、旧1115drawのHOST_LONGと区別する。ba078e39のbuild成功と実機測定を混同しない。
+`fde49fb8348742058138fa573554e775ec0dd4f6`は**専用診断候補**で、TRACEのCMake既定をONにした。登録device builderが任意CMake引数/CI artifact指定を受け付けないためのsource側対応であり、通常リリース設定ではない。同headの24 workflows/82 jobsは成功し、実機担当へ引き渡した。その後の通常候補a8eccbfbではTRACE/phase-onlyの既定をOFF/OFFへ戻している。診断候補791c95dfでは再びsource既定をON/ONにし、同headの24 workflows/82 checksとfresh製品linkを通過した。791のA測定後にCでclass-owner assertが起き、修正診断候補a4185e2bを実機担当へ固定して渡した。この後続製品sourceでは両既定をOFFへ戻している。fde実測を791や後続headの結果と呼ばない。既定fixtureはDEVICE_SHORT、旧1115drawのHOST_LONGと区別する。ba078e39のbuild成功と実機測定を混同しない。
 
 ## 寿命と観測範囲
 
@@ -53,7 +53,7 @@ AのSTART=85986ms、`cloudmem.loaded`=86234msで、loadまで248ms。その直�
 
 基準a8eccbfbの24 workflows/82 checks成功後、`main/CMakeLists.txt`のTRACEとphase-onlyの**両source既定をON**にした専用診断候補を作る。任意CMake引数やCI artifactからのflashを使わず、登録builderの既存コマンドだけでphase-onlyを再現するためであり、通常リリースの既定変更ではない。broker/profile/権限は変更しない。候補SHA、build設定、BIN/ELF hash、receiptを実機担当が対応付け、flash前に実値を照合する。ここではflashを実施しない。
 
-CIは同じsource headから次の3構成を製品linkする。通常／従来TRACEの比較でphase-onlyが混入しないよう、OFFも明示する。他の通常firmware workflowも両方OFFを指定し、既存baselineでoption未定義でもcache型がBOOLとなるよう`:BOOL`を指定する。
+791のCIは同じsource headから次の3構成を製品linkし、全て成功した。通常／従来TRACEの比較でphase-onlyが混入しないよう、OFFも明示する。他の通常firmware workflowも両方OFFを指定し、既存baselineでoption未定義でもcache型がBOOLとなるよう`:BOOL`を指定する。
 
 | 構成 | TRACE / phase-only | 設定方法 |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ CIは同じsource headから次の3構成を製品linkする。通常／従来TR
 
 `python tools/check_memory_build_profile.py --build-dir output --profile phase`で、両BOOL cacheがON、`app_session.c`に両compile defineが1、guestの`POCKET_GUEST_ALLOCATOR_METRICS=1`が実際に付いていることを確認する。normal/traceの検査も同じscriptへprofile名を渡す。欠落・古いOFF・矛盾するdefine・重複compile commandは拒否する。`--self-test`は実sourceのoption宣言を小CMake projectで使い、fresh既定と再利用OFF cacheの差、明示normal/trace、古いcache/欠落define等の負例を検証する。
 
-測定後のrestore対象は次の3点。診断用source既定が通常版へ残らないよう、同じbranchの後続commitとして行う。
+診断用source既定が通常版へ残らないよう、791の固定後、同じbranchの後続製品sourceで次の復帰を行った。実機測定前でも固定したowner修正診断a4185e2bを指定すれば診断構成は再現できるため、branchの新しいHEADを計測対象へ読み替えない。
 
 1. `main/CMakeLists.txt`のTRACEとphase-onlyの既定を**両方OFF**へ戻し、source注記と本節の状態表示も通常版へ更新する。片方だけ戻さない。
 2. Character materialsのphase専用CI buildには再び両`-D ...=ON`を明示する。通常buildの明示OFFとprofile検査は残す。
@@ -73,11 +73,11 @@ CIは同じsource headから次の3構成を製品linkする。通常／従来TR
 
 profile検査script、通常CIの明示OFF、初期化分割、phase-only機能自体は残す。診断候補commit全体を機械的にrevertしてこれらを消す手順ではない。a8eccbfbは通常既定OFF/OFFの参照SHAとして保持する。
 
-実機HOMEはユーザーBack操作後の確認が残っているという報告であり、このsource候補のbuild成功をHOME復帰や安全なflash条件の確認に代えない。実機への操作は別担当が状態を照合して行う。分割によりwall時間・callback境界・GC機会が変わり、phase-onlyは観測処理も変えるため、旧fdeと性能条件が同一とは扱わない。同じ固定tick/draw payloadの回帰一致と実機性能比較を区別する。
+791のassert後は実機担当がHOME復帰とowner/job/queue/sessionなしを報告した。a4185e2bの実機再測定は別工程であり、この後続sourceのbuild成功を実機A/C完走や安全なflash条件の確認に代えない。実機への操作は別担当が状態を照合して行う。分割によりwall時間・callback境界・GC機会が変わり、phase-onlyは観測処理も変えるため、旧fdeと性能条件が同一とは扱わない。同じ固定tick/draw payloadの回帰一致と実機性能比較を区別する。
 
 `KASANE_MEGADEMO_TRACE=ON`で製品linkする。同一SHA・同一binary・160 KiB設定でA/Cを選ぶ。登録buildと同じ`idf.py -B output -D SDKCONFIG=output/sdkconfig build`のfresh構成で、CMakeCacheのTRACE=ONとguest compile define `POCKET_GUEST_ALLOCATOR_METRICS=1`を確認してから実機へ渡す。既存cacheのOFFを既定値だけで上書きできるとは仮定しない。通常版CIは`-D KASANE_MEGADEMO_TRACE=OFF`を明示する。trace OFFでは通常allocatorの余分なcounter処理/保存領域を除き、`memoryMark`も公開しない。比較appはその場合`METRICS UNAVAILABLE`を明示し、計測成功にしない。計測用binaryの時刻を通常buildの性能と呼ばない。
 
-制御経路を静かに保つ診断には、追加の`KASANE_MEMORY_PHASE_ONLY=ON`をTRACEと共に使う。通常版の意図する既定はOFF/OFF、今回の専用source候補だけON/ONである。従来TRACEだけのper-turn MDT/MDTJ動作はphase-onlyを明示OFFにすれば維持する。phase-onlyは反復MDT/MDTJとそのheapwalkを出さず、counterをdrainする。明示MMK、通常の低頻度描画集計・開始/終了・エラー通知は残す。HELLOを含む非計測appの待機turnでも反復MDTを出さない。BGCOSTとの併用やTRACEなしのphase-only指定はCMakeで拒否する。phase-onlyからper-frameのJS/render/send分布は得られず、残るKASANE_PAINTの30paint集計をMDTの代わりとしない。
+制御経路を静かに保つ診断には、追加の`KASANE_MEMORY_PHASE_ONLY=ON`をTRACEと共に使う。通常版の意図する既定はOFF/OFF、固定した791とowner修正a4185e2bの専用source候補はON/ONであり、後続製品sourceではOFF/OFFに復帰した。従来TRACEだけのper-turn MDT/MDTJ動作はphase-onlyを明示OFFにすれば維持する。phase-onlyは反復MDT/MDTJとそのheapwalkを出さず、counterをdrainする。明示MMK、通常の低頻度描画集計・開始/終了・エラー通知は残す。HELLOを含む非計測appの待機turnでも反復MDTを出さない。BGCOSTとの併用やTRACEなしのphase-only指定はCMakeで拒否する。phase-onlyからper-frameのJS/render/send分布は得られず、残るKASANE_PAINTの30paint集計をMDTの代わりとしない。
 
 phase-onlyの`mn_scope=session`はguest session開始からのlocal minimumで、checkpointごとにはresetしない。通常MDTでは従来の`mn_scope=trace_window`を維持する。両scopeを同じ窓として比較しない。設定は別build directory/別SDKCONFIGで製品linkし、CMakeCacheとcompile defineを照合する。登録builderが任意引数を受理しない場合、必要な設定を持つ診断source候補を別SHAで用意する工程が残る。CI artifactや非正式なflashを迂回経路にせず、phase-only実機効果を未確認のまま成功とはしない。
 

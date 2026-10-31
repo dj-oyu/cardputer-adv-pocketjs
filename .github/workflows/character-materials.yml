@@ -184,14 +184,15 @@ jobs:
         run: |
           set -euo pipefail
           . "$IDF_PATH/export.sh"
-          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
+          test ! -e build_character
+          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" build
           idf.py -B build_character size > build_character/size.log
           python tools/check_memory_build_profile.py --build-dir build_character --profile normal | tee build_character/profile-verification.log
           idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           idf.py -B build_character_memory size > build_character_memory/size.log
           python tools/check_memory_build_profile.py --build-dir build_character_memory --profile trace | tee build_character_memory/profile-verification.log
           test ! -e build_character_memory_phase
-          idf.py -B build_character_memory_phase -D SDKCONFIG="$PWD/build_character_memory_phase/sdkconfig" build
+          idf.py -B build_character_memory_phase -D SDKCONFIG="$PWD/build_character_memory_phase/sdkconfig" -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY=ON build
           idf.py -B build_character_memory_phase size > build_character_memory_phase/size.log
           python tools/check_memory_build_profile.py --build-dir build_character_memory_phase --profile phase | tee build_character_memory_phase/profile-verification.log
           git diff --exit-code

@@ -58,11 +58,11 @@ option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation f
 option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
-# Diagnostic-only source candidate for builders without CMake selectors.
-# Restore BOTH defaults to OFF after measurement; normal CI overrides both.
+# Product builds leave diagnostic tracing disabled by default.
+# Enable both options explicitly for quiet memory checkpoint diagnostics.
 # See docs/perf/cloud-memory-fixture.md for fresh-cache and restore checks.
-option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" ON)
-option(KASANE_MEMORY_PHASE_ONLY "Keep explicit memory checkpoints without recurring MDT/MDTJ output" ON)
+option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(KASANE_MEMORY_PHASE_ONLY "Keep explicit memory checkpoints without recurring MDT/MDTJ output" OFF)
 option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
 set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
 if(POCKET_DERBY_RUNNER_AFFINE)
