@@ -82,3 +82,4 @@
 
 - [狐の頬・口吻の造形診断](fox-cheek-authoring-study.md) — 両モデルの切り分け、同条件画像と未採用試作。
 - [設定図から取り直した狐顔の無陰影・native陰影実証](fox-reference-redesign.md) — 手動参照点、新規固定資産、clayでの形状診断とhost検証。
+- [狐の頭蓋・局所マズル・輪郭毛束の分離](fox-surface-separation.md) — 尖頭と棚の軽減、native費用、残る中央塊と毛束線化。

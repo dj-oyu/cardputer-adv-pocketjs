@@ -14,8 +14,12 @@ def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--lit-result',type=Path,required=True)
  parser.add_argument('--clay-result',type=Path,required=True)
+ parser.add_argument('--old-lit-result',type=Path,help='optional prior geometry at the same camera/light')
  parser.add_argument('--out',type=Path,required=True)
- args=parser.parse_args();w,h=1440,612
+ args=parser.parse_args()
+ rows=[('LIT',args.lit_result),('CLAY',args.clay_result)]
+ if args.old_lit_result:rows=[('OLD LIT',args.old_lit_result),('NEW LIT',args.lit_result),('NEW CLAY',args.clay_result)]
+ w,h=1440,28+292*len(rows)
  pixels=bytearray(bytes((24,28,32))*(w*h))
  def text(x,y,s):
   for c in s:
@@ -24,8 +28,10 @@ def main():
      if bits&(1<<(4-xx)):
       p=((y+yy)*w+x+xx)*3;pixels[p:p+3]=b'\xe9\xee\xe8'
    x+=6
- text(5,5,'REAL QUICKJS / NATIVE RENDERER / HOST SIMULATION / NOT DEVICE CAPTURE OR FPS / SAME GEOMETRY, CAMERA AND WORLD LIGHT')
- for row,(label,path) in enumerate([('LIT',args.lit_result),('CLAY',args.clay_result)]):
+ header='REAL QUICKJS / NATIVE RENDERER / HOST SIMULATION / NOT DEVICE CAPTURE OR FPS / SAME GEOMETRY, CAMERA AND WORLD LIGHT'
+ if args.old_lit_result:header='REAL QUICKJS / NATIVE HOST / NOT DEVICE CAPTURE OR FPS / SAME CAMERA + WORLD LIGHT / GEOMETRY BY ROW'
+ text(5,5,header)
+ for row,(label,path) in enumerate(rows):
   result=json.loads(path.read_text());assert result['passed'] and not result['device_capture']
   folder=result['captures']
   if sys.platform=='win32' and folder.startswith('/mnt/c/'):folder='C:/'+folder[7:]

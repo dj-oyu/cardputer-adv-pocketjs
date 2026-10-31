@@ -122,7 +122,8 @@ def raster(shapes,yaw,silhouette=False):
  w,h=240,135;pixels=bytearray(bytes(unpack(rgb565(BG)))*(w*h));depth=[-math.inf]*(w*h)
  angle=math.radians(yaw);c,s=math.cos(angle),math.sin(angle)
  for shape in shapes:
-  if silhouette and shape['name']!='continuous-face':continue
+  if silhouette and shape['name']!='continuous-face' and not (
+   silhouette=='contour' and shape['name'].startswith(('cheek-fur-','forelock-'))):continue
   points=[(120+1.3*(c*x+s*z),87+1.3*y,-s*x+c*z) for x,y,z in shape['vertices']]
   for indices in shape['triangles']:
    a,b,d=[points[i] for i in indices];det=(b[0]-a[0])*(d[1]-a[1])-(b[1]-a[1])*(d[0]-a[0])
@@ -144,7 +145,7 @@ def png(path,w,h,pixels):
  raw=b''.join(b'\0'+pixels[y*w*3:(y+1)*w*3] for y in range(h))
  path.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(raw,9))+chunk(b'IEND',b''))
 
-def landmark_comparison(shapes,out):
+def landmark_comparison(shapes,out,surface_fn=None):
  reference=json.loads((ROOT/'tools/character/fox_reference_landmarks.json').read_text())
  w,h=960,310;pixels=bytearray(bytes((24,28,32))*(w*h))
  def line(x0,y0,x1,y1,color):
@@ -177,17 +178,20 @@ def landmark_comparison(shapes,out):
    if ('eye_center' in name or name in ('nose_tip','chin')) and isinstance(p,list) and len(p)==2:
     x,y=ref(p);line(x-3,y,x+3,y,(230,60,65));line(x,y-3,x,y+3,(230,60,65))
   angle=math.radians(yaw)
-  for x,y,z in [(-10.75,-2.2,surface(-10.75,-2.2)+.35),(10.75,-2.2,surface(10.75,-2.2)+.35),(0,6.6,28.5),(0,17,12)]:
+  depth=surface_fn or surface
+  for x,y,z in [(-10.75,-2.2,depth(-10.75,-2.2)+.35),(10.75,-2.2,depth(10.75,-2.2)+.35),
+                 (0,6.6,depth(0,6.6)+1.3 if surface_fn else 28.5),(0,17,depth(0,17) if surface_fn else 12)]:
    sx=x0+2*(120+1.3*(math.cos(angle)*x+math.sin(angle)*z));sy=y0+2*(87+1.3*y)
    line(sx-3,sy,sx+3,sy,(0,135,170));line(sx,sy-3,sx,sy+3,(0,135,170))
  png(out/'landmark-comparison.png',w,h,pixels)
 
-def main():
+def main(argv=None,*,authoring=None,authoring_config=None,surface_fn=None):
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--out-dir',type=Path,default=ROOT/'.cache/fox-asset-redesign')
- out=parser.parse_args().out_dir.resolve();assert out.is_relative_to(ROOT/'.cache');out.mkdir(parents=True,exist_ok=True)
- shapes=author();model=native_model(shapes)
+ out=parser.parse_args(argv).out_dir.resolve();assert out.is_relative_to(ROOT/'.cache');out.mkdir(parents=True,exist_ok=True)
+ shapes=(authoring or author)();model=native_model(shapes)
  (out/'model.json').write_text(json.dumps(model,indent=2)+'\n')
- (out/'authoring.json').write_text(json.dumps(dict(rows=ROWS,boundary=BOUNDARY,shapes=shapes),indent=2)+'\n')
+ record=dict(rows=ROWS,boundary=BOUNDARY,shapes=shapes) if authoring_config is None else dict(config=authoring_config,shapes=shapes)
+ (out/'authoring.json').write_text(json.dumps(record,indent=2)+'\n')
  # Preserve the static native boundary before any mutable-pose integration.
  subprocess.run(['node','-e',"const fs=require('fs'),{compile}=require('./tools/ayatsuri/model/pack_model.cjs');fs.writeFileSync(process.argv[2],compile(JSON.parse(fs.readFileSync(process.argv[1],'utf8'))));",str(out/'model.json'),str(out/'model.aynm')],cwd=ROOT,check=True)
  for mode in ('lit','clay'):
@@ -200,7 +204,8 @@ def main():
   counts=dict(asset='fox-patch-combined',vertices=sum(len(n['mesh']['vertices'])//3 for n in derived['nodes'][1:]),
               triangles=sum(len(n['mesh']['indices'])//3 for n in derived['nodes'][1:]),meshes=len(derived['nodes'])-1)
   (folder/'fox-patch-combined_data.js').write_text('globalThis.__foxCompiledData='+json.dumps(counts)+';\n')
- w,h=1440,600;pixels=bytearray(bytes((24,28,32))*(w*h))
+ modes=(False,True) if authoring_config is None else (False,True,'contour')
+ w,h=1440,600 if len(modes)==2 else 885;pixels=bytearray(bytes((24,28,32))*(w*h))
  def text(x,y,value):
   for char in value:
    for yy,bits in enumerate(glyph(char)):
@@ -209,10 +214,12 @@ def main():
       p=((y+yy)*w+x+xx)*3;pixels[p:p+3]=b'\xe9\xee\xe8'
    x+=6
  text(5,5,'OFFLINE AUTHORING PROJECTION / UNLIT / NOT NATIVE RENDERER OR DEVICE CAPTURE')
- for row,silhouette in enumerate((False,True)):
+ for row,silhouette in enumerate(modes):
   for col,yaw in enumerate((-35,0,35)):
    image=raster(shapes,yaw,silhouette);x0=col*480;y0=30+row*285
-   text(x0+5,y0-10,('FACE SILHOUETTE' if silhouette else 'FLAT ALBEDO + LANDMARK MARKERS')+f' YAW {yaw:+d}')
+   label='FLAT ALBEDO + LANDMARK MARKERS' if not silhouette else 'FACE SILHOUETTE'
+   if authoring_config is not None and silhouette:label='COMBINED FACE + FUR' if silhouette=='contour' else 'SKULL ONLY / FUR OMITTED'
+   text(x0+5,y0-10,label+f' YAW {yaw:+d}')
    for y in range(135):
     for x in range(240):
      rgb=image[(y*240+x)*3:(y*240+x)*3+3]
@@ -220,11 +227,12 @@ def main():
       for dx in (0,1):
        p=((y0+y*2+dy)*w+x0+x*2+dx)*3;pixels[p:p+3]=rgb
  png(out/'unlit-contact.png',w,h,pixels)
- landmark_comparison(shapes,out)
+ landmark_comparison(shapes,out,surface_fn)
  proof=dict(kind='OFFLINE AUTHORING ONLY / NOT NATIVE RENDERER OR DEVICE',nativeAssetBytes=(out/'model.aynm').stat().st_size,
   nativeAssetSha256=hashlib.sha256((out/'model.aynm').read_bytes()).hexdigest(),nodes=len(model['nodes']),
   faceVertices=len(shapes[0]['vertices']),faceTriangles=len(shapes[0]['triangles']),
-  intendedFrontRatios=dict(faceWidthToHeight=66/42,eyeSeparationToFaceWidth=21.5/66,noseFractionFromForehead=(6.6+25)/42),
+  intendedFrontRatios=dict(faceWidthToHeight=66/42,eyeSeparationToFaceWidth=21.5/66,noseFractionFromForehead=(6.6+25)/42) if authoring_config is None else None,
+  authoringConfig=authoring_config,
   referenceLandmarksSha256=hashlib.sha256((ROOT/'tools/character/fox_reference_landmarks.json').read_bytes()).hexdigest(),
   generatorSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
   limitations=['Reference points are manually estimated; the sheet is not calibrated multiview geometry.',
