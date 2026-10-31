@@ -449,7 +449,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 - **`transfer` の門**（`components/quickjs-ng/quickjs-ng/quickjs.c` の `js_array_buffer_transfer`）: `free_func` が `js_array_buffer_free` でない ArrayBuffer は、長さに関わらず `TypeError`。`detached` の検査の直後、長さ 0 の分岐の前。
 - **確認**:
   - host: `tools/kasane_contract/run_pocket_shiki_api_qjs.py` が、実機と同じ自己検査（`apps/shikitest/shiki_api_test.js`）を本物の QuickJS と C で ASan・UBSan・リーク検出の下で走らせ、33 項目すべて通り、セッションの終わりに区画が返る。門を外すと失敗する（わざと入れた誤り）。手続き型の host 試験（`run_pocket_proc_qjs.py`・`_rom_`・`_limits_`・`run_proc_limits_scene.py`・`build_kasane_test.sh`）は変わらず通る。
-  - 実機（`e644e40`）: `local.shikiapi` が 34 項目（capability を含む）すべて通った。ログに `SHIKI_HEAP open bytes=49152`。アプリの起動前のホームの空き 198,248 B、終了後 206,872 B（区画は返っている）。`local.shikitest` は、比べた最初の 372 本（ログの 93 行）が以前の合格のログと同じ行。
+  - 実機（`e644e40`）: `local.shikiapi` が 34 項目（capability を含む）すべて通った。ログに `SHIKI_HEAP open bytes=49152`。アプリの起動前のホームの空き 198,248 B、終了後 206,872 B（区画は返っている）。`local.shikitest` は、比べた最初の 372 本（ログの 93 行）が以前の合格のログと同じ行、`local.shikidata` も最初の 368 本（92 行）が同じ行。`kasane.shiki` を挙げない DERBY は区画を取らず（`SHIKI_HEAP` の行が無い）、読み込み後の空き 71,104 B・最大の連続ブロック 31,744 B（計数ビルドでは 68,416 B・31,744 B。ビルドが違うので差は参考）。
 
 ## 6. 次の作業
 
