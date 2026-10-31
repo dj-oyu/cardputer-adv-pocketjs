@@ -107,4 +107,3 @@ int main(int argc,char **argv){
  dispose:if(meta)fclose(meta);if(ayatsuri_model_instance_dispose(&instance,&owner,1)!=AYATSURI_MODEL_OK)rc=1;
  cleanup:free(allocation);free(blob);if(rc)fail("probe did not complete");return rc;
 }
-
