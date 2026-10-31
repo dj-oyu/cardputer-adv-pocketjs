@@ -46,5 +46,6 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          idf.py -B build_dma -D SDKCONFIG="$PWD/build_dma/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_DMA_OVERLAP=${{ matrix.dma }} -D KASANE_MEGADEMO_TRACE=OFF build
+          idf.py -B build_dma -D SDKCONFIG="$PWD/build_dma/sdkconfig" -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_DMA_OVERLAP=${{ matrix.dma }} -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           grep -qx 'KASANE_DMA_OVERLAP:BOOL=${{ matrix.dma }}' build_dma/CMakeCache.txt
+          grep -qx 'KASANE_MEMORY_PHASE_ONLY:BOOL=OFF' build_dma/CMakeCache.txt

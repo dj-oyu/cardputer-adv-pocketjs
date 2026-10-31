@@ -86,6 +86,7 @@ jobs:
           node tools/character/test_lab.cjs
           python3 tools/character/test_capture_plan.py
           python3 tools/check_docs.py
+          python3 tools/check_memory_build_profile.py --self-test
       - name: Actual native contracts and app
         env:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
@@ -174,12 +175,16 @@ jobs:
         run: |
           set -euo pipefail
           . "$IDF_PATH/export.sh"
-          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=OFF build
+          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           idf.py -B build_character size > build_character/size.log
-          idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON build
+          python tools/check_memory_build_profile.py --build-dir build_character --profile normal | tee build_character/profile-verification.log
+          idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           idf.py -B build_character_memory size > build_character_memory/size.log
-          idf.py -B build_character_memory_phase -D SDKCONFIG="$PWD/build_character_memory_phase/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY=ON build
+          python tools/check_memory_build_profile.py --build-dir build_character_memory --profile trace | tee build_character_memory/profile-verification.log
+          test ! -e build_character_memory_phase
+          idf.py -B build_character_memory_phase -D SDKCONFIG="$PWD/build_character_memory_phase/sdkconfig" build
           idf.py -B build_character_memory_phase size > build_character_memory_phase/size.log
+          python tools/check_memory_build_profile.py --build-dir build_character_memory_phase --profile phase | tee build_character_memory_phase/profile-verification.log
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -190,6 +195,9 @@ jobs:
             build_character/*.elf
             build_character/*.map
             build_character/*.log
+            build_character/CMakeCache.txt
+            build_character/sdkconfig
+            build_character/compile_commands.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -199,7 +207,13 @@ jobs:
             build_character_memory/*.elf
             build_character_memory/*.map
             build_character_memory/*.log
+            build_character_memory/CMakeCache.txt
+            build_character_memory/sdkconfig
+            build_character_memory/compile_commands.json
             build_character_memory_phase/*.bin
             build_character_memory_phase/*.elf
             build_character_memory_phase/*.map
             build_character_memory_phase/*.log
+            build_character_memory_phase/CMakeCache.txt
+            build_character_memory_phase/sdkconfig
+            build_character_memory_phase/compile_commands.json

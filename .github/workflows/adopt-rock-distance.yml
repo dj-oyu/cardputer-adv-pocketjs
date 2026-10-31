@@ -108,7 +108,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_adopt -D SDKCONFIG="$PWD/build_adopt/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_MEGADEMO_TRACE=OFF build
+          idf.py -B build_adopt -D SDKCONFIG="$PWD/build_adopt/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           idf.py -B build_adopt size > build_adopt/size.log
           git diff --exit-code
           python3 - <<'PYTHON'

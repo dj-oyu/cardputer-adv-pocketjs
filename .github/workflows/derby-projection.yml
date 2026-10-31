@@ -103,12 +103,13 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_projection -DPOCKET_DERBY_COURSE_CACHE=${{ matrix.cache }} -DPOCKET_DERBY_PROJECT_BATCH=${{ matrix.batch }} -D KASANE_MEGADEMO_TRACE=OFF build
+          idf.py -B build_projection -DPOCKET_DERBY_COURSE_CACHE=${{ matrix.cache }} -DPOCKET_DERBY_PROJECT_BATCH=${{ matrix.batch }} -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           ccache -s || true
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=${{ matrix.cache }}' build_projection/CMakeCache.txt
           grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=${{ matrix.batch }}' build_projection/CMakeCache.txt
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=OFF' build_projection/CMakeCache.txt
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE_PIE_MIN:STRING=0' build_projection/CMakeCache.txt
+          grep -qx 'KASANE_MEMORY_PHASE_ONLY:BOOL=OFF' build_projection/CMakeCache.txt
           if [ '${{ matrix.cache }}' = OFF ] && [ '${{ matrix.batch }}' = OFF ]; then
             xtensa-esp-elf-nm -a build_projection/cardputer_pocketjs.elf > build_projection/symbols.txt
             if grep -E ' (derby_runner_affine|js_project|course_pose|pocket_derby_projection_counts)$' build_projection/symbols.txt; then exit 1; fi
