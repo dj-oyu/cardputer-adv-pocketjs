@@ -1,6 +1,6 @@
 # CLOUD MEMORY: 明示回収と実機A/C比較
 
-基準は3d31fb86。ここからの明示回収・組込みprovider・診断counterを次候補として扱う。実機7d21b302の実績を流用しない。実機メモリ値・GC時間・物理LCD品質は未測定である。
+基準は3d31fb86。ここからの明示回収・組込みprovider・診断counterを次候補として扱う。実機7d21b302の実績を流用しない。実機でのA/C完了比較・GC時間・物理LCD品質は未測定である。下記fde49fbの初期phase報告をsteadyや完了結果へ拡張しない。
 
 `fde49fb8348742058138fa573554e775ec0dd4f6`は**専用診断候補**で、TRACEのCMake既定をONにした。登録device builderが任意CMake引数/CI artifact指定を受け付けないためのsource側対応であり、通常リリース設定ではない。同headの24 workflows/82 jobsは成功し、実機担当へ引き渡した。この文書更新後の通常候補では既定OFFへ戻しているため、診断版の実測を新headの結果と呼ばない。既定fixtureはDEVICE_SHORT、旧1115drawのHOST_LONGと区別する。ba078e39のbuild成功と実機測定を混同しない。
 
@@ -27,9 +27,33 @@ HOST_LONGはwarm16/steady1000/burst32/clear1/recreate32/clear1/recreate32/clear1
 
 A/Cのcold比較には必ずCLOSE→fresh OPENする。先にAをロードしてCへ切り替える方法では、AのJS code/graph残留をcold条件へ混ぜる。A→CとC→Aの順、warm再runとfresh runを別に記録する。
 
+### fde49fb実機の中断と初期化分割
+
+実機担当から2026-10-31の報告を受領した。fde49fb診断版のflashは03:39:34に成功し、同BIN/ELFと3領域readbackを確認したとの報告。原本`hone110-fde-device-failure-result-20261031.json`はこちらでは未取得で、以下は原ログ独立照合済みの実測とはしない。
+
+AのSTART=85986ms、`cloudmem.loaded`=86234msで、loadまで248ms。その直後のvector→place→pose→updateで`InternalError: interrupted`となり、63draw/warmは完了しなかった。loaded時の報告値はguest gu84480B、allocator live77104B/high110284B、最大成功要求8496B、callback fail0、ESP free77544B/largest31744B/trace-window minimum36820B。callback fail0だけではQuickJS quota拒否を除外できず、これをOOMと断定しない。250ms turn watchdogとの近接から累積初回処理が有力候補だが、割込み理由の独立照合は未実施である。
+
+旧fixtureはENTERの1callbackで全chunk load→scene/model作成→binding/sample作成→最初のupdate/evaluate/render/commitまで行っていた。後続fixtureはload slot、Model、scene、binding、first drawを別callbackへ分け、setup中に演技tick/draw数を進めない。A/Cの空slotも揃え、再生成も同じ分割を使う。`loaded`は全chunk完了後・作成前、`create.begin/model/scene/created`はそれぞれの境界を示す。63/1115という成功draw条件は変更しない。個々の段階が実機250ms以内になる保証ではなく、watchdog/heap cap/GC条件は緩めない。
+
+分割版の最初のm32 SHORTは、Aが45draw後の再生成でquota拒否となった。canaryはquota5/allocator0、first request168B/used163752B。cold load用selectorを全load完了時に解放した次案も、再生成直後の更新でquota4/allocator0、request80B/used163816Bとなった。後者のA requested peakは147044B。Cだけが63draw×2を完了しても、この不完全なAとのA/C比較はFAILである。旧版のSHORT成功をこの分割版へ流用しない。
+
+次案はfailure/cancelの同じcleanup処理と初期化表示を共有し、private readoutは`setupStep`から状態を導出する。scene constructorより前に所有recordを確保し、生成後は既存fieldへの代入でactorを公開する。constructor後のrecord確保失敗で明示disposeの機会を失う隙間も除く。全chunk完了後はcold loaderを保持せず、warm再runは同数の空load slotを進む。参照保持・draw数・tick・capを減らす対策ではない。
+
+所有record/UIの修正だけの案もrequest80B/used163780B、quota4/allocator0でFAILした。最終案では初期化をframe内の1箇所へ置き、専用closureをなくし、入力recordは生成中に保持せず最初のsample時に確保する。再生成の開始は独立した待機callbackへ送るためrunごとに2 callback増えるが、A/Cで揃え、演技tick・成功draw・保持するdisposed scene/handleは同じである。各変更の節約量を単独測定したものではない。
+
+この最終案のm32 DEVICE_SHORTはA/C各63draw×2、各81turnでPASS。全frameのincremental/full-reference、A/C画像列一致、実行中の依存hash不変、終了guest0を確認した。requested peakはA146656B/C101224B、最大成功要求8496B/6607B。上の旧分割前SHORT記録との差はA+16B/C-12Bだが、変更別の寄与を切り分けた比較ではなく、allocatorのrequested量でありQuickJS会計の残量やESPの最大連続freeとは異なる。画像列SHA256は`9d9cc354358c7afd3bec1f715e1c3758cf66fd024ce69858d6f03875bc45d909`。失敗した3案もcache内の別directoryへ保存し、成功記録で上書きしない。
+
+同じ最終sourceのHOST_LONGもA/C各1115draw×2、各1133turnでPASS。全2230画像のA/C一致と全描画reference、依存hash不変、終了guest0を確認した。requested peakはA146740B、Cはrun1が101308B/run2が101312B、最大成功要求はSHORTと同じ。画像列SHA256は`4ccc1e196155f2aca5800c4f1120372269ad9c71b630ee865eeb1fdb7083abe3`。SHORTとLONGは別host binaryで、両profile内はそれぞれ同一binaryのA/C比較である。新しい分割fixtureの実機完了結果はまだない。
+
+エラー後のAPP_STOPPED/HOME_READY/JS0も報告されたが、broker cleanupは`teardown_failed/outcome_unknown`、後続HELLO timeoutがあり、その後のHELLO_READYにもTRACEの連続出力による`serial_not_quiet_before_command`が伴った。Cは選択入力まで到達せず未測定。この状態報告を安全な終了・C測定成功と読み替えない。装置の状態照合は実機担当の工程で、ここからreset/flash/別回復経路を実行した事実はない。
+
 ## 最小診断build
 
 `KASANE_MEGADEMO_TRACE=ON`で製品linkする。同一SHA・同一binary・160 KiB設定でA/Cを選ぶ。登録buildと同じ`idf.py -B output -D SDKCONFIG=output/sdkconfig build`のfresh構成で、CMakeCacheのTRACE=ONとguest compile define `POCKET_GUEST_ALLOCATOR_METRICS=1`を確認してから実機へ渡す。既存cacheのOFFを既定値だけで上書きできるとは仮定しない。通常版CIは`-D KASANE_MEGADEMO_TRACE=OFF`を明示する。trace OFFでは通常allocatorの余分なcounter処理/保存領域を除き、`memoryMark`も公開しない。比較appはその場合`METRICS UNAVAILABLE`を明示し、計測成功にしない。計測用binaryの時刻を通常buildの性能と呼ばない。
+
+制御経路を静かに保つ診断には、追加の`KASANE_MEMORY_PHASE_ONLY=ON`をTRACEと共に指定する。両optionの通常既定はOFF、既存TRACEだけのper-turn MDT/MDTJ動作は維持する。phase-onlyは反復MDT/MDTJとそのheapwalkを出さず、counterをdrainする。明示MMK、通常の低頻度描画集計・開始/終了・エラー通知は残す。HELLOを含む非計測appの待機turnでも反復MDTを出さない。BGCOSTとの併用やTRACEなしのphase-only指定はCMakeで拒否する。phase-onlyからper-frameのJS/render/send分布は得られず、残るKASANE_PAINTの30paint集計をMDTの代わりとしない。
+
+phase-onlyの`mn_scope=session`はguest session開始からのlocal minimumで、checkpointごとにはresetしない。通常MDTでは従来の`mn_scope=trace_window`を維持する。両scopeを同じ窓として比較しない。設定は別build directory/別SDKCONFIGで製品linkし、CMakeCacheとcompile defineを照合する。登録builderが任意引数を受理しない場合、必要な設定を持つ診断source候補を別SHAで用意する工程が残る。CI artifactや非正式なflashを迂回経路にせず、phase-only実機効果を未確認のまま成功とはしない。
 
 `pocket.app.memoryMark(label)`は診断専用。英数字と`._-:`、1..32文字のprimitive stringのみ。owner同期checkpointで新しいJS result objectやGC/heapwalkを作らず、`MMK`を1行出す。ラベル変換で小さな確保が生じる可能性と、ログ費用は別に残る。
 
@@ -40,7 +64,7 @@ A/Cのcold比較には必ずCLOSE→fresh OPENする。先にAをロードして
 | alloc / realloc / free_calls / fail | callback回数。failはallocator callbackの失敗で、QuickJS quota拒否とは別 |
 | cache | available/enabled/held bytes/hit/miss/flush。heldはguest live会計外 |
 | free / lg | INTERNAL\|8BITの空き/最大連続block |
-| mn / mn_scope | 既存MDT trace windowのlocal minimum。checkpointごとにresetしない |
+| mn / mn_scope | 通常MDTはtrace_window、phase-onlyはsessionのlocal minimum。checkpointごとにresetしない |
 | sample_us | counter/heap読取の時間。ラベル変換とログ出力を含まない |
 
 allocator operation counterは飽和する。cacheの既存uint32 counterはwrapする。highwaterはcallback境界でのusable量で、backend realloc内部の一時的な二重確保やallocator metadata全体を捕捉しない。guest quota拒否は既存OOM canaryで判別する。固定layoutのInstance arenaにfree-listはないためarena largestfreeはN/A。`malloc_size-memory_used_size`を断片化量とは呼ばない。

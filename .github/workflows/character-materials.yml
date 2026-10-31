@@ -69,7 +69,7 @@ jobs:
           python3 tools/character/test_fox_lifetime.py
           node tools/character/test_material_region.cjs
           python3 tools/character/test_material_study_inputs.py
-          python3 tools/test_guest_allocator_metrics.py
+          python3 tools/test_guest_allocator_metrics.py --quickjs
           node tools/ayatsuri/model/test_pack_model.cjs
           node tools/ayatsuri/model/builtin_asset.cjs
           node tools/ayatsuri/model/test_fox_face.cjs
@@ -94,6 +94,7 @@ jobs:
           python3 tools/kasane_contract/run_pocket_shape.py
           python3 tools/kasane_contract/run_proc_ellipsoid.py
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2
+          python3 tools/kasane_contract/run_character_app_host.py --source-plane
           python3 tools/kasane_contract/run_fox_app_host.py
           python3 tools/kasane_contract/run_fox_app_host.py --material-study mask-inset --capture-dir .cache/fox-material-asan
           python3 tools/kasane_contract/run_fox_app_host.py --material-study blend-mask-only --capture-dir .cache/fox-blend-material-asan
@@ -109,7 +110,9 @@ jobs:
           sudo apt-get install -y gcc-multilib
           python3 tools/ayatsuri/run_transform.py --m32
           python3 tools/ayatsuri/run_follow.py --m32
+          python3 tools/ayatsuri/model/run_model_contracts.py --m32
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2 --m32
+          python3 tools/kasane_contract/run_character_app_host.py --source-plane --m32
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --capture-dir .cache/fox-capture
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-inset --capture-dir .cache/fox-material-m32
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-mask-only --capture-dir .cache/fox-blend-material-m32
@@ -146,6 +149,8 @@ jobs:
             .cache/fox-app-asan-blend-mask-only/
             .cache/fox-app-m32-blend-mask-only/
             .cache/fox-local-plane-assets/
+            .cache/source-plane-render-*/
+            .cache/ayatsuri-model-contracts/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -173,6 +178,8 @@ jobs:
           idf.py -B build_character size > build_character/size.log
           idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON build
           idf.py -B build_character_memory size > build_character_memory/size.log
+          idf.py -B build_character_memory_phase -D SDKCONFIG="$PWD/build_character_memory_phase/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY=ON build
+          idf.py -B build_character_memory_phase size > build_character_memory_phase/size.log
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -192,3 +199,7 @@ jobs:
             build_character_memory/*.elf
             build_character_memory/*.map
             build_character_memory/*.log
+            build_character_memory_phase/*.bin
+            build_character_memory_phase/*.elf
+            build_character_memory_phase/*.map
+            build_character_memory_phase/*.log
