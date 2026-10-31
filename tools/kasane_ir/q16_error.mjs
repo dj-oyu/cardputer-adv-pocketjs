@@ -72,8 +72,9 @@ const X = {
 const litQ = v => { let q = 30; while (q > 0 && Math.abs(Math.round(v * 2 ** q)) > 2 ** 31 - 1) q--; return q; };
 
 // Q0 names (sec.8.3 rule 1): counts, colours and integer draw arguments,
-// and the counters of for loops (plan_js: let v = 0, then the last statement
-// of the repeat's body v += 1).
+// the counters of for loops (plan_js: let v = 0, then the last statement of
+// the repeat's body v += 1), and every name joined to one of those by a
+// plain name-to-name assignment.
 const INTS = {line: [2], plot: [2], cubic: [0, 1], linePattern: [2, 3, 4, 9]};
 function q0Names(ast) {
   const out = new Set();
@@ -87,8 +88,18 @@ function q0Names(ast) {
       walk(x.body);
     }
     if (x.k === 'draw') for (const i of INTS[x.f] ?? []) if (x.args[i]?.k === 'name') out.add(x.args[i].v);
+    if (x.k === 'decl') for (const d of x.d) if (d.e.k === 'name') links.push([d.n, d.e.v]);
+    if (x.k === 'assign' && x.o === '=' && x.e.k === 'name') links.push([x.n, x.e.v]);
   });
+  const links = [];
   walk(ast);
+  // Names joined by a plain name-to-name assignment share the type: one
+  // count or colour among them makes them all Q0 (const C0 = 0xffd9; cu = C0;
+  // line(x, y, cu)).
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [a, b] of links) if (out.has(a) !== out.has(b)) { out.add(a); out.add(b); grew = true; }
+  }
   return out;
 }
 
@@ -100,34 +111,39 @@ function emitFix(ast, params, qdecl) {
   const Q = n => ints.has(n) ? 0 : qdecl[n] ?? 16;
   const consts = [];
   const C = v => { consts.push(v); return `__c[${consts.length - 1}]`; };
+  // sec.8.3 rule 9: what sec.6.1 would refuse is a compile error, not a
+  // silent saturation.
+  const lit = (v, q) => { const r = Math.round(Math.abs(v) * 2 ** q); if (r > 2 ** 31 - 1) throw new Error(`literal ${v} does not fit Q${q}`); return lround(v, q); };
+  const S = s => { if (s > 62) throw new Error(`MUL shift ${s} over 62`); if (s < -31) throw new Error(`MUL shift ${s} under -31`); return s; };
+  const K = k => { if (Math.abs(k) > 31) throw new Error(`SHIFT ${k} outside -31..31`); return k; };
   const natural = e => e.k === 'name' ? Q(e.v) : e.k === 'num' ? null : 16;
   // A factor of *: [code, its Q].
   const factor = e => {
     if (e.k === 'name') return [e.v, Q(e.v)];
-    if (e.k === 'num') { const q = litQ(+e.lit); return [C(lround(+e.lit, q)), q]; }
+    if (e.k === 'num') { const q = litQ(+e.lit); return [C(lit(+e.lit, q)), q]; }
     return [g(e, 16), 16];
   };
   const g = (e, q) => {
     switch (e.k) {
-      case 'num': return C(lround(+e.lit, q));
-      case 'name': { const d = q - Q(e.v); return d ? `$.shift(${e.v}, ${d})` : e.v; }
+      case 'num': return C(lit(+e.lit, q));
+      case 'name': { const d = K(q - Q(e.v)); return d ? `$.shift(${e.v}, ${d})` : e.v; }
       case 'neg': return `$.sub(0n, ${g(e.a, q)})`;
       case '+': return `$.add(${g(e.a, q)}, ${g(e.b, q)})`;
       case '-': return `$.sub(${g(e.a, q)}, ${g(e.b, q)})`;
-      case '*': { const [a, qa] = factor(e.a), [b, qb] = factor(e.b); return `$.mul(${a}, ${b}, ${qa + qb - q})`; }
+      case '*': { const [a, qa] = factor(e.a), [b, qb] = factor(e.b); return `$.mul(${a}, ${b}, ${S(qa + qb - q)})`; }
       case '/': {
         const c = +e.b.lit, k = Math.log2(Math.abs(c));
         if (Number.isInteger(k) && k >= 0) {
           let body;
-          if (e.a.k === '*') { const [a, qa] = factor(e.a.a), [b, qb] = factor(e.a.b); body = `$.mul(${a}, ${b}, ${qa + qb - q + k})`; }
-          else body = `$.shift(${g(e.a, q)}, ${-k})`;
+          if (e.a.k === '*') { const [a, qa] = factor(e.a.a), [b, qb] = factor(e.a.b); body = `$.mul(${a}, ${b}, ${S(qa + qb - q + k)})`; }
+          else body = `$.shift(${g(e.a, q)}, ${K(-k)})`;
           return c < 0 ? `$.sub(0n, ${body})` : body;
         }
         return g({k: '*', a: e.a, b: {k: 'num', lit: String(1 / c)}}, q);
       }
       case 'call': {
         const s = `$.sin($.mul(${g(e.args[0], 16)}, ${TURN}n, 32))`;
-        return q === 16 ? s : `$.shift(${s}, ${q - 16})`;
+        return q === 16 ? s : `$.shift(${s}, ${K(q - 16)})`;
       }
     }
     throw new Error(e.k);
@@ -204,16 +220,19 @@ const FLOAT = {
 };
 
 // Coordinates in the order the plan hands them over; the VM's bounds.
-function recorder() {
+// fixed: the engine's test (shiki-spec.md sec.4.5): the pixel the value
+// lands on, floor(value + 0.5), is within -480..720.
+function recorder(fixed) {
   const xy = [];
-  const c = v => { if (!Number.isFinite(v) || v < -480 || v > 720) throw new Fail('INVALID'); xy.push(v); };
+  const out = fixed ? v => { const p = Math.floor(v + .5); return p < -480 || p > 720; } : v => !Number.isFinite(v) || v < -480 || v > 720;
+  const c = v => { if (out(v)) throw new Fail('INVALID'); xy.push(v); };
   return {xy, api: {
     move: (x, y) => { c(x); c(y); }, line: (x, y) => { c(x); c(y); }, plot: (x, y) => { c(x); c(y); },
     linePattern: (x, y) => { c(x); c(y); }, cubic: (n, col, ...q) => q.forEach(c),
   }};
 }
 function run(fn, mode, input, args) {
-  const r = recorder();
+  const r = recorder(mode === FIXM);
   try { fn(mode, r.api, Fail, input, args); } catch (e) { if (!(e instanceof Fail)) throw e; return {status: e.status, xy: r.xy}; }
   return {status: 'DONE', xy: r.xy};
 }
