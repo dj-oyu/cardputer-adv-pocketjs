@@ -138,3 +138,6 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 # As with the cache size above, an existing sdkconfig keeps its DIO line; edit
 # CONFIG_ESPTOOLPY_FLASHMODE_* there too (or start that build_* directory fresh).
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# MEASUREMENT ONLY (docs/kasane/shiki.md sec.4.5): reverted in the next commit.
+CONFIG_POCKET_SHIKI_MEMSTAT=y
