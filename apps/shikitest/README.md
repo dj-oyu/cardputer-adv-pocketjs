@@ -15,3 +15,7 @@
 ## 試験専用の面
 
 `pocket.shikiDebug` は仕様 §9 の API ではない。manifest で `kasane.shiki.debug` を要求したセッションにだけ入る（`pocket.derby` と同じ形）。1 回の `run` ごとに式と線分（約 11 KB）を確保して返す前に解放するので、通常のファームの `.bss` は増えない。
+
+## CYCLE BENCH（`local.cyclebench`）
+
+同じ試験専用の面の `pocket.shikiDebug.bench(i)` で、整数の命令（`mull`・`mulsh`・`quos` など、値の大きさ別）と、GCC が呼ぶ 64 ビットのライブラリ関数（`__divdi3` など）と、Shiki エンジンの命令 1 つ（`ksn_shiki_draw` の中）のサイクル数を測る。1 フレームに 1 ケースで、ログへ `CB ...` を 1 行ずつ出し、最後に `CB END`。方法は `main/hal/int_latency.c`、結果は [docs/perf/int-latency.md](../../docs/perf/int-latency.md)。これもメニューには出さず、USB broker の `app_session` で起動する。

@@ -482,6 +482,9 @@ extern const char stress_start[] asm("_binary_stress_js_start");
 // USB broker (native_apps below), never from the menu.
 extern const char shiki_test_start[] asm("_binary_shiki_test_js_start");
 extern const char shiki_test_end[] asm("_binary_shiki_test_js_end");
+// The integer instruction latency probe (apps/shikitest/cycle_bench.js), the same way.
+extern const char cycle_bench_start[] asm("_binary_cycle_bench_js_start");
+extern const char cycle_bench_end[] asm("_binary_cycle_bench_js_end");
 extern const char stress_end[] asm("_binary_stress_js_end");
 extern const char proc_megademo_start[] asm("_binary_proc_megademo_js_start");
 extern const char proc_megademo_end[] asm("_binary_proc_megademo_js_end");
@@ -649,6 +652,7 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,7),
     NATIVE_APP("local.stress","STRESS TEST",stress_start,stress_end,5),
     NATIVE_APP("local.shikitest","SHIKI TEST",shiki_test_start,shiki_test_end,5),
+    NATIVE_APP("local.cyclebench","CYCLE BENCH",cycle_bench_start,cycle_bench_end,5),
     NATIVE_APP("local.megademo","MEGADEMO",proc_megademo_start,proc_megademo_end,5),
     NATIVE_APP("local.gridlab","GRID LAB",grid_lab_start,grid_lab_end,5),
     NATIVE_APP("local.videolab","VIDEO LAB",video_lab_start,video_lab_end,5),

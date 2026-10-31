@@ -78,6 +78,13 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
+    // The integer instruction latency probe (apps/shikitest/cycle_bench.js,
+    // docs/perf/int-latency.md): not on the menu, started by the USB broker;
+    // it logs one line of cycle counts per case.
+    {.id="local.cyclebench", .title="CYCLE BENCH", .entry="apps/shikitest/cycle_bench.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
     // The procedural megademo is an ordinary foreground app. Its frame loop
     // wraps after 48 frames; leaving it with Back and reopening starts a new
     // session with fresh procedural plans.
