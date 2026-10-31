@@ -6,6 +6,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+// Counts this file's allocations when CONFIG_POCKET_SHIKI_MEMSTAT is on
+// (docs/kasane/shiki.md sec.4.5); nothing otherwise.
+#define SHIKI_MS_FILE SHIKI_MS_DERBY
+#include "shiki_memstat.h"
 
 /* DERBY WATCH's panning series (ser() in apps/derby/derby_pan.js as of vm/main
  * fac3552) translated to C, docs/apps/derby-ser-native.md. The JS is the

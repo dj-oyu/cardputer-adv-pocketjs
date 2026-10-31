@@ -97,6 +97,7 @@ static int64_t hp_eval_t0;
 #include "pet_hub.h"
 #include "pocket_derby.h"
 #include "pocket_shiki.h"
+#include "shiki_memstat.h"
 #include "pocket_shape.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
@@ -1056,6 +1057,9 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
+    // Before the surfaces free anything: the session's peaks (diagnostic
+    // builds only, shiki_memstat.h).
+    shiki_memstat_report();
     // Holds no guest values (docs/apps/derby-ser-native.md section 3).
     pocket_derby_reset();
     if(pocket_kasane_reset()){
@@ -1111,6 +1115,7 @@ void app_stop(void) {
     // After the teardown, so a refusal inside it is counted in this session.
     oomprobe_session_end("app");
 #endif
+    shiki_memstat_reset();
     ESP_LOGI("app","APP_STOPPED");
 }
 

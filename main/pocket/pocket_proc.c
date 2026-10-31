@@ -71,6 +71,10 @@ static int bg_last=-1;
 static struct { uint32_t n,cy; } bg_ab[2];
 static unsigned bg_ab_mode;
 #endif
+// Counts this file's allocations when CONFIG_POCKET_SHIKI_MEMSTAT is on
+// (docs/kasane/shiki.md sec.4.5); nothing otherwise.
+#define SHIKI_MS_FILE SHIKI_MS_PROC
+#include "shiki_memstat.h"
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
  * grows), so a released handle can never alias a later plan. Worst case with
