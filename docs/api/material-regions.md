@@ -10,6 +10,7 @@
 
 ```js
 const cheek = scene.add({
+  name: 'cheek',
   geometry: {kind: 'ellipsoid', radii: [26, 23, 18]},
   material: {color: 0xe47b30, roughness: 0.94, specular: 0.025},
   pattern: {kind: 'localPlane', normal: [-0.45, 0.86, 0.24],
