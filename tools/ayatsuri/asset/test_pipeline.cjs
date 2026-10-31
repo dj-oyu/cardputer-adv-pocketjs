@@ -36,6 +36,8 @@ function tests(output){
   assert.throws(()=>run(ir,{...profile,maxCollapses:0}),/SEARCH_BUDGET_EXCEEDED/);
   assert.throws(()=>run(ir,{...profile,maxTriangleTests:1}),/SEARCH_BUDGET_EXCEEDED/);
   const bumpy=importGlb(fixture(9,.2).glb);assert.throws(()=>run(bumpy,profile),/QUALITY_SURFACE/);
+  const curvedSource=fixture(9,.1),curvedProfile={...profile,quality:{maxSampleDistance:.01,maxNormalDegrees:8,minSilhouetteIoU:.97}},curved=run(importGlb(curvedSource.glb),curvedProfile);
+  assert(curved.report.finalErrors[0].distance.max>0);assert(curved.report.finalErrors[0].distance.max<.01);assert(curved.report.finalErrors[0].normalDegrees.max<8);assert.deepEqual(run(importGlb(curvedSource.glb),curvedProfile).bytes,curved.bytes);
   const offset=importGlb(fixture(3,1e-5).glb);for(const p of offset.surfaces[0].positions)p[2]+=.7;
   const broad={...profile,targetVertices:8,assetScale:1,quality:{...profile.quality,maxSampleDistance:1,maxNormalDegrees:180,minSilhouetteIoU:0}},composed=run(offset,broad).report;
   // A test-only threshold separates stage errors from their accumulated error.
@@ -47,6 +49,7 @@ function tests(output){
   const nonmanifold=structuredClone(s);nonmanifold.triangles.push(s.triangles[0].slice());assert.throws(()=>reduceSurface(nonmanifold,{targetVertices:49}),/NONMANIFOLD/);
   if(output){fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'source.glb'),glb);fs.writeFileSync(path.join(output,'editable-source.json'),JSON.stringify(editable,null,2)+'\n');fs.writeFileSync(path.join(output,'profile.json'),JSON.stringify(profile,null,2)+'\n');
     fs.writeFileSync(path.join(output,'candidate.aynm'),a.bytes);fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(a.report,null,2)+'\n');
+    fs.writeFileSync(path.join(output,'curved-source.glb'),curvedSource.glb);fs.writeFileSync(path.join(output,'curved-candidate.aynm'),curved.bytes);fs.writeFileSync(path.join(output,'curved-profile.json'),JSON.stringify(curvedProfile,null,2)+'\n');fs.writeFileSync(path.join(output,'curved-report.json'),JSON.stringify(curved.report,null,2)+'\n');
     const target=path.join(fs.mkdtempSync(path.join(output,'cli-test-')),'candidate'),first=child.spawnSync(process.execPath,[path.join(__dirname,'pipeline.cjs'),path.join(output,'source.glb'),path.join(output,'profile.json'),target],{encoding:'utf8'});assert.equal(first.status,0,first.stderr||String(first.error)||first.stdout);
     assert.equal(child.spawnSync(process.execPath,[path.join(__dirname,'pipeline.cjs'),path.join(output,'source.glb'),path.join(output,'profile.json'),target],{encoding:'utf8'}).status,1);assert.deepEqual(fs.readFileSync(path.join(target,'candidate.aynm')),a.bytes);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target,'scene.ir.json'),'utf8')),ir);

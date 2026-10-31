@@ -17,6 +17,10 @@ directoryを排他的に確保し、immutable filesを書き、全fileの長さ/
 Windows OneDriveでのdirectory rename失敗をsleep/retryで隠さず、このcommit境界を使う。
 人工sourceは81頂点の平面gridで、GLBに加え編集可能なpositions/normals/indicesのJSONを保存する。
 これは高自由度sourceの読み込み・縮小・分割・pack境界の試験であり、旧狐の係数調整を再開するものではない。
+平面に加えて曲面gridの正例も生成する（`curved-*`）。source→最終packの観測距離最大
+0.009324 source metres、normal角最大3.353°、9viewのsilhouette IoUは1。
+この正例のprofileは距離.01/normal8°/IoU.97で事前指定し、厳しい平面profileでの曲面拒否負例も残す。
+これらは人工曲面の縮小誤差であり、狐の造形や実rendererの品質ではない。
 
 ## 現在通る経路
 
