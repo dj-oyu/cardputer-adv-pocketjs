@@ -128,6 +128,7 @@ static JSValue js_run(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     const bool data=argc>3&&!JS_IsUndefined(argv[3]);
     regions_t *rs=calloc(1,sizeof *rs);
     if(!rs)return fail(ctx,POCKET_ERR_OUT_OF_MEMORY,"no room for a run");
+    rs->well=true;                                 /* no data: no region to refuse */
     if(data&&!read_regions(ctx,argv[3],rs)){
         free_regions(rs);free(rs);
         return fail(ctx,POCKET_ERR_INVALID_ARGUMENT,"expected data as [{t, q, k, v} | index, ...]");
