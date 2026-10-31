@@ -439,7 +439,7 @@
     }
   },
   "frontRatios": {
-    "definition": "2D manual image-space estimates; x right/y down. Width is outer cheek-tip span, height forehead surface top to chin, excludes ears and separate forelock tuft tip. Not a recovered 3D measurement.",
+    "definition": "2D manual image-space estimates; x right/y down. Width is outer cheek-tip span, height visible upper boundary to chin, excludes ears and separately marked forelock tip. The upper boundary still includes hair flow and does not identify the smooth skull surface top. Historical forehead_top_no_ears keys are retained. Not a recovered 3D measurement.",
     "face_width_px": 172,
     "face_height_px": 109,
     "width_over_height": 1.5779816513761469,
@@ -453,7 +453,7 @@
   "notesJa": [
     "目視手動近似。点の目安誤差は輪郭/眼/鼻で概ね±3px、毛先/白毛境界/額の定義で±5〜8px。自動抽出や精密測定ではない。",
     "複数の設定画は厳密な投影整合を持たない。FRONT自体も瞳・頬・鼻に軽い非対称があり、3/4の眼間隔を正面同一3Dの射影条件として強制しない。",
-    "顔幅は耳幅でも頭蓋の球幅でもなく、左右のクリーム頬の毛先を含む。額頂点は橙色の額面と前髪房の先端を分けて記録した。",
+    "顔幅は耳幅でも頭蓋の球幅でもなく、左右のクリーム頬の毛先を含む。上端y82は別記した前髪先端y63とは異なるが、毛束・毛流れを含む見かけ輪郭であり滑らかな頭蓋頂点とは断定できない。旧キー名は計測履歴として保持し、頭蓋surface topへの直接変換には使わない。",
     "3/4では目の横から頬が広がり、口吻は鼻へ短く絞られる。鼻へ続く橙色の太い円筒や縦長の鼻梁棒を作らない。",
     "眼の上から額までを大きな半球ドームにしない。大眼は上顔面の下寄りに十分な幅を占め、眉から額上端の帯は耳を除けば比較的短い。",
     "白毛は左右の独立した球ではない。眼下から左右の頬毛へ連続する広い下顔面で、中央の鼻下へ寄りながら顎の下まで回る。",
