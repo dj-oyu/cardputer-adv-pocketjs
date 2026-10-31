@@ -63,10 +63,15 @@ if (typeof pocket !== 'undefined') {
   const D = pocket.shikiDebug, N = 600, SEED = 1, next = shikiGen(SEED);
   let i = 0;
   console.log('SK BEGIN seed ' + SEED + ' cases ' + N);
+  // A case takes 30-60 ms of JS here, and a turn over budget is interrupted:
+  // stop at 60 ms. Four cases a line keep 600 under the broker's 256 lines.
+  let out = '';
   globalThis.frame = function () {
-    for (let k = 0; k < 20 && i < N; k++, i++) {
+    const t0 = Date.now();
+    while (i < N && Date.now() - t0 < 60) {
       const c = next();
-      console.log('SK ' + i + ' ' + shikiHash(c.line) + ' ' + D.run(c.b, c.args, c.inp));
+      out += (out ? ' ' : 'SK ' + i + ' ') + shikiHash(c.line) + ' ' + D.run(c.b, c.args, c.inp);
+      if (++i % 4 === 0 || i === N) { console.log(out); out = ''; }
     }
     if (i === N) { console.log('SK END ' + N); i++; }
   };

@@ -7,8 +7,8 @@
 // generator and hash are defined), makes the same cases the device made,
 // runs them through the C engine (tools/kasane_contract/shiki_run.c, ASan)
 // and the host reference (tools/kasane_ir/shiki_ref.mjs), which must agree,
-// and compares every "SK <i> <case hash> <result hash> <status>" line of the
-// device's log with them:
+// and compares every case of the device's log ("SK <first> <case hash>
+// <result hash> <status> ...", four cases a line) with them:
 //   case hash differs   the device's JS made a different case (QuickJS and
 //                       Node disagree on the generator's arithmetic or on
 //                       String(number)); the result is then not compared.
@@ -51,8 +51,11 @@ const logFile = argv.find(a => !a.startsWith('--') && a !== opt('--seed') && a !
 if (!logFile) throw new Error('usage: shiki_device.mjs LOG.txt | --expect');
 const got = new Map();
 for (const raw of fs.readFileSync(logFile, 'utf8').split('\n')) {
-  const m = /SK (\d+) ([0-9a-f]{8}) ([0-9a-f]{8}) ([A-Z]+)/.exec(raw);
-  if (m) got.set(Number(m[1]), m[0]);
+  // "SK <first> (<case hash> <result hash> <status>)+": consecutive cases.
+  const m = /SK (\d+)((?: [0-9a-f]{8} [0-9a-f]{8} [A-Z]+)+)/.exec(raw);
+  if (!m) continue;
+  const t = m[2].trim().split(' ');
+  for (let k = 0; k < t.length; k += 3) got.set(Number(m[1]) + k / 3, `SK ${Number(m[1]) + k / 3} ${t[k]} ${t[k + 1]} ${t[k + 2]}`);
 }
 let caseBad = 0, resultBad = 0, missing = 0;
 for (let i = 0; i < N; i++) {

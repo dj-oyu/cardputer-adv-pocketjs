@@ -5,7 +5,7 @@
 ## 流れ
 
 1. アプリが決まったシード（`SEED`）でランダムな式を `N` 本作る（`shikiGen`）。式の 2 割はバイト列を 1 ビット壊して、登録の拒否も比べる。
-2. 1 本ごとに試験専用の面 `pocket.shikiDebug.run(code, args, inputs)` で登録と draw を 1 回行い、ログへ `SK <番号> <ケースの行のハッシュ> <結果の行のハッシュ> <終わり方>` を出す。1 フレームに 20 本、最後に `SK END`。
+2. 1 本ごとに試験専用の面 `pocket.shikiDebug.run(code, args, inputs)` で登録と draw を 1 回行い、ログへ `SK <最初の番号> <ケースの行のハッシュ> <結果の行のハッシュ> <終わり方> ...` を 4 本ずつ 1 行で出す（broker のログは 1 回 256 行まで）。1 本に実機の JS で 30〜60 ms かかり、ターンが長すぎると中断される（`InternalError: interrupted`）ので、1 フレームは 60 ms で切る。最後に `SK END`。
 3. host で `node tools/kasane_ir/shiki_device.mjs ログ.txt`。このファイルをそのまま Node で読んで同じケースを作り、C の実行器と参照実装（`tools/kasane_ir/shiki_ref.mjs`）の結果の行のハッシュと比べる。
 
 ## なぜハッシュか
