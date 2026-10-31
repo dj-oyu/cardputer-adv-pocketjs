@@ -1,5 +1,6 @@
-// DERBY's panning rail (prail) and turf stripes (pt) as @shiki would take
-// them (docs/kasane/shiki-spec.md sec.8.3, shiki.md sec.5.6). Not shipped:
+// DERBY's panning rail (prail) and turf stripes (pt), and the mowing stripes
+// (turf), as @shiki would take them (docs/kasane/shiki-spec.md sec.8.3,
+// shiki.md sec.5.6). Not shipped:
 // the app runs apps/derby/derby_prog.js. tools/kasane_ir/q16_error.mjs --alt
 // runs these under the spec's fixed point and compares them with the
 // originals in double.
@@ -56,5 +57,19 @@ function pt(green) {
     const n2 = n1 * (pz * n1 + 2);
     const n3 = n2 * (pz * n2 + 2);
     near = n3 * (pz * n3 + 2);
+  }
+}
+
+// turf: the shipped function with @q phase=0. green is a colour (Q0, rule
+// 1), and 512 + phase * 288 gives it a Q16 input otherwise, which rule 9
+// refuses: the writer says that phase is a whole number (0 or 1).
+/** @plan turf inputs: x0, x1, dx0, dx1, y0, y1, stripes, phase
+ *  @q phase=0 */
+function turf() {
+  let near = x0, far = x1, green = 512 + phase * 288;
+  for (let j0 = 0; j0 < stripes; j0++) {
+    move(near, y0); line(far, y1, green);
+    near += dx0; far += dx1;
+    green = 1312 - green;
   }
 }

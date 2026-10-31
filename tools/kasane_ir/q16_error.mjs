@@ -108,7 +108,21 @@ function q0Names(ast) {
 function emitFix(ast, params, qdecl) {
   const ints = q0Names(ast);
   for (const [n, q] of Object.entries(qdecl)) if (ints.has(n) && q !== 0) throw new Error(`@q ${n}=${q}: ${n} is a count, colour or loop variable (Q0)`);
+  // sec.8.3 rule 9: a Q0 name must not be given a value with a fraction (a
+  // non-integer literal, a name that is not Q0, sin or a division), which Q0
+  // would drop without a word.
   const Q = n => ints.has(n) ? 0 : qdecl[n] ?? 16;
+  const fractional = e => e.k === 'num' ? !Number.isInteger(+e.lit) : e.k === 'name' ? Q(e.v) !== 0 :
+    e.k === 'call' || e.k === '/' || (e.a && fractional(e.a)) || (e.b && fractional(e.b));
+  const check = list => list.forEach(x => {
+    if (x.k === 'decl') for (const d of x.d) if (ints.has(d.n) && fractional(d.e)) throw new Error(`${d.n} is Q0 (sec.8.3 rule 1) but is given a fraction`);
+    if (x.k === 'assign' && ints.has(x.n) && fractional(x.e)) throw new Error(`${x.n} is Q0 (sec.8.3 rule 1) but is given a fraction`);
+    if (x.k === 'repeat') {
+      if (x.n.k === 'num' && !(Number.isInteger(+x.n.lit) && +x.n.lit >= 1 && +x.n.lit <= 255)) throw new Error(`REPEAT ${x.n.lit} outside 1..255`);
+      check(x.body);
+    }
+  });
+  check(ast);
   const consts = [];
   const C = v => { consts.push(v); return `__c[${consts.length - 1}]`; };
   // sec.8.3 rule 9: what sec.6.1 would refuse is a compile error, not a
@@ -256,7 +270,11 @@ const load = file => {
   const text = fs.readFileSync(file, 'utf8'), q = qdecls(text);
   return new Map(findPlans(text, path.basename(file)).map(p => {
     const ast = planAst(p);
-    return [p.name, {plan: p, float: emitFloat(ast, p.params), fix: emitFix(ast, p.params, q.get(p.name) ?? {})}];
+    // fix compiles when first run: a plan replaced by --alt is never compiled
+    // here, so its rule-9 errors (which the alternative answers) do not stop
+    // the run.
+    let fixFn = null;
+    return [p.name, {plan: p, float: emitFloat(ast, p.params), get fix() { return fixFn ??= emitFix(ast, p.params, q.get(p.name) ?? {}); }}];
   }));
 };
 const plans = load(plansFile), alt = altFile ? load(altFile) : new Map();
