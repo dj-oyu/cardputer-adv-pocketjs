@@ -12,6 +12,24 @@ from run_megademo_app_host import ROOT, build
 sys.path.insert(0, str(ROOT / 'tools/ayatsuri/model'))
 from run_model_study import compile_sources, compiler_identity, content_key
 
+COMPILED_ASSETS = ROOT / '.cache/fox-compiled-assets'
+COMPILED_NAMES = {'compiled':'fox-patch-compiled', **{'compiled-'+v:'fox-patch-'+v for v in ('eye','mask','shape','combined')}}
+
+def generate_compiled_assets():
+    subprocess.run(['node','tools/ayatsuri/model/export_fox_patch.cjs'],cwd=ROOT,check=True)
+
+def compiled_header(cache):
+    lines=[]
+    for index,name in enumerate(COMPILED_NAMES.values()):
+        data=(COMPILED_ASSETS/(name+'.aynm')).read_bytes()
+        lines.append('static const uint8_t fox_compiled_'+str(index)+'[]={'+','.join(str(b) for b in data)+'};')
+    lines.append('static bool fox_compiled_asset(const char *name,const uint8_t **data,size_t *bytes){')
+    for index,name in enumerate(COMPILED_NAMES.values()):
+        lines.append('if(!strcmp(name,"'+name+'")){*data=fox_compiled_'+str(index)+';*bytes=sizeof fox_compiled_'+str(index)+';return true;}')
+    lines.append('return false;}')
+    cache.mkdir(parents=True,exist_ok=True)
+    (cache/'fox_compiled_assets.inc').write_text('\n'.join(lines)+'\n')
+
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -21,9 +39,13 @@ def inputs():
     result = compile_sources(ROOT)
     for name in ('apps/lib/ayatsuri_model.js', 'apps/lib/ayatsuri_clip.js', 'apps/lib/ayatsuri_visibility.js',
                  'tools/character/fox_patch_fixture.js', 'tools/character/fox_retopology_fixture.js',
+                 'tools/character/fox_compiled_patch_fixture.js', 'apps/fox3d/fox_sheet_scene.js',
                  'tools/kasane_contract/test_fox_patch_host.c',
                  'tools/kasane_contract/run_fox_patch_host.py'):
         result[name] = sha(ROOT / name)
+    if COMPILED_ASSETS.exists():
+        for path in sorted(COMPILED_ASSETS.iterdir()):
+            if path.is_file():result[path.relative_to(ROOT).as_posix()]=sha(path)
     return result
 
 
@@ -41,7 +63,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32', action='store_true')
     parser.add_argument('--capture-dir', type=Path)
-    parser.add_argument('--variant',choices=('baseline','unlit','clay','dense-clay','dense','socket','socket-only','gouraud','gouraud-socket','retopology','retopology-clay'),default='baseline')
+    parser.add_argument('--compiled-provider',action='store_true',help='use the same native-asset binary for a source-A comparison')
+    parser.add_argument('--variant',choices=('baseline','unlit','clay','dense-clay','dense','socket','socket-only','gouraud','gouraud-socket','retopology','retopology-clay',*COMPILED_NAMES),default='baseline')
     args = parser.parse_args()
     if sys.platform == 'win32':
         parser.error('Use Linux/WSL for ASan or the existing m32 sysroot')
@@ -54,6 +77,14 @@ def main():
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',
                UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
     env['FOX_PATCH_VARIANT']=args.variant
+    compiled_provider=args.compiled_provider or args.variant in COMPILED_NAMES
+    if compiled_provider:
+        generate_compiled_assets()
+        flags.append('-DAYATSURI_FOX_COMPILED_STUDY')
+    if args.variant in COMPILED_NAMES:
+        name=COMPILED_NAMES[args.variant]
+        env['FOX_PATCH_COMPILED_META']=str(COMPILED_ASSETS/(name+'_data.js'))
+        env['FOX_PATCH_COMPILED_ASSET']=name
     if args.m32:
         env.setdefault('M32_SYSROOT', '/tmp/m32sys')
         flags += subprocess.check_output(['bash', 'tools/vmtest/m32_sysroot.sh'],
@@ -69,10 +100,12 @@ def main():
            if k.startswith(('components/quickjs-ng/', 'components/pocketjs_guest/include/'))
            or k == 'tools/kasane_contract/run_megademo_app_host.py'}
     key = content_key(qjs, flags, 'fox-patch-host-v1', toolchain)
-    binary = build(flags, ROOT / '.cache/fox-patch-builds' / profile / key[:16], 'tools/kasane_contract/test_fox_patch_host.c')
+    build_cache=ROOT / '.cache/fox-patch-builds' / profile / key[:16]
+    if compiled_provider:compiled_header(build_cache)
+    binary = build(flags, build_cache, 'tools/kasane_contract/test_fox_patch_host.c')
     binary_before = sha(binary)
     generated = {p.name: sha(p) for p in binary.parent.iterdir()
-                 if p.is_file() and p.suffix in ('.h', '.c', '.o')}
+                 if p.is_file() and p.suffix in ('.h', '.c', '.o', '.inc')}
     runs = []
     for index in range(2):
         folder = captures / f'run-{index}'
@@ -126,12 +159,12 @@ def main():
                          and complete and profile_ok and lifecycle_ok and len(timings) == 4))
     unchanged = inputs() == before and sha(binary) == binary_before
     generated_after = {p.name: sha(p) for p in binary.parent.iterdir()
-                       if p.is_file() and p.suffix in ('.h', '.c', '.o')}
+                       if p.is_file() and p.suffix in ('.h', '.c', '.o', '.inc')}
     unchanged = unchanged and generated_after == generated
     repeated = runs[0]['image_sha256'] == runs[1]['image_sha256'] and runs[0]['frame_hashes'] == runs[1]['frame_hashes']
     proof = dict(kind='HOST SIMULATION', device_capture=False, device_fps_claim=False,
                  passed=all(r['passed'] for r in runs) and unchanged and repeated,
-                 profile=profile, variant=args.variant, cap=163840 if args.m32 else None,
+                 profile=profile, variant=args.variant, compiled_provider=compiled_provider, cap=163840 if args.m32 else None,
                  forced_frame_gc=False, captures=str(captures), runs=runs,
                  source_sha256=before, sources_and_artifacts_unchanged=unchanged,
                  binary=str(binary), binary_sha256=binary_before,

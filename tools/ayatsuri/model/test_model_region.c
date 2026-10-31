@@ -29,7 +29,9 @@ int main(int argc,char **argv){
     assert(model.slot_bytes==plain.slot_bytes&&ayatsuri_model_instance_bytes(&model)==ayatsuri_model_instance_bytes(&plain));
     assert(sizeof(ayatsuri_model_section)==8);
     typedef struct {const uint8_t *data;uint32_t bytes;uint16_t node_count,packet_count;uint32_t slot_bytes;ayatsuri_model_section section[7];} old_model_layout;
-    assert(sizeof(ayatsuri_model)==sizeof(old_model_layout)+8);
+    /* Seven base sections plus localPlane and four required mesh sections.
+     * Existing per-node work remains unchanged; descriptor metadata grows 40B. */
+    assert(sizeof(ayatsuri_model)==sizeof(old_model_layout)+5*sizeof(ayatsuri_model_section));
     uint8_t *mut=malloc(bytes),*snapshot=malloc(bytes);assert(mut&&snapshot);memcpy(snapshot,p,bytes);
     const uint32_t start=model.section[7].offset,dir=32+7*20;
     for(size_t n=0;n<bytes;n++)reject(p,n);

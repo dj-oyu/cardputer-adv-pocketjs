@@ -19,6 +19,7 @@
 | [blended-surfaces.md](blended-surfaces.md) | 造形の縦切り | 汎用の連続前面ブレンド、ambient RGB、同画素のpacked楕円体と借用/資源制約 |
 | [material-regions.md](material-regions.md) | 最小材質領域 | 同じ楕円体のbody-local面で2色を分離、共通法線と艶、native共有資産と範囲 |
 | [character-utility.md](character-utility.md) | 実験版 | キャラクターの配置・材質・身体座標の模様・世界光・視点を分離するJS utility。縦切りの実装範囲・依存更新・資源と未達品質を明示 |
+| [ayatsuri-native-mesh.md](ayatsuri-native-mesh.md) | native資産の最小拡張 | 固定mesh/material/topologyと個体workの分離、required sections、Gouraud提出と寿命 |
 | [ayatsuri-visibility.md](ayatsuri-visibility.md) | 最小utility | 投影後の表面選択、明示的painter順、所有権と失敗時不変性。一般Z遮蔽とは区別 |
 | [ayatsuri-clip.md](ayatsuri-clip.md) | 最小adapter | 同frameの3D開口投影と解析楕円体の凸clip。失敗・EMPTY・資源寿命と未対応depthを分離 |
 | [backlog.md](backlog.md) | backlog | BLE、Opus の採否、SD の帯域、PC bridge の wire 形式など |

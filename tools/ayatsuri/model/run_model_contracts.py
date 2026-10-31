@@ -43,6 +43,16 @@ def main():
     cache.mkdir(parents=True, exist_ok=True)
     # A failed rerun must never leave an older successful proof in this folder.
     (cache / 'result.json').unlink(missing_ok=True)
+    # Guard all compile inputs and runtime chunks before export/build. Generated
+    # fixture files live in .cache and are captured separately before execution.
+    from run_model_study import compile_sources
+    def input_hashes():
+        result=compile_sources(ROOT)
+        for directory in ('apps/lib','apps/character'):
+            for source in (ROOT/directory).rglob('*.js'):
+                result[source.relative_to(ROOT).as_posix()]=digest(source)
+        return result
+    before_inputs=input_hashes()
     commands = []
 
     def run(command, log=None):
@@ -60,9 +70,10 @@ def main():
 
     # The compiler's fixture export is pinned to its recorded source commit.
     run([node, 'tools/ayatsuri/model/test_pack_model.cjs'], 'pack.log')
+    run([node, 'tools/ayatsuri/model/test_pack_mesh.cjs'], 'pack-mesh.log')
     run([node, 'tools/ayatsuri/model/pack_model.cjs', '.cache/ayatsuri-native/cloud.aynm'], 'export.log')
     fixtures = [ROOT / '.cache/ayatsuri-native' / name for name in
-                ('tiny.aynm', 'cloud.aynm', 'region.aynm', 'region-plain.aynm', 'blend-region.aynm', 'blend-region-plain.aynm', 'source-plane.aynm')]
+                ('tiny.aynm', 'cloud.aynm', 'region.aynm', 'region-plain.aynm', 'blend-region.aynm', 'blend-region-plain.aynm', 'source-plane.aynm', 'mesh.aynm')]
     extra = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
     if args.m32:
         # The helper and all executions share this process/call; /tmp can be
@@ -99,45 +110,59 @@ def main():
             temporary.replace(obj)
         objects.append(obj)
     core = ROOT / 'main/ayatsuri/ayatsuri_model.c'
+    visibility = ROOT / 'main/ayatsuri/ayatsuri_visibility.c'
     core_test = ROOT / 'tools/ayatsuri/model/test_model_core.c'
+    mesh_test = ROOT / 'tools/ayatsuri/model/test_model_mesh.c'
     region_test = ROOT / 'tools/ayatsuri/model/test_model_region.c'
     blend_region_test = ROOT / 'tools/ayatsuri/model/test_model_blend_region.c'
     qjs_test = ROOT / 'tools/ayatsuri/model/test_model_qjs.c'
     core_binary, qjs_binary = cache / 'test-model-core', cache / 'test-model-qjs'
     strict = ['-Wall', '-Wextra', '-Werror']
-    run([compiler, *flags, *strict, *includes, core, core_test, '-lm', '-o', core_binary])
+    run([compiler, *flags, *strict, *includes, core, visibility, core_test, '-lm', '-o', core_binary])
+    mesh_binary = cache / 'test-model-mesh'
+    run([compiler, *flags, *strict, *includes, core, visibility, mesh_test, '-lm', '-o', mesh_binary])
     region_binary = cache / 'test-model-region'
-    run([compiler, *flags, *strict, *includes, core, region_test, '-lm', '-o', region_binary])
+    run([compiler, *flags, *strict, *includes, core, visibility, region_test, '-lm', '-o', region_binary])
     blend_region_binary = cache / 'test-model-blend-region'
-    run([compiler, *flags, *strict, *includes, core, blend_region_test, '-lm', '-o', blend_region_binary])
+    run([compiler, *flags, *strict, *includes, core, visibility, blend_region_test, '-lm', '-o', blend_region_binary])
     renderer = ROOT / 'main/ui/kasane/ksn_procedural.c'
-    run([compiler, *flags, *strict, *defines, *includes, core, renderer, qjs_test, *objects, '-lm', '-o', qjs_binary])
+    run([compiler, *flags, *strict, *defines, *includes, core, visibility, renderer, qjs_test, *objects, '-lm', '-o', qjs_binary])
     source_plane_test = ROOT / 'tools/ayatsuri/model/test_source_plane_qjs.c'
     source_plane_binary = cache / 'test-source-plane-qjs'
-    run([compiler, *flags, *strict, *defines, *includes, core, renderer, source_plane_test, *objects, '-lm', '-o', source_plane_binary])
+    run([compiler, *flags, *strict, *defines, *includes, core, visibility, renderer, source_plane_test, *objects, '-lm', '-o', source_plane_binary])
+    binaries=[core_binary,mesh_binary,region_binary,blend_region_binary,qjs_binary,source_plane_binary]
+    artifacts=binaries+objects+fixtures
+    before_artifacts={str(p.relative_to(ROOT)):digest(p) for p in artifacts}
+    run([mesh_binary, fixtures[7]], 'mesh.log')
     run([core_binary, fixtures[1]], 'core.log')  # Core fixture asserts the 19-node cloud.
     run([region_binary, fixtures[2], fixtures[3]], 'region.log')
     run([blend_region_binary, fixtures[4], fixtures[5]], 'blend-region.log')
     run([qjs_binary, fixtures[0]], 'qjs-tiny.log')
     run([qjs_binary, fixtures[1]], 'qjs-cloud.log')
     run([source_plane_binary, fixtures[6]], 'source-plane-qjs.log')
-    sources = [core, ROOT / 'main/ayatsuri/ayatsuri_model.h',
+    sources = [core, visibility, ROOT / 'main/ayatsuri/ayatsuri_visibility.h',
+               ROOT / 'main/ayatsuri/ayatsuri_model.h',
                ROOT / 'main/pocket/pocket_api.h', ROOT / 'main/pocket/pocket_class_registry.h',
-               ROOT / 'main/ayatsuri/ayatsuri_transform.h',
-               ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, region_test, blend_region_test, qjs_test,
+               ROOT / 'main/ayatsuri/ayatsuri_transform.h', ROOT / 'main/ayatsuri/ayatsuri_shade.h',
+               ROOT / 'main/pocket/pocket_ayatsuri_model.inc', core_test, mesh_test, region_test, blend_region_test, qjs_test,
                renderer, ROOT / 'main/ui/kasane/ksn_procedural.h',
                ROOT / 'apps/lib/ayatsuri_model.js',
                ROOT / 'tools/ayatsuri/model/test_model_qjs.js', Path(__file__).resolve()]
-    sources += [ROOT / 'tools/ayatsuri/model/pack_model.cjs', ROOT / 'tools/ayatsuri/model/test_pack_model.cjs']
+    sources += [ROOT / 'tools/ayatsuri/model/pack_model.cjs', ROOT / 'tools/ayatsuri/model/test_pack_model.cjs',
+                ROOT / 'tools/ayatsuri/model/test_pack_mesh.cjs']
     sources += [source_plane_test, ROOT / 'tools/ayatsuri/model/test_source_plane_qjs.js',
                 ROOT / 'apps/character/character.js', ROOT / 'apps/character/character_blend.js',
                 ROOT / 'apps/lib/ayatsuri_local_plane.js']
-    proof = dict(kind='HOST SIMULATION', passed=True, profile=profile,
+    unchanged=before_inputs==input_hashes() and before_artifacts=={str(p.relative_to(ROOT)):digest(p) for p in artifacts}
+    proof = dict(kind='HOST SIMULATION', passed=unchanged, profile=profile,
+                 inputs_unchanged_during_run=unchanged, input_sha256=before_inputs,
+                 binary_object_fixture_sha256=before_artifacts,
                  compiler=version.splitlines()[0], flags=flags, commands=commands,
                  qjs_cache_key=key.hexdigest(),
                  source_sha256={str(p.relative_to(ROOT)): digest(p) for p in sources},
                  fixture_sha256={p.name: digest(p) for p in fixtures})
     (cache / 'result.json').write_text(json.dumps(proof, indent=2) + '\n')
+    if not unchanged:raise SystemExit('AYNM inputs/artifacts changed during run')
     print('AYNM_CONTRACTS_PASS', profile, cache / 'result.json', flush=True)
 
 

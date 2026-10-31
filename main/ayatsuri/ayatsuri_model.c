@@ -1,5 +1,8 @@
 #include "ayatsuri_model.h"
 #include "ayatsuri_transform.h"
+#include "ayatsuri_visibility.h"
+#include "ayatsuri_shade.h"
+#include "../ui/kasane/ksn_procedural.h"
 #include <limits.h>
 
 typedef struct {
@@ -28,12 +31,54 @@ static const uint8_t *node_region(const ayatsuri_model *m,unsigned id){
     return NULL;
 }
 static unsigned node_slot_bytes(const ayatsuri_model *m,unsigned id,const uint8_t *node){
+    if(node[2]==3){const uint8_t *d=row(m,9,m16(node+4),32);
+        return (84u+sizeof(ksn_proc_gouraud_patch)+12u*m16(d+2)+7u)&~7u;}
     return slot_bytes(node)+(node[2]==2&&node_region(m,id)?24u:0u);
 }
 static bool float_rows_valid(const uint8_t *data,uint32_t count,unsigned floats,unsigned positive_start){
     for(uint32_t i=0;i<count;++i)for(unsigned k=0;k<floats;++k){
         const float value=mf(data+(i*floats+k)*4);
         if(!isfinite(value)||(k>=positive_start&&!(value>0)))return false;
+    }
+    return true;
+}
+/* Every mesh row is validated, including unused cold rows. Offsets are row
+ * indices, not pointers; the original byte span may be unaligned. */
+static bool meshes_valid(const ayatsuri_model *m){
+    for(uint32_t k=0;k<m->section[9].count;k++){
+        const uint8_t *v=row(m,10,k,28);double length=0;
+        for(unsigned j=0;j<7;j++){
+            const float x=mf(v+4*j);if(!isfinite(x)||fabsf(x)>4096)return false;
+            if(j>=3&&j<6)length+=(double)x*x;
+        }
+        if(fabs(length-1)>1e-4)return false;
+    }
+    for(uint32_t k=0;k<m->section[10].count;k++)for(unsigned j=0;j<3;j++)
+        if(m16(row(m,11,k,6)+2*j)>=32)return false;
+    for(uint32_t k=0;k<m->section[11].count;k++)for(unsigned j=0;j<3;j++){
+        const float x=mf(row(m,12,k,12)+4*j);if(!isfinite(x)||fabsf(x)>4096)return false;
+    }
+    for(uint32_t k=0;k<m->section[8].count;k++){
+        const uint8_t *d=row(m,9,k,32);const unsigned first=m16(d),nv=m16(d+2),tri=m16(d+4),nt=m16(d+6),hole=m16(d+8);
+        if(nv<3||nv>32||!nt||nt>64||d[10]>2||d[11]>1||
+           first>m->section[9].count||nv>m->section[9].count-first||
+           tri>m->section[10].count||nt>m->section[10].count-tri)return false;
+        unsigned holes=0;
+        for(unsigned j=0;j<2;j++){
+            if(j<d[10]){if(d[12+j]<3||d[12+j]>8)return false;holes+=d[12+j];}
+            else if(d[12+j])return false;
+        }
+        if(hole>m->section[11].count||holes>m->section[11].count-hole)return false;
+        for(unsigned j=19;j<32;j++)if(d[j])return false;
+        for(unsigned j=0;j<nt;j++){
+            const uint8_t *t=row(m,11,tri+j,6);const unsigned a=m16(t),b=m16(t+2),c=m16(t+4);
+            if(a>=nv||b>=nv||c>=nv||a==b||a==c||b==c)return false;
+            const uint8_t *va=row(m,10,first+a,28),*vb=row(m,10,first+b,28),*vc=row(m,10,first+c,28);
+            const double ux=(double)mf(vb)-mf(va),uy=(double)mf(vb+4)-mf(va+4),uz=(double)mf(vb+8)-mf(va+8),
+                vx=(double)mf(vc)-mf(va),vy=(double)mf(vc+4)-mf(va+4),vz=(double)mf(vc+8)-mf(va+8),
+                x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx;
+            if(x==0&&y==0&&z==0)return false;
+        }
     }
     return true;
 }
@@ -48,7 +93,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
        sections>(bytes-32)/20)return AYATSURI_MODEL_INVALID;
     const uint32_t directory_end=32+20*sections;
     ayatsuri_model candidate={.data=p,.bytes=(uint32_t)bytes};unsigned seen=0;
-    static const uint32_t strides[8]={16,36,12,24,72,8,1,32};
+    static const uint32_t strides[12]={16,36,12,24,72,8,1,32,32,28,6,12};
     for(uint32_t i=0;i<sections;++i){
         const uint8_t *d=p+32+20*i;const uint16_t type=m16(d),flags=m16(d+2);
         const uint32_t offset=m32(d+4),length=m32(d+8),count=m32(d+12),stride=m32(d+16);
@@ -58,7 +103,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
             const uint8_t *prior=p+32+20*j;
             if(overlaps(p+offset,length,p+m32(prior+4),m32(prior+8)))return AYATSURI_MODEL_INVALID;
         }
-        if(type>=1&&type<=8){
+        if(type>=1&&type<=12){
             const unsigned bit=1u<<(type-1);
             if(flags!=1||(seen&bit)||stride!=strides[type-1]||(uint64_t)count*stride!=length)
                 return AYATSURI_MODEL_INVALID;
@@ -66,13 +111,16 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
         }else if(flags&1)return AYATSURI_MODEL_INVALID;
         else if(stride&&(uint64_t)count*stride>length)return AYATSURI_MODEL_INVALID;
     }
-    if((seen&127)!=127)return AYATSURI_MODEL_INVALID;
+    if((seen&127)!=127||((seen&0xf00)&&(seen&0xf00)!=0xf00))return AYATSURI_MODEL_INVALID;
     const uint32_t count=candidate.section[0].count;
     if(!count||count>AYATSURI_MODEL_MAX_NODES||candidate.section[1].count!=count||candidate.section[5].count!=count||
        candidate.section[2].count>count||candidate.section[3].count>8*count||candidate.section[4].count>count||
        candidate.section[6].count>127*count||
-       ((seen&128)&&(!candidate.section[7].count||candidate.section[7].count>count)))return AYATSURI_MODEL_INVALID;
+       ((seen&128)&&(!candidate.section[7].count||candidate.section[7].count>count))||
+       ((seen&0xf00)&&(!candidate.section[8].count||candidate.section[8].count>count||
+        candidate.section[9].count>32*count||candidate.section[10].count>64*count||candidate.section[11].count>16*count)))return AYATSURI_MODEL_INVALID;
     candidate.node_count=(uint16_t)count;
+    if(!meshes_valid(&candidate))return AYATSURI_MODEL_INVALID;
     for(uint32_t k=0;k<candidate.section[6].count;++k){const uint8_t c=*row(&candidate,7,k,1);
         if(c<32||c>126)return AYATSURI_MODEL_INVALID;}
     if(!float_rows_valid(row(&candidate,2,0,36),count,9,9)||
@@ -92,14 +140,19 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
         const uint8_t *n=row(&candidate,1,i,16),*pose=row(&candidate,2,i,36);
         const int parent=parent_id(n);const uint16_t shape=m16(n+4),lobes=m16(n+6),material=m16(n+8),binding=m16(n+10);
         const float blend=mf(n+12);
-        if(parent< -1||parent>=(int)i||n[2]>2||n[3]>1||binding>=count||!isfinite(blend))return AYATSURI_MODEL_INVALID;
+        if(parent< -1||parent>=(int)i||n[2]>3||n[3]>1||binding>=count||!isfinite(blend))return AYATSURI_MODEL_INVALID;
         for(unsigned k=6;k<9;++k)if(mf(pose+4*k)==0)return AYATSURI_MODEL_INVALID;
         if(!n[2]){if(shape!=UINT16_MAX||material!=UINT16_MAX||lobes||blend!=0)return AYATSURI_MODEL_INVALID;}
         else{
             if(material>=candidate.section[4].count)return AYATSURI_MODEL_INVALID;
             if(n[2]==1){if(shape>=candidate.section[2].count||lobes||blend!=0)return AYATSURI_MODEL_INVALID;}
-            else if(!lobes||lobes>8||shape>candidate.section[3].count||lobes>candidate.section[3].count-shape||blend<0||blend>128)
-                return AYATSURI_MODEL_INVALID;
+            else if(n[2]==2){if(!lobes||lobes>8||shape>candidate.section[3].count||lobes>candidate.section[3].count-shape||blend<0||blend>128)
+                return AYATSURI_MODEL_INVALID;}
+            else{
+                if(!(seen&0xf00)||shape>=candidate.section[8].count||lobes||blend!=0)return AYATSURI_MODEL_INVALID;
+                const uint8_t *fixed=row(&candidate,5,material,72);
+                if(md(fixed+48)!=1||md(fixed+56)!=1||md(fixed+64)!=0)return AYATSURI_MODEL_INVALID;
+            }
             ++candidate.packet_count;
         }
         const uint8_t *b=row(&candidate,6,binding,8);const uint16_t length=m16(b+2);const uint32_t start=m32(b+4);
@@ -111,7 +164,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
             const uint8_t *prior_node=row(&candidate,1,j,16),*prior=row(&candidate,6,m16(prior_node+10),8);
             if(m16(prior+2)==length&&!memcmp(name,row(&candidate,7,m32(prior+4),1),length))return AYATSURI_MODEL_INVALID;
         }
-        candidate.slot_bytes+=slot_bytes(n);
+        candidate.slot_bytes+=n[2]==3?node_slot_bytes(&candidate,i,n):slot_bytes(n);
     }
     /* Validate all cold region rows before publishing any model metadata.
      * A normal is already unit length on the wire; never silently normalize. */
@@ -163,7 +216,7 @@ ayatsuri_model_status ayatsuri_model_instance_init(const ayatsuri_model *m,void 
         const uint8_t *node=row(m,1,j,16);model_node_state *s=states(&result)+j;
         s->offset=offset;s->enabled=node[3];memcpy(work(&result,j)+12,row(m,2,j,36),36);
         add_count(&result.stats.init_copy_bytes,36);
-        if(node[2]){
+        if(node[2]&&node[2]!=3){
             const uint8_t *material=row(m,5,m16(node+8),72);
             s->color=m32(material+44);s->opacity=md(material+56);
             memcpy((uint8_t *)work(&result,j)+(node[2]==1?164:264),material,node[2]==1?32:44);
@@ -190,7 +243,7 @@ ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *i
         return leave(i,AYATSURI_MODEL_INVALID);
     for(unsigned j=0;j<count;++j){
         const unsigned flags=t->dirty[j];const uint8_t *node=row(i->model,1,j,16);
-        if(flags>127||(flags&24)==24||(!node[2]&&(flags&96)))return leave(i,AYATSURI_MODEL_INVALID);
+        if(flags>127||(flags&24)==24||((!node[2]||node[2]==3)&&(flags&96)))return leave(i,AYATSURI_MODEL_INVALID);
         for(unsigned k=0;k<9;++k)if(flags&(1u<<(k/3))){const float v=t->pose[j*9+k];
             if(!isfinite(v)||(k>=6&&v==0))return leave(i,AYATSURI_MODEL_INVALID);}
         if((flags&32)&&t->color[j]>0xffffff)return leave(i,AYATSURI_MODEL_INVALID);
@@ -210,6 +263,14 @@ ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *i
     }
     if(changed){add_count(&i->mutation_epoch,1);i->evaluated=false;}
     return leave(i,AYATSURI_MODEL_OK);
+}
+ayatsuri_model_status ayatsuri_model_instance_node_kind(ayatsuri_model_instance *i,const void *owner,
+        uint32_t generation,uint16_t node,uint8_t *out){
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    if(!out||node>=i->model->node_count||overlaps(out,1,i,sizeof *i)||
+       overlaps(out,1,i->model,sizeof *i->model)||overlaps(out,1,i->arena,i->arena_bytes)||
+       overlaps(out,1,i->model->data,i->model->bytes))return leave(i,AYATSURI_MODEL_INVALID);
+    *out=row(i->model,1,node,16)[2];return leave(i,AYATSURI_MODEL_OK);
 }
 ayatsuri_model_status ayatsuri_model_instance_read_pose(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,uint16_t node,float out[9]){
@@ -339,6 +400,87 @@ static bool blend_packet(ayatsuri_model_instance *i,unsigned id,const float righ
     const uint8_t *region=node_region(model,id);
     return !region||blend_plane(i,id,region,right,down,forward);
 }
+/* Same bounded convex predicate as the packet consumer, kept independent of
+ * renderer linkage. A folded/nonconvex projected hole invalidates evaluation. */
+static bool mesh_hole_valid(const ksn_proc_ellipsoid_clip *p){
+    int orientation=0;
+    for(unsigned i=0;i<p->count;i++){
+        const unsigned next=(i+1)%p->count;const double ax=p->xy[2*i],ay=p->xy[2*i+1],
+            dx=(double)p->xy[2*next]-ax,dy=(double)p->xy[2*next+1]-ay;
+        if(dx==0&&dy==0)return false;
+        for(unsigned j=0;j<p->count;j++)if(j!=i&&j!=next){
+            const double cross=dx*((double)p->xy[2*j+1]-ay)-dy*((double)p->xy[2*j]-ax);
+            const int sign=(cross>0)-(cross<0);
+            if(!sign||(orientation&&sign!=orientation))return false;
+            orientation=sign;
+        }
+    }
+    return true;
+}
+static bool mesh_project(const float projection[12],const uint8_t *xyz,float *x,float *y,float *depth){
+    const float a=mf(xyz),b=mf(xyz+4),c=mf(xyz+8);
+    /* Deliberate binary32 operations, matching hone.project's orthographic path. */
+    *x=projection[0]*a+projection[1]*b+projection[2]*c+projection[3];
+    *y=projection[4]*a+projection[5]*b+projection[6]*c+projection[7];
+    *depth=projection[8]*a+projection[9]*b+projection[10]*c+projection[11];
+    return isfinite(*x)&&isfinite(*y)&&fabsf(*x)<=4096&&fabsf(*y)<=4096&&isfinite(*depth);
+}
+/* Keep mesh-only scratch out of the nonmesh evaluator stack frame. */
+static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3]){
+    const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*d=row(model,9,m16(node+4),32),
+        *material=row(model,5,m16(node+8),72);
+    const unsigned nv=m16(d+2),nt=m16(d+6);float *m=work(i,id);
+    ksn_proc_gouraud_patch *p=(ksn_proc_gouraud_patch *)((uint8_t *)m+84);
+    float *xy=(float *)((uint8_t *)p+sizeof *p),*depth=xy+2*nv;
+    const double a=m[0],b=m[1],c=m[2],e=m[4],f=m[5],g=m[6],h=m[8],j=m[9],k=m[10],
+        det=a*(f*k-g*j)-b*(e*k-g*h)+c*(e*j-f*h);
+    if(!isfinite(det)||det==0)return false;
+    /* Inverse-transpose preserves authored outward normals under any nonsingular
+     * TRS. Reflection never rewrites winding; selection can cull the whole sheet. */
+    const double normal[9]={(f*k-g*j)/det,(g*h-e*k)/det,(e*j-f*h)/det,
+        (c*j-b*k)/det,(a*k-c*h)/det,(b*h-a*j)/det,
+        (b*g-c*f)/det,(c*e-a*g)/det,(a*f-b*e)/det};
+    float projection[12],coeff[8];const float *basis[3]={right,down,forward};
+    for(unsigned r=0;r<3;r++){
+        const float zoom=r<2?i->camera[6]:1;
+        for(unsigned col=0;col<3;col++)projection[4*r+col]=zoom*(basis[r][0]*m[col]+basis[r][1]*m[4+col]+basis[r][2]*m[8+col]);
+        projection[4*r+3]=zoom*(basis[r][0]*(m[3]-i->camera[3])+basis[r][1]*(m[7]-i->camera[4])+basis[r][2]*(m[11]-i->camera[5]));
+        if(r<2)projection[4*r+3]+=i->camera[7+r];
+    }
+    for(unsigned r=0;r<12;r++)if(!isfinite(projection[r]))return false;
+    for(unsigned r=0;r<8;r++)coeff[r]=mf(material+4*r);
+    ayatsuri_shade_basis shade;if(!ayatsuri_shade_prepare(i->lighting,&shade))return false;
+    memset(p,0,sizeof *p);p->header.vertices=(uint8_t)nv;p->header.holes=d[10];
+    for(unsigned v=0;v<nv;v++){
+        const uint8_t *cold=row(model,10,m16(d)+v,28);ksn_proc_gouraud_vertex *out=p->vertices+v;
+        if(!mesh_project(projection,cold,xy+2*v,xy+2*v+1,depth+v))return false;
+        out->x=xy[2*v];out->y=xy[2*v+1];out->mask=mf(cold+24);
+        const double x=normal[0]*mf(cold+12)+normal[1]*mf(cold+16)+normal[2]*mf(cold+20),
+            y=normal[3]*mf(cold+12)+normal[4]*mf(cold+16)+normal[5]*mf(cold+20),
+            z=normal[6]*mf(cold+12)+normal[7]*mf(cold+16)+normal[8]*mf(cold+20),length=hypot3(x,y,z);
+        if(!(length>0)||!isfinite(length))return false;
+        int16_t snorm[3];const double components[3]={x,y,z};
+        for(unsigned r=0;r<3;r++)snorm[r]=(int16_t)fmax(-32767,fmin(32767,floor(components[r]*32767/length+0.5)));
+        if(!snorm[0]&&!snorm[1]&&!snorm[2])return false;
+        out->color_a=ayatsuri_shade_sample(snorm,m16(d+14),d[18],i->lighting,coeff,&shade);
+        out->color_b=ayatsuri_shade_sample(snorm,m16(d+16),d[18],i->lighting,coeff,&shade);
+    }
+    /* Decode cold U16 indices instead of assuming the caller's span alignment. */
+    uint16_t indices[3*KSN_PROC_GOURAUD_TRIANGLES];uint32_t counts[3];
+    for(unsigned t=0;t<nt;t++)for(unsigned v=0;v<3;v++)indices[3*t+v]=m16(row(model,11,m16(d+4)+t,6)+2*v);
+    if(ayatsuri_visibility_select(xy,depth,nv,indices,nt,(ayatsuri_visibility_order)d[11],p->indices,3*nt,counts)!=AYATSURI_VISIBILITY_OK)return false;
+    p->header.triangles=(uint8_t)counts[0];
+    unsigned hole_at=m16(d+8);
+    for(unsigned hole=0;hole<d[10];hole++){
+        ksn_proc_ellipsoid_clip *clip=p->clips+hole;clip->count=d[12+hole];
+        for(unsigned v=0;v<clip->count;v++){
+            float unused;
+            if(!mesh_project(projection,row(model,12,hole_at++,12),clip->xy+2*v,clip->xy+2*v+1,&unused))return false;
+        }
+        if(counts[0]&&!mesh_hole_valid(clip))return false;
+    }
+    return true;
+}
 ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,const float camera[9],const float light[6]){
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
@@ -366,7 +508,8 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *
         if(ayatsuri_transform_evaluate(&pose,parent<0?NULL:&p,&result)!=AYATSURI_OK)return leave(i,AYATSURI_MODEL_RANGE);
         add_count(&i->stats.geometry_updates,1);
         memcpy(work(i,j),&result,48);states(i)[j].world_enabled=states(i)[j].enabled&&(parent<0||states(i)[parent].world_enabled);
-        if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward)))
+        if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward))||
+           (node[2]==3&&!mesh_packet(i,j,right,down,forward)))
             return leave(i,AYATSURI_MODEL_RANGE);
         if(node[2]){add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);}
     }
@@ -384,9 +527,10 @@ ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *i,co
        *cursor>i->model->node_count)return leave(i,AYATSURI_MODEL_INVALID);
     for(unsigned j=*cursor;j<i->model->node_count;++j){const uint8_t *node=row(i->model,1,j,16);
         if(node[2]&&states(i)[j].world_enabled){
+            if(node[2]==3&&!((const ksn_proc_gouraud_patch *)((const uint8_t *)work(i,j)+84))->header.triangles)continue;
             const unsigned bytes=node_slot_bytes(i->model,j,node);
             *out=(ayatsuri_model_packet){(const uint8_t *)work(i,j),i->lighting,(uint16_t)j,(uint16_t)bytes,
-                (uint8_t)(node[2]==2&&bytes>slot_bytes(node)?3:node[2]),(uint8_t)m16(node+6)};
+                (uint8_t)(node[2]==3?4:node[2]==2&&bytes>slot_bytes(node)?3:node[2]),(uint8_t)m16(node+6)};
             *cursor=j+1;return leave(i,AYATSURI_MODEL_OK);
         }}
     *cursor=i->model->node_count;return leave(i,AYATSURI_MODEL_DONE);

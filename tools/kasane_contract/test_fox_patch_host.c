@@ -21,6 +21,7 @@ static void *patch_realloc(void *o,void *p,size_t n){bool had=p!=NULL;void *next
 static const JSMallocFunctions PATCH_MF={patch_calloc,patch_malloc,patch_free,patch_realloc,pk_usable};
 static JSValue study,draw_fn,stats_fn,release_fn,stats_out;
 static unsigned patch_frames;
+static bool patch_compiled;
 static double js_us[128],present_us[128];
 static unsigned long long turn_calls,turn_bytes;
 static double patch_now(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (double)t.tv_sec*1e6+(double)t.tv_nsec/1e3;}
@@ -68,7 +69,7 @@ static bool patch_phase(const char *name,bool with_stats){
     putchar('\n');return patch_accounting_valid&&(!with_stats||
         (patch_stat("vertices")>0&&patch_stat("triangles")>0&&patch_stat("typedBytes")>0&&
          patch_stat("nativePasses")==1&&patch_stat("fillCalls")>=0&&patch_stat("fillCalls")<=2*patch_stat("triangles")&&
-         patch_stat("culled")>=0&&patch_stat("culled")<=patch_stat("triangles")));
+         patch_stat("culled")>=(patch_compiled?-1:0)&&patch_stat("culled")<=patch_stat("triangles")));
 }
 static bool patch_invalid(double yaw,double light){
     static uint16_t old[240*135];memcpy(old,panel,sizeof old);JSValue args[2]={JS_NewFloat64(ctx,yaw),JS_NewFloat64(ctx,light)};
@@ -91,14 +92,18 @@ int main(void){
     const char *variant=getenv("FOX_PATCH_VARIANT");
     if(variant){JSValue g=JS_GetGlobalObject(ctx);JS_SetPropertyStr(ctx,g,"__foxPatchVariant",JS_NewString(ctx,variant));JS_FreeValue(ctx,g);}
     const bool retopology=variant&&(!strcmp(variant,"retopology")||!strcmp(variant,"retopology-clay"));
+    const bool compiled=variant&&!strncmp(variant,"compiled",8);patch_compiled=compiled;
     ok=ok&&patch_load("apps/lib/ayatsuri_model.js")&&patch_load("apps/lib/ayatsuri_clip.js");
     if(retopology)ok=ok&&patch_load("apps/lib/ayatsuri_visibility.js");
-    ok=ok&&patch_load(retopology?"tools/character/fox_retopology_fixture.js":"tools/character/fox_patch_fixture.js");
+    if(compiled){const char *metadata=getenv("FOX_PATCH_COMPILED_META");ok=ok&&metadata&&patch_load(metadata)&&patch_load("apps/fox3d/fox_sheet_scene.js");}
+    ok=ok&&patch_load(compiled?"tools/character/fox_compiled_patch_fixture.js":
+        retopology?"tools/character/fox_retopology_fixture.js":"tools/character/fox_patch_fixture.js");
     JSValue global=JS_GetGlobalObject(ctx);study=JS_GetPropertyStr(ctx,global,"FoxPatchStudy");JS_FreeValue(ctx,global);
     draw_fn=JS_GetPropertyStr(ctx,study,"draw");stats_fn=JS_GetPropertyStr(ctx,study,"stats");release_fn=JS_GetPropertyStr(ctx,study,"release");stats_out=JS_NewObject(ctx);
     ok=ok&&JS_IsFunction(ctx,draw_fn)&&JS_IsFunction(ctx,stats_fn)&&JS_IsFunction(ctx,release_fn)&&patch_phase("fixture",false);
     const uint8_t *cold=NULL;size_t cold_bytes=0;ayatsuri_model model;
-    if(pocket_ayatsuri_builtin_asset("fox-face",&cold,&cold_bytes)&&ayatsuri_model_open(cold,cold_bytes,&model)==AYATSURI_MODEL_OK)
+    const char *asset_name=getenv("FOX_PATCH_COMPILED_ASSET");if(!asset_name)asset_name="fox-face";
+    if(pocket_ayatsuri_builtin_asset(asset_name,&cold,&cold_bytes)&&ayatsuri_model_open(cold,cold_bytes,&model)==AYATSURI_MODEL_OK)
         printf("FOX_PATCH_NATIVE cold_bytes=%zu nodes=%u arena_payload_bytes=%zu guest_charged=1 native_heap_unmeasured=1\n",cold_bytes,model.node_count,ayatsuri_model_instance_bytes(&model));else ok=false;
     for(int yaw=-35;ok&&yaw<=35;yaw+=35)ok=patch_draw(yaw,0,true);
     if(ok)ok=patch_phase("captures",true);

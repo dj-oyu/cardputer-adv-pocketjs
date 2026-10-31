@@ -20,6 +20,8 @@ globalThis.AyatsuriNative=(()=>{
     try{
       for(const key in patch)if(key!=='color'&&key!=='opacity')fail();
       const color=patch.color,opacity=patch.opacity;
+      if((this.kind===0||this.kind===3)&&(color!==undefined||opacity!==undefined))
+        throw new TypeError('AyatsuriNative: this node has no mutable material');
       if(color!==undefined)rgb(color);if(opacity!==undefined){finite(opacity);if(opacity<0||opacity>1)fail();}
       if(color!==undefined){s.colors[this.id]=color;s.mask[this.id]|=32;}
       if(opacity!==undefined){s.opacity[this.id]=opacity;s.mask[this.id]|=64;}
@@ -32,7 +34,11 @@ globalThis.AyatsuriNative=(()=>{
   // Shared methods never close over a scene's borrowed model or native instance.
   const Scene={handle(id){
     const s=this;alive(s);if(!Number.isInteger(id)||id<0||id>=s.n)fail();
-    if(!s.handles[id])s.handles[id]=Object.assign(Object.create(Handle),{id,scene:s});return s.handles[id];
+    if(!s.handles[id]){
+      const kind=typeof s.instance.nodeKind==='function'?s.instance.nodeKind(id):-1;
+      s.handles[id]=Object.assign(Object.create(Handle),{id,scene:s,kind});
+    }
+    return s.handles[id];
   },node(name){
     const s=this;alive(s);s.busy=true;let id;
     try{id=s.model.node(name);}finally{s.busy=false;}

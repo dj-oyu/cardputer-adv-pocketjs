@@ -4,6 +4,7 @@
 #include "ayatsuri/ayatsuri_transform.h"
 #include "ayatsuri/ayatsuri_follow.h"
 #include "ayatsuri/ayatsuri_visibility.h"
+#include "ayatsuri/ayatsuri_shade.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -319,22 +320,6 @@ static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *un
         JS_CFUNC_DEF("driveCreate",1,js_ayatsuri_drive_create)};
     return JS_SetPropertyFunctionList(ctx,ns,methods,sizeof methods/sizeof methods[0])<0?ESP_ERR_NO_MEM:ESP_OK;
 }
-static bool shade_unit(float *x,float *y,float *z){
-    /* Scale first: a finite nonzero Float32 direction can be subnormal. */
-    const float scale=fmaxf(fabsf(*x),fmaxf(fabsf(*y),fabsf(*z)));
-    if(!(scale>0)||!isfinite(scale))return false;
-    *x/=scale;*y/=scale;*z/=scale;
-    const float length=sqrtf((*x)*(*x)+(*y)*(*y)+(*z)*(*z));
-    *x/=length;*y/=length;*z/=length;
-    return true;
-}
-static unsigned shade_channel(float base,float light,float tint,float front,float spec,
-                              float back,float thin,const float *m,unsigned max){
-    float v=base*(m[0]+m[1]*front*light)+light*(m[2]*spec+m[4]*thin*back*tint);
-    if(v<0)v=0;
-    if(v>1)v=1;
-    return (unsigned)lroundf(v*(float)max);
-}
 /* shade(normals, albedo, thickness, lighting, material, output[,from[,count]])
  * A bounded vertex/cell kernel, independent of frame drawing. Normals are
  * SNORM16 rather than quantised positions; float remains for transforms. */
@@ -366,11 +351,8 @@ static JSValue js_shape_shade(JSContext *ctx,JSValueConst self,int argc,JSValueC
     for(unsigned i=0;i<8;i++)if(!isfinite(m[i])||
         (i==3?(m[i]<1||m[i]>128):(m[i]<0||m[i]>1)))
         return invalid(ctx,op,"material coefficients must be 0..1, shininess 1..128");
-    float lx=light[0],ly=light[1],lz=light[2],vx=light[3],vy=light[4],vz=light[5];
-    if(!shade_unit(&lx,&ly,&lz)||!shade_unit(&vx,&vy,&vz))
-        return invalid(ctx,op,"light and view directions must be nonzero");
-    float hx=lx+vx,hy=ly+vy,hz=lz+vz;
-    const bool half=shade_unit(&hx,&hy,&hz);
+    ayatsuri_shade_basis basis;
+    if(!ayatsuri_shade_prepare(light,&basis))return invalid(ctx,op,"light and view directions must be nonzero");
     const int16_t *normal=(const int16_t *)v[0].data;
     /* Validate the requested range before its first write: even a late bad
      * normal leaves all output unchanged. Unrequested samples are untouched. */
@@ -383,16 +365,7 @@ static JSValue js_shape_shade(JSContext *ctx,JSValueConst self,int argc,JSValueC
     const uint8_t *thickness=v[2].data;
     uint16_t *output=(uint16_t *)v[5].data;
     for(size_t i=begin;i<begin+len;i++){
-        float x=normal[3*i]*(1.0f/32767),y=normal[3*i+1]*(1.0f/32767),z=normal[3*i+2]*(1.0f/32767);
-        (void)shade_unit(&x,&y,&z);
-        const float dot=x*lx+y*ly+z*lz,front=fmaxf(0,dot),back=fmaxf(0,-dot);
-        const float nh=half?fmaxf(0,x*hx+y*hy+z*hz):0;
-        const float spec=front>0&&nh>0?powf(nh,m[3]):0,thin=1-thickness[i]*(1.0f/255);
-        const uint16_t c=albedo[i];
-        const unsigned r=shade_channel(((c>>11)&31)*(1.0f/31),light[6],m[5],front,spec,back,thin,m,31);
-        const unsigned g=shade_channel(((c>>5)&63)*(1.0f/63),light[7],m[6],front,spec,back,thin,m,63);
-        const unsigned b=shade_channel((c&31)*(1.0f/31),light[8],m[7],front,spec,back,thin,m,31);
-        output[i]=(uint16_t)((r<<11)|(g<<5)|b);
+        output[i]=ayatsuri_shade_sample(normal+3*i,albedo[i],thickness[i],light,m,&basis);
     }
     return JS_UNDEFINED;
 }

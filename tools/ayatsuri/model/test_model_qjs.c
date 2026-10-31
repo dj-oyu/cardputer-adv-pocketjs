@@ -22,7 +22,7 @@ bool pocket_api_class_ready(JSRuntime *rt,pocket_class_owner_t *owner,JSClassID 
 void pocket_api_class_forget(pocket_class_owner_t *owner){pocket_class_registry_forget(&class_registry,owner);}
 static void reset_classes(void){pocket_class_registry_reset(&class_registry);}
 
-static union {ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;ksn_proc_clipped_ellipsoid clipped;
+static union {ksn_proc_gouraud_patch gouraud;ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;ksn_proc_clipped_ellipsoid clipped;
     struct {ksn_proc_blend_ellipsoids patch;ksn_proc_blend_region_mask mask;} region;} packets[512];
 static unsigned packet_count,submit_calls,fail_submission,begin_calls;
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
@@ -48,6 +48,13 @@ JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const
     if(l>r||t>b)return JS_UNDEFINED;
     if(fail_submission&&++submit_calls==fail_submission)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"injected submit");
     CHECK(packet_count<512);memset(&packets[packet_count],0,sizeof packets[0]);packets[packet_count++].clipped=*p;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p){
+    int l,t,r,b;unsigned cost;
+    if(!ksn_proc_gouraud_bounds(p,&l,&t,&r,&b,&cost))return invalid(ctx,op,"invalid Gouraud packet");
+    if(l>r||t>b)return JS_UNDEFINED;
+    if(fail_submission&&++submit_calls==fail_submission)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"injected submit");
+    CHECK(packet_count<512);memset(&packets[packet_count],0,sizeof packets[0]);packets[packet_count++].gouraud=*p;return JS_UNDEFINED;
 }
 #include "../../../main/pocket/pocket_ayatsuri_model.inc"
 static uint8_t *fixture;static size_t fixture_bytes;
@@ -274,6 +281,89 @@ static void blend_region_contract(JSContext *ctx){
     JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,global);free(data);
     CHECK(!memcmp(&saved,&packets[1].region.mask,24));
 }
+/* New mesh packets use the same owned cold snapshot and actor lifetime as
+ * analytic packets. The recorder proves ownership/rollback; real raster and
+ * device budgets remain the separate app-host and hardware contracts. */
+static void mesh_contract(JSContext *ctx){
+    size_t size;char *data=read_file(".cache/ayatsuri-native/mesh.aynm",&size);
+    JSValue global=JS_GetGlobalObject(ctx),input=JS_NewArrayBufferCopy(ctx,(uint8_t *)data,size);CHECK(!JS_IsException(input));
+    CHECK(JS_SetPropertyStr(ctx,global,"meshSource",JS_DupValue(ctx,input))>=0);JS_FreeValue(ctx,global);
+    const char *setup=
+        "(()=>{const m=modelOpen(meshSource),a=m.instance(),b=m.instance(),id=m.node('patch');"
+        "assert(m.count===2&&id===1&&m.stats({}).instances===2,'mesh shared actors');"
+        "assert(a.nodeKind(0)===0&&a.nodeKind(id)===3&&b.nodeKind(id)===3,'mesh metadata independent actors');"
+        "for(const bad of [-1,2,.5,NaN,Infinity,'1',true])rejects(()=>a.nodeKind(bad),'INVALID_ARGUMENT');"
+        "rejects(()=>a.nodeKind(),'INVALID_ARGUMENT');rejects(()=>a.nodeKind(1,2),'INVALID_ARGUMENT');"
+        "a.stats({set nodes(n){assert(n===2,'mesh metadata busy probe');rejects(()=>a.nodeKind(id),'BUSY');}});"
+        "{const invalid=meshSource.slice(0);new Uint8Array(invalid)[0]=0;rejects(()=>modelOpen(invalid),'INVALID_ARGUMENT');}"
+        "new Uint8Array(meshSource).fill(0);const c=m.instance();c.dispose();"
+        "const camera=new Float32Array([0,0,300,0,0,0,1,120,67.5]),light=new Float32Array([0,0,1,1,1,1]);"
+        "a.evaluate(camera,light);clearPackets();a.submit();assert(packetCount()===1,'mesh submitted');const baseline=snapshotHash();"
+        "b.evaluate(camera,light);clearPackets();b.submit();assert(snapshotHash()===baseline,'mesh independent baseline');"
+        "const dirty=new Uint8Array(2),poses=new Float32Array(18),colors=new Uint32Array(2),opacity=new Float64Array(2),saved=new Float32Array(9),read=new Float32Array(9);a.readPose(0,saved);"
+        "for(const field of [32,64]){dirty[0]=1;poses[0]=saved[0]+7;dirty[1]=field;colors[1]=0xff0000;opacity[1]=.5;"
+        "rejects(()=>a.targets(dirty,poses,colors,opacity),'INVALID_ARGUMENT');a.readPose(0,read);assert(equal(read,saved),'mesh late target rejection atomic');"
+        "clearPackets();a.submit();assert(snapshotHash()===baseline,'mesh rejection preserves packet');}"
+        "dirty.fill(0);dirty[0]=1;a.targets(dirty,poses,colors,opacity);a.evaluate(camera,light);clearPackets();a.submit();assert(snapshotHash()!==baseline,'mesh parent pose dependency');"
+        "clearPackets();b.submit();assert(snapshotHash()===baseline,'other mesh actor unaffected');"
+        "dirty.fill(0);forceSubmitFailure(1);rejects(()=>a.submit());assert(snapshotHash()===baseline,'mesh submit rollback');forceSubmitFailure(0);"
+        "clearPackets();a.submit();const savedPacket=snapshotHash();"
+        "a.submitClipped(new Uint16Array(0),new Uint8Array(0),new Float32Array(0));assert(packetCount()===2,'mesh in mixed clipped walk');"
+        "clearPackets();a.submit();assert(snapshotHash()===savedPacket,'mesh snapshot stable');"
+        "{const scene=AyatsuriNative.scene({model:m}),handle=scene.handle(id),group=scene.handle(0);"
+        "assert(handle.kind===3&&group.kind===0&&scene.handle(id)===handle,'metadata cached visual handles');"
+        "const state=()=>[scene.ready,scene.busy,scene.mask.join(),scene.poses.join(),scene.colors.join(),scene.opacity.join()].join('|');"
+        "const materialReject=(h,value)=>{const before=state();let caught=false;try{h.material(value)}catch(e){caught=e instanceof TypeError}assert(caught&&state()===before,'material setter rejection preserves scene state');};"
+        "scene.evaluate(0);const ready=state();handle.material({});group.material({});assert(state()===ready&&scene.ready,'empty unsupported material is no-op');"
+        "materialReject(handle,{color:0xff00ff});materialReject(handle,{opacity:.5});materialReject(group,{color:0xffffff});materialReject(group,{opacity:.5});"
+        "handle.place({position:[3,4,0]});const pending=state();materialReject(handle,{color:0xff0000,opacity:.3});"
+        "handle.material({});assert(state()===pending&&!scene.ready&&scene.mask[id]===1,'rejected material retains pending pose');"
+        "scene.evaluate(1);clearPackets();scene.render();assert(scene.ready&&!scene.mask.some(x=>x)&&packetCount()===1,'pending pose still evaluates and renders');"
+        "const pose=new Float32Array(9);scene.instance.readPose(id,pose);assert(pose[0]===3&&pose[1]===4,'pending pose reached native');"
+        "scene.dispose();rejects(()=>handle.place({position:[0,0,0]}));}"
+        "globalThis.meshHarness={m,a,b,camera,light,dirty,poses,colors,opacity};})();";
+    eval_ok(ctx,setup,strlen(setup));
+    CHECK(packets[0].gouraud.header.vertices==4&&packets[0].gouraud.header.triangles==2&&packets[0].gouraud.header.holes==1);
+    global=JS_GetGlobalObject(ctx);JSValue harness=JS_GetPropertyStr(ctx,global,"meshHarness"),actor=JS_GetPropertyStr(ctx,harness,"a");
+    JSValue eval[2]={JS_GetPropertyStr(ctx,harness,"camera"),JS_GetPropertyStr(ctx,harness,"light")};
+    const char *names[]={"dirty","poses","colors","opacity"};JSValue targets[4];
+    for(unsigned k=0;k<4;k++)targets[k]=JS_GetPropertyStr(ctx,harness,names[k]);
+    const size_t calls=allocation_calls;
+    for(unsigned frame=0;frame<1000;frame++){
+        JSValue value=managed_instance_targets(ctx,actor,4,targets);CHECK(!JS_IsException(value));JS_FreeValue(ctx,value);
+        value=managed_instance_evaluate(ctx,actor,2,eval);CHECK(!JS_IsException(value));JS_FreeValue(ctx,value);
+        packet_count=0;value=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(value)&&packet_count==1);JS_FreeValue(ctx,value);
+    }
+    CHECK(allocation_calls==calls);
+    for(unsigned k=0;k<4;k++)JS_FreeValue(ctx,targets[k]);
+    for(unsigned k=0;k<2;k++)JS_FreeValue(ctx,eval[k]);
+    JS_FreeValue(ctx,actor);JS_FreeValue(ctx,harness);JS_FreeValue(ctx,global);
+    const char *cleanup="(()=>{const {m,a,b,camera,light}=meshHarness;m.dispose();rejects(()=>m.instance(),'CLOSED');"
+        "assert(m.stats({}).instances===2&&!m.stats({}).released,'mesh closed cold retained');"
+        "assert(a.nodeKind(0)===0&&a.nodeKind(1)===3&&b.nodeKind(1)===3,'live actor metadata after shared Model close');"
+        "a.evaluate(camera,light);clearPackets();a.submit();a.dispose();assert(!m.stats({}).released,'mesh last actor protects cold');"
+        "b.evaluate(camera,light);clearPackets();b.submit();const snapshot=snapshotHash();b.dispose();"
+        "assert(m.stats({}).released&&m.stats({}).ownedBytes===0&&snapshotHash()===snapshot,'mesh last actor releases cold without snapshot mutation');"
+        "rejects(()=>a.evaluate(camera,light),'CLOSED');rejects(()=>b.submit(),'CLOSED');rejects(()=>a.nodeKind(1),'CLOSED');rejects(()=>b.nodeKind(1),'CLOSED');delete globalThis.meshHarness;delete globalThis.meshSource;})();";
+    eval_ok(ctx,cleanup,strlen(cleanup));JS_FreeValue(ctx,input);free(data);
+    puts("MESH_QJS_PASS node_kind visual_material_rejection pending_pose copied_source shared_actors targets_atomic snapshot rollback clipped_walk retained_close warm1000_allocations0");
+}
+static void mesh_oom_contract(void){
+    size_t bytes;uint8_t *data=(uint8_t *)read_file(".cache/ayatsuri-native/mesh.aynm",&bytes);size_t failures=0;
+    for(unsigned site=1;site<=64;site++){
+        JSRuntime *rt=JS_NewRuntime2(&allocator,NULL);CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx);
+        JSValue input=JS_NewArrayBufferCopy(ctx,data,bytes);CHECK(!JS_IsException(input));
+        fail_at=allocation_calls+site;const size_t injected=injected_ooms;
+        JSValue model=js_ayatsuri_model_open(ctx,JS_UNDEFINED,1,&input),actor=JS_UNDEFINED;
+        if(!JS_IsException(model))actor=managed_model_instance(ctx,model,0,NULL);
+        if(JS_HasException(ctx)){JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);}
+        fail_at=0;failures+=injected_ooms!=injected;JS_FreeValue(ctx,actor);JS_FreeValue(ctx,model);
+        model=js_ayatsuri_model_open(ctx,JS_UNDEFINED,1,&input);CHECK(!JS_IsException(model));
+        actor=managed_model_instance(ctx,model,0,NULL);CHECK(!JS_IsException(actor));
+        JS_FreeValue(ctx,actor);JS_FreeValue(ctx,model);JS_FreeValue(ctx,input);reset_classes();JS_FreeContext(ctx);JS_FreeRuntime(rt);CHECK(retained==0);
+    }
+    CHECK(failures>0);free(data);printf("MESH_QJS_OOM_PASS positions64 injected_positions=%zu retained=0\n",failures);
+}
 /* Deliberately exceed the old process-global owner limit before exercising
  * the REAL Model/Instance constructors. These unrelated QuickJS classes are
  * a registry stress fixture, not substitutes for physical device surfaces. */
@@ -302,7 +392,7 @@ int main(int argc,char **argv){
         ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
         const size_t before_skew=skew_count;skew_bytes=ayatsuri_model_instance_bytes(&model)+7u;
         packet_count=submit_calls=fail_submission=begin_calls=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
-        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);blend_region_contract(ctx);JS_RunGC(rt);
+        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);blend_region_contract(ctx);mesh_contract(ctx);JS_RunGC(rt);
         CHECK(skew_count>before_skew);skew_bytes=0;
         reset_classes();JS_FreeContext(ctx);JS_FreeRuntime(rt);CHECK(retained==0);
     }
@@ -321,5 +411,6 @@ int main(int argc,char **argv){
         a=managed_model_instance(ctx,m,0,NULL);CHECK(!JS_IsException(a));
         JS_FreeValue(ctx,a);JS_FreeValue(ctx,m);reset_classes();JS_FreeContext(ctx);JS_FreeRuntime(rt);CHECK(retained==0);
     }
+    mesh_oom_contract();
     free(wrapper);free(source);free(fixture);printf("PASS native Model/Instance: real QuickJS, 4 runtimes after 24 preexisting class owners, explicit cold release/both finalizer orders, actual JS wrapper visibility/dirty/atomicity, projection/clipped batch prevalidation, two independent instances, snapshot/rollback, arena 4-mod-8 skew=%zu, opacity 4-mod-8=%zu, F32 2-mod-4 rejected=%zu, 1000 warm targets/evaluate/submit/readProjection/submitClipped zero allocations, 192 OOM positions/%zu injected, retained=0\n",skew_count,opacity_skew_count,f32_alignment_rejections,injected_ooms);return 0;
 }

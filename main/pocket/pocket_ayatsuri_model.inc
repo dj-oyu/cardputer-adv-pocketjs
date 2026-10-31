@@ -204,6 +204,10 @@ static JSValue managed_instance_submit(JSContext *ctx,JSValueConst self,int argc
             result=pocket_proc_native_ellipsoid(ctx,op,&p);
         }else if(packet.kind==2||packet.kind==3){
             ksn_proc_blend_ellipsoids p;result=managed_submit_blend(ctx,op,&packet,&p);
+        }else if(packet.kind==4){
+            /* Instance owns the aligned evaluated packet; the frame takes its
+             * existing bounded snapshot before this synchronous call returns. */
+            result=pocket_proc_native_gouraud(ctx,op,(const ksn_proc_gouraud_patch *)(packet.storage+84));
         }else result=invalid(ctx,op,"invalid model packet kind");
         if(JS_IsException(result))break;
         status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
@@ -259,6 +263,10 @@ static JSValue managed_instance_submit_clipped(JSContext *ctx,JSValueConst self,
             result=pocket_proc_native_ellipsoid(ctx,op,&scratch.clipped.patch);
         }else if(packet.kind==2||packet.kind==3){
             result=managed_submit_blend(ctx,op,&packet,&scratch.blend);
+        }else if(packet.kind==4){
+            /* Instance owns the aligned evaluated packet; the frame takes its
+             * existing bounded snapshot before this synchronous call returns. */
+            result=pocket_proc_native_gouraud(ctx,op,(const ksn_proc_gouraud_patch *)(packet.storage+84));
         }else result=invalid(ctx,op,"invalid model packet kind");
         if(JS_IsException(result))break;
         status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
@@ -266,6 +274,14 @@ static JSValue managed_instance_submit_clipped(JSContext *ctx,JSValueConst self,
     if(!JS_IsException(result)&&status!=AYATSURI_MODEL_DONE)result=managed_model_error(ctx,op,status);
     if(JS_IsException(result))pocket_proc_native_rollback(&mark);
     a->busy=false;return result;
+}
+static JSValue managed_instance_node_kind(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="ayatsuri.instance.nodeKind";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+    if(!a)return JS_EXCEPTION;
+    double index;uint8_t kind=0;ayatsuri_model_status status=AYATSURI_MODEL_INVALID;
+    if(argc==1&&number(ctx,argv[0],&index)&&whole(index,0,UINT16_MAX))
+        status=ayatsuri_model_instance_node_kind(&a->core,a,1,(uint16_t)index,&kind);
+    a->busy=false;return status==AYATSURI_MODEL_OK?JS_NewUint32(ctx,kind):managed_model_error(ctx,op,status);
 }
 static JSValue managed_instance_stats(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     const char *op="ayatsuri.instance.stats";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
@@ -319,6 +335,7 @@ static const JSCFunctionListEntry managed_model_methods[]={
     JS_CFUNC_DEF("dispose",0,managed_model_dispose)};
 static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("targets",4,managed_instance_targets),JS_CFUNC_DEF("evaluate",2,managed_instance_evaluate),
+    JS_CFUNC_DEF("nodeKind",1,managed_instance_node_kind),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),
     JS_CFUNC_DEF("submitClipped",3,managed_instance_submit_clipped),
     JS_CFUNC_DEF("readProjection",2,managed_instance_read_projection),

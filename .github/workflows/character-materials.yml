@@ -7,6 +7,7 @@ on:
       - 'apps/cloudprobe/**'
       - 'apps/cloudmem/**'
       - 'apps/fox3d/**'
+      - 'apps/foxsheet/**'
       - 'apps/lib/ayatsuri_clip.js'
       - 'apps/lib/ayatsuri_local_plane.js'
       - 'components/pocketjs_guest/src/guest.c'
@@ -93,7 +94,7 @@ jobs:
           node tools/ayatsuri/model/test_pack_model.cjs
           node tools/ayatsuri/model/builtin_asset.cjs
           node tools/ayatsuri/model/test_fox_face.cjs
-          gcc -std=c11 -O1 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -I main tools/ayatsuri/model/test_builtin_assets.c main/pocket/pocket_ayatsuri_assets.c main/ayatsuri/ayatsuri_model.c -lm -o /tmp/fox-builtin-assets
+          gcc -std=c11 -O1 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -I main tools/ayatsuri/model/test_builtin_assets.c main/pocket/pocket_ayatsuri_assets.c main/ayatsuri/ayatsuri_model.c main/ayatsuri/ayatsuri_visibility.c -lm -o /tmp/fox-builtin-assets
           /tmp/fox-builtin-assets
           node tools/ayatsuri/model/test_native_scene.cjs
           python3 tools/ayatsuri/model/run_model_contracts.py
@@ -212,6 +213,57 @@ jobs:
           path: |
             .cache/fox-patch-host/
             .cache/gouraud-contracts/
+  compiled-fox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Native immutable fox assets and isolated visual factors
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          node tools/ayatsuri/model/export_fox_patch.cjs --check-product
+          node tools/ayatsuri/model/export_fox_patch.cjs
+          python3 tools/character/test_compiled_fox_depth.py
+          python3 tools/kasane_contract/run_fox_sheet_app_host.py
+          python3 tools/kasane_contract/run_fox_sheet_app_host.py --m32
+          python3 tools/kasane_contract/run_fox_patch_host.py --variant compiled-combined
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --compiled-provider --variant retopology
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-eye
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-mask
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-shape
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-combined
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          folder=Path('.cache/fox-patch-host/m32')
+          a=json.loads((folder/'retopology/result.json').read_text())
+          b=json.loads((folder/'compiled/result.json').read_text())
+          assert a['passed'] and b['passed'] and a['binary_sha256']==b['binary_sha256']
+          for x,y in zip(a['runs'],b['runs']):
+              assert x['frame_hashes']==y['frame_hashes'] and x['image_sha256']==y['image_sha256']
+              assert y['metrics']['guest_peak']<x['metrics']['guest_peak']<=163840
+          print('COMPILED_FOX_SAME_IMAGE_LOWER_GUEST_PASS')
+          PY
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: compiled-fox-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/fox-patch-host/
+            .cache/fox-compiled-assets/
+            .cache/fox-sheet-app-asan/
+            .cache/fox-sheet-app-m32/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

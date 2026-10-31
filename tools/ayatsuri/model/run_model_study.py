@@ -39,9 +39,10 @@ def compile_sources(root):
     files.add(root / 'apps/pet/assets/pets-compact.bin')
     files.add(root / 'apps/cloud/assets/cloud.aynm')
     files.add(root / 'apps/cloud/assets/cloud_model_bytes.inc')
-    fox_assets=root/'apps/fox3d/assets'
-    if fox_assets.exists():
-        files.update(p for p in fox_assets.rglob('*') if p.is_file() and p.suffix in ('.aynm','.inc'))
+    for name in ('apps/fox3d/assets','apps/foxsheet/assets'):
+        fox_assets=root/name
+        if fox_assets.exists():
+            files.update(p for p in fox_assets.rglob('*') if p.is_file() and p.suffix in ('.aynm','.inc'))
     return {file.relative_to(root).as_posix(): sha(file) for file in sorted(files)}
 
 

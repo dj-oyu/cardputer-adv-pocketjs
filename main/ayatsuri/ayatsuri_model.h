@@ -27,8 +27,9 @@ typedef struct {
     uint32_t slot_bytes;
     /* Sections 1..7 are mandatory; optional localPlane rows use required
      * section 8. Mode 4 uses existing ellipse work; mode 5 adds 24 bytes
-     * only to each masked blend's work slot. */
-    ayatsuri_model_section section[8];
+     * only to each masked blend's work slot. Mesh kind 3 requires sections
+     * 9..12 as a set: descriptor32, vertex28, triangle6, hole XYZ12. */
+    ayatsuri_model_section section[12];
 } ayatsuri_model;
 
 typedef struct {
@@ -77,9 +78,15 @@ ayatsuri_model_status ayatsuri_model_instance_dispose(ayatsuri_model_instance *i
  * a byte-addressed span of N little-endian IEEE binary64 values; its base
  * need not be double-aligned. All inputs are borrowed only during the call.
  * Validate all selected values before any write. A rejected batch leaves
- * cached packets publishable; a same-value batch preserves the epoch. */
+ * cached packets publishable; a same-value batch preserves the epoch.
+ * Mesh cold materials require thickness=1, opacity=1, edgeSoftness=0; the
+ * mesh descriptor owns the actual U8 thickness. Mesh nodes accept pose/visibility only; COLOR/OPACITY rejects the batch. */
 ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *instance,
         const void *owner,uint32_t generation,const ayatsuri_model_targets *targets);
+/* Immutable node kind (0 group, 1 ellipse, 2 blend, 3 mesh). No evaluation
+ * is required. Invalid owner/state/index/output leaves the output unchanged. */
+ayatsuri_model_status ayatsuri_model_instance_node_kind(ayatsuri_model_instance *instance,
+        const void *owner,uint32_t generation,uint16_t node_id,uint8_t *out);
 ayatsuri_model_status ayatsuri_model_instance_read_pose(ayatsuri_model_instance *instance,
         const void *owner,uint32_t generation,uint16_t node_id,float out[9]);
 /* Counters saturate at UINT32_MAX. eval_calls counts validated-owner attempts;
@@ -98,7 +105,12 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *
  * 96,128,164,196,232; blend fields at 252,264,308,316+24*lobes.
  * Kind 3 is a masked blend: old blend work followed by plane[4] F32,
  * feather F32, RGB565 colorB U16, reserved U16=0 (24 bytes). Plane is
- * A*screenX+B*screenY+C*finalBlendedDepth+D in common node-local units. */
+ * A*screenX+B*screenY+C*finalBlendedDepth+D in common node-local units.
+ * Kind 4 is a Gouraud mesh: the common 84-byte transform/pose prefix, then
+ * a 1040-byte ksn_proc_gouraud_patch, then xy[2*vertices]/depth[vertices]
+ * F32 scratch; the slot is rounded to 8 bytes. Empty selection is skipped.
+ * Normals use inverse-transpose; source winding is never reversed, including
+ * reflected poses. No mutable vertices, expression morphs or mesh opacity. */
 ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *instance,
         const void *owner,uint32_t generation,uint32_t *cursor,ayatsuri_model_packet *out);
 #endif
