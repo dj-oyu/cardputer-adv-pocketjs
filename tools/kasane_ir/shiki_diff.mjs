@@ -78,15 +78,36 @@ function program() {
     const r = rnd();
     if (r < .10 && open.length < 8 && room > 2) {
       if (rnd() < .7) code.push({op: OP.REPEAT, imm: heavy ? ri(100, 255) : pick([1, 2, 3, 5, 255, ri(1, 9)])});
-      else code.push({op: OP.REPEAT_REG, a: reg()});
+      else {
+        // The count register usually holds an edge of 0..255 (256 and -1 are INVALID).
+        const c = reg();
+        if (rnd() < .7) code.push({op: OP.SET, dst: c, imm: pick([0, 1, 2, 255, 256, -1, 65536])});
+        code.push({op: OP.REPEAT_REG, a: c});
+      }
       open.push(code.length - 1);
     } else if (r < .16 && open.length) { code.push({op: OP.END}); open.pop(); }
     else if (r < .19 && open.length) code.push({op: OP.BREAK_IF_GT, a: reg(), b: reg()});
     else if (r < .30) code.push({op: OP.SET, dst: reg(), imm: rnd() < .4 ? coordRaw() : rnd() < .2 ? ri(0, 300) : imm32()});
+    // The raster budget's exact edge: lines of cost 1,024 (-480 to 543), 8 of
+    // them fill 8,192 to the pixel, the 9th is LIMIT.
+    else if (r < .31 && open.length < 7 && room > 6) {
+      const x = reg(), y = (x + 1) % 16, w = (x + 2) % 16;
+      code.push({op: OP.SET, dst: x, imm: -480 * 65536}, {op: OP.SET, dst: w, imm: 543 * 65536}, {op: OP.MOVE, a: x, b: y},
+        {op: OP.REPEAT, imm: pick([4, 8, 9])}, {op: OP.LINE, a: w, b: y, aux: 2}, {op: OP.LINE, a: x, b: y, aux: 3}, {op: OP.END});
+    }
+    // Long lines in a loop: the 8,192-pixel raster budget, not the step cap.
+    else if (r < .32 && heavy && open.length < 7 && room > 6) {
+      const x = reg(), y = reg();
+      code.push({op: OP.SET, dst: x, imm: pick([-480, 0, 720]) * 65536}, {op: OP.SET, dst: y, imm: ri(0, 134) * 65536},
+        {op: OP.REPEAT, imm: ri(3, 30)}, {op: OP.LINE, a: x, b: y, aux: 1}, {op: OP.NEG, dst: x, a: x}, {op: OP.END});
+    }
     else if (r < .35 && nin) code.push({op: OP.INPUT, dst: reg(), a: ri(0, nin - 1)});
     else if (r < .55) {
       const op = pick([OP.ADD, OP.SUB, OP.NEG, OP.MUL, OP.MUL, OP.SHIFT, OP.ADD_H, OP.SUB_H, OP.MUL_H, OP.SHIFT_H, OP.SIN]);
       const i = {op, dst: reg(), a: reg()};
+      // .H saturates its operands first (sec.2.3): feed it values past 16 bits.
+      if ([OP.ADD_H, OP.SUB_H, OP.MUL_H, OP.SHIFT_H].includes(op) && rnd() < .5)
+        code.push({op: OP.SET, dst: i.a, imm: pick([32767, 32768, -32768, -32769, 40000, -70000, 2 ** 31 - 1, -(2 ** 31)])});
       if ([OP.ADD, OP.SUB, OP.MUL, OP.ADD_H, OP.SUB_H, OP.MUL_H].includes(op)) i.b = reg();
       if (op === OP.MUL) i.aux = pick([0, 1, 15, 16, 17, 31, 32, 48, 62, ri(0, 62)]);
       if (op === OP.MUL_H) i.aux = pick([0, 1, 14, 15, 16, 31, ri(0, 31)]);
@@ -110,8 +131,11 @@ function program() {
     const pc = ri(0, code.length - 1), i = code[pc];
     let field, q, v;
     if (i.op === OP.SET) { field = 0; q = pick([16, 0, 24, ri(0, 30)]); v = rnd() < .5 ? ri(-500, 740) + pick([0, .5, -.5, .25, 1 / 65536]) : (rnd() - .5) * 1e5; }
-    else if (i.op === OP.PLOT || i.op === OP.LINE) { field = 1; q = rnd() < .9 ? 0 : 16; v = rnd() < .9 ? ri(0, 65535) : pick([-1, 65536, 1.5]); }
-    else if (i.op === OP.REPEAT) { field = 0; q = rnd() < .9 ? 0 : 16; v = pick([1, 2, 255, 0, 256, ri(1, 9)]); }
+    // A Q above 0 with a value that still lands in range after scaling
+    // (0.5 at Q16 is 32768) is refused only by the Q0 rule (sec.3), so the
+    // rule is tested on its own.
+    else if (i.op === OP.PLOT || i.op === OP.LINE) { field = 1; q = pick([0, 0, 0, 16, 8, 1]); v = q ? ri(0, 65535) / 2 ** q : rnd() < .9 ? ri(0, 65535) : pick([-1, 65536, 1.5]); }
+    else if (i.op === OP.REPEAT) { field = 0; q = pick([0, 0, 0, 16, 4]); v = q ? ri(1, 255) / 2 ** q : pick([1, 2, 255, 0, 256, ri(1, 9)]); }
     else continue;
     if (patches.some(p => p.pc === pc && p.field === field)) continue;
     patches.push({pc, arg: args.length, field}); args.push(q); argv.push(v);
@@ -143,8 +167,13 @@ const runner = path.join(dir, 'shiki_run');
 execFileSync('gcc', ['-std=gnu11', '-Wall', '-Wextra', '-Werror', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover',
   '-Imain/ui/kasane', 'main/ui/kasane/ksn_shiki.c', 'tools/kasane_contract/shiki_run.c', '-lm', '-o', runner], {cwd: ROOT, stdio: 'inherit'});
 const big = {maxBuffer: 1 << 30, cwd: ROOT};
-const c = execFileSync(runner, [cases], big).toString().trimEnd().split('\n');
-const js = execFileSync('node', [path.join(ROOT, 'tools/kasane_ir/shiki_ref.mjs'), cases], big).toString().trimEnd().split('\n');
+// A runner that crashes (ASan, a wild jump) is a failure, not silence.
+const run = (cmd, args, extra = {}) => {
+  try { return execFileSync(cmd, args, {...big, ...extra}).toString(); }
+  catch (e) { console.log(`${path.basename(cmd)} failed: ${(e.stderr || e.message).toString().slice(0, 600)}`); console.log('SHIKI DIFF FAIL (runner)'); process.exit(1); }
+};
+const c = run(runner, [cases]).trimEnd().split('\n');
+const js = run('node', [path.join(ROOT, 'tools/kasane_ir/shiki_ref.mjs'), cases]).trimEnd().split('\n');
 const cSin = execFileSync(runner, [], {...big, env: {...process.env, SHIKI_SIN_TABLE: '1'}}).toString().trim();
 const {SIN_TABLE} = await import(path.join(ROOT, 'tools/kasane_ir/shiki_ref.mjs'));
 let bad = 0;
