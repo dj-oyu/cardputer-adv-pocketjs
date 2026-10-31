@@ -438,6 +438,19 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 - **仕様との差（決定済み）**: §8.2 は「受け取る側と同じ Q 形式の名前は `SHIFT dst+j, 名前, imm=0` で写す」と書く。変換器は、組の位置と元の値のレジスタが同じに落ちた写しを省く（例: `pairs.put(b, a * k)` の `b`。既存の `cubic()` の固定レジスタと同じ処理）。結果のビットは同じで、命令とステップの数だけが減る。**ユーザー決定（2026-10-31）: 省いてよいと仕様 §8.2 に足した。**
 - **確認**（host）: `test_shiki_data_compile.mjs`。8 本の式（点の束、`take` と `put`、入れ替え、`LOOKUP` の表 2 つ、異なる領域の入れ子と `break`、同じ領域の自己入れ子、その場の `put`、件数の 2 つの `EACH`）を、ランダムな領域の中身と入力で、参照のエンジンと `shiki_fix`（AST をそのまま評価）が、状態・線分・実行後の全領域の中身まで一致（各 2,000 本 × 2 シードで全件一致）。拒否すべき 8 本（規則 1・9、`put` の位置と書く宣言、`LOOKUP` の `k_rec`、名前の数）がそれぞれの理由で拒否される。わざと入れた誤り（`LOOKUP` の `k`、`take` の件数のモード、`put` の組の並び）はすべて検出した。既存の `test_shiki_compile.mjs`（DERBY の 7 本、25,705 ベクトル）と `test_kir.mjs` は変わらず通る。**実機ではまだ動かしていない**（変換器は host の道具で、出力のバイト列は §5.13 で実機と一致したエンジンが読む）。
 
+### 5.15 Shiki のヒープと JS API の実装（2026-10-31）
+
+仕様 §9 の実装。コミット `16e8a88`（式の大きさ）、`e644e40`（ヒープと API）。
+
+- **式は命令の数だけの大きさ**: 以前は 1 本あたり固定で約 1 KB（64 命令の配列と表）。`loop_end` と `level` を命令の 12 B の構造体の空き 2 B に移し、命令を可変長の末尾にした（ヘッダ + 12 B × 命令の数）。予算 48 KiB に BIG WAVE の 22 本が入るため。
+- **ヒープ**（`main/pocket/shiki_heap.c`）: manifest に `kasane.shiki` を挙げたアプリの開始時、ゲストを作る前に連続した区画を 1 つ取り（既定 48 KiB、manifest の `shiki_bytes` で変えられる）、ESP-IDF の `multi_heap` で切り分ける。取れなければアプリを起動しない。そのセッションの `pocket_proc.c` の確保（フレーム・作業領域・VM・式・点）はすべて区画から。ゲストを壊した後に、区画が空なら返す。空でない間（presenter がまだ面を放さない）は閉じかけにして、最後の解放で返す。`kasane.shiki` を挙げないアプリは区画を持たず、確保は今までどおりシステムのヒープ。
+- **JS API**（`main/pocket/pocket_shiki_api.c`）: `register`（バイト列か組み込みの名前、引数、`options.data`）、`unregister`、`draw`、`heap()`、`data()`、`release()`、capability `kasane.shiki`（`supported`、区画があれば `available`、§9.1 の `limits`）。Shiki の式は手続き型の slot・handle・フレームを共有する slot の種類で、手続き型の呼び出しからは見えない。`beginFrame`・`commit`・`resource`・`createSurface` は手続き型の関数そのもの、`grid` は今の `pocket.kasane.grid`。組み込みの式の表はまだ空（DERBY の移行で埋める）。`grid` の確保はまだ区画の外。
+- **窓**: 外部メモリの ArrayBuffer の上の型付き配列。Shiki が窓と ArrayBuffer の両方を強く持ち、同一性は窓で比べる。`release` と `app_stop()` の reset（ゲストを壊す前）で detach → 参照を捨てる → 区画へ返す。解放済みの窓は detach されているので `CLOSED` で見分ける。
+- **`transfer` の門**（`components/quickjs-ng/quickjs-ng/quickjs.c` の `js_array_buffer_transfer`）: `free_func` が `js_array_buffer_free` でない ArrayBuffer は、長さに関わらず `TypeError`。`detached` の検査の直後、長さ 0 の分岐の前。
+- **確認**:
+  - host: `tools/kasane_contract/run_pocket_shiki_api_qjs.py` が、実機と同じ自己検査（`apps/shikitest/shiki_api_test.js`）を本物の QuickJS と C で ASan・UBSan・リーク検出の下で走らせ、33 項目すべて通り、セッションの終わりに区画が返る。門を外すと失敗する（わざと入れた誤り）。手続き型の host 試験（`run_pocket_proc_qjs.py`・`_rom_`・`_limits_`・`run_proc_limits_scene.py`・`build_kasane_test.sh`）は変わらず通る。
+  - 実機（`e644e40`）: `local.shikiapi` が 34 項目（capability を含む）すべて通った。ログに `SHIKI_HEAP open bytes=49152`。アプリの起動前のホームの空き 198,248 B、終了後 206,872 B（区画は返っている）。`local.shikitest` は、比べた最初の 372 本（ログの 93 行）が以前の合格のログと同じ行。
+
 ## 6. 次の作業
 
 0. **Shiki の native 側のメモリを実機で数える**（§4.5）。専用ヒープの予算と利益の判断材料。
