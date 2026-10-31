@@ -136,22 +136,8 @@ static bool check_loops(ksn_shiki_plan *p){
             p->loop_end[stack[--depth]]=(uint8_t)pc;
         }else if(op==KSN_SHIKI_BREAK_IF_GT&&!depth)return false;
     }
-    if(depth)return false;
-    /* END folding. An END whose previous instruction is an ordinary one (not
-     * a loop opener, END or BREAK_IF_GT) is reached only by falling through
-     * from it: jumps land on an opener + 1 or an END + 1, and an opener + 1
-     * that is an END has the opener before it. That instruction then runs the
-     * END inline, with the END's own step check and count, so the END is
-     * never dispatched. */
-    for(unsigned pc=1;ksn_shiki_fold_end&&pc<p->count;pc++){
-        if(p->code[pc].op!=KSN_SHIKI_END)continue;
-        const uint8_t prev=p->code[pc-1].op;
-        if(prev!=KSN_SHIKI_REPEAT&&prev!=KSN_SHIKI_REPEAT_REG&&prev!=KSN_SHIKI_END&&
-           prev!=KSN_SHIKI_BREAK_IF_GT)p->code[pc-1].fold=1;
-    }
-    return true;
+    return depth==0;
 }
-bool ksn_shiki_fold_end=true;
 static uint16_t le16(const uint8_t *b){return (uint16_t)(b[0]|b[1]<<8);}
 static int32_t le32(const uint8_t *b){
     return (int32_t)((uint32_t)b[0]|(uint32_t)b[1]<<8|(uint32_t)b[2]<<16|(uint32_t)b[3]<<24);
@@ -183,7 +169,7 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
     for(unsigned pc=0;pc<n;pc++){
         const uint8_t *b=code+body+12*pc;
         if(b[10]||b[11])return false;            /* reserved */
-        plan->code[pc]=(ksn_shiki_inst){b[0],b[1],b[2],b[3],le32(b+4),le16(b+8),0};
+        plan->code[pc]=(ksn_shiki_inst){b[0],b[1],b[2],b[3],le32(b+4),le16(b+8)};
     }
     /* Patches: strictly ascending (pc, field), into imm or aux only. */
     int last=-1;
@@ -469,14 +455,6 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
             break;
         }
         default: return KSN_SHIKI_INVALID;   /* registration refuses every other op */
-        }
-        if(i->fold){
-            /* The END at pc + 1, as its own dispatch would run it (an ordinary
-             * instruction always falls through: next == pc + 1). */
-            if(vm->steps==KSN_SHIKI_STEPS)return KSN_SHIKI_LIMIT;
-            vm->steps++;
-            if(--vm->loop[vm->depth-1].remaining)next=vm->loop[vm->depth-1].pc+1u;
-            else{vm->depth--;next=pc+2;}
         }
         pc=next;
         if(pc==plan->count)return KSN_SHIKI_DONE;

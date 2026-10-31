@@ -44,7 +44,6 @@ typedef struct {
     uint8_t op,dst,a,b;
     int32_t imm;
     uint16_t aux;
-    uint8_t fold;   /* an END follows and is run inline (ksn_shiki.c); was padding */
 } ksn_shiki_inst;
 
 /* A registered program: its own patched copy (sec.6.1: the caller's bytes
@@ -69,12 +68,6 @@ typedef struct {
     bool pen_valid;
     uint16_t count;                         /* segments emitted by this draw */
 } ksn_shiki_vm;
-
-/* Whether registration folds an END into the ordinary instruction before it
- * (the instruction then runs the END itself, saving one dispatch per loop
- * turn; steps and every result are unchanged). On by default; the cycle
- * bench clears it to measure the difference in one binary. */
-extern bool ksn_shiki_fold_end;
 
 /* 257 entries, sec.4.4: round(sin(k pi / 512) * 65536). */
 extern const int32_t ksn_shiki_sin_table[257];
