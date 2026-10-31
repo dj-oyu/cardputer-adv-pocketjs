@@ -21,13 +21,20 @@ assert.deepEqual(Array.from(packet().texture),texture,'local region follows tran
 assert.notDeepEqual(Array.from(packet().screen),projection);
 assert.throws(()=>body.texture({offset:[.1,0]}),/localPlane/);
 const beforeInvalid=stats();
-for(const pattern of [
-  {normal:[0,0,0]}, {normal:[0,NaN,0]}, {normal:[0,1,0],offset:2.1},
-  {normal:[0,1,0],feather:1e-5}, {normal:[0,1,0],feather:Infinity}, {normal:[0,1,0],color:0x1000000}
-]){
-  assert.throws(()=>scene.add({geometry:{kind:'ellipsoid',radii:[1,1,1]},pattern:{kind:'localPlane',color:0xffffff,...pattern}}));
+const invalid=[
+  [{normal:[0,0,0]},/localPlane range/], [{normal:[0,NaN,0]},/finite number required/],
+  [{normal:[0,1,0],offset:2.1},/localPlane range/], [{normal:[0,1,0],feather:1e-5},/localPlane range/],
+  [{normal:[0,1,0],feather:Infinity},/finite number required/], [{normal:[0,1,0],color:0x1000000},/RGB24 required/]
+];
+for(let index=0;index<invalid.length;++index){
+  const [pattern,reason]=invalid[index];
+  assert.throws(()=>scene.add({name:'invalid-plane-'+index,geometry:{kind:'ellipsoid',radii:[1,1,1]},
+    pattern:{kind:'localPlane',color:0xffffff,...pattern}}),reason);
   assert.deepEqual(stats(),beforeInvalid,'failed construction does not publish a node');
 }
 scene.render();
+scene.add({name:'valid-plane-control',geometry:{kind:'ellipsoid',radii:[1,1,1]},
+  pattern:{kind:'localPlane',normal:[0,1,0],offset:0,feather:.1,color:0xffffff}});
+scene.evaluate(15);scene.render();
 scene.dispose();
 console.log('MATERIAL_REGION_JS_PASS owned=true lightInvariant=true poseFollowing=true invalidAtomic=true');
