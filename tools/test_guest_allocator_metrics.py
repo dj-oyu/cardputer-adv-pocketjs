@@ -210,7 +210,12 @@ int main(void){
     JSValue global=JS_GetGlobalObject(js_ctx);JS_SetPropertyStr(js_ctx,global,"mark",JS_NewCFunction(js_ctx,js_memory_mark,"mark",1));JS_FreeValue(js_ctx,global);
     run(js_ctx,"if(mark('scene.ready')!==undefined)throw Error('result object');");
     assert(logs==1&&strstr(last_log,"MMK scene.ready gen=7")&&strstr(last_log,"live=100 high=200 maxreq=80"));
-    assert(strstr(last_log,"mn_scope=trace_window")&&strstr(last_log,"arena_largest=NA gc_count=NA gc_us=NA"));
+#ifdef KASANE_MEMORY_PHASE_ONLY
+    assert(strstr(last_log,"mn_scope=session"));
+#else
+    assert(strstr(last_log,"mn_scope=trace_window"));
+#endif
+    assert(strstr(last_log,"arena_largest=NA gc_count=NA gc_us=NA"));
     run(js_ctx,"for(const x of ['', 'a'.repeat(33), 'bad label', '\\n', '\\0x', 'é', '界', {}, null, 2]){let caught=false;try{mark(x)}catch(e){caught=String(e).includes('INVALID_ARGUMENT')}if(!caught)throw Error('bad label '+x)}");
     run(js_ctx,"for(const args of [[],['x','y']]){let caught=false;try{mark(...args)}catch(e){caught=String(e).includes('INVALID_ARGUMENT')}if(!caught)throw Error('arity')}");
     assert(logs==1&&!memory_mark_active&&!memory_mark_busy);
@@ -230,7 +235,7 @@ int main(void){
 
 def function(path, name):
     text = (ROOT / path).read_text(encoding='utf-8')
-    found = re.search(r'(?ms)^(?:static )?(?:esp_err_t|JSValue) ' + re.escape(name) + r'\([^;{]*\{.*?^}', text)
+    found = re.search(r'(?ms)^(?:static )?(?:esp_err_t|JSValue|void) ' + re.escape(name) + r'\([^;{]*\{.*?^}', text)
     if not found:
         raise RuntimeError(f'production function not found: {name}')
     return found[0]
@@ -269,6 +274,25 @@ def main():
                 args += [str(source), str(ROOT / 'components/pocketjs_guest/src/block_cache.c'), '-o', str(binary)]
                 subprocess.run(args, check=True)
                 subprocess.run([str(binary)], check=True)
+        quiet_source, quiet_binary = Path(tmp) / 'quiet.c', Path(tmp) / 'quiet'
+        quiet_source.write_text(r'''
+#include <assert.h>
+#include <stdint.h>
+typedef struct { unsigned value; } pocket_proc_trace;
+static unsigned drains,logs;
+static struct { char kind; uint32_t work; } mdt;
+static void pocket_proc_trace_take(pocket_proc_trace *p){++drains;p->value=0;}
+#define ESP_LOGI(...) (++logs)
+''' + function('main/app_session.c', 'mdt_emit') + r'''
+int main(void){
+    for(unsigned n=0;n<1000;n++){mdt.kind='F';mdt.work=n;mdt_emit();assert(!mdt.kind&&!mdt.work);}
+    assert(drains==1000&&logs==0);return 0;
+}
+''')
+        subprocess.run([os.environ.get('CC', 'gcc'), '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
+                        '-fsanitize=address,undefined', str(quiet_source), '-o', str(quiet_binary)], check=True)
+        subprocess.run([str(quiet_binary)], check=True)
+        print('MEMORY_PHASE_ONLY_QUIET_PASS turns=1000 recurring_logs=0 counter_drains=1000')
         if options.quickjs:
             qjs = ROOT / 'components/quickjs-ng/quickjs-ng'
             common = [os.environ.get('CC', 'gcc'), '-std=gnu11', '-O1', '-g', '-D_GNU_SOURCE', '-DQUICKJS_NG_BUILD',
@@ -279,11 +303,13 @@ def main():
                 obj = Path(tmp) / f'{name}.o'
                 subprocess.run(common + ['-c', str(qjs / f'{name}.c'), '-o', str(obj)], check=True)
                 objects.append(str(obj))
-            source, binary = Path(tmp) / 'bridge.c', Path(tmp) / 'bridge'
-            source.write_text(BRIDGE.replace('@MARK@', function('main/app_session.c', 'app_memory_mark'))
-                              .replace('@BRIDGE@', function('main/pocket/pocket_app.c', 'js_memory_mark')))
-            subprocess.run(common + ['-Wall', '-Wextra', '-Werror', str(source), *objects, '-lm', '-o', str(binary)], check=True)
-            subprocess.run([str(binary)], check=True)
+            for quiet in (False, True):
+                source, binary = Path(tmp) / f'bridge-{quiet}.c', Path(tmp) / f'bridge-{quiet}'
+                source.write_text(BRIDGE.replace('@MARK@', function('main/app_session.c', 'app_memory_mark'))
+                                  .replace('@BRIDGE@', function('main/pocket/pocket_app.c', 'js_memory_mark')))
+                mode = ['-DKASANE_MEMORY_PHASE_ONLY=1'] if quiet else []
+                subprocess.run(common + mode + ['-Wall', '-Wextra', '-Werror', str(source), *objects, '-lm', '-o', str(binary)], check=True)
+                subprocess.run([str(binary)], check=True)
 
 
 if __name__ == '__main__':

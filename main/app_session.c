@@ -287,7 +287,6 @@ static struct {
     char kind;
     uint32_t js_us,render_us,send_us,bytes,bands,presents,btn,fed;
 } mdt;
-static unsigned mdt_seq;
 // '~' at HOME cycles the guest heap cap for the next start, to find how much
 // of the 160 KiB the app needs to evaluate and run (docs/kasane/
 // megademo-device-limits.md). 0 keeps the shipping value.
@@ -299,6 +298,17 @@ void app_trace_next_heap_limit(void){
     ESP_LOGI("app","MDT_LIMIT %u",(unsigned)(MDT_LIMITS[mdt_limit_index]?
              MDT_LIMITS[mdt_limit_index]:160*1024));
 }
+#ifdef KASANE_MEMORY_PHASE_ONLY
+static void mdt_emit(void) {
+    /* A checkpoint-only diagnostic must leave the control channel quiet,
+     * including while HELLO is open. Drain counters without logging or heap
+     * walks. The local minimum spans the session, not a hidden sample turn. */
+    pocket_proc_trace ignored;
+    pocket_proc_trace_take(&ignored);
+    mdt=(typeof(mdt)){0};
+}
+#else
+static unsigned mdt_seq;
 static void mdt_emit(void) {
     if(!mdt.kind) return;
     pocket_proc_trace p;
@@ -352,6 +362,7 @@ static void mdt_emit(void) {
     }
     mdt=(typeof(mdt)){0};
 }
+#endif
 #endif
 #ifndef KASANE_STRESS_GRAD_AB
 #define KASANE_STRESS_GRAD_AB 0
@@ -1035,16 +1046,22 @@ esp_err_t app_memory_mark(JSContext *context,const char *label) {
      * never a new reset here. sample_us excludes USB/log output and label
      * conversion. Usable highwater excludes realloc's backend temporaries.
      * Cache bytes are not guest-live bytes; neither is allocator metadata. */
+    const char *minimum_scope=
+#ifdef KASANE_MEMORY_PHASE_ONLY
+        "session";
+#else
+        "trace_window";
+#endif
     ESP_LOGI("app","MMK %s gen=%u gu=%zu limit=%zu live=%zu high=%zu maxreq=%zu "
              "alloc=%u realloc=%u free_calls=%u fail=%u cache=%u/%u/%zu/%u/%u/%u "
-             "free=%zu lg=%zu mn=%zu mn_scope=trace_window sample_us=%u "
+             "free=%zu lg=%zu mn=%zu mn_scope=%s sample_us=%u "
              "arena_largest=NA gc_count=NA gc_us=NA",
              label,(unsigned)guest_generation,used,limit,a.usable_live_bytes,
              a.usable_highwater_bytes,a.max_successful_request,
              (unsigned)a.allocation_calls,(unsigned)a.realloc_calls,(unsigned)a.free_calls,
              (unsigned)a.failed_calls,(unsigned)a.cache_available,(unsigned)a.cache_enabled,
              a.cache_held_bytes,(unsigned)a.cache_hits,(unsigned)a.cache_misses,
-             (unsigned)a.cache_flushes,free_bytes,largest,minimum,(unsigned)sample_us);
+             (unsigned)a.cache_flushes,free_bytes,largest,minimum,minimum_scope,(unsigned)sample_us);
     memory_mark_busy=false;return ESP_OK;
 }
 #endif
@@ -1591,7 +1608,11 @@ esp_err_t app_start_test(char test) {
     // every session; pocket_proc_reset() keeps it.
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
 #ifdef KASANE_MEGADEMO_TRACE
-    if(cloud_memory_probe()) {
+    bool memory_window=cloud_memory_probe();
+#ifdef KASANE_MEMORY_PHASE_ONLY
+    memory_window=true;
+#endif
+    if(memory_window) {
         heap_caps_monitor_local_minimum_free_size_stop();
         heap_caps_monitor_local_minimum_free_size_start();
     }
