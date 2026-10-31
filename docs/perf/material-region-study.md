@@ -49,6 +49,8 @@ native sectionは全件検証後publish、旧bin受理、896箇所の切詰め/�
 
 新機能を使わないappへ追加bytecodeを常駐させないことも、今回の性能受入に含める。helper未読込の明示拒否と、namespace削除後も作成済みsceneが同じencoderを使うことをJS試験へ追加した。
 
+load前後と各frameのcanaryは同じsticky flagへ合流する。loadの観測処理がcounterを消費しても拒否を見失わない。private負例では、同じm32 binaryでutility loadへ捕捉される200000Bの確保要求だけを挿入し、演技がdigest一致で完了してもgateがFAILすることを確認した。作業ソースはfinallyで完全復元し、cap/GC条件を変更していない。この負例コードを製品へ含めない。
+
 ```sh
 node tools/character/test_material_region.cjs
 python3 tools/character/test_material_study_inputs.py

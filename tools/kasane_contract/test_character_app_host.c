@@ -11,6 +11,7 @@
 #include "pocket_api.h"
 
 static unsigned fixture_starts,fixture_completes,fixture_passes,fixture_returns,fixture_return_complete,fixture_return_failure;
+static bool fixture_saw_oom;
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     if(getenv("CHARACTER_FIXTURE")&&argc&&JS_IsString(argv[0])){
         const char *line=JS_ToCString(c,argv[0]);
@@ -41,6 +42,7 @@ static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *arg
     JSValue result=character_fixture_base_load(c,self,argc,argv);
     JSMemoryUsage m;JS_ComputeMemoryUsage(JS_GetRuntime(c),&m);
     JSOOMCanary canary;JS_TakeOOMCanary(JS_GetRuntime(c),&canary);
+    fixture_saw_oom=fixture_saw_oom||prior.quota_count||prior.allocator_count||canary.quota_count||canary.allocator_count;
     fprintf(stderr,"CHARACTER_FIXTURE_LOAD name=%s exception=%u used_before=%zu used_after=%lld memory_used=%lld blocks=%lld limit=%zu pk_current=%zu pk_peak=%zu max_request=%zu prior_quota_rejections=%u prior_allocator_rejections=%u quota_rejections=%u allocator_rejections=%u first_req=%zu first_used=%zu\n",
         name,(unsigned)JS_IsException(result),used_before,(long long)m.malloc_size,
         (long long)m.memory_used_size,(long long)m.malloc_count,limit,cur_bytes,peak_bytes,
@@ -414,7 +416,6 @@ static bool capture_images(void){
  * arbitrary JS control script, sleeps, or per-frame forced GC are involved. */
 static uint32_t fixture_panel_hash=UINT32_C(2166136261);
 static unsigned fixture_presented;
-static bool fixture_saw_oom;
 static void fixture_record_presented(void){
     for(unsigned i=0;i<240*135;++i){
         fixture_panel_hash=(fixture_panel_hash^(panel[i]&255u))*UINT32_C(16777619);
