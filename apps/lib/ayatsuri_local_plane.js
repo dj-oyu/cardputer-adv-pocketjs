@@ -41,8 +41,11 @@ globalThis.AyatsuriLocalPlane=(()=>{
   }
   const Scene={add(def){
     const s=this._plane;alive(s);s.busy=true;
-    let copy=def,record=null;
+    let copy=def,record=null,queued=false;
     try{
+      // Reserve every adapter-owned object/slot before base.add publishes.
+      const handle=Object.create(Handle);
+      handle._node=null;handle._raw=null;handle._plane=s;handle._region=false;
       // The wrapper blocks its entry points, and the base owner blocks raw
       // handle mutation while user pattern/normal/definition getters run.
       const owner=s.owner;if(owner)owner.busy=true;
@@ -56,12 +59,13 @@ globalThis.AyatsuriLocalPlane=(()=>{
           record={work:null,surface:null,pattern,color565:s.pack(pattern.color)};
         }
       }finally{if(owner)owner.busy=false;}
-      const h=s.base.add(copy);if(!s.owner)s.owner=h._node.owner;
+      if(record){s.records.push(record);queued=true;}
+      let h;
+      try{h=s.base.add(copy);}catch(error){if(queued)s.records.pop();throw error;}
+      if(!s.owner)s.owner=h._node.owner;
       if(record){
         record.work=h._node.analytic.work;record.surface=h._node.analytic.surface;
-        s.records.push(record);
       }
-      const handle=Object.create(Handle);
       handle._node=h._node;handle._raw=h;handle._plane=s;handle._region=!!record;
       s.ready=false;return handle;
     }finally{s.busy=false;}

@@ -57,4 +57,29 @@ scene.dispose();
 scene.dispose();
 assert.throws(()=>body.texture({offset:[0,0]}),/disposed scene/);
 assert.throws(()=>scene.evaluate(25),/disposed scene/);
+// Synthetic allocation faults cover both adapter and base handle creation.
+// These are V8 fault injections, not proof of a real QuickJS allocator OOM.
+for(let fault=1;fault<=3;fault++){
+  const atomic=LocalPlane.scene({backend:{ellipsoid(){}},evaluator:TransformReference});
+  const def={name:'retry-after-allocation-failure',geometry:{kind:'ellipsoid',radii:[1,1,1]},
+    pattern:{kind:'localPlane',normal:[0,1,0],color:0xffffff}};
+  const original=Object.create;let calls=0;
+  Object.create=function(proto){if(++calls===fault)throw new Error('synthetic allocation failure');return original(proto);};
+  try{assert.throws(()=>atomic.add(def),/synthetic allocation failure/);}finally{Object.create=original;}
+  const state={};atomic.stats(state);assert.equal(state.objects,0);
+  atomic.add(def);atomic.evaluate(0);atomic.render();atomic.dispose();
+}
+{
+  const atomic=LocalPlane.scene({backend:{ellipsoid(){}},evaluator:TransformReference});
+  const def={name:'retry-after-record-reservation',geometry:{kind:'ellipsoid',radii:[1,1,1]},
+    pattern:{kind:'localPlane',normal:[0,1,0],color:0xffffff}};
+  const original=Array.prototype.push;
+  Array.prototype.push=function(value){
+    if(value&&value.pattern&&value.work===null)throw new Error('synthetic record reservation failure');
+    return original.apply(this,arguments);
+  };
+  try{assert.throws(()=>atomic.add(def),/synthetic record reservation failure/);}finally{Array.prototype.push=original;}
+  const state={};atomic.stats(state);assert.equal(state.objects,0);
+  atomic.add(def);atomic.evaluate(0);atomic.render();atomic.dispose();
+}
 console.log('MATERIAL_REGION_JS_PASS owned=true lightInvariant=true poseFollowing=true invalidAtomic=true');
