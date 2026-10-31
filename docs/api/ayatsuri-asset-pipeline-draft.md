@@ -2,7 +2,10 @@
 
 状態: **制作方針は合意済み、以下の形式・アルゴリズム・閾値は設計案**。2026-10-31。
 実装基準は `03f24827ae02421fc3d4bdd897425e5e9a19a43b`。
-この文書を追加した時点で、新importer・自動縮小器・Blender実行経路は未実装。
+この文書の初版追加時点で、新importer・自動縮小器・Blender実行経路は未実装。
+現在の最小実装範囲は、synthetic GLB→IR→endpoint QEM縮小→32/64 partition→既存AYNMと、
+native reader/arena検証である。着手範囲と完了実績を区別し、実Blender取り込みと
+native画像の品質ゲートを、この範囲への着手だけで達成済みとはしない。
 既定FOX FACE / FOX SHEET、製品API、実機023559fを変更しない。
 
 ## 1. 制作入力と実行形式を分ける
@@ -212,12 +215,60 @@ image resizeはしない。240×135のnative pixelで評価し、拡大nearest�
 | normal | 平均角度 ≤3° / p95 ≤8° / max ≤20°、指定creaseは別検査 |
 | material boundary | p95 ≤.5 px / max ≤1 px、領域欠落/混同0 |
 | 遮蔽 | protected eye/lid/muzzleの非tie semantic-ID誤り0 px、全体誤り≤.1% face pixels |
+| 同semantic内の可視depth | source顔幅で正規化した絶対view-depth差p95 ≤.5% / max ≤1.5%、保護域max ≤.5% |
+| 最終RGB565出力 | 同対応画素の各R5/G6/B5成分差: 平均 ≤.5 level / p95 ≤1 level / max ≤2 levels |
 
 geometry近接tieの判定epsilonはscene scaleからprofileに明示し、誤りpixelを恣意的に除外しない。
 毛先消失・薄い接続・穴の閉塞はIoU平均で隠れ得るためsemantic region別の最大誤差も出す。
 指定crease・材質境界と滑らかな法線の継ぎ目を区別する。
 距離の連続最大を証明できない近似samplingは「観測最大」と記す。
 閾値超過時はFAIL。結果を見て黙って閾値/asset上限を緩めない。
+
+### 7.1 同じsemantic-ID内の前後誤りも検出する
+
+semantic-IDの一致だけでは、同じ頭部の裏側・別の折返し面を誤って描いた場合を検出できない。
+sourceの画素中心rayに対する最前面について、semantic-IDに加えsource triangle ID、barycentric位置、
+view-depth、可視normalを保存する。reducedにも最前面のdepthと、縮小対応表から得るsource側の
+surface対応を保存する。両者の同ID可視画素で符号付きdepth差と絶対差を計測し、
+近すぎる面と遠すぎる面の両方を検出する。単に同semantic内のどこかの最寄点を探して
+隠れた面へ対応を付け、可視面の誤りを小さい距離へ置き換えない。
+
+sourceのみ/reducedのみの画素や異ID画素は、このdepth統計から外れてもsilhouette/遮蔽ゲートには
+必ず残す。縮小でtriangle番号が変わるため番号一致は要求せず、原本対応と可視surfaceの距離を
+別々に記録する。rayが同IDの複数面と交差する負例を用意し、同IDでも前後を誤ればFAILすることを
+確認する。tie epsilonは投影・scale・F32量子化から事前固定し、depth差の上限より小さくする。
+保護域の内部対応を定義できないprofileは、depthゲートを成功とせず未検証とする。
+
+### 7.2 色空間・量子化・陰影誤差を別に測る
+
+最終表示の初期合否基準は、表の**RGB565成分levelの絶対差**を候補とする。
+R/Bは0..31、Gは0..63で測り、8bit化した見かけの差やreference値で割った相対誤差へ置き換えない。
+これにより黒で除算不能になったり、白と黒で違う許容率を暗黙適用したりしない。
+この閾値も未実測の提案であり、黒・白・中間灰・低輝度の彩色・強いhighlight・材質境界のfixtureで
+固定してから候補を評価する。source/reducedで可視IDが一致する画素を対象とし、除外された
+境界/欠落画素は7.1と既存のsilhouette/遮蔽ゲートで独立に落とす。
+
+linear RGBでのRMSE/最大差は補助指標として出せるが、glTFのlinear base color、Honeへ渡す値、
+rendererの計算色空間、transfer function、clampとRGB565丸めの順をprofileに明記した場合に限る。
+RGB565を展開した値を無条件にlinear光量と呼ばない。linear RGBの小さい平均誤差を理由に、
+最終RGB565での境界・highlight・暗部の誤差を合格にしない。
+
+同じHone材質mapping・camera・光で、高自由度sourceとreducedを別々に評価して、
+Gouraud補間による陰影損失を測る。さらにreducedのpack前、F32/RGB565化したdecode後、
+実native描画を分け、partition境界の複製、補間、丸め、描画順による追加差を報告する。
+shapeを補うためのnormal変更・albedoへの固定陰影焼込みは、形状誤差の解消とは扱わない。
+明示した材質近似そのものの損失と、縮小による損失も別に記録する。
+
+### 7.3 Blender export損失と縮小損失を分離する
+
+比較は `.blend`の評価済みsource→GLB/IR、GLB/IR→reduced、reduced→packed decode→nativeの
+段階ごとに行う。exportの三角形化、modifier/static-bake、normal/attribute分割、材質mappingで
+失うものをexport reportへ出し、その損失を縮小器の誤差に混ぜない。
+原本・export設定・各中間物のhashと対応表を保持する。
+
+synthetic GLB→IRのidentity対照が通っても、Blender→GLBが損失なく通った証明ではない。
+実Blender/exporterからの比較が未実施ならexport損失は未測定とし、縮小側の数値が良好でも
+Blender import完了を宣言しない。実native画像の比較がなければ最終RGB565/Gouraudゲートも未検証である。
 
 最小view集合はyaw 0/±15/±35 × pitch 0/±10、別の中間角をholdoutにする。
 unlit silhouette、gray clay、normal可視化、albedo-only/semantic-ID、固定世界光3方向を出す。
@@ -269,10 +320,48 @@ reportはsource/GLB/IR/outputのSHA256、Blender/exporter/compiler版と設定�
 
 このcheckoutには利用可能な`.blend`/GLBの高自由度狐sourceは見つかっていない。
 設定PNGは存在し実見済みだが、3D原本の代わりにはならない。
-BlenderはPATHと標準install場所では確認できず、実exportは未実行。
+限定した読み取り探索では、PATH、Program Files/Program Files (x86)/ユーザーProgramsの
+Blender名directoryと既知Blender Foundation場所、HKCU/HKLM/WOW6432のuninstall登録に
+Blenderを発見できなかった。task-2内のcheckout（.git/node_modules/build/cacheを除く）と
+親directoryの深さ2、既知cacheの深さ3までの`.blend`/`.blend1`/GLB/glTF、対象名のOBJにも
+高自由度狐原本を発見していない。cacheのOBJはfox/character/source/model/mesh名を深さ2まで
+調べた限定結果であり、全ディスクや全cacheに存在しないとの断定ではない。
+Blender起動・install・実exportは未実行。
 インストールや装置操作をせず、まずP1のparser/basis人工fixtureとP0のsource制作を分けて進められる。
+現最小実装のsynthetic GLB、endpoint QEM、partition、AYNM reader/arenaの検証結果は個別に記録し、
+実Blender export、最終native画像、同headの全資源/実機ゲートへ流用しない。
 
 次に固定するのは、(1) 実sourceとBlender版/export設定、(2) 最小opaque材質mapping、
 (3) 同sourceに適用する品質閾値と総cold/arena/packet予算である。
 数値閾値はここでは提案、既存renderer制約とBlender import必須は前提として区別する。
 旧係数試験の結果はsource品質や本pipeline実装済みの証拠へ転用しない。
+
+## 10. 人工fixtureの初回実装（仕様全体の受入ではない）
+
+後続作業で[試作コードと実行手順](../../tools/ayatsuri/asset/README.md)を追加した。
+GLB2→IR、境界固定endpoint QEM、決定的32/64分割、既存AYNM compile、
+sampled geometry/normal・silhouetteと資源gate、C reader/arena probeを実装。
+未知attribute/optional extension、両面指定、nontriangle、skin/morph等は初版では拒否する。
+glTFのmode既定はTRIANGLES、alpha既定はOPAQUE、doubleSided既定はfalseとして扱う。
+nonmanifold辺と共有辺の不整合windingを縮小前に拒否する。
+
+初期入力は編集可能なmesh配列JSONと同じ人工GLBの平面gridで、狐原本ではない。
+81頂点/128面→49頂点/64面→2mesh、cold2584 B、segment上限134。
+64bit ASan/UBSanの実C probeでarena3092 B（node state24 B）、全2584切断prefix拒否、
+初期pose/再読込/dispose成功を確認した。これはQuickJS/実機のメモリpeakではない。
+ローカルm32は既存 `/tmp/m32sys` の準備条件不足でcompile前に停止し、未測定。
+新しいsoftwareやsysrootは導入していない。
+
+距離/normalはsourceとreduced双方の全vertex・全face centroidを等重みsampleし、
+nearest triangleのbarycentric normalと比較する。面積重みや意味対応を持つ連続最大ではない。
+source→最終F32 decodedまでの合成誤差も検査する。
+silhouetteは全triangle和集合の整数pixel sampleで、nativeの背面選択/遮蔽を証明しない。
+資源は指定全viewの最大訪問数で判定する。決定的なcollapse数/triangle検査数を上限とし、
+timeoutや予算超過で採用binは出さない。
+
+CLIは入力GLB/profileを上限付きで読み、生成先を排他的に確保する。
+全出力hash付きCOMPLETE manifestを最後に生成し、未完/不整合候補をreaderが拒否する。
+既存出力を上書きせず、失敗途中のcandidateを製品へ登録しない。
+statusは常に `generated-experimental-not-accepted` とし、実Blender export損失、
+native最終色/depth/原本対応、狐造形、guest peak、実機は未検証のまま残す。
+これらが未完であるため、人工fixtureの数値PASSを縮小器一般や狐の品質合格へ拡大しない。
