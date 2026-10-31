@@ -61,20 +61,32 @@ def closed(a, b):
     return b[1] < a[1] or (b[1] == a[1] and b[0] > a[0])
 
 
-def compare(points, triangles):
+def raster_edge(a, b, x, y):
+    # Canonical coefficients preserve shared-edge ties in the actual rasterizer.
+    sign = 1
+    if a[0] > b[0] or (a[0] == b[0] and a[1] > b[1]):
+        a, b, sign = b, a, -1
+    aa, bb = a[1] - b[1], b[0] - a[0]
+    cc = (b[1] - a[1]) * a[0] - (b[0] - a[0]) * a[1]
+    return sign * (aa * x + bb * y + cc)
+
+
+def compare(points, triangles, reverse=False):
     areas = [edge(points[a], points[b], points[c][0], points[c][1]) for a, b, c in triangles]
     visible = [i for i, area in enumerate(areas) if area > 1e-5]
     order = sorted(visible, key=lambda i: (sum(points[v][2] for v in triangles[i]) / 3, i))
+    if reverse:
+        order.reverse()
     paint, nearest = [[-1] * (WIDTH * HEIGHT) for _ in range(2)]
     paint_z, nearest_z = [[-math.inf] * (WIDTH * HEIGHT) for _ in range(2)]
     coverage = [0] * (WIDTH * HEIGHT)
     for tid in order:
         a, b, c = [points[v] for v in triangles[tid]]
-        ymin, ymax = max(0, math.floor(min(a[1], b[1], c[1]))), min(HEIGHT, math.ceil(max(a[1], b[1], c[1])))
-        xmin, xmax = max(0, math.floor(min(a[0], b[0], c[0]))), min(WIDTH, math.ceil(max(a[0], b[0], c[0])))
-        for y in range(ymin, ymax):
-            for x in range(xmin, xmax):
-                edges = [edge(b, c, x + .5, y + .5), edge(c, a, x + .5, y + .5), edge(a, b, x + .5, y + .5)]
+        ymin, ymax = max(0, math.ceil(min(a[1], b[1], c[1]))), min(HEIGHT - 1, math.floor(max(a[1], b[1], c[1])))
+        xmin, xmax = max(0, math.ceil(min(a[0], b[0], c[0]))), min(WIDTH - 1, math.floor(max(a[0], b[0], c[0])))
+        for y in range(ymin, ymax + 1):
+            for x in range(xmin, xmax + 1):
+                edges = [raster_edge(b, c, x, y), raster_edge(c, a, x, y), raster_edge(a, b, x, y)]
                 if any(v < 0 or (v == 0 and not closed(u, w)) for v, (u, w) in zip(edges, [(b, c), (c, a), (a, b)])):
                     continue
                 pos = y * WIDTH + x
@@ -109,6 +121,11 @@ def main():
     parser.add_argument('--out-dir', type=Path, default=ROOT / '.cache/fox-retopology-review/tracked')
     parser.add_argument('--images', action='store_true', help='also save 27 diagnostic PNGs')
     args = parser.parse_args()
+    # Fractional bounds distinguish integer centers from a half-pixel oracle.
+    square = [(10.25, 10.25, 0), (30.25, 10.25, 0), (30.25, 30.25, 0), (10.25, 30.25, 0)]
+    square_result, square_paint, _, _ = compare(square, [(0, 1, 3), (1, 2, 3)])
+    assert square_result['covered_pixels'] == 400 and square_result['overlap_pixels'] == 0
+    assert square_paint[10 * WIDTH + 10] == -1 and square_paint[30 * WIDTH + 30] >= 0
     before = SOURCE.read_bytes()
     xyz, triangles = geometry(before.decode('utf-8'))
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -128,20 +145,24 @@ def main():
                 png(args.out_dir / (tag + '_difference.png'),
                     [v for i in range(WIDTH * HEIGHT) for v in ((255, 20, 20) if i in mismatch else
                      ((85, 85, 85) if nearest[i] >= 0 else (230, 238, 230)))])
+    negative, _, _, _ = compare(project(xyz, -35, 0), triangles, reverse=True)
     unchanged = before == SOURCE.read_bytes()
     passed = unchanged and len(results) == 9 and all(r['mismatch_pixels'] == 0 and r['covered_pixels'] > 0 for r in results)
     # Require actual occlusion samples; disjoint triangles alone cannot prove ordering.
-    passed = passed and all(r['overlap_pixels'] > 0 for r in results if r['yaw'] != 0)
+    passed = passed and all(r['overlap_pixels'] > 0 for r in results if r['yaw'] != 0) and negative['mismatch_pixels'] > 0
     proof = dict(kind='HOST DEPTH ORACLE / NOT DEVICE OR PRODUCT Z-BUFFER', passed=passed,
                  source=str(SOURCE.relative_to(ROOT)), source_sha256=hashlib.sha256(before).hexdigest(),
                  test_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), sources_unchanged=unchanged,
                  vertices=len(xyz), triangles=len(triangles), views=results,
+                 negative_control=dict(yaw=-35, pitch=0, reversed_depth_order=True, mismatch_pixels=negative['mismatch_pixels']),
+                 fractional_bbox_regression=True,
                  projection='Ry(yaw)*Rx(pitch), F32 screen projection, ortho zoom=F32(1.3), center=(120,78)',
-                 coverage='pixel-center, half-open top-left, signed screen area >1e-5',
+                 coverage='integer (x,y) centers; inclusive ceil(min)..floor(max) bounds; canonical binary64 edges; top-left; signed screen area >1e-5',
                  depth='larger viewZ nearer; double barycentric reference over F32 vertices; non-tie tolerance=1e-5',
                  scope='Nine samples of this sheet only; excludes separate eyes/nose/ears, continuous-angle guarantee and image quality acceptance.')
     (args.out_dir / 'result.json').write_text(json.dumps(proof, indent=2) + '\n')
     assert passed, 'painter/depth mismatch, missing occlusion sample or changed fixture; inspect result.json'
+    print('FOX_DEPTH_NEGATIVE reversed_order_mismatch=' + str(negative['mismatch_pixels']))
     print('FOX_DEPTH_PASS views=9 vertices=30 triangles=46 mismatch_pixels=0 source_sha256=' + proof['source_sha256'])
 
 

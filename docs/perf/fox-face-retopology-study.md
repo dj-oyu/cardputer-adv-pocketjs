@@ -12,7 +12,7 @@
 
 新案をそのままhoneへ渡すとyaw −35°で3面（ID26,28,37）、+35°で3面（30,32,40）が裏向きとなり、全packetが拒否される。indexを反転して隠す方法は採らず、[optional ayatsuri visibility](../api/ayatsuri-visibility.md)で投影後の表面を選び、元の頂点番号とwindingを維持する。可視数は43/46/43。旧7引数honeは維持し、第8引数triangleCountで固定容量index bufferの有効prefixだけをsnapshotする。
 
-選択と描画を分離し、明示的`authored`順と`centroid-depth`順を用意した。後者は一般Z解決ではない。今回の同patchには独立の画素ごとnearest-Z参照を用い、yaw −35/0/+35 × pitch −10/0/+10の9条件で非tie差分0画素、可視41..46面、重なりのある条件47..62画素でも一致した。順序を逆にする負対照は−35°/pitch0で62画素の差を検出した。pitchはoracle上の拡張試験で、現在のnative fixture操作はyawだけ。連続角度域全体、眼/鼻の別packet遮蔽、一般meshの循環遮蔽まで保証しない。
+選択と描画を分離し、明示的`authored`順と`centroid-depth`順を用意した。後者は一般Z解決ではない。今回の同patchには独立の画素ごとnearest-Z参照を用い、yaw −35/0/+35 × pitch −10/0/+10の9条件で非tie差分0画素、可視41..46面、重なりのある条件47..60画素でも一致した。順序を逆にする負対照は−35°/pitch0で60画素の差を検出した。pitchはoracle上の拡張試験で、現在のnative fixture操作はyawだけ。連続角度域全体、眼/鼻の別packet遮蔽、一般meshの循環遮蔽まで保証しない。 当初oracleは半画素中心で実装されていたため、独立指摘後に実Gouraudと同じ整数(x,y)中心・ceil(min)..floor(max)の両端inclusive bbox・canonical edgeへ修正した。修正後の件数を上記へ反映し、fractional座標の矩形で整数中心と右/下端を検出する回帰、描画順逆転の負対照もテストへ固定した。製品rendererや造形データの変更ではない。
 
 ## ホスト資源比較
 
