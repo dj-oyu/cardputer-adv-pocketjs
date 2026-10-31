@@ -577,13 +577,6 @@ bool ksn_proc_blend_region_read(const ksn_proc_segment *data,unsigned words,
     memcpy(p,data,bytes);memcpy(mask,(const uint8_t *)data+bytes,sizeof *mask);
     *used=needed;return true;
 }
-bool ksn_proc_blend_region_bounds(const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *mask,
-        int *left,int *top,int *right,int *bottom){
-    if(!mask||mask->reserved||!ell_finite(mask->plane,4,1e6f)||
-       !(mask->plane[0]!=0||mask->plane[1]!=0||mask->plane[2]!=0)||!isfinite(mask->feather)||
-       !(mask->feather==0||(mask->feather>=1e-4f&&mask->feather<=4096)))return false;
-    return ksn_proc_blend_bounds(p,left,top,right,bottom);
-}
 bool ksn_proc_blend_bounds(const ksn_proc_blend_ellipsoids *p,int *left,int *top,int *right,int *bottom){
     if(!p||!p->header.count||p->header.count>KSN_PROC_BLEND_LOBES||p->header.reserved||
        p->header.surface[1]>255||p->header.surface[2]>255||
@@ -612,6 +605,13 @@ bool ksn_proc_blend_bounds(const ksn_proc_blend_ellipsoids *p,int *left,int *top
     }
     if(!p->header.surface[1]){*left=1;*right=0;}
     return true;
+}
+bool ksn_proc_blend_region_bounds(const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *mask,
+        int *left,int *top,int *right,int *bottom){
+    if(!mask||mask->reserved||!ell_finite(mask->plane,4,1e6f)||
+       !(mask->plane[0]!=0||mask->plane[1]!=0||mask->plane[2]!=0)||!isfinite(mask->feather)||
+       !(mask->feather==0||(mask->feather>=1e-4f&&mask->feather<=4096)))return false;
+    return ksn_proc_blend_bounds(p,left,top,right,bottom);
 }
 static unsigned ell_colour(float base,float light,float tint,float front,float spec,float back,float thin,
                            const float *m,unsigned max){
