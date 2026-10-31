@@ -20,6 +20,10 @@
 
 同じ流れで、データ領域を持つ式を試す（`shiki_data_test.js`、`shikiDataGen`）。式は 1〜4 個の領域を宣言し、ケースは型・Q 形式・`k_rec`・中身（または前の領域と同じメモリ）を持つ。`run(code, args, inputs, data)` の `data` は `[{t, q, k, v} | 番号, ...]` で、結果の行には実行後の全領域の中身が付く（` D ...`）。ケースの行・結果の行の書式は `tools/kasane_contract/shiki_run.c` の先頭。ログは `SD ...`、最後に `SD END`。host は `node tools/kasane_ir/shiki_device.mjs ログ.txt --data`。4 分の 1 の式は、登録で拒否される誤り（`PUT` の書く旗、型の不一致、レコード 0 件、範囲外の `FETCH`）を混ぜ、1 割はバイト列を 1 ビット壊す。
 
+## SHIKI API（`local.shikiapi`、仕様 §9 の `pocket.kasane.shiki`）
+
+manifest に `kasane.shiki` を挙げたアプリとして起動し（セッションの開始時に Shiki のヒープ 48 KiB を取る）、`shiki_api_test.js` の自己検査を 1 フレームで回す: capability、`heap()`、`data()` の検査と予算、`options.data` の結び付けと `PUT` の書き込み、`release` の `BUSY`・`CLOSED`・別の view、`transfer` の門（長さに関わらず `TypeError`、窓は残る）、手続き型の呼び出しから Shiki の handle が見えないこと、16 個の上限、`INVALID`・`LIMIT`・有限でない入力の誤り、共有の `beginFrame`・`grid`。失敗した項目ごとに `SA FAIL ...`、最後に `SA END pass=N fail=M`。同じファイルを host で `python tools/kasane_contract/run_pocket_shiki_api_qjs.py`（本物の QuickJS と C、ASan・UBSan・リーク検出）が走らせる。
+
 ## CYCLE BENCH（`local.cyclebench`）
 
 同じ試験専用の面の `pocket.shikiDebug.bench(i)`（ケースの数は `benchCount()`）で、整数の命令（`mull`・`mulsh`・`quos` など、値の大きさ別）と、GCC が呼ぶ 64 ビットのライブラリ関数（`__divdi3` など）と、Shiki エンジンの命令 1 つ（`ksn_shiki_draw` の中）のサイクル数を測る。画面には蓋絵（題、進み具合の棒、終わったケースの数）を出す。LCD の転送は非同期なので、ケースは 2 フレームに 1 回だけ測り、間のフレームで前の絵の転送を終わらせる（転送と測定を重ねない）。ログへ `CB ...` を 1 行ずつ出し、最後に `CB END`。方法は `main/hal/int_latency.c`、結果は [docs/perf/int-latency.md](../../docs/perf/int-latency.md)。これもメニューには出さず、USB broker の `app_session` で起動する。

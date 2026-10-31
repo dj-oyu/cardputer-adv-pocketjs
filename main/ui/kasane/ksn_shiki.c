@@ -403,6 +403,7 @@ static __attribute__((noinline)) ksn_shiki_status pattern_line(ksn_shiki_vm *vm,
             return KSN_SHIKI_LIMIT;
         vm->raster=(uint16_t)(vm->raster+s+1);
         out[vm->count++]=(ksn_proc_segment){(int16_t)(ax+KSN_PROC_EXT_PATTERN),ay,bx,by,i->aux};
+        vm->ext=true;
         out[vm->count++]=(ksn_proc_segment){(int16_t)(uint16_t)(bits&0xFFFF),(int16_t)head,
             (int16_t)u0q,(int16_t)(0x8000|duq),(uint16_t)(other>=0?other:0)};
         ax=bx;ay=by;ua=ub;

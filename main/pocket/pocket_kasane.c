@@ -2758,6 +2758,12 @@ static bool animation_proto(JSContext *ctx) {
     return lazy_proto(ctx,animation_class,animation_methods,COUNT(animation_methods));
 }
 
+// Weak: the host tests that build this file without the Shiki API link
+// without it (the namespace is then never installed and the capability not
+// published).
+__attribute__((weak)) esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane);
+__attribute__((weak)) esp_err_t pocket_shiki_api_register(void);
+__attribute__((weak)) bool shiki_heap_active(void);
 static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     /* Instance and animation prototypes are built on first use (above). */
@@ -2796,7 +2802,13 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     if(pocket_proc_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_grid_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_video_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
-    return pocket_pixel_install(ctx,ns);
+    if(pocket_pixel_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
+    // kasane.shiki last: it shares the procedural and grid members above.
+    // Only a session that has a Shiki heap gets it -- the one whose manifest
+    // names kasane.shiki (app_session.c takes the heap before the guest).
+    if(pocket_shiki_api_install&&shiki_heap_active&&shiki_heap_active())
+        return pocket_shiki_api_install(ctx,ns);
+    return ESP_OK;
 }
 
 static const pocket_limit_t kasane_limits[]={
@@ -2813,6 +2825,7 @@ static const pocket_capability_t capability={
 esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
     (void)user_data;
     esp_err_t result=pocket_api_register(&capability);
+    if(result==ESP_OK&&pocket_shiki_api_register)result=pocket_shiki_api_register();
     return result==ESP_OK?pocket_api_lazy(ctx,"kasane",build_kasane,NULL):result;
 }
 JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *registry,

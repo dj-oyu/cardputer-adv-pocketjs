@@ -485,6 +485,9 @@ extern const char shiki_test_end[] asm("_binary_shiki_test_js_end");
 // Its data-region half (apps/shikitest/shiki_data_test.js), the same way.
 extern const char shiki_data_test_start[] asm("_binary_shiki_data_test_js_start");
 extern const char shiki_data_test_end[] asm("_binary_shiki_data_test_js_end");
+// The pocket.kasane.shiki self-check (apps/shikitest/shiki_api_test.js), the same way.
+extern const char shiki_api_test_start[] asm("_binary_shiki_api_test_js_start");
+extern const char shiki_api_test_end[] asm("_binary_shiki_api_test_js_end");
 // The integer instruction latency probe (apps/shikitest/cycle_bench.js), the same way.
 extern const char cycle_bench_start[] asm("_binary_cycle_bench_js_start");
 extern const char cycle_bench_end[] asm("_binary_cycle_bench_js_end");
@@ -656,6 +659,7 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.stress","STRESS TEST",stress_start,stress_end,5),
     NATIVE_APP("local.shikitest","SHIKI TEST",shiki_test_start,shiki_test_end,5),
     NATIVE_APP("local.shikidata","SHIKI DATA",shiki_data_test_start,shiki_data_test_end,5),
+    NATIVE_APP("local.shikiapi","SHIKI API",shiki_api_test_start,shiki_api_test_end,5),
     NATIVE_APP("local.cyclebench","CYCLE BENCH",cycle_bench_start,cycle_bench_end,5),
     NATIVE_APP("local.megademo","MEGADEMO",proc_megademo_start,proc_megademo_end,5),
     NATIVE_APP("local.gridlab","GRID LAB",grid_lab_start,grid_lab_end,5),

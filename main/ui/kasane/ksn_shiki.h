@@ -104,6 +104,7 @@ typedef struct {
     int16_t pen_x,pen_y;
     bool pen_valid;
     uint16_t count;                         /* segments emitted by this draw */
+    bool ext;                               /* a LINE_PATTERN chord is among them */
 } ksn_shiki_vm;
 
 /* 257 entries, sec.4.4: round(sin(k pi / 512) * 65536). */

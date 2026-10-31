@@ -9,6 +9,14 @@
 /* A small APP-session adapter for registered procedural IR. */
 esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
 void pocket_proc_reset(void);
+/* Shiki programs share the procedural slots, handles and frames
+ * (pocket_shiki_api.c): attach takes ownership of plan (freed by detach or
+ * reset) and returns its handle, 0 when the 32 slots or the handles are
+ * spent; draw runs it into the frame beginFrame() opened. */
+uint32_t pocket_proc_shiki_attach(void *plan);
+void *pocket_proc_shiki_plan(uint32_t handle);
+bool pocket_proc_shiki_detach(uint32_t handle);
+JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
 /* The built-in plans register('name', args) looks up (docs/kasane/flash-plan.md):
  * a const table the firmware links, generated from the apps' @plan functions.
  * The table must outlive every session; reset() keeps it. Without a call,

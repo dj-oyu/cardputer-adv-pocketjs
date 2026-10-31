@@ -70,7 +70,7 @@ def build_and_run(cc,objs,table,shipped,cases,label,flags,extra,plan_source,incl
     sources=[KASANE/'ksn_procedural.c',KASANE/'ksn_proc_analysis.c',plan_source,
              KASANE/'ksn_proc_plan_points.c',KASANE/'ksn_proc_points.c',
              KASANE/'ksn_proc_points_dispatch.c',table,
-             ROOT/'tools/kasane_contract/test_pocket_proc_rom_qjs.c',*extra]
+             ROOT/'tools/kasane_contract/test_pocket_proc_rom_qjs.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/ui/kasane/ksn_shiki.c',*extra]
     binary=OUT/f'test_pocket_proc_rom_{label}'
     command=[cc,'-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror',
              '-fsanitize=address,undefined','-fno-omit-frame-pointer',*DEFS,*flags,

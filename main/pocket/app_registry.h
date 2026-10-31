@@ -55,6 +55,8 @@ typedef struct {
     const char *const *required;   // NULL-terminated capability names
     const char *const *optional;   // NULL-terminated; absence is not a refusal
     app_works_t        works;
+    uint32_t           shiki_bytes;  // the Shiki heap of a kasane.shiki app; 0 = the
+                                     // default, 48 KiB (shiki-spec.md sec.9.2)
 } app_manifest_t;
 
 // The identity a work launched from the library runs under. It is its own app
