@@ -10,6 +10,8 @@
  * less polygon holes into horizontal-line trapezoid draws; outline() draws a
  * polygon's edges, leaving out those inside other polygons. These write
  * directly into the candidate procedural frame under its existing limits.
+ * gouraudPatch() snapshots bounded screen vertices/indices/colour fields
+ * and holes, interpolating RGB565 without a framebuffer or depth sort.
  * shade() is a separate bounded SNORM16 normal/albedo/thickness kernel:
  * borrowed typed arrays in, RGB565 sample colours out, no frame required.
  * Not part of the common API: app_session.c installs it only into a session

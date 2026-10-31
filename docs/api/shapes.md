@@ -105,6 +105,30 @@ Cを0..1へclampし、31/63/31を掛けて四捨五入する。これは表示RG
 
 法線の量子化幅は1/32767（約0.0000305）。位置/変換を整数化するAPIではない。法線再正規化の後に照明を計算する。標本数以外の動的確保はなく、常駐モデルcacheも持たない。既存のWAKE計測をこの追加カーネルのfps保証へ流用しない。
 
+## `gouraudPatch(xy, indices, colorsA, colorsB, mask, holeXY, holeCounts)`
+
+**実装中のbounded補間パッチ**。既存`shade`で求めた頂点色を三角形内でscreen-linear補間する。光源・カメラ・asset・frame時計は所有せず、全画面buffer/Z buffer/alpha/自動depth sortを追加しない。appがbeginFrame/commitし、他の描画との前後順を決める。一般の自己遮蔽meshやimage warpの完成APIではない。
+
+| 入力 | 型・上限 | 意味 |
+| --- | --- | --- |
+| xy | Float32Array、2n、3≤n≤32 | 最終投影後のxy。各成分は有限、−4096..4096 px |
+| indices | Uint16Array、3t、1≤t≤64 | 0..n−1。各三角形は(bx−ax)(cy−ay)−(by−ay)(cx−ax)>1e−5。Y下向きでは時計回り |
+| colorsA / colorsB | 各Uint16Array、n | 同じ法線・光条件で評価した2固有色のRGB565。法線やalbedo自体をここで照明計算しない |
+| mask | Float32Array、n | 有限、−4096..4096のsigned scalar。補間結果≥0でB、負でAを選択。光の向きから作る値ではない |
+| holeXY | Float32Array、2ΣholeCounts | screen xy、有限−4096..4096。最大2個の厳密凸polygon |
+| holeCounts | Uint8Array、0..2要素、各3..8 | 穴の点数。0要素は穴なし。穴の境界も描かず、巻き方向は両方可 |
+
+全てordinary ArrayBufferを持つreadonly入力。immutable backingと入力間のaliasは許し、SharedArrayBuffer・detached bufferは拒否する。foreign backingの非整列addressもmemcpyで読む。7入力を検証後、数値snapshotをcandidateへコピーし、呼出し後のJS bufferは保持しない。入力を変更しても提出済みframeへ影響しない。正常呼出し中にJS/callbackを呼ばず、warm反復中のheap確保を要求しない。型・長さ・値・topology違反はINVALID_ARGUMENT、frame予算はLIMIT_EXCEEDED、beginFrame前/再入はBUSY。失敗はcandidate/building/committed frameへ未適用で、同じcandidateへ別の有効描画を続けられる。
+
+整数pixel中心、共有辺はtop-left coverageで1枚だけが所有する。補間はscreen空間で、perspective-correct属性補間ではない。現在の狐試験はorthographic。透視投影へそのまま使ってbody-local模様が必ず固定されると約束しない。単色同士のalbedo境界と、照明の連続性は別の契約である。
+
+geometry coverage・weight・mask選択はbinary64で評価する。RGB565の各5/6/5 bit channel補間だけをfloat32とし、最後にclamp/四捨五入する。wide色参照との同一bitを要求せず、色code誤差とcoverage/mask選択の一致を別に検証する。画素ごとの法線補間・specular再評価ではないため、小さなツヤの精度には限界がある。
+
+packetはheader8 B＋16n B頂点＋6t B index＋68h B穴、最後を10 B segmentへzero paddingする。30頂点/40三角形/2穴なら864 B payload、geometryを含め88 entries。used countのみsnapshotし、Cの最大作業構造1040 Bを全て常駐コピーしない。検証用のreserved/未使用field/paddingはcanonical zero。予算は各triangleの画面内clipped整数bbox面積の**合計**を既存65535 raster stepsへ加え、snapshot entriesも既存resource上限へ加える。穴やcoverageで落ちる画素も含めるが、これはCPU時間の測定値ではない。
+
+これは[狐の共有face比較](../perf/fox-face-gouraud-study.md)から追加した最小hone機能であり、ayatsuriの汎用mesh authoring/native Model形式への組込みは後続。既存の解析楕円体/blend/凸fillと併用する。
+
+
 ## `ellipsoid(screen, normalMatrix, lighting, material, surface, texture)`
 
 滑らかな材質と透過合成を検証する、**実装中の解析的パッチ**。投影された単位球を走査帯の各画素で評価する。三角形の平面塗りへ分割せず、全画面bufferも持たない。既存の `fill/outline` と同じ候補frame/順序/上限を使い、appがbeginFrame/commitする。

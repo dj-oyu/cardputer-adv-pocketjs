@@ -557,6 +557,144 @@ bool ksn_proc_clipped_ellipsoid_bounds(const ksn_proc_clipped_ellipsoid *p,int *
     }
     *left=l;*top=t;*right=r;*bottom=b;return true;
 }
+static bool gouraud_zero(const void *data,size_t bytes){
+    const uint8_t *p=data;for(size_t i=0;i<bytes;i++)if(p[i])return false;return true;
+}
+static bool gouraud_header(const ksn_proc_gouraud_header *h){
+    return h->vertices>=3&&h->vertices<=KSN_PROC_GOURAUD_VERTICES&&
+        h->triangles>=1&&h->triangles<=KSN_PROC_GOURAUD_TRIANGLES&&
+        h->holes<=KSN_PROC_GOURAUD_HOLES&&!h->reserved&&!h->reserved2;
+}
+bool ksn_proc_gouraud_read(const ksn_proc_segment *data,unsigned words,ksn_proc_gouraud_patch *p,unsigned *used){
+    if(!data||!p||!used||words<(sizeof p->header+sizeof *data-1)/sizeof *data)return false;
+    ksn_proc_gouraud_header h;memcpy(&h,data,sizeof h);
+    if(!gouraud_header(&h))return false;
+    const size_t bytes=KSN_PROC_GOURAUD_BYTES(h.vertices,h.triangles,h.holes);
+    const unsigned count=(unsigned)KSN_PROC_GOURAUD_WORDS(h.vertices,h.triangles,h.holes);
+    if(count>words)return false;
+    const uint8_t *raw=(const uint8_t *)data;
+    if(!gouraud_zero(raw+bytes,count*sizeof *data-bytes))return false;
+    memset(p,0,sizeof *p);p->header=h;size_t offset=sizeof h;
+    memcpy(p->vertices,raw+offset,h.vertices*sizeof p->vertices[0]);offset+=h.vertices*sizeof p->vertices[0];
+    memcpy(p->indices,raw+offset,3u*h.triangles*sizeof p->indices[0]);offset+=3u*h.triangles*sizeof p->indices[0];
+    memcpy(p->clips,raw+offset,h.holes*sizeof p->clips[0]);*used=count;return true;
+}
+static double gouraud_area(const ksn_proc_gouraud_vertex *a,const ksn_proc_gouraud_vertex *b,
+                           const ksn_proc_gouraud_vertex *c){
+    return ((double)b->x-a->x)*((double)c->y-a->y)-((double)b->y-a->y)*((double)c->x-a->x);
+}
+static void gouraud_box(const ksn_proc_gouraud_vertex *a,const ksn_proc_gouraud_vertex *b,
+                        const ksn_proc_gouraud_vertex *c,int *left,int *top,int *right,int *bottom){
+    *left=(int)fmax(0,ceil(fmin(a->x,fmin(b->x,c->x))));
+    *top=(int)fmax(0,ceil(fmin(a->y,fmin(b->y,c->y))));
+    *right=(int)fmin(KSN_PROC_W-1,floor(fmax(a->x,fmax(b->x,c->x))));
+    *bottom=(int)fmin(KSN_PROC_H-1,floor(fmax(a->y,fmax(b->y,c->y))));
+}
+bool ksn_proc_gouraud_bounds(const ksn_proc_gouraud_patch *p,int *left,int *top,int *right,int *bottom,unsigned *cost){
+    if(!p||!left||!top||!right||!bottom||!cost||!gouraud_header(&p->header))return false;
+    const unsigned vertices=p->header.vertices,triangles=p->header.triangles,holes=p->header.holes;
+    if(!gouraud_zero(p->vertices+vertices,(KSN_PROC_GOURAUD_VERTICES-vertices)*sizeof p->vertices[0])||
+       !gouraud_zero(p->indices+3*triangles,(KSN_PROC_GOURAUD_TRIANGLES-triangles)*3*sizeof p->indices[0])||
+       !gouraud_zero(p->clips+holes,(KSN_PROC_GOURAUD_HOLES-holes)*sizeof p->clips[0]))return false;
+    for(unsigned i=0;i<vertices;i++){
+        const ksn_proc_gouraud_vertex *v=p->vertices+i;
+        if(!isfinite(v->x)||!isfinite(v->y)||!isfinite(v->mask)||fabsf(v->x)>4096||
+           fabsf(v->y)>4096||fabsf(v->mask)>4096)return false;
+    }
+    for(unsigned i=0;i<holes;i++){int winding;if(p->clips[i].count<3||!clip_prepare(p->clips+i,&winding))return false;}
+    int l=KSN_PROC_W,t=KSN_PROC_H,r=-1,b=-1;unsigned steps=0;
+    for(unsigned i=0;i<triangles;i++){
+        const uint16_t *index=p->indices+3*i;
+        if(index[0]>=vertices||index[1]>=vertices||index[2]>=vertices)return false;
+        const ksn_proc_gouraud_vertex *a=p->vertices+index[0],*v=p->vertices+index[1],*c=p->vertices+index[2];
+        if(!(gouraud_area(a,v,c)>1e-5))return false;
+        int x0,y0,x1,y1;gouraud_box(a,v,c,&x0,&y0,&x1,&y1);
+        if(x0>x1||y0>y1)continue;
+        steps+=(unsigned)(x1-x0+1)*(unsigned)(y1-y0+1);
+        if(x0<l)l=x0;
+        if(y0<t)t=y0;
+        if(x1>r)r=x1;
+        if(y1>b)b=y1;
+    }
+    *left=l;*top=t;*right=r;*bottom=b;*cost=steps;return true;
+}
+bool __attribute__((noinline)) ksn_proc_gouraud_frame_next(const ksn_proc_frame *frame,unsigned *i,
+                                                         ksn_proc_segment *geometry,unsigned *cost){
+    ksn_proc_gouraud_patch p;unsigned used;int l,t,r,b;
+    if(!ksn_proc_gouraud_read(frame->segments+*i,frame->count-*i,&p,&used)||
+       !ksn_proc_gouraud_bounds(&p,&l,&t,&r,&b,cost)){
+        *i=frame->count+1u;return false;
+    }
+    *i+=used;geometry->x0=(int16_t)(geometry->x0-KSN_PROC_EXT_GOURAUD_PATCH);
+    if(l!=geometry->x0||t!=geometry->y0||r!=geometry->x1||b!=geometry->y1||l>r||t>b){
+        *i=frame->count+1u;return false;
+    }
+    return true;
+}
+typedef struct {double a,b,c;int sign;bool closed;} gouraud_edge;
+static gouraud_edge gouraud_make_edge(const ksn_proc_gouraud_vertex *a,const ksn_proc_gouraud_vertex *b){
+    const double dx=(double)b->x-a->x,dy=(double)b->y-a->y;
+    gouraud_edge edge={.sign=1,.closed=dy<0||(dy==0&&dx>0)};
+    /* Both triangles evaluate a shared edge in the same canonical direction.
+     * Reversing it only negates the result, including exact zero at ties. */
+    if(a->x>b->x||(a->x==b->x&&a->y>b->y)){
+        const ksn_proc_gouraud_vertex *swap=a;a=b;b=swap;edge.sign=-1;
+    }
+    edge.a=(double)a->y-b->y;edge.b=(double)b->x-a->x;
+    edge.c=((double)b->y-a->y)*a->x-((double)b->x-a->x)*a->y;return edge;
+}
+static double gouraud_edge_value(const gouraud_edge *e,int x,int y){return e->sign*(e->a*x+e->b*y+e->c);}
+static __attribute__((noinline)) void gouraud_band(const ksn_proc_gouraud_patch *p,uint16_t *pixels,int y,int height){
+    int winding[KSN_PROC_GOURAUD_HOLES];
+    for(unsigned h=0;h<p->header.holes;h++)if(!clip_prepare(p->clips+h,winding+h))return;
+    for(unsigned i=0;i<p->header.triangles;i++){
+        const uint16_t *index=p->indices+3*i;
+        const ksn_proc_gouraud_vertex *v[3]={p->vertices+index[0],p->vertices+index[1],p->vertices+index[2]};
+        int left,top,right,bottom;gouraud_box(v[0],v[1],v[2],&left,&top,&right,&bottom);
+        if(top<y)top=y;
+        if(bottom>=y+height)bottom=y+height-1;
+        if(left>right||top>bottom)continue;
+        const double inverse=1/gouraud_area(v[0],v[1],v[2]);
+        const gouraud_edge edge[3]={gouraud_make_edge(v[1],v[2]),gouraud_make_edge(v[2],v[0]),gouraud_make_edge(v[0],v[1])};
+        for(int yy=top;yy<=bottom;yy++){
+            int hl[KSN_PROC_GOURAUD_HOLES],hr[KSN_PROC_GOURAUD_HOLES];
+            for(unsigned h=0;h<p->header.holes;h++){
+                hl[h]=left;hr[h]=right;
+                if(!clip_span(p->clips+h,winding[h],yy,hl+h,hr+h)){hl[h]=1;hr[h]=0;}
+            }
+            for(int x=left;x<=right;x++){
+                bool hidden=false;
+                for(unsigned h=0;h<p->header.holes;h++)if(x>=hl[h]&&x<=hr[h]){hidden=true;break;}
+                if(hidden)continue;
+                double w[3];bool inside=true;
+                for(unsigned k=0;k<3;k++){
+                    w[k]=gouraud_edge_value(edge+k,x,yy);
+                    if(w[k]<0||(w[k]==0&&!edge[k].closed)){inside=false;break;}
+                }
+                if(!inside)continue;
+                for(unsigned k=0;k<3;k++)w[k]*=inverse;
+                const bool second=w[0]*v[0]->mask+w[1]*v[1]->mask+w[2]*v[2]->mask>=0;
+                const uint16_t a=second?v[0]->color_b:v[0]->color_a,
+                    b=second?v[1]->color_b:v[1]->color_a,c=second?v[2]->color_b:v[2]->color_a;
+                /* Keep coverage and near-zero material selection in the wide
+                 * reference arithmetic; only bounded 5/6-bit colour values
+                 * use float32. A tie may differ by one channel code. */
+                const float cw[3]={(float)w[0],(float)w[1],(float)w[2]};
+                const unsigned red=(unsigned)lroundf(fmaxf(0,fminf(31,cw[0]*(a>>11)+cw[1]*(b>>11)+cw[2]*(c>>11)))),
+                    green=(unsigned)lroundf(fmaxf(0,fminf(63,cw[0]*((a>>5)&63)+cw[1]*((b>>5)&63)+cw[2]*((c>>5)&63)))),
+                    blue=(unsigned)lroundf(fmaxf(0,fminf(31,cw[0]*(a&31)+cw[1]*(b&31)+cw[2]*(c&31))));
+                pixels[(yy-y)*KSN_PROC_W+x]=(uint16_t)((red<<11)|(green<<5)|blue);
+            }
+        }
+    }
+}
+static __attribute__((noinline)) bool gouraud_render_entry(const ksn_proc_segment *data,unsigned words,
+                                                          uint16_t *pixels,int y,int height,unsigned *used){
+    ksn_proc_gouraud_patch p;int l,t,r,b;unsigned cost;
+    if(!ksn_proc_gouraud_read(data,words,&p,used)||!ksn_proc_gouraud_bounds(&p,&l,&t,&r,&b,&cost))return false;
+    if(b>=y&&t<y+height)gouraud_band(&p,pixels,y,height);
+    return true;
+}
 bool ksn_proc_blend_read(const ksn_proc_segment *data,unsigned words,ksn_proc_blend_ellipsoids *p,unsigned *used){
     if(!data||!p||!used||words*sizeof *data<sizeof p->header)return false;
     memcpy(&p->header,data,sizeof p->header);
@@ -802,6 +940,11 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,const ksn_p
 static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
     for(unsigned j=0;j<frame->count;j++){
         const ksn_proc_segment *s=&frame->segments[j];
+        if(s->x0>=KSN_PROC_EXT_GOURAUD_PATCH-480){
+            unsigned used;
+            if(!gouraud_render_entry(s+1,frame->count-j-1,pixels,y,height,&used))return;
+            j+=used;continue;
+        }
         if(s->x0>=KSN_PROC_EXT_BLEND_REGION-480){
             ksn_proc_blend_ellipsoids p;ksn_proc_blend_region_mask mask;unsigned used;
             if(!ksn_proc_blend_region_read(s+1,frame->count-j-1,&p,&mask,&used))return;

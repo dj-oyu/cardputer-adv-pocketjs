@@ -56,6 +56,7 @@ typedef struct { int16_t x0,y0,x1,y1; uint16_t color; } ksn_proc_segment;
 #define KSN_PROC_EXT_BLEND_ELLIPSOIDS 12288
 #define KSN_PROC_EXT_CLIPPED_ELLIPSOID 16384
 #define KSN_PROC_EXT_BLEND_REGION 20480
+#define KSN_PROC_EXT_GOURAUD_PATCH 24576
 #define KSN_PROC_EXT_MIN 2048
 #define KSN_PROC_PATTERN_BITS 24
 #define KSN_PROC_PATTERN_BLOCK 6
@@ -114,6 +115,28 @@ bool ksn_proc_blend_region_read(const ksn_proc_segment *data,unsigned words,
     ksn_proc_blend_ellipsoids *p,ksn_proc_blend_region_mask *mask,unsigned *used);
 bool ksn_proc_blend_region_bounds(const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *mask,
     int *left,int *top,int *right,int *bottom);
+/* Screen-linear, already-lit vertex colours; mask selects B at >=0. No
+ * lighting, depth buffer or alpha is implied. Serialized arrays use only the
+ * declared counts; fixed-array unused storage and segment padding are zero. */
+#define KSN_PROC_GOURAUD_VERTICES 32
+#define KSN_PROC_GOURAUD_TRIANGLES 64
+#define KSN_PROC_GOURAUD_HOLES 2
+typedef struct {float x,y,mask;uint16_t color_a,color_b;} ksn_proc_gouraud_vertex;
+typedef struct {uint8_t vertices,triangles,holes,reserved;uint32_t reserved2;} ksn_proc_gouraud_header;
+typedef struct {
+    ksn_proc_gouraud_header header;
+    ksn_proc_gouraud_vertex vertices[KSN_PROC_GOURAUD_VERTICES];
+    uint16_t indices[3*KSN_PROC_GOURAUD_TRIANGLES];
+    ksn_proc_ellipsoid_clip clips[KSN_PROC_GOURAUD_HOLES];
+} ksn_proc_gouraud_patch;
+_Static_assert(sizeof(ksn_proc_gouraud_vertex)==16&&sizeof(ksn_proc_gouraud_header)==8&&
+               sizeof(ksn_proc_ellipsoid_clip)==68&&sizeof(ksn_proc_gouraud_patch)==1040,"Gouraud packet layout");
+#define KSN_PROC_GOURAUD_BYTES(v,t,h) (8u+16u*(v)+6u*(t)+68u*(h))
+#define KSN_PROC_GOURAUD_WORDS(v,t,h) ((KSN_PROC_GOURAUD_BYTES(v,t,h)+sizeof(ksn_proc_segment)-1)/sizeof(ksn_proc_segment))
+bool ksn_proc_gouraud_read(const ksn_proc_segment *data,unsigned words,ksn_proc_gouraud_patch *p,unsigned *used);
+/* Cost is the sum of clipped integer triangle bounding-box areas, before
+ * holes/top-left coverage; the submitting owner applies its frame budget. */
+bool ksn_proc_gouraud_bounds(const ksn_proc_gouraud_patch *p,int *left,int *top,int *right,int *bottom,unsigned *cost);
 typedef struct {
     uint16_t count;
     uint16_t raster_steps;
@@ -123,6 +146,8 @@ typedef struct {
 } ksn_proc_frame;
 _Static_assert(sizeof(ksn_proc_frame)==6+KSN_PROC_SEGMENTS*sizeof(ksn_proc_segment),
                "ext took the padding byte: the frame did not grow");
+/* Out of line so legacy walks do not reserve the new packet's stack storage. */
+bool ksn_proc_gouraud_frame_next(const ksn_proc_frame *frame,unsigned *i,ksn_proc_segment *geometry,unsigned *cost);
 /* For code that walks a frame's geometry (damage, validation): the entry at
  * *i (a pattern line's with the bias removed), whether it is a pattern line,
  * and its raster cost; *i moves past a pattern line's parameters. False at
@@ -135,6 +160,8 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
     *geometry=frame->segments[(*i)++];
     *pattern=frame->ext&&geometry->x0>=KSN_PROC_EXT_MIN;
     if(*pattern){
+        if(geometry->x0>=KSN_PROC_EXT_GOURAUD_PATCH-480)
+            return ksn_proc_gouraud_frame_next(frame,i,geometry,cost);
         if(geometry->x0>=KSN_PROC_EXT_BLEND_REGION-480){
             ksn_proc_blend_ellipsoids p;ksn_proc_blend_region_mask mask;unsigned used;
             if(!ksn_proc_blend_region_read(frame->segments+*i,frame->count-*i,&p,&mask,&used)){

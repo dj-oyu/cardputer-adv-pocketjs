@@ -11,6 +11,8 @@ on:
       - 'apps/lib/ayatsuri_local_plane.js'
       - 'components/pocketjs_guest/src/guest.c'
       - 'components/pocketjs_guest/include/pocketjs/guest.h'
+      - 'main/CMakeLists.txt'
+      - 'tools/check_memory_build_profile.py'
       - 'main/app_session.*'
       - 'main/pocket/pocket_app.c'
       - 'main/pocket/pocket_api.*'
@@ -35,6 +37,10 @@ on:
       - 'tools/character/**'
       - 'tools/kasane_contract/*character*'
       - 'tools/kasane_contract/*ellipsoid*'
+      - 'tools/kasane_contract/*fox*'
+      - 'tools/kasane_contract/*gouraud*'
+      - 'tools/kasane_contract/run_pocket_proc_qjs.py'
+      - 'tools/kasane_contract/proc_native_weak.c'
       - 'tools/kasane_contract/shape_contract.js'
       - '.github/workflows/character-materials.yml'
   workflow_dispatch:
@@ -74,6 +80,9 @@ jobs:
           node tools/character/test_ayatsuri_clip.cjs
           python3 tools/character/test_fox_lifetime.py
           node tools/character/test_material_region.cjs
+          node tools/character/test_fox_patch.cjs
+          FOX_PATCH_VARIANT=gouraud node tools/character/test_fox_patch.cjs
+          FOX_PATCH_VARIANT=gouraud-socket node tools/character/test_fox_patch.cjs
           python3 tools/character/test_material_study_inputs.py
           python3 tools/test_guest_allocator_metrics.py --quickjs
           node tools/ayatsuri/model/test_pack_model.cjs
@@ -101,6 +110,7 @@ jobs:
           python3 tools/kasane_contract/run_pocket_shape.py
           python3 tools/kasane_contract/run_proc_ellipsoid.py
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --gouraud-only --opt 2
           python3 tools/kasane_contract/run_character_app_host.py --source-plane
           python3 tools/kasane_contract/run_fox_app_host.py
           python3 tools/kasane_contract/run_fox_app_host.py --material-study mask-inset --capture-dir .cache/fox-material-asan
@@ -120,6 +130,7 @@ jobs:
           python3 tools/ayatsuri/run_follow.py --m32
           python3 tools/ayatsuri/model/run_model_contracts.py --m32
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2 --m32
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --gouraud-only --opt 2 --m32
           python3 tools/kasane_contract/run_character_app_host.py --source-plane --m32
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --capture-dir .cache/fox-capture
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-inset --capture-dir .cache/fox-material-m32
@@ -161,6 +172,36 @@ jobs:
             .cache/ayatsuri-model-contracts/
             .cache/class-owner-regression/
             .cache/class-session-order/
+            .cache/gouraud-contracts/
+  gouraud:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Same-input native colour interpolation and heap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 tools/kasane_contract/run_fox_patch_host.py --variant gouraud-socket
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant baseline
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant gouraud
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant gouraud-socket
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: gouraud-native-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/fox-patch-host/
+            .cache/gouraud-contracts/
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -435,6 +435,48 @@ static JSValue js_shape_ellipsoid_clipped_packed(JSContext *ctx,JSValueConst sel
     p.clip.count=(uint8_t)(clip.bytes/8);if(clip.bytes)memcpy(p.clip.xy,clip.data,clip.bytes);
     return pocket_proc_native_clipped_ellipsoid(ctx,op,&p);
 }
+/* Ordinary typed arrays are borrowed only until this call returns. Empty
+ * hole views are allowed; shared/detached views are not. memcpy also permits
+ * foreign backing stores whose address is not naturally aligned. */
+static bool gouraud_view(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    const bool ordinary=JS_IsArrayBuffer(ab);
+    uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
+    const bool ok=ordinary&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&(data||(!size&&!bytes));
+    if(ok)*out=(shade_view){data?data+offset:NULL,bytes};
+    JS_FreeValue(ctx,ab);return ok;
+}
+static JSValue js_shape_gouraud(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="hone.gouraudPatch";
+    if(argc!=7)return invalid(ctx,op,"expected xy, indices, colorsA, colorsB, mask, holeXY, holeCounts");
+    const JSTypedArrayEnum types[7]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16,
+        JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT8};
+    shade_view v[7];
+    for(unsigned k=0;k<7;k++)if(!gouraud_view(ctx,argv[k],types[k],&v[k]))
+        return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"ordinary typed views F32/U16/U16/U16/F32/F32/U8 required");
+    const size_t n=v[0].bytes/8,t=v[1].bytes/6,h=v[6].bytes;
+    if(v[0].bytes%8||n<3||n>32||v[1].bytes%6||!t||t>64||h>2||
+       v[2].bytes!=n*2||v[3].bytes!=n*2||v[4].bytes!=n*4)
+        return invalid(ctx,op,"3..32 vertices, 1..64 index triples, 0..2 holes and matching vertex fields required");
+    size_t hole_points=0;
+    for(size_t k=0;k<h;k++){if(v[6].data[k]<3||v[6].data[k]>8)return invalid(ctx,op,"hole counts must be 3..8");hole_points+=v[6].data[k];}
+    if(v[5].bytes!=hole_points*8)return invalid(ctx,op,"holeXY length must match holeCounts");
+    ksn_proc_gouraud_patch p={0};p.header.vertices=(uint8_t)n;p.header.triangles=(uint8_t)t;p.header.holes=(uint8_t)h;
+    for(size_t k=0;k<n;k++){
+        memcpy(&p.vertices[k].x,v[0].data+k*8,4);memcpy(&p.vertices[k].y,v[0].data+k*8+4,4);
+        memcpy(&p.vertices[k].mask,v[4].data+k*4,4);
+        memcpy(&p.vertices[k].color_a,v[2].data+k*2,2);memcpy(&p.vertices[k].color_b,v[3].data+k*2,2);
+    }
+    memcpy(p.indices,v[1].data,v[1].bytes);hole_points=0;
+    for(size_t k=0;k<h;k++){
+        p.clips[k].count=v[6].data[k];memcpy(p.clips[k].xy,v[5].data+hole_points*8,(size_t)p.clips[k].count*8);
+        hole_points+=p.clips[k].count;
+    }
+    return pocket_proc_native_gouraud(ctx,op,&p);
+}
 static JSValue js_shape_blend_region(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv);
 static JSValue js_shape_blend_ellipsoids(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     if(argc==7)return js_shape_blend_region(ctx,self,argc,argv);
@@ -686,6 +728,7 @@ esp_err_t pocket_shape_fill(JSContext *ctx,JSValueConst ns,void *unused){
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("project",3,js_shape_project),
         JS_CFUNC_DEF("shade",6,js_shape_shade),
+        JS_CFUNC_DEF("gouraudPatch",7,js_shape_gouraud),
         JS_CFUNC_DEF("ellipsoid",6,js_shape_ellipsoid),
         JS_CFUNC_DEF("ellipsoidPacked",3,js_shape_ellipsoid_packed),
         JS_CFUNC_DEF("ellipsoidClippedPacked",4,js_shape_ellipsoid_clipped_packed),

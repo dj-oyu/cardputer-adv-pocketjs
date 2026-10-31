@@ -17,6 +17,7 @@
 | [material-region-study.md](material-region-study.md) | 同一曲面の固有色 | localPlaneと旧UV/単色の比較、片側狐fixture、native共有資産とhost費用/未達 |
 | [fox-face-v3.md](fox-face-v3.md) | 眼と寿命・会計計測 | 部品数を維持した白輪/突出の改善、6回のrelease/recreate、host会計peakと未分離の内訳 |
 | [cloud-memory-fixture.md](cloud-memory-fixture.md) | 診断次候補 | 明示cold回収、製品A/C有限fixture、guest/ESP/cacheを分ける最小実機計測と未検証 |
+| [fox-face-gouraud-study.md](fox-face-gouraud-study.md) | host小実証・未製品置換 | 共有faceの因子分離、bounded Gouraud、眼窩/口吻の残差と160KiB/寿命検証 |
 | [class-owner-registry.md](class-owner-registry.md) | 実機障害・回帰 | 16 owner枠assert、全24 classの登録/破棄、製品/host契約統一と計測範囲 |
 | [cloud-finite-fixture.md](cloud-finite-fixture.md) | ローカル次候補 | Enter/Uで選ぶ外乱・途中retarget・pause/replay有限診断と検証境界 |
 | [cloud-static-asset-study.md](cloud-static-asset-study.md) | ローカル比較・未採用 | 雲の静的定義bin化、所有権、source/packedの実測方法と実機境界 |

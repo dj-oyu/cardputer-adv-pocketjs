@@ -22,6 +22,10 @@ void pocket_proc_host_classes_reset(void){
     pocket_class_registry_reset(&proc_host_class_registry);
 }
 
+__attribute__((weak)) JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"Gouraud patches unavailable in this harness",false,NULL);
+}
 __attribute__((weak)) JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch,
         const ksn_proc_blend_region_mask *mask){
     (void)patch;(void)mask;
