@@ -92,7 +92,6 @@ globalThis.Ayatsuri = (() => {
         const node = this._node; nodeAlive(node); let changed = false;
         if (!node.analytic) fail('group has no texture');
         if (node.geometryExtension) fail('geometry has no texture');
-        if (node.pattern && node.pattern.kind === 'localPlane') fail('localPlane has no UV transform');
         if (patch.offset) vector(patch.offset, 2);
         if (patch.scale) vector(patch.scale, 2);
         if (patch.rotation !== undefined) finite(Math.fround(finite(patch.rotation)));
@@ -202,16 +201,10 @@ globalThis.Ayatsuri = (() => {
         const p = def.pattern;
         if (!analytic) fail('group has no texture');
         if (p.kind === 'image') fail('image pattern unsupported');
-        if (p.kind === 'localPlane') {
-          const extension = globalThis.AyatsuriLocalPlane;
-          if (!extension) fail('localPlane module required');
-          node.pattern = extension.create(p);
-        } else {
         if (p.kind !== 'band' && p.kind !== 'checker') fail('pattern kind');
           node.pattern = {kind: p.kind, axis: p.axis || 'v', start: p.start === undefined ? 0.5 : unit(p.start),
             end: p.end === undefined ? 1 : unit(p.end), color: rgb(p.color), repeats: p.repeats === undefined ? 4 : finite(p.repeats)};
           if ((node.pattern.axis !== 'u' && node.pattern.axis !== 'v') || node.pattern.start > node.pattern.end || node.pattern.repeats <= 0) fail('pattern range');
-        }
       }
       if (def.textureTransform) handle.texture(def.textureTransform);
       if (def.visible !== undefined) handle.visible(def.visible);
@@ -280,15 +273,11 @@ globalThis.Ayatsuri = (() => {
             surface[0] = pack(node.color); surface[1] = pattern ? pack(pattern.color) : surface[0];
             surface[2] = Math.round(node.opacity * 255);
             surface[3] = Math.round(Math.min(1, node.thickness * Math.hypot(m[2], m[6], m[10])) * 255);
-            surface[4] = !pattern ? 0 : pattern.code || (pattern.kind === 'checker' ? 3 : pattern.axis === 'u' ? 1 : 2);
-            if (pattern && pattern.encode) pattern.encode(t);
-            else {
+            surface[4] = !pattern ? 0 : pattern.kind === 'checker' ? 3 : pattern.axis === 'u' ? 1 : 2;
             t[49] = cs * t[63]; t[50] = -sn * t[64]; t[51] = 0.5 + t[61] - (t[49] + t[50]) * 0.5;
             t[52] = sn * t[63]; t[53] = cs * t[64]; t[54] = 0.5 + t[62] - (t[52] + t[53]) * 0.5;
             if (pattern && pattern.kind === 'checker') for (let k = 0; k < 6; ++k) t[49 + k] *= pattern.repeats;
-            t[56] = pattern ? pattern.start : 0; t[57] = pattern ? pattern.end : 1;
-            }
-            t[55] = node.edgeSoftness;
+            t[55] = node.edgeSoftness; t[56] = pattern ? pattern.start : 0; t[57] = pattern ? pattern.end : 1;
             if (albedoChanged) ++counts.albedoUpdates;
           }
           if (geometryChanged || cameraChanged || lightChanged || albedoChanged || node.evaluatedShading !== node.shadingVersion) {

@@ -1,4 +1,5 @@
 // Optional local albedo plane; loaded only by apps that use this pattern.
+// Adapter ABI: SourceA handle._node.analytic is the existing 264B packet.
 'use strict';
 globalThis.AyatsuriLocalPlane=(()=>{
   function fail(text){throw new TypeError('Ayatsuri: '+text);}
@@ -7,6 +8,7 @@ globalThis.AyatsuriLocalPlane=(()=>{
     const n=this.normal;work[49]=n[0];work[50]=n[1];work[51]=n[2];
     work[52]=this.offset;work[53]=this.feather;work[54]=0;work[56]=0;work[57]=1;
   }};
+  Object.freeze(Pattern);
   function create(p){
     if(!p||p.kind!=='localPlane')fail('pattern kind');
     const n=p.normal;if(!n||n.length!==3)fail('vector length');
@@ -19,5 +21,75 @@ globalThis.AyatsuriLocalPlane=(()=>{
     const pattern=Object.create(Pattern);pattern.normal=[x/length,y/length,z/length];
     pattern.offset=offset;pattern.feather=feather;pattern.color=color;return pattern;
   }
-  const api={create};if(typeof module!=='undefined')module.exports=api;return api;
+  function alive(s){
+    if(!s||s.dead||(s.owner&&s.owner.disposed))fail('disposed scene');
+    if(s.busy||(s.owner&&s.owner.busy))fail('busy scene');
+  }
+  function ready(s){alive(s);if(!s.ready||(s.owner&&s.owner.dirty))fail('evaluate before render');}
+  function rejectTexture(){
+    const n=this._node,o=n&&n.owner;
+    if(!o||o.disposed)fail('disposed scene');if(o.busy)fail('busy scene');
+    fail('localPlane has no UV transform');
+  }
+  function change(s,method,patch){
+    alive(s);s.busy=true;
+    try{s.base[method](patch);s.ready=false;}finally{s.busy=false;}
+  }
+  const Scene={add(def){
+    const s=this._plane;alive(s);s.busy=true;
+    let copy=def,record=null;
+    try{
+      // The wrapper blocks its entry points, and the base owner blocks raw
+      // handle mutation while user pattern/normal/definition getters run.
+      const owner=s.owner;if(owner)owner.busy=true;
+      try{
+        const p=def&&def.pattern;
+        if(p&&p.kind==='localPlane'){
+          const pattern=create(p);copy={};
+          for(const key in def)if(key!=='pattern')copy[key]=def[key];
+          if(!copy.geometry||copy.geometry.kind!=='ellipsoid')fail('localPlane requires ellipsoid');
+          if(copy.textureTransform)fail('localPlane has no UV transform');
+          record={work:null,surface:null,pattern,color565:s.pack(pattern.color)};
+        }
+      }finally{if(owner)owner.busy=false;}
+      const h=s.base.add(copy);if(!s.owner)s.owner=h._node.owner;
+      if(record){
+        record.work=h._node.analytic.work;record.surface=h._node.analytic.surface;
+        h.texture=rejectTexture;s.records.push(record);
+      }
+      s.ready=false;return h;
+    }finally{s.busy=false;}
+  },light(patch){change(this._plane,'light',patch);},camera(patch){change(this._plane,'camera',patch);},
+  evaluate(timeMs){
+    const s=this._plane;alive(s);s.busy=true;s.ready=false;
+    try{
+      s.base.evaluate(timeMs);
+      for(let k=0;k<s.records.length;k++){
+        const r=s.records[k];r.pattern.encode(r.work);r.surface[1]=r.color565;r.surface[4]=4;
+      }
+      s.ready=true;
+    }finally{s.busy=false;}
+  },render(){
+    const s=this._plane;ready(s);s.busy=true;
+    try{s.base.render();}catch(error){s.ready=false;throw error;}finally{s.busy=false;}
+  },visit(visitor){
+    const s=this._plane;ready(s);s.busy=true;
+    try{s.base.visit(visitor);}finally{s.busy=false;}
+  },stats(out){const s=this._plane;alive(s);s.busy=true;try{s.base.stats(out);}finally{s.busy=false;}},
+  dispose(){
+    const s=this._plane;if(!s||s.busy||(s.owner&&s.owner.busy))fail('busy scene');if(s.dead)return;s.busy=true;
+    try{
+      s.base.dispose();for(let k=0;k<s.records.length;k++){
+        const r=s.records[k];r.work=r.surface=r.pattern=null;
+      }
+      s.records.length=0;s.base=s.owner=s.pack=s.records=null;s.dead=true;s.ready=false;
+    }finally{s.busy=false;}
+  }};
+  function scene(options){
+    const Base=globalThis.Ayatsuri;
+    if(!Base||typeof Base.scene!=='function'||typeof Base.pack!=='function')fail('base Ayatsuri required');
+    const factory=Base.scene,pack=Base.pack,facade=Object.create(Scene);
+    facade._plane={base:factory(options),pack,owner:null,records:[],ready:false,busy:false,dead:false};return facade;
+  }
+  const api={create,scene};if(typeof module!=='undefined')module.exports=api;return api;
 })();

@@ -3,7 +3,11 @@ const assert=require('node:assert/strict');
 const Ayatsuri=require('../../apps/character/character.js');
 const LocalPlane=require('../../apps/lib/ayatsuri_local_plane.js');
 const TransformReference=require('./transform_reference.cjs');
-const scene=Ayatsuri.scene({backend:{ellipsoid(){}},evaluator:TransformReference});
+const plain=Ayatsuri.scene({backend:{ellipsoid(){}},evaluator:TransformReference});
+assert.throws(()=>plain.add({name:'requires-region-factory',geometry:{kind:'ellipsoid',radii:[1,1,1]},
+  pattern:{kind:'localPlane',normal:[0,1,0],color:0xffffff}}),/pattern kind/);
+plain.dispose();
+const scene=LocalPlane.scene({backend:{ellipsoid(){}},evaluator:TransformReference});
 const normal=[0,2,0],body=scene.add({name:'body',geometry:{kind:'ellipsoid',radii:[20,30,10]},
   material:{color:0xe47b30,specular:.5},pattern:{kind:'localPlane',normal,offset:.2,feather:.1,color:0xffe8bb}});
 normal.fill(NaN);
@@ -21,8 +25,6 @@ assert.equal(stats().projectionUpdates,before.projectionUpdates);
 body.place({rotation:[.2,.4,-.1],scale:[1.3,.7,1.1]});scene.evaluate(10);
 assert.deepEqual(Array.from(packet().texture),texture,'local region follows transformed surface');
 assert.notDeepEqual(Array.from(packet().screen),projection);
-assert.throws(()=>scene.add({name:'requires-plane-module',geometry:{kind:'ellipsoid',radii:[1,1,1]},
-  pattern:{kind:'localPlane',normal:[0,1,0],color:0xffffff}}),/localPlane module required/);
 globalThis.AyatsuriLocalPlane=LocalPlane;
 assert.throws(()=>body.texture({offset:[.1,0]}),/localPlane/);
 const beforeInvalid=stats();
@@ -41,5 +43,14 @@ scene.render();
 scene.add({name:'valid-plane-control',geometry:{kind:'ellipsoid',radii:[1,1,1]},
   pattern:{kind:'localPlane',normal:[0,1,0],offset:0,feather:.1,color:0xffffff}});
 scene.evaluate(15);scene.render();
+assert.throws(()=>scene.add({name:'reentrant',geometry:{kind:'ellipsoid',radii:[1,1,1]},
+  get pattern(){body.place({position:[1,0,0]});return null;}}),/busy scene/);
+scene.render();
+body.place({position:[1,0,0]});
+assert.throws(()=>scene.render(),/evaluate before render/);
+scene.evaluate(20);scene.render();
 scene.dispose();
+scene.dispose();
+assert.throws(()=>body.texture({offset:[0,0]}),/disposed scene/);
+assert.throws(()=>scene.evaluate(25),/disposed scene/);
 console.log('MATERIAL_REGION_JS_PASS owned=true lightInvariant=true poseFollowing=true invalidAtomic=true');
