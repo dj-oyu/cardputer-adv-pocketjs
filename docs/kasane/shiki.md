@@ -163,6 +163,8 @@
 
 #### 4.5.1 計測の結果（2026-10-31、実測）
 
+**決定（2026-10-31、ユーザー）: 既定の予算は 48 KiB（49,152 B）。** 実測の最大 41,916 B（BIG WAVE のタイトル）に約 7 KB（17%）の余裕。アプリの開始時の 64 KiB の連続ブロックに入り、約 16 KB が残る。仕様 §9.2。
+
 `CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_proc.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ [logs/shiki-memstat-20261031.txt](logs/shiki-memstat-20261031.txt)。
 
 | アプリ（何をしたか） | native 側の最大 | 内訳（ブロックの大きさ） | 最大の時の空き／最大の連続ブロック |
