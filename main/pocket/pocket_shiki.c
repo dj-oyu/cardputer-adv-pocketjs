@@ -3,6 +3,7 @@
 #include "ksn_shiki.h"
 #include "int_latency.h"
 #include "esp_cpu.h"
+#include "esp_app_desc.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,11 +155,25 @@ static JSValue js_bench_count(JSContext *ctx,JSValueConst self,int argc,JSValueC
     return JS_NewUint32(ctx,(uint32_t)(int_latency_count()+OP_COUNT));
 }
 
+/* benchBuild(): "<version> <first 8 bytes of the ELF's SHA-256 in hex>". The
+ * Shiki rows move between builds (the engine's layout), so results are
+ * compared only between runs that name the same build
+ * (docs/perf/int-latency.md). */
+static JSValue js_bench_build(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    const esp_app_desc_t *d=esp_app_get_description();
+    char out[80];
+    int n=snprintf(out,sizeof out,"%.32s ",d->version);
+    for(unsigned k=0;k<8&&n>0&&(size_t)n+2<sizeof out;k++)n+=snprintf(out+n,sizeof out-(size_t)n,"%02x",d->app_elf_sha256[k]);
+    return JS_NewString(ctx,out);
+}
+
 esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",3,js_run),JS_CFUNC_DEF("bench",1,js_bench),
-        JS_CFUNC_DEF("benchCount",0,js_bench_count)};
-    return JS_SetPropertyFunctionList(ctx,ns,methods,3)<0?ESP_ERR_NO_MEM:ESP_OK;
+        JS_CFUNC_DEF("benchCount",0,js_bench_count),
+        JS_CFUNC_DEF("benchBuild",0,js_bench_build)};
+    return JS_SetPropertyFunctionList(ctx,ns,methods,4)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 /* No limits: the engine's are the spec's (sec.9.1); this surface adds none. */
 static const pocket_capability_t capability={.name="kasane.shiki.debug",.supported=true,

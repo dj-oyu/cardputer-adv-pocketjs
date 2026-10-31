@@ -1,3 +1,4 @@
+# The "CB shiki" rows below are not used for comparison (docs/perf/int-latency.md, the rule for Shiki rows).
 CB BEGIN
 CB asm add 1 2 thr=1.00 lat=1.00 ind=1.00 per=1
 CB asm mull 7 3 thr=1.00 lat=2.00 ind=1.00 per=1

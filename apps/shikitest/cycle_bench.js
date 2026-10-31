@@ -24,7 +24,7 @@ function show() {
     });
   } catch (e) { /* the last picture is not presented yet: the next case's patch shows the count */ }
 }
-console.log('CB BEGIN ' + total);
+console.log('CB BEGIN ' + total + ' BUILD ' + D.benchBuild());
 globalThis.frame = function () {
   // Odd frames only rest: the picture patched after the last case is sent
   // while nothing is being measured.
