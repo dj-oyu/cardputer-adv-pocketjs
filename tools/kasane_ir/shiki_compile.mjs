@@ -5,9 +5,11 @@
 //   import {compileShiki} from './shiki_compile.mjs';
 //   const {bytes, count, inputsQ, argsQ, warnings} = compileShiki(plan, qdecl);
 //
-// Stage 1 of sec.11: the 32-bit instructions, SIN, loops, breaks,
-// MOVE/PLOT/LINE, and cubic() / linePattern() (sec.4.6, 4.7, v1.2). Data
-// regions throw (their engine instructions are not there yet).
+// The 32-bit instructions, SIN, loops, breaks, MOVE/PLOT/LINE, cubic() /
+// linePattern() (sec.4.6, 4.7, v1.2), and the data regions of v1.3 (sec.8.2):
+// for (const [a, b] of r) / r.take(n) is EACH + FETCH, r.put(...) PUT, r[i]
+// LOOKUP. FETCH writes and PUT reads m consecutive registers: such a group is
+// coloured as one unit, before the other values (after the pinned ones).
 //
 // CUBIC reads r0..r7 and LINE_PATTERN's block r10..r15 (dst 0 and 10, as
 // kir.mjs did, so the two never meet). Each operand is computed into a fresh
@@ -50,14 +52,21 @@ const READS = {
   [OP.PLOT_C]: ['a', 'b', 'dst'], [OP.LINE_C]: ['a', 'b', 'dst'],
   [OP.CUBIC]: [], [OP.LINE_PATTERN]: ['a', 'b'],
 };
+READS[OP.LOOKUP] = ['b'];
 const BASE = {[OP.CUBIC]: 0, [OP.LINE_PATTERN]: 10};
-const WRITES = new Set([OP.SET, OP.INPUT, OP.ADD, OP.SUB, OP.MUL, OP.NEG, OP.SHIFT, OP.SIN]);
-const uses = i => (READS[i.op] ?? []).map(f => i[f]).concat(i.args ?? []);
-const defines = i => WRITES.has(i.op);
+const WRITES = new Set([OP.SET, OP.INPUT, OP.ADD, OP.SUB, OP.MUL, OP.NEG, OP.SHIFT, OP.SIN, OP.LOOKUP]);
+// EACH reads its count register only in the count mode (aux = 1); FETCH
+// writes its group (defs), PUT reads its group (args).
+const uses = i => (READS[i.op] ?? []).map(f => i[f]).concat(i.args ?? [], i.op === OP.EACH && i.aux === 1 ? [i.b] : []);
+const defsOf = i => WRITES.has(i.op) ? [i.dst] : i.defs ?? [];
+const defines = i => defsOf(i).length > 0;
+const opens = op => op === OP.REPEAT || op === OP.REPEAT_REG || op === OP.EACH;
 
 // ------------------------------------------------------------- lowering
-function lower(ast, qdecl) {
-  const {Q, natural} = qRules(ast, qdecl);
+function lower(ast, qdecl, data) {
+  const {Q, natural} = qRules(ast, qdecl, data);
+  const region = r => { const i = data.findIndex(d => d.name === r); return [i, data[i]]; };
+  const loops = [];   // for...of loops around the statement: {r, members}
   const code = [], vregs = [], names = new Map(), pools = new Map(), warnings = [];
   const inputsQ = [], argsQ = [];
   const assigned = new Set();
@@ -148,6 +157,16 @@ function lower(ast, qdecl) {
         const s = op(OP.SIN, {a: turns.vr});
         return q === 16 ? s : op(OP.SHIFT, {a: s.vr, imm: K(q - 16)});
       }
+      case 'index': {
+        // LOOKUP: g is the index's Q (a name's, else Q16), k = q - the
+        // region's Q (sec.8.2). Never shared by CSE: a PUT may change the
+        // memory it reads.
+        const [ri, d] = region(e.r);
+        if (d.k !== 1) throw new Error(`${e.r}[...]: LOOKUP needs a region of record 1`);
+        const gq = e.i.k === 'name' ? Q(e.i.v) : 16;
+        const b = mat(ev(e.i, gq)), dst = vreg('temp');
+        return {t: 'r', vr: dst, inst: emit({op: OP.LOOKUP, dst, a: ri, b, aux: gq, imm: K(q - d.q)})};
+      }
     }
     throw new Error(`bad expression ${e.k}`);
   }
@@ -175,6 +194,16 @@ function lower(ast, qdecl) {
     if (x.inst && !x.var) { x.inst.dst = t; cse.delete(x.key); return t; }
     // A constant, input or argument is copied from its hoisted value, so that
     // one held in the pinned register for the whole draw costs nothing here.
+    const v = mat(x);
+    emit({op: OP.SHIFT, dst: t, a: v, imm: 0, copy: v});
+    return t;
+  }
+  // A value in a consecutive group (PUT's operands): a fresh temporary
+  // becomes the member itself; anything else is copied into one (SHIFT 0,
+  // which the colouring removes when both land in one register).
+  function member(x) {
+    const t = vreg('group');
+    if (x.inst && !x.var) { x.inst.dst = t; cse.delete(x.key); return t; }
     const v = mat(x);
     emit({op: OP.SHIFT, dst: t, a: v, imm: 0, copy: v});
     return t;
@@ -232,6 +261,37 @@ function lower(ast, qdecl) {
           cse = new Map();
           break;
         }
+        case 'each': {
+          const [ri, d] = region(s.r);
+          if (s.names.length > d.k) throw new Error(`${s.names.length} names for ${s.r}'s record of ${d.k}`);
+          if (s.n) {
+            const n = ev(s.n, 0);
+            if (n.t === 'c' && (n.raw < 0 || n.raw > 65535)) throw new Error(`${s.r}.take(${n.raw}) outside 0..65,535`);
+            emit({op: OP.EACH, a: ri, b: mat(n), aux: 1});
+          } else emit({op: OP.EACH, a: ri, aux: 0});
+          cse = new Map();
+          const members = s.names.map(n => vreg('fetch', n));
+          emit({op: OP.FETCH, a: ri, b: 0, aux: members.length, imm: 0, defs: members});
+          members.forEach((m, j) => { wrote(m); names.set(s.names[j], {kind: 'alias', x: {t: 'r', vr: m}}); });
+          loops.push({r: s.r, members});
+          stmts(s.body);
+          loops.pop();
+          emit({op: OP.END});
+          cse = new Map();
+          break;
+        }
+        case 'put': {
+          const [ri, d] = region(s.r), l = [...loops].reverse().find(o => o.r === s.r);
+          if (!l) throw new Error(`${s.r}.put() outside a for...of over ${s.r}`);
+          if (!d.write) throw new Error(`${s.r}.put(): the region is not declared write`);
+          if (s.args.length < 1 || s.args.length > d.k) throw new Error(`${s.r}.put() takes 1..${d.k} values`);
+          const xs = s.args.map(e => ev(e, d.q));
+          // put(a, b, c) of the names FETCH just placed: PUT reads them where
+          // they are (sec.8.2).
+          const same = xs.every((x, j) => x.t === 'r' && !x.inst && x.vr === l.members[j]);
+          emit({op: OP.PUT, a: ri, b: 0, aux: xs.length, imm: 0, args: same ? l.members.slice(0, xs.length) : xs.map(member)});
+          break;
+        }
         case 'break': {
           const qa = natural(s.a), qb = natural(s.b), q = Math.max(qa ?? qb ?? 16, qb ?? qa ?? 16);
           emit({op: OP.BREAK_IF_GT, a: mat(ev(s.a, q)), b: mat(ev(s.b, q))});
@@ -282,7 +342,7 @@ function lower(ast, qdecl) {
 function structure(code) {
   const end = new Map(), stack = [];
   code.forEach((i, pc) => {
-    if (i.op === OP.REPEAT || i.op === OP.REPEAT_REG) stack.push(pc);
+    if (opens(i.op)) stack.push(pc);
     if (i.op === OP.END) end.set(stack.pop(), pc);
   });
   return end;
@@ -291,7 +351,7 @@ function successors(code) {
   const end = structure(code), open = [], out = [];
   code.forEach((i, pc) => {
     const s = [pc + 1];
-    if (i.op === OP.REPEAT || i.op === OP.REPEAT_REG) { open.push(pc); s.push(end.get(pc) + 1); }
+    if (opens(i.op)) { open.push(pc); s.push(end.get(pc) + 1); }
     if (i.op === OP.END) s.push(open.pop() + 1);
     if (i.op === OP.BREAK_IF_GT) s.push(end.get(open[open.length - 1]) + 1);
     out.push(s.filter(t => t <= code.length));
@@ -306,7 +366,7 @@ function liveness(code) {
       const out = new Set();
       for (const t of succ[pc]) if (t < code.length) for (const v of liveIn[t]) out.add(v);
       const inn = new Set(out);
-      if (defines(code[pc])) inn.delete(code[pc].dst);
+      for (const d of defsOf(code[pc])) inn.delete(d);
       for (const u of uses(code[pc])) inn.add(u);
       if (inn.size !== liveIn[pc].size || out.size !== liveOut[pc].size) changed = true;
       liveIn[pc] = inn; liveOut[pc] = out;
@@ -317,7 +377,7 @@ function liveness(code) {
 function removeDead(code) {
   for (;;) {
     const {liveOut} = liveness(code);
-    const keep = code.filter((i, pc) => !defines(i) || liveOut[pc].has(i.dst));
+    const keep = code.filter((i, pc) => !defines(i) || defsOf(i).some(d => liveOut[pc].has(d)));
     if (keep.length === code.length) return code;
     code = keep;
   }
@@ -329,7 +389,7 @@ function placePools(code, vregs) {
   code.forEach((i, pc) => {
     if (depth === 0) top = pc;
     for (const u of uses(i)) if (vregs[u].kind === 'pool' && !first.has(u)) first.set(u, top);
-    if (i.op === OP.REPEAT || i.op === OP.REPEAT_REG) depth++;
+    if (opens(i.op)) depth++;
     if (i.op === OP.END) depth--;
   });
   for (const [vr, pc] of [...first].sort((a, b) => b[1] - a[1] || b[0] - a[0]))
@@ -364,13 +424,25 @@ function color(code, vregs) {
   };
   code.forEach((i, pc) => {
     for (const u of uses(i)) nodes.add(u);
-    if (defines(i)) { nodes.add(i.dst); for (const v of liveOut[pc]) if (v !== i.copy) edge(i.dst, v); }
+    for (const d of defsOf(i)) { nodes.add(d); for (const v of liveOut[pc]) if (v !== i.copy) edge(d, v); }
   });
   // Pinned values take their registers first; two of them live together on
   // one register cannot be coloured (a re-materialisation will not help).
   const reg = new Map();
   for (const v of nodes) if (vregs[v].pin !== undefined) reg.set(v, vregs[v].pin);
   for (const [v, r] of reg) for (const w of adj.get(v) ?? []) if (reg.get(w) === r) throw new Error(`two values pinned to r${r} are live together`);
+  // Consecutive groups (FETCH's and PUT's) next, each as a unit: the lowest
+  // base where no member meets a coloured neighbour on its register.
+  const groups = [];
+  code.forEach(i => { if (i.op === OP.FETCH) groups.push(i.defs); if (i.op === OP.PUT) groups.push(i.args); });
+  for (const g of groups) {
+    if (g.every(v => reg.has(v))) continue;   // a PUT that reads FETCH's group
+    let base = -1;
+    for (let b = 0; base < 0 && b + g.length <= REGS; b++)
+      if (g.every((v, j) => ![...(adj.get(v) ?? [])].some(w => reg.get(w) === b + j))) base = b;
+    if (base < 0) return null;
+    g.forEach((v, j) => reg.set(v, base + j));
+  }
   const rest = new Set([...nodes].filter(v => !reg.has(v))), stack = [];
   const deg = v => [...(adj.get(v) ?? [])].filter(w => rest.has(w)).length;
   while (rest.size) {
@@ -393,15 +465,17 @@ function color(code, vregs) {
 }
 
 // ------------------------------------------------------------------ bytes
-function encode(code, inputsQ, argsQ) {
+function encode(code, inputsQ, argsQ, data) {
   const patches = [];
   code.forEach((i, pc) => { for (const p of [i.patch ?? []].flat()) patches.push([pc, p.arg, p.field]); });
   patches.sort((x, y) => x[0] - y[0] || x[2] - y[2]);
-  const head = 12 + inputsQ.length + argsQ.length + 4 * patches.length, body = (head + 3) & ~3;
+  const tables = 12 + inputsQ.length + argsQ.length + 4 * data.length;
+  const head = tables + 4 * patches.length, body = (head + 3) & ~3;
   const b = new Uint8Array(body + 12 * code.length), dv = new DataView(b.buffer);
-  b.set([0x53, 0x4b, 0x49, 0x31, 1, 0, code.length, inputsQ.length, argsQ.length, 0, patches.length, 0]);
+  b.set([0x53, 0x4b, 0x49, 0x31, 1, 0, code.length, inputsQ.length, argsQ.length, data.length, patches.length, 0]);
   b.set(inputsQ, 12); b.set(argsQ, 12 + inputsQ.length);
-  patches.forEach((p, k) => b.set([...p, 0], 12 + inputsQ.length + argsQ.length + 4 * k));
+  data.forEach((d, k) => b.set([d.type, d.q, d.k, d.write], 12 + inputsQ.length + argsQ.length + 4 * k));
+  patches.forEach((p, k) => b.set([...p, 0], tables + 4 * k));
   code.forEach((i, k) => {
     const o = body + 12 * k;
     b.set([i.op, i.dst ?? 0, i.a ?? 0, i.b ?? 0], o);
@@ -414,7 +488,8 @@ function encode(code, inputsQ, argsQ) {
 // plan: plan_js.mjs's findPlans() entry; qdecl: {name: Q} from its @q.
 export function compileShiki(plan, qdecl = {}) {
   const ast = planAst(plan);
-  const {code: lowered, vregs, inputsQ, argsQ, warnings} = lower(ast, qdecl);
+  const data = plan.data ?? [];
+  const {code: lowered, vregs, inputsQ, argsQ, warnings} = lower(ast, qdecl, data);
   for (let k = 0; k < plan.inputs.length; k++) inputsQ[k] ??= 16;
   let code = removeDead(placePools(lowered, vregs));
   const rematerialised = [];
@@ -429,11 +504,19 @@ export function compileShiki(plan, qdecl = {}) {
     code = removeDead(remat(code, vregs, pick[0]));
   }
   const R = v => reg.get(v);
+  const consecutive = (vs, what) => {
+    const rs = vs.map(R);
+    rs.forEach((r, k) => { if (r !== rs[0] + k) throw new Error(`${what} not in consecutive registers`); });
+    return rs[0];
+  };
   let out = code.map(i => {
     const j = {...i};
-    if (defines(i)) j.dst = R(i.dst);
+    if (WRITES.has(i.op)) j.dst = R(i.dst);
     for (const f of READS[i.op] ?? []) j[f] = R(i[f]);
-    if (i.args) {
+    if (i.op === OP.EACH) j.b = i.aux === 1 ? R(i.b) : 0;
+    if (i.op === OP.FETCH) j.dst = consecutive(i.defs, 'FETCH');
+    else if (i.op === OP.PUT) j.dst = consecutive(i.args, 'PUT');
+    else if (i.args) {
       j.args = i.args.map(R);
       j.args.forEach((r, k) => { if (r !== BASE[i.op] + k) throw new Error(`operand ${k} not in r${BASE[i.op] + k}`); });
     }
@@ -445,13 +528,14 @@ export function compileShiki(plan, qdecl = {}) {
   let depth = 0;
   out = out.filter(j => {
     const drop = j.op === OP.SET && j.imm === 0 && !j.patch && depth === 0 && !written.has(j.dst);
-    if (defines(j)) written.add(j.dst);
-    if (j.op === OP.REPEAT || j.op === OP.REPEAT_REG) depth++;
+    if (WRITES.has(j.op)) written.add(j.dst);
+    if (j.op === OP.FETCH) for (let k = 0; k < j.aux; k++) written.add(j.dst + k);
+    if (opens(j.op)) depth++;
     if (j.op === OP.END) depth--;
     return !drop;
   });
   if (!out.length) out.push({op: OP.SET, dst: 0, imm: 0});
   if (out.length > CODE && !process.env.SHIKI_NO_LIMIT) throw new Error(`${out.length} instructions, over ${CODE}`);
   const qIn = inputsQ.slice(0, plan.inputs.length), qArg = plan.params.map((_, k) => argsQ[k] ?? 16);
-  return {bytes: encode(out, qIn, qArg), code: out, count: out.length, inputsQ: qIn, argsQ: qArg, rematerialised, warnings};
+  return {bytes: encode(out, qIn, qArg, data), code: out, count: out.length, inputsQ: qIn, argsQ: qArg, rematerialised, warnings};
 }

@@ -17,13 +17,27 @@ export const TURN = 683565276;
 // pattern's bits and period.
 export const INTS = {line: [2], plot: [2], cubic: [0, 1], linePattern: [2, 3, 4, 9]};
 
+// The names a for...of over a data region unpacks, with the region's Q
+// (rule 1, v1.3): they behave as @q names.
+export function eachNames(ast, data = []) {
+  const out = new Map();
+  const walk = list => list.forEach(x => {
+    if (x.k === 'each') { const d = data.find(r => r.name === x.r); for (const n of x.names) out.set(n, d.q); }
+    if (x.body) walk(x.body);
+  });
+  walk(ast);
+  return out;
+}
+
 // Q0 names (rule 1): counts, colours and integer draw arguments, the
 // counters of for loops (plan_js: let v = 0, then the last statement of the
-// repeat's body v += 1), and every name joined to one of those by a plain
-// name-to-name assignment.
-export function q0Names(ast) {
+// repeat's body v += 1), take(n)'s count, and every name joined to one of
+// those by a plain name-to-name assignment. The names a for...of unpacks
+// take no part in the joining (they are fixed at the region's Q).
+export function q0Names(ast, fixed = new Set()) {
   const out = new Set(), links = [];
   const walk = list => list.forEach((x, k) => {
+    if (x.k === 'each') { if (x.n?.k === 'name') out.add(x.n.v); walk(x.body); }
     if (x.k === 'repeat') {
       if (x.n.k === 'name') out.add(x.n.v);
       const last = x.body[x.body.length - 1], prev = list[k - 1];
@@ -39,7 +53,10 @@ export function q0Names(ast) {
   walk(ast);
   for (let grew = true; grew;) {
     grew = false;
-    for (const [a, b] of links) if (out.has(a) !== out.has(b)) { out.add(a); out.add(b); grew = true; }
+    for (const [a, b] of links) {
+      if (fixed.has(a) || fixed.has(b)) continue;
+      if (out.has(a) !== out.has(b)) { out.add(a); out.add(b); grew = true; }
+    }
   }
   return out;
 }
@@ -48,17 +65,28 @@ export function q0Names(ast) {
 // that do not depend on the arithmetic: a declaration that contradicts Q0, a
 // Q0 name given a value that can carry a fraction, a REPEAT literal outside
 // 1..255. Each throws, as the compiler must.
-export function qRules(ast, qdecl) {
-  const ints = q0Names(ast);
+export function qRules(ast, qdecl, data = []) {
+  const each = eachNames(ast, data);
+  for (const [n, q] of each) if (n in qdecl && qdecl[n] !== q) throw new Error(`@q ${n}=${qdecl[n]}: ${n} comes from a region at Q${q} (sec.8.3 rule 1)`);
+  const ints = q0Names(ast, new Set(each.keys()));
   for (const [n, q] of Object.entries(qdecl)) if (ints.has(n) && q !== 0) throw new Error(`@q ${n}=${q}: ${n} is a count, colour or loop variable (Q0)`);
-  const Q = n => ints.has(n) ? 0 : qdecl[n] ?? 16;
+  const Q = n => each.has(n) ? each.get(n) : ints.has(n) ? 0 : qdecl[n] ?? 16;
+  const regionQ = r => data.find(d => d.name === r).q;
+  // A region's element read at the region's Q: a fraction unless that is 0.
   const fractional = e => e.k === 'num' ? !Number.isInteger(+e.lit) : e.k === 'name' ? Q(e.v) !== 0 :
+    e.k === 'index' ? regionQ(e.r) !== 0 :
     e.k === 'call' || e.k === '/' || (e.a && fractional(e.a)) || (e.b && fractional(e.b));
   const check = list => list.forEach(x => {
     if (x.k === 'decl') for (const d of x.d) if (ints.has(d.n) && fractional(d.e)) throw new Error(`${d.n} is Q0 (sec.8.3 rule 1) but is given a fraction`);
     if (x.k === 'assign' && ints.has(x.n) && fractional(x.e)) throw new Error(`${x.n} is Q0 (sec.8.3 rule 1) but is given a fraction`);
     if (x.k === 'repeat') {
       if (x.n.k === 'num' && !(Number.isInteger(+x.n.lit) && +x.n.lit >= 1 && +x.n.lit <= 255)) throw new Error(`REPEAT ${x.n.lit} outside 1..255`);
+      check(x.body);
+    }
+    if (x.k === 'each') {
+      // take(n): Q0, a whole count 0..65,535 when a literal (sec.8.2).
+      if (x.n && fractional(x.n)) throw new Error(`${x.r}.take(): the count is Q0 (sec.8.3 rule 1) but can carry a fraction`);
+      if (x.n?.k === 'num' && !(+x.n.lit >= 0 && +x.n.lit <= 65535)) throw new Error(`${x.r}.take(${x.n.lit}) outside 0..65,535`);
       check(x.body);
     }
   });
