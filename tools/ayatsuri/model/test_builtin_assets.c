@@ -35,7 +35,7 @@ int main(void){
     ayatsuri_model_instance instance;
     CHECK(ayatsuri_model_instance_init(&model,arena,bytes,&instance,1,&instance)==AYATSURI_MODEL_OK);
     float pose[9];CHECK(ayatsuri_model_instance_read_pose(&instance,&instance,1,7,pose)==AYATSURI_MODEL_OK);
-    CHECK(pose[0]==0&&pose[1]==15&&pose[2]==22&&pose[6]==1&&pose[7]==.15f&&pose[8]==1);
+    CHECK(pose[0]==0&&pose[1]==14&&pose[2]==22&&pose[6]==1&&pose[7]==.15f&&pose[8]==1);
     float camera[9]={0,0,400,0,0,0,1.3f,120,78},light[6]={0,0,1,1,1,1};
     CHECK(ayatsuri_model_instance_evaluate(&instance,&instance,1,camera,light)==AYATSURI_MODEL_OK);
     uint32_t cursor=0,count=0;ayatsuri_model_packet packet;ayatsuri_model_status status;

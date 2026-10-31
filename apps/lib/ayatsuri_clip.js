@@ -112,7 +112,7 @@ globalThis.AyatsuriClip=(()=>{
       if(s.nativeMode&&s.sealed)fail('native apertures are fixed after first evaluate');
       if(n<3||n>8)fail('aperture needs 3..8 vertices');array(rest,n*3);
       const id=s.nativeMode?nativeId(s,projection):-1,work=s.nativeMode?null:packed(s,projection),copy=new Float32Array(rest),sign=convex(copy,n,3,0),a={};
-      Object.assign(a,{owner:s,projection,projectionId:id,node:s.nativeMode?null:handleStates.get(projection).raw._node,work,n,rest:copy,local:new Float32Array(copy),localStage:new Float32Array(n*3),
+      Object.assign(a,{owner:s,projection,projectionId:id,node:s.nativeMode?null:handleStates.get(projection).raw._node,work,n,local:copy,localStage:new Float32Array(n*3),
         xy:new Float32Array(n*2),xyStage:new Float32Array(n*2),screen:new Float32Array(8),screenStage:new Float32Array(8),active:EMPTY,
         restSign:sign,screenSign:0,pendingSign:0,revision:1,evaluatedRevision:0,empty:null,invalid:false,changed:false});
       const handle=Object.create(Aperture);apertureStates.set(handle,a);s.apertures.push(a);return handle;
@@ -173,7 +173,7 @@ globalThis.AyatsuriClip=(()=>{
     const s=sceneStates.get(this);if(s.busy)throw new Error('AyatsuriClip: disposed/busy scene');if(s.dead)return;s.busy=true;
     try{s.raw.dispose();s.dead=true;s.ready=false;
       for(let j=0;j<s.apertures.length;j++){
-        const a=s.apertures[j];a.projection=a.node=a.work=a.rest=a.local=a.localStage=a.xy=a.xyStage=a.screen=a.screenStage=a.active=null;
+        const a=s.apertures[j];a.projection=a.node=a.work=a.local=a.localStage=a.xy=a.xyStage=a.screen=a.screenStage=a.active=null;
       }
       for(let j=0;j<s.handles.length;j++)s.handles[j].raw=null;
       s.apertures.length=s.bindings.length=s.handles.length=0;if(s.adapter)s.adapter.owner=null;

@@ -58,8 +58,8 @@ globalThis.FoxFaceModel=(()=>{
       pose(root,0,0,0,pitch,yaw,0);
       pose(creamFace,0,-1.8*smile,0,0,0,0,1+.04*smile,1,1);
       pose(jaw,0,10,-1,-.38*open,0,0,1+.08*smile-.14*surprise,1,1);
-      mouth.visible(open>.015);pose(mouth,0,15+.5*open,22,-.12*open,0,0,1+.25*smile-.45*surprise,.15+.7*open+.4*surprise,1);
-      pose(lip,0,14.5-1.1*smile,24,0,0,0,1+.2*smile,1,1);
+      mouth.visible(open>.015);pose(mouth,0,14+.5*open,22,-.18*open,0,0,1+.25*smile-.45*surprise,.15+.7*open+.4*surprise,1);
+      pose(lip,0,12.8-1.1*smile,24,0,0,0,1+.2*smile,1,1);
       eyes[0].update(smile,surprise,viewYaw);eyes[1].update(smile,surprise,viewYaw);
     }
     update({});

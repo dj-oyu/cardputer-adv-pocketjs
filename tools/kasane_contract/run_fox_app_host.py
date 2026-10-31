@@ -26,6 +26,14 @@ def inputs():
     return found
 
 
+def lifetime_stable(phases):
+    for name in ('released','recreated'):
+        rows=[p for p in phases if p['name']==name]
+        if len(rows)!=6 or len({(p['rounded_request_current'],p['guest_accounted_current']) for p in rows})!=1:
+            return False
+    return True
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32',action='store_true')
@@ -69,7 +77,7 @@ def main():
                 images.append(hashlib.sha256(data).hexdigest())
         phases=[dict(name=m.group(1),**dict(zip(('rounded_request_current','rounded_request_peak_so_far','single_request_max','guest_accounted_current','cap','alloc_calls','alloc_bytes'),map(int,m.groups()[1:]))))
                 for m in re.finditer(r'FOX_PHASE name=(\S+) rounded_request_current=(\d+) rounded_request_peak_so_far=(\d+) single_request_max=(\d+) guest_accounted_current=(\d+) cap=(\d+) alloc_calls=(\d+) alloc_bytes=(\d+)',result.stdout)]
-        phase_valid=sum(p['name']=='released' for p in phases)==6 and sum(p['name']=='recreated' for p in phases)==6
+        phase_valid=lifetime_stable(phases)
         account=re.search(r'FOX_ACCOUNTING peak=(\d+) overhead_per_block=(\d+) formula_verified=(\d+) live_blocks=(\d+)',result.stdout)
         accounting=dict(zip(('peak','overhead_per_block','formula_verified','live_blocks'),map(int,account.groups()))) if account else None
         account_valid=bool(accounting and accounting['formula_verified']==1 and (not args.m32 or accounting['peak']<=163840))

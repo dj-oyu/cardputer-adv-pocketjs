@@ -22,7 +22,7 @@ rest/morphedXYZはprojection楕円体の**単位球local座標**。globeのradii
 
 evaluateは既存scene評価→必要な全開口の投影/検査→全件成功後publish。カメラ/親子pose/morph変更はclipへ伝播する。光だけの変更でscreenが不変なら再投影せず、陰影評価は既存sceneに任せる。offsetやdirty flagの手動管理はcallerへ要求しない。
 
-初期化時にlocal/staging/projected/screen cacheを確保し、更新時には既存bufferを使う。typed bufferの寿命はscene所有、native呼出時には同期snapshotされる。disposeは冪等で、保持apertureをtombstoneにし不要なscene/work参照を切る。warm loopの実alloc数、wrapperのguest費用とnative packet増分は別に計測する。新clipped packetは従来より1枚あたり7entry/70B増え、EMPTYは0append。
+初期化時に入力の所有copyをcurrent localとして保持し、初期windingとstaging/projected/screen cacheを確保する。未使用のrest座標の重複は保持しない。setterも同期copyし、callerの後続変更から独立する。更新時には既存bufferを使う。typed bufferの寿命はscene所有、native呼出時には同期snapshotされる。disposeは冪等で、保持apertureをtombstoneにし不要なscene/work参照を切る。warm loopの実alloc数、wrapperのguest費用とnative packet増分は別に計測する。新clipped packetは従来より1枚あたり7entry/70B増え、EMPTYは0append。
 
 動的JS作成pathは`character.js`のprivate handle/node/264B work layoutとの実装上の結合を持つ。これはJS authorへoffsetを公開する意味ではなく、実験adapter内部の互換条件。固定native pathは下節の共通C評価を使う。追加AA、一般depth/遮蔽、view correctiveの自動生成、任意角度/負scaleの保証はない。
 

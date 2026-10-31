@@ -65,6 +65,7 @@ jobs:
           node tools/character/test_cloud_fixture.cjs
           node tools/character/test_cloud_memory.cjs
           node tools/character/test_ayatsuri_clip.cjs
+          python3 tools/character/test_fox_lifetime.py
           python3 tools/test_guest_allocator_metrics.py
           node tools/ayatsuri/model/test_pack_model.cjs
           node tools/ayatsuri/model/builtin_asset.cjs
