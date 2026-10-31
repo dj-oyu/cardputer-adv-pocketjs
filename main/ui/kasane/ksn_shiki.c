@@ -87,16 +87,17 @@ static const uint8_t used[KSN_SHIKI_OPS]={
     [KSN_SHIKI_SHIFT]=F_DST|F_A|F_IMM,       [KSN_SHIKI_ADD_H]=F_DST|F_A|F_B,
     [KSN_SHIKI_SUB_H]=F_DST|F_A|F_B,         [KSN_SHIKI_MUL_H]=F_DST|F_A|F_B|F_AUX,
     [KSN_SHIKI_SHIFT_H]=F_DST|F_A|F_IMM,
+    [KSN_SHIKI_CUBIC]=F_DST|F_IMM|F_AUX,     [KSN_SHIKI_LINE_PATTERN]=F_DST|F_A|F_B|F_IMM|F_AUX,
 };
-/* Stage 1 refuses these (header comment). */
+/* The data-region instructions (stage 4) are still refused (header comment). */
 static bool stage1(uint8_t op){
-    return op<KSN_SHIKI_OPS&&op!=KSN_SHIKI_CUBIC&&op!=KSN_SHIKI_LINE_PATTERN&&op<KSN_SHIKI_EACH;
+    return op<KSN_SHIKI_EACH;
 }
 /* imm fields that take an int (sec.3): a patched argument must be Q0. */
 static bool int_imm(uint8_t op){
     return op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_SHIFT||op==KSN_SHIKI_SHIFT_H||
            op==KSN_SHIKI_EACH||op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT||
-           op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_LINE_PATTERN;
+           op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_CUBIC||op==KSN_SHIKI_LINE_PATTERN;
 }
 static bool check_inst(const ksn_shiki_inst *i,unsigned inputs){
     if(!stage1(i->op))return false;
@@ -113,6 +114,10 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs){
     case KSN_SHIKI_SHIFT: return i->imm>=-31&&i->imm<=31;
     case KSN_SHIKI_SHIFT_H: return i->imm>=-15&&i->imm<=14;
     case KSN_SHIKI_REPEAT: return i->imm>=1&&i->imm<=255;
+    /* The block registers must all exist: dst..dst+7 and dst..dst+5. */
+    case KSN_SHIKI_CUBIC: return i->dst<=KSN_SHIKI_REGS-8&&i->imm>=1&&i->imm<=255;
+    case KSN_SHIKI_LINE_PATTERN:
+        return i->dst<=KSN_SHIKI_REGS-KSN_PROC_PATTERN_BLOCK&&i->imm>=1&&i->imm<=KSN_PROC_PATTERN_BITS;
     default: return true;
     }
 }
@@ -221,6 +226,140 @@ static int32_t sine(int32_t r){
     return (int32_t)(quad>=2?-v:v);
 }
 
+/* ---- CUBIC and LINE_PATTERN (sec.4.6, sec.4.7, v1.2). Every division at run
+ * time is int32 by int32 (sec.2.2): a 64-bit one is a __divdi3 call of 87-160
+ * cycles on the S3 (docs/perf/int-latency.md), so each bound below is what
+ * keeps a dividend inside int32, not decoration. Divisions by powers of two
+ * go through floor_shift. */
+/* floor(p / q) for q > 0. C's / truncates toward zero; a negative p with a
+ * remainder is one lower. q > 0 rules out INT32_MIN / -1. */
+static int32_t floor_div(int32_t p,int32_t q){
+    const int32_t d=p/q;
+    return p%q<0?d-1:d;
+}
+/* M(v, m) = v - m floor(v / m), 0..m-1, for m > 0. */
+static int32_t floor_mod(int32_t v,int32_t m){
+    const int32_t r=v%m;
+    return r<0?r+m:r;
+}
+/* R(p, q) = floor((2p + q) / 2q), the nearest integer with halves up, for
+ * q > 0 (sec.4.7 never divides by a negative q). An even q takes the equal
+ * floor((p + q/2) / q), which needs one bit less: the d of a chord (p up to
+ * 2^30) depends on it. An odd q only comes from lambda's denominator, where
+ * 2p + q < 7 * 2^28 + 2^27 < 2^31. Callers keep inside those bounds. */
+static int32_t round_div(int32_t p,int32_t q){
+    if(!(q&1))return floor_div(p+q/2,q);
+    return floor_div(2*p+q,2*q);
+}
+/* sec.2.2's MUL with s = 16. */
+static int32_t mul16(int32_t a,int32_t b){
+    return sat32(floor_shift((int64_t)a*b,16));
+}
+
+/* CUBIC: n segments through B(1..n) from P0 = r[dst], r[dst+1]. The status
+ * to stop with, or RUNNING; the pen moves only on RUNNING. */
+static ksn_shiki_status cubic(ksn_shiki_vm *vm,ksn_proc_segment *out,const ksn_shiki_inst *i){
+    const int32_t *p=&vm->reg[i->dst];
+    int16_t px[8];
+    for(unsigned k=0;k<8;k++)if(!coord(p[k],&px[k]))return KSN_SHIKI_INVALID;
+    const int32_t n=i->imm;
+    int16_t x0=px[0],y0=px[1];
+    for(int32_t k=1;k<=n;k++){
+        /* k 2^16 <= 255 * 2^16: int32, and non-negative, so / is the floor.
+         * u, t in 0..2^16 keep every weight in 0..3 * 2^16 (no saturation);
+         * a weight times an int32 coordinate is under 2^50 before the shift. */
+        const int32_t t=(k<<16)/n,u=65536-t;
+        const int32_t uu=mul16(u,u),tt=mul16(t,t);
+        const int32_t w0=mul16(uu,u),w1=3*mul16(uu,t),w2=3*mul16(u,tt),w3=mul16(tt,t);
+        /* The sums are sec.2.2 ADDs from the left, each saturated. */
+        const int32_t bx=sat32((int64_t)sat32((int64_t)sat32((int64_t)mul16(w0,p[0])+mul16(w1,p[2]))
+                                              +mul16(w2,p[4]))+mul16(w3,p[6]));
+        const int32_t by=sat32((int64_t)sat32((int64_t)sat32((int64_t)mul16(w0,p[1])+mul16(w1,p[3]))
+                                              +mul16(w2,p[5]))+mul16(w3,p[7]));
+        int16_t x1,y1;
+        if(!coord(bx,&x1)||!coord(by,&y1))return KSN_SHIKI_INVALID;
+        const ksn_shiki_status s=emit(vm,out,x0,y0,x1,y1,i->aux);
+        if(s!=KSN_SHIKI_RUNNING)return s;
+        x0=x1;y0=y1;
+    }
+    vm->pen_x=x0;vm->pen_y=y0;vm->pen_valid=true;
+    return KSN_SHIKI_RUNNING;
+}
+
+/* LINE_PATTERN from the valid pen to (x, y): 1, 2, 4 or 8 chords of two
+ * entries each, in ksn_procedural.h's encoding (geometry with x0 biased by
+ * KSN_PROC_EXT_PATTERN, then the parameters). The status to stop with, or
+ * RUNNING; the caller moves the pen only on RUNNING, and chords already
+ * added stay (sec.4.7.7). */
+static ksn_shiki_status pattern_line(ksn_shiki_vm *vm,ksn_proc_segment *out,
+                                     const ksn_shiki_inst *i,int16_t x,int16_t y){
+    const int32_t *r=&vm->reg[i->dst];
+    const int32_t bits=r[0],other=r[1],u0=r[2],u1=r[3],w0=r[4],w1=r[5];
+    /* sec.4.7.2, in its order (bits, B, u0, u1, w0, w1; all INVALID before
+     * any entry, so the order is not observable). The u bounds keep ub - ua
+     * inside +-2^30, the w bounds 51 W and 8 * the larger weight in int32. */
+    if(bits<0||bits>0xFFFFFF||other<-1||other>65535||
+       u0<-(1<<29)||u0>(1<<29)||u1<-(1<<29)||u1>(1<<29)||
+       w0<-(1<<24)||w0>(1<<24)||w1<-(1<<24)||w1>(1<<24))return KSN_SHIKI_INVALID;
+    const int32_t a=w0<0?-w0:w0,b=w1<0?-w1:w1;
+    int32_t c=1;
+    if((w0>0&&w1>0)||(w0<0&&w1<0)){
+        const int32_t W=a>b?a:b,V=a>b?b:a;
+        c=50*W<51*V?1:5*W<6*V?2:5*W<8*V?4:8;
+    }
+    /* Weights scaled for lambda (sec.4.7.4): the smaller to 13 bits, the
+     * loop finding e = max(0, L(min) - 13), at most 11 since |w| <= 2^24.
+     * Scaling by the smaller keeps its ratio to the larger (the larger stays
+     * up to 2^24, so D < 8 * 2^24 = 2^27). Unused (and a or b possibly 0)
+     * when c is 1. */
+    unsigned e=0;
+    while(((a>b?b:a)>>e)>=(1<<13))e++;
+    const int32_t as=a>>e,bs=b>>e;
+    const int32_t n=i->imm,wrap=256*n;
+    const uint16_t head=(uint16_t)(0x8000u|(uint32_t)bits>>16|(uint32_t)n<<8|(other>=0?1u<<13:0u));
+    const int16_t px=vm->pen_x,py=vm->pen_y;
+    int16_t ax=px,ay=py;
+    int32_t ua=u0;
+    for(int32_t j=1;j<=c;j++){
+        int16_t bx=x,by=y;
+        int32_t ub=u1;
+        if(j<c){
+            /* |x - px| <= 1200, j < 8: the cut lies between the ends, so it
+             * needs no range test. */
+            bx=(int16_t)(px+round_div((x-px)*j,c));
+            by=(int16_t)(py+round_div((y-py)*j,c));
+            /* lambda in Q14, 0..2^14, from the smaller weight's side so the
+             * numerator is under 2^13 * 7 * 2^14 < 2^30; D in 1..2^27 (the
+             * larger weight is >= 1 after scaling and both coefficients >= 1). */
+            const int32_t D=as*(c-j)+bs*j;
+            const int32_t lambda=b<=a?round_div(bs*j<<14,D)
+                                     :(1<<14)-round_div(as*(c-j)<<14,D);
+            /* (u1 - u0) lambda < 2^44: the only 64-bit value, divided by a
+             * power of two. R(p, 2^14) = floor((p + 2^13) / 2^14). */
+            ub=u0+(int32_t)floor_shift((int64_t)(u1-u0)*lambda+8192,14);
+        }
+        const int32_t dx=bx>ax?bx-ax:ax-bx,dy=by>ay?by-ay:ay-by,s=dx>dy?dx:dy;
+        /* R(ua, 256): ua + 128 fits in 64 bits trivially, result +-2^21. */
+        const int32_t u0q=floor_mod((int32_t)floor_shift((int64_t)ua+128,8),wrap);
+        int32_t duq=0;
+        if(s){
+            /* ub - ua within +-2^30, 256 s <= 307,200 and even. */
+            const int32_t d=round_div(ub-ua,256*s);
+            if(d<=-65536||d>=65536)return KSN_SHIKI_INVALID;
+            duq=floor_mod(d,wrap);
+        }
+        /* sec.4.8.4 with room for both entries. */
+        if(vm->count>=KSN_SHIKI_SEGMENTS-1||vm->raster+(unsigned)s+1u>KSN_SHIKI_RASTER)
+            return KSN_SHIKI_LIMIT;
+        vm->raster=(uint16_t)(vm->raster+s+1);
+        out[vm->count++]=(ksn_proc_segment){(int16_t)(ax+KSN_PROC_EXT_PATTERN),ay,bx,by,i->aux};
+        out[vm->count++]=(ksn_proc_segment){(int16_t)(uint16_t)(bits&0xFFFF),(int16_t)head,
+            (int16_t)u0q,(int16_t)(0x8000|duq),(uint16_t)(other>=0?other:0)};
+        ax=bx;ay=by;ua=ub;
+    }
+    return KSN_SHIKI_RUNNING;
+}
+
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     memset(vm,0,sizeof *vm);
@@ -290,6 +429,21 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
             if(i->op==KSN_SHIKI_PLOT||i->op==KSN_SHIKI_PLOT_C)s=emit(vm,out,x,y,x,y,c);
             else if(i->op!=KSN_SHIKI_MOVE&&vm->pen_valid)s=emit(vm,out,vm->pen_x,vm->pen_y,x,y,c);
             if(s!=KSN_SHIKI_RUNNING)return s;
+            vm->pen_x=x;vm->pen_y=y;vm->pen_valid=true;
+            break;
+        }
+        case KSN_SHIKI_CUBIC: {
+            const ksn_shiki_status s=cubic(vm,out,i);
+            if(s!=KSN_SHIKI_RUNNING)return s;
+            break;
+        }
+        case KSN_SHIKI_LINE_PATTERN: {
+            int16_t x,y;
+            if(!coord(r[i->a],&x)||!coord(r[i->b],&y))return KSN_SHIKI_INVALID;
+            if(vm->pen_valid){
+                const ksn_shiki_status s=pattern_line(vm,out,i,x,y);
+                if(s!=KSN_SHIKI_RUNNING)return s;
+            }
             vm->pen_x=x;vm->pen_y=y;vm->pen_valid=true;
             break;
         }

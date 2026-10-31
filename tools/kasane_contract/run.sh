@@ -58,7 +58,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_plan_draw.c \
     -lm -o "$out/proc-plan-draw"
   "$out/proc-plan-draw"
-  # Shiki v1 (docs/kasane/shiki-spec.md): the C engine must build clean under
+  # Shiki v1.2 (docs/kasane/shiki-spec.md): the C engine must build clean under
   # both option sets; its bit-for-bit agreement with the independent host
   # reference is checked once below (shiki_diff.mjs builds its own ASan runner).
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \

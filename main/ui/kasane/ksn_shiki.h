@@ -1,11 +1,12 @@
 #ifndef KSN_SHIKI_H
 #define KSN_SHIKI_H
-/* Shiki v1 line programs: registration and the integer engine
+/* Shiki v1.2 line programs: registration and the integer engine
  * (docs/kasane/shiki-spec.md). Stage 1 of the spec's migration (sec.11):
- * the 32-bit and .H instructions, the sec.3 byte format and every sec.6.1
- * check. CUBIC, LINE_PATTERN (integer procedures still open, sec.12) and the
- * data-region instructions (stage 4) are refused at registration for now,
- * as is a header that declares data regions.
+ * the 32-bit and .H instructions, CUBIC and LINE_PATTERN (v1.2's integer
+ * procedures, sec.4.6/4.7: run-time divisions are int32 by int32 only,
+ * sec.2.2), the sec.3 byte format and every sec.6.1 check. The data-region
+ * instructions (stage 4) are refused at registration for now, as is a
+ * header that declares data regions.
  *
  * Nothing here allocates: the caller asks ksn_shiki_plan_bytes() and hands
  * over that much memory (the Shiki heap of sec.9.2 comes later). No float
@@ -81,7 +82,8 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
                         ksn_shiki_plan *plan);
 
 /* Runs one draw: up to KSN_SHIKI_INPUTS inputs (n of them; missing ones are
- * 0, extra ones ignored, sec.4.8.7). Segments go to out[0..vm->count). The
+ * 0, extra ones ignored, sec.4.8.7). Segments go to out[0..vm->count), a
+ * LINE_PATTERN chord as two entries in ksn_procedural.h's encoding. The
  * vm is fully reset here; its state after the call is sec.4.8.8's. */
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);

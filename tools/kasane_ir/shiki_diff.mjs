@@ -59,9 +59,12 @@ const patU = () => rnd() < .2 ? pick([2 ** 29, -(2 ** 29), 2 ** 29 + 1, -(2 ** 2
 function patW() {
   if (rnd() < .2) return [pick([0, 1, -1, 2 ** 24, -(2 ** 24), 2 ** 24 + 1, ri(-(2 ** 24), 2 ** 24)]),
     pick([0, 1, -1, 2 ** 24, -(2 ** 24), -(2 ** 24) - 1, ri(-(2 ** 24), 2 ** 24)])];
-  const v = pick([ri(1, 300), ri(1, 2 ** 24 / 2), ri(65536, 20 * 65536), 8191, 8192, 8193, 16383, 16384]);
-  const [num, den] = pick([[51, 50], [6, 5], [8, 5], [3, 1], [1000, 1]]);
-  let w = Math.floor(v * num / den) + pick([-1, 0, 0, 1, ri(-5, 5)]);
+  const [num, den] = pick([[51, 50], [6, 5], [8, 5], [3, 1], [3, 1], [7, 1], [5, 3], [1000, 1]]);
+  // Exactly on a boundary (v a multiple of den), or a step either side; the
+  // integer ratios (3/1, 7/1, 5/3) put a cut's lambda exactly on a half.
+  const v = rnd() < .5 ? den * pick([1, 2, ri(1, 50), ri(1, 2 ** 20), ri(1, 2 ** 24 / (8 * den))])
+    : pick([ri(1, 300), ri(1, 2 ** 24 / 2), ri(65536, 20 * 65536), 8191, 8192, 8193, 16383, 16384]);
+  let w = Math.floor(v * num / den) + pick([-1, 0, 0, 0, 1, ri(-5, 5)]);
   w = Math.min(Math.max(w, 1), 2 ** 24);
   const sgn = rnd() < .5 ? 1 : -1, pair = rnd() < .5 ? [v * sgn, w * sgn] : [w * sgn, v * sgn];
   if (rnd() < .1) pair[1] = -pair[1];
@@ -76,10 +79,15 @@ function prim(code, heavy, loop) {
     return;
   }
   const d = ri(0, 10), r = () => ri(0, 15);
-  const block = [patBits(), patColB(), patU(), patU(), ...patW()];
+  const fine = rnd() < .7;                       // a block that passes its checks
+  const block = fine ? [ri(0, 0xffffff), pick([-1, ri(0, 65535)]), ri(-3000, 3000) * 65536 + ri(0, 65535),
+    ri(-3000, 3000) * 65536 + ri(0, 65535), ...patW()] : [patBits(), patColB(), patU(), patU(), ...patW()];
+  // Usually the pen and the end in range, from registers outside the block.
+  const free = Array.from({length: 16}, (_, k) => k).filter(k => k < d || k > d + 5);
+  const [a, b, pa, pb] = rnd() < .8 ? [0, 1, 2, 3].map(() => pick(free)) : [r(), r(), r(), r()];
+  if (rnd() < .8) for (const k of [pa, pb, a, b]) code.push({op: OP.SET, dst: k, imm: rnd() < .9 ? ri(-470, 710) * 65536 + ri(0, 65535) : coordRaw()});
   block.forEach((v, k) => code.push({op: OP.SET, dst: d + k, imm: v}));
-  const a = r(), b = r();
-  if (rnd() < .5) code.push({op: OP.MOVE, a: r(), b: r()});
+  if (rnd() < .8) code.push({op: OP.MOVE, a: pa, b: pb});
   const i = {op: OP.LINE_PATTERN, dst: d, a, b, imm: pick([1, 2, 7, 24, ri(1, 24)]), aux: colour()};
   // A loop of pattern lines between the screen's edges: the 2-entry segment
   // check and the raster budget.
