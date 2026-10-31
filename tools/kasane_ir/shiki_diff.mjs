@@ -11,7 +11,8 @@
 // or a hole in the spec. The encoder here is this file's own (not the
 // reference's assemble()), so a shared encoding mistake cannot hide.
 //
-// The generator aims at the edges the spec defines: saturation, floor of
+// The generator aims at the edges the spec defines (v1.2: CUBIC and
+// LINE_PATTERN's ranges, chord boundaries and limits too): saturation, floor of
 // negative products and shifts, .H operand saturation, every SIN quadrant
 // boundary, coordinates at -480/720 and their halves, the 10,000-step,
 // 1,024-segment and 8,192-raster limits, REPEAT_REG out of range, breaks out
@@ -43,6 +44,52 @@ const coordRaw = () => {
   return px * 65536 + pick([0, 1, 32767, 32768, 32769, 65535, ri(0, 65535)]);
 };
 
+// CUBIC's control points: mostly in range, some on the lower edge (where the
+// weights' floors could push a point out, sec.4.6.3), some out of range.
+const cubicRaw = () => rnd() < .15 ? pick([-480 * 65536 - 32768, -480 * 65536 - 32767, -480 * 65536 - 32765,
+  720 * 65536 + 32767, -481 * 65536, 721 * 65536]) : coordRaw();
+// LINE_PATTERN's block (sec.4.7): each field at, inside and past its range.
+const patBits = () => pick([0, 1, 0xffffff, 0x1000000, -1, 0x5a5a5a, ri(0, 0xffffff), ri(0, 0xffffff)]);
+const patColB = () => pick([-1, -1, 0, 65535, 65536, -2, ri(0, 65535)]);
+const patU = () => rnd() < .2 ? pick([2 ** 29, -(2 ** 29), 2 ** 29 + 1, -(2 ** 29) - 1, 0, 2 ** 31 - 1])
+  : ri(-3000, 3000) * 65536 + ri(0, 65535);
+// Weights: a pair on either side of the 1.02 / 1.2 / 1.6 boundaries, mixed
+// signs, zero, the +-2^24 edge and values past it, and large ones that the
+// 13-bit normalisation has to shift.
+function patW() {
+  if (rnd() < .2) return [pick([0, 1, -1, 2 ** 24, -(2 ** 24), 2 ** 24 + 1, ri(-(2 ** 24), 2 ** 24)]),
+    pick([0, 1, -1, 2 ** 24, -(2 ** 24), -(2 ** 24) - 1, ri(-(2 ** 24), 2 ** 24)])];
+  const v = pick([ri(1, 300), ri(1, 2 ** 24 / 2), ri(65536, 20 * 65536), 8191, 8192, 8193, 16383, 16384]);
+  const [num, den] = pick([[51, 50], [6, 5], [8, 5], [3, 1], [1000, 1]]);
+  let w = Math.floor(v * num / den) + pick([-1, 0, 0, 1, ri(-5, 5)]);
+  w = Math.min(Math.max(w, 1), 2 ** 24);
+  const sgn = rnd() < .5 ? 1 : -1, pair = rnd() < .5 ? [v * sgn, w * sgn] : [w * sgn, v * sgn];
+  if (rnd() < .1) pair[1] = -pair[1];
+  return pair;
+}
+function prim(code, heavy, loop) {
+  const colour = () => rnd() < .95 ? ri(0, 65535) : 0;
+  if (rnd() < .5) {
+    const d = ri(0, 8);
+    for (let k = 0; k < 8; k++) code.push({op: OP.SET, dst: d + k, imm: cubicRaw()});
+    code.push({op: OP.CUBIC, dst: d, imm: heavy ? pick([200, 255]) : pick([1, 2, 3, 7, 16, 64, 255, ri(1, 255)]), aux: colour()});
+    return;
+  }
+  const d = ri(0, 10), r = () => ri(0, 15);
+  const block = [patBits(), patColB(), patU(), patU(), ...patW()];
+  block.forEach((v, k) => code.push({op: OP.SET, dst: d + k, imm: v}));
+  const a = r(), b = r();
+  if (rnd() < .5) code.push({op: OP.MOVE, a: r(), b: r()});
+  const i = {op: OP.LINE_PATTERN, dst: d, a, b, imm: pick([1, 2, 7, 24, ri(1, 24)]), aux: colour()};
+  // A loop of pattern lines between the screen's edges: the 2-entry segment
+  // check and the raster budget.
+  if (loop && heavy) {
+    const x = (d + 7) % 16;
+    code.push({op: OP.SET, dst: x, imm: pick([-480, 720]) * 65536}, {op: OP.REPEAT, imm: ri(20, 255)},
+      {...i, a: x}, {op: OP.NEG, dst: x, a: x}, {op: OP.END});
+  } else code.push(i);
+}
+
 // ------------------------------------------------------------- encoder
 const OP = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9, REPEAT_REG: 10,
   BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14, LINE_PATTERN: 15, SUB: 16, NEG: 17, SHIFT: 18,
@@ -72,9 +119,13 @@ function program() {
   const code = [], open = [];
   const target = ri(4, 64);
   const heavy = rnd() < .15;                       // aim at the limits
+  const prims = rnd() < .25;
   while (code.length < target) {
     const room = target - code.length - open.length; // keep room for the ENDs
     if (room <= 0) break;
+    // CUBIC and LINE_PATTERN (sec.4.6, 4.7, v1.2), with their operands set
+    // just before: about one program in four has one or more.
+    if (prims && rnd() < .12 && room > 10) { prim(code, heavy, open.length < 8 && room > 13); continue; }
     const r = rnd();
     if (r < .10 && open.length < 8 && room > 2) {
       if (rnd() < .7) code.push({op: OP.REPEAT, imm: heavy ? ri(100, 255) : pick([1, 2, 3, 5, 255, ri(1, 9)])});
@@ -135,7 +186,11 @@ function program() {
     // (0.5 at Q16 is 32768) is refused only by the Q0 rule (sec.3), so the
     // rule is tested on its own.
     else if (i.op === OP.PLOT || i.op === OP.LINE) { field = 1; q = pick([0, 0, 0, 16, 8, 1]); v = q ? ri(0, 65535) / 2 ** q : rnd() < .9 ? ri(0, 65535) : pick([-1, 65536, 1.5]); }
-    else if (i.op === OP.REPEAT) { field = 0; q = pick([0, 0, 0, 16, 4]); v = q ? ri(1, 255) / 2 ** q : pick([1, 2, 255, 0, 256, ri(1, 9)]); }
+    else if (i.op === OP.REPEAT || i.op === OP.CUBIC) { field = 0; q = pick([0, 0, 0, 16, 4]); v = q ? ri(1, 255) / 2 ** q : pick([1, 2, 255, 0, 256, ri(1, 9)]); }
+    else if (i.op === OP.LINE_PATTERN) {
+      field = pick([0, 1]); q = pick([0, 0, 0, 16]);
+      v = field ? (q ? ri(0, 65535) / 2 ** q : pick([0, 65535, 65536, -1, ri(0, 65535)])) : (q ? ri(1, 24) / 2 ** q : pick([1, 24, 0, 25, ri(1, 24)]));
+    }
     else continue;
     if (patches.some(p => p.pc === pc && p.field === field)) continue;
     patches.push({pc, arg: args.length, field}); args.push(q); argv.push(v);

@@ -1,7 +1,8 @@
 // How far LINE_PATTERN's cut coordinate (docs/kasane/shiki-spec.md sec.4.7,
 // v1.2: weights normalised to 13 bits, the ratio in Q14, so every division is
 // 32-bit) lands from the exact perspective-correct value, on DERBY's captured
-// crowd draws, beside two other splits of the same precision budget. Host,
+// crowd draws, beside the splits weighed before it (the larger weight setting
+// the shift: 13/Q14 was v1.2's draft). Host,
 // Node only. Results: docs/kasane/shiki.md sec.5.10.
 //
 //   node tools/kasane_ir/pattern_cut_precision.mjs [CASES.json]
@@ -19,6 +20,14 @@ const cases = JSON.parse(fs.readFileSync(process.argv[2] ?? '.cache/kasane_ir/q1
 const chords = (w0, w1) => { if (!((w0 > 0 && w1 > 0) || (w0 < 0 && w1 < 0))) return 1; const W = Math.max(Math.abs(w0), Math.abs(w1)), V = Math.min(Math.abs(w0), Math.abs(w1));
   return 50 * W < 51 * V ? 1 : 5 * W < 6 * V ? 2 : 5 * W < 8 * V ? 4 : 8; };
 const variants = {};
+// v1.2 as frozen: the smaller weight sets the shift (13 bits), the larger keeps
+// up to 24; the side whose weight is larger is taken as 2^14 minus the other.
+variants['min13 λQ14 (v1.2)'] = (u0, u1, w0, w1, c, j) => {
+  const wa = Math.abs(w0), wb = Math.abs(w1), e = Math.max(0, Math.min(wa, wb).toString(2).length - 13);
+  const a = Math.floor(wa / 2 ** e), b = Math.floor(wb / 2 ** e), D = a * (c - j) + b * j;
+  const lam = wb <= wa ? Rn(b * j * 16384, D) : 16384 - Rn(a * (c - j) * 16384, D);
+  return u0 + Number(R64(B(u1 - u0) * B(lam), 16384n));
+};
 for (const [wb, lq] of [[13, 14], [15, 12], [11, 16]]) variants[`w${wb} λQ${lq}`] = (u0, u1, w0, w1, c, j) => {
   let a = Math.abs(w0), b = Math.abs(w1); const e = Math.max(0, Math.max(a, b).toString(2).length - wb); a = a >> e; b = b >> e; // floor of positive
   const lam = Rn(b * j * 2 ** lq, a * (c - j) + b * j);

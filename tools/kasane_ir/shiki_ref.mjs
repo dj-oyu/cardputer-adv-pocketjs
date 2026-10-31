@@ -364,10 +364,13 @@ export function patternOp(ctx, xr, yr, block, N, colourA) {
     if (j < c) {
       bx = pX + R(BigInt((x - pX) * j), BigInt(c));
       by = pY + R(BigInt((y - pY) * j), BigInt(c));
+      // The smaller weight sets the shift (13 bits); the side whose weight is
+      // the larger is 2^14 minus the other's share, so a numerator never
+      // holds the larger weight.
       const A = Math.abs(w0), B = Math.abs(w1);
-      const e = Math.max(0, bitLength(Math.max(A, B)) - 13);
-      const A2 = Math.floor(A / 2 ** e), B2 = Math.floor(B / 2 ** e);
-      const lam = R(BigInt(B2 * j) * 16384n, BigInt(A2 * (c - j) + B2 * j));
+      const e = Math.max(0, bitLength(Math.min(A, B)) - 13);
+      const A2 = Math.floor(A / 2 ** e), B2 = Math.floor(B / 2 ** e), D = BigInt(A2 * (c - j) + B2 * j);
+      const lam = B <= A ? R(BigInt(B2 * j) * 16384n, D) : 16384 - R(BigInt(A2 * (c - j)) * 16384n, D);
       ub = u0 + R(BigInt(u1 - u0) * BigInt(lam), 16384n);
     }
     const s = Math.max(Math.abs(bx - ax), Math.abs(by - ay));

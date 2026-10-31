@@ -13,6 +13,20 @@ globalThis.shikiGen = function (seed) {
     for (let k = 0; k < nin; k++) inq.push(pick([16, 16, 0, 24, 30]));
     const n = ri(4, 48), heavy = rnd() < .1;
     while (code.length + open.length < n) {
+      if (rnd() < .06) {
+        if (rnd() < .5) {
+          const d = ri(0, 8);
+          for (let k = 0; k < 8; k++) code.push([0, d + k, 0, 0, crd(), 0]);
+          code.push([14, d, 0, 0, pick([1, 2, 7, 64, 255, ri(1, 255)]), ri(0, 65535)]);
+        } else {
+          const d = ri(0, 10), v = ri(1, 1 << 20), w = Math.floor(v * pick([1.02, 1.2, 1.6, 3, 1])) + ri(-1, 1);
+          const u = () => pick([0, 1 << 29, (1 << 29) + 1, ri(-3000, 3000) * 65536 + ri(0, 65535)]);
+          [pick([0, 0xffffff, ri(0, 0xffffff)]), pick([-1, 0, 65535, 65536]), u(), u(), pick([v, -v, 0]), pick([w, -w, 1 << 24])]
+            .forEach((x, k) => code.push([0, d + k, 0, 0, x, 0]));
+          code.push([7, 0, reg(), reg(), 0, 0], [15, d, reg(), reg(), pick([1, 24, ri(1, 24)]), ri(0, 65535)]);
+        }
+        continue;
+      }
       const r = rnd();
       if (r < .1 && open.length < 8) {
         if (rnd() < .7) code.push([5, 0, 0, 0, heavy ? ri(100, 255) : ri(1, 9), 0]);
