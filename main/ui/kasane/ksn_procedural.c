@@ -566,6 +566,24 @@ bool ksn_proc_blend_read(const ksn_proc_segment *data,unsigned words,ksn_proc_bl
     memcpy(p,data,KSN_PROC_BLEND_BYTES(p->header.count));
     return true;
 }
+bool ksn_proc_blend_region_read(const ksn_proc_segment *data,unsigned words,
+        ksn_proc_blend_ellipsoids *p,ksn_proc_blend_region_mask *mask,unsigned *used){
+    if(!data||!p||!mask||!used||words*sizeof *data<sizeof p->header)return false;
+    memcpy(&p->header,data,sizeof p->header);
+    if(!p->header.count||p->header.count>KSN_PROC_BLEND_LOBES)return false;
+    const unsigned bytes=(unsigned)KSN_PROC_BLEND_BYTES(p->header.count),
+        needed=(unsigned)KSN_PROC_BLEND_REGION_WORDS(p->header.count);
+    if(needed>words)return false;
+    memcpy(p,data,bytes);memcpy(mask,(const uint8_t *)data+bytes,sizeof *mask);
+    *used=needed;return true;
+}
+bool ksn_proc_blend_region_bounds(const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *mask,
+        int *left,int *top,int *right,int *bottom){
+    if(!mask||mask->reserved||!ell_finite(mask->plane,4,1e6f)||
+       !(mask->plane[0]!=0||mask->plane[1]!=0||mask->plane[2]!=0)||!isfinite(mask->feather)||
+       !(mask->feather==0||(mask->feather>=1e-4f&&mask->feather<=4096)))return false;
+    return ksn_proc_blend_bounds(p,left,top,right,bottom);
+}
 bool ksn_proc_blend_bounds(const ksn_proc_blend_ellipsoids *p,int *left,int *top,int *right,int *bottom){
     if(!p||!p->header.count||p->header.count>KSN_PROC_BLEND_LOBES||p->header.reserved||
        p->header.surface[1]>255||p->header.surface[2]>255||
@@ -681,12 +699,14 @@ typedef struct {
  * This has bounded work and no depth buffer. The projected silhouette remains
  * the union of the lobes. Support-regularized shading normals suppress grazing
  * cap seams; they approximate, rather than differentiate, the blended height. */
-static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *pixels,int y,int height){
+static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *region,
+        uint16_t *pixels,int y,int height){
     int left,top,right,bottom;if(!ksn_proc_blend_bounds(p,&left,&top,&right,&bottom))return;
     if(top<y)top=y;
     if(bottom>=y+height)bottom=y+height-1;
     if(left>right||top>bottom)return;
     const ksn_proc_blend_header *h=&p->header;
+    const float inverse_feather=region&&region->feather>0?1/region->feather:0;
     const float *m=h->material;
     float light[3]={h->light[0],h->light[1],h->light[2]},view[3]={h->light[3],h->light[4],h->light[5]};
     (void)ell_unit(light);(void)ell_unit(view);
@@ -750,7 +770,18 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *p
             nh=has_half?fmaxf(0,normal[0]*half[0]+normal[1]*half[1]+normal[2]*half[2]):0,
             spec=front>0&&nh>0&&m[2]>0?powf(nh,m[3]):0,thin=1-h->surface[2]*(1.0f/255)*chord;
         const uint16_t base=h->surface[0];unsigned color[3];
-        const unsigned channels[3]={(base>>11)&31,(base>>5)&63,base&31},max[3]={31,63,31};
+        float channels[3]={(base>>11)&31,(base>>5)&63,base&31};
+        const unsigned max[3]={31,63,31};
+        if(region&&base!=region->color){
+            const float *r=region->plane,distance=r[0]*x+r[1]*yy+r[2]*depth+r[3],
+                mix=inverse_feather>0?fmaxf(0,fminf(1,.5f+distance*inverse_feather)):(distance>=0?1:0);
+            const uint16_t other=region->color;
+            const unsigned b[3]={(other>>11)&31,(other>>5)&63,other&31};
+            for(unsigned k=0;k<3;k++){
+                if(mix>=1)channels[k]=(float)b[k];
+                else if(mix>0)channels[k]+=((float)b[k]-channels[k])*mix;
+            }
+        }
         for(unsigned k=0;k<3;k++){
             const float c=channels[k]*(1.0f/max[k])*(m[0]*m[8+k]+m[1]*front*h->light[6+k])+
                 h->light[6+k]*(m[2]*spec+m[4]*thin*back*m[5+k]);
@@ -771,6 +802,13 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,uint16_t *p
 static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
     for(unsigned j=0;j<frame->count;j++){
         const ksn_proc_segment *s=&frame->segments[j];
+        if(s->x0>=KSN_PROC_EXT_BLEND_REGION-480){
+            ksn_proc_blend_ellipsoids p;ksn_proc_blend_region_mask mask;unsigned used;
+            if(!ksn_proc_blend_region_read(s+1,frame->count-j-1,&p,&mask,&used))return;
+            int l,t,r,b;if(!ksn_proc_blend_region_bounds(&p,&mask,&l,&t,&r,&b))return;
+            if(s->y1>=y&&s->y0<y+height)blend_ellipsoids_band(&p,&mask,pixels,y,height);
+            j+=used;continue;
+        }
         if(s->x0>=KSN_PROC_EXT_CLIPPED_ELLIPSOID-480){
             ksn_proc_clipped_ellipsoid p;int winding;
             if(!ksn_proc_clipped_ellipsoid_read(s+1,frame->count-j-1,&p)||!clip_prepare(&p.clip,&winding))return;
@@ -780,7 +818,7 @@ static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *fram
         if(s->x0>=KSN_PROC_EXT_BLEND_ELLIPSOIDS-480){
             ksn_proc_blend_ellipsoids p;unsigned used;
             if(!ksn_proc_blend_read(s+1,frame->count-j-1,&p,&used))return;
-            if(s->y1>=y&&s->y0<y+height)blend_ellipsoids_band(&p,pixels,y,height);
+            if(s->y1>=y&&s->y0<y+height)blend_ellipsoids_band(&p,NULL,pixels,y,height);
             j+=used;continue;
         }
         if(s->x0>=KSN_PROC_EXT_ELLIPSOID-480){

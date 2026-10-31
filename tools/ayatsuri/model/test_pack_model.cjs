@@ -27,7 +27,7 @@ assert.equal(patterned.readUInt16LE(at),1);assert.equal(patterned[at+2],4);asser
 assert.equal(patterned.readUInt32LE(at+24),0x00ff00);assert.equal(patterned.readUInt32LE(at+28),0);
 assert.ok(patterned.equals(compile(structuredClone(region))));
 let regionRejected=0;function badRegion(fn){const c=structuredClone(region);fn(c);assert.throws(()=>compile(c));++regionRejected;}
-for(const fn of [c=>c.nodes[0].pattern=c.nodes[1].pattern,c=>c.nodes[2].pattern=c.nodes[1].pattern,
+for(const fn of [c=>c.nodes[0].pattern=c.nodes[1].pattern,
   c=>c.nodes[1].pattern.kind='checker',c=>c.nodes[1].pattern.normal=[0,0,0],c=>c.nodes[1].pattern.normal=[0,1.001,0],
   c=>c.nodes[1].pattern.normal=[0,NaN,0],c=>c.nodes[1].pattern.normal=[0,Infinity,0],c=>c.nodes[1].pattern.normal=[0,1],
   c=>c.nodes[1].pattern.offset=2.001,c=>c.nodes[1].pattern.offset=-2.001,c=>c.nodes[1].pattern.offset=NaN,
@@ -40,4 +40,17 @@ badRegion(c=>c.nodes[1].pattern.normal=[0,1.00006,0]);
 fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/region.aynm'),patterned);
 fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/region-plain.aynm'),plain);
 console.log('AYNM_REGION_PACK_PASS rows=2 deterministic=true oldBin=unchanged rejected='+regionRejected);
+const blendRegion=structuredClone(tiny),child=structuredClone(tiny.nodes[2]);
+child.index=3;child.name='child-blend';child.parent=2;child.pose=[3,-2,4,.1,-.2,.3,1.1,.8,1.2];blendRegion.nodes.push(child);
+const blendPlain=compile(blendRegion);
+blendRegion.nodes[2].pattern={kind:'localPlane',normal:[.6,.8,0],offset:3,feather:1.5,color:blendRegion.nodes[2].color};
+blendRegion.nodes[3].pattern={kind:'localPlane',normal:[0,0,-1],offset:-4,feather:0,color:0xff0000};
+const blendBytes=compile(blendRegion),blendAt=blendBytes.readUInt32LE(dir+4);
+assert.equal(blendBytes[blendAt+2],5);assert.equal(blendBytes[blendAt+34],5);
+assert.ok(blendBytes.equals(compile(structuredClone(blendRegion))));
+for(const [key,values] of [['offset',[-4096,4096]],['feather',[0,1e-4,4096]]])for(const v of values){const c=structuredClone(blendRegion);c.nodes[2].pattern[key]=v;compile(c);}
+for(const [key,values] of [['offset',[-4097,4097,NaN]],['feather',[-1,9e-5,4097,Infinity]]])for(const v of values){const c=structuredClone(blendRegion);c.nodes[2].pattern[key]=v;assert.throws(()=>compile(c));}
+fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/blend-region.aynm'),blendBytes);
+fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/blend-region-plain.aynm'),blendPlain);
+console.log('AYNM_BLEND_REGION_PACK_PASS rows=2 sameColor=true limits=true defaultBytes=unchanged');
 console.log('AYNM_PACK_PASS cloudBytes='+bytes.length+' nodes=19 deterministic=true malformed='+rejected+' tinyNodes=3 tinyBytes='+tinyBytes.length);

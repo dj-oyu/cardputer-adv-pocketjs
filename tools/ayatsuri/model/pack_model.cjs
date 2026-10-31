@@ -14,12 +14,13 @@ function compile(m){
     const n=m.nodes[i],kind={group:0,ellipsoid:1,blendEllipsoids:2}[n.kind];
     int(kind,0,2);if(n.index!==i||typeof n.enabled!=='boolean'||typeof n.name!=='string'||!(/^[\x20-\x7e]{1,127}$/).test(n.name)||names.includes(n.name))throw TypeError('identity');
     if(n.pattern!==undefined&&n.pattern!==null){
-      const p=n.pattern;if(kind!==1||p.kind!=='localPlane')throw TypeError('ellipsoid localPlane pattern');
+      const p=n.pattern;if((kind!==1&&kind!==2)||p.kind!=='localPlane')throw TypeError('analytic localPlane pattern');
       const normal=Array.from(floats(p.normal,3),Math.fround),length=normal.reduce((s,v)=>s+v*v,0);
       if(Math.abs(length-1)>1e-4)throw TypeError('unit localPlane normal');
       f32(p.offset);f32(p.feather);
-      if(p.offset< -2||p.offset>2||(p.feather!==0&&(p.feather<1e-4||p.feather>2)))throw TypeError('localPlane range');
-      const region=Buffer.alloc(32);region.writeUInt16LE(i,0);region[2]=4;
+      const limit=kind===1?2:4096;
+      if(p.offset< -limit||p.offset>limit||(p.feather!==0&&(p.feather<1e-4||p.feather>limit)))throw TypeError('localPlane range');
+      const region=Buffer.alloc(32);region.writeUInt16LE(i,0);region[2]=kind===1?4:5;
       normal.forEach((v,k)=>region.writeFloatLE(v,4+k*4));region.writeFloatLE(p.offset,16);region.writeFloatLE(p.feather,20);
       region.writeUInt32LE(int(p.color,0,0xffffff),24);regions.push(region);
     }

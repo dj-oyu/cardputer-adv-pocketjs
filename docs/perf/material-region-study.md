@@ -66,4 +66,35 @@ python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-in
 
 `--material-study mask-only|mask-inset`はoffline generatorからcold fixtureを作り、host linkのprovider wrapperだけで差し替える。製品assetを書き換えず、同じJS app/native validation/Instance/snapshotを通る。入力hashは生成inc/bin/json/manifestに加え、generatorが実際に読むSourceA/blend原本まで含める。生成後の原本変更を検出する負例がある。結果は`.cache/fox-app-{m32,asan}-mask-inset/result.json`へ、compiler/flags/binary/source/画像hash・phaseを保存する。
 
-2平面の積集合、blendの共通local座標、材質ごとのroughness/厚み、任意depth/occlusionは未実装。同一面の毛色を分ける機能と、狐全体の完成・実機受入を分けて扱う。
+2平面の積集合、材質ごとのroughness/厚み、任意depth/occlusionは未実装。同一面の毛色を分ける機能と、狐全体の完成・実機受入を分けて扱う。
+
+## 次段階: blend共通面の1平面
+
+ellipsoidの小実証に続き、既存cream-faceの最終blend depth上でcommon model-local平面を評価する新variantを追加した。[wire/単位/型の仕様](../api/material-regions.md#blendの共通面-新variant)を参照。lobeごとの単位球qで毛色を選ばず、同じnormalでalbedoだけを分ける。
+
+[同条件の片側比較](../apps/fox-blend-region-host.png)はHOST SIMULATION。列はv4基準／形状不変の共通平面／同平面と左外端lobe1個削除。正面neutral/smileとyaw±35°、固定光の同じframeを並べた。平面だけの案はgeometry/materialのsections1..7がbyte一致。別のinset案は左3lobesの位置・大きさも変えるため、色分け単独の効果と混ぜない。既定の製品fox assetは変更していない。
+
+| m32、cap163840B、通常GC、同249frame×2/48画像 | v4同workload | planeのみ | plane＋inset | plane＋外端1lobe削除 |
+| --- | ---: | ---: | ---: | ---: |
+| 丸め後要求peak B | 138600 | 138624 | 138624 | 138516 |
+| QuickJS会計peak B | 155112 | 155136 | 155136 | 155028 |
+| 最大単一raw要求 B | 9199 | 9223 | 9223 | 9115 |
+| Instance arena B | 9192 | 9216 | 9216 | 9108 |
+| cream-face lobe数 | 8 | 8 | 8 | 7 |
+
+各profileで全描画reference、2runの48画像一致、入力不変、6回のrelease/recreate plateau、quota/allocator拒否0、終了guest0を確認。ASan/UBSanのplaneのみ案は別64bit profileで同じ249frame×2を確認し、そのRAM値を32bitへ換算しない。F32/byteの比較と見た目の受入は別である。
+
+planeは使用nodeのarenaを24B増やす。pruned案は左外端lobe1個の108Bを削除し、差引84B減となった。これは同じhost workloadのguest会計であり、ESPのfree/largest、断片化、GC時間、実機の描画速度は未計測。固定blobやflashの増分をguest peakへ足さない。
+
+形状を保ったplane案では、上/外側の白領域をfur色へ変えられるが、白い横帯と眼の貼付感は残る。pruned案は左端の白い張り出しを短くできる一方、主頬の横長面と丸い口吻は残る。独立画像レビューも改善が既定採用には弱いと判断したため、今回の4案は比較fixtureとして残し、既定資産には採用しない。共通面の汎用機能の成立、84Bの節約、狐の画質受入を別々に扱う。
+
+描画試験は最終depthのbinary64独立oracle、A=B画素一致、specularのみの同一画像、旧golden、1..8lobes/切詰め、mask全fieldのdamage、snapshot/repairを検査。実QuickJSでは7引数入力の型・値・予算拒否、copy後のbuffer変更、色領域だけの更新を全描画referenceと比較する。native Modelは非一様/負scale、親子、camera変更、光変更時の領域不変、失敗評価後の復帰、閉じたModelとlive Instance、二個体をASan/UBSan/m32で検査した。
+
+```sh
+python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study unchanged --capture-dir .cache/fox-blend-unchanged
+python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-mask-only --capture-dir .cache/fox-blend-plane
+python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-mask-inset --capture-dir .cache/fox-blend-inset
+python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-mask-pruned --capture-dir .cache/fox-blend-pruned
+```
+
+追加のpixel処理は平面dot3乗算/3加減算、必要時のfeather係数とalbedo混合。逆変換はnode評価時に行い、pixelごとの逆行列やlobe再走査を追加しない。旧96B header/旧variant/5引数は維持し、新packetはraw末尾へdescriptor24Bを付けてから10B entryへ丸める。native submitのsnapshotコピーを削って寿命を借用へ変えることはしていない。画質と実機費用が未確認のため、速度改善済みとは主張しない。

@@ -22,6 +22,7 @@ def plain(path):
         "('band_entry','plain_band','pattern_band','render_band_ext','ksn_proc_render_band',"
         "'ell_finite','ell_unit','ell_colour','ellipsoid_band','ksn_proc_ellipsoid_bounds',"
         "'ksn_proc_blend_read','ksn_proc_blend_bounds','blend_projection','blend_ellipsoids_band',"
+        "'ksn_proc_blend_region_read','ksn_proc_blend_region_bounds',"
         "'clip_prepare','clip_contains','clip_span','ksn_proc_clipped_ellipsoid_read',"
         "'ksn_proc_clipped_ellipsoid_bounds')")
     text = once(text, "bool plain_step_candidate;\n", """bool plain_step_candidate;
@@ -33,6 +34,14 @@ bool ksn_proc_blend_bounds(const ksn_proc_blend_ellipsoids *p,int *l,int *t,int 
 }
 bool ksn_proc_blend_read(const ksn_proc_segment *data,unsigned words,ksn_proc_blend_ellipsoids *p,unsigned *used){
  return cand_ksn_proc_blend_read(data,words,p,used);
+}
+bool ksn_proc_blend_region_read(const ksn_proc_segment *data,unsigned words,ksn_proc_blend_ellipsoids *p,
+        ksn_proc_blend_region_mask *mask,unsigned *used){
+ return cand_ksn_proc_blend_region_read(data,words,p,mask,used);
+}
+bool ksn_proc_blend_region_bounds(const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *mask,
+        int *l,int *t,int *r,int *b){
+ return cand_ksn_proc_blend_region_bounds(p,mask,l,t,r,b);
 }
 bool ksn_proc_clipped_ellipsoid_read(const ksn_proc_segment *data,unsigned words,ksn_proc_clipped_ellipsoid *p){
  return cand_ksn_proc_clipped_ellipsoid_read(data,words,p);

@@ -435,7 +435,9 @@ static JSValue js_shape_ellipsoid_clipped_packed(JSContext *ctx,JSValueConst sel
     p.clip.count=(uint8_t)(clip.bytes/8);if(clip.bytes)memcpy(p.clip.xy,clip.data,clip.bytes);
     return pocket_proc_native_clipped_ellipsoid(ctx,op,&p);
 }
+static JSValue js_shape_blend_region(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv);
 static JSValue js_shape_blend_ellipsoids(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    if(argc==7)return js_shape_blend_region(ctx,self,argc,argv);
     (void)self;const char *op="shapes.blendEllipsoids";
     if(argc!=5)return invalid(ctx,op,"expected lobes21n, light9, material11, surface3, controls2");
     shade_view v[5];
@@ -451,6 +453,27 @@ static JSValue js_shape_blend_ellipsoids(JSContext *ctx,JSValueConst self,int ar
     pocket_proc_mark mark;
     JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
     result=pocket_proc_native_blend_ellipsoids(ctx,op,&p);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    return result;
+}
+
+static JSValue js_shape_blend_region(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="hone.blendEllipsoids";
+    if(argc!=7)return invalid(ctx,op,"expected lobes21n, light9, material11, surface3, controls2, plane5, color1");
+    shade_view v[7];const size_t sizes[7]={0,36,44,6,8,20,2};
+    for(unsigned i=0;i<7;i++)if(!shade_buffer(ctx,argv[i],i==3||i==6?JS_TYPED_ARRAY_UINT16:JS_TYPED_ARRAY_FLOAT32,false,&v[i])||
+        (i&&v[i].bytes!=sizes[i]))return invalid(ctx,op,"invalid blend region typed views");
+    if(!v[0].bytes||v[0].bytes%sizeof(ksn_proc_blend_lobe))return invalid(ctx,op,"complete lobe rows required");
+    const size_t count=v[0].bytes/sizeof(ksn_proc_blend_lobe);
+    if(count>KSN_PROC_BLEND_LOBES)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"at most eight lobes");
+    ksn_proc_blend_ellipsoids p={0};p.header.count=(uint8_t)count;
+    ksn_proc_blend_region_mask mask={0};
+    memcpy(p.lobes,v[0].data,v[0].bytes);memcpy(p.header.light,v[1].data,36);
+    memcpy(p.header.material,v[2].data,44);memcpy(p.header.surface,v[3].data,6);memcpy(p.header.controls,v[4].data,8);
+    memcpy(&mask,v[5].data,20);memcpy(&mask.color,v[6].data,2);
+    pocket_proc_mark mark;
+    JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
+    result=pocket_proc_native_blend_region(ctx,op,&p,&mask);
     if(JS_IsException(result))pocket_proc_native_rollback(&mark);
     return result;
 }

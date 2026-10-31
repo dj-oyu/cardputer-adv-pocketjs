@@ -96,6 +96,7 @@ jobs:
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2
           python3 tools/kasane_contract/run_fox_app_host.py
           python3 tools/kasane_contract/run_fox_app_host.py --material-study mask-inset --capture-dir .cache/fox-material-asan
+          python3 tools/kasane_contract/run_fox_app_host.py --material-study blend-mask-only --capture-dir .cache/fox-blend-material-asan
           python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
           python3 tools/kasane_contract/run_character_app_host.py --capture-dir .cache/character-capture
           python3 tools/kasane_contract/run_character_app_host.py --cloud --capture-dir .cache/cloud-capture
@@ -111,6 +112,7 @@ jobs:
           python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2 --m32
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --capture-dir .cache/fox-capture
           python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-inset --capture-dir .cache/fox-material-m32
+          python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-mask-only --capture-dir .cache/fox-blend-material-m32
           node tools/character/transform_oracle.cjs
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
           CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
@@ -139,6 +141,10 @@ jobs:
             .cache/fox-material-m32/
             .cache/fox-app-asan-mask-inset/
             .cache/fox-app-m32-mask-inset/
+            .cache/fox-blend-material-asan/
+            .cache/fox-blend-material-m32/
+            .cache/fox-app-asan-blend-mask-only/
+            .cache/fox-app-m32-blend-mask-only/
             .cache/fox-local-plane-assets/
   firmware:
     runs-on: ubuntu-24.04

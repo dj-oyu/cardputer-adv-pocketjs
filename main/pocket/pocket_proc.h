@@ -43,6 +43,8 @@ JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_pro
  * unchanged. Unlike older analytic methods, budget rejection does not poison. */
 JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch);
 JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch);
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch,
+    const ksn_proc_blend_region_mask *mask);
 void pocket_proc_native_rollback(const pocket_proc_mark *mark);
 /* The 8-row bands (17) of the image a just-committed frame changes, and on
  * each its columns [x0, x1): the bands whose ordered entries differ from the

@@ -175,6 +175,20 @@ static void managed_packet_ellipsoid(const ayatsuri_model_packet *packet,ksn_pro
     memcpy(p->material,packet->storage+164,32);memcpy(p->texture,packet->storage+196,36);
     memcpy(p->surface,packet->storage+232,10);memcpy(p->light,packet->lighting,36);
 }
+static JSValue managed_submit_blend(JSContext *ctx,const char *op,const ayatsuri_model_packet *packet,
+        ksn_proc_blend_ellipsoids *p){
+    memset(p,0,sizeof *p);p->header.count=packet->lobe_count;
+    memcpy(p->header.light,packet->lighting,36);memcpy(p->header.surface,packet->storage+252,6);
+    memcpy(p->header.material,packet->storage+264,44);memcpy(p->header.controls,packet->storage+308,8);
+    memcpy(p->lobes,packet->storage+316+24*packet->lobe_count,84*packet->lobe_count);
+    if(packet->kind==3){
+        ksn_proc_blend_region_mask mask;
+        _Static_assert(sizeof mask==24,"model blend region tail");
+        memcpy(&mask,packet->storage+316+108*packet->lobe_count,sizeof mask);
+        return pocket_proc_native_blend_region(ctx,op,p,&mask);
+    }
+    return pocket_proc_native_blend_ellipsoids(ctx,op,p);
+}
 static JSValue managed_instance_submit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)argv;const char *op="ayatsuri.instance.submit";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
     if(!a)return JS_EXCEPTION;
@@ -188,14 +202,8 @@ static JSValue managed_instance_submit(JSContext *ctx,JSValueConst self,int argc
         if(packet.kind==1){
             ksn_proc_ellipsoid p;managed_packet_ellipsoid(&packet,&p);
             result=pocket_proc_native_ellipsoid(ctx,op,&p);
-        }else if(packet.kind==2){
-            ksn_proc_blend_ellipsoids p={0};p.header.count=packet.lobe_count;
-            /* Blend storage layout is the same pure-C utility work packet. */
-            memcpy(p.header.light,packet.lighting,36);
-            memcpy(p.header.surface,packet.storage+252,6);
-            memcpy(p.header.material,packet.storage+264,44);memcpy(p.header.controls,packet.storage+308,8);
-            memcpy(p.lobes,packet.storage+316+24*packet.lobe_count,84*packet.lobe_count);
-            result=pocket_proc_native_blend_ellipsoids(ctx,op,&p);
+        }else if(packet.kind==2||packet.kind==3){
+            ksn_proc_blend_ellipsoids p;result=managed_submit_blend(ctx,op,&packet,&p);
         }else result=invalid(ctx,op,"invalid model packet kind");
         if(JS_IsException(result))break;
         status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);
@@ -249,12 +257,8 @@ static JSValue managed_instance_submit_clipped(JSContext *ctx,JSValueConst self,
         }else if(packet.kind==1){
             managed_packet_ellipsoid(&packet,&scratch.clipped.patch);
             result=pocket_proc_native_ellipsoid(ctx,op,&scratch.clipped.patch);
-        }else if(packet.kind==2){
-            memset(&scratch.blend,0,sizeof scratch.blend);scratch.blend.header.count=packet.lobe_count;
-            memcpy(scratch.blend.header.light,packet.lighting,36);memcpy(scratch.blend.header.surface,packet.storage+252,6);
-            memcpy(scratch.blend.header.material,packet.storage+264,44);memcpy(scratch.blend.header.controls,packet.storage+308,8);
-            memcpy(scratch.blend.lobes,packet.storage+316+24*packet.lobe_count,84*packet.lobe_count);
-            result=pocket_proc_native_blend_ellipsoids(ctx,op,&scratch.blend);
+        }else if(packet.kind==2||packet.kind==3){
+            result=managed_submit_blend(ctx,op,&packet,&scratch.blend);
         }else result=invalid(ctx,op,"invalid model packet kind");
         if(JS_IsException(result))break;
         status=ayatsuri_model_instance_next(&a->core,a,1,&cursor,&packet);

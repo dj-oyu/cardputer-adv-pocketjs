@@ -26,7 +26,8 @@ typedef struct {
     uint16_t node_count, packet_count;
     uint32_t slot_bytes;
     /* Sections 1..7 are mandatory; optional localPlane rows use required
-     * section 8. Its descriptor adds eight bytes, never instance work. */
+     * section 8. Mode 4 uses existing ellipse work; mode 5 adds 24 bytes
+     * only to each masked blend's work slot. */
     ayatsuri_model_section section[8];
 } ayatsuri_model;
 
@@ -94,7 +95,10 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *
         const void *owner,uint32_t generation,const float camera[9],const float light[6]);
 /* cursor begins at zero. Groups and inherited-hidden nodes are skipped.
  * storage uses existing 84/264/(316+108*lobes) layout; ellipse fields start at
- * 96,128,164,196,232; blend fields at 252,264,308,316+24*lobes. */
+ * 96,128,164,196,232; blend fields at 252,264,308,316+24*lobes.
+ * Kind 3 is a masked blend: old blend work followed by plane[4] F32,
+ * feather F32, RGB565 colorB U16, reserved U16=0 (24 bytes). Plane is
+ * A*screenX+B*screenY+C*finalBlendedDepth+D in common node-local units. */
 ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *instance,
         const void *owner,uint32_t generation,uint32_t *cursor,ayatsuri_model_packet *out);
 #endif

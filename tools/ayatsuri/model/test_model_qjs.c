@@ -23,7 +23,8 @@ bool pocket_api_class_ready(JSRuntime *rt,JSRuntime **owner,JSClassID *id){
     *owner=rt;*id=0;return false;
 }
 static void reset_classes(void){for(unsigned n=0;n<class_owner_count;n++)*class_owners[n]=NULL;}
-static union {ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;ksn_proc_clipped_ellipsoid clipped;} packets[512];
+static union {ksn_proc_ellipsoid ellipse;ksn_proc_blend_ellipsoids blend;ksn_proc_clipped_ellipsoid clipped;
+    struct {ksn_proc_blend_ellipsoids patch;ksn_proc_blend_region_mask mask;} region;} packets[512];
 static unsigned packet_count,submit_calls,fail_submission,begin_calls;
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
     (void)ctx;(void)op;++begin_calls;*mark=(pocket_proc_mark){.count=(uint16_t)packet_count};return JS_UNDEFINED;
@@ -36,6 +37,12 @@ JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_pro
 JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p){
     if(fail_submission&&++submit_calls==fail_submission)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"injected submit");
     CHECK(packet_count<512);memset(&packets[packet_count],0,sizeof packets[0]);packets[packet_count++].blend=*p;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p,const ksn_proc_blend_region_mask *mask){
+    int l,t,r,b;if(!ksn_proc_blend_region_bounds(p,mask,&l,&t,&r,&b))return invalid(ctx,op,"invalid blend region");
+    if(fail_submission&&++submit_calls==fail_submission)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"injected submit");
+    CHECK(packet_count<512);memset(&packets[packet_count],0,sizeof packets[0]);
+    packets[packet_count].region.patch=*p;packets[packet_count++].region.mask=*mask;return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *p){
     int l,t,r,b;if(!ksn_proc_clipped_ellipsoid_bounds(p,&l,&t,&r,&b))return invalid(ctx,op,"invalid clip");
@@ -243,6 +250,31 @@ static void finalizer_order_contract(JSContext *ctx){
     }
     JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,global);
 }
+static void blend_region_contract(JSContext *ctx){
+    size_t size;uint8_t *data=(uint8_t *)read_file(".cache/ayatsuri-native/blend-region.aynm",&size);
+    JSValue model=pocket_ayatsuri_model_from_static(ctx,data,size);CHECK(!JS_IsException(model));
+    JSValue actor=managed_model_instance(ctx,model,0,NULL);CHECK(!JS_IsException(actor));
+    JSValue global=JS_GetGlobalObject(ctx),eval[2]={JS_GetPropertyStr(ctx,global,"warmCamera"),JS_GetPropertyStr(ctx,global,"warmLight")};
+    JSValue r=managed_instance_evaluate(ctx,actor,2,eval);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+    packet_count=0;r=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(r)&&packet_count==3);JS_FreeValue(ctx,r);
+    pocket_model_actor *a=JS_GetOpaque(actor,pocket_model_instance_class);uint32_t at=2;ayatsuri_model_packet p;
+    CHECK(ayatsuri_model_instance_next(&a->core,a,1,&at,&p)==AYATSURI_MODEL_OK&&p.kind==3);
+    CHECK(!memcmp(&packets[1].region.mask,p.storage+p.bytes-24,24));
+    CHECK(!memcmp(packets[1].region.patch.lobes,p.storage+316+24*p.lobe_count,84*p.lobe_count));
+    const ksn_proc_blend_region_mask saved=packets[1].region.mask;
+    const char *sources[]={"new Uint16Array(0)","new Uint8Array(0)","new Float32Array(0)"};JSValue clips[3];
+    for(unsigned k=0;k<3;k++){clips[k]=JS_Eval(ctx,sources[k],strlen(sources[k]),"clip-empty",JS_EVAL_TYPE_GLOBAL);CHECK(!JS_IsException(clips[k]));}
+    packet_count=0;r=managed_instance_submit_clipped(ctx,actor,3,clips);CHECK(!JS_IsException(r)&&packet_count==3);JS_FreeValue(ctx,r);
+    CHECK(!memcmp(&saved,&packets[1].region.mask,24));
+    submit_calls=0;fail_submission=2;r=managed_instance_submit_clipped(ctx,actor,3,clips);CHECK(JS_IsException(r)&&packet_count==3);
+    r=JS_GetException(ctx);JS_FreeValue(ctx,r);fail_submission=0;
+    r=managed_model_dispose(ctx,model,0,NULL);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+    packet_count=0;r=managed_instance_submit(ctx,actor,0,NULL);CHECK(!JS_IsException(r)&&packet_count==3);JS_FreeValue(ctx,r);
+    r=managed_instance_dispose(ctx,actor,0,NULL);CHECK(!JS_IsException(r));JS_FreeValue(ctx,r);
+    JS_FreeValue(ctx,actor);JS_FreeValue(ctx,model);for(unsigned k=0;k<3;k++)JS_FreeValue(ctx,clips[k]);
+    JS_FreeValue(ctx,eval[0]);JS_FreeValue(ctx,eval[1]);JS_FreeValue(ctx,global);free(data);
+    CHECK(!memcmp(&saved,&packets[1].region.mask,24));
+}
 int main(int argc,char **argv){
     CHECK(argc>=2);fixture=(uint8_t *)read_file(argv[1],&fixture_bytes);
     size_t source_bytes;char *source=read_file(argc>2?argv[2]:"tools/ayatsuri/model/test_model_qjs.js",&source_bytes);
@@ -255,7 +287,7 @@ int main(int argc,char **argv){
         ayatsuri_model model;CHECK(ayatsuri_model_open(fixture,fixture_bytes,&model)==AYATSURI_MODEL_OK);
         const size_t before_skew=skew_count;skew_bytes=ayatsuri_model_instance_bytes(&model)+7u;
         packet_count=submit_calls=fail_submission=begin_calls=0;install(ctx);eval_ok(ctx,wrapper,wrapper_bytes);
-        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);JS_RunGC(rt);
+        eval_ok(ctx,source,source_bytes);warm_contract(ctx);unaligned_opacity_contract(ctx);finalizer_order_contract(ctx);blend_region_contract(ctx);JS_RunGC(rt);
         CHECK(skew_count>before_skew);skew_bytes=0;
         JS_FreeContext(ctx);reset_classes();JS_FreeRuntime(rt);CHECK(retained==0);
     }

@@ -43,15 +43,17 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--m32',action='store_true')
     parser.add_argument('--capture-dir',type=Path)
-    parser.add_argument('--material-study',choices=('mask-only','mask-inset'),help='host-only cold asset override; leaves the product asset unchanged')
+    parser.add_argument('--material-study',choices=('unchanged','mask-only','mask-inset','blend-mask-only','blend-mask-inset','blend-mask-pruned'),help='host-only cold asset override; unchanged is v4 with the same study workload')
     args=parser.parse_args()
     suffix=('-'+args.material_study) if args.material_study else ''
     cache=ROOT/(('.cache/fox-app-m32' if args.m32 else '.cache/fox-app-asan')+suffix);cache.mkdir(parents=True,exist_ok=True)
     (cache/'result.json').unlink(missing_ok=True)
     flags=['-Itools/kasane_contract','-ffp-contract=off']
     captures=48 if args.material_study else 42
+    study=None
     if args.material_study:
         subprocess.run(['node','tools/ayatsuri/model/studies/fox_local_plane.cjs'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
+        study=json.loads((ROOT/'.cache/fox-local-plane-assets/manifest.json').read_text())
         asset=(ROOT/'.cache/fox-local-plane-assets'/(args.material_study+'.inc')).resolve()
         flags+=['-DFOX_MATERIAL_ASSET="'+str(asset)+'"','-Wl,--wrap=pocket_ayatsuri_builtin_asset']
     env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
@@ -99,6 +101,7 @@ def main():
     same_images=runs[0]['image_sha256']==runs[1]['image_sha256'] if args.capture_dir else None
     proof=dict(kind='HOST SIMULATION',device_capture=False,passed=all(r['passed'] for r in runs) and unchanged and same_images is not False,
                material_study=args.material_study,cap=163840 if args.m32 else None,forced_frame_gc=False,pointer_profile=32 if args.m32 else 64,runs=runs,
+               study_baseline=study['baseline'] if study else None,study_variant=study['variants'][args.material_study] if study else None,
                binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),flags=flags,toolchain=toolchain,
                source_sha256=before,sources_unchanged_during_run=unchanged,repeat_images_equal=same_images,
                repeat_image_comparison_performed=bool(args.capture_dir))

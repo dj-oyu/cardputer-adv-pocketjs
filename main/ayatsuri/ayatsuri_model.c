@@ -23,6 +23,13 @@ static const uint8_t *row(const ayatsuri_model *m,unsigned section,uint32_t inde
     return m->data+m->section[section-1].offset+index*stride;
 }
 static unsigned slot_bytes(const uint8_t *node){return node[2]==0?84:node[2]==1?264:316+108u*m16(node+6);}
+static const uint8_t *node_region(const ayatsuri_model *m,unsigned id){
+    for(uint32_t k=0;k<m->section[7].count;++k){const uint8_t *r=row(m,8,k,32);if(m16(r)==id)return r;}
+    return NULL;
+}
+static unsigned node_slot_bytes(const ayatsuri_model *m,unsigned id,const uint8_t *node){
+    return slot_bytes(node)+(node[2]==2&&node_region(m,id)?24u:0u);
+}
 static bool float_rows_valid(const uint8_t *data,uint32_t count,unsigned floats,unsigned positive_start){
     for(uint32_t i=0;i<count;++i)for(unsigned k=0;k<floats;++k){
         const float value=mf(data+(i*floats+k)*4);
@@ -112,11 +119,15 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
         const uint8_t *region=row(&candidate,8,k,32);const uint16_t id=m16(region);
         const double x=mf(region+4),y=mf(region+8),z=mf(region+12);
         const float offset=mf(region+16),feather=mf(region+20);
-        if(id>=count||row(&candidate,1,id,16)[2]!=1||region[2]!=4||region[3]||m32(region+28)||
+        if(id>=count)return AYATSURI_MODEL_INVALID;
+        const unsigned kind=row(&candidate,1,id,16)[2];
+        const float limit=region[2]==5?4096:2;
+        if(!((kind==1&&region[2]==4)||(kind==2&&region[2]==5))||region[3]||m32(region+28)||
            !isfinite(x)||!isfinite(y)||!isfinite(z)||fabs(x*x+y*y+z*z-1)>1e-4||
-           !isfinite(offset)||offset< -2||offset>2||!isfinite(feather)||
-           (feather!=0&&(feather<1e-4f||feather>2))||m32(region+24)>0xffffff)return AYATSURI_MODEL_INVALID;
+           !isfinite(offset)||offset< -limit||offset>limit||!isfinite(feather)||
+           (feather!=0&&(feather<1e-4f||feather>limit))||m32(region+24)>0xffffff)return AYATSURI_MODEL_INVALID;
         for(uint32_t j=0;j<k;++j)if(m16(row(&candidate,8,j,32))==id)return AYATSURI_MODEL_INVALID;
+        if(region[2]==5)candidate.slot_bytes+=24;
     }
     *out=candidate;return AYATSURI_MODEL_OK;
 }
@@ -160,7 +171,7 @@ ayatsuri_model_status ayatsuri_model_instance_init(const ayatsuri_model *m,void 
             if(node[2]==1){work(&result,j)[63]=work(&result,j)[64]=1;}
             else work(&result,j)[77]=mf(node+12);
         }
-        offset+=slot_bytes(node);
+        offset+=node_slot_bytes(m,j,node);
     }
     *out=result;return AYATSURI_MODEL_OK;
 }
@@ -269,6 +280,33 @@ static bool ellipse_packet(ayatsuri_model_instance *i,unsigned id,const float ri
     }
     return true;
 }
+static bool blend_plane(ayatsuri_model_instance *i,unsigned id,const uint8_t *region,
+        const float right[3],const float down[3],const float forward[3]){
+    float *w=work(i,id);double q[9],t[3];const float *basis[3]={right,down,forward};
+    /* Invert the actual stored camera basis, not its assumed orthonormal
+     * transpose. The final blended depth is in this common affine frame. */
+    for(unsigned r=0;r<3;++r){
+        const double zoom=r<2?i->camera[6]:1;
+        for(unsigned c=0;c<3;++c)q[3*r+c]=zoom*((double)basis[r][0]*w[c]+(double)basis[r][1]*w[4+c]+(double)basis[r][2]*w[8+c]);
+        t[r]=zoom*((double)basis[r][0]*((double)w[3]-i->camera[3])+
+            (double)basis[r][1]*((double)w[7]-i->camera[4])+(double)basis[r][2]*((double)w[11]-i->camera[5]));
+        if(r<2)t[r]+=i->camera[7+r];
+    }
+    const double a=q[0],b=q[1],c=q[2],d=q[3],e=q[4],f=q[5],g=q[6],h=q[7],j=q[8],
+        det=a*(e*j-f*h)-b*(d*j-f*g)+c*(d*h-e*g);
+    if(!isfinite(det)||det==0)return false;
+    const double inv[9]={(e*j-f*h)/det,(c*h-b*j)/det,(b*f-c*e)/det,
+        (f*g-d*j)/det,(a*j-c*g)/det,(c*d-a*f)/det,
+        (d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det};
+    double plane[4];
+    for(unsigned k=0;k<3;++k)plane[k]=mf(region+4)*inv[k]+mf(region+8)*inv[3+k]+mf(region+12)*inv[6+k];
+    plane[3]=-plane[0]*t[0]-plane[1]*t[1]-plane[2]*t[2]-mf(region+16);
+    const unsigned at=slot_bytes(row(i->model,1,id,16));float *out=w+at/4;
+    for(unsigned k=0;k<4;++k)if(!narrow(plane[k],out+k)||fabs(out[k])>1e6)return false;
+    if(out[0]==0&&out[1]==0&&out[2]==0)return false;
+    out[4]=mf(region+20);surface_write(w,at+20,0,pack_rgb(m32(region+24)));surface_write(w,at+20,1,0);
+    return true;
+}
 static bool blend_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3]){
     const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*material=row(model,5,m16(node+8),72);
     const unsigned count=m16(node+6);float *w=work(i,id),*packet=w+79+6*count;
@@ -297,7 +335,9 @@ static bool blend_packet(ayatsuri_model_instance *i,unsigned id,const float righ
     surface_write(w,252,0,pack_rgb(states(i)[id].color));
     surface_write(w,252,1,(uint16_t)floor(states(i)[id].opacity*255+0.5));
     surface_write(w,252,2,(uint16_t)floor(fmin(1,md(material+48)*hypot3(m[2],m[6],m[10]))*255+0.5));
-    return narrow(md(material+64),w+78);
+    if(!narrow(md(material+64),w+78))return false;
+    const uint8_t *region=node_region(model,id);
+    return !region||blend_plane(i,id,region,right,down,forward);
 }
 ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,const float camera[9],const float light[6]){
@@ -344,7 +384,9 @@ ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *i,co
        *cursor>i->model->node_count)return leave(i,AYATSURI_MODEL_INVALID);
     for(unsigned j=*cursor;j<i->model->node_count;++j){const uint8_t *node=row(i->model,1,j,16);
         if(node[2]&&states(i)[j].world_enabled){
-            *out=(ayatsuri_model_packet){(const uint8_t *)work(i,j),i->lighting,(uint16_t)j,(uint16_t)slot_bytes(node),node[2],(uint8_t)m16(node+6)};
+            const unsigned bytes=node_slot_bytes(i->model,j,node);
+            *out=(ayatsuri_model_packet){(const uint8_t *)work(i,j),i->lighting,(uint16_t)j,(uint16_t)bytes,
+                (uint8_t)(node[2]==2&&bytes>slot_bytes(node)?3:node[2]),(uint8_t)m16(node+6)};
             *cursor=j+1;return leave(i,AYATSURI_MODEL_OK);
         }}
     *cursor=i->model->node_count;return leave(i,AYATSURI_MODEL_DONE);

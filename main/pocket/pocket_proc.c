@@ -840,6 +840,27 @@ JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const 
     c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
     return JS_UNDEFINED;
 }
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p,
+        const ksn_proc_blend_region_mask *mask){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_blend_region_bounds(p,mask,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid blended region");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p->header.count,
+        words=(unsigned)KSN_PROC_BLEND_REGION_WORDS(p->header.count),limit=surface_segments(&surfaces[building_surface]);
+    if(c->count>limit||words+1u>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"blended region frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_BLEND_REGION),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,words*sizeof c->segments[0]);
+    const size_t bytes=KSN_PROC_BLEND_BYTES(p->header.count);
+    memcpy(c->segments+c->count,p,bytes);
+    memcpy((uint8_t *)(c->segments+c->count)+bytes,mask,sizeof *mask);
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
+}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";

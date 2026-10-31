@@ -220,6 +220,8 @@ static bool blend_primitive_contract(void){
       "const material=new Float32Array([1,0,0,16,0,1,1,1,1,1,1]);"
       "const surface=new Uint16Array([0xf800,255,128]),controls=new Float32Array([6,.08]);"
       "const draw=()=>S.blendEllipsoids(lobes,light,material,surface,controls);"
+      "const plane=new Float32Array([1,0,0,-120,0]),color=new Uint16Array([0x001f]);"
+      "const region=()=>S.blendEllipsoids(lobes,light,material,surface,controls,plane,color);"
       "const mustThrow=(f,code)=>{try{f()}catch(e){if(e.code===code)return;throw e}throw Error('missing '+code)};"
       "const resource=H.resource({maxSegments:1024});"
       "pocket.kasane.replace(tx=>{tx.background(0x000000ff);tx.image({resource,bounds:[0,0,240,135]})});"
@@ -236,7 +238,14 @@ static bool blend_primitive_contract(void){
       "draw();const huge=new Float32Array(21*8);for(let i=0;i<8;i++){huge.set(row,21*i);huge[21*i]=120;huge[21*i+5]=67}"
       "mustThrow(()=>S.blendEllipsoids(huge,light,material,surface,controls),'LIMIT_EXCEEDED');"
       "mustThrow(()=>H.commit(),'BUSY');H.beginFrame(0);draw();H.commit();"
-      "},ambient:(blue)=>{surface[0]=0xffff;material[8]=blue?.25:1;material[9]=blue?.5:1;H.beginFrame(0);draw();H.commit()}"
+      "},ambient:(blue)=>{surface[0]=0xffff;material[8]=blue?.25:1;material[9]=blue?.5:1;H.beginFrame(0);draw();H.commit()},"
+      "region:(mode)=>{surface[0]=0xf800;material[8]=material[9]=1;plane.set([1,0,0,mode===1?-110:-120,0]);color[0]=mode===2?0xf800:0x001f;H.beginFrame(0);"
+      "for(let i=0;i<5;i++){const old=plane[i];plane[i]=NaN;mustThrow(region,'INVALID_ARGUMENT');plane[i]=old}"
+      "plane[0]=0;mustThrow(region,'INVALID_ARGUMENT');plane[0]=1;plane[4]=1e-5;mustThrow(region,'INVALID_ARGUMENT');plane[4]=0;"
+      "mustThrow(()=>S.blendEllipsoids(lobes,light,material,surface,controls,new Uint8Array(20),color),'INVALID_ARGUMENT');"
+      "region();const huge=new Float32Array(21*8);for(let i=0;i<8;i++){huge.set(row,21*i);huge[21*i]=120;huge[21*i+5]=67}"
+      "mustThrow(()=>S.blendEllipsoids(huge,light,material,surface,controls,plane,color),'LIMIT_EXCEEDED');"
+      "plane.fill(NaN);color[0]=0;H.commit()}"
       "}})();";
     if(!eval(script,strlen(script),"blend-contract.js"))return false;
     present(0);if(panel[67*240+120]!=0xf800)return false;
@@ -257,9 +266,16 @@ static bool blend_primitive_contract(void){
     const char *busy="(()=>{try{pocket.kasane.procedural.beginFrame(0)}catch(e){if(e.code==='BUSY')return;throw e}throw Error('missing repair BUSY')})()";
     if(!eval(busy,strlen(busy),"blend-repair.js"))return false;
     present(4);if(!full_reference(4))return false;
+    for(unsigned mode=0;mode<3;mode++){
+        char call[48];snprintf(call,sizeof call,"__blendTest.region(%u);",mode);
+        if(!eval(call,strlen(call),"blend-region.js"))return false;
+        present(5+mode);if(!full_reference(5+mode))return false;
+        const uint16_t left=mode==1?0x001f:0xf800,right=mode==2?0xf800:0x001f;
+        if(panel[67*240+116]!=left||panel[67*240+124]!=right)return false;
+    }
     const char *cleanup="delete globalThis.__blendTest;";
     const bool ok=eval(cleanup,strlen(cleanup),"blend-contract.js");
-    printf("BLEND_PRIMITIVE immutable/validation/budget/ambient-damage/repair %s\n",ok?"PASS":"FAIL");
+    printf("BLEND_PRIMITIVE immutable/validation/budget/ambient-damage/region-snapshot/region-dirty/repair %s\n",ok?"PASS":"FAIL");
     return ok;
 }
 
