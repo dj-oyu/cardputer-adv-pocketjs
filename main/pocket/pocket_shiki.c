@@ -82,24 +82,37 @@ static JSValue js_run(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
  * timed whole, the minimum of seven draws, divided by the 3,200 copies. The
  * SET row is the floor (dispatch and the loop's share) to read the rest
  * against. Values stay put (r1, r2 are never written), so an operand class is
- * the same for every copy. */
-typedef struct { const char *name; uint8_t op,a,b; int32_t imm; uint16_t aux; int32_t r1,r2; } op_case;
+ * the same for every copy.
+ *
+ * The LOOP rows measure END folding (ksn_shiki.c): copies per loop turn,
+ * an inner REPEAT of `inner` turns (0: none), and folding forced off (0) or
+ * on (1) for that registration (-1: the default), all in one binary. The
+ * cost is per copy, the loop's END share included, so the difference between
+ * fold=0 and fold=1 is what one END dispatch costs, spread over the copies. */
+typedef struct { const char *name; uint8_t op,a,b; int32_t imm; uint16_t aux; int32_t r1,r2;
+                 uint8_t copies,inner; int8_t fold; } op_case;
 static const op_case OP_CASES[]={
-    {"SET",KSN_SHIKI_SET,0,0,0,0,5,7},
-    {"ADD",KSN_SHIKI_ADD,1,2,0,0,5,7},
-    {"ADD sat",KSN_SHIKI_ADD,1,2,0,0,0x7fffffff,0x7fffffff},
-    {"SUB",KSN_SHIKI_SUB,1,2,0,0,5,7},
-    {"NEG",KSN_SHIKI_NEG,1,0,0,0,5,7},
-    {"MUL s16 small",KSN_SHIKI_MUL,1,2,0,16,5<<16,7<<16},
-    {"MUL s16 large",KSN_SHIKI_MUL,1,2,0,16,0x12345678,0x7654321},
-    {"MUL s0 sat",KSN_SHIKI_MUL,1,2,0,0,0x7fffffff,0x7fffffff},
-    {"MUL s40",KSN_SHIKI_MUL,1,2,0,40,0x12345678,0x7654321},
-    {"SHIFT +5",KSN_SHIKI_SHIFT,1,0,5,0,0x12345,7},
-    {"SHIFT -5",KSN_SHIKI_SHIFT,1,0,-5,0,0x12345,7},
-    {"SIN",KSN_SHIKI_SIN,1,0,0,0,12345,7},
-    {"ADD.H",KSN_SHIKI_ADD_H,1,2,0,0,1000,2000},
-    {"MUL.H s8",KSN_SHIKI_MUL_H,1,2,0,8,1000,2000},
-    {"SHIFT.H +3",KSN_SHIKI_SHIFT_H,1,0,3,0,1000,7},
+    {"SET",KSN_SHIKI_SET,0,0,0,0,5,7,16,0,-1},
+    {"ADD",KSN_SHIKI_ADD,1,2,0,0,5,7,16,0,-1},
+    {"ADD sat",KSN_SHIKI_ADD,1,2,0,0,0x7fffffff,0x7fffffff,16,0,-1},
+    {"SUB",KSN_SHIKI_SUB,1,2,0,0,5,7,16,0,-1},
+    {"NEG",KSN_SHIKI_NEG,1,0,0,0,5,7,16,0,-1},
+    {"MUL s16 small",KSN_SHIKI_MUL,1,2,0,16,5<<16,7<<16,16,0,-1},
+    {"MUL s16 large",KSN_SHIKI_MUL,1,2,0,16,0x12345678,0x7654321,16,0,-1},
+    {"MUL s0 sat",KSN_SHIKI_MUL,1,2,0,0,0x7fffffff,0x7fffffff,16,0,-1},
+    {"MUL s40",KSN_SHIKI_MUL,1,2,0,40,0x12345678,0x7654321,16,0,-1},
+    {"SHIFT +5",KSN_SHIKI_SHIFT,1,0,5,0,0x12345,7,16,0,-1},
+    {"SHIFT -5",KSN_SHIKI_SHIFT,1,0,-5,0,0x12345,7,16,0,-1},
+    {"SIN",KSN_SHIKI_SIN,1,0,0,0,12345,7,16,0,-1},
+    {"ADD.H",KSN_SHIKI_ADD_H,1,2,0,0,1000,2000,16,0,-1},
+    {"MUL.H s8",KSN_SHIKI_MUL_H,1,2,0,8,1000,2000,16,0,-1},
+    {"SHIFT.H +3",KSN_SHIKI_SHIFT_H,1,0,3,0,1000,7,16,0,-1},
+    {"LOOP16 ADD fold=0",KSN_SHIKI_ADD,1,2,0,0,5,7,16,0,0},
+    {"LOOP16 ADD fold=1",KSN_SHIKI_ADD,1,2,0,0,5,7,16,0,1},
+    {"LOOP4 ADD fold=0",KSN_SHIKI_ADD,1,2,0,0,5,7,4,4,0},
+    {"LOOP4 ADD fold=1",KSN_SHIKI_ADD,1,2,0,0,5,7,4,4,1},
+    {"LOOP1 ADD fold=0",KSN_SHIKI_ADD,1,2,0,0,5,7,1,16,0},
+    {"LOOP1 ADD fold=1",KSN_SHIKI_ADD,1,2,0,0,5,7,1,16,1},
 };
 #define OP_COUNT (sizeof OP_CASES/sizeof OP_CASES[0])
 static void put_inst(uint8_t *b,uint8_t op,uint8_t dst,uint8_t a,uint8_t bb,int32_t imm,uint16_t aux){
@@ -109,17 +122,23 @@ static void put_inst(uint8_t *b,uint8_t op,uint8_t dst,uint8_t a,uint8_t bb,int3
     memcpy(b,w,sizeof w);
 }
 static bool op_case_line(const op_case *c,char *out,size_t n){
-    enum { COPIES=16, TURNS=200, COUNT=COPIES+4 };
-    uint8_t code[12+12*COUNT]={'S','K','I','1',1,0,COUNT,0,0,0,0,0};
+    enum { TURNS=200, MAX=16+6 };
+    const unsigned copies=c->copies,count=copies+4+(c->inner?2u:0u);
+    uint8_t code[12+12*MAX]={'S','K','I','1',1,0,(uint8_t)count,0,0,0,0,0};
     uint8_t *p=code+12;
     put_inst(p,KSN_SHIKI_SET,1,0,0,c->r1,0);p+=12;
     put_inst(p,KSN_SHIKI_SET,2,0,0,c->r2,0);p+=12;
     put_inst(p,KSN_SHIKI_REPEAT,0,0,0,TURNS,0);p+=12;
-    for(unsigned k=0;k<COPIES;k++){put_inst(p,c->op,3,c->a,c->b,c->imm,c->aux);p+=12;}
+    if(c->inner){put_inst(p,KSN_SHIKI_REPEAT,0,0,0,c->inner,0);p+=12;}
+    for(unsigned k=0;k<copies;k++){put_inst(p,c->op,3,c->a,c->b,c->imm,c->aux);p+=12;}
+    if(c->inner){put_inst(p,KSN_SHIKI_END,0,0,0,0,0);p+=12;}
     put_inst(p,KSN_SHIKI_END,0,0,0,0,0);
     ksn_shiki_plan *plan=malloc(sizeof *plan);
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
-    bool ok=plan&&seg&&ksn_shiki_register(code,sizeof code,NULL,0,plan);
+    const bool fold=ksn_shiki_fold_end;
+    if(c->fold>=0)ksn_shiki_fold_end=c->fold;
+    bool ok=plan&&seg&&ksn_shiki_register(code,12+12*count,NULL,0,plan);
+    ksn_shiki_fold_end=fold;
     uint32_t best=UINT32_MAX;
     ksn_shiki_status s=KSN_SHIKI_INVALID;
     for(unsigned r=0;ok&&r<7;r++){
@@ -132,7 +151,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
     free(plan);free(seg);
     if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki %s FAILED %d",c->name,ok?(int)s:-1);
     else snprintf(out,n,"CB shiki %s %ld %ld cy=%.2f",c->name,(long)c->r1,(long)c->r2,
-                  (double)best/(COPIES*TURNS));
+                  (double)best/(copies*TURNS*(c->inner?c->inner:1u)));
     return true;
 }
 static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
