@@ -1,0 +1,6 @@
+app local.fox3d
+option strip-debug
+utility ../lib/ayatsuri_model.js
+clip ../lib/ayatsuri_clip.js
+model fox_face_model.js
+runtime fox_face_runtime.js

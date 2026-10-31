@@ -1,4 +1,6 @@
-# `pocket.shapes` — 平面のベクター描画
+# hone / 互換`pocket.shapes` — 低レイヤー描画
+
+正式な低層名は[hone](hone-ayatsuri.md)。正規入口は`pocket.hone`、旧`pocket.shapes`と同じnamespace/実装を参照する。以下の既存shapes契約・capabilityとoperation名は互換として保持する。ayatsuriのC APIは別の高層であり、ここに同一視しない。
 
 手続き面（`pocket.kasane.procedural`）の、組み立て中のフレームへ、塗りと線を C で描く。点は呼び出し側の型付き配列に置き、番号で指す（フレームごとに配列を作らない）。設計の経緯は [megademo-shapes.md](../apps/megademo-shapes.md)、実装は `main/pocket/pocket_shape.c`、契約の試験は `tools/kasane_contract/run_pocket_shape.py`。
 
@@ -11,6 +13,7 @@ manifest の `required` か `optional` に `kasane.shapes` があるセッショ
 | `maxPoints` | 1024 | 1 つの配列で指せる点の数 |
 | `maxPolygonPoints` | 256 | 1 つの多角形の頂点の数 |
 | `maxHoles` | 6 | 1 回の塗りで抜く穴、または輪郭を隠す多角形の数 |
+| `maxShadeSamples` | 1024 | `shade` 1 回の配列の標本数 |
 
 ## 点と多角形
 
@@ -71,3 +74,99 @@ Y = (bx·x + by·y + bz·z + bt) / w
 ## 費用（実機、MEGADEMO の WAKE）
 
 1 フレームに `project` 2 回・`fill` 4〜6 回・`outline` 13 回。plan を通していた前の版で JS のターン約 22 ms（同じ絵を JS で描くと約 130 ms）。数値の内訳は [megademo-shapes.md](../apps/megademo-shapes.md)。
+
+## `shade(normals, albedo, thickness, lighting, material, output[, from[, count]])`
+
+材質と照明の小さな標本カーネル。**実装中の拡張**であり、実機性能と最終的な3体の見た目は未検証。画像・frame・描画順・物体名は所有せず、標本ごとの色だけを計算する。既存の `project/fill/outline` の意味は変えない。
+
+| 引数 | 型と長さ | 意味 |
+| --- | --- | --- |
+| normals | Int16Array、3n | 世界座標の法線xyz。SNORM16、各成分−32767..32767。−32768とゼロベクトルは拒否。方向を単位化して使う |
+| albedo | Uint16Array、n | 物体に属する固有色/模様、RGB565 |
+| thickness | Uint8Array、n | 0は薄い、255は厚いというモデルの透過減衰係数。距離の物理単位ではない |
+| lighting | Float32Array、9 | 光へ向く方向xyz、観測者へ向く方向xyz、光RGB。方向各成分−1..1（非ゼロ、単位化）、RGBは0..1 |
+| material | Float32Array、8 | ambient,diffuse,specular,shininess,transmission,透過色RGB。shininessは1..128、他は0..1 |
+| output | 書込み可Uint16Array、n | 出力RGB565。入力とは別配列、またはalbedoと完全に同一のview |
+
+nは0..1024。fromは既定0、countは既定残り全部。いずれも整数で範囲を越えるとLIMIT_EXCEEDED。他の型/長さ/値/重複bufferの違反はINVALID_ARGUMENT。requested rangeの法線を全て検証してから書くので、遅い標本に不正値があってもoutputは変わらない。範囲外標本は読まず書かない（lighting/materialと配列形の検証は毎回行う）。
+
+全bufferは同期呼出しの間だけ借り、保持・コピーしない。typed viewと値を読み終えてから計算し、その間JS/callbackを実行しない。outputはalbedoの同一viewだけin-placeを許し、他入力とのbyte領域の重複、albedoとの部分重複は拒否する。出力への書込は2×count byteで、返り値はundefined。frameを開く必要はない。
+
+Nは単位法線、Lは光方向、Vは視点方向、Hはnormalize(L+V)。front=max(0,N·L)、back=max(0,−N·L)、thin=1−thickness/255。L+Vがゼロならspec=0、ほかはfront>0のときだけspec=max(0,N·H)^shininess。
+
+各RGB成分の式は次のとおり。baseはRGB565の各成分を31/63/31で割った値。
+
+```
+C = base*(ambient + diffuse*front*lightRGB)
+  + lightRGB*(specular*spec + transmission*thin*back*transmitRGB)
+```
+
+Cを0..1へclampし、31/63/31を掛けて四捨五入する。これは表示RGB上の様式化近似で、線形色空間PBRや物理的内部散乱ではない。厚みは裏側光の減衰だけを変え、表面ツヤの強さを厚みから決めない。world法線の逆転置変換、テクスチャUVから固有色への評価、光/視点変更に応じた再評価範囲はutilityの責務。実際の背景の透過合成や落影はこのカーネルだけでは実現しない。
+
+法線の量子化幅は1/32767（約0.0000305）。位置/変換を整数化するAPIではない。法線再正規化の後に照明を計算する。標本数以外の動的確保はなく、常駐モデルcacheも持たない。既存のWAKE計測をこの追加カーネルのfps保証へ流用しない。
+
+## `gouraudPatch(xy, indices, colorsA, colorsB, mask, holeXY, holeCounts[, triangleCount])`
+
+**実装中のbounded補間パッチ**。既存`shade`で求めた頂点色を三角形内でscreen-linear補間する。光源・カメラ・asset・frame時計は所有せず、全画面buffer/Z buffer/alpha/自動depth sortを追加しない。appがbeginFrame/commitし、他の描画との前後順を決める。一般の自己遮蔽meshやimage warpの完成APIではない。
+
+| 入力 | 型・上限 | 意味 |
+| --- | --- | --- |
+| xy | Float32Array、2n、3≤n≤32 | 最終投影後のxy。各成分は有限、−4096..4096 px |
+| indices | Uint16Array、3t、1≤t≤64 | 0..n−1。各三角形は(bx−ax)(cy−ay)−(by−ay)(cx−ax)>1e−5。Y下向きでは時計回り |
+| colorsA / colorsB | 各Uint16Array、n | 同じ法線・光条件で評価した2固有色のRGB565。法線やalbedo自体をここで照明計算しない |
+| mask | Float32Array、n | 有限、−4096..4096のsigned scalar。補間結果≥0でB、負でAを選択。光の向きから作る値ではない |
+| holeXY | Float32Array、2ΣholeCounts | screen xy、有限−4096..4096。最大2個の厳密凸polygon |
+| holeCounts | Uint8Array、0..2要素、各3..8 | 穴の点数。0要素は穴なし。穴の境界も描かず、巻き方向は両方可 |
+
+省略可能な第8引数`triangleCount`は整数1..t。省略時は全t面、指定時はindicesの先頭3×triangleCount要素だけを検証・snapshotする。固定容量bufferの末尾は読まない。0面は描画を呼ばず、[可視面utility](ayatsuri-visibility.md)の結果で明示的に分岐する。入力bufferの長さ自体は常に1..64個の完全なindex tripleとする。旧7引数の検証は変わらない。
+
+全てordinary ArrayBufferを持つreadonly入力。immutable backingと入力間のaliasは許し、SharedArrayBuffer・detached bufferは拒否する。foreign backingの非整列addressもmemcpyで読む。7入力を検証後、数値snapshotをcandidateへコピーし、呼出し後のJS bufferは保持しない。入力を変更しても提出済みframeへ影響しない。正常呼出し中にJS/callbackを呼ばず、warm反復中のheap確保を要求しない。型・長さ・値・topology違反はINVALID_ARGUMENT、frame予算はLIMIT_EXCEEDED、beginFrame前/再入はBUSY。失敗はcandidate/building/committed frameへ未適用で、同じcandidateへ別の有効描画を続けられる。
+
+整数pixel中心、共有辺はtop-left coverageで1枚だけが所有する。補間はscreen空間で、perspective-correct属性補間ではない。現在の狐試験はorthographic。透視投影へそのまま使ってbody-local模様が必ず固定されると約束しない。単色同士のalbedo境界と、照明の連続性は別の契約である。
+
+geometry coverage・weight・mask選択はbinary64で評価する。RGB565の各5/6/5 bit channel補間だけをfloat32とし、最後にclamp/四捨五入する。wide色参照との同一bitを要求せず、色code誤差とcoverage/mask選択の一致を別に検証する。画素ごとの法線補間・specular再評価ではないため、小さなツヤの精度には限界がある。
+
+packetはheader8 B＋16n B頂点＋6t B index＋68h B穴、最後を10 B segmentへzero paddingする。30頂点/40三角形/2穴なら864 B payload、geometryを含め88 entries。used countのみsnapshotし、Cの最大作業構造1040 Bを全て常駐コピーしない。検証用のreserved/未使用field/paddingはcanonical zero。予算は各triangleの画面内clipped整数bbox面積の**合計**を既存65535 raster stepsへ加え、snapshot entriesも既存resource上限へ加える。穴やcoverageで落ちる画素も含めるが、これはCPU時間の測定値ではない。
+
+これは[狐の共有face比較](../perf/fox-face-gouraud-study.md)から追加した最小hone機能であり、ayatsuriの汎用mesh authoring/native Model形式への組込みは後続。既存の解析楕円体/blend/凸fillと併用する。
+
+
+## `ellipsoid(screen, normalMatrix, lighting, material, surface, texture)`
+
+滑らかな材質と透過合成を検証する、**実装中の解析的パッチ**。投影された単位球を走査帯の各画素で評価する。三角形の平面塗りへ分割せず、全画面bufferも持たない。既存の `fill/outline` と同じ候補frame/順序/上限を使い、appがbeginFrame/commitする。
+
+| 引数 | 型/長さ | 内容 |
+| --- | --- | --- |
+| screen | Float32Array/8 | Ax,Ay,Az,cx,Bx,By,Bz,cy。単位球のlocal点qを画面x=A·q+cx、y=B·q+cyへ写す直交affine投影 |
+| normalMatrix | Float32Array/9 | local球面法線を世界法線へ写す行優先3×3。モデル線形変換の逆転置 |
+| lighting/material | Float32Array/9、8 | shadeと同じ方向・光色・材質の契約 |
+| surface | Uint16Array/5 | colorA565、colorB565、opacity0..255、thickness0..255、pattern0..4 |
+| texture | Float32Array/9 | uScale,uShear,uOffset,vShear,vScale,vOffset,edgeSoftness,bandStart,bandEnd |
+
+screen各成分は有限±4096、normalMatrixは有限±1,000,000で非特異。投影の2行は独立（Gram行列のdet > 1e−6×対角積）。texture affineの6値は有限±4096、softness/start/endは0..1、start<=end。不正型/長さ/値/近特異投影はINVALID_ARGUMENT。offscreenとopacity0は有効な空描画。
+
+球面の身体UVはu=atan2(qx,qz)/(2π)+0.5、v=qy/2+0.5。textureの2×3 affineを掛ける。pattern0はAのみ、1はUの小数部が[start,end]ならB、2はVで同判定、3はfloor(U)+floor(V)の奇数cellならB。pattern4は[localPlane材質領域](material-regions.md)で、texture9の意味とvalidationをmode別に切り替える。画像textureはこのprimitiveでは未対応で、未知patternを黙って無視せず拒否する。模様は球体local座標に固定し、照明と独立に評価する。
+
+screenの2行の擬似逆行列で各画素から球内の点を求め、2行の外積方向にsqrt(1−r²)だけ進めて表面を復元する。normalMatrixと世界視線で前面を選ぶため、負scaleの反転でも背面を描かない。透過減衰はshadeのthinの代わりに `1−thickness/255×sqrt(1−r²)` を使い、光路の長さの近似とする。表面ツヤとは独立で、物理的subsurface/PBRではない。
+
+alphaはopacityにedge coverageを掛け、現在の走査帯の下地へRGB565成分ごとに合成する。coverageは `min(1,(1−r²)/max(edgeSoftness,2/min(radiusX,radiusY)))`。softness0でも輪郭の約1pxを滑らかにする。softnessを増すと柔らかな縁になる。真の体積多重散乱、光の落影、透明物体の自動depth sortは未対応。draw順はapp/utilityが決める。
+
+呼出時に184Bの数値packetをcandidateへコピーして凍結する（詰物もゼロ化）。1パッチは既存frameの20entry=200Bを使い、clipped AABBの画素数をraster予算へ保守的に課金する。フレームごとのJS bufferコピー0とは異なり、この所有権確定のコピーは必要。caller配列を後で変えてもcommit済み画像は変わらない。render帯でpacketをstackへ読み出すが、継続参照・動的確保・全画面cacheはない。packet全byteを帯damage署名へ含めるため、光/材質/模様だけの変更も再描画される。
+
+上限失敗はLIMIT_EXCEEDED、候補frame破棄、呼出の部分結果なし、次beginFrameが必要。実機のrender時間/heap/画質は未検証。ホスト契約試験は `tools/kasane_contract/run_proc_ellipsoid.py` の実renderer O0/O2・全画面/8行帯一致、alpha/光/視点/UV/負scale/特異入力/切れたpacketを扱う。
+
+## `ellipsoidClippedPacked(data, byteOffset, lighting, xy)`
+
+凸の包含領域で解析楕円体を切る汎用低層。`pocket.hone`と既存shapes互換namespaceへ同じ入口を公開する。眼・狐専用の意味、持続するclip stack、深度bufferは持たない。
+
+`data`は通常ArrayBuffer、`byteOffset`は非負整数。既存`ellipsoidPacked`の148B配置（screen32B、normal36B、material32B、texture36B、surface10Bと末尾2B）を同期で読む。`lighting`は通常ArrayBufferを裏付けに持つFloat32Array/9、`xy`も通常Float32Arrayで、長さ0または6/8/10/12/14/16。shared/detached backingは拒否する。非整列のbyteOffsetもmemcpyで読むため許可し、typed pointerへcastしない。
+
+`xy`は画面座標の3〜8頂点。全active座標は有限±4096、重複・同一直線・凹・自己交差を拒否する。全辺に対する全頂点の同側性を検査し、両windingを許す。morphのrest方向維持や可視角度域はutility/modelの責任であり、両winding対応を反転許可へ読み替えない。長さ0は**明示EMPTY**で、clipなしではない。EMPTYでも元の楕円体・材質・光を検証し、不正値を隠さない。有効EMPTYは0append。
+
+各行の凸spanを先に求め、覆われない画素の法線・UV・陰影計算を省く。境界は既存rendererの整数画面標本を含むclosed edge。球面側のsoft edgeは維持するが、clip辺に追加AAはない。surfaceを切った平面のcap、物理交差、頭や頬による自動遮蔽、depth sortにはならない。配置順と前後関係は別途評価する。
+
+新packetは252B、27entry=270B。旧184B/20entry ABIは不変。reserved、未使用頂点、最終paddingはゼロ化し、全描画パラメータを帯署名に含める。clip bboxと楕円体bboxの共通AABBへ保守的にraster課金し、正確なpolygon面積とは呼ばない。
+
+この新入口は入力とsegment/raster総量を**append前**に全検査する。INVALID_ARGUMENT/LIMIT_EXCEEDEDはNOT_APPLIEDでbuilding/count/raster/既存candidateを保ち、後続の有効append/commitを許す。既存ellipsoidの予算失敗時poison契約は変更しない。描画はcandidate所有snapshotを使い、呼出後のJS配列変更を参照しない。present失敗時の旧committed/repairも従来どおり。
+
+低層試験は`run_proc_ellipsoid.py`と`run_pocket_proc_qjs.py --clip-only`。ASan/UBSan、整数境界、padding、EMPTY、shared入力、非整列、snapshot、頂点のみのdamage、IO repair、quota復帰を対象とする。画質・実機時間・stackの受入とは区別する。

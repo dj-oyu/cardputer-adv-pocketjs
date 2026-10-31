@@ -88,7 +88,7 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_workspace -D SDKCONFIG="$PWD/build_workspace/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_workspace -D SDKCONFIG="$PWD/build_workspace/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           idf.py -B build_workspace size > build_workspace/size.log
           python3 - <<'PY'
           import hashlib,json,os,shlex,subprocess
@@ -102,7 +102,7 @@ jobs:
               'CONFIG_SECURE_FLASH_ENC_ENABLED','CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK'))
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
-          for key in ('POCKET_PROBES','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+          for key in ('POCKET_PROBES','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE','KASANE_MEMORY_PHASE_ONLY'):
               assert key+':BOOL=OFF' in cache,key
           baseline=b/'baseline-pocket_proc.c'
           baseline.write_bytes(subprocess.check_output(['git','show',os.environ['BASE_HEAD']+':main/pocket/pocket_proc.c']))

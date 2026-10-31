@@ -10,6 +10,29 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [cloud-native-model-study.md](cloud-native-model-study.md) | host比較C | readonly Model/個体Instanceの共有、160KiBのA/C容量と301frame画像ハッシュ一致、未実機の境界 |
+| [fox-native-face-study.md](fox-native-face-study.md) | host比較・顔の最小実証 | 狐のnative25node/凸clip、160KiB起動比較、表情・角度・画像回帰と未達品質 |
+| [fox-face-v2.md](fox-face-v2.md) | 顔の造形反復 | 眼窩と方向補正、細い口吻、内耳・耳毛、同条件とpitch/背面光の比較 |
+| [fox-face-v4.md](fox-face-v4.md) | 下顔と重複buffer | 同条件4候補の採否、開口の所有copy削減、6回の回収/再生成の同値assertとhost会計 |
+| [material-region-study.md](material-region-study.md) | 同一曲面の固有色 | localPlaneと旧UV/単色の比較、片側狐fixture、native共有資産とhost費用/未達 |
+| [fox-face-v3.md](fox-face-v3.md) | 眼と寿命・会計計測 | 部品数を維持した白輪/突出の改善、6回のrelease/recreate、host会計peakと未分離の内訳 |
+| [cloud-memory-fixture.md](cloud-memory-fixture.md) | 診断次候補 | 明示cold回収、製品A/C有限fixture、guest/ESP/cacheを分ける最小実機計測と未検証 |
+| [fox-native-asset-study.md](fox-native-asset-study.md) | 同画像のnative資産比較 | 同一binaryのm32費用、5因子の採否、FOX SHEET app寿命と未計測境界 |
+| [fox-face-retopology-study.md](fox-face-retopology-study.md) | host可視面と造形比較 | 30頂点46面の表選択/前後順、独立depth参照、160KiB費用と既定不採用判断 |
+| [fox-face-gouraud-study.md](fox-face-gouraud-study.md) | host小実証・未製品置換 | 共有faceの因子分離、bounded Gouraud、眼窩/口吻の残差と160KiB/寿命検証 |
+| [class-owner-registry.md](class-owner-registry.md) | 実機障害・回帰 | 16 owner枠assert、全24 classの登録/破棄、製品/host契約統一と計測範囲 |
+| [cloud-finite-fixture.md](cloud-finite-fixture.md) | ローカル次候補 | Enter/Uで選ぶ外乱・途中retarget・pause/replay有限診断と検証境界 |
+| [cloud-static-asset-study.md](cloud-static-asset-study.md) | ローカル比較・未採用 | 雲の静的定義bin化、所有権、source/packedの実測方法と実機境界 |
+| [dynamic-follow-integration.md](dynamic-follow-integration.md) | ローカル実装・host検証 | 2DOF共通核、数値精度・収束FAIL保持、雲接続と容量試験 |
+| [character-materials.md](character-materials.md) | 実装・host検証 | 3体の材質utility、解析的楕円体、WAKE移行、m32 heap、点描等の比較と未検証範囲 |
+| [character-device-smoke.md](character-device-smoke.md) | 実機担当報告・次期計画 | a30b2a2の機能smoke、測定範囲と未受入、再現可能な画質captureの必要変更 |
+| [character-capture-host.md](character-capture-host.md) | host診断手順 | app所有seek/pause/step、明示ロード診断、固定入力12枚/連番と実機証拠の区別 |
+| [cloud-quality-v1.md](cloud-quality-v1.md) | 視覚改善候補 | 雲1体のbefore/afterと301sample動作画像、造形/材質/演技の変更と未達品質、m32観測 |
+| [cloud-quality-v2.md](cloud-quality-v2.md) | 視覚改善候補 | 顔比率を保つ胴体変形、彩雲の端ごとの流れ、3512529との同条件比較 |
+| [cloud-quality-v3.md](cloud-quality-v3.md) | ローカル視覚改善 | cap境界の陰影補正、柔らかな量感、32a3336との分離比較と回帰 |
+| [cloud-quality-v4.md](cloud-quality-v4.md) | ローカル演技改善 | 喜び/驚きの口角・頬・眉と彩雲の広がり、TRS再利用と160KiB門 |
+| [dynamic-motion-host-study.md](dynamic-motion-host-study.md) | 机上・host試験 | 小LUTと状態付き相互連成、保持近似、非対称/順序不変、算術/bytesと未達収束 |
+| [ayatsuri-transform-core.md](ayatsuri-transform-core.md) | 実装・host検証 | JS/C共通TRS核、失敗時不変、408 vectors/実QuickJS/3体の回帰、m32精度profileと未実測の区別 |
 | [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [pie-opt-plan.md](pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |
 | [flash-size-method.md](flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |

@@ -21,7 +21,8 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     binary = OUT / "test_pocket_shape"
     sources = [*(QJS / n for n in ("dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c", "quickjs-vm.c")),
-               ROOT / "main/pocket/pocket_shape.c", ROOT / "tools/hostshim/pocket_api_stub.c",
+               ROOT / "main/pocket/pocket_shape.c", ROOT / "main/ayatsuri/ayatsuri_model.c", ROOT / "main/ayatsuri/ayatsuri_visibility.c", ROOT / "main/pocket/pocket_ayatsuri_assets.c",
+               ROOT / "main/ui/kasane/ksn_procedural.c", ROOT / "tools/hostshim/pocket_api_stub.c",
                ROOT / "tools/kasane_contract/test_pocket_shape.c"]
     subprocess.run([cc, "-std=gnu11", "-O1", "-g", "-ffp-contract=off", "-fsanitize=address,undefined",
                     "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE", "-I", str(QJS), "-I", str(ROOT / "main/pocket"),

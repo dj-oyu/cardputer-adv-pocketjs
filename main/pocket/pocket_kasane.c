@@ -136,10 +136,10 @@ static JSClassID tx_class, modal_class, ref_class, template_class;
 static JSClassID instance_class, ticket_class, image_class, animation_class;
 static JSClassID schema_class;
 static JSClassID source_cap_class;
-static JSRuntime *tx_rt, *modal_rt, *ref_rt, *template_rt;
-static JSRuntime *instance_rt, *ticket_rt, *image_rt, *animation_rt;
-static JSRuntime *schema_rt;
-static JSRuntime *source_cap_rt;
+static pocket_class_owner_t tx_owner, modal_owner, ref_owner, template_owner;
+static pocket_class_owner_t instance_owner, ticket_owner, image_owner, animation_owner;
+static pocket_class_owner_t schema_class_owner;
+static pocket_class_owner_t source_cap_owner;
 typedef struct {
     ksn_source_registry *registry;
     ksn_source_handle handle;
@@ -1606,7 +1606,7 @@ typedef struct {
     bool pending,pending_replace,dirty,rebuild,running;
 } kasane_scene;
 static JSClassID scene_class;
-static JSRuntime *scene_rt;
+static pocket_class_owner_t scene_owner;
 
 static void scene_set(JSContext *ctx,JSValue *slot,JSValue value) {
     JSValue old=*slot;*slot=value;JS_FreeValue(ctx,old);
@@ -2716,7 +2716,7 @@ static const JSCFunctionListEntry functions[]={
     JS_CFUNC_DEF("inputScope",0,js_input_scope),
 };
 
-static bool register_class(JSContext *ctx, JSClassID *id, JSRuntime **owner,
+static bool register_class(JSContext *ctx, JSClassID *id, pocket_class_owner_t *owner,
                            const JSClassDef *def) {
     JSRuntime *rt=JS_GetRuntime(ctx);
     if(pocket_api_class_ready(rt,owner,id)) return true;
@@ -2761,16 +2761,16 @@ static bool animation_proto(JSContext *ctx) {
 static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     /* Instance and animation prototypes are built on first use (above). */
-    if(!register_class(ctx,&tx_class,&tx_rt,&tx_def)||
-       !register_class(ctx,&modal_class,&modal_rt,&modal_def)||
-       !register_class(ctx,&ref_class,&ref_rt,&ref_def)||
-       !register_class(ctx,&instance_class,&instance_rt,&instance_def)||
-       !register_class(ctx,&animation_class,&animation_rt,&animation_def)||
-       !register_class(ctx,&template_class,&template_rt,&template_def)||
-       !register_class(ctx,&image_class,&image_rt,&image_def)||
-       !register_class(ctx,&ticket_class,&ticket_rt,&ticket_def)||
-       !register_class(ctx,&scene_class,&scene_rt,&scene_def)||
-       !register_class(ctx,&schema_class,&schema_rt,&schema_def)) return ESP_ERR_NO_MEM;
+    if(!register_class(ctx,&tx_class,&tx_owner,&tx_def)||
+       !register_class(ctx,&modal_class,&modal_owner,&modal_def)||
+       !register_class(ctx,&ref_class,&ref_owner,&ref_def)||
+       !register_class(ctx,&instance_class,&instance_owner,&instance_def)||
+       !register_class(ctx,&animation_class,&animation_owner,&animation_def)||
+       !register_class(ctx,&template_class,&template_owner,&template_def)||
+       !register_class(ctx,&image_class,&image_owner,&image_def)||
+       !register_class(ctx,&ticket_class,&ticket_owner,&ticket_def)||
+       !register_class(ctx,&scene_class,&scene_owner,&scene_def)||
+       !register_class(ctx,&schema_class,&schema_class_owner,&schema_def)) return ESP_ERR_NO_MEM;
     /* Handles with no methods, and scenes (whose methods are own properties),
      * inherit Object.prototype directly instead of each owning an empty object. */
     JSValue plain=JS_NewObject(ctx);
@@ -2823,7 +2823,7 @@ JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *regi
        registry->entries[handle.index].generation!=handle.generation)
         return throw_result(ctx,KSN_STALE,op);
     if(!ensure_state(ctx,op))return JS_EXCEPTION;
-    if(!register_class(ctx,&source_cap_class,&source_cap_rt,&source_cap_def))
+    if(!register_class(ctx,&source_cap_class,&source_cap_owner,&source_cap_def))
         return throw_result(ctx,KSN_OOM,op);
     JSValue proto=JS_GetClassProto(ctx,source_cap_class);
     if(JS_IsNull(proto)){

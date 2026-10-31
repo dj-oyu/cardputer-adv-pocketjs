@@ -9,6 +9,36 @@ const throws = (f, code, what) => {
 };
 const P = new Float32Array(64), D = new Float32Array(64);
 const put = (a, i, pts) => pts.forEach((p, k) => { a[2 * (i + k)] = p[0]; a[2 * (i + k) + 1] = p[1]; });
+eq(hone, shapes, 'hone and legacy shapes have one namespace/owner');
+eq(hone.ellipsoid, shapes.ellipsoid, 'hone shares native methods');
+
+// The framework bridge shares its C TRS evaluator; drawing remains hone's job.
+{
+  const pose=new Float32Array([1,2,3,0,0,0,2,3,4]), out=new Float32Array(12);
+  ayatsuri.compose(pose,null,out);
+  eq(out.join(','),'2,0,0,1,0,3,0,2,0,0,4,3','C root pose');
+  const child=new Float32Array([1,2,3,0,0,0,1,1,1]);
+  ayatsuri.compose(child,out,out);
+  eq(out.join(','),'2,0,0,3,0,3,0,8,0,0,4,15','C parent/output alias');
+  const memory=new Float32Array(16), sharedPose=memory.subarray(0,9), sharedOut=memory.subarray(4);
+  sharedPose.set(pose);ayatsuri.compose(sharedPose,undefined,sharedOut);
+  eq(sharedOut.join(','),'2,0,0,1,0,3,0,2,0,0,4,3','C overlapping JS views snapshot inputs');
+  out.fill(37);const previous=out.join(',');
+  pose[6]=0;throws(()=>ayatsuri.compose(pose,null,out),'INVALID_ARGUMENT','C zero scale');
+  eq(out.join(','),previous,'invalid C input leaves output unchanged');pose[6]=2;
+  const parent=new Float32Array([3e38,0,0,0,0,1,0,0,0,0,1,0]);
+  throws(()=>ayatsuri.compose(pose,parent,out),'LIMIT_EXCEEDED','C float32 overflow');
+  eq(out.join(','),previous,'C overflow leaves every output byte unchanged');
+  parent[0]=NaN;throws(()=>ayatsuri.compose(pose,parent,out),'INVALID_ARGUMENT','C nonfinite parent');
+  throws(()=>ayatsuri.compose(new Float32Array(8),null,out),'INVALID_ARGUMENT','C short pose');
+  throws(()=>ayatsuri.compose(pose,null,new Float64Array(12)),'INVALID_ARGUMENT','C narrow output');
+  if(typeof out.buffer.sliceToImmutable==='function'){
+    const readonly=new Float32Array(out.buffer.sliceToImmutable());
+    throws(()=>ayatsuri.compose(pose,null,readonly),'INVALID_ARGUMENT','C readonly output');
+  }
+  ayatsuri.compose(child,null,out);
+  eq(out[3],1,'C evaluation recovers without hidden state');
+}
 
 // project: x, y over w; w <= 0 gives NaN; ranges; Float32Array only.
 {
@@ -87,3 +117,76 @@ eq(__segs(), '', 'rolled back');
 throws(() => shapes.fill(P, [0, 4], [], 1), 'BUSY', 'frame abandoned until beginFrame');
 __begin(); __limit(4096);
 eq(before, 5, 'the ellipse again');
+
+// shade: body albedo is independent of light/view, and only the requested
+// output range changes. This kernel never needs an open procedural frame.
+{
+  const N = new Int16Array([0, 0, 32767, 32767, 0, 0, 0, 0, -32767]);
+  const A = new Uint16Array([0xf800, 0x07e0, 0x001f]);
+  const T = new Uint8Array([0, 128, 255]);
+  const L = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1, 1]);
+  const M = new Float32Array([0, 1, 0, 16, 0, 1, 0.5, 0.25]);
+  const O = new Uint16Array(3);
+  shapes.shade(N, A, T, L, M, O);
+  eq(O[0], 0xf800, 'front diffuse red'); eq(O[1], 0, 'side diffuse black');
+  eq(O[2], 0, 'back diffuse black'); eq(A[1], 0x07e0, 'albedo unchanged');
+  M[0] = 1; M[1] = 0;
+  shapes.shade(N, A, T, L, M, O);
+  eq(O.join(','), A.join(','), 'ambient returns body colours at every orientation');
+  O.fill(0x1234); M[0] = 0; M[1] = 1;
+  shapes.shade(N, A, T, L, M, O, 1, 1);
+  eq(O.join(','), '4660,0,4660', 'partial range only');
+  shapes.shade(N, A, T, L, M, O, 3, 0);
+  eq(O.join(','), '4660,0,4660', 'empty final range');
+  throws(() => shapes.shade(N, A, T, L, M, O, 3, 1), 'LIMIT_EXCEEDED', 'shade range');
+  const n2 = new Int16Array([0, 0, 32767]);
+  const a2 = new Uint16Array([0]); const t2 = new Uint8Array([0]); const o2 = new Uint16Array(1);
+  M[1] = 0; M[2] = 1;
+  shapes.shade(n2, a2, t2, L, M, o2);
+  eq(o2[0], 0xffff, 'front broad specular');
+  L[3] = 1; L[5] = 0; M[3] = 4;
+  shapes.shade(n2, a2, t2, L, M, o2);
+  eq(o2[0] < 0xffff && o2[0] > 0, true, 'view moves highlight');
+  L[0] = 0; L[2] = -1; L[3] = 0; L[5] = 1;
+  M[2] = 0; M[4] = 1; M[5] = 1; M[6] = 0; M[7] = 0;
+  shapes.shade(n2, a2, t2, L, M, o2);
+  eq(o2[0], 0xf800, 'thin warm back transmission');
+  t2[0] = 255;
+  shapes.shade(n2, a2, t2, L, M, o2);
+  eq(o2[0], 0, 'thick sample suppresses transmission');
+  // Specular strength is independent of thickness, not a thick-skin rule.
+  L[2] = 1; M[2] = 1;
+  shapes.shade(n2, a2, t2, L, M, o2);
+  eq(o2[0], 0xffff, 'thickness does not determine specular');
+  const inPlace = new Uint16Array([0xf800, 0x07e0, 0x001f]);
+  M[0] = 1; M[2] = 0; M[4] = 0;
+  shapes.shade(N, inPlace, T, L, M, inPlace);
+  eq(inPlace.join(','), A.join(','), 'exact albedo alias supported');
+  const raw = new ArrayBuffer(12), overlapN = new Int16Array(raw), overlapO = new Uint16Array(raw, 2, 2);
+  overlapN.set([0, 0, 32767, 0, 0, 32767]);
+  throws(() => shapes.shade(overlapN, new Uint16Array(2), new Uint8Array(2), L, M, overlapO),
+    'INVALID_ARGUMENT', 'overlapping normals/output refused');
+  O.fill(0x1234); const badN = new Int16Array(N); badN[6] = badN[7] = badN[8] = 0;
+  throws(() => shapes.shade(badN, A, T, L, M, O), 'INVALID_ARGUMENT', 'late zero normal');
+  eq(O.join(','), '4660,4660,4660', 'invalid shade is atomic');
+  shapes.shade(badN, A, T, L, M, O, 0, 1);
+  eq(O[0], 0xf800, 'unrequested bad normals do not prevent a local update');
+  const offsetsN = new Int16Array(9); offsetsN.set([0, 0, 32767], 3);
+  const offsetsO = new Uint16Array(3); offsetsO.fill(0x1234);
+  shapes.shade(offsetsN.subarray(3, 6), A.subarray(0, 1), T.subarray(0, 1), L, M,
+    offsetsO.subarray(1, 2));
+  eq(offsetsO.join(','), '4660,63488,4660', 'typed view byte offsets respected');
+  const tinyL = new Float32Array(L); tinyL[2] = 1e-40;
+  shapes.shade(N, A, T, tinyL, M, O);
+  eq(O.join(','), A.join(','), 'nonzero subnormal light is normalized');
+  badN[8] = -32768;
+  throws(() => shapes.shade(badN, A, T, L, M, O), 'INVALID_ARGUMENT', 'SNORM reserved minimum');
+  throws(() => shapes.shade(new Float32Array(9), A, T, L, M, O), 'INVALID_ARGUMENT', 'normal narrow type');
+  throws(() => shapes.shade(N, A, new Uint8Array(2), L, M, O), 'INVALID_ARGUMENT', 'thickness length');
+  M[3] = NaN;
+  throws(() => shapes.shade(N, A, T, L, M, O), 'INVALID_ARGUMENT', 'material finite');
+  M[3] = 16; L[0] = L[1] = L[2] = 0;
+  throws(() => shapes.shade(N, A, T, L, M, O), 'INVALID_ARGUMENT', 'nonzero light');
+  throws(() => shapes.shade(new Int16Array(3075), new Uint16Array(1025), new Uint8Array(1025), L, M,
+    new Uint16Array(1025)), 'LIMIT_EXCEEDED', 'shade sample cap');
+}

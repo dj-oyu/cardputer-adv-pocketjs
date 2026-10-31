@@ -491,6 +491,18 @@ extern const char derby_watch_start[] asm("_binary_derby_watch_js_start");
 extern const char derby_watch_end[] asm("_binary_derby_watch_js_end");
 extern const char big_wave_start[] asm("_binary_big_wave_js_start");
 extern const char big_wave_end[] asm("_binary_big_wave_js_end");
+extern const char character_lab_start[] asm("_binary_character_lab_js_start");
+extern const char character_lab_end[] asm("_binary_character_lab_js_end");
+extern const char cloud_probe_start[] asm("_binary_cloud_probe_js_start");
+extern const char cloud_probe_end[] asm("_binary_cloud_probe_js_end");
+extern const char cloud_memory_start[] asm("_binary_cloud_memory_js_start");
+extern const char cloud_memory_end[] asm("_binary_cloud_memory_js_end");
+extern const char fox_face_start[] asm("_binary_fox_face_js_start");
+extern const char fox_face_end[] asm("_binary_fox_face_js_end");
+extern const char fox_sheet_start[] asm("_binary_fox_sheet_js_start");
+extern const char fox_sheet_end[] asm("_binary_fox_sheet_js_end");
+extern const char cloud_act_start[] asm("_binary_cloud_act_js_start");
+extern const char cloud_act_end[] asm("_binary_cloud_act_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 extern const char pixel_lab_probe_start[] asm("_binary_pixel_lab_probe_js_start");
 extern const char pixel_lab_probe_end[] asm("_binary_pixel_lab_probe_js_end");
@@ -624,6 +636,12 @@ static bool home_key(const keystroke_t *k) {
                            (size_t)(derby_watch_end-derby_watch_start-1)); break;
         case 13: begin_run("local.bigwave",NULL,0,big_wave_start,
                            (size_t)(big_wave_end-big_wave_start-1)); break;
+        case 14: begin_run("local.character",NULL,0,character_lab_start,
+                           (size_t)(character_lab_end-character_lab_start-1)); break;
+        case 15: begin_run("local.cloud",NULL,0,cloud_act_start,
+                           (size_t)(cloud_act_end-cloud_act_start-1)); break;
+        case 16: begin_run("local.cloudprobe",NULL,0,cloud_probe_start,
+                           (size_t)(cloud_probe_end-cloud_probe_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
@@ -650,12 +668,18 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.lcdcatch","LCD CATCH",lcd_catch_start,lcd_catch_end,5),
     NATIVE_APP("local.derby","DERBY WATCH",derby_watch_start,derby_watch_end,5),
     NATIVE_APP("local.bigwave","BIG WAVE",big_wave_start,big_wave_end,5),
+    NATIVE_APP("local.character","CHARACTER LAB",character_lab_start,character_lab_end,5),
     NATIVE_APP("local.player","MUSIC PLAYER (host launch unsupported)",NULL,NULL,0),
     NATIVE_APP("local.playground","PLAYGROUND (dynamic source unsupported)",NULL,NULL,0),
     NATIVE_APP("local.tutorial","TUTORIAL (dynamic source unsupported)",NULL,NULL,0),
     NATIVE_APP("local.deskclock","DESK CLOCK (overlay unsupported)",NULL,NULL,0),
     NATIVE_APP("local.work","WORK (dynamic source unsupported)",NULL,NULL,0),
     NATIVE_APP("local.vmprobe","VM PROBE (typed workloads unsupported)",NULL,NULL,0),
+    NATIVE_APP("local.cloud","CLOUD ACT",cloud_act_start,cloud_act_end,5),
+    NATIVE_APP("local.cloudprobe","CLOUD PROBE",cloud_probe_start,cloud_probe_end,5),
+    NATIVE_APP("local.cloudmem","CLOUD MEMORY",cloud_memory_start,cloud_memory_end,5),
+    NATIVE_APP("local.fox3d","FOX FACE",fox_face_start,fox_face_end,5),
+    NATIVE_APP("local.foxsheet","FOX SHEET",fox_sheet_start,fox_sheet_end,5),
 };
 static unsigned native_catalog_count(void) { return sizeof(native_apps)/sizeof(native_apps[0]); }
 static uint32_t native_generation;

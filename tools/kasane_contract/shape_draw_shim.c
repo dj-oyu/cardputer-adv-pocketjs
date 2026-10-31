@@ -4,7 +4,31 @@
  * harnesses define it as SHAPE_DRAW_JS (shape_draw_shim.h).
  * docs/api/shapes.md. */
 #include "quickjs.h"
+#include "pocket_api.h"
 #include "pocket_proc.h"
+
+JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"Gouraud patches need a native renderer",false,NULL);
+}
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch,
+        const ksn_proc_blend_region_mask *mask){
+    (void)patch;(void)mask;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"blended regions unavailable in this harness",false,NULL);
+}
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"blended surfaces need a native renderer",false,NULL);
+}
+
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches need a native renderer",false,NULL);
+}
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"clipped patches need a native renderer",false,NULL);
+}
 
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
     (void)ctx;(void)op;*mark=(pocket_proc_mark){0};return JS_UNDEFINED;

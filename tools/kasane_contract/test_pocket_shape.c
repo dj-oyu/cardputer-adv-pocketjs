@@ -32,6 +32,27 @@ JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int 
     return JS_UNDEFINED;
 }
 void pocket_proc_native_rollback(const pocket_proc_mark *mark){nsegs=mark->count;}
+JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"Gouraud patches need a native renderer",false,NULL);
+}
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch,
+        const ksn_proc_blend_region_mask *mask){
+    (void)patch;(void)mask;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"blended regions unavailable in this harness",false,NULL);
+}
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"blended surfaces need the renderer harness",false,NULL);
+}
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"analytic patches need the renderer harness",false,NULL);
+}
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch){
+    (void)patch;
+    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,op,"clipped patches need the renderer harness",false,NULL);
+}
 
 /* __segs(): the recorded segments as "x0,y0,x1,y1,c;..." and cleared;
  * __limit(n) caps them; __begin() opens a frame again. */
@@ -59,9 +80,8 @@ static char *read_file(const char *path,size_t *size){
 int main(int argc,char **argv){
     REQUIRE(argc==2);
     JSRuntime *rt=JS_NewRuntime();JSContext *ctx=JS_NewContext(rt);
-    JSValue g=JS_GetGlobalObject(ctx),shapes=JS_NewObject(ctx);
-    REQUIRE(pocket_shape_fill(ctx,shapes,NULL)==ESP_OK);
-    JS_SetPropertyStr(ctx,g,"shapes",shapes);
+    REQUIRE(pocket_shape_install(ctx,NULL)==ESP_OK);
+    JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__segs",JS_NewCFunction(ctx,js_segs,"__segs",0));
     JS_SetPropertyStr(ctx,g,"__limit",JS_NewCFunction(ctx,js_limit,"__limit",1));
     JS_SetPropertyStr(ctx,g,"__begin",JS_NewCFunction(ctx,js_begin,"__begin",0));

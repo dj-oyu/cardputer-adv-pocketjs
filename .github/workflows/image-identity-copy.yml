@@ -101,13 +101,14 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig build
+          idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           ccache -s || true
           git rev-parse HEAD > build_image/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_image/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_image/CMakeCache.txt
           grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_image/CMakeCache.txt
           grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=OFF' build_image/CMakeCache.txt
+          grep -qx 'KASANE_MEMORY_PHASE_ONLY:BOOL=OFF' build_image/CMakeCache.txt
           python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_image/expected-partition.bin
           cmp build_image/expected-partition.bin build_image/partition_table/partition-table.bin
           python -c 'from pathlib import Path; e=Path("build_image/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e; c=Path("build_image/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
@@ -185,12 +186,13 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig build
+          idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           ccache -s || true
           git rev-parse HEAD > build_diag/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_diag/sdkconfig
           grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_diag/CMakeCache.txt
           grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_diag/CMakeCache.txt
+          grep -qx 'KASANE_MEMORY_PHASE_ONLY:BOOL=OFF' build_diag/CMakeCache.txt
           python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_diag/expected-partition.bin
           cmp build_diag/expected-partition.bin build_diag/partition_table/partition-table.bin
           python -c 'from pathlib import Path; e=Path("build_diag/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e and b"DERBY_APP_DIAG START workload=" in e and b"DERBY_APP_DIAG EXIT" in e; c=Path("build_diag/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'

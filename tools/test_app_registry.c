@@ -79,6 +79,34 @@ static void test_admission(void) {
     CHECK(megademo && !strcmp(megademo->title,"MEGADEMO"));
     CHECK(megademo && !strcmp(megademo->entry,"apps/kasane/proc_megademo.js"));
     CHECK(megademo && megademo->works==APP_WORKS_NONE);
+    const app_manifest_t *character=app_registry_find("local.character");
+    CHECK(character && !strcmp(character->title,"CHARACTER LAB"));
+    CHECK(character && !strcmp(character->entry,"apps/character/character_lab.js"));
+    CHECK(character && character->works==APP_WORKS_NONE);
+    missing="kasane.shapes";
+    CHECK(!app_registry_admit(character,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(!strcmp(reason,"NEEDS kasane.shapes"));
+    const app_manifest_t *cloud=app_registry_find("local.cloud");
+    CHECK(cloud && !strcmp(cloud->title,"CLOUD ACT"));
+    CHECK(cloud && !strcmp(cloud->entry,"apps/cloud/cloud_act.js"));
+    CHECK(cloud && cloud->works==APP_WORKS_NONE);
+    CHECK(!app_registry_admit(cloud,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(!strcmp(reason,"NEEDS kasane.shapes"));
+    missing=NULL;
+    CHECK(app_registry_admit(cloud,"0.1.0",supported,NULL,reason,sizeof reason));
+    const app_manifest_t *probe=app_registry_find("local.cloudprobe");
+    CHECK(probe && !strcmp(probe->title,"CLOUD PROBE"));
+    CHECK(probe && !strcmp(probe->entry,"apps/cloudprobe/cloud_probe.js"));
+    CHECK(app_registry_admit(probe,"0.1.0",supported,NULL,reason,sizeof reason));
+    const app_manifest_t *memory=app_registry_find("local.cloudmem");
+    CHECK(memory && !strcmp(memory->entry,"apps/cloudmem/cloud_memory.js"));
+    CHECK(memory && !strcmp(memory->title,"CLOUD MEMORY"));
+    CHECK(app_registry_admit(memory,"0.1.0",supported,NULL,reason,sizeof reason));
+    const app_manifest_t *fox=app_registry_find("local.fox3d");
+    CHECK(fox && !strcmp(fox->entry,"apps/fox3d/fox_face.js"));
+    CHECK(fox && !strcmp(fox->title,"FOX FACE"));
+    CHECK(fox && fox->works==APP_WORKS_NONE);
+    CHECK(app_registry_admit(fox,"0.1.0",supported,NULL,reason,sizeof reason));
     // The games: one row each, started from the home menu, no works library.
     static const struct { const char *id, *title, *entry; } games[]={
         {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},

@@ -117,6 +117,12 @@ void app_stop(void);
 // Owner task teardown proof; does not infer completion from console output.
 bool app_guest_present(void);
 uint32_t app_guest_generation(void);
+#ifdef KASANE_MEGADEMO_TRACE
+struct JSContext;
+/* Owner-only diagnostic checkpoint. Samples counters/heap boundaries without
+ * GC or a heap/object walk; emits one bounded line, no JS result allocation. */
+esp_err_t app_memory_mark(struct JSContext *context, const char *label);
+#endif
 void app_request_stop(void);
 // Swap the predicate QuickJS's single interrupt slot answers with
 // (docs/vm/vm-L1-design.md sec.5.3). The registration itself lives in the guest;

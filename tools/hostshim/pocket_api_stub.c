@@ -13,6 +13,12 @@
 static const pocket_capability_t *caps[16];
 static int ncaps;
 
+JSValue pocket_api_root(JSContext *ctx) {
+    JSValue global=JS_GetGlobalObject(ctx),root=JS_GetPropertyStr(ctx,global,"pocket");
+    if(JS_IsObject(root)){JS_FreeValue(ctx,global);return root;}
+    JS_FreeValue(ctx,root);return global;
+}
+
 esp_err_t pocket_api_register(const pocket_capability_t *capability) {
     for(int i=0;i<ncaps;i++)
         if(!strcmp(caps[i]->name,capability->name)) { caps[i]=capability; return ESP_OK; }
@@ -28,27 +34,16 @@ const pocket_capability_t *host_capability(const char *name) {
 static void host_class_owners_forget(void);
 void host_capabilities_clear(void) { ncaps=0; host_class_owners_forget(); }
 
-// The firmware's copy lives in pocket_api.c and remembers every owner, so that
-// the end of a session can clear them: a new runtime can land on the address a
-// freed one had, and a bare pointer compare then claims a class is registered
-// in a table that has never seen it. This test builds and frees runtimes in a
-// loop, which is that case exactly, so it keeps the same bookkeeping -- the
-// forgetting hangs off host_capabilities_clear(), the stub's session end.
-static JSRuntime **class_owners[16];
-static unsigned class_owner_count;
-
-bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
-    if(*owner==rt) return true;
-    *id=0;
-    *owner=rt;
-    for(unsigned i=0;i<class_owner_count;i++) if(class_owners[i]==owner) return false;
-    if(class_owner_count<sizeof(class_owners)/sizeof(class_owners[0]))
-        class_owners[class_owner_count++]=owner;
-    return false;
+// Use the production registry implementation; never drop a lazy class owner.
+static pocket_class_registry_t class_registry;
+bool pocket_api_class_ready(JSRuntime *rt,pocket_class_owner_t *owner,JSClassID *id) {
+    return pocket_class_registry_ready(&class_registry,rt,owner,id);
 }
-
+void pocket_api_class_forget(pocket_class_owner_t *owner) {
+    pocket_class_registry_forget(&class_registry,owner);
+}
 static void host_class_owners_forget(void) {
-    for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
+    pocket_class_registry_reset(&class_registry);
 }
 
 bool pocket_api_supported(const char *name) { return host_capability(name)!=NULL; }

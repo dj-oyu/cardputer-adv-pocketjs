@@ -191,7 +191,7 @@ static int64_t deadline_from(const net_options_t *o, int32_t fallback_ms) {
 // ------------------------------------------------------------------- state
 
 static JSClassID lease_class, response_class;
-static JSRuntime *lease_rt, *response_rt;
+static pocket_class_owner_t lease_owner, response_owner;
 
 // The lease. One at a time, and a second acquire of the same profile shares it
 // rather than opening another, which is what section 11 means by reference
@@ -1481,11 +1481,11 @@ static esp_err_t build_net(JSContext *ctx, JSValueConst ns, void *user) {
     // It does not -- the counter is per runtime -- and pocket_api.h now carries
     // the whole of what that cost. A session that never reaches here still
     // needs neither.
-    if(!pocket_api_class_ready(rt,&lease_rt,&lease_class)) {
+    if(!pocket_api_class_ready(rt,&lease_owner,&lease_class)) {
         JS_NewClassID(rt,&lease_class);
         if(JS_NewClass(rt,lease_class,&lease_class_def)<0) return ESP_FAIL;
     }
-    if(!pocket_api_class_ready(rt,&response_rt,&response_class)) {
+    if(!pocket_api_class_ready(rt,&response_owner,&response_class)) {
         JS_NewClassID(rt,&response_class);
         if(JS_NewClass(rt,response_class,&response_class_def)<0) return ESP_FAIL;
     }

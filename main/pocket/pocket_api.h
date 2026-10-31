@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "quickjs.h"
+#include "pocket_class_registry.h"
 
 // globalThis.pocket — the common JS API surface described in docs/api/common-api.md.
 //
@@ -322,7 +323,15 @@ void pocket_api_sub_mark(pocket_sub_table_t *table, JSRuntime *rt,
 // followed by a USB diagnostic. So every owner handed in here is remembered,
 // and pocket_api_reset(), which app_stop() calls before the guest is
 // destroyed, forgets them all. Within one session the pointer is sound.
-bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id);
+// The zero-initialized owner descriptor must stay alive until reset/forget;
+// surface statics supply their own links, so there is no fixed owner capacity
+// or registration allocation. Only the owner task may touch this registry.
+// The process has one active guest; simultaneous runtimes cannot share these
+// static class IDs. Reset preserves IDs until old-runtime finalizers retire.
+bool pocket_api_class_ready(JSRuntime *rt, pocket_class_owner_t *owner, JSClassID *id);
+// Forget one surface at its teardown boundary; the descriptor may be reused.
+// This does not destroy a JS class, change its ID, or free a runtime.
+void pocket_api_class_forget(pocket_class_owner_t *owner);
 
 // --------------------------------------------------------- async completions
 //

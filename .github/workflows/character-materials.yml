@@ -1,0 +1,332 @@
+name: Character materials
+on:
+  pull_request:
+    paths:
+      - 'apps/character/**'
+      - 'apps/cloud/**'
+      - 'apps/cloudprobe/**'
+      - 'apps/cloudmem/**'
+      - 'apps/fox3d/**'
+      - 'apps/foxsheet/**'
+      - 'apps/lib/ayatsuri_clip.js'
+      - 'apps/lib/ayatsuri_local_plane.js'
+      - 'components/pocketjs_guest/src/guest.c'
+      - 'components/pocketjs_guest/include/pocketjs/guest.h'
+      - 'main/CMakeLists.txt'
+      - 'tools/check_memory_build_profile.py'
+      - 'main/app_session.*'
+      - 'main/pocket/pocket_app.c'
+      - 'main/pocket/pocket_api.*'
+      - 'main/pocket/pocket_class_registry.h'
+      - 'main/pocket/app_registry.c'
+      - 'tools/test_app_registry.c'
+      - 'apps/lib/ayatsuri_follow.js'
+      - 'apps/kasane/megademo_wake.js'
+      - 'apps/kasane/chunks.txt'
+      - 'main/pocket/pocket_shape.*'
+      - 'main/pocket/pocket_ayatsuri_follow.inc'
+      - 'main/pocket/pocket_ayatsuri_model.inc'
+      - 'main/pocket/pocket_ayatsuri_assets.*'
+      - 'apps/lib/ayatsuri_model.js'
+      - 'main/pocket/pocket_proc.*'
+      - 'main/ui/kasane/ksn_procedural.*'
+      - 'main/ayatsuri/**'
+      - 'tools/ayatsuri/**'
+      - 'tools/pocket/**'
+      - 'tools/hostshim/pocket_api_stub.c'
+      - 'tools/character*'
+      - 'tools/character/**'
+      - 'tools/kasane_contract/*character*'
+      - 'tools/kasane_contract/*ellipsoid*'
+      - 'tools/kasane_contract/*fox*'
+      - 'tools/kasane_contract/*gouraud*'
+      - 'tools/kasane_contract/run_pocket_proc_qjs.py'
+      - 'tools/kasane_contract/proc_native_weak.c'
+      - 'tools/kasane_contract/shape_contract.js'
+      - 'tools/kasane_contract/test_pocket_shape.c'
+      - 'tools/kasane_contract/shape_draw_shim.*'
+      - 'tools/kasane_contract/run_pocket_shape.py'
+      - '.github/workflows/character-materials.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+concurrency:
+  group: character-materials-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Visual API and exact WAKE inputs
+        run: |
+          gcc -std=c11 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -I main/text tools/test_app_registry.c main/pocket/app_registry.c -o /tmp/character-app-registry
+          /tmp/character-app-registry
+          python3 tools/ayatsuri/run_transform.py
+          python3 tools/ayatsuri/run_follow.py
+          python3 tools/pocket/run_class_registry.py
+          python3 tools/kasane_contract/run_class_session_order.py
+          node tools/character/test_follow.cjs
+          node tools/character/test_cloud_dynamic.cjs
+          node tools/character/test_cloud_fixture.cjs
+          node tools/character/test_cloud_memory.cjs
+          node tools/character/test_ayatsuri_clip.cjs
+          python3 tools/character/test_fox_lifetime.py
+          node tools/character/test_material_region.cjs
+          python3 tools/character/test_fox_depth.py
+          node tools/character/test_fox_retopology.cjs
+          node tools/character/test_fox_patch.cjs
+          FOX_PATCH_VARIANT=gouraud node tools/character/test_fox_patch.cjs
+          FOX_PATCH_VARIANT=gouraud-socket node tools/character/test_fox_patch.cjs
+          python3 tools/character/test_material_study_inputs.py
+          python3 tools/test_guest_allocator_metrics.py --quickjs
+          node tools/ayatsuri/model/test_pack_model.cjs
+          node tools/ayatsuri/model/builtin_asset.cjs
+          node tools/ayatsuri/model/test_fox_face.cjs
+          gcc -std=c11 -O1 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -I main tools/ayatsuri/model/test_builtin_assets.c main/pocket/pocket_ayatsuri_assets.c main/ayatsuri/ayatsuri_model.c main/ayatsuri/ayatsuri_visibility.c -lm -o /tmp/fox-builtin-assets
+          /tmp/fox-builtin-assets
+          node tools/ayatsuri/model/test_native_scene.cjs
+          python3 tools/ayatsuri/model/run_model_contracts.py
+          python3 tools/ayatsuri/model/run_model_study.py --self-test-manifest
+          python3 tools/ayatsuri/model/run_cloud_memory.py --self-test-inputs
+          node tools/character/transform_oracle.cjs
+          node tools/character_motion_test.cjs
+          node tools/character_wake_oracle.cjs
+          node tools/kasane_contract/test_character_utility.cjs
+          node tools/character/test_lab.cjs
+          python3 tools/character/test_capture_plan.py
+          python3 tools/check_docs.py
+          python3 tools/check_memory_build_profile.py --self-test
+      - name: Actual native contracts and app
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          python3 tools/kasane_contract/run_pocket_shape.py
+          python3 tools/kasane_contract/run_proc_ellipsoid.py
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --gouraud-only --opt 2
+          python3 tools/kasane_contract/run_character_app_host.py --source-plane
+          python3 tools/kasane_contract/run_fox_app_host.py
+          python3 tools/kasane_contract/run_fox_app_host.py --material-study mask-inset --capture-dir .cache/fox-material-asan
+          python3 tools/kasane_contract/run_fox_app_host.py --material-study blend-mask-only --capture-dir .cache/fox-blend-material-asan
+          python3 tools/kasane_contract/run_character_app_host.py --ppm .cache/character-native/frames
+          python3 tools/kasane_contract/run_character_app_host.py --capture-dir .cache/character-capture
+          python3 tools/kasane_contract/run_character_app_host.py --cloud --capture-dir .cache/cloud-capture
+          python3 tools/character/native_contact.py .cache/character-native/frames
+          python3 tools/kasane_contract/run_proc_megademo_scenes.py
+          node tools/character/coverage_study.cjs
+      - name: Device-sized guest heap gate (host, not hardware)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 tools/kasane_contract/run_class_session_order.py --m32
+          python3 tools/ayatsuri/run_transform.py --m32
+          python3 tools/ayatsuri/run_follow.py --m32
+          python3 tools/ayatsuri/model/run_model_contracts.py --m32
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --clip-only --opt 2 --m32
+          python3 tools/kasane_contract/run_pocket_proc_qjs.py --gouraud-only --opt 2 --m32
+          python3 tools/kasane_contract/run_character_app_host.py --source-plane --m32
+          python3 tools/kasane_contract/run_fox_app_host.py --m32 --capture-dir .cache/fox-capture
+          python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-inset --capture-dir .cache/fox-material-m32
+          python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-mask-only --capture-dir .cache/fox-blend-material-m32
+          node tools/character/transform_oracle.cjs
+          CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --m32
+          CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 python3 tools/kasane_contract/run_character_app_host.py --cloud --m32
+          python3 tools/kasane_contract/run_character_app_host.py --cloud --fixture --m32
+          python3 tools/ayatsuri/model/run_model_comparison.py --m32
+          python3 tools/ayatsuri/model/run_cloud_memory.py --m32 --profile DEVICE_SHORT
+          python3 tools/ayatsuri/model/run_cloud_memory.py --m32 --profile HOST_LONG
+          MEGA_HEAP_LIMIT=163840 python3 tools/kasane_contract/run_megademo_app_host.py --m32 --baseline-rev 843496c
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: character-native-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/character-native/frames/
+            .cache/character-capture/
+            .cache/cloud-capture/
+            .cache/native-model-study/ci/
+            .cache/cloud-memory-*/
+            .cache/fox-capture/
+            .cache/fox-app-m32/result.json
+            .cache/fox-app-m32/*.log
+            .cache/fox-material-asan/
+            .cache/fox-material-m32/
+            .cache/fox-app-asan-mask-inset/
+            .cache/fox-app-m32-mask-inset/
+            .cache/fox-blend-material-asan/
+            .cache/fox-blend-material-m32/
+            .cache/fox-app-asan-blend-mask-only/
+            .cache/fox-app-m32-blend-mask-only/
+            .cache/fox-local-plane-assets/
+            .cache/source-plane-render-*/
+            .cache/ayatsuri-model-contracts/
+            .cache/class-owner-regression/
+            .cache/class-session-order/
+            .cache/gouraud-contracts/
+  gouraud:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Same-input native colour interpolation and heap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          gcc -std=c11 -O2 -Wall -Wextra -Werror -fno-fast-math -ffp-contract=off -fsanitize=address,undefined -DAYATSURI_VISIBILITY_ALLOC_TEST -Imain/ayatsuri tools/ayatsuri/test_visibility.c main/ayatsuri/ayatsuri_visibility.c -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free -lm -o /tmp/test_visibility
+          /tmp/test_visibility
+          python3 tools/kasane_contract/run_fox_patch_host.py --variant retopology
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant retopology
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant retopology-clay
+          python3 tools/kasane_contract/run_fox_patch_host.py --variant gouraud-socket
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant baseline
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant gouraud
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant gouraud-socket
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: gouraud-native-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/fox-patch-host/
+            .cache/gouraud-contracts/
+  compiled-fox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Native immutable fox assets and isolated visual factors
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          node tools/ayatsuri/model/export_fox_patch.cjs --check-product
+          node tools/ayatsuri/model/export_fox_patch.cjs
+          python3 tools/character/test_compiled_fox_depth.py
+          python3 tools/kasane_contract/run_fox_sheet_app_host.py
+          python3 tools/kasane_contract/run_fox_sheet_app_host.py --m32
+          python3 tools/kasane_contract/run_fox_patch_host.py --variant compiled-combined
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --compiled-provider --variant retopology
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-eye
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-mask
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-shape
+          python3 tools/kasane_contract/run_fox_patch_host.py --m32 --variant compiled-combined
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          folder=Path('.cache/fox-patch-host/m32')
+          a=json.loads((folder/'retopology/result.json').read_text())
+          b=json.loads((folder/'compiled/result.json').read_text())
+          assert a['passed'] and b['passed'] and a['binary_sha256']==b['binary_sha256']
+          for x,y in zip(a['runs'],b['runs']):
+              assert x['frame_hashes']==y['frame_hashes'] and x['image_sha256']==y['image_sha256']
+              assert y['metrics']['guest_peak']<x['metrics']['guest_peak']<=163840
+          print('COMPILED_FOX_SAME_IMAGE_LOWER_GUEST_PASS')
+          PY
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: compiled-fox-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/fox-patch-host/
+            .cache/fox-compiled-assets/
+            .cache/fox-sheet-app-asan/
+            .cache/fox-sheet-app-m32/
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Product link without flash
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test ! -e build_character
+          idf.py -B build_character -D SDKCONFIG="$PWD/build_character/sdkconfig" build
+          idf.py -B build_character size > build_character/size.log
+          python tools/check_memory_build_profile.py --build-dir build_character --profile normal | tee build_character/profile-verification.log
+          idf.py -B build_character_memory -D SDKCONFIG="$PWD/build_character_memory/sdkconfig" -D IDF_TARGET=esp32s3 -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
+          idf.py -B build_character_memory size > build_character_memory/size.log
+          python tools/check_memory_build_profile.py --build-dir build_character_memory --profile trace | tee build_character_memory/profile-verification.log
+          test ! -e build_character_memory_phase
+          idf.py -B build_character_memory_phase -D SDKCONFIG="$PWD/build_character_memory_phase/sdkconfig" -D KASANE_MEGADEMO_TRACE=ON -D KASANE_MEMORY_PHASE_ONLY=ON build
+          idf.py -B build_character_memory_phase size > build_character_memory_phase/size.log
+          python tools/check_memory_build_profile.py --build-dir build_character_memory_phase --profile phase | tee build_character_memory_phase/profile-verification.log
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: character-firmware-${{ env.SOURCE_HEAD }}
+          path: |
+            build_character/*.bin
+            build_character/*.elf
+            build_character/*.map
+            build_character/*.log
+            build_character/CMakeCache.txt
+            build_character/sdkconfig
+            build_character/compile_commands.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: character-memory-firmware-${{ env.SOURCE_HEAD }}
+          path: |
+            build_character_memory/*.bin
+            build_character_memory/*.elf
+            build_character_memory/*.map
+            build_character_memory/*.log
+            build_character_memory/CMakeCache.txt
+            build_character_memory/sdkconfig
+            build_character_memory/compile_commands.json
+            build_character_memory_phase/*.bin
+            build_character_memory_phase/*.elf
+            build_character_memory_phase/*.map
+            build_character_memory_phase/*.log
+            build_character_memory_phase/CMakeCache.txt
+            build_character_memory_phase/sdkconfig
+            build_character_memory_phase/compile_commands.json

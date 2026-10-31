@@ -40,21 +40,61 @@
  * so JS_SetMemoryLimit() and malloc_size mean what they mean on the device.
  * Blocks are allocated at that length, since QuickJS may use the slack.
  * The current and peak totals also give the peak inside one JS_Eval. */
+#ifdef CHARACTER_MODEL_STUDY
+#define CHARACTER_MEMORY_OBSERVER 1
+/* Link wrapping is invisible to builtin-malloc optimization. These stores
+ * must survive around calls that the compiler otherwise treats as pure. */
+static volatile unsigned study_guest_depth,study_observer_depth;
+static bool study_native_active;
+#define STUDY_GUEST_ENTER (++study_guest_depth)
+#define STUDY_GUEST_LEAVE (--study_guest_depth)
+#else
+#define STUDY_GUEST_ENTER ((void)0)
+#define STUDY_GUEST_LEAVE ((void)0)
+#endif
+#ifdef CHARACTER_MEMORY_OBSERVER
+/* Match this QuickJS build's source-level accounting policy, and verify it
+ * against JS_ComputeMemoryUsage at every live observation checkpoint. */
+#if defined(__APPLE__)
+#define CHARACTER_MALLOC_OVERHEAD 0u
+#else
+#define CHARACTER_MALLOC_OVERHEAD 8u
+#endif
+static size_t character_memory_live_blocks,character_memory_accounted_peak;
+#endif
 typedef struct { size_t n; size_t pad[3]; } pk_hdr;   /* keeps 16 B alignment */
 static size_t cur_bytes,peak_bytes;
 static unsigned long long alloc_calls,alloc_bytes; /* MEGA_SCENESTATS: what frame() allocates */
+static size_t largest_guest_request; /* requested guest allocation, not native free/largest */
 static size_t tlsf_len(size_t n){n=(n+3)&~(size_t)3;return n<12?12:n;}
-static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;}
+static void pk_count(size_t add,size_t sub){
+    cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;
+#ifdef CHARACTER_MEMORY_OBSERVER
+    const size_t accounted=cur_bytes+CHARACTER_MALLOC_OVERHEAD*character_memory_live_blocks;
+    if(accounted>character_memory_accounted_peak)character_memory_accounted_peak=accounted;
+#endif
+}
 static void *pk_malloc(void *o,size_t n){(void)o;if(!n)return NULL;
-    pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;pk_count(tlsf_len(n),0);
+    if(n>largest_guest_request)largest_guest_request=n;
+    STUDY_GUEST_ENTER;pk_hdr *h=malloc(sizeof *h+tlsf_len(n));STUDY_GUEST_LEAVE;if(!h)return NULL;h->n=n;
+#ifdef CHARACTER_MEMORY_OBSERVER
+    ++character_memory_live_blocks;
+#endif
+    pk_count(tlsf_len(n),0);
     alloc_calls++;alloc_bytes+=tlsf_len(n);return h+1;}
 static void *pk_calloc(void *o,size_t c,size_t n){void *p=pk_malloc(o,c*n);if(p)memset(p,0,c*n);return p;}
-static void pk_free(void *o,void *p){(void)o;if(!p)return;pk_hdr *h=(pk_hdr *)p-1;pk_count(0,tlsf_len(h->n));free(h);}
+static void pk_free(void *o,void *p){(void)o;if(!p)return;pk_hdr *h=(pk_hdr *)p-1;
+#ifdef CHARACTER_MEMORY_OBSERVER
+    --character_memory_live_blocks;
+#endif
+    pk_count(0,tlsf_len(h->n));STUDY_GUEST_ENTER;free(h);STUDY_GUEST_LEAVE;
+}
 static void *pk_realloc(void *o,void *p,size_t n){
     if(!p)return pk_malloc(o,n);
     if(!n){pk_free(o,p);return NULL;}
     pk_hdr *h=(pk_hdr *)p-1;size_t old=h->n;
-    pk_hdr *q=realloc(h,sizeof *q+tlsf_len(n));if(!q)return NULL;
+    if(n>largest_guest_request)largest_guest_request=n;
+    STUDY_GUEST_ENTER;pk_hdr *q=realloc(h,sizeof *q+tlsf_len(n));STUDY_GUEST_LEAVE;if(!q)return NULL;
     q->n=n;pk_count(tlsf_len(n),tlsf_len(old));
     alloc_calls++;alloc_bytes+=tlsf_len(n);return q+1;}
 static size_t pk_usable(const void *p){return p?tlsf_len(((const pk_hdr *)p-1)->n):0;}
@@ -68,8 +108,66 @@ void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
 void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
+#ifdef CHARACTER_MODEL_STUDY
+void *__real_malloc(size_t size);
+void *__real_realloc(void *ptr,size_t size);
+/* Fixed observer registry: no observer allocation; counts requested bytes only.
+ * libc-internal allocations not passing these linked symbols are outside scope. */
+static struct {void *ptr;size_t size;} study_native_blocks[4096];
+static volatile size_t study_native_current,study_native_peak,study_native_largest,study_native_count;
+static volatile unsigned long long study_native_calls;
+static bool study_native_overflow;
+static bool study_native_watch(void){return study_native_active&&!study_guest_depth&&!study_observer_depth;}
+static int study_native_find(void *ptr){for(unsigned i=0;i<4096;++i)if(study_native_blocks[i].ptr==ptr)return (int)i;return -1;}
+static void study_native_add(void *ptr,size_t size){
+    if(!ptr)return;
+    int slot=study_native_find(NULL);
+    if(slot<0){study_native_overflow=true;return;}
+    study_native_blocks[slot].ptr=ptr;study_native_blocks[slot].size=size;
+    study_native_current+=size;++study_native_count;
+    if(study_native_current>study_native_peak)study_native_peak=study_native_current;
+}
+static void study_native_remove(int i){
+    if(i<0)return;
+    study_native_current-=study_native_blocks[i].size;--study_native_count;
+    study_native_blocks[i].ptr=NULL;study_native_blocks[i].size=0;
+}
+void *__wrap_malloc(size_t size){
+    const bool watch=study_native_watch();if(watch){++study_native_calls;if(size>study_native_largest)study_native_largest=size;}
+    void *p=__real_malloc(size);if(watch)study_native_add(p,size);return p;
+}
+void *__wrap_calloc(size_t count,size_t size){
+    const size_t bytes=count&&size>SIZE_MAX/count?SIZE_MAX:count*size;const bool watch=study_native_watch();
+    if(watch){++study_native_calls;if(bytes>study_native_largest)study_native_largest=bytes;}
+    void *p=__real_calloc(count,size);if(watch)study_native_add(p,bytes);return p;
+}
+void *__wrap_realloc(void *ptr,size_t size){
+    const bool watch=study_native_watch();const int slot=watch&&ptr?study_native_find(ptr):-1;
+    if(watch){++study_native_calls;if(size>study_native_largest)study_native_largest=size;}
+    void *p=__real_realloc(ptr,size);
+    if(watch&&(p||!size)){study_native_remove(slot);study_native_add(p,size);}return p;
+}
+void __wrap_free(void *ptr){if(ptr&&study_native_watch())study_native_remove(study_native_find(ptr));__real_free(ptr);}
+static bool study_allocator_selftest(void){
+    const size_t guest=cur_bytes,blocks=character_memory_live_blocks,native=study_native_current;
+    const unsigned long long calls=study_native_calls;
+    void *p=pk_malloc(NULL,32);
+    const bool guest_ok=p&&cur_bytes==guest+32&&character_memory_live_blocks==blocks+1&&
+        study_native_current==native&&study_native_calls==calls;
+    pk_free(NULL,p);
+    void *q=__wrap_malloc(47);
+    if(q)((volatile unsigned char *)q)[0]=0xa5;
+    const bool native_ok=q&&study_native_current==native+47&&study_native_calls==calls+1;
+    __wrap_free(q);
+    const bool released=cur_bytes==guest&&character_memory_live_blocks==blocks&&study_native_current==native;
+    printf("MODEL_OBSERVER_SELFTEST guest_excluded=%s native_tracked=%s released=%s\n",
+        guest_ok?"PASS":"FAIL",native_ok?"PASS":"FAIL",released?"PASS":"FAIL");
+    return guest_ok&&native_ok&&released;
+}
+#else
 void __wrap_free(void *ptr){__real_free(ptr);}
 void *__wrap_calloc(size_t count,size_t size){return __real_calloc(count,size);}
+#endif
 /* The app does not use pocket.kasane.video (it needs a streamed source). */
 esp_err_t pocket_video_install(JSContext *ctx,JSValueConst kasane){(void)ctx;(void)kasane;return ESP_OK;}
 void pocket_video_reset(void){}
@@ -209,6 +307,74 @@ static size_t heap_req(void){
     JSMemoryUsage m;JS_ComputeMemoryUsage(rt,&m);return (size_t)m.memory_used_size;
 }
 
+#ifdef CHARACTER_MEMORY_OBSERVER
+/* Opt-in host observer: all fields below are raw QuickJS/guest-allocator
+ * measurements. Categories overlap (code is part of function size), and
+ * binary_object_size means serialized bytecode, never ArrayBuffer storage.
+ * JS_mallocz opaque payloads count against the guest allocator but may not
+ * be separately categorized by QuickJS's object walker. No GC is run here. */
+static FILE *character_memory_output;
+static size_t character_memory_total_peak,character_memory_total_request,character_memory_total_accounted_peak;
+static bool character_memory_failed;
+static void character_memory_record(const char *phase,bool explicit_gc){
+    const char *path=getenv("CHARACTER_MEMORY_STUDY");if(!path)return;
+    if(!character_memory_output){
+        character_memory_output=fopen(path,"w");
+        if(!character_memory_output){character_memory_failed=true;return;}
+    }
+    ++study_observer_depth;
+    JSMemoryUsage m;memset(&m,0,sizeof m);
+    const unsigned long long before=alloc_calls;
+    if(rt)JS_ComputeMemoryUsage(rt,&m);
+    if(peak_bytes>character_memory_total_peak)character_memory_total_peak=peak_bytes;
+    if(largest_guest_request>character_memory_total_request)character_memory_total_request=largest_guest_request;
+    if(character_memory_accounted_peak>character_memory_total_accounted_peak)character_memory_total_accounted_peak=character_memory_accounted_peak;
+    const size_t expected_accounted=cur_bytes+CHARACTER_MALLOC_OVERHEAD*character_memory_live_blocks;
+    const bool accounting_valid=!rt||((size_t)m.malloc_size==expected_accounted&&(size_t)m.malloc_count==character_memory_live_blocks);
+    if(!accounting_valid)character_memory_failed=true;
+    FILE *f=character_memory_output;
+    fprintf(f,"{\"kind\":\"HOST SIMULATION\",\"phase\":\"%s\",\"explicit_gc_before_sample\":%s,"
+        "\"host_pointer_bits\":%zu,\"guest_allocator_current_tlsf_bytes\":%zu,"
+        "\"guest_allocator_phase_peak_tlsf_bytes\":%zu,\"guest_allocator_total_peak_tlsf_bytes\":%zu,"
+        "\"guest_allocator_phase_max_request_bytes\":%zu,\"guest_allocator_total_max_request_bytes\":%zu,"
+        "\"guest_allocator_alloc_calls\":%llu,\"guest_allocator_allocated_bytes_cumulative\":%llu,"
+        "\"observer_guest_alloc_calls\":%llu,\"off_guest_native_requested_bytes\":null,"
+        "\"native_free_bytes\":null,\"native_largest_free_bytes\":null,\"native_stack_bytes\":null,"
+        "\"fixture_static_panel_strip_bytes\":%zu,\"quickjs\":",
+        phase,explicit_gc?"true":"false",sizeof(void*)*8,cur_bytes,peak_bytes,character_memory_total_peak,
+        largest_guest_request,character_memory_total_request,alloc_calls,alloc_bytes,alloc_calls-before,
+        sizeof panel+sizeof strip_pixels);
+    /* Peaks come from every successful allocator event, not end-of-phase
+     * block count. They include QuickJS's per-live-block quota overhead. */
+    if(rt){
+        fputc('{',f);
+#define MEMORY_FIELD(name) fprintf(f,"\"" #name "\":%lld,",(long long)m.name)
+        MEMORY_FIELD(malloc_size);MEMORY_FIELD(malloc_limit);MEMORY_FIELD(memory_used_size);
+        MEMORY_FIELD(malloc_count);MEMORY_FIELD(memory_used_count);
+        MEMORY_FIELD(atom_count);MEMORY_FIELD(atom_size);MEMORY_FIELD(str_count);MEMORY_FIELD(str_size);
+        MEMORY_FIELD(obj_count);MEMORY_FIELD(obj_size);MEMORY_FIELD(prop_count);MEMORY_FIELD(prop_size);
+        MEMORY_FIELD(shape_count);MEMORY_FIELD(shape_size);MEMORY_FIELD(js_func_count);MEMORY_FIELD(js_func_size);
+        MEMORY_FIELD(js_func_code_size);MEMORY_FIELD(js_func_pc2line_count);MEMORY_FIELD(js_func_pc2line_size);
+        MEMORY_FIELD(c_func_count);MEMORY_FIELD(array_count);MEMORY_FIELD(fast_array_count);MEMORY_FIELD(fast_array_elements);
+        MEMORY_FIELD(binary_object_count);
+#undef MEMORY_FIELD
+        fprintf(f,"\"binary_object_size\":%lld}",(long long)m.binary_object_size);
+    }else fputs("null",f);
+    fprintf(f,",\"guest_allocator_live_blocks\":%zu,\"guest_quota_overhead_per_block_bytes\":%u,"
+        "\"guest_accounted_phase_peak_bytes\":%zu,\"guest_accounted_total_peak_bytes\":%zu,\"accounting_formula_verified\":%s",
+        character_memory_live_blocks,CHARACTER_MALLOC_OVERHEAD,character_memory_accounted_peak,
+        character_memory_total_accounted_peak,accounting_valid?"true":"false");
+    fprintf(f,",\"explicit_native_requested_current\":%zu,\"explicit_native_requested_peak\":%zu,\"explicit_native_largest_request\":%zu,\"explicit_native_live_blocks\":%zu,\"explicit_native_alloc_calls\":%llu,\"explicit_native_registry_overflow\":%s,\"fixture_observer_registry_bytes\":%zu",study_native_current,study_native_peak,study_native_largest,study_native_count,study_native_calls,study_native_overflow?"true":"false",sizeof study_native_blocks);
+    --study_observer_depth;
+    if(fputs("}\n",f)==EOF||fflush(f))character_memory_failed=true;
+    peak_bytes=cur_bytes;largest_guest_request=0;character_memory_accounted_peak=expected_accounted;
+}
+static void character_memory_close(void){
+    if(character_memory_output&&fclose(character_memory_output))character_memory_failed=true;
+    character_memory_output=NULL;
+}
+#endif
+
 /* Counts live, peak and cumulative plans and host time in register(),
  * without changing what the app sees. pocket.memory.info() stands in for the
  * device's sampled internal free heap, which gates the app's prefetch: a
@@ -216,7 +382,7 @@ static size_t heap_req(void){
  * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-device-limits.md). */
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
+    "globalThis.pocket={kasane:globalThis.kasane,hone:globalThis.hone,shapes:globalThis.shapes,ayatsuri:globalThis.ayatsuri,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
     "(function(){const P=pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"

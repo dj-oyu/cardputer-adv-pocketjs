@@ -48,7 +48,7 @@ static bool       dirty;
 // vacated still need repainting.
 static uint32_t   dirty_bands;
 static JSClassID  session_class;
-static JSRuntime *session_rt;
+static pocket_class_owner_t session_owner;
 static bool       class_ready;
 // Never reset per session: a handle identifies a session for the life of the
 // firmware run, so a TextSession object the app kept from a closed session can
@@ -563,7 +563,7 @@ static const JSClassDef session_def = {.class_name="PocketTextSession"};
 static bool ensure_class(JSContext *ctx) {
     if(class_ready) return true;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    if(!pocket_api_class_ready(rt,&session_rt,&session_class)) {
+    if(!pocket_api_class_ready(rt,&session_owner,&session_class)) {
         JS_NewClassID(rt,&session_class);
         if(JS_NewClass(rt,session_class,&session_def)<0) return false;
     }

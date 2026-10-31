@@ -99,7 +99,7 @@ typedef struct {
 static pocket_state_t *state;
 static JSClassID       hub_class;
 static JSClassID       token_class;
-static JSRuntime      *hub_rt, *token_rt;
+static pocket_class_owner_t hub_owner, token_owner;
 
 static const char *TAG = "pocket";
 
@@ -548,20 +548,16 @@ void pocket_api_cancel_all(const char *code) {
 
 unsigned pocket_api_open_count(void) { return promise_open; }
 
-// Every static that pocket_api_class_ready() has filled in, so the end of a
-// session can clear them (see pocket_api.h). Twelve owners exist today; the
-// assert is for the surface that adds the seventeenth, not for runtime input.
-static JSRuntime **class_owners[16];
-static unsigned class_owner_count;
+// Each surface supplies its own static link. Lazy classes cannot exhaust a
+// process-wide pointer table, and no allocator is involved in registration.
+static pocket_class_registry_t class_registry;
 
-bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
-    if(*owner==rt) return true;      // already registered in this runtime
-    *id=0;                           // and this one's counter decides the id
-    *owner=rt;
-    for(unsigned i=0;i<class_owner_count;i++) if(class_owners[i]==owner) return false;
-    assert(class_owner_count<sizeof(class_owners)/sizeof(class_owners[0]));
-    class_owners[class_owner_count++]=owner;
-    return false;
+bool pocket_api_class_ready(JSRuntime *rt,pocket_class_owner_t *owner,JSClassID *id) {
+    return pocket_class_registry_ready(&class_registry,rt,owner,id);
+}
+
+void pocket_api_class_forget(pocket_class_owner_t *owner) {
+    pocket_class_registry_forget(&class_registry,owner);
 }
 
 void pocket_api_reset(void) {
@@ -574,7 +570,7 @@ void pocket_api_reset(void) {
     // prevent.
     override_count=0;
     sub_live=0;
-    for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
+    pocket_class_registry_reset(&class_registry);
     for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
         pocket_promise_t *p=&promises[i];
         if(!atomic_load(&p->request)) continue;
@@ -868,11 +864,11 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     lazy_count=0;
     JSRuntime *rt=JS_GetRuntime(ctx);
     // See pocket_api_class_ready(): the id has to come from THIS runtime.
-    if(!pocket_api_class_ready(rt,&hub_rt,&hub_class)) {
+    if(!pocket_api_class_ready(rt,&hub_owner,&hub_class)) {
         JS_NewClassID(rt,&hub_class);
         if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
     }
-    if(!pocket_api_class_ready(rt,&token_rt,&token_class)) {
+    if(!pocket_api_class_ready(rt,&token_owner,&token_class)) {
         JS_NewClassID(rt,&token_class);
         if(JS_NewClass(rt,token_class,&token_class_def)<0) return ESP_FAIL;
     }

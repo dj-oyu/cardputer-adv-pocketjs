@@ -1,0 +1,10 @@
+app local.nativecloudprobe
+option strip-debug
+utility ../lib/ayatsuri_model.js
+follow ../lib/ayatsuri_follow.js
+motion ../cloud/cloud_pose.js
+dynamic ../cloud/cloud_dynamic.js
+update ../cloud/cloud_shared_update.js
+model ../cloud/cloud_native_model.js
+probe native_probe_runtime.js
+fixture ../cloud/cloud_fixture.js

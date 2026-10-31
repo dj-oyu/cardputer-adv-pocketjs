@@ -287,7 +287,6 @@ static struct {
     char kind;
     uint32_t js_us,render_us,send_us,bytes,bands,presents,btn,fed;
 } mdt;
-static unsigned mdt_seq;
 // '~' at HOME cycles the guest heap cap for the next start, to find how much
 // of the 160 KiB the app needs to evaluate and run (docs/kasane/
 // megademo-device-limits.md). 0 keeps the shipping value.
@@ -299,6 +298,17 @@ void app_trace_next_heap_limit(void){
     ESP_LOGI("app","MDT_LIMIT %u",(unsigned)(MDT_LIMITS[mdt_limit_index]?
              MDT_LIMITS[mdt_limit_index]:160*1024));
 }
+#ifdef KASANE_MEMORY_PHASE_ONLY
+static void mdt_emit(void) {
+    /* A checkpoint-only diagnostic must leave the control channel quiet,
+     * including while HELLO is open. Drain counters without logging or heap
+     * walks. The local minimum spans the session, not a hidden sample turn. */
+    pocket_proc_trace ignored;
+    pocket_proc_trace_take(&ignored);
+    mdt=(typeof(mdt)){0};
+}
+#else
+static unsigned mdt_seq;
 static void mdt_emit(void) {
     if(!mdt.kind) return;
     pocket_proc_trace p;
@@ -352,6 +362,7 @@ static void mdt_emit(void) {
     }
     mdt=(typeof(mdt)){0};
 }
+#endif
 #endif
 #ifndef KASANE_STRESS_GRAD_AB
 #define KASANE_STRESS_GRAD_AB 0
@@ -1001,6 +1012,59 @@ void app_report(void) {
 static uint32_t guest_generation;
 bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
+#ifdef KASANE_MEGADEMO_TRACE
+static bool memory_mark_busy;
+static bool cloud_memory_probe(void) {
+    const app_manifest_t *manifest=app_registry_current();
+    return manifest&&!strcmp(manifest->id,"local.cloudmem");
+}
+esp_err_t app_memory_mark(JSContext *context,const char *label) {
+    if(!label||!label[0])return ESP_ERR_INVALID_ARG;
+    unsigned length=0;
+    while(length<33&&label[length]) {
+        const unsigned char c=(unsigned char)label[length++];
+        if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||
+             c=='.'||c=='_'||c=='-'||c==':'))return ESP_ERR_INVALID_ARG;
+    }
+    if(length>32)return ESP_ERR_INVALID_ARG;
+    if(!guest||!context||
+       context!=pocketjs_guest_quickjs_context(guest))return ESP_ERR_INVALID_STATE;
+    const int64_t began=esp_timer_get_time();
+    pocketjs_guest_allocator_stats_t a;
+    esp_err_t result=pocketjs_guest_allocator_snapshot(guest,&a);
+    if(result!=ESP_OK)return result;
+    if(memory_mark_busy)return ESP_ERR_INVALID_STATE;
+    memory_mark_busy=true;
+    size_t used=0,limit=0;
+    JS_GetMemoryCounters(JS_GetRuntime(context),&used,&limit);
+    const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    const size_t free_bytes=heap_caps_get_free_size(caps);
+    const size_t largest=heap_caps_get_largest_free_block(caps);
+    const size_t minimum=heap_caps_get_minimum_free_size(caps);
+    const uint32_t sample_us=(uint32_t)(esp_timer_get_time()-began);
+    /* mn uses the existing trace window (session start or the last MDT reset),
+     * never a new reset here. sample_us excludes USB/log output and label
+     * conversion. Usable highwater excludes realloc's backend temporaries.
+     * Cache bytes are not guest-live bytes; neither is allocator metadata. */
+    const char *minimum_scope=
+#ifdef KASANE_MEMORY_PHASE_ONLY
+        "session";
+#else
+        "trace_window";
+#endif
+    ESP_LOGI("app","MMK %s gen=%u gu=%zu limit=%zu live=%zu high=%zu maxreq=%zu "
+             "alloc=%u realloc=%u free_calls=%u fail=%u cache=%u/%u/%zu/%u/%u/%u "
+             "free=%zu lg=%zu mn=%zu mn_scope=%s sample_us=%u "
+             "arena_largest=NA gc_count=NA gc_us=NA",
+             label,(unsigned)guest_generation,used,limit,a.usable_live_bytes,
+             a.usable_highwater_bytes,a.max_successful_request,
+             (unsigned)a.allocation_calls,(unsigned)a.realloc_calls,(unsigned)a.free_calls,
+             (unsigned)a.failed_calls,(unsigned)a.cache_available,(unsigned)a.cache_enabled,
+             a.cache_held_bytes,(unsigned)a.cache_hits,(unsigned)a.cache_misses,
+             (unsigned)a.cache_flushes,free_bytes,largest,minimum,minimum_scope,(unsigned)sample_us);
+    memory_mark_busy=false;return ESP_OK;
+}
+#endif
 
 void app_stop(void) {
     bool p0_had_guest=guest!=NULL;
@@ -1543,8 +1607,21 @@ esp_err_t app_start_test(char test) {
     // (docs/kasane/flash-plan.md): a const table in flash, the same for
     // every session; pocket_proc_reset() keeps it.
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
+#ifdef KASANE_MEGADEMO_TRACE
+    bool memory_window=cloud_memory_probe();
+#ifdef KASANE_MEMORY_PHASE_ONLY
+    memory_window=true;
+#endif
+    if(memory_window) {
+        heap_caps_monitor_local_minimum_free_size_stop();
+        heap_caps_monitor_local_minimum_free_size_start();
+    }
+#endif
     TRY(pocketjs_guest_create(&gc,&guest));
     if(++guest_generation==0)++guest_generation;
+#ifdef KASANE_MEGADEMO_TRACE
+    if(cloud_memory_probe())(void)app_memory_mark(pocketjs_guest_quickjs_context(guest),"runtime.ready");
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
     // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
@@ -1950,8 +2027,15 @@ source_ready:;
 #ifdef POCKET_HEAPPROBE
     if(hp && hp_module) module_entry=true;
 #endif
+#ifdef KASANE_MEGADEMO_TRACE
+    if(cloud_memory_probe())(void)app_memory_mark(pocketjs_guest_quickjs_context(guest),"module.before");
+#endif
     if(user_source) err=eval_user_source(source,length,module_entry);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
+#ifdef KASANE_MEGADEMO_TRACE
+    if(cloud_memory_probe())(void)app_memory_mark(pocketjs_guest_quickjs_context(guest),
+                                               err==ESP_OK?"module.ready":"module.failed");
+#endif
 #ifdef POCKET_HEAPPROBE
     if(hp) hp_report("eval",err);
 #endif
