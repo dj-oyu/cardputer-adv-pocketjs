@@ -4,6 +4,10 @@
 
 ## authoring
 
+動的JS作成ではoptional module `apps/lib/ayatsuri_local_plane.js`を先にロードする。appのchunksへ`regions ../lib/ayatsuri_local_plane.js`を登録し、必要時に`pocket.app.load('regions')`する例になる。未ロードでlocalPlaneを作ると`localPlane module required`を返し、nodeを公開しない。既存band/checkerや領域を使わないappはこのmoduleを読み込まない。固定native assetの利用もJS helperを必要としない。
+
+作成済みpatternは所有normalと共有encoder参照を保持する。後からglobal helperを置換/削除しても、既存sceneの領域評価を切り替えない。これは時計やsceneの共有可変stateを作るmoduleではない。
+
 ```js
 const cheek = scene.add({
   geometry: {kind: 'ellipsoid', radii: [26, 23, 18]},

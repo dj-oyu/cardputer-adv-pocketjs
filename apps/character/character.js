@@ -203,11 +203,9 @@ globalThis.Ayatsuri = (() => {
         if (!analytic) fail('group has no texture');
         if (p.kind === 'image') fail('image pattern unsupported');
         if (p.kind === 'localPlane') {
-          vector(p.normal, 3);
-          const length = Math.hypot(p.normal[0], p.normal[1], p.normal[2]),
-            offset = p.offset === undefined ? 0 : finite(p.offset), feather = p.feather === undefined ? 0 : finite(p.feather);
-          if (!(length > 0) || Math.abs(offset) > 2 || feather < 0 || feather > 2 || (feather > 0 && feather < 1e-4)) fail('localPlane range');
-          node.pattern = {kind: p.kind, normal: [p.normal[0] / length, p.normal[1] / length, p.normal[2] / length], offset, feather, color: rgb(p.color)};
+          const extension = globalThis.AyatsuriLocalPlane;
+          if (!extension) fail('localPlane module required');
+          node.pattern = extension.create(p);
         } else {
         if (p.kind !== 'band' && p.kind !== 'checker') fail('pattern kind');
           node.pattern = {kind: p.kind, axis: p.axis || 'v', start: p.start === undefined ? 0.5 : unit(p.start),
@@ -282,12 +280,9 @@ globalThis.Ayatsuri = (() => {
             surface[0] = pack(node.color); surface[1] = pattern ? pack(pattern.color) : surface[0];
             surface[2] = Math.round(node.opacity * 255);
             surface[3] = Math.round(Math.min(1, node.thickness * Math.hypot(m[2], m[6], m[10])) * 255);
-            surface[4] = !pattern ? 0 : pattern.kind === 'localPlane' ? 4 : pattern.kind === 'checker' ? 3 : pattern.axis === 'u' ? 1 : 2;
-            if (pattern && pattern.kind === 'localPlane') {
-              for (let k = 0; k < 3; ++k) t[49+k] = pattern.normal[k];
-              t[52] = pattern.offset; t[53] = pattern.feather; t[54] = 0;
-              t[56] = 0; t[57] = 1;
-            } else {
+            surface[4] = !pattern ? 0 : pattern.code || (pattern.kind === 'checker' ? 3 : pattern.axis === 'u' ? 1 : 2);
+            if (pattern && pattern.encode) pattern.encode(t);
+            else {
             t[49] = cs * t[63]; t[50] = -sn * t[64]; t[51] = 0.5 + t[61] - (t[49] + t[50]) * 0.5;
             t[52] = sn * t[63]; t[53] = cs * t[64]; t[54] = 0.5 + t[62] - (t[52] + t[53]) * 0.5;
             if (pattern && pattern.kind === 'checker') for (let k = 0; k < 6; ++k) t[49 + k] *= pattern.repeats;

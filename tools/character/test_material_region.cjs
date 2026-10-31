@@ -1,11 +1,13 @@
 'use strict';
 const assert=require('node:assert/strict');
 const Ayatsuri=require('../../apps/character/character.js');
+const LocalPlane=require('../../apps/lib/ayatsuri_local_plane.js');
 const TransformReference=require('./transform_reference.cjs');
 const scene=Ayatsuri.scene({backend:{ellipsoid(){}},evaluator:TransformReference});
 const normal=[0,2,0],body=scene.add({name:'body',geometry:{kind:'ellipsoid',radii:[20,30,10]},
   material:{color:0xe47b30,specular:.5},pattern:{kind:'localPlane',normal,offset:.2,feather:.1,color:0xffe8bb}});
 normal.fill(NaN);
+delete globalThis.AyatsuriLocalPlane;
 function packet(){let value;scene.visit(p=>{value=p;});return value;}
 function stats(){const s={};scene.stats(s);return s;}
 scene.evaluate(0);
@@ -19,6 +21,9 @@ assert.equal(stats().projectionUpdates,before.projectionUpdates);
 body.place({rotation:[.2,.4,-.1],scale:[1.3,.7,1.1]});scene.evaluate(10);
 assert.deepEqual(Array.from(packet().texture),texture,'local region follows transformed surface');
 assert.notDeepEqual(Array.from(packet().screen),projection);
+assert.throws(()=>scene.add({name:'requires-plane-module',geometry:{kind:'ellipsoid',radii:[1,1,1]},
+  pattern:{kind:'localPlane',normal:[0,1,0],color:0xffffff}}),/localPlane module required/);
+globalThis.AyatsuriLocalPlane=LocalPlane;
 assert.throws(()=>body.texture({offset:[.1,0]}),/localPlane/);
 const beforeInvalid=stats();
 const invalid=[

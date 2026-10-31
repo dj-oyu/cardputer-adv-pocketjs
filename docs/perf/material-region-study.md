@@ -39,6 +39,16 @@ native sectionは全件検証後publish、旧bin受理、896箇所の切詰め/�
 
 ## 再現
 
+### 未使用機能の常駐費用で見つかった回帰
+
+最初の`de42c1a`はcloudprobeの160KiB診断fixtureで失敗した。アプリが例外を捕捉するため、uncaught例外0だけでは検出できない。host側のO(1)canaryで、presented=297、first_req=37B、first_used=163812B、cap163840B、quota拒否6/物理allocator拒否0を観測した。終了時のfreeだけではこの一時拒否を説明できない。
+
+同じm32 binary（SHA256 `6ecb71655010fdf8c00817feaa9e3a321ab9e1b7e410bd943893e6f819dd38c9`）、同じchunks/seed/cap/通常GCでSourceAだけLF原本を差し替えた対照では、新版23153BはFAIL、基準b93の22126BはPASSだった。元の作業ファイルはfinallyで完全復元した。未使用localPlane parser/encoderの常駐を小さいoptional moduleへ分離し、baseには必要時の委譲だけを残した。native固定資産はhelperを使わない。
+
+分離後はfixture2回とも297frameで完了、digest `e12e1890`、pause15、旧画像維持/通常復帰、全描画reference、終了guest0、捕捉quota/allocator拒否0でPASS。観測live159252B/丸め後要求peak146640Bはこのcloudprobe profileの値で、上の狐の会計peakと混ぜない。cap増加・frame毎強制GC・sleep調整・試験閾値緩和は行わない。host gateは捕捉されたOOMも明示的に拒否するようにした。
+
+新機能を使わないappへ追加bytecodeを常駐させないことも、今回の性能受入に含める。helper未読込の明示拒否と、namespace削除後も作成済みsceneが同じencoderを使うことをJS試験へ追加した。
+
 ```sh
 node tools/character/test_material_region.cjs
 python3 tools/character/test_material_study_inputs.py

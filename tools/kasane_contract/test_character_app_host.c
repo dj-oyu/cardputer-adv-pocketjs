@@ -414,6 +414,7 @@ static bool capture_images(void){
  * arbitrary JS control script, sleeps, or per-frame forced GC are involved. */
 static uint32_t fixture_panel_hash=UINT32_C(2166136261);
 static unsigned fixture_presented;
+static bool fixture_saw_oom;
 static void fixture_record_presented(void){
     for(unsigned i=0;i<240*135;++i){
         fixture_panel_hash=(fixture_panel_hash^(panel[i]&255u))*UINT32_C(16777619);
@@ -429,6 +430,14 @@ static bool fixture_real_frame(unsigned buttons){
         fprintf(stderr,"CHARACTER_FIXTURE_FRAME_FAILED buttons=%u presented=%u used=%zu limit=%zu quota_rejections=%u allocator_rejections=%u first_req=%zu first_used=%zu\n",
             buttons,fixture_presented,used,limit,canary.quota_count,canary.allocator_count,canary.first_req,canary.first_used);
         return false;
+    }
+    /* The app can catch a quota failure and return normally. Preserve that
+     * evidence without allocating another JS error/string while near the cap. */
+    JSOOMCanary caught;JS_TakeOOMCanary(rt,&caught);
+    if(caught.quota_count||caught.allocator_count){
+        size_t used=0,limit=0;JS_GetMemoryCounters(rt,&used,&limit);fixture_saw_oom=true;
+        fprintf(stderr,"CHARACTER_FIXTURE_CAUGHT_OOM presented=%u used=%zu limit=%zu quota=%u allocator=%u first_req=%zu first_used=%zu\n",
+            fixture_presented,used,limit,caught.quota_count,caught.allocator_count,caught.first_req,caught.first_used);
     }
     const unsigned before=present_failures;present((uint64_t)fixture_presented*33333u);
     const bool valid=present_failures==before&&full_reference((uint64_t)fixture_presented*33333u);
@@ -492,7 +501,7 @@ static int finite_fixture_contract(bool ok){
         if(ok)ok=fixture_real_frame(0);
         printf("CHARACTER_FIXTURE injected_commit_failure=%s previous_picture_unchanged=%u ordinary_recovery=%u\n",ok?"PASS":"FAIL",ok,ok);
     }
-    ok=ok&&!exceptions&&!present_failures;
+    ok=ok&&!exceptions&&!present_failures&&!fixture_saw_oom;
     printf("CHARACTER_FIXTURE_PANEL fnv32=%08x presented=%u\n",(unsigned)fixture_panel_hash,fixture_presented);
     printf("CHARACTER_FIXTURE frames=%u bound=%lu starts=%u completes=%u pass=%u returns=%u ordinary_return=%u full_reference=1 eager_gc=0 live=%zu peak_requested=%zu max_request=%zu\n",
         fixture_frames,parsed,fixture_starts,fixture_completes,fixture_passes,fixture_returns,

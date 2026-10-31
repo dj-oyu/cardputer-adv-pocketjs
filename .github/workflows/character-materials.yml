@@ -8,6 +8,7 @@ on:
       - 'apps/cloudmem/**'
       - 'apps/fox3d/**'
       - 'apps/lib/ayatsuri_clip.js'
+      - 'apps/lib/ayatsuri_local_plane.js'
       - 'components/pocketjs_guest/src/guest.c'
       - 'components/pocketjs_guest/include/pocketjs/guest.h'
       - 'main/app_session.*'
