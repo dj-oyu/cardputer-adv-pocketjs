@@ -4,6 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const {reduceSurface,partition,sampleErrors}=require('./reduce.cjs');
 const {compile}=require('../model/pack_model.cjs');
 const hash=x=>crypto.createHash('sha256').update(x).digest('hex');
+function toolchain(){return {node:process.version,v8:process.versions.v8,numeric:'binary64 JS; existing packer F32 output',files:['import_glb.cjs','reduce.cjs','pipeline.cjs','../model/pack_model.cjs','../model/export_cloud.cjs'].map(file=>({file,sha256:hash(fs.readFileSync(path.join(__dirname,file)))}))};}
 function fail(code){const e=Error(code);e.code=code;throw e;}
 function number(v,a,b){if(!Number.isFinite(v)||v<a||v>b)fail('INVALID_PROFILE');return v;}
 function project(p,view){const y=view.yaw*Math.PI/180,t=view.pitch*Math.PI/180,c=Math.cos(y),s=Math.sin(y),cy=Math.cos(t),sy=Math.sin(t),x=c*p[0]+s*p[2],z=-s*p[0]+c*p[2];return [120+view.scale*x,67+view.scale*(cy*p[1]-sy*z),sy*p[1]+cy*z];}
@@ -59,7 +60,7 @@ function run(ir,profile){
   const segments=parts.reduce((sum,s)=>sum+1+Math.ceil((8+16*s.positions.length+6*s.triangles.length)/10),0),arenaEstimate=24*nodes.length+84+parts.reduce((sum,s)=>sum+Math.ceil((84+1040+12*s.positions.length)/8)*8,0);
   if(bytes.length>budget.maxColdBytes||segments>budget.maxSegments||arenaEstimate>budget.maxArenaEstimateBytes)fail('BUDGET_EXCEEDED');
   if(hash(JSON.stringify(ir))!==inputHash)fail('INPUT_MUTATED');
-  return {bytes,manifest,decoded,report:{schema:'hone-asset-report-v1',status:'generated-experimental-not-accepted',source:ir.source,irHash:inputHash,profileHash:hash(JSON.stringify(profile)),binSha256:hash(bytes),profile,surfaceReports,quantization,finalErrors,views,
+  return {bytes,manifest,decoded,report:{schema:'hone-asset-report-v1',status:'generated-experimental-not-accepted',source:structuredClone(ir.source),irHash:inputHash,profileHash:hash(JSON.stringify(profile)),binSha256:hash(bytes),profile:structuredClone(profile),toolchain:toolchain(),surfaceReports,quantization,finalErrors,views,
     coldBytes:bytes.length,nodes:nodes.length,parts:parts.length,segmentsUpperBound:segments,arenaConservativeEstimate:arenaEstimate,maxBboxPixelVisitsObserved:Math.max(...views.map(v=>v.bboxPixelVisits)),
     correspondence:parts.map(s=>({partId:s.stableId,sourceVertices:s.sourceVertexIds,sourceTriangles:s.sourceTriangleIds})),
     gates:{sampledGeometry:true,sampledNormal:true,sampledSilhouette:true,coldAndEstimatedBudgets:true,blenderExportLoss:'NOT_TESTED',nativeReader:'NOT_TESTED',nativeFinalColour:'NOT_TESTED',occlusionDepthAndCorrespondence:'NOT_TESTED',sourceArt:'NOT_ACCEPTED',guestPeak:'NOT_MEASURED',device:'NOT_TESTED'}}};
