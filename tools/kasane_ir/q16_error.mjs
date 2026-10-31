@@ -17,7 +17,7 @@
 //        saturate; a power-of-two divisor folds into s), literal factors at
 //        the largest Q that fits, sin through the sec.4.4 table, inputs and
 //        arguments by sec.2.3 (lround, then saturate), coordinates read as
-//        Q16 with the compiler's +0.5 (sec.4.5).
+//        Q16, rounded by the engine to the nearest pixel (sec.4.5, v1.1).
 // --alt: plans of the same names in ALT.js (plans_q16/derby_pan.js: the same
 // functions with @q declarations) run in fix instead; f64 and f32 still run
 // the original. Its f64 is compared with the original's too (alt f64).
@@ -156,7 +156,7 @@ for (const file of caseFiles) for (const c of JSON.parse(fs.readFileSync(file, '
 const pct = (a, p) => { if (!a.length) return 0; const s = Float64Array.from(a).sort(); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const max = a => a.reduce((m, v) => v > m ? v : m, 0);
 const f = v => v === 0 ? '0' : v < 1e-3 ? v.toExponential(1) : v.toFixed(3);
-console.log('fixed point: shiki-spec.md v1 (@q declared, Q16 otherwise)' + (altFile ? `; plan* from ${path.basename(altFile)}` : ''));
+console.log('fixed point: shiki-spec.md v1.1 (@q declared, Q16 otherwise)' + (altFile ? `; plan* from ${path.basename(altFile)}` : ''));
 console.log('plan     source  vectors compared coords | f32 max   p99.9  px-diff | fix max   p99.9  px-diff | fix status/shape diff, saturations in arithmetic / on entry');
 for (const r of [...rows.values()].sort((a, b) => a.plan.localeCompare(b.plan) || a.tag.localeCompare(b.tag))) {
   console.log(`${r.plan.padEnd(8)} ${r.tag.padEnd(7)} ${String(r.vectors).padStart(7)} ${String(r.both).padStart(8)} ${String(r.coords).padStart(6)} | ` +

@@ -27,7 +27,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | 文書 | 内容 |
 | --- | --- |
 | [入口](README.md) | 読む順番、現在地、機械可読の旧スキーマ例の扱い |
-| [Shiki 仕様書 v1（凍結）](shiki-spec.md) | Shiki の規範: 固定小数の型と演算、線の式の命令、データ領域（`EACH`・`FETCH`・`PUT`・`LOOKUP`）、登録時の検査、`@shiki` の記法と Q 形式、JS API・ヒープ・capability、検証の要件、移行の順番 |
+| [Shiki 仕様書 v1.1（凍結）](shiki-spec.md) | Shiki の規範: 固定小数の型と演算、線の式の命令、データ領域（`EACH`・`FETCH`・`PUT`・`LOOKUP`）、登録時の検査、`@shiki` の記法と Q 形式、JS API・ヒープ・capability、検証の要件、移行の順番 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |

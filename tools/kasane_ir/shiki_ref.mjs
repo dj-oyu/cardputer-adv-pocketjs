@@ -285,7 +285,7 @@ export function register(code, args = []) {
 
 const MAX_STEPS = 10000, MAX_SEGS = 1024, MAX_RASTER = 8192;
 
-const px = (raw) => Math.floor(raw / 65536); // §4.5
+const px = (raw) => Math.floor((raw + 32768) / 65536); // §4.5 (v1.1): nearest, halves up; exact in double
 const inRange = (p) => p >= -480 && p <= 720;
 
 export function draw(plan, inputs = []) {

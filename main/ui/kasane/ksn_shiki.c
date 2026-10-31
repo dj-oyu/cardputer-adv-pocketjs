@@ -190,7 +190,9 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
 
 /* ---- execution (sec.4, sec.4.8) */
 static bool coord(int32_t raw,int16_t *px){
-    const int64_t p=floor_shift(raw,16);         /* sec.4.5: the pixel */
+    /* sec.4.5 (v1.1): the nearest pixel, halves up. The engine adds the half
+     * so that a compiled plan spends no instruction per coordinate on it. */
+    const int64_t p=floor_shift((int64_t)raw+32768,16);
     if(p<-480||p>720)return false;
     *px=(int16_t)p;
     return true;

@@ -17,9 +17,8 @@
 // fails, re-materialise a hoisted value at each use and try again.
 //
 // What the result must equal is shiki_fix.mjs's evaluation of the same AST,
-// bit for bit (test_shiki_compile.mjs), including the +0.5 every coordinate
-// gets (sec.4.5): folded into a literal term where the coordinate ends in
-// "+ c" or "- c", an ADD of 32768 otherwise.
+// bit for bit (test_shiki_compile.mjs). Coordinates go to the engine at Q16
+// as they are: the engine rounds them (sec.4.5, v1.1).
 import {planAst} from './plan_js.mjs';
 import {litQ, qRules, TURN} from './shiki_q.mjs';
 
@@ -158,14 +157,8 @@ function lower(ast, qdecl) {
     else if (x.t === 'p') emit({op: OP.SET, dst: vr, imm: 0, patch: {arg: x.n, field: 0}});
     else emit({op: OP.SHIFT, dst: vr, a: x.vr, imm: 0, copy: x.vr});
   }
-  // A coordinate (sec.4.5): at Q16 plus one half, folded into a literal term.
-  function coord(e) {
-    if (e.k === '+' && e.b.k === 'num') return mat(ev({...e, b: {k: 'num', lit: String(+e.b.lit + .5)}}, 16));
-    if (e.k === '+' && e.a.k === 'num') return mat(ev({...e, a: {k: 'num', lit: String(+e.a.lit + .5)}}, 16));
-    if (e.k === '-' && e.b.k === 'num') return mat(ev({...e, b: {k: 'num', lit: String(+e.b.lit - .5)}}, 16));
-    if (e.k === 'num') return cst(raw(+e.lit + .5, 16));
-    return op(OP.ADD, {a: mat(ev(e, 16)), b: cst(32768)}).vr;
-  }
+  // A coordinate: at Q16; the engine rounds it (sec.4.5, v1.1).
+  const coord = e => mat(ev(e, 16));
   // An integer argument (colour, count): an immediate, a patched argument or
   // a register.
   function int(e, what, lo, hi) {

@@ -129,20 +129,24 @@ test('SIN at quadrant edges and negatives', () => {
 
 // ---- coordinates / drawing ------------------------------------------------------
 
-test('coordinate floor of negatives and range edges', () => {
-  const r = run([SET(0, -1), SET(1, -480 * 65536), { op: 'PLOT', a: 0, b: 1, aux: 7 }]);
+test('coordinate rounding (v1.1: nearest, halves up) and range edges', () => {
+  // raw -1 is -1/65536 px: nearest 0. -32768 (-0.5) rounds up to 0, -32769 down to -1.
+  const r = run([SET(0, -1), SET(1, -480 * 65536), { op: 'PLOT', a: 0, b: 1, aux: 7 },
+    SET(2, -32768), SET(3, -32769), { op: 'PLOT', a: 2, b: 3, aux: 8 }]);
   assert.equal(r.status, 'DONE');
-  assert.deepEqual(r.segs, [[-1, -480, -1, -480, 7]]);
-  assert.deepEqual([r.pen.valid, r.pen.x, r.pen.y], [true, -1, -480]);
-  // −480·65536 − 1 → −481 → INVALID
-  const r2 = run([SET(0, -480 * 65536 - 1), SET(1, 0), { op: 'PLOT', a: 0, b: 1 }]);
+  assert.deepEqual(r.segs, [[0, -480, 0, -480, 7], [0, -1, 0, -1, 8]]);
+  assert.deepEqual([r.pen.valid, r.pen.x, r.pen.y], [true, 0, -1]);
+  // -480 - 0.5 px rounds to -480; one step lower is -481: INVALID.
+  const r1 = run([SET(0, -480 * 65536 - 32768), { op: 'MOVE', a: 0, b: 0 }]);
+  assert.deepEqual([r1.status, r1.pen.x], ['DONE', -480]);
+  const r2 = run([SET(0, -480 * 65536 - 32769), SET(1, 0), { op: 'PLOT', a: 0, b: 1 }]);
   assert.equal(r2.status, 'INVALID');
   assert.equal(r2.steps, 3);
   assert.equal(r2.pen.valid, false);
-  // 720·65536 + 65535 → 720 ok; 721·65536 → INVALID
-  const r3 = run([SET(0, 720 * 65536 + 65535), { op: 'MOVE', a: 0, b: 0 }]);
+  // 720 + 0.5 - 1/65536 px is 720; 720.5 rounds up to 721: INVALID.
+  const r3 = run([SET(0, 720 * 65536 + 32767), { op: 'MOVE', a: 0, b: 0 }]);
   assert.deepEqual([r3.status, r3.pen.x, r3.pen.y], ['DONE', 720, 720]);
-  const r4 = run([SET(0, 721 * 65536), SET(1, 0), { op: 'MOVE', a: 1, b: 0 }]);
+  const r4 = run([SET(0, 720 * 65536 + 32768), SET(1, 0), { op: 'MOVE', a: 1, b: 0 }]);
   assert.equal(r4.status, 'INVALID'); // b fails after a passed
 });
 
@@ -433,8 +437,9 @@ test('CASE line round trip', () => {
   const bytes = assemble({ inputs: [16], args: [16], patches: [[0, 0, 0]],
     code: [SET(0, 0), { op: 'INPUT', dst: 1, a: 0 }, { op: 'MOVE', a: 0, b: 1 }] });
   const line = `CASE ${toHex(bytes)} ARGS 1 -0.5 INPUTS 2 3.25 NaN`;
+  // -0.5 px rounds up to 0 (sec.4.5, v1.1); 3.25 px to 3.
   assert.equal(runCase(line),
-    'RUN DONE 3 1 -1 3 R -32768 212992 0 0 0 0 0 0 0 0 0 0 0 0 0 0 S 0');
+    'RUN DONE 3 1 0 3 R -32768 212992 0 0 0 0 0 0 0 0 0 0 0 0 0 0 S 0');
   assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 1 Infinity INPUTS 0`), 'REJECT');
   assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 0 INPUTS 0`), 'REJECT');
   assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 1 -0 INPUTS 1 -Infinity`).split(' ')[1], 'BADINPUT');
