@@ -5,7 +5,7 @@
 ## 流れ
 
 1. アプリが決まったシード（`SEED`）でランダムな式を `N` 本作る（`shikiGen`）。式の 2 割はバイト列を 1 ビット壊して、登録の拒否も比べる。
-2. 1 本ごとに試験専用の面 `pocket.shikiDebug.run(code, args, inputs)` で登録と draw を 1 回行い、ログへ `SK <最初の番号> <ケースの行のハッシュ> <結果の行のハッシュ> <終わり方> ...` を 4 本ずつ 1 行で出す（broker のログは 1 回 256 行まで）。1 本に実機の JS で 30〜60 ms かかり、ターンが長すぎると中断される（`InternalError: interrupted`）ので、1 フレームは 60 ms で切る。33 ms を超えるフレームの後は描画のループが待たず、CPU 1 のアイドルタスクが走らないので、タスクのウォッチドッグが 5 秒ごとに警告する（試験は止まらない）。それを避けるため、10 フレームに 1 回は何もしないフレームにする。最後に `SK END`。
+2. 1 本ごとに試験専用の面 `pocket.shikiDebug.run(code, args, inputs)` で登録と draw を 1 回行い、ログへ `SK <最初の番号> <ケースの行のハッシュ> <結果の行のハッシュ> <終わり方> ...` を 4 本ずつ 1 行で出す（broker のログは 1 回 256 行まで）。1 本に実機の JS で 30〜60 ms かかり、ターンが長すぎると中断される（`InternalError: interrupted`）ので、1 フレームは 60 ms で切る。（33 ms を超えるフレームが続くと、以前は CPU 1 のアイドルタスクが走らず、タスクのウォッチドッグが 5 秒ごとに警告した。描画のループが周期を超えたフレームの後に 1 tick 譲るようにして直した。`main/main.c`）最後に `SK END`。
 3. host で `node tools/kasane_ir/shiki_device.mjs ログ.txt`。このファイルをそのまま Node で読んで同じケースを作り、C の実行器と参照実装（`tools/kasane_ir/shiki_ref.mjs`）の結果の行のハッシュと比べる。
 
 ## なぜハッシュか
@@ -18,4 +18,4 @@
 
 ## CYCLE BENCH（`local.cyclebench`）
 
-同じ試験専用の面の `pocket.shikiDebug.bench(i)` で、整数の命令（`mull`・`mulsh`・`quos` など、値の大きさ別）と、GCC が呼ぶ 64 ビットのライブラリ関数（`__divdi3` など）と、Shiki エンジンの命令 1 つ（`ksn_shiki_draw` の中）のサイクル数を測る。1 フレームに 1 ケースで、ログへ `CB ...` を 1 行ずつ出し、最後に `CB END`。方法は `main/hal/int_latency.c`、結果は [docs/perf/int-latency.md](../../docs/perf/int-latency.md)。これもメニューには出さず、USB broker の `app_session` で起動する。
+同じ試験専用の面の `pocket.shikiDebug.bench(i)`（ケースの数は `benchCount()`）で、整数の命令（`mull`・`mulsh`・`quos` など、値の大きさ別）と、GCC が呼ぶ 64 ビットのライブラリ関数（`__divdi3` など）と、Shiki エンジンの命令 1 つ（`ksn_shiki_draw` の中）のサイクル数を測る。画面には蓋絵（題、進み具合の棒、終わったケースの数）を出す。LCD の転送は非同期なので、ケースは 2 フレームに 1 回だけ測り、間のフレームで前の絵の転送を終わらせる（転送と測定を重ねない）。ログへ `CB ...` を 1 行ずつ出し、最後に `CB END`。方法は `main/hal/int_latency.c`、結果は [docs/perf/int-latency.md](../../docs/perf/int-latency.md)。これもメニューには出さず、USB broker の `app_session` で起動する。

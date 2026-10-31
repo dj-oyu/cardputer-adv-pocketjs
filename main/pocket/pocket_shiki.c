@@ -148,10 +148,17 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     return JS_NULL;
 }
 
+/* benchCount(): how many lines bench() gives, so the app can show progress. */
+static JSValue js_bench_count(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    return JS_NewUint32(ctx,(uint32_t)(int_latency_count()+OP_COUNT));
+}
+
 esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
-    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",3,js_run),JS_CFUNC_DEF("bench",1,js_bench)};
-    return JS_SetPropertyFunctionList(ctx,ns,methods,2)<0?ESP_ERR_NO_MEM:ESP_OK;
+    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",3,js_run),JS_CFUNC_DEF("bench",1,js_bench),
+        JS_CFUNC_DEF("benchCount",0,js_bench_count)};
+    return JS_SetPropertyFunctionList(ctx,ns,methods,3)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 /* No limits: the engine's are the spec's (sec.9.1); this surface adds none. */
 static const pocket_capability_t capability={.name="kasane.shiki.debug",.supported=true,

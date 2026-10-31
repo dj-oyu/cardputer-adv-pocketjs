@@ -1475,6 +1475,15 @@ static void ui_task(void *arg) {
                                                          configTICK_RATE_HZ);
                     vm_wake_wait(pocket_kasane_source_wait_ticks(
                         wait_now,ticks,configTICK_RATE_HZ));
+                } else if(!floor_ms) {
+                    // A frame that ran past the whole period waited nowhere
+                    // above, and back to back such frames never left this
+                    // core: CPU 1's idle task starved and the task watchdog
+                    // warned every 5 s (seen with apps/shikitest at 60 ms a
+                    // frame, docs/kasane/shiki.md sec.5.11). One tick, as the
+                    // continuation branch already owes; only frames over the
+                    // period pay it.
+                    vTaskDelay(1);
                 }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.

@@ -79,11 +79,8 @@ if (typeof pocket !== 'undefined') {
   console.log('SK BEGIN seed ' + SEED + ' cases ' + N);
   // A case takes 30-60 ms of JS here, and a turn over budget is interrupted:
   // stop at 60 ms. Four cases a line keep 600 under the broker's 256 lines.
-  let out = '', f = 0;
+  let out = '';
   globalThis.frame = function () {
-    // A frame past 33 ms never waits, so CPU 1's idle task never runs and the
-    // task watchdog warns every 5 s: rest one frame in ten (README.md).
-    if (++f % 10 === 0) return;
     const t0 = Date.now();
     while (i < N && Date.now() - t0 < 60) {
       const c = next();
