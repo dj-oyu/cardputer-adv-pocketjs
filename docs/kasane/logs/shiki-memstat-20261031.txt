@@ -1,0 +1,27 @@
+# DERBY (local.derby, 90 s idle: paddock -> demo race 1000001 to finish/photo/result -> paddock -> next demo start), build 392ffe2
+SHIKI_MEM total peak=37408 cur=36076 n=50 overflow=0 free_at_peak=55068 lg_at_peak=31744 free_min=53672 lg_min=31744
+SHIKI_MEM site proc:303 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:304 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:305 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:306 n=1 peak=1024 max=1024 cur=1024
+SHIKI_MEM site derby:196 n=5 peak=1984 max=992 cur=132
+SHIKI_MEM site proc:476 n=34 peak=1468 max=72 cur=544
+SHIKI_MEM site proc:263 n=7 peak=2536 max=416 cur=2120
+# MEGADEMO (local.megademo, 90 s, no input; scenes seen at the end: NEWS tier 2 (registered=108), TWIST), build 392ffe2
+SHIKI_MEM total peak=33304 cur=31556 n=142 overflow=0 free_at_peak=46740 lg_at_peak=31744 free_min=45740 lg_min=31744
+SHIKI_MEM site grid:432 n=1 peak=1344 max=1344 cur=1344
+SHIKI_MEM site grid:470 n=1 peak=1600 max=1600 cur=1600
+SHIKI_MEM site proc:303 n=1 peak=7936 max=7936 cur=7936
+SHIKI_MEM site proc:304 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:305 n=1 peak=7936 max=7936 cur=7936
+SHIKI_MEM site proc:306 n=1 peak=1024 max=1024 cur=1024
+SHIKI_MEM site proc:476 n=120 peak=1496 max=64 cur=964
+SHIKI_MEM site proc:263 n=16 peak=1216 max=152 cur=0
+# BIG WAVE (local.bigwave, 90 s at the title screen: all 22 plans registered; the run itself NOT measured: starting it needs the '1' key, which the broker cannot send), build 392ffe2
+SHIKI_MEM total peak=41916 cur=41916 n=40 overflow=0 free_at_peak=64080 lg_at_peak=31744 free_min=64080 lg_min=31744
+SHIKI_MEM site proc:552 n=22 peak=5604 max=800 cur=5604
+SHIKI_MEM site proc:263 n=14 peak=3032 max=224 cur=3032
+SHIKI_MEM site proc:303 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:304 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:305 n=1 peak=10752 max=10752 cur=10752
+SHIKI_MEM site proc:306 n=1 peak=1024 max=1024 cur=1024
