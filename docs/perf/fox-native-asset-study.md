@@ -50,7 +50,24 @@ m32実appのrequested peak123380 B／guest会計peak138116 B／最大request5587
 - 五つのcompiled surfaceについて整数pixel中心・inclusive bbox・canonical edgeのnearest-Z参照45viewは差分0。逆順の負例は旧形状60／変更形状50画素の差を検出。別の眼・鼻・skullとの遮蔽、連続角度域、実appのpitch操作は保証しない。
 - Xtensa GCC15.2/O2の単体stack参考値: evaluate旧1104 B→1072 B、mesh helper784 B、visibility752 B。noinlineで非使用経路の増加を避けた一方、既知mesh callchainは2112→2608 B。上位JS／libgcc／実機stack peakは別で未計測。
 
-今回のESP速度、実機peak／largest／GC時間、物理LCD画質は未測定。実機a418の[雲A/C](cloud-memory-fixture.md)は別SHA／別model／診断条件で、本候補の結果として扱わない。通常sourceはTRACE/phase-only OFF/OFF、実機a418へ書き込んでいない。
+ホストの表からESP速度・定常／peak・GC時間・物理LCD画質は導けない。a418の[雲A/C](cloud-memory-fixture.md)は別SHA／別model／診断条件であり、本候補の結果ではない。023559fの実機確認は次節に分ける。
+
+## 023559fの実機smoke（2026-10-31、別担当の報告）
+
+対象は`023559f29fd22a3bc483064baab520d2652c45f5`、通常TRACE/phase-only OFF/OFF。12:36:10 UTCにflash・readback・boot ELF一致を確認。FOX SHEETはyaw／world light／release-reload 3往復／resetの14入力、既定FOX FACEは4表情／yaw／light／resetの11入力をconsumed。両者STOP/CLOSE成功、12:38:51にfresh HOMEへ戻った。assert/panic/OOM/draw errorのログなし、ログ欠落なし。これは画質受入や失敗注入試験ではない。
+
+| 観測窓 | FOX SHEET | FOX FACE |
+| --- | ---: | ---: |
+| 起動後・初回描画前 guest B | 75340 | 69452 |
+| 同時点 ESP free B | 122212 | 128128 |
+| 同時点 ESP largest B | 59392 | 59392 |
+| APP_ID→初回描画通知 ms | 528 | 481 |
+| STOP後 guest B | 0 | 0 |
+| STOP後 ESP free / largest B | 207752 / 69632 | 207752 / 69632 |
+
+**初回前とSTOP後のphase値であり、peak・定常・FPS・GC時間・stack余裕ではない。** release/reload中の個別メモリ推移は未取得。表示captureとapp_sessionの正式併用経路がないため画像は未取得、物理LCD画質も未受入。上の画像は引き続きホスト画像である。
+
+同boot `11651282494201920168`、終了時owner/lease/job/queue/sessionなし。初回catalog_changedは未実行照合後fresh catalogで再準備、flash後continuation期限切れは通常queueの再待機で処理し、他job介入なし。一次記録は実機担当の`hone110-023559f2-device-result-20261031.json`とflash-evidence。本文はその報告を転記したもので、独立した再実測ではない。後続のローカル造形案をこの実機SHAの実績へ混ぜない。
 
 ## 再現
 

@@ -15,7 +15,7 @@
 | UP | Model/Instanceをrelease／reload |
 | ENTER | 中立viewへresetしてload |
 
-正式app catalogとNATIVE_APP経路へ登録している。既存の物理HOME shell一覧は変更していない。実機a418にはこのappを配置しておらず、新headの正式build／承認されたflash／fresh catalog確認は後段。
+正式app catalogとNATIVE_APP経路へ登録している。既存の物理HOME shell一覧は変更していない。023559fの実機でyaw・light・release/reload・reset・STOP/CLOSEのsmokeは確認済み。capture／物理LCD画質・peak／定常メモリは未確認で、後続造形試作とは別の実績である。詳細は[計測記録](../../docs/perf/fox-native-asset-study.md#023559fの実機smoke2026-10-31別担当の報告)。
 
 releaseでは個体arenaとModel参照を解放するが、appが所有するdisplay resourceと補助配列は再読込み用に保持する。提出済み画像は数値snapshotとして残り、RELEASED表示でも参照切れにならない。app終了のruntime解放とは別段階である。
 
