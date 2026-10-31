@@ -6,7 +6,7 @@
 
 動的JS作成ではoptional module `apps/lib/ayatsuri_local_plane.js`をロードし、`AyatsuriLocalPlane.scene(options)`を明示的に使う。通常の`Ayatsuri.scene`を書き換えるmoduleではない。appのchunksへ`regions ../lib/ayatsuri_local_plane.js`を登録し、必要時に`pocket.app.load('regions')`する例になる。既存band/checkerや領域を使わないappはこのmoduleを読み込まない。固定native assetもJS helperを必要としない。
 
-専用factoryは元のsceneと同じ配置/材質/光/時計/描画の入口を持ち、同じ面への色領域適用を引き受ける。作成済みpatternは所有normalと共有encoderを保持し、global helperの置換/削除で意味を変えない。scene.disposeはhelperの作業参照も切る。現在はSourceAのprivate264B layoutを使う実験adapterで、任意geometry/clip adapterの自動合成を保証しない。
+専用factoryは元のsceneと同じ配置/材質/光/時計/描画の入口を持ち、同じ面への色領域適用を引き受ける。作成済みpatternは所有normalと共有encoderを保持し、global helperの置換/削除で意味を変えない。現在はSourceAのprivate264B ellipsoid／316+108*n B blend layoutを使う実験adapterで、任意geometry/clip adapterの自動合成を保証しない。
 
 ```js
 const scene = AyatsuriLocalPlane.scene(options);
@@ -28,6 +28,35 @@ scene.render(); // beginFrame/commit and clock belong to the app.
 前面の復元点qでd=n·q−offsetを計算する。feather=0はd>=0でB、それ以外A。正ならmix=clamp(0.5+d/feather,0,1)。端点はA/Bを直接選び、中間だけRGB565の各成分を混合してから既存のshadeを1回行う。端点をA+(B−A)で再計算し、丸めが変わることを避ける。
 
 qはworld normalやlightではなく元のunit sphere座標なので、模様は物体とともに動き、非一様scaleにも追従する。light変更では模様座標を変えず、shadeだけ変わる。新しい任意mesh morphや物理的な皮膚/毛の散乱を保証する機能ではない。
+
+### 動的blendの同じ入口
+
+appのchunksへ`blend ../character/character_blend.js`も登録し、utility→blend→regionsの順で明示loadする。通常の`character.js`と`character_blend.js`は変更せず、optional factoryのscene内でblend拡張を包む。
+
+```js
+const scene = AyatsuriLocalPlane.scene({geometries: [AyatsuriBlend]});
+const cheek = scene.add({
+  name: 'cheek',
+  geometry: {kind: 'blendEllipsoids', blend: 8, lobes: [
+    {position: [-8, 0, 0], radii: [20, 22, 14]},
+    {position: [8, 0, 0], radii: [20, 22, 14]}
+  ]},
+  material: {color: 0xe47b30, roughness: 0.9},
+  pattern: {kind: 'localPlane', normal: [0, 0.8, 0.6],
+            offset: 3, feather: 2, color: 0xffe8bb}
+});
+cheek.place({rotation: [0, yaw, 0]});
+scene.evaluate(timeMs);
+scene.render();
+```
+
+同じpattern名でも、blendの距離と幅はnode共通model-local単位であり、ellipsoidの単位球qとは異なる。blendはoffset[-4096,4096]、featherは0または[1e-4,4096]。入力normalを所有copy/正規化し、native Modelと同じF32 authoring値から係数を作る。固定色Bとplaneの作成後変更は未提供で、色A・配置・visibility・光・cameraは通常handleを使う。
+
+masked blendだけ既存の同じbacking store末尾へ24Bを予約し、plane F32[5]とB色U16[1]のviewを作る。geometry/camera変更時だけ係数を更新し、light/material変更だけでは再計算しない。`stats(out).localPlaneUpdates`はこの計算回数。hot pathでrecord探索や新buffer確保を行わず、render時に既存backendの7引数経路を使う。planeを持たないblendは5引数を維持する。constructorでbackendと拡張のmethodを捕捉し、後のnamespace差替えで既存sceneを切り替えない。
+
+addのadapter用handle/record/array枠/viewはnode公開前に予約する。失敗時に名前やnodeを残さず、同名再試行を可能にする。再入はbusyとして拒否し、render/visitには成功evaluateが必要。disposeは冪等で、保持された公開handleからraw nodeとbuffer参照も切り、以後の操作を拒否する。scene自身のwork解放と、appが所有するKasane resourceの解放は別責任。既存のcommitted描画はnumeric snapshotなので、新しいframe待ちや表示の自動消去は追加しない。
+
+visitの`localPlane`、`localPlaneColor`、`localPlaneNormal`とlocal offset/featherは同期の借用numeric dataで、immutable snapshotではない。変更・長期保持を行わず、後の描画を保存したい場合はcallerがcopyする。callerが借用viewを保持し続ける場合のArrayBuffer RAM回収を、disposeだけで保証しない。
 
 ## hone / C packet
 
@@ -64,7 +93,7 @@ blendは各lobeの単位球qでは分類しない。node全体のmodel-local点p
 
 hone Cは`pocket_proc_native_blend_region(ctx,op,&blend,&mask)`。JS低層は既存`pocket.hone.blendEllipsoids(lobes21n,light9,material11,surface3,controls2)`の5引数を保持し、7引数の場合だけ`plane5`（A,B,C,D,featherのFloat32Array）と`color1`（B色Uint16Array）を追加する。新たな常駐JS endpoint objectは増やさない。全入力をstackへcopy/検証してから候補へappendする。低層以外の利用者はnative Modelのpattern記述を使い、画面係数やoffset管理を行わない。
 
-今回、動的SourceA用`AyatsuriLocalPlane.scene()`はellipsoid専用のまま。blendでの高層入口はoffline Model記述とnative Instanceであり、SourceA wrapperを対応済みとはしない。2平面、任意mask、blend surfaceへの独立凸clipや別surface間depthは未実装。
+高層入口は動的SourceAのoptional factoryとoffline Model記述の両方。2平面、任意mask、blend surfaceへの独立凸clipや別surface間depthは未実装。
 
 ## native共有Model
 

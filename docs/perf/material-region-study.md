@@ -98,3 +98,23 @@ python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study blend-m
 ```
 
 追加のpixel処理は平面dot3乗算/3加減算、必要時のfeather係数とalbedo混合。逆変換はnode評価時に行い、pixelごとの逆行列やlobe再走査を追加しない。旧96B header/旧variant/5引数は維持し、新packetはraw末尾へdescriptor24Bを付けてから10B entryへ丸める。native submitのsnapshotコピーを削って寿命を借用へ変えることはしていない。画質と実機費用が未確認のため、速度改善済みとは主張しない。
+
+## 白帯の根本差と次の造形試験
+
+設定図`fox-character-sheet-volume-muzzle-v2.png`の実画素と上のhost比較を独立に見直した。現状は丸い頭へ突出した眼球、横長の白い頬cap、丸い口吻を載せる構成である。設定図は額→眼窩→鼻筋→前へ細まる口吻が連続し、眼がその面へ収まる。頬は耳側で広く、鼻側では薄い。現blendは白いgroup内だけを連続させ、頭・眼窩・口吻全体の面を共有していないため、色境界だけを動かしても独立した口ひげ感が残る。
+
+次の候補は既存前面を置き換える小さな固定構成の3D顔面patchで、部品の追加で埋めない。額・眼窩・頬・口吻を共有し、眼開口を同じ顔面の基準点へ結ぶ。まずneutralの正面/左右35°で面のつながりをhost検証する案であり、実装・採用済みではない。既存の親子TRS、3D anchor、凸clip、固有色planeは再利用できる。一方、凹んだ眼窩や細まる顔面を制御する連続面の位置/法線更新・面上attachmentは未提供であり、単なる正のellipsoid blendだけで解決済みとはしない。一般mesh engineや全画面Z-bufferの導入を先に必須とはしない。
+
+## SourceA の明示的 optional factory
+
+`AyatsuriLocalPlane.scene({geometries:[AyatsuriBlend]})`から、動的なblendにも同じ1平面2色をauthoringできる。通常の`character.js`と`character_blend.js`は変更せず、非使用appに追加moduleを読み込ませない。masked blendだけが既存backing末尾に24Bを追加し、planeはgeometry/camera変更時に更新する。光だけの変更では固有色領域を再計算しない。
+
+実QuickJSの確保失敗注入で、初稿の動的propertyコピーが例外を残したままrotationの欠けたnodeを公開する欠陥を検出した。対象fieldを明示したsnapshotへ修正し、単にpending例外を消して成功扱いにはしていない。固定版の64bit ASan/UBSan試験では113確保位置すべてがatomicに拒否され、旧packet保持・同名再試行後の全packet一致を確認した。通常factoryの対照64位置もすべて拒否した。
+
+同試験の16 pose/camera/light条件でnative Modelとのgeometry byte一致、実C shaderの32画像対一致、plane最大絶対差0。warmの無変更1000回とpose変更1000回はallocator呼出し0。dispose済みhandleを8個保持したheader等は64bitで1432B残るがraw backingへの参照は切れ、handleも解放後のbaseline差0、runtime終了retained0を確認した。これらはhost試験であり、ESP32の速度・メモリ実測ではない。64bit sanitizer試験は160KiB容量受入とは分離する。
+
+同じ固定版のm32実QuickJSでも16条件/32画像、113位置のatomic拒否と全packet再試行一致、warm両1000回の確保0を確認した。保持した8 tombstoneはm32では864B、解放後baseline差0。ASan版とm32版は別binaryであり、bit数により保持量が異なる。証拠は`.cache/source-plane-proof/final-{asan64,m32}-result.json`とrunner logに残す。
+
+実際の`pocket.hone`とcandidate/committed描画経路も別harnessで検査する。`--source-plane`は12状態を2processで再生し、毎回のincremental/full-reference、色一致、pose/light/camera更新、hide/show、失敗後の旧画像保持とrepair、dispose後のcommitted画像保持と再生成一致を確認する。
+
+固定版はこの実描画harnessも64bit sanitizerとm32の両方でPASSした。m32はcap163840B、frameごとの強制GCなし、両process終了guest0。12状態のhash列が同一で、実行中の依存source hash不変も確認した。最後のreset/invalid/recreate画像hashは`eed049309a5c9e40`。m32結果は`.cache/source-plane-render-m32/result.json`、64bit結果は対応する`source-plane-render-asan/result.json`に保存する。いずれもHOST SIMULATIONであり実機の計測ではない。

@@ -53,4 +53,22 @@ for(const [key,values] of [['offset',[-4097,4097,NaN]],['feather',[-1,9e-5,4097,
 fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/blend-region.aynm'),blendBytes);
 fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/blend-region-plain.aynm'),blendPlain);
 console.log('AYNM_BLEND_REGION_PACK_PASS rows=2 sameColor=true limits=true defaultBytes=unchanged');
+// Only normalize authoring inputs here. The live source/core oracle is QuickJS + C.
+const vm=require('node:vm'),sourceContext=vm.createContext({});
+for(const file of ['apps/character/character.js','apps/character/character_blend.js','tools/ayatsuri/model/test_source_plane_qjs.js'])
+  vm.runInContext(fs.readFileSync(path.join(ROOT,file),'utf8'),sourceContext,{filename:file});
+const forbidden=()=>{throw Error('offline export cannot evaluate');};
+const sourceScene=sourceContext.Ayatsuri.scene({backend:{ellipsoidPacked:forbidden,blendEllipsoids:forbidden},evaluator:{composeNode:forbidden},geometries:[sourceContext.AyatsuriBlend]});
+const sourceDefs=sourceContext.sourcePlaneDefinitions(),sourceHandles=[],sourceNodes=[];
+for(let i=0;i<sourceDefs.length;i++){
+  const def=sourceDefs[i],parent=def.parent===undefined?-1:def.parent,pattern=def.pattern;delete def.pattern;
+  if(parent>=0)def.parent=sourceHandles[parent];
+  const h=sourceScene.add(def),n=h._node,p=n.analytic;
+  const record={index:i,name:n.name,parent,kind:p?p.kind:'group',enabled:n.enabled,pose:Array.from(n.matrix.slice(12,21))};
+  if(p)Object.assign(record,{color:n.color,thickness:n.thickness,opacity:n.opacity,edgeSoftness:n.edgeSoftness,material:Array.from(n.materialData),lobes:Array.from(p.local),blend:p.controls[0],pattern});
+  sourceHandles.push(h);sourceNodes.push(record);
+}
+const sourceFixture=compile({schema:'ayatsuri-native-model-design-v1',nodes:sourceNodes});
+fs.writeFileSync(path.join(ROOT,'.cache/ayatsuri-native/source-plane.aynm'),sourceFixture);
+console.log('SOURCE_PLANE_FIXTURE_PASS nodes=4 bytes='+sourceFixture.length);
 console.log('AYNM_PACK_PASS cloudBytes='+bytes.length+' nodes=19 deterministic=true malformed='+rejected+' tinyNodes=3 tinyBytes='+tinyBytes.length);

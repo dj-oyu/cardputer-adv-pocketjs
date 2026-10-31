@@ -663,6 +663,54 @@ static int memory_app_contract(bool loaded){
     return ok?0:1;
 }
 
+static bool source_plane_eval_file(const char *path){
+    FILE *file=fopen(path,"rb");if(!file)return false;
+    static char source[65536];const size_t n=fread(source,1,sizeof source-1,file);
+    const bool complete=!ferror(file)&&feof(file);fclose(file);source[n]=0;
+    return complete&&n&&eval(source,n,path);
+}
+static bool source_plane_call(const char *method){
+    char script[100];const int n=snprintf(script,sizeof script,"__sourcePlaneFixture.%s();",method);
+    return n>0&&(size_t)n<sizeof script&&eval(script,(size_t)n,"source-plane-phase.js");
+}
+static bool source_plane_renderer_contract(void){
+    const char *files[]={"apps/character/character.js","apps/character/character_blend.js",
+        "apps/lib/ayatsuri_local_plane.js","tools/character/source_plane_render_fixture.js"};
+    for(unsigned k=0;k<4;k++)if(!source_plane_eval_file(files[k]))return false;
+    static uint16_t same[240*135],reset[240*135];
+    const char *phases[]={"plain","same","colour","pose","light","camera","hide","show","reset","snapshot","invalid"};
+    for(unsigned k=0;k<sizeof phases/sizeof phases[0];k++){
+        if(!source_plane_call(phases[k]))return false;
+        present(k);if(!full_reference(k)||present_failures)return false;
+        if(k==0)memcpy(same,panel,sizeof panel);
+        if(k==1&&memcmp(same,panel,sizeof panel))return false;
+        if(k==6)for(unsigned pixel=0;pixel<240*135;pixel++)if(panel[pixel])return false;
+        if(k==8)memcpy(reset,panel,sizeof panel);
+        if(k>=9&&memcmp(reset,panel,sizeof panel))return false;
+        printf("SOURCE_PLANE_FRAME phase=%s hash=%016llx\n",phases[k],(unsigned long long)memory_panel_hash());
+    }
+    if(!source_plane_call("pose"))return false;
+    pocket_kasane_invalidate();failure_strip=0;
+    ksn_display_port failing={.strip=get_strip,.present=fail_second_strip,
+        .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
+    ksn_render_stats stats;if(pocket_kasane_present(&failing,&stats)!=KSN_IO)return false;
+    const char *busy="(()=>{try{pocket.kasane.procedural.beginFrame(0)}catch(e){if(e.code==='BUSY')return;throw e}throw Error('missing repair BUSY')})()";
+    if(!eval(busy,strlen(busy),"source-plane-repair.js"))return false;
+    present(11);if(!full_reference(11))return false;
+    if(!source_plane_call("reset"))return false;
+    present(12);
+    if(memcmp(reset,panel,sizeof panel)||!full_reference(12))return false;
+    if(!source_plane_call("dispose"))return false;
+    present(13);
+    if(memcmp(reset,panel,sizeof panel)||!full_reference(13))return false;
+    if(!source_plane_call("recreate"))return false;
+    present(14);
+    if(memcmp(reset,panel,sizeof panel)||!full_reference(14))return false;
+    if(!source_plane_call("cleanup"))return false;
+    printf("SOURCE_PLANE_FRAME phase=recreated hash=%016llx\n",(unsigned long long)memory_panel_hash());
+    const char *cleanup="delete globalThis.__sourcePlaneFixture;delete globalThis.AyatsuriLocalPlane;delete globalThis.AyatsuriBlend;delete globalThis.Ayatsuri;delete globalThis.Character;";
+    return eval(cleanup,strlen(cleanup),"source-plane-cleanup.js")&&!exceptions&&!present_failures;
+}
 int main(int argc,char **argv){
 #ifdef CHARACTER_MODEL_STUDY
     study_native_active=getenv("CHARACTER_MEMORY_STUDY")!=NULL;
@@ -706,6 +754,19 @@ int main(int argc,char **argv){
         return model_study_run(loaded);
     }
 #endif
+    if(getenv("CHARACTER_SOURCE_PLANE")){
+        bool passed=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&source_plane_renderer_contract();
+        JSOOMCanary oom;JS_TakeOOMCanary(rt,&oom);
+        if(oom.count){
+            printf("SOURCE_PLANE_RENDER_OOM quota=%u allocator=%u first_req=%zu first_used=%zu cap=%s\n",
+                oom.quota_count,oom.allocator_count,oom.first_req,oom.first_used,limit?limit:"unlimited");
+            passed=false;
+        }
+        pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        passed=passed&&!cur_bytes;
+        printf("SOURCE_PLANE_RENDER_%s pointer_bits=%zu cap=%s released_guest=%zu\n",passed?"PASS":"FAIL",sizeof(void*)*8,limit?limit:"unlimited",cur_bytes);
+        return passed?0:1;
+    }
     const bool memory_app=getenv("CHARACTER_MEMORY_APP")!=NULL;
     bool ok=eval(PRELUDE,strlen(PRELUDE),"prelude.js")&&(memory_app||(primitive_contract()&&blend_primitive_contract()&&core_transform_contract()));
     if(!memory_app)JS_RunGC(rt);

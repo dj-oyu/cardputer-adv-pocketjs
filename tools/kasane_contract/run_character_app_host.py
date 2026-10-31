@@ -1,5 +1,6 @@
 """Actual QuickJS, native shapes and Kasane band presentation, host only."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ from run_megademo_app_host import ROOT, build
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cloud', action='store_true', help='run the dedicated one-model CLOUD ACT app')
+    parser.add_argument('--source-plane', action='store_true', help='optional SourceA blend-plane native-renderer contract only')
     parser.add_argument('--fixture', action='store_true', help='tap Enter for the bounded cloud fixture twice, then verify U return and deterministic logs')
     parser.add_argument('--fixture-max-frames', type=int, default=360, help='fixture button-frame budget, 1..360')
     parser.add_argument('--frames-per-mode', type=int, default=301)
@@ -19,6 +21,8 @@ def main():
     parser.add_argument('--capture-dir', type=Path, help='host-only diagnostic images and provenance manifest; separate from the 5418-frame regression')
     parser.add_argument('--capture-ticks', help='override default per-mode ticks: comma list or inclusive start:stop[:step], including reverse ranges')
     args = parser.parse_args()
+    if args.source_plane and (args.cloud or args.fixture or args.capture_dir or args.ppm or args.capture_ticks):
+        parser.error('--source-plane is a separate bounded contract')
     if args.fixture and (not args.cloud or args.capture_dir or args.ppm):
         parser.error('--fixture requires --cloud and cannot be combined with capture/PPM output')
     if not 1 <= args.fixture_max_frames <= 360:
@@ -35,8 +39,12 @@ def main():
         parser.error('--frames-per-mode must be at least 2 to release mode-switch keys')
     flags = ['-fsanitize=address,undefined']
     cache = ROOT / ('.cache/character-fixture-asan' if args.fixture else '.cache/character-native')
+    if args.source_plane:
+        cache = ROOT / '.cache/source-plane-render-asan'
     if args.m32:
         cache = ROOT / ('.cache/character-fixture-m32' if args.fixture else '.cache/character-native-m32')
+        if args.source_plane:
+            cache = ROOT / '.cache/source-plane-render-m32'
         sysroot = dict(os.environ, M32_SYSROOT=os.environ.get('M32_SYSROOT', str(cache / 'm32sys')))
         flags = subprocess.run(['bash','tools/vmtest/m32_sysroot.sh'],cwd=ROOT,env=sysroot,
                                check=True,capture_output=True,text=True).stdout.split()
@@ -53,6 +61,41 @@ def main():
     env['CHARACTER_APP_CHUNKS'] = chunks
     env.setdefault('ASAN_OPTIONS', 'detect_leaks=0:abort_on_error=1')
     env.setdefault('UBSAN_OPTIONS', 'halt_on_error=1:print_stacktrace=1')
+    if args.source_plane:
+        env['CHARACTER_SOURCE_PLANE'] = '1'
+        if args.m32:
+            env['CHARACTER_HEAP_LIMIT'] = '163840'
+        if 'ASAN_OPTIONS' not in os.environ:
+            env['ASAN_OPTIONS'] = 'detect_leaks=1:abort_on_error=1'
+        def inputs():
+            hashes = capture.provenance(ROOT, binary, flags)['source_sha256']
+            name = 'tools/character/source_plane_render_fixture.js'
+            hashes[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+            return hashes
+        before = inputs()
+        runs = []
+        for attempt in (1, 2):
+            result = subprocess.run([str(binary)], cwd=ROOT, env=env, text=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            (cache / f'run-{attempt}.log').write_text(result.stdout)
+            print(result.stdout, end='')
+            runs.append(dict(passed=result.returncode == 0 and 'SOURCE_PLANE_RENDER_PASS' in result.stdout,
+                             returncode=result.returncode,
+                             frames=[line for line in result.stdout.splitlines() if line.startswith('SOURCE_PLANE_FRAME ')]))
+        unchanged = before == inputs()
+        deterministic = len(runs[0]['frames']) == 12 and runs[0]['frames'] == runs[1]['frames']
+        passed = unchanged and deterministic and all(row['passed'] for row in runs)
+        proof = dict(kind='HOST SIMULATION', passed=passed, sources_unchanged_during_run=unchanged,
+                     deterministic=deterministic,
+                     heap_limit_bytes=int(env['CHARACTER_HEAP_LIMIT']) if env.get('CHARACTER_HEAP_LIMIT') else None,
+                     pointer_bits=32 if args.m32 else 64,
+                     source_sha256=before, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+                     flags=flags, runs=runs, device_measurement=False)
+        (cache / 'result.json').write_text(json.dumps(proof, indent=2) + '\n')
+        print('SOURCE_PLANE_RENDER_REPEAT_' + ('PASS' if passed else 'FAIL'), cache / 'result.json')
+        if not passed:
+            raise SystemExit(1)
+        return
     if args.fixture:
         env.update(CHARACTER_FIXTURE='1', CHARACTER_FIXTURE_MAX_FRAMES=str(args.fixture_max_frames),
                    CHARACTER_HEAP_LIMIT='163840', CHARACTER_NO_EAGER_GC='1', CHARACTER_FULL_REFERENCE='1')
