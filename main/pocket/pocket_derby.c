@@ -459,11 +459,6 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
  * numbers derby_view.js passed (pocket_proc_draw_numbers takes doubles). */
 #define DNR_Q 720896            /* 11 m */
 #define DFR_Q 1481114           /* 22.6 m */
-#define VS_X 840                /* the screen: centre x, depth, half width, bottom, top (m) */
-#define VS_D 34
-#define VS_W 20
-#define VS_B 6
-#define VS_T 16
 static int64_t fdiv(int64_t a,int64_t b){int64_t q=a/b;if(a%b&&((a<0)!=(b<0)))q--;return q;}
 static int64_t cdiv(int64_t a,int64_t b){return -fdiv(-a,b);}
 static int64_t rdiv(int64_t a,int64_t b){return fdiv(2*a+b,2*b);}   /* Math.round(a / b), b > 0 */
@@ -490,19 +485,20 @@ static JSValue js_side(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     cam.e=cam.K?(int64_t)k0*Q16:-5*Q16;
     return JS_UNDEFINED;
 }
-/* aim(gu, wu, gl, fmin): a panning unit at pose(gu, wu) turned to the
- * leader at gl (shot()): pc = [x, z, unit x, z, f, distance]. Returns f
- * rounded (px). */
+/* aim(gu, wu, gl, fmin, px, fmax): a panning unit at pose(gu, wu) turned to
+ * the leader at gl (shot()), f keeping the leader px long within fmin..fmax:
+ * pc = [x, z, unit x, z, f, distance]. Returns f rounded (px). */
 static JSValue js_aim(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
-    double gu,wu,gl;int32_t fmin;
-    if(argc<4||!course||!qn(argv[0],&gu)||!qn(argv[1],&wu)||!qn(argv[2],&gl)||!in32(argv[3],&fmin))
-        return fail(ctx,"derby.aim",POCKET_ERR_INVALID_ARGUMENT,"expected course(), Q16 g, w, lead and f px");
+    double gu,wu,gl;int32_t fmin,px,fmax;
+    if(argc<6||!course||!qn(argv[0],&gu)||!qn(argv[1],&wu)||!qn(argv[2],&gl)||!in32(argv[3],&fmin)||
+       !in32(argv[4],&px)||!in32(argv[5],&fmax))
+        return fail(ctx,"derby.aim",POCKET_ERR_INVALID_ARGUMENT,"expected course(), Q16 g, w, lead and three px ints");
     double q[4],a[4];
     pose(gu,wu,q);pose(gl,(course->dnr+DFR_Q/65536.0)/2,a);
     const double x=a[0]-q[0],z=a[1]-q[1],e=sqrt(x*x+z*z);
     double *pc=view.pc;
-    pc[0]=q[0];pc[1]=q[1];pc[2]=x/e;pc[3]=z/e;pc[4]=js_min(1500,js_max(fmin,14*e/2.4));pc[5]=e;
+    pc[0]=q[0];pc[1]=q[1];pc[2]=x/e;pc[3]=z/e;pc[4]=js_min(fmax,js_max(fmin,px*e/2.4));pc[5]=e;
     cam.aimed=true;view.set=false;
     return JS_NewInt32(ctx,(int32_t)js_round(pc[4]));
 }
@@ -511,13 +507,14 @@ static void pj(const double P[4],double o[2]){
     const double *pc=view.pc,a=P[0]-pc[0],b=P[1]-pc[1],Z=(a*pc[2]+b*pc[3])/pc[4];
     o[0]=a*pc[3]-b*pc[2]+120*Z;o[1]=Z;
 }
-/* wide(g, units): the panning unit (0..2 of units' [g, w] rows) nearest the
- * aim at g, plus 4 when it is over 60 m away (wide()). */
+/* wide(g, units, far): the panning unit (0..2 of units' [g, w] rows) nearest
+ * the aim at g, plus 4 when it is over far m away (wide()). */
 static JSValue js_wide(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
-    double g;
-    const int32_t *u=argc>=2?i32array(ctx,argv[1],6):NULL;
-    if(!u||!course||!qn(argv[0],&g))return fail(ctx,"derby.wide",POCKET_ERR_INVALID_ARGUMENT,"expected Q16 g and 6 Q16 unit terms");
+    double g;int32_t far;
+    const int32_t *u=argc>=3?i32array(ctx,argv[1],6):NULL;
+    if(!u||!course||!qn(argv[0],&g)||!in32(argv[2],&far))
+        return fail(ctx,"derby.wide",POCKET_ERR_INVALID_ARGUMENT,"expected Q16 g, 6 Q16 unit terms and m");
     double a[4],q[4],e=1e9;
     int m=0;
     pose(g,(course->dnr+DFR_Q/65536.0)/2,a);
@@ -526,7 +523,7 @@ static JSValue js_wide(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         const double x=a[0]-q[0],z=a[1]-q[1];
         if(x*x+z*z<e)e=x*x+z*z,m=i;
     }
-    return JS_NewInt32(ctx,m+(e>60*60?4:0));
+    return JS_NewInt32(ctx,m+(e>(double)far*far?4:0));
 }
 /* part(kind, h, ...): one piece of the background on the current camera. */
 enum{PART_STANDS,PART_RAIL,PART_TURF,PART_POLES,PART_GATE,PART_VIS,PART_PANVIS,PART_PANPOLES};
@@ -599,8 +596,8 @@ static JSValue js_part(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         break;
     }
     case PART_VIS:{
-        /* a: the face's rect (px) and its colour. */
-        const double in[8]={a[0]-1,a[1]-1,a[2],a[3],(double)lmax(1,rdiv(f*4,340LL*Q16)),dq(gy((int64_t)VS_D*Q16)),a[4],0};
+        /* a: the face's rect (px), its colour and depth (m). */
+        const double in[8]={a[0]-1,a[1]-1,a[2],a[3],(double)lmax(1,rdiv(f*4,(int64_t)a[5]*10*Q16)),dq(gy((int64_t)a[5]*Q16)),a[4],0};
         r=drawq(ctx,h,in);
         break;
     }
@@ -678,16 +675,18 @@ static JSValue js_head(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     }
     return JS_UNDEFINED;
 }
-/* screen(out, pan): the big screen's face on the side camera (or with pan,
- * the panning unit) as px ints [x0, y0, x1, y1], or 0 when it is out of view
- * or over the map (paint()). On a panning unit it keeps the face's edges for
- * part(PANVIS). */
+/* screen(out, pan, x, d, w, b, t): the big screen (centre x, depth d, half
+ * width w, bottom b and top t, m) on the side camera (or with pan, the
+ * panning unit) as px ints [x0, y0, x1, y1] in out, or 0 when it is out of
+ * view or over the map (paint()). On a panning unit it keeps the face's
+ * edges for part(PANVIS). */
 static JSValue js_screen(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
-    int32_t *out=argc>=1?i32array(ctx,argv[0],4):NULL;
-    if(!out||!course)return fail(ctx,"derby.screen",POCKET_ERR_INVALID_ARGUMENT,"expected course() and Int32Array(4)");
+    int32_t *out=argc>=7?i32array(ctx,argv[0],4):NULL,vs[5];
+    for(int i=0;i<5&&out;i++)if(!in32(argv[i+2],&vs[i]))out=NULL;
+    if(!out||!course)return fail(ctx,"derby.screen",POCKET_ERR_INVALID_ARGUMENT,"expected course(), Int32Array(4), pan and 5 m ints");
     double A[4],B[4];
-    pose(VS_X-VS_W,VS_D,A);pose(VS_X+VS_W,VS_D,B);
+    pose(vs[0]-vs[2],vs[1],A);pose(vs[0]+vs[2],vs[1],B);
     double v[4];
     if(argc>=2&&JS_ToBool(ctx,argv[1])&&cam.aimed){
         double p[2],q[2];
@@ -698,7 +697,7 @@ static JSValue js_screen(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         v[0]=js_round(x0);v[1]=ceil(28-10*js_min(vq[1],vq[3]));v[2]=js_round(x1);v[3]=28;
     }else{
         const double f=dq(cam.f),x0=dq(cam.x0),h=dq(cam.h),hy=dq(cam.hy),p=f/A[1];
-        v[0]=js_round(120+(A[0]-x0)*p);v[1]=js_round(hy+(h-VS_T)*p);v[2]=js_round(120+(B[0]-x0)*p);v[3]=js_round(hy+(h-VS_B)*p);
+        v[0]=js_round(120+(A[0]-x0)*p);v[1]=js_round(hy+(h-vs[4])*p);v[2]=js_round(120+(B[0]-x0)*p);v[3]=js_round(hy+(h-vs[3])*p);
         if(v[0]>239||v[2]<1||v[1]<13||v[1]>134||v[2]-v[0]<8||v[2]-v[0]>160)return JS_NewInt32(ctx,0);
     }
     for(int i=0;i<4;i++)out[i]=(int32_t)v[i];
@@ -715,12 +714,12 @@ esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
 #endif
         JS_CFUNC_DEF("ser",7,js_ser),
         JS_CFUNC_DEF("side",6,js_side),
-        JS_CFUNC_DEF("aim",4,js_aim),
-        JS_CFUNC_DEF("wide",2,js_wide),
+        JS_CFUNC_DEF("aim",6,js_aim),
+        JS_CFUNC_DEF("wide",3,js_wide),
         JS_CFUNC_DEF("part",8,js_part),
         JS_CFUNC_DEF("lanes",4,js_lanes),
         JS_CFUNC_DEF("head",3,js_head),
-        JS_CFUNC_DEF("screen",2,js_screen),
+        JS_CFUNC_DEF("screen",7,js_screen),
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?
            ESP_ERR_NO_MEM:ESP_OK;

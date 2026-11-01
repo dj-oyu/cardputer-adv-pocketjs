@@ -1242,7 +1242,7 @@ int main(int argc,char **argv){
      * panning unit, the leader's px, the f cap): 0 pans for every WIDE (f
      * from its least, 200), 1e9 never; 0,1 keeps f at 200, which brings the
      * screen into a panning unit's view. */
-    if(getenv("DERBY_PAN")){char b[96];snprintf(b,sizeof b,"[%s].forEach((v,i)=>PAN[i]=v)",getenv("DERBY_PAN"));
+    if(getenv("DERBY_PAN")){char b[96];snprintf(b,sizeof b,"[%s].forEach((v,i)=>PAN[i]=v|0)",getenv("DERBY_PAN"));
         REQ(eval(b,strlen(b),"pan.js"));}
     /* DERBY_JS: any script run after the app's (e.g. moving the screen so
      * that a panning unit sees it: run_derby.py). */

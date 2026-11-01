@@ -98,9 +98,10 @@ try {
   }, nop);
 } catch (e) {}
 
-// The screen's lettering offsets from its face (px; the face is
-// pocket.derby's: main/pocket/pocket_derby.c VS_*). FN: the feed's runners.
-const FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
+// The screen (README "Turf vision"): centre x, depth, half width, bottom
+// and top height (m), a 4:1 face; LO: its lettering's offsets from the face
+// (px); FN: the feed's runners.
+const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
 // The course: chord ends (CH, Q16 m) and sections [length, radius (0: a
 // straight), x, z, tangent x, z, heading (Q16 turns)], Q16; pose() is
 // pocket.derby's. The oval (README "楕円"): the back straight, a 120 m bend
@@ -118,7 +119,7 @@ let CRS = 0, CH;
 // screen); HEAD ON is a still (paint).
 const CAMS = [[6553600, 635699, 2162688, 576717, 1, -2000000000, 2000000000], 0, [3801088, 983040, 2359296, 994339, 1, -2000000000, 2000000000],
   [11141120, 458752, 1441792, 246724, 0, -2000000000, 65142784], [19660800, 262144, 1966080, 192239, 0, 65536000, 65536000],
-  [8519680, 104858, 5505024, 443628, 1, 53084160, 57016320], 0,
+  [8519680, 104858, 5505024, 443628, 1, (VS[0] - 30) * QM, (VS[0] + 30) * QM], 0,
   [200, 6, 28, 6553600, -917504, -917504], [200, 6, 28, 30146560, -917504, -196608], [200, 6, 28, 53739520, -917504, -917504]],
   NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON', 'WIDE 1', 'WIDE 2', 'WIDE 3'];
 // Panning units (rows 7..9, [least f (px), height, horizon y, g, w, w on the
@@ -126,13 +127,15 @@ const CAMS = [[6553600, 635699, 2162688, 576717, 1, -2000000000, 2000000000], 0,
 // leader, f keeping it 14 px long, at most 1500. WIDE takes the nearest when
 // it is over 60 m from the leader, or the leader is on the oval's bend (the
 // side view does not bend: README). Height 6 and horizon 28 are baked in the
-// pan plans. PU: the units' [g, w] for pocket.derby.wide.
-// pc: the unit in use (null for a side unit), its f px at 4.
+// pan plans. PAN: the distance (m), the leader's px, the f cap. PU: the
+// units' [g, w] for pocket.derby.wide. pc: the unit in use (null for a side
+// unit), its f px at 4.
+const PAN = [60, 14, 1500];
 let pc = null;
 const PU = new Int32Array(6);
 function wide(g) {
   for (let i = 0; i < 3; ++i) PU[2 * i] = CAMS[7 + i][3], PU[2 * i + 1] = CAMS[7 + i][CRS ? 5 : 4];
-  const r = S.wide(g, PU);
+  const r = S.wide(g, PU, PAN[0]);
   return r > 3 || CRS && g > OB && g < 42598400 ? 7 + (r & 3) : 0;
 }
 // x a / b for 0 <= x, a < 2^15 (Q16 fractions): the high and low halves.
@@ -146,7 +149,7 @@ function shot(m, xs, l, cut) {
   }
   const c = CAMS[m];
   if (m > 6) {
-    pc = [0, 0, 0, 0, S.aim(c[3], c[CRS ? 5 : 4], mx.apply(null, xs), c[0])];
+    pc = [0, 0, 0, 0, S.aim(c[3], c[CRS ? 5 : 4], mx.apply(null, xs), c[0], PAN[1], PAN[2])];
     return [pc[4] * QM, c[1] * QM, c[2] * QM];
   }
   const tgt = mx.apply(null, xs) - c[3];
@@ -165,7 +168,7 @@ function course(c, x0, xs, close, gate, K) {
     S.part(0, live.stands, live.crowd || 0, 163840);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
-      S.part(5, live.vis, vr[0], vr[1], vr[2], vr[3], von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
+      S.part(5, live.vis, vr[0], vr[1], vr[2], vr[3], von < 8 ? 0 : von < 11 ? 0x632c : 0x0866, VS[1]);
       feed(xs, (vr[2] - vr[0]) * 546);
       S.side(c[0], c[1], c[2], x0, 0, 0);
     }

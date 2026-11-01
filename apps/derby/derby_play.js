@@ -80,10 +80,10 @@ globalThis.frame = function (b) {
         // after 400 m cuts to the new leader, a cut is held 45 frames, HEAD ON
         // (a close finish) until the slow motion (README).
         // WIDE away from every panning unit is the nearest one (wide()).
-        // L: the leader (Q16 m); the screen is at 840 m.
+        // L: the leader (Q16 m).
         const o = ro = rank || order(rs), L = XQ[o[0]];
         let m = slow ? 3 : man ? cam : scene !== 'race' ? 0 : hold > 0 || cm === 6 ? cm :
-          L < 9830400 ? 0 : L < (F.o ? OB : 26214400) ? 2 : L < 45875200 ? (dl > 0 ? 1 : 0) : L < 51118080 ? 1 : L < 58982400 ? 5 :
+          L < 9830400 ? 0 : L < (F.o ? OB : 26214400) ? 2 : L < 45875200 ? (dl > 0 ? 1 : 0) : L < (VS[0] - 60) * QM ? 1 : L < (VS[0] + 60) * QM ? 5 :
           L > 60948480 && L - XQ[o[1]] < 98304 ? 6 : 0;
         if (!m && scene === 'race' && !live.gate) m = wide(L);
         if (m !== cm) { cl = man ? pick : o[0]; cm = m; hold = camT = 45; log('CAM ' + (NAMES[m] || m)); }

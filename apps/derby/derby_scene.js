@@ -135,7 +135,7 @@ function paint(c, xs, close, gate, extra) {
   // over the map (y < 13): fill, bezel, feed and lettering use these px.
   if (scene === 'race' && cm !== 6) {
     if (!pc) S.side(c[0], c[1], c[2], cx, 0, 0);
-    vr = S.screen(VR, pc ? 1 : 0) ? VR : null;
+    vr = S.screen(VR, pc ? 1 : 0, VS[0], VS[1], VS[2], VS[3], VS[4]) ? VR : null;
   } else vr = null;
   if (vr) ++von;
   H.beginFrame(4);
