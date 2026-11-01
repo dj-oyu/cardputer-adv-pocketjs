@@ -18,7 +18,14 @@ def main():
     parser.add_argument('--out',type=Path,help='write 48 RGB565 frames and SHA256 manifest')
     parser.add_argument('--opt',choices=('0','2'),default='2',help='host compiler optimization level')
     parser.add_argument('--proc-source',type=Path,help='alternate pocket_proc.c for baseline comparison')
+    parser.add_argument('--clip-only',action='store_true',help='current native clipped-patch contracts, without MEGADEMO/baseline workload')
+    parser.add_argument('--m32',action='store_true',help='clip-only i386/SSE2 profile, without sanitizers')
+    parser.add_argument('--gouraud-only',action='store_true',help='bounded indexed Gouraud snapshot/raster contracts')
     args=parser.parse_args()
+    if args.clip_only and args.gouraud_only:parser.error('choose one isolated contract suite')
+    isolated=args.clip_only or args.gouraud_only
+    if isolated and (args.proc_source or args.out):parser.error('--clip-only cannot use --proc-source/--out')
+    if args.m32 and (not isolated or sys.platform=='win32'):parser.error('--m32 requires --clip-only/--gouraud-only under Linux/WSL')
     cc=shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
     if not cc:
         candidate=Path('C:/msys64/ucrt64/bin/gcc.exe')
@@ -26,7 +33,8 @@ def main():
     if not cc:raise SystemExit('No host C compiler found')
     OUT.mkdir(parents=True,exist_ok=True)
     suffix='.exe' if sys.platform=='win32' else ''
-    label='_baseline' if args.proc_source else ''
+    label='_gouraud' if args.gouraud_only else '_clip' if args.clip_only else '_baseline' if args.proc_source else ''
+    if args.m32:label+='_m32'
     binary=OUT/('test_pocket_proc_qjs'+label+'_O'+args.opt+suffix)
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
              ROOT/'main/ui/kasane/ksn_procedural.c',
@@ -40,19 +48,56 @@ def main():
              ROOT/'main/ui/kasane/ksn_render.c',
              ROOT/'main/ui/kasane/ksn_blend_pie.c',
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
-             ROOT/'main/pocket/pocket_shape.c',
+             ROOT/'main/pocket/pocket_shape.c', ROOT/'main/ayatsuri/ayatsuri_model.c', ROOT/'main/ayatsuri/ayatsuri_visibility.c', ROOT/'main/pocket/pocket_ayatsuri_assets.c',
              ROOT/'tools/kasane_contract/proc_native_weak.c',
-             ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c',
+             ROOT/('tools/kasane_contract/test_gouraud_qjs.c' if args.gouraud_only else 'tools/kasane_contract/test_pocket_proc_clip_qjs.c' if args.clip_only else 'tools/kasane_contract/test_pocket_proc_qjs.c'),
              # MEGADEMO's built-in plans (the app registers kasane.<name>).
              rom_table(OUT/'ksn_proc_rom_plans.c')]
-    command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
+    flags=['-ffp-contract=off'] if isolated else []
+    env=os.environ.copy();env['PATH']=str(Path(cc).parent)+os.pathsep+env.get('PATH','')
+    if args.m32:
+        env.setdefault('M32_SYSROOT','/tmp/m32sys')
+        # Build and execute in this same process: the temporary sysroot may
+        # disappear between WSL invocations. No parallel helper is started.
+        flags+=subprocess.check_output(['bash','tools/vmtest/m32_sysroot.sh'],cwd=ROOT,env=env,text=True).split()
+        flags+=['-msse2','-mfpmath=sse']
+    elif isolated and sys.platform!='win32':flags+=['-fsanitize=address,undefined','-fno-omit-frame-pointer']
+    command=[cc,'-std=gnu11','-O'+args.opt,*flags,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
              '-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),
              '-I',str(ROOT/'tools/hostshim'),
              *(str(s) for s in sources),'-lm','-o',str(binary)]
-    env=os.environ.copy();env['PATH']=str(Path(cc).parent)+os.pathsep+env.get('PATH','')
+    if args.gouraud_only:
+        sys.path.insert(0,str(ROOT/'tools/ayatsuri/model'))
+        from run_model_study import compile_sources
+        def gouraud_inputs():
+            result=compile_sources(ROOT)
+            source=ROOT/'apps/lib/ayatsuri_visibility.js'
+            result[source.relative_to(ROOT).as_posix()]=hashlib.sha256(source.read_bytes()).hexdigest()
+            return result
+        inputs=gouraud_inputs()
     subprocess.run(command,cwd=ROOT,env=env,check=True)
+    if args.gouraud_only:
+        profile='m32' if args.m32 else 'windows64' if sys.platform=='win32' else 'asan64'
+        proof_dir=ROOT/'.cache/gouraud-contracts'/profile;proof_dir.mkdir(parents=True,exist_ok=True)
+        env.setdefault('ASAN_OPTIONS','detect_leaks=0:abort_on_error=1');env.setdefault('UBSAN_OPTIONS','halt_on_error=1:print_stacktrace=1')
+        r=subprocess.run([str(binary)],cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        (proof_dir/'run.log').write_text(r.stdout);print(r.stdout,end='')
+        unchanged=inputs==gouraud_inputs()
+        passed=r.returncode==0 and unchanged and 'GOURAUD_QJS_PASS ' in r.stdout and 'warm_allocations=0 live_blocks=0' in r.stdout
+        proof=dict(kind='ACTUAL QUICKJS GOURAUD CONTRACT',profile=profile,passed=passed,exit_code=r.returncode,
+                   source_sha256=inputs,sources_unchanged=unchanged,binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+                   command=command,binary=str(binary),device_run=False)
+        (proof_dir/'result.json').write_text(json.dumps(proof,indent=2)+'\n')
+        if not passed:raise SystemExit(1)
+        return
+    if args.clip_only:
+
+        env.setdefault('ASAN_OPTIONS','detect_leaks=0:abort_on_error=1')
+        env.setdefault('UBSAN_OPTIONS','halt_on_error=1:print_stacktrace=1')
+        subprocess.run([str(binary)],cwd=ROOT,env=env,check=True)
+        return
     # The app's chunks, then Act I's former programs (the VM reference).
     files=chunk_arg()+','+str(ROOT/'tools/kasane_contract/proc_megademo_news_ref.js')
     invocation=[str(binary),files]

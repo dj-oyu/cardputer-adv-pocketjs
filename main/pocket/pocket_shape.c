@@ -1,6 +1,10 @@
 #include "pocket_shape.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
+#include "ayatsuri/ayatsuri_transform.h"
+#include "ayatsuri/ayatsuri_follow.h"
+#include "ayatsuri/ayatsuri_visibility.h"
+#include "ayatsuri/ayatsuri_shade.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -139,6 +143,397 @@ static JSValue js_shape_project(JSContext *ctx,JSValueConst self,int argc,JSValu
         set(&dst,2*i+1,(a[4]*x+a[5]*y+a[6]*z+a[7])/w);
     }
     return JS_UNDEFINED;
+}
+
+/* shade() separates body-attached albedo from world-space lighting. These
+ * borrowed views last only for this synchronous call; no JS is run after
+ * validation and no buffer or callback is retained. */
+typedef struct { uint8_t *data;size_t bytes; } shade_view;
+static bool shade_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,
+                         bool writable,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    uint8_t *raw=JS_GetArrayBuffer(ctx,&size,ab);
+    const bool immutable=JS_IsImmutableArrayBuffer(ab)>0;
+    bool ok=raw&&offset<=size&&bytes<=size-offset&&(!writable||!immutable);
+    if(ok)*out=(shade_view){raw+offset,bytes};
+    JS_FreeValue(ctx,ab);
+    return ok;
+}
+static bool shade_overlap(const shade_view *a,const shade_view *b){
+    const uintptr_t x=(uintptr_t)a->data,y=(uintptr_t)b->data;
+    return a->bytes&&b->bytes&&(x<=y?y-x<a->bytes:x-y<b->bytes);
+}
+/* Ayatsuri owns evaluation semantics; hone still owns drawing. Keep this
+ * small bridge beside the existing typed-view checks, without linking a
+ * second implementation or retaining guest buffers after this call. */
+#include "pocket_ayatsuri_follow.inc"
+#include "pocket_ayatsuri_model.inc"
+#include "pocket_ayatsuri_assets.h"
+
+static JSValue js_ayatsuri_model_builtin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.modelBuiltin";
+    if(argc!=1||!JS_IsString(argv[0]))return invalid(ctx,op,"expected builtin asset name");
+    size_t name_bytes=0;const char *name=JS_ToCStringLen(ctx,&name_bytes,argv[0]);
+    if(!name)return JS_EXCEPTION;
+    const uint8_t *data=NULL;size_t bytes=0;
+    const bool found=name_bytes==strlen(name)&&pocket_ayatsuri_builtin_asset(name,&data,&bytes);
+    JS_FreeCString(ctx,name);
+    if(!found)return invalid(ctx,op,"unknown builtin model");
+    return pocket_ayatsuri_model_from_static(ctx,data,bytes);
+}
+static JSValue js_ayatsuri_compose(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.compose";
+    if(argc!=3)return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, output[12]");
+    shade_view pose_view,parent_view,output_view;
+    const bool has_parent=!JS_IsNull(argv[1])&&!JS_IsUndefined(argv[1]);
+    if(!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT32,false,&pose_view)||pose_view.bytes!=36||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,true,&output_view)||output_view.bytes!=48||
+       (has_parent&&(!shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,false,&parent_view)||parent_view.bytes!=48)))
+        return invalid(ctx,op,"expected Float32 pose[9], parent[12] or null, writable output[12]");
+    ayatsuri_pose pose;ayatsuri_transform parent,result;
+    memcpy(&pose,pose_view.data,sizeof pose);
+    if(has_parent)memcpy(&parent,parent_view.data,sizeof parent);
+    const ayatsuri_status status=ayatsuri_transform_evaluate(&pose,has_parent?&parent:NULL,&result);
+    if(status==AYATSURI_INVALID)return invalid(ctx,op,"finite pose/parent and nonzero scale required");
+    if(status!=AYATSURI_OK)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 transform overflow");
+    memcpy(output_view.data,&result,sizeof result);
+    return JS_UNDEFINED;
+}
+/* Utility-private packed node: matrix[12], pose[9]. One stable view replaces
+ * two ArrayBuffer view headers per object without changing scalar semantics. */
+static JSValue js_ayatsuri_compose_node(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.composeNode";shade_view node,parent;
+    const bool has_parent=argc==2&&!JS_IsNull(argv[1])&&!JS_IsUndefined(argv[1]);
+    if(argc!=2||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT32,true,&node)||node.bytes!=84||
+       (has_parent&&(!shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,false,&parent)||(parent.bytes!=84&&parent.bytes!=48))))
+        return invalid(ctx,op,"expected writable node Float32[21], parent Float32[21/12] or null");
+    ayatsuri_pose pose;ayatsuri_transform p,result;
+    memcpy(&pose,node.data+48,sizeof pose);
+    if(has_parent)memcpy(&p,parent.data,sizeof p);
+    const ayatsuri_status status=ayatsuri_transform_evaluate(&pose,has_parent?&p:NULL,&result);
+    if(status==AYATSURI_INVALID)return invalid(ctx,op,"invalid node pose/parent");
+    if(status!=AYATSURI_OK)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 transform overflow");
+    memcpy(node.data,&result,sizeof result);return JS_UNDEFINED;
+}
+/* All packets are synchronously borrowed. Stack snapshots make aliasing safe;
+ * only a fully validated result is copied back into guest-owned storage. */
+static JSValue js_ayatsuri_follow_prepare(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followPrepare";shade_view input,output;
+    if(argc!=2||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT32,false,&input)||input.bytes!=32||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,true,&output)||output.bytes!=112)
+        return invalid(ctx,op,"expected config Float32[8], writable prepared Float64[14]");
+    ayatsuri_follow_config config;ayatsuri_follow_coeff prepared;
+    memcpy(&config,input.data,sizeof config);
+    const ayatsuri_status status=ayatsuri_follow_prepare(&config,&prepared);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported follow coefficients: condition must be <= 1000000");
+    if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow coefficients");
+    memcpy(output.data,&prepared,sizeof prepared);return JS_UNDEFINED;
+}
+static JSValue js_ayatsuri_follow_step(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followStep";shade_view coeff,state,goal,force;
+    if(argc!=4||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT64,false,&coeff)||coeff.bytes!=112||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,true,&state)||state.bytes!=16||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&goal)||goal.bytes!=8||
+       !shade_buffer(ctx,argv[3],JS_TYPED_ARRAY_FLOAT32,false,&force)||force.bytes!=8)
+        return invalid(ctx,op,"expected prepared Float64[14], state Float32[4], goal/force Float32[2]");
+    ayatsuri_follow_coeff c;ayatsuri_follow_state s;ayatsuri_follow_goal g;float f[2];
+    memcpy(&c,coeff.data,sizeof c);memcpy(&s,state.data,sizeof s);memcpy(&g,goal.data,sizeof g);memcpy(f,force.data,sizeof f);
+    const ayatsuri_status status=ayatsuri_follow_step(&c,&g,f,&s);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 follow overflow");
+    if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow step");
+    memcpy(state.data,&s,sizeof s);return JS_UNDEFINED;
+}
+static JSValue js_ayatsuri_follow_impulse(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followImpulse";shade_view coeff,state,impulse;
+    if(argc!=3||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_FLOAT64,false,&coeff)||coeff.bytes!=112||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,true,&state)||state.bytes!=16||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&impulse)||impulse.bytes!=8)
+        return invalid(ctx,op,"expected prepared Float64[14], state Float32[4], impulse Float32[2]");
+    ayatsuri_follow_coeff c;ayatsuri_follow_state s;float j[2];
+    memcpy(&c,coeff.data,sizeof c);memcpy(&s,state.data,sizeof s);memcpy(j,impulse.data,sizeof j);
+    const ayatsuri_status status=ayatsuri_follow_impulse(&c,j,&s);
+    if(status==AYATSURI_RANGE)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"float32 impulse overflow");
+    if(status!=AYATSURI_OK)return invalid(ctx,op,"invalid follow impulse");
+    memcpy(state.data,&s,sizeof s);return JS_UNDEFINED;
+}
+static JSValue js_ayatsuri_follow_drive(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.followDrive";shade_view phase,increment,output;
+    if(argc!=3||!shade_buffer(ctx,argv[0],JS_TYPED_ARRAY_UINT32,true,&phase)||phase.bytes!=12||
+       !shade_buffer(ctx,argv[1],JS_TYPED_ARRAY_UINT32,false,&increment)||increment.bytes!=12||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,true,&output)||output.bytes!=4||
+       shade_overlap(&phase,&output))
+        return invalid(ctx,op,"expected phase/increment Uint32[3], nonoverlapping output Float32[1]");
+    uint32_t p[3],inc[3];float value;
+    memcpy(p,phase.data,sizeof p);memcpy(inc,increment.data,sizeof inc);
+    if(ayatsuri_follow_drive(p,inc,&value)!=AYATSURI_OK)return invalid(ctx,op,"invalid drive");
+    memcpy(output.data,&value,sizeof value);memcpy(phase.data,p,sizeof p);return JS_UNDEFINED;
+}
+static bool visibility_view(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,bool writable,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    const bool ordinary=JS_IsArrayBuffer(ab);
+    uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
+    const bool ok=data&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&
+        (!writable||!JS_IsImmutableArrayBuffer(ab));
+    if(ok)*out=(shade_view){data+offset,bytes};
+    JS_FreeValue(ctx,ab);return ok;
+}
+/* No input snapshot is needed: this pure kernel validates all borrowed spans
+ * before publishing either output, and never calls JS or retains a pointer. */
+static JSValue js_ayatsuri_select_visible(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="ayatsuri.selectVisible";shade_view v[5];double order;
+    const JSTypedArrayEnum types[5]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,
+        JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT32};
+    if(argc!=6||!number(ctx,argv[5],&order)||order!=floor(order)||order<0||order>1)
+        return invalid(ctx,op,"expected xy, depth, source indices, output indices, counts and order 0/1");
+    for(unsigned k=0;k<5;k++){
+        if(!visibility_view(ctx,argv[k],types[k],k>=3,&v[k]))
+            return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"ordinary typed views F32/F32/U16/U16/U32 required");
+        const size_t alignment=k==2||k==3?2:4;
+        if((uintptr_t)v[k].data%alignment)return invalid(ctx,op,"naturally aligned backing store required");
+    }
+    if(v[0].bytes%8||v[1].bytes!=v[0].bytes/2||v[2].bytes%6||v[3].bytes%2||v[4].bytes!=12)
+        return invalid(ctx,op,"matching xy/depth, complete source triangles, output capacity and counts[3] required");
+    const ayatsuri_visibility_status status=ayatsuri_visibility_select((const float *)v[0].data,
+        (const float *)v[1].data,v[0].bytes/8,(const uint16_t *)v[2].data,v[2].bytes/6,
+        (ayatsuri_visibility_order)(int)order,(uint16_t *)v[3].data,v[3].bytes/2,(uint32_t *)v[4].data);
+    if(status!=AYATSURI_VISIBILITY_OK)return invalid(ctx,op,"invalid size/value, short output or overlapping spans");
+    return JS_UNDEFINED;
+}
+static esp_err_t ayatsuri_namespace_fill(JSContext *ctx,JSValueConst ns,void *unused){
+    (void)unused;
+    static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("compose",3,js_ayatsuri_compose),
+        JS_CFUNC_DEF("composeNode",2,js_ayatsuri_compose_node),
+        JS_CFUNC_DEF("selectVisible",6,js_ayatsuri_select_visible),
+        JS_CFUNC_DEF("followPrepare",2,js_ayatsuri_follow_prepare),
+        JS_CFUNC_DEF("followStep",4,js_ayatsuri_follow_step),
+        JS_CFUNC_DEF("followImpulse",3,js_ayatsuri_follow_impulse),
+        JS_CFUNC_DEF("followDrive",3,js_ayatsuri_follow_drive),
+        JS_CFUNC_DEF("followCreate",2,js_ayatsuri_follow_create),
+        JS_CFUNC_DEF("modelOpen",1,js_ayatsuri_model_open),
+        JS_CFUNC_DEF("modelBuiltin",1,js_ayatsuri_model_builtin),
+        JS_CFUNC_DEF("driveCreate",1,js_ayatsuri_drive_create)};
+    return JS_SetPropertyFunctionList(ctx,ns,methods,sizeof methods/sizeof methods[0])<0?ESP_ERR_NO_MEM:ESP_OK;
+}
+/* shade(normals, albedo, thickness, lighting, material, output[,from[,count]])
+ * A bounded vertex/cell kernel, independent of frame drawing. Normals are
+ * SNORM16 rather than quantised positions; float remains for transforms. */
+static JSValue js_shape_shade(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.shade";
+    if(argc<6||argc>8)return invalid(ctx,op,"expected normals, albedo, thickness, lighting, material, output[, from[, count]]");
+    double from=0,count=-1;
+    if((argc>6&&(!number(ctx,argv[6],&from)||!whole(from,0,SHAPE_POINTS)))||
+       (argc>7&&(!number(ctx,argv[7],&count)||!whole(count,0,SHAPE_POINTS))))
+        return invalid(ctx,op,"from and count must be integers 0..1024");
+    shade_view v[6];
+    const JSTypedArrayEnum types[6]={JS_TYPED_ARRAY_INT16,JS_TYPED_ARRAY_UINT16,
+        JS_TYPED_ARRAY_UINT8,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16};
+    for(unsigned i=0;i<6;i++)if(!shade_buffer(ctx,argv[i],types[i],i==5,&v[i]))
+        return invalid(ctx,op,"expected Int16, Uint16, Uint8, Float32, Float32, writable Uint16 arrays");
+    const size_t n=v[1].bytes/2;
+    if(n>SHAPE_POINTS)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"at most 1024 shading samples");
+    if(v[0].bytes!=n*6||v[2].bytes!=n||v[3].bytes!=9*4||v[4].bytes!=8*4||v[5].bytes!=n*2)
+        return invalid(ctx,op,"buffer lengths must be normals 3n, albedo n, thickness n, lighting 9, material 8, output n");
+    const size_t begin=(size_t)from,len=count<0?(begin<n?n-begin:0):(size_t)count;
+    if(begin>n||len>n-begin)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"sample range past buffers");
+    for(unsigned i=0;i<5;i++)if(shade_overlap(&v[5],&v[i])&&
+        !(i==1&&v[5].data==v[1].data&&v[5].bytes==v[1].bytes))
+        return invalid(ctx,op,"output may only overlap an exactly identical albedo view");
+    const float *light=(const float *)v[3].data,*m=(const float *)v[4].data;
+    for(unsigned i=0;i<9;i++)if(!isfinite(light[i])||
+        (i<6?(light[i]<-1||light[i]>1):(light[i]<0||light[i]>1)))
+        return invalid(ctx,op,"lighting directions must be -1..1, RGB 0..1, all finite");
+    for(unsigned i=0;i<8;i++)if(!isfinite(m[i])||
+        (i==3?(m[i]<1||m[i]>128):(m[i]<0||m[i]>1)))
+        return invalid(ctx,op,"material coefficients must be 0..1, shininess 1..128");
+    ayatsuri_shade_basis basis;
+    if(!ayatsuri_shade_prepare(light,&basis))return invalid(ctx,op,"light and view directions must be nonzero");
+    const int16_t *normal=(const int16_t *)v[0].data;
+    /* Validate the requested range before its first write: even a late bad
+     * normal leaves all output unchanged. Unrequested samples are untouched. */
+    for(size_t i=begin;i<begin+len;i++){
+        const int16_t x=normal[3*i],y=normal[3*i+1],z=normal[3*i+2];
+        if(x==INT16_MIN||y==INT16_MIN||z==INT16_MIN||(!x&&!y&&!z))
+            return invalid(ctx,op,"normals must be nonzero SNORM16 (-32767..32767)");
+    }
+    const uint16_t *albedo=(const uint16_t *)v[1].data;
+    const uint8_t *thickness=v[2].data;
+    uint16_t *output=(uint16_t *)v[5].data;
+    for(size_t i=begin;i<begin+len;i++){
+        output[i]=ayatsuri_shade_sample(normal+3*i,albedo[i],thickness[i],light,m,&basis);
+    }
+    return JS_UNDEFINED;
+}
+
+/* Freeze one small numeric patch into the candidate, never the caller's
+ * mutable buffers. The rasterizer evaluates its continuous surface by band. */
+static JSValue js_shape_ellipsoid(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.ellipsoid";
+    if(argc!=6)return invalid(ctx,op,"expected screen8, normal9, light9, material8, surface5, texture9");
+    shade_view v[6];
+    const size_t sizes[6]={32,36,36,32,10,36};
+    for(unsigned i=0;i<6;i++)if(!shade_buffer(ctx,argv[i],i==4?JS_TYPED_ARRAY_UINT16:JS_TYPED_ARRAY_FLOAT32,false,&v[i])||v[i].bytes!=sizes[i])
+        return invalid(ctx,op,"expected Float32 arrays 8/9/9/8, Uint16 surface5, Float32 texture9");
+    ksn_proc_ellipsoid p={0};
+    memcpy(p.screen,v[0].data,32);memcpy(p.normal,v[1].data,36);
+    memcpy(p.light,v[2].data,36);memcpy(p.material,v[3].data,32);
+    memcpy(p.surface,v[4].data,10);memcpy(p.texture,v[5].data,36);
+    pocket_proc_mark mark;
+    JSValue r=pocket_proc_native_begin(ctx,op,&mark);
+    if(JS_IsException(r))return r;
+    r=pocket_proc_native_ellipsoid(ctx,op,&p);
+    if(JS_IsException(r))pocket_proc_native_rollback(&mark);
+    return r;
+}
+
+/* The packed input avoids retaining separate views for each analytic field.
+ * Byte offsets are wire layout, not C layout; even an unaligned source is
+ * copied into the same aligned, zero-padded snapshot as ellipsoid(). */
+static JSValue js_shape_ellipsoid_packed(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.ellipsoidPacked";
+    double offset;shade_view light;
+    if(argc!=3||!JS_IsArrayBuffer(argv[0])||!number(ctx,argv[1],&offset)||!whole(offset,0,UINT32_MAX)||
+       !shade_buffer(ctx,argv[2],JS_TYPED_ARRAY_FLOAT32,false,&light)||light.bytes!=36)
+        return invalid(ctx,op,"expected ArrayBuffer, integer byte offset, Float32 light9");
+    size_t size=0;const uint8_t *data=JS_GetArrayBuffer(ctx,&size,argv[0]);
+    const size_t start=(size_t)offset;
+    if(!data||start>size||148u>size-start)return invalid(ctx,op,"packed ellipsoid needs 148 bytes at offset");
+    data+=start;
+    ksn_proc_ellipsoid p={0};
+    memcpy(p.screen,data,32);memcpy(p.normal,data+32,36);memcpy(p.material,data+68,32);
+    memcpy(p.texture,data+100,36);memcpy(p.surface,data+136,10);memcpy(p.light,light.data,36);
+    pocket_proc_mark mark;
+    JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
+    result=pocket_proc_native_ellipsoid(ctx,op,&p);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    return result;
+}
+
+static bool clipped_float_view(JSContext *ctx,JSValueConst value,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=JS_TYPED_ARRAY_FLOAT32)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    const bool ordinary=JS_IsArrayBuffer(ab);
+    uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
+    const bool ok=ordinary&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&(data||(!size&&!bytes));
+    if(ok)*out=(shade_view){data?data+offset:NULL,bytes};
+    JS_FreeValue(ctx,ab);return ok;
+}
+/* Four stateless inputs; EMPTY is a zero-length clip, not absent clipping.
+ * Read all arguments, then memcpy into an aligned stack snapshot. Even foreign
+ * unaligned buffers need no C typed-pointer dereference. No guest pointer or
+ * global clip state is retained, and failed append leaves building intact. */
+static JSValue js_shape_ellipsoid_clipped_packed(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="shapes.ellipsoidClippedPacked";
+    double offset;shade_view light,clip;
+    if(argc!=4||!JS_IsArrayBuffer(argv[0])||!number(ctx,argv[1],&offset)||!whole(offset,0,UINT32_MAX)||
+       !clipped_float_view(ctx,argv[2],&light)||light.bytes!=36||!clipped_float_view(ctx,argv[3],&clip)||
+       (clip.bytes&&(clip.bytes<24||clip.bytes>64||clip.bytes%8)))
+        return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"expected ArrayBuffer, byte offset, Float32 light9, Float32 convex xy[0 or 6..16]");
+    size_t size=0;const uint8_t *data=JS_GetArrayBuffer(ctx,&size,argv[0]);const size_t start=(size_t)offset;
+    if(!data||start>size||148u>size-start)return invalid(ctx,op,"packed ellipsoid needs 148 bytes at offset");
+    data+=start;ksn_proc_clipped_ellipsoid p={0};
+    memcpy(p.patch.screen,data,32);memcpy(p.patch.normal,data+32,36);memcpy(p.patch.material,data+68,32);
+    memcpy(p.patch.texture,data+100,36);memcpy(p.patch.surface,data+136,10);memcpy(p.patch.light,light.data,36);
+    p.clip.count=(uint8_t)(clip.bytes/8);if(clip.bytes)memcpy(p.clip.xy,clip.data,clip.bytes);
+    return pocket_proc_native_clipped_ellipsoid(ctx,op,&p);
+}
+/* Ordinary typed arrays are borrowed only until this call returns. Empty
+ * hole views are allowed; shared/detached views are not. memcpy also permits
+ * foreign backing stores whose address is not naturally aligned. */
+static bool gouraud_view(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,shade_view *out){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue ab=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(ab))return false;
+    const bool ordinary=JS_IsArrayBuffer(ab);
+    uint8_t *data=ordinary?JS_GetArrayBuffer(ctx,&size,ab):NULL;
+    const bool ok=ordinary&&!JS_HasException(ctx)&&offset<=size&&bytes<=size-offset&&(data||(!size&&!bytes));
+    if(ok)*out=(shade_view){data?data+offset:NULL,bytes};
+    JS_FreeValue(ctx,ab);return ok;
+}
+static JSValue js_shape_gouraud(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="hone.gouraudPatch";
+    if(argc!=7&&argc!=8)return invalid(ctx,op,"expected xy, indices, colorsA, colorsB, mask, holeXY, holeCounts and optional triangleCount");
+    const JSTypedArrayEnum types[7]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16,
+        JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT8};
+    shade_view v[7];
+    for(unsigned k=0;k<7;k++)if(!gouraud_view(ctx,argv[k],types[k],&v[k]))
+        return JS_HasException(ctx)?JS_EXCEPTION:invalid(ctx,op,"ordinary typed views F32/U16/U16/U16/F32/F32/U8 required");
+    const size_t n=v[0].bytes/8,capacity=v[1].bytes/6,h=v[6].bytes;
+    size_t t=capacity;
+    if(v[0].bytes%8||n<3||n>32||v[1].bytes%6||!capacity||capacity>64||h>2||
+       v[2].bytes!=n*2||v[3].bytes!=n*2||v[4].bytes!=n*4)
+        return invalid(ctx,op,"3..32 vertices, 1..64 index triples, 0..2 holes and matching vertex fields required");
+    if(argc==8){
+        double count;
+        if(!number(ctx,argv[7],&count)||count!=floor(count)||count<1||count>(double)capacity)
+            return invalid(ctx,op,"triangleCount must be an integer within 1..index capacity");
+        t=(size_t)count;
+    }
+    size_t hole_points=0;
+    for(size_t k=0;k<h;k++){if(v[6].data[k]<3||v[6].data[k]>8)return invalid(ctx,op,"hole counts must be 3..8");hole_points+=v[6].data[k];}
+    if(v[5].bytes!=hole_points*8)return invalid(ctx,op,"holeXY length must match holeCounts");
+    ksn_proc_gouraud_patch p={0};p.header.vertices=(uint8_t)n;p.header.triangles=(uint8_t)t;p.header.holes=(uint8_t)h;
+    for(size_t k=0;k<n;k++){
+        memcpy(&p.vertices[k].x,v[0].data+k*8,4);memcpy(&p.vertices[k].y,v[0].data+k*8+4,4);
+        memcpy(&p.vertices[k].mask,v[4].data+k*4,4);
+        memcpy(&p.vertices[k].color_a,v[2].data+k*2,2);memcpy(&p.vertices[k].color_b,v[3].data+k*2,2);
+    }
+    memcpy(p.indices,v[1].data,t*6);hole_points=0;
+    for(size_t k=0;k<h;k++){
+        p.clips[k].count=v[6].data[k];memcpy(p.clips[k].xy,v[5].data+hole_points*8,(size_t)p.clips[k].count*8);
+        hole_points+=p.clips[k].count;
+    }
+    return pocket_proc_native_gouraud(ctx,op,&p);
+}
+static JSValue js_shape_blend_region(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv);
+static JSValue js_shape_blend_ellipsoids(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    if(argc==7)return js_shape_blend_region(ctx,self,argc,argv);
+    (void)self;const char *op="shapes.blendEllipsoids";
+    if(argc!=5)return invalid(ctx,op,"expected lobes21n, light9, material11, surface3, controls2");
+    shade_view v[5];
+    const size_t sizes[5]={0,36,44,6,8};
+    for(unsigned i=0;i<5;i++)if(!shade_buffer(ctx,argv[i],i==3?JS_TYPED_ARRAY_UINT16:JS_TYPED_ARRAY_FLOAT32,false,&v[i])||
+        (i&&v[i].bytes!=sizes[i]))return invalid(ctx,op,"expected Float32 lobes/light/material, Uint16 surface3, Float32 controls2");
+    if(!v[0].bytes||v[0].bytes%sizeof(ksn_proc_blend_lobe))return invalid(ctx,op,"lobes must contain complete 21-float rows");
+    const size_t count=v[0].bytes/sizeof(ksn_proc_blend_lobe);
+    if(count>KSN_PROC_BLEND_LOBES)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"at most eight blended ellipsoids");
+    ksn_proc_blend_ellipsoids p={0};p.header.count=(uint8_t)count;
+    memcpy(p.lobes,v[0].data,v[0].bytes);memcpy(p.header.light,v[1].data,36);
+    memcpy(p.header.material,v[2].data,44);memcpy(p.header.surface,v[3].data,6);memcpy(p.header.controls,v[4].data,8);
+    pocket_proc_mark mark;
+    JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
+    result=pocket_proc_native_blend_ellipsoids(ctx,op,&p);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    return result;
+}
+
+static JSValue js_shape_blend_region(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="hone.blendEllipsoids";
+    if(argc!=7)return invalid(ctx,op,"expected lobes21n, light9, material11, surface3, controls2, plane5, color1");
+    shade_view v[7];const size_t sizes[7]={0,36,44,6,8,20,2};
+    for(unsigned i=0;i<7;i++)if(!shade_buffer(ctx,argv[i],i==3||i==6?JS_TYPED_ARRAY_UINT16:JS_TYPED_ARRAY_FLOAT32,false,&v[i])||
+        (i&&v[i].bytes!=sizes[i]))return invalid(ctx,op,"invalid blend region typed views");
+    if(!v[0].bytes||v[0].bytes%sizeof(ksn_proc_blend_lobe))return invalid(ctx,op,"complete lobe rows required");
+    const size_t count=v[0].bytes/sizeof(ksn_proc_blend_lobe);
+    if(count>KSN_PROC_BLEND_LOBES)return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"at most eight lobes");
+    ksn_proc_blend_ellipsoids p={0};p.header.count=(uint8_t)count;
+    ksn_proc_blend_region_mask mask={0};
+    memcpy(p.lobes,v[0].data,v[0].bytes);memcpy(p.header.light,v[1].data,36);
+    memcpy(p.header.material,v[2].data,44);memcpy(p.header.surface,v[3].data,6);memcpy(p.header.controls,v[4].data,8);
+    memcpy(&mask,v[5].data,20);memcpy(&mask.color,v[6].data,2);
+    pocket_proc_mark mark;
+    JSValue result=pocket_proc_native_begin(ctx,op,&mark);if(JS_IsException(result))return result;
+    result=pocket_proc_native_blend_region(ctx,op,&p,&mask);
+    if(JS_IsException(result))pocket_proc_native_rollback(&mark);
+    return result;
 }
 
 /* ---- fill */
@@ -348,6 +743,12 @@ esp_err_t pocket_shape_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("project",3,js_shape_project),
+        JS_CFUNC_DEF("shade",6,js_shape_shade),
+        JS_CFUNC_DEF("gouraudPatch",7,js_shape_gouraud),
+        JS_CFUNC_DEF("ellipsoid",6,js_shape_ellipsoid),
+        JS_CFUNC_DEF("ellipsoidPacked",3,js_shape_ellipsoid_packed),
+        JS_CFUNC_DEF("ellipsoidClippedPacked",4,js_shape_ellipsoid_clipped_packed),
+        JS_CFUNC_DEF("blendEllipsoids",5,js_shape_blend_ellipsoids),
         JS_CFUNC_DEF("fill",4,js_shape_fill),
         JS_CFUNC_DEF("outline",4,js_shape_outline),
     };
@@ -359,12 +760,42 @@ static const pocket_limit_t shape_limits[]={
     {.name="maxPoints",.kind=POCKET_LIMIT_INT,.number=SHAPE_POINTS},
     {.name="maxPolygonPoints",.kind=POCKET_LIMIT_INT,.number=SHAPE_POLY},
     {.name="maxHoles",.kind=POCKET_LIMIT_INT,.number=SHAPE_HOLES},
+    {.name="maxShadeSamples",.kind=POCKET_LIMIT_INT,.number=SHAPE_POINTS},
+    {.name="ellipsoidEntries",.kind=POCKET_LIMIT_INT,.number=KSN_PROC_ELLIPSOID_ENTRIES},
+    {.name="blendEllipsoidLobes",.kind=POCKET_LIMIT_INT,.number=KSN_PROC_BLEND_LOBES},
     {0},
 };
 static const pocket_capability_t capability={.name="kasane.shapes",.supported=true,
     .available=true,.limits=shape_limits};
+/* Both names resolve to one namespace: no second method table or work owner. */
+static JSValue js_hone_namespace(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)argc;(void)argv;
+    JSValue ns=JS_GetPropertyStr(ctx,self,"shapes");
+    if(JS_IsException(ns))return ns;
+    if(!JS_IsObject(ns)){
+        JS_FreeValue(ctx,ns);
+        return invalid(ctx,"hone","shapes namespace unavailable");
+    }
+    if(JS_DefinePropertyValueStr(ctx,self,"hone",JS_DupValue(ctx,ns),JS_PROP_ENUMERABLE)<0){
+        JS_FreeValue(ctx,ns);return JS_EXCEPTION;
+    }
+    return ns;
+}
 esp_err_t pocket_shape_install(JSContext *ctx,void *unused){
     (void)unused;
     esp_err_t err=pocket_api_register(&capability);
-    return err==ESP_OK?pocket_api_lazy(ctx,"shapes",pocket_shape_fill,NULL):err;
+    if(err!=ESP_OK)return err;
+    err=pocket_api_lazy(ctx,"shapes",pocket_shape_fill,NULL);
+    if(err!=ESP_OK)return err;
+    JSValue root=pocket_api_root(ctx);
+    if(!JS_IsObject(root)){JS_FreeValue(ctx,root);return ESP_ERR_INVALID_STATE;}
+    JSValue getter=JS_NewCFunction(ctx,js_hone_namespace,"hone",0);
+    if(JS_IsException(getter)){JS_FreeValue(ctx,root);return ESP_ERR_NO_MEM;}
+    JSAtom atom=JS_NewAtom(ctx,"hone");
+    if(atom==JS_ATOM_NULL){JS_FreeValue(ctx,getter);JS_FreeValue(ctx,root);return ESP_ERR_NO_MEM;}
+    int ok=JS_DefinePropertyGetSet(ctx,root,atom,getter,JS_UNDEFINED,
+                                JS_PROP_ENUMERABLE|JS_PROP_CONFIGURABLE);
+    JS_FreeAtom(ctx,atom);JS_FreeValue(ctx,root);
+    if(ok<0)return ESP_ERR_NO_MEM;
+    return pocket_api_lazy(ctx,"ayatsuri",ayatsuri_namespace_fill,NULL);
 }

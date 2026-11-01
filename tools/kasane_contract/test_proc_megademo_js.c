@@ -174,6 +174,7 @@ int main(int argc, char **argv) {
         JSValue g = JS_GetGlobalObject(ctx), pocket = JS_GetPropertyStr(ctx, g, "pocket");
         JSValue shapes = JS_NewObject(ctx);
         REQUIRE(pocket_shape_fill(ctx, shapes, NULL) == ESP_OK);
+        JS_SetPropertyStr(ctx, pocket, "hone", JS_DupValue(ctx, shapes));
         JS_SetPropertyStr(ctx, pocket, "shapes", shapes);
         JS_FreeValue(ctx, pocket); JS_FreeValue(ctx, g);
         JSValue r = JS_Eval(ctx, SHAPE_DRAW_JS, sizeof SHAPE_DRAW_JS - 1, "shim.js", JS_EVAL_TYPE_GLOBAL);

@@ -20,6 +20,7 @@ static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 // naming it is what gets the session that surface, as pet.companion does.
 static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", NULL};
 static const char *const CAPS_SHAPES[]= {"kasane.shapes", NULL};
+static const char *const CAPS_CHARACTER[]= {"display.kasane", "input.action", "input.keys", "kasane.shapes", NULL};
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -98,6 +99,10 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_GAME, .optional=CAPS_GAME_OPT, .works=APP_WORKS_NONE},
 
+    {.id="local.character", .title="CHARACTER LAB", .entry="apps/character/character_lab.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
     // Both of its capabilities are REQUIRED rather than optional, and that is
     // not strictness for its own sake: without the card there is nothing to
     // choose and without playback there is nothing to do with a choice, so an
@@ -150,6 +155,22 @@ static const app_manifest_t MANIFESTS[] = {
     {.id=APP_ID_WORK, .title="WORK", .entry="src:work",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_PICK},
+
+    {.id="local.cloud", .title="CLOUD ACT", .entry="apps/cloud/cloud_act.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.cloudprobe", .title="CLOUD PROBE", .entry="apps/cloudprobe/cloud_probe.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.cloudmem", .title="CLOUD MEMORY", .entry="apps/cloudmem/cloud_memory.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.fox3d", .title="FOX FACE", .entry="apps/fox3d/fox_face.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.foxsheet", .title="FOX SHEET", .entry="apps/foxsheet/fox_sheet.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_CHARACTER, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 };
 
 #define MANIFEST_N (sizeof(MANIFESTS)/sizeof(MANIFESTS[0]))

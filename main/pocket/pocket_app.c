@@ -30,6 +30,39 @@ static const char *TAG = "pocket.app";
 #define APP_SLEEPS          2
 
 static JSContext *js_ctx;               // the realm this surface installed into
+#ifdef KASANE_MEGADEMO_TRACE
+static bool memory_mark_active;
+static JSValue js_memory_mark(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)self;const char *op="app.memoryMark";
+    if(ctx!=js_ctx||memory_mark_active)
+        return pocket_api_throw(ctx,POCKET_ERR_BUSY,op,"checkpoint owner is busy",false,NULL);
+    if(argc!=1||!JS_IsString(argv[0]))
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,"label must be a string",false,NULL);
+    memory_mark_active=true;
+    /* Primitive string length is checked before UTF-8 conversion, so even an
+     * invalid non-ASCII/rope label cannot request unbounded conversion space. */
+    JSValue length=JS_GetPropertyStr(ctx,argv[0],"length");
+    uint32_t count=0;
+    bool valid=!JS_IsException(length)&&JS_ToUint32(ctx,&count,length)==0&&count>0&&count<=32;
+    JS_FreeValue(ctx,length);
+    if(!valid) {
+        memory_mark_active=false;
+        if(JS_HasException(ctx))return JS_EXCEPTION;
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,"label length must be 1..32",false,NULL);
+    }
+    size_t bytes=0;const char *text=JS_ToCStringLen(ctx,&bytes,argv[0]);
+    if(!text){memory_mark_active=false;return JS_EXCEPTION;}
+    char label[33];valid=bytes>0&&bytes<=32;
+    if(valid){memcpy(label,text,bytes);label[bytes]=0;valid=strlen(label)==bytes;}
+    JS_FreeCString(ctx,text);
+    esp_err_t result=valid?app_memory_mark(ctx,label):ESP_ERR_INVALID_ARG;
+    memory_mark_active=false;
+    if(result!=ESP_OK)
+        return pocket_api_throw(ctx,result==ESP_ERR_INVALID_ARG?POCKET_ERR_INVALID_ARGUMENT:POCKET_ERR_BUSY,
+                                op,"invalid label or unavailable owner",false,NULL);
+    return JS_UNDEFINED;
+}
+#endif
 
 // ------------------------------------------------------------------ lifecycle
 //
@@ -864,6 +897,9 @@ void pocket_app_reset(void) {
 // them, and this is where the numbers it would branch on are published. Every
 // value below is a limit this file actually enforces.
 static const pocket_limit_t app_limits[] = {
+#ifdef KASANE_MEGADEMO_TRACE
+    {.name="memoryMark",      .kind=POCKET_LIMIT_FLAG,.number=1},
+#endif
     {.name="maxFrameListeners",.kind=POCKET_LIMIT_INT, .number=APP_FRAME_LISTENERS},
     {.name="stopHookMs",       .kind=POCKET_LIMIT_INT, .number=APP_STOP_MS},
     {.name="stopReasons",      .kind=POCKET_LIMIT_TEXT,.text="back,evict"},
@@ -918,6 +954,9 @@ static esp_err_t build_app(JSContext *ctx, JSValueConst ns, void *user) {
     define(ctx,ns,"start",JS_NewCFunction(ctx,js_start,"start",1));
     define(ctx,ns,"exit",JS_NewCFunction(ctx,js_exit,"exit",0));
     define(ctx,ns,"onFrame",JS_NewCFunction(ctx,js_on_frame,"onFrame",1));
+#ifdef KASANE_MEGADEMO_TRACE
+    define(ctx,ns,"memoryMark",JS_NewCFunction(ctx,js_memory_mark,"memoryMark",1));
+#endif
     return ESP_OK;
 }
 
@@ -972,6 +1011,9 @@ esp_err_t pocket_app_install(JSContext *ctx, void *user_data) {
     fps_window_us=0; fps_frames=0; fps_value=-1.0;
     log_reset();
     js_ctx=ctx;
+#ifdef KASANE_MEGADEMO_TRACE
+    memory_mark_active=false;
+#endif
 
     esp_err_t err;
     if((err=pocket_api_lazy(ctx,"app",build_app,NULL))!=ESP_OK) return err;

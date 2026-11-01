@@ -5,7 +5,10 @@ them (HOME OVERLAY, VOLUME, AUTO TIME SYNC) move no press this script counts.
 AUTO TIME SYNC can matter to the numbers instead: a home screen left idle for
 ten seconds with a network stored brings the radio up for a clock sync, and a
 PERF line taken during one is not a quiet-home measurement. Such lines are
-kept, and marked, rather than dropped."""
+kept, and marked, rather than dropped.
+CLOUD PROBE is appended to Apps; this script leaves Apps before counting
+settings navigation, so its existing key sequence is unchanged.
+"""
 import argparse
 from pathlib import Path
 import struct

@@ -35,6 +35,8 @@ set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 list(APPEND KASANE_SOURCES
     "pocket/pocket_proc.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
+    "pocket/pocket_ayatsuri_assets.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
@@ -56,7 +58,11 @@ option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation f
 option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
+# Product builds leave diagnostic tracing disabled by default.
+# Enable both options explicitly for quiet memory checkpoint diagnostics.
+# See docs/perf/cloud-memory-fixture.md for fresh-cache and restore checks.
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(KASANE_MEMORY_PHASE_ONLY "Keep explicit memory checkpoints without recurring MDT/MDTJ output" OFF)
 option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
 set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
 if(POCKET_DERBY_RUNNER_AFFINE)
@@ -80,6 +86,9 @@ endif()
 option(KASANE_BGCOST_TRACE "BGC/BGP lines after MDT: VM steps, frame geometry, per-plan draw costs" OFF)
 if(KASANE_BGCOST_TRACE AND NOT KASANE_MEGADEMO_TRACE)
     message(FATAL_ERROR "KASANE_BGCOST_TRACE requires KASANE_MEGADEMO_TRACE")
+endif()
+if(KASANE_MEMORY_PHASE_ONLY AND (NOT KASANE_MEGADEMO_TRACE OR KASANE_BGCOST_TRACE))
+    message(FATAL_ERROR "KASANE_MEMORY_PHASE_ONLY requires KASANE_MEGADEMO_TRACE and excludes KASANE_BGCOST_TRACE")
 endif()
 # The background-cost study (docs/kasane/derby-background-cost.md) runs its
 # measuring copies of DERBY WATCH, and a synthetic segment load, from the
@@ -216,7 +225,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "scene/fxmat
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/character/character_lab.js" "../apps/cloud/cloud_act.js" "../apps/cloudprobe/cloud_probe.js" "../apps/cloudmem/cloud_memory.js" "../apps/fox3d/fox_face.js" "../apps/foxsheet/fox_sheet.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
@@ -268,6 +277,11 @@ if(KASANE_PROC_JS_DIAGNOSTIC)
 endif()
 if(KASANE_MEGADEMO_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_TRACE=1)
+    idf_component_get_property(_guest_metrics_lib pocketjs_guest COMPONENT_LIB)
+    target_compile_definitions(${_guest_metrics_lib} PRIVATE POCKET_GUEST_ALLOCATOR_METRICS=1)
+endif()
+if(KASANE_MEMORY_PHASE_ONLY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEMORY_PHASE_ONLY=1)
 endif()
 if(KASANE_BGCOST_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_BGCOST_TRACE=1)
@@ -582,6 +596,9 @@ set_source_files_properties(ui/kasane/ksn_procedural.c
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # pocket.shapes: the same scan conversion on host and device (no fused madd.s).
 set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(ayatsuri/ayatsuri_visibility.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(ayatsuri/ayatsuri_model.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_property(SOURCE ui/kasane/ksn_procedural.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
 if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
     set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()

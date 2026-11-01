@@ -777,6 +777,113 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     if(!c)return;
     c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;
 }
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *p){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_ellipsoid_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid or singular analytic ellipsoid");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1);
+    if(KSN_PROC_ELLIPSOID_ENTRIES>surface_segments(&surfaces[building_surface])-c->count||
+       cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"analytic patch frame limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_ELLIPSOID),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    /* Zero the final entry's unused bytes as well as explicit packet padding:
+     * band hashes must not depend on previous frame storage. */
+    memset(c->segments+c->count,0,KSN_PROC_ELLIPSOID_WORDS*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,sizeof *p);
+    c->count+=(uint16_t)KSN_PROC_ELLIPSOID_WORDS;
+    c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *p){
+    if(js_call_active)return failure(ctx,op,POCKET_ERR_BUSY,"reentrant procedural call");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_clipped_ellipsoid_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid clipped ellipsoid or convex inclusion");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1),limit=surface_segments(&surfaces[building_surface]);
+    /* This new append is NOT_APPLIED on failure, including quota: do not
+     * poison building as older analytic endpoints historically do. */
+    if(c->count>limit||KSN_PROC_CLIPPED_ENTRIES>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"clipped patch frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_CLIPPED_ELLIPSOID),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,KSN_PROC_CLIPPED_WORDS*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,sizeof *p);
+    c->count+=(uint16_t)KSN_PROC_CLIPPED_WORDS;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_blend_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid or singular blended ellipsoids");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p->header.count,
+        words=(unsigned)KSN_PROC_BLEND_WORDS(p->header.count);
+    if(words+1u>surface_segments(&surfaces[building_surface])-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"blended surface frame limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_BLEND_ELLIPSOIDS),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,words*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,KSN_PROC_BLEND_BYTES(p->header.count));
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p,
+        const ksn_proc_blend_region_mask *mask){
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_blend_region_bounds(p,mask,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid blended region");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p->header.count,
+        words=(unsigned)KSN_PROC_BLEND_REGION_WORDS(p->header.count),limit=surface_segments(&surfaces[building_surface]);
+    if(c->count>limit||words+1u>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"blended region frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_BLEND_REGION),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,words*sizeof c->segments[0]);
+    const size_t bytes=KSN_PROC_BLEND_BYTES(p->header.count);
+    memcpy(c->segments+c->count,p,bytes);
+    memcpy((uint8_t *)(c->segments+c->count)+bytes,mask,sizeof *mask);
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p){
+    if(js_call_active)return failure(ctx,op,POCKET_ERR_BUSY,"reentrant procedural call");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;unsigned cost;
+    if(!ksn_proc_gouraud_bounds(p,&left,&top,&right,&bottom,&cost))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid indexed Gouraud patch");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned words=(unsigned)KSN_PROC_GOURAUD_WORDS(p->header.vertices,p->header.triangles,p->header.holes),
+        limit=surface_segments(&surfaces[building_surface]);
+    if(c->count>limit||words+1u>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"Gouraud patch frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_GOURAUD_PATCH),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    uint8_t *out=(uint8_t *)(c->segments+c->count);
+    memset(out,0,words*sizeof c->segments[0]);
+    memcpy(out,&p->header,sizeof p->header);out+=sizeof p->header;
+    size_t bytes=p->header.vertices*sizeof p->vertices[0];memcpy(out,p->vertices,bytes);out+=bytes;
+    bytes=p->header.triangles*3u*sizeof p->indices[0];memcpy(out,p->indices,bytes);out+=bytes;
+    bytes=p->header.holes*sizeof p->clips[0];memcpy(out,p->clips,bytes);
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
+}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";

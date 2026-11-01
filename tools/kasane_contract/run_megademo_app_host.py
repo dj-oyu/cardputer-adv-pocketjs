@@ -31,7 +31,7 @@ EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
          "main/ui/kasane/ksn_proc_grid_pie.c", "main/ui/kasane/ksn_proc_grid_image.c",
          "main/ui/kasane/ksn_proc_grid_resize.c", "main/pocket/pocket_pixel.c",
          "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c",
-         "main/pocket/pocket_shape.c"]
+         "main/pocket/pocket_shape.c", "main/ayatsuri/ayatsuri_model.c", "main/ayatsuri/ayatsuri_visibility.c", "main/pocket/pocket_ayatsuri_assets.c"]
 
 
 def kasane_sources() -> list[str]:
@@ -41,7 +41,7 @@ def kasane_sources() -> list[str]:
             if not s.startswith("tools/test_pocket_kasane")]
 
 
-def build(flags: list[str], cache: Path) -> Path:
+def build(flags: list[str], cache: Path, entry: str = "tools/kasane_contract/test_megademo_app_host.c") -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
                    stdout=subprocess.DEVNULL)
@@ -63,7 +63,7 @@ def build(flags: list[str], cache: Path) -> Path:
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_GRID_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/kasane_contract/test_megademo_app_host.c", *kasane_sources(), *EXTRA,
+                    entry, *kasane_sources(), *EXTRA,
                     str(rom_table(cache / "ksn_proc_rom_plans.c")),
                     *objects, "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
@@ -111,7 +111,7 @@ def main() -> None:
     extra = ["-DPOCKET_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
     if args.m32:
         # A sysroot under .cache survives WSL restarts, which empty /tmp.
-        sysroot = dict(os.environ, M32_SYSROOT=str(CACHE / "m32sys"))
+        sysroot = dict(os.environ, M32_SYSROOT=os.environ.get("M32_SYSROOT", str(CACHE / "m32sys")))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=sysroot,
                                capture_output=True, text=True).stdout.split()
         binary = build(flags + extra, CACHE / ("m32" + ("_nobd" if extra else "")))
@@ -151,6 +151,9 @@ def main() -> None:
                                      cwd=ROOT, capture_output=True, check=True)
                 (base / words[1]).write_bytes(got.stdout)
         env["MEGA_CHUNKS"] = str(base / "chunks.txt")
+    elif (CACHE / "baseline_chunks/chunks.txt").exists():
+        # Match the documented cached-entry fallback with its cached chunks.
+        env["MEGA_CHUNKS"] = str(CACHE / "baseline_chunks/chunks.txt")
     print(f"baseline: {old.name} ({old.stat().st_size} B)")
     subprocess.run([str(binary), str(old), "--baseline"], cwd=ROOT, env=env, check=True)
 

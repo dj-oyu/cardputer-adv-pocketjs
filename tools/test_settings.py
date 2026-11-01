@@ -1,7 +1,10 @@
 """Exercise settings. MP3 PLAYBACK is appended to Apps; category 1 and all
 settings row indices used below are unchanged. The overlay row is a three-way
 choice (OFF / DESK CLOCK / MUSIC) rather than a toggle, VOLUME is appended
-after it, and AUTO TIME SYNC (index 6) after that."""
+after it, and AUTO TIME SYNC (index 6) after that.
+CLOUD PROBE is appended to Apps; this script leaves Apps before counting
+settings navigation, so its existing key sequence is unchanged.
+"""
 import argparse
 import re
 import time

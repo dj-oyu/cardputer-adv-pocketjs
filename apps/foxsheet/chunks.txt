@@ -1,0 +1,7 @@
+app local.foxsheet
+option strip-debug
+utility ../lib/ayatsuri_model.js
+clip ../lib/ayatsuri_clip.js
+data fox_sheet_data.js
+scene ../fox3d/fox_sheet_scene.js
+runtime fox_sheet_runtime.js

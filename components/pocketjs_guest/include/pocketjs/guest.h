@@ -48,6 +48,31 @@ typedef struct {
   bool jobs_dropped;       /* jobs were queued when the session ended */
 } pocketjs_guest_stats_t;
 
+/* Constant-size allocator diagnostics; no GC or object/heap walk. Live/high
+ * water count callback-owned usable bytes, excluding QuickJS's per-block
+ * accounting overhead, cached free blocks and allocator-internal realloc
+ * temporaries. The host backend's usable size is its requested size.
+ * Calls count nonzero allocation attempts, non-null frees and every realloc
+ * callback; calloc counts as one allocation. Counters saturate. Failures are
+ * allocator callback failures, NOT QuickJS malloc_limit rejections (which
+ * remain in the existing destructive OOM canary). Successful realloc(NULL,n)
+ * counts only as realloc; realloc(p,0) is not a failure. */
+typedef struct {
+  size_t usable_live_bytes, usable_highwater_bytes, max_successful_request;
+  uint32_t allocation_calls, realloc_calls, free_calls, failed_calls;
+  size_t cache_held_bytes;
+  uint32_t cache_hits, cache_misses, cache_flushes;
+  bool cache_available, cache_enabled;
+} pocketjs_guest_allocator_stats_t;
+
+/* Synchronous owner-task snapshot. Requires guest component compile definition
+ * POCKET_GUEST_ALLOCATOR_METRICS=1; otherwise ESP_ERR_NOT_SUPPORTED without an
+ * output write. OFF removes counter storage/work from ordinary allocation.
+ * No retained pointers or reset. Cache data is unavailable on the host; no
+ * arena largest-free metric exists. */
+esp_err_t pocketjs_guest_allocator_snapshot(const pocketjs_guest_t *guest,
+                                            pocketjs_guest_allocator_stats_t *out);
+
 void pocketjs_guest_config_defaults(pocketjs_guest_config_t *config);
 
 esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,

@@ -50,7 +50,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
-          idf.py -B build_keyboard -D SDKCONFIG="$PWD/build_keyboard/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_keyboard -D SDKCONFIG="$PWD/build_keyboard/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_MEGADEMO_TRACE=OFF -D KASANE_MEMORY_PHASE_ONLY:BOOL=OFF build
           idf.py -B build_keyboard size > build_keyboard/size.log
           python3 - <<'PY'
           import hashlib,json,os,subprocess
@@ -64,7 +64,7 @@ jobs:
           assert hashlib.sha256((b/'sdkconfig').read_bytes()).hexdigest()=='9fea08cfca669fe6e033e1ceb9281c7e1f89f49536a4419393bbc4108182a04b'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
-          for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+          for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE','KASANE_MEMORY_PHASE_ONLY'):
               assert k+':BOOL=OFF' in cache,k
           elf=(b/'cardputer_pocketjs.elf').read_bytes()
           assert b'Application information:' in elf and b'KBD_PROBE' in elf

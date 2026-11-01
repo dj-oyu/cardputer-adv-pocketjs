@@ -11,6 +11,7 @@ pocket.app.load('act1');
 pocket.app.load('act2');
 if (pocket.kasane && pocket.kasane.procedural) pocket.app.load('set');
 pocket.app.load('brief');
+pocket.app.load('motion');
 pocket.app.load('wake');
 if (pocket.kasane && pocket.kasane.procedural) {
   pocket.app.load('view');

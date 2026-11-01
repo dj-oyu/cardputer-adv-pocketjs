@@ -13,6 +13,9 @@
 #include "quickjs-vm.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#ifndef POCKET_GUEST_ALLOCATOR_METRICS
+#define POCKET_GUEST_ALLOCATOR_METRICS 0
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
 #include <stdio.h>
 #include "quickjs-vm.h"
@@ -138,6 +141,9 @@ struct pocketjs_guest {
   JSValue frame;
   size_t heap_limit;
   bool prefer_psram;
+#if POCKET_GUEST_ALLOCATOR_METRICS
+  pocketjs_guest_allocator_stats_t allocator_stats;
+#endif
 #ifdef ESP_PLATFORM
   /* R3 (docs/vm/r3-small-block-cache.md): freed small blocks kept for the next
    * allocation of their length. Used only from the task that created the
@@ -358,7 +364,7 @@ static inline bool guest_uses_block_cache(const pocketjs_guest_t *guest) {
          xTaskGetCurrentTaskHandle() == guest->owner_task;
 }
 
-static void *guest_malloc(void *opaque, size_t size) {
+static void *guest_raw_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U) {
     return NULL;
@@ -376,19 +382,7 @@ static void *guest_malloc(void *opaque, size_t size) {
   return memory;
 }
 
-static void *guest_calloc(void *opaque, size_t count, size_t size) {
-  if (count != 0U && size > SIZE_MAX / count) {
-    return NULL;
-  }
-  const size_t total = count * size;
-  void *memory = guest_malloc(opaque, total);
-  if (memory != NULL) {
-    memset(memory, 0, total);
-  }
-  return memory;
-}
-
-static void guest_free(void *opaque, void *pointer) {
+static void guest_raw_free(void *opaque, void *pointer) {
   if (guest_uses_block_cache(opaque)) {
     block_cache_free(&((pocketjs_guest_t *)opaque)->block_cache, pointer);
     return;
@@ -400,13 +394,13 @@ static size_t guest_usable_size(const void *pointer) {
   return pointer == NULL ? 0U : guest_block_length(pointer);
 }
 
-static void *guest_realloc(void *opaque, void *pointer, size_t size) {
+static void *guest_raw_realloc(void *opaque, void *pointer, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (pointer == NULL) {
-    return guest_malloc(opaque, size);
+    return guest_raw_malloc(opaque, size);
   }
   if (size == 0U) {
-    guest_free(opaque, pointer);
+    guest_raw_free(opaque, pointer);
     return NULL;
   }
   if (guest != NULL && guest->prefer_psram) {
@@ -416,7 +410,7 @@ static void *guest_realloc(void *opaque, void *pointer, size_t size) {
   return heap_caps_realloc(pointer, size, GUEST_CAPS_INTERNAL);
 }
 #else
-static void *guest_malloc(void *opaque, size_t size) {
+static void *guest_raw_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U || size > SIZE_MAX - sizeof(allocation_header_t)) {
     return NULL;
@@ -436,19 +430,7 @@ static void *guest_malloc(void *opaque, size_t size) {
   return header + 1;
 }
 
-static void *guest_calloc(void *opaque, size_t count, size_t size) {
-  if (count != 0U && size > SIZE_MAX / count) {
-    return NULL;
-  }
-  const size_t total = count * size;
-  void *memory = guest_malloc(opaque, total);
-  if (memory != NULL) {
-    memset(memory, 0, total);
-  }
-  return memory;
-}
-
-static void guest_free(void *opaque, void *pointer) {
+static void guest_raw_free(void *opaque, void *pointer) {
   (void)opaque;
   if (pointer != NULL) {
     heap_caps_free(((allocation_header_t *)pointer) - 1);
@@ -460,25 +442,117 @@ static size_t guest_usable_size(const void *pointer) {
                          : (((const allocation_header_t *)pointer) - 1)->size;
 }
 
-static void *guest_realloc(void *opaque, void *pointer, size_t size) {
+static void *guest_raw_realloc(void *opaque, void *pointer, size_t size) {
   if (pointer == NULL) {
-    return guest_malloc(opaque, size);
+    return guest_raw_malloc(opaque, size);
   }
   if (size == 0U) {
-    guest_free(opaque, pointer);
+    guest_raw_free(opaque, pointer);
     return NULL;
   }
   const size_t previous_size = guest_usable_size(pointer);
-  void *next = guest_malloc(opaque, size);
+  void *next = guest_raw_malloc(opaque, size);
   if (next == NULL) {
     return NULL;
   }
   memcpy(next, pointer, previous_size < size ? previous_size : size);
-  guest_free(opaque, pointer);
+  guest_raw_free(opaque, pointer);
   return next;
 }
 
 #endif
+
+#if POCKET_GUEST_ALLOCATOR_METRICS
+static void allocator_count(uint32_t *value) {
+  if (*value != UINT32_MAX) ++*value;
+}
+static void allocator_adopt(pocketjs_guest_t *guest, size_t old_bytes,
+                            void *pointer, size_t request) {
+  if (!guest) return;
+  pocketjs_guest_allocator_stats_t *s = &guest->allocator_stats;
+  const size_t next = guest_usable_size(pointer);
+  s->usable_live_bytes -= old_bytes;
+  s->usable_live_bytes = SIZE_MAX - s->usable_live_bytes < next
+                            ? SIZE_MAX : s->usable_live_bytes + next;
+  if (s->usable_live_bytes > s->usable_highwater_bytes)
+    s->usable_highwater_bytes = s->usable_live_bytes;
+  if (pointer && request > s->max_successful_request)
+    s->max_successful_request = request;
+}
+static void *guest_malloc(void *opaque, size_t size) {
+  pocketjs_guest_t *guest = opaque;
+  if (guest && size) allocator_count(&guest->allocator_stats.allocation_calls);
+  void *p = guest_raw_malloc(opaque, size);
+  if (p) allocator_adopt(guest, 0, p, size);
+  else if (guest && size) allocator_count(&guest->allocator_stats.failed_calls);
+  return p;
+}
+#else
+#define guest_malloc guest_raw_malloc
+#endif
+static void *guest_calloc(void *opaque, size_t count, size_t size) {
+#if POCKET_GUEST_ALLOCATOR_METRICS
+  pocketjs_guest_t *guest = opaque;
+#endif
+  if (count && size > SIZE_MAX / count) {
+#if POCKET_GUEST_ALLOCATOR_METRICS
+    if (guest) {
+      allocator_count(&guest->allocator_stats.allocation_calls);
+      allocator_count(&guest->allocator_stats.failed_calls);
+    }
+#endif
+    return NULL;
+  }
+  const size_t total = count * size;
+  void *p = guest_malloc(opaque, total);
+  if (p) memset(p, 0, total);
+  return p;
+}
+#if POCKET_GUEST_ALLOCATOR_METRICS
+static void guest_free(void *opaque, void *pointer) {
+  pocketjs_guest_t *guest = opaque;
+  if (guest && pointer) {
+    allocator_count(&guest->allocator_stats.free_calls);
+    allocator_adopt(guest, guest_usable_size(pointer), NULL, 0);
+  }
+  guest_raw_free(opaque, pointer);
+}
+static void *guest_realloc(void *opaque, void *pointer, size_t size) {
+  pocketjs_guest_t *guest = opaque;
+  if (guest) allocator_count(&guest->allocator_stats.realloc_calls);
+  const size_t old_bytes = guest_usable_size(pointer);
+  void *p = guest_raw_realloc(opaque, pointer, size);
+  if (p || !size) allocator_adopt(guest, old_bytes, p, size);
+  else if (guest) allocator_count(&guest->allocator_stats.failed_calls);
+  return p;
+}
+#else
+#define guest_free guest_raw_free
+#define guest_realloc guest_raw_realloc
+#endif
+
+esp_err_t pocketjs_guest_allocator_snapshot(const pocketjs_guest_t *guest,
+                                            pocketjs_guest_allocator_stats_t *out) {
+  if (!guest || !out) return ESP_ERR_INVALID_ARG;
+#ifdef ESP_PLATFORM
+  if (xTaskGetCurrentTaskHandle() != guest->owner_task)
+    return ESP_ERR_INVALID_STATE;
+#endif
+#if POCKET_GUEST_ALLOCATOR_METRICS
+  *out = guest->allocator_stats;
+#ifdef ESP_PLATFORM
+  out->cache_available = true;
+  out->cache_enabled = guest->block_cache.enabled;
+  out->cache_held_bytes = block_cache_held(&guest->block_cache);
+  out->cache_hits = guest->block_cache.hits;
+  out->cache_misses = guest->block_cache.misses;
+  out->cache_flushes = guest->block_cache.flushes;
+#endif
+  return ESP_OK;
+#else
+  return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
 
 static const JSMallocFunctions GUEST_ALLOCATOR = {
     .js_calloc = guest_calloc,
