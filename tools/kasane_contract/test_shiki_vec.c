@@ -49,27 +49,24 @@ static ksn_shiki_status run(void){return ksn_shiki_draw(plan,NULL,0,&vm,seg);}
 static const int16_t *V(unsigned k){return (const int16_t *)(((uintptr_t)vm.vraw+15u)&~(uintptr_t)15u)+8*k;}
 
 static void pairs(void){
-    static int16_t work[2][KSN_SHIKI_BENCH_WORK];
-    static ksn_proc_segment got[2][KSN_SHIKI_SEGMENTS];
-    unsigned count[2]={0};
+    static int16_t work[KSN_SHIKI_BENCH_WORK];
+    static ksn_proc_segment first[2][KSN_SHIKI_SEGMENTS];
+    unsigned count[2]={0},seen[2]={0};
     for(unsigned i=0;i<ksn_shiki_bench_count();i++){
         ksn_shiki_bench_case c;
-        CHECK(ksn_shiki_bench_build(i,work[i&1],&c),"build %u",i);
+        CHECK(ksn_shiki_bench_build(i,work,&c),"build %u",i);
         const bool ok=ksn_shiki_register(c.code,c.len,NULL,0,c.region,c.regions,plan);
         CHECK(ok,"%s registers",c.name);
         if(!ok)continue;
         const ksn_shiki_status s=run();
         CHECK(s==KSN_SHIKI_DONE,"%s DONE (got %d)",c.name,s);
-        count[i&1]=vm.count;
-        memcpy(got[i&1],seg,vm.count*sizeof *seg);
-        printf("  %-18s %2u instr, %5u steps, %4u segments\n",c.name,(unsigned)plan->count,vm.steps,vm.count);
-        if(i&1){
-            CHECK(count[0]==count[1]&&!memcmp(got[0],got[1],count[0]*sizeof *seg),
-                  "pair %u: %s draws what its scalar form draws (%u vs %u)",c.pair,c.name,count[1],count[0]);
-        }
+        printf("  %-22s %2u instr, %5u steps, %4u segments\n",c.name,(unsigned)plan->count,vm.steps,vm.count);
+        if(!seen[c.pair]++){count[c.pair]=vm.count;memcpy(first[c.pair],seg,vm.count*sizeof *seg);}
+        else CHECK(count[c.pair]==vm.count&&!memcmp(first[c.pair],seg,vm.count*sizeof *seg),
+                   "%s draws what the first of its pair draws (%u vs %u)",c.name,vm.count,count[c.pair]);
         if(i==1){
             /* Direct: x' = floor((cos x - sin y + 120 * 2^14) / 2^14). */
-            const int16_t *pts=work[0];
+            const int16_t *pts=work;
             bool same=vm.count==128;
             for(unsigned k=0;same&&k<128;k++){
                 const int32_t x=pts[2*k],y=pts[2*k+1];
@@ -80,6 +77,27 @@ static void pairs(void){
             CHECK(same,"affine128 equals the direct computation");
         }
     }
+}
+
+/* PUT and FETCH on planes: field c of record j at c * records + j. */
+static void soa_put(void){
+    int16_t a[16];
+    for(int k=0;k<16;k++)a[k]=(int16_t)k;
+    const uint8_t decl[1][4]={{KSN_SHIKI_I16,0,2,3}};
+    ksn_shiki_region r[1]={{a,16,KSN_SHIKI_I16,0,2}};
+    prog p;p_begin(&p,1,decl);
+    I(&p,KSN_SHIKI_EACH,0,0,0,0,0);
+    I(&p,KSN_SHIKI_FETCH,0,0,0,0,2);                 /* r0 = x, r1 = y */
+    I(&p,KSN_SHIKI_ADD,0,0,1,0,0);
+    I(&p,KSN_SHIKI_PUT,0,0,1,0,1);                   /* y = x + y */
+    I(&p,KSN_SHIKI_END,0,0,0,0,0);
+    CHECK(reg(&p,r,1)&&run()==KSN_SHIKI_DONE,"soa put runs");
+    bool ok=true;
+    for(int j=0;j<8;j++)ok=ok&&a[j]==j&&a[8+j]==j+8+j;
+    CHECK(ok,"soa put writes the y plane (%d %d)",a[8],a[15]);
+    int16_t b[12];
+    ksn_shiki_region rb[1]={{b,12,KSN_SHIKI_I16,0,2}};    /* 6 records: not a multiple of 8 */
+    CHECK(!reg(&p,rb,1),"soa refuses a record count off the multiple of 8");
 }
 
 static void lanes(void){
@@ -248,6 +266,7 @@ static void checks_run(void){
 int main(void){
     plan=malloc(KSN_SHIKI_PLAN_MAX);
     pairs();
+    soa_put();
     lanes();
     emits();
     refusals();

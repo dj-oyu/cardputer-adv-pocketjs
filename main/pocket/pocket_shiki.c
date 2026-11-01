@@ -285,7 +285,7 @@ static unsigned timed_rows(timed_row *rows,unsigned max){
     if(n<max)rows[n++]=(timed_row){-1,false};
     for(unsigned i=0;i<ksn_shiki_bench_count();i++){
         if(n<max)rows[n++]=(timed_row){(int)i,false};
-        if(i==1&&n<max)rows[n++]=(timed_row){(int)i,true};   /* affine128 vector */
+        if((i==1||i==5)&&n<max)rows[n++]=(timed_row){(int)i,true};   /* the vector forms */
     }
     return n;
 }

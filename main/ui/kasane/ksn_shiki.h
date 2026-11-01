@@ -83,6 +83,13 @@ typedef struct {
     uint16_t records;
     uint8_t type,k_rec;
     uint32_t n;
+    /* PROTOTYPE (shiki-pie.md sec.3.3, option S): the region table's byte 3
+     * bit 1 lays the region out as field planes, element (field c, record j)
+     * at c * records + j, instead of v1.3's j * k_rec + c. The prototype asks
+     * for a record count that is a multiple of 8, so that the stride (the
+     * count rounded up to 8) is the count itself and every plane starts on
+     * 16 B when the region does. */
+    bool soa;
 } ksn_shiki_bound;
 typedef struct {
     uint8_t count,inputs;

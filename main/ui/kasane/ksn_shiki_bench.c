@@ -46,22 +46,38 @@ static void affine_consts(asm_t *s){
 }
 static uint32_t next(uint32_t *st){*st=*st*1664525u+1013904223u;return *st>>8;}
 
-unsigned ksn_shiki_bench_count(void){return 4;}
+/* Cases 0..3 lay the regions out as v1.3 does (AoS), 4..7 as field planes
+ * (option S, shiki-pie.md sec.3.3) with the same values: x of every record,
+ * then y, and so on. pair 0 is affine128, 1 the lines; every case of a pair
+ * draws the same segments. The SoA lines region holds 104 records (a
+ * multiple of 8, as the prototype asks) and both forms draw the first 100
+ * (EACH and EMIT take the count from r4), the same 100 the AoS rows draw. */
+enum { CASES=8 };
+unsigned ksn_shiki_bench_count(void){return CASES;}
+
+/* AoS (k fields to a record, n records) to planes. */
+static void to_planes(int16_t *dst,const int16_t *src,unsigned k,unsigned n){
+    for(unsigned j=0;j<n;j++)for(unsigned c=0;c<k;c++)dst[c*n+j]=src[j*k+c];
+}
 
 bool ksn_shiki_bench_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shiki_bench_case *c){
-    if(i>=4)return false;
+    if(i>=CASES)return false;
     memset(c,0,sizeof *c);
     uint32_t st=12345;
-    c->pair=i/2;
-    if(i<2){
-        int16_t *pts=work,*out=work+2*POINTS;
+    const bool soa=i>=4;
+    const uint8_t lay=soa?2:0;                     /* region table byte 3, bit 1 */
+    const unsigned form=i%4;
+    c->pair=form/2;
+    if(form<2){
+        int16_t *pts=work,*out=work+2*POINTS,*tmp=work+4*POINTS;
         for(unsigned k=0;k<2*POINTS;k++)pts[k]=(int16_t)((int32_t)(next(&st)%201)-100);
+        if(soa){memcpy(tmp,pts,2*POINTS*sizeof *pts);to_planes(pts,tmp,2,POINTS);}
         memset(out,0,2*POINTS*sizeof *out);
-        const uint8_t decl[2][4]={{KSN_SHIKI_I16,0,2,0},{KSN_SHIKI_I16,0,2,1}};
+        const uint8_t decl[2][4]={{KSN_SHIKI_I16,0,2,lay},{KSN_SHIKI_I16,0,2,(uint8_t)(1|lay)}};
         c->region[0]=(ksn_shiki_region){pts,2*POINTS,KSN_SHIKI_I16,0,2};
         c->region[1]=(ksn_shiki_region){out,2*POINTS,KSN_SHIKI_I16,0,2};
-        if(i==0){
-            c->name="affine128 scalar";
+        if(form==0){
+            c->name=soa?"affine128 scalar soa":"affine128 scalar";
             c->regions=1;
             asm_t s=begin(c,decl,1);
             affine_consts(&s);
@@ -83,7 +99,7 @@ bool ksn_shiki_bench_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shi
             op(&s,KSN_SHIKI_END,0,0,0,0,0);
             finish(c,&s,1);
         }else{
-            c->name="affine128 vector";
+            c->name=soa?"affine128 vector soa":"affine128 vector";
             c->regions=2;
             asm_t s=begin(c,decl,2);
             affine_consts(&s);
@@ -106,40 +122,46 @@ bool ksn_shiki_bench_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shi
         }
         return true;
     }
-    int16_t *ln=work;
-    for(unsigned k=0;k<LINES;k++){
+    /* The lines: LINES records of (x0, y0, x1, y1); SoA pads to 104. */
+    const unsigned recs=soa?(LINES+7)/8*8:LINES;
+    int16_t *ln=work,*tmp=work+4*recs;
+    for(unsigned k=0;k<recs;k++){
         const int16_t x=(int16_t)(next(&st)%240),y=(int16_t)(next(&st)%135);
         ln[4*k]=x;ln[4*k+1]=y;
         ln[4*k+2]=(int16_t)(x+(int32_t)(next(&st)%17)-8);
         ln[4*k+3]=(int16_t)(y+(int32_t)(next(&st)%17)-8);
     }
-    const uint8_t decl[1][4]={{KSN_SHIKI_I16,0,4,0}};
-    c->region[0]=(ksn_shiki_region){ln,4*LINES,KSN_SHIKI_I16,0,4};
+    if(soa){memcpy(tmp,ln,4*recs*sizeof *ln);to_planes(ln,tmp,4,recs);}
+    const uint8_t decl[1][4]={{KSN_SHIKI_I16,0,4,lay}};
+    c->region[0]=(ksn_shiki_region){ln,4*recs,KSN_SHIKI_I16,0,4};
     c->regions=1;
     asm_t s=begin(c,decl,1);
-    if(i==2){
-        c->name="lines100 scalar";
-        op(&s,KSN_SHIKI_EACH,0,0,0,0,0);
+    const uint8_t counted=soa?1:0;
+    if(soa)op(&s,KSN_SHIKI_SET,4,0,0,LINES,0);
+    if(form==2){
+        c->name=soa?"lines100 scalar soa":"lines100 scalar";
+        op(&s,KSN_SHIKI_EACH,0,0,(uint8_t)(counted?4:0),0,counted);
         op(&s,KSN_SHIKI_FETCH,0,0,0,16,4);                /* r0..r3 in Q16 */
         op(&s,KSN_SHIKI_MOVE,0,0,1,0,0);
         op(&s,KSN_SHIKI_LINE,0,2,3,0,COLOUR);
         op(&s,KSN_SHIKI_END,0,0,0,0,0);
     }else{
-        c->name="lines100 emit";
-        op(&s,KSN_SHIKI_EMIT_LINES,0,0,0,0,COLOUR);
+        c->name=soa?"lines100 emit soa":"lines100 emit";
+        op(&s,KSN_SHIKI_EMIT_LINES,counted,0,(uint8_t)(counted?4:0),0,COLOUR);
     }
     finish(c,&s,1);
     return true;
 }
 
 /* ---- the PIE checks */
-enum { CHECKS=10 };
+enum { CHECKS=11 };
 unsigned ksn_shiki_bench_check_count(void){return CHECKS;}
 bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shiki_bench_case *c){
     if(i>=CHECKS)return false;
-    if(i==CHECKS-1){                       /* the timed vector form, checked too */
-        const bool ok=ksn_shiki_bench_build(1,work,c);
-        c->name="check affine128";
+    if(i>=CHECKS-2){                       /* the timed vector forms, checked too */
+        const bool soa=i==CHECKS-1;
+        const bool ok=ksn_shiki_bench_build(soa?5:1,work,c);
+        c->name=soa?"check affine128 soa":"check affine128";
         return ok;
     }
     memset(c,0,sizeof *c);
