@@ -166,7 +166,10 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl
         return i->dst<8&&i->a<8&&i->b<8;
     case KSN_SHIKI_VMAC: return i->a<8&&i->b<8;
     case KSN_SHIKI_VMACK: return i->a<8;
-    case KSN_SHIKI_VOUT: return i->dst<8&&i->aux<=63;
+    /* 0..32: on the device, EE.SRCMB.S16.QACC matched the model at shift
+     * 33 but not at 40 and/or 63 (docs/kasane/shiki-pie.md sec.8); the
+     * prototype keeps to the range checked plus margin. */
+    case KSN_SHIKI_VOUT: return i->dst<8&&i->aux<=32;
     case KSN_SHIKI_EMIT_POINTS: case KSN_SHIKI_EMIT_LINES:
         return i->dst<=1&&(i->dst||!i->b)&&rd[i->a].type==KSN_SHIKI_I16&&i->imm>=0&&i->imm<=15&&
                rd[i->a].k_rec>=(i->op==KSN_SHIKI_EMIT_LINES?4:2);
@@ -714,9 +717,8 @@ static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_
         for(unsigned l=0;l<8;l++)acc[l]=r[i->a];
         break;
     case KSN_SHIKI_VOUT:
-        /* |acc| <= 2^39: a shift past 40 gives what 40 gives (0 or -1). */
         for(unsigned l=0;l<8;l++){
-            acc[l]=floor_shift(acc[l],i->aux>40?40u:i->aux);
+            acc[l]=floor_shift(acc[l],i->aux);
             v[i->dst][l]=(int16_t)sat16(acc[l]);
         }
         break;

@@ -238,7 +238,7 @@ static void refusals(void){
            I(&p,KSN_SHIKI_END,0,0,0,0,0));
     REFUSE("vector register 8",I(&p,KSN_SHIKI_VEACH,0,0,0,0,0);I(&p,KSN_SHIKI_VIOTA,8,0,0,0,0);
            I(&p,KSN_SHIKI_END,0,0,0,0,0));
-    REFUSE("VOUT shift 64",I(&p,KSN_SHIKI_VEACH,0,0,0,0,0);I(&p,KSN_SHIKI_VOUT,0,0,0,0,64);
+    REFUSE("VOUT shift 33",I(&p,KSN_SHIKI_VEACH,0,0,0,0,0);I(&p,KSN_SHIKI_VOUT,0,0,0,0,33);
            I(&p,KSN_SHIKI_END,0,0,0,0,0));
     REFUSE("EMIT_LINES on a 2-element record",I(&p,KSN_SHIKI_EMIT_LINES,0,0,0,0,1));
     REFUSE("EMIT q 16",I(&p,KSN_SHIKI_EMIT_POINTS,0,0,0,16,1));

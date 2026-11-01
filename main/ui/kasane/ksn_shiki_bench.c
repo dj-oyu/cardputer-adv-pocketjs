@@ -273,7 +273,8 @@ bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],k
         return true;
     }
     case 7:
-        /* Shifts of 32 and more: 40 * 32767^2 is about 2^35.3. */
+        /* Large shifts: 40 * 32767^2 is about 2^35.3. The first device run
+         * (f3ec673) also had 40 and 63 here, which PIE did not match. */
         c->name="check shift32";
         s=begin(c,one,2);
         op(&s,KSN_SHIKI_SET,0,0,0,32767,0);
@@ -283,12 +284,12 @@ bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],k
         op(&s,KSN_SHIKI_VZACC,0,0,0,0,0);
         op(&s,KSN_SHIKI_VSPLAT,0,0,0,0,0);
         for(unsigned k=0;k<40;k++)op(&s,KSN_SHIKI_VMACK,0,0,0,0,0);
-        op(&s,KSN_SHIKI_VOUT,1,0,0,0,33);
+        op(&s,KSN_SHIKI_VOUT,1,0,0,0,32);
         op(&s,KSN_SHIKI_VOUT,2,0,0,0,0);
         op(&s,KSN_SHIKI_VACCSET,0,2,0,0,0);
-        op(&s,KSN_SHIKI_VOUT,3,0,0,0,40);
+        op(&s,KSN_SHIKI_VOUT,3,0,0,0,32);            /* the largest shift allowed */
         op(&s,KSN_SHIKI_VACCSET,0,2,0,0,0);
-        op(&s,KSN_SHIKI_VOUT,4,0,0,0,63);
+        op(&s,KSN_SHIKI_VOUT,4,0,0,0,31);
         op(&s,KSN_SHIKI_END,0,0,0,0,0);
         finish(c,&s,2);
         return true;
