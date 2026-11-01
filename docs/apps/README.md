@@ -16,7 +16,7 @@
 | [pet-asset-design.md](pet-asset-design.md) | 設計 | ペット画像の省容量化（PPT2 形式） |
 | [lcd-catch.md](lcd-catch.md) | 設計・記録 | LCD CATCH: 固定セグメントの液晶ゲーム。Kasane の ref 32・コマンド 80 に収める設計、host の台本再生、実機で調整する項目 |
 | [derby-watch.md](derby-watch.md) | 設計・記録 | DERBY WATCH: 線画の疑似 3D で観る競馬、再現できるレースのモデル、起動ごとの種、較正したオッズ、場面ごとの plan、host の全画素検証、`pocket.app.load` のチャンクへの分割 |
-| [derby-integer.md](derby-integer.md) | 設計 | DERBY WATCH の JS から double を無くす: 受け入れ条件（opprof で float の演算 0、境目は int だけ）、double の発生源、QuickJS で int のままでいる規則、固定小数点の単位、割り算の行き先（定数の逆数・Shiki の `DIV`・`pocket.derby`・整数の長除法）、段階（2026-11-01、実装前） |
+| [derby-integer.md](derby-integer.md) | 設計 | DERBY WATCH の JS から double を無くす: 受け入れ条件（opprof の float の組は列挙した境目だけ、静的検査 0、境目は int だけ）、前の計測（float の組 776〜1,250/ターン）、double の発生源、QuickJS で int のままでいる規則、2 進の固定小数の m、割り算の行き先（定数の逆数・`pocket.derby` の C・整数の長除法。Shiki に除算は足さない）、段階（表示が先、モデルが最後）、SLOW のレビューと対応（2026-11-01、実装前） |
 | [derby-ser-native.md](derby-ser-native.md) | 設計・記録 | DERBY WATCH の首振りの列 `ser()` を倍精度の C（`pocket.derby`、DERBY のセッションだけの面、capability `derby.series`）に写し `draw` を数値引数にした（S1b）: 境目の API、host の oracle（JS と C の draw の入力をビット単位で照合）、楕円コーナーの WIDE 2 が実機 15.9 → 24.6 fps、ゲスト −5.2 KB・評価の余裕 30.6 KB、画素・結果は全行一致（2026-10-02） |
 | [megademo-story.md](megademo-story.md) | 設計・記録 | MEGADEMO — ASTRAL FIGHTER（2026-10-28 からの物語: 目覚め WAKE・出撃番号・記憶の濁り・猫のタマ）と、その前の NIGHT SIGNAL: 部屋と猫とモニターの物語として 5 章に組み直した台本、場面のつなぎ、Enter の小窓を物語の装置に使う設計、IV CORE（正二十面体の殻が開く 3D、グレーのフラッシュ・電波障害・めまいズーム）への差し替え、`pocket.app.load` の 4 チャンクへの分割（評価のピーク −39.5 KB）、メモリ（host m32）と実機の 90 秒の記録 |
 | [megademo-shapes.md](megademo-shapes.md) | 設計・記録 | MEGADEMO の WAKE（3D の点＋透視のタマ）が実機 7 fps（JS のターン 130 ms）だったので、走査変換・投影・輪郭を C（`pocket.shapes`、MEGADEMO のセッションだけの面、capability `kasane.shapes`）へ移した: 倍精度ビルドで JS と draw がビット単位で一致する oracle、単精度の差、メモリ |
