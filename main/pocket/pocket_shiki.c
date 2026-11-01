@@ -393,7 +393,7 @@ esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
         JS_CFUNC_DEF("benchCount",0,js_bench_count),
         JS_CFUNC_DEF("benchBuild",0,js_bench_build),
         JS_CFUNC_DEF("cycles",0,js_cycles),JS_CFUNC_DEF("drawProfile",1,js_draw_profile)};
-    return JS_SetPropertyFunctionList(ctx,ns,methods,4)<0?ESP_ERR_NO_MEM:ESP_OK;
+    return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 /* No limits: the engine's are the spec's (sec.9.1); this surface adds none. */
 static const pocket_capability_t capability={.name="kasane.shiki.debug",.supported=true,
