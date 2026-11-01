@@ -130,6 +130,27 @@ globalThis.shikiApiTest = function (pocket, log) {
   S.beginFrame(0);
   throws('many count', 'LIMIT_EXCEEDED', () => S.drawMany(new Uint32Array(257).fill(put), new Float64Array(257), 1));
   S.unregister(put); S.release(box);
+  // sin/cos/sinMany (v1.5): integers in Q16 turns, the SIN instruction's value
+  // (checked against a program: INPUT t, SIN, PUT into a region).
+  const sv = S.data({type: 'i32', q: 0, records: 1, record: 1});
+  const sp = S.register(asm([[2, 0, 1, 1]], [[1, 0, 0], [4, 1, 0], [23, 0, 0, 0], [25, 1, 0, 0, 0, 1], [6]], [0]), [], {data: [sv]});
+  const TS = [0, 1, 63, 64, 100, 16383, 16384, 16385, 32768, 49152, 65535, -1, -16384, 123456789, -2147483648, 2147483647];
+  S.beginFrame(0);
+  let same = true;
+  for (const t of TS) { S.draw(sp, t); same = same && S.sin(t) === sv[0]; }
+  ok('sin = SIN', same);
+  ok('sin ends', S.sin(0) === 0 && S.sin(16384) === 65536 && S.sin(-16384) === -65536 && S.cos(0) === 65536 && S.cos(2147483647) === S.sin(-2147483648 + 16383));
+  throws('sin fraction', 'INVALID_ARGUMENT', () => S.sin(1.5));
+  throws('sin range', 'INVALID_ARGUMENT', () => S.sin(2147483648));
+  throws('sin string', 'INVALID_ARGUMENT', () => S.sin('1'));
+  const ta = new Int32Array(TS), to = new Int32Array(TS.length);
+  S.sinMany(ta, to, 16384);
+  ok('sinMany', TS.every((t, i) => to[i] === S.cos(t)));
+  S.sinMany(ta, ta);
+  ok('sinMany in place', TS.every((t, i) => ta[i] === S.sin(t)));
+  throws('sinMany length', 'INVALID_ARGUMENT', () => S.sinMany(new Int32Array(2), new Int32Array(3)));
+  throws('sinMany type', 'INVALID_ARGUMENT', () => S.sinMany(new Float64Array(2), new Int32Array(2)));
+  S.unregister(sp); S.release(sv);
   S.beginFrame(0); S.draw(plot, 120, 60); S.commit();   // one commit a turn
   S.unregister(plot); S.unregister(spin);
   throws('bad program', 'INVALID_ARGUMENT', () => S.register(new Uint8Array([1, 2, 3])));

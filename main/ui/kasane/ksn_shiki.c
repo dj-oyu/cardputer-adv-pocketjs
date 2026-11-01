@@ -343,7 +343,7 @@ static ksn_shiki_status emit(ksn_shiki_vm *vm,ksn_proc_segment *out,
     out[vm->count++]=(ksn_proc_segment){x0,y0,x1,y1,c};
     return KSN_SHIKI_RUNNING;
 }
-static int32_t sine(int32_t r){
+int32_t ksn_shiki_sin(int32_t r){
     const unsigned p=(uint32_t)r&0xFFFFu,quad=p>>14;
     unsigned w=p&0x3FFFu;
     if(quad&1)w=0x4000u-w;
@@ -818,7 +818,7 @@ ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *
             r[i->dst]=i->imm>=0?sat16(a*((int64_t)1<<i->imm)):(int32_t)floor_shift(a,(unsigned)-i->imm);
             break;
         }
-        case KSN_SHIKI_SIN: r[i->dst]=sine(r[i->a]); break;
+        case KSN_SHIKI_SIN: r[i->dst]=ksn_shiki_sin(r[i->a]); break;
         case KSN_SHIKI_REPEAT: case KSN_SHIKI_REPEAT_REG: {
             int32_t count=i->imm;
             if(i->op==KSN_SHIKI_REPEAT_REG){

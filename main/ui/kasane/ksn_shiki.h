@@ -139,6 +139,10 @@ extern bool ksn_shiki_vec_pie;
 
 /* 257 entries, sec.4.4: round(sin(k pi / 512) * 65536). */
 extern const int32_t ksn_shiki_sin_table[257];
+/* The SIN instruction (sec.4.4): r's low 16 bits are the fraction of a turn,
+ * the result is Q16 (-65536..65536). Also the JS API's sin/cos/sinMany
+ * (sec.9.4, v1.5), so a JS value and a program's agree bit for bit. */
+int32_t ksn_shiki_sin(int32_t r);
 
 /* sec.2.4: a double to Q f, false for a non-finite v. */
 bool ksn_shiki_from_double(double v,unsigned f,int32_t *out);

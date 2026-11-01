@@ -362,6 +362,46 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     return JS_UNDEFINED;
 }
 
+// ------------------------------------------------- sin() / cos() / sinMany()
+// sec.9.4 (v1.5): the SIN instruction for JS. An angle is an integer in Q16
+// turns (65536 a turn; only the low 16 bits matter, so any int32 wraps) and
+// the result an integer in Q16 (-65536..65536), the instruction's value bit
+// for bit (ksn_shiki_sin). Integers only, and not rounded: the point is that
+// no double is made or read (the S3 has no double unit). A JS int is read off
+// its tag; a double with an integer value is accepted, as JS may hold one.
+static bool int32_arg(JSValueConst v,int32_t *out){
+    const int tag=JS_VALUE_GET_TAG(v);
+    if(tag==JS_TAG_INT){*out=JS_VALUE_GET_INT(v);return true;}
+    if(!JS_TAG_IS_FLOAT64(tag))return false;
+    const double d=JS_VALUE_GET_FLOAT64(v);
+    if(!(d>=-2147483648.0&&d<=2147483647.0)||d!=floor(d))return false;
+    *out=(int32_t)d;
+    return true;
+}
+static JSValue js_sin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,int magic){
+    (void)self;
+    int32_t t;
+    if(argc<1||!int32_arg(argv[0],&t))
+        return failure(ctx,magic?"kasane.shiki.cos":"kasane.shiki.sin",POCKET_ERR_INVALID_ARGUMENT,
+                       "expected an int32 angle in Q16 turns");
+    /* cos: a quarter turn on; unsigned so that the int32 ends wrap */
+    return JS_NewInt32(ctx,ksn_shiki_sin(magic?(int32_t)((uint32_t)t+16384u):t));
+}
+// sinMany(t, out[, offset]): out[i] = sin(t[i] + offset) for Int32Arrays of
+// one length (they may be the same array); offset an int32, default 0.
+static JSValue js_sin_many(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.sinMany";
+    size_t n=0,m=0;
+    int32_t offset=0;
+    const int32_t *t=argc>=2?typed_data(ctx,argv[0],JS_TYPED_ARRAY_INT32,&n):NULL;
+    int32_t *out=t?(int32_t *)typed_data(ctx,argv[1],JS_TYPED_ARRAY_INT32,&m):NULL;
+    if(!t||!out||n!=m||(argc>=3&&!JS_IsUndefined(argv[2])&&!int32_arg(argv[2],&offset)))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected (Int32Array angles, Int32Array out of the same length, int32 offset)");
+    for(size_t i=0;i<n;i++)out[i]=ksn_shiki_sin((int32_t)((uint32_t)t[i]+(uint32_t)offset));
+    return JS_UNDEFINED;
+}
+
 // --------------------------------------------------------------- heap()
 static JSValue js_heap(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;
@@ -395,6 +435,9 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("release",1,js_release),
         JS_CFUNC_DEF("fields",1,js_fields),
         JS_CFUNC_DEF("drawMany",3,js_draw_many),
+        JS_CFUNC_MAGIC_DEF("sin",1,js_sin,0),
+        JS_CFUNC_MAGIC_DEF("cos",1,js_sin,1),
+        JS_CFUNC_DEF("sinMany",3,js_sin_many),
     };
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
     JSValue procedural=JS_GetPropertyStr(ctx,kasane,"procedural");
