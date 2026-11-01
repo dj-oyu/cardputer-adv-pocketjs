@@ -82,10 +82,10 @@ for (let n = 0; n < 140; ++n) PW[n + 1] = PW[n] + (PW[n] * 268 >> 16);
 // turns), one sinMany a frame.
 const XS = new Int32Array(8), LT = new Int32Array(8), LS = new Int32Array(8), PO = new Int32Array(32);
 let lz = new Int32Array(8).map((_, i) => PW[20 * i]), zo = [7, 6, 5, 4, 3, 2, 1, 0];
-const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
+const h4 = v => ('000' + v.toString(16).toUpperCase()).slice(-4), hex = s => h4(s >>> 16) + h4(s & 65535), num = i => 'NO.' + (i + 1),
   th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
 // Seeds: the hardware's, mixed with the stored race count (README).
-const ST = pocket.storage, HW = pocket.random.seed();
+const ST = pocket.storage, HW = pocket.random.seed() | 0; // int-lint: allow
 let sn = 0;
 function save() { if (dm) return; try { ST.set('derby.v1', {v: 1, pts: pts, race: raceNo}).then(nop, nop); } catch (e) {} }
 try {

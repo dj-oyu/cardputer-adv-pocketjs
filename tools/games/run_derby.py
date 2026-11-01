@@ -41,8 +41,7 @@ the harness runs the same lowering's copy, .cache/derby_host/lowered/apps/derby
 Courses: each race's seed picks the straight or the oval (derby_watch.js OV);
 --course straight|oval runs every race on one (the lowered copy's OV[0] set
 to 0 or 1, host only). The oval's odds are checked like the straight's
-(tune_derby.mjs --course=oval) and its bend against the trial
-(derby_corner.mjs app: every step, every digit).
+(tune_derby.mjs --course=oval).
 Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
 seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
 stored race under another hardware seed must be another race; the seed
@@ -223,9 +222,10 @@ def force_course(app_dir: Path, course: str) -> Path:
     if course != "seed":
         entry = app_dir / "derby_watch.js"
         text = entry.read_text(encoding="utf-8")
-        if "const OV = [.5," not in text:
+        if "const OV = [32768," not in text:
             raise SystemExit("derby_watch.js: OV changed, update force_course()")
-        entry.write_text(text.replace("const OV = [.5,", f"const OV = [{int(course == 'oval')},"), encoding="utf-8")
+        # The chance is Q16 against a 16-bit draw: 65536 always, 0 never.
+        entry.write_text(text.replace("const OV = [32768,", f"const OV = [{65536 * (course == 'oval')},"), encoding="utf-8")
     return app_dir
 
 
@@ -356,11 +356,12 @@ def main() -> None:
         print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
         if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
             raise SystemExit("odds calibration check failed")
-        print("==== oval: odds calibration, and the app's bend against the trial's reference", flush=True)
+        print("==== oval: odds calibration", flush=True)
         if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check", "--course=oval"], cwd=ROOT).returncode:
             raise SystemExit("oval odds calibration check failed")
-        if subprocess.run(["node", "tools/games/derby_corner.mjs", "app", "500"], cwd=ROOT).returncode:
-            raise SystemExit("the app's oval differs from tools/games/derby_corner.mjs")
+        # derby_corner.mjs's app check compared the double model with the
+        # trial digit for digit; the model is integer now
+        # (docs/apps/derby-integer.md), so the trial is its history only.
     if args.ppm:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)

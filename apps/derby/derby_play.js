@@ -48,24 +48,24 @@ globalThis.frame = function (b) {
       if (scene === 'pad') {
         if (P('a') || P('d')) { pick = (pick + (P('d') ? 1 : 7)) % 8; if (A) A.cue('move'); }
         stake = mx(50, mn(stake + (P('e') ? 50 : P('s') ? -50 : 0), 500, pts));
-        if (P('1')) { log('PICK ' + (pick + 1) + ' stake=' + stake + ' odds=' + od[pick]); if (A) A.cue('accept'); { enter('gate'); break fr; } }
+        if (P('1')) { log('PICK ' + (pick + 1) + ' stake=' + stake + ' odds=' + ot(od[pick])); if (A) A.cue('accept'); { enter('gate'); break fr; } }
       } else if (scene === 'gate' || scene === 'race') {
         // A camera key overrides the director for 5 s.
         if (P(',') || P('/') || P('a') || P('d')) { cam = (cam + (P('/') || P('d') ? 1 : 2)) % 3; camT = 45; man = 150; }
         if (scene === 'gate' && (!queue.length && t > 40 || t > 300)) { log('GO' + (queue.length ? ' LOADSTALL' : '')); { enter('race'); break fr; } }
         if (scene === 'race') {
           const lead = mx.apply(null, rs.x);
-          if (!slow && lead > D - 20) { slow = 1; camT = 60; log('SLOW'); }
+          if (!slow && lead > 64225280) { slow = 1; camT = 60; log('SLOW'); }
           // Slow motion shows each sim step over 4 frames: the sim never
           // changes, so the camera cannot change the race.
           disp += slow ? 1 : 4;
           for (; disp >= 4 && rs.done < 3; disp -= 4) {
             const was = rs.done;
-            step(F, rs, DT);
+            step(F, rs);
             const w = (rank = order(rs))[0];
-            if (w !== ld) { if (lead > 500) log('LEAD #' + (w + 1) + ' at ' + rnd(lead) + 'M'); if (lead > 400) dl = 60; ld = w; }
+            if (w !== ld) { if (lead > 32768000) log('LEAD #' + (w + 1) + ' at ' + (lead + 32768 >> 16) + 'M'); if (lead > 26214400) dl = 60; ld = w; }
             // The photo: every runner where it was when the winner crossed.
-            if (!was && rs.done) photoX = photo((rs.tc[w] - rs.t + DT) * 81920 | 0);
+            if (!was && rs.done) photoX = photo(rs.tc[w] - rs.t + 65536 >> 4);
           }
           // The band's plan takes the gate's slot (README "plan の登録").
           if (live.gate && lead > 120) { drop(['gate']); want(['band']); }

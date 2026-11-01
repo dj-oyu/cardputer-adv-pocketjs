@@ -3,7 +3,7 @@
 // enter the stalls), race, photo (still), res (result).
 function enter(s) {
   scene = s; t = 0; need = 1;
-  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : ''));
+  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field(rng(HW ^ M.imul(sn, 0x9e3779b9))() + M.imul(raceNo, 0x9e3779b9) | 0); log('ODDS ' + (od = odds(F.h, F.o)).map(ot) + (F.o ? ' OVAL' : ''));
     // The oval's bend in 16 chords (pocket.derby's series).
     CRS = F.o ? OC : 0; CH = [-655360000];
     if (F.o) for (let j = 0; j <= 16; ++j) CH.push(OB + j * 1544156);
@@ -41,7 +41,7 @@ function build(up) {
       R.bar = [0, 1, 2].map(i => tx.rect({bounds: [180, 43 + 12 * i, 181, 49 + 12 * i], color: 0x05ffa1ff}));
       // The tote: a silk swatch per runner, then its odds.
       R.od = SILK.map((c, i) => (tx.rect({bounds: [3 + 30 * i, 15, 6 + 30 * i, 22], color: (c >> 8 & 248) * 16777216 + (c >> 3 & 252) * 65536 + (c << 3 & 248) * 256 + 255}),
-        tt([8 + 30 * i, 13, 32 + 30 * i, 24, 0xd8e8ffff, 4], od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]))));
+        tt([8 + 30 * i, 13, 32 + 30 * i, 24, 0xd8e8ffff, 4], od[i] < 100 ? ot(od[i], 1) : '' + idiv(od[i] + 5, 10))));
     }
     R.t = TX[pad ? 0 : res0 ? 2 : 1].map(b => tt(b));
     // The curtain: a black rect over everything but DEMO.
@@ -55,12 +55,13 @@ function hud(tx) {
   if (scene === 'pad') {
     const h = F.h[pick];
     s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
-      STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
+      STY[h.sty] + ' x' + ot(od[pick]), 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
 
     if (R.pick !== pick) {
       R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
-      const v = [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1];
-      for (let i = 0; i < 3; ++i) R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + rnd(52 * mx(0, mn(1, v[i]))), 49 + 12 * i]);
+      // The figures' fractions (Q16): where each lies in its range.
+      const v = [h.qt, h.qs, h.qk];
+      for (let i = 0; i < 3; ++i) R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + (52 * v[i] + 32768 >> 16), 49 + 12 * i]);
       R.pick = pick;
     }
   } else if (scene === 'res') {
@@ -78,17 +79,17 @@ function hud(tx) {
   }
   for (let i = 0; i < s.length; ++i) if (R.t[i].s !== s[i]) R.t[i].setText(tx, R.t[i].s = s[i]);
 }
-// The runners u (Q12) of the way through the last sim step (Q16 m: the
-// model's x is double until its own stage, docs/apps/derby-integer.md sec.4.2,
-// read here into XQ); their lanes (README "レーンの横位置"): once a step the
-// oval steers w at .8 m/s at most, lz sways (sinMany).
+// The runners u (Q12) of the way through the last sim step (Q16 m; XQ the
+// step's own); their lanes (README "レーンの横位置"): once a step the oval
+// steers w at .8 m/s at most, lz sways (sinMany). VM: the leader's speed .88
+// of a step (Q16 m), for the camera.
 const XQ = new Int32Array(8);
 let VM = 0;
 function at(u) {
   const w = rs.l, k = F.k, n = rs.t > (w.t || 0);
   w.t = rs.t;
-  for (let i = 0; i < 8; ++i) { const p = rs.px[i] * QM | 0; XQ[i] = rs.x[i] * QM | 0; XS[i] = p + ((XQ[i] - p) * u >> 12); }
-  VM = mx.apply(null, rs.v) * 2884 | 0;
+  for (let i = 0; i < 8; ++i) { const p = rs.px[i]; XQ[i] = rs.x[i]; XS[i] = p + ((XQ[i] - p) * u >> 12); }
+  VM = (mx.apply(null, rs.v) >> 8) * 57672 >> 12;
   const L = mx.apply(null, XS);
   for (let i = 0, x, s; i < 8; ++i) {
     x = XQ[i]; s = F.h[i].sty;
@@ -112,17 +113,18 @@ function photo(u) {
 }
 // Finish: run the rest of the field unseen, then settle the bet.
 function settle() {
-  while (rs.done < 8 && rs.t < 200) step(F, rs, DT);
-  const o = order(rs), a = rs.tc[o[1]] - rs.tc[o[0]], m = a * rs.v[o[1]];
-  const mg = m < .02 ? 'DEAD HEAT' : m < .12 ? 'NOSE' : m < .3 ? 'SHORT HEAD' : m < .6 ? 'HEAD' : m < 1 ? 'NECK' :
-    m < 1.8 ? '1/2 LENGTH' : rnd(m / 2.4) + ' LENGTHS';
-  const dp = replay ? 0 : o[0] === pick ? rnd(stake * (od[pick] - 1)) : -stake;
+  while (rs.done < 8 && rs.t < 262144000) step(F, rs);
+  // The margin (Q16 m): the second's time behind (Q16 steps) at its speed.
+  const o = order(rs), a = rs.tc[o[1]] - rs.tc[o[0]], m = (a >> 6) * (rs.v[o[1]] >> 10) >> 4;
+  const mg = m < 1311 ? 'DEAD HEAT' : m < 7864 ? 'NOSE' : m < 19661 ? 'SHORT HEAD' : m < 39322 ? 'HEAD' : m < 65536 ? 'NECK' :
+    m < 117965 ? '1/2 LENGTH' : idiv(m + 78643, 157286) + ' LENGTHS';
+  const dp = replay ? 0 : o[0] === pick ? idiv(stake * (od[pick] - 10) + 5, 10) : -stake;
   pts += dp;
   if (pts < 50) pts = 1000;
   fin = {o: o, mg: mg, dp: dp};
   const n = [], c = [];
-  for (const i of o) { n.push(i + 1); c.push(rs.tc[i]); }
-  log('FINISH race=' + raceNo + ' seed=' + hex(F.seed) + ' order=' + n + ' t=' + c + ' margin=' + mg);
+  for (const i of o) { n.push(i + 1); c.push((rs.tc[i] >> 6) * 50 >> 10); }
+  log('FINISH race=' + raceNo + ' seed=' + hex(F.seed) + ' order=' + n + ' ms=' + c + ' margin=' + mg);
   if (!replay) { log('RESULT pick=' + (pick + 1) + ' place=' + (o.indexOf(pick) + 1) + ' delta=' + dp + ' points=' + pts); save(); }
   notes = (o[0] === pick ? WIN : LOSE).slice();
 }
