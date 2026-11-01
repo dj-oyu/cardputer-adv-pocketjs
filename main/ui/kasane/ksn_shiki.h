@@ -53,7 +53,9 @@ enum { KSN_SHIKI_I16, KSN_SHIKI_U16, KSN_SHIKI_I32 };
  * records records of k_rec fields of type, laid out as field planes: field
  * c of record j is element c * S + j, S = ksn_shiki_stride(records), so the
  * memory holds k_rec * S elements (ksn_shiki_region_elements) and each plane
- * ends in S - records padding elements the engine never touches. The binding
+ * ends in S - records padding elements whose values never reach a result and
+ * are unchanged by a draw (sec.5.1: an implementation may read them and write
+ * the same values back, as a masked PIE tail would; this one never does). The binding
  * is fixed at registration; the caller keeps the memory alive and unmoved
  * while the plan exists. Two entries may point at the same memory (sec.5.1). */
 typedef struct {
