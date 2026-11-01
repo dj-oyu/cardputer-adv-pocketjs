@@ -15,7 +15,8 @@
 // (CH, the sections, pc), converted exactly as the C converts them, and its
 // own pose() (the vm/main JS).
 (function () {
-  const S = pocket.derby, NV = S.view, NS = S.ser, NC = S.course, NA = S.aim, q16 = v => v / 65536;
+  const S = pocket.derby, NV = S.view, NS = S.ser, NC = S.course, NA = S.aim, q16 = v => v / 65536,
+    flo = M.floor, rnd = M.round, PI = M.PI;
   let VE, VC, Lo, Hi, ZF, T, HL, CR, HC, CE, rec, fuzz = 0, pc, CH, SEC, DN;
   function pose(g, w) {
     if (!SEC) return [g, w, 1, 0];
@@ -119,7 +120,7 @@
   // random tier plus three random ones (Q16 integers, as the app passes
   // them); the app's course, camera and tier are put back afterwards.
   globalThis.__serfuzz = function (n, seed) {
-    const r = rng(seed), sv = [pc, tier], pick = l => l[flo(r() * l.length)], Q = v => v * 65536 | 0,
+    const r0 = rng(seed), r = () => (r0() >>> 0) / 4294967296, sv = [pc, tier], pick = l => l[flo(r() * l.length)], Q = v => v * 65536 | 0,
       ach = CRS ? [-655360000].concat(Array.from({length: 17}, (_, j) => OB + j * 1544156), [655360000]) : [-655360000, 655360000];
     fuzz = 1; __serdry(1);
     try {
