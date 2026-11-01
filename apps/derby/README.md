@@ -224,6 +224,15 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 
 **実機の結果（1回ずつ、レースは別、`docs/kasane/logs/derby-shiki-20261101-3830107.txt`）:** JS のターンは race 開始・FIELD・CLOSE で約 0.2〜0.3 ms（2〜3%）減り、WIDE 2 と VISION はノイズの範囲で変わらない。走者は WIDE の重さの主因ではなかった。代わりに、読み込み後のネイティブの空きが 70,808 → 51,004 B（Shiki の heap 48 KiB を開くため）、ゲストが 90,064 → 94,424 B（+4.4 KB）に減った。最初の焼き込みでは組み込み表がリンクされず（`libmain.a` の weak 既定が勝った）、`register('derby.run')` が全て失敗した。host はオブジェクトを直にリンクするので通っていた。
 
+### sin は Shiki（2026-11-01）
+
+表示側の残りの `Math.sin` / `Math.cos` も `pocket.kasane.shiki` の整数版（Q16 の回転数、結果は Q16）へ移した。JS の `Math.sin` は実機で 1 回約 2,700 cycles、`shiki.sin` は約 1,150（ほぼ呼び出しの固定費）、`sinMany` は 1 要素約 80（docs/kasane/logs/shiki-drawcost-20261101-4392695.txt）。レースのモデル（`derby_watch.js`）は算術だけなので触らない。
+
+- `at()` の横揺れ `sin(a / 40 + 2.4 i)`: 8 頭分を `Int32Array` に詰めて毎フレーム `sinMany` 1 回。馬ごとのずらし `2.4 i` は定数の表 `ZO`。
+- `pose()` の曲線（楕円コースのカーブ）: 同じ角を `shiki.cos` と `shiki.sin` で。角の量子化は 1/65536 回転、半径 120 m で約 1.2 cm。
+- 大写しの馬のコマ（`g0`〜`g5`、登録のときに 1 回）: `ss` / `sc`（ラジアンを回転数に直す薄い包み）。上下の揺れ `bob` は k が整数なので値の表（`.35 sin(2πk/3)` = 0, ±0.3031）。
+- 距離・角は double なので、回転数への `|0`（または `Int32Array` への代入）の変換は 1 回ずつ残る。変換を避けられるのは、入力が最初から整数の場合だけ。
+
 ## FINISH の効果（ダストと手描き風の帯、2026-10-02）
 
 FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中間の粒・手前のボケ）と上下 3 本ずつの手描き風の帯を描く。HEAD ON（`cm === 6`）では奥と中間の層を馬の前に描く（馬が手前に来る）。設計・費用・画と GIF は [docs/apps/derby-finish-fx.md](../../docs/apps/derby-finish-fx.md)。

@@ -549,7 +549,7 @@ const T = {
 };
 // The close-up horse: 6 gallop frames of one polyline (typed points, half
 // pixels), fixed on screen with the hip at HX,HY and 4 px per unit.
-const HX = 92, HY = 88, HS = 4, bob = k => .35 * sin(2 * PI * k / 3);
+const HX = 92, HY = 88, HS = 4, bob = k => k % 3 && (k % 3 < 2 ? .3031 : -.3031); // .35 sin(2 pi k / 3)
 // Units, y down, hip at 0,0; a pair 20+o,l is a leg of phase o and
 // segment length l from the point before it (knee, hoof, back up).
 const BODY = [-2.4, 3.2, -1.6, 1.4, -.6, 0, .3, -.4, 3.8, .3, 7, -.9, 8.3, -3.1, 9.9, -5, 9.8, -6, 10.5, -4.9,

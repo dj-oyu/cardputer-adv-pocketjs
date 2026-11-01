@@ -1,6 +1,8 @@
 'use strict';
 const V = pocket.kasane, H = V.procedural, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
 const SKN = {run: 1, legs: 1, frl: 1, frb: 1}; // Shiki (README)
+// sin, cos on radians via the integer Q16-turn API (README "sin は Shiki").
+const TQ = 32768 / PI, ss = r => SK.sin(r * TQ | 0) / 65536, sc = r => SK.cos(r * TQ | 0) / 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
 H.beginFrame(0);
 const res = H.resource(), live = {}, queue = [];
@@ -25,8 +27,8 @@ function load() {
       for (let j = 0; j < BODY.length; j += 2) {
         const u = BODY[j], l = BODY[j + 1];
         if (u < 20) { put(jx = u, jy = l + b); continue; }
-        const a = .55 * sin(ph + u - 20), kx = jx + l * sin(a), ky = jy + l * M.cos(a), a2 = a - .9 * mx(0, sin(ph + u - 18.6));
-        put(kx, ky); put(kx + l * sin(a2), ky + l * M.cos(a2)); put(kx, ky); put(jx, jy);
+        const a = .55 * ss(ph + u - 20), kx = jx + l * ss(a), ky = jy + l * sc(a), a2 = a - .9 * mx(0, ss(ph + u - 18.6));
+        put(kx, ky); put(kx + l * ss(a2), ky + l * sc(a2)); put(kx, ky); put(jx, jy);
       }
       p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
     } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
@@ -68,6 +70,8 @@ let rs = null, od = null, fin = null, photoX = null, replay = 0;
 let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
 // Lanes drawn, the order far to near (README "レーンの横位置").
 let lz = DL.slice(), zo = [7, 6, 5, 4, 3, 2, 1, 0];
+// at()'s sway angles a / 40 + 2.4 i as Q16 turns, one sinMany a frame.
+const LT = new Int32Array(8), LS = new Int32Array(8), ZO = new Int32Array(8).map((_, i) => 2.4 * i * TQ);
 const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
   th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
 // Seeds: the hardware's, mixed with the stored race count (README).
@@ -103,7 +107,7 @@ function pose(g, w) {
   const e = CRS[i];
   let x = e[2], z = e[3], c = e[4], d = e[5];
   if (e[1]) {
-    const r = 1 / e[1] + DNR, C = M.cos(e[6] + e[1] * g), S = sin(e[6] + e[1] * g);
+    const r = 1 / e[1] + DNR, q = (e[6] + e[1] * g) * TQ | 0, C = SK.cos(q) / 65536, S = SK.sin(q) / 65536;
     x += (S - d) * r; z -= (C - c) * r; c = C; d = S; g = 0;
   }
   return [x + g * c - w * d, z + g * d + w * c, c, d];
