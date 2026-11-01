@@ -1395,7 +1395,10 @@ int main(int argc,char **argv){
         printf("guest heap churn in frame(), %s: %u frames, %.1f allocations and %.0f B a frame, largest rise in one "
                "frame %zu B, freed only by the cycle collector %zu B\n",CHURN_SCENE[i],churn[i].frames,
                (double)churn[i].n/churn[i].frames,(double)churn[i].b/churn[i].frames,churn[i].hi,churn[i].gc);
-    bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0xffffu&&frame_reg_max<=1&&go_seen>=1&&
+    /* PLOT and PLOT_COLOR_REG were used only by the runner and fr plans, which
+     * are now Shiki programs (derby.run/legs/frl/frb); their draws count instead. */
+    unsigned ops_need=0xffffu&~(1u<<KSN_PROC_PLOT)&~(1u<<KSN_PROC_PLOT_COLOR_REG);
+    bool pass=!exceptions&&!bad_present&&!framefails&&(ops_used&ops_need)==ops_need&&shiki_draws>0&&frame_reg_max<=1&&go_seen>=1&&
               !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&
               (getenv("DERBY_PANFACE")?pan_face_frames>0:overlay_frames>0)&&refs_max<=32&&cmds_max<=80&&newton_screen<0.1;
     /* No cycles: the device would keep them until the heap is nearly full
