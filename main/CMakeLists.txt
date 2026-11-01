@@ -463,6 +463,18 @@ if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
             COMMENT "Compiling the built-in plans"
             VERBATIM)
     endif()
+    # The built-in Shiki programs (docs/kasane/shiki-spec.md sec.9.4
+    # register(name)): the rom apps' @shiki functions as a const table in
+    # flash, the same way; pocket_shiki_api.c's weak empty table otherwise.
+    if(APP_CHUNK_SHIKI)
+        add_custom_command(OUTPUT "${APP_CHUNK_SHIKI_C}"
+            COMMAND "${POCKET_NODE}" "${_kir}/emit_shiki_rom.mjs" "${APP_CHUNK_SHIKI_C}" ${APP_CHUNK_SHIKI}
+            DEPENDS ${APP_CHUNK_SHIKI_SOURCES} "${_kir}/emit_shiki_rom.mjs" "${_kir}/plan_js.mjs"
+                    "${_kir}/shiki_compile.mjs" "${_kir}/shiki_q.mjs" "${_kir}/shiki_fix.mjs"
+            COMMENT "Compiling the built-in Shiki programs"
+            VERBATIM)
+        target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_SHIKI_C}")
+    endif()
 endif()
 # The built-in plan table app_session.c hands to pocket.kasane.procedural:
 # the generated one above, or make_app_chunks.py's empty one.

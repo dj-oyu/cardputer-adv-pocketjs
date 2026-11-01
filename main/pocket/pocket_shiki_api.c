@@ -177,10 +177,12 @@ static JSValue js_release(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 }
 
 // ------------------------------------------------------------ register()
-// Built-in programs by name (sec.9.4): none yet. DERBY's move to Shiki
-// (sec.11 step 3) fills this table.
-typedef struct { const char *name; const uint8_t *code; uint16_t len; } builtin_t;
-static const builtin_t BUILTIN[1]={{NULL,NULL,0}};
+// Built-in programs by name (sec.9.4): the apps' @shiki functions, compiled
+// at build time into a const table in flash (tools/kasane_ir/emit_shiki_rom.mjs,
+// the build's generated ksn_shiki_rom.c). Weak and empty here, for a build or
+// a host harness without one: a function rather than a weak array, so that no
+// declared size of this file's can stand for the table's.
+__attribute__((weak)) const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return NULL;}
 
 static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
@@ -190,8 +192,10 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     size_t len=0;
     if(JS_IsString(argv[0])){
         const char *name=JS_ToCString(ctx,argv[0]);
-        for(unsigned k=0;name&&k<sizeof BUILTIN/sizeof BUILTIN[0];k++)
-            if(BUILTIN[k].name&&!strcmp(BUILTIN[k].name,name)){code=BUILTIN[k].code;len=BUILTIN[k].len;}
+        unsigned rom_count=0;
+        const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&rom_count);
+        for(unsigned k=0;name&&k<rom_count;k++)
+            if(!strcmp(rom[k].name,name)){code=rom[k].code;len=rom[k].len;}
         if(name)JS_FreeCString(ctx,name);
         if(!code)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"no built-in program of that name");
     }else{

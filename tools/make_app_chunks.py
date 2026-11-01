@@ -69,6 +69,10 @@ from pathlib import Path
 NAME = re.compile(r'[A-Za-z0-9_.\-]{1,31}$')
 # lower_plans.mjs's markers (tools/kasane_ir/plan_js.mjs findPlans).
 PLAN = re.compile(r'/\*\*(?:(?!\*/)[\s\S])*?@plan\s')
+# @shiki functions (Shiki programs, docs/kasane/shiki-spec.md sec.8): lowered
+# like @plan (lower_plans.mjs removes them; they need a rom app) and compiled
+# into the built-in Shiki table (tools/kasane_ir/emit_shiki_rom.mjs).
+SHIKI = re.compile(r'/\*\*(?:(?!\*/)[\s\S])*?@shiki\s')
 DECODER = re.compile(r'/\*\*\s*@planDecoder(\s+rom)?\s*\*/')
 ROM_APP = re.compile(r'[a-z][a-z0-9_]*$')
 APP_ID = re.compile(r'[A-Za-z0-9_.\-]{1,63}$')
@@ -163,7 +167,7 @@ def main():
             fail(f'{app} has {len(have)} chunks; at most {MAX_CHUNKS}')
 
     # Chunks with @plan functions are embedded lowered (the module comment).
-    lower, plans, embed, rom = [], [], {}, []
+    lower, plans, embed, rom, shiki = [], [], {}, [], []
     for app in sorted(apps):
         decoders, planned, marks, files = 0, [], [], []
         for name, file in apps[app]:
@@ -171,7 +175,9 @@ def main():
             found = DECODER.findall(text)
             decoders += len(found)
             marks += [bool(m) for m in found]
-            if PLAN.search(text):
+            if SHIKI.search(text):
+                shiki.append((app, file))
+            if PLAN.search(text) or SHIKI.search(text):
                 planned.append(name)
                 if file not in embed:
                     embed[file] = out / 'apps' / file.parent.name / file.name
@@ -187,6 +193,10 @@ def main():
                      f'[a-z][a-z0-9_]* name (found {", ".join(sorted(short))})')
             how = 'rom:' + next(iter(short))
             rom += [(how[4:], f) for f in files]
+            shiki = [(how[4:], f) if a == app else (a, f) for a, f in shiki]
+        elif any(a == app for a, _ in shiki):
+            fail(f'{app}: @shiki functions ship as the built-in Shiki table and need a '
+                 '/** @planDecoder rom */ app (tools/kasane_ir/lower_plans.mjs)')
         lower += [(f, embed[f], how) for f in files]
         plans += [f'{app}:{n}' for n in planned]
 
@@ -249,7 +259,10 @@ def main():
                                           [f'"{a}=text:{f.as_posix()}"' for a, f in texts]) + ')',
           'set(APP_CHUNK_ROM_SOURCES ' + ' '.join(f'"{f.as_posix()}"' for _, f in rom + texts) + ')',
           'set(APP_CHUNK_ROM_C "' + (out / ('ksn_proc_rom_plans.c' if rom or texts else 'ksn_proc_rom_plans_none.c'))
-          .as_posix() + '")']
+          .as_posix() + '")',
+          'set(APP_CHUNK_SHIKI ' + ' '.join(f'"{a}={f.as_posix()}"' for a, f in shiki) + ')',
+          'set(APP_CHUNK_SHIKI_SOURCES ' + ' '.join(f'"{f.as_posix()}"' for _, f in shiki) + ')',
+          'set(APP_CHUNK_SHIKI_C "' + (out / 'ksn_shiki_rom.c').as_posix() + '")']
     write(out / 'app_chunks.cmake', '\n'.join(cm) + '\n')
     if not rom and not texts:
         write(out / 'ksn_proc_rom_plans_none.c',

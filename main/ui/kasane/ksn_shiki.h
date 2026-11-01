@@ -97,6 +97,11 @@ typedef struct {
     ksn_shiki_bound region[KSN_SHIKI_REGIONS];
     ksn_shiki_inst code[];
 } ksn_shiki_plan;
+/* A built-in program (spec sec.9.4 register(name)): an app's @shiki function
+ * compiled at build time (tools/kasane_ir/emit_shiki_rom.mjs) into flash. */
+typedef struct { const char *name; const uint8_t *code; uint16_t len; } ksn_shiki_rom_entry;
+/* The table and its length (the generated file's; empty when none). */
+const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count);
 /* The bytes a plan of count instructions takes; KSN_SHIKI_PLAN_MAX holds any. */
 #define ksn_shiki_plan_bytes(count) (sizeof(ksn_shiki_plan)+(size_t)(count)*sizeof(ksn_shiki_inst))
 #define KSN_SHIKI_PLAN_MAX ksn_shiki_plan_bytes(KSN_SHIKI_CODE)
