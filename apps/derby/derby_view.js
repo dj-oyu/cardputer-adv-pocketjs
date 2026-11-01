@@ -1,5 +1,7 @@
 'use strict';
-const V = pocket.kasane, H = V.procedural, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
+const V = pocket.kasane, H = V.procedural, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
+// Shiki programs (derby_prog.js @shiki, built in): registered and dropped through V.shiki.
+const SKN = {run: 1, legs: 1, frl: 1, frb: 1};
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
 H.beginFrame(0);
 const res = H.resource(), live = {}, queue = [];
@@ -29,11 +31,10 @@ function load() {
       }
       p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
     } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
-    else if (n[0] === 'r' && i >= 0) p = ['runner', [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410]];
     else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
     else if (n === 'crowd') p = [n, [k[1], k[6], k[7]].concat(KN[3].slice(0, 5))];
     else p = [n, k.slice(0, n === 'stands' ? 4 : 0)];
-    live[n] = H.register('derby.' + p[0], p[1], p[2]);
+    live[n] = SKN[n] ? SK.register('derby.' + n) : H.register('derby.' + p[0], p[1], p[2]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
 }
@@ -42,7 +43,7 @@ const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) H.draw(live[n], a, b, c
 const want = l => { for (const n of l) if (!live[n] && queue.indexOf(n) < 0) queue.push(n); };
 function drop(l) {
   for (const n of l) {
-    if (live[n]) H.unregister(live[n]);
+    if (live[n]) (SKN[n] ? SK : H).unregister(live[n]);
     delete live[n];
     if (queue.indexOf(n) >= 0) queue.splice(queue.indexOf(n), 1);
   }
@@ -64,7 +65,7 @@ const FANFARE = [523, 110, 659, 110, 784, 110, 1047, 260], BELL = [1568, 60, 156
 
 // ---- State
 let pts = 1000, raceNo = 1, pick = 0, stake = 100, scene = '', t = 0, cam = 0, camT = 0, R = [], need = 0;
-let rs = null, od = null, fin = null, photoX = null, replay = 0, ph = z8(0);
+let rs = null, od = null, fin = null, photoX = null, replay = 0;
 let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
 // Lanes drawn, the order far to near (README "レーンの横位置").
 let lz = DL.slice(), zo = [7, 6, 5, 4, 3, 2, 1, 0];
@@ -198,23 +199,36 @@ function course(c, x0, xs, close, gate, K) {
     q = f * M.sqrt(Q) / DL[0];
     if (gate && M.abs(x0 * q) < 400) dr('gate', -x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy);
   }
-  // Slow motion: the legs' phase between sim steps, as at() places the
-  // runners (ph is the step's end; disp of the next step shown).
-  const sp = slow && scene === 'race' ? 1 - disp : 0;
+  // The legs' phase follows xs, which at() places between sim steps in
+  // slow motion, so a runner's stride matches where it is shown.
   for (const l of zo) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
-    const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]), a = ph[l];
+    const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]);
     if (l === close) {
-      const g = (flo(a * 3 / PI) % 6 + 6) % 6;
+      bflush();
+      const g = (flo(DO(l) * .923077) % 6 + 6) % 6;
       dr('g' + g, []);
       dr('silk', SILK[l], rnd(HS * bob(g)));
-    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y, sp ? a - sp * rs.v[l] * DT / 6.5 * 2 * PI : a);
+    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y);
   }
+  bflush();
   rail(DNR, 0xffff);
 }
-// A runner: hip x, back y, px per unit, ground y, four hooves.
-const rin = (l, X, S, Y, a) => dr('r' + l, X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)),
-  X + S * (.5 + 3 * sin(a + .8)), X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1)));
+// Runners and HEAD ON horses, batched: each adds two Shiki draws (legs first)
+// to one drawMany (shiki-spec sec.9.4), flushed before any other draw that
+// must land between them. The legs' phase is the horse's distance (DO: the
+// gate's phase of i rad), so JS keeps no phase and calls no sin.
+const BH = new Uint32Array(32), BI = new Float64Array(32 * 7), DO = l => xs[l] + l * 1.0345;
+let bn = 0, bs = 7;
+function bput(h, a, b, c, d, e, f, g) { const o = bn * bs; BH[bn++] = h; BI[o] = a; BI[o + 1] = b; BI[o + 2] = c; BI[o + 3] = d; BI[o + 4] = e; BI[o + 5] = f; if (bs > 6) BI[o + 6] = g; }
+function bflush() { if (bn) SK.drawMany(BH.subarray(0, bn), BI.subarray(0, bn * bs), bs); bn = 0; }
+// A runner: hip X, ground Y, S px per unit; colours of horse l.
+function rin(l, X, S, Y) {
+  if (!live.run || !live.legs) return;
+  bs = 7; const d = DO(l), c = F.h[l].coat;
+  bput(live.legs, X, S, Y, d, c, 0, 0);
+  bput(live.run, X, S, Y, d, c, SILK[l], SILK[l] ^ 0x8410);
+}
 // The screen's feed on its face vr at scale z: a low camera 6 m behind the leader.
 function feed(xs, z) {
   if (von > 10) course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr);

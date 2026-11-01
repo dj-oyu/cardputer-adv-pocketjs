@@ -66,6 +66,8 @@
 #include "keymap.h"
 #include "app_chunks_host.h"
 #include "app_registry.h"
+#include "ksn_shiki.h"
+#include "shiki_heap.h"
 #include "pocket_app_load.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
@@ -169,6 +171,16 @@ static double demo_end_ms;
 static double at_start[3];                  /* storage.set calls, tones, cues when the demo began */
 static unsigned demo_on,demo_off,demo_px_outside;
 static int tier_env=1;   /* the app starts at MID */
+
+/* ---- Shiki draws (derby_prog.js @shiki, the built-in table): each run again
+ * here through the same engine, its segments appended to the oracle's
+ * candidate frames as a procedural draw's are, so that the frame comparison
+ * covers them. The engine's own correctness is the Shiki contract's
+ * (tools/kasane_contract, shiki_diff.mjs), not this harness's. */
+typedef struct { int handle; ksn_shiki_plan *plan; } sspec;
+static sspec sspecs[8];
+static unsigned shiki_draws;
+static sspec *sfind(int h){for(unsigned i=0;i<8;i++)if(sspecs[i].plan&&sspecs[i].handle==h)return &sspecs[i];return NULL;}
 
 /* ---- the procedural oracle */
 #define SLOTS 64u
@@ -573,6 +585,43 @@ static JSValue js_sercmp(JSContext *c,JSValueConst self,int argc,JSValueConst *a
         printf("\n");
     }
     ser_n=0;
+    return JS_UNDEFINED;
+}
+static JSValue js_cap_sreg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;
+    int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
+    const char *name=JS_ToCString(c,argv[1]);REQ(name);
+    unsigned count=0;const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&count);
+    const ksn_shiki_rom_entry *e=NULL;
+    for(unsigned k=0;k<count;k++)if(!strcmp(rom[k].name,name))e=&rom[k];
+    JS_FreeCString(c,name);REQ(e);
+    sspec *s=NULL;for(unsigned i=0;i<8&&!s;i++)if(!sspecs[i].plan)s=&sspecs[i];
+    REQ(s);
+    s->plan=malloc(ksn_shiki_plan_bytes_for(e->code,e->len));REQ(s->plan);
+    REQ(ksn_shiki_register(e->code,e->len,NULL,0,NULL,0,s->plan));
+    s->handle=h;live_plans++;if(live_plans>live_max)live_max=live_plans;registered++;
+    return JS_UNDEFINED;
+}
+static JSValue js_cap_sunreg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;
+    int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
+    sspec *s=sfind(h);REQ(s);
+    free(s->plan);s->plan=NULL;live_plans--;unregistered++;
+    return JS_UNDEFINED;
+}
+static JSValue js_cap_sdraw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;
+    int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
+    sspec *s=sfind(h);REQ(s);
+    const unsigned n=len(argv[1]);REQ(n<=KSN_SHIKI_INPUTS);
+    double in[KSN_SHIKI_INPUTS];
+    for(unsigned i=0;i<n;i++)in[i]=at(argv[1],i);
+    static ksn_shiki_vm vm;
+    static ksn_proc_frame f;
+    REQ(ksn_shiki_draw(s->plan,in,n,&vm,f.segments)==KSN_SHIKI_DONE);
+    f.count=vm.count;f.raster_steps=vm.raster;f.ext=vm.ext;
+    append(&cand_plan,&f);append(&cand_vm,&f);
+    frame_draws++;frame_steps+=vm.steps;shiki_draws++;
     return JS_UNDEFINED;
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -1024,7 +1073,13 @@ static const char PRELUDE[]=
     "P.draw=function(h,i){try{D.apply(P,arguments)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify([].slice.call(arguments,1)));throw e}"
     "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&(Array.isArray(i)?i[7]:arguments[8])===10565?3:"
     "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,t,t>2?pf():0,arguments)};"
-    "P.commit=function(){C.call(P);__commit(pf())};})();"
+    "P.commit=function(){C.call(P);__commit(pf())};"
+    /* pocket.kasane.shiki (the runners, HEAD ON's horses): register by name,
+     * and each drawMany entry into the oracle as one draw (__sdraw). */
+    "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
+    "S.register=function(n){const h=SR.call(S,n);__sreg(h,n);return h};"
+    "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
+    "S.drawMany=function(H,I,s){SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)))};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
      * keeps a clip), with their last rect and visibility. */
@@ -1078,6 +1133,9 @@ int main(int argc,char **argv){
     host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
+    /* The Shiki heap, as app_session.c takes it for an app naming
+     * kasane.shiki (DERBY does): pocket.kasane then has shiki. */
+    REQ(shiki_heap_begin(0));
     pocket_kasane_install(ctx,NULL);
     {   /* pocket.derby (the firmware's lazy namespace, built here at once). */
         JSValue g=JS_GetGlobalObject(ctx),ns=JS_NewObject(ctx);
@@ -1091,7 +1149,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,2},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1323,8 +1381,8 @@ int main(int argc,char **argv){
     printf("\npanning units: frames %u, f %.0f..%.0f, the screen in view %u; Newton: %lu points in %u draws, "
            "max error %.4f px (f %.0f) against the exact projection, %.4f px for points on the panel\n",pan_frames,
            pan_frames?pan_f_lo:0,pan_f_hi,pan_face_frames,newton_points,newton_draws,newton_max,newton_max_f,newton_screen);
-    printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u\n",
-           registered,unregistered,live_max,frame_reg_max);
+    printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u, shiki draws %u\n",
+           registered,unregistered,live_max,frame_reg_max,shiki_draws);
     printf("frames %u (procedural frames checked %u): exceptions=%u bad_present=%u failures=%u tones=%u\n",
            tick,frames_checked,exceptions,bad_present,framefails,tones);
     printf("finish: %s\n",finishes?finish[0]:"-");

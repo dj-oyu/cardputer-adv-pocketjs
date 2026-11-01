@@ -8,7 +8,7 @@ function enter(s) {
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
     CH.push(1e4); S.course(CH, F.o ? OC : 0, DNR);
   }
-  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; rs.l = DL.slice(); F.k = z8(0);
+  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); rs.l = DL.slice(); F.k = z8(0);
     for (let i = 0; i < 64; ++i) F.k[i >> 3] += F.m[i & 7] > F.m[i >> 3]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
   if (s === 'photo') { drop(['band']); want(['photo']); }
@@ -149,9 +149,14 @@ function paint(c, xs, close, gate, extra) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
     // down the course; each horse scaled by its own 1/z (JS divides),
     // the last (farthest) first.
-    if (j === 1 && q) for (let i = 7; i >= 0; --i) {
-      const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
-      dr('fr', 120 + (lz[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s));
+    if (j === 1 && q && live.frl && live.frb) {
+      bs = 6;
+      for (let i = 7; i >= 0; --i) {
+        const l = ro[i], q = 400 / (D + 12 - xs[l]), x = 120 + (lz[l] - 16.5) * q, y = 50 + 2.2 * q, d = DO(l), c = F.h[l].coat;
+        bput(live.frl, x, y, q / 6, d, c, SILK[l]);
+        bput(live.frb, x, y, q / 6, d, c, SILK[l]);
+      }
+      bflush();
     }
     const w = e[q + 4 + j];
     if (!w) continue;

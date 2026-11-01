@@ -61,7 +61,6 @@ globalThis.frame = function (b) {
           for (; disp >= 1 && rs.done < 3; --disp) {
             const was = rs.done;
             step(F, rs, DT);
-            for (let i = 0; i < 8; ++i) ph[i] += rs.v[i] * DT / 6.5 * 2 * PI;
             const w = (rank = order(rs))[0];
             if (w !== ld) { if (lead > 500) log('LEAD #' + (w + 1) + ' at ' + rnd(lead) + 'M'); if (lead > 400) dl = 60; ld = w; }
             // The photo: every runner where it was when the winner crossed.
@@ -72,7 +71,7 @@ globalThis.frame = function (b) {
           if (rs.done >= 3) { settle(); { enter('photo'); break fr; } }
         }
         xs = at(slow ? disp : 1);
-        if (scene === 'gate') for (let i = 0; i < 8; ++i) if (!live['r' + i]) xs[i] = -999;
+        if (scene === 'gate' && !(live.run && live.legs)) xs = z8(-999);
         if (hold > 0) --hold;
         if (dl > 0) --dl;
         if (man > 0) --man;
@@ -106,7 +105,6 @@ globalThis.frame = function (b) {
         // Paddock warm-up and the winner's canter: a lone horse, camera locked.
         xs = z8(-999);
         xs[l] = 60 + t * .25;
-        ph[l] += .25 / 6.5 * 2 * PI;
         c = shot(1, xs, l);
         close = l;
       }

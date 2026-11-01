@@ -81,7 +81,9 @@ EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c
          # pocket.app.load and its table, read from apps/derby/chunks.txt
          "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c",
          # pocket.derby, the series in C (docs/apps/derby-ser-native.md)
-         "main/pocket/pocket_derby.c"]
+         "main/pocket/pocket_derby.c",
+         # pocket.kasane.shiki: the runners and HEAD ON's horses (derby_prog.js @shiki)
+         "main/pocket/pocket_shiki_api.c"]
 
 
 def kasane_sources() -> list[str]:
@@ -103,10 +105,21 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
     return out
 
 
+def shiki_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
+    """The firmware's built-in Shiki table for src (tools/kasane_ir/
+    emit_shiki_rom.mjs, as main/CMakeLists.txt makes it): DERBY's @shiki
+    functions."""
+    out = cache / "ksn_shiki_rom.c"
+    subprocess.run(["node", str(ROOT / "tools/kasane_ir/emit_shiki_rom.mjs"), str(out),
+                    f"derby={src / 'derby_prog.js'}"], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    return out
+
+
 def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
           runner_affine=False, camera_cache=False, project_batch=False, harness=None) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
+    stable = shiki_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
                    stdout=subprocess.DEVNULL)
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
@@ -142,7 +155,7 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *experiment_sources, str(table), *objects,
+                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *experiment_sources, str(table), str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary

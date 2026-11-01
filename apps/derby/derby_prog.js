@@ -115,22 +115,32 @@ const T = {
     }
   },
 
-  // runner: one horse on the gate / FIELD shots. Hip at (x, y), size s; the
-  // body in coat $0, four legs to (leg0..3, hoof), the jockey in silk $1 and
-  // a cap in $2 (silk ^ 0x8410).
-  /** @plan runner inputs: x, y, s, hoof, leg0, leg1, leg2, leg3 */
-  runner(p0, p1, p2) {
-    const u = s * 2.5, up = -1 * u;
+  // run, legs (Shiki, docs/kasane/shiki-bundle.md): one horse on the gate /
+  // FIELD shots, every horse the same two programs (colours are inputs).
+  // Hip at X, back Y - 6S (bobbing), ground Y, S px per unit; d is the
+  // horse's distance in m (plus its own offset): the stride is 6.5 m, so the
+  // leg phase is 2 pi d / 6.5, and sin runs here, not in JS. legs first.
+  /** @shiki run inputs: X, S, Y, d, coat, silk, cap
+   *  @q coat=0, silk=0, cap=0 */
+  run() {
+    const x = X, y = Y - 6 * S + .6 * S * sin(d * 1.93328);
+    const u = S * 2.5, up = -1 * u;
     const back = x + u + u, withers = back + u, head = withers + u;
     const high = y + up, higher = high + up;
     move(x + up, y + u);
-    line(x, y, p0); line(withers, y, p0); line(head, higher, p0); line(head + u, high, p0); line(head, high, p0);
-    move(x, y); line(leg0, hoof, p0);
-    move(x, y); line(leg1, hoof, p0);
-    move(withers, y); line(leg2, hoof, p0);
-    move(withers, y); line(leg3, hoof, p0);
-    move(back, y); line(back, high, p1); line(withers, higher, p1); line(head, high, p1);
-    plot(withers, higher, p2);
+    line(x, y, coat); line(withers, y, coat); line(head, higher, coat); line(head + u, high, coat); line(head, high, coat);
+    move(back, y); line(back, high, silk); line(withers, higher, silk); line(head, high, silk);
+    plot(withers, higher, cap);
+  },
+  /** @shiki legs inputs: X, S, Y, d, coat
+   *  @q coat=0 */
+  legs() {
+    const y = Y - 6 * S + .6 * S * sin(d * 1.93328);
+    const s3 = 3 * S, xa = X + .5 * S, xb = X + 8 * S, w = X + 7.5 * S, a = d * .966644;
+    move(X, y); line(xa + s3 * sin(a), Y, coat);
+    move(X, y); line(xa + s3 * sin(a + .8), Y, coat);
+    move(w, y); line(xb + s3 * sin(a + 3.3), Y, coat);
+    move(w, y); line(xb + s3 * sin(a + 4.1), Y, coat);
   },
 
   // gate: the starting stalls, 9 dividers from the centre outwards, each a
@@ -313,17 +323,30 @@ const T = {
     line(a4, legY, 19049);
   },
 
-  // fr: a horse head on (HEAD ON cut): x, ground y, px per unit s, coat,
-  // jockey (silk), lift of each foreleg (px).
-  /** @plan fr inputs: x, ground, s, coat, jockey, lift0, lift1 */
-  fr() {
+  // frl, frb (Shiki): a horse head on (HEAD ON cut): x, ground y, px per
+  // unit s, distance d (as run), coat, jockey (silk). frl: the forelegs, each
+  // lifted by max(0, +-1.5 s sin(2 pi d / 6.5)); frb: body and jockey.
+  /** @shiki frl inputs: x, ground, s, d, coat
+   *  @q coat=0 */
+  frl() {
+    const L = 1.5 * s * sin(d * .966644);
+    let l0 = 0, l1 = 0;
+    for (let i = 0; i < 1; i++) { if (0 > L) break; l0 = L; }
+    for (let i = 0; i < 1; i++) { if (L > 0) break; l1 = -L; }
     const k0 = (-1.2) * s + x;
     const k1 = k0 * (-1) + x + x;
     const knee = (-6) * s + ground;
     move(k0, knee);
-    line(k0, lift0 * (-1) + ground, coat);
+    line(k0, l0 * (-1) + ground, coat);
     move(k1, knee);
-    line(k1, lift1 * (-1) + ground, coat);
+    line(k1, l1 * (-1) + ground, coat);
+  },
+  /** @shiki frb inputs: x, ground, s, d, coat, jockey
+   *  @q coat=0, jockey=0 */
+  frb() {
+    const k0 = (-1.2) * s + x;
+    const k1 = k0 * (-1) + x + x;
+    const knee = (-6) * s + ground;
     const ns = s * (-1);
     const c1 = s * (-1) + x;
     const c2 = x + s;
@@ -538,4 +561,4 @@ let F = null;
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
   [50, 105, 50, 105, 50, 160, 123, 123, 160, 50, 64, 64, 50, 58, 58, 50, 56, 56, 40, 14, 21, 42, 40, 56, 56, 19, 17, 56, 57, 14, 10, 58, 59, 5, -1, 60, 61, 60, -1, -8, -1, 60, 50, 19]];
 const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
-  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'hl', 'dust', 'bokeh'];
+  RUN = ['gate', 'run', 'legs', 'map', 'vis', 'frl', 'frb', 'hd', 'prail', 't0', 't1', 'hl', 'dust', 'bokeh'];

@@ -33,7 +33,8 @@ function pan(xs) {
   zo.sort((a, b) => ps[b][1] - ps[a][1]);
   for (const l of zo) {
     const p = ps[l], r = 1 / p[1], X = p[0] * r;
-    if (p[1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r, ph[l]);
+    if (p[1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r);
   }
+  bflush();
   S.ser(live.prail, DNR, k[4], 0, L, 0xffff, 4.9);
 }

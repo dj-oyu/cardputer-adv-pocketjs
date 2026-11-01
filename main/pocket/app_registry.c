@@ -18,7 +18,7 @@ static const char *const CAPS_GAME[]   = {"display.kasane", "input.action", "inp
 static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 // DERBY WATCH's panning series run in C (pocket.derby, docs/apps/derby-ser-native.md);
 // naming it is what gets the session that surface, as pet.companion does.
-static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", NULL};
+static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", "kasane.shiki", NULL};
 static const char *const CAPS_SHAPES[]= {"kasane.shapes", NULL};
 // The Shiki test (apps/shikitest): the engine through its test-only surface.
 static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
