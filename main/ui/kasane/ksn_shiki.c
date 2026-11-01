@@ -776,11 +776,21 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
 
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
+    int32_t in[KSN_SHIKI_INPUTS]={0};
+    for(unsigned k=0;k<plan->inputs;k++)
+        if(!ksn_shiki_from_double(k<n?inputs[k]:0.0,plan->input_q[k],&in[k])){
+            memset(vm,0,sizeof *vm);
+            return KSN_SHIKI_BADINPUT;
+        }
+    return ksn_shiki_draw_fixed(plan,in,plan->inputs,vm,out);
+}
+
+ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                      ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     memset(vm,0,sizeof *vm);
     vm->pie=KSN_SHIKI_HAS_PIE&&ksn_shiki_vec_pie;
     int32_t in[KSN_SHIKI_INPUTS]={0};
-    for(unsigned k=0;k<plan->inputs;k++)
-        if(!ksn_shiki_from_double(k<n?inputs[k]:0.0,plan->input_q[k],&in[k]))return KSN_SHIKI_BADINPUT;
+    for(unsigned k=0;k<plan->inputs&&k<n;k++)in[k]=inputs[k];
     int32_t *r=vm->reg;
     unsigned pc=0;
     for(;;){

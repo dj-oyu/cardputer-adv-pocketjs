@@ -157,6 +157,11 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
  * vm is fully reset here; its state after the call is sec.4.8.8's. */
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
+/* The same draw from inputs already in each input's Q format (as sec.2.4
+ * would make them): no conversion, so no BADINPUT. Missing inputs are 0,
+ * extra ones ignored. ksn_shiki_draw converts and calls this. */
+ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                      ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
 /* The result line of the shared text contract (tools/kasane_ir/shiki_ref.mjs
  * format(), tools/kasane_contract/shiki_run.c), handed to put in pieces so a
  * caller can print it or hash it without holding a line that 1,024 segments

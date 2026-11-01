@@ -15,6 +15,9 @@ const h8 = S.register(asm([16, 16, 16, 16, 16, 16, 16, 16], [[0, 0, 0, 0, 1]]));
 const hp = S.register(asm([16, 16], [[1, 0, 0], [1, 1, 1], [8, 0, 0, 1, 0, 2016]]));
 const arr = [1, 2, 3, 4, 5, 6, 7, 8];
 const noop = function (x) { return x; };
+const H0 = new Uint32Array(N).fill(h0), H8 = new Uint32Array(N).fill(h8), Z = new Float64Array(0);
+const R8 = new Float64Array(N * 8), F8 = new Int32Array(N * 8);
+for (let i = 0; i < N * 8; i++) { R8[i] = 1 + i % 8; F8[i] = (1 + i % 8) * 65536; }
 const cases = [
   ['loop', () => { for (let i = 0; i < N; i++) noop(i); }],
   ['native', () => { for (let i = 0; i < N; i++) D.cycles(); }],
@@ -22,6 +25,10 @@ const cases = [
   ['draw8', () => { for (let i = 0; i < N; i++) S.draw(h8, 1, 2, 3, 4, 5, 6, 7, 8); }],
   ['draw8arr', () => { for (let i = 0; i < N; i++) S.draw(h8, arr); }],
   ['point', () => { for (let i = 0; i < N; i++) S.draw(hp, 120, 60); }],
+  // drawMany (prototype): the same N draws in one call.
+  ['many0', () => S.drawMany(H0, Z, 0)],
+  ['many8', () => S.drawMany(H8, R8, 8)],
+  ['many8fixed', () => S.drawMany(H8, F8, 8)],
 ];
 let done = false;
 globalThis.frame = function () {

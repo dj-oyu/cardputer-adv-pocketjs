@@ -94,6 +94,23 @@ globalThis.shikiApiTest = function (pocket, log) {
   const spin = S.register(asm([], [[5, 0, 0, 0, 255], [5, 0, 0, 0, 255], [6], [6]]));
   S.beginFrame(0);
   throws('limit', 'LIMIT_EXCEEDED', () => S.draw(spin));
+  // drawMany (prototype, shiki-bundle.md sec.5): INPUT r0, PUT it into a
+  // one-record i32 Q16 region; the region keeps the last draw's input.
+  const box = S.data({type: 'i32', q: 16, records: 1, record: 1});
+  const put = S.register(asm([[2, 16, 1, 1]], [[23, 0, 0, 0], [1, 0, 0], [25, 0, 0, 0, 0, 1], [6]], [16]), [], {data: [box]});
+  S.beginFrame(0);
+  S.drawMany(new Uint32Array([put, put]), new Float64Array([1.5, 2.25]), 1);
+  ok('many real', box[0] === 2.25 * 65536);
+  S.drawMany(new Uint32Array([put]), new Int32Array([98304]), 1);
+  ok('many fixed', box[0] === 98304);
+  S.draw(put, 0.5);
+  ok('many = draw', box[0] === 32768);
+  throws('many length', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put, put]), new Float64Array([1]), 1));
+  throws('many array', 'INVALID_ARGUMENT', () => S.drawMany([put], new Float64Array([1]), 1));
+  throws('many type', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put]), new Float32Array([1]), 1));
+  S.beginFrame(0);
+  throws('many stale', 'CLOSED', () => S.drawMany(new Uint32Array([put, 0x3fffffff]), new Float64Array([1, 1]), 1));
+  S.unregister(put); S.release(box);
   S.beginFrame(0); S.draw(plot, 120, 60); S.commit();   // one commit a turn
   S.unregister(plot); S.unregister(spin);
   throws('bad program', 'INVALID_ARGUMENT', () => S.register(new Uint8Array([1, 2, 3])));

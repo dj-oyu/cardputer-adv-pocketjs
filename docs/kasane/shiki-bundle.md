@@ -48,3 +48,14 @@
 - 配列で渡す形（`draw8arr`）の `parse` は変わらない（`JS_GetPropertyUint32` を入力ごとに通るため）。
 - `draw0` は同じ（±0.3%、揺れの内側）。
 - 残る 1 回の費用（入力 8、引数）: JS 側 約 1,970、`parse` 874、`lookup` 123、`engine` 1,455、`copy` 82 サイクル。束ねで消せるのは JS 側と `lookup` で、全体の約 46%（計算）。
+
+## 5. 束ねの試作: `shiki.drawMany(handles, inputs, stride)`
+
+**試作。仕様にはまだ入れない**（数を測ってから v1.5 の草案にし、SLOW のレビューに回す）。
+
+- `handles` は `Uint32Array`。`inputs` は 1 回の draw に `stride` 個（0〜8）ずつ、`handles` の順に並べた型付き配列: `Float64Array` なら JS の数として §2.4 で変換、`Int32Array` なら各入力の Q 形式の値そのもの（変換しない。入力から double をなくす形）。長さはちょうど `handles.length × stride`。
+- 型付き配列にしたのは、ポインタを 1 回取れば入力は 1 つずつのメモリの読み出しになるため（配列の要素の読み取りは 1 つ 約 400 サイクル、§3）。
+- 順に描き、最初に失敗した draw で `draw()` と同じ誤りを投げ、フレームを捨てる（`draw()` と同じ）。それより前の draw の書き込み（データ領域）は残る。
+- エンジンは `ksn_shiki_draw_fixed`（入力が Q 形式済み）と `ksn_shiki_draw`（変換してから同じものを呼ぶ）に分けた。結果は変わらない（`shiki_diff` 2 万件）。
+- 確認（host）: JS API の自己試験 46 件（実数・整数の経路の値が `draw()` と同じ、長さ・型・古い handle の誤り）。
+- 計測: `draw_cost.js` の `many0`・`many8`・`many8fixed`（同じ 200 回を 1 回の呼び出しで）。結果は §6（実機の計測待ち）。

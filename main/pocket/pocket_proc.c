@@ -1040,6 +1040,9 @@ uint32_t pocket_cycles(void){
 #endif
 }
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
+    return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n);
+}
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n){
     const char *op="kasane.shiki.draw";
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
@@ -1055,7 +1058,8 @@ JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,u
     image_band_valid=false;
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
-    const ksn_shiki_status s=ksn_shiki_draw(slot->plan,in,n,shiki_vm,scratch);
+    const ksn_shiki_status s=fixed?ksn_shiki_draw_fixed(slot->plan,fixed,n,shiki_vm,scratch)
+                                  :ksn_shiki_draw(slot->plan,in,n,shiki_vm,scratch);
     if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
     if(s!=KSN_SHIKI_DONE){
         building=false;

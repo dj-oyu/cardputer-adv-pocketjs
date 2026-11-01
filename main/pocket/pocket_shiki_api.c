@@ -304,6 +304,51 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     return pocket_proc_shiki_draw(ctx,handle,in,n);
 }
 
+// ----------------------------------------------------------- drawMany()
+// PROTOTYPE (docs/kasane/shiki-bundle.md sec.5, not in the spec yet): many
+// draws in one call. handles is a Uint32Array; inputs holds stride inputs a
+// draw, in handle order, as a Float64Array (JS numbers, converted by sec.2.4)
+// or an Int32Array (already each input's Q format: no conversion). Typed
+// arrays so that one pointer is taken once and every input is a load, not a
+// property read (shiki-bundle.md sec.3: a call is ~1,200 cycles and an array
+// element ~400). Draws run in order; the first that fails throws as draw()
+// does and abandons the frame, as draw() does.
+static const void *typed_data(JSContext *ctx,JSValueConst v,int kind,size_t *count){
+    if(JS_GetTypedArrayType(v)!=kind)return NULL;
+    size_t off=0,len=0,bpe=0,size=0;
+    JSValue buf=JS_GetTypedArrayBuffer(ctx,v,&off,&len,&bpe);
+    if(JS_IsException(buf)){JS_FreeValue(ctx,JS_GetException(ctx));return NULL;}
+    uint8_t *base=JS_GetArrayBuffer(ctx,&size,buf);
+    JS_FreeValue(ctx,buf);
+    if(!base){JS_FreeValue(ctx,JS_GetException(ctx));return NULL;}   /* detached */
+    *count=bpe?len/bpe:0;
+    return base+off;
+}
+static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.drawMany";
+    size_t count=0,ninputs=0;
+    uint32_t stride=0;
+    const uint32_t *handles=argc>=1?typed_data(ctx,argv[0],JS_TYPED_ARRAY_UINT32,&count):NULL;
+    if(!handles||argc<3||!whole(ctx,argv[2],0,KSN_SHIKI_INPUTS,&stride))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected (Uint32Array handles, Float64Array|Int32Array inputs, stride 0..8)");
+    const double *real=NULL;
+    const int32_t *fixed=NULL;
+    if(stride){
+        real=typed_data(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,&ninputs);
+        if(!real)fixed=typed_data(ctx,argv[1],JS_TYPED_ARRAY_INT32,&ninputs);
+        if((!real&&!fixed)||ninputs!=count*stride)
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs: a Float64Array or Int32Array of handles.length * stride");
+    }
+    for(size_t i=0;i<count;i++){
+        if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
+        JSValue r=pocket_proc_shiki_draw_inputs(ctx,handles[i],real?real+i*stride:NULL,
+                                                fixed?fixed+i*stride:NULL,stride);
+        if(JS_IsException(r))return r;
+    }
+    return JS_UNDEFINED;
+}
+
 // --------------------------------------------------------------- heap()
 static JSValue js_heap(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;
@@ -336,6 +381,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("data",1,js_data),
         JS_CFUNC_DEF("release",1,js_release),
         JS_CFUNC_DEF("fields",1,js_fields),
+        JS_CFUNC_DEF("drawMany",3,js_draw_many),
     };
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
     JSValue procedural=JS_GetPropertyStr(ctx,kasane,"procedural");
