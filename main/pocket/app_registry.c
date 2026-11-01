@@ -25,6 +25,9 @@ static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "
 // The Shiki API self-check (apps/shikitest/shiki_api_test.js): a kasane.shiki
 // app, so its session takes the Shiki heap (default budget).
 static const char *const CAPS_SHIKI_API[]= {"display.kasane", "kasane.shiki", NULL};
+// The draw cost probe (apps/shikitest/draw_cost.js): the Shiki API and the
+// test surface's cycle counter and draw profile.
+static const char *const CAPS_SHIKI_COST[]= {"display.kasane", "kasane.shiki", "kasane.shiki.debug", NULL};
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -99,6 +102,12 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.cyclebench", .title="CYCLE BENCH", .entry="apps/shikitest/cycle_bench.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // What one Shiki draw costs, by stage (apps/shikitest/draw_cost.js,
+    // docs/kasane/shiki-bundle.md): not on the menu, started by the broker.
+    {.id="local.drawcost", .title="DRAW COST", .entry="apps/shikitest/draw_cost.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_SHIKI_COST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The procedural megademo is an ordinary foreground app. Its frame loop
     // wraps after 48 frames; leaving it with Back and reopening starts a new

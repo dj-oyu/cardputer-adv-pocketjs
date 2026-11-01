@@ -277,6 +277,7 @@ static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.shiki.draw";
+    const uint32_t t0=pocket_shiki_prof.on?pocket_cycles():0;
     uint32_t handle=0,n=0;
     while(argc>2&&JS_IsUndefined(argv[argc-1]))argc--;
     const bool numeric=argc>=2&&JS_IsNumber(argv[1]);
@@ -291,6 +292,7 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         JS_FreeValue(ctx,v);
         if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs must be numbers");
     }
+    if(pocket_shiki_prof.on){const uint32_t t=pocket_cycles();pocket_shiki_prof.parse+=t-t0;pocket_shiki_prof.mark=t;}
     return pocket_proc_shiki_draw(ctx,handle,in,n);
 }
 

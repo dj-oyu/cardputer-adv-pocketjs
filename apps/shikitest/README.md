@@ -27,3 +27,7 @@ manifest に `kasane.shiki` を挙げたアプリとして起動し（セッシ�
 ## CYCLE BENCH（`local.cyclebench`）
 
 同じ試験専用の面の `pocket.shikiDebug.bench(i)`（ケースの数は `benchCount()`）で、整数の命令（`mull`・`mulsh`・`quos` など、値の大きさ別）と、GCC が呼ぶ 64 ビットのライブラリ関数（`__divdi3` など）と、Shiki エンジンの命令 1 つ（`ksn_shiki_draw` の中）のサイクル数を測る。画面には蓋絵（題、進み具合の棒、終わったケースの数）を出す。LCD の転送は非同期なので、ケースは 2 フレームに 1 回だけ測り、間のフレームで前の絵の転送を終わらせる（転送と測定を重ねない）。ログへ `CB ...` を 1 行ずつ出し、最後に `CB END`。方法は `main/hal/int_latency.c`、結果は [docs/perf/int-latency.md](../../docs/perf/int-latency.md)。これもメニューには出さず、USB broker の `app_session` で起動する。
+
+## DRAW COST（`local.drawcost`、`draw_cost.js`）
+
+`pocket.kasane.shiki.draw()` 1 回の費用を段ごとに測る（[docs/kasane/shiki-bundle.md](../../docs/kasane/shiki-bundle.md)）。メニューには出ず、USB のブローカーが起動する。`shikiDebug.cycles()`（CPU のサイクル数）で JS のループ 200 回を包み、5 回の最小を取る。同時に `shikiDebug.drawProfile()` が、ネイティブの段（`parse` 引数の検査と入力の読み取り、`lookup` handle とフレームの準備、`engine` エンジン、`copy` フレームへの複写）のサイクルを積む。変種: 空の JS 関数（`loop`）、ネイティブの空呼び出し（`native`）、入力 0 の式（`draw0`）、入力 8 を引数で（`draw8`）・配列で（`draw8arr`）、点 1 つ（`point`）。1 行に `DC <変種> total=<1 回のサイクル> parse= lookup= engine= copy= n=`、最後に `DC END`。

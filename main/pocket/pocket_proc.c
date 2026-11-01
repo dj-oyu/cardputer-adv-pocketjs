@@ -22,6 +22,9 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_api.h"
 #include "ui/kasane/ksn_proc_plan.h"
 #include "ui/kasane/ksn_shiki.h"
+#ifdef ESP_PLATFORM
+#include "esp_cpu.h"
+#endif
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -1028,6 +1031,14 @@ bool pocket_proc_shiki_detach(uint32_t handle){
     *slot=(proc_slot){0};
     return true;
 }
+pocket_shiki_draw_prof pocket_shiki_prof;
+uint32_t pocket_cycles(void){
+#ifdef ESP_PLATFORM
+    return esp_cpu_get_cycle_count();
+#else
+    return 0;
+#endif
+}
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
     const char *op="kasane.shiki.draw";
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
@@ -1042,7 +1053,10 @@ JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,u
     const unsigned room=surface_segments(&surfaces[building_surface]);
     ksn_proc_segment *scratch=workspace->frame.segments;
     image_band_valid=false;
+    pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
+    if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
     const ksn_shiki_status s=ksn_shiki_draw(slot->plan,in,n,shiki_vm,scratch);
+    if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
     if(s!=KSN_SHIKI_DONE){
         building=false;
         return failure(ctx,op,s==KSN_SHIKI_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
@@ -1057,6 +1071,7 @@ JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,u
     candidate->count+=shiki_vm->count;
     candidate->raster_steps+=shiki_vm->raster;
     if(shiki_vm->ext)candidate->ext=1;
+    if(pf->on){pf->copy+=pocket_cycles()-pf->mark;pf->n++;}
     return JS_UNDEFINED;
 }
 

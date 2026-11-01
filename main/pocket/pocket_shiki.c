@@ -1,5 +1,6 @@
 #include "pocket_shiki.h"
 #include "pocket_api.h"
+#include "pocket_proc.h"
 #include "ksn_shiki.h"
 #include "ksn_shiki_bench.h"
 #include "int_latency.h"
@@ -364,11 +365,34 @@ static JSValue js_bench_build(JSContext *ctx,JSValueConst self,int argc,JSValueC
     return JS_NewString(ctx,out);
 }
 
+/* cycles(): the CPU cycle counter (240 MHz, wraps every ~17.9 s), for timing
+ * JS around native calls (apps/shikitest/draw_cost.js). */
+static JSValue js_cycles(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    return JS_NewUint32(ctx,esp_cpu_get_cycle_count());
+}
+/* drawProfile(on): returns the stage sums so far ({n, parse, lookup, engine,
+ * copy} in cycles, pocket_proc.h) and restarts them, on or off. */
+static JSValue js_draw_profile(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    pocket_shiki_draw_prof *p=&pocket_shiki_prof;
+    JSValue o=JS_NewObject(ctx);
+    if(JS_IsException(o))return o;
+    JS_SetPropertyStr(ctx,o,"n",JS_NewUint32(ctx,p->n));
+    JS_SetPropertyStr(ctx,o,"parse",JS_NewUint32(ctx,p->parse));
+    JS_SetPropertyStr(ctx,o,"lookup",JS_NewUint32(ctx,p->lookup));
+    JS_SetPropertyStr(ctx,o,"engine",JS_NewUint32(ctx,p->engine));
+    JS_SetPropertyStr(ctx,o,"copy",JS_NewUint32(ctx,p->copy));
+    *p=(pocket_shiki_draw_prof){.on=argc>0&&JS_ToBool(ctx,argv[0])>0};
+    return o;
+}
+
 esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",4,js_run),JS_CFUNC_DEF("bench",1,js_bench),
         JS_CFUNC_DEF("benchCount",0,js_bench_count),
-        JS_CFUNC_DEF("benchBuild",0,js_bench_build)};
+        JS_CFUNC_DEF("benchBuild",0,js_bench_build),
+        JS_CFUNC_DEF("cycles",0,js_cycles),JS_CFUNC_DEF("drawProfile",1,js_draw_profile)};
     return JS_SetPropertyFunctionList(ctx,ns,methods,4)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 /* No limits: the engine's are the spec's (sec.9.1); this surface adds none. */
