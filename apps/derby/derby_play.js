@@ -30,6 +30,9 @@ function attract(b) {
   if (hit || scene === 'res' && t > DEMO_RES) return fe = n, demo(0, n);
   pilot();
 }
+// The curtain's alpha: Q8 (256 = black) in FX[3] steps of 255 / FX[3].
+const curtain = () => (mx(0, mn(256, mx(dm ? 0 : (mn(nw - idle, 1000000) - DEMO_IDLE_S * 1000 + FX[0]) * 131 >> 8,
+  nw - fe >= FX[2] ? -1 : 256 - ((nw - fe) * 218 >> 8)))) * FX[3] + 128 >> 8) * 255 >> 3;
 globalThis.frame = function (b) {
   if (b & 0x2000) { if (dm) demo(0); save(); return log('SAVE points=' + pts + ' race=' + raceNo); }
   try {
@@ -40,8 +43,7 @@ globalThis.frame = function (b) {
       ++t;
       if (camT > 0) --camT;
       // The curtain: wall clock only (attract's nw, fe); the game never reads it.
-      // Q8 (256 = black); FX[3] steps of 255 / FX[3].
-      fa = (mx(0, mn(256, mx(dm ? 0 : (mn(nw - idle, 1000000) - DEMO_IDLE_S * 1000 + FX[0]) * 131 >> 8, nw - fe >= FX[2] ? -1 : 256 - ((nw - fe) * 218 >> 8)))) * FX[3] + 128 >> 8) * 255 >> 3;
+      fa = curtain();
       if (P('tab')) { tier = (tier + 1) % 3; const l = ['stands', 'crowd'].filter(n => live[n] || queue.indexOf(n) >= 0); drop(l); want(l); log('TIER ' + tier); }
       load();
       let xs, c, l = pick, close = -1, gate = 0, extra = null, rank;
@@ -125,7 +127,7 @@ globalThis.frame = function (b) {
         if (scene === 'photo') {
           // Magnify 2x about the line and the runners' feet.
           const z = mn(256, t * 2185 >> 8), e = (z * z >> 8) * (768 - 2 * z) >> 8;
-          R[0].setRect(tx, [-120 * e + 128 >> 8, -100 * e + 128 >> 8, 240 + (120 * e + 128 >> 8), 135 + (35 * e + 128 >> 8)]);
+          R[0].setRect(tx, [128 - 120 * e >> 8, 128 - 100 * e >> 8, 240 + (120 * e + 128 >> 8), 135 + (35 * e + 128 >> 8)]);
         }
       };
       if (need) { build(up); need = 0; } else V.patch(up);

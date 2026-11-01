@@ -29,9 +29,9 @@ function load() {
       for (let j = 0; j < BODY.length; j += 2) {
         const u = BODY[j], l = BODY[j + 1] * 655 >> 8;
         if (u < 2000) { put(jx = u * 655 >> 8, jy = l + b); continue; }
-        const o = ph + ((u - 2000) * 6675 >> 6), a = SK.sin(o) * 5737 >> 16, kx = jx + (l * SK.sin(a) >> 16),
-          ky = jy + (l * SK.cos(a) >> 16), a2 = a - (mx(0, SK.sin(o + 14603)) * 9387 >> 16);
-        put(kx, ky); put(kx + (l * SK.sin(a2) >> 16), ky + (l * SK.cos(a2) >> 16)); put(kx, ky); put(jx, jy);
+        const I = M.imul, o = ph + ((u - 2000) * 6675 >> 6), a = I(SK.sin(o), 5737) >> 16, kx = jx + (I(l, SK.sin(a)) >> 16),
+          ky = jy + (I(l, SK.cos(a)) >> 16), a2 = a - (mx(0, SK.sin(o + 14603)) * 9387 >> 16);
+        put(kx, ky); put(kx + (I(l, SK.sin(a2)) >> 16), ky + (I(l, SK.cos(a2)) >> 16)); put(kx, ky); put(jx, jy);
       }
       p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
     } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];

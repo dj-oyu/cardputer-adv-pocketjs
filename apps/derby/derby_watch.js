@@ -18,11 +18,13 @@ const POOL = 'BIT DASH,HEX HOOF,NULL MOON,BAUD STAR,LOOP KID,CACHE HIT,TIN KITE,
 const SILK = [0xffff, 0x8c71, 0xf800, 0x237f, 0xffe0, 0x07e0, 0xfd20, 0xf81f], STY = ['FRONT', 'STALK', 'CLOSE'];
 const z8 = v => [v, v, v, v, v, v, v, v];
 // The stream's next 32 bits (int32); f16: its top 16 as a Q16 fraction.
+// a + b mod 2^32 by halves: an int32 '+' that overflows is a double.
+const add = (a, b) => { const l = (a & 65535) + (b & 65535); return ((a >>> 16) + (b >>> 16) + (l >>> 16) << 16) | l & 65535; };
 function rng(s) {
   return function () {
-    s = s + 0x6d2b79f5 | 0;
+    s = s < 315917835 ? s + 0x6d2b79f5 : s - 1231700742 - 1231700741; // + 0x6d2b79f5 mod 2^32
     let t = M.imul(s ^ s >>> 15, 1 | s);
-    t = t + M.imul(t ^ t >>> 7, 61 | t) ^ t;
+    t = add(t, M.imul(t ^ t >>> 7, 61 | t)) ^ t;
     return t ^ t >>> 14;
   };
 }
@@ -47,7 +49,7 @@ function fdiv(a, b) {
 // of its own (c), which also picks the course (Q16).
 const OV = [32768, 164, 1311], OL = [164, 117, 70, 23, -23, -70, -117, -164];
 function field(seed) {
-  const r = rng(seed), c = rng(seed + 0x2545f491 | 0), p = POOL.slice(), h = [], m = [];
+  const r = rng(seed), c = rng(add(seed, 0x2545f491)), p = POOL.slice(), h = [], m = [];
   for (let i = 0, a, b; i < 8; ++i) {
     const k = {n: p.splice(f16(r) * p.length >> 16, 1)[0], qt: f16(r)};
     k.top = TOP + (SPR * k.qt >> 16); k.qs = f16(r); k.st = ST0 + k.qs; k.qk = f16(r); k.kick = KI0 + (KI1 * k.qk >> 16);
@@ -56,14 +58,14 @@ function field(seed) {
     // EB: the speed past which a runner tires, and its drain a Q20 of excess.
     k.vth = k.top - (k.top * FADE >> 16); k.kd = idiv(214748365, k.top); k.kq = k.kick * (4 + k.sty) >> 2;
     h.push(k);
-    a = OL[i]; b = OV[2] * (2 * f16(c) - 65536) >> 16; m[i] = a + b + (a * b >> 16);
+    a = OL[i]; b = OV[2] * (2 * f16(c) - 65536) >> 16; m[i] = a + b + (M.imul(a, b) >> 16);
   }
   return {seed: seed, h: h, m: m, o: f16(c) < OV[0]};
 }
 // Arithmetic only, no Math.sin/exp: a seed replays bit for bit anywhere.
 // Per race a form offset the odds cannot see, and a slow random walk.
 function race(f) {
-  const r = rng(f.seed + 0x5bd1e995 | 0), fm = z8(0), e = [];
+  const r = rng(add(f.seed, 0x5bd1e995)), fm = z8(0), e = [];
   for (let i = 0; i < 8; ++i) { e[i] = f.h[i].st; fm[i] = FORM * (f16(r) - 32768) >> 16; }
   return {t: 0, x: z8(0), v: z8(0), e: e, sb: z8(0), px: z8(0), tc: z8(0), fm: fm, w: z8(0), r: r, done: 0};
 }
@@ -87,7 +89,7 @@ function step(f, s) {
     const a = g - v, up = h.acc;
     v += a > up ? up : a < -DV ? -DV : a;
     if (v > h.vth) s.e[i] -= (v - h.vth) * (gap < 65536 ? 3 : 2) * h.kd >> 17;
-    const y = s.x[i] = x + ((s.v[i] = v) + (f.o && x >= 17891328 && x < 42598400 ? v * f.m[i] >> 16 : 0) >> 4);
+    const y = s.x[i] = x + ((s.v[i] = v) + (f.o && x >= 17891328 && x < 42598400 ? M.imul(v, f.m[i]) >> 16 : 0) >> 4);
     if (x < DQ && y >= DQ) s.tc[i] = t0 + fdiv(DQ - x, y - x), ++s.done;
   }
 }

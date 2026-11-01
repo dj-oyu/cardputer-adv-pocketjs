@@ -3,7 +3,7 @@
 // enter the stalls), race, photo (still), res (result).
 function enter(s) {
   scene = s; t = 0; need = 1;
-  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field(rng(HW ^ M.imul(sn, 0x9e3779b9))() + M.imul(raceNo, 0x9e3779b9) | 0); log('ODDS ' + (od = odds(F.h, F.o)).map(ot) + (F.o ? ' OVAL' : ''));
+  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field(add(rng(HW ^ M.imul(sn, 0x9e3779b9))(), M.imul(raceNo, 0x9e3779b9))); log('ODDS ' + (od = odds(F.h, F.o)).map(ot) + (F.o ? ' OVAL' : ''));
     // The oval's bend in 16 chords (pocket.derby's series).
     CRS = F.o ? OC : 0; CH = [-655360000];
     if (F.o) for (let j = 0; j <= 16; ++j) CH.push(OB + j * 1544156);
@@ -97,7 +97,8 @@ function at(u) {
     LT[i] = ((XS[i] >> 6) * 261 >> 10) + 25033 * i;
   }
   SK.sinMany(LT, LS, 0);
-  for (let i = 0; i < 8; ++i) lz[i] = w[i] + (mn(26214, (L - XS[i] >> 4) * 1966 >> 12) * LS[i] >> 16);
+  // imul: 0 times a negative sine is -0, a double, with '*'.
+  for (let i = 0; i < 8; ++i) lz[i] = w[i] + (M.imul(mn(26214, (L - XS[i] >> 4) * 1966 >> 12), LS[i]) >> 16);
   zo.sort((a, b) => lz[b] - lz[a]);
   return XS;
 }
@@ -168,7 +169,7 @@ function paint(c, xs, close, gate, extra) {
     if (j > 1) { dr('band', w, (f * 21846 >> 16) % 6); continue; }
     // The first slot k w + o px from the area's left, -2w..-w; its angle k GA
     // as Q16 turns; t as frames (the plans scale them); px rounded.
-    const o = e[15 + j] * d, k = ((-o >> 8) * RW[w] >> 24) - 1;
+    const o = e[15 + j] * d, k = ((0 - o >> 8) * RW[w] >> 24) - 1;
     dr(j ? 'bokeh' : 'dust', f, e[q] + k * w + (o + 32768 >> 16), k * 25032 & 65535, w, e[q + 1], e[q + 2] - (r + 32768 >> 16), e[q + 3] + (r + 32768 >> 16));
   }
   if (extra) dr(extra[0], extra[1]);
