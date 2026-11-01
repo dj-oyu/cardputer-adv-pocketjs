@@ -1,7 +1,6 @@
 'use strict';
 const V = pocket.kasane, H = V.procedural, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
-// Shiki programs (derby_prog.js @shiki, built in): registered and dropped through V.shiki.
-const SKN = {run: 1, legs: 1, frl: 1, frb: 1};
+const SKN = {run: 1, legs: 1, frl: 1, frb: 1}; // Shiki (README)
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
 H.beginFrame(0);
 const res = H.resource(), live = {}, queue = [];
@@ -199,33 +198,28 @@ function course(c, x0, xs, close, gate, K) {
     q = f * M.sqrt(Q) / DL[0];
     if (gate && M.abs(x0 * q) < 400) dr('gate', -x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy);
   }
-  // The legs' phase follows xs, which at() places between sim steps in
-  // slow motion, so a runner's stride matches where it is shown.
   for (const l of zo) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
     const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]);
     if (l === close) {
       bflush();
-      const g = (flo(DO(l) * .923077) % 6 + 6) % 6;
+      const g = (flo(DO(xs[l], l) * .923077) % 6 + 6) % 6;
       dr('g' + g, []);
       dr('silk', SILK[l], rnd(HS * bob(g)));
-    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y);
+    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y, DO(xs[l], l));
   }
   bflush();
   rail(DNR, 0xffff);
 }
-// Runners and HEAD ON horses, batched: each adds two Shiki draws (legs first)
-// to one drawMany (shiki-spec sec.9.4), flushed before any other draw that
-// must land between them. The legs' phase is the horse's distance (DO: the
-// gate's phase of i rad), so JS keeps no phase and calls no sin.
-const BH = new Uint32Array(32), BI = new Float64Array(32 * 7), DO = l => xs[l] + l * 1.0345;
+// Shiki draws batched into one drawMany; DO: the legs' phase as a distance (README).
+const BH = new Uint32Array(32), BI = new Float64Array(32 * 7), DO = (x, l) => x + l * 1.0345;
 let bn = 0, bs = 7;
 function bput(h, a, b, c, d, e, f, g) { const o = bn * bs; BH[bn++] = h; BI[o] = a; BI[o + 1] = b; BI[o + 2] = c; BI[o + 3] = d; BI[o + 4] = e; BI[o + 5] = f; if (bs > 6) BI[o + 6] = g; }
 function bflush() { if (bn) SK.drawMany(BH.subarray(0, bn), BI.subarray(0, bn * bs), bs); bn = 0; }
-// A runner: hip X, ground Y, S px per unit; colours of horse l.
-function rin(l, X, S, Y) {
+// A runner: hip X, ground Y, S px per unit, distance d.
+function rin(l, X, S, Y, d) {
   if (!live.run || !live.legs) return;
-  bs = 7; const d = DO(l), c = F.h[l].coat;
+  bs = 7; const c = F.h[l].coat;
   bput(live.legs, X, S, Y, d, c, 0, 0);
   bput(live.run, X, S, Y, d, c, SILK[l], SILK[l] ^ 0x8410);
 }

@@ -152,7 +152,7 @@ function paint(c, xs, close, gate, extra) {
     if (j === 1 && q && live.frl && live.frb) {
       bs = 6;
       for (let i = 7; i >= 0; --i) {
-        const l = ro[i], q = 400 / (D + 12 - xs[l]), x = 120 + (lz[l] - 16.5) * q, y = 50 + 2.2 * q, d = DO(l), c = F.h[l].coat;
+        const l = ro[i], q = 400 / (D + 12 - xs[l]), x = 120 + (lz[l] - 16.5) * q, y = 50 + 2.2 * q, d = DO(xs[l], l), c = F.h[l].coat;
         bput(live.frl, x, y, q / 6, d, c, SILK[l]);
         bput(live.frb, x, y, q / 6, d, c, SILK[l]);
       }
