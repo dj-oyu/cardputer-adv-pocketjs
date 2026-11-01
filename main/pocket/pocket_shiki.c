@@ -212,41 +212,118 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
                   (double)best/(COPIES*TURNS));
     return true;
 }
-/* After the op rows: the PIE prototype's pairs (ksn_shiki_bench.c,
- * docs/kasane/shiki-pie.md sec.6), each a whole draw, the minimum of seven,
- * with the segments' count and steps so a pair's rows can be checked equal.
- * Row "empty" is one SET: the draw's fixed cost (the vm's reset and the
- * input conversion) that every other row includes. */
-static bool pair_line(unsigned i,char *out,size_t n){
-    ksn_shiki_bench_case *c=malloc(sizeof *c);
-    int16_t *work=malloc(KSN_SHIKI_BENCH_WORK*sizeof *work);
-    ksn_shiki_plan *plan=malloc(KSN_SHIKI_PLAN_MAX);
-    ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
-    ksn_shiki_vm *vm=malloc(sizeof *vm);
-    bool ok=c&&work&&plan&&seg&&vm;
-    if(ok&&i==0){
+/* After the op rows, the PIE prototype (ksn_shiki_bench.c,
+ * docs/kasane/shiki-pie.md sec.6):
+ *   - the checks: each program drawn on the C model and on PIE, every
+ *     observable compared ("same" or the first difference);
+ *   - the pairs, each a whole draw, the minimum of seven, with the vector
+ *     instructions on the C model (pie=0) and on PIE (pie=1). Row "empty"
+ *     is one SET: the fixed cost every draw includes. Scalar and emit rows
+ *     do not use the switch, so they are timed once.
+ * work is 16-B aligned (PIE's 128-bit accesses; an unaligned region takes
+ * the C lane loops, which "check unaligned" covers). */
+typedef struct {
+    ksn_shiki_bench_case c;
+    ksn_shiki_vm vm;
+    ksn_shiki_plan *plan;
+    ksn_proc_segment *seg;
+    int16_t *work,*raw;
+} bench_t;
+static bench_t *bench_new(void){
+    bench_t *b=calloc(1,sizeof *b);
+    if(!b)return NULL;
+    b->plan=malloc(KSN_SHIKI_PLAN_MAX);
+    b->seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *b->seg);
+    b->raw=malloc(KSN_SHIKI_BENCH_WORK*sizeof(int16_t)+16);
+    if(!b->plan||!b->seg||!b->raw){free(b->plan);free(b->seg);free(b->raw);free(b);return NULL;}
+    b->work=(int16_t *)(((uintptr_t)b->raw+15u)&~(uintptr_t)15u);
+    return b;
+}
+static void bench_free(bench_t *b){
+    if(b){free(b->plan);free(b->seg);free(b->raw);free(b);}
+}
+/* What a draw leaves that the two paths must agree on, as one FNV hash:
+ * status, the result line (steps, pen, registers, segments), v0..v7 and
+ * the regions. */
+static uint32_t observe(bench_t *b,ksn_shiki_status s){
+    uint32_t h=2166136261u;
+    ksn_shiki_result(true,s,&b->vm,b->seg,fnv,&h);
+    fnv(&h,(const char *)(((uintptr_t)b->vm.vraw+15u)&~(uintptr_t)15u),128);
+    ksn_shiki_result_regions(b->c.region,b->c.regions,fnv,&h);
+    return h;
+}
+static bool check_line(unsigned i,char *out,size_t n){
+    bench_t *b=bench_new();
+    if(!b){snprintf(out,n,"CB shiki check %u NO MEMORY",i);return true;}
+    uint32_t h[2]={0,0};
+    int16_t v3[2]={0,0};
+    ksn_shiki_status st[2]={KSN_SHIKI_INVALID,KSN_SHIKI_INVALID};
+    bool ok=true;
+    for(unsigned pie=0;ok&&pie<2;pie++){
+        ok=ksn_shiki_bench_check_build(i,b->work,&b->c)&&
+           ksn_shiki_register(b->c.code,b->c.len,NULL,0,b->c.region,b->c.regions,b->plan);
+        if(!ok)break;
+        ksn_shiki_vec_pie=pie;
+        st[pie]=ksn_shiki_draw(b->plan,NULL,0,&b->vm,b->seg);
+        ksn_shiki_vec_pie=false;
+        h[pie]=observe(b,st[pie]);
+        /* v1[0] (writeback reads it) for the log either way */
+        v3[pie]=((const int16_t *)(((uintptr_t)b->vm.vraw+15u)&~(uintptr_t)15u))[8];
+    }
+    if(!ok)snprintf(out,n,"CB shiki check %u FAILED to register",i);
+    else snprintf(out,n,"CB shiki check %s %s model=%08lx/%d pie=%08lx/%d v1[0]=%d/%d",b->c.name,
+                  h[0]==h[1]?"same":"DIFF",(unsigned long)h[0],(int)st[0],(unsigned long)h[1],(int)st[1],
+                  v3[0],v3[1]);
+    bench_free(b);
+    return true;
+}
+/* Row j of the timed part: 0 is "empty"; then each case, a vector case
+ * twice (pie 0, 1). */
+typedef struct { int index; bool pie; } timed_row;
+static unsigned timed_rows(timed_row *rows,unsigned max){
+    unsigned n=0;
+    if(n<max)rows[n++]=(timed_row){-1,false};
+    for(unsigned i=0;i<ksn_shiki_bench_count();i++){
+        if(n<max)rows[n++]=(timed_row){(int)i,false};
+        if(i==1&&n<max)rows[n++]=(timed_row){(int)i,true};   /* affine128 vector */
+    }
+    return n;
+}
+static bool pair_line(unsigned j,char *out,size_t n){
+    timed_row rows[16];
+    const unsigned count=timed_rows(rows,16);
+    if(j>=count)return false;
+    bench_t *b=bench_new();
+    if(!b){snprintf(out,n,"CB shiki draw NO MEMORY");return true;}
+    bool ok=true;
+    if(rows[j].index<0){
         static const uint8_t empty[24]={'S','K','I','1',1,0,1,0,0,0,0,0,KSN_SHIKI_SET,0,0,0,1,0,0,0,0,0,0,0};
-        memset(c,0,sizeof *c);
-        c->name="empty";
-        memcpy(c->code,empty,sizeof empty);
-        c->len=sizeof empty;
-    }else if(ok)ok=ksn_shiki_bench_build(i-1,work,c);
-    ok=ok&&ksn_shiki_register(c->code,c->len,NULL,0,c->region,c->regions,plan);
+        b->c.name="empty";
+        memcpy(b->c.code,empty,sizeof empty);
+        b->c.len=sizeof empty;
+    }else ok=ksn_shiki_bench_build((unsigned)rows[j].index,b->work,&b->c);
+    ok=ok&&ksn_shiki_register(b->c.code,b->c.len,NULL,0,b->c.region,b->c.regions,b->plan);
     uint32_t best=UINT32_MAX;
     ksn_shiki_status s=KSN_SHIKI_INVALID;
+    ksn_shiki_vec_pie=rows[j].pie;
     for(unsigned r=0;ok&&r<7;r++){
         const uint32_t t0=esp_cpu_get_cycle_count();
-        s=ksn_shiki_draw(plan,NULL,0,vm,seg);
+        s=ksn_shiki_draw(b->plan,NULL,0,&b->vm,b->seg);
         const uint32_t dt=esp_cpu_get_cycle_count()-t0;
         if(dt<best)best=dt;
     }
-    if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki draw %s FAILED %d",c?c->name:"?",ok?(int)s:-1);
-    else snprintf(out,n,"CB shiki draw %s cy=%lu us=%.1f steps=%u segs=%u",c->name,(unsigned long)best,
-                  best/240.0,vm->steps,vm->count);
-    free(c);free(work);free(plan);free(seg);free(vm);
+    ksn_shiki_vec_pie=false;
+    if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki draw %s FAILED %d",b->c.name?b->c.name:"?",ok?(int)s:-1);
+    else snprintf(out,n,"CB shiki draw %s pie=%d cy=%lu us=%.1f steps=%u segs=%u",b->c.name,rows[j].pie?1:0,
+                  (unsigned long)best,best/240.0,b->vm.steps,b->vm.count);
+    bench_free(b);
     return true;
 }
-#define PAIR_COUNT (1+ksn_shiki_bench_count())
+static unsigned pair_count(void){
+    timed_row rows[16];
+    return ksn_shiki_bench_check_count()+timed_rows(rows,16);
+}
+#define PAIR_COUNT pair_count()
 static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     uint32_t i=0;
@@ -259,7 +336,9 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     i-=first;
     if(i<OP_COUNT&&op_case_line(&OP_CASES[i],line,sizeof line))return JS_NewString(ctx,line);
     i-=(uint32_t)OP_COUNT;
-    if(i<PAIR_COUNT&&pair_line(i,line,sizeof line))return JS_NewString(ctx,line);
+    if(i<ksn_shiki_bench_check_count()&&check_line(i,line,sizeof line))return JS_NewString(ctx,line);
+    i-=ksn_shiki_bench_check_count();
+    if(pair_line(i,line,sizeof line))return JS_NewString(ctx,line);
     return JS_NULL;
 }
 

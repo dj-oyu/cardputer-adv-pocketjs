@@ -1,5 +1,13 @@
 #include "ksn_shiki.h"
 #include <math.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(__XTENSA__) && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#define KSN_SHIKI_HAS_PIE 1
+#else
+#define KSN_SHIKI_HAS_PIE 0
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -511,14 +519,143 @@ typedef int16_t vlanes[8];
 static vlanes *vregs(ksn_shiki_vm *vm){
     return (vlanes *)(((uintptr_t)vm->vraw+15u)&~(uintptr_t)15u);
 }
+bool ksn_shiki_vec_pie=false;
+
+#if KSN_SHIKI_HAS_PIE
+/* ---- P2: the same instructions on PIE (shiki-pie.md sec.6 item 1). The
+ * vector registers are the same int16[8] in memory either way, so a lane
+ * loop of the C model below may serve any case PIE does not (a tail block,
+ * a record of 3 or more, an unaligned region, VIOTA). The accumulator is
+ * QACC's image, stored and loaded whole around each instruction that uses
+ * it (QACC_L then QACC_H, 128 + 32 bits each, at +0/+16/+32/+48): its byte
+ * layout is never read in C, so it need not be known.
+ *
+ * Each helper is one asm block that owns the q registers it names: GCC does
+ * not allocate PIE registers for C code and rejects q registers in clobber
+ * lists, so "memory" is the only fence (as ksn_proc_points_pie.c). */
+#define QACC_LOAD(p) "ee.ld.qacc_l.l.128.ip " p ", 16\n" "ee.ld.qacc_l.h.32.ip " p ", 16\n" \
+                     "ee.ld.qacc_h.l.128.ip " p ", 16\n" "ee.ld.qacc_h.h.32.ip " p ", -48\n"
+#define QACC_STORE(p) "ee.st.qacc_l.l.128.ip " p ", 16\n" "ee.st.qacc_l.h.32.ip " p ", 16\n" \
+                      "ee.st.qacc_h.l.128.ip " p ", 16\n" "ee.st.qacc_h.h.32.ip " p ", -48\n"
+static void pie_copy(int16_t *d,const int16_t *a){
+    __asm__ volatile("ee.vld.128.ip q0, %[a], 0\n" "ee.vst.128.ip q0, %[d], 0\n"
+                     ::[a]"a"(a),[d]"a"(d):"memory");
+}
+/* Field f (0 or 1) of 8 two-element records at a (32 B, aligned). */
+static void pie_unzip(int16_t *d,const int16_t *a,unsigned f){
+    if(f)__asm__ volatile("ee.vld.128.ip q0, %[a], 16\n" "ee.vld.128.ip q1, %[a], 0\n"
+                          "ee.vunzip.16 q0, q1\n" "ee.vst.128.ip q1, %[d], 0\n"
+                          :[a]"+&a"(a):[d]"a"(d):"memory");
+    else __asm__ volatile("ee.vld.128.ip q0, %[a], 16\n" "ee.vld.128.ip q1, %[a], 0\n"
+                          "ee.vunzip.16 q0, q1\n" "ee.vst.128.ip q0, %[d], 0\n"
+                          :[a]"+&a"(a):[d]"a"(d):"memory");
+}
+#define PIE_BIN(name,insn) \
+static void name(int16_t *d,const int16_t *a,const int16_t *b){ \
+    __asm__ volatile("ee.vld.128.ip q0, %[a], 0\n" "ee.vld.128.ip q1, %[b], 0\n" \
+                     insn " q2, q0, q1\n" "ee.vst.128.ip q2, %[d], 0\n" \
+                     ::[a]"a"(a),[b]"a"(b),[d]"a"(d):"memory"); \
+}
+PIE_BIN(pie_vadd,"ee.vadds.s16")
+PIE_BIN(pie_vsub,"ee.vsubs.s16")
+PIE_BIN(pie_vmin,"ee.vmin.s16")
+PIE_BIN(pie_vmax,"ee.vmax.s16")
+static void pie_splat(int16_t *d,const int16_t *k){
+    __asm__ volatile("ee.vldbc.16.ip q0, %[k], 0\n" "ee.vst.128.ip q0, %[d], 0\n"
+                     ::[k]"a"(k),[d]"a"(d):"memory");
+}
+static void pie_zacc(void *acc){
+    __asm__ volatile("ee.zero.qacc\n" QACC_STORE("%[p]")
+                     :[p]"+&a"(acc)::"memory");
+}
+/* acc += a * b lane by lane (b a vector, or one value broadcast). */
+static void pie_mac(void *acc,const int16_t *a,const int16_t *b){
+    __asm__ volatile(QACC_LOAD("%[p]") "ee.vld.128.ip q0, %[a], 0\n" "ee.vld.128.ip q1, %[b], 0\n"
+                     "ee.vmulas.s16.qacc q0, q1\n" QACC_STORE("%[p]")
+                     :[p]"+&a"(acc):[a]"a"(a),[b]"a"(b):"memory");
+}
+static void pie_mack(void *acc,const int16_t *a,const int16_t *k){
+    __asm__ volatile(QACC_LOAD("%[p]") "ee.vld.128.ip q0, %[a], 0\n" "ee.vldbc.16.ip q1, %[k], 0\n"
+                     "ee.vmulas.s16.qacc q0, q1\n" QACC_STORE("%[p]")
+                     :[p]"+&a"(acc):[a]"a"(a),[k]"a"(k):"memory");
+}
+/* acc = t in every lane, as ksn_proc_points_pie.c sets its translation:
+ * t = t0 * 1 + (-32768) * (t1 + t2 + t3), every term an int16. */
+static void pie_accset(void *acc,int32_t t){
+    int16_t k[6];
+    int64_t q=-(int64_t)(t/32768);
+    k[0]=1;k[1]=(int16_t)(t%32768);k[2]=INT16_MIN;
+    for(unsigned j=3;j<6;j++){
+        const int64_t part=q>INT16_MAX?INT16_MAX:q<INT16_MIN?INT16_MIN:q;
+        k[j]=(int16_t)part;q-=part;
+    }
+    const int16_t *p=k;
+    __asm__ volatile("ee.zero.qacc\n"
+                     "ee.vldbc.16.ip q0, %[k], 2\n" "ee.vldbc.16.ip q1, %[k], 2\n"
+                     "ee.vmulas.s16.qacc q0, q1\n"
+                     "ee.vldbc.16.ip q0, %[k], 2\n"
+                     "ee.vldbc.16.ip q1, %[k], 2\n" "ee.vmulas.s16.qacc q0, q1\n"
+                     "ee.vldbc.16.ip q1, %[k], 2\n" "ee.vmulas.s16.qacc q0, q1\n"
+                     "ee.vldbc.16.ip q1, %[k], 0\n" "ee.vmulas.s16.qacc q0, q1\n"
+                     QACC_STORE("%[p]")
+                     :[k]"+&a"(p),[p]"+&a"(acc)::"memory");
+}
+static void pie_out(void *acc,int16_t *d,unsigned s){
+    __asm__ volatile(QACC_LOAD("%[p]") "ee.srcmb.s16.qacc q0, %[s], 0\n" "ee.vst.128.ip q0, %[d], 0\n"
+                     QACC_STORE("%[p]")
+                     :[p]"+&a"(acc):[s]"a"(s),[d]"a"(d):"memory");
+}
+#endif
+
 static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_plan *plan,const ksn_shiki_inst *i){
     vlanes *v=vregs(vm);
-    int64_t *acc=vm->acc;
+    int64_t *acc=ksn_shiki_vm_acc(vm);
     const int32_t *r=vm->reg;
     const unsigned lv=i->level;
     const uint32_t base=(uint32_t)(vm->loop[lv].total-vm->loop[lv].remaining)*8u;
     const uint32_t n=vm->loop[lv].n;
     const unsigned live=n-base>=8?8u:(unsigned)(n-base);
+#if KSN_SHIKI_HAS_PIE
+    if(vm->pie){
+        switch(i->op){
+        case KSN_SHIKI_VLOAD: {
+            const ksn_shiki_bound *g=&plan->region[i->a];
+            const int16_t *d=(const int16_t *)g->data+base*g->k_rec;
+            if(live==8&&!((uintptr_t)d&15u)){
+                if(g->k_rec==1){pie_copy(v[i->dst],d);return;}
+                if(g->k_rec==2){pie_unzip(v[i->dst],d,i->b);return;}
+            }
+            break;                                   /* the C model's lane loop */
+        }
+        case KSN_SHIKI_VSTORE: {
+            const ksn_shiki_bound *g=&plan->region[i->a];
+            int16_t *d=(int16_t *)g->data+base;
+            if(live==8&&g->k_rec==1&&!((uintptr_t)d&15u)){pie_copy(d,v[i->dst]);return;}
+            break;
+        }
+        case KSN_SHIKI_VSPLAT: {
+            const int16_t k=(int16_t)sat16(r[i->a]);
+            pie_splat(v[i->dst],&k);
+            return;
+        }
+        case KSN_SHIKI_VADD: pie_vadd(v[i->dst],v[i->a],v[i->b]); return;
+        case KSN_SHIKI_VSUB: pie_vsub(v[i->dst],v[i->a],v[i->b]); return;
+        case KSN_SHIKI_VMIN: pie_vmin(v[i->dst],v[i->a],v[i->b]); return;
+        case KSN_SHIKI_VMAX: pie_vmax(v[i->dst],v[i->a],v[i->b]); return;
+        /* The accumulator is QACC's image here: every use goes to PIE. */
+        case KSN_SHIKI_VZACC: pie_zacc(acc); return;
+        case KSN_SHIKI_VMAC: pie_mac(acc,v[i->a],v[i->b]); return;
+        case KSN_SHIKI_VMACK: {
+            const int16_t k=(int16_t)sat16(r[i->b]);
+            pie_mack(acc,v[i->a],&k);
+            return;
+        }
+        case KSN_SHIKI_VACCSET: pie_accset(acc,r[i->a]); return;
+        case KSN_SHIKI_VOUT: pie_out(acc,v[i->dst],i->aux); return;
+        default: break;                              /* VIOTA */
+        }
+    }
+#endif
     switch(i->op){
     case KSN_SHIKI_VLOAD: {
         const ksn_shiki_bound *g=&plan->region[i->a];
@@ -567,8 +704,9 @@ static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_
         for(unsigned l=0;l<8;l++)acc[l]=r[i->a];
         break;
     case KSN_SHIKI_VOUT:
+        /* |acc| <= 2^39: a shift past 40 gives what 40 gives (0 or -1). */
         for(unsigned l=0;l<8;l++){
-            acc[l]=floor_shift(acc[l],i->aux);
+            acc[l]=floor_shift(acc[l],i->aux>40?40u:i->aux);
             v[i->dst][l]=(int16_t)sat16(acc[l]);
         }
         break;
@@ -609,6 +747,7 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     memset(vm,0,sizeof *vm);
+    vm->pie=KSN_SHIKI_HAS_PIE&&ksn_shiki_vec_pie;
     int32_t in[KSN_SHIKI_INPUTS]={0};
     for(unsigned k=0;k<plan->inputs;k++)
         if(!ksn_shiki_from_double(k<n?inputs[k]:0.0,plan->input_q[k],&in[k]))return KSN_SHIKI_BADINPUT;

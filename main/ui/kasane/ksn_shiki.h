@@ -112,12 +112,23 @@ typedef struct {
     bool pen_valid;
     uint16_t count;                         /* segments emitted by this draw */
     bool ext;                               /* a LINE_PATTERN chord is among them */
-    /* The prototype's vector state (shiki-pie.md sec.3.1): v0..v7, 8 lanes
-     * of int16 each, kept in memory; acc, 8 lanes of 40 bits (sat40). The
-     * raw buffer leaves room to align the lanes to 16 B for PIE loads. */
-    uint8_t vraw[8*16+15];
-    int64_t acc[8];
+    /* The prototype's vector state (shiki-pie.md sec.3.1), kept in memory:
+     * v0..v7 (8 lanes of int16) then the accumulator (8 lanes of 40 bits,
+     * sat40), both 16-B aligned inside raw for PIE's 128-bit accesses. The
+     * accumulator is int64_t[8] for the C model and QACC's own image
+     * (EE.ST.QACC_*) for PIE: pie, latched from ksn_shiki_vec_pie when the
+     * draw starts, says which, so a draw never mixes them. */
+    uint8_t vraw[8*16+64+15];
+    bool pie;
 } ksn_shiki_vm;
+/* The C model's accumulator (meaningless when vm->pie). */
+static inline int64_t *ksn_shiki_vm_acc(ksn_shiki_vm *vm){
+    return (int64_t *)((((uintptr_t)vm->vraw+15u)&~(uintptr_t)15u)+128u);
+}
+/* Prototype switch: the vector instructions run on PIE (ESP32-S3 only;
+ * elsewhere it is ignored). Off by default; the bench flips it to compare
+ * the two in one binary. */
+extern bool ksn_shiki_vec_pie;
 
 /* 257 entries, sec.4.4: round(sin(k pi / 512) * 65536). */
 extern const int32_t ksn_shiki_sin_table[257];

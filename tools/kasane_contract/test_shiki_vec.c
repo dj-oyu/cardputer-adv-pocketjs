@@ -127,8 +127,8 @@ static void lanes(void){
     I(&p,KSN_SHIKI_END,0,0,0,0,0);
     CHECK(reg(&p,rh,2),"sat40 registers");
     CHECK(run()==KSN_SHIKI_DONE,"sat40 runs");
-    CHECK(V(2)[0]==32767&&V(2)[7]==32767&&vm.acc[5]==32767,"sat40, then VOUT writes back (%d %lld)",
-          V(2)[0],(long long)vm.acc[5]);
+    CHECK(V(2)[0]==32767&&V(2)[7]==32767&&ksn_shiki_vm_acc(&vm)[5]==32767,"sat40, then VOUT writes back (%d %lld)",
+          V(2)[0],(long long)ksn_shiki_vm_acc(&vm)[5]);
     CHECK(vm.steps==1+1+16*42+1+1+2,"steps %u",vm.steps);
     for(int k=0;k<128;k++)h[k]=-32768;
     p_begin(&p,2,decl);
@@ -139,7 +139,7 @@ static void lanes(void){
     for(int k=0;k<40;k++)I(&p,KSN_SHIKI_VMAC,0,0,1,0,0);
     I(&p,KSN_SHIKI_END,0,0,0,0,0);
     CHECK(reg(&p,rh,2),"vmac registers");
-    CHECK(run()==KSN_SHIKI_DONE&&vm.acc[3]==-((int64_t)1<<39),"sat40 below (%lld)",(long long)vm.acc[3]);
+    CHECK(run()==KSN_SHIKI_DONE&&ksn_shiki_vm_acc(&vm)[3]==-((int64_t)1<<39),"sat40 below (%lld)",(long long)ksn_shiki_vm_acc(&vm)[3]);
     /* VACCSET, VOUT's floor, VIOTA, VMIN/VMAX over 16 records. */
     p_begin(&p,2,decl);
     I(&p,KSN_SHIKI_SET,1,0,0,-5,0);
@@ -152,7 +152,7 @@ static void lanes(void){
     I(&p,KSN_SHIKI_END,0,0,0,0,0);
     CHECK(reg(&p,r,2),"acc registers");
     CHECK(run()==KSN_SHIKI_DONE,"acc runs");
-    CHECK(vm.acc[0]==-3&&vm.acc[7]==-3,"VOUT writes the shifted value back (%lld)",(long long)vm.acc[0]);
+    CHECK(ksn_shiki_vm_acc(&vm)[0]==-3&&ksn_shiki_vm_acc(&vm)[7]==-3,"VOUT writes the shifted value back (%lld)",(long long)ksn_shiki_vm_acc(&vm)[0]);
     CHECK(V(3)[3]==-3,"VOUT floors (%d)",V(3)[3]);
     CHECK(V(4)[0]==8&&V(4)[7]==15,"VIOTA numbers the second block's records (%d %d)",V(4)[0],V(4)[7]);
     CHECK(V(5)[0]==-3&&V(6)[0]==8,"VMIN/VMAX");
@@ -233,12 +233,25 @@ static void refusals(void){
     CHECK(reg(&p,r,3),"accepts VLOAD of a longer region");
 }
 
+/* The device's PIE checks must at least run to DONE on the C model. */
+static void checks_run(void){
+    static int16_t work[KSN_SHIKI_BENCH_WORK] __attribute__((aligned(16)));
+    for(unsigned i=0;i<ksn_shiki_bench_check_count();i++){
+        ksn_shiki_bench_case c;
+        CHECK(ksn_shiki_bench_check_build(i,work,&c),"check %u builds",i);
+        const bool ok=ksn_shiki_register(c.code,c.len,NULL,0,c.region,c.regions,plan);
+        CHECK(ok,"%s registers",c.name);
+        if(ok)CHECK(run()==KSN_SHIKI_DONE,"%s runs",c.name);
+    }
+}
+
 int main(void){
     plan=malloc(KSN_SHIKI_PLAN_MAX);
     pairs();
     lanes();
     emits();
     refusals();
+    checks_run();
     free(plan);
     printf("%s (%u checks, %u failed)\n",fails?"SHIKI VEC FAIL":"SHIKI VEC PASS",checks,fails);
     return fails?1:0;

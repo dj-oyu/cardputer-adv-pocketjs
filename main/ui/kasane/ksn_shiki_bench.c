@@ -131,3 +131,157 @@ bool ksn_shiki_bench_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shi
     finish(c,&s,1);
     return true;
 }
+
+/* ---- the PIE checks */
+enum { CHECKS=10 };
+unsigned ksn_shiki_bench_check_count(void){return CHECKS;}
+bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shiki_bench_case *c){
+    if(i>=CHECKS)return false;
+    if(i==CHECKS-1){                       /* the timed vector form, checked too */
+        const bool ok=ksn_shiki_bench_build(1,work,c);
+        c->name="check affine128";
+        return ok;
+    }
+    memset(c,0,sizeof *c);
+    uint32_t st=777+i;
+    for(unsigned k=0;k<KSN_SHIKI_BENCH_WORK;k++)work[k]=(int16_t)next(&st);
+    int16_t *a=work,*o=work+512;
+    const uint8_t one[2][4]={{KSN_SHIKI_I16,0,1,0},{KSN_SHIKI_I16,0,1,1}};
+    c->region[0]=(ksn_shiki_region){a,128,KSN_SHIKI_I16,0,1};
+    c->region[1]=(ksn_shiki_region){o,128,KSN_SHIKI_I16,0,1};
+    c->regions=2;
+    asm_t s;
+    switch(i){
+    case 0:
+        c->name="check tail";
+        s=begin(c,one,2);
+        op(&s,KSN_SHIKI_SET,0,0,0,13,0);
+        op(&s,KSN_SHIKI_SET,1,0,0,30000,0);
+        op(&s,KSN_SHIKI_SET,2,0,0,-70000,0);         /* VSPLAT saturates */
+        op(&s,KSN_SHIKI_VEACH,0,0,0,0,1);
+        op(&s,KSN_SHIKI_VLOAD,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VSPLAT,1,1,0,0,0);
+        op(&s,KSN_SHIKI_VSPLAT,2,2,0,0,0);
+        op(&s,KSN_SHIKI_VADD,3,0,1,0,0);
+        op(&s,KSN_SHIKI_VSUB,4,0,1,0,0);
+        op(&s,KSN_SHIKI_VMIN,5,3,4,0,0);
+        op(&s,KSN_SHIKI_VMAX,6,0,2,0,0);
+        op(&s,KSN_SHIKI_VIOTA,7,0,0,0,0);
+        op(&s,KSN_SHIKI_VSTORE,3,1,0,0,0);
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    case 1: {
+        c->name="check unzip";
+        const uint8_t two[2][4]={{KSN_SHIKI_I16,0,2,0},{KSN_SHIKI_I16,0,2,1}};
+        c->region[0]=(ksn_shiki_region){a,128,KSN_SHIKI_I16,0,2};
+        c->region[1]=(ksn_shiki_region){o,128,KSN_SHIKI_I16,0,2};
+        s=begin(c,two,2);
+        op(&s,KSN_SHIKI_VEACH,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VLOAD,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VLOAD,1,0,1,0,0);
+        op(&s,KSN_SHIKI_VSUB,2,1,0,0,0);
+        op(&s,KSN_SHIKI_VSTORE,2,1,1,0,0);           /* a field of 2: the C store */
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    }
+    case 2: {
+        c->name="check record3";
+        const uint8_t three[2][4]={{KSN_SHIKI_I16,0,3,0},{KSN_SHIKI_I16,0,1,1}};
+        c->region[0]=(ksn_shiki_region){a,126,KSN_SHIKI_I16,0,3};
+        c->region[1]=(ksn_shiki_region){o,42,KSN_SHIKI_I16,0,1};
+        s=begin(c,three,2);
+        op(&s,KSN_SHIKI_VEACH,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VLOAD,0,0,2,0,0);
+        op(&s,KSN_SHIKI_VSTORE,0,1,0,0,0);
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    }
+    case 3: case 4:
+        /* 16 blocks x 40 MACs of +-32767 * 32767 pass 2^39 either way. */
+        c->name=i==3?"check sat40 up":"check sat40 down";
+        for(unsigned k=0;k<128;k++)a[k]=i==3?32767:-32768;
+        s=begin(c,one,2);
+        op(&s,KSN_SHIKI_SET,0,0,0,32767,0);
+        op(&s,KSN_SHIKI_SET,1,0,0,8,0);
+        op(&s,KSN_SHIKI_VEACH,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VLOAD,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VSPLAT,1,0,0,0,0);
+        for(unsigned k=0;k<20;k++){
+            op(&s,KSN_SHIKI_VMACK,0,0,0,0,0);
+            op(&s,KSN_SHIKI_VMAC,0,0,1,0,0);
+        }
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VEACH,0,0,1,0,1);
+        op(&s,KSN_SHIKI_VOUT,2,0,0,0,24);
+        op(&s,KSN_SHIKI_VOUT,3,0,0,0,0);
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    case 5:
+        /* What SRCMB writes back: 500000 (the shifted value) or 32767 (its
+         * sat16)? The second VOUT reads 31250 or 2047. */
+        c->name="check writeback";
+        s=begin(c,one,2);
+        op(&s,KSN_SHIKI_SET,0,0,0,1000000,0);
+        op(&s,KSN_SHIKI_SET,1,0,0,8,0);
+        op(&s,KSN_SHIKI_VEACH,0,0,1,0,1);
+        op(&s,KSN_SHIKI_VACCSET,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VOUT,0,0,0,0,1);
+        op(&s,KSN_SHIKI_VOUT,1,0,0,0,4);
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    case 6: {
+        c->name="check accset";
+        static const int32_t t[4]={123456789,INT32_MIN,-5,INT32_MAX};
+        static const uint16_t sh[4]={12,16,1,16};
+        s=begin(c,one,2);
+        for(unsigned k=0;k<4;k++)op(&s,KSN_SHIKI_SET,(uint8_t)k,0,0,t[k],0);
+        op(&s,KSN_SHIKI_SET,4,0,0,8,0);
+        op(&s,KSN_SHIKI_VEACH,0,0,4,0,1);
+        for(unsigned k=0;k<4;k++){
+            op(&s,KSN_SHIKI_VACCSET,0,(uint8_t)k,0,0,0);
+            op(&s,KSN_SHIKI_VOUT,(uint8_t)k,0,0,0,sh[k]);
+        }
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    }
+    case 7:
+        /* Shifts of 32 and more: 40 * 32767^2 is about 2^35.3. */
+        c->name="check shift32";
+        s=begin(c,one,2);
+        op(&s,KSN_SHIKI_SET,0,0,0,32767,0);
+        op(&s,KSN_SHIKI_SET,1,0,0,8,0);
+        op(&s,KSN_SHIKI_SET,2,0,0,-1000,0);
+        op(&s,KSN_SHIKI_VEACH,0,0,1,0,1);
+        op(&s,KSN_SHIKI_VZACC,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VSPLAT,0,0,0,0,0);
+        for(unsigned k=0;k<40;k++)op(&s,KSN_SHIKI_VMACK,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VOUT,1,0,0,0,33);
+        op(&s,KSN_SHIKI_VOUT,2,0,0,0,0);
+        op(&s,KSN_SHIKI_VACCSET,0,2,0,0,0);
+        op(&s,KSN_SHIKI_VOUT,3,0,0,0,40);
+        op(&s,KSN_SHIKI_VACCSET,0,2,0,0,0);
+        op(&s,KSN_SHIKI_VOUT,4,0,0,0,63);
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    default:
+        /* Regions off the 16-B grid: the C model's lane loops. */
+        c->name="check unaligned";
+        c->region[0]=(ksn_shiki_region){a+1,64,KSN_SHIKI_I16,0,1};
+        c->region[1]=(ksn_shiki_region){o+3,64,KSN_SHIKI_I16,0,1};
+        s=begin(c,one,2);
+        op(&s,KSN_SHIKI_VEACH,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VLOAD,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VADD,0,0,0,0,0);
+        op(&s,KSN_SHIKI_VSTORE,0,1,0,0,0);
+        op(&s,KSN_SHIKI_END,0,0,0,0,0);
+        finish(c,&s,2);
+        return true;
+    }
+}

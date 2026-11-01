@@ -27,4 +27,12 @@ unsigned ksn_shiki_bench_count(void);
 /* Builds case i into *c with its regions in work (filled with the case's
  * data). False past the last case. */
 bool ksn_shiki_bench_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shiki_bench_case *c);
+/* Programs that are not timed: each runs once on the C model and once on
+ * PIE (ksn_shiki_vec_pie) and every observable must agree (segments, steps,
+ * registers, vector registers, region contents). They aim at what the TRM
+ * leaves open or the prototype assumes: VUNZIP's lane order, QACC's image
+ * round trip, VMULAS's 40-bit saturation, what SRCMB writes back, shifts of
+ * 32 and more, the tail and unaligned fallbacks. work must be 16-B aligned. */
+unsigned ksn_shiki_bench_check_count(void);
+bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shiki_bench_case *c);
 #endif
