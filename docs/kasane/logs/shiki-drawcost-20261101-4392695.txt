@@ -1,0 +1,17 @@
+# Shiki v1.5 draft on the device, 2026-11-01 (firmware 4392695, ELF 8618a837...).
+# API self-test (broker job v15-api2-4392695): I (81135) js: SA END pass=60 fail=0
+# Draw cost and sines (broker job v15-cost-4392695), cycles per call/value:
+I (109986) js: DC BEGIN n=200 rounds=5 BUILD 1 8618a837f2831fd0
+I (109994) js: DC loop total=1119.6 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (110002) js: DC native total=1161.6 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (110015) js: DC draw0 total=2387.3 parse=501.5 lookup=115.3 engine=308.6 copy=81.2 n=200
+I (110038) js: DC draw8 total=4657.5 parse=875.7 lookup=131.2 engine=1576.8 copy=86.5 n=200
+I (110071) js: DC draw8arr total=6997.8 parse=3669.1 lookup=136.4 engine=1558.3 copy=81.1 n=200
+I (110088) js: DC point total=3312.5 parse=593.8 lookup=146.4 engine=922.1 copy=107.0 n=200
+I (110094) js: DC many0 total=585.4 parse=0.0 lookup=113.0 engine=313.4 copy=81.0 n=200
+I (110105) js: DC many8 total=1854.1 parse=0.0 lookup=129.1 engine=1564.0 copy=81.0 n=200
+I (110111) js: DC many8fixed total=606.5 parse=0.0 lookup=129.0 engine=318.0 copy=81.1 n=200
+I (110126) js: DC mathsin total=2735.6 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (110134) js: DC shikisin total=1153.2 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (110138) js: DC sinMany total=79.3 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (110139) js: DC END

@@ -89,3 +89,11 @@
 - **中**: `stride = 0` なら `inputs` を検査しない（M1）、登録されていない handle は範囲外の値も含めて `CLOSED`（`draw()` とはここが違う。M2）、draw `i` の handle と入力は draw `i` の始めに読む＝データ領域の窓を入力にすると前の draw の書き込みが映る（M3）、`Int32Array` の Q 形式は `handles[i]` の式の宣言による（M4）、検査の順と空の `handles`（M5）。
 - **軽微**: 内部名 `BADINPUT` を §4.8 の 7 の誤りに、失敗した draw の `operation` は `"kasane.shiki.draw"`、§10 に別名・範囲外の handle・割り込み・実機の最悪時間の要件。
 - 確認（host）: JS API の自己試験 50 件（整数の経路を変換と比べる、窓を入力にした別名、範囲外の handle、空の `handles`）。
+
+## 9. v1.5 の版の実機の確認（`4392695`、2026-11-01）
+
+ログ: [logs/shiki-drawcost-20261101-4392695.txt](logs/shiki-drawcost-20261101-4392695.txt)。
+
+- JS API の自己試験 **60/60**（`drawMany` の両方の経路・別名・`index`・範囲外の handle、`sin` が 16 の角度で `SIN` 命令と一致、`cos`・`sinMany`・誤り）。
+- `drawMany`（draw の間の監視なし）: `many0` 585・`many8` 1,854・`many8fixed` 607 サイクル/draw で、`ad10726` と同じ（±1.5%）。
+- 正弦（1 回・1 値あたり）: `Math.sin` 2,736 サイクル（11.4 µs）、`shiki.sin` 1,153（4.8 µs、2.4 倍）、`sinMany` **79（0.33 µs、35 倍）**（実測）。`shiki.sin` の費用は空のネイティブ呼び出し（1,162）と同じで、表を引く計算はほぼ無料。速さが要るなら、まとめて 1 回で求める（`sinMany`）か、式の中で `SIN` を使う。
