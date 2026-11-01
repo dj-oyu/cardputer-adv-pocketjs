@@ -27,6 +27,10 @@
 
 #define REGIONS 16          // maxSessionDataRegions (sec.9.1)
 #define BINDS 32            // one per slot: maxHandles
+// maxDrawsPerCall (sec.9.4, v1.5): drawMany runs in native code, where the
+// guest's interrupt check does not run, so its length bounds the time a call
+// cannot be stopped: 256 draws of at most KSN_SHIKI_STEPS steps each.
+#define DRAWS_PER_CALL 256
 
 typedef struct {
     JSValue window,buffer;   // both held: the window for identity, the buffer to detach
@@ -305,14 +309,15 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 }
 
 // ----------------------------------------------------------- drawMany()
-// PROTOTYPE (docs/kasane/shiki-bundle.md sec.5, not in the spec yet): many
-// draws in one call. handles is a Uint32Array; inputs holds stride inputs a
+// sec.9.4 (v1.5 draft; docs/kasane/shiki-bundle.md sec.5-6): many draws in
+// one call. handles is a Uint32Array; inputs holds stride inputs a
 // draw, in handle order, as a Float64Array (JS numbers, converted by sec.2.4)
 // or an Int32Array (already each input's Q format: no conversion). Typed
 // arrays so that one pointer is taken once and every input is a load, not a
 // property read (shiki-bundle.md sec.3: a call is ~1,200 cycles and an array
 // element ~400). Draws run in order; the first that fails throws as draw()
-// does and abandons the frame, as draw() does.
+// does, with the draw's position as the error's index, and abandons the
+// frame, as draw() does.
 static const void *typed_data(JSContext *ctx,JSValueConst v,int kind,size_t *count){
     if(JS_GetTypedArrayType(v)!=kind)return NULL;
     size_t off=0,len=0,bpe=0,size=0;
@@ -332,6 +337,8 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     const uint32_t *handles=argc>=1?typed_data(ctx,argv[0],JS_TYPED_ARRAY_UINT32,&count):NULL;
     if(!handles||argc<3||!whole(ctx,argv[2],0,KSN_SHIKI_INPUTS,&stride))
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected (Uint32Array handles, Float64Array|Int32Array inputs, stride 0..8)");
+    if(count>DRAWS_PER_CALL)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"more than 256 draws in one call");
     const double *real=NULL;
     const int32_t *fixed=NULL;
     if(stride){
@@ -344,7 +351,11 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
         if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
         JSValue r=pocket_proc_shiki_draw_inputs(ctx,handles[i],real?real+i*stride:NULL,
                                                 fixed?fixed+i*stride:NULL,stride);
-        if(JS_IsException(r))return r;
+        if(JS_IsException(r)){
+            JSValue e=JS_GetException(ctx);
+            if(JS_IsObject(e))JS_SetPropertyStr(ctx,e,"index",JS_NewUint32(ctx,(uint32_t)i));
+            return JS_Throw(ctx,e);
+        }
     }
     return JS_UNDEFINED;
 }
@@ -411,6 +422,7 @@ static const pocket_limit_t limits[]={
     {"maxSurfaces",POCKET_LIMIT_INT,2,NULL},
     {"loopDepth",POCKET_LIMIT_INT,KSN_SHIKI_LOOP_DEPTH,NULL},
     {"maxRecords",POCKET_LIMIT_INT,KSN_SHIKI_RECORDS,NULL},
+    {"maxDrawsPerCall",POCKET_LIMIT_INT,DRAWS_PER_CALL,NULL},
     {0},
 };
 static void probe(const pocket_capability_t *cap,bool *available,const char **reason){

@@ -25,7 +25,7 @@ globalThis.shikiApiTest = function (pocket, log) {
     return b;
   };
   const caps = pocket.capabilities && pocket.capabilities.get && pocket.capabilities.get('kasane.shiki');
-  if (caps) ok('capability', caps.supported === true && caps.available === true && caps.limits.maxRecords === 65535);
+  if (caps) ok('capability', caps.supported === true && caps.available === true && caps.limits.maxRecords === 65535 && caps.limits.maxDrawsPerCall === 256);
   // Frames and the engine's state are taken on the first draw and kept: warm
   // them up so the heap's baseline holds them.
   const warm = S.register(asm([], [[0, 0, 0, 0, 1]]));
@@ -110,6 +110,12 @@ globalThis.shikiApiTest = function (pocket, log) {
   throws('many type', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put]), new Float32Array([1]), 1));
   S.beginFrame(0);
   throws('many stale', 'CLOSED', () => S.drawMany(new Uint32Array([put, 0x3fffffff]), new Float64Array([1, 1]), 1));
+  S.beginFrame(0);
+  let at = -1;
+  try { S.drawMany(new Uint32Array([put, put, put]), new Float64Array([1, NaN, 1]), 1); } catch (e) { at = e.index; }
+  ok('many index', at === 1 && box[0] === 65536);
+  S.beginFrame(0);
+  throws('many count', 'LIMIT_EXCEEDED', () => S.drawMany(new Uint32Array(257).fill(put), new Float64Array(257), 1));
   S.unregister(put); S.release(box);
   S.beginFrame(0); S.draw(plot, 120, 60); S.commit();   // one commit a turn
   S.unregister(plot); S.unregister(spin);
