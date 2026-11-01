@@ -222,6 +222,8 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - 正面の馬の前脚の持ち上げ `max(0, ±1.5 s sin)` は、Shiki に max の命令が無いので、1 回だけ回すループと `break` で書く。
 - `kasane.shiki` を宣言するので、セッションの始めに Shiki のヒープ（既定 48 KiB）を取り、旧 API のフレームもその中に置かれる。
 
+**実機の結果（1回ずつ、レースは別、`docs/kasane/logs/derby-shiki-20261101-3830107.txt`）:** JS のターンは race 開始・FIELD・CLOSE で約 0.2〜0.3 ms（2〜3%）減り、WIDE 2 と VISION はノイズの範囲で変わらない。走者は WIDE の重さの主因ではなかった。代わりに、読み込み後のネイティブの空きが 70,808 → 51,004 B（Shiki の heap 48 KiB を開くため）、ゲストが 90,064 → 94,424 B（+4.4 KB）に減った。最初の焼き込みでは組み込み表がリンクされず（`libmain.a` の weak 既定が勝った）、`register('derby.run')` が全て失敗した。host はオブジェクトを直にリンクするので通っていた。
+
 ## FINISH の効果（ダストと手描き風の帯、2026-10-02）
 
 FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中間の粒・手前のボケ）と上下 3 本ずつの手描き風の帯を描く。HEAD ON（`cm === 6`）では奥と中間の層を馬の前に描く（馬が手前に来る）。設計・費用・画と GIF は [docs/apps/derby-finish-fx.md](../../docs/apps/derby-finish-fx.md)。
