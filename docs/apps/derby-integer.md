@@ -28,6 +28,17 @@ opprof を `0050cb4`（表示の sin を Shiki へ移した版）で回した（
 
 全命令のおよそ 10% が float の算術・比較。割り算は 1 ターンに約 100 回。（`oval_w2_mid_w100` の構成は harness の判定が FAIL を返したが、計数には影響しない。計装の構成の既知の扱いで、ここでは直さない。）
 
+ネイティブの境目に渡る double（host の harness の `__ftag`、全ゲーム 14,563 フレーム、`0050cb4`）:
+
+| 境目 | 呼び出し | double を含む呼び出し | double の数 |
+| --- | --- | --- | --- |
+| `H.draw`（旧 API の plan） | 91,020 | 80,876 | 495,273 |
+| `SK.drawMany`（`Float64Array`） | 13,370 | 13,370 | 13,370（配列） |
+| `pocket.derby.*` | 17,993 | 17,978 | 39,157 |
+| `setRect` | 3,817 | 8 | 15 |
+
+静的検査（`derby_int_lint.mjs`）: 256 件（watch 57、view 84、prog 43、scene 38、pan 20、play 13、demo 1）。
+
 ## 3. double の発生源（今のコード）
 
 | 所 | 何が double か | 理由 |

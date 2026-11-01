@@ -609,6 +609,43 @@ static JSValue js_cap_sunreg(JSContext *c,JSValueConst self,int argc,JSValueCons
     free(s->plan);s->plan=NULL;live_plans--;unregistered++;
     return JS_UNDEFINED;
 }
+/* Doubles handed to the native surfaces (docs/apps/derby-integer.md sec.1,
+ * condition 3): a float-tagged number among a call's arguments, one level
+ * into arrays, and a Float32/Float64Array argument, counted by surface. */
+enum{FT_DRAW,FT_SDRAW,FT_DERBY,FT_REF,FT_N};
+static const char *const FT_NAME[FT_N]={"draw","drawMany","derby","ref"};
+static unsigned long ft_calls[FT_N],ft_floats[FT_N],ft_bad_calls[FT_N];
+static char ft_first[FT_N][96];
+static unsigned ft_value(JSContext *c,JSValueConst v,int depth){
+    if(JS_TAG_IS_FLOAT64(JS_VALUE_GET_TAG(v)))return 1;
+    if(!JS_IsObject(v))return 0;
+    const JSTypedArrayEnum t=JS_GetTypedArrayType(v);
+    if(t==JS_TYPED_ARRAY_FLOAT64||t==JS_TYPED_ARRAY_FLOAT32)return 1;
+    if(depth||!JS_IsArray(v))return 0;
+    int64_t n=0;
+    JSValue len=JS_GetPropertyStr(c,v,"length");
+    JS_ToInt64(c,&n,len);JS_FreeValue(c,len);
+    unsigned f=0;
+    for(int64_t i=0;i<n&&i<256;i++){JSValue e=JS_GetPropertyUint32(c,v,(uint32_t)i);f+=ft_value(c,e,1);JS_FreeValue(c,e);}
+    return f;
+}
+/* __ftag(kind, name, args): args is the call's arguments object or an array. */
+static JSValue js_ftag(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    int32_t k=0;
+    if(argc<3||JS_ToInt32(c,&k,argv[0])||k<0||k>=FT_N)return JS_UNDEFINED;
+    int64_t n=0;
+    JSValue len=JS_GetPropertyStr(c,argv[2],"length");
+    JS_ToInt64(c,&n,len);JS_FreeValue(c,len);
+    unsigned f=0;
+    for(int64_t i=0;i<n&&i<16;i++){JSValue e=JS_GetPropertyUint32(c,argv[2],(uint32_t)i);f+=ft_value(c,e,0);JS_FreeValue(c,e);}
+    ft_calls[k]++;
+    if(f){
+        ft_floats[k]+=f;
+        if(!ft_bad_calls[k]++){const char *s=JS_ToCString(c,argv[1]);snprintf(ft_first[k],sizeof ft_first[k],"%s",s?s:"?");JS_FreeCString(c,s);}
+    }
+    return JS_UNDEFINED;
+}
 static JSValue js_cap_sdraw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;
     int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
@@ -1072,14 +1109,14 @@ static const char PRELUDE[]=
      * numeric input arguments[8]. */
     "P.draw=function(h,i){try{D.apply(P,arguments)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify([].slice.call(arguments,1)));throw e}"
     "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&(Array.isArray(i)?i[7]:arguments[8])===10565?3:"
-    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,t,t>2?pf():0,arguments)};"
+    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__ftag(0,L?Object.keys(L).find(k=>L[k]===h):'?',arguments);__draw(h,t,t>2?pf():0,arguments)};"
     "P.commit=function(){C.call(P);__commit(pf())};"
     /* pocket.kasane.shiki (the runners, HEAD ON's horses): register by name,
      * and each drawMany entry into the oracle as one draw (__sdraw). */
     "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
     "S.register=function(n){const h=SR.call(S,n);__sreg(h,n);return h};"
     "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
-    "S.drawMany=function(H,I,s){SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)))};})();"
+    "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)))};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
      * keeps a clip), with their last rect and visibility. */
@@ -1087,7 +1124,7 @@ static const char PRELUDE[]=
     "(function(){const K=kasane,RP=K.replace,PA=K.patch;"
     "function ref(r){const p=Object.getPrototypeOf(r);if(p.__w)return;p.__w=1;const sr=p.setRect,sv=p.setVisible,sc=p.setClip;"
     "p.setClip=function(t,b){if(!b[0]&&!b[1]&&b[2]===240&&b[3]===135&&!this.__o){this.__o=1;this.__v=true;this.__r=null;__ov.push(this)}return sc.call(this,t,b)};"
-    "p.setRect=function(t,b){if(this.__o)this.__r=b.slice();return sr.call(this,t,b)};"
+    "p.setRect=function(t,b){__ftag(3,'setRect',[b]);if(this.__o)this.__r=b.slice();return sr.call(this,t,b)};"
     "p.setVisible=function(t,v){if(this.__o)this.__v=v;return sv.call(this,t,v)}}"
     "function wrap(t){const p=Object.getPrototypeOf(t);if(p.__w)return;p.__w=1;"
     "for(const n of ['image','rect','text']){const f=p[n];p[n]=function(sp){const r=f.call(this,sp);__refs++;ref(r);return r}}}"
@@ -1095,7 +1132,7 @@ static const char PRELUDE[]=
     "K.patch=function(f){return PA.call(K,t=>{wrap(t);return f(t)})};})();"
     "globalThis.__turn=0;globalThis.__now=0;globalThis.__sets=0;globalThis.__cues=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:__race}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:globalThis.__pd,time:{now:()=>__now},"
+    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:(()=>{const d=globalThis.__pd,o={};for(const n of Object.getOwnPropertyNames(d))o[n]=typeof d[n]==='function'?function(){__ftag(2,n,arguments);return d[n].apply(d,arguments)}:d[n];return o})(),time:{now:()=>__now},"
     /* The device samples the native heap at the start of a turn, so while the
      * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
@@ -1149,7 +1186,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,2},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,2},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1381,6 +1418,9 @@ int main(int argc,char **argv){
     printf("\npanning units: frames %u, f %.0f..%.0f, the screen in view %u; Newton: %lu points in %u draws, "
            "max error %.4f px (f %.0f) against the exact projection, %.4f px for points on the panel\n",pan_frames,
            pan_frames?pan_f_lo:0,pan_f_hi,pan_face_frames,newton_points,newton_draws,newton_max,newton_max_f,newton_screen);
+    for(unsigned k=0;k<FT_N;k++)
+        printf("boundary %s: %lu calls, %lu with doubles (%lu doubles)%s%s\n",FT_NAME[k],ft_calls[k],ft_bad_calls[k],
+               ft_floats[k],ft_bad_calls[k]?", first: ":"",ft_first[k]);
     printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u, shiki draws %u\n",
            registered,unregistered,live_max,frame_reg_max,shiki_draws);
     printf("frames %u (procedural frames checked %u): exceptions=%u bad_present=%u failures=%u tones=%u\n",
