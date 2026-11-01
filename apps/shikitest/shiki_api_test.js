@@ -101,8 +101,10 @@ globalThis.shikiApiTest = function (pocket, log) {
   S.beginFrame(0);
   S.drawMany(new Uint32Array([put, put]), new Float64Array([1.5, 2.25]), 1);
   ok('many real', box[0] === 2.25 * 65536);
-  S.drawMany(new Uint32Array([put]), new Int32Array([98304]), 1);
-  ok('many fixed', box[0] === 98304);
+  S.drawMany(new Uint32Array([put]), new Float64Array([1.5]), 1);
+  const viaReal = box[0];
+  S.drawMany(new Uint32Array([put]), new Int32Array([1.5 * 65536]), 1);
+  ok('many fixed', box[0] === viaReal);
   S.draw(put, 0.5);
   ok('many = draw', box[0] === 32768);
   throws('many length', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put, put]), new Float64Array([1]), 1));
@@ -110,6 +112,17 @@ globalThis.shikiApiTest = function (pocket, log) {
   throws('many type', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put]), new Float32Array([1]), 1));
   S.beginFrame(0);
   throws('many stale', 'CLOSED', () => S.drawMany(new Uint32Array([put, 0x3fffffff]), new Float64Array([1, 1]), 1));
+  S.beginFrame(0);
+  throws('many range', 'CLOSED', () => S.drawMany(new Uint32Array([0x80000000]), null, 0));
+  S.drawMany(new Uint32Array(0), null, 0);
+  // Inputs read at each draw's start: a window as inputs sees the earlier
+  // draw's PUT (records 2: both get input + 1).
+  const two = S.data({type: 'i32', q: 0, records: 2, record: 1});
+  const inc = S.register(asm([[2, 0, 1, 1]], [[0, 1, 0, 0, 1], [23, 0, 0, 0], [1, 0, 0], [2, 0, 0, 1], [25, 0, 0, 0, 0, 1], [6]], [0]), [], {data: [two]});
+  two[0] = 5;
+  S.drawMany(new Uint32Array([inc, inc]), two.subarray(0, 2), 1);
+  ok('many alias', two[0] === 7 && two[1] === 7);
+  S.unregister(inc); S.release(two);
   S.beginFrame(0);
   let at = -1;
   try { S.drawMany(new Uint32Array([put, put, put]), new Float64Array([1, NaN, 1]), 1); } catch (e) { at = e.index; }

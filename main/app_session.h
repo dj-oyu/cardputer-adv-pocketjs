@@ -124,6 +124,10 @@ void app_request_stop(void);
 // guest's own handler had been dead since the first of them. NULL restores the
 // session watchdog (stop requested, or the 250 ms deadline).
 void app_vm_watchdog(int (*fn)(void *), void *opaque);
+// What that predicate answers now: native code that runs many units of work
+// in one call from the guest (kasane.shiki.drawMany, spec sec.9.4) asks it
+// between units, because the guest's own check does not run until it returns.
+bool app_vm_interrupt_due(void);
 // Close any parked bytecode chain before entering a shutdown hook.
 void app_vm_prepare_stop(void);
 void app_report(void);

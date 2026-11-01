@@ -353,7 +353,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 | `maxSurfaces` | 2 |
 | `loopDepth` | 8 |
 | `maxRecords`（1 領域） | 65,535 |
-| `maxDrawsPerCall`（`drawMany` 1 回の draw の数、v1.5） | 256 |
+| `maxDrawsPerCall`（`drawMany` 1 回の draw の数の上限、v1.5。止められない時間は draw の間の割り込みの検査が抑える） | 256 |
 
 `maxRecords` は 1 回の draw で回し切れる件数ではない。`EACH` は 1 件ごとに本体と `END` のステップを使うので、1 回の draw で回せるのは約 `maxSteps ÷ (本体の命令の数 + 1)` 件。
 
@@ -397,10 +397,12 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 
 **`drawMany(handles, inputs, stride)`（v1.5）**: 複数の draw を 1 回の呼び出しで行う。
 
-- 引数: `handles` は `Uint32Array`（Shiki の handle を描く順に）、`stride` は 1 回の draw の入力の数（0〜8 の整数）、`inputs` は `handles.length × stride` 個の要素を持つ `Float64Array` か `Int32Array`（draw `i` の入力は `inputs[i·stride .. i·stride + stride − 1]`）。`stride = 0` なら `inputs` は読まない。
-- 意味: `Float64Array` なら、`i = 0, 1, …` の順に `draw(handles[i], inputs[i·stride], …, inputs[i·stride + stride − 1])` を呼ぶのと同じ（入力の数え方・変換・誤りを含む）。`Int32Array` なら、各値を §2.4 の変換の結果として読む（入力の Q 形式の `fixed`。変換が無いので `BADINPUT` にあたる誤りも無い）。式が宣言した入力より `stride` が大きければ残りは捨て、小さければ足りない分は 0（§4.8 の 7 と同じ）。
-- 誤り: 引数の形（型付き配列でない、型が違う、`stride` が 0〜8 の外、`inputs` の長さが合わない、`detach` された配列）は、どの draw も行わずに `INVALID_ARGUMENT`。`handles.length` が `maxDrawsPerCall` を超えれば、どの draw も行わずに `LIMIT_EXCEEDED`。draw が失敗したら、その draw の `draw()` と同じ誤りを、**何番目の draw か（0 から）を `index` プロパティに付けて**投げ、残りの draw は行わない。フレームの扱いは `draw()` の失敗と同じ（そのフレームは捨てられる）。それより前の draw がデータ領域に書いた値は残る（§5.3 の 3）。
-- `maxDrawsPerCall` を設ける理由: `drawMany` はネイティブの中で回り、その間はゲストの割り込みの検査が走らない。止められない時間を「256 回 × 1 回の draw の上限（§4.8）」に抑える。
+- 引数: `handles` は `Uint32Array`（Shiki の handle を描く順に）、`stride` は 1 回の draw の入力の数（0〜8 の整数）、`inputs` は `handles.length × stride` 個の要素を持つ `Float64Array` か `Int32Array`（draw `i` の入力は `inputs[i·stride .. i·stride + stride − 1]`）。`stride = 0` なら `inputs` は**読まず、検査もしない**（`null` でよい）。`subarray` などオフセットの付いた view でよく、同じ配列を別の呼び出しで使い回してよい。
+- 意味: draw `i` は、`handles[i]` の式を、次の入力で実行する。`Float64Array` なら JS の数として §2.4 で変換する（`draw()` と同じ変換。有限でない値は §4.8 の 7 の誤り）。`Int32Array` なら、各値を **`handles[i]` の式が宣言した、その位置の入力の Q 形式の `fixed`** として読み、変換しない（同じ位置でも handle ごとに Q 形式が違いうる。換算は JS の責任）。式が宣言した入力より `stride` が大きければ残りは捨て、小さければ足りない分は 0（§4.8 の 7）。入力の変換と実行は、同じ入力で `draw()` を呼んだときと同じ。
+- 読む時: draw `i` の handle と入力は、**draw `i` の始めに**読む。したがって `handles`・`inputs` がデータ領域の窓（またはその ArrayBuffer の上の view）なら、前の draw の `PUT` の書き込みが後の draw の handle と入力に映る。呼び出しの途中で JS は動かないので、配列の長さと detach の状態は始めに一度だけ検査する。
+- 検査の順と誤り（どれも、どの draw も行わずに投げる）: `handles` が `Uint32Array` でない、`stride` が 0〜8 の整数でない → `INVALID_ARGUMENT`。`handles.length` が `maxDrawsPerCall` を超える → `LIMIT_EXCEEDED`。`stride ≥ 1` で `inputs` が `Float64Array`・`Int32Array` でない、長さが `handles.length × stride` でない、detach されている → `INVALID_ARGUMENT`。`handles.length = 0` なら何もせず戻る（`beginFrame` が無くても誤りにしない）。
+- draw の誤り: draw `i` の誤りは、`draw()` と同じ `PocketError`（`code`・`operation` `"kasane.shiki.draw"`・`retryable`・`outcome`）に、**何番目の draw か（0 から）を読み取り専用の `index` プロパティで付けて**投げ、残りの draw は行わない（`index` は common-api §4 の、面が足すプロパティ）。`outcome` は失敗した draw 自身を指す。`handles[i]` が登録された Shiki の handle でない（0、別の種類の handle、2^31 以上を含む）なら `CLOSED`（`draw()` は範囲外の値を `INVALID_ARGUMENT` にするので、ここは `draw()` と違う）。フレームの扱いは `draw()` の失敗と同じで、そのフレームは捨てられる（前の draw の線分も）。前の draw がデータ領域に書いた値は残る（§5.3 の 3）。誤りがオブジェクトでない（ゲストのメモリが尽きた例外など）か、`index` を付けられなかった場合、`index` は無い。
+- 割り込み: draw と draw の間で、セッションの監視（停止の要求、ターンの期限。ゲストの割り込みの検査と同じもの）を確かめる。止めるべきなら、残りの draw を行わず、ゲストの割り込みと同じ**捕まえられない誤り**で止める。`drawMany` はネイティブの中で回り、その間はゲストの割り込みの検査が走らないため。止められない時間は draw 1 回分（最大 `maxSteps` のステップ、推定 3〜4.5 ms、未測定）。`maxDrawsPerCall`（256）は 1 回の呼び出しの長さの上限。
 - 型付き配列にする理由（実測、[shiki-bundle.md](shiki-bundle.md) §3・§6）: JS からネイティブを 1 回呼ぶ費用は 約 1,200 サイクル、配列の要素の読み取りは 1 つ 約 400 サイクル。型付き配列ならポインタを 1 回取り、入力は 1 つずつのメモリの読み出しになる。入力 8 の draw は、1 回ずつ 19.5 µs、`Float64Array` で 7.7 µs、`Int32Array` で 2.5 µs。
 
 ## 10. 検証の要件
@@ -410,7 +412,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 2. **PIE**: PIE へ下ろした列は、同じ入力でスカラーの経路とビット単位で一致しなければならない（`N` が 8 の倍数でない件数、§8.4 の 3 の境界の件数を含む）。`.H` の各命令について、`QACC`＋`SRCMB` の丸めと飽和が §2.3 の定義どおりであることを**実機で**確かめる（境界の値: ±2^15、積の符号、`s` = 0・15・31）。
 3. **捕獲した入力**: DERBY・MEGADEMO・BIG WAVE の捕獲した入力（データ領域の中身を含む）とランダムな入力で、参照実装と C が一致すること、および double で計算した意図の座標との誤差を記録すること（[shiki.md](shiki.md) §5.5 の形）。
 4. **寿命**: 外部メモリの窓に対して `transfer`・`transferToFixedLength`・`transferToImmutable`（長さ 0・同じ・違う）と `resize` が `TypeError` になり、区画が realloc されないこと。`release`・`unregister`・`app_stop()` のあらゆる順序で、解放が 1 回だけ起き、解放後の区画に触らないこと（ASan の host 試験）。
-5. **`drawMany`（v1.5）**: `Float64Array` の結果（線分・データ領域の書き込み・誤りとその `index`）が、同じ入力で `draw()` を順に呼んだときと一致すること。`Int32Array` の結果が、§2.4 の変換の結果を渡した `Float64Array` の場合と一致すること。引数の誤りでは draw を 1 つも行わないこと。
+5. **`drawMany`（v1.5）**: `Float64Array` の結果（線分・データ領域の書き込み・誤りとその `index`）が、同じ入力で `draw()` を順に呼んだときと一致すること。`Int32Array` の結果が、§2.4 の変換の結果を `Float64Array` で渡した場合と一致すること（直値ではなく、変換と比べる）。引数の誤りでは draw を 1 つも行わないこと。登録されていない handle（範囲外の値を含む）が `CLOSED` になること。`inputs` がデータ領域の窓で、前の draw の `PUT` が後の draw の入力に映ること。割り込み（停止の要求、期限）で残りの draw が行われないこと。**実機で**、最悪の draw（`maxSteps`）の時間と、`drawMany` 1 回の割り込みの遅れを測ること。
 6. **実機**: 実機でしか起きない不具合（評価中の `null`、strict aliasing など）がこのプロジェクトにはあるので、host だけで済んだことにしない。
 
 ## 11. 旧 API からの移行
@@ -436,4 +438,4 @@ v1.3 で決めたもの: データ領域の実行の細部（§5.4）、`EACH` �
 
 v1.4 で決めたもの: データ領域の並びは欄ごとの面だけ（§5.1。2026-11-01 ユーザー決定）、`shiki.data()` の形と `shiki.fields()`（§9.3）。
 
-v1.5 で決めるもの（草案）: `drawMany` の形と誤り（§9.4）、`maxDrawsPerCall` の値（§9.1）。関連の決定（2026-11-01、ユーザー）: JS の `Math.sin` などは遅くても正確なまま、速さの要る三角関数は Shiki の `SIN`（精度は Q16）で計算する（[issue #112](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/112)）。
+v1.5 で決めるもの（草案）: `drawMany` の形と誤り（§9.4）、`maxDrawsPerCall` の値（§9.1）。SLOW の独立レビュー（`674c3c9`、重大 2・中 5・軽微 4）を反映: 割り込みの検査を draw の間に入れ `maxDrawsPerCall` は長さの上限に（重大 R1）、`index` を common-api §4 の面が足すプロパティとして定義（R2）、`stride = 0`・handle の範囲・読む時（別名）・Int32Array の Q 形式・検査の順を明記（中 M1〜M5）。関連の決定（2026-11-01、ユーザー）: JS の `Math.sin` などは遅くても正確なまま、速さの要る三角関数は Shiki の `SIN`（精度は Q16）で計算する（[issue #112](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/112)）。
