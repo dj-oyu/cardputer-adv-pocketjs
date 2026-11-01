@@ -113,3 +113,16 @@ Blenderは限定探索で未発見だが、不存在とは断定していない�
 高自由度の狐sourceも未制作で、[制作工程案の§11](../api/ayatsuri-asset-pipeline-draft.md)から進める。
 実Blender export損失、狐の造形、morph、clip、一般的な交差形状、実機RAM/画質/FPSは未受入。
 人工sourceで全gateが通っても製品既定へは自動採用しない。
+
+## 独立照明・証拠保護の後続修正
+
+参照照明は要求されたlight 6要素とcameraから独立計算するview方向を使う。
+native evaluatedLightingをそのままsource参照へ流用しない。evaluatedLighting自体は
+別gate（最大絶対差1e-6）で比較し、producerが保存する要求camera/light/rootPoseと
+metadataのechoも照合する。別光で描かれた実C画像に本来の要求光を与える負例では、
+照明と最終色の両gateが失敗し、geometry/depth/correspondenceは維持されることを確認する。
+
+単独oracle CLIも新規directoryを排他的に予約する。既存oracle.json/PNGを上書きせず、
+失敗後の予約先を次実行の成功成果物に見せかけない。負例用readerは本体loadNativeを共用し、
+sourceSha256欠落・空・staleを含む同じprovenance規則を適用する。
+これらの回帰はtest_oracle_cli.cjsをCIから明示実行し、freshな実C studyも使用する。

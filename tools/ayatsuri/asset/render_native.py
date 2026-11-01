@@ -89,7 +89,7 @@ def main():
                 if (output / name).stat().st_size != 240 * 135 * 2:
                     raise RuntimeError('unexpected pixel buffer length')
             png565(output / 'pixels.u16le', output / 'pixels.png')
-            report.update(inputSha256=input_hash, compiler=cc,
+            report.update(inputSha256=input_hash, requestedParameters=dict(camera=args.camera,light=args.light,rootPose=root,rootPoseApplied=args.root_pose is not None), compiler=cc,
                           compilerVersion=subprocess.check_output([cc, '--version'], text=True).splitlines()[0],
                           flags=flags, sourceSha256=before,
                           sourcesUnchanged=before == {str(p.relative_to(ROOT)): sha(p) for p in inputs},

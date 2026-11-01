@@ -56,12 +56,14 @@ function sameFeature(a,b,point,epsilon){
 }
 function compare({sourceIR,compileReport,metadata,pixels,tags,coverage,thresholds,rootPose}){
   check(pixels.length===N&&tags.length===N&&coverage.length===N,'IMAGE_SIZE');
-  const th={depthTieEpsilonSource:1e-6,...thresholds};for(const key of ['minIoU','maxColorMean','maxColorP95','maxColorMax','maxDepthSource','maxComponentMismatch','maxCorrespondenceDistanceSource','depthTieEpsilonSource'])check(Number.isFinite(th[key])&&th[key]>=0,'INVALID_THRESHOLDS');
+  const th={depthTieEpsilonSource:1e-6,maxLightingError:1e-6,...thresholds};for(const key of ['minIoU','maxColorMean','maxColorP95','maxColorMax','maxDepthSource','maxComponentMismatch','maxCorrespondenceDistanceSource','depthTieEpsilonSource','maxLightingError'])check(Number.isFinite(th[key])&&th[key]>=0,'INVALID_THRESHOLDS');
   // The probe prints nine significant decimal digits: restore the actual F32
   // values before exact native-edge tests, rather than using decimal doubles.
-  const camera=metadata.camera?.map(Math.fround),lighting=metadata.evaluatedLighting?.map(Math.fround),pose=(rootPose||metadata.rootPose||[0,0,0,0,0,0,1,1,1]).map(Math.fround),profile=compileReport.profile;
-  check(camera?.length===9&&lighting?.length===9&&pose?.length===9,'METADATA_PARAMETERS');
-  check([...camera,...lighting,...pose].every(Number.isFinite),'METADATA_NONFINITE');
+  const camera=metadata.camera?.map(Math.fround),requestedLight=metadata.light?.map(Math.fround),evaluatedLighting=metadata.evaluatedLighting?.map(Math.fround),pose=(rootPose||metadata.rootPose||[0,0,0,0,0,0,1,1,1]).map(Math.fround),profile=compileReport.profile;
+  check(camera?.length===9&&requestedLight?.length===6&&evaluatedLighting?.length===9&&pose?.length===9,'METADATA_PARAMETERS');
+  const lighting=[...requestedLight.slice(0,3),...basis(camera).f,...requestedLight.slice(3,6)];
+  const lightingMaxError=Math.max(...lighting.map((v,i)=>Math.abs(v-evaluatedLighting[i])));
+  check([...camera,...lighting,...evaluatedLighting,...pose].every(Number.isFinite),'METADATA_NONFINITE');
   check(hash(JSON.stringify(sourceIR))===compileReport.irHash,'SOURCE_IR_HASH_MISMATCH');
   const tagRecords=metadata.triangleTags||metadata.packets.flatMap((p,packetIndex)=>p.triangles.map((indices,triangleIndex)=>({tag:p.triangleTags[triangleIndex],packetIndex,nodeId:p.nodeId,triangleIndex,indices})));
   const source=sourceTriangles(sourceIR,profile,camera,lighting,pose),ref=raster(source.triangles),mappings=new Map(compileReport.correspondence.map(x=>[x.nodeId,x])),tagMap=new Map(tagRecords.map(t=>[t.tag,t]));
@@ -91,26 +93,30 @@ function compare({sourceIR,compileReport,metadata,pixels,tags,coverage,threshold
     if((wrongComponent||d>th.maxDepthSource||dist>th.maxCorrespondenceDistanceSource)&&errors.length<64)errors.push(sample);if(i%337===0&&evidence.length<64)evidence.push(sample);
   }
   const color=summary(colour),colorChannels=colourByChannel.map((values,i)=>({channel:['R5','G6','B5'][i],...summary(values)})),z=summary(depth),corr=summary(correspondence),iou=union?intersection/union:1;
-  const gates={coverage:union>0&&intersection>0&&iou>=th.minIoU,diagnosticCoverage:tagCoverageMismatch===0&&tagPixelMismatch===0&&unknownTags===0,color:colorChannels.every(c=>c.mean<=th.maxColorMean&&c.p95<=th.maxColorP95&&c.max<=th.maxColorMax),depth:z.max<=th.maxDepthSource,sourceCorrespondence:componentMismatch<=th.maxComponentMismatch&&semanticMismatch===0&&corr.max<=th.maxCorrespondenceDistanceSource};
-  const report={schema:'hone-native-image-oracle-v1',passed:Object.values(gates).every(Boolean),gates,thresholds:structuredClone(th),metrics:{pixelsCompared:intersection,iou,sourceRasterBBoxVisits:ref.visits,equivalentSourceTiePixels,tagCoverageMismatch,tagPixelMismatch,unknownTags,semanticMismatch,componentMismatch,colorLevels:color,colorChannels,depthSource:z,correspondenceSource:corr},errors,evidence,
-    scope:'F64 high-density source mapped to Hone material; native final RGB565 and diagnostic native triangle tags; no Blender/export/physical display acceptance',camera,lighting,rootPose:pose};
+  const gates={lighting:lightingMaxError<=th.maxLightingError,coverage:union>0&&intersection>0&&iou>=th.minIoU,diagnosticCoverage:tagCoverageMismatch===0&&tagPixelMismatch===0&&unknownTags===0,color:colorChannels.every(c=>c.mean<=th.maxColorMean&&c.p95<=th.maxColorP95&&c.max<=th.maxColorMax),depth:z.max<=th.maxDepthSource,sourceCorrespondence:componentMismatch<=th.maxComponentMismatch&&semanticMismatch===0&&corr.max<=th.maxCorrespondenceDistanceSource};
+  const report={schema:'hone-native-image-oracle-v1',passed:Object.values(gates).every(Boolean),gates,thresholds:structuredClone(th),metrics:{lightingMaxError,pixelsCompared:intersection,iou,sourceRasterBBoxVisits:ref.visits,equivalentSourceTiePixels,tagCoverageMismatch,tagPixelMismatch,unknownTags,semanticMismatch,componentMismatch,colorLevels:color,colorChannels,depthSource:z,correspondenceSource:corr},errors,evidence,
+    scope:'F64 high-density source mapped to Hone material; native final RGB565 and diagnostic native triangle tags; no Blender/export/physical display acceptance',camera,lighting,evaluatedLighting,rootPose:pose};
   return {report,images:{source:ref.colors,native:pixels,depth:depthImage,diff:new Uint16Array(Array.from(pixels,(p,i)=>ref.ids[i]>=0&&coverage[i]?Math.abs(p-ref.colors[i])?0xf800:0:ref.ids[i]>=0||coverage[i]?0x001f:0))}};
 }
 function png(file,pixels){
   const crc=data=>{let v=0xffffffff;for(const b of data){v^=b;for(let j=0;j<8;j++)v=(v>>>1)^((v&1)?0xedb88320:0);}return (v^0xffffffff)>>>0;},chunk=(type,data)=>{const t=Buffer.from(type),h=Buffer.alloc(4),c=Buffer.alloc(4);h.writeUInt32BE(data.length);c.writeUInt32BE(crc(Buffer.concat([t,data])));return Buffer.concat([h,t,data,c]);};
-  const raw=Buffer.alloc(H*(1+W*3));for(let y=0;y<H;y++)for(let x=0;x<W;x++){const c=channels(pixels[y*W+x]),at=y*(1+W*3)+1+x*3;raw[at]=Math.round(c[0]*255/31);raw[at+1]=Math.round(c[1]*255/63);raw[at+2]=Math.round(c[2]*255/31);}const header=Buffer.alloc(13);header.writeUInt32BE(W);header.writeUInt32BE(H,4);header[8]=8;header[9]=2;fs.writeFileSync(file,Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',zlib.deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]));
+  const raw=Buffer.alloc(H*(1+W*3));for(let y=0;y<H;y++)for(let x=0;x<W;x++){const c=channels(pixels[y*W+x]),at=y*(1+W*3)+1+x*3;raw[at]=Math.round(c[0]*255/31);raw[at+1]=Math.round(c[1]*255/63);raw[at+2]=Math.round(c[2]*255/31);}const header=Buffer.alloc(13);header.writeUInt32BE(W);header.writeUInt32BE(H,4);header[8]=8;header[9]=2;fs.writeFileSync(file,Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',zlib.deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]),{flag:'wx'});
 }
 function loadNative(directory,expectedHash){
   const json=file=>JSON.parse(readBounded(path.join(directory,file),16*1024*1024).toString('utf8')),proof=json('render-report.json');
   check(proof.passed&&proof.inputUnchanged&&proof.sourcesUnchanged&&proof.inputSha256===expectedHash,'NATIVE_PROVENANCE');
   const root=path.resolve(__dirname,'../../..'),required=['tools/ayatsuri/asset/render_native.c','main/ayatsuri/ayatsuri_model.c','main/ayatsuri/ayatsuri_model.h','main/ayatsuri/ayatsuri_transform.h','main/ayatsuri/ayatsuri_shade.h','main/ayatsuri/ayatsuri_visibility.c','main/ayatsuri/ayatsuri_visibility.h','main/ui/kasane/ksn_procedural.c','main/ui/kasane/ksn_procedural.h'];
   for(const file of required)check(proof.sourceSha256?.[file]===hash(readBounded(path.join(root,file),2*1024*1024)),'NATIVE_SOURCE_STALE');
-  const files={};for(const name of ['metadata.json','pixels.u16le','coverage.u16le','visible-triangles.u16le']){const b=readBounded(path.join(directory,name),name==='metadata.json'?16*1024*1024:N*2);check(hash(b)===proof.outputs[name],'NATIVE_OUTPUT_HASH');files[name]=b;}
+  const files={};for(const name of ['metadata.json','pixels.u16le','coverage.u16le','visible-triangles.u16le']){const b=readBounded(path.join(directory,name),name==='metadata.json'?16*1024*1024:N*2);check(hash(b)===proof.outputs?.[name],'NATIVE_OUTPUT_HASH');files[name]=b;}
   const u16=name=>{const b=files[name];check(b.length===N*2,'IMAGE_SIZE');return Uint16Array.from({length:N},(_,i)=>b.readUInt16LE(i*2));};
-  return {metadata:JSON.parse(files['metadata.json'].toString('utf8')),pixels:u16('pixels.u16le'),tags:u16('visible-triangles.u16le'),coverage:u16('coverage.u16le')};
+  const metadata=JSON.parse(files['metadata.json'].toString('utf8'));check(metadata.width===W&&metadata.height===H&&metadata.pixelFormat==='RGB565_U16LE','NATIVE_IMAGE_FORMAT');
+  const requested=proof.requestedParameters;check(requested&&typeof requested.rootPoseApplied==='boolean','NATIVE_REQUESTED_PARAMETERS');
+  const same=(a,b,n)=>Array.isArray(a)&&Array.isArray(b)&&a.length===n&&b.length===n&&a.every((v,i)=>Number.isFinite(v)&&Number.isFinite(b[i])&&Math.fround(v)===Math.fround(b[i]));
+  check(same(metadata.camera,requested.camera,9)&&same(metadata.light,requested.light,6)&&same(metadata.rootPose,requested.rootPose,9)&&metadata.rootPoseApplied===requested.rootPoseApplied,'NATIVE_PARAMETER_ECHO');
+  return {metadata,pixels:u16('pixels.u16le'),tags:u16('visible-triangles.u16le'),coverage:u16('coverage.u16le'),proof};
 }
 module.exports={compare,sourceTriangles,raster,shade,png,basis,loadNative};
-if(require.main===module){try{const [irFile,reportFile,nativeDir,thresholdFile,outDir]=process.argv.slice(2);check(outDir,'USAGE_IR_REPORT_NATIVE_THRESHOLDS_OUTPUT');const read=file=>JSON.parse(readBounded(file,64*1024*1024).toString('utf8')),compileReport=read(reportFile);
+if(require.main===module){try{const [irFile,reportFile,nativeDir,thresholdFile,outDir]=process.argv.slice(2);check(outDir,'USAGE_IR_REPORT_NATIVE_THRESHOLDS_OUTPUT');fs.mkdirSync(path.dirname(path.resolve(outDir)),{recursive:true});fs.mkdirSync(outDir,{recursive:false});const read=file=>JSON.parse(readBounded(file,64*1024*1024).toString('utf8')),compileReport=read(reportFile);
   const result=compare({sourceIR:read(irFile),compileReport,...loadNative(nativeDir,compileReport.binSha256),thresholds:read(thresholdFile)});
-  fs.mkdirSync(outDir,{recursive:true});fs.writeFileSync(path.join(outDir,'oracle.json'),JSON.stringify(result.report,null,2)+'\n');for(const [name,data] of Object.entries(result.images))png(path.join(outDir,name+'.png'),data);console.log(JSON.stringify(result.report));if(!result.report.passed)process.exitCode=1;
+  fs.writeFileSync(path.join(outDir,'oracle.json'),JSON.stringify(result.report,null,2)+'\n',{flag:'wx'});for(const [name,data] of Object.entries(result.images))png(path.join(outDir,name+'.png'),data);console.log(JSON.stringify(result.report));if(!result.report.passed)process.exitCode=1;
 }catch(e){console.error(JSON.stringify({passed:false,error:e.message}));process.exitCode=1;}}

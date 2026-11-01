@@ -131,26 +131,8 @@ function writeFixtures(directory,fixture=overlapFixtures()){
 
 const PIXELS=240*135;
 const THRESHOLDS=Object.freeze({minIoU:.97,maxColorMean:.5,maxColorP95:1,maxColorMax:2,maxDepthSource:.01,maxComponentMismatch:0,maxCorrespondenceDistanceSource:.01,depthTieEpsilonSource:1e-6});
-function readBounded(file,limit,exact=false){
-  const fd=fs.openSync(file,'r');try{
-    const before=fs.fstatSync(fd);assert(before.isFile()&&before.size<=limit&&(!exact||before.size===limit),'ARTIFACT_SIZE: '+file);
-    const data=Buffer.alloc(before.size);let offset=0;
-    while(offset<data.length){const n=fs.readSync(fd,data,offset,data.length-offset,null);assert(n>0,'ARTIFACT_TRUNCATED: '+file);offset+=n;}
-    assert.equal(fs.readSync(fd,Buffer.alloc(1),0,1,null),0,'ARTIFACT_GREW: '+file);
-    const after=fs.fstatSync(fd);assert.equal(after.size,before.size);assert.equal(after.mtimeMs,before.mtimeMs);return data;
-  }finally{fs.closeSync(fd);}
-}
 function readNativeArtifacts(directory,expectedBin){
-  const raw={};for(const name of ['metadata.json','pixels.u16le','visible-triangles.u16le','coverage.u16le'])
-    raw[name]=readBounded(path.join(directory,name),name.endsWith('.json')?4*1024*1024:PIXELS*2,!name.endsWith('.json'));
-  const proof=JSON.parse(readBounded(path.join(directory,'render-report.json'),2*1024*1024).toString('utf8'));
-  assert.equal(proof.passed,true,'NATIVE_RENDER_FAILED');assert.equal(proof.sourcesUnchanged,true);assert.equal(proof.inputUnchanged,true);
-  assert.equal(proof.inputSha256,sha256(expectedBin),'NATIVE_MODEL_MISMATCH');
-  for(const [name,data] of Object.entries(raw))assert.equal(proof.outputs?.[name],sha256(data),'NATIVE_ARTIFACT_HASH: '+name);
-  const metadata=JSON.parse(raw['metadata.json'].toString('utf8'));
-  assert.equal(metadata.width,240);assert.equal(metadata.height,135);assert.equal(metadata.pixelFormat,'RGB565_U16LE');
-  const u16=name=>Uint16Array.from({length:PIXELS},(_,i)=>raw[name].readUInt16LE(i*2));
-  return {metadata,pixels:u16('pixels.u16le'),tags:u16('visible-triangles.u16le'),coverage:u16('coverage.u16le'),proof};
+  return require('./oracle.cjs').loadNative(directory,sha256(expectedBin));
 }
 function runNativeTests(kind,correctDirectory,reversedDirectory,outputDirectory){
   assert(['two-surfaces','same-surface'].includes(kind),'FIXTURE_KIND: two-surfaces or same-surface');
