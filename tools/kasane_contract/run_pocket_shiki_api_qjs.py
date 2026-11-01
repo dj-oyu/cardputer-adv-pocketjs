@@ -16,12 +16,16 @@ def main():
     if not cc:raise SystemExit('No host C compiler found')
     OUT.mkdir(parents=True,exist_ok=True)
     binary=OUT/'test_pocket_shiki_api_qjs'
+    # No app table here: the empty one the firmware links when no app has @shiki.
+    rom=OUT/'ksn_shiki_rom_none.c'
+    rom.write_text('#include "ksn_shiki.h"\n'
+                   'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
              *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c','ksn_proc_analysis.c','ksn_proc_plan.c',
                'ksn_proc_plan_points.c','ksn_proc_points.c','ksn_proc_points_pie.c','ksn_proc_points_dispatch.c',
                'ksn_core.c','ksn_render.c','ksn_blend_pie.c','ksn_shiki.c')),
              ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/pocket/pocket_shiki_api.c',
-             ROOT/'tools/kasane_contract/proc_native_weak.c',
+             ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_shiki_api_qjs.c']
     command=[cc,'-std=gnu11','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover',
              '-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST',

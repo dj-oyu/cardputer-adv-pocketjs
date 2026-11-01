@@ -179,10 +179,10 @@ static JSValue js_release(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 // ------------------------------------------------------------ register()
 // Built-in programs by name (sec.9.4): the apps' @shiki functions, compiled
 // at build time into a const table in flash (tools/kasane_ir/emit_shiki_rom.mjs,
-// the build's generated ksn_shiki_rom.c). Weak and empty here, for a build or
-// a host harness without one: a function rather than a weak array, so that no
-// declared size of this file's can stand for the table's.
-__attribute__((weak)) const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return NULL;}
+// the build's generated ksn_shiki_rom.c, or make_app_chunks.py's empty one).
+// No weak default here: this file and the table share libmain.a, and the
+// linker never pulls an archive member to replace a symbol already defined,
+// so a weak empty table won on the device while the host (plain objects) passed.
 
 static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
