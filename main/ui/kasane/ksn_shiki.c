@@ -3,7 +3,10 @@
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 #endif
-#if defined(__XTENSA__) && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+/* __xtensa__ (lowercase) is the compiler's own predefine: host builds that
+ * fake the target with -D__XTENSA__ (the fake-PIE runs of the pocket_proc
+ * harness) must not reach the asm below. */
+#if defined(__xtensa__) && defined(__XTENSA__) && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
 #define KSN_SHIKI_HAS_PIE 1
 #else
 #define KSN_SHIKI_HAS_PIE 0
