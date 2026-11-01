@@ -1,6 +1,7 @@
 #include "pocket_shiki.h"
 #include "pocket_api.h"
 #include "ksn_shiki.h"
+#include "ksn_shiki_bench.h"
 #include "int_latency.h"
 #include "esp_cpu.h"
 #include "esp_app_desc.h"
@@ -211,6 +212,41 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
                   (double)best/(COPIES*TURNS));
     return true;
 }
+/* After the op rows: the PIE prototype's pairs (ksn_shiki_bench.c,
+ * docs/kasane/shiki-pie.md sec.6), each a whole draw, the minimum of seven,
+ * with the segments' count and steps so a pair's rows can be checked equal.
+ * Row "empty" is one SET: the draw's fixed cost (the vm's reset and the
+ * input conversion) that every other row includes. */
+static bool pair_line(unsigned i,char *out,size_t n){
+    ksn_shiki_bench_case *c=malloc(sizeof *c);
+    int16_t *work=malloc(KSN_SHIKI_BENCH_WORK*sizeof *work);
+    ksn_shiki_plan *plan=malloc(KSN_SHIKI_PLAN_MAX);
+    ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
+    ksn_shiki_vm *vm=malloc(sizeof *vm);
+    bool ok=c&&work&&plan&&seg&&vm;
+    if(ok&&i==0){
+        static const uint8_t empty[24]={'S','K','I','1',1,0,1,0,0,0,0,0,KSN_SHIKI_SET,0,0,0,1,0,0,0,0,0,0,0};
+        memset(c,0,sizeof *c);
+        c->name="empty";
+        memcpy(c->code,empty,sizeof empty);
+        c->len=sizeof empty;
+    }else if(ok)ok=ksn_shiki_bench_build(i-1,work,c);
+    ok=ok&&ksn_shiki_register(c->code,c->len,NULL,0,c->region,c->regions,plan);
+    uint32_t best=UINT32_MAX;
+    ksn_shiki_status s=KSN_SHIKI_INVALID;
+    for(unsigned r=0;ok&&r<7;r++){
+        const uint32_t t0=esp_cpu_get_cycle_count();
+        s=ksn_shiki_draw(plan,NULL,0,vm,seg);
+        const uint32_t dt=esp_cpu_get_cycle_count()-t0;
+        if(dt<best)best=dt;
+    }
+    if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki draw %s FAILED %d",c?c->name:"?",ok?(int)s:-1);
+    else snprintf(out,n,"CB shiki draw %s cy=%lu us=%.1f steps=%u segs=%u",c->name,(unsigned long)best,
+                  best/240.0,vm->steps,vm->count);
+    free(c);free(work);free(plan);free(seg);free(vm);
+    return true;
+}
+#define PAIR_COUNT (1+ksn_shiki_bench_count())
 static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     uint32_t i=0;
@@ -222,13 +258,15 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     if(i<first)return int_latency_case(i,line,sizeof line)?JS_NewString(ctx,line):JS_NULL;
     i-=first;
     if(i<OP_COUNT&&op_case_line(&OP_CASES[i],line,sizeof line))return JS_NewString(ctx,line);
+    i-=(uint32_t)OP_COUNT;
+    if(i<PAIR_COUNT&&pair_line(i,line,sizeof line))return JS_NewString(ctx,line);
     return JS_NULL;
 }
 
 /* benchCount(): how many lines bench() gives, so the app can show progress. */
 static JSValue js_bench_count(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;
-    return JS_NewUint32(ctx,(uint32_t)(int_latency_count()+OP_COUNT));
+    return JS_NewUint32(ctx,(uint32_t)(int_latency_count()+OP_COUNT+PAIR_COUNT));
 }
 
 /* benchBuild(): "<version> <first 8 bytes of the ELF's SHA-256 in hex>". The

@@ -91,7 +91,22 @@ static const uint8_t used[KSN_SHIKI_OPS]={
     /* a is a region number here, b of FETCH/PUT a position: check_inst(). */
     [KSN_SHIKI_EACH]=F_A|F_B|F_AUX,          [KSN_SHIKI_FETCH]=F_DST|F_A|F_B|F_IMM|F_AUX,
     [KSN_SHIKI_PUT]=F_DST|F_A|F_B|F_IMM|F_AUX,[KSN_SHIKI_LOOKUP]=F_DST|F_A|F_B|F_IMM|F_AUX,
+    /* Prototype vector instructions: dst/a/b are vector registers (0..7)
+     * unless check_inst() says a region or a scalar register. */
+    [KSN_SHIKI_VEACH]=F_A|F_B|F_AUX,
+    [KSN_SHIKI_VLOAD]=F_DST|F_A|F_B,         [KSN_SHIKI_VSTORE]=F_DST|F_A|F_B,
+    [KSN_SHIKI_VSPLAT]=F_DST|F_A,            [KSN_SHIKI_VIOTA]=F_DST,
+    [KSN_SHIKI_VADD]=F_DST|F_A|F_B,          [KSN_SHIKI_VSUB]=F_DST|F_A|F_B,
+    [KSN_SHIKI_VMIN]=F_DST|F_A|F_B,          [KSN_SHIKI_VMAX]=F_DST|F_A|F_B,
+    [KSN_SHIKI_VZACC]=0,                     [KSN_SHIKI_VMAC]=F_A|F_B,
+    [KSN_SHIKI_VMACK]=F_A|F_B,               [KSN_SHIKI_VACCSET]=F_A,
+    [KSN_SHIKI_VOUT]=F_DST|F_AUX,
+    [KSN_SHIKI_EMIT_POINTS]=F_DST|F_A|F_B|F_IMM|F_AUX,
+    [KSN_SHIKI_EMIT_LINES]=F_DST|F_A|F_B|F_IMM|F_AUX,
 };
+/* Ops inside a VEACH body (and only there). */
+static bool vec_op(uint8_t op){return op>=KSN_SHIKI_VLOAD&&op<=KSN_SHIKI_VOUT;}
+static bool emit_op(uint8_t op){return op==KSN_SHIKI_EMIT_POINTS||op==KSN_SHIKI_EMIT_LINES;}
 /* The region table as registration reads it (sec.3). */
 typedef struct { uint8_t type,q,k_rec,write; } region_decl;
 /* imm fields that take an int (sec.3): a patched argument must be Q0. */
@@ -101,7 +116,8 @@ static bool int_imm(uint8_t op){
            op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_CUBIC||op==KSN_SHIKI_LINE_PATTERN;
 }
 static bool region_op(uint8_t op){
-    return op>=KSN_SHIKI_EACH&&op<=KSN_SHIKI_LOOKUP;
+    return (op>=KSN_SHIKI_EACH&&op<=KSN_SHIKI_LOOKUP)||op==KSN_SHIKI_VEACH||
+           op==KSN_SHIKI_VLOAD||op==KSN_SHIKI_VSTORE||emit_op(op);
 }
 static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl *rd,unsigned nr){
     if(i->op>=KSN_SHIKI_OPS)return false;
@@ -131,6 +147,21 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl
                i->imm>=-31&&i->imm<=31;
     case KSN_SHIKI_LOOKUP:
         return rd[i->a].k_rec==1&&i->aux<=31&&i->imm>=-31&&i->imm<=31;
+    /* Prototype: vector registers 0..7, i16 regions, a field of the record. */
+    case KSN_SHIKI_VEACH: return i->aux==1||(i->aux==0&&i->b==0);
+    case KSN_SHIKI_VLOAD: case KSN_SHIKI_VSTORE:
+        if(i->op==KSN_SHIKI_VSTORE&&!rd[i->a].write)return false;
+        return i->dst<8&&rd[i->a].type==KSN_SHIKI_I16&&i->b<rd[i->a].k_rec;
+    case KSN_SHIKI_VSPLAT: return i->dst<8;
+    case KSN_SHIKI_VIOTA: return i->dst<8;
+    case KSN_SHIKI_VADD: case KSN_SHIKI_VSUB: case KSN_SHIKI_VMIN: case KSN_SHIKI_VMAX:
+        return i->dst<8&&i->a<8&&i->b<8;
+    case KSN_SHIKI_VMAC: return i->a<8&&i->b<8;
+    case KSN_SHIKI_VMACK: return i->a<8;
+    case KSN_SHIKI_VOUT: return i->dst<8&&i->aux<=63;
+    case KSN_SHIKI_EMIT_POINTS: case KSN_SHIKI_EMIT_LINES:
+        return i->dst<=1&&(i->dst||!i->b)&&rd[i->a].type==KSN_SHIKI_I16&&i->imm>=0&&i->imm<=15&&
+               rd[i->a].k_rec>=(i->op==KSN_SHIKI_EMIT_LINES?4:2);
     default: return true;
     }
 }
@@ -146,7 +177,18 @@ static bool check_loops(ksn_shiki_plan *p){
     for(unsigned pc=0;pc<p->count;pc++){
         const ksn_shiki_inst *i=&p->code[pc];
         const uint8_t op=i->op;
-        if(op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_REPEAT_REG||op==KSN_SHIKI_EACH){
+        /* Prototype: a VEACH body holds vector ops and its END only, and a
+         * vector op appears nowhere else; its frame is the VEACH's. */
+        const bool in_vec=depth&&p->code[stack[depth-1]].op==KSN_SHIKI_VEACH;
+        if(in_vec&&op!=KSN_SHIKI_END&&!vec_op(op))return false;
+        if(!in_vec&&vec_op(op))return false;
+        if(vec_op(op)){
+            p->code[pc].level=(uint8_t)(depth-1);
+            /* A lane's record exists in every region the body reads. */
+            if((op==KSN_SHIKI_VLOAD||op==KSN_SHIKI_VSTORE)&&
+               p->region[i->a].records<p->region[p->code[stack[depth-1]].a].records)return false;
+        }
+        if(op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_REPEAT_REG||op==KSN_SHIKI_EACH||op==KSN_SHIKI_VEACH){
             if(depth==KSN_SHIKI_LOOP_DEPTH)return false;
             stack[depth++]=(uint8_t)pc;
         }else if(op==KSN_SHIKI_END){
@@ -458,6 +500,112 @@ static __attribute__((noinline)) void data_op(ksn_shiki_vm *vm,const ksn_shiki_p
     for(unsigned j=0;j<m;j++)store(g,base+j,v[j]);
 }
 
+/* ---- prototype vector instructions (docs/kasane/shiki-pie.md sec.3.1)
+ * The lanes are records base..base+7 of the VEACH's block; a lane at or past
+ * the loop's N reads 0 and is never written (the masked tail, sec.3.4). */
+static int64_t sat40(int64_t v){
+    const int64_t m=(int64_t)1<<39;
+    return v<-m?-m:v>m-1?m-1:v;
+}
+typedef int16_t vlanes[8];
+static vlanes *vregs(ksn_shiki_vm *vm){
+    return (vlanes *)(((uintptr_t)vm->vraw+15u)&~(uintptr_t)15u);
+}
+static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_plan *plan,const ksn_shiki_inst *i){
+    vlanes *v=vregs(vm);
+    int64_t *acc=vm->acc;
+    const int32_t *r=vm->reg;
+    const unsigned lv=i->level;
+    const uint32_t base=(uint32_t)(vm->loop[lv].total-vm->loop[lv].remaining)*8u;
+    const uint32_t n=vm->loop[lv].n;
+    const unsigned live=n-base>=8?8u:(unsigned)(n-base);
+    switch(i->op){
+    case KSN_SHIKI_VLOAD: {
+        const ksn_shiki_bound *g=&plan->region[i->a];
+        const int16_t *d=(const int16_t *)g->data+base*g->k_rec+i->b;
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=l<live?d[l*g->k_rec]:0;
+        break;
+    }
+    case KSN_SHIKI_VSTORE: {
+        const ksn_shiki_bound *g=&plan->region[i->a];
+        int16_t *d=(int16_t *)g->data+base*g->k_rec+i->b;
+        for(unsigned l=0;l<live;l++)d[l*g->k_rec]=v[i->dst][l];
+        break;
+    }
+    case KSN_SHIKI_VSPLAT: {
+        const int16_t x=(int16_t)sat16(r[i->a]);
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=x;
+        break;
+    }
+    case KSN_SHIKI_VIOTA:
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=(int16_t)sat16((int64_t)base+l);
+        break;
+    case KSN_SHIKI_VADD:
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=(int16_t)sat16((int32_t)v[i->a][l]+v[i->b][l]);
+        break;
+    case KSN_SHIKI_VSUB:
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=(int16_t)sat16((int32_t)v[i->a][l]-v[i->b][l]);
+        break;
+    case KSN_SHIKI_VMIN:
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=v[i->a][l]<v[i->b][l]?v[i->a][l]:v[i->b][l];
+        break;
+    case KSN_SHIKI_VMAX:
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=v[i->a][l]>v[i->b][l]?v[i->a][l]:v[i->b][l];
+        break;
+    case KSN_SHIKI_VZACC:
+        for(unsigned l=0;l<8;l++)acc[l]=0;
+        break;
+    case KSN_SHIKI_VMAC:
+        for(unsigned l=0;l<8;l++)acc[l]=sat40(acc[l]+(int32_t)v[i->a][l]*v[i->b][l]);
+        break;
+    case KSN_SHIKI_VMACK: {
+        const int32_t k=sat16(r[i->b]);
+        for(unsigned l=0;l<8;l++)acc[l]=sat40(acc[l]+(int32_t)v[i->a][l]*k);
+        break;
+    }
+    case KSN_SHIKI_VACCSET:
+        for(unsigned l=0;l<8;l++)acc[l]=r[i->a];
+        break;
+    case KSN_SHIKI_VOUT:
+        for(unsigned l=0;l<8;l++){
+            acc[l]=floor_shift(acc[l],i->aux);
+            v[i->dst][l]=(int16_t)sat16(acc[l]);
+        }
+        break;
+    default: break;
+    }
+}
+/* EMIT_POINTS / EMIT_LINES: every record (or r[b] of them) of an i16 region
+ * as points (x, y) or lines (x0, y0, x1, y1) at Q imm, each coordinate to
+ * the nearest pixel (halves up), outside -480..720 INVALID. The pen is not
+ * touched. */
+static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,const ksn_shiki_plan *plan,
+                                                            ksn_proc_segment *out,const ksn_shiki_inst *i){
+    const ksn_shiki_bound *g=&plan->region[i->a];
+    uint32_t count=g->records;
+    if(i->dst){
+        const int32_t c=vm->reg[i->b];
+        if(c<0||(uint32_t)c>g->records)return KSN_SHIKI_INVALID;
+        count=(uint32_t)c;
+    }
+    const unsigned q=(unsigned)i->imm,k=g->k_rec;
+    const int32_t half=q?1<<(q-1):0;
+    const bool lines=i->op==KSN_SHIKI_EMIT_LINES;
+    const int16_t *d=(const int16_t *)g->data;
+    for(uint32_t c=0;c<count;c++,d+=k){
+        int16_t p[4];
+        for(unsigned j=0;j<(lines?4u:2u);j++){
+            const int32_t x=(d[j]+half)>>q;   /* arithmetic shift: the floor */
+            if(x<-480||x>720)return KSN_SHIKI_INVALID;
+            p[j]=(int16_t)x;
+        }
+        const ksn_shiki_status s=lines?emit(vm,out,p[0],p[1],p[2],p[3],i->aux)
+                                      :emit(vm,out,p[0],p[1],p[0],p[1],i->aux);
+        if(s!=KSN_SHIKI_RUNNING)return s;
+    }
+    return KSN_SHIKI_RUNNING;
+}
+
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     memset(vm,0,sizeof *vm);
@@ -523,6 +671,36 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
         case KSN_SHIKI_FETCH: case KSN_SHIKI_PUT: case KSN_SHIKI_LOOKUP:
             data_op(vm,plan,pc);
             break;
+        case KSN_SHIKI_VEACH: {
+            /* As EACH, a frame per block of 8 records; N above int16 is
+             * refused so that VIOTA's record numbers fit a lane. */
+            const uint32_t records=plan->region[i->a].records;
+            int32_t count=(int32_t)records;
+            if(i->aux){
+                count=r[i->b];
+                if(count<0||(uint32_t)count>records)return KSN_SHIKI_INVALID;
+            }
+            if(count>32767)return KSN_SHIKI_INVALID;
+            if(!count){next=i->end+1u;break;}
+            const uint16_t blocks=(uint16_t)((count+7)/8);
+            vm->loop[vm->depth].pc=(uint8_t)pc;
+            vm->loop[vm->depth].remaining=blocks;
+            vm->loop[vm->depth].total=blocks;
+            vm->loop[vm->depth].n=(uint16_t)count;
+            vm->depth++;
+            break;
+        }
+        case KSN_SHIKI_VLOAD: case KSN_SHIKI_VSTORE: case KSN_SHIKI_VSPLAT: case KSN_SHIKI_VIOTA:
+        case KSN_SHIKI_VADD: case KSN_SHIKI_VSUB: case KSN_SHIKI_VMIN: case KSN_SHIKI_VMAX:
+        case KSN_SHIKI_VZACC: case KSN_SHIKI_VMAC: case KSN_SHIKI_VMACK: case KSN_SHIKI_VACCSET:
+        case KSN_SHIKI_VOUT:
+            vec_exec(vm,plan,i);
+            break;
+        case KSN_SHIKI_EMIT_POINTS: case KSN_SHIKI_EMIT_LINES: {
+            const ksn_shiki_status s=emit_exec(vm,plan,out,i);
+            if(s!=KSN_SHIKI_RUNNING)return s;
+            break;
+        }
         case KSN_SHIKI_END:
             if(--vm->loop[vm->depth-1].remaining)next=vm->loop[vm->depth-1].pc+1u;
             else vm->depth--;

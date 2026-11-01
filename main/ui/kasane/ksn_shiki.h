@@ -36,6 +36,13 @@ enum {
     KSN_SHIKI_SUB, KSN_SHIKI_NEG, KSN_SHIKI_SHIFT,
     KSN_SHIKI_ADD_H, KSN_SHIKI_SUB_H, KSN_SHIKI_MUL_H, KSN_SHIKI_SHIFT_H,
     KSN_SHIKI_EACH, KSN_SHIKI_FETCH, KSN_SHIKI_PUT, KSN_SHIKI_LOOKUP,
+    /* PROTOTYPE (docs/kasane/shiki-pie.md, not in the spec yet): 8-lane
+     * vector instructions with PIE's semantics, interpreted once per block
+     * of 8 records, and batch emitters that draw from a region natively. */
+    KSN_SHIKI_VEACH, KSN_SHIKI_VLOAD, KSN_SHIKI_VSTORE, KSN_SHIKI_VSPLAT, KSN_SHIKI_VIOTA,
+    KSN_SHIKI_VADD, KSN_SHIKI_VSUB, KSN_SHIKI_VMIN, KSN_SHIKI_VMAX,
+    KSN_SHIKI_VZACC, KSN_SHIKI_VMAC, KSN_SHIKI_VMACK, KSN_SHIKI_VACCSET, KSN_SHIKI_VOUT,
+    KSN_SHIKI_EMIT_POINTS, KSN_SHIKI_EMIT_LINES,
     KSN_SHIKI_OPS
 };
 
@@ -98,13 +105,18 @@ typedef struct {
     int32_t reg[KSN_SHIKI_REGS];
     /* total is set by EACH only: its cursor is total - remaining, so END
      * stays the same instruction for every loop. */
-    struct { uint8_t pc; uint16_t remaining,total; } loop[KSN_SHIKI_LOOP_DEPTH];
+    struct { uint8_t pc; uint16_t remaining,total,n; } loop[KSN_SHIKI_LOOP_DEPTH];
     uint8_t depth;
     uint16_t steps,raster;
     int16_t pen_x,pen_y;
     bool pen_valid;
     uint16_t count;                         /* segments emitted by this draw */
     bool ext;                               /* a LINE_PATTERN chord is among them */
+    /* The prototype's vector state (shiki-pie.md sec.3.1): v0..v7, 8 lanes
+     * of int16 each, kept in memory; acc, 8 lanes of 40 bits (sat40). The
+     * raw buffer leaves room to align the lanes to 16 B for PIE loads. */
+    uint8_t vraw[8*16+15];
+    int64_t acc[8];
 } ksn_shiki_vm;
 
 /* 257 entries, sec.4.4: round(sin(k pi / 512) * 65536). */
