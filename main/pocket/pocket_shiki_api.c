@@ -27,12 +27,12 @@
 
 #define REGIONS 16          // maxSessionDataRegions (sec.9.1)
 #define BINDS 32            // one per slot: maxHandles
-// maxDrawsPerCall (sec.9.4, v1.5): a length bound. The time a call cannot be
-// stopped is bounded by the watchdog check between draws (one draw at most).
+// maxDrawsPerCall (sec.9.4, v1.5): drawMany runs in native code, where the
+// guest's interrupt check does not run; the watchdog is not asked between
+// draws either (user decision: its cost per draw is not worth it). So a call
+// cannot be stopped for at most 256 draws of up to KSN_SHIKI_STEPS steps,
+// about 1 s at worst (estimate).
 #define DRAWS_PER_CALL 256
-// The session's watchdog (app_session.c). Weak here so that host harnesses
-// without a session link: no session, never due.
-__attribute__((weak)) bool app_vm_interrupt_due(void){return false;}
 
 typedef struct {
     JSValue window,buffer;   // both held: the window for identity, the buffer to detach
@@ -350,16 +350,6 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs: a Float64Array or Int32Array of handles.length * stride");
     }
     for(size_t i=0;i<count;i++){
-        /* sec.9.4: between draws, the session's watchdog (stop requested, the
-         * turn's deadline), which the guest cannot ask while this loop runs.
-         * Interrupted the way QuickJS interrupts: uncatchable, the rest of
-         * the draws not done. */
-        if(i&&app_vm_interrupt_due()){
-            JS_ThrowInternalError(ctx,"interrupted");
-            JSValue e=JS_GetException(ctx);
-            JS_SetUncatchableError(ctx,e);
-            return JS_Throw(ctx,e);
-        }
         if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
         JSValue r=pocket_proc_shiki_draw_inputs(ctx,handles[i],real?real+i*stride:NULL,
                                                 fixed?fixed+i*stride:NULL,stride);

@@ -675,17 +675,8 @@ static int interrupt(void *opaque) {
     (void)opaque;
     return atomic_load(&stop_requested) || esp_timer_get_time()>deadline;
 }
-// The predicate in the slot, kept here too so that native code which runs
-// long without returning to the guest can ask it (app_vm_interrupt_due).
-static int (*watchdog_fn)(void *)=interrupt;
-static void *watchdog_opaque;
 void app_vm_watchdog(int (*fn)(void *), void *opaque) {
-    watchdog_fn=fn?fn:interrupt;
-    watchdog_opaque=fn?opaque:NULL;
-    if(guest) pocketjs_guest_set_watchdog(guest,watchdog_fn,watchdog_opaque);
-}
-bool app_vm_interrupt_due(void) {
-    return guest&&watchdog_fn(watchdog_opaque);
+    if(guest) pocketjs_guest_set_watchdog(guest,fn?fn:interrupt,opaque);
 }
 
 void app_vm_prepare_stop(void) {
@@ -1599,7 +1590,6 @@ esp_err_t app_start_test(char test) {
     // the deepest chains a session ever has.
     if(reloc_requested) pocketjs_guest_reloc_arm(guest,true);
 #endif
-    watchdog_fn=interrupt;watchdog_opaque=NULL;
     pocketjs_guest_set_watchdog(guest,interrupt,NULL);
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
