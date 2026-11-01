@@ -1,0 +1,14 @@
+# Shiki draw cost with the drawMany prototype, device run 2026-11-01 (broker
+# job dm-run2-ad10726, firmware ad10726, ELF 3b1e438c...). many* rows: the
+# same 200 draws in one drawMany call; cycles per draw.
+I (108724) js: DC BEGIN n=200 rounds=5 BUILD 1 3b1e438c2b1c99f6
+I (108732) js: DC loop total=1119.5 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (108740) js: DC native total=1161.6 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (108754) js: DC draw0 total=2397.3 parse=502.2 lookup=115.4 engine=315.7 copy=81.1 n=200
+I (108776) js: DC draw8 total=4673.8 parse=883.9 lookup=131.6 engine=1579.8 copy=83.1 n=200
+I (108809) js: DC draw8arr total=6986.8 parse=3648.8 lookup=131.7 engine=1561.1 copy=83.2 n=200
+I (108826) js: DC point total=3325.7 parse=594.6 lookup=147.1 engine=914.6 copy=111.2 n=200
+I (108832) js: DC many0 total=576.5 parse=0.0 lookup=110.0 engine=309.3 copy=81.0 n=200
+I (108843) js: DC many8 total=1851.9 parse=0.0 lookup=126.0 engine=1565.4 copy=81.0 n=200
+I (108849) js: DC many8fixed total=604.5 parse=0.0 lookup=126.0 engine=318.0 copy=82.5 n=200
+I (108851) js: DC END
