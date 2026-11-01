@@ -1,6 +1,6 @@
 #ifndef KSN_SHIKI_H
 #define KSN_SHIKI_H
-/* Shiki v1.3 line programs: registration and the integer engine
+/* Shiki v1.4 line programs: registration and the integer engine
  * (docs/kasane/shiki-spec.md). The 32-bit and .H instructions, CUBIC and
  * LINE_PATTERN (v1.2's integer procedures, sec.4.6/4.7: run-time divisions
  * are int32 by int32 only, sec.2.2), the data-region instructions EACH,
@@ -49,15 +49,20 @@ enum {
 /* Element types of a data region (sec.3's region table). */
 enum { KSN_SHIKI_I16, KSN_SHIKI_U16, KSN_SHIKI_I32 };
 
-/* A data region as the caller hands it to registration (sec.5.1): n elements
- * of type at data, k_rec to a record. The binding is fixed at registration;
- * the caller keeps the memory alive and unmoved while the plan exists. Two
- * entries may point at the same memory (sec.5.1). */
+/* A data region as the caller hands it to registration (sec.5.1, v1.4):
+ * records records of k_rec fields of type, laid out as field planes: field
+ * c of record j is element c * S + j, S = ksn_shiki_stride(records), so the
+ * memory holds k_rec * S elements (ksn_shiki_region_elements) and each plane
+ * ends in S - records padding elements the engine never touches. The binding
+ * is fixed at registration; the caller keeps the memory alive and unmoved
+ * while the plan exists. Two entries may point at the same memory (sec.5.1). */
 typedef struct {
     void *data;
-    uint32_t n;
+    uint32_t records;
     uint8_t type,q,k_rec;
 } ksn_shiki_region;
+#define ksn_shiki_stride(records) (((uint32_t)(records)+7u)&~7u)
+#define ksn_shiki_region_elements(records,k_rec) ((size_t)(k_rec)*ksn_shiki_stride(records))
 
 /* One instruction as the engine keeps it: the sec.4.2 fields, decoded from
  * little-endian bytes so the engine never reads the caller's buffer again,
@@ -80,16 +85,9 @@ _Static_assert(sizeof(ksn_shiki_inst)==12,"the spare bytes hold end and level");
  * program costs what it holds (docs/kasane/shiki.md sec.4.5.1). */
 typedef struct {
     void *data;
+    uint32_t stride;              /* the plane length S (sec.5.1): up to 65,536 */
     uint16_t records;
     uint8_t type,k_rec;
-    uint32_t n;
-    /* PROTOTYPE (shiki-pie.md sec.3.3, option S): the region table's byte 3
-     * bit 1 lays the region out as field planes, element (field c, record j)
-     * at c * records + j, instead of v1.3's j * k_rec + c. The prototype asks
-     * for a record count that is a multiple of 8, so that the stride (the
-     * count rounded up to 8) is the count itself and every plane starts on
-     * 16 B when the region does. */
-    bool soa;
 } ksn_shiki_bound;
 typedef struct {
     uint8_t count,inputs;
@@ -165,7 +163,8 @@ typedef void (*ksn_shiki_put)(void *ctx,const char *text,size_t len);
 void ksn_shiki_result(bool registered,ksn_shiki_status status,const ksn_shiki_vm *vm,
                       const ksn_proc_segment *seg,ksn_shiki_put put,void *ctx);
 /* The contract's region part, appended to a registered case's result line
- * when the case passed regions: " D <n>" and, per region, " <n> <e...>"
- * (i16/i32 signed, u16 unsigned, decimal). */
+ * when the case passed regions: " D <n>" and, per region, " <records> <e...>"
+ * with the k_rec * records values field by field and the padding left out
+ * (sec.10.1 v1.4; i16/i32 signed, u16 unsigned, decimal). */
 void ksn_shiki_result_regions(const ksn_shiki_region *regions,unsigned n,ksn_shiki_put put,void *ctx);
 #endif

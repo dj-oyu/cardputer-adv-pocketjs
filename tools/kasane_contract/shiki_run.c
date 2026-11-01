@@ -8,10 +8,15 @@
  *   ./shiki_run CASES.txt
  *
  * Case:   CASE <hex> ARGS <n> <v...> INPUTS <m> <u...> [DATA <r> <region>...]
- *         <region> = <type> <q> <k_rec> <n> <e...> | ALIAS <j>  (j: an earlier region)
+ *         <region> = <type> <q> <k_rec> <R> <e...> | ALIAS <j>  (j: an earlier region)
+ *         <R> records, then k_rec * R values field by field (spec v1.4
+ *         sec.10.1): field 0 of records 0..R-1, then field 1, ...; the D part
+ *         alike. The padding of each plane is filled with a marker before the
+ *         run and must be unchanged after it (sec.5.1); if not, the line ends
+ *         in " PADDING", which the reference never prints.
  * Output: REJECT
  *         RUN <STATUS> <steps> <penValid> <penX> <penY> R <r0..r15> S <n> <x0 y0 x1 y1 c>...
- *             [D <r> (<n> <e...>)...]   (only when the case had DATA)
+ *             [D <r> (<R> <e...>)...]   (only when the case had DATA)
  * A malformed region (what shiki.data() would refuse: type, q, k_rec, a
  * length that is not whole records or not 1..65,535 of them, an element out
  * of its type's range) makes the case REJECT.
@@ -74,23 +79,36 @@ int main(int argc,char **argv){
                     reg[k]=reg[j];
                     continue;
                 }
+                /* v1.4 sec.10.1: n = k_rec * R values, field by field. The
+                 * memory is planes of S = R rounded up to 8; the padding is
+                 * filled with PAD so an engine that lets it reach a result
+                 * (a LOOKUP clamped to S - 1, a plane read past R) disagrees
+                 * with the reference, which keeps no padding at all. */
                 const long type=atol(w),q=atol(word(&p)),kr=atol(word(&p));
-                const long n=atol(word(&p));
+                const long Rin=atol(word(&p)),n=kr>=1&&kr<=8?Rin*kr:Rin;
                 const size_t es=type==KSN_SHIKI_I32?4:2;
                 if(type<0||type>2||q<0||q>30||kr<1||kr>8||n<kr||n%kr||n/kr>KSN_SHIKI_RECORDS)well=false;
-                void *mem=well?calloc((size_t)n,es):NULL;
+                const uint32_t R=well?(uint32_t)(n/kr):0,S=ksn_shiki_stride(R);
+                void *mem=well?malloc(ksn_shiki_region_elements(R,kr)*es):NULL;
                 owned[k]=mem;
+                enum { PAD=15036 };
+                for(uint32_t e=0;mem&&e<ksn_shiki_region_elements(R,kr);e++){
+                    if(type==0)((int16_t *)mem)[e]=PAD;
+                    else if(type==1)((uint16_t *)mem)[e]=PAD;
+                    else ((int32_t *)mem)[e]=PAD;
+                }
                 for(long e=0;e<n;e++){
                     const long long v=strtoll(word(&p),NULL,10);
                     const bool in_range=type==0?v>=-32768&&v<=32767:type==1?v>=0&&v<=65535
                                                 :v>=INT32_MIN&&v<=INT32_MAX;
                     if(!in_range)well=false;
                     if(!mem)continue;
-                    if(type==0)((int16_t *)mem)[e]=(int16_t)v;
-                    else if(type==1)((uint16_t *)mem)[e]=(uint16_t)v;
-                    else ((int32_t *)mem)[e]=(int32_t)v;
+                    const uint32_t at=(uint32_t)(e/(long)R)*S+(uint32_t)(e%(long)R);
+                    if(type==0)((int16_t *)mem)[at]=(int16_t)v;
+                    else if(type==1)((uint16_t *)mem)[at]=(uint16_t)v;
+                    else ((int32_t *)mem)[at]=(int32_t)v;
                 }
-                reg[k]=(ksn_shiki_region){mem,(uint32_t)(n>0?n:0),(uint8_t)type,(uint8_t)q,(uint8_t)kr};
+                reg[k]=(ksn_shiki_region){mem,R,(uint8_t)type,(uint8_t)q,(uint8_t)kr};
             }
         }
         /* Exactly what the header asks for, so ASan sees an engine that writes
@@ -101,7 +119,24 @@ int main(int argc,char **argv){
         const ksn_shiki_status s=ok?ksn_shiki_draw(plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
                                    :KSN_SHIKI_INVALID;
         ksn_shiki_result(ok,s,&vm,seg,put_stdout,NULL);
-        if(ok&&data)ksn_shiki_result_regions(reg,nr,put_stdout,NULL);
+        if(ok&&data){
+            ksn_shiki_result_regions(reg,nr,put_stdout,NULL);
+            /* sec.5.1 v1.4: a draw leaves every plane's padding as it was. */
+            bool kept=true;
+            for(unsigned k=0;k<KSN_SHIKI_REGIONS+4;k++){
+                if(!owned[k])continue;
+                const ksn_shiki_region *g=&reg[k];
+                const uint32_t S=ksn_shiki_stride(g->records);
+                for(uint32_t c=0;c<g->k_rec;c++)for(uint32_t j=g->records;j<S;j++){
+                    const uint32_t e=c*S+j;
+                    const long v=g->type==KSN_SHIKI_I16?((const int16_t *)g->data)[e]
+                                :g->type==KSN_SHIKI_U16?((const uint16_t *)g->data)[e]
+                                :((const int32_t *)g->data)[e];
+                    if(v!=15036)kept=false;
+                }
+            }
+            if(!kept)fputs(" PADDING",stdout);
+        }
         putchar('\n');
         for(unsigned k=0;k<KSN_SHIKI_REGIONS+4;k++)free(owned[k]);
         free(plan);

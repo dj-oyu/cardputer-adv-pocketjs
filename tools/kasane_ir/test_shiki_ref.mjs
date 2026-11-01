@@ -498,7 +498,8 @@ test('BREAK_IF_GT leaves an EACH and pops its frame', () => {
 
 test('nested EACH of different regions reads both cursors', () => {
   const r = runD([EACH(0), EACH(1), FETCH(1, 0, 0, 1), FETCH(2, 1, 0, 2), ADD(4, 4, 1), ADD(4, 4, 2),
-    ADD(6, 6, 3), END, END], [I32T, [2, 0, 2, 0]], [rg(2, 0, 1, [1, 2]), rg(2, 0, 2, [10, 20, 30, 40])]);
+    ADD(6, 6, 3), END, END], [I32T, [2, 0, 2, 0]], [rg(2, 0, 1, [1, 2]), rg(2, 0, 2, [10, 30, 20, 40])]);
+  // v1.4 field by field: records (10, 20) and (30, 40) listed as 10 30 | 20 40.
   // (1+10)+(1+30)+(2+10)+(2+30) = 86; 2·(20+40) = 120. Steps 1 + 2·(1 + 2·6 + 1).
   assert.deepEqual([r.status, r.steps, r.regs[4], r.regs[6]], ['DONE', 29, 86, 120]);
 });
@@ -550,11 +551,11 @@ test('PUT: i16 / u16 saturation, i32 passthrough, k shift', () => {
 });
 
 test('PUT then FETCH in the same draw, and in a later loop; b offset keeps other elements', () => {
-  const g = rg(2, 0, 2, [1, 2, 3, 4]);
+  const g = rg(2, 0, 2, [1, 3, 2, 4]); // records (1, 2), (3, 4), field by field (v1.4)
   const r = runD([SET(9, 100), EACH(0), FETCH(0, 0, 0, 1), ADD(1, 0, 9), PUT(1, 0, 1, 1), FETCH(2, 0, 1, 1),
     ADD(3, 3, 2), END, EACH(0), FETCH(4, 0, 1, 1), ADD(5, 5, 4), END], [[2, 0, 2, 1]], [g]);
   assert.deepEqual([r.status, r.regs[3], r.regs[5]], ['DONE', 204, 204]);
-  assert.deepEqual(Array.from(g.mem), [1, 101, 3, 103]);
+  assert.deepEqual(Array.from(g.mem), [1, 3, 101, 103]);
 });
 
 test('LOOKUP: clamp both ends, g = 0 / 16 / 31, k, u16, dst == b', () => {
@@ -722,7 +723,7 @@ test('CASE DATA / ALIAS parse and D output', () => {
   // invalid descriptors make the whole case REJECT
   assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 2 32768 7 ALIAS 0`), 'REJECT');
   assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 31 1 2 -5 7 ALIAS 0`), 'REJECT');
-  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 2 3 1 2 3 ALIAS 0`), 'REJECT');
+  assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 9 1 1 ALIAS 0`), 'REJECT'); // k_rec 9 (v1.4: <R> is a record count, so 'not whole records' cannot be written)
   assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 0 ALIAS 0`), 'REJECT'); // 0 records
   assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 ALIAS 0 0 0 1 1 1`), 'REJECT'); // alias forward
   assert.equal(runCase(`CASE ${hex} ARGS 0 INPUTS 0 DATA 2 0 0 1 1 1 ALIAS 1`), 'REJECT'); // alias to itself

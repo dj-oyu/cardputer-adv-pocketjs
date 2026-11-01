@@ -153,6 +153,10 @@ const MAX_RECORDS = 65535;
 // the given elements. null if the descriptor is invalid (§5.1: type 0..2, q
 // 0..30, k_rec 1..8, n a multiple of k_rec, n / k_rec in 1..65,535, every
 // element an integer inside its type's range).
+// v1.4 (§5.1, §10.1): the elements are field by field — field 0 of records
+// 0..R-1, then field 1, ... — and `mem` keeps them so, with no padding: field c
+// of record j is mem[c * R + j]. The engine's planes are S = R rounded up to 8
+// long; the padding never reaches a result, so this model leaves it out.
 export function makeRegion(type, q, k, elements) {
   if (![type, q, k].every(Number.isInteger)) return null;
   if (type < 0 || type > 2 || q < 0 || q > 30 || k < 1 || k > 8) return null;
@@ -599,19 +603,19 @@ export function draw(plan, inputs = []) {
       }
       case 24: { // §5.4.3 FETCH: r[dst+j] = SHIFT(e_j, k), ascending j
         const g = regions[I.a];
-        const base = cursorOf(pc) * g.k + I.b;
-        for (let j = 0; j < I.aux; j++) regs[I.dst + j] = shift32(g.mem[base + j], I.imm);
+        const R = g.n / g.k, c = cursorOf(pc); // §5.4.6 v1.4: field (b + j) of record c
+        for (let j = 0; j < I.aux; j++) regs[I.dst + j] = shift32(g.mem[(I.b + j) * R + c], I.imm);
         break;
       }
       case 25: { // §5.4.4 PUT: every v_j first, then saturate and write ascending j
         const g = regions[I.a];
-        const base = cursorOf(pc) * g.k + I.b;
+        const R = g.n / g.k, c = cursorOf(pc);
         const v = [];
         for (let j = 0; j < I.aux; j++) v.push(satElem(g.type, shift32(regs[I.dst + j], I.imm)));
-        for (let j = 0; j < I.aux; j++) g.mem[base + j] = v[j];
+        for (let j = 0; j < I.aux; j++) g.mem[(I.b + j) * R + c] = v[j];
         break;
       }
-      case 26: { // §5.4.5 LOOKUP: i = clamp(⌊r[b] / 2^g⌋, 0, n − 1)
+      case 26: { // §5.4.5 LOOKUP: i = clamp(⌊r[b] / 2^g⌋, 0, R − 1); k_rec = 1 so R = n
         const g = regions[I.a];
         let i = Math.floor(regs[I.b] / 2 ** I.aux);
         if (i < 0) i = 0;
@@ -640,13 +644,13 @@ export function format(result, data = []) {
   for (const s of result.segs) parts.push(...s);
   if (data.length > 0) {
     parts.push('D', data.length);
-    for (const g of data) parts.push(g.n, ...g.mem);
+    for (const g of data) parts.push(g.n / g.k, ...g.mem); // v1.4 §10.1: R, then k_rec·R values
   }
   return parts.join(' ');
 }
 
 // Parses one `CASE <hex> ARGS <n> ... INPUTS <m> ... [DATA <r> <region>...]`
-// line, <region> := <type> <q> <k_rec> <n> <e0> ... | ALIAS <j> (j < its own
+// line, <region> := <type> <q> <k_rec> <R> <e0> ... | ALIAS <j> (j < its own
 // index). `regions` is the list passed, or null when a descriptor is invalid
 // (the case is then REJECT: it models shiki.data() failing). A malformed line
 // throws.
@@ -682,7 +686,11 @@ export function parseCase(line) {
         regions.push(j >= 0 && j < i ? regions[j] : null);
         continue;
       }
-      const type = int(t[k]), q = int(t[k + 1]), kr = int(t[k + 2]), n = int(t[k + 3]);
+      // v1.4 §10.1: <R> records, then k_rec·R values field by field. A v1.3
+      // line (which gave the element count n) fails here for k_rec ≥ 2 (too
+      // few tokens) and means the same for k_rec = 1.
+      const type = int(t[k]), q = int(t[k + 1]), kr = int(t[k + 2]), R = int(t[k + 3]);
+      const n = Number.isInteger(kr) && kr >= 1 && kr <= 8 ? R * kr : R;
       k += 4;
       if (n < 0 || k + n > t.length) throw new Error(`short region: ${line}`);
       const els = t.slice(k, k + n).map(int);

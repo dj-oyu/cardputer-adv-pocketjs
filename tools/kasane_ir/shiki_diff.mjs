@@ -256,8 +256,7 @@ function dataProgram() {
     if (m < .015) g.type = (g.type + 1) % 3;
     else if (m < .03) g.q = (g.q + 1) % 31;
     else if (m < .045) g.k = g.k % 8 + 1, g.n = records * g.k;
-    else if (m < .05) g.n = 0;                       // no records: shiki.data() refuses it
-    else if (m < .055) g.n += 1;                     // not whole records
+    else if (m < .055) g.n = 0;                      // no records: shiki.data() refuses it
     g.e = Array.from({length: g.n}, ELEM[g.type]);
     return g;
   });
@@ -334,7 +333,7 @@ function dataProgram() {
     const k = ri(0, bytes.length - 1);
     bytes[k] = rnd() < .5 ? ri(0, 255) : bytes[k] ^ (1 << ri(0, 7));
   }
-  const data = pass.map(g => g.alias !== undefined ? `ALIAS ${g.alias}` : `${g.type} ${g.q} ${g.k} ${g.n} ${g.e.join(' ')}`);
+  const data = pass.map(g => g.alias !== undefined ? `ALIAS ${g.alias}` : `${g.type} ${g.q} ${g.k} ${g.n / g.k} ${g.e.join(' ')}`);
   return {bytes, argv, inv: [], data: `DATA ${data.length} ${data.join(' ')}`};
 }
 

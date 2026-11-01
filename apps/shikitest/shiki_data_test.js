@@ -1,4 +1,4 @@
-// Shiki data regions (v1.3) on-device differential test (README.md). The
+// Shiki data regions (v1.3, layout v1.4) on-device differential test (README.md). The
 // generator is shared: tools/kasane_ir/shiki_device.mjs --data loads this file.
 'use strict';
 globalThis.shikiDataGen = function (seed) {
@@ -56,7 +56,7 @@ globalThis.shikiDataGen = function (seed) {
     if (rnd() < .1) { const k = ri(0, b.length - 1); b[k] ^= 1 << ri(0, 7); }
     let hex = '';
     for (let k = 0; k < b.length; k++) hex += (b[k] < 16 ? '0' : '') + b[k].toString(16);
-    const dl = pas.map(g => typeof g === 'number' ? 'ALIAS ' + g : g.t + ' ' + g.q + ' ' + g.k + ' ' + g.v.length + (g.v.length ? ' ' + g.v.join(' ') : ''));
+    const dl = pas.map(g => typeof g === 'number' ? 'ALIAS ' + g : g.t + ' ' + g.q + ' ' + g.k + ' ' + g.v.length / g.k + (g.v.length ? ' ' + g.v.join(' ') : ''));
     return {b: b, data: pas, line: 'CASE ' + hex + ' ARGS 0 INPUTS 0 DATA ' + nr + ' ' + dl.join(' ')};
   };
 };

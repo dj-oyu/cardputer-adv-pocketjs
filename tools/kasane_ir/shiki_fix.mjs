@@ -129,7 +129,9 @@ export function emitFix(ast, params, qdecl, data = []) {
         loops.pop();
         return `{ const __n = ${n}; if (__n < 0 || __n > ${rec}) throw new __Fail('INVALID');\n` +
           `for (let ${c} = 0; ${c} < __n; ${c}++) {\n` +
-          x.names.map((v, j) => `const ${v} = BigInt(__data[${i}][${c} * ${d.k} + ${j}]);`).join('\n') + `\n${body}\n} }`;
+          // v1.4 field planes (as shiki_ref.mjs keeps them, no padding): field
+          // j of record c at j * R + c.
+          x.names.map((v, j) => `const ${v} = BigInt(__data[${i}][${j} * ${rec} + ${c}]);`).join('\n') + `\n${body}\n} }`;
       }
       case 'put': {
         const [i, d] = reg(x.r), l = [...loops].reverse().find(o => o.r === x.r);
@@ -138,7 +140,7 @@ export function emitFix(ast, params, qdecl, data = []) {
         if (x.args.length < 1 || x.args.length > d.k) throw new Error(`${x.r}.put() takes 1..${d.k} values`);
         // Every value first, then the writes (sec.5.4.4).
         return `{ const __v = [${x.args.map(a => g(a, d.q)).join(', ')}];\n` +
-          x.args.map((_, j) => `__data[${i}][${l.c} * ${d.k} + ${j}] = $.store(${d.type}, __v[${j}]);`).join('\n') + ' }';
+          x.args.map((_, j) => `__data[${i}][${j} * (__data[${i}].length / ${d.k}) + ${l.c}] = $.store(${d.type}, __v[${j}]);`).join('\n') + ' }';
       }
       case 'repeat': {
         const reg = !(x.n.k === 'num' || (x.n.k === 'name' && params.includes(x.n.v)));

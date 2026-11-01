@@ -5,9 +5,11 @@
 // procedural functions themselves, and draw runs the Shiki engine into the
 // same frame. grid is the existing pocket.kasane.grid (sec.7).
 //
-// Data regions (sec.5.1, 9.2, 9.3). data() takes the memory from the Shiki
-// heap, 16-byte aligned, and hands JS a typed array over an ArrayBuffer of
-// that external memory. Shiki holds the window (the typed array) and its
+// Data regions (sec.5.1, 9.2, 9.3; v1.4 field planes). data() takes the
+// memory from the Shiki heap, 16-byte aligned, and hands JS a typed array over
+// an ArrayBuffer of that external memory: the whole region, k_rec planes of
+// S = R rounded up to 8, padding included. fields() makes per-field views of
+// length R on request only (a guest object each; DERBY's heap is tight). Shiki holds the window (the typed array) and its
 // ArrayBuffer strongly, so JS dropping the window frees nothing and calls no
 // free_func: a region lives until release() or the end of the session.
 // Identity is by the window object (a second view of the same buffer is not
@@ -29,7 +31,7 @@
 typedef struct {
     JSValue window,buffer;   // both held: the window for identity, the buffer to detach
     void *mem;
-    uint32_t n;              // elements
+    uint32_t records;        // R; the memory is k_rec planes of S = R rounded up to 8
     uint8_t type,q,k_rec;
     uint8_t live;
     uint16_t binds;          // handles bound to it
@@ -84,39 +86,69 @@ static const char *const TYPE_NAME[]={"i16","u16","i32"};
 static JSValue js_data(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.shiki.data";
-    if(argc<1||!JS_IsObject(argv[0]))return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected {type, q, length, record}");
+    if(argc<1||!JS_IsObject(argv[0]))return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected {type, q, records, record}");
+    // v1.4: the v1.3 shape (length, elements in record order) is refused,
+    // whatever its value, so old code does not run on the new layout.
+    JSAtom len_atom=JS_NewAtom(ctx,"length");
+    const int has_length=JS_HasProperty(ctx,argv[0],len_atom);
+    JS_FreeAtom(ctx,len_atom);
+    if(has_length<0)return JS_EXCEPTION;
+    if(has_length)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"length is v1.3's shape: pass records (the record count)");
     JSValue t=JS_GetPropertyStr(ctx,argv[0],"type");
     const char *s=JS_IsString(t)?JS_ToCString(ctx,t):NULL;
     int type=-1;
     for(int k=0;s&&k<3;k++)if(!strcmp(s,TYPE_NAME[k]))type=k;
     if(s)JS_FreeCString(ctx,s);
     JS_FreeValue(ctx,t);
-    uint32_t q=0,length=0,record=0;
-    // sec.9.3: an unknown type, q outside 0..30, record outside 1..8, a length
-    // that is not whole records or not 1..65,535 of them.
+    uint32_t q=0,records=0,record=0;
+    // sec.9.3: an unknown type, q outside 0..30, record outside 1..8, records
+    // not an integer in 1..65,535 (not rounded).
     if(type<0||!prop_whole(ctx,argv[0],"q",0,30,&q)||!prop_whole(ctx,argv[0],"record",1,8,&record)||
-       !prop_whole(ctx,argv[0],"length",1,8.0*KSN_SHIKI_RECORDS,&length)||length%record||
-       length/record>KSN_SHIKI_RECORDS)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected type i16/u16/i32, q 0..30, record 1..8, length a whole 1..65,535 records");
+       !prop_whole(ctx,argv[0],"records",1,KSN_SHIKI_RECORDS,&records))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected type i16/u16/i32, q 0..30, record 1..8, records 1..65,535");
     int slot=-1;
     for(int k=0;k<REGIONS&&slot<0;k++)if(!regions[k].live)slot=k;
     if(slot<0)return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"16 data regions in a session");
-    const size_t bytes=(size_t)length*(type==2?4u:2u);
+    const size_t elements=ksn_shiki_region_elements(records,record);
+    const size_t bytes=elements*(type==2?4u:2u);
     void *mem=shiki_heap_aligned(bytes);
     if(!mem)return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"the Shiki heap's budget");
     memset(mem,0,bytes);
     JSValue buffer=JS_NewArrayBuffer(ctx,mem,bytes,free_nothing,NULL,false);
     if(JS_IsException(buffer)){shiki_heap_free(mem);return buffer;}
     static const JSTypedArrayEnum KIND[]={JS_TYPED_ARRAY_INT16,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_INT32};
-    JSValueConst targs[3]={buffer,JS_NewInt32(ctx,0),JS_NewInt32(ctx,(int32_t)length)};
+    JSValueConst targs[3]={buffer,JS_NewInt32(ctx,0),JS_NewInt32(ctx,(int32_t)elements)};
     JSValue window=JS_NewTypedArray(ctx,3,targs,KIND[type]);
     if(JS_IsException(window)){
         JS_DetachArrayBuffer(ctx,buffer);JS_FreeValue(ctx,buffer);shiki_heap_free(mem);
         return window;
     }
     owner=ctx;
-    regions[slot]=(region_t){JS_DupValue(ctx,window),buffer,mem,length,(uint8_t)type,(uint8_t)q,(uint8_t)record,1,0};
+    regions[slot]=(region_t){JS_DupValue(ctx,window),buffer,mem,records,(uint8_t)type,(uint8_t)q,(uint8_t)record,1,0};
     return window;
+}
+
+// fields(window): k_rec fresh views, field c = window[c*S .. c*S+R). Not
+// regions themselves: register()/release() still want the window.
+static JSValue js_fields(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.fields";
+    bool closed=false;
+    const int k=argc>=1?region_of(ctx,argv[0],&closed):-1;
+    if(k<0)return failure(ctx,op,closed?POCKET_ERR_CLOSED:POCKET_ERR_INVALID_ARGUMENT,
+                          closed?"released window":"not a window shiki.data() returned");
+    const region_t *g=&regions[k];
+    static const JSTypedArrayEnum KIND[]={JS_TYPED_ARRAY_INT16,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_INT32};
+    const uint32_t S=ksn_shiki_stride(g->records),size=g->type==2?4u:2u;
+    JSValue out=JS_NewArray(ctx);
+    if(JS_IsException(out))return out;
+    for(uint32_t c=0;c<g->k_rec;c++){
+        JSValueConst targs[3]={g->buffer,JS_NewInt64(ctx,(int64_t)c*S*size),JS_NewInt32(ctx,(int32_t)g->records)};
+        JSValue view=JS_NewTypedArray(ctx,3,targs,KIND[g->type]);
+        if(JS_IsException(view)){JS_FreeValue(ctx,out);return view;}
+        if(JS_SetPropertyUint32(ctx,out,c,view)<0){JS_FreeValue(ctx,out);return JS_EXCEPTION;}
+    }
+    return out;
 }
 
 // Detach, drop Shiki's references, give the memory back (sec.9.2's order).
@@ -193,7 +225,7 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
                     return failure(ctx,op,closed?POCKET_ERR_CLOSED:POCKET_ERR_INVALID_ARGUMENT,
                                    closed?"a released window":"options.data: not a window shiki.data() returned");}
                 const region_t *r=&regions[g];
-                bound[k]=(ksn_shiki_region){r->mem,r->n,r->type,r->q,r->k_rec};
+                bound[k]=(ksn_shiki_region){r->mem,r->records,r->type,r->q,r->k_rec};
                 which[k]=(uint8_t)g;
             }
         }
@@ -293,6 +325,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("heap",0,js_heap),
         JS_CFUNC_DEF("data",1,js_data),
         JS_CFUNC_DEF("release",1,js_release),
+        JS_CFUNC_DEF("fields",1,js_fields),
     };
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
     JSValue procedural=JS_GetPropertyStr(ctx,kasane,"procedural");

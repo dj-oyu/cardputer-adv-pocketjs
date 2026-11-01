@@ -66,10 +66,10 @@ static void pairs(void){
                    "%s draws what the first of its pair draws (%u vs %u)",c.name,vm.count,count[c.pair]);
         if(i==1){
             /* Direct: x' = floor((cos x - sin y + 120 * 2^14) / 2^14). */
-            const int16_t *pts=work;
+            const int16_t *pts=work;                       /* planes: x then y */
             bool same=vm.count==128;
             for(unsigned k=0;same&&k<128;k++){
-                const int32_t x=pts[2*k],y=pts[2*k+1];
+                const int32_t x=pts[k],y=pts[128+k];
                 const int32_t X=(int32_t)((14189*x-8192*y+(120<<14))>>14);
                 const int32_t Y=(int32_t)((8192*x+14189*y+(67<<14))>>14);
                 same=seg[k].x0==X&&seg[k].y0==Y&&seg[k].x1==X&&seg[k].y1==Y&&seg[k].color==2016;
@@ -79,25 +79,53 @@ static void pairs(void){
     }
 }
 
-/* PUT and FETCH on planes: field c of record j at c * records + j. */
-static void soa_put(void){
+/* ksn_shiki_put into a NUL-terminated buffer (ctx, 256 B). */
+static void put_line(void *ctx,const char *text,size_t len){
+    char *b=ctx;
+    const size_t n=strlen(b);
+    if(n+len<256){memcpy(b+n,text,len);b[n+len]=0;}
+}
+
+/* PUT and FETCH on planes (v1.4 sec.5.4.6): field c of record j at c * S + j,
+ * S = records rounded up to 8. 6 records: planes of 8, padding 6..7 and
+ * 14..15 never touched. */
+static void planes(void){
     int16_t a[16];
-    for(int k=0;k<16;k++)a[k]=(int16_t)k;
-    const uint8_t decl[1][4]={{KSN_SHIKI_I16,0,2,3}};
-    ksn_shiki_region r[1]={{a,16,KSN_SHIKI_I16,0,2}};
+    for(int k=0;k<16;k++)a[k]=(int16_t)(100+k);
+    const uint8_t decl[1][4]={{KSN_SHIKI_I16,0,2,1}};
+    ksn_shiki_region r[1]={{a,6,KSN_SHIKI_I16,0,2}};
     prog p;p_begin(&p,1,decl);
     I(&p,KSN_SHIKI_EACH,0,0,0,0,0);
     I(&p,KSN_SHIKI_FETCH,0,0,0,0,2);                 /* r0 = x, r1 = y */
     I(&p,KSN_SHIKI_ADD,0,0,1,0,0);
     I(&p,KSN_SHIKI_PUT,0,0,1,0,1);                   /* y = x + y */
     I(&p,KSN_SHIKI_END,0,0,0,0,0);
-    CHECK(reg(&p,r,1)&&run()==KSN_SHIKI_DONE,"soa put runs");
+    CHECK(reg(&p,r,1)&&run()==KSN_SHIKI_DONE,"planes: put runs");
     bool ok=true;
-    for(int j=0;j<8;j++)ok=ok&&a[j]==j&&a[8+j]==j+8+j;
-    CHECK(ok,"soa put writes the y plane (%d %d)",a[8],a[15]);
-    int16_t b[12];
-    ksn_shiki_region rb[1]={{b,12,KSN_SHIKI_I16,0,2}};    /* 6 records: not a multiple of 8 */
-    CHECK(!reg(&p,rb,1),"soa refuses a record count off the multiple of 8");
+    for(int j=0;j<6;j++)ok=ok&&a[j]==100+j&&a[8+j]==(100+j)+(108+j);
+    for(int j=6;j<8;j++)ok=ok&&a[j]==100+j&&a[8+j]==108+j;
+    CHECK(ok,"planes: put writes the y plane, padding untouched (%d %d %d)",a[8],a[13],a[14]);
+    /* LOOKUP clamps to record R - 1, not to the padding. */
+    int16_t t[8]={11,22,33,44,55,-1,-1,-1};
+    const uint8_t d1[1][4]={{KSN_SHIKI_I16,0,1,0}};
+    ksn_shiki_region rt[1]={{t,5,KSN_SHIKI_I16,0,1}};
+    p_begin(&p,1,d1);
+    I(&p,KSN_SHIKI_SET,0,0,0,7,0);
+    I(&p,KSN_SHIKI_LOOKUP,1,0,0,0,0);
+    I(&p,KSN_SHIKI_SET,0,0,0,-3,0);
+    I(&p,KSN_SHIKI_LOOKUP,2,0,0,0,0);
+    CHECK(reg(&p,rt,1)&&run()==KSN_SHIKI_DONE&&vm.reg[1]==55&&vm.reg[2]==11,
+          "planes: LOOKUP clamps to 0..R-1 (%d %d)",vm.reg[1],vm.reg[2]);
+    /* The region table's flag bits other than write are 0 (v1.4 sec.3). */
+    const uint8_t bad[1][4]={{KSN_SHIKI_I16,0,2,2}};
+    p_begin(&p,1,bad);
+    I(&p,KSN_SHIKI_EACH,0,0,0,0,0);I(&p,KSN_SHIKI_END,0,0,0,0,0);
+    CHECK(!reg(&p,r,1),"planes: refuses flag bit 1");
+    /* The result line lists k_rec * R values field by field, no padding. */
+    char line[256]="";
+    ksn_shiki_region rr[1]={{a,6,KSN_SHIKI_I16,0,2}};
+    ksn_shiki_result_regions(rr,1,put_line,line);
+    CHECK(!strcmp(line," D 1 6 100 101 102 103 104 105 208 210 212 214 216 218"),"planes: result line (%s)",line);
 }
 
 static void lanes(void){
@@ -193,9 +221,11 @@ static void lanes(void){
 
 static void emits(void){
     /* Q4 points: halves up, -480..720. */
-    int16_t pt[6]={(int16_t)(10*16+8),(int16_t)(-3*16-8),(int16_t)(5*16+7),0,(int16_t)(720*16+8),0};
+    /* 3 records as planes of 8: x0 x1 x2 . . . . . | y0 y1 y2 . . . . . */
+    int16_t pt[16]={(int16_t)(10*16+8),(int16_t)(5*16+7),(int16_t)(720*16+8),0,0,0,0,0,
+                    (int16_t)(-3*16-8),0,0,0,0,0,0,0};
     const uint8_t decl[1][4]={{KSN_SHIKI_I16,4,2,0}};
-    ksn_shiki_region r[1]={{pt,6,KSN_SHIKI_I16,4,2}};
+    ksn_shiki_region r[1]={{pt,3,KSN_SHIKI_I16,4,2}};
     prog p;p_begin(&p,1,decl);
     I(&p,KSN_SHIKI_SET,0,0,0,2,0);
     I(&p,KSN_SHIKI_EMIT_POINTS,1,0,0,4,31);          /* count = r0 = 2 */
@@ -214,10 +244,10 @@ static void emits(void){
 }
 
 static void refusals(void){
-    static int16_t a[64];
+    static int16_t a[64];   /* 32 records of 2: two planes of 32 */
     const uint8_t decl[3][4]={{KSN_SHIKI_I16,0,2,0},{KSN_SHIKI_I32,0,2,1},{KSN_SHIKI_I16,0,2,0}};
     static int32_t w[64];
-    ksn_shiki_region r[3]={{a,64,KSN_SHIKI_I16,0,2},{w,64,KSN_SHIKI_I32,0,2},{a,32,KSN_SHIKI_I16,0,2}};
+    ksn_shiki_region r[3]={{a,32,KSN_SHIKI_I16,0,2},{w,32,KSN_SHIKI_I32,0,2},{a,16,KSN_SHIKI_I16,0,2}};
     prog p;
 #define REFUSE(what,...) do{p_begin(&p,3,decl);__VA_ARGS__;CHECK(!reg(&p,r,3),"refuses %s",what);}while(0)
     REFUSE("a vector op outside VEACH",I(&p,KSN_SHIKI_VIOTA,0,0,0,0,0));
@@ -266,7 +296,7 @@ static void checks_run(void){
 int main(void){
     plan=malloc(KSN_SHIKI_PLAN_MAX);
     pairs();
-    soa_put();
+    planes();
     lanes();
     emits();
     refusals();

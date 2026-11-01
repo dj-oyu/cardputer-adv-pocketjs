@@ -249,15 +249,13 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
     memset(plan->region,0,sizeof plan->region);
     for(unsigned k=0;k<ndata;k++){
         const uint8_t *t=reg_t+4*k;
-        if(t[0]>KSN_SHIKI_I32||t[1]>30||t[2]<1||t[2]>8||t[3]>3)return false;
-        rd[k]=(region_decl){t[0],t[1],t[2],(uint8_t)(t[3]&1u)};
+        if(t[0]>KSN_SHIKI_I32||t[1]>30||t[2]<1||t[2]>8||t[3]>1)return false;
+        rd[k]=(region_decl){t[0],t[1],t[2],t[3]};
         const ksn_shiki_region *g=&regions[k];
-        if(!g->data||g->type!=t[0]||g->q!=t[1]||g->k_rec!=t[2]||g->n%t[2])return false;
-        const uint32_t records=g->n/t[2];
-        if(records<1||records>KSN_SHIKI_RECORDS)return false;
-        const bool soa=t[3]&2u;
-        if(soa&&records%8u)return false;
-        plan->region[k]=(ksn_shiki_bound){g->data,(uint16_t)records,t[0],t[2],g->n,soa};
+        if(!g->data||g->type!=t[0]||g->q!=t[1]||g->k_rec!=t[2])return false;
+        if(g->records<1||g->records>KSN_SHIKI_RECORDS)return false;
+        plan->region[k]=(ksn_shiki_bound){g->data,ksn_shiki_stride(g->records),
+                                          (uint16_t)g->records,t[0],t[2]};
     }
     int32_t arg[KSN_SHIKI_ARGS];
     for(unsigned k=0;k<narg;k++)if(!ksn_shiki_from_double(args[k],arg_q[k],&arg[k]))return false;
@@ -495,15 +493,15 @@ static __attribute__((noinline)) void data_op(ksn_shiki_vm *vm,const ksn_shiki_p
     if(i->op==KSN_SHIKI_LOOKUP){
         int64_t e=floor_shift(r[i->b],i->aux);
         if(e<0)e=0;
-        if(e>(int64_t)g->n-1)e=(int64_t)g->n-1;
+        if(e>(int64_t)g->records-1)e=(int64_t)g->records-1;
         r[i->dst]=shift32(load(g,(uint32_t)e),i->imm);
         return;
     }
     const unsigned lv=i->level;
     const uint32_t cursor=(uint32_t)vm->loop[lv].total-vm->loop[lv].remaining;
-    /* Field b + j of the record: AoS steps 1 between fields, SoA a plane. */
-    const uint32_t step=g->soa?g->records:1u;
-    const uint32_t base=g->soa?i->b*step+cursor:cursor*g->k_rec+i->b;
+    /* Field b + j of record cursor: element (b + j) * S + cursor (sec.5.4.6). */
+    const uint32_t step=g->stride;
+    const uint32_t base=i->b*step+cursor;
     const unsigned m=i->aux;
     if(i->op==KSN_SHIKI_FETCH){
         for(unsigned j=0;j<m;j++)r[i->dst+j]=shift32(load(g,base+j*step),i->imm);
@@ -532,7 +530,8 @@ bool ksn_shiki_vec_pie=false;
 /* ---- P2: the same instructions on PIE (shiki-pie.md sec.6 item 1). The
  * vector registers are the same int16[8] in memory either way, so a lane
  * loop of the C model below may serve any case PIE does not (a tail block,
- * a record of 3 or more, an unaligned region, VIOTA). The accumulator is
+ * an unaligned region, VIOTA). A field's 8 records are one aligned 128-bit
+ * access because regions are field planes (sec.5.1, v1.4). The accumulator is
  * QACC's image, stored and loaded whole around each instruction that uses
  * it (QACC_L then QACC_H, 128 + 32 bits each, at +0/+16/+32/+48): its byte
  * layout is never read in C, so it need not be known.
@@ -547,15 +546,6 @@ bool ksn_shiki_vec_pie=false;
 static void pie_copy(int16_t *d,const int16_t *a){
     __asm__ volatile("ee.vld.128.ip q0, %[a], 0\n" "ee.vst.128.ip q0, %[d], 0\n"
                      ::[a]"a"(a),[d]"a"(d):"memory");
-}
-/* Field f (0 or 1) of 8 two-element records at a (32 B, aligned). */
-static void pie_unzip(int16_t *d,const int16_t *a,unsigned f){
-    if(f)__asm__ volatile("ee.vld.128.ip q0, %[a], 16\n" "ee.vld.128.ip q1, %[a], 0\n"
-                          "ee.vunzip.16 q0, q1\n" "ee.vst.128.ip q1, %[d], 0\n"
-                          :[a]"+&a"(a):[d]"a"(d):"memory");
-    else __asm__ volatile("ee.vld.128.ip q0, %[a], 16\n" "ee.vld.128.ip q1, %[a], 0\n"
-                          "ee.vunzip.16 q0, q1\n" "ee.vst.128.ip q0, %[d], 0\n"
-                          :[a]"+&a"(a):[d]"a"(d):"memory");
 }
 #define PIE_BIN(name,insn) \
 static void name(int16_t *d,const int16_t *a,const int16_t *b){ \
@@ -627,22 +617,15 @@ static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_
         switch(i->op){
         case KSN_SHIKI_VLOAD: {
             const ksn_shiki_bound *g=&plan->region[i->a];
-            if(g->soa||g->k_rec==1){
-                const int16_t *d=(const int16_t *)g->data+(uint32_t)i->b*g->records+base;
-                if(live==8&&!((uintptr_t)d&15u)){pie_copy(v[i->dst],d);return;}
-            }else if(g->k_rec==2){
-                const int16_t *d=(const int16_t *)g->data+base*2u;
-                if(live==8&&!((uintptr_t)d&15u)){pie_unzip(v[i->dst],d,i->b);return;}
-            }
+            const int16_t *d=(const int16_t *)g->data+(uint32_t)i->b*g->stride+base;
+            if(live==8&&!((uintptr_t)d&15u)){pie_copy(v[i->dst],d);return;}
             break;                                   /* the C model's lane loop */
         }
         case KSN_SHIKI_VSTORE: {
             const ksn_shiki_bound *g=&plan->region[i->a];
-            if(g->soa||g->k_rec==1){
-                int16_t *d=(int16_t *)g->data+(uint32_t)i->b*g->records+base;
-                if(live==8&&!((uintptr_t)d&15u)){pie_copy(d,v[i->dst]);return;}
-            }
-            break;                                   /* AoS of 2+: the lane loop */
+            int16_t *d=(int16_t *)g->data+(uint32_t)i->b*g->stride+base;
+            if(live==8&&!((uintptr_t)d&15u)){pie_copy(d,v[i->dst]);return;}
+            break;
         }
         case KSN_SHIKI_VSPLAT: {
             const int16_t k=(int16_t)sat16(r[i->a]);
@@ -670,16 +653,14 @@ static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_
     switch(i->op){
     case KSN_SHIKI_VLOAD: {
         const ksn_shiki_bound *g=&plan->region[i->a];
-        const unsigned lane=g->soa?1u:g->k_rec;
-        const int16_t *d=(const int16_t *)g->data+(g->soa?(uint32_t)i->b*g->records+base:base*g->k_rec+i->b);
-        for(unsigned l=0;l<8;l++)v[i->dst][l]=l<live?d[l*lane]:0;
+        const int16_t *d=(const int16_t *)g->data+(uint32_t)i->b*g->stride+base;
+        for(unsigned l=0;l<8;l++)v[i->dst][l]=l<live?d[l]:0;
         break;
     }
     case KSN_SHIKI_VSTORE: {
         const ksn_shiki_bound *g=&plan->region[i->a];
-        const unsigned lane=g->soa?1u:g->k_rec;
-        int16_t *d=(int16_t *)g->data+(g->soa?(uint32_t)i->b*g->records+base:base*g->k_rec+i->b);
-        for(unsigned l=0;l<live;l++)d[l*lane]=v[i->dst][l];
+        int16_t *d=(int16_t *)g->data+(uint32_t)i->b*g->stride+base;
+        for(unsigned l=0;l<live;l++)d[l]=v[i->dst][l];
         break;
     }
     case KSN_SHIKI_VSPLAT: {
@@ -738,13 +719,13 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
         if(c<0||(uint32_t)c>g->records)return KSN_SHIKI_INVALID;
         count=(uint32_t)c;
     }
-    const unsigned q=(unsigned)i->imm,k=g->k_rec;
+    const unsigned q=(unsigned)i->imm;
     const int32_t half=q?1<<(q-1):0;
     const bool lines=i->op==KSN_SHIKI_EMIT_LINES;
     const int16_t *d=(const int16_t *)g->data;
-    /* A record's fields: AoS next to each other, SoA a plane apart. */
-    const uint32_t rec=g->soa?1u:k,field=g->soa?g->records:1u;
-    for(uint32_t c=0;c<count;c++,d+=rec){
+    /* A record's fields are a plane apart (sec.5.1). */
+    const uint32_t field=g->stride;
+    for(uint32_t c=0;c<count;c++,d++){
         int16_t p[4];
         for(unsigned j=0;j<(lines?4u:2u);j++){
             const int32_t x=(d[j*field]+half)>>q;   /* arithmetic shift: the floor */
@@ -913,8 +894,10 @@ void ksn_shiki_result_regions(const ksn_shiki_region *regions,unsigned n,ksn_shi
     put_int(put,ctx,(long)n);
     for(unsigned k=0;k<n;k++){
         const ksn_shiki_region *g=&regions[k];
-        put_int(put,ctx,(long)g->n);
-        for(uint32_t e=0;e<g->n;e++){
+        const uint32_t S=ksn_shiki_stride(g->records);
+        put_int(put,ctx,(long)g->records);
+        for(uint32_t c=0;c<g->k_rec;c++)for(uint32_t j=0;j<g->records;j++){
+            const uint32_t e=c*S+j;
             const long v=g->type==KSN_SHIKI_I16?((const int16_t *)g->data)[e]
                         :g->type==KSN_SHIKI_U16?((const uint16_t *)g->data)[e]
                         :((const int32_t *)g->data)[e];

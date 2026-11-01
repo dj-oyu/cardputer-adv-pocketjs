@@ -22,8 +22,9 @@
  *
  *
  * data (v1.3, apps/shikitest/shiki_data_test.js) is an array of regions, each
- * {t, q, k, v} (type, Q, record size, the elements as numbers) or a number j,
- * the same memory as region j. It is the case line's DATA part as values;
+ * {t, q, k, v} (type, Q, record size, the k * R values field by field as in
+ * the case line, spec v1.4 sec.10.1) or a number j, the same memory as
+ * region j. The values are laid out as planes of S = R rounded up to 8. It is the case line's DATA part as values;
  * the result line then carries the regions' contents (" D ..."), and a
  * malformed region makes the case REJECT, as in shiki_run.c.
  *
@@ -85,11 +86,13 @@ static bool read_regions(JSContext *ctx,JSValueConst data,regions_t *rs){
                JS_IsArray(v)&&int_prop(ctx,v,"length",&n);
             if(ok){
                 if(t<0||t>2||q<0||q>30||kr<1||kr>8||n<kr||n%kr||n/kr>KSN_SHIKI_RECORDS)rs->well=false;
-                void *mem=rs->well?calloc((size_t)n,t==KSN_SHIKI_I32?4:2):NULL;
+                const uint32_t R=rs->well?(uint32_t)(n/kr):0,S=ksn_shiki_stride(R);
+                void *mem=rs->well?calloc(ksn_shiki_region_elements(R,kr),t==KSN_SHIKI_I32?4:2):NULL;
                 if(rs->well&&!mem)rs->well=false;
                 rs->owned[k]=mem;
-                for(int64_t e=0;mem&&e<n;e++){
-                    JSValue x=JS_GetPropertyUint32(ctx,v,(uint32_t)e);
+                for(int64_t v_at=0;mem&&v_at<n;v_at++){
+                    const int64_t e=(v_at/R)*S+v_at%R;
+                    JSValue x=JS_GetPropertyUint32(ctx,v,(uint32_t)v_at);
                     int64_t val=0;
                     const bool num=JS_IsNumber(x)&&JS_ToInt64(ctx,&val,x)==0;
                     JS_FreeValue(ctx,x);
@@ -100,7 +103,7 @@ static bool read_regions(JSContext *ctx,JSValueConst data,regions_t *rs){
                     else if(t==1)((uint16_t *)mem)[e]=(uint16_t)val;
                     else ((int32_t *)mem)[e]=(int32_t)val;
                 }
-                rs->r[k]=(ksn_shiki_region){mem,(uint32_t)n,(uint8_t)t,(uint8_t)q,(uint8_t)kr};
+                rs->r[k]=(ksn_shiki_region){mem,R,(uint8_t)t,(uint8_t)q,(uint8_t)kr};
             }
             JS_FreeValue(ctx,v);
         }
