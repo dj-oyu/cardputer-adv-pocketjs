@@ -1,8 +1,9 @@
 'use strict';
 const V = pocket.kasane, H = V.procedural, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
 const SKN = {run: 1, legs: 1, frl: 1, frb: 1}; // Shiki (README)
-// sin, cos on radians via the integer Q16-turn API (README "sin は Shiki").
-const TQ = 32768 / PI, ss = r => SK.sin(r * TQ | 0) / 65536, sc = r => SK.cos(r * TQ | 0) / 65536;
+// Integers only (docs/apps/derby-integer.md): lengths are Q16 m, px Q16
+// where a fraction counts, angles Q16 turns. pocket.derby does the divisions.
+const S = pocket.derby, QM = 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
 H.beginFrame(0);
 const res = H.resource(), live = {}, queue = [];
@@ -21,14 +22,16 @@ function load() {
     const k = KN[tier], i = +n[1];
     let p;
     if (n[0] === 'g' && i >= 0) {
-      // Gallop frame i of the close-up horse.
-      const x = [], y = [], ph = PI * i / 3, b = bob(i), put = (u, v) => { x.push(rnd(8 * u)); y.push(rnd(8 * v)); };
+      // Gallop frame i of the close-up horse: units Q8, BODY in hundredths,
+      // a leg's phase o (u - 20 rad) and the frame's i/6 turn in Q16 turns.
+      const x = [], y = [], ph = 10923 * i, b = bob(i), put = (u, v) => { x.push(u + 16 >> 5); y.push(v + 16 >> 5); };
       let jx = 0, jy = 0;
       for (let j = 0; j < BODY.length; j += 2) {
-        const u = BODY[j], l = BODY[j + 1];
-        if (u < 20) { put(jx = u, jy = l + b); continue; }
-        const a = .55 * ss(ph + u - 20), kx = jx + l * ss(a), ky = jy + l * sc(a), a2 = a - .9 * mx(0, ss(ph + u - 18.6));
-        put(kx, ky); put(kx + l * ss(a2), ky + l * sc(a2)); put(kx, ky); put(jx, jy);
+        const u = BODY[j], l = BODY[j + 1] * 655 >> 8;
+        if (u < 2000) { put(jx = u * 655 >> 8, jy = l + b); continue; }
+        const o = ph + ((u - 2000) * 6675 >> 6), a = SK.sin(o) * 5737 >> 16, kx = jx + (l * SK.sin(a) >> 16),
+          ky = jy + (l * SK.cos(a) >> 16), a2 = a - (mx(0, SK.sin(o + 14603)) * 9387 >> 16);
+        put(kx, ky); put(kx + (l * SK.sin(a2) >> 16), ky + (l * SK.cos(a2) >> 16)); put(kx, ky); put(jx, jy);
       }
       p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
     } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
@@ -58,7 +61,8 @@ function sound() {
   if (!A || busy || !notes.length) return;
   const n = notes.splice(0, 2);
   busy = 1;
-  try { A.tone({frequencyHz: n[0], durationMs: n[1], gain: .45}).then(done, done); } catch (e) { busy = 0; }
+  // audio.tone's gain is a fraction (a listed boundary).
+  try { A.tone({frequencyHz: n[0], durationMs: n[1], gain: .45}).then(done, done); } catch (e) { busy = 0; } // int-lint: allow
 }
 // Notes as Hz, ms pairs; WIN and LOSE open with the camera click.
 const FANFARE = [523, 110, 659, 110, 784, 110, 1047, 260], BELL = [1568, 60, 1568, 60, 1568, 260],
@@ -68,10 +72,16 @@ const FANFARE = [523, 110, 659, 110, 784, 110, 1047, 260], BELL = [1568, 60, 156
 let pts = 1000, raceNo = 1, pick = 0, stake = 100, scene = '', t = 0, cam = 0, camT = 0, R = [], need = 0;
 let rs = null, od = null, fin = null, photoX = null, replay = 0;
 let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
-// Lanes drawn, the order far to near (README "レーンの横位置").
-let lz = DL.slice(), zo = [7, 6, 5, 4, 3, 2, 1, 0];
-// at()'s sway angles a / 40 + 2.4 i as Q16 turns, one sinMany a frame.
-const LT = new Int32Array(8), LS = new Int32Array(8), ZO = new Int32Array(8).map((_, i) => 2.4 * i * TQ);
+// Lane depths 12 Q^(n/20) m (Q16) for n 0..140: the lanes are PW[20 j];
+// at() steers to PW[...] (README "レーンの横位置").
+const PW = new Int32Array(141);
+PW[0] = 786432;
+for (let n = 0; n < 140; ++n) PW[n + 1] = PW[n] + (PW[n] * 268 >> 16);
+// Lanes drawn, the order far to near; xs (Q16 m along) and lz (Q16 m deep)
+// as Int32Array for pocket.derby; at()'s sway angles a / 40 + 2.4 i (Q16
+// turns), one sinMany a frame.
+const XS = new Int32Array(8), LT = new Int32Array(8), LS = new Int32Array(8), PO = new Int32Array(32);
+let lz = new Int32Array(8).map((_, i) => PW[20 * i]), zo = [7, 6, 5, 4, 3, 2, 1, 0];
 const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
   th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
 // Seeds: the hardware's, mixed with the stored race count (README).
@@ -88,146 +98,114 @@ try {
   }, nop);
 } catch (e) {}
 
-// The screen (README "Turf vision"): centre x, depth, half width, bottom
-// and top height (m), a 4:1 face.
-const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
-// The course: its sections [m along the inner rail, curvature 1/m, start x,
-// z, tangent x, z (, heading on a bend)]. pose(g, w): the point g m along it,
-// w m out from the side cameras' line (the side view's depth: inner rail 11,
-// screen 34, stands 40), as [x, z, tangent]; a bend's centre is 1/curvature
-// in from the rail. The straight gives [g, w, 1, 0] exactly. The oval (README
-// "楕円"): the back straight, a 120 m bend to the right, the home straight on
-// the straight's line from 650 m. CH: chord ends (pocket.derby).
-const OB = 650 - 120 * PI, SC = [], OC = [[OB, 0, 650 + OB, -218, -1, 0], [120 * PI, -1 / 120, 650, -218, -1, 0, PI], [2e3, 0, 650, 0, 1, 0]];
-let CRS = SC, CH;
-function pose(g, w) {
-  if (CRS === SC) return [g, w, 1, 0];
-  let i = 0;
-  while (i < 2 && g > CRS[i][0]) g -= CRS[i++][0];
-  const e = CRS[i];
-  let x = e[2], z = e[3], c = e[4], d = e[5];
-  if (e[1]) {
-    const r = 1 / e[1] + DNR, q = (e[6] + e[1] * g) * TQ | 0, C = SK.cos(q) / 65536, S = SK.sin(q) / 65536;
-    x += (S - d) * r; z -= (C - c) * r; c = C; d = S; g = 0;
-  }
-  return [x + g * c - w * d, z + g * d + w * c, c, d];
-}
-// ---- Cameras, a row a unit: [f, height, horizon y, lead, smoothed, lo,
-// hi]. A side unit looks along the course's normal from cx: the leader
-// lead/f m ahead of it (eased when smoothed, set on a cut), cx held within
-// lo..hi. WIDE, CLOSE (set per lane), FIELD, FINISH (slow motion), PHOTO
-// (along the line: the line is x=120), VISION (low, within 30 m of the
+// The screen's lettering offsets from its face (px; the face is
+// pocket.derby's: main/pocket/pocket_derby.c VS_*). FN: the feed's runners.
+const FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
+// The course: chord ends (CH, Q16 m) and sections [length, radius (0: a
+// straight), x, z, tangent x, z, heading (Q16 turns)], Q16; pose() is
+// pocket.derby's. The oval (README "楕円"): the back straight, a 120 m bend
+// to the right, the home straight on the straight's line from 650 m. OB: the
+// bend's start (650 - 120 pi m).
+const OB = 17891910, OC = [[OB, 0, 60490310, -14286848, -QM, 0], [24706490, -7864320, 42598400, -14286848, -QM, 0, 32768],
+  [131072000, 0, 42598400, 0, QM, 0]];
+let CRS = 0, CH;
+// ---- Cameras, a row a unit: [f (Q16 px), height (Q16 m), horizon y (Q16
+// px), lead/f (Q16 m: the leader that far ahead of the centre), smoothed,
+// lo, hi (Q16 m)]. A side unit looks along the course's normal from cx: the
+// leader lead/f m ahead of it (eased when smoothed, set on a cut), cx held
+// within lo..hi. WIDE, CLOSE (set per lane), FIELD, FINISH (slow motion),
+// PHOTO (along the line: the line is x=120), VISION (low, within 30 m of the
 // screen); HEAD ON is a still (paint).
-const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1e9], [170, 7, 22, 640, 0, -1e9, D - 6],
-  [300, 4, 30, 880, 0, D, D], [130, 1.6, 84, 880, 1, VS[0] - 30, VS[0] + 30], 0,
-  [200, 6, 28, 100, -14, -14], [200, 6, 28, 460, -14, -3], [200, 6, 28, 820, -14, -14]],
+const CAMS = [[6553600, 635699, 2162688, 576717, 1, -2000000000, 2000000000], 0, [3801088, 983040, 2359296, 994339, 1, -2000000000, 2000000000],
+  [11141120, 458752, 1441792, 246724, 0, -2000000000, 65142784], [19660800, 262144, 1966080, 192239, 0, 65536000, 65536000],
+  [8519680, 104858, 5505024, 443628, 1, 53084160, 57016320], 0,
+  [200, 6, 28, 6553600, -917504, -917504], [200, 6, 28, 30146560, -917504, -196608], [200, 6, 28, 53739520, -917504, -917504]],
   NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON', 'WIDE 1', 'WIDE 2', 'WIDE 3'];
-// Panning units (rows 7..9, [least f, height, horizon y, g, w, w on the
-// oval: WIDE 2 near its bend's centre]; README):
-// turned to the leader, f keeping it PAN[1] px long, at most PAN[2]. WIDE
-// takes the nearest when it is over PAN[0] m from the leader, or the leader
-// is on the oval's bend (the side view does not bend: README). Height 6 and
-// horizon 28 are baked in the pan plans. PAN[3]: the oval's bend in chords.
-// pc: the unit in use, [x, z, unit vector to the aim, f, distance to the
-// aim], null for a side unit.
-const PAN = [60, 14, 1500, 16];
-let pc = null, vq = null;
+// Panning units (rows 7..9, [least f (px), height, horizon y, g, w, w on the
+// oval: WIDE 2 near its bend's centre (Q16 m)]; README): turned to the
+// leader, f keeping it 14 px long, at most 1500. WIDE takes the nearest when
+// it is over 60 m from the leader, or the leader is on the oval's bend (the
+// side view does not bend: README). Height 6 and horizon 28 are baked in the
+// pan plans. PU: the units' [g, w] for pocket.derby.wide.
+// pc: the unit in use (null for a side unit), its f px at 4.
+let pc = null;
+const PU = new Int32Array(6);
 function wide(g) {
-  let m = 0, e = 1e9;
-  for (let i = 7; i < 10; ++i) {
-    const q = pose(CAMS[i][3], CAMS[i][CRS === OC ? 5 : 4]), a = pose(g, (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1];
-    if (x * x + z * z < e) e = x * x + z * z, m = i;
-  }
-  return e > PAN[0] * PAN[0] || CRS === OC && g > OB && g < 650 ? m : 0;
+  for (let i = 0; i < 3; ++i) PU[2 * i] = CAMS[7 + i][3], PU[2 * i + 1] = CAMS[7 + i][CRS ? 5 : 4];
+  const r = S.wide(g, PU);
+  return r > 3 || CRS && g > OB && g < 42598400 ? 7 + (r & 3) : 0;
 }
-// Sets cx for shot m (1: locked on lane l) and returns the camera.
+// x a / b for 0 <= x, a < 2^15 (Q16 fractions): the high and low halves.
+const fm = (x, a) => (x >> 16) * a + ((x & 65535) * a >> 16);
+// Sets cx for shot m (1: locked on lane l) and returns the camera [f, h, hy].
 function shot(m, xs, l, cut) {
   pc = null;
   if (m === 1) {
-    const f = 24 * lz[l];
-    cx = xs[l] - 12.5 * U - (HX - 120) / 24;
-    return [f, 3, HY + 6 * HS - 72];
+    cx = xs[l] - 136533 + 76459;
+    return [24 * lz[l], 196608, 2621440];
   }
   const c = CAMS[m];
   if (m > 6) {
-    const q = pose(c[3], c[CRS === OC ? 5 : 4]), a = pose(mx.apply(null, xs), (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1], e = M.sqrt(x * x + z * z);
-    pc = [q[0], q[1], x / e, z / e, mn(PAN[2], mx(c[0], PAN[1] * e / 2.4)), e];
-    return [pc[4], c[1], c[2]];
+    pc = [0, 0, 0, 0, S.aim(c[3], c[CRS ? 5 : 4], mx.apply(null, xs), c[0])];
+    return [pc[4] * QM, c[1] * QM, c[2] * QM];
   }
-  const tgt = mx.apply(null, xs) - c[3] / c[0];
-  cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88 : tgt));
+  const tgt = mx.apply(null, xs) - c[3];
+  cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + fm(tgt - cx, 7864) + VM : tgt));
   return c;
 }
 // Draws one frame of the course (dr, no list), back to front, for camera c
-// at x0. K: the screen's face when this is its feed, a camera 6 m behind
-// the leader, low on the rail: rails and the leading FN[tier] runners,
-// those wholly inside K.
+// at x0 (pocket.derby: stands, crowd, rails, turf, poles, gate). K: the
+// screen's face when this is its feed, a camera 6 m behind the leader, low on
+// the rail: rails and the leading FN[tier] runners, those wholly inside K.
 function course(c, x0, xs, close, gate, K) {
   if (!K && pc) return pan(xs);
-  const f = c[0], h = c[1], hy = c[2], k = KN[tier], o = K ? (K[0] + K[2]) / 2 : 120, R = K ? K[2] - 1 : 245,
-    sx = (w, d0) => o + (w - x0) * f / d0, gy = d0 => hy + h * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
-  const rail = (d0, col) => {
-    const p = f / d0, s = k[4] * p, a = sx((K ? M.ceil : flo)((x0 - (o - (K ? K[0] : -5)) / p) / k[4]) * k[4], d0);
-    dr('rail', a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col);
-  };
-  let q = f / 40, n;
+  const k = KN[tier];
+  S.side(c[0], c[1], c[2], x0, K ? K[0] : 0, K ? K[2] : 0);
   if (!K) {
-    // Stands and crowd at 40 m, a pillar every 12 m; the crowd's pattern is
-    // fixed on the stand (cells from its pillar j).
-    const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
-    n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
-    dr('stands', a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5));
-    dr('crowd', a, gy(40) - 1.2 * q, a + n * dx, gy(40) - 1.2 * q, -2.4 * q, -2.4 * q, j * 12 * KN[3][5], (j + n) * 12 * KN[3][5]);
+    S.part(0, live.stands, live.crowd || 0, 163840);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
-      dr('vis', vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
-      feed(xs, (vr[2] - vr[0]) / 120);
+      S.part(5, live.vis, vr[0], vr[1], vr[2], vr[3], von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
+      feed(xs, (vr[2] - vr[0]) * 546);
+      S.side(c[0], c[1], c[2], x0, 0, 0);
     }
   }
-  rail(DFR, 0xad55);
+  S.part(1, live.rail, 1481114, 0xad55, k[4]);
   if (!K) {
-    // Turf stripes: lines of constant distance, so they meet at the vanishing
-    // point; none whose near end is left of -470 (the VM's -480 limit: a
-    // close-up of a far lane at LIGHT's 10 m spacing reached -499).
-    q = f / DFR;
-    const w = k[5], i0 = mx(flo((x0 - 125 / q) / w), M.ceil((x0 - 590 * DNR / f) / w)), xf = sx(i0 * w, DFR), xn = sx(i0 * w, DNR);
-    n = mx(0, mn(M.ceil((250 - xf) / (w * q)), flo((700 - xn) / (w * f / DNR))));
-    dr('turf', xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1);
-    for (let m = 200; m <= D; m += 200) {
-      const p = sx(m, DFR), e = m === D;
-      if (p > -40 && p < 280)
-        dr('pole', p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR));
-    }
-    // The gate at 0 m: 9 stall posts, lane boundaries one MUL apart in depth.
-    q = f * M.sqrt(Q) / DL[0];
-    if (gate && M.abs(x0 * q) < 400) dr('gate', -x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy);
+    S.part(2, live.turf, k[5]);
+    S.part(3, live.pole);
+    if (gate) S.part(4, live.gate);
   }
+  S.lanes(xs, lz, PO, 0);
+  const L = K ? K[0] * QM : -160 * QM, R = K ? (K[2] - 1) * QM : 400 * QM;
   for (const l of zo) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
-    const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]);
+    const X = PO[4 * l], s = PO[4 * l + 1];
     if (l === close) {
       bflush();
-      const g = (flo(DO(xs[l], l) * .923077) % 6 + 6) % 6;
+      const g = ((DO(xs[l], l) >> 12) * 60495 >> 12) % 6;
       dr('g' + g, []);
-      dr('silk', SILK[l], rnd(HS * bob(g)));
-    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y, DO(xs[l], l));
+      dr('silk', SILK[l], HS * bob(g) + 128 >> 8);
+    } else if (K ? X - (5 * s >> 1) >= L && X + (25 * s >> 1) <= R : X > L && X < R) rin(l, X, s, PO[4 * l + 2], DO(xs[l], l));
   }
   bflush();
-  rail(DNR, 0xffff);
+  S.part(1, live.rail, 720896, 0xffff, k[4]);
 }
-// Shiki draws batched into one drawMany; DO: the legs' phase as a distance (README).
-const BH = new Uint32Array(32), BI = new Float64Array(32 * 7), DO = (x, l) => x + l * 1.0345;
+// Shiki draws batched into one drawMany, Q16 inputs; DO: the legs' phase as
+// a distance, xs plus the lane's offset (its gate phase; README).
+const BH = new Uint32Array(32), BI = new Int32Array(32 * 7), DO = (x, l) => x + l * 67797;
 let bn = 0, bs = 7;
 function bput(h, a, b, c, d, e, f, g) { const o = bn * bs; BH[bn++] = h; BI[o] = a; BI[o + 1] = b; BI[o + 2] = c; BI[o + 3] = d; BI[o + 4] = e; BI[o + 5] = f; if (bs > 6) BI[o + 6] = g; }
 function bflush() { if (bn) SK.drawMany(BH.subarray(0, bn), BI.subarray(0, bn * bs), bs); bn = 0; }
-// A runner: hip X, ground Y, S px per unit, distance d.
+// A runner: hip X, ground Y, S px per unit (Q16), distance d (Q16 m).
 function rin(l, X, S, Y, d) {
   if (!live.run || !live.legs) return;
   bs = 7; const c = F.h[l].coat;
   bput(live.legs, X, S, Y, d, c, 0, 0);
   bput(live.run, X, S, Y, d, c, SILK[l], SILK[l] ^ 0x8410);
 }
-// The screen's feed on its face vr at scale z: a low camera 6 m behind the leader.
+// The screen's feed on its face vr at scale z (Q16): a low camera 6 m behind
+// the leader.
 function feed(xs, z) {
-  if (von > 10) course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr);
+  if (von > 10) course([85 * z, 3 * QM, vr[1] * QM + (z << 2) + (z * 13107 >> 14)], mx.apply(null, xs) - 393216, xs, -1, 0, vr);
 }

@@ -7,10 +7,10 @@
 // The curtain (README): FX = ms to black before the demo, ms held black,
 // ms back in (also after a key), alpha steps.
 const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = 'a d e s r 1 , / tab'.split(' '), FX = [500, 700, 300, 8];
-let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk, fe = -1e9, fa = 0, nw = 0;
+let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk, fe = -1000000000, fa = 0, nw = 0;
 // A key ends the demo and is spent doing so (dk '' matches no key).
 function attract(b) {
-  const n = nw = pocket.time ? pocket.time.now() : 0;
+  const n = nw = pocket.time ? pocket.time.now() | 0 : 0;
   if (!dm && scene !== 'pad') { dk = 0; idle = n; return; }
   const k = K.down().join();
   let hit = b || k && k !== kp;
@@ -19,7 +19,7 @@ function attract(b) {
   if (!dm) {
     dk = 0;
     if (!idle || hit || k || scene !== 'pad') idle = n;
-    else if (n - idle >= DEMO_IDLE_S * 1e3) {
+    else if (n - idle >= DEMO_IDLE_S * 1000) {
       // Its code loads now, under the black curtain; short of heap, the
       // paddock comes back and the idle clock starts over (README).
       try { pocket.app.load('demo'); } catch (e) { log('DEMOFAIL ' + e); return idle = n; }
@@ -40,7 +40,8 @@ globalThis.frame = function (b) {
       ++t;
       if (camT > 0) --camT;
       // The curtain: wall clock only (attract's nw, fe); the game never reads it.
-      fa = rnd(mx(0, mn(1, mx(dm ? 0 : (nw - idle + FX[0]) / FX[0] - DEMO_IDLE_S * 1e3 / FX[0], 1 - (nw - fe) / FX[2]))) * FX[3]) * 255 / FX[3] | 0;
+      // Q8 (256 = black); FX[3] steps of 255 / FX[3].
+      fa = (mx(0, mn(256, mx(dm ? 0 : (mn(nw - idle, 1000000) - DEMO_IDLE_S * 1000 + FX[0]) * 131 >> 8, nw - fe >= FX[2] ? -1 : 256 - ((nw - fe) * 218 >> 8)))) * FX[3] + 128 >> 8) * 255 >> 3;
       if (P('tab')) { tier = (tier + 1) % 3; const l = ['stands', 'crowd'].filter(n => live[n] || queue.indexOf(n) >= 0); drop(l); want(l); log('TIER ' + tier); }
       load();
       let xs, c, l = pick, close = -1, gate = 0, extra = null, rank;
@@ -57,21 +58,21 @@ globalThis.frame = function (b) {
           if (!slow && lead > D - 20) { slow = 1; camT = 60; log('SLOW'); }
           // Slow motion shows each sim step over 4 frames: the sim never
           // changes, so the camera cannot change the race.
-          disp += slow ? .25 : 1;
-          for (; disp >= 1 && rs.done < 3; --disp) {
+          disp += slow ? 1 : 4;
+          for (; disp >= 4 && rs.done < 3; disp -= 4) {
             const was = rs.done;
             step(F, rs, DT);
             const w = (rank = order(rs))[0];
             if (w !== ld) { if (lead > 500) log('LEAD #' + (w + 1) + ' at ' + rnd(lead) + 'M'); if (lead > 400) dl = 60; ld = w; }
             // The photo: every runner where it was when the winner crossed.
-            if (!was && rs.done) photoX = photo((rs.tc[w] - rs.t + DT) / DT);
+            if (!was && rs.done) photoX = photo((rs.tc[w] - rs.t + DT) * 81920 | 0);
           }
           // The band's plan takes the gate's slot (README "plan の登録").
           if (live.gate && lead > 120) { drop(['gate']); want(['band']); }
           if (rs.done >= 3) { settle(); { enter('photo'); break fr; } }
         }
-        xs = at(slow ? disp : 1);
-        if (scene === 'gate' && !(live.run && live.legs)) xs = z8(-999);
+        xs = at(slow ? disp << 10 : 4096);
+        if (scene === 'gate' && !(live.run && live.legs)) xs = XS.fill(-65470464);
         if (hold > 0) --hold;
         if (dl > 0) --dl;
         if (man > 0) --man;
@@ -79,17 +80,18 @@ globalThis.frame = function (b) {
         // after 400 m cuts to the new leader, a cut is held 45 frames, HEAD ON
         // (a close finish) until the slow motion (README).
         // WIDE away from every panning unit is the nearest one (wide()).
-        const o = ro = rank || order(rs), L = rs.x[o[0]];
+        // L: the leader (Q16 m); the screen is at 840 m.
+        const o = ro = rank || order(rs), L = XQ[o[0]];
         let m = slow ? 3 : man ? cam : scene !== 'race' ? 0 : hold > 0 || cm === 6 ? cm :
-          L < 150 ? 0 : L < (F.o ? OB : 400) ? 2 : L < 700 ? (dl > 0 ? 1 : 0) : L < VS[0] - 60 ? 1 : L < VS[0] + 60 ? 5 :
-          L > D - 70 && L - rs.x[o[1]] < 1.5 ? 6 : 0;
+          L < 9830400 ? 0 : L < (F.o ? OB : 26214400) ? 2 : L < 45875200 ? (dl > 0 ? 1 : 0) : L < 51118080 ? 1 : L < 58982400 ? 5 :
+          L > 60948480 && L - XQ[o[1]] < 98304 ? 6 : 0;
         if (!m && scene === 'race' && !live.gate) m = wide(L);
         if (m !== cm) { cl = man ? pick : o[0]; cm = m; hold = camT = 45; log('CAM ' + (NAMES[m] || m)); }
         c = shot(m === 6 ? 0 : m, xs, cl, scene === 'gate' || camT === 45);
         close = m === 1 ? cl : -1;
         gate = live.gate;
         extra = ['map', z8(0)];
-        for (let i = 0; i < 8; ++i) extra[1][i] = 8 + mn(rs.x[i], D) * .224;
+        for (let i = 0; i < 8; ++i) extra[1][i] = 8 + ((mn(XQ[i], 65536000) >> 9) * 14680 >> 23);
       } else if (scene === 'photo') {
         xs = photo();
         c = shot(4, xs);
@@ -103,8 +105,8 @@ globalThis.frame = function (b) {
       }
       if (!xs) {
         // Paddock warm-up and the winner's canter: a lone horse, camera locked.
-        xs = z8(-999);
-        xs[l] = 60 + t * .25;
+        xs = XS.fill(-65470464);
+        xs[l] = 3932160 + t * 16384;
         c = shot(1, xs, l);
         close = l;
       }
@@ -122,8 +124,8 @@ globalThis.frame = function (b) {
         if (v && !(t & 3)) { R.v[2].setColor(tx, t & 8 ? 0xff2020ff : 0x401010ff); R.v[0].setText(tx, R.t[1].s + ' ' + R.t[0].s.slice(0, 5)); }
         if (scene === 'photo') {
           // Magnify 2x about the line and the runners' feet.
-          const z = mn(1, t / 30), e = z * z * (3 - 2 * z);
-          R[0].setRect(tx, [rnd(-120 * e), rnd(-100 * e), rnd(240 + 120 * e), rnd(135 + 35 * e)]);
+          const z = mn(256, t * 2185 >> 8), e = (z * z >> 8) * (768 - 2 * z) >> 8;
+          R[0].setRect(tx, [-120 * e + 128 >> 8, -100 * e + 128 >> 8, 240 + (120 * e + 128 >> 8), 135 + (35 * e + 128 >> 8)]);
         }
       };
       if (need) { build(up); need = 0; } else V.patch(up);

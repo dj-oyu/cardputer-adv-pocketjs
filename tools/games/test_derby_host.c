@@ -551,7 +551,11 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
     REQ(!JS_IsException(r));
     const double f=num(r);
     JS_FreeValue(ctx,r);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,g);
-    cap_draw((int)handle,in,n,f>=0?4u:0u,f>=0?f:0);
+    unsigned tag=0;double ff=0;
+    if(f>=0)tag=4,ff=f;
+    else if(f==-2)tag=1;
+    else if(f<=-3){ff=-f-3;tag=n>7&&in[7]==10565?3u:0u;}
+    cap_draw((int)handle,in,n,tag,ff);
 }
 static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;(void)argv;
@@ -651,11 +655,14 @@ static JSValue js_cap_sdraw(JSContext *c,JSValueConst self,int argc,JSValueConst
     int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
     sspec *s=sfind(h);REQ(s);
     const unsigned n=len(argv[1]);REQ(n<=KSN_SHIKI_INPUTS);
+    /* argv[2]: the inputs came as an Int32Array (each input's Q, unconverted). */
+    const bool fixed=argc>2&&JS_ToBool(c,argv[2]);
     double in[KSN_SHIKI_INPUTS];
-    for(unsigned i=0;i<n;i++)in[i]=at(argv[1],i);
+    int32_t fx[KSN_SHIKI_INPUTS];
+    for(unsigned i=0;i<n;i++){in[i]=at(argv[1],i);fx[i]=(int32_t)in[i];}
     static ksn_shiki_vm vm;
     static ksn_proc_frame f;
-    REQ(ksn_shiki_draw(s->plan,in,n,&vm,f.segments)==KSN_SHIKI_DONE);
+    REQ((fixed?ksn_shiki_draw_fixed(s->plan,fx,n,&vm,f.segments):ksn_shiki_draw(s->plan,in,n,&vm,f.segments))==KSN_SHIKI_DONE);
     f.count=vm.count;f.raster_steps=vm.raster;f.ext=vm.ext;
     append(&cand_plan,&f);append(&cand_vm,&f);
     frame_draws++;frame_steps+=vm.steps;shiki_draws++;
@@ -697,6 +704,8 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
             bool pattern;
             while(ksn_proc_frame_next(&cand_plan,&i,&g,&pattern,&cost)){
                 if(g.x0>=X0&&g.x0<=X1&&g.x1>=X0&&g.x1<=X1&&g.y0>=Y0&&g.y0<=Y1&&g.y1>=Y0&&g.y1<=Y1){inside++;continue;}
+                if(getenv("DERBY_DBGFACE")&&occluded_frames<1&&!(g.x1<X0&&g.x0<X0)&&!(g.y0>Y1&&g.y1>Y1)&&!(g.y0<Y0&&g.y1<Y0))
+                    printf("  front seg %d,%d-%d,%d\n",g.x0,g.y0,g.x1,g.y1);
                 g.color=0xffff;front.segments[front.count++]=g;
             }
             feed_segments+=inside;if(inside)feed_frames++;
@@ -1104,7 +1113,9 @@ static const char PRELUDE[]=
      * app's pc (the panning unit, f at 4) is a global of its scripts. */
     "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
     /* pocket.derby.ser's draws (pocket_proc_draw_hook): f for the series. */
-    "globalThis.__nt=h=>{const L=globalThis.derby&&derby.L;return L&&(h===L.prail||h===L.t0||h===L.t1)?pf():-1};"
+    /* and the draws pocket.derby.part() makes: -2 the screen's face (vis),
+     * -3 - f a panning unit's hl (the bezel when its colour is 10565). */
+    "globalThis.__nt=h=>{const L=globalThis.derby&&derby.L;return !L?-1:h===L.prail||h===L.t0||h===L.t1?pf():h===L.vis?-2:h===L.hl?-3-pf():-1};"
     /* Inputs as an array or as numbers (N12): i is the array, or the 8th
      * numeric input arguments[8]. */
     "P.draw=function(h,i){try{D.apply(P,arguments)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify([].slice.call(arguments,1)));throw e}"
@@ -1116,7 +1127,7 @@ static const char PRELUDE[]=
     "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
     "S.register=function(n){const h=SR.call(S,n);__sreg(h,n);return h};"
     "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
-    "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)))};})();"
+    "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)),I instanceof Int32Array)};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
      * keeps a clip), with their last rect and visibility. */
@@ -1186,7 +1197,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,2},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,3},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);

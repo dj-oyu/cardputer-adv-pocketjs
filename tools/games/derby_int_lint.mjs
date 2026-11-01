@@ -45,7 +45,10 @@ for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) {
     src = src.slice(0, p.start) + src.slice(p.start, p.end).replace(/[^\n]/g, ' ') + src.slice(p.end);
   const lines = src.split('\n');
   let n = 0;
+  const raw = text.split('\n');
   lines.forEach((line, k) => {
+    // A listed boundary (docs/apps/derby-integer.md sec.4.2) carries this mark.
+    if (/int-lint: allow/.test(raw[k])) return;
     for (const [name, re] of RULES)
       for (const m of line.matchAll(re)) {
         ++n;

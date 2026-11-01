@@ -14,18 +14,19 @@ function prog() {
 }
 // [LIGHT, MID, HEAVY]: stand tiers, crowd rows, dots per bay, roof arc
 // segments, rail post and turf stripe spacing (m), the crowd's head and body
-// patterns; then the crowd's skin, cloths, row shift, empty, cells a m.
+// patterns; then the crowd's skin, cloths, row shift, empty (its cells a m,
+// 2.5, go to pocket.derby as Q16: derby_view.js, derby_pan.js).
 const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
-  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5],
+  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1],
   // The dust and the band (docs/apps/derby-finish-fx.md; sizes and colours
   // are the dust, bokeh and band plans' first lines). 0..6 FINISH, 7..13
   // HEAD ON: the dust's area (x from, x to, y from, height), the dust's and
   // the bokeh's slot px (0: off), the band's strokes a side. 14 the dust's
   // rise px a frame (FINISH), 15, 16 the dust's and the bokeh's parallax (1:
   // the track at 16 m), 17 the drift px a frame a unit of parallax, 18 t a
-  // frame, 19 frames a band redraw. (20..22: the cut's frame, cx and camera,
-  // appended by paint().)
-  [20, 220, 50, 72, 20, 60, 3, 60, 180, 30, 50, 14, 0, 0, .24, 1, 1, .15, .003, 3]];
+  // frame (in the plans), 19 frames a band redraw; 14 and 17 in Q16. (20..22: the cut's
+  // frame, cx and camera, appended by paint().)
+  [20, 220, 50, 72, 20, 60, 3, 60, 180, 30, 50, 14, 0, 0, 15729, 1, 1, 9830, 0, 3]];
 let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
@@ -459,7 +460,8 @@ const T = {
   // KN[4] (the JS half: areas, layers, parallax, rates) and the constants on
   // each plan's first line (shapes, colours). A dust layer is a row of slots
   // w px wide that scrolls with the camera: the JS passes o (the first slot's
-  // x, -2w..-w from the area's left) and h0 (its number times GA, mod 2 pi);
+  // x, -2w..-w from the area's left) and h0 (its number times GA, as Q16
+  // turns), t as frames (docs/apps/derby-integer.md: integer inputs);
   // slot i's particle is placed by u = sin(h0 + i GA) (GA the golden angle:
   // no two slots alike) and sin(u * 137 ...) (chaotic in u), so it keeps its
   // look while the row scrolls. The row stops at xR; y within y0..y0 + yH.
@@ -471,13 +473,13 @@ const T = {
   /** @plan dust inputs: t, o, h0, w, xR, y0, yH */
   dust() {
     const SPK = .8, TW = 100, GR = .5, L = 2, C0 = 0xffd9, C1 = 0xe695, C2 = 0xffff, GA = 2.39996;
-    let x = o, h = h0;
-    const hs = yH * .5, yc = y0 + hs, jx = w * .45, tw = t * TW;
+    let x = o, h = h0 * .0000958738;
+    const hs = yH * .5, yc = y0 + hs, jx = w * .45, tw = t * .003 * TW;
     for (let i = 0; i < 40; i++) {
       if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
-      const py = sin(u * 137 + t) * hs + yc;
+      const py = sin(u * 137 + t * .003) * hs + yc;
       let cu = C0, l = 0;
       for (let a = 0; a < 1; a++) {
         if (GR > sin(u * 53)) break;
@@ -498,13 +500,13 @@ const T = {
   /** @plan bokeh inputs: t, o, h0, w, xR, y0, yH */
   bokeh() {
     const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
-    let x = o, h = h0;
+    let x = o, h = h0 * .0000958738;
     const jx = w * .45, rv = R0 * .3;
     for (let i = 0; i < 24; i++) {
       if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
-      const cy = sin(u * 137 + t) * (yH * .5) + yH * .5 + y0;
+      const cy = sin(u * 137 + t * .003) * (yH * .5) + yH * .5 + y0;
       let r = u * rv + R0, cc = RIM;
       for (let q = 0; q < N; q++) {
         const f = r * .7071;
@@ -549,12 +551,12 @@ const T = {
 };
 // The close-up horse: 6 gallop frames of one polyline (typed points, half
 // pixels), fixed on screen with the hip at HX,HY and 4 px per unit.
-const HX = 92, HY = 88, HS = 4, bob = k => k % 3 && (k % 3 < 2 ? .3031 : -.3031); // .35 sin(2 pi k / 3)
-// Units, y down, hip at 0,0; a pair 20+o,l is a leg of phase o and
-// segment length l from the point before it (knee, hoof, back up).
-const BODY = [-2.4, 3.2, -1.6, 1.4, -.6, 0, .3, -.4, 3.8, .3, 7, -.9, 8.3, -3.1, 9.9, -5, 9.8, -6, 10.5, -4.9,
-  12.7, -2.3, 12.5, -1.6, 10.4, -2.4, 9.3, -2, 8.6, .8, 7.4, 2.2, 23.14, 1.9, 23.64, 1.9, 4, 2.7, 1.2, 2, 20, 2,
-  20.5, 2, -.5, 1.2, -.6, 0];
+const HX = 92, HY = 88, HS = 4, bob = k => k % 3 && (k % 3 < 2 ? 78 : -78); // .35 sin(2 pi k / 3), Q8
+// Units (hundredths), y down, hip at 0,0; a pair 2000+o,l is a leg of phase
+// o and segment length l from the point before it (knee, hoof, back up).
+const BODY = [-240, 320, -160, 140, -60, 0, 30, -40, 380, 30, 700, -90, 830, -310, 990, -500, 980, -600, 1050, -490,
+  1270, -230, 1250, -160, 1040, -240, 930, -200, 860, 80, 740, 220, 2314, 190, 2364, 190, 400, 270, 120, 200, 2000, 200,
+  2050, 200, -50, 120, -60, 0];
 let F = null;
 // HEAD ON's fixed set (rails, finish line, stands, the screen edge on) as
 // one polyline; points from the camera in README.
