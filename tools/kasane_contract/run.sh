@@ -69,6 +69,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_bench.c \
     tools/kasane_contract/test_shiki_vec.c -lm -o "$out/shiki-vec"
   "$out/shiki-vec"
+  # sec.2.4's conversion in integers against the libm form (bit for bit).
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_from_double.c -lm -o "$out/shiki-from-double"
+  "$out/shiki-from-double"
   if [[ "$options" == -g* ]]; then
     node tools/kasane_ir/test_shiki_ref.mjs
     node tools/kasane_ir/shiki_diff.mjs --cases 20000 --keep "$out/shiki-diff"

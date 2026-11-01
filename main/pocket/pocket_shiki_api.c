@@ -287,6 +287,14 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
     double in[KSN_SHIKI_INPUTS]={0};
     for(uint32_t k=0;k<n;k++){
+        /* Inputs passed as arguments are read off their tag: an int or a
+         * double is the number itself, with no reference to take and drop
+         * (about 180 cycles an input otherwise, shiki-bundle.md sec.3). */
+        if(numeric){
+            const int tag=JS_VALUE_GET_TAG(argv[1+k]);
+            if(tag==JS_TAG_INT){in[k]=JS_VALUE_GET_INT(argv[1+k]);continue;}
+            if(JS_TAG_IS_FLOAT64(tag)){in[k]=JS_VALUE_GET_FLOAT64(argv[1+k]);continue;}
+        }
         JSValue v=numeric?JS_DupValue(ctx,argv[1+k]):JS_GetPropertyUint32(ctx,argv[1],k);
         const bool ok=number(ctx,v,&in[k]);
         JS_FreeValue(ctx,v);

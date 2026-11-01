@@ -71,14 +71,46 @@ static int32_t sat16(int64_t v){
 }
 
 bool ksn_shiki_from_double(double v,unsigned f,int32_t *out){
-    if(!isfinite(v))return false;
-    /* sec.2.4, in double as written: scale (exact, a power of two), clamp,
-     * then round half away from zero. */
-    double x=ldexp(v,(int)f);
-    if(x<-2147483648.0)x=-2147483648.0;
-    if(x>2147483647.0)x=2147483647.0;
-    const double r=x<0?-floor(-x+0.5):floor(x+0.5);
-    *out=(int32_t)r;
+    /* sec.2.4 -- scale by 2^f (exact), clamp to int32, round half away from
+     * zero -- computed on the double's bits with integer operations only.
+     * The S3 has no double unit, so ldexp/floor ran in software at about 390
+     * cycles an input (docs/kasane/shiki-bundle.md sec.3); this gives the
+     * same int32 for every double (tools/kasane_contract/test_shiki_from_double.c
+     * compares it with the libm form). Rounding before clamping is the same
+     * as clamping first: no value inside the int32 range rounds out of it,
+     * and every value outside clamps to the end it is beyond. */
+    uint64_t bits;
+    memcpy(&bits,&v,sizeof bits);
+    const bool neg=bits>>63;
+    const unsigned e=(unsigned)(bits>>52)&0x7FFu;
+    if(e==0x7FFu)return false;                       /* infinity or NaN */
+    uint64_t m=bits&((1ull<<52)-1);
+    int shift=(int)f-1074;                           /* |v| = m * 2^(shift - f) for e = 0 */
+    if(e){m|=1ull<<52;shift+=(int)e-1;}
+    uint64_t mag;                                    /* round(|v| * 2^f), saturated past 2^31 */
+    if(!m)mag=0;
+    else if(shift>=0)mag=shift>=11?(1ull<<32):m<<shift;   /* m >= 2^52 when shift > 0 */
+    else if(shift<-63)mag=0;                         /* |x| < 2^-10: rounds to 0 */
+    else{
+        /* floor(|x| + 0.5) with the addition rounded to a double, as the spec
+         * and the JS reference (Math.floor(Math.abs(x) + 0.5)) do it: 0.5 +
+         * 0.49999999999999994 is 1.0 in double. In units of 2^-s the sum is
+         * t = m + 2^(s-1) (under 2^63); round it to 53 significant bits,
+         * ties to even, then drop the s fraction bits. */
+        const unsigned s=(unsigned)-shift;
+        uint64_t t=m+(1ull<<(s-1));
+        const unsigned len=64u-(unsigned)__builtin_clzll(t);
+        if(len>53){
+            const unsigned d=len-53;
+            const uint64_t half=1ull<<(d-1),rest=t&((1ull<<d)-1);
+            t>>=d;
+            if(rest>half||(rest==half&&(t&1u)))t++;
+            t<<=d;
+        }
+        mag=t>>s;
+    }
+    if(neg)*out=mag>=(1ull<<31)?INT32_MIN:-(int32_t)mag;
+    else *out=mag>=(1ull<<31)-1?INT32_MAX:(int32_t)mag;
     return true;
 }
 
