@@ -65,6 +65,7 @@ def build(flags: list[str]) -> Path:
     obj_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(["python3", str(HERE / "patch_quickjs.py"), str(obj_dir)], check=True)
     table = run_derby.rom_table(obj_dir)
+    stable = run_derby.shiki_table(obj_dir)
     subprocess.run(["python3", "tools/make_font.py", str(obj_dir)], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
     (obj_dir / "kasane_pet_test_data.h").write_text(
@@ -90,7 +91,7 @@ def build(flags: list[str]) -> Path:
     # pocket_proc_hook_dry, which exists only under POCKET_PROC_DRAW_HOOK.
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/games/test_derby_host.c", *run_derby.kasane_sources(), *run_derby.EXTRA, str(table), *objects,
+                    "tools/games/test_derby_host.c", *run_derby.kasane_sources(), *run_derby.EXTRA, str(table), str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-Wl,--wrap=JS_NewContext", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
