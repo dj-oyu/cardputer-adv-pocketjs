@@ -713,8 +713,10 @@ static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n,uns
     frame_draws++;frame_steps+=vm.steps;shiki_draws++;
     if(tag)tagged(tag,in,&f);
 }
+static uint32_t sh_used_max,sh_largest_min=UINT32_MAX;
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;
+    {uint32_t b=0,u=0,l=0;shiki_heap_info(&b,&u,&l);if(u>sh_used_max)sh_used_max=u;if(l<sh_largest_min)sh_largest_min=l;}
     /* argv[0]: the panning unit's f, 0 for a side unit. */
     cur_pan_f=argc?num(argv[0]):0;
     if(cur_pan_f>0){pan_frames++;if(cur_pan_f<pan_f_lo)pan_f_lo=cur_pan_f;if(cur_pan_f>pan_f_hi)pan_f_hi=cur_pan_f;}
@@ -1510,6 +1512,7 @@ int main(int argc,char **argv){
      for(unsigned k=0;k<count;k++){
          const size_t body=rom[k].len-12u*rom[k].code[6];   /* the instructions end the bytes (sec.3) */
          for(unsigned i=0;i<rom[k].code[6];i++)shiki_ops_rom|=1ull<<rom[k].code[body+12*i];}}
+    printf("shiki heap: used max %u, largest free min %u (of %u)\n",sh_used_max,sh_largest_min,SHIKI_HEAP_DEFAULT_BYTES);
     printf("shiki ops: built-in %llx, drawn %llx\n",(unsigned long long)shiki_ops_rom,(unsigned long long)shiki_ops_drawn);
     if(!(ops_used&~(1u<<KSN_PROC_SET)))ops_need=ops_used;
     bool pass=!exceptions&&!bad_present&&!framefails&&(ops_used&ops_need)==ops_need&&(shiki_ops_drawn&shiki_ops_rom)==shiki_ops_rom&&shiki_draws>0&&frame_reg_max<=1&&go_seen>=1&&

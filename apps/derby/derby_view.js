@@ -3,9 +3,11 @@ const V = pocket.kasane, SK = V.shiki, K = pocket.input.keys, log = m => console
 // Integers only (docs/apps/derby-integer.md): lengths are Q16 m, px Q16
 // where a fraction counts, angles Q16 turns. pocket.derby does the divisions.
 const S = pocket.derby, QM = 65536;
-// Frames now, while the heap still has holes that size (MEGADEMO's lesson).
+// Frames now, while the heap still has holes that size (MEGADEMO's lesson),
+// 768 segments each: the most in a frame is 583 (host, every tier), and the
+// Shiki heap holds the frames, the programs and the windows (README).
+const res = SK.resource({maxSegments: 768}), live = {}, win = {}, queue = [];
 SK.beginFrame(0);
-const res = SK.resource(), live = {}, win = {}, queue = [];
 derby.L = live; // the host oracle names plans by these handles
 let reg = 0;
 // One plan a frame from frame 1 (info() is null while evaluating), only
@@ -46,13 +48,17 @@ function load() {
     queue.push(queue.shift());
   }
 }
-// A polyline (px) as Shiki: its segments (x0, y0, x1, y1) in an i16 window
-// and one EMIT_LINES of colour c (README). [code, , window].
+// A polyline (px) as Shiki: its points (x, y) in an i16 window, drawn by
+// EACH; FETCH at Q16; LINE in colour c (the first LINE only moves the pen).
+// [code, , window] (README).
 function poly(n, x, y, c) {
-  const m = x.length - 1, w = win[n] = SK.data({type: 'i16', q: 0, records: m, record: 4}), S = m + 7 & ~7;
-  for (let i = 0; i < m; ++i) { w[i] = x[i]; w[S + i] = y[i]; w[2 * S + i] = x[i + 1]; w[3 * S + i] = y[i + 1]; }
-  const b = new Uint8Array(28);
-  b.set([83, 75, 73, 49, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 4, 0, 45, 0, 0, 0, 0, 0, 0, 0, c & 255, c >> 8]);
+  const m = x.length, w = win[n] = SK.data({type: 'i16', q: 0, records: m, record: 2}), S = m + 7 & ~7;
+  for (let i = 0; i < m; ++i) { w[i] = x[i]; w[S + i] = y[i]; }
+  const b = new Uint8Array(64);
+  b.set([83, 75, 73, 49, 1, 0, 4, 0, 0, 1, 0, 0, 0, 0, 2, 0, 23], 0);
+  b.set([24, 0, 0, 0, 16, 0, 0, 0, 2], 28);
+  b.set([9, 0, 0, 1, 0, 0, 0, 0, c & 255, c >> 8], 40);
+  b[52] = 6;
   return [b, 0, w];
 }
 // Draws plan n now if it is registered (inputs are copied: pocket_proc.c).
