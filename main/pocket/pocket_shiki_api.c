@@ -356,7 +356,7 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     for(size_t i=0;i<count;i++){
         if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
         JSValue r=pocket_proc_shiki_draw_inputs(ctx,handles[i],real?real+i*stride:NULL,
-                                                fixed?fixed+i*stride:NULL,stride);
+                                                fixed?fixed+i*stride:NULL,stride,(unsigned)i);
         if(JS_IsException(r)){
             JSValue e=JS_GetException(ctx);
             if(JS_IsObject(e))JS_SetPropertyStr(ctx,e,"index",JS_NewUint32(ctx,(uint32_t)i));

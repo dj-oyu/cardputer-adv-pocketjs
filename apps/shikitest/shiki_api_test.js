@@ -123,6 +123,18 @@ globalThis.shikiApiTest = function (pocket, log) {
   S.drawMany(new Uint32Array([inc, inc]), two.subarray(0, 2), 1);
   ok('many alias', two[0] === 7 && two[1] === 7);
   S.unregister(inc); S.release(two);
+  // v2.0 draft: DRAW_INDEX r0; STORE r0 into record r0 (drawMany's entry
+  // numbers 0..3); LOAD r1 from record r0; out of range INVALID.
+  const ix = S.data({type: 'i16', q: 0, records: 4, record: 1});
+  const own = S.register(asm([[0, 0, 1, 1]], [[29, 0], [28, 0, 0, 0, 0, 256], [27, 1, 0, 0, 0, 256]]), [], {data: [ix]});
+  const ir = () => ix.subarray(0, 4).join();          // the records (the window ends in padding)
+  S.drawMany(new Uint32Array([own, own, own, own]), null, 0);
+  ok('draw index', ir() === '0,1,2,3');
+  ix.fill(9); S.draw(own);
+  ok('draw index 0', ir() === '0,9,9,9');
+  throws('load range', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([own, own, own, own, own]), null, 0));
+  S.beginFrame(0);
+  S.unregister(own); S.release(ix);
   S.beginFrame(0);
   let at = -1;
   try { S.drawMany(new Uint32Array([put, put, put]), new Float64Array([1, NaN, 1]), 1); } catch (e) { at = e.index; }

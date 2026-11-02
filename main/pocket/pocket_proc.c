@@ -1040,9 +1040,10 @@ uint32_t pocket_cycles(void){
 #endif
 }
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
-    return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n);
+    return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
 }
-JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n){
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
+                                      unsigned index){
     const char *op="kasane.shiki.draw";
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
@@ -1058,8 +1059,19 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     image_band_valid=false;
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
-    const ksn_shiki_status s=fixed?ksn_shiki_draw_fixed(slot->plan,fixed,n,shiki_vm,scratch)
-                                  :ksn_shiki_draw(slot->plan,in,n,shiki_vm,scratch);
+    /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
+     * its number (DRAW_INDEX, Shiki v2.0 draft sec.4.1). */
+    ksn_shiki_status s;
+    if(fixed)s=ksn_shiki_draw_index(slot->plan,fixed,n,index,shiki_vm,scratch);
+    else{
+        int32_t fx[KSN_SHIKI_INPUTS]={0};
+        const ksn_shiki_plan *pl=slot->plan;
+        bool good=true;
+        for(unsigned k=0;k<pl->inputs&&good;k++)
+            good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
+        if(good)s=ksn_shiki_draw_index(pl,fx,pl->inputs,index,shiki_vm,scratch);
+        else{memset(shiki_vm,0,sizeof *shiki_vm);s=KSN_SHIKI_BADINPUT;}
+    }
     if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
     if(s!=KSN_SHIKI_DONE){
         building=false;
