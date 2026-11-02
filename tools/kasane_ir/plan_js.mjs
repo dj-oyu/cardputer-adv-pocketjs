@@ -14,7 +14,8 @@
 import {compileAst} from './kir.mjs';
 
 export const RULES = {
-  R1: 'statements: let/const, = += -= *=, for (let i = 0; i < n; i++), if (a > b) break;, move/line/plot/cubic/linePattern(...)',
+  R1: 'statements: let/const, = += -= *=, for (let i = 0; i < n; i++), if (a > b) break;, move/line/plot/cubic/linePattern(...); ' +
+    'with @data regions (Shiki v1.3): for (const [a, b] of region) / of region.take(n), region.put(...), region[i]',
   R2: 'expressions: numbers, names, + - *, unary -, / by a constant, sin() or Math.sin(), Math.PI, parentheses',
   R3: 'loops: for (let i = 0; i < n; i++) with n not changed in the body and i not assigned; no while/do/continue',
   R4: 'names: the @plan inputs, the parameters, locals declared before use; no shadowing, no reassigned const',
@@ -42,7 +43,7 @@ const KEYWORDS = new Set(['while', 'do', 'switch', 'return', 'var', 'function', 
   'continue', 'else', 'yield', 'await', 'typeof', 'delete', 'this', 'with', 'in', 'of', 'import', 'export']);
 
 // The function body -> kir.mjs statements (for desugared to repeat).
-function parseBody(src, line0, inputs, params) {
+function parseBody(src, line0, inputs, params, data = []) {
   const t = lex(src, line0);
   let p = 0;
   const scopes = [new Map()];
@@ -54,6 +55,8 @@ function parseBody(src, line0, inputs, params) {
   };
   inputs.forEach(n => declare(n, 'input', line0));
   params.forEach(n => declare(n, 'param', line0));
+  data.forEach(d => declare(d.name, 'data', line0));
+  const region = n => lookup(n)?.kind === 'data';
   const peek = (k, o = 0) => t[p + o].k === k || (t[p + o].k === 'id' && t[p + o].v === k);
   const take = (k, rule = 'R1') => { if (!peek(k)) fail(t[p].line, rule, `expected ${k}, got ${t[p].v ?? t[p].k}`); return t[p++]; };
   function primary() {
@@ -74,6 +77,12 @@ function parseBody(src, line0, inputs, params) {
       }
       if (KEYWORDS.has(x.v)) fail(x.line, 'R5', `${x.v}`);
       if (!lookup(x.v)) fail(x.line, 'R4', `${x.v} is not declared here`);
+      if (region(x.v)) {
+        // table[i]: LOOKUP (Shiki v1.3, shiki-spec.md sec.8.2).
+        if (!peek('[')) fail(x.line, 'R5', `the data region ${x.v} used as a value`);
+        p++; const i = expr(); take(']', 'R2');
+        return {k: 'index', r: x.v, i, line: x.line};
+      }
       return {k: 'name', v: x.v, line: x.line};
     }
     fail(x.line, x.k === '[' || x.k === "'" || x.k === '"' || x.k === '`' || x.k === '{' ? 'R5' : 'R2', `unexpected ${x.v ?? x.k}`);
@@ -103,7 +112,7 @@ function parseBody(src, line0, inputs, params) {
     return a;
   }
   let allowCompare = false, loops = 0;
-  const names = e => e.k === 'name' ? [e.v] : [e.a, e.b, ...(e.args ?? [])].filter(Boolean).flatMap(names);
+  const names = e => e.k === 'name' ? [e.v] : [e.a, e.b, e.i, ...(e.args ?? [])].filter(Boolean).flatMap(names);
   const assignedIn = body => body.flatMap(s => s.k === 'assign' ? [s.n] : s.k === 'decl' ? s.d.map(d => d.n) : s.body ? assignedIn(s.body) : []);
   const reads = body => body.flatMap(s => [
     ...(s.e ? names(s.e) : []), ...(s.d ? s.d.flatMap(d => names(d.e)) : []), ...(s.args ? s.args.flatMap(names) : []),
@@ -144,6 +153,14 @@ function parseBody(src, line0, inputs, params) {
     }
     if (x.k !== 'id') fail(line, 'R1', `a statement starting with ${x.k}`);
     const n = t[p++].v;
+    if (region(n)) {
+      // region.put(e0, ...): PUT into the record of the loop over region.
+      take('.'); if (take('id').v !== 'put') fail(line, 'R5', `${n}.${t[p - 1].v}`);
+      take('('); const args = [];
+      if (!peek(')')) do args.push(expr()); while (peek(',') && take(','));
+      take(')'); take(';');
+      return [{k: 'put', r: n, args, line}];
+    }
     if (peek('(')) {
       if (!['move', 'line', 'plot', 'cubic', 'linePattern'].includes(n)) fail(line, 'R5', `a call to ${n}()`);
       take('('); const args = [];
@@ -162,8 +179,28 @@ function parseBody(src, line0, inputs, params) {
     p++; const e = expr(); take(';');
     return [{k: 'assign', n, o, e, line}];
   }
+  // for (const [a, b, c] of region) / of region.take(n): EACH + FETCH.
+  function forOf(line) {
+    take('const'); take('['); const vs = [];
+    do vs.push(take('id', 'R1').v); while (peek(',') && take(','));
+    take(']'); take('of', 'R3');
+    const r = take('id', 'R3').v;
+    if (!region(r)) fail(line, 'R3', `${r} is not a @data region`);
+    let n = null;
+    if (peek('.')) {
+      p++; if (take('id', 'R3').v !== 'take') fail(line, 'R3', `${r}.${t[p - 1].v} (only .take(n))`);
+      take('('); n = expr(); take(')');
+    }
+    take(')', 'R3');
+    scopes.push(new Map());
+    vs.forEach(v => declare(v, 'const', line));
+    loops++; const body = block(); loops--;
+    scopes.pop();
+    return [{k: 'each', r, names: vs, n, body, line}];
+  }
   function forLoop(line) {
     p++; take('(', 'R3');
+    if (peek('const') && peek('[', 1)) return forOf(line);
     if (!peek('let')) fail(line, 'R3', 'the loop variable must be declared with let');
     p++; const v = take('id', 'R3').v; take('=', 'R3');
     const zero = take('num', 'R3');
@@ -198,11 +235,21 @@ function parseBody(src, line0, inputs, params) {
 // Every /** ... @plan name ... inputs: a, b */ function f(args) { ... } in a
 // file, and the method form f(args) { ... } (method: true), for a plan that
 // is a property of an object literal.
-export function findPlans(text, file = '') {
-  const re = /\/\*\*((?:(?!\*\/)[\s\S])*?@plan\s[\s\S]*?)\*\/\s*(function\s+)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{/g, out = [];
+//
+// marks: which doc tags count. The float pipeline (lower_plans.mjs) reads
+// @plan only; the Shiki tools pass ['plan', 'shiki']. @data lines
+// (`@data seats: i16 q8 record 3 write`, Shiki v1.3) become plan.data in
+// order: the region numbers.
+export function findPlans(text, file = '', marks = ['plan']) {
+  const tag = `@(?:${marks.join('|')})`;
+  const re = new RegExp(`\\/\\*\\*((?:(?!\\*\\/)[\\s\\S])*?${tag}\\s[\\s\\S]*?)\\*\\/\\s*(function\\s+)?([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*\\{`, 'g'), out = [];
   let m;
   while ((m = re.exec(text))) {
-    const doc = m[1], name = /@plan\s+([\w.$-]+)/.exec(doc)[1];
+    const doc = m[1], name = new RegExp(`${tag}\\s+([\\w.$-]+)`).exec(doc)[1];
+    const data = [...doc.matchAll(/@data\s+([A-Za-z_$][\w$]*)\s*:\s*(i16|u16|i32)\s+q(\d+)\s+record\s+(\d+)(\s+write)?/g)]
+      .map(d => ({name: d[1], type: ['i16', 'u16', 'i32'].indexOf(d[2]), q: +d[3], k: +d[4], write: d[5] ? 1 : 0}));
+    if (data.length > 4) throw new PlanError(`${file}: ${name}: more than 4 @data regions`);
+    for (const d of data) if (d.q > 30 || d.k < 1 || d.k > 8) throw new PlanError(`${file}: ${name}: @data ${d.name}: q 0..30, record 1..8`);
     const inputs = (/inputs:\s*([^\n*]*)/.exec(doc)?.[1] ?? '').split(',').map(s => s.trim()).filter(Boolean);
     if (inputs.length > 8) throw new PlanError(`${file}: ${name}: more than 8 inputs`);
     const params = m[4].split(',').map(s => s.trim()).filter(Boolean);
@@ -217,14 +264,14 @@ export function findPlans(text, file = '') {
     }
     const fnStart = text.lastIndexOf('/**', m.index + 3);
     const head = m.index + m[0].length - m[0].replace(/^\/\*\*[\s\S]*?\*\/\s*/, '').length;
-    out.push({name, fn: m[3], method: !m[2], inputs, params, body: text.slice(start, i - 1), line: bodyLine,
+    out.push({name, fn: m[3], method: !m[2], inputs, params, data, body: text.slice(start, i - 1), line: bodyLine,
       start: fnStart, end: i, text: (m[2] ? '' : 'function ') + text.slice(head, i), file});
   }
   return out;
 }
 export function planAst(plan) {
   try {
-    const body = parseBody(plan.body, plan.line, plan.inputs, plan.params);
+    const body = parseBody(plan.body, plan.line, plan.inputs, plan.params, plan.data ?? []);
     return [{k: 'input', d: plan.inputs.map((n, k) => ({n, k}))},
       ...plan.params.map((n, index) => ({k: 'param', n, index})), ...body];
   } catch (e) {

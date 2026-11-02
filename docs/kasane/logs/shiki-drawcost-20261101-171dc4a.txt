@@ -1,0 +1,11 @@
+# Shiki draw cost by stage after the integer sec.2.4 conversion and tag-read
+# inputs, device run 2026-11-01 (broker job dc-run2-171dc4a, firmware 171dc4a,
+# ELF 4ce80d0c...). Same probe as shiki-drawcost-20261101-94aea92.txt.
+I (125733) js: DC BEGIN n=200 rounds=5 BUILD 1 4ce80d0cd0c197ce
+I (125741) js: DC loop total=1119.5 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (125749) js: DC native total=1161.6 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (125762) js: DC draw0 total=2331.0 parse=501.1 lookup=107.0 engine=277.6 copy=77.0 n=200
+I (125784) js: DC draw8 total=4499.6 parse=874.0 lookup=123.1 engine=1454.8 copy=82.4 n=200
+I (125816) js: DC draw8arr total=6887.6 parse=3664.5 lookup=123.3 engine=1472.8 copy=82.4 n=200
+I (125833) js: DC point total=3162.5 parse=592.6 lookup=138.3 engine=818.6 copy=103.2 n=200
+I (125835) js: DC END

@@ -14,18 +14,19 @@ function prog() {
 }
 // [LIGHT, MID, HEAVY]: stand tiers, crowd rows, dots per bay, roof arc
 // segments, rail post and turf stripe spacing (m), the crowd's head and body
-// patterns; then the crowd's skin, cloths, row shift, empty, cells a m.
+// patterns; then the crowd's skin, cloths, row shift, empty (its cells a m,
+// 2.5, go to pocket.derby as Q16: derby_view.js, derby_pan.js).
 const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
-  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5],
+  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1],
   // The dust and the band (docs/apps/derby-finish-fx.md; sizes and colours
   // are the dust, bokeh and band plans' first lines). 0..6 FINISH, 7..13
   // HEAD ON: the dust's area (x from, x to, y from, height), the dust's and
   // the bokeh's slot px (0: off), the band's strokes a side. 14 the dust's
   // rise px a frame (FINISH), 15, 16 the dust's and the bokeh's parallax (1:
   // the track at 16 m), 17 the drift px a frame a unit of parallax, 18 t a
-  // frame, 19 frames a band redraw. (20..22: the cut's frame, cx and camera,
-  // appended by paint().)
-  [20, 220, 50, 72, 20, 60, 3, 60, 180, 30, 50, 14, 0, 0, .24, 1, 1, .15, .003, 3]];
+  // frame (in the plans), 19 frames a band redraw; 14 and 17 in Q16. (20..22: the cut's
+  // frame, cx and camera, appended by paint().)
+  [20, 220, 50, 72, 20, 60, 3, 60, 180, 30, 50, 14, 0, 0, 15729, 1, 1, 9830, 0, 3]];
 let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
@@ -115,22 +116,32 @@ const T = {
     }
   },
 
-  // runner: one horse on the gate / FIELD shots. Hip at (x, y), size s; the
-  // body in coat $0, four legs to (leg0..3, hoof), the jockey in silk $1 and
-  // a cap in $2 (silk ^ 0x8410).
-  /** @plan runner inputs: x, y, s, hoof, leg0, leg1, leg2, leg3 */
-  runner(p0, p1, p2) {
-    const u = s * 2.5, up = -1 * u;
+  // run, legs (Shiki, docs/kasane/shiki-bundle.md): one horse on the gate /
+  // FIELD shots, every horse the same two programs (colours are inputs).
+  // Hip at X, back Y - 6S (bobbing), ground Y, S px per unit; d is the
+  // horse's distance in m (plus its own offset): the stride is 6.5 m, so the
+  // leg phase is 2 pi d / 6.5, and sin runs here, not in JS. legs first.
+  /** @shiki run inputs: X, S, Y, d, coat, silk, cap
+   *  @q coat=0, silk=0, cap=0 */
+  run() {
+    const x = X, y = Y - 6 * S + .6 * S * sin(d * 1.93328);
+    const u = S * 2.5, up = -1 * u;
     const back = x + u + u, withers = back + u, head = withers + u;
     const high = y + up, higher = high + up;
     move(x + up, y + u);
-    line(x, y, p0); line(withers, y, p0); line(head, higher, p0); line(head + u, high, p0); line(head, high, p0);
-    move(x, y); line(leg0, hoof, p0);
-    move(x, y); line(leg1, hoof, p0);
-    move(withers, y); line(leg2, hoof, p0);
-    move(withers, y); line(leg3, hoof, p0);
-    move(back, y); line(back, high, p1); line(withers, higher, p1); line(head, high, p1);
-    plot(withers, higher, p2);
+    line(x, y, coat); line(withers, y, coat); line(head, higher, coat); line(head + u, high, coat); line(head, high, coat);
+    move(back, y); line(back, high, silk); line(withers, higher, silk); line(head, high, silk);
+    plot(withers, higher, cap);
+  },
+  /** @shiki legs inputs: X, S, Y, d, coat
+   *  @q coat=0 */
+  legs() {
+    const y = Y - 6 * S + .6 * S * sin(d * 1.93328);
+    const s3 = 3 * S, xa = X + .5 * S, xb = X + 8 * S, w = X + 7.5 * S, a = d * .966644;
+    move(X, y); line(xa + s3 * sin(a), Y, coat);
+    move(X, y); line(xa + s3 * sin(a + .8), Y, coat);
+    move(w, y); line(xb + s3 * sin(a + 3.3), Y, coat);
+    move(w, y); line(xb + s3 * sin(a + 4.1), Y, coat);
   },
 
   // gate: the starting stalls, 9 dividers from the centre outwards, each a
@@ -313,17 +324,30 @@ const T = {
     line(a4, legY, 19049);
   },
 
-  // fr: a horse head on (HEAD ON cut): x, ground y, px per unit s, coat,
-  // jockey (silk), lift of each foreleg (px).
-  /** @plan fr inputs: x, ground, s, coat, jockey, lift0, lift1 */
-  fr() {
+  // frl, frb (Shiki): a horse head on (HEAD ON cut): x, ground y, px per
+  // unit s, distance d (as run), coat, jockey (silk). frl: the forelegs, each
+  // lifted by max(0, +-1.5 s sin(2 pi d / 6.5)); frb: body and jockey.
+  /** @shiki frl inputs: x, ground, s, d, coat
+   *  @q coat=0 */
+  frl() {
+    const L = 1.5 * s * sin(d * .966644);
+    let l0 = 0, l1 = 0;
+    for (let i = 0; i < 1; i++) { if (0 > L) break; l0 = L; }
+    for (let i = 0; i < 1; i++) { if (L > 0) break; l1 = -L; }
     const k0 = (-1.2) * s + x;
     const k1 = k0 * (-1) + x + x;
     const knee = (-6) * s + ground;
     move(k0, knee);
-    line(k0, lift0 * (-1) + ground, coat);
+    line(k0, l0 * (-1) + ground, coat);
     move(k1, knee);
-    line(k1, lift1 * (-1) + ground, coat);
+    line(k1, l1 * (-1) + ground, coat);
+  },
+  /** @shiki frb inputs: x, ground, s, d, coat, jockey
+   *  @q coat=0, jockey=0 */
+  frb() {
+    const k0 = (-1.2) * s + x;
+    const k1 = k0 * (-1) + x + x;
+    const knee = (-6) * s + ground;
     const ns = s * (-1);
     const c1 = s * (-1) + x;
     const c2 = x + s;
@@ -436,7 +460,8 @@ const T = {
   // KN[4] (the JS half: areas, layers, parallax, rates) and the constants on
   // each plan's first line (shapes, colours). A dust layer is a row of slots
   // w px wide that scrolls with the camera: the JS passes o (the first slot's
-  // x, -2w..-w from the area's left) and h0 (its number times GA, mod 2 pi);
+  // x, -2w..-w from the area's left) and h0 (its number times GA, as Q16
+  // turns), t as frames (docs/apps/derby-integer.md: integer inputs);
   // slot i's particle is placed by u = sin(h0 + i GA) (GA the golden angle:
   // no two slots alike) and sin(u * 137 ...) (chaotic in u), so it keeps its
   // look while the row scrolls. The row stops at xR; y within y0..y0 + yH.
@@ -448,13 +473,13 @@ const T = {
   /** @plan dust inputs: t, o, h0, w, xR, y0, yH */
   dust() {
     const SPK = .8, TW = 100, GR = .5, L = 2, C0 = 0xffd9, C1 = 0xe695, C2 = 0xffff, GA = 2.39996;
-    let x = o, h = h0;
-    const hs = yH * .5, yc = y0 + hs, jx = w * .45, tw = t * TW;
+    let x = o, h = h0 * .0000958738;
+    const hs = yH * .5, yc = y0 + hs, jx = w * .45, tw = t * .003 * TW;
     for (let i = 0; i < 40; i++) {
       if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
-      const py = sin(u * 137 + t) * hs + yc;
+      const py = sin(u * 137 + t * .003) * hs + yc;
       let cu = C0, l = 0;
       for (let a = 0; a < 1; a++) {
         if (GR > sin(u * 53)) break;
@@ -475,13 +500,13 @@ const T = {
   /** @plan bokeh inputs: t, o, h0, w, xR, y0, yH */
   bokeh() {
     const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
-    let x = o, h = h0;
+    let x = o, h = h0 * .0000958738;
     const jx = w * .45, rv = R0 * .3;
     for (let i = 0; i < 24; i++) {
       if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
-      const cy = sin(u * 137 + t) * (yH * .5) + yH * .5 + y0;
+      const cy = sin(u * 137 + t * .003) * (yH * .5) + yH * .5 + y0;
       let r = u * rv + R0, cc = RIM;
       for (let q = 0; q < N; q++) {
         const f = r * .7071;
@@ -526,16 +551,16 @@ const T = {
 };
 // The close-up horse: 6 gallop frames of one polyline (typed points, half
 // pixels), fixed on screen with the hip at HX,HY and 4 px per unit.
-const HX = 92, HY = 88, HS = 4, bob = k => .35 * sin(2 * PI * k / 3);
-// Units, y down, hip at 0,0; a pair 20+o,l is a leg of phase o and
-// segment length l from the point before it (knee, hoof, back up).
-const BODY = [-2.4, 3.2, -1.6, 1.4, -.6, 0, .3, -.4, 3.8, .3, 7, -.9, 8.3, -3.1, 9.9, -5, 9.8, -6, 10.5, -4.9,
-  12.7, -2.3, 12.5, -1.6, 10.4, -2.4, 9.3, -2, 8.6, .8, 7.4, 2.2, 23.14, 1.9, 23.64, 1.9, 4, 2.7, 1.2, 2, 20, 2,
-  20.5, 2, -.5, 1.2, -.6, 0];
+const HX = 92, HY = 88, HS = 4, bob = k => k % 3 && (k % 3 < 2 ? 78 : -78); // .35 sin(2 pi k / 3), Q8
+// Units (hundredths), y down, hip at 0,0; a pair 2000+o,l is a leg of phase
+// o and segment length l from the point before it (knee, hoof, back up).
+const BODY = [-240, 320, -160, 140, -60, 0, 30, -40, 380, 30, 700, -90, 830, -310, 990, -500, 980, -600, 1050, -490,
+  1270, -230, 1250, -160, 1040, -240, 930, -200, 860, 80, 740, 220, 2314, 190, 2364, 190, 400, 270, 120, 200, 2000, 200,
+  2050, 200, -50, 120, -60, 0];
 let F = null;
 // HEAD ON's fixed set (rails, finish line, stands, the screen edge on) as
 // one polyline; points from the camera in README.
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
   [50, 105, 50, 105, 50, 160, 123, 123, 160, 50, 64, 64, 50, 58, 58, 50, 56, 56, 40, 14, 21, 42, 40, 56, 56, 19, 17, 56, 57, 14, 10, 58, 59, 5, -1, 60, 61, 60, -1, -8, -1, 60, 50, 19]];
 const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
-  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'hl', 'dust', 'bokeh'];
+  RUN = ['gate', 'run', 'legs', 'map', 'vis', 'frl', 'frb', 'hd', 'prail', 't0', 't1', 'hl', 'dust', 'bokeh'];

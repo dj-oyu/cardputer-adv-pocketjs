@@ -65597,6 +65597,16 @@ static JSValue js_array_buffer_transfer(JSContext *ctx, JSValueConst this_val,
     if (abuf->detached) {
         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
     }
+    // Pocket (docs/kasane/shiki-spec.md sec.9.3): an ArrayBuffer over memory
+    // someone else owns (a Shiki data region's window) is never transferred,
+    // at any length. A different length would js_realloc() the owner's
+    // memory, the same length would hand it and its free_func to a new
+    // ArrayBuffer behind the owner's back, and length 0 would detach it
+    // below without the owner knowing. Here, after the detached check and
+    // before the length-0 branch, so no path gets past it.
+    if (abuf->free_func != js_array_buffer_free) {
+        return JS_ThrowTypeError(ctx, "cannot transfer an ArrayBuffer over external memory");
+    }
     pmax_len = NULL;
     if (magic == JS_ARRAY_BUFFER_TRANSFER) {
         if (array_buffer_is_resizable(abuf)) { // carry over maxByteLength

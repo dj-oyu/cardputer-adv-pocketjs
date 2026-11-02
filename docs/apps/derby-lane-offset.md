@@ -96,6 +96,8 @@ u=1 で 0 となる。「先頭は揺れない」と一致せず、スロー中�
 
 ### 検証の範囲
 
+**廃止（2026-11-02）:** 下の `test_derby_lanes.mjs`・`test_derby_photo.mjs`・`test_derby_pan_order.mjs` は削除した。どれも DERBY の JS（`at()`・`photo()`・`pose()`・`pj()`・`pan()`・`course()`）を double の式のまま取り出して検査していたが、整数化（[derby-integer.md](derby-integer.md)）で式は Q16 の整数になり、投影・首振りの並びは `pocket.derby` の C に移った。これらの挙動は `tools/games/run_derby.py`（全画素・大型画面・首振りの oracle・種・デモ）で検査している。以下は当時の記録。
+
 - `tools/games/test_derby_lanes.mjs`: 実ソースの `at/photo` とレースモデルを読み、
   先頭・補間途中の先頭交代、273/650 m 境界、0.04 m 上限、同一 step で一度だけ舵を更新、
   直線の舵固定、横見の depth-order、レース結果非干渉、写真固定、再走時の初期化を確認。

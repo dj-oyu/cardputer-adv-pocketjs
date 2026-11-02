@@ -34,7 +34,7 @@ set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 list(APPEND KASANE_SOURCES
-    "pocket/pocket_proc.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_proc.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_shiki.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
@@ -42,7 +42,9 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
-    "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
+    "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c"
+    "ui/kasane/ksn_shiki.c"
+    "ui/kasane/ksn_shiki_bench.c")
 # Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
 # turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
 option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
@@ -205,7 +207,7 @@ set(POCKET_LDFRAGMENTS "")
 if(CONFIG_POCKET_VM_HELPER_IRAM)
     list(APPEND POCKET_LDFRAGMENTS "vm/helper_iram8.lf")
 endif()
-idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
+idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "hal/int_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/app_control.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../third_party/bmi270/bmi2.c" "../third_party/bmi270/bmi270.c"
     ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
@@ -216,7 +218,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "scene/fxmat
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
@@ -461,10 +463,23 @@ if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
             COMMENT "Compiling the built-in plans"
             VERBATIM)
     endif()
+    # The built-in Shiki programs (docs/kasane/shiki-spec.md sec.9.4
+    # register(name)): the rom apps' @shiki functions as a const table in
+    # flash, the same way; make_app_chunks.py's empty one otherwise (added
+    # below). Not a weak default: in libmain.a it would win over the table.
+    if(APP_CHUNK_SHIKI)
+        add_custom_command(OUTPUT "${APP_CHUNK_SHIKI_C}"
+            COMMAND "${POCKET_NODE}" "${_kir}/emit_shiki_rom.mjs" "${APP_CHUNK_SHIKI_C}" ${APP_CHUNK_SHIKI}
+            DEPENDS ${APP_CHUNK_SHIKI_SOURCES} "${_kir}/emit_shiki_rom.mjs" "${_kir}/plan_js.mjs"
+                    "${_kir}/shiki_compile.mjs" "${_kir}/shiki_q.mjs" "${_kir}/shiki_fix.mjs"
+            COMMENT "Compiling the built-in Shiki programs"
+            VERBATIM)
+    endif()
 endif()
 # The built-in plan table app_session.c hands to pocket.kasane.procedural:
 # the generated one above, or make_app_chunks.py's empty one.
 target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_ROM_C}")
+target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_SHIKI_C}")
 foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
     target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
 endforeach()
@@ -582,6 +597,10 @@ set_source_files_properties(ui/kasane/ksn_procedural.c
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # pocket.shapes: the same scan conversion on host and device (no fused madd.s).
 set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# Shiki (docs/kasane/shiki-spec.md): integer engine; the only floating point is
+# the sec.2.4 conversion of inputs, which must match the host reference bit
+# for bit, so no contraction there either.
+set_source_files_properties(ui/kasane/ksn_shiki.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
     set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()

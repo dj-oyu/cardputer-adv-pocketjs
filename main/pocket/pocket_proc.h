@@ -9,6 +9,26 @@
 /* A small APP-session adapter for registered procedural IR. */
 esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
 void pocket_proc_reset(void);
+/* Shiki programs share the procedural slots, handles and frames
+ * (pocket_shiki_api.c): attach takes ownership of plan (freed by detach or
+ * reset) and returns its handle, 0 when the 32 slots or the handles are
+ * spent; draw runs it into the frame beginFrame() opened. */
+uint32_t pocket_proc_shiki_attach(void *plan);
+void *pocket_proc_shiki_plan(uint32_t handle);
+bool pocket_proc_shiki_detach(uint32_t handle);
+JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
+/* The same with the inputs either as JS numbers (in) or, when fixed is not
+ * NULL, already in each input's Q format (shiki.drawMany with an Int32Array). */
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n);
+/* Diagnostic (shikiDebug.drawProfile, docs/kasane/shiki-bundle.md): CPU cycles
+ * a Shiki draw spends in each native stage, summed while on. parse: js_draw's
+ * argument checks and input reads; lookup: from there to the engine (handle,
+ * frame, workspace); engine: ksn_shiki_draw; copy: the segments into the
+ * frame. mark is the cycle count where the next stage starts. Off by default:
+ * one branch per stage. pocket_cycles() is 0 off the device. */
+typedef struct { bool on; uint32_t n,parse,lookup,engine,copy,mark; } pocket_shiki_draw_prof;
+extern pocket_shiki_draw_prof pocket_shiki_prof;
+uint32_t pocket_cycles(void);
 /* The built-in plans register('name', args) looks up (docs/kasane/flash-plan.md):
  * a const table the firmware links, generated from the apps' @plan functions.
  * The table must outlive every session; reset() keeps it. Without a call,

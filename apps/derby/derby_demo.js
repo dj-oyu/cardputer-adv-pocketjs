@@ -3,7 +3,7 @@
 function demo(on, n) {
   if (!on) { [pts, raceNo, pick, stake, A] = bk; notes = []; drop(RUN); drop(['photo']); }
   log('DEMO ' + (on ? 'START ' : 'END ') + [pts, raceNo, pick, stake]);
-  if (on) { bk = [pts, raceNo, pick, stake, A]; A = null; raceNo = 1e6 + ++dn; pick = 0; stake = 100; }
+  if (on) { bk = [pts, raceNo, pick, stake, A]; A = null; raceNo = 1000000 + ++dn; pick = 0; stake = 100; }
   dm = on; dk = ''; idle = n; camT = 0;
   enter('pad');
 }

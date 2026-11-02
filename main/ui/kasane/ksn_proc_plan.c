@@ -131,6 +131,86 @@ static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
     }
     return vm->status;
 }
+/* ---- draw: begin and run as one call (pocket_proc.c draw_run) ----
+ * begin + run redid on every draw work whose answer was fixed when the plan
+ * was prepared: a memset of the whole VM (about 1 KB), the copy of the rows,
+ * valid_program() over them, then a memcmp (rom_matches() for a built-in
+ * plan) proving the VM still held this plan's rows. Here begin and run are
+ * one call with nothing in between, so "the VM holds this registration's
+ * rows" is true by construction, not checked; and no VM state outlives the
+ * call that a later registration in the same slot or at the same address
+ * could be taken for (the next draw starts over), so no generation number
+ * is needed.
+ *
+ * Validation may be skipped because plan->valid is set only after
+ * mark_fused()'s ksn_proc_analyze() accepted these exact rows, and analyze
+ * rejects every row valid_program() rejects (the same per-op field checks,
+ * loop depth and nesting; tools/kasane_contract/test_proc_plan_draw.c checks
+ * that the two agree). A sized plan's rows are its own heap copy, written only
+ * by prepare; a built-in plan's are const and its args are written only
+ * before prepare. Neither can change inside a draw: no guest code runs there.
+ *
+ * Kept per draw: what depends on the draw (inputs, registers, pen, counters,
+ * the frame header); loop_end, one pass over REPEAT/END (keeping it in the
+ * plan would cost 64 B of DRAM per plan, up to 32 plans); and for a built-in
+ * plan the copy out of flash with its arguments applied, since the rows the
+ * VM runs must hold them and the table is const. A sized plan runs from its
+ * own rows without a copy. VM fields the run never reads before writing
+ * (loop[], owned_code past count, last_pc) are left as they were. */
+static ksn_proc_status draw_begin(ksn_proc_vm *vm,const ksn_proc_inst *code,uint8_t count,
+                                  const float input[KSN_PROC_INPUTS],ksn_proc_frame *frame){
+    frame->ready=false;frame->count=0;frame->raster_steps=0;frame->ext=0;
+    vm->status=KSN_PROC_INVALID;
+    for(unsigned j=0;j<KSN_PROC_INPUTS;j++)if(!isfinite(input[j]))return vm->status;
+    /* Prepare proved the nesting; the bounds are kept so a broken invariant
+     * fails the draw instead of writing outside loop_end/open. */
+    uint8_t open[KSN_PROC_LOOP_DEPTH];
+    unsigned depth=0;
+    for(unsigned pc=0;pc<count;pc++){
+        const uint8_t op=code[pc].op;
+        if(op==KSN_PROC_REPEAT||op==KSN_PROC_REPEAT_REG){
+            if(depth==KSN_PROC_LOOP_DEPTH)return vm->status;
+            open[depth++]=(uint8_t)pc;
+        }else if(op==KSN_PROC_END){
+            if(!depth)return vm->status;
+            vm->loop_end[open[--depth]]=(uint8_t)pc;
+        }
+    }
+    if(depth)return vm->status;
+    memset(vm->reg,0,sizeof vm->reg);
+    memcpy(vm->input,input,sizeof vm->input);
+    vm->pc=0;vm->last_pc=0;vm->depth=0;vm->steps=0;
+    vm->pen_x=0;vm->pen_y=0;vm->pen_valid=false;
+    vm->owned_program=(ksn_proc_program){code,count};
+    vm->program=&vm->owned_program;vm->frame=frame;
+    return vm->status=KSN_PROC_RUNNING;
+}
+ksn_proc_status ksn_proc_sized_plan_draw(ksn_proc_vm *vm,const ksn_proc_sized_plan *plan,
+                                         const float input[KSN_PROC_INPUTS],
+                                         ksn_proc_frame *frame){
+    if(!vm||!frame||!input||!plan||!plan->valid||!plan->count||plan->count>KSN_PROC_CODE)
+        return ksn_proc_begin_state(vm,NULL,input,NULL,frame);
+    if(draw_begin(vm,plan->code,plan->count,input,frame)!=KSN_PROC_RUNNING)return vm->status;
+    return run_loop(vm,plan->code,plan->fused,false);
+}
+ksn_proc_status ksn_proc_rom_plan_draw(ksn_proc_vm *vm,const ksn_proc_rom_plan *plan,
+                                       const float input[KSN_PROC_INPUTS],
+                                       ksn_proc_frame *frame){
+    if(!vm||!frame||!input||!plan||!plan->valid||!plan->rom||!plan->rom->count||
+       plan->rom->count>KSN_PROC_CODE)
+        return ksn_proc_begin_state(vm,NULL,input,NULL,frame);
+    const ksn_proc_rom_entry *rom=plan->rom;
+    memcpy(vm->owned_code,rom->code,rom->count*sizeof vm->owned_code[0]);
+    const ksn_proc_binding binding={rom->patch,plan->args,rom->patches,plan->params};
+    /* Succeeded at prepare with the same arguments; a failure here would mean
+     * the plan changed after prepare, so the draw fails rather than run it. */
+    if(!ksn_proc_apply_binding(vm->owned_code,rom->count,&binding)){
+        frame->ready=false;frame->count=0;frame->raster_steps=0;frame->ext=0;
+        return vm->status=KSN_PROC_INVALID;
+    }
+    if(draw_begin(vm,vm->owned_code,rom->count,input,frame)!=KSN_PROC_RUNNING)return vm->status;
+    return run_loop(vm,vm->owned_code,plan->fused,false);
+}
 ksn_proc_status ksn_proc_plan_run(ksn_proc_vm *vm,const ksn_proc_plan *plan,bool debug_step){
     if(!plan)return run_core(vm,false,NULL,0,NULL,debug_step);
     return run_core(vm,plan->valid,plan->code,plan->program.count,plan->fused,debug_step);

@@ -66,6 +66,8 @@
 #include "keymap.h"
 #include "app_chunks_host.h"
 #include "app_registry.h"
+#include "ksn_shiki.h"
+#include "shiki_heap.h"
 #include "pocket_app_load.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
@@ -169,6 +171,16 @@ static double demo_end_ms;
 static double at_start[3];                  /* storage.set calls, tones, cues when the demo began */
 static unsigned demo_on,demo_off,demo_px_outside;
 static int tier_env=1;   /* the app starts at MID */
+
+/* ---- Shiki draws (derby_prog.js @shiki, the built-in table): each run again
+ * here through the same engine, its segments appended to the oracle's
+ * candidate frames as a procedural draw's are, so that the frame comparison
+ * covers them. The engine's own correctness is the Shiki contract's
+ * (tools/kasane_contract, shiki_diff.mjs), not this harness's. */
+typedef struct { int handle; ksn_shiki_plan *plan; } sspec;
+static sspec sspecs[8];
+static unsigned shiki_draws;
+static sspec *sfind(int h){for(unsigned i=0;i<8;i++)if(sspecs[i].plan&&sspecs[i].handle==h)return &sspecs[i];return NULL;}
 
 /* ---- the procedural oracle */
 #define SLOTS 64u
@@ -539,7 +551,11 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
     REQ(!JS_IsException(r));
     const double f=num(r);
     JS_FreeValue(ctx,r);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,g);
-    cap_draw((int)handle,in,n,f>=0?4u:0u,f>=0?f:0);
+    unsigned tag=0;double ff=0;
+    if(f>=0)tag=4,ff=f;
+    else if(f==-2)tag=1;
+    else if(f<=-3){ff=-f-3;tag=n>7&&in[7]==10565?3u:0u;}
+    cap_draw((int)handle,in,n,tag,ff);
 }
 static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;(void)argv;
@@ -573,6 +589,83 @@ static JSValue js_sercmp(JSContext *c,JSValueConst self,int argc,JSValueConst *a
         printf("\n");
     }
     ser_n=0;
+    return JS_UNDEFINED;
+}
+static JSValue js_cap_sreg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;
+    int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
+    const char *name=JS_ToCString(c,argv[1]);REQ(name);
+    unsigned count=0;const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&count);
+    const ksn_shiki_rom_entry *e=NULL;
+    for(unsigned k=0;k<count;k++)if(!strcmp(rom[k].name,name))e=&rom[k];
+    JS_FreeCString(c,name);REQ(e);
+    sspec *s=NULL;for(unsigned i=0;i<8&&!s;i++)if(!sspecs[i].plan)s=&sspecs[i];
+    REQ(s);
+    s->plan=malloc(ksn_shiki_plan_bytes_for(e->code,e->len));REQ(s->plan);
+    REQ(ksn_shiki_register(e->code,e->len,NULL,0,NULL,0,s->plan));
+    s->handle=h;live_plans++;if(live_plans>live_max)live_max=live_plans;registered++;
+    return JS_UNDEFINED;
+}
+static JSValue js_cap_sunreg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;
+    int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
+    sspec *s=sfind(h);REQ(s);
+    free(s->plan);s->plan=NULL;live_plans--;unregistered++;
+    return JS_UNDEFINED;
+}
+/* Doubles handed to the native surfaces (docs/apps/derby-integer.md sec.1,
+ * condition 3): a float-tagged number among a call's arguments, one level
+ * into arrays, and a Float32/Float64Array argument, counted by surface. */
+enum{FT_DRAW,FT_SDRAW,FT_DERBY,FT_REF,FT_N};
+static const char *const FT_NAME[FT_N]={"draw","drawMany","derby","ref"};
+static unsigned long ft_calls[FT_N],ft_floats[FT_N],ft_bad_calls[FT_N];
+static char ft_first[FT_N][96];
+static unsigned ft_value(JSContext *c,JSValueConst v,int depth){
+    if(JS_TAG_IS_FLOAT64(JS_VALUE_GET_TAG(v)))return 1;
+    if(!JS_IsObject(v))return 0;
+    const JSTypedArrayEnum t=JS_GetTypedArrayType(v);
+    if(t==JS_TYPED_ARRAY_FLOAT64||t==JS_TYPED_ARRAY_FLOAT32)return 1;
+    if(depth||!JS_IsArray(v))return 0;
+    int64_t n=0;
+    JSValue len=JS_GetPropertyStr(c,v,"length");
+    JS_ToInt64(c,&n,len);JS_FreeValue(c,len);
+    unsigned f=0;
+    for(int64_t i=0;i<n&&i<256;i++){JSValue e=JS_GetPropertyUint32(c,v,(uint32_t)i);f+=ft_value(c,e,1);JS_FreeValue(c,e);}
+    return f;
+}
+/* __ftag(kind, name, args): args is the call's arguments object or an array. */
+static JSValue js_ftag(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    int32_t k=0;
+    if(argc<3||JS_ToInt32(c,&k,argv[0])||k<0||k>=FT_N)return JS_UNDEFINED;
+    int64_t n=0;
+    JSValue len=JS_GetPropertyStr(c,argv[2],"length");
+    JS_ToInt64(c,&n,len);JS_FreeValue(c,len);
+    unsigned f=0;
+    for(int64_t i=0;i<n&&i<16;i++){JSValue e=JS_GetPropertyUint32(c,argv[2],(uint32_t)i);f+=ft_value(c,e,0);JS_FreeValue(c,e);}
+    ft_calls[k]++;
+    if(f){
+        ft_floats[k]+=f;
+        if(!ft_bad_calls[k]++){const char *s=JS_ToCString(c,argv[1]);snprintf(ft_first[k],sizeof ft_first[k],"%s",s?s:"?");JS_FreeCString(c,s);}
+    }
+    return JS_UNDEFINED;
+}
+static JSValue js_cap_sdraw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;
+    int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
+    sspec *s=sfind(h);REQ(s);
+    const unsigned n=len(argv[1]);REQ(n<=KSN_SHIKI_INPUTS);
+    /* argv[2]: the inputs came as an Int32Array (each input's Q, unconverted). */
+    const bool fixed=argc>2&&JS_ToBool(c,argv[2]);
+    double in[KSN_SHIKI_INPUTS];
+    int32_t fx[KSN_SHIKI_INPUTS];
+    for(unsigned i=0;i<n;i++){in[i]=at(argv[1],i);fx[i]=(int32_t)in[i];}
+    static ksn_shiki_vm vm;
+    static ksn_proc_frame f;
+    REQ((fixed?ksn_shiki_draw_fixed(s->plan,fx,n,&vm,f.segments):ksn_shiki_draw(s->plan,in,n,&vm,f.segments))==KSN_SHIKI_DONE);
+    f.count=vm.count;f.raster_steps=vm.raster;f.ext=vm.ext;
+    append(&cand_plan,&f);append(&cand_vm,&f);
+    frame_draws++;frame_steps+=vm.steps;shiki_draws++;
     return JS_UNDEFINED;
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -611,6 +704,8 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
             bool pattern;
             while(ksn_proc_frame_next(&cand_plan,&i,&g,&pattern,&cost)){
                 if(g.x0>=X0&&g.x0<=X1&&g.x1>=X0&&g.x1<=X1&&g.y0>=Y0&&g.y0<=Y1&&g.y1>=Y0&&g.y1<=Y1){inside++;continue;}
+                if(getenv("DERBY_DBGFACE")&&occluded_frames<1&&!(g.x1<X0&&g.x0<X0)&&!(g.y0>Y1&&g.y1>Y1)&&!(g.y0<Y0&&g.y1<Y0))
+                    printf("  front seg %d,%d-%d,%d\n",g.x0,g.y0,g.x1,g.y1);
                 g.color=0xffff;front.segments[front.count++]=g;
             }
             feed_segments+=inside;if(inside)feed_frames++;
@@ -1018,13 +1113,21 @@ static const char PRELUDE[]=
      * app's pc (the panning unit, f at 4) is a global of its scripts. */
     "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
     /* pocket.derby.ser's draws (pocket_proc_draw_hook): f for the series. */
-    "globalThis.__nt=h=>{const L=globalThis.derby&&derby.L;return L&&(h===L.prail||h===L.t0||h===L.t1)?pf():-1};"
+    /* and the draws pocket.derby.part() makes: -2 the screen's face (vis),
+     * -3 - f a panning unit's hl (the bezel when its colour is 10565). */
+    "globalThis.__nt=h=>{const L=globalThis.derby&&derby.L;return !L?-1:h===L.prail||h===L.t0||h===L.t1?pf():h===L.vis?-2:h===L.hl?-3-pf():-1};"
     /* Inputs as an array or as numbers (N12): i is the array, or the 8th
      * numeric input arguments[8]. */
     "P.draw=function(h,i){try{D.apply(P,arguments)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify([].slice.call(arguments,1)));throw e}"
     "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&(Array.isArray(i)?i[7]:arguments[8])===10565?3:"
-    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,t,t>2?pf():0,arguments)};"
-    "P.commit=function(){C.call(P);__commit(pf())};})();"
+    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__ftag(0,L?Object.keys(L).find(k=>L[k]===h):'?',arguments);__draw(h,t,t>2?pf():0,arguments)};"
+    "P.commit=function(){C.call(P);__commit(pf())};"
+    /* pocket.kasane.shiki (the runners, HEAD ON's horses): register by name,
+     * and each drawMany entry into the oracle as one draw (__sdraw). */
+    "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
+    "S.register=function(n){const h=SR.call(S,n);__sreg(h,n);return h};"
+    "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
+    "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)),I instanceof Int32Array)};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
      * keeps a clip), with their last rect and visibility. */
@@ -1032,7 +1135,7 @@ static const char PRELUDE[]=
     "(function(){const K=kasane,RP=K.replace,PA=K.patch;"
     "function ref(r){const p=Object.getPrototypeOf(r);if(p.__w)return;p.__w=1;const sr=p.setRect,sv=p.setVisible,sc=p.setClip;"
     "p.setClip=function(t,b){if(!b[0]&&!b[1]&&b[2]===240&&b[3]===135&&!this.__o){this.__o=1;this.__v=true;this.__r=null;__ov.push(this)}return sc.call(this,t,b)};"
-    "p.setRect=function(t,b){if(this.__o)this.__r=b.slice();return sr.call(this,t,b)};"
+    "p.setRect=function(t,b){__ftag(3,'setRect',[b]);if(this.__o)this.__r=b.slice();return sr.call(this,t,b)};"
     "p.setVisible=function(t,v){if(this.__o)this.__v=v;return sv.call(this,t,v)}}"
     "function wrap(t){const p=Object.getPrototypeOf(t);if(p.__w)return;p.__w=1;"
     "for(const n of ['image','rect','text']){const f=p[n];p[n]=function(sp){const r=f.call(this,sp);__refs++;ref(r);return r}}}"
@@ -1040,7 +1143,7 @@ static const char PRELUDE[]=
     "K.patch=function(f){return PA.call(K,t=>{wrap(t);return f(t)})};})();"
     "globalThis.__turn=0;globalThis.__now=0;globalThis.__sets=0;globalThis.__cues=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:__race}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:globalThis.__pd,time:{now:()=>__now},"
+    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:(()=>{const d=globalThis.__pd,o={};for(const n of Object.getOwnPropertyNames(d))o[n]=typeof d[n]==='function'?function(){__ftag(2,n,arguments);return d[n].apply(d,arguments)}:d[n];return o})(),time:{now:()=>__now},"
     /* The device samples the native heap at the start of a turn, so while the
      * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
@@ -1078,6 +1181,9 @@ int main(int argc,char **argv){
     host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
+    /* The Shiki heap, as app_session.c takes it for an app naming
+     * kasane.shiki (DERBY does): pocket.kasane then has shiki. */
+    REQ(shiki_heap_begin(0));
     pocket_kasane_install(ctx,NULL);
     {   /* pocket.derby (the firmware's lazy namespace, built here at once). */
         JSValue g=JS_GetGlobalObject(ctx),ns=JS_NewObject(ctx);
@@ -1091,7 +1197,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,3},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1136,7 +1242,7 @@ int main(int argc,char **argv){
      * panning unit, the leader's px, the f cap): 0 pans for every WIDE (f
      * from its least, 200), 1e9 never; 0,1 keeps f at 200, which brings the
      * screen into a panning unit's view. */
-    if(getenv("DERBY_PAN")){char b[96];snprintf(b,sizeof b,"[%s].forEach((v,i)=>PAN[i]=v)",getenv("DERBY_PAN"));
+    if(getenv("DERBY_PAN")){char b[96];snprintf(b,sizeof b,"[%s].forEach((v,i)=>PAN[i]=v|0)",getenv("DERBY_PAN"));
         REQ(eval(b,strlen(b),"pan.js"));}
     /* DERBY_JS: any script run after the app's (e.g. moving the screen so
      * that a panning unit sees it: run_derby.py). */
@@ -1323,8 +1429,11 @@ int main(int argc,char **argv){
     printf("\npanning units: frames %u, f %.0f..%.0f, the screen in view %u; Newton: %lu points in %u draws, "
            "max error %.4f px (f %.0f) against the exact projection, %.4f px for points on the panel\n",pan_frames,
            pan_frames?pan_f_lo:0,pan_f_hi,pan_face_frames,newton_points,newton_draws,newton_max,newton_max_f,newton_screen);
-    printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u\n",
-           registered,unregistered,live_max,frame_reg_max);
+    for(unsigned k=0;k<FT_N;k++)
+        printf("boundary %s: %lu calls, %lu with doubles (%lu doubles)%s%s\n",FT_NAME[k],ft_calls[k],ft_bad_calls[k],
+               ft_floats[k],ft_bad_calls[k]?", first: ":"",ft_first[k]);
+    printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u, shiki draws %u\n",
+           registered,unregistered,live_max,frame_reg_max,shiki_draws);
     printf("frames %u (procedural frames checked %u): exceptions=%u bad_present=%u failures=%u tones=%u\n",
            tick,frames_checked,exceptions,bad_present,framefails,tones);
     printf("finish: %s\n",finishes?finish[0]:"-");
@@ -1337,7 +1446,10 @@ int main(int argc,char **argv){
         printf("guest heap churn in frame(), %s: %u frames, %.1f allocations and %.0f B a frame, largest rise in one "
                "frame %zu B, freed only by the cycle collector %zu B\n",CHURN_SCENE[i],churn[i].frames,
                (double)churn[i].n/churn[i].frames,(double)churn[i].b/churn[i].frames,churn[i].hi,churn[i].gc);
-    bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0xffffu&&frame_reg_max<=1&&go_seen>=1&&
+    /* PLOT and PLOT_COLOR_REG were used only by the runner and fr plans, which
+     * are now Shiki programs (derby.run/legs/frl/frb); their draws count instead. */
+    unsigned ops_need=0xffffu&~(1u<<KSN_PROC_PLOT)&~(1u<<KSN_PROC_PLOT_COLOR_REG);
+    bool pass=!exceptions&&!bad_present&&!framefails&&(ops_used&ops_need)==ops_need&&shiki_draws>0&&frame_reg_max<=1&&go_seen>=1&&
               !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&
               (getenv("DERBY_PANFACE")?pan_face_frames>0:overlay_frames>0)&&refs_max<=32&&cmds_max<=80&&newton_screen<0.1;
     /* No cycles: the device would keep them until the heap is nearly full

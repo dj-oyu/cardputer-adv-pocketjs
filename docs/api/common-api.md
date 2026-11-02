@@ -226,6 +226,8 @@ type PocketError = Error & {
 
 同期関数は引数検証・状態取得・小さなUI変更に限る。待ちを伴うI/OはPromiseを返す。Promiseを返すメソッドは引数エラーもrejectへ統一する。同期関数はthrowする。JSへESP-IDFの数値エラーを直接返さず、診断情報にだけ保持する。
 
+面の仕様は、`PocketError` に読み取り専用のプロパティを足してよい（その面の仕様に定義を書く。例: `kasane.shiki.drawMany` の `index`、[shiki-spec.md](../kasane/shiki-spec.md) §9.4）。共通の4つの意味は変えない。
+
 共通code: INVALID_ARGUMENT、UNSUPPORTED、NOT_AVAILABLE、PERMISSION_DENIED、BUSY、LIMIT_EXCEEDED、OUT_OF_MEMORY、TIMEOUT、CANCELLED、CLOSED、DISCONNECTED、NOT_FOUND、CORRUPT_DATA、IO_ERROR、AUTH_FAILED、TLS_ERROR、CONFLICT。retryableは自動再送の指示ではない。書込や外部操作の結果が不明ならoutcome=unknownとし、再試行で重複し得ることをアプリが判断できるようにする。
 
 - 時間は単調時計のミリ秒、ファイル位置と長さはbytes。JSの安全な整数範囲でのみ受け付ける。

@@ -1,0 +1,43 @@
+# Shiki PIE prototype, device run 2026-11-01 (broker job pie-bench2-f3ec673)
+# firmware: commit f3ec673, ELF SHA-256 03cb0b286a414718... (flash job pie-flash2-f3ec673,
+# readback and boot verified). App local.cyclebench; only the Shiki lines are kept below
+# (the asm/c64 rows match docs/perf/logs/int-latency-*.txt and are not part of this run's question).
+I (218070) js: CB BEGIN 84 BUILD 1 03cb0b286a414718
+I (221295) js: CB shiki SET 5 7 cy=57.01
+I (221365) js: CB shiki ADD 5 7 cy=69.33
+I (221433) js: CB shiki ADD sat 2147483647 2147483647 cy=74.33
+I (221498) js: CB shiki SUB 5 7 cy=55.00
+I (221566) js: CB shiki NEG 5 7 cy=68.02
+I (221635) js: CB shiki MUL s16 small 327680 458752 cy=90.34
+I (221703) js: CB shiki MUL s16 large 305419896 124076833 cy=94.34
+I (221768) js: CB shiki MUL s0 sat 2147483647 2147483647 cy=78.34
+I (221836) js: CB shiki MUL s40 305419896 124076833 cy=90.34
+I (221903) js: CB shiki SHIFT +5 74565 7 cy=95.34
+I (221969) js: CB shiki SHIFT -5 74565 7 cy=88.34
+I (222037) js: CB shiki SIN 12345 7 cy=95.34
+I (222103) js: CB shiki ADD.H 1000 2000 cy=82.34
+I (222171) js: CB shiki MUL.H s8 1000 2000 cy=103.34
+I (222236) js: CB shiki SHIFT.H +3 1000 7 cy=89.34
+I (222298) js: CB shiki check check tail same model=84700102/1 pie=84700102/1 v1[0]=30000/30000
+I (222367) js: CB shiki check check unzip same model=8d8ecb54/1 pie=8d8ecb54/1 v1[0]=-11383/-11383
+I (222432) js: CB shiki check check record3 same model=23b7b269/1 pie=23b7b269/1 v1[0]=0/0
+I (222502) js: CB shiki check check sat40 up same model=75a76fc6/1 pie=75a76fc6/1 v1[0]=32767/32767
+I (222569) js: CB shiki check check sat40 down same model=8a9d6c4d/1 pie=8a9d6c4d/1 v1[0]=32767/32767
+I (222633) js: CB shiki check check writeback same model=a2bff0d2/1 pie=a2bff0d2/1 v1[0]=31250/31250
+I (222702) js: CB shiki check check accset same model=7f2eabfd/1 pie=7f2eabfd/1 v1[0]=-32768/-32768
+I (222769) js: CB shiki check check shift32 DIFF model=0c8e3006/1 pie=b6d42166/1 v1[0]=4/4
+I (222833) js: CB shiki check check unaligned same model=1b9f2642/1 pie=1b9f2642/1 v1[0]=0/0
+I (222908) js: CB shiki check check affine128 same model=a5267e6d/1 pie=a5267e6d/1 v1[0]=80/80
+I (222975) js: CB shiki check check affine128 soa same model=77f33da9/1 pie=77f33da9/1 v1[0]=80/80
+I (223033) js: CB shiki draw empty pie=0 cy=264 us=1.1 steps=1 segs=0
+I (223105) js: CB shiki draw affine128 scalar pie=0 cy=179827 us=749.3 steps=1926 segs=128
+I (223169) js: CB shiki draw affine128 vector pie=0 cy=62159 us=259.0 steps=215 segs=128
+I (223237) js: CB shiki draw affine128 vector pie=1 cy=42691 us=177.9 steps=215 segs=128
+I (223304) js: CB shiki draw lines100 scalar pie=0 cy=72381 us=301.6 steps=401 segs=100
+I (223369) js: CB shiki draw lines100 emit pie=0 cy=12519 us=52.2 steps=1 segs=100
+I (223443) js: CB shiki draw affine128 scalar soa pie=0 cy=180091 us=750.4 steps=1926 segs=128
+I (223506) js: CB shiki draw affine128 vector soa pie=0 cy=61702 us=257.1 steps=215 segs=128
+I (223572) js: CB shiki draw affine128 vector soa pie=1 cy=41274 us=172.0 steps=215 segs=128
+I (223641) js: CB shiki draw lines100 scalar soa pie=0 cy=72642 us=302.7 steps=402 segs=100
+I (223706) js: CB shiki draw lines100 emit soa pie=0 cy=12569 us=52.4 steps=2 segs=100
+I (223772) js: CB END 84

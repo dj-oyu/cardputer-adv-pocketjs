@@ -1,0 +1,376 @@
+// Shiki v1's C engine against the host reference, on random programs
+// (docs/kasane/shiki-spec.md sec.10.1). Host: Node and gcc.
+//
+//   node tools/kasane_ir/shiki_diff.mjs [--cases N] [--seed S] [--keep DIR]
+//
+// Builds tools/kasane_contract/shiki_run.c with main/ui/kasane/ksn_shiki.c
+// (ASan/UBSan), writes N random cases in the shared text contract, runs them
+// through the C runner and tools/kasane_ir/shiki_ref.mjs, and compares the
+// output lines byte for byte, plus the two sine tables. The two engines were
+// written independently from the spec; a difference is a bug in one of them
+// or a hole in the spec. The encoder here is this file's own (not the
+// reference's assemble()), so a shared encoding mistake cannot hide.
+//
+// The generator aims at the edges the spec defines (v1.2: CUBIC and
+// LINE_PATTERN's ranges, chord boundaries and limits too): saturation, floor of
+// negative products and shifts, .H operand saturation, every SIN quadrant
+// boundary, coordinates at -480/720 and their halves, the 10,000-step,
+// 1,024-segment and 8,192-raster limits, REPEAT_REG out of range, breaks out
+// of nested loops, argument patches, lround halves at the JS boundary. A
+// fifth of the programs are mutated byte for byte so registration's
+// accept/reject is compared too.
+//
+// Data regions (v1.3, sec.5, sec.10.1): a share of the cases (--data, 0.4)
+// declare 1-4 regions and pass them in the case's DATA part, and the result
+// line carries every region's contents after the run. They cover EACH with
+// both count modes (N = 0, N = the record count, out of range), FETCH/PUT at
+// the types' edges (u16 >= 32768, negative i16, +-k, saturation), LOOKUP's
+// clamps and g = 0/31, nested and self-nested EACH, BREAK_IF_GT out of an
+// EACH, LIMIT in the middle of one (writes made so far stay), aliased
+// regions, and binding mismatches (count, type, Q, record size, malformed).
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+const opt = (name, d) => { const i = process.argv.indexOf(name); return i < 0 ? d : process.argv[i + 1]; };
+const N = Number(opt('--cases', 20000)), SEED = Number(opt('--seed', 1)), DATA = Number(opt('--data', 0.4));
+const dir = opt('--keep', fs.mkdtempSync(path.join(os.tmpdir(), 'shiki-diff-')));
+fs.mkdirSync(dir, {recursive: true});
+
+// ---------------------------------------------------------------- random
+let st = SEED >>> 0 || 1;
+const rnd = () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; };
+const ri = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
+const pick = a => a[Math.floor(rnd() * a.length)];
+const I32 = [0, 1, -1, 2, -2, 32767, 32768, -32768, -32769, 65535, 65536, -65536, 2 ** 31 - 1, -(2 ** 31),
+  2 ** 30, -(2 ** 30), 0x4000, 0x8000, 0xC000, 0xFFFF, 0x10000, -0x4000, 46341, 0x7FFFFFFF - 5];
+const imm32 = () => rnd() < .5 ? pick(I32) : rnd() < .5 ? ri(-70000, 70000) : ri(-(2 ** 31), 2 ** 31 - 1);
+// A Q16 coordinate near the interesting pixels, with odd fractions.
+const coordRaw = () => {
+  const px = pick([-481, -480, -479, 0, 1, 119, 120, 239, 240, 719, 720, 721, ri(-500, 740), ri(0, 239)]);
+  return px * 65536 + pick([0, 1, 32767, 32768, 32769, 65535, ri(0, 65535)]);
+};
+
+// CUBIC's control points: mostly in range, some on the lower edge (where the
+// weights' floors could push a point out, sec.4.6.3), some out of range.
+const cubicRaw = () => rnd() < .15 ? pick([-480 * 65536 - 32768, -480 * 65536 - 32767, -480 * 65536 - 32765,
+  720 * 65536 + 32767, -481 * 65536, 721 * 65536]) : coordRaw();
+// LINE_PATTERN's block (sec.4.7): each field at, inside and past its range.
+const patBits = () => pick([0, 1, 0xffffff, 0x1000000, -1, 0x5a5a5a, ri(0, 0xffffff), ri(0, 0xffffff)]);
+const patColB = () => pick([-1, -1, 0, 65535, 65536, -2, ri(0, 65535)]);
+const patU = () => rnd() < .2 ? pick([2 ** 29, -(2 ** 29), 2 ** 29 + 1, -(2 ** 29) - 1, 0, 2 ** 31 - 1])
+  : ri(-3000, 3000) * 65536 + ri(0, 65535);
+// Weights: a pair on either side of the 1.02 / 1.2 / 1.6 boundaries, mixed
+// signs, zero, the +-2^24 edge and values past it, and large ones that the
+// 13-bit normalisation has to shift.
+function patW() {
+  if (rnd() < .2) return [pick([0, 1, -1, 2 ** 24, -(2 ** 24), 2 ** 24 + 1, ri(-(2 ** 24), 2 ** 24)]),
+    pick([0, 1, -1, 2 ** 24, -(2 ** 24), -(2 ** 24) - 1, ri(-(2 ** 24), 2 ** 24)])];
+  const [num, den] = pick([[51, 50], [6, 5], [8, 5], [3, 1], [3, 1], [7, 1], [5, 3], [1000, 1]]);
+  // Exactly on a boundary (v a multiple of den), or a step either side; the
+  // integer ratios (3/1, 7/1, 5/3) put a cut's lambda exactly on a half.
+  const v = rnd() < .5 ? den * pick([1, 2, ri(1, 50), ri(1, 2 ** 20), ri(1, 2 ** 24 / (8 * den))])
+    : pick([ri(1, 300), ri(1, 2 ** 24 / 2), ri(65536, 20 * 65536), 8191, 8192, 8193, 16383, 16384]);
+  let w = Math.floor(v * num / den) + pick([-1, 0, 0, 0, 1, ri(-5, 5)]);
+  w = Math.min(Math.max(w, 1), 2 ** 24);
+  const sgn = rnd() < .5 ? 1 : -1, pair = rnd() < .5 ? [v * sgn, w * sgn] : [w * sgn, v * sgn];
+  if (rnd() < .1) pair[1] = -pair[1];
+  return pair;
+}
+function prim(code, heavy, loop) {
+  const colour = () => rnd() < .95 ? ri(0, 65535) : 0;
+  if (rnd() < .5) {
+    const d = ri(0, 8);
+    for (let k = 0; k < 8; k++) code.push({op: OP.SET, dst: d + k, imm: cubicRaw()});
+    code.push({op: OP.CUBIC, dst: d, imm: heavy ? pick([200, 255]) : pick([1, 2, 3, 7, 16, 64, 255, ri(1, 255)]), aux: colour()});
+    return;
+  }
+  const d = ri(0, 10), r = () => ri(0, 15);
+  const fine = rnd() < .7;                       // a block that passes its checks
+  const block = fine ? [ri(0, 0xffffff), pick([-1, ri(0, 65535)]), ri(-3000, 3000) * 65536 + ri(0, 65535),
+    ri(-3000, 3000) * 65536 + ri(0, 65535), ...patW()] : [patBits(), patColB(), patU(), patU(), ...patW()];
+  // Usually the pen and the end in range, from registers outside the block.
+  const free = Array.from({length: 16}, (_, k) => k).filter(k => k < d || k > d + 5);
+  const [a, b, pa, pb] = rnd() < .8 ? [0, 1, 2, 3].map(() => pick(free)) : [r(), r(), r(), r()];
+  if (rnd() < .8) for (const k of [pa, pb, a, b]) code.push({op: OP.SET, dst: k, imm: rnd() < .9 ? ri(-470, 710) * 65536 + ri(0, 65535) : coordRaw()});
+  block.forEach((v, k) => code.push({op: OP.SET, dst: d + k, imm: v}));
+  if (rnd() < .8) code.push({op: OP.MOVE, a: pa, b: pb});
+  const i = {op: OP.LINE_PATTERN, dst: d, a, b, imm: pick([1, 2, 7, 24, ri(1, 24)]), aux: colour()};
+  // A loop of pattern lines between the screen's edges: the 2-entry segment
+  // check and the raster budget.
+  if (loop && heavy) {
+    const x = (d + 7) % 16;
+    code.push({op: OP.SET, dst: x, imm: pick([-480, 720]) * 65536}, {op: OP.REPEAT, imm: ri(20, 255)},
+      {...i, a: x}, {op: OP.NEG, dst: x, a: x}, {op: OP.END});
+  } else code.push(i);
+}
+
+// ------------------------------------------------------------- encoder
+const OP = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9, REPEAT_REG: 10,
+  BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14, LINE_PATTERN: 15, SUB: 16, NEG: 17, SHIFT: 18,
+  ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26};
+function encode({inputs = [], args = [], regions = [], patches = [], code}) {
+  const head = 12 + inputs.length + args.length + 4 * regions.length + 4 * patches.length, body = (head + 3) & ~3;
+  const b = new Uint8Array(body + 12 * code.length);
+  b.set([0x53, 0x4b, 0x49, 0x31, 1, 0, code.length, inputs.length, args.length, regions.length, patches.length, 0]);
+  let o = 12;
+  for (const q of inputs) b[o++] = q;
+  for (const q of args) b[o++] = q;
+  for (const r of regions) { b.set([r.type, r.q, r.k, r.write], o); o += 4; }
+  for (const p of patches) { b.set([p.pc, p.arg, p.field, 0], o); o += 4; }
+  const dv = new DataView(b.buffer);
+  code.forEach((i, k) => {
+    const at = body + 12 * k;
+    b.set([i.op, i.dst ?? 0, i.a ?? 0, i.b ?? 0], at);
+    dv.setInt32(at + 4, i.imm ?? 0, true);
+    dv.setUint16(at + 8, i.aux ?? 0, true);
+  });
+  return b;
+}
+
+// ----------------------------------------------------------- generator
+const reg = () => ri(0, 15);
+function program() {
+  const nin = ri(0, 8), inputs = Array.from({length: nin}, () => pick([16, 16, 0, 24, 30, ri(0, 30)]));
+  const code = [], open = [];
+  const target = ri(4, 64);
+  const heavy = rnd() < .15;                       // aim at the limits
+  const prims = rnd() < .25;
+  while (code.length < target) {
+    const room = target - code.length - open.length; // keep room for the ENDs
+    if (room <= 0) break;
+    // CUBIC and LINE_PATTERN (sec.4.6, 4.7, v1.2), with their operands set
+    // just before: about one program in four has one or more.
+    if (prims && rnd() < .12 && room > 10) { prim(code, heavy, open.length < 8 && room > 13); continue; }
+    const r = rnd();
+    if (r < .10 && open.length < 8 && room > 2) {
+      if (rnd() < .7) code.push({op: OP.REPEAT, imm: heavy ? ri(100, 255) : pick([1, 2, 3, 5, 255, ri(1, 9)])});
+      else {
+        // The count register usually holds an edge of 0..255 (256 and -1 are INVALID).
+        const c = reg();
+        if (rnd() < .7) code.push({op: OP.SET, dst: c, imm: pick([0, 1, 2, 255, 256, -1, 65536])});
+        code.push({op: OP.REPEAT_REG, a: c});
+      }
+      open.push(code.length - 1);
+    } else if (r < .16 && open.length) { code.push({op: OP.END}); open.pop(); }
+    else if (r < .19 && open.length) code.push({op: OP.BREAK_IF_GT, a: reg(), b: reg()});
+    else if (r < .30) code.push({op: OP.SET, dst: reg(), imm: rnd() < .4 ? coordRaw() : rnd() < .2 ? ri(0, 300) : imm32()});
+    // The raster budget's exact edge: lines of cost 1,024 (-480 to 543), 8 of
+    // them fill 8,192 to the pixel, the 9th is LIMIT.
+    else if (r < .31 && open.length < 7 && room > 6) {
+      const x = reg(), y = (x + 1) % 16, w = (x + 2) % 16;
+      code.push({op: OP.SET, dst: x, imm: -480 * 65536}, {op: OP.SET, dst: w, imm: 543 * 65536}, {op: OP.MOVE, a: x, b: y},
+        {op: OP.REPEAT, imm: pick([4, 8, 9])}, {op: OP.LINE, a: w, b: y, aux: 2}, {op: OP.LINE, a: x, b: y, aux: 3}, {op: OP.END});
+    }
+    // Long lines in a loop: the 8,192-pixel raster budget, not the step cap.
+    else if (r < .32 && heavy && open.length < 7 && room > 6) {
+      const x = reg(), y = reg();
+      code.push({op: OP.SET, dst: x, imm: pick([-480, 0, 720]) * 65536}, {op: OP.SET, dst: y, imm: ri(0, 134) * 65536},
+        {op: OP.REPEAT, imm: ri(3, 30)}, {op: OP.LINE, a: x, b: y, aux: 1}, {op: OP.NEG, dst: x, a: x}, {op: OP.END});
+    }
+    else if (r < .35 && nin) code.push({op: OP.INPUT, dst: reg(), a: ri(0, nin - 1)});
+    else if (r < .55) {
+      const op = pick([OP.ADD, OP.SUB, OP.NEG, OP.MUL, OP.MUL, OP.SHIFT, OP.ADD_H, OP.SUB_H, OP.MUL_H, OP.SHIFT_H, OP.SIN]);
+      const i = {op, dst: reg(), a: reg()};
+      // .H saturates its operands first (sec.2.3): feed it values past 16 bits.
+      if ([OP.ADD_H, OP.SUB_H, OP.MUL_H, OP.SHIFT_H].includes(op) && rnd() < .5)
+        code.push({op: OP.SET, dst: i.a, imm: pick([32767, 32768, -32768, -32769, 40000, -70000, 2 ** 31 - 1, -(2 ** 31)])});
+      if ([OP.ADD, OP.SUB, OP.MUL, OP.ADD_H, OP.SUB_H, OP.MUL_H].includes(op)) i.b = reg();
+      if (op === OP.MUL) i.aux = pick([0, 1, 15, 16, 17, 31, 32, 48, 62, ri(0, 62)]);
+      if (op === OP.MUL_H) i.aux = pick([0, 1, 14, 15, 16, 31, ri(0, 31)]);
+      if (op === OP.SHIFT) i.imm = pick([-31, -16, -1, 0, 1, 16, 31, ri(-31, 31)]);
+      if (op === OP.SHIFT_H) i.imm = pick([-15, -1, 0, 1, 14, ri(-15, 14)]);
+      code.push(i);
+    } else {
+      const op = pick([OP.MOVE, OP.PLOT, OP.LINE, OP.LINE, OP.PLOT_C, OP.LINE_C]);
+      const i = {op, a: reg(), b: reg()};
+      if (op === OP.PLOT || op === OP.LINE) i.aux = ri(0, 65535);
+      if (op === OP.PLOT_C || op === OP.LINE_C) i.dst = reg();
+      code.push(i);
+    }
+  }
+  while (open.length) { code.push({op: OP.END}); open.pop(); }
+  if (code.length > 64) code.length = 64;          // may unbalance: a reject to compare
+  // Arguments patched into SET's imm (any Q), PLOT/LINE's aux and REPEAT's
+  // imm (Q0), sorted by (pc, field).
+  const args = [], argv = [], patches = [];
+  for (let k = 0; k < ri(0, 3); k++) {
+    const pc = ri(0, code.length - 1), i = code[pc];
+    let field, q, v;
+    if (i.op === OP.SET) { field = 0; q = pick([16, 0, 24, ri(0, 30)]); v = rnd() < .5 ? ri(-500, 740) + pick([0, .5, -.5, .25, 1 / 65536]) : (rnd() - .5) * 1e5; }
+    // A Q above 0 with a value that still lands in range after scaling
+    // (0.5 at Q16 is 32768) is refused only by the Q0 rule (sec.3), so the
+    // rule is tested on its own.
+    else if (i.op === OP.PLOT || i.op === OP.LINE) { field = 1; q = pick([0, 0, 0, 16, 8, 1]); v = q ? ri(0, 65535) / 2 ** q : rnd() < .9 ? ri(0, 65535) : pick([-1, 65536, 1.5]); }
+    else if (i.op === OP.REPEAT || i.op === OP.CUBIC) { field = 0; q = pick([0, 0, 0, 16, 4]); v = q ? ri(1, 255) / 2 ** q : pick([1, 2, 255, 0, 256, ri(1, 9)]); }
+    else if (i.op === OP.LINE_PATTERN) {
+      field = pick([0, 1]); q = pick([0, 0, 0, 16]);
+      v = field ? (q ? ri(0, 65535) / 2 ** q : pick([0, 65535, 65536, -1, ri(0, 65535)])) : (q ? ri(1, 24) / 2 ** q : pick([1, 24, 0, 25, ri(1, 24)]));
+    }
+    else continue;
+    if (patches.some(p => p.pc === pc && p.field === field)) continue;
+    patches.push({pc, arg: args.length, field}); args.push(q); argv.push(v);
+  }
+  patches.sort((x, y) => x.pc - y.pc || x.field - y.field);
+  const bytes = encode({inputs, args, patches, code});
+  if (rnd() < .2) {                                // mutation: compare accept/reject
+    const k = ri(0, bytes.length - 1);
+    bytes[k] = rnd() < .5 ? ri(0, 255) : bytes[k] ^ (1 << ri(0, 7));
+  }
+  const inv = Array.from({length: rnd() < .1 ? ri(0, 10) : nin}, () => {
+    const q = 16;
+    return pick([ri(-600, 800), ri(-600, 800) + .5, -(ri(0, 600) + .5), (ri(-1e6, 1e6)) / 2 ** q, rnd() * 1e3 - 500,
+      1e12, -1e12, 0, -0, ...(rnd() < .02 ? [NaN, Infinity] : [])]);
+  });
+  return {bytes, argv, inv};
+}
+
+// ------------------------------------------------- data regions (v1.3)
+const ELEM = [
+  () => pick([-32768, -32767, -1, 0, 1, 255, 256, 32767, ri(-32768, 32767), ri(-300, 300)]),
+  () => pick([0, 1, 32767, 32768, 32769, 65535, ri(0, 65535), ri(0, 300)]),
+  () => pick([-(2 ** 31), 2 ** 31 - 1, -1, 0, 1, 65536, -65536, ri(-(2 ** 31), 2 ** 31 - 1), ri(-70000, 70000)]),
+];
+function dataProgram() {
+  const heavy = rnd() < .12;
+  // Most programs register, so that execution is compared; the rest carry
+  // mistakes (bad = the chance per instruction or field).
+  const bad = rnd() < .7 ? 0 : .06;
+  const no = () => rnd() < bad;
+  const nr = ri(1, 4);
+  const decl = Array.from({length: nr}, () => ({type: ri(0, 2), q: pick([0, 8, 14, 16, 30, ri(0, 30)]),
+    k: rnd() < .35 ? 1 : ri(1, 8), write: !bad || rnd() < .85 ? 1 : 0}));
+  if (!decl.some(d => d.k === 1) && rnd() < .7) decl[ri(0, nr - 1)].k = 1;
+  // What the case passes: usually the declaration with records of its own.
+  const pass = decl.map((d, i) => {
+    if (i && rnd() < .08) {                         // the same memory under two numbers
+      const j = ri(0, i - 1);
+      if (decl[j].type === d.type && decl[j].q === d.q && decl[j].k === d.k) return {alias: j};
+      if (rnd() < .5) { Object.assign(d, {type: decl[j].type, q: decl[j].q, k: decl[j].k}); return {alias: j}; }
+    }
+    const records = heavy ? ri(300, 3000) : pick([1, 1, 2, 3, 7, 8, 9, 17, ri(1, 40)]);
+    const g = {type: d.type, q: d.q, k: d.k, n: records * d.k};
+    const m = bad ? rnd() : 1;
+    if (m < .015) g.type = (g.type + 1) % 3;
+    else if (m < .03) g.q = (g.q + 1) % 31;
+    else if (m < .045) g.k = g.k % 8 + 1, g.n = records * g.k;
+    else if (m < .055) g.n = 0;                      // no records: shiki.data() refuses it
+    g.e = Array.from({length: g.n}, ELEM[g.type]);
+    return g;
+  });
+  if (bad && rnd() < .05) pass.pop();               // a count mismatch
+  else if (bad && rnd() < .05) pass.push({type: 0, q: 0, k: 1, n: 1, e: [0]});
+  const k1 = decl.map((d, i) => i).filter(i => decl[i].k === 1);
+  const rec = i => { const g = pass[i]; return g ? (g.alias !== undefined ? pass[g.alias] : g) : null; };
+  const records = i => { const g = rec(i); return g ? Math.max(1, Math.floor(g.n / Math.max(1, g.k))) : 1; };
+  const code = [], open = [];                        // open: {region|-1}
+  const target = ri(6, 64);
+  const shiftK = () => pick([0, 0, 0, -1, 1, -8, 8, 16, -16, 31, -31, ri(-31, 31)]);
+  while (code.length < target) {
+    const room = target - code.length - open.length;
+    if (room <= 0) break;
+    const inside = open.filter(o => o >= 0);
+    const r = rnd();
+    if (r < .16 && open.length < 8 && room > 3) {
+      // EACH: the outer ones mostly differ, but a self-nested one now and then.
+      const a = inside.length && rnd() < .2 ? pick(inside) : ri(0, nr - 1);
+      if (rnd() < .45) code.push({op: OP.EACH, a});
+      else {
+        const c = reg(), n = records(a);
+        if (rnd() < .85) code.push({op: OP.SET, dst: c, imm: pick([0, 1, n, n, n - 1, n + 1, -1, 2 ** 31 - 1, ri(0, n)])});
+        code.push({op: OP.EACH, a, b: c, aux: 1});
+      }
+      open.push(a);
+    } else if (r < .2 && open.length < 8 && room > 2) {
+      code.push({op: OP.REPEAT, imm: heavy ? ri(50, 255) : pick([1, 2, 3])}); open.push(-1);
+    } else if (r < .3 && open.length) { code.push({op: OP.END}); open.pop(); }
+    else if (r < .34 && open.length) code.push({op: OP.BREAK_IF_GT, a: reg(), b: reg()});
+    else if (r < .52 && (inside.length || no())) {
+      // FETCH / PUT: a valid span of the record, or (bad) one past it.
+      const a = inside.length ? pick(inside) : ri(0, nr - 1), k = decl[a].k;
+      const m = no() ? ri(0, 9) : ri(1, k), b = no() ? ri(0, 8) : ri(0, Math.max(0, k - m));
+      const dst = no() ? ri(0, 15) : ri(0, 16 - Math.max(1, m));
+      const put = rnd() < .5 && (decl[a].write || no());
+      code.push({op: put ? OP.PUT : OP.FETCH, dst, a, b, aux: m, imm: shiftK()});
+    } else if (r < .58 && (k1.length || no())) {
+      const a = k1.length && !no() ? pick(k1) : ri(0, nr - 1), i = reg();
+      if (rnd() < .5) code.push({op: OP.SET, dst: i, imm: pick([-1, 0, 1, -65536, 2 ** 31 - 1, -(2 ** 31), ri(-5, 50), ri(-5, 50) * 65536 + ri(0, 65535)])});
+      code.push({op: OP.LOOKUP, dst: reg(), a, b: i, aux: pick([0, 0, 16, 31, 1, ri(0, 31)]), imm: shiftK()});
+    } else if (r < .8) {
+      const op = pick([OP.ADD, OP.SUB, OP.NEG, OP.MUL, OP.SHIFT, OP.ADD_H, OP.MUL_H, OP.SHIFT_H]);
+      const i = {op, dst: reg(), a: reg()};
+      if ([OP.ADD, OP.SUB, OP.MUL, OP.ADD_H, OP.MUL_H].includes(op)) i.b = reg();
+      if (op === OP.MUL) i.aux = pick([0, 8, 16, ri(0, 62)]);
+      if (op === OP.MUL_H) i.aux = pick([0, 8, 15, ri(0, 31)]);
+      if (op === OP.SHIFT) i.imm = shiftK();
+      if (op === OP.SHIFT_H) i.imm = pick([-15, -1, 0, 1, 14, ri(-15, 14)]);
+      code.push(i);
+    } else if (r < .88) code.push({op: OP.SET, dst: reg(), imm: rnd() < .4 ? coordRaw() : imm32()});
+    else {
+      const op = pick([OP.PLOT, OP.LINE, OP.MOVE]);
+      code.push({op, a: reg(), b: reg(), aux: op === OP.MOVE ? 0 : ri(0, 65535)});
+    }
+  }
+  while (open.length) { code.push({op: OP.END}); open.pop(); }
+  if (code.length > 64) code.length = 64;
+  // Arguments patched into EACH's aux (the count mode) and FETCH/PUT/LOOKUP's k.
+  const args = [], argv = [], patches = [];
+  for (let n = 0; n < ri(0, 2); n++) {
+    const pc = ri(0, code.length - 1), i = code[pc];
+    let field, q = pick([0, 0, 0, 16]), v;
+    // EACH's imm is unused but not an int field (sec.3): any Q, must end up 0.
+    if (i.op === OP.EACH) { field = rnd() < .7 ? 1 : 0; v = field ? (q ? 1 / 65536 : pick([0, 1, 2])) : pick([0, 0, 1 / 131072, 1]); }
+    else if (i.op === OP.FETCH || i.op === OP.PUT || i.op === OP.LOOKUP) { field = 0; v = q ? ri(-31, 31) / 2 ** q : pick([-31, 0, 31, 32, ri(-31, 31)]); }
+    else continue;
+    if (patches.some(p => p.pc === pc && p.field === field)) continue;
+    patches.push({pc, arg: args.length, field}); args.push(q); argv.push(v);
+  }
+  patches.sort((x, y) => x.pc - y.pc || x.field - y.field);
+  const bytes = encode({regions: decl, args, patches, code});
+  if (rnd() < .15) {
+    const k = ri(0, bytes.length - 1);
+    bytes[k] = rnd() < .5 ? ri(0, 255) : bytes[k] ^ (1 << ri(0, 7));
+  }
+  const data = pass.map(g => g.alias !== undefined ? `ALIAS ${g.alias}` : `${g.type} ${g.q} ${g.k} ${g.n / g.k} ${g.e.join(' ')}`);
+  return {bytes, argv, inv: [], data: `DATA ${data.length} ${data.join(' ')}`};
+}
+
+// --------------------------------------------------------------- run
+const hex = b => Buffer.from(b).toString('hex');
+const lines = [];
+for (let n = 0; n < N; n++) {
+  const {bytes, argv, inv, data} = rnd() < DATA ? dataProgram() : program();
+  lines.push(`CASE ${hex(bytes)} ARGS ${argv.length} ${argv.map(String).join(' ')} INPUTS ${inv.length} ${inv.map(String).join(' ')}${data ? ' ' + data : ''}`.replace(/  +/g, ' ').trim());
+}
+const cases = path.join(dir, 'cases.txt');
+fs.writeFileSync(cases, lines.join('\n') + '\n');
+const runner = path.join(dir, 'shiki_run');
+execFileSync('gcc', ['-std=gnu11', '-Wall', '-Wextra', '-Werror', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover',
+  '-Imain/ui/kasane', 'main/ui/kasane/ksn_shiki.c', 'tools/kasane_contract/shiki_run.c', '-lm', '-o', runner], {cwd: ROOT, stdio: 'inherit'});
+const big = {maxBuffer: 1 << 30, cwd: ROOT};
+// A runner that crashes (ASan, a wild jump) is a failure, not silence.
+const run = (cmd, args, extra = {}) => {
+  try { return execFileSync(cmd, args, {...big, ...extra}).toString(); }
+  catch (e) { console.log(`${path.basename(cmd)} failed: ${(e.stderr || e.message).toString().slice(0, 600)}`); console.log('SHIKI DIFF FAIL (runner)'); process.exit(1); }
+};
+const c = run(runner, [cases]).trimEnd().split('\n');
+const js = run('node', [path.join(ROOT, 'tools/kasane_ir/shiki_ref.mjs'), cases]).trimEnd().split('\n');
+const cSin = execFileSync(runner, [], {...big, env: {...process.env, SHIKI_SIN_TABLE: '1'}}).toString().trim();
+const {SIN_TABLE} = await import(path.join(ROOT, 'tools/kasane_ir/shiki_ref.mjs'));
+let bad = 0;
+if (cSin !== Array.from(SIN_TABLE).join(' ')) { bad++; console.log('SIN TABLE DIFFERS'); }
+if (c.length !== N || js.length !== N) { console.log(`line counts: C ${c.length}, JS ${js.length}, cases ${N}`); process.exit(1); }
+const tally = {};
+for (let k = 0; k < N; k++) {
+  const key = c[k].startsWith('REJECT') ? 'REJECT' : c[k].split(' ')[1];
+  tally[key] = (tally[key] ?? 0) + 1;
+  if (c[k] !== js[k]) {
+    if (++bad <= 5) console.log(`DIFF case ${k}\n  ${lines[k].slice(0, 400)}\n  C:  ${c[k].slice(0, 400)}\n  JS: ${js[k].slice(0, 400)}`);
+  }
+}
+console.log(`cases ${N} (seed ${SEED}): ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+console.log(bad ? `SHIKI DIFF FAIL (${bad})` : 'SHIKI DIFF PASS');
+console.log(`cases kept in ${dir}`);
+process.exit(bad ? 1 : 0);

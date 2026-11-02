@@ -1,0 +1,44 @@
+# DERBY: runner/fr @plan + JS Math.sin -> built-in Shiki (run/legs/frl/frb) + drawMany
+# device, local.derby 60 s app_session, demo race (seeds differ between runs: compare by camera)
+
+BASE fw 4392695 (old DERBY, @plan runner/fr, JS Math.sin)
+APP_LOAD prog bytes=2465 used=31916>34956>36504
+APP_LOAD view bytes=12092 compile_us=51443 used=36504>53936>65336
+APP_LOAD scene bytes=9578 compile_us=48008 used=65336>77352>79720
+APP_LOAD pan bytes=2014 used=79720>81824>81824
+APP_LOAD play bytes=7282 used=81824>88936>94284
+LOADED MEM free=70808 largest=31744 js=90064
+pad turn_ms 5.37-5.40 render 7.85-8.0
+demo seed 4A96248B: gate 6.49; race start 9.79,10.81,10.87,10.72,10.73,10.81,11.08
+CAM FIELD 11.15,11.14,11.14,11.14
+CAM WIDE 2 11.78,17.77,19.28,19.97,20.28,20.80,20.92,19.30,17.40,19.90,20.48,20.49,20.28,19.79,19.17,17.83
+CAM WIDE 3 19.00
+CAM CLOSE 16.72,10.30,10.42,10.36
+CAM VISION 12.09,13.38,13.24,13.18
+CAM WIDE 3 13.39,15.41,15.70,15.80
+
+NEW fw 3830107 (Shiki runners, phase from distance, drawMany Float64)
+SHIKI_HEAP open bytes=49152
+APP_LOAD prog bytes=2440 used=31956>34856>36352
+APP_LOAD view bytes=12395 compile_us=53855 used=36352>54836>71032
+APP_LOAD scene bytes=9674 compile_us=48204 used=71032>83080>85456
+APP_LOAD pan bytes=2033 used=85456>87568>87560
+APP_LOAD play bytes=7148 used=87560>94488>98468
+APP_LOAD demo used=101792>103016>103004   (base 97640>98864>98848)
+LOADED MEM free=51004 largest=31744 js=94424
+pad turn_ms 5.33-5.36
+demo seed 2E270CE5: race plans=26 reg=26 (base 31)
+race start 8.19,10.48,10.53,10.56,10.46,10.45,10.75
+CAM FIELD 10.84,10.90,10.92,10.92,10.93
+CAM WIDE 2 15.08,18.45,19.71,20.00,20.60,20.67,20.30,17.35,18.60,20.21,20.29,20.16,19.69,19.33,18.15
+CAM WIDE 3 18.14,18.25
+CAM CLOSE 12.64,10.16,10.16
+CAM VISION 10.51,13.24,13.26,13.07,12.93
+CAM WIDE 3 14.26
+CAM HEAD ON 14.56,8.62
+FINISH 9.07,10.14
+
+Summary (measured, one run each, different races):
+  turn_ms: race start/FIELD/CLOSE about -0.2..-0.3 ms (2-3%); WIDE 2 and VISION unchanged within noise.
+  native free at LOADED: 70808 -> 51004 (-19.8 KB; the 48 KiB Shiki heap is opened for this app).
+  guest after load: js 90064 -> 94424 (+4.4 KB); view chunk after run 65336 -> 71032 (+5.7 KB).

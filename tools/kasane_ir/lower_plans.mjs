@@ -55,9 +55,21 @@ function withComments(text, at) {
 
 export function lowerText(text, file, ids = null, rom = null) {
   text = text.replace(/\r\n/g, '\n');
-  const plans = findPlans(text, file), report = [];
+  // @shiki functions (Shiki programs, spec sec.8) ship only as the built-in
+  // table (emit_shiki_rom.mjs), whichever way the @plan functions ship, so
+  // they are always removed: the guest never evaluates their source.
+  const shiki = findPlans(text, file, ['shiki']).map(p => ({...p, shiki: true}));
+  const plans = findPlans(text, file).concat(shiki).sort((a, b) => a.start - b.start), report = [];
   let out = '', at = 0;
   for (const p of plans) {
+    if (p.shiki) {
+      const [from] = withComments(text, p.start);
+      const tail = /^[ \t]*,?[ \t]*\n?/.exec(text.slice(p.end))[0];
+      out += text.slice(at, from);
+      at = p.end + tail.length;
+      report.push({name: p.name, file, shiki: true, sourceBytes: p.end - p.start});
+      continue;
+    }
     const c = compilePlan(p);
     if (c.count > 64) throw new Error(`${file}: ${p.name}: ${c.count} instructions (register() takes 64)`);
     const packed = encodeNibble(c.text);
@@ -101,7 +113,7 @@ function main() {
     const [, src, dst] = args;
     const text = fs.readFileSync(src, 'utf8');
     fs.mkdirSync(path.dirname(dst), {recursive: true});
-    fs.writeFileSync(dst, /@plan/.test(text) ? lowerText(text, path.basename(src), ids, rom).text : text);
+    fs.writeFileSync(dst, /@plan|@shiki/.test(text) ? lowerText(text, path.basename(src), ids, rom).text : text);
     return;
   }
   const [src, dst] = args;
@@ -124,7 +136,7 @@ function main() {
   }
   if (report.length && !ids && decoders !== 1) throw new Error(`${src}: ${decoders} @planDecoder functions (want 1)`);
   fs.writeFileSync(path.join(dst, 'plans.json'), JSON.stringify(report, null, 1));
-  const sum = k => report.reduce((a, r) => a + r[k], 0);
+  const sum = k => report.reduce((a, r) => a + (r[k] ?? 0), 0);
   console.log(`lower_plans: ${report.length} plans, ${sum('instructions')} instructions; source ${sum('sourceBytes')} B of ` +
     `plan functions -> ${rom ? 'rom (removed)' : ids ? 'ids' : sum('packedBytes') + ' B packed'}`);
 }

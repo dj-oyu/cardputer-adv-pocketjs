@@ -88,6 +88,15 @@ ksn_proc_status ksn_proc_sized_plan_begin(ksn_proc_vm *vm,const ksn_proc_sized_p
                                           ksn_proc_frame *frame);
 ksn_proc_status ksn_proc_sized_plan_run(ksn_proc_vm *vm,const ksn_proc_sized_plan *plan,
                                         bool debug_step);
+/* begin + run (no debug stepping) as one call, without redoing per draw
+ * what prepare fixed: no whole-VM memset, no revalidation, no check that the
+ * VM holds the plan (it cannot hold anything else). Frame, registers, pen,
+ * steps and status come out as from begin + run, byte for byte. An invalid
+ * plan fails as its begin does. For the per-draw path of
+ * pocket.kasane.procedural; begin/run stay for stepping and state carry. */
+ksn_proc_status ksn_proc_sized_plan_draw(ksn_proc_vm *vm,const ksn_proc_sized_plan *plan,
+                                         const float input[KSN_PROC_INPUTS],
+                                         ksn_proc_frame *frame);
 bool ksn_proc_sized_plan_register_points_affine(ksn_proc_sized_plan *plan,
                                                  const KsnProcAffineQ14 *coeff,
                                                  const KsnProcPointsPolicy *policy);
@@ -151,6 +160,12 @@ ksn_proc_status ksn_proc_rom_plan_begin(ksn_proc_vm *vm,const ksn_proc_rom_plan 
                                         ksn_proc_frame *frame);
 ksn_proc_status ksn_proc_rom_plan_run(ksn_proc_vm *vm,const ksn_proc_rom_plan *plan,
                                       bool debug_step);
+/* As ksn_proc_sized_plan_draw. The rows are still copied out of flash into
+ * the VM with the arguments applied (the table is const); validation and
+ * the comparison with the table are not repeated. */
+ksn_proc_status ksn_proc_rom_plan_draw(ksn_proc_vm *vm,const ksn_proc_rom_plan *plan,
+                                       const float input[KSN_PROC_INPUTS],
+                                       ksn_proc_frame *frame);
 bool ksn_proc_rom_plan_register_points_affine(ksn_proc_rom_plan *plan,
                                                const KsnProcAffineQ14 *coeff,
                                                const KsnProcPointsPolicy *policy);

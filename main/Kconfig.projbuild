@@ -168,6 +168,17 @@ menu "Pocket VM (diagnostics)"
 
             Regenerate the header after any change to the builtins.
 
+    config POCKET_SHIKI_MEMSTAT
+        bool "Count the native allocations of the line/grid surfaces (diagnostic)"
+        default n
+        help
+            main/pocket/shiki_memstat.c: what pocket_proc.c, pocket_grid.c and
+            pocket_derby.c allocate, per call site, with the heap block sizes,
+            the peak, and the internal heap's free bytes and largest block
+            beside each allocation. app_stop() logs "SHIKI_MEM ..." lines.
+            For sizing the Shiki heap's default budget (docs/kasane/shiki.md
+            sec.4.5); never in the product image.
+
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
         range -1 1

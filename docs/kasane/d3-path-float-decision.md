@@ -1,5 +1,7 @@
 # D3/D3a: path と float IR の採否
 
+> 2026-10-30 追記: Shiki（この IR の新しい総称）は実数を固定小数だけにすると決めた（[shiki.md](shiki.md) §5）。下の「float の式を Q14 の PIE へ暗黙に下ろさない」理由は、すべての式が明示的に型付けされることで消える。この文書の判断そのものは当時の記録として残す。
+
 2026-09-28 の host gate: [`test_proc_path_float_decision.c`](../../tools/kasane_contract/test_proc_path_float_decision.c) を MinGW GCC 15.2.0 の `-O0` と `-O2` で実行。両方通過した。COM3はこのgateで使用していない。`run.sh` にも同じ試験を追加した。
 
 ## 代表path

@@ -96,6 +96,10 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#include "pocket_shiki.h"
+#include "shiki_memstat.h"
+#include "shiki_heap.h"
+#include "pocket_shiki_api.h"
 #include "pocket_shape.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
@@ -1055,6 +1059,9 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
+    // Before the surfaces free anything: the session's peaks (diagnostic
+    // builds only, shiki_memstat.h).
+    shiki_memstat_report();
     // Holds no guest values (docs/apps/derby-ser-native.md section 3).
     pocket_derby_reset();
     if(pocket_kasane_reset()){
@@ -1072,6 +1079,8 @@ void app_stop(void) {
     pocket_text_reset();
     pocket_bridge_reset();
     pocket_memory_reset();
+    // Holds guest values (the data regions' windows): before the guest goes.
+    pocket_shiki_api_reset();
     pocket_api_reset();
     // Read before the runtime goes: app_report() below runs with guest == NULL,
     // so this is the last point at which "was anything still queued" has an
@@ -1088,6 +1097,9 @@ void app_stop(void) {
 #endif
     if(guest) pocketjs_guest_destroy(guest);
     guest=NULL;
+    // After the guest: its finalizers may still call the windows' free_func
+    // (a no-op). The region goes back once nothing lives in it.
+    shiki_heap_end();
 #ifdef KASANE_P0_PROBE
     if(p0_had_guest)pocket_mutex_arena_report();
 #endif
@@ -1110,6 +1122,7 @@ void app_stop(void) {
     // After the teardown, so a refusal inside it is counted in this session.
     oomprobe_session_end("app");
 #endif
+    shiki_memstat_reset();
     ESP_LOGI("app","APP_STOPPED");
 }
 
@@ -1543,6 +1556,18 @@ esp_err_t app_start_test(char test) {
     // (docs/kasane/flash-plan.md): a const table in flash, the same for
     // every session; pocket_proc_reset() keeps it.
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
+    // The Shiki heap (docs/kasane/shiki-spec.md sec.9.2): one contiguous
+    // region for a session whose manifest names kasane.shiki, taken now,
+    // before the guest, while the heap is clean (a 40 KB-class block is not
+    // there once a guest runs: docs/kasane/shiki.md sec.4.5.1). An app that
+    // cannot have it does not start.
+    if(!overlay_session&&app_registry_wants(app_registry_current(),"kasane.shiki")){
+        const app_manifest_t *m=app_registry_current();
+        if(!shiki_heap_begin(m?m->shiki_bytes:0)){
+            ESP_LOGE("app","SHIKI_HEAP_UNAVAILABLE bytes=%u",(unsigned)(m&&m->shiki_bytes?m->shiki_bytes:SHIKI_HEAP_DEFAULT_BYTES));
+            err=ESP_ERR_NO_MEM;goto fail;
+        }
+    }
     TRY(pocketjs_guest_create(&gc,&guest));
     if(++guest_generation==0)++guest_generation;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
@@ -1633,6 +1658,10 @@ surfaces_done:
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
     if(app_registry_wants(app_registry_current(),"derby.series"))
         TRY(pocketjs_guest_quickjs_install_once(guest,"derby",pocket_derby_install,NULL));
+    // pocket.shikiDebug, the Shiki engine for the on-device differential test
+    // (apps/shikitest), the same way: only for kasane.shiki.debug.
+    if(app_registry_wants(app_registry_current(),"kasane.shiki.debug"))
+        TRY(pocketjs_guest_quickjs_install_once(guest,"shiki-debug",pocket_shiki_debug_install,NULL));
     // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
     // 'J' diagnostic, which runs MEGADEMO without a manifest).
     // docs/apps/megademo-shapes.md.

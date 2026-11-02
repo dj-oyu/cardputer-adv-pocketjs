@@ -1,0 +1,11 @@
+# Shiki draw cost by stage, device run 2026-11-01 (broker job dc-run2-94aea92,
+# firmware 94aea92, ELF 1987d9e7...). apps/shikitest/draw_cost.js: 200 calls,
+# minimum of 5 rounds, cycles per call at 240 MHz.
+I (130552) js: DC BEGIN n=200 rounds=5 BUILD 1 1987d9e7c28aff15
+I (130560) js: DC loop total=1120.0 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (130568) js: DC native total=1162.3 parse=0.0 lookup=0.0 engine=0.0 copy=0.0 n=0
+I (130581) js: DC draw0 total=2324.7 parse=494.0 lookup=107.0 engine=270.0 copy=77.0 n=200
+I (130616) js: DC draw8 total=7490.7 parse=1936.8 lookup=123.1 engine=3377.5 copy=77.1 n=200
+I (130656) js: DC draw8arr total=8789.2 parse=3660.7 lookup=123.1 engine=3371.9 copy=77.0 n=200
+I (130676) js: DC point total=3907.2 parse=850.1 lookup=138.0 engine=1293.9 copy=103.1 n=200
+I (130678) js: DC END

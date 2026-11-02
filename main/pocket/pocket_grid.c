@@ -57,6 +57,10 @@ void pocket_grid_resize_profile_read(pocket_grid_resize_profile *out)
 #define GRID_RESIZE_START() 0u
 #define GRID_RESIZE_END(field, count, start) ((void)(start))
 #endif
+// Counts this file's allocations when CONFIG_POCKET_SHIKI_MEMSTAT is on
+// (docs/kasane/shiki.md sec.4.5); nothing otherwise.
+#define SHIKI_MS_FILE SHIKI_MS_GRID
+#include "shiki_memstat.h"
 
 #define GRID_APP_SLOTS POCKET_GRID_MAX_SLOTS
 /* No PSRAM is configured on this board. Compact plans may share the six

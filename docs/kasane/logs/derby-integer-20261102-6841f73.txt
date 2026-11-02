@@ -1,0 +1,31 @@
+# DERBY all-integer JS (6841f73) on the device, local.derby 60 s app_session, the demo race
+# (seeds differ from the earlier runs: compare by camera). Baselines: derby-shiki-20261101-3830107.txt.
+SHIKI_HEAP open bytes=49152
+APP_LOAD prog bytes=2601 used=34024>36604>39796
+APP_LOAD view bytes=11683 compile_us=45130 used=39796>56968>74156
+APP_LOAD scene bytes=9966 compile_us=46344 used=74156>86132>89388
+APP_LOAD pan bytes=1215 used=89388>90628>90588
+APP_LOAD play bytes=7503 used=90588>97752>101428
+APP_LOAD demo bytes=742 used=105708>106940>106932
+LOADED MEM free=47556 largest=31744 js=97684
+pad turn_ms 4.82-4.91
+demo seed 41D9BA4B: gate 5.47; WIDE 1 9.22,10.99; WIDE 10.74
+CAM WIDE (side) 8.87,8.87,8.87
+CAM FIELD 8.89,9.19,9.22,9.24,9.25,9.27,9.11,9.10,9.10,9.27
+CAM WIDE 2 (oval pan) 9.60,11.29 / 10.28 / 10.46
+CAM CLOSE 8.96,8.84 / 11.56,8.86 / 11.45,8.84,8.78 / 10.60,8.82,9.01
+CAM WIDE 3 11.11 / 10.86,11.28
+CAM VISION 10.07,11.02,10.94,10.85
+CAM HEAD ON 9.02,7.67
+FINISH 8.93
+
+Turn (ms, one run each; races differ):
+              double (4392695)   Shiki runners (3830107)   all integer (6841f73)
+  pad          5.37-5.40          5.33-5.36                  4.82-4.91
+  FIELD        11.14              10.84-10.93                8.89-9.27
+  WIDE 2 pan   17.4-20.9          15.1-20.7                  9.6-11.3
+  CLOSE        10.30-10.42        10.16                      8.78-9.01 (11.5 on a cut)
+  VISION       13.18-13.38        13.07-13.26                10.85-11.02
+  HEAD ON      -                  8.62                       7.67-9.02
+Memory after loading: native free 70,808 / 51,004 / 47,556 B; guest js 90,064 / 94,424 / 97,684 B;
+  play chunk's eval peak (used) 88,936 / 94,488 / 97,752 B.

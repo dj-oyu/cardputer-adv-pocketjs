@@ -1,0 +1,64 @@
+CB BEGIN 62 BUILD 1 e7db07f3f98a30ee
+CB asm add 1 2 thr=1.00 lat=1.00 ind=1.00 per=1
+CB asm mull 7 3 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mull 32767 32767 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mull 2147483647 3 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mull 3 2147483647 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mull 2147483647 2147483647 thr=0.99 lat=1.96 ind=0.96 per=1
+CB asm mull -1 -1 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mull 305419896 -124076833 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mulsh 7 3 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mulsh 2147483647 2147483647 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mulsh -1 -1 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm muluh 7 3 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm muluh -1 -1 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mul16s 7 3 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mul16s 32767 32767 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mul16s -32768 -32768 thr=1.00 lat=2.00 ind=1.00 per=1
+CB asm mul16u 65535 65535 thr=1.00 lat=1.98 ind=0.98 per=1
+CB asm quos 7 3 thr=2.00 lat=2.00 ind=2.00 per=1
+CB asm quos 32767 3 thr=7.00 lat=7.00 ind=7.00 per=1
+CB asm quos 2147483647 3 thr=12.00 lat=12.00 ind=12.00 per=1
+CB asm quos 2147483647 32767 thr=12.00 lat=12.00 ind=12.00 per=1
+CB asm quos 2147483647 2147483632 thr=2.00 lat=2.00 ind=2.00 per=1
+CB asm quos 3 2147483647 thr=2.00 lat=2.00 ind=2.00 per=1
+CB asm quos -2147483647 3 thr=11.99 lat=11.96 ind=11.96 per=1
+CB asm quos 2147483647 -1 thr=12.00 lat=12.00 ind=12.00 per=1
+CB asm quou 7 3 thr=2.00 lat=2.00 ind=2.00 per=1
+CB asm quou -1 3 thr=12.00 lat=12.00 ind=12.00 per=1
+CB asm quou -1 -16 thr=2.00 lat=2.00 ind=2.00 per=1
+CB asm rems 7 3 thr=3.00 lat=3.00 ind=3.00 per=1
+CB asm rems 2147483647 3 thr=13.00 lat=13.00 ind=13.00 per=1
+CB asm rems 2147483647 2147483632 thr=3.00 lat=3.00 ind=3.00 per=1
+CB asm remu -1 3 thr=13.00 lat=13.00 ind=13.00 per=1
+CB asm src 305419896 -1698898192 thr=1.00 lat=1.00 ind=1.00 per=1
+CB asm ssr+src 305419896 13 thr=2.00 lat=2.00 ind=2.00 per=2
+CB c64 div64s 100 7 cy=87.88
+CB c64 div64s 1099511627899 1000003 cy=97.98
+CB c64 div64s 9223372036854775807 3 cy=159.98
+CB c64 div64s 4611686018427387909 1099511627783 cy=103.98
+CB c64 div64s -1125899906842624 12345 cy=151.80
+CB c64 div64u 1099511627899 1000003 cy=86.98
+CB c64 mod64s 1099511627899 1000003 cy=96.98
+CB c64 mul64 1099511627779 1048581 cy=5.98
+CB c64 mul32w 305419896 -124076833 cy=-1.00
+CB c64 mul32w>>16 305419896 -124076833 cy=1.73
+CB c64 shr64 -1152921504606846976 37 cy=24.98
+CB c64 div32c 2147483647 3 cy=10.00
+CB c64 div32c 7 3 cy=-0.20
+CB shiki SET 5 7 cy=60.17
+CB shiki ADD 5 7 cy=78.50
+CB shiki ADD sat 2147483647 2147483647 cy=77.50
+CB shiki SUB 5 7 cy=73.50
+CB shiki NEG 5 7 cy=67.17
+CB shiki MUL s16 small 327680 458752 cy=98.50
+CB shiki MUL s16 large 305419896 124076833 cy=97.82
+CB shiki MUL s0 sat 2147483647 2147483647 cy=80.50
+CB shiki MUL s40 305419896 124076833 cy=98.50
+CB shiki SHIFT +5 74565 7 cy=82.50
+CB shiki SHIFT -5 74565 7 cy=75.50
+CB shiki SIN 12345 7 cy=84.50
+CB shiki ADD.H 1000 2000 cy=101.51
+CB shiki MUL.H s8 1000 2000 cy=95.50
+CB shiki SHIFT.H +3 1000 7 cy=111.53
+CB END 62

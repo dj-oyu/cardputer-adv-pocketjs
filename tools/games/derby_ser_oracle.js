@@ -8,9 +8,38 @@
 // "//*": dr() records instead of drawing; the plan comes as a handle (turf: b
 // omitted); zf, t, the stands' plans and constants come from view()'s
 // arguments, which outside the fuzz must equal the app's own values.
+//
+// Since the integer interface (docs/apps/derby-integer.md) the app gives the
+// course, the unit and the series as Q16 integers and pocket.derby holds the
+// camera (aim()); the oracle captures those calls and keeps its own doubles
+// (CH, the sections, pc), converted exactly as the C converts them, and its
+// own pose() (the vm/main JS).
 (function () {
-  const S = pocket.derby, NV = S.view, NS = S.ser, NC = S.course;
-  let VE, VC, Lo, Hi, ZF, T, HL, CR, HC, CE, rec, fuzz = 0;
+  const S = pocket.derby, NV = S.view, NS = S.ser, NC = S.course, NA = S.aim, q16 = v => v / 65536,
+    flo = M.floor, rnd = M.round, PI = M.PI;
+  let VE, VC, Lo, Hi, ZF, T, HL, CR, HC, CE, rec, fuzz = 0, pc, CH, SEC, DN;
+  function pose(g, w) {
+    if (!SEC) return [g, w, 1, 0];
+    let i = 0;
+    while (i < SEC.length - 1 && g > SEC[i][0]) g -= SEC[i++][0];
+    const e = SEC[i];
+    let x = e[2], z = e[3], c = e[4], d = e[5];
+    if (e[1]) {
+      const r = 1 / e[1] + DN, C = M.cos(e[6] + e[1] * g), S = M.sin(e[6] + e[1] * g);
+      x += (S - d) * r; z -= (C - c) * r; c = C; d = S; g = 0;
+    }
+    return [x + g * c - w * d, z + g * d + w * c, c, d];
+  }
+  S.course = function (ch, sec, dnr) {
+    CH = ch.map(q16); DN = q16(dnr);
+    SEC = sec ? sec.map(row => { const e = row.map(q16); if (e.length < 7) e[6] = 0; if (e[1]) { e[1] = 1 / e[1]; e[6] *= 2 * M.PI; } return e; }) : null;
+    return NC.apply(S, arguments);
+  };
+  S.aim = function (gu, wu, gl, fmin, px, fmax) {
+    const q = pose(q16(gu), q16(wu)), a = pose(q16(gl), (DN + 1481114 / 65536) / 2), x = a[0] - q[0], z = a[1] - q[1], e = M.sqrt(x * x + z * z);
+    pc = [q[0], q[1], x / e, z / e, mn(fmax, mx(fmin, px * e / 2.4)), e];
+    return NA.apply(S, arguments);
+  };
   const dr = (h, a) => { if (h) rec.push(h, ...a); }; //*
   function lim(c0, c1) { if (c1 > 0) Lo = mx(Lo, -c0 / c1); else if (c1 < 0) Hi = mn(Hi, -c0 / c1); else if (c0 < 0) Hi = -1e9; }
   function ser(h, turf, w, s, g0, L, zf, a, b) { //*
@@ -63,7 +92,7 @@
   }
   // pan()'s chord ends and chords in view, for pc and zf.
   function chords(zf) {
-    VE = CRS === OC && []; VC = VE ? [] : [0];
+    VE = !!SEC && []; VC = VE ? [] : [0];
     if (VE) {
       for (const g of CH) {
         const m = pose(g, 0), x = m[0] - pc[0], z = m[1] - pc[1];
@@ -72,56 +101,56 @@
       for (let j = 1; j < CH.length; ++j) if (!ou(j - 1, 25.5, 30, zf)) VC.push(j - 1);
     }
   }
-  S.view = function (p, zf, t2, hl, cr, hc, ce) {
-    if (!fuzz && (p !== pc || t2 !== t || hl !== live.hl || cr !== live.crowd || hc !== KN[tier][0] || ce !== KN[3][5]))
+  S.view = function (zx, t2, hl, cr, hc, ce) {
+    if (!fuzz && (t2 !== t || hl !== live.hl || cr !== live.crowd || hc !== KN[tier][0]))
       throw Error('SER_ORACLE view() arguments are not the app\'s');
-    ZF = zf; T = t2; HL = hl; CR = cr; HC = hc; CE = ce;
-    chords(zf);
+    ZF = pc[5] + q16(zx); T = t2; HL = hl; CR = cr; HC = hc; CE = q16(ce);
+    chords(ZF);
     return NV.apply(S, arguments);
   };
   S.ser = function (h, w, s, g0, L, a, b) {
     rec = [];
-    ser(h, b === undefined, w, s, g0, L, ZF, a, b);
+    ser(h, b === undefined, q16(w), q16(s), q16(g0), L, ZF, b === undefined ? q16(a) : a, b === undefined ? b : q16(b));
     __serbegin();
     const r = NS.apply(S, arguments);
     __sercmp(rec, fuzz);
     return r;
   };
   // n random cases, each a course, a camera and the five series of pan() at a
-  // random tier plus three random ones; the app's course, camera and tier are
-  // put back afterwards.
+  // random tier plus three random ones (Q16 integers, as the app passes
+  // them); the app's course, camera and tier are put back afterwards.
   globalThis.__serfuzz = function (n, seed) {
-    const r = rng(seed), sv = [CRS, CH, pc, tier], pick = l => l[flo(r() * l.length)];
+    const r0 = rng(seed), r = () => (r0() >>> 0) / 4294967296, sv = [pc, tier], pick = l => l[flo(r() * l.length)], Q = v => v * 65536 | 0,
+      ach = CRS ? [-655360000].concat(Array.from({length: 17}, (_, j) => OB + j * 1544156), [655360000]) : [-655360000, 655360000];
     fuzz = 1; __serdry(1);
     try {
       for (let c = 0; c < n; ++c) {
         const oval = r() < .7;
-        CRS = oval ? OC : SC; CH = [-1e4];
-        if (oval) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
-        CH.push(1e4);
-        S.course(CH, oval ? OC : 0, DNR);
+        S.course(oval ? [-655360000].concat(Array.from({length: 17}, (_, j) => OB + j * 1544156), [655360000]) : [-655360000, 655360000],
+          oval ? OC : 0, 720896);
         tier = flo(r() * 3);
         const k = KN[tier], g = -150 + 1300 * r(), gc = pick([g, g - 40 + 80 * r(), 100 + 900 * r(), 460, 820]),
-          wc = pick([-14, -100, -3, -150 + 210 * r(), 11 + 30 * r()]), q = pose(gc, wc), a = pose(g, (DNR + DFR) / 2),
-          x = a[0] - q[0] + (r() < .1 ? 1e-9 : 0), z = a[1] - q[1], e = M.sqrt(x * x + z * z) || 1;
-        pc = [q[0], q[1], x / e, z / e, pick([200, 1500, mn(1500, mx(200, 14 * e / 2.4)), 50 + 3000 * r()]), e];
-        const zf = pc[5] + pick([75, 150, 500 * r()]), L = pick([4, 8, 4, 8, 0]), t2 = flo(r() * 1000);
-        S.view(pc, zf, t2, pick([7, 0]), pick([9, 0]), k[0], KN[3][5]);
-        S.ser(3, 40, 12, 0, L, 31727, -7.5);
-        S.ser(3, DFR, k[4], 0, L, 0xad55, 4.9);
-        S.ser(4, DNR, 2 * k[5], 0, L, 11.6);
-        S.ser(5, DNR, 2 * k[5], k[5], L, 11.6);
-        S.ser(3, DNR, k[4], 0, L, 0xffff, 4.9);
+          wc = pick([-14, -100, -3, -150 + 210 * r(), 11 + 30 * r()]), f = pick([200, 1500, 0, 50 + 3000 * r() | 0]);
+        if (f) S.aim(Q(gc), Q(wc), Q(g), f, 14, f); else S.aim(Q(gc), Q(wc), Q(g), 200, 14, 1500);
+        const L = pick([4, 8, 4, 8, 0]), t2 = flo(r() * 1000);
+        S.view(pick([75, 150, 500 * r() | 0]) * 65536, t2, pick([7, 0]), pick([9, 0]), k[0], 163840);
+        S.ser(3, 40 * 65536, 12 * 65536, 0, L, 31727, -491520);
+        S.ser(3, 1481114, k[4] * 65536, 0, L, 0xad55, 321126);
+        S.ser(4, 720896, 2 * k[5] * 65536, 0, L, 760218);
+        S.ser(5, 720896, 2 * k[5] * 65536, k[5] * 65536, L, 760218);
+        S.ser(3, 720896, k[4] * 65536, 0, L, 0xffff, 321126);
         for (let i = 0; i < 3; ++i) {
           const s = pick([1, 2.5, 4, 5, 7, 8, 10, 12, 14, 16 * r() + .5]), b = pick([-7.5, 4.9, -1 - 9 * r(), 9 * r(), undefined]);
-          b === undefined ? S.ser(6, 5 + 45 * r(), s, pick([0, s / 2, s * r()]), L, 5 + 20 * r()) :
-            S.ser(6, 5 + 45 * r(), s, pick([0, s / 2, s * r()]), L, pick([31727, 0xad55, 0xffff]), b);
+          b === undefined ? S.ser(6, Q(5 + 45 * r()), Q(s), Q(pick([0, s / 2, s * r()])), L, Q(5 + 20 * r())) :
+            S.ser(6, Q(5 + 45 * r()), Q(s), Q(pick([0, s / 2, s * r()])), L, pick([31727, 0xad55, 0xffff]), Q(b));
         }
       }
     } finally {
       fuzz = 0; __serdry(0);
-      [CRS, CH, pc, tier] = sv;
-      S.course(CH, CRS === OC ? OC : 0, DNR);
+      // The app's course again (through the wrapper: CH, SEC, DN); its unit
+      // is aimed again on its next frame.
+      [pc, tier] = sv;
+      S.course(ach, CRS || 0, 720896);
     }
   };
 })();

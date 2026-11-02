@@ -33,6 +33,12 @@ ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext(src, ctx);
 const {field, race, step, order, odds, D, DT} = ctx.derby;
+// The integer model (docs/apps/derby-integer.md; it exports fdiv): x Q16 m,
+// speeds Q20 m a step of 0.05 s, time Q16 steps, odds in tenths, figures as
+// Q16 fractions. These read either model in m, s and decimal odds.
+const INT = !!ctx.derby.fdiv, XM = INT ? 65536 : 1, TS = t => INT ? t / 65536 * .05 : t,
+  VM = v => INT ? v / 1048576 / .05 : v, OD = o => INT ? o / 10 : o, T_END = INT ? 4000 * 65536 : 200;
+const fig = k => INT ? {top: 16.6 + .2 * k.qt / 65536, st: .8 + k.qs / 65536, sty: k.sty, acc: 5 + 2 * k.qa / 65536, re: .25 * k.qr / 65536} : k;
 
 const args = process.argv.slice(2), check = args.includes('--check'), oval = args.includes('--course=oval');
 const N = +(args.find(a => !a.startsWith('--')) || 3000);
@@ -42,13 +48,13 @@ for (let n = 0; n < N; ++n) {
   const seed = (0x3e1b7 + Math.imul(n + 1, 0x9e3779b9)) >>> 0;
   const f = field(seed);
   f.o = oval;
-  const od = odds(f.h, f.o);
+  const od = Array.from(odds(f.h, f.o), OD);
   const s = race(f, true);
   let lead = -1, ch = 0;
-  while (s.done < 8 && s.t < 200) {
+  while (s.done < 8 && s.t < T_END) {
     step(f, s, DT);
     const l = order(s)[0];
-    if (Math.max(...s.x) > D - 300 && l !== lead && lead >= 0 && !s.done) ch++;
+    if (Math.max(...s.x) / XM > D - 300 && l !== lead && lead >= 0 && !s.done) ch++;
     lead = l;
   }
   const o = order(s), w = o[0];
@@ -56,10 +62,10 @@ for (let n = 0; n < N; ++n) {
   styleWins[f.h[w].sty]++;
   laneWins[w]++;
   if (od.indexOf(Math.min(...od)) === w) favWins++;
-  times.push(s.tc[w]);
-  margins.push((s.tc[o[1]] - s.tc[w]) * s.v[o[1]]);
+  times.push(TS(s.tc[w]));
+  margins.push(TS(s.tc[o[1]] - s.tc[w]) * VM(s.v[o[1]]));
   changes.push(ch);
-  rows.push({h: f.h, od: Array.from(od), w});
+  rows.push({h: f.h.map(fig), od, w});
 }
 const q = (a, p) => { const b = a.slice().sort((x, y) => x - y); return b[Math.floor(p * (b.length - 1))]; };
 const frac = (a, f) => a.filter(f).length / a.length;

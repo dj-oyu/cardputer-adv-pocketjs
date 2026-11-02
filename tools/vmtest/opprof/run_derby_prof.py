@@ -37,7 +37,7 @@ HERE = Path(__file__).resolve().parent
 # name: (course, tier, DERBY_EACH, extra DERBY_JS, band lo, hi, marks)
 CONFIGS = {
     "oval_w2_mid_w100": ("oval", 1, "cam=8;man=9;", "", 273, 650, (300, 400, 500, 600)),
-    "oval_w2_mid_w3": ("oval", 1, "cam=8;man=9;", "CAMS[8][5]=-3;", 273, 650, (300, 400, 500, 600)),
+    "oval_w2_mid_w3": ("oval", 1, "cam=8;man=9;", "CAMS[8][5]=-196608;", 273, 650, (300, 400, 500, 600)),
     "oval_w2_heavy_w100": ("oval", 2, "cam=8;man=9;", "", 273, 650, (300, 400, 500, 600)),
     "straight_w2_heavy": ("straight", 2, "cam=8;man=9;", "", 300, 620, (300, 400, 500, 600)),
     "straight_side_mid": ("straight", 1, "cam=0;man=9;", "wide=()=>0;", 300, 620, (300, 400, 500, 600)),
@@ -49,7 +49,7 @@ KEEP = ("draw,commit,beginFrame,patch,replace,register,unregister,setRect,setVis
         "setClip,setText,setColor,image,rect,text")
 
 WRAP = """(()=>{const F=frame,T=[%s];let k=0,n=0;
-globalThis.frame=function(b){const L=scene==='race'&&!dm&&!replay&&rs?Math.max.apply(null,rs.x):-1;let g=null;
+globalThis.frame=function(b){const L=scene==='race'&&!dm&&!replay&&rs?Math.max.apply(null,rs.x)/65536:-1;let g=null;
 if(L>=%d&&L<%d){g='win';if(k<T.length&&L>=T[k]){g='at'+T[k];while(k<T.length&&L>=T[k])++k;}}
 if(g)__opprof(1);try{return F(b);}finally{if(g)__opprof(0,g+' tick='+n+' L='+L.toFixed(1)+' cm='+cm+' pan='+(pc?1:0));++n;}};})()"""
 
@@ -65,6 +65,7 @@ def build(flags: list[str]) -> Path:
     obj_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(["python3", str(HERE / "patch_quickjs.py"), str(obj_dir)], check=True)
     table = run_derby.rom_table(obj_dir)
+    stable = run_derby.shiki_table(obj_dir)
     subprocess.run(["python3", "tools/make_font.py", str(obj_dir)], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
     (obj_dir / "kasane_pet_test_data.h").write_text(
@@ -90,7 +91,7 @@ def build(flags: list[str]) -> Path:
     # pocket_proc_hook_dry, which exists only under POCKET_PROC_DRAW_HOOK.
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/games/test_derby_host.c", *run_derby.kasane_sources(), *run_derby.EXTRA, str(table), *objects,
+                    "tools/games/test_derby_host.c", *run_derby.kasane_sources(), *run_derby.EXTRA, str(table), str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-Wl,--wrap=JS_NewContext", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
