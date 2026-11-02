@@ -46,6 +46,8 @@ QuickJS の評価ピーク・生存 heap・fps は未測定で、余裕がある
 
 ## 公開された回帰テスト
 
+**廃止（2026-11-02）:** 下の `test_derby_lanes.mjs`・`test_derby_photo.mjs`・`test_derby_pan_order.mjs` は削除した。どれも DERBY の JS（`at()`・`photo()`・`pose()`・`pj()`・`pan()`・`course()`）を double の式のまま取り出して検査していたが、整数化（[derby-integer.md](derby-integer.md)）で式は Q16 の整数になり、投影・首振りの並びは `pocket.derby` の C に移った。これらの挙動は `tools/games/run_derby.py`（全画素・大型画面・首振りの oracle・種・デモ）で検査している。以下は当時の記録。
+
 `tools/games/test_derby_pan_order.mjs` は実ソースの model / at / photo / pose /
 shot / pj / pan / course / feed を読み込む。
 native の `S.view/ser` と線描画 `dr` は stub、馬の `rin` は提出記録として捕捉する。
