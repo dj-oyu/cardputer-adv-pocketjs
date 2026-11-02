@@ -1,0 +1,33 @@
+# DERBY with every plan on Shiki (b30dc1d) on the device, local.derby 60 s app_session, the demo race
+# to FINISH (seeds differ from the earlier runs: compare by camera). Baseline: derby-integer-20261102-6841f73.txt.
+# The first try (e47ac03, before the heap fix) refused band every frame: "the Shiki heap's budget".
+SHIKI_HEAP open bytes=49152
+APP_LOAD prog bytes=2601 compile_us=9218 run_us=821 used=34044>36608>39804
+APP_LOAD view bytes=12419 compile_us=46657 run_us=9323 used=39804>57432>74188
+APP_LOAD scene bytes=9968 compile_us=46010 run_us=2126 used=74188>86240>89524
+APP_LOAD pan bytes=1215 compile_us=6247 run_us=349 used=89524>90768>90728
+APP_LOAD play bytes=7503 compile_us=28692 run_us=13678 used=90728>97896>101488
+APP_LOAD demo bytes=742 compile_us=5680 run_us=265 used=107640>108860>108844
+LOADED MEM free=48492 largest=31744 js=97424
+pad turn_ms 4.85-4.90
+demo seed 3D7CECDF: race plans=26 reg=26, no LOADFAIL in the 111 log lines
+CAM WIDE 1 6.89,10.27,10.36
+CAM WIDE 10.00,8.64,8.64,8.62
+CAM FIELD 8.72,8.99,8.97,8.97,8.97,8.96,8.84,8.82,8.86,8.99
+CAM WIDE 2 (oval pan) 9.30,10.76 / 10.29,11.01,11.14
+CAM WIDE 9.38,8.68,8.66
+CAM CLOSE 10.59,8.55 / 9.00,8.40,8.39
+CAM WIDE 3 9.21,10.99 / 10.49,10.83
+CAM VISION 8.42,10.02,10.66,10.51,10.41
+CAM HEAD ON 8.32,7.29
+FINISH (the session ended at 60 s)
+
+Turn (ms, one run each; races differ):
+              all integer (6841f73)   all Shiki (b30dc1d)
+  pad          4.82-4.91               4.85-4.90
+  FIELD        8.89-9.27               8.72-8.99
+  WIDE 2 pan   9.6-11.3                9.30-11.14
+  CLOSE        8.78-9.01               8.39-9.00 (10.6 on a cut)
+  VISION       10.85-11.02             10.02-10.66
+  HEAD ON      7.67-9.02               7.29-8.32
+Memory after loading: native free 47,556 / 48,492 B; guest js 97,684 / 97,424 B.
