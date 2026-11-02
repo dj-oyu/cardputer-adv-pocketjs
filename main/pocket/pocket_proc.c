@@ -1079,20 +1079,29 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     return JS_UNDEFINED;
 }
 
+// The frame's functions: the same frames whichever namespace a caller uses
+// (procedural, and kasane.shiki through pocket_proc_frame_install).
+static const JSCFunctionListEntry frame_methods[]={
+    JS_CFUNC_DEF("beginFrame",1,js_begin),
+    JS_CFUNC_DEF("commit",0,js_commit),
+    JS_CFUNC_DEF("resource",0,js_resource),
+    JS_CFUNC_DEF("createSurface",0,js_create_surface),
+};
+esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
+    return JS_SetPropertyFunctionList(ctx,obj,frame_methods,
+                                      (int)(sizeof frame_methods/sizeof frame_methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
+}
 esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     JSValue procedural=JS_NewObject(ctx);
     if(JS_IsException(procedural))return ESP_ERR_NO_MEM;
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("register",1,js_register),
         JS_CFUNC_DEF("unregister",1,js_unregister),
-        JS_CFUNC_DEF("beginFrame",1,js_begin),
         JS_CFUNC_DEF("draw",2,js_draw),
-        JS_CFUNC_DEF("commit",0,js_commit),
-        JS_CFUNC_DEF("resource",0,js_resource),
-        JS_CFUNC_DEF("createSurface",0,js_create_surface),
     };
     if(JS_SetPropertyFunctionList(ctx,procedural,methods,
-                                  (int)(sizeof methods/sizeof methods[0]))<0){
+                                  (int)(sizeof methods/sizeof methods[0]))<0||
+       pocket_proc_frame_install(ctx,procedural)!=ESP_OK){
         JS_FreeValue(ctx,procedural);return ESP_ERR_NO_MEM;
     }
     return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;

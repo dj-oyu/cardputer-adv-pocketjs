@@ -1126,6 +1126,9 @@ static const char PRELUDE[]=
      * and each drawMany entry into the oracle as one draw (__sdraw). */
     "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
     "S.register=function(n){const h=SR.call(S,n);__sreg(h,n);return h};"
+    /* The frame's functions: DERBY calls them on kasane.shiki (v2.0 step 0);
+     * the same hooks as procedural's. */
+    "S.beginFrame=P.beginFrame;S.commit=P.commit;"
     "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
     "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)),I instanceof Int32Array)};})();"
     /* The draw references one replace() exposes (the limit is 32), and the

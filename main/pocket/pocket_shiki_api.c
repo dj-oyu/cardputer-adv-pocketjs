@@ -420,8 +420,7 @@ static JSValue js_heap(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 }
 
 // ------------------------------------------------------------- install
-// The procedural namespace's own functions, shared (they act on the same
-// frames): copied from kasane.procedural, which pocket_proc_install made.
+// grid is kasane's own (pocket_grid_install), shared: copied from there.
 static bool share(JSContext *ctx,JSValueConst from,JSValueConst to,const char *name){
     JSValue f=JS_GetPropertyStr(ctx,from,name);
     if(JS_IsException(f))return false;
@@ -444,10 +443,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("sinMany",3,js_sin_many),
     };
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
-    JSValue procedural=JS_GetPropertyStr(ctx,kasane,"procedural");
-    ok=ok&&!JS_IsException(procedural)&&share(ctx,procedural,shiki,"beginFrame")&&share(ctx,procedural,shiki,"commit")&&
-       share(ctx,procedural,shiki,"resource")&&share(ctx,procedural,shiki,"createSurface");
-    JS_FreeValue(ctx,procedural);
+    ok=ok&&pocket_proc_frame_install(ctx,shiki)==ESP_OK;
     ok=ok&&share(ctx,kasane,shiki,"grid");
     if(!ok){JS_FreeValue(ctx,shiki);return ESP_ERR_NO_MEM;}
     owner=ctx;

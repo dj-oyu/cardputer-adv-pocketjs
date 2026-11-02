@@ -5,8 +5,8 @@ const SKN = {run: 1, legs: 1, frl: 1, frb: 1}; // Shiki (README)
 // where a fraction counts, angles Q16 turns. pocket.derby does the divisions.
 const S = pocket.derby, QM = 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
-H.beginFrame(0);
-const res = H.resource(), live = {}, queue = [];
+SK.beginFrame(0);
+const res = SK.resource(), live = {}, queue = [];
 derby.L = live; // the host oracle names plans by these handles
 let reg = 0;
 // One plan a frame from frame 1 (info() is null while evaluating), only

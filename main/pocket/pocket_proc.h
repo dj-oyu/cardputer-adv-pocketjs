@@ -8,6 +8,9 @@
 
 /* A small APP-session adapter for registered procedural IR. */
 esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
+/* beginFrame, commit, resource, createSurface on obj (kasane.shiki has them
+ * directly, Shiki v2.0 sec.2.5 step 0). */
+esp_err_t pocket_proc_frame_install(JSContext *ctx, JSValueConst obj);
 void pocket_proc_reset(void);
 /* Shiki programs share the procedural slots, handles and frames
  * (pocket_shiki_api.c): attach takes ownership of plan (freed by detach or

@@ -2803,7 +2803,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     if(pocket_grid_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_video_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_pixel_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
-    // kasane.shiki last: it shares the procedural and grid members above.
+    // kasane.shiki last: it shares the grid member above.
     // Only a session that has a Shiki heap gets it -- the one whose manifest
     // names kasane.shiki (app_session.c takes the heap before the guest).
     if(pocket_shiki_api_install&&shiki_heap_active&&shiki_heap_active())
