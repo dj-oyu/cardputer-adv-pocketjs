@@ -1,0 +1,18 @@
+name: Compact opaque helper synthetic tests
+on:
+  push:
+    branches: ['work/compact-opaque-host-primitives-20261102']
+    paths: ['tools/ayatsuri/asset/compact_opaque/**', '.github/workflows/compact-opaque-helpers.yml']
+  pull_request:
+    paths: ['tools/ayatsuri/asset/compact_opaque/**', '.github/workflows/compact-opaque-helpers.yml']
+permissions:
+  contents: read
+jobs:
+  synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 tools/ayatsuri/asset/compact_opaque/run_tests.py
