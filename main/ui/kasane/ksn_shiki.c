@@ -613,7 +613,7 @@ typedef int16_t vlanes[8];
 static vlanes *vregs(ksn_shiki_vm *vm){
     return (vlanes *)(((uintptr_t)vm->vraw+15u)&~(uintptr_t)15u);
 }
-bool ksn_shiki_vec_pie=false;
+bool ksn_shiki_vec_pie=KSN_SHIKI_HAS_PIE;
 
 #if KSN_SHIKI_HAS_PIE
 /* ---- P2: the same instructions on PIE (shiki-pie.md sec.6 item 1). The
@@ -826,7 +826,7 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
     for(uint32_t c=0;c<count;c++,d++){
         int16_t p[4];
         for(unsigned j=0;j<(lines?4u:2u);j++){
-            const int32_t x=(d[j*field]+half)>>q;   /* arithmetic shift: the floor */
+            const int32_t x=(int32_t)floor_shift((int64_t)d[j*field]+half,q);
             if(x<-480||x>720)return KSN_SHIKI_INVALID;
             p[j]=(int16_t)x;
         }

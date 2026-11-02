@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from megademo_chunks import rom_table  # noqa: E402
+from megademo_chunks import shiki_table  # noqa: E402
 CACHE = ROOT / ".cache/kasane_megademo_app"
 QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
@@ -64,7 +64,7 @@ def build(flags: list[str], cache: Path) -> Path:
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_GRID_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/kasane_contract/test_megademo_app_host.c", *kasane_sources(), *EXTRA,
-                    str(rom_table(cache / "ksn_proc_rom_plans.c")),
+                    "main/pocket/pocket_shiki_api.c", str(shiki_table(cache / "ksn_shiki_rom.c")),
                     *objects, "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -108,6 +108,32 @@ def main() -> None:
     parser.add_argument("--no-band-damage", action="store_true",
                         help="damage commit()'s bounding rectangle, as before band damage (A/B)")
     args = parser.parse_args()
+    # The baseline must be on Shiki too (the float VM is gone): one binary
+    # runs both.
+    base_list = None
+    old = CACHE / "proc_megademo_baseline.js"
+    shown = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/proc_megademo.js"],
+                           cwd=ROOT, capture_output=True)
+    # WSL git cannot open a Windows-created worktree; extract it there first:
+    #   git show <rev>:apps/kasane/proc_megademo.js > .cache/kasane_megademo_app/proc_megademo_baseline.js
+    if shown.returncode == 0:
+        old.write_bytes(shown.stdout)
+    elif not old.exists():
+        raise SystemExit(f"cannot read the baseline app: {shown.stderr.decode().strip()}")
+    # A chunked baseline: its chunks.txt and chunk files, as of that revision.
+    listed = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/chunks.txt"],
+                            cwd=ROOT, capture_output=True)
+    if listed.returncode == 0:
+        base = CACHE / "baseline_chunks"
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "chunks.txt").write_bytes(listed.stdout)
+        for raw in listed.stdout.decode().splitlines():
+            words = raw.split("#", 1)[0].split()
+            if len(words) == 2 and words[0] not in ("app", "option"):
+                got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
+                                     cwd=ROOT, capture_output=True, check=True)
+                (base / words[1]).write_bytes(got.stdout)
+        base_list = base / "chunks.txt"
     extra = ["-DPOCKET_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
     if args.m32:
         # A sysroot under .cache survives WSL restarts, which empty /tmp.
@@ -127,30 +153,9 @@ def main() -> None:
     subprocess.run([str(binary), "apps/kasane/proc_megademo.js"], cwd=ROOT, env=env, check=True)
     if args.ppm:
         print(f"Wrote {panel_sheet(args.ppm.resolve())}")
-    old = CACHE / "proc_megademo_baseline.js"
-    shown = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/proc_megademo.js"],
-                           cwd=ROOT, capture_output=True)
-    # WSL git cannot open a Windows-created worktree; extract it there first:
-    #   git show <rev>:apps/kasane/proc_megademo.js > .cache/kasane_megademo_app/proc_megademo_baseline.js
-    if shown.returncode == 0:
-        old.write_bytes(shown.stdout)
-    elif not old.exists():
-        raise SystemExit(f"cannot read the baseline app: {shown.stderr.decode().strip()}")
     env.pop("MEGA_PPM", None)
-    # A chunked baseline: its chunks.txt and chunk files, as of that revision.
-    listed = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/chunks.txt"],
-                            cwd=ROOT, capture_output=True)
-    if listed.returncode == 0:
-        base = CACHE / "baseline_chunks"
-        base.mkdir(parents=True, exist_ok=True)
-        (base / "chunks.txt").write_bytes(listed.stdout)
-        for raw in listed.stdout.decode().splitlines():
-            words = raw.split("#", 1)[0].split()
-            if len(words) == 2 and words[0] not in ("app", "option"):
-                got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
-                                     cwd=ROOT, capture_output=True, check=True)
-                (base / words[1]).write_bytes(got.stdout)
-        env["MEGA_CHUNKS"] = str(base / "chunks.txt")
+    if base_list:
+        env["MEGA_CHUNKS"] = str(base_list)
     print(f"baseline: {old.name} ({old.stat().st_size} B)")
     subprocess.run([str(binary), str(old), "--baseline"], cwd=ROOT, env=env, check=True)
 

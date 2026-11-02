@@ -252,6 +252,11 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
         }
         JS_FreeValue(ctx,data);
         if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"options.data: an array of up to 4 windows");
+        // Reading data[k] can run a getter, which can release a window read
+        // before it: the plan must not keep memory the heap has taken back.
+        for(uint32_t k=0;k<nr;k++)
+            if(!regions[which[k]].live||regions[which[k]].mem!=bound[k].data)
+                return failure(ctx,op,POCKET_ERR_CLOSED,"a released window");
     }
     int b=-1;
     for(int k=0;k<BINDS&&b<0;k++)if(!binds[k].handle)b=k;
@@ -601,6 +606,7 @@ static const pocket_limit_t limits[]={
     {"maxRecords",POCKET_LIMIT_INT,KSN_SHIKI_RECORDS,NULL},
     {"maxDrawsPerCall",POCKET_LIMIT_INT,DRAWS_PER_CALL,NULL},
     {"maxLists",POCKET_LIMIT_INT,LISTS,NULL},
+    {"vectorRegisters",POCKET_LIMIT_INT,8,NULL},
     {0},
 };
 static void probe(const pocket_capability_t *cap,bool *available,const char **reason){

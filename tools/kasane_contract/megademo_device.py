@@ -435,7 +435,7 @@ def main() -> int:
     c = sub.add_parser("shots")
     c.add_argument("logs", type=Path, nargs="+")
     c.add_argument("--out", type=Path, required=True)
-    c.add_argument("--host", type=Path, help="host frames from run_proc_megademo_scenes.py --out")
+    c.add_argument("--host", type=Path, help="host frames (t<tier>_s<scene>_f<frame>_0.ppm); their generator, run_proc_megademo_scenes.py, went with the float VM in Shiki v2.0")
     a = sub.add_parser("analyze")
     a.add_argument("logs", type=Path, nargs="+")
     args = parser.parse_args()

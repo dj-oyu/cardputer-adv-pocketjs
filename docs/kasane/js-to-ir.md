@@ -17,7 +17,7 @@
 
 **JS → IR のコンパイラ・アセンブラ・逆アセンブラはリポジトリに無い。** あるのは 1 命令 1 文字のテキストを配列にする 10 行の `prog()` で、DERBY（[derby_prog.js](../../apps/derby/derby_prog.js)）、MEGADEMO（[proc_megademo.js](../../apps/kasane/proc_megademo.js)、`U` の短縮つき）、BIG WAVE（[big_wave.js](../../apps/bigwave/big_wave.js)）がそれぞれ写しを持つ。文字 → op の表引きと `$n` の置換だけで、検査は native の登録に任せている。[grid_fold.js](../../apps/kasane/grid_fold.js) は symbolic な式 builder だが、対象は型付きメモリ IR（`ksn_proc_grid`）で、この float VM ではない。
 
-**登録時コンパイラ（D3a）はソース言語を持たない。** 入力は数値の行（`[op,dst,a,b,value,color]`）で、`pocket_proc.c` の `register_impl()` が読んで `ksn_proc_plan_prepare()`（[ksn_proc_plan.c](../../main/ui/kasane/ksn_proc_plan.c)）に渡す。prepare がするのは、IR を plan の `code[64]` へ写す、[ksn_proc_analysis.c](../../main/ui/kasane/ksn_proc_analysis.c) で有界 CFG・def-use・生存・失敗条件を取る、同じ基本ブロックで依存のある隣り合った算術 2 命令に融合の印（`fused_at`）を付ける、の 3 つだけ。命令の移動・削除・レジスタの割り当ては無い（「No code is moved or elided」）。PIE の選択は型付き Q14 点列（`affineQ14Points`）と grid の IR に対してで、この float IR には掛からない。
+**登録時コンパイラ（D3a）はソース言語を持たない。** 入力は数値の行（`[op,dst,a,b,value,color]`）で、`pocket_proc.c` の `register_impl()` が読んで `ksn_proc_plan_prepare()`（ksn_proc_plan.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_plan.c`））に渡す。prepare がするのは、IR を plan の `code[64]` へ写す、ksn_proc_analysis.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_analysis.c`） で有界 CFG・def-use・生存・失敗条件を取る、同じ基本ブロックで依存のある隣り合った算術 2 命令に融合の印（`fused_at`）を付ける、の 3 つだけ。命令の移動・削除・レジスタの割り当ては無い（「No code is moved or elided」）。PIE の選択は型付き Q14 点列（`affineQ14Points`）と grid の IR に対してで、この float IR には掛からない。
 
 **命令セット**（[ksn_procedural.h](../../main/ui/kasane/ksn_procedural.h)、15 op）: `SET INPUT ADD MUL SIN REPEAT END MOVE PLOT LINE REPEAT_REG BREAK_IF_GT PLOT_COLOR_REG LINE_COLOR_REG CUBIC`。除算・減算・比較分岐・sqrt・floor・レジスタ間の MOV は無い（減算は `×−1` と加算、コピーは `+0`）。`CUBIC` は r0..r7 の 4 点を読む（dst=0 固定、分割 1..64）。制約: レジスタ 16、入力 8、1 plan 64 命令、ループの深さ 8、`REPEAT` 1..255（0 は検証で拒否）、`REPEAT_REG` 0..255 の整数（0 は本体を飛ばす）、1 draw の step 10,000・線分 1,024・ラスタ 8,192、座標 −480..720。`draw()` のたびに `begin` がプログラムを VM へ写して検証し直し、**レジスタは毎回 +0 から始まる**（`pocket_proc.c` は状態を持ち越す `begin_state` を使わない）。算術の結果が非有限、`REPEAT_REG`・色レジスタが範囲外の整数でない、座標が範囲外、のどれでも draw 全体が失敗する。
 
@@ -54,7 +54,7 @@
 
 ユーザーの問い「IR と 1:1 のテキストだから膨らんでいるのでは」への答え。**膨らんではいるが、詰めても効くのは 1.6〜2.4 KB で、flash 案（7.1〜8.1 KB）の 3 分の 1 以下。**
 
-[`pack.mjs`](../../tools/kasane_ir/pack.mjs) が `derby_prog.js` の `T` を Latin-1 の詰めた文字列（QuickJS では 1 文字 1 バイト）に置き換え、`prog()` を同じ行を返す復号器に替える。全 plan で復号した行が今の `prog()` と一致することを確かめてから書き出す（行が同じなので、登録される IR も同じ）。
+`pack.mjs`（v2.0 で削除。`427b308` の `tools/kasane_ir/pack.mjs`） が `derby_prog.js` の `T` を Latin-1 の詰めた文字列（QuickJS では 1 文字 1 バイト）に置き換え、`prog()` を同じ行を返す復号器に替える。全 plan で復号した行が今の `prog()` と一致することを確かめてから書き出す（行が同じなので、登録される IR も同じ）。
 
 - **byte 形**: op 1 バイト、欄 1 つに 1 バイト（0..199 はそのまま、`$n`、16/24 bit、負号、小数は桁の文字列）。
 - **nibble 形**: op と第 1 レジスタで 1 バイト、残りのレジスタは 2 つで 1 バイト（ユーザー案のとおり、レジスタは 4 bit、色は 2 バイト）。

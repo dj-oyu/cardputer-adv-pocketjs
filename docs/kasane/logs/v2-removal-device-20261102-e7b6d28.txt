@@ -1,0 +1,37 @@
+# Shiki v2.0 after the float VM and pocket.kasane.procedural were removed
+# (3fe6384, CI fixes up to e7b6d28), device runs, firmware e7b6d28, 2026-11-02.
+# Broker app_session jobs, no input (attract/demo). Each session ended by
+# duration; the device then opened local.player's overlay (not these apps).
+
+## DERBY WATCH (v2s5-derby2-e7b6d28, 60 s): demo race from the paddock to FINISH
+I (799118) shiki: SHIKI_HEAP open bytes=49152
+I (799165) pocket.app: APP_LOAD prog bytes=2601 compile_us=9250 run_us=877 used=34096>36664>39856
+I (799223) pocket.app: APP_LOAD view bytes=12419 compile_us=47179 run_us=9155 used=39856>57492>74108
+I (799274) pocket.app: APP_LOAD scene bytes=9968 compile_us=46393 run_us=2085 used=74108>86176>89536
+I (799327) pocket.app: APP_LOAD play bytes=7503 compile_us=29271 run_us=14215 used=90740>97900>101496
+I (799346) js: DERBY LOADED points=900 race=1
+I (799348) app: MEM free=47640 largest=31744 js=97556 frames=0
+I (814379) js: DERBY SCENE pad race=1000001 seed=124E52E9 plans=12 reg=12
+I (818976) js: DERBY SCENE race race=1000001 seed=124E52E9 plans=26 reg=26
+# KASANE_PAINT turn_ms (30-frame averages): paddock 4.95-6.12, WIDE 9.0-12.1,
+# WIDE 2 13.6-16.8, FIELD 9.3, CLOSE 9.0-11.1, VISION 10.0-11.1, HEAD ON 7.5-9.7
+I (857464) js: DERBY CAM HEAD ON
+I (859243) js: DERBY CAM FINISH
+I (859487) app: MEM free=206772 largest=69632 js=0 frames=1791
+
+## MEGADEMO (v2s5-mega-e7b6d28, 75 s): WAKE, Act I, TWIST, ZENITH, CORE, LOST, WAKE, Act I, TWIST, ZENITH at tier 2
+I (1091881) shiki: SHIKI_HEAP open bytes=49152
+I (1092174) pocket.app: APP_LOAD loop bytes=3363 compile_us=10933 run_us=2478 used=101308>103968>104160
+I (1092181) app: MEM free=37356 largest=24576 js=102752 frames=0
+I (1110972) js: MEGADEMO SCENE ZENITH tier=2 plans=15 freed=16 registered=37
+I (1118220) js: MEGADEMO SCENE CORE tier=2 plans=8 freed=15 registered=45
+I (1145368) js: MEGADEMO SCENE ZENITH tier=2 plans=15 freed=16 registered=84
+# turn_ms 3.8-15.7 (WAKE 12.1-15.7, NEWS 3.8-10.6, TWIST 8.3-13.8,
+# ZENITH 6.6-8.5, CORE 7.7-13.6)
+
+## BIG WAVE (v2s5-bigwave-e7b6d28, 40 s, attract mode): 1,196 frames
+I (1304061) shiki: SHIKI_HEAP open bytes=49152
+I (1304225) js: BIGWAVE READY plans=6 tone=true
+I (1304232) app: MEM free=74108 largest=31744 js=71680 frames=0
+# turn_ms 8.2-10.8, render_ms 4.4-6.0
+I (1344352) app: MEM free=206772 largest=69632 js=0 frames=1196

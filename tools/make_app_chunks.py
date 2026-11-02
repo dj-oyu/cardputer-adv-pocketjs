@@ -25,36 +25,26 @@ table records the files' _start/_end symbols, not their lengths, so editing a
 chunk needs no reconfigure; adding, renaming or removing one does, and
 main/CMakeLists.txt makes every LIST a configure dependency for that.
 
-A chunk whose file has @plan functions (procedural plans written as JS,
-docs/kasane/js-to-ir.md section 5) is embedded lowered: the build runs
-tools/kasane_ir/lower_plans.mjs --file on it and embeds OUTDIR/apps/<the
-list's directory>/<the same base name>, so the symbol and the table stay
-the same. app_chunks.cmake then also sets APP_CHUNK_LOWER (source, output
-and how, in threes: `packed`, or `rom:APP`) and APP_CHUNK_PLANS (the chunks'
-"app:name" labels, for main/CMakeLists.txt's Node check). Which chunks are
-lowered is decided here, at configure: a chunk that gains its first @plan
-needs a reconfigure (one that loses its last is copied through unchanged).
-An app with @plan functions must have exactly one @planDecoder among its
-chunks, or the configure fails.
-
-An app whose decoder is marked `/** @planDecoder rom */` ships its plans as
-the firmware's built-in table (docs/kasane/flash-plan.md section 2): its
-@plan chunks are lowered with lower_plans.mjs --rom APP (the plans and the
-decoder removed; APP is the list's directory name, [a-z][a-z0-9_]*, and the
-app registers 'APP.name'), and APP_CHUNK_ROM lists them as APP=source for
-main/CMakeLists.txt to compile with tools/kasane_ir/emit_rom_plans.mjs into
-ksn_proc_rom_plans.c. With no such app, OUTDIR/ksn_proc_rom_plans_none.c
-(an empty table) is written here, so a build without @plan needs no Node;
-APP_CHUNK_ROM_C names whichever file the build compiles.
+A chunk whose file has @shiki functions (Shiki programs written as JS,
+docs/kasane/shiki-spec.md sec.8) is embedded without them: the build runs
+tools/kasane_ir/lower_plans.mjs --rom APP --file on it and embeds
+OUTDIR/apps/<the list's directory>/<the same base name>, so the symbol and
+the table stay the same, and compiles the functions into the firmware's
+built-in Shiki table (tools/kasane_ir/emit_shiki_rom.mjs, ksn_shiki_rom.c)
+as 'APP.name', APP being the list's directory name ([a-z][a-z0-9_]*).
+app_chunks.cmake then also sets APP_CHUNK_LOWER (source, output and
+`rom:APP`, in threes), APP_CHUNK_PLANS (the chunks' "app:name" labels, for
+main/CMakeLists.txt's Node check) and APP_CHUNK_SHIKI (APP=source). Which
+chunks are lowered is decided here, at configure: a chunk that gains its
+first @shiki needs a reconfigure. Such an app needs exactly one
+`/** @planDecoder rom */` among its chunks, or the configure fails. With no
+such app, OUTDIR/ksn_shiki_rom_none.c (an empty table) is written here, so a
+build without @shiki needs no Node. The float VM's @plan functions and
+`rom-text` templates went with the VM (Shiki v2.0); either is refused.
 
 `option strip-debug` compiles the app's chunks without line tables
 (JS_PocketSetStripDebug, docs/vm/strip-debug.md): a runtime error then names
 each function's first line, and the app keeps less heap.
-
-A list may also name a file of plan templates in text, `rom-text FILE`
-(MEGADEMO's megademo_plans.js: T and its decoder prog): not a chunk, never
-embedded, its templates go into the same table as 'APP.name', APP being the
-list's directory name (APP=text:FILE for emit_rom_plans.mjs).
 
 Refused, so the build fails at configure rather than the app at run time:
 a name that is not 1..31 of [A-Za-z0-9_.-], a name twice in one app, more than
@@ -69,9 +59,9 @@ from pathlib import Path
 NAME = re.compile(r'[A-Za-z0-9_.\-]{1,31}$')
 # lower_plans.mjs's markers (tools/kasane_ir/plan_js.mjs findPlans).
 PLAN = re.compile(r'/\*\*(?:(?!\*/)[\s\S])*?@plan\s')
-# @shiki functions (Shiki programs, docs/kasane/shiki-spec.md sec.8): lowered
-# like @plan (lower_plans.mjs removes them; they need a rom app) and compiled
-# into the built-in Shiki table (tools/kasane_ir/emit_shiki_rom.mjs).
+# @shiki functions (Shiki programs, docs/kasane/shiki-spec.md sec.8): removed
+# by lower_plans.mjs (they need a rom app) and compiled into the built-in
+# Shiki table (tools/kasane_ir/emit_shiki_rom.mjs).
 SHIKI = re.compile(r'/\*\*(?:(?!\*/)[\s\S])*?@shiki\s')
 DECODER = re.compile(r'/\*\*\s*@planDecoder(\s+rom)?\s*\*/')
 ROM_APP = re.compile(r'[a-z][a-z0-9_]*$')
@@ -98,7 +88,7 @@ OPTIONS = ('strip-debug',)
 
 
 def read_list(path):
-    app, chunks, texts, options = None, [], [], set()
+    app, chunks, options = None, [], set()
     for n, raw in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
         line = raw.split('#', 1)[0].strip()
         if not line:
@@ -119,14 +109,8 @@ def read_list(path):
             options.add(words[1])
             continue
         if words[0] == 'rom-text':
-            file = (path.parent / words[1]).resolve()
-            if not file.is_file():
-                fail(f'{path}:{n}: no file {file}')
-            if not ROM_APP.match(path.parent.name):
-                fail(f'{path}:{n}: built-in plans are named after the directory, '
-                     f'which must be [a-z][a-z0-9_]* (found {path.parent.name})')
-            texts.append((path.parent.name, file))
-            continue
+            fail(f'{path}:{n}: rom-text plan templates went with the float VM (Shiki v2.0); '
+                 'write the programs as @shiki functions')
         if not app:
             fail(f'{path}:{n}: a chunk before the "app <id>" line')
         name, rel = words
@@ -138,7 +122,7 @@ def read_list(path):
         chunks.append((name, file))
     if not app:
         fail(f'{path}: no "app <id>" line')
-    return app, chunks, texts, options
+    return app, chunks, options
 
 
 def main():
@@ -148,11 +132,9 @@ def main():
     lists = [Path(p).resolve() for p in sys.argv[2:]]
     apps = {}          # id -> [(name, file)]
     bases = {}         # base name -> file
-    texts = []         # (APP, file): rom-text templates
     options = {}       # id -> {option}
     for lst in lists:
-        app, chunks, more, opts = read_list(lst)
-        texts += more
+        app, chunks, opts = read_list(lst)
         options.setdefault(app, set()).update(opts)
         have = apps.setdefault(app, [])
         for name, file in chunks:
@@ -166,37 +148,34 @@ def main():
         if len(have) > MAX_CHUNKS:
             fail(f'{app} has {len(have)} chunks; at most {MAX_CHUNKS}')
 
-    # Chunks with @plan functions are embedded lowered (the module comment).
-    lower, plans, embed, rom, shiki = [], [], {}, [], []
+    # Chunks with @shiki functions are embedded lowered (the module comment).
+    lower, plans, embed, shiki = [], [], {}, []
     for app in sorted(apps):
         decoders, planned, marks, files = 0, [], [], []
         for name, file in apps[app]:
             text = file.read_text(encoding='utf-8', errors='replace') if file.suffix in ('.js', '.mjs') else ''
+            if PLAN.search(text):
+                fail(f'{file}: @plan functions went with the float VM (Shiki v2.0); '
+                     'write them as @shiki functions')
             found = DECODER.findall(text)
             decoders += len(found)
             marks += [bool(m) for m in found]
             if SHIKI.search(text):
-                shiki.append((app, file))
-            if PLAN.search(text) or SHIKI.search(text):
                 planned.append(name)
                 if file not in embed:
                     embed[file] = out / 'apps' / file.parent.name / file.name
                     files.append(file)
-        if planned and decoders != 1:
-            fail(f'{app}: chunks {", ".join(planned)} have @plan functions and the app has {decoders} '
-                 '@planDecoder functions; it needs exactly 1 (tools/kasane_ir/lower_plans.mjs)')
-        how = 'packed'
-        if planned and marks[0]:
-            short = {f.parent.name for f in files}
-            if len(short) != 1 or not ROM_APP.match(next(iter(short))):
-                fail(f'{app}: built-in plans are named after the directory of the chunks, which must be one '
-                     f'[a-z][a-z0-9_]* name (found {", ".join(sorted(short))})')
-            how = 'rom:' + next(iter(short))
-            rom += [(how[4:], f) for f in files]
-            shiki = [(how[4:], f) if a == app else (a, f) for a, f in shiki]
-        elif any(a == app for a, _ in shiki):
-            fail(f'{app}: @shiki functions ship as the built-in Shiki table and need a '
-                 '/** @planDecoder rom */ app (tools/kasane_ir/lower_plans.mjs)')
+        if not planned:
+            continue
+        if decoders != 1 or not marks[0]:
+            fail(f'{app}: chunks {", ".join(planned)} have @shiki functions and the app needs exactly one '
+                 f'/** @planDecoder rom */ (found {decoders} @planDecoder; tools/kasane_ir/lower_plans.mjs)')
+        short = {f.parent.name for f in files}
+        if len(short) != 1 or not ROM_APP.match(next(iter(short))):
+            fail(f'{app}: built-in programs are named after the directory of the chunks, which must be one '
+                 f'[a-z][a-z0-9_]* name (found {", ".join(sorted(short))})')
+        how = 'rom:' + next(iter(short))
+        shiki += [(how[4:], f) for f in files]
         lower += [(f, embed[f], how) for f in files]
         plans += [f'{app}:{n}' for n in planned]
 
@@ -255,21 +234,10 @@ def main():
           'set(APP_CHUNK_LOWER ' + ' '.join(f'"{a.as_posix()}" "{b.as_posix()}" "{h}"'
                                             for a, b, h in lower) + ')',
           'set(APP_CHUNK_PLANS ' + ' '.join(f'"{p}"' for p in plans) + ')',
-          'set(APP_CHUNK_ROM ' + ' '.join([f'"{a}={f.as_posix()}"' for a, f in rom] +
-                                          [f'"{a}=text:{f.as_posix()}"' for a, f in texts]) + ')',
-          'set(APP_CHUNK_ROM_SOURCES ' + ' '.join(f'"{f.as_posix()}"' for _, f in rom + texts) + ')',
-          'set(APP_CHUNK_ROM_C "' + (out / ('ksn_proc_rom_plans.c' if rom or texts else 'ksn_proc_rom_plans_none.c'))
-          .as_posix() + '")',
           'set(APP_CHUNK_SHIKI ' + ' '.join(f'"{a}={f.as_posix()}"' for a, f in shiki) + ')',
           'set(APP_CHUNK_SHIKI_SOURCES ' + ' '.join(f'"{f.as_posix()}"' for _, f in shiki) + ')',
           'set(APP_CHUNK_SHIKI_C "' + (out / ('ksn_shiki_rom.c' if shiki else 'ksn_shiki_rom_none.c')).as_posix() + '")']
     write(out / 'app_chunks.cmake', '\n'.join(cm) + '\n')
-    if not rom and not texts:
-        write(out / 'ksn_proc_rom_plans_none.c',
-              '/* Generated by tools/make_app_chunks.py: no app ships built-in plans. */\n'
-              '#include "ksn_proc_plan.h"\n'
-              'const ksn_proc_rom_entry ksn_proc_rom_plans[1] = {{0}};\n'
-              'const unsigned ksn_proc_rom_plans_count = 0;\n')
     if not shiki:
         # Always a definition to link: a weak default in pocket_shiki_api.c
         # would win over the generated table, which sits in the same static
@@ -278,11 +246,9 @@ def main():
               '/* Generated by tools/make_app_chunks.py: no app ships built-in Shiki programs. */\n'
               '#include "ksn_shiki.h"\n'
               'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count) { *count = 0; return 0; }\n')
-    romfiles = {f for _, f in rom}
     for app in sorted(apps):
         print(f'{app}: ' + ', '.join(n + (' (module)' if f.suffix == '.mjs' else '') +
-                                     ((' (@plan, lowered, rom)' if f in romfiles else ' (@plan, lowered)')
-                                      if f in embed else '') for n, f in apps[app]))
+                                     (' (@shiki, lowered)' if f in embed else '') for n, f in apps[app]))
 
 
 if __name__ == '__main__':

@@ -119,8 +119,9 @@ function brief(s, t) {
     for (let j = 0; j < 7; ++j) P2(j, BS[2 * j], BS[2 * j + 1]);
     SH.outline(WP, 0, 7, 0x57f9);
   }
-  for (let q = 0; q < 5; ++q) if (on(s, t, 36 + 2 * q))
-    E(2, 109 + 5 * q, q === 2 && s > 1 ? 1.3 - 1.3 * smooth(ramp(t, 48, 80)) : 1.3, 2 * g, WV[q], WV[5 + q], WV[10 + q]);
+  for (let q = 0, n, z = 2 * g; q < 5; ++q) if (on(s, t, 36 + 2 * q))
+    E(2, 109 + 5 * q, q === 2 && s > 1 ? 1.3 - 1.3 * smooth(ramp(t, 48, 80)) : 1.3, z, WV[q], n = WV[5 + q], WV[10 + q],
+      z * z * n % 6.283185307179586, (z + z + 1) * n % 6.283185307179586);
   if (on(s, t, 44)) E(4, g * 2.9, .7 + .3 * p);
   if (on(s, t, 48)) E(5, g * .07);
   BR[0] = spd; BR[1] = o; BR[2] = g;

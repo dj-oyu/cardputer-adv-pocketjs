@@ -32,7 +32,7 @@ idf.py -B build_proc -DKASANE_PROC_DEVICE_PROBE=ON build
 
 ## 表示と記録
 
-[`ksn_procedural_device_probe.c`](../../main/ui/kasane/ksn_procedural_device_probe.c) は Kasane core の SYSTEM 色帯、格子下地、手続き型の波形と点格子を表示する。波形は 96 sample の native 反復で95線分を生成し、基準高さを変えて60フレーム描く。2面目を確保できなければ波形1面で継続する。最後に全画面を再描画し、既存の `PIX` capture を出す。目視では上端の青い帯、背景格子、赤い動く曲線、2面時の水色の点格子を確認する。
+`ksn_procedural_device_probe.c`（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_procedural_device_probe.c`） は Kasane core の SYSTEM 色帯、格子下地、手続き型の波形と点格子を表示する。波形は 96 sample の native 反復で95線分を生成し、基準高さを変えて60フレーム描く。2面目を確保できなければ波形1面で継続する。最後に全画面を再描画し、既存の `PIX` capture を出す。目視では上端の青い帯、背景格子、赤い動く曲線、2面時の水色の点格子を確認する。
 
 `KSN_PROC START/ALLOC/FRAME/PASS/END` のログから次を読む。
 

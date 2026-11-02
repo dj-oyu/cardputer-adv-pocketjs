@@ -175,7 +175,7 @@ QuickJS は参照カウントで即時解放するので、GC 前後のピーク
 
 | 検査 | 内容 | 結果 |
 | --- | --- | --- |
-| [`run_proc_megademo_scenes.py`](../../tools/kasane_contract/run_proc_megademo_scenes.py) | 3段階×6場面×全 1,104 フレーム、7,440 draw。各 draw を plan（`ksn_proc_plan_run`）・デバッグ単歩 plan・生 VM の `ksn_proc_begin`＋`ksn_proc_step` で走らせて線分・ラスタ・ステップ・レジスタを比較、点列は scalar・PIE モデル・plan のディスパッチを比較。フレームを全画面と 8 行帯で描いて全画素比較。Act I は `proc_megademo.h` と全画素一致。adapter の上限（線分・ラスタ・ステップ・入力・座標・plan 数）を全フレームで検査。15 opcode すべての使用を要求。 | PASS。ハッシュ programs `0343c4b5d45b5f39` pixels `49cb7fdda82a08c2` |
+| `run_proc_megademo_scenes.py`（v2.0 で削除。`427b308` の `tools/kasane_contract/run_proc_megademo_scenes.py`） | 3段階×6場面×全 1,104 フレーム、7,440 draw。各 draw を plan（`ksn_proc_plan_run`）・デバッグ単歩 plan・生 VM の `ksn_proc_begin`＋`ksn_proc_step` で走らせて線分・ラスタ・ステップ・レジスタを比較、点列は scalar・PIE モデル・plan のディスパッチを比較。フレームを全画面と 8 行帯で描いて全画素比較。Act I は `proc_megademo.h` と全画素一致。adapter の上限（線分・ラスタ・ステップ・入力・座標・plan 数）を全フレームで検査。15 opcode すべての使用を要求。 | PASS。ハッシュ programs `0343c4b5d45b5f39` pixels `49cb7fdda82a08c2` |
 | [`run_megademo_app_host.py`](../../tools/kasane_contract/run_megademo_app_host.py) | アプリ全体を実 `pocket.kasane`（view・procedural・grid・pixel）と実レンダラで 1,136 フレーム。例外 0・DEGRADE 0・表示失敗 0、live ≤ 32、累計 > 32、旧新の共存あり。ASan/UBSan（64 bit）と `--m32`。 | PASS（両方） |
 | `run_proc_megademo_js.py`（更新） | Act I の programs/inputs が C 参照と一致、48 フレームの draw がその場面の plan を指す、ズームの切替、942 フレームの読み込み（live ≤ 32・累計 > 32・解除あり・死んだ handle を使わない） | PASS |
 | `run_pocket_proc_qjs.py`（更新） | 実 `pocket_proc.c` で 48 フレームの全画素一致（scalar と fake PIE）、ズーム往復 | PASS（REPLACE 回数の期待値を 1→2 に。48 フレーム目で TWIST のセットに入るため） |

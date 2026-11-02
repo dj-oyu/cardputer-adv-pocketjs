@@ -1,22 +1,16 @@
 /* Host-only surface ownership and repair test. Compile with
- * ksn_procedural.c, ksn_procedural_surface.c, and -lm. */
+ * ksn_procedural.c, ksn_procedural_surface.c, and -lm. The candidate frames
+ * are built here from segments: the float VM that once wrote them went in
+ * Shiki v2.0, and the surface only ever saw the finished frame. */
 #include "ksn_procedural_surface.h"
 #include <assert.h>
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
-#define I(OP,D,A,B,V,C) {OP,D,A,B,V,C}
-static const ksn_proc_inst dot_code[]={
-    I(KSN_PROC_INPUT,0,0,0,0,0),I(KSN_PROC_SET,1,0,0,10,0),
-    I(KSN_PROC_PLOT,0,0,1,0,0xf800)
-};
-static const ksn_proc_program dot={dot_code,3};
 static ksn_proc_surface surface,empty;
 static ksn_proc_frame candidate;
 static uint16_t old_panel[KSN_PROC_W*KSN_PROC_H];
 static uint16_t new_panel[KSN_PROC_W*KSN_PROC_H];
 static uint16_t panel[KSN_PROC_W*KSN_PROC_H];
-static ksn_proc_vm vm;
 static uint16_t bg(int x,int y){return (uint16_t)(((x+y)&31)|(((y/2)&63)<<5));}
 static bool backdrop(void *ctx,uint16_t *pixels,int y,int h){
     (void)ctx;
@@ -24,10 +18,12 @@ static bool backdrop(void *ctx,uint16_t *pixels,int y,int h){
         pixels[row*KSN_PROC_W+x]=bg(x,y+row);
     return true;
 }
-static void prepare(float x){
-    const float input[KSN_PROC_INPUTS]={x,0,0,0};
-    assert(ksn_proc_begin(&vm,&dot,input,&candidate)==KSN_PROC_RUNNING);
-    assert(ksn_proc_run(&vm)==KSN_PROC_DONE);
+/* One red dot at (x, 10), as a finished frame: raster_steps is the one
+ * pixel the surface's validation recounts. */
+static void prepare(int x){
+    memset(&candidate,0,sizeof candidate);
+    candidate.segments[0]=(ksn_proc_segment){(int16_t)x,10,(int16_t)x,10,0xf800};
+    candidate.count=1;candidate.raster_steps=1;candidate.ready=true;
 }
 int main(void){
     ksn_proc_surface_init(&surface);
@@ -71,8 +67,11 @@ int main(void){
     assert(ksn_proc_surface_render_committed(&surface,backdrop,0,panel,0,KSN_PROC_H));
     assert(!memcmp(panel,new_panel,sizeof panel));
 
-    const float bad_input[KSN_PROC_INPUTS]={NAN,0,0,0};
-    assert(ksn_proc_begin(&vm,&dot,bad_input,&candidate)==KSN_PROC_INVALID);
+    prepare(10);
+    candidate.ready=false; // a frame the writer rejected
+    assert(ksn_proc_surface_stage(&surface,&candidate)==0);
+    prepare(10);
+    candidate.raster_steps=2; // a cost that does not match its segments
     assert(ksn_proc_surface_stage(&surface,&candidate)==0);
     candidate.ready=true;candidate.count=1;candidate.raster_steps=1;
     candidate.segments[0]=(ksn_proc_segment){-32000,10,32000,10,0xf800};

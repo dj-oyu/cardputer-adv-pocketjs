@@ -1,15 +1,4 @@
 #include "pocket_proc.h"
-#ifdef POCKET_DERBY_RUNNER_AFFINE
-#include "derby_runner_affine.h"
-#ifndef POCKET_DERBY_RUNNER_AFFINE_PIE_MIN
-#define POCKET_DERBY_RUNNER_AFFINE_PIE_MIN 0
-#endif
-static DerbyRunnerAffineCounts runner_affine_counts;
-void pocket_proc_runner_affine_counts(DerbyRunnerAffineCounts *out,bool reset){
-    if(out)*out=runner_affine_counts;
-    if(reset)runner_affine_counts=(DerbyRunnerAffineCounts){0};
-}
-#endif
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
@@ -20,7 +9,7 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_kasane.h"
 #endif
 #include "pocket_api.h"
-#include "ui/kasane/ksn_proc_plan.h"
+#include "ui/kasane/ksn_procedural.h"
 #include "ui/kasane/ksn_shiki.h"
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
@@ -59,44 +48,18 @@ void pocket_proc_trace_take(pocket_proc_trace *out){
 void pocket_proc_trace_view(void){trace.view_n++;trace_split=false;}
 void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
 #endif
-#ifdef KASANE_BGCOST_TRACE
-#include <stdio.h>
-#include "esp_log.h"
-static uint32_t bg_steps,bg_commit_us,bg_view_us;
-void pocket_proc_bgcost_view_us(uint32_t us){bg_view_us+=us;}
-/* Per slot, over one BGP window; bg_last is the slot draw_impl ran so that
- * js_draw can charge its wall time to it. */
-static struct { uint32_t handle,n,us,steps,seg; } bg_plan[32];
-static int bg_last=-1;
-/* Per-draw VM setup A/B: [0] the combined draw, [1] begin + run; cycles of
- * those calls alone (no JS argument reading). bg_ab_mode flips at each BGP
- * line, so a window is all one path. esp_cpu.h comes with
- * KASANE_MEGADEMO_TRACE, which this trace requires (main/CMakeLists.txt). */
-static struct { uint32_t n,cy; } bg_ab[2];
-static unsigned bg_ab_mode;
-#endif
 // Counts this file's allocations when CONFIG_POCKET_SHIKI_MEMSTAT is on
 // (docs/kasane/shiki.md sec.4.5); nothing otherwise.
 #define SHIKI_MS_FILE SHIKI_MS_PROC
 #include "shiki_memstat.h"
-// Frames, the VM, programs and points come from the Shiki heap when the
+// Frames, the engine's state and programs come from the Shiki heap when the
 // session has one (kasane.shiki, docs/kasane/shiki-spec.md sec.9.2), from the
 // system heap otherwise.
 #include "shiki_heap.h"
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
- * grows), so a released handle can never alias a later plan. Worst case with
- * every slot holding a 128-point batch is 32*(plan+points) heap: see
- * docs/kasane/procedural-ir-experiment.md for the byte count. A batch pays
- * for its own point count, not for the cap (points_bytes() below). */
+ * grows), so a released handle can never alias a later program. */
 #define PROC_HANDLES 32u
-/* A multiple of 8 keeps whole PIE blocks; the dispatcher handles any tail. */
-#define PROC_POINT_MAX 128u
-/* Typed points share the VM's coordinate bound (ksn_procedural.c coordinate()):
- * off-panel geometry is legal, the band renderer clips it, and a bounded
- * range keeps every segment's raster walk bounded. */
-#define PROC_POINT_LOW (-480)
-#define PROC_POINT_HIGH 720
 #define PROC_SURFACES 2u
 /* A surface's candidate and committed frames hold only the segments it
  * declared (createSurface({maxSegments})), allocated as the ksn_proc_frame
@@ -115,51 +78,19 @@ static size_t frame_bytes(unsigned segments){
     return offsetof(ksn_proc_frame,segments)+(size_t)segments*sizeof(ksn_proc_segment);
 }
 
-/* One malloc per batch: this header, then four planes (x, y, out_x, out_y)
- * of points_stride(count) elements each. It used to be four 128-element
- * arrays whatever the count (1,055 B with the alignment slack), which is what
- * put 32 plans of 40 points into OUT_OF_MEMORY next to a large guest
- * (docs/kasane/procedural-limits-device.md sec.3).
- *
- * The stride is the count rounded up to whole eight-lane blocks, so every
- * plane begins 16-byte aligned: the dispatcher sends an unaligned plane to the
- * scalar path, so misalignment would cost speed, never memory safety. The
- * round-up is not overrun room -- the PIE kernel loads and stores only
- * [0, count) (whole blocks by PIE, the tail scalar), which
- * tools/kasane_contract/test_proc_points_pie_host.c pins with a guard block. */
-typedef struct {
-    uint16_t count,color;
-} proc_points;
-static size_t points_stride(unsigned count){return ((size_t)count+7u)&~(size_t)7u;}
-static size_t points_bytes(unsigned count){
-    /* +15: malloc aligns to 4 or 8, and the planes need 16. */
-    return sizeof(proc_points)+15u+4u*points_stride(count)*sizeof(int16_t);
-}
-static int16_t *points_plane(const proc_points *p,unsigned k){
-    uintptr_t base=((uintptr_t)(p+1)+15u)&~(uintptr_t)15u;
-    return (int16_t *)base+k*points_stride(p->count);
-}
-enum {PLANE_X,PLANE_Y,PLANE_OUT_X,PLANE_OUT_Y};
-/* plan is a ksn_proc_sized_plan (rows registered as an array) or, when rom is
- * set, a ksn_proc_rom_plan (a built-in plan registered by name: its code
- * stays in the firmware's table), or, when shiki is set, a ksn_shiki_plan
- * (pocket.kasane.shiki, pocket_shiki_api.c: it shares the slots, handles and
- * frames, and the procedural calls do not see it). The kind bits sit in the
- * handle's word, so the slot stays 12 B: handles never exceed PROC_HANDLE_MAX. */
+/* plan is a ksn_shiki_plan (pocket.kasane.shiki, pocket_shiki_api.c), the
+ * only kind since v2.0 removed the float VM. Handles never exceed
+ * PROC_HANDLE_MAX. */
 #define PROC_HANDLE_MAX ((1u<<30)-1u)
 typedef struct {
-    uint32_t handle:30,rom:1,shiki:1;
+    uint32_t handle;
     void *plan;
-    proc_points *points;
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
 /* The Shiki engine's state for draw (pocket_proc_shiki_draw), taken with the
  * frames on the first Shiki draw. */
 static ksn_shiki_vm *shiki_vm;
-static const ksn_proc_rom_entry *rom_table;
-static unsigned rom_count;
-static uint32_t scalar_batches,pie_batches;
 /* What a frame shows on each 8-row band of the image: a hash of the ordered
  * entries that touch the band (its pixels are a function of the backdrop
  * colour and that list alone, ksn_proc_render_band) and their columns. Two
@@ -193,7 +124,6 @@ typedef union {
 _Static_assert(sizeof(proc_workspace)==sizeof(ksn_proc_frame),
                "image raster cache must not enlarge the VM workspace");
 static proc_workspace *workspace;
-static ksn_proc_vm *vm;
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
@@ -217,98 +147,6 @@ static bool integer(JSContext *ctx,JSValueConst value,uint32_t max,uint32_t *out
     if(!number(ctx,value,&n)||n<0||n>max||n!=floor(n))return false;
     *out=(uint32_t)n;return true;
 }
-static bool signed_integer(JSContext *ctx,JSValueConst value,int32_t low,int32_t high,int32_t *out){
-    double n;
-    if(!number(ctx,value,&n)||n<low||n>high||n!=floor(n))return false;
-    *out=(int32_t)n;return true;
-}
-static bool array_length(JSContext *ctx,JSValueConst array,uint32_t *length){
-    if(!JS_IsArray(array))return false;
-    JSValue v=JS_GetPropertyStr(ctx,array,"length");
-    if(JS_IsException(v))return false;
-    bool ok=integer(ctx,v,UINT32_MAX,length);
-    JS_FreeValue(ctx,v);return ok;
-}
-static bool entry(JSContext *ctx,JSValueConst row,ksn_proc_inst *out){
-    uint32_t length,fields[4];double value;
-    if(!array_length(ctx,row,&length)||length!=6)return false;
-    for(unsigned j=0;j<4;j++){
-        JSValue v=JS_GetPropertyUint32(ctx,row,j);
-        bool ok=!JS_IsException(v)&&integer(ctx,v,UINT8_MAX,&fields[j]);
-        JS_FreeValue(ctx,v);if(!ok)return false;
-    }
-    JSValue v=JS_GetPropertyUint32(ctx,row,4);
-    bool ok=!JS_IsException(v)&&number(ctx,v,&value)&&
-            isfinite((float)value);
-    JS_FreeValue(ctx,v);if(!ok)return false;
-    uint32_t color;
-    v=JS_GetPropertyUint32(ctx,row,5);
-    ok=!JS_IsException(v)&&integer(ctx,v,UINT16_MAX,&color);
-    JS_FreeValue(ctx,v);if(!ok)return false;
-    *out=(ksn_proc_inst){(uint8_t)fields[0],(uint8_t)fields[1],
-                         (uint8_t)fields[2],(uint8_t)fields[3],
-                         (float)value,(uint16_t)color};
-    return true;
-}
-typedef enum {POINTS_OK,POINTS_INVALID,POINTS_NO_MEMORY} points_result;
-/* Sizes the batch from its own length, so the allocation happens after the
- * descriptor's shape is known and before any element is read. */
-static points_result read_points(JSContext *ctx,JSValueConst descriptor,
-                                 proc_points **out,KsnProcAffineQ14 *coeff){
-    if(!JS_IsObject(descriptor))return POINTS_INVALID;
-    JSValue kind=JS_GetPropertyStr(ctx,descriptor,"kind");
-    const char *name=JS_IsString(kind)?JS_ToCString(ctx,kind):NULL;
-    bool valid=name&&strcmp(name,"affineQ14Points")==0;
-    if(name)JS_FreeCString(ctx,name);
-    JS_FreeValue(ctx,kind);
-    if(!valid)return POINTS_INVALID;
-    JSValue x=JS_GetPropertyStr(ctx,descriptor,"x");
-    JSValue y=JS_GetPropertyStr(ctx,descriptor,"y");
-    JSValue matrix=JS_GetPropertyStr(ctx,descriptor,"coeff");
-    JSValue color=JS_GetPropertyStr(ctx,descriptor,"color");
-    uint32_t nx=0,ny=0,nc=0,shade=0;
-    valid=array_length(ctx,x,&nx)&&array_length(ctx,y,&ny)&&
-          array_length(ctx,matrix,&nc)&&nx==ny&&nx>=2&&nx<=PROC_POINT_MAX&&
-          nc==6&&integer(ctx,color,UINT16_MAX,&shade);
-    int32_t terms[6]={0};
-    proc_points *points=NULL;
-    bool no_memory=false;
-    if(valid){
-        points=shiki_or_sys_malloc(points_bytes(nx));
-        no_memory=!points;
-        valid=!no_memory;
-    }
-    if(valid){
-        points->count=(uint16_t)nx;
-        int16_t *px_plane=points_plane(points,PLANE_X);
-        int16_t *py_plane=points_plane(points,PLANE_Y);
-        for(uint32_t i=0;i<nx&&valid;i++){
-            JSValue vx=JS_GetPropertyUint32(ctx,x,i);
-            JSValue vy=JS_GetPropertyUint32(ctx,y,i);
-            int32_t px=0,py=0;
-            valid=!JS_IsException(vx)&&!JS_IsException(vy)&&
-                  signed_integer(ctx,vx,INT16_MIN,INT16_MAX,&px)&&
-                  signed_integer(ctx,vy,INT16_MIN,INT16_MAX,&py);
-            JS_FreeValue(ctx,vx);JS_FreeValue(ctx,vy);
-            px_plane[i]=(int16_t)px;py_plane[i]=(int16_t)py;
-        }
-        for(unsigned i=0;i<6&&valid;i++){
-            JSValue value=JS_GetPropertyUint32(ctx,matrix,i);
-            valid=!JS_IsException(value)&&signed_integer(ctx,value,
-                    i<4?INT16_MIN:INT32_MIN,i<4?INT16_MAX:INT32_MAX,&terms[i]);
-            JS_FreeValue(ctx,value);
-        }
-    }
-    JS_FreeValue(ctx,x);JS_FreeValue(ctx,y);
-    JS_FreeValue(ctx,matrix);JS_FreeValue(ctx,color);
-    if(!valid){shiki_or_sys_free(points);return no_memory?POINTS_NO_MEMORY:POINTS_INVALID;}
-    points->color=(uint16_t)shade;
-    *coeff=(KsnProcAffineQ14){(int16_t)terms[0],(int16_t)terms[1],
-                              (int16_t)terms[2],(int16_t)terms[3],
-                              terms[4],terms[5]};
-    *out=points;
-    return POINTS_OK;
-}
 static unsigned surface_segments(const proc_surface *surface){
     return surface->max_segments?surface->max_segments:KSN_PROC_SEGMENTS;
 }
@@ -317,8 +155,7 @@ static bool buffers(proc_surface *surface){
     if(!surface->candidate)surface->candidate=shiki_or_sys_calloc(1,bytes);
     if(!workspace)workspace=shiki_or_sys_calloc(1,sizeof *workspace);
     if(!surface->committed)surface->committed=shiki_or_sys_calloc(1,bytes);
-    if(!vm)vm=shiki_or_sys_calloc(1,sizeof *vm);
-    return surface->candidate&&workspace&&surface->committed&&vm;
+    return surface->candidate&&workspace&&surface->committed;
 }
 static bool any_pending(void){
     for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].pending)return true;
@@ -338,15 +175,13 @@ static bool surface_index(JSContext *ctx,JSValueConst value,unsigned *index){
     return false;
 }
 /* Handle 0 is never issued and is also what an empty slot holds, so a
- * lookup must require a plan, not just a matching number. The procedural
- * calls look up their own kind only: a Shiki handle is stale to them. */
-static proc_slot *find_kind(uint32_t handle,bool shiki){
+ * lookup must require a plan, not just a matching number. */
+static proc_slot *find_slot(uint32_t handle){
     if(!handle)return NULL;
     for(unsigned i=0;i<PROC_HANDLES;i++)
-        if(slots[i].plan&&slots[i].handle==handle&&slots[i].shiki==shiki)return &slots[i];
+        if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
     return NULL;
 }
-static proc_slot *find_slot(uint32_t handle){return find_kind(handle,false);}
 static ksn_rect frame_damage(const proc_surface *surface){
     if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
@@ -424,195 +259,9 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
     }
     return true;
 }
-/* Typed points for a plan just prepared: none, attached, or the failure the
- * caller returns (the plan is not yet in a slot, so the caller frees it). */
-static JSValue attach_points(JSContext *ctx,JSValueConst descriptor,bool rom,void *plan,
-                             proc_points **out){
-    const char *op="kasane.procedural.register";
-    *out=NULL;
-    if(JS_IsUndefined(descriptor)||JS_IsNull(descriptor))return JS_UNDEFINED;
-    KsnProcAffineQ14 coeff;
-    /* Cardputer ADV calibration: at n=8/16/40 the PIE path beat scalar
-     * across 2048 runs, with exact output parity. The dispatcher still
-     * falls back on hosts or an unavailable/unaligned backend. */
-    const KsnProcPointsPolicy policy={true,8};
-    proc_points *points=NULL;
-    points_result read=read_points(ctx,descriptor,&points,&coeff);
-    if(read==POINTS_NO_MEMORY)
-        return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"point allocation failed");
-    if(read!=POINTS_OK||
-       !(rom?ksn_proc_rom_plan_register_points_affine(plan,&coeff,&policy):
-             ksn_proc_sized_plan_register_points_affine(plan,&coeff,&policy))){
-        shiki_or_sys_free(points);
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid typed point batch");
-    }
-    *out=points;
-    return JS_UNDEFINED;
-}
-/* register(name, args?, points?): a built-in plan (docs/kasane/flash-plan.md).
- * The same checks as the array path, in the same order of kinds: the shape
- * of the call, the slot limit before any allocation, the values, then the
- * program. args must hold exactly the plan function's declared arguments
- * (undefined or null for none), each a finite number; an argument that fills
- * a field must also be what that field takes as an array row (REPEAT/CUBIC
- * counts integers 0..255, colours 0..65535, values finite as float). */
-static JSValue register_rom(JSContext *ctx,int argc,JSValueConst *argv){
-    const char *op="kasane.procedural.register";
-    if(argc<1||argc>3)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
-                       "expected a plan name, its arguments and optional points");
-    size_t length=0;
-    const char *name=JS_ToCStringLen(ctx,&length,argv[0]);
-    if(!name)return JS_EXCEPTION;
-    const ksn_proc_rom_entry *rom=NULL;
-    for(unsigned i=0;i<rom_count&&!rom;i++)
-        if(rom_table[i].name&&strlen(rom_table[i].name)==length&&
-           !memcmp(rom_table[i].name,name,length))
-            rom=&rom_table[i];
-    JS_FreeCString(ctx,name);
-    if(!rom)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"unknown built-in plan");
-    /* The generator emits only valid entries; this keeps a bad table from
-     * sizing the arguments below (params) or the analysis's copy (count). */
-    if(!ksn_proc_rom_entry_valid(rom))
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid built-in plan");
-    uint32_t given=0;
-    if(argc>=2&&!JS_IsUndefined(argv[1])&&!JS_IsNull(argv[1])&&
-       !array_length(ctx,argv[1],&given))
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected an array of plan arguments");
-    if(given!=rom->params)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"plan argument count mismatch");
-    unsigned slot=0;
-    while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
-    if(slot==PROC_HANDLES||next_handle==PROC_HANDLE_MAX)
-        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"procedural plan limit");
-    /* 40 + 4 * params B on the device, whatever the instruction count. */
-#ifdef KASANE_MEGADEMO_TRACE
-    size_t plan_free0=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-#endif
-    ksn_proc_rom_plan *plan=shiki_or_sys_calloc(1,ksn_proc_rom_plan_bytes(rom->params));
-#ifdef KASANE_MEGADEMO_TRACE
-    if(plan)ESP_LOGI("proc","PLANSZ rom=%u blk=%u took=%d",(unsigned)rom->count,
-                     (unsigned)heap_caps_get_allocated_size(plan),
-                     (int)(plan_free0-heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
-#endif
-    if(!plan)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"plan allocation failed");
-    plan->params=rom->params;
-    double arg[KSN_PROC_ROM_PARAMS];
-    for(uint32_t i=0;i<given;i++){
-        JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);
-        bool ok=!JS_IsException(v)&&number(ctx,v,&arg[i]);
-        JS_FreeValue(ctx,v);
-        if(!ok){shiki_or_sys_free(plan);
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid plan argument");}
-        plan->args[i]=(float)arg[i];
-    }
-    /* What entry() would have required of the row holding the argument. */
-    for(unsigned k=0;k<rom->patches;k++){
-        const ksn_proc_patch *p=&rom->patch[k];
-        const double v=arg[p->param];
-        bool ok=p->field==KSN_PROC_FIELD_A?v>=0&&v<=UINT8_MAX&&v==floor(v):
-                p->field==KSN_PROC_FIELD_COLOR?v>=0&&v<=UINT16_MAX&&v==floor(v):
-                isfinite((float)v);
-        if(!ok){shiki_or_sys_free(plan);
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid instruction entry");}
-    }
-#ifdef KASANE_MEGADEMO_TRACE
-    int64_t prep_began=esp_timer_get_time();
-    bool prepared=ksn_proc_rom_plan_prepare(plan,rom);
-    uint32_t prep_us=(uint32_t)(esp_timer_get_time()-prep_began);
-    trace.prep_us+=prep_us;
-    if(prep_us>trace.prep_max_us)trace.prep_max_us=prep_us;
-    if(!prepared){
-#else
-    if(!ksn_proc_rom_plan_prepare(plan,rom)){
-#endif
-        shiki_or_sys_free(plan);
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
-    }
-    proc_points *points=NULL;
-    JSValue attached=attach_points(ctx,argc==3?argv[2]:JS_UNDEFINED,true,plan,&points);
-    if(JS_IsException(attached)){shiki_or_sys_free(plan);return attached;}
-    uint32_t handle=++next_handle;
-    slots[slot]=(proc_slot){.handle=handle,.rom=1,.plan=plan,.points=points};
-    return JS_NewInt32(ctx,(int32_t)handle);
-}
-static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;
-    if(argc>=1&&JS_IsString(argv[0]))return register_rom(ctx,argc,argv);
-    const char *op="kasane.procedural.register";
-    uint32_t count;
-    if((argc!=1&&argc!=2)||!array_length(ctx,argv[0],&count)||
-       !count||count>KSN_PROC_CODE)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected 1..64 instructions");
-    /* The limit is decided before any work or allocation: a full table must
-     * answer LIMIT_EXCEEDED, and a low heap used to turn the 33rd plan into
-     * OUT_OF_MEMORY because the plan and its points were allocated first.
-     * The slot stays free while the arrays below are read: a getter that calls
-     * back into procedural is refused by guarded(). */
-    unsigned slot=0;
-    while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
-    if(slot==PROC_HANDLES||next_handle==PROC_HANDLE_MAX)
-        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"procedural plan limit");
-    ksn_proc_inst code[KSN_PROC_CODE];
-    for(uint32_t i=0;i<count;i++){
-        JSValue row=JS_GetPropertyUint32(ctx,argv[0],i);
-        bool ok=!JS_IsException(row)&&entry(ctx,row,&code[i]);
-        JS_FreeValue(ctx,row);
-        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid instruction entry");
-    }
-    /* Sized to the program: a full-size plan was 872 B whatever the count
-     * (docs/kasane/plan-sized-alloc.md). count is 1..64 here, checked above. */
-#ifdef KASANE_MEGADEMO_TRACE
-    size_t plan_free0=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-#endif
-    ksn_proc_sized_plan *plan=shiki_or_sys_calloc(1,ksn_proc_sized_plan_bytes(count));
-#ifdef KASANE_MEGADEMO_TRACE
-    /* What one plan costs the shared heap: the request, the block the
-     * allocator handed out, and the drop in free bytes (header included). */
-    if(plan)ESP_LOGI("proc","PLANSZ n=%u blk=%u took=%d",(unsigned)count,
-                     (unsigned)heap_caps_get_allocated_size(plan),
-                     (int)(plan_free0-heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
-#endif
-    if(!plan)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"plan allocation failed");
-    const ksn_proc_program program={code,(uint8_t)count};
-#ifdef KASANE_MEGADEMO_TRACE
-    int64_t prep_began=esp_timer_get_time();
-    bool prepared=ksn_proc_sized_plan_prepare(plan,count,&program);
-    uint32_t prep_us=(uint32_t)(esp_timer_get_time()-prep_began);
-    trace.prep_us+=prep_us;
-    if(prep_us>trace.prep_max_us)trace.prep_max_us=prep_us;
-    if(!prepared){
-#else
-    if(!ksn_proc_sized_plan_prepare(plan,count,&program)){
-#endif
-        shiki_or_sys_free(plan);
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
-    }
-    proc_points *points=NULL;
-    JSValue attached=attach_points(ctx,argc==2?argv[1]:JS_UNDEFINED,false,plan,&points);
-    if(JS_IsException(attached)){shiki_or_sys_free(plan);return attached;}
-    uint32_t handle=++next_handle;
-    slots[slot]=(proc_slot){.handle=handle,.rom=0,.plan=plan,.points=points};
-    return JS_NewInt32(ctx,(int32_t)handle);
-}
-static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;
-    const char *op="kasane.procedural.unregister";
-    uint32_t handle;
-    if(argc!=1||!integer(ctx,argv[0],INT32_MAX,&handle))
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected one procedural handle");
-    proc_slot *slot=find_slot(handle);
-    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
-    /* Legal between beginFrame() and commit(): draw() copies the plan's
-     * segments into the candidate and the VM runs from its own code copy, so
-     * no frame, pending presentation or image band refers to a plan. */
-    shiki_or_sys_free(slot->plan);shiki_or_sys_free(slot->points);
-    *slot=(proc_slot){0};
-    return JS_UNDEFINED;
-}
 static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
-    const char *op="kasane.procedural.beginFrame";
+    const char *op="kasane.shiki.beginFrame";
     uint32_t color;
     unsigned index=0;
     if((argc!=1&&argc!=2)||!integer(ctx,argv[0],UINT16_MAX,&color)||
@@ -633,169 +282,10 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     building=true;
     return JS_UNDEFINED;
 }
-/* The second half of draw(), shared by H.draw (array or numbers) and the
- * native callers (pocket_proc_draw_numbers): the inputs are read and each one
- * is a finite double that stays finite as a float. Short input lists are
- * zero-padded, so a caller written for four inputs sees exactly the frame it
- * saw when four were required. */
-static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const float *input){
-    const char *op="kasane.procedural.draw";
-    ksn_proc_frame *candidate=surfaces[building_surface].candidate;
-    const unsigned room=surface_segments(&surfaces[building_surface]);
-    ksn_proc_frame *scratch=&workspace->frame;
-    /* Both the affine fast path and the VM overwrite the cached raster,
-     * including draws that fail or are abandoned without commit(). */
-    image_band_valid=false;
-#ifndef KASANE_BGCOST_TRACE
-    (void)handle;
-#endif
-    ksn_proc_status status;
-#ifdef POCKET_DERBY_RUNNER_AFFINE
-    const ksn_proc_rom_plan *rp=slot->rom?slot->plan:NULL;
-    bool affine=false;
-    if(rp&&rp->valid&&rp->params==3&&!slot->points&&
-       !strcmp(rp->rom->name,"derby.runner")){
-        ++runner_affine_counts.attempts;
-        const KsnProcPointsPolicy policy={POCKET_DERBY_RUNNER_AFFINE_PIE_MIN>0,
-                                          POCKET_DERBY_RUNNER_AFFINE_PIE_MIN};
-        KsnProcPointsDecision d;
-        affine=derby_runner_affine(input,rp->args,&policy,scratch,&d);
-        if(affine){
-            ++runner_affine_counts.accepted;
-            if(d.backend==KSN_PROC_POINTS_PIE)++runner_affine_counts.pie_batches;
-            else ++runner_affine_counts.scalar_batches;
-            vm->steps=0; /* Candidate path executes no VM instructions. */
-        }else ++runner_affine_counts.fallback;
-    }
-    if(affine)status=KSN_PROC_DONE;
-    else
-#endif
-#ifdef KASANE_BGCOST_TRACE
-    {
-    /* Same-binary A/B of the per-draw VM setup (docs/kasane/flash-plan.md
-     * sec.13): BGP windows alternate between begin + run as before and the
-     * combined draw. Whole windows, not frames: an app may begin more than
-     * one surface a frame, which would pin a surface's plans to one parity.
-     * One binary because the instruction cache moves a kernel ~15% between
-     * builds. */
-    const unsigned ab=bg_ab_mode;
-    const uint32_t ab_began=esp_cpu_get_cycle_count();
-    if(ab){
-        status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
-                         ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
-        if(status==KSN_PROC_RUNNING)
-            status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
-                             ksn_proc_sized_plan_run(vm,slot->plan,false);
-    }else
-#endif
-    /* Begin and run as one call: prepare already validated the rows, so the
-     * draw neither revalidates nor checks that the VM holds this plan. */
-    status=slot->rom?ksn_proc_rom_plan_draw(vm,slot->plan,input,scratch):
-                     ksn_proc_sized_plan_draw(vm,slot->plan,input,scratch);
-#ifdef KASANE_BGCOST_TRACE
-    bg_ab[ab].cy+=esp_cpu_get_cycle_count()-ab_began;bg_ab[ab].n++;
-    }
-#endif
-    if(status!=KSN_PROC_DONE){
-        building=false;
-        return failure(ctx,op,status==KSN_PROC_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:
-                       POCKET_ERR_INVALID_ARGUMENT,"procedural execution failed");
-    }
-    unsigned typed_segments=0,typed_steps=0;
-    KsnProcPointsDecision decision={0};
-    if(slot->points){
-        proc_points *p=slot->points;
-        const KsnProcPointSrc src={points_plane(p,PLANE_X),points_plane(p,PLANE_Y)};
-        const KsnProcPointDst dst={points_plane(p,PLANE_OUT_X),points_plane(p,PLANE_OUT_Y)};
-        const int16_t *out_x=dst.x,*out_y=dst.y;
-        if(!(slot->rom?ksn_proc_rom_plan_run_points_affine(slot->plan,dst,src,p->count,&decision):
-                       ksn_proc_sized_plan_run_points_affine(slot->plan,dst,src,p->count,&decision))){
-            building=false;
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"typed point run failed");
-        }
-        typed_segments=p->count-1;
-        for(unsigned i=0;i<p->count;i++){
-            if(out_x[i]<PROC_POINT_LOW||out_x[i]>PROC_POINT_HIGH||
-               out_y[i]<PROC_POINT_LOW||out_y[i]>PROC_POINT_HIGH){
-                building=false;
-                return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
-                               "typed point outside -480..720");
-            }
-            if(i){
-                int dx=abs(out_x[i]-out_x[i-1]);
-                int dy=abs(out_y[i]-out_y[i-1]);
-                typed_steps+=(unsigned)(dx>dy?dx:dy)+1u;
-            }
-        }
-    }
-    if((unsigned)scratch->count+typed_segments>room-candidate->count||
-       (unsigned)scratch->raster_steps+typed_steps>(unsigned)UINT16_MAX-candidate->raster_steps){
-        building=false;
-        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
-    }
-    memcpy(&candidate->segments[candidate->count],scratch->segments,
-           scratch->count*sizeof scratch->segments[0]);
-    candidate->count+=scratch->count;
-    candidate->raster_steps+=scratch->raster_steps;
-    candidate->ext|=scratch->ext;
-    if(slot->points){
-        const proc_points *p=slot->points;
-        const int16_t *out_x=points_plane(p,PLANE_OUT_X),*out_y=points_plane(p,PLANE_OUT_Y);
-        for(unsigned i=1;i<p->count;i++)
-            candidate->segments[candidate->count++]=(ksn_proc_segment){
-                out_x[i-1],out_y[i-1],out_x[i],out_y[i],p->color};
-        candidate->raster_steps+=(uint16_t)typed_steps;
-        if(decision.backend==KSN_PROC_POINTS_PIE)pie_batches++;
-        else scalar_batches++;
-    }
-#ifdef KASANE_BGCOST_TRACE
-    bg_steps+=vm->steps;
-    bg_last=(int)(slot-slots);
-    bg_plan[bg_last].handle=handle;
-    bg_plan[bg_last].n++;
-    bg_plan[bg_last].steps+=vm->steps;
-    bg_plan[bg_last].seg+=scratch->count+typed_segments;
-#endif
-    return JS_UNDEFINED;
-}
-static bool finite_input(double n){return isfinite(n)&&isfinite((float)n);}
-/* draw(handle, inputs[]) or draw(handle, a0, ..., a7): a number as the second
- * argument starts the numeric form, which builds no array. Trailing undefined
- * arguments count as not passed (a wrapper like (n, a, ..., h) => draw(h, a,
- * ..., h) forwards eight whatever its caller gave), so the numeric form is
- * zero-padded like a short array and draw(h, array, undefined) is the array
- * form. A hole (undefined before a number) is a non-finite input. */
-static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;
-    const char *op="kasane.procedural.draw";
-    uint32_t handle,length=0;
-    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
-    while(argc>2&&JS_IsUndefined(argv[argc-1]))argc--;
-    const bool numeric=argc>=2&&JS_IsNumber(argv[1]);
-    if(argc<2||!integer(ctx,argv[0],INT32_MAX,&handle)||
-       (numeric?(length=(uint32_t)argc-1u)>KSN_PROC_INPUTS:
-                (argc!=2||!array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)))
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
-    proc_slot *slot=find_slot(handle);
-    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
-    float input[KSN_PROC_INPUTS]={0};
-    for(unsigned i=0;i<length;i++){
-        double n;bool ok;
-        if(numeric)ok=number(ctx,argv[1+i],&n)&&finite_input(n);
-        else{
-            JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);
-            ok=!JS_IsException(v)&&number(ctx,v,&n)&&finite_input(n);
-            JS_FreeValue(ctx,v);
-        }
-        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
-        input[i]=(float)n;
-    }
-    return draw_run(ctx,slot,handle,input);
-}
 /* Native drawing straight into the candidate (pocket_shape.c): draw()'s
  * frame limits without a plan or the VM. */
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
-    if(js_call_active)return failure(ctx,"kasane.procedural",POCKET_ERR_BUSY,"reentrant procedural call");
+    if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     const ksn_proc_frame *c=surfaces[building_surface].candidate;
     *mark=(pocket_proc_mark){c->count,c->raster_steps,c->ext,(uint8_t)building_surface};
@@ -826,7 +316,7 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark){
 }
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
-    const char *op="kasane.procedural.commit";
+    const char *op="kasane.shiki.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
     surface->damage=frame_damage(surface);
@@ -853,108 +343,35 @@ typedef JSValue (*proc_js_method)(JSContext *,JSValueConst,int,JSValueConst *);
 static JSValue guarded(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,
                        proc_js_method method){
     if(js_call_active)
-        return failure(ctx,"kasane.procedural",POCKET_ERR_BUSY,
-                       "reentrant procedural call");
+        return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     js_call_active=true;
     JSValue result=method(ctx,self,argc,argv);
     js_call_active=false;
     return result;
 }
-static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-#ifdef KASANE_MEGADEMO_TRACE
-    int64_t began=esp_timer_get_time();
-    JSValue result=guarded(ctx,self,argc,argv,register_impl);
-    trace.reg_us+=(uint32_t)(esp_timer_get_time()-began);trace.reg_n++;
-    return result;
-#else
-    return guarded(ctx,self,argc,argv,register_impl);
-#endif
-}
-static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-#ifdef KASANE_MEGADEMO_TRACE
-    trace.unreg_n++;
-#endif
-    return guarded(ctx,self,argc,argv,unregister_impl);
-}
 static JSValue js_begin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,begin_impl);
-}
-static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-#ifdef KASANE_MEGADEMO_TRACE
-    int64_t began=esp_timer_get_time();
-    JSValue result=guarded(ctx,self,argc,argv,draw_impl);
-    uint32_t us=(uint32_t)(esp_timer_get_time()-began);
-    trace.draw_us+=us;trace.draw_n++;
-    if(us>trace.draw_max_us)trace.draw_max_us=us;
-#ifdef KASANE_BGCOST_TRACE
-    if(bg_last>=0)bg_plan[bg_last].us+=us;
-    bg_last=-1;
-#endif
-    return result;
-#else
-    return guarded(ctx,self,argc,argv,draw_impl);
-#endif
 }
 #ifdef POCKET_PROC_DRAW_HOOK
 bool pocket_proc_hook_dry;
 #endif
+/* One draw for a native caller (pocket_derby.c): a Shiki handle, the inputs
+ * converted by sec.2.4 of the spec. */
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
-    const char *op="kasane.procedural.draw";
+    const char *op="kasane.shiki.draw";
 #ifdef POCKET_PROC_DRAW_HOOK
     if(pocket_proc_hook_dry){pocket_proc_draw_hook(handle,in,n);return JS_UNDEFINED;}
 #endif
-    if(js_call_active)
-        return failure(ctx,"kasane.procedural",POCKET_ERR_BUSY,"reentrant procedural call");
-    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
-    if(handle>INT32_MAX||n>KSN_PROC_INPUTS)
+    if(handle>INT32_MAX||n>KSN_SHIKI_INPUTS)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
-    /* A Shiki handle (pocket.derby's plans move to Shiki one by one, v2.0
-     * step 1): the Shiki engine, the inputs converted by sec.2.4. */
-    if(find_kind(handle,true)){
-        JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
-#ifdef POCKET_PROC_DRAW_HOOK
-        if(!JS_IsException(result))pocket_proc_draw_hook(handle,in,n);
-#endif
-        return result;
-    }
-    proc_slot *slot=find_slot(handle);
-    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
-    float input[KSN_PROC_INPUTS]={0};
-    for(unsigned i=0;i<n;i++){
-        if(!finite_input(in[i]))return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
-        input[i]=(float)in[i];
-    }
-    /* Timed and counted as js_draw() is, so the diagnostic VM draw time keeps
-     * covering every draw of a frame whoever issues it. */
-#ifdef KASANE_MEGADEMO_TRACE
-    int64_t began=esp_timer_get_time();
-#endif
-    js_call_active=true;
-    JSValue result=draw_run(ctx,slot,handle,input);
-    js_call_active=false;
-#ifdef KASANE_MEGADEMO_TRACE
-    uint32_t us=(uint32_t)(esp_timer_get_time()-began);
-    trace.draw_us+=us;trace.draw_n++;
-    if(us>trace.draw_max_us)trace.draw_max_us=us;
-#ifdef KASANE_BGCOST_TRACE
-    if(bg_last>=0)bg_plan[bg_last].us+=us;
-    bg_last=-1;
-#endif
-#endif
+    JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
 #ifdef POCKET_PROC_DRAW_HOOK
     if(!JS_IsException(result))pocket_proc_draw_hook(handle,in,n);
 #endif
     return result;
 }
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-#ifdef KASANE_BGCOST_TRACE
-    int64_t began=esp_timer_get_time();
-    JSValue result=guarded(ctx,self,argc,argv,commit_impl);
-    bg_commit_us+=(uint32_t)(esp_timer_get_time()-began);
-    return result;
-#else
     return guarded(ctx,self,argc,argv,commit_impl);
-#endif
 }
 /* {maxSegments: 1..1024} (absent or undefined: 0, the 1,024 default). */
 static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segments){
@@ -968,7 +385,7 @@ static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segment
 }
 static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
-    const char *op="kasane.procedural.resource";
+    const char *op="kasane.shiki.resource";
     unsigned index=0;
     /* resource({maxSegments}): surface 0's image, its two frames sized for
      * maxSegments (createSurface()'s option for surface 1). Decided before
@@ -998,7 +415,7 @@ static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueCons
  * option issues no handle. */
 static JSValue create_surface_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
-    const char *op="kasane.procedural.createSurface";
+    const char *op="kasane.shiki.createSurface";
     uint32_t segments=0;
     if(argc>1)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
                              "expected optional {maxSegments}");
@@ -1024,17 +441,17 @@ uint32_t pocket_proc_shiki_attach(void *plan){
     while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
     if(slot==PROC_HANDLES||next_handle==PROC_HANDLE_MAX)return 0;
     const uint32_t handle=++next_handle;
-    slots[slot]=(proc_slot){.handle=handle,.shiki=1,.plan=plan};
+    slots[slot]=(proc_slot){.handle=handle,.plan=plan};
     return handle;
 }
 void *pocket_proc_shiki_plan(uint32_t handle){
-    proc_slot *slot=find_kind(handle,true);
+    proc_slot *slot=find_slot(handle);
     return slot?slot->plan:NULL;
 }
 bool pocket_proc_shiki_detach(uint32_t handle){
     /* As unregister(): legal between beginFrame() and commit(), since draw
      * copies the segments out and keeps nothing of the plan. */
-    proc_slot *slot=find_kind(handle,true);
+    proc_slot *slot=find_slot(handle);
     if(!slot)return false;
     shiki_or_sys_free(slot->plan);
     *slot=(proc_slot){0};
@@ -1056,7 +473,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     const char *op="kasane.shiki.draw";
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
-    proc_slot *slot=find_kind(handle,true);
+    proc_slot *slot=find_slot(handle);
     if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale Shiki handle");
     if(!shiki_vm&&!(shiki_vm=shiki_or_sys_calloc(1,sizeof *shiki_vm))){
         building=false;
@@ -1100,8 +517,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     return JS_UNDEFINED;
 }
 
-// The frame's functions: the same frames whichever namespace a caller uses
-// (procedural, and kasane.shiki through pocket_proc_frame_install).
+// The frame's functions on kasane.shiki (pocket_shiki_api.c).
 static const JSCFunctionListEntry frame_methods[]={
     JS_CFUNC_DEF("beginFrame",1,js_begin),
     JS_CFUNC_DEF("commit",0,js_commit),
@@ -1112,47 +528,24 @@ esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
     return JS_SetPropertyFunctionList(ctx,obj,frame_methods,
                                       (int)(sizeof frame_methods/sizeof frame_methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
 }
-esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
-    JSValue procedural=JS_NewObject(ctx);
-    if(JS_IsException(procedural))return ESP_ERR_NO_MEM;
-    static const JSCFunctionListEntry methods[]={
-        JS_CFUNC_DEF("register",1,js_register),
-        JS_CFUNC_DEF("unregister",1,js_unregister),
-        JS_CFUNC_DEF("draw",2,js_draw),
-    };
-    if(JS_SetPropertyFunctionList(ctx,procedural,methods,
-                                  (int)(sizeof methods/sizeof methods[0]))<0||
-       pocket_proc_frame_install(ctx,procedural)!=ESP_OK){
-        JS_FreeValue(ctx,procedural);return ESP_ERR_NO_MEM;
-    }
-    return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;
-}
 void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_HANDLES;i++){
-        shiki_or_sys_free(slots[i].plan);shiki_or_sys_free(slots[i].points);slots[i]=(proc_slot){0};
+        shiki_or_sys_free(slots[i].plan);slots[i]=(proc_slot){0};
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);shiki_or_sys_free(surfaces[i].committed);
         surfaces[i]=(proc_surface){0};
     }
-    shiki_or_sys_free(workspace);shiki_or_sys_free(vm);workspace=NULL;vm=NULL;
+    shiki_or_sys_free(workspace);workspace=NULL;
     shiki_or_sys_free(shiki_vm);shiki_vm=NULL;
     image_band_valid=false;image_band_frame=NULL;
     building=js_call_active=false;building_surface=pending_surface=0;
-    scalar_batches=pie_batches=0;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
 #endif
 #ifdef KASANE_MEGADEMO_TRACE
     trace=(pocket_proc_trace){0};trace_split=false;
 #endif
-}
-void pocket_proc_rom_plans(const ksn_proc_rom_entry *entries,unsigned count){
-    rom_table=entries;rom_count=entries?count:0;
-}
-void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){
-    if(scalar)*scalar=scalar_batches;
-    if(pie)*pie=pie_batches;
 }
 void pocket_proc_end_turn(void){
     /* A thrown JS frame must not carry an unfinished candidate into the next
@@ -1209,14 +602,7 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         uint32_t band_start=esp_cpu_get_cycle_count();
 #endif
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
-#ifdef KASANE_BGCOST_TRACE
-        /* A/B of the band renderer in one binary: a background colour of 1
-         * selects the one before LINE_PATTERN (tools/games/bgcost/pattern). */
-        if(frame&&!(color==1?ksn_proc_render_band_base:ksn_proc_render_band)(frame,image_band,band_y,(int)rows))
-            return KSN_INVALID;
-#else
         if(frame&&!ksn_proc_render_band(frame,image_band,band_y,(int)rows))return KSN_INVALID;
-#endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
         image_band_cycles+=esp_cpu_get_cycle_count()-band_start;
         image_band_count++;
@@ -1244,50 +630,6 @@ void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
                               .variants=1,.frames=1,.read_span=image_span,.opaque=true};
 }
 void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0);}
-#ifdef KASANE_BGCOST_TRACE
-void pocket_proc_bgcost_take(pocket_proc_bgcost *out){
-    pocket_proc_bgcost r={.steps=bg_steps,.commit_us=bg_commit_us,.view_us=bg_view_us};
-    bg_steps=bg_commit_us=bg_view_us=0;
-    const proc_surface *s=&surfaces[0];
-    const ksn_proc_frame *f=s->pending?s->candidate:(s->has_committed?s->committed:NULL);
-    if(f){
-        r.seg=f->count;r.ras=f->raster_steps;
-        unsigned i=0,cost;
-        ksn_proc_segment geometry;
-        bool pattern;
-        while(ksn_proc_frame_next(f,&i,&geometry,&pattern,&cost)){
-            const ksn_proc_segment *g=&geometry;
-            int y0=g->y0<g->y1?g->y0:g->y1,y1=g->y0>g->y1?g->y0:g->y1;
-            int dx=abs(g->x1-g->x0),dy=y1-y0,n=(dx>dy?dx:dy)+1;
-            int a=y0<0?0:y0,b=y1>KSN_PROC_H-1?KSN_PROC_H-1:y1;
-            if(a>b)continue;
-            /* Bands (PROC_IMAGE_BAND_ROWS) the segment is walked in, and its
-             * Bresenham iterations inside the panel's rows: the renderer
-             * walks off-panel columns too, but never off-panel rows. */
-            r.hits+=(unsigned)(b/PROC_IMAGE_BAND_ROWS-a/PROC_IMAGE_BAND_ROWS+1);
-            r.walk+=(uint32_t)((int64_t)n*(b-a+1)/(dy+1));
-        }
-    }
-    if(out)*out=r;
-}
-void pocket_proc_bgcost_plans_emit(void){
-    char line[400];
-    int at=snprintf(line,sizeof line,"BGP");
-    for(unsigned i=0;i<32&&at<(int)sizeof line-48;i++){
-        if(!bg_plan[i].n)continue;
-        at+=snprintf(line+at,sizeof line-at," %u=%u/%u/%u/%u",(unsigned)bg_plan[i].handle,
-                     (unsigned)bg_plan[i].n,(unsigned)bg_plan[i].us,
-                     (unsigned)bg_plan[i].steps,(unsigned)bg_plan[i].seg);
-    }
-    memset(bg_plan,0,sizeof bg_plan);
-    ESP_LOGI("app","%s",line);
-    /* BGD draw=n/cycles begin+run=n/cycles (same window as BGP). */
-    ESP_LOGI("app","BGD draw=%u/%u begin+run=%u/%u",(unsigned)bg_ab[0].n,(unsigned)bg_ab[0].cy,
-             (unsigned)bg_ab[1].n,(unsigned)bg_ab[1].cy);
-    memset(bg_ab,0,sizeof bg_ab);
-    bg_ab_mode^=1u;
-}
-#endif
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
     (void)ctx;
     if(!pixels||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;

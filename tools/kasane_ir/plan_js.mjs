@@ -22,6 +22,10 @@ export const RULES = {
   R4: 'names: the @plan inputs, the parameters, locals declared before use; no shadowing, no reassigned const',
   R5: 'no strings, arrays, objects, other calls, ternaries, comparisons outside if/for, % ** or bit operators',
   R6: 'break only as if (a > b) break; or if (a < b) break; (the VM has BREAK_IF_GT) inside a for',
+  R7: 'vectors (v2.0 draft, Shiki D7): for (const [a, b] of region[.from(k)][.take(n)].blocks()) { ... } holds only ' +
+    'const v = <vector>;, region.setLane(c, <vector>);, acc.zero(); acc.set(s); acc.mac(<vector>, <vector>); acc.mack(<vector>, s); ' +
+    'where a <vector> is a name, region.lane(c), splat(s), iota(), vmin(a, b), vmax(a, b), acc.out(shift), a + b or a - b; ' +
+    'points(region[.from(k)][.take(n)], colour); and lines(...) outside it',
 };
 class PlanError extends SyntaxError {}
 const fail = (line, rule, what) => { throw new PlanError(`line ${line}: ${what} [${rule}: ${RULES[rule]}]`); };
@@ -79,6 +83,7 @@ function parseBody(src, line0, inputs, params, data = []) {
       }
       if (KEYWORDS.has(x.v)) fail(x.line, 'R5', `${x.v}`);
       if (!lookup(x.v)) fail(x.line, 'R4', `${x.v} is not declared here`);
+      if (lookup(x.v).kind === 'vec') fail(x.line, 'R7', `the vector ${x.v} used as a scalar`);
       if (region(x.v)) {
         // table[i]: LOOKUP (Shiki v1.3, shiki-spec.md sec.8.2).
         if (!peek('[')) fail(x.line, 'R5', `the data region ${x.v} used as a value`);
@@ -121,7 +126,11 @@ function parseBody(src, line0, inputs, params, data = []) {
     ...(s.i ? names(s.i) : []), ...(s.from ? names(s.from) : []),
     ...(s.e ? names(s.e) : []), ...(s.d ? s.d.flatMap(d => names(d.e)) : []), ...(s.args ? s.args.flatMap(names) : []),
     ...(s.k === 'break' ? [...names(s.a), ...names(s.b)] : []), ...(s.n && typeof s.n === 'object' ? names(s.n) : []),
-    ...(s.k === 'assign' && s.o !== '=' ? [s.n] : []), ...(s.body ? reads(s.body) : [])]);
+    ...(s.k === 'assign' && s.o !== '=' ? [s.n] : []), ...(s.body ? reads(s.body) : []),
+    ...(s.k === 'vdecl' || s.k === 'vstore' ? vnames(s.e) : []), ...(s.k === 'acc' ? s.args.flatMap(vnames) : [])]);
+  // The scalar names a vector expression reads (splat's operand).
+  const vnames = e => e.k === 'vsplat' ? names(e.args[0]) : e.k === 'vbin' ? [...vnames(e.a), ...vnames(e.b)] :
+    e.k && !e.k.startsWith('v') ? names(e) : [];
   function block() {
     take('{'); scopes.push(new Map());
     const s = [];
@@ -189,6 +198,15 @@ function parseBody(src, line0, inputs, params, data = []) {
       take(')'); take(';');
       return [{k: 'put', r: n, args, line}];
     }
+    if ((n === 'points' || n === 'lines') && peek('(')) {
+      // EMIT_POINTS / EMIT_LINES (v2.0 draft sec.6.2): a region's records as
+      // points (x, y) or lines (x0, y0, x1, y1), drawn by the engine.
+      take('('); const r = take('id', 'R7').v;
+      if (!region(r)) fail(line, 'R7', `${n}(): ${r} is not a @data region`);
+      const {n: cnt, from} = chain(r, line, false);
+      take(',', 'R7'); const c = expr(); take(')'); take(';');
+      return [{k: 'emit', f: n, r, n: cnt, from, args: [c], line}];
+    }
     if (peek('(')) {
       if (!['move', 'line', 'plot', 'cubic', 'linePattern'].includes(n)) fail(line, 'R5', `a call to ${n}()`);
       take('('); const args = [];
@@ -207,21 +225,120 @@ function parseBody(src, line0, inputs, params, data = []) {
     p++; const e = expr(); take(';');
     return [{k: 'assign', n, o, e, line}];
   }
+  // region[.from(k)][.take(n)][.blocks()] after the region's name: the start
+  // record (v2.0 draft), the count, and (vector loops, D7) .blocks() last.
+  function chain(r, line, loop) {
+    let n = null, from = null, blocks = false;
+    if (peek('.') && peek('from', 1)) { p += 2; take('('); from = expr(); take(')'); }
+    if (peek('.') && peek('take', 1)) { p += 2; take('('); n = expr(); take(')'); }
+    if (loop && peek('.') && peek('blocks', 1)) { p += 2; take('('); take(')'); blocks = true; }
+    if (peek('.')) fail(line, 'R3', `${r}.${t[p + 1].v ?? t[p + 1].k} (only .from(k), .take(n)${loop ? ' and .blocks()' : ''}, in that order)`);
+    return {n, from, blocks};
+  }
+  // for (const [a, b] of region...blocks()) { ... }: VEACH over blocks of 8
+  // records, a and b the blocks of fields 0 and 1 (VLOAD). The body is
+  // straight-line vector code (rule R7): each statement one instruction or
+  // an accumulator call, each vector expression node one instruction.
+  function vectorLoop(line, r, vs, n, from) {
+    if (lookup('acc')) fail(line, 'R7', 'acc names the accumulator inside a vector loop; rename the other acc');
+    scopes.push(new Map());
+    vs.forEach(v => declare(v, 'vec', line));
+    take('{');
+    const body = [];
+    while (!peek('}')) {
+      if (peek('eof')) fail(t[p].line, 'R7', 'unclosed block');
+      body.push(...vstmt());
+    }
+    take('}');
+    scopes.pop();
+    return [{k: 'vloop', r, names: vs, n, from, body, line}];
+  }
+  const vec = n => lookup(n)?.kind === 'vec';
+  const literal = what => { const x = take('num', 'R7'); if (!/^\d+$/.test(x.v)) fail(x.line, 'R7', `${what} must be a whole number`); return +x.v; };
+  // A scalar operand inside a vector loop (splat, acc.set, acc.mack): an
+  // ordinary expression of names from outside the loop.
+  function scalar() { const e = expr(); return e; }
+  function vstmt() {
+    const line = t[p].line;
+    if (peek('const')) {
+      p++; const d = [];
+      do {
+        const n = take('id', 'R7').v; take('=', 'R7');
+        d.push({k: 'vdecl', n, e: vexpr(), line}); declare(n, 'vec', line);
+      } while (peek(',') && take(','));
+      take(';', 'R7');
+      return d;
+    }
+    const x = take('id', 'R7');
+    if (x.v === 'acc') {
+      take('.', 'R7'); const f = take('id', 'R7').v; take('(', 'R7');
+      let args;
+      if (f === 'zero') args = [];
+      else if (f === 'set') args = [scalar()];
+      else if (f === 'mac') { const a = vexpr(); take(',', 'R7'); args = [a, vexpr()]; }
+      else if (f === 'mack') { const a = vexpr(); take(',', 'R7'); args = [a, scalar()]; }
+      else fail(line, 'R7', `acc.${f}()`);
+      take(')', 'R7'); take(';', 'R7');
+      return [{k: 'acc', f, args, line}];
+    }
+    if (region(x.v)) {
+      take('.', 'R7'); if (take('id', 'R7').v !== 'setLane') fail(line, 'R7', `${x.v}.${t[p - 1].v} in a vector loop`);
+      take('(', 'R7'); const c = literal('setLane()\'s field'); take(',', 'R7'); const e = vexpr(); take(')', 'R7'); take(';', 'R7');
+      return [{k: 'vstore', r: x.v, c, e, line}];
+    }
+    fail(line, 'R7', `${x.v} as a statement in a vector loop`);
+  }
+  function vexpr() {
+    let a = vprim();
+    while (peek('+') || peek('-')) { const o = t[p++].k; a = {k: 'vbin', o: o === '+' ? 'add' : 'sub', a, b: vprim()}; }
+    if (peek('*') || peek('/')) fail(t[p].line, 'R7', `${t[p].k} on vectors (multiply with the accumulator: acc.mac, acc.mack)`);
+    return a;
+  }
+  function vprim() {
+    const x = t[p];
+    if (x.k === '(') { p++; const e = vexpr(); take(')', 'R7'); return e; }
+    if (x.k !== 'id') fail(x.line, 'R7', `${x.v ?? x.k} in a vector expression`);
+    p++;
+    if (x.v === 'acc') {
+      take('.', 'R7'); if (take('id', 'R7').v !== 'out') fail(x.line, 'R7', `acc.${t[p - 1].v} as a value (only acc.out(shift))`);
+      take('(', 'R7'); const s = literal('acc.out()\'s shift'); take(')', 'R7');
+      return {k: 'vout', s, line: x.line};
+    }
+    if (region(x.v)) {
+      take('.', 'R7'); if (take('id', 'R7').v !== 'lane') fail(x.line, 'R7', `${x.v}.${t[p - 1].v} in a vector expression`);
+      take('(', 'R7'); const c = literal('lane()\'s field'); take(')', 'R7');
+      return {k: 'vlane', r: x.v, c, line: x.line};
+    }
+    if (peek('(')) {
+      p++;
+      let e;
+      if (x.v === 'splat') e = {k: 'vsplat', args: [scalar()]};
+      else if (x.v === 'iota') e = {k: 'viota'};
+      else if (x.v === 'vmin' || x.v === 'vmax') { const a = vexpr(); take(',', 'R7'); e = {k: 'vbin', o: x.v.slice(1), a, b: vexpr()}; }
+      else fail(x.line, 'R7', `a call to ${x.v}() in a vector expression`);
+      take(')', 'R7');
+      return {...e, line: x.line};
+    }
+    if (!vec(x.v)) fail(x.line, 'R7', `${x.v} is ${lookup(x.v) ? 'a scalar (use splat())' : 'not declared here'}`);
+    return {k: 'vname', v: x.v, line: x.line};
+  }
   // for (const [a, b, c] of region) / of region.take(n): EACH + FETCH.
   function forOf(line) {
-    take('const'); take('['); const vs = [];
-    do vs.push(take('id', 'R1').v); while (peek(',') && take(','));
-    take(']'); take('of', 'R3');
+    take('const');
+    // for (const b of region.blocks()): a vector loop that loads no field.
+    const vs = [];
+    if (peek('[')) {
+      take('[');
+      do vs.push(take('id', 'R1').v); while (peek(',') && take(','));
+      take(']');
+    } else { take('id', 'R3'); if (!(peek('of') && peek('.', 2))) fail(line, 'R3', 'for (const [a, b] of region)'); }
+    take('of', 'R3');
     const r = take('id', 'R3').v;
     if (!region(r)) fail(line, 'R3', `${r} is not a @data region`);
-    let n = null, from = null;
-    // .from(k) (v2.0 draft: the start record), then .take(n).
-    if (peek('.') && peek('from', 1)) { p += 2; take('('); from = expr(); take(')'); }
-    if (peek('.')) {
-      p++; if (take('id', 'R3').v !== 'take') fail(line, 'R3', `${r}.${t[p - 1].v} (only .from(k) and .take(n))`);
-      take('('); n = expr(); take(')');
-    }
+    const {n, from, blocks} = chain(r, line, true);
     take(')', 'R3');
+    if (blocks) return vectorLoop(line, r, vs, n, from);
+    if (!vs.length) fail(line, 'R3', `for (const x of ${r}) (unpack the record: for (const [a, b] of ${r}))`);
     scopes.push(new Map());
     vs.forEach(v => declare(v, 'const', line));
     loops++; const body = block(); loops--;
@@ -230,7 +347,7 @@ function parseBody(src, line0, inputs, params, data = []) {
   }
   function forLoop(line) {
     p++; take('(', 'R3');
-    if (peek('const') && peek('[', 1)) return forOf(line);
+    if (peek('const') && (peek('[', 1) || peek('of', 2))) return forOf(line);
     if (!peek('let')) fail(line, 'R3', 'the loop variable must be declared with let');
     p++; const v = take('id', 'R3').v; take('=', 'R3');
     const zero = take('num', 'R3');

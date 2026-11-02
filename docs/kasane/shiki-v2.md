@@ -71,9 +71,15 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 1. DERBY: `pocket.derby` の全 draw を Shiki に（R2）、`@plan` 18 本と点を `@shiki` に。
    - 進み（2026-11-02）: `@plan` は `nil`（型付きの点）だけを残して `@shiki` に移した。`pocket.derby` の C の描画は handle の種類で engine を選ぶ（`pocket_proc_draw_numbers`）。誤差と `@q` は [apps/derby/README.md](../../apps/derby/README.md)「背景の式もすべて Shiki」。残りは点（`i16` の領域と `EMIT_LINES`）と、実機の確認。
 2. MEGADEMO。
+   - 済（2026-11-02）: 24 本を `@shiki`（`apps/kasane/megademo_prog.js`）に。`eg` の `s²·noise` が Q16 を超えたので位相を差分で持つ形にした。猫の船 `sh` は i16 の窓。誤差と host・実機の結果は [megademo-story.md](../apps/megademo-story.md)「Shiki へ」。
 3. BIG WAVE。
+   - 済（2026-11-02）: [apps/bigwave/README.md](../../apps/bigwave/README.md)。実機はデモ画面で約 20 秒（ターン 8.3〜9.7 ms）。
 4. 検査用のアプリと heapprobe の DERBY。
+   - 済（2026-11-02）: `proc_limits_probe.js`・`proc_multi_surface_probe.js`・`overlay_proc_multi_probe.js`・`proc_news_zoom.js` と、float の VM を測っていた実機の probe（`ksn_procedural_device_probe.c`・`ksn_proc_compiler_device_probe.c`・`ksn_proc_limits_device_probe.c`・`ksn_megademo_device_probe.c`）を消した。D2 の 2 つの面の probe は、overlay のセッションに Shiki の heap が無いので移せない（CMake のオプションを ON にすると configure が止まる）。`KASANE_PROC_DEVICE_PROBE` も同じ（grid・pixel の probe は残るが、呼ぶ入口が要る）。heapprobe の DERBY は、旧 DERBY の複製（`apps/heapprobe/derby_v0/`）をやめ、configure の時に今の DERBY から 1 本のスクリプトを作る形に作り直した（`tools/heapprobe_derby.py`、[derby-watch.md](../apps/derby-watch.md)「heapprobe の変種」）。`grid_fold_device_probe.js` は grid（残る）の検査なので残した。
 5. 旧 API の削除（§2.2）と、関係する host の検査・CI の整理。
+   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_proc.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_procedural.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
+   - 実機（e7b6d28、2026-11-02、入力なし）: DERBY はデモのレースを FINISH まで（読み込み後の空き 47,640 B、ゲスト 97,556 B、ターン 4.9〜16.8 ms）、MEGADEMO は tier 2 で 1 周余り（空き 37,356 B、旧 API があった 427b308 の 36,820 B から +536 B）、BIG WAVE はデモ画面で 40 秒（空き 74,108 B、dedda13 の 73,808 B から +300 B）。いずれも失敗なし。ファームは DIRAM 180,924 B・flash 1,601,184 B（CI の memlog、削除前の値はまだ同じ形で採っていない）。ログは [logs/v2-removal-device-20261102-e7b6d28.txt](logs/v2-removal-device-20261102-e7b6d28.txt)。
+   - CI: BIG WAVE を v2.0 より前の固定の版と並べて走らせる実験の 3 本（`validate-curl-section.yml`・`adopt-rock-distance.yml`・`bigwave-input-literals.yml`）は、旧版の側が動かないので外した（2026-11-02、利用者の了承。スクリプトは `tools/` に記録として残る）。
 
 各段で、host の全画素の検査（`run_derby.py` などの既存の照合）と実機の fps・メモリを、移す前と比べる。
 
@@ -197,7 +203,25 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | `drawIndex()` | `DRAW_INDEX` | 式の中で Q0。`const l = drawIndex();` の `l` は Q0 |
 | `for (const [x] of r.from(k))`・`r.from(k).take(n)` | `EACH` の開始レコード | `k` は Q0（小数を持ちうる式は誤り） |
 
-使わない `r.at()` の名前があっても `LOAD` は消さない（番号の検査が `INVALID` になりうるため）。検査: `test_shiki_data_compile.mjs` の `lane`・`from`（コンパイルした式と AST の評価が、状態・線分・領域の中身で一致）。ベクトルは案のまま: `for (const v of r.blocks())` の中で命令と 1 対 1 の演算と呼び出し（8 レーンにできない形はコンパイルの誤り）。
+使わない `r.at()` の名前があっても `LOAD` は消さない（番号の検査が `INVALID` になりうるため）。検査: `test_shiki_data_compile.mjs` の `lane`・`from`（コンパイルした式と AST の評価が、状態・線分・領域の中身で一致）。
+
+**ベクトルの分も実装した（2026-11-02、凍結前の差分レビューに出す）。** ベクトルのループの本体は直線のコードで、文 1 つ・ベクトルの式の節 1 つが命令 1 つになる（`R7`）。ベクトルの値はレーンの生の int16 で、Q の規則は付かない（Q を変えるのは `acc.out(s)` のシフトで、書き手が明示する）。
+
+| 書き方 | 命令 | 規則 |
+| --- | --- | --- |
+| `for (const [x, y] of r.blocks()) { ... }`・`r.from(k)`・`r.take(n)` を `.blocks()` の前に | `VEACH`（開始レコード・件数は `EACH` と同じ）＋名前ごとに `VLOAD`（欄 0, 1, ...） | `r` は `i16`（名前を取るとき）。`take(n)` の literal は 0〜32,767。名前を取らない `for (const b of r.blocks())` も可（`b` は使えない）。入れ子・本体の中のスカラーの文（描画・`if`・`let`・代入・別のループ）は誤り |
+| `r.lane(c)` | `VLOAD`（欄 `c`、ループのブロックのレーン） | `r` は `i16`、`c` は数の literal。ループの領域と別の領域でもよい（登録の検査: その領域のレコード数がループの領域以上） |
+| `r.setLane(c, v);` | `VSTORE` | 書く旗の無い領域は誤り。端数のブロックはマスクの外のレーンを書かない |
+| `splat(s)` | `VSPLAT` | `s` はスカラーの式を **Q0** で（名前なら Q0 の名前になる。小数は切り捨て）、int16 に飽和 |
+| `iota()` | `VIOTA` | レーンのレコード番号 |
+| `a + b`・`a - b`・`vmin(a, b)`・`vmax(a, b)` | `VADD`・`VSUB`（16 ビットの飽和）・`VMIN`・`VMAX` | `*`・`/`・単項の `-` はベクトルでは誤り（掛け算は蓄積器で） |
+| `acc.zero();`・`acc.set(s);` | `VZACC`・`VACCSET` | `s` はスカラー Q0。`acc` は描画の間ずっと 1 つで、ブロック・ループをまたいで残る |
+| `acc.mac(a, b);`・`acc.mack(a, s);` | `VMAC`・`VMACK` | 40 ビットの飽和。`s` はスカラー Q0（int16 に飽和） |
+| `acc.out(s)`（式） | `VOUT` | `s` は数の literal 0〜32。蓄積器にシフト後の値を書き戻す（式に現れた順に 1 回ずつ） |
+| `points(r[.from(k)][.take(n)], c);`・`lines(...)` | `EMIT_POINTS`・`EMIT_LINES` | ベクトルのループの外。`r` は `i16`、欄 2 個（線は 4 個）以上、座標の Q は領域の Q（15 以下）。`c` は定数か登録の引数。`k`・`n` は Q0、両方あると連続の 2 レジスタ |
+
+- 変換: スカラーの被演算子（`splat`・`acc.set`・`acc.mack`）は `VEACH` の前で計算する（本体にスカラーの命令を置けないため。再計算（remat）も `VEACH` の前に置く）。ベクトルの値は本体の中だけで生きる直線のコードなので、最後に読まれた後でレジスタを返す線形の割り当てで `v0`〜`v7` に載せる。読まれない純粋な値（`VLOAD`・`VSPLAT` など）は消し、`VOUT` は蓄積器を書くので残す。同時に 9 個以上生きると誤り。
+- 検査: `tools/kasane_ir/test_shiki_vector_compile.mjs`。6 本の式（affine・演算の全部・蓄積器の持ち越し・2 つの領域と `lines`・`EMIT` の開始と件数・スカラーのループの中のベクトルのループ）を、**C のエンジン**（`ksn_shiki.c` を `shiki_run.c` で、ASan・UBSan 付き）で描き、AST の評価（`shiki_fix.mjs`）と状態・線分・全領域の中身で比べる（host の参照 `shiki_ref.mjs` はベクトルの命令を持たないため）。各 200 件で全一致、誤りの 15 件は期待した文言で拒む。DERBY・BIG WAVE・MEGADEMO の `@shiki` 関数と既存の検査の式（74 本）は、変更の前と同じバイト列になる。PIE の経路（実機）では未確認（C モデルと PIE の一致は試作の検査 shiki-pie.md §8.2 による）。
 - ビット一致: C モデルと PIE の照合（実機）を §10.2 of spec に足す。自動の下ろし（`.H`）とベクトルの命令が同じ領域を読む式も、スカラー・C モデル・PIE の 3 つで一致することを要件にする（レビュー M5）。
 
 ## 7. 決めることの一覧
@@ -209,7 +233,7 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | D4 | 窓に `S` のプロパティを足すか | **決定: 足さない**（同） |
 | D5 | 並びを残す方法 | **決定: native のリスト**（同。順番の表を受ける・入力なし・失敗で止める。§5.1、凍結前にレビュー） |
 | D6 | PIE の広げ方 | **決定: ベクトルの命令を仕様に**（同） |
-| D7 | `@shiki` でのベクトルの命令・`LOAD`・`STORE`・`DRAW_INDEX` の書き方 | 凍結前に、試作と DERBY の背景の移行で決める |
+| D7 | `@shiki` でのベクトルの命令・`LOAD`・`STORE`・`DRAW_INDEX` の書き方 | **実装済み**（2026-11-02。スカラーは `r.at`・`r.set`・`drawIndex()`・`r.from(k)`、ベクトルは `r...blocks()`・`r.lane`・`r.setLane`・`splat`・`iota`・`acc.*`・`points`・`lines`。§6.2 の表。凍結前の差分レビューで確定） |
 
 （初稿の D1「版 1 のバイト列を拒むか」は、版を上げないことにしたので消した。§1）
 
@@ -235,3 +259,82 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | M5 | §8.4 の条件と、`.H` と `V*` の一致の検証 | §3.3、§6.2 |
 | M6 | 移行表の抜け（heapprobe、`derby_view.js`、`pocket_shape.c`、`gridFold`、CLAUDE.md の Node の記述） | §2.1・§2.2 |
 | L1〜L5 | `aux` の当てはめ、`S` の式、`vectorRegisters`、`vraw` の大きさ、§3 と §4 の関係 | §3.1・§4.2・§6.2・§4.3 |
+
+## 11. 差分レビュー（SLOW、2026-11-02、`885fb18..f585848`）と対応
+
+C の重大なバグは見つからず、host の検査はすべて通った（レビュー側でも走らせて確認）。止めていたのは、規範文が自分の要件（§10.1、§10.2、`limits`）を満たしていない箇所と、実機の未実施。凍結（[shiki-spec.md](shiki-spec.md) を v2.0 に書き換える）のときは、以下を本文に入れる。
+
+**規範に書く（凍結の条件）**
+
+- **§10.1 の例外:** 参照実装（`tools/kasane_ir/shiki_ref.mjs`）は op 0〜29 まで。op 30〜45（ベクトル・`EMIT_*`）の規範は C モデル（`ksn_shiki.c` の `vec_exec` のスカラー側）とし、独立の照合は「C モデルと PIE の実機照合（shiki-pie.md §8.2 の形）」と「`@shiki` の AST 評価（`shiki_fix.mjs`）と C の一致（`test_shiki_vector_compile.mjs`）」で行う。後者は変換器と同じ AST を読むので、バイト列の意味を独立に決める参照ではない。
+- **端数ブロックのレーン:** `VEACH` の最後のブロックの `live` 未満のレーンだけがレコードに当たる。マスクの外のレーンは、`VLOAD` が 0 を入れる。`VIOTA` は外でも `ブロックの先頭のレコード番号 + レーン`（飽和）。`VSPLAT`・`VADD`/`VSUB`/`VMIN`/`VMAX`・蓄積器の命令（`VZACC`/`VMAC`/`VMACK`/`VACCSET`/`VOUT`）は 8 レーン全部で動く。`VSTORE` だけが `live` のレーンに限る。蓄積器は draw の間残るので、端数ブロックで外のレーンに溜めた値は、後のループの満杯ブロックの `VOUT`・`VSTORE` に出る（決定的）。
+- **自動の下ろし（§8.4 of spec）は未実装:** エンジンの PIE は `VEACH` のベクトル命令だけ。§8.4 は「下ろしてよい」の許可で、実装したときに §10.2（スカラー・C モデル・PIE の一致）を満たす。§6.2 の「自動の下ろしは v1.5 のまま残す（両方ある）」と、末尾の「`.H` と `V*` の 3 つで一致」は、この意味に読み替える。
+- **`EMIT_POINTS`/`EMIT_LINES` の `imm`:** 0〜15 の Q として各座標を `floor((x + 2^(imm-1)) / 2^imm)` で画素にする（`imm` が 0 なら x のまま）。領域の Q と一致するかは検査しない。`@shiki` は領域の Q を置く。
+- **`limits.vectorRegisters: 8`** を足した（`pocket_shiki_api.c`、`dst < 8` を登録時に強制している値）。
+- §9.4 に `list`・`setList`・`drawList`・`releaseList` の行を入れ、`drawList` の誤りの `index` が「`order` の中の位置」であることと、`count` を省くと `R` であることを書く。§3.1 のステップの数え方（命令ごとに 1、`EMIT_*` は命令全体で 1）と、§4.1 の `EMIT` の旗は、§4.3 の命令表 1 本にまとめる。
+- §9.2 の注記: (a) USB の `'J'` 診断（manifest 無しで MEGADEMO を走らせる）は Shiki heap を取る例外で、そのとき使う大きさは直前に選ばれたアプリの manifest の `shiki_bytes`（既定 48 KiB）。(b) Shiki heap の無いセッションでも `register`・`draw` はシステム heap で通るが、`data`・`list` は Shiki heap にしか取らないので予算の誤りで失敗する（`kasane.shiki.available` が false のとき）。
+
+**直した（コード、2026-11-02）**
+
+- `ksn_shiki.c` の `EMIT_*` の座標の丸めを、負数の `>>`（実装定義）から `floor_shift` に揃えた（GCC の結果は同じ。`shiki_diff` 20,000 件・ベクトルの検査は通る）。
+- `register` の `options.data` を読む間に、getter が先に読んだ窓を `release()` できた。読み終えた後に、窓がまだ生きていて同じメモリかを確かめ、違えば `CLOSED`。
+- BIG WAVE と MEGADEMO で、`data()` で窓を作った後に `register()` が投げると窓が解放されなかった。失敗したら `release` してから投げ直す（DERBY は既にそうしている）。
+- `tools/kasane_contract/run.sh` に `test_shiki_data_compile.mjs`・`test_shiki_vector_compile.mjs`・`run_pocket_shiki_api_qjs.py` を足した（誰も走らせていなかった）。
+
+**実機（凍結の条件）:** `apps/shikitest/shiki_api_test.js`（`LOAD`/`STORE`/`DRAW_INDEX`/リスト）の実機の実行と、現在の番号（op 30〜45）での C モデルと PIE の照合を 1 回ずつ。**→ 済み（2b4dbc9、§11.1）。**
+
+### 11.1 実機の確認と、ベースラインからの変化（2026-11-02、2b4dbc9 / f63ca75）
+
+記録は [logs/v2-review-device-20261102-2b4dbc9.txt](logs/v2-review-device-20261102-2b4dbc9.txt)。数値はすべて実機の実測で、`KASANE_PAINT` の `turn_ms`（30 フレームの平均）。1 回ずつの走行で、DERBY はデモのレースの種が走行ごとに違う（カメラの場面で比べる）。命令キャッシュの配置でビルド間に 15% 程度は動く（CLAUDE.md）ので、それ未満の差は差と読まない。
+
+- **ベクトル命令を既定で PIE に（2b4dbc9）:** `shikiapi` は pass 76 / fail 0。`cyclebench` の C モデルと PIE の照合は 10 件すべて一致（tail・fields2・record3・sat40 の上下・writeback・accset・shift32・unaligned・affine128）。affine128 のベクトル版は C モデル 272.2 µs → PIE 189.1 µs（−31%。f505b0e の 248.8 → 169.4 µs と同じ比）。**出荷の 3 本はベクトル命令を使っていない**（`@shiki` にベクトルの構文が無い）ので、PIE を既定にしても 3 本の時間は変わらない。下の表の 2b4dbc9 と e7b6d28 の差は走行ごとの揺れ。
+- **MEGADEMO が起動しなくなっていた（直した、f63ca75）:** `act2` のコンパイルが `OOM first_req=21760`（ゲストは 160 KiB のうち 75 KB）で止まった。2b4dbc9・a87299f・同じ日の朝に動いた e7b6d28 を焼き直しても同じなので、コードではなくシステム heap の配置が変わった（再起動直後でも再現）。起動ログでは、最大の空きブロックは自動時刻同期で Wi-Fi が上がる前は 122,880 B、後は 69,632 B で、そこから Shiki heap 48 KiB をチャンクの読み込みより前に取る。`core()`（121 行の 1 関数）は解析中に pass-1 のバイトコードを 1 ブロック約 26 KB で持つ（host の `tools/vmtest/compile_peak.py`、今回最大ブロックを出すようにした）。他のチャンクはどれも 13 KB 以下。破片（`shards`）と炸裂前の部分（`ship`）を別の関数に分け、最大ブロック 26,152 → 12,140 B、コンパイルのピーク −1.6 KB。host の走行は HEAD とバイト単位で同じ（16 枚とシート）。**同じ形の失敗は他のアプリでも起きうる:** 1 関数のバイトコードが大きいと、空きの総量ではなく連続した 1 ブロックで落ちる。
+- **空き heap（読み込み後の `MEM free`）:** 浮動小数の VM の時代（4392695・bd1d829）は Shiki heap を取っていない。v2 の走行は 49,152 B を取ったうえでの値。
+
+**DERBY WATCH**（読み込み後: 空き / ゲスト）
+
+| 場面 | 4392695（浮動小数の VM） | 6841f73（全整数、v2 直前） | e7b6d28（旧 API 削除後） | 2b4dbc9（今回） |
+| --- | --- | --- | --- | --- |
+| 空き / ゲスト | 70,808 / 90,064 | 47,556 / 97,684 | 47,640 / 97,556 | 48,012 / 97,460 |
+| パドック | 5.37〜5.40 | 4.82〜4.91 | 4.95〜6.12 | 4.85〜4.95 |
+| FIELD | 11.1 | 8.89〜9.27 | 9.3 | 8.90〜9.11 |
+| WIDE 2 | 11.8〜20.9 | 9.60〜11.29 | 13.6〜16.8 | 9.52〜10.85 |
+| CLOSE | 10.3〜10.4 | 8.78〜9.01 | 9.0〜11.1 | 7.81〜11.04 |
+| VISION | 12.1〜13.4 | 10.07〜11.02 | 10.0〜11.1 | 10.59〜10.85 |
+| WIDE 3 | 13.4〜19.0 | 10.86〜11.28 | — | 10.64〜11.12 |
+| HEAD ON / FINISH | — | 7.67〜9.02 / 8.93 | 7.5〜9.7 / — | 7.54 / 7.51〜8.76 |
+
+浮動小数の VM から、最も重い場面（WIDE 2・WIDE 3）の最悪が 20.9 → 10.9 ms、19.0 → 11.1 ms。空きは 22.8 KB 減ったが、Shiki heap 49,152 B を含んでの差なので、それ以外の使用は約 26 KB 減った（差し引きの計算）。ゲストは +7.4 KB（整数化で増え、v2 で変わらない）。
+
+**MEGADEMO**（HEAVY、読み込み後: 空き / ゲスト）
+
+| 場面 | bd1d829（浮動小数の VM） | 427b308（Shiki 初回） | e7b6d28 | f63ca75（今回） |
+| --- | --- | --- | --- | --- |
+| 空き / ゲスト | 87,604 / 102,228 | 36,820 / 102,856 | 37,356 / 102,752 | 36,872 / 102,744 |
+| WAKE | — | 15.32〜15.36 | 12.1〜15.7 | 15.54〜15.69 |
+| NEWS | 最重 11.7 | 4.95〜10.54 | 3.8〜10.6 | 4.39〜10.77 |
+| TWIST | — | 7.63〜13.21 | 8.3〜13.8 | 7.64〜13.91 |
+| ZENITH | — | 6.13〜7.33 | 6.6〜8.5 | 6.15〜7.36 |
+| CORE | 最重 15.0（28.9 fps） | 8.15〜13.39 | 7.7〜13.6 | 7.82〜12.99 |
+| LOST | — | 3.80 | — | 3.65〜4.84 |
+
+CORE の最悪は 15.0 → 約 13 ms、NEWS は 11.7 → 約 10.8 ms。空きの減り 50.7 KB のうち 49,152 B が Shiki heap で、それ以外の増加は約 1.6 KB。2,597 フレーム（2.5 周）で DEGRADE・OOM・例外なし。
+
+**BIG WAVE**（attract、Shiki 以前の実機の記録は無い）
+
+| | dedda13（Shiki 初回） | e7b6d28 | f63ca75（今回） |
+| --- | --- | --- | --- |
+| 空き / ゲスト | 73,808 / 71,792 | 74,108 / 71,680 | 73,800 / 71,808 |
+| turn / render | 8.29〜9.67 / 4.38〜4.55 | 8.2〜10.8 / 4.4〜6.0 | 8.24〜9.91 / 4.36〜4.77 |
+
+60 秒で 1,791 フレーム（29.9 fps）。
+
+**まとめ:** レビュー対応と PIE の既定化の前後（e7b6d28 → 2b4dbc9/f63ca75）で、3 本の時間と空きは揺れの範囲で変わらない。v2 の効果は浮動小数の VM からの差（DERBY の最悪 −10 ms、MEGADEMO CORE の最悪 −2 ms）で、代わりに Shiki heap 48 KiB を常に取る。PIE の効果はベクトル命令を書いたプログラムにしか出ず、出荷の 3 本にはまだ無い（自動の下ろし §8.4 も未実装）。
+
+**後に回す（凍結を止めない）**
+
+- DERBY の投影誤差の門: float の VM の照合と一緒に消えた（`newton_screen < 0.1`）。`pocket.derby` の C の投影の誤差を自動で縛るものが今は無い（`tools/kasane_ir/q16_error.mjs` は `@plan` 時代の分析で、検査に繋がっていない）。native の draw の入力を double で計算し直して比べる門を DERBY の host 検査に戻す。
+- LINE_PATTERN の決定的な幾何の検査（重み 1:4 の 8 弦）と CUBIC の誤差の記録（§4.6 の 0.597 px）は、float の VM の試験と一緒に消えた。残るのは `shiki_diff` の乱択（C と参照の独立した実装の一致）と `test_shiki_vec.c`。
+- DERBY の host 検査の再生の比較は面 0 だけ（面 1 は数えるだけ）。
+- MEGADEMO の翻訳の誤差（旧い行との差 1.5e-4 px、固定小数 0.053 px）は、作業用の一回の採取（427b308 の前の旧テンプレートを読んだもの）で、検査としては残していない。BIG WAVE は `tools/games/bigwave_shiki/compare.mjs` が残っている。
+- MEGADEMO の `eg` の `s * rh` は、場面が約 4 分続くと 32,768 rad（Q16 の上限）を超える。今の場面の長さなら届かない（推定）。

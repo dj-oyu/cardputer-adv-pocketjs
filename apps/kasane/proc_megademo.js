@@ -9,10 +9,10 @@
 'use strict';
 pocket.app.load('act1');
 pocket.app.load('act2');
-if (pocket.kasane && pocket.kasane.procedural) pocket.app.load('set');
+if (pocket.kasane && pocket.kasane.shiki) pocket.app.load('set');
 pocket.app.load('brief');
 pocket.app.load('wake');
-if (pocket.kasane && pocket.kasane.procedural) {
+if (pocket.kasane && pocket.kasane.shiki) {
   pocket.app.load('view');
   pocket.app.load('loop');
 }

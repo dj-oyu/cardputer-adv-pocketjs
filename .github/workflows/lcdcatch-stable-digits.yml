@@ -119,7 +119,7 @@ jobs:
           assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in config
           assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in config
           cache=(b/'CMakeCache.txt').read_text().splitlines()
-          for key in ('POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+          for key in ('POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
               assert key+':BOOL=OFF' in cache,key
           names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
           images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}

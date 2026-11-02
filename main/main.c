@@ -61,14 +61,6 @@ static atomic_bool fpu_probe_requested;
 static atomic_bool proc_probe_requested;
 void ksn_proc_device_probe_run(void);
 #endif
-#ifdef KASANE_PROC_LIMITS_PROBE
-#include "ksn_proc_limits_device_probe.h"
-static atomic_bool limits_probe_requested;
-#endif
-#ifdef KASANE_MEGADEMO_DEVICE_PROBE
-static atomic_bool megademo_probe_requested;
-void ksn_megademo_device_probe_run(void);
-#endif
 #ifdef KASANE_P5_NOTICE_PROBE
 static atomic_int p5_notice_probe_requested;
 #define P5_NOTICE_OWNER (UINT32_MAX-1u)
@@ -195,22 +187,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #ifdef KASANE_PROC_DEVICE_PROBE
     if(c=='|') { atomic_store(&proc_probe_requested,true); return false; }
     if(c=='J') { atomic_store(&diagnostic,c); return false; }
-    if(c=='(') { atomic_store(&diagnostic,c); return false; }
-#endif
-#ifdef KASANE_MEGADEMO_DEVICE_PROBE
-    if(c=='`') { atomic_store(&megademo_probe_requested,true); return false; }
 #endif
 #ifdef KASANE_MEGADEMO_TRACE
     // Guest heap cap for the next app start (app_session.c MDT_LIMITS). Read
     // only at start, so pressing it while an app runs changes nothing live.
     if(c=='~') { extern void app_trace_next_heap_limit(void); app_trace_next_heap_limit(); return false; }
     if(c=='S') { atomic_store(&raw_capture,6); return false; }
-#endif
-#ifdef KASANE_PROC_LIMITS_PROBE
-    /* Ahead of P2's '{'/'}' navigation aliases; the two probes are not built
-     * together. '{' measures natively at HOME, '}' starts the JS lifecycle app. */
-    if(c=='{') { atomic_store(&limits_probe_requested,true); return false; }
-    if(c=='}') { atomic_store(&diagnostic,c); return false; }
 #endif
     memset(k,0,sizeof(*k));
     if(atomic_load(&text_screen)) {
@@ -1106,18 +1088,6 @@ static void ui_task(void *arg) {
         /* App teardown can time out while an SD read is in progress. Reap its
          * acknowledged lease even when HOME has no guest turns to pump. */
         pocket_video_sd_stream_reap();
-#ifdef KASANE_MEGADEMO_DEVICE_PROBE
-        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&megademo_probe_requested,false)){
-            ksn_megademo_device_probe_run();
-            ESP_LOGI("shell","HOME_READY");
-        }
-#endif
-#ifdef KASANE_PROC_LIMITS_PROBE
-        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&limits_probe_requested,false)){
-            ksn_proc_limits_device_probe_run();
-            ESP_LOGI("shell","HOME_READY");
-        }
-#endif
 #ifdef KASANE_PROC_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&proc_probe_requested,false)){
             ksn_proc_device_probe_run();

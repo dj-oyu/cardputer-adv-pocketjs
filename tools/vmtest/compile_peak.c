@@ -38,7 +38,7 @@ static stack_t_ stacks[MAX_STACKS];
 static int nstacks = 1;
 static size_t live[MAX_STACKS], live_n[MAX_STACKS];
 static size_t snap[MAX_STACKS], snap_n[MAX_STACKS];
-static size_t cur, peak, events;
+static size_t cur, peak, events, biggest;
 static int tracking;
 static FILE *series;
 
@@ -64,6 +64,7 @@ static void charge(hdr_t *h, int sign) {
     if (sign > 0) { cur += l; live[h->sid] += l; live_n[h->sid]++; }
     else { cur -= l; live[h->sid] -= l; live_n[h->sid]--; }
     if (!tracking) return;
+    if (sign > 0 && l > biggest) biggest = l;
     events++;
     if (series && (events % 16 == 0 || sign > 0))
         fprintf(series, "%zu\t%zu\t%u\n", events, cur, h->sid);
@@ -189,6 +190,10 @@ int main(int argc, char **argv) {
     fclose(f);
     printf("source %zu B: peak +%zu, kept +%zu (before %zu)\n", len, compile_peak - before,
            kept - before, before);
+    /* The largest single block asked for (TLSF length): it needs one free
+     * block of that size, whatever the total, which a fragmented heap may
+     * not have (docs/kasane/shiki-v2.md sec.11, MEGADEMO's act2). */
+    printf("largest block %zu B\n", biggest);
     if (series) fclose(series);
     JS_FreeValue(ctx, fn);
     JS_FreeContext(ctx);

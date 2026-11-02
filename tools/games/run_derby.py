@@ -1,13 +1,14 @@
 """DERBY WATCH on the host: build and run tools/games/test_derby_host.c.
 
 Builds the harness against the real QuickJS, the real pocket.kasane (view and
-procedural), pocket.input.keys (keymap + keystate) and the Kasane renderer,
+shiki), pocket.input.keys (keymap + keystate) and the Kasane renderer,
 then runs:
   1. the full scripted game at the default load tier (MID): paddock, gate,
      race with camera changes, photo, result, a replay that must finish
-     identically, the next race and the Back turn; every procedural draw
-     through the plan / debug-step / single-step VM oracle and every frame
-     compared pixel for pixel;
+     identically, the next race and the Back turn; every Shiki draw replayed
+     through the same engine and each committed frame compared pixel for
+     pixel with the replay (no draw reaches the panel unseen), every op of
+     the built-in Shiki table drawn;
      before the game, the demo (attract) mode: the idle clock, three whole
      demos, a key in each scene, Back inside a demo;
   2. each of the first three demo races again, played by hand from the same
@@ -23,8 +24,6 @@ then runs:
      150 m deep and f held at 200, so that a panning unit sees it (its face,
      feed and occlusion checked; the side units' faces are not, the screen
      being out of place for them).
-Every run with a panning unit compares each point its VM series emit (Newton
-reciprocals, float) with the exact projection (<0.1 px on the panel).
 The series run in C (pocket.derby, main/pocket/pocket_derby.c): three runs of the 64-bit build
 (MID, and LIGHT and HEAVY panning for every WIDE, the director alone) carry
 DERBY_SER_ORACLE, which runs the JS ser() of vm/main
@@ -34,10 +33,12 @@ random cameras and courses, and requires every draw input equal bit for bit;
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
-Plans: apps/derby/derby_prog.js holds them as @plan JS functions, which the
-firmware build lowers (tools/kasane_ir/lower_plans.mjs, main/CMakeLists.txt);
-the harness runs the same lowering's copy, .cache/derby_host/lowered/apps/derby
-(DERBY_APP_DIR). Node 16 or later on PATH (WSL: bash -lc).
+Programs: apps/derby/derby_prog.js holds them as @shiki JS functions, which
+the firmware build compiles into the built-in Shiki table
+(tools/kasane_ir/emit_shiki_rom.mjs, linked here as main/CMakeLists.txt links
+it) and removes from the chunks (lower_plans.mjs); the harness runs the same
+lowering's copy, .cache/derby_host/lowered/apps/derby (DERBY_APP_DIR). Node 16
+or later on PATH (WSL: bash -lc).
 Courses: each race's seed picks the straight or the oval (derby_watch.js OV);
 --course straight|oval runs every race on one (the lowered copy's OV[0] set
 to 0 or 1, host only). The oval's odds are checked like the straight's
@@ -92,18 +93,6 @@ def kasane_sources() -> list[str]:
             if not s.startswith("tools/test_pocket_kasane")]
 
 
-def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
-    """The firmware's built-in plan table for src (tools/kasane_ir/
-    emit_rom_plans.mjs, as main/CMakeLists.txt makes it): DERBY's @plan
-    functions when its decoder is marked rom, else an empty table."""
-    out = cache / "ksn_proc_rom_plans.c"
-    prog = src / "derby_prog.js"
-    rom = prog.exists() and re.search(r"@planDecoder\s+rom\b", prog.read_text(encoding="utf-8"))
-    subprocess.run(["node", str(ROOT / "tools/kasane_ir/emit_rom_plans.mjs"), str(out),
-                    *([f"derby={prog}"] if rom else [])], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
-    return out
-
-
 def shiki_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
     """The firmware's built-in Shiki table for src (tools/kasane_ir/
     emit_shiki_rom.mjs, as main/CMakeLists.txt makes it): DERBY's @shiki
@@ -115,9 +104,8 @@ def shiki_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
 
 
 def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
-          runner_affine=False, camera_cache=False, project_batch=False, harness=None) -> Path:
+          camera_cache=False, project_batch=False, harness=None) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
-    table = rom_table(cache, rom_src)
     stable = shiki_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
                    stdout=subprocess.DEVNULL)
@@ -143,18 +131,13 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     experiment_flags = []
-    experiment_sources = []
-    if runner_affine:
-        experiment_flags += ["-DPOCKET_DERBY_RUNNER_AFFINE"]
-        experiment_sources += ["main/pocket/derby_runner_affine.c"]
     if camera_cache:
         experiment_flags += ["-DPOCKET_DERBY_COURSE_CACHE"]
     if project_batch:
         experiment_flags += ["-DPOCKET_DERBY_PROJECT_BATCH"]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, "-DKSN_PROC_POINTS_PIE_MODEL",
-                    "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *experiment_sources, str(table), str(stable), *objects,
+                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -206,10 +189,9 @@ def sheet(folder: Path, out: Path, order: list[str], columns: int) -> None:
 
 
 def lower(src: Path, dst: Path) -> Path:
-    """src (an apps/derby) as the firmware embeds it: every file copied, the
-    @plan functions compiled and prog() the decoder (lower_plans.mjs), or,
-    with the decoder marked rom, both removed (the plans are the built-in
-    table build() links, rom_table())."""
+    """src (an apps/derby) as the firmware embeds it: every file copied and
+    the @shiki functions removed (lower_plans.mjs); they are the built-in
+    Shiki table build() links (shiki_table())."""
     shutil.rmtree(dst, ignore_errors=True)
     subprocess.run(["node", str(ROOT / "tools/kasane_ir/lower_plans.mjs"), str(src), str(dst)],
                    cwd=ROOT, check=True, stdout=subprocess.DEVNULL)

@@ -15,11 +15,15 @@ static const char *const CAPS_NONE[]   = {NULL};
 static const char *const CAPS_KASANE[] = {"display.kasane", "input.action", NULL};
 // Games read held keys (pocket.input.keys, docs/platform/keystate.md) and make sound.
 static const char *const CAPS_GAME[]   = {"display.kasane", "input.action", "input.keys", NULL};
-static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 // DERBY WATCH's panning series run in C (pocket.derby, docs/apps/derby-ser-native.md);
 // naming it is what gets the session that surface, as pet.companion does.
 static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", "kasane.shiki", NULL};
-static const char *const CAPS_SHAPES[]= {"kasane.shapes", NULL};
+// BIG WAVE draws with Shiki's built-in programs (apps/bigwave/big_wave_prog.js):
+// naming kasane.shiki is what gets its session the Shiki heap.
+static const char *const CAPS_BIGWAVE_OPT[]= {"audio.tone", "kasane.shiki", NULL};
+// MEGADEMO draws with Shiki's built-in programs (apps/kasane/megademo_prog.js)
+// and pocket.shapes.
+static const char *const CAPS_MEGADEMO_OPT[]= {"kasane.shapes", "kasane.shiki", NULL};
 // The Shiki test (apps/shikitest): the engine through its test-only surface.
 static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
 // The Shiki API self-check (apps/shikitest/shiki_api_test.js): a kasane.shiki
@@ -109,12 +113,11 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_SHIKI_COST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
-    // The procedural megademo is an ordinary foreground app. Its frame loop
-    // wraps after 48 frames; leaving it with Back and reopening starts a new
-    // session with fresh procedural plans.
+    // MEGADEMO is an ordinary foreground app. Leaving it with Back and
+    // reopening starts a new session with fresh Shiki programs.
     {.id="local.megademo", .title="MEGADEMO", .entry="apps/kasane/proc_megademo.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
-     .required=CAPS_KASANE, .optional=CAPS_SHAPES, .works=APP_WORKS_NONE},
+     .required=CAPS_KASANE, .optional=CAPS_MEGADEMO_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.gridlab", .title="GRID LAB", .entry="apps/kasane/grid_lab.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
@@ -136,7 +139,7 @@ static const app_manifest_t MANIFESTS[] = {
 
     {.id="local.bigwave", .title="BIG WAVE", .entry="apps/bigwave/big_wave.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
-     .required=CAPS_GAME, .optional=CAPS_GAME_OPT, .works=APP_WORKS_NONE},
+     .required=CAPS_GAME, .optional=CAPS_BIGWAVE_OPT, .works=APP_WORKS_NONE},
 
     // Both of its capabilities are REQUIRED rather than optional, and that is
     // not strictness for its own sake: without the card there is nothing to

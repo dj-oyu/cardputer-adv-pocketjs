@@ -1,0 +1,32 @@
+# BIG WAVE on Shiki (v2.0 step 3), device run, firmware dedda13, 2026-11-02.
+# Broker job v2s3-bigwave2-dedda13 (app_session local.bigwave, no inputs sent:
+# the attract mode). The session ended after ~20 s with app_authority_lost:
+# the device switched to local.player's overlay at 453144 (not this app).
+I (432975) shiki: SHIKI_HEAP open bytes=49152
+I (432980) app: APP_ID local.bigwave
+I (433138) js: BIGWAVE READY plans=6 tone=true
+I (433145) app: MEM free=73808 largest=31744 js=71792 frames=0
+I (433146) shell: RUN 20232 bytes -> ESP_OK
+I (433169) kasane: KASANE_FRAME_PRESENTED
+I (434124) kasane: KASANE_PAINT turn_ms=9.65 render_ms=4.66 send_ms=1.51 bytes=31744 bands=14 frames=30
+I (435135) kasane: KASANE_PAINT turn_ms=8.29 render_ms=4.51 send_ms=1.51 bytes=34976 bands=14 frames=30
+I (436139) kasane: KASANE_PAINT turn_ms=8.65 render_ms=4.47 send_ms=1.54 bytes=35232 bands=14 frames=30
+I (437144) kasane: KASANE_PAINT turn_ms=8.88 render_ms=4.45 send_ms=1.52 bytes=30976 bands=14 frames=30
+I (438143) kasane: KASANE_PAINT turn_ms=8.89 render_ms=4.44 send_ms=1.60 bytes=34976 bands=14 frames=30
+I (439150) kasane: KASANE_PAINT turn_ms=8.88 render_ms=4.48 send_ms=1.63 bytes=36000 bands=15 frames=30
+I (440158) kasane: KASANE_PAINT turn_ms=8.85 render_ms=4.46 send_ms=1.61 bytes=36000 bands=15 frames=30
+I (441160) kasane: KASANE_PAINT turn_ms=8.81 render_ms=4.47 send_ms=1.62 bytes=36000 bands=15 frames=30
+I (442166) kasane: KASANE_PAINT turn_ms=8.45 render_ms=4.47 send_ms=1.65 bytes=36000 bands=15 frames=30
+I (443171) kasane: KASANE_PAINT turn_ms=8.43 render_ms=4.50 send_ms=1.64 bytes=36000 bands=15 frames=30
+I (444174) kasane: KASANE_PAINT turn_ms=8.53 render_ms=4.48 send_ms=1.64 bytes=36000 bands=15 frames=30
+I (445182) kasane: KASANE_PAINT turn_ms=9.06 render_ms=4.51 send_ms=1.63 bytes=35488 bands=14 frames=30
+I (446189) kasane: KASANE_PAINT turn_ms=9.67 render_ms=4.38 send_ms=1.36 bytes=36000 bands=13 frames=30
+I (447196) kasane: KASANE_PAINT turn_ms=9.12 render_ms=4.49 send_ms=1.59 bytes=36000 bands=15 frames=30
+I (448203) kasane: KASANE_PAINT turn_ms=9.10 render_ms=4.52 send_ms=1.64 bytes=36000 bands=15 frames=30
+I (449209) kasane: KASANE_PAINT turn_ms=9.08 render_ms=4.52 send_ms=1.62 bytes=36000 bands=15 frames=30
+I (450213) kasane: KASANE_PAINT turn_ms=9.04 render_ms=4.55 send_ms=1.63 bytes=36000 bands=15 frames=30
+I (451215) kasane: KASANE_PAINT turn_ms=8.73 render_ms=4.50 send_ms=1.64 bytes=36000 bands=15 frames=30
+I (452214) kasane: KASANE_PAINT turn_ms=8.68 render_ms=4.49 send_ms=1.65 bytes=36000 bands=15 frames=30
+I (453143) app: MEM free=206648 largest=69632 js=0 frames=597
+I (453144) app: APP_STOPPED
+I (453148) app: APP_ID local.player

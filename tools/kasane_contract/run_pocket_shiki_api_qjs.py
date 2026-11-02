@@ -21,8 +21,7 @@ def main():
     rom.write_text('#include "ksn_shiki.h"\n'
                    'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
-             *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c','ksn_proc_analysis.c','ksn_proc_plan.c',
-               'ksn_proc_plan_points.c','ksn_proc_points.c','ksn_proc_points_pie.c','ksn_proc_points_dispatch.c',
+             *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c',
                'ksn_core.c','ksn_render.c','ksn_blend_pie.c','ksn_shiki.c')),
              ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/pocket/pocket_shiki_api.c',
              ROOT/'tools/kasane_contract/proc_native_weak.c',rom,

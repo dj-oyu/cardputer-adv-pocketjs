@@ -9,13 +9,23 @@ const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], ZOOM = 44;
 let tier = KN.length - 1, scene = 7, t = 0, tick = 0, live = [], PN = 0, LT = 0, next = null, loaded = 0;
 let img, mon, hud = [], hw = [], R = {}, built = -1, vis = false, said = -1, zb = -1, ZB = FULL;
 let zoom = ZOOM, target = ZOOM, spd = 2, pin = false, fixed = false, held = 0;
-const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
-// Plans are the firmware's built-in table (megademo_plans.js, kasane.<name>):
-// an entry's arguments, and the ship's points ('sh' takes only those).
+// WN: the ship's point windows by handle, released with the plan.
+const WN = {}, drop = h => {
+  for (let i = 0; i < h.length; ++i) { H.unregister(h[i]); if (WN[h[i]]) { H.release(WN[h[i]]); delete WN[h[i]]; } }
+};
+// Programs are the firmware's built-in Shiki table (megademo_prog.js,
+// kasane.<name>): an entry's arguments; 'sh' takes the ship's points, an
+// i16 window (x, y).
 const reg = (s, i) => {
   const e = plist(s, tier)[i];
   ++loaded;
-  return e[0] === 'sh' ? H.register('kasane.sh', [], points(e[1])) : H.register('kasane.' + e[0], e.slice(1));
+  if (e[0] !== 'sh') return H.register('kasane.' + e[0], e.slice(1));
+  const p = points(e[1]), n = p[0].length, o = n + 7 & ~7, w = H.data({type: 'i16', q: 0, records: n, record: 2});
+  for (let j = 0; j < n; ++j) { w[j] = p[0][j]; w[o + j] = p[1][j]; }
+  let h;
+  try { h = H.register('kasane.sh', [], {data: [w]}); } catch (x) { H.release(w); throw x; }
+  WN[h] = w;
+  return h;
 };
 const lerp4 = (a, b, e) => a.map((v, j) => rnd(v + (b[j] - v) * e)), clamp = v => v < 0 ? 0 : v > 1 ? 1 : v;
 function prefetch(s, max) {

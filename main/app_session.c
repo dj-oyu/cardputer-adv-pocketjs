@@ -40,10 +40,6 @@
 #include "pocket_grid.h"
 #include "ui/kasane/ksn_proc_grid_resize.h"
 #endif
-#ifdef KASANE_PROC_LIMITS_PROBE
-#include "ksn_proc_limits_device_probe.h"
-extern const char proc_limits_probe_start[] asm("_binary_proc_limits_probe_js_start");
-#endif
 #ifdef POCKET_KEYTEST
 extern const char keytest_start[] asm("_binary_keytest_js_start");
 #endif
@@ -155,7 +151,6 @@ extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
 extern const char kasane_demo_start[] asm("_binary_demo_js_start");
 extern const char proc_megademo_start[] asm("_binary_proc_megademo_js_start");
-extern const char proc_news_zoom_start[] asm("_binary_proc_news_zoom_js_start");
 #ifdef KASANE_P0_PROBE
 extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
 extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
@@ -325,18 +320,6 @@ static void mdt_emit(void) {
              (unsigned)mdt.btn,(unsigned)mdt.fed,
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
              (unsigned)gu,(unsigned)p.commit_n,(unsigned)p.view_n,(unsigned)p.split_n);
-#ifdef KASANE_BGCOST_TRACE
-    // Its own line after the MDT it belongs to, so the MDT parsers keep
-    // their format (docs/kasane/derby-background-cost.md).
-    {
-        pocket_proc_bgcost b;
-        pocket_proc_bgcost_take(&b);
-        ESP_LOGI("app","BGC %u st=%u seg=%u ras=%u hit=%u walk=%u cm=%u vw=%u",mdt_seq-1,
-                 (unsigned)b.steps,(unsigned)b.seg,(unsigned)b.ras,(unsigned)b.hits,(unsigned)b.walk,
-                 (unsigned)b.commit_us,(unsigned)b.view_us);
-        if(!(mdt_seq%30))pocket_proc_bgcost_plans_emit();
-    }
-#endif
     // cv: commit()s, replace()/patch()es, and presents that showed a commit
     // whose view update had not run yet (the new image under the old view).
     // mn is the lowest free heap inside this turn (and the print above), not
@@ -537,10 +520,6 @@ static bool kasane_presented;
  * The pending program must survive and be reread on the following present. */
 static bool d4_pixel_injected, d4_pixel_retry;
 static int d4_pixel_fail_after=-1;
-#endif
-#ifdef KASANE_PROC_JS_DIAGNOSTIC
-static bool news_prof_active;
-static int news_prof_previous;
 #endif
 #ifdef KASANE_P2_REPAIR_PROBE
 /* 1: forced full repaint, 2: the next natural PATCH. USB task -> UI task. */
@@ -1108,9 +1087,6 @@ void app_stop(void) {
 #endif
     app_report();
     if(p0_had_guest)ksn_p0_probe_report(overlay_session?"overlay":"app");
-#ifdef KASANE_PROC_JS_DIAGNOSTIC
-    if(news_prof_active){g_ksn_prof=news_prof_previous;news_prof_active=false;}
-#endif
 #ifdef KASANE_P4_DECODE_CYCLE_PROBE
     if(p0_had_guest)ksn_render_decode_cycle_report();
 #endif
@@ -1552,16 +1528,13 @@ esp_err_t app_start_test(char test) {
     // that was already failing.
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
-    // The built-in plans register('derby.crowd', args) names
-    // (docs/kasane/flash-plan.md): a const table in flash, the same for
-    // every session; pocket_proc_reset() keeps it.
-    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     // The Shiki heap (docs/kasane/shiki-spec.md sec.9.2): one contiguous
     // region for a session whose manifest names kasane.shiki, taken now,
     // before the guest, while the heap is clean (a 40 KB-class block is not
     // there once a guest runs: docs/kasane/shiki.md sec.4.5.1). An app that
     // cannot have it does not start.
-    if(!overlay_session&&app_registry_wants(app_registry_current(),"kasane.shiki")){
+    // The 'J' diagnostic runs MEGADEMO without a manifest: it draws with Shiki.
+    if(!overlay_session&&(app_registry_wants(app_registry_current(),"kasane.shiki")||test=='J')){
         const app_manifest_t *m=app_registry_current();
         if(!shiki_heap_begin(m?m->shiki_bytes:0)){
             ESP_LOGE("app","SHIKI_HEAP_UNAVAILABLE bytes=%u",(unsigned)(m&&m->shiki_bytes?m->shiki_bytes:SHIKI_HEAP_DEFAULT_BYTES));
@@ -1673,19 +1646,6 @@ source_ready:;
     // USB-only diagnostics exercise the same lifecycle and resource limits.
     switch(test) {
         case 'J': source=proc_megademo_start; break;
-#ifdef KASANE_PROC_LIMITS_PROBE
-        case '}': source=proc_limits_probe_start;
-                  TRY(pocketjs_guest_quickjs_install_once(guest,"limits",
-                                                          ksn_proc_limits_js_install,NULL));
-                  break;
-#endif
-        case '(': source=proc_news_zoom_start;
-#ifdef KASANE_PROC_JS_DIAGNOSTIC
-                  news_prof_previous=g_ksn_prof;
-                  news_prof_active=true;
-                  g_ksn_prof=1;
-#endif
-                  break;
         case '1': source="(() => {"; break;
         case '2': source="while(true){}"; break;
         case '3': source="globalThis.frame=()=>{while(true){}}"; break;
@@ -2641,7 +2601,7 @@ static esp_err_t present_frame(void) {
             if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
             if(painted==30) {
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
-                if(news_prof_active){
+                {
                     uint32_t band_n,band_cy,span_n,span_cy;
                     pocket_proc_image_prof_read(&band_n,&band_cy,&span_n,&span_cy);
                     ESP_LOGI("kasane","PROC_IMAGE band_n=%u band_cy=%u span_n=%u span_cy=%u frames=%u",
