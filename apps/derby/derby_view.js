@@ -1,6 +1,6 @@
 'use strict';
 const V = pocket.kasane, H = V.procedural, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
-const SKN = {run: 1, legs: 1, frl: 1, frb: 1}; // Shiki (README)
+// Every plan is Shiki but nil, the typed points' (README).
 // Integers only (docs/apps/derby-integer.md): lengths are Q16 m, px Q16
 // where a fraction counts, angles Q16 turns. pocket.derby does the divisions.
 const S = pocket.derby, QM = 65536;
@@ -38,7 +38,7 @@ function load() {
     else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
     else if (n === 'crowd') p = [n, [k[1], k[6], k[7]].concat(KN[3].slice(0, 5))];
     else p = [n, k.slice(0, n === 'stands' ? 4 : 0)];
-    live[n] = (onS[n] = SKN[p[0]]) ? SK.register('derby.' + p[0], p[1]) : H.register('derby.' + p[0], p[1], p[2]);
+    live[n] = (onS[n] = p[0] !== 'nil') ? SK.register('derby.' + p[0], p[1]) : H.register('derby.' + p[0], p[1], p[2]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
 }

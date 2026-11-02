@@ -409,6 +409,37 @@ static unsigned exact_run(const spec *s,const double *in,double *ex,double *ey,u
 /* One draw that the real pocket_proc.c accepted: from the app's H.draw (the
  * JS wrapper in PRELUDE, array or numeric inputs) or from pocket.derby.ser
  * (pocket_proc_draw_hook below). in64: the inputs as the JS doubles. */
+/* The checks a tagged draw feeds (procedural or Shiki): 1 the screen's face,
+ * 2 HEAD ON's still, 3 a panning unit's bezel. fp: the draw's segments. */
+static void tagged(unsigned tag,const double *in64,const ksn_proc_frame *fp){
+    if(tag==2&&!cur_surface)head_frames++;
+    if(tag==3){
+        /* A panning unit's view of the screen: its bezel (hl, the face's two
+         * edges joined) closes the face; the rect inside it is the app's vr
+         * rule, recomputed here from the edges [x, 1/Z'] of the draw, held
+         * as the vis inputs are (vr less one on the left and top). */
+        REQ(!cur_surface&&!vis_drawn);
+        vis_drawn=1;vis_seg_end=cand_plan.count;pan_face_frames++;
+        const double xl=in64[0],rl=in64[1],xr=in64[2],rr=in64[3];
+        vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(28-10*fmin(rl,rr))-1;
+        vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=28;
+    }
+    if(tag==1){
+        REQ(!cur_surface&&!vis_drawn&&fp->count>=4);
+        vis_drawn=1;vis_seg_end=cand_plan.count;
+        for(unsigned i=0;i<4;i++)vis_in[i]=(int)in64[i];
+        /* The face is filled row by row, exactly its interior, then the first
+         * bezel ring runs one pixel outside it. */
+        const ksn_proc_segment *g=fp->segments;
+        const int a=vis_in[0],b=vis_in[1],c2=vis_in[2],d=vis_in[3],rows=d-b-1;
+        REQ(rows>0&&(unsigned)rows+4<=fp->count);
+        for(int r=0;r<rows;r++)
+            if(!(g[r].x0==a+1&&g[r].x1==c2-1&&g[r].y0==b+1+r&&g[r].y1==b+1+r))bezel_bad++;
+        g+=rows;
+        if(!(g[0].x0==a&&g[0].y0==b&&g[0].x1==c2&&g[0].y1==b&&g[1].x1==c2&&g[1].y1==d&&
+             g[2].x1==a&&g[2].y1==d&&g[3].x1==a&&g[3].y1==b))bezel_bad++;
+    }
+}
 static void cap_draw(int handle,const double *in64,unsigned ni,unsigned tag,double f){
     spec *s=find(handle);REQ(s);
     static float vx[4096],vy[4096];
@@ -460,33 +491,7 @@ static void cap_draw(int handle,const double *in64,unsigned ni,unsigned tag,doub
     frame_steps+=vr.steps;frame_draws++;
     if(s->program.count>frame_instr_max)frame_instr_max=s->program.count;
     append(&cand_plan,&f_plan);append(&cand_vm,&f_vm);
-    if(tag==2&&!cur_surface)head_frames++;
-    if(tag==3){
-        /* A panning unit's view of the screen: its bezel (hl, the face's two
-         * edges joined) closes the face; the rect inside it is the app's vr
-         * rule, recomputed here from the edges [x, 1/Z'] of the draw, held
-         * as the vis inputs are (vr less one on the left and top). */
-        REQ(!cur_surface&&!vis_drawn);
-        vis_drawn=1;vis_seg_end=cand_plan.count;pan_face_frames++;
-        const double xl=in64[0],rl=in64[1],xr=in64[2],rr=in64[3];
-        vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(28-10*fmin(rl,rr))-1;
-        vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=28;
-    }
-    if(tag==1){
-        REQ(!cur_surface&&!vis_drawn&&f_plan.count>=4);
-        vis_drawn=1;vis_seg_end=cand_plan.count;
-        for(unsigned i=0;i<4;i++)vis_in[i]=(int)in64[i];
-        /* The face is filled row by row, exactly its interior, then the first
-         * bezel ring runs one pixel outside it. */
-        const ksn_proc_segment *g=f_plan.segments;
-        const int a=vis_in[0],b=vis_in[1],c2=vis_in[2],d=vis_in[3],rows=d-b-1;
-        REQ(rows>0&&(unsigned)rows+4<=f_plan.count);
-        for(int r=0;r<rows;r++)
-            if(!(g[r].x0==a+1&&g[r].x1==c2-1&&g[r].y0==b+1+r&&g[r].y1==b+1+r))bezel_bad++;
-        g+=rows;
-        if(!(g[0].x0==a&&g[0].y0==b&&g[0].x1==c2&&g[0].y1==b&&g[1].x1==c2&&g[1].y1==d&&
-             g[2].x1==a&&g[2].y1==d&&g[3].x1==a&&g[3].y1==b))bezel_bad++;
-    }
+    tagged(tag,in64,&f_plan);
     if(s->has_points){
         const unsigned n=s->points;
         ksn_proc_points_affine_scalar((KsnProcPointDst){s->sx,s->sy},(KsnProcPointSrc){s->x,s->y},n,&s->coeff);
@@ -539,7 +544,7 @@ static double ser_buf[1<<16];
 static unsigned ser_n,ser_bad;
 static bool ser_overflow;
 static unsigned long ser_calls,ser_fuzz_calls,ser_draws,ser_fuzz_draws;
-static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n);
+static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n,unsigned tag);
 void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
     if(ser_oracle){
         if(ser_n+9<=sizeof ser_buf/sizeof ser_buf[0]){
@@ -548,9 +553,6 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
         }else ser_overflow=true;
     }
     if(pocket_proc_hook_dry)return;
-    /* A Shiki handle drawn from C (pocket.derby): the Shiki replay. */
-    sspec *ss=sfind((int)handle);
-    if(ss){sdraw_run(ss,in,NULL,n);return;}
     JSValue g=JS_GetGlobalObject(ctx),fn=JS_GetPropertyStr(ctx,g,"__nt"),h=JS_NewInt32(ctx,(int32_t)handle);
     JSValue r=JS_Call(ctx,fn,g,1,&h);
     REQ(!JS_IsException(r));
@@ -560,6 +562,11 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
     if(f>=0)tag=4,ff=f;
     else if(f==-2)tag=1;
     else if(f<=-3){ff=-f-3;tag=n>7&&in[7]==10565?3u:0u;}
+    /* A Shiki handle drawn from C (pocket.derby): the Shiki replay, with the
+     * same tags but the Newton check (procedural only; Shiki's projection
+     * error is tools/kasane_ir/q16_error.mjs's). */
+    sspec *ss=sfind((int)handle);
+    if(ss){sdraw_run(ss,in,NULL,n,tag==4?0:tag);return;}
     cap_draw((int)handle,in,n,tag,ff);
 }
 static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -670,16 +677,21 @@ static JSValue js_cap_sdraw(JSContext *c,JSValueConst self,int argc,JSValueConst
     double in[KSN_SHIKI_INPUTS];
     int32_t fx[KSN_SHIKI_INPUTS];
     for(unsigned i=0;i<n;i++){in[i]=at(argv[1],i);fx[i]=(int32_t)in[i];}
-    sdraw_run(s,in,fixed?fx:NULL,n);
+    int32_t tag=0;
+    if(argc>3)JS_ToInt32(c,&tag,argv[3]);
+    sdraw_run(s,in,fixed?fx:NULL,n,(unsigned)tag);
     return JS_UNDEFINED;
 }
-static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n){
+static uint64_t shiki_ops_drawn;
+static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n,unsigned tag){
     static ksn_shiki_vm vm;
     static ksn_proc_frame f;
     REQ((fx?ksn_shiki_draw_fixed(s->plan,fx,n,&vm,f.segments):ksn_shiki_draw(s->plan,in,n,&vm,f.segments))==KSN_SHIKI_DONE);
     f.count=vm.count;f.raster_steps=vm.raster;f.ext=vm.ext;
+    for(unsigned k=0;k<s->plan->count;k++)shiki_ops_drawn|=1ull<<s->plan->code[k].op;
     append(&cand_plan,&f);append(&cand_vm,&f);
     frame_draws++;frame_steps+=vm.steps;shiki_draws++;
+    if(tag)tagged(tag,in,&f);
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;
@@ -1144,7 +1156,8 @@ static const char PRELUDE[]=
     "S.beginFrame=P.beginFrame;S.commit=P.commit;"
     "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
     /* draw(handle, ...numbers) or draw(handle, array): one oracle draw. */
-    "const SD=S.draw;S.draw=function(h,i){__ftag(0,'sdraw',arguments);SD.apply(S,arguments);let a=Array.isArray(i)?i:[].slice.call(arguments,1);while(a.length&&a[a.length-1]===undefined)a=a.slice(0,-1);__sdraw(h,a,false)};"
+    "const SD=S.draw;S.draw=function(h,i){__ftag(0,'sdraw',arguments);SD.apply(S,arguments);let a=Array.isArray(i)?i:[].slice.call(arguments,1);while(a.length&&a[a.length-1]===undefined)a=a.slice(0,-1);"
+    "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&a[7]===10565?3:0:0;__sdraw(h,a,false,t)};"
     "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)),I instanceof Int32Array)};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
@@ -1215,7 +1228,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,3},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,3},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,3},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,4},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1467,7 +1480,17 @@ int main(int argc,char **argv){
     /* PLOT and PLOT_COLOR_REG were used only by the runner and fr plans, which
      * are now Shiki programs (derby.run/legs/frl/frb); their draws count instead. */
     unsigned ops_need=0xffffu&~(1u<<KSN_PROC_PLOT)&~(1u<<KSN_PROC_PLOT_COLOR_REG);
-    bool pass=!exceptions&&!bad_present&&!framefails&&(ops_used&ops_need)==ops_need&&shiki_draws>0&&frame_reg_max<=1&&go_seen>=1&&
+    /* v2.0 step 1: DERBY's plans are Shiki but nil (typed points). Every op
+     * of the built-in Shiki table is drawn at least once; the procedural op
+     * coverage is asked only while a procedural plan other than nil runs. */
+    uint64_t shiki_ops_rom=0;
+    {unsigned count=0;const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&count);
+     for(unsigned k=0;k<count;k++){
+         const size_t body=rom[k].len-12u*rom[k].code[6];   /* the instructions end the bytes (sec.3) */
+         for(unsigned i=0;i<rom[k].code[6];i++)shiki_ops_rom|=1ull<<rom[k].code[body+12*i];}}
+    printf("shiki ops: built-in %llx, drawn %llx\n",(unsigned long long)shiki_ops_rom,(unsigned long long)shiki_ops_drawn);
+    if(!(ops_used&~(1u<<KSN_PROC_SET)))ops_need=ops_used;
+    bool pass=!exceptions&&!bad_present&&!framefails&&(ops_used&ops_need)==ops_need&&(shiki_ops_drawn&shiki_ops_rom)==shiki_ops_rom&&shiki_draws>0&&frame_reg_max<=1&&go_seen>=1&&
               !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&
               (getenv("DERBY_PANFACE")?pan_face_frames>0:overlay_frames>0)&&refs_max<=32&&cmds_max<=80&&newton_screen<0.1;
     /* No cycles: the device would keep them until the heap is nearly full

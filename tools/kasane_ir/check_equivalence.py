@@ -62,6 +62,8 @@ def instrument(root: Path) -> None:
     # the arguments p[1]. Before those, prog() made the rows and is patched
     # below to record its arguments.
     rom = "H.register('derby.' + p[0], p[1], p[2]);\n"
+    if rom not in view:   # v2.0 step 1: SKN names register through kasane.shiki
+        rom = "? SK.register('derby.' + p[0], p[1]) : H.register('derby.' + p[0], p[1], p[2]);\n"
     if rom in view:
         view = view.replace(rom, rom + "    __log('REG ' + n + ' ' + JSON.stringify(p[1] || []));\n")
     else:
@@ -76,10 +78,14 @@ def instrument(root: Path) -> None:
                                     "H.draw(live[n], a); } };")
     else:
         anchor = "const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) H.draw(live[n], a, b, c, d, e, f, g, h); };"
+        api = "H"
+        if anchor not in view:   # v2.0 step 1: the API that registered the plan
+            anchor = "const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) (onS[n] ? SK : H).draw(live[n], a, b, c, d, e, f, g, h); };"
+            api = "(onS[n] ? SK : H)"
         assert anchor in view, "derby_view.js: draw line moved"
         view = view.replace(anchor, "const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) { "
                             "__log('DRAW ' + n + ' ' + [a,b,c,d,e,f,g,h].map(v => v === undefined ? 0 : v).join(',')); "
-                            "H.draw(live[n], a, b, c, d, e, f, g, h); } };")
+                            f"{api}.draw(live[n], a, b, c, d, e, f, g, h); }} }};")
     (d / "derby_view.js").write_text(view, encoding="utf-8")
     # prog() as the app runs it (the decoder, or the text assembler of an
     # older DIR) records its arguments for the REG line.
