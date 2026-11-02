@@ -220,30 +220,7 @@ function core(k, t) {
   // (face i at point 3 (i % 2 * 10 + i / 2)); twisted by b, one way or
   // the other, which is one turn with the yaw (the two sets' pr()). A
   // face's depth sum (ts, light or shade) is its centre's.
-  const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee), Cp = M.cos(A + b), Sp = M.sin(A + b), Cm = M.cos(A - b),
-    Sm = M.sin(A - b);
-  let c = 0, tm = 0;
-  for (let i = 0, o = 0; i < 20; ++i, o += 13) {
-    const k = 1 + op * (.8 + .3 * (i % 4)) / FC[o + 3], cx = FC[o] * k, cy = FC[o + 1] * k, H = FC[o + 2] * k;
-    if (cy * Psp + (H * (i & 1 ? Cp : Cm) - cx * (i & 1 ? Sp : Sm)) * Pcp > 0) tm |= 1 << i;
-    for (let j = 0, p = o + 4, w = 9 * (i % 2 * 10 + (i >> 1)); j < 3; ++j, p += 3, w += 3) {
-      WM[w] = cx + FC[p] * h; WM[w + 1] = cy + FC[p + 1] * h; WM[w + 2] = H + FC[p + 2] * h;
-    }
-  }
-  pr(Cm, Sm, sc * Dd, 0, 30); pr(Cp, Sp, sc * Dd, 30, 30);
-  for (let i = 0; i < 20; ++i) {
-    const w = 6 * (i % 2 * 10 + (i >> 1)), x0 = WP[w], y0 = WP[w + 1], x1 = WP[w + 2], y1 = WP[w + 3], x2 = WP[w + 4],
-      y2 = WP[w + 5];
-    // Shards off the screen (or behind the lens: NaN) are not drawn, nor,
-    // in the burst, past 4000 steps: lines cost their length unclipped.
-    if (!(x0 > -80 && x0 < 320 && y0 > -73 && y0 < 207 && x1 > -80 && x1 < 320 && y1 > -73 && y1 < 207 &&
-      x2 > -80 && x2 < 320 && y2 > -73 && y2 < 207) || e > 0 && (c += M.max(M.abs(x0 - x1), M.abs(y0 - y1)) +
-      M.max(M.abs(x1 - x2), M.abs(y1 - y2)) + M.max(M.abs(x2 - x0), M.abs(y2 - y0))) > 4000) continue;
-    // In the burst's glare only light and shade are left: shards grey,
-    // light facing the eye, dark turned away (the ring is the one colour).
-    const ts = tm >> i & 1;
-    E(0, x0, y0, x1, y1, x2, y2, gy ? ts ? 0x4208 : 0xad55 : (ts ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
-  }
+  shards(op, ee, A, b, sc, e, gy, X);
   // The core (cc): cube and octahedron (LETHE's magenta), pulsing; a quad
   // with a corner behind the lens (NaN) is not drawn.
   const cc = sc * smooth(ramp(g, 58, 72)) * (1 + .15 * M.sin(g * .5)) * (1 + .5 * cr) * (1 - m);
@@ -300,7 +277,39 @@ function core(k, t) {
   const G = 1 + .8 * d * (1 - m) + 1.4 * ee, L = rnd(k.n * (t < 100 ? cr ** 1.5 : t < 118 ? 0 : 1 - e));
   E(5, 190 * G * Rc, 190 * G * Rs, -70 * G * Rs, 70 * G * Rc, g * .05 + 2 * ee, 120, 67);
   if (L) E(6, t * 1.7, L, 10 + 40 * cr);
-  if (e > 0) return;
+  if (e <= 0) ship(t, T, sc, cc);
+}
+// The shards (FC faces, pushed out and twisted, into WM, WP), apart from
+// core() for the same reason.
+function shards(op, ee, A, b, sc, e, gy, X) {
+  const h = (1 - .35 * M.min(op, 1.6)) * (1 - .6 * ee), Cp = M.cos(A + b), Sp = M.sin(A + b), Cm = M.cos(A - b),
+    Sm = M.sin(A - b);
+  let c = 0, tm = 0;
+  for (let i = 0, o = 0; i < 20; ++i, o += 13) {
+    const k = 1 + op * (.8 + .3 * (i % 4)) / FC[o + 3], cx = FC[o] * k, cy = FC[o + 1] * k, H = FC[o + 2] * k;
+    if (cy * Psp + (H * (i & 1 ? Cp : Cm) - cx * (i & 1 ? Sp : Sm)) * Pcp > 0) tm |= 1 << i;
+    for (let j = 0, p = o + 4, w = 9 * (i % 2 * 10 + (i >> 1)); j < 3; ++j, p += 3, w += 3) {
+      WM[w] = cx + FC[p] * h; WM[w + 1] = cy + FC[p + 1] * h; WM[w + 2] = H + FC[p + 2] * h;
+    }
+  }
+  pr(Cm, Sm, sc * Dd, 0, 30); pr(Cp, Sp, sc * Dd, 30, 30);
+  for (let i = 0; i < 20; ++i) {
+    const w = 6 * (i % 2 * 10 + (i >> 1)), x0 = WP[w], y0 = WP[w + 1], x1 = WP[w + 2], y1 = WP[w + 3], x2 = WP[w + 4],
+      y2 = WP[w + 5];
+    // Shards off the screen (or behind the lens: NaN) are not drawn, nor,
+    // in the burst, past 4000 steps: lines cost their length unclipped.
+    if (!(x0 > -80 && x0 < 320 && y0 > -73 && y0 < 207 && x1 > -80 && x1 < 320 && y1 > -73 && y1 < 207 &&
+      x2 > -80 && x2 < 320 && y2 > -73 && y2 < 207) || e > 0 && (c += M.max(M.abs(x0 - x1), M.abs(y0 - y1)) +
+      M.max(M.abs(x1 - x2), M.abs(y1 - y2)) + M.max(M.abs(x2 - x0), M.abs(y2 - y0))) > 4000) continue;
+    // In the burst's glare only light and shade are left: shards grey,
+    // light facing the eye, dark turned away (the ring is the one colour).
+    const ts = tm >> i & 1;
+    E(0, x0, y0, x1, y1, x2, y2, gy ? ts ? 0x4208 : 0xad55 : (ts ? 0x167f : i % 3 ? 0xfa3f : WH) ^ X);
+  }
+}
+// The part before the burst, apart: one function's bytecode is one block of
+// the heap while it compiles (docs/kasane/shiki-v2.md sec.11).
+function ship(t, T, sc, cc) {
   // LETHE's reticle: on the shell, onto the core as the lasers open it
   // (58..72); the tag follows (TGX) until the charge.
   const R = sc * 1.05 + (cc * .75 - sc * 1.05) * smooth(ramp(t, 58, 72));
