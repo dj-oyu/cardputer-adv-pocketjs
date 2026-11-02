@@ -97,6 +97,11 @@ typedef struct {
 typedef struct {
     uint8_t count,inputs;
     uint8_t input_q[KSN_SHIKI_INPUTS];
+    /* The JIT's code for the plan's VEACH sections (device only,
+     * ksn_shiki_jit.c; docs/kasane/shiki-jit.md), or NULL. A plan that may
+     * hold code is given back with ksn_shiki_plan_dispose() before its memory
+     * is freed. */
+    void *jit;
     ksn_shiki_bound region[KSN_SHIKI_REGIONS];
     ksn_shiki_inst code[];
 } ksn_shiki_plan;
@@ -112,6 +117,10 @@ const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count);
  * or 0 when the header is not a Shiki header (registration then fails
  * anyway): what to allocate before ksn_shiki_register(). */
 size_t ksn_shiki_plan_bytes_for(const uint8_t *code,size_t len);
+/* Frees what registration attached to the plan beyond its own bytes (the
+ * JIT's code); the plan's memory stays the caller's. Safe on a plan whose
+ * registration failed, and a no-op on the host. */
+void ksn_shiki_plan_dispose(ksn_shiki_plan *plan);
 
 typedef enum { KSN_SHIKI_RUNNING, KSN_SHIKI_DONE, KSN_SHIKI_INVALID,
                KSN_SHIKI_LIMIT, KSN_SHIKI_BADINPUT } ksn_shiki_status;

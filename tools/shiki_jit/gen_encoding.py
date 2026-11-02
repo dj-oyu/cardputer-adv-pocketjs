@@ -46,6 +46,7 @@ FORMS = [
     ('ENTRY32', 'entry a1, 32', []),
     ('RETWN', 'retw.n', []),
     ('NOPN', 'nop.n', []),
+    ('NOP', 'nop', []),
 ]
 BASE = {'q': 0, 'a': 2, 'i': 0}   # a2 as the base AR: a0/a1 are special to some forms
 

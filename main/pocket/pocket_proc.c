@@ -453,6 +453,7 @@ bool pocket_proc_shiki_detach(uint32_t handle){
      * copies the segments out and keeps nothing of the plan. */
     proc_slot *slot=find_slot(handle);
     if(!slot)return false;
+    ksn_shiki_plan_dispose(slot->plan);
     shiki_or_sys_free(slot->plan);
     *slot=(proc_slot){0};
     return true;
@@ -530,6 +531,7 @@ esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
 }
 void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_HANDLES;i++){
+        if(slots[i].plan)ksn_shiki_plan_dispose(slots[i].plan);
         shiki_or_sys_free(slots[i].plan);slots[i]=(proc_slot){0};
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
