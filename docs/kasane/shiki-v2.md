@@ -69,6 +69,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 0. **フレームの関数を Shiki に載せ替える**（レビュー R1）: `pocket.kasane.shiki` に `beginFrame`・`commit`・`resource`・`createSurface`・`grid` を直接載せ、全アプリの `H.beginFrame` などを `SK.` に書き換える（`procedural` の名前はまだ残す）。
 1. DERBY: `pocket.derby` の全 draw を Shiki に（R2）、`@plan` 18 本と点を `@shiki` に。
+   - 進み（2026-11-02）: `@plan` は `nil`（型付きの点）だけを残して `@shiki` に移した。`pocket.derby` の C の描画は handle の種類で engine を選ぶ（`pocket_proc_draw_numbers`）。誤差と `@q` は [apps/derby/README.md](../../apps/derby/README.md)「背景の式もすべて Shiki」。残りは点（`i16` の領域と `EMIT_LINES`）と、実機の確認。
 2. MEGADEMO。
 3. BIG WAVE。
 4. 検査用のアプリと heapprobe の DERBY。

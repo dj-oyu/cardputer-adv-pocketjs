@@ -224,6 +224,13 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 
 **実機の結果（1回ずつ、レースは別、`docs/kasane/logs/derby-shiki-20261101-3830107.txt`）:** JS のターンは race 開始・FIELD・CLOSE で約 0.2〜0.3 ms（2〜3%）減り、WIDE 2 と VISION はノイズの範囲で変わらない。走者は WIDE の重さの主因ではなかった。代わりに、読み込み後のネイティブの空きが 70,808 → 51,004 B（Shiki の heap 48 KiB を開くため）、ゲストが 90,064 → 94,424 B（+4.4 KB）に減った。最初の焼き込みでは組み込み表がリンクされず（`libmain.a` の weak 既定が勝った）、`register('derby.run')` が全て失敗した。host はオブジェクトを直にリンクするので通っていた。
 
+### 背景の式もすべて Shiki（2026-11-02、Shiki v2.0 の手順 1）
+
+- `nil`（大写しの馬と HEAD ON の型付きの点）以外の 21 本はすべて `@shiki`。`derby_view.js` は `nil` 以外を `kasane.shiki` で登録し、描くときも登録した側の API を使う（`onS`。`t0`・`t1` は同じ `pt`）。`pocket.derby` の C の描画（`part`・`ser` など）は、handle が Shiki ならその engine で描く（`pocket_proc_draw_numbers`）。
+- Q 形式の宣言（`@q`）: `prail`・`pt` は奥行きを Q24（docs/kasane/shiki.md §5.6.1）、`turf` は `phase=0`、`dust`・`bokeh` は `t=0, h0=0`（どちらも整数。Q16 のままだと `h0` が飽和して 96 px ずれた）。`bokeh` は 1 回だけ回る内側のループを書き下した（64 命令に収めるため。線分は同じ）。
+- 誤差（host、同じ関数の double と比べた最大。実ゲーム／ランダム）: `prail` 0.009／0.047 px、`pt` 0.008／0.016、`hl` 0.0002／0.001、`conf` 0.12／0.75、`dust` 0.56／1.7、`bokeh` 0.26／0.85、他は 0.001 px 未満。`dust`・`bokeh` は sin を乱数の代わりに使うので、粒が 1〜2 px 動く（見た目の破綻ではない）。
+- host の全検査は通り、レースの結果は同じ。画素のハッシュは変わる（float から Q16 へ）。実機の確認は別に記録する。
+
 ### sin は Shiki（2026-11-01）
 
 表示側の残りの `Math.sin` / `Math.cos` も `pocket.kasane.shiki` の整数版（Q16 の回転数、結果は Q16）へ移した。JS の `Math.sin` は実機で 1 回約 2,700 cycles、`shiki.sin` は約 1,150（ほぼ呼び出しの固定費）、`sinMany` は 1 要素約 80（docs/kasane/logs/shiki-drawcost-20261101-4392695.txt）。レースのモデル（`derby_watch.js`）は算術だけなので触らない。
@@ -269,7 +276,7 @@ FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中
 | 名前 | ファイル | 中身 | いつ読むか |
 | --- | --- | --- | --- |
 | （入口） | `derby_watch.js` | レースのモデル（`rng`〜`odds`、`globalThis.derby`） | 起動。host の `tune_derby.mjs` はこれだけを読む |
-| `prog` | `derby_prog.js` | plan のプログラム（`T` の各 plan は `@plan` を付けた JS のメソッド。`@planDecoder rom` の印で、ビルドが 18 本を firmware の flash の表（`ksn_proc_rom_plans.c`、8.6 KB）にコンパイルし、このファイルからは plan と復号器を消して埋め込む。アプリは `H.register('derby.' + 名前, 引数, 点列)` で登録する。このファイルはそのままでは動かない。plan の前と中のコメントは出荷されない。docs/kasane/flash-plan.md）・大写しの馬の点列の元・HEAD ON の線画 | 入口の評価中 |
+| `prog` | `derby_prog.js` | plan のプログラム（`T` の各 plan は `@shiki`（`nil` だけ `@plan`）を付けた JS のメソッド。`@planDecoder rom` の印で、ビルドが firmware の flash の表（`@shiki` は `ksn_shiki_rom.c`、`@plan` は `ksn_proc_rom_plans.c`）にコンパイルし、このファイルからは plan と復号器を消して埋め込む。アプリは `H.register('derby.' + 名前, 引数, 点列)` で登録する。このファイルはそのままでは動かない。plan の前と中のコメントは出荷されない。docs/kasane/flash-plan.md）・大写しの馬の点列の元・HEAD ON の線画 | 入口の評価中 |
 | `view` | `derby_view.js` | plan の登録・音・状態・保存・カメラ・`course()` | 同 |
 | `scene` | `derby_scene.js` | `enter`・`build`・`hud`・`settle`・`paint` | 同 |
 | `pan` | `derby_pan.js` | 首振りの投影（`pj`）と 1 フレーム（`pan`）。列は `pocket.derby`（C）。scene に入れるとそのチャンクのコンパイルのピークが +5.9 KB 跳ねたので分けた | 同 |
