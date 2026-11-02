@@ -141,6 +141,8 @@ DERBY の走者（今は 1 頭 7 入力 × 2 本を毎フレーム `bput`）を�
 - **リストは入力を持たない。** 状態はデータ領域（§4）。
 - **途中の draw が失敗したら止める**（`drawMany` と同じ。後の draw は行わない）。
 
+実装（2026-11-02）: `pocket_shiki_api.c` の `list`・`setList`・`drawList`・`releaseList`、`limits.maxLists` 8。リストの id は「枠 + 1 + 8 × 世代」で、解放した id は枠を使い回しても `CLOSED` のまま。`unregister` はリストが参照している間 `BUSY`。検査は `apps/shikitest/shiki_api_test.js`（host の QuickJS、ASan/UBSan で 75/75。実機は未実施）。
+
 リスト自体の利点（§4 の状態の置き場とは別に）: 項目の handle の検査が作る時の 1 回になる、参照中の handle の `unregister` を `BUSY` で守れる、handles の型付き配列がゲストのヒープから消える。
 
 ### 5.1 API

@@ -42,10 +42,21 @@ typedef struct {
     uint8_t live;
     uint16_t binds;          // handles bound to it
 } region_t;
-typedef struct { uint32_t handle; uint8_t n; uint8_t region[KSN_SHIKI_REGIONS]; } bind_t;
+// lists: entries of native lists that name the handle (unregister is BUSY
+// while any do, shiki-v2.md sec.5.1).
+typedef struct { uint32_t handle; uint16_t lists; uint8_t n; uint8_t region[KSN_SHIKI_REGIONS]; } bind_t;
 
 static region_t regions[REGIONS];
 static bind_t binds[BINDS];
+
+// Native lists (Shiki v2.0 draft, docs/kasane/shiki-v2.md sec.5.1): a copy of
+// the handles in the Shiki heap, drawn by drawList in an order table's order.
+// The id is slot + 1 + LISTS * generation, so a released list's id stays
+// stale after its slot is reused.
+#define LISTS 8              // maxLists
+typedef struct { uint32_t *h; uint32_t id; uint16_t n; } list_t;
+static list_t lists[LISTS];
+static uint32_t list_generation;
 static JSContext *owner;     // the guest the windows belong to (for the reset)
 
 static void free_nothing(JSRuntime *rt,void *opaque,void *ptr){(void)rt;(void)opaque;(void)ptr;}
@@ -257,7 +268,7 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     const uint32_t handle=pocket_proc_shiki_attach(plan);
     if(!handle){shiki_or_sys_free(plan);return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"32 handles");}
     // A window passed twice counts once for this handle (sec.9.3).
-    binds[b]=(bind_t){handle,0,{0}};
+    binds[b]=(bind_t){.handle=handle};
     for(uint32_t k=0;k<nr;k++){
         bool seen=false;
         for(unsigned j=0;j<binds[b].n;j++)seen|=binds[b].region[j]==which[k];
@@ -275,7 +286,9 @@ static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueCo
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected one Shiki handle");
     int b=-1;
     for(int k=0;k<BINDS&&b<0;k++)if(handle&&binds[k].handle==handle)b=k;
-    if(b<0||!pocket_proc_shiki_detach(handle))return failure(ctx,op,POCKET_ERR_CLOSED,"stale Shiki handle");
+    if(b<0)return failure(ctx,op,POCKET_ERR_CLOSED,"stale Shiki handle");
+    if(binds[b].lists)return failure(ctx,op,POCKET_ERR_BUSY,"a list still draws the handle");
+    if(!pocket_proc_shiki_detach(handle))return failure(ctx,op,POCKET_ERR_CLOSED,"stale Shiki handle");
     for(unsigned j=0;j<binds[b].n;j++)regions[binds[b].region[j]].binds--;
     binds[b]=(bind_t){0};
     return JS_UNDEFINED;
@@ -366,6 +379,117 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     return JS_UNDEFINED;
 }
 
+// ------------------------------------------------------------- lists
+// list(handles), setList(list, handles, offset?), drawList(list, order?,
+// count?), releaseList(list): shiki-v2.md sec.5.1 (v2.0 draft).
+static int bind_of(uint32_t handle){
+    for(int k=0;handle&&k<BINDS;k++)if(binds[k].handle==handle)return k;
+    return -1;
+}
+// The live list named by v; *code says why not.
+static list_t *list_of(JSContext *ctx,JSValueConst v,const char **code){
+    uint32_t id=0;
+    *code=POCKET_ERR_INVALID_ARGUMENT;
+    if(!whole(ctx,v,1,UINT32_MAX,&id))return NULL;
+    list_t *l=&lists[(id-1u)%LISTS];
+    if(!l->h||l->id!=id){*code=POCKET_ERR_CLOSED;return NULL;}
+    return l;
+}
+// handles (a Uint32Array of 1..max) whose entries are all live Shiki handles.
+static const char *check_handles(JSContext *ctx,JSValueConst v,size_t max,const uint32_t **h,size_t *n){
+    *h=typed_data(ctx,v,JS_TYPED_ARRAY_UINT32,n);
+    if(!*h||*n<1||*n>max)return POCKET_ERR_INVALID_ARGUMENT;
+    for(size_t k=0;k<*n;k++)if(bind_of((*h)[k])<0)return POCKET_ERR_CLOSED;
+    return NULL;
+}
+static JSValue js_list(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.list";
+    const uint32_t *h=NULL;
+    size_t n=0;
+    const char *bad=argc>=1?check_handles(ctx,argv[0],DRAWS_PER_CALL,&h,&n):POCKET_ERR_INVALID_ARGUMENT;
+    if(bad)return failure(ctx,op,bad,bad==POCKET_ERR_CLOSED?"a stale Shiki handle":"expected a Uint32Array of 1..256 handles");
+    int slot=-1;
+    for(int k=0;k<LISTS&&slot<0;k++)if(!lists[k].h)slot=k;
+    if(slot<0)return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"8 lists");
+    uint32_t *mem=shiki_heap_malloc(n*sizeof *mem);
+    if(!mem)return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"the Shiki heap's budget");
+    memcpy(mem,h,n*sizeof *mem);
+    for(size_t k=0;k<n;k++)binds[bind_of(mem[k])].lists++;
+    const uint32_t id=(uint32_t)slot+1u+LISTS*(++list_generation%(UINT32_MAX/LISTS-1u));
+    lists[slot]=(list_t){mem,id,(uint16_t)n};
+    return JS_NewUint32(ctx,id);
+}
+static JSValue js_set_list(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.setList",*code;
+    list_t *l=argc>=1?list_of(ctx,argv[0],&code):NULL;
+    if(!l)return failure(ctx,op,argc>=1?code:POCKET_ERR_INVALID_ARGUMENT,"expected a list");
+    uint32_t off=0;
+    if(argc>=3&&!JS_IsUndefined(argv[2])&&!whole(ctx,argv[2],0,l->n,&off))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"offset outside the list");
+    const uint32_t *h=NULL;
+    size_t n=0;
+    const char *bad=argc>=2?check_handles(ctx,argv[1],l->n,&h,&n):POCKET_ERR_INVALID_ARGUMENT;
+    if(!bad&&off+n>l->n)bad=POCKET_ERR_INVALID_ARGUMENT;
+    if(bad)return failure(ctx,op,bad,bad==POCKET_ERR_CLOSED?"a stale Shiki handle":"expected a Uint32Array inside the list");
+    for(size_t k=0;k<n;k++){
+        binds[bind_of(l->h[off+k])].lists--;
+        l->h[off+k]=h[k];
+        binds[bind_of(h[k])].lists++;
+    }
+    return JS_UNDEFINED;
+}
+static JSValue js_release_list(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.releaseList",*code;
+    list_t *l=argc>=1?list_of(ctx,argv[0],&code):NULL;
+    if(!l)return failure(ctx,op,argc>=1?code:POCKET_ERR_INVALID_ARGUMENT,"expected a list");
+    for(unsigned k=0;k<l->n;k++)binds[bind_of(l->h[k])].lists--;
+    shiki_heap_free(l->h);
+    *l=(list_t){0};
+    return JS_UNDEFINED;
+}
+// drawList: no inputs (stride 0). Without order, entries 0..n-1; with order
+// (a u16, record-1 window), entries order[0..count-1], each read at its
+// draw's start (an earlier draw's STORE shows), all checked once before the
+// first draw. DRAW_INDEX is the entry's number; an error's index is the
+// position in order.
+static JSValue js_draw_list(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.shiki.drawList",*code;
+    list_t *l=argc>=1?list_of(ctx,argv[0],&code):NULL;
+    if(!l)return failure(ctx,op,argc>=1?code:POCKET_ERR_INVALID_ARGUMENT,"expected a list");
+    const uint16_t *order=NULL;
+    uint32_t count=l->n;
+    if(argc>=2&&!JS_IsUndefined(argv[1])&&!JS_IsNull(argv[1])){
+        bool closed=false;
+        const int g=region_of(ctx,argv[1],&closed);
+        if(g<0)return failure(ctx,op,closed?POCKET_ERR_CLOSED:POCKET_ERR_INVALID_ARGUMENT,
+                              closed?"a released window":"order: a u16 window of record 1 from shiki.data()");
+        if(regions[g].type!=1||regions[g].k_rec!=1)
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"order: a u16 window of record 1 from shiki.data()");
+        order=regions[g].mem;
+        count=regions[g].records;
+        if(argc>=3&&!JS_IsUndefined(argv[2])&&!whole(ctx,argv[2],0,regions[g].records,&count))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"count outside the order table");
+        for(uint32_t k=0;k<count;k++)if(order[k]>=l->n)
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"order names an entry past the list");
+    }
+    for(uint32_t i=0;i<count;i++){
+        const uint32_t e=order?order[i]:i;   /* read now: an earlier draw may have written it */
+        if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
+        JSValue r=e<l->n?pocket_proc_shiki_draw_inputs(ctx,l->h[e],NULL,NULL,0,e)
+                        :failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"order names an entry past the list");
+        if(JS_IsException(r)){
+            JSValue x=JS_GetException(ctx);
+            if(JS_IsObject(x))JS_SetPropertyStr(ctx,x,"index",JS_NewUint32(ctx,i));
+            return JS_Throw(ctx,x);
+        }
+    }
+    return JS_UNDEFINED;
+}
+
 // ------------------------------------------------- sin() / cos() / sinMany()
 // sec.9.4 (v1.5): the SIN instruction for JS. An angle is an integer in Q16
 // turns (65536 a turn; only the low 16 bits matter, so any int32 wraps) and
@@ -441,6 +565,10 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_MAGIC_DEF("sin",1,js_sin,0),
         JS_CFUNC_MAGIC_DEF("cos",1,js_sin,1),
         JS_CFUNC_DEF("sinMany",3,js_sin_many),
+        JS_CFUNC_DEF("list",1,js_list),
+        JS_CFUNC_DEF("setList",3,js_set_list),
+        JS_CFUNC_DEF("drawList",3,js_draw_list),
+        JS_CFUNC_DEF("releaseList",1,js_release_list),
     };
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
     ok=ok&&pocket_proc_frame_install(ctx,shiki)==ESP_OK;
@@ -468,6 +596,7 @@ static const pocket_limit_t limits[]={
     {"loopDepth",POCKET_LIMIT_INT,KSN_SHIKI_LOOP_DEPTH,NULL},
     {"maxRecords",POCKET_LIMIT_INT,KSN_SHIKI_RECORDS,NULL},
     {"maxDrawsPerCall",POCKET_LIMIT_INT,DRAWS_PER_CALL,NULL},
+    {"maxLists",POCKET_LIMIT_INT,LISTS,NULL},
     {0},
 };
 static void probe(const pocket_capability_t *cap,bool *available,const char **reason){
@@ -481,6 +610,8 @@ esp_err_t pocket_shiki_api_register(void){return pocket_api_register(&capability
 
 void pocket_shiki_api_reset(void){
     for(int k=0;k<REGIONS;k++)if(regions[k].live)drop_region(owner,&regions[k]);
+    for(int k=0;k<LISTS;k++)if(lists[k].h)shiki_heap_free(lists[k].h);
+    memset(lists,0,sizeof lists);
     memset(binds,0,sizeof binds);
     owner=NULL;
 }
