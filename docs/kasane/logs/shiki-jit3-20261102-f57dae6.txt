@@ -45,3 +45,27 @@ I (348443) kasane: SHIKI_TURN draws=45.2 steps=5042 engine_ms=2.463 total_ms=2.5
 I (349456) kasane: SHIKI_TURN draws=29.6 steps=3616 engine_ms=1.505 total_ms=1.559 frames=30 jit=1/2760
 I (350451) kasane: SHIKI_TURN draws=19.5 steps=2568 engine_ms=1.272 total_ms=1.313 frames=30 jit=0/2760
 I (351470) kasane: SHIKI_TURN draws=22.4 steps=2637 engine_ms=1.082 total_ms=1.130 frames=30 jit=1/2760
+
+# DERBY, job jit3-derby-f57dae6 (demo: paddock, then the race)
+I (558078) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.660 total_ms=0.696 frames=30 jit=1/304
+I (559084) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.626 total_ms=0.660 frames=30 jit=0/304
+I (562096) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.630 total_ms=0.667 frames=30 jit=1/2592
+I (563099) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.622 total_ms=0.655 frames=30 jit=0/2592
+I (575406) kasane: SHIKI_TURN draws=26.0 steps=3006 engine_ms=1.592 total_ms=1.676 frames=30 jit=1/6548
+I (576418) kasane: SHIKI_TURN draws=26.0 steps=2933 engine_ms=1.599 total_ms=1.685 frames=30 jit=0/6548
+I (576967) js: DERBY CAM WIDE
+I (577421) kasane: SHIKI_TURN draws=24.1 steps=2125 engine_ms=1.316 total_ms=1.390 frames=30 jit=1/7072
+I (578426) kasane: SHIKI_TURN draws=22.0 steps=1245 engine_ms=1.014 total_ms=1.076 frames=30 jit=0/7072
+I (579436) kasane: SHIKI_TURN draws=22.0 steps=1244 engine_ms=0.944 total_ms=1.006 frames=30 jit=1/7072
+I (580446) kasane: SHIKI_TURN draws=22.0 steps=1245 engine_ms=1.018 total_ms=1.078 frames=30 jit=0/7072
+I (581064) js: DERBY CAM FIELD
+I (582455) kasane: SHIKI_TURN draws=23.0 steps=1431 engine_ms=1.215 total_ms=1.280 frames=30 jit=0/7072
+I (583465) kasane: SHIKI_TURN draws=23.0 steps=1431 engine_ms=1.186 total_ms=1.255 frames=30 jit=1/7072
+I (584474) kasane: SHIKI_TURN draws=23.0 steps=1430 engine_ms=1.210 total_ms=1.275 frames=30 jit=0/7072
+I (585484) kasane: SHIKI_TURN draws=23.0 steps=1431 engine_ms=1.153 total_ms=1.221 frames=30 jit=1/7072
+I (586034) js: DERBY CAM WIDE 2
+I (588511) kasane: SHIKI_TURN draws=46.8 steps=3252 engine_ms=1.865 total_ms=1.988 frames=30 jit=0/7072
+I (589518) kasane: SHIKI_TURN draws=48.1 steps=3374 engine_ms=1.763 total_ms=1.891 frames=30 jit=1/7072
+I (590528) kasane: SHIKI_TURN draws=50.4 steps=3550 engine_ms=2.101 total_ms=2.231 frames=30 jit=0/7072
+I (591537) kasane: SHIKI_TURN draws=52.5 steps=3665 engine_ms=2.052 total_ms=2.193 frames=30 jit=1/7072
+# (app free heap at load: MEM free=48040 largest=31744; the JIT's code reached 7,072 B)
