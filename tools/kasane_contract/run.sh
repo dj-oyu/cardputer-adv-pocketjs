@@ -63,6 +63,14 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   if [[ "$options" == -g* ]]; then
     node tools/kasane_ir/test_shiki_ref.mjs
     node tools/kasane_ir/shiki_diff.mjs --cases 20000 --keep "$out/shiki-diff"
+    # The @shiki compiler against the C engine and its AST evaluation: data
+    # regions (v1.3-v2.0 LOAD/STORE/DRAW_INDEX/start records) and the v2.0
+    # vector syntax (D7; shiki_ref.mjs stops at op 29, so for ops 30-45 the C
+    # model is the reference these compare with). And pocket.kasane.shiki's
+    # JS surface (apps/shikitest/shiki_api_test.js) on the real adapter.
+    node tools/kasane_ir/test_shiki_data_compile.mjs
+    node tools/kasane_ir/test_shiki_vector_compile.mjs
+    python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py
   fi
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \

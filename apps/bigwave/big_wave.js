@@ -131,7 +131,8 @@
     if (WIN[e[0]]) P.release(WIN[e[0]]);
     delete PL[e[0]]; delete WIN[e[0]];
     const s = spec(e[0], e[1], e[2]);
-    PL[e[0]] = s[2] ? P.register(s[0], [], {data: [s[2]]}) : P.register(s[0], s[1]);
+    try { PL[e[0]] = s[2] ? P.register(s[0], [], {data: [s[2]]}) : P.register(s[0], s[1]); }
+    catch (x) { if (s[2]) P.release(s[2]); throw x; }
     WIN[e[0]] = s[2];
   }
   function loadSet(k) { SETK.forEach(n => load(n, k, S.tier)); }

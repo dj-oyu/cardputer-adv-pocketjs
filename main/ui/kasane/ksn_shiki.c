@@ -826,7 +826,7 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
     for(uint32_t c=0;c<count;c++,d++){
         int16_t p[4];
         for(unsigned j=0;j<(lines?4u:2u);j++){
-            const int32_t x=(d[j*field]+half)>>q;   /* arithmetic shift: the floor */
+            const int32_t x=(int32_t)floor_shift((int64_t)d[j*field]+half,q);
             if(x<-480||x>720)return KSN_SHIKI_INVALID;
             p[j]=(int16_t)x;
         }

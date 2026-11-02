@@ -22,7 +22,8 @@ const reg = (s, i) => {
   if (e[0] !== 'sh') return H.register('kasane.' + e[0], e.slice(1));
   const p = points(e[1]), n = p[0].length, o = n + 7 & ~7, w = H.data({type: 'i16', q: 0, records: n, record: 2});
   for (let j = 0; j < n; ++j) { w[j] = p[0][j]; w[o + j] = p[1][j]; }
-  const h = H.register('kasane.sh', [], {data: [w]});
+  let h;
+  try { h = H.register('kasane.sh', [], {data: [w]}); } catch (x) { H.release(w); throw x; }
   WN[h] = w;
   return h;
 };

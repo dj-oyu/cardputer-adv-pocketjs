@@ -259,3 +259,34 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | M5 | §8.4 の条件と、`.H` と `V*` の一致の検証 | §3.3、§6.2 |
 | M6 | 移行表の抜け（heapprobe、`derby_view.js`、`pocket_shape.c`、`gridFold`、CLAUDE.md の Node の記述） | §2.1・§2.2 |
 | L1〜L5 | `aux` の当てはめ、`S` の式、`vectorRegisters`、`vraw` の大きさ、§3 と §4 の関係 | §3.1・§4.2・§6.2・§4.3 |
+
+## 11. 差分レビュー（SLOW、2026-11-02、`885fb18..f585848`）と対応
+
+C の重大なバグは見つからず、host の検査はすべて通った（レビュー側でも走らせて確認）。止めていたのは、規範文が自分の要件（§10.1、§10.2、`limits`）を満たしていない箇所と、実機の未実施。凍結（[shiki-spec.md](shiki-spec.md) を v2.0 に書き換える）のときは、以下を本文に入れる。
+
+**規範に書く（凍結の条件）**
+
+- **§10.1 の例外:** 参照実装（`tools/kasane_ir/shiki_ref.mjs`）は op 0〜29 まで。op 30〜45（ベクトル・`EMIT_*`）の規範は C モデル（`ksn_shiki.c` の `vec_exec` のスカラー側）とし、独立の照合は「C モデルと PIE の実機照合（shiki-pie.md §8.2 の形）」と「`@shiki` の AST 評価（`shiki_fix.mjs`）と C の一致（`test_shiki_vector_compile.mjs`）」で行う。後者は変換器と同じ AST を読むので、バイト列の意味を独立に決める参照ではない。
+- **端数ブロックのレーン:** `VEACH` の最後のブロックの `live` 未満のレーンだけがレコードに当たる。マスクの外のレーンは、`VLOAD` が 0 を入れる。`VIOTA` は外でも `ブロックの先頭のレコード番号 + レーン`（飽和）。`VSPLAT`・`VADD`/`VSUB`/`VMIN`/`VMAX`・蓄積器の命令（`VZACC`/`VMAC`/`VMACK`/`VACCSET`/`VOUT`）は 8 レーン全部で動く。`VSTORE` だけが `live` のレーンに限る。蓄積器は draw の間残るので、端数ブロックで外のレーンに溜めた値は、後のループの満杯ブロックの `VOUT`・`VSTORE` に出る（決定的）。
+- **自動の下ろし（§8.4 of spec）は未実装:** エンジンの PIE は `VEACH` のベクトル命令だけ。§8.4 は「下ろしてよい」の許可で、実装したときに §10.2（スカラー・C モデル・PIE の一致）を満たす。§6.2 の「自動の下ろしは v1.5 のまま残す（両方ある）」と、末尾の「`.H` と `V*` の 3 つで一致」は、この意味に読み替える。
+- **`EMIT_POINTS`/`EMIT_LINES` の `imm`:** 0〜15 の Q として各座標を `floor((x + 2^(imm-1)) / 2^imm)` で画素にする（`imm` が 0 なら x のまま）。領域の Q と一致するかは検査しない。`@shiki` は領域の Q を置く。
+- **`limits.vectorRegisters: 8`** を足した（`pocket_shiki_api.c`、`dst < 8` を登録時に強制している値）。
+- §9.4 に `list`・`setList`・`drawList`・`releaseList` の行を入れ、`drawList` の誤りの `index` が「`order` の中の位置」であることと、`count` を省くと `R` であることを書く。§3.1 のステップの数え方（命令ごとに 1、`EMIT_*` は命令全体で 1）と、§4.1 の `EMIT` の旗は、§4.3 の命令表 1 本にまとめる。
+- §9.2 の注記: (a) USB の `'J'` 診断（manifest 無しで MEGADEMO を走らせる）は Shiki heap を取る例外で、そのとき使う大きさは直前に選ばれたアプリの manifest の `shiki_bytes`（既定 48 KiB）。(b) Shiki heap の無いセッションでも `register`・`draw` はシステム heap で通るが、`data`・`list` は Shiki heap にしか取らないので予算の誤りで失敗する（`kasane.shiki.available` が false のとき）。
+
+**直した（コード、2026-11-02）**
+
+- `ksn_shiki.c` の `EMIT_*` の座標の丸めを、負数の `>>`（実装定義）から `floor_shift` に揃えた（GCC の結果は同じ。`shiki_diff` 20,000 件・ベクトルの検査は通る）。
+- `register` の `options.data` を読む間に、getter が先に読んだ窓を `release()` できた。読み終えた後に、窓がまだ生きていて同じメモリかを確かめ、違えば `CLOSED`。
+- BIG WAVE と MEGADEMO で、`data()` で窓を作った後に `register()` が投げると窓が解放されなかった。失敗したら `release` してから投げ直す（DERBY は既にそうしている）。
+- `tools/kasane_contract/run.sh` に `test_shiki_data_compile.mjs`・`test_shiki_vector_compile.mjs`・`run_pocket_shiki_api_qjs.py` を足した（誰も走らせていなかった）。
+
+**実機（凍結の条件）:** `apps/shikitest/shiki_api_test.js`（`LOAD`/`STORE`/`DRAW_INDEX`/リスト）の実機の実行と、現在の番号（op 30〜45）での C モデルと PIE の照合を 1 回ずつ。
+
+**後に回す（凍結を止めない）**
+
+- DERBY の投影誤差の門: float の VM の照合と一緒に消えた（`newton_screen < 0.1`）。`pocket.derby` の C の投影の誤差を自動で縛るものが今は無い（`tools/kasane_ir/q16_error.mjs` は `@plan` 時代の分析で、検査に繋がっていない）。native の draw の入力を double で計算し直して比べる門を DERBY の host 検査に戻す。
+- LINE_PATTERN の決定的な幾何の検査（重み 1:4 の 8 弦）と CUBIC の誤差の記録（§4.6 の 0.597 px）は、float の VM の試験と一緒に消えた。残るのは `shiki_diff` の乱択（C と参照の独立した実装の一致）と `test_shiki_vec.c`。
+- DERBY の host 検査の再生の比較は面 0 だけ（面 1 は数えるだけ）。
+- MEGADEMO の翻訳の誤差（旧い行との差 1.5e-4 px、固定小数 0.053 px）は、作業用の一回の採取（427b308 の前の旧テンプレートを読んだもの）で、検査としては残していない。BIG WAVE は `tools/games/bigwave_shiki/compare.mjs` が残っている。
+- MEGADEMO の `eg` の `s * rh` は、場面が約 4 分続くと 32,768 rad（Q16 の上限）を超える。今の場面の長さなら届かない（推定）。
