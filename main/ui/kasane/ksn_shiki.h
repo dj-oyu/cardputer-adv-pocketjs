@@ -140,9 +140,12 @@ typedef struct {
 static inline int64_t *ksn_shiki_vm_acc(ksn_shiki_vm *vm){
     return (int64_t *)((((uintptr_t)vm->vraw+15u)&~(uintptr_t)15u)+128u);
 }
-/* Prototype switch: the vector instructions run on PIE (ESP32-S3 only;
- * elsewhere it is ignored). Off by default; the bench flips it to compare
- * the two in one binary. */
+/* The vector instructions (ops 30-45) run on PIE (ESP32-S3 only; elsewhere
+ * it is ignored). On by default since v2.0 (D6: the vector instructions exist
+ * to be mapped to PIE); an instruction PIE cannot take (a tail block, an
+ * unaligned region, VIOTA) runs the C model's lane loop, with the same result.
+ * The bench (pocket_shiki.c) flips it to compare the two in one binary and
+ * puts it back. */
 extern bool ksn_shiki_vec_pie;
 
 /* 257 entries, sec.4.4: round(sin(k pi / 512) * 65536). */

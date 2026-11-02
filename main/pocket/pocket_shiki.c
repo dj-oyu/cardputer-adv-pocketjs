@@ -263,13 +263,14 @@ static bool check_line(unsigned i,char *out,size_t n){
     int16_t v3[2]={0,0};
     ksn_shiki_status st[2]={KSN_SHIKI_INVALID,KSN_SHIKI_INVALID};
     bool ok=true;
+    const bool kept=ksn_shiki_vec_pie;
     for(unsigned pie=0;ok&&pie<2;pie++){
         ok=ksn_shiki_bench_check_build(i,b->work,&b->c)&&
            ksn_shiki_register(b->c.code,b->c.len,NULL,0,b->c.region,b->c.regions,b->plan);
         if(!ok)break;
         ksn_shiki_vec_pie=pie;
         st[pie]=ksn_shiki_draw(b->plan,NULL,0,&b->vm,b->seg);
-        ksn_shiki_vec_pie=false;
+        ksn_shiki_vec_pie=kept;
         h[pie]=observe(b,st[pie]);
         /* v1[0] (writeback reads it) for the log either way */
         v3[pie]=((const int16_t *)(((uintptr_t)b->vm.vraw+15u)&~(uintptr_t)15u))[8];
@@ -309,6 +310,7 @@ static bool pair_line(unsigned j,char *out,size_t n){
     ok=ok&&ksn_shiki_register(b->c.code,b->c.len,NULL,0,b->c.region,b->c.regions,b->plan);
     uint32_t best=UINT32_MAX;
     ksn_shiki_status s=KSN_SHIKI_INVALID;
+    const bool kept=ksn_shiki_vec_pie;
     ksn_shiki_vec_pie=rows[j].pie;
     for(unsigned r=0;ok&&r<7;r++){
         const uint32_t t0=esp_cpu_get_cycle_count();
@@ -316,7 +318,7 @@ static bool pair_line(unsigned j,char *out,size_t n){
         const uint32_t dt=esp_cpu_get_cycle_count()-t0;
         if(dt<best)best=dt;
     }
-    ksn_shiki_vec_pie=false;
+    ksn_shiki_vec_pie=kept;
     if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki draw %s FAILED %d",b->c.name?b->c.name:"?",ok?(int)s:-1);
     else snprintf(out,n,"CB shiki draw %s pie=%d cy=%lu us=%.1f steps=%u segs=%u",b->c.name,rows[j].pie?1:0,
                   (unsigned long)best,best/240.0,b->vm.steps,b->vm.count);

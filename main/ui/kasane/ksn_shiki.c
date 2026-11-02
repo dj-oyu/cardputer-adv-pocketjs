@@ -613,7 +613,7 @@ typedef int16_t vlanes[8];
 static vlanes *vregs(ksn_shiki_vm *vm){
     return (vlanes *)(((uintptr_t)vm->vraw+15u)&~(uintptr_t)15u);
 }
-bool ksn_shiki_vec_pie=false;
+bool ksn_shiki_vec_pie=KSN_SHIKI_HAS_PIE;
 
 #if KSN_SHIKI_HAS_PIE
 /* ---- P2: the same instructions on PIE (shiki-pie.md sec.6 item 1). The
