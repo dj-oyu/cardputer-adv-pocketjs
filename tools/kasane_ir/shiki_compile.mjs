@@ -10,6 +10,10 @@
 // for (const [a, b] of r) / r.take(n) is EACH + FETCH, r.put(...) PUT, r[i]
 // LOOKUP. FETCH writes and PUT reads m consecutive registers: such a group is
 // coloured as one unit, before the other values (after the pinned ones).
+// v2.0 draft (D7, docs/kasane/shiki-v2.md sec.6.2): for (... of r.blocks())
+// is VEACH with a straight-line body of vector instructions on v0..v7
+// (vloop(), vectors()); its scalar operands are computed before the VEACH.
+// points() / lines() are EMIT_POINTS / EMIT_LINES.
 //
 // CUBIC reads r0..r7 and LINE_PATTERN's block r10..r15 (dst 0 and 10, as
 // kir.mjs did, so the two never meet). Each operand is computed into a fresh
@@ -28,13 +32,16 @@
 // bit for bit (test_shiki_compile.mjs). Coordinates go to the engine at Q16
 // as they are: the engine rounds them (sec.4.5, v1.1).
 import {planAst} from './plan_js.mjs';
-import {litQ, qRules, TURN} from './shiki_q.mjs';
+import {litQ, qRules, TURN, vectorScalars} from './shiki_q.mjs';
 
 export const OP = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9,
   REPEAT_REG: 10, BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14, LINE_PATTERN: 15, SUB: 16, NEG: 17,
   SHIFT: 18, ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26,
-  LOAD: 27, STORE: 28, DRAW_INDEX: 29};
-const REGS = 16, CODE = 64;
+  LOAD: 27, STORE: 28, DRAW_INDEX: 29,
+  // v2.0 draft sec.6.2 (D7): the vector instructions and EMIT.
+  VEACH: 30, VLOAD: 31, VSTORE: 32, VSPLAT: 33, VIOTA: 34, VADD: 35, VSUB: 36, VMIN: 37, VMAX: 38,
+  VZACC: 39, VMAC: 40, VMACK: 41, VACCSET: 42, VOUT: 43, EMIT_POINTS: 44, EMIT_LINES: 45};
+const REGS = 16, CODE = 64, VREGS = 8;
 
 // Raw value of a literal at Q q (sec.2.4's rounding), or a compile error
 // (rule 9) when it does not fit.
@@ -57,16 +64,25 @@ READS[OP.LOOKUP] = ['b'];
 // v2.0 draft: LOAD/STORE read the record's register b; LOAD writes its group
 // (defs), STORE reads its group (args), as FETCH and PUT do.
 READS[OP.LOAD] = ['b']; READS[OP.STORE] = ['b'];
+// The vector instructions' dst/a/b are vector registers (allocated by
+// vectors() below), except the scalar operands listed here.
+READS[OP.VSPLAT] = ['a']; READS[OP.VACCSET] = ['a']; READS[OP.VMACK] = ['b'];
 const BASE = {[OP.CUBIC]: 0, [OP.LINE_PATTERN]: 10};
 const WRITES = new Set([OP.SET, OP.INPUT, OP.ADD, OP.SUB, OP.MUL, OP.NEG, OP.SHIFT, OP.SIN, OP.LOOKUP, OP.DRAW_INDEX]);
 // EACH reads its count register only in the count mode (aux bit 0) and its
 // start register (imm) only with aux bit 1 (v2.0 draft); FETCH writes its
 // group (defs), PUT reads its group (args).
-const eachRegs = i => i.op === OP.EACH ? [...(i.aux & 1 ? ['b'] : []), ...(i.aux & 2 ? ['imm'] : [])] : [];
-const uses = i => (READS[i.op] ?? []).concat(eachRegs(i)).map(f => i[f]).concat(i.args ?? []);
+const isEach = op => op === OP.EACH || op === OP.VEACH;
+const isEmit = op => op === OP.EMIT_POINTS || op === OP.EMIT_LINES;
+// EMIT's flags are in dst: with one of them b is its register; with both,
+// b and b + 1 are a consecutive group (args).
+const eachRegs = i => isEach(i.op) ? [...(i.aux & 1 ? ['b'] : []), ...(i.aux & 2 ? ['imm'] : [])]
+  : isEmit(i.op) && (i.dst === 1 || i.dst === 2) ? ['b'] : [];
+const regFields = i => (READS[i.op] ?? []).concat(eachRegs(i));
+const uses = i => regFields(i).map(f => i[f]).concat(i.args ?? []);
 const defsOf = i => WRITES.has(i.op) ? [i.dst] : i.defs ?? [];
 const defines = i => defsOf(i).length > 0;
-const opens = op => op === OP.REPEAT || op === OP.REPEAT_REG || op === OP.EACH;
+const opens = op => op === OP.REPEAT || op === OP.REPEAT_REG || op === OP.EACH || op === OP.VEACH;
 
 // ------------------------------------------------------------- lowering
 function lower(ast, qdecl, data) {
@@ -322,6 +338,25 @@ function lower(ast, qdecl, data) {
           }
           break;
         }
+        case 'vloop': vloop(s); break;
+        case 'emit': {
+          // EMIT_POINTS / EMIT_LINES: an i16 region's records at its Q (imm),
+          // the colour in aux; dst bit 0 the count, bit 1 the start (v2.0
+          // draft sec.4.1, 6.2).
+          const [ri, d] = region(s.r), lines = s.f === 'lines';
+          if (d.type !== 0) throw new Error(`${s.f}(${s.r}): the region must be i16`);
+          if (d.k < (lines ? 4 : 2)) throw new Error(`${s.f}(${s.r}): a record of ${lines ? 4 : 2} or more fields (found ${d.k})`);
+          if (d.q > 15) throw new Error(`${s.f}(${s.r}): the region's Q${d.q} is over 15`);
+          const i = {op: lines ? OP.EMIT_LINES : OP.EMIT_POINTS, a: ri, imm: d.q, dst: (s.n ? 1 : 0) | (s.from ? 2 : 0), b: 0};
+          field(s.args[0], `${s.f} colour`, 0, 65535, 'aux', i);
+          const st = s.from ? ev(s.from, 0) : null, n = s.n ? ev(s.n, 0) : null;
+          if (n?.t === 'c' && (n.raw < 0 || n.raw > 65535)) throw new Error(`${s.r}.take(${n.raw}) outside 0..65,535`);
+          if (st && n) i.args = [member(st), member(n)];
+          else if (st) i.b = mat(st);
+          else if (n) i.b = mat(n);
+          emit(i);
+          break;
+        }
         case 'break': {
           const qa = natural(s.a), qb = natural(s.b), q = Math.max(qa ?? qb ?? 16, qb ?? qa ?? 16);
           emit({op: OP.BREAK_IF_GT, a: mat(ev(s.a, q)), b: mat(ev(s.b, q))});
@@ -364,8 +399,105 @@ function lower(ast, qdecl, data) {
       }
     }
   }
+  // A vector loop (D7): VEACH, its straight-line body of vector
+  // instructions, END. The scalar operands (splat, acc.set, acc.mack) are
+  // computed before the VEACH, since nothing scalar may run inside it; the
+  // vector values are numbered here and given v0..v7 by vectors().
+  function vloop(s) {
+    const [ri, d] = region(s.r);
+    const i16 = (r, dd, what) => { if (dd.type !== 0) throw new Error(`${what}: ${r} must be an i16 region`); };
+    if (s.names.length) i16(s.r, d, `for (const [...] of ${s.r}.blocks())`);
+    if (s.names.length > d.k) throw new Error(`${s.names.length} names for ${s.r}'s record of ${d.k}`);
+    const scal = new Map();
+    for (const x of s.body) for (const e of vectorScalars(x)) scal.set(e, mat(ev(e, 0)));
+    const from = s.from ? mat(ev(s.from, 0)) : null;
+    const fl = from === null ? {aux: 0} : {aux: 2, imm: from};
+    if (s.n) {
+      const n = ev(s.n, 0);
+      if (n.t === 'c' && (n.raw < 0 || n.raw > 32767)) throw new Error(`${s.r}.take(${n.raw}) outside 0..32,767`);
+      emit({op: OP.VEACH, a: ri, b: mat(n), ...fl, aux: fl.aux | 1});
+    } else emit({op: OP.VEACH, a: ri, ...fl});
+    const vc = [], vn = new Map();
+    let id = 0;
+    const put = i => (vc.push(i), i.d);
+    s.names.forEach((n, j) => vn.set(n, put({op: OP.VLOAD, d: id++, a: ri, b: j})));
+    const lane = (r, c, store) => {
+      const [rj, dj] = region(r);
+      i16(r, dj, `${r}.${store ? 'setLane' : 'lane'}(${c})`);
+      if (c >= dj.k) throw new Error(`${r}.${store ? 'setLane' : 'lane'}(${c}): ${r}'s record has ${dj.k} fields`);
+      if (store && !dj.write) throw new Error(`${r}.setLane(): the region is not declared write`);
+      return rj;
+    };
+    const BIN = {add: OP.VADD, sub: OP.VSUB, min: OP.VMIN, max: OP.VMAX};
+    const vx = e => {
+      switch (e.k) {
+        case 'vname': return vn.get(e.v);
+        case 'vlane': return put({op: OP.VLOAD, d: id++, a: lane(e.r, e.c), b: e.c});
+        case 'vsplat': return put({op: OP.VSPLAT, d: id++, s: scal.get(e.args[0])});
+        case 'viota': return put({op: OP.VIOTA, d: id++});
+        case 'vbin': { const a = vx(e.a), b = vx(e.b); return put({op: BIN[e.o], d: id++, x: a, y: b}); }
+        case 'vout':
+          if (e.s > 32) throw new Error(`acc.out(${e.s}): the shift is 0..32`);
+          return put({op: OP.VOUT, d: id++, aux: e.s});
+      }
+      throw new Error(`bad vector expression ${e.k}`);
+    };
+    for (const x of s.body) {
+      if (x.k === 'vdecl') vn.set(x.n, vx(x.e));
+      else if (x.k === 'vstore') { const v = vx(x.e); vc.push({op: OP.VSTORE, x: v, a: lane(x.r, x.c, true), b: x.c}); }
+      else if (x.f === 'zero') vc.push({op: OP.VZACC});
+      else if (x.f === 'set') vc.push({op: OP.VACCSET, s: scal.get(x.args[0])});
+      else if (x.f === 'mac') { const a = vx(x.args[0]), b = vx(x.args[1]); vc.push({op: OP.VMAC, x: a, y: b}); }
+      else { const a = vx(x.args[0]); vc.push({op: OP.VMACK, x: a, s: scal.get(x.args[1])}); }
+    }
+    for (const i of vectors(vc)) emit(i);
+    emit({op: OP.END});
+    cse = new Map();
+  }
   stmts(ast);
   return {code, vregs, inputsQ, argsQ, warnings};
+}
+
+// A vector loop's body to instructions on v0..v7 (D7). The body is straight
+// line, so a value's register is free after its last read: dead pure values
+// are dropped (VOUT stays, it writes the accumulator back), the rest take the
+// lowest free register, reusing an operand's register when that read was its
+// last (the engine reads a lane's operands before writing it).
+function vectors(vc) {
+  const PURE = new Set([OP.VLOAD, OP.VSPLAT, OP.VIOTA, OP.VADD, OP.VSUB, OP.VMIN, OP.VMAX]);
+  const ops = i => [i.x, i.y].filter(v => v !== undefined);
+  const live = new Set(), keep = [];
+  for (let k = vc.length - 1; k >= 0; k--) {
+    const i = vc[k];
+    if (i.d !== undefined && PURE.has(i.op) && !live.has(i.d)) continue;
+    keep.unshift(i);
+    for (const v of ops(i)) live.add(v);
+  }
+  const last = new Map();
+  keep.forEach((i, k) => { for (const v of ops(i)) last.set(v, k); });
+  const reg = new Map(), free = new Set(Array.from({length: VREGS}, (_, k) => k));
+  const take = () => {
+    if (!free.size) throw new Error(`more than ${VREGS} vectors live at once`);
+    const r = Math.min(...free); free.delete(r); return r;
+  };
+  return keep.map((i, k) => {
+    const x = i.x !== undefined ? reg.get(i.x) : 0, y = i.y !== undefined ? reg.get(i.y) : 0;
+    for (const v of new Set(ops(i))) if (last.get(v) === k) free.add(reg.get(v));
+    let d = 0;
+    if (i.d !== undefined) { d = take(); reg.set(i.d, d); if (!last.has(i.d)) free.add(d); }
+    switch (i.op) {
+      case OP.VLOAD: return {op: i.op, dst: d, a: i.a, b: i.b};
+      case OP.VSTORE: return {op: i.op, dst: x, a: i.a, b: i.b};
+      case OP.VSPLAT: return {op: i.op, dst: d, a: i.s};
+      case OP.VIOTA: return {op: i.op, dst: d};
+      case OP.VZACC: return {op: i.op};
+      case OP.VMAC: return {op: i.op, a: x, b: y};
+      case OP.VMACK: return {op: i.op, a: x, b: i.s};
+      case OP.VACCSET: return {op: i.op, a: i.s};
+      case OP.VOUT: return {op: i.op, dst: d, aux: i.aux};
+      default: return {op: i.op, dst: d, a: x, b: y};
+    }
+  });
 }
 
 // ---------------------------------------------------- control flow, liveness
@@ -430,6 +562,23 @@ function placePools(code, vregs) {
 // A hoisted value defined again right before each use.
 function remat(code, vregs, vr) {
   const out = [];
+  // Nothing scalar may run inside a VEACH: one definition before it serves
+  // the VEACH and its body.
+  for (let pc = 0; pc < code.length; pc++) {
+    if (code[pc].op !== OP.VEACH) continue;
+    let end = pc + 1;
+    while (code[end].op !== OP.END) end++;
+    const span = code.slice(pc, end + 1);
+    if (!span.some(j => uses(j).includes(vr))) continue;
+    const t = vregs.push({kind: 'remat', name: vregs[vr].name}) - 1;
+    code = [...code.slice(0, pc), {...vregs[vr].def, dst: t}, ...span.map(j => {
+      const k = {...j};
+      for (const f of regFields(j)) if (k[f] === vr) k[f] = t;
+      if (k.args) k.args = k.args.map(a => a === vr ? t : a);
+      return k;
+    }), ...code.slice(end + 1)];
+    pc = end + 1;
+  }
   for (const i of code) {
     if (defines(i) && i.dst === vr) continue;
     // A copy into a pinned value takes the definition itself (one instruction).
@@ -438,7 +587,7 @@ function remat(code, vregs, vr) {
       const t = vregs.push({kind: 'remat', name: vregs[vr].name}) - 1;
       out.push({...vregs[vr].def, dst: t});
       const j = {...i};
-      for (const f of (READS[i.op] ?? []).concat(eachRegs(i))) if (j[f] === vr) j[f] = t;
+      for (const f of regFields(i)) if (j[f] === vr) j[f] = t;
       if (j.args) j.args = j.args.map(a => a === vr ? t : a);
       out.push(j);
     } else out.push(i);
@@ -465,7 +614,10 @@ function color(code, vregs) {
   // Consecutive groups (FETCH's and PUT's) next, each as a unit: the lowest
   // base where no member meets a coloured neighbour on its register.
   const groups = [];
-  code.forEach(i => { if (i.op === OP.FETCH || i.op === OP.LOAD) groups.push(i.defs); if (i.op === OP.PUT || i.op === OP.STORE) groups.push(i.args); });
+  code.forEach(i => {
+    if (i.op === OP.FETCH || i.op === OP.LOAD) groups.push(i.defs);
+    if (i.op === OP.PUT || i.op === OP.STORE || (isEmit(i.op) && i.args)) groups.push(i.args);
+  });
   for (const g of groups) {
     if (g.every(v => reg.has(v))) continue;   // a PUT that reads FETCH's group
     let base = -1;
@@ -544,8 +696,9 @@ export function compileShiki(plan, qdecl = {}) {
     const j = {...i};
     if (WRITES.has(i.op)) j.dst = R(i.dst);
     for (const f of READS[i.op] ?? []) j[f] = R(i[f]);
-    if (i.op === OP.EACH) { j.b = i.aux & 1 ? R(i.b) : 0; j.imm = i.aux & 2 ? R(i.imm) : 0; }
-    if (i.op === OP.FETCH || i.op === OP.LOAD) j.dst = consecutive(i.defs, i.op === OP.LOAD ? 'LOAD' : 'FETCH');
+    if (isEach(i.op)) { j.b = i.aux & 1 ? R(i.b) : 0; j.imm = i.aux & 2 ? R(i.imm) : 0; }
+    if (isEmit(i.op)) { j.b = i.args ? consecutive(i.args, 'EMIT start and count') : i.dst ? R(i.b) : 0; delete j.args; }
+    else if (i.op === OP.FETCH || i.op === OP.LOAD) j.dst = consecutive(i.defs, i.op === OP.LOAD ? 'LOAD' : 'FETCH');
     else if (i.op === OP.PUT || i.op === OP.STORE) j.dst = consecutive(i.args, i.op === OP.STORE ? 'STORE' : 'PUT');
     else if (i.args) {
       j.args = i.args.map(R);
