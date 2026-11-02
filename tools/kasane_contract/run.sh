@@ -71,6 +71,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     node tools/kasane_ir/test_shiki_data_compile.mjs
     node tools/kasane_ir/test_shiki_vector_compile.mjs
     python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py
+    python3 tools/shiki_jit/test_encoder.py
   fi
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \

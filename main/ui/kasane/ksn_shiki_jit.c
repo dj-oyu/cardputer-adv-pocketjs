@@ -15,6 +15,21 @@
 #define KSN_JIT_DEVICE 0
 #endif
 
+#include "ksn_shiki_jit_enc.h"
+
+void ksn_jit_emit(ksn_jit_buf *b,unsigned form,int o0,int o1,int o2){
+    if(form>=KSN_JIT_FORMS)return;
+    const ksn_jit_form *f=&KSN_JIT_FORM[form];
+    if(b->overflow||b->len+f->len>b->cap){b->overflow=true;return;}
+    const int o[3]={o0,o1,o2};
+    uint32_t w=f->base;
+    for(unsigned k=0;k<f->nbits;k++){
+        const ksn_jit_bit *t=&f->bits[k];
+        if((((unsigned)o[t->operand]^(unsigned)f->base_op[t->operand])>>t->bit)&1u)w^=1u<<t->at;
+    }
+    for(unsigned k=0;k<f->len;k++)b->p[b->len++]=(uint8_t)(w>>(8*k));
+}
+
 #if KSN_JIT_DEVICE
 /* Two functions, assembled once with the toolchain that builds this firmware
  * (xtensa-esp32s3-elf-as, esp-15.2.0) and kept as bytes; stage 0 checks
