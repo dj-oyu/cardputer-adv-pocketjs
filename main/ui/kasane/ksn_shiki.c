@@ -69,6 +69,11 @@ static int64_t floor_shift(int64_t v,unsigned s){
 static int32_t sat32(int64_t v){
     return v>INT32_MAX?INT32_MAX:v<INT32_MIN?INT32_MIN:(int32_t)v;
 }
+/* floor(x / 2^q) for 0 <= q <= 30, without relying on >> of a negative int
+ * (implementation-defined in C): the same value as floor_shift. */
+static inline int32_t floor_shr32(int32_t x,unsigned q){
+    return x>=0?(int32_t)((uint32_t)x>>q):-(int32_t)((uint32_t)(-(x+1))>>q)-1;
+}
 static int32_t sat16(int64_t v){
     return v>32767?32767:v<-32768?-32768:(int32_t)v;
 }
@@ -839,16 +844,45 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
     const int16_t *d=(const int16_t *)g->data+start;
     /* A record's fields are a plane apart (sec.5.1). */
     const uint32_t field=g->stride;
-    for(uint32_t c=0;c<count;c++,d++){
-        int16_t p[4];
-        for(unsigned j=0;j<(lines?4u:2u);j++){
-            const int32_t x=(int32_t)floor_shift((int64_t)d[j*field]+half,q);
-            if(x<-480||x>720)return KSN_SHIKI_INVALID;
-            p[j]=(int16_t)x;
+    const uint16_t colour=i->aux;
+    /* The same results as one emit() per record (a record's coordinates
+     * checked before it is emitted, INVALID or LIMIT at the first record
+     * that fails, the records before it kept), in a loop with no call and
+     * 32-bit arithmetic: the raw value is an int16 and half < 2^15. */
+    if(!lines){
+        /* A point costs 1 raster step and 1 segment, so how many fit is
+         * known before the loop. */
+        uint32_t room=KSN_SHIKI_SEGMENTS-vm->count;
+        if(KSN_SHIKI_RASTER-(uint32_t)vm->raster<room)room=KSN_SHIKI_RASTER-(uint32_t)vm->raster;
+        const uint32_t n=count<room?count:room;
+        const int16_t *xs=d,*ys=d+field;
+        ksn_proc_segment *o=out+vm->count;
+        uint32_t c=0;
+        for(;c<n;c++){
+            const int32_t x=floor_shr32(xs[c]+half,q),y=floor_shr32(ys[c]+half,q);
+            if((uint32_t)(x+480)>1200u||(uint32_t)(y+480)>1200u)break;
+            o[c]=(ksn_proc_segment){(int16_t)x,(int16_t)y,(int16_t)x,(int16_t)y,colour};
         }
-        const ksn_shiki_status s=lines?emit(vm,out,p[0],p[1],p[2],p[3],i->aux)
-                                      :emit(vm,out,p[0],p[1],p[0],p[1],i->aux);
-        if(s!=KSN_SHIKI_RUNNING)return s;
+        vm->count=(uint16_t)(vm->count+c);
+        vm->raster=(uint16_t)(vm->raster+c);
+        if(c<n)return KSN_SHIKI_INVALID;
+        if(n==count)return KSN_SHIKI_RUNNING;
+        /* Out of room at record n: its coordinates are still checked first. */
+        const int32_t x=floor_shr32(xs[n]+half,q),y=floor_shr32(ys[n]+half,q);
+        return (uint32_t)(x+480)>1200u||(uint32_t)(y+480)>1200u?KSN_SHIKI_INVALID:KSN_SHIKI_LIMIT;
+    }
+    for(uint32_t c=0;c<count;c++,d++){
+        int32_t p[4];
+        for(unsigned j=0;j<4u;j++){
+            p[j]=floor_shr32(d[j*field]+half,q);
+            if((uint32_t)(p[j]+480)>1200u)return KSN_SHIKI_INVALID;
+        }
+        if(vm->count==KSN_SHIKI_SEGMENTS)return KSN_SHIKI_LIMIT;
+        const int32_t dx=p[2]>p[0]?p[2]-p[0]:p[0]-p[2],dy=p[3]>p[1]?p[3]-p[1]:p[1]-p[3];
+        const uint32_t cost=(uint32_t)(dx>dy?dx:dy)+1u;
+        if(vm->raster+cost>KSN_SHIKI_RASTER)return KSN_SHIKI_LIMIT;
+        vm->raster=(uint16_t)(vm->raster+cost);
+        out[vm->count++]=(ksn_proc_segment){(int16_t)p[0],(int16_t)p[1],(int16_t)p[2],(int16_t)p[3],colour};
     }
     return KSN_SHIKI_RUNNING;
 }

@@ -56,6 +56,11 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_bench.c \
     tools/kasane_contract/test_shiki_vec.c -lm -o "$out/shiki-vec"
   "$out/shiki-vec"
+  # EMIT_POINTS / EMIT_LINES against their definition written out plainly
+  # (the fast loop of docs/kasane/shiki-jit.md sec.8.3), limits included.
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_emit.c -lm -o "$out/shiki-emit"
+  "$out/shiki-emit"
   # sec.2.4's conversion in integers against the libm form (bit for bit).
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_from_double.c -lm -o "$out/shiki-from-double"
