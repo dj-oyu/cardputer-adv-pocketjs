@@ -59,7 +59,7 @@ def main():
  src=once(src,'cur_bytes+=add;cur_bytes-=sub;','cur_bytes+=add;cur_bytes-=sub;if(add){n_alloc++;b_alloc+=add;}if(cur_bytes>turn_hi)turn_hi=cur_bytes;')
  src=once(src,'    printf("  [%5u] %s\\n",frame_no,s);','    if(!bw_perf)printf("  [%5u] %s\\n",frame_no,s);')
  src=once(src,'static int oracle(void){','static int oracle(void){\n    if(bw_perf)return 0;')
- start=src.index('    "(function(){const P=pocket.kasane.procedural');end=src.index('    /* The rider formula',start);src=src[:start]+src[end:]
+ start=src.index('    "(function(){const P=pocket.kasane.shiki');end=src.index('    /* The rider formula',start);src=src[:start]+src[end:]
  src=once(src,'int main(int argc,char **argv){',HELPER+'\nint main(int argc,char **argv){\n    bw_perf=true;')
  src=once(src,'    /* ---- 1. title:','    return bw_run(getenv("BIGWAVE_INPUTS_CASE"),cur_bytes,eval_peak);\n    /* ---- 1. title:')
  harness=out/'perf.c';harness.write_text(src);binary=common.build(out/'build',harness,a.m32)
