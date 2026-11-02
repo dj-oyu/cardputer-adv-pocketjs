@@ -90,6 +90,8 @@ export function emitFix(ast, params, qdecl, data = []) {
         return g({k: '*', a: e.a, b: {k: 'num', lit: String(1 / c)}}, q);
       }
       case 'call': {
+        // drawIndex() (v2.0 draft DRAW_INDEX): the draw's number, Q0.
+        if (e.f === 'drawIndex') { const d = K(q); return d ? `$.shift(BigInt(__idx), ${d})` : 'BigInt(__idx)'; }
         const s = `$.sin($.mul(${g(e.args[0], 16)}, ${TURN}n, 32))`;
         return q === 16 ? s : `$.shift(${s}, ${K(q - 16)})`;
       }
@@ -118,17 +120,20 @@ export function emitFix(ast, params, qdecl, data = []) {
         return `__draw.${x.f}(${x.args.map((a, i) => ii.includes(i) ? `$.int(${g(a, 0)})` : `$.real(${g(a, 16)})`).join(', ')});`;
       }
       case 'each': {
-        // EACH (+ FETCH): N read once, 0..records or INVALID; each name is
-        // its element at the region's Q.
+        // EACH (+ FETCH): the start (v2.0 draft, 0..records) then N (0..records
+        // - start), each read once, or INVALID; each name is its element at
+        // the region's Q.
         const [i, d] = reg(x.r), c = `__cur${uid++}`;
         if (x.names.length > d.k) throw new Error(`${x.names.length} names for a record of ${d.k}`);
         const rec = `(__data[${i}].length / ${d.k})`;
-        const n = x.n ? `Number(${g(x.n, 0)})` : rec;
+        const st = x.from ? `Number(${g(x.from, 0)})` : '0';
+        const n = x.n ? `Number(${g(x.n, 0)})` : `${rec} - __s`;
         loops.push({r: x.r, c});
         const body = s(x.body);
         loops.pop();
-        return `{ const __n = ${n}; if (__n < 0 || __n > ${rec}) throw new __Fail('INVALID');\n` +
-          `for (let ${c} = 0; ${c} < __n; ${c}++) {\n` +
+        return `{ const __s = ${st}; if (__s < 0 || __s > ${rec}) throw new __Fail('INVALID');\n` +
+          `const __n = ${n}; if (__n < 0 || __n > ${rec} - __s) throw new __Fail('INVALID');\n` +
+          `for (let ${c} = __s; ${c} < __s + __n; ${c}++) {\n` +
           // v1.4 field planes (as shiki_ref.mjs keeps them, no padding): field
           // j of record c at j * R + c.
           x.names.map((v, j) => `const ${v} = BigInt(__data[${i}][${j} * ${rec} + ${c}]);`).join('\n') + `\n${body}\n} }`;
@@ -142,6 +147,19 @@ export function emitFix(ast, params, qdecl, data = []) {
         return `{ const __v = [${x.args.map(a => g(a, d.q)).join(', ')}];\n` +
           x.args.map((_, j) => `__data[${i}][${j} * (__data[${i}].length / ${d.k}) + ${l.c}] = $.store(${d.type}, __v[${j}]);`).join('\n') + ' }';
       }
+      case 'load': case 'store': {
+        // v2.0 draft LOAD / STORE: record i (Q0) in 0..records - 1 or
+        // INVALID; fields c.. of it. STORE: every value first, then the writes.
+        const [i, d] = reg(x.r), u = uid++, rec = `(__data[${i}].length / ${d.k})`;
+        const m = x.k === 'load' ? x.names.length : x.args.length;
+        if (m < 1 || x.c + m > d.k) throw new Error(`${x.r}.${x.k === 'load' ? 'at' : 'set'}(): fields ${x.c}..${x.c + m - 1} of a record of ${d.k}`);
+        if (x.k === 'store' && !d.write) throw new Error(`${x.r}.set(): the region is not declared write`);
+        const head = `const __r${u} = Number(${g(x.i, 0)}); if (__r${u} < 0 || __r${u} >= ${rec}) throw new __Fail('INVALID');\n`;
+        if (x.k === 'load')
+          return head + x.names.map((v, j) => `const ${v} = BigInt(__data[${i}][${x.c + j} * ${rec} + __r${u}]);`).join('\n');
+        return `{ ${head}const __v = [${x.args.map(a => g(a, d.q)).join(', ')}];\n` +
+          x.args.map((_, j) => `__data[${i}][${x.c + j} * ${rec} + __r${u}] = $.store(${d.type}, __v[${j}]);`).join('\n') + ' }';
+      }
       case 'repeat': {
         const reg = !(x.n.k === 'num' || (x.n.k === 'name' && params.includes(x.n.v)));
         return `{ const __n = Number(${g(x.n, 0)}); if (__n < ${reg ? 0 : 1} || __n > 255) throw new __Fail('INVALID');\n` +
@@ -150,8 +168,8 @@ export function emitFix(ast, params, qdecl, data = []) {
     }
     throw new Error(x.k);
   }).join('\n');
-  const fn = new Function('$', '__c', '__draw', '__Fail', '__in', '__args', '__data', s(ast));
-  return (m, draw, Fl, input, args, regions = []) => fn(m, consts, draw, Fl, input, args, regions);
+  const fn = new Function('$', '__c', '__draw', '__Fail', '__in', '__args', '__data', '__idx', s(ast));
+  return (m, draw, Fl, input, args, regions = [], index = 0) => fn(m, consts, draw, Fl, input, args, regions, index);
 }
 export const FIXM = {...X, real: v => Number(v) / 65536, int: v => Number(v)};
 

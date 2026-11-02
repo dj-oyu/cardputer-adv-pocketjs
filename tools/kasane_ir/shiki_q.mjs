@@ -22,7 +22,8 @@ export const INTS = {line: [2], plot: [2], cubic: [0, 1], linePattern: [2, 3, 4,
 export function eachNames(ast, data = []) {
   const out = new Map();
   const walk = list => list.forEach(x => {
-    if (x.k === 'each') { const d = data.find(r => r.name === x.r); for (const n of x.names) out.set(n, d.q); }
+    // and a region.at(i)'s names (v2.0 draft LOAD), the same way.
+    if (x.k === 'each' || x.k === 'load') { const d = data.find(r => r.name === x.r); for (const n of x.names) out.set(n, d.q); }
     if (x.body) walk(x.body);
   });
   walk(ast);
@@ -31,13 +32,16 @@ export function eachNames(ast, data = []) {
 
 // Q0 names (rule 1): counts, colours and integer draw arguments, the
 // counters of for loops (plan_js: let v = 0, then the last statement of the
-// repeat's body v += 1), take(n)'s count, and every name joined to one of
-// those by a plain name-to-name assignment. The names a for...of unpacks
+// repeat's body v += 1), take(n)'s count, from(k)'s start, the record of
+// at(i) / set(i, ...), a name declared as drawIndex() (v2.0 draft), and every
+// name joined to one of those by a plain name-to-name assignment. The names a for...of unpacks
 // take no part in the joining (they are fixed at the region's Q).
 export function q0Names(ast, fixed = new Set()) {
   const out = new Set(), links = [];
   const walk = list => list.forEach((x, k) => {
-    if (x.k === 'each') { if (x.n?.k === 'name') out.add(x.n.v); walk(x.body); }
+    if (x.k === 'each') { for (const e of [x.n, x.from]) if (e?.k === 'name') out.add(e.v); walk(x.body); }
+    if ((x.k === 'load' || x.k === 'store') && x.i.k === 'name') out.add(x.i.v);
+    if (x.k === 'decl') for (const d of x.d) if (d.e.k === 'call' && d.e.f === 'drawIndex') out.add(d.n);
     if (x.k === 'repeat') {
       if (x.n.k === 'name') out.add(x.n.v);
       const last = x.body[x.body.length - 1], prev = list[k - 1];
@@ -75,7 +79,7 @@ export function qRules(ast, qdecl, data = []) {
   // A region's element read at the region's Q: a fraction unless that is 0.
   const fractional = e => e.k === 'num' ? !Number.isInteger(+e.lit) : e.k === 'name' ? Q(e.v) !== 0 :
     e.k === 'index' ? regionQ(e.r) !== 0 :
-    e.k === 'call' || e.k === '/' || (e.a && fractional(e.a)) || (e.b && fractional(e.b));
+    e.k === 'call' ? e.f !== 'drawIndex' : e.k === '/' || (e.a && fractional(e.a)) || (e.b && fractional(e.b));
   const check = list => list.forEach(x => {
     if (x.k === 'decl') for (const d of x.d) if (ints.has(d.n) && fractional(d.e)) throw new Error(`${d.n} is Q0 (sec.8.3 rule 1) but is given a fraction`);
     if (x.k === 'assign' && ints.has(x.n) && fractional(x.e)) throw new Error(`${x.n} is Q0 (sec.8.3 rule 1) but is given a fraction`);
@@ -87,13 +91,14 @@ export function qRules(ast, qdecl, data = []) {
       // take(n): Q0, a whole count 0..65,535 when a literal (sec.8.2).
       if (x.n && fractional(x.n)) throw new Error(`${x.r}.take(): the count is Q0 (sec.8.3 rule 1) but can carry a fraction`);
       if (x.n?.k === 'num' && !(+x.n.lit >= 0 && +x.n.lit <= 65535)) throw new Error(`${x.r}.take(${x.n.lit}) outside 0..65,535`);
+      if (x.from && fractional(x.from)) throw new Error(`${x.r}.from(): the start is Q0 (sec.8.3 rule 1) but can carry a fraction`);
       check(x.body);
     }
   });
   check(ast);
   // Rule 7: a name's declared Q, a literal follows the other side (null), any
   // other expression Q16.
-  const natural = e => e.k === 'name' ? Q(e.v) : e.k === 'num' ? null : 16;
+  const natural = e => e.k === 'name' ? Q(e.v) : e.k === 'num' ? null : e.k === 'call' && e.f === 'drawIndex' ? 0 : 16;
   return {Q, natural, ints};
 }
 

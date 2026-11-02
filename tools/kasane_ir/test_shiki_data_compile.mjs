@@ -98,6 +98,28 @@ function counted() {
   }
   for (const [x, c] of marks.take(2)) { plot(x, 20, c); }
 }
+
+/** @shiki lane inputs: k, dy
+ *  @data st: i16 q4 record 3 write */
+function lane() {
+  // v2.0 draft: the record by number (LOAD/STORE), the draw's number.
+  const l = drawIndex();
+  const [x, y] = st.at(l);
+  const [z] = st.at(k, 2);
+  plot(x, y + dy, 2016);
+  st.set(k, [x + z, y - 1]);
+  st.set(l / 2, [z * 2], 2);
+}
+
+/** @shiki from inputs: s, n, dx
+ *  @data pts: i16 q0 record 2 write */
+function from() {
+  // v2.0 draft: EACH from a start record, with and without a count.
+  for (const [x, y] of pts.from(s)) { plot(x + dx, y, 31); }
+  for (const [x, y] of pts.from(s).take(n)) { pts.put(x + drawIndex(), y); }
+  const [a] = pts.at(drawIndex() + s);
+  plot(a, a, 1);
+}
 `;
 
 // Must not compile: [plan source, part of the error message].
@@ -127,6 +149,15 @@ function r7() { for (const [a, b, c] of d) { plot(a, b, c); } }`, 'names for'],
   [`/** @shiki r8 inputs: x
  *  @data d: i16 q0 record 1 write */
 function r8() { for (const [a] of d) { d.put(a, a); } }`, 'takes 1..1'],
+  [`/** @shiki r9 inputs: x
+ *  @data d: i16 q0 record 2 */
+function r9() { d.set(x, [x]); }`, 'not declared write'],
+  [`/** @shiki r10 inputs: x
+ *  @data d: i16 q0 record 2 */
+function r10() { const [a, b] = d.at(x, 1); plot(a, b, 1); }`, 'fields 1..2'],
+  [`/** @shiki r11 inputs: x
+ *  @data d: i16 q0 record 1 */
+function r11() { for (const [a] of d.from(x / 3)) { plot(a, x, 1); } }`, 'Q0'],
 ];
 
 // ---------------------------------------------------------------- random
@@ -142,7 +173,7 @@ const ELEM = [
 const INPUT = () => pick([ri(0, 8), ri(0, 3), ri(-20, 260), ri(-5, 5) + pick([0, .5, .25]), ri(0, 70), 0, 1, 2, 3, 1e6, -1e6, ri(-4, 4) / 3]);
 
 // shiki_fix's evaluation, drawn as the engine draws (as test_shiki_compile.mjs).
-function expected(fn, input, args, mem) {
+function expected(fn, input, args, mem, index) {
   const ctx = {segs: [], pen: {valid: false, x: 0, y: 0}, raster: 0};
   const px = v => { const p = Math.floor(v + .5); if (p < -480 || p > 720) throw new Fail('INVALID'); return p; };
   const add = seg => { const e = addSeg(ctx, seg); if (e) throw new Fail(e); };
@@ -153,7 +184,7 @@ function expected(fn, input, args, mem) {
     plot: (x, y, c) => { c = colour(c); const X = px(x), Y = px(y); add([X, Y, X, Y, c]); at(X, Y); },
     line: (x, y, c) => { c = colour(c); const X = px(x), Y = px(y); if (ctx.pen.valid) add([ctx.pen.x, ctx.pen.y, X, Y, c]); at(X, Y); },
   };
-  try { fn(FIXM, api, Fail, input, args, mem); } catch (e) { if (!(e instanceof Fail)) throw e; return {status: e.status, seg: ctx.segs}; }
+  try { fn(FIXM, api, Fail, input, args, mem, index); } catch (e) { if (!(e instanceof Fail)) throw e; return {status: e.status, seg: ctx.segs}; }
   return {status: 'DONE', seg: ctx.segs};
 }
 
@@ -174,14 +205,18 @@ for (const plan of findPlans(text, 'PLANS', ['shiki'])) {
       return makeRegion(d.type, d.q, d.k, Array.from({length: recs * d.k}, ELEM[d.type]));
     });
     const args = plan.params.map(() => ri(0, 65535));
-    const input = plan.inputs.map(INPUT);
+    // The record-number plans mostly stop INVALID on wide inputs: half get
+    // small ones, inside the regions, so that DONE is compared too.
+    const small = (plan.name === 'lane' || plan.name === 'from') && rnd() < .5;
+    const input = plan.inputs.map(() => small ? ri(0, 3) : INPUT());
     const copies = regions.map(g => g.mem.slice());
     const h = register(C.bytes, args, regions);
     if (!h) { bad++; rows.push(`${plan.name}: the engine refused the compiled bytes`); break; }
     n.vectors++;
-    const got = draw(h, input);
+    const index = small ? ri(0, 2) : pick([0, 0, 1, 2, 3, 7, ri(0, 40), 255]);   // DRAW_INDEX (v2.0 draft)
+    const got = draw(h, input, index);
     if (got.status === 'LIMIT' && got.steps === 10000) { n.steps++; continue; }
-    const want = expected(fn, input, args, copies);
+    const want = expected(fn, input, args, copies, index);
     n.status[got.status] = (n.status[got.status] ?? 0) + 1;
     // Region contents are compared whatever the status: writes made before a
     // stop stay (sec.5.3.3).
