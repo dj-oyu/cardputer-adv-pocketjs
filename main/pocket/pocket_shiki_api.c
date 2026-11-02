@@ -395,20 +395,23 @@ static list_t *list_of(JSContext *ctx,JSValueConst v,const char **code){
     if(!l->h||l->id!=id){*code=POCKET_ERR_CLOSED;return NULL;}
     return l;
 }
-// handles (a Uint32Array of 1..max) whose entries are all live Shiki handles.
-static const char *check_handles(JSContext *ctx,JSValueConst v,size_t max,const uint32_t **h,size_t *n){
+// handles (a Uint32Array of 1..max) whose entries are all live Shiki handles:
+// 0, or 1 for a wrong shape, 2 for a stale handle.
+enum { HANDLES_OK, HANDLES_BAD, HANDLES_STALE };
+static int check_handles(JSContext *ctx,JSValueConst v,size_t max,const uint32_t **h,size_t *n){
     *h=typed_data(ctx,v,JS_TYPED_ARRAY_UINT32,n);
-    if(!*h||*n<1||*n>max)return POCKET_ERR_INVALID_ARGUMENT;
-    for(size_t k=0;k<*n;k++)if(bind_of((*h)[k])<0)return POCKET_ERR_CLOSED;
-    return NULL;
+    if(!*h||*n<1||*n>max)return HANDLES_BAD;
+    for(size_t k=0;k<*n;k++)if(bind_of((*h)[k])<0)return HANDLES_STALE;
+    return HANDLES_OK;
 }
 static JSValue js_list(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.shiki.list";
     const uint32_t *h=NULL;
     size_t n=0;
-    const char *bad=argc>=1?check_handles(ctx,argv[0],DRAWS_PER_CALL,&h,&n):POCKET_ERR_INVALID_ARGUMENT;
-    if(bad)return failure(ctx,op,bad,bad==POCKET_ERR_CLOSED?"a stale Shiki handle":"expected a Uint32Array of 1..256 handles");
+    const int bad=argc>=1?check_handles(ctx,argv[0],DRAWS_PER_CALL,&h,&n):HANDLES_BAD;
+    if(bad==HANDLES_STALE)return failure(ctx,op,POCKET_ERR_CLOSED,"a stale Shiki handle");
+    if(bad)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected a Uint32Array of 1..256 handles");
     int slot=-1;
     for(int k=0;k<LISTS&&slot<0;k++)if(!lists[k].h)slot=k;
     if(slot<0)return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"8 lists");
@@ -430,9 +433,10 @@ static JSValue js_set_list(JSContext *ctx,JSValueConst self,int argc,JSValueCons
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"offset outside the list");
     const uint32_t *h=NULL;
     size_t n=0;
-    const char *bad=argc>=2?check_handles(ctx,argv[1],l->n,&h,&n):POCKET_ERR_INVALID_ARGUMENT;
-    if(!bad&&off+n>l->n)bad=POCKET_ERR_INVALID_ARGUMENT;
-    if(bad)return failure(ctx,op,bad,bad==POCKET_ERR_CLOSED?"a stale Shiki handle":"expected a Uint32Array inside the list");
+    int bad=argc>=2?check_handles(ctx,argv[1],l->n,&h,&n):HANDLES_BAD;
+    if(!bad&&off+n>l->n)bad=HANDLES_BAD;
+    if(bad==HANDLES_STALE)return failure(ctx,op,POCKET_ERR_CLOSED,"a stale Shiki handle");
+    if(bad)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected a Uint32Array inside the list");
     for(size_t k=0;k<n;k++){
         binds[bind_of(l->h[off+k])].lists--;
         l->h[off+k]=h[k];
