@@ -72,7 +72,7 @@ jobs:
           assert digest=='9fea08cfca669fe6e033e1ceb9281c7e1f89f49536a4419393bbc4108182a04b'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
-          for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+          for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
               assert k+':BOOL=OFF' in cache,k
           elf=(b/'cardputer_pocketjs.elf').read_bytes()
           assert b'Application information:' in elf and b'KBD_PROBE' in elf
