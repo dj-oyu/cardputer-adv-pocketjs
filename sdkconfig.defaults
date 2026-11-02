@@ -138,3 +138,18 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 # As with the cache size above, an existing sdkconfig keeps its DIO line; edit
 # CONFIG_ESPTOOLPY_FLASHMODE_* there too (or start that build_* directory fresh).
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# --- Shiki JIT: executable RAM (docs/kasane/shiki-jit.md sec.2) ---------------
+# Memory protection (PMS on the S3) splits the shared SRAM into a code part
+# and a data part and makes MALLOC_CAP_EXEC allocations impossible (IDF
+# v6.0.1 Kconfig, ESP_SYSTEM_MEMPROT: "allocating memory with
+# MALLOC_CAP_EXEC capability is not possible when this config is enabled").
+# The Shiki JIT writes PIE code into RAM at register time and runs it, so the
+# protection is off (the owner's decision for plan A, 2026-11-02). Why that is
+# acceptable here: every byte of code on this device is firmware its owner
+# builds and flashes, apps are JS run by the QuickJS guest (no native code
+# from outside), and the firmware listens on no network port (its only IP
+# traffic is the outbound time sync). What it gives up: a stray write from a
+# firmware bug can land in code and run instead of faulting at the
+# code/data boundary.
+CONFIG_ESP_SYSTEM_MEMPROT=n
