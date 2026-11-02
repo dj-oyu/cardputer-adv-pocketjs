@@ -29,8 +29,35 @@ static const ksn_jit_bit KSN_JIT_BITS_STQACCHH[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7
 static const ksn_jit_bit KSN_JIT_BITS_L32I[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
 static const ksn_jit_bit KSN_JIT_BITS_ADDI[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
 static const ksn_jit_bit KSN_JIT_BITS_LOOPGTZ[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{1,0,16},{1,1,17},{1,2,18},{1,3,19},{1,4,20},{1,5,21},{1,6,22},{1,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_L32IN[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,12},{2,1,13},{2,2,14},{2,3,15}};
+static const ksn_jit_bit KSN_JIT_BITS_S32IN[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,12},{2,1,13},{2,2,14},{2,3,15}};
+static const ksn_jit_bit KSN_JIT_BITS_S32I[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_L16UI[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_S16I[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_S8I[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_MOVI[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,16},{1,1,17},{1,2,18},{1,3,19},{1,4,20},{1,5,21},{1,6,22},{1,7,23},{1,8,8},{1,9,9},{1,10,10},{1,11,11}};
+static const ksn_jit_bit KSN_JIT_BITS_MOVN[]={{0,0,4},{0,1,5},{0,2,6},{0,3,7},{1,0,8},{1,1,9},{1,2,10},{1,3,11}};
+static const ksn_jit_bit KSN_JIT_BITS_ADDN[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_SUB[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_NEG[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,4},{1,1,5},{1,2,6},{1,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_XOR[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_AND[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_SRAI[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,4},{1,1,5},{1,2,6},{1,3,7},{2,0,8},{2,1,9},{2,2,10},{2,3,11},{2,4,20}};
+static const ksn_jit_bit KSN_JIT_BITS_SRLI[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,4},{1,1,5},{1,2,6},{1,3,7},{2,0,8},{2,1,9},{2,2,10},{2,3,11}};
+static const ksn_jit_bit KSN_JIT_BITS_SSAI[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{0,4,4}};
+static const ksn_jit_bit KSN_JIT_BITS_SRC[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_SLL[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11}};
+static const ksn_jit_bit KSN_JIT_BITS_MULL[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_MULSH[]={{0,0,12},{0,1,13},{0,2,14},{0,3,15},{1,0,8},{1,1,9},{1,2,10},{1,3,11},{2,0,4},{2,1,5},{2,2,6},{2,3,7}};
+static const ksn_jit_bit KSN_JIT_BITS_BEQ[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{1,0,4},{1,1,5},{1,2,6},{1,3,7},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_BGE[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{1,0,4},{1,1,5},{1,2,6},{1,3,7},{2,0,16},{2,1,17},{2,2,18},{2,3,19},{2,4,20},{2,5,21},{2,6,22},{2,7,23}};
+static const ksn_jit_bit KSN_JIT_BITS_BGEZ[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{1,0,12},{1,1,13},{1,2,14},{1,3,15},{1,4,16},{1,5,17},{1,6,18},{1,7,19},{1,8,20},{1,9,21},{1,10,22},{1,11,23}};
+static const ksn_jit_bit KSN_JIT_BITS_BEQZN[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{1,0,12},{1,1,13},{1,2,14},{1,3,15},{1,4,4},{1,5,5}};
+static const ksn_jit_bit KSN_JIT_BITS_BNEZN[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11},{1,0,12},{1,1,13},{1,2,14},{1,3,15},{1,4,4},{1,5,5}};
+static const ksn_jit_bit KSN_JIT_BITS_J[]={{0,0,6},{0,1,7},{0,2,8},{0,3,9},{0,4,10},{0,5,11},{0,6,12},{0,7,13},{0,8,14},{0,9,15},{0,10,16},{0,11,17},{0,12,18},{0,13,19},{0,14,20},{0,15,21},{0,16,22},{0,17,23}};
+static const ksn_jit_bit KSN_JIT_BITS_CALLX8[]={{0,0,8},{0,1,9},{0,2,10},{0,3,11}};
 
-enum {KSN_JIT_VLD128IP,KSN_JIT_VST128IP,KSN_JIT_VLDBC16,KSN_JIT_VADDS16,KSN_JIT_VSUBS16,KSN_JIT_VMIN16,KSN_JIT_VMAX16,KSN_JIT_ZEROQACC,KSN_JIT_VMULAS16,KSN_JIT_VSMULAS16,KSN_JIT_SRCMB16,KSN_JIT_LDQACCLL,KSN_JIT_LDQACCLH,KSN_JIT_LDQACCHL,KSN_JIT_LDQACCHH,KSN_JIT_STQACCLL,KSN_JIT_STQACCLH,KSN_JIT_STQACCHL,KSN_JIT_STQACCHH,KSN_JIT_L32I,KSN_JIT_ADDI,KSN_JIT_LOOPGTZ,KSN_JIT_ENTRY32,KSN_JIT_RETWN,KSN_JIT_NOPN,KSN_JIT_NOP,KSN_JIT_FORMS};
+enum {KSN_JIT_VLD128IP,KSN_JIT_VST128IP,KSN_JIT_VLDBC16,KSN_JIT_VADDS16,KSN_JIT_VSUBS16,KSN_JIT_VMIN16,KSN_JIT_VMAX16,KSN_JIT_ZEROQACC,KSN_JIT_VMULAS16,KSN_JIT_VSMULAS16,KSN_JIT_SRCMB16,KSN_JIT_LDQACCLL,KSN_JIT_LDQACCLH,KSN_JIT_LDQACCHL,KSN_JIT_LDQACCHH,KSN_JIT_STQACCLL,KSN_JIT_STQACCLH,KSN_JIT_STQACCHL,KSN_JIT_STQACCHH,KSN_JIT_L32I,KSN_JIT_ADDI,KSN_JIT_LOOPGTZ,KSN_JIT_ENTRY32,KSN_JIT_L32IN,KSN_JIT_S32IN,KSN_JIT_S32I,KSN_JIT_L16UI,KSN_JIT_S16I,KSN_JIT_S8I,KSN_JIT_MOVI,KSN_JIT_MOVN,KSN_JIT_ADDN,KSN_JIT_SUB,KSN_JIT_NEG,KSN_JIT_XOR,KSN_JIT_AND,KSN_JIT_SRAI,KSN_JIT_SRLI,KSN_JIT_SSAI,KSN_JIT_SRC,KSN_JIT_SLL,KSN_JIT_MULL,KSN_JIT_MULSH,KSN_JIT_BEQ,KSN_JIT_BGE,KSN_JIT_BGEZ,KSN_JIT_BEQZN,KSN_JIT_BNEZN,KSN_JIT_J,KSN_JIT_CALLX8,KSN_JIT_ENTRY48,KSN_JIT_RETWN,KSN_JIT_NOPN,KSN_JIT_NOP,KSN_JIT_FORMS};
 static const ksn_jit_form KSN_JIT_FORM[KSN_JIT_FORMS]={
     {0x00830024u,3,15,{0,2,0},KSN_JIT_BITS_VLD128IP}, /* ee.vld.128.ip q{0}, a{1}, {2} */
     {0x008a0024u,3,15,{0,2,0},KSN_JIT_BITS_VST128IP}, /* ee.vst.128.ip q{0}, a{1}, {2} */
@@ -55,6 +82,34 @@ static const ksn_jit_form KSN_JIT_FORM[KSN_JIT_FORMS]={
     {0x0000c222u,3,16,{2,2,0},KSN_JIT_BITS_ADDI}, /* addi a{0}, a{1}, {2} */
     {0x0000a276u,3,12,{2,0,0},KSN_JIT_BITS_LOOPGTZ}, /* loopgtz a{0}, .+4+{1} */
     {0x00004136u,3,0,{0,0,0},0}, /* entry a1, 32 */
+    {0x00000228u,2,12,{2,2,0},KSN_JIT_BITS_L32IN}, /* l32i.n a{0}, a{1}, {2} */
+    {0x00000229u,2,12,{2,2,0},KSN_JIT_BITS_S32IN}, /* s32i.n a{0}, a{1}, {2} */
+    {0x00006222u,3,16,{2,2,0},KSN_JIT_BITS_S32I}, /* s32i a{0}, a{1}, {2} */
+    {0x00001222u,3,16,{2,2,0},KSN_JIT_BITS_L16UI}, /* l16ui a{0}, a{1}, {2} */
+    {0x00005222u,3,16,{2,2,0},KSN_JIT_BITS_S16I}, /* s16i a{0}, a{1}, {2} */
+    {0x00004222u,3,16,{2,2,0},KSN_JIT_BITS_S8I}, /* s8i a{0}, a{1}, {2} */
+    {0x0000a022u,3,16,{2,0,0},KSN_JIT_BITS_MOVI}, /* movi a{0}, {1} */
+    {0x0000022du,2,8,{2,2,0},KSN_JIT_BITS_MOVN}, /* mov.n a{0}, a{1} */
+    {0x0000222au,2,12,{2,2,2},KSN_JIT_BITS_ADDN}, /* add.n a{0}, a{1}, a{2} */
+    {0x00c02220u,3,12,{2,2,2},KSN_JIT_BITS_SUB}, /* sub a{0}, a{1}, a{2} */
+    {0x00602020u,3,8,{2,2,0},KSN_JIT_BITS_NEG}, /* neg a{0}, a{1} */
+    {0x00302220u,3,12,{2,2,2},KSN_JIT_BITS_XOR}, /* xor a{0}, a{1}, a{2} */
+    {0x00102220u,3,12,{2,2,2},KSN_JIT_BITS_AND}, /* and a{0}, a{1}, a{2} */
+    {0x00212020u,3,13,{2,2,0},KSN_JIT_BITS_SRAI}, /* srai a{0}, a{1}, {2} */
+    {0x00412020u,3,12,{2,2,0},KSN_JIT_BITS_SRLI}, /* srli a{0}, a{1}, {2} */
+    {0x00404000u,3,5,{0,0,0},KSN_JIT_BITS_SSAI}, /* ssai {0} */
+    {0x00812220u,3,12,{2,2,2},KSN_JIT_BITS_SRC}, /* src a{0}, a{1}, a{2} */
+    {0x00a12200u,3,8,{2,2,0},KSN_JIT_BITS_SLL}, /* sll a{0}, a{1} */
+    {0x00822220u,3,12,{2,2,2},KSN_JIT_BITS_MULL}, /* mull a{0}, a{1}, a{2} */
+    {0x00b22220u,3,12,{2,2,2},KSN_JIT_BITS_MULSH}, /* mulsh a{0}, a{1}, a{2} */
+    {0x00001227u,3,16,{2,2,0},KSN_JIT_BITS_BEQ}, /* beq a{0}, a{1}, .+4+{2} */
+    {0x0000a227u,3,16,{2,2,0},KSN_JIT_BITS_BGE}, /* bge a{0}, a{1}, .+4+{2} */
+    {0x000002d6u,3,16,{2,0,0},KSN_JIT_BITS_BGEZ}, /* bgez a{0}, .+4+{1} */
+    {0x0000028cu,2,10,{2,0,0},KSN_JIT_BITS_BEQZN}, /* beqz.n a{0}, .+4+{1} */
+    {0x000002ccu,2,10,{2,0,0},KSN_JIT_BITS_BNEZN}, /* bnez.n a{0}, .+4+{1} */
+    {0x00000006u,3,18,{0,0,0},KSN_JIT_BITS_J}, /* j .+4+{0} */
+    {0x000002e0u,3,4,{2,0,0},KSN_JIT_BITS_CALLX8}, /* callx8 a{0} */
+    {0x00006136u,3,0,{0,0,0},0}, /* entry a1, 48 */
     {0x0000f01du,2,0,{0,0,0},0}, /* retw.n */
     {0x0000f03du,2,0,{0,0,0},0}, /* nop.n */
     {0x000020f0u,3,0,{0,0,0},0}, /* nop */

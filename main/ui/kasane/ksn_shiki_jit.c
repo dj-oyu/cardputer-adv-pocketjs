@@ -224,15 +224,327 @@ unsigned ksn_shiki_jit_plan(const ksn_shiki_plan *plan,ksn_jit_section *s,unsign
     return n;
 }
 
+/* ---- Stage 3: the whole plan as scalar code (shiki-jit.md sec.11) ----------
+ * Address registers: a2 the run context, a3 the vm (its registers at 0, so
+ * r[k] is l32i.n at 4k), a4 the step limit, a5 the inputs, a6 INT32_MAX
+ * (the saturation's fix-up), a7 the helper; a8..a15 are scratch within one
+ * instruction (callx8 gives them to the helper). The vm stays in memory:
+ * the code reads and writes the same registers, loop frames, depth and
+ * step count the interpreter does, so it can hand any block over to it.
+ *
+ * Steps are counted per block: a block runs from the instruction after a
+ * loop opener, END or BREAK_IF_GT (or pc 0) to the next of them, and its
+ * header adds its length to vm->steps, or returns its pc to the interpreter
+ * when that would pass the limit (the interpreter then stops at the exact
+ * step). Every jump target is a block start, so every path passes a header.
+ * Loop depth is lexical (registration matched each END to its opener), so
+ * each frame's address is known when compiling. */
+#define VM_REM(f) (offsetof(ksn_shiki_vm,loop)+(f)*sizeof(((ksn_shiki_vm *)0)->loop[0])+offsetof(__typeof__(((ksn_shiki_vm *)0)->loop[0]),remaining))
+#define VM_LPC(f) (offsetof(ksn_shiki_vm,loop)+(f)*sizeof(((ksn_shiki_vm *)0)->loop[0])+offsetof(__typeof__(((ksn_shiki_vm *)0)->loop[0]),pc))
+_Static_assert(offsetof(ksn_shiki_vm,reg)==0,"r[k] at 4k");
+_Static_assert(VM_REM(KSN_SHIKI_LOOP_DEPTH-1)<=510&&offsetof(ksn_shiki_vm,steps)<=510&&
+               offsetof(ksn_shiki_vm,depth)<=255&&VM_LPC(KSN_SHIKI_LOOP_DEPTH-1)<=255,
+               "the vm's fields within l16ui/s8i reach");
+_Static_assert(KSN_SHIKI_LOOP_DEPTH<=8&&KSN_SHIKI_CODE<=64,"pcs and depths fit a movi");
+
+static bool opens(uint8_t op){
+    return op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_REPEAT_REG||op==KSN_SHIKI_EACH||op==KSN_SHIKI_VEACH;
+}
+static bool ends_block(uint8_t op){
+    return opens(op)||op==KSN_SHIKI_END||op==KSN_SHIKI_BREAK_IF_GT;
+}
+/* Re-encodes the instruction at `at` (a branch whose offset is known now). */
+static void patch(ksn_jit_buf *b,size_t at,unsigned form,int o0,int o1,int o2){
+    if(b->overflow)return;
+    const size_t len=b->len;
+    b->len=at;
+    ksn_jit_emit(b,form,o0,o1,o2);
+    b->len=len;
+}
+/* l32r: not in the generated table (its target is pc-relative to the word
+ * below, ((pc + 3) & ~3) + 4 * (imm16 - 65536)); test_scalar.py checks the
+ * bytes with objdump. */
+static void emit_l32r(ksn_jit_buf *b,unsigned t,size_t literal){
+    if(b->overflow||b->len+3u>b->cap){b->overflow=true;return;}
+    const long words=((long)literal-(long)((b->len+3u)&~(size_t)3u))/4;
+    if(words< -65536||words>=0){b->overflow=true;return;}
+    const uint32_t imm=(uint32_t)words&0xFFFFu;
+    b->p[b->len++]=(uint8_t)(0x01u|t<<4);
+    b->p[b->len++]=(uint8_t)imm;
+    b->p[b->len++]=(uint8_t)(imm>>8);
+}
+/* dst = r[a] (+ or -) r[b] saturated: overflow when the operands' signs
+ * say so (add: both differ from the sum's; sub: a's differs from b's and
+ * from the difference's); the fix-up is INT32_MAX or MIN by a's sign. */
+static void emit_addsub(ksn_jit_buf *b,const ksn_shiki_inst *i,bool sub){
+    ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+    ksn_jit_emit(b,KSN_JIT_L32IN,9,3,i->b);
+    if(sub){
+        ksn_jit_emit(b,KSN_JIT_SUB,10,8,9);
+        ksn_jit_emit(b,KSN_JIT_XOR,11,8,9);
+        ksn_jit_emit(b,KSN_JIT_XOR,12,8,10);
+    }else{
+        ksn_jit_emit(b,KSN_JIT_ADDN,10,8,9);
+        ksn_jit_emit(b,KSN_JIT_XOR,11,8,10);
+        ksn_jit_emit(b,KSN_JIT_XOR,12,9,10);
+    }
+    ksn_jit_emit(b,KSN_JIT_AND,11,11,12);
+    const size_t br=b->len;
+    ksn_jit_emit(b,KSN_JIT_BGEZ,11,0,0);
+    ksn_jit_emit(b,KSN_JIT_SRAI,10,8,31);
+    ksn_jit_emit(b,KSN_JIT_XOR,10,10,6);
+    patch(b,br,KSN_JIT_BGEZ,11,(int)(b->len-br-4u),0);
+    ksn_jit_emit(b,KSN_JIT_S32IN,10,3,i->dst);
+}
+/* a10 holds the result and a11 the 64-bit value's high word (its sign is
+ * the true result's); hi_ok and lo_sign are the registers whose equality
+ * says the result fits. */
+static void emit_fix(ksn_jit_buf *b,unsigned hi_ok,unsigned lo_sign,unsigned sign_of){
+    const size_t br=b->len;
+    ksn_jit_emit(b,KSN_JIT_BEQ,(int)hi_ok,(int)lo_sign,0);
+    ksn_jit_emit(b,KSN_JIT_SRAI,10,(int)sign_of,31);
+    ksn_jit_emit(b,KSN_JIT_XOR,10,10,6);
+    patch(b,br,KSN_JIT_BEQ,(int)hi_ok,(int)lo_sign,(int)(b->len-br-4u));
+}
+static void emit_mul(ksn_jit_buf *b,const ksn_shiki_inst *i){
+    const unsigned s=i->aux;                         /* 0..62 (registration) */
+    ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+    ksn_jit_emit(b,KSN_JIT_L32IN,9,3,i->b);
+    ksn_jit_emit(b,KSN_JIT_MULL,10,8,9);
+    ksn_jit_emit(b,KSN_JIT_MULSH,11,8,9);
+    if(s==0){
+        ksn_jit_emit(b,KSN_JIT_SRAI,12,10,31);
+        emit_fix(b,11,12,11);
+    }else if(s<32){
+        /* floor(p / 2^s) is p >> s (arithmetic); it fits when the high
+         * word shifted alone is the low word's sign. */
+        ksn_jit_emit(b,KSN_JIT_SSAI,(int)s,0,0);
+        ksn_jit_emit(b,KSN_JIT_SRC,10,11,10);
+        ksn_jit_emit(b,KSN_JIT_SRAI,12,11,(int)s);
+        ksn_jit_emit(b,KSN_JIT_SRAI,13,10,31);
+        emit_fix(b,12,13,11);
+    }else{
+        /* |p| <= 2^62, so p >> s (s >= 32) always fits. */
+        ksn_jit_emit(b,KSN_JIT_SRAI,10,11,(int)(s-32u));
+    }
+    ksn_jit_emit(b,KSN_JIT_S32IN,10,3,i->dst);
+}
+static void emit_shift(ksn_jit_buf *b,const ksn_shiki_inst *i){
+    const int t=i->imm;                              /* -31..31 (registration) */
+    ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+    if(t==0){
+        ksn_jit_emit(b,KSN_JIT_S32IN,8,3,i->dst);
+        return;
+    }
+    if(t<0){
+        ksn_jit_emit(b,KSN_JIT_SRAI,10,8,-t);
+    }else{
+        /* sll shifts by 32 - SAR; src gives the high word of (sign:a) << t. */
+        ksn_jit_emit(b,KSN_JIT_SSAI,32-t,0,0);
+        ksn_jit_emit(b,KSN_JIT_SLL,10,8,0);
+        ksn_jit_emit(b,KSN_JIT_SRAI,9,8,31);
+        ksn_jit_emit(b,KSN_JIT_SRC,11,9,8);
+        ksn_jit_emit(b,KSN_JIT_SRAI,12,10,31);
+        emit_fix(b,11,12,9);
+    }
+    ksn_jit_emit(b,KSN_JIT_S32IN,10,3,i->dst);
+}
+
+#define JIT_FIXUPS (2u*KSN_SHIKI_CODE)
+bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entry){
+    const unsigned n=plan->count;
+    /* The literal pool: SET's values that movi cannot hold. */
+    int32_t pool[KSN_SHIKI_CODE];
+    unsigned npool=0;
+    uint8_t lit[KSN_SHIKI_CODE];
+    for(unsigned pc=0;pc<n;pc++){
+        const ksn_shiki_inst *i=&plan->code[pc];
+        if(i->op!=KSN_SHIKI_SET||(i->imm>=-2048&&i->imm<=2047))continue;
+        unsigned k=0;
+        while(k<npool&&pool[k]!=i->imm)k++;
+        if(k==npool)pool[npool++]=i->imm;
+        lit[pc]=(uint8_t)k;
+    }
+    const size_t base=b->len;                        /* 4-aligned: the pool's words */
+    for(unsigned k=0;k<npool;k++)
+        for(unsigned j=0;j<4;j++){
+            if(b->len>=b->cap){b->overflow=true;return false;}
+            b->p[b->len++]=(uint8_t)((uint32_t)pool[k]>>(8*j));
+        }
+    *entry=b->len;
+    ksn_jit_emit(b,KSN_JIT_ENTRY48,0,0,0);
+    ksn_jit_emit(b,KSN_JIT_L32IN,3,2,0);
+    ksn_jit_emit(b,KSN_JIT_L32IN,5,2,1);
+    ksn_jit_emit(b,KSN_JIT_L32IN,4,2,2);
+    ksn_jit_emit(b,KSN_JIT_L32IN,7,2,3);
+    ksn_jit_emit(b,KSN_JIT_MOVI,6,-1,0);
+    ksn_jit_emit(b,KSN_JIT_SRLI,6,6,1);
+
+    size_t at[KSN_SHIKI_CODE+1];
+    struct { uint16_t at; uint8_t target; } fix[JIT_FIXUPS];
+    unsigned nfix=0;
+    uint8_t stack[KSN_SHIKI_LOOP_DEPTH];             /* the openers, innermost last */
+    unsigned depth=0;
+    bool block=true;
+    /* A j to the block at pc_, its offset patched at the end. */
+#define JUMP(pc_) do{ \
+        if(nfix<JIT_FIXUPS){fix[nfix].at=(uint16_t)b->len;fix[nfix++].target=(uint8_t)(pc_);} \
+        else{b->overflow=true;} \
+        ksn_jit_emit(b,KSN_JIT_J,0,0,0); \
+    }while(0)
+    for(unsigned pc=0;pc<n;pc++){
+        const ksn_shiki_inst *i=&plan->code[pc];
+        at[pc]=b->len;
+        if(block){
+            unsigned k=pc;
+            while(k<n&&!ends_block(plan->code[k].op))k++;
+            const unsigned len=(k<n?k+1u:n)-pc;      /* through the terminator */
+            ksn_jit_emit(b,KSN_JIT_L16UI,8,3,(int)(offsetof(ksn_shiki_vm,steps)/2));
+            ksn_jit_emit(b,KSN_JIT_ADDI,8,8,(int)len);
+            const size_t br=b->len;
+            ksn_jit_emit(b,KSN_JIT_BGE,4,8,0);
+            ksn_jit_emit(b,KSN_JIT_MOVI,2,(int)pc,0);
+            ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
+            patch(b,br,KSN_JIT_BGE,4,8,(int)(b->len-br-4u));
+            ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(offsetof(ksn_shiki_vm,steps)/2));
+            block=false;
+        }
+        switch(i->op){
+        case KSN_SHIKI_SET:
+            if(i->imm>=-2048&&i->imm<=2047)ksn_jit_emit(b,KSN_JIT_MOVI,8,i->imm,0);
+            else emit_l32r(b,8,base+4u*lit[pc]);
+            ksn_jit_emit(b,KSN_JIT_S32IN,8,3,i->dst);
+            break;
+        case KSN_SHIKI_INPUT:
+            ksn_jit_emit(b,KSN_JIT_L32IN,8,5,i->a);
+            ksn_jit_emit(b,KSN_JIT_S32IN,8,3,i->dst);
+            break;
+        case KSN_SHIKI_ADD: emit_addsub(b,i,false); break;
+        case KSN_SHIKI_SUB: emit_addsub(b,i,true); break;
+        case KSN_SHIKI_NEG: {
+            /* -INT32_MIN is the only overflow: then a & -a is negative. */
+            ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+            ksn_jit_emit(b,KSN_JIT_NEG,10,8,0);
+            ksn_jit_emit(b,KSN_JIT_AND,11,8,10);
+            const size_t br=b->len;
+            ksn_jit_emit(b,KSN_JIT_BGEZ,11,0,0);
+            ksn_jit_emit(b,KSN_JIT_MOVN,10,6,0);
+            patch(b,br,KSN_JIT_BGEZ,11,(int)(b->len-br-4u),0);
+            ksn_jit_emit(b,KSN_JIT_S32IN,10,3,i->dst);
+            break;
+        }
+        case KSN_SHIKI_MUL: emit_mul(b,i); break;
+        case KSN_SHIKI_SHIFT: emit_shift(b,i); break;
+        case KSN_SHIKI_REPEAT:
+            if(depth>=KSN_SHIKI_LOOP_DEPTH)return false;
+            ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)pc,0);
+            ksn_jit_emit(b,KSN_JIT_S8I,8,3,(int)VM_LPC(depth));
+            ksn_jit_emit(b,KSN_JIT_MOVI,8,i->imm,0);     /* 1..255 */
+            ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(VM_REM(depth)/2));
+            ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)depth+1,0);
+            ksn_jit_emit(b,KSN_JIT_S8I,8,3,(int)offsetof(ksn_shiki_vm,depth));
+            stack[depth++]=(uint8_t)pc;
+            block=true;
+            break;
+        case KSN_SHIKI_END: {
+            if(!depth)return false;
+            const unsigned f=depth-1u,o=stack[f];
+            ksn_jit_emit(b,KSN_JIT_L16UI,8,3,(int)(VM_REM(f)/2));
+            ksn_jit_emit(b,KSN_JIT_ADDI,8,8,-1);
+            ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(VM_REM(f)/2));
+            const size_t br=b->len;
+            ksn_jit_emit(b,KSN_JIT_BEQZN,8,0,0);
+            JUMP(o+1u);
+            patch(b,br,KSN_JIT_BEQZN,8,(int)(b->len-br-4u),0);
+            ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)f,0);
+            ksn_jit_emit(b,KSN_JIT_S8I,8,3,(int)offsetof(ksn_shiki_vm,depth));
+            depth--;
+            block=true;
+            break;
+        }
+        case KSN_SHIKI_BREAK_IF_GT: {
+            if(!depth)return false;
+            const unsigned f=depth-1u,o=stack[f];
+            ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+            ksn_jit_emit(b,KSN_JIT_L32IN,9,3,i->b);
+            const size_t br=b->len;
+            ksn_jit_emit(b,KSN_JIT_BGE,9,8,0);
+            ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)f,0);
+            ksn_jit_emit(b,KSN_JIT_S8I,8,3,(int)offsetof(ksn_shiki_vm,depth));
+            JUMP(plan->code[o].end+1u);
+            patch(b,br,KSN_JIT_BGE,9,8,(int)(b->len-br-4u));
+            block=true;
+            break;
+        }
+        default: {
+            /* The helper: ksn_shiki_jit_leaf(ctx, pc). */
+            const bool skips=opens(i->op);
+            if(skips&&depth>=KSN_SHIKI_LOOP_DEPTH)return false;
+            ksn_jit_emit(b,KSN_JIT_MOVN,10,2,0);
+            ksn_jit_emit(b,KSN_JIT_MOVI,11,(int)pc,0);
+            ksn_jit_emit(b,KSN_JIT_CALLX8,7,0,0);
+            const size_t go=b->len;
+            ksn_jit_emit(b,KSN_JIT_BEQZN,10,0,0);
+            if(skips){
+                ksn_jit_emit(b,KSN_JIT_ADDI,9,10,-1);
+                const size_t br=b->len;
+                ksn_jit_emit(b,KSN_JIT_BNEZN,9,0,0);
+                JUMP(i->end+1u);
+                patch(b,br,KSN_JIT_BNEZN,9,(int)(b->len-br-4u),0);
+            }
+            ksn_jit_emit(b,KSN_JIT_MOVN,2,10,0);
+            ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
+            patch(b,go,KSN_JIT_BEQZN,10,(int)(b->len-go-4u),0);
+            if(skips){stack[depth++]=(uint8_t)pc;block=true;}
+            break;
+        }
+        }
+        if(b->overflow)return false;
+    }
+#undef JUMP
+    if(depth)return false;
+    at[n]=b->len;                                    /* the program's end: DONE */
+    ksn_jit_emit(b,KSN_JIT_MOVI,2,(int)KSN_SHIKI_DONE<<8,0);
+    ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
+    for(unsigned k=0;k<nfix;k++){
+        const long off=(long)at[fix[k].target]-(long)fix[k].at-4;
+        patch(b,fix[k].at,KSN_JIT_J,(int)off,0,0);
+    }
+    return !b->overflow;
+}
+
 /* ---- Stage 2 at run time (device) ------------------------------------------ */
 bool ksn_shiki_jit_enabled=true;
+/* Stage 3's switch and memory (sec.11); defined everywhere so that the
+ * session's log can read them, used on the device only. */
+bool ksn_shiki_jit_scalar_on=true;
+uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
 typedef struct {
     uint8_t *raw,*exec;           /* the allocation, and the code in it (16-aligned) */
     unsigned n;
     ksn_jit_section s[KSN_JIT_SECTIONS];
+    uint8_t *sraw;                /* stage 3: the plan's scalar code (allocation, entry) */
+    uint32_t (*scalar)(ksn_jit_run *);
+    uint32_t sbytes;
 } jit_plan;
+/* Copies len bytes of code into a new executable allocation, as 32-bit
+ * words (the instruction bus takes only word stores); *raw is what to free.
+ * The code starts 16-aligned (the VEACH loops count on it). */
+static uint8_t *to_exec(uint8_t *tmp,size_t n,uint8_t **raw,size_t *bytes){
+    const size_t len=(n+3u)&~(size_t)3u;
+    *raw=heap_caps_malloc(len+16u,MALLOC_CAP_EXEC);
+    if(!*raw)return NULL;
+    *bytes=len+16u;
+    uint8_t *x=(uint8_t *)(((uintptr_t)*raw+15u)&~(uintptr_t)15u);
+    volatile uint32_t *w=(volatile uint32_t *)(esp_ptr_in_diram_iram(x)?esp_ptr_diram_iram_to_dram(x):(void *)x);
+    memset(tmp+n,0,len-n);
+    for(size_t k=0;k<len/4;k++)
+        w[k]=(uint32_t)tmp[4*k]|(uint32_t)tmp[4*k+1]<<8|(uint32_t)tmp[4*k+2]<<16|(uint32_t)tmp[4*k+3]<<24;
+    __asm__ volatile("memw\n" "isync\n":::"memory");
+    return x;
+}
 #define JIT_SCRATCH 2048u        /* 4 sections of at most ~400 B each */
 
 void ksn_shiki_jit_attach(ksn_shiki_plan *plan){
@@ -246,26 +558,72 @@ void ksn_shiki_jit_attach(ksn_shiki_plan *plan){
     ksn_jit_buf b={tmp,0,JIT_SCRATCH,false};
     j->n=ksn_shiki_jit_plan(plan,j->s,KSN_JIT_SECTIONS,&b);
     if(!j->n){free(tmp);free(j);return;}
-    /* Rounded up to whole words: the instruction bus takes only word stores. */
-    const size_t len=(b.len+3u)&~(size_t)3u;
-    j->raw=heap_caps_malloc(len+16u,MALLOC_CAP_EXEC);
-    if(!j->raw){free(tmp);free(j);return;}       /* no code: the interpreter runs it */
-    j->exec=(uint8_t *)(((uintptr_t)j->raw+15u)&~(uintptr_t)15u);
-    volatile uint32_t *w=(volatile uint32_t *)(esp_ptr_in_diram_iram(j->exec)?
-                                               esp_ptr_diram_iram_to_dram(j->exec):(void *)j->exec);
-    memset(tmp+b.len,0,len-b.len);
-    for(size_t k=0;k<len/4;k++)
-        w[k]=(uint32_t)tmp[4*k]|(uint32_t)tmp[4*k+1]<<8|(uint32_t)tmp[4*k+2]<<16|(uint32_t)tmp[4*k+3]<<24;
-    __asm__ volatile("memw\n" "isync\n":::"memory");
+    size_t bytes;
+    j->exec=to_exec(tmp,b.len,&j->raw,&bytes);
     free(tmp);
+    if(!j->exec){free(j);return;}                /* no code: the interpreter runs it */
     plan->jit=j;
 }
 void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
     jit_plan *j=plan?plan->jit:NULL;
     if(!j)return;
-    heap_caps_free(j->raw);
+    if(j->raw)heap_caps_free(j->raw);
+    if(j->sraw){heap_caps_free(j->sraw);ksn_shiki_jit_bytes-=j->sbytes;}
     free(j);
     plan->jit=NULL;
+}
+
+/* ---- Stage 3 at run time ----------------------------------------------------
+ * A plan is compiled on its JIT_HEAT-th draw (a plan drawn once, a title's,
+ * never costs memory), once: on any failure, or when the code would pass
+ * the budget, it stays with the interpreter. The budget bounds the
+ * executable memory taken from the heap the app shares (shiki-jit.md
+ * sec.11). */
+#define JIT_HEAT 32u
+#define JIT_SCALAR_SCRATCH 4096u
+
+static bool compile_scalar(ksn_shiki_plan *plan){
+    uint8_t *tmp=malloc(JIT_SCALAR_SCRATCH);
+    if(!tmp)return false;
+    ksn_jit_buf b={tmp,0,JIT_SCALAR_SCRATCH,false};
+    size_t entry=0,bytes=0;
+    if(!ksn_shiki_jit_scalar(plan,&b,&entry)||ksn_shiki_jit_bytes+b.len+20u>ksn_shiki_jit_budget){
+        free(tmp);
+        return false;
+    }
+    jit_plan *j=plan->jit;
+    const bool fresh=!j;
+    if(fresh&&!(j=calloc(1,sizeof *j))){free(tmp);return false;}
+    uint8_t *x=to_exec(tmp,b.len,&j->sraw,&bytes);
+    free(tmp);
+    if(!x){if(fresh)free(j);return false;}
+    j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
+    j->sbytes=(uint32_t)bytes;
+    ksn_shiki_jit_bytes+=(uint32_t)bytes;
+    plan->jit=j;
+    return true;
+}
+bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
+    const jit_plan *j=plan->jit;
+    if(j&&j->scalar)return true;
+    plan->heat=UINT16_MAX;
+    return compile_scalar(plan);
+}
+uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
+                           ksn_shiki_vm *vm,ksn_proc_segment *out){
+    if(!ksn_shiki_jit_scalar_on)return 0;
+    /* The plan's memory is the caller's own copy (never flash), so the JIT
+     * may keep its heat and code pointer in it. */
+    ksn_shiki_plan *p=(ksn_shiki_plan *)plan;
+    const jit_plan *j=p->jit;
+    if(!j||!j->scalar){
+        if(p->heat==UINT16_MAX||++p->heat<JIT_HEAT)return 0;
+        p->heat=UINT16_MAX;
+        if(!compile_scalar(p))return 0;
+        j=p->jit;
+    }
+    ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,plan,out,index};
+    return j->scalar(&c);
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}
 

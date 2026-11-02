@@ -303,3 +303,102 @@ bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],k
         return true;
     }
 }
+
+/* ---- random programs for the scalar JIT (ksn_shiki_bench.h) --------------- */
+static void put_inst(uint8_t *b,uint8_t op,uint8_t dst,uint8_t a,uint8_t bb,int32_t imm,uint16_t aux){
+    b[0]=op;b[1]=dst;b[2]=a;b[3]=bb;
+    for(unsigned k=0;k<4;k++)b[4+k]=(uint8_t)((uint32_t)imm>>(8*k));
+    b[8]=(uint8_t)aux;b[9]=(uint8_t)(aux>>8);b[10]=b[11]=0;
+}
+static int32_t value(uint32_t *st){
+    switch(next(st)%12){
+    case 10: case 11: {                         /* +-2^k, +-(2^k - 1): the exact boundaries */
+        const unsigned k=next(st)%32;
+        const int64_t m=((int64_t)1<<k)-(int64_t)(next(st)&1);
+        return (int32_t)(next(st)&1?m:-m);
+    }
+    case 8: case 9: {                           /* log-uniform: products near every boundary */
+        const uint32_t m=(next(st)<<8|next(st))>>(next(st)%32);
+        return next(st)&1?(int32_t)m:-(int32_t)m;
+    }
+    case 0: return (int32_t)(next(st)%4001)-2000;
+    case 1: return INT32_MAX-(int32_t)(next(st)%3);
+    case 2: return INT32_MIN+(int32_t)(next(st)%3);
+    case 3: return (int32_t)(next(st)<<8^next(st));
+    case 4: return (int32_t)(next(st)%2048)-1024+((next(st)&1)?65536:0);
+    case 5: return (int32_t)(next(st)%601)-300;
+    default: return (int32_t)(next(st)%40)-20;
+    }
+}
+/* A well-nested program of up to 64 instructions; registration has the last
+ * word (a refused one is drawn again). */
+static unsigned program(uint32_t *st,uint8_t *body,unsigned *nin){
+    unsigned n=0,open[KSN_SHIKI_LOOP_DEPTH],depth=0;
+    const unsigned want=4+next(st)%60;
+    const int big=next(st)%4==0;                   /* long loops: the step limit */
+    *nin=next(st)%(KSN_SHIKI_INPUTS+1);
+    /* Half the programs give most registers a value first, so that the
+     * arithmetic meets the boundaries rather than zeros. */
+    if(next(st)&1)
+        for(unsigned k=0;k<KSN_SHIKI_REGS&&n+4<want;k++)if(next(st)%4)put_inst(body+12*n++,KSN_SHIKI_SET,(uint8_t)k,0,0,value(st),0);
+    while(n<want){
+        const unsigned left=want-n;
+        if(depth&&(left<=depth||next(st)%6==0)){put_inst(body+12*n++,KSN_SHIKI_END,0,0,0,0,0);depth--;continue;}
+        const uint8_t d=(uint8_t)(next(st)%KSN_SHIKI_REGS),ra=(uint8_t)(next(st)%KSN_SHIKI_REGS),rb=(uint8_t)(next(st)%KSN_SHIKI_REGS);
+        uint8_t *p=body+12*n;
+        switch(next(st)%22){
+        case 0: case 1: put_inst(p,KSN_SHIKI_SET,d,0,0,value(st),0); break;
+        case 2: if(*nin){put_inst(p,KSN_SHIKI_INPUT,d,(uint8_t)(next(st)%*nin),0,0,0);break;}
+                put_inst(p,KSN_SHIKI_SET,d,0,0,value(st),0); break;
+        case 3: case 4: case 5: put_inst(p,KSN_SHIKI_ADD,d,ra,rb,0,0); break;
+        case 6: put_inst(p,KSN_SHIKI_SUB,d,ra,rb,0,0); break;
+        case 7: put_inst(p,KSN_SHIKI_NEG,d,ra,0,0,0); break;
+        case 8: case 9: case 10: {
+            static const uint16_t s[]={0,1,8,15,16,24,31,32,33,40,62};
+            put_inst(p,KSN_SHIKI_MUL,d,ra,rb,0,next(st)%3?s[next(st)%11]:(uint16_t)(next(st)%63));
+            break;
+        }
+        case 11: put_inst(p,KSN_SHIKI_SHIFT,d,ra,0,(int32_t)(next(st)%63)-31,0); break;
+        case 12: put_inst(p,KSN_SHIKI_SIN,d,ra,0,0,0); break;
+        case 13: put_inst(p,KSN_SHIKI_ADD_H,d,ra,rb,0,0); break;
+        case 14: case 15:
+            if(depth<4&&left>depth+2){
+                put_inst(p,KSN_SHIKI_REPEAT,0,0,0,big?(int32_t)(1+next(st)%255):(int32_t)(1+next(st)%4),0);
+                open[depth++]=n;
+            }else put_inst(p,KSN_SHIKI_ADD,d,ra,rb,0,0);
+            break;
+        case 16:
+            if(depth<4&&left>depth+2){put_inst(p,KSN_SHIKI_REPEAT_REG,0,ra,0,0,0);open[depth++]=n;}
+            else put_inst(p,KSN_SHIKI_SUB,d,ra,rb,0,0);
+            break;
+        case 17: if(depth){put_inst(p,KSN_SHIKI_BREAK_IF_GT,0,ra,rb,0,0);break;}
+                 put_inst(p,KSN_SHIKI_MOVE,0,ra,rb,0,0); break;
+        case 18: put_inst(p,KSN_SHIKI_MOVE,0,ra,rb,0,0); break;
+        case 19: put_inst(p,KSN_SHIKI_LINE,0,ra,rb,0,(uint16_t)next(st)); break;
+        case 20: put_inst(p,KSN_SHIKI_PLOT,0,ra,rb,0,(uint16_t)next(st)); break;
+        default: put_inst(p,KSN_SHIKI_DRAW_INDEX,d,0,0,0,0); break;
+        }
+        (void)open;
+        n++;
+    }
+    while(depth){put_inst(body+12*n++,KSN_SHIKI_END,0,0,0,0,0);depth--;}
+    return n;
+}
+
+size_t ksn_shiki_bench_random(uint32_t *seed,ksn_shiki_bench_case *c,int32_t in[KSN_SHIKI_INPUTS],
+                              unsigned *nin,unsigned *index){
+    uint32_t *st=seed;
+    memset(c,0,sizeof *c);
+    c->name="random";
+    uint8_t body[12*(KSN_SHIKI_CODE+KSN_SHIKI_LOOP_DEPTH)];
+    unsigned n;
+    do n=program(st,body,nin); while(n>KSN_SHIKI_CODE);
+    const uint8_t head[12]={'S','K','I','1',1,0,(uint8_t)n,(uint8_t)*nin,0,0,0,0};
+    memcpy(c->code,head,12);
+    const size_t at=(12u+*nin+3u)&~(size_t)3u;     /* the inputs' Q bytes (0), padded */
+    memcpy(c->code+at,body,12u*n);
+    c->len=at+12u*n;
+    for(unsigned k=0;k<KSN_SHIKI_INPUTS;k++)in[k]=k<*nin?value(st):0;
+    *index=next(st)%5u;
+    return c->len;
+}

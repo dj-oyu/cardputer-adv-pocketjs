@@ -342,10 +342,79 @@ static bool pair_line(unsigned j,char *out,size_t n){
     bench_free(b);
     return true;
 }
-/* The last line: the JIT's stage-0 probe (ksn_shiki_jit.c). */
+/* The scalar JIT on this CPU (shiki-jit.md sec.11): ksn_shiki_bench_random's
+ * programs, the ones tools/shiki_jit/test_scalar.c runs on its emulator,
+ * each drawn by the interpreter and by the plan's code, every observable
+ * compared (as there: the step count and pen only for DONE, an error
+ * inside a block counting to the block's end). Also the cycles per step of
+ * both over the programs that finish. SCALAR_LINES lines of SCALAR_PER
+ * programs, so that no call runs for long. */
+#define SCALAR_LINES 4u
+#define SCALAR_PER 200u
+static uint32_t scalar_hash(const ksn_shiki_vm *vm,const ksn_proc_segment *seg,ksn_shiki_status s){
+    uint32_t h=2166136261u;
+    const int st=(int)s;
+    fnv(&h,(const char *)&st,sizeof st);
+    fnv(&h,(const char *)vm->reg,sizeof vm->reg);
+    fnv(&h,(const char *)&vm->count,sizeof vm->count);
+    fnv(&h,(const char *)seg,vm->count*sizeof *seg);
+    if(s==KSN_SHIKI_DONE){
+        const int16_t pen[3]={vm->pen_x,vm->pen_y,(int16_t)vm->pen_valid};
+        const uint16_t more[3]={vm->steps,vm->raster,vm->depth};
+        fnv(&h,(const char *)pen,sizeof pen);
+        fnv(&h,(const char *)more,sizeof more);
+    }
+    return h;
+}
+static bool scalar_line(unsigned line,char *out,size_t n){
+    bench_t *b=bench_new();
+    if(!b){snprintf(out,n,"CB jit scalar NO MEMORY");return true;}
+    uint32_t seed=1u+line*7919u;
+    unsigned same=0,diff=0,none=0,first=UINT32_MAX,done=0;
+    uint64_t cy[2]={0,0},steps=0;
+    uint32_t bytes=0,inst=0;
+    const bool kept=ksn_shiki_jit_enabled;
+    for(unsigned t=0;t<SCALAR_PER;t++){
+        int32_t in[KSN_SHIKI_INPUTS];
+        unsigned nin,index;
+        ksn_shiki_bench_random(&seed,&b->c,in,&nin,&index);
+        ksn_shiki_plan_dispose(b->plan);
+        if(!ksn_shiki_register(b->c.code,b->c.len,NULL,0,NULL,0,b->plan)){t--;continue;}
+        uint32_t h[2];
+        ksn_shiki_status st[2];
+        uint32_t dt[2];
+        for(unsigned run=0;run<2;run++){
+            ksn_shiki_jit_enabled=run==1;
+            if(run==1){
+                const uint32_t before=ksn_shiki_jit_bytes;
+                if(!ksn_shiki_jit_compile_now(b->plan)){none++;break;}
+                bytes+=ksn_shiki_jit_bytes-before;
+                inst+=b->plan->count;
+            }
+            const uint32_t t0=esp_cpu_get_cycle_count();
+            st[run]=ksn_shiki_draw_index(b->plan,in,nin,index,&b->vm,b->seg);
+            dt[run]=esp_cpu_get_cycle_count()-t0;
+            h[run]=scalar_hash(&b->vm,b->seg,st[run]);
+        }
+        ksn_shiki_jit_enabled=kept;
+        if(!b->plan->jit)continue;
+        if(h[0]==h[1])same++;
+        else{diff++;if(first==UINT32_MAX)first=t;}
+        if(st[0]==KSN_SHIKI_DONE){done++;cy[0]+=dt[0];cy[1]+=dt[1];steps+=b->vm.steps;}
+    }
+    ksn_shiki_jit_enabled=kept;
+    snprintf(out,n,"CB jit scalar %u/%u %s same=%u diff=%u first=%d none=%u done=%u cy/step interp=%.1f jit=%.1f "
+             "code=%.1f B/inst",line+1u,SCALAR_LINES,diff?"DIFF":"same",same,diff,first==UINT32_MAX?-1:(int)first,
+             none,done,steps?(double)cy[0]/(double)steps:0.0,steps?(double)cy[1]/(double)steps:0.0,
+             inst?(double)bytes/(double)inst:0.0);
+    bench_free(b);
+    return true;
+}
+/* Then the scalar JIT's lines; the last line: the JIT's stage-0 probe
+ * (ksn_shiki_jit.c). */
 static unsigned pair_count(void){
     timed_row rows[24];
-    return ksn_shiki_bench_check_count()+timed_rows(rows,24)+1u;
+    return ksn_shiki_bench_check_count()+timed_rows(rows,24)+SCALAR_LINES+1u;
 }
 #define PAIR_COUNT pair_count()
 static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -365,6 +434,8 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     if(pair_line(i,line,sizeof line))return JS_NewString(ctx,line);
     timed_row rows[24];
     i-=timed_rows(rows,24);
+    if(i<SCALAR_LINES&&scalar_line(i,line,sizeof line))return JS_NewString(ctx,line);
+    i-=SCALAR_LINES;
     if(i==0&&ksn_shiki_jit_probe(line,sizeof line))return JS_NewString(ctx,line);
     return JS_NULL;
 }

@@ -45,3 +45,39 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan);
 void ksn_shiki_pie_accset_image(void *img,int32_t r);
 uint32_t ksn_shiki_jit_veach(const ksn_shiki_plan *plan,unsigned pc,uint32_t start,uint32_t count,
                              ksn_shiki_vm *vm,void *vregs,void *acc);
+
+/* Stage 3 (shiki-jit.md sec.11): the whole plan as scalar code. The code
+ * keeps the vm in memory (registers, loop frames, depth, steps), inlines
+ * the arithmetic and the loop control and calls ksn_shiki_jit_leaf for
+ * every other instruction, so it can stop at any block and leave the vm as
+ * the interpreter would have it. What the code reads (32-bit fields: the
+ * device's pointers; the host test maps them): */
+typedef struct {
+    ksn_shiki_vm *vm;                       /* 0 */
+    const int32_t *in;                      /* 4: the draw's inputs */
+    int32_t limit;                          /* 8: KSN_SHIKI_STEPS */
+    uint32_t (*leaf)(const void *,uint32_t);/* 12: ksn_shiki_jit_leaf */
+    const ksn_shiki_plan *plan;
+    ksn_proc_segment *out;
+    unsigned index;
+} ksn_jit_run;
+/* One instruction the code does not inline (ksn_shiki.c): 0 go on, 1 skip
+ * the loop body (a loop run zero times: control goes to its END + 1), else
+ * the status << 8. The step is already counted. */
+uint32_t ksn_shiki_jit_leaf(const ksn_jit_run *c,uint32_t pc);
+/* Compiles plan into b: a literal pool, then the function at *entry
+ * (uint32_t f(ksn_jit_run *): the status << 8 when the draw ended, else the
+ * pc where the interpreter goes on). False when b is too small. */
+bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entry);
+/* Run time (device): the plan's code, compiled once it is hot and if the
+ * budget holds it; 0 (start at pc 0) when there is none. */
+extern bool ksn_shiki_jit_scalar_on;
+extern uint32_t ksn_shiki_jit_budget,ksn_shiki_jit_bytes;
+/* The bench's: compile now, whatever the heat (the budget still holds). */
+bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan);
+uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
+                           ksn_shiki_vm *vm,ksn_proc_segment *out);
+/* The interpreter from pc on, the vm as the code left it (in: the draw's
+ * KSN_SHIKI_INPUTS inputs). ksn_shiki_draw_index's own loop. */
+ksn_shiki_status ksn_shiki_resume(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
+                                  ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS],unsigned pc);

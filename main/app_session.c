@@ -29,6 +29,7 @@
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
 #include "pocket_proc.h"
+#include "ui/kasane/ksn_shiki_jit.h"
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
 #endif
@@ -2629,10 +2630,17 @@ static esp_err_t present_frame(void) {
                 {
                     pocket_shiki_turn st;
                     pocket_shiki_turn_take(&st);
+                    /* jit: the scalar JIT's switch and its code's bytes (sec.11).
+                     * POCKET_SHIKI_JIT_AB (a measurement build) flips the switch
+                     * after each line, so one binary gives both. */
                     if(st.draws)
-                        ESP_LOGI("kasane","SHIKI_TURN draws=%.1f steps=%.0f engine_ms=%.3f total_ms=%.3f frames=%u",
+                        ESP_LOGI("kasane","SHIKI_TURN draws=%.1f steps=%.0f engine_ms=%.3f total_ms=%.3f frames=%u jit=%d/%u",
                                  st.draws/(double)painted,st.steps/(double)painted,
-                                 st.engine_cy/240000.0/painted,st.total_cy/240000.0/painted,painted);
+                                 st.engine_cy/240000.0/painted,st.total_cy/240000.0/painted,painted,
+                                 ksn_shiki_jit_scalar_on?1:0,(unsigned)ksn_shiki_jit_bytes);
+#ifdef POCKET_SHIKI_JIT_AB
+                    ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
+#endif
                 }
 #ifdef KASANE_PROC_DEVICE_PROBE
                 {

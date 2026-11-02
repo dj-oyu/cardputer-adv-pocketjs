@@ -97,6 +97,9 @@ typedef struct {
 typedef struct {
     uint8_t count,inputs;
     uint8_t input_q[KSN_SHIKI_INPUTS];
+    /* Draws so far, for the scalar JIT's choice of plans to compile (in the
+     * struct's padding; ksn_shiki_jit.c). */
+    uint16_t heat;
     /* The JIT's code for the plan's VEACH sections (device only,
      * ksn_shiki_jit.c; docs/kasane/shiki-jit.md), or NULL. A plan that may
      * hold code is given back with ksn_shiki_plan_dispose() before its memory
