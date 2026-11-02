@@ -45,7 +45,7 @@ gcc -std=c11 -O2 -Wall -Wextra -Werror -Imain/ui/kasane main/ui/kasane/ksn_proce
 
 ## 表現を変えた構造 probe
 
-[`probe_procedural_patterns.c`](../../tools/kasane_contract/probe_procedural_patterns.c) で、出力数を増やす代わりに10の小さな構造例を試した。O0 と O2 の host 実行で同じ結果を得た。
+`probe_procedural_patterns.c`（v2.0 で削除。`427b308` の `tools/kasane_contract/probe_procedural_patterns.c`） で、出力数を増やす代わりに10の小さな構造例を試した。O0 と O2 の host 実行で同じ結果を得た。
 
 ```text
 gcc -std=c11 -O2 -Wall -Wextra -Werror -Imain/ui/kasane main/ui/kasane/ksn_procedural.c tools/kasane_contract/probe_procedural_patterns.c -lm -o .cache/probe_procedural_patterns.exe

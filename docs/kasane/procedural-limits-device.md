@@ -19,7 +19,7 @@
 | 回数 | ネイティブ測定3回（run1/6/8。値は3回とも0.2%以内で一致）。JS 測定は最終 image で2回（run7/8）、それ以前の image で2回（run4/5）。ログは `.cache/proc-limits-20260929/`（git 管理外） |
 | 条件 | Wi-Fi 接続後、ホームで音楽 overlay が動いた状態から開始。診断は overlay を止めてから走る。音声と FLOWER は同時に動かしていない |
 
-`KASANE_PROC_LIMITS_PROBE` は既定 OFF。ON のときだけ USB `{`（ホームでネイティブ測定）と `}`（JS 測定アプリ [`proc_limits_probe.js`](../../apps/kasane/proc_limits_probe.js)）が有効になり、JS には `__lim`（heap・スタック・時計・frame hash）が入る。通常ビルドの EMBED とキー表は変わらない。`ksn_proc_step` には、旧来の全レジスタ検査を実行時に切り替える分岐がこのオプションのときだけ入る（後述）。
+`KASANE_PROC_LIMITS_PROBE` は既定 OFF。ON のときだけ USB `{`（ホームでネイティブ測定）と `}`（JS 測定アプリ `proc_limits_probe.js`（v2.0 で削除。`427b308` の `apps/kasane/proc_limits_probe.js`））が有効になり、JS には `__lim`（heap・スタック・時計・frame hash）が入る。通常ビルドの EMBED とキー表は変わらない。`ksn_proc_step` には、旧来の全レジスタ検査を実行時に切り替える分岐がこのオプションのときだけ入る（後述）。
 
 ## 1. 動的な plan のライフサイクル
 
@@ -53,7 +53,7 @@ JS 測定アプリ（ゲスト約 112 KB、ソース 12 KB）の中で測った�
 
 ## 2. 新しい上限での正しさ
 
-[`proc_limits_probe.js`](../../apps/kasane/proc_limits_probe.js) の `limScene` を実機と host の両方で描いた。
+`proc_limits_probe.js`（v2.0 で削除。`427b308` の `apps/kasane/proc_limits_probe.js`） の `limScene` を実機と host の両方で描いた。
 
 - 入力8個を r8〜r15 へ読み、REPEAT を8段入れ子にして 16×16 の点を `PLOT_COLOR_REG` で打つ（32命令。シーン4 draw の合計は 1,599 step、391線分）。
 - 128点の型付きバッチ（Q14 の回転・並進、変換後の座標は一部が画面外）。

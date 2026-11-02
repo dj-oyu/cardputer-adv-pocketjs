@@ -1,9 +1,16 @@
-/* Real QuickJS (with the L2c VM) contract for the procedural frame across a
- * turn boundary, the plan limit's precedence over allocation, and per-count
- * point allocation. Built by run_pocket_proc_limits_qjs.py under ASan/UBSan
- * with proc_alloc_hook.h force-included into these sources only, so
- * pocket_proc.c's allocations can be failed and measured while the prebuilt
- * engine allocates normally.
+/* Real QuickJS (with the L2c VM) contract for the frame across a turn
+ * boundary, the handle limit's precedence over allocation, per-count plan
+ * allocation and the per-surface segment cap, through pocket.kasane.shiki.
+ * Built by run_pocket_proc_turn_qjs.py under ASan/UBSan with
+ * proc_alloc_hook.h force-included into these sources only, so
+ * pocket_proc.c's and the Shiki API's allocations can be failed and measured
+ * while the prebuilt engine allocates normally. No Shiki heap is opened, so
+ * those allocations reach the hooked malloc/calloc one by one.
+ *
+ * The draws are tiny Shiki programs assembled here as bytes (asm(), the
+ * sec.3 layout of apps/shikitest/shiki_api_test.js): the float VM's plans
+ * and typed point batches these contracts were first written with went in
+ * Shiki v2.0, and so did the point-batch sizing contract.
  *
  * The park is the VM's own: frame() is entered through JS_VMCall, asks for a
  * yield from a native, and parks at the next backward branch -- the same
@@ -14,15 +21,14 @@
 #include "quickjs-vm.h"
 #include "pocket_proc.h"
 #include "pocket_api.h"
-#include "ksn_proc_plan.h"
-#include "ksn_proc_points_pie.h"
+#include "pocket_shiki_api.h"
+#include "ksn_shiki.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
 #define REQUIRE(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
-static uint16_t actual[KSN_PROC_W*KSN_PROC_H],expected[KSN_PROC_W*KSN_PROC_H];
-static ksn_proc_frame reference_frame;
+static uint16_t actual[KSN_PROC_W*KSN_PROC_H];
 
 static bool fail_alloc;
 static size_t last_malloc;
@@ -38,33 +44,6 @@ void *proc_test_calloc(size_t count,size_t size){
     calloc_n++;
     return (calloc)(count,size);
 }
-
-#if KSN_PROC_POINTS_HAS_PIE
-/* The device kernel's memory traversal without its arithmetic: 128-bit
- * aligned loads and stores for every whole block of eight, the scalar
- * reference for the tail. ASan fails the run if a block reaches past the
- * per-count allocation; the alignment check fails it if a plane is not on 16. */
-static unsigned blocks_run;
-void ksn_proc_points_affine_pie(KsnProcPointDst dst,KsnProcPointSrc src,
-                                size_t n,const KsnProcAffineQ14 *coeff){
-    const size_t blocks=n/8;
-    for(size_t b=0;b<blocks;b++){
-        const size_t i=b*8;
-        REQUIRE((((uintptr_t)(src.x+i))|((uintptr_t)(src.y+i))|
-                 ((uintptr_t)(dst.x+i))|((uintptr_t)(dst.y+i)))%16==0);
-        int16_t sx[8],sy[8],dx[8],dy[8];
-        memcpy(sx,src.x+i,16);memcpy(sy,src.y+i,16);
-        ksn_proc_points_affine_scalar((KsnProcPointDst){dx,dy},
-                                      (KsnProcPointSrc){sx,sy},8,coeff);
-        memcpy(dst.x+i,dx,16);memcpy(dst.y+i,dy,16);
-        blocks_run++;
-    }
-    if(n>blocks*8)
-        ksn_proc_points_affine_scalar((KsnProcPointDst){dst.x+blocks*8,dst.y+blocks*8},
-                                      (KsnProcPointSrc){src.x+blocks*8,src.y+blocks*8},
-                                      n-blocks*8,coeff);
-}
-#endif
 
 ksn_result pocket_kasane_proc_publish(void){return KSN_OK;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
@@ -82,6 +61,10 @@ JSValue pocket_api_throw(JSContext *ctx,const char *code,const char *op,
     (void)retryable;(void)outcome;
     return JS_ThrowTypeError(ctx,"%s %s: %s",code,op,message);
 }
+esp_err_t pocket_api_register(const pocket_capability_t *capability){(void)capability;return ESP_OK;}
+/* pocket_proc_reset() then pocket_shiki_api_reset(), app_stop()'s order: the
+ * API's handle book must forget what reset() closed. */
+static void session_reset(void){pocket_proc_reset();pocket_shiki_api_reset();}
 static JSValue request_yield(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;
     JS_VMRequestYield(JS_GetRuntime(ctx));
@@ -130,17 +113,27 @@ static unsigned count_color(const uint16_t *pixels,uint16_t color){
 }
 
 static const char prelude[]=
-    "globalThis.proc=pocket.kasane.procedural;"
+    "globalThis.proc=pocket.kasane.shiki;"
     "globalThis.code=f=>{try{const r=f();return r===undefined?'OK':'VALUE'}catch(e){"
     "const m=String(e);for(const c of ['INVALID_ARGUMENT','LIMIT_EXCEEDED','CLOSED','BUSY',"
     "'OUT_OF_MEMORY'])if(m.includes(c))return c;return m}};"
     "globalThis.expect=(f,c)=>{const got=code(f);"
     "if(got!==c)throw Error('expected '+c+' got '+got+': '+f)};"
-    "globalThis.dotAt=(x,y,c)=>[[0,0,0,0,x,0],[0,1,0,0,y,0],[8,0,0,1,0,c]];"
-    "globalThis.mk=n=>({kind:'affineQ14Points',"
-    "x:Array.from({length:n},(_,i)=>i*2-20),"
-    "y:Array.from({length:n},(_,i)=>60+(i*37)%50-25),"
-    "coeff:[16384,0,0,16384,0,0],color:0x07e0});"
+    /* The error's text, for two failures that share a code. */
+    "globalThis.says=(f,text)=>{try{f()}catch(e){if(String(e).includes(text))return;"
+    "throw Error('expected '+text+' got '+e)}throw Error('no error: '+f)};"
+    "globalThis.asm=(regions,code,inputs)=>{inputs=inputs||[];"
+    "const head=12+inputs.length+4*regions.length,body=(head+3)&~3;"
+    "const b=new Uint8Array(body+12*code.length),dv=new DataView(b.buffer);"
+    "b.set([83,75,73,49,1,0,code.length,inputs.length,0,regions.length,0,0]);"
+    "b.set(inputs,12);regions.forEach((r,k)=>b.set(r,12+inputs.length+4*k));"
+    "code.forEach((i,k)=>{const o=body+12*k;b.set(i.slice(0,4),o);"
+    "dv.setInt32(o+4,i[4]||0,true);dv.setUint16(o+8,i[5]||0,true)});return b};"
+    /* SET r0 = x, SET r1 = y (Q16 pixels), PLOT in colour c. */
+    "globalThis.dotRows=(x,y,c)=>[[0,0,0,0,x*65536],[0,1,0,0,y*65536],[8,0,0,1,0,c]];"
+    "globalThis.dotAt=(x,y,c)=>asm([],dotRows(x,y,c));"
+    /* n PLOTs at (x, 7), x 5 unless given: SET, SET, REPEAT n { PLOT } END. */
+    "globalThis.plots=(n,c,x=5)=>asm([],[[0,0,0,0,x*65536],[0,1,0,0,7*65536],[5,0,0,0,n],[8,0,0,1,0,c],[6]]);"
     "globalThis.spin=()=>{for(let i=0;i<2;i++){}};";
 
 /* Bug 1: a frame the VM parks between beginFrame() and commit(). */
@@ -201,7 +194,7 @@ static void park_contract(JSContext *ctx){
     pocket_proc_end_turn();
     eval_ok(ctx,"expect(()=>proc.draw(c,[]),'BUSY');expect(()=>proc.commit(),'BUSY')");
     REQUIRE(!pocket_proc_pending());
-    pocket_proc_reset();
+    session_reset();
 }
 
 /* Back's save turn (app_tick(0x2000)): yield is off, so the continuation runs
@@ -240,59 +233,50 @@ static void leave_contract(JSContext *ctx){
     pocket_proc_end_turn();
     settle(actual);
     REQUIRE(actual[10*KSN_PROC_W+10]==0xffff&&count_color(actual,0xffff)==1);
-    pocket_proc_reset();
+    session_reset();
 }
 
-/* Bug 2: the 33rd register() is LIMIT_EXCEEDED before any array is read or
- * any byte allocated, so a low heap cannot turn it into OUT_OF_MEMORY. */
+/* Bug 2: the 33rd register() is LIMIT_EXCEEDED for the handles before any
+ * byte is allocated, so a low heap cannot turn it into a heap failure. Shiki
+ * reports both as LIMIT_EXCEEDED (spec sec.9.4: the budget decides at once),
+ * so the message tells them apart. */
 static void limit_contract(JSContext *ctx){
     eval_ok(ctx,
         "globalThis.hs=[];for(let i=0;i<32;i++)hs.push(proc.register(dotAt(i,i,i+1)));"
-        "globalThis.touched=0;"
-        "globalThis.trap=[0];Object.defineProperty(trap,0,"
-        "{get(){touched++;return [0,0,0,0,0,0]}});"
-        "globalThis.ptrap={get kind(){touched++;return 'affineQ14Points'},x:[0,1],y:[0,1],"
-        "coeff:[16384,0,0,16384,0,0],color:1};"
-        "expect(()=>proc.register(trap),'LIMIT_EXCEEDED');"
-        "expect(()=>proc.register(dotAt(0,0,1),ptrap),'LIMIT_EXCEEDED');"
-        "if(touched)throw Error('full table read the arguments: '+touched)");
+        "says(()=>proc.register(dotAt(0,0,1)),'32 handles')");
     fail_alloc=true;
-    eval_ok(ctx,
-        "expect(()=>proc.register(dotAt(0,0,1)),'LIMIT_EXCEEDED');"
-        "expect(()=>proc.register(dotAt(0,0,1),mk(128)),'LIMIT_EXCEEDED')");
+    eval_ok(ctx,"says(()=>proc.register(dotAt(0,0,1)),'32 handles')");
     fail_alloc=false;
-    /* With a slot free, the same failure is the heap's and says so. */
+    /* With a handle free, the same failure is the heap's and says so. */
     eval_ok(ctx,"proc.unregister(hs[7])");
     fail_alloc=true;
-    eval_ok(ctx,
-        "expect(()=>proc.register(dotAt(0,0,1)),'OUT_OF_MEMORY');"
-        "expect(()=>proc.register(dotAt(0,0,1),mk(40)),'OUT_OF_MEMORY')");
+    eval_ok(ctx,"says(()=>proc.register(dotAt(0,0,1)),'budget')");
     fail_alloc=false;
     eval_ok(ctx,
-        "hs[7]=proc.register(dotAt(0,0,1),mk(40));"
-        "expect(()=>proc.register(dotAt(0,0,1)),'LIMIT_EXCEEDED')");
-    pocket_proc_reset();
+        "hs[7]=proc.register(dotAt(0,0,1));"
+        "says(()=>proc.register(dotAt(0,0,1)),'32 handles')");
+    session_reset();
 }
 
-/* A plan allocates for its own instruction count (the full-size plan held 64
- * whatever the count). Each size draws, and a churn of mixed sizes through
- * all 32 slots runs under ASan, so a plan that reads or writes past its own
+/* A plan allocates for its own instruction count (ksn_shiki_plan_bytes, not
+ * KSN_SHIKI_PLAN_MAX). Each size draws, and a churn of mixed sizes through
+ * all 32 handles runs under ASan, so a plan that reads or writes past its own
  * count fails here rather than on the device's shared heap. */
 static void plan_size_contract(JSContext *ctx){
     static const unsigned counts[]={1,2,3,8,16,32,63,64};
-    eval_ok(ctx,"globalThis.sized=(n,x,y,c)=>{if(n===1)return [[8,0,0,1,0,c]];"
-                "if(n===2)return [[0,0,0,0,x,0],[8,0,0,1,0,c]];"
-                "const p=[];for(let i=0;i<n-3;i++)p.push([2,2,2,2,0,0]);"
-                "return p.concat(dotAt(x,y,c))}");
+    eval_ok(ctx,"globalThis.sized=(n,x,y,c)=>{if(n===1)return asm([],[[8,0,0,1,0,c]]);"
+                "if(n===2)return asm([],[[0,0,0,0,x*65536],[8,0,0,1,0,c]]);"
+                "const p=[];for(let i=0;i<n-3;i++)p.push([0,2,0,0,0]);"
+                "return asm([],p.concat(dotRows(x,y,c)))}");
     for(unsigned k=0;k<sizeof counts/sizeof counts[0];k++){
         const unsigned n=counts[k];
         char source[200];
         snprintf(source,sizeof source,
                  "globalThis.ps=proc.register(sized(%u,40,50,0xffff))",n);
-        calloc_n=0;
+        last_malloc=0;
         eval_ok(ctx,source);
-        REQUIRE(calloc_n==1&&callocs[0]==ksn_proc_sized_plan_bytes(n));
-        REQUIRE(callocs[0]<sizeof(ksn_proc_plan));
+        REQUIRE(last_malloc==ksn_shiki_plan_bytes(n));
+        REQUIRE(n==KSN_SHIKI_CODE||last_malloc<KSN_SHIKI_PLAN_MAX);
         eval_ok(ctx,"proc.beginFrame(3);proc.draw(ps,[]);proc.commit();proc.unregister(ps)");
         settle(actual);
         const unsigned at=n==1?0:n==2?40:50*KSN_PROC_W+40;
@@ -315,51 +299,19 @@ static void plan_size_contract(JSContext *ctx){
         "proc.beginFrame(0);for(const h of live)proc.draw(h,[]);proc.commit()");
     settle(actual);
     pocket_proc_end_turn();
-    pocket_proc_reset();
-}
-
-/* Improvement 3: a batch allocates for its own count, rounded to whole
- * eight-lane planes, and draws the same pixels as the scalar reference. */
-static void sizing_contract(JSContext *ctx,unsigned *pie_expected){
-    static const unsigned counts[]={2,7,8,9,40,63,64,65,120,127,128};
-    for(unsigned k=0;k<sizeof counts/sizeof counts[0];k++){
-        const unsigned n=counts[k];
-        char source[160];
-        snprintf(source,sizeof source,
-                 "globalThis.pb=proc.register([[0,0,0,0,0,0]],mk(%u));"
-                 "proc.beginFrame(3);proc.draw(pb,[]);proc.commit()",n);
-        last_malloc=0;
-        eval_ok(ctx,source);
-        /* 4-byte header + 15 alignment slack + four planes of round8(n). */
-        REQUIRE(last_malloc==4u+15u+4u*((n+7u)&~7u)*2u);
-        settle(actual);
-        int16_t x[128],y[128];
-        for(unsigned i=0;i<n;i++){x[i]=(int16_t)(i*2-20);y[i]=(int16_t)(60+(i*37)%50-25);}
-        for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=3;
-        memset(&reference_frame,0,sizeof reference_frame);
-        reference_frame.ready=true;reference_frame.count=(uint16_t)(n-1);
-        for(unsigned i=1;i<n;i++)
-            reference_frame.segments[i-1]=(ksn_proc_segment){x[i-1],y[i-1],x[i],y[i],0x07e0};
-        REQUIRE(ksn_proc_render_band(&reference_frame,expected,0,KSN_PROC_H));
-        REQUIRE(memcmp(actual,expected,sizeof actual)==0);
-        eval_ok(ctx,"proc.unregister(pb)");
-        if(n>=8)++*pie_expected;
-    }
-    /* Largest batch: the new layout is no bigger than the fixed one was
-     * (1,040 + 15 B). */
-    REQUIRE(4u+15u+4u*128u*2u<=1040u+15u);
+    session_reset();
 }
 
 /* Per-surface segment cap: createSurface({maxSegments}) sizes that surface's
  * two frames to header + n entries, and draw() enforces n exactly as it
  * enforces 1,024 on surface 0. ASan fails the run if any path (draw's copy,
- * typed points, damage, image spans, the present swap) touches an entry past
+ * damage, image spans, the present swap) touches an entry past
  * the short allocation; LeakSanitizer checks reset() frees both frames. */
 static void cap_contract(JSContext *ctx){
     const size_t head=offsetof(ksn_proc_frame,segments);
     const size_t full=sizeof(ksn_proc_frame);
     REQUIRE(head==6u&&sizeof(ksn_proc_segment)==10u&&full==10246u);
-    pocket_proc_reset(); /* sizing_contract left surface 0's buffers allocated */
+    session_reset(); /* plan_size_contract left surface 0's buffers allocated */
     ksn_image_port image;pocket_proc_image_port(&image);
     uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
     fail_alloc=true;calloc_n=0;
@@ -368,19 +320,19 @@ static void cap_contract(JSContext *ctx){
     REQUIRE(calloc_n==0);fail_alloc=false;
     /* 128 PLOTs per draw: SET r0,r1; REPEAT 128 { PLOT } END. */
     eval_ok(ctx,
-        "globalThis.p128=proc.register([[0,0,0,0,5,0],[0,1,0,0,7,0],"
-        "[5,0,128,0,0,0],[8,0,0,1,0,0xffe0],[6,0,0,0,0,0]]);"
+        "globalThis.p128=proc.register(plots(128,0xffe0));"
         "globalThis.dot=proc.register(dotAt(40,40,0xf800));"
-        "globalThis.typed=proc.register([[0,0,0,0,0,0]],mk(128));"
+        "globalThis.p127=proc.register(plots(127,0x07e0,9));"
         /* Options are refused before any surface exists. */
         "for(const bad of [0,null,'x',{maxSegments:0},{maxSegments:1025},"
         "{maxSegments:1.5},{maxSegments:'256'},{maxSegments:-1},{maxSegments:NaN}])"
         "expect(()=>proc.createSurface(bad),'INVALID_ARGUMENT');"
         "expect(()=>proc.createSurface({maxSegments:8},1),'INVALID_ARGUMENT')");
-    /* Surface 0 is unchanged: two full frames, scratch and the VM. */
+    /* Surface 0 is unchanged: two full frames and the full workspace (the
+     * engine's state comes with the first draw). */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==4&&callocs[0]==full&&callocs[1]==full&&callocs[2]==full);
+    REQUIRE(calloc_n==3&&callocs[0]==full&&callocs[1]==full&&callocs[2]==full);
     eval_ok(ctx,
         "for(let i=0;i<8;i++)proc.draw(p128,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')");
@@ -397,10 +349,10 @@ static void cap_contract(JSContext *ctx){
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0,small)");
     REQUIRE(calloc_n==2&&callocs[0]==head+256u*10u&&callocs[1]==head+256u*10u);
-    /* Exactly full through both paths (128 VM + 127 typed + 1 VM = 256), then
+    /* Exactly full across three programs (128 + 127 + 1 = 256), then
      * one more is refused and the frame is closed. */
     eval_ok(ctx,
-        "proc.draw(p128,[]);proc.draw(typed,[]);proc.draw(dot,[]);"
+        "proc.draw(p128,[]);proc.draw(p127,[]);proc.draw(dot,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
         "expect(()=>proc.commit(),'BUSY')");
     pocket_proc_end_turn();
@@ -408,13 +360,13 @@ static void cap_contract(JSContext *ctx){
     eval_ok(ctx,
         "proc.beginFrame(0,small);proc.draw(p128,[]);proc.draw(p128,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
-        "proc.beginFrame(0,small);proc.draw(p128,[]);proc.draw(typed,[]);proc.draw(dot,[]);"
+        "proc.beginFrame(0,small);proc.draw(p128,[]);proc.draw(p127,[]);proc.draw(dot,[]);"
         "proc.commit()");
     ksn_image_port port;pocket_proc_image_port_at(&port,1);
     REQUIRE(port.read_span(port.ctx,0,0,40,0,KSN_PROC_W,span,alpha)==KSN_OK);
     REQUIRE(span[40]==0xf800);
     REQUIRE(port.read_span(port.ctx,0,0,7,0,KSN_PROC_W,span,alpha)==KSN_OK);
-    REQUIRE(span[5]==0xffe0);
+    REQUIRE(span[5]==0xffe0&&span[9]==0x07e0);
     pocket_proc_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
     /* Presented, swapped, and drawn again into the other short frame. */
@@ -429,7 +381,7 @@ static void cap_contract(JSContext *ctx){
         "proc.beginFrame(0);for(let i=0;i<8;i++)proc.draw(p128,[]);proc.commit()");
     settle(actual);
     eval_ok(ctx,"expect(()=>proc.createSurface({maxSegments:8}),'LIMIT_EXCEEDED')");
-    pocket_proc_reset();
+    session_reset();
     /* Bounds of the option: 1 and 1,024; {} and undefined mean 1,024. */
     static const struct {const char *create;unsigned segments;} cases[]={
         {"proc.createSurface({maxSegments:1})",1},
@@ -453,7 +405,7 @@ static void cap_contract(JSContext *ctx){
                  "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')",cases[k].segments);
         eval_ok(ctx,source);
         pocket_proc_end_turn();
-        pocket_proc_reset();
+        session_reset();
     }
     /* Surface 0 through resource({maxSegments}): its two frames shrink, the
      * workspace (scratch) stays full; draw() enforces the cap; once the
@@ -463,12 +415,11 @@ static void cap_contract(JSContext *ctx){
         "{maxSegments:'8'},{maxSegments:null}])"
         "expect(()=>proc.resource(bad),'INVALID_ARGUMENT');"
         "proc.resource({maxSegments:96});"
-        "globalThis.p32=proc.register([[0,0,0,0,5,0],[0,1,0,0,7,0],"
-        "[5,0,32,0,0,0],[8,0,0,1,0,0xffe0],[6,0,0,0,0,0]]);"
+        "globalThis.p32=proc.register(plots(32,0xffe0));"
         "globalThis.dot=proc.register(dotAt(40,40,0xf800))");
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==4&&callocs[0]==head+96u*10u&&callocs[1]==full&&callocs[2]==head+96u*10u);
+    REQUIRE(calloc_n==3&&callocs[0]==head+96u*10u&&callocs[1]==full&&callocs[2]==head+96u*10u);
     eval_ok(ctx,
         "for(let i=0;i<3;i++)proc.draw(p32,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
@@ -479,20 +430,21 @@ static void cap_contract(JSContext *ctx){
     eval_ok(ctx,"proc.beginFrame(0);proc.draw(dot,[]);proc.commit()");
     settle(actual);
     REQUIRE(actual[40*KSN_PROC_W+40]==0xf800);
-    pocket_proc_reset();
+    session_reset();
     /* reset() forgets the cap: the next frames are full again. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==4&&callocs[0]==full&&callocs[2]==full);
+    REQUIRE(calloc_n==3&&callocs[0]==full&&callocs[2]==full);
     pocket_proc_end_turn();
-    pocket_proc_reset();
+    session_reset();
 }
 
 int main(void){
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
     JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);
-    REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK);
+    REQUIRE(JS_SetPropertyStr(ctx,kasane,"grid",JS_NewObject(ctx))>=0);
+    REQUIRE(pocket_shiki_api_install(ctx,kasane)==ESP_OK);
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"requestYield",
@@ -503,22 +455,11 @@ int main(void){
     leave_contract(ctx);
     limit_contract(ctx);
     plan_size_contract(ctx);
-    unsigned pie=0;
-    sizing_contract(ctx,&pie);
-    uint32_t scalar_batches=0,pie_batches=0;
-    pocket_proc_batch_counts(&scalar_batches,&pie_batches);
-#if KSN_PROC_POINTS_HAS_PIE
-    REQUIRE(pie_batches==pie&&blocks_run>0);
-#else
-    REQUIRE(pie_batches==0);
-#endif
-    /* After the batch count check: its reset() clears the counters. */
     cap_contract(ctx);
-    pocket_proc_reset();
+    session_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated/thrown "
            "frame carries nothing, Back's save frame opens after the finished frame is presented, "
-           "limit before allocation, per-count plans and points (%u PIE batches), per-surface segment cap\n",
-           (unsigned)pie_batches);
+           "handle limit before allocation, per-count plans, per-surface segment cap\n");
     return 0;
 }

@@ -25,7 +25,6 @@ def main(trace_path=None, fused=False):
                  ("dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c", "quickjs-vm.c")),
                ROOT / "main/ui/kasane/ksn_proc_grid.c",
                ROOT / "main/ui/kasane/ksn_proc_grid_pie.c",
-               ROOT / "main/ui/kasane/ksn_proc_points.c",
                ROOT / "tools/kasane_contract/test_proc_grid_fold_qjs.c"]
     command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
                "-DKSN_GRID_PIE_MODEL", "-I", str(QJS),

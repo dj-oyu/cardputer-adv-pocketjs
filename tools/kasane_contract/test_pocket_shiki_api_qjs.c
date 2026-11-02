@@ -53,7 +53,6 @@ int main(int argc,char **argv){
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
     JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);
-    REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK);
     REQUIRE(JS_SetPropertyStr(ctx,kasane,"grid",JS_NewObject(ctx))>=0);
     REQUIRE(pocket_shiki_api_install(ctx,kasane)==ESP_OK);
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);

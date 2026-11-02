@@ -11,7 +11,7 @@
 
 ## 1. 設計
 
-**固定長の `ksn_proc_plan` は残し、ヒープ用に `ksn_proc_sized_plan` を足した**（[ksn_proc_plan.h](../../main/ui/kasane/ksn_proc_plan.h)）。固定長の plan は、host の試験・device probe・`proc_megademo_preview.c` が、スタック・静的配列・構造体のコピーで使っている。そこで固定長の plan の末尾を可変長にすると、これらが全部壊れる。新しい型は、ヘッダの後ろに可変長配列 `code[]` を持つ。
+**固定長の `ksn_proc_plan` は残し、ヒープ用に `ksn_proc_sized_plan` を足した**（ksn_proc_plan.h（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_plan.h`））。固定長の plan は、host の試験・device probe・`proc_megademo_preview.c` が、スタック・静的配列・構造体のコピーで使っている。そこで固定長の plan の末尾を可変長にすると、これらが全部壊れる。新しい型は、ヘッダの後ろに可変長配列 `code[]` を持つ。
 
 | 項目 | 固定長 `ksn_proc_plan` | `ksn_proc_sized_plan` |
 | --- | --- | --- |

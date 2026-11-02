@@ -19,9 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef KASANE_BGCOST_TRACE
-#include "esp_timer.h"
-#endif
 
 #define KASANE_REF_LIMIT 32u
 #define KASANE_REF_STORAGE 64u
@@ -1067,7 +1064,7 @@ static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueCons
 }
 
 JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
-    const char *op="kasane.procedural.resource";
+    const char *op="kasane.shiki.resource";
     if(surface>=2||(state&&state->building.value))return throw_result(ctx,KSN_BUSY,op);
     /* Complete all fallible JS work before changing native display mode. */
     JSValue object=JS_NewObjectClass(ctx,image_class);
@@ -1718,13 +1715,7 @@ static JSValue js_patch(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
     (void)self;
 #ifdef KASANE_MEGADEMO_TRACE
-#ifdef KASANE_BGCOST_TRACE
-    int64_t began=esp_timer_get_time();
-#endif
     JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
-#ifdef KASANE_BGCOST_TRACE
-    pocket_proc_bgcost_view_us((uint32_t)(esp_timer_get_time()-began));
-#endif
     if(!JS_IsException(ticket))pocket_proc_trace_view();
     return ticket;
 #else
@@ -2799,7 +2790,6 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
         JS_FreeValue(ctx,cache);return ESP_ERR_NO_MEM;
     }
     if(JS_SetPropertyStr(ctx,ns,"cache",cache)<0)return ESP_ERR_NO_MEM;
-    if(pocket_proc_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_grid_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_video_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_pixel_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
@@ -3078,11 +3068,8 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
     pocket_pixel_present_result(result);
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     if(proc_candidate&&result==KSN_OK&&stats->transferred_bytes){
-        uint32_t scalar=0,pie=0;
-        pocket_proc_batch_counts(&scalar,&pie);
-        ESP_LOGI("PROC_JS","frame=%lu scalar=%lu pie=%lu bytes=%lu",
-                 (unsigned long)proc_log_frame++,(unsigned long)scalar,
-                 (unsigned long)pie,(unsigned long)stats->transferred_bytes);
+        ESP_LOGI("PROC_JS","frame=%lu bytes=%lu",
+                 (unsigned long)proc_log_frame++,(unsigned long)stats->transferred_bytes);
     }
 #else
     (void)proc_candidate;

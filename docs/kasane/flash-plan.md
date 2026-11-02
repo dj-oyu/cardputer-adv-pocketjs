@@ -50,7 +50,7 @@ const q = H.register(rows, points);                                  // 今ま�
 
 ## 2. ビルド時の表
 
-**生成器** [`tools/kasane_ir/emit_rom_plans.mjs`](../../tools/kasane_ir/emit_rom_plans.mjs)（実装済み）:
+**生成器** `tools/kasane_ir/emit_rom_plans.mjs`（v2.0 で削除。`427b308` の `tools/kasane_ir/emit_rom_plans.mjs`）（実装済み）:
 
 ```
 node tools/kasane_ir/emit_rom_plans.mjs OUT.c derby=apps/derby/derby_prog.js [app=FILE ...] [--symbol NAME] [--json OUT.json]

@@ -71,9 +71,14 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 1. DERBY: `pocket.derby` の全 draw を Shiki に（R2）、`@plan` 18 本と点を `@shiki` に。
    - 進み（2026-11-02）: `@plan` は `nil`（型付きの点）だけを残して `@shiki` に移した。`pocket.derby` の C の描画は handle の種類で engine を選ぶ（`pocket_proc_draw_numbers`）。誤差と `@q` は [apps/derby/README.md](../../apps/derby/README.md)「背景の式もすべて Shiki」。残りは点（`i16` の領域と `EMIT_LINES`）と、実機の確認。
 2. MEGADEMO。
+   - 済（2026-11-02）: 24 本を `@shiki`（`apps/kasane/megademo_prog.js`）に。`eg` の `s²·noise` が Q16 を超えたので位相を差分で持つ形にした。猫の船 `sh` は i16 の窓。誤差と host・実機の結果は [megademo-story.md](../apps/megademo-story.md)「Shiki へ」。
 3. BIG WAVE。
+   - 済（2026-11-02）: [apps/bigwave/README.md](../../apps/bigwave/README.md)。実機はデモ画面で約 20 秒（ターン 8.3〜9.7 ms）。
 4. 検査用のアプリと heapprobe の DERBY。
+   - 済（2026-11-02）: `proc_limits_probe.js`・`proc_multi_surface_probe.js`・`overlay_proc_multi_probe.js`・`proc_news_zoom.js` と、float の VM を測っていた実機の probe（`ksn_procedural_device_probe.c`・`ksn_proc_compiler_device_probe.c`・`ksn_proc_limits_device_probe.c`・`ksn_megademo_device_probe.c`）を消した。D2 の 2 つの面の probe は、overlay のセッションに Shiki の heap が無いので移せない（CMake のオプションを ON にすると configure が止まる）。`KASANE_PROC_DEVICE_PROBE` も同じ（grid・pixel の probe は残るが、呼ぶ入口が要る）。**残り:** heapprobe の DERBY（`apps/heapprobe/derby_v0/`、旧 DERBY の複製で `@plan` を持つので、`POCKET_HEAPPROBE` は今は configure で止まる）を今の DERBY から作り直す。`grid_fold_device_probe.js` は grid（残る）の検査なので残した。
 5. 旧 API の削除（§2.2）と、関係する host の検査・CI の整理。
+   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_proc.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_procedural.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
+   - CI: BIG WAVE を v2.0 より前の固定の版と並べて走らせる実験の 3 本（`validate-curl-section.yml`・`adopt-rock-distance.yml`・`bigwave-input-literals.yml`）は、旧版の側が動かないので外した（2026-11-02、利用者の了承。スクリプトは `tools/` に記録として残る）。
 
 各段で、host の全画素の検査（`run_derby.py` などの既存の照合）と実機の fps・メモリを、移す前と比べる。
 

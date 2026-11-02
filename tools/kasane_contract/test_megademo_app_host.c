@@ -29,7 +29,6 @@
 #include "text/ksn_font.h"
 #include "sound.h"
 #include "pocket_av.h"
-#include "ksn_proc_plan.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -220,7 +219,7 @@ static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
     "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
-    "(function(){const P=pocket.kasane.shiki||pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
+    "(function(){const P=pocket.kasane.shiki,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"
     "regNs:0,frameDrawNs:0,unreg:0,frameUnreg:0};"
     "P.register=function(){const t=__now();const h=R.apply(P,arguments);"
@@ -263,10 +262,6 @@ int main(int argc,char **argv){
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));
-    /* The built-in tables, as the firmware links them: the Shiki programs
-     * (megademo_prog.js) and, for a baseline still on the float VM, its
-     * plan templates (megademo_chunks.rom_table). */
-    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     read_chunks();
     JS_FreeValue(ctx,g);
     JS_RunGC(rt);

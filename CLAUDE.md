@@ -23,7 +23,7 @@ idf.py -B build_api -p COM3 monitor
 
 初回セットアップ: `python tools/prepare_dependencies.py`（BMI270・libopus・minimp3を固定revisionで取得）。Rust UIアーカイブとPocketJS上流のcheckoutは不要（旧UI経路は削除済み）。
 
-**アプリのチャンクに `@plan` の関数があると、ビルドに Node 16 以上が要る**（`tools/kasane_ir/lower_plans.mjs` が plan を IR の詰めた文字列に置き換える。この機体は Volta の v24 が PATH にある。IDF には入っていない）。無ければ configure が止まる。`@plan` が無いアプリは Node 不要。チャンクに初めて `@plan` を書いたら `idf.py reconfigure`。host の DERBY 検査は `wsl bash -lc` で走らせる（素の `bash -c` の PATH には node が無い）。詳細は `docs/platform/build-environment.md`、`docs/kasane/js-to-ir.md`。
+**アプリのチャンクに `@shiki` の関数があると、ビルドに Node 16 以上が要る**（`tools/kasane_ir/emit_shiki_rom.mjs` が関数を firmware の組み込みの Shiki の表にし、`lower_plans.mjs` がチャンクから消す。この機体は Volta の v24 が PATH にある。IDF には入っていない）。無ければ configure が止まる。`@shiki` が無いアプリは Node 不要。チャンクに初めて `@shiki` を書いたら `idf.py reconfigure`。float の VM の `@plan` と `pocket.kasane.procedural` は Shiki v2.0 で消えた（書くと configure が止まる）。host の DERBY 検査は `wsl bash -lc` で走らせる（素の `bash -c` の PATH には node が無い）。詳細は `docs/platform/build-environment.md`、`docs/kasane/shiki-spec.md` §8。
 
 ## 実機テスト
 

@@ -2,55 +2,48 @@
  * replay order must not depend on the order of 8-row strip requests. */
 #include "ksn_procedural_layers.h"
 #include <assert.h>
+#include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#define I(OP,D,A,B,V,C) {OP,D,A,B,V,C}
-static const ksn_proc_inst wave_code[]={
-    I(KSN_PROC_SET,0,0,0,10,0),I(KSN_PROC_SET,1,0,0,2,0),
-    I(KSN_PROC_INPUT,2,0,0,0,0),I(KSN_PROC_SET,3,0,0,22,0),
-    I(KSN_PROC_SET,4,0,0,0.13f,0),I(KSN_PROC_REPEAT,0,96,0,0,0),
-    I(KSN_PROC_MUL,5,0,4,0,0),I(KSN_PROC_SIN,6,5,0,0,0),
-    I(KSN_PROC_MUL,6,6,3,0,0),I(KSN_PROC_ADD,7,6,2,0,0),
-    I(KSN_PROC_LINE,0,0,7,0,0xf800),I(KSN_PROC_ADD,0,0,1,0,0),
-    I(KSN_PROC_END,0,0,0,0,0)
-};
-static const ksn_proc_inst grid_code[]={
-    I(KSN_PROC_SET,1,0,0,20,0),I(KSN_PROC_SET,2,0,0,19,0),
-    I(KSN_PROC_SET,3,0,0,18,0),I(KSN_PROC_REPEAT,0,6,0,0,0),
-    I(KSN_PROC_SET,0,0,0,25,0),I(KSN_PROC_REPEAT,0,10,0,0,0),
-    I(KSN_PROC_PLOT,0,0,1,0,0x07ff),I(KSN_PROC_ADD,0,0,2,0,0),
-    I(KSN_PROC_END,0,0,0,0,0),I(KSN_PROC_ADD,1,1,3,0,0),
-    I(KSN_PROC_END,0,0,0,0,0)
-};
-static const ksn_proc_inst cross_code[]={
-    I(KSN_PROC_SET,0,0,0,-20,0),I(KSN_PROC_SET,1,0,0,126,0),
-    I(KSN_PROC_MOVE,0,0,1,0,0),I(KSN_PROC_SET,0,0,0,260,0),
-    I(KSN_PROC_LINE,0,0,1,0,0xffff),
-    I(KSN_PROC_SET,0,0,0,120,0),I(KSN_PROC_SET,1,0,0,-30,0),
-    I(KSN_PROC_MOVE,0,0,1,0,0),I(KSN_PROC_SET,1,0,0,165,0),
-    I(KSN_PROC_LINE,0,0,1,0,0xf81f)
-};
-static const ksn_proc_inst red_code[]={
-    I(KSN_PROC_SET,0,0,0,80,0),I(KSN_PROC_SET,1,0,0,80,0),
-    I(KSN_PROC_PLOT,0,0,1,0,0xf800)
-};
-static const ksn_proc_inst green_code[]={
-    I(KSN_PROC_SET,0,0,0,80,0),I(KSN_PROC_SET,1,0,0,80,0),
-    I(KSN_PROC_PLOT,0,0,1,0,0x07e0)
-};
-static const ksn_proc_inst empty_code[]={I(KSN_PROC_SET,0,0,0,1,0)};
-static const ksn_proc_inst outside_code[]={
-    I(KSN_PROC_SET,0,0,0,300,0),I(KSN_PROC_SET,1,0,0,20,0),
-    I(KSN_PROC_PLOT,0,0,1,0,0xffff)
-};
-#define PROGRAM(code) {code,(uint8_t)(sizeof code/sizeof code[0])}
-static const ksn_proc_program wave=PROGRAM(wave_code),grid=PROGRAM(grid_code),
-    cross=PROGRAM(cross_code),red=PROGRAM(red_code),green=PROGRAM(green_code),
-    empty=PROGRAM(empty_code),outside=PROGRAM(outside_code);
+/* The frames are built here from segments: the float VM whose programs
+ * first drew these shapes went in Shiki v2.0, and the surfaces and layers
+ * only ever saw the finished frame. raster_steps is recounted by the
+ * surface's validation, so seg() keeps it exact. */
+typedef void (*shape_fn)(float input0);
+static ksn_proc_frame scratch;
+static void seg(int x0,int y0,int x1,int y1,uint16_t color){
+    assert(scratch.count<KSN_PROC_SEGMENTS);
+    scratch.segments[scratch.count++]=(ksn_proc_segment){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1,color};
+    int dx=abs(x1-x0),dy=abs(y1-y0);
+    scratch.raster_steps=(uint16_t)(scratch.raster_steps+(dx>dy?dx:dy)+1);
+}
+static void wave(float baseline){
+    int px=0,py=0;
+    for(int n=0;n<96;n++){
+        int x=10+2*n,y=(int)lroundf(baseline+22.f*sinf(.13f*(float)x));
+        if(n)seg(px,py,x,y,0xf800);
+        px=x;py=y;
+    }
+}
+static void grid(float unused){
+    (void)unused;
+    for(int row=0;row<6;row++)for(int col=0;col<10;col++){
+        int x=25+19*col,y=20+18*row;
+        seg(x,y,x,y,0x07ff);
+    }
+}
+static void cross(float unused){
+    (void)unused;
+    seg(-20,126,260,126,0xffff);
+    seg(120,-30,120,165,0xf81f);
+}
+static void red(float unused){(void)unused;seg(80,80,80,80,0xf800);}
+static void green(float unused){(void)unused;seg(80,80,80,80,0x07e0);}
+static void empty(float unused){(void)unused;}
+static void outside(float unused){(void)unused;seg(300,20,300,20,0xffff);}
 static ksn_proc_surface bottom,top;
 static ksn_proc_layers layers;
-static ksn_proc_frame scratch;
-static ksn_proc_vm vm;
 static uint16_t before[KSN_PROC_W*KSN_PROC_H],after[KSN_PROC_W*KSN_PROC_H];
 static uint16_t strips[KSN_PROC_W*KSN_PROC_H];
 static unsigned backdrops;
@@ -60,10 +53,10 @@ static bool backdrop(void *ctx,uint16_t *pixels,int y,int rows){
         pixels[row*KSN_PROC_W+x]=(uint16_t)(0x1000|(((x+y+row)&31)<<5));
     return true;
 }
-static void prepare(const ksn_proc_program *p,float input0){
-    const float input[KSN_PROC_INPUTS]={input0,0,0,0};
-    assert(ksn_proc_begin(&vm,p,input,&scratch)==KSN_PROC_RUNNING);
-    assert(ksn_proc_run(&vm)==KSN_PROC_DONE);
+static void prepare(shape_fn shape,float input0){
+    memset(&scratch,0,sizeof scratch);
+    shape(input0);
+    scratch.ready=true;
 }
 static void check_damage(const ksn_proc_damage *damage){
     for(int y=0;y<KSN_PROC_H;y++)for(int x=0;x<KSN_PROC_W;x++){
@@ -73,7 +66,7 @@ static void check_damage(const ksn_proc_damage *damage){
         assert(x>=damage->x0[band]&&x<damage->x1[band]);
     }
 }
-static void transition(unsigned index,const ksn_proc_program *p,float input0,
+static void transition(unsigned index,shape_fn p,float input0,
                        bool fail_transfer){
     prepare(p,input0);
     assert(ksn_proc_layers_render_committed(&layers,before,0,KSN_PROC_H));
@@ -109,18 +102,18 @@ int main(void){
     ksn_proc_layers_init(&layers,backdrop,0);
     assert(ksn_proc_layers_add(&layers,&bottom));
     assert(ksn_proc_layers_add(&layers,&top));
-    transition(0,&wave,60,false);
-    transition(1,&grid,0,false);
-    transition(0,&wave,78,false);
-    transition(1,&cross,0,false);
-    transition(0,&wave,40,true); /* Partial transfer, restore old wave. */
-    transition(0,&wave,40,false);
-    transition(1,&red,0,false);
-    transition(1,&green,0,false); /* Same bounds, different colour. */
+    transition(0,wave,60,false);
+    transition(1,grid,0,false);
+    transition(0,wave,78,false);
+    transition(1,cross,0,false);
+    transition(0,wave,40,true); /* Partial transfer, restore old wave. */
+    transition(0,wave,40,false);
+    transition(1,red,0,false);
+    transition(1,green,0,false); /* Same bounds, different colour. */
     assert(after[80*KSN_PROC_W+80]==0x07e0);
-    transition(1,&empty,0,false); /* Erase upper surface. */
-    transition(0,&outside,0,false); /* Clip a complete old frame. */
-    transition(0,&empty,0,false); /* No on-screen damage. */
+    transition(1,empty,0,false); /* Erase upper surface. */
+    transition(0,outside,0,false); /* Clip a complete old frame. */
+    transition(0,empty,0,false); /* No on-screen damage. */
     assert(ksn_proc_layers_render_committed(&layers,after,0,KSN_PROC_H));
     printf("PROCEDURAL_PATTERN_MATRIX_OK: wave, grid, clipped crossings, colour update, erase, offscreen, rollback; damage and reverse bands\n");
 }

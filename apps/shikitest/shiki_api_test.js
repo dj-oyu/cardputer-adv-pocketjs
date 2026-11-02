@@ -69,8 +69,8 @@ globalThis.shikiApiTest = function (pocket, log) {
   throws('transfer 8', 'TypeError', () => w.buffer.transfer(8));
   throws('fixed', 'TypeError', () => w.buffer.transferToFixedLength());
   ok('kept', w.length === 16 && w[8] === 11);
-  // Handles: the procedural calls do not see a Shiki handle.
-  throws('procedural draw', 'CLOSED', () => pocket.kasane.procedural.draw(h, []));
+  // The float VM's namespace is gone (v2.0).
+  ok('no procedural', pocket.kasane.procedural === undefined);
   S.unregister(h);
   throws('stale', 'CLOSED', () => S.unregister(h));
   S.release(w);

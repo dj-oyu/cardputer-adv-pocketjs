@@ -1,18 +1,13 @@
-/* Host-only APP-local multi-surface composition test. */
+/* Host-only APP-local multi-surface composition test. Each layer's frame is
+ * one dot built here from a segment (the float VM that once wrote it went in
+ * Shiki v2.0; the layers only see the finished frame). */
 #include "ksn_procedural_layers.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#define I(OP,D,A,B,V,C) {OP,D,A,B,V,C}
-static const ksn_proc_inst dot_code[]={
-    I(KSN_PROC_INPUT,0,0,0,0,0),I(KSN_PROC_INPUT,1,1,0,0,0),
-    I(KSN_PROC_INPUT,2,2,0,0,0),I(KSN_PROC_PLOT_COLOR_REG,2,0,1,0,0)
-};
-static const ksn_proc_program dot={dot_code,4};
 static ksn_proc_layers layers;
 static ksn_proc_surface lower,upper;
 static ksn_proc_frame scratch;
-static ksn_proc_vm vm;
 static uint16_t committed[KSN_PROC_W*KSN_PROC_H];
 static uint16_t candidate[KSN_PROC_W*KSN_PROC_H];
 static uint16_t strips[KSN_PROC_W*KSN_PROC_H];
@@ -24,10 +19,10 @@ static bool backdrop(void *ctx,uint16_t *pixels,int y,int height){
         pixels[row*KSN_PROC_W+x]=bg(x,y+row);
     return true;
 }
-static void prepare(float x,float y,float color){
-    const float input[KSN_PROC_INPUTS]={x,y,color,0};
-    assert(ksn_proc_begin(&vm,&dot,input,&scratch)==KSN_PROC_RUNNING);
-    assert(ksn_proc_run(&vm)==KSN_PROC_DONE);
+static void prepare(int x,int y,uint16_t color){
+    memset(&scratch,0,sizeof scratch);
+    scratch.segments[0]=(ksn_proc_segment){(int16_t)x,(int16_t)y,(int16_t)x,(int16_t)y,color};
+    scratch.count=1;scratch.raster_steps=1;scratch.ready=true;
 }
 static void stage_finish(unsigned index){
     uint32_t ticket=ksn_proc_layers_stage(&layers,index,&scratch);

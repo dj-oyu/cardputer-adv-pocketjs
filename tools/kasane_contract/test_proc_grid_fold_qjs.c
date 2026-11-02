@@ -1,6 +1,5 @@
 #include "quickjs.h"
 #include "ksn_proc_grid_pie.h"
-#include "ksn_proc_points.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -11,6 +10,27 @@
     fprintf(stderr, "grid fold QuickJS check failed at %s:%d\n", __FILE__, __LINE__); \
     exit(1); \
 } } while (0)
+
+/* The affine examples' independent reference: X = m00 x + m01 y + tx (Q2.14
+ * matrix, Q14 translation) in int64, floor(X / 16384), saturated to int16.
+ * This was ksn_proc_points_affine_scalar, the typed points of the float
+ * procedural VM, which went in Shiki v2.0; the grid's own affine fold is
+ * what is checked against it. */
+typedef struct { int16_t m00, m01, m10, m11; int32_t tx, ty; } affine_q14;
+static int16_t floor_sat_q14(int64_t sum)
+{
+    int64_t whole = sum / INT64_C(16384);
+    if (sum < 0 && sum % INT64_C(16384) != 0) --whole;
+    return (int16_t)(whole > INT16_MAX ? INT16_MAX : whole < INT16_MIN ? INT16_MIN : whole);
+}
+static void affine_reference(int16_t *out_x, int16_t *out_y, const int16_t *x,
+                             const int16_t *y, unsigned n, const affine_q14 *c)
+{
+    for (unsigned i = 0; i < n; ++i) {
+        out_x[i] = floor_sat_q14((int64_t)c->m00 * x[i] + (int64_t)c->m01 * y[i] + c->tx);
+        out_y[i] = floor_sat_q14((int64_t)c->m10 * x[i] + (int64_t)c->m11 * y[i] + c->ty);
+    }
+}
 
 static JSContext *js;
 static FILE *trace_file;
@@ -250,10 +270,9 @@ static void run_example(JSValueConst example)
             x[i] = source[2 * i];
             y[i] = source[2 * i + 1];
         }
-        KsnProcAffineQ14 coeffs = {15872, 2048, -1024, 15360,
+        const affine_q14 coeffs = {15872, 2048, -1024, 15360,
                                    225000, -327680};
-        ksn_proc_points_affine_scalar((KsnProcPointDst){out_x, out_y},
-                                      (KsnProcPointSrc){x, y}, 40, &coeffs);
+        affine_reference(out_x, out_y, x, y, 40, &coeffs);
         CHECK(memcmp(expected, strcmp(name, "affineX") == 0 ? out_x : out_y,
                      output_count * sizeof(int16_t)) == 0);
     }

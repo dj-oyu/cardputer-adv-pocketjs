@@ -1,78 +1,49 @@
-"""Compile and run the real QuickJS procedural adapter on the host."""
-import os
+"""Compile and run the real QuickJS frame adapter (pocket_proc.c through
+pocket.kasane.shiki) on the host: test_pocket_proc_qjs.c, under ASan/UBSan.
+
+The float procedural VM and its PIE point batches went in Shiki v2.0, so the
+fake-PIE arm, the MEGADEMO chunks and the 48-frame --out manifest went with
+them; the frames are now Shiki programs (see the test's header)."""
 import argparse
-import hashlib
-import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 
-from megademo_chunks import chunk_arg, rom_table
 ROOT=Path(__file__).resolve().parents[2]
 QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 OUT=ROOT/'.cache/kasane_pocket_proc_qjs'
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--out',type=Path,help='write 48 RGB565 frames and SHA256 manifest')
-    parser.add_argument('--opt',choices=('0','2'),default='2',help='host compiler optimization level')
-    parser.add_argument('--proc-source',type=Path,help='alternate pocket_proc.c for baseline comparison')
+    parser.add_argument('--opt',choices=('0','1','2'),default='1',help='host compiler optimization level')
     args=parser.parse_args()
     cc=shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
-    if not cc:
-        candidate=Path('C:/msys64/ucrt64/bin/gcc.exe')
-        if candidate.exists():cc=str(candidate)
     if not cc:raise SystemExit('No host C compiler found')
     OUT.mkdir(parents=True,exist_ok=True)
-    suffix='.exe' if sys.platform=='win32' else ''
-    label='_baseline' if args.proc_source else ''
-    binary=OUT/('test_pocket_proc_qjs'+label+'_O'+args.opt+suffix)
+    binary=OUT/('test_pocket_proc_qjs_O'+args.opt)
+    # No app table: the empty one the firmware links when no app has @shiki.
+    rom=OUT/'ksn_shiki_rom_none.c'
+    rom.write_text('#include "ksn_shiki.h"\n'
+                   'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
-             ROOT/'main/ui/kasane/ksn_procedural.c',
-             ROOT/'main/ui/kasane/ksn_proc_analysis.c',
-             ROOT/'main/ui/kasane/ksn_proc_plan.c',
-             ROOT/'main/ui/kasane/ksn_proc_plan_points.c',
-             ROOT/'main/ui/kasane/ksn_proc_points.c',
-             ROOT/'main/ui/kasane/ksn_proc_points_pie.c',
-             ROOT/'main/ui/kasane/ksn_proc_points_dispatch.c',
-             ROOT/'main/ui/kasane/ksn_core.c',
-             ROOT/'main/ui/kasane/ksn_render.c',
-             ROOT/'main/ui/kasane/ksn_blend_pie.c',
-             (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),ROOT/'main/pocket/shiki_heap.c',ROOT/'main/ui/kasane/ksn_shiki.c',
-             ROOT/'main/pocket/pocket_shape.c',
-             ROOT/'tools/kasane_contract/proc_native_weak.c',
-             ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c',
-             # MEGADEMO's built-in plans (the app registers kasane.<name>).
-             rom_table(OUT/'ksn_proc_rom_plans.c')]
-    command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
-             '-DKSN_PROC_HOST_TEST',
+             *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c','ksn_core.c',
+               'ksn_render.c','ksn_blend_pie.c','ksn_shiki.c')),
+             ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',
+             ROOT/'main/pocket/pocket_shiki_api.c',
+             # pocket.shapes' native line API is pocket_proc.c's; nothing
+             # here draws through it, the weak stand-ins only satisfy the link
+             # for a pocket_proc.c that lacks it.
+             ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
+             ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
+    command=[cc,'-std=gnu11','-O'+args.opt,'-g','-fsanitize=address,undefined','-fno-sanitize-recover',
+             '-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),
              '-I',str(ROOT/'tools/hostshim'),
              *(str(s) for s in sources),'-lm','-o',str(binary)]
-    env=os.environ.copy();env['PATH']=str(Path(cc).parent)+os.pathsep+env.get('PATH','')
-    subprocess.run(command,cwd=ROOT,env=env,check=True)
-    # The app's chunks, then Act I's former programs (the VM reference).
-    files=chunk_arg()+','+str(ROOT/'tools/kasane_contract/proc_megademo_news_ref.js')
-    invocation=[str(binary),files]
-    if args.out:
-        args.out.mkdir(parents=True,exist_ok=True)
-        invocation.append(str(args.out.resolve()))
-    subprocess.run(invocation,cwd=ROOT,env=env,check=True)
-    fake_binary=OUT/('test_pocket_proc_qjs_fake_pie'+label+'_O'+args.opt+suffix)
-    fake_command=[argument for argument in command if argument!=str(ROOT/'main/ui/kasane/ksn_proc_points_pie.c')]
-    fake_command[fake_command.index('-o')+1]=str(fake_binary)
-    fake_command[1:1]=['-D__XTENSA__','-DCONFIG_IDF_TARGET_ESP32S3=1',
-                       '-DKSN_PROC_HOST_FAKE_PIE']
-    subprocess.run(fake_command,cwd=ROOT,env=env,check=True)
-    subprocess.run([str(fake_binary),files],
-                   cwd=ROOT,env=env,check=True)
-    if args.out:
-        hashes={f'frame-{i:02d}.rgb565':hashlib.sha256(
-            (args.out/f'frame-{i:02d}.rgb565').read_bytes()).hexdigest()
-            for i in range(48)}
-        (args.out/'sha256.json').write_text(json.dumps(hashes,indent=2)+'\n')
-        print(f'Wrote {args.out}/sha256.json')
+    subprocess.run(command,cwd=ROOT,check=True)
+    env=os.environ.copy();env.setdefault('ASAN_OPTIONS','detect_leaks=1')
+    subprocess.run([str(binary)],cwd=ROOT,env=env,check=True)
 
 if __name__=='__main__':main()

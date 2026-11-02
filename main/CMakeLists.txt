@@ -40,9 +40,6 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
     "ui/kasane/ksn_procedural.c" "ui/kasane/ksn_pixel_function.c"
     "ui/kasane/ksn_pixel_span.c"
-    "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
-    "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
-    "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c"
     "ui/kasane/ksn_shiki.c"
     "ui/kasane/ksn_shiki_bench.c")
 # Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
@@ -52,25 +49,17 @@ if(KASANE_DMA_OVERLAP AND NOT CMAKE_BUILD_EARLY_EXPANSION)
     add_compile_definitions(KASANE_DMA_OVERLAP=1)
 endif()
 option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
+if(KASANE_PROC_DEVICE_PROBE)
+    # Its driver (ksn_procedural_device_probe.c) measured the float VM, which
+    # Shiki v2.0 removed; the grid and pixel probes it also ran need a new one.
+    message(FATAL_ERROR "KASANE_PROC_DEVICE_PROBE went with the float VM (Shiki v2.0)")
+endif()
 option(KASANE_FLOWER_FRAME_PROBE "Measure two captured FLOWER frames on the device" OFF)
 option(KASANE_FLOWER_D1_PROBE "Verify fixed FLOWER species and heap-pressure repair on device" OFF)
 option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation failure after first ACK" OFF)
 option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
-option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
-option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
-set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
-if(POCKET_DERBY_RUNNER_AFFINE)
-    if(NOT POCKET_DERBY_RUNNER_AFFINE_PIE_MIN MATCHES "^(0|[1-9][0-9]*)$" OR
-       POCKET_DERBY_RUNNER_AFFINE_PIE_MIN GREATER 128)
-        message(FATAL_ERROR "Runner PIE threshold must be an integer in 0..128")
-    endif()
-    list(APPEND KASANE_SOURCES "pocket/derby_runner_affine.c")
-    add_compile_definitions(POCKET_DERBY_RUNNER_AFFINE=1
-        POCKET_DERBY_RUNNER_AFFINE_PIE_MIN=${POCKET_DERBY_RUNNER_AFFINE_PIE_MIN})
-    set_source_files_properties(pocket/derby_runner_affine.c PROPERTIES COMPILE_OPTIONS "-O2;-fstack-usage")
-endif()
 option(POCKET_DERBY_COURSE_CACHE "Experimental registered course world-point cache" OFF)
 option(POCKET_DERBY_PROJECT_BATCH "Experimental double pose/camera/projection batch" OFF)
 if(POCKET_DERBY_PROJECT_BATCH)
@@ -79,35 +68,13 @@ endif()
 if(POCKET_DERBY_COURSE_CACHE)
     add_compile_definitions(POCKET_DERBY_COURSE_CACHE=1)
 endif()
-option(KASANE_BGCOST_TRACE "BGC/BGP lines after MDT: VM steps, frame geometry, per-plan draw costs" OFF)
-if(KASANE_BGCOST_TRACE AND NOT KASANE_MEGADEMO_TRACE)
-    message(FATAL_ERROR "KASANE_BGCOST_TRACE requires KASANE_MEGADEMO_TRACE")
-endif()
-# The background-cost study (docs/kasane/derby-background-cost.md) runs its
-# measuring copies of DERBY WATCH, and a synthetic segment load, from the
-# DERBY WATCH row: a path relative to this file that replaces
-# apps/derby/derby_watch.js. The file must be named derby_watch.js, because
-# main.c finds the source by the symbol that name makes. Empty ships the app.
-set(DERBY_BGCOST_SOURCE "" CACHE STRING "Measuring source for the DERBY WATCH row (diagnostic only)")
 set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
-if(DERBY_BGCOST_SOURCE)
-    set(DERBY_WATCH_SOURCE "${DERBY_BGCOST_SOURCE}")
-endif()
-option(KASANE_PROC_LIMITS_PROBE "USB-triggered procedural limits/lifecycle measurements ('{' native, '}' JS)" OFF)
-if(KASANE_PROC_LIMITS_PROBE)
-    list(APPEND KASANE_SOURCES "ui/kasane/ksn_proc_limits_device_probe.c")
-endif()
 if(KASANE_PROC_DEVICE_PROBE)
     list(APPEND KASANE_SOURCES
         "ui/kasane/ksn_procedural_surface.c"
         "ui/kasane/ksn_procedural_layers.c" "ui/kasane/ksn_procedural_present.c"
-        "ui/kasane/ksn_procedural_device_probe.c"
         "ui/kasane/ksn_pixel_span_device_probe.c"
-        "ui/kasane/ksn_proc_compiler_device_probe.c"
         "ui/kasane/ksn_grid_scan_cost_device_probe.c")
-endif()
-if(KASANE_MEGADEMO_DEVICE_PROBE)
-    list(APPEND KASANE_SOURCES "ui/kasane/ksn_megademo_device_probe.c")
 endif()
 if(KASANE_FLOWER_D1_PROBE)
     list(APPEND KASANE_SOURCES "scene/flower_d1_species_probe.c" "scene/flower_d1_pressure_probe.c")
@@ -133,13 +100,10 @@ option(KASANE_D5_SD_STREAM_PROBE "Replace VIDEO LAB with temporary SD stream dia
 option(KASANE_D4_PIXEL_APP_PROBE "Replace VIDEO LAB with bounded pixel function APP and inject second-band failure" OFF)
 option(KASANE_D2_MULTI_SURFACE_PROBE "Replace VIDEO LAB with two independent procedural image surfaces" OFF)
 option(KASANE_D2_OVERLAY_PROC_PROBE "Run two procedural image surfaces over FLOWER with one LCD failure" OFF)
-if(KASANE_D2_OVERLAY_PROC_PROBE AND
-   (KASANE_D4_PIXEL_APP_PROBE OR KASANE_D6_VIDEO_OVERLAY_PROBE OR KASANE_D6_SD_AV_STREAM_PROBE))
-    message(FATAL_ERROR "D2 overlay procedural probe requires other overlay/pixel probes OFF")
-endif()
-if(KASANE_D2_MULTI_SURFACE_PROBE AND
-   (KASANE_D4_PIXEL_APP_PROBE OR KASANE_D5_SD_STREAM_PROBE OR KASANE_D6_SD_AV_STREAM_PROBE))
-    message(FATAL_ERROR "D2 multi-surface VIDEO LAB probe requires other VIDEO LAB probes OFF")
+if(KASANE_D2_OVERLAY_PROC_PROBE OR KASANE_D2_MULTI_SURFACE_PROBE)
+    # Their apps drew with the float VM's procedural plans (Shiki v2.0 removed
+    # them); an overlay session has no Shiki heap to draw with instead.
+    message(FATAL_ERROR "The D2 surface probes went with the float VM (Shiki v2.0)")
 endif()
 set(KASANE_VIDEO_LAB_SOURCE "../apps/kasane/video_lab.js")
 if(KASANE_D5_SD_STREAM_PROBE)
@@ -218,7 +182,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "hal/int_lat
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
@@ -261,18 +225,11 @@ endif()
 if(KASANE_FLOWER_AUDIO_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_AUDIO_PROBE=1)
 endif()
-if(KASANE_MEGADEMO_DEVICE_PROBE)
-    target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../tools/kasane_contract")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_DEVICE_PROBE=1)
-endif()
 if(KASANE_PROC_JS_DIAGNOSTIC)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_JS_DIAGNOSTIC=1)
 endif()
 if(KASANE_MEGADEMO_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_TRACE=1)
-endif()
-if(KASANE_BGCOST_TRACE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_BGCOST_TRACE=1)
 endif()
 # The pocket.input.keys diagnostic (docs/platform/keystate.md): the key test app
 # on USB 'r', and US-framed key injection on the same USB stream. OFF by default
@@ -381,7 +338,7 @@ endif()
 file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../apps/*/chunks.txt")
 list(APPEND _app_chunk_lists ${POCKET_APP_CHUNK_LISTS})
 if(POCKET_DERBY_PROJECT_BATCH)
-    if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
+    if(POCKET_HEAPPROBE)
         message(FATAL_ERROR "DERBY projection batch requires the normal game chunks")
     endif()
     set(_project_input "${CMAKE_SOURCE_DIR}/apps/derby")
@@ -407,15 +364,14 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
              "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py" ${_app_chunk_lists})
 include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")
 target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunks.c")
-# A chunk with @plan functions (procedural plans written as JS,
-# docs/kasane/js-to-ir.md section 5) is embedded lowered: at build time,
-# tools/kasane_ir/lower_plans.mjs replaces each plan by its compiled IR and
-# the @planDecoder by the decoder, into build/generated/apps/<app>/ under the
-# same base name, so the symbol and the chunk table do not change. Editing
-# the chunk re-lowers it without a reconfigure. Only then does the build need
-# Node, 16 or later (docs/platform/build-environment.md); without @plan (or a
-# chunks.txt rom-text line: MEGADEMO's templates) it does not look for it.
-if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
+# A chunk with @shiki functions (Shiki programs written as JS,
+# docs/kasane/shiki-spec.md sec.8) is embedded with them removed: at build
+# time tools/kasane_ir/lower_plans.mjs strips them into
+# build/generated/apps/<app>/ under the same base name, so the symbol and the
+# chunk table do not change, and emit_shiki_rom.mjs compiles them into the
+# built-in table. Only then does the build need Node, 16 or later
+# (docs/platform/build-environment.md).
+if(APP_CHUNK_LOWER)
     find_program(POCKET_NODE node)
     set(_node_version "")
     if(POCKET_NODE)
@@ -430,8 +386,8 @@ if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
         endif()
         # Searched again at the next configure, after PATH is fixed.
         unset(POCKET_NODE CACHE)
-        message(FATAL_ERROR "The app chunks ${_plans} have @plan functions, which the build "
-                "compiles with tools/kasane_ir/lower_plans.mjs: that needs Node 16 or later on PATH "
+        message(FATAL_ERROR "The app chunks ${_plans} have @shiki functions, which the build "
+                "compiles with tools/kasane_ir: that needs Node 16 or later on PATH "
                 "(${_found}). Install Node (this project's machine uses Volta's Node v24) and put it "
                 "on the PATH of the shell that runs idf.py, or pass -DPOCKET_NODE=<path to node>; "
                 "then reconfigure. See docs/platform/build-environment.md.")
@@ -439,30 +395,15 @@ if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
     set(_kir "${CMAKE_SOURCE_DIR}/tools/kasane_ir")
     set(_lower ${APP_CHUNK_LOWER})
     while(_lower)
-        # how: packed (the plans as packed strings and their decoder), or
-        # rom:APP (the plans removed; they ship as the table below).
+        # how: rom:APP (the programs removed; they ship as the table below).
         list(POP_FRONT _lower _src _dst _how)
-        set(_mode "")
-        if(_how MATCHES "^rom:(.+)$")
-            set(_mode --rom "${CMAKE_MATCH_1}")
-        endif()
+        string(REGEX REPLACE "^rom:" "" _app "${_how}")
         add_custom_command(OUTPUT "${_dst}"
-            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" ${_mode} --file "${_src}" "${_dst}"
-            DEPENDS "${_src}" "${_kir}/lower_plans.mjs" "${_kir}/plan_js.mjs" "${_kir}/kir.mjs" "${_kir}/pack.mjs"
-            COMMENT "Compiling the @plan functions of ${_src}"
+            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" --rom "${_app}" --file "${_src}" "${_dst}"
+            DEPENDS "${_src}" "${_kir}/lower_plans.mjs" "${_kir}/plan_js.mjs"
+            COMMENT "Removing the @shiki functions of ${_src}"
             VERBATIM)
     endwhile()
-    # The built-in plans (docs/kasane/flash-plan.md section 2): the rom apps'
-    # @plan functions as a const table in flash, made from the same sources
-    # in the same build as the JS that names them, so the two cannot drift.
-    if(APP_CHUNK_ROM)
-        add_custom_command(OUTPUT "${APP_CHUNK_ROM_C}"
-            COMMAND "${POCKET_NODE}" "${_kir}/emit_rom_plans.mjs" "${APP_CHUNK_ROM_C}" ${APP_CHUNK_ROM}
-            DEPENDS ${APP_CHUNK_ROM_SOURCES} "${_kir}/emit_rom_plans.mjs" "${_kir}/plan_js.mjs"
-                    "${_kir}/kir.mjs" "${_kir}/pack.mjs"
-            COMMENT "Compiling the built-in plans"
-            VERBATIM)
-    endif()
     # The built-in Shiki programs (docs/kasane/shiki-spec.md sec.9.4
     # register(name)): the rom apps' @shiki functions as a const table in
     # flash, the same way; make_app_chunks.py's empty one otherwise (added
@@ -476,19 +417,10 @@ if(APP_CHUNK_LOWER OR APP_CHUNK_ROM)
             VERBATIM)
     endif()
 endif()
-# The built-in plan table app_session.c hands to pocket.kasane.procedural:
-# the generated one above, or make_app_chunks.py's empty one.
-target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_ROM_C}")
 target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_SHIKI_C}")
 foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
     target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
 endforeach()
-if(KASANE_PROC_LIMITS_PROBE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_LIMITS_PROBE=1)
-    # Embedded only in the probe image, so a normal build's EMBED list and
-    # flash layout are unchanged.
-    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/proc_limits_probe.js" TEXT)
-endif()
 if(KASANE_P0_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_P0_PROBE=1)
     if(KASANE_TEXT_PIE_DEVICE_PROBE)
@@ -562,14 +494,6 @@ if(KASANE_D4_PIXEL_APP_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D4_PIXEL_APP_PROBE=1)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/pixel_lab_probe.js" TEXT)
 endif()
-if(KASANE_D2_MULTI_SURFACE_PROBE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D2_MULTI_SURFACE_PROBE=1)
-    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/proc_multi_surface_probe.js" TEXT)
-endif()
-if(KASANE_D2_OVERLAY_PROC_PROBE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D2_OVERLAY_PROC_PROBE=1)
-    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/overlay_proc_multi_probe.js" TEXT)
-endif()
 if(KASANE_P0_BUS_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_P0_BUS_PROBE=1)
 endif()
@@ -587,11 +511,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # and other components retain the project's size optimization.
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
 set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
-set_source_files_properties(ui/kasane/ksn_procedural.c
-    ui/kasane/ksn_proc_analysis.c ui/kasane/ksn_proc_plan.c
-    ui/kasane/ksn_proc_plan_points.c ui/kasane/ksn_proc_points.c
-    ui/kasane/ksn_proc_points_pie.c ui/kasane/ksn_proc_points_dispatch.c
-    PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTIONS "-O2")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
@@ -607,13 +527,8 @@ endif()
 if(KASANE_PROC_DEVICE_PROBE)
     set_source_files_properties(ui/kasane/ksn_procedural_surface.c
         ui/kasane/ksn_procedural_layers.c
-        ui/kasane/ksn_procedural_present.c ui/kasane/ksn_procedural_device_probe.c
-        ui/kasane/ksn_proc_compiler_device_probe.c
+        ui/kasane/ksn_procedural_present.c
         ui/kasane/ksn_grid_scan_cost_device_probe.c
-        PROPERTIES COMPILE_OPTIONS "-O2")
-endif()
-if(KASANE_MEGADEMO_DEVICE_PROBE)
-    set_source_files_properties(ui/kasane/ksn_megademo_device_probe.c
         PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 

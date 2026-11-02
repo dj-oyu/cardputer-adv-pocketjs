@@ -1,9 +1,21 @@
+/* The frames, surfaces and image resources of pocket_proc.c through JS, on
+ * real QuickJS: beginFrame/commit/resource/createSurface and Shiki draws on
+ * pocket.kasane.shiki (pocket_shiki_api.c), the image port the presenter
+ * reads, transfer failure and repair, two independent surfaces on the real
+ * Kasane core and renderer, and stale resources. run_pocket_proc_qjs.py
+ * builds it.
+ *
+ * The frames are drawn by small Shiki programs assembled here as bytes (the
+ * sec.3 layout, asm() as apps/shikitest/shiki_api_test.js writes it) with
+ * whole-pixel inputs, so the C reference is the same segments rendered by
+ * ksn_proc_render_band. The float procedural VM, pocket.kasane.procedural and
+ * MEGADEMO's programs, which this harness used to run, went in Shiki v2.0;
+ * the app itself is run by run_megademo_app_host.py. */
 #include "quickjs.h"
 #include "pocket_proc.h"
 #include "pocket_api.h"
-#include "pocket_shape.h"
-#include "proc_megademo.h"
-#include "ksn_proc_plan.h"
+#include "pocket_shiki_api.h"
+#include "shiki_heap.h"
 #include "core_fixture.h"
 #include "ksn_render.h"
 #include <stdio.h>
@@ -13,7 +25,6 @@
 
 #define REQUIRE(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
 static uint16_t actual[KSN_PROC_W*KSN_PROC_H], expected[KSN_PROC_W*KSN_PROC_H];
-static uint16_t previous[KSN_PROC_W*KSN_PROC_H];
 static unsigned publishes,invalidates;
 KSN_TEST_CORE(multi_core,static);
 static bool multi_active;
@@ -35,12 +46,6 @@ static ksn_result multi_send_rect(void *ctx,uint16_t x,uint16_t y,uint16_t cols,
                pixels+(size_t)row*KSN_PROC_W+x,cols*2);
     return y==multi_fail_y?KSN_IO:KSN_OK;
 }
-#ifdef KSN_PROC_HOST_FAKE_PIE
-void ksn_proc_points_affine_pie(KsnProcPointDst dst,KsnProcPointSrc src,
-                                size_t n,const KsnProcAffineQ14 *coeff){
-    ksn_proc_points_affine_scalar(dst,src,n,coeff);
-}
-#endif
 
 ksn_result pocket_kasane_proc_publish(void){publishes++;return KSN_OK;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
@@ -56,10 +61,7 @@ JSValue pocket_kasane_proc_resource(JSContext *ctx){
         ksn_image_port port;pocket_proc_image_port_at(&port,0);
         REQUIRE(ksn_core_register_image(&multi_core,KSN_APP,&port,&multi_resource[0])==KSN_OK);
     }
-    /* Marked so the mock view can tell surface 0's image from the others. */
-    JSValue object=JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx,object,"__s0",JS_TRUE);
-    return object;
+    return JS_NewObject(ctx);
 }
 JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
     pocket_proc_image_mode_at(surface);
@@ -69,70 +71,85 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
     }
     return JS_NewObject(ctx);
 }
+/* The code first in the message, so the scripts below can read it. */
 JSValue pocket_api_throw(JSContext *ctx,const char *code,const char *op,
                          const char *message,bool retryable,const char *outcome){
     (void)retryable;(void)outcome;
     return JS_ThrowTypeError(ctx,"%s %s: %s",code,op,message);
 }
-static char *read_file(const char *path,size_t *size){
-    FILE *f=fopen(path,"rb");REQUIRE(f);
-    REQUIRE(fseek(f,0,SEEK_END)==0);long n=ftell(f);REQUIRE(n>0);
-    REQUIRE(fseek(f,0,SEEK_SET)==0);
-    char *data=malloc((size_t)n+1);REQUIRE(data);
-    REQUIRE(fread(data,1,(size_t)n,f)==(size_t)n);REQUIRE(fclose(f)==0);
-    data[n]=0;*size=(size_t)n;return data;
-}
+/* pocket_shiki_api.c's capability registration, never called here. */
+esp_err_t pocket_api_register(const pocket_capability_t *capability){(void)capability;return ESP_OK;}
 static void eval_ok(JSContext *ctx,const char *source){
     JSValue result=JS_Eval(ctx,source,strlen(source),"adapter-test.js",JS_EVAL_TYPE_GLOBAL);
     if(JS_IsException(result)){
         JSValue error=JS_GetException(ctx);const char *message=JS_ToCString(ctx,error);
-        fprintf(stderr,"QuickJS: %s\n",message?message:"exception");
+        fprintf(stderr,"QuickJS: %s\nwhile running: %s\n",message?message:"exception",source);
         if(message)JS_FreeCString(ctx,message);JS_FreeValue(ctx,error);exit(1);
     }
     JS_FreeValue(ctx,result);
 }
 static void eval_error(JSContext *ctx,const char *source){
     JSValue result=JS_Eval(ctx,source,strlen(source),"adapter-test.js",JS_EVAL_TYPE_GLOBAL);
+    if(!JS_IsException(result))fprintf(stderr,"no error from: %s\n",source);
     REQUIRE(JS_IsException(result));
     JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
 }
-#define APP_NEWS_TICKS (2u*PROC_MEGA_FRAMES)
-#define APP_WAKE_TICKS 104u
-#define APP_ACT1_TICKS 216u
-static void reference(unsigned tick){
-    uint16_t color=proc_mega_backdrop(tick);
-    for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
-    for(unsigned layer=0;layer<PROC_MEGA_LAYERS;layer++){
-        ksn_proc_inst code[KSN_PROC_CODE];ksn_proc_program program;
-        float inputs[KSN_PROC_INPUTS];ksn_proc_plan plan;
-        ksn_proc_vm vm;ksn_proc_frame frame;
-        REQUIRE(proc_mega_build(tick,layer,code,&program,inputs));
-        REQUIRE(ksn_proc_plan_prepare(&plan,&program));
-        REQUIRE(ksn_proc_plan_begin(&vm,&plan,inputs,&frame)==KSN_PROC_RUNNING);
-        REQUIRE(ksn_proc_plan_run(&vm,&plan,false)==KSN_PROC_DONE);
-        REQUIRE(ksn_proc_render_band(&frame,expected,0,KSN_PROC_H));
-        if(layer==3){
-            static const KsnProcAffineQ14 coeff[3]={
-                {16384,0,0,16384,0,0},
-                {16000,1600,-1000,16384,-6*16384,6*16384},
-                {15360,-2304,1300,15500,18*16384,-10*16384}};
-            static const uint16_t colors[3]={0x07ff,0xfde0,0xf81f};
-            _Alignas(16) int16_t x[40],y[40],out_x[40],out_y[40];
-            for(unsigned i=0;i<40;i++){
-                x[i]=(int16_t)(18+i*5);
-                y[i]=(int16_t)(92+((i*13)%23)-11);
-            }
-            unsigned phase=tick/16;
-            ksn_proc_points_affine_scalar((KsnProcPointDst){out_x,out_y},
-                (KsnProcPointSrc){x,y},40,&coeff[phase]);
-            ksn_proc_frame typed={.ready=true,.count=39};
-            for(unsigned i=1;i<40;i++)
-                typed.segments[i-1]=(ksn_proc_segment){out_x[i-1],out_y[i-1],
-                    out_x[i],out_y[i],colors[phase]};
-            REQUIRE(ksn_proc_render_band(&typed,expected,0,KSN_PROC_H));
-        }
-    }
+/* pocket_proc_reset() then pocket_shiki_api_reset(), app_stop()'s order. */
+static void session_reset(void){pocket_proc_reset();pocket_shiki_api_reset();}
+
+/* The pixel workload: FRAMES frames of LINES lines, each its own program
+ * (a colour each) drawn with four whole-pixel inputs. The same integers in
+ * JS (prelude) and here; some lines leave the panel on either side. */
+#define FRAMES 24u
+#define LINES 5u
+static const uint16_t line_color[LINES]={0xf800,0x07e0,0x001f,0xffe0,0xf81f};
+static uint16_t frame_backdrop(unsigned f){return (uint16_t)((f*2117u)&0xffffu);}
+static void line_ends(unsigned f,unsigned l,int e[4]){
+    e[0]=(int)((f*37u+l*53u)%360u)-60;
+    e[1]=(int)((f*11u+l*29u)%200u)-30;
+    e[2]=(int)((f*23u+l*71u+97u)%360u)-60;
+    e[3]=(int)((f*19u+l*41u+50u)%200u)-30;
 }
+static void reference(unsigned f){
+    static ksn_proc_frame frame;
+    memset(&frame,0,sizeof frame);
+    for(unsigned l=0;l<LINES;l++){
+        int e[4];line_ends(f,l,e);
+        frame.segments[frame.count++]=(ksn_proc_segment){(int16_t)e[0],(int16_t)e[1],
+            (int16_t)e[2],(int16_t)e[3],line_color[l]};
+    }
+    frame.ready=true;
+    const uint16_t color=frame_backdrop(f);
+    for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)expected[i]=color;
+    REQUIRE(ksn_proc_render_band(&frame,expected,0,KSN_PROC_H));
+}
+static const char prelude[]=
+    "globalThis.S=pocket.kasane.shiki;"
+    /* sec.3 bytes: regions [type,q,k,write], code [op,dst,a,b,imm,aux]. */
+    "globalThis.asm=(regions,code,inputs)=>{inputs=inputs||[];"
+    "const head=12+inputs.length+4*regions.length,body=(head+3)&~3;"
+    "const b=new Uint8Array(body+12*code.length),dv=new DataView(b.buffer);"
+    "b.set([83,75,73,49,1,0,code.length,inputs.length,0,regions.length,0,0]);"
+    "b.set(inputs,12);regions.forEach((r,k)=>b.set(r,12+inputs.length+4*k));"
+    "code.forEach((i,k)=>{const o=body+12*k;b.set(i.slice(0,4),o);"
+    "dv.setInt32(o+4,i[4]||0,true);dv.setUint16(o+8,i[5]||0,true)});return b};"
+    /* PLOT at fixed (x, y): SET r0, SET r1 (Q16 pixels), PLOT. */
+    "globalThis.dotAt=(x,y,c)=>asm([],[[0,0,0,0,x*65536],[0,1,0,0,y*65536],[8,0,0,1,0,c]]);"
+    /* PLOT at the inputs (x, y), Q16. */
+    "globalThis.dotIn=c=>asm([],[[1,0,0],[1,1,1],[8,0,0,1,0,c]],[16,16]);"
+    /* LINE from (x0, y0) to (x1, y1), all inputs: INPUT x4, MOVE, LINE. */
+    "globalThis.lineIn=c=>asm([],[[1,0,0],[1,1,1],[1,2,2],[1,3,3],[7,0,0,1],[9,0,2,3,0,c]],[16,16,16,16]);"
+    "globalThis.code=f=>{try{f();return 'OK'}catch(e){const m=String(e);"
+    "for(const c of ['INVALID_ARGUMENT','LIMIT_EXCEEDED','CLOSED','BUSY','OUT_OF_MEMORY'])"
+    "if(m.includes(c))return c;return m}};"
+    "globalThis.expect=(f,c)=>{const got=code(f);"
+    "if(got!==c)throw Error('expected '+c+' got '+got+': '+f)};"
+    "globalThis.LINES=[0xf800,0x07e0,0x001f,0xffe0,0xf81f].map(c=>S.register(lineIn(c)));"
+    "globalThis.ends=(f,l)=>[(f*37+l*53)%360-60,(f*11+l*29)%200-30,"
+    "(f*23+l*71+97)%360-60,(f*19+l*41+50)%200-30];"
+    "globalThis.frameAt=f=>{S.beginFrame((f*2117)&0xffff);"
+    "for(let l=0;l<5;l++)S.draw(LINES[l],...ends(f,l));S.commit()};";
+
 static void check_image_rows(const ksn_image_port *image){
     uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
     /* Alternating bands, the short final band, and duplicate source rows
@@ -153,45 +170,18 @@ static void check_image_rows(const ksn_image_port *image){
         }
     }
 }
-/* pocket_shape.c's install, never called here (main() fills pocket.shapes
- * itself). */
-esp_err_t pocket_api_register(const pocket_capability_t *capability){(void)capability;return ESP_OK;}
-esp_err_t pocket_api_lazy(JSContext *ctx,const char *name,pocket_namespace_fn fn,void *user){
-    (void)ctx;(void)name;(void)fn;(void)user;return ESP_OK;
-}
-int main(int argc,char **argv){
-    REQUIRE(argc==2||argc==3);
+int main(void){
+    /* A Shiki session: the frames, the workspace and the programs come from
+     * the Shiki heap at its default budget, as on the device. */
+    REQUIRE(shiki_heap_begin(0));
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
     JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
     JSValue global=JS_GetGlobalObject(ctx),pocket=JS_NewObject(ctx),kasane=JS_NewObject(ctx);
-    REQUIRE(pocket_proc_install(ctx,kasane)==ESP_OK);
+    REQUIRE(JS_SetPropertyStr(ctx,kasane,"grid",JS_NewObject(ctx))>=0);
+    REQUIRE(pocket_shiki_api_install(ctx,kasane)==ESP_OK);
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
-    /* WAKE draws through pocket.shapes into the real pocket_proc.c. */
-    JSValue shapes=JS_NewObject(ctx);
-    REQUIRE(pocket_shape_fill(ctx,shapes,NULL)==ESP_OK);
-    REQUIRE(JS_SetPropertyStr(ctx,pocket,"shapes",shapes)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);
-    /* The view side is a permissive mock; megaBounds follows the image of
-     * procedural surface 0, whose resource object is marked below. */
-    eval_ok(ctx,
-        "globalThis.megaBounds=[];globalThis.megaReplaces=0;"
-        "globalThis.console={log(){}};"
-        "const ref=()=>({setRect(){},setClip(){},setColor(){},setText(){},setReveal(){},"
-        "setImageFrame(){},setRotation(){},place(){},setVisible(){},"
-        "animate(){return {stop(){},finish(){},poll(){return 'running'}}}});"
-        "const uiTx=new Proxy({},{get(o,k){return k==='image'?s=>{const r=ref(),main=s.resource.__s0;"
-        "if(main)megaBounds=s.bounds.slice();"
-        "r.setRect=(tx,b)=>{if(main)megaBounds=b.slice()};return r}:()=>ref()}});"
-        "pocket.memory={info(){return {internalFreeBytes:1e9}}};"
-        "pocket.kasane.replace=fn=>{megaReplaces++;fn(uiTx)};"
-        "pocket.kasane.patch=fn=>fn(uiTx);"
-        "pocket.kasane.stats=()=>({displayed:{commands:0}});"
-        "pocket.kasane.resource=()=>({});"
-        "pocket.kasane.cache={create(){return {}}};"
-        "pocket.kasane.pixel={open(){return {}},stage(){return true}};"
-        "pocket.kasane.grid={registerResizeSource(){return 1},"
-        "resource(){return {__monitor:true}}}");
     ksn_image_port image;pocket_proc_image_port(&image);
     REQUIRE(image.width==KSN_PROC_W&&image.height==KSN_PROC_H);
     REQUIRE(image.variants==1&&image.frames==1);
@@ -200,89 +190,20 @@ int main(int argc,char **argv){
     REQUIRE(image.read_span(image.ctx,1,0,0,0,1,span,alpha)==KSN_INVALID);
     REQUIRE(image.read_span(image.ctx,0,0,0,0,KSN_PROC_W,span,alpha)==KSN_OK);
     for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
-    eval_ok(ctx,"pocket.kasane.procedural.resource()");
+    eval_ok(ctx,prelude);
+    eval_ok(ctx,"S.resource()");
     REQUIRE(pocket_proc_is_image_mode());
-    /* The built-in plan table, as app_session.c hands it over: the app
-     * registers MEGADEMO's plans by name (run_pocket_proc_qjs.py generates it). */
-    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
-    /* argv[1]: the app's chunks, comma-separated, in apps/kasane/chunks.txt's
-     * order (what the entry's pocket.app.load() calls evaluate). */
-    char list[4096];snprintf(list,sizeof list,"%s",argv[1]);
-    for(char *file=strtok(list,",");file;file=strtok(NULL,",")){
-        size_t bytes;char *source=read_file(file,&bytes);
-        JSValue result=JS_Eval(ctx,source,bytes,file,JS_EVAL_TYPE_GLOBAL);
-        if(JS_IsException(result)){
-            JSValue error=JS_GetException(ctx);
-            const char *message=JS_ToCString(ctx,error);
-            fprintf(stderr,"megademo JS eval %s: %s\n",file,message?message:"<non-string exception>");
-            if(message)JS_FreeCString(ctx,message);
-            JS_FreeValue(ctx,error);
-        }
-        REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
-    }
-    /* The app opens with WAKE: APP_WAKE_TICKS frames (Tama backlit, then the
-     * TV off), which prefetch the news. The last frame is black. */
-    eval_ok(ctx,"if(procMegademo.len[7]!==104)throw Error('WAKE length')");
-    for(unsigned tick=0;tick<APP_WAKE_TICKS;tick++){
-        eval_ok(ctx,"frame()");
-        REQUIRE(pocket_proc_pending());
-        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
-        if(tick+1==APP_WAKE_TICKS)for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Act I (CALL, ROUTE, VOYAGE: APP_ACT1_TICKS frames) draws with
-     * pocket.shapes and its HUD plans; each frame is presented. The story
-     * starts in the room and its camera reaches full screen during CALL;
-     * each scene and the room leaving view rebuild the set. */
-    for(unsigned tick=0;tick<APP_ACT1_TICKS;tick++){
-        eval_ok(ctx,"frame()");
-        REQUIRE(pocket_proc_pending());
-        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
-        memcpy(expected,actual,sizeof expected);check_image_rows(&image);
-        pocket_proc_present_result(KSN_OK);
-        REQUIRE(!pocket_proc_pending());
-    }
-    eval_ok(ctx,"if(megaReplaces<2||megaBounds.join(',')!=='0,0,240,135')"
-                "throw Error('story camera did not reach full screen');"
-                "globalThis.newsReplaces=megaReplaces");
-    /* Two held Enter frames count as one press. The same resource reaches the
-     * monitor and then returns to an exact full-screen rectangle. */
-    for(unsigned i=0;i<44;i++){
-        eval_ok(ctx,i<2?"frame(0x4000)":"frame(0)");
-        REQUIRE(pocket_proc_pending());
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Act I's last frame was before these: TWIST starts with the room in
-     * view, one new REPLACE. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==newsReplaces+1)"
-                "throw Error('Enter did not shrink into monitor')");
-    for(unsigned i=0;i<44;i++){
-        eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
-        REQUIRE(pocket_proc_pending());
-        pocket_proc_present_result(KSN_OK);
-    }
-    /* Back at full screen the set is rebuilt without the room. */
-    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==newsReplaces+2)"
-                "throw Error('Enter did not restore full screen')");
-    /* The adapter's pixel contract on Act I's former programs (the VM's
-     * reference workload, proc_megademo_news_ref.js, equal to
-     * proc_megademo.h): each 16-frame beat twice, news tick k showing
-     * reference frame (k / 32) * 16 + k % 16, as the app played it. */
-    eval_ok(ctx,
-        "const NP=pocket.kasane.procedural,NR=procMegademoNews,NH=[];"
-        "for(let ph=0;ph<3;ph++){NH.push([]);for(let l=0;l<5;l++){const b=NR.pointBatch(ph,l);"
-        "NH[ph].push(b?NP.register(NR.program(ph,l),b):NP.register(NR.program(ph,l)))}}"
-        "globalThis.newsFrame=k=>{const f=(k/32|0)*16+k%16,ph=f/16|0;NP.beginFrame(NR.backdrop(f));"
-        "for(let l=0;l<5;l++)NP.draw(NH[ph][l],NR.inputs(f,l));NP.commit()}");
+
+    /* The pixel contract: each frame, read back through the backdrop and the
+     * image port, equals the reference; the first two survive two failed
+     * transfers before their ACK. */
     publishes=0;
     const unsigned invalidates0=invalidates;
-    uint32_t news_scalar=0,news_pie=0;
-    pocket_proc_batch_counts(&news_scalar,&news_pie);
-    for(unsigned tick=0;tick<APP_NEWS_TICKS;tick++){
-        char call[48];snprintf(call,sizeof call,"newsFrame(%u)",tick);eval_ok(ctx,call);
+    for(unsigned f=0;f<FRAMES;f++){
+        char call[48];snprintf(call,sizeof call,"frameAt(%u)",f);eval_ok(ctx,call);
         REQUIRE(pocket_proc_pending());
         REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
-        reference(tick/32u*16u+tick%16u);
+        reference(f);
         REQUIRE(memcmp(actual,expected,sizeof actual)==0);
         for(unsigned y=0;y<KSN_PROC_H;y++){
             REQUIRE(image.read_span(image.ctx,0,0,y,0,KSN_PROC_W,span,alpha)==KSN_OK);
@@ -294,17 +215,7 @@ int main(int argc,char **argv){
             REQUIRE(image.read_span(image.ctx,0,0,y,0,KSN_PROC_W,span,alpha)==KSN_OK);
         span_ticks+=clock()-span_start;
         check_image_rows(&image);
-        if(argc==3&&tick%32u<16u){ /* each Act I frame once, by its index */
-            char path[1024];
-            REQUIRE(snprintf(path,sizeof path,"%s/frame-%02u.rgb565",argv[2],tick/32u*16u+tick%16u)>0);
-            FILE *out=fopen(path,"wb");REQUIRE(out);
-            for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++){
-                REQUIRE(fputc(expected[i]&255,out)!=EOF);
-                REQUIRE(fputc(expected[i]>>8,out)!=EOF);
-            }
-            REQUIRE(fclose(out)==0);
-        }
-        if(tick<=1){
+        if(f<=1){
             pocket_proc_present_result(KSN_IO);
             REQUIRE(pocket_proc_pending());
             REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
@@ -324,7 +235,6 @@ int main(int argc,char **argv){
             REQUIRE(!pocket_proc_pending());
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
             REQUIRE(memcmp(span,expected+25*KSN_PROC_W+7,31*sizeof *span)==0);
-            memcpy(previous,expected,sizeof previous);
         }else{
             pocket_proc_present_result(KSN_OK);
             REQUIRE(!pocket_proc_pending());
@@ -332,136 +242,126 @@ int main(int argc,char **argv){
             REQUIRE(memcmp(actual,expected,sizeof actual)==0);
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
             REQUIRE(memcmp(span,expected+25*KSN_PROC_W+7,31*sizeof *span)==0);
-            memcpy(previous,expected,sizeof previous);
         }
     }
-    REQUIRE(publishes==APP_NEWS_TICKS);
-    uint32_t scalar=0,pie=0;
-    pocket_proc_batch_counts(&scalar,&pie);
-    scalar-=news_scalar;pie-=news_pie;
-#ifdef KSN_PROC_HOST_FAKE_PIE
-    REQUIRE(scalar==0&&pie==APP_NEWS_TICKS);
-#else
-    REQUIRE(scalar==APP_NEWS_TICKS&&pie==0);
-#endif
-    eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
-    eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
-    eval_error(ctx,"pocket.kasane.procedural.draw(1,[NaN,0,0,0])");
+    REQUIRE(publishes==FRAMES);
+
+    /* A refused program, a failed draw (it closes the frame), and the end of
+     * the turn closing a frame. */
+    eval_error(ctx,"S.register(new Uint8Array([1,2,3]))");
+    eval_ok(ctx,"globalThis.dot=S.register(dotIn(63488));S.beginFrame(0)");
+    eval_error(ctx,"S.draw(dot,NaN,0)");
+    eval_error(ctx,"S.commit()");
+    eval_ok(ctx,"S.beginFrame(0)");
     pocket_proc_end_turn();
-    eval_error(ctx,"pocket.kasane.procedural.commit()");
-    pocket_proc_reset();
+    eval_error(ctx,"S.commit()");
+    session_reset();
     REQUIRE(!pocket_proc_is_image_mode());
     REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
     for(unsigned i=0;i<31;i++)REQUIRE(span[i]==0&&alpha[i]==255);
-    eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
-    eval_error(ctx,"pocket.kasane.procedural.draw(1,[0,0,0,0])");
-    eval_ok(ctx,"let fresh=pocket.kasane.procedural.register([[0,0,0,0,1,0]]);"
-                "pocket.kasane.procedural.beginFrame(63488);"
-                "pocket.kasane.procedural.draw(fresh,[0,0,0,0]);"
-                "pocket.kasane.procedural.commit()");
+    /* reset() closed every handle. */
+    eval_ok(ctx,"S.beginFrame(0)");
+    eval_error(ctx,"S.draw(dot,0,0)");
+
+    /* Backdrop mode (no resource): a failed transfer keeps the committed
+     * frame and owes a repair before the next frame opens. */
+    eval_ok(ctx,"globalThis.fresh=S.register(dotAt(0,0,1));"
+                "S.beginFrame(63488);S.draw(fresh);S.commit()");
     pocket_proc_present_result(KSN_IO);
     REQUIRE(pocket_proc_has_frame());
     REQUIRE(invalidates>0); /* Backdrop mode repairs the old committed frame. */
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
-    eval_error(ctx,"pocket.kasane.procedural.beginFrame(0)"); /* Old backdrop owes repair. */
+    eval_error(ctx,"S.beginFrame(0)"); /* Old backdrop owes repair. */
     pocket_proc_overlay_present_result(KSN_OK); /* FLOWER cannot repair it. */
-    eval_error(ctx,"pocket.kasane.procedural.beginFrame(0)");
+    eval_error(ctx,"S.beginFrame(0)");
     pocket_proc_present_result(KSN_OK);
     REQUIRE(!pocket_proc_has_frame());
-    eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
+    eval_ok(ctx,"S.beginFrame(0)");
     pocket_proc_end_turn();
-    pocket_proc_reset();
+    session_reset();
+
+    /* Reentrancy: a getter that runs inside a guarded call (resource()'s
+     * option) meets BUSY; one that runs while draw() reads its inputs may
+     * close the frame, and then the draw adds nothing to any frame. */
     eval_ok(ctx,
-        "const proc=pocket.kasane.procedural;let nestedRegisterBusy=false;"
-        "let row=[0,0,0,0,1,0];"
-        "Object.defineProperty(row,0,{get(){try{proc.register([[0,0,0,0,2,0]])}"
-        "catch(e){nestedRegisterBusy=String(e).includes('BUSY')}return 0}});"
-        "let guarded=proc.register([row]);"
-        "if(!nestedRegisterBusy||!Number.isInteger(guarded))throw Error('register reentrancy');"
-        "proc.beginFrame(7);let nestedCommitBusy=false;let guardIn=[0,0,0,0];"
-        "Object.defineProperty(guardIn,0,{get(){try{proc.commit()}"
-        "catch(e){nestedCommitBusy=String(e).includes('BUSY')}return 0}});"
-        "proc.draw(guarded,guardIn);"
-        "if(!nestedCommitBusy)throw Error('draw reentrancy');proc.commit()");
+        "let nestedBusy=false;"
+        "S.resource({get maxSegments(){try{S.beginFrame(0)}"
+        "catch(e){nestedBusy=String(e).includes('BUSY')}return 96}});"
+        "if(!nestedBusy)throw Error('resource reentrancy');"
+        "globalThis.guarded=S.register(dotAt(5,5,0xffff));"
+        "S.beginFrame(7);let guardIn=[0,0];"
+        "Object.defineProperty(guardIn,0,{get(){S.commit();return 0}});"
+        "expect(()=>S.draw(guarded,guardIn),'BUSY')");
     REQUIRE(pocket_proc_pending());
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==7);
     pocket_proc_present_result(KSN_OK);
-    pocket_proc_reset();
-    eval_error(ctx,"pocket.kasane.procedural.register([[0,0,0,0,1,0]],"
-                   "{kind:'affineQ14Points',x:[0,1],y:[0],coeff:[16384,0,0,16384,0,0],color:1})");
-    eval_ok(ctx,"let off=pocket.kasane.procedural.register([[0,0,0,0,1,0]],"
-                "{kind:'affineQ14Points',x:[0,1],y:[0,0],"
-                /* x=721: one past the shared VM/typed bound of 720. */
-                "coeff:[16384,0,0,16384,11812864,0],color:1});"
-                "pocket.kasane.procedural.beginFrame(4)");
-    eval_error(ctx,"pocket.kasane.procedural.draw(off,[0,0,0,0])");
-    REQUIRE(!pocket_proc_pending());
-    pocket_proc_reset();
-    eval_ok(ctx,
-        "let curve=proc.register(["
-        "[0,0,0,0,10,0],[0,1,0,0,10,0],"
-        "[0,2,0,0,35,0],[1,3,0,0,0,0],"
-        "[0,4,0,0,75,0],[0,5,0,0,95,0],"
-        "[0,6,0,0,100,0],[0,7,0,0,10,0],"
-        "[14,0,16,0,0,2016]]);"
-        "proc.beginFrame(0);proc.draw(curve,[95,0,0,0]);proc.commit()");
+    session_reset();
+
+    /* Inputs: a different input draws a different frame; the numeric form
+     * draws what the array form draws, short lists zero-padded, trailing
+     * undefined arguments not passed. */
+    eval_ok(ctx,"globalThis.curve=S.register(asm([],[[0,0,0,0,10*65536],[0,1,0,0,10*65536],"
+                "[7,0,0,1],[1,2,0],[0,3,0,0,100*65536],[9,0,2,3,0,2016]],[16]));"
+                "S.beginFrame(0);S.draw(curve,[95]);S.commit()");
     REQUIRE(pocket_proc_pending());
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     REQUIRE(actual[10*KSN_PROC_W+10]==0x07e0);
-    REQUIRE(actual[10*KSN_PROC_W+100]==0x07e0);
+    REQUIRE(actual[100*KSN_PROC_W+95]==0x07e0);
+    static uint16_t previous[KSN_PROC_W*KSN_PROC_H];
     memcpy(previous,actual,sizeof previous);
     pocket_proc_present_result(KSN_OK);
-    eval_ok(ctx,"proc.beginFrame(0);proc.draw(curve,[25,0,0,0]);proc.commit()");
+    eval_ok(ctx,"S.beginFrame(0);S.draw(curve,[25]);S.commit()");
     REQUIRE(pocket_proc_pending());
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     REQUIRE(memcmp(previous,actual,sizeof actual)!=0);
     pocket_proc_present_result(KSN_OK);
-    /* Numeric inputs (draw(h, a0, ..., a7)): the same frame as the array form,
-     * short lists zero-padded, trailing undefined arguments not passed. */
     static const char *const SAME_AS_95[]={
-        "proc.draw(curve,95,0,0,0)","proc.draw(curve,95)",
-        "proc.draw(curve,95,0,undefined,undefined)","proc.draw(curve,[95,0,0,0],undefined)",
-        "proc.draw(curve,[95],undefined,undefined)"};
+        "S.draw(curve,95,0,0,0)","S.draw(curve,95)",
+        "S.draw(curve,95,0,undefined,undefined)","S.draw(curve,[95,0,0,0],undefined)",
+        "S.draw(curve,[95],undefined,undefined)"};
     for(unsigned i=0;i<sizeof SAME_AS_95/sizeof SAME_AS_95[0];i++){
         char js[160];
-        snprintf(js,sizeof js,"proc.beginFrame(0);%s;proc.commit()",SAME_AS_95[i]);
+        snprintf(js,sizeof js,"S.beginFrame(0);%s;S.commit()",SAME_AS_95[i]);
         eval_ok(ctx,js);
         REQUIRE(pocket_proc_pending());
         REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
         REQUIRE(memcmp(previous,actual,sizeof actual)==0);
         pocket_proc_present_result(KSN_OK);
     }
-    eval_ok(ctx,"proc.beginFrame(0)");
+    /* Shiki converts only the inputs a program declares (curve has one), so
+     * a non-finite value is refused in that position; a non-number is
+     * refused in any. draw(h) alone is zero inputs, padded, and valid. */
     static const char *const BAD_NUMERIC[]={
-        "proc.draw(curve,95,undefined,0)",       /* a hole */
-        "proc.draw(curve,1,2,3,4,5,6,7,8,9)",    /* nine inputs */
-        "proc.draw(curve,NaN)","proc.draw(curve,95,Infinity)","proc.draw(curve,1e39)",
-        "proc.draw(curve,95,'1')","proc.draw(curve,'95')","proc.draw(curve,[95],0)",
-        "proc.draw(curve)","proc.draw(curve,undefined)","proc.draw(999999,95)"};
-    for(unsigned i=0;i<sizeof BAD_NUMERIC/sizeof BAD_NUMERIC[0];i++)eval_error(ctx,BAD_NUMERIC[i]);
-    /* This harness's pocket_api_throw() puts the code first in the message. */
-    eval_ok(ctx,"let code='';try{proc.draw(999999,95)}catch(e){code=e.message}"
+        "S.draw(curve,95,undefined,0)",       /* a hole */
+        "S.draw(curve,1,2,3,4,5,6,7,8,9)",    /* nine inputs */
+        "S.draw(curve,NaN)","S.draw(curve,Infinity)","S.draw(curve,1e39)",
+        "S.draw(curve,95,'1')","S.draw(curve,'95')","S.draw(curve,[95],0)",
+        "S.draw(curve,undefined)","S.draw(999999,95)"};
+    for(unsigned i=0;i<sizeof BAD_NUMERIC/sizeof BAD_NUMERIC[0];i++){
+        eval_ok(ctx,"S.beginFrame(0)");
+        eval_error(ctx,BAD_NUMERIC[i]);
+    }
+    eval_ok(ctx,"S.beginFrame(0);let code='';try{S.draw(999999,95)}catch(e){code=e.message}"
                 "if(!code.startsWith('CLOSED'))throw Error('stale handle: '+code);"
-                "try{proc.draw(curve,95,undefined,0)}catch(e){code=e.message}"
+                "S.beginFrame(0);try{S.draw(curve,95,undefined,0)}catch(e){code=e.message}"
                 "if(!code.startsWith('INVALID_ARGUMENT'))throw Error('hole: '+code)");
     pocket_proc_end_turn();
-    eval_error(ctx,"proc.register([[14,0,0,0,0,2016]])");
-    pocket_proc_reset();
+    session_reset();
+
     /* Two image resources keep independent committed frames and reject a
-     * second writer until the first candidate's display ticket is retired. */
+     * second writer until the first candidate's display ticket is retired.
+     * The second surface is capped (createSurface({maxSegments})) so both fit
+     * the default Shiki heap, as an app's would. */
     ksn_core_init(&multi_core);multi_active=true;
     eval_ok(ctx,
-        "const layerId=proc.createSurface();"
+        "globalThis.layerId=S.createSurface({maxSegments:256});"
         "if(!Number.isInteger(layerId)||layerId<=0)throw Error('surface ID');"
-        "proc.beginFrame(0,layerId)");
-    eval_error(ctx,"proc.commit()"); /* An extra surface needs its image lease. */
+        "S.beginFrame(0,layerId)");
+    eval_error(ctx,"S.commit()"); /* An extra surface needs its image lease. */
     pocket_proc_end_turn();
-    eval_ok(ctx,
-        "proc.resource();proc.resource(layerId);"
-        "const dotPlan=proc.register([[1,0,0,0,0,0],[1,1,1,0,0,0],"
-        "[8,0,0,1,0,63488]])");
+    eval_ok(ctx,"S.resource();S.resource(layerId);globalThis.dotPlan=S.register(dotIn(63488))");
     ksn_client app=ksn_core_client(&multi_core,KSN_APP);
     ksn_tx tx;ksn_ref refs[2];
     REQUIRE(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
@@ -482,14 +382,13 @@ int main(int argc,char **argv){
     ksn_image_port first,second;
     pocket_proc_image_port_at(&first,0);pocket_proc_image_port_at(&second,1);
     REQUIRE(first.ctx!=second.ctx);
-    eval_ok(ctx,"proc.beginFrame(0);proc.draw(dotPlan,[10,10,0,0]);proc.commit()");
-    eval_error(ctx,"proc.beginFrame(0,layerId)");
+    eval_ok(ctx,"S.beginFrame(0);S.draw(dotPlan,10,10);S.commit()");
+    eval_error(ctx,"S.beginFrame(0,layerId)");
     multi_bytes=0;
     REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
     REQUIRE(multi_bytes==64*48*2&&multi_panel[10*240+10]==0xf800);
     pocket_proc_overlay_present_result(KSN_OK);
-    eval_ok(ctx,"proc.beginFrame(0,layerId);"
-                "proc.draw(dotPlan,[20,10,0,0]);proc.commit()");
+    eval_ok(ctx,"S.beginFrame(0,layerId);S.draw(dotPlan,20,10);S.commit()");
     REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK);
     REQUIRE(span[0]==0xf800);
     REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK);
@@ -499,20 +398,21 @@ int main(int argc,char **argv){
     REQUIRE(multi_bytes==64*48*2&&multi_panel[10*240+100]==0xf800);
     pocket_proc_overlay_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
-    /* A VM draw overwrites the shared raster workspace even if the caller
-     * abandons the candidate. Re-reading the same cached row must still use
-     * the committed frame, on either surface. Exercise both phase orders. */
+    /* A Shiki draw writes its segments into the shared workspace, which is
+     * also the image's raster band cache, even if the caller abandons the
+     * candidate. Re-reading the same cached row must still use the committed
+     * frame, on either surface. Exercise both phase orders. */
     for(unsigned target=0;target<2;target++){
         REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
-        eval_ok(ctx,target?"proc.beginFrame(0,layerId);proc.draw(dotPlan,[42,10,0,0])":
-                           "proc.beginFrame(0);proc.draw(dotPlan,[42,10,0,0])");
+        eval_ok(ctx,target?"S.beginFrame(0,layerId);S.draw(dotPlan,42,10)":
+                           "S.beginFrame(0);S.draw(dotPlan,42,10)");
         REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
         REQUIRE(first.read_span(first.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
         for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
         pocket_proc_end_turn();
         REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
-        eval_ok(ctx,target?"proc.beginFrame(0,layerId);proc.draw(dotPlan,[43,10,0,0])":
-                           "proc.beginFrame(0);proc.draw(dotPlan,[43,10,0,0])");
+        eval_ok(ctx,target?"S.beginFrame(0,layerId);S.draw(dotPlan,43,10)":
+                           "S.beginFrame(0);S.draw(dotPlan,43,10)");
         REQUIRE(first.read_span(first.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
         for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
         pocket_proc_end_turn();
@@ -521,17 +421,19 @@ int main(int argc,char **argv){
         REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
     }
     REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
-    eval_ok(ctx,"proc.beginFrame(0)");
-    eval_error(ctx,"proc.draw(dotPlan,[721,10,0,0])");
+    /* One past the coordinate range (720) fails and leaves the committed
+     * frame alone. */
+    eval_ok(ctx,"S.beginFrame(0)");
+    eval_error(ctx,"S.draw(dotPlan,721,10)");
     REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
-    eval_ok(ctx,"proc.beginFrame(0);proc.draw(dotPlan,[11,10,0,0]);proc.commit()");
+    eval_ok(ctx,"S.beginFrame(0);S.draw(dotPlan,11,10);S.commit()");
     REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
     multi_bytes=0;
     REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
     REQUIRE(multi_bytes==16*8*2&&multi_panel[10*240+10]==0&&
             multi_panel[10*240+11]==0xf800&&multi_panel[10*240+100]==0xf800);
     pocket_proc_overlay_present_result(KSN_OK);
-    eval_ok(ctx,"proc.beginFrame(0,layerId);proc.draw(dotPlan,[21,10,0,0]);proc.commit()");
+    eval_ok(ctx,"S.beginFrame(0,layerId);S.draw(dotPlan,21,10);S.commit()");
     multi_fail_y=8;
     REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_IO);
     pocket_proc_overlay_present_result(KSN_IO);
@@ -542,19 +444,23 @@ int main(int argc,char **argv){
             multi_panel[10*240+101]==0xf800&&multi_panel[10*240+11]==0xf800);
     pocket_proc_overlay_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
-    eval_error(ctx,"proc.createSurface()");
+    eval_error(ctx,"S.createSurface()");
     REQUIRE(ksn_core_reset_layer(&multi_core,KSN_APP)==KSN_OK);
     ksn_image_port stale_port;
     REQUIRE(ksn_core_image_port(&multi_core,KSN_APP,multi_resource[0],&stale_port)==KSN_STALE);
     REQUIRE(ksn_core_image_port(&multi_core,KSN_APP,multi_resource[1],&stale_port)==KSN_STALE);
     multi_active=false;
-    pocket_proc_reset();
-    eval_error(ctx,"proc.resource(layerId)");
-    eval_ok(ctx,"const newLayerId=proc.createSurface();"
+    session_reset();
+    eval_error(ctx,"S.resource(layerId)");
+    eval_ok(ctx,"const newLayerId=S.createSurface();"
                 "if(newLayerId===layerId)throw Error('stale surface ID reused')");
-    pocket_proc_reset();
+    session_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
-    printf("PASS real QuickJS procedural adapter: 48 exact RGB565 frames, two independent image surfaces, 256 B rectangle damage, IO repair, stale resources, Enter toggle; image span CPU %.1f ms\n",
-           1000.0*(double)span_ticks/CLOCKS_PER_SEC);
+    shiki_heap_end();
+    uint32_t bytes,used,largest;shiki_heap_info(&bytes,&used,&largest);
+    REQUIRE(!bytes);
+    printf("PASS real QuickJS frame adapter (pocket.kasane.shiki): %u exact RGB565 frames, "
+           "two independent image surfaces, 256 B rectangle damage, IO repair, stale resources; "
+           "image span CPU %.1f ms\n",FRAMES,1000.0*(double)span_ticks/CLOCKS_PER_SEC);
     return 0;
 }
