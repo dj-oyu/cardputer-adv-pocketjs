@@ -45,7 +45,8 @@ const T = {
 
   // turf: mowing stripes from the near edge (x0, y0) to the far edge (x1, y1),
   // alternating between two greens (512 + 288 * phase, then 1312 minus it).
-  /** @plan turf inputs: x0, x1, dx0, dx1, y0, y1, stripes, phase */
+  /** @plan turf inputs: x0, x1, dx0, dx1, y0, y1, stripes, phase
+   *  @q phase=0 */
   turf() {
     let near = x0, far = x1, green = 512 + phase * 288;
     for (let j0 = 0; j0 < stripes; j0++) {
@@ -385,7 +386,8 @@ const T = {
   // 6 m and horizon 28 are baked in).
   // prail: posts from the height 6 - top down to the ground, and the top and
   // mid lines from the first post to the point after the last.
-  /** @plan prail inputs: x, dx, z, dz, posts, r, colour, top */
+  /** @plan prail inputs: x, dx, z, dz, posts, r, colour, top
+   *  @q z=24, dz=24, pz=24 */
   prail() {
     let px = x, pz = z, q = r;
     const x0 = px * q;
@@ -410,7 +412,8 @@ const T = {
   // pt: turf stripes in one green ($0; t0 and t1 are the two), each from the
   // far rail (farX, farZ past the near point) to the near one. The far 1/Z'
   // starts from the near one (4 steps), then 3 a stripe; the near 4.
-  /** @plan pt inputs: x, dx, z, dz, stripes, r, farX, farZ */
+  /** @plan pt inputs: x, dx, z, dz, stripes, r, farX, farZ
+   *  @q z=24, dz=24, farZ=24, pz=24, fz0=24, fz=24 */
   pt(green) {
     let px = x, pz = z, near = r;
     const fz0 = pz + farZ;
@@ -494,12 +497,11 @@ const T = {
     }
   },
 
-  // bokeh: one layer of N octagons from radius R0 (+-30% by hash) inwards 1
-  // px apart, the rim in RIM, the rest in FILL (N 1: a ring). y drifts with
+  // bokeh: a ring of radius R0 (+-30% by hash) in RIM a layer. y drifts with
   // t (the JS scales it), x with o.
   /** @plan bokeh inputs: t, o, h0, w, xR, y0, yH */
   bokeh() {
-    const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
+    const R0 = 6, RIM = 0x7b28, GA = 2.39996;
     let x = o, h = h0 * .0000958738;
     const jx = w * .45, rv = R0 * .3;
     for (let i = 0; i < 24; i++) {
@@ -507,14 +509,10 @@ const T = {
       const u = sin(h);
       const cx = u * jx + x;
       const cy = sin(u * 137 + t * .003) * (yH * .5) + yH * .5 + y0;
-      let r = u * rv + R0, cc = RIM;
-      for (let q = 0; q < N; q++) {
-        const f = r * .7071;
-        const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc2 = cy - f;
-        move(xa, cy); line(xb, yb, cc); line(cx, cy + r, cc); line(xc, yb, cc); line(xd, cy, cc);
-        line(xc, yc2, cc); line(cx, cy - r, cc); line(xb, yc2, cc); line(xa, cy, cc);
-        r += -1; cc = FILL;
-      }
+      const r = u * rv + R0, f = r * .7071;
+      const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc2 = cy - f;
+      move(xa, cy); line(xb, yb, RIM); line(cx, cy + r, RIM); line(xc, yb, RIM); line(xd, cy, RIM);
+      line(xc, yc2, RIM); line(cx, cy - r, RIM); line(xb, yc2, RIM); line(xa, cy, RIM);
       x += w; h += GA;
     }
   },

@@ -178,9 +178,10 @@ static int tier_env=1;   /* the app starts at MID */
  * covers them. The engine's own correctness is the Shiki contract's
  * (tools/kasane_contract, shiki_diff.mjs), not this harness's. */
 typedef struct { int handle; ksn_shiki_plan *plan; } sspec;
-static sspec sspecs[8];
+#define SSPECS 32u
+static sspec sspecs[SSPECS];
 static unsigned shiki_draws;
-static sspec *sfind(int h){for(unsigned i=0;i<8;i++)if(sspecs[i].plan&&sspecs[i].handle==h)return &sspecs[i];return NULL;}
+static sspec *sfind(int h){for(unsigned i=0;i<SSPECS;i++)if(sspecs[i].plan&&sspecs[i].handle==h)return &sspecs[i];return NULL;}
 
 /* ---- the procedural oracle */
 #define SLOTS 64u
@@ -538,6 +539,7 @@ static double ser_buf[1<<16];
 static unsigned ser_n,ser_bad;
 static bool ser_overflow;
 static unsigned long ser_calls,ser_fuzz_calls,ser_draws,ser_fuzz_draws;
+static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n);
 void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
     if(ser_oracle){
         if(ser_n+9<=sizeof ser_buf/sizeof ser_buf[0]){
@@ -546,6 +548,9 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
         }else ser_overflow=true;
     }
     if(pocket_proc_hook_dry)return;
+    /* A Shiki handle drawn from C (pocket.derby): the Shiki replay. */
+    sspec *ss=sfind((int)handle);
+    if(ss){sdraw_run(ss,in,NULL,n);return;}
     JSValue g=JS_GetGlobalObject(ctx),fn=JS_GetPropertyStr(ctx,g,"__nt"),h=JS_NewInt32(ctx,(int32_t)handle);
     JSValue r=JS_Call(ctx,fn,g,1,&h);
     REQ(!JS_IsException(r));
@@ -599,10 +604,15 @@ static JSValue js_cap_sreg(JSContext *c,JSValueConst self,int argc,JSValueConst 
     const ksn_shiki_rom_entry *e=NULL;
     for(unsigned k=0;k<count;k++)if(!strcmp(rom[k].name,name))e=&rom[k];
     JS_FreeCString(c,name);REQ(e);
-    sspec *s=NULL;for(unsigned i=0;i<8&&!s;i++)if(!sspecs[i].plan)s=&sspecs[i];
+    sspec *s=NULL;for(unsigned i=0;i<SSPECS&&!s;i++)if(!sspecs[i].plan)s=&sspecs[i];
     REQ(s);
+    /* argv[2]: the registration arguments (an array, or undefined). */
+    double args[KSN_SHIKI_ARGS];
+    unsigned na=argc>2&&JS_IsArray(argv[2])?len(argv[2]):0;
+    REQ(na<=KSN_SHIKI_ARGS);
+    for(unsigned k=0;k<na;k++)args[k]=at(argv[2],k);
     s->plan=malloc(ksn_shiki_plan_bytes_for(e->code,e->len));REQ(s->plan);
-    REQ(ksn_shiki_register(e->code,e->len,NULL,0,NULL,0,s->plan));
+    REQ(ksn_shiki_register(e->code,e->len,args,na,NULL,0,s->plan));
     s->handle=h;live_plans++;if(live_plans>live_max)live_max=live_plans;registered++;
     return JS_UNDEFINED;
 }
@@ -660,13 +670,16 @@ static JSValue js_cap_sdraw(JSContext *c,JSValueConst self,int argc,JSValueConst
     double in[KSN_SHIKI_INPUTS];
     int32_t fx[KSN_SHIKI_INPUTS];
     for(unsigned i=0;i<n;i++){in[i]=at(argv[1],i);fx[i]=(int32_t)in[i];}
+    sdraw_run(s,in,fixed?fx:NULL,n);
+    return JS_UNDEFINED;
+}
+static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n){
     static ksn_shiki_vm vm;
     static ksn_proc_frame f;
-    REQ((fixed?ksn_shiki_draw_fixed(s->plan,fx,n,&vm,f.segments):ksn_shiki_draw(s->plan,in,n,&vm,f.segments))==KSN_SHIKI_DONE);
+    REQ((fx?ksn_shiki_draw_fixed(s->plan,fx,n,&vm,f.segments):ksn_shiki_draw(s->plan,in,n,&vm,f.segments))==KSN_SHIKI_DONE);
     f.count=vm.count;f.raster_steps=vm.raster;f.ext=vm.ext;
     append(&cand_plan,&f);append(&cand_vm,&f);
     frame_draws++;frame_steps+=vm.steps;shiki_draws++;
-    return JS_UNDEFINED;
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;
@@ -1125,11 +1138,13 @@ static const char PRELUDE[]=
     /* pocket.kasane.shiki (the runners, HEAD ON's horses): register by name,
      * and each drawMany entry into the oracle as one draw (__sdraw). */
     "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
-    "S.register=function(n){const h=SR.call(S,n);__sreg(h,n);return h};"
+    "S.register=function(n,a,o){const h=SR.call(S,n,a,o);__sreg(h,n,a);return h};"
     /* The frame's functions: DERBY calls them on kasane.shiki (v2.0 step 0);
      * the same hooks as procedural's. */
     "S.beginFrame=P.beginFrame;S.commit=P.commit;"
     "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
+    /* draw(handle, ...numbers) or draw(handle, array): one oracle draw. */
+    "const SD=S.draw;S.draw=function(h,i){__ftag(0,'sdraw',arguments);SD.apply(S,arguments);let a=Array.isArray(i)?i:[].slice.call(arguments,1);while(a.length&&a[a.length-1]===undefined)a=a.slice(0,-1);__sdraw(h,a,false)};"
     "S.drawMany=function(H,I,s){__ftag(1,'drawMany',arguments);SM.call(S,H,I,s);for(let i=0;i<H.length;i++)__sdraw(H[i],Array.from(I.subarray(i*s,i*s+s)),I instanceof Int32Array)};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
@@ -1200,7 +1215,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,2},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,3},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,3},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,3},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);

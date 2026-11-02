@@ -6,7 +6,7 @@ const SKN = {run: 1, legs: 1, frl: 1, frb: 1}; // Shiki (README)
 const S = pocket.derby, QM = 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
 SK.beginFrame(0);
-const res = SK.resource(), live = {}, queue = [];
+const res = SK.resource(), live = {}, onS = {}, queue = [];
 derby.L = live; // the host oracle names plans by these handles
 let reg = 0;
 // One plan a frame from frame 1 (info() is null while evaluating), only
@@ -38,16 +38,16 @@ function load() {
     else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
     else if (n === 'crowd') p = [n, [k[1], k[6], k[7]].concat(KN[3].slice(0, 5))];
     else p = [n, k.slice(0, n === 'stands' ? 4 : 0)];
-    live[n] = SKN[n] ? SK.register('derby.' + n) : H.register('derby.' + p[0], p[1], p[2]);
+    live[n] = (onS[n] = SKN[p[0]]) ? SK.register('derby.' + p[0], p[1]) : H.register('derby.' + p[0], p[1], p[2]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
 }
 // Draws plan n now if it is registered (inputs are copied: pocket_proc.c).
-const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) H.draw(live[n], a, b, c, d, e, f, g, h); };
+const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) (onS[n] ? SK : H).draw(live[n], a, b, c, d, e, f, g, h); };
 const want = l => { for (const n of l) if (!live[n] && queue.indexOf(n) < 0) queue.push(n); };
 function drop(l) {
   for (const n of l) {
-    if (live[n]) (SKN[n] ? SK : H).unregister(live[n]);
+    if (live[n]) (onS[n] ? SK : H).unregister(live[n]);
     delete live[n];
     if (queue.indexOf(n) >= 0) queue.splice(queue.indexOf(n), 1);
   }

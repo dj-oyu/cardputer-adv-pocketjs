@@ -908,6 +908,15 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     if(handle>INT32_MAX||n>KSN_PROC_INPUTS)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    /* A Shiki handle (pocket.derby's plans move to Shiki one by one, v2.0
+     * step 1): the Shiki engine, the inputs converted by sec.2.4. */
+    if(find_kind(handle,true)){
+        JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
+#ifdef POCKET_PROC_DRAW_HOOK
+        if(!JS_IsException(result))pocket_proc_draw_hook(handle,in,n);
+#endif
+        return result;
+    }
     proc_slot *slot=find_slot(handle);
     if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
     float input[KSN_PROC_INPUTS]={0};
