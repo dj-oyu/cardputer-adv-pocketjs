@@ -41,6 +41,9 @@ static bool strip(const ksn_mesh_snapshot *s,uint16_t *pixels,unsigned y,unsigne
             for(unsigned j=0;j<3;j++)if(!co_vertex_at(&view,indices[j],v+j))return false;
             double area=((double)v[1].x-v[0].x)*((double)v[2].y-v[0].y)-((double)v[1].y-v[0].y)*((double)v[2].x-v[0].x);
             if(!(area>1e-5))return false;
+            /* Match painter arithmetic exactly: division per weight can flip
+             * the authored mask sign at a material boundary. */
+            const double inverse=1/area;
             int left=(int)ceil(fmin(v[0].x,fmin(v[1].x,v[2].x))),right=(int)floor(fmax(v[0].x,fmax(v[1].x,v[2].x)));
             int top=(int)ceil(fmin(v[0].y,fmin(v[1].y,v[2].y))),bottom=(int)floor(fmax(v[0].y,fmax(v[1].y,v[2].y)));
             if(left<0)left=0;
@@ -52,7 +55,7 @@ static bool strip(const ksn_mesh_snapshot *s,uint16_t *pixels,unsigned y,unsigne
                 double w[3];bool inside=true;
                 for(unsigned k=0;k<3;k++){w[k]=gouraud_edge_value(edge+k,x,yy);if(w[k]<0||(w[k]==0&&!edge[k].closed))inside=false;}
                 if(!inside)continue;
-                for(unsigned k=0;k<3;k++)w[k]/=area;
+                for(unsigned k=0;k<3;k++)w[k]*=inverse;
                 const float depth=(float)(w[0]*v[0].depth+w[1]*v[1].depth+w[2]*v[2].depth);
                 if(!isfinite(depth))return false;
                 const unsigned at=(unsigned)(yy-(int)y)*KSN_PROC_W+(unsigned)x;

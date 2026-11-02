@@ -51,6 +51,25 @@ int main(void){
  JSValue g=JS_GetGlobalObject(ctx),p=JS_NewObject(ctx);REQUIRE(pocket_proc_install(ctx,p)==ESP_OK);
  REQUIRE(JS_SetPropertyStr(ctx,g,"K",p)>=0);JS_FreeValue(ctx,g);eval_ok(ctx,"globalThis.P=K.procedural;globalThis.pocket={kasane:K}");
  ksn_proc_gouraud_patch red=triangle(63488),blue=triangle(31);float z[3]={0,0,0};
+ /* Reciprocal multiplication and per-weight division differ at an authored
+  * material boundary even with one face and uniform depth. Compare actual C
+  * painter/depth paths, including the complete image in both band sizes. */
+ ksn_proc_gouraud_patch boundary={0};boundary.header.vertices=3;boundary.header.triangles=1;
+ boundary.vertices[0]=(ksn_proc_gouraud_vertex){0,0,-1,0xf800,0x001f};
+ boundary.vertices[1]=(ksn_proc_gouraud_vertex){3,0,2,0xf800,0x001f};
+ boundary.vertices[2]=(ksn_proc_gouraud_vertex){0,4,-1,0xf800,0x001f};
+ boundary.indices[1]=1;boundary.indices[2]=2;
+ eval_ok(ctx,"P.beginFrame(0)");JSValue boundary_result=pocket_proc_native_gouraud(ctx,"boundary",&boundary);
+ REQUIRE(!JS_IsException(boundary_result));JS_FreeValue(ctx,boundary_result);eval_ok(ctx,"P.commit()");
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,expected)==KSN_OK&&expected[241]==0x001f);pocket_proc_present_result(KSN_OK);
+ for(unsigned rows=1;rows<=8;rows+=7){
+  eval_ok(ctx,rows==1?"P.beginMeshFrame(0,1024,8000000,1)":"P.beginMeshFrame(0,1024,8000000,8)");
+  append(ctx,&boundary,z);eval_ok(ctx,"P.commit()");REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK);
+  printf("MESH_SHADER_BOUNDARY rows=%u painter=%04x depth=%04x\n",rows,expected[241],actual[241]);
+  REQUIRE(actual[241]==0x001f&&!memcmp(actual,expected,sizeof actual));pocket_proc_present_result(KSN_OK);
+ }
+ pocket_proc_reset();
+ puts("MESH_SHADER_BOUNDARY_PASS single_face uniform_depth legacy_pixel whole_image row1_row8");
  /* One packet must agree with the existing painter coverage, masks and
   * varying A/B vertex shader; depth changes visibility only. */
  ksn_proc_gouraud_patch varying=red;varying.vertices[1].color_a=2016;varying.vertices[2].color_a=31;
