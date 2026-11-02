@@ -15,7 +15,6 @@ static const char *const CAPS_NONE[]   = {NULL};
 static const char *const CAPS_KASANE[] = {"display.kasane", "input.action", NULL};
 // Games read held keys (pocket.input.keys, docs/platform/keystate.md) and make sound.
 static const char *const CAPS_GAME[]   = {"display.kasane", "input.action", "input.keys", NULL};
-static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 // DERBY WATCH's panning series run in C (pocket.derby, docs/apps/derby-ser-native.md);
 // naming it is what gets the session that surface, as pet.companion does.
 static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", "kasane.shiki", NULL};
