@@ -1,12 +1,11 @@
 'use strict';
-const V = pocket.kasane, H = V.procedural, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
-// Every plan is Shiki but nil, the typed points' (README).
+const V = pocket.kasane, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
 // Integers only (docs/apps/derby-integer.md): lengths are Q16 m, px Q16
 // where a fraction counts, angles Q16 turns. pocket.derby does the divisions.
 const S = pocket.derby, QM = 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
 SK.beginFrame(0);
-const res = SK.resource(), live = {}, onS = {}, queue = [];
+const res = SK.resource(), live = {}, win = {}, queue = [];
 derby.L = live; // the host oracle names plans by these handles
 let reg = 0;
 // One plan a frame from frame 1 (info() is null while evaluating), only
@@ -17,14 +16,15 @@ function load() {
   if (!n) return;
   try {
     if (pocket.memory && pocket.memory.info().internalFreeBytes < 18432) return;
-    // The plan n: a built-in plan's name (derby_prog.js), exactly its
-    // declared arguments, and the points of a typed-point plan.
+    // The plan n: a built-in plan's name (derby_prog.js) and exactly its
+    // declared arguments, or a polyline (poly()).
     const k = KN[tier], i = +n[1];
     let p;
     if (n[0] === 'g' && i >= 0) {
       // Gallop frame i of the close-up horse: units Q8, BODY in hundredths,
       // a leg's phase o (u - 20 rad) and the frame's i/6 turn in Q16 turns.
-      const x = [], y = [], ph = 10923 * i, b = bob(i), put = (u, v) => { x.push(u + 16 >> 5); y.push(v + 16 >> 5); };
+      // Units Q8 to px: half size at HX, HY (the old affine floored).
+      const x = [], y = [], ph = 10923 * i, b = bob(i), put = (u, v) => { x.push((u + 16 >> 6) + HX); y.push((v + 16 >> 6) + HY); };
       let jx = 0, jy = 0;
       for (let j = 0; j < BODY.length; j += 2) {
         const u = BODY[j], l = BODY[j + 1] * 655 >> 8;
@@ -33,22 +33,36 @@ function load() {
           ky = jy + (I(l, SK.cos(a)) >> 16), a2 = a - (mx(0, SK.sin(o + 14603)) * 9387 >> 16);
         put(kx, ky); put(kx + (I(l, SK.sin(a2)) >> 16), ky + (I(l, SK.cos(a2)) >> 16)); put(kx, ky); put(jx, jy);
       }
-      p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
-    } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
+      p = poly(n, x, y, 0xef5b);
+    } else if (n === 'hd') p = poly(n, HD[0], HD[1], 0xad55);
     else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
     else if (n === 'crowd') p = [n, [k[1], k[6], k[7]].concat(KN[3].slice(0, 5))];
     else p = [n, k.slice(0, n === 'stands' ? 4 : 0)];
-    live[n] = (onS[n] = p[0] !== 'nil') ? SK.register('derby.' + p[0], p[1]) : H.register('derby.' + p[0], p[1], p[2]);
+    live[n] = p.length > 2 ? SK.register(p[0], [], {data: [p[2]]}) : SK.register('derby.' + p[0], p[1]);
     queue.shift(); ++reg;
-  } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
+  } catch (e) {
+    log('LOADFAIL ' + n + ' ' + e);
+    if (win[n] && !live[n]) { SK.release(win[n]); delete win[n]; }
+    queue.push(queue.shift());
+  }
+}
+// A polyline (px) as Shiki: its segments (x0, y0, x1, y1) in an i16 window
+// and one EMIT_LINES of colour c (README). [code, , window].
+function poly(n, x, y, c) {
+  const m = x.length - 1, w = win[n] = SK.data({type: 'i16', q: 0, records: m, record: 4}), S = m + 7 & ~7;
+  for (let i = 0; i < m; ++i) { w[i] = x[i]; w[S + i] = y[i]; w[2 * S + i] = x[i + 1]; w[3 * S + i] = y[i + 1]; }
+  const b = new Uint8Array(28);
+  b.set([83, 75, 73, 49, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 4, 0, 45, 0, 0, 0, 0, 0, 0, 0, c & 255, c >> 8]);
+  return [b, 0, w];
 }
 // Draws plan n now if it is registered (inputs are copied: pocket_proc.c).
-const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) (onS[n] ? SK : H).draw(live[n], a, b, c, d, e, f, g, h); };
+const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) SK.draw(live[n], a, b, c, d, e, f, g, h); };
 const want = l => { for (const n of l) if (!live[n] && queue.indexOf(n) < 0) queue.push(n); };
 function drop(l) {
   for (const n of l) {
-    if (live[n]) (onS[n] ? SK : H).unregister(live[n]);
-    delete live[n];
+    if (live[n]) SK.unregister(live[n]);
+    if (win[n]) SK.release(win[n]);
+    delete live[n]; delete win[n];
     if (queue.indexOf(n) >= 0) queue.splice(queue.indexOf(n), 1);
   }
 }

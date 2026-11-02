@@ -373,11 +373,6 @@ const T = {
     line(x, chest + ns + ns, coat);
   },
 
-  // nil: draws nothing; the code of the typed-point plans (gallop frames, hd).
-  /** @plan nil inputs: */
-  nil() {
-  },
-
   // ---- The panning units (ser() in scene, README "首振りカメラ"). A series
   // of points along the straight, far to near: X'' and -Z' step linearly,
   // and 1/Z' comes from the point before by Newton, q *= (-Z') q + 2. The

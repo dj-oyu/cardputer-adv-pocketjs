@@ -68,6 +68,7 @@
 #include "app_registry.h"
 #include "ksn_shiki.h"
 #include "shiki_heap.h"
+#include "pocket_shiki_api.h"   /* the windows go before the guest */
 #include "pocket_app_load.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
@@ -606,11 +607,30 @@ static JSValue js_sercmp(JSContext *c,JSValueConst self,int argc,JSValueConst *a
 static JSValue js_cap_sreg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;
     int32_t h=0;REQ(JS_ToInt32(c,&h,argv[0])==0);
-    const char *name=JS_ToCString(c,argv[1]);REQ(name);
-    unsigned count=0;const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&count);
-    const ksn_shiki_rom_entry *e=NULL;
-    for(unsigned k=0;k<count;k++)if(!strcmp(rom[k].name,name))e=&rom[k];
-    JS_FreeCString(c,name);REQ(e);
+    /* A built-in name, or the program's bytes (a Uint8Array) with its data
+     * windows (argv[3], each carrying __d = [type, q, k_rec, records]). */
+    const uint8_t *code=NULL;size_t clen=0;
+    ksn_shiki_region regs[KSN_SHIKI_REGIONS];unsigned nr=0;
+    if(JS_IsString(argv[1])){
+        const char *name=JS_ToCString(c,argv[1]);REQ(name);
+        unsigned count=0;const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&count);
+        for(unsigned k=0;k<count;k++)if(!strcmp(rom[k].name,name)){code=rom[k].code;clen=rom[k].len;}
+        JS_FreeCString(c,name);
+    }else{
+        code=JS_GetUint8Array(c,&clen,argv[1]);
+        if(argc>3&&JS_IsArray(argv[3])){
+            nr=len(argv[3]);REQ(nr<=KSN_SHIKI_REGIONS);
+            for(unsigned k=0;k<nr;k++){
+                JSValue w=JS_GetPropertyUint32(c,argv[3],k),d=JS_GetPropertyStr(c,w,"__d");
+                size_t off=0,blen=0,bpe=0,size=0;
+                JSValue buf=JS_GetTypedArrayBuffer(c,w,&off,&blen,&bpe);REQ(!JS_IsException(buf));
+                uint8_t *mem=JS_GetArrayBuffer(c,&size,buf);REQ(mem);
+                regs[k]=(ksn_shiki_region){mem+off,(uint32_t)at(d,3),(uint8_t)at(d,0),(uint8_t)at(d,1),(uint8_t)at(d,2)};
+                JS_FreeValue(c,buf);JS_FreeValue(c,d);JS_FreeValue(c,w);
+            }
+        }
+    }
+    REQ(code);
     sspec *s=NULL;for(unsigned i=0;i<SSPECS&&!s;i++)if(!sspecs[i].plan)s=&sspecs[i];
     REQ(s);
     /* argv[2]: the registration arguments (an array, or undefined). */
@@ -618,8 +638,8 @@ static JSValue js_cap_sreg(JSContext *c,JSValueConst self,int argc,JSValueConst 
     unsigned na=argc>2&&JS_IsArray(argv[2])?len(argv[2]):0;
     REQ(na<=KSN_SHIKI_ARGS);
     for(unsigned k=0;k<na;k++)args[k]=at(argv[2],k);
-    s->plan=malloc(ksn_shiki_plan_bytes_for(e->code,e->len));REQ(s->plan);
-    REQ(ksn_shiki_register(e->code,e->len,args,na,NULL,0,s->plan));
+    s->plan=malloc(ksn_shiki_plan_bytes_for(code,clen));REQ(s->plan);
+    REQ(ksn_shiki_register(code,clen,args,na,regs,nr,s->plan));
     s->handle=h;live_plans++;if(live_plans>live_max)live_max=live_plans;registered++;
     return JS_UNDEFINED;
 }
@@ -1150,7 +1170,9 @@ static const char PRELUDE[]=
     /* pocket.kasane.shiki (the runners, HEAD ON's horses): register by name,
      * and each drawMany entry into the oracle as one draw (__sdraw). */
     "const S=kasane.shiki,SR=S.register,SU=S.unregister,SM=S.drawMany;"
-    "S.register=function(n,a,o){const h=SR.call(S,n,a,o);__sreg(h,n,a);return h};"
+    "S.register=function(n,a,o){const h=SR.call(S,n,a,o);__sreg(h,n,a,o&&o.data);return h};"
+    /* data(): the window remembers its shape, for __sreg's regions. */
+    "const SA=S.data;S.data=function(d){const w=SA.call(S,d);w.__d=[d.type==='i16'?0:d.type==='u16'?1:2,d.q,d.record,d.records];return w};"
     /* The frame's functions: DERBY calls them on kasane.shiki (v2.0 step 0);
      * the same hooks as procedural's. */
     "S.beginFrame=P.beginFrame;S.commit=P.commit;"
@@ -1228,7 +1250,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,3},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,4},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__sreg",js_cap_sreg,4},{"__sunreg",js_cap_sunreg,1},{"__sdraw",js_cap_sdraw,4},{"__ftag",js_ftag,3},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1301,7 +1323,7 @@ int main(int argc,char **argv){
         run_until("res",4000);
         printf("NORMAL_FINISH %s\nNORMAL_PICK %s\nNORMAL_RESULT %s\n",finish[0],last_pick,last_result);
         bool ok=!exceptions&&!bad_present&&!framefails&&finishes==1;
-        pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
         printf("%s\n",ok?"DERBY_HOST PASS":"DERBY_HOST FAIL");
         return ok?0:1;
     }
@@ -1504,7 +1526,7 @@ int main(int argc,char **argv){
                ser_fuzz_calls,ser_bad);
         pass=pass&&!ser_bad&&ser_fuzz_calls>0;
     }
-    pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"DERBY_HOST PASS":"DERBY_HOST FAIL");
     return pass?0:1;
 }
