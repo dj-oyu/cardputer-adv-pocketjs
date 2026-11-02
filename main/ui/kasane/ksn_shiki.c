@@ -132,11 +132,14 @@ static const uint8_t used[KSN_SHIKI_OPS]={
     [KSN_SHIKI_SHIFT_H]=F_DST|F_A|F_IMM,
     [KSN_SHIKI_CUBIC]=F_DST|F_IMM|F_AUX,     [KSN_SHIKI_LINE_PATTERN]=F_DST|F_A|F_B|F_IMM|F_AUX,
     /* a is a region number here, b of FETCH/PUT a position: check_inst(). */
-    [KSN_SHIKI_EACH]=F_A|F_B|F_AUX,          [KSN_SHIKI_FETCH]=F_DST|F_A|F_B|F_IMM|F_AUX,
+    [KSN_SHIKI_EACH]=F_A|F_B|F_IMM|F_AUX,    [KSN_SHIKI_FETCH]=F_DST|F_A|F_B|F_IMM|F_AUX,
     [KSN_SHIKI_PUT]=F_DST|F_A|F_B|F_IMM|F_AUX,[KSN_SHIKI_LOOKUP]=F_DST|F_A|F_B|F_IMM|F_AUX,
-    /* Prototype vector instructions: dst/a/b are vector registers (0..7)
-     * unless check_inst() says a region or a scalar register. */
-    [KSN_SHIKI_VEACH]=F_A|F_B|F_AUX,
+    /* v2.0 draft: b is the record's register, aux = c | m << 8. */
+    [KSN_SHIKI_LOAD]=F_DST|F_A|F_B|F_IMM|F_AUX,[KSN_SHIKI_STORE]=F_DST|F_A|F_B|F_IMM|F_AUX,
+    [KSN_SHIKI_DRAW_INDEX]=F_DST,
+    /* Vector instructions: dst/a/b are vector registers (0..7) unless
+     * check_inst() says a region or a scalar register. */
+    [KSN_SHIKI_VEACH]=F_A|F_B|F_IMM|F_AUX,
     [KSN_SHIKI_VLOAD]=F_DST|F_A|F_B,         [KSN_SHIKI_VSTORE]=F_DST|F_A|F_B,
     [KSN_SHIKI_VSPLAT]=F_DST|F_A,            [KSN_SHIKI_VIOTA]=F_DST,
     [KSN_SHIKI_VADD]=F_DST|F_A|F_B,          [KSN_SHIKI_VSUB]=F_DST|F_A|F_B,
@@ -156,10 +159,11 @@ typedef struct { uint8_t type,q,k_rec,write; } region_decl;
 static bool int_imm(uint8_t op){
     return op==KSN_SHIKI_REPEAT||op==KSN_SHIKI_SHIFT||op==KSN_SHIKI_SHIFT_H||
            op==KSN_SHIKI_FETCH||op==KSN_SHIKI_PUT||
-           op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_CUBIC||op==KSN_SHIKI_LINE_PATTERN;
+           op==KSN_SHIKI_LOOKUP||op==KSN_SHIKI_CUBIC||op==KSN_SHIKI_LINE_PATTERN||
+           op==KSN_SHIKI_EACH||op==KSN_SHIKI_VEACH||op==KSN_SHIKI_LOAD||op==KSN_SHIKI_STORE;
 }
 static bool region_op(uint8_t op){
-    return (op>=KSN_SHIKI_EACH&&op<=KSN_SHIKI_LOOKUP)||op==KSN_SHIKI_VEACH||
+    return (op>=KSN_SHIKI_EACH&&op<=KSN_SHIKI_STORE)||op==KSN_SHIKI_VEACH||
            op==KSN_SHIKI_VLOAD||op==KSN_SHIKI_VSTORE||emit_op(op);
 }
 static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl *rd,unsigned nr){
@@ -182,16 +186,23 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl
     case KSN_SHIKI_CUBIC: return i->dst<=KSN_SHIKI_REGS-8&&i->imm>=1&&i->imm<=255;
     case KSN_SHIKI_LINE_PATTERN:
         return i->dst<=KSN_SHIKI_REGS-KSN_PROC_PATTERN_BLOCK&&i->imm>=1&&i->imm<=KSN_PROC_PATTERN_BITS;
-    /* sec.6.1, v1.3. aux = 0 counts every record and names no register. */
-    case KSN_SHIKI_EACH: return i->aux==1||(i->aux==0&&i->b==0);
+    /* sec.6.1, v1.3; v2.0 draft sec.4.1. aux bit 0: the count is r[b] (else
+     * b is 0); bit 1: the start record is r[imm] (else imm is 0). */
+    case KSN_SHIKI_EACH: case KSN_SHIKI_VEACH:
+        return i->aux<=3&&((i->aux&1)||!i->b)&&((i->aux&2)?i->imm>=0&&i->imm<KSN_SHIKI_REGS:!i->imm);
     case KSN_SHIKI_FETCH: case KSN_SHIKI_PUT:
         if(i->op==KSN_SHIKI_PUT&&!rd[i->a].write)return false;
         return i->aux>=1&&i->b+i->aux<=rd[i->a].k_rec&&i->dst+i->aux-1u<KSN_SHIKI_REGS&&
                i->imm>=-31&&i->imm<=31;
     case KSN_SHIKI_LOOKUP:
         return rd[i->a].k_rec==1&&i->aux<=31&&i->imm>=-31&&i->imm<=31;
-    /* Prototype: vector registers 0..7, i16 regions, a field of the record. */
-    case KSN_SHIKI_VEACH: return i->aux==1||(i->aux==0&&i->b==0);
+    /* v2.0 draft sec.3.1: fields c..c+m-1 (aux = c | m << 8), m 1..8. */
+    case KSN_SHIKI_LOAD: case KSN_SHIKI_STORE: {
+        const unsigned c=i->aux&0xFFu,m=i->aux>>8;
+        if(i->op==KSN_SHIKI_STORE&&!rd[i->a].write)return false;
+        return m>=1&&m<=8&&c+m<=rd[i->a].k_rec&&i->dst+m<=KSN_SHIKI_REGS&&i->imm>=-31&&i->imm<=31;
+    }
+    /* Vector registers 0..7, i16 regions, a field of the record. */
     case KSN_SHIKI_VLOAD: case KSN_SHIKI_VSTORE:
         if(i->op==KSN_SHIKI_VSTORE&&!rd[i->a].write)return false;
         return i->dst<8&&rd[i->a].type==KSN_SHIKI_I16&&i->b<rd[i->a].k_rec;
@@ -205,8 +216,12 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl
      * 33 but not at 40 and/or 63 (docs/kasane/shiki-pie.md sec.8); the
      * prototype keeps to the range checked plus margin. */
     case KSN_SHIKI_VOUT: return i->dst<8&&i->aux<=32;
+    /* aux is the colour, so the flags are in dst: bit 0 the count, bit 1
+     * the start (v2.0 draft sec.4.1). The start is r[b], the count r[b] or,
+     * with both, r[b + 1]. */
     case KSN_SHIKI_EMIT_POINTS: case KSN_SHIKI_EMIT_LINES:
-        return i->dst<=1&&(i->dst||!i->b)&&rd[i->a].type==KSN_SHIKI_I16&&i->imm>=0&&i->imm<=15&&
+        return i->dst<=3&&(i->dst||!i->b)&&(i->dst!=3||i->b+1u<KSN_SHIKI_REGS)&&
+               rd[i->a].type==KSN_SHIKI_I16&&i->imm>=0&&i->imm<=15&&
                rd[i->a].k_rec>=(i->op==KSN_SHIKI_EMIT_LINES?4:2);
     default: return true;
     }
@@ -533,7 +548,7 @@ static __attribute__((noinline)) void data_op(ksn_shiki_vm *vm,const ksn_shiki_p
         return;
     }
     const unsigned lv=i->level;
-    const uint32_t cursor=(uint32_t)vm->loop[lv].total-vm->loop[lv].remaining;
+    const uint32_t cursor=(uint32_t)vm->loop[lv].start+vm->loop[lv].total-vm->loop[lv].remaining;
     /* Field b + j of record cursor: element (b + j) * S + cursor (sec.5.4.6). */
     const uint32_t step=g->stride;
     const uint32_t base=i->b*step+cursor;
@@ -548,7 +563,46 @@ static __attribute__((noinline)) void data_op(ksn_shiki_vm *vm,const ksn_shiki_p
     for(unsigned j=0;j<m;j++)store(g,base+j*step,v[j]);
 }
 
-/* ---- prototype vector instructions (docs/kasane/shiki-pie.md sec.3.1)
+/* LOAD and STORE (v2.0 draft sec.3.1): fields c..c+m-1 of record r[b], which
+ * must be one of the region's (else INVALID, D3). STORE computes every value
+ * first, then writes in ascending j, as PUT does. */
+static __attribute__((noinline)) bool record_op(ksn_shiki_vm *vm,const ksn_shiki_plan *plan,const ksn_shiki_inst *i){
+    const ksn_shiki_bound *g=&plan->region[i->a];
+    int32_t *r=vm->reg;
+    const int32_t rec=r[i->b];
+    if(rec<0||(uint32_t)rec>=g->records)return false;
+    const unsigned c=i->aux&0xFFu,m=i->aux>>8;
+    const uint32_t step=g->stride,base=c*step+(uint32_t)rec;
+    if(i->op==KSN_SHIKI_LOAD){
+        for(unsigned j=0;j<m;j++)r[i->dst+j]=shift32(load(g,base+j*step),i->imm);
+        return true;
+    }
+    int32_t v[8];
+    for(unsigned j=0;j<m;j++)v[j]=shift32(r[i->dst+j],i->imm);
+    for(unsigned j=0;j<m;j++)store(g,base+j*step,v[j]);
+    return true;
+}
+/* An EACH / VEACH's start and count (sec.5.4.1; v2.0 draft sec.4.1): the
+ * start r[imm] (aux bit 1) in 0..R, then the count r[b] (aux bit 0) in
+ * 0..R - start, else R - start. Each read once, on entry. False: INVALID. */
+static bool loop_range(const ksn_shiki_vm *vm,const ksn_shiki_inst *i,uint32_t records,
+                       uint32_t *start,uint32_t *count){
+    *start=0;
+    if(i->aux&2){
+        const int32_t s=vm->reg[i->imm];
+        if(s<0||(uint32_t)s>records)return false;
+        *start=(uint32_t)s;
+    }
+    *count=records-*start;
+    if(i->aux&1){
+        const int32_t c=vm->reg[i->b];
+        if(c<0||(uint32_t)c>records-*start)return false;
+        *count=(uint32_t)c;
+    }
+    return true;
+}
+
+/* ---- vector instructions (shiki-v2.md sec.6, docs/kasane/shiki-pie.md sec.3.1)
  * The lanes are records base..base+7 of the VEACH's block; a lane at or past
  * the loop's N reads 0 and is never written (the masked tail, sec.3.4). */
 static int64_t sat40(int64_t v){
@@ -644,9 +698,11 @@ static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_
     int64_t *acc=ksn_shiki_vm_acc(vm);
     const int32_t *r=vm->reg;
     const unsigned lv=i->level;
-    const uint32_t base=(uint32_t)(vm->loop[lv].total-vm->loop[lv].remaining)*8u;
+    /* rel: the block's first lane from the loop's start; base: its record. */
+    const uint32_t rel=(uint32_t)(vm->loop[lv].total-vm->loop[lv].remaining)*8u;
+    const uint32_t base=vm->loop[lv].start+rel;
     const uint32_t n=vm->loop[lv].n;
-    const unsigned live=n-base>=8?8u:(unsigned)(n-base);
+    const unsigned live=n-rel>=8?8u:(unsigned)(n-rel);
 #if KSN_SHIKI_HAS_PIE
     if(vm->pie){
         switch(i->op){
@@ -741,23 +797,30 @@ static __attribute__((noinline)) void vec_exec(ksn_shiki_vm *vm,const ksn_shiki_
     default: break;
     }
 }
-/* EMIT_POINTS / EMIT_LINES: every record (or r[b] of them) of an i16 region
+/* EMIT_POINTS / EMIT_LINES: the records from the start (dst bit 1: r[b],
+ * else 0) to the end, or the count of them (dst bit 0), of an i16 region
  * as points (x, y) or lines (x0, y0, x1, y1) at Q imm, each coordinate to
  * the nearest pixel (halves up), outside -480..720 INVALID. The pen is not
  * touched. */
 static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,const ksn_shiki_plan *plan,
                                                             ksn_proc_segment *out,const ksn_shiki_inst *i){
     const ksn_shiki_bound *g=&plan->region[i->a];
-    uint32_t count=g->records;
-    if(i->dst){
-        const int32_t c=vm->reg[i->b];
-        if(c<0||(uint32_t)c>g->records)return KSN_SHIKI_INVALID;
+    uint32_t start=0;
+    if(i->dst&2){
+        const int32_t s=vm->reg[i->b];
+        if(s<0||(uint32_t)s>g->records)return KSN_SHIKI_INVALID;
+        start=(uint32_t)s;
+    }
+    uint32_t count=g->records-start;
+    if(i->dst&1){
+        const int32_t c=vm->reg[i->dst&2?i->b+1u:i->b];
+        if(c<0||(uint32_t)c>g->records-start)return KSN_SHIKI_INVALID;
         count=(uint32_t)c;
     }
     const unsigned q=(unsigned)i->imm;
     const int32_t half=q?1<<(q-1):0;
     const bool lines=i->op==KSN_SHIKI_EMIT_LINES;
-    const int16_t *d=(const int16_t *)g->data;
+    const int16_t *d=(const int16_t *)g->data+start;
     /* A record's fields are a plane apart (sec.5.1). */
     const uint32_t field=g->stride;
     for(uint32_t c=0;c<count;c++,d++){
@@ -787,6 +850,10 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
 
 ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                       ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
+    return ksn_shiki_draw_index(plan,inputs,n,0,vm,out);
+}
+ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                      unsigned index,ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     memset(vm,0,sizeof *vm);
     vm->pie=KSN_SHIKI_HAS_PIE&&ksn_shiki_vec_pie;
     int32_t in[KSN_SHIKI_INPUTS]={0};
@@ -832,40 +899,38 @@ ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *
             break;
         }
         case KSN_SHIKI_EACH: {
-            /* sec.5.4.1: one step on entry, r[b] read once, N = 0 skips the
-             * body without a frame. */
-            const uint32_t records=plan->region[i->a].records;
-            int32_t count=(int32_t)records;
-            if(i->aux){
-                count=r[i->b];
-                if(count<0||(uint32_t)count>records)return KSN_SHIKI_INVALID;
-            }
+            /* sec.5.4.1: one step on entry, the start and count read once,
+             * N = 0 skips the body without a frame. */
+            uint32_t start,count;
+            if(!loop_range(vm,i,plan->region[i->a].records,&start,&count))return KSN_SHIKI_INVALID;
             if(!count){next=i->end+1u;break;}
             vm->loop[vm->depth].pc=(uint8_t)pc;
             vm->loop[vm->depth].remaining=(uint16_t)count;
             vm->loop[vm->depth].total=(uint16_t)count;
+            vm->loop[vm->depth].start=(uint16_t)start;
             vm->depth++;
             break;
         }
         case KSN_SHIKI_FETCH: case KSN_SHIKI_PUT: case KSN_SHIKI_LOOKUP:
             data_op(vm,plan,pc);
             break;
+        case KSN_SHIKI_LOAD: case KSN_SHIKI_STORE:
+            if(!record_op(vm,plan,i))return KSN_SHIKI_INVALID;
+            break;
+        case KSN_SHIKI_DRAW_INDEX: r[i->dst]=(int32_t)index; break;
         case KSN_SHIKI_VEACH: {
-            /* As EACH, a frame per block of 8 records; N above int16 is
-             * refused so that VIOTA's record numbers fit a lane. */
-            const uint32_t records=plan->region[i->a].records;
-            int32_t count=(int32_t)records;
-            if(i->aux){
-                count=r[i->b];
-                if(count<0||(uint32_t)count>records)return KSN_SHIKI_INVALID;
-            }
-            if(count>32767)return KSN_SHIKI_INVALID;
+            /* As EACH, a frame per block of 8 records; a last record number
+             * above int16 is refused so that VIOTA's numbers fit a lane. */
+            uint32_t start,count;
+            if(!loop_range(vm,i,plan->region[i->a].records,&start,&count))return KSN_SHIKI_INVALID;
+            if(start+count>32767u)return KSN_SHIKI_INVALID;
             if(!count){next=i->end+1u;break;}
             const uint16_t blocks=(uint16_t)((count+7)/8);
             vm->loop[vm->depth].pc=(uint8_t)pc;
             vm->loop[vm->depth].remaining=blocks;
             vm->loop[vm->depth].total=blocks;
             vm->loop[vm->depth].n=(uint16_t)count;
+            vm->loop[vm->depth].start=(uint16_t)start;
             vm->depth++;
             break;
         }

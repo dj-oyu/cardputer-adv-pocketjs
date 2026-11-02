@@ -7,7 +7,8 @@
  *       tools/kasane_contract/shiki_run.c -lm -o shiki_run
  *   ./shiki_run CASES.txt
  *
- * Case:   CASE <hex> ARGS <n> <v...> INPUTS <m> <u...> [DATA <r> <region>...]
+ * Case:   CASE <hex> ARGS <n> <v...> INPUTS <m> <u...> [INDEX <k>] [DATA <r> <region>...]
+ *         INDEX: the draw's number DRAW_INDEX reads (v2.0 draft), 0 when absent.
  *         <region> = <type> <q> <k_rec> <R> <e...> | ALIAS <j>  (j: an earlier region)
  *         <R> records, then k_rec * R values field by field (spec v1.4
  *         sec.10.1): field 0 of records 0..R-1, then field 1, ...; the D part
@@ -67,7 +68,10 @@ int main(int argc,char **argv){
         void *owned[KSN_SHIKI_REGIONS+4]={0};
         unsigned nr=0;
         bool well=true,data=false;
-        if(!strcmp(word(&p),"DATA")){
+        const char *next=word(&p);
+        unsigned index=0;
+        if(!strcmp(next,"INDEX")){index=(unsigned)atoi(word(&p));next=word(&p);}
+        if(!strcmp(next,"DATA")){
             data=true;
             nr=(unsigned)atoi(word(&p));
             if(nr>KSN_SHIKI_REGIONS+4){well=false;nr=0;}
@@ -116,8 +120,16 @@ int main(int argc,char **argv){
         const size_t pb=ksn_shiki_plan_bytes_for(code,len);
         ksn_shiki_plan *plan=malloc(pb?pb:sizeof(ksn_shiki_plan));
         const bool ok=well&&pb&&ksn_shiki_register(code,len,args,na,reg,nr,plan);
-        const ksn_shiki_status s=ok?ksn_shiki_draw(plan,in,ni>KSN_SHIKI_INPUTS?KSN_SHIKI_INPUTS:ni,&vm,seg)
-                                   :KSN_SHIKI_INVALID;
+        ksn_shiki_status s=KSN_SHIKI_INVALID;
+        if(ok){
+            /* ksn_shiki_draw's conversion (sec.2.4), then the draw by number. */
+            int32_t fx[KSN_SHIKI_INPUTS]={0};
+            bool good=true;
+            for(unsigned k=0;k<plan->inputs;k++)
+                if(!ksn_shiki_from_double(k<ni?in[k]:0.0,plan->input_q[k],&fx[k]))good=false;
+            if(!good){memset(&vm,0,sizeof vm);s=KSN_SHIKI_BADINPUT;}
+            else s=ksn_shiki_draw_index(plan,fx,plan->inputs,index,&vm,seg);
+        }
         ksn_shiki_result(ok,s,&vm,seg,put_stdout,NULL);
         if(ok&&data){
             ksn_shiki_result_regions(reg,nr,put_stdout,NULL);

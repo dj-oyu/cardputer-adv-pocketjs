@@ -112,8 +112,10 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 | ---: | --- | --- |
 | 29 | `DRAW_INDEX dst` | `r[dst]` = この draw の番号（`drawMany` の何番目か、0〜`maxDrawsPerCall − 1`）。`draw()` から呼ばれたときは 0。1 ステップ |
 
-- **開始レコード（レビュー R3）:** `EACH`・`VEACH`・`EMIT_POINTS`・`EMIT_LINES` に、`aux` の bit 1 で「`imm` のレジスタ番号の値を開始レコードにする」旗を足す（v1 の `EACH` の `aux` は bit 0 だけ使う）。カーソルは開始レコードから始まり、件数は bit 0 の規則のまま（全件なら `R − 開始`）。開始が 0〜`R` の外なら `INVALID`。これで「6 コマを 1 領域に並べ、番号で 1 コマを描く」「レーン `l` の列だけ回す」が書ける。
-- **配管（レビュー M3）:** `ksn_shiki_draw_fixed` に draw の番号の引数を足す。検証の行（§10.1 of spec）に番号の欄を足す。`drawMany` で draw `k` が失敗すると `k + 1` 以降は行われない（v1.5 のまま）ので、「draw `k` の失敗の後、`k + 1` 以降の `STORE` は起きない」を §5.3 of spec に足す。
+- **開始レコード（レビュー R3）:** `EACH`・`VEACH` に、`aux` の bit 1 で「`imm` のレジスタ番号の値を開始レコードにする」旗を足す（v1 の `EACH` の `aux` は bit 0 だけ使う）。`aux` は 0〜3、bit 1 が無ければ `imm` は 0、あれば `imm` は 0〜15（`imm` は整数の欄になり、引数の当てはめは Q0 だけ）。入るときに開始 `s`（0〜`R`）、次に件数（bit 0 なら `r[b]` で 0〜`R − s`、無ければ `R − s`）を 1 回ずつ読み、外なら `INVALID`。カーソルは `s` から始まる。`VEACH` は `s + 件数` が 32,767 を超えると `INVALID`（`VIOTA` のレーンの値はレコードの番号なので）。
+  - **`EMIT_POINTS`・`EMIT_LINES` は旗を `dst` に置く**（実装で決めた。`aux` は色なので空きが無い）。`dst` の bit 0 が件数、bit 1 が開始。開始は `r[b]`、件数は `r[b]`（開始なし）か `r[b + 1]`（両方）。範囲の規則は `EACH` と同じ。
+  - 実装（2026-11-02）: `ksn_shiki.c`、参照 `shiki_ref.mjs`（`EACH`・`LOAD`・`STORE`・`DRAW_INDEX`。ベクトルと `EMIT` は参照に無く、`test_shiki_vec.c` が確かめる）、差分の検査 `shiki_diff.mjs`、検証の行の `INDEX k`（`INPUTS` の後、`DATA` の前。無ければ 0）。これで「6 コマを 1 領域に並べ、番号で 1 コマを描く」「レーン `l` の列だけ回す」が書ける。
+- **配管（レビュー M3）:** draw の番号を受ける `ksn_shiki_draw_index` を足した（`ksn_shiki_draw_fixed` は番号 0 で呼ぶ）。検証の行（§10.1 of spec）に番号の欄を足す。`drawMany` で draw `k` が失敗すると `k + 1` 以降は行われない（v1.5 のまま）ので、「draw `k` の失敗の後、`k + 1` 以降の `STORE` は起きない」を §5.3 of spec に足す。
 
 ### 4.2 JS の側
 

@@ -6,7 +6,10 @@
  *      VOUT's floor and write-back, VIOTA, VMIN/VMAX;
  *   3. step counts (one per vector instruction per block);
  *   4. EMIT rounding, counts and INVALID;
- *   5. what registration refuses.
+ *   5. what registration refuses;
+ *   6. the start record (v2.0 draft, docs/kasane/shiki-v2.md sec.4.1) of
+ *      VEACH (aux bit 1, r[imm]) and EMIT_* (dst bit 1, r[b]; the count
+ *      then in r[b + 1]): lanes, VIOTA's numbers, the edges and INVALID.
  *
  *   cc -std=c11 -Wall -Wextra -Werror -Imain/ui/kasane main/ui/kasane/ksn_shiki.c \
  *      main/ui/kasane/ksn_shiki_bench.c tools/kasane_contract/test_shiki_vec.c -lm
@@ -243,6 +246,81 @@ static void emits(void){
     CHECK(reg(&p,r,1)&&run()==KSN_SHIKI_INVALID,"count above the records is INVALID");
 }
 
+static void starts(void){
+    /* VEACH from record 3 for 6 records into a second region: lanes 3..8,
+     * VIOTA gives the record numbers; nothing else is written. */
+    static int16_t src[16] __attribute__((aligned(16))),dst[16] __attribute__((aligned(16)));
+    for(int k=0;k<16;k++){src[k]=(int16_t)(10*k);dst[k]=-1;}
+    const uint8_t decl[2][4]={{KSN_SHIKI_I16,0,1,0},{KSN_SHIKI_I16,0,1,1}};
+    ksn_shiki_region r[2]={{src,12,KSN_SHIKI_I16,0,1},{dst,12,KSN_SHIKI_I16,0,1}};
+    prog p;p_begin(&p,2,decl);
+    I(&p,KSN_SHIKI_SET,4,0,0,3,0);                   /* start */
+    I(&p,KSN_SHIKI_SET,5,0,0,6,0);                   /* count */
+    I(&p,KSN_SHIKI_VEACH,0,0,5,4,3);
+    I(&p,KSN_SHIKI_VLOAD,0,0,0,0,0);
+    I(&p,KSN_SHIKI_VIOTA,1,0,0,0,0);
+    I(&p,KSN_SHIKI_VADD,0,0,1,0,0);
+    I(&p,KSN_SHIKI_VSTORE,0,1,0,0,0);
+    I(&p,KSN_SHIKI_END,0,0,0,0,0);
+    CHECK(reg(&p,r,2),"VEACH with a start registers");
+    CHECK(run()==KSN_SHIKI_DONE,"VEACH with a start runs");
+    bool ok=true;
+    for(int k=0;k<12;k++)ok=ok&&dst[k]==(k>=3&&k<9?11*k:-1);
+    CHECK(ok,"VEACH lanes 3..8 only (%d %d %d %d)",dst[2],dst[3],dst[8],dst[9]);
+    /* 2 SETs, VEACH, one block x (4 + END): one block of 6 lanes. */
+    CHECK(vm.steps==2+1+5,"VEACH with a start: one block (%u steps)",vm.steps);
+    /* Without a count: start .. R. Start R: nothing. Start R + 1, -1, or a
+     * count past R - start: INVALID. */
+    for(int k=0;k<16;k++)dst[k]=-1;
+    p_begin(&p,2,decl);
+    I(&p,KSN_SHIKI_SET,4,0,0,10,0);
+    I(&p,KSN_SHIKI_VEACH,0,0,0,4,2);
+    I(&p,KSN_SHIKI_VLOAD,0,0,0,0,0);I(&p,KSN_SHIKI_VSTORE,0,1,0,0,0);
+    I(&p,KSN_SHIKI_END,0,0,0,0,0);
+    CHECK(reg(&p,r,2)&&run()==KSN_SHIKI_DONE&&dst[9]==-1&&dst[10]==100&&dst[11]==110&&dst[12]==-1,
+          "VEACH from 10 to R");
+    const int32_t edge[][3]={{12,0,KSN_SHIKI_DONE},{13,0,KSN_SHIKI_INVALID},{-1,0,KSN_SHIKI_INVALID},
+                             {5,8,KSN_SHIKI_INVALID},{5,7,KSN_SHIKI_DONE}};
+    for(unsigned e=0;e<sizeof edge/sizeof edge[0];e++){
+        p_begin(&p,2,decl);
+        I(&p,KSN_SHIKI_SET,4,0,0,edge[e][0],0);
+        I(&p,KSN_SHIKI_SET,5,0,0,edge[e][1],0);
+        I(&p,KSN_SHIKI_VEACH,0,0,edge[e][1]?5:0,4,edge[e][1]?3:2);
+        I(&p,KSN_SHIKI_VIOTA,0,0,0,0,0);
+        I(&p,KSN_SHIKI_END,0,0,0,0,0);
+        CHECK(reg(&p,r,2)&&run()==(ksn_shiki_status)edge[e][2],"VEACH start %d count %d",edge[e][0],edge[e][1]);
+    }
+    /* EMIT_POINTS from record 1 (dst 2: start r[b]), and from 1 for 1
+     * (dst 3: count r[b + 1]). */
+    int16_t pt[16]={(int16_t)(10*16),(int16_t)(20*16),(int16_t)(30*16),0,0,0,0,0,
+                    (int16_t)(1*16),(int16_t)(2*16),(int16_t)(3*16),0,0,0,0,0};
+    const uint8_t dp[1][4]={{KSN_SHIKI_I16,4,2,0}};
+    ksn_shiki_region rp[1]={{pt,3,KSN_SHIKI_I16,4,2}};
+    p_begin(&p,1,dp);
+    I(&p,KSN_SHIKI_SET,6,0,0,1,0);
+    I(&p,KSN_SHIKI_EMIT_POINTS,2,0,6,4,31);
+    CHECK(reg(&p,rp,1)&&run()==KSN_SHIKI_DONE&&vm.count==2&&seg[0].x0==20&&seg[0].y0==2&&seg[1].x0==30,
+          "EMIT from record 1 (%u: %d %d)",vm.count,seg[0].x0,seg[0].y0);
+    p_begin(&p,1,dp);
+    I(&p,KSN_SHIKI_SET,6,0,0,1,0);I(&p,KSN_SHIKI_SET,7,0,0,1,0);
+    I(&p,KSN_SHIKI_EMIT_POINTS,3,0,6,4,31);
+    CHECK(reg(&p,rp,1)&&run()==KSN_SHIKI_DONE&&vm.count==1&&seg[0].x0==20,"EMIT from 1 for 1");
+    p_begin(&p,1,dp);
+    I(&p,KSN_SHIKI_SET,6,0,0,2,0);I(&p,KSN_SHIKI_SET,7,0,0,2,0);
+    I(&p,KSN_SHIKI_EMIT_POINTS,3,0,6,4,31);
+    CHECK(reg(&p,rp,1)&&run()==KSN_SHIKI_INVALID&&vm.count==0,"EMIT count past R - start is INVALID");
+    p_begin(&p,1,dp);
+    I(&p,KSN_SHIKI_SET,6,0,0,4,0);
+    I(&p,KSN_SHIKI_EMIT_POINTS,2,0,6,4,31);
+    CHECK(reg(&p,rp,1)&&run()==KSN_SHIKI_INVALID,"EMIT start past R is INVALID");
+    p_begin(&p,1,dp);
+    I(&p,KSN_SHIKI_EMIT_POINTS,3,0,15,4,31);
+    CHECK(!reg(&p,rp,1),"EMIT start and count need r[b + 1]");
+    p_begin(&p,1,dp);
+    I(&p,KSN_SHIKI_EMIT_POINTS,4,0,0,4,31);
+    CHECK(!reg(&p,rp,1),"EMIT dst above 3 is refused");
+}
+
 static void refusals(void){
     static int16_t a[64];   /* 32 records of 2: two planes of 32 */
     const uint8_t decl[3][4]={{KSN_SHIKI_I16,0,2,0},{KSN_SHIKI_I32,0,2,1},{KSN_SHIKI_I16,0,2,0}};
@@ -298,6 +376,7 @@ int main(void){
     pairs();
     planes();
     lanes();
+    starts();
     emits();
     refusals();
     checks_run();

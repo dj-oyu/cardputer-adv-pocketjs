@@ -36,9 +36,12 @@ enum {
     KSN_SHIKI_SUB, KSN_SHIKI_NEG, KSN_SHIKI_SHIFT,
     KSN_SHIKI_ADD_H, KSN_SHIKI_SUB_H, KSN_SHIKI_MUL_H, KSN_SHIKI_SHIFT_H,
     KSN_SHIKI_EACH, KSN_SHIKI_FETCH, KSN_SHIKI_PUT, KSN_SHIKI_LOOKUP,
-    /* PROTOTYPE (docs/kasane/shiki-pie.md, not in the spec yet): 8-lane
-     * vector instructions with PIE's semantics, interpreted once per block
-     * of 8 records, and batch emitters that draw from a region natively. */
+    /* v2.0 draft (docs/kasane/shiki-v2.md sec.3, 4): a record by number. */
+    KSN_SHIKI_LOAD, KSN_SHIKI_STORE, KSN_SHIKI_DRAW_INDEX,
+    /* v2.0 draft (shiki-v2.md sec.6, from the prototype of
+     * docs/kasane/shiki-pie.md): 8-lane vector instructions with PIE's
+     * semantics, interpreted once per block of 8 records, and batch emitters
+     * that draw from a region natively. */
     KSN_SHIKI_VEACH, KSN_SHIKI_VLOAD, KSN_SHIKI_VSTORE, KSN_SHIKI_VSPLAT, KSN_SHIKI_VIOTA,
     KSN_SHIKI_VADD, KSN_SHIKI_VSUB, KSN_SHIKI_VMIN, KSN_SHIKI_VMAX,
     KSN_SHIKI_VZACC, KSN_SHIKI_VMAC, KSN_SHIKI_VMACK, KSN_SHIKI_VACCSET, KSN_SHIKI_VOUT,
@@ -115,9 +118,9 @@ typedef enum { KSN_SHIKI_RUNNING, KSN_SHIKI_DONE, KSN_SHIKI_INVALID,
 
 typedef struct {
     int32_t reg[KSN_SHIKI_REGS];
-    /* total is set by EACH only: its cursor is total - remaining, so END
-     * stays the same instruction for every loop. */
-    struct { uint8_t pc; uint16_t remaining,total,n; } loop[KSN_SHIKI_LOOP_DEPTH];
+    /* total and start are set by EACH / VEACH only: the cursor is start +
+     * total - remaining, so END stays the same instruction for every loop. */
+    struct { uint8_t pc; uint16_t remaining,total,n,start; } loop[KSN_SHIKI_LOOP_DEPTH];
     uint8_t depth;
     uint16_t steps,raster;
     int16_t pen_x,pen_y;
@@ -171,6 +174,10 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
  * extra ones ignored. ksn_shiki_draw converts and calls this. */
 ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                       ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
+/* ksn_shiki_draw_fixed with the draw's number (shiki-v2.md sec.4.1): what
+ * DRAW_INDEX reads, the entry of drawMany or of a list; draw_fixed is 0. */
+ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                      unsigned index,ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
 /* The result line of the shared text contract (tools/kasane_ir/shiki_ref.mjs
  * format(), tools/kasane_contract/shiki_run.c), handed to put in pieces so a
  * caller can print it or hash it without holding a line that 1,024 segments
