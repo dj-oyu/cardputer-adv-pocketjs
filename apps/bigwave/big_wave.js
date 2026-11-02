@@ -1,9 +1,9 @@
-// BIG WAVE: ride a peeling wave in third person, lines only (kasane.procedural).
+// BIG WAVE: ride a peeling wave in third person, lines only (kasane.shiki).
 // E pump S brake A/D turn ; pop . tuck , / carve 1 start 2-4 load tab pause.
 // Why: apps/bigwave/README.md
 (function () {
   'use strict';
-  const M = Math, f32 = M.fround, rnd = M.round, cl = (v, a, b) => v < a ? a : v > b ? b : v;
+  const M = Math, rnd = M.round, cl = (v, a, b) => v < a ? a : v > b ? b : v;
   // ---- Tuning: physics, course and difficulty per set (docs/apps/big-wave.md).
   const K = {
     vw: [9, 10.5, 12], H: [5, 6.5, 8], len: [320, 360, 400], rock: [70, 55, 42], sec: [120, 90, 70],
@@ -24,77 +24,50 @@
     {n: 'DUSK', bg: 0x1805, cu: 0x5fff, sh: 0xb01f, se: 0x600c, sk: 0xfd20, fo: 0xffdf}];
   const RIDERS = [0xffe0, 0xf9c7, 0x87f0];
 
-  // Programs as text, one letter per ksn_proc_op then its fields; $x is an argument.
-  const OPS = 'SIAMNREVPLQBplC', FL = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23',
-    '123', '123', '25'];
-  function prog(src, arg) {
-    const c = src.split(' ').map(t => {
-      const v = t.slice(1).split(',').map(x => x[0] === '$' ? arg[x[1]] : +x);
-      const o = OPS.indexOf(t[0]), f = FL[o], row = [o, 0, 0, 0, 0, 0];
-      for (let j = 0; j < f.length; ++j) row[+f[j]] = v[j];
-      row[4] = f32(row[4]);
-      return row;
-    });
-    if (c.length > 64) throw RangeError('64 instructions');
-    return c;
-  }
-  // Slice loop: no divide in the VM, so y = 1/depth steps by y *= 1-u+u^2-u^3, u = D*y.
-  const Y = ' S13,$D M14,8,13 M12,14,15 S13,1 A12,12,13 M12,12,14 M12,12,15 A12,12,13 M12,12,14' +
-    ' M12,12,15 A12,12,13 M8,8,12 E', A0 = 'I13,0 M10,8,13 I13,1 M11,8,13 ',
-    TV = 'I13,2 M12,8,13 A0,12,4 I13,3 M12,8,13 A1,12,5 ',
-    TS = 'I13,2 M12,8,13 S13,$x A0,12,13 I13,3 M12,8,13 S13,$y A1,12,13 ',
-    S12 = 'S13,$L M12,13,10 A2,0,12 M12,13,11 A3,1,12 S13,$V M12,13,11 A4,2,12 S13,$W M12,13,10 A5,3,12 ',
-    LC = 'L6,7,$c C$n,$c I13,7 A9,9,13', W0 = 'I8,4 I9,6 S15,-1 I13,5 Q13 ';
-  const T = {
-    cu: W0 + A0 + TS + S12 + 'S13,$d M14,9,13 S13,$l A14,14,13 M12,14,10 A6,0,12 M12,14,11 A7,1,12' +
-      ' S13,$e M14,9,13 S13,$v A14,14,13 M12,14,11 A6,6,12 M12,14,10 M12,12,15 A7,7,12 ' + LC + Y,
-    sh: W0 + 'M14,8,9 I13,0 M10,14,13 I13,1 M11,14,13 ' + TS + S12 + 'S13,$l M12,13,10 A6,0,12' +
-      ' M12,13,11 A7,1,12 S13,$v M12,13,11 A6,6,12 S13,$u M12,13,10 A7,7,12 ' + LC + Y,
-    se: 'I8,4 S15,-1 S4,$x S5,$y I13,5 Q13 ' + A0 + TV + 'S13,$f M12,13,10 A2,0,12 M12,13,11 A3,1,12' +
-      ' L0,1,$t V2,3 L0,1,$s S13,97 M6,8,13 I13,6 A6,6,13 N6,6 S13,.45 M6,6,13 S13,.5 A6,6,13 S13,$f' +
-      ' M6,6,13 M12,6,10 A2,0,12 M12,6,11 A3,1,12 P2,3,$g' + Y,
-    sk: 'I8,4 S4,$x S5,$y ' + A0 + TV + 'S13,$h I12,0 M12,12,13 A2,4,12 I12,1 M12,12,13 A3,5,12 V4,5' +
-      ' L2,3,$k S6,$r R$m V4,5 M12,6,10 A2,0,12 M12,6,11 A3,1,12 L2,3,$t S13,$q M6,6,13 E',
-    fo: 'I8,4 S15,-1 S4,$x S5,$y I9,6 I13,5 Q13 ' + A0 + TV + 'V0,1 S6,$l R$n S13,1.9 M7,6,13 A7,7,9' +
-      ' N7,7 S13,1 A7,7,13 I13,7 M7,7,13 M12,6,10 A2,0,12 M12,6,11 A3,1,12 M12,7,11 A2,2,12 M12,7,10' +
-      ' M12,12,15 A3,3,12 L2,3,$c S13,$d A6,6,13 E S13,2.3 A9,9,13' + Y,
-    ri: 'I0,0 I1,1 I2,2 I3,3 I13,4 M4,3,13 S12,-1 M5,2,13 M5,5,12 I14,5 S13,.3 M2,2,13 M3,3,13 M8,2,12' +
-      ' M9,3,12 A6,0,8 A7,1,9 V6,7 S13,.85 M10,13,4 A10,10,0 M11,13,5 A11,11,1 l14,10,11 A6,0,2 A7,1,3' +
-      ' l14,6,7 A6,0,8 A7,1,9 l14,6,7 V10,11 S13,1.85 M6,13,4 A6,6,0 M7,13,5 A7,7,1 l14,6,7 S13,1.25' +
-      ' M6,13,4 A6,6,0 M7,13,5 A7,7,1 A6,6,8 A6,6,8 A7,7,9 A7,7,9 V6,7 A6,6,2 A6,6,2 A6,6,2 A6,6,2' +
-      ' A7,7,3 A7,7,3 A7,7,3 A7,7,3 l14,6,7',
-    ro: 'I8,0 I9,1 I10,2 I11,3 S15,-1 M12,10,15 S13,-1.2 M0,13,10 A0,0,8 M1,13,11 A1,1,9 S13,-1' +
-      ' M2,13,10 A2,2,8 M3,13,11 A3,3,9 S13,1.3 M14,13,11 A2,2,14 M14,13,12 A3,3,14 S13,.9 M4,13,10' +
-      ' A4,4,8 M5,13,11 A5,5,9 S13,1.5 M14,13,11 A4,4,14 M14,13,12 A5,5,14 S13,1.2 M6,13,10 A6,6,8' +
-      ' M7,13,11 A7,7,9 C6,35953 L0,1,35953',
-    ln: 'I0,0 I1,1 I2,2 I3,3 I4,4 V0,1 l4,2,3', sp: 'S0,0'
-  };
+  // The programs are Shiki's built-in table, bigwave.<name> (big_wave_prog.js;
+  // README). Camera and face profile there are C and PF's numbers.
   // Rider, stand and tuck: board then body, one path (px, feet at 0,0).
   const BODY = [[0, 6, 4, 2, 3, -5, 0, -12, -3, -5, -4, 2, 0, 6, 1, 1, 5, -8, 0, -16, -5, -9, -1, -5, -5, -9,
     0, -16, -1, -27, -13, -22, -1, -27, 11, -25, -1, -27, -1, -29, -4, -31, -1, -36, 2, -31, -1, -29],
   [0, 6, 4, 2, 3, -5, 0, -12, -3, -5, -4, 2, 0, 6, 1, 1, 6, -5, 0, -11, -6, -6, -1, -5, -6, -6, 0, -11, -2,
     -19, -12, -13, -2, -19, 9, -15, -2, -19, -2, -21, -5, -23, -2, -27, 1, -23, -2, -21]];
-  const Q = 16384, BIN = .2, NB = 7;
+  const Q = 16384, BIN = .2, NB = 7, TAU = 2 * M.PI;
+  // Rider sprite i: roll bin i % NB, pose i / NB, turned about the vanishing
+  // point; px = floor(Q14 affine of the body's points), as the old typed
+  // points did. [x[], y[]].
   function sprite(i) {
     const b = i % NB, L = (b - 3) * BIN, r = -.45 * L, a = .55 * L, pts = BODY[(i / NB) | 0];
     const k = C.F / C.cb, ox = -k * C.ol, oy = k * C.ov, c = M.cos(r), s = M.sin(r);
     const px = C.vx + ox * c - oy * s, qy = C.vy + ox * s + oy * c;
+    const m = [rnd(M.cos(a) * Q), rnd(-M.sin(a) * Q), rnd(M.sin(a) * Q), rnd(M.cos(a) * Q), rnd(px * Q), rnd(qy * Q)];
     const x = [], y = [];
-    for (let j = 0; j < pts.length; j += 2) { x.push(pts[j]); y.push(pts[j + 1]); }
-    return {kind: 'affineQ14Points', x: x, y: y, color: 0xffe0, coeff: [rnd(M.cos(a) * Q),
-      rnd(-M.sin(a) * Q), rnd(M.sin(a) * Q), rnd(M.cos(a) * Q), rnd(px * Q), rnd(qy * Q)]};
+    for (let j = 0; j < pts.length; j += 2) {
+      x.push(M.floor((m[0] * pts[j] + m[1] * pts[j + 1] + m[4]) / Q));
+      y.push(M.floor((m[2] * pts[j] + m[3] * pts[j + 1] + m[5]) / Q));
+    }
+    return [x, y];
   }
-  // Arguments per plan; wave plans change with the set (colors, heights).
+  // A polyline (px) as Shiki: its points in an i16 window (x, y), drawn by
+  // EACH; FETCH at Q16; LINE in colour c. [code, , window].
+  function poly(x, y, c) {
+    const n = x.length, w = P.data({type: 'i16', q: 0, records: n, record: 2}), s = n + 7 & ~7;
+    for (let i = 0; i < n; ++i) { w[i] = x[i]; w[s + i] = y[i]; }
+    const b = new Uint8Array(64);
+    b.set([83, 75, 73, 49, 1, 0, 4, 0, 0, 1, 0, 0, 0, 0, 2, 0, 23], 0);
+    b.set([24, 0, 0, 0, 16, 0, 0, 0, 2], 28);
+    b.set([9, 0, 0, 1, 0, 0, 0, 0, c & 255, c >> 8], 40);
+    b[52] = 6;
+    return [b, [], w];
+  }
+  // Arguments per program (big_wave_prog.js); wave programs change with the
+  // set (colours, heights) and the load tier (CUBIC and foam steps).
   function args(k, set, tier) {
-    const P = SETS[set], H = K.H[set], tr = TIER[tier], F = C.F;
-    const a = {D: C.D, x: C.vx, y: C.vy, L: PF.L, V: PF.V, W: -PF.V, l: PF.l, v: PF.v, u: -PF.v, d: PF.dl,
-      e: PF.dv, n: tr[1]};
-    if (k === 'cu') a.c = P.cu;
-    if (k === 'sh') a.c = P.sh;
-    if (k === 'se') { a.f = 8; a.t = P.cu; a.s = P.se; a.g = P.fo; }
-    if (k === 'sk') { a.h = 250 / F; a.k = P.sk; a.r = 2; a.m = 5; a.t = P.se; a.q = 1.6; }
-    if (k === 'fo') { a.l = .25 * H; a.n = tr[2]; a.d = -1.55 * H / (tr[2] - 1); a.c = P.fo; }
-    return a;
+    const P = SETS[set], H = K.H[set], tr = TIER[tier];
+    if (k === 'cu') return [P.cu, tr[1]];
+    if (k === 'sh') return [P.sh, tr[1]];
+    if (k === 'se') return [P.cu, P.se, P.fo];
+    if (k === 'sk') return [P.sk, P.se];
+    return [.25 * H, tr[2], -1.55 * H / (tr[2] - 1), P.fo];
   }
   const SETK = ['cu', 'sh', 'se', 'sk', 'fo'];
 
@@ -144,19 +117,22 @@
   }
 
   // ---- Plans: handles by key; a queue registers one per frame (a decode is 12-20 ms).
-  const P = typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.procedural;
-  const PL = {}, queue = [];
+  const P = typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.shiki;
+  const PL = {}, WIN = {}, queue = [];
   function spec(k, set, tier) {
-    if (k[0] === 's' && k[1] === 'p') return [prog(T.sp, {}), sprite(+k.slice(2))];
-    return [prog(T[k], SETK.indexOf(k) < 0 ? {} : args(k, set, tier)), null];
+    if (k[0] === 's' && k[1] === 'p') { const p = sprite(+k.slice(2)); return poly(p[0], p[1], 0xffe0); }
+    return ['bigwave.' + k, SETK.indexOf(k) < 0 ? [] : args(k, set, tier)];
   }
   function load(k, set, tier) { queue.push([k, set, tier]); }
   function pump() {
     const e = queue.shift();
     if (!e) return;
-    const s = spec(e[0], e[1], e[2]);
     if (PL[e[0]]) P.unregister(PL[e[0]]);
-    PL[e[0]] = s[1] ? P.register(s[0], s[1]) : P.register(s[0]);
+    if (WIN[e[0]]) P.release(WIN[e[0]]);
+    delete PL[e[0]]; delete WIN[e[0]];
+    const s = spec(e[0], e[1], e[2]);
+    PL[e[0]] = s[2] ? P.register(s[0], [], {data: [s[2]]}) : P.register(s[0], s[1]);
+    WIN[e[0]] = s[2];
   }
   function loadSet(k) { SETK.forEach(n => load(n, k, S.tier)); }
 
@@ -295,7 +271,7 @@
     const m0 = M.ceil((s.cx + C.dn) / d), m1 = M.floor((s.cx + far) / d), y = m => 1 / (m * d - s.cx);
     const add = (k, i) => { if (PL[k]) D.push([PL[k], i]); };
     add('sk', [e[0], e[1], w[0], w[1], 1 / C.dn]);
-    add('se', [e[0], e[1], w[0], w[1], y(m0), m1 - m0 + 1, s.t * .21]);
+    add('se', [e[0], e[1], w[0], w[1], y(m0), m1 - m0 + 1, s.t * .21 % TAU]);
     if (s.st === 3) return;
     // Wave runs: slices grouped between breakpoints, each run overlaps the last
     // slice of the previous one so the lip rail stays connected.
@@ -315,10 +291,10 @@
     }
     // Whitewater behind the curl, and the splash of a wipeout.
     const fb = M.min(m1, M.floor(s.xc / d));
-    if (fb >= m0) add('fo', [e[0], e[1], w[0], w[1], y(m0), fb - m0 + 1, s.t * .4, .12 * H]);
+    if (fb >= m0) add('fo', [e[0], e[1], w[0], w[1], y(m0), fb - m0 + 1, s.t * .4 % TAU, .12 * H]);
     if (s.st === 2 && s.wt < 30) {
       const a0 = M.max(m0, M.ceil((s.wx - 2) / d));
-      add('fo', [e[0], e[1], w[0], w[1], y(a0), 3, s.t * .7, .3 + s.wt * .02]);
+      add('fo', [e[0], e[1], w[0], w[1], y(a0), 3, s.t * .7 % TAU, .3 + s.wt * .02]);
     }
     // Obstacles, far to near.
     const ob = [], c = s.course;

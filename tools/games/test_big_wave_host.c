@@ -13,11 +13,10 @@
  *    under E, climbing under A, ...), with a fixed seed so every run is
  *    identical. Obstacle cases place the rider by writing the state (setup);
  *    the action is always keys, and the bot only reads;
- *  - every procedural draw of every frame runs three ways that must agree bit
- *    for bit (the plan pocket_proc.c runs, the plan in debug-step mode, the
- *    single-step VM), and the frame rendered from the plan and from the VM
- *    segments is compared pixel for pixel; typed points run scalar, the PIE
- *    model and the dispatcher;
+ *  - every Shiki draw of every frame (the built-in programs bigwave.<name>
+ *    and the rider sprites' polylines) runs again here through the Shiki
+ *    engine and must finish DONE within the limits; the frame is rendered
+ *    from those segments (Shiki v2.0 step 3: BIG WAVE left the float VM);
  *  - per-frame load (segments, raster steps, VM steps, instructions, plans,
  *    points) against the adapter's limits, per game state and per load tier;
  *  - the guest heap after evaluation and its peak over the run (TLSF model);
@@ -33,8 +32,10 @@
 #include "keymap.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
-#include "ui/kasane/ksn_proc_plan.h"
-#include "ui/kasane/ksn_proc_points_pie.h"
+#include "ui/kasane/ksn_procedural.h"
+#include "ui/kasane/ksn_shiki.h"
+#include "shiki_heap.h"
+#include "pocket_shiki_api.h"
 #include "text/ksn_font.h"
 #include "sound.h"
 #include "esp_log.h"
@@ -211,90 +212,57 @@ static void ppm(const char *label){
     printf("  [%5u] PPM %s\n",frame_no,label);
 }
 
-/* ---- the differential oracle (the test_proc_megademo_scenes.c discipline) */
-#define MAX_POINTS 128u
+/* ---- the Shiki replay */
 typedef struct {
     int32_t handle;
     char key[8];
-    ksn_proc_inst code[KSN_PROC_CODE];
-    ksn_proc_program program;
-    ksn_proc_plan plan;
-    bool has_points;
-    unsigned points,regs,depth,inputs_read;
-    uint16_t color;
-    KsnProcAffineQ14 coeff;
-    _Alignas(16) int16_t x[MAX_POINTS],y[MAX_POINTS];
-    _Alignas(16) int16_t sx[MAX_POINTS],sy[MAX_POINTS],px[MAX_POINTS],py[MAX_POINTS],dx[MAX_POINTS],dy[MAX_POINTS];
+    ksn_shiki_plan *plan;
     unsigned max_segs,max_raster,max_steps,draws;
 } spec;
 static spec *specs[256];
 static unsigned spec_n,live_plans,live_peak,registered,unregistered;
-static ksn_proc_frame f_plan,f_debug,f_vm,cand_plan,cand_vm;
+static ksn_proc_frame f_plan,cand_plan,cand_vm;
 static uint16_t pix_plan[KSN_PROC_W*KSN_PROC_H],pix_vm[KSN_PROC_W*KSN_PROC_H];
 static unsigned oracle_failures;
 #define CHECK(t) do{if(!(t)){printf("ORACLE FAIL frame %u: %s (%s:%d)\n",frame_no,#t,__FILE__,__LINE__);oracle_failures++;return 0;}}while(0)
-
 static double at(JSValueConst a,unsigned i){
     JSValue v=JS_GetPropertyUint32(ctx,a,i);double d=NAN;JS_ToFloat64(ctx,&d,v);JS_FreeValue(ctx,v);return d;
 }
 static unsigned len(JSValueConst a){
     JSValue v=JS_GetPropertyStr(ctx,a,"length");double d=0;JS_ToFloat64(ctx,&d,v);JS_FreeValue(ctx,v);return (unsigned)d;
 }
-static void analyse(spec *s,unsigned *ops){
-    uint16_t used=0;unsigned depth=0,maxd=0,inputs=0;
-    for(unsigned i=0;i<s->program.count;++i){
-        const ksn_proc_inst *c=&s->code[i];
-        *ops|=1u<<c->op;
-        switch(c->op){
-        case KSN_PROC_SET:used|=1u<<c->dst;break;
-        case KSN_PROC_INPUT:used|=1u<<c->dst;if(c->a+1u>inputs)inputs=c->a+1u;break;
-        case KSN_PROC_ADD:case KSN_PROC_MUL:used|=1u<<c->dst|1u<<c->a|1u<<c->b;break;
-        case KSN_PROC_SIN:used|=1u<<c->dst|1u<<c->a;break;
-        case KSN_PROC_REPEAT:case KSN_PROC_REPEAT_REG:
-            if(c->op==KSN_PROC_REPEAT_REG)used|=1u<<c->a;
-            if(++depth>maxd)maxd=depth;
-            break;
-        case KSN_PROC_END:--depth;break;
-        case KSN_PROC_BREAK_IF_GT:case KSN_PROC_MOVE:case KSN_PROC_PLOT:case KSN_PROC_LINE:
-            used|=1u<<c->a|1u<<c->b;break;
-        case KSN_PROC_PLOT_COLOR_REG:case KSN_PROC_LINE_COLOR_REG:used|=1u<<c->dst|1u<<c->a|1u<<c->b;break;
-        case KSN_PROC_CUBIC:used|=0xffu;break;
-        default:break;
-        }
-    }
-    unsigned n=0;for(unsigned r=0;r<16;++r)n+=(used>>r)&1u;
-    s->regs=n;s->depth=maxd;s->inputs_read=inputs;
-}
-static unsigned ops_used;
+static uint64_t ops_used;
 static spec *find(int32_t h){for(unsigned i=0;i<spec_n;i++)if(specs[i]&&specs[i]->handle==h)return specs[i];return NULL;}
-static bool load_spec(int32_t handle,JSValueConst code,JSValueConst pts){
+/* code: a built-in name or the bytes (Uint8Array); args: the registration
+ * arguments; data: the windows, each carrying __d = [type, q, k_rec, records]
+ * (the prelude's data() wrapper). */
+static bool load_spec(int32_t handle,JSValueConst code,JSValueConst args,JSValueConst data){
+    const uint8_t *bytes=NULL;size_t blen=0;
+    if(JS_IsString(code)){
+        const char *name=JS_ToCString(ctx,code);
+        unsigned count=0;const ksn_shiki_rom_entry *rom=ksn_shiki_rom_table(&count);
+        for(unsigned k=0;name&&k<count;k++)if(!strcmp(rom[k].name,name)){bytes=rom[k].code;blen=rom[k].len;}
+        if(name)JS_FreeCString(ctx,name);
+    }else bytes=JS_GetUint8Array(ctx,&blen,code);
+    if(!bytes)return false;
+    double a[KSN_SHIKI_ARGS];unsigned na=JS_IsArray(args)?len(args):0;
+    if(na>KSN_SHIKI_ARGS)return false;
+    for(unsigned k=0;k<na;k++)a[k]=at(args,k);
+    ksn_shiki_region regs[KSN_SHIKI_REGIONS];unsigned nr=JS_IsArray(data)?len(data):0;
+    if(nr>KSN_SHIKI_REGIONS)return false;
+    for(unsigned k=0;k<nr;k++){
+        JSValue w=JS_GetPropertyUint32(ctx,data,k),d=JS_GetPropertyStr(ctx,w,"__d");
+        size_t off=0,bl=0,bpe=0,size=0;
+        JSValue buf=JS_GetTypedArrayBuffer(ctx,w,&off,&bl,&bpe);
+        uint8_t *mem=JS_IsException(buf)?NULL:JS_GetArrayBuffer(ctx,&size,buf);
+        regs[k]=(ksn_shiki_region){mem?mem+off:NULL,(uint32_t)at(d,3),(uint8_t)at(d,0),(uint8_t)at(d,1),(uint8_t)at(d,2)};
+        JS_FreeValue(ctx,buf);JS_FreeValue(ctx,d);JS_FreeValue(ctx,w);
+    }
     spec *s=calloc(1,sizeof *s);
     s->handle=handle;
-    unsigned n=len(code);
-    if(n<1||n>KSN_PROC_CODE){free(s);return false;}
-    for(unsigned i=0;i<n;++i){
-        JSValue row=JS_GetPropertyUint32(ctx,code,i);
-        ksn_proc_inst *c=&s->code[i];
-        c->op=(uint8_t)at(row,0);c->dst=(uint8_t)at(row,1);c->a=(uint8_t)at(row,2);c->b=(uint8_t)at(row,3);
-        c->value=(float)at(row,4);c->color=(uint16_t)at(row,5);
-        JS_FreeValue(ctx,row);
-    }
-    s->program=(ksn_proc_program){s->code,(uint8_t)n};
-    if(!ksn_proc_plan_prepare(&s->plan,&s->program)){free(s);return false;}
-    analyse(s,&ops_used);
-    if(!JS_IsNull(pts)&&!JS_IsUndefined(pts)){
-        JSValue x=JS_GetPropertyStr(ctx,pts,"x"),y=JS_GetPropertyStr(ctx,pts,"y"),
-                k=JS_GetPropertyStr(ctx,pts,"coeff"),col=JS_GetPropertyStr(ctx,pts,"color");
-        s->points=len(x);
-        for(unsigned i=0;i<s->points&&i<MAX_POINTS;++i){s->x[i]=(int16_t)at(x,i);s->y[i]=(int16_t)at(y,i);}
-        s->coeff=(KsnProcAffineQ14){(int16_t)at(k,0),(int16_t)at(k,1),(int16_t)at(k,2),(int16_t)at(k,3),
-                                    (int32_t)at(k,4),(int32_t)at(k,5)};
-        double cd=0;JS_ToFloat64(ctx,&cd,col);s->color=(uint16_t)cd;
-        const KsnProcPointsPolicy policy={true,8};
-        if(!ksn_proc_plan_register_points_affine(&s->plan,&s->coeff,&policy)){free(s);return false;}
-        s->has_points=true;
-        JS_FreeValue(ctx,x);JS_FreeValue(ctx,y);JS_FreeValue(ctx,k);JS_FreeValue(ctx,col);
-    }
+    s->plan=malloc(ksn_shiki_plan_bytes_for(bytes,blen)?ksn_shiki_plan_bytes_for(bytes,blen):sizeof *s->plan);
+    if(!ksn_shiki_register(bytes,blen,a,na,regs,nr,s->plan)){free(s->plan);free(s);return false;}
+    for(unsigned k=0;k<s->plan->count;k++)ops_used|=1ull<<s->plan->code[k].op;
     unsigned slot=0;while(slot<spec_n&&specs[slot])slot++;
     if(slot==spec_n)spec_n++;
     specs[slot]=s;
@@ -314,24 +282,12 @@ typedef struct {
 static stats st_state[6],st_tier[3],st_all;
 static unsigned long long pixels_checked,draws_checked;
 static unsigned frames_checked;
-static unsigned run_draw(spec *s,const float in[KSN_PROC_INPUTS],unsigned *raster,unsigned *segs,stats *fs){
-    ksn_proc_vm vp,vd,vr;
-    CHECK(ksn_proc_plan_begin(&vp,&s->plan,in,&f_plan)==KSN_PROC_RUNNING);
-    CHECK(ksn_proc_plan_run(&vp,&s->plan,false)==KSN_PROC_DONE);
-    CHECK(ksn_proc_plan_begin(&vd,&s->plan,in,&f_debug)==KSN_PROC_RUNNING);
-    CHECK(ksn_proc_plan_run(&vd,&s->plan,true)==KSN_PROC_DONE);
-    CHECK(ksn_proc_begin(&vr,&s->program,in,&f_vm)==KSN_PROC_RUNNING);
-    ksn_proc_status status;unsigned singles=0;
-    do{status=ksn_proc_step(&vr);++singles;}while(status==KSN_PROC_RUNNING);
-    CHECK(status==KSN_PROC_DONE);
-    CHECK(vp.steps==vr.steps&&vd.steps==vr.steps&&singles==vr.steps);
-    CHECK(f_debug.count==f_plan.count&&f_vm.count==f_plan.count);
-    CHECK(!memcmp(f_debug.segments,f_plan.segments,f_plan.count*sizeof f_plan.segments[0]));
-    CHECK(!memcmp(f_vm.segments,f_plan.segments,f_plan.count*sizeof f_plan.segments[0]));
-    CHECK(!memcmp(vp.reg,vr.reg,sizeof vr.reg));
+static unsigned run_draw(spec *s,const double in[KSN_SHIKI_INPUTS],unsigned n,unsigned *raster,unsigned *segs,stats *fs){
+    static ksn_shiki_vm vm;
+    CHECK(ksn_shiki_draw(s->plan,in,n,&vm,f_plan.segments)==KSN_SHIKI_DONE);
+    f_plan.count=vm.count;f_plan.raster_steps=vm.raster;f_plan.ext=vm.ext;
     CHECK(cand_plan.count+f_plan.count<=KSN_PROC_SEGMENTS);
-    append(&cand_plan,&f_plan);append(&cand_vm,&f_vm);
-    unsigned seg=f_plan.count,ras=f_plan.raster_steps;
+    append(&cand_plan,&f_plan);append(&cand_vm,&f_plan);
     for(unsigned i=0;i<f_plan.count;i++){
         const ksn_proc_segment *g=&f_plan.segments[i];
         int lo=g->x0<g->y0?g->x0:g->y0,hi=g->x0>g->y0?g->x0:g->y0;
@@ -341,41 +297,13 @@ static unsigned run_draw(spec *s,const float in[KSN_PROC_INPUTS],unsigned *raste
         if(lo<fs->co_lo)fs->co_lo=lo;
         if(hi>fs->co_hi)fs->co_hi=hi;
     }
-    if(s->has_points){
-        const unsigned n=s->points;
-        ksn_proc_points_affine_scalar((KsnProcPointDst){s->sx,s->sy},(KsnProcPointSrc){s->x,s->y},n,&s->coeff);
-        ksn_proc_points_affine_pie((KsnProcPointDst){s->px,s->py},(KsnProcPointSrc){s->x,s->y},n,&s->coeff);
-        KsnProcPointsDecision decision;
-        CHECK(ksn_proc_plan_run_points_affine(&s->plan,(KsnProcPointDst){s->dx,s->dy},
-                                              (KsnProcPointSrc){s->x,s->y},n,&decision));
-        CHECK(!memcmp(s->sx,s->px,n*2)&&!memcmp(s->sy,s->py,n*2));
-        CHECK(!memcmp(s->sx,s->dx,n*2)&&!memcmp(s->sy,s->dy,n*2));
-        ksn_proc_frame *typed=&f_debug;
-        typed->count=0;typed->raster_steps=0;typed->ready=true;
-        for(unsigned i=0;i<n;++i){
-            CHECK(s->sx[i]>=-480&&s->sx[i]<=720&&s->sy[i]>=-480&&s->sy[i]<=720);
-            if(s->sx[i]<fs->pt_lo)fs->pt_lo=s->sx[i];
-            if(s->sy[i]<fs->pt_lo)fs->pt_lo=s->sy[i];
-            if(s->sx[i]>fs->pt_hi)fs->pt_hi=s->sx[i];
-            if(s->sy[i]>fs->pt_hi)fs->pt_hi=s->sy[i];
-            if(i){
-                int ddx=abs(s->sx[i]-s->sx[i-1]),ddy=abs(s->sy[i]-s->sy[i-1]);
-                typed->raster_steps=(uint16_t)(typed->raster_steps+(ddx>ddy?ddx:ddy)+1);
-                typed->segments[typed->count++]=(ksn_proc_segment){s->sx[i-1],s->sy[i-1],s->sx[i],s->sy[i],s->color};
-            }
-        }
-        CHECK(cand_plan.count+typed->count<=KSN_PROC_SEGMENTS);
-        append(&cand_plan,typed);append(&cand_vm,typed);
-        seg+=typed->count;ras+=typed->raster_steps;
-        if(n>fs->points_max)fs->points_max=n;
-    }
-    CHECK(f_plan.raster_steps<=KSN_PROC_RASTER_STEPS&&vr.steps<=KSN_PROC_STEPS);
-    if(seg>s->max_segs)s->max_segs=seg;
-    if(ras>s->max_raster)s->max_raster=ras;
-    if(vr.steps>s->max_steps)s->max_steps=vr.steps;
+    CHECK(vm.raster<=KSN_SHIKI_RASTER&&vm.steps<=KSN_SHIKI_STEPS);
+    if(f_plan.count>s->max_segs)s->max_segs=f_plan.count;
+    if(vm.raster>s->max_raster)s->max_raster=vm.raster;
+    if(vm.steps>s->max_steps)s->max_steps=vm.steps;
     s->draws++;
-    *raster=f_plan.raster_steps;*segs=seg;
-    return vr.steps;
+    *raster=vm.raster;*segs=f_plan.count;
+    return vm.steps;
 }
 static void acc(stats *a,const stats *f,unsigned draws,unsigned segs,unsigned raster,unsigned steps,
                 unsigned draw_raster,unsigned draw_steps){
@@ -402,7 +330,7 @@ static const stats STATS0={.pt_lo=32767,.pt_hi=-32768,.co_lo=32767,.co_hi=-32768
 /* Registrations, releases and draws reach C at the call (the prelude's
  * wrappers call these), so the harness holds no program or input array in the
  * guest heap it measures. */
-typedef struct { int32_t h; unsigned n; float in[KSN_PROC_INPUTS]; } rec_draw;
+typedef struct { int32_t h; unsigned n; double in[KSN_SHIKI_INPUTS]; } rec_draw;
 static rec_draw rec[128];
 static unsigned rec_n;
 static bool rec_committed;
@@ -410,7 +338,7 @@ static double rec_bg;
 static JSValue js_reg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;
     double hd=0;JS_ToFloat64(c,&hd,argv[0]);
-    if(!load_spec((int32_t)hd,argv[1],argv[2])){printf("ORACLE FAIL frame %u: plan %d rejected\n",frame_no,(int)hd);oracle_failures++;}
+    if(!load_spec((int32_t)hd,argv[1],argv[2],argv[3])){printf("ORACLE FAIL frame %u: plan %d rejected\n",frame_no,(int)hd);oracle_failures++;}
     live_plans++;registered++;
     if(live_plans>live_peak)live_peak=live_plans;
     return JS_UNDEFINED;
@@ -418,7 +346,7 @@ static JSValue js_reg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
 static JSValue js_unreg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;
     double hd=0;JS_ToFloat64(c,&hd,argv[0]);
-    for(unsigned j=0;j<spec_n;j++)if(specs[j]&&specs[j]->handle==(int32_t)hd){free(specs[j]);specs[j]=NULL;}
+    for(unsigned j=0;j<spec_n;j++)if(specs[j]&&specs[j]->handle==(int32_t)hd){free(specs[j]->plan);free(specs[j]);specs[j]=NULL;}
     live_plans--;unregistered++;
     return JS_UNDEFINED;
 }
@@ -430,7 +358,8 @@ static JSValue js_draw(JSContext *c,JSValueConst self,int argc,JSValueConst *arg
     if(rec_n==sizeof rec/sizeof rec[0]){oracle_failures++;return JS_UNDEFINED;}
     rec_draw *d=&rec[rec_n++];
     d->h=(int32_t)at(argv[0],0);d->n=len(argv[1]);
-    for(unsigned k=0;k<KSN_PROC_INPUTS;k++)d->in[k]=k<d->n?(float)at(argv[1],k):0.0f;
+    if(d->n>KSN_SHIKI_INPUTS)d->n=KSN_SHIKI_INPUTS;
+    for(unsigned k=0;k<KSN_SHIKI_INPUTS;k++)d->in[k]=k<d->n?at(argv[1],k):0.0;
     return JS_UNDEFINED;
 }
 static JSValue js_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -455,13 +384,11 @@ static int oracle(void){
         for(unsigned i=0;i<n;i++){
             spec *s=find(rec[i].h);
             const unsigned ni=rec[i].n;
-            const float *input=rec[i].in;
+            const double *input=rec[i].in;
             if(!s){printf("ORACLE FAIL frame %u: draw of unknown plan\n",frame_no);oracle_failures++;continue;}
             if(ni>fs.inputs_max)fs.inputs_max=ni;
-            if(s->program.count>fs.instr_max)fs.instr_max=s->program.count;
-            if(s->regs>fs.regs_max)fs.regs_max=s->regs;
-            if(s->depth>fs.depth_max)fs.depth_max=s->depth;
-            unsigned r=0,sg=0,stp=run_draw(s,input,&r,&sg,&fs);
+            if(s->plan->count>fs.instr_max)fs.instr_max=s->plan->count;
+            unsigned r=0,sg=0,stp=run_draw(s,input,ni,&r,&sg,&fs);
             if(getenv("BW_DUMP")&&(unsigned)atoi(getenv("BW_DUMP"))==frame_no){
                 printf("  draw %-5s in",s->key);for(unsigned k=0;k<ni;k++)printf(" %.3f",input[k]);
                 printf(" | segs %u",f_plan.count);
@@ -499,9 +426,11 @@ static const char PRELUDE[]=
     "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
     "capabilities:{get:n=>({name:n,supported:__cap(n)||n==='audio.tone',available:true})},"
     "audio:{tone:globalThis.__tone}};"
-    "(function(){const P=pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw,B=P.beginFrame,"
-    "C=P.commit,g=globalThis;"
-    "P.register=function(c,p){const h=p?R.call(P,c,p):R.call(P,c);g.__reg(h,c,p||null);return h};"
+    "(function(){const P=pocket.kasane.shiki,R=P.register,U=P.unregister,D=P.draw,B=P.beginFrame,"
+    "C=P.commit,SA=P.data,g=globalThis;"
+    /* data(): the window remembers its shape, for __reg's regions. */
+    "P.data=function(d){const w=SA.call(P,d);w.__d=[d.type==='i16'?0:d.type==='u16'?1:2,d.q,d.record,d.records];return w};"
+    "P.register=function(c,a,o){const h=R.call(P,c,a,o);g.__reg(h,c,a||null,o&&o.data||null);return h};"
     "P.unregister=function(h){U.call(P,h);g.__unreg(h)};"
     "P.beginFrame=function(c){g.__begin(c);return B.apply(P,arguments)};"
     "P.draw=function(h,i){D.call(P,h,i);g.__draw([h],i)};"
@@ -599,13 +528,16 @@ int main(int argc,char **argv){
         JS_SetMemoryLimit(rt,limit);
         if(limit/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,limit/2);
     }
+    /* BIG WAVE names kasane.shiki: its session takes the Shiki heap before
+     * the guest (app_session.c), and kasane then has shiki. */
+    if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
     pocket_kasane_install(ctx,NULL);
     pocket_input_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__cap",JS_NewCFunction(ctx,js_cap,"cap",1));
     JS_SetPropertyStr(ctx,g,"__tone",JS_NewCFunction(ctx,js_tone,"tone",1));
-    JS_SetPropertyStr(ctx,g,"__reg",JS_NewCFunction(ctx,js_reg,"reg",3));
+    JS_SetPropertyStr(ctx,g,"__reg",JS_NewCFunction(ctx,js_reg,"reg",4));
     JS_SetPropertyStr(ctx,g,"__unreg",JS_NewCFunction(ctx,js_unreg,"unreg",1));
     JS_SetPropertyStr(ctx,g,"__begin",JS_NewCFunction(ctx,js_begin,"begin",1));
     JS_SetPropertyStr(ctx,g,"__draw",JS_NewCFunction(ctx,js_draw,"draw",2));
@@ -801,10 +733,10 @@ int main(int argc,char **argv){
 
     /* ---- report */
     printf("\nplans: live peak %u (limit 32), registered %u, unregistered %u\n",live_peak,registered,unregistered);
-    printf("\nper plan (max over the run): key instr regs depth inputs points | segs raster steps draws\n");
+    printf("\nper program (max over the run): key instr inputs | segs raster steps draws\n");
     for(unsigned i=0;i<spec_n;i++){spec *s=specs[i];if(!s)continue;
-        printf("  %-5s %3u %3u %2u %2u %4u | %4u %5u %5u %6u\n",s->key,s->program.count,s->regs,s->depth,s->inputs_read,
-               s->points,s->max_segs,s->max_raster,s->max_steps,s->draws);}
+        printf("  %-5s %3u %2u | %4u %5u %5u %6u\n",s->key,s->plan->count,s->plan->inputs,
+               s->max_segs,s->max_raster,s->max_steps,s->draws);}
     static const char *const SN[]={"title","ride","wipeout","set break","clear","game over"};
     printf("\nper frame: frames draws_max seg_max seg_avg raster_max raster_avg draw_raster_max draw_steps_max frame_steps_max frame_steps_avg plans_max instr_max regs_max depth_max inputs_max points_max coord_lo coord_hi\n");
     for(unsigned i=0;i<6+3+1;i++){
@@ -819,13 +751,9 @@ int main(int argc,char **argv){
                a->frame_steps_max,(double)a->steps_sum/a->frames,a->plans_max,a->instr_max,a->regs_max,a->depth_max,a->inputs_max,a->points_max,
                a->co_lo,a->co_hi);
     }
-    printf("\nops used:");
-    static const char *const OPN[]={"SET","INPUT","ADD","MUL","SIN","REPEAT","END","MOVE","PLOT","LINE","REPEAT_REG",
-                                    "BREAK_IF_GT","PLOT_COLOR_REG","LINE_COLOR_REG","CUBIC"};
-    for(unsigned op=0;op<15;op++)if(ops_used&(1u<<op))printf(" %s",OPN[op]);
-    printf("\nops unused:");
-    for(unsigned op=0;op<15;op++)if(!(ops_used&(1u<<op)))printf(" %s",OPN[op]);
-    printf("\noracle: %u frames, %llu draws, %llu pixels, plan == debug-step plan == single-step VM, failures %u\n",
+    printf("\nShiki ops registered: %llx\n",(unsigned long long)ops_used);
+    {uint32_t b=0,u=0,l=0;shiki_heap_info(&b,&u,&l);printf("Shiki heap now: %u of %u used, largest free %u\n",u,b,l);}
+    printf("replay: %u frames, %llu draws, %llu pixels, every Shiki draw DONE, failures %u\n",
            frames_checked,draws_checked,pixels_checked,oracle_failures);
     printf("guest heap (TLSF model, %zu-bit host): runtime %zu, after prelude %zu, after eval %zu (+%zu), "
            "live peak after GC %zu (+%zu), peak before GC %zu (+%zu)\n",sizeof(void *)*8,heap_before,heap_prelude,
@@ -835,7 +763,7 @@ int main(int argc,char **argv){
     printf("frames %u: exceptions=%u present_failures=%u tones=%u wipes LIP=%u ROCK=%u RIDER=%u CAUGHT=%u LAND=%u tube_logs=%u\n",
            frame_no,exceptions,present_failures,tones,wipes[0],wipes[1],wipes[2],wipes[3],wipes[4],tube_logs);
     bool pass=!fails&&!exceptions&&!present_failures&&!oracle_failures&&live_peak<=32&&readys==1;
-    pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"BIGWAVE_HOST PASS":"BIGWAVE_HOST FAIL");
     return pass?0:1;
 }

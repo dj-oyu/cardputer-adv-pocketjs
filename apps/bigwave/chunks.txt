@@ -1,0 +1,6 @@
+# BIG WAVE's chunks (pocket.app.load; docs/vm/eval-peak.md section 7). The
+# entry (big_wave.js) is the whole game; prog only carries the Shiki
+# programs, which the build compiles into the firmware's built-in table as
+# bigwave.<name> and strips from the chunk (big_wave_prog.js, README).
+app local.bigwave
+prog   big_wave_prog.js

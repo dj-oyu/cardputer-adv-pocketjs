@@ -63,12 +63,17 @@ def build(m32: bool) -> Path:
                             "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)],
                            cwd=ROOT, check=True)
         objects.append(str(obj))
+    # BIG WAVE's Shiki programs (apps/bigwave/big_wave_prog.js), as the
+    # firmware build makes the built-in table.
+    rom = cache / "ksn_shiki_rom.c"
+    subprocess.run(["node", "tools/kasane_ir/emit_shiki_rom.mjs", str(rom), "bigwave=apps/bigwave/big_wave_prog.js"],
+                   cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
     binary = cache / "test-big-wave"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/games/test_big_wave_host.c", *kasane_sources(), *EXTRA, *objects,
+                    "tools/games/test_big_wave_host.c", *kasane_sources(), *EXTRA, "main/pocket/pocket_shiki_api.c", str(rom), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
