@@ -1158,7 +1158,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 
 ### heapprobe の変種
 
-`POCKET_HEAPPROBE` の `derby-spread`・`-flat`・`-split3/4`・`-load3/4`・`-bc` は 1 本のソースから作る試作なので、分割前のソースを `apps/heapprobe/derby_v0/derby_watch.js`（e15e6eb の blob そのまま）に凍結し、`main/CMakeLists.txt` の元をそこへ向けた。`derby`（索引 29）は出荷の入口（チャンクを含む）を評価する。
+`POCKET_HEAPPROBE` の `derby-spread`・`-flat`・`-split3/4`・`-load3/4`・`-bc` は 1 本のソースから作る試作。以前は分割前のソースを `apps/heapprobe/derby_v0/derby_watch.js`（e15e6eb の blob そのまま）に凍結して使っていたが、それは float の VM で描いていたので、Shiki v2.0 で VM と一緒に消した。今は configure の時に `tools/heapprobe_derby.py` が出荷の DERBY（入口と `chunks.txt` のチャンク。prog チャンクは build と同じく `@shiki` を抜く）を 1 本の関数に包んだスクリプトにし、`main/CMakeLists.txt` がそこから各変種を作る（2026-11-02。host の DERBY 検査を、この 1 本で通した）。`derby`（索引 29）は出荷の入口（チャンクを含む）を評価する。
 
 ### 確信の低い点
 

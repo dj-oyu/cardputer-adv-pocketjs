@@ -251,12 +251,25 @@ if(POCKET_HEAPPROBE)
     # of heap. Generated into flash rather than patched into a DRAM copy at
     # run time: a 32 KB copy held through the evaluation took the room the
     # Kasane frame needs ("frame allocation failed"), a failure of its own.
-    # These variants (spread, flat, split, load3/4) are made from DERBY WATCH
-    # as one script, frozen before it became chunks (e15e6eb); the "derby"
-    # variant runs the shipped entry, chunks and all.
-    set(_hp_derby "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/derby_v0/derby_watch.js")
+    # These variants (spread, flat, split, load3/4) are made from the shipped
+    # DERBY WATCH joined into one script at configure time
+    # (tools/heapprobe_derby.py: the entry and its chunks, the prog chunk's
+    # @shiki functions removed as the build does; Node, which DERBY's @shiki
+    # needs anyway). They were made from a copy frozen before the game became
+    # chunks (apps/heapprobe/derby_v0, e15e6eb) until Shiki v2.0 removed the
+    # float VM that copy drew with. The "derby" variant runs the shipped
+    # entry, chunks and all.
+    find_program(POCKET_NODE node)
+    set(_hp_derby "${CMAKE_CURRENT_BINARY_DIR}/hp_src/derby_watch.js")
+    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_derby.py" "${POCKET_NODE}" "${_hp_derby}"
+                    RESULT_VARIABLE _hp_rc)
+    if(NOT _hp_rc EQUAL 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: tools/heapprobe_derby.py failed (it needs Node on PATH)")
+    endif()
+    file(GLOB _hp_derby_srcs "${CMAKE_SOURCE_DIR}/apps/derby/*.js" "${CMAKE_SOURCE_DIR}/apps/derby/chunks.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_hp_derby_srcs}
+                 "${CMAKE_SOURCE_DIR}/tools/heapprobe_derby.py")
     set(_hp_spread "${CMAKE_CURRENT_BINARY_DIR}/heapprobe_derby_spread.js")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hp_derby}")
     file(READ "${_hp_derby}" _hp_src)
     string(FIND "${_hp_src}" "'a d e s r 1 , / tab'.split(' ')" _hp_at)
     if(_hp_at LESS 0)
@@ -319,7 +332,8 @@ if(POCKET_HEAPPROBE)
     list(APPEND POCKET_APP_CHUNK_LISTS "${_hp_imp}/imp_chunks.txt"
          "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/import_chunks.txt")
     # Precompiled DERBY WATCH, if the host has made it (WSL:
-    #   python3 tools/vmtest/compile_peak.py apps/heapprobe/derby_v0/derby_watch.js --write .cache/compile_peak/derby.bc)
+    #   python3 tools/heapprobe_derby.py node .cache/compile_peak/derby_watch.js
+    #   python3 tools/vmtest/compile_peak.py .cache/compile_peak/derby_watch.js --write .cache/compile_peak/derby.bc)
     # from this same quickjs.c. Absent: the derby-bc variants report no loader.
     set(_hp_bc "${CMAKE_SOURCE_DIR}/.cache/compile_peak/derby.bc")
     if(EXISTS "${_hp_bc}")
