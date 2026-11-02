@@ -145,3 +145,32 @@ retw.n
 - **MEGADEMO のステップは振り分けが支配している。** 1 ステップ 94〜118 サイクルは、命令ごとの床（57〜100 サイクル、§8 の `CB shiki` の行）にほぼ等しい。DERBY は線・模様の線を描く命令が多く、1 ステップが重い（129〜366 サイクル）。
 - **スカラーの JIT の見込み（推定）:** 振り分けをなくして 1 ステップを 30〜40 サイクル前後にできれば、MEGADEMO で 1 フレーム 約 1.5〜2.3 ms（ターンの 15〜25%）、DERBY で 約 0.5〜1.3 ms（5〜10%）。描画の命令（`LINE`・`LINE_PATTERN`）そのものの仕事は残る。
 
+
+## 10. 命令の内訳（host、2026-11-02）
+
+スカラーの JIT が何を inline にすべきかを決めるため、実行された命令を数えた。`-DKSN_SHIKI_OPSTATS` で `ksn_shiki_draw_index` が命令ごとに数え、終了時に `SHIKI_OPSTATS` を stderr へ出す（本番のビルドには入らない）。host のハーネスへは環境変数 `KSN_HOST_CFLAGS` で渡す。
+
+```bash
+KSN_HOST_CFLAGS=-DKSN_SHIKI_OPSTATS python3 tools/kasane_contract/run_megademo_app_host.py
+KSN_HOST_CFLAGS=-DKSN_SHIKI_OPSTATS python3 tools/games/run_derby.py   # 成功時は stderr を捨てるので、続けて下を直接走らせる
+.cache/derby_host/asan/test-derby 2>&1 >/dev/null | grep SHIKI_OPSTATS
+```
+
+数はハーネスの台本全体の合計で、実機の 1 フレームの配分そのものではない（host の実測、比率の目安）。
+
+| 命令 | MEGADEMO | DERBY |
+| --- | ---: | ---: |
+| `ADD` | 34% | 25.9% |
+| `MUL` | 36% | 24.6% |
+| `SET` | 1.8% | 10.3% |
+| `INPUT` | 2.4% | 9.1% |
+| `SUB` / `NEG` / `SHIFT` | 4% / – / 2.6% | 1.2% / 0.5% / 1.7% |
+| `END` / `REPEAT` / `REPEAT_REG` / `BREAK_IF_GT` | 5% / – / – / – | 4.0% / 0.3% / 0.4% / 0.5% |
+| `SIN` | 6% | 2.8% |
+| `MOVE` | 2% | 7.0% |
+| `LINE` / `LINE_C` | 3.5% / 2% | 2.3% / 7.3% |
+
+（DERBY は 51,377,614 ステップ。– は 0.5% 未満。）
+
+- **算術と制御（`SET`・`INPUT`・`ADD`・`SUB`・`NEG`・`MUL`・`SHIFT`・ループ）で、MEGADEMO の約 88%、DERBY の約 79% のステップ。** スカラーの JIT はここを inline にし、残り（`SIN`・`MOVE`・`LINE*`・`EACH`/`FETCH` など）は C の関数を呼ぶか、インタプリタへ戻る。
+- DERBY は `MOVE`・`LINE_C` が 14% あり、§9 で 1 ステップが重い理由と合う。描画の命令の中の仕事は JIT では減らない。

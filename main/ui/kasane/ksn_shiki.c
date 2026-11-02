@@ -898,6 +898,24 @@ ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,
     return ksn_shiki_draw_fixed(plan,in,plan->inputs,vm,out);
 }
 
+#ifdef KSN_SHIKI_OPSTATS
+/* Host profiling only (docs/kasane/shiki-jit.md sec.10): how often each op
+ * runs over a whole harness run, printed at exit. */
+#include <stdlib.h>
+static unsigned long long opstat[64];
+static void opstat_print(void){
+    unsigned long long all=0;
+    for(unsigned k=0;k<64;k++)all+=opstat[k];
+    fprintf(stderr,"SHIKI_OPSTATS total %llu\n",all);
+    for(unsigned k=0;k<64;k++)if(opstat[k])
+        fprintf(stderr,"SHIKI_OPSTATS op %u %llu %.1f%%\n",k,opstat[k],100.0*(double)opstat[k]/(double)all);
+}
+void ksn_shiki_opstat(unsigned op){
+    static int once;
+    if(!once){once=1;atexit(opstat_print);}
+    opstat[op&63]++;
+}
+#endif
 ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                       ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     return ksn_shiki_draw_index(plan,inputs,n,0,vm,out);
@@ -914,6 +932,9 @@ ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *
         if(vm->steps==KSN_SHIKI_STEPS)return KSN_SHIKI_LIMIT;
         vm->steps++;
         const ksn_shiki_inst *i=&plan->code[pc];
+#ifdef KSN_SHIKI_OPSTATS
+        ksn_shiki_opstat(i->op);
+#endif
         unsigned next=pc+1;
         switch(i->op){
         case KSN_SHIKI_SET: r[i->dst]=i->imm; break;
