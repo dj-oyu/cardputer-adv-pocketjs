@@ -1,0 +1,87 @@
+# Shiki v2.0 after the SLOW review (a87299f) with the vector instructions on PIE
+# by default (2b4dbc9), device runs, firmware 2b4dbc9 (sha256 3a66cccb...),
+# 2026-11-02. Broker app_session jobs, no input (attract/demo).
+
+## local.shikiapi (v2p-shikiapi-2b4dbc9-b, 30 s)
+I (186401) app: MEM free=103560 largest=31744 js=42824 frames=0
+I (186473) js: SA END pass=76 fail=0
+
+## local.cyclebench (v2p-cyclebench-2b4dbc9, 60 s): C model vs PIE on this build
+I (236395) js: CB BEGIN 78 BUILD 1 3a66cccba47c8322
+I (240630) js: CB shiki check check tail same model=84700102/1 pie=84700102/1 v1[0]=30000/30000
+I (240698) js: CB shiki check check fields2 same model=a9fafb37/1 pie=a9fafb37/1 v1[0]=-1000/-1000
+I (240765) js: CB shiki check check record3 same model=522ef56e/1 pie=522ef56e/1 v1[0]=0/0
+I (240835) js: CB shiki check check sat40 up same model=75a76fc6/1 pie=75a76fc6/1 v1[0]=32767/32767
+I (240902) js: CB shiki check check sat40 down same model=8a9d6c4d/1 pie=8a9d6c4d/1 v1[0]=32767/32767
+I (240967) js: CB shiki check check writeback same model=a2bff0d2/1 pie=a2bff0d2/1 v1[0]=31250/31250
+I (241035) js: CB shiki check check accset same model=7f2eabfd/1 pie=7f2eabfd/1 v1[0]=-32768/-32768
+I (241102) js: CB shiki check check shift32 same model=49cedac6/1 pie=49cedac6/1 v1[0]=9/9
+I (241166) js: CB shiki check check unaligned same model=1b9f2642/1 pie=1b9f2642/1 v1[0]=0/0
+I (241241) js: CB shiki check check affine128 same model=5f67edad/1 pie=5f67edad/1 v1[0]=80/80
+I (241299) js: CB shiki draw empty pie=0 cy=308 us=1.3 steps=1 segs=0
+I (241372) js: CB shiki draw affine128 scalar pie=0 cy=183798 us=765.8 steps=1926 segs=128
+I (241435) js: CB shiki draw affine128 vector pie=0 cy=65338 us=272.2 steps=215 segs=128
+I (241501) js: CB shiki draw affine128 vector pie=1 cy=45375 us=189.1 steps=215 segs=128
+I (241569) js: CB shiki draw lines100 scalar pie=0 cy=71435 us=297.6 steps=401 segs=100
+I (241635) js: CB shiki draw lines100 emit pie=0 cy=18267 us=76.1 steps=1 segs=100
+I (241702) js: CB END 78
+# All 10 checks agree. affine128 vector: C model 272.2 us, PIE 189.1 us (-31%).
+# Same ratio as f505b0e (248.8 / 169.4 us); the absolute values moved with
+# the build (instruction cache alignment, CLAUDE.md).
+
+## DERBY WATCH (v2p-derby-2b4dbc9, 90 s): paddock, demo race to FINISH, photo, result, paddock
+I (327159) pocket.app: APP_LOAD prog bytes=2601 compile_us=9213 run_us=821 used=33988>36556>39752
+I (327218) pocket.app: APP_LOAD view bytes=12419 compile_us=47008 run_us=9364 used=39752>57396>73988
+I (327268) pocket.app: APP_LOAD scene bytes=9968 compile_us=46336 run_us=2103 used=73988>86056>89364
+I (327277) pocket.app: APP_LOAD pan bytes=1215 compile_us=6199 run_us=240 used=89364>90604>90568
+I (327322) pocket.app: APP_LOAD play bytes=7503 compile_us=29156 run_us=13947 used=90568>97752>101412
+I (327340) js: DERBY LOADED points=900 race=1
+I (327342) app: MEM free=48012 largest=31744 js=97460 frames=0
+I (342360) pocket.app: APP_LOAD demo bytes=742 compile_us=5811 run_us=260 used=107748>108976>108960
+I (342374) js: DERBY SCENE pad race=1000001 seed=F86F3F83 plans=12 reg=12
+I (345759) js: DERBY SCENE race race=1000001 seed=F86F3F83 plans=26 reg=26
+I (390019) js: DERBY FINISH race=1000001 seed=F86F3F83 order=8,1,5,3,4,6,7,2 ms=61349,61398,61581,61904,61998,62214,62251,62340 margin=NECK
+I (390024) js: DERBY SCENE photo race=1000001 seed=F86F3F83 plans=25 reg=27
+I (393745) js: DERBY SCENE res race=1000001 seed=F86F3F83 plans=12 reg=28
+I (414483) app: MEM free=206736 largest=69632 js=0 frames=2596
+# KASANE_PAINT turn_ms (30-frame averages) by camera:
+#   paddock 4.85-4.95 (render 7.8-7.9), WIDE 1 7.3-10.5, WIDE 8.80-9.91,
+#   FIELD 8.90-9.11, WIDE 2 9.52-10.85, CLOSE 7.81-11.04, VISION 10.59-10.85,
+#   WIDE 3 10.64-11.12, HEAD ON 7.54, FINISH 7.51-8.76, photo 8.61, result 4.47-6.04
+
+## MEGADEMO before the act2 split (2b4dbc9, a87299f and e7b6d28 all the same): did not start
+# v2p-mega-2b4dbc9 (after DERBY), v2p-mega-2b4dbc9-d (fresh boot), v2p-mega-a87299f-b,
+# v2p-mega-e7b6d28-b (each just after a flash): the same failure on all three builds,
+# so the heap's layout moved, not the code (e7b6d28 had loaded it at 08:40 the same day).
+I (86754) shiki: SHIKI_HEAP open bytes=49152
+I (86770) pocket.app: APP_LOAD act1 bytes=1624 compile_us=6522 run_us=1058 used=21912>24092>25376
+W (86857) pocket.app: APP_LOAD act2 failed chunk 'act2' did not compile: out of memory
+E (86861) app: OOM n=1 first_req=21760 used=75100
+# The guest was at 75 KB of its 160 KiB: the system heap had no free block of
+# 21,760 B. Boot log (v2p-restart-2b4dbc9): largest free block 122,880 B until
+# the automatic time sync brings Wi-Fi up at ~11 s, 69,632 B after it.
+
+## MEGADEMO (v2p-mega-f63ca75-b, 90 s, firmware f63ca75 = 2b4dbc9 + the act2 split): 2,597 frames
+I (82474) shiki: SHIKI_HEAP open bytes=49152
+I (82490) pocket.app: APP_LOAD act1 bytes=1624 compile_us=6584 run_us=1075 used=21900>24076>25340
+I (82593) pocket.app: APP_LOAD act2 bytes=25446 compile_us=90116 run_us=10921 used=25340>42964>47400
+I (82649) pocket.app: APP_LOAD set bytes=14250 compile_us=51890 run_us=960 used=48396>66336>68156
+I (82699) pocket.app: APP_LOAD brief bytes=11570 compile_us=47470 run_us=995 used=68156>77628>80264
+I (82735) pocket.app: APP_LOAD wake bytes=8652 compile_us=31224 run_us=2897 used=80264>87588>94012
+I (82749) pocket.app: APP_LOAD view bytes=3767 compile_us=8247 run_us=3595 used=94012>97332>101304
+I (82765) pocket.app: APP_LOAD loop bytes=3363 compile_us=10984 run_us=2489 used=101304>103964>104148
+I (82771) app: MEM free=36872 largest=23552 js=102744 frames=0
+I (108795) js: MEGADEMO SCENE CORE tier=2 plans=8 freed=15 registered=45
+I (143216) js: MEGADEMO SCENE CORE tier=2 plans=8 freed=15 registered=92
+I (169895) app: MEM free=206736 largest=69632 js=0 frames=2597
+# No DEGRADE, OOM or exception. KASANE_PAINT turn_ms (30-frame averages), by scene:
+#   WAKE 15.54-15.69 (render 3.9-4.3), NEWS 4.39-10.77, TWIST 7.64-13.91,
+#   ZENITH 6.15-7.36, CORE 7.82-12.99 (render up to 11.4), LOST 3.65-4.84
+
+## BIG WAVE (v2p-bigwave-f63ca75, 60 s, attract mode): 1,791 frames (29.9 fps)
+I (222436) shiki: SHIKI_HEAP open bytes=49152
+I (222599) js: BIGWAVE READY plans=6 tone=true
+I (222606) app: MEM free=73800 largest=31744 js=71808 frames=0
+I (282679) app: MEM free=206736 largest=69632 js=0 frames=1791
+# turn_ms 8.24-9.91, render_ms 4.36-4.77, send_ms 1.35-1.65
+# The device was left on f63ca75 (the branch's head).
