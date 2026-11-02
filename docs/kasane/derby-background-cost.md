@@ -336,12 +336,12 @@ j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191)
 
 ### 見る資料（ユーザー向け、評価は書かない）
 
-| ファイル | 中身 |
+| 再生成する比較 | 条件 |
 | --- | --- |
-| [`docs/apps/derby-crowd-checker-preview.png`](../apps/derby-crowd-checker-preview.png) | チェッカーボード。行: LIGHT/MID/HEAVY × WIDE/FIELD。列: (a) 今、(b) 偶数フレーム、(c) 奇数フレーム、(e) (b)(c) の平均（線形光で 50% ずつ、残像の近似）。(b)(c) が隣り合う列で (d) の並べた画を兼ねる。x0 = 700 m、瞬き 0、3 倍 |
-| [`docs/apps/derby-crowd-dots-preview.png`](../apps/derby-crowd-dots-preview.png) | 同じ並びで、点だけ交互の形 |
-| [`docs/apps/derby-crowd-still.gif`](../apps/derby-crowd-still.gif) | 連続 8 フレーム（t = 0..7、33 ms/コマで繰り返し）、カメラ固定。列: 今・チェッカーボード・点だけ。行は上と同じ、2 倍 |
-| [`docs/apps/derby-crowd-pan.gif`](../apps/derby-crowd-pan.gif) | 同じく、カメラがレースの速さ（16 m/s）でパンする |
+| 旧host比較（再生成対象） | チェッカーボード。行: LIGHT/MID/HEAVY × WIDE/FIELD。列: (a) 今、(b) 偶数フレーム、(c) 奇数フレーム、(e) (b)(c) の平均（線形光で 50% ずつ、残像の近似）。(b)(c) が隣り合う列で (d) の並べた画を兼ねる。x0 = 700 m、瞬き 0、3 倍 |
+| 旧host比較（再生成対象） | 同じ並びで、点だけ交互の形 |
+| 旧host比較（再生成対象） | 連続 8 フレーム（t = 0..7、33 ms/コマで繰り返し）、カメラ固定。列: 今・チェッカーボード・点だけ。行は上と同じ、2 倍 |
+| 旧host比較（再生成対象） | 同じく、カメラがレースの速さ（16 m/s）でパンする |
 
 画は host の float32 の基準で描いた観客席と観客だけで、空・芝・柵・馬は無い（背景は単色）。LCD の応答や実機の 30 fps のむらは入っていない。GIF の 1 コマは 30 ms（GIF の遅延は 10 ms 単位で、33.3 ms を表せない）で、8 コマで繰り返すので、瞬き（8 フレームごと）は GIF の中では起きない。
 
@@ -429,10 +429,10 @@ y は区画の始まりの 1/Z' を区画全体に使う誤差で、最前列（
 
 ### 見る資料（評価は書かない）
 
-| ファイル | 中身 |
+| 再生成する比較 | 条件 |
 | --- | --- |
-| [`docs/apps/derby-crowd-look-preview.png`](../apps/derby-crowd-look-preview.png) | 行: LIGHT 横見 300・800 m、LIGHT 首振り 300・800 m、MID（同じ 4 行）、HEAVY（同じ 4 行）。列: 今、A4、A2、A1、B、C、D、E、F。t = 0、3 倍 |
-| `docs/apps/derby-crowd-look-<ID>.gif`（A4・A2・A1・B・C・D・E・F） | 連続 8 フレーム（30 ms/コマ）、先頭がレースの速さ（16 m/s）で進む。列: 今 ｜ その候補、行は上と同じ、2 倍 |
+| 旧host比較（再生成対象） | 行: LIGHT 横見 300・800 m、LIGHT 首振り 300・800 m、MID（同じ 4 行）、HEAVY（同じ 4 行）。列: 今、A4、A2、A1、B、C、D、E、F。t = 0、3 倍 |
+| `.cache/derby-crowd-look-<ID>.gif`（A4・A2・A1・B・C・D・E・F） | 連続 8 フレーム（30 ms/コマ）、先頭がレースの速さ（16 m/s）で進む。列: 今 ｜ その候補、行は上と同じ、2 倍 |
 
 ```sh
 node tools/games/pancost/crowd_look.mjs table|interp     # 費用の表・首振りの補間誤差
@@ -477,10 +477,10 @@ MID 横見 800 m の内訳（線分・ステップ・draw）: B 219 線・2,527�
 
 見る資料:
 
-| ファイル | 中身 |
+| 再生成する比較 | 条件 |
 | --- | --- |
-| [`docs/apps/derby-crowd-bprime-preview.png`](../apps/derby-crowd-bprime-preview.png) | 行は上の一覧と同じ 12 場面。列: 今、B、B'1、B'2、B'3。t = 0、3 倍 |
-| `docs/apps/derby-crowd-bprime-<B1/B2/B3>.gif` | 連続 8 フレーム（30 ms/コマ、16 m/s）。列: 今 ｜ その変形、2 倍 |
+| 旧host比較（再生成対象） | 行は上の一覧と同じ 12 場面。列: 今、B、B'1、B'2、B'3。t = 0、3 倍 |
+| `.cache/derby-crowd-bprime-<B1/B2/B3>.gif` | 連続 8 フレーム（30 ms/コマ、16 m/s）。列: 今 ｜ その変形、2 倍 |
 
 ```sh
 node tools/games/pancost/crowd_look.mjs table --set bprime     # 費用の表（B との比も）

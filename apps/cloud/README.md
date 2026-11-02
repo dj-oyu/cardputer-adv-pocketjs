@@ -16,7 +16,7 @@
 
 8個までのlobeを使う[汎用前面ブレンド](../../docs/api/blended-surfaces.md)は雲専用rendererではない。薄い縁や複雑な内部密度、体積散乱、設定図の絵のような細かなfluffまでは再現していない。改善前後の画像を比較して調整中で、目標品質の受入済みとはしない。
 
-[初版の改善前後と301sample動作画像、検証記録](../../docs/perf/cloud-quality-v1.md)を参照。どちらもHOST SIMULATIONであり、実機captureではない。
+[初版の判断と検証記録](../../docs/perf/cloud-quality-v4.md#過去候補の判断と測定)を参照。host比較の画像は再生成物として追跡を終了した。実機報告は対象SHAごとに分けて残す。
 
 ## 操作と検証
 
@@ -33,8 +33,8 @@ CHARACTER_HEAP_LIMIT=163840 CHARACTER_NO_EAGER_GC=1 CHARACTER_FULL_REFERENCE=1 p
 
 動的核の[契約](../../docs/api/ayatsuri-follow-core.md)と[容量/数値検証](../../docs/perf/dynamic-follow-integration.md)を参照。clockは引き続きapp所有で、描画再試行の同時刻ではq/v/位相を進めない。大きなseekは1200 step以内のreplay。外乱/status/resetの詳細診断はactor生成前に`dynamic_debug`を明示ロードし、通常起動ではロードしない。顔や補助形状の解析的表現は残り、全演技の動的化や一般IKの完成ではない。
 
-[顔比率保持と彩雲の次段改善・3512529との比較](../../docs/perf/cloud-quality-v2.md)も参照。
+[顔比率保持と彩雲の次段改善・3512529との比較](../../docs/perf/cloud-quality-v4.md#過去候補の判断と測定)も参照。
 
-[cap境界の陰影補正・柔らかな量感のローカル比較](../../docs/perf/cloud-quality-v3.md)では、32a3336を基準にnative修正と材質調整を分離して評価する。公開候補のCI/実機結果とは区別する。
+[cap境界の陰影補正・柔らかな量感のローカル比較](../../docs/perf/cloud-quality-v4.md#過去候補の判断と測定)では、32a3336を基準にnative修正と材質調整を分離して評価する。公開候補のCI/実機結果とは区別する。
 
 [喜び/驚きの演技比較とTRS再利用](../../docs/perf/cloud-quality-v4.md)では、55f025fと同条件で表情・彩雲を比較し、163840 Bのhost門を維持する。

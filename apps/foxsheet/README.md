@@ -2,8 +2,6 @@
 
 `local.foxsheet` / typed catalog名 **FOX SHEET**。固定3D形状・材質・topologyをcompiled native資産として直接使う比較候補。既定のFOX FACEとその4表情は置き換えない。画像パーツ版や完成した狐キャラクターではない。
 
-![同条件host比較。上:旧試作、下:選択候補](../../docs/apps/fox-sheet-before-after-host.png)
-
 画像は240×135の**ホストシミュレーション**。物理LCDの受入ではない。顎の丸みと白目は前進したが、白橙の横帯・狭い口線・頬毛・浅い眼窩・斜めのskull接合は未達。中立表情・yaw／世界光の操作に限定する。頂点表情morphや自律演技を完成したとは扱わない。
 
 ## 操作

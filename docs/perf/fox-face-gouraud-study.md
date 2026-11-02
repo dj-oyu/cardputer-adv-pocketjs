@@ -8,8 +8,6 @@
 
 設定画（Library `libfile_6be7d8a574e88191a1b4c8bb83517684`、取得済みPNGを実見）の目標は、眼が収まる眼窩、頬から前へ張り出す口吻、そこに付く小さい鼻である。既存v4の別volumeの白頬を、30頂点/40三角形の一面へまとめた初案は白ヒゲの団子感を弱めたが、面ごとのshade→単色fillにより硬い三角帯になった。
 
-![因子を分けたhost画像。各行yaw -35/0/+35、実機画像ではない](../apps/fox-face-factor-host.png)
-
 この一覧は**Gouraud追加前のローカル比較**であり、複数段階のソースを経た調査記録。各画像は240×135の実QuickJS/native host出力。各条件で同じorthographic camera/world lightを使う。
 
 | 条件 | 変えるもの | 観察と採否 |
@@ -33,8 +31,6 @@
 - coverage/weight/maskはwide参照演算を保ち、bounded RGB565 channelの補間だけF32。色誤差とcoverage/選択を分けて検証する。
 
 Gouraudを使うと同じ面数で暗い三角帯が減ることを作者・独立画像レビューが確認した。下顎/光と反対側の暗さは残っており、白飛ばしではない。**描画機能を採用候補へ進める根拠**であり、モデルの製品置換には至っていない。白橙の直線帯、丸い盾状の輪郭、眼窩の浅さ、短い口吻、小さい鼻口が残る。
-
-![最終native hostの同source比較。元fill/補間/補間＋眼、各yaw -35/0/+35。実機画像ではない](../apps/fox-face-gouraud-host.png)
 
 | 最終m32同source（各78frame×2 process） | 元fill | Gouraud | Gouraud＋眼 |
 | --- | ---: | ---: | ---: |

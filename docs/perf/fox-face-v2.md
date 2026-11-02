@@ -41,7 +41,7 @@ python3 tools/kasane_contract/run_fox_app_host.py --capture-dir .cache/fox-v2-fi
 
 64bit ASan/UBSanも237frame×2 PASS、要求peak199124B/単一10632B、拒否0、終了guest0。両profileともsource依存hashの試験前後不変を確認した。これはcapなしの64bit安全性試験で、device容量やESP heapの実測ではない。
 
-[基準25node](../apps/fox-face-host.png)、[v2の同条件12枚](../apps/fox-face-v2-host.png)、[v2のpitch/背面光12枚](../apps/fox-face-v2-pitch-backlight.png)を保存した。残りの表情pitch captureを含む全42枚とsource hashはhost試験の結果folderへ出す。CIの指定済みgenerated artifact pathではhidden `.cache`も保存対象にし、前段の未アップロードを解消する。
+基準25node、v2の同条件12枚、v2のpitch/背面光12枚を保存した。残りの表情pitch captureを含む全42枚とsource hashはhost試験の結果folderへ出す。CIの指定済みgenerated artifact pathではhidden `.cache`も保存対象にし、前段の未アップロードを解消する。
 
 ## 視覚判断と未達
 

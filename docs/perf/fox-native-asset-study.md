@@ -2,8 +2,6 @@
 
 固定topology/materialを既存Modelへ移し、同じ狐でメモリと画質を比較した。**移行だけの条件は全78frameの画像hashを維持し、m32 guest会計peakを161408→131048 Bへ削減**。これは同じnative binary・同じ160 KiB上限・通常GCでのhost測定で、ESP実測値やGC時間の削減率ではない。
 
-![要因別host比較](../apps/fox-native-asset-factors-host.png)
-
 各行は同じyaw −35/0/+35°・固定world light・240×135。上からJS定義の対照、native移行のみ、眼のみ、毛色のみ、形状のみ、組合せ。画像は**ホストシミュレーション**であり実機captureではない。
 
 ## 採否

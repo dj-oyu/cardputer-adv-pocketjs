@@ -63,8 +63,6 @@ source/view/光/閾値を固定し、49頂点版のFAILを残したまま65頂�
 | 49 vertices | 2640 B | 3116 B | 137 | yaw ±35°でdepth/correspondence FAIL |
 | 65 vertices | 3656 B | 4580 B | 200 | 固定した全6 caseでPASS |
 
-![人工sourceとnative画像・depth差の比較](../apps/asset-native-image-host.png)
-
 各paneは240×135のまま。列はsource参照、native49、49のdepth差、native65、65のdepth差。
 行は正面、camera yaw−35°、+35°。depth色は緑0から赤.01 source metre。
 これはhost simulation画像であり、実機captureや狐の設定画ではない。

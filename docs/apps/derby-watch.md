@@ -1265,6 +1265,6 @@ q24 の段階 3。WIDE を、コースの手前に立つ 3 台の首振りカメ
 
 - plan は `crowd` 1 本（56 命令）で横見と首振りを描く。同時の plan は 30 → 29/32、首振りの plan は `prail`・`t0`・`t1`・`hl` の 4 本。
 - 見た目の値は `KN`（`derby_prog.js`）の 1 か所: 段階ごとの頭と体の 24 ビットの模様、`KN[3]` に肌・服 2 色・段ごとのずれ・空席の色・1 m あたりのセル数（[apps/derby/README.md](../../apps/derby/README.md) の「観客」）。
-- 画と GIF: [derby-crowd-p24-preview.png](derby-crowd-p24-preview.png)・[derby-crowd-p24.gif](derby-crowd-p24.gif)（host。左が以前の市松、右が P24）。
+- 画と GIF: 旧host比較（再生成対象）（host。左が以前の市松、右が P24）。
 - 実機の時間とメモリは [derby-pan-memory.md](derby-pan-memory.md) §13、命令の設計と帯の単価は [crowd-primitives-design.md](../kasane/crowd-primitives-design.md)。
 

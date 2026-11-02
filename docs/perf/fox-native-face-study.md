@@ -30,7 +30,7 @@ AYNM本体は3148B、SHA256 `3c296648c459ff0cc1b03849febfbd93f96e8cf64345ede2c28
 
 目の最終調整前には、全25node native版と元JS25node版の12枚が全画素一致した。最終調整は意図的な画質差で、開眼を尖った菱形から8点の丸い開口へ変更し、開眼時の硬い屋根状の瞼線を消した。全smile時の瞼端点と、瞼以外のrig制御は対照と一致させる。これ以後の画像を旧版との全画素一致とは呼ばない。
 
-同じ条件の[調整前12枚](../apps/fox-face-host-before.png)と[調整後12枚](../apps/fox-face-host.png)を保存した。いずれもnative host描画を2倍に拡大した画像で、実機captureではない。最終版は32bitで要求peak126992B/単一8047B、64bit ASan/UBSanでは要求peak176992B/単一10632B（capなし）。両profileとも231frame×2、差分/全描画、反復画像一致、解放guest0。64bit量を実機予算へ転用しない。
+同じ条件の調整前12枚と調整後12枚を保存した。いずれもnative host描画を2倍に拡大した画像で、実機captureではない。最終版は32bitで要求peak126992B/単一8047B、64bit ASan/UBSanでは要求peak176992B/単一10632B（capなし）。両profileとも231frame×2、差分/全描画、反復画像一致、解放guest0。64bit量を実機予算へ転用しない。
 
 nativeの`readProjection`は開口ごと32B同期copy、`submitClipped`は固定typed tableを同期snapshotする。bound nodeは可視ellipsoidに限定し、閉眼はEMPTYで扱う。一般Z bufferや頭・頬との自動遮蔽は追加していない。
 

@@ -250,8 +250,6 @@ fps は「背景なしの固定費 27.6 ms ＋ 背景」が 33.3 ms を超えた
 
 ### 画像（host の描画、見た目の評価はしない）
 
-![観客の 4 通り](derby-crowd-variants-preview.png)
-
 上から: 今の観客（MID・WIDE の横見、`T.crowd` を float32 で再現）／型付きのタイル（ランダムウォークの折れ線、3 種を柱の番号の hash で選ぶ）／今の点を 1/4 に間引き／太い帯（1 行 2 本）。[`tools/games/pancost/crowd_preview.py`](../../tools/games/pancost/crowd_preview.py) が作る（240×40 の帯を 3 倍）。実機の画面ではない。
 
 ## 5. 条件と出所

@@ -43,10 +43,6 @@
   - 層ごとの JS（`flo`・`%`・パンの計算）を 2〜3 フレームに 1 回にする: 約 −0.1〜0.2 ms。
   - 帯を 1 本の plan の中で上下とも 1 回の draw にまとめるのは、すでにしている。
   - これらを全部入れて、ようやく 1.0 ms 前後（推定）。見た目の判断が要るので入れていない。
-- **画**:
-  - 削る前と後の並置: [derby-finish-fx-variants.png](derby-finish-fx-variants.png)・[derby-finish-fx-headon-variants.png](derby-finish-fx-headon-variants.png)。列は「効果なし・削る前（dce2e78）・削った後」。
-  - GIF: [derby-finish-fx-before.gif](derby-finish-fx-before.gif)・[derby-finish-fx.gif](derby-finish-fx.gif)・[derby-finish-fx-headon-before.gif](derby-finish-fx-headon-before.gif)・[derby-finish-fx-headon-after.gif](derby-finish-fx-headon-after.gif)。
-  - 脚の補間: [derby-finish-fx-legs.png](derby-finish-fx-legs.png)・[off](derby-finish-fx-legs-off.gif)・[on](derby-finish-fx-legs-on.gif)。
 
 ## 結論
 
@@ -232,17 +228,9 @@
 
 ## 7. 画と GIF（host、見た目の評価はしない）
 
-画は MID の台本の最初の FINISH（tick 2215・2226・2238）と HEAD ON（2171・2183・2194）で、デモのレースなので DEMO の文字が出ている。
+過去候補の画像/GIFは追跡を終了した。採用はFINISH D（馬場固定・上昇・範囲あり）とHEAD ON ①（馬の後ろのみ）。A〜C・HEAD ON ②〜④は出荷コードに持たない。脚の位相はスロー中だけ補間する。費用・回帰条件・生成元は§1〜§6に残す。
 
-- **調整前と後**:
-  - FINISH: [derby-finish-fx-variants.png](derby-finish-fx-variants.png)。行が 3 フレーム、列が「効果なし・調整前（B、全画面）・調整後（D、範囲あり）」。
-  - GIF: [derby-finish-fx-before.gif](derby-finish-fx-before.gif)・[derby-finish-fx.gif](derby-finish-fx.gif)（調整後）。
-  - 代表フレーム（調整後、等倍）: [derby-finish-fx-frame1.png](derby-finish-fx-frame1.png)・[frame2](derby-finish-fx-frame2.png)・[frame3](derby-finish-fx-frame3.png)。
-  - HEAD ON: [derby-finish-fx-headon-variants.png](derby-finish-fx-headon-variants.png)（列は同じ）。GIF: [derby-finish-fx-headon-before.gif](derby-finish-fx-headon-before.gif)・[derby-finish-fx-headon-after.gif](derby-finish-fx-headon-after.gif)。
-- **脚の補間**: [derby-finish-fx-legs.png](derby-finish-fx-legs.png)（4 フレーム、左が補間なし・右があり）。GIF: [derby-finish-fx-legs-off.gif](derby-finish-fx-legs-off.gif)・[derby-finish-fx-legs-on.gif](derby-finish-fx-legs-on.gif)（16 フレーム、8 fps）。
-- **調整前のパターン比較**（ser-native をマージする前のコードの画）:
-  - FINISH: [A](derby-finish-fx-A.gif)・[B](derby-finish-fx-B.gif)・[C](derby-finish-fx-C.gif)・[D](derby-finish-fx-D.gif)
-  - HEAD ON: [①](derby-finish-fx-headon-1.gif)〜[④](derby-finish-fx-headon-4.gif)
+再現対象はMID台本のFINISH tick2215/2226/2238、HEAD ON tick2171/2183/2194。過去の形を再比較する場合は冒頭の候補SHAを使用し、生成物は`.cache`に出力する。
 
 ## 省略したもの（実機の時間を 30 分以内にするため。実機の占有は合計約 11 分）
 

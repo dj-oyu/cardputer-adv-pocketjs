@@ -4,7 +4,7 @@
 
 ## 1面の比較
 
-[9枚の比較](../apps/material-region-surface-host.png)は単色/既存UV band/平面hard/feather/光だけ/姿勢/非一様scale/spec-only旧/新。同じ面で斜めの色境界を作り、別球の陰影を足さずにfeatherできることを確認した。[61連番のAPNG](../apps/material-region-motion-host.png)は固定世界光でbody yaw −35→+35°を動かす1回再生の診断sweep。30 samples/sは再生設定で、実機FPSではない。
+9枚の比較は単色/既存UV band/平面hard/feather/光だけ/姿勢/非一様scale/spec-only旧/新。同じ面で斜めの色境界を作り、別球の陰影を足さずにfeatherできることを確認した。61連番のAPNGは固定世界光でbody yaw −35→+35°を動かす1回再生の診断sweep。30 samples/sは再生設定で、実機FPSではない。
 
 全て240×135の**HOST SIMULATION**を2倍表示し、実機captureではない。模様はbody-local qに固定され、光だけでは境界が動かない。shade前の色を混合し、normalとspecを1回評価する。spec-only旧/新の全画素は一致した。RGB565量子化や低解像度の境界品質を全条件で保証するものではなく、LCDの動き/画質は未受入。
 
@@ -14,8 +14,8 @@ WindowsとLinuxのO0/O2で実rendererを確認。基準C rendererへ同じ旧mod
 
 同じcamera/lightと4表情×yaw±35/0°、pitch±10°を比較した。
 
-- [mask-only](../apps/fox-local-plane-mask-host.png): 既存の頭のsurfaceに斜めの白領域だけ追加。白面は連続するが、前に残るcream頬と二重曲面/白帯が目立つ。
-- [mask-inset](../apps/fox-local-plane-inset-host.png): 同じmaskのまま左頬3lobeを頭内部へ退かせ、白い頭面を見せる。眼下の連続面は改善方向だが、口吻の丸い塊・対側白帯・口/顎の接合・眼窩構成は未達。[pitch/逆光](../apps/fox-local-plane-inset-aux.png)も確認した。
+- mask-only: 既存の頭のsurfaceに斜めの白領域だけ追加。白面は連続するが、前に残るcream頬と二重曲面/白帯が目立つ。
+- mask-inset: 同じmaskのまま左頬3lobeを頭内部へ退かせ、白い頭面を見せる。眼下の連続面は改善方向だが、口吻の丸い塊・対側白帯・口/顎の接合・眼窩構成は未達。pitch/逆光も確認した。
 
 領域は頭ellipsoidのみ。cream-face blend自体を複数材質化したわけではない。独立画像レビューも、機能は有望だが狐造形は未達と判定した。既定モデルへ試作を採用せず、29node/8開口/12clip対象/Instance arena9192Bを維持した比較fixtureを残す。
 
@@ -72,7 +72,7 @@ python3 tools/kasane_contract/run_fox_app_host.py --m32 --material-study mask-in
 
 ellipsoidの小実証に続き、既存cream-faceの最終blend depth上でcommon model-local平面を評価する新variantを追加した。[wire/単位/型の仕様](../api/material-regions.md#blendの共通面-新variant)を参照。lobeごとの単位球qで毛色を選ばず、同じnormalでalbedoだけを分ける。
 
-[同条件の片側比較](../apps/fox-blend-region-host.png)はHOST SIMULATION。列はv4基準／形状不変の共通平面／同平面と左外端lobe1個削除。正面neutral/smileとyaw±35°、固定光の同じframeを並べた。平面だけの案はgeometry/materialのsections1..7がbyte一致。別のinset案は左3lobesの位置・大きさも変えるため、色分け単独の効果と混ぜない。既定の製品fox assetは変更していない。
+同条件の片側比較はHOST SIMULATION。列はv4基準／形状不変の共通平面／同平面と左外端lobe1個削除。正面neutral/smileとyaw±35°、固定光の同じframeを並べた。平面だけの案はgeometry/materialのsections1..7がbyte一致。別のinset案は左3lobesの位置・大きさも変えるため、色分け単独の効果と混ぜない。既定の製品fox assetは変更していない。
 
 | m32、cap163840B、通常GC、同249frame×2/48画像 | v4同workload | planeのみ | plane＋inset | plane＋外端1lobe削除 |
 | --- | ---: | ---: | ---: | ---: |

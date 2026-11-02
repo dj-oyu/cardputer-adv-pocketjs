@@ -4,7 +4,6 @@
 
 ユーザーの要望: DERBY WATCH の観客は点（チェッカー、1 draw 523 µs・767 ステップ・66 点）で、規則正しい点にしか見えない。「線分が多いのが重いなら、それっぽいノイズで軽く描けないか」「画像を貼る／2〜3 コマのアニメ／上下に揺らせば客に見える」。
 
-
 ## 0. 本実装の結果（P24、ブランチ `vm/crowd-p24`、2026-10-01）
 
 ユーザーの決定で、観客席は **P24（模様線: 1 本の線に 24 ビットの模様と 2 色目）** にした。実機の数値は COM3 の実測、各 1 回。
@@ -16,8 +15,7 @@
 - **観客以外は変わらない**: host で観客の draw だけを外すと、全画素ハッシュが基準 45f309f と 3 段階とも一致。着順・時計・種・デモ・R 再生・オッズ・保存は全行一致。
 - **費用（実機、MID・HEAVY の VM draw + 帯描画の中央値の差、基準 → P24）**: 横見 WIDE −0.27 ms（MID）／−0.65 ms（HEAVY）、FIELD −0.53／−1.18 ms、首振りの直線 −0.54 ms（HEAVY）、楕円の首振り −0.38／−0.53 ms。fps は横見で変わらず（JS が律速）、楕円の首振りは 15.3 → 16.1 fps（`pk` の列を回す JS が消えたため）。
 - **メモリ**: 静的 DIRAM ±0、flash のコード +3,068 B・.rodata −656 B。ゲスト（host m32）は評価後 +292 B、評価のピーク +268 B、GC 後の最大 +184〜324 B。実機の評価の余裕は 22,810 → 22,670 B、レース中のゲスト最大は約 +200〜400 B（138,944 B、140,000 まで約 1.0 KB）。詳細は [derby-pan-memory.md](../apps/derby-pan-memory.md) §13。
-- 見る資料: [derby-crowd-p24-preview.png](../apps/derby-crowd-p24-preview.png)（12 場面、左が以前の市松、右が P24、3 倍）、[derby-crowd-p24.gif](../apps/derby-crowd-p24.gif)（8 フレーム）。生成は [`crowd_p24.mjs`](../../tools/games/pancost/crowd_p24.mjs)（アプリの plan と `KN` をそのまま使う）。
-
+- 過去の比較画像は追跡を終了した。12場面の一覧（旧市松／P24、3倍）と8フレームのGIFの生成は [`crowd_p24.mjs`](../../tools/games/pancost/crowd_p24.mjs)（アプリの plan と `KN` をそのまま使う）。
 
 ## 結論（試作のとき）
 
@@ -29,11 +27,11 @@
 
 ## 見る資料（評価は書かない）
 
-| ファイル | 中身 |
+| 再生成する比較 | 条件 |
 | --- | --- |
-| [`docs/apps/derby-crowd-prim-preview.png`](../apps/derby-crowd-prim-preview.png) | 行: LIGHT 横見 300・800 m、LIGHT 首振り 300・800 m、MID（同じ 4 行）、HEAVY（同じ 4 行）。列: 今（チェッカーの 1 フレーム）、P24 模様線（24 ビット）、PN ノイズ線、T タイル矩形。t = 0、3 倍 |
-| `docs/apps/derby-crowd-prim-P24.gif`・`-PN.gif`・`-T.gif` | 連続 8 フレーム（30 ms/コマ）、カメラが 16 m/s で進む。列: 今 ｜ その候補、行は上と同じ、2 倍。タイルは 2 フレームごとにコマが替わる（3 コマ） |
-| [`docs/apps/derby-crowd-prim-tiles.png`](../apps/derby-crowd-prim-tiles.png) | タイルの絵そのもの。行: LIGHT・MID・HEAVY、列: コマ 0・1・2、6 倍 |
+| 旧host比較（再生成対象） | 行: LIGHT 横見 300・800 m、LIGHT 首振り 300・800 m、MID（同じ 4 行）、HEAVY（同じ 4 行）。列: 今（チェッカーの 1 フレーム）、P24 模様線（24 ビット）、PN ノイズ線、T タイル矩形。t = 0、3 倍 |
+| `.cache/derby-crowd-prim-P24.gif`・`-PN.gif`・`-T.gif` | 連続 8 フレーム（30 ms/コマ）、カメラが 16 m/s で進む。列: 今 ｜ その候補、行は上と同じ、2 倍。タイルは 2 フレームごとにコマが替わる（3 コマ） |
+| 旧host比較（再生成対象） | タイルの絵そのもの。行: LIGHT・MID・HEAVY、列: コマ 0・1・2、6 倍 |
 
 場面・背景・窓は [`crowd_look.mjs`](../../tools/games/pancost/crowd_look.mjs)（[観客の見え方の候補](derby-background-cost.md)）と同じ。首振りは強制（800 m は実際のゲームでは横見になる位置）。色は仮の値。
 

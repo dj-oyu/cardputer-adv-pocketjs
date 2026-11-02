@@ -155,7 +155,6 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - **fps**: 首振り WIDE は 30 fps を割る（実機 MID 25.3〜25.5、HEAVY 24.6〜25.0 fps。JS のターン 20〜22 ms、横見の WIDE は 15.9 ms）。レースの絵の約 4 分の 1 が首振り。ユーザーの決定（q24）で、楕円コースまで入れてから fps の影響を見る（docs の derby-pan-memory.md §10・§11）。
 - **host の検査**: 首振りのフレームの全点を倍精度の厳密な投影と比べる（誤差 0.1 px 未満、実測の最大 0.075 px）。`DERBY_PAN=1e9` で首振りを止めると、横見の画素は首振りを入れる前と全構成で同じ。
 
-
 ## 列を C で（`pocket.derby`、2026-10-02）
 
 首振りの列（`ser()` と、その中の `ou()`・`lim()`・`inr()`、弦の端 `VE` と視野の弦 `VC`）は firmware の C（`main/pocket/pocket_derby.c`）にある。JS の `ser()` を倍精度の同じ演算順で写したもので、`draw` に渡す入力は JS とビット単位で同じ（host の oracle、`tools/games/derby_ser_oracle.js`）。画素と結果は変わらない。設計と実測は docs の [derby-ser-native.md](../../docs/apps/derby-ser-native.md)。
@@ -314,4 +313,4 @@ node tools/games/derby_corner.mjs app 4000  # アプリの楕円の補正が参�
   - 段の数は従来どおり段階ごとの 2 番目（LIGHT 2・MID 3・HEAVY 4）。
 - **位相の流し方**: 模様はコース上の位置（横見は柱 `j` から、首振りは弦の端のコース位置）に固定してあり、カメラが動くとスタンドと一緒に流れる。
 - 首振りでは、両端の奥行きが違う線を VM が 2・4・8 本の弦に割り、模様の間隔を奥ほど詰める。
-- 画と GIF: [derby-crowd-p24-preview.png](../../docs/apps/derby-crowd-p24-preview.png)・[derby-crowd-p24.gif](../../docs/apps/derby-crowd-p24.gif)（host。左が以前の市松、右が P24）。
+- 画と GIF: 旧host比較（再生成対象）（host。左が以前の市松、右が P24）。

@@ -2,8 +2,6 @@
 
 4acb68fの[設定図からの再設計](fox-reference-redesign.md)で残った尖頭と棚状下顔に対し、毛束の見かけ輪郭を頭蓋へ写す方法をやめ、造形の自由度を分けた。既定FOX FACE／FOX SHEETと実機023559fは変更していない。
 
-![旧案・新案・新案clayの同条件比較](../apps/fox-separated-native-host.png)
-
 全列yaw −35/0/+35°、同じcamera（zoom1.3、中心120/87）と固定世界光。実QuickJS／native rendererの**ホストシミュレーション**を最近傍2倍表示した。上段は旧案lit、中段は新案lit、下段は新案clay。実機captureやFPSの証拠ではない。
 
 ## 分けた意味と生成経路
@@ -13,8 +11,6 @@
 - 頬毛と前髪の輪郭は別の9三角形として作る。これらを頬の球体や滑らかな頭蓋の頂点に混ぜない。根元も上記支持域外に置く。
 
 数値はmodel-localの任意単位、x右・y下・zカメラ側。cameraのzoomでpixelへ投影する。SI単位や生体の忠実な形状ではない。解析場を頂点へサンプルし、法線を生成してnative資産へ格納する。三角形補間と共有頂点法線は解析場の支持境界やC1を厳密保存しないので、native全pixelの外頬不変とは主張しない。
-
-![無陰影・頭蓋のみ・毛束を含む輪郭](../apps/fox-separated-unlit-host.png)
 
 無陰影を先にレビューし、丸い頭蓋の基体と輪郭毛束の分離が確認できてから、同じgeometryのnative lit/clayへ進めた。上図は制作確認用のオフラインdepth-buffer投影であり、製品へZbufferを導入したものではない。
 

@@ -11,11 +11,7 @@
 
 ## 比較動画とグラフ — HOST SIMULATION
 
-![HOST SIMULATION。硬い連結、設計周波数1.8Hzの連結、.9Hzの柔連結、同じ柔連結＋表示補償。30sample/sはdevice FPSではない](dynamic-motion-host-comparison.png)
-
 APNG、331枚/先頭11秒wall time。更新は60Hz、表示sampleは30Hz。5.5〜6.5秒wall timeでsimulationと位相を停止し、休止時間を投入せず再開。注記のwall時計は動くが、物体のstateは同じ。末端の緑輪は追従reference、黒十字は要求goal、橙が実際の末端。最後までの16秒simulationはCSV/グラフで確認する。
-
-![HOST数値比較。時刻はpauseを除くsimulation time](dynamic-motion-host-graphs.png)
 
 ## 仮定・単位・更新式
 
@@ -97,8 +93,6 @@ simulation時刻2秒でgoal角を.15rad/要求world点を(4,69)へ変更、4秒�
 120Hz軌道との差は、30Hzで末端RMS .25229unit/先端角最大差.01976rad、60Hzで.08821unit/.00683rad。これは120Hzを真値とした誤差保証ではなく刻み比較。60Hzは次の候補だが、120Hzと同等とも最終採用とも言わない。
 
 ## 左右非対称・行き戻り・並列化の境界
-
-![異なる目標/状態/慣性/係数の左右枝。反転や逆再生では計算しない](dynamic-motion-host-asymmetric.png)
 
 共通driveを各step一度生成し、別々に所有する左右branchへ読取入力する。左I1=1/入力倍率1、右I1=1.6/倍率.65。左は2/6/8秒で.15/−.08/0、右は3/7/9秒で−.11/.04/0へ変更。帰りに左は連結.9/.35→1.1/.9、右は1.3/.6→.8/.45へ前計算を更新する。q/vは保持。これは共通の外部駆動を受ける独立rootで、共通torsoを介した左右の反力までは含まない。
 
