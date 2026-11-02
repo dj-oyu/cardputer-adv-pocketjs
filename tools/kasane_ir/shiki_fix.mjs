@@ -37,6 +37,13 @@ const X = {
   store: (t, v) => Number(t === 0 ? (v > 32767n ? 32767n : v < -32768n ? -32768n : v)
     : t === 1 ? (v > 65535n ? 65535n : v < 0n ? 0n : v) : v),
   at: (v, g, n) => { const i = floorDiv(v, BigInt(g)); return i < 0n ? 0 : i > BigInt(n - 1) ? n - 1 : Number(i); },
+  // The vector instructions (v2.0 draft sec.6.2, the prototype's C model in
+  // ksn_shiki.c): lanes are int16, the accumulator 40 bits (saturating);
+  // VOUT shifts each lane of it (floor), writes the shifted value back and
+  // gives it saturated to int16.
+  sat16: v => { v = Number(v); return v > 32767 ? 32767 : v < -32768 ? -32768 : v; },
+  sat40: v => v > 2 ** 39 - 1 ? 2 ** 39 - 1 : v < -(2 ** 39) ? -(2 ** 39) : v,
+  vout: (acc, s) => acc.map((v, l) => { acc[l] = Math.floor(v / 2 ** s); return X.sat16(acc[l]); }),
   sin: a => {                                // sec.4.4, a in Q16 turns
     const p = Number(BigInt.asUintN(16, a)), quad = p >> 14;
     let w = p & 0x3fff;
@@ -160,6 +167,66 @@ export function emitFix(ast, params, qdecl, data = []) {
         return `{ ${head}const __v = [${x.args.map(a => g(a, d.q)).join(', ')}];\n` +
           x.args.map((_, j) => `__data[${i}][${x.c + j} * ${rec} + __r${u}] = $.store(${d.type}, __v[${j}]);`).join('\n') + ' }';
       }
+      case 'vloop': {
+        // D7 (v2.0 draft sec.6.2): blocks of 8 records from the start, the
+        // last block's lanes past N masked (a load reads 0, a store skips
+        // them). Vectors are arrays of 8 Numbers; the accumulator (__acc)
+        // lives for the whole draw, as the engine's does.
+        const [i, d] = reg(x.r), rec = `(__data[${i}].length / ${d.k})`, u = uid++;
+        const st = x.from ? `Number(${g(x.from, 0)})` : '0';
+        const n = x.n ? `Number(${g(x.n, 0)})` : `${rec} - __s${u}`;
+        const vn = new Map();
+        const lane = (r, c) => { const [j, dj] = reg(r); return `__data[${j}][${c} * (__data[${j}].length / ${dj.k}) + __base${u} + __l]`; };
+        const L = body => `Array.from({length: 8}, (_, __l) => ${body})`;
+        const sc = e => `$.sat16(${g(e, 0)})`;
+        const vx = e => {
+          switch (e.k) {
+            case 'vname': return vn.get(e.v);
+            case 'vlane': return L(`__l < __live${u} ? ${lane(e.r, e.c)} : 0`);
+            case 'vsplat': return `Array(8).fill(${sc(e.args[0])})`;
+            case 'viota': return L(`$.sat16(__base${u} + __l)`);
+            case 'vbin': {
+              const f = {add: '$.sat16(__a[__l] + __b[__l])', sub: '$.sat16(__a[__l] - __b[__l])',
+                min: 'Math.min(__a[__l], __b[__l])', max: 'Math.max(__a[__l], __b[__l])'}[e.o];
+              return `((__a, __b) => ${L(f)})(${vx(e.a)}, ${vx(e.b)})`;
+            }
+            case 'vout': return `$.vout(__acc, ${e.s})`;
+          }
+          throw new Error(e.k);
+        };
+        x.names.forEach((v, j) => vn.set(v, `__f${u}_${j}`));
+        const body = x.body.map(y => {
+          if (y.k === 'vdecl') { const v = `__v${uid++}`; const c = `const ${v} = ${vx(y.e)};`; vn.set(y.n, v); return c; }
+          if (y.k === 'vstore') return `{ const __x = ${vx(y.e)}; for (let __l = 0; __l < __live${u}; __l++) ${lane(y.r, y.c)} = __x[__l]; }`;
+          if (y.f === 'zero') return '__acc.fill(0);';
+          if (y.f === 'set') return `__acc.fill(Number(${g(y.args[0], 0)}));`;
+          if (y.f === 'mac') return `{ const __a = ${vx(y.args[0])}, __b = ${vx(y.args[1])}; for (let __l = 0; __l < 8; __l++) __acc[__l] = $.sat40(__acc[__l] + __a[__l] * __b[__l]); }`;
+          return `{ const __a = ${vx(y.args[0])}, __k = ${sc(y.args[1])}; for (let __l = 0; __l < 8; __l++) __acc[__l] = $.sat40(__acc[__l] + __a[__l] * __k); }`;
+        });
+        const loads = x.names.map((v, j) => `const __f${u}_${j} = ${L(`__l < __live${u} ? __data[${i}][${j} * ${rec} + __base${u} + __l] : 0`)};`);
+        return `{ const __s${u} = ${st}; if (__s${u} < 0 || __s${u} > ${rec}) throw new __Fail('INVALID');\n` +
+          `const __n${u} = ${n}; if (__n${u} < 0 || __n${u} > ${rec} - __s${u}) throw new __Fail('INVALID');\n` +
+          `if (__s${u} + __n${u} > 32767) throw new __Fail('INVALID');\n` +
+          `for (let __b${u} = 0; __b${u} < __n${u}; __b${u} += 8) {\n` +
+          `const __base${u} = __s${u} + __b${u}, __live${u} = Math.min(8, __n${u} - __b${u});\n` +
+          `${loads.join('\n')}\n${body.join('\n')}\n} }`;
+      }
+      case 'emit': {
+        // EMIT_POINTS / EMIT_LINES: records start.. (count), each coordinate
+        // to the nearest pixel at the region's Q (halves up), outside
+        // -480..720 INVALID; the pen is not touched.
+        const [i, d] = reg(x.r), rec = `(__data[${i}].length / ${d.k})`, u = uid++;
+        const st = x.from ? `Number(${g(x.from, 0)})` : '0';
+        const n = x.n ? `Number(${g(x.n, 0)})` : `${rec} - __s${u}`;
+        const m = x.f === 'lines' ? 4 : 2, half = d.q ? 2 ** (d.q - 1) : 0;
+        return `{ const __s${u} = ${st}; if (__s${u} < 0 || __s${u} > ${rec}) throw new __Fail('INVALID');\n` +
+          `const __n${u} = ${n}; if (__n${u} < 0 || __n${u} > ${rec} - __s${u}) throw new __Fail('INVALID');\n` +
+          `const __c${u} = Number(${g(x.args[0], 0)});\n` +
+          `for (let __r = __s${u}; __r < __s${u} + __n${u}; __r++) {\n` +
+          `const __p = [${Array.from({length: m}, (_, j) => `Math.floor((__data[${i}][${j} * ${rec} + __r] + ${half}) / ${2 ** d.q})`).join(', ')}];\n` +
+          `if (__p.some(v => v < -480 || v > 720)) throw new __Fail('INVALID');\n` +
+          (m === 4 ? `__draw.seg(__p[0], __p[1], __p[2], __p[3], __c${u}); }` : `__draw.seg(__p[0], __p[1], __p[0], __p[1], __c${u}); }`) + ' }';
+      }
       case 'repeat': {
         const reg = !(x.n.k === 'num' || (x.n.k === 'name' && params.includes(x.n.v)));
         return `{ const __n = Number(${g(x.n, 0)}); if (__n < ${reg ? 0 : 1} || __n > 255) throw new __Fail('INVALID');\n` +
@@ -168,7 +235,8 @@ export function emitFix(ast, params, qdecl, data = []) {
     }
     throw new Error(x.k);
   }).join('\n');
-  const fn = new Function('$', '__c', '__draw', '__Fail', '__in', '__args', '__data', '__idx', s(ast));
+  const fn = new Function('$', '__c', '__draw', '__Fail', '__in', '__args', '__data', '__idx',
+    'const __acc = [0, 0, 0, 0, 0, 0, 0, 0];\n' + s(ast));
   return (m, draw, Fl, input, args, regions = [], index = 0) => fn(m, consts, draw, Fl, input, args, regions, index);
 }
 export const FIXM = {...X, real: v => Number(v) / 65536, int: v => Number(v)};

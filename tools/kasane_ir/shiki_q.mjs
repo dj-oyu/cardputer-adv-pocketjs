@@ -36,10 +36,23 @@ export function eachNames(ast, data = []) {
 // at(i) / set(i, ...), a name declared as drawIndex() (v2.0 draft), and every
 // name joined to one of those by a plain name-to-name assignment. The names a for...of unpacks
 // take no part in the joining (they are fixed at the region's Q).
+// The scalar operands of a vector loop's statement (D7): splat()'s,
+// acc.set()'s and acc.mack()'s second. Each is taken at Q0.
+export function vectorScalars(x) {
+  const ex = e => e.k === 'vsplat' ? [e.args[0]] : e.k === 'vbin' ? [...ex(e.a), ...ex(e.b)] : [];
+  if (x.k === 'vdecl' || x.k === 'vstore') return ex(x.e);
+  if (x.k === 'acc') return x.f === 'set' ? [x.args[0]] : x.f === 'mack' ? [...ex(x.args[0]), x.args[1]] : x.f === 'mac' ? x.args.flatMap(ex) : [];
+  return [];
+}
 export function q0Names(ast, fixed = new Set()) {
   const out = new Set(), links = [];
   const walk = list => list.forEach((x, k) => {
     if (x.k === 'each') { for (const e of [x.n, x.from]) if (e?.k === 'name') out.add(e.v); walk(x.body); }
+    // D7: a vector loop's start and count, its scalar operands, and an
+    // EMIT's start, count and colour.
+    if (x.k === 'vloop') { for (const e of [x.n, x.from]) if (e?.k === 'name') out.add(e.v); walk(x.body); }
+    if (x.k === 'emit') for (const e of [x.n, x.from, x.args[0]]) if (e?.k === 'name') out.add(e.v);
+    for (const e of vectorScalars(x)) if (e.k === 'name') out.add(e.v);
     if ((x.k === 'load' || x.k === 'store') && x.i.k === 'name') out.add(x.i.v);
     if (x.k === 'decl') for (const d of x.d) if (d.e.k === 'call' && d.e.f === 'drawIndex') out.add(d.n);
     if (x.k === 'repeat') {
@@ -86,6 +99,14 @@ export function qRules(ast, qdecl, data = []) {
     if (x.k === 'repeat') {
       if (x.n.k === 'num' && !(Number.isInteger(+x.n.lit) && +x.n.lit >= 1 && +x.n.lit <= 255)) throw new Error(`REPEAT ${x.n.lit} outside 1..255`);
       check(x.body);
+    }
+    if (x.k === 'vloop' || x.k === 'emit') {
+      // D7: VEACH's last record must fit int16 (VIOTA), so a literal count is
+      // 0..32,767; EMIT's count 0..65,535.
+      const max = x.k === 'vloop' ? 32767 : 65535;
+      if (x.n && fractional(x.n)) throw new Error(`${x.r}.take(): the count is Q0 (sec.8.3 rule 1) but can carry a fraction`);
+      if (x.n?.k === 'num' && !(+x.n.lit >= 0 && +x.n.lit <= max)) throw new Error(`${x.r}.take(${x.n.lit}) outside 0..${max.toLocaleString('en')}`);
+      if (x.from && fractional(x.from)) throw new Error(`${x.r}.from(): the start is Q0 (sec.8.3 rule 1) but can carry a fraction`);
     }
     if (x.k === 'each') {
       // take(n): Q0, a whole count 0..65,535 when a literal (sec.8.2).
