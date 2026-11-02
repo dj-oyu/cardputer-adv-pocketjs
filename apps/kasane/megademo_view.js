@@ -1,7 +1,7 @@
 // MEGADEMO chunk: the pocket.kasane view's resources and tables (room,
 // HUD, story text). Loaded only with pocket.kasane.
 'use strict';
-const V = pocket.kasane, H = V.procedural, G = V.grid;
+const V = pocket.kasane, H = V.shiki, G = V.grid;
 // Surface 0's frames sized for 768 segments (the busiest frame, TWIST at
 // HEAVY, is 648): 2 x 7.7 KB instead of 2 x 10.2 KB, in smaller holes.
 // Firmware without the option (and the baseline the contracts compare

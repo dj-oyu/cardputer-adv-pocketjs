@@ -5,14 +5,17 @@
 // night() is 1 on the first night; each WAKE adds one.
 let sortie = 742;
 const night = () => sortie - 741;
-// The cat's ship (a head with two ears, from behind) in 8 roll bins.
+// The cat's ship (a head with two ears, from behind) in 8 roll bins: px =
+// floor of its Q14 affine (x2, banked, at 120, 110), as the old typed points.
 const SHIP = [0, -4, 5, -12, 7, -5, 13, 0, 10, 5, 5, 8, 2, 6, 0, 9, -2, 6, -5, 8, -10, 5,
   -13, 0, -7, -5, -5, -12, 0, -4];
 function points(b) {
-  const x = [], y = [], a = (b - 3.5) * .14, c = 2 * M.cos(a) * 16384, n = 2 * M.sin(a) * 16384;
-  for (let i = 0; i < SHIP.length; i += 2) { x.push(SHIP[i]); y.push(SHIP[i + 1]); }
-  return {kind: 'affineQ14Points', x: x, y: y, color: WH,
-    coeff: [rnd(c), rnd(-n), rnd(n), rnd(c), 120 * 16384, 110 * 16384]};
+  const x = [], y = [], a = (b - 3.5) * .14, c = rnd(2 * M.cos(a) * 16384), n = rnd(2 * M.sin(a) * 16384);
+  for (let i = 0; i < SHIP.length; i += 2) {
+    x.push(M.floor((c * SHIP[i] - n * SHIP[i + 1]) / 16384) + 120);
+    y.push(M.floor((n * SHIP[i] + c * SHIP[i + 1]) / 16384) + 110);
+  }
+  return [x, y];
 }
 // TWIST: frames, rails, arches, planks (two colours alternating), 2nd
 // rails, 2 wall courses; x: the negative past the wall (inverted colours).

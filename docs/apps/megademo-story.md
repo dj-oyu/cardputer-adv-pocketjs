@@ -655,3 +655,13 @@ CORE の殻・コア・自機の投影を、WAKE と Act I が使っている `p
 - `V.resource('tally')` は 42 × 82 の画像で、**フレーム n が n 晩分**。画素は表示のときに span ごとに計算する（ビットマップを持たない。刻みの外は透明）。部屋の組み立てでは `tx.image({resource: tally, bounds: [196, 16, 238, 98], frame: min(90, night())})` の **1 コマンド**。
 - 並びは前と同じ（3 組で 1 行、14 px 間隔）で、6 行・**90 晩**まで。最後の 2 行は猫の後ろにかかる。
 - host で前の版（矩形）と 1・4・5・9・13・20 晩の部屋の画面が全画素一致。部屋のコマンドは最大 32 個減り、評価後のゲストも −140 B（ループのコードが消えた分）。
+
+## Shiki へ（2026-11-02、v2.0 手順4）
+
+浮動小数の VM の plan 24 本を、Shiki の `@shiki` 関数（`apps/kasane/megademo_prog.js`）に書き直した。組み込みの表の名前は前と同じ `kasane.<名前>` で、`megademo_set.js` の登録も名前のまま。`megademo_plans.js` と `chunks.txt` の `rom-text` の行は消え、`prog megademo_prog.js` のチャンク（ビルドが関数を抜く。entry は読まない）になった。
+
+- **`eg`（脳波）**: `sin(s² · noise)` の `s²·noise` が、s が 2 × フレーム数で増えるので Q16（±32,768）を超えていた（固定小数の誤差 最大 2.59 px）。位相を差分で持つ形に変えた: p は d = (2s+1)·noise ずつ、d は 2·noise ずつ増える。初めの p と d は、アプリが 2π で割った余りを渡す（`megademo_brief.js`、入力 7・8 番）。
+- **`sh`（猫の船）**: 旧 API の型付きの点（Q14 のアフィン）の代わりに、`points()` が floor した画素を返し、`megademo_set.js` が i16 の窓（x, y）に詰めて `register('kasane.sh', [], {data: [窓]})` に渡す。窓は plan を外すときに `release` する（`WN`）。
+- **翻訳の確かめ（host、scratch の採取）**: 全場面・全段・全フレームの draw 47,453 回を、旧い行（double）・`@shiki` の double・固定小数で比べた。旧い行との差は最大 1.5e-4 px、固定小数と double の差は最大 0.053 px（`ry`）。`eg` は直した後 0.022 px。`sh` の点は floor した画素を同じ式で作るので、この比較には入れていない。
+- **host の通し（`run_megademo_app_host.py`）**: 2.4 周、例外 0・劣化 0・転送失敗 0。m32 の評価後のゲスト heap は 115,581 B（旧版 115,486 B、+95 B）、評価のピーク 132,628 B（旧版 132,424 B、+204 B）。host の模型の値で、実機の値ではない。runner は、旧版が `megademo_plans.js` を持っていればその表を浮動小数の VM 側にリンクして、同じバイナリで比べる。
+- **残り**: 浮動小数の VM の行を読む host の検査（`run_proc_megademo_scenes.py`・`run_proc_megademo_js.py`・`run_pocket_proc_qjs.py` と `megademo_host.js` の `plan()`）は、手順5で旧 API と一緒に消す。

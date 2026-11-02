@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from megademo_chunks import rom_table  # noqa: E402
+from megademo_chunks import rom_table, shiki_table  # noqa: E402
 CACHE = ROOT / ".cache/kasane_megademo_app"
 QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
@@ -41,7 +41,7 @@ def kasane_sources() -> list[str]:
             if not s.startswith("tools/test_pocket_kasane")]
 
 
-def build(flags: list[str], cache: Path) -> Path:
+def build(flags: list[str], cache: Path, plans: Path | None) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
                    stdout=subprocess.DEVNULL)
@@ -64,7 +64,8 @@ def build(flags: list[str], cache: Path) -> Path:
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_GRID_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/kasane_contract/test_megademo_app_host.c", *kasane_sources(), *EXTRA,
-                    str(rom_table(cache / "ksn_proc_rom_plans.c")),
+                    "main/pocket/pocket_shiki_api.c", str(shiki_table(cache / "ksn_shiki_rom.c")),
+                    str(rom_table(cache / "ksn_proc_rom_plans.c", plans)),
                     *objects, "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -108,25 +109,9 @@ def main() -> None:
     parser.add_argument("--no-band-damage", action="store_true",
                         help="damage commit()'s bounding rectangle, as before band damage (A/B)")
     args = parser.parse_args()
-    extra = ["-DPOCKET_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
-    if args.m32:
-        # A sysroot under .cache survives WSL restarts, which empty /tmp.
-        sysroot = dict(os.environ, M32_SYSROOT=str(CACHE / "m32sys"))
-        flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=sysroot,
-                               capture_output=True, text=True).stdout.split()
-        binary = build(flags + extra, CACHE / ("m32" + ("_nobd" if extra else "")))
-    else:
-        binary = build(["-fsanitize=address,undefined"] + extra, CACHE / ("asan" + ("_nobd" if extra else "")))
-    env = os.environ.copy()
-    # Boot-lifetime singletons in the Kasane fixture are intentionally kept.
-    env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
-    env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
-    if args.ppm:
-        args.ppm.mkdir(parents=True, exist_ok=True)
-        env["MEGA_PPM"] = str(args.ppm.resolve())
-    subprocess.run([str(binary), "apps/kasane/proc_megademo.js"], cwd=ROOT, env=env, check=True)
-    if args.ppm:
-        print(f"Wrote {panel_sheet(args.ppm.resolve())}")
+    # The baseline first: one binary runs both, and a baseline from before
+    # the move to Shiki needs its plan templates in the float VM's table.
+    plans, base_list = None, None
     old = CACHE / "proc_megademo_baseline.js"
     shown = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/proc_megademo.js"],
                            cwd=ROOT, capture_output=True)
@@ -136,7 +121,6 @@ def main() -> None:
         old.write_bytes(shown.stdout)
     elif not old.exists():
         raise SystemExit(f"cannot read the baseline app: {shown.stderr.decode().strip()}")
-    env.pop("MEGA_PPM", None)
     # A chunked baseline: its chunks.txt and chunk files, as of that revision.
     listed = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/chunks.txt"],
                             cwd=ROOT, capture_output=True)
@@ -150,7 +134,31 @@ def main() -> None:
                 got = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/{words[1]}"],
                                      cwd=ROOT, capture_output=True, check=True)
                 (base / words[1]).write_bytes(got.stdout)
-        env["MEGA_CHUNKS"] = str(base / "chunks.txt")
+        base_list = base / "chunks.txt"
+        if (base / "megademo_plans.js").exists():
+            plans = base / "megademo_plans.js"
+    extra = ["-DPOCKET_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
+    if args.m32:
+        # A sysroot under .cache survives WSL restarts, which empty /tmp.
+        sysroot = dict(os.environ, M32_SYSROOT=str(CACHE / "m32sys"))
+        flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=sysroot,
+                               capture_output=True, text=True).stdout.split()
+        binary = build(flags + extra, CACHE / ("m32" + ("_nobd" if extra else "")), plans)
+    else:
+        binary = build(["-fsanitize=address,undefined"] + extra, CACHE / ("asan" + ("_nobd" if extra else "")), plans)
+    env = os.environ.copy()
+    # Boot-lifetime singletons in the Kasane fixture are intentionally kept.
+    env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+    env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
+    if args.ppm:
+        args.ppm.mkdir(parents=True, exist_ok=True)
+        env["MEGA_PPM"] = str(args.ppm.resolve())
+    subprocess.run([str(binary), "apps/kasane/proc_megademo.js"], cwd=ROOT, env=env, check=True)
+    if args.ppm:
+        print(f"Wrote {panel_sheet(args.ppm.resolve())}")
+    env.pop("MEGA_PPM", None)
+    if base_list:
+        env["MEGA_CHUNKS"] = str(base_list)
     print(f"baseline: {old.name} ({old.stat().st_size} B)")
     subprocess.run([str(binary), str(old), "--baseline"], cwd=ROOT, env=env, check=True)
 

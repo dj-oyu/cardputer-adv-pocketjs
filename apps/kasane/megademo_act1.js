@@ -1,5 +1,5 @@
-// MEGADEMO chunk 1: shared maths and the load tiers (the plan templates are
-// megademo_plans.js, built into the firmware). Every distinct name (global or local) is a resident
+// MEGADEMO chunk 1: shared maths and the load tiers (the Shiki programs are
+// megademo_prog.js, built into the firmware). Every distinct name (global or local) is a resident
 // atom (~60 B): the chunks reuse short names and write out numbers used
 // once (docs/apps/megademo-story.md, 2026-10-29).
 'use strict';
@@ -23,6 +23,5 @@ const KN = [
   {c: CH, z: ZH, k: {r: 40, d: 1, n: 24}},
   {c: CH, z: ZH, k: {r: 40, d: 2, n: 40}}
 ];
-// hx: a hex digit of a string (the tables in megademo_act2.js). The plan
-// templates are megademo_plans.js, compiled into the firmware.
+// hx: a hex digit of a string (the tables in megademo_act2.js).
 const hx = (s, i) => { const c = s.charCodeAt(i); return c > 57 ? c - 87 : c - 48; };

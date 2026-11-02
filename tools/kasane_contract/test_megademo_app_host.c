@@ -1,5 +1,5 @@
 /* apps/kasane/proc_megademo.js as the firmware runs it, on the host: the real
- * QuickJS, the real pocket.kasane (view, procedural, grid resize, pixel) and
+ * QuickJS, the real pocket.kasane (view, shiki, grid resize, pixel) and
  * the real renderer presenting into a 240x135 panel after every frame().
  *
  * What it proves before a flash (no device, no serial port):
@@ -20,6 +20,8 @@
 #include "pocket_shape.h"
 #include "pocket_kasane.h"
 #include "pocket_proc.h"
+#include "pocket_shiki_api.h"
+#include "shiki_heap.h"
 #include "pocket_video.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
@@ -218,7 +220,7 @@ static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
     "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
-    "(function(){const P=pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
+    "(function(){const P=pocket.kasane.shiki||pocket.kasane.procedural,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"
     "regNs:0,frameDrawNs:0,unreg:0,frameUnreg:0};"
     "P.register=function(){const t=__now();const h=R.apply(P,arguments);"
@@ -252,14 +254,18 @@ int main(int argc,char **argv){
         JS_SetMemoryLimit(rt,limit);
         if(limit/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,limit/2);
     }
+    /* MEGADEMO names kasane.shiki: its session takes the Shiki heap before
+     * the guest (app_session.c), and kasane then has shiki. */
+    if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
     pocket_kasane_install(ctx,NULL);
     pocket_shape_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
     JS_SetPropertyStr(ctx,g,"__load",JS_NewCFunction(ctx,js_load,"load",1));
-    /* The built-in plan table, as app_session.c hands it over (the runner
-     * generates it from megademo_plans.js: megademo_chunks.rom_table). */
+    /* The built-in tables, as the firmware links them: the Shiki programs
+     * (megademo_prog.js) and, for a baseline still on the float VM, its
+     * plan templates (megademo_chunks.rom_table). */
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     read_chunks();
     JS_FreeValue(ctx,g);
@@ -391,7 +397,7 @@ int main(int argc,char **argv){
     printf("panel: %llu bytes sent over %u frames (%.0f a frame; a whole frame is 64800)\n",
            panel_bytes,frames,frames?(double)panel_bytes/frames:0.0);
     ok=ok&&!exceptions&&!present_failures;
-    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",ok?"MEGADEMO_HOST PASS":"MEGADEMO_HOST FAIL");
     return ok?0:1;
 }
