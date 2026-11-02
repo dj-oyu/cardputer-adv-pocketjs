@@ -35,7 +35,7 @@ def main():
     sources=[kasane/'ksn_procedural.c',kasane/'ksn_proc_analysis.c',
              kasane/'ksn_proc_plan.c',kasane/'ksn_proc_plan_points.c',
              kasane/'ksn_proc_points.c',kasane/'ksn_proc_points_dispatch.c',
-             ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/ui/kasane/ksn_shiki.c',
+             ROOT/'main/pocket/pocket_proc.c',ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/ui/kasane/ksn_shiki.c',
              ROOT/'tools/kasane_contract/test_pocket_proc_limits_qjs.c']
     base=[cc,'-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror',*sanitize,*DEFS,
           '-DKSN_PROC_HOST_TEST','-I',str(QJS),'-I',str(ROOT/'main'),

@@ -67,7 +67,7 @@ def objects(cc):
     return objs
 
 def build_and_run(cc,objs,table,shipped,cases,label,flags,extra,plan_source,include_first):
-    sources=[KASANE/'ksn_procedural.c',KASANE/'ksn_proc_analysis.c',plan_source,
+    sources=[KASANE/'ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',KASANE/'ksn_procedural.c',KASANE/'ksn_proc_analysis.c',plan_source,
              KASANE/'ksn_proc_plan_points.c',KASANE/'ksn_proc_points.c',
              KASANE/'ksn_proc_points_dispatch.c',table,
              ROOT/'tools/kasane_contract/test_pocket_proc_rom_qjs.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/ui/kasane/ksn_shiki.c',*extra]

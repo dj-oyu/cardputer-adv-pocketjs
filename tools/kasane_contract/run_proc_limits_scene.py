@@ -38,7 +38,7 @@ def main() -> None:
         'ksn_procedural.c', 'ksn_proc_analysis.c', 'ksn_proc_plan.c',
         'ksn_proc_plan_points.c', 'ksn_proc_points.c', 'ksn_proc_points_dispatch.c',
         'ksn_proc_points_pie.c')]
-    sources += [ROOT / 'main/pocket/pocket_proc.c', ROOT / 'main/pocket/shiki_heap.c', ROOT / 'main/ui/kasane/ksn_shiki.c',
+    sources += [ROOT / 'main/pocket/pocket_proc.c', ROOT / 'main/ui/kasane/ksn_mesh_depth.c', ROOT / 'main/ayatsuri/compact_opaque.c', ROOT / 'main/pocket/shiki_heap.c', ROOT / 'main/ui/kasane/ksn_shiki.c',
                 ROOT / 'tools/kasane_contract/test_proc_limits_scene.c']
     binary = OUT / 'test_proc_limits_scene'
     subprocess.run([cc, '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra', '-Werror', *sanitize,

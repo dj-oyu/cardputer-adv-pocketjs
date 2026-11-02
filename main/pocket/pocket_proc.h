@@ -61,9 +61,28 @@ extern bool pocket_proc_hook_dry;
  * draw() does (LIMIT_EXCEEDED / INVALID_ARGUMENT, beginFrame again), and the
  * caller rolls back to the mark so the candidate keeps no part of the call.
  * Each returns JS_UNDEFINED or JS_EXCEPTION. */
-typedef struct { uint16_t count,raster; uint8_t ext,surface; } pocket_proc_mark;
+typedef struct { uint16_t count,raster; uint8_t ext,surface; size_t depth_bytes; unsigned depth_packets; uint32_t depth_work; } pocket_proc_mark;
+typedef struct {size_t candidate,committed,workspace,metadata;} pocket_proc_mesh_bytes;
+/* Explicit payload/metadata accounting; allocator overhead, guest/model and
+ * legacy frame/workspaces are separate. Does not claim physical RAM fitness. */
+void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out);
+#ifdef KSN_PROC_HOST_TEST
+void pocket_proc_mesh_fail_after(int allocations);
+#endif
+bool pocket_proc_native_mesh_depth(void);
+JSValue pocket_proc_native_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch,const float *depth,uint16_t node);
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark);
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color);
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch);
+/* Validation/quota failure leaves the current candidate AND building state
+ * unchanged. Unlike older analytic methods, budget rejection does not poison. */
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch);
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch);
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch,
+    const ksn_proc_blend_region_mask *mask);
+/* Screen-linear vertex colours and an independent model-attached scalar
+ * mask. Synchronous numeric snapshot; quota/validation is NOT_APPLIED. */
+JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch);
 void pocket_proc_native_rollback(const pocket_proc_mark *mark);
 /* The 8-row bands (17) of the image a just-committed frame changes, and on
  * each its columns [x0, x1): the bands whose ordered entries differ from the
