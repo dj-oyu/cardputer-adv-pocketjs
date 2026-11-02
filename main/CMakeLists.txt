@@ -41,7 +41,7 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_procedural.c" "ui/kasane/ksn_pixel_function.c"
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_shiki.c"
-    "ui/kasane/ksn_shiki_bench.c")
+    "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
 # Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
 # turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
 option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)

@@ -3,6 +3,7 @@
 #include "pocket_proc.h"
 #include "ksn_shiki.h"
 #include "ksn_shiki_bench.h"
+#include "ksn_shiki_jit.h"
 #include "int_latency.h"
 #include "esp_cpu.h"
 #include "esp_app_desc.h"
@@ -325,9 +326,10 @@ static bool pair_line(unsigned j,char *out,size_t n){
     bench_free(b);
     return true;
 }
+/* The last line: the JIT's stage-0 probe (ksn_shiki_jit.c). */
 static unsigned pair_count(void){
     timed_row rows[16];
-    return ksn_shiki_bench_check_count()+timed_rows(rows,16);
+    return ksn_shiki_bench_check_count()+timed_rows(rows,16)+1u;
 }
 #define PAIR_COUNT pair_count()
 static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -336,7 +338,7 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     if(argc<1||JS_ToUint32(ctx,&i,argv[0])!=0)
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"shikiDebug.bench","expected (index)",
                                 false,POCKET_OUTCOME_NOT_APPLIED);
-    char line[160];
+    char line[224];
     const unsigned first=int_latency_count();
     if(i<first)return int_latency_case(i,line,sizeof line)?JS_NewString(ctx,line):JS_NULL;
     i-=first;
@@ -345,6 +347,9 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     if(i<ksn_shiki_bench_check_count()&&check_line(i,line,sizeof line))return JS_NewString(ctx,line);
     i-=ksn_shiki_bench_check_count();
     if(pair_line(i,line,sizeof line))return JS_NewString(ctx,line);
+    timed_row rows[16];
+    i-=timed_rows(rows,16);
+    if(i==0&&ksn_shiki_jit_probe(line,sizeof line))return JS_NewString(ctx,line);
     return JS_NULL;
 }
 
