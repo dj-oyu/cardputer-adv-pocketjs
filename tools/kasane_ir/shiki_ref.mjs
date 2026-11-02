@@ -106,6 +106,8 @@ export const OPS = {
   LINE: 9, REPEAT_REG: 10, BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14,
   LINE_PATTERN: 15, SUB: 16, NEG: 17, SHIFT: 18, ADD_H: 19, SUB_H: 20, MUL_H: 21,
   SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26,
+  // v2.0 draft (docs/kasane/shiki-v2.md sec.3, 4)
+  LOAD: 27, STORE: 28, DRAW_INDEX: 29,
 };
 
 const F = (dst, a, b, imm, aux) => ({ dst, a, b, imm, aux });
@@ -137,7 +139,9 @@ const OPDEF = new Map([
 // ints taken by imm per op for the Q0 patch rule (§3): REPEAT count, CUBIC
 // segments, LINE_PATTERN period, and the k of SHIFT/SHIFT.H/FETCH/PUT/LOOKUP.
 // EACH's imm is unused (must be 0 after patching), so it is not listed.
-const INT_IMM_OPS = new Set([5, 14, 15, 18, 22, 24, 25, 26]);
+// v2.0 draft: EACH's imm names the start register (aux bit 1), an int too,
+// and LOAD/STORE's k.
+const INT_IMM_OPS = new Set([5, 14, 15, 18, 22, 23, 24, 25, 26, 27, 28]);
 
 // ---- §5.1 data regions --------------------------------------------------------
 
@@ -231,9 +235,11 @@ const MAX_INSTR = 64, MAX_IO = 8, MAX_REGIONS = 4, MAX_PATCHES = 32, LOOP_DEPTH 
 function checkRegionOp(I, R) {
   const kOk = I.imm >= -31 && I.imm <= 31;
   switch (I.op) {
-    case 23: // EACH a, b, aux=f: f 0 → b = 0; f 1 → b a register. dst, imm unused.
-      if (I.dst !== 0 || I.imm !== 0 || I.aux > 1) return false;
-      return I.aux === 0 ? I.b === 0 : I.b <= 15;
+    case 23: // EACH a, b, aux=f, imm: f bit 0 → b the count register (else 0);
+      // bit 1 → imm the start register (else 0) (v2.0 draft sec.4.1). dst unused.
+      if (I.dst !== 0 || I.aux > 3) return false;
+      if ((I.aux & 1) ? I.b > 15 : I.b !== 0) return false;
+      return (I.aux & 2) ? I.imm >= 0 && I.imm <= 15 : I.imm === 0;
     case 24: // FETCH dst, a, b=position, aux=m, imm=k
     case 25: { // PUT: the same, and the region must be declared writable
       const m = I.aux;
@@ -242,6 +248,12 @@ function checkRegionOp(I, R) {
     }
     case 26: // LOOKUP dst, a, b (register), aux=g, imm=k; k_rec = 1 only
       return R.k === 1 && I.dst <= 15 && I.b <= 15 && I.aux <= 31 && kOk;
+    case 27: // LOAD dst, a, b (the record's register), aux = c | m << 8, imm=k
+    case 28: { // STORE: the same, and the region must be declared writable
+      const c = I.aux & 255, m = I.aux >> 8;
+      if (m < 1 || m > 8 || c + m > R.k || I.dst + m > 16 || I.b > 15 || !kOk) return false;
+      return I.op === 27 || (R.flags & 1) === 1;
+    }
   }
   return false;
 }
@@ -331,17 +343,21 @@ export function register(code, args = [], regions = []) {
   const stack = [];
   for (let i = 0; i < n; i++) {
     const I = ins[i];
-    if (I.op >= 23 && I.op <= 26) {
+    if (I.op >= 23 && I.op <= 28) {
       if (I.a >= nr || !checkRegionOp(I, regTab[I.a])) return null;
       if (I.op === 23) {
         if (stack.length >= LOOP_DEPTH) return null;
         stack.push(i);
-      } else if (I.op !== 26) {
+      } else if (I.op === 24 || I.op === 25) {
         let s = stack.length - 1;
         while (s >= 0 && !(ins[stack[s]].op === 23 && ins[stack[s]].a === I.a)) s--;
         if (s < 0) return null; // FETCH/PUT outside an EACH of its region
         eachOf[i] = stack[s];
       }
+      continue;
+    }
+    if (I.op === 29) { // DRAW_INDEX dst (v2.0 draft sec.4.1)
+      if (I.dst > 15 || I.a || I.b || I.imm || I.aux) return null;
       continue;
     }
     const d = OPDEF.get(I.op);
@@ -483,7 +499,8 @@ export function patternOp(ctx, xr, yr, block, N, colourA) {
   return null;
 }
 
-export function draw(plan, inputs = []) {
+// index: the draw's number, what DRAW_INDEX reads (v2.0 draft sec.4.1).
+export function draw(plan, inputs = [], index = 0) {
   const regs = new Int32Array(16);
   const pen = { valid: false, x: 0, y: 0 };
   const segs = [];
@@ -589,16 +606,21 @@ export function draw(plan, inputs = []) {
       case 20: regs[I.dst] = subH(regs[I.a], regs[I.b]); break;
       case 21: regs[I.dst] = mulH(regs[I.a], regs[I.b], I.aux); break;
       case 22: regs[I.dst] = shiftH(regs[I.a], I.imm); break;
-      case 23: { // §5.4.1 EACH: N read once on entry; 0 skips past END unstacked
+      case 23: { // §5.4.1 EACH: the start, then N, read once on entry; N = 0 skips past END unstacked
         const g = regions[I.a];
         const records = g.n / g.k;
-        let count = records;
-        if (I.aux === 1) {
+        let first = 0;
+        if (I.aux & 2) { // v2.0 draft sec.4.1: the start record r[imm], 0..R
+          first = regs[I.imm];
+          if (first < 0 || first > records) { err = 'INVALID'; break; }
+        }
+        let count = records - first;
+        if (I.aux & 1) {
           count = regs[I.b];
-          if (count < 0 || count > records) { err = 'INVALID'; break; }
+          if (count < 0 || count > records - first) { err = 'INVALID'; break; }
         }
         if (count === 0) next = matchEnd[pc] + 1;
-        else loops.push({ start: pc, left: count, cursor: 0 });
+        else loops.push({ start: pc, left: count, cursor: first });
         break;
       }
       case 24: { // §5.4.3 FETCH: r[dst+j] = SHIFT(e_j, k), ascending j
@@ -623,6 +645,21 @@ export function draw(plan, inputs = []) {
         regs[I.dst] = shift32(g.mem[i], I.imm);
         break;
       }
+      case 27: // v2.0 draft sec.3.1 LOAD: record r[b] in 0..R − 1 (else INVALID, D3)
+      case 28: { // STORE: every v_j first, then saturate and write ascending j
+        const g = regions[I.a];
+        const R = g.n / g.k, rec = regs[I.b], c = I.aux & 255, m = I.aux >> 8;
+        if (rec < 0 || rec >= R) { err = 'INVALID'; break; }
+        if (I.op === 27) {
+          for (let j = 0; j < m; j++) regs[I.dst + j] = shift32(g.mem[(c + j) * R + rec], I.imm);
+        } else {
+          const v = [];
+          for (let j = 0; j < m; j++) v.push(satElem(g.type, shift32(regs[I.dst + j], I.imm)));
+          for (let j = 0; j < m; j++) g.mem[(c + j) * R + rec] = v[j];
+        }
+        break;
+      }
+      case 29: regs[I.dst] = index; break;
       default: throw new Error(`unreachable op ${I.op}`);
     }
     if (err) return end(err);
@@ -649,7 +686,7 @@ export function format(result, data = []) {
   return parts.join(' ');
 }
 
-// Parses one `CASE <hex> ARGS <n> ... INPUTS <m> ... [DATA <r> <region>...]`
+// Parses one `CASE <hex> ARGS <n> ... INPUTS <m> ... [INDEX <k>] [DATA <r> <region>...]`
 // line, <region> := <type> <q> <k_rec> <R> <e0> ... | ALIAS <j> (j < its own
 // index). `regions` is the list passed, or null when a descriptor is invalid
 // (the case is then REJECT: it models shiki.data() failing). A malformed line
@@ -669,6 +706,8 @@ export function parseCase(line) {
   const ni = Number(t[k++]);
   const inputs = t.slice(k, k + ni).map(Number);
   k += ni;
+  let index = 0;   // v2.0 draft sec.4.1: the draw's number, 0 when absent
+  if (t[k] === 'INDEX') { index = Number(t[k + 1]); k += 2; if (!Number.isInteger(index) || index < 0 || index > 65535) throw new Error(`bad INDEX: ${line}`); }
   let regions = [];
   if (k < t.length) {
     if (t[k++] !== 'DATA') throw new Error(`expected DATA: ${line}`);
@@ -700,14 +739,14 @@ export function parseCase(line) {
     if (k !== t.length) throw new Error(`trailing tokens: ${line}`);
     if (regions.includes(null)) regions = null;
   }
-  return { code, args, inputs, regions };
+  return { code, args, inputs, index, regions };
 }
 
 export function runCase(line) {
-  const { code, args, inputs, regions } = parseCase(line);
+  const { code, args, inputs, index, regions } = parseCase(line);
   if (regions === null) return 'REJECT';
   const plan = register(code, args, regions);
-  return plan === null ? 'REJECT' : format(draw(plan, inputs), regions);
+  return plan === null ? 'REJECT' : format(draw(plan, inputs, index), regions);
 }
 
 export const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');

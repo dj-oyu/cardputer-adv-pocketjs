@@ -32,7 +32,8 @@ import {litQ, qRules, TURN} from './shiki_q.mjs';
 
 export const OP = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9,
   REPEAT_REG: 10, BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14, LINE_PATTERN: 15, SUB: 16, NEG: 17,
-  SHIFT: 18, ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26};
+  SHIFT: 18, ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26,
+  LOAD: 27, STORE: 28, DRAW_INDEX: 29};
 const REGS = 16, CODE = 64;
 
 // Raw value of a literal at Q q (sec.2.4's rounding), or a compile error
@@ -53,11 +54,16 @@ const READS = {
   [OP.CUBIC]: [], [OP.LINE_PATTERN]: ['a', 'b'],
 };
 READS[OP.LOOKUP] = ['b'];
+// v2.0 draft: LOAD/STORE read the record's register b; LOAD writes its group
+// (defs), STORE reads its group (args), as FETCH and PUT do.
+READS[OP.LOAD] = ['b']; READS[OP.STORE] = ['b'];
 const BASE = {[OP.CUBIC]: 0, [OP.LINE_PATTERN]: 10};
-const WRITES = new Set([OP.SET, OP.INPUT, OP.ADD, OP.SUB, OP.MUL, OP.NEG, OP.SHIFT, OP.SIN, OP.LOOKUP]);
-// EACH reads its count register only in the count mode (aux = 1); FETCH
-// writes its group (defs), PUT reads its group (args).
-const uses = i => (READS[i.op] ?? []).map(f => i[f]).concat(i.args ?? [], i.op === OP.EACH && i.aux === 1 ? [i.b] : []);
+const WRITES = new Set([OP.SET, OP.INPUT, OP.ADD, OP.SUB, OP.MUL, OP.NEG, OP.SHIFT, OP.SIN, OP.LOOKUP, OP.DRAW_INDEX]);
+// EACH reads its count register only in the count mode (aux bit 0) and its
+// start register (imm) only with aux bit 1 (v2.0 draft); FETCH writes its
+// group (defs), PUT reads its group (args).
+const eachRegs = i => i.op === OP.EACH ? [...(i.aux & 1 ? ['b'] : []), ...(i.aux & 2 ? ['imm'] : [])] : [];
+const uses = i => (READS[i.op] ?? []).concat(eachRegs(i)).map(f => i[f]).concat(i.args ?? []);
 const defsOf = i => WRITES.has(i.op) ? [i.dst] : i.defs ?? [];
 const defines = i => defsOf(i).length > 0;
 const opens = op => op === OP.REPEAT || op === OP.REPEAT_REG || op === OP.EACH;
@@ -153,6 +159,10 @@ function lower(ast, qdecl, data) {
         return ev({k: '*', a: e.a, b: {k: 'num', lit: String(1 / c)}}, q);
       }
       case 'call': {
+        if (e.f === 'drawIndex') {   // v2.0 draft DRAW_INDEX: Q0
+          const x = op(OP.DRAW_INDEX, {});
+          return q ? op(OP.SHIFT, {a: x.vr, imm: K(q)}) : x;
+        }
         const turns = op(OP.MUL, {a: mat(ev(e.args[0], 16)), b: cst(TURN), aux: 32});
         const s = op(OP.SIN, {a: turns.vr});
         return q === 16 ? s : op(OP.SHIFT, {a: s.vr, imm: K(q - 16)});
@@ -264,11 +274,14 @@ function lower(ast, qdecl, data) {
         case 'each': {
           const [ri, d] = region(s.r);
           if (s.names.length > d.k) throw new Error(`${s.names.length} names for ${s.r}'s record of ${d.k}`);
+          // from(k): the start record in a register (aux bit 1, imm), v2.0 draft.
+          const from = s.from ? mat(ev(s.from, 0)) : null;
+          const fl = from === null ? {aux: 0} : {aux: 2, imm: from};
           if (s.n) {
             const n = ev(s.n, 0);
             if (n.t === 'c' && (n.raw < 0 || n.raw > 65535)) throw new Error(`${s.r}.take(${n.raw}) outside 0..65,535`);
-            emit({op: OP.EACH, a: ri, b: mat(n), aux: 1});
-          } else emit({op: OP.EACH, a: ri, aux: 0});
+            emit({op: OP.EACH, a: ri, b: mat(n), ...fl, aux: fl.aux | 1});
+          } else emit({op: OP.EACH, a: ri, ...fl});
           cse = new Map();
           const members = s.names.map(n => vreg('fetch', n));
           emit({op: OP.FETCH, a: ri, b: 0, aux: members.length, imm: 0, defs: members});
@@ -290,6 +303,23 @@ function lower(ast, qdecl, data) {
           // they are (sec.8.2).
           const same = xs.every((x, j) => x.t === 'r' && !x.inst && x.vr === l.members[j]);
           emit({op: OP.PUT, a: ri, b: 0, aux: xs.length, imm: 0, args: same ? l.members.slice(0, xs.length) : xs.map(member)});
+          break;
+        }
+        case 'load': case 'store': {
+          // v2.0 draft LOAD / STORE: record s.i (Q0), fields s.c.. .
+          const [ri, d] = region(s.r), load = s.k === 'load';
+          const m = load ? s.names.length : s.args.length;
+          if (m < 1 || s.c + m > d.k) throw new Error(`${s.r}.${load ? 'at' : 'set'}(): fields ${s.c}..${s.c + m - 1} of ${s.r}'s record of ${d.k}`);
+          if (!load && !d.write) throw new Error(`${s.r}.set(): the region is not declared write`);
+          const b = mat(ev(s.i, 0)), aux = s.c | m << 8;
+          if (load) {
+            const members = s.names.map(n => vreg('fetch', n));
+            emit({op: OP.LOAD, a: ri, b, aux, imm: 0, defs: members});
+            members.forEach((v, j) => { wrote(v); names.set(s.names[j], {kind: 'alias', x: {t: 'r', vr: v}}); });
+          } else {
+            const xs = s.args.map(e => ev(e, d.q));
+            emit({op: OP.STORE, a: ri, b, aux, imm: 0, args: xs.map(member)});
+          }
           break;
         }
         case 'break': {
@@ -377,7 +407,8 @@ function liveness(code) {
 function removeDead(code) {
   for (;;) {
     const {liveOut} = liveness(code);
-    const keep = code.filter((i, pc) => !defines(i) || defsOf(i).some(d => liveOut[pc].has(d)));
+    // A LOAD stays even when its values are unused: its record check can fail.
+    const keep = code.filter((i, pc) => !defines(i) || i.op === OP.LOAD || defsOf(i).some(d => liveOut[pc].has(d)));
     if (keep.length === code.length) return code;
     code = keep;
   }
@@ -407,7 +438,7 @@ function remat(code, vregs, vr) {
       const t = vregs.push({kind: 'remat', name: vregs[vr].name}) - 1;
       out.push({...vregs[vr].def, dst: t});
       const j = {...i};
-      for (const f of READS[i.op] ?? []) if (j[f] === vr) j[f] = t;
+      for (const f of (READS[i.op] ?? []).concat(eachRegs(i))) if (j[f] === vr) j[f] = t;
       if (j.args) j.args = j.args.map(a => a === vr ? t : a);
       out.push(j);
     } else out.push(i);
@@ -434,7 +465,7 @@ function color(code, vregs) {
   // Consecutive groups (FETCH's and PUT's) next, each as a unit: the lowest
   // base where no member meets a coloured neighbour on its register.
   const groups = [];
-  code.forEach(i => { if (i.op === OP.FETCH) groups.push(i.defs); if (i.op === OP.PUT) groups.push(i.args); });
+  code.forEach(i => { if (i.op === OP.FETCH || i.op === OP.LOAD) groups.push(i.defs); if (i.op === OP.PUT || i.op === OP.STORE) groups.push(i.args); });
   for (const g of groups) {
     if (g.every(v => reg.has(v))) continue;   // a PUT that reads FETCH's group
     let base = -1;
@@ -513,9 +544,9 @@ export function compileShiki(plan, qdecl = {}) {
     const j = {...i};
     if (WRITES.has(i.op)) j.dst = R(i.dst);
     for (const f of READS[i.op] ?? []) j[f] = R(i[f]);
-    if (i.op === OP.EACH) j.b = i.aux === 1 ? R(i.b) : 0;
-    if (i.op === OP.FETCH) j.dst = consecutive(i.defs, 'FETCH');
-    else if (i.op === OP.PUT) j.dst = consecutive(i.args, 'PUT');
+    if (i.op === OP.EACH) { j.b = i.aux & 1 ? R(i.b) : 0; j.imm = i.aux & 2 ? R(i.imm) : 0; }
+    if (i.op === OP.FETCH || i.op === OP.LOAD) j.dst = consecutive(i.defs, i.op === OP.LOAD ? 'LOAD' : 'FETCH');
+    else if (i.op === OP.PUT || i.op === OP.STORE) j.dst = consecutive(i.args, i.op === OP.STORE ? 'STORE' : 'PUT');
     else if (i.args) {
       j.args = i.args.map(R);
       j.args.forEach((r, k) => { if (r !== BASE[i.op] + k) throw new Error(`operand ${k} not in r${BASE[i.op] + k}`); });
@@ -530,6 +561,7 @@ export function compileShiki(plan, qdecl = {}) {
     const drop = j.op === OP.SET && j.imm === 0 && !j.patch && depth === 0 && !written.has(j.dst);
     if (WRITES.has(j.op)) written.add(j.dst);
     if (j.op === OP.FETCH) for (let k = 0; k < j.aux; k++) written.add(j.dst + k);
+    if (j.op === OP.LOAD) for (let k = 0; k < j.aux >> 8; k++) written.add(j.dst + k);
     if (opens(j.op)) depth++;
     if (j.op === OP.END) depth--;
     return !drop;

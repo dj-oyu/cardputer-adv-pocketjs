@@ -31,7 +31,7 @@ let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
   // a mid rail from the first post to one post past the last.
-  /** @plan rail inputs: x0, dx, top, ground, posts, mid, colour */
+  /** @shiki rail inputs: x0, dx, top, ground, posts, mid, colour */
   rail() {
     let x = x0;
     const end = posts * dx + x;
@@ -45,7 +45,8 @@ const T = {
 
   // turf: mowing stripes from the near edge (x0, y0) to the far edge (x1, y1),
   // alternating between two greens (512 + 288 * phase, then 1312 minus it).
-  /** @plan turf inputs: x0, x1, dx0, dx1, y0, y1, stripes, phase */
+  /** @shiki turf inputs: x0, x1, dx0, dx1, y0, y1, stripes, phase
+   *  @q phase=0 */
   turf() {
     let near = x0, far = x1, green = 512 + phase * 288;
     for (let j0 = 0; j0 < stripes; j0++) {
@@ -60,7 +61,7 @@ const T = {
   // of $3 segments peaking two tiers above the roof line. The x + 0 copies
   // are the hand IR's (x + 0 is not x: it turns -0 into +0), kept so the IR
   // did not change in the move to JS.
-  /** @plan stands inputs: x0, dx, ground, rise, bays, unused5, unused6, roof */
+  /** @shiki stands inputs: x0, dx, ground, rise, bays, unused5, unused6, roof */
   stands(tiers, rows, dots, arcs) {
     let x = x0;
     let y = ground + 0;
@@ -94,7 +95,7 @@ const T = {
   // from the last. $7 is colour B, the empty cells' (-1: none). The loop draws
   // two rows a turn (the two cloths are immediates) and stops after $0.
   // The look's numbers are one table: KN (the tiers' patterns, KN[3] the rest).
-  /** @plan crowd inputs: x0, y0, x1, y1, dy0, dy1, u0, u1 */
+  /** @shiki crowd inputs: x0, y0, x1, y1, dy0, dy1, u0, u1 */
   crowd(rows, head, body, skin, cloth0, cloth1, shift, empty) {
     let ya = y0, yb = y1, ua = u0, ub = u1, k = rows;
     const s0 = dy0 + 2, s1 = dy1 + 2;
@@ -146,7 +147,7 @@ const T = {
 
   // gate: the starting stalls, 9 dividers from the centre outwards, each a
   // shrink times the one before (x, and both heights above the horizon).
-  /** @plan gate inputs: x, rise0, rise1, shrink, horizon */
+  /** @shiki gate inputs: x, rise0, rise1, shrink, horizon */
   gate() {
     let dx = x;
     let h0 = rise0;
@@ -165,7 +166,7 @@ const T = {
 
   // pole: the winning post (red, from the ground to the top), its disc of
   // radius r as two CUBICs, and the finish line doubled one pixel apart.
-  /** @plan pole inputs: x, ground, top, r, lx0, ly0, lx1, ly1 */
+  /** @shiki pole inputs: x, ground, top, r, lx0, ly0, lx1, ly1 */
   pole() {
     move(x, ground);
     line(x, top, 63488);
@@ -194,7 +195,7 @@ const T = {
   // photo: the photo-finish frame. The line at x (white, then red one pixel
   // right), the top and bottom borders, and a ruler of 8 groups of 4 ticks
   // (6 px apart) each ending in a longer white tick.
-  /** @plan photo inputs: x */
+  /** @shiki photo inputs: x */
   photo() {
     move(x, 13);
     line(x, 127, 65535);
@@ -220,7 +221,7 @@ const T = {
 
   // conf: confetti. Up to 96 flakes (input 1 of them) on fixed sine tracks,
   // drifting with the time (input 0); yellow and 129055 - yellow alternate.
-  /** @plan conf inputs: t, count */
+  /** @shiki conf inputs: t, count */
   conf() {
     let i = 0, colour = 65504;
     for (let j0 = 0; j0 < 96; j0++) {
@@ -236,7 +237,7 @@ const T = {
 
   // silk: the jockey over the close-up horse (points baked for HX,HY; README):
   // the silk in colour, raised by bob px, and a white cap by CUBIC.
-  /** @plan silk inputs: colour, bob */
+  /** @shiki silk inputs: colour, bob */
   silk() {
     move(113, 96 + bob);
     line(116, 92 + bob, colour);
@@ -252,7 +253,7 @@ const T = {
 
   // map: the race map. The course line, the finish mark, and each horse's
   // x (inputs 0..7) as a 4 px dash in its silk (derby_watch.js SILK, baked).
-  /** @plan map inputs: h0, h1, h2, h3, h4, h5, h6, h7 */
+  /** @shiki map inputs: h0, h1, h2, h3, h4, h5, h6, h7 */
   map() {
     move(8, 12);
     line(232, 12, 16904);
@@ -279,7 +280,7 @@ const T = {
   // vis: the big screen. Its face filled row by row in the colour face (the
   // feed is drawn over it), bezel rings round it, a top light, and two pairs
   // of legs down to legY.
-  /** @plan vis inputs: x0, y0, x1, y1, bezel, legY, face */
+  /** @shiki vis inputs: x0, y0, x1, y1, bezel, legY, face */
   vis() {
     let l = x0;
     let t = y0;
@@ -372,11 +373,6 @@ const T = {
     line(x, chest + ns + ns, coat);
   },
 
-  // nil: draws nothing; the code of the typed-point plans (gallop frames, hd).
-  /** @plan nil inputs: */
-  nil() {
-  },
-
   // ---- The panning units (ser() in scene, README "首振りカメラ"). A series
   // of points along the straight, far to near: X'' and -Z' step linearly,
   // and 1/Z' comes from the point before by Newton, q *= (-Z') q + 2. The
@@ -385,7 +381,8 @@ const T = {
   // 6 m and horizon 28 are baked in).
   // prail: posts from the height 6 - top down to the ground, and the top and
   // mid lines from the first post to the point after the last.
-  /** @plan prail inputs: x, dx, z, dz, posts, r, colour, top */
+  /** @shiki prail inputs: x, dx, z, dz, posts, r, colour, top
+   *  @q z=24, dz=24, pz=24 */
   prail() {
     let px = x, pz = z, q = r;
     const x0 = px * q;
@@ -410,7 +407,8 @@ const T = {
   // pt: turf stripes in one green ($0; t0 and t1 are the two), each from the
   // far rail (farX, farZ past the near point) to the near one. The far 1/Z'
   // starts from the near one (4 steps), then 3 a stripe; the near 4.
-  /** @plan pt inputs: x, dx, z, dz, stripes, r, farX, farZ */
+  /** @shiki pt inputs: x, dx, z, dz, stripes, r, farX, farZ
+   *  @q z=24, dz=24, farZ=24, pz=24, fz0=24, fz=24 */
   pt(green) {
     let px = x, pz = z, near = r;
     const fz0 = pz + farZ;
@@ -437,7 +435,7 @@ const T = {
   // hl: lines between two ends (x0, 1/Z' r0) and (x1, r1): the first at the
   // height coefficient c0, then cs a line, lines of them; the ends of the
   // first and the last joined (the screen's face and bezel, stand tiers).
-  /** @plan hl inputs: x0, r0, x1, r1, c0, cs, lines, colour */
+  /** @shiki hl inputs: x0, r0, x1, r1, c0, cs, lines, colour */
   hl() {
     let c = c0, ya = 0, yb = 0;
     const y0 = r0 * c0 + 28;
@@ -470,7 +468,8 @@ const T = {
   // dust: specks (1 px) and, on slots whose hash is over GR, grains (L px
   // long), in C0 and C1, or in C2 while the twinkle (rate TW) is over SPK. y
   // drifts with t (the JS scales it), x with o.
-  /** @plan dust inputs: t, o, h0, w, xR, y0, yH */
+  /** @shiki dust inputs: t, o, h0, w, xR, y0, yH
+   *  @q t=0, h0=0 */
   dust() {
     const SPK = .8, TW = 100, GR = .5, L = 2, C0 = 0xffd9, C1 = 0xe695, C2 = 0xffff, GA = 2.39996;
     let x = o, h = h0 * .0000958738;
@@ -494,12 +493,12 @@ const T = {
     }
   },
 
-  // bokeh: one layer of N octagons from radius R0 (+-30% by hash) inwards 1
-  // px apart, the rim in RIM, the rest in FILL (N 1: a ring). y drifts with
+  // bokeh: a ring of radius R0 (+-30% by hash) in RIM a layer. y drifts with
   // t (the JS scales it), x with o.
-  /** @plan bokeh inputs: t, o, h0, w, xR, y0, yH */
+  /** @shiki bokeh inputs: t, o, h0, w, xR, y0, yH
+   *  @q t=0, h0=0 */
   bokeh() {
-    const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
+    const R0 = 6, RIM = 0x7b28, GA = 2.39996;
     let x = o, h = h0 * .0000958738;
     const jx = w * .45, rv = R0 * .3;
     for (let i = 0; i < 24; i++) {
@@ -507,14 +506,10 @@ const T = {
       const u = sin(h);
       const cx = u * jx + x;
       const cy = sin(u * 137 + t * .003) * (yH * .5) + yH * .5 + y0;
-      let r = u * rv + R0, cc = RIM;
-      for (let q = 0; q < N; q++) {
-        const f = r * .7071;
-        const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc2 = cy - f;
-        move(xa, cy); line(xb, yb, cc); line(cx, cy + r, cc); line(xc, yb, cc); line(xd, cy, cc);
-        line(xc, yc2, cc); line(cx, cy - r, cc); line(xb, yc2, cc); line(xa, cy, cc);
-        r += -1; cc = FILL;
-      }
+      const r = u * rv + R0, f = r * .7071;
+      const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc2 = cy - f;
+      move(xa, cy); line(xb, yb, RIM); line(cx, cy + r, RIM); line(xc, yb, RIM); line(xd, cy, RIM);
+      line(xc, yc2, RIM); line(cx, cy - r, RIM); line(xb, yc2, RIM); line(xa, cy, RIM);
       x += w; h += GA;
     }
   },
@@ -524,7 +519,7 @@ const T = {
   // whenever boil (0..5, the JS cycles it: six drawings, as cel boil) changes, tilted up to TILT px a segment; the top's first at
   // y BT, the bottom's at BS - BT, the next GAP px further in (lines close
   // together read as one thick stroke); in white, sepia0, sepia1 by turns.
-  /** @plan band inputs: strokes, boil */
+  /** @shiki band inputs: strokes, boil */
   band() {
     const white = 0xffff, sepia0 = 0x7202, sepia1 = 0xcd0d, BT = 15, BS = 146, GAP = 2.5, TILT = .59, AMP0 = .8, AMP1 = .4, N = 6, SEG = 42;
     let y0 = BT, sg = GAP, c0 = white, c1 = sepia0, c2 = sepia1, hb = boil * 2.29;

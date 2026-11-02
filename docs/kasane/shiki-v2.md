@@ -69,6 +69,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 0. **フレームの関数を Shiki に載せ替える**（レビュー R1）: `pocket.kasane.shiki` に `beginFrame`・`commit`・`resource`・`createSurface`・`grid` を直接載せ、全アプリの `H.beginFrame` などを `SK.` に書き換える（`procedural` の名前はまだ残す）。
 1. DERBY: `pocket.derby` の全 draw を Shiki に（R2）、`@plan` 18 本と点を `@shiki` に。
+   - 進み（2026-11-02）: `@plan` は `nil`（型付きの点）だけを残して `@shiki` に移した。`pocket.derby` の C の描画は handle の種類で engine を選ぶ（`pocket_proc_draw_numbers`）。誤差と `@q` は [apps/derby/README.md](../../apps/derby/README.md)「背景の式もすべて Shiki」。残りは点（`i16` の領域と `EMIT_LINES`）と、実機の確認。
 2. MEGADEMO。
 3. BIG WAVE。
 4. 検査用のアプリと heapprobe の DERBY。
@@ -112,26 +113,38 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 | ---: | --- | --- |
 | 29 | `DRAW_INDEX dst` | `r[dst]` = この draw の番号（`drawMany` の何番目か、0〜`maxDrawsPerCall − 1`）。`draw()` から呼ばれたときは 0。1 ステップ |
 
-- **開始レコード（レビュー R3）:** `EACH`・`VEACH`・`EMIT_POINTS`・`EMIT_LINES` に、`aux` の bit 1 で「`imm` のレジスタ番号の値を開始レコードにする」旗を足す（v1 の `EACH` の `aux` は bit 0 だけ使う）。カーソルは開始レコードから始まり、件数は bit 0 の規則のまま（全件なら `R − 開始`）。開始が 0〜`R` の外なら `INVALID`。これで「6 コマを 1 領域に並べ、番号で 1 コマを描く」「レーン `l` の列だけ回す」が書ける。
-- **配管（レビュー M3）:** `ksn_shiki_draw_fixed` に draw の番号の引数を足す。検証の行（§10.1 of spec）に番号の欄を足す。`drawMany` で draw `k` が失敗すると `k + 1` 以降は行われない（v1.5 のまま）ので、「draw `k` の失敗の後、`k + 1` 以降の `STORE` は起きない」を §5.3 of spec に足す。
+- **開始レコード（レビュー R3）:** `EACH`・`VEACH` に、`aux` の bit 1 で「`imm` のレジスタ番号の値を開始レコードにする」旗を足す（v1 の `EACH` の `aux` は bit 0 だけ使う）。`aux` は 0〜3、bit 1 が無ければ `imm` は 0、あれば `imm` は 0〜15（`imm` は整数の欄になり、引数の当てはめは Q0 だけ）。入るときに開始 `s`（0〜`R`）、次に件数（bit 0 なら `r[b]` で 0〜`R − s`、無ければ `R − s`）を 1 回ずつ読み、外なら `INVALID`。カーソルは `s` から始まる。`VEACH` は `s + 件数` が 32,767 を超えると `INVALID`（`VIOTA` のレーンの値はレコードの番号なので）。
+  - **`EMIT_POINTS`・`EMIT_LINES` は旗を `dst` に置く**（実装で決めた。`aux` は色なので空きが無い）。`dst` の bit 0 が件数、bit 1 が開始。開始は `r[b]`、件数は `r[b]`（開始なし）か `r[b + 1]`（両方）。範囲の規則は `EACH` と同じ。
+  - 実装（2026-11-02）: `ksn_shiki.c`、参照 `shiki_ref.mjs`（`EACH`・`LOAD`・`STORE`・`DRAW_INDEX`。ベクトルと `EMIT` は参照に無く、`test_shiki_vec.c` が確かめる）、差分の検査 `shiki_diff.mjs`、検証の行の `INDEX k`（`INPUTS` の後、`DATA` の前。無ければ 0）。これで「6 コマを 1 領域に並べ、番号で 1 コマを描く」「レーン `l` の列だけ回す」が書ける。
+- **配管（レビュー M3）:** draw の番号を受ける `ksn_shiki_draw_index` を足した（`ksn_shiki_draw_fixed` は番号 0 で呼ぶ）。検証の行（§10.1 of spec）に番号の欄を足す。`drawMany` で draw `k` が失敗すると `k + 1` 以降は行われない（v1.5 のまま）ので、「draw `k` の失敗の後、`k + 1` 以降の `STORE` は起きない」を §5.3 of spec に足す。
 
 ### 4.2 JS の側
 
 - 状態はアプリが `shiki.data()` で作る**少数の領域**に置き、JS は窓（型付き配列 1 本）に整数を書く。欄は `窓[c · S + j]`、`S = (R + 7) & ~7`（`ksn_shiki_stride` と同じ式）（レビュー L2）。`fields()` の view は作るたびにゲストのヒープを使うので、毎フレームの経路では窓を直接使う（手引き）。
 - 領域の数の上限（`maxSessionDataRegions` 16）と予算（既定 48 KiB）はそのまま。
-- 決めること **D4:** 窓に `S` を返す読み取り専用のプロパティを足すか（推奨: 足さない。式は v1.4 で固定済みで、プロパティは窓ごとにゲストのメモリを使う）。
+- **D4（決定、2026-11-02、利用者）: 窓に `S` のプロパティは足さない。** 式（`(R + 7) & ~7`）は v1.4 で固定済みで、プロパティは窓ごとにゲストのメモリを使う。アプリが自分で計算する。
 
 ### 4.3 効果の見込み（推定）と、DERBY で残る仕事
 
 DERBY の走者（今は 1 頭 7 入力 × 2 本を毎フレーム `bput`）を例にすると:
 
 - **消せる:** 入力の組み立て（`BI` の `Int32Array` への書き込み）。式が `DRAW_INDEX` でレーン番号を得て、状態の領域（位置・奥行き・色）を `LOAD` で読む。さらに `pocket.derby.lanes()` が投影の結果（今は `PO` へ書く `X`・`S`・`Y`）を状態の領域の窓へ直接書けば、JS のレーンごとの仕事は位置と奥行きを書くことだけになる（推定、未測定）。
-- **残る（レビュー R3）:** 毎フレームの選択。(a) 画面外の走者を飛ばす（Shiki は座標が −480〜720 の外だと `INVALID` でフレームを捨てるので、間引きは必須）、(b) 中継で描く頭数を `FN[tier]` に絞る、(c) 奥から手前への順（毎フレーム変わる）。(a) は式の中で `REPEAT 1` と `BREAK_IF_GT` で書ける（1 条件 3〜4 命令、`run` は 42 命令なので収まる見込み）。(b)・(c) は `handles` の並びか、順番の表（領域）で表す。**「JS の仕事が 0」ではなく「レーンの状態を書くことと、並びの表の更新」**になる。
-- 3 と 2 の関係: 投影の式がレーンごとの `X`・`S`・`Y` を `STORE` し、`run`・`legs` が `DRAW_INDEX` → 順番の表を `LOAD` → そのレーンのレコードを `LOAD`、という流れで、DERBY の R1 の問題（投影を C に置いた理由）が Shiki の中で解ける（レビュー L5）。
+- **残る（レビュー R3）:** 毎フレームの選択。(a) 画面外の走者を飛ばす（Shiki は座標が −480〜720 の外だと `INVALID` でフレームを捨てるので、間引きは必須）、(b) 中継で描く頭数を `FN[tier]` に絞る、(c) 奥から手前への順（毎フレーム変わる）。(a) は式の中で `REPEAT 1` と `BREAK_IF_GT` で書ける（1 条件 3〜4 命令、`run` は 42 命令なので収まる見込み）。(b)・(c) は `drawList` の順番の表（§5.1）で表す。式は順番を知らない。**「JS の仕事が 0」ではなく「レーンの状態を書くことと、並びの表の更新」**になる。
+- 3 と 2 の関係: 投影の式がレーンごとの `X`・`S`・`Y` を `STORE` し、`drawList` が順番の表の順に `run`・`legs` を描き、式は `DRAW_INDEX`（リストの中の番号）→ そのレーンのレコードを `LOAD`、という流れで、DERBY の R1 の問題（投影を C に置いた理由）が Shiki の中で解ける（レビュー L5）。
 
 ## 5. 描画の並びを残す（構想の 4）
 
 **決定（2026-11-02、利用者）: native のリスト（案 L-b）。** 手引きだけの案（不変の `Uint32Array` を `drawMany` に渡す）は採らなかった。以下は規則の草案（凍結前にレビューする）。
+
+規則の決定（2026-11-02、利用者。すべて推奨のとおり）:
+
+- **順と間引きはリストが持つ（案 B）。** `drawList` が順番の表（`u16` の窓）を受け、native が回す。式は順番の表を読まない（草案の「式が順番の表を `DRAW_INDEX` と `LOAD` で読み、自分で抜ける」案 A は、どの式にも同じ 3〜4 命令が要るので採らなかった）。JS は毎フレーム順番の表と `count` を書く。
+- **リストは入力を持たない。** 状態はデータ領域（§4）。
+- **途中の draw が失敗したら止める**（`drawMany` と同じ。後の draw は行わない）。
+
+実装（2026-11-02）: `pocket_shiki_api.c` の `list`・`setList`・`drawList`・`releaseList`、`limits.maxLists` 8。リストの id は「枠 + 1 + 8 × 世代」で、解放した id は枠を使い回しても `CLOSED` のまま。`unregister` はリストが参照している間 `BUSY`。検査は `apps/shikitest/shiki_api_test.js`（host の QuickJS、ASan/UBSan で 75/75。実機は未実施）。
+
+リスト自体の利点（§4 の状態の置き場とは別に）: 項目の handle の検査が作る時の 1 回になる、参照中の handle の `unregister` を `BUSY` で守れる、handles の型付き配列がゲストのヒープから消える。
 
 ### 5.1 API
 
@@ -139,14 +152,15 @@ DERBY の走者（今は 1 頭 7 入力 × 2 本を毎フレーム `bput`）を�
 | --- | --- | --- |
 | `shiki.list(handles)` | `handles`（`Uint32Array`、長さ 1〜`maxDrawsPerCall`）を Shiki のヒープへ写し、リストの handle（正の整数）を返す。各要素は登録済みの Shiki の handle | 型・長さ: `INVALID_ARGUMENT`。未登録の handle: `CLOSED`。予算・リストの数: `LIMIT_EXCEEDED` |
 | `shiki.setList(list, handles, offset?)` | リストの `offset` 番目から `handles` を上書きする（長さは変えない） | 範囲外: `INVALID_ARGUMENT`。古いリスト: `CLOSED` |
-| `shiki.drawList(list, from?, count?)` | リストの `from` 番目から `count` 個（省略は残り全部）を、入力なし（`stride = 0` の `drawMany` と同じ）で順に描く。`DRAW_INDEX` は**リストの中の番号**（`from` からではなく、リストの先頭から） | `from`・`count` が範囲外: `INVALID_ARGUMENT`。draw の誤りは `drawMany` と同じ（`index` はリストの中の番号） |
+| `shiki.drawList(list, order?, count?)` | `order` を省くとリストの全部を先頭から順に描く。`order`（`shiki.data()` の `u16`・`k_rec = 1` の窓）を渡すと、`order[0]`〜`order[count − 1]` の番号の項目をその順に描く（`count` の省略は `R`）。同じ番号を 2 回描いてよい。入力は無い（`stride = 0` の `drawMany` と同じ）。`DRAW_INDEX` は**リストの中の番号**（`order` の値。`order` の中の位置ではない） | `order` が `data()` の `u16`・`k_rec = 1` の窓でない: `INVALID_ARGUMENT`。`count` が 0〜`R` の外、`order` の値がリストの長さ以上: `INVALID_ARGUMENT`（draw を 1 つも行う前に検査する）。draw の誤りは `drawMany` と同じで、`index` は `order` の中の位置 |
 | `shiki.releaseList(list)` | リストを解放する | 古いリスト: `CLOSED` |
 
 - **寿命:** リストが参照している handle の `unregister` は `BUSY`（データ領域の `release` と同じ考え方。黙って古い handle を描かない）。リストはセッションの終わりに全部解放する（`app_stop()` の reset）。
 - **予算:** リストは `4 × 長さ` バイトと管理領域を Shiki のヒープから取り、`heap().used` に入る。`limits` に `maxLists`（案: 8）を足す。長さの上限は `maxDrawsPerCall`（256）。
 - **割り込み:** `drawList` は `drawMany` と同じく、draw と draw の間で割り込みを確かめない（v1.5 の決定と同じ。最悪 約 1 秒）。
 - **入力:** リストは入力を持たない。式は状態をデータ領域から `DRAW_INDEX` と `LOAD` で読む（§4）。入力が要る描画は `drawMany` を使う。
-- DERBY の例: 走者の `legs`・`run` を 8 頭分（16 個）並べたリストを 1 本持ち、奥から手前の順・間引き・頭数は順番の表（領域）で式が決める（§4.3）。毎フレームは `drawList(list)` 1 回。並びそのものを変えたいときは `setList`。
+- **順番の表の寿命:** `order` の窓は `drawList` の間だけ読む（結び付けない）。読む時は `drawMany` の `handles` と同じく、各 draw の始め（前の draw の `PUT`・`STORE` が映る）。
+- DERBY の例: 走者の `legs`・`run` を 8 頭分（16 個、項目 `2l`・`2l + 1` がレーン `l`）並べたリストを 1 本持つ。JS は奥から手前の順に、描く項目の番号を順番の表へ書き、`drawList(list, order, n)` を 1 回。式は `DRAW_INDEX >> 1` でレーンを得て状態を `LOAD` する。並びそのものを変えたいときは `setList`。
 
 ### 5.2 途中に別の描画を挟む
 
@@ -174,7 +188,16 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 
 - 登録の検査: `VEACH` の本体はベクトルの命令と `END` だけ、ベクトルの命令は `VEACH` の外に置けない、入れ子不可（試作のまま）。
 - ベクトルのレジスタは `v0`〜`v7`、蓄積器 1 つ（試作の値）。`limits` に `vectorRegisters: 8` を出す（コードで強制する値。レビュー L3）。
-- `@shiki` での書き方は凍結前に決める（決めること **D7**）。
+- `@shiki` での書き方は凍結前に決める（決めること **D7**）。利用者は書き方を任せた（2026-11-02）。縛りは **JS の文法として正しいこと**だけ（本体はビルドで消え実機の QuickJS は読まないが、エディタ・整数の lint・`findPlans` がファイルを読む）。意味は変換器（`plan_js.mjs` のパーサは自前）が決める。**スカラーの分は実装した（2026-11-02、凍結前のレビューで確定）:**
+
+| 書き方 | 命令 | 規則 |
+| --- | --- | --- |
+| `const [x, y] = r.at(i);`・`r.at(i, c)` | `LOAD`（欄 `c` から名前の数だけ） | 名前は領域の Q（`for...of` と同じ）。`i` は Q0 で計算する（Q0 の名前は `i` に使った名前も Q0 になる） |
+| `r.set(i, [a, b]);`・`r.set(i, [a, b], c)` | `STORE` | 値は領域の Q。書く旗の無い領域は誤り。`c` は数の literal |
+| `drawIndex()` | `DRAW_INDEX` | 式の中で Q0。`const l = drawIndex();` の `l` は Q0 |
+| `for (const [x] of r.from(k))`・`r.from(k).take(n)` | `EACH` の開始レコード | `k` は Q0（小数を持ちうる式は誤り） |
+
+使わない `r.at()` の名前があっても `LOAD` は消さない（番号の検査が `INVALID` になりうるため）。検査: `test_shiki_data_compile.mjs` の `lane`・`from`（コンパイルした式と AST の評価が、状態・線分・領域の中身で一致）。ベクトルは案のまま: `for (const v of r.blocks())` の中で命令と 1 対 1 の演算と呼び出し（8 レーンにできない形はコンパイルの誤り）。
 - ビット一致: C モデルと PIE の照合（実機）を §10.2 of spec に足す。自動の下ろし（`.H`）とベクトルの命令が同じ領域を読む式も、スカラー・C モデル・PIE の 3 つで一致することを要件にする（レビュー M5）。
 
 ## 7. 決めることの一覧
@@ -183,8 +206,8 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | --- | --- | --- |
 | D2 | 実数の入力と引数を残すか | **決定: 残す**（2026-11-02、利用者） |
 | D3 | `LOAD`・`STORE` の範囲外 | **決定: 読み書きとも `INVALID`**（同） |
-| D4 | 窓に `S` のプロパティを足すか | 足さない（推奨のまま。未決） |
-| D5 | 並びを残す方法 | **決定: native のリスト**（同。規則は §5.1、凍結前にレビュー） |
+| D4 | 窓に `S` のプロパティを足すか | **決定: 足さない**（同） |
+| D5 | 並びを残す方法 | **決定: native のリスト**（同。順番の表を受ける・入力なし・失敗で止める。§5.1、凍結前にレビュー） |
 | D6 | PIE の広げ方 | **決定: ベクトルの命令を仕様に**（同） |
 | D7 | `@shiki` でのベクトルの命令・`LOAD`・`STORE`・`DRAW_INDEX` の書き方 | 凍結前に、試作と DERBY の背景の移行で決める |
 
@@ -192,7 +215,7 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 
 ## 8. 検証と進め方
 
-1. この草案のレビューの反映（済、§10）。D2・D3・D5・D6 は決定（§7）。D4・D7 と §5.1 のリストの規則は実装と一緒に詰め、凍結前の差分レビューに出す。
+1. この草案のレビューの反映（済、§10）。D2〜D6 と §5.1 のリストの規則は決定（§7）。D7 は実装と一緒に詰め、凍結前の差分レビューに出す。
 2. 実装は §2.5 の順に、各段で host の照合（全画素・oracle）と実機（fps・ゲストと native のメモリ・評価の余裕）を移す前と比べる。旧 API の削除（§2.2）の前後で flash・`.bss`・空きヒープを `tools/memlog.py --port` で測る。
 3. 実機の照合: `LOAD`・`STORE`・`DRAW_INDEX`・開始レコードの JS API の検査（`apps/shikitest/`）、ベクトルの命令の C モデルと PIE の一致（shiki-pie.md §8.2 の形）。
 4. 凍結の前に、実装の差分と本文を SLOW が読む（差分レビュー）。

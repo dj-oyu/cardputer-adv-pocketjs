@@ -15,8 +15,9 @@ import {compileAst} from './kir.mjs';
 
 export const RULES = {
   R1: 'statements: let/const, = += -= *=, for (let i = 0; i < n; i++), if (a > b) break;, move/line/plot/cubic/linePattern(...); ' +
-    'with @data regions (Shiki v1.3): for (const [a, b] of region) / of region.take(n), region.put(...), region[i]',
-  R2: 'expressions: numbers, names, + - *, unary -, / by a constant, sin() or Math.sin(), Math.PI, parentheses',
+    'with @data regions (Shiki v1.3): for (const [a, b] of region) / of region.take(n), region.put(...), region[i]; ' +
+    '(v2.0 draft) of region.from(k) / region.from(k).take(n), const [a, b] = region.at(i[, c]);, region.set(i, [a, b][, c]);',
+  R2: 'expressions: numbers, names, + - *, unary -, / by a constant, sin() or Math.sin(), Math.PI, parentheses, drawIndex() (v2.0 draft)',
   R3: 'loops: for (let i = 0; i < n; i++) with n not changed in the body and i not assigned; no while/do/continue',
   R4: 'names: the @plan inputs, the parameters, locals declared before use; no shadowing, no reassigned const',
   R5: 'no strings, arrays, objects, other calls, ternaries, comparisons outside if/for, % ** or bit operators',
@@ -72,6 +73,7 @@ function parseBody(src, line0, inputs, params, data = []) {
     if (x.k === 'id') {
       p++;
       if (peek('(')) {
+        if (x.v === 'drawIndex') { p++; take(')', 'R2'); return {k: 'call', f: 'drawIndex', args: [], line: x.line}; }
         if (x.v !== 'sin') fail(x.line, 'R5', `a call to ${x.v}() in an expression`);
         return call('sin', x.line);
       }
@@ -113,8 +115,10 @@ function parseBody(src, line0, inputs, params, data = []) {
   }
   let allowCompare = false, loops = 0;
   const names = e => e.k === 'name' ? [e.v] : [e.a, e.b, e.i, ...(e.args ?? [])].filter(Boolean).flatMap(names);
-  const assignedIn = body => body.flatMap(s => s.k === 'assign' ? [s.n] : s.k === 'decl' ? s.d.map(d => d.n) : s.body ? assignedIn(s.body) : []);
+  const assignedIn = body => body.flatMap(s => s.k === 'assign' ? [s.n] : s.k === 'decl' ? s.d.map(d => d.n) :
+    s.k === 'load' ? s.names : s.body ? assignedIn(s.body) : []);
   const reads = body => body.flatMap(s => [
+    ...(s.i ? names(s.i) : []), ...(s.from ? names(s.from) : []),
     ...(s.e ? names(s.e) : []), ...(s.d ? s.d.flatMap(d => names(d.e)) : []), ...(s.args ? s.args.flatMap(names) : []),
     ...(s.k === 'break' ? [...names(s.a), ...names(s.b)] : []), ...(s.n && typeof s.n === 'object' ? names(s.n) : []),
     ...(s.k === 'assign' && s.o !== '=' ? [s.n] : []), ...(s.body ? reads(s.body) : [])]);
@@ -129,6 +133,20 @@ function parseBody(src, line0, inputs, params, data = []) {
     const line = t[p].line, x = t[p];
     if (x.k === 'id' && KEYWORDS.has(x.v))
       fail(line, x.v === 'while' || x.v === 'do' || x.v === 'continue' ? 'R3' : x.v === 'else' ? 'R6' : 'R1', `${x.v}`);
+    if (peek('const') && peek('[', 1)) {
+      // const [a, b] = region.at(i[, c]); LOAD of record i, fields c.. (v2.0 draft).
+      p += 2; const vs = [];
+      do vs.push(take('id', 'R1').v); while (peek(',') && take(','));
+      take(']'); take('=');
+      const r = take('id', 'R1').v;
+      if (!region(r)) fail(line, 'R1', `${r} is not a @data region`);
+      take('.'); if (take('id').v !== 'at') fail(line, 'R5', `${r}.${t[p - 1].v} (only .at(i) here)`);
+      take('('); const i = expr(); let c = 0;
+      if (peek(',')) { p++; c = +take('num', 'R1').v; }
+      take(')'); take(';');
+      vs.forEach(v => declare(v, 'const', line));
+      return [{k: 'load', r, names: vs, i, c, line}];
+    }
     if (peek('let') || peek('const')) {
       const kind = t[p++].v, d = [];
       do {
@@ -154,8 +172,18 @@ function parseBody(src, line0, inputs, params, data = []) {
     if (x.k !== 'id') fail(line, 'R1', `a statement starting with ${x.k}`);
     const n = t[p++].v;
     if (region(n)) {
-      // region.put(e0, ...): PUT into the record of the loop over region.
-      take('.'); if (take('id').v !== 'put') fail(line, 'R5', `${n}.${t[p - 1].v}`);
+      // region.put(e0, ...): PUT into the record of the loop over region;
+      // region.set(i, [e0, ...][, c]): STORE into record i (v2.0 draft).
+      take('.'); const m = take('id').v;
+      if (m === 'set') {
+        take('('); const i = expr(); take(','); take('['); const args = [];
+        if (!peek(']')) do args.push(expr()); while (peek(',') && take(','));
+        take(']'); let c = 0;
+        if (peek(',')) { p++; c = +take('num', 'R1').v; }
+        take(')'); take(';');
+        return [{k: 'store', r: n, i, args, c, line}];
+      }
+      if (m !== 'put') fail(line, 'R5', `${n}.${m}`);
       take('('); const args = [];
       if (!peek(')')) do args.push(expr()); while (peek(',') && take(','));
       take(')'); take(';');
@@ -186,9 +214,11 @@ function parseBody(src, line0, inputs, params, data = []) {
     take(']'); take('of', 'R3');
     const r = take('id', 'R3').v;
     if (!region(r)) fail(line, 'R3', `${r} is not a @data region`);
-    let n = null;
+    let n = null, from = null;
+    // .from(k) (v2.0 draft: the start record), then .take(n).
+    if (peek('.') && peek('from', 1)) { p += 2; take('('); from = expr(); take(')'); }
     if (peek('.')) {
-      p++; if (take('id', 'R3').v !== 'take') fail(line, 'R3', `${r}.${t[p - 1].v} (only .take(n))`);
+      p++; if (take('id', 'R3').v !== 'take') fail(line, 'R3', `${r}.${t[p - 1].v} (only .from(k) and .take(n))`);
       take('('); n = expr(); take(')');
     }
     take(')', 'R3');
@@ -196,7 +226,7 @@ function parseBody(src, line0, inputs, params, data = []) {
     vs.forEach(v => declare(v, 'const', line));
     loops++; const body = block(); loops--;
     scopes.pop();
-    return [{k: 'each', r, names: vs, n, body, line}];
+    return [{k: 'each', r, names: vs, n, from, body, line}];
   }
   function forLoop(line) {
     p++; take('(', 'R3');

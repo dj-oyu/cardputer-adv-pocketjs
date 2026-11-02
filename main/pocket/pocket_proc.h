@@ -8,6 +8,9 @@
 
 /* A small APP-session adapter for registered procedural IR. */
 esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
+/* beginFrame, commit, resource, createSurface on obj (kasane.shiki has them
+ * directly, Shiki v2.0 sec.2.5 step 0). */
+esp_err_t pocket_proc_frame_install(JSContext *ctx, JSValueConst obj);
 void pocket_proc_reset(void);
 /* Shiki programs share the procedural slots, handles and frames
  * (pocket_shiki_api.c): attach takes ownership of plan (freed by detach or
@@ -18,8 +21,11 @@ void *pocket_proc_shiki_plan(uint32_t handle);
 bool pocket_proc_shiki_detach(uint32_t handle);
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
 /* The same with the inputs either as JS numbers (in) or, when fixed is not
- * NULL, already in each input's Q format (shiki.drawMany with an Int32Array). */
-JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n);
+ * NULL, already in each input's Q format (shiki.drawMany with an Int32Array),
+ * and the draw's number, what DRAW_INDEX reads (drawMany's entry; 0 for
+ * draw()). */
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
+                                      unsigned index);
 /* Diagnostic (shikiDebug.drawProfile, docs/kasane/shiki-bundle.md): CPU cycles
  * a Shiki draw spends in each native stage, summed while on. parse: js_draw's
  * argument checks and input reads; lookup: from there to the engine (handle,

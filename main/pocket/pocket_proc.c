@@ -908,6 +908,15 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     if(handle>INT32_MAX||n>KSN_PROC_INPUTS)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    /* A Shiki handle (pocket.derby's plans move to Shiki one by one, v2.0
+     * step 1): the Shiki engine, the inputs converted by sec.2.4. */
+    if(find_kind(handle,true)){
+        JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
+#ifdef POCKET_PROC_DRAW_HOOK
+        if(!JS_IsException(result))pocket_proc_draw_hook(handle,in,n);
+#endif
+        return result;
+    }
     proc_slot *slot=find_slot(handle);
     if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
     float input[KSN_PROC_INPUTS]={0};
@@ -1040,9 +1049,10 @@ uint32_t pocket_cycles(void){
 #endif
 }
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
-    return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n);
+    return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
 }
-JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n){
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
+                                      unsigned index){
     const char *op="kasane.shiki.draw";
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
@@ -1058,8 +1068,19 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     image_band_valid=false;
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
-    const ksn_shiki_status s=fixed?ksn_shiki_draw_fixed(slot->plan,fixed,n,shiki_vm,scratch)
-                                  :ksn_shiki_draw(slot->plan,in,n,shiki_vm,scratch);
+    /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
+     * its number (DRAW_INDEX, Shiki v2.0 draft sec.4.1). */
+    ksn_shiki_status s;
+    if(fixed)s=ksn_shiki_draw_index(slot->plan,fixed,n,index,shiki_vm,scratch);
+    else{
+        int32_t fx[KSN_SHIKI_INPUTS]={0};
+        const ksn_shiki_plan *pl=slot->plan;
+        bool good=true;
+        for(unsigned k=0;k<pl->inputs&&good;k++)
+            good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
+        if(good)s=ksn_shiki_draw_index(pl,fx,pl->inputs,index,shiki_vm,scratch);
+        else{memset(shiki_vm,0,sizeof *shiki_vm);s=KSN_SHIKI_BADINPUT;}
+    }
     if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
     if(s!=KSN_SHIKI_DONE){
         building=false;
@@ -1079,20 +1100,29 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     return JS_UNDEFINED;
 }
 
+// The frame's functions: the same frames whichever namespace a caller uses
+// (procedural, and kasane.shiki through pocket_proc_frame_install).
+static const JSCFunctionListEntry frame_methods[]={
+    JS_CFUNC_DEF("beginFrame",1,js_begin),
+    JS_CFUNC_DEF("commit",0,js_commit),
+    JS_CFUNC_DEF("resource",0,js_resource),
+    JS_CFUNC_DEF("createSurface",0,js_create_surface),
+};
+esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
+    return JS_SetPropertyFunctionList(ctx,obj,frame_methods,
+                                      (int)(sizeof frame_methods/sizeof frame_methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
+}
 esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     JSValue procedural=JS_NewObject(ctx);
     if(JS_IsException(procedural))return ESP_ERR_NO_MEM;
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("register",1,js_register),
         JS_CFUNC_DEF("unregister",1,js_unregister),
-        JS_CFUNC_DEF("beginFrame",1,js_begin),
         JS_CFUNC_DEF("draw",2,js_draw),
-        JS_CFUNC_DEF("commit",0,js_commit),
-        JS_CFUNC_DEF("resource",0,js_resource),
-        JS_CFUNC_DEF("createSurface",0,js_create_surface),
     };
     if(JS_SetPropertyFunctionList(ctx,procedural,methods,
-                                  (int)(sizeof methods/sizeof methods[0]))<0){
+                                  (int)(sizeof methods/sizeof methods[0]))<0||
+       pocket_proc_frame_install(ctx,procedural)!=ESP_OK){
         JS_FreeValue(ctx,procedural);return ESP_ERR_NO_MEM;
     }
     return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;

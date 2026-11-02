@@ -141,7 +141,7 @@ function paint(c, xs, close, gate, extra) {
     vr = S.screen(VR, pc ? 1 : 0, VS[0], VS[1], VS[2], VS[3], VS[4]) ? VR : null;
   } else vr = null;
   if (vr) ++von;
-  H.beginFrame(4);
+  SK.beginFrame(4);
   // The dust and the band (KN[4]; docs/apps/derby-finish-fx.md): 0 the dust,
   // HEAD ON's horses, 1 the bokeh, 2 the band. A row of slots scrolls by its
   // parallax times d (Q16 px), the pan since the cut (cx, px at 16 m) and the
@@ -173,6 +173,6 @@ function paint(c, xs, close, gate, extra) {
     dr(j ? 'bokeh' : 'dust', f, e[q] + k * w + (o + 32768 >> 16), k * 25032 & 65535, w, e[q + 1], e[q + 2] - (r + 32768 >> 16), e[q + 3] + (r + 32768 >> 16));
   }
   if (extra) dr(extra[0], extra[1]);
-  H.commit();
+  SK.commit();
 }
 

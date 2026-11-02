@@ -28,6 +28,11 @@
 // clamps and g = 0/31, nested and self-nested EACH, BREAK_IF_GT out of an
 // EACH, LIMIT in the middle of one (writes made so far stay), aliased
 // regions, and binding mismatches (count, type, Q, record size, malformed).
+//
+// v2.0 draft (docs/kasane/shiki-v2.md sec.3, 4): LOAD/STORE of record r[b]
+// (inside and just past 0..R-1, negative, the field span at its edges),
+// DRAW_INDEX with the case's INDEX, and EACH from a start record r[imm]
+// (0, R, past R, with and without a count, a count past R - start).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -110,7 +115,8 @@ function prim(code, heavy, loop) {
 // ------------------------------------------------------------- encoder
 const OP = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9, REPEAT_REG: 10,
   BREAK_IF_GT: 11, PLOT_C: 12, LINE_C: 13, CUBIC: 14, LINE_PATTERN: 15, SUB: 16, NEG: 17, SHIFT: 18,
-  ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26};
+  ADD_H: 19, SUB_H: 20, MUL_H: 21, SHIFT_H: 22, EACH: 23, FETCH: 24, PUT: 25, LOOKUP: 26,
+  LOAD: 27, STORE: 28, DRAW_INDEX: 29};
 function encode({inputs = [], args = [], regions = [], patches = [], code}) {
   const head = 12 + inputs.length + args.length + 4 * regions.length + 4 * patches.length, body = (head + 3) & ~3;
   const b = new Uint8Array(body + 12 * code.length);
@@ -276,11 +282,20 @@ function dataProgram() {
     if (r < .16 && open.length < 8 && room > 3) {
       // EACH: the outer ones mostly differ, but a self-nested one now and then.
       const a = inside.length && rnd() < .2 ? pick(inside) : ri(0, nr - 1);
-      if (rnd() < .45) code.push({op: OP.EACH, a});
+      const n = records(a);
+      // The start record (v2.0 draft): r[imm] with aux bit 1.
+      let from = 0, sr = -1;
+      if (rnd() < .35) {
+        sr = reg();
+        from = pick([0, 0, 1, n, n - 1, n + 1, -1, ri(0, n)]);
+        if (rnd() < .9) code.push({op: OP.SET, dst: sr, imm: from});
+      }
+      const flag = sr >= 0 ? 2 : 0, imm = sr >= 0 ? sr : 0;
+      if (rnd() < .45) code.push({op: OP.EACH, a, aux: flag, imm});
       else {
-        const c = reg(), n = records(a);
-        if (rnd() < .85) code.push({op: OP.SET, dst: c, imm: pick([0, 1, n, n, n - 1, n + 1, -1, 2 ** 31 - 1, ri(0, n)])});
-        code.push({op: OP.EACH, a, b: c, aux: 1});
+        const c = reg(), left = Math.max(0, n - Math.max(0, from));
+        if (rnd() < .85) code.push({op: OP.SET, dst: c, imm: pick([0, 1, left, left, left - 1, left + 1, n, -1, 2 ** 31 - 1, ri(0, left)])});
+        code.push({op: OP.EACH, a, b: c, aux: 1 | flag, imm});
       }
       open.push(a);
     } else if (r < .2 && open.length < 8 && room > 2) {
@@ -294,7 +309,16 @@ function dataProgram() {
       const dst = no() ? ri(0, 15) : ri(0, 16 - Math.max(1, m));
       const put = rnd() < .5 && (decl[a].write || no());
       code.push({op: put ? OP.PUT : OP.FETCH, dst, a, b, aux: m, imm: shiftK()});
-    } else if (r < .58 && (k1.length || no())) {
+    } else if (r < .55) {
+      // LOAD / STORE of record r[b] (v2.0 draft sec.3.1), anywhere.
+      const a = ri(0, nr - 1), k = decl[a].k, rb = reg(), n = records(a);
+      if (rnd() < .8) code.push({op: OP.SET, dst: rb, imm: pick([0, 0, 1, n - 1, n, -1, ri(0, n - 1), 2 ** 31 - 1])});
+      const m = no() ? ri(0, 9) : ri(1, k), c = no() ? ri(0, 8) : ri(0, Math.max(0, k - m));
+      const dst = no() ? ri(0, 15) : ri(0, 16 - Math.max(1, m));
+      const put = rnd() < .5 && (decl[a].write || no());
+      code.push({op: put ? OP.STORE : OP.LOAD, dst, a, b: rb, aux: c | m << 8, imm: shiftK()});
+    } else if (r < .565) code.push({op: OP.DRAW_INDEX, dst: reg()});
+    else if (r < .6 && (k1.length || no())) {
       const a = k1.length && !no() ? pick(k1) : ri(0, nr - 1), i = reg();
       if (rnd() < .5) code.push({op: OP.SET, dst: i, imm: pick([-1, 0, 1, -65536, 2 ** 31 - 1, -(2 ** 31), ri(-5, 50), ri(-5, 50) * 65536 + ri(0, 65535)])});
       code.push({op: OP.LOOKUP, dst: reg(), a, b: i, aux: pick([0, 0, 16, 31, 1, ri(0, 31)]), imm: shiftK()});
@@ -322,7 +346,7 @@ function dataProgram() {
     let field, q = pick([0, 0, 0, 16]), v;
     // EACH's imm is unused but not an int field (sec.3): any Q, must end up 0.
     if (i.op === OP.EACH) { field = rnd() < .7 ? 1 : 0; v = field ? (q ? 1 / 65536 : pick([0, 1, 2])) : pick([0, 0, 1 / 131072, 1]); }
-    else if (i.op === OP.FETCH || i.op === OP.PUT || i.op === OP.LOOKUP) { field = 0; v = q ? ri(-31, 31) / 2 ** q : pick([-31, 0, 31, 32, ri(-31, 31)]); }
+    else if (i.op === OP.FETCH || i.op === OP.PUT || i.op === OP.LOOKUP || i.op === OP.LOAD || i.op === OP.STORE) { field = 0; v = q ? ri(-31, 31) / 2 ** q : pick([-31, 0, 31, 32, ri(-31, 31)]); }
     else continue;
     if (patches.some(p => p.pc === pc && p.field === field)) continue;
     patches.push({pc, arg: args.length, field}); args.push(q); argv.push(v);
@@ -334,7 +358,8 @@ function dataProgram() {
     bytes[k] = rnd() < .5 ? ri(0, 255) : bytes[k] ^ (1 << ri(0, 7));
   }
   const data = pass.map(g => g.alias !== undefined ? `ALIAS ${g.alias}` : `${g.type} ${g.q} ${g.k} ${g.n / g.k} ${g.e.join(' ')}`);
-  return {bytes, argv, inv: [], data: `DATA ${data.length} ${data.join(' ')}`};
+  const index = rnd() < .5 ? pick([0, 1, 7, 255, 65535, ri(0, 300)]) : null;
+  return {bytes, argv, inv: [], data: `${index === null ? '' : `INDEX ${index} `}DATA ${data.length} ${data.join(' ')}`};
 }
 
 // --------------------------------------------------------------- run

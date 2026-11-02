@@ -672,9 +672,10 @@ test('§6.1 / §5.1 region registration rejects', () => {
   rejectsD([EACH(0), PUT(13, 0, 0, 4), END], T4, [g4()]);
   rejectsD([EACH(0), FETCH(0, 0, 0, 1, 32), END], T4, [g4()]);
   rejectsD([EACH(0), PUT(0, 0, 0, 1, -32), END], T4, [g4()]);
-  // EACH fields: aux 0/1; aux 0 ⇒ b = 0; aux 1 ⇒ b ≤ 15; dst = imm = 0
+  // EACH fields: aux 0..3 (v2.0 draft: bit 1 the start register in imm);
+  // bit 0 clear ⇒ b = 0; bit 0 set ⇒ b ≤ 15; dst = 0; bit 1 clear ⇒ imm = 0
   rejectsD([EACH(0, 1, 0), END], [I32T], [g1()]);
-  rejectsD([EACH(0, 0, 2), END], [I32T], [g1()]);
+  rejectsD([EACH(0, 0, 4), END], [I32T], [g1()]);
   rejectsD([EACH(0, 16, 1), END], [I32T], [g1()]);
   assert.ok(register(prog([EACH(0, 15, 1), END], { regions: [I32T] }), [], [g1()]));
   rejectsD([{ ...EACH(0), dst: 1 }, END], [I32T], [g1()]);
@@ -701,9 +702,11 @@ test('patches into data-region ops: k and m are Q0, checked after patching', () 
   assert.equal(reg([1, 0], [[1, 0, 0], [1, 1, 1]], [0, 3]), null); // k not Q0
   assert.equal(reg([0, 0], [[1, 0, 0], [1, 1, 1]], [0, 5]), null); // m = 5: b + m > k_rec
   assert.equal(reg([0, 0], [[1, 0, 0], [1, 1, 1]], [32, 1]), null); // k = 32
-  // EACH's imm is unused: any Q patches it, but it must be 0 afterwards
-  assert.ok(register(prog(code, { regions: T4, args: [16], patches: [[0, 0, 0]] }), [0], [g4()]));
-  assert.equal(register(prog(code, { regions: T4, args: [16], patches: [[0, 0, 0]] }), [1], [g4()]), null);
+  // v2.0 draft: EACH's imm is the start register (an int field): Q0 only,
+  // and 0 unless aux bit 1 is set.
+  assert.equal(register(prog(code, { regions: T4, args: [16], patches: [[0, 0, 0]] }), [0], [g4()]), null);
+  assert.ok(register(prog(code, { regions: T4, args: [0], patches: [[0, 0, 0]] }), [0], [g4()]));
+  assert.equal(register(prog(code, { regions: T4, args: [0], patches: [[0, 0, 0]] }), [1], [g4()]), null);
 });
 
 // ---- text contract: DATA / ALIAS / D ------------------------------------------------
@@ -753,9 +756,63 @@ test('CASE DATA / ALIAS parse and D output', () => {
   assert.throws(() => parseCase(`CASE ${plain} ARGS 0 INPUTS 0 DATA 1 2 0 1 1 x`));
 });
 
+// ---- v2.0 draft (docs/kasane/shiki-v2.md sec.3, 4) --------------------------------
+const LOAD = (dst, a, b, c, m, k = 0) => ({ op: 'LOAD', dst, a, b, aux: c | m << 8, imm: k });
+const STORE = (dst, a, b, c, m, k = 0) => ({ op: 'STORE', dst, a, b, aux: c | m << 8, imm: k });
+
+test('LOAD / STORE: fields c..c+m-1 of record r[b]; out of 0..R-1 INVALID', () => {
+  // i16, k_rec 3, R 3 (fields: [1,2,3], [10,20,30], [100,200,300]), writable.
+  const T = [[0, 0, 3, 1]], g = rg(0, 0, 3, [1, 2, 3, 10, 20, 30, 100, 200, 300]);
+  const r = runD([SET(0, 2), LOAD(4, 0, 0, 1, 2), SET(1, 1), STORE(4, 0, 1, 0, 2, 1)], T, [g]);
+  assert.deepEqual([r.status, r.regs[4], r.regs[5]], ['DONE', 30, 300]);
+  // STORE of record 1, fields 0..1, shifted left by 1.
+  assert.deepEqual(Array.from(g.mem), [1, 60, 3, 10, 600, 30, 100, 200, 300]);
+  for (const bad of [-1, 3]) {
+    const x = runD([SET(0, bad), LOAD(4, 0, 0, 0, 1)], T, [rg(0, 0, 3, [1, 2, 3, 10, 20, 30, 100, 200, 300])]);
+    assert.deepEqual([x.status, x.steps], ['INVALID', 2]);
+  }
+  // STORE saturates to the element type; the values are all read before any write.
+  const h = rg(0, 0, 3, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  runD([SET(2, 70000), SET(3, -5), SET(0, 0), STORE(2, 0, 0, 1, 2)], T, [h]);
+  assert.deepEqual(Array.from(h.mem), [0, 0, 0, 32767, 0, 0, -5, 0, 0]);
+  rejectsD([STORE(0, 0, 0, 0, 1)], [[0, 0, 3, 0]], [rg(0, 0, 3, [1, 2, 3])]);   // read-only region
+  rejectsD([LOAD(0, 0, 0, 2, 2)], T, [rg(0, 0, 3, [1, 2, 3])]);                 // c + m > k_rec
+  rejectsD([LOAD(0, 0, 0, 0, 0)], T, [rg(0, 0, 3, [1, 2, 3])]);                 // m = 0
+  rejectsD([LOAD(14, 0, 0, 0, 3)], T, [rg(0, 0, 3, [1, 2, 3])]);                // dst + m > 16
+});
+
+test('DRAW_INDEX reads the draw number (0 by default; INDEX on a CASE line)', () => {
+  const bytes = assemble({ code: [{ op: 'DRAW_INDEX', dst: 3 }] });
+  assert.equal(draw(register(bytes), [], 7).regs[3], 7);
+  assert.equal(draw(register(bytes)).regs[3], 0);
+  assert.equal(runCase(`CASE ${toHex(bytes)} ARGS 0 INPUTS 0 INDEX 255`).split(' ')[10], '255');
+  assert.equal(register(assemble({ code: [{ op: 'DRAW_INDEX', dst: 3, a: 1 }] })), null);
+});
+
+test('EACH from a start record r[imm] (aux bit 1), with and without a count', () => {
+  const g = () => rg(2, 0, 1, [10, 20, 30, 40, 50]);
+  const each = (aux, imm, b = 0) => ({ op: 'EACH', a: 0, b, aux, imm });
+  // start 2, the rest: 30 + 40 + 50
+  let r = runD([SET(6, 2), each(2, 6), FETCH(1, 0, 0, 1), ADD(2, 2, 1), END], [I32T], [g()]);
+  assert.deepEqual([r.status, r.regs[2]], ['DONE', 120]);
+  // start 1, count 2: 20 + 30
+  r = runD([SET(6, 1), SET(5, 2), each(3, 6, 5), FETCH(1, 0, 0, 1), ADD(2, 2, 1), END], [I32T], [g()]);
+  assert.deepEqual([r.status, r.regs[2]], ['DONE', 50]);
+  // start R: nothing, DONE; start R + 1 or -1: INVALID; count past R - start: INVALID
+  r = runD([SET(6, 5), each(2, 6), FETCH(1, 0, 0, 1), ADD(2, 2, 1), END, SET(7, 1)], [I32T], [g()]);
+  assert.deepEqual([r.status, r.regs[2], r.regs[7]], ['DONE', 0, 1]);
+  for (const st of [6, -1]) assert.equal(runD([SET(6, st), each(2, 6), END], [I32T], [g()]).status, 'INVALID');
+  assert.equal(runD([SET(6, 3), SET(5, 3), each(3, 6, 5), END], [I32T], [g()]).status, 'INVALID');
+  // the flag bit 1 needs a register in imm; without it imm must be 0
+  rejectsD([each(0, 1), END], [I32T], [g()]);
+  rejectsD([each(2, 16), END], [I32T], [g()]);
+  rejectsD([each(4, 0), END], [I32T], [g()]);
+});
+
 test('OPS names cover the v1 table', () => {
   assert.equal(OPS.SHIFT_H, 22);
   assert.equal(OPS.LOOKUP, 26);
+  assert.equal(OPS.DRAW_INDEX, 29);
 });
 
 console.log(`${passed} passed, ${failed} failed`);
