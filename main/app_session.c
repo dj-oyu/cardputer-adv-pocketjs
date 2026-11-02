@@ -2623,6 +2623,17 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
+                /* What Shiki cost these frames (pocket_proc.c, docs/kasane/shiki-jit.md
+                 * sec.9): draws and engine steps per frame, the engine (input
+                 * conversion included) and the whole native draw, ms per frame. */
+                {
+                    pocket_shiki_turn st;
+                    pocket_shiki_turn_take(&st);
+                    if(st.draws)
+                        ESP_LOGI("kasane","SHIKI_TURN draws=%.1f steps=%.0f engine_ms=%.3f total_ms=%.3f frames=%u",
+                                 st.draws/(double)painted,st.steps/(double)painted,
+                                 st.engine_cy/240000.0/painted,st.total_cy/240000.0/painted,painted);
+                }
 #ifdef KASANE_PROC_DEVICE_PROBE
                 {
                     pocket_grid_resize_profile resize_prof;

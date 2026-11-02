@@ -459,6 +459,8 @@ bool pocket_proc_shiki_detach(uint32_t handle){
     return true;
 }
 pocket_shiki_draw_prof pocket_shiki_prof;
+static pocket_shiki_turn shiki_turn;
+void pocket_shiki_turn_take(pocket_shiki_turn *out){*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
 uint32_t pocket_cycles(void){
 #ifdef ESP_PLATFORM
     return esp_cpu_get_cycle_count();
@@ -472,6 +474,7 @@ JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,u
 JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
                                       unsigned index){
     const char *op="kasane.shiki.draw";
+    const uint32_t t_in=pocket_cycles();
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_slot *slot=find_slot(handle);
@@ -486,6 +489,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     image_band_valid=false;
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
+    const uint32_t t_engine=pocket_cycles();
     /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
      * its number (DRAW_INDEX, Shiki v2.0 draft sec.4.1). */
     ksn_shiki_status s;
@@ -500,6 +504,9 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
         else{memset(shiki_vm,0,sizeof *shiki_vm);s=KSN_SHIKI_BADINPUT;}
     }
     if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
+    shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    shiki_turn.steps+=shiki_vm->steps;
+    shiki_turn.draws++;
     if(s!=KSN_SHIKI_DONE){
         building=false;
         return failure(ctx,op,s==KSN_SHIKI_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
@@ -515,6 +522,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     candidate->raster_steps+=shiki_vm->raster;
     if(shiki_vm->ext)candidate->ext=1;
     if(pf->on){pf->copy+=pocket_cycles()-pf->mark;pf->n++;}
+    shiki_turn.total_cy+=pocket_cycles()-t_in;
     return JS_UNDEFINED;
 }
 
