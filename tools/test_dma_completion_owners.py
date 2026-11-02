@@ -93,10 +93,19 @@ void pocket_grid_source_invalidated(uint32_t r){(void)r;}
     pocket = pocket.replace("    repair_tests();", """
     repair_tests();
     pocket_kasane_reset();
-    check(run("globalThis.dp=kasane.procedural;"
-              "globalThis.dh=dp.register([[0,0,0,0,10,0],[0,1,0,0,10,0],[8,0,0,1,0,65535]]);"
-              "dp.beginFrame(0);dp.draw(dh,[]);dp.commit();"),
-          "DMA native procedural candidate submits");
+    /* The frame functions live on kasane.shiki since Shiki v2.0; this harness
+     * has no Shiki engine, so they go on a plain object and the one-pixel
+     * line goes in through the native path pocket.shapes uses. */
+    {
+        JSValue g=JS_GetGlobalObject(ctx),dp=JS_NewObject(ctx);
+        check(pocket_proc_frame_install(ctx,dp)==ESP_OK,"DMA frame functions install");
+        JS_SetPropertyStr(ctx,g,"dp",dp);JS_FreeValue(ctx,g);
+    }
+    pocket_proc_mark dma_mark;
+    bool dma_ok=run("dp.beginFrame(0);");
+    dma_ok=dma_ok&&!JS_IsException(pocket_proc_native_begin(ctx,"dma",&dma_mark));
+    dma_ok=dma_ok&&!JS_IsException(pocket_proc_native_line(ctx,"dma",10,10,10,10,65535));
+    check(dma_ok&&run("dp.commit();"),"DMA native procedural candidate submits");
     check(pocket_proc_pending(),"DMA native candidate remains pending before transfer");
     check(present(&stats)==KSN_OK&&!pocket_proc_pending()&&panel_pixels[10*240+10]==65535,
           "DMA finish precedes native procedural promotion and panel equality");
