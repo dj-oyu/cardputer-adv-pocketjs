@@ -1,0 +1,35 @@
+# MEGADEMO on Shiki (v2.0 step 4), device run, firmware 427b308, 2026-11-02.
+# Broker job v2s4-mega2-427b308 (app_session local.megademo, 90 s, no input):
+# 2,595 frames, two and a half loops at tier 2 (HEAVY), no error. The session
+# ended by duration; the device then opened local.player's overlay (not this app).
+I (536439) shiki: SHIKI_HEAP open bytes=49152
+I (536444) app: APP_ID local.megademo
+I (536455) pocket.app: APP_LOAD act1 bytes=1624 compile_us=6477 run_us=1083 used=21896>24076>25368
+I (536560) pocket.app: APP_LOAD act2 bytes=25069 compile_us=91928 run_us=10769 used=25368>43120>46796
+I (536615) pocket.app: APP_LOAD set bytes=14202 compile_us=51197 run_us=966 used=48572>66380>68164
+I (536665) pocket.app: APP_LOAD brief bytes=11570 compile_us=46966 run_us=1002 used=68164>77644>80280
+I (536701) pocket.app: APP_LOAD wake bytes=8652 compile_us=31047 run_us=2874 used=80280>87600>94024
+I (536714) pocket.app: APP_LOAD view bytes=3767 compile_us=8088 run_us=3431 used=94024>97380>101412
+I (536730) pocket.app: APP_LOAD loop bytes=3363 compile_us=10981 run_us=2444 used=101412>104072>104264
+I (536737) app: MEM free=36820 largest=23552 js=102856 frames=0
+# Scene switches (plans live, freed, registered so far):
+I (540219) js: MEGADEMO SCENE NEWS tier=2 plans=14 freed=0 registered=14
+I (547479) js: MEGADEMO SCENE TWIST tier=2 plans=8 freed=14 registered=14
+I (555530) js: MEGADEMO SCENE ZENITH tier=2 plans=15 freed=16 registered=37
+I (562773) js: MEGADEMO SCENE CORE tier=2 plans=8 freed=15 registered=45
+I (570360) js: MEGADEMO SCENE LOST tier=2 plans=2 freed=8 registered=47
+I (571162) js: MEGADEMO SCENE WAKE tier=2 plans=0 freed=2 registered=47
+I (581910) js: MEGADEMO SCENE TWIST tier=2 plans=8 freed=14 registered=61
+I (589963) js: MEGADEMO SCENE ZENITH tier=2 plans=15 freed=16 registered=84
+I (597206) js: MEGADEMO SCENE CORE tier=2 plans=8 freed=15 registered=92
+I (604790) js: MEGADEMO SCENE LOST tier=2 plans=2 freed=8 registered=94
+I (616340) js: MEGADEMO SCENE TWIST tier=2 plans=8 freed=14 registered=108
+# KASANE_PAINT (30-frame averages), by scene, first loop:
+# WAKE    turn 15.32-15.36 ms render 3.86-4.33
+# NEWS    turn 4.95-10.54 ms render 5.70-7.96
+# TWIST   turn 7.63-13.21 ms render 5.36-7.62
+# ZENITH  turn 6.13-7.33 ms render 5.05-8.35
+# CORE    turn 8.15-13.39 ms render 3.19-10.85
+# LOST    turn 3.80 ms render 2.44
+I (623831) app: MEM free=206648 largest=69632 js=0 frames=2595
+I (623832) app: APP_STOPPED
