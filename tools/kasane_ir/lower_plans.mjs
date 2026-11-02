@@ -56,10 +56,9 @@ function withComments(text, at) {
 export function lowerText(text, file, ids = null, rom = null) {
   text = text.replace(/\r\n/g, '\n');
   // @shiki functions (Shiki programs, spec sec.8) ship only as the built-in
-  // table (emit_shiki_rom.mjs), so they need --rom and are removed like rom
-  // plans: the guest never evaluates their source.
+  // table (emit_shiki_rom.mjs), whichever way the @plan functions ship, so
+  // they are always removed: the guest never evaluates their source.
   const shiki = findPlans(text, file, ['shiki']).map(p => ({...p, shiki: true}));
-  if (shiki.length && !rom) throw new Error(`${file}: @shiki functions need a /** @planDecoder rom */ app (they ship as the built-in table)`);
   const plans = findPlans(text, file).concat(shiki).sort((a, b) => a.start - b.start), report = [];
   let out = '', at = 0;
   for (const p of plans) {
