@@ -132,6 +132,9 @@ def check_shipped(tmp, exe, mode, as_path, bad):
             print(line)
             continue
         sites = [int(x) for x in m.group(7).split(',') if x]
+        # JIT_GUESS in ksn_shiki_jit.c: the one-pass compile's block.
+        if int(m.group(6)) > 24 * int(m.group(3)) + 32:
+            bad.append(f'{m.group(1)}: {m.group(6)} B of code outgrow JIT_GUESS({m.group(3)})')
         plans.append((m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)),
                       int(m.group(6)), sites))
     NPLANS[0] = len(plans)

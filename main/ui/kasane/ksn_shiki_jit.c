@@ -1247,9 +1247,14 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
  * retried after JIT_RETRY more draws: a scene's plans come and go). */
 enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
 #define JIT_RETRY 64
-/* The code a plan of n instructions takes at most, for the budget check
- * that spares a compile when it would not fit (sec.11: ~22-25 B each). */
-#define JIT_GUESS(n) ((uint32_t)(n)*32u+64u)
+/* The code a plan of n instructions takes at most: the budget check that
+ * spares a compile when it would not fit, and the block the one-pass compile
+ * in the region writes into (sec.17). The shipped programs take at most
+ * 23.4 B an instruction (kasane.ci, 58 instructions, 1,356 B; test_scalar.py
+ * fails when one outgrows this). A plan that does outgrow it still compiles,
+ * by the two-pass path. 32 n + 64 before sec.21.5: a third more than the
+ * code, which a full region could not give. */
+#define JIT_GUESS(n) ((uint32_t)(n)*24u+32u)
 
 /* sec.15: the region's free room the JIT leaves to the region's own users.
  * 0 since sec.21.4: a registration that does not fit takes back only as
