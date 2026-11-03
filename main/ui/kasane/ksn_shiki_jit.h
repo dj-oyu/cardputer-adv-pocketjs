@@ -57,6 +57,8 @@ typedef struct {
     const int32_t *in;                      /* 4: the draw's inputs */
     int32_t limit;                          /* 8: KSN_SHIKI_STEPS */
     uint32_t (*leaf)(const void *,uint32_t);/* 12: ksn_shiki_jit_leaf */
+    uint32_t (*draw)(const void *,int32_t,int32_t,int32_t,uint32_t); /* 16: ksn_shiki_jit_draw */
+    const int32_t *sin;                     /* 20: ksn_shiki_sin_table */
     const ksn_shiki_plan *plan;
     ksn_proc_segment *out;
     unsigned index;
@@ -65,6 +67,12 @@ typedef struct {
  * the loop body (a loop run zero times: control goes to its END + 1), else
  * the status << 8. The step is already counted. */
 uint32_t ksn_shiki_jit_leaf(const ksn_jit_run *c,uint32_t pc);
+/* The drawing instructions, called by the code directly (sec.12) with the
+ * registers already read: x and y raw (Q16), the colour (aux, or r[dst] for
+ * the _C forms) and the kind. Same results as the interpreter's case: 0 to
+ * go on, else the status << 8. In IRAM on the device. */
+enum { KSN_JIT_DRAW_MOVE, KSN_JIT_DRAW_LINE, KSN_JIT_DRAW_PLOT, KSN_JIT_DRAW_LINE_C, KSN_JIT_DRAW_PLOT_C };
+uint32_t ksn_shiki_jit_draw(const ksn_jit_run *c,int32_t x,int32_t y,int32_t colour,uint32_t kind);
 /* Compiles plan into b: a literal pool, then the function at *entry
  * (uint32_t f(ksn_jit_run *): the status << 8 when the draw ended, else the
  * pc where the interpreter goes on). False when b is too small. */

@@ -30,9 +30,10 @@ static uint32_t st=7;
 static uint32_t rnd(void){st=st*1664525u+1013904223u;return st>>8;}
 
 /* ---- the emulator ---------------------------------------------------------- */
-enum { A_CTX=0x10000000u, A_VM=0x20000000u, A_IN=0x30000000u, A_CODE=0x40000000u, A_LEAF=0x50000000u };
+enum { A_CTX=0x10000000u, A_VM=0x20000000u, A_IN=0x30000000u, A_CODE=0x40000000u, A_LEAF=0x50000000u,
+       A_DRAW=0x60000000u, A_SIN=0x70000000u };
 typedef struct {
-    uint32_t ctx[4];
+    uint32_t ctx[6];
     ksn_shiki_vm *vm;
     int32_t *in;
     const uint8_t *code; size_t code_len;
@@ -42,8 +43,9 @@ typedef struct {
 static uint8_t *addr(emu *e,uint32_t a,unsigned n){
     struct { uint32_t base; void *p; size_t len; } m[]={
         {A_CTX,e->ctx,sizeof e->ctx},{A_VM,e->vm,sizeof *e->vm},
-        {A_IN,e->in,4u*KSN_SHIKI_INPUTS},{A_CODE,(void *)e->code,e->code_len}};
-    for(unsigned k=0;k<4;k++)
+        {A_IN,e->in,4u*KSN_SHIKI_INPUTS},{A_CODE,(void *)e->code,e->code_len},
+        {A_SIN,(void *)ksn_shiki_sin_table,sizeof ksn_shiki_sin_table}};
+    for(unsigned k=0;k<5;k++)
         if(a>=m[k].base&&a-m[k].base+n<=m[k].len){
             if((a-m[k].base)%n){fprintf(stderr,"EMU unaligned %08x\n",a);exit(2);}
             return (uint8_t *)m[k].p+(a-m[k].base);
@@ -52,7 +54,7 @@ static uint8_t *addr(emu *e,uint32_t a,unsigned n){
 }
 static uint32_t ld(emu *e,uint32_t a,unsigned n){uint32_t v=0;memcpy(&v,addr(e,a,n),n);return v;}
 static void st_(emu *e,uint32_t a,uint32_t v,unsigned n){
-    if(a>=A_CODE&&a<A_LEAF){fprintf(stderr,"EMU store to code\n");exit(2);}
+    if((a>=A_CODE&&a<A_LEAF)||a>=A_SIN){fprintf(stderr,"EMU store to code or table\n");exit(2);}
     memcpy(addr(e,a,n),&v,n);
 }
 static int32_t sext(uint32_t v,unsigned bits){return (int32_t)(v<<(32-bits))>>(32-bits);}
@@ -128,6 +130,12 @@ static uint32_t emulate(emu *e,size_t entry){
         case KSN_JIT_SSAI: sar=(uint32_t)o[0]; break;
         case KSN_JIT_SRC: a[o[0]]=(uint32_t)((((uint64_t)x<<32)|y)>>sar); break;
         case KSN_JIT_SLL: a[o[0]]=(uint32_t)(((uint64_t)x)<<(32u-sar)); break;
+        case KSN_JIT_EXTUI1: a[o[0]]=(x>>o[2])&1u; break;
+        case KSN_JIT_EXTUI6: a[o[0]]=(x>>o[2])&63u; break;
+        case KSN_JIT_EXTUI9: a[o[0]]=(x>>o[2])&511u; break;
+        case KSN_JIT_EXTUI14: a[o[0]]=(x>>o[2])&0x3FFFu; break;
+        case KSN_JIT_ADDMI: a[o[0]]=x+(uint32_t)sext((uint32_t)o[2],8)*256u; break;
+        case KSN_JIT_ADDX4: a[o[0]]=(x<<2)+y; break;
         case KSN_JIT_MULL: a[o[0]]=x*y; break;
         case KSN_JIT_MULSH: a[o[0]]=(uint32_t)((uint64_t)((int64_t)(int32_t)x*(int32_t)y)>>32); break;
         case KSN_JIT_BEQ: if(a[o[0]]==x)next=pc+4u+(size_t)sext((uint32_t)o[2],8); break;
@@ -137,8 +145,9 @@ static uint32_t emulate(emu *e,size_t entry){
         case KSN_JIT_BNEZN: if(a[o[0]])next=pc+4u+(size_t)o[1]; break;
         case KSN_JIT_J: next=pc+4u+(size_t)sext((uint32_t)o[0],18); break;
         case KSN_JIT_CALLX8:
-            if(a[o[0]]!=A_LEAF||a[10]!=A_CTX){fprintf(stderr,"EMU bad call\n");exit(2);}
-            a[10]=ksn_shiki_jit_leaf(e->run,a[11]);
+            if((a[o[0]]!=A_LEAF&&a[o[0]]!=A_DRAW)||a[10]!=A_CTX){fprintf(stderr,"EMU bad call\n");exit(2);}
+            if(a[o[0]]==A_LEAF)a[10]=ksn_shiki_jit_leaf(e->run,a[11]);
+            else a[10]=ksn_shiki_jit_draw(e->run,(int32_t)a[11],(int32_t)a[12],(int32_t)a[13],a[14]);
             for(unsigned k=8;k<16;k++)if(k!=10)a[k]=0xDEADBEEFu;   /* the callee's */
             sar=rnd();                                               /* not kept either */
             break;
@@ -175,8 +184,10 @@ int main(int argc,char **argv){
         memset(&vj,0,sizeof vj);
         int32_t inj[KSN_SHIKI_INPUTS]={0};
         for(unsigned k=0;k<plan->inputs&&k<nin;k++)inj[k]=in[k];
-        const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,plan,seg_j,index};
-        emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF},&vj,inj,buf,b.len,&run,0};
+        const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
+                               (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
+                               ksn_shiki_sin_table,plan,seg_j,index};
+        emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF,A_DRAW,A_SIN},&vj,inj,buf,b.len,&run,0};
         const uint32_t r=emulate(&e,entry);
         ksn_shiki_status got;
         if(r>=256u)got=(ksn_shiki_status)(r>>8);

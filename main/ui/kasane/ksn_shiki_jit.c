@@ -350,6 +350,40 @@ static void emit_shift(ksn_jit_buf *b,const ksn_shiki_inst *i){
     ksn_jit_emit(b,KSN_JIT_S32IN,10,3,i->dst);
 }
 
+/* SIN (sec.4.4): p = r & 0xFFFF, quadrant p >> 14, w = p & 0x3FFF mirrored
+ * in odd quadrants; T[i] + floor((T[i+1] - T[i]) * t / 64) with i = w >> 6,
+ * t = w & 63 (T[i+1] is read only when t > 0, so w = 0x4000 reads T[256]
+ * alone); negated in quadrants 2 and 3. The table's address is ctx->sin. */
+static void emit_sin(ksn_jit_buf *b,const ksn_shiki_inst *i){
+    ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+    ksn_jit_emit(b,KSN_JIT_EXTUI14,9,8,0);           /* w */
+    ksn_jit_emit(b,KSN_JIT_EXTUI1,10,8,14);          /* odd quadrant */
+    size_t br=b->len;
+    ksn_jit_emit(b,KSN_JIT_BEQZN,10,0,0);
+    ksn_jit_emit(b,KSN_JIT_NEG,9,9,0);
+    ksn_jit_emit(b,KSN_JIT_ADDMI,9,9,0x4000/256);    /* 0x4000 - w */
+    patch(b,br,KSN_JIT_BEQZN,10,(int)(b->len-br-4u),0);
+    ksn_jit_emit(b,KSN_JIT_EXTUI9,11,9,6);           /* i, 0..256 */
+    ksn_jit_emit(b,KSN_JIT_EXTUI6,12,9,0);           /* t */
+    ksn_jit_emit(b,KSN_JIT_L32IN,13,2,5);            /* ctx->sin */
+    ksn_jit_emit(b,KSN_JIT_ADDX4,11,11,13);
+    ksn_jit_emit(b,KSN_JIT_L32IN,14,11,0);
+    br=b->len;
+    ksn_jit_emit(b,KSN_JIT_BEQZN,12,0,0);
+    ksn_jit_emit(b,KSN_JIT_L32IN,15,11,1);
+    ksn_jit_emit(b,KSN_JIT_SUB,15,15,14);
+    ksn_jit_emit(b,KSN_JIT_MULL,15,15,12);
+    ksn_jit_emit(b,KSN_JIT_SRAI,15,15,6);
+    ksn_jit_emit(b,KSN_JIT_ADDN,14,14,15);
+    patch(b,br,KSN_JIT_BEQZN,12,(int)(b->len-br-4u),0);
+    ksn_jit_emit(b,KSN_JIT_EXTUI1,10,8,15);          /* quadrants 2, 3 */
+    br=b->len;
+    ksn_jit_emit(b,KSN_JIT_BEQZN,10,0,0);
+    ksn_jit_emit(b,KSN_JIT_NEG,14,14,0);
+    patch(b,br,KSN_JIT_BEQZN,10,(int)(b->len-br-4u),0);
+    ksn_jit_emit(b,KSN_JIT_S32IN,14,3,i->dst);
+}
+
 #define JIT_FIXUPS (2u*KSN_SHIKI_CODE)
 bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entry){
     const unsigned n=plan->count;
@@ -359,10 +393,14 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     uint8_t lit[KSN_SHIKI_CODE];
     for(unsigned pc=0;pc<n;pc++){
         const ksn_shiki_inst *i=&plan->code[pc];
-        if(i->op!=KSN_SHIKI_SET||(i->imm>=-2048&&i->imm<=2047))continue;
+        int32_t v;
+        if(i->op==KSN_SHIKI_SET)v=i->imm;
+        else if(i->op==KSN_SHIKI_LINE||i->op==KSN_SHIKI_PLOT)v=i->aux;  /* the colour */
+        else continue;
+        if(v>=-2048&&v<=2047)continue;
         unsigned k=0;
-        while(k<npool&&pool[k]!=i->imm)k++;
-        if(k==npool)pool[npool++]=i->imm;
+        while(k<npool&&pool[k]!=v)k++;
+        if(k==npool)pool[npool++]=v;
         lit[pc]=(uint8_t)k;
     }
     const size_t base=b->len;                        /* 4-aligned: the pool's words */
@@ -435,6 +473,30 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
         }
         case KSN_SHIKI_MUL: emit_mul(b,i); break;
         case KSN_SHIKI_SHIFT: emit_shift(b,i); break;
+        case KSN_SHIKI_SIN: emit_sin(b,i); break;
+        case KSN_SHIKI_MOVE: case KSN_SHIKI_LINE: case KSN_SHIKI_PLOT:
+        case KSN_SHIKI_LINE_C: case KSN_SHIKI_PLOT_C: {
+            /* ksn_shiki_jit_draw(ctx, r[a], r[b], colour, kind). */
+            static const uint8_t kind[]={[KSN_SHIKI_MOVE]=KSN_JIT_DRAW_MOVE,[KSN_SHIKI_LINE]=KSN_JIT_DRAW_LINE,
+                                         [KSN_SHIKI_PLOT]=KSN_JIT_DRAW_PLOT,[KSN_SHIKI_LINE_C]=KSN_JIT_DRAW_LINE_C,
+                                         [KSN_SHIKI_PLOT_C]=KSN_JIT_DRAW_PLOT_C};
+            ksn_jit_emit(b,KSN_JIT_MOVN,10,2,0);
+            ksn_jit_emit(b,KSN_JIT_L32IN,11,3,i->a);
+            ksn_jit_emit(b,KSN_JIT_L32IN,12,3,i->b);
+            if(i->op==KSN_SHIKI_LINE_C||i->op==KSN_SHIKI_PLOT_C)ksn_jit_emit(b,KSN_JIT_L32IN,13,3,i->dst);
+            else if(i->op==KSN_SHIKI_MOVE)ksn_jit_emit(b,KSN_JIT_MOVI,13,0,0);
+            else if(i->aux<=2047)ksn_jit_emit(b,KSN_JIT_MOVI,13,i->aux,0);
+            else emit_l32r(b,13,base+4u*lit[pc]);
+            ksn_jit_emit(b,KSN_JIT_MOVI,14,kind[i->op],0);
+            ksn_jit_emit(b,KSN_JIT_L32IN,9,2,4);         /* ctx->draw */
+            ksn_jit_emit(b,KSN_JIT_CALLX8,9,0,0);
+            const size_t go=b->len;
+            ksn_jit_emit(b,KSN_JIT_BEQZN,10,0,0);
+            ksn_jit_emit(b,KSN_JIT_MOVN,2,10,0);
+            ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
+            patch(b,go,KSN_JIT_BEQZN,10,(int)(b->len-go-4u),0);
+            break;
+        }
         case KSN_SHIKI_REPEAT:
             if(depth>=KSN_SHIKI_LOOP_DEPTH)return false;
             ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)pc,0);
@@ -622,7 +684,9 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
         if(!compile_scalar(p))return 0;
         j=p->jit;
     }
-    ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,plan,out,index};
+    ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
+                   (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
+                   ksn_shiki_sin_table,plan,out,index};
     return j->scalar(&c);
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}

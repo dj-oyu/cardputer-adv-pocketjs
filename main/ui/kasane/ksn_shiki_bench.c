@@ -45,6 +45,7 @@ static void affine_consts(asm_t *s){
     op(s,KSN_SHIKI_SET,14,0,0,TY<<14,0);
 }
 static uint32_t next(uint32_t *st){*st=*st*1664525u+1013904223u;return *st>>8;}
+static int rnd2(uint32_t *st){return (int)(next(st)&1u);}
 
 /* Regions are field planes (spec v1.4 sec.5.1): x of every record, then y,
  * each plane S = records rounded up to 8 long. pair 0 is affine128, 1 the
@@ -346,7 +347,7 @@ static unsigned program(uint32_t *st,uint8_t *body,unsigned *nin){
         if(depth&&(left<=depth||next(st)%6==0)){put_inst(body+12*n++,KSN_SHIKI_END,0,0,0,0,0);depth--;continue;}
         const uint8_t d=(uint8_t)(next(st)%KSN_SHIKI_REGS),ra=(uint8_t)(next(st)%KSN_SHIKI_REGS),rb=(uint8_t)(next(st)%KSN_SHIKI_REGS);
         uint8_t *p=body+12*n;
-        switch(next(st)%22){
+        switch(next(st)%24){
         case 0: case 1: put_inst(p,KSN_SHIKI_SET,d,0,0,value(st),0); break;
         case 2: if(*nin){put_inst(p,KSN_SHIKI_INPUT,d,(uint8_t)(next(st)%*nin),0,0,0);break;}
                 put_inst(p,KSN_SHIKI_SET,d,0,0,value(st),0); break;
@@ -376,6 +377,8 @@ static unsigned program(uint32_t *st,uint8_t *body,unsigned *nin){
         case 18: put_inst(p,KSN_SHIKI_MOVE,0,ra,rb,0,0); break;
         case 19: put_inst(p,KSN_SHIKI_LINE,0,ra,rb,0,(uint16_t)next(st)); break;
         case 20: put_inst(p,KSN_SHIKI_PLOT,0,ra,rb,0,(uint16_t)next(st)); break;
+        case 21: put_inst(p,rnd2(st)?KSN_SHIKI_LINE_C:KSN_SHIKI_PLOT_C,d,ra,rb,0,0); break;
+        case 22: put_inst(p,KSN_SHIKI_SIN,d,ra,0,0,0); break;
         default: put_inst(p,KSN_SHIKI_DRAW_INDEX,d,0,0,0,0); break;
         }
         (void)open;

@@ -59,7 +59,7 @@ const int32_t ksn_shiki_sin_table[257]={
 /* ---- arithmetic, as sec.2.2/2.3 define it: on exact 64-bit values, with
  * floor division by powers of two written out (C's >> on a negative value
  * is implementation-defined; the spec defines the mathematics). */
-static int64_t floor_shift(int64_t v,unsigned s){
+static inline __attribute__((always_inline)) int64_t floor_shift(int64_t v,unsigned s){
     if(!s)return v;
     if(v>=0)return v>>s;
     return -((-v+(((int64_t)1<<s)-1))>>s);  /* |v| <= 2^62: -v cannot overflow */
@@ -358,7 +358,7 @@ void ksn_shiki_plan_dispose(ksn_shiki_plan *plan){
 }
 
 /* ---- execution (sec.4, sec.4.8) */
-static bool coord(int32_t raw,int16_t *px){
+static inline __attribute__((always_inline)) bool coord(int32_t raw,int16_t *px){
     /* sec.4.5 (v1.1): the nearest pixel, halves up. The engine adds the half
      * so that a compiled plan spends no instruction per coordinate on it. */
     const int64_t p=floor_shift((int64_t)raw+32768,16);
@@ -366,7 +366,7 @@ static bool coord(int32_t raw,int16_t *px){
     *px=(int16_t)p;
     return true;
 }
-static ksn_shiki_status emit(ksn_shiki_vm *vm,ksn_proc_segment *out,
+static inline __attribute__((always_inline)) ksn_shiki_status emit(ksn_shiki_vm *vm,ksn_proc_segment *out,
                              int16_t x0,int16_t y0,int16_t x1,int16_t y1,uint16_t c){
     if(vm->count==KSN_SHIKI_SEGMENTS)return KSN_SHIKI_LIMIT;
     const int dx=x1>x0?x1-x0:x0-x1,dy=y1>y0?y1-y0:y0-y1;
@@ -1072,6 +1072,29 @@ uint32_t ksn_shiki_jit_leaf(const ksn_jit_run *c,uint32_t pc){
     const ksn_shiki_status s=step(c->plan,c->in,c->index,c->vm,c->out,pc,&next);
     if(s!=KSN_SHIKI_RUNNING)return (uint32_t)s<<8;
     return next!=pc+1u;
+}
+
+/* MOVE, LINE, PLOT and their _C forms for the scalar JIT (sec.12): the
+ * interpreter's case below, without its dispatch. In IRAM: the code that
+ * calls it is in RAM, and a flash miss costs more than the work. */
+#if KSN_SHIKI_HAS_PIE
+#include "esp_attr.h"
+#define KSN_JIT_FAST IRAM_ATTR
+#else
+#define KSN_JIT_FAST
+#endif
+KSN_JIT_FAST uint32_t ksn_shiki_jit_draw(const ksn_jit_run *c,int32_t xr,int32_t yr,int32_t colour,uint32_t kind){
+    ksn_shiki_vm *vm=c->vm;
+    if(kind>=KSN_JIT_DRAW_LINE_C&&(colour<0||colour>65535))return (uint32_t)KSN_SHIKI_INVALID<<8;
+    const uint16_t col=(uint16_t)colour;
+    int16_t x,y;
+    if(!coord(xr,&x)||!coord(yr,&y))return (uint32_t)KSN_SHIKI_INVALID<<8;
+    ksn_shiki_status s=KSN_SHIKI_RUNNING;
+    if(kind==KSN_JIT_DRAW_PLOT||kind==KSN_JIT_DRAW_PLOT_C)s=emit(vm,c->out,x,y,x,y,col);
+    else if(kind!=KSN_JIT_DRAW_MOVE&&vm->pen_valid)s=emit(vm,c->out,vm->pen_x,vm->pen_y,x,y,col);
+    if(s!=KSN_SHIKI_RUNNING)return (uint32_t)s<<8;
+    vm->pen_x=x;vm->pen_y=y;vm->pen_valid=true;
+    return 0;
 }
 
 ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
