@@ -1171,7 +1171,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     const bool fresh=!j;
     if(fresh&&!(j=calloc(1,sizeof *j)))return JIT_NOMEM;
     attach_weights(j,plan,need);
-    const size_t len=(need+3u)&~(size_t)3u;
+    size_t len=(need+3u)&~(size_t)3u;
     /* The code: in the Shiki region when it has room (sec.15: DIRAM, so
      * its blocks run at their instruction-bus alias; the region is taken
      * at the app's start, before the guest scatters its blocks over DIRAM),
@@ -1194,22 +1194,37 @@ static int compile_scalar(ksn_shiki_plan *plan){
         plan->need64=(uint8_t)(bytes/64u>255u?255u:bytes/64u);
         return JIT_NOMEM;
     }
-    EXECMAP_GOT(x,j->sregion);
     /* DIRAM: write bytes through the data alias. Otherwise (RTC fast memory,
      * where a tight heap puts MALLOC_CAP_EXEC: sec.15) write whole words. */
-    const bool diram=j->sregion||esp_ptr_in_diram_iram(x);
-    if(!w)w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
+    bool diram=j->sregion||esp_ptr_in_diram_iram(x);
     if(!diram&&b.chk_add){
-        /* sec.18: RTC fast memory is beyond call0's reach of the checker:
-         * the inline checks, if they still fit what was taken. */
+        /* sec.18: RTC fast memory is beyond call0's reach of the checker, so
+         * the code there has the inline checks, which are longer: the block
+         * is taken again at that length. */
         ksn_jit_buf c={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
         sat_mode(j,&c,0,false);
-        if(!ksn_shiki_jit_scalar(plan,&c,&entry)||c.len>len){drop_scalar(j);if(fresh)free(j);return JIT_NOMEM;}
+        if(!ksn_shiki_jit_scalar(plan,&c,&entry)){drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;}
         need=c.len;
+        if(need>len){
+            heap_caps_free(j->sraw);
+            len=(need+3u)&~(size_t)3u;
+            bytes=len+16u;
+            j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
+            x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
+            if(!x){
+                drop_scalar(j);if(fresh)free(j);
+                plan->need64=(uint8_t)(bytes/64u>255u?255u:bytes/64u);
+                return JIT_NOMEM;
+            }
+            diram=esp_ptr_in_diram_iram(x);
+        }
+        b.chk_add=0;                          /* inline, wherever it landed now */
     }
+    EXECMAP_GOT(x,j->sregion);
+    if(!w)w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
     for(size_t k=0;k<len/4;k++)((volatile uint32_t *)(void *)w)[k]=0;
     ksn_jit_buf e={w,0,need,false,!diram,0,0,0,0,NULL,0};
-    sat_mode(j,&e,(uint32_t)(uintptr_t)x,diram);
+    sat_mode(j,&e,(uint32_t)(uintptr_t)x,diram&&b.chk_add);
     size_t entry2=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
         drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;
