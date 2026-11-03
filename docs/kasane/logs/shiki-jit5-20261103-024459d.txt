@@ -1,0 +1,12 @@
+# CUBIC/LINE_PATTERN called directly, pattern_line in IRAM, cubic in flash (computes its weights);
+# device, 024459d (POCKET_SHIKI_JIT_AB build), DERBY job jit5-derby-b (paddock only: the broker
+# ended the session at 01:18:40 when another job started, app_authority_lost; not the firmware).
+# SHIKI_TURN cubic=<calls per frame>/<ms per frame> pat=<calls>/<ms>, inside engine_ms.
+I (80787) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.585 total_ms=0.624 frames=30 jit=0/356 cubic=6.0/0.204 pat=9.0/0.027
+I (83802) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.529 total_ms=0.570 frames=30 jit=1/2844 cubic=6.0/0.202 pat=9.0/0.017
+I (84809) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.584 total_ms=0.624 frames=30 jit=0/2844 cubic=6.0/0.205 pat=9.0/0.027
+I (85809) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.528 total_ms=0.568 frames=30 jit=1/2844 cubic=6.0/0.202 pat=9.0/0.017
+I (86817) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.585 total_ms=0.626 frames=30 jit=0/2844 cubic=6.0/0.204 pat=9.0/0.027
+I (87819) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.527 total_ms=0.566 frames=30 jit=1/2844 cubic=6.0/0.202 pat=9.0/0.017
+I (93873) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.514 total_ms=0.553 frames=30 jit=1/3780 cubic=6.0/0.200 pat=9.0/0.017
+I (94866) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.588 total_ms=0.628 frames=30 jit=0/3780 cubic=6.0/0.205 pat=9.0/0.026
