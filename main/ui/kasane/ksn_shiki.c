@@ -296,7 +296,7 @@ size_t ksn_shiki_plan_bytes_for(const uint8_t *code,size_t len){
 }
 bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsigned nargs,
                         const ksn_shiki_region *regions,unsigned nregions,ksn_shiki_plan *plan){
-    if(plan){plan->jit=NULL;plan->heat=0;}
+    if(plan){plan->jit=NULL;plan->heat=0;plan->need64=0;}
     if(!code||!plan||len<12||memcmp(code,"SKI1",4)||code[4]!=1||code[5]!=0||code[11])return false;
     const unsigned n=code[6],nin=code[7],narg=code[8],ndata=code[9],npatch=code[10];
     if(n<1||n>KSN_SHIKI_CODE||nin>KSN_SHIKI_INPUTS||narg>KSN_SHIKI_ARGS||ndata>4||

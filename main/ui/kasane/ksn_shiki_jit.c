@@ -746,6 +746,11 @@ enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
  * tightest heap, where a 4 KB scratch did not fit (sec.14). */
 static int compile_scalar(ksn_shiki_plan *plan){
     if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget)return JIT_BUDGET;
+    /* A plan whose allocation failed before is not sized again while the
+     * heap still has no block that long: the sizing pass costs as much as
+     * the compile, and DERBY's WIDE retried a dozen plans a second at its
+     * tightest heap, which made the JIT slower than the interpreter (sec.14). */
+    if(plan->need64&&heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)<64u*plan->need64)return JIT_NOMEM;
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false};
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
@@ -766,7 +771,11 @@ static int compile_scalar(ksn_shiki_plan *plan){
     const size_t len=(need+3u)&~(size_t)3u,bytes=len+16u;
     j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
     uint8_t *x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
-    if(!x){free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_NOMEM;}
+    if(!x){
+        free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);
+        plan->need64=(uint8_t)(bytes/64u>255u?255u:bytes/64u);
+        return JIT_NOMEM;
+    }
     /* DIRAM: write bytes through the data alias. Otherwise (when the heap
      * is tight the allocation can come from IRAM-only memory, which takes
      * 32-bit accesses only) write the words in place. */
@@ -789,7 +798,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
     if(j&&j->scalar)return true;
-    plan->heat=INT16_MIN;
+    plan->heat=INT8_MIN;
     return compile_scalar(plan)==JIT_DONE;
 }
 uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
@@ -800,16 +809,16 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     ksn_shiki_plan *p=(ksn_shiki_plan *)plan;
     const jit_plan *j=p->jit;
     if(!j||!j->scalar){
-        /* heat: draws so far; INT16_MIN never again; negative: waiting
+        /* heat: draws so far; INT8_MIN never again; negative: waiting
          * to retry after a full budget or heap. */
-        if(p->heat==INT16_MIN||++p->heat<(int16_t)JIT_HEAT)return 0;
+        if(p->heat==INT8_MIN||++p->heat<(int8_t)JIT_HEAT)return 0;
         const int r=compile_scalar(p);
         if(r!=JIT_DONE){
             ksn_shiki_jit_fail[r]++;
-            p->heat=r==JIT_REFUSED?INT16_MIN:(int16_t)((int)JIT_HEAT-JIT_RETRY);
+            p->heat=r==JIT_REFUSED?INT8_MIN:(int8_t)((int)JIT_HEAT-JIT_RETRY);
             return 0;
         }
-        p->heat=INT16_MIN;
+        p->heat=INT8_MIN;
         j=p->jit;
     }
     ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
