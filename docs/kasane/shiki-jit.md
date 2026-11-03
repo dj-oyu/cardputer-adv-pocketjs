@@ -420,3 +420,10 @@ ADD/SUB の飽和チェック（`xor, xor, and, bgez` と、飽和したとき�
 - チェッカーの正しさ: CYCLE BENCH のランダムなプログラム 800 本が実機で JIT とインタプリタ一致（チェッカーを通る状態）。host は 2 万本 × 5 通り（インライン、チェッカー、パッチ、作り直し途中、作り直し後）。
 - 未確認: DERBY のレース用プランの一部に `SHIKI_SAT` が出ていない（RTC に置かれてインラインになったと推定）。近景で脚が止まる件は、チェッカーとは別の原因（ログを取らない状態でも起きた）。
 
+## 19. RTC fast memory には JIT のコードを置かない
+
+RTC fast memory（`0x600FE000`、8 KB）は ESP-IDF が普通のヒープに加えており、DIRAM が詰まると `MALLOC_CAP_EXEC` がここを返す。ここは APB クロックで動き、コードは遅い（§15: NEWS 2.3 ms、DIRAM で 0.8 ms）。共有チェッカー（§18）の `call0` も届かない。
+
+- JIT は RTC fast memory を実行用メモリとして使わない（e3aa94c、スカラーのコード。VEACH の区間も同じ）。返ってきたら手放し、スカラーのコードは「場所がない」扱い（`need64`）で冷えたプランの場所を待つ。その間はインタプリタ。
+- RTC fast memory は、遅くても困らない常駐の仕事に起動時に先に渡す。まず `input` タスクのスタック 4 KB（e3aa94c。実測の最大使用量は約 1,250 B）。Wi-Fi・時刻同期のタスクも収める見直しは [issue #116](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/116)。
+

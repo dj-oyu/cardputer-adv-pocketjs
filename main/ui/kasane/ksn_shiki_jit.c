@@ -969,7 +969,10 @@ static uint8_t *to_exec(uint8_t *tmp,size_t n,uint8_t **raw,size_t *bytes){
     if(!*raw)return NULL;
     *bytes=len+16u;
     uint8_t *x=(uint8_t *)(((uintptr_t)*raw+15u)&~(uintptr_t)15u);
-    volatile uint32_t *w=(volatile uint32_t *)(esp_ptr_in_diram_iram(x)?esp_ptr_diram_iram_to_dram(x):(void *)x);
+    /* sec.19: no code in RTC fast memory (APB clock); the sections stay
+     * with the interpreter instead. */
+    if(esp_ptr_in_rtc_iram_fast(x)||!esp_ptr_in_diram_iram(x)){heap_caps_free(*raw);*raw=NULL;return NULL;}
+    volatile uint32_t *w=(volatile uint32_t *)esp_ptr_diram_iram_to_dram(x);
     memset(tmp+n,0,len-n);
     for(size_t k=0;k<len/4;k++)
         w[k]=(uint32_t)tmp[4*k]|(uint32_t)tmp[4*k+1]<<8|(uint32_t)tmp[4*k+2]<<16|(uint32_t)tmp[4*k+3]<<24;
@@ -1287,7 +1290,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
      * (sec.15), which runs code at the APB clock (NEWS 2.3 ms there, 0.8 in
      * DIRAM) and is beyond call0's reach of the checker: no code there; the
      * plan waits (need64) for a cold plan's room, interpreted meanwhile. */
-    const bool diram=j->sregion||esp_ptr_in_diram_iram(x);
+    const bool diram=j->sregion||(!esp_ptr_in_rtc_iram_fast(x)&&esp_ptr_in_diram_iram(x));
     if(!diram){
         drop_scalar(j);if(fresh)free(j);
         plan->need64=(uint8_t)(bytes/64u>255u?255u:bytes/64u);
