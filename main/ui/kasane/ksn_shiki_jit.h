@@ -106,11 +106,6 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
 /* Run time (device): the plan's code, compiled once it is hot and if the
  * budget holds it; 0 (start at pc 0) when there is none. */
 extern bool ksn_shiki_jit_scalar_on;
-/* shiki-jit.md sec.19.3: bytes added to a session's Shiki region for the
- * JIT's code, on top of the app's budget. The region is the only DIRAM a
- * guest leaves in one piece; with RTC fast memory refused (sec.19) DERBY's
- * race had 2.4 KB of code where it used 11 KB. */
-#define KSN_SHIKI_JIT_REGION_EXTRA (8u*1024u)
 extern uint32_t ksn_shiki_jit_budget,ksn_shiki_jit_bytes;
 /* Compiles that did not happen since boot: refused by the compiler, the
  * budget full, the heap full (the last two are retried). Device only. */
