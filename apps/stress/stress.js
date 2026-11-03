@@ -1,4 +1,4 @@
-// Stress test, vaporwave sea: heap churn + a full-screen Shiki frame. See README.md.
+// Stress test, vaporwave surf at dusk: heap churn + a full-screen Shiki frame. See README.md.
 (function () {
   const V = pocket.kasane, P = V.shiki, fs = pocket.fs, CAP = [15, 35, 1e9];
   const rgb = v => (v >> 19 & 31) << 11 | (v >> 10 & 63) << 5 | (v >> 3 & 31);
@@ -19,34 +19,54 @@
   let meter, stat, info, lv;
 
   // Shiki regions (window index = field * S + record, S = records rounded up to 8).
+  // The palette: an 80s surf poster at dusk, neon over a lo-fi CRT.
   const mix = (a, b, f) => { let o = 0; for (let s = 0; s < 24; s += 8) o |= Math.round((a >> s & 255) * (1 - f) + (b >> s & 255) * f) << s; return o; };
+  const grad = (st, f) => { let i = 0; while (i < st.length - 2 && f > st[i + 2]) i += 2; return mix(st[i + 1], st[i + 3], (f - st[i]) / (st[i + 2] - st[i])); };
+  const dim = (c, k) => mix(0, c, k);
+  const win = (type, rows, k) => [P.data({type: type, q: 0, records: rows.length, record: k}), rows.length + 7 & ~7];
+  const fill = (w, rows) => rows.forEach((r, j) => r.forEach((v, c) => { w[0][c * w[1] + j] = v; }));
+  const SKY = [0, 0x14052e, .45, 0x5a1a8c, .8, 0xff3cac, 1, 0xff9a3d], SEA = [0, 0x19c6d8, .35, 0x0a6f9c, 1, 0x07103a];
   const ramp = P.data({type: 'u16', q: 0, records: 135, record: 1});
-  for (let y = 0; y < 135; y++)
-    ramp[y] = rgb(y < 60 ? mix(0x2a0a5e, PINK >>> 8, y / 59) : y === 60 ? MINT >>> 8 : mix(CYAN >>> 8, INK >>> 8, (y - 61) / 73));
+  for (let y = 0; y < 135; y++)   // every other row a little darker: scanlines
+    ramp[y] = rgb(y === 60 ? 0xfff1b0 : dim(y < 60 ? grad(SKY, y / 59) : grad(SEA, (y - 61) / 73), y & 1 ? .8 : 1));
+  const tw = P.data({type: 'u16', q: 0, records: 8, record: 1});
+  for (let i = 0; i < 8; i++) tw[i] = rgb(mix(0x3a1466, 0xfff6ff, i / 7));
+  const ST = [];
+  for (let i = 0; i < 24; i++) ST.push([i * 53 % 236 + 2, i * 29 % 34 + 2, i * 17 % 62]);
+  const stars = win('i16', ST, 3); fill(stars, ST);
   const SR = [];
-  for (let k = 0; k < 6; k++)   // striped sun: bars of a disc of radius 26 about y 42
-    for (let y = 16 + k * 7, e = y + 5 - (k >> 1); y < e; y++)
-      SR.push([y, Math.sqrt(676 - (y - 42) * (y - 42)) | 0, rgb(0xff0000 | (0xfb - k * 22) << 8 | (0x96 - k * 6))]);
-  const sun = P.data({type: 'u16', q: 0, records: SR.length, record: 3}), ss = SR.length + 7 & ~7;
-  SR.forEach((r, j) => { sun[j] = r[0]; sun[ss + j] = r[1]; sun[2 * ss + j] = r[2]; });
-  const pal = [CYAN, PINK, MINT, SUN].map(c => rgb(c >>> 8));
-  const school = P.data({type: 'u16', q: 0, records: 9, record: 3});
-  for (let i = 0; i < 9; i++) { school[i] = i * 29 % 72; school[16 + i] = i * 13 % 30; school[32 + i] = pal[i & 3]; }
-  const D = [0, 1, 5, 6, 16, 4, 19, 0, 22, 4, 34, 5, 41, 7, 34, 10, 20, 12, 5, 9, 0, 14, 2, 7, 0, 1];
-  const shape = P.data({type: 'i16', q: 0, records: D.length / 2, record: 2}), ds = D.length / 2 + 7 & ~7;
-  for (let j = 0; j < D.length / 2; j++) { shape[j] = D[2 * j]; shape[ds + j] = D[2 * j + 1]; }
-  const ring = P.data({type: 'i16', q: 0, records: 8, record: 3});
+  for (let y = 16; y < 60; y++)   // the disc of radius 26 about (176, 42), cut by the horizon
+    SR.push([y, Math.sqrt(676 - (y - 42) * (y - 42)) | 0, rgb(grad([0, 0xfff07a, .5, 0xff9a3d, 1, 0xff2fa0], (y - 16) / 43))]);
+  const sun = win('u16', SR, 3); fill(sun, SR);
+  const wc = P.data({type: 'u16', q: 0, records: 12, record: 1});
+  for (let r = 0; r < 12; r++) wc[r] = rgb(grad([0, 0xffb3e6, .4, 0xff5fd2, 1, 0x3ff4ff], r / 11));
+  const FR = [[-12, -14, -34, 6], [-10, -20, -26, -10], [-2, -22, -8, -22], [8, -22, 12, -18],
+    [12, -16, 30, -6], [14, -8, 34, 12], [4, -2, 16, 24]];
+  const fronds = win('i16', FR, 4); fill(fronds, FR);
+  const pal = [0xff3cac, 0xb6ff3a, 0x19e6d4, 0xffe14d].map(rgb);
+  const SC = [];
+  for (let i = 0; i < 9; i++) SC.push([i * 29 % 72, i * 13 % 30, pal[i & 3]]);
+  const school = win('u16', SC, 3); fill(school, SC);
+  const D = [[0, 1], [5, 6], [16, 4], [19, 0], [22, 4], [34, 5], [41, 7], [34, 10], [20, 12], [5, 9], [0, 14], [2, 7], [0, 1]];
+  const shape = win('i16', D, 2); fill(shape, D);
+  const ring = win('i16', [0, 0, 0, 0, 0, 0, 0, 0].map(() => [0, 0, 0]), 3);
   const B = [];
   for (let i = 0; i < 8; i++) B.push({x: 8 + i * 29, y: 64 + i * 37 % 42, r: 2 + i % 4, s: 0.3 + i % 3 * 0.25});
 
-  const reg = (n, a, d) => P.register('stress.' + n, a, d ? {data: [d]} : undefined);
-  const hSky = reg('sky', [], ramp), hSun = reg('sun', [], sun), hGrid = reg('grid', [pal[1]]);
-  const hFish = reg('fish', [], school), hDol = reg('dolphin', [rgb(0x9fb8ff), rgb(0xeef4ff)], shape);
-  const hBub = reg('bubbles', [rgb(0xe8feff)], ring);
-  // One drawMany a frame, two inputs a draw: 4 sky bands, sun, grid, 2 schools, 2 dolphins, bubbles.
-  const H = new Uint32Array([hSky, hSky, hSky, hSky, hSun, hGrid, hFish, hFish, hDol, hDol, hBub]);
-  const IN = new Float64Array(H.length * 2);
-  IN.set([0, 34, 34, 34, 68, 34, 102, 33]);
+  const reg = (n, a, d) => P.register('stress.' + n, a, d ? {data: d} : undefined);
+  const hSky = reg('sky', [], [ramp]), hStar = reg('stars', [], [stars[0], tw]), hSun = reg('sun', [], [sun[0]]);
+  const hGlow = reg('glow', [rgb(0xfff07a), rgb(0xfff07a) + rgb(0xff5fd2)]), hWave = reg('waves', [], [wc]);
+  const hFish = reg('fish', [], [school[0]]), hDol = reg('dolphin', [rgb(0x3ff4ff), rgb(0xfff6ff)], [shape[0]]);
+  const hDol2 = reg('dolphin', [rgb(0xff5fd2), rgb(0xffe14d)], [shape[0]]);
+  const hBub = reg('bubbles', [rgb(0xc8fbff)], [ring[0]]), hTrunk = reg('trunk', [rgb(0x16031f), 8]), hCrown = reg('crown', [rgb(0x16031f), 5], [fronds[0]]);
+  const hVhs = reg('vhs', [rgb(0xfff6ff), rgb(0xff3cac)]);
+  // One drawMany a frame, four inputs a draw, back to front: about 910 of the
+  // frame's 1,024 segments.
+  const H = new Uint32Array([hSky, hSky, hSky, hSky, hStar, hSun, hGlow, hWave, hFish, hFish, hDol, hDol2,
+    hBub, hTrunk, hCrown, hTrunk, hCrown, hVhs]);
+  const IN = new Float64Array(H.length * 4);
+  [0, 34, 34, 34, 68, 34, 102, 33].forEach((v, i) => { IN[(i >> 1) * 4 + (i & 1)] = v; });
+  IN.set([12, 136, 1, 0, 12, 136, 1, 0, 230, 140, -1, 0, 230, 140, -1, 0], 13 * 4);
   const res = P.resource();
   const txt = () => ['pool ' + pool.length + ' peak ' + peak + ' oom ' + oom + ' f' + t,
     'native ' + natOk + ' ' + nat + ' reads ' + (natB >> 10) + 'K', 'LV' + (lvl + 1)];
@@ -117,22 +137,29 @@
     else { err++; console.log('STRESS_FAIL ' + where + ' ' + e); }
   }
 
-  // The sea: positions into IN and the bubble ring, then one Shiki frame.
+  // The scene: phases and positions into IN, the moving rows into their
+  // windows, then one Shiki frame. Phases stay within 2 pi (Shiki's sin).
+  const TAU = Math.PI * 2, ph = k => t * k % TAU;
   function paint() {
-    IN[10] = t / 2 % 9.6;
+    IN[16] = ph(.07); IN[24] = ph(.05); IN[28] = ph(.11);
+    for (let y = 16; y < 60; y++)   // the sun's gaps climb, wider lower down
+      sun[0][y - 16] = y > 34 && (y + (t >> 2)) % 7 < (y - 30) / 8 ? 300 : y;
     for (let k = 0; k < 2; k++) {
-      IN[12 + 2 * k] = (t * (1 + k) + k * 150) % 340 - 100;
-      IN[13 + 2 * k] = 64 + k * 16 + 5 * Math.sin((t + k * 20) / 14);
-      const p = (t * 2 + k * 170) % 340, a = Math.sin(p / 340 * Math.PI * 2);
-      IN[16 + 2 * k] = p - 50;
-      IN[17 + 2 * k] = a > 0 ? 86 - 58 * a : 86 - 8 * a;   // leap above the horizon, then glide
+      IN[32 + 4 * k] = (t * (1 + k) + k * 150) % 340 - 100;
+      IN[33 + 4 * k] = 66 + k * 18 + 5 * Math.sin((t + k * 20) / 14);
+      const p = (t * 2 + k * 170) % 340, a = Math.sin(p / 340 * TAU);
+      IN[40 + 4 * k] = p - 50;
+      IN[41 + 4 * k] = a > 0 ? 88 - 58 * a : 88 - 8 * a;   // leap above the horizon, then glide
     }
     B.forEach(function (b, k) {
-      b.y -= b.s; if (b.y < 62) b.y = 104;
-      ring[k] = b.x + 3 * Math.sin((t + k * 9) / 10); ring[8 + k] = b.y; ring[16 + k] = b.r;
+      b.y -= b.s; if (b.y < 64) b.y = 104;
+      ring[0][k] = b.x + 3 * Math.sin((t + k * 9) / 10); ring[0][8 + k] = b.y; ring[0][16 + k] = b.r;
     });
+    IN[55] = IN[59] = 2.5 * Math.sin(t / 23); IN[63] = IN[67] = 2.5 * Math.sin(t / 19 + 1);
+    const g = t % 150;   // a VHS tracking glitch every 5 s, parked above the screen between
+    IN[68] = g < 14 ? 18 + g * 7 : -40; IN[69] = ph(.9);
     P.beginFrame(BG);
-    P.drawMany(H, IN, 2);
+    P.drawMany(H, IN, 4);
     P.commit();
   }
 

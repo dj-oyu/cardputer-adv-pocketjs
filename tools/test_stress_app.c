@@ -203,7 +203,22 @@ int main(int argc,char **argv) {
     JS_SetPropertyStr(ctx,g,"__dispatchFault",JS_NewCFunction(ctx,js_dispatch_fault,"dispatchFault",0));
     JS_FreeValue(ctx,g);
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
+    // STRESS_HEAP_LIMIT also caps the evaluation, as on the device (the guest
+    // is created with its limit): with an -m32 build this is the check that
+    // the source still evaluates in 160 KiB. The used bytes after it follow.
+    const char *eval_limit=getenv("STRESS_HEAP_LIMIT");
+    if(eval_limit) {
+        size_t limit=(size_t)strtoul(eval_limit,NULL,0);
+        JS_SetMemoryLimit(rt,limit);
+        if(limit/2<JS_GetGCThreshold(rt)) JS_SetGCThreshold(rt,limit/2);
+    }
     bool ok=eval(src,n,path)&&present();
+    if(eval_limit) {
+        size_t used=0,limit=0;
+        JS_RunGC(rt);
+        JS_GetMemoryCounters(rt,&used,&limit);
+        printf("guest after eval: %zu of %zu B\n",used,limit);
+    }
     printf("%s eval + first present\n",ok?"ok  ":"FAIL");
     // A 64-bit host spends more per object than the device, so the cap is
     // set above the device's 160 KiB; L3 still has to reach it.

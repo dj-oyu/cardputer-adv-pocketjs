@@ -12,13 +12,15 @@ import pathlib, sys
 data = pathlib.Path('apps/pet/assets/pets-compact.bin').read_bytes()
 pathlib.Path(sys.argv[1]).write_text('static const uint8_t pet_test_data[] = {' + ','.join(map(str, data)) + '};\n')
 PY
+# QJS_CFLAGS: extra flags for the QuickJS objects (an -m32 build passes the
+# sysroot's flags here and in CFLAGS, with its own CACHE).
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
 DEFS=(-DQUICKJS_NG_BUILD -D_GNU_SOURCE)
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
-    gcc -std=gnu11 -c -O1 -g -w "${DEFS[@]}" -I "$QJS" -I components/pocketjs_guest/include \
+    gcc -std=gnu11 -c -O1 -g -w ${QJS_CFLAGS:-} "${DEFS[@]}" -I "$QJS" -I components/pocketjs_guest/include \
         "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done
