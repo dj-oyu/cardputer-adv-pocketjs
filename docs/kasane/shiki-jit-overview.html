@@ -508,7 +508,7 @@ a{color:var(--accent)}
 <p class="sowhat">ここまでの結果を、1 つの表と今の区画の図にまとめる。</p>
 
 <!-- ============================================================ -->
-<h2 id="c11">11. 推移と今の姿 <span class="tag">§19.2、§19.3、§21.2、§22.1</span></h2>
+<h2 id="c11">11. 推移と今の姿 <span class="tag">§19.2、§19.3、§21.2、§22.1、§22.2</span></h2>
 <div class="bridge">
 <p><b>知っているもの:</b> リリースごとのレイテンシの推移表（p50 の幅を版ごとに並べる）。</p>
 <p><b>違うところ:</b> DERBY は実行ごとにレースが違う（乱数の種）ので、同じ場面の窓どうしを比べている。値の幅は 30 フレームの窓ごとの違い。</p>
@@ -576,7 +576,12 @@ a{color:var(--accent)}
 </div>
 </div>
 <p class="note">区画の内訳の根拠（各項目のファイルと行）は <a href="pipeline-overview.html#mem">パイプラインの §8</a> の表にある。「式・点の窓…約 13.5 KB」は 33.1 KB から固定分 19,588 B（7,688 × 2 + 3,840 + 372）を引いた差 <span class="e">計算</span>で、個別には測っていない。</p>
-<p class="sowhat">DERBY は 48 KiB で 56 KiB と同じ速さに戻った。残りは MEGADEMO・DERBY の場面の切り替わりでの <code>jitdrop</code>（§21.4）。</p>
+<h3>MEGADEMO（実機、a616c0d、48 KiB、§22.2）</h3>
+<ul>
+<li>全場面を回った。engine_ms: NEWS <b>0.71〜0.72 ms</b>、TWIST <b>0.97〜0.98</b>、ZENITH <b>0.66〜0.69</b> <span class="m">実測</span>。eb5c12c と同じ。</li>
+<li>JIT のコード最大 10,688 B、失敗 0、返したプラン 0（<code>jitdrop=0/34</code>）。区画の使用は最大 38,980 B、一続きの空きは最小 5,964 B <span class="m">実測</span>。</li>
+</ul>
+<p class="sowhat">DERBY も MEGADEMO も 48 KiB で以前と同じ速さ。どちらも返したプランは 0 で、§21.4 の「1 本ずつ返す」動きが起きる場面は実機ではまだ見ていない（host の検査だけ）。</p>
 
 <!-- ============================================================ -->
 <h2 id="facts">事実・推定・未確認</h2>
@@ -585,7 +590,7 @@ a{color:var(--accent)}
 <b><span class="m">host 実測</span></b><span>レジスタキャッシュの −6.5%（26,171 → 24,461 B）、出荷プランの 1 命令あたり最大 23.4 B、飽和チェックがコードの約 1/4、命令の内訳。</span>
 <b><span class="m">コードで確認</span></b><span>区画 48 KiB の既定と上書きの無いこと、表 128 件、持ち主は下・JIT は上、空きのゼロ、<code>JIT_REGION_KEEP</code> 0、<code>JIT_GUESS</code> 24n+32、<code>JIT_EXEC_CAPS</code>、帯のキャッシュ 3,840 B、フレーム 7,686 B、予算 16 KiB、<code>JIT_HEAT</code> 4、<code>JIT_COLD_DRAWS</code> 1,024。番地の地図は TRM v1.8 p.403、p.685。</span>
 <b><span class="e">推定・計算</span></b><span>12804a9 のコードの 6〜7 KB が RTC にあったこと。RTC が遅いのは命令の取り込みのため。持ち主 33.1 KB（実測の差）。区画の中の並び。作業領域の廃止で空く 6,406 B。</span>
-<b><span class="u">未確認</span></b><span>§21.4（1 プランずつ返す）の実機の <code>jitdrop</code>。レジスタキャッシュ単独の実機での効果。当時の DIRAM の 32 KB と 10.7 KB の塊の持ち主。shiki-jit.md の §20 の節（参照はあるが本文が無い）。</span>
+<b><span class="u">未確認</span></b><span>§21.4（1 プランずつ返す）が実機で起きる場面（DERBY・MEGADEMO とも返したプランは 0）。レジスタキャッシュ単独の実機での効果。当時の DIRAM の 32 KB と 10.7 KB の塊の持ち主。shiki-jit.md の §20 の節（参照はあるが本文が無い）。</span>
 </div>
 </main>
 </body>
