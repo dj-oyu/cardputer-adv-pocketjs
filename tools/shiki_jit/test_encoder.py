@@ -26,7 +26,7 @@ DRIVER = r'''
 int main(void){
     int form,o0,o1,o2;
     while(scanf("%d %d %d %d",&form,&o0,&o1,&o2)==4){
-        uint8_t mem[8]; ksn_jit_buf b={mem,0,sizeof mem,false};
+        uint8_t mem[8]; ksn_jit_buf b={mem,0,sizeof mem,false,false};
         ksn_jit_emit(&b,(unsigned)form,o0,o1,o2);
         for(size_t k=0;k<b.len;k++)printf("%02x",mem[k]);
         printf("\n");

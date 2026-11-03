@@ -179,16 +179,27 @@ int main(int argc,char **argv){
         const unsigned n=plan->count;
         tried++;
         const ksn_shiki_status want=ksn_shiki_draw_index(plan,in,nin,index,&vi,seg_i);
-        ksn_jit_buf b={buf,0,sizeof buf,false};
+        ksn_jit_buf b={buf,0,sizeof buf,false,false};
         size_t entry=0;
         if(!ksn_shiki_jit_scalar(plan,&b,&entry)){printf("COMPILE FAILED trial %u (n=%u)\n",t,n);fails++;continue;}
         /* The device sizes first (no buffer), then emits into memory of
          * exactly that length (sec.14): both passes must agree. */
         {
-            ksn_jit_buf z={NULL,0,sizeof buf,false};
+            ksn_jit_buf z={NULL,0,sizeof buf,false,false};
             size_t ez=0;
             if(!ksn_shiki_jit_scalar(plan,&z,&ez)||z.len!=b.len||ez!=entry){
                 printf("SIZING DIFF trial %u: %zu/%zu entry %zu/%zu\n",t,z.len,b.len,ez,entry);fails++;continue;
+            }
+        }
+        /* And the word-only writer (IRAM without a data alias) gives the
+         * same bytes. */
+        {
+            static uint32_t wbuf[sizeof buf/4];
+            memset(wbuf,0xA5,sizeof wbuf);
+            ksn_jit_buf z={(uint8_t *)wbuf,0,b.len,false,true};
+            size_t ez=0;
+            if(!ksn_shiki_jit_scalar(plan,&z,&ez)||z.len!=b.len||memcmp(wbuf,buf,b.len)){
+                printf("WORD WRITER DIFF trial %u\n",t);fails++;continue;
             }
         }
         total_bytes+=b.len;total_inst+=n;

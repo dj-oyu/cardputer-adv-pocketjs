@@ -47,7 +47,7 @@ int main(int argc,char **argv){
         double args[8]={1,1,1,1,1,1,1,1};
         if(!ksn_shiki_register(c,rom[e].len,args,narg,reg,ndata,plan)){printf("%s REJECT\n",rom[e].name);continue;}
         static uint8_t mem[8192];
-        ksn_jit_buf b={mem,0,sizeof mem,false};
+        ksn_jit_buf b={mem,0,sizeof mem,false,false};
         size_t entry=0;
         const bool ok=ksn_shiki_jit_scalar(plan,&b,&entry);
         while(ftell(bin)%16)fputc(0,bin);

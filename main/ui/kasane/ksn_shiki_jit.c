@@ -18,6 +18,16 @@
 
 #include "ksn_shiki_jit_enc.h"
 
+/* One byte at b->len (ksn_jit_buf: word_only memory gets it by
+ * read-modify-write of the aligned word). */
+static inline void jit_put(ksn_jit_buf *b,uint8_t v){
+    if(b->word_only){
+        volatile uint32_t *w=(volatile uint32_t *)(void *)(b->p+(b->len&~(size_t)3u));
+        const unsigned sh=(unsigned)(b->len&3u)*8u;
+        *w=(*w&~(0xFFu<<sh))|((uint32_t)v<<sh);
+    }else b->p[b->len]=v;
+    b->len++;
+}
 void ksn_jit_emit(ksn_jit_buf *b,unsigned form,int o0,int o1,int o2){
     if(form>=KSN_JIT_FORMS)return;
     const ksn_jit_form *f=&KSN_JIT_FORM[form];
@@ -29,7 +39,7 @@ void ksn_jit_emit(ksn_jit_buf *b,unsigned form,int o0,int o1,int o2){
         if((((unsigned)o[t->operand]^(unsigned)f->base_op[t->operand])>>t->bit)&1u)w^=1u<<t->at;
     }
     if(!b->p){b->len+=f->len;return;}           /* a sizing pass */
-    for(unsigned k=0;k<f->len;k++)b->p[b->len++]=(uint8_t)(w>>(8*k));
+    for(unsigned k=0;k<f->len;k++)jit_put(b,(uint8_t)(w>>(8*k)));
 }
 
 /* ---- Stage 2: VEACH sections as PIE code (shiki-jit.md sec.3) --------------
@@ -271,9 +281,9 @@ static void emit_l32r(ksn_jit_buf *b,unsigned t,size_t literal){
     if(words< -65536||words>=0){b->overflow=true;return;}
     const uint32_t imm=(uint32_t)words&0xFFFFu;
     if(!b->p){b->len+=3u;return;}
-    b->p[b->len++]=(uint8_t)(0x01u|t<<4);
-    b->p[b->len++]=(uint8_t)imm;
-    b->p[b->len++]=(uint8_t)(imm>>8);
+    jit_put(b,(uint8_t)(0x01u|t<<4));
+    jit_put(b,(uint8_t)imm);
+    jit_put(b,(uint8_t)(imm>>8));
 }
 /* dst = r[a] (+ or -) r[b] saturated: overflow when the operands' signs
  * say so (add: both differ from the sum's; sub: a's differs from b's and
@@ -412,8 +422,8 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     for(unsigned k=0;k<npool;k++)
         for(unsigned j=0;j<4;j++){
             if(b->len>=b->cap){b->overflow=true;return false;}
-            if(b->p)b->p[b->len]=(uint8_t)((uint32_t)pool[k]>>(8*j));
-            b->len++;
+            if(b->p)jit_put(b,(uint8_t)((uint32_t)pool[k]>>(8*j)));
+            else b->len++;
         }
     *entry=b->len;
     ksn_jit_emit(b,KSN_JIT_ENTRY48,0,0,0);
@@ -690,7 +700,7 @@ void ksn_shiki_jit_attach(ksn_shiki_plan *plan){
     uint8_t *tmp=malloc(JIT_SCRATCH);
     jit_plan *j=calloc(1,sizeof *j);
     if(!tmp||!j){free(tmp);free(j);return;}
-    ksn_jit_buf b={tmp,0,JIT_SCRATCH,false};
+    ksn_jit_buf b={tmp,0,JIT_SCRATCH,false,false};
     j->n=ksn_shiki_jit_plan(plan,j->s,KSN_JIT_SECTIONS,&b);
     if(!j->n){free(tmp);free(j);return;}
     size_t bytes;
@@ -736,7 +746,7 @@ enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
  * tightest heap, where a 4 KB scratch did not fit (sec.14). */
 static int compile_scalar(ksn_shiki_plan *plan){
     if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget)return JIT_BUDGET;
-    ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false};
+    ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false};
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
     const size_t need=b.len;
@@ -756,15 +766,14 @@ static int compile_scalar(ksn_shiki_plan *plan){
     const size_t len=(need+3u)&~(size_t)3u,bytes=len+16u;
     j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
     uint8_t *x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
-    if(!x||!esp_ptr_in_diram_iram(x)){
-        /* (Only DIRAM has the byte-writable alias this relies on.) */
-        if(j->sraw)heap_caps_free(j->sraw);
-        j->sraw=NULL;
-        free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_NOMEM;
-    }
-    uint8_t *w=esp_ptr_diram_iram_to_dram(x);
-    memset(w,0,len);
-    ksn_jit_buf e={w,0,need,false};
+    if(!x){free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_NOMEM;}
+    /* DIRAM: write bytes through the data alias. Otherwise (when the heap
+     * is tight the allocation can come from IRAM-only memory, which takes
+     * 32-bit accesses only) write the words in place. */
+    const bool diram=esp_ptr_in_diram_iram(x);
+    uint8_t *w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
+    for(size_t k=0;k<len/4;k++)((volatile uint32_t *)(void *)w)[k]=0;
+    ksn_jit_buf e={w,0,need,false,!diram};
     size_t entry2=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
         heap_caps_free(j->sraw);j->sraw=NULL;

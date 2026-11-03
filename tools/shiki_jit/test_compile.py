@@ -30,7 +30,7 @@ DRIVER = r'''
 static void one(const ksn_shiki_bench_case *c,ksn_shiki_plan *plan,FILE *bin){
     if(!ksn_shiki_register(c->code,c->len,NULL,0,c->region,c->regions,plan)){printf("%s REJECT\n",c->name);return;}
     static uint8_t mem[4096];
-    ksn_jit_buf b={mem,0,sizeof mem,false};
+    ksn_jit_buf b={mem,0,sizeof mem,false,false};
     ksn_jit_section s[KSN_JIT_SECTIONS];
     const unsigned n=ksn_shiki_jit_plan(plan,s,KSN_JIT_SECTIONS,&b);
     long at=ftell(bin);
