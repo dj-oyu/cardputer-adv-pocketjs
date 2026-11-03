@@ -76,7 +76,7 @@ int main(void){
         memset(z,0x11,1000);
         CHECK(shiki_heap_shrink(z,100)==z);
         uint8_t *after=shiki_heap_malloc(800);
-        CHECK(after==z+100);
+        CHECK(after>=z+100&&after<z+100+16);         /* right after the kept part */
         nz=0;for(unsigned k=0;k<800;k++)nz+=after[k]!=0;
         CHECK(nz==0);
         shiki_heap_free(after);shiki_heap_free(z);shiki_heap_free(o2);
