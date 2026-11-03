@@ -113,9 +113,19 @@ extern uint32_t ksn_shiki_jit_fail[3];
 extern uint32_t ksn_shiki_jit_evicted;
 extern uint32_t ksn_shiki_jit_cold;
 extern uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
-/* sec.18: ADD/SUB sites whose check was patched out [0], kept [1], and
- * never run while logged [2], since boot. */
-extern uint32_t ksn_shiki_jit_sat[3];
+/* sec.18 since boot: ADD/SUB sites put to rest (check out) [0], checked
+ * for good [1], site samples taken [2], rests ended by a sample (back to
+ * the check for good) [3]. */
+extern uint32_t ksn_shiki_jit_sat[4];
+/* sec.18.3, portable so the host can check it: the schedule of a site out
+ * of its check. first: from the slot after the logged draws, the slot's
+ * rest word, or KSN_JIT_SAT_FAST (keep the check, no log) or
+ * KSN_JIT_SAT_LOG (never ran: go on logging). next: from the rest word and
+ * the slot after one sampled draw, the next rest word or KSN_JIT_SAT_FAST. */
+#define KSN_JIT_SAT_FAST 0xFFFFFFFFu
+#define KSN_JIT_SAT_LOG 0xFFFFFFFEu
+uint32_t ksn_shiki_jit_sat_first(uint32_t sample,uint32_t draws);
+uint32_t ksn_shiki_jit_sat_next(uint32_t rest,uint32_t sample,uint32_t draws);
 /* The bench's: compile now, whatever the heat (the budget still holds). */
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan);
 uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,

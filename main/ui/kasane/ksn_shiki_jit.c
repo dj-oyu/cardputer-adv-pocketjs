@@ -306,6 +306,36 @@ static void emit_l32r(ksn_jit_buf *b,unsigned t,size_t literal){
  * Patched out (ksn_shiki_jit_run's decision), the call0 becomes j over the
  * slot. */
 #define JIT_SLOT_NEVER 0x80000000u
+/* sec.18.3: the rest schedule. A site out of its check (j over the slot)
+ * keeps its schedule in the slot, which nothing else reads then:
+ * [15:0] the draw it is sampled next (low 16 bits), [20:16] the most bits
+ * its samples used, [30:21] the rest length in draws. */
+#define SAT_NEAR 3u                 /* within this many bits of INT32_MAX: checked for good */
+#define SAT_REST_MIN 16u
+#define SAT_REST_MAX 1023u
+static uint32_t sat_pack(uint32_t next,unsigned env,unsigned len){
+    return (next&0xFFFFu)|(uint32_t)env<<16|(uint32_t)len<<21;
+}
+static unsigned sat_bits(uint32_t w){return w?32u-(unsigned)__builtin_clz(w):0u;}
+uint32_t ksn_shiki_jit_sat_first(uint32_t sample,uint32_t draws){
+    if(sample&JIT_SLOT_NEVER)return KSN_JIT_SAT_LOG;
+    const unsigned used=sat_bits(sample);
+    if(used>=31u-SAT_NEAR)return KSN_JIT_SAT_FAST;
+    return sat_pack(draws+SAT_REST_MIN,used,SAT_REST_MIN);
+}
+uint32_t ksn_shiki_jit_sat_next(uint32_t rest,uint32_t sample,uint32_t draws){
+    const unsigned env=rest>>16&31u,len=rest>>21&1023u;
+    if(sample&JIT_SLOT_NEVER)return sat_pack(draws+4u,env,len);   /* not reached this draw */
+    const unsigned used=sat_bits(sample),env2=used>env?used:env;
+    if(env2>=31u-SAT_NEAR)return KSN_JIT_SAT_FAST;
+    const unsigned room=31u-SAT_NEAR-env2,growth=env2-env;
+    /* No growth: twice the rest. Growth: half the draws the same growth
+     * per rest would take to reach SAT_NEAR bits of room. */
+    uint32_t len2=growth?(uint32_t)len*room/(2u*growth):2u*len;
+    if(len2<SAT_REST_MIN)return KSN_JIT_SAT_FAST;
+    if(len2>SAT_REST_MAX)len2=SAT_REST_MAX;
+    return sat_pack(draws+len2,env2,(unsigned)len2);
+}
 static void emit_checked(ksn_jit_buf *b,const ksn_shiki_inst *i,bool sub){
     const unsigned least=sub?7u:6u;              /* l32i.n, l32i.n, add.n or sub */
     unsigned wide=(1u-(unsigned)(b->org+b->len+least))&3u;
@@ -729,7 +759,7 @@ uint32_t ksn_shiki_jit_evicted;
 uint32_t ksn_shiki_jit_cold;
 /* Compiles attempted and their cycles (sec.17), for the session's log. */
 uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
-uint32_t ksn_shiki_jit_sat[3];
+uint32_t ksn_shiki_jit_sat[4];
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
@@ -896,19 +926,20 @@ typedef struct {
     ksn_shiki_plan *plan;
     void *next;
     uint32_t last;                /* jit_clock at its last draw (sec.16) */
-    /* sec.18: JIT_SAT_LOG, the code calls the shared checker and its slots
-     * log; JIT_SAT_DECIDED, every site is settled. plain: sites that lost
-     * their check (patched to j over the slot); fast: sites that keep it,
-     * pointed at the checker's entry without the log. A later compile
-     * (after a drop) of a decided plan emits plain sites plain and the rest
-     * inline. draws: draws since the code was compiled. */
-    uint8_t sat;
-    uint16_t draws;
+    /* sec.18: JIT_SAT_LOG, every site calls the checker with its log;
+     * JIT_SAT_LIVE, each site is resting (j over the slot, its schedule in
+     * the slot), checked for good (call0 to the fast entry) or still
+     * logging (never ran yet). draws: draws since the code was compiled;
+     * due: the draw a resting or logging site is next looked at. sites:
+     * each site's call0 offset (sec.18.3), subs: which are SUB. */
+    uint8_t sat,nsites;
+    uint32_t draws,due;
     int32_t alias;                /* the code's data-bus address minus its instruction-bus one */
     uint8_t *sdata;               /* the code's start on the data bus */
-    uint64_t plain,fast;
+    uint16_t *sites;
+    uint64_t subs;
 } jit_plan;
-enum { JIT_SAT_NONE, JIT_SAT_LOG, JIT_SAT_DECIDED };
+enum { JIT_SAT_NONE, JIT_SAT_LOG, JIT_SAT_LIVE };
 static unsigned count_sites(const ksn_shiki_plan *plan){
     unsigned n=0;
     for(unsigned pc=0;pc<plan->count;pc++)n+=plan->code[pc].op==KSN_SHIKI_ADD||plan->code[pc].op==KSN_SHIKI_SUB;
@@ -969,6 +1000,7 @@ static void drop_scalar(jit_plan *j){
     }
     j->sraw=NULL;j->scalar=NULL;j->sbytes=0;j->weights=NULL;j->wbytes=0;
     j->sregion=j->wregion=false;
+    free(j->sites);j->sites=NULL;j->nsites=0;j->sat=JIT_SAT_NONE;
     unlist(j);
 }
 void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
@@ -1080,8 +1112,7 @@ static int compiled(ksn_shiki_plan *plan,jit_plan *j,uint8_t *x,size_t entry,siz
     j->sdata=data;
     j->alias=(int32_t)((intptr_t)data-(intptr_t)x);
     j->draws=0;
-    if(j->sat!=JIT_SAT_DECIDED){j->plain=j->fast=0;}
-    if(j->sat!=JIT_SAT_DECIDED)j->sat=checker&&count_sites(plan)?JIT_SAT_LOG:JIT_SAT_NONE;
+    j->sat=checker&&count_sites(plan)?JIT_SAT_LOG:JIT_SAT_NONE;
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
     ksn_shiki_jit_bytes+=(uint32_t)bytes;
@@ -1096,12 +1127,11 @@ static bool in_diram(const uint8_t *p,size_t n){
     return esp_ptr_in_diram_dram(p)&&esp_ptr_in_diram_dram(p+n-1);
 }
 
-/* sec.18: how a plan's ADD/SUB sites are emitted. Decided: the sites the
- * logs cleared plain, the rest inline (no logging any more). Otherwise the
- * shared checker, when the code will run on DIRAM (org: its instruction-bus
- * address; elsewhere call0 does not reach the checker). */
+/* sec.18: how a plan's ADD/SUB sites are emitted: through the shared
+ * checker when the code will run on DIRAM (org: its instruction-bus
+ * address; elsewhere call0 does not reach the checker), else inline. */
 static void sat_mode(const jit_plan *j,ksn_jit_buf *b,uint32_t org,bool checker){
-    if(j&&j->sat==JIT_SAT_DECIDED){b->plain=j->plain;return;}
+    (void)j;
     if(!checker)return;
     b->org=org;
     b->chk_add=(uint32_t)(uintptr_t)ksn_jit_chk_add;
@@ -1231,21 +1261,15 @@ static int compile_scalar(ksn_shiki_plan *plan){
     }
     return compiled(plan,j,x,entry,bytes,w,e.chk_add!=0);
 }
-/* sec.18: the logs are read twice, early (the checker with its log costs
- * ~4x the inline check, so the sooner a site leaves it the better):
- * - at JIT_SAT_EARLY draws a site whose results used at most
- *   31 - JIT_SAT_ROOM_EARLY bits loses its check (its call0 becomes j over
- *   the slot), and one that came within JIT_SAT_NEAR bits of INT32_MAX (or
- *   saturated) keeps it, without the log (call0 to the fast entry);
- * - at JIT_SAT_LATE draws the rest are settled with JIT_SAT_ROOM bits of
- *   room; a site that never ran keeps its check, without the log.
- * Values are risk, not proof: a site cleared here wraps if a later draw
- * overflows it (docs/kasane/shiki-jit.md sec.18). */
+/* sec.18: the first JIT_SAT_EARLY draws log every site. Then (sat_first)
+ * each site is put to rest (its check out: j over the slot) unless it came
+ * within SAT_NEAR bits of INT32_MAX, which keeps the check for good without
+ * the log (call0 to the fast entry); a site that never ran goes on logging.
+ * A resting site is sampled when its rest ends: for that one draw its call0
+ * goes back to the logging entry, and the sample sets the next rest
+ * (ksn_shiki_jit_sat_next) or ends the rest for good. Values are risk, not
+ * proof: a site that overflows while resting wraps (shiki-jit.md sec.18). */
 #define JIT_SAT_EARLY 16u
-#define JIT_SAT_LATE 64u
-#define JIT_SAT_ROOM_EARLY 12u
-#define JIT_SAT_ROOM 8u
-#define JIT_SAT_NEAR 3u
 /* Rewrites the 3 bytes at the site: j over the slot, or call0 to `to`. */
 static void sat_patch(jit_plan *j,unsigned at,const uint8_t *to){
     ksn_jit_buf q={j->sdata,at,at+3u,false,false,0,0,0,0,NULL,0};
@@ -1253,50 +1277,142 @@ static void sat_patch(jit_plan *j,unsigned at,const uint8_t *to){
     const uint32_t pc=(uint32_t)(uintptr_t)j->sdata-(uint32_t)j->alias+at;
     ksn_jit_emit(&q,KSN_JIT_CALL0,(int)(((int32_t)(uintptr_t)to-(int32_t)(pc&~3u)-4)/4),0,0);
 }
-static void sat_pass(const ksn_shiki_plan *plan,jit_plan *j,bool late){
+/* What the site's 3 bytes are now: 0 j (resting), 1 call0 to the fast
+ * entry, 2 call0 to the logging entry. */
+static unsigned sat_kind(jit_plan *j,unsigned k){
+    const uint8_t *at=j->sdata+j->sites[k];
+    uint8_t want[3];
+    ksn_jit_buf q={want,0,3,false,false,0,0,0,0,NULL,0};
+    ksn_jit_emit(&q,KSN_JIT_J,3,0,0);
+    if(!memcmp(at,want,3))return 0;
+    q.len=0;
+    const bool sub=j->subs>>k&1u;
+    const uint32_t pc=(uint32_t)(uintptr_t)j->sdata-(uint32_t)j->alias+j->sites[k];
+    const uint8_t *to=sub?ksn_jit_chk_sub_fast:ksn_jit_chk_add_fast;
+    ksn_jit_emit(&q,KSN_JIT_CALL0,(int)(((int32_t)(uintptr_t)to-(int32_t)(pc&~3u)-4)/4),0,0);
+    return memcmp(at,want,3)?2u:1u;
+}
+static volatile uint32_t *sat_slot(jit_plan *j,unsigned k){
+    return (volatile uint32_t *)(void *)(j->sdata+j->sites[k]+3u);
+}
+/* A schedule word (or FAST / LOG) applied to site k. */
+static void sat_apply(jit_plan *j,unsigned k,uint32_t r){
+    if(r==KSN_JIT_SAT_LOG)return;                      /* stays on the logging entry */
+    if(r==KSN_JIT_SAT_FAST){
+        sat_patch(j,j->sites[k],j->subs>>k&1u?ksn_jit_chk_sub_fast:ksn_jit_chk_add_fast);
+        ksn_shiki_jit_sat[1]++;
+        return;
+    }
+    *sat_slot(j,k)=r;
+    sat_patch(j,j->sites[k],NULL);
+}
+/* The draw the plan next needs a look: the soonest rest's end, or soon
+ * when a site still logs (it has not run yet). */
+static void sat_due(jit_plan *j){
+    uint32_t due=UINT32_MAX;
+    for(unsigned k=0;k<j->nsites;k++){
+        const unsigned kind=sat_kind(j,k);
+        uint32_t at=UINT32_MAX;
+        if(kind==0){
+            const int16_t d=(int16_t)((uint16_t)*sat_slot(j,k)-(uint16_t)j->draws);
+            at=d>0?j->draws+(uint32_t)d:j->draws;
+        }
+        else if(kind==2)at=j->draws+SAT_REST_MIN;
+        if(at<due)due=at;
+    }
+    j->due=due;
+}
+static void sat_first(const ksn_shiki_plan *plan,jit_plan *j){
     uint16_t sites[KSN_SHIKI_CODE];
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
     sat_mode(j,&b,0,true);
     b.sites=sites;
     size_t entry=0;
-    if(!ksn_shiki_jit_scalar(plan,&b,&entry)){j->sat=JIT_SAT_DECIDED;return;}   /* cannot happen: it compiled */
+    j->sat=JIT_SAT_NONE;
+    if(!ksn_shiki_jit_scalar(plan,&b,&entry)||!b.nsites||b.nsites>64u)return;   /* cannot happen: it compiled */
+    j->subs=0;
+    for(unsigned pc=0,n=0;pc<plan->count&&n<64u;pc++){
+        const uint8_t op=plan->code[pc].op;
+        if(op==KSN_SHIKI_SUB)j->subs|=1ull<<n;
+        n+=op==KSN_SHIKI_ADD||op==KSN_SHIKI_SUB;
+    }
+    j->sites=malloc(b.nsites*sizeof *j->sites);
+    j->nsites=(uint8_t)b.nsites;
+    if(!j->sites){
+        /* No room for the offsets: every site keeps its check, without the log. */
+        jit_plan t=*j;t.sites=sites;
+        for(unsigned k=0;k<b.nsites;k++)sat_apply(&t,k,KSN_JIT_SAT_FAST);
+        j->nsites=0;
+        __asm__ volatile("memw\n" "isync\n":::"memory");
+        return;
+    }
+    memcpy(j->sites,sites,b.nsites*sizeof *sites);
     /* The SHIKI_SAT line: per site, in program order, the bits its results
      * used (0-9, a-v for 10-31; '-' never ran); fnv names the plan (FNV-1a
      * of its instructions, as a host tool can compute from the ROM). */
     char bits[65];
-    unsigned out=0,kept=0,never=0,open=0,n=0;
-    uint64_t subs=0;                                   /* which sites are SUB */
-    for(unsigned pc=0;pc<plan->count&&n<64u;pc++){
-        const uint8_t op=plan->code[pc].op;
-        if(op==KSN_SHIKI_SUB)subs|=1ull<<n;
-        n+=op==KSN_SHIKI_ADD||op==KSN_SHIKI_SUB;
-    }
-    for(unsigned k=0;k<b.nsites&&k<64u;k++){
-        const uint32_t w=*(volatile const uint32_t *)(const void *)(j->sdata+sites[k]+3u);
-        const unsigned used=w?32u-(unsigned)__builtin_clz(w):0u;
-        bits[k]=(w&JIT_SLOT_NEVER)?'-':(char)(used<10u?'0'+used:'a'+used-10u);
+    unsigned rest=0,fast=0,never=0;
+    for(unsigned k=0;k<j->nsites;k++){
+        const uint32_t w=*sat_slot(j,k);
+        bits[k]=(w&JIT_SLOT_NEVER)?'-':(char)(sat_bits(w)<10u?'0'+sat_bits(w):'a'+sat_bits(w)-10u);
         bits[k+1]=0;
-        if((j->plain|j->fast)>>k&1u)continue;          /* settled early */
-        bool clear,keep;
-        if(w&JIT_SLOT_NEVER){clear=false;keep=late;if(late){ksn_shiki_jit_sat[2]++;never++;}}
-        else if(late){clear=used<=31u-JIT_SAT_ROOM;keep=!clear;}
-        else{clear=used<=31u-JIT_SAT_ROOM_EARLY;keep=used>=31u-JIT_SAT_NEAR;}
-        if(clear){
-            sat_patch(j,sites[k],NULL);
-            j->plain|=1ull<<k;ksn_shiki_jit_sat[0]++;out++;
-        }else if(keep){
-            sat_patch(j,sites[k],subs>>k&1u?ksn_jit_chk_sub_fast:ksn_jit_chk_add_fast);
-            j->fast|=1ull<<k;
-            if(!(w&JIT_SLOT_NEVER)){ksn_shiki_jit_sat[1]++;kept++;}
-        }else open++;
+        const uint32_t r=ksn_shiki_jit_sat_first(w,j->draws);
+        if(r==KSN_JIT_SAT_LOG)never++;
+        else if(r==KSN_JIT_SAT_FAST)fast++;
+        else{rest++;ksn_shiki_jit_sat[0]++;}
+        sat_apply(j,k,r);
     }
     __asm__ volatile("memw\n" "isync\n":::"memory");
-    if(late||!open)j->sat=JIT_SAT_DECIDED;
+    j->sat=JIT_SAT_LIVE;
+    sat_due(j);
     uint32_t fnv=2166136261u;
     const uint8_t *q=(const uint8_t *)plan->code;
     for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)fnv=(fnv^q[k])*16777619u;
-    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u at=%u out=%u kept=%u never=%u open=%u bits=%s",
-             (unsigned)fnv,(unsigned)plan->count,(unsigned)j->draws,out,kept,never,open,b.nsites?bits:"");
+    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u rest=%u fast=%u never=%u bits=%s",
+             (unsigned)fnv,(unsigned)plan->count,rest,fast,never,bits);
+}
+/* Before a draw that is due: each resting site whose rest has ended goes
+ * back to the logging entry for this draw (its schedule kept in stash). */
+static uint64_t sat_sample_begin(jit_plan *j,uint32_t *stash){
+    uint64_t m=0;
+    for(unsigned k=0;k<j->nsites;k++){
+        if(sat_kind(j,k)!=0)continue;
+        const uint32_t w=*sat_slot(j,k);
+        if((int16_t)((uint16_t)w-(uint16_t)j->draws)>0)continue;
+        stash[k]=w;
+        *sat_slot(j,k)=JIT_SLOT_NEVER;
+        sat_patch(j,j->sites[k],j->subs>>k&1u?ksn_jit_chk_sub:ksn_jit_chk_add);
+        m|=1ull<<k;
+    }
+    __asm__ volatile("memw\n" "isync\n":::"memory");
+    return m;
+}
+/* After it: each sample sets the next rest or ends it for good; a site
+ * still logging (it had never run) gets its first decision once it ran. */
+static void sat_sample_end(const ksn_shiki_plan *plan,jit_plan *j,const uint32_t *stash,uint64_t m){
+    for(unsigned k=0;k<j->nsites;k++){
+        const uint32_t w=*sat_slot(j,k);
+        uint32_t r;
+        if(m>>k&1u){
+            ksn_shiki_jit_sat[2]++;
+            r=ksn_shiki_jit_sat_next(stash[k],w,j->draws);
+            if(r==KSN_JIT_SAT_FAST){
+                ksn_shiki_jit_sat[3]++;
+                uint32_t fnv=2166136261u;
+                const uint8_t *q=(const uint8_t *)plan->code;
+                for(size_t i=0;i<plan->count*sizeof plan->code[0];i++)fnv=(fnv^q[i])*16777619u;
+                ESP_LOGI("kasane","SHIKI_SAT fnv=%08x site=%u back env=%u used=%u len=%u draw=%u",(unsigned)fnv,k,
+                         (unsigned)(stash[k]>>16&31u),sat_bits(w&~JIT_SLOT_NEVER),(unsigned)(stash[k]>>21&1023u),
+                         (unsigned)j->draws);
+            }
+        }else if(sat_kind(j,k)==2){
+            r=ksn_shiki_jit_sat_first(w,j->draws);
+            if(r!=KSN_JIT_SAT_LOG&&r!=KSN_JIT_SAT_FAST)ksn_shiki_jit_sat[0]++;
+        }else continue;
+        sat_apply(j,k,r);
+    }
+    __asm__ volatile("memw\n" "isync\n":::"memory");
+    sat_due(j);
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
@@ -1337,14 +1453,18 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
                    ksn_shiki_sin_table,
                    (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,
                    0,j->alias,j->weights,plan,out,index};
-    ((jit_plan *)j)->last=++jit_clock;
+    jit_plan *jm=(jit_plan *)j;
+    jm->last=++jit_clock;
+    uint32_t stash[64];
+    uint64_t sampled=0;
+    const bool look=jm->sat==JIT_SAT_LIVE&&jm->draws>=jm->due;
+    if(look)sampled=sat_sample_begin(jm,stash);
     jit_running++;
     const uint32_t r=j->scalar(&c);
     jit_running--;
-    if(j->sat==JIT_SAT_LOG){
-        const uint16_t d=++((jit_plan *)j)->draws;
-        if(d==JIT_SAT_EARLY||d==JIT_SAT_LATE)sat_pass(p,(jit_plan *)j,d==JIT_SAT_LATE);
-    }
+    jm->draws++;
+    if(jm->sat==JIT_SAT_LOG&&jm->draws==JIT_SAT_EARLY)sat_first(p,jm);
+    else if(look)sat_sample_end(p,jm,stash,sampled);
     return r;
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}

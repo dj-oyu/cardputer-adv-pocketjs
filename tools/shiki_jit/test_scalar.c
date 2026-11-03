@@ -251,6 +251,32 @@ static bool agrees(const ksn_shiki_plan *plan,uint8_t *code,size_t len,size_t en
     return !bad;
 }
 
+/* sec.18.3: the rest schedule, on a few hand-made samples. */
+static unsigned sched_fails(void){
+    unsigned bad=0;
+#define EXPECT(c) do{if(!(c)){printf("SCHEDULE FAIL line %d: %s\n",__LINE__,#c);bad++;}}while(0)
+    const uint32_t N=0x80000000u;
+    EXPECT(ksn_shiki_jit_sat_first(N,16)==KSN_JIT_SAT_LOG);                 /* never ran */
+    EXPECT(ksn_shiki_jit_sat_first(0x0FFFFFFFu,16)==KSN_JIT_SAT_FAST);       /* 28 bits: within 3 of the top */
+    EXPECT(ksn_shiki_jit_sat_first(0x7FFFFFFFu,16)==KSN_JIT_SAT_FAST);       /* saturated */
+    const uint32_t r=ksn_shiki_jit_sat_first(0x00FFFFFFu,16);                /* 24 bits: rest 16 */
+    EXPECT((r&0xFFFFu)==32u&&(r>>16&31u)==24u&&(r>>21&1023u)==16u);
+    const uint32_t r2=ksn_shiki_jit_sat_next(r,0x00800000u,32);              /* no growth: twice */
+    EXPECT((r2&0xFFFFu)==64u&&(r2>>16&31u)==24u&&(r2>>21&1023u)==32u);
+    const uint32_t r3=ksn_shiki_jit_sat_next(r2,0x01FFFFFFu,64);             /* +1 bit: 32*(31-3-25)/2 = 48 */
+    EXPECT((r3>>16&31u)==25u&&(r3>>21&1023u)==48u&&(r3&0xFFFFu)==112u);
+    EXPECT(ksn_shiki_jit_sat_next(r3,0x07FFFFFFu,112)==KSN_JIT_SAT_FAST);  /* +2 bits: 48*(31-3-27)/4 = 12 < 16 */
+    EXPECT(ksn_shiki_jit_sat_next(r3,0x0FFFFFFFu,112)==KSN_JIT_SAT_FAST);  /* 28 bits */
+    const uint32_t r4=ksn_shiki_jit_sat_next(r3,N,112);                      /* not reached: soon again */
+    EXPECT((r4&0xFFFFu)==116u&&(r4>>21&1023u)==48u);
+    uint32_t w=r;                                                             /* doubling stops at the cap */
+    for(unsigned k=0;k<12;k++)w=ksn_shiki_jit_sat_next(w,0x00800000u,1000u+k);
+    EXPECT((w>>21&1023u)==1023u);
+    EXPECT(((ksn_shiki_jit_sat_next(r,0x00800000u,0xFFF0u)&0xFFFFu)==((0xFFF0u+32u)&0xFFFFu)));  /* wraps in 16 bits */
+#undef EXPECT
+    return bad;
+}
+
 int main(int argc,char **argv){
     static uint8_t buf[8192],cbuf[8192],pbuf[8192];
     ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);
@@ -332,6 +358,7 @@ int main(int argc,char **argv){
     printf("scalar: CUBIC %u calls, LINE_PATTERN %u calls (interpreter and code together)\n",
            (unsigned)ksn_shiki_curve_n[0],(unsigned)ksn_shiki_curve_n[1]);
     free(plan);
+    fails+=sched_fails();
     if(fails){printf("SHIKI JIT SCALAR FAIL (%u)\n",fails);return 1;}
     printf("SHIKI JIT SCALAR PASS\n");
     return 0;
