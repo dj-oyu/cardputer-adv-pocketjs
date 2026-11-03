@@ -28,8 +28,6 @@
 static void *sys_region(size_t n){return heap_caps_malloc(n,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);}
 static void sys_region_free(void *p){heap_caps_free(p);}
 #define HEAP_REFUSED(what,p) ESP_LOGE("shiki","SHIKI_HEAP_REFUSED %s %p",what,p)
-/* malloc's alignment: 4, as multi_heap gave before (no 8-byte loads). */
-#define MALLOC_ALIGN 4u
 #else
 #include <stdio.h>
 static void *sys_region(size_t n){return malloc(n);}
@@ -38,9 +36,10 @@ static void sys_region_free(void *p){free(p);}
 // there is a bug in the caller, so it stops the test.
 #define SHIKI_HEAP_CHECK 1
 #define HEAP_REFUSED(what,p) do{fprintf(stderr,"SHIKI_HEAP_REFUSED %s %p\n",what,(void *)(p));abort();}while(0)
-/* The host's structs hold 8-byte pointers. */
-#define MALLOC_ALIGN _Alignof(max_align_t)
 #endif
+/* malloc's alignment, as the C library's: 8-byte members (int64_t, the
+ * host's pointers) need it; a few bytes of padding a block. */
+#define MALLOC_ALIGN _Alignof(max_align_t)
 
 /* 128 blocks: 16 data regions, 8 lists, 32 programs, the surface's two
  * frames, the workspace and the VM state, and the JIT's code and weights
