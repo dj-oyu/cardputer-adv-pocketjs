@@ -509,6 +509,8 @@ done:
              (int)wifi_time_status().state,
              (unsigned)esp_get_free_heap_size());
     atomic_store(&running,false);
+    /* Stack high-water mark, to size a shared stack (shiki-jit.md sec.19). */
+    ESP_LOGI("wifi","WIFI_STACK_HWM %s free=%u",pcTaskGetName(NULL),(unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelete(NULL);
 }
 
@@ -658,6 +660,8 @@ static void scan_task(void *arg) {
     ESP_LOGI(TAG,"SCAN_DONE state=%d free=%u",
              (int)wifi_time_scan_state(),(unsigned)esp_get_free_heap_size());
     atomic_store(&running,false);
+    /* Stack high-water mark, to size a shared stack (shiki-jit.md sec.19). */
+    ESP_LOGI("wifi","WIFI_STACK_HWM %s free=%u",pcTaskGetName(NULL),(unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelete(NULL);
 }
 
@@ -807,6 +811,8 @@ done:
     atomic_store(&link_stop_req,false);
     atomic_store(&link_owner_v,0);
     atomic_store(&running,false);
+    /* Stack high-water mark, to size a shared stack (shiki-jit.md sec.19). */
+    ESP_LOGI("wifi","WIFI_STACK_HWM %s free=%u",pcTaskGetName(NULL),(unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelete(NULL);
 }
 

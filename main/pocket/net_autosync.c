@@ -275,6 +275,7 @@ static void attempt_task(void *arg) {
              (unsigned)low,(unsigned)free_internal(),mon?"":" (shared monitor)");
     atomic_store(&posted,(int)out);
     atomic_store(&active,false);
+    ESP_LOGI(TAG,"AUTOSYNC_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelete(NULL);
 }
 
