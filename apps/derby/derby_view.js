@@ -206,7 +206,7 @@ function course(c, x0, xs, close, gate, K) {
     const X = PO[4 * l], s = PO[4 * l + 1];
     if (l === close) {
       bflush();
-      const g = ((DO(xs[l], l) >> 12) * 60495 >> 12) % 6;
+      const g = ((DO(xs[l], l) >> 12) * 60495 >> 20) % 6;
       dr('g' + g, []);
       dr('silk', SILK[l], HS * bob(g) + 128 >> 8);
     } else if (K ? X - (5 * s >> 1) >= L && X + (25 * s >> 1) <= R : X > L && X < R) rin(l, X, s, PO[4 * l + 2], DO(xs[l], l));
