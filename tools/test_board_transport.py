@@ -58,7 +58,7 @@ typedef int esp_err_t;
 #define gpio_set_level(p,v) ((void)(p),(void)(v))
 typedef struct {size_t length; const void *tx_buffer;} spi_transaction_t;
 @DECLARATIONS@
-static bool capture,capture_turn_taken,pie_swap;
+static bool capture,capture_turn_taken,pie_swap,lcd_le;
 static int g_board_async=1,g_board_swap_into=1,lcd;
 static uint16_t glass[LCD_W*LCD_H],expected[LCD_W*LCD_H];
 static uint8_t snapshot[LCD_W*STRIP_H*2];
@@ -259,7 +259,7 @@ int main(void){
  puts("BOARD_TRANSPORT PASS: native/DMA OFF+ON ownership, stable scratch, packed panel pixels, windows, tail, capture, faults");
 }
 '''
-parts = [function(x) for x in ('uint16_t *board_strip(', 'static esp_err_t tx_reap(',
+parts = [function(x) for x in ('static void put_strip(uint16_t *out,uint16_t *in,int count){', 'uint16_t *board_strip(', 'static esp_err_t tx_reap(',
     'void board_capture(', 'bool board_capture_take_turn(', 'static esp_err_t command(',
     'esp_err_t board_present(', 'esp_err_t board_present_rect(')]
 if CONTINUATION:
