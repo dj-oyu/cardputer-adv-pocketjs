@@ -373,6 +373,7 @@ static bool scalar_line(unsigned line,char *out,size_t n){
     unsigned same=0,diff=0,none=0,first=UINT32_MAX,done=0;
     uint64_t cy[2]={0,0},steps=0;
     uint32_t bytes=0,inst=0;
+    uint64_t compile_cy=0;                       /* compiling and copying to executable memory */
     const bool kept=ksn_shiki_jit_enabled;
     for(unsigned t=0;t<SCALAR_PER;t++){
         int32_t in[KSN_SHIKI_INPUTS];
@@ -386,8 +387,9 @@ static bool scalar_line(unsigned line,char *out,size_t n){
         for(unsigned run=0;run<2;run++){
             ksn_shiki_jit_enabled=run==1;
             if(run==1){
-                const uint32_t before=ksn_shiki_jit_bytes;
+                const uint32_t before=ksn_shiki_jit_bytes,c0=esp_cpu_get_cycle_count();
                 if(!ksn_shiki_jit_compile_now(b->plan)){none++;break;}
+                compile_cy+=esp_cpu_get_cycle_count()-c0;
                 bytes+=ksn_shiki_jit_bytes-before;
                 inst+=b->plan->count;
             }
@@ -404,9 +406,9 @@ static bool scalar_line(unsigned line,char *out,size_t n){
     }
     ksn_shiki_jit_enabled=kept;
     snprintf(out,n,"CB jit scalar %u/%u %s same=%u diff=%u first=%d none=%u done=%u cy/step interp=%.1f jit=%.1f "
-             "code=%.1f B/inst",line+1u,SCALAR_LINES,diff?"DIFF":"same",same,diff,first==UINT32_MAX?-1:(int)first,
+             "code=%.1f B/inst compile=%.1f cy/inst",line+1u,SCALAR_LINES,diff?"DIFF":"same",same,diff,first==UINT32_MAX?-1:(int)first,
              none,done,steps?(double)cy[0]/(double)steps:0.0,steps?(double)cy[1]/(double)steps:0.0,
-             inst?(double)bytes/(double)inst:0.0);
+             inst?(double)bytes/(double)inst:0.0,inst?(double)compile_cy/(double)inst:0.0);
     bench_free(b);
     return true;
 }

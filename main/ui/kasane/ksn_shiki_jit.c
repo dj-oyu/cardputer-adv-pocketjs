@@ -710,8 +710,10 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
  * never costs memory), once: on any failure, or when the code would pass
  * the budget, it stays with the interpreter. The budget bounds the
  * executable memory taken from the heap the app shares (shiki-jit.md
- * sec.11). */
-#define JIT_HEAT 32u
+ * sec.11). 4, not 32: MEGADEMO registers a scene's plans while it plays
+ * (TWIST's negative set from frame 60, drawn from 122 for 74 frames), and
+ * at one draw a frame 32 left half of that scene interpreted (sec.14). */
+#define JIT_HEAT 4u
 #define JIT_SCALAR_SCRATCH 4096u
 
 static bool compile_scalar(ksn_shiki_plan *plan){
