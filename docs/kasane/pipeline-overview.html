@@ -548,7 +548,7 @@ ol.steps li{margin:4px 0}
 <tr><td>56 KiB にした代わりの、起動後のシステムの空き</td><td class="num">45,576 → 37,308</td><td>shiki-jit.md §21.3</td><td><span class="m">実測</span></td></tr>
 </table>
 <p class="note">workspace の廃止で DERBY の区画から空くのは 10,248 − 3,840 = <b>6,408 B</b> <span class="e">計算</span>。DERBY は <code>resource()</code> で面 0 を image にしている（<code>derby_view.js:9</code>、<code>derby_scene.js:29</code>）ので、帯のキャッシュは取られる。（shiki-jit.md §22 は、この点を直した。）</p>
-<p class="note"><a href="shiki.md">shiki.md</a> §4.5.1（2026-10-31 実測）の DERBY の行の「フレーム 2 枚 + 作業用 各 10,752」は、768 本にする前（<code>b30dc1d</code>、2026-11-02 より前）で、TLSF のブロックの大きさ。<a href="shiki-jit-overview.html">shiki-jit-overview.html</a> §4 の図も 10,752 × 3 で描かれており、今の DERBY とは合わない。</p>
+<p class="note"><a href="shiki.md">shiki.md</a> §4.5.1（2026-10-31 実測）の DERBY の行の「フレーム 2 枚 + 作業用 各 10,752」は、768 本にする前（<code>b30dc1d</code>、2026-11-02 より前）で、TLSF のブロックの大きさ。<a href="shiki-jit-overview.html">shiki-jit-overview.html</a> の以前の版の §4 の図も 10,752 × 3 で描かれていた（2026-11-03 に書き直し、今は 48 KiB・作業領域なしの図）。</p>
 </div>
 
 <h2 id="jit">9. JIT の位置</h2>

@@ -10,6 +10,7 @@
   --sram0:#c9c3b8; --static:#b8b2a7; --guest:#e2a86b; --shiki:#4f8fd6; --jit:#2fa37a;
   --dram:#9d8fd1; --rtc:#d46a6a; --free:#ffffff; --reserved:#8a8580; --keep:#f2d16b;
   --interp:#a9a39a; --rtcbar:#d46a6a; --diram:#2fa37a; --accent:#2f6fb5;
+  --bridgebg:#eef4fb; --bridgeline:#2f6fb5; --sowhat:#2fa37a;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -17,6 +18,7 @@
     --sram0:#57534d; --static:#4d4944; --guest:#b9814a; --shiki:#4a86c9; --jit:#3fb58b;
     --dram:#7c6fb3; --rtc:#c25e5e; --free:#2b2f34; --reserved:#6a6560; --keep:#c9a944;
     --interp:#6d6862; --rtcbar:#c25e5e; --diram:#3fb58b; --accent:#7fb0e8;
+    --bridgebg:#1c2633; --bridgeline:#7fb0e8; --sowhat:#3fb58b;
   }
 }
 :root[data-theme="dark"]{
@@ -24,6 +26,7 @@
   --sram0:#57534d; --static:#4d4944; --guest:#b9814a; --shiki:#4a86c9; --jit:#3fb58b;
   --dram:#7c6fb3; --rtc:#c25e5e; --free:#2b2f34; --reserved:#6a6560; --keep:#c9a944;
   --interp:#6d6862; --rtcbar:#c25e5e; --diram:#3fb58b; --accent:#7fb0e8;
+  --bridgebg:#1c2633; --bridgeline:#7fb0e8; --sowhat:#3fb58b;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
@@ -36,12 +39,27 @@ p,li{color:var(--fg)}
 .lead{color:var(--muted);margin:0 0 18px}
 .note{color:var(--muted);font-size:.88rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.bridge{background:var(--bridgebg);border-left:4px solid var(--bridgeline);border-radius:0 10px 10px 0;padding:10px 16px;margin:10px 0 16px;font-size:.93rem}
+.bridge p{margin:2px 0}
+.bridge b{color:var(--bridgeline)}
+.sowhat{border-top:1px dashed var(--line);margin:18px 0 0;padding-top:8px;font-size:.93rem}
+.sowhat::before{content:"→ ";color:var(--sowhat);font-weight:700}
+.chain{counter-reset:ch;list-style:none;padding:0;margin:8px 0}
+.chain li{position:relative;padding:6px 0 6px 40px;border-left:2px solid var(--line);margin-left:14px}
+.chain li::before{counter-increment:ch;content:counter(ch);position:absolute;left:-14px;top:6px;width:26px;height:26px;border-radius:50%;background:var(--card);border:2px solid var(--accent);color:var(--accent);font-size:.8rem;font-weight:700;text-align:center;line-height:22px}
+.chain li .why{display:block;color:var(--muted);font-size:.86rem}
+.chain a{color:var(--accent);font-weight:600}
 .tag{display:inline-block;font-size:.75rem;padding:0 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:2px}
+.m{display:inline-block;font-size:.72rem;padding:0 6px;border-radius:4px;margin-left:4px;vertical-align:1px;border:1px solid var(--jit);color:var(--jit);white-space:nowrap}
+.e{display:inline-block;font-size:.72rem;padding:0 6px;border-radius:4px;margin-left:4px;vertical-align:1px;border:1px solid var(--guest);color:var(--guest);white-space:nowrap}
+.u{display:inline-block;font-size:.72rem;padding:0 6px;border-radius:4px;margin-left:4px;vertical-align:1px;border:1px solid var(--rtc);color:var(--rtc);white-space:nowrap}
 code{font:0.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:color-mix(in srgb,var(--line) 35%,transparent);padding:1px 4px;border-radius:4px}
 table{border-collapse:collapse;width:100%;font-size:.9rem;margin:8px 0}
 th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
 th{color:var(--muted);font-weight:600}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.now td{background:color-mix(in srgb,var(--jit) 10%,transparent)}
+.scroll{overflow-x:auto}
 svg{display:block;width:100%;height:auto}
 svg text{fill:var(--fg);font-family:inherit}
 svg .muted{fill:var(--muted)}
@@ -49,52 +67,163 @@ svg .muted{fill:var(--muted)}
 .legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;background:var(--c)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:720px){.grid2{grid-template-columns:1fr}}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:.9rem}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.9rem}
 .kv b{font-weight:600;white-space:nowrap}
-nav.toc{font-size:.9rem;columns:2;column-gap:24px;margin:10px 0 0}
-nav.toc a{color:var(--accent);text-decoration:none}
-@media (max-width:720px){nav.toc{columns:1}}
 a{color:var(--accent)}
 </style>
 </head>
 <body>
 <main>
 <h1>Shiki JIT とメモリ配置</h1>
-<p class="lead">ESP32-S3（PSRAM なし）の内部 RAM がアプリの実行中にどう埋まっているか、Shiki の式を機械語にする JIT がどこにコードを置きどう動くかの図解。数値は特記の無い限り実機の実測（2026-11-03）。詳細と経緯は <a href="shiki-jit.md">shiki-jit.md</a>（§11〜§16）。</p>
+<p class="lead">Shiki の描画のプログラム（プラン）を、実行中に Xtensa の機械語へ変える JIT と、その機械語を置くメモリの話。2026-11-03 までの実験を、一続きの問いとして並べ直した図解。正本は <a href="shiki-jit.md">shiki-jit.md</a>（§番号はこの文書の節）。数値には <span class="m">実測</span> <span class="e">推定・計算</span> <span class="u">未確認</span> の印を付け、どこで測ったか（実機 / host）を書く。</p>
 
-<nav class="toc">
-<a href="#map">1. 内部 RAM の地図</a><br>
-<a href="#heap">2. アプリ実行中の heap（実測）</a><br>
-<a href="#bus">3. 同じ RAM を 2 つのバスで見る</a><br>
-<a href="#region">4. Shiki の区画と JIT の相乗り</a><br>
-<a href="#flow">5. 1 回の描画で JIT が何をするか</a><br>
-<a href="#code">6. 生成するコードの形</a><br>
-<a href="#evict">7. メモリが足りないとき</a><br>
-<a href="#result">8. 速さ: 置き場所で 3 倍変わる</a><br>
-<a href="#facts">9. 事実と推定</a>
-</nav>
+<h2 id="map">0. この文書の地図</h2>
+<p><b>全体の問題:</b> Shiki はアプリが登録した小さな命令列（プラン）を、毎フレーム何十回もインタプリタで走らせて線分を作る（描画のパイプライン自体は <a href="pipeline-overview.html">Kasane の描画パイプライン</a> で説明している）。インタプリタは命令の振り分けで時間を使うので、よく描くプランを機械語にして直接走らせたい（JIT）。ところがこの機体は PSRAM が無く、<b>機械語を置けるメモリは、アプリ（QuickJS のゲスト）や描画データと取り合う DIRAM だけ</b>。この文書の大半は「速いコードを、どこに、どれだけ置けるか」の話になる。</p>
+<ol class="chain">
+<li><a href="#c1">何を機械語にするのか</a> — インタプリタの何が遅く、JIT は何を置き換えるか。<span class="why">出発点。ここで「機械語の置き場所」が必要になる。</span></li>
+<li><a href="#c2">機械語を置ける RAM はどこか</a> — この石で命令を実行できるのはどのメモリか。<span class="why">1 章で作った機械語を置く場所の候補を絞る。</span></li>
+<li><a href="#c3">Shiki の区画に相乗りする</a> — 候補の DIRAM がゲストで埋まっているとき、どこから場所を借りるか。<span class="why">2 章の候補が実際には空いていなかったので、別の空きを探す。</span></li>
+<li><a href="#c4">飽和チェックをリスクで外す</a> — 場所が限られるなら、コードそのものを小さく速くできないか。<span class="why">3 章で場所は得たが量が足りない。コードの 1/4 を占める検査を削る。</span></li>
+<li><a href="#c5">レジスタキャッシュ</a> — 検査を外したコードを、さらに短くできないか。<span class="why">4 章で検査を消したコードにだけ使える最適化。</span></li>
+<li><a href="#c6">RTC fast memory を断る</a> — 遅いメモリにコードを置かないと決めたら、何が起きたか。<span class="why">4 章の検査の仕組みが RTC では動かないことが、置き場所の見直しを迫った。</span></li>
+<li><a href="#c7">区画を大きくする実験</a> — 足りないなら区画を 8 KiB 増やせば済むか。<span class="why">6 章で「DIRAM そのものが足りない」と分かった、その素直な対策。</span></li>
+<li><a href="#c8">区画の管理を作り直す</a> — 空きの総量はあるのに入らない（細切れ）を、どう無くすか。<span class="why">7 章で「増やす」は他のアプリを壊すと分かり、「詰め方」へ戻る。</span></li>
+<li><a href="#c9">作業領域を無くす</a> — 区画の持ち主の側を減らせないか。<span class="why">8 章で詰め方は直ったが、48 KiB では量がまだ足りない。</span></li>
+<li><a href="#c10">リストを 1 本にする案（見送り）</a> — さらに削る案を、なぜ取り消したか。<span class="why">9 章の続きとして試し、振る舞いの変化を理由に戻した。</span></li>
+<li><a href="#c11">推移と今の姿</a> — 結局 DERBY はどれだけ速くなり、区画は今どう使われているか。<span class="why">全章の結果を 1 つの表と図にまとめる。</span></li>
+<li><a href="#facts">事実・推定・未確認</a></li>
+</ol>
 
-<h2 id="map">1. 内部 RAM の地図 <span class="tag">TRM v1.8 p.403</span></h2>
+<!-- ============================================================ -->
+<h2 id="c1">1. 何を機械語にするのか <span class="tag">§9〜§14、§17</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> V8 の Ignition → TurboFan、JVM のインタプリタ → C1/C2。何回か呼ばれた関数だけを機械語にし、残りはインタプリタで走らせる、という段階分け。</p>
+<p><b>違うところ:</b> 機械語を置ける量が JIT の予算 16 KiB で、それもアプリと取り合う。deopt のような「推測が外れたら戻す」仕組みは無く、ブロックの頭でインタプリタへ渡せるだけ。</p>
+<p><b>この章の問い:</b> Shiki のインタプリタは何に時間を使っていて、JIT はそれをどう置き換えるのか。</p>
+</div>
+<p>Shiki のプランは、レジスタ 16 本と入れ子のループを持つ小さな命令列で、JS の <code>draw()</code> 1 回ごとに最後まで走り、線分を出す（プランと線分の並びは <a href="pipeline-overview.html#shiki">パイプラインの §6</a>）。インタプリタは 1 命令ごとに「読む → 種類で分岐 → 被演算子をメモリから読む → 計算 → 書く」を踏み、1 ステップ 94〜118 サイクルのほとんどが振り分けだった <span class="m">実測（実機、§9）</span>。命令の約 8 割は算術とループの制御 <span class="m">host の内訳、§10</span>。</p>
+<p>段階 3 のスカラーの JIT（§11）は、プランの命令を順に機械語へ並べ、算術とループの制御はその場で書き、線を引く・<code>SIN</code>・ベクトルの区間などは C の関数（helper）を呼ぶ。ランダムなプログラムでは 1 ステップがインタプリタ 72〜84 → 機械語 28〜43 サイクル <span class="m">実機、§11.5</span>。</p>
+
+<h3>1 回の描画で JIT が何をするか（今のコード）</h3>
+<div class="card">
+<svg viewBox="0 0 940 500" role="img" aria-label="JIT の判断の流れ">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <g font-size="12">
+  <rect x="330" y="10" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="35" text-anchor="middle" font-weight="600">draw（プラン 1 本を描く）</text>
+  <line x1="470" y1="50" x2="470" y2="74" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="76" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="101" text-anchor="middle">コードがある？</text>
+  <line x1="610" y1="96" x2="700" y2="96" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="655" y="88" text-anchor="middle" class="muted">ある</text>
+  <rect x="702" y="76" width="228" height="40" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
+  <text x="816" y="101" text-anchor="middle">機械語を呼ぶ（描いた時刻を記録）</text>
+  <line x1="470" y1="116" x2="470" y2="140" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="482" y="132" class="muted">無い</text>
+  <rect x="330" y="142" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="167" text-anchor="middle">熱さ +1。4 回目？（JIT_HEAT）</text>
+  <line x1="330" y1="162" x2="240" y2="162" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="285" y="154" text-anchor="middle" class="muted">まだ</text>
+  <rect x="10" y="142" width="228" height="40" rx="8" fill="var(--interp)" fill-opacity=".35" stroke="var(--interp)"/>
+  <text x="124" y="167" text-anchor="middle">インタプリタで描く</text>
+  <line x1="470" y1="182" x2="470" y2="206" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="208" width="280" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="230" text-anchor="middle">予算 16 KiB と空きに入る見込みは？</text>
+  <text x="470" y="248" text-anchor="middle" class="muted">無ければ冷えたプランのコードを捨てる（§16）</text>
+  <line x1="470" y1="260" x2="470" y2="284" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="286" width="280" height="52" rx="8" fill="var(--jit)" fill-opacity=".12" stroke="var(--jit)"/>
+  <text x="470" y="308" text-anchor="middle">区画の上端に 24n+32 B を取り、1 回で書く</text>
+  <text x="470" y="326" text-anchor="middle" class="muted">余りは返す（検査なしのコードは上へ寄せる）</text>
+  <line x1="470" y1="338" x2="470" y2="362" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="482" y="355" class="muted">入らない</text>
+  <rect x="330" y="364" width="280" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="386" text-anchor="middle">2 パス: 長さを数えて、区画 →</text>
+  <text x="470" y="404" text-anchor="middle">だめなら MALLOC_CAP_EXEC|DMA（DIRAM だけ）</text>
+  <line x1="470" y1="416" x2="470" y2="440" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="442" width="280" height="40" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
+  <text x="470" y="467" text-anchor="middle">書く → memw; isync → 呼ぶ</text>
+  <line x1="610" y1="390" x2="700" y2="390" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="655" y="382" text-anchor="middle" class="muted">取れない</text>
+  <rect x="702" y="364" width="228" height="52" rx="8" fill="var(--rtc)" fill-opacity=".2" stroke="var(--rtc)"/>
+  <text x="816" y="386" text-anchor="middle">要る大きさ（need64）を覚えて失敗</text>
+  <text x="816" y="404" text-anchor="middle" class="muted">64 回の描画の後に再挑戦</text>
+  <line x1="610" y1="312" x2="700" y2="312" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="702" y="290" width="228" height="44" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
+  <text x="816" y="317" text-anchor="middle">呼ぶ</text>
+  <text x="655" y="304" text-anchor="middle" class="muted">書けた</text>
+  </g>
+</svg>
+<p class="note">定数はコードで確かめた: <code>JIT_HEAT</code> 4、<code>JIT_RETRY</code> 64、予算 <code>ksn_shiki_jit_budget</code> 16,384 B、<code>JIT_GUESS(n)</code> = 24n+32、<code>JIT_EXEC_CAPS</code> = <code>MALLOC_CAP_EXEC|MALLOC_CAP_DMA</code>（<code>main/ui/kasane/ksn_shiki_jit.c</code>）。区画から取ったブロックも DIRAM の中にあることを確かめてから使う（<code>in_diram()</code>）。</p>
+</div>
+<div class="grid2">
+<div class="card">
+<h3>なぜ 4 回目か</h3>
+<p>1 回しか描かないプラン（タイトルなど）にメモリを使わないため。以前は 32 回目で、MEGADEMO は場面の途中でプランを登録するので、場面の半分をインタプリタで走らせていた（§14.1）。</p>
+</div>
+<div class="card">
+<h3>コンパイルの重さ</h3>
+<p>エンコーダをビットの連なり（run）で符号化し、区画では見込みの大きさで 1 回書く形にして（§17）、1 命令 約 8,500 → 3,170〜3,320 サイクル <span class="m">実機 cycle bench</span>。DERBY の中ではコンパイルは 1 フレームあたり最大 0.19 ms <span class="m">実機、§17.3</span>。</p>
+</div>
+</div>
+<div class="grid2">
+<div class="card">
+<h3>レジスタの割り当て（§11.1）</h3>
+<table>
+<tr><th>レジスタ</th><th>中身</th></tr>
+<tr><td><code>a2</code></td><td>実行の context</td></tr>
+<tr><td><code>a3</code></td><td>vm（<code>r[k]</code> は <code>l32i.n</code> の 4k 番地）</td></tr>
+<tr><td><code>a4</code></td><td>ステップの上限</td></tr>
+<tr><td><code>a5</code></td><td>入力</td></tr>
+<tr><td><code>a6</code></td><td><code>INT32_MAX</code>（飽和の直し）</td></tr>
+<tr><td><code>a7</code></td><td>helper の番地（最内側のループでは回数、§13.2）</td></tr>
+<tr><td><code>a8</code>–<code>a15</code></td><td>作業用。§20 のレジスタキャッシュもここ</td></tr>
+</table>
+</div>
+<div class="card">
+<h3>1 本のコードの並び</h3>
+<svg viewBox="0 0 420 230" role="img" aria-label="コードの並び">
+  <rect x="20" y="10" width="380" height="40" fill="var(--keep)" fill-opacity=".5"/>
+  <text x="210" y="35" text-anchor="middle" font-size="12">literal pool（大きい定数・色・CUBIC の表の行）</text>
+  <rect x="20" y="50" width="380" height="30" fill="var(--jit)" fill-opacity=".35"/>
+  <text x="210" y="70" text-anchor="middle" font-size="12">entry a1,48（入口）</text>
+  <rect x="20" y="80" width="380" height="40" fill="var(--jit)" fill-opacity=".2"/>
+  <text x="210" y="98" text-anchor="middle" font-size="12">ブロックの頭: steps += k、上限を越えるなら</text>
+  <text x="210" y="114" text-anchor="middle" font-size="12">その pc を返してインタプリタへ</text>
+  <rect x="20" y="120" width="380" height="40" fill="var(--jit)" fill-opacity=".35"/>
+  <text x="210" y="138" text-anchor="middle" font-size="12">算術をその場で（mull+mulsh、srai、飽和の検査）</text>
+  <text x="210" y="154" text-anchor="middle" font-size="12">helper を callx8 で呼ぶ</text>
+  <rect x="20" y="160" width="380" height="30" fill="var(--jit)" fill-opacity=".2"/>
+  <text x="210" y="180" text-anchor="middle" font-size="12">END: addi + 分岐</text>
+  <rect x="20" y="190" width="380" height="30" fill="var(--jit)" fill-opacity=".35"/>
+  <text x="210" y="210" text-anchor="middle" font-size="12">retw.n（戻り値: pc か 状態 &lt;&lt; 8）</text>
+</svg>
+</div>
+</div>
+<p class="note">正しさの検査: エンコーダの表はアセンブラから作り（<code>tools/shiki_jit/gen_encoding.py</code>）、host ではランダムなプログラムを小さな Xtensa エミュレータで走らせてインタプリタと比べ（<code>test_scalar.py</code>）、実機の cycle bench でも 800 本を突き合わせる（§11.4、すべて一致 <span class="m">実機</span>）。</p>
+<p class="sowhat">機械語は作れるし速い。次の問題は「その機械語をどのメモリに置けば実行できるか」。</p>
+
+<!-- ============================================================ -->
+<h2 id="c2">2. 機械語を置ける RAM はどこか <span class="tag">§2、TRM v1.8 p.403</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> JIT が W^X のために、同じ物理ページを「書ける番地」と「実行できる番地」の 2 か所に mmap する二重マッピング。</p>
+<p><b>違うところ:</b> ここに MMU のページ管理は無く、どの RAM が命令バスから見えるかは石の配線で決まっている。メモリ保護（<code>CONFIG_ESP_SYSTEM_MEMPROT</code>）は切ってある（§2）。</p>
+<p><b>この章の問い:</b> この石で、JIT の機械語を置いて実行できるのはどのメモリか。</p>
+</div>
 <p>CPU から見える内部 RAM は 4 種類。<b>命令を実行できるのは命令バスから見える所だけ</b>で、SRAM2 はデータ専用。</p>
 <div class="card">
 <svg viewBox="0 0 940 250" role="img" aria-label="内部 RAM の種類と番地">
-  <!-- SRAM0 -->
   <rect x="10" y="40" width="70" height="60" rx="6" fill="var(--sram0)"/>
   <text x="45" y="66" text-anchor="middle" font-size="13" font-weight="600">SRAM0</text>
   <text x="45" y="84" text-anchor="middle" font-size="11">32 KB</text>
-  <!-- SRAM1 -->
   <rect x="90" y="40" width="600" height="60" rx="6" fill="var(--shiki)" fill-opacity=".22" stroke="var(--shiki)"/>
   <text x="390" y="66" text-anchor="middle" font-size="14" font-weight="600">SRAM1（DIRAM）416 KB</text>
   <text x="390" y="84" text-anchor="middle" font-size="11">データ側と命令側の両方から見える → JIT のコードを置ける</text>
-  <!-- SRAM2 -->
   <rect x="700" y="40" width="130" height="60" rx="6" fill="var(--dram)" fill-opacity=".35" stroke="var(--dram)"/>
   <text x="765" y="66" text-anchor="middle" font-size="13" font-weight="600">SRAM2 64 KB</text>
   <text x="765" y="84" text-anchor="middle" font-size="11">データ専用</text>
-  <!-- RTC -->
   <rect x="840" y="40" width="90" height="60" rx="6" fill="var(--rtc)" fill-opacity=".35" stroke="var(--rtc)"/>
   <text x="885" y="66" text-anchor="middle" font-size="13" font-weight="600">RTC FAST</text>
-  <text x="885" y="84" text-anchor="middle" font-size="11">8 KB</text>
-  <!-- buses -->
+  <text x="885" y="84" text-anchor="middle" font-size="11">8 KB・遅い</text>
   <text x="10" y="134" font-size="12" font-weight="600">命令バス</text>
   <line x1="10" y1="142" x2="690" y2="142" stroke="var(--fg)" stroke-width="2"/>
   <line x1="840" y1="142" x2="930" y2="142" stroke="var(--fg)" stroke-width="2"/>
@@ -110,58 +239,10 @@ a{color:var(--accent)}
   <text x="10" y="244" font-size="11" class="muted">SRAM0 はデータバスから見えない（命令専用）。SRAM2 は命令バスから見えない（データ専用）。</text>
 </svg>
 </div>
-
-<h2 id="heap">2. アプリ実行中の heap（実測）</h2>
-<p>DERBY のレース中に <code>EXECMAP</code>（<code>-DPOCKET_SHIKI_JIT_EXECMAP</code> の計測ビルド）で、heap の領域ごとに空きと使用ブロックを数えた。<b>DIRAM はゲスト（QuickJS）の小さいブロック約 1,500 個で埋まり、空きは 2.2 KB が 38 個に散らばる（最大 152 B）。</b></p>
-<div class="card">
-<svg viewBox="0 0 940 300" role="img" aria-label="DERBY のレース中の heap 領域">
-  <text x="10" y="20" font-size="12" font-weight="600">DIRAM の heap 0x3FCB_5170 – 0x3FCE_9710（214,432 B、横幅は実寸に比例）</text>
-  <!-- whole bar = 214432 B over 900 px -->
-  <rect x="10" y="30" width="900" height="54" fill="var(--guest)"/>
-  <!-- 32,768 block at offset 22,644 -->
-  <rect x="105" y="30" width="137.5" height="54" fill="var(--static)"/>
-  <text x="173" y="61" text-anchor="middle" font-size="11">32 KB の塊</text>
-  <!-- shiki region offset 147,964 size 49,152 -->
-  <rect x="621" y="30" width="206" height="54" fill="var(--shiki)"/>
-  <text x="724" y="54" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">Shiki の区画</text>
-  <text x="724" y="71" text-anchor="middle" font-size="11" fill="#fff">49,152 B</text>
-  <!-- 10,752 at offset 197,120 -->
-  <rect x="837" y="30" width="45" height="54" fill="var(--static)"/>
-  <text x="860" y="98" text-anchor="middle" font-size="10" class="muted">10.7 KB</text>
-  <text x="300" y="61" font-size="12">ゲストなどの小さいブロック</text>
-  <text x="10" y="102" font-size="11" class="muted">空き 2,232 B（38 個、最大 152 B）← JIT のコード 1 本（1〜3 KB）が入らない</text>
-
-  <text x="10" y="140" font-size="12" font-weight="600">そのほかの heap 領域</text>
-  <rect x="10" y="150" width="94" height="40" fill="var(--guest)"/>
-  <text x="57" y="175" text-anchor="middle" font-size="11">DIRAM 22 KB</text>
-  <text x="10" y="206" font-size="11" class="muted">空き 0（4 KB ×2 ほか）</text>
-
-  <rect x="230" y="150" width="140" height="40" fill="var(--dram)" fill-opacity=".4" stroke="var(--dram)"/>
-  <rect x="230" y="150" width="45" height="40" fill="var(--dram)"/>
-  <text x="300" y="175" text-anchor="middle" font-size="11">SRAM2 32 KB</text>
-  <text x="230" y="206" font-size="11" class="muted">空き 20 KB、でも実行不可</text>
-
-  <rect x="470" y="150" width="60" height="40" fill="var(--rtc)"/>
-  <text x="500" y="175" text-anchor="middle" font-size="11" fill="#fff">RTC 8 KB</text>
-  <text x="470" y="206" font-size="11" class="muted">以前の JIT のコードの行き先</text>
-
-  <text x="10" y="248" font-size="12">→ 区画を共有する前、実行用の確保（<tspan font-family="ui-monospace,monospace">MALLOC_CAP_EXEC</tspan>）は全部 RTC FAST に落ち、</text>
-  <text x="10" y="268" font-size="12">　JIT のコードは 6.9 KB で頭打ちだった。Shiki の区画は DIRAM にあるので、そのまま実行に使える。</text>
-</svg>
-<div class="legend">
-  <span style="--c:var(--guest)">ゲスト（QuickJS）など</span>
-  <span style="--c:var(--static)">大きい確保（用途は未特定）</span>
-  <span style="--c:var(--shiki)">Shiki の区画</span>
-  <span style="--c:var(--dram)">データ専用</span>
-  <span style="--c:var(--rtc)">RTC FAST</span>
-</div>
-</div>
-<p class="note">区画はアプリの開始時、ゲストを作る前に 1 つの塊で取る（shiki.md §4.3）。ゲストが散らばる前なので 48 KB が連続して取れ、DIRAM に入る。</p>
-
-<h2 id="bus">3. 同じ RAM を 2 つのバスで見る</h2>
-<p>SRAM1 の同じバイトは、データバスでは <code>0x3FC8_8000</code> 起点、命令バスでは <code>0x4037_8000</code> 起点の番地を持つ（差は <code>0x6F_0000</code>）。<b>JIT はデータ側の番地にバイト単位で書き、命令側の番地を関数として呼ぶ。</b></p>
+<p>SRAM1 の同じバイトは、データバスでは <code>0x3FC8_8000</code> 起点、命令バスでは <code>0x4037_8000</code> 起点の番地を持つ（差は <code>0x6F_0000</code>）。<b>JIT はデータ側の番地に書き、命令側の番地を関数として呼ぶ。</b></p>
 <div class="card">
 <svg viewBox="0 0 940 210" role="img" aria-label="データ側から書き命令側から実行する">
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
   <rect x="330" y="70" width="280" height="70" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)" stroke-width="2"/>
   <text x="470" y="100" text-anchor="middle" font-size="14" font-weight="600">SRAM1 の同じ 1 KB</text>
   <text x="470" y="122" text-anchor="middle" font-size="12">JIT が作ったコード</text>
@@ -174,174 +255,77 @@ a{color:var(--accent)}
   <text x="795" y="64" text-anchor="middle" font-size="11" class="muted">0x403C_9xxx を呼ぶ（命令側）</text>
   <path d="M670 48 C 630 48, 620 80, 610 92" fill="none" stroke="var(--fg)" stroke-width="2" marker-end="url(#a1)"/>
   <text x="470" y="170" text-anchor="middle" font-size="12">書いた後に <tspan font-family="ui-monospace,monospace">memw; isync</tspan>（内部 SRAM は命令キャッシュを通らないので無効化は要らない）</text>
-  <text x="470" y="192" text-anchor="middle" font-size="11" class="muted">RTC FAST は 1 つの番地で両方から見える。メモリ保護（CONFIG_ESP_SYSTEM_MEMPROT）は切ってある（§2）</text>
-  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <text x="470" y="192" text-anchor="middle" font-size="11" class="muted">RTC FAST は 1 つの番地で両方から見えるが、APB クロックで動き遅い（6 章）</text>
 </svg>
 </div>
+<p class="sowhat">候補は DIRAM（速い）と RTC FAST（8 KB、遅い）だけ。ところが DIRAM はアプリの実行中、ほとんど空いていない。次の章はその実測から始まる。</p>
 
-<h2 id="region">4. Shiki の区画と JIT の相乗り</h2>
-<p>48 KiB の区画の持ち主は Shiki（フレーム・作業領域・エンジン・式・点）。JIT は<b>余りを借りる</b>だけで、持ち主が足りなくなれば返す。</p>
+<!-- ============================================================ -->
+<h2 id="c3">3. Shiki の区画に相乗りする <span class="tag">§14.3、§15、§16</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> リクエストごとの arena（まとめて取ってまとめて捨てる）と、空いた容量を貸して必要になったら取り上げるスポットインスタンス。CDN のキャッシュが、最近使われていないものから追い出す（LRU）こと。</p>
+<p><b>違うところ:</b> 取り上げは同期で、描画のコードの実行中には返せない。追い出したコードは、また 4 回描かれたら作り直す（費用はコンパイル 1 回）。</p>
+<p><b>この章の問い:</b> DIRAM がゲストの小さなブロックで埋まっているとき、機械語の場所をどこから得るか。</p>
+</div>
+<p>測定用のビルド（<code>EXECMAP</code>、§15.1）で DERBY のレース中の heap を数えた。<b>DIRAM はゲスト（QuickJS）の小さいブロック約 1,500 個で埋まり、空きは 2.2 KB が 38 個に散らばる（最大 152 B）</b> <span class="m">実機、ba9d872</span>。実行用の確保（<code>MALLOC_CAP_EXEC</code>）はすべて RTC FAST に落ち、JIT のコードは 6.9 KB で頭打ちだった。</p>
 <div class="card">
-<svg viewBox="0 0 940 170" role="img" aria-label="Shiki の区画の内訳（DERBY）">
-  <text x="10" y="18" font-size="12" font-weight="600">DERBY の区画 49,152 B（横幅は実寸に比例。持ち主の最大 37,408 B は shiki.md §4.5.1 の実測）</text>
-  <!-- 900px = 49152 -->
-  <rect x="10" y="28" width="197" height="56" fill="var(--shiki)"/>
-  <text x="108" y="52" text-anchor="middle" font-size="11" fill="#fff">フレーム</text>
-  <text x="108" y="68" text-anchor="middle" font-size="11" fill="#fff">10,752</text>
-  <rect x="207" y="28" width="197" height="56" fill="var(--shiki)" fill-opacity=".85"/>
-  <text x="305" y="52" text-anchor="middle" font-size="11" fill="#fff">フレーム</text>
-  <text x="305" y="68" text-anchor="middle" font-size="11" fill="#fff">10,752</text>
-  <rect x="404" y="28" width="197" height="56" fill="var(--shiki)" fill-opacity=".7"/>
-  <text x="502" y="52" text-anchor="middle" font-size="11" fill="#fff">作業領域</text>
-  <text x="502" y="68" text-anchor="middle" font-size="11" fill="#fff">10,752</text>
-  <rect x="601" y="28" width="104" height="56" fill="var(--shiki)" fill-opacity=".5"/>
-  <text x="653" y="52" text-anchor="middle" font-size="10">エンジン・式</text>
-  <text x="653" y="68" text-anchor="middle" font-size="10">点・コース</text>
-  <rect x="705" y="28" width="168" height="56" fill="var(--jit)"/>
-  <text x="789" y="52" text-anchor="middle" font-size="11" fill="#fff">JIT のコード</text>
-  <text x="789" y="68" text-anchor="middle" font-size="11" fill="#fff">と CUBIC の表</text>
-  <rect x="873" y="28" width="37" height="56" fill="var(--keep)"/>
-  <text x="891" y="100" text-anchor="middle" font-size="10" class="muted">2 KB</text>
-  <text x="10" y="122" font-size="12">・JIT は取った後に最大の空きが <tspan font-family="ui-monospace,monospace">JIT_REGION_KEEP</tspan>（2 KB）以上残るときだけ借りる（<tspan font-family="ui-monospace,monospace">shiki_heap_spare</tspan>）。</text>
-  <text x="10" y="142" font-size="12">・持ち主の確保が失敗したら reclaim hook が呼ばれ、JIT は区画のブロックを全部返して、確保をやり直させる。</text>
-  <text x="10" y="162" font-size="12">・JIT のコードの実行中は返さない（区画の確保はすべて描画の前に起きる）。</text>
+<svg viewBox="0 0 940 300" role="img" aria-label="DERBY のレース中の heap 領域（当時）">
+  <text x="10" y="20" font-size="12" font-weight="600">当時（ba9d872）の DIRAM の heap 0x3FCB_5170 – 0x3FCE_9710（214,432 B、横幅は実寸に比例）</text>
+  <rect x="10" y="30" width="900" height="54" fill="var(--guest)"/>
+  <rect x="105" y="30" width="137.5" height="54" fill="var(--static)"/>
+  <text x="173" y="61" text-anchor="middle" font-size="11">32 KB の塊</text>
+  <rect x="621" y="30" width="206" height="54" fill="var(--shiki)"/>
+  <text x="724" y="54" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">Shiki の区画</text>
+  <text x="724" y="71" text-anchor="middle" font-size="11" fill="#fff">49,152 B</text>
+  <rect x="837" y="30" width="45" height="54" fill="var(--static)"/>
+  <text x="860" y="98" text-anchor="middle" font-size="10" class="muted">10.7 KB</text>
+  <text x="300" y="61" font-size="12">ゲストなどの小さいブロック</text>
+  <text x="10" y="102" font-size="11" class="muted">空き 2,232 B（38 個、最大 152 B）← JIT のコード 1 本（1〜3 KB）が入らない</text>
+  <text x="10" y="140" font-size="12" font-weight="600">そのほかの heap 領域</text>
+  <rect x="10" y="150" width="94" height="40" fill="var(--guest)"/>
+  <text x="57" y="175" text-anchor="middle" font-size="11">DIRAM 22 KB</text>
+  <text x="10" y="206" font-size="11" class="muted">空き 0</text>
+  <rect x="230" y="150" width="140" height="40" fill="var(--dram)" fill-opacity=".4" stroke="var(--dram)"/>
+  <rect x="230" y="150" width="45" height="40" fill="var(--dram)"/>
+  <text x="300" y="175" text-anchor="middle" font-size="11">SRAM2 32 KB</text>
+  <text x="230" y="206" font-size="11" class="muted">空き 20 KB、でも実行不可</text>
+  <rect x="470" y="150" width="60" height="40" fill="var(--rtc)"/>
+  <text x="500" y="175" text-anchor="middle" font-size="11" fill="#fff">RTC 8 KB</text>
+  <text x="470" y="206" font-size="11" class="muted">当時の JIT のコードの行き先</text>
+  <text x="10" y="248" font-size="12">→ Shiki の区画はアプリの開始時、ゲストを作る前に 1 つの塊で取るので DIRAM にあり、</text>
+  <text x="10" y="268" font-size="12">　そのまま実行に使える。ここを借りることにした（ba9d872）。</text>
 </svg>
 <div class="legend">
-  <span style="--c:var(--shiki)">Shiki（持ち主）</span>
-  <span style="--c:var(--jit)">JIT が借りている分</span>
-  <span style="--c:var(--keep)">持ち主のために空けておく分</span>
+  <span style="--c:var(--guest)">ゲスト（QuickJS）など</span>
+  <span style="--c:var(--static)">大きい確保（持ち主は未特定）</span>
+  <span style="--c:var(--shiki)">Shiki の区画</span>
+  <span style="--c:var(--dram)">データ専用</span>
+  <span style="--c:var(--rtc)">RTC FAST</span>
 </div>
 </div>
+<p><b>区画の持ち主は Shiki</b>（フレーム・式・データ領域など）で、JIT は余りを借りるだけ。持ち主の確保が失敗すると reclaim hook が呼ばれ、JIT が場所を返す（§15.2。返し方は 8 章で変わる）。区画に入らない新しいコードのためには、<b>直近 1,024 回の描画で描かれていないプランのコードを古い順に捨てる</b>（§16、<code>JIT_COLD_DRAWS</code>）。DERBY はレースの開始時に全カメラのプランを登録するので、切り替わった後のカメラのコードが場所を塞いでいた。</p>
 
-<h2 id="flow">5. 1 回の描画で JIT が何をするか</h2>
-<div class="card">
-<svg viewBox="0 0 940 470" role="img" aria-label="JIT の判断の流れ">
-  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
-  <g font-size="12">
-  <rect x="330" y="10" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
-  <text x="470" y="35" text-anchor="middle" font-weight="600">draw（プラン 1 本を描く）</text>
-  <line x1="470" y1="50" x2="470" y2="74" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <rect x="330" y="76" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
-  <text x="470" y="101" text-anchor="middle">コードがある？</text>
-  <line x1="610" y1="96" x2="700" y2="96" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <text x="655" y="88" text-anchor="middle" class="muted">ある</text>
-  <rect x="702" y="76" width="228" height="40" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
-  <text x="816" y="101" text-anchor="middle">機械語を呼ぶ（時刻を記録）</text>
-  <line x1="470" y1="116" x2="470" y2="140" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <text x="482" y="132" class="muted">無い</text>
-  <rect x="330" y="142" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
-  <text x="470" y="167" text-anchor="middle">熱さ +1。4 回目？</text>
-  <line x1="330" y1="162" x2="240" y2="162" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <text x="285" y="154" text-anchor="middle" class="muted">まだ</text>
-  <rect x="10" y="142" width="228" height="40" rx="8" fill="var(--interp)" fill-opacity=".35" stroke="var(--interp)"/>
-  <text x="124" y="167" text-anchor="middle">インタプリタで描く</text>
-  <line x1="470" y1="182" x2="470" y2="206" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <rect x="330" y="208" width="280" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
-  <text x="470" y="230" text-anchor="middle">入る見込みがあるか（予算・前回の大きさ）</text>
-  <text x="470" y="248" text-anchor="middle" class="muted">無ければ冷えたプランのコードを捨てて作る</text>
-  <line x1="470" y1="260" x2="470" y2="284" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <rect x="330" y="286" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
-  <text x="470" y="311" text-anchor="middle">1 回目: 長さだけ数える（書かない）</text>
-  <line x1="470" y1="326" x2="470" y2="350" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <rect x="330" y="352" width="280" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
-  <text x="470" y="374" text-anchor="middle">場所を取る: Shiki の区画 → だめなら</text>
-  <text x="470" y="392" text-anchor="middle">MALLOC_CAP_EXEC（実際には RTC FAST）</text>
-  <line x1="470" y1="404" x2="470" y2="428" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <rect x="330" y="430" width="280" height="34" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
-  <text x="470" y="452" text-anchor="middle">2 回目: 書く → memw; isync → 呼ぶ</text>
-  <line x1="610" y1="378" x2="700" y2="378" stroke="var(--fg)" marker-end="url(#a2)"/>
-  <text x="655" y="370" text-anchor="middle" class="muted">取れない</text>
-  <rect x="702" y="352" width="228" height="52" rx="8" fill="var(--rtc)" fill-opacity=".2" stroke="var(--rtc)"/>
-  <text x="816" y="374" text-anchor="middle">大きさを覚えて失敗</text>
-  <text x="816" y="392" text-anchor="middle" class="muted">64 回の描画の後に再挑戦</text>
-  </g>
-</svg>
-</div>
-<div class="grid2">
-<div class="card">
-<h3>なぜ 4 回目か</h3>
-<p>1 回しか描かないプラン（タイトルなど）にメモリを使わないため。以前は 32 回目だったが、MEGADEMO は場面の途中でプランを登録し直すので、場面の半分をインタプリタで走らせていた（§14）。</p>
-</div>
-<div class="card">
-<h3>なぜ 2 回走らせていたか</h3>
-<p>長さを先に知り、ちょうどの大きさを取るため（§14）。§17 で、Shiki の区画では見積もりの大きさで 1 回書いて余りを返す 1 パスにし、エンコーダもビットの連なり（run）で符号化するようにした。コンパイルは 1 命令 約 8,500 → 約 3,200 サイクル（cycle bench）、DERBY の中では 1 フレームあたり最大 0.19 ms（実測）。</p>
-</div>
-</div>
-
-<h2 id="code">6. 生成するコードの形</h2>
-<p>プランの命令を順に Xtensa の機械語に並べる。算術とループの制御はその場に書き、線を引く・SIN・ベクトルの区間などは C の関数（helper）を呼ぶ。</p>
-<div class="grid2">
-<div class="card">
-<h3>レジスタの割り当て</h3>
-<table>
-<tr><th>レジスタ</th><th>中身</th></tr>
-<tr><td><code>a2</code></td><td>実行の context（vm・入力・上限・helper の番地）</td></tr>
-<tr><td><code>a3</code></td><td>vm（<code>r[k]</code> は <code>l32i.n</code> の 4k 番地）</td></tr>
-<tr><td><code>a4</code></td><td>ステップの上限</td></tr>
-<tr><td><code>a5</code></td><td>入力</td></tr>
-<tr><td><code>a6</code></td><td><code>INT32_MAX</code>（飽和の直し）</td></tr>
-<tr><td><code>a7</code></td><td>最内側のループの回数</td></tr>
-<tr><td><code>a8</code>–<code>a15</code></td><td>作業用（<code>callx8</code> で helper に渡る）</td></tr>
-</table>
-</div>
-<div class="card">
-<h3>1 本のコードの並び</h3>
-<svg viewBox="0 0 420 230" role="img" aria-label="コードの並び">
-  <rect x="20" y="10" width="380" height="40" fill="var(--keep)" fill-opacity=".5"/>
-  <text x="210" y="35" text-anchor="middle" font-size="12">literal pool（大きい定数・色・CUBIC の表の行）</text>
-  <rect x="20" y="50" width="380" height="30" fill="var(--jit)" fill-opacity=".35"/>
-  <text x="210" y="70" text-anchor="middle" font-size="12">entry a1,48（入口）</text>
-  <rect x="20" y="80" width="380" height="40" fill="var(--jit)" fill-opacity=".2"/>
-  <text x="210" y="98" text-anchor="middle" font-size="12">ブロックの頭: steps += k、上限を越えるなら</text>
-  <text x="210" y="114" text-anchor="middle" font-size="12">その pc を返してインタプリタへ</text>
-  <rect x="20" y="120" width="380" height="40" fill="var(--jit)" fill-opacity=".35"/>
-  <text x="210" y="138" text-anchor="middle" font-size="12">算術をその場で（mull+mulsh、srai、飽和）</text>
-  <text x="210" y="154" text-anchor="middle" font-size="12">helper を callx8 で呼ぶ</text>
-  <rect x="20" y="160" width="380" height="30" fill="var(--jit)" fill-opacity=".2"/>
-  <text x="210" y="180" text-anchor="middle" font-size="12">END: addi + 分岐（回数は a7）</text>
-  <rect x="20" y="190" width="380" height="30" fill="var(--jit)" fill-opacity=".35"/>
-  <text x="210" y="210" text-anchor="middle" font-size="12">retw.n（戻り値: pc か 状態 &lt;&lt; 8）</text>
-</svg>
-</div>
-</div>
-<p class="note">エンコーダの表はアセンブラから作り（<code>tools/shiki_jit/gen_encoding.py</code>）、host ではランダムなプログラムを小さな Xtensa エミュレータで走らせてインタプリタと比べ（<code>test_scalar.py</code>）、実機の cycle bench でも 800 本を突き合わせる（すべて一致）。</p>
-
-<h2 id="evict">7. メモリが足りないとき</h2>
-<table>
-<tr><th>場面</th><th>何をする</th><th>その後</th></tr>
-<tr><td>Shiki の持ち主の確保が失敗</td><td>JIT は区画に置いた全プランのコードと表を返す（reclaim hook）</td><td>64 回の描画の後に作り直し</td></tr>
-<tr><td>新しいプランのコードが入らない</td><td>直近 1,024 回の描画で使われていないプランのコードを、古い順に捨てる（§16）</td><td>捨てられたプランは熱さ 0 から。また描かれれば 4 回目に作り直し</td></tr>
-<tr><td>それでも入らない</td><td>必要な大きさを覚えて失敗（<code>need64</code>）</td><td>次の挑戦は最大の空きを見るだけ。数えるパスを無駄に走らせない（§14）</td></tr>
-<tr><td>コンパイラが断る命令</td><td>二度と試さない</td><td>インタプリタで走る</td></tr>
-</table>
-<p class="note">DERBY はレース用に全カメラのプランを登録するので、使わなくなったカメラのコードがメモリを塞いでいた。§16 の「冷えたプランを捨てる」はその対策で、DERBY の heap の失敗は 1 レースで 28 → 11 回、捨てたのは 13 回（実測、別のレースどうし）。代わりに、捨てたコードを作り直す窓は +0.3〜0.6 ms 跳ねる。区画の reclaim（14 プラン）はレースの登録の時に起きる。</p>
-
-<h2 id="result">8. 速さ: 置き場所で 3 倍変わる</h2>
-<p>1 フレームあたりの Shiki のエンジンの時間（ms、30 フレームの平均の窓。値が幅を持つ場合は中央）。<b>同じ JIT のコードでも、RTC FAST に置くと DIRAM（区画）に置いた場合の 2〜3 倍遅い</b>。</p>
+<h3>置き場所で 3 倍変わる</h3>
+<p>1 フレームあたりの Shiki のエンジンの時間（ms）。<b>同じ JIT のコードでも、RTC FAST に置くと DIRAM（区画）の 2〜3 倍遅い</b> <span class="m">実機、別の実行どうしの同じ場面の窓</span>。</p>
 <div class="card">
 <svg viewBox="0 0 940 330" role="img" aria-label="置き場所ごとの描画時間">
   <g font-size="12">
-  <!-- scale: 3.4 ms = 600 px, x0=200 -->
   <text x="10" y="40" font-weight="600">MEGADEMO NEWS</text>
   <rect x="200" y="24" width="575" height="12" fill="var(--interp)"/><text x="782" y="35">3.26</text>
   <rect x="200" y="38" width="425" height="12" fill="var(--rtcbar)"/><text x="632" y="49">2.41</text>
   <rect x="200" y="52" width="146" height="12" fill="var(--diram)"/><text x="353" y="63">0.83</text>
-
   <text x="10" y="100" font-weight="600">MEGADEMO TWIST</text>
   <rect x="200" y="84" width="582" height="12" fill="var(--interp)"/><text x="789" y="95">3.30</text>
   <rect x="200" y="98" width="415" height="12" fill="var(--rtcbar)"/><text x="622" y="109">2.35</text>
   <rect x="200" y="112" width="180" height="12" fill="var(--diram)"/><text x="387" y="123">1.02</text>
-
   <text x="10" y="160" font-weight="600">MEGADEMO ZENITH</text>
   <rect x="200" y="144" width="506" height="12" fill="var(--interp)"/><text x="713" y="155">2.87</text>
   <rect x="200" y="158" width="383" height="12" fill="var(--rtcbar)"/><text x="590" y="169">2.17</text>
   <rect x="200" y="172" width="138" height="12" fill="var(--diram)"/><text x="345" y="183">0.78</text>
-
   <text x="10" y="220" font-weight="600">DERBY FIELD</text>
   <rect x="200" y="204" width="199" height="12" fill="var(--interp)"/><text x="406" y="215">1.13</text>
   <rect x="200" y="218" width="166" height="12" fill="var(--rtcbar)"/><text x="373" y="229">0.94</text>
   <rect x="200" y="232" width="132" height="12" fill="var(--diram)"/><text x="339" y="243">0.75</text>
-
   <text x="10" y="280" font-weight="600">DERBY パドック</text>
   <rect x="200" y="264" width="92" height="12" fill="var(--interp)"/><text x="299" y="275">0.52</text>
   <rect x="200" y="278" width="71" height="12" fill="var(--rtcbar)"/><text x="278" y="289">0.40</text>
@@ -354,15 +338,254 @@ a{color:var(--accent)}
   <span style="--c:var(--diram)">JIT、コードは Shiki の区画＝DIRAM（ba9d872）</span>
 </div>
 </div>
-<p class="note">比べた窓は別の実行（同じ場面・同じ描画数）。DERBY は実行ごとにレースが違うので、場面の窓を比べている。記録は <a href="logs/shiki-jit10-20261103-2ced4c9.txt">jit10</a>、<a href="logs/shiki-jit11-20261103-05d1a75.txt">jit11</a>、<a href="logs/shiki-jit12-20261103-ba9d872.txt">jit12</a>。</p>
+<p class="note">記録は <a href="logs/shiki-jit10-20261103-2ced4c9.txt">jit10</a>、<a href="logs/shiki-jit11-20261103-05d1a75.txt">jit11</a>、<a href="logs/shiki-jit12-20261103-ba9d872.txt">jit12</a>。RTC が遅い理由は「命令の取り込みが遅い」と読んでいるが、取り込みの速さそのものは測っていない <span class="e">推定</span>。冷えたプランを捨てた後、DERBY の heap の失敗は 1 レースで 28 → 11 回 <span class="m">実機、§16.1、別のレースどうし</span>。</p>
+<p class="sowhat">場所は得たが、DERBY のレースではまだ足りない。置く量を増やす前に、コードそのものを小さく・速くできないかを見る。</p>
 
-<h2 id="facts">9. 事実と推定</h2>
+<!-- ============================================================ -->
+<h2 id="c4">4. 飽和チェックをリスクで外す <span class="tag">§18</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> feature flag とカナリア（まず全部で監視し、問題が無ければ段階的に外す）、サンプリングプロファイラ（毎回ではなく間を置いて見る）。V8 の投機的最適化（型を仮定して速いコードを作る）。</p>
+<p><b>違うところ:</b> 外した後に仮定が外れても deopt は無い。溢れた足し算は飽和せず折り返す。証明ではなく、観測した値の大きさで決めるリスクの判断（ユーザー決定）。</p>
+<p><b>この章の問い:</b> コードの 1/4 を占める ADD/SUB の飽和チェックを、どう安全寄りに外すか。</p>
+</div>
+<p>Shiki の ADD/SUB は溢れると <code>INT32_MAX</code>/<code>MIN</code> に張り付く（飽和）約束で、その検査は ADD 26 B のうち 18 B、生成コードの約 1/4 だった <span class="m">host、出荷プラン 45 本</span>。静的に「溢れない」と証明できる地点は ADD 3/327 しかない。</p>
+<ol>
+<li><b>共有チェッカーとログ枠（§18.1、38a55ef）。</b> 各地点は IRAM の 1 つのチェッカーへ <code>call0</code> し、直後の 4 B をその地点のログ枠にする。チェッカーは飽和させた上で |結果| を枠に OR する（地点ごとに「どれだけ大きな値を見たか」が残る）。</li>
+<li><b>最初の判断（§18.2、12804a9）。</b> 最初の 16 draw は全地点のログを取り、<code>INT32_MAX</code> まで 3 ビット以内なら常時チェック、6 ビット以上の余裕ならその場で確定（チェックなし）、その間は休止とサンプルへ。</li>
+<li><b>休止とサンプル（§18.3、59f2517）。</b> 外した地点は休止の後に 1 draw だけ測る。増えなければ休止を 2 倍に、128 draw（増えないサンプル 3 回）で確定。</li>
+<li><b>確定したら作り直す（§18.5、7fe6d75）。</b> <code>call0</code> を <code>j</code> に変えるだけでは速くならなかった <span class="m">実機</span>。プランの地点が全部確定したらコードを捨ててコンパイルし直し、確定した地点は素の <code>add</code>（8 B）にする。判断はプランの命令の FNV-1a をキーに 48 件覚え（<code>JIT_FINAL_CACHE</code>）、同じプランを登録し直しても最初から作り直した形でコンパイルする。冷えて捨てたコードの判断も残す（§18.4）。</li>
+</ol>
+<div class="card">
+<h3>結果（実機、12804a9、§18.6）</h3>
+<ul>
+<li>DERBY と MEGADEMO のほぼ全プランが <b>16 draw 目に確定</b>して作り直された（地点はほとんど 22〜25 ビットの値）。常時チェック・戻した地点は 0 <span class="m">実測</span>。</li>
+<li>DERBY のエンジン時間: レース序盤 1.17〜1.20 → 0.95〜0.97 ms、WIDE 0.57 → 0.44、FIELD 0.68 → 0.56、CLOSE 0.58 → 0.46。<b>15〜23% 速い</b> <span class="m">実測</span>。MEGADEMO NEWS 0.81 → 0.75 ms。</li>
+<li>チェッカーの正しさ: 実機でランダムなプログラム 800 本が一致。host は 2 万本 × 5 通り（インライン、チェッカー、パッチ、作り直し途中、作り直し後）。</li>
+<li>代償: 共有チェッカーへの <code>call0</code> は届く範囲が限られ、RTC FAST に置かれたコードからは届かない（そこではインラインの検査で出していた）。</li>
+</ul>
+</div>
+<p class="sowhat">検査が消えたコードは、レジスタの使い方も自由になる。次はそれを使ってさらに短くする。</p>
+
+<!-- ============================================================ -->
+<h2 id="c5">5. レジスタキャッシュ <span class="tag">§20（c4d872d）</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> Java の JIT がフィールドをローカル変数（レジスタ）に置いたまま計算し、最後に 1 回だけ書き戻すこと。write-back キャッシュ。</p>
+<p><b>違うところ:</b> helper の呼び出し・ループの制御・ブロックの頭ではインタプリタや C がメモリの vm を読むので、そのたびに全部書き戻す（flush）。だから効くのは「算術だけが続く区間」に限られる。</p>
+<p><b>この章の問い:</b> 検査を外したコードを、メモリの読み書きを減らしてどこまで短くできるか。</p>
+</div>
+<p>JIT のコードは vm のレジスタをメモリに置いたまま読み書きする（どのブロックの頭でもインタプリタへ渡せるように、§11.1）。c4d872d は、<code>SET</code>・<code>INPUT</code>・<code>ADD</code>・<code>SUB</code>・<code>NEG</code>・<code>MUL</code>・<code>SHIFT</code> が続く区間だけ、値を <code>a8</code>〜<code>a15</code> に持ったままにする: 読みはレジスタに残っていればロードしない、結果は区間の終わりまで書かない、区間内で上書きされた結果は書かない。共有チェッカーの <code>call0</code> はレジスタが決まっているので、<b>チェッカーの無いコード（4 章で作り直した後のコード）だけ</b>に使う。</p>
+<ul>
+<li>出荷プランの最終コード 26,171 → 24,461 B（<b>−6.5%</b>）<span class="m">host、同じコンパイラ</span>。</li>
+<li>実機での速さへの効果は、この変更だけでは測れていない <span class="u">未確認</span>。c4d872d・c6119de の実機は JIT の場所が無くほぼインタプリタで走っており、効果が見えたのは区画を 56 KiB にした fb30211 から（§19.3）。そこでは区画の大きさも同時に変わっている。</li>
+</ul>
+<p class="note">shiki-jit.md には §20 の節がまだ無い（§19.3 が「レジスタ保持（§20）」と参照している）。この章の内容は c4d872d のコミットメッセージと <code>ksn_shiki_jit.c</code> の「sec.20: the register cache」のコメントによる。</p>
+<p class="sowhat">コードは小さく速くなった。ところが同じ時期に「RTC にはコードを置かない」と決めたことで、DERBY のレースは逆に遅くなった。</p>
+
+<!-- ============================================================ -->
+<h2 id="c6">6. RTC fast memory を断る <span class="tag">§19、§19.1、§19.2</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> スケジューラが、ラベルの条件だけ満たした遅いノード（古い世代のインスタンス）にポッドを置いてしまうこと。「入る」と答えるが、実際に置くと使えない。</p>
+<p><b>違うところ:</b> ここの「遅いノード」は RTC fast memory 8 KB で、遅い上に共有チェッカーへの <code>call0</code> が届かない。しかも他に移す先（DIRAM）がほぼ無い。</p>
+<p><b>この章の問い:</b> RTC を断ったら何が壊れ、その直しの後に何が本当の上限だと分かったか。</p>
+</div>
+<ul>
+<li><b>断る（e3aa94c）。</b> JIT は RTC fast memory をコードに使わない。返ってきたら手放し、「場所がない」扱い（<code>need64</code>）で冷えたプランの場所を待つ。代わりに RTC は遅くても困らない常駐の仕事に起動時に渡す: <code>input</code> タスクのスタック 4 KB（最大使用 約 1,250 B <span class="m">実機</span>）。</li>
+<li><b>退行（c4d872d）。</b> スタックを置いた後の RTC の残り約 3.5 KB が、<code>MALLOC_CAP_EXEC</code> の最大の空きだった。入るかの判定 <code>fits()</code> はこれを数えて「入る」と答え、確保は RTC に当たって手放され、冷えたプランは一度も捨てられなかった。DERBY のレースで NOMEM 274、JIT のコード 4,704 B、発走 1.36〜1.46 ms（12804a9 は 0.95〜0.97）<span class="m">実機、§19.1</span>。</li>
+<li><b>直し（c6119de）。</b> 確保も判定も <code>MALLOC_CAP_EXEC|MALLOC_CAP_DMA</code> で行う。実行できて DMA も使えるのは DIRAM だけなので、RTC は候補にも空きの数にも入らない（コードで確認: <code>JIT_EXEC_CAPS</code>）。</li>
+<li><b>それでも足りない（§19.2）。</b> NOMEM は 194 回続き、JIT のコードは 2,400 B。発走 1.41 ms <span class="m">実機</span>。<b>足りないのは DIRAM そのものだった。</b> 12804a9 が速かったのは、RTC に 6〜7 KB ほどコードを置けていたためと読む <span class="e">推定（RTC の空き 8 KB と、今 DIRAM に収まる量の差。EXECMAP では測っていない）</span>。スタックを移して空いた 4 KB はデータ専用の SRAM 側から出ていたらしく、JIT の場所にはならなかった <span class="e">推定</span>。</li>
+</ul>
+<p class="sowhat">RTC を使わないなら、DIRAM の中の機械語の場所＝Shiki の区画の余りを増やすしかない。まず素直に区画を大きくしてみる。</p>
+
+<!-- ============================================================ -->
+<h2 id="c7">7. 区画を大きくする実験 <span class="tag">§19.3、§21.3</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> 1 つのテナントのクォータを上げると共有クラスタの他のテナントが詰まること。ECS/K8s の bin-packing で、空きの合計は足りているのに 1 台に収まる連続の空きが無いこと（断片化）。</p>
+<p><b>違うところ:</b> スケールアウトは無い。全体は約 334 KiB の DRAM 1 つで、「他のテナント」はアプリ自身の JS のゲスト（評価中は定常の約 2 倍のピークを使う）。</p>
+<p><b>この章の問い:</b> 区画を 8 KiB 増やせば DERBY は速くなるか、その代償は何か。</p>
+</div>
+<p>5dda893 は、JIT が有効ならどのアプリも区画を 8 KiB 大きく取るようにし、fb30211 で <code>SHIKI_TURN</code> に <code>shk=使用/最大の空き/大きさ</code> を足して測った。</p>
+<ul>
+<li><b>DERBY は速くなった。</b> 発走 1.41 → 0.52 ms、WIDE 2 1.24〜1.73 → 0.61〜0.93、JIT のコード 8,788〜10,528 B、NOMEM 5（HEAD ON から）<span class="m">実機、fb30211</span>。</li>
+<li><b>区画の空きは細切れ。</b> レース中 <code>shk=50164/3328/57344</code>: 空き 7,180 B のうち一続きは 3,328 B。約 3.9 KB が JIT の入らない隙間にあった <span class="m">実機</span>。区画の中は ESP-IDF の TLSF（<code>multi_heap</code>）で管理していた。</li>
+<li><b>代償: DERBY の起動時のシステムの空き</b> 45,576 → 37,308 B <span class="m">実機</span>。</li>
+<li><b>MEGADEMO が起動できなくなった。</b> チャンク <code>wake</code> の解析で 12,138 B の確保が失敗（<code>START_FAILED</code>）<span class="m">実機</span>。区画の 8 KiB が、ゲストの評価のピークの余裕を食った。全アプリに 8 KiB を足す変更は戻した（3407064）。</li>
+<li><b>アプリごとの予算（§21.3、750ed21）。</b> その後、manifest の <code>shiki_bytes</code> で DERBY だけ 56 KiB にした（ユーザー決定）。MEGADEMO は 48 KiB のまま。これは 9 章の後で外した。</li>
+</ul>
+<p class="sowhat">増やすと他を壊す。そこで「空きはあるのに入らない」側、つまり区画の中の詰め方を直す。</p>
+
+<!-- ============================================================ -->
+<h2 id="c8">8. 区画の管理を作り直す <span class="tag">§21、§21.1〜§21.5</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> 汎用の malloc（jemalloc など）をやめ、用途の決まった slab / arena にすること。寿命の長いものと短いものを別の場所に置くこと（世代別 GC の発想）。昔のプロセスのスタックとヒープのように、両端から向かい合って伸ばすこと。</p>
+<p><b>違うところ:</b> 持ち主のブロックは動かせない（C と JS の <code>ArrayBuffer</code> が番地を握っている）ので、詰め直し（compaction）は無い。動かせるのは、自分しか指さない JIT のコードだけ。</p>
+<p><b>この章の問い:</b> 区画の空きを一続きに保ち、JIT に回せる量を増やすには、どう管理すればよいか。</p>
+</div>
+<p>区画の持ち主は少なく（データ領域 16・リスト 8・プラン 32・フレームなど・JIT のコードと表）、大きさは確保の時に決まり、場面の切り替わりでまとめて解放される。TLSF の大きさの区分・ブロックの見出し・境界合わせの切り出しは要らない（ユーザー決定）。<code>main/pocket/shiki_heap.c</code>（host と実機で同じコード）は:</p>
+<div class="grid2">
+<div class="card">
+<h3>固定長の表（c12cddd）</h3>
+<ul>
+<li>生きているブロックを <b>128 件の表</b>に番地の順で持つ。開始と長さは 4 B 単位の 16 bit（<code>SLOTS 128u</code>、表は 512 B の <code>.bss</code>。コードで確認）。区画の中はブロックの中身だけ。</li>
+<li><b>持ち主は下から、JIT は上から</b>（<code>alloc_low</code> / <code>alloc_high</code>）。出入りの多い JIT のコードが、持ち主の間に挟まらない。</li>
+</ul>
+</div>
+<div class="card">
+<h3>空きは常にゼロ</h3>
+<ul>
+<li>区画は取った時に 1 回だけゼロにし、解放したブロック（と縮めた後ろ）は返す時にゼロにする。<code>calloc</code> はゼロ埋めをしない。</li>
+<li><b>host では</b>確保のたびに中身がゼロかを確かめ、ゼロでなければ止める＝解放後の書き込みを host で捕まえる。実機ではこの検査はしない。</li>
+<li>ブロックの先頭でない番地の <code>free</code>（二重解放など）は断る（実機は <code>SHIKI_HEAP_REFUSED</code> のログ）。</li>
+</ul>
+</div>
+</div>
+<h3>表にしただけでは足りなかった（§21.1、eb5c12c）</h3>
+<p>MEGADEMO は 48 KiB で全場面を回った（NEWS 0.71 ms）<span class="m">実機</span>。しかし DERBY のレースは c6119de と同じく遅く（発走 1.33〜1.49 ms）、<code>shk=43264/2104/49152</code>: 空き約 6 KB のうち一続きは約 2.1 KB <span class="m">実機</span>。原因は JIT の 1 回のコンパイル（§17）: 見込みの長さのブロックを隙間の上端に取り、書いた後で<b>後ろ</b>を返すので、返した分がそのブロックと上の JIT のブロックの間の穴になる。</p>
+<div class="card">
+<svg viewBox="0 0 940 170" role="img" aria-label="後ろを返すと穴ができ、上へ寄せると穴ができない">
+  <g font-size="12">
+  <text x="10" y="18" font-weight="600">後ろを返す（以前）</text>
+  <rect x="10" y="28" width="420" height="40" fill="var(--free)" stroke="var(--line)"/>
+  <rect x="250" y="28" width="90" height="40" fill="var(--jit)"/>
+  <text x="295" y="53" text-anchor="middle" fill="#fff">新しいコード</text>
+  <rect x="340" y="28" width="40" height="40" fill="var(--rtc)" fill-opacity=".35" stroke="var(--rtc)"/>
+  <text x="360" y="84" text-anchor="middle" class="muted" font-size="11">穴</text>
+  <rect x="380" y="28" width="50" height="40" fill="var(--jit)" fill-opacity=".7"/>
+  <text x="405" y="53" text-anchor="middle" font-size="11" fill="#fff">上の JIT</text>
+  <text x="10" y="84" class="muted" font-size="11">← 持ち主の側</text>
+  <text x="500" y="18" font-weight="600">上へ寄せて頭を返す（e877784）</text>
+  <rect x="500" y="28" width="420" height="40" fill="var(--free)" stroke="var(--line)"/>
+  <rect x="780" y="28" width="90" height="40" fill="var(--jit)"/>
+  <text x="825" y="53" text-anchor="middle" fill="#fff">新しいコード</text>
+  <rect x="870" y="28" width="50" height="40" fill="var(--jit)" fill-opacity=".7"/>
+  <text x="895" y="53" text-anchor="middle" font-size="11" fill="#fff">上の JIT</text>
+  <text x="500" y="84" class="muted" font-size="11">← 空きは下側に一続きで残る</text>
+  <text x="10" y="120">検査の無いコード（4 章で作り直した後、ほとんどのプラン）は、分岐も l32r も pc 相対で、自分と context しか指さない。</text>
+  <text x="10" y="140">16 B 単位で動かせば境界も保つので、shiki_heap_shrink_up で中身を上へ寄せる。チェッカーを呼ぶコードは call0 が</text>
+  <text x="10" y="160">絶対番地に依存するので、今までどおり後ろを返す（コードで確認: chk_add で分岐）。</text>
+  </g>
+</svg>
+</div>
+<p>e877784 で JIT に入るコードは 3.2〜4.9 → 4.5〜6.8 KB、WIDE・FIELD は 56 KiB の時と同じ速さに戻った（WIDE 0.42、FIELD 0.54 ms）<span class="m">実機、§21.2</span>。発走と WIDE 2 は描くプランが多く 9〜10 KB 要り、48 KiB では入らない（持ち主 約 39.5 KB、空き 約 4.6 KB）。</p>
+<h3>さらに 2 つの調整</h3>
+<ul>
+<li><b>返すのは足りる分だけ、残す余裕は 0（§21.4、c5530a7）。</b> 持ち主の確保が失敗すると、hook は 1 回に 1 プランだけ、一番長く描かれていないプランのブロックを返し、区画は確保が通るまで繰り返す。以前は 1 回で全プランが返していた（MEGADEMO の TWIST で 12 プラン）。全部返す作りのための余裕 <code>JIT_REGION_KEEP</code> は 2 KB → 0（コードで確認）。実機での <code>jitdrop</code> の測定は §21.4 が「測ること」として残している <span class="u">未確認</span>。</li>
+<li><b>見込みの長さを実測に合わせる（§21.5、56949dc）。</b> <code>JIT_GUESS(n)</code> は 32n+64 → <b>24n+32</b>。出荷している 45 プランのコードは 1 命令あたり最大 <b>23.4 B</b>（<code>kasane.ci</code> 58 命令 1,356 B）<span class="m">host、同じコンパイラ</span>。見込みが大きすぎると、詰まった区画で一続きの空きが取れず 2 パスの道へ回っていた。超えるプランが出ても 2 パスで正しくコンパイルされ、<code>test_scalar.py</code> は出荷プランが見込みを超えたら落ちる。</li>
+</ul>
+<p class="sowhat">詰め方は直った。残りは純粋な量の不足で、48 KiB の区画では持ち主が多すぎる。次は持ち主の側を減らす。</p>
+
+<!-- ============================================================ -->
+<h2 id="c9">9. 作業領域を無くす <span class="tag">§22、§22.1</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> 一時ファイルに書いてからコピーするのをやめ、宛先へ直接ストリームで書くこと。Kafka のコンシューマが、処理が成功してから offset を進める（失敗したら進めないので、途中の結果は無かったことになる）こと。</p>
+<p><b>違うところ:</b> 宛先は「描画中のフレーム」の末尾で、書ける本数の上限をエンジンが毎命令守る必要がある。JIT のコードも線分は C の helper で出すので、同じ検査を通る。</p>
+<p><b>この章の問い:</b> 区画の持ち主の中で、無くせる大きな塊はどれか。無くしたら DERBY は 48 KiB に戻れるか。</p>
+</div>
+<p>これまで 1 回の <code>draw()</code> は、1,024 本入る作業領域（<code>workspace</code>、10,246 B）へ書き、描画中のフレームの残りに入れば <code>memcpy</code> で写していた。「全部入るか、何も入らないか」にするための一時置き場だった（フレームの仕組みは <a href="pipeline-overview.html#shiki">パイプラインの §6</a>）。</p>
+<ul>
+<li><b>直し（c4d7a6c、ユーザー決定）。</b> エンジンにその描画で出してよい線分の数 <code>cap</code> を持たせ、描画中のフレームの末尾へ直接書く。超えたら <code>LIMIT</code> で止まり、フレームの本数（<code>count</code>）を進めないので、書きかけはフレームに入らない。</li>
+<li><b>作業領域は、画像の面の帯のキャッシュ（240 × 8 × 2 = 3,840 B）だけになった</b>（<code>pocket_proc.c</code> の <code>image_band_buf</code>、コードで確認）。画像の面を使わないアプリは取らない。</li>
+<li>効果: 画像の面を使うアプリ（DERBY・MEGADEMO）で 10,246 − 3,840 = <b>6,406 B</b>、使わないアプリで 10,246 B が区画から空く <span class="e">計算</span>。描画ごとの <code>memcpy</code> も無くなる。</li>
+</ul>
+<div class="card">
+<h3>結果（実機、4786558、DERBY の区画 56 KiB、§22.1）</h3>
+<ul>
+<li>レース: WIDE <b>0.43 ms</b>、FIELD <b>0.51〜0.54</b>、WIDE 2 <b>0.58〜0.94</b> <span class="m">実測</span>。JIT のコード 8.8〜9.6 KB、失敗 0 <span class="m">実測</span>。</li>
+<li>区画 <code>shk=42480/13548/57344</code>: <b>空きは一続きの 13.5 KB</b>（TLSF の時は空き 7.2 KB のうち一続き 3.3 KB）<span class="m">実測</span>。</li>
+<li>持ち主は 42,480 − 9,396（JIT）≒ <b>33.1 KB</b> <span class="e">計算（実測の差）</span>。48 KiB なら JIT に約 16 KB 残る <span class="e">計算</span>。レースの JIT（約 10 KB）が入るので、DERBY の 56 KiB の指定を外し、既定の 48 KiB に戻した（94439f7。システムの空きが 8 KiB 戻る）。</li>
+<li><b>48 KiB に戻した DERBY の実機の測定はまだ無い</b> <span class="u">未確認</span>。上の数字はすべて 56 KiB の区画でのもの。</li>
+</ul>
+</div>
+<p class="sowhat">持ち主を減らす手はもう 1 つ考えられた（フレームのリストを 1 本にする）。試して、戻した。</p>
+
+<!-- ============================================================ -->
+<h2 id="c10">10. リストを 1 本にする案（見送り） <span class="tag">§23</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> blue-green デプロイ（表示中と組み立て中の 2 つを持ち、成功したら切り替える）。1 つにまとめれば資源は半分だが、失敗したときに「前の版に戻す」ができなくなる。</p>
+<p><b>違うところ:</b> 節約は DERBY でリスト 1 本 7,686 B（計算）。代わりに画面の振る舞いが変わる。</p>
+<p><b>この章の問い:</b> 面ごとの 2 つの線分のリストを 1 つにする価値はあるか。</p>
+</div>
+<p>組み立て中（candidate）と表示中（committed）を 1 つにまとめ、<code>frame()</code> が例外で終わったら描けた分を出す、という変更を一度実装した（b65e830、host の検査は通過）。ユーザーの判断で取り消した（2d38365）: VM が <code>frame()</code> を途中で止めて持ち越している間（park）の描き直しに描きかけが出る、例外の後に前のフレームへ戻れない、という変化のため。今は 2 つのリストのまま、例外のフレームは捨てて前のフレームを出し続ける。Shiki の区画の削減は 9 章の作業領域だけにした。</p>
+<p class="sowhat">ここまでの結果を、1 つの表と今の区画の図にまとめる。</p>
+
+<!-- ============================================================ -->
+<h2 id="c11">11. 推移と今の姿 <span class="tag">§19.2、§19.3、§21.2、§22.1</span></h2>
+<div class="bridge">
+<p><b>知っているもの:</b> リリースごとのレイテンシの推移表（p50 の幅を版ごとに並べる）。</p>
+<p><b>違うところ:</b> DERBY は実行ごとにレースが違う（乱数の種）ので、同じ場面の窓どうしを比べている。値の幅は 30 フレームの窓ごとの違い。</p>
+<p><b>この章の問い:</b> 各段で DERBY のエンジン時間と JIT の量はどう動き、区画は今どう使われているか。</p>
+</div>
+<h3>DERBY の推移（1 フレームのエンジン時間 engine_ms）</h3>
+<div class="card scroll">
+<table style="min-width:820px">
+<tr><th>ビルド</th><th>区画・管理</th><th>コードの置き場所</th><th class="num">発走（WIDE 1）</th><th class="num">WIDE</th><th class="num">FIELD</th><th class="num">WIDE 2</th><th class="num">JIT のコード</th><th class="num">NOMEM</th><th>印</th></tr>
+<tr><td>12804a9（4 章）</td><td>48 KiB・TLSF</td><td>区画＋RTC</td><td class="num">0.95〜0.97</td><td class="num">0.44</td><td class="num">0.56</td><td class="num">1.17〜1.38</td><td class="num">10,592〜11,448 B</td><td class="num">0</td><td><span class="m">実測</span></td></tr>
+<tr><td>c4d872d（5・6 章）</td><td>48 KiB・TLSF</td><td>RTC を拒否、判定は RTC を数える</td><td class="num">1.36〜1.46</td><td class="num">0.46〜0.55</td><td class="num">0.64〜0.70</td><td class="num">1.46〜2.32</td><td class="num">4,704 B</td><td class="num">274</td><td><span class="m">実測</span></td></tr>
+<tr><td>c6119de（6 章）</td><td>48 KiB・TLSF</td><td>DIRAM だけ（EXEC|DMA）</td><td class="num">1.41</td><td class="num">0.64〜0.68</td><td class="num">0.75〜0.91</td><td class="num">1.24〜1.73</td><td class="num">2,400 B</td><td class="num">194</td><td><span class="m">実測</span></td></tr>
+<tr><td>fb30211（7 章）</td><td>56 KiB・TLSF</td><td>DIRAM だけ</td><td class="num">0.52</td><td class="num">0.42</td><td class="num">0.53</td><td class="num">0.61〜0.93</td><td class="num">8,788〜10,528 B</td><td class="num">5</td><td><span class="m">実測</span></td></tr>
+<tr><td>eb5c12c（8 章）</td><td>48 KiB・表</td><td>DIRAM だけ</td><td class="num">1.33〜1.49</td><td class="num">0.53〜0.55</td><td class="num">0.63〜0.68</td><td class="num">0.95〜1.57</td><td class="num">3.2〜4.9 KB</td><td class="num">—</td><td><span class="m">実測</span>（NOMEM は記録なし）</td></tr>
+<tr><td>e877784（8 章）</td><td>48 KiB・表＋上へ縮める</td><td>DIRAM だけ</td><td class="num">1.32〜1.61</td><td class="num">0.42</td><td class="num">0.54</td><td class="num">0.92〜1.31</td><td class="num">4.5〜6.8 KB</td><td class="num">—</td><td><span class="m">実測</span>（NOMEM は記録なし）</td></tr>
+<tr><td>4786558（9 章）</td><td>56 KiB・表、作業領域なし</td><td>DIRAM だけ</td><td class="num">—</td><td class="num">0.43</td><td class="num">0.51〜0.54</td><td class="num">0.58〜0.94</td><td class="num">8.8〜9.6 KB</td><td class="num">0</td><td><span class="m">実測</span>（発走は §22.1 に記録なし）</td></tr>
+<tr class="now"><td>94439f7（今）</td><td>48 KiB・表、作業領域なし</td><td>DIRAM だけ</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">余地 約 16 KB</td><td class="num">—</td><td><span class="u">未確認（実機未測定）</span> 余地は <span class="e">計算</span></td></tr>
+</table>
+<p class="note">出典: §19.2 の表（12804a9・c4d872d・c6119de）、§19.3 の表（fb30211）、§21.2 の表（eb5c12c・e877784）、§22.1（4786558）。12804a9 の WIDE 2 は §19.2 の値（§18.6 は 1.05〜1.38）。12804a9 のコードの一部（6〜7 KB）は RTC にあった <span class="e">推定</span>。<code>shk</code>（使用/最大の空き/大きさ）: fb30211 50,164/3,328/57,344、eb5c12c 43,264/2,104/49,152、e877784 44,548/2,924/49,152、4786558 42,480/13,548/57,344 <span class="m">実測</span>。MEGADEMO は 48 KiB のまま: 12804a9 で NEWS 0.75・ZENITH 0.68〜0.74・TWIST 1.00 ms、eb5c12c で NEWS 0.71・ZENITH 0.63〜0.69・TWIST 0.98 ms <span class="m">実測</span>。</p>
+</div>
+
+<h3>今の区画（DERBY、48 KiB、レース中の見込み）</h3>
+<p>どのアプリも区画は既定の 48 KiB（<code>SHIKI_HEAP_DEFAULT_BYTES</code>、<code>shiki_heap.h</code>。<code>app_registry.c</code> に <code>shiki_bytes</code> を指定するアプリは無い。コードで確認）。区画はアプリの開始時、ゲストを作る前に取る（<code>app_session.c</code> の <code>shiki_heap_begin</code>）。</p>
+<div class="card scroll">
+<svg viewBox="0 0 940 240" role="img" aria-label="DERBY の Shiki の区画 48 KiB の今の使われ方" style="min-width:720px">
+  <text x="10" y="18" font-size="12" font-weight="600">DERBY の区画 49,152 B（横幅は実寸に比例。低い番地 → 高い番地）</text>
+  <!-- 900 px = 49152 B ; x0=10 -->
+  <rect x="10" y="30" width="70.3" height="60" fill="var(--keep)"/>
+  <text x="45" y="54" text-anchor="middle" font-size="10">帯の</text>
+  <text x="45" y="68" text-anchor="middle" font-size="10">キャッシュ</text>
+  <text x="45" y="82" text-anchor="middle" font-size="10">3,840</text>
+  <rect x="80.3" y="30" width="140.8" height="60" fill="var(--shiki)"/>
+  <text x="150.7" y="54" text-anchor="middle" font-size="11" fill="#fff">フレーム A</text>
+  <text x="150.7" y="72" text-anchor="middle" font-size="11" fill="#fff">7,688</text>
+  <rect x="221.1" y="30" width="140.8" height="60" fill="var(--shiki)" fill-opacity=".8"/>
+  <text x="291.5" y="54" text-anchor="middle" font-size="11" fill="#fff">フレーム B</text>
+  <text x="291.5" y="72" text-anchor="middle" font-size="11" fill="#fff">7,688</text>
+  <rect x="361.9" y="30" width="6.8" height="60" fill="var(--guest)"/>
+  <rect x="368.7" y="30" width="247.4" height="60" fill="var(--shiki)" fill-opacity=".35"/>
+  <text x="492" y="54" text-anchor="middle" font-size="11">式・点の窓・データ領域・リスト</text>
+  <text x="492" y="72" text-anchor="middle" font-size="11">約 13.5 KB（差し引き）</text>
+  <rect x="616.1" y="30" width="121.9" height="60" fill="var(--free)" stroke="var(--line)"/>
+  <text x="677" y="54" text-anchor="middle" font-size="11">空き</text>
+  <text x="677" y="72" text-anchor="middle" font-size="10" class="muted">約 6.6 KB</text>
+  <rect x="738" y="30" width="172" height="60" fill="var(--jit)"/>
+  <text x="824" y="54" text-anchor="middle" font-size="11" fill="#fff">JIT のコードと表</text>
+  <text x="824" y="72" text-anchor="middle" font-size="10" fill="#fff">約 9.4 KB、上から</text>
+  <line x1="10" y1="100" x2="616" y2="100" stroke="var(--shiki)" stroke-width="2"/>
+  <text x="313" y="116" text-anchor="middle" font-size="11">持ち主 約 33.1 KB（下から）</text>
+  <line x1="616" y1="100" x2="910" y2="100" stroke="var(--jit)" stroke-width="2"/>
+  <text x="763" y="116" text-anchor="middle" font-size="11">JIT と空き 約 16 KB（計算）</text>
+  <text x="365" y="132" text-anchor="middle" font-size="10" class="muted">VM 372</text>
+  <text x="10" y="158" font-size="11.5">・帯のキャッシュ 240×8×2、フレーム 6 + 768 × 10 B（4 B 単位で 7,688）、VM の状態 372 B はコードからの計算。</text>
+  <text x="10" y="176" font-size="11.5">・持ち主 33.1 KB と JIT 9.4 KB は 56 KiB の区画での実測（4786558、§22.1）。48 KiB での実測はまだ無い。</text>
+  <text x="10" y="194" font-size="11.5">・並び（帯のキャッシュ → A・B → VM）はコードの確保の順からの推定。場面の切り替えで式・データ領域は入れ替わる。</text>
+  <text x="10" y="212" font-size="11.5">・管理は 128 件の表（.bss 512 B）。空きは常にゼロ。持ち主の確保が失敗すると、JIT は古いプランから 1 本ずつ返す。</text>
+  <text x="10" y="230" font-size="11.5">・作業領域（10,246 B）は c4d7a6c で無くなった。以前の図の「フレーム・作業領域 各 10,752」は 1,024 本・TLSF の時の大きさ。</text>
+</svg>
+<div class="legend">
+  <span style="--c:var(--keep)">画像の面の帯のキャッシュ（画素）</span>
+  <span style="--c:var(--shiki)">フレーム（線分の並び）</span>
+  <span style="--c:var(--guest)">VM の状態</span>
+  <span style="--c:color-mix(in srgb,var(--shiki) 35%,transparent)">登録で変わるもの</span>
+  <span style="--c:var(--jit)">JIT（借り手）</span>
+</div>
+</div>
+<p class="note">区画の内訳の根拠（各項目のファイルと行）は <a href="pipeline-overview.html#mem">パイプラインの §8</a> の表にある。「式・点の窓…約 13.5 KB」は 33.1 KB から固定分 19,588 B（7,688 × 2 + 3,840 + 372）を引いた差 <span class="e">計算</span>で、個別には測っていない。</p>
+<p class="sowhat">次に測るべきは、48 KiB に戻した DERBY のレース（発走と WIDE 2 の engine_ms、<code>shk=</code>、NOMEM）と、MEGADEMO・DERBY の場面の切り替わりでの <code>jitdrop</code>（§21.4）。</p>
+
+<!-- ============================================================ -->
+<h2 id="facts">事実・推定・未確認</h2>
 <div class="kv">
-<b>実測</b><span>heap の領域ごとの空き・使用（EXECMAP）、JIT の確保がどこに落ちたか（got= の数）、各場面の ms、区画を共有した後に登録の失敗・エラーが無いこと（DERBY・MEGADEMO・BIG WAVE）。</span>
-<b>実測</b><span>番地の地図は TRM v1.8 p.403、p.685。</span>
-<b>推定</b><span>RTC FAST に置いたコードが遅いのは命令の取り込みが遅いため（取り込みの速さそのものは未測定。同じコードの置き場所だけを変えた比較からの読み）。</span>
-<b>実測</b><span>DERBY で 14 プランが区画を返したのはレースの 26 プランの登録の時（5021a80 の <code>jitdrop=</code>）。</span>
-<b>未特定</b><span>DIRAM の 32 KB と 10.7 KB の塊の持ち主。</span>
+<b><span class="m">実測</span></b><span>各ビルドの engine_ms・JIT のコードの量・NOMEM・<code>shk=</code>（実機の <code>SHIKI_TURN</code>、shiki-jit.md の各節）。heap の領域ごとの空き（EXECMAP、ba9d872）。MEGADEMO の 56 KiB での起動失敗（fb30211）。<code>input</code> スタックの最大使用。</span>
+<b><span class="m">host 実測</span></b><span>レジスタキャッシュの −6.5%（26,171 → 24,461 B）、出荷プランの 1 命令あたり最大 23.4 B、飽和チェックがコードの約 1/4、命令の内訳。</span>
+<b><span class="m">コードで確認</span></b><span>区画 48 KiB の既定と上書きの無いこと、表 128 件、持ち主は下・JIT は上、空きのゼロ、<code>JIT_REGION_KEEP</code> 0、<code>JIT_GUESS</code> 24n+32、<code>JIT_EXEC_CAPS</code>、帯のキャッシュ 3,840 B、フレーム 7,686 B、予算 16 KiB、<code>JIT_HEAT</code> 4、<code>JIT_COLD_DRAWS</code> 1,024。番地の地図は TRM v1.8 p.403、p.685。</span>
+<b><span class="e">推定・計算</span></b><span>12804a9 のコードの 6〜7 KB が RTC にあったこと。RTC が遅いのは命令の取り込みのため。持ち主 33.1 KB（実測の差）と、48 KiB で JIT に約 16 KB 残ること。区画の中の並び。作業領域の廃止で空く 6,406 B。</span>
+<b><span class="u">未確認</span></b><span>48 KiB に戻した DERBY の実機の速さと <code>shk=</code>。§21.4（1 プランずつ返す）の実機の <code>jitdrop</code>。レジスタキャッシュ単独の実機での効果。当時の DIRAM の 32 KB と 10.7 KB の塊の持ち主。shiki-jit.md の §20 の節（参照はあるが本文が無い）。</span>
 </div>
 </main>
 </body>
