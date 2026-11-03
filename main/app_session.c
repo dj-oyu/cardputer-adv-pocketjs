@@ -2187,12 +2187,7 @@ static void run_pumps(uint32_t buttons) {
 // built candidate for the next frame() to commit.
 static void end_guest_turn(void) {
     if(pocketjs_guest_work_pending(guest)) pocket_kasane_park_turn();
-    else {
-        // A frame() that threw with its procedural frame open shows what it
-        // drew (shiki-jit.md sec.23); stop and suspend only close it.
-        pocket_proc_flush_turn();
-        pocket_kasane_end_turn();
-    }
+    else pocket_kasane_end_turn();
 }
 
 // One call into the guest. The Cardputer supplies a pad mask, centered analog

@@ -61,7 +61,7 @@ void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
  * grows), so a released handle can never alias a later program. */
 #define PROC_HANDLES 32u
 #define PROC_SURFACES 2u
-/* A surface's frame holds only the segments it
+/* A surface's candidate and committed frames hold only the segments it
  * declared (createSurface({maxSegments})), allocated as the ksn_proc_frame
  * header plus that many entries. The full 1,024-entry frame is 10,246 B, and
  * a second surface needs two of those as separate contiguous blocks: DERBY
@@ -102,18 +102,11 @@ typedef struct {
     uint32_t hash[PROC_BANDS];
     uint8_t x0[PROC_BANDS],x1[PROC_BANDS];
 } proc_band_sig;
-/* One segment list a surface (shiki-jit.md sec.23): the frame being built
- * and the one shown are the same list. beginFrame() starts it over, commit()
- * shows it, and a frame() that throws or a draw that fails shows what was
- * drawn before (pocket_proc_flush_turn). What the shown frame was is kept
- * only as its band signatures, box and colour, which is all damage needs. */
 typedef struct {
-    ksn_proc_frame *candidate;
+    ksn_proc_frame *candidate,*committed;
     proc_band_sig candidate_sig,committed_sig;
-    ksn_rect candidate_box,committed_box;
     uint16_t candidate_color,committed_color;
     bool pending,has_committed,repair_required,image_mode;
-    bool unfinished; /* a draw closed the frame; the turn's end shows it */
     bool sig_ready; /* candidate_sig describes the candidate (commit .. next beginFrame) */
     uint32_t handle;
     ksn_rect damage;
@@ -130,12 +123,6 @@ static unsigned building_surface,pending_surface;
 #define PROC_IMAGE_BAND_ROWS 8u
 static uint16_t *image_band_buf;
 static bool building;
-/* A draw that fails closes the frame; what was drawn before it is shown at
- * the turn's end (pocket_proc_flush_turn, sec.23). */
-static void close_unfinished(void){
-    if(building)surfaces[building_surface].unfinished=true;
-    building=false;
-}
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
 static uint16_t image_band_y;
@@ -166,7 +153,8 @@ static bool buffers(proc_surface *surface){
     if(!surface->candidate)surface->candidate=shiki_or_sys_calloc(1,bytes);
     if(surface->image_mode&&!image_band_buf)
         image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
-    return surface->candidate&&(!surface->image_mode||image_band_buf);
+    if(!surface->committed)surface->committed=shiki_or_sys_calloc(1,bytes);
+    return surface->candidate&&surface->committed&&(!surface->image_mode||image_band_buf);
 }
 static bool any_pending(void){
     for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].pending)return true;
@@ -193,17 +181,17 @@ static proc_slot *find_slot(uint32_t handle){
         if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
     return NULL;
 }
-/* The box a frame's segments cover, clamped to the image. VM and typed
- * segments may lie anywhere in -480..720; clamping each edge keeps x0<=x1
- * and y0<=y1 for any non-empty set, and a set wholly off one side collapses
- * to a zero-width rectangle on that edge. An empty frame has x0>x1. */
-static ksn_rect frame_box(const ksn_proc_frame *frame){
+static ksn_rect frame_damage(const proc_surface *surface){
+    if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
+        return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
     int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
-    unsigned i=0,cost;
-    ksn_proc_segment geometry;
-    bool pattern;
-    /* Geometry only: a pattern line's parameters are not coordinates. */
-    while(ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost)){
+    const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
+    for(unsigned f=0;f<2;f++){
+      unsigned i=0,cost;
+      ksn_proc_segment geometry;
+      bool pattern;
+      /* Geometry only: a pattern line's parameters are not coordinates. */
+      while(ksn_proc_frame_next(frames[f],&i,&geometry,&pattern,&cost)){
         const ksn_proc_segment *seg=&geometry;
         int ax=seg->x0<seg->x1?seg->x0:seg->x1;
         int bx=seg->x0>seg->x1?seg->x0:seg->x1;
@@ -213,25 +201,16 @@ static ksn_rect frame_box(const ksn_proc_frame *frame){
         if(ay<y0)y0=ay;
         if(bx+1>x1)x1=bx+1;
         if(by+1>y1)y1=by+1;
+      }
     }
+    /* VM and typed segments may lie anywhere in -480..720. Clamping each edge
+     * keeps x0<=x1 and y0<=y1 for any non-empty set; a set wholly off one side
+     * collapses to a zero-width rectangle on that edge. */
     if(x0<0)x0=0;
     if(y0<0)y0=0;
     if(x1>KSN_PROC_W)x1=KSN_PROC_W;
     if(y1>KSN_PROC_H)y1=KSN_PROC_H;
     return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
-}
-/* What changes on screen: the box of the new frame and of the one shown. */
-static ksn_rect frame_damage(proc_surface *surface){
-    surface->candidate_box=frame_box(surface->candidate);
-    if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
-        return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
-    const ksn_rect a=surface->candidate_box,b=surface->committed_box;
-    const bool ea=a.x0>=a.x1||a.y0>=a.y1,eb=b.x0>=b.x1||b.y0>=b.y1;
-    if(ea&&eb)return a;                      /* nothing on either */
-    if(ea)return b;
-    if(eb)return a;
-    return (ksn_rect){a.x0<b.x0?a.x0:b.x0,a.y0<b.y0?a.y0:b.y0,
-                      a.x1>b.x1?a.x1:b.x1,a.y1>b.y1?a.y1:b.y1};
 }
 static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
     for(unsigned b=0;b<PROC_BANDS;b++){sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;}
@@ -292,13 +271,10 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     proc_surface *surface=&surfaces[index];
     if(!buffers(surface))return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
     /* Header only: the frame may be shorter than sizeof(ksn_proc_frame). */
-    /* The list starts over. It stays ready: a repaint while the frame is
-     * built (a parked frame()) shows what it has so far (sec.23). */
     surface->candidate->count=0;
     surface->candidate->raster_steps=0;
-    surface->candidate->ready=true;
+    surface->candidate->ready=false;
     surface->candidate->ext=0;
-    surface->unfinished=false;
     surface->sig_ready=false;
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
@@ -318,14 +294,14 @@ JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark 
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     if(x0< -480||x0>720||y0< -480||y0>720||x1< -480||x1>720||y1< -480||y1>720){
-        close_unfinished();
+        building=false;
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"segment outside -480..720");
     }
     ksn_proc_frame *c=surfaces[building_surface].candidate;
     const unsigned dx=(unsigned)abs(x1-x0),dy=(unsigned)abs(y1-y0),cost=(dx>dy?dx:dy)+1u;
     if(c->count>=surface_segments(&surfaces[building_surface])||
        cost>(unsigned)UINT16_MAX-c->raster_steps){
-        close_unfinished();
+        building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
     }
     c->segments[c->count++]=(ksn_proc_segment){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1,color};
@@ -337,37 +313,29 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     if(!c)return;
     c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;
 }
-/* Shows surface index's frame: commit(), and the turn's end for a frame
- * left unfinished. KSN_STALE: a second surface without its resource. */
-static ksn_result commit_frame(unsigned index){
-    proc_surface *surface=&surfaces[index];
-    surface->damage=frame_damage(surface);
-    band_signature(surface->candidate,&surface->candidate_sig);
-    surface->sig_ready=true;
-    if(index&&!surface->image_mode)return KSN_STALE;
-    ksn_result result=index||surface->image_mode?
-        pocket_kasane_proc_publish_at(index,surface->damage):
-        pocket_kasane_proc_publish();
-    if(result!=KSN_OK)return result;
-    surface->candidate->ready=true;
-    surface->pending=true;
-    surface->unfinished=false;
-    pending_surface=index;
-    image_band_valid=false;
-#ifdef KASANE_MEGADEMO_TRACE
-    trace.commit_n++;trace_split=true;
-#endif
-    return KSN_OK;
-}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.shiki.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
-    const ksn_result result=commit_frame(building_surface);
-    if(result==KSN_STALE)return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
+    proc_surface *surface=&surfaces[building_surface];
+    surface->damage=frame_damage(surface);
+    band_signature(surface->candidate,&surface->candidate_sig);
+    surface->sig_ready=true;
+    if(building_surface&&!surface->image_mode)
+        return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
+    ksn_result result=building_surface||surface->image_mode?
+        pocket_kasane_proc_publish_at(building_surface,surface->damage):
+        pocket_kasane_proc_publish();
     if(result!=KSN_OK)return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
                                    POCKET_ERR_BUSY,"Kasane presentation unavailable");
+    surface->candidate->ready=true;
+    surface->pending=true;
+    pending_surface=building_surface;
+    image_band_valid=false;
     building=false;
+#ifdef KASANE_MEGADEMO_TRACE
+    trace.commit_n++;trace_split=true;
+#endif
     return JS_UNDEFINED;
 }
 typedef JSValue (*proc_js_method)(JSContext *,JSValueConst,int,JSValueConst *);
@@ -511,7 +479,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     proc_slot *slot=find_slot(handle);
     if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale Shiki handle");
     if(!shiki_vm&&!(shiki_vm=shiki_or_sys_calloc(1,sizeof *shiki_vm))){
-        close_unfinished();
+        building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"no room for the engine's state");
     }
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
@@ -544,12 +512,12 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
      * was checked after the draw; the engine's own per-draw limits as its. */
     const bool full=s==KSN_SHIKI_LIMIT&&room<KSN_SHIKI_SEGMENTS&&shiki_vm->count>=room;
     if(s!=KSN_SHIKI_DONE&&!full){
-        close_unfinished();
+        building=false;
         return failure(ctx,op,s==KSN_SHIKI_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
                        s==KSN_SHIKI_BADINPUT?"non-finite input":"Shiki execution failed");
     }
     if(full||(unsigned)shiki_vm->raster>(unsigned)UINT16_MAX-candidate->raster_steps){
-        close_unfinished();
+        building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
     }
     candidate->count+=shiki_vm->count;
@@ -577,7 +545,7 @@ void pocket_proc_reset(void){
         shiki_or_sys_free(slots[i].plan);slots[i]=(proc_slot){0};
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
-        shiki_or_sys_free(surfaces[i].candidate);
+        shiki_or_sys_free(surfaces[i].candidate);shiki_or_sys_free(surfaces[i].committed);
         surfaces[i]=(proc_surface){0};
     }
     shiki_or_sys_free(image_band_buf);image_band_buf=NULL;
@@ -592,30 +560,11 @@ void pocket_proc_reset(void){
 #endif
 }
 void pocket_proc_end_turn(void){
-    /* An open frame does not carry into the next owner turn. Not called at
-     * the end of a host turn that the VM parked: that frame() resumes in the
-     * continuation and still owns its frame (pocket_kasane_park_turn,
-     * end_guest_turn in app_session.c). A normal turn's end shows the
-     * unfinished frame first (pocket_proc_flush_turn); a stop or suspend
-     * only closes it. */
-    if(building)surfaces[building_surface].unfinished=false;
-    building=false;
-}
-void pocket_proc_flush_turn(void){
-    /* sec.23 (2026-11-03): a frame() that threw with its frame open, or a
-     * draw that failed and closed it, shows what was drawn before: beginFrame()
-     * has already started the one list over, so the frame shown before is
-     * gone, and the part drawn is the best picture there is. */
-    for(unsigned i=0;i<PROC_SURFACES;i++){
-        const bool open=building&&building_surface==i;
-        if(!open&&!surfaces[i].unfinished)continue;
-        /* Nothing drawn: the screen keeps what the LCD shows (no blank). */
-        if(!surfaces[i].candidate||!surfaces[i].candidate->count||any_pending()||any_repair()){
-            surfaces[i].unfinished=false;continue;
-        }
-        (void)commit_frame(i);                 /* best effort: a failure leaves it unshown */
-        surfaces[i].unfinished=false;
-    }
+    /* A thrown JS frame must not carry an unfinished candidate into the next
+     * owner turn. Previously committed or pending presentation stays intact.
+     * Not called at the end of a host turn that the VM parked: that frame()
+     * resumes in the continuation and still owns its candidate
+     * (pocket_kasane_park_turn, end_guest_turn in app_session.c). */
     building=false;
 }
 bool pocket_proc_has_frame(void){
@@ -647,7 +596,8 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     uint32_t span_start=esp_cpu_get_cycle_count();
 #endif
-    const ksn_proc_frame *frame=surface->pending||surface->has_committed?surface->candidate:NULL;
+    const ksn_proc_frame *frame=surface->pending?surface->candidate:
+        (surface->has_committed?surface->committed:NULL);
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
     /* Before the first frame or after reset, a blank image needs no
@@ -702,7 +652,8 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
     (void)ctx;
     if(!pixels||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
     const proc_surface *surface=&surfaces[0];
-    const ksn_proc_frame *frame=surface->pending||surface->has_committed?surface->candidate:NULL;
+    const ksn_proc_frame *frame=surface->pending?surface->candidate:
+        (surface->has_committed?surface->committed:NULL);
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
     for(unsigned i=0;i<(unsigned)rows*KSN_PROC_W;i++)pixels[i]=color;
@@ -715,10 +666,10 @@ void pocket_proc_present_result(ksn_result result){
     if(!surface->pending&&!repairing)return;
     if(result==KSN_OK){
         if(surface->pending){
-            /* The list itself is what is shown now; keep what damage needs. */
+            ksn_proc_frame *old=surface->committed;
+            surface->committed=surface->candidate;surface->candidate=old;
             surface->committed_color=surface->candidate_color;
             surface->committed_sig=surface->candidate_sig;
-            surface->committed_box=surface->candidate_box;
             surface->has_committed=true;surface->pending=false;
             image_band_valid=false;
         }

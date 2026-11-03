@@ -94,7 +94,7 @@ ol.steps li{margin:4px 0}
 </div>
 <div class="card">
 <h3>Shiki の「複数の並び」は、画素ではなく記録</h3>
-<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_proc.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つは、その後 1 本にした（<a href="#plan">§10</a>）。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
+<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_proc.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つを 1 本にする案は見送った（<a href="#plan">§10</a>）。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
 </div>
 </div>
 
@@ -455,7 +455,7 @@ ol.steps li{margin:4px 0}
     <text x="34" y="410" font-size="11.5">　転送に失敗（KSN_IO）→ 修復の印。backdrop なら committed で描き直す（:677–688）。</text>
     <text x="34" y="432" font-size="11.5">・VM が frame() を途中で止めて次のターンへ持ち越す（park）間は、candidate を閉じない</text>
     <text x="34" y="450" font-size="11.5">　（end_guest_turn、app_session.c:2188–2191）。</text>
-    <text x="34" y="470" font-size="11.5" fill="var(--planline)">→ その後 1 本にし、投げたら「できた分を出す」扱いに変えた（§10）。</text>
+    <text x="34" y="470" font-size="11.5" fill="var(--planline)">→ 1 本にする案は見送り。2 本のまま（§10）。</text>
   </g>
 </svg>
 </div>
@@ -555,15 +555,12 @@ ol.steps li{margin:4px 0}
 
 <h2 id="plan">10. その後の変更（c4d7a6c の後）</h2>
 <div class="plan">
-<h3>Shiki を線分の並び 1 本にした（2026-11-03 ユーザー決定。host の検査は通過、実機は未測定）</h3>
-<p><b>§6〜§8 の図と行番号は c4d7a6c の動作。</b>その後、次の 3 つが入った。仕様の文書は <a href="shiki-jit.md">shiki-jit.md</a> §22・§23。</p>
+<h3>Shiki の区画の削減は workspace だけにした（2026-11-03 ユーザー決定）</h3>
 <ul>
-<li><b>workspace を無くす</b>（c4d7a6c）。draw は並びの末尾へ直接書き、入りきらなければ本数（<code>count</code>）を進めない。その draw は <code>LIMIT_EXCEEDED</code> になり、フレームは閉じる（これは前と同じ）。</li>
-<li><b>candidate と committed を 1 本にまとめる。</b>面あたりの並びは 1 本。差分の判断には、前に出したフレームの帯の hash・箱・背景色だけを残す（古い線分そのものは持たない）。転送の失敗（KSN_IO）の修復は、今の並びで描き直す。</li>
-<li><b><code>frame()</code> が投げた時、または draw の失敗でフレームが閉じた時は「flush」。</b>通常のターンの終わりに、そこまでに描いた分を commit したものとして出す（<code>pocket_proc_flush_turn</code>）。何も描いていなければ何も出さない。停止・中断では出さない。</li>
-<li><b>park の間の描き直しは、描きかけを出す</b>（案 B）。VM が <code>frame()</code> を途中で止めて持ち越している間に帯を描き直すと、その帯は組み立て中の並びから描かれ、次の <code>commit()</code> で正しい絵に戻る。描き直しを <code>commit()</code> まで待たせる案（案 A、v-sync に近い）は、ちらつきが実機で見えたら入れる。</li>
+<li><b>workspace を無くす</b>（c4d7a6c）。draw は並びの末尾へ直接書き、入りきらなければ本数（<code>count</code>）を進めない。その draw は <code>LIMIT_EXCEEDED</code> になり、フレームは閉じる。§6〜§8 はこの時点の動作。</li>
+<li><b>candidate と committed を 1 本にまとめる案は見送った。</b>一度実装した（b65e830。<code>frame()</code> が投げたら描けた分を出す、park 中の描き直しは描きかけを出す）が、取り消した。面ごとの並びは 2 本のまま、投げたフレームは捨てて前のフレームを出し続ける。経緯は <a href="shiki-jit.md">shiki-jit.md</a> §23。</li>
 </ul>
-<p class="note">効果 <span class="e">計算</span>: DERBY（768 本、image の面あり）の区画の固定の持ち主は、並び 2 本 + workspace = 7,686 × 2 + 10,246 = 25,618 B から、並び 1 本 + 帯のキャッシュ = 7,686 + 3,840 = 11,526 B になる（約 14 KB 減）。</p>
+<p class="note">workspace を無くした効果 <span class="e">計算</span>: image の面を使うアプリ（DERBY・MEGADEMO）で 10,246 − 3,840 = 6,406 B、使わないアプリで 10,246 B。</p>
 </div>
 
 <h2 id="facts">11. 事実・推定・未確認</h2>

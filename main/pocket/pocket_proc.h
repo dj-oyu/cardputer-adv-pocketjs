@@ -41,10 +41,6 @@ typedef struct { uint32_t draws,steps,engine_cy,total_cy; } pocket_shiki_turn;
 void pocket_shiki_turn_take(pocket_shiki_turn *out);
 uint32_t pocket_cycles(void);
 void pocket_proc_end_turn(void);
-/* The end of a normal owner turn (not a stop or suspend): a frame left
- * unfinished (frame() threw, or a draw failed) is committed with what it
- * drew (docs/kasane/shiki-jit.md sec.23), then the turn ends. */
-void pocket_proc_flush_turn(void);
 /* One draw for a native caller (pocket_derby.c): a Shiki handle and its
  * inputs as numbers, with shiki.draw()'s checks and PocketError. Returns
  * JS_UNDEFINED or JS_EXCEPTION. */
