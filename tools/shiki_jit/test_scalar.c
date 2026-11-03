@@ -182,6 +182,15 @@ int main(int argc,char **argv){
         ksn_jit_buf b={buf,0,sizeof buf,false};
         size_t entry=0;
         if(!ksn_shiki_jit_scalar(plan,&b,&entry)){printf("COMPILE FAILED trial %u (n=%u)\n",t,n);fails++;continue;}
+        /* The device sizes first (no buffer), then emits into memory of
+         * exactly that length (sec.14): both passes must agree. */
+        {
+            ksn_jit_buf z={NULL,0,sizeof buf,false};
+            size_t ez=0;
+            if(!ksn_shiki_jit_scalar(plan,&z,&ez)||z.len!=b.len||ez!=entry){
+                printf("SIZING DIFF trial %u: %zu/%zu entry %zu/%zu\n",t,z.len,b.len,ez,entry);fails++;continue;
+            }
+        }
         total_bytes+=b.len;total_inst+=n;
         if(b.len>maxlen)maxlen=(unsigned)b.len;
         /* As ksn_shiki_draw_index: a cleared vm, the inputs copied. */

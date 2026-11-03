@@ -28,6 +28,7 @@ void ksn_jit_emit(ksn_jit_buf *b,unsigned form,int o0,int o1,int o2){
         const ksn_jit_bit *t=&f->bits[k];
         if((((unsigned)o[t->operand]^(unsigned)f->base_op[t->operand])>>t->bit)&1u)w^=1u<<t->at;
     }
+    if(!b->p){b->len+=f->len;return;}           /* a sizing pass */
     for(unsigned k=0;k<f->len;k++)b->p[b->len++]=(uint8_t)(w>>(8*k));
 }
 
@@ -269,6 +270,7 @@ static void emit_l32r(ksn_jit_buf *b,unsigned t,size_t literal){
     const long words=((long)literal-(long)((b->len+3u)&~(size_t)3u))/4;
     if(words< -65536||words>=0){b->overflow=true;return;}
     const uint32_t imm=(uint32_t)words&0xFFFFu;
+    if(!b->p){b->len+=3u;return;}
     b->p[b->len++]=(uint8_t)(0x01u|t<<4);
     b->p[b->len++]=(uint8_t)imm;
     b->p[b->len++]=(uint8_t)(imm>>8);
@@ -410,7 +412,8 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     for(unsigned k=0;k<npool;k++)
         for(unsigned j=0;j<4;j++){
             if(b->len>=b->cap){b->overflow=true;return false;}
-            b->p[b->len++]=(uint8_t)((uint32_t)pool[k]>>(8*j));
+            if(b->p)b->p[b->len]=(uint8_t)((uint32_t)pool[k]>>(8*j));
+            b->len++;
         }
     *entry=b->len;
     ksn_jit_emit(b,KSN_JIT_ENTRY48,0,0,0);
@@ -726,17 +729,21 @@ enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
  * that spares a compile when it would not fit (sec.11: ~22-25 B each). */
 #define JIT_GUESS(n) ((uint32_t)(n)*32u+64u)
 
+/* Compiles straight into its executable memory: a sizing pass (no buffer)
+ * gives the length, the allocation is that long, and the second pass
+ * writes through the allocation's data-bus alias (DIRAM takes byte stores
+ * there). No scratch buffer: MEGADEMO compiles TWIST's negative set at its
+ * tightest heap, where a 4 KB scratch did not fit (sec.14). */
 static int compile_scalar(ksn_shiki_plan *plan){
     if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget)return JIT_BUDGET;
-    uint8_t *tmp=malloc(JIT_SCALAR_SCRATCH);
-    if(!tmp)return JIT_NOMEM;
-    ksn_jit_buf b={tmp,0,JIT_SCALAR_SCRATCH,false};
-    size_t entry=0,bytes=0;
-    if(!ksn_shiki_jit_scalar(plan,&b,&entry)){free(tmp);return JIT_REFUSED;}
-    if(ksn_shiki_jit_bytes+b.len+20u>ksn_shiki_jit_budget){free(tmp);return JIT_BUDGET;}
+    ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false};
+    size_t entry=0;
+    if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
+    const size_t need=b.len;
+    if(ksn_shiki_jit_bytes+need+20u>ksn_shiki_jit_budget)return JIT_BUDGET;
     jit_plan *j=plan->jit;
     const bool fresh=!j;
-    if(fresh&&!(j=calloc(1,sizeof *j))){free(tmp);return JIT_NOMEM;}
+    if(fresh&&!(j=calloc(1,sizeof *j)))return JIT_NOMEM;
     /* CUBIC's weights (sec.13); without them the code still works (the
      * helper computes them), so a refusal here is not a failure. */
     size_t rows=0;
@@ -746,9 +753,24 @@ static int compile_scalar(ksn_shiki_plan *plan){
         ksn_shiki_cubic_weights(plan,j->weights,rows);
         j->wbytes=(uint32_t)(4u*rows);
     }
-    uint8_t *x=to_exec(tmp,b.len,&j->sraw,&bytes);
-    free(tmp);
-    if(!x){free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_NOMEM;}
+    const size_t len=(need+3u)&~(size_t)3u,bytes=len+16u;
+    j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
+    uint8_t *x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
+    if(!x||!esp_ptr_in_diram_iram(x)){
+        /* (Only DIRAM has the byte-writable alias this relies on.) */
+        if(j->sraw)heap_caps_free(j->sraw);
+        j->sraw=NULL;
+        free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_NOMEM;
+    }
+    uint8_t *w=esp_ptr_diram_iram_to_dram(x);
+    memset(w,0,len);
+    ksn_jit_buf e={w,0,need,false};
+    size_t entry2=0;
+    if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
+        heap_caps_free(j->sraw);j->sraw=NULL;
+        free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_REFUSED;
+    }
+    __asm__ volatile("memw\n" "isync\n":::"memory");
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
     ksn_shiki_jit_bytes+=(uint32_t)bytes+j->wbytes;
