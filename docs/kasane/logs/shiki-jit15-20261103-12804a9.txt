@@ -1,0 +1,29 @@
+# Saturation checks: shared checker, rest, final compile (sec.18); device, 2026-11-03
+# SHIKI_TURN ... sat=<to rest>/<checked for good>/<samples>/<rests ended>/<plans compiled final>
+# == DERBY, 12804a9 (job jit23-derby-1) ==
+SHIKI_SAT fnv=d0625195 n=18 rest=2 fast=0 never=0 bits=pp
+SHIKI_SAT fnv=d0625195 n=18 final plain=2 of 2 draw=16
+SHIKI_SAT fnv=c7b5e03f n=60 rest=20 fast=0 never=0 bits=kkmmmmmmop2mmmmllop1
+SHIKI_SAT fnv=c7b5e03f n=60 final plain=20 of 20 draw=16
+SHIKI_SAT fnv=e9818576 n=20 final plain=4 of 4 draw=131
+-- title --
+SHIKI_TURN draws=7.0 steps=399 engine_ms=0.327 total_ms=0.358 frames=30 jit=1/3076 cubic=6.0/0.062 pat=9.0/0.017 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=40/0/3/0/5
+-- race start (WIDE 1) --
+SHIKI_TURN draws=26.0 steps=3006 engine_ms=0.967 total_ms=1.042 frames=30 jit=1/10592 cubic=0.0/0.000 pat=9.0/0.077 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+SHIKI_TURN draws=26.0 steps=2936 engine_ms=0.948 total_ms=1.023 frames=30 jit=1/10592 cubic=0.0/0.000 pat=9.0/0.077 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+-- WIDE --
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.442 total_ms=0.500 frames=30 jit=1/10592 cubic=10.7/0.102 pat=9.0/0.017 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+-- FIELD --
+SHIKI_TURN draws=23.0 steps=1431 engine_ms=0.562 total_ms=0.622 frames=30 jit=1/11448 cubic=18.9/0.183 pat=9.0/0.017 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+-- WIDE 2 --
+SHIKI_TURN draws=47.3 steps=3284 engine_ms=1.172 total_ms=1.285 frames=30 jit=1/11448 cubic=0.0/0.000 pat=36.9/0.101 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+SHIKI_TURN draws=52.6 steps=3609 engine_ms=1.381 total_ms=1.507 frames=30 jit=1/11448 cubic=2.0/0.022 pat=49.8/0.188 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+-- CLOSE --
+SHIKI_TURN draws=20.0 steps=1047 engine_ms=0.459 total_ms=0.517 frames=30 jit=1/11448 cubic=5.7/0.059 pat=9.0/0.017 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=74/0/3/0/9
+# == MEGADEMO, 12804a9 (job jit23-mega-1) ==
+-- NEWS --
+SHIKI_TURN draws=18.0 steps=7783 engine_ms=0.752 total_ms=0.801 frames=30 jit=1/2560 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/7 jitdrop=0/16 jitcc=0/0.000 sat=114/0/6/0/16
+-- TWIST --
+SHIKI_TURN draws=7.0 steps=6574 engine_ms=1.002 total_ms=1.041 frames=30 jit=1/5028 cubic=23.0/0.333 pat=0.0/0.000 jitfail=0/0/7 jitdrop=0/16 jitcc=0/0.000 sat=181/0/6/0/21
+-- ZENITH --
+SHIKI_TURN draws=10.3 steps=6208 engine_ms=0.683 total_ms=0.725 frames=30 jit=1/7716 cubic=1.2/0.032 pat=0.0/0.000 jitfail=0/0/7 jitdrop=0/16 jitcc=1/0.014 sat=296/0/6/0/32
