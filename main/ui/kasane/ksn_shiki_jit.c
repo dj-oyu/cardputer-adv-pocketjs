@@ -1416,9 +1416,13 @@ static int compile_in_region(ksn_shiki_plan *plan){
         return e.overflow?-2:JIT_REFUSED;
     }
     const size_t len=(e.len+3u)&~(size_t)3u;
-    uint8_t *q=shiki_heap_shrink(d,len);
-    /* The region trims in place (shiki-jit.md sec.21); NULL only for a
-     * block it does not know. */
+    /* sec.21: the block sits at the top of its gap; giving back its end
+     * would leave a hole under the code above it. Code without the shared
+     * checker addresses only itself and the context, so it moves up to the
+     * block's end (16-aligned, as it was compiled); call0 to the checker is
+     * absolute, so code that has it keeps its place. NULL only for a block
+     * the region does not know. */
+    uint8_t *q=e.chk_add?shiki_heap_shrink(d,len):shiki_heap_shrink_up(d,len,16);
     if(!q||!in_diram(q,len)){
         if(q)shiki_heap_free(q);
         if(fresh)free(j);

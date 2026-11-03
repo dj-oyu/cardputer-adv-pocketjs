@@ -195,6 +195,21 @@ void *shiki_heap_shrink(void *p,size_t n){
     }
     return p;
 }
+void *shiki_heap_shrink_up(void *p,size_t n,size_t align){
+    if(!shiki_heap_owns(p)||!n)return p;
+    const int i=find(p);
+    if(i<0){HEAP_REFUSED("shrink of",p);return NULL;}
+    blk *b=&blocks[i];
+    const uint32_t words=words_of(n),end=b->at+b->words;
+    if(words>=b->words)return p;
+    const uint32_t at=align_down(end-words,align);
+    if(at==UINT32_MAX||at<=b->at)return shiki_heap_shrink(p,n);
+    memmove(addr(at),addr(b->at),4u*words);
+    memset(addr(b->at),0,4u*(at-b->at));              // the head, given back
+    memset(addr(at+words),0,4u*(end-at-words));       // alignment's slack
+    b->at=(uint16_t)at;b->words=(uint16_t)words;      // still inside its span: order kept
+    return addr(at);
+}
 void *shiki_heap_spare(size_t n,size_t keep){
     if(!shiki_heap_active())return NULL;
     void *p=alloc_high(n,16);

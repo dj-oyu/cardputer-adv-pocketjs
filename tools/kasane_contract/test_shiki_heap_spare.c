@@ -79,7 +79,20 @@ int main(void){
         CHECK(after>=z+100&&after<z+100+16);         /* right after the kept part */
         nz=0;for(unsigned k=0;k<800;k++)nz+=after[k]!=0;
         CHECK(nz==0);
-        shiki_heap_free(after);shiki_heap_free(z);shiki_heap_free(o2);
+        shiki_heap_free(after);shiki_heap_free(z);
+        /* A spare block shrunk upward keeps its end: its first bytes move
+         * up, 16-aligned, the head comes back zero, and no hole is left
+         * under the block above it. */
+        uint8_t *top=shiki_heap_spare(512,0),*sp=shiki_heap_spare(1024,0);
+        CHECK(top&&sp&&sp+1024<=top);
+        for(unsigned k=0;k<100;k++)sp[k]=(uint8_t)(k+1);
+        uint8_t *up=shiki_heap_shrink_up(sp,100,16);
+        CHECK(up>sp&&((uintptr_t)up&15u)==0&&up+112>=sp+1024&&up+100<=sp+1024);
+        for(unsigned k=0;k<100;k++)CHECK(up[k]==(uint8_t)(k+1));
+        nz=0;for(uint8_t *q=sp;q<up;q++)nz+=*q!=0;
+        CHECK(nz==0);
+        shiki_heap_free(up);shiki_heap_free(top);
+        shiki_heap_free(o2);
         uint32_t b2,u2,l2;
         shiki_heap_info(&b2,&u2,&l2);
         CHECK(u2==0&&l2==b2);                          /* nothing left, one piece */
