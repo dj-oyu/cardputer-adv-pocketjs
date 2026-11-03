@@ -78,7 +78,7 @@ static inline __attribute__((always_inline)) int64_t floor_shift(int64_t v,unsig
     if(v>=0)return v>>s;
     return -((-v+(((int64_t)1<<s)-1))>>s);  /* |v| <= 2^62: -v cannot overflow */
 }
-static int32_t sat32(int64_t v){
+static inline __attribute__((always_inline)) int32_t sat32(int64_t v){
     return v>INT32_MAX?INT32_MAX:v<INT32_MIN?INT32_MIN:(int32_t)v;
 }
 /* floor(x / 2^q) for 0 <= q <= 30, without relying on >> of a negative int
@@ -411,12 +411,12 @@ int32_t ksn_shiki_sin(int32_t r){
  * go through floor_shift. */
 /* floor(p / q) for q > 0. C's / truncates toward zero; a negative p with a
  * remainder is one lower. q > 0 rules out INT32_MIN / -1. */
-static int32_t floor_div(int32_t p,int32_t q){
+static inline __attribute__((always_inline)) int32_t floor_div(int32_t p,int32_t q){
     const int32_t d=p/q;
     return p%q<0?d-1:d;
 }
 /* M(v, m) = v - m floor(v / m), 0..m-1, for m > 0. */
-static int32_t floor_mod(int32_t v,int32_t m){
+static inline __attribute__((always_inline)) int32_t floor_mod(int32_t v,int32_t m){
     const int32_t r=v%m;
     return r<0?r+m:r;
 }
@@ -425,12 +425,12 @@ static int32_t floor_mod(int32_t v,int32_t m){
  * floor((p + q/2) / q), which needs one bit less: the d of a chord (p up to
  * 2^30) depends on it. An odd q only comes from lambda's denominator, where
  * 2p + q < 7 * 2^28 + 2^27 < 2^31. Callers keep inside those bounds. */
-static int32_t round_div(int32_t p,int32_t q){
+static inline __attribute__((always_inline)) int32_t round_div(int32_t p,int32_t q){
     if(!(q&1))return floor_div(p+q/2,q);
     return floor_div(2*p+q,2*q);
 }
 /* sec.2.2's MUL with s = 16. */
-static int32_t mul16(int32_t a,int32_t b){
+static inline __attribute__((always_inline)) int32_t mul16(int32_t a,int32_t b){
     return sat32(floor_shift((int64_t)a*b,16));
 }
 
@@ -441,31 +441,59 @@ static int32_t mul16(int32_t a,int32_t b){
  * (docs/perf/int-latency.md). One call per CUBIC / LINE_PATTERN is cheap next
  * to that. */
 
-/* CUBIC: n segments through B(1..n) from P0 = r[dst], r[dst+1]. The status
- * to stop with, or RUNNING; the pen moves only on RUNNING. */
-static __attribute__((noinline)) ksn_shiki_status cubic(ksn_shiki_vm *vm,ksn_proc_segment *out,const ksn_shiki_inst *i){
+/* CUBIC's weights for segment k of n (sec.4.6): they depend on k and n
+ * only, never on the points, so the scalar JIT keeps them in a table per
+ * plan (ksn_shiki_cubic_weights, docs/kasane/shiki-jit.md sec.13).
+ * k 2^16 <= 255 * 2^16: int32, and non-negative, so / is the floor. u, t in
+ * 0..2^16 keep every weight in 0..3 * 2^16 (no saturation). */
+static void cubic_weights(int32_t n,int32_t k,int32_t w[4]){
+    const int32_t t=(k<<16)/n,u=65536-t;
+    const int32_t uu=mul16(u,u),tt=mul16(t,t);
+    w[0]=mul16(uu,u);w[1]=3*mul16(uu,t);w[2]=3*mul16(u,tt);w[3]=mul16(tt,t);
+}
+size_t ksn_shiki_cubic_weights(const ksn_shiki_plan *plan,int32_t *out,size_t max){
+    size_t used=0;
+    for(unsigned pc=0;pc<plan->count;pc++){
+        const ksn_shiki_inst *i=&plan->code[pc];
+        if(i->op!=KSN_SHIKI_CUBIC)continue;
+        if(used+4u*(size_t)i->imm>max)return 0;
+        for(int32_t k=1;k<=i->imm;k++)cubic_weights(i->imm,k,out+used+4u*(size_t)(k-1));
+        used+=4u*(size_t)i->imm;
+    }
+    return used;
+}
+
+/* CUBIC: n segments through B(1..n) from P0 = r[dst], r[dst+1]; wt is the
+ * n rows of weights when the caller has them (else they are computed). The
+ * status to stop with, or RUNNING; the pen moves only on RUNNING. Written as
+ * loops (one copy of mul16 and of the coordinate check) so that it is small
+ * enough for IRAM: unrolled it was 4.3 KB. */
+static __attribute__((noinline)) KSN_JIT_FAST ksn_shiki_status cubic(ksn_shiki_vm *vm,ksn_proc_segment *out,
+                                                                     const ksn_shiki_inst *i,const int32_t *wt){
     const int32_t *p=&vm->reg[i->dst];
-    int16_t px[8];
-    for(unsigned k=0;k<8;k++)if(!coord(p[k],&px[k]))return KSN_SHIKI_INVALID;
+    int16_t x0=0,y0=0;
+    for(unsigned k=0;k<8;k++){
+        int16_t c;
+        if(!coord(p[k],&c))return KSN_SHIKI_INVALID;
+        if(k==0)x0=c;
+        if(k==1)y0=c;
+    }
     const int32_t n=i->imm;
-    int16_t x0=px[0],y0=px[1];
     for(int32_t k=1;k<=n;k++){
-        /* k 2^16 <= 255 * 2^16: int32, and non-negative, so / is the floor.
-         * u, t in 0..2^16 keep every weight in 0..3 * 2^16 (no saturation);
-         * a weight times an int32 coordinate is under 2^50 before the shift. */
-        const int32_t t=(k<<16)/n,u=65536-t;
-        const int32_t uu=mul16(u,u),tt=mul16(t,t);
-        const int32_t w0=mul16(uu,u),w1=3*mul16(uu,t),w2=3*mul16(u,tt),w3=mul16(tt,t);
-        /* The sums are sec.2.2 ADDs from the left, each saturated. */
-        const int32_t bx=sat32((int64_t)sat32((int64_t)sat32((int64_t)mul16(w0,p[0])+mul16(w1,p[2]))
-                                              +mul16(w2,p[4]))+mul16(w3,p[6]));
-        const int32_t by=sat32((int64_t)sat32((int64_t)sat32((int64_t)mul16(w0,p[1])+mul16(w1,p[3]))
-                                              +mul16(w2,p[5]))+mul16(w3,p[7]));
-        int16_t x1,y1;
-        if(!coord(bx,&x1)||!coord(by,&y1))return KSN_SHIKI_INVALID;
-        const ksn_shiki_status s=emit(vm,out,x0,y0,x1,y1,i->aux);
+        int32_t own[4];
+        const int32_t *w=wt?wt+4*(k-1):own;
+        if(!wt)cubic_weights(n,k,own);
+        /* The sums are sec.2.2 ADDs from the left, each saturated: a weight
+         * times an int32 coordinate is under 2^50 before the shift. */
+        int16_t e[2];
+        for(unsigned c=0;c<2;c++){
+            int32_t acc=mul16(w[0],p[c]);
+            for(unsigned j=1;j<4;j++)acc=sat32((int64_t)acc+mul16(w[j],p[2*j+c]));
+            if(!coord(acc,&e[c]))return KSN_SHIKI_INVALID;
+        }
+        const ksn_shiki_status s=emit(vm,out,x0,y0,e[0],e[1],i->aux);
         if(s!=KSN_SHIKI_RUNNING)return s;
-        x0=x1;y0=y1;
+        x0=e[0];y0=e[1];
     }
     vm->pen_x=x0;vm->pen_y=y0;vm->pen_valid=true;
     return KSN_SHIKI_RUNNING;
@@ -549,11 +577,12 @@ static __attribute__((noinline)) KSN_JIT_FAST ksn_shiki_status pattern_line(ksn_
 /* CUBIC, or LINE_PATTERN to (xr, yr) raw: the interpreter's case and the
  * scalar JIT's ksn_shiki_jit_curve, counted in ksn_shiki_curve_n/_cy. */
 static inline __attribute__((always_inline)) ksn_shiki_status curve(ksn_shiki_vm *vm,ksn_proc_segment *out,
-                                                                    const ksn_shiki_inst *i,int32_t xr,int32_t yr){
+                                                                    const ksn_shiki_inst *i,int32_t xr,int32_t yr,
+                                                                    const int32_t *wt){
     const uint32_t t0=CURVE_NOW();
     ksn_shiki_status s=KSN_SHIKI_RUNNING;
     const unsigned k=i->op==KSN_SHIKI_CUBIC?0u:1u;
-    if(!k)s=cubic(vm,out,i);
+    if(!k)s=cubic(vm,out,i,wt);
     else{
         int16_t x,y;
         if(!coord(xr,&x)||!coord(yr,&y))s=KSN_SHIKI_INVALID;
@@ -1079,7 +1108,7 @@ step(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,ksn_shiki_vm *v
             break;
         }
         case KSN_SHIKI_CUBIC: case KSN_SHIKI_LINE_PATTERN: {
-            const ksn_shiki_status s=curve(vm,out,i,r[i->a],r[i->b]);
+            const ksn_shiki_status s=curve(vm,out,i,r[i->a],r[i->b],NULL);
             if(s!=KSN_SHIKI_RUNNING)return s;
             break;
         }
@@ -1116,9 +1145,12 @@ KSN_JIT_FAST uint32_t ksn_shiki_jit_draw(const ksn_jit_run *c,int32_t xr,int32_t
 }
 
 /* CUBIC and LINE_PATTERN for the scalar JIT (sec.12.2): curve() without
- * the dispatch; pattern_line is in IRAM, cubic (4 KB) stays in flash. */
+ * the dispatch, both in IRAM (sec.13). */
 KSN_JIT_FAST uint32_t ksn_shiki_jit_curve(const ksn_jit_run *c,int32_t xr,int32_t yr,uint32_t pc){
-    const ksn_shiki_status s=curve(c->vm,c->out,&c->plan->code[pc],xr,yr);
+    const ksn_shiki_inst *i=&c->plan->code[pc];
+    /* For CUBIC the code passes its row in the weights table as x (-1: none). */
+    const int32_t *wt=i->op==KSN_SHIKI_CUBIC&&xr>=0&&c->weights?c->weights+xr:NULL;
+    const ksn_shiki_status s=curve(c->vm,c->out,i,xr,yr,wt);
     return s==KSN_SHIKI_RUNNING?0u:(uint32_t)s<<8;
 }
 

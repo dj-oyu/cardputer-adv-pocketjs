@@ -391,11 +391,14 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     int32_t pool[KSN_SHIKI_CODE];
     unsigned npool=0;
     uint8_t lit[KSN_SHIKI_CODE];
+    int32_t wrow[KSN_SHIKI_CODE];                    /* CUBIC: its first row in ctx->weights */
+    int32_t rows=0;
     for(unsigned pc=0;pc<n;pc++){
         const ksn_shiki_inst *i=&plan->code[pc];
         int32_t v;
         if(i->op==KSN_SHIKI_SET)v=i->imm;
         else if(i->op==KSN_SHIKI_LINE||i->op==KSN_SHIKI_PLOT)v=i->aux;  /* the colour */
+        else if(i->op==KSN_SHIKI_CUBIC){v=wrow[pc]=rows;rows+=4*i->imm;}  /* ksn_shiki_cubic_weights' order */
         else continue;
         if(v>=-2048&&v<=2047)continue;
         unsigned k=0;
@@ -475,12 +478,14 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
         case KSN_SHIKI_SHIFT: emit_shift(b,i); break;
         case KSN_SHIKI_SIN: emit_sin(b,i); break;
         case KSN_SHIKI_CUBIC: case KSN_SHIKI_LINE_PATTERN: {
-            /* ksn_shiki_jit_curve(ctx, r[a], r[b], pc). */
+            /* ksn_shiki_jit_curve(ctx, r[a], r[b], pc); for CUBIC x is its
+             * first row in the weights table instead. */
             ksn_jit_emit(b,KSN_JIT_MOVN,10,2,0);
             if(i->op==KSN_SHIKI_LINE_PATTERN){
                 ksn_jit_emit(b,KSN_JIT_L32IN,11,3,i->a);
                 ksn_jit_emit(b,KSN_JIT_L32IN,12,3,i->b);
-            }
+            }else if(wrow[pc]<=2047)ksn_jit_emit(b,KSN_JIT_MOVI,11,wrow[pc],0);  /* x: the row (sec.13) */
+            else emit_l32r(b,11,base+4u*lit[pc]);
             ksn_jit_emit(b,KSN_JIT_MOVI,13,(int)pc,0);
             ksn_jit_emit(b,KSN_JIT_L32IN,9,2,6);         /* ctx->curve */
             ksn_jit_emit(b,KSN_JIT_CALLX8,9,0,0);
@@ -607,7 +612,10 @@ typedef struct {
     uint8_t *sraw;                /* stage 3: the plan's scalar code (allocation, entry) */
     uint32_t (*scalar)(ksn_jit_run *);
     uint32_t sbytes;
+    int32_t *weights;             /* sec.13: CUBIC's weights, or NULL */
+    uint32_t wbytes;
 } jit_plan;
+#define JIT_WEIGHTS_MAX 512u     /* int32s: 2 KB, e.g. 8 CUBICs of 16 segments */
 /* Copies len bytes of code into a new executable allocation, as 32-bit
  * words (the instruction bus takes only word stores); *raw is what to free.
  * The code starts 16-aligned (the VEACH loops count on it). */
@@ -648,6 +656,7 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
     if(!j)return;
     if(j->raw)heap_caps_free(j->raw);
     if(j->sraw){heap_caps_free(j->sraw);ksn_shiki_jit_bytes-=j->sbytes;}
+    if(j->weights){free(j->weights);ksn_shiki_jit_bytes-=j->wbytes;}
     free(j);
     plan->jit=NULL;
 }
@@ -673,12 +682,21 @@ static bool compile_scalar(ksn_shiki_plan *plan){
     jit_plan *j=plan->jit;
     const bool fresh=!j;
     if(fresh&&!(j=calloc(1,sizeof *j))){free(tmp);return false;}
+    /* CUBIC's weights (sec.13); without them the code still works (the
+     * helper computes them), so a refusal here is not a failure. */
+    size_t rows=0;
+    for(unsigned pc=0;pc<plan->count;pc++)if(plan->code[pc].op==KSN_SHIKI_CUBIC)rows+=4u*(size_t)plan->code[pc].imm;
+    if(rows&&rows<=JIT_WEIGHTS_MAX&&ksn_shiki_jit_bytes+b.len+20u+4u*rows<=ksn_shiki_jit_budget&&
+       (j->weights=malloc(4u*rows))!=NULL){
+        ksn_shiki_cubic_weights(plan,j->weights,rows);
+        j->wbytes=(uint32_t)(4u*rows);
+    }
     uint8_t *x=to_exec(tmp,b.len,&j->sraw,&bytes);
     free(tmp);
-    if(!x){if(fresh)free(j);return false;}
+    if(!x){free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return false;}
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
-    ksn_shiki_jit_bytes+=(uint32_t)bytes;
+    ksn_shiki_jit_bytes+=(uint32_t)bytes+j->wbytes;
     plan->jit=j;
     return true;
 }
@@ -704,7 +722,8 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
                    (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
                    ksn_shiki_sin_table,
-                   (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,plan,out,index};
+                   (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,j->weights,
+                   plan,out,index};
     return j->scalar(&c);
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}

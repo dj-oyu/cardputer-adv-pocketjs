@@ -163,6 +163,9 @@ int main(int argc,char **argv){
     static uint8_t buf[8192];
     ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);
     static ksn_shiki_vm vi,vj;
+    /* CUBIC's weights (sec.13): odd trials give the code the table, even
+     * ones none (the helper computes them), so both paths are compared. */
+    static int32_t weights[4*KSN_SHIKI_CODE*255];
     unsigned fails=0,by[5]={0},tried=0,bailed=0,maxlen=0;
     unsigned long total_bytes=0,total_inst=0;
     const unsigned trials=argc>1?(unsigned)atoi(argv[1]):20000;
@@ -188,7 +191,9 @@ int main(int argc,char **argv){
         const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
                                (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
                                ksn_shiki_sin_table,
-                               (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,plan,seg_j,index};
+                               (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,
+                               (t&1)&&ksn_shiki_cubic_weights(plan,weights,sizeof weights/4)?weights:NULL,
+                               plan,seg_j,index};
         emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF,A_DRAW,A_SIN,A_CURVE},&vj,inj,buf,b.len,&run,0};
         const uint32_t r=emulate(&e,entry);
         ksn_shiki_status got;

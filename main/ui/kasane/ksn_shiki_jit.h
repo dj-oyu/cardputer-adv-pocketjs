@@ -60,6 +60,7 @@ typedef struct {
     uint32_t (*draw)(const void *,int32_t,int32_t,int32_t,uint32_t); /* 16: ksn_shiki_jit_draw */
     const int32_t *sin;                     /* 20: ksn_shiki_sin_table */
     uint32_t (*curve)(const void *,int32_t,int32_t,uint32_t); /* 24: ksn_shiki_jit_curve */
+    const int32_t *weights;                 /* the plan's CUBIC weights (C only), or NULL */
     const ksn_shiki_plan *plan;
     ksn_proc_segment *out;
     unsigned index;
@@ -80,6 +81,9 @@ uint32_t ksn_shiki_jit_curve(const ksn_jit_run *c,int32_t x,int32_t y,uint32_t p
 /* Calls and cycles of CUBIC [0] and LINE_PATTERN [1] since boot, whichever
  * path ran them (the session's SHIKI_TURN line prints the difference). */
 extern uint32_t ksn_shiki_curve_n[2],ksn_shiki_curve_cy[2];
+/* Every CUBIC's weights in pc order, n rows of 4 each (sec.13): the int32s
+ * written, or 0 when they would pass max. */
+size_t ksn_shiki_cubic_weights(const ksn_shiki_plan *plan,int32_t *out,size_t max);
 /* Compiles plan into b: a literal pool, then the function at *entry
  * (uint32_t f(ksn_jit_run *): the status << 8 when the draw ended, else the
  * pc where the interpreter goes on). False when b is too small. */
