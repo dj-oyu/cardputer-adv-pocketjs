@@ -482,6 +482,182 @@ static void emit_sin(ksn_jit_buf *b,const ksn_shiki_inst *i){
     ksn_jit_emit(b,KSN_JIT_S32IN,14,3,i->dst);
 }
 
+/* ---- sec.20: the register cache ---------------------------------------------
+ * Inside a straight run of inline instructions (SET, INPUT, ADD, SUB, NEG,
+ * MUL, SHIFT) the vm's registers live in a8..a15: a read finds its value
+ * there if it is still held, a result stays there (dirty) until the run
+ * ends, and a result overwritten inside the run is never stored. A run ends
+ * before anything else (a helper, a loop opener or END, BREAK_IF_GT, SIN,
+ * the program's end), where every dirty value is stored: outside a run the
+ * vm in memory is exact, as the interpreter, a helper or a bail at a block
+ * header needs it. Nothing inside a run can fail or bail, and every jump
+ * target is a block start, which follows a run's end. Only without the
+ * shared checker (sec.18: the code compiled after the logs), whose call0
+ * has fixed registers. */
+typedef struct { int8_t v[16]; bool dirty[16]; uint8_t age[16]; uint8_t clock; } jit_rc;
+enum { RC_FREE=-1, RC_TEMP=-2 };
+static void rc_reset(jit_rc *r){for(unsigned p=0;p<16;p++){r->v[p]=RC_FREE;r->dirty[p]=false;}}
+static void rc_flush(ksn_jit_buf *b,jit_rc *r){
+    for(unsigned p=8;p<16;p++)if(r->v[p]>=0&&r->dirty[p])ksn_jit_emit(b,KSN_JIT_S32IN,(int)p,3,r->v[p]);
+    rc_reset(r);
+}
+static void rc_touch(jit_rc *r,unsigned p){r->age[p]=++r->clock;}
+/* A register of a8..a15 not in avoid: a free one, else the least recently
+ * used value (stored first if dirty). */
+static unsigned rc_alloc(ksn_jit_buf *b,jit_rc *r,unsigned avoid){
+    int best=-1;
+    for(unsigned p=8;p<16;p++)if(!(avoid>>p&1u)&&r->v[p]==RC_FREE){best=(int)p;break;}
+    if(best<0)
+        for(unsigned p=8;p<16;p++)
+            if(!(avoid>>p&1u)&&r->v[p]>=0&&(best<0||(uint8_t)(r->age[p]-r->age[best])>0x80u))best=(int)p;
+    if(best<0){b->overflow=true;return 8;}           /* cannot happen: at most 6 in use */
+    if(r->v[best]>=0&&r->dirty[best])ksn_jit_emit(b,KSN_JIT_S32IN,best,3,r->v[best]);
+    r->v[best]=RC_FREE;r->dirty[best]=false;
+    rc_touch(r,(unsigned)best);
+    return (unsigned)best;
+}
+static unsigned rc_temp(ksn_jit_buf *b,jit_rc *r,unsigned avoid){
+    const unsigned p=rc_alloc(b,r,avoid);
+    r->v[p]=RC_TEMP;
+    return p;
+}
+static void rc_release(jit_rc *r,unsigned p){if(r->v[p]==RC_TEMP)r->v[p]=RC_FREE;}
+/* The register holding r[v], loaded if no register does. */
+static unsigned rc_src(ksn_jit_buf *b,jit_rc *r,unsigned v,unsigned avoid){
+    for(unsigned p=8;p<16;p++)if(r->v[p]==(int8_t)v){rc_touch(r,p);return p;}
+    const unsigned p=rc_alloc(b,r,avoid);
+    ksn_jit_emit(b,KSN_JIT_L32IN,(int)p,3,(int)v);
+    r->v[p]=(int8_t)v;r->dirty[p]=false;
+    return p;
+}
+/* p now holds r[v]'s new value: any older copy is dead (never stored). */
+static void rc_def(jit_rc *r,unsigned p,unsigned v){
+    for(unsigned q=8;q<16;q++)if(q!=p&&r->v[q]==(int8_t)v){r->v[q]=RC_FREE;r->dirty[q]=false;}
+    r->v[p]=(int8_t)v;r->dirty[p]=true;
+    rc_touch(r,p);
+}
+#define RB(p) (1u<<(p))
+/* d = INT32_MAX or MIN by sign_of's sign unless hi_ok == lo_sign. */
+static void rc_fix(ksn_jit_buf *b,unsigned hi_ok,unsigned lo_sign,unsigned sign_of,unsigned d){
+    const size_t br=b->len;
+    ksn_jit_emit(b,KSN_JIT_BEQ,(int)hi_ok,(int)lo_sign,0);
+    ksn_jit_emit(b,KSN_JIT_SRAI,(int)d,(int)sign_of,31);
+    ksn_jit_emit(b,KSN_JIT_XOR,(int)d,(int)d,6);
+    patch(b,br,KSN_JIT_BEQ,(int)hi_ok,(int)lo_sign,(int)(b->len-br-4u));
+}
+static bool rc_takes(uint8_t op){
+    return op==KSN_SHIKI_SET||op==KSN_SHIKI_INPUT||op==KSN_SHIKI_ADD||op==KSN_SHIKI_SUB||
+           op==KSN_SHIKI_NEG||op==KSN_SHIKI_MUL||op==KSN_SHIKI_SHIFT;
+}
+/* One inline instruction through the cache; false when op is not one. */
+static bool rc_inline(ksn_jit_buf *b,jit_rc *r,const ksn_shiki_inst *i,unsigned site,size_t literal){
+    switch(i->op){
+    case KSN_SHIKI_SET: {
+        const unsigned d=rc_alloc(b,r,0);
+        if(i->imm>=-2048&&i->imm<=2047)ksn_jit_emit(b,KSN_JIT_MOVI,(int)d,i->imm,0);
+        else emit_l32r(b,d,literal);
+        rc_def(r,d,i->dst);
+        return true;
+    }
+    case KSN_SHIKI_INPUT: {
+        const unsigned d=rc_alloc(b,r,0);
+        ksn_jit_emit(b,KSN_JIT_L32IN,(int)d,5,i->a);
+        rc_def(r,d,i->dst);
+        return true;
+    }
+    case KSN_SHIKI_ADD: case KSN_SHIKI_SUB: {
+        const bool sub=i->op==KSN_SHIKI_SUB;
+        const unsigned pa=rc_src(b,r,i->a,0),pb=rc_src(b,r,i->b,RB(pa));
+        const unsigned d=rc_alloc(b,r,RB(pa)|RB(pb));
+        if(sub)ksn_jit_emit(b,KSN_JIT_SUB,(int)d,(int)pa,(int)pb);
+        else ksn_jit_emit(b,KSN_JIT_ADDN,(int)d,(int)pa,(int)pb);
+        if(!(site<64u&&(b->plain>>site&1u))){
+            /* The inline check (sec.18: a site the logs did not clear). */
+            r->v[d]=RC_TEMP;
+            const unsigned t1=rc_temp(b,r,RB(pa)|RB(pb)|RB(d)),t2=rc_temp(b,r,RB(pa)|RB(pb)|RB(d)|RB(t1));
+            if(sub){
+                ksn_jit_emit(b,KSN_JIT_XOR,(int)t1,(int)pa,(int)pb);
+                ksn_jit_emit(b,KSN_JIT_XOR,(int)t2,(int)pa,(int)d);
+            }else{
+                ksn_jit_emit(b,KSN_JIT_XOR,(int)t1,(int)pa,(int)d);
+                ksn_jit_emit(b,KSN_JIT_XOR,(int)t2,(int)pb,(int)d);
+            }
+            ksn_jit_emit(b,KSN_JIT_AND,(int)t1,(int)t1,(int)t2);
+            const size_t br=b->len;
+            ksn_jit_emit(b,KSN_JIT_BGEZ,(int)t1,0,0);
+            ksn_jit_emit(b,KSN_JIT_SRAI,(int)d,(int)pa,31);
+            ksn_jit_emit(b,KSN_JIT_XOR,(int)d,(int)d,6);
+            patch(b,br,KSN_JIT_BGEZ,(int)t1,(int)(b->len-br-4u),0);
+            rc_release(r,t1);rc_release(r,t2);
+        }
+        rc_def(r,d,i->dst);
+        return true;
+    }
+    case KSN_SHIKI_NEG: {
+        const unsigned pa=rc_src(b,r,i->a,0),d=rc_alloc(b,r,RB(pa));
+        r->v[d]=RC_TEMP;
+        const unsigned t=rc_temp(b,r,RB(pa)|RB(d));
+        ksn_jit_emit(b,KSN_JIT_NEG,(int)d,(int)pa,0);
+        ksn_jit_emit(b,KSN_JIT_AND,(int)t,(int)pa,(int)d);
+        const size_t br=b->len;
+        ksn_jit_emit(b,KSN_JIT_BGEZ,(int)t,0,0);
+        ksn_jit_emit(b,KSN_JIT_MOVN,(int)d,6,0);
+        patch(b,br,KSN_JIT_BGEZ,(int)t,(int)(b->len-br-4u),0);
+        rc_release(r,t);
+        rc_def(r,d,i->dst);
+        return true;
+    }
+    case KSN_SHIKI_MUL: {
+        const unsigned s=i->aux;
+        const unsigned pa=rc_src(b,r,i->a,0),pb=rc_src(b,r,i->b,RB(pa));
+        const unsigned d=rc_alloc(b,r,RB(pa)|RB(pb));
+        r->v[d]=RC_TEMP;
+        const unsigned h=rc_temp(b,r,RB(pa)|RB(pb)|RB(d));
+        ksn_jit_emit(b,KSN_JIT_MULL,(int)d,(int)pa,(int)pb);
+        ksn_jit_emit(b,KSN_JIT_MULSH,(int)h,(int)pa,(int)pb);
+        const unsigned busy=RB(pa)|RB(pb)|RB(d)|RB(h);
+        if(s==0){
+            const unsigned t=rc_temp(b,r,busy);
+            ksn_jit_emit(b,KSN_JIT_SRAI,(int)t,(int)d,31);
+            rc_fix(b,h,t,h,d);
+            rc_release(r,t);
+        }else if(s<32){
+            const unsigned t1=rc_temp(b,r,busy),t2=rc_temp(b,r,busy|RB(t1));
+            ksn_jit_emit(b,KSN_JIT_SSAI,(int)s,0,0);
+            ksn_jit_emit(b,KSN_JIT_SRC,(int)d,(int)h,(int)d);
+            ksn_jit_emit(b,KSN_JIT_SRAI,(int)t1,(int)h,(int)s);
+            ksn_jit_emit(b,KSN_JIT_SRAI,(int)t2,(int)d,31);
+            rc_fix(b,t1,t2,h,d);
+            rc_release(r,t1);rc_release(r,t2);
+        }else ksn_jit_emit(b,KSN_JIT_SRAI,(int)d,(int)h,(int)(s-32u));
+        rc_release(r,h);
+        rc_def(r,d,i->dst);
+        return true;
+    }
+    case KSN_SHIKI_SHIFT: {
+        const int t=i->imm;
+        const unsigned pa=rc_src(b,r,i->a,0),d=rc_alloc(b,r,RB(pa));
+        if(t==0)ksn_jit_emit(b,KSN_JIT_MOVN,(int)d,(int)pa,0);
+        else if(t<0)ksn_jit_emit(b,KSN_JIT_SRAI,(int)d,(int)pa,-t);
+        else{
+            r->v[d]=RC_TEMP;
+            const unsigned busy=RB(pa)|RB(d);
+            const unsigned sg=rc_temp(b,r,busy),hi=rc_temp(b,r,busy|RB(sg)),lo=rc_temp(b,r,busy|RB(sg)|RB(hi));
+            ksn_jit_emit(b,KSN_JIT_SSAI,32-t,0,0);
+            ksn_jit_emit(b,KSN_JIT_SLL,(int)d,(int)pa,0);
+            ksn_jit_emit(b,KSN_JIT_SRAI,(int)sg,(int)pa,31);
+            ksn_jit_emit(b,KSN_JIT_SRC,(int)hi,(int)sg,(int)pa);
+            ksn_jit_emit(b,KSN_JIT_SRAI,(int)lo,(int)d,31);
+            rc_fix(b,hi,lo,sg,d);
+            rc_release(r,sg);rc_release(r,hi);rc_release(r,lo);
+        }
+        rc_def(r,d,i->dst);
+        return true;
+    }
+    default: return false;
+    }
+}
+
 #define JIT_FIXUPS (2u*KSN_SHIKI_CODE)
 bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entry){
     const unsigned n=plan->count;
@@ -556,8 +732,13 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
         else{b->overflow=true;} \
         ksn_jit_emit(b,KSN_JIT_J,0,0,0); \
     }while(0)
+    jit_rc rc;
+    rc_reset(&rc);
+    const bool cache=!b->chk_add;                    /* sec.20 */
     for(unsigned pc=0;pc<n;pc++){
         const ksn_shiki_inst *i=&plan->code[pc];
+        const bool cached=cache&&rc_takes(i->op);
+        if(!cached)rc_flush(b,&rc);                  /* the run ends (sec.20) */
         at[pc]=b->len;
         if(block&&pc>0&&hoist[pc-1u]&&depth&&stack[depth-1u]==pc-1u){
             /* The hoisted loop's entry (its opener pushed the frame). */
@@ -589,6 +770,13 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
             patch(b,br,KSN_JIT_BGE,4,8,(int)(b->len-br-4u));
             ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(offsetof(ksn_shiki_vm,steps)/2));
             block=false;
+        }
+        if(cached){
+            const bool add=i->op==KSN_SHIKI_ADD||i->op==KSN_SHIKI_SUB;
+            rc_inline(b,&rc,i,add?site:0u,base+4u*lit[pc]);
+            if(add)site++;
+            if(b->overflow)return false;
+            continue;
         }
         switch(i->op){
         case KSN_SHIKI_SET:
@@ -742,6 +930,7 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     }
 #undef JUMP
     if(depth)return false;
+    rc_flush(b,&rc);
     at[n]=b->len;                                    /* the program's end: DONE */
     ksn_jit_emit(b,KSN_JIT_MOVI,2,(int)KSN_SHIKI_DONE<<8,0);
     ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
