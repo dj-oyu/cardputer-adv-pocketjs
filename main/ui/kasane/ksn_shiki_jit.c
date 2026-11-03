@@ -663,6 +663,92 @@ uint32_t ksn_shiki_jit_fail[3];
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
+/* Measurement build (shiki-jit.md sec.15): where executable memory goes.
+ * Removed (the define) after the measurement. */
+#define POCKET_SHIKI_JIT_EXECMAP 1
+#ifdef POCKET_SHIKI_JIT_EXECMAP
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "shiki_heap.h"
+/* Where the JIT's allocations landed: [0] DIRAM, [1] elsewhere. */
+static uint32_t execmap_where[2];
+typedef struct {
+    intptr_t start,end;
+    uint32_t free,largest,nfree,used,nused;
+    void *top[4];
+    uint32_t topn[4];
+    bool exec;
+} execmap_heap;
+typedef struct { execmap_heap h[12]; unsigned n; bool mark; } execmap_t;
+static execmap_heap *execmap_find(execmap_t *m,intptr_t start,intptr_t end){
+    for(unsigned k=0;k<m->n;k++)if(m->h[k].start==start)return &m->h[k];
+    if(m->n==sizeof m->h/sizeof m->h[0])return NULL;
+    execmap_heap *h=&m->h[m->n++];
+    memset(h,0,sizeof *h);
+    h->start=start;h->end=end;
+    return h;
+}
+/* heap_caps_walk holds the heap lock while it calls this: count only. */
+static bool execmap_walk(walker_heap_into_t heap,walker_block_info_t block,void *ud){
+    execmap_t *m=ud;
+    execmap_heap *h=execmap_find(m,heap.start,heap.end);
+    if(!h)return true;
+    if(m->mark){h->exec=true;return true;}
+    const uint32_t n=(uint32_t)block.size;
+    if(block.used){
+        h->used+=n;h->nused++;
+        for(unsigned k=0;k<4;k++)if(n>h->topn[k]){
+            for(unsigned q=3;q>k;q--){h->topn[q]=h->topn[q-1];h->top[q]=h->top[q-1];}
+            h->topn[k]=n;h->top[k]=block.ptr;break;
+        }
+    }else{
+        h->free+=n;h->nfree++;
+        if(n>h->largest)h->largest=n;
+    }
+    return true;
+}
+static const char *execmap_kind(intptr_t a){
+    if(a>=0x3FC88000&&a<0x3FCF0000)return "diram";
+    if(a>=0x3FCF0000&&a<0x3FD00000)return "dram";
+    if(a>=0x40370000&&a<0x403E0000)return "iram";
+    if(a>=0x600FE000&&a<0x60100000)return "rtc";
+    return "other";
+}
+static void execmap_report(const char *why){
+    static int64_t last;
+    const int64_t now=esp_timer_get_time();
+    if(last&&now-last<3000000)return;
+    last=now;
+    static execmap_t m;                 /* 600 B: not on the UI task's stack */
+    memset(&m,0,sizeof m);
+    m.mark=true;heap_caps_walk(MALLOC_CAP_EXEC,execmap_walk,&m);
+    m.mark=false;heap_caps_walk_all(execmap_walk,&m);
+    const void *sr;size_t sn;
+    shiki_heap_region(&sr,&sn);
+    ESP_LOGI("jit","EXECMAP why=%s exec_free=%u exec_largest=%u int_free=%u int_largest=%u shiki=%p/%u jit=%u got=%u/%u fail=%u/%u/%u",
+             why,(unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             sr,(unsigned)sn,(unsigned)ksn_shiki_jit_bytes,
+             (unsigned)execmap_where[0],(unsigned)execmap_where[1],
+             (unsigned)ksn_shiki_jit_fail[0],(unsigned)ksn_shiki_jit_fail[1],(unsigned)ksn_shiki_jit_fail[2]);
+    for(unsigned k=0;k<m.n;k++){
+        const execmap_heap *h=&m.h[k];
+        ESP_LOGI("jit","EXECMAP heap=%p-%p %s exec=%d size=%u free=%u/%u largest=%u used=%u/%u top=%p/%u,%p/%u,%p/%u,%p/%u",
+                 (void *)h->start,(void *)h->end,execmap_kind(h->start),h->exec?1:0,
+                 (unsigned)(h->end-h->start),(unsigned)h->free,(unsigned)h->nfree,(unsigned)h->largest,
+                 (unsigned)h->used,(unsigned)h->nused,
+                 h->top[0],(unsigned)h->topn[0],h->top[1],(unsigned)h->topn[1],
+                 h->top[2],(unsigned)h->topn[2],h->top[3],(unsigned)h->topn[3]);
+    }
+}
+#define EXECMAP_REPORT(why) execmap_report(why)
+#define EXECMAP_GOT(x) (execmap_where[esp_ptr_in_diram_iram(x)?0:1]++)
+#else
+#define EXECMAP_REPORT(why) ((void)0)
+#define EXECMAP_GOT(x) ((void)0)
+#endif
 typedef struct {
     uint8_t *raw,*exec;           /* the allocation, and the code in it (16-aligned) */
     unsigned n;
@@ -780,6 +866,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     /* DIRAM: write bytes through the data alias. Otherwise (when the heap
      * is tight the allocation can come from IRAM-only memory, which takes
      * 32-bit accesses only) write the words in place. */
+    EXECMAP_GOT(x);
     const bool diram=esp_ptr_in_diram_iram(x);
     uint8_t *w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
     for(size_t k=0;k<len/4;k++)((volatile uint32_t *)(void *)w)[k]=0;
@@ -813,9 +900,14 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
         /* heat: draws so far; INT8_MIN never again; negative: waiting
          * to retry after a full budget or heap. */
         if(p->heat==INT8_MIN||++p->heat<(int8_t)JIT_HEAT)return 0;
+#ifdef POCKET_SHIKI_JIT_EXECMAP
+        static bool first=true;
+        if(first){first=false;EXECMAP_REPORT("first");}
+#endif
         const int r=compile_scalar(p);
         if(r!=JIT_DONE){
             ksn_shiki_jit_fail[r]++;
+            if(r==JIT_NOMEM)EXECMAP_REPORT("nomem");
             p->heat=r==JIT_REFUSED?INT8_MIN:(int8_t)((int)JIT_HEAT-JIT_RETRY);
             return 0;
         }

@@ -34,6 +34,8 @@ bool shiki_heap_owns(const void *p);
 /* shiki.heap(): the region's size, what is allocated, the largest free
  * block. Zeros without a region. */
 void shiki_heap_info(uint32_t *bytes,uint32_t *used,uint32_t *largest);
+/* The region itself (NULL, 0 without one): for memory diagnostics. */
+void shiki_heap_region(const void **p,size_t *bytes);
 
 /* The allocators for code that serves both kinds of session: the region when
  * one is open, the system heap otherwise; free goes wherever the block came

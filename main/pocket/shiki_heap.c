@@ -112,6 +112,7 @@ void shiki_heap_end(void){
     else closing=true;
 }
 bool shiki_heap_active(void){return region&&!closing;}
+void shiki_heap_region(const void **p,size_t *bytes){*p=region;*bytes=region?region_bytes:0;}
 bool shiki_heap_owns(const void *p){
     return region&&(const uint8_t *)p>=(const uint8_t *)region&&
            (const uint8_t *)p<(const uint8_t *)region+region_bytes;
