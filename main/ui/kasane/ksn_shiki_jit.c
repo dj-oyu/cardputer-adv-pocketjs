@@ -931,8 +931,12 @@ typedef struct {
      * the slot), checked for good (call0 to the fast entry) or still
      * logging (never ran yet). draws: draws since the code was compiled;
      * due: the draw a resting or logging site is next looked at. sites:
-     * each site's call0 offset (sec.18.3), subs: which are SUB. */
+     * each site's call0 offset (sec.18.3), then (saved) each site's state
+     * as it was when the code was last dropped (sat_save), which a later
+     * compile takes up instead of logging again (sec.18.4). subs: which
+     * sites are SUB. */
     uint8_t sat,nsites;
+    bool saved;
     uint32_t draws,due;
     int32_t alias;                /* the code's data-bus address minus its instruction-bus one */
     uint8_t *sdata;               /* the code's start on the data bus */
@@ -989,6 +993,8 @@ static void unlist(jit_plan *j){
 }
 /* Gives back the plan's scalar code and weights (the interpreter runs it
  * until it is compiled again). */
+static void sat_save(jit_plan *j);
+static void sat_restore(const ksn_shiki_plan *plan,jit_plan *j);
 static void drop_scalar(jit_plan *j){
     if(j->sraw){
         if(j->sregion)shiki_heap_free(j->sraw);else heap_caps_free(j->sraw);
@@ -1000,7 +1006,9 @@ static void drop_scalar(jit_plan *j){
     }
     j->sraw=NULL;j->scalar=NULL;j->sbytes=0;j->weights=NULL;j->wbytes=0;
     j->sregion=j->wregion=false;
-    free(j->sites);j->sites=NULL;j->nsites=0;j->sat=JIT_SAT_NONE;
+    /* sec.18.4: what the sites learnt outlives the code. */
+    if(j->sat==JIT_SAT_LIVE&&j->sites&&j->sraw)sat_save(j);
+    j->sat=JIT_SAT_NONE;
     unlist(j);
 }
 void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
@@ -1008,6 +1016,7 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
     if(!j)return;
     if(j->raw)heap_caps_free(j->raw);
     drop_scalar(j);
+    free(j->sites);
     free(j);
     plan->jit=NULL;
 }
@@ -1112,7 +1121,11 @@ static int compiled(ksn_shiki_plan *plan,jit_plan *j,uint8_t *x,size_t entry,siz
     j->sdata=data;
     j->alias=(int32_t)((intptr_t)data-(intptr_t)x);
     j->draws=0;
-    j->sat=checker&&count_sites(plan)?JIT_SAT_LOG:JIT_SAT_NONE;
+    j->sat=JIT_SAT_NONE;
+    if(checker&&count_sites(plan)){
+        j->sat=JIT_SAT_LOG;
+        if(j->saved)sat_restore(plan,j);
+    }
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
     ksn_shiki_jit_bytes+=(uint32_t)bytes;
@@ -1336,7 +1349,9 @@ static void sat_first(const ksn_shiki_plan *plan,jit_plan *j){
         if(op==KSN_SHIKI_SUB)j->subs|=1ull<<n;
         n+=op==KSN_SHIKI_ADD||op==KSN_SHIKI_SUB;
     }
-    j->sites=malloc(b.nsites*sizeof *j->sites);
+    free(j->sites);
+    j->saved=false;
+    j->sites=malloc(2u*b.nsites*sizeof *j->sites);     /* offsets, then saved states */
     j->nsites=(uint8_t)b.nsites;
     if(!j->sites){
         /* No room for the offsets: every site keeps its check, without the log. */
@@ -1413,6 +1428,47 @@ static void sat_sample_end(const ksn_shiki_plan *plan,jit_plan *j,const uint32_t
     }
     __asm__ volatile("memw\n" "isync\n":::"memory");
     sat_due(j);
+}
+/* sec.18.4: each site's state when its code is dropped, 16 bits: [15:14]
+ * 1 resting, 2 checked for good, 0 still logging; [13:9] the most bits seen;
+ * [8:0] the rest length / 2. */
+static void sat_save(jit_plan *j){
+    uint16_t *st=j->sites+j->nsites;
+    for(unsigned k=0;k<j->nsites;k++){
+        const unsigned kind=sat_kind(j,k);
+        const uint32_t w=*sat_slot(j,k);
+        st[k]=kind==0?(uint16_t)(1u<<14|(w>>16&31u)<<9|(w>>22&511u)):kind==1?(uint16_t)(2u<<14):0u;
+    }
+    j->saved=true;
+}
+/* A new compile of a plan with saved states (the same layout: the shared
+ * checker, the sites where they were, each a call0 to the logging entry)
+ * takes them up: resting sites rest again from their saved length, sites
+ * checked for good go to the fast entry. Anything else logs afresh. */
+static void sat_restore(const ksn_shiki_plan *plan,jit_plan *j){
+    j->saved=false;
+    if(!j->sites)return;
+    for(unsigned k=0;k<j->nsites;k++)if(sat_kind(j,k)!=2)return;   /* not the layout saved */
+    const uint16_t *st=j->sites+j->nsites;
+    unsigned rest=0,fast=0,logs=0;
+    for(unsigned k=0;k<j->nsites;k++){
+        const unsigned kind=st[k]>>14,env=st[k]>>9&31u;
+        unsigned len=(st[k]&511u)*2u;
+        if(len<SAT_REST_MIN)len=SAT_REST_MIN;
+        if(kind==1){sat_apply(j,k,sat_pack(j->draws+len,env,len));rest++;}
+        else if(kind==2){
+            sat_patch(j,j->sites[k],j->subs>>k&1u?ksn_jit_chk_sub_fast:ksn_jit_chk_add_fast);
+            fast++;
+        }else logs++;
+    }
+    __asm__ volatile("memw\n" "isync\n":::"memory");
+    j->sat=JIT_SAT_LIVE;
+    sat_due(j);
+    uint32_t fnv=2166136261u;
+    const uint8_t *q=(const uint8_t *)plan->code;
+    for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)fnv=(fnv^q[k])*16777619u;
+    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u taken up rest=%u fast=%u log=%u",(unsigned)fnv,
+             (unsigned)plan->count,rest,fast,logs);
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
