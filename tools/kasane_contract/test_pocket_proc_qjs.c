@@ -398,34 +398,39 @@ int main(void){
     REQUIRE(multi_bytes==64*48*2&&multi_panel[10*240+100]==0xf800);
     pocket_proc_overlay_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
-    /* A Shiki draw writes its segments into the shared workspace, which is
-     * also the image's raster band cache, even if the caller abandons the
-     * candidate. Re-reading the same cached row must still use the committed
-     * frame, on either surface. Exercise both phase orders. */
+    /* One list a surface (shiki-jit.md sec.23): while a frame is built, a
+     * read of that surface shows the list as it is (beginFrame started it
+     * over); the other surface is untouched. The image band cache must not
+     * serve a stale row on either. Both phase orders. */
     for(unsigned target=0;target<2;target++){
         REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
         eval_ok(ctx,target?"S.beginFrame(0,layerId);S.draw(dotPlan,42,10)":
                            "S.beginFrame(0);S.draw(dotPlan,42,10)");
-        REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+        REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&
+                span[0]==(target?0xf800:0));
+        REQUIRE(first.read_span(first.ctx,0,0,10,42,1,span,alpha)==KSN_OK&&
+                span[0]==(target?0:0xf800));
+        REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&
+                span[0]==(target?0:0xf800));
         REQUIRE(first.read_span(first.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
         for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
         pocket_proc_end_turn();
-        REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
-        eval_ok(ctx,target?"S.beginFrame(0,layerId);S.draw(dotPlan,43,10)":
-                           "S.beginFrame(0);S.draw(dotPlan,43,10)");
-        REQUIRE(first.read_span(first.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
-        for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
-        pocket_proc_end_turn();
-        REQUIRE(second.read_span(second.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
-        for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
+        /* Shown again as it was, for the next round and what follows. */
+        eval_ok(ctx,target?"S.beginFrame(0,layerId);S.draw(dotPlan,20,10);S.commit()":
+                           "S.beginFrame(0);S.draw(dotPlan,10,10);S.commit()");
+        multi_bytes=0;
+        REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
+        pocket_proc_overlay_present_result(KSN_OK);
+        REQUIRE(!pocket_proc_pending());
         REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
     }
     REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
-    /* One past the coordinate range (720) fails and leaves the committed
-     * frame alone. */
+    /* One past the coordinate range (720) fails; the list beginFrame()
+     * started over stays empty (the failed draw adds nothing). */
     eval_ok(ctx,"S.beginFrame(0)");
     eval_error(ctx,"S.draw(dotPlan,721,10)");
-    REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+    REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0);
+    pocket_proc_end_turn();
     eval_ok(ctx,"S.beginFrame(0);S.draw(dotPlan,11,10);S.commit()");
     REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
     multi_bytes=0;

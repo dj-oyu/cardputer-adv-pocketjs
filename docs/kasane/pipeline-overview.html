@@ -82,7 +82,7 @@ ol.steps li{margin:4px 0}
 <a href="#copies">7. DERBY の 1 画素が通る道</a><br>
 <a href="#mem">8. Shiki の区画のメモリ（DERBY）</a><br>
 <a href="#jit">9. JIT の位置</a><br>
-<a href="#plan">10. 予定の変更（作業中）</a><br>
+<a href="#plan">10. その後の変更（c4d7a6c の後）</a><br>
 <a href="#facts">11. 事実・推定・未確認</a>
 </nav>
 
@@ -94,7 +94,7 @@ ol.steps li{margin:4px 0}
 </div>
 <div class="card">
 <h3>Shiki の「複数の並び」は、画素ではなく記録</h3>
-<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_proc.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つを 1 本にする作業は <a href="#plan">§10</a>。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
+<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_proc.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つは、その後 1 本にした（<a href="#plan">§10</a>）。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
 </div>
 </div>
 
@@ -455,7 +455,7 @@ ol.steps li{margin:4px 0}
     <text x="34" y="410" font-size="11.5">　転送に失敗（KSN_IO）→ 修復の印。backdrop なら committed で描き直す（:677–688）。</text>
     <text x="34" y="432" font-size="11.5">・VM が frame() を途中で止めて次のターンへ持ち越す（park）間は、candidate を閉じない</text>
     <text x="34" y="450" font-size="11.5">　（end_guest_turn、app_session.c:2188–2191）。</text>
-    <text x="34" y="470" font-size="11.5" fill="var(--planline)">→ 2 つを 1 本にし、投げたら「できた分を出す」扱いに変える予定（§10）。</text>
+    <text x="34" y="470" font-size="11.5" fill="var(--planline)">→ その後 1 本にし、投げたら「できた分を出す」扱いに変えた（§10）。</text>
   </g>
 </svg>
 </div>
@@ -546,23 +546,24 @@ ol.steps li{margin:4px 0}
 <tr><td>区画の使用／最大の空き（56 KiB・TLSF 時）</td><td class="num">50,164 / 3,328</td><td>fb30211（shiki-jit.md §19.3・§21.2）</td><td><span class="m">実測</span> <span class="u">今の管理では未確認</span></td></tr>
 <tr><td>56 KiB にした代わりの、起動後のシステムの空き</td><td class="num">45,576 → 37,308</td><td>shiki-jit.md §21.3</td><td><span class="m">実測</span></td></tr>
 </table>
-<p class="note">workspace の廃止で DERBY の区画から空くのは 10,248 − 3,840 = <b>6,408 B</b> <span class="e">計算</span>。DERBY は <code>resource()</code> で面 0 を image にしている（<code>derby_view.js:9</code>、<code>derby_scene.js:29</code>）ので、帯のキャッシュは取られる。shiki-jit.md §22 の「DERBY の区画で 10,246 B」「画像の面を使わないアプリ（DERBY の背景）は取らない」は、この点でコードと合わない。</p>
+<p class="note">workspace の廃止で DERBY の区画から空くのは 10,248 − 3,840 = <b>6,408 B</b> <span class="e">計算</span>。DERBY は <code>resource()</code> で面 0 を image にしている（<code>derby_view.js:9</code>、<code>derby_scene.js:29</code>）ので、帯のキャッシュは取られる。（shiki-jit.md §22 は、この点を直した。）</p>
 <p class="note"><a href="shiki.md">shiki.md</a> §4.5.1（2026-10-31 実測）の DERBY の行の「フレーム 2 枚 + 作業用 各 10,752」は、768 本にする前（<code>b30dc1d</code>、2026-11-02 より前）で、TLSF のブロックの大きさ。<a href="shiki-jit-overview.html">shiki-jit-overview.html</a> §4 の図も 10,752 × 3 で描かれており、今の DERBY とは合わない。</p>
 </div>
 
 <h2 id="jit">9. JIT の位置</h2>
 <p>JIT は <b>⑤ の draw の中</b>だけに関わる。よく描かれる式（4 回目から）を Xtensa / PIE の機械語にして、インタプリタの代わりに走らせる（<code>ksn_shiki.c</code> の <code>ksn_shiki_jit_run</code> 呼び出し）。出力は同じ線分で、行き先も同じ candidate の末尾（線分は C の helper が出すので、<code>cap</code> の検査も同じものを通る。shiki-jit.md §22）。帯の合成・転送は何も変わらない。コードの置き場所は上の区画の上側の空きで、持ち主の確保が足りなくなれば返す。詳しくは <a href="shiki-jit-overview.html">Shiki JIT とメモリ配置（図解）</a> と <a href="shiki-jit.md">shiki-jit.md</a>。</p>
 
-<h2 id="plan">10. 予定の変更（作業中）</h2>
+<h2 id="plan">10. その後の変更（c4d7a6c の後）</h2>
 <div class="plan">
-<h3>Shiki を線分の並び 1 本にする（2026-11-03 ユーザー決定、メインのセッションで実装中）</h3>
-<p><b>§6〜§8 は c4d7a6c の動作。決定のうち、入ったのは 1 つ目だけ。</b></p>
+<h3>Shiki を線分の並び 1 本にした（2026-11-03 ユーザー決定。host の検査は通過、実機は未測定）</h3>
+<p><b>§6〜§8 の図と行番号は c4d7a6c の動作。</b>その後、次の 3 つが入った。仕様の文書は <a href="shiki-jit.md">shiki-jit.md</a> §22・§23。</p>
 <ul>
-<li><b>workspace を無くす。</b>— <b>入った（c4d7a6c）。</b>draw は並びの末尾へ直接書き、入りきらなければ本数（<code>count</code>）を進めない。ただし今は、その上で <code>LIMIT_EXCEEDED</code> を投げてフレームを閉じる（<code>building=false</code>、<code>pocket_proc.c:519–522</code>）。「数を進めないだけで続ける」形にはまだなっていない。</li>
-<li><b>candidate と committed を 1 本にまとめる。</b>面あたりのフレームは 1 枚。— <b>未実装。</b></li>
-<li><b><code>frame()</code> が投げたときは「flush」。</b>そこまでにできた分を commit したものとして表示し、次のフレームは最初からやり直す（今は candidate を捨てて前のフレームを出し続ける）。— <b>未実装。</b></li>
+<li><b>workspace を無くす</b>（c4d7a6c）。draw は並びの末尾へ直接書き、入りきらなければ本数（<code>count</code>）を進めない。その draw は <code>LIMIT_EXCEEDED</code> になり、フレームは閉じる（これは前と同じ）。</li>
+<li><b>candidate と committed を 1 本にまとめる。</b>面あたりの並びは 1 本。差分の判断には、前に出したフレームの帯の hash・箱・背景色だけを残す（古い線分そのものは持たない）。転送の失敗（KSN_IO）の修復は、今の並びで描き直す。</li>
+<li><b><code>frame()</code> が投げた時、または draw の失敗でフレームが閉じた時は「flush」。</b>通常のターンの終わりに、そこまでに描いた分を commit したものとして出す（<code>pocket_proc_flush_turn</code>）。何も描いていなければ何も出さない。停止・中断では出さない。</li>
+<li><b>park の間の描き直しは、描きかけを出す</b>（案 B）。VM が <code>frame()</code> を途中で止めて持ち越している間に帯を描き直すと、その帯は組み立て中の並びから描かれ、次の <code>commit()</code> で正しい絵に戻る。描き直しを <code>commit()</code> まで待たせる案（案 A、v-sync に近い）は、ちらつきが実機で見えたら入れる。</li>
 </ul>
-<p class="note">見込み <span class="e">推定</span>: 1 本にすれば DERBY でさらにフレーム 1 枚 7,688 B が区画から消える（workspace の分と合わせて約 14 KB）。shiki-jit.md §22 は、1 本にすると VM が <code>frame()</code> を途中で止めて持ち越している間（park）に別の理由で画面を描き直したとき、描きかけの並びが出てしまう点を、先に決めることとして挙げている。転送の失敗（KSN_IO）からの修復が今は committed に頼っている点（<code>pocket_proc.c:677–688</code>）と、帯の hash を「前のフレーム」と比べている点（<code>pocket_proc.c:240–260</code>。比べる相手は hash だけ残せばよい）も、1 本にするときに形が変わる。</p>
+<p class="note">効果 <span class="e">計算</span>: DERBY（768 本、image の面あり）の区画の固定の持ち主は、並び 2 本 + workspace = 7,686 × 2 + 10,246 = 25,618 B から、並び 1 本 + 帯のキャッシュ = 7,686 + 3,840 = 11,526 B になる（約 14 KB 減）。</p>
 </div>
 
 <h2 id="facts">11. 事実・推定・未確認</h2>

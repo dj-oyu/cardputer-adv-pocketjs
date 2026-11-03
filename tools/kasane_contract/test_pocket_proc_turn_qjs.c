@@ -188,11 +188,36 @@ static void park_contract(JSContext *ctx){
     REQUIRE(!pocket_proc_pending());
     eval_ok(ctx,"expect(()=>proc.draw(c,[]),'BUSY');expect(()=>proc.commit(),'BUSY')");
 
-    /* A frame that throws with its frame open: nothing is carried either. */
+    /* A frame that throws with its frame open: the turn's end shows what it
+     * drew (shiki-jit.md sec.23; app_session.c's end_guest_turn), and the
+     * frame is closed. */
     eval_ok(ctx,"globalThis.frame=()=>{proc.beginFrame(0);proc.draw(b,[]);throw Error('x')}");
     REQUIRE(!call_frame(ctx,&threw)&&threw);
+    pocket_proc_flush_turn();
     pocket_proc_end_turn();
     eval_ok(ctx,"expect(()=>proc.draw(c,[]),'BUSY');expect(()=>proc.commit(),'BUSY')");
+    REQUIRE(pocket_proc_pending());
+    settle(actual);
+    REQUIRE(actual[20*KSN_PROC_W+20]==0xf800&&count_color(actual,0xf800)==1);
+    /* A draw that fails closes the frame; what came before it is shown too. */
+    /* (5 x 255 PLOTs: past the engine's 1,024 a draw, so LIMIT; its own
+     * segments are not the frame's.) */
+    eval_ok(ctx,"globalThis.big=proc.register(asm([],[[0,0,0,0,5*65536],[0,1,0,0,7*65536],"
+                "[5,0,0,0,5],[5,0,0,0,255],[8,0,0,1,0,0xffe0],[6],[6]]));"
+                "globalThis.frame=()=>{proc.beginFrame(0);proc.draw(c,[]);"
+                "expect(()=>proc.draw(big,[]),'LIMIT_EXCEEDED')}");
+    REQUIRE(!call_frame(ctx,&threw)&&!threw);
+    eval_ok(ctx,"expect(()=>proc.commit(),'BUSY')");
+    pocket_proc_flush_turn();
+    pocket_proc_end_turn();
+    settle(actual);
+    REQUIRE(actual[30*KSN_PROC_W+30]==0x001f&&count_color(actual,0xf800)==0&&
+            count_color(actual,0xffe0)==0);
+    /* Thrown before drawing anything: nothing new is shown. */
+    eval_ok(ctx,"globalThis.frame=()=>{proc.beginFrame(0);throw Error('y')}");
+    REQUIRE(!call_frame(ctx,&threw)&&threw);
+    pocket_proc_flush_turn();
+    pocket_proc_end_turn();
     REQUIRE(!pocket_proc_pending());
     session_reset();
 }
@@ -328,12 +353,12 @@ static void cap_contract(JSContext *ctx){
         "{maxSegments:1.5},{maxSegments:'256'},{maxSegments:-1},{maxSegments:NaN}])"
         "expect(()=>proc.createSurface(bad),'INVALID_ARGUMENT');"
         "expect(()=>proc.createSurface({maxSegments:8},1),'INVALID_ARGUMENT')");
-    /* Surface 0: two full frames and nothing else -- draws go straight into
-     * the candidate, no scratch frame (shiki-jit.md sec.22); the engine's
-     * state comes with the first draw. */
+    /* Surface 0: one full list and nothing else -- draws go straight into
+     * it, no scratch frame (shiki-jit.md sec.22) and no second list
+     * (sec.23); the engine's state comes with the first draw. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==2&&callocs[0]==full&&callocs[1]==full);
+    REQUIRE(calloc_n==1&&callocs[0]==full);
     eval_ok(ctx,
         "for(let i=0;i<8;i++)proc.draw(p128,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')");
@@ -342,14 +367,14 @@ static void cap_contract(JSContext *ctx){
     settle(actual);
     REQUIRE(actual[40*KSN_PROC_W+40]==0xf800);
 
-    /* Surface 1 at 256: two frames of 6 + 2,560 B, nothing else allocated. */
+    /* Surface 1 at 256: one list of 6 + 2,560 B, nothing else allocated. */
     eval_ok(ctx,"globalThis.small=proc.createSurface({maxSegments:256});proc.resource(small)");
     fail_alloc=true;
     eval_ok(ctx,"expect(()=>proc.beginFrame(0,small),'OUT_OF_MEMORY')");
     fail_alloc=false;
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0,small)");
-    REQUIRE(calloc_n==2&&callocs[0]==head+256u*10u&&callocs[1]==head+256u*10u);
+    REQUIRE(calloc_n==1&&callocs[0]==head+256u*10u);
     /* Exactly full across three programs (128 + 127 + 1 = 256), then
      * one more is refused and the frame is closed. */
     eval_ok(ctx,
@@ -370,7 +395,7 @@ static void cap_contract(JSContext *ctx){
     REQUIRE(span[5]==0xffe0&&span[9]==0x07e0);
     pocket_proc_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
-    /* Presented, swapped, and drawn again into the other short frame. */
+    /* Presented, and drawn again into the same short list (sec.23). */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0,small);proc.draw(dot,[]);proc.commit()");
     REQUIRE(calloc_n==0);
@@ -400,7 +425,7 @@ static void cap_contract(JSContext *ctx){
         pocket_proc_end_turn();
         calloc_n=0;
         eval_ok(ctx,"proc.beginFrame(0,s)");
-        REQUIRE(calloc_n==2&&callocs[0]==head+cases[k].segments*10u);
+        REQUIRE(calloc_n==1&&callocs[0]==head+cases[k].segments*10u);
         snprintf(source,sizeof source,
                  "for(let i=0;i<%u;i++)proc.draw(dot,[]);"
                  "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')",cases[k].segments);
@@ -408,7 +433,7 @@ static void cap_contract(JSContext *ctx){
         pocket_proc_end_turn();
         session_reset();
     }
-    /* Surface 0 through resource({maxSegments}): its two frames shrink (no
+    /* Surface 0 through resource({maxSegments}): its list shrinks (no
      * scratch frame since sec.22; the image band cache came with resource());
      * draw() enforces the cap; once the frames exist only the same value is
      * accepted. */
@@ -421,7 +446,7 @@ static void cap_contract(JSContext *ctx){
         "globalThis.dot=proc.register(dotAt(40,40,0xf800))");
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==2&&callocs[0]==head+96u*10u&&callocs[1]==head+96u*10u);
+    REQUIRE(calloc_n==1&&callocs[0]==head+96u*10u);
     eval_ok(ctx,
         "for(let i=0;i<3;i++)proc.draw(p32,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
@@ -436,7 +461,7 @@ static void cap_contract(JSContext *ctx){
     /* reset() forgets the cap: the next frames are full again. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==2&&callocs[0]==full&&callocs[1]==full);
+    REQUIRE(calloc_n==1&&callocs[0]==full);
     pocket_proc_end_turn();
     session_reset();
 }
@@ -460,8 +485,8 @@ int main(void){
     cap_contract(ctx);
     session_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
-    printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated/thrown "
-           "frame carries nothing, Back's save frame opens after the finished frame is presented, "
+    printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated frame carries nothing, thrown/failed frame shows what it drew, "
+           "Back's save frame opens after the finished frame is presented, "
            "handle limit before allocation, per-count plans, per-surface segment cap\n");
     return 0;
 }
