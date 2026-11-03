@@ -553,8 +553,8 @@ DERBY（engine_ms、実測）:
 
 ### 22.2 MEGADEMO（実機、2026-11-03、a616c0d、区画 48 KiB）
 
-- 起動して全場面を回った（WAKE → NEWS → TWIST → ZENITH）。評価の後 `MEM free=33432 largest=24576 js=102712`。
-- engine_ms（30 フレームの窓、コンパイルの入らない窓）: NEWS 0.71〜0.72 ms、TWIST 0.97〜0.98、ZENITH 0.66〜0.69（実測）。eb5c12c（NEWS 0.71・ZENITH 0.63〜0.69・TWIST 0.98）と同じ。コンパイルの入る窓は 1.2〜1.7 ms。
+- 起動して全場面を回った（WAKE → NEWS → TWIST → ZENITH → CORE → LOST を 2 周）。評価の後 `MEM free=33432 largest=24576 js=102712`。
+- engine_ms（30 フレームの窓、コンパイルの入らない窓）: NEWS 0.71〜0.72 ms、TWIST 0.91〜0.98（1 周目 0.97〜0.98、2 周目 0.91〜0.92）、ZENITH 0.64〜0.70（実測）。eb5c12c（NEWS 0.71・ZENITH 0.63〜0.69・TWIST 0.98）と同じ。コンパイルの入る窓は 1.2〜1.7 ms。
 - JIT のコード最大 10,688 B（TWIST）、`jitfail=0/0/0`、`jitdrop=0/34`（返したプラン 0）。区画の使用は最大 38,980 B、一続きの空きは最小 5,964 B（`shk=33108/5964/49152`、ZENITH）。
 - §21.4 の測定: DERBY（94439f7、§22.1）も MEGADEMO も返したプランは 0。持ち主の確保が失敗する場面が無く、1 本ずつ返す動きは実機では起きなかった（起きる場面の実機の測定は無い。host の検査 `test_shiki_heap_spare.c` だけ）。
 

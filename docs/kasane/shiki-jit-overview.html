@@ -578,7 +578,7 @@ a{color:var(--accent)}
 <p class="note">区画の内訳の根拠（各項目のファイルと行）は <a href="pipeline-overview.html#mem">パイプラインの §8</a> の表にある。「式・点の窓…約 13.5 KB」は 33.1 KB から固定分 19,588 B（7,688 × 2 + 3,840 + 372）を引いた差 <span class="e">計算</span>で、個別には測っていない。</p>
 <h3>MEGADEMO（実機、a616c0d、48 KiB、§22.2）</h3>
 <ul>
-<li>全場面を回った。engine_ms: NEWS <b>0.71〜0.72 ms</b>、TWIST <b>0.97〜0.98</b>、ZENITH <b>0.66〜0.69</b> <span class="m">実測</span>。eb5c12c と同じ。</li>
+<li>全場面を回った。engine_ms: NEWS <b>0.71〜0.72 ms</b>、TWIST <b>0.91〜0.98</b>、ZENITH <b>0.64〜0.70</b>（2 周） <span class="m">実測</span>。eb5c12c と同じ。</li>
 <li>JIT のコード最大 10,688 B、失敗 0、返したプラン 0（<code>jitdrop=0/34</code>）。区画の使用は最大 38,980 B、一続きの空きは最小 5,964 B <span class="m">実測</span>。</li>
 </ul>
 <p class="sowhat">DERBY も MEGADEMO も 48 KiB で以前と同じ速さ。どちらも返したプランは 0 で、§21.4 の「1 本ずつ返す」動きが起きる場面は実機ではまだ見ていない（host の検査だけ）。</p>
