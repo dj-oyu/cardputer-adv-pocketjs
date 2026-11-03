@@ -297,7 +297,48 @@ static void emit_l32r(ksn_jit_buf *b,unsigned t,size_t literal){
 /* dst = r[a] (+ or -) r[b] saturated: overflow when the operands' signs
  * say so (add: both differ from the sum's; sub: a's differs from b's and
  * from the difference's); the fix-up is INT32_MAX or MIN by a's sign. */
-static void emit_addsub(ksn_jit_buf *b,const ksn_shiki_inst *i,bool sub){
+/* sec.18: the site of a shared check. The checker (ksn_jit_chk_add/_sub,
+ * IRAM) takes a8, a9 and the wrapped a10, saturates a10, ORs |a10| into the
+ * 4-byte slot after the call0 (its bit 31, set here, says "never run") and
+ * returns past the slot. The slot must be a word: the loads and the add
+ * take their wide forms (or a nop leads) until the call0 is at 1 mod 4.
+ * Patched out (ksn_shiki_jit_run's decision), the call0 becomes j over the
+ * slot. */
+#define JIT_SLOT_NEVER 0x80000000u
+static void emit_checked(ksn_jit_buf *b,const ksn_shiki_inst *i,bool sub){
+    const unsigned least=sub?7u:6u;              /* l32i.n, l32i.n, add.n or sub */
+    unsigned wide=(1u-(unsigned)(b->org+b->len+least))&3u;
+    if(sub&&wide==3u){ksn_jit_emit(b,KSN_JIT_NOP,0,0,0);wide=0;}
+    ksn_jit_emit(b,wide>=1u?KSN_JIT_L32I:KSN_JIT_L32IN,8,3,i->a);
+    ksn_jit_emit(b,wide>=2u?KSN_JIT_L32I:KSN_JIT_L32IN,9,3,i->b);
+    if(sub)ksn_jit_emit(b,KSN_JIT_SUB,10,8,9);
+    else ksn_jit_emit(b,wide==3u?KSN_JIT_ADD:KSN_JIT_ADDN,10,8,9);
+    if(b->sites&&b->nsites<KSN_SHIKI_CODE)b->sites[b->nsites++]=(uint16_t)b->len;
+    long words=0;
+    if(b->p){
+        const uint32_t pc=b->org+(uint32_t)b->len,to=sub?b->chk_sub:b->chk_add;
+        words=((long)to-(long)(pc&~3u)-4)/4;
+        if((pc&3u)!=1u||words< -131072||words>131071){b->overflow=true;return;}
+    }
+    ksn_jit_emit(b,KSN_JIT_CALL0,(int)words,0,0);
+    if(b->overflow||b->len+4u>b->cap){b->overflow=true;return;}
+    for(unsigned k=0;k<4;k++){
+        if(b->p)jit_put(b,(uint8_t)(JIT_SLOT_NEVER>>(8*k)));
+        else b->len++;
+    }
+    ksn_jit_emit(b,KSN_JIT_S32IN,10,3,i->dst);
+}
+static void emit_addsub(ksn_jit_buf *b,const ksn_shiki_inst *i,bool sub,unsigned site){
+    if(site<64u&&(b->plain>>site&1u)){
+        /* Decided (sec.18): the logs showed room, the check is gone. */
+        ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
+        ksn_jit_emit(b,KSN_JIT_L32IN,9,3,i->b);
+        if(sub)ksn_jit_emit(b,KSN_JIT_SUB,8,8,9);
+        else ksn_jit_emit(b,KSN_JIT_ADDN,8,8,9);
+        ksn_jit_emit(b,KSN_JIT_S32IN,8,3,i->dst);
+        return;
+    }
+    if(b->chk_add){emit_checked(b,i,sub);return;}
     ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
     ksn_jit_emit(b,KSN_JIT_L32IN,9,3,i->b);
     if(sub){
@@ -441,6 +482,18 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     ksn_jit_emit(b,KSN_JIT_L32IN,4,2,2);
     ksn_jit_emit(b,KSN_JIT_MOVI,6,-1,0);
     ksn_jit_emit(b,KSN_JIT_SRLI,6,6,1);
+    /* sec.18: call0 overwrites a0, the code's own return; the checker
+     * reloads it from ctx->ra before it returns. */
+    unsigned site=0;
+    if(b->chk_add)
+        for(unsigned pc=0;pc<n;pc++){
+            const uint8_t op=plan->code[pc].op;
+            if(op!=KSN_SHIKI_ADD&&op!=KSN_SHIKI_SUB)continue;
+            if(site>=64u||!(b->plain>>site&1u)){ksn_jit_emit(b,KSN_JIT_S32I,0,2,7);break;}
+            site++;
+        }
+    site=0;
+    b->nsites=0;
 
     size_t at[KSN_SHIKI_CODE+1];
     struct { uint16_t at; uint8_t target; } fix[JIT_FIXUPS];
@@ -511,8 +564,8 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
             ksn_jit_emit(b,KSN_JIT_L32IN,8,5,i->a);
             ksn_jit_emit(b,KSN_JIT_S32IN,8,3,i->dst);
             break;
-        case KSN_SHIKI_ADD: emit_addsub(b,i,false); break;
-        case KSN_SHIKI_SUB: emit_addsub(b,i,true); break;
+        case KSN_SHIKI_ADD: emit_addsub(b,i,false,site++); break;
+        case KSN_SHIKI_SUB: emit_addsub(b,i,true,site++); break;
         case KSN_SHIKI_NEG: {
             /* -INT32_MIN is the only overflow: then a & -a is negative. */
             ksn_jit_emit(b,KSN_JIT_L32IN,8,3,i->a);
@@ -675,9 +728,51 @@ uint32_t ksn_shiki_jit_evicted;
 uint32_t ksn_shiki_jit_cold;
 /* Compiles attempted and their cycles (sec.17), for the session's log. */
 uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
+uint32_t ksn_shiki_jit_sat[3];
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
+/* sec.18: the shared saturation checker, reached by call0 from each ADD/SUB
+ * site (emit_checked): a8, a9 the operands, a10 the wrapped result, a2 the
+ * context, a6 INT32_MAX, a0 the slot's instruction-bus address. Saturates
+ * a10 (as the inline check), ORs |a10| into the slot through the data bus
+ * (ctx->alias) and clears its never-run bit, reloads the code's a0 from
+ * ctx->ra and returns past the slot. Uses a11..a14, which the code treats
+ * as scratch. In IRAM: within call0's reach of the Shiki region. */
+__asm__(
+"    .pushsection .iram1.ksn_jit_chk,\"ax\",@progbits\n"
+"    .align 4\n"
+"    .global ksn_jit_chk_sub\n"
+"    .type ksn_jit_chk_sub,@function\n"
+"ksn_jit_chk_sub:\n"
+"    xor a11, a8, a9\n"
+"    xor a12, a8, a10\n"
+"    j 1f\n"
+"    .align 4\n"
+"    .global ksn_jit_chk_add\n"
+"    .type ksn_jit_chk_add,@function\n"
+"ksn_jit_chk_add:\n"
+"    xor a11, a8, a10\n"
+"    xor a12, a9, a10\n"
+"1:  and a11, a11, a12\n"
+"    bgez a11, 2f\n"
+"    srai a10, a8, 31\n"
+"    xor a10, a10, a6\n"
+"2:  l32i a12, a2, 32\n"
+"    add a12, a12, a0\n"
+"    l32i a13, a12, 0\n"
+"    srai a14, a10, 31\n"
+"    xor a14, a14, a10\n"
+"    and a13, a13, a6\n"
+"    or a13, a13, a14\n"
+"    s32i a13, a12, 0\n"
+"    addi a12, a0, 4\n"
+"    l32i a0, a2, 28\n"
+"    jx a12\n"
+"    .popsection\n");
+extern const uint8_t ksn_jit_chk_add[],ksn_jit_chk_sub[];
+_Static_assert(offsetof(ksn_jit_run,ra)==28&&offsetof(ksn_jit_run,alias)==32,"the checker's offsets");
+
 /* Measurement build (shiki-jit.md sec.15): -DPOCKET_SHIKI_JIT_EXECMAP logs
  * where executable memory goes (EXECMAP lines). */
 #ifdef POCKET_SHIKI_JIT_EXECMAP
@@ -780,7 +875,17 @@ typedef struct {
     ksn_shiki_plan *plan;
     void *next;
     uint32_t last;                /* jit_clock at its last draw (sec.16) */
+    /* sec.18: JIT_SAT_LOG, the code calls the shared checker and its slots
+     * log; JIT_SAT_DECIDED, plain says which sites lost their check (the
+     * code patched, and any later compile emits them plain and the rest
+     * inline). draws: draws since the code was compiled. */
+    uint8_t sat;
+    uint16_t draws;
+    int32_t alias;                /* the code's data-bus address minus its instruction-bus one */
+    uint8_t *sdata;               /* the code's start on the data bus */
+    uint64_t plain;
 } jit_plan;
+enum { JIT_SAT_NONE, JIT_SAT_LOG, JIT_SAT_DECIDED };
 #define JIT_WEIGHTS_MAX 512u     /* int32s: 2 KB, e.g. 8 CUBICs of 16 segments */
 /* Copies len bytes of code into a new executable allocation, as 32-bit
  * words (the instruction bus takes only word stores); *raw is what to free.
@@ -808,7 +913,7 @@ void ksn_shiki_jit_attach(ksn_shiki_plan *plan){
     uint8_t *tmp=malloc(JIT_SCRATCH);
     jit_plan *j=calloc(1,sizeof *j);
     if(!tmp||!j){free(tmp);free(j);return;}
-    ksn_jit_buf b={tmp,0,JIT_SCRATCH,false,false};
+    ksn_jit_buf b={tmp,0,JIT_SCRATCH,false,false,0,0,0,0,NULL,0};
     j->n=ksn_shiki_jit_plan(plan,j->s,KSN_JIT_SECTIONS,&b);
     if(!j->n){free(tmp);free(j);return;}
     size_t bytes;
@@ -941,8 +1046,13 @@ static void attach_weights(jit_plan *j,const ksn_shiki_plan *plan,size_t code){
 }
 /* The plan's code is at x (instruction bus), bytes long, entry in: the plan
  * runs it from its next draw. */
-static int compiled(ksn_shiki_plan *plan,jit_plan *j,uint8_t *x,size_t entry,size_t bytes){
+static int compiled(ksn_shiki_plan *plan,jit_plan *j,uint8_t *x,size_t entry,size_t bytes,
+                    uint8_t *data,bool checker){
     __asm__ volatile("memw\n" "isync\n":::"memory");
+    j->sdata=data;
+    j->alias=(int32_t)((intptr_t)data-(intptr_t)x);
+    j->draws=0;
+    if(j->sat!=JIT_SAT_DECIDED)j->sat=checker&&count_sites(plan)?JIT_SAT_LOG:JIT_SAT_NONE;
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
     ksn_shiki_jit_bytes+=(uint32_t)bytes;
@@ -957,6 +1067,23 @@ static bool in_diram(const uint8_t *p,size_t n){
     return esp_ptr_in_diram_dram(p)&&esp_ptr_in_diram_dram(p+n-1);
 }
 
+/* sec.18: how a plan's ADD/SUB sites are emitted. Decided: the sites the
+ * logs cleared plain, the rest inline (no logging any more). Otherwise the
+ * shared checker, when the code will run on DIRAM (org: its instruction-bus
+ * address; elsewhere call0 does not reach the checker). */
+static void sat_mode(const jit_plan *j,ksn_jit_buf *b,uint32_t org,bool checker){
+    if(j&&j->sat==JIT_SAT_DECIDED){b->plain=j->plain;return;}
+    if(!checker)return;
+    b->org=org;
+    b->chk_add=(uint32_t)(uintptr_t)ksn_jit_chk_add;
+    b->chk_sub=(uint32_t)(uintptr_t)ksn_jit_chk_sub;
+}
+static unsigned count_sites(const ksn_shiki_plan *plan){
+    unsigned n=0;
+    for(unsigned pc=0;pc<plan->count;pc++)n+=plan->code[pc].op==KSN_SHIKI_ADD||plan->code[pc].op==KSN_SHIKI_SUB;
+    return n;
+}
+
 /* sec.17: in the Shiki region, one pass. A block as long as the guess
  * (JIT_GUESS), the code written once through the data bus, the end given
  * back. Returns JIT_DONE, JIT_REFUSED, or -2 when the region has no room
@@ -969,7 +1096,8 @@ static int compile_in_region(ksn_shiki_plan *plan){
     jit_plan *j=plan->jit;
     const bool fresh=!j;
     if(fresh&&!(j=calloc(1,sizeof *j))){shiki_heap_free(d);return -2;}
-    ksn_jit_buf e={d,0,guess,false,false};
+    ksn_jit_buf e={d,0,guess,false,false,0,0,0,0,NULL,0};
+    sat_mode(j,&e,(uint32_t)(uintptr_t)esp_ptr_diram_dram_to_iram(d),true);
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry)){
         shiki_heap_free(d);
@@ -988,7 +1116,7 @@ static int compile_in_region(ksn_shiki_plan *plan){
     j->sraw=q;j->sregion=true;
     attach_weights(j,plan,len);
     EXECMAP_GOT(q,true);
-    return compiled(plan,j,(uint8_t *)esp_ptr_diram_dram_to_iram(q),entry,len);
+    return compiled(plan,j,(uint8_t *)esp_ptr_diram_dram_to_iram(q),entry,len,q,e.chk_add!=0);
 }
 
 /* The two-pass path: a sizing pass (no buffer) gives the length, the
@@ -1005,10 +1133,11 @@ static int compile_scalar(ksn_shiki_plan *plan){
     if(plan->need64&&!fits(64u*plan->need64)&&!make_room(64u*plan->need64))return JIT_NOMEM;
     const int r=compile_in_region(plan);
     if(r!=-2)return r;
-    ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false};
+    ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
+    sat_mode(plan->jit,&b,0,true);                /* sized for DIRAM: the shared checker */
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
-    const size_t need=b.len;
+    size_t need=b.len;
     if(!fits(need)&&!make_room(need)){
         if(ksn_shiki_jit_bytes+need+20u>ksn_shiki_jit_budget)return JIT_BUDGET;
         const size_t est=need+16u;
@@ -1047,13 +1176,49 @@ static int compile_scalar(ksn_shiki_plan *plan){
      * where a tight heap puts MALLOC_CAP_EXEC: sec.15) write whole words. */
     const bool diram=j->sregion||esp_ptr_in_diram_iram(x);
     if(!w)w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
+    if(!diram&&b.chk_add){
+        /* sec.18: RTC fast memory is beyond call0's reach of the checker:
+         * the inline checks, if they still fit what was taken. */
+        ksn_jit_buf c={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
+        sat_mode(j,&c,0,false);
+        if(!ksn_shiki_jit_scalar(plan,&c,&entry)||c.len>len){drop_scalar(j);if(fresh)free(j);return JIT_NOMEM;}
+        need=c.len;
+    }
     for(size_t k=0;k<len/4;k++)((volatile uint32_t *)(void *)w)[k]=0;
-    ksn_jit_buf e={w,0,need,false,!diram};
+    ksn_jit_buf e={w,0,need,false,!diram,0,0,0,0,NULL,0};
+    sat_mode(j,&e,(uint32_t)(uintptr_t)x,diram);
     size_t entry2=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
         drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;
     }
-    return compiled(plan,j,x,entry,bytes);
+    return compiled(plan,j,x,entry,bytes,w,e.chk_add!=0);
+}
+/* sec.18: after JIT_SAT_DRAWS draws of logging, a site whose results kept
+ * JIT_SAT_ROOM bits of room below INT32_MAX loses its check: its call0
+ * becomes j over the slot. A site that never ran, or came closer, keeps it.
+ * The decision outlives the code: a later compile (after a drop) emits the
+ * cleared sites plain and the rest inline. */
+#define JIT_SAT_DRAWS 256u
+#define JIT_SAT_ROOM 8u
+static void sat_decide(const ksn_shiki_plan *plan,jit_plan *j){
+    uint16_t sites[KSN_SHIKI_CODE];
+    ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
+    sat_mode(j,&b,0,true);
+    b.sites=sites;
+    size_t entry=0;
+    j->sat=JIT_SAT_DECIDED;
+    j->plain=0;
+    if(!ksn_shiki_jit_scalar(plan,&b,&entry))return;   /* cannot happen: it compiled */
+    for(unsigned k=0;k<b.nsites&&k<64u;k++){
+        const uint32_t w=*(volatile const uint32_t *)(const void *)(j->sdata+sites[k]+3u);
+        if(w&JIT_SLOT_NEVER){ksn_shiki_jit_sat[2]++;continue;}
+        if(w>=1u<<(31u-JIT_SAT_ROOM)){ksn_shiki_jit_sat[1]++;continue;}
+        ksn_jit_buf q={j->sdata,sites[k],sites[k]+3u,false,false,0,0,0,0,NULL,0};
+        ksn_jit_emit(&q,KSN_JIT_J,3,0,0);
+        j->plain|=1ull<<k;
+        ksn_shiki_jit_sat[0]++;
+    }
+    __asm__ volatile("memw\n" "isync\n":::"memory");
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
@@ -1092,12 +1257,13 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
                    (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
                    ksn_shiki_sin_table,
-                   (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,j->weights,
-                   plan,out,index};
+                   (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,
+                   0,j->alias,j->weights,plan,out,index};
     ((jit_plan *)j)->last=++jit_clock;
     jit_running++;
     const uint32_t r=j->scalar(&c);
     jit_running--;
+    if(j->sat==JIT_SAT_LOG&&++((jit_plan *)j)->draws>=JIT_SAT_DRAWS)sat_decide(p,(jit_plan *)j);
     return r;
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}

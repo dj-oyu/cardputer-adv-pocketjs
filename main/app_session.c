@@ -2636,7 +2636,8 @@ static esp_err_t present_frame(void) {
                     /* cubic/pat: CUBIC and LINE_PATTERN calls per frame and their
                      * ms per frame (inside engine_ms; sec.12.2). */
                     /* jitcc: compiles attempted per window and their ms per
-                     * frame (sec.17). */
+                     * frame (sec.17). sat: ADD/SUB checks patched out / kept /
+                     * never run when their plan decided, since boot (sec.18). */
                     static uint32_t cc_n,cc_cy;
                     const uint32_t ccn=ksn_shiki_jit_compiles-cc_n,cccy=ksn_shiki_jit_compile_cy-cc_cy;
                     cc_n=ksn_shiki_jit_compiles;cc_cy=ksn_shiki_jit_compile_cy;
@@ -2646,14 +2647,15 @@ static esp_err_t present_frame(void) {
                     for(unsigned k=0;k<2;k++){curve_n[k]=ksn_shiki_curve_n[k];curve_cy[k]=ksn_shiki_curve_cy[k];}
                     if(st.draws)
                         ESP_LOGI("kasane","SHIKI_TURN draws=%.1f steps=%.0f engine_ms=%.3f total_ms=%.3f frames=%u jit=%d/%u"
-                                 " cubic=%.1f/%.3f pat=%.1f/%.3f jitfail=%u/%u/%u jitdrop=%u/%u jitcc=%u/%.3f",
+                                 " cubic=%.1f/%.3f pat=%.1f/%.3f jitfail=%u/%u/%u jitdrop=%u/%u jitcc=%u/%.3f sat=%u/%u/%u",
                                  st.draws/(double)painted,st.steps/(double)painted,
                                  st.engine_cy/240000.0/painted,st.total_cy/240000.0/painted,painted,
                                  ksn_shiki_jit_scalar_on?1:0,(unsigned)ksn_shiki_jit_bytes,
                                  cn0/(double)painted,cc0/240000.0/painted,cn1/(double)painted,cc1/240000.0/painted,
                                  (unsigned)ksn_shiki_jit_fail[0],(unsigned)ksn_shiki_jit_fail[1],(unsigned)ksn_shiki_jit_fail[2],
                                  (unsigned)ksn_shiki_jit_evicted,(unsigned)ksn_shiki_jit_cold,
-                                 (unsigned)ccn,cccy/240000.0/painted);
+                                 (unsigned)ccn,cccy/240000.0/painted,(unsigned)ksn_shiki_jit_sat[0],
+                                 (unsigned)ksn_shiki_jit_sat[1],(unsigned)ksn_shiki_jit_sat[2]);
 #ifdef POCKET_SHIKI_JIT_AB
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif

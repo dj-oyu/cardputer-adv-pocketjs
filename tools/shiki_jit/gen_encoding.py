@@ -85,6 +85,10 @@ FORMS = [
     ('RETWN', 'retw.n', []),
     ('NOPN', 'nop.n', []),
     ('NOP', 'nop', []),
+    # sec.18: the shared saturation checker. ADD and L32I are the wide forms
+    # of add.n / l32i.n, chosen to put the call's 4-byte slot on a word.
+    ('CALL0', 'call0 .+4+{0}', [('i', -131072, 131071, 4)]),
+    ('ADD', 'add a{0}, a{1}, a{2}', [('a', 0, 15, 1)] * 3),
 ]
 BASE = {'q': 0, 'a': 2, 'i': 0}   # a2 as the base AR: a0/a1 are special to some forms
 

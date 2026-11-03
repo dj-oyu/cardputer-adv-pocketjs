@@ -14,7 +14,17 @@ bool ksn_shiki_jit_probe(char *out,size_t n);
 /* p NULL: a sizing pass (len counts, nothing is written). word_only: p is
  * memory that takes 32-bit accesses only (IRAM without a data alias, p
  * 4-aligned); bytes go in by read-modify-write of their word. */
-typedef struct { uint8_t *p; size_t len,cap; bool overflow,word_only; } ksn_jit_buf;
+typedef struct {
+    uint8_t *p; size_t len,cap; bool overflow,word_only;
+    /* The scalar compiler's only (sec.18; zero: inline saturation checks).
+     * org: p[0]'s instruction-bus address, 4-aligned (a sizing pass may give
+     * 0); chk_add/chk_sub: the shared checker's entries (call0 reach);
+     * plain: ADD/SUB sites (in program order) emitted with no check at all;
+     * sites: when not NULL, each checked site's call0 offset (nsites of them). */
+    uint32_t org,chk_add,chk_sub;
+    uint64_t plain;
+    uint16_t *sites; unsigned nsites;
+} ksn_jit_buf;
 /* One instruction: form is a KSN_JIT_* index, o0..o2 its operands as written
  * (q and a register numbers, immediates divided by their scale: an offset
  * of 16 in ee.vld.128.ip is 1). Out of room sets overflow and writes nothing. */
@@ -63,6 +73,8 @@ typedef struct {
     uint32_t (*draw)(const void *,int32_t,int32_t,int32_t,uint32_t); /* 16: ksn_shiki_jit_draw */
     const int32_t *sin;                     /* 20: ksn_shiki_sin_table */
     uint32_t (*curve)(const void *,int32_t,int32_t,uint32_t); /* 24: ksn_shiki_jit_curve */
+    uint32_t ra;                            /* 28: the code's a0, kept across the checker's call0 */
+    int32_t alias;                          /* 32: the code's data-bus address minus its instruction-bus one */
     const int32_t *weights;                 /* the plan's CUBIC weights (C only), or NULL */
     const ksn_shiki_plan *plan;
     ksn_proc_segment *out;
@@ -101,6 +113,9 @@ extern uint32_t ksn_shiki_jit_fail[3];
 extern uint32_t ksn_shiki_jit_evicted;
 extern uint32_t ksn_shiki_jit_cold;
 extern uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
+/* sec.18: ADD/SUB sites whose check was patched out [0], kept [1], and
+ * never run while logged [2], since boot. */
+extern uint32_t ksn_shiki_jit_sat[3];
 /* The bench's: compile now, whatever the heat (the budget still holds). */
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan);
 uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,

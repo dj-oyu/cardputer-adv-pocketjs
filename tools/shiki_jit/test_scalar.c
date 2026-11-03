@@ -31,19 +31,22 @@ static uint32_t rnd(void){st=st*1664525u+1013904223u;return st>>8;}
 
 /* ---- the emulator ---------------------------------------------------------- */
 enum { A_CTX=0x10000000u, A_VM=0x20000000u, A_IN=0x30000000u, A_CODE=0x40000000u, A_LEAF=0x50000000u,
-       A_DRAW=0x60000000u, A_SIN=0x70000000u, A_CURVE=0x58000000u };
+       A_DRAW=0x60000000u, A_SIN=0x70000000u, A_CURVE=0x58000000u,
+       /* sec.18: the shared checker's entries (within call0's reach of the
+        * code) and the code's own return address. */
+       A_CHK_ADD=A_CODE+0x20000u, A_CHK_SUB=A_CODE+0x20010u, A_RA=0x48000000u };
 typedef struct {
-    uint32_t ctx[7];
+    uint32_t ctx[9];
     ksn_shiki_vm *vm;
     int32_t *in;
-    const uint8_t *code; size_t code_len;
+    uint8_t *code; size_t code_len;
     const ksn_jit_run *run;
-    unsigned steps;
+    unsigned steps,checks;
 } emu;
 static uint8_t *addr(emu *e,uint32_t a,unsigned n){
     struct { uint32_t base; void *p; size_t len; } m[]={
         {A_CTX,e->ctx,sizeof e->ctx},{A_VM,e->vm,sizeof *e->vm},
-        {A_IN,e->in,4u*KSN_SHIKI_INPUTS},{A_CODE,(void *)e->code,e->code_len},
+        {A_IN,e->in,4u*KSN_SHIKI_INPUTS},{A_CODE,e->code,e->code_len},
         {A_SIN,(void *)ksn_shiki_sin_table,sizeof ksn_shiki_sin_table}};
     for(unsigned k=0;k<5;k++)
         if(a>=m[k].base&&a-m[k].base+n<=m[k].len){
@@ -90,6 +93,7 @@ static int decode(const uint8_t *p,size_t left,int o[3]){
 static uint32_t emulate(emu *e,size_t entry){
     uint32_t a[16]={0},sar=0;
     a[2]=A_CTX;
+    a[0]=A_RA;
     size_t pc=entry;
     for(unsigned n=0;;n++){
         if(n>2000000u){fprintf(stderr,"EMU runaway\n");exit(2);}
@@ -110,7 +114,33 @@ static uint32_t emulate(emu *e,size_t entry){
         const uint32_t x=a[o[1]&15],y=a[o[2]&15];
         switch(f){
         case KSN_JIT_ENTRY48: break;
-        case KSN_JIT_RETWN: return a[2];
+        case KSN_JIT_NOP: case KSN_JIT_NOPN: break;
+        case KSN_JIT_RETWN:
+            if(a[0]!=A_RA){fprintf(stderr,"EMU a0 lost: %08x\n",a[0]);exit(2);}
+            return a[2];
+        case KSN_JIT_L32I: a[o[0]]=ld(e,x+4u*(unsigned)o[2],4); break;
+        case KSN_JIT_ADD: a[o[0]]=x+y; break;
+        case KSN_JIT_CALL0: {
+            /* The checker (ksn_shiki_jit.c's ksn_jit_chk_add/_sub) from its
+             * comment: saturate a10, OR |a10| into the slot after the call
+             * (clearing the never-run bit), reload a0, return past the slot. */
+            const uint32_t at=A_CODE+(uint32_t)pc,to=(at&~3u)+4u+4u*(uint32_t)sext((uint32_t)o[0],18);
+            if(to!=A_CHK_ADD&&to!=A_CHK_SUB){fprintf(stderr,"EMU call0 to %08x\n",to);exit(2);}
+            const uint32_t ret=at+3u,va=a[8],vb=a[9],d=a[10];
+            const uint32_t ov=to==A_CHK_ADD?((va^d)&(vb^d)):((va^vb)&(va^d));
+            uint32_t v=(int32_t)ov<0?(uint32_t)((int32_t)va>>31)^a[6]:d;
+            a[10]=v;
+            const uint32_t slot=ret+e->ctx[8];
+            uint8_t *q=addr(e,slot,4);                /* in the code, word-aligned */
+            uint32_t w;memcpy(&w,q,4);
+            w=(w&a[6])|(v^(uint32_t)((int32_t)v>>31));
+            memcpy(q,&w,4);
+            e->checks++;
+            for(unsigned k=11;k<15;k++)a[k]=0xDEADBEEFu;
+            a[0]=e->ctx[7];
+            next=(size_t)(ret+4u-A_CODE);
+            break;
+        }
         case KSN_JIT_L32IN: a[o[0]]=ld(e,x+4u*(unsigned)o[2],4); break;
         case KSN_JIT_S32IN: st_(e,x+4u*(unsigned)o[2],a[o[0]],4); break;
         case KSN_JIT_S32I: st_(e,x+4u*(unsigned)o[2],a[o[0]],4); break;
@@ -158,18 +188,74 @@ static uint32_t emulate(emu *e,size_t entry){
     }
 }
 
+static ksn_proc_segment seg_i[KSN_SHIKI_SEGMENTS],seg_j[KSN_SHIKI_SEGMENTS];
+static ksn_shiki_vm vi,vj;
+/* CUBIC's weights (sec.13): odd trials give the code the table, even
+ * ones none (the helper computes them), so both paths are compared. */
+static int32_t weights[4*KSN_SHIKI_CODE*255];
+static unsigned bailed,checks;
+
+/* Compiles plan into buf (org A_CODE, the checker's entries when chk) and
+ * checks that a sizing pass and the word-only writer agree; 0 on failure. */
+static size_t compile(const ksn_shiki_plan *plan,uint8_t *buf,size_t cap,bool chk,uint64_t plain,
+                      size_t *entry,uint16_t *sites,unsigned *nsites,unsigned t){
+    ksn_jit_buf b={buf,0,cap,false,false,A_CODE,chk?A_CHK_ADD:0,chk?A_CHK_SUB:0,plain,sites,0};
+    if(!ksn_shiki_jit_scalar(plan,&b,entry)){printf("COMPILE FAILED trial %u (n=%u)\n",t,plan->count);return 0;}
+    if(nsites)*nsites=b.nsites;
+    /* The device sizes first (no buffer, org 0), then emits into memory of
+     * exactly that length (sec.14): both passes must agree. */
+    ksn_jit_buf z={NULL,0,cap,false,false,0,b.chk_add,b.chk_sub,plain,NULL,0};
+    size_t ez=0;
+    if(!ksn_shiki_jit_scalar(plan,&z,&ez)||z.len!=b.len||ez!=*entry){
+        printf("SIZING DIFF trial %u: %zu/%zu entry %zu/%zu\n",t,z.len,b.len,ez,*entry);return 0;
+    }
+    /* And the word-only writer (IRAM without a data alias) gives the
+     * same bytes. */
+    static uint32_t wbuf[8192/4];
+    memset(wbuf,0xA5,sizeof wbuf);
+    ksn_jit_buf w={(uint8_t *)wbuf,0,b.len,false,true,A_CODE,b.chk_add,b.chk_sub,plain,NULL,0};
+    if(!ksn_shiki_jit_scalar(plan,&w,&ez)||w.len!=b.len||memcmp(wbuf,buf,b.len)){
+        printf("WORD WRITER DIFF trial %u\n",t);return 0;
+    }
+    return b.len;
+}
+/* Runs the code once from a cleared vm, as ksn_shiki_draw_index would; true
+ * when it agrees with the interpreter's run (vi, seg_i, want). */
+static bool agrees(const ksn_shiki_plan *plan,uint8_t *code,size_t len,size_t entry,const int32_t *in,
+                   unsigned nin,unsigned index,unsigned t,ksn_shiki_status want,ksn_shiki_status *gotp){
+    memset(&vj,0,sizeof vj);
+    int32_t inj[KSN_SHIKI_INPUTS]={0};
+    for(unsigned k=0;k<plan->inputs&&k<nin;k++)inj[k]=in[k];
+    const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
+                           (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
+                           ksn_shiki_sin_table,
+                           (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,
+                           0,0,
+                           (t&1)&&ksn_shiki_cubic_weights(plan,weights,sizeof weights/4)?weights:NULL,
+                           plan,seg_j,index};
+    emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF,A_DRAW,A_SIN,A_CURVE,0,0},&vj,inj,code,len,&run,0,0};
+    const uint32_t r=emulate(&e,entry);
+    checks+=e.checks;
+    ksn_shiki_status got;
+    if(r>=256u)got=(ksn_shiki_status)(r>>8);
+    else{bailed++;got=ksn_shiki_resume(plan,inj,index,&vj,seg_j,r);}
+    *gotp=got;
+    bool bad=got!=want||memcmp(vi.reg,vj.reg,sizeof vi.reg)||vi.count!=vj.count||
+             memcmp(seg_i,seg_j,vi.count*sizeof *seg_i);
+    if(want==KSN_SHIKI_DONE)
+        bad|=vi.steps!=vj.steps||vi.pen_x!=vj.pen_x||vi.pen_y!=vj.pen_y||vi.pen_valid!=vj.pen_valid||
+             vi.raster!=vj.raster||vi.depth!=vj.depth;
+    return !bad;
+}
+
 int main(int argc,char **argv){
-    static ksn_proc_segment seg_i[KSN_SHIKI_SEGMENTS],seg_j[KSN_SHIKI_SEGMENTS];
-    static uint8_t buf[8192];
+    static uint8_t buf[8192],cbuf[8192],pbuf[8192];
     ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);
-    static ksn_shiki_vm vi,vj;
-    /* CUBIC's weights (sec.13): odd trials give the code the table, even
-     * ones none (the helper computes them), so both paths are compared. */
-    static int32_t weights[4*KSN_SHIKI_CODE*255];
-    unsigned fails=0,by[5]={0},tried=0,bailed=0,maxlen=0;
-    unsigned long total_bytes=0,total_inst=0;
+    unsigned fails=0,by[5]={0},tried=0,maxlen=0,sites_all=0,sites_plain=0,sites_never=0;
+    unsigned long total_bytes=0,total_inst=0,chk_bytes=0,plain_bytes=0;
     const unsigned trials=argc>1?(unsigned)atoi(argv[1]):20000;
     uint32_t gen=1;
+    static const char *const MODE[]={"inline","checker","patched","plain"};
     for(unsigned t=0;t<trials;t++){
         static ksn_shiki_bench_case c;
         int32_t in[KSN_SHIKI_INPUTS];
@@ -179,59 +265,56 @@ int main(int argc,char **argv){
         const unsigned n=plan->count;
         tried++;
         const ksn_shiki_status want=ksn_shiki_draw_index(plan,in,nin,index,&vi,seg_i);
-        ksn_jit_buf b={buf,0,sizeof buf,false,false};
-        size_t entry=0;
-        if(!ksn_shiki_jit_scalar(plan,&b,&entry)){printf("COMPILE FAILED trial %u (n=%u)\n",t,n);fails++;continue;}
-        /* The device sizes first (no buffer), then emits into memory of
-         * exactly that length (sec.14): both passes must agree. */
-        {
-            ksn_jit_buf z={NULL,0,sizeof buf,false,false};
-            size_t ez=0;
-            if(!ksn_shiki_jit_scalar(plan,&z,&ez)||z.len!=b.len||ez!=entry){
-                printf("SIZING DIFF trial %u: %zu/%zu entry %zu/%zu\n",t,z.len,b.len,ez,entry);fails++;continue;
-            }
-        }
-        /* And the word-only writer (IRAM without a data alias) gives the
-         * same bytes. */
-        {
-            static uint32_t wbuf[sizeof buf/4];
-            memset(wbuf,0xA5,sizeof wbuf);
-            ksn_jit_buf z={(uint8_t *)wbuf,0,b.len,false,true};
-            size_t ez=0;
-            if(!ksn_shiki_jit_scalar(plan,&z,&ez)||z.len!=b.len||memcmp(wbuf,buf,b.len)){
-                printf("WORD WRITER DIFF trial %u\n",t);fails++;continue;
-            }
-        }
-        total_bytes+=b.len;total_inst+=n;
-        if(b.len>maxlen)maxlen=(unsigned)b.len;
-        /* As ksn_shiki_draw_index: a cleared vm, the inputs copied. */
-        memset(&vj,0,sizeof vj);
-        int32_t inj[KSN_SHIKI_INPUTS]={0};
-        for(unsigned k=0;k<plan->inputs&&k<nin;k++)inj[k]=in[k];
-        const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
-                               (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
-                               ksn_shiki_sin_table,
-                               (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,
-                               (t&1)&&ksn_shiki_cubic_weights(plan,weights,sizeof weights/4)?weights:NULL,
-                               plan,seg_j,index};
-        emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF,A_DRAW,A_SIN,A_CURVE},&vj,inj,buf,b.len,&run,0};
-        const uint32_t r=emulate(&e,entry);
-        ksn_shiki_status got;
-        if(r>=256u)got=(ksn_shiki_status)(r>>8);
-        else{bailed++;got=ksn_shiki_resume(plan,inj,index,&vj,seg_j,r);}
         by[want]++;
-        int bad=got!=want||memcmp(vi.reg,vj.reg,sizeof vi.reg)||vi.count!=vj.count||
-                memcmp(seg_i,seg_j,vi.count*sizeof *seg_i);
-        if(want==KSN_SHIKI_DONE)
-            bad|=vi.steps!=vj.steps||vi.pen_x!=vj.pen_x||vi.pen_y!=vj.pen_y||vi.pen_valid!=vj.pen_valid||
-                 vi.raster!=vj.raster||vi.depth!=vj.depth;
-        if(bad&&fails++<10)
-            printf("DIFF trial %u: status %d/%d steps %u/%u count %u/%u (n=%u)\n",t,(int)got,(int)want,
+        size_t entry=0,centry=0,pentry=0;
+        uint16_t sites[KSN_SHIKI_CODE];
+        unsigned nsites=0;
+        /* inline: the checks in the code. checker (sec.18): the shared
+         * checker, whose slots then say where the check can go; patched: that
+         * code with those call0s turned into j over the slot; plain: compiled
+         * again without those checks. The same draw has the same values, so
+         * all four must agree with the interpreter. */
+        const size_t len=compile(plan,buf,sizeof buf,false,0,&entry,NULL,NULL,t);
+        const size_t clen=len?compile(plan,cbuf,sizeof cbuf,true,0,&centry,sites,&nsites,t):0;
+        if(!len||!clen){fails++;continue;}
+        total_bytes+=len;total_inst+=n;chk_bytes+=clen;
+        if(len>maxlen)maxlen=(unsigned)len;
+        ksn_shiki_status got;
+        int bad=-1;
+        if(!agrees(plan,buf,len,entry,in,nin,index,t,want,&got))bad=0;
+        else if(!agrees(plan,cbuf,clen,centry,in,nin,index,t,want,&got))bad=1;
+        else{
+            uint64_t plain=0;
+            memcpy(pbuf,cbuf,clen);
+            for(unsigned k=0;k<nsites;k++){
+                uint32_t w;memcpy(&w,cbuf+sites[k]+3u,4);
+                if(w&0x80000000u){sites_never++;continue;}
+                if(w>0x3FFFFFFFu)continue;               /* saturated (or as good as) */
+                plain|=1ull<<k;
+                sites_plain++;
+                ksn_jit_buf q={pbuf,sites[k],sites[k]+3u,false,false,0,0,0,0,NULL,0};
+                ksn_jit_emit(&q,KSN_JIT_J,3,0,0);        /* over the slot */
+            }
+            sites_all+=nsites;
+            if(!agrees(plan,pbuf,clen,centry,in,nin,index,t,want,&got))bad=2;
+            else{
+                const size_t plen=compile(plan,pbuf,sizeof pbuf,true,plain,&pentry,NULL,NULL,t);
+                if(!plen){fails++;continue;}
+                plain_bytes+=plen;
+                if(!agrees(plan,pbuf,plen,pentry,in,nin,index,t,want,&got))bad=3;
+            }
+        }
+        if(bad>=0&&fails++<10)
+            printf("DIFF %s trial %u: status %d/%d steps %u/%u count %u/%u (n=%u)\n",MODE[bad],t,(int)got,(int)want,
                    vj.steps,vi.steps,vj.count,vi.count,n);
     }
     printf("scalar: %u programs (DONE %u INVALID %u LIMIT %u), %u handed back at the limit; "
            "code %.1f B per instruction, largest %u B\n",tried,by[KSN_SHIKI_DONE],by[KSN_SHIKI_INVALID],
            by[KSN_SHIKI_LIMIT],bailed,(double)total_bytes/(double)total_inst,maxlen);
+    printf("scalar sec.18: checker %.1f B per instruction (inline %.1f), %u checker calls; of %u sites "
+           "%u patched out, %u never run; with them plain %.1f B per instruction\n",
+           (double)chk_bytes/(double)total_inst,(double)total_bytes/(double)total_inst,checks,sites_all,
+           sites_plain,sites_never,(double)plain_bytes/(double)total_inst);
     /* Both paths count CUBIC / LINE_PATTERN: half of these ran in the code. */
     printf("scalar: CUBIC %u calls, LINE_PATTERN %u calls (interpreter and code together)\n",
            (unsigned)ksn_shiki_curve_n[0],(unsigned)ksn_shiki_curve_n[1]);
