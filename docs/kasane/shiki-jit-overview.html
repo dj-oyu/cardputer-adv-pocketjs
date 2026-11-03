@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shiki JIT とメモリ配置</title>
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1f2328; --muted:#5d6670; --line:#d8d4cc; --card:#ffffff;
+  --sram0:#c9c3b8; --static:#b8b2a7; --guest:#e2a86b; --shiki:#4f8fd6; --jit:#2fa37a;
+  --dram:#9d8fd1; --rtc:#d46a6a; --free:#ffffff; --reserved:#8a8580; --keep:#f2d16b;
+  --interp:#a9a39a; --rtcbar:#d46a6a; --diram:#2fa37a; --accent:#2f6fb5;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16181b; --fg:#e6e3dd; --muted:#a5a09a; --line:#3a3d42; --card:#1f2226;
+    --sram0:#57534d; --static:#4d4944; --guest:#b9814a; --shiki:#4a86c9; --jit:#3fb58b;
+    --dram:#7c6fb3; --rtc:#c25e5e; --free:#2b2f34; --reserved:#6a6560; --keep:#c9a944;
+    --interp:#6d6862; --rtcbar:#c25e5e; --diram:#3fb58b; --accent:#7fb0e8;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#16181b; --fg:#e6e3dd; --muted:#a5a09a; --line:#3a3d42; --card:#1f2226;
+  --sram0:#57534d; --static:#4d4944; --guest:#b9814a; --shiki:#4a86c9; --jit:#3fb58b;
+  --dram:#7c6fb3; --rtc:#c25e5e; --free:#2b2f34; --reserved:#6a6560; --keep:#c9a944;
+  --interp:#6d6862; --rtcbar:#c25e5e; --diram:#3fb58b; --accent:#7fb0e8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.75 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:1.7rem;margin:0 0 4px;letter-spacing:.01em}
+h2{font-size:1.25rem;margin:44px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:1.02rem;margin:22px 0 6px}
+p,li{color:var(--fg)}
+.lead{color:var(--muted);margin:0 0 18px}
+.note{color:var(--muted);font-size:.88rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.tag{display:inline-block;font-size:.75rem;padding:0 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:2px}
+code{font:0.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:color-mix(in srgb,var(--line) 35%,transparent);padding:1px 4px;border-radius:4px}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--fg);font-family:inherit}
+svg .muted{fill:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.84rem;color:var(--muted);margin:6px 0 0}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.grid2{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:.9rem}
+.kv b{font-weight:600;white-space:nowrap}
+nav.toc{font-size:.9rem;columns:2;column-gap:24px;margin:10px 0 0}
+nav.toc a{color:var(--accent);text-decoration:none}
+@media (max-width:720px){nav.toc{columns:1}}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>Shiki JIT とメモリ配置</h1>
+<p class="lead">ESP32-S3（PSRAM なし）の内部 RAM がアプリの実行中にどう埋まっているか、Shiki の式を機械語にする JIT がどこにコードを置きどう動くかの図解。数値は特記の無い限り実機の実測（2026-11-03）。詳細と経緯は <a href="shiki-jit.md">shiki-jit.md</a>（§11〜§16）。</p>
+
+<nav class="toc">
+<a href="#map">1. 内部 RAM の地図</a><br>
+<a href="#heap">2. アプリ実行中の heap（実測）</a><br>
+<a href="#bus">3. 同じ RAM を 2 つのバスで見る</a><br>
+<a href="#region">4. Shiki の区画と JIT の相乗り</a><br>
+<a href="#flow">5. 1 回の描画で JIT が何をするか</a><br>
+<a href="#code">6. 生成するコードの形</a><br>
+<a href="#evict">7. メモリが足りないとき</a><br>
+<a href="#result">8. 速さ: 置き場所で 3 倍変わる</a><br>
+<a href="#facts">9. 事実と推定</a>
+</nav>
+
+<h2 id="map">1. 内部 RAM の地図 <span class="tag">TRM v1.8 p.403</span></h2>
+<p>CPU から見える内部 RAM は 4 種類。<b>命令を実行できるのは命令バスから見える所だけ</b>で、SRAM2 はデータ専用。</p>
+<div class="card">
+<svg viewBox="0 0 940 250" role="img" aria-label="内部 RAM の種類と番地">
+  <!-- SRAM0 -->
+  <rect x="10" y="40" width="70" height="60" rx="6" fill="var(--sram0)"/>
+  <text x="45" y="66" text-anchor="middle" font-size="13" font-weight="600">SRAM0</text>
+  <text x="45" y="84" text-anchor="middle" font-size="11">32 KB</text>
+  <!-- SRAM1 -->
+  <rect x="90" y="40" width="600" height="60" rx="6" fill="var(--shiki)" fill-opacity=".22" stroke="var(--shiki)"/>
+  <text x="390" y="66" text-anchor="middle" font-size="14" font-weight="600">SRAM1（DIRAM）416 KB</text>
+  <text x="390" y="84" text-anchor="middle" font-size="11">データ側と命令側の両方から見える → JIT のコードを置ける</text>
+  <!-- SRAM2 -->
+  <rect x="700" y="40" width="130" height="60" rx="6" fill="var(--dram)" fill-opacity=".35" stroke="var(--dram)"/>
+  <text x="765" y="66" text-anchor="middle" font-size="13" font-weight="600">SRAM2 64 KB</text>
+  <text x="765" y="84" text-anchor="middle" font-size="11">データ専用</text>
+  <!-- RTC -->
+  <rect x="840" y="40" width="90" height="60" rx="6" fill="var(--rtc)" fill-opacity=".35" stroke="var(--rtc)"/>
+  <text x="885" y="66" text-anchor="middle" font-size="13" font-weight="600">RTC FAST</text>
+  <text x="885" y="84" text-anchor="middle" font-size="11">8 KB</text>
+  <!-- buses -->
+  <text x="10" y="134" font-size="12" font-weight="600">命令バス</text>
+  <line x1="10" y1="142" x2="690" y2="142" stroke="var(--fg)" stroke-width="2"/>
+  <line x1="840" y1="142" x2="930" y2="142" stroke="var(--fg)" stroke-width="2"/>
+  <text x="10" y="160" font-size="11" class="muted">0x4037_0000 – 0x4037_7FFF</text>
+  <text x="250" y="160" font-size="11" class="muted">0x4037_8000 – 0x403D_FFFF</text>
+  <text x="840" y="160" font-size="11" class="muted">0x600F_E000</text>
+  <text x="10" y="196" font-size="12" font-weight="600">データバス</text>
+  <line x1="90" y1="204" x2="830" y2="204" stroke="var(--fg)" stroke-width="2" stroke-dasharray="6 4"/>
+  <line x1="840" y1="204" x2="930" y2="204" stroke="var(--fg)" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="250" y="222" font-size="11" class="muted">0x3FC8_8000 – 0x3FCE_FFFF</text>
+  <text x="700" y="222" font-size="11" class="muted">0x3FCF_0000 –</text>
+  <text x="840" y="222" font-size="11" class="muted">（同じ番地）</text>
+  <text x="10" y="244" font-size="11" class="muted">SRAM0 はデータバスから見えない（命令専用）。SRAM2 は命令バスから見えない（データ専用）。</text>
+</svg>
+</div>
+
+<h2 id="heap">2. アプリ実行中の heap（実測）</h2>
+<p>DERBY のレース中に <code>EXECMAP</code>（<code>-DPOCKET_SHIKI_JIT_EXECMAP</code> の計測ビルド）で、heap の領域ごとに空きと使用ブロックを数えた。<b>DIRAM はゲスト（QuickJS）の小さいブロック約 1,500 個で埋まり、空きは 2.2 KB が 38 個に散らばる（最大 152 B）。</b></p>
+<div class="card">
+<svg viewBox="0 0 940 300" role="img" aria-label="DERBY のレース中の heap 領域">
+  <text x="10" y="20" font-size="12" font-weight="600">DIRAM の heap 0x3FCB_5170 – 0x3FCE_9710（214,432 B、横幅は実寸に比例）</text>
+  <!-- whole bar = 214432 B over 900 px -->
+  <rect x="10" y="30" width="900" height="54" fill="var(--guest)"/>
+  <!-- 32,768 block at offset 22,644 -->
+  <rect x="105" y="30" width="137.5" height="54" fill="var(--static)"/>
+  <text x="173" y="61" text-anchor="middle" font-size="11">32 KB の塊</text>
+  <!-- shiki region offset 147,964 size 49,152 -->
+  <rect x="621" y="30" width="206" height="54" fill="var(--shiki)"/>
+  <text x="724" y="54" text-anchor="middle" font-size="12" font-weight="600" fill="#fff">Shiki の区画</text>
+  <text x="724" y="71" text-anchor="middle" font-size="11" fill="#fff">49,152 B</text>
+  <!-- 10,752 at offset 197,120 -->
+  <rect x="837" y="30" width="45" height="54" fill="var(--static)"/>
+  <text x="860" y="98" text-anchor="middle" font-size="10" class="muted">10.7 KB</text>
+  <text x="300" y="61" font-size="12">ゲストなどの小さいブロック</text>
+  <text x="10" y="102" font-size="11" class="muted">空き 2,232 B（38 個、最大 152 B）← JIT のコード 1 本（1〜3 KB）が入らない</text>
+
+  <text x="10" y="140" font-size="12" font-weight="600">そのほかの heap 領域</text>
+  <rect x="10" y="150" width="94" height="40" fill="var(--guest)"/>
+  <text x="57" y="175" text-anchor="middle" font-size="11">DIRAM 22 KB</text>
+  <text x="10" y="206" font-size="11" class="muted">空き 0（4 KB ×2 ほか）</text>
+
+  <rect x="230" y="150" width="140" height="40" fill="var(--dram)" fill-opacity=".4" stroke="var(--dram)"/>
+  <rect x="230" y="150" width="45" height="40" fill="var(--dram)"/>
+  <text x="300" y="175" text-anchor="middle" font-size="11">SRAM2 32 KB</text>
+  <text x="230" y="206" font-size="11" class="muted">空き 20 KB、でも実行不可</text>
+
+  <rect x="470" y="150" width="60" height="40" fill="var(--rtc)"/>
+  <text x="500" y="175" text-anchor="middle" font-size="11" fill="#fff">RTC 8 KB</text>
+  <text x="470" y="206" font-size="11" class="muted">以前の JIT のコードの行き先</text>
+
+  <text x="10" y="248" font-size="12">→ 区画を共有する前、実行用の確保（<tspan font-family="ui-monospace,monospace">MALLOC_CAP_EXEC</tspan>）は全部 RTC FAST に落ち、</text>
+  <text x="10" y="268" font-size="12">　JIT のコードは 6.9 KB で頭打ちだった。Shiki の区画は DIRAM にあるので、そのまま実行に使える。</text>
+</svg>
+<div class="legend">
+  <span style="--c:var(--guest)">ゲスト（QuickJS）など</span>
+  <span style="--c:var(--static)">大きい確保（用途は未特定）</span>
+  <span style="--c:var(--shiki)">Shiki の区画</span>
+  <span style="--c:var(--dram)">データ専用</span>
+  <span style="--c:var(--rtc)">RTC FAST</span>
+</div>
+</div>
+<p class="note">区画はアプリの開始時、ゲストを作る前に 1 つの塊で取る（shiki.md §4.3）。ゲストが散らばる前なので 48 KB が連続して取れ、DIRAM に入る。</p>
+
+<h2 id="bus">3. 同じ RAM を 2 つのバスで見る</h2>
+<p>SRAM1 の同じバイトは、データバスでは <code>0x3FC8_8000</code> 起点、命令バスでは <code>0x4037_8000</code> 起点の番地を持つ（差は <code>0x6F_0000</code>）。<b>JIT はデータ側の番地にバイト単位で書き、命令側の番地を関数として呼ぶ。</b></p>
+<div class="card">
+<svg viewBox="0 0 940 210" role="img" aria-label="データ側から書き命令側から実行する">
+  <rect x="330" y="70" width="280" height="70" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)" stroke-width="2"/>
+  <text x="470" y="100" text-anchor="middle" font-size="14" font-weight="600">SRAM1 の同じ 1 KB</text>
+  <text x="470" y="122" text-anchor="middle" font-size="12">JIT が作ったコード</text>
+  <rect x="20" y="20" width="250" height="56" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="145" y="44" text-anchor="middle" font-size="13" font-weight="600">コンパイラ（C）</text>
+  <text x="145" y="64" text-anchor="middle" font-size="11" class="muted">0x3FCD_9xxx に書く（データ側）</text>
+  <path d="M270 48 C 310 48, 320 80, 330 92" fill="none" stroke="var(--fg)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="670" y="20" width="250" height="56" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="795" y="44" text-anchor="middle" font-size="13" font-weight="600">描画（Shiki の draw）</text>
+  <text x="795" y="64" text-anchor="middle" font-size="11" class="muted">0x403C_9xxx を呼ぶ（命令側）</text>
+  <path d="M670 48 C 630 48, 620 80, 610 92" fill="none" stroke="var(--fg)" stroke-width="2" marker-end="url(#a1)"/>
+  <text x="470" y="170" text-anchor="middle" font-size="12">書いた後に <tspan font-family="ui-monospace,monospace">memw; isync</tspan>（内部 SRAM は命令キャッシュを通らないので無効化は要らない）</text>
+  <text x="470" y="192" text-anchor="middle" font-size="11" class="muted">RTC FAST は 1 つの番地で両方から見える。メモリ保護（CONFIG_ESP_SYSTEM_MEMPROT）は切ってある（§2）</text>
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+</svg>
+</div>
+
+<h2 id="region">4. Shiki の区画と JIT の相乗り</h2>
+<p>48 KiB の区画の持ち主は Shiki（フレーム・作業領域・エンジン・式・点）。JIT は<b>余りを借りる</b>だけで、持ち主が足りなくなれば返す。</p>
+<div class="card">
+<svg viewBox="0 0 940 170" role="img" aria-label="Shiki の区画の内訳（DERBY）">
+  <text x="10" y="18" font-size="12" font-weight="600">DERBY の区画 49,152 B（横幅は実寸に比例。持ち主の最大 37,408 B は shiki.md §4.5.1 の実測）</text>
+  <!-- 900px = 49152 -->
+  <rect x="10" y="28" width="197" height="56" fill="var(--shiki)"/>
+  <text x="108" y="52" text-anchor="middle" font-size="11" fill="#fff">フレーム</text>
+  <text x="108" y="68" text-anchor="middle" font-size="11" fill="#fff">10,752</text>
+  <rect x="207" y="28" width="197" height="56" fill="var(--shiki)" fill-opacity=".85"/>
+  <text x="305" y="52" text-anchor="middle" font-size="11" fill="#fff">フレーム</text>
+  <text x="305" y="68" text-anchor="middle" font-size="11" fill="#fff">10,752</text>
+  <rect x="404" y="28" width="197" height="56" fill="var(--shiki)" fill-opacity=".7"/>
+  <text x="502" y="52" text-anchor="middle" font-size="11" fill="#fff">作業領域</text>
+  <text x="502" y="68" text-anchor="middle" font-size="11" fill="#fff">10,752</text>
+  <rect x="601" y="28" width="104" height="56" fill="var(--shiki)" fill-opacity=".5"/>
+  <text x="653" y="52" text-anchor="middle" font-size="10">エンジン・式</text>
+  <text x="653" y="68" text-anchor="middle" font-size="10">点・コース</text>
+  <rect x="705" y="28" width="168" height="56" fill="var(--jit)"/>
+  <text x="789" y="52" text-anchor="middle" font-size="11" fill="#fff">JIT のコード</text>
+  <text x="789" y="68" text-anchor="middle" font-size="11" fill="#fff">と CUBIC の表</text>
+  <rect x="873" y="28" width="37" height="56" fill="var(--keep)"/>
+  <text x="891" y="100" text-anchor="middle" font-size="10" class="muted">2 KB</text>
+  <text x="10" y="122" font-size="12">・JIT は取った後に最大の空きが <tspan font-family="ui-monospace,monospace">JIT_REGION_KEEP</tspan>（2 KB）以上残るときだけ借りる（<tspan font-family="ui-monospace,monospace">shiki_heap_spare</tspan>）。</text>
+  <text x="10" y="142" font-size="12">・持ち主の確保が失敗したら reclaim hook が呼ばれ、JIT は区画のブロックを全部返して、確保をやり直させる。</text>
+  <text x="10" y="162" font-size="12">・JIT のコードの実行中は返さない（区画の確保はすべて描画の前に起きる）。</text>
+</svg>
+<div class="legend">
+  <span style="--c:var(--shiki)">Shiki（持ち主）</span>
+  <span style="--c:var(--jit)">JIT が借りている分</span>
+  <span style="--c:var(--keep)">持ち主のために空けておく分</span>
+</div>
+</div>
+
+<h2 id="flow">5. 1 回の描画で JIT が何をするか</h2>
+<div class="card">
+<svg viewBox="0 0 940 470" role="img" aria-label="JIT の判断の流れ">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <g font-size="12">
+  <rect x="330" y="10" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="35" text-anchor="middle" font-weight="600">draw（プラン 1 本を描く）</text>
+  <line x1="470" y1="50" x2="470" y2="74" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="76" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="101" text-anchor="middle">コードがある？</text>
+  <line x1="610" y1="96" x2="700" y2="96" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="655" y="88" text-anchor="middle" class="muted">ある</text>
+  <rect x="702" y="76" width="228" height="40" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
+  <text x="816" y="101" text-anchor="middle">機械語を呼ぶ（時刻を記録）</text>
+  <line x1="470" y1="116" x2="470" y2="140" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="482" y="132" class="muted">無い</text>
+  <rect x="330" y="142" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="167" text-anchor="middle">熱さ +1。4 回目？</text>
+  <line x1="330" y1="162" x2="240" y2="162" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="285" y="154" text-anchor="middle" class="muted">まだ</text>
+  <rect x="10" y="142" width="228" height="40" rx="8" fill="var(--interp)" fill-opacity=".35" stroke="var(--interp)"/>
+  <text x="124" y="167" text-anchor="middle">インタプリタで描く</text>
+  <line x1="470" y1="182" x2="470" y2="206" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="208" width="280" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="230" text-anchor="middle">入る見込みがあるか（予算・前回の大きさ）</text>
+  <text x="470" y="248" text-anchor="middle" class="muted">無ければ冷えたプランのコードを捨てて作る</text>
+  <line x1="470" y1="260" x2="470" y2="284" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="286" width="280" height="40" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="311" text-anchor="middle">1 回目: 長さだけ数える（書かない）</text>
+  <line x1="470" y1="326" x2="470" y2="350" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="352" width="280" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
+  <text x="470" y="374" text-anchor="middle">場所を取る: Shiki の区画 → だめなら</text>
+  <text x="470" y="392" text-anchor="middle">MALLOC_CAP_EXEC（実際には RTC FAST）</text>
+  <line x1="470" y1="404" x2="470" y2="428" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <rect x="330" y="430" width="280" height="34" rx="8" fill="var(--jit)" fill-opacity=".25" stroke="var(--jit)"/>
+  <text x="470" y="452" text-anchor="middle">2 回目: 書く → memw; isync → 呼ぶ</text>
+  <line x1="610" y1="378" x2="700" y2="378" stroke="var(--fg)" marker-end="url(#a2)"/>
+  <text x="655" y="370" text-anchor="middle" class="muted">取れない</text>
+  <rect x="702" y="352" width="228" height="52" rx="8" fill="var(--rtc)" fill-opacity=".2" stroke="var(--rtc)"/>
+  <text x="816" y="374" text-anchor="middle">大きさを覚えて失敗</text>
+  <text x="816" y="392" text-anchor="middle" class="muted">64 回の描画の後に再挑戦</text>
+  </g>
+</svg>
+</div>
+<div class="grid2">
+<div class="card">
+<h3>なぜ 4 回目か</h3>
+<p>1 回しか描かないプラン（タイトルなど）にメモリを使わないため。以前は 32 回目だったが、MEGADEMO は場面の途中でプランを登録し直すので、場面の半分をインタプリタで走らせていた（§14）。</p>
+</div>
+<div class="card">
+<h3>なぜ 2 回走らせるか</h3>
+<p>長さを先に知り、ちょうどの大きさを取るため。4 KB の作業用バッファで 1 回書いて写す方式は、heap が詰まると作業用バッファ自体が取れなかった（§14）。代わりにコンパイルは 1 命令 約 8,500 サイクルかかる。</p>
+</div>
+</div>
+
+<h2 id="code">6. 生成するコードの形</h2>
+<p>プランの命令を順に Xtensa の機械語に並べる。算術とループの制御はその場に書き、線を引く・SIN・ベクトルの区間などは C の関数（helper）を呼ぶ。</p>
+<div class="grid2">
+<div class="card">
+<h3>レジスタの割り当て</h3>
+<table>
+<tr><th>レジスタ</th><th>中身</th></tr>
+<tr><td><code>a2</code></td><td>実行の context（vm・入力・上限・helper の番地）</td></tr>
+<tr><td><code>a3</code></td><td>vm（<code>r[k]</code> は <code>l32i.n</code> の 4k 番地）</td></tr>
+<tr><td><code>a4</code></td><td>ステップの上限</td></tr>
+<tr><td><code>a5</code></td><td>入力</td></tr>
+<tr><td><code>a6</code></td><td><code>INT32_MAX</code>（飽和の直し）</td></tr>
+<tr><td><code>a7</code></td><td>最内側のループの回数</td></tr>
+<tr><td><code>a8</code>–<code>a15</code></td><td>作業用（<code>callx8</code> で helper に渡る）</td></tr>
+</table>
+</div>
+<div class="card">
+<h3>1 本のコードの並び</h3>
+<svg viewBox="0 0 420 230" role="img" aria-label="コードの並び">
+  <rect x="20" y="10" width="380" height="40" fill="var(--keep)" fill-opacity=".5"/>
+  <text x="210" y="35" text-anchor="middle" font-size="12">literal pool（大きい定数・色・CUBIC の表の行）</text>
+  <rect x="20" y="50" width="380" height="30" fill="var(--jit)" fill-opacity=".35"/>
+  <text x="210" y="70" text-anchor="middle" font-size="12">entry a1,48（入口）</text>
+  <rect x="20" y="80" width="380" height="40" fill="var(--jit)" fill-opacity=".2"/>
+  <text x="210" y="98" text-anchor="middle" font-size="12">ブロックの頭: steps += k、上限を越えるなら</text>
+  <text x="210" y="114" text-anchor="middle" font-size="12">その pc を返してインタプリタへ</text>
+  <rect x="20" y="120" width="380" height="40" fill="var(--jit)" fill-opacity=".35"/>
+  <text x="210" y="138" text-anchor="middle" font-size="12">算術をその場で（mull+mulsh、srai、飽和）</text>
+  <text x="210" y="154" text-anchor="middle" font-size="12">helper を callx8 で呼ぶ</text>
+  <rect x="20" y="160" width="380" height="30" fill="var(--jit)" fill-opacity=".2"/>
+  <text x="210" y="180" text-anchor="middle" font-size="12">END: addi + 分岐（回数は a7）</text>
+  <rect x="20" y="190" width="380" height="30" fill="var(--jit)" fill-opacity=".35"/>
+  <text x="210" y="210" text-anchor="middle" font-size="12">retw.n（戻り値: pc か 状態 &lt;&lt; 8）</text>
+</svg>
+</div>
+</div>
+<p class="note">エンコーダの表はアセンブラから作り（<code>tools/shiki_jit/gen_encoding.py</code>）、host ではランダムなプログラムを小さな Xtensa エミュレータで走らせてインタプリタと比べ（<code>test_scalar.py</code>）、実機の cycle bench でも 800 本を突き合わせる（すべて一致）。</p>
+
+<h2 id="evict">7. メモリが足りないとき</h2>
+<table>
+<tr><th>場面</th><th>何をする</th><th>その後</th></tr>
+<tr><td>Shiki の持ち主の確保が失敗</td><td>JIT は区画に置いた全プランのコードと表を返す（reclaim hook）</td><td>64 回の描画の後に作り直し</td></tr>
+<tr><td>新しいプランのコードが入らない</td><td>直近 1,024 回の描画で使われていないプランのコードを、古い順に捨てる（§16）</td><td>捨てられたプランは熱さ 0 から。また描かれれば 4 回目に作り直し</td></tr>
+<tr><td>それでも入らない</td><td>必要な大きさを覚えて失敗（<code>need64</code>）</td><td>次の挑戦は最大の空きを見るだけ。数えるパスを無駄に走らせない（§14）</td></tr>
+<tr><td>コンパイラが断る命令</td><td>二度と試さない</td><td>インタプリタで走る</td></tr>
+</table>
+<p class="note">DERBY はレース用に全カメラのプランを登録するので、使わなくなったカメラのコードがメモリを塞いでいた。§16 の「冷えたプランを捨てる」はその対策。</p>
+
+<h2 id="result">8. 速さ: 置き場所で 3 倍変わる</h2>
+<p>1 フレームあたりの Shiki のエンジンの時間（ms、30 フレームの平均の窓。値が幅を持つ場合は中央）。<b>同じ JIT のコードでも、RTC FAST に置くと DIRAM（区画）に置いた場合の 2〜3 倍遅い</b>。</p>
+<div class="card">
+<svg viewBox="0 0 940 330" role="img" aria-label="置き場所ごとの描画時間">
+  <g font-size="12">
+  <!-- scale: 3.4 ms = 600 px, x0=200 -->
+  <text x="10" y="40" font-weight="600">MEGADEMO NEWS</text>
+  <rect x="200" y="24" width="575" height="12" fill="var(--interp)"/><text x="782" y="35">3.26</text>
+  <rect x="200" y="38" width="425" height="12" fill="var(--rtcbar)"/><text x="632" y="49">2.41</text>
+  <rect x="200" y="52" width="146" height="12" fill="var(--diram)"/><text x="353" y="63">0.83</text>
+
+  <text x="10" y="100" font-weight="600">MEGADEMO TWIST</text>
+  <rect x="200" y="84" width="582" height="12" fill="var(--interp)"/><text x="789" y="95">3.30</text>
+  <rect x="200" y="98" width="415" height="12" fill="var(--rtcbar)"/><text x="622" y="109">2.35</text>
+  <rect x="200" y="112" width="180" height="12" fill="var(--diram)"/><text x="387" y="123">1.02</text>
+
+  <text x="10" y="160" font-weight="600">MEGADEMO ZENITH</text>
+  <rect x="200" y="144" width="506" height="12" fill="var(--interp)"/><text x="713" y="155">2.87</text>
+  <rect x="200" y="158" width="383" height="12" fill="var(--rtcbar)"/><text x="590" y="169">2.17</text>
+  <rect x="200" y="172" width="138" height="12" fill="var(--diram)"/><text x="345" y="183">0.78</text>
+
+  <text x="10" y="220" font-weight="600">DERBY FIELD</text>
+  <rect x="200" y="204" width="199" height="12" fill="var(--interp)"/><text x="406" y="215">1.13</text>
+  <rect x="200" y="218" width="166" height="12" fill="var(--rtcbar)"/><text x="373" y="229">0.94</text>
+  <rect x="200" y="232" width="132" height="12" fill="var(--diram)"/><text x="339" y="243">0.75</text>
+
+  <text x="10" y="280" font-weight="600">DERBY パドック</text>
+  <rect x="200" y="264" width="92" height="12" fill="var(--interp)"/><text x="299" y="275">0.52</text>
+  <rect x="200" y="278" width="71" height="12" fill="var(--rtcbar)"/><text x="278" y="289">0.40</text>
+  <rect x="200" y="292" width="59" height="12" fill="var(--diram)"/><text x="266" y="303">0.335</text>
+  </g>
+</svg>
+<div class="legend">
+  <span style="--c:var(--interp)">インタプリタ（JIT 無し）</span>
+  <span style="--c:var(--rtcbar)">JIT、コードは RTC FAST（2ced4c9・05d1a75）</span>
+  <span style="--c:var(--diram)">JIT、コードは Shiki の区画＝DIRAM（ba9d872）</span>
+</div>
+</div>
+<p class="note">比べた窓は別の実行（同じ場面・同じ描画数）。DERBY は実行ごとにレースが違うので、場面の窓を比べている。記録は <a href="logs/shiki-jit10-20261103-2ced4c9.txt">jit10</a>、<a href="logs/shiki-jit11-20261103-05d1a75.txt">jit11</a>、<a href="logs/shiki-jit12-20261103-ba9d872.txt">jit12</a>。</p>
+
+<h2 id="facts">9. 事実と推定</h2>
+<div class="kv">
+<b>実測</b><span>heap の領域ごとの空き・使用（EXECMAP）、JIT の確保がどこに落ちたか（got= の数）、各場面の ms、区画を共有した後に登録の失敗・エラーが無いこと（DERBY・MEGADEMO・BIG WAVE）。</span>
+<b>実測</b><span>番地の地図は TRM v1.8 p.403、p.685。</span>
+<b>推定</b><span>RTC FAST に置いたコードが遅いのは命令の取り込みが遅いため（取り込みの速さそのものは未測定。同じコードの置き場所だけを変えた比較からの読み）。</span>
+<b>推定</b><span>DERBY で 14 プランがコードを返したのはレースの 26 プランの登録の時（時刻は記録していない）。</span>
+<b>未特定</b><span>DIRAM の 32 KB と 10.7 KB の塊の持ち主。</span>
+</div>
+</main>
+</body>
+</html>
