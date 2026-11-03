@@ -28,3 +28,29 @@ I (323880) kasane: SHIKI_TURN draws=22.4 steps=1406 engine_ms=0.764 total_ms=0.8
 I (324889) kasane: SHIKI_TURN draws=22.0 steps=1393 engine_ms=1.013 total_ms=1.082 frames=30 jit=0/7212 cubic=17.0/0.229 pat=9.0/0.026
 I (325901) kasane: SHIKI_TURN draws=22.0 steps=1392 engine_ms=0.709 total_ms=0.775 frames=30 jit=1/7212 cubic=16.9/0.160 pat=9.0/0.017
 I (326908) kasane: SHIKI_TURN draws=22.6 steps=1415 engine_ms=1.047 total_ms=1.117 frames=30 jit=0/7212 cubic=18.1/0.248 pat=9.0/0.026
+
+# MEGADEMO, job jit6-mega
+I (464363) kasane: SHIKI_TURN draws=17.2 steps=7147 engine_ms=2.508 total_ms=2.559 frames=30 jit=1/2028 cubic=0.0/0.000 pat=0.0/0.000
+I (465372) kasane: SHIKI_TURN draws=18.0 steps=7782 engine_ms=3.218 total_ms=3.273 frames=30 jit=0/2028 cubic=0.0/0.000 pat=0.0/0.000
+I (466374) kasane: SHIKI_TURN draws=18.0 steps=7783 engine_ms=2.365 total_ms=2.418 frames=30 jit=1/3216 cubic=0.0/0.000 pat=0.0/0.000
+I (467382) kasane: SHIKI_TURN draws=18.0 steps=7778 engine_ms=3.209 total_ms=3.263 frames=30 jit=0/3216 cubic=0.0/0.000 pat=0.0/0.000
+I (468387) kasane: SHIKI_TURN draws=18.0 steps=7773 engine_ms=2.272 total_ms=2.324 frames=30 jit=1/3216 cubic=0.0/0.000 pat=0.0/0.000
+I (469207) js: MEGADEMO SCENE TWIST tier=2 plans=8 freed=14 registered=14
+I (470402) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=3.251 total_ms=3.292 frames=30 jit=1/0 cubic=23.0/0.457 pat=0.0/0.000
+I (471410) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=3.262 total_ms=3.304 frames=30 jit=0/0 cubic=23.0/0.457 pat=0.0/0.000
+I (472411) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=2.332 total_ms=2.375 frames=30 jit=1/6560 cubic=23.0/0.336 pat=0.0/0.000
+I (473449) kasane: SHIKI_TURN draws=6.8 steps=6355 engine_ms=3.160 total_ms=3.200 frames=30 jit=0/6560 cubic=22.2/0.441 pat=0.0/0.000
+I (474463) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=3.263 total_ms=3.305 frames=30 jit=1/6560 cubic=23.0/0.456 pat=0.0/0.000
+I (475469) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=3.266 total_ms=3.306 frames=30 jit=0/6560 cubic=23.0/0.462 pat=0.0/0.000
+I (476471) kasane: SHIKI_TURN draws=9.6 steps=8100 engine_ms=3.305 total_ms=3.355 frames=30 jit=1/7396 cubic=23.0/0.375 pat=0.0/0.000
+I (477252) js: MEGADEMO SCENE ZENITH tier=2 plans=0 freed=16 registered=22
+I (478482) kasane: SHIKI_TURN draws=10.2 steps=5936 engine_ms=2.257 total_ms=2.302 frames=30 jit=1/2396 cubic=0.7/0.028 pat=0.0/0.000
+I (479493) kasane: SHIKI_TURN draws=10.3 steps=6210 engine_ms=2.736 total_ms=2.782 frames=30 jit=0/2396 cubic=1.3/0.056 pat=0.0/0.000
+I (480494) kasane: SHIKI_TURN draws=10.9 steps=6264 engine_ms=2.062 total_ms=2.107 frames=30 jit=1/4224 cubic=1.3/0.056 pat=0.0/0.000
+I (481502) kasane: SHIKI_TURN draws=10.4 steps=6212 engine_ms=2.744 total_ms=2.790 frames=30 jit=0/4224 cubic=1.6/0.067 pat=0.0/0.000
+I (482510) kasane: SHIKI_TURN draws=11.7 steps=6747 engine_ms=2.166 total_ms=2.210 frames=30 jit=1/4864 cubic=1.2/0.050 pat=0.0/0.000
+I (483517) kasane: SHIKI_TURN draws=11.9 steps=6649 engine_ms=2.945 total_ms=2.993 frames=30 jit=0/4864 cubic=1.7/0.073 pat=0.0/0.000
+I (484499) js: MEGADEMO SCENE CORE tier=2 plans=0 freed=15 registered=37
+I (489564) kasane: SHIKI_TURN draws=22.8 steps=3130 engine_ms=1.491 total_ms=1.541 frames=30 jit=0/2528 cubic=0.0/0.000 pat=0.0/0.000
+I (490571) kasane: SHIKI_TURN draws=18.2 steps=2370 engine_ms=0.870 total_ms=0.912 frames=30 jit=1/2528 cubic=0.0/0.000 pat=0.0/0.000
+I (491970) kasane: SHIKI_TURN draws=20.2 steps=2356 engine_ms=1.173 total_ms=1.220 frames=30 jit=0/2528 cubic=0.0/0.000 pat=0.0/0.000
