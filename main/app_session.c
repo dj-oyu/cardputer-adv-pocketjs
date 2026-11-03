@@ -30,9 +30,6 @@
 #include "pocket_kasane.h"
 #include "pocket_proc.h"
 #include "ui/kasane/ksn_shiki_jit.h"
-/* Measurement build (shiki-jit.md sec.14): SHIKI_TURN windows alternate
- * the scalar JIT on and off. Removed after the measurement. */
-#define POCKET_SHIKI_JIT_AB 1
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
 #endif

@@ -721,8 +721,9 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
 
 /* ---- Stage 3 at run time ----------------------------------------------------
  * A plan is compiled on its JIT_HEAT-th draw (a plan drawn once, a title's,
- * never costs memory), once: on any failure, or when the code would pass
- * the budget, it stays with the interpreter. The budget bounds the
+ * never costs memory). A plan the compiler refuses stays with the
+ * interpreter; one that met a full budget or heap is tried again later
+ * (JIT_RETRY). The budget bounds the
  * executable memory taken from the heap the app shares (shiki-jit.md
  * sec.11). 4, not 32: MEGADEMO registers a scene's plans while it plays
  * (TWIST's negative set from frame 60, drawn from 122 for 74 frames), and
