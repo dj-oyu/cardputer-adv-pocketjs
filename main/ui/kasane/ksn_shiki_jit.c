@@ -417,12 +417,24 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     ksn_jit_emit(b,KSN_JIT_L32IN,3,2,0);
     ksn_jit_emit(b,KSN_JIT_L32IN,5,2,1);
     ksn_jit_emit(b,KSN_JIT_L32IN,4,2,2);
-    ksn_jit_emit(b,KSN_JIT_L32IN,7,2,3);
     ksn_jit_emit(b,KSN_JIT_MOVI,6,-1,0);
     ksn_jit_emit(b,KSN_JIT_SRLI,6,6,1);
 
     size_t at[KSN_SHIKI_CODE+1];
     struct { uint16_t at; uint8_t target; } fix[JIT_FIXUPS];
+    /* sec.13: an innermost REPEAT / REPEAT_REG whose body has no BREAK_IF_GT
+     * counts its steps once on entry, count * (body + END), and keeps the
+     * count in a7 (callx8 leaves a0..a7 alone); its END is addi + branch. */
+    bool hoist[KSN_SHIKI_CODE];
+    for(unsigned pc=0;pc<n;pc++){
+        const ksn_shiki_inst *i=&plan->code[pc];
+        hoist[pc]=false;
+        if(i->op!=KSN_SHIKI_REPEAT&&i->op!=KSN_SHIKI_REPEAT_REG)continue;
+        bool ok=true;
+        for(unsigned k=pc+1u;k<i->end&&ok;k++)ok=!ends_block(plan->code[k].op);
+        hoist[pc]=ok;
+    }
+    size_t body_at[KSN_SHIKI_LOOP_DEPTH];            /* a hoisted loop's body, or SIZE_MAX */
     unsigned nfix=0;
     uint8_t stack[KSN_SHIKI_LOOP_DEPTH];             /* the openers, innermost last */
     unsigned depth=0;
@@ -436,6 +448,23 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
     for(unsigned pc=0;pc<n;pc++){
         const ksn_shiki_inst *i=&plan->code[pc];
         at[pc]=b->len;
+        if(block&&pc>0&&hoist[pc-1u]&&depth&&stack[depth-1u]==pc-1u){
+            /* The hoisted loop's entry (its opener pushed the frame). */
+            const unsigned f=depth-1u,len=plan->code[pc-1u].end-(pc-1u);   /* body + END */
+            ksn_jit_emit(b,KSN_JIT_L16UI,7,3,(int)(VM_REM(f)/2));
+            ksn_jit_emit(b,KSN_JIT_L16UI,8,3,(int)(offsetof(ksn_shiki_vm,steps)/2));
+            ksn_jit_emit(b,KSN_JIT_MOVI,9,(int)len,0);
+            ksn_jit_emit(b,KSN_JIT_MULL,9,9,7);
+            ksn_jit_emit(b,KSN_JIT_ADDN,8,8,9);
+            const size_t br=b->len;
+            ksn_jit_emit(b,KSN_JIT_BGE,4,8,0);
+            ksn_jit_emit(b,KSN_JIT_MOVI,2,(int)pc,0);
+            ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
+            patch(b,br,KSN_JIT_BGE,4,8,(int)(b->len-br-4u));
+            ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(offsetof(ksn_shiki_vm,steps)/2));
+            body_at[f]=b->len;
+            block=false;
+        }
         if(block){
             unsigned k=pc;
             while(k<n&&!ends_block(plan->code[k].op))k++;
@@ -527,12 +556,26 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
             ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(VM_REM(depth)/2));
             ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)depth+1,0);
             ksn_jit_emit(b,KSN_JIT_S8I,8,3,(int)offsetof(ksn_shiki_vm,depth));
+            body_at[depth]=SIZE_MAX;
             stack[depth++]=(uint8_t)pc;
             block=true;
             break;
         case KSN_SHIKI_END: {
             if(!depth)return false;
             const unsigned f=depth-1u,o=stack[f];
+            if(body_at[f]!=SIZE_MAX){
+                /* A hoisted loop: the count is in a7, the steps are counted. */
+                ksn_jit_emit(b,KSN_JIT_ADDI,7,7,-1);
+                const size_t br=b->len;
+                ksn_jit_emit(b,KSN_JIT_BEQZN,7,0,0);
+                ksn_jit_emit(b,KSN_JIT_J,(int)((long)body_at[f]-(long)b->len-4),0,0);
+                patch(b,br,KSN_JIT_BEQZN,7,(int)(b->len-br-4u),0);
+                ksn_jit_emit(b,KSN_JIT_MOVI,8,(int)f,0);
+                ksn_jit_emit(b,KSN_JIT_S8I,8,3,(int)offsetof(ksn_shiki_vm,depth));
+                depth--;
+                block=true;
+                break;
+            }
             ksn_jit_emit(b,KSN_JIT_L16UI,8,3,(int)(VM_REM(f)/2));
             ksn_jit_emit(b,KSN_JIT_ADDI,8,8,-1);
             ksn_jit_emit(b,KSN_JIT_S16I,8,3,(int)(VM_REM(f)/2));
@@ -566,7 +609,8 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
             if(skips&&depth>=KSN_SHIKI_LOOP_DEPTH)return false;
             ksn_jit_emit(b,KSN_JIT_MOVN,10,2,0);
             ksn_jit_emit(b,KSN_JIT_MOVI,11,(int)pc,0);
-            ksn_jit_emit(b,KSN_JIT_CALLX8,7,0,0);
+            ksn_jit_emit(b,KSN_JIT_L32IN,9,2,3);         /* ctx->leaf */
+            ksn_jit_emit(b,KSN_JIT_CALLX8,9,0,0);
             const size_t go=b->len;
             ksn_jit_emit(b,KSN_JIT_BEQZN,10,0,0);
             if(skips){
@@ -579,7 +623,7 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
             ksn_jit_emit(b,KSN_JIT_MOVN,2,10,0);
             ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
             patch(b,go,KSN_JIT_BEQZN,10,(int)(b->len-go-4u),0);
-            if(skips){stack[depth++]=(uint8_t)pc;block=true;}
+            if(skips){body_at[depth]=SIZE_MAX;stack[depth++]=(uint8_t)pc;block=true;}
             break;
         }
         }
