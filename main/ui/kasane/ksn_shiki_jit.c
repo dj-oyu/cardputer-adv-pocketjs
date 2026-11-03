@@ -673,6 +673,8 @@ uint32_t ksn_shiki_jit_fail[3];
 uint32_t ksn_shiki_jit_evicted;
 /* Plans whose code was dropped for not being drawn lately (sec.16). */
 uint32_t ksn_shiki_jit_cold;
+/* Compiles attempted and their cycles (sec.17), for the session's log. */
+uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
@@ -1074,7 +1076,10 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
         static bool first=true;
         if(first){first=false;EXECMAP_REPORT("first");}
 #endif
+        const uint32_t t0=esp_cpu_get_cycle_count();
         const int r=compile_scalar(p);
+        ksn_shiki_jit_compile_cy+=esp_cpu_get_cycle_count()-t0;
+        ksn_shiki_jit_compiles++;
         if(r!=JIT_DONE){
             ksn_shiki_jit_fail[r]++;
             if(r==JIT_NOMEM)EXECMAP_REPORT("nomem");
