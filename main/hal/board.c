@@ -65,6 +65,16 @@ int g_board_swap_into = 1;
 // One TX payload; every write waits for the exact previous descriptor.
 // Native UI loses copy/DMA overlap; the stable shared drawing strip remains.
 static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
+// The panel's byte order (RAMCTRL 0xB0, second parameter, ENDIAN = bit 3).
+// false: the ST7789's reset order, MSB first, so every strip is byte-swapped
+// on its way out. true: LSB first, the order the CPU draws in, so the strip
+// goes as drawn. Whether a 4-line SPI ST7789 honours ENDIAN is not in any
+// document we have (ESP-IDF's driver sets it; reports are from 8080 buses),
+// and MISO is unwired, so the only test is the glass: BOARD_ENDIAN_PROBE
+// alternates the two every 2 s and the owner looks for a change.
+static bool lcd_le;
+#define BOARD_ENDIAN_PROBE 1
+static void put_strip(uint16_t *out,uint16_t *in,int count);
 static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
@@ -169,6 +179,22 @@ static esp_err_t command(uint8_t c, const void *data, size_t n) {
     esp_err_t e = tx(false, &c, 1);
     return e == ESP_OK && n ? tx(true, data, n) : e;
 }
+static esp_err_t set_endian(bool le){
+    const uint8_t ramctrl[]={0x00,(uint8_t)(0xF0|(le?0x08:0x00))};
+    esp_err_t e=command(0xb0,ramctrl,2);
+    if(e==ESP_OK)lcd_le=le;
+    return e;
+}
+#if BOARD_ENDIAN_PROBE
+static int64_t endian_flip_us;
+/* At a window change (no strip in flight, RAMWR about to reopen). */
+static void endian_probe(void){
+    const int64_t now=esp_timer_get_time();
+    if(now-endian_flip_us<2000000)return;
+    endian_flip_us=now;
+    if(set_endian(!lcd_le)==ESP_OK)ESP_LOGI("board","LCD_ENDIAN le=%d",lcd_le?1:0);
+}
+#endif
 static esp_err_t kwrite(uint8_t reg, uint8_t value) {
     uint8_t data[] = {reg, value};
     return i2c_master_transmit(keyboard, data, 2, 30);
@@ -219,6 +245,14 @@ static void __attribute__((noinline)) swap_pie(uint16_t *in, uint16_t *out, unsi
 
 static void swap_scalar(uint16_t *out, const uint16_t *in, int count) {
     for(int i=0;i<count;i++) out[i]=(uint16_t)((in[i]<<8)|(in[i]>>8));
+}
+/* A strip on its way to the panel: swapped for an MSB-first panel, as drawn
+ * for an LSB-first one. in==out swaps in place (no copy when LSB first). */
+static void put_strip(uint16_t *out,uint16_t *in,int count){
+    if(lcd_le){if(out!=in)memcpy(out,in,(size_t)count*2u);return;}
+    if(pie_swap&&((uintptr_t)in&15u)==0&&((uintptr_t)out&15u)==0&&(count*2)%32==0)
+        swap_pie(in,out,(unsigned)(count*2/32));
+    else swap_scalar(out,in,count);
 }
 
 // 32 pixels is 64 bytes, two of the 32-byte blocks the vector loop consumes.
@@ -477,6 +511,9 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if(y!=next_row||window_x!=0||window_cols!=LCD_W) {
         uint16_t x0=40, x1=279, y0=53+(uint16_t)y, y1=53+LCD_H-1;
         uint8_t xs[]={x0>>8,x0,x1>>8,x1}, ys[]={y0>>8,y0,y1>>8,y1};
+#if BOARD_ENDIAN_PROBE
+        if(y==0)endian_probe();
+#endif
         esp_err_t e=command(0x2a,xs,4); if(e) return e;
         e=command(0x2b,ys,4); if(e) return e;
         e=command(0x2c,NULL,0); if(e) return e;   // RAMWR: opens the write session
@@ -503,12 +540,10 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         DD_ADD(DD_TX_COPY_BYTES,bytes);
         uint16_t *panel = tx_buf;
         if (g_board_swap_into) {
-            if(pie_swap) swap_pie(pixels,panel,(unsigned)(count*2/32));
-            else swap_scalar(panel,pixels,count);
+            put_strip(panel,pixels,count);
         } else {
             // The A/B arm: swap in place, then copy, the way 7fd965f shipped it.
-            if(pie_swap) swap_pie(pixels,pixels,(unsigned)(count*2/32));
-            else swap_scalar(pixels,pixels,count);
+            put_strip(pixels,pixels,count);
             memcpy(panel, pixels, bytes);
         }
 #ifdef KASANE_P0_BUS_PROBE
@@ -540,8 +575,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         }
     } else {
         DD_OPEN(copy,DD_TX_COPY);
-        if(pie_swap) swap_pie(pixels,pixels,(unsigned)(count*2/32));
-        else swap_scalar(pixels,pixels,count);
+        put_strip(pixels,pixels,count);
         DD_CLOSE(copy);
         if (e == ESP_OK) {
             DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
@@ -605,12 +639,7 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     DD_OPEN(copy,DD_TX_COPY);
     DD_ADD(DD_TX_COPY_BYTES,bytes);
     uint16_t *panel = tx_buf;
-    bool aligned = pie_swap && (x%16)==0 && (cols%16)==0;
-    for (int r=0;r<rows;r++) {
-        uint16_t *in = pixels+r*LCD_W+x, *out = panel+r*cols;
-        if (aligned) swap_pie(in, out, (unsigned)(cols*2/32));
-        else swap_scalar(out, in, cols);
-    }
+    for (int r=0;r<rows;r++) put_strip(panel+r*cols,pixels+r*LCD_W+x,cols);
     DD_CLOSE(copy);
     if (g_board_async) {
         if (e == ESP_OK) {
