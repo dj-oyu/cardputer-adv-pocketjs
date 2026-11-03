@@ -207,7 +207,7 @@ ol.steps li{margin:4px 0}
 <div class="grid2">
 <div class="card">
 <h3>大きさ</h3>
-<p>240 × 135 × 2 B（RGB565）= <b>64,800 B</b> <span class="e">計算</span>。PSRAM は無く、内部 RAM は約 334 KiB。ホーム画面の空き heap は 280,932 B <span class="m">実測</span>（CLAUDE.md）で、アプリを動かすと JS のゲストに最大 160 KiB（<code>app_session.c:1509</code>）、DERBY は Shiki の区画に 56 KiB（<code>app_registry.c:144</code>）を取る。DERBY の起動後のシステムの空きは 37,308 B <span class="m">実測</span>（<a href="shiki-jit.md">shiki-jit.md</a> §21.3）。<b>64,800 B の 1 枚が丸ごと入る場所が、アプリの実行中には無い。</b></p>
+<p>240 × 135 × 2 B（RGB565）= <b>64,800 B</b> <span class="e">計算</span>。PSRAM は無く、内部 RAM は約 334 KiB。ホーム画面の空き heap は 280,932 B <span class="m">実測</span>（CLAUDE.md）で、アプリを動かすと JS のゲストに最大 160 KiB（<code>app_session.c:1509</code>）、Shiki の区画に既定 48 KiB を取る（DERBY は一時 56 KiB にし、94439f7 で 48 KiB に戻した。56 KiB の時の DERBY の起動後のシステムの空きは 37,308 B <span class="m">実測</span>、<a href="shiki-jit.md">shiki-jit.md</a> §21.3・§22.1）。<b>64,800 B の 1 枚が丸ごと入る場所が、アプリの実行中には無い。</b></p>
 <p>代わりに常駐するのは、作業台の帯 <code>shared</code> 3,840 B（<code>board.c:37</code>）と転送用の <code>tx_buf</code> 3,840 B（<code>board.c:67</code>）の計 7,680 B。フレームバッファの約 12%。</p>
 </div>
 <div class="card">
@@ -489,7 +489,7 @@ ol.steps li{margin:4px 0}
 </div>
 
 <h2 id="mem">8. Shiki の区画のメモリ（DERBY）</h2>
-<p>Shiki を宣言したアプリは、起動時、ゲストを作る前に、連続した 1 区画を取る（<code>app_session.c:1532–1545</code>）。既定 48 KiB（<code>shiki_heap.h:19</code>）、DERBY は 56 KiB = 57,344 B（<code>app_registry.c:144</code>）。区画の中は自前の固定長の表で管理する（<code>shiki_heap.c</code>、<a href="shiki-jit.md">shiki-jit.md</a> §21）: 生きたブロックを番地の順に 128 件（<code>shiki_heap.c:48</code>、表は <code>.bss</code> の 512 B）、持ち主は下から、JIT は上から取り、空きは常にゼロ。</p>
+<p>Shiki を宣言したアプリは、起動時、ゲストを作る前に、連続した 1 区画を取る（<code>app_session.c:1532–1545</code>）。既定 48 KiB（<code>shiki_heap.h:19</code>）。DERBY も 48 KiB（一時 56 KiB にし、94439f7 で戻した、<a href="shiki-jit.md">shiki-jit.md</a> §22.1）。区画の中は自前の固定長の表で管理する（<code>shiki_heap.c</code>、<a href="shiki-jit.md">shiki-jit.md</a> §21）: 生きたブロックを番地の順に 128 件（<code>shiki_heap.c:48</code>、表は <code>.bss</code> の 512 B）、持ち主は下から、JIT は上から取り、空きは常にゼロ。</p>
 <div class="card scroll">
 <svg viewBox="0 0 940 250" role="img" aria-label="DERBY の Shiki の区画の内訳" style="min-width:720px">
   <text x="20" y="18" font-size="12" font-weight="600">DERBY の区画 57,344 B（c4d7a6c、横幅は実寸に比例。低い番地 → 高い番地）</text>

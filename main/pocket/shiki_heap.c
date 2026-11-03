@@ -42,7 +42,7 @@ static void sys_region_free(void *p){free(p);}
 #define MALLOC_ALIGN _Alignof(max_align_t)
 
 /* 128 blocks: 16 data regions, 8 lists, 32 programs, the surface's two
- * frames, the workspace and the VM state, and the JIT's code and weights
+ * frames, the image band cache and the VM state, and the JIT's code and weights
  * (two per program), with room left. Words of 4 bytes, so 16 bits address
  * 256 KiB. */
 #define SLOTS 128u
