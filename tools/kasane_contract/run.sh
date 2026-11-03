@@ -61,6 +61,11 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_emit.c -lm -o "$out/shiki-emit"
   "$out/shiki-emit"
+  # The Shiki region's spare room and reclaim hook (the JIT's code lives
+  # there, docs/kasane/shiki-jit.md sec.15).
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/pocket \
+    main/pocket/shiki_heap.c tools/kasane_contract/test_shiki_heap_spare.c -o "$out/shiki-heap-spare"
+  "$out/shiki-heap-spare"
   # sec.2.4's conversion in integers against the libm form (bit for bit).
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_from_double.c -lm -o "$out/shiki-from-double"

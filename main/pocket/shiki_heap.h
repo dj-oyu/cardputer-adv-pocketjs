@@ -36,6 +36,13 @@ bool shiki_heap_owns(const void *p);
 void shiki_heap_info(uint32_t *bytes,uint32_t *used,uint32_t *largest);
 /* The region itself (NULL, 0 without one): for memory diagnostics. */
 void shiki_heap_region(const void **p,size_t *bytes);
+/* Spare room for a user that can give its blocks back (the JIT's code,
+ * docs/kasane/shiki-jit.md sec.15): 16-byte aligned, and only while the
+ * largest free block left after it is at least keep bytes. The region's own
+ * users come first: when one of their allocations fails, the reclaim hook
+ * is called (it frees spare blocks) and the allocation is tried once more. */
+void *shiki_heap_spare(size_t n,size_t keep);
+void shiki_heap_set_reclaim(void (*reclaim)(void));
 
 /* The allocators for code that serves both kinds of session: the region when
  * one is open, the system heap otherwise; free goes wherever the block came

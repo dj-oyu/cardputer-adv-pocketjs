@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_memory_utils.h"
 #include "esp_cpu.h"
+#include "shiki_heap.h"
 #else
 #define KSN_JIT_DEVICE 0
 #endif
@@ -660,6 +661,8 @@ bool ksn_shiki_jit_enabled=true;
  * session's log can read them, used on the device only. */
 bool ksn_shiki_jit_scalar_on=true;
 uint32_t ksn_shiki_jit_fail[3];
+/* Plans that gave their region blocks back to the Shiki region (sec.15). */
+uint32_t ksn_shiki_jit_evicted;
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
@@ -669,9 +672,9 @@ uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 #ifdef POCKET_SHIKI_JIT_EXECMAP
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "shiki_heap.h"
-/* Where the JIT's allocations landed: [0] DIRAM, [1] elsewhere. */
-static uint32_t execmap_where[2];
+/* Where the JIT's code landed: [0] DIRAM from the system heap, [1]
+ * elsewhere (RTC fast memory), [2] the Shiki region. */
+static uint32_t execmap_where[3];
 typedef struct {
     intptr_t start,end;
     uint32_t free,largest,nfree,used,nused;
@@ -725,13 +728,14 @@ static void execmap_report(const char *why){
     m.mark=false;heap_caps_walk_all(execmap_walk,&m);
     const void *sr;size_t sn;
     shiki_heap_region(&sr,&sn);
-    ESP_LOGI("jit","EXECMAP why=%s exec_free=%u exec_largest=%u int_free=%u int_largest=%u shiki=%p/%u jit=%u got=%u/%u fail=%u/%u/%u",
+    ESP_LOGI("jit","EXECMAP why=%s exec_free=%u exec_largest=%u int_free=%u int_largest=%u shiki=%p/%u jit=%u got=%u/%u/%u evict=%u fail=%u/%u/%u",
              why,(unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
              sr,(unsigned)sn,(unsigned)ksn_shiki_jit_bytes,
-             (unsigned)execmap_where[0],(unsigned)execmap_where[1],
+             (unsigned)execmap_where[0],(unsigned)execmap_where[1],(unsigned)execmap_where[2],
+             (unsigned)ksn_shiki_jit_evicted,
              (unsigned)ksn_shiki_jit_fail[0],(unsigned)ksn_shiki_jit_fail[1],(unsigned)ksn_shiki_jit_fail[2]);
     for(unsigned k=0;k<m.n;k++){
         const execmap_heap *h=&m.h[k];
@@ -744,10 +748,10 @@ static void execmap_report(const char *why){
     }
 }
 #define EXECMAP_REPORT(why) execmap_report(why)
-#define EXECMAP_GOT(x) (execmap_where[esp_ptr_in_diram_iram(x)?0:1]++)
+#define EXECMAP_GOT(x,region) (execmap_where[(region)?2:esp_ptr_in_diram_iram(x)?0:1]++)
 #else
 #define EXECMAP_REPORT(why) ((void)0)
-#define EXECMAP_GOT(x) ((void)0)
+#define EXECMAP_GOT(x,region) ((void)0)
 #endif
 typedef struct {
     uint8_t *raw,*exec;           /* the allocation, and the code in it (16-aligned) */
@@ -758,6 +762,12 @@ typedef struct {
     uint32_t sbytes;
     int32_t *weights;             /* sec.13: CUBIC's weights, or NULL */
     uint32_t wbytes;
+    /* sec.15: sraw and weights are blocks of the Shiki region (data-bus
+     * addresses; the code runs at the instruction-bus alias), given back
+     * when the region's own users need the room. Such plans are listed. */
+    bool sregion,wregion;
+    ksn_shiki_plan *plan;
+    void *next;
 } jit_plan;
 #define JIT_WEIGHTS_MAX 512u     /* int32s: 2 KB, e.g. 8 CUBICs of 16 segments */
 /* Copies len bytes of code into a new executable allocation, as 32-bit
@@ -795,12 +805,32 @@ void ksn_shiki_jit_attach(ksn_shiki_plan *plan){
     if(!j->exec){free(j);return;}                /* no code: the interpreter runs it */
     plan->jit=j;
 }
+/* Plans whose code or weights live in the Shiki region (sec.15). */
+static jit_plan *region_plans;
+static void unlist(jit_plan *j){
+    for(jit_plan **q=&region_plans;*q;q=(jit_plan **)&(*q)->next)
+        if(*q==j){*q=j->next;j->next=NULL;return;}
+}
+/* Gives back the plan's scalar code and weights (the interpreter runs it
+ * until it is compiled again). */
+static void drop_scalar(jit_plan *j){
+    if(j->sraw){
+        if(j->sregion)shiki_heap_free(j->sraw);else heap_caps_free(j->sraw);
+        ksn_shiki_jit_bytes-=j->sbytes;
+    }
+    if(j->weights){
+        if(j->wregion)shiki_heap_free(j->weights);else free(j->weights);
+        ksn_shiki_jit_bytes-=j->wbytes;
+    }
+    j->sraw=NULL;j->scalar=NULL;j->sbytes=0;j->weights=NULL;j->wbytes=0;
+    j->sregion=j->wregion=false;
+    unlist(j);
+}
 void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
     jit_plan *j=plan?plan->jit:NULL;
     if(!j)return;
     if(j->raw)heap_caps_free(j->raw);
-    if(j->sraw){heap_caps_free(j->sraw);ksn_shiki_jit_bytes-=j->sbytes;}
-    if(j->weights){free(j->weights);ksn_shiki_jit_bytes-=j->wbytes;}
+    drop_scalar(j);
     free(j);
     plan->jit=NULL;
 }
@@ -826,6 +856,28 @@ enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
  * that spares a compile when it would not fit (sec.11: ~22-25 B each). */
 #define JIT_GUESS(n) ((uint32_t)(n)*32u+64u)
 
+/* sec.15: the region's free room the JIT leaves to the region's own users,
+ * so that a registration rarely has to take the JIT's blocks back. */
+#define JIT_REGION_KEEP 2048u
+static int jit_running;           /* inside the JIT's code: nothing is dropped */
+static uint32_t region_largest(void){
+    uint32_t bytes,used,largest;
+    shiki_heap_info(&bytes,&used,&largest);
+    return largest;
+}
+/* The Shiki region's reclaim hook: one of its own allocations failed, so
+ * every plan gives its region blocks back and waits JIT_RETRY draws. */
+static void jit_reclaim(void){
+    if(jit_running)return;
+    while(region_plans){
+        jit_plan *j=region_plans;
+        ksn_shiki_plan *p=j->plan;
+        drop_scalar(j);
+        if(p){p->heat=(int8_t)((int)JIT_HEAT-JIT_RETRY);p->need64=0;}
+        ksn_shiki_jit_evicted++;
+    }
+}
+
 /* Compiles straight into its executable memory: a sizing pass (no buffer)
  * gives the length, the allocation is that long, and the second pass
  * writes through the allocation's data-bus alias (DIRAM takes byte stores
@@ -837,7 +889,8 @@ static int compile_scalar(ksn_shiki_plan *plan){
      * heap still has no block that long: the sizing pass costs as much as
      * the compile, and DERBY's WIDE retried a dozen plans a second at its
      * tightest heap, which made the JIT slower than the interpreter (sec.14). */
-    if(plan->need64&&heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)<64u*plan->need64)return JIT_NOMEM;
+    if(plan->need64&&heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)<64u*plan->need64&&
+       region_largest()<64u*plan->need64+JIT_REGION_KEEP)return JIT_NOMEM;
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false};
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
@@ -850,36 +903,60 @@ static int compile_scalar(ksn_shiki_plan *plan){
      * helper computes them), so a refusal here is not a failure. */
     size_t rows=0;
     for(unsigned pc=0;pc<plan->count;pc++)if(plan->code[pc].op==KSN_SHIKI_CUBIC)rows+=4u*(size_t)plan->code[pc].imm;
-    if(rows&&rows<=JIT_WEIGHTS_MAX&&ksn_shiki_jit_bytes+b.len+20u+4u*rows<=ksn_shiki_jit_budget&&
-       (j->weights=malloc(4u*rows))!=NULL){
-        ksn_shiki_cubic_weights(plan,j->weights,rows);
-        j->wbytes=(uint32_t)(4u*rows);
+    if(rows&&rows<=JIT_WEIGHTS_MAX&&ksn_shiki_jit_bytes+b.len+20u+4u*rows<=ksn_shiki_jit_budget){
+        /* The region first (sec.15), then the system heap. */
+        j->weights=shiki_heap_spare(4u*rows,JIT_REGION_KEEP);
+        j->wregion=j->weights!=NULL;
+        if(!j->weights)j->weights=malloc(4u*rows);
+        if(j->weights){
+            ksn_shiki_cubic_weights(plan,j->weights,rows);
+            j->wbytes=(uint32_t)(4u*rows);
+            ksn_shiki_jit_bytes+=j->wbytes;     /* drop_scalar takes it back */
+        }
     }
-    const size_t len=(need+3u)&~(size_t)3u,bytes=len+16u;
-    j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
-    uint8_t *x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
+    const size_t len=(need+3u)&~(size_t)3u;
+    /* The code: in the Shiki region when it has room (sec.15: DIRAM, so
+     * its blocks run at their instruction-bus alias; the region is taken
+     * at the app's start, before the guest scatters its blocks over DIRAM),
+     * else MALLOC_CAP_EXEC from the system heap. */
+    size_t bytes=len;
+    uint8_t *x=NULL,*w=NULL;
+    j->sraw=shiki_heap_spare(len,JIT_REGION_KEEP);
+    if(j->sraw&&!(esp_ptr_in_diram_dram(j->sraw)&&esp_ptr_in_diram_dram(j->sraw+len-1))){
+        shiki_heap_free(j->sraw);j->sraw=NULL;
+    }
+    if(j->sraw){
+        j->sregion=true;
+        w=j->sraw;
+        x=(uint8_t *)esp_ptr_diram_dram_to_iram(w);
+    }else{
+        bytes=len+16u;
+        j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
+        x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
+    }
     if(!x){
-        free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);
+        drop_scalar(j);if(fresh)free(j);
         plan->need64=(uint8_t)(bytes/64u>255u?255u:bytes/64u);
         return JIT_NOMEM;
     }
-    /* DIRAM: write bytes through the data alias. Otherwise (when the heap
-     * is tight the allocation can come from IRAM-only memory, which takes
-     * 32-bit accesses only) write the words in place. */
-    EXECMAP_GOT(x);
-    const bool diram=esp_ptr_in_diram_iram(x);
-    uint8_t *w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
+    EXECMAP_GOT(x,j->sregion);
+    /* DIRAM: write bytes through the data alias. Otherwise (RTC fast memory,
+     * where a tight heap puts MALLOC_CAP_EXEC: sec.15) write whole words. */
+    const bool diram=j->sregion||esp_ptr_in_diram_iram(x);
+    if(!w)w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
     for(size_t k=0;k<len/4;k++)((volatile uint32_t *)(void *)w)[k]=0;
     ksn_jit_buf e={w,0,need,false,!diram};
     size_t entry2=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
-        heap_caps_free(j->sraw);j->sraw=NULL;
-        free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_REFUSED;
+        drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;
     }
     __asm__ volatile("memw\n" "isync\n":::"memory");
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
-    ksn_shiki_jit_bytes+=(uint32_t)bytes+j->wbytes;
+    ksn_shiki_jit_bytes+=(uint32_t)bytes;
+    j->plan=plan;
+    if((j->sregion||j->wregion)&&!j->next&&region_plans!=j){j->next=region_plans;region_plans=j;}
+    shiki_heap_set_reclaim(jit_reclaim);
     plan->jit=j;
     return JIT_DONE;
 }
@@ -919,7 +996,10 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
                    ksn_shiki_sin_table,
                    (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,j->weights,
                    plan,out,index};
-    return j->scalar(&c);
+    jit_running++;
+    const uint32_t r=j->scalar(&c);
+    jit_running--;
+    return r;
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}
 

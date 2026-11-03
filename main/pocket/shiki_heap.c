@@ -117,14 +117,33 @@ bool shiki_heap_owns(const void *p){
     return region&&(const uint8_t *)p>=(const uint8_t *)region&&
            (const uint8_t *)p<(const uint8_t *)region+region_bytes;
 }
-void *shiki_heap_malloc(size_t n){return shiki_heap_active()?heap_alloc(n,4):NULL;}
+static void (*reclaim_hook)(void);
+void shiki_heap_set_reclaim(void (*reclaim)(void)){reclaim_hook=reclaim;}
+/* The region's own allocations: a failure first asks the spare users to
+ * give their blocks back. */
+static void *owned_alloc(size_t n,size_t align){
+    if(!shiki_heap_active())return NULL;
+    void *p=heap_alloc(n,align);
+    if(!p&&reclaim_hook){reclaim_hook();p=heap_alloc(n,align);}
+    return p;
+}
+void *shiki_heap_malloc(size_t n){return owned_alloc(n,4);}
+void *shiki_heap_spare(size_t n,size_t keep){
+    if(!shiki_heap_active())return NULL;
+    void *p=heap_alloc(n,16);
+    if(!p)return NULL;
+    uint32_t used,largest;
+    heap_stats(&used,&largest);
+    if(largest<keep){heap_release(p);return NULL;}
+    return p;
+}
 void *shiki_heap_calloc(size_t count,size_t n){
     if(n&&count>SIZE_MAX/n)return NULL;
     void *p=shiki_heap_malloc(count*n);
     if(p)memset(p,0,count*n);
     return p;
 }
-void *shiki_heap_aligned(size_t n){return shiki_heap_active()?heap_alloc(n,16):NULL;}
+void *shiki_heap_aligned(size_t n){return owned_alloc(n,16);}
 void shiki_heap_free(void *p){
     if(!p||!shiki_heap_owns(p))return;
     heap_release(p);
