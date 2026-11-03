@@ -32,6 +32,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [Shiki と PIE（草案）](shiki-pie.md) | PIE を前提にした Shiki の形の見直し: 今の自動の下ろしが効かない理由、PIE の事実、ベクトルの命令・列からの描画・SoA の領域・端数・数の型の候補と決める点 |
 | [Shiki の JIT（草案）](shiki-jit.md) | ベクトルの区間を登録時に PIE の機械語にして RAM で実行する（案 A、2026-11-02 決定）: パイプラインを空けている原因の理屈、実行できる RAM とメモリ保護、生成するコードの形、アセンブラから作るエンコーダと検査、段階 |
 | [Shiki JIT とメモリ配置（図解、HTML）](shiki-jit-overview.html) | 内部 RAM の地図、アプリ実行中の heap の実測、2 つのバスから見る SRAM1、Shiki の区画と JIT の相乗り、1 回の描画での判断の流れ、生成するコードの形、メモリ不足の扱い、置き場所ごとの速さ（2026-11-03 実測） |
+| [Kasane の描画パイプライン（図解、HTML）](pipeline-overview.html) | フレームバッファを持たない理由、1 ターンの流れ（`frame()` → Shiki の beginFrame/draw/commit → 17 本の帯の合成 → SPI の DMA）、作業台の帯と転送用バッファ 1 本の重ね、`KASANE_PAINT` の各欄、帯の重ね合わせの順、Shiki の線分の並び（candidate・committed、帯の hash、作業領域の廃止）、DERBY の区画の内訳と、並びを 1 本にする予定（c4d7a6c 時点、2026-11-03） |
 | [Shiki の draw の束ね（作業中）](shiki-bundle.md) | draw 1 回の固定費の段ごとの実測と、複数の handle を 1 回で描く API |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |

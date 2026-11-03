@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kasane の描画パイプライン</title>
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1f2328; --muted:#5d6670; --line:#d8d4cc; --card:#ffffff;
+  --js:#e2a86b; --shiki:#4f8fd6; --kasane:#2fa37a; --board:#9d8fd1; --spi:#d46a6a;
+  --host:#8a8580; --keep:#f2d16b; --free:#ffffff; --jit:#2fa37a; --accent:#2f6fb5;
+  --planbg:#fff6dc; --planline:#d9b44a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16181b; --fg:#e6e3dd; --muted:#a5a09a; --line:#3a3d42; --card:#1f2226;
+    --js:#b9814a; --shiki:#4a86c9; --kasane:#3fb58b; --board:#7c6fb3; --spi:#c25e5e;
+    --host:#6a6560; --keep:#c9a944; --free:#2b2f34; --jit:#3fb58b; --accent:#7fb0e8;
+    --planbg:#2e2a1c; --planline:#a8892f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#16181b; --fg:#e6e3dd; --muted:#a5a09a; --line:#3a3d42; --card:#1f2226;
+  --js:#b9814a; --shiki:#4a86c9; --kasane:#3fb58b; --board:#7c6fb3; --spi:#c25e5e;
+  --host:#6a6560; --keep:#c9a944; --free:#2b2f34; --jit:#3fb58b; --accent:#7fb0e8;
+  --planbg:#2e2a1c; --planline:#a8892f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.75 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:1.7rem;margin:0 0 4px;letter-spacing:.01em}
+h2{font-size:1.25rem;margin:44px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:1.02rem;margin:22px 0 6px}
+p,li{color:var(--fg)}
+.lead{color:var(--muted);margin:0 0 18px}
+.note{color:var(--muted);font-size:.88rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+.plan{background:var(--planbg);border:2px solid var(--planline);border-radius:10px;padding:14px 16px;margin:14px 0}
+.plan h3{margin-top:0}
+.tag{display:inline-block;font-size:.75rem;padding:0 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:2px}
+.m{display:inline-block;font-size:.72rem;padding:0 6px;border-radius:4px;margin-left:4px;vertical-align:1px;border:1px solid var(--kasane);color:var(--kasane)}
+.e{display:inline-block;font-size:.72rem;padding:0 6px;border-radius:4px;margin-left:4px;vertical-align:1px;border:1px solid var(--js);color:var(--js)}
+.u{display:inline-block;font-size:.72rem;padding:0 6px;border-radius:4px;margin-left:4px;vertical-align:1px;border:1px solid var(--spi);color:var(--spi)}
+code{font:0.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:color-mix(in srgb,var(--line) 35%,transparent);padding:1px 4px;border-radius:4px}
+.ref{font:0.8em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--fg);font-family:inherit}
+svg .muted{fill:var(--muted)}
+svg .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.84rem;color:var(--muted);margin:6px 0 0}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.grid2{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:.9rem}
+.kv b{font-weight:600;white-space:nowrap}
+nav.toc{font-size:.9rem;columns:2;column-gap:24px;margin:10px 0 0}
+nav.toc a{color:var(--accent);text-decoration:none}
+@media (max-width:720px){nav.toc{columns:1}}
+a{color:var(--accent)}
+ol.steps li{margin:4px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>Kasane の描画パイプライン</h1>
+<p class="lead">JS の <code>frame()</code> が呼ばれてから LCD に画素が届くまでを、コードを追って図にしたもの。画面全体の画素を RAM に持つ「フレームバッファ」は無く、画面は 8 行ずつの帯で毎回組み立てて送る。Shiki が持っているのは画素ではなく「線分の並び」（描き方の記録）で、それが複数ある理由も扱う。ファイルと行は <b>c4d7a6c 時点</b>（2026-11-03、Shiki の作業領域を廃止したコミット。<code>file:行</code> で示す）。数値には <span class="m">実測</span> <span class="e">推定・計算</span> <span class="u">未確認</span> の印を付ける。</p>
+
+<nav class="toc">
+<a href="#tldr">0. 先に結論</a><br>
+<a href="#turn">1. 1 ターンの全体</a><br>
+<a href="#nofb">2. なぜフレームバッファが無いか</a><br>
+<a href="#band">3. 帯（strip）と転送</a><br>
+<a href="#paint">4. KASANE_PAINT の読み方</a><br>
+<a href="#layers">5. 帯の中の重ね合わせ</a><br>
+<a href="#shiki">6. Shiki の線分の並び</a><br>
+<a href="#copies">7. DERBY の 1 画素が通る道</a><br>
+<a href="#mem">8. Shiki の区画のメモリ（DERBY）</a><br>
+<a href="#jit">9. JIT の位置</a><br>
+<a href="#plan">10. 予定の変更（作業中）</a><br>
+<a href="#facts">11. 事実・推定・未確認</a>
+</nav>
+
+<h2 id="tldr">0. 先に結論</h2>
+<div class="grid2">
+<div class="card">
+<h3>画面は「状態から毎回組み立てる」</h3>
+<p>RAM にあるのは画面の<b>説明</b>（Kasane のコマンド最大 80 個と、Shiki の線分の並び）だけ。描くときは 240×8 画素（3,840 B）の帯 1 本を作業台にして、上から 17 本、説明を全部その帯に描き込んでは LCD へ送る。TypeScript の感覚で言えば、仮想 DOM を毎回 8 行分だけ実体化して送り、送ったら捨てるのに近い。</p>
+</div>
+<div class="card">
+<h3>Shiki の「複数の並び」は、画素ではなく記録</h3>
+<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_proc.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つを 1 本にする作業は <a href="#plan">§10</a>。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
+</div>
+</div>
+
+<h2 id="turn">1. 1 ターンの全体</h2>
+<p>描画タスクは 1 つ（<code>ui_task</code>、<code>main/main.c:1080</code>）。アプリの実行中は 1 周ごとに <code>tick_run()</code> → <code>app_tick()</code> を呼び、その中で JS の <code>frame()</code> と転送が<b>同じ関数の中で順に</b>起きる。並行に走るのは SPI の DMA だけ。</p>
+<div class="card scroll">
+<svg viewBox="0 0 940 760" role="img" aria-label="1 ターンのシーケンス図" style="min-width:760px">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <g font-size="12" font-weight="600" text-anchor="middle">
+    <rect x="15" y="8" width="130" height="40" rx="6" fill="var(--host)" fill-opacity=".3" stroke="var(--host)"/>
+    <text x="80" y="25">ui_task</text><text x="80" y="41" font-weight="400" class="muted mono" font-size="10">main.c</text>
+    <rect x="170" y="8" width="130" height="40" rx="6" fill="var(--host)" fill-opacity=".18" stroke="var(--host)"/>
+    <text x="235" y="25">app_tick</text><text x="235" y="41" font-weight="400" class="muted mono" font-size="10">app_session.c</text>
+    <rect x="325" y="8" width="130" height="40" rx="6" fill="var(--js)" fill-opacity=".35" stroke="var(--js)"/>
+    <text x="390" y="25">JS frame()</text><text x="390" y="41" font-weight="400" class="muted mono" font-size="10">QuickJS</text>
+    <rect x="480" y="8" width="130" height="40" rx="6" fill="var(--shiki)" fill-opacity=".3" stroke="var(--shiki)"/>
+    <text x="545" y="25">Shiki</text><text x="545" y="41" font-weight="400" class="muted mono" font-size="10">pocket_proc.c</text>
+    <rect x="635" y="8" width="130" height="40" rx="6" fill="var(--kasane)" fill-opacity=".3" stroke="var(--kasane)"/>
+    <text x="700" y="25">Kasane</text><text x="700" y="41" font-weight="400" class="muted mono" font-size="10">ksn_render.c</text>
+    <rect x="790" y="8" width="135" height="40" rx="6" fill="var(--board)" fill-opacity=".3" stroke="var(--board)"/>
+    <text x="857" y="25">board + SPI</text><text x="857" y="41" font-weight="400" class="muted mono" font-size="10">board.c</text>
+  </g>
+  <g stroke="var(--line)" stroke-dasharray="4 4">
+    <line x1="80" y1="48" x2="80" y2="750"/><line x1="235" y1="48" x2="235" y2="750"/>
+    <line x1="390" y1="48" x2="390" y2="750"/><line x1="545" y1="48" x2="545" y2="750"/>
+    <line x1="700" y1="48" x2="700" y2="750"/><line x1="857" y1="48" x2="857" y2="750"/>
+  </g>
+  <g font-size="11.5" stroke-width="1.6">
+    <!-- 1 -->
+    <line x1="80" y1="76" x2="231" y2="76" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="86" y="70">① tick_run → app_tick(buttons)</text>
+    <text x="86" y="90" class="muted mono" font-size="10">main.c:1196 → :964</text>
+    <!-- 2 pumps -->
+    <rect x="228" y="102" width="14" height="38" fill="var(--host)" fill-opacity=".4"/>
+    <text x="248" y="116">② run_pumps(): pocket_*_pump()</text>
+    <text x="248" y="131" class="muted">入力・Promise の完了などをここで JS へ</text>
+    <text x="248" y="146" class="muted mono" font-size="10">app_session.c:2387 / 2140–2181</text>
+    <!-- 3 frame -->
+    <line x1="235" y1="170" x2="386" y2="170" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="241" y="164">③ dispatch_guest → frame()</text>
+    <text x="241" y="184" class="muted mono" font-size="10">app_session.c:2395, 2199</text>
+    <rect x="383" y="172" width="14" height="250" fill="var(--js)" fill-opacity=".45"/>
+    <!-- 4 beginFrame -->
+    <line x1="397" y1="206" x2="541" y2="206" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="403" y="200">④ beginFrame(色)</text>
+    <text x="551" y="210">candidate.count = 0</text>
+    <text x="551" y="224" class="muted mono" font-size="10">pocket_proc.c:261–283</text>
+    <!-- 5 draw -->
+    <line x1="397" y1="256" x2="541" y2="256" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="403" y="250">⑤ draw / drawMany × N</text>
+    <rect x="538" y="258" width="14" height="70" fill="var(--shiki)" fill-opacity=".5"/>
+    <text x="558" y="272">VM が candidate の末尾へ直接</text>
+    <text x="558" y="287">線分を書く（上限 = 残りの本数）</text>
+    <text x="558" y="302">→ 最後まで出せたら count を進める</text>
+    <text x="558" y="318" class="muted mono" font-size="10">pocket_proc.c:473–527</text>
+    <!-- 6 commit -->
+    <line x1="397" y1="352" x2="541" y2="352" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="403" y="346">⑥ commit()</text>
+    <text x="558" y="358">帯ごとの hash → 傷んだ帯</text>
+    <text x="558" y="373">pending = true（まだ表示ではない）</text>
+    <text x="558" y="388" class="muted mono" font-size="10">pocket_proc.c:316–339</text>
+    <line x1="545" y1="396" x2="696" y2="396" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
+    <text x="604" y="410" font-size="10.5">帯の傷を Kasane へ</text>
+    <text x="604" y="423" class="muted mono" font-size="10">pocket_kasane.c:2941</text>
+    <!-- 7 return -->
+    <line x1="383" y1="440" x2="239" y2="440" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
+    <text x="243" y="456">⑦ 戻る → end_guest_turn()</text>
+    <text x="243" y="471" class="muted mono" font-size="10">app_session.c:2396, 2188</text>
+    <!-- 8 present -->
+    <line x1="235" y1="496" x2="696" y2="496" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="241" y="490">⑧ present_frame() → pocket_kasane_present_complete()</text>
+    <text x="241" y="510" class="muted mono" font-size="10">app_session.c:2423 → 2481 → 2521、pocket_kasane.c:3030</text>
+    <rect x="693" y="498" width="14" height="170" fill="var(--kasane)" fill-opacity=".5"/>
+    <!-- 9 band loop -->
+    <rect x="455" y="528" width="480" height="132" rx="8" fill="none" stroke="var(--kasane)" stroke-dasharray="6 3"/>
+    <text x="463" y="545" font-weight="600">⑨ 傷んだ帯ごとに（最大 17 回） ksn_render.c:2096</text>
+    <line x1="693" y1="566" x2="549" y2="566" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="575" y="560" font-size="10.5">image の画素を読む</text>
+    <text x="463" y="580" class="muted mono" font-size="10">image_span pocket_proc.c:586</text>
+    <text x="713" y="590" font-size="11">合成（背景 → APP → SYSTEM）</text>
+    <line x1="707" y1="616" x2="853" y2="616" stroke="var(--fg)" marker-end="url(#ar)"/>
+    <text x="713" y="610" font-size="11">kasane_send → board_present</text>
+    <text x="713" y="632" class="muted mono" font-size="10">app_session.c:584、board.c:436</text>
+    <rect x="850" y="618" width="14" height="36" fill="var(--spi)" fill-opacity=".5"/>
+    <text x="760" y="652" font-size="10.5">前の帯を待つ → swap → queue</text>
+    <!-- DMA tail -->
+    <rect x="850" y="660" width="14" height="40" fill="var(--spi)" fill-opacity=".25" stroke="var(--spi)" stroke-dasharray="3 2"/>
+    <!-- 10 finish -->
+    <line x1="700" y1="690" x2="549" y2="690" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
+    <text x="463" y="684" font-size="10.5">⑩ 最後の帯の DMA を待ち ACK</text>
+    <text x="463" y="704" font-size="10.5">→ candidate と committed を入れ替え</text>
+    <text x="463" y="718" class="muted mono" font-size="10">ksn_render.c:2389–2394、pocket_proc.c:670</text>
+    <!-- 11 wait -->
+    <line x1="235" y1="736" x2="84" y2="736" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
+    <text x="90" y="752" font-size="10.5">⑪ 33 ms の残りを待つ（main.c:1401、app_session.h:103）</text>
+  </g>
+</svg>
+</div>
+<ol class="steps">
+<li><b>入口。</b><code>ui_task</code> は実行中なら <code>tick_run(have,&amp;stroke)</code>（<code>main.c:1196</code>）、その中でキーをボタンの bit にして <code>app_tick(buttons)</code>（<code>main.c:964</code>）。押した後に離した状態のターンをもう 1 回回す（<code>main.c:966</code>）。</li>
+<li><b>前置き。</b><code>app_tick</code> の頭で、前のターンから残った提出物があれば先に転送だけして帰る（<code>app_session.c:2248–2264</code>）。続けて <code>run_pumps()</code> が各面の <code>pocket_*_pump()</code> を決まった順に呼ぶ（<code>app_session.c:2140–2181</code>）。ここで解決した Promise は、この後の <code>frame()</code> から見える。</li>
+<li><b>JS。</b><code>dispatch_guest()</code> → <code>pocketjs_guest_frame()</code>（<code>app_session.c:2195–2200</code>）。DERBY なら <code>derby_scene.js:144</code> の <code>SK.beginFrame(4)</code> から <code>derby_scene.js:176</code> の <code>SK.commit()</code> までが 1 フレームの Shiki の描画。Kasane のノード（文字・矩形）は <code>patch</code> / <code>replace</code> で別に提出する。</li>
+<li><b>後始末。</b><code>end_guest_turn()</code>（<code>app_session.c:2188</code>）が <code>pocket_proc_end_turn()</code>（<code>pocket_proc.c:562</code>）を呼び、組み立て中のフレームを閉じる。<code>frame()</code> が VM に途中で止められた（park）ときだけは閉じずに次のターンへ持ち越す。</li>
+<li><b>転送。</b><code>present_frame()</code>（<code>app_session.c:2481</code>）が表示ポート（作業台の帯 <code>kasane_strip</code>、送り口 <code>kasane_send</code>、240×135、8 行）を組んで Kasane に渡す（<code>app_session.c:2507–2509</code>）。Kasane は傷んだ帯だけを上から順に合成して送り、最後の DMA を待ってから「表示された」と記録する。</li>
+<li><b>待ち。</b>JS アプリの表示周期は 33 ms（<code>VM_DISPLAY_PERIOD_MS</code>、<code>app_session.h:103</code>）。使った時間を引いた残りを待つ（<code>main.c:1401</code>）。</li>
+</ol>
+
+<h2 id="nofb">2. なぜフレームバッファが無いか</h2>
+<div class="grid2">
+<div class="card">
+<h3>大きさ</h3>
+<p>240 × 135 × 2 B（RGB565）= <b>64,800 B</b> <span class="e">計算</span>。PSRAM は無く、内部 RAM は約 334 KiB。ホーム画面の空き heap は 280,932 B <span class="m">実測</span>（CLAUDE.md）で、アプリを動かすと JS のゲストに最大 160 KiB（<code>app_session.c:1509</code>）、DERBY は Shiki の区画に 56 KiB（<code>app_registry.c:144</code>）を取る。DERBY の起動後のシステムの空きは 37,308 B <span class="m">実測</span>（<a href="shiki-jit.md">shiki-jit.md</a> §21.3）。<b>64,800 B の 1 枚が丸ごと入る場所が、アプリの実行中には無い。</b></p>
+<p>代わりに常駐するのは、作業台の帯 <code>shared</code> 3,840 B（<code>board.c:37</code>）と転送用の <code>tx_buf</code> 3,840 B（<code>board.c:67</code>）の計 7,680 B。フレームバッファの約 12%。</p>
+</div>
+<div class="card">
+<h3>絵を覚えているのは LCD の側</h3>
+<p>パネル（ST7789）は自分の表示用メモリ（GRAM）を持ち、書かれた画素を送られ直すまで表示し続ける。だから<b>変わった帯だけ送れば足りる</b>。番地の窓を開く命令は CASET／RASET／RAMWR（<code>board.c:478–482</code>）で、可視の 240×135 は x=40、y=53 から始まる窓（パネルのメモリの方が大きい）。</p>
+<p>ただし <b>MISO が配線されていないので GRAM は読めない</b>（<code>board.c:357–361</code>）。「いま画面に何が出ているか」は、ソフトの側の記録（Kasane の確定済みのコマンドと、Shiki の committed）でしか分からない。転送に失敗した帯は、記録から描き直す（修復、<code>pocket_proc.c:677–688</code>）。<code>board_capture</code> は byte swap の前の作業台を写すので、画面の正しさの証拠にはならない。</p>
+</div>
+</div>
+<p class="note">クラウドの言葉に置くと、LCD は「PUT はできるが GET ができない」オブジェクトストア。正本は手元の状態（説明）で、ストアには差分の帯を上書きしていく。</p>
+
+<h2 id="band">3. 帯（strip）と転送</h2>
+<p>帯は 8 行（<code>STRIP_H</code>、<code>board.h:7</code>）。135 行は 8 で割り切れないので <b>16 本 × 8 行 + 最後の 1 本 × 7 行 = 17 本</b>（<code>ksn_render.c:2098</code> の <code>rows=band==16?7:8</code>）。全幅の帯 1 本は 240 × 8 × 2 = 3,840 B、17 本で 64,800 B。</p>
+<div class="card scroll">
+<svg viewBox="0 0 940 470" role="img" aria-label="17 本の帯と、作業台と転送用バッファの流れ" style="min-width:760px">
+  <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <text x="20" y="20" font-size="12" font-weight="600">画面 240×135 と 17 本の帯（例: band_mask=0x00e00）</text>
+  <!-- screen: 240x135 scaled 1.2 -> 288 x 162 at x=20,y=32 ; each row 1.2 px; band 9.6 px -->
+  <g font-size="9.5">
+    <rect x="20" y="32" width="288" height="162" fill="var(--card)" stroke="var(--fg)"/>
+    <rect x="20" y="118.4" width="288" height="28.8" fill="var(--spi)" fill-opacity=".35"/>
+    <g stroke="var(--line)">
+      <line x1="20" y1="41.6" x2="308" y2="41.6"/><line x1="20" y1="51.2" x2="308" y2="51.2"/><line x1="20" y1="60.8" x2="308" y2="60.8"/>
+      <line x1="20" y1="70.4" x2="308" y2="70.4"/><line x1="20" y1="80" x2="308" y2="80"/><line x1="20" y1="89.6" x2="308" y2="89.6"/>
+      <line x1="20" y1="99.2" x2="308" y2="99.2"/><line x1="20" y1="108.8" x2="308" y2="108.8"/><line x1="20" y1="118.4" x2="308" y2="118.4"/>
+      <line x1="20" y1="128" x2="308" y2="128"/><line x1="20" y1="137.6" x2="308" y2="137.6"/><line x1="20" y1="147.2" x2="308" y2="147.2"/>
+      <line x1="20" y1="156.8" x2="308" y2="156.8"/><line x1="20" y1="166.4" x2="308" y2="166.4"/><line x1="20" y1="176" x2="308" y2="176"/>
+      <line x1="20" y1="185.6" x2="308" y2="185.6"/>
+    </g>
+    <text x="314" y="40">0</text><text x="314" y="88">5</text><text x="314" y="126">9</text><text x="314" y="136">10</text><text x="314" y="145">11</text>
+    <text x="314" y="193">16（7 行）</text>
+  </g>
+  <text x="20" y="214" font-size="11" class="muted">帯 9・10・11 だけ傷んだ例:</text>
+  <text x="20" y="230" font-size="11" class="muted mono">bytes=11520（3 × 3,840）</text>
+  <text x="20" y="246" font-size="11" class="muted mono">bands=3 band_runs=1</text>
+  <text x="20" y="262" font-size="11" class="muted">（hello の実測と同じ形、kasane-text-damage.md）</text>
+
+  <!-- buffers -->
+  <text x="400" y="20" font-size="12" font-weight="600">RAM に常駐する画素は 2 本だけ</text>
+  <rect x="400" y="34" width="190" height="56" rx="6" fill="var(--kasane)" fill-opacity=".25" stroke="var(--kasane)"/>
+  <text x="495" y="56" text-anchor="middle" font-size="12" font-weight="600">shared（作業台）</text>
+  <text x="495" y="74" text-anchor="middle" font-size="11" class="mono">3,840 B board.c:37</text>
+  <rect x="680" y="34" width="190" height="56" rx="6" fill="var(--spi)" fill-opacity=".25" stroke="var(--spi)"/>
+  <text x="775" y="56" text-anchor="middle" font-size="12" font-weight="600">tx_buf（転送用）</text>
+  <text x="775" y="74" text-anchor="middle" font-size="11" class="mono">3,840 B board.c:67</text>
+  <line x1="590" y1="62" x2="676" y2="62" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar2)"/>
+  <text x="633" y="54" text-anchor="middle" font-size="10.5">byte swap</text>
+  <text x="633" y="80" text-anchor="middle" font-size="10" class="muted">PIE で写す</text>
+  <line x1="870" y1="62" x2="925" y2="62" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar2)"/>
+  <text x="900" y="54" text-anchor="middle" font-size="10.5">DMA</text>
+  <text x="400" y="112" font-size="11" class="muted">合成は shared に。swap した写しを tx_buf から DMA で送る。</text>
+  <text x="400" y="128" font-size="11" class="muted">DMA の間に、shared で次の帯を合成できる。</text>
+
+  <!-- timeline -->
+  <text x="400" y="152" font-size="12" font-weight="600">時間の流れ（KASANE_DMA_OVERLAP、既定 ON）</text>
+  <text x="400" y="176" font-size="11" font-weight="600">CPU</text>
+  <text x="400" y="214" font-size="11" font-weight="600">SPI DMA</text>
+  <g font-size="10" text-anchor="middle">
+    <rect x="460" y="162" width="90" height="22" fill="var(--kasane)" fill-opacity=".5"/><text x="505" y="177">合成 帯 n</text>
+    <rect x="550" y="162" width="22" height="22" fill="var(--spi)" fill-opacity=".6"/><text x="561" y="177">s</text>
+    <rect x="572" y="162" width="90" height="22" fill="var(--kasane)" fill-opacity=".5"/><text x="617" y="177">合成 n+1</text>
+    <rect x="662" y="162" width="28" height="22" fill="var(--host)" fill-opacity=".45"/><text x="676" y="177">待</text>
+    <rect x="690" y="162" width="22" height="22" fill="var(--spi)" fill-opacity=".6"/><text x="701" y="177">s</text>
+    <rect x="712" y="162" width="90" height="22" fill="var(--kasane)" fill-opacity=".5"/><text x="757" y="177">合成 n+2</text>
+    <rect x="802" y="162" width="28" height="22" fill="var(--host)" fill-opacity=".45"/><text x="816" y="177">待</text>
+    <rect x="830" y="162" width="22" height="22" fill="var(--spi)" fill-opacity=".6"/><text x="841" y="177">s</text>
+    <rect x="572" y="200" width="118" height="22" fill="var(--spi)" fill-opacity=".35" stroke="var(--spi)"/><text x="631" y="215">送信 帯 n</text>
+    <rect x="712" y="200" width="118" height="22" fill="var(--spi)" fill-opacity=".35" stroke="var(--spi)"/><text x="771" y="215">送信 帯 n+1</text>
+    <rect x="852" y="200" width="70" height="22" fill="var(--spi)" fill-opacity=".35" stroke="var(--spi)"/><text x="887" y="215">送信 n+2</text>
+  </g>
+  <text x="400" y="244" font-size="10.5" class="muted">s = 前の DMA の回収（tx_reap）→ shared を swap しながら</text>
+  <text x="400" y="259" font-size="10.5" class="muted">　　tx_buf へ写す → queue。「待」は前の帯の送信の完了待ち。</text>
+  <text x="400" y="274" font-size="10.5" class="muted">tx_buf は 1 本なので、次の写しは前の送信が終わるまで待つ</text>
+  <text x="400" y="289" font-size="10.5" class="muted">（board.c:494、tx_reap は board.c:94）。</text>
+
+  <!-- RAMWR -->
+  <text x="20" y="330" font-size="12" font-weight="600">RAMWR のセッション: 連続する帯は窓を開き直さない</text>
+  <g font-size="10.5">
+    <rect x="20" y="342" width="110" height="26" rx="4" fill="var(--board)" fill-opacity=".35" stroke="var(--board)"/><text x="75" y="359" text-anchor="middle">CASET・RASET</text>
+    <rect x="134" y="342" width="64" height="26" rx="4" fill="var(--board)" fill-opacity=".35" stroke="var(--board)"/><text x="166" y="359" text-anchor="middle">RAMWR</text>
+    <rect x="202" y="342" width="72" height="26" fill="var(--spi)" fill-opacity=".35"/><text x="238" y="359" text-anchor="middle">帯 9</text>
+    <rect x="278" y="342" width="72" height="26" fill="var(--spi)" fill-opacity=".35"/><text x="314" y="359" text-anchor="middle">帯 10</text>
+    <rect x="354" y="342" width="72" height="26" fill="var(--spi)" fill-opacity=".35"/><text x="390" y="359" text-anchor="middle">帯 11</text>
+    <text x="440" y="359">書き込み位置は自動で進むので、帯 9→10→11 は画素だけを続けて送る</text>
+  </g>
+  <text x="20" y="390" font-size="10.5" class="muted">次に送る行が書き込み位置（next_row）と違うとき、または幅・x が変わるときだけ窓を開き直す（board.c:476–483、557）。</text>
+  <text x="20" y="406" font-size="10.5" class="muted">命令は必ず前の DMA を回収してから送る。命令が来ると RAMWR のセッションが終わるため（command()、board.c:162–171）。</text>
+  <text x="20" y="430" font-size="12" font-weight="600">幅を狭めた帯</text>
+  <text x="20" y="448" font-size="10.5" class="muted">帯の傷の左右を 16 px 単位に外へ丸め、幅が 192 px（KSN_NARROW_MAX）以下なら、その列だけ送る（ksn_render.c:1991–1998、board.c:572）。</text>
+  <text x="20" y="464" font-size="10.5" class="muted">16 px 単位なのは、swap の PIE カーネル（32 B ずつ）を使い続けるため。画面のキャプチャ中は狭めない（app_session.c:2509）。</text>
+</svg>
+</div>
+<div class="card">
+<h3>転送用バッファは 1 本（CLAUDE.md の「2 本」は古い）</h3>
+<p>CLAUDE.md のアーキテクチャの節は「転送用バッファ2本（<code>tx_buf</code>、1本が送信中のあいだにもう1本へ書く）」と書いているが、今のコードは <code>tx_buf</code> が 1 本（<code>board.c:63–68</code> の注記「One TX payload; every write waits for the exact previous descriptor」）。<code>634ac07</code>（PR #37 の取り込み）で 1 本になった（<a href="../perf/kasane-dma-overlap.md">kasane-dma-overlap.md</a> の「単一 3,840 B TX payload」）。重なるのは「CPU が <code>shared</code> で次の帯を合成する」と「DMA が <code>tx_buf</code> を送る」の 2 つで、swap して写す処理は前の送信の完了を待つ。SPI は 80 MHz（<code>board.c:363</code>）、デバイスのキューは 1（<code>queue_size=1</code>）。</p>
+</div>
+<div class="grid2">
+<div class="card">
+<h3>1 本の帯の送り方（コードの順）</h3>
+<ol>
+<li>Kasane が <code>shared</code> に帯を合成（<code>ksn_render.c:2096–2357</code>）。</li>
+<li><code>kasane_send()</code>（<code>app_session.c:584</code>）: テキスト欄を帯に重ねる（<code>pocket_text_overlay</code>、<code>:604</code>）。</li>
+<li><code>kasane_dma_submit()</code>（<code>app_session.c:565</code>）: 前の帯の DMA の結果を回収（<code>board_present_finish</code> → <code>tx_reap</code>、<code>board.c:660、94</code>）。</li>
+<li><code>board_present()</code>（<code>board.c:436</code>）: ペットとマイクの印を重ね（<code>:438–443</code>）、必要なら窓を開き（<code>:476–483</code>）、<code>shared</code> を byte swap しながら <code>tx_buf</code> へ（<code>:504–507</code>）、DC を上げて <code>spi_device_queue_trans</code>（<code>:532</code>）。待たずに戻る。</li>
+<li>全帯の後、最後の DMA を待ち（<code>ksn_render.c:2388–2389</code>）、成功なら Kasane の確定（<code>ksn_core_presented</code>、<code>:2394</code>）。</li>
+</ol>
+</div>
+<div class="card">
+<h3>時間の目安</h3>
+<div class="kv">
+<b>17 帯の線の時間</b><span>64,800 B × 8 bit ÷ 80 MHz = 6.48 ms <span class="e">計算、命令とすき間を除く</span></span>
+<b>全画面の転送</b><span>7.7 ms <span class="m">実測</span>（<code>main.c:1011</code> の注記）</span>
+<b>40→80 MHz</b><span>send 15.5 → 9.1 ms <span class="m">実測</span>（<code>board.c:356–358</code>、当時の経路）</span>
+<b>帯 1 本の固定費</b><span>約 17 µs（8 行×240 の塗りほか）<span class="m">実測</span>（<a href="derby-background-cost.md">derby-background-cost.md</a> §2、2026-09-30）</span>
+<b>DERBY の render</b><span>9〜10.5 ms、うち Shiki の帯の線描き 1.1〜2.6 ms、残り約 7.4 ms は全画面の image と HUD の文字の合成 <span class="m">実測</span>（同 §1、2026-09-30。float の VM の頃の計測で、帯の経路は今と同じ）</span>
+</div>
+</div>
+</div>
+
+<h2 id="paint">4. KASANE_PAINT の読み方</h2>
+<p>実機のログの <code>KASANE_PAINT</code> 行は、送った帯があるフレーム（painted）が 30 個たまるたびに 1 行出る（<code>app_session.c:2603–2626</code>）。<b>ミリ秒の列は窓の平均、bytes・bands・band_runs・band_mask は窓の最後のフレームの値</b>。</p>
+<div class="card scroll">
+<p class="mono" style="font:0.86em ui-monospace,Menlo,Consolas,monospace;margin:0">KASANE_PAINT turn_ms=… render_ms=… send_ms=… bytes=11520 bands=3 band_runs=1 band_mask=0x00e00 prof=… fill_n=… … frames=30<br><span class="note">（形の例。値は §3 の帯 9〜11 の場合）</span></p>
+<table>
+<tr><th>欄</th><th>中身</th><th>どこで作るか</th></tr>
+<tr><td><code>turn_ms</code></td><td>JS のターン（<code>frame()</code> と、その前後のジョブの消化）の平均。転送しなかったターンも数える</td><td><code>turn_sum/ticks</code>、<code>app_session.c:2391–2409</code>、続きのターンは <code>:2303</code></td></tr>
+<tr><td><code>render_ms</code></td><td><code>present_frame</code> 全体から送りの時間を引いた平均。合成・Shiki の帯の線描き・byte swap 以外の準備</td><td><code>render_sum+=whole-sent_us</code>、<code>app_session.c:2574</code></td></tr>
+<tr><td><code>send_ms</code></td><td><code>kasane_send</code> と最後の回収の中にいた時間の平均。<b>DMA の線の時間ではなく、CPU がそこで止まっていた時間</b>（前の帯の DMA を待つ・swap・queue）。重ねがうまく行くほど小さい</td><td><code>sent_us</code>、<code>app_session.c:577、614、646</code>、<code>:2575</code></td></tr>
+<tr><td><code>bytes</code></td><td>最後のフレームで送った画素のバイト数。帯ごとに 行数 × 列数 × 2 の和（狭めた帯は狭い幅で）</td><td><code>ksn_render.c:2368</code></td></tr>
+<tr><td><code>bands</code></td><td>最後のフレームで送った帯の数（<code>band_mask</code> の 1 の数）</td><td><code>ksn_render_band_count</code>、<code>ksn_render.c:22</code></td></tr>
+<tr><td><code>band_runs</code></td><td>送った帯の連続のかたまりの数。同じ bytes でも 1 かたまりか飛び飛びかで、窓の開き直しの回数が違う</td><td><code>ksn_render_band_runs</code>、<code>ksn_render.c:27</code>；理由は <code>app_session.c:2593–2596</code></td></tr>
+<tr><td><code>band_mask</code></td><td>bit b = 帯 b（行 8b〜8b+7）を送った。<code>0x1ffff</code> = 17 帯すべて = 64,800 B</td><td><code>stats->bands|=1u&lt;&lt;band</code>、<code>ksn_render.c:2367</code></td></tr>
+<tr><td><code>prof</code> と <code>*_n</code>／<code>*_cy</code></td><td>合成の計測（塗り・文字の span・タイル・ブレンド・読み・image）の回数とサイクル。窓の合計。<code>prof=0</code> の間は数えない</td><td><code>ksn_render_prof_read</code>、<code>app_session.c:2592</code>、<code>ksn_render.h:25</code></td></tr>
+<tr><td><code>frames</code></td><td>窓の painted の数（30）</td><td><code>app_session.c:2603、2626</code></td></tr>
+</table>
+<p class="note">同じ窓の後に <code>SHIKI_TURN</code>（draw の回数・VM のステップ・engine_ms など、Shiki の 1 フレームあたり）が続く（<code>app_session.c:2631–</code>）。</p>
+</div>
+
+<h2 id="layers">5. 帯の中の重ね合わせ</h2>
+<p>帯 1 本を作るときは、<b>その帯にかかる層を全部、下から順に</b> <code>shared</code> へ描く（画家のアルゴリズム）。描き終わった帯はもう読まないので、次の帯で同じ 3,840 B を使い回せる。</p>
+<div class="card scroll">
+<svg viewBox="0 0 940 340" role="img" aria-label="帯 1 本の合成の順番" style="min-width:720px">
+  <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <g font-size="12">
+    <rect x="20" y="250" width="520" height="40" rx="6" fill="var(--host)" fill-opacity=".25" stroke="var(--host)"/>
+    <text x="32" y="268" font-weight="600">① 下地: 背景色で塗る、または Shiki の背景（backdrop）</text>
+    <text x="32" y="284" font-size="10.5" class="muted mono">fill565 ksn_render.c:2108／load_backdrop :2102 → pocket_proc.c:651</text>
+    <rect x="20" y="196" width="520" height="46" rx="6" fill="var(--kasane)" fill-opacity=".28" stroke="var(--kasane)"/>
+    <text x="32" y="214" font-weight="600">② APP の層: コマンド最大 80 個を順に（rect・文字・グラデーション・image）</text>
+    <text x="32" y="232" font-size="10.5" class="muted">Shiki の image ノードもここ。DERBY は全画面 240×135 の image（derby_scene.js:29）</text>
+    <rect x="20" y="146" width="520" height="42" rx="6" fill="var(--kasane)" fill-opacity=".45" stroke="var(--kasane)"/>
+    <text x="32" y="164" font-weight="600">③ SYSTEM の層: コマンド最大 16 個（通知など）</text>
+    <text x="32" y="180" font-size="10.5" class="muted mono">KSN_APP_COMMANDS 80 / KSN_SYSTEM_COMMANDS 16 ksn_core.h:19–20、層の順 ksn_render.c:2114</text>
+    <rect x="20" y="92" width="520" height="46" rx="6" fill="var(--board)" fill-opacity=".3" stroke="var(--board)"/>
+    <text x="32" y="110" font-weight="600">④ ホストの重ね: テキスト欄・ペット・録音中の印</text>
+    <text x="32" y="128" font-size="10.5" class="muted mono">テキスト欄 app_session.c:604、ペット・印 board.c:438–443</text>
+    <rect x="20" y="40" width="520" height="44" rx="6" fill="var(--spi)" fill-opacity=".3" stroke="var(--spi)"/>
+    <text x="32" y="58" font-weight="600">⑤ byte swap して tx_buf へ → DMA</text>
+    <text x="32" y="76" font-size="10.5" class="muted mono">board.c:504–532</text>
+    <line x1="560" y1="290" x2="560" y2="44" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar3)"/>
+    <text x="572" y="170" font-size="11" class="muted">同じ 3,840 B の上で</text>
+    <text x="572" y="186" font-size="11" class="muted">下から上へ描き重ねる</text>
+  </g>
+  <g font-size="11.5">
+    <text x="680" y="58" font-weight="600">なぜ LCD に直接描かないか</text>
+    <text x="680" y="82">・半透明・文字の縁は「下の色」を</text>
+    <text x="680" y="98">　読んで混ぜる。LCD は読めない</text>
+    <text x="680" y="122">・層ごとに送ると、同じ画素を</text>
+    <text x="680" y="138">　何度も送り、途中の絵（文字の</text>
+    <text x="680" y="154">　無い背景）が一瞬見える</text>
+    <text x="680" y="178">・帯を RAM で完成させれば、</text>
+    <text x="680" y="194">　1 画素は 1 回だけ送る</text>
+    <text x="680" y="226" class="muted" font-size="10.5">ref は 32 個まで（pocket_kasane.c:23）。</text>
+    <text x="680" y="242" class="muted" font-size="10.5">不透明な image が帯を覆うときは、</text>
+    <text x="680" y="258" class="muted" font-size="10.5">それより下の APP のコマンドを飛ばす</text>
+    <text x="680" y="274" class="muted" font-size="10.5">（ksn_render.c:2031–2052）。</text>
+  </g>
+</svg>
+</div>
+<div class="grid2">
+<div class="card">
+<h3>Shiki が下地になる場合（backdrop）</h3>
+<p>面 0 を <code>resource()</code> で image にしていないアプリでは、Shiki のフレームが帯の下地そのもの。<code>pocket_proc_backdrop()</code>（<code>pocket_proc.c:651–660</code>）が帯を背景色で塗り、その帯にかかる線分を描く。この形の <code>commit()</code> は <code>pocket_kasane_proc_publish()</code> で<b>画面全体</b>を傷にする（<code>pocket_kasane.c:2924</code>）。帯ごとの hash による絞り込みは使わない。</p>
+</div>
+<div class="card">
+<h3>Shiki が image になる場合（DERBY）</h3>
+<p><code>SK.resource({maxSegments: 768})</code>（<code>derby_view.js:9</code>）で面 0 が image の資源になり（<code>pocket_kasane.c:1086</code>）、シーンの <code>tx.image({resource: res, bounds: [0,0,240,135]})</code>（<code>derby_scene.js:29</code>）が ② の APP の層に入る。合成はその image を 32 画素ずつ読む（<code>image_span</code>、<code>pocket_proc.c:586</code>）。<code>commit()</code> は帯の hash で傷を絞る（<code>pocket_kasane.c:2941</code>）。</p>
+</div>
+</div>
+
+<h2 id="shiki">6. Shiki の線分の並び</h2>
+<h3>線分（segment）とフレーム</h3>
+<div class="grid2">
+<div class="card">
+<p><code>ksn_proc_segment</code> = <code>{int16 x0, y0, x1, y1; uint16 color}</code> = <b>10 B</b>（<code>ksn_procedural.h:16</code>）。1 画素幅の直線（Bresenham）。両端が同じなら 1 点。座標は −480〜720 まで許す。模様の線（<code>LINE_PATTERN</code>）は 2 つ分を使う（<code>ksn_procedural.h:17–31</code>）。</p>
+<p>フレーム <code>ksn_proc_frame</code> = 見出し 6 B（<code>count</code>、<code>raster_steps</code>、<code>ready</code>、<code>ext</code>）+ 線分の配列（<code>ksn_procedural.h:36–42</code>）。上限は 1,024 本（<code>KSN_PROC_SEGMENTS</code>）で 10,246 B。面ごとに <code>maxSegments</code>（1〜1,024）で短く取れる（<code>pocket_proc.c:62–81</code>）。DERBY は 768 本で 6 + 7,680 = <b>7,686 B</b> <span class="e">計算</span>。DERBY の 1 フレームの最多は 583 本 <span class="m">host 実測</span>（<code>apps/derby/README.md:234</code>）。</p>
+</div>
+<div class="card">
+<p>ラスタ化は帯ごと（<code>ksn_proc_render_band</code>、<code>ksn_procedural.c:129–168</code>）。<b>帯 1 本を描くたびに、フレームの線分を最初から最後まで全部見る</b>。縦の範囲が帯にかからない線分は 1 回の比較で飛ばし（1 線分 × 1 帯で 50 ns <span class="m">実測</span>、derby-background-cost.md §2）、かかる線分は、帯の上端までの Bresenham の位相を割り算で復元してから（<code>:142–158</code>）帯の中だけ画素を置く。17 帯なら 17 回なめる。</p>
+<p>線分の順が描く順なので、後の線分が前の線分を上書きする。</p>
+</div>
+</div>
+
+<h3>並びは 1 面に 2 つ（c4d7a6c の時点）</h3>
+<div class="card scroll">
+<svg viewBox="0 0 940 490" role="img" aria-label="candidate と committed の流れ" style="min-width:760px">
+  <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+  <g font-size="12">
+    <!-- VM -->
+    <rect x="20" y="40" width="160" height="66" rx="8" fill="var(--js)" fill-opacity=".3" stroke="var(--js)"/>
+    <text x="100" y="64" text-anchor="middle" font-weight="600">draw（VM / JIT）</text>
+    <text x="100" y="82" text-anchor="middle" font-size="10.5" class="muted">出してよい本数 cap</text>
+    <text x="100" y="97" text-anchor="middle" font-size="10.5" class="muted">= 残りの本数</text>
+    <line x1="180" y1="70" x2="606" y2="70" stroke="var(--fg)" marker-end="url(#ar4)"/>
+    <text x="392" y="62" text-anchor="middle" font-size="10.5">candidate の末尾へ直接書く（ksn_shiki_draw_index_cap）</text>
+    <text x="392" y="88" text-anchor="middle" font-size="10.5" class="muted mono">tail=&amp;candidate-&gt;segments[count] pocket_proc.c:486–489</text>
+    <line x1="300" y1="96" x2="300" y2="140" stroke="var(--spi)" marker-end="url(#ar4)"/>
+    <text x="310" y="122" font-size="10.5" fill="var(--spi)">cap に達した → count を進めず LIMIT_EXCEEDED（書きかけは数に入らない）</text>
+    <text x="310" y="138" font-size="10.5" fill="var(--spi)">ただし building=false なので、このフレームはもう描けない（pocket_proc.c:513–522）</text>
+    <!-- candidate -->
+    <rect x="610" y="30" width="300" height="76" rx="8" fill="var(--shiki)" fill-opacity=".35" stroke="var(--shiki)"/>
+    <text x="760" y="52" text-anchor="middle" font-weight="600">candidate（組み立て中）</text>
+    <text x="760" y="70" text-anchor="middle" font-size="10.5">maxSegments 本分（DERBY 7,686 B）</text>
+    <text x="760" y="88" text-anchor="middle" font-size="10.5" class="muted">beginFrame で count=0、draw ごとに count を進める</text>
+    <!-- commit -->
+    <line x1="760" y1="106" x2="760" y2="168" stroke="var(--fg)" marker-end="url(#ar4)"/>
+    <text x="770" y="140" font-size="10.5">commit(): 帯の hash、pending</text>
+    <rect x="610" y="170" width="300" height="56" rx="8" fill="var(--shiki)" fill-opacity=".35" stroke="var(--shiki)" stroke-width="2"/>
+    <text x="760" y="194" text-anchor="middle" font-weight="600">candidate（pending）</text>
+    <text x="760" y="212" text-anchor="middle" font-size="10.5" class="muted">転送中の帯はこれを読む（pocket_proc.c:599、655）</text>
+    <!-- swap -->
+    <line x1="610" y1="198" x2="470" y2="198" stroke="var(--fg)" marker-end="url(#ar4)"/>
+    <text x="540" y="190" text-anchor="middle" font-size="10.5">転送が成功</text>
+    <text x="540" y="214" text-anchor="middle" font-size="10.5">ポインタを交換</text>
+    <rect x="210" y="170" width="256" height="56" rx="8" fill="var(--shiki)" fill-opacity=".6" stroke="var(--shiki)"/>
+    <text x="338" y="194" text-anchor="middle" font-weight="600" fill="#fff">committed（表示中）</text>
+    <text x="338" y="212" text-anchor="middle" font-size="10.5" fill="#fff">maxSegments 本分（DERBY 7,686 B）</text>
+    <text x="210" y="246" font-size="10.5" class="muted mono">pocket_proc.c:662–675。古い committed の領域が次の candidate になる（コピーは無い）</text>
+    <!-- throw -->
+    <rect x="20" y="268" width="890" height="212" rx="8" fill="none" stroke="var(--line)"/>
+    <text x="34" y="290" font-weight="600">今の失敗の扱い</text>
+    <text x="34" y="312" font-size="11.5">・frame() が commit の前に投げる → ターンの終わりに building=false（pocket_proc.c:562–569）。</text>
+    <text x="34" y="330" font-size="11.5">　candidate は commit されず、次の beginFrame が count=0 に戻す。画面は committed のまま（前のフレームが出続ける）。</text>
+    <text x="34" y="352" font-size="11.5">・draw がフレームの残りを超える → その draw の線分は数に入らず、building=false と LIMIT_EXCEEDED。</text>
+    <text x="34" y="370" font-size="11.5">　後の draw も commit も「beginFrame required」で断られる。</text>
+    <text x="34" y="392" font-size="11.5">・commit 済みで転送待ちの間の beginFrame → BUSY（pocket_proc.c:269–270）。</text>
+    <text x="34" y="410" font-size="11.5">　転送に失敗（KSN_IO）→ 修復の印。backdrop なら committed で描き直す（:677–688）。</text>
+    <text x="34" y="432" font-size="11.5">・VM が frame() を途中で止めて次のターンへ持ち越す（park）間は、candidate を閉じない</text>
+    <text x="34" y="450" font-size="11.5">　（end_guest_turn、app_session.c:2188–2191）。</text>
+    <text x="34" y="470" font-size="11.5" fill="var(--planline)">→ 2 つを 1 本にし、投げたら「できた分を出す」扱いに変える予定（§10）。</text>
+  </g>
+</svg>
+</div>
+<div class="grid2">
+<div class="card">
+<h3>なくなった 3 つ目: workspace（c4d7a6c まで）</h3>
+<p>直前の 56949dc までは、draw 1 回分を必ず 1,024 本入る下書き（<code>workspace</code>、10,246 B）へ書き、出し終えてから「candidate の残りに入るか」を調べて <code>memcpy</code> していた。入らない draw を「全部か無か」にするための一時置き場で、共用体として image の帯のキャッシュも兼ねていた。c4d7a6c で VM が出してよい本数 <code>cap</code> を持つようになり（<code>ksn_shiki_vm.cap</code>、<code>ksn_shiki.h:147</code>、<code>ksn_shiki_draw_index_cap</code> <code>:206</code>）、下書きと写しが消えた。残ったのは <b>image の面の帯のキャッシュ</b>（<code>image_band_buf</code>、240×8×2 = 3,840 B、<code>pocket_proc.c:123–124</code>）。image の面が選ばれた時に取る（<code>pocket_proc.c:577–584</code>）。経緯は <a href="shiki-jit.md">shiki-jit.md</a> §22。</p>
+</div>
+<div class="card">
+<h3>帯の hash（どの帯が変わったか）</h3>
+<p><code>commit()</code> で <code>band_signature()</code>（<code>pocket_proc.c:215–239</code>）が、17 本の帯それぞれについて、その帯にかかる線分の<b>生のバイト</b>を順に FNV-1a で混ぜ、線分の左右の範囲も記録する。<code>pocket_proc_band_damage()</code>（<code>:240–260</code>）が committed の hash と比べ、違う帯だけを傷にし、列は 2 つのフレームの範囲の和。背景色が変わったか、まだ committed が無ければ全帯。帯の画素は「背景色と、その帯にかかる線分の並び」だけで決まるので、hash が同じなら描かずに済む。</p>
+<p class="note">別に <code>frame_damage()</code>（<code>:184–214</code>）が 2 つのフレームの全線分の外接矩形を出す。帯の hash が使えないときの予備（<code>pocket_kasane.c:2943–2944</code>）。</p>
+</div>
+</div>
+
+<h2 id="copies">7. DERBY の 1 画素が通る道</h2>
+<p>「フレームバッファが無い」ことと「コピーが無い」ことは別。DERBY（image の形）で、Shiki の線が LCD に届くまでに通る場所を、コードの順に並べる。</p>
+<div class="card">
+<table>
+<tr><th>#</th><th>何が</th><th>どこへ</th><th>大きさ</th><th>コード</th></tr>
+<tr><td>1–2</td><td>VM / JIT が線分を出す（c4d7a6c から下書きと写しは無い）</td><td>candidate の末尾</td><td class="num">10 B × 本</td><td><code>pocket_proc.c:489–504、523</code></td></tr>
+<tr><td>3</td><td>帯の初めに背景色で塗り、線分を全部なめて画素を置く</td><td>image の帯のキャッシュ <code>image_band_buf</code></td><td class="num">3,840 B／帯</td><td><code>pocket_proc.c:610–634</code>、<code>ksn_procedural.c:129</code></td></tr>
+<tr><td>4</td><td>32 画素ずつ写す（＋不透明度 255）</td><td>Kasane の span の作業域</td><td class="num">64 B／回</td><td><code>pocket_proc.c:636–637</code>、<code>ksn_render.c:141–146</code></td></tr>
+<tr><td>5</td><td>帯の下地を背景色で塗った上に、image を書き込む（不透明なら上書き）</td><td><code>shared</code></td><td class="num">3,840 B／帯</td><td><code>ksn_render.c:2108</code>、合成 <code>:2114–</code></td></tr>
+<tr><td>6</td><td>HUD の文字・矩形、テキスト欄・ペット・印を重ねる</td><td><code>shared</code></td><td class="num">—</td><td><code>app_session.c:604</code>、<code>board.c:438–443</code></td></tr>
+<tr><td>7</td><td>byte swap しながら写す</td><td><code>tx_buf</code></td><td class="num">3,840 B／帯</td><td><code>board.c:506</code></td></tr>
+<tr><td>8</td><td>DMA</td><td>LCD の GRAM</td><td class="num">3,840 B／帯</td><td><code>board.c:532</code></td></tr>
+</table>
+<p class="note">1–2 は線分（記録）の書き込み、3〜8 は画素。3 の帯のキャッシュは、拡大縮小した image が同じ行を何度も読むときに線分をなめ直さないためのもの（<code>pocket_proc.c:126–127</code>）。DERBY は 1:1 なので、帯ごとに 1 回なめて 1 回使う。5 の背景色の塗りは、不透明な image が帯を全部覆う場合でも走るように読める（<code>ksn_render.c:2104–2110</code> に image の不透明さを見る条件が無い）<span class="u">実機の計測では未確認</span>。</p>
+</div>
+
+<h2 id="mem">8. Shiki の区画のメモリ（DERBY）</h2>
+<p>Shiki を宣言したアプリは、起動時、ゲストを作る前に、連続した 1 区画を取る（<code>app_session.c:1532–1545</code>）。既定 48 KiB（<code>shiki_heap.h:19</code>）、DERBY は 56 KiB = 57,344 B（<code>app_registry.c:144</code>）。区画の中は自前の固定長の表で管理する（<code>shiki_heap.c</code>、<a href="shiki-jit.md">shiki-jit.md</a> §21）: 生きたブロックを番地の順に 128 件（<code>shiki_heap.c:48</code>、表は <code>.bss</code> の 512 B）、持ち主は下から、JIT は上から取り、空きは常にゼロ。</p>
+<div class="card scroll">
+<svg viewBox="0 0 940 250" role="img" aria-label="DERBY の Shiki の区画の内訳" style="min-width:720px">
+  <text x="20" y="18" font-size="12" font-weight="600">DERBY の区画 57,344 B（c4d7a6c、横幅は実寸に比例。低い番地 → 高い番地）</text>
+  <!-- 900 px = 57344 B ; x0=20 -->
+  <rect x="20" y="30" width="60.3" height="60" fill="var(--keep)"/>
+  <text x="50" y="54" text-anchor="middle" font-size="10">帯の</text>
+  <text x="50" y="68" text-anchor="middle" font-size="10">キャッシュ</text>
+  <text x="50" y="82" text-anchor="middle" font-size="10">3,840</text>
+  <rect x="80.3" y="30" width="120.7" height="60" fill="var(--shiki)"/>
+  <text x="141" y="54" text-anchor="middle" font-size="11" fill="#fff">フレーム A</text>
+  <text x="141" y="72" text-anchor="middle" font-size="11" fill="#fff">7,688</text>
+  <rect x="201" y="30" width="120.7" height="60" fill="var(--shiki)" fill-opacity=".8"/>
+  <text x="261" y="54" text-anchor="middle" font-size="11" fill="#fff">フレーム B</text>
+  <text x="261" y="72" text-anchor="middle" font-size="11" fill="#fff">7,688</text>
+  <rect x="321.7" y="30" width="5.8" height="60" fill="var(--js)"/>
+  <rect x="327.5" y="30" width="234.2" height="60" fill="var(--shiki)" fill-opacity=".35"/>
+  <text x="444" y="54" text-anchor="middle" font-size="11">式・点の窓・データ領域・リスト</text>
+  <text x="444" y="72" text-anchor="middle" font-size="11">約 14.9 KB（差し引き）</text>
+  <rect x="561.7" y="30" width="358.3" height="60" fill="var(--free)" stroke="var(--line)"/>
+  <rect x="790" y="30" width="130" height="60" fill="var(--jit)" fill-opacity=".55"/>
+  <text x="676" y="54" text-anchor="middle" font-size="11">空き</text>
+  <text x="855" y="54" text-anchor="middle" font-size="11">JIT のコード</text>
+  <text x="855" y="72" text-anchor="middle" font-size="10" class="muted">上から、量は変動</text>
+  <text x="740" y="106" text-anchor="middle" font-size="10.5" class="muted">持ち主の山の上 約 22.8 KB（推定）を空きと JIT で分ける</text>
+  <text x="325" y="106" text-anchor="middle" font-size="10" class="muted">VM 372</text>
+  <text x="20" y="136" font-size="11.5">・帯のキャッシュは resource() の時（derby_view.js:9 → pocket_proc_image_mode_at、pocket_proc.c:577–584）、</text>
+  <text x="20" y="154" font-size="11.5">　A・B は最初の beginFrame の時（derby_view.js:10 → buffers()、pocket_proc.c:151–158）に取る。並びはコードの順からの推定。</text>
+  <text x="20" y="172" font-size="11.5">・転送が成功するたびにポインタを入れ替えるので、A と B のどちらが candidate かはフレームごとに交代する。</text>
+  <text x="20" y="190" font-size="11.5">・VM の状態は最初の draw で取る（pocket_proc.c:481）。式・窓・データ領域は登録で取り、場面の切り替えで返す。</text>
+  <text x="20" y="208" font-size="11.5">・「約 14.9 KB」は変更前の host の山 40,914 B（実測）から、変更前の固定分 25,992 B（計算）を引いた差。個別には測っていない。</text>
+  <text x="20" y="226" font-size="11.5">・持ち主の山は今 約 34.5 KB（= 14.9 KB + 固定分 19,588 B、推定）。空きと JIT の境は実行中に動く。</text>
+</svg>
+<div class="legend">
+  <span style="--c:var(--keep)">image の帯のキャッシュ（画素）</span>
+  <span style="--c:var(--shiki)">フレーム（線分の並び）</span>
+  <span style="--c:var(--js)">VM の状態</span>
+  <span style="--c:color-mix(in srgb,var(--shiki) 35%,transparent)">登録で変わるもの</span>
+  <span style="--c:var(--jit)">JIT（借り手）</span>
+</div>
+</div>
+<div class="card scroll">
+<table>
+<tr><th>中身</th><th class="num">大きさ（B）</th><th>根拠</th><th>種類</th></tr>
+<tr><td>フレーム × 2（candidate・committed）</td><td class="num">2 × 7,686（区画では 4 B 単位で 7,688）</td><td><code>offsetof(ksn_proc_frame,segments)</code> 6 + 768 × <code>sizeof(ksn_proc_segment)</code> 10（<code>pocket_proc.c:78–80</code>）</td><td><span class="e">構造体から計算</span></td></tr>
+<tr><td>image の帯のキャッシュ</td><td class="num">3,840</td><td>240 × 8 × 2（<code>pocket_proc.c:123–124、577–584</code>）。image の面があるときだけ</td><td><span class="e">計算</span></td></tr>
+<tr><td>（c4d7a6c で廃止）workspace</td><td class="num">10,246（10,248）</td><td><code>sizeof(proc_workspace)==sizeof(ksn_proc_frame)</code>、1,024 本分の下書きと帯のキャッシュの共用体（56949dc の <code>pocket_proc.c:120–125</code>）</td><td><span class="e">計算</span></td></tr>
+<tr><td>VM の状態 <code>ksn_shiki_vm</code></td><td class="num">372（cap を足す前は 368）</td><td>レジスタ 16 × 4、ループ 8 × 10、ペン・数・<code>cap</code>、<code>vraw</code> 207 B ほか、32 bit の整列で（<code>ksn_shiki.h:134–157</code>）</td><td><span class="e">構造体から計算</span></td></tr>
+<tr><td>式（plan）1 本</td><td class="num">64 + 12 × 命令数</td><td><code>ksn_shiki_plan_bytes</code>（<code>ksn_shiki.h:120</code>）、命令は最大 64（<code>KSN_SHIKI_CODE</code>、<code>:19</code>）で 832 B。handle は 32 まで</td><td><span class="e">構造体から計算</span></td></tr>
+<tr><td>データ領域・点の窓</td><td class="num">宣言しだい</td><td>最大 16（<code>pocket_shiki_api.c:28</code>）、16 B 境界（<code>shiki_heap_aligned</code>）</td><td>—</td></tr>
+<tr><td>描画のリスト（<code>setList</code>）</td><td class="num">4 × 要素数</td><td>最大 8（<code>pocket_shiki_api.c:56、423</code>）。線分の並びではなく「どの handle をどの番号で描くか」の表</td><td>—</td></tr>
+<tr><td>固定分の合計（今）</td><td class="num">19,588</td><td>7,688 × 2 + 3,840 + 372</td><td><span class="e">計算</span></td></tr>
+<tr><td>固定分の合計（56949dc まで）</td><td class="num">25,992</td><td>7,688 × 2 + 10,248 + 368</td><td><span class="e">計算</span></td></tr>
+<tr><td>持ち主全体の山（DERBY、768 本にした後、workspace 廃止の前）</td><td class="num">40,914</td><td><code>apps/derby/README.md:234</code>。<a href="shiki-jit.md">shiki-jit.md</a> §21.1 は約 39〜40 KB（host 40,112 B）</td><td><span class="m">host 実測</span></td></tr>
+<tr><td>区画の使用／最大の空き（48 KiB 時）</td><td class="num">44,548 / 2,924</td><td><code>shk=</code>、e877784、JIT のコード込み（shiki-jit.md §21.2）</td><td><span class="m">実測</span></td></tr>
+<tr><td>区画の使用／最大の空き（56 KiB・TLSF 時）</td><td class="num">50,164 / 3,328</td><td>fb30211（shiki-jit.md §19.3・§21.2）</td><td><span class="m">実測</span> <span class="u">今の管理では未確認</span></td></tr>
+<tr><td>56 KiB にした代わりの、起動後のシステムの空き</td><td class="num">45,576 → 37,308</td><td>shiki-jit.md §21.3</td><td><span class="m">実測</span></td></tr>
+</table>
+<p class="note">workspace の廃止で DERBY の区画から空くのは 10,248 − 3,840 = <b>6,408 B</b> <span class="e">計算</span>。DERBY は <code>resource()</code> で面 0 を image にしている（<code>derby_view.js:9</code>、<code>derby_scene.js:29</code>）ので、帯のキャッシュは取られる。shiki-jit.md §22 の「DERBY の区画で 10,246 B」「画像の面を使わないアプリ（DERBY の背景）は取らない」は、この点でコードと合わない。</p>
+<p class="note"><a href="shiki.md">shiki.md</a> §4.5.1（2026-10-31 実測）の DERBY の行の「フレーム 2 枚 + 作業用 各 10,752」は、768 本にする前（<code>b30dc1d</code>、2026-11-02 より前）で、TLSF のブロックの大きさ。<a href="shiki-jit-overview.html">shiki-jit-overview.html</a> §4 の図も 10,752 × 3 で描かれており、今の DERBY とは合わない。</p>
+</div>
+
+<h2 id="jit">9. JIT の位置</h2>
+<p>JIT は <b>⑤ の draw の中</b>だけに関わる。よく描かれる式（4 回目から）を Xtensa / PIE の機械語にして、インタプリタの代わりに走らせる（<code>ksn_shiki.c</code> の <code>ksn_shiki_jit_run</code> 呼び出し）。出力は同じ線分で、行き先も同じ candidate の末尾（線分は C の helper が出すので、<code>cap</code> の検査も同じものを通る。shiki-jit.md §22）。帯の合成・転送は何も変わらない。コードの置き場所は上の区画の上側の空きで、持ち主の確保が足りなくなれば返す。詳しくは <a href="shiki-jit-overview.html">Shiki JIT とメモリ配置（図解）</a> と <a href="shiki-jit.md">shiki-jit.md</a>。</p>
+
+<h2 id="plan">10. 予定の変更（作業中）</h2>
+<div class="plan">
+<h3>Shiki を線分の並び 1 本にする（2026-11-03 ユーザー決定、メインのセッションで実装中）</h3>
+<p><b>§6〜§8 は c4d7a6c の動作。決定のうち、入ったのは 1 つ目だけ。</b></p>
+<ul>
+<li><b>workspace を無くす。</b>— <b>入った（c4d7a6c）。</b>draw は並びの末尾へ直接書き、入りきらなければ本数（<code>count</code>）を進めない。ただし今は、その上で <code>LIMIT_EXCEEDED</code> を投げてフレームを閉じる（<code>building=false</code>、<code>pocket_proc.c:519–522</code>）。「数を進めないだけで続ける」形にはまだなっていない。</li>
+<li><b>candidate と committed を 1 本にまとめる。</b>面あたりのフレームは 1 枚。— <b>未実装。</b></li>
+<li><b><code>frame()</code> が投げたときは「flush」。</b>そこまでにできた分を commit したものとして表示し、次のフレームは最初からやり直す（今は candidate を捨てて前のフレームを出し続ける）。— <b>未実装。</b></li>
+</ul>
+<p class="note">見込み <span class="e">推定</span>: 1 本にすれば DERBY でさらにフレーム 1 枚 7,688 B が区画から消える（workspace の分と合わせて約 14 KB）。shiki-jit.md §22 は、1 本にすると VM が <code>frame()</code> を途中で止めて持ち越している間（park）に別の理由で画面を描き直したとき、描きかけの並びが出てしまう点を、先に決めることとして挙げている。転送の失敗（KSN_IO）からの修復が今は committed に頼っている点（<code>pocket_proc.c:677–688</code>）と、帯の hash を「前のフレーム」と比べている点（<code>pocket_proc.c:240–260</code>。比べる相手は hash だけ残せばよい）も、1 本にするときに形が変わる。</p>
+</div>
+
+<h2 id="facts">11. 事実・推定・未確認</h2>
+<div class="kv">
+<b>コードで確認</b><span>帯 8 行・17 本・最後は 7 行、作業台 1 本・転送用 1 本、DMA の重ね、RAMWR の連続、KASANE_PAINT の各欄の出どころ、Shiki の 2 つの並びと交換の時期、末尾への直接の書き込み、帯の hash、失敗の扱い、区画の大きさと管理（すべて c4d7a6c）。</span>
+<b>計算</b><span>64,800 B、6.48 ms、フレーム 7,686 B、帯のキャッシュ 3,840 B、旧 workspace 10,246 B、VM 372 B（旧 368 B）、plan 64 + 12n B、固定分 19,588 B（旧 25,992 B）、§8・§10 の削減量。構造体の大きさは 32 bit の整列を手で数えたもの（実機の <code>sizeof</code> は測っていない）。</span>
+<b>実測（引用）</b><span>空き heap 280,932 B、全画面転送 7.7 ms、80 MHz で 9.1 ms、帯の費用モデル、DERBY の render 9〜10.5 ms、持ち主の山 40,914 B（host、workspace 廃止の前）、<code>shk=</code> の値、起動後の空き 37,308 B、1 フレーム最多 583 本（host）。出典は各所に記した。</span>
+<b>未確認</b><span>workspace 廃止の後の DERBY の区画（<code>shk=</code>）と、今の表の管理での 56 KiB の値。DERBY の現行 image での <code>KASANE_PAINT</code>（render・send・band_mask）の値（docs/kasane/logs の DERBY のログに KASANE_PAINT 行が無い）。不透明な全面 image の下で背景色の塗りが無駄に走っているかの実測。表示が正しいこと（MISO 未配線のため、目視でしか確かめられない）。</span>
+</div>
+</main>
+</body>
+</html>
