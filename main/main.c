@@ -1542,7 +1542,21 @@ void app_main(void) {
     };
     uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
     app_control_init(boot_id,&native_hooks);
-    configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
+    /* The input task's stack is RTC fast memory (docs/kasane/shiki-jit.md
+     * sec.19): 8 KB on the APB clock, slow for code and data, and the heap
+     * hands it to whoever asks next -- the Shiki JIT's code ran 3x slower
+     * there. A task that only polls the keyboard does not mind the speed,
+     * and taking the memory at boot leaves 4 KB more of DIRAM. Pinned to
+     * core 0, the one that reaches RTC fast memory on every chip. */
+    {
+        static StaticTask_t input_tcb;
+        StackType_t *input_stack=heap_caps_malloc(4096,MALLOC_CAP_RTCRAM);
+        if(input_stack)
+            configASSERT(xTaskCreateStaticPinnedToCore(input_task,"input",4096/sizeof(StackType_t),NULL,6,
+                                                       input_stack,&input_tcb,0));
+        else configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
+        ESP_LOGI("boot","INPUT_STACK %s",input_stack?"rtc":"dram");
+    }
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
     // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
     // and nothing else -- the three settings are one binary family, which is
