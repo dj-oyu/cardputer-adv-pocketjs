@@ -163,15 +163,18 @@ static bool present(void) {
 }
 
 // A pocket.fs with the one shape the app uses: open() -> {read(n), close()},
-// three 1 KiB chunks then null (end of file).
+// three 1 KiB chunks then null (end of file). A read that fails (an OOM in
+// the Uint8Array) is finished too: its promise rejects, it does not hang, so
+// it counts in finally -- before, such a read left started one ahead and the
+// run failed on a read that had in fact settled.
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};"
     "globalThis.pocket={kasane:globalThis.kasane,fs:{open:async function(){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}let n=0;"
     "return{read:async function(m){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}"
-    "__readStarted();let c=++n>3?null:new Uint8Array(m);"
-    "__readFinished();return c},close:function(){}}}},memory:globalThis.memory};";
+    "__readStarted();try{return ++n>3?null:new Uint8Array(m)}finally{__readFinished()}},"
+    "close:function(){}}}},memory:globalThis.memory};";
 
 int main(int argc,char **argv) {
     const char *gradient_arm=getenv("KSN_VERTICAL_GRAD_PIE");

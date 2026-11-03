@@ -11,10 +11,11 @@ function prog() {
   throw Error('programs are compiled at build time: tools/kasane_ir/lower_plans.mjs');
 }
 const T = {
-  // sky: n full-width rows from y0, each in its row's colour of the ramp
-  // (135 colours, one per row: sky, horizon, sea; stress.js darkens every
-  // other row, the scanlines). 34 rows is the most a draw may raster
-  // (34 x 240 <= 8,192), so the screen is four draws.
+  // sky: n full-width rows from y0, every other row, each in its row's
+  // colour of the ramp (135 colours, one per row: sky, horizon, sea). The
+  // rows between are the frame's background: the scanlines, and half the
+  // pixels to write. 34 rows is the most a draw may raster (34 x 240 <=
+  // 8,192), so the screen is two draws.
   /** @shiki sky inputs: y0, n
    *  @data ramp: u16 q0 record 1 */
   sky() {
@@ -22,7 +23,7 @@ const T = {
     for (let i = 0; i < n; i++) {
       move(0, y);
       line(239, y, ramp[y]);
-      y += 1;
+      y += 2;
     }
   },
   // stars: per record a point at (x, y) twinkling with sin(ph + t): the
@@ -107,6 +108,27 @@ const T = {
       cubic(seg, c, tx, ty, qx, qy, px - 3 * m, py - 5, px, py);
       cubic(seg, c, tx, ty + 1, qx, qy + 3, px - 3 * m, py - 2, px, py);
       cubic(seg, c, tx, ty + 2, qx, qy + 5, px - 4 * m, py, px, py);
+    }
+  },
+  // rim: the edge light on a crown's leaves: each leaf's top edge as a
+  // polyline one pixel above it, through the curve at 1/3, 2/3 and the tip
+  // (stress.js computes them from fr into rf; the sway moves them by the
+  // tip's weight in each). CUBIC's colour is fixed at registration, LINE's
+  // comes from a register: the light runs from leaf to leaf, leaf k at
+  // sin(t + .9 k) of lt's 8 colours, its tip half a step ahead.
+  /** @shiki rim inputs: x, y, m, s, t
+   *  @data rf: i16 q0 record 6
+   *  @data lt: u16 q0 record 1 */
+  rim() {
+    const tx = x + 16 * m + s, ty = y - 65;
+    let ph = t;
+    for (const [ax, ay, bx, by, ex, ey] of rf) {
+      const c = lt[sin(ph) * 3.5 + 3.5];
+      move(tx, ty);
+      line(tx + ax * m + s * .26, ty + ay + s * .08, c);
+      line(tx + bx * m + s * .74, ty + by + s * .22, c);
+      line(tx + ex * m + s, ty + ey + s * .3, lt[sin(ph + .6) * 3.5 + 3.5]);
+      ph += .9;
     }
   },
   // fish: a school at (x, y): per record a fish at (dx, dy), a body (a

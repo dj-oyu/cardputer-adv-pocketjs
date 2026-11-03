@@ -43,6 +43,13 @@
   const FR = [[-12, -14, -34, 6], [-10, -20, -26, -10], [-2, -22, -8, -22], [8, -22, 12, -18],
     [12, -16, 30, -6], [14, -8, 34, 12], [4, -2, 16, 24]];
   const fronds = win('i16', FR, 4); fill(fronds, FR);
+  // The rim's polyline: each leaf's curve (crown's first) at 1/3 and 2/3, and its tip.
+  const RF = FR.map(f => { const P1 = [f[0], f[1]], P2 = [f[2] - 3, f[3] - 5], P3 = [f[2], f[3]];
+    const b = (u, v, w) => [0, 1].map(i => Math.round((u * P1[i] + v * P2[i] + w * P3[i]) / 27));
+    return b(12, 6, 1).concat(b(6, 12, 8), P3); });
+  const rims = win('i16', RF, 6); fill(rims, RF);
+  const lt = P.data({type: 'u16', q: 0, records: 8, record: 1});   // the rim light, dark to sunlit
+  for (let i = 0; i < 8; i++) lt[i] = rgb(grad([0, 0x2a0638, .45, 0xc2187f, .75, 0xff7a3d, 1, 0xfff3a0], i / 7));
   const pal = [0xff3cac, 0xb6ff3a, 0x19e6d4, 0xffe14d].map(rgb);
   const SC = [];
   for (let i = 0; i < 9; i++) SC.push([i * 29 % 72, i * 13 % 30, pal[i & 3]]);
@@ -59,14 +66,15 @@
   const hFish = reg('fish', [], [school[0]]), hDol = reg('dolphin', [rgb(0x3ff4ff), rgb(0xfff6ff)], [shape[0]]);
   const hDol2 = reg('dolphin', [rgb(0xff5fd2), rgb(0xffe14d)], [shape[0]]);
   const hBub = reg('bubbles', [rgb(0xc8fbff)], [ring[0]]), hTrunk = reg('trunk', [rgb(0x16031f), 8]), hCrown = reg('crown', [rgb(0x16031f), 5], [fronds[0]]);
-  const hVhs = reg('vhs', [rgb(0xfff6ff), rgb(0xff3cac)]);
-  // One drawMany a frame, four inputs a draw, back to front: about 910 of the
-  // frame's 1,024 segments.
-  const H = new Uint32Array([hSky, hSky, hSky, hSky, hStar, hSun, hGlow, hWave, hFish, hFish, hDol, hDol2,
-    hBub, hTrunk, hCrown, hTrunk, hCrown, hVhs]);
-  const IN = new Float64Array(H.length * 4);
-  [0, 34, 34, 34, 68, 34, 102, 33].forEach((v, i) => { IN[(i >> 1) * 4 + (i & 1)] = v; });
-  IN.set([12, 136, 1, 0, 12, 136, 1, 0, 230, 140, -1, 0, 230, 140, -1, 0], 13 * 4);
+  const hRim = reg('rim', [], [rims[0], lt]), hVhs = reg('vhs', [rgb(0xfff6ff), rgb(0xff3cac)]);
+  // One drawMany a frame, five inputs a draw, back to front: about 900 of the
+  // frame's 1,024 segments. The draws by number, for IN[d * 5 + k]:
+  const DR = [[hSky, 0, 34], [hSky, 68, 34], [hStar], [hSun], [hGlow], [hWave], [hFish], [hFish], [hDol], [hDol2],
+    [hBub], [hTrunk, 12, 136, 1], [hCrown, 12, 136, 1], [hRim, 12, 136, 1], [hTrunk, 230, 140, -1],
+    [hCrown, 230, 140, -1], [hRim, 230, 140, -1], [hVhs]];
+  const STAR = 2, GLOW = 4, WAVE = 5, FISH = 6, DOL = 8, PALM = 11, VHS = 17;
+  const H = new Uint32Array(DR.map(d => d[0])), IN = new Float64Array(DR.length * 5);
+  DR.forEach((d, i) => { for (let k = 1; k < d.length; k++) IN[i * 5 + k - 1] = d[k]; });
   const res = P.resource();
   const txt = () => ['pool ' + pool.length + ' peak ' + peak + ' oom ' + oom + ' f' + t,
     'native ' + natOk + ' ' + nat + ' reads ' + (natB >> 10) + 'K', 'LV' + (lvl + 1)];
@@ -141,25 +149,27 @@
   // windows, then one Shiki frame. Phases stay within 2 pi (Shiki's sin).
   const TAU = Math.PI * 2, ph = k => t * k % TAU;
   function paint() {
-    IN[16] = ph(.07); IN[24] = ph(.05); IN[28] = ph(.11);
+    IN[STAR * 5] = ph(.07); IN[GLOW * 5] = ph(.05); IN[WAVE * 5] = ph(.11);
     for (let y = 16; y < 60; y++)   // the sun's gaps climb, wider lower down
       sun[0][y - 16] = y > 34 && (y + (t >> 2)) % 7 < (y - 30) / 8 ? 300 : y;
     for (let k = 0; k < 2; k++) {
-      IN[32 + 4 * k] = (t * (1 + k) + k * 150) % 340 - 100;
-      IN[33 + 4 * k] = 66 + k * 18 + 5 * Math.sin((t + k * 20) / 14);
+      IN[(FISH + k) * 5] = (t * (1 + k) + k * 150) % 340 - 100;
+      IN[(FISH + k) * 5 + 1] = 66 + k * 18 + 5 * Math.sin((t + k * 20) / 14);
       const p = (t * 2 + k * 170) % 340, a = Math.sin(p / 340 * TAU);
-      IN[40 + 4 * k] = p - 50;
-      IN[41 + 4 * k] = a > 0 ? 88 - 58 * a : 88 - 8 * a;   // leap above the horizon, then glide
+      IN[(DOL + k) * 5] = p - 50;
+      IN[(DOL + k) * 5 + 1] = a > 0 ? 88 - 58 * a : 88 - 8 * a;   // leap above the horizon, then glide
+      const sway = 2.5 * Math.sin(t / (23 - 4 * k) + k);   // the palms: trunk, crown and rim sway as one
+      for (let j = 0; j < 3; j++) IN[(PALM + 3 * k + j) * 5 + 3] = sway;
+      IN[(PALM + 3 * k + 2) * 5 + 4] = ph(.06 + .02 * k);
     }
     B.forEach(function (b, k) {
       b.y -= b.s; if (b.y < 64) b.y = 104;
       ring[0][k] = b.x + 3 * Math.sin((t + k * 9) / 10); ring[0][8 + k] = b.y; ring[0][16 + k] = b.r;
     });
-    IN[55] = IN[59] = 2.5 * Math.sin(t / 23); IN[63] = IN[67] = 2.5 * Math.sin(t / 19 + 1);
     const g = t % 150;   // a VHS tracking glitch every 5 s, parked above the screen between
-    IN[68] = g < 14 ? 18 + g * 7 : -40; IN[69] = ph(.9);
+    IN[VHS * 5] = g < 14 ? 18 + g * 7 : -40; IN[VHS * 5 + 1] = ph(.9);
     P.beginFrame(BG);
-    P.drawMany(H, IN, 4);
+    P.drawMany(H, IN, 5);
     P.commit();
   }
 
