@@ -133,9 +133,15 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_GAME, .optional=CAPS_LCD_OPT, .works=APP_WORKS_NONE},
 
+    // 56 KiB of Shiki heap, not the default 48: the region's owners take
+    // about 39.5 KB in the race, and its plans' JIT code wants 9-10 KB more
+    // (docs/kasane/shiki-jit.md sec.21.3; the race start 1.3 ms at 48 KiB,
+    // 0.5 ms at 56). MEGADEMO stays at 48: 8 KiB more cost its evaluation
+    // the 12 KB block a chunk needs (sec.19.3).
     {.id="local.derby", .title="DERBY WATCH", .entry="apps/derby/derby_watch.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
-     .required=CAPS_GAME, .optional=CAPS_DERBY_OPT, .works=APP_WORKS_NONE},
+     .required=CAPS_GAME, .optional=CAPS_DERBY_OPT, .works=APP_WORKS_NONE,
+     .shiki_bytes=56u*1024u},
 
     {.id="local.bigwave", .title="BIG WAVE", .entry="apps/bigwave/big_wave.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,

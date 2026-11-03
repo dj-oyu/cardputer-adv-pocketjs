@@ -505,3 +505,11 @@ DERBY（engine_ms、実測）:
 
 - 上へ縮めて、JIT に入るコードは 3.2〜4.9 → 4.5〜6.8 KB。WIDE・FIELD は 56 KiB の時と同じ速さに戻った。
 - 残りは量の不足。区画の持ち主が約 39.5 KB、空きは約 4.6 KB（一続きは 2.3〜2.9 KB）。発走と WIDE 2 は描くプランが多く、JIT のコードが 9〜10 KB 要る（56 KiB の時の実測）。48 KiB の区画では入らない。
+
+### 21.3 DERBY の区画は 56 KiB（2026-11-03 ユーザー決定）
+
+アプリごとの予算（[shiki-spec.md](shiki-spec.md) §9.2 の manifest の `shiki: {bytes: N}`、ファームでは `app_registry.c` の `shiki_bytes`）で、DERBY だけ 56 KiB にする。他のアプリは既定の 48 KiB のまま。
+
+- 理由: §21.2 のとおり、DERBY の発走と WIDE 2 の JIT のコード（9〜10 KB）は 48 KiB の区画に入らない。56 KiB の DERBY は実機でゴール・結果まで走った（§19.3、TLSF の時の実測。発走 0.52 ms）。代償は起動後のシステムの空きで、45,576 → 37,308 B（同じく実測）。
+- MEGADEMO は 48 KiB のまま（56 KiB では評価中の 12 KB の確保が失敗した、§19.3）。
+- host の DERBY の検査（`tools/games/test_derby_host.c`）は既定の 48 KiB で区画を開いたまま。持ち主が 48 KiB に収まることの検査として残す。
