@@ -744,34 +744,54 @@ __asm__(
 "    .pushsection .iram1.ksn_jit_chk,\"ax\",@progbits\n"
 "    .align 4\n"
 "    .global ksn_jit_chk_sub\n"
-"    .type ksn_jit_chk_sub,@function\n"
 "ksn_jit_chk_sub:\n"
 "    xor a11, a8, a9\n"
 "    xor a12, a8, a10\n"
 "    j 1f\n"
 "    .align 4\n"
 "    .global ksn_jit_chk_add\n"
-"    .type ksn_jit_chk_add,@function\n"
 "ksn_jit_chk_add:\n"
 "    xor a11, a8, a10\n"
 "    xor a12, a9, a10\n"
-"1:  and a11, a11, a12\n"
+/* The loads are issued ahead of their uses (a load's result costs a cycle
+ * when the next instruction reads it). */
+"1:  l32i a13, a2, 32\n"
+"    and a11, a11, a12\n"
+"    add a13, a13, a0\n"
 "    bgez a11, 2f\n"
 "    srai a10, a8, 31\n"
 "    xor a10, a10, a6\n"
-"2:  l32i a12, a2, 32\n"
-"    add a12, a12, a0\n"
-"    l32i a13, a12, 0\n"
+"2:  l32i a12, a13, 0\n"
 "    srai a14, a10, 31\n"
 "    xor a14, a14, a10\n"
-"    and a13, a13, a6\n"
-"    or a13, a13, a14\n"
-"    s32i a13, a12, 0\n"
-"    addi a12, a0, 4\n"
+"    and a12, a12, a6\n"
+"    or a12, a12, a14\n"
+"    s32i a12, a13, 0\n"
+"    addi a13, a0, 4\n"
+"    l32i a0, a2, 28\n"
+"    jx a13\n"
+/* The fast entries: the same saturation, no log. A site whose check stays
+ * is pointed here once its plan has decided (sat_pass). */
+"    .align 4\n"
+"    .global ksn_jit_chk_sub_fast\n"
+"ksn_jit_chk_sub_fast:\n"
+"    xor a11, a8, a9\n"
+"    xor a12, a8, a10\n"
+"    j 3f\n"
+"    .align 4\n"
+"    .global ksn_jit_chk_add_fast\n"
+"ksn_jit_chk_add_fast:\n"
+"    xor a11, a8, a10\n"
+"    xor a12, a9, a10\n"
+"3:  and a11, a11, a12\n"
+"    bgez a11, 4f\n"
+"    srai a10, a8, 31\n"
+"    xor a10, a10, a6\n"
+"4:  addi a12, a0, 4\n"
 "    l32i a0, a2, 28\n"
 "    jx a12\n"
 "    .popsection\n");
-extern const uint8_t ksn_jit_chk_add[],ksn_jit_chk_sub[];
+extern const uint8_t ksn_jit_chk_add[],ksn_jit_chk_sub[],ksn_jit_chk_add_fast[],ksn_jit_chk_sub_fast[];
 _Static_assert(offsetof(ksn_jit_run,ra)==28&&offsetof(ksn_jit_run,alias)==32,"the checker's offsets");
 
 /* Measurement build (shiki-jit.md sec.15): -DPOCKET_SHIKI_JIT_EXECMAP logs
@@ -877,16 +897,23 @@ typedef struct {
     void *next;
     uint32_t last;                /* jit_clock at its last draw (sec.16) */
     /* sec.18: JIT_SAT_LOG, the code calls the shared checker and its slots
-     * log; JIT_SAT_DECIDED, plain says which sites lost their check (the
-     * code patched, and any later compile emits them plain and the rest
-     * inline). draws: draws since the code was compiled. */
+     * log; JIT_SAT_DECIDED, every site is settled. plain: sites that lost
+     * their check (patched to j over the slot); fast: sites that keep it,
+     * pointed at the checker's entry without the log. A later compile
+     * (after a drop) of a decided plan emits plain sites plain and the rest
+     * inline. draws: draws since the code was compiled. */
     uint8_t sat;
     uint16_t draws;
     int32_t alias;                /* the code's data-bus address minus its instruction-bus one */
     uint8_t *sdata;               /* the code's start on the data bus */
-    uint64_t plain;
+    uint64_t plain,fast;
 } jit_plan;
 enum { JIT_SAT_NONE, JIT_SAT_LOG, JIT_SAT_DECIDED };
+static unsigned count_sites(const ksn_shiki_plan *plan){
+    unsigned n=0;
+    for(unsigned pc=0;pc<plan->count;pc++)n+=plan->code[pc].op==KSN_SHIKI_ADD||plan->code[pc].op==KSN_SHIKI_SUB;
+    return n;
+}
 #define JIT_WEIGHTS_MAX 512u     /* int32s: 2 KB, e.g. 8 CUBICs of 16 segments */
 /* Copies len bytes of code into a new executable allocation, as 32-bit
  * words (the instruction bus takes only word stores); *raw is what to free.
@@ -1053,6 +1080,7 @@ static int compiled(ksn_shiki_plan *plan,jit_plan *j,uint8_t *x,size_t entry,siz
     j->sdata=data;
     j->alias=(int32_t)((intptr_t)data-(intptr_t)x);
     j->draws=0;
+    if(j->sat!=JIT_SAT_DECIDED){j->plain=j->fast=0;}
     if(j->sat!=JIT_SAT_DECIDED)j->sat=checker&&count_sites(plan)?JIT_SAT_LOG:JIT_SAT_NONE;
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
@@ -1079,12 +1107,6 @@ static void sat_mode(const jit_plan *j,ksn_jit_buf *b,uint32_t org,bool checker)
     b->chk_add=(uint32_t)(uintptr_t)ksn_jit_chk_add;
     b->chk_sub=(uint32_t)(uintptr_t)ksn_jit_chk_sub;
 }
-static unsigned count_sites(const ksn_shiki_plan *plan){
-    unsigned n=0;
-    for(unsigned pc=0;pc<plan->count;pc++)n+=plan->code[pc].op==KSN_SHIKI_ADD||plan->code[pc].op==KSN_SHIKI_SUB;
-    return n;
-}
-
 /* sec.17: in the Shiki region, one pass. A block as long as the guess
  * (JIT_GUESS), the code written once through the data bus, the end given
  * back. Returns JIT_DONE, JIT_REFUSED, or -2 when the region has no room
@@ -1194,46 +1216,72 @@ static int compile_scalar(ksn_shiki_plan *plan){
     }
     return compiled(plan,j,x,entry,bytes,w,e.chk_add!=0);
 }
-/* sec.18: after JIT_SAT_DRAWS draws of logging, a site whose results kept
- * JIT_SAT_ROOM bits of room below INT32_MAX loses its check: its call0
- * becomes j over the slot. A site that never ran, or came closer, keeps it.
- * The decision outlives the code: a later compile (after a drop) emits the
- * cleared sites plain and the rest inline. */
-#define JIT_SAT_DRAWS 256u
+/* sec.18: the logs are read twice, early (the checker with its log costs
+ * ~4x the inline check, so the sooner a site leaves it the better):
+ * - at JIT_SAT_EARLY draws a site whose results used at most
+ *   31 - JIT_SAT_ROOM_EARLY bits loses its check (its call0 becomes j over
+ *   the slot), and one that came within JIT_SAT_NEAR bits of INT32_MAX (or
+ *   saturated) keeps it, without the log (call0 to the fast entry);
+ * - at JIT_SAT_LATE draws the rest are settled with JIT_SAT_ROOM bits of
+ *   room; a site that never ran keeps its check, without the log.
+ * Values are risk, not proof: a site cleared here wraps if a later draw
+ * overflows it (docs/kasane/shiki-jit.md sec.18). */
+#define JIT_SAT_EARLY 16u
+#define JIT_SAT_LATE 64u
+#define JIT_SAT_ROOM_EARLY 12u
 #define JIT_SAT_ROOM 8u
-static void sat_decide(const ksn_shiki_plan *plan,jit_plan *j){
+#define JIT_SAT_NEAR 3u
+/* Rewrites the 3 bytes at the site: j over the slot, or call0 to `to`. */
+static void sat_patch(jit_plan *j,unsigned at,const uint8_t *to){
+    ksn_jit_buf q={j->sdata,at,at+3u,false,false,0,0,0,0,NULL,0};
+    if(!to){ksn_jit_emit(&q,KSN_JIT_J,3,0,0);return;}
+    const uint32_t pc=(uint32_t)(uintptr_t)j->sdata-(uint32_t)j->alias+at;
+    ksn_jit_emit(&q,KSN_JIT_CALL0,(int)(((int32_t)(uintptr_t)to-(int32_t)(pc&~3u)-4)/4),0,0);
+}
+static void sat_pass(const ksn_shiki_plan *plan,jit_plan *j,bool late){
     uint16_t sites[KSN_SHIKI_CODE];
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
     sat_mode(j,&b,0,true);
     b.sites=sites;
     size_t entry=0;
-    j->sat=JIT_SAT_DECIDED;
-    j->plain=0;
-    if(!ksn_shiki_jit_scalar(plan,&b,&entry))return;   /* cannot happen: it compiled */
+    if(!ksn_shiki_jit_scalar(plan,&b,&entry)){j->sat=JIT_SAT_DECIDED;return;}   /* cannot happen: it compiled */
     /* The SHIKI_SAT line: per site, in program order, the bits its results
      * used (0-9, a-v for 10-31; '-' never ran); fnv names the plan (FNV-1a
      * of its instructions, as a host tool can compute from the ROM). */
     char bits[65];
-    unsigned out=0,kept=0,never=0;
+    unsigned out=0,kept=0,never=0,open=0,n=0;
+    uint64_t subs=0;                                   /* which sites are SUB */
+    for(unsigned pc=0;pc<plan->count&&n<64u;pc++){
+        const uint8_t op=plan->code[pc].op;
+        if(op==KSN_SHIKI_SUB)subs|=1ull<<n;
+        n+=op==KSN_SHIKI_ADD||op==KSN_SHIKI_SUB;
+    }
     for(unsigned k=0;k<b.nsites&&k<64u;k++){
         const uint32_t w=*(volatile const uint32_t *)(const void *)(j->sdata+sites[k]+3u);
         const unsigned used=w?32u-(unsigned)__builtin_clz(w):0u;
         bits[k]=(w&JIT_SLOT_NEVER)?'-':(char)(used<10u?'0'+used:'a'+used-10u);
         bits[k+1]=0;
-        if(w&JIT_SLOT_NEVER){ksn_shiki_jit_sat[2]++;never++;continue;}
-        if(w>=1u<<(31u-JIT_SAT_ROOM)){ksn_shiki_jit_sat[1]++;kept++;continue;}
-        out++;
-        ksn_jit_buf q={j->sdata,sites[k],sites[k]+3u,false,false,0,0,0,0,NULL,0};
-        ksn_jit_emit(&q,KSN_JIT_J,3,0,0);
-        j->plain|=1ull<<k;
-        ksn_shiki_jit_sat[0]++;
+        if((j->plain|j->fast)>>k&1u)continue;          /* settled early */
+        bool clear,keep;
+        if(w&JIT_SLOT_NEVER){clear=false;keep=late;if(late){ksn_shiki_jit_sat[2]++;never++;}}
+        else if(late){clear=used<=31u-JIT_SAT_ROOM;keep=!clear;}
+        else{clear=used<=31u-JIT_SAT_ROOM_EARLY;keep=used>=31u-JIT_SAT_NEAR;}
+        if(clear){
+            sat_patch(j,sites[k],NULL);
+            j->plain|=1ull<<k;ksn_shiki_jit_sat[0]++;out++;
+        }else if(keep){
+            sat_patch(j,sites[k],subs>>k&1u?ksn_jit_chk_sub_fast:ksn_jit_chk_add_fast);
+            j->fast|=1ull<<k;
+            if(!(w&JIT_SLOT_NEVER)){ksn_shiki_jit_sat[1]++;kept++;}
+        }else open++;
     }
     __asm__ volatile("memw\n" "isync\n":::"memory");
+    if(late||!open)j->sat=JIT_SAT_DECIDED;
     uint32_t fnv=2166136261u;
     const uint8_t *q=(const uint8_t *)plan->code;
     for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)fnv=(fnv^q[k])*16777619u;
-    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u out=%u kept=%u never=%u bits=%s",
-             (unsigned)fnv,(unsigned)plan->count,out,kept,never,b.nsites?bits:"");
+    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u at=%u out=%u kept=%u never=%u open=%u bits=%s",
+             (unsigned)fnv,(unsigned)plan->count,(unsigned)j->draws,out,kept,never,open,b.nsites?bits:"");
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
@@ -1278,7 +1326,10 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     jit_running++;
     const uint32_t r=j->scalar(&c);
     jit_running--;
-    if(j->sat==JIT_SAT_LOG&&++((jit_plan *)j)->draws>=JIT_SAT_DRAWS)sat_decide(p,(jit_plan *)j);
+    if(j->sat==JIT_SAT_LOG){
+        const uint16_t d=++((jit_plan *)j)->draws;
+        if(d==JIT_SAT_EARLY||d==JIT_SAT_LATE)sat_pass(p,(jit_plan *)j,d==JIT_SAT_LATE);
+    }
     return r;
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}

@@ -34,7 +34,8 @@ enum { A_CTX=0x10000000u, A_VM=0x20000000u, A_IN=0x30000000u, A_CODE=0x40000000u
        A_DRAW=0x60000000u, A_SIN=0x70000000u, A_CURVE=0x58000000u,
        /* sec.18: the shared checker's entries (within call0's reach of the
         * code) and the code's own return address. */
-       A_CHK_ADD=A_CODE+0x20000u, A_CHK_SUB=A_CODE+0x20010u, A_RA=0x48000000u };
+       A_CHK_ADD=A_CODE+0x20000u, A_CHK_SUB=A_CODE+0x20010u, A_CHK_ADD_F=A_CODE+0x20020u,
+       A_CHK_SUB_F=A_CODE+0x20030u, A_RA=0x48000000u };
 typedef struct {
     uint32_t ctx[9];
     ksn_shiki_vm *vm;
@@ -125,16 +126,18 @@ static uint32_t emulate(emu *e,size_t entry){
              * comment: saturate a10, OR |a10| into the slot after the call
              * (clearing the never-run bit), reload a0, return past the slot. */
             const uint32_t at=A_CODE+(uint32_t)pc,to=(at&~3u)+4u+4u*(uint32_t)sext((uint32_t)o[0],18);
-            if(to!=A_CHK_ADD&&to!=A_CHK_SUB){fprintf(stderr,"EMU call0 to %08x\n",to);exit(2);}
+            if(to!=A_CHK_ADD&&to!=A_CHK_SUB&&to!=A_CHK_ADD_F&&to!=A_CHK_SUB_F){fprintf(stderr,"EMU call0 to %08x\n",to);exit(2);}
             const uint32_t ret=at+3u,va=a[8],vb=a[9],d=a[10];
-            const uint32_t ov=to==A_CHK_ADD?((va^d)&(vb^d)):((va^vb)&(va^d));
+            const bool add=to==A_CHK_ADD||to==A_CHK_ADD_F;
+            const uint32_t ov=add?((va^d)&(vb^d)):((va^vb)&(va^d));
             uint32_t v=(int32_t)ov<0?(uint32_t)((int32_t)va>>31)^a[6]:d;
             a[10]=v;
-            const uint32_t slot=ret+e->ctx[8];
-            uint8_t *q=addr(e,slot,4);                /* in the code, word-aligned */
-            uint32_t w;memcpy(&w,q,4);
-            w=(w&a[6])|(v^(uint32_t)((int32_t)v>>31));
-            memcpy(q,&w,4);
+            uint8_t *q=addr(e,ret+e->ctx[8],4);       /* the slot: in the code, word-aligned */
+            if(to==A_CHK_ADD||to==A_CHK_SUB){         /* the fast entries do not log */
+                uint32_t w;memcpy(&w,q,4);
+                w=(w&a[6])|(v^(uint32_t)((int32_t)v>>31));
+                memcpy(q,&w,4);
+            }
             e->checks++;
             for(unsigned k=11;k<15;k++)a[k]=0xDEADBEEFu;
             a[0]=e->ctx[7];
@@ -251,7 +254,7 @@ static bool agrees(const ksn_shiki_plan *plan,uint8_t *code,size_t len,size_t en
 int main(int argc,char **argv){
     static uint8_t buf[8192],cbuf[8192],pbuf[8192];
     ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);
-    unsigned fails=0,by[5]={0},tried=0,maxlen=0,sites_all=0,sites_plain=0,sites_never=0;
+    unsigned fails=0,by[5]={0},tried=0,maxlen=0,sites_all=0,sites_plain=0,sites_never=0,sites_fast=0;
     unsigned long total_bytes=0,total_inst=0,chk_bytes=0,plain_bytes=0;
     const unsigned trials=argc>1?(unsigned)atoi(argv[1]):20000;
     uint32_t gen=1;
@@ -288,11 +291,21 @@ int main(int argc,char **argv){
             memcpy(pbuf,cbuf,clen);
             for(unsigned k=0;k<nsites;k++){
                 uint32_t w;memcpy(&w,cbuf+sites[k]+3u,4);
+                ksn_jit_buf q={pbuf,sites[k],sites[k]+3u,false,false,0,0,0,0,NULL,0};
                 if(w&0x80000000u){sites_never++;continue;}
-                if(w>0x3FFFFFFFu)continue;               /* saturated (or as good as) */
+                if(w>0x3FFFFFFFu){
+                    /* Saturated (or as good as): kept, pointed at the fast
+                     * entry of the same kind (ksn_shiki_jit.c's sat_patch). */
+                    int o[3];
+                    decode(pbuf+sites[k],3,o);
+                    const uint32_t at=A_CODE+sites[k],old=(at&~3u)+4u+4u*(uint32_t)sext((uint32_t)o[0],18);
+                    const uint32_t to=old==A_CHK_ADD?A_CHK_ADD_F:A_CHK_SUB_F;
+                    ksn_jit_emit(&q,KSN_JIT_CALL0,(int)(((int32_t)to-(int32_t)(at&~3u)-4)/4),0,0);
+                    sites_fast++;
+                    continue;
+                }
                 plain|=1ull<<k;
                 sites_plain++;
-                ksn_jit_buf q={pbuf,sites[k],sites[k]+3u,false,false,0,0,0,0,NULL,0};
                 ksn_jit_emit(&q,KSN_JIT_J,3,0,0);        /* over the slot */
             }
             sites_all+=nsites;
@@ -312,9 +325,9 @@ int main(int argc,char **argv){
            "code %.1f B per instruction, largest %u B\n",tried,by[KSN_SHIKI_DONE],by[KSN_SHIKI_INVALID],
            by[KSN_SHIKI_LIMIT],bailed,(double)total_bytes/(double)total_inst,maxlen);
     printf("scalar sec.18: checker %.1f B per instruction (inline %.1f), %u checker calls; of %u sites "
-           "%u patched out, %u never run; with them plain %.1f B per instruction\n",
+           "%u patched out, %u to the fast entry, %u never run; with them plain %.1f B per instruction\n",
            (double)chk_bytes/(double)total_inst,(double)total_bytes/(double)total_inst,checks,sites_all,
-           sites_plain,sites_never,(double)plain_bytes/(double)total_inst);
+           sites_plain,sites_fast,sites_never,(double)plain_bytes/(double)total_inst);
     /* Both paths count CUBIC / LINE_PATTERN: half of these ran in the code. */
     printf("scalar: CUBIC %u calls, LINE_PATTERN %u calls (interpreter and code together)\n",
            (unsigned)ksn_shiki_curve_n[0],(unsigned)ksn_shiki_curve_n[1]);
