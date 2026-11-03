@@ -168,14 +168,14 @@ void shiki_heap_region(const void **p,size_t *bytes){*p=region;*bytes=region?reg
 bool shiki_heap_owns(const void *p){
     return region&&(const uint8_t *)p>=region&&(const uint8_t *)p<region+region_bytes;
 }
-static void (*reclaim_hook)(void);
-void shiki_heap_set_reclaim(void (*reclaim)(void)){reclaim_hook=reclaim;}
-/* The region's own allocations: a failure first asks the spare users to
- * give their blocks back. */
+static bool (*reclaim_hook)(void);
+void shiki_heap_set_reclaim(bool (*reclaim)(void)){reclaim_hook=reclaim;}
+/* The region's own allocations: while one fails, the spare users give
+ * blocks back, a little at a time, until it fits or they have none left. */
 static void *owned_alloc(size_t n,size_t align){
     if(!shiki_heap_active())return NULL;
     void *p=alloc_low(n,align);
-    if(!p&&reclaim_hook){reclaim_hook();p=alloc_low(n,align);}
+    while(!p&&reclaim_hook&&reclaim_hook())p=alloc_low(n,align);
     return p;
 }
 void *shiki_heap_malloc(size_t n){return owned_alloc(n,MALLOC_ALIGN);}

@@ -39,10 +39,11 @@ void shiki_heap_region(const void **p,size_t *bytes);
 /* Spare room for a user that can give its blocks back (the JIT's code,
  * docs/kasane/shiki-jit.md sec.15): 16-byte aligned, and only while the
  * largest free block left after it is at least keep bytes. The region's own
- * users come first: when one of their allocations fails, the reclaim hook
- * is called (it frees spare blocks) and the allocation is tried once more. */
+ * users come first: while one of their allocations fails, the reclaim hook
+ * is called (it frees some spare blocks and returns true, or returns false
+ * when it has none to give) and the allocation is tried again. */
 void *shiki_heap_spare(size_t n,size_t keep);
-void shiki_heap_set_reclaim(void (*reclaim)(void));
+void shiki_heap_set_reclaim(bool (*reclaim)(void));
 /* Gives back the end of a block (n bytes stay). The block normally keeps its
  * address; the result is where it is now (its first n bytes kept). */
 void *shiki_heap_shrink(void *p,size_t n);

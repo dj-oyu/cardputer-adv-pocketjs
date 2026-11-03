@@ -1,8 +1,8 @@
 /* The Shiki region's spare room (main/pocket/shiki_heap.h, docs/kasane/
  * shiki-jit.md sec.15): a spare block is refused when it would leave less
  * than keep bytes in one piece, and when one of the region's own
- * allocations fails, the reclaim hook gives spare blocks back and the
- * allocation is tried once more. */
+ * allocations fails, the reclaim hook gives spare blocks back, one call at
+ * a time, until the allocation fits (sec.21.4). */
 #include "shiki_heap.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,10 +13,12 @@ static int fails;
 
 static void *spare[8];
 static unsigned nspare,reclaims;
-static void reclaim(void){
+/* Gives back one spare block a call, the last taken first. */
+static bool reclaim(void){
+    if(!nspare)return false;
     reclaims++;
-    for(unsigned k=0;k<nspare;k++)shiki_heap_free(spare[k]);
-    nspare=0;
+    shiki_heap_free(spare[--nspare]);
+    return true;
 }
 
 int main(void){
@@ -37,11 +39,12 @@ int main(void){
     shiki_heap_set_reclaim(reclaim);
     void *own2=shiki_heap_malloc(4096);
     CHECK(own2!=NULL);
-    CHECK(reclaims==1&&nspare==0);
+    CHECK(reclaims==1&&nspare==1);                 /* one block was enough */
     /* A success does not call the hook. */
     void *small=shiki_heap_malloc(16);
     CHECK(small!=NULL&&reclaims==1);
     shiki_heap_free(small);shiki_heap_free(own2);
+    while(nspare)shiki_heap_free(spare[--nspare]);
     /* Shrinking gives the end back: the block keeps its address and its
      * first bytes, and the freed tail is room again. */
     uint8_t *big=shiki_heap_spare(4096,0);

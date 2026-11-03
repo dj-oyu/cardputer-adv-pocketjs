@@ -1251,9 +1251,11 @@ enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
  * that spares a compile when it would not fit (sec.11: ~22-25 B each). */
 #define JIT_GUESS(n) ((uint32_t)(n)*32u+64u)
 
-/* sec.15: the region's free room the JIT leaves to the region's own users,
- * so that a registration rarely has to take the JIT's blocks back. */
-#define JIT_REGION_KEEP 2048u
+/* sec.15: the region's free room the JIT leaves to the region's own users.
+ * 0 since sec.21.4: a registration that does not fit takes back only as
+ * many plans' blocks as it needs (jit_reclaim), so a cushion only cost code
+ * room (2 KB, about two plans). */
+#define JIT_REGION_KEEP 0u
 static int jit_running;           /* inside the JIT's code: nothing is dropped */
 static uint32_t region_largest(void){
     uint32_t bytes,used,largest;
@@ -1261,17 +1263,22 @@ static uint32_t region_largest(void){
     return largest;
 }
 /* The Shiki region's reclaim hook: one of its own allocations failed, so
- * every plan with region blocks gives them back and waits JIT_RETRY draws. */
-static void jit_reclaim(void){
-    if(jit_running)return;
-    for(jit_plan *j=jit_plans,*n;j;j=n){
-        n=j->next;
-        if(!j->sregion&&!j->wregion)continue;
-        ksn_shiki_plan *p=j->plan;
-        drop_scalar(j);
-        if(p){p->heat=(int8_t)((int)JIT_HEAT-JIT_RETRY);p->need64=0;}
-        ksn_shiki_jit_evicted++;
-    }
+ * the plan with region blocks drawn longest ago gives them back and waits
+ * JIT_RETRY draws. One plan a call: the region calls again while its
+ * allocation still fails (sec.21.4; before, every plan gave its blocks back
+ * at once, and MEGADEMO's TWIST lost all 12 at a registration). false when
+ * there is nothing to give. */
+static bool jit_reclaim(void){
+    if(jit_running)return false;
+    jit_plan *cold=NULL;
+    for(jit_plan *j=jit_plans;j;j=j->next)
+        if((j->sregion||j->wregion)&&(!cold||(int32_t)(j->last-cold->last)<0))cold=j;
+    if(!cold)return false;
+    ksn_shiki_plan *p=cold->plan;
+    drop_scalar(cold);
+    if(p){p->heat=(int8_t)((int)JIT_HEAT-JIT_RETRY);p->need64=0;}
+    ksn_shiki_jit_evicted++;
+    return true;
 }
 
 /* sec.16: code of plans not drawn lately makes room for a plan being drawn.
