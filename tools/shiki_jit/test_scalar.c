@@ -68,18 +68,18 @@ static int decode(const uint8_t *p,size_t left,int o[3]){
         uint32_t w=0;
         for(unsigned k=0;k<F->len;k++)w|=(uint32_t)p[k]<<(8*k);
         uint32_t field=0;
-        for(unsigned k=0;k<F->nbits;k++)field|=1u<<F->bits[k].at;
+        for(unsigned k=0;k<F->nruns;k++)field|=((1u<<F->runs[k].len)-1u)<<F->runs[k].at;
         const uint32_t all=F->len==4?0xFFFFFFFFu:((1u<<(8*F->len))-1u);
         if((w&all&~field)!=(F->base&all&~field))continue;
         if(found>=0){fprintf(stderr,"EMU ambiguous %d/%u\n",found,f);exit(2);}
         found=(int)f;
         for(unsigned j=0;j<3;j++)o[j]=0;
         unsigned width[3]={0,0,0};
-        for(unsigned k=0;k<F->nbits;k++){
-            const ksn_jit_bit *t=&F->bits[k];
-            const unsigned bit=((w^F->base)>>t->at)&1u;
-            o[t->operand]|=(int)(bit<<t->bit);
-            if(t->bit+1u>width[t->operand])width[t->operand]=t->bit+1u;
+        for(unsigned k=0;k<F->nruns;k++){
+            const ksn_jit_field *t=&F->runs[k];
+            const unsigned bits=((w^F->base)>>t->at)&((1u<<t->len)-1u);
+            o[t->operand]|=(int)(bits<<t->src);
+            if(t->src+t->len>width[t->operand])width[t->operand]=t->src+t->len;
         }
         for(unsigned j=0;j<3;j++)o[j]^=F->base_op[j]&((1<<width[j])-1);
     }

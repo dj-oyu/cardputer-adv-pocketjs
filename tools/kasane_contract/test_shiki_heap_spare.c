@@ -40,7 +40,21 @@ int main(void){
     /* A success does not call the hook. */
     void *small=shiki_heap_malloc(16);
     CHECK(small!=NULL&&reclaims==1);
-    shiki_heap_free(small);shiki_heap_free(own2);shiki_heap_free(own);
+    shiki_heap_free(small);shiki_heap_free(own2);
+    /* Shrinking gives the end back: the block keeps its address and its
+     * first bytes, and the freed tail is room again. */
+    uint8_t *big=shiki_heap_spare(4096,0);
+    CHECK(big!=NULL);
+    for(unsigned k=0;k<64;k++)big[k]=(uint8_t)k;
+    shiki_heap_info(&bytes,&used,&largest);
+    const uint32_t before=used;
+    uint8_t *small2=shiki_heap_shrink(big,64);
+    CHECK(small2==big);
+    for(unsigned k=0;k<64;k++)CHECK(small2[k]==(uint8_t)k);
+    shiki_heap_info(&bytes,&used,&largest);
+    CHECK(used+4096-64==before);
+    shiki_heap_free(small2);
+    shiki_heap_free(own);
     shiki_heap_set_reclaim(NULL);
     shiki_heap_end();
     CHECK(!shiki_heap_active());

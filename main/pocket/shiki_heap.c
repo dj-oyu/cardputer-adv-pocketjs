@@ -31,6 +31,8 @@ static void *heap_alloc(size_t n,size_t align){
     return align>4?multi_heap_aligned_alloc(heap,n,align):multi_heap_malloc(heap,n);
 }
 static void heap_release(void *p){multi_heap_free(heap,p);}
+/* TLSF trims a shrinking block in place; the caller copes if it moves. */
+static void *heap_shrink(void *p,size_t n){return multi_heap_realloc(heap,p,n);}
 static void heap_stats(uint32_t *used,uint32_t *largest){
     multi_heap_info_t info;
     multi_heap_get_info(heap,&info);
@@ -65,6 +67,13 @@ static void heap_release(void *p){
     for(hblk **b=&heap->used;*b;b=&(*b)->next)if(heap->base+(*b)->off==p){
         hblk *d=*b;*b=d->next;free(d);return;
     }
+}
+static void *heap_shrink(void *p,size_t n){
+    for(hblk *b=heap->used;b;b=b->next)if(heap->base+b->off==p){
+        if(n&&n<b->size)b->size=n;
+        return p;
+    }
+    return NULL;
 }
 static void heap_stats(uint32_t *used,uint32_t *largest){
     size_t u=0,best=0,at=0;
@@ -128,6 +137,9 @@ static void *owned_alloc(size_t n,size_t align){
     return p;
 }
 void *shiki_heap_malloc(size_t n){return owned_alloc(n,4);}
+void *shiki_heap_shrink(void *p,size_t n){
+    return shiki_heap_owns(p)&&n?heap_shrink(p,n):p;
+}
 void *shiki_heap_spare(size_t n,size_t keep){
     if(!shiki_heap_active())return NULL;
     void *p=heap_alloc(n,16);

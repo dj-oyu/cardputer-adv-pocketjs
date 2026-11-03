@@ -33,14 +33,22 @@ void ksn_jit_emit(ksn_jit_buf *b,unsigned form,int o0,int o1,int o2){
     if(form>=KSN_JIT_FORMS)return;
     const ksn_jit_form *f=&KSN_JIT_FORM[form];
     if(b->overflow||b->len+f->len>b->cap){b->overflow=true;return;}
+    if(!b->p){b->len+=f->len;return;}           /* a sizing pass: the length is enough */
     const int o[3]={o0,o1,o2};
+    /* Each run of operand bits that differ from the base is XORed in with one
+     * shift and mask (sec.17: the bit-by-bit loop was 91% of a compile). */
     uint32_t w=f->base;
-    for(unsigned k=0;k<f->nbits;k++){
-        const ksn_jit_bit *t=&f->bits[k];
-        if((((unsigned)o[t->operand]^(unsigned)f->base_op[t->operand])>>t->bit)&1u)w^=1u<<t->at;
+    for(unsigned k=0;k<f->nruns;k++){
+        const ksn_jit_field *r=&f->runs[k];
+        const uint32_t d=((uint32_t)o[r->operand]^(uint32_t)f->base_op[r->operand])>>r->src;
+        w^=(d&((1u<<r->len)-1u))<<r->at;
     }
-    if(!b->p){b->len+=f->len;return;}           /* a sizing pass */
-    for(unsigned k=0;k<f->len;k++)jit_put(b,(uint8_t)(w>>(8*k)));
+    if(b->word_only){for(unsigned k=0;k<f->len;k++)jit_put(b,(uint8_t)(w>>(8*k)));return;}
+    uint8_t *q=b->p+b->len;
+    q[0]=(uint8_t)w;q[1]=(uint8_t)(w>>8);
+    if(f->len>2)q[2]=(uint8_t)(w>>16);
+    if(f->len>3)q[3]=(uint8_t)(w>>24);
+    b->len+=f->len;
 }
 
 /* ---- Stage 2: VEACH sections as PIE code (shiki-jit.md sec.3) --------------
@@ -913,10 +921,77 @@ static bool make_room(size_t need){
     return true;
 }
 
-/* Compiles straight into its executable memory: a sizing pass (no buffer)
- * gives the length, the allocation is that long, and the second pass
- * writes through the allocation's data-bus alias (DIRAM takes byte stores
- * there). No scratch buffer: MEGADEMO compiles TWIST's negative set at its
+/* CUBIC's weights (sec.13); without them the code still works (the helper
+ * computes them), so a refusal here is not a failure. code: the code's bytes,
+ * for the budget. */
+static void attach_weights(jit_plan *j,const ksn_shiki_plan *plan,size_t code){
+    size_t rows=0;
+    for(unsigned pc=0;pc<plan->count;pc++)if(plan->code[pc].op==KSN_SHIKI_CUBIC)rows+=4u*(size_t)plan->code[pc].imm;
+    if(!rows||rows>JIT_WEIGHTS_MAX||ksn_shiki_jit_bytes+code+20u+4u*rows>ksn_shiki_jit_budget)return;
+    /* The region first (sec.15), then the system heap. */
+    j->weights=shiki_heap_spare(4u*rows,JIT_REGION_KEEP);
+    j->wregion=j->weights!=NULL;
+    if(!j->weights)j->weights=malloc(4u*rows);
+    if(!j->weights)return;
+    ksn_shiki_cubic_weights(plan,j->weights,rows);
+    j->wbytes=(uint32_t)(4u*rows);
+    ksn_shiki_jit_bytes+=j->wbytes;             /* drop_scalar takes it back */
+}
+/* The plan's code is at x (instruction bus), bytes long, entry in: the plan
+ * runs it from its next draw. */
+static int compiled(ksn_shiki_plan *plan,jit_plan *j,uint8_t *x,size_t entry,size_t bytes){
+    __asm__ volatile("memw\n" "isync\n":::"memory");
+    j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
+    j->sbytes=(uint32_t)bytes;
+    ksn_shiki_jit_bytes+=(uint32_t)bytes;
+    j->plan=plan;
+    j->last=jit_clock;
+    j->next=jit_plans;jit_plans=j;
+    shiki_heap_set_reclaim(jit_reclaim);
+    plan->jit=j;
+    return JIT_DONE;
+}
+static bool in_diram(const uint8_t *p,size_t n){
+    return esp_ptr_in_diram_dram(p)&&esp_ptr_in_diram_dram(p+n-1);
+}
+
+/* sec.17: in the Shiki region, one pass. A block as long as the guess
+ * (JIT_GUESS), the code written once through the data bus, the end given
+ * back. Returns JIT_DONE, JIT_REFUSED, or -2 when the region has no room
+ * or the guess was short (the two-pass path below then runs). */
+static int compile_in_region(ksn_shiki_plan *plan){
+    const size_t guess=JIT_GUESS(plan->count);
+    uint8_t *d=shiki_heap_spare(guess,JIT_REGION_KEEP);
+    if(!d)return -2;
+    if(!in_diram(d,guess)){shiki_heap_free(d);return -2;}
+    jit_plan *j=plan->jit;
+    const bool fresh=!j;
+    if(fresh&&!(j=calloc(1,sizeof *j))){shiki_heap_free(d);return -2;}
+    ksn_jit_buf e={d,0,guess,false,false};
+    size_t entry=0;
+    if(!ksn_shiki_jit_scalar(plan,&e,&entry)){
+        shiki_heap_free(d);
+        if(fresh)free(j);
+        return e.overflow?-2:JIT_REFUSED;
+    }
+    const size_t len=(e.len+3u)&~(size_t)3u;
+    uint8_t *q=shiki_heap_shrink(d,len);
+    /* TLSF trims in place; if the block ever moved, the code moved with it
+     * (it addresses only relative to itself and through the context). */
+    if(!q||!in_diram(q,len)){
+        if(q)shiki_heap_free(q);
+        if(fresh)free(j);
+        return -2;
+    }
+    j->sraw=q;j->sregion=true;
+    attach_weights(j,plan,len);
+    EXECMAP_GOT(q,true);
+    return compiled(plan,j,(uint8_t *)esp_ptr_diram_dram_to_iram(q),entry,len);
+}
+
+/* The two-pass path: a sizing pass (no buffer) gives the length, the
+ * allocation is that long (the region, or MALLOC_CAP_EXEC), the second pass
+ * writes. No scratch buffer: MEGADEMO compiles TWIST's negative set at its
  * tightest heap, where a 4 KB scratch did not fit (sec.14). */
 static int compile_scalar(ksn_shiki_plan *plan){
     if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget&&!make_room(JIT_GUESS(plan->count)))
@@ -926,6 +1001,8 @@ static int compile_scalar(ksn_shiki_plan *plan){
      * the compile, and DERBY's WIDE retried a dozen plans a second at its
      * tightest heap, which made the JIT slower than the interpreter (sec.14). */
     if(plan->need64&&!fits(64u*plan->need64)&&!make_room(64u*plan->need64))return JIT_NOMEM;
+    const int r=compile_in_region(plan);
+    if(r!=-2)return r;
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false};
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
@@ -939,21 +1016,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     jit_plan *j=plan->jit;
     const bool fresh=!j;
     if(fresh&&!(j=calloc(1,sizeof *j)))return JIT_NOMEM;
-    /* CUBIC's weights (sec.13); without them the code still works (the
-     * helper computes them), so a refusal here is not a failure. */
-    size_t rows=0;
-    for(unsigned pc=0;pc<plan->count;pc++)if(plan->code[pc].op==KSN_SHIKI_CUBIC)rows+=4u*(size_t)plan->code[pc].imm;
-    if(rows&&rows<=JIT_WEIGHTS_MAX&&ksn_shiki_jit_bytes+b.len+20u+4u*rows<=ksn_shiki_jit_budget){
-        /* The region first (sec.15), then the system heap. */
-        j->weights=shiki_heap_spare(4u*rows,JIT_REGION_KEEP);
-        j->wregion=j->weights!=NULL;
-        if(!j->weights)j->weights=malloc(4u*rows);
-        if(j->weights){
-            ksn_shiki_cubic_weights(plan,j->weights,rows);
-            j->wbytes=(uint32_t)(4u*rows);
-            ksn_shiki_jit_bytes+=j->wbytes;     /* drop_scalar takes it back */
-        }
-    }
+    attach_weights(j,plan,need);
     const size_t len=(need+3u)&~(size_t)3u;
     /* The code: in the Shiki region when it has room (sec.15: DIRAM, so
      * its blocks run at their instruction-bus alias; the region is taken
@@ -962,9 +1025,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     size_t bytes=len;
     uint8_t *x=NULL,*w=NULL;
     j->sraw=shiki_heap_spare(len,JIT_REGION_KEEP);
-    if(j->sraw&&!(esp_ptr_in_diram_dram(j->sraw)&&esp_ptr_in_diram_dram(j->sraw+len-1))){
-        shiki_heap_free(j->sraw);j->sraw=NULL;
-    }
+    if(j->sraw&&!in_diram(j->sraw,len)){shiki_heap_free(j->sraw);j->sraw=NULL;}
     if(j->sraw){
         j->sregion=true;
         w=j->sraw;
@@ -990,16 +1051,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
         drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;
     }
-    __asm__ volatile("memw\n" "isync\n":::"memory");
-    j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
-    j->sbytes=(uint32_t)bytes;
-    ksn_shiki_jit_bytes+=(uint32_t)bytes;
-    j->plan=plan;
-    j->last=jit_clock;
-    j->next=jit_plans;jit_plans=j;
-    shiki_heap_set_reclaim(jit_reclaim);
-    plan->jit=j;
-    return JIT_DONE;
+    return compiled(plan,j,x,entry,bytes);
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;

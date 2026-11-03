@@ -43,6 +43,9 @@ void shiki_heap_region(const void **p,size_t *bytes);
  * is called (it frees spare blocks) and the allocation is tried once more. */
 void *shiki_heap_spare(size_t n,size_t keep);
 void shiki_heap_set_reclaim(void (*reclaim)(void));
+/* Gives back the end of a block (n bytes stay). The block normally keeps its
+ * address; the result is where it is now (its first n bytes kept). */
+void *shiki_heap_shrink(void *p,size_t n);
 
 /* The allocators for code that serves both kinds of session: the region when
  * one is open, the system heap otherwise; free goes wherever the block came
