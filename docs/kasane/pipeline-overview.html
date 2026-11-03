@@ -83,7 +83,8 @@ ol.steps li{margin:4px 0}
 <a href="#mem">8. Shiki の区画のメモリ（DERBY）</a><br>
 <a href="#jit">9. JIT の位置</a><br>
 <a href="#plan">10. その後の変更（c4d7a6c の後）</a><br>
-<a href="#facts">11. 事実・推定・未確認</a>
+<a href="#strip">11. 研究: 帯のバッファ（ピンポン・一本化・並び替え）</a><br>
+<a href="#facts">12. 事実・推定・未確認</a>
 </nav>
 
 <h2 id="tldr">0. 先に結論</h2>
@@ -563,7 +564,53 @@ ol.steps li{margin:4px 0}
 <p class="note">workspace を無くした効果 <span class="e">計算</span>: image の面を使うアプリ（DERBY・MEGADEMO）で 10,246 − 3,840 = 6,406 B、使わないアプリで 10,246 B。</p>
 </div>
 
-<h2 id="facts">11. 事実・推定・未確認</h2>
+<h2 id="strip">11. 研究: 帯のバッファ（ピンポン・一本化・並び替え）</h2>
+<p>2026-11-03 の議論と調査の記録。<b>まだ何も入れていない</b>（LCD の並び順の確認用ビルド d4fcfc4 を除く）。</p>
+
+<h3>今の形と、memcpy に見えるものの正体</h3>
+<p>帯のバッファは 2 本ある。描く用の <code>shared</code>（<code>board_strip()</code>、3,840 B）と、送る用の <code>tx_buf</code>（3,840 B）。CPU が <code>shared</code> に帯 N+1 を描く間、DMA は <code>tx_buf</code> から帯 N を送る（<code>board.c</code> の <code>board_present()</code>、<code>g_board_async=1</code>）。待ち合わせは、帯 N+1 を <code>tx_buf</code> へ移す一瞬だけ。</p>
+<ul>
+<li><b>移しは memcpy ではなくバイトの入れ替え。</b>ST7789 は RGB565 を上位バイトから受け取り（リセット時の既定）、CPU は下位バイトから書く。入れ替えはどのみち全画素に要るので、入れ替えながら <code>tx_buf</code> に書けば（<code>g_board_swap_into=1</code>）、移しの手間はほぼ増えない <span class="e">コメントの値: 帯 1 本 約 10 µs</span>。以前はその場で入れ替えてから memcpy していた（7fd965f、遅かった）。</li>
+<li><b>描く先を交互に変えない理由。</b>描画先のポインタを 1 フレームの間持ち続ける呼び出し元が約 8 か所ある（<code>render_rects</code> の <code>display-&gt;strip()</code>、shell・editor・codeedit・tutorial・wifi_ui・workspace・pickmodal）<span class="u">調査の報告、行は未照合</span>。交互にするには、すべてで帯ごとに取り直す改修が要る。</li>
+<li>SPI は 80 MHz。帯 1 本 3,840 B は理論 384 µs、コメントの値で約 440 µs。非同期にした効果は FLOWER で 38.73 → 33.30 ms、fps 24.95 → 28.80 <span class="m">実測、docs/perf/pie-consolidation.md</span>。</li>
+</ul>
+
+<h3>1.N バッファ（輪の中で書き込み先と送信元をずらす）</h3>
+<ul>
+<li>速さ: 1 秒にさばける量は「帯を描く時間」と「帯を送る時間」の遅い方で決まり、今の 2 本でほぼ全部重なっている。1.N にして縮むのは、移しの待ち 約 10 µs × 17 本 ≒ 最大 0.17 ms / フレーム <span class="e">計算</span>。空いた行を知るには帯を数行ずつの転送に分ける必要があり（SPI のドライバは転送の終わりしか知らせない）、転送 1 回ごとの手間が増える <span class="e">推定</span>。</li>
+<li>メモリを減らす読み方（2 本 7,680 B → 1.25 本 4,800 B）では、Kasane が帯の中で層を重ねて描くので、帯 1 本分の空きができるまで描き始められず、描画と転送の重なりが減る。</li>
+<li>DERBY のレースは CPU 側が重い: <code>render_ms</code> 4.6〜6.6、<code>send_ms</code> 1.0〜2.4 <span class="m">実測、30 フレーム平均</span>（<code>send_ms</code> が何を測るかは <span class="u">未確認</span>）。</li>
+</ul>
+
+<h3>並び替えを外せるか: LCD の並び順の設定</h3>
+<ul>
+<li>ST7789 の RAMCTRL（0xB0）の第 2 引数の bit 3（ENDIAN）で、下位バイト先を受け付けるはず。ESP-IDF の ST7789 ドライバはこれを使う（既定 0xF0、下位バイト先なら | 0x08）。ただし <b>4 線 SPI で効くかは資料が見つからない</b>（報告は 8080 の並列バスか、接続が不明なもの）。</li>
+<li>確かめ方: MISO が未配線で読み戻せないので、目で見るしかない。確認用ビルド d4fcfc4 は 2 秒ごとに「入れ替えあり（ENDIAN=0）」と「入れ替えなし（ENDIAN=1）」を切り替え、<code>LCD_ENDIAN le=</code> をログに出す（実機で切り替えは動いている <span class="m">ログで確認</span>。画面が変わるかは <span class="u">持ち主の目視待ち</span>）。画面が変わらなければ、並び替えのパスが消える。</li>
+<li>出典: <a href="https://github.com/espressif/esp-idf/issues/11416">esp-idf #11416</a>、<a href="https://sourcevu.sysprogs.com/espressif/esp-idf/files/components/esp_lcd/src/esp_lcd_panel_st7789.c">esp_lcd_panel_st7789.c</a>。</li>
+</ul>
+
+<h3>並び替えを描画の途中へ前倒しできるか（パイプラインの走査）</h3>
+<ul>
+<li><b>前倒しできる場所は、作りとしては無い。</b>帯へ最終の画素を書く経路が十数系統あり、半透明の合成・文字のアンチエイリアス・シーンの PIE カーネルなど約 15 系統が帯を読み戻す <span class="u">調査の報告、行は一部のみ照合</span>。帯を上位バイト先にすると、読み戻すたびに入れ替えて読み・書きが要る。</li>
+<li>PIE に入れ替えながら書く命令は無い（<code>EE.VST.128.IP</code> は素のストア、TRM v1.8 p.275。入れ替えは <code>EE.VUNZIP.8</code> + <code>EE.VZIP.8</code>、p.295、32 B に 2 命令）。</li>
+<li>単色の塗り（背景・不透明の矩形・Shiki の線）は色を前もって入れ替えればほぼ無料だが、同じ帯に読み戻しが 1 つでもあると混ざって壊れる。</li>
+<li>結論: <b>並び替えは「送る直前の 1 パス」のままがよい。</b>ピンポンにも並び替えの撤去は要らない（描き終えた帯をその場で入れ替えて、そのまま DMA の送り元にできる。その場の入れ替えは 7fd965f の出荷版で使われていた実績がある）。</li>
+</ul>
+
+<h3>帯のバッファをまとめる・ピンポンにする時の障害</h3>
+<table>
+<tr><th>障害</th><th>中身</th><th>回避</th></tr>
+<tr><td>バイトの並び替え</td><td>LCD は上位バイト先、CPU は下位バイト先</td><td>LCD の ENDIAN（目視待ち）か、その場で入れ替え</td></tr>
+<tr><td>DMA の送信と次の帯の書き込みの衝突</td><td>DMA が読んでいる間、そのバッファには書けない</td><td>1 本なら描画と転送が直列になる。ピンポン（2 本）なら重なる</td></tr>
+<tr><td>描画先のポインタを 1 フレーム持つ呼び出し元</td><td>約 8 か所</td><td>帯ごとに <code>board_strip()</code> を取り直す改修</td></tr>
+<tr><td>狭い窓（<code>board_present_rect</code>）</td><td>1 行 240 画素の帯から窓の列だけを送る。SPI の DMA は連続した領域しか送れず、詰め直しの写しが要る</td><td>行ごとの DMA 記述子で拾い集める（ESP-IDF の <code>spi_master</code> では不可、<span class="u">未調査</span>）</td></tr>
+<tr><td>送る直前に帯へ書く処理</td><td><code>pet_hub_overlay</code>・<code>pocket_capture_overlay</code> が <code>board_present</code> の中で上書きする</td><td>書く順番を保てば問題ない（DMA 中の帯には書けない）</td></tr>
+<tr><td>画面取り込み</td><td><code>board_capture</code> は入れ替え前の画素を出す。<code>PIX</code> 行を読むツールの期待値も下位バイト先</td><td>入れ替え前に取り込む今の順を保つ</td></tr>
+<tr><td>大きさの決め打ち</td><td><code>test_board_dma_overlap.py</code> の <code>sizeof(shared)==3840</code>、SPI の <code>max_transfer_sz</code></td><td>一緒に直す</td></tr>
+</table>
+<p class="note">効果の見込み <span class="e">推定</span>: 並び替えか移しのパスが消えて、1 フレーム最大 約 0.1〜0.24 ms（別パスの memcpy を消した実測 −0.24 ms、pie-simd.md）。今の DERBY は帯を描く CPU が支配的なので、先に効くのは描画側（帯ごとに全線分をなめ直す、不透明な背景画像の下の塗り）。</p>
+
+<h2 id="facts">12. 事実・推定・未確認</h2>
 <div class="kv">
 <b>コードで確認</b><span>帯 8 行・17 本・最後は 7 行、作業台 1 本・転送用 1 本、DMA の重ね、RAMWR の連続、KASANE_PAINT の各欄の出どころ、Shiki の 2 つの並びと交換の時期、末尾への直接の書き込み、帯の hash、失敗の扱い、区画の大きさと管理（すべて c4d7a6c）。</span>
 <b>計算</b><span>64,800 B、6.48 ms、フレーム 7,686 B、帯のキャッシュ 3,840 B、旧 workspace 10,246 B、VM 372 B（旧 368 B）、plan 64 + 12n B、固定分 19,588 B（旧 25,992 B）、§8・§10 の削減量。構造体の大きさは 32 bit の整列を手で数えたもの（実機の <code>sizeof</code> は測っていない）。</span>
