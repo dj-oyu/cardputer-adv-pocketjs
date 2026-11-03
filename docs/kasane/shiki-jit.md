@@ -427,3 +427,10 @@ RTC fast memory（`0x600FE000`、8 KB）は ESP-IDF が普通のヒープに加�
 - JIT は RTC fast memory を実行用メモリとして使わない（e3aa94c、スカラーのコード。VEACH の区間も同じ）。返ってきたら手放し、スカラーのコードは「場所がない」扱い（`need64`）で冷えたプランの場所を待つ。その間はインタプリタ。
 - RTC fast memory は、遅くても困らない常駐の仕事に起動時に先に渡す。まず `input` タスクのスタック 4 KB（e3aa94c。実測の最大使用量は約 1,250 B）。Wi-Fi・時刻同期のタスクも収める見直しは [issue #116](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/116)。
 
+
+### 19.1 確保の能力の指定で RTC を外す（c6119de）
+
+e3aa94c の形（確保してから RTC なら手放す）は、DERBY のレースで JIT をほぼ止めた（実機、c4d872d）。`input` のスタックを置いた後の RTC の残り約 3.5 KB が、`MALLOC_CAP_EXEC` の最大の空きブロックだった。`fits()` はこれを数えて「入る」と答え、確保は RTC に当たって手放され、`make_room()` は冷えたプランを一度も捨てなかった。同じプランが 64 draw ごとにサイズの計算からやり直した。
+
+- c4d872d のレース（実機）: `jitfail` の NOMEM が 274 まで増え、JIT のコードは 4,704 B で止まり、コンパイルの時間がターンあたり最大 0.6 ms。発走 1.36〜1.46 ms（12804a9 は 0.95〜0.97 ms、10,592 B）。
+- 直し: 確保も `fits()` の大きさの検査も `MALLOC_CAP_EXEC|MALLOC_CAP_DMA` で行う。実行できて DMA も使えるのは DIRAM だけなので、RTC は候補にも空きの数にも入らない。手放す検査は保険として残す。
