@@ -56,6 +56,16 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_bench.c \
     tools/kasane_contract/test_shiki_vec.c -lm -o "$out/shiki-vec"
   "$out/shiki-vec"
+  # EMIT_POINTS / EMIT_LINES against their definition written out plainly
+  # (the fast loop of docs/kasane/shiki-jit.md sec.8.3), limits included.
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_emit.c -lm -o "$out/shiki-emit"
+  "$out/shiki-emit"
+  # The Shiki region's spare room and reclaim hook (the JIT's code lives
+  # there, docs/kasane/shiki-jit.md sec.15).
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/pocket \
+    main/pocket/shiki_heap.c tools/kasane_contract/test_shiki_heap_spare.c -o "$out/shiki-heap-spare"
+  "$out/shiki-heap-spare"
   # sec.2.4's conversion in integers against the libm form (bit for bit).
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki.c tools/kasane_contract/test_shiki_from_double.c -lm -o "$out/shiki-from-double"
@@ -71,6 +81,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     node tools/kasane_ir/test_shiki_data_compile.mjs
     node tools/kasane_ir/test_shiki_vector_compile.mjs
     python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py
+    python3 tools/shiki_jit/test_encoder.py
+    python3 tools/shiki_jit/test_compile.py
+    python3 tools/shiki_jit/test_scalar.py
   fi
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \

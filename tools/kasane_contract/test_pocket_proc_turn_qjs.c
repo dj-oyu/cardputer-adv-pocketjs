@@ -328,11 +328,12 @@ static void cap_contract(JSContext *ctx){
         "{maxSegments:1.5},{maxSegments:'256'},{maxSegments:-1},{maxSegments:NaN}])"
         "expect(()=>proc.createSurface(bad),'INVALID_ARGUMENT');"
         "expect(()=>proc.createSurface({maxSegments:8},1),'INVALID_ARGUMENT')");
-    /* Surface 0 is unchanged: two full frames and the full workspace (the
-     * engine's state comes with the first draw). */
+    /* Surface 0: two full frames and nothing else -- draws go straight into
+     * the candidate, no scratch frame (shiki-jit.md sec.22); the engine's
+     * state comes with the first draw. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==3&&callocs[0]==full&&callocs[1]==full&&callocs[2]==full);
+    REQUIRE(calloc_n==2&&callocs[0]==full&&callocs[1]==full);
     eval_ok(ctx,
         "for(let i=0;i<8;i++)proc.draw(p128,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')");
@@ -407,9 +408,10 @@ static void cap_contract(JSContext *ctx){
         pocket_proc_end_turn();
         session_reset();
     }
-    /* Surface 0 through resource({maxSegments}): its two frames shrink, the
-     * workspace (scratch) stays full; draw() enforces the cap; once the
-     * frames exist only the same value is accepted. */
+    /* Surface 0 through resource({maxSegments}): its two frames shrink (no
+     * scratch frame since sec.22; the image band cache came with resource());
+     * draw() enforces the cap; once the frames exist only the same value is
+     * accepted. */
     eval_ok(ctx,
         "for(const bad of [{maxSegments:0},{maxSegments:1025},{maxSegments:1.5},"
         "{maxSegments:'8'},{maxSegments:null}])"
@@ -419,7 +421,7 @@ static void cap_contract(JSContext *ctx){
         "globalThis.dot=proc.register(dotAt(40,40,0xf800))");
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==3&&callocs[0]==head+96u*10u&&callocs[1]==full&&callocs[2]==head+96u*10u);
+    REQUIRE(calloc_n==2&&callocs[0]==head+96u*10u&&callocs[1]==head+96u*10u);
     eval_ok(ctx,
         "for(let i=0;i<3;i++)proc.draw(p32,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
@@ -434,7 +436,7 @@ static void cap_contract(JSContext *ctx){
     /* reset() forgets the cap: the next frames are full again. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==3&&callocs[0]==full&&callocs[2]==full);
+    REQUIRE(calloc_n==2&&callocs[0]==full&&callocs[1]==full);
     pocket_proc_end_turn();
     session_reset();
 }

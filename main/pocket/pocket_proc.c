@@ -69,8 +69,9 @@ void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
  * could not exist at all (docs/kasane/surface-segment-cap.md). Nothing reads a
  * frame past count (render_band, damage, image spans), and nothing copies or
  * clears a whole ksn_proc_frame here, which is what makes the short
- * allocation safe; scratch and the VM stay full size because one plan may
- * emit up to KSN_PROC_SEGMENTS before draw() checks the surface's room. */
+ * allocation safe. A Shiki draw writes straight into the candidate's tail,
+ * stopped at the room left (ksn_shiki_draw_index_cap), so no frame-sized
+ * scratch exists (docs/kasane/shiki-jit.md sec.22). */
 _Static_assert(offsetof(ksn_proc_frame,segments)+
                KSN_PROC_SEGMENTS*sizeof(ksn_proc_segment)==sizeof(ksn_proc_frame),
                "segments must be the frame's last member, with no tail padding");
@@ -114,16 +115,13 @@ typedef struct {
 static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
-/* Plan execution and image rasterization are synchronous owner-task phases.
- * Rasterization reads candidate/committed frames, never this workspace. */
+/* An image surface's raster cache: one 8-row band of pixels, taken with an
+ * image surface's frames (3,840 B). It was the union with a full 1,024-entry
+ * scratch frame (10,246 B) that every draw wrote into before the room check
+ * and a copy into the candidate; draws now go straight to the candidate
+ * (sec.22). */
 #define PROC_IMAGE_BAND_ROWS 8u
-typedef union {
-    ksn_proc_frame frame;
-    uint16_t band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS];
-} proc_workspace;
-_Static_assert(sizeof(proc_workspace)==sizeof(ksn_proc_frame),
-               "image raster cache must not enlarge the VM workspace");
-static proc_workspace *workspace;
+static uint16_t *image_band_buf;
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
@@ -153,9 +151,10 @@ static unsigned surface_segments(const proc_surface *surface){
 static bool buffers(proc_surface *surface){
     const size_t bytes=frame_bytes(surface_segments(surface));
     if(!surface->candidate)surface->candidate=shiki_or_sys_calloc(1,bytes);
-    if(!workspace)workspace=shiki_or_sys_calloc(1,sizeof *workspace);
+    if(surface->image_mode&&!image_band_buf)
+        image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
     if(!surface->committed)surface->committed=shiki_or_sys_calloc(1,bytes);
-    return surface->candidate&&workspace&&surface->committed;
+    return surface->candidate&&surface->committed&&(!surface->image_mode||image_band_buf);
 }
 static bool any_pending(void){
     for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].pending)return true;
@@ -453,11 +452,14 @@ bool pocket_proc_shiki_detach(uint32_t handle){
      * copies the segments out and keeps nothing of the plan. */
     proc_slot *slot=find_slot(handle);
     if(!slot)return false;
+    ksn_shiki_plan_dispose(slot->plan);
     shiki_or_sys_free(slot->plan);
     *slot=(proc_slot){0};
     return true;
 }
 pocket_shiki_draw_prof pocket_shiki_prof;
+static pocket_shiki_turn shiki_turn;
+void pocket_shiki_turn_take(pocket_shiki_turn *out){*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
 uint32_t pocket_cycles(void){
 #ifdef ESP_PLATFORM
     return esp_cpu_get_cycle_count();
@@ -471,6 +473,7 @@ JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,u
 JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
                                       unsigned index){
     const char *op="kasane.shiki.draw";
+    const uint32_t t_in=pocket_cycles();
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_slot *slot=find_slot(handle);
@@ -480,40 +483,48 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"no room for the engine's state");
     }
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
-    const unsigned room=surface_segments(&surfaces[building_surface]);
-    ksn_proc_segment *scratch=workspace->frame.segments;
+    const unsigned room=surface_segments(&surfaces[building_surface])-candidate->count;
+    /* Straight into the tail: a draw that does not fit stops at LIMIT and
+     * the count below is not advanced, so its segments are not the frame's. */
+    ksn_proc_segment *tail=&candidate->segments[candidate->count];
     image_band_valid=false;
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
+    const uint32_t t_engine=pocket_cycles();
     /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
      * its number (DRAW_INDEX, Shiki v2.0 draft sec.4.1). */
     ksn_shiki_status s;
-    if(fixed)s=ksn_shiki_draw_index(slot->plan,fixed,n,index,shiki_vm,scratch);
+    if(fixed)s=ksn_shiki_draw_index_cap(slot->plan,fixed,n,index,shiki_vm,tail,room);
     else{
         int32_t fx[KSN_SHIKI_INPUTS]={0};
         const ksn_shiki_plan *pl=slot->plan;
         bool good=true;
         for(unsigned k=0;k<pl->inputs&&good;k++)
             good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
-        if(good)s=ksn_shiki_draw_index(pl,fx,pl->inputs,index,shiki_vm,scratch);
+        if(good)s=ksn_shiki_draw_index_cap(pl,fx,pl->inputs,index,shiki_vm,tail,room);
         else{memset(shiki_vm,0,sizeof *shiki_vm);s=KSN_SHIKI_BADINPUT;}
     }
     if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
-    if(s!=KSN_SHIKI_DONE){
+    shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    shiki_turn.steps+=shiki_vm->steps;
+    shiki_turn.draws++;
+    /* Out of the frame's room reads as the frame's limit, as when the room
+     * was checked after the draw; the engine's own per-draw limits as its. */
+    const bool full=s==KSN_SHIKI_LIMIT&&room<KSN_SHIKI_SEGMENTS&&shiki_vm->count>=room;
+    if(s!=KSN_SHIKI_DONE&&!full){
         building=false;
         return failure(ctx,op,s==KSN_SHIKI_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
                        s==KSN_SHIKI_BADINPUT?"non-finite input":"Shiki execution failed");
     }
-    if((unsigned)shiki_vm->count>room-candidate->count||
-       (unsigned)shiki_vm->raster>(unsigned)UINT16_MAX-candidate->raster_steps){
+    if(full||(unsigned)shiki_vm->raster>(unsigned)UINT16_MAX-candidate->raster_steps){
         building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
     }
-    memcpy(&candidate->segments[candidate->count],scratch,shiki_vm->count*sizeof *scratch);
     candidate->count+=shiki_vm->count;
     candidate->raster_steps+=shiki_vm->raster;
     if(shiki_vm->ext)candidate->ext=1;
     if(pf->on){pf->copy+=pocket_cycles()-pf->mark;pf->n++;}
+    shiki_turn.total_cy+=pocket_cycles()-t_in;
     return JS_UNDEFINED;
 }
 
@@ -530,13 +541,14 @@ esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
 }
 void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_HANDLES;i++){
+        if(slots[i].plan)ksn_shiki_plan_dispose(slots[i].plan);
         shiki_or_sys_free(slots[i].plan);slots[i]=(proc_slot){0};
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);shiki_or_sys_free(surfaces[i].committed);
         surfaces[i]=(proc_surface){0};
     }
-    shiki_or_sys_free(workspace);workspace=NULL;
+    shiki_or_sys_free(image_band_buf);image_band_buf=NULL;
     shiki_or_sys_free(shiki_vm);shiki_vm=NULL;
     image_band_valid=false;image_band_frame=NULL;
     building=js_call_active=false;building_surface=pending_surface=0;
@@ -563,7 +575,12 @@ bool pocket_proc_pending(void){return any_pending();}
 bool pocket_proc_backdrop_pending(void){return surfaces[0].pending&&!surfaces[0].image_mode;}
 bool pocket_proc_is_image_mode(void){return surfaces[0].image_mode;}
 void pocket_proc_image_mode_at(unsigned index){
-    if(index<PROC_SURFACES)surfaces[index].image_mode=true;
+    if(index>=PROC_SURFACES)return;
+    surfaces[index].image_mode=true;
+    /* A frame may already exist (resource() after beginFrame); the next
+     * beginFrame() fails if this does too. */
+    if(!image_band_buf)
+        image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
 }
 void pocket_proc_image_mode(void){pocket_proc_image_mode_at(0);}
 static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
@@ -590,7 +607,8 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         memset(alpha,255,count);
         goto span_done;
     }
-    uint16_t *image_band=workspace->band;
+    uint16_t *image_band=image_band_buf;
+    if(!image_band)return KSN_OOM;          /* buffers() takes it for an image surface */
     uint16_t band_y=(uint16_t)(y&~(PROC_IMAGE_BAND_ROWS-1u));
     if(!image_band_valid||image_band_surface!=index||
        image_band_y!=band_y||image_band_frame!=frame||

@@ -37,7 +37,7 @@ typedef struct {size_t length; const void *tx_buffer;} spi_transaction_t;
 @TX_DECL@
 static uint16_t shared[240*8], saved[240*8];
 static int g_board_async=1, g_board_swap_into=1;
-static bool tx_inflight, capture, pie_swap;
+static bool tx_inflight, capture, pie_swap, lcd_le;
 static spi_transaction_t tx_pending;
 static int lcd, queues, reaps, command_calls, fail_queue;
 static const void *borrow; static size_t borrowed_bytes;
@@ -156,7 +156,7 @@ CASES = r'''int main(void){
 }'''
 
 HARNESS=HARNESS.replace('@TX_DECL@',re.search(r'^static uint16_t tx_buf\[.*?;',source,re.M).group())
-parts=[function(s) for s in ['static esp_err_t tx_reap(', 'static esp_err_t command(',
+parts=[function(s) for s in ['static void put_strip(uint16_t *out,uint16_t *in,int count){', 'static esp_err_t tx_reap(', 'static esp_err_t command(',
     'esp_err_t board_present(', 'esp_err_t board_present_rect(',
     'esp_err_t board_present_sync(', 'esp_err_t board_present_rect_sync(',
     'esp_err_t board_present_finish(', 'esp_err_t board_present_submit(']]

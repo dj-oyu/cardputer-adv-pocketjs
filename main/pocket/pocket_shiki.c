@@ -3,6 +3,7 @@
 #include "pocket_proc.h"
 #include "ksn_shiki.h"
 #include "ksn_shiki_bench.h"
+#include "ksn_shiki_jit.h"
 #include "int_latency.h"
 #include "esp_cpu.h"
 #include "esp_app_desc.h"
@@ -138,7 +139,7 @@ static JSValue js_run(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         free_regions(rs);free(rs);
         return fail(ctx,POCKET_ERR_INVALID_ARGUMENT,"expected data as [{t, q, k, v} | index, ...]");
     }
-    ksn_shiki_plan *plan=malloc(KSN_SHIKI_PLAN_MAX);
+    ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);   /* jit NULL until register */
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
     if(!plan||!seg){free(plan);free(seg);free_regions(rs);free(rs);return fail(ctx,POCKET_ERR_OUT_OF_MEMORY,"no room for a run");}
     ksn_shiki_vm vm={0};
@@ -148,6 +149,7 @@ static JSValue js_run(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     uint32_t h=2166136261u;
     ksn_shiki_result(ok,s,&vm,seg,fnv,&h);
     if(ok&&data)ksn_shiki_result_regions(rs->r,rs->n,fnv,&h);
+    ksn_shiki_plan_dispose(plan);
     free(plan);free(seg);free_regions(rs);free(rs);
     static const char *const name[]={"RUNNING","DONE","INVALID","LIMIT","BADINPUT"};
     char out[32];
@@ -198,7 +200,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
     put_inst(p,KSN_SHIKI_REPEAT,0,0,0,TURNS,0);p+=12;
     for(unsigned k=0;k<COPIES;k++){put_inst(p,c->op,3,c->a,c->b,c->imm,c->aux);p+=12;}
     put_inst(p,KSN_SHIKI_END,0,0,0,0,0);
-    ksn_shiki_plan *plan=malloc(KSN_SHIKI_PLAN_MAX);
+    ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);
     ksn_proc_segment *seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *seg);
     bool ok=plan&&seg&&ksn_shiki_register(code,sizeof code,NULL,0,NULL,0,plan);
     uint32_t best=UINT32_MAX;
@@ -210,6 +212,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
         const uint32_t dt=esp_cpu_get_cycle_count()-t0;
         if(dt<best)best=dt;
     }
+    if(plan)ksn_shiki_plan_dispose(plan);
     free(plan);free(seg);
     if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki %s FAILED %d",c->name,ok?(int)s:-1);
     else snprintf(out,n,"CB shiki %s %ld %ld cy=%.2f",c->name,(long)c->r1,(long)c->r2,
@@ -236,7 +239,7 @@ typedef struct {
 static bench_t *bench_new(void){
     bench_t *b=calloc(1,sizeof *b);
     if(!b)return NULL;
-    b->plan=malloc(KSN_SHIKI_PLAN_MAX);
+    b->plan=calloc(1,KSN_SHIKI_PLAN_MAX);        /* jit NULL: dispose is safe before any register */
     b->seg=malloc(KSN_SHIKI_SEGMENTS*sizeof *b->seg);
     b->raw=malloc(KSN_SHIKI_BENCH_WORK*sizeof(int16_t)+16);
     if(!b->plan||!b->seg||!b->raw){free(b->plan);free(b->seg);free(b->raw);free(b);return NULL;}
@@ -244,7 +247,7 @@ static bench_t *bench_new(void){
     return b;
 }
 static void bench_free(bench_t *b){
-    if(b){free(b->plan);free(b->seg);free(b->raw);free(b);}
+    if(b){if(b->plan)ksn_shiki_plan_dispose(b->plan);free(b->plan);free(b->seg);free(b->raw);free(b);}
 }
 /* What a draw leaves that the two paths must agree on, as one FNV hash:
  * status, the result line (steps, pen, registers, segments), v0..v7 and
@@ -259,44 +262,54 @@ static uint32_t observe(bench_t *b,ksn_shiki_status s){
 static bool check_line(unsigned i,char *out,size_t n){
     bench_t *b=bench_new();
     if(!b){snprintf(out,n,"CB shiki check %u NO MEMORY",i);return true;}
-    uint32_t h[2]={0,0};
-    int16_t v3[2]={0,0};
-    ksn_shiki_status st[2]={KSN_SHIKI_INVALID,KSN_SHIKI_INVALID};
-    bool ok=true;
-    const bool kept=ksn_shiki_vec_pie;
-    for(unsigned pie=0;ok&&pie<2;pie++){
+    /* Three runs of the same case: the C model, PIE instruction by
+     * instruction, and PIE through the JIT's code (shiki-jit.md sec.3). */
+    uint32_t h[3]={0,0,0};
+    int16_t v3[3]={0,0,0};
+    ksn_shiki_status st[3]={KSN_SHIKI_INVALID,KSN_SHIKI_INVALID,KSN_SHIKI_INVALID};
+    bool ok=true,compiled=false;
+    const bool kept=ksn_shiki_vec_pie,kept_jit=ksn_shiki_jit_enabled;
+    for(unsigned run=0;ok&&run<3;run++){
+        ksn_shiki_plan_dispose(b->plan);
         ok=ksn_shiki_bench_check_build(i,b->work,&b->c)&&
            ksn_shiki_register(b->c.code,b->c.len,NULL,0,b->c.region,b->c.regions,b->plan);
         if(!ok)break;
-        ksn_shiki_vec_pie=pie;
-        st[pie]=ksn_shiki_draw(b->plan,NULL,0,&b->vm,b->seg);
+        if(run==2)compiled=b->plan->jit!=NULL;
+        ksn_shiki_vec_pie=run>0;
+        ksn_shiki_jit_enabled=run==2;
+        st[run]=ksn_shiki_draw(b->plan,NULL,0,&b->vm,b->seg);
         ksn_shiki_vec_pie=kept;
-        h[pie]=observe(b,st[pie]);
+        ksn_shiki_jit_enabled=kept_jit;
+        h[run]=observe(b,st[run]);
         /* v1[0] (writeback reads it) for the log either way */
-        v3[pie]=((const int16_t *)(((uintptr_t)b->vm.vraw+15u)&~(uintptr_t)15u))[8];
+        v3[run]=((const int16_t *)(((uintptr_t)b->vm.vraw+15u)&~(uintptr_t)15u))[8];
     }
     if(!ok)snprintf(out,n,"CB shiki check %u FAILED to register",i);
-    else snprintf(out,n,"CB shiki check %s %s model=%08lx/%d pie=%08lx/%d v1[0]=%d/%d",b->c.name,
-                  h[0]==h[1]?"same":"DIFF",(unsigned long)h[0],(int)st[0],(unsigned long)h[1],(int)st[1],
-                  v3[0],v3[1]);
+    else snprintf(out,n,"CB shiki check %s %s model=%08lx/%d pie=%08lx/%d jit%s=%08lx/%d v1[0]=%d/%d/%d",
+                  b->c.name,h[0]==h[1]&&h[1]==h[2]?"same":"DIFF",(unsigned long)h[0],(int)st[0],
+                  (unsigned long)h[1],(int)st[1],compiled?"":"(none)",(unsigned long)h[2],(int)st[2],
+                  v3[0],v3[1],v3[2]);
     bench_free(b);
     return true;
 }
 /* Row j of the timed part: 0 is "empty"; then each case, a vector case
  * twice (pie 0, 1). */
-typedef struct { int index; bool pie; } timed_row;
+typedef struct { int index; bool pie,jit; } timed_row;
 static unsigned timed_rows(timed_row *rows,unsigned max){
     unsigned n=0;
-    if(n<max)rows[n++]=(timed_row){-1,false};
+    if(n<max)rows[n++]=(timed_row){-1,false,false};
     for(unsigned i=0;i<ksn_shiki_bench_count();i++){
-        if(n<max)rows[n++]=(timed_row){(int)i,false};
-        if((i==1||i==5)&&n<max)rows[n++]=(timed_row){(int)i,true};   /* the vector forms */
+        if(n<max)rows[n++]=(timed_row){(int)i,false,false};
+        if(i==1||i==5){                                               /* the vector forms */
+            if(n<max)rows[n++]=(timed_row){(int)i,true,false};
+            if(n<max)rows[n++]=(timed_row){(int)i,true,true};          /* and through the JIT */
+        }
     }
     return n;
 }
 static bool pair_line(unsigned j,char *out,size_t n){
-    timed_row rows[16];
-    const unsigned count=timed_rows(rows,16);
+    timed_row rows[24];
+    const unsigned count=timed_rows(rows,24);
     if(j>=count)return false;
     bench_t *b=bench_new();
     if(!b){snprintf(out,n,"CB shiki draw NO MEMORY");return true;}
@@ -307,11 +320,13 @@ static bool pair_line(unsigned j,char *out,size_t n){
         memcpy(b->c.code,empty,sizeof empty);
         b->c.len=sizeof empty;
     }else ok=ksn_shiki_bench_build((unsigned)rows[j].index,b->work,&b->c);
+    ksn_shiki_plan_dispose(b->plan);
     ok=ok&&ksn_shiki_register(b->c.code,b->c.len,NULL,0,b->c.region,b->c.regions,b->plan);
     uint32_t best=UINT32_MAX;
     ksn_shiki_status s=KSN_SHIKI_INVALID;
-    const bool kept=ksn_shiki_vec_pie;
+    const bool kept=ksn_shiki_vec_pie,kept_jit=ksn_shiki_jit_enabled;
     ksn_shiki_vec_pie=rows[j].pie;
+    ksn_shiki_jit_enabled=rows[j].jit;
     for(unsigned r=0;ok&&r<7;r++){
         const uint32_t t0=esp_cpu_get_cycle_count();
         s=ksn_shiki_draw(b->plan,NULL,0,&b->vm,b->seg);
@@ -319,15 +334,89 @@ static bool pair_line(unsigned j,char *out,size_t n){
         if(dt<best)best=dt;
     }
     ksn_shiki_vec_pie=kept;
+    ksn_shiki_jit_enabled=kept_jit;
     if(!ok||s!=KSN_SHIKI_DONE)snprintf(out,n,"CB shiki draw %s FAILED %d",b->c.name?b->c.name:"?",ok?(int)s:-1);
-    else snprintf(out,n,"CB shiki draw %s pie=%d cy=%lu us=%.1f steps=%u segs=%u",b->c.name,rows[j].pie?1:0,
+    else snprintf(out,n,"CB shiki draw %s pie=%d%s cy=%lu us=%.1f steps=%u segs=%u",b->c.name,rows[j].pie?1:0,
+                  rows[j].jit?(b->plan->jit?" jit":" jit(none)"):"",
                   (unsigned long)best,best/240.0,b->vm.steps,b->vm.count);
     bench_free(b);
     return true;
 }
+/* The scalar JIT on this CPU (shiki-jit.md sec.11): ksn_shiki_bench_random's
+ * programs, the ones tools/shiki_jit/test_scalar.c runs on its emulator,
+ * each drawn by the interpreter and by the plan's code, every observable
+ * compared (as there: the step count and pen only for DONE, an error
+ * inside a block counting to the block's end). Also the cycles per step of
+ * both over the programs that finish. SCALAR_LINES lines of SCALAR_PER
+ * programs, so that no call runs for long. */
+#define SCALAR_LINES 4u
+#define SCALAR_PER 200u
+static uint32_t scalar_hash(const ksn_shiki_vm *vm,const ksn_proc_segment *seg,ksn_shiki_status s){
+    uint32_t h=2166136261u;
+    const int st=(int)s;
+    fnv(&h,(const char *)&st,sizeof st);
+    fnv(&h,(const char *)vm->reg,sizeof vm->reg);
+    fnv(&h,(const char *)&vm->count,sizeof vm->count);
+    fnv(&h,(const char *)seg,vm->count*sizeof *seg);
+    if(s==KSN_SHIKI_DONE){
+        const int16_t pen[3]={vm->pen_x,vm->pen_y,(int16_t)vm->pen_valid};
+        const uint16_t more[3]={vm->steps,vm->raster,vm->depth};
+        fnv(&h,(const char *)pen,sizeof pen);
+        fnv(&h,(const char *)more,sizeof more);
+    }
+    return h;
+}
+static bool scalar_line(unsigned line,char *out,size_t n){
+    bench_t *b=bench_new();
+    if(!b){snprintf(out,n,"CB jit scalar NO MEMORY");return true;}
+    uint32_t seed=1u+line*7919u;
+    unsigned same=0,diff=0,none=0,first=UINT32_MAX,done=0;
+    uint64_t cy[2]={0,0},steps=0;
+    uint32_t bytes=0,inst=0;
+    uint64_t compile_cy=0;                       /* compiling and copying to executable memory */
+    const bool kept=ksn_shiki_jit_enabled;
+    for(unsigned t=0;t<SCALAR_PER;t++){
+        int32_t in[KSN_SHIKI_INPUTS];
+        unsigned nin,index;
+        ksn_shiki_bench_random(&seed,&b->c,in,&nin,&index);
+        ksn_shiki_plan_dispose(b->plan);
+        if(!ksn_shiki_register(b->c.code,b->c.len,NULL,0,NULL,0,b->plan)){t--;continue;}
+        uint32_t h[2];
+        ksn_shiki_status st[2];
+        uint32_t dt[2];
+        for(unsigned run=0;run<2;run++){
+            ksn_shiki_jit_enabled=run==1;
+            if(run==1){
+                const uint32_t before=ksn_shiki_jit_bytes,c0=esp_cpu_get_cycle_count();
+                if(!ksn_shiki_jit_compile_now(b->plan)){none++;break;}
+                compile_cy+=esp_cpu_get_cycle_count()-c0;
+                bytes+=ksn_shiki_jit_bytes-before;
+                inst+=b->plan->count;
+            }
+            const uint32_t t0=esp_cpu_get_cycle_count();
+            st[run]=ksn_shiki_draw_index(b->plan,in,nin,index,&b->vm,b->seg);
+            dt[run]=esp_cpu_get_cycle_count()-t0;
+            h[run]=scalar_hash(&b->vm,b->seg,st[run]);
+        }
+        ksn_shiki_jit_enabled=kept;
+        if(!b->plan->jit)continue;
+        if(h[0]==h[1])same++;
+        else{diff++;if(first==UINT32_MAX)first=t;}
+        if(st[0]==KSN_SHIKI_DONE){done++;cy[0]+=dt[0];cy[1]+=dt[1];steps+=b->vm.steps;}
+    }
+    ksn_shiki_jit_enabled=kept;
+    snprintf(out,n,"CB jit scalar %u/%u %s same=%u diff=%u first=%d none=%u done=%u cy/step interp=%.1f jit=%.1f "
+             "code=%.1f B/inst compile=%.1f cy/inst",line+1u,SCALAR_LINES,diff?"DIFF":"same",same,diff,first==UINT32_MAX?-1:(int)first,
+             none,done,steps?(double)cy[0]/(double)steps:0.0,steps?(double)cy[1]/(double)steps:0.0,
+             inst?(double)bytes/(double)inst:0.0,inst?(double)compile_cy/(double)inst:0.0);
+    bench_free(b);
+    return true;
+}
+/* Then the scalar JIT's lines; the last line: the JIT's stage-0 probe
+ * (ksn_shiki_jit.c). */
 static unsigned pair_count(void){
-    timed_row rows[16];
-    return ksn_shiki_bench_check_count()+timed_rows(rows,16);
+    timed_row rows[24];
+    return ksn_shiki_bench_check_count()+timed_rows(rows,24)+SCALAR_LINES+1u;
 }
 #define PAIR_COUNT pair_count()
 static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -336,7 +425,7 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     if(argc<1||JS_ToUint32(ctx,&i,argv[0])!=0)
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"shikiDebug.bench","expected (index)",
                                 false,POCKET_OUTCOME_NOT_APPLIED);
-    char line[160];
+    char line[224];
     const unsigned first=int_latency_count();
     if(i<first)return int_latency_case(i,line,sizeof line)?JS_NewString(ctx,line):JS_NULL;
     i-=first;
@@ -345,6 +434,11 @@ static JSValue js_bench(JSContext *ctx,JSValueConst self,int argc,JSValueConst *
     if(i<ksn_shiki_bench_check_count()&&check_line(i,line,sizeof line))return JS_NewString(ctx,line);
     i-=ksn_shiki_bench_check_count();
     if(pair_line(i,line,sizeof line))return JS_NewString(ctx,line);
+    timed_row rows[24];
+    i-=timed_rows(rows,24);
+    if(i<SCALAR_LINES&&scalar_line(i,line,sizeof line))return JS_NewString(ctx,line);
+    i-=SCALAR_LINES;
+    if(i==0&&ksn_shiki_jit_probe(line,sizeof line))return JS_NewString(ctx,line);
     return JS_NULL;
 }
 

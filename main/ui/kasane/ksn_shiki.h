@@ -97,6 +97,17 @@ typedef struct {
 typedef struct {
     uint8_t count,inputs;
     uint8_t input_q[KSN_SHIKI_INPUTS];
+    /* Draws so far, for the scalar JIT's choice of plans to compile, and
+     * the size its code took the last time an allocation for it failed, in
+     * 64-byte units rounded down (0: not known). In the struct's padding;
+     * ksn_shiki_jit.c. */
+    int8_t heat;
+    uint8_t need64;
+    /* The JIT's code for the plan's VEACH sections (device only,
+     * ksn_shiki_jit.c; docs/kasane/shiki-jit.md), or NULL. A plan that may
+     * hold code is given back with ksn_shiki_plan_dispose() before its memory
+     * is freed. */
+    void *jit;
     ksn_shiki_bound region[KSN_SHIKI_REGIONS];
     ksn_shiki_inst code[];
 } ksn_shiki_plan;
@@ -112,6 +123,10 @@ const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count);
  * or 0 when the header is not a Shiki header (registration then fails
  * anyway): what to allocate before ksn_shiki_register(). */
 size_t ksn_shiki_plan_bytes_for(const uint8_t *code,size_t len);
+/* Frees what registration attached to the plan beyond its own bytes (the
+ * JIT's code); the plan's memory stays the caller's. Safe on a plan whose
+ * registration failed, and a no-op on the host. */
+void ksn_shiki_plan_dispose(ksn_shiki_plan *plan);
 
 typedef enum { KSN_SHIKI_RUNNING, KSN_SHIKI_DONE, KSN_SHIKI_INVALID,
                KSN_SHIKI_LIMIT, KSN_SHIKI_BADINPUT } ksn_shiki_status;
@@ -126,6 +141,10 @@ typedef struct {
     int16_t pen_x,pen_y;
     bool pen_valid;
     uint16_t count;                         /* segments emitted by this draw */
+    /* The most this draw may emit (<= KSN_SHIKI_SEGMENTS): the room left in
+     * the caller's frame, so a draw writes straight into the frame's tail
+     * and one that would not fit stops at LIMIT (pocket_proc.c). */
+    uint16_t cap;
     bool ext;                               /* a LINE_PATTERN chord is among them */
     /* The prototype's vector state (shiki-pie.md sec.3.1), kept in memory:
      * v0..v7 (8 lanes of int16) then the accumulator (8 lanes of 40 bits,
@@ -181,6 +200,11 @@ ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *
  * DRAW_INDEX reads, the entry of drawMany or of a list; draw_fixed is 0. */
 ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                       unsigned index,ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
+/* ksn_shiki_draw_index into out[0..cap): the draw stops at LIMIT when it
+ * would emit more than cap segments (cap <= KSN_SHIKI_SEGMENTS). The other
+ * entry points take the full KSN_SHIKI_SEGMENTS. */
+ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                          unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap);
 /* The result line of the shared text contract (tools/kasane_ir/shiki_ref.mjs
  * format(), tools/kasane_contract/shiki_run.c), handed to put in pieces so a
  * caller can print it or hash it without holding a line that 1,024 segments

@@ -1,0 +1,22 @@
+# Skip the sizing pass while the heap cannot hold a plan (need64 + largest exec block); device, 05d1a75 (POCKET_SHIKI_JIT_AB build)
+# DERBY, job jit11-derby-1 (a different race from jit10: seed 61803A64). jitfail counts from boot (0 at start).
+app: MEM free=44740 largest=31744 js=97308 (after load)
+-- paddock: on 0.36-0.40 / off 0.52 ms --
+SHIKI_TURN draws=7.0 steps=398 engine_ms=0.363 total_ms=0.399 frames=30 jit=1/3968 cubic=6.0/0.063 pat=9.0/0.017 jitfail=0/0/0
+SHIKI_TURN draws=7.0 steps=399 engine_ms=0.479 total_ms=0.518 frames=30 jit=0/3968 cubic=6.0/0.109 pat=9.0/0.025 jitfail=0/0/0
+-- WIDE --
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.655 total_ms=0.720 frames=30 jit=1/6892 cubic=10.7/0.101 pat=9.0/0.017 jitfail=0/0/7
+SHIKI_TURN draws=22.0 steps=1246 engine_ms=0.886 total_ms=0.955 frames=30 jit=0/6892 cubic=10.7/0.154 pat=9.0/0.026 jitfail=0/0/7
+-- FIELD --
+SHIKI_TURN draws=23.0 steps=1431 engine_ms=0.866 total_ms=0.937 frames=30 jit=1/6892 cubic=19.0/0.212 pat=9.0/0.017 jitfail=0/0/9
+SHIKI_TURN draws=23.0 steps=1430 engine_ms=1.062 total_ms=1.133 frames=30 jit=0/6892 cubic=18.9/0.258 pat=9.0/0.025 jitfail=0/0/9
+-- WIDE 2 / WIDE 3: heap failures +3..6 per JIT-on window (jit10: +10..13), on no longer slower than off --
+SHIKI_TURN draws=28.2 steps=2997 engine_ms=1.657 total_ms=1.755 frames=30 jit=0/6892 cubic=4.6/0.084 pat=9.0/0.091 jitfail=0/0/16
+SHIKI_TURN draws=29.0 steps=3097 engine_ms=1.695 total_ms=1.794 frames=30 jit=1/6892 cubic=6.0/0.107 pat=9.0/0.079 jitfail=0/0/22
+SHIKI_TURN draws=28.4 steps=2753 engine_ms=1.452 total_ms=1.547 frames=30 jit=1/6892 cubic=3.4/0.054 pat=9.0/0.064 jitfail=0/0/35
+SHIKI_TURN draws=27.0 steps=3106 engine_ms=1.655 total_ms=1.750 frames=30 jit=0/6892 cubic=2.0/0.046 pat=9.0/0.092 jitfail=0/0/35
+SHIKI_TURN draws=27.0 steps=3223 engine_ms=1.625 total_ms=1.720 frames=30 jit=1/6892 cubic=2.0/0.048 pat=9.0/0.077 jitfail=0/0/38
+-- VISION --
+SHIKI_TURN draws=33.0 steps=1877 engine_ms=0.957 total_ms=1.053 frames=30 jit=1/6892 cubic=8.7/0.082 pat=9.0/0.017 jitfail=0/0/30
+SHIKI_TURN draws=33.0 steps=1873 engine_ms=1.176 total_ms=1.271 frames=30 jit=0/6892 cubic=8.2/0.122 pat=9.0/0.025 jitfail=0/0/30
+DERBY FINISH race=1000001 seed=61803A64 order=7,3,4,6,8,5,1,2 ms=61276,61406,61438,61683,61966,61998,61998,62179 margin=1 LENGTHS

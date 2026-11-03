@@ -271,7 +271,7 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"program, arguments or regions refused (sec.6.1)");
     }
     const uint32_t handle=pocket_proc_shiki_attach(plan);
-    if(!handle){shiki_or_sys_free(plan);return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"32 handles");}
+    if(!handle){ksn_shiki_plan_dispose(plan);shiki_or_sys_free(plan);return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"32 handles");}
     // A window passed twice counts once for this handle (sec.9.3).
     binds[b]=(bind_t){.handle=handle};
     for(uint32_t k=0;k<nr;k++){

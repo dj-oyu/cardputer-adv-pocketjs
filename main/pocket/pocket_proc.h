@@ -33,6 +33,12 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
  * one branch per stage. pocket_cycles() is 0 off the device. */
 typedef struct { bool on; uint32_t n,parse,lookup,engine,copy,mark; } pocket_shiki_draw_prof;
 extern pocket_shiki_draw_prof pocket_shiki_prof;
+/* Always on (a few cycle reads per draw): what the Shiki draws of the turns
+ * since the last take cost, for the SHIKI_TURN line next to KASANE_PAINT
+ * (docs/kasane/shiki-jit.md sec.9). engine: the conversion and the engine;
+ * total: the whole native draw (lookup, engine, copy into the frame). */
+typedef struct { uint32_t draws,steps,engine_cy,total_cy; } pocket_shiki_turn;
+void pocket_shiki_turn_take(pocket_shiki_turn *out);
 uint32_t pocket_cycles(void);
 void pocket_proc_end_turn(void);
 /* One draw for a native caller (pocket_derby.c): a Shiki handle and its

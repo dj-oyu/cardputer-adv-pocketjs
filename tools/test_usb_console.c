@@ -11,7 +11,7 @@
 static esp_vfs_t vfs;
 static char wire[32768];
 static size_t used, packets[1024];
-static unsigned calls, fail_call, stream_count, buffering_count;
+static unsigned calls, fail_call, stream_count, buffering_count, last_ticks;
 static int64_t now;
 static bool deny_lock, nested_bridge;
 int64_t esp_timer_get_time(void) { return now; }
@@ -24,7 +24,9 @@ int xSemaphoreTake(SemaphoreHandle_t s, TickType_t ticks) {
 }
 void xSemaphoreGive(SemaphoreHandle_t s) { assert(s->held);s->held=0; }
 int usb_serial_jtag_write_bytes(const void *p, size_t n, uint32_t ticks) {
-    assert(ticks>0 && ticks<=50 && calls<1024);
+    /* 0 ticks: console text while nobody reads (usb_console.c host_absent). */
+    assert(ticks<=50 && calls<1024);
+    last_ticks=ticks;
     packets[calls++]=n;
     if(nested_bridge) {
         nested_bridge=false;
@@ -116,6 +118,19 @@ int main(void) {
     clean();char huge[16384];memset(huge,'z',sizeof(huge));
     ssize_t n=vfs.write(1,huge,sizeof(huge));
     assert(n>0 && n<(ssize_t)sizeof(huge) && now<=100000 && calls<=50);
+    /* Nobody reading: after one refusal, console text waits for nothing (a
+     * refused line costs no time) until a write gets through; a frame still
+     * waits its budget; one write through ends it. */
+    clean();fail_call=1;
+    assert(vfs.write(1,"a\n",2)==-1 && now>0);
+    int64_t t0=now;fail_call=calls+1;
+    assert(vfs.write(1,"b\n",2)==-1 && last_ticks==0 && now==t0);
+    fail_call=calls+1;
+    assert(usb_console_frame("\x1d" "B00\n",5)==ESP_ERR_TIMEOUT && last_ticks>0);
+    wrote(1,"c\n");
+    assert(last_ticks==0);                     /* got through without waiting */
+    wrote(1,"d\n");
+    assert(last_ticks>0);                      /* and the budget is back */
     clean();owner=0;running=true;SCREENS[0].run_restore=restore;
     end_run(ESP_OK);
     assert(!running && restored==1 && pending_calls==1);

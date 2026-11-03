@@ -1,0 +1,15 @@
+# Shiki JIT stage 0 (docs/kasane/shiki-jit.md sec.2): machine code written into
+# RAM and run, device run, firmware 481f7ce (ELF 6039adfa...), 2026-11-02.
+# Broker job jit0-cb-481f7ce-b (app_session local.cyclebench). Memory protection
+# off (CONFIG_ESP_SYSTEM_MEMPROT=n). The other bench lines are as before.
+I (62885) js: CB BEGIN 79 BUILD 1 6039adfad42b183c
+I (67911) js: CB shiki draw affine128 vector pie=0 cy=65338 us=272.2 steps=215 segs=128
+I (67981) js: CB shiki draw affine128 vector pie=1 cy=45375 us=189.1 steps=215 segs=128
+I (68181) js: CB jit memprot=0 alloc=0x403beb00 diram=1 exec=1 one=same/42 loop=same/43 blocks=16 cy_jit=97 cy_c=1319
+I (68249) js: CB END 79
+# alloc: MALLOC_CAP_EXEC returned an instruction-bus address in DIRAM; the code
+# was written through the data-bus alias and run from it. one/loop: both
+# functions returned their value and their output equals C's saturating sum.
+# cy_jit: 16 blocks (128 lanes) of load, load, add, store in a zero-overhead
+# loop, call included: 97 cycles, about 6 per block. cy_c: the same sum in C
+# (-O2): 1,319 cycles. 7-run minimum each.

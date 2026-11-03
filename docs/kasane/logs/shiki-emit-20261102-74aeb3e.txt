@@ -1,0 +1,24 @@
+# EMIT_POINTS / EMIT_LINES in one loop (docs/kasane/shiki-jit.md sec.8.3),
+# device run, firmware 74aeb3e (ELF 50922d97...), 2026-11-02. Broker job
+# emit-cb-c (app_session local.cyclebench). 7-run minimums of one draw.
+I (87770) js: CB BEGIN 80 BUILD 1 50922d97a6f1df1f
+I (91997) js: CB shiki check check tail same model=84700102/1 pie=84700102/1 jit(none)=84700102/1 v1[0]=30000/30000/30000
+I (92064) js: CB shiki check check fields2 same model=a9fafb37/1 pie=a9fafb37/1 jit=a9fafb37/1 v1[0]=-1000/-1000/-1000
+I (92129) js: CB shiki check check record3 same model=522ef56e/1 pie=522ef56e/1 jit=522ef56e/1 v1[0]=0/0/0
+I (92199) js: CB shiki check check sat40 up same model=75a76fc6/1 pie=75a76fc6/1 jit=75a76fc6/1 v1[0]=32767/32767/32767
+I (92265) js: CB shiki check check sat40 down same model=8a9d6c4d/1 pie=8a9d6c4d/1 jit=8a9d6c4d/1 v1[0]=32767/32767/32767
+I (92331) js: CB shiki check check writeback same model=a2bff0d2/1 pie=a2bff0d2/1 jit=a2bff0d2/1 v1[0]=31250/31250/31250
+I (92397) js: CB shiki check check accset same model=7f2eabfd/1 pie=7f2eabfd/1 jit(none)=7f2eabfd/1 v1[0]=-32768/-32768/-32768
+I (92465) js: CB shiki check check shift32 same model=49cedac6/1 pie=49cedac6/1 jit=49cedac6/1 v1[0]=9/9/9
+I (92529) js: CB shiki check check unaligned same model=1b9f2642/1 pie=1b9f2642/1 jit=1b9f2642/1 v1[0]=0/0/0
+I (92610) js: CB shiki check check affine128 same model=5f67edad/1 pie=5f67edad/1 jit=5f67edad/1 v1[0]=80/80/80
+I (92734) js: CB shiki draw affine128 scalar pie=0 cy=184958 us=770.7 steps=1926 segs=128
+I (92797) js: CB shiki draw affine128 vector pie=0 cy=53894 us=224.6 steps=215 segs=128
+I (92862) js: CB shiki draw affine128 vector pie=1 cy=34708 us=144.6 steps=215 segs=128
+I (92930) js: CB shiki draw affine128 vector pie=1 jit cy=6787 us=28.3 steps=215 segs=128
+I (92998) js: CB shiki draw lines100 scalar pie=0 cy=71731 us=298.9 steps=401 segs=100
+I (93063) js: CB shiki draw lines100 emit pie=0 cy=13225 us=55.1 steps=1 segs=100
+I (93199) js: CB END 80
+# Before (2a78095, logs/shiki-jit2-20261102-2a78095.txt): affine128 vector C
+# 65,058, PIE 45,872, JIT 17,951; lines100 emit 19,067. The three vector rows
+# fell by the same ~11,160 cycles (128 points: ~87 cycles a point).

@@ -1,0 +1,12 @@
+# JIT_HEAT 32 -> 4, compile timing; device, 50d5013 (POCKET_SHIKI_JIT_AB build). cycle bench, job jit7-cb-b
+# compile= cycles per instruction to compile one random program and copy it to executable memory (mallocs included)
+I (154642) js: CB jit scalar 1/4 same same=200 diff=0 first=-1 none=0 done=74 cy/step interp=80.5 jit=33.7 code=24.0 B/inst compile=4298.9 cy/inst
+I (154876) js: CB jit scalar 2/4 same same=200 diff=0 first=-1 none=0 done=86 cy/step interp=91.4 jit=40.1 code=24.7 B/inst compile=4432.3 cy/inst
+I (155081) js: CB jit scalar 3/4 same same=200 diff=0 first=-1 none=0 done=80 cy/step interp=93.2 jit=38.9 code=24.7 B/inst compile=4412.8 cy/inst
+I (155285) js: CB jit scalar 4/4 same same=200 diff=0 first=-1 none=0 done=96 cy/step interp=74.7 jit=21.0 code=24.9 B/inst compile=4475.6 cy/inst
+
+# 4a3212a (retry + jitfail counters), MEGADEMO job jit8-mega-b: jitfail=refused/budget/heap
+I (269354) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=2.119 total_ms=2.160 frames=30 jit=1/6560 cubic=23.0/0.332 pat=0.0/0.000 jitfail=0/0/0
+I (271403) kasane: SHIKI_TURN draws=6.8 steps=6355 engine_ms=2.974 total_ms=3.014 frames=30 jit=1/7396 cubic=22.2/0.408 pat=0.0/0.000 jitfail=0/0/6
+I (273425) kasane: SHIKI_TURN draws=7.8 steps=6948 engine_ms=3.123 total_ms=3.166 frames=30 jit=1/7396 cubic=23.0/0.434 pat=0.0/0.000 jitfail=0/0/7
+I (281462) kasane: SHIKI_TURN draws=11.4 steps=6218 engine_ms=1.981 total_ms=2.026 frames=30 jit=1/7236 cubic=3.9/0.106 pat=0.0/0.000 jitfail=0/0/11

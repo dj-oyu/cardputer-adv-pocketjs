@@ -1,0 +1,24 @@
+# Faster compiles (encoder by bit runs, sizing pass skips encoding, one pass in the Shiki region); device
+# == host profile (callgrind, x86, DERBY + MEGADEMO's 45 built-in plans, 200 x sizing+emit) ==
+before: 1,140,386,601 Ir total; ksn_jit_emit 1,038,939,000 (91.10%), ksn_shiki_jit_scalar 80,490,800 (7.06%)
+after : 503,116,001 Ir total;   ksn_jit_emit   401,668,400 (79.84%), ksn_shiki_jit_scalar 80,490,800 (16.00%)
+# == cycle bench, 9e31ca5 (job cs1-cb-1): compile (two passes; the bench's path) was ~7,650-8,610 cy/inst ==
+CB jit scalar 1/4 same same=200 diff=0 first=-1 none=0 done=74 cy/step interp=89.2 jit=37.7 code=24.0 B/inst compile=3174.2 cy/inst
+CB jit scalar 2/4 same same=200 diff=0 first=-1 none=0 done=86 cy/step interp=97.6 jit=43.2 code=24.7 B/inst compile=3204.0 cy/inst
+CB jit scalar 3/4 same same=200 diff=0 first=-1 none=0 done=80 cy/step interp=97.9 jit=41.1 code=24.7 B/inst compile=3227.8 cy/inst
+CB jit scalar 4/4 same same=200 diff=0 first=-1 none=0 done=96 cy/step interp=77.0 jit=22.2 code=24.9 B/inst compile=3317.6 cy/inst
+# == DERBY, b315417 (job cs2-derby-1): jitcc=<compiles in the window>/<compile ms per frame> ==
+SHIKI_TURN draws=6.2 steps=338 engine_ms=0.414 total_ms=0.444 frames=30 jit=1/3504 cubic=5.6/0.063 pat=6.0/0.013 jitfail=0/0/0 jitdrop=0/0 jitcc=9/0.085
+SHIKI_TURN draws=7.0 steps=399 engine_ms=0.325 total_ms=0.355 frames=30 jit=1/3792 cubic=6.0/0.063 pat=9.0/0.017 jitfail=0/0/0 jitdrop=0/0 jitcc=2/0.013
+-- race start (26 plans registered; 14 region reclaims) --
+SHIKI_TURN draws=39.0 steps=2514 engine_ms=1.204 total_ms=1.316 frames=30 jit=1/4832 cubic=18.2/0.177 pat=19.5/0.048 jitfail=0/0/0 jitdrop=14/0 jitcc=8/0.187
+SHIKI_TURN draws=26.0 steps=3004 engine_ms=1.201 total_ms=1.282 frames=30 jit=1/7180 cubic=0.0/0.000 pat=9.0/0.091 jitfail=0/0/0 jitdrop=14/0 jitcc=2/0.080
+SHIKI_TURN draws=26.0 steps=2932 engine_ms=1.166 total_ms=1.248 frames=30 jit=1/9160 cubic=0.0/0.000 pat=9.0/0.089 jitfail=0/0/0 jitdrop=14/0 jitcc=2/0.076
+-- WIDE (cold drops) --
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.793 total_ms=0.854 frames=30 jit=1/6800 cubic=10.7/0.135 pat=9.0/0.017 jitfail=0/0/1 jitdrop=14/3 jitcc=3/0.093
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.570 total_ms=0.630 frames=30 jit=1/6800 cubic=10.6/0.102 pat=9.0/0.017 jitfail=0/0/1 jitdrop=14/3 jitcc=0/0.000
+-- WIDE 2 --
+SHIKI_TURN draws=42.8 steps=3019 engine_ms=1.362 total_ms=1.472 frames=30 jit=1/7628 cubic=0.0/0.000 pat=27.6/0.078 jitfail=0/0/4 jitdrop=14/7 jitcc=2/0.090
+SHIKI_TURN draws=47.3 steps=3280 engine_ms=1.434 total_ms=1.553 frames=30 jit=1/7628 cubic=0.0/0.000 pat=36.9/0.101 jitfail=0/0/6 jitdrop=14/7 jitcc=2/0.046
+SHIKI_TURN draws=48.4 steps=3401 engine_ms=1.514 total_ms=1.637 frames=30 jit=1/7628 cubic=0.0/0.000 pat=37.5/0.112 jitfail=0/0/9 jitdrop=14/7 jitcc=3/0.069
+SHIKI_TURN draws=50.6 steps=3563 engine_ms=1.604 total_ms=1.732 frames=30 jit=1/8468 cubic=1.4/0.018 pat=41.1/0.141 jitfail=0/0/11 jitdrop=14/7 jitcc=3/0.060

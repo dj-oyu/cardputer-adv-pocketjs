@@ -35,4 +35,13 @@ bool ksn_shiki_bench_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shi
  * 32 and more, the tail and unaligned fallbacks. work must be 16-B aligned. */
 unsigned ksn_shiki_bench_check_count(void);
 bool ksn_shiki_bench_check_build(unsigned i,int16_t work[KSN_SHIKI_BENCH_WORK],ksn_shiki_bench_case *c);
+/* A random program for the scalar JIT's checks (docs/kasane/shiki-jit.md
+ * sec.11): well nested, up to 64 instructions of the scalar set (arithmetic
+ * at the int32 boundaries, loops up to 255 deep enough to reach the step
+ * limit, BREAK_IF_GT, MOVE/LINE/PLOT, SIN, ADD_H, DRAW_INDEX), no regions,
+ * its inputs and draw index. Registration may still refuse one (a
+ * coordinate it checks): draw another. The host test
+ * (tools/shiki_jit/test_scalar.c) and the device bench run the same ones. */
+size_t ksn_shiki_bench_random(uint32_t *seed,ksn_shiki_bench_case *c,int32_t in[KSN_SHIKI_INPUTS],
+                              unsigned *nin,unsigned *index);
 #endif

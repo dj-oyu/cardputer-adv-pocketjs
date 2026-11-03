@@ -1,0 +1,36 @@
+# Drop the code of plans not drawn in the last 1,024 draws to make room (sec.16); device, 5021a80
+# SHIKI_TURN ... jitfail=<refused>/<budget>/<heap> jitdrop=<region reclaimed>/<cold dropped>
+# == DERBY job cold1-derby-1 (a different race from ba9d872's: seed 85FF4868) ==
+-- first race window: the 14 region reclaims happen at the race's registration (GO) --
+SHIKI_TURN draws=45.9 steps=3482 engine_ms=1.954 total_ms=2.082 frames=30 jit=1/7180 cubic=16.4/0.159 pat=19.5/0.076 jitfail=0/0/0 jitdrop=14/0
+-- WIDE: first cold drops --
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.790 total_ms=0.851 frames=30 jit=1/6800 cubic=10.7/0.116 pat=9.0/0.017 jitfail=0/0/1 jitdrop=14/3
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.568 total_ms=0.628 frames=30 jit=1/6800 cubic=10.7/0.101 pat=9.0/0.017 jitfail=0/0/1 jitdrop=14/3
+-- FIELD --
+SHIKI_TURN draws=23.0 steps=1430 engine_ms=0.684 total_ms=0.747 frames=30 jit=1/7640 cubic=18.9/0.182 pat=9.0/0.017 jitfail=0/0/1 jitdrop=14/3
+-- WIDE 2 (29 draws a frame in this race) --
+SHIKI_TURN draws=29.0 steps=3156 engine_ms=1.111 total_ms=1.195 frames=30 jit=1/11280 cubic=6.0/0.067 pat=9.0/0.079 jitfail=0/0/1 jitdrop=14/3
+SHIKI_TURN draws=29.0 steps=3378 engine_ms=1.129 total_ms=1.211 frames=30 jit=1/11280 cubic=6.0/0.066 pat=9.0/0.052 jitfail=0/0/1 jitdrop=14/3
+-- CLOSE --
+SHIKI_TURN draws=16.0 steps=840 engine_ms=0.576 total_ms=0.632 frames=30 jit=1/11280 cubic=5.6/0.080 pat=9.0/0.017 jitfail=0/0/1 jitdrop=14/3
+-- VISION (cold drops 3 -> 6) --
+SHIKI_TURN draws=23.2 steps=1352 engine_ms=0.764 total_ms=0.829 frames=30 jit=1/8924 cubic=9.2/0.095 pat=9.0/0.017 jitfail=0/0/2 jitdrop=14/6
+SHIKI_TURN draws=34.0 steps=1912 engine_ms=0.795 total_ms=0.882 frames=30 jit=1/8924 cubic=10.4/0.101 pat=9.0/0.017 jitfail=0/0/2 jitdrop=14/6
+SHIKI_TURN draws=33.0 steps=1877 engine_ms=0.766 total_ms=0.850 frames=30 jit=1/8924 cubic=8.7/0.083 pat=9.0/0.017 jitfail=0/0/2 jitdrop=14/6
+-- WIDE 3 / FINISH: recompiles after cold drops cost a window +0.3-0.6 ms --
+SHIKI_TURN draws=27.0 steps=3026 engine_ms=1.421 total_ms=1.503 frames=30 jit=1/11032 cubic=2.0/0.022 pat=9.0/0.079 jitfail=0/0/3 jitdrop=14/6
+SHIKI_TURN draws=27.0 steps=3134 engine_ms=1.256 total_ms=1.337 frames=30 jit=1/11032 cubic=2.0/0.022 pat=9.0/0.079 jitfail=0/0/3 jitdrop=14/6
+SHIKI_TURN draws=27.0 steps=3242 engine_ms=1.341 total_ms=1.422 frames=30 jit=1/8468 cubic=2.0/0.022 pat=9.0/0.070 jitfail=0/0/4 jitdrop=14/10
+SHIKI_TURN draws=25.8 steps=2737 engine_ms=1.515 total_ms=1.589 frames=30 jit=1/8468 cubic=6.4/0.099 pat=9.0/0.024 jitfail=0/0/10 jitdrop=14/10
+SHIKI_TURN draws=26.0 steps=2567 engine_ms=1.531 total_ms=1.606 frames=30 jit=1/10372 cubic=9.2/0.118 pat=9.0/0.017 jitfail=0/0/11 jitdrop=14/13
+SHIKI_TURN draws=26.0 steps=2594 engine_ms=0.839 total_ms=0.909 frames=30 jit=1/10372 cubic=9.0/0.095 pat=9.0/0.017 jitfail=0/0/11 jitdrop=14/13
+DERBY FINISH race=1000001 seed=85FF4868 order=3,8,1,6,7,2,5,4 ms=60934,61086,61167,61597,61682,61769,62115,62234 margin=1 LENGTHS
+-- results (52 draws) --
+SHIKI_TURN draws=52.4 steps=3161 engine_ms=1.689 total_ms=1.847 frames=30 jit=1/4064 cubic=23.3/0.262 pat=30.9/0.060 jitfail=0/0/11 jitdrop=14/13
+# heap failures by the results: 11 (ba9d872: 28)
+
+# == MEGADEMO job cold1-mega-1 (counters carried over from DERBY; no new failure or drop) ==
+SHIKI_TURN draws=18.0 steps=7782 engine_ms=0.808 total_ms=0.855 frames=30 jit=1/3120 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/11 jitdrop=14/13
+SHIKI_TURN draws=7.0 steps=6574 engine_ms=1.003 total_ms=1.040 frames=30 jit=1/6448 cubic=23.0/0.333 pat=0.0/0.000 jitfail=0/0/11 jitdrop=14/13
+SHIKI_TURN draws=10.8 steps=6261 engine_ms=0.761 total_ms=0.804 frames=30 jit=1/7948 cubic=1.1/0.029 pat=0.0/0.000 jitfail=0/0/11 jitdrop=14/13
+SHIKI_TURN draws=46.3 steps=3426 engine_ms=0.829 total_ms=0.934 frames=30 jit=1/3104 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/11 jitdrop=14/13

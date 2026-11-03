@@ -1,0 +1,28 @@
+# What the Shiki draws cost per frame (SHIKI_TURN, docs/kasane/shiki-jit.md
+# sec.9), device runs, firmware deca9f8, 2026-11-02. Broker jobs turn-derby-b
+# (local.derby, 90 s, demo race) and turn-mega (local.megademo, 75 s). Each
+# SHIKI_TURN follows the KASANE_PAINT of the same 30 frames; per frame:
+# draws, engine steps, engine_ms (input conversion + engine), total_ms (the
+# whole native draw: lookup, engine, copy into the frame). The JS call into
+# native is not in total_ms.
+
+## DERBY WATCH (turn_ms from the KASANE_PAINT line before)
+paddock   turn 4.97  SHIKI_TURN draws=7.0  steps=399  engine_ms=0.608 total_ms=0.646
+WIDE 1    turn 9.42  SHIKI_TURN draws=51.7 steps=4265 engine_ms=2.639 total_ms=2.818
+WIDE      turn 11.78 SHIKI_TURN draws=25.5 steps=2734 engine_ms=1.456 total_ms=1.554
+FIELD     turn 9.27  SHIKI_TURN draws=23.0 steps=1431 engine_ms=1.172 total_ms=1.246
+WIDE 2    turn 16.79 SHIKI_TURN draws=53.7 steps=3701 engine_ms=2.197 total_ms=2.362
+CLOSE     turn 8.98  SHIKI_TURN draws=22.0 steps=1153 engine_ms=0.995 total_ms=1.067
+WIDE 3    turn 15.22 SHIKI_TURN draws=44.2 steps=4123 engine_ms=2.224 total_ms=2.362
+VISION    turn 11.06 SHIKI_TURN draws=34.0 steps=1912 engine_ms=1.405 total_ms=1.513
+HEAD ON   turn 8.92  SHIKI_TURN draws=21.4 steps=1842 engine_ms=0.987 total_ms=1.055
+FINISH    turn 8.90  SHIKI_TURN draws=26.0 steps=2566 engine_ms=1.488 total_ms=1.570
+result    turn 5.51  SHIKI_TURN draws=8.0  steps=2793 engine_ms=1.472 total_ms=1.518
+
+## MEGADEMO (HEAVY)
+NEWS      turn 10.25 SHIKI_TURN draws=18.0 steps=7782 engine_ms=3.057 total_ms=3.108
+TWIST     turn 12.87 SHIKI_TURN draws=7.0  steps=6574 engine_ms=3.229 total_ms=3.269
+ZENITH    turn 7.23  SHIKI_TURN draws=11.2 steps=6475 engine_ms=2.797 total_ms=2.850
+CORE      turn 12.59 SHIKI_TURN draws=45.6 steps=5034 engine_ms=2.344 total_ms=2.442
+LOST      turn 3.02  SHIKI_TURN draws=6.0  steps=569  engine_ms=0.318 total_ms=0.344
+# (WAKE draws through its own path: no SHIKI_TURN line after its first frames.)

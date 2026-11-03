@@ -61,7 +61,10 @@ def build(flags: list[str], cache: Path) -> Path:
     binary = cache / "test-megademo-app"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_GRID_PIE_MODEL",
+    # KSN_HOST_CFLAGS: extra flags for a profiling build, e.g.
+    # -DKSN_SHIKI_OPSTATS (docs/kasane/shiki-jit.md sec.10).
+    extra = os.environ.get("KSN_HOST_CFLAGS", "").split()
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *extra, "-DKSN_GRID_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/kasane_contract/test_megademo_app_host.c", *kasane_sources(), *EXTRA,
                     "main/pocket/pocket_shiki_api.c", str(shiki_table(cache / "ksn_shiki_rom.c")),

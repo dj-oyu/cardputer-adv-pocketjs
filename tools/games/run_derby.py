@@ -135,7 +135,10 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
         experiment_flags += ["-DPOCKET_DERBY_COURSE_CACHE"]
     if project_batch:
         experiment_flags += ["-DPOCKET_DERBY_PROJECT_BATCH"]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
+    # KSN_HOST_CFLAGS: extra flags for a profiling build (-DKSN_SHIKI_OPSTATS,
+    # docs/kasane/shiki-jit.md sec.10).
+    extra = os.environ.get("KSN_HOST_CFLAGS", "").split()
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],

@@ -356,7 +356,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
 
 static void input_task(void *arg) {
     (void)arg;
+    unsigned polls=0;
     while(1) {
+        /* Its stack's high-water mark once, after ~10 s of polling, to size
+         * the RTC fast memory it is given (shiki-jit.md sec.19). */
+        if(++polls==2000)
+            ESP_LOGI("boot","INPUT_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
         keystroke_t k;
         bool have=keymap_poll(&k);
         motion_poll();
@@ -1542,7 +1547,23 @@ void app_main(void) {
     };
     uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
     app_control_init(boot_id,&native_hooks);
-    configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
+    /* The input task's stack is RTC fast memory (docs/kasane/shiki-jit.md
+     * sec.19): 8 KB on the APB clock, slow for code and data, and the heap
+     * hands it to whoever asks next -- the Shiki JIT's code ran 3x slower
+     * there. A task that only polls the keyboard does not mind the speed,
+     * and taking the memory at boot leaves 4 KB more of DIRAM. Pinned to
+     * core 0, the one that reaches RTC fast memory on every chip. */
+    {
+        static StaticTask_t input_tcb;
+        StackType_t *input_stack=heap_caps_malloc(4096,MALLOC_CAP_RTCRAM);
+        if(input_stack)
+            configASSERT(xTaskCreateStaticPinnedToCore(input_task,"input",4096/sizeof(StackType_t),NULL,6,
+                                                       input_stack,&input_tcb,0));
+        else configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
+        ESP_LOGI("boot","INPUT_STACK %s rtc_free=%u rtc_largest=%u",input_stack?"rtc":"dram",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_RTCRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RTCRAM));
+    }
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
     // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
     // and nothing else -- the three settings are one binary family, which is

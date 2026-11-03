@@ -1,0 +1,12 @@
+# Compile straight into executable memory (sizing pass, no 4 KB scratch); device, 5e35e1f (POCKET_SHIKI_JIT_AB build)
+# cycle bench, job jit9-cb-b: compile= now includes two passes (sizing + emit)
+I (195668) js: CB jit scalar 1/4 same same=200 diff=0 first=-1 none=0 done=74 cy/step interp=81.6 jit=33.7 code=24.0 B/inst compile=7650.9 cy/inst
+I (196010) js: CB jit scalar 2/4 same same=200 diff=0 first=-1 none=0 done=86 cy/step interp=91.7 jit=39.8 code=24.7 B/inst compile=7901.1 cy/inst
+I (196315) js: CB jit scalar 3/4 same same=200 diff=0 first=-1 none=0 done=80 cy/step interp=92.7 jit=38.8 code=24.7 B/inst compile=7851.2 cy/inst
+I (196613) js: CB jit scalar 4/4 same same=200 diff=0 first=-1 none=0 done=96 cy/step interp=74.6 jit=21.0 code=24.9 B/inst compile=7953.9 cy/inst
+
+# MEGADEMO, job jit9-mega: every compile failed for heap (jit bytes stay 0); the cycle bench (lots of heap) compiled.
+# Reading: the tight heap hands MALLOC_CAP_EXEC out of IRAM-only memory, and this build refused anything not in DIRAM.
+I (305640) kasane: SHIKI_TURN draws=18.0 steps=7781 engine_ms=3.348 total_ms=3.400 frames=30 jit=1/0 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/11
+I (311690) kasane: SHIKI_TURN draws=7.0 steps=6574 engine_ms=3.413 total_ms=3.453 frames=30 jit=1/0 cubic=23.0/0.458 pat=0.0/0.000 jitfail=0/0/34
+I (331855) kasane: SHIKI_TURN draws=22.4 steps=2637 engine_ms=1.415 total_ms=1.472 frames=30 jit=1/0 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/134

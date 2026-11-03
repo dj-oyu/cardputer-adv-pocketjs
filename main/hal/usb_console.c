@@ -23,12 +23,21 @@ static SemaphoreHandle_t tx_lock;
 static atomic_bool broken_line;
 static bool line_open;
 static int last_stream;
+// Nobody is reading: the last write was refused. Console text then waits for
+// nothing (a full buffer refuses it at once) until a write gets through. With
+// the port closed, every log line used to wait the whole budget, and the UI
+// task froze for it every second or two (DERBY's demo, 2026-11-03; the
+// freezes stopped while the broker read the port). Frames (the broker's
+// protocol) always wait the budget: a host that just opened the port drains
+// the stale buffer within milliseconds, and a frame must not be lost to it.
+static atomic_bool host_absent;
 
 static TickType_t remaining(int64_t deadline) {
     int64_t us=deadline-esp_timer_get_time();
     return us<=0 ? 0 : (TickType_t)((us+1000*portTICK_PERIOD_MS-1)/(1000*portTICK_PERIOD_MS));
 }
-static bool send_bytes(const void *data, size_t size, int64_t deadline) {
+static bool send_bytes(const void *data, size_t size, int64_t deadline, bool nowait) {
+    if(nowait) return usb_serial_jtag_write_bytes(data,size,0)==(int)size;
     TickType_t ticks=remaining(deadline);
     return ticks && usb_serial_jtag_write_bytes(data,size,ticks)==(int)size;
 }
@@ -36,7 +45,8 @@ static ssize_t transmit(int stream, const void *data, size_t size, bool frame) {
     if(!size) return 0;
     if(!tx_lock) { errno=ENODEV;return -1; }
     const int64_t deadline=esp_timer_get_time()+TX_BUDGET_US;
-    if(xSemaphoreTake(tx_lock,remaining(deadline))!=pdTRUE) {
+    const bool nowait=!frame&&atomic_load(&host_absent);
+    if(xSemaphoreTake(tx_lock,nowait?0:remaining(deadline))!=pdTRUE) {
         atomic_store(&broken_line,true);
         errno=EAGAIN;return -1;
     }
@@ -47,7 +57,7 @@ static ssize_t transmit(int stream, const void *data, size_t size, bool frame) {
     // fragments on the same healthy stream may still compose normally.
     bool repair=atomic_exchange(&broken_line,false);
     bool boundary=repair || (line_open && stream!=last_stream);
-    if(boundary && !send_bytes("\n",1,deadline)) goto refused;
+    if(boundary && !send_bytes("\n",1,deadline,nowait)) goto refused;
     if(boundary) line_open=false;
     while(done<size) {
         size_t n=size-done;
@@ -57,21 +67,23 @@ static ssize_t transmit(int stream, const void *data, size_t size, bool frame) {
              * writer may emit GS: printing a valid CRC cannot forge an ACK. */
             const unsigned char *gs=memchr(bytes+done,0x1d,n);
             if(gs==bytes+done) {
-                if(!send_bytes("\\x1d",4,deadline))goto refused;
+                if(!send_bytes("\\x1d",4,deadline,nowait))goto refused;
                 done++;last_stream=stream;line_open=true;continue;
             }
             if(gs)n=(size_t)(gs-(bytes+done));
         }
-        if(!send_bytes(bytes+done,n,deadline)) goto refused;
+        if(!send_bytes(bytes+done,n,deadline,nowait)) goto refused;
         done+=n;
         last_stream=stream;
         line_open=bytes[done-1]!='\n';
     }
+    atomic_store(&host_absent,false);
     xSemaphoreGive(tx_lock);
     return (ssize_t)done;
 refused:
     // No hidden retries. Report only queued source bytes, not the repair LF.
     atomic_store(&broken_line,true);
+    atomic_store(&host_absent,true);
     xSemaphoreGive(tx_lock);
     errno=EAGAIN;
     return done ? (ssize_t)done : -1;
