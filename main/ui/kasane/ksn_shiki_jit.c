@@ -1148,13 +1148,20 @@ static unsigned count_sites(const ksn_shiki_plan *plan){
     for(unsigned pc=0;pc<plan->count;pc++)n+=plan->code[pc].op==KSN_SHIKI_ADD||plan->code[pc].op==KSN_SHIKI_SUB;
     return n;
 }
+/* sec.19: executable memory the JIT asks for. MALLOC_CAP_EXEC alone also
+ * matches RTC fast memory (APB clock); only DIRAM is both executable and
+ * DMA-capable, so the DMA cap keeps both the allocation and the size check
+ * of fits() out of RTC. Counting RTC's free block made fits() say yes, the
+ * allocation landed in RTC and was refused, and make_room never ran: DERBY
+ * sized the same plans again every JIT_RETRY draws (sec.19.3). */
+#define JIT_EXEC_CAPS (MALLOC_CAP_EXEC|MALLOC_CAP_DMA)
 #define JIT_WEIGHTS_MAX 512u     /* int32s: 2 KB, e.g. 8 CUBICs of 16 segments */
 /* Copies len bytes of code into a new executable allocation, as 32-bit
  * words (the instruction bus takes only word stores); *raw is what to free.
  * The code starts 16-aligned (the VEACH loops count on it). */
 static uint8_t *to_exec(uint8_t *tmp,size_t n,uint8_t **raw,size_t *bytes){
     const size_t len=(n+3u)&~(size_t)3u;
-    *raw=heap_caps_malloc(len+16u,MALLOC_CAP_EXEC);
+    *raw=heap_caps_malloc(len+16u,JIT_EXEC_CAPS);
     if(!*raw)return NULL;
     *bytes=len+16u;
     uint8_t *x=(uint8_t *)(((uintptr_t)*raw+15u)&~(uintptr_t)15u);
@@ -1280,7 +1287,7 @@ static uint32_t jit_clock;
 static bool fits(size_t need){
     if(ksn_shiki_jit_bytes+need+20u>ksn_shiki_jit_budget)return false;
     return region_largest()>=need+JIT_REGION_KEEP||
-           heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)>=need+16u;
+           heap_caps_get_largest_free_block(JIT_EXEC_CAPS)>=need+16u;
 }
 /* Drops cold plans' code, coldest first, until need fits. A dropped plan
  * starts again from heat 0: drawn again, it is compiled on its 4th draw. */
@@ -1467,7 +1474,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
         x=(uint8_t *)esp_ptr_diram_dram_to_iram(w);
     }else{
         bytes=len+16u;
-        j->sraw=heap_caps_malloc(bytes,MALLOC_CAP_EXEC);
+        j->sraw=heap_caps_malloc(bytes,JIT_EXEC_CAPS);
         x=j->sraw?(uint8_t *)(((uintptr_t)j->sraw+15u)&~(uintptr_t)15u):NULL;
     }
     if(!x){
