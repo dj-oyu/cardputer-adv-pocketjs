@@ -663,6 +663,8 @@ bool ksn_shiki_jit_scalar_on=true;
 uint32_t ksn_shiki_jit_fail[3];
 /* Plans that gave their region blocks back to the Shiki region (sec.15). */
 uint32_t ksn_shiki_jit_evicted;
+/* Plans whose code was dropped for not being drawn lately (sec.16). */
+uint32_t ksn_shiki_jit_cold;
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
@@ -767,6 +769,7 @@ typedef struct {
     bool sregion,wregion;
     ksn_shiki_plan *plan;
     void *next;
+    uint32_t last;                /* jit_clock at its last draw (sec.16) */
 } jit_plan;
 #define JIT_WEIGHTS_MAX 512u     /* int32s: 2 KB, e.g. 8 CUBICs of 16 segments */
 /* Copies len bytes of code into a new executable allocation, as 32-bit
@@ -804,10 +807,10 @@ void ksn_shiki_jit_attach(ksn_shiki_plan *plan){
     if(!j->exec){free(j);return;}                /* no code: the interpreter runs it */
     plan->jit=j;
 }
-/* Plans whose code or weights live in the Shiki region (sec.15). */
-static jit_plan *region_plans;
+/* Plans with scalar code (sec.15, sec.16), wherever it lives. */
+static jit_plan *jit_plans;
 static void unlist(jit_plan *j){
-    for(jit_plan **q=&region_plans;*q;q=(jit_plan **)&(*q)->next)
+    for(jit_plan **q=&jit_plans;*q;q=(jit_plan **)&(*q)->next)
         if(*q==j){*q=j->next;j->next=NULL;return;}
 }
 /* Gives back the plan's scalar code and weights (the interpreter runs it
@@ -865,16 +868,49 @@ static uint32_t region_largest(void){
     return largest;
 }
 /* The Shiki region's reclaim hook: one of its own allocations failed, so
- * every plan gives its region blocks back and waits JIT_RETRY draws. */
+ * every plan with region blocks gives them back and waits JIT_RETRY draws. */
 static void jit_reclaim(void){
     if(jit_running)return;
-    while(region_plans){
-        jit_plan *j=region_plans;
+    for(jit_plan *j=jit_plans,*n;j;j=n){
+        n=j->next;
+        if(!j->sregion&&!j->wregion)continue;
         ksn_shiki_plan *p=j->plan;
         drop_scalar(j);
         if(p){p->heat=(int8_t)((int)JIT_HEAT-JIT_RETRY);p->need64=0;}
         ksn_shiki_jit_evicted++;
     }
+}
+
+/* sec.16: code of plans not drawn lately makes room for a plan being drawn.
+ * DERBY registers every camera's plans for the race, and the memory filled
+ * up with the code of cameras already cut away from, while the later ones
+ * ran interpreted. jit_clock counts draws of compiled plans; a plan not
+ * drawn in the last JIT_COLD_DRAWS (about 1 s of DERBY's race, 5 s of a
+ * MEGADEMO scene) is cold. */
+#define JIT_COLD_DRAWS 1024u
+static uint32_t jit_clock;
+/* need bytes of code fit the budget and the region (keeping its share)
+ * or the system heap's executable memory. */
+static bool fits(size_t need){
+    if(ksn_shiki_jit_bytes+need+20u>ksn_shiki_jit_budget)return false;
+    return region_largest()>=need+JIT_REGION_KEEP||
+           heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)>=need+16u;
+}
+/* Drops cold plans' code, coldest first, until need fits. A dropped plan
+ * starts again from heat 0: drawn again, it is compiled on its 4th draw. */
+static bool make_room(size_t need){
+    if(jit_running)return false;
+    while(!fits(need)){
+        jit_plan *cold=NULL;
+        for(jit_plan *j=jit_plans;j;j=j->next)
+            if(jit_clock-j->last>JIT_COLD_DRAWS&&(!cold||(int32_t)(j->last-cold->last)<0))cold=j;
+        if(!cold)return false;
+        ksn_shiki_plan *p=cold->plan;
+        drop_scalar(cold);
+        if(p){p->heat=0;p->need64=0;}
+        ksn_shiki_jit_cold++;
+    }
+    return true;
 }
 
 /* Compiles straight into its executable memory: a sizing pass (no buffer)
@@ -883,18 +919,23 @@ static void jit_reclaim(void){
  * there). No scratch buffer: MEGADEMO compiles TWIST's negative set at its
  * tightest heap, where a 4 KB scratch did not fit (sec.14). */
 static int compile_scalar(ksn_shiki_plan *plan){
-    if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget)return JIT_BUDGET;
+    if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget&&!make_room(JIT_GUESS(plan->count)))
+        return JIT_BUDGET;
     /* A plan whose allocation failed before is not sized again while the
      * heap still has no block that long: the sizing pass costs as much as
      * the compile, and DERBY's WIDE retried a dozen plans a second at its
      * tightest heap, which made the JIT slower than the interpreter (sec.14). */
-    if(plan->need64&&heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)<64u*plan->need64&&
-       region_largest()<64u*plan->need64+JIT_REGION_KEEP)return JIT_NOMEM;
+    if(plan->need64&&!fits(64u*plan->need64)&&!make_room(64u*plan->need64))return JIT_NOMEM;
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false};
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
     const size_t need=b.len;
-    if(ksn_shiki_jit_bytes+need+20u>ksn_shiki_jit_budget)return JIT_BUDGET;
+    if(!fits(need)&&!make_room(need)){
+        if(ksn_shiki_jit_bytes+need+20u>ksn_shiki_jit_budget)return JIT_BUDGET;
+        const size_t est=need+16u;
+        plan->need64=(uint8_t)(est/64u>255u?255u:est/64u);
+        return JIT_NOMEM;
+    }
     jit_plan *j=plan->jit;
     const bool fresh=!j;
     if(fresh&&!(j=calloc(1,sizeof *j)))return JIT_NOMEM;
@@ -954,7 +995,8 @@ static int compile_scalar(ksn_shiki_plan *plan){
     j->sbytes=(uint32_t)bytes;
     ksn_shiki_jit_bytes+=(uint32_t)bytes;
     j->plan=plan;
-    if((j->sregion||j->wregion)&&!j->next&&region_plans!=j){j->next=region_plans;region_plans=j;}
+    j->last=jit_clock;
+    j->next=jit_plans;jit_plans=j;
     shiki_heap_set_reclaim(jit_reclaim);
     plan->jit=j;
     return JIT_DONE;
@@ -995,6 +1037,7 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
                    ksn_shiki_sin_table,
                    (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,j->weights,
                    plan,out,index};
+    ((jit_plan *)j)->last=++jit_clock;
     jit_running++;
     const uint32_t r=j->scalar(&c);
     jit_running--;
