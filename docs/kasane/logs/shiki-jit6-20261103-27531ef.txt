@@ -5,3 +5,26 @@ I (183079) js: CB jit scalar 1/4 same same=200 diff=0 first=-1 none=0 done=74 cy
 I (183313) js: CB jit scalar 2/4 same same=200 diff=0 first=-1 none=0 done=86 cy/step interp=91.6 jit=40.6 code=24.7 B/inst
 I (183518) js: CB jit scalar 3/4 same same=200 diff=0 first=-1 none=0 done=80 cy/step interp=93.6 jit=39.3 code=24.7 B/inst
 I (183722) js: CB jit scalar 4/4 same same=200 diff=0 first=-1 none=0 done=96 cy/step interp=75.1 jit=21.3 code=24.9 B/inst
+
+# DERBY, job jit6-derby (paddock, then the demo race); SHIKI_TURN ... jit=<on>/<bytes> cubic=<calls>/<ms> pat=<calls>/<ms>
+I (296375) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.435 total_ms=0.470 frames=30 jit=1/3008 cubic=6.0/0.062 pat=9.0/0.017
+I (297386) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.469 total_ms=0.509 frames=30 jit=0/3008 cubic=6.0/0.103 pat=9.0/0.026
+I (298394) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.383 total_ms=0.418 frames=30 jit=1/3008 cubic=6.0/0.063 pat=9.0/0.017
+I (299403) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.472 total_ms=0.511 frames=30 jit=0/3008 cubic=6.0/0.103 pat=9.0/0.026
+I (300412) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.382 total_ms=0.417 frames=30 jit=1/3008 cubic=6.0/0.063 pat=9.0/0.017
+I (301424) kasane: SHIKI_TURN draws=7.0 steps=399 engine_ms=0.471 total_ms=0.510 frames=30 jit=0/3008 cubic=6.0/0.103 pat=9.0/0.026
+I (304462) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.378 total_ms=0.413 frames=30 jit=1/3168 cubic=6.0/0.063 pat=9.0/0.017
+I (305473) kasane: SHIKI_TURN draws=7.0 steps=398 engine_ms=0.470 total_ms=0.510 frames=30 jit=0/3168 cubic=6.0/0.103 pat=9.0/0.026
+I (313969) js: DERBY CAM WIDE
+I (315831) kasane: SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.608 total_ms=0.672 frames=30 jit=1/7212 cubic=10.7/0.101 pat=9.0/0.017
+I (316839) kasane: SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.881 total_ms=0.947 frames=30 jit=0/7212 cubic=10.7/0.154 pat=9.0/0.026
+I (317838) kasane: SHIKI_TURN draws=22.0 steps=1246 engine_ms=0.605 total_ms=0.669 frames=30 jit=1/7212 cubic=10.7/0.101 pat=9.0/0.017
+I (318122) js: DERBY CAM FIELD
+I (319846) kasane: SHIKI_TURN draws=23.0 steps=1430 engine_ms=0.852 total_ms=0.921 frames=30 jit=1/7212 cubic=18.9/0.213 pat=9.0/0.017
+I (320854) kasane: SHIKI_TURN draws=23.0 steps=1430 engine_ms=1.066 total_ms=1.136 frames=30 jit=0/7212 cubic=18.9/0.258 pat=9.0/0.026
+I (321861) kasane: SHIKI_TURN draws=23.0 steps=1430 engine_ms=0.875 total_ms=0.945 frames=30 jit=1/7212 cubic=18.9/0.214 pat=9.0/0.017
+I (322871) kasane: SHIKI_TURN draws=23.0 steps=1431 engine_ms=1.074 total_ms=1.146 frames=30 jit=0/7212 cubic=18.9/0.260 pat=9.0/0.026
+I (323880) kasane: SHIKI_TURN draws=22.4 steps=1406 engine_ms=0.764 total_ms=0.833 frames=30 jit=1/7212 cubic=17.7/0.180 pat=9.0/0.017
+I (324889) kasane: SHIKI_TURN draws=22.0 steps=1393 engine_ms=1.013 total_ms=1.082 frames=30 jit=0/7212 cubic=17.0/0.229 pat=9.0/0.026
+I (325901) kasane: SHIKI_TURN draws=22.0 steps=1392 engine_ms=0.709 total_ms=0.775 frames=30 jit=1/7212 cubic=16.9/0.160 pat=9.0/0.017
+I (326908) kasane: SHIKI_TURN draws=22.6 steps=1415 engine_ms=1.047 total_ms=1.117 frames=30 jit=0/7212 cubic=18.1/0.248 pat=9.0/0.026
