@@ -1,0 +1,8 @@
+# Shiki JIT, SIN inline + direct draw calls, device, 1981e54 (POCKET_SHIKI_JIT_AB build), cycle bench job jit4-cb-1981e54-b
+I (118560) js: CB shiki check check affine128 same model=5f67edad/1 pie=5f67edad/1 jit=5f67edad/1 v1[0]=80/80/80
+I (118887) js: CB shiki draw affine128 vector pie=1 jit cy=6889 us=28.7 steps=215 segs=128
+I (119274) js: CB jit scalar 1/4 same same=200 diff=0 first=-1 none=0 done=86 cy/step interp=72.3 jit=27.2 code=24.3 B/inst
+I (119477) js: CB jit scalar 2/4 same same=200 diff=0 first=-1 none=0 done=94 cy/step interp=84.5 jit=33.4 code=24.4 B/inst
+I (119684) js: CB jit scalar 3/4 same same=200 diff=0 first=-1 none=0 done=103 cy/step interp=82.4 jit=30.2 code=24.3 B/inst
+I (119909) js: CB jit scalar 4/4 same same=200 diff=0 first=-1 none=0 done=100 cy/step interp=83.5 jit=28.5 code=24.9 B/inst
+I (119949) js: CB jit memprot=0 alloc=0x403a8190 diram=1 exec=1 one=same/42 loop=same/43 blocks=16 cy_jit=97 cy_c=1319
