@@ -92,6 +92,9 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
  * budget holds it; 0 (start at pc 0) when there is none. */
 extern bool ksn_shiki_jit_scalar_on;
 extern uint32_t ksn_shiki_jit_budget,ksn_shiki_jit_bytes;
+/* Compiles that did not happen since boot: refused by the compiler, the
+ * budget full, the heap full (the last two are retried). Device only. */
+extern uint32_t ksn_shiki_jit_fail[3];
 /* The bench's: compile now, whatever the heat (the budget still holds). */
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan);
 uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,

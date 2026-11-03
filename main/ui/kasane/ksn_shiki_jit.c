@@ -646,6 +646,7 @@ bool ksn_shiki_jit_enabled=true;
 /* Stage 3's switch and memory (sec.11); defined everywhere so that the
  * session's log can read them, used on the device only. */
 bool ksn_shiki_jit_scalar_on=true;
+uint32_t ksn_shiki_jit_fail[3];
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
@@ -716,18 +717,26 @@ void ksn_shiki_jit_detach(ksn_shiki_plan *plan){
 #define JIT_HEAT 4u
 #define JIT_SCALAR_SCRATCH 4096u
 
-static bool compile_scalar(ksn_shiki_plan *plan){
+/* Why a compile did not happen (ksn_shiki_jit_fail[]): the compiler refused
+ * the plan (never retried), the budget was full, or the heap was (both
+ * retried after JIT_RETRY more draws: a scene's plans come and go). */
+enum { JIT_DONE=-1, JIT_REFUSED, JIT_BUDGET, JIT_NOMEM };
+#define JIT_RETRY 64
+/* The code a plan of n instructions takes at most, for the budget check
+ * that spares a compile when it would not fit (sec.11: ~22-25 B each). */
+#define JIT_GUESS(n) ((uint32_t)(n)*32u+64u)
+
+static int compile_scalar(ksn_shiki_plan *plan){
+    if(ksn_shiki_jit_bytes+JIT_GUESS(plan->count)>ksn_shiki_jit_budget)return JIT_BUDGET;
     uint8_t *tmp=malloc(JIT_SCALAR_SCRATCH);
-    if(!tmp)return false;
+    if(!tmp)return JIT_NOMEM;
     ksn_jit_buf b={tmp,0,JIT_SCALAR_SCRATCH,false};
     size_t entry=0,bytes=0;
-    if(!ksn_shiki_jit_scalar(plan,&b,&entry)||ksn_shiki_jit_bytes+b.len+20u>ksn_shiki_jit_budget){
-        free(tmp);
-        return false;
-    }
+    if(!ksn_shiki_jit_scalar(plan,&b,&entry)){free(tmp);return JIT_REFUSED;}
+    if(ksn_shiki_jit_bytes+b.len+20u>ksn_shiki_jit_budget){free(tmp);return JIT_BUDGET;}
     jit_plan *j=plan->jit;
     const bool fresh=!j;
-    if(fresh&&!(j=calloc(1,sizeof *j))){free(tmp);return false;}
+    if(fresh&&!(j=calloc(1,sizeof *j))){free(tmp);return JIT_NOMEM;}
     /* CUBIC's weights (sec.13); without them the code still works (the
      * helper computes them), so a refusal here is not a failure. */
     size_t rows=0;
@@ -739,18 +748,18 @@ static bool compile_scalar(ksn_shiki_plan *plan){
     }
     uint8_t *x=to_exec(tmp,b.len,&j->sraw,&bytes);
     free(tmp);
-    if(!x){free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return false;}
+    if(!x){free(j->weights);j->weights=NULL;j->wbytes=0;if(fresh)free(j);return JIT_NOMEM;}
     j->scalar=(uint32_t (*)(ksn_jit_run *))(void *)(x+entry);
     j->sbytes=(uint32_t)bytes;
     ksn_shiki_jit_bytes+=(uint32_t)bytes+j->wbytes;
     plan->jit=j;
-    return true;
+    return JIT_DONE;
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
     if(j&&j->scalar)return true;
-    plan->heat=UINT16_MAX;
-    return compile_scalar(plan);
+    plan->heat=INT16_MIN;
+    return compile_scalar(plan)==JIT_DONE;
 }
 uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
                            ksn_shiki_vm *vm,ksn_proc_segment *out){
@@ -760,9 +769,16 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     ksn_shiki_plan *p=(ksn_shiki_plan *)plan;
     const jit_plan *j=p->jit;
     if(!j||!j->scalar){
-        if(p->heat==UINT16_MAX||++p->heat<JIT_HEAT)return 0;
-        p->heat=UINT16_MAX;
-        if(!compile_scalar(p))return 0;
+        /* heat: draws so far; INT16_MIN never again; negative: waiting
+         * to retry after a full budget or heap. */
+        if(p->heat==INT16_MIN||++p->heat<(int16_t)JIT_HEAT)return 0;
+        const int r=compile_scalar(p);
+        if(r!=JIT_DONE){
+            ksn_shiki_jit_fail[r]++;
+            p->heat=r==JIT_REFUSED?INT16_MIN:(int16_t)((int)JIT_HEAT-JIT_RETRY);
+            return 0;
+        }
+        p->heat=INT16_MIN;
         j=p->jit;
     }
     ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
