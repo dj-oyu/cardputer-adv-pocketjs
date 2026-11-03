@@ -31,9 +31,9 @@ static uint32_t rnd(void){st=st*1664525u+1013904223u;return st>>8;}
 
 /* ---- the emulator ---------------------------------------------------------- */
 enum { A_CTX=0x10000000u, A_VM=0x20000000u, A_IN=0x30000000u, A_CODE=0x40000000u, A_LEAF=0x50000000u,
-       A_DRAW=0x60000000u, A_SIN=0x70000000u };
+       A_DRAW=0x60000000u, A_SIN=0x70000000u, A_CURVE=0x58000000u };
 typedef struct {
-    uint32_t ctx[6];
+    uint32_t ctx[7];
     ksn_shiki_vm *vm;
     int32_t *in;
     const uint8_t *code; size_t code_len;
@@ -145,8 +145,9 @@ static uint32_t emulate(emu *e,size_t entry){
         case KSN_JIT_BNEZN: if(a[o[0]])next=pc+4u+(size_t)o[1]; break;
         case KSN_JIT_J: next=pc+4u+(size_t)sext((uint32_t)o[0],18); break;
         case KSN_JIT_CALLX8:
-            if((a[o[0]]!=A_LEAF&&a[o[0]]!=A_DRAW)||a[10]!=A_CTX){fprintf(stderr,"EMU bad call\n");exit(2);}
+            if((a[o[0]]!=A_LEAF&&a[o[0]]!=A_DRAW&&a[o[0]]!=A_CURVE)||a[10]!=A_CTX){fprintf(stderr,"EMU bad call\n");exit(2);}
             if(a[o[0]]==A_LEAF)a[10]=ksn_shiki_jit_leaf(e->run,a[11]);
+            else if(a[o[0]]==A_CURVE)a[10]=ksn_shiki_jit_curve(e->run,(int32_t)a[11],(int32_t)a[12],a[13]);
             else a[10]=ksn_shiki_jit_draw(e->run,(int32_t)a[11],(int32_t)a[12],(int32_t)a[13],a[14]);
             for(unsigned k=8;k<16;k++)if(k!=10)a[k]=0xDEADBEEFu;   /* the callee's */
             sar=rnd();                                               /* not kept either */
@@ -186,8 +187,9 @@ int main(int argc,char **argv){
         for(unsigned k=0;k<plan->inputs&&k<nin;k++)inj[k]=in[k];
         const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
                                (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
-                               ksn_shiki_sin_table,plan,seg_j,index};
-        emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF,A_DRAW,A_SIN},&vj,inj,buf,b.len,&run,0};
+                               ksn_shiki_sin_table,
+                               (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,plan,seg_j,index};
+        emu e={{A_VM,A_IN,KSN_SHIKI_STEPS,A_LEAF,A_DRAW,A_SIN,A_CURVE},&vj,inj,buf,b.len,&run,0};
         const uint32_t r=emulate(&e,entry);
         ksn_shiki_status got;
         if(r>=256u)got=(ksn_shiki_status)(r>>8);
@@ -205,6 +207,9 @@ int main(int argc,char **argv){
     printf("scalar: %u programs (DONE %u INVALID %u LIMIT %u), %u handed back at the limit; "
            "code %.1f B per instruction, largest %u B\n",tried,by[KSN_SHIKI_DONE],by[KSN_SHIKI_INVALID],
            by[KSN_SHIKI_LIMIT],bailed,(double)total_bytes/(double)total_inst,maxlen);
+    /* Both paths count CUBIC / LINE_PATTERN: half of these ran in the code. */
+    printf("scalar: CUBIC %u calls, LINE_PATTERN %u calls (interpreter and code together)\n",
+           (unsigned)ksn_shiki_curve_n[0],(unsigned)ksn_shiki_curve_n[1]);
     free(plan);
     if(fails){printf("SHIKI JIT SCALAR FAIL (%u)\n",fails);return 1;}
     printf("SHIKI JIT SCALAR PASS\n");

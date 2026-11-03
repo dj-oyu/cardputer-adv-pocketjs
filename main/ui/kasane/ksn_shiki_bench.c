@@ -46,6 +46,11 @@ static void affine_consts(asm_t *s){
 }
 static uint32_t next(uint32_t *st){*st=*st*1664525u+1013904223u;return *st>>8;}
 static int rnd2(uint32_t *st){return (int)(next(st)&1u);}
+/* A coordinate (Q16) mostly on or near the screen, sometimes anything. */
+static int32_t pixel(uint32_t *st){
+    if(next(st)%10==0)return (int32_t)(next(st)<<8^next(st));
+    return (int32_t)(((uint32_t)((int32_t)(next(st)%700)-200)<<16)|(next(st)&0xFFFFu));
+}
 
 /* Regions are field planes (spec v1.4 sec.5.1): x of every record, then y,
  * each plane S = records rounded up to 8 long. pair 0 is affine128, 1 the
@@ -378,6 +383,35 @@ static unsigned program(uint32_t *st,uint8_t *body,unsigned *nin){
         case 19: put_inst(p,KSN_SHIKI_LINE,0,ra,rb,0,(uint16_t)next(st)); break;
         case 20: put_inst(p,KSN_SHIKI_PLOT,0,ra,rb,0,(uint16_t)next(st)); break;
         case 21: put_inst(p,rnd2(st)?KSN_SHIKI_LINE_C:KSN_SHIKI_PLOT_C,d,ra,rb,0,0); break;
+        case 23:
+            /* CUBIC or LINE_PATTERN with their register block set first,
+             * mostly in range (pixels, sec.4.7.2's bounds), sometimes not. */
+            if(left>12&&next(st)%3==0){
+                if(rnd2(st)){
+                    const uint8_t base=(uint8_t)(next(st)%(KSN_SHIKI_REGS-7));
+                    for(unsigned k=0;k<8;k++)put_inst(body+12*n++,KSN_SHIKI_SET,(uint8_t)(base+k),0,0,pixel(st),0);
+                    put_inst(body+12*n++,KSN_SHIKI_CUBIC,base,0,0,(int32_t)(1+next(st)%(next(st)%4?12:255)),
+                             (uint16_t)next(st));
+                }else{
+                    const uint8_t base=(uint8_t)(next(st)%(KSN_SHIKI_REGS-KSN_PROC_PATTERN_BLOCK-1));
+                    const uint8_t ex=(uint8_t)(base+KSN_PROC_PATTERN_BLOCK),ey=(uint8_t)(ex+1u<KSN_SHIKI_REGS?ex+1:0);
+                    const int32_t w=next(st)%5?1<<24:1<<25;
+                    const int32_t v[KSN_PROC_PATTERN_BLOCK]={
+                        (int32_t)(next(st)&(next(st)%8?0xFFFFFFu:0xFFFFFFFu)),
+                        (int32_t)(next(st)%65538)-1,
+                        (int32_t)(next(st)%(1u<<30))-(1<<29),(int32_t)(next(st)%(1u<<30))-(1<<29),
+                        (int32_t)(next(st)%(2u*(uint32_t)w+1u))-w,(int32_t)(next(st)%(2u*(uint32_t)w+1u))-w};
+                    for(unsigned k=0;k<KSN_PROC_PATTERN_BLOCK;k++)put_inst(body+12*n++,KSN_SHIKI_SET,(uint8_t)(base+k),0,0,v[k],0);
+                    put_inst(body+12*n++,KSN_SHIKI_SET,ex,0,0,pixel(st),0);
+                    put_inst(body+12*n++,KSN_SHIKI_SET,ey,0,0,pixel(st),0);
+                    if(rnd2(st))put_inst(body+12*n++,KSN_SHIKI_MOVE,0,ey,ex,0,0);
+                    put_inst(body+12*n++,KSN_SHIKI_LINE_PATTERN,base,ex,ey,(int32_t)(1+next(st)%KSN_PROC_PATTERN_BITS),
+                             (uint16_t)next(st));
+                }
+                continue;
+            }
+            put_inst(p,KSN_SHIKI_DRAW_INDEX,d,0,0,0,0);
+            break;
         case 22: put_inst(p,KSN_SHIKI_SIN,d,ra,0,0,0); break;
         default: put_inst(p,KSN_SHIKI_DRAW_INDEX,d,0,0,0,0); break;
         }

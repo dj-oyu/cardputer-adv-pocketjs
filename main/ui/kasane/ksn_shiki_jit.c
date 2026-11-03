@@ -474,6 +474,23 @@ bool ksn_shiki_jit_scalar(const ksn_shiki_plan *plan,ksn_jit_buf *b,size_t *entr
         case KSN_SHIKI_MUL: emit_mul(b,i); break;
         case KSN_SHIKI_SHIFT: emit_shift(b,i); break;
         case KSN_SHIKI_SIN: emit_sin(b,i); break;
+        case KSN_SHIKI_CUBIC: case KSN_SHIKI_LINE_PATTERN: {
+            /* ksn_shiki_jit_curve(ctx, r[a], r[b], pc). */
+            ksn_jit_emit(b,KSN_JIT_MOVN,10,2,0);
+            if(i->op==KSN_SHIKI_LINE_PATTERN){
+                ksn_jit_emit(b,KSN_JIT_L32IN,11,3,i->a);
+                ksn_jit_emit(b,KSN_JIT_L32IN,12,3,i->b);
+            }
+            ksn_jit_emit(b,KSN_JIT_MOVI,13,(int)pc,0);
+            ksn_jit_emit(b,KSN_JIT_L32IN,9,2,6);         /* ctx->curve */
+            ksn_jit_emit(b,KSN_JIT_CALLX8,9,0,0);
+            const size_t go=b->len;
+            ksn_jit_emit(b,KSN_JIT_BEQZN,10,0,0);
+            ksn_jit_emit(b,KSN_JIT_MOVN,2,10,0);
+            ksn_jit_emit(b,KSN_JIT_RETWN,0,0,0);
+            patch(b,go,KSN_JIT_BEQZN,10,(int)(b->len-go-4u),0);
+            break;
+        }
         case KSN_SHIKI_MOVE: case KSN_SHIKI_LINE: case KSN_SHIKI_PLOT:
         case KSN_SHIKI_LINE_C: case KSN_SHIKI_PLOT_C: {
             /* ksn_shiki_jit_draw(ctx, r[a], r[b], colour, kind). */
@@ -686,7 +703,8 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     }
     ksn_jit_run c={vm,in,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,
                    (uint32_t (*)(const void *,int32_t,int32_t,int32_t,uint32_t))ksn_shiki_jit_draw,
-                   ksn_shiki_sin_table,plan,out,index};
+                   ksn_shiki_sin_table,
+                   (uint32_t (*)(const void *,int32_t,int32_t,uint32_t))ksn_shiki_jit_curve,plan,out,index};
     return j->scalar(&c);
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}
