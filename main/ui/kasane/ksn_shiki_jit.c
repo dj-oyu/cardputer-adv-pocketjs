@@ -666,9 +666,8 @@ uint32_t ksn_shiki_jit_evicted;
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
-/* Measurement build (shiki-jit.md sec.15): where executable memory goes.
- * Removed (the define) after the measurement. */
-#define POCKET_SHIKI_JIT_EXECMAP 1
+/* Measurement build (shiki-jit.md sec.15): -DPOCKET_SHIKI_JIT_EXECMAP logs
+ * where executable memory goes (EXECMAP lines). */
 #ifdef POCKET_SHIKI_JIT_EXECMAP
 #include "esp_log.h"
 #include "esp_timer.h"

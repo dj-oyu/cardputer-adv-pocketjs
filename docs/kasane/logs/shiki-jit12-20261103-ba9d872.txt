@@ -1,0 +1,61 @@
+# Where executable memory goes (EXECMAP), and the JIT's code in the Shiki region
+# == 6758888 (EXECMAP only; JIT code from MALLOC_CAP_EXEC), DERBY job em1-derby-1 ==
+I (151940) jit: EXECMAP why=nomem exec_free=3212 exec_largest=768 int_free=24272 int_largest=19456 shiki=0x3fcd9358/49152 jit=6708 got=0/14 fail=0/0/1
+I (151944) jit: EXECMAP heap=0x600fe000-0x600fffe8 rtc exec=1 size=8168 free=812/1 largest=812 used=6912/14 top=0x600ff14c/1536,0x600fe8f0/1152,0x600ff750/960,0x600fe468/576
+I (151947) jit: EXECMAP heap=0x3fce9710-0x3fceee34 diram exec=1 size=22308 free=0/0 largest=0 used=20996/143 top=0x3fceb990/4096,0x3fced8a0/4096,0x3fce9ca0/1024,0x3fcea6e4/768
+I (151950) jit: EXECMAP heap=0x3fcb5170-0x3fce9710 diram exec=1 size=214432 free=2232/38 largest=152 used=205064/1510 top=0x3fcd9358/49152,0x3fcba9e4/32768,0x3fce535c/10752,0x3fcc4c84/5376
+I (151953) jit: EXECMAP heap=0x3fcf0000-0x3fcf8000 dram exec=0 size=32768 free=20968/22 largest=19740 used=10644/82 top=0x3fcf02e4/2048,0x3fcf27f4/368,0x3fcf2fd4/336,0x3fcf24c0/232
+# (got=<DIRAM system heap>/<elsewhere = RTC fast memory>: all 14 JIT allocations in RTC)
+I (170203) jit: EXECMAP why=nomem exec_free=1888 exec_largest=640 int_free=22824 int_largest=18432 shiki=0x3fcd9358/49152 jit=6892 got=0/15 fail=0/0/25
+SHIKI_TURN (WIDE 2, JIT always on) draws=27.6 steps=2975 engine_ms=2.136 total_ms=2.226 frames=30 jit=1/6892 jitfail=0/0/26
+
+# == ba9d872 (JIT code + weights in the Shiki region, reclaim hook), DERBY job em2-derby-1 ==
+# got=<DIRAM system>/<RTC>/<Shiki region>, evict = plans that gave their region blocks back
+I (159175) jit: EXECMAP why=first exec_free=8488 exec_largest=7680 int_free=38180 int_largest=28672 shiki=0x3fcd937c/49152 jit=0 got=0/0/0 evict=0 fail=0/0/0
+I (159184) jit: EXECMAP heap=0x3fcb5180-0x3fce9710 diram exec=1 size=214416 free=632/15 largest=128 used=206724/1514 top=0x3fcd937c/49152,0x3fcba9f4/32768,0x3fce5380/10752,0x3fcc4ccc/5376
+I (159187) jit: EXECMAP heap=0x3fcf0000-0x3fcf8000 dram exec=0 size=32768 free=29684/1 largest=29684 used=2328/3 top=0x3fcf02e4/2048,0x3fcf0b4c/184,0x3fcf0ae8/96,0/0
+-- paddock --
+SHIKI_TURN draws=7.0 steps=398 engine_ms=0.304 total_ms=0.335 frames=30 jit=1/3792 cubic=6.0/0.063 pat=9.0/0.017 jitfail=0/0/0
+-- WIDE 1 / WIDE --
+SHIKI_TURN draws=26.0 steps=2983 engine_ms=1.107 total_ms=1.191 frames=30 jit=1/7180 cubic=0.0/0.000 pat=9.0/0.090 jitfail=0/0/0
+SHIKI_TURN draws=22.0 steps=1245 engine_ms=0.671 total_ms=0.732 frames=30 jit=1/10440 cubic=10.7/0.117 pat=9.0/0.017 jitfail=0/0/0
+SHIKI_TURN draws=22.0 steps=1246 engine_ms=0.573 total_ms=0.634 frames=30 jit=1/10440 cubic=10.7/0.102 pat=9.0/0.017 jitfail=0/0/0
+-- FIELD --
+SHIKI_TURN draws=23.0 steps=1431 engine_ms=0.686 total_ms=0.750 frames=30 jit=1/11280 cubic=19.0/0.183 pat=9.0/0.017 jitfail=0/0/0
+-- WIDE 2 --
+SHIKI_TURN draws=45.1 steps=3135 engine_ms=1.170 total_ms=1.288 frames=30 jit=1/11280 cubic=0.0/0.000 pat=31.5/0.090 jitfail=0/0/0
+SHIKI_TURN draws=49.5 steps=3497 engine_ms=1.324 total_ms=1.452 frames=30 jit=1/11280 cubic=0.3/0.003 pat=40.8/0.126 jitfail=0/0/0
+SHIKI_TURN draws=53.5 steps=3707 engine_ms=1.462 total_ms=1.601 frames=30 jit=1/11280 cubic=2.0/0.022 pat=48.3/0.174 jitfail=0/0/0
+SHIKI_TURN draws=50.8 steps=3567 engine_ms=1.373 total_ms=1.504 frames=30 jit=1/11280 cubic=1.2/0.013 pat=40.5/0.143 jitfail=0/0/0
+-- later cameras: region (2 KB kept) and RTC full, late plans fail (cheaply) --
+I (206742) jit: EXECMAP why=nomem exec_free=2216 exec_largest=256 int_free=20312 int_largest=16384 shiki=0x3fcd937c/49152 jit=11280 got=0/6/21 evict=14 fail=0/0/1
+SHIKI_TURN (VISION) draws=33.0 steps=1877 engine_ms=0.894 total_ms=0.979 frames=30 jit=1/11280 cubic=8.7/0.082 pat=9.0/0.017 jitfail=0/0/4
+I (223775) jit: EXECMAP why=nomem exec_free=1624 exec_largest=256 int_free=19552 int_largest=15872 shiki=0x3fcd937c/49152 jit=11424 got=0/6/22 evict=14 fail=0/0/28
+DERBY FINISH race=1000001 seed=AC78102D order=1,3,6,5,2,4,8,7 ms=60931,60936,60989,61490,62078,62102,62262,62376 margin=NOSE
+
+# == ba9d872, MEGADEMO job em2-mega-1 (JIT always on; jitfail carried over from DERBY = 28, no new failures) ==
+app: MEM free=33588 largest=21504 js=102844 (after load)
+-- NEWS --
+SHIKI_TURN draws=18.0 steps=7782 engine_ms=0.810 total_ms=0.858 frames=30 jit=1/3120 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=18.0 steps=7783 engine_ms=0.809 total_ms=0.856 frames=30 jit=1/3120 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=18.0 steps=7772 engine_ms=0.800 total_ms=0.848 frames=30 jit=1/3120 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/28
+-- TWIST --
+SHIKI_TURN draws=7.0 steps=6574 engine_ms=0.999 total_ms=1.039 frames=30 jit=1/6448 cubic=23.0/0.333 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=7.0 steps=6574 engine_ms=0.998 total_ms=1.039 frames=30 jit=1/6448 cubic=23.0/0.331 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=6.8 steps=6355 engine_ms=0.965 total_ms=1.004 frames=30 jit=1/6448 cubic=22.2/0.320 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=7.0 steps=6574 engine_ms=2.039 total_ms=2.079 frames=30 jit=1/12960 cubic=23.0/0.347 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=7.0 steps=6574 engine_ms=1.523 total_ms=1.563 frames=30 jit=1/12960 cubic=23.0/0.337 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=9.0 steps=7689 engine_ms=1.691 total_ms=1.737 frames=30 jit=1/14332 cubic=23.0/0.339 pat=0.0/0.000 jitfail=0/0/28
+-- ZENITH --
+SHIKI_TURN draws=10.3 steps=6210 engine_ms=0.787 total_ms=0.829 frames=30 jit=1/7504 cubic=1.3/0.036 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=10.8 steps=6263 engine_ms=0.764 total_ms=0.807 frames=30 jit=1/7948 cubic=1.2/0.033 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=12.1 steps=6784 engine_ms=0.788 total_ms=0.833 frames=30 jit=1/8836 cubic=1.1/0.029 pat=0.0/0.000 jitfail=0/0/28
+-- CORE --
+SHIKI_TURN draws=47.1 steps=3577 engine_ms=0.854 total_ms=0.952 frames=30 jit=1/3104 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=22.8 steps=2641 engine_ms=0.466 total_ms=0.524 frames=30 jit=1/3104 cubic=0.0/0.000 pat=0.0/0.000 jitfail=0/0/28
+
+# == ba9d872, BIG WAVE job em2-bigwave-1 (title, 60 s; no registration failure, no new jitfail) ==
+I (439628) js: BIGWAVE READY plans=6 tone=true
+app: MEM free=70428 largest=30720 js=71836 (after load)
+SHIKI_TURN draws=9.0 steps=2704 engine_ms=0.706 total_ms=0.742 frames=30 jit=1/6528 cubic=31.1/0.347 pat=0.0/0.000 jitfail=0/0/28
+SHIKI_TURN draws=7.0 steps=2617 engine_ms=0.673 total_ms=0.706 frames=30 jit=1/6528 cubic=30.1/0.334 pat=0.0/0.000 jitfail=0/0/28
