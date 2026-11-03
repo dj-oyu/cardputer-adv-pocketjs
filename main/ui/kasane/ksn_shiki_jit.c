@@ -311,8 +311,12 @@ static void emit_l32r(ksn_jit_buf *b,unsigned t,size_t literal){
  * [15:0] the draw it is sampled next (low 16 bits), [20:16] the most bits
  * its samples used, [30:21] the rest length in draws. */
 #define SAT_NEAR 3u                 /* within this many bits of INT32_MAX: checked for good */
+#define SAT_ROOM_FINAL 6u           /* this much room after the first logs: settled at once */
 #define SAT_REST_MIN 16u
 #define SAT_REST_MAX 1023u
+/* A rest this long means settled (sec.18.5): three samples without growth
+ * (16, 32, 64, 128), or SAT_ROOM_FINAL bits of room at the first look. */
+#define SAT_FINAL 128u
 static uint32_t sat_pack(uint32_t next,unsigned env,unsigned len){
     return (next&0xFFFFu)|(uint32_t)env<<16|(uint32_t)len<<21;
 }
@@ -321,6 +325,7 @@ uint32_t ksn_shiki_jit_sat_first(uint32_t sample,uint32_t draws){
     if(sample&JIT_SLOT_NEVER)return KSN_JIT_SAT_LOG;
     const unsigned used=sat_bits(sample);
     if(used>=31u-SAT_NEAR)return KSN_JIT_SAT_FAST;
+    if(used<=31u-SAT_ROOM_FINAL)return sat_pack(draws+SAT_FINAL,used,SAT_FINAL);   /* settled at once */
     return sat_pack(draws+SAT_REST_MIN,used,SAT_REST_MIN);
 }
 uint32_t ksn_shiki_jit_sat_next(uint32_t rest,uint32_t sample,uint32_t draws){
@@ -1512,7 +1517,6 @@ static void sat_restore(const ksn_shiki_plan *plan,jit_plan *j){
  * others (checked for good, or never run) with the inline check. The
  * decision is kept by content (sat_cache_put) for the plan's later
  * registrations. Values are risk, not proof (shiki-jit.md sec.18). */
-#define SAT_FINAL 128u
 static bool sat_ready(jit_plan *j){
     if(j->sat!=JIT_SAT_LIVE||!j->sites)return false;
     for(unsigned k=0;k<j->nsites;k++)

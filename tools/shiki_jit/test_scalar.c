@@ -259,20 +259,21 @@ static unsigned sched_fails(void){
     EXPECT(ksn_shiki_jit_sat_first(N,16)==KSN_JIT_SAT_LOG);                 /* never ran */
     EXPECT(ksn_shiki_jit_sat_first(0x0FFFFFFFu,16)==KSN_JIT_SAT_FAST);       /* 28 bits: within 3 of the top */
     EXPECT(ksn_shiki_jit_sat_first(0x7FFFFFFFu,16)==KSN_JIT_SAT_FAST);       /* saturated */
-    const uint32_t r=ksn_shiki_jit_sat_first(0x00FFFFFFu,16);                /* 24 bits: rest 16 */
-    EXPECT((r&0xFFFFu)==32u&&(r>>16&31u)==24u&&(r>>21&1023u)==16u);
-    const uint32_t r2=ksn_shiki_jit_sat_next(r,0x00800000u,32);              /* no growth: twice */
-    EXPECT((r2&0xFFFFu)==64u&&(r2>>16&31u)==24u&&(r2>>21&1023u)==32u);
-    const uint32_t r3=ksn_shiki_jit_sat_next(r2,0x01FFFFFFu,64);             /* +1 bit: 32*(31-3-25)/2 = 48 */
-    EXPECT((r3>>16&31u)==25u&&(r3>>21&1023u)==48u&&(r3&0xFFFFu)==112u);
-    EXPECT(ksn_shiki_jit_sat_next(r3,0x07FFFFFFu,112)==KSN_JIT_SAT_FAST);  /* +2 bits: 48*(31-3-27)/4 = 12 < 16 */
-    EXPECT(ksn_shiki_jit_sat_next(r3,0x0FFFFFFFu,112)==KSN_JIT_SAT_FAST);  /* 28 bits */
-    const uint32_t r4=ksn_shiki_jit_sat_next(r3,N,112);                      /* not reached: soon again */
-    EXPECT((r4&0xFFFFu)==116u&&(r4>>21&1023u)==48u);
+    const uint32_t f=ksn_shiki_jit_sat_first(0x01FFFFFFu,16);                /* 25 bits: 6 of room, settled */
+    EXPECT((f>>21&1023u)==128u&&(f>>16&31u)==25u);
+    const uint32_t r=ksn_shiki_jit_sat_first(0x03FFFFFFu,16);                /* 26 bits: rest 16 */
+    EXPECT((r&0xFFFFu)==32u&&(r>>16&31u)==26u&&(r>>21&1023u)==16u);
+    const uint32_t r2=ksn_shiki_jit_sat_next(r,0x02000000u,32);              /* no growth: twice */
+    EXPECT((r2&0xFFFFu)==64u&&(r2>>16&31u)==26u&&(r2>>21&1023u)==32u);
+    const uint32_t r3=ksn_shiki_jit_sat_next(r2,0x04000000u,64);             /* +1 bit: 32*(31-3-27)/2 = 16 */
+    EXPECT((r3>>16&31u)==27u&&(r3>>21&1023u)==16u&&(r3&0xFFFFu)==80u);
+    EXPECT(ksn_shiki_jit_sat_next(r3,0x08000000u,80)==KSN_JIT_SAT_FAST);   /* 28 bits */
+    const uint32_t r4=ksn_shiki_jit_sat_next(r3,N,80);                       /* not reached: soon again */
+    EXPECT((r4&0xFFFFu)==84u&&(r4>>21&1023u)==16u);
     uint32_t w=r;                                                             /* doubling stops at the cap */
-    for(unsigned k=0;k<12;k++)w=ksn_shiki_jit_sat_next(w,0x00800000u,1000u+k);
+    for(unsigned k=0;k<12;k++)w=ksn_shiki_jit_sat_next(w,0x02000000u,1000u+k);
     EXPECT((w>>21&1023u)==1023u);
-    EXPECT(((ksn_shiki_jit_sat_next(r,0x00800000u,0xFFF0u)&0xFFFFu)==((0xFFF0u+32u)&0xFFFFu)));  /* wraps in 16 bits */
+    EXPECT(((ksn_shiki_jit_sat_next(r,0x02000000u,0xFFF0u)&0xFFFFu)==((0xFFF0u+32u)&0xFFFFu)));  /* wraps in 16 bits */
 #undef EXPECT
     return bad;
 }
