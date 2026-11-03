@@ -281,10 +281,10 @@ int main(int argc,char **argv){
     static uint8_t buf[8192],cbuf[8192],pbuf[8192];
     ksn_shiki_plan *plan=calloc(1,KSN_SHIKI_PLAN_MAX);
     unsigned fails=0,by[5]={0},tried=0,maxlen=0,sites_all=0,sites_plain=0,sites_never=0,sites_fast=0;
-    unsigned long total_bytes=0,total_inst=0,chk_bytes=0,plain_bytes=0;
+    unsigned long total_bytes=0,total_inst=0,chk_bytes=0,plain_bytes=0,final_bytes=0;
     const unsigned trials=argc>1?(unsigned)atoi(argv[1]):20000;
     uint32_t gen=1;
-    static const char *const MODE[]={"inline","checker","patched","plain"};
+    static const char *const MODE[]={"inline","checker","patched","plain","final"};
     for(unsigned t=0;t<trials;t++){
         static ksn_shiki_bench_case c;
         int32_t in[KSN_SHIKI_INPUTS];
@@ -341,6 +341,14 @@ int main(int argc,char **argv){
                 if(!plen){fails++;continue;}
                 plain_bytes+=plen;
                 if(!agrees(plan,pbuf,plen,pentry,in,nin,index,t,want,&got))bad=3;
+                else{
+                    /* sec.18.5, final: no checker, the cleared sites plain
+                     * and the rest with the inline check. */
+                    const size_t flen=compile(plan,pbuf,sizeof pbuf,false,plain,&pentry,NULL,NULL,t);
+                    if(!flen){fails++;continue;}
+                    final_bytes+=flen;
+                    if(!agrees(plan,pbuf,flen,pentry,in,nin,index,t,want,&got))bad=4;
+                }
             }
         }
         if(bad>=0&&fails++<10)
@@ -351,9 +359,9 @@ int main(int argc,char **argv){
            "code %.1f B per instruction, largest %u B\n",tried,by[KSN_SHIKI_DONE],by[KSN_SHIKI_INVALID],
            by[KSN_SHIKI_LIMIT],bailed,(double)total_bytes/(double)total_inst,maxlen);
     printf("scalar sec.18: checker %.1f B per instruction (inline %.1f), %u checker calls; of %u sites "
-           "%u patched out, %u to the fast entry, %u never run; with them plain %.1f B per instruction\n",
+           "%u patched out, %u to the fast entry, %u never run; with them plain %.1f B per instruction, final %.1f\n",
            (double)chk_bytes/(double)total_inst,(double)total_bytes/(double)total_inst,checks,sites_all,
-           sites_plain,sites_fast,sites_never,(double)plain_bytes/(double)total_inst);
+           sites_plain,sites_fast,sites_never,(double)plain_bytes/(double)total_inst,(double)final_bytes/(double)total_inst);
     /* Both paths count CUBIC / LINE_PATTERN: half of these ran in the code. */
     printf("scalar: CUBIC %u calls, LINE_PATTERN %u calls (interpreter and code together)\n",
            (unsigned)ksn_shiki_curve_n[0],(unsigned)ksn_shiki_curve_n[1]);

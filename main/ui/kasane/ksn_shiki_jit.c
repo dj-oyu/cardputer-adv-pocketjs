@@ -759,7 +759,7 @@ uint32_t ksn_shiki_jit_evicted;
 uint32_t ksn_shiki_jit_cold;
 /* Compiles attempted and their cycles (sec.17), for the session's log. */
 uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
-uint32_t ksn_shiki_jit_sat[4];
+uint32_t ksn_shiki_jit_sat[5];
 uint32_t ksn_shiki_jit_budget=16384u,ksn_shiki_jit_bytes;
 
 #if KSN_JIT_DEVICE
@@ -937,6 +937,11 @@ typedef struct {
      * sites are SUB. */
     uint8_t sat,nsites;
     bool saved;
+    /* sec.18.5: final, the sites are settled for good and the code is
+     * compiled without the checker: plain sites with no check at all, the
+     * rest with the inline one. */
+    bool final;
+    uint64_t plain;
     uint32_t draws,due;
     int32_t alias;                /* the code's data-bus address minus its instruction-bus one */
     uint8_t *sdata;               /* the code's start on the data bus */
@@ -1143,8 +1148,44 @@ static bool in_diram(const uint8_t *p,size_t n){
 /* sec.18: how a plan's ADD/SUB sites are emitted: through the shared
  * checker when the code will run on DIRAM (org: its instruction-bus
  * address; elsewhere call0 does not reach the checker), else inline. */
-static void sat_mode(const jit_plan *j,ksn_jit_buf *b,uint32_t org,bool checker){
-    (void)j;
+/* FNV-1a of the plan's instructions: the same function with the same
+ * arguments, whichever registration (DERBY registers a scene's plans
+ * again at each scene). */
+static uint32_t plan_fnv(const ksn_shiki_plan *plan){
+    uint32_t h=2166136261u;
+    const uint8_t *q=(const uint8_t *)plan->code;
+    for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)h=(h^q[k])*16777619u;
+    return h;
+}
+/* sec.18.5: final decisions by plan content, so a plan registered again
+ * starts final. A ring of JIT_FINAL_CACHE (12 bytes each), taken on the
+ * first decision. */
+#define JIT_FINAL_CACHE 48u
+typedef struct { uint32_t fnv; uint64_t plain; } __attribute__((packed)) sat_final_entry;
+static sat_final_entry *sat_cache;
+static unsigned sat_cache_n,sat_cache_next;
+static void sat_cache_put(uint32_t fnv,uint64_t plain){
+    if(!sat_cache&&!(sat_cache=malloc(JIT_FINAL_CACHE*sizeof *sat_cache)))return;
+    for(unsigned k=0;k<sat_cache_n;k++)if(sat_cache[k].fnv==fnv){sat_cache[k].plain=plain;return;}
+    sat_cache[sat_cache_next]=(sat_final_entry){fnv,plain};
+    sat_cache_next=(sat_cache_next+1u)%JIT_FINAL_CACHE;
+    if(sat_cache_n<JIT_FINAL_CACHE)sat_cache_n++;
+}
+static bool sat_final(const ksn_shiki_plan *plan,jit_plan *j,uint64_t *plain){
+    if(j&&j->final){*plain=j->plain;return true;}
+    if(!sat_cache_n)return false;
+    const uint32_t fnv=plan_fnv(plan);
+    for(unsigned k=0;k<sat_cache_n;k++)
+        if(sat_cache[k].fnv==fnv){
+            *plain=sat_cache[k].plain;
+            if(j){j->final=true;j->plain=*plain;}
+            return true;
+        }
+    return false;
+}
+static void sat_mode(const ksn_shiki_plan *plan,jit_plan *j,ksn_jit_buf *b,uint32_t org,bool checker){
+    uint64_t plain;
+    if(sat_final(plan,j,&plain)){b->plain=plain;return;}      /* sec.18.5 */
     if(!checker)return;
     b->org=org;
     b->chk_add=(uint32_t)(uintptr_t)ksn_jit_chk_add;
@@ -1163,7 +1204,7 @@ static int compile_in_region(ksn_shiki_plan *plan){
     const bool fresh=!j;
     if(fresh&&!(j=calloc(1,sizeof *j))){shiki_heap_free(d);return -2;}
     ksn_jit_buf e={d,0,guess,false,false,0,0,0,0,NULL,0};
-    sat_mode(j,&e,(uint32_t)(uintptr_t)esp_ptr_diram_dram_to_iram(d),true);
+    sat_mode(plan,j,&e,(uint32_t)(uintptr_t)esp_ptr_diram_dram_to_iram(d),true);
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry)){
         shiki_heap_free(d);
@@ -1200,7 +1241,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     const int r=compile_in_region(plan);
     if(r!=-2)return r;
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
-    sat_mode(plan->jit,&b,0,true);                /* sized for DIRAM: the shared checker */
+    sat_mode(plan,plan->jit,&b,0,true);                /* sized for DIRAM: the shared checker */
     size_t entry=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return JIT_REFUSED;
     size_t need=b.len;
@@ -1245,7 +1286,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
          * the code there has the inline checks, which are longer: the block
          * is taken again at that length. */
         ksn_jit_buf c={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
-        sat_mode(j,&c,0,false);
+        sat_mode(plan,j,&c,0,false);
         if(!ksn_shiki_jit_scalar(plan,&c,&entry)){drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;}
         need=c.len;
         if(need>len){
@@ -1267,7 +1308,7 @@ static int compile_scalar(ksn_shiki_plan *plan){
     if(!w)w=diram?(uint8_t *)esp_ptr_diram_iram_to_dram(x):x;
     for(size_t k=0;k<len/4;k++)((volatile uint32_t *)(void *)w)[k]=0;
     ksn_jit_buf e={w,0,need,false,!diram,0,0,0,0,NULL,0};
-    sat_mode(j,&e,(uint32_t)(uintptr_t)x,diram&&b.chk_add);
+    sat_mode(plan,j,&e,(uint32_t)(uintptr_t)x,diram&&b.chk_add);
     size_t entry2=0;
     if(!ksn_shiki_jit_scalar(plan,&e,&entry2)||e.len!=need||entry2!=entry){
         drop_scalar(j);if(fresh)free(j);return JIT_REFUSED;
@@ -1338,7 +1379,7 @@ static void sat_due(jit_plan *j){
 static void sat_first(const ksn_shiki_plan *plan,jit_plan *j){
     uint16_t sites[KSN_SHIKI_CODE];
     ksn_jit_buf b={NULL,0,JIT_SCALAR_SCRATCH,false,false,0,0,0,0,NULL,0};
-    sat_mode(j,&b,0,true);
+    sat_mode(plan,j,&b,0,true);
     b.sites=sites;
     size_t entry=0;
     j->sat=JIT_SAT_NONE;
@@ -1380,9 +1421,7 @@ static void sat_first(const ksn_shiki_plan *plan,jit_plan *j){
     __asm__ volatile("memw\n" "isync\n":::"memory");
     j->sat=JIT_SAT_LIVE;
     sat_due(j);
-    uint32_t fnv=2166136261u;
-    const uint8_t *q=(const uint8_t *)plan->code;
-    for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)fnv=(fnv^q[k])*16777619u;
+    const uint32_t fnv=plan_fnv(plan);
     ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u rest=%u fast=%u never=%u bits=%s",
              (unsigned)fnv,(unsigned)plan->count,rest,fast,never,bits);
 }
@@ -1413,9 +1452,7 @@ static void sat_sample_end(const ksn_shiki_plan *plan,jit_plan *j,const uint32_t
             r=ksn_shiki_jit_sat_next(stash[k],w,j->draws);
             if(r==KSN_JIT_SAT_FAST){
                 ksn_shiki_jit_sat[3]++;
-                uint32_t fnv=2166136261u;
-                const uint8_t *q=(const uint8_t *)plan->code;
-                for(size_t i=0;i<plan->count*sizeof plan->code[0];i++)fnv=(fnv^q[i])*16777619u;
+                const uint32_t fnv=plan_fnv(plan);
                 ESP_LOGI("kasane","SHIKI_SAT fnv=%08x site=%u back env=%u used=%u len=%u draw=%u",(unsigned)fnv,k,
                          (unsigned)(stash[k]>>16&31u),sat_bits(w&~JIT_SLOT_NEVER),(unsigned)(stash[k]>>21&1023u),
                          (unsigned)j->draws);
@@ -1464,11 +1501,36 @@ static void sat_restore(const ksn_shiki_plan *plan,jit_plan *j){
     __asm__ volatile("memw\n" "isync\n":::"memory");
     j->sat=JIT_SAT_LIVE;
     sat_due(j);
-    uint32_t fnv=2166136261u;
-    const uint8_t *q=(const uint8_t *)plan->code;
-    for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)fnv=(fnv^q[k])*16777619u;
+    const uint32_t fnv=plan_fnv(plan);
     ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u taken up rest=%u fast=%u log=%u",(unsigned)fnv,
              (unsigned)plan->count,rest,fast,logs);
+}
+/* sec.18.5: the watch ends. A site whose rest has grown to SAT_FINAL draws
+ * (three samples in a row without growth: 16, 32, 64, 128) is settled with
+ * no check; once every resting site of a plan is, its code is compiled
+ * again without the checker: settled sites plain (8 B, no check), the
+ * others (checked for good, or never run) with the inline check. The
+ * decision is kept by content (sat_cache_put) for the plan's later
+ * registrations. Values are risk, not proof (shiki-jit.md sec.18). */
+#define SAT_FINAL 128u
+static bool sat_ready(jit_plan *j){
+    if(j->sat!=JIT_SAT_LIVE||!j->sites)return false;
+    for(unsigned k=0;k<j->nsites;k++)
+        if(sat_kind(j,k)==0&&(*sat_slot(j,k)>>21&1023u)<SAT_FINAL)return false;
+    return true;
+}
+static void sat_finalize(ksn_shiki_plan *plan,jit_plan *j){
+    uint64_t plain=0;
+    for(unsigned k=0;k<j->nsites&&k<64u;k++)if(sat_kind(j,k)==0)plain|=1ull<<k;
+    const uint32_t fnv=plan_fnv(plan);
+    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u final plain=%u of %u draw=%u",(unsigned)fnv,(unsigned)plan->count,
+             (unsigned)__builtin_popcountll(plain),(unsigned)j->nsites,(unsigned)j->draws);
+    sat_cache_put(fnv,plain);
+    drop_scalar(j);
+    j->final=true;
+    j->plain=plain;
+    ksn_shiki_jit_sat[4]++;
+    plan->heat=(int8_t)(JIT_HEAT-1u);                  /* compiled again on its next draw */
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
@@ -1521,6 +1583,8 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
     jm->draws++;
     if(jm->sat==JIT_SAT_LOG&&jm->draws==JIT_SAT_EARLY)sat_first(p,jm);
     else if(look)sat_sample_end(p,jm,stash,sampled);
+    else return r;
+    if(sat_ready(jm))sat_finalize(p,jm);
     return r;
 }
 static int16_t jit_sat16(int32_t v){return v>32767?32767:v<-32768?-32768:(int16_t)v;}

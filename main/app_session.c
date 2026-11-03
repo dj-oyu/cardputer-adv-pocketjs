@@ -2648,7 +2648,7 @@ static esp_err_t present_frame(void) {
                     for(unsigned k=0;k<2;k++){curve_n[k]=ksn_shiki_curve_n[k];curve_cy[k]=ksn_shiki_curve_cy[k];}
                     if(st.draws)
                         ESP_LOGI("kasane","SHIKI_TURN draws=%.1f steps=%.0f engine_ms=%.3f total_ms=%.3f frames=%u jit=%d/%u"
-                                 " cubic=%.1f/%.3f pat=%.1f/%.3f jitfail=%u/%u/%u jitdrop=%u/%u jitcc=%u/%.3f sat=%u/%u/%u/%u",
+                                 " cubic=%.1f/%.3f pat=%.1f/%.3f jitfail=%u/%u/%u jitdrop=%u/%u jitcc=%u/%.3f sat=%u/%u/%u/%u/%u",
                                  st.draws/(double)painted,st.steps/(double)painted,
                                  st.engine_cy/240000.0/painted,st.total_cy/240000.0/painted,painted,
                                  ksn_shiki_jit_scalar_on?1:0,(unsigned)ksn_shiki_jit_bytes,
@@ -2657,7 +2657,7 @@ static esp_err_t present_frame(void) {
                                  (unsigned)ksn_shiki_jit_evicted,(unsigned)ksn_shiki_jit_cold,
                                  (unsigned)ccn,cccy/240000.0/painted,(unsigned)ksn_shiki_jit_sat[0],
                                  (unsigned)ksn_shiki_jit_sat[1],(unsigned)ksn_shiki_jit_sat[2],
-                                 (unsigned)ksn_shiki_jit_sat[3]);
+                                 (unsigned)ksn_shiki_jit_sat[3],(unsigned)ksn_shiki_jit_sat[4]);
 #ifdef POCKET_SHIKI_JIT_AB
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif

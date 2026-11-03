@@ -115,8 +115,8 @@ extern uint32_t ksn_shiki_jit_cold;
 extern uint32_t ksn_shiki_jit_compiles,ksn_shiki_jit_compile_cy;
 /* sec.18 since boot: ADD/SUB sites put to rest (check out) [0], checked
  * for good [1], site samples taken [2], rests ended by a sample (back to
- * the check for good) [3]. */
-extern uint32_t ksn_shiki_jit_sat[4];
+ * the check for good) [3], plans compiled final without the checker [4]. */
+extern uint32_t ksn_shiki_jit_sat[5];
 /* sec.18.3, portable so the host can check it: the schedule of a site out
  * of its check. first: from the slot after the logged draws, the slot's
  * rest word, or KSN_JIT_SAT_FAST (keep the check, no log) or
