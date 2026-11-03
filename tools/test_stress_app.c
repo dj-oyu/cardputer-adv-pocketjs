@@ -11,6 +11,8 @@
 #include "pocket_kasane.h"
 #include "pocket_memory.h"
 #include "pocket_av.h"
+#include "shiki_heap.h"
+#include "pocket_shiki_api.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
@@ -76,6 +78,9 @@ static unsigned bad_command_count,bad_native;
 static unsigned pressure_events, pressure_trims;
 static unsigned reads_started,reads_finished,reads_at_first_oom,unhandled_rejections;
 static unsigned dispatch_faults,reads_at_dispatch_fault,bad_fault_reads;
+/* The retained HUD over the Shiki frame (stress.js scene()): the image, two
+ * titles, the level, the panel and its border, the meter, two status lines. */
+#define STRESS_COMMANDS 9u
 
 static JSValue js_read_started(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
     (void)c;(void)self;(void)argc;(void)argv; reads_started++; return JS_UNDEFINED;
@@ -113,7 +118,7 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
     else if(!strncmp(s,"STRESS_FAIL",11)) { lines_fail++; printf("  %s\n",s); }
     else if(!strncmp(s,"STRESS f=",9)) {
         unsigned commands=0;const char *field=strstr(s," cmds=");
-        if(!field||sscanf(field," cmds=%u",&commands)!=1||commands!=75)bad_command_count++;
+        if(!field||sscanf(field," cmds=%u",&commands)!=1||commands!=STRESS_COMMANDS)bad_command_count++;
         field=strstr(s," pe=");if(field)sscanf(field," pe=%u",&pressure_events);
         field=strstr(s," trim=");if(field)sscanf(field," trim=%u",&pressure_trims);
         lines_stat++;if(lines_stat%5==1)printf("  %s\n",s);
@@ -186,6 +191,9 @@ int main(int argc,char **argv) {
     if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
     host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
+    /* The manifest names kasane.shiki: the session takes the Shiki heap
+     * before the guest (app_session.c), and kasane then has shiki. */
+    if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
     pocket_kasane_install(ctx,NULL);
     pocket_memory_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
@@ -273,7 +281,8 @@ int main(int argc,char **argv) {
               !unhandled_rejections&&
               (!inject_dispatch_fault||(dispatch_faults==1&&!bad_fault_reads&&
                                         reads_started>reads_at_dispatch_fault));
-    pocket_memory_reset();pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
+    pocket_memory_reset();pocket_shiki_api_reset();pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
+    shiki_heap_end();
     printf("%s\n",pass?"STRESS_HOST PASS":"STRESS_HOST FAIL");
     return pass?0:1;
 }

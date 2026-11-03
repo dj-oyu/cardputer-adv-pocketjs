@@ -1,7 +1,13 @@
 # STRESS TEST（`apps/stress/stress.js`）
 
-ゲストのヒープと Kasane の描画に同時に負荷をかける試験用アプリ。見た目は vaporwave の海
+ゲストのヒープと描画に同時に負荷をかける試験用アプリ。見た目は vaporwave の海
 （縞の夕日、ピンクの透視グリッド、魚群、跳ねるイルカ、泡）。メニューの最後の行（index 7）。
+
+**2026-11-03 に描画を Shiki に移した。** それまでは Kasane の保持シーン（75 コマンド、キャッシュの
+テンプレートとインスタンス、半透明の図形）で海を描いていた。いまは海の全体を `pocket.kasane.shiki` の
+組み込みの式 6 本（`stress_prog.js`）が毎フレーム描き、式は実機では JIT の対象になる
+（[docs/kasane/shiki-jit.md](../../docs/kasane/shiki-jit.md)）。保持シーンは Shiki の画面（`tx.image`）と
+その上の HUD（題字・段階・状態の 2 行・メーター）の 9 コマンドだけ。下の「実測」以降の節は、移す前の版の記録。
 
 ## 何をするか
 
@@ -11,31 +17,41 @@
   - Enter で段階を回す: LV1 15 個 → LV2 35 個 → LV3 上限なし。
   - LV3 は実際に確保失敗まで積み、捕まえてすべて捨て、また積む（`STRESS_OOM`）。確保失敗は
     `app_session.c` がログに残すだけで、アプリは続く。途中で失敗した `replace` は参照をすべて古くするので、
-    失敗したフレームの次はシーンを作り直す。
+    失敗したフレームの次はシーンを作り直す。途中で失敗した Shiki のフレームは、次の `beginFrame` が捨て直す。
   - `pocket.memory.onPressure` はレベル・原因を購読する。LV3 では割り当て失敗 bit の通知時に
     保持プールを破棄する。初回 OOM を意図的に残し、通知 callback 内ではログや追加配列を作らない。
 - **ネイティブの `Uint8Array`**（F3b の実機確認、`docs/vm/builtin-floor-plan.md` §17.3）: 2 フレームに 1 回
   `assets:/hello.js` を 1 KB ずつ `pocket.fs` で読む。読んだ塊もメモリの負荷に入る。最初の塊で、JS がまだ
   グローバルの `Uint8Array` を読んでいない状態から、ネイティブが作ったものの `prototype`・`constructor` が
   グローバルと一致するかを確かめる（`STRESS_NATIVE ok|NG`）。
-- **描画**: 75 コマンド（上限 80）。魚群 2 群（キャッシュの 1 テンプレート × 2 インスタンス、1 群 9 匹）、
-  イルカ 2 頭、泡 8 個、透視グリッド 4 本、縞の夕日、文字。1 回の patch で参照 20 個を更新する（上限 32）。
-  120 フレームごとに `replace` でシーンを作り直し、その同じトランザクションで現在位置へ更新する。
+- **描画**: 1 フレームに `drawMany` 1 回で 11 回の draw（空と海の帯 4、夕日、グリッド、魚群 2、イルカ 2、泡）。
+  画面の全行を Shiki の線で塗る（1 回の draw のラスタの上限 8,192 で、240 px の行は 34 行まで。だから帯が 4 本）。
+  段階は描画の量を変えない（ヒープの段階だけを比べるため）。120 フレームごとに HUD を `replace` で作り直す。
 
-## Kasane の制約（作りながら踏んだもの）
+## Shiki の式（`stress_prog.js`）
 
-- `replace` は `tx.background()` が無いと `INVALID_ARGUMENT` で断る。作成時は理由が出なかったが、
-  Kasane側で背景要件を示すエラーメッセージを追加した。
-- 角丸の半径は 8 まで（形状の幅・高さの半分以下も必要）。大きな円は描けないので、夕日は横縞の
-  矩形で作っている。Kasane側で半径不正を示すエラーメッセージを追加した。
-- キャッシュのコマンドは **同じ Kasane ホスト内の全テンプレート合計で 48**。インスタンスごとにテンプレートの
-  コマンド数をシーンの 80 から使う。group opacity 用の追加コマンドは使わない。
-- 作ったときの `bounds` が既定の `clip` になる。`setRect` で動かす図形は `clip` を明示しないと、元の位置と
-  重なる部分しか描かれない（グリッドと泡は `clip: SEA`）。
+| 式 | 入力 | データ領域 | 描くもの |
+| --- | --- | --- | --- |
+| `sky` | 開始行・行数 | `ramp`（`u16`、135 行の色） | 全幅の横線。行の色を表から引く（`LOOKUP`） |
+| `sun` | なし | `rows`（`u16`、行・半幅・色） | 夕日の縞。円の弦の半幅は JS が起動時に一度だけ計算する |
+| `grid` | 奥行きの位相 | なし | 横線 5 本（`y = 62 + q²/50`）と、消失点 (120, 61) からの放射 9 本 |
+| `fish` | 群の位置 | `school`（`u16`、位置・色） | 1 群 9 匹。胴の三角と尾 |
+| `dolphin` | 位置 | `shape`（`i16`、輪郭の点） | 輪郭の折れ線と腹の線 |
+| `bubbles` | なし | `ring`（`i16`、位置・半径） | 8 角形の輪。位置は JS が毎フレーム窓に書く |
 
-80コマンドは現行FWの固定RAM予算で、Cardputerの描画ハードウェア上限と断定できない。円・線・
-多数の粒子を少数コマンドで描く手段は未実装。clip既定値の変更やbatch primitive追加は既存画面の
-画素・RAM・描画時間への影響を測ってから判断する。
+- 消失点・水平線（y 60）・夕日の中心（x 176）は `stress_prog.js` と `stress.js` の両方に書いた定数で、同じ値を保つ。
+- 色は RGB565 で、JS が起動時に `rgb()` で変える。Shiki の線に透明度は無いので、旧版の半透明（魚群・泡）は不透明になった。
+- 式は組み込みの表（`stress.<name>`）。`stress_prog.js` の `@shiki` 関数をビルドが flash の表にし、チャンクからは消す（`chunks.txt` の `prog`。アプリは読み込まない）。
+- Shiki の区画は既定の 48 KiB（マニフェストは `kasane.shiki` を required に挙げる。Shiki が無いと描けないため）。host の使用量は 27,360 B（フレーム 2 枚・式・領域）。実機では同じ区画に JIT のコードが加わる（未測定）。
+
+## Kasane の制約（旧版で踏んだもの）
+
+旧版（保持シーンだけで海を描いた版）で踏んだ制約。Kasane のエラーメッセージの改善はこの経験から入った。
+
+- `replace` は `tx.background()` が無いと `INVALID_ARGUMENT` で断る。
+- 角丸の半径は 8 まで（形状の幅・高さの半分以下も必要）。
+- キャッシュのコマンドは同じ Kasane ホスト内の全テンプレート合計で 48。インスタンスごとにテンプレートのコマンド数をシーンの 80 から使う。
+- 作ったときの `bounds` が既定の `clip` になる。`setRect` で動かす図形は `clip` を明示しないと、元の位置と重なる部分しか描かれない。
 
 ## ログ（USB）
 
@@ -43,7 +59,7 @@
 | --- | --- |
 | `STRESS_READY` | 評価が終わった |
 | `STRESS_NATIVE ok len=N` | ネイティブ生成の `Uint8Array` がグローバルと一致（`NG` なら不一致） |
-| `STRESS f= lvl= pool= peak= oom= cyc= nat= natOk= err= cmds= native= pressure= pe= trim=` | 60 フレームごと。末尾は現在の圧迫マスク・通知回数・通知による破棄回数 |
+| `STRESS f= lvl= pool= peak= oom= cyc= nat= natOk= err= cmds= native= pressure= pe= trim= shiki=` | 60 フレームごと。`pressure`〜`trim` は現在の圧迫マスク・通知回数・通知による破棄回数、`shiki=` は Shiki の区画の使用量／大きさ（Shiki 版で末尾に足した） |
 | `STRESS_LEVEL n` | Enter で段階が変わった |
 | `STRESS_OOM n= at=` | 確保失敗を捕まえた |
 | `STRESS_SUSPECT n= at=` | OOM 例外の文字列確保も失敗した疑い。試験側は同一ターンの VM OOM 記録がある場合のみ許容 |
@@ -57,11 +73,17 @@
   段階ごとの fps・`turn_ms`/`render_ms` の中央値・OOM 回数を JSON で出して `STRESS_APP_PASS|FAIL` を判定する。
   画面を確認するときは `--launch-only` を付ける。`STRESS_READY` と60フレーム進行を確認して
   ポートを閉じ、アプリは終了しない。
-- ホスト: `bash tools/build_stress_app_test.sh && /tmp/test-stress-app`（WSL）。実物の QuickJS と
-  `pocket.kasane` で 900 フレーム回し、Kasane の検証に通らないシーンや例外を焼く前に見つける。
+- ホスト: `bash tools/build_stress_app_test.sh && /tmp/test-stress-app`（WSL、Node 16 以上）。実物の QuickJS・
+  `pocket.kasane`・`pocket.kasane.shiki`（式は firmware と同じ組み込みの表）で 900 フレーム回し、
+  Kasane の検証に通らないシーン、Shiki の draw の失敗、例外を焼く前に見つける。
   `STRESS_PPM=<prefix>` で 90・240・420 フレーム目の画面を PPM に書く。
+  - Shiki 版の結果（2026-11-03、host、ASan）: PASS。HUD 9 コマンド、OOM 2 回から回復、Shiki の区画 27,360 / 49,152 B。
+  - `tools/vmtest/prof/stress_prof.sh` の O2・サニタイザ無しのビルドでは、`reads=449/448` で FAIL になる。
+    旧版の `stress.js` でも同じ値になるので、描画の変更とは関係が無い。OOM が `pocket.fs` の stub の
+    読み始めと読み終わりの間に当たると、数が食い違う（検査側の数え方の問題として未修正）。
+- 実機: Shiki 版はまだ実機で確かめていない（fps・`turn_ms`・`render_ms`・JIT の結果・空きヒープ）。
 
-## 実測（実機、2026-09-26、vm/main + F3）
+## 実測（旧版、実機、2026-09-26、vm/main + F3）
 
 | 段階 | fps | `turn_ms` 中央値 | `render_ms` 中央値 | OOM |
 | --- | --- | --- | --- | --- |

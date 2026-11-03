@@ -1,0 +1,6 @@
+# STRESS TEST's chunks (pocket.app.load; docs/vm/eval-peak.md section 7). The
+# entry (stress.js) is the whole app; prog only carries the Shiki programs,
+# which the build compiles into the firmware's built-in table as
+# stress.<name> and strips from the chunk (stress_prog.js, README).
+app local.stress
+prog   stress_prog.js

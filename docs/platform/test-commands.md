@@ -12,7 +12,7 @@ python tools\test_settings.py --port COM3              # XMB設定・ミュー�
 python tools\capture_home.py --port COM3               # 実ピクセル取得と30fps確認
 python tools\test_editor_draft.py --port COM3          # 未保存の編集がアプリ起動を跨いで残るか
 python tools\benchmark_app.py --port COM3              # JSアプリのPAINT内訳
-python tools\stress_app.py --port COM3                # STRESS TEST（メニュー最後の行）: ヒープ負荷3段階＋描画負荷、OOM回復とfps
+python tools\stress_app.py --port COM3                # STRESS TEST（メニュー index 7）: ヒープ負荷3段階＋Shikiの描画負荷、OOM回復とfps
 python tools\test_app_resume.py --port COM3           # Backで眠るアプリ（IMU CAL/PET/COMPANION）: 中断→同じ行で再開→別アプリで退去
 ```
 
@@ -37,7 +37,7 @@ python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで�
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_scene_tables.py .cache/generated && gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/scene_stub -Imain/scene -I.cache/generated tools/test_wave.c -lm -o /tmp/tw && /tmp/tw"   # LEVEL WAVE: 水の体積保存・静止時の勾配・strip一致・傾きの全範囲（docs/scenes/level-wave.md）。tools/preview_wave.c は連番PPMのプレビュー
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasaneで900フレーム（Kasaneが断るシーンを焼く前に、WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasane・Shikiで900フレーム（Kasaneが断るシーン・Shikiのdrawの失敗を焼く前に、WSLのみ、Node要）
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
 python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```

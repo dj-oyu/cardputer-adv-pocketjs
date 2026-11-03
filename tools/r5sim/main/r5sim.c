@@ -52,8 +52,8 @@ void pocket_pixel_reset(void){}
 bool pocket_pixel_pending(void){return false;}
 void pocket_pixel_present_result(ksn_result r){(void)r;}
 
-extern const char stress_js_start[] asm("_binary_stress_js_start");
-extern const char stress_js_end[] asm("_binary_stress_js_end");
+extern const char stress_js_start[] asm("_binary_stress_r5_js_start");
+extern const char stress_js_end[] asm("_binary_stress_r5_js_end");
 
 #ifndef R5SIM_FRAMES
 #define R5SIM_FRAMES 120
@@ -135,7 +135,7 @@ void app_main(void) {
     JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_nop,"readStarted",0));
     JS_SetPropertyStr(ctx,g,"__readFinished",JS_NewCFunction(ctx,js_nop,"readFinished",0));
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
-    bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),"stress.js")&&present();
+    bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),"stress_r5.js")&&present();
     printf("R5SIM eval %s\n",ok?"ok":"FAIL");
     // The device's arrangement (main/app_session.c, pocketjs_guest_create).
     JS_SetMemoryLimit(rt,160*1024);
