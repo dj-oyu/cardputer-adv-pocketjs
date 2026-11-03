@@ -1537,8 +1537,11 @@ esp_err_t app_start_test(char test) {
     // The 'J' diagnostic runs MEGADEMO without a manifest: it draws with Shiki.
     if(!overlay_session&&(app_registry_wants(app_registry_current(),"kasane.shiki")||test=='J')){
         const app_manifest_t *m=app_registry_current();
-        if(!shiki_heap_begin(m?m->shiki_bytes:0)){
-            ESP_LOGE("app","SHIKI_HEAP_UNAVAILABLE bytes=%u",(unsigned)(m&&m->shiki_bytes?m->shiki_bytes:SHIKI_HEAP_DEFAULT_BYTES));
+        // The app's budget plus the JIT's share (shiki-jit.md sec.19.3).
+        const size_t shiki_bytes=(m&&m->shiki_bytes?m->shiki_bytes:SHIKI_HEAP_DEFAULT_BYTES)+
+                                 (ksn_shiki_jit_scalar_on?KSN_SHIKI_JIT_REGION_EXTRA:0u);
+        if(!shiki_heap_begin(shiki_bytes)){
+            ESP_LOGE("app","SHIKI_HEAP_UNAVAILABLE bytes=%u",(unsigned)shiki_bytes);
             err=ESP_ERR_NO_MEM;goto fail;
         }
     }
