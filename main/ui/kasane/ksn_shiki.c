@@ -382,7 +382,7 @@ static inline __attribute__((always_inline)) bool coord(int32_t raw,int16_t *px)
 }
 static inline __attribute__((always_inline)) ksn_shiki_status emit(ksn_shiki_vm *vm,ksn_proc_segment *out,
                              int16_t x0,int16_t y0,int16_t x1,int16_t y1,uint16_t c){
-    if(vm->count==KSN_SHIKI_SEGMENTS)return KSN_SHIKI_LIMIT;
+    if(vm->count>=vm->cap)return KSN_SHIKI_LIMIT;
     const int dx=x1>x0?x1-x0:x0-x1,dy=y1>y0?y1-y0:y0-y1;
     const unsigned cost=(unsigned)(dx>dy?dx:dy)+1;
     if(vm->raster+cost>KSN_SHIKI_RASTER)return KSN_SHIKI_LIMIT;
@@ -562,7 +562,7 @@ static __attribute__((noinline)) KSN_JIT_FAST ksn_shiki_status pattern_line(ksn_
             duq=floor_mod(d,wrap);
         }
         /* sec.4.8.4 with room for both entries. */
-        if(vm->count>=KSN_SHIKI_SEGMENTS-1||vm->raster+(unsigned)s+1u>KSN_SHIKI_RASTER)
+        if(vm->count+1u>=vm->cap||vm->raster+(unsigned)s+1u>KSN_SHIKI_RASTER)
             return KSN_SHIKI_LIMIT;
         vm->raster=(uint16_t)(vm->raster+s+1);
         out[vm->count++]=(ksn_proc_segment){(int16_t)(ax+KSN_PROC_EXT_PATTERN),ay,bx,by,i->aux};
@@ -914,7 +914,7 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
     if(!lines){
         /* A point costs 1 raster step and 1 segment, so how many fit is
          * known before the loop. */
-        uint32_t room=KSN_SHIKI_SEGMENTS-vm->count;
+        uint32_t room=vm->count<vm->cap?(uint32_t)vm->cap-vm->count:0u;
         if(KSN_SHIKI_RASTER-(uint32_t)vm->raster<room)room=KSN_SHIKI_RASTER-(uint32_t)vm->raster;
         const uint32_t n=count<room?count:room;
         const int16_t *xs=d,*ys=d+field;
@@ -939,7 +939,7 @@ static __attribute__((noinline)) ksn_shiki_status emit_exec(ksn_shiki_vm *vm,con
             p[j]=floor_shr32(d[j*field]+half,q);
             if((uint32_t)(p[j]+480)>1200u)return KSN_SHIKI_INVALID;
         }
-        if(vm->count==KSN_SHIKI_SEGMENTS)return KSN_SHIKI_LIMIT;
+        if(vm->count>=vm->cap)return KSN_SHIKI_LIMIT;
         const int32_t dx=p[2]>p[0]?p[2]-p[0]:p[0]-p[2],dy=p[3]>p[1]?p[3]-p[1]:p[1]-p[3];
         const uint32_t cost=(uint32_t)(dx>dy?dx:dy)+1u;
         if(vm->raster+cost>KSN_SHIKI_RASTER)return KSN_SHIKI_LIMIT;
@@ -1156,7 +1156,12 @@ KSN_JIT_FAST uint32_t ksn_shiki_jit_curve(const ksn_jit_run *c,int32_t xr,int32_
 
 ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                       unsigned index,ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
+    return ksn_shiki_draw_index_cap(plan,inputs,n,index,vm,out,KSN_SHIKI_SEGMENTS);
+}
+ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                          unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap){
     memset(vm,0,sizeof *vm);
+    vm->cap=(uint16_t)(cap<KSN_SHIKI_SEGMENTS?cap:KSN_SHIKI_SEGMENTS);
     vm->pie=KSN_SHIKI_HAS_PIE&&ksn_shiki_vec_pie;
     int32_t in[KSN_SHIKI_INPUTS]={0};
     for(unsigned k=0;k<plan->inputs&&k<n;k++)in[k]=inputs[k];

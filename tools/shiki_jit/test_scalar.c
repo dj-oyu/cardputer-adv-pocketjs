@@ -227,6 +227,7 @@ static size_t compile(const ksn_shiki_plan *plan,uint8_t *buf,size_t cap,bool ch
 static bool agrees(const ksn_shiki_plan *plan,uint8_t *code,size_t len,size_t entry,const int32_t *in,
                    unsigned nin,unsigned index,unsigned t,ksn_shiki_status want,ksn_shiki_status *gotp){
     memset(&vj,0,sizeof vj);
+    vj.cap=KSN_SHIKI_SEGMENTS;                        /* as ksn_shiki_draw_index sets it */
     int32_t inj[KSN_SHIKI_INPUTS]={0};
     for(unsigned k=0;k<plan->inputs&&k<nin;k++)inj[k]=in[k];
     const ksn_jit_run run={&vj,inj,KSN_SHIKI_STEPS,(uint32_t (*)(const void *,uint32_t))ksn_shiki_jit_leaf,

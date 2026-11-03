@@ -141,6 +141,10 @@ typedef struct {
     int16_t pen_x,pen_y;
     bool pen_valid;
     uint16_t count;                         /* segments emitted by this draw */
+    /* The most this draw may emit (<= KSN_SHIKI_SEGMENTS): the room left in
+     * the caller's frame, so a draw writes straight into the frame's tail
+     * and one that would not fit stops at LIMIT (pocket_proc.c). */
+    uint16_t cap;
     bool ext;                               /* a LINE_PATTERN chord is among them */
     /* The prototype's vector state (shiki-pie.md sec.3.1), kept in memory:
      * v0..v7 (8 lanes of int16) then the accumulator (8 lanes of 40 bits,
@@ -196,6 +200,11 @@ ksn_shiki_status ksn_shiki_draw_fixed(const ksn_shiki_plan *plan,const int32_t *
  * DRAW_INDEX reads, the entry of drawMany or of a list; draw_fixed is 0. */
 ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                       unsigned index,ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
+/* ksn_shiki_draw_index into out[0..cap): the draw stops at LIMIT when it
+ * would emit more than cap segments (cap <= KSN_SHIKI_SEGMENTS). The other
+ * entry points take the full KSN_SHIKI_SEGMENTS. */
+ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                          unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap);
 /* The result line of the shared text contract (tools/kasane_ir/shiki_ref.mjs
  * format(), tools/kasane_contract/shiki_run.c), handed to put in pieces so a
  * caller can print it or hash it without holding a line that 1,024 segments
