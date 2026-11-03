@@ -1417,8 +1417,8 @@ static int compile_in_region(ksn_shiki_plan *plan){
     }
     const size_t len=(e.len+3u)&~(size_t)3u;
     uint8_t *q=shiki_heap_shrink(d,len);
-    /* TLSF trims in place; if the block ever moved, the code moved with it
-     * (it addresses only relative to itself and through the context). */
+    /* The region trims in place (shiki-jit.md sec.21); NULL only for a
+     * block it does not know. */
     if(!q||!in_diram(q,len)){
         if(q)shiki_heap_free(q);
         if(fresh)free(j);

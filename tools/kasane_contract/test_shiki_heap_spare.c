@@ -6,6 +6,7 @@
 #include "shiki_heap.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int fails;
 #define CHECK(c) do{if(!(c)){printf("FAIL %s:%d %s\n",__FILE__,__LINE__,#c);fails++;}}while(0)
@@ -55,6 +56,34 @@ int main(void){
     CHECK(used+4096-64==before);
     shiki_heap_free(small2);
     shiki_heap_free(own);
+    /* sec.21: owners from the bottom, spare users from the top, so the two
+     * do not interleave; freed memory comes back zero. */
+    {
+        const void *base;size_t rb;
+        shiki_heap_region(&base,&rb);
+        uint8_t *o1=shiki_heap_malloc(1000),*s1=shiki_heap_spare(1000,0),*o2=shiki_heap_malloc(1000);
+        CHECK(o1&&s1&&o2);
+        CHECK(o1==(const uint8_t *)base);              /* the lowest place */
+        CHECK(o2>o1&&o2<s1);                           /* owners stay below */
+        CHECK(s1+1000+16>(const uint8_t *)base+rb);    /* the highest place */
+        memset(o1,0xa5,1000);memset(s1,0x5a,1000);
+        shiki_heap_free(o1);shiki_heap_free(s1);
+        uint8_t *z=shiki_heap_calloc(1,1000);
+        CHECK(z==(const uint8_t *)base);
+        unsigned nz=0;for(unsigned k=0;k<1000;k++)nz+=z[k]!=0;
+        CHECK(nz==0);
+        /* A shrunk block's tail comes back zero too. */
+        memset(z,0x11,1000);
+        CHECK(shiki_heap_shrink(z,100)==z);
+        uint8_t *after=shiki_heap_malloc(800);
+        CHECK(after==z+100);
+        nz=0;for(unsigned k=0;k<800;k++)nz+=after[k]!=0;
+        CHECK(nz==0);
+        shiki_heap_free(after);shiki_heap_free(z);shiki_heap_free(o2);
+        uint32_t b2,u2,l2;
+        shiki_heap_info(&b2,&u2,&l2);
+        CHECK(u2==0&&l2==b2);                          /* nothing left, one piece */
+    }
     shiki_heap_set_reclaim(NULL);
     shiki_heap_end();
     CHECK(!shiki_heap_active());
