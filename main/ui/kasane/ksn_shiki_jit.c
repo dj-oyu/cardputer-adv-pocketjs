@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_memory_utils.h"
 #include "esp_cpu.h"
+#include "esp_log.h"
 #include "shiki_heap.h"
 #else
 #define KSN_JIT_DEVICE 0
@@ -1209,16 +1210,30 @@ static void sat_decide(const ksn_shiki_plan *plan,jit_plan *j){
     j->sat=JIT_SAT_DECIDED;
     j->plain=0;
     if(!ksn_shiki_jit_scalar(plan,&b,&entry))return;   /* cannot happen: it compiled */
+    /* The SHIKI_SAT line: per site, in program order, the bits its results
+     * used (0-9, a-v for 10-31; '-' never ran); fnv names the plan (FNV-1a
+     * of its instructions, as a host tool can compute from the ROM). */
+    char bits[65];
+    unsigned out=0,kept=0,never=0;
     for(unsigned k=0;k<b.nsites&&k<64u;k++){
         const uint32_t w=*(volatile const uint32_t *)(const void *)(j->sdata+sites[k]+3u);
-        if(w&JIT_SLOT_NEVER){ksn_shiki_jit_sat[2]++;continue;}
-        if(w>=1u<<(31u-JIT_SAT_ROOM)){ksn_shiki_jit_sat[1]++;continue;}
+        const unsigned used=w?32u-(unsigned)__builtin_clz(w):0u;
+        bits[k]=(w&JIT_SLOT_NEVER)?'-':(char)(used<10u?'0'+used:'a'+used-10u);
+        bits[k+1]=0;
+        if(w&JIT_SLOT_NEVER){ksn_shiki_jit_sat[2]++;never++;continue;}
+        if(w>=1u<<(31u-JIT_SAT_ROOM)){ksn_shiki_jit_sat[1]++;kept++;continue;}
+        out++;
         ksn_jit_buf q={j->sdata,sites[k],sites[k]+3u,false,false,0,0,0,0,NULL,0};
         ksn_jit_emit(&q,KSN_JIT_J,3,0,0);
         j->plain|=1ull<<k;
         ksn_shiki_jit_sat[0]++;
     }
     __asm__ volatile("memw\n" "isync\n":::"memory");
+    uint32_t fnv=2166136261u;
+    const uint8_t *q=(const uint8_t *)plan->code;
+    for(size_t k=0;k<plan->count*sizeof plan->code[0];k++)fnv=(fnv^q[k])*16777619u;
+    ESP_LOGI("kasane","SHIKI_SAT fnv=%08x n=%u out=%u kept=%u never=%u bits=%s",
+             (unsigned)fnv,(unsigned)plan->count,out,kept,never,b.nsites?bits:"");
 }
 bool ksn_shiki_jit_compile_now(ksn_shiki_plan *plan){
     const jit_plan *j=plan->jit;
