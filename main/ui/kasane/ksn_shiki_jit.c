@@ -996,6 +996,8 @@ static void unlist(jit_plan *j){
 static void sat_save(jit_plan *j);
 static void sat_restore(const ksn_shiki_plan *plan,jit_plan *j);
 static void drop_scalar(jit_plan *j){
+    /* sec.18.4: what the sites learnt outlives the code (read before it goes). */
+    if(j->sat==JIT_SAT_LIVE&&j->sites&&j->sraw)sat_save(j);
     if(j->sraw){
         if(j->sregion)shiki_heap_free(j->sraw);else heap_caps_free(j->sraw);
         ksn_shiki_jit_bytes-=j->sbytes;
@@ -1006,8 +1008,6 @@ static void drop_scalar(jit_plan *j){
     }
     j->sraw=NULL;j->scalar=NULL;j->sbytes=0;j->weights=NULL;j->wbytes=0;
     j->sregion=j->wregion=false;
-    /* sec.18.4: what the sites learnt outlives the code. */
-    if(j->sat==JIT_SAT_LIVE&&j->sites&&j->sraw)sat_save(j);
     j->sat=JIT_SAT_NONE;
     unlist(j);
 }
