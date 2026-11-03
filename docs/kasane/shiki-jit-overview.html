@@ -492,7 +492,7 @@ a{color:var(--accent)}
 <li>レース: WIDE <b>0.43 ms</b>、FIELD <b>0.51〜0.54</b>、WIDE 2 <b>0.58〜0.94</b> <span class="m">実測</span>。JIT のコード 8.8〜9.6 KB、失敗 0 <span class="m">実測</span>。</li>
 <li>区画 <code>shk=42480/13548/57344</code>: <b>空きは一続きの 13.5 KB</b>（TLSF の時は空き 7.2 KB のうち一続き 3.3 KB）<span class="m">実測</span>。</li>
 <li>持ち主は 42,480 − 9,396（JIT）≒ <b>33.1 KB</b> <span class="e">計算（実測の差）</span>。48 KiB なら JIT に約 16 KB 残る <span class="e">計算</span>。レースの JIT（約 10 KB）が入るので、DERBY の 56 KiB の指定を外し、既定の 48 KiB に戻した（94439f7。システムの空きが 8 KiB 戻る）。</li>
-<li><b>48 KiB に戻した DERBY の実機の測定はまだ無い</b> <span class="u">未確認</span>。上の数字はすべて 56 KiB の区画でのもの。</li>
+<li><b>48 KiB に戻した実機（94439f7、§22.1）</b>: WIDE <b>0.43 ms</b>、FIELD <b>0.54</b>、WIDE 2 <b>0.60〜0.93</b>（56 KiB と同じ）。JIT のコード 9.4〜9.6 KB、失敗 0、返したプラン 0。区画 <code>shk=42480/5356/49152</code>（空き 6,672 B、一続き 5,356 B）<span class="m">実測</span>。使用量は 56 KiB の時と同じ 42,480 B で、区画を小さくしても持ち主と JIT は同じだけ入った。</li>
 </ul>
 </div>
 <p class="sowhat">持ち主を減らす手はもう 1 つ考えられた（フレームのリストを 1 本にする）。試して、戻した。</p>
@@ -525,9 +525,9 @@ a{color:var(--accent)}
 <tr><td>eb5c12c（8 章）</td><td>48 KiB・表</td><td>DIRAM だけ</td><td class="num">1.33〜1.49</td><td class="num">0.53〜0.55</td><td class="num">0.63〜0.68</td><td class="num">0.95〜1.57</td><td class="num">3.2〜4.9 KB</td><td class="num">—</td><td><span class="m">実測</span>（NOMEM は記録なし）</td></tr>
 <tr><td>e877784（8 章）</td><td>48 KiB・表＋上へ縮める</td><td>DIRAM だけ</td><td class="num">1.32〜1.61</td><td class="num">0.42</td><td class="num">0.54</td><td class="num">0.92〜1.31</td><td class="num">4.5〜6.8 KB</td><td class="num">—</td><td><span class="m">実測</span>（NOMEM は記録なし）</td></tr>
 <tr><td>4786558（9 章）</td><td>56 KiB・表、作業領域なし</td><td>DIRAM だけ</td><td class="num">—</td><td class="num">0.43</td><td class="num">0.51〜0.54</td><td class="num">0.58〜0.94</td><td class="num">8.8〜9.6 KB</td><td class="num">0</td><td><span class="m">実測</span>（発走は §22.1 に記録なし）</td></tr>
-<tr class="now"><td>94439f7（今）</td><td>48 KiB・表、作業領域なし</td><td>DIRAM だけ</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">余地 約 16 KB</td><td class="num">—</td><td><span class="u">未確認（実機未測定）</span> 余地は <span class="e">計算</span></td></tr>
+<tr class="now"><td>94439f7（今）</td><td>48 KiB・表、作業領域なし</td><td>DIRAM だけ</td><td class="num">—</td><td class="num">0.43</td><td class="num">0.54</td><td class="num">0.60〜0.93</td><td class="num">9.4〜9.6 KB</td><td class="num">0</td><td><span class="m">実測</span>（発走は §22.1 に記録なし）</td></tr>
 </table>
-<p class="note">出典: §19.2 の表（12804a9・c4d872d・c6119de）、§19.3 の表（fb30211）、§21.2 の表（eb5c12c・e877784）、§22.1（4786558）。12804a9 の WIDE 2 は §19.2 の値（§18.6 は 1.05〜1.38）。12804a9 のコードの一部（6〜7 KB）は RTC にあった <span class="e">推定</span>。<code>shk</code>（使用/最大の空き/大きさ）: fb30211 50,164/3,328/57,344、eb5c12c 43,264/2,104/49,152、e877784 44,548/2,924/49,152、4786558 42,480/13,548/57,344 <span class="m">実測</span>。MEGADEMO は 48 KiB のまま: 12804a9 で NEWS 0.75・ZENITH 0.68〜0.74・TWIST 1.00 ms、eb5c12c で NEWS 0.71・ZENITH 0.63〜0.69・TWIST 0.98 ms <span class="m">実測</span>。</p>
+<p class="note">出典: §19.2 の表（12804a9・c4d872d・c6119de）、§19.3 の表（fb30211）、§21.2 の表（eb5c12c・e877784）、§22.1（4786558）。12804a9 の WIDE 2 は §19.2 の値（§18.6 は 1.05〜1.38）。12804a9 のコードの一部（6〜7 KB）は RTC にあった <span class="e">推定</span>。<code>shk</code>（使用/最大の空き/大きさ）: fb30211 50,164/3,328/57,344、eb5c12c 43,264/2,104/49,152、e877784 44,548/2,924/49,152、4786558 42,480/13,548/57,344、94439f7 42,480/5,356/49,152 <span class="m">実測</span>。MEGADEMO は 48 KiB のまま: 12804a9 で NEWS 0.75・ZENITH 0.68〜0.74・TWIST 1.00 ms、eb5c12c で NEWS 0.71・ZENITH 0.63〜0.69・TWIST 0.98 ms <span class="m">実測</span>。</p>
 </div>
 
 <h3>今の区画（DERBY、48 KiB、レース中の見込み）</h3>
@@ -559,10 +559,10 @@ a{color:var(--accent)}
   <line x1="10" y1="100" x2="616" y2="100" stroke="var(--shiki)" stroke-width="2"/>
   <text x="313" y="116" text-anchor="middle" font-size="11">持ち主 約 33.1 KB（下から）</text>
   <line x1="616" y1="100" x2="910" y2="100" stroke="var(--jit)" stroke-width="2"/>
-  <text x="763" y="116" text-anchor="middle" font-size="11">JIT と空き 約 16 KB（計算）</text>
+  <text x="763" y="116" text-anchor="middle" font-size="11">JIT 約 9.4 KB と空き 約 6.7 KB（実測）</text>
   <text x="365" y="132" text-anchor="middle" font-size="10" class="muted">VM 372</text>
   <text x="10" y="158" font-size="11.5">・帯のキャッシュ 240×8×2、フレーム 6 + 768 × 10 B（4 B 単位で 7,688）、VM の状態 372 B はコードからの計算。</text>
-  <text x="10" y="176" font-size="11.5">・持ち主 33.1 KB と JIT 9.4 KB は 56 KiB の区画での実測（4786558、§22.1）。48 KiB での実測はまだ無い。</text>
+  <text x="10" y="176" font-size="11.5">・持ち主 33.1 KB と JIT 9.4 KB は実測の差（48 KiB の 94439f7 でも使用 42,480 B、空き 6,672 B、一続き 5,356 B）。</text>
   <text x="10" y="194" font-size="11.5">・並び（帯のキャッシュ → A・B → VM）はコードの確保の順からの推定。場面の切り替えで式・データ領域は入れ替わる。</text>
   <text x="10" y="212" font-size="11.5">・管理は 128 件の表（.bss 512 B）。空きは常にゼロ。持ち主の確保が失敗すると、JIT は古いプランから 1 本ずつ返す。</text>
   <text x="10" y="230" font-size="11.5">・作業領域（10,246 B）は c4d7a6c で無くなった。以前の図の「フレーム・作業領域 各 10,752」は 1,024 本・TLSF の時の大きさ。</text>
@@ -576,7 +576,7 @@ a{color:var(--accent)}
 </div>
 </div>
 <p class="note">区画の内訳の根拠（各項目のファイルと行）は <a href="pipeline-overview.html#mem">パイプラインの §8</a> の表にある。「式・点の窓…約 13.5 KB」は 33.1 KB から固定分 19,588 B（7,688 × 2 + 3,840 + 372）を引いた差 <span class="e">計算</span>で、個別には測っていない。</p>
-<p class="sowhat">次に測るべきは、48 KiB に戻した DERBY のレース（発走と WIDE 2 の engine_ms、<code>shk=</code>、NOMEM）と、MEGADEMO・DERBY の場面の切り替わりでの <code>jitdrop</code>（§21.4）。</p>
+<p class="sowhat">DERBY は 48 KiB で 56 KiB と同じ速さに戻った。残りは MEGADEMO・DERBY の場面の切り替わりでの <code>jitdrop</code>（§21.4）。</p>
 
 <!-- ============================================================ -->
 <h2 id="facts">事実・推定・未確認</h2>
@@ -584,8 +584,8 @@ a{color:var(--accent)}
 <b><span class="m">実測</span></b><span>各ビルドの engine_ms・JIT のコードの量・NOMEM・<code>shk=</code>（実機の <code>SHIKI_TURN</code>、shiki-jit.md の各節）。heap の領域ごとの空き（EXECMAP、ba9d872）。MEGADEMO の 56 KiB での起動失敗（fb30211）。<code>input</code> スタックの最大使用。</span>
 <b><span class="m">host 実測</span></b><span>レジスタキャッシュの −6.5%（26,171 → 24,461 B）、出荷プランの 1 命令あたり最大 23.4 B、飽和チェックがコードの約 1/4、命令の内訳。</span>
 <b><span class="m">コードで確認</span></b><span>区画 48 KiB の既定と上書きの無いこと、表 128 件、持ち主は下・JIT は上、空きのゼロ、<code>JIT_REGION_KEEP</code> 0、<code>JIT_GUESS</code> 24n+32、<code>JIT_EXEC_CAPS</code>、帯のキャッシュ 3,840 B、フレーム 7,686 B、予算 16 KiB、<code>JIT_HEAT</code> 4、<code>JIT_COLD_DRAWS</code> 1,024。番地の地図は TRM v1.8 p.403、p.685。</span>
-<b><span class="e">推定・計算</span></b><span>12804a9 のコードの 6〜7 KB が RTC にあったこと。RTC が遅いのは命令の取り込みのため。持ち主 33.1 KB（実測の差）と、48 KiB で JIT に約 16 KB 残ること。区画の中の並び。作業領域の廃止で空く 6,406 B。</span>
-<b><span class="u">未確認</span></b><span>48 KiB に戻した DERBY の実機の速さと <code>shk=</code>。§21.4（1 プランずつ返す）の実機の <code>jitdrop</code>。レジスタキャッシュ単独の実機での効果。当時の DIRAM の 32 KB と 10.7 KB の塊の持ち主。shiki-jit.md の §20 の節（参照はあるが本文が無い）。</span>
+<b><span class="e">推定・計算</span></b><span>12804a9 のコードの 6〜7 KB が RTC にあったこと。RTC が遅いのは命令の取り込みのため。持ち主 33.1 KB（実測の差）。区画の中の並び。作業領域の廃止で空く 6,406 B。</span>
+<b><span class="u">未確認</span></b><span>§21.4（1 プランずつ返す）の実機の <code>jitdrop</code>。レジスタキャッシュ単独の実機での効果。当時の DIRAM の 32 KB と 10.7 KB の塊の持ち主。shiki-jit.md の §20 の節（参照はあるが本文が無い）。</span>
 </div>
 </main>
 </body>
