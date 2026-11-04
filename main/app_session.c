@@ -2707,6 +2707,18 @@ static esp_err_t present_frame(void) {
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
+                /* MEASUREMENT ONLY (CARRY_AB): the 4-row pieces' carry on (1)
+                 * and off (0), alternate windows, g_ksn_prof on for the image
+                 * cycles. */
+                {
+                    extern int g_pocket_proc_carry;
+                    g_ksn_prof=1;
+                    ESP_LOGI("kasane","CARRY_AB carry=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u bands=%u",
+                             g_pocket_proc_carry,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes,band_count_last);
+                    g_pocket_proc_carry=!g_pocket_proc_carry;
+                }
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
                 /* Same-binary A/B of zero-copy strips (board.h): the window
                  * just printed used the mode named here, then it flips. */
