@@ -1,5 +1,34 @@
 /* Synthetic storage-v3 fixtures. White-box access verifies exact ownership. */
+#include <stdlib.h>
+#include <assert.h>
+static struct { void *ptr; size_t bytes; } tracked[16];
+static size_t live_bytes, peak_bytes;
+static void account(void *ptr, size_t bytes) {
+    if (!ptr) return;
+    for (size_t i = 0; i < 16; i++) if (!tracked[i].ptr) {
+        tracked[i].ptr = ptr; tracked[i].bytes = bytes;
+        live_bytes += bytes;
+        if (live_bytes > peak_bytes) peak_bytes = live_bytes;
+        return;
+    }
+    assert(0);
+}
+static void *tracked_malloc(size_t n) { void *p = malloc(n); account(p, n); return p; }
+static void *tracked_calloc(size_t n, size_t z) { void *p = calloc(n, z); account(p, n*z); return p; }
+static void tracked_free(void *p) {
+    if (!p) return;
+    for (size_t i = 0; i < 16; i++) if (tracked[i].ptr == p) {
+        live_bytes -= tracked[i].bytes; tracked[i].ptr = NULL; free(p); return;
+    }
+    assert(0);
+}
+#define malloc tracked_malloc
+#define calloc tracked_calloc
+#define free tracked_free
 #include "visibility.c"
+#undef malloc
+#undef calloc
+#undef free
 #include <stdio.h>
 
 static size_t nodes_breadth_first(size_t triangles) {
@@ -19,11 +48,12 @@ static size_t nodes_breadth_first(size_t triangles) {
 int main(void) {
     assert(VIS_STORAGE_CONTRACT_VERSION == 3);
     assert(sizeof(triangle) == 4 * sizeof(uint16_t));
+    assert(sizeof(build_center) == 3 * sizeof(double));
     const size_t vertex_counts[] = {3, 8, 64, VIS_MAX_VERTICES};
     for (size_t n = 1; n <= VIS_MAX_TRIANGLES; n++) {
         size_t nodes = nodes_breadth_first(n);
         assert(vis_scene_required_nodes(n) == nodes);
-        assert(vis_scene_build_temporary_bytes_v3(n) == n * sizeof(build_triangle));
+        assert(vis_scene_build_temporary_bytes_v3(n) == n * 3 * sizeof(double));
         for (size_t i = 0; i < sizeof(vertex_counts) / sizeof(vertex_counts[0]); i++) {
             size_t v = vertex_counts[i];
             size_t expected = sizeof(vis_scene) + v * 3 * sizeof(double)
@@ -67,6 +97,8 @@ int main(void) {
     assert(vis_scene_build(&scene, xyz, 8, indices, 9, generation, too_small) == VIS_CAPACITY);
     assert(!scene);
     assert(vis_scene_build(&scene, xyz, 8, indices, 9, generation, limits) == VIS_OK);
+    assert(live_bytes == bytes);
+    assert(peak_bytes == bytes + 9 * 3 * sizeof(double));
     assert(scene->vertices == 8 && scene->bytes == bytes && scene->nodes == nodes);
     assert(!memcmp(scene->xyz, original, sizeof(original)));
     assert(vis_scene_overlaps(scene, scene->xyz + 23, sizeof(double)));
@@ -89,6 +121,7 @@ int main(void) {
     assert(hit.found && hit.triangle_ordinal == 0 && hit.distance == 1);
     vis_binding_clear(&binding);
     vis_scene_release(scene);
+    assert(live_bytes == 0);
     puts("PASS: storage-v3 exhaustive capacity formulas; exact-byte admission; original vertex IDs, unused vertices, signed zero, poison and ties");
     return 0;
 }

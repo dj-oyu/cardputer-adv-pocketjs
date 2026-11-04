@@ -11,12 +11,22 @@ are needed by the tests.
 Storage contract v3 owns an exact copy of every input double-precision vertex,
 including unused vertices and distinct vertex IDs with identical coordinates.
 Each persistent triangle stores three uint16 vertex indices and its original
-uint16 ordinal. Validation occurs before narrowing. Temporary bounds and sort
-records are released before publication of the scene.
+uint16 ordinal. Validation occurs before narrowing. Construction retains only three double-precision center coordinates per
+triangle in temporary storage. Bounds are recomputed from owned vertices during
+tree construction, and the indexed triangle records are sorted in place. The
+temporary centers are released before publication of the scene.
 
 Use `vis_scene_required_bytes_v3(vertices, triangles)` for persistent requested
 heap bytes and `vis_scene_build_temporary_bytes_v3(triangles)` for the additional
-build-only allocation. The persistent byte limit does not include temporary
+build-only allocation: `3 * sizeof(double) * triangles` (24 bytes per triangle
+on hosts with 8-byte doubles), down from the previous bounds/center/index record
+(80 bytes per triangle on those hosts). Persistent storage and traversal are
+unchanged. This trades additional construction work for lower temporary memory;
+no construction-speed or device-memory-fit claim is made. Equivalence checks
+apply only under the tested compiler and floating-point flags. Even the prior
+implementation can differ in signed-zero bits across optimization levels;
+this is not a cross-optimization or cross-platform bitwise guarantee.
+The persistent byte limit does not include temporary
 storage, allocator overhead, caller arrays, or retained older scenes. They must
 be counted separately for peak-memory admission. Sparse vertex-heavy inputs can
 require more memory than representations that retain only triangle positions.
@@ -49,6 +59,8 @@ overwritten. Four tests run at O0/O2, both plain and with ASan/UBSan:
 - 1000 synthetic segments compared with an independent long-double oracle.
 - All allowed triangle-count capacity formulas, exact-byte admission, unused
   vertex preservation, duplicate-position identity and signed-zero copying.
+  Tracked allocations verify actual requested build peak, persistent bytes after
+  publication and zero remaining bytes after release.
 
 Fixtures are small procedural or explicitly synthetic triangles. Tests do not
 load scene files, contact services, or produce rendered images. Logs, executable
