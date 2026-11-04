@@ -25,6 +25,65 @@
 
 **待ちの仕組み（コードから）:** 帯 N を写して積んだ後、CPU は帯 N+1 を `shared` に描く。描き終えたら、帯 N の送信の完了を待ってから `tx_buf` に写す。1 帯ごとの時間は `max(帯 N+1 の描画, 帯 N の送信)` で、合計は `Σ max(描画_i, 送信)`。送信の時間はどの帯もほぼ同じなので、帯の順を変えても合計は変わらない（帯の重さのばらつきが、そのまま待ちになる）。
 
+### 1.1 今のドライバの中身（ESP-IDF v6.0.1 の `spi_master`、コードを読んだ事実）
+
+パスは `components/esp_driver_spi/src/gpspi/` の下。行番号は v6.0.1。
+
+**帯 1 本の流れ:**
+
+1. **呼び出し側（`board.c:567`）:** `spi_device_queue_trans`（`spi_master.c:1218`）。
+   - `check_trans_valid` → `setup_priv_desc`：内部 RAM の DMA 可能なバッファなら写さない。`tx_buf` はこれに当たる。
+   - `xQueueSend(trans_queue)` → `spi_bus_lock_bg_request`（ISR を起こす）。
+2. **ISR `spi_intr`（`:971`）、前の帯の完了の割り込み:**
+   - `spi_post_trans`（`post_cb`）→ `xQueueSendFromISR(ret_queue)`。
+   - バス・ロックの調停のループ → `xQueueReceiveFromISR` で次の帯を取り出す。
+   - `spi_new_trans`（`:814`）→ `portYIELD_FROM_ISR`。
+3. **`spi_new_trans` の中身（毎回すべてやり直す）:**
+   - `spi_setup_device`：前と同じ装置なら何もしない。
+   - `spi_hal_setup_trans`（`esp_hal_gpspi/spi_hal_iram.c:126`）：割り込みのクリア、線の数、dummy、MISO の遅延、MOSI・MISO のビット長、cmd・addr の長さ、CS の保持を書き、`hal->trans_config` を `memcpy` する。
+   - `s_spi_dma_prepare_data`（`:747`）：
+     - `spicommon_dma_desc_setup_link`（`spi_common.c:365`）で記述子の鎖を作り直す（4,092 B ごとに 1 個。3,840 B は 1 個）。
+     - `gdma_reset` → `spi_hal_hw_prepare_tx`（SPI の送信 FIFO のリセット、`OUTFIFO_EMPTY` のクリア、DMA の送信の有効化）→ `gdma_start`。
+   - `spi_hal_enable_data_line` → `pre_cb` → `spi_hal_user_start`（`spi_ll_apply_config` + `spi_ll_user_start`）。
+4. **呼び出し側、次の帯の前（`board.c:114`）:** `spi_device_get_trans_result`（`:1270`）。
+   - `xQueueReceive(ret_queue)` で眠って待つ → `uninstall_priv_desc`。
+
+**帯ごとの上乗せの出どころ（推定、未測定。S0 で測る）:**
+
+- キュー 3 回：送る、ISR で受ける、ISR から返す。
+- ISR の入口と出口。
+- バス・ロックの調停。
+- SPI のレジスタの十数回の書き込み。
+- 記述子の作り直し。
+- GDMA のリセットと開始。
+- 呼び出し側のタスクの起床。
+
+線の時間 384 µs に対するコメントの値 440 µs の差、約 56 µs がこの合計に当たるかは S0 で確かめる。
+
+**`spi_master` が GDMA に触る口:**
+
+- `spi_common.c:267` の `alloc_dma_chan`：S3 では `gdma_new_ahb_channel` で送信チャネルを確保し、`gdma_connect(..., GDMA_MAKE_TRIGGER(GDMA_TRIG_PERIPH_SPI, 2))` で SPI2 につなぐ。
+- 開始とリセットは `gdma_start` と `gdma_reset`（`spi_master.c:743-744` のマクロ）。
+- どちらも `esp_hw_support` の公開の GDMA API（`esp_private/gdma.h`）。自前のドライバも、チャネルの確保とつなぎはこの API を使えば、I2S の音や SPI3（SD）とチャネルを取り合わない（Q5）。
+- `CONFIG_SPI_MASTER_ISR_IN_IRAM`（既定 y）は `GDMA_CTRL_FUNC_IN_IRAM` を選ぶ。`gdma_start` などは IRAM にある。
+- `gdma.c` 自体は、手元の部分的な checkout に無く、未読。
+
+**分割転送（SCT）の API は使えるが、今回の用途に合わない。**
+
+- API は `esp_private/spi_master_internal.h`：`spi_bus_multi_trans_mode_enable`（`:1669`）と `spi_device_queue_multi_trans`（`:1792`）。S3 では `SOC_SPI_SCT_SUPPORTED_PERIPH` が SPI2 だけ。
+- 合わない理由:
+  - 半二重の装置が要る（今の LCD の装置は全二重の既定）。
+  - 呼ぶたびに `heap_caps_malloc(MALLOC_CAP_DMA)` で CONF のバッファを取る。
+  - 全区間のデータを積む時に揃えておく必要がある。帯を描きながら足すことはできない（TRM の H2 と同じ。Q3）。
+  - 区間の間で CS が上がる（`sct_gap_len`）。CS が上がった後も ST7789 が RAMWR を続けるかは、確かめていない。
+
+**記述子:**
+
+- `spi_bus_initialize` で `max_transfer_sz` から個数を決める（`spi_common.c:338`）。今は `sizeof(shared)` = 3,840 B なので 1 個。
+- 帯ごとに `spicommon_dma_desc_setup_link` で中身を書き直す。
+
+**`spi_device_polling_transmit`（コマンド、`board.c:170`）** は `spi_device_polling_start/end`（`:1378`/`:1425`）。割り込みを使わず、完了を回って待つ。
+
 ## 2. ハードウェアの制約（TRM）
 
 | # | 事実 | TRM |
@@ -104,7 +163,7 @@
 | --- | --- | --- | --- |
 | 描画用 `shared` | 3,840 B | 同じ | 同じ |
 | 送信用 | `tx_buf` 3,840 B | 輪 5,760 B | 輪 7,680 B |
-| 記述子 | `spi_master` の中（未調査） | 12 × 12 B = 144 B | 16 × 12 B = 192 B |
+| 記述子 | `spi_master` の中、1 個（§1.1） | 12 × 12 B = 144 B | 16 × 12 B = 192 B |
 | ISR のコード（IRAM、DRAM と同じ池） | `spi_master` の ISR | 推定 0.3〜1 KB | 同じ |
 | `spi_master` の SPI2 の分 | あり（未調査） | 無くなる | 無くなる |
 
@@ -132,7 +191,7 @@
 - **Q2:** 転送の完了を ISR で知るのは `SPI_TRANS_DONE` と `GDMA_OUT_TOTAL_EOF` のどちらがよいか（GDMA の EOF は FIFO へ読み終えた時点で、線を通り終えた時点ではない可能性）。CS を上げるのは SPI の完了なので、次の転送の開始は SPI の完了に合わせるべきか。
 - **Q3:** 転送と転送の間に CPU を挟まずに続けるため、分割転送（H7）で 1 フレームを 1 本の鎖にする案。各区間の CONF で長さを変えられる。ただし H2 のため、鎖の全区間のデータを始める前に書き終える必要があり、帯ごとに追加はできない。採るか。
 - **Q4:** CPU の待ちは、ポーリングか、タスクの通知で眠るか（眠ると Wi-Fi などの他のタスクが走れるが、起床の遅れが増える）。
-- **Q5:** GDMA の送信チャネルの確保と、ほかのドライバ（I2S の音、SPI3 の SD、`esp_lcd` を使う部分の有無）との衝突。IDF v6.0.1 の `esp_private` の API の安定性。
+- **Q5:** GDMA の送信チャネルの確保と、ほかのドライバ（I2S の音、SPI3 の SD、`esp_lcd` を使う部分の有無）との衝突。IDF v6.0.1 の `esp_private` の API の安定性。（§1.1: `spi_master` 自身が `gdma_new_ahb_channel`・`gdma_connect`・`gdma_start`・`gdma_reset` を使っている。同じ API で確保すれば取り合いは GDMA のドライバが仲裁する。）
 - **Q6:** GPIO マトリクス経由の 80 MHz の半二重の送信の、自前の設定での正しさ（`spi_master` が内部で設定している入力の遅延補償・時計の分周）。
 - **Q7:** `RING_ROWS` の既定（12 か 16 か）と、.bss の増加の受け入れ。
 - **Q8:** 1 行 1 記述子の GDMA の記述子の取り込みの上乗せ（記述子を読むたびの AHB のアクセス）で、送信の速さが落ちないか。2 行 1 記述子にする手。
