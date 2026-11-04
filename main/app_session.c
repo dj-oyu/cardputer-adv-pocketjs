@@ -1,5 +1,3 @@
-/* MEASUREMENT BUILD ONLY: the HSPAN_AB rotation (reverted after the device run). */
-#define POCKET_PROC_HSPAN_AB 1
 #include "derby_detail.h"
 #include "app_session.h"
 #include "board.h"
