@@ -1,3 +1,5 @@
+/* MEASUREMENT BUILD ONLY: the ROWS_AB rotation (reverted after the device run). */
+#define POCKET_PROC_ROWS_AB 1
 #include "derby_detail.h"
 #include "app_session.h"
 #include "board.h"
