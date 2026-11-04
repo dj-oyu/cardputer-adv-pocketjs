@@ -230,12 +230,22 @@ static esp_err_t set_endian(bool le){
 }
 #if BOARD_ENDIAN_PROBE
 static int64_t endian_flip_us;
-/* At a window change (no strip in flight, RAMWR about to reopen). */
+static unsigned endian_phase;
+/* At a window change (no strip in flight, RAMWR about to reopen). Three
+ * 2-second phases: 0 panel MSB-first + CPU swap (today), 1 panel LSB-first +
+ * no swap (correct only if the panel honours ENDIAN), 2 panel MSB-first + no
+ * swap -- a deliberate mismatch that must look wrong, so the eye test is
+ * shown to be able to see one. lcd_le is the CPU side (put_strip). */
 static void endian_probe(void){
     const int64_t now=esp_timer_get_time();
     if(now-endian_flip_us<2000000)return;
     endian_flip_us=now;
-    if(set_endian(!lcd_le)==ESP_OK)ESP_LOGI("board","LCD_ENDIAN le=%d",lcd_le?1:0);
+    endian_phase=(endian_phase+1)%3;
+    const bool panel_le=endian_phase==1;
+    if(set_endian(panel_le)!=ESP_OK)return;
+    lcd_le=endian_phase!=0;
+    ESP_LOGI("board","LCD_ENDIAN phase=%u panel_le=%d cpu_le=%d",
+             endian_phase,panel_le?1:0,lcd_le?1:0);
 }
 #endif
 static esp_err_t kwrite(uint8_t reg, uint8_t value) {
