@@ -315,6 +315,15 @@ int main(int argc,char **argv) {
            exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
+#ifdef POCKET_PROC_VISIT_STATS
+    {extern unsigned long long pocket_proc_visits[3][2];
+     printf("proc visits 8-row: all=%llu B=%llu A=%llu | 4-row: all=%llu B=%llu A=%llu\n",
+            pocket_proc_visits[0][0],pocket_proc_visits[1][0],pocket_proc_visits[2][0],
+            pocket_proc_visits[0][1],pocket_proc_visits[1][1],pocket_proc_visits[2][1]);
+     extern unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
+     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",pocket_proc_visit_frames,
+            pocket_proc_entries_max,pocket_proc_list_max[0],pocket_proc_list_max[1]);}
+#endif
     if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d hspan=%d strip_rows=%u panel_digest=%08x\n",
                            g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,
                            g_ksn_proc_hspan,(unsigned)strip_rows_arm,panel_digest);

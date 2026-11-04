@@ -237,6 +237,55 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
         }
     }
 }
+#ifdef POCKET_PROC_VISIT_STATS
+/* Host diagnostic (docs/platform/lcd-dma-driver.md 9.5): for each committed
+ * frame, how many entries a renderer looks at to draw every 8-row band and
+ * every 4-row piece -- all of them (today), only those between the first and
+ * the last entry touching it (design B), only those touching it (design A). */
+unsigned long long pocket_proc_visits[3][2];   /* [all,B,A][8-row,4-row] */
+unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
+static void visit_stats(const ksn_proc_frame *frame){
+    enum{PIECES=(KSN_PROC_H+3)/4};
+    int first[PIECES],last[PIECES];unsigned touch[PIECES]={0},touchb[PROC_BANDS]={0};
+    for(unsigned p=0;p<PIECES;p++){first[p]=-1;last[p]=-1;}
+    unsigned i=0,cost,entries=0;
+    ksn_proc_segment g;bool pattern;
+    for(;;){
+        const unsigned start=i;
+        if(!ksn_proc_frame_next(frame,&i,&g,&pattern,&cost))break;
+        entries++;
+        const int ya=g.y0<g.y1?g.y0:g.y1,yb=g.y0^g.y1^ya;
+        if(yb<0||ya>=KSN_PROC_H)continue;
+        const unsigned p0=(unsigned)(ya<0?0:ya)/4u,p1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/4u;
+        for(unsigned p=p0;p<=p1;p++){
+            if(first[p]<0)first[p]=(int)start;
+            last[p]=(int)start;touch[p]++;
+        }
+        for(unsigned b=p0/2u;b<=p1/2u;b++)touchb[b]++;
+    }
+    pocket_proc_visit_frames++;
+    if(entries>pocket_proc_entries_max)pocket_proc_entries_max=entries;
+    unsigned list4=0,list8=0;
+    for(unsigned p=0;p<PIECES;p++)list4+=touch[p];
+    for(unsigned b=0;b<PROC_BANDS;b++)list8+=touchb[b];
+    if(list4>pocket_proc_list_max[1])pocket_proc_list_max[1]=list4;
+    if(list8>pocket_proc_list_max[0])pocket_proc_list_max[0]=list8;
+    for(unsigned p=0;p<PIECES;p++){
+        pocket_proc_visits[0][1]+=entries;
+        if(first[p]>=0)pocket_proc_visits[1][1]+=(unsigned)(last[p]-first[p]+1);
+        pocket_proc_visits[2][1]+=touch[p];
+    }
+    for(unsigned b=0;b<PROC_BANDS;b++){
+        const unsigned pa=2*b,pb=2*b+1<PIECES?2*b+1:2*b;
+        int f=first[pa],l=last[pa];
+        if(first[pb]>=0&&(f<0||first[pb]<f))f=first[pb];
+        if(last[pb]>l)l=last[pb];
+        pocket_proc_visits[0][0]+=entries;
+        if(f>=0)pocket_proc_visits[1][0]+=(unsigned)(l-f+1);
+        pocket_proc_visits[2][0]+=touchb[b];
+    }
+}
+#endif
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
 #ifdef POCKET_PROC_NO_BAND_DAMAGE
     /* Host A/B only (run_megademo_app_host.py --no-band-damage). */
@@ -321,6 +370,9 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     surface->damage=frame_damage(surface);
     band_signature(surface->candidate,&surface->candidate_sig);
     surface->sig_ready=true;
+#ifdef POCKET_PROC_VISIT_STATS
+    visit_stats(surface->candidate);
+#endif
     if(building_surface&&!surface->image_mode)
         return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
     ksn_result result=building_surface||surface->image_mode?

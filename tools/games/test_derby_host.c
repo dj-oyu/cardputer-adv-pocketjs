@@ -1232,6 +1232,15 @@ int main(int argc,char **argv){
     printf("finish: %s\n",finishes?finish[0]:"-");
     if(finishes>1)printf("replay: %s\n",finish[1]);
     printf("pixels hash %016llx\n",(unsigned long long)pixel_hash);
+#ifdef POCKET_PROC_VISIT_STATS
+    {extern unsigned long long pocket_proc_visits[3][2];
+     printf("proc visits 8-row: all=%llu B=%llu A=%llu | 4-row: all=%llu B=%llu A=%llu\n",
+            pocket_proc_visits[0][0],pocket_proc_visits[1][0],pocket_proc_visits[2][0],
+            pocket_proc_visits[0][1],pocket_proc_visits[1][1],pocket_proc_visits[2][1]);
+     extern unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
+     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",pocket_proc_visit_frames,
+            pocket_proc_entries_max,pocket_proc_list_max[0],pocket_proc_list_max[1]);}
+#endif
     printf("strip_rows=%u panel_digest=%08x\n",(unsigned)strip_rows_arm,(unsigned)strip_panel_digest);
     printf("guest heap (TLSF model, %zu-bit host): before eval %zu, peak during eval %zu (+%zu), after eval %zu, "
            "live peak after GC %zu, whole-run peak %zu; device limit 163840\n",sizeof(void *)*8,before,eval_peak,
