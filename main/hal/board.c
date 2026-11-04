@@ -228,6 +228,14 @@ static esp_err_t set_endian(bool le){
     if(e==ESP_OK)lcd_le=le;
     return e;
 }
+#if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB
+// Measurement build (board.h): flips between LSB first with no swap and MSB
+// first with the swap, at a frame boundary. Returns the new LSB-first state.
+int board_endian_ab_flip(void){
+    if(set_endian(!lcd_le)!=ESP_OK)return -1;
+    return lcd_le?1:0;
+}
+#endif
 #if BOARD_ENDIAN_PROBE
 static int64_t endian_flip_us;
 /* At a window change (no strip in flight, RAMWR about to reopen). */
@@ -459,6 +467,12 @@ esp_err_t board_init(void) {
     uint8_t format=0x55, orientation=0x60;
     ESP_ERROR_CHECK(command(0x3a, &format, 1));
     ESP_ERROR_CHECK(command(0x36, &orientation, 1));
+    // LSB-first pixels (RAMCTRL ENDIAN): strips go out as drawn, and put_strip
+    // copies instead of byte-swapping. This 4-wire ST7789 honours it -- the
+    // owner's eye test of 2026-11-04 (docs/platform/lcd-dma-driver.md 9.2),
+    // with a deliberate-mismatch phase to show the test could see a wrong one.
+    ESP_ERROR_CHECK(set_endian(true));
+    ESP_LOGI("board","LCD byte order: LSB first (no swap)");
     ESP_ERROR_CHECK(command(0x21, NULL, 0));
     ESP_ERROR_CHECK(command(0x29, NULL, 0));
     gpio_set_level(38, 1);

@@ -60,6 +60,14 @@ esp_err_t board_present_finish(void);
 #if BOARD_LCD_DEPTH2
 extern int g_board_depth;
 #endif
+// Measurement build: a same-binary A/B of the panel byte order (LSB first,
+// no swap) against MSB first with the swap. Call at a frame boundary.
+#ifndef BOARD_ENDIAN_AB
+#define BOARD_ENDIAN_AB 0
+#endif
+#if BOARD_ENDIAN_AB
+int board_endian_ab_flip(void);
+#endif
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 // Owner-task frame boundary, after transfer completion (success or failure).
 // Ends window reuse only; it does not drain DMA or acknowledge a transfer.

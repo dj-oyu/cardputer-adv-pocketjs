@@ -2690,6 +2690,18 @@ static esp_err_t present_frame(void) {
                          render_sum/30/1000.0,present_sum/30/1000.0);
                 g_board_depth=g_board_depth<2?2:1;
 #endif
+#if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB
+                /* Same-binary A/B of the panel byte order (board.h): the window
+                 * just printed ran with the order named here, then it flips. */
+                {
+                    static int endian_le=1;
+                    ESP_LOGI("kasane","ENDIAN_AB le=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
+                             endian_le,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes);
+                    endian_le=board_endian_ab_flip();
+                }
+#endif
 #if defined(POCKET_PROC_ROWS_AB)&&POCKET_PROC_ROWS_AB
                 /* Same-binary A/B of the Shiki image's row path and the covered
                  * band's skipped fill (ksn_render.h): the window just printed
