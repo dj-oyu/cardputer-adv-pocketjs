@@ -28,15 +28,15 @@ def main():
                    'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
              *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c','ksn_core.c',
-               'ksn_render.c','ksn_blend_pie.c','ksn_shiki.c')),
-             ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',
+               'ksn_render.c','ksn_blend_pie.c','ksn_shiki.c','ksn_mesh_depth.c')),
+             ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',
              ROOT/'main/pocket/pocket_shiki_api.c',
              # pocket.shapes' native line API is pocket_proc.c's; nothing
              # here draws through it, the weak stand-ins only satisfy the link
              # for a pocket_proc.c that lacks it.
              ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
-    command=[cc,'-std=gnu11','-O'+args.opt,'-g','-fsanitize=address,undefined','-fno-sanitize-recover',
+    command=[cc,'-std=gnu11','-O'+args.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-sanitize-recover',
              '-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),

@@ -34,6 +34,8 @@ set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 list(APPEND KASANE_SOURCES
+    "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
+    "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
     "pocket/pocket_proc.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_shiki.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
@@ -582,3 +584,7 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_mbedtls_add_tx_
 # Compile-time stack evidence for the native endpoint; no runtime instrumentation.
 set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "pocket/app_control.c"
              APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+
+# Keep managed mesh F32 evaluation and coverage order consistent with host.
+set_source_files_properties(ayatsuri/ayatsuri_model.c ayatsuri/ayatsuri_visibility.c ui/kasane/ksn_mesh_depth.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_property(SOURCE ui/kasane/ksn_procedural.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")

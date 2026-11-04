@@ -1,4 +1,5 @@
 #include "pocket_proc.h"
+#include "ui/kasane/ksn_mesh_depth.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
@@ -104,6 +105,7 @@ typedef struct {
 } proc_band_sig;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
+    ksn_mesh_snapshot depth_candidate,depth_committed;
     proc_band_sig candidate_sig,committed_sig;
     uint16_t candidate_color,committed_color;
     bool pending,has_committed,repair_required,image_mode;
@@ -113,6 +115,29 @@ typedef struct {
     uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (no option) */
 } proc_surface;
 static proc_surface surfaces[PROC_SURFACES];
+/* Native heap, separately accounted from guest and Shiki heaps. */
+static float *depth_workspace;
+static unsigned depth_rows;
+#ifdef KSN_PROC_HOST_TEST
+static int depth_fail_after=-1;
+void pocket_proc_mesh_fail_after(int n){depth_fail_after=n;}
+#endif
+static void *depth_calloc(size_t n,size_t size){
+#ifdef KSN_PROC_HOST_TEST
+    if(depth_fail_after==0)return NULL;
+    if(depth_fail_after>0)--depth_fail_after;
+#endif
+    return calloc(n,size);
+}
+void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
+    if(!out)return;
+    *out=(pocket_proc_mesh_bytes){.workspace=depth_rows*KSN_PROC_W*sizeof(float),.metadata=sizeof(ksn_mesh_snapshot)*2*PROC_SURFACES+sizeof depth_workspace+sizeof depth_rows};
+    for(unsigned i=0;i<PROC_SURFACES;i++){
+        out->candidate+=surfaces[i].depth_candidate.packets.capacity;
+        out->committed+=surfaces[i].depth_committed.packets.capacity;
+    }
+}
+
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
 /* An image surface's raster cache: one 8-row band of pixels, taken with an
@@ -182,7 +207,8 @@ static proc_slot *find_slot(uint32_t handle){
     return NULL;
 }
 static ksn_rect frame_damage(const proc_surface *surface){
-    if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
+    if(surface->depth_candidate.enabled||surface->depth_committed.enabled||
+       !surface->has_committed||surface->candidate_color!=surface->committed_color)
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
     int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
     const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
@@ -245,7 +271,8 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
 #endif
     if(index>=PROC_SURFACES||!surfaces[index].sig_ready)return false;
     const proc_surface *s=&surfaces[index];
-    const bool all=!s->has_committed||s->candidate_color!=s->committed_color;
+    const bool all=s->depth_candidate.enabled||s->depth_committed.enabled||
+        !s->has_committed||s->candidate_color!=s->committed_color;
     *bands=0;
     for(unsigned b=0;b<PROC_BANDS;b++){
         const proc_band_sig *n=&s->candidate_sig,*o=&s->committed_sig;
@@ -276,22 +303,70 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     surface->candidate->ready=false;
     surface->candidate->ext=0;
     surface->sig_ready=false;
+    surface->depth_candidate.enabled=false;surface->depth_candidate.packets.size=0;
+    surface->depth_candidate.packets.packets=0;surface->depth_candidate.work=0;
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
     building=true;
     return JS_UNDEFINED;
 }
+/* Explicit opaque mesh scope; old beginFrame and painter APIs keep their
+ * serialization budget and behavior. The caller chooses byte/work budgets.
+ * Native allocations are bounded; no guest/PSRAM capacity is inferred. */
+static JSValue begin_mesh_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="kasane.shiki.beginMeshFrame";
+    uint32_t color,bytes,work,rows;unsigned index=0;
+    if((argc!=4&&argc!=5)||!integer(ctx,argv[0],UINT16_MAX,&color)||
+       !integer(ctx,argv[1],65536,&bytes)||!bytes||
+       !integer(ctx,argv[2],8000000,&work)||!work||
+       !integer(ctx,argv[3],8,&rows)||(rows!=1&&rows!=8)||
+       (argc==5&&!surface_index(ctx,argv[4],&index)))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected color, bytes(1..65536), work(1..8000000), rows(1|8), optional surface");
+    if(any_pending()||any_repair())return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
+    proc_surface *surface=&surfaces[index];
+    uint8_t *fresh=NULL;float *scratch=NULL;
+    if(surface->depth_candidate.packets.capacity!=bytes){fresh=depth_calloc(1,bytes);if(!fresh)goto oom;}
+    if(depth_rows<rows){scratch=depth_calloc(KSN_PROC_W*rows,sizeof(float));if(!scratch)goto oom;}
+    JSValue args[2]={argv[0],argc==5?argv[4]:JS_UNDEFINED};
+    JSValue result=begin_impl(ctx,self,argc==5?2:1,args);
+    if(JS_IsException(result)){free(fresh);free(scratch);return result;}
+    if(fresh){free(surface->depth_candidate.packets.data);surface->depth_candidate.packets.data=fresh;surface->depth_candidate.packets.capacity=bytes;}
+    if(scratch){free(depth_workspace);depth_workspace=scratch;depth_rows=rows;}
+    surface->depth_candidate.enabled=true;surface->depth_candidate.work_limit=work;
+    return JS_UNDEFINED;
+oom:
+    free(fresh);free(scratch);
+    return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"bounded depth storage allocation failed");
+}
+bool pocket_proc_native_mesh_depth(void){return building&&surfaces[building_surface].depth_candidate.enabled;}
+JSValue pocket_proc_native_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p,const float *depth,uint16_t node){
+    if(!pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_BUSY,"beginMeshFrame required");
+    if(!ksn_mesh_append(&surfaces[building_surface].depth_candidate,p,depth,node))
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported or over-budget opaque mesh");
+    image_band_valid=false;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_sided_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p,
+        const float *depth,const uint16_t *colors,const uint8_t bits[8],uint16_t node){
+    if(!pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_BUSY,"beginMeshFrame required");
+    if(!ksn_mesh_append_sided(&surfaces[building_surface].depth_candidate,p,depth,colors,bits,node))
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported or over-budget sided mesh");
+    image_band_valid=false;return JS_UNDEFINED;
+}
 /* Native drawing straight into the candidate (pocket_shape.c): draw()'s
  * frame limits without a plan or the VM. */
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
-    if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
+    if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant procedural call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     const ksn_proc_frame *c=surfaces[building_surface].candidate;
-    *mark=(pocket_proc_mark){c->count,c->raster_steps,c->ext,(uint8_t)building_surface};
+    *mark=(pocket_proc_mark){.count=c->count,.raster=c->raster_steps,.ext=c->ext,.surface=(uint8_t)building_surface,
+        .depth_bytes=surfaces[building_surface].depth_candidate.packets.size,
+        .depth_packets=surfaces[building_surface].depth_candidate.packets.packets,
+        .depth_work=surfaces[building_surface].depth_candidate.work};
     image_band_valid=false;
     return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
+    if(pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     if(x0< -480||x0>720||y0< -480||y0>720||x1< -480||x1>720||y1< -480||y1>720){
         building=false;
@@ -312,12 +387,129 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     ksn_proc_frame *c=surfaces[mark->surface<PROC_SURFACES?mark->surface:0].candidate;
     if(!c)return;
     c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;
+    ksn_mesh_snapshot *d=&surfaces[mark->surface<PROC_SURFACES?mark->surface:0].depth_candidate;
+    d->packets.size=mark->depth_bytes;d->packets.packets=mark->depth_packets;d->work=mark->depth_work;
+    image_band_valid=false;
+}
+JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *p){
+    if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_ellipsoid_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid or singular analytic ellipsoid");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1);
+    if(KSN_PROC_ELLIPSOID_ENTRIES>surface_segments(&surfaces[building_surface])-c->count||
+       cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"analytic patch frame limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_ELLIPSOID),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    /* Zero the final entry's unused bytes as well as explicit packet padding:
+     * band hashes must not depend on previous frame storage. */
+    memset(c->segments+c->count,0,KSN_PROC_ELLIPSOID_WORDS*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,sizeof *p);
+    c->count+=(uint16_t)KSN_PROC_ELLIPSOID_WORDS;
+    c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *p){
+    if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
+    if(js_call_active)return failure(ctx,op,POCKET_ERR_BUSY,"reentrant procedural call");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_clipped_ellipsoid_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid clipped ellipsoid or convex inclusion");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1),limit=surface_segments(&surfaces[building_surface]);
+    /* This new append is NOT_APPLIED on failure, including quota: do not
+     * poison building as older analytic endpoints historically do. */
+    if(c->count>limit||KSN_PROC_CLIPPED_ENTRIES>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"clipped patch frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_CLIPPED_ELLIPSOID),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,KSN_PROC_CLIPPED_WORDS*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,sizeof *p);
+    c->count+=(uint16_t)KSN_PROC_CLIPPED_WORDS;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p){
+    if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_blend_bounds(p,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid or singular blended ellipsoids");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p->header.count,
+        words=(unsigned)KSN_PROC_BLEND_WORDS(p->header.count);
+    if(words+1u>surface_segments(&surfaces[building_surface])-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"blended surface frame limit");
+    }
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_BLEND_ELLIPSOIDS),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,words*sizeof c->segments[0]);
+    memcpy(c->segments+c->count,p,KSN_PROC_BLEND_BYTES(p->header.count));
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p,
+        const ksn_proc_blend_region_mask *mask){
+    if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;
+    if(!ksn_proc_blend_region_bounds(p,mask,&left,&top,&right,&bottom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid blended region");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned cost=(unsigned)(right-left+1)*(unsigned)(bottom-top+1)*p->header.count,
+        words=(unsigned)KSN_PROC_BLEND_REGION_WORDS(p->header.count),limit=surface_segments(&surfaces[building_surface]);
+    if(c->count>limit||words+1u>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"blended region frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_BLEND_REGION),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    memset(c->segments+c->count,0,words*sizeof c->segments[0]);
+    const size_t bytes=KSN_PROC_BLEND_BYTES(p->header.count);
+    memcpy(c->segments+c->count,p,bytes);
+    memcpy((uint8_t *)(c->segments+c->count)+bytes,mask,sizeof *mask);
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
+}
+JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p){
+    if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
+    if(js_call_active)return failure(ctx,op,POCKET_ERR_BUSY,"reentrant procedural call");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    int left,top,right,bottom;unsigned cost;
+    if(!ksn_proc_gouraud_bounds(p,&left,&top,&right,&bottom,&cost))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid indexed Gouraud patch");
+    if(left>right||top>bottom)return JS_UNDEFINED;
+    ksn_proc_frame *c=surfaces[building_surface].candidate;
+    const unsigned words=(unsigned)KSN_PROC_GOURAUD_WORDS(p->header.vertices,p->header.triangles,p->header.holes),
+        limit=surface_segments(&surfaces[building_surface]);
+    if(c->count>limit||words+1u>limit-c->count||cost>(unsigned)UINT16_MAX-c->raster_steps)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"Gouraud patch frame limit");
+    c->segments[c->count++]=(ksn_proc_segment){(int16_t)(left+KSN_PROC_EXT_GOURAUD_PATCH),
+        (int16_t)top,(int16_t)right,(int16_t)bottom,0};
+    uint8_t *out=(uint8_t *)(c->segments+c->count);
+    memset(out,0,words*sizeof c->segments[0]);
+    memcpy(out,&p->header,sizeof p->header);out+=sizeof p->header;
+    size_t bytes=p->header.vertices*sizeof p->vertices[0];memcpy(out,p->vertices,bytes);out+=bytes;
+    bytes=p->header.triangles*3u*sizeof p->indices[0];memcpy(out,p->indices,bytes);out+=bytes;
+    bytes=p->header.holes*sizeof p->clips[0];memcpy(out,p->clips,bytes);
+    c->count+=(uint16_t)words;c->raster_steps=(uint16_t)(c->raster_steps+cost);c->ext=1;
+    image_band_valid=false;return JS_UNDEFINED;
 }
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.shiki.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
+    if(surface->depth_candidate.enabled&&surface->candidate->count)
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"mesh scope cannot contain painter entries");
     surface->damage=frame_damage(surface);
     band_signature(surface->candidate,&surface->candidate_sig);
     surface->sig_ready=true;
@@ -350,6 +542,9 @@ static JSValue guarded(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 }
 static JSValue js_begin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,begin_impl);
+}
+static JSValue js_begin_mesh(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return guarded(ctx,self,argc,argv,begin_mesh_impl);
 }
 #ifdef POCKET_PROC_DRAW_HOOK
 bool pocket_proc_hook_dry;
@@ -473,6 +668,7 @@ JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,u
 JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
                                       unsigned index){
     const char *op="kasane.shiki.draw";
+    if(pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     const uint32_t t_in=pocket_cycles();
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
@@ -531,6 +727,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
 // The frame's functions on kasane.shiki (pocket_shiki_api.c).
 static const JSCFunctionListEntry frame_methods[]={
     JS_CFUNC_DEF("beginFrame",1,js_begin),
+    JS_CFUNC_DEF("beginMeshFrame",4,js_begin_mesh),
     JS_CFUNC_DEF("commit",0,js_commit),
     JS_CFUNC_DEF("resource",0,js_resource),
     JS_CFUNC_DEF("createSurface",0,js_create_surface),
@@ -546,8 +743,10 @@ void pocket_proc_reset(void){
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);shiki_or_sys_free(surfaces[i].committed);
+        free(surfaces[i].depth_candidate.packets.data);free(surfaces[i].depth_committed.packets.data);
         surfaces[i]=(proc_surface){0};
     }
+    free(depth_workspace);depth_workspace=NULL;depth_rows=0;
     shiki_or_sys_free(image_band_buf);image_band_buf=NULL;
     shiki_or_sys_free(shiki_vm);shiki_vm=NULL;
     image_band_valid=false;image_band_frame=NULL;
@@ -621,6 +820,8 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
 #endif
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
         if(frame&&!ksn_proc_render_band(frame,image_band,band_y,(int)rows))return KSN_INVALID;
+        const ksn_mesh_snapshot *mesh=surface->pending?&surface->depth_candidate:&surface->depth_committed;
+        if(mesh->enabled&&!ksn_mesh_render(mesh,image_band,band_y,rows,depth_workspace,depth_rows))return KSN_INVALID;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
         image_band_cycles+=esp_cpu_get_cycle_count()-band_start;
         image_band_count++;
@@ -657,7 +858,9 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
     for(unsigned i=0;i<(unsigned)rows*KSN_PROC_W;i++)pixels[i]=color;
-    return !frame||ksn_proc_render_band(frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
+    if(frame&&!ksn_proc_render_band(frame,pixels,y,rows))return KSN_INVALID;
+    const ksn_mesh_snapshot *mesh=surface->pending?&surface->depth_candidate:&surface->depth_committed;
+    return !mesh->enabled||ksn_mesh_render(mesh,pixels,y,rows,depth_workspace,depth_rows)?KSN_OK:KSN_INVALID;
 }
 void pocket_proc_present_result(ksn_result result){
     proc_surface *surface=&surfaces[pending_surface];
@@ -668,6 +871,8 @@ void pocket_proc_present_result(ksn_result result){
         if(surface->pending){
             ksn_proc_frame *old=surface->committed;
             surface->committed=surface->candidate;surface->candidate=old;
+            ksn_mesh_snapshot old_depth=surface->depth_committed;
+            surface->depth_committed=surface->depth_candidate;surface->depth_candidate=old_depth;
             surface->committed_color=surface->candidate_color;
             surface->committed_sig=surface->candidate_sig;
             surface->has_committed=true;surface->pending=false;

@@ -70,7 +70,7 @@ static music_state *active;
 static pocket_app_view_host current_host;
 static uint32_t music_serial;
 static JSClassID music_class;
-static JSRuntime *music_rt;
+static pocket_class_owner_t music_owner;
 static const JSClassDef music_def={.class_name="Kasane"};
 #if defined(KASANE_P0_PROBE) && !defined(KASANE_P1_OUTPUT_OVERLAY_PROBE)
 static uint32_t p0_time_light_patch,p0_time_light_same,p0_time_light_fallback;
@@ -895,7 +895,7 @@ static const JSCFunctionListEntry presenter_methods[]={
 
 static bool music_class_ready(JSContext *ctx){
     JSRuntime *rt=JS_GetRuntime(ctx);
-    if(!pocket_api_class_ready(rt,&music_rt,&music_class)){
+    if(!pocket_api_class_ready(rt,&music_owner,&music_class)){
         JS_NewClassID(rt,&music_class);
         if(JS_NewClass(rt,music_class,&music_def)<0)return false;
     }
