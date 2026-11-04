@@ -2513,12 +2513,8 @@ static esp_err_t present_frame(void) {
         // damaged columns of a band. It is withdrawn while board_capture is
         // dumping rows, because those PIX lines print all 240 columns of the
         // shared strip and only the window would have been repainted.
-#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
-        /* Design 0 (board.h mode 2): 4-row pieces from the strip's halves. */
+        /* Design 0 (board.h): 4-row pieces from the strip's halves. */
         const uint16_t strip_rows=(uint16_t)board_strip_rows();
-#else
-        const uint16_t strip_rows=STRIP_H;
-#endif
         ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
                               .width=LCD_W,.height=LCD_H,.strip_rows=strip_rows,.text=&ksn_font_port,
                               .present_rect=board_capture_active()?NULL:kasane_send_rect};

@@ -65,7 +65,21 @@ int g_board_swap_into = 1;
 // of memcpy is ~10 us against the ~440 us of SPI the copy lets the CPU skip.
 // One TX payload; every write waits for the exact previous descriptor.
 // Native UI loses copy/DMA overlap; the stable shared drawing strip remains.
+#if !(defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF)
 static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
+#else
+// Design 0 (board.h, docs/platform/lcd-dma-driver.md 9.5): no tx_buf. The
+// strip's two 4-row halves take turns: one is sent from where it was drawn
+// while the other is drawn. half_lent is the half board_strip_next handed out
+// last (a present of it goes out asynchronously); half_from the one in
+// flight. Any other buffer -- a screen's own whole strip -- is sent and
+// finished before board_present returns, since its caller draws into it
+// again at once.
+static uint16_t *half_lent, *half_from;
+#if (defined(BOARD_BUF_AB)&&BOARD_BUF_AB)||(defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2)
+#error "BOARD_STRIP_HALF has no tx_buf: the measurement builds need it off"
+#endif
+#endif
 // The panel's byte order (RAMCTRL 0xB0, second parameter, ENDIAN = bit 3).
 // false: the ST7789's reset order, MSB first, so every strip is byte-swapped
 // on its way out. true: LSB first, the order the CPU draws in, so the strip
@@ -100,7 +114,21 @@ static bool zero_copy_strip(const uint16_t *pixels) {
            (pixels == shared || pixels == tx_buf || pixels == shared + 4 * LCD_W);
 }
 #endif
+int board_strip_rows(void) {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    return 4;
+#elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    return g_board_half ? 4 : STRIP_H;
+#else
+    return STRIP_H;
+#endif
+}
 uint16_t *board_strip_next(void) {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    // At most one strip is in flight (queue_size 1), so the other half is free.
+    half_lent = (tx_inflight && half_from == shared) ? shared + 4 * LCD_W : shared;
+    return half_lent;
+#endif
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
     // At most one strip is in flight (queue_size 1), so the other is free.
     if (g_board_half) return (tx_inflight && tx_from == shared) ? shared + 4 * LCD_W : shared;
@@ -305,7 +333,7 @@ uint32_t board_lcd_direct_underruns(void) { return lcd_spi_direct_underruns(); }
 #endif
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
 int board_buf_mode(void) { return g_board_ring ? 3 : g_board_half ? 2 : g_board_zero_copy ? 1 : 0; }
-int board_strip_rows(void) { return g_board_half ? 4 : STRIP_H; }
+
 uint32_t board_buf_underruns(void) { return lcd_spi_direct_underruns(); }
 int board_buf_mode_set(int mode) {
     if (tx_reap() != ESP_OK) return -1;
@@ -718,6 +746,12 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         // Drawing/overlays may overlap DMA; the single TX copy starts only
         // after ownership is returned by the reap above.
         DD_OPEN(copy,DD_TX_COPY);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+        // Sent from where it was drawn; put_strip in place is nothing for
+        // LSB-first pixels and the swap otherwise.
+        uint16_t *panel = pixels;
+        put_strip(pixels,pixels,count);
+#else
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
         uint16_t *panel = tx_slot_buf[tx_next];
 #else
@@ -737,6 +771,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             put_strip(pixels,pixels,count);
             memcpy(panel, pixels, bytes);
         }
+#endif
 #ifdef KASANE_P0_BUS_PROBE
         ksn_p0_bus_phase_sample(KSN_P0_BUS_SWAP,
             (uint32_t)(esp_timer_get_time()-swap_began),false);
@@ -783,6 +818,9 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
             tx_from = panel;
 #endif
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+            half_from = panel;
+#endif
         }
     } else {
         DD_OPEN(copy,DD_TX_COPY);
@@ -795,6 +833,12 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0);
         }
     }
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    // A screen's own strip (not a lent half): finished before it is drawn
+    // into again.
+    if (pixels != half_lent && e == ESP_OK) e = tx_reap();
+    half_lent = NULL;
+#endif
     // Where the pointer lands once these rows are in. At the bottom of the
     // window it wraps to the window's own top, which is only row 0 when this
     // frame started there, so the end of the panel always re-windows. A failed
@@ -865,9 +909,31 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     e=tx_reap();
 #endif
     if(e!=ESP_OK){next_row=-1;return e;}
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    const bool lent = pixels == half_lent;
+    half_lent = NULL;
+    if (!lent) {
+        // A screen's own strip: its rows outside the window are still the
+        // caller's, so nothing is packed in place. Row by row, finished here.
+        for (int r = 0; r < rows && e == ESP_OK; r++) {
+            DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
+            e = tx(true, pixels + r * LCD_W + x, (size_t)cols * 2u);
+            DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+        }
+        next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+        window_x=x;window_cols=cols;
+        return e;
+    }
+#endif
     DD_OPEN(copy,DD_TX_COPY);
     DD_ADD(DD_TX_COPY_BYTES,bytes);
-#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    // A lent half, packed in place: row r moves from r*240+x down to r*cols,
+    // never past a row still to be read.
+    uint16_t *panel = pixels;
+    for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
+    if (0)
+#elif defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     uint16_t *panel = tx_slot_buf[tx_next];
 #else
     uint16_t *panel = tx_buf;
@@ -915,6 +981,9 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
 #endif
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
             tx_from = panel;
+#endif
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+            half_from = panel;
 #endif
         }
     } else {

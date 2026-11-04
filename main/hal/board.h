@@ -23,6 +23,15 @@ uint16_t *board_strip(void);
 // returns the one that is not in flight. Needs LSB-first pixels (no swap).
 // Off (0) it returns board_strip(). Frame boundaries only may change it.
 uint16_t *board_strip_next(void);
+// Design 0 (docs/platform/lcd-dma-driver.md 9.5): no tx_buf. Kasane and the
+// home loop ask for 4-row strips with board_strip_next and send them from
+// where they were drawn; any other screen's whole strip goes out and is
+// finished before board_present returns. 0: today's copy into tx_buf.
+#ifndef BOARD_STRIP_HALF
+#define BOARD_STRIP_HALF 1
+#endif
+// The rows of the strips board_strip_next hands out (4 with BOARD_STRIP_HALF).
+int board_strip_rows(void);
 // TEMPORARY A/B switch for the panel transfer (see board.c): 1 = queue the strip
 // and reap the previous one on the next call (asynchronous, the shipping path),
 // 0 = the blocking polling transfer this file has always used. Both paths live in
@@ -90,8 +99,6 @@ int board_endian_ab_flip(void);
 extern int g_board_zero_copy;
 int board_buf_mode_set(int mode);
 int board_buf_mode(void);
-// The rows of the strips the board hands out now: 4 in mode 2, else 8.
-int board_strip_rows(void);
 uint32_t board_buf_underruns(void);
 #endif
 #if BOARD_LCD_DIRECT
