@@ -87,18 +87,23 @@ int g_board_zero_copy = 0;
 // Design 2 (board.h): strips go into lcd_spi.c's row ring, built from
 // tx_buf's 8 rows and these 4 (+1,920 B).
 static int g_board_ring = 0;
+// Design 0 (board.h): the strip's two 4-row halves take turns (Kasane draws
+// 4-row pieces), so one 8-row buffer both draws and sends.
+static int g_board_half = 0;
 static bool ring_ready;
 static uint16_t ring_extra[4 * LCD_W] __attribute__((aligned(16)));
 static uint16_t *tx_from;
 // A strip that can be sent where it lies: one of the two slots, pixels LSB
 // first. Anything else (another screen's buffer) takes the copy.
 static bool zero_copy_strip(const uint16_t *pixels) {
-    return g_board_zero_copy && lcd_le && (pixels == shared || pixels == tx_buf);
+    return g_board_zero_copy && lcd_le &&
+           (pixels == shared || pixels == tx_buf || pixels == shared + 4 * LCD_W);
 }
 #endif
 uint16_t *board_strip_next(void) {
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
     // At most one strip is in flight (queue_size 1), so the other is free.
+    if (g_board_half) return (tx_inflight && tx_from == shared) ? shared + 4 * LCD_W : shared;
     if (g_board_zero_copy) return (tx_inflight && tx_from == shared) ? tx_buf : shared;
 #endif
     return shared;
@@ -299,12 +304,13 @@ int board_lcd_direct_set(int on) {
 uint32_t board_lcd_direct_underruns(void) { return lcd_spi_direct_underruns(); }
 #endif
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
-int board_buf_mode(void) { return g_board_ring ? 2 : g_board_zero_copy ? 1 : 0; }
+int board_buf_mode(void) { return g_board_ring ? 3 : g_board_half ? 2 : g_board_zero_copy ? 1 : 0; }
+int board_strip_rows(void) { return g_board_half ? 4 : STRIP_H; }
 uint32_t board_buf_underruns(void) { return lcd_spi_direct_underruns(); }
 int board_buf_mode_set(int mode) {
     if (tx_reap() != ESP_OK) return -1;
-    if (g_board_ring && mode != 2) lcd_spi_ring_leave();
-    if (mode == 2 && !g_board_ring) {
+    if (g_board_ring && mode != 3) lcd_spi_ring_leave();
+    if (mode == 3 && !g_board_ring) {
         if (!ring_ready) {
             uint16_t *rows[LCD_SPI_RING_ROWS];
             for (int k = 0; k < 8; k++) rows[k] = tx_buf + k * LCD_W;
@@ -315,8 +321,9 @@ int board_buf_mode_set(int mode) {
         }
         lcd_spi_ring_enter();
     }
-    g_board_ring = mode == 2;
-    g_board_zero_copy = mode == 1;
+    g_board_ring = mode == 3;
+    g_board_half = mode == 2;
+    g_board_zero_copy = mode == 1 || mode == 2;
     return mode;
 }
 #endif

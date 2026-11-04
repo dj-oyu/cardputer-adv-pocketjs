@@ -151,14 +151,26 @@ static bool eval(const char *source,size_t len,const char *name) {
     return ok;
 }
 
-static uint16_t *get_strip(void *o) { (void)o; return strip_pixels; }
+/* KSN_STRIP_ROWS=4: the port of design 0 (docs/platform/lcd-dma-driver.md
+ * 9.5): 4-row pieces, the two halves of the one strip in turn, each poisoned
+ * before it is handed out so a piece that read pixels it did not draw would
+ * move the digest. */
+static uint16_t strip_rows_arm=8;
+static unsigned strip_half;
+static uint16_t *get_strip(void *o) {
+    (void)o;
+    if(strip_rows_arm!=4) return strip_pixels;
+    uint16_t *half=strip_pixels+(strip_half++&1u)*4u*240u;
+    for(unsigned i=0;i<4u*240u;i++)half[i]=0xdead;
+    return half;
+}
 static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pixels) {
     (void)o; memcpy(panel+y*240,pixels,rows*240*sizeof(*pixels)); return KSN_OK;
 }
 static bool present(void) {
     if(!pocket_kasane_needs_present()) return true;
     ksn_display_port port={.strip=get_strip,.present=send_strip,
-                           .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
+                           .width=240,.height=135,.strip_rows=strip_rows_arm,.text=&ksn_font_port};
     ksn_render_stats stats;
     return pocket_kasane_present(&port,&stats)==KSN_OK;
 }
@@ -190,7 +202,9 @@ int main(int argc,char **argv) {
     /* KSN_PROC_HSPAN=0: the band renderer walks horizontal lines too. */
     const char *hspan_arm=getenv("KSN_PROC_HSPAN");
     if(hspan_arm)g_ksn_proc_hspan=strcmp(hspan_arm,"0")!=0;
-    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm;
+    const char *strip_arm=getenv("KSN_STRIP_ROWS");
+    if(strip_arm)strip_rows_arm=(uint16_t)atoi(strip_arm);
+    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");
@@ -301,9 +315,9 @@ int main(int argc,char **argv) {
            exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
-    if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d hspan=%d panel_digest=%08x\n",
+    if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d hspan=%d strip_rows=%u panel_digest=%08x\n",
                            g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,
-                           g_ksn_proc_hspan,panel_digest);
+                           g_ksn_proc_hspan,(unsigned)strip_rows_arm,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&!bad_suspect&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
               pressure_events>0&&pressure_trims>0&&

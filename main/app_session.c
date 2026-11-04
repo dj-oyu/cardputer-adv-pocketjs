@@ -570,7 +570,7 @@ static esp_err_t kasane_dma_submit(kasane_display_t *display,int x,int y,int col
     esp_err_t result=g_board_depth<2?kasane_drain(display):ESP_OK;
 #elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
     /* The ring (mode 2) waits for the rows it reuses, inside the board. */
-    esp_err_t result=board_buf_mode()==2?ESP_OK:kasane_drain(display);
+    esp_err_t result=board_buf_mode()==3?ESP_OK:kasane_drain(display);
 #else
     esp_err_t result=kasane_drain(display);
 #endif
@@ -2513,8 +2513,14 @@ static esp_err_t present_frame(void) {
         // damaged columns of a band. It is withdrawn while board_capture is
         // dumping rows, because those PIX lines print all 240 columns of the
         // shared strip and only the window would have been repainted.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+        /* Design 0 (board.h mode 2): 4-row pieces from the strip's halves. */
+        const uint16_t strip_rows=(uint16_t)board_strip_rows();
+#else
+        const uint16_t strip_rows=STRIP_H;
+#endif
         ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
-                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H,.text=&ksn_font_port,
+                              .width=LCD_W,.height=LCD_H,.strip_rows=strip_rows,.text=&ksn_font_port,
                               .present_rect=board_capture_active()?NULL:kasane_send_rect};
         ksn_render_stats stats;
 #ifdef KASANE_D4_PIXEL_APP_PROBE
@@ -2716,7 +2722,7 @@ static esp_err_t present_frame(void) {
                              (unsigned)stats.transferred_bytes,
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                              (unsigned)board_buf_underruns());
-                    int next=board_buf_mode_set((mode+1)%3);
+                    int next=board_buf_mode_set((mode+1)%3);   /* copy, 1', 0 */
                     if(next>=0)mode=next;
                 }
 #endif

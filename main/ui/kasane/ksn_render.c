@@ -1950,7 +1950,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
 #endif
     DD_OPEN(prepare,DD_RENDER_PREPARE);
     if(!core||!display||!stats||!display->strip||!display->present||
-       display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
+       display->width!=240||display->height!=135||
+       (display->strip_rows!=8&&display->strip_rows!=4))return KSN_INVALID;
     stretch_map.active=false;
     *stats=(ksn_render_stats){0};
     /* One frame's worth of decoded commands; a retried frame starts over. */
@@ -2099,15 +2100,24 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     bool first_band=true;
     for(unsigned band=0;band<17;band++){
         if(!(damage.bands&(1u<<band)))continue;
-        /* The port may hand out a different strip per band (the board's two
-         * buffers in turn, so a band is drawn while the last one is sent
-         * from the other). The first came above, before any band went out. */
+        /* A port with strip_rows 4 gets each 8-row band as two 4-row pieces,
+         * each drawn, then presented, on its own (the band stays the unit of
+         * damage, occlusion and stats). The board then needs only one 8-row
+         * buffer: one half is sent while the other is drawn
+         * (docs/platform/lcd-dma-driver.md 9.5). */
+        const int band_y=(int)band*8,band_rows=band==16?7:8;
+        const int piece=display->strip_rows==4?4:8;
+        for(int piece_y=band_y;piece_y<band_y+band_rows;piece_y+=piece){
+        /* The port may hand out a different strip per piece (the board's
+         * buffers in turn, so one is drawn while the last is sent from the
+         * other). The first came above, before anything went out. */
         if(!first_band){
             pixels=display->strip(display->ctx);
             if(!pixels){ksn_core_failed(core,frame.ticket);return KSN_OOM;}
         }
         first_band=false;
-        int y=(int)band*8,rows=band==16?7:8;
+        int y=piece_y,rows=band_y+band_rows-piece_y;
+        if(rows>piece)rows=piece;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
         DD_OPEN(backdrop,DD_BACKDROP);
         if(load_backdrop&&!(next_system_opaque&(1u<<band))){
@@ -2390,8 +2400,9 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
         DD_CLOSE(present);
         if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
-        stats->bands|=1u<<band;
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
+        }
+        stats->bands|=1u<<band;
     }
 #ifndef KASANE_DMA_OVERLAP
     return ksn_core_presented(core,frame.ticket);

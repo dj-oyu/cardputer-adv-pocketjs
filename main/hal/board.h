@@ -84,11 +84,14 @@ int board_endian_ab_flip(void);
 #define BOARD_BUF_AB 0
 #endif
 #if BOARD_BUF_AB
-// Measurement build: 0 copy (today), 1 zero-copy strips, 2 the row ring
-// (docs/platform/lcd-dma-driver.md 9.4). At a frame boundary only.
+// Measurement build: 0 copy (today), 1 zero-copy strips (1'), 2 the strip's
+// 4-row halves (design 0), 3 the row ring (docs/platform/lcd-dma-driver.md
+// 9.4-9.5). At a frame boundary only.
 extern int g_board_zero_copy;
 int board_buf_mode_set(int mode);
 int board_buf_mode(void);
+// The rows of the strips the board hands out now: 4 in mode 2, else 8.
+int board_strip_rows(void);
 uint32_t board_buf_underruns(void);
 #endif
 #if BOARD_LCD_DIRECT
