@@ -564,7 +564,13 @@ static esp_err_t kasane_drain(kasane_display_t *display) {
 }
 static esp_err_t kasane_dma_submit(kasane_display_t *display,int x,int y,int cols,
                                    int rows,uint16_t *pixels) {
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    /* Depth 2 (board.h): the board waits for a free slot, not for the band
+     * before. Failures still surface at the next submit or at finish. */
+    esp_err_t result=g_board_depth<2?kasane_drain(display):ESP_OK;
+#else
     esp_err_t result=kasane_drain(display);
+#endif
     if(result!=ESP_OK)return result;
     result=board_present_submit(x,y,cols,rows,pixels);
     return result;
@@ -2675,6 +2681,14 @@ static esp_err_t present_frame(void) {
                  * build only (POCKET_PROC_HSPAN_AB 1); pixels are the same. */
                 ESP_LOGI("kasane","HSPAN_AB hspan=%d render_ms=%.2f",g_ksn_proc_hspan,render_sum/30/1000.0);
                 g_ksn_proc_hspan=!g_ksn_proc_hspan;
+#endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+                /* Same-binary A/B of the LCD queue depth (board.h): the window
+                 * just printed ran at the depth named here, then it flips. */
+                ESP_LOGI("kasane","DEPTH_AB depth=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f",
+                         g_board_depth,ticks?turn_sum/ticks/1000.0:0.0,
+                         render_sum/30/1000.0,present_sum/30/1000.0);
+                g_board_depth=g_board_depth<2?2:1;
 #endif
 #if defined(POCKET_PROC_ROWS_AB)&&POCKET_PROC_ROWS_AB
                 /* Same-binary A/B of the Shiki image's row path and the covered

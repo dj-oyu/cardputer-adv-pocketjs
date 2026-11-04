@@ -79,6 +79,18 @@ static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
 static spi_transaction_t tx_pending;
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+// Depth 2 (board.h): the second panel buffer and its descriptor. Strips go to
+// the two slots in turn; tx_queued of them (0..2) are owned by the driver,
+// the oldest at slot (tx_next - tx_queued). spi_master returns results in
+// queue order, so reaping one always frees the oldest slot.
+int g_board_depth = 2;
+static uint16_t tx_buf_b[LCD_W * STRIP_H] __attribute__((aligned(16)));
+static spi_transaction_t tx_pending_b;
+static unsigned tx_queued, tx_next;
+static uint16_t *const tx_slot_buf[2] = {tx_buf, tx_buf_b};
+static spi_transaction_t *const tx_slot_desc[2] = {&tx_pending, &tx_pending_b};
+#endif
 #ifdef KASANE_P0_BUS_PROBE
 /* Diagnostic only. SPI post_cb runs in the SPI2 ISR just before the driver
  * places the result on ret_queue. This is an ISR-service timestamp, not the
@@ -101,7 +113,30 @@ static void IRAM_ATTR lcd_post_cb(spi_transaction_t *trans){
 // (the LCD device is configured with queue_size=1), so this is also the barrier
 // every command goes through before it ends the RAMWR session. Returns the
 // transfer's own error, or ESP_OK when there was nothing in flight.
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+// Reaps the oldest queued strip. A result that is not the expected descriptor
+// is a failure and leaves the slot owned, as tx_reap below does.
+static esp_err_t tx_reap_one(void) {
+    spi_transaction_t *want = tx_slot_desc[(tx_next + 2 - tx_queued) & 1], *done = NULL;
+    DD_SCOPE(DD_TX_REAP);
+    DD_ADD(DD_TX_REAPS,1);
+    esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+    if (e == ESP_OK && done != want) e = ESP_ERR_INVALID_STATE;
+    DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+    if (done == want) tx_queued--;
+    tx_inflight = tx_queued != 0;
+    return e;
+}
+#endif
 static esp_err_t tx_reap(void) {
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    // Every queued strip: the barrier for commands, sync and finish.
+    while (tx_queued) {
+        esp_err_t e = tx_reap_one();
+        if (e != ESP_OK) return e;
+    }
+    return ESP_OK;
+#endif
     if (!tx_inflight) return ESP_OK;
     DD_SCOPE(DD_TX_REAP);
     DD_ADD(DD_TX_REAPS,1);
@@ -145,6 +180,14 @@ static esp_err_t tx_reap(void) {
     tx_inflight = done != &tx_pending;
     return e;
 }
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+// Before copying a strip: depth 1 waits for everything (today), depth 2 only
+// for the slot the copy is about to overwrite.
+static esp_err_t tx_reap_slot(void) {
+    if (g_board_depth < 2) return tx_reap();
+    return tx_queued >= 2 ? tx_reap_one() : ESP_OK;
+}
+#endif
 // Open RAMWR position and horizontal bounds. A -1 row means no reusable window.
 static uint16_t window_x,window_cols;
 static bool capture,capture_turn_taken;
@@ -394,7 +437,12 @@ esp_err_t board_init(void) {
     // the byte swap and the transfer, and MISO is unwired, so no software
     // check here can see what actually reaches the glass. Revert to 40000000
     // if any tearing or colour damage ever shows up.
-    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1
+    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37,
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+        .queue_size=2
+#else
+        .queue_size=1
+#endif
 #ifdef KASANE_P0_BUS_PROBE
         ,.post_cb=lcd_post_cb
 #endif
@@ -528,7 +576,11 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     size_t bytes = (size_t)LCD_W * rows * 2;
     // Commands may have drained already. A continued window has not: the
     // same TX payload/descriptor cannot be touched while the driver owns it.
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    esp_err_t e=tx_reap_slot();
+#else
     esp_err_t e=tx_reap();
+#endif
     if(e!=ESP_OK){next_row=-1;return e;}
     if (g_board_async) {
 #ifdef KASANE_P0_BUS_PROBE
@@ -538,7 +590,11 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         // after ownership is returned by the reap above.
         DD_OPEN(copy,DD_TX_COPY);
         DD_ADD(DD_TX_COPY_BYTES,bytes);
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+        uint16_t *panel = tx_slot_buf[tx_next];
+#else
         uint16_t *panel = tx_buf;
+#endif
         if (g_board_swap_into) {
             put_strip(panel,pixels,count);
         } else {
@@ -556,22 +612,32 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             // only other place that touches the line and it cannot be used here,
             // because it would block on the transfer this path exists to overlap.
             gpio_set_level(34, 1);
-            tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            spi_transaction_t *desc = tx_slot_desc[tx_next];
+#else
+            spi_transaction_t *desc = &tx_pending;
+#endif
+            *desc = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
 #ifdef KASANE_P0_BUS_PROBE
             atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
-            tx_pending.user=&lcd_data_isr_us;
+            desc->user=&lcd_data_isr_us;
             int64_t queue_began=esp_timer_get_time();
 #endif
             { DD_SCOPE(DD_TX_SUBMIT);
               DD_ADD(DD_TX_SUBMITS,1);
-              e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+              e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #ifdef KASANE_P0_BUS_PROBE
             ksn_p0_bus_phase_sample(KSN_P0_BUS_QUEUE,
                 (uint32_t)(esp_timer_get_time()-queue_began),false);
 #endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            if (e == ESP_OK) { tx_queued++; tx_next ^= 1; }
+            tx_inflight = tx_queued != 0;
+#else
             tx_inflight = (e == ESP_OK);
+#endif
         }
     } else {
         DD_OPEN(copy,DD_TX_COPY);
@@ -634,27 +700,45 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // make every packed row a whole number of the kernel's blocks at an aligned
     // address. Anything else falls to the scalar swap, which is the arm that
     // made the first narrow measurement slower than the full-width path.
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    e=tx_reap_slot();
+#else
     e=tx_reap();
+#endif
     if(e!=ESP_OK){next_row=-1;return e;}
     DD_OPEN(copy,DD_TX_COPY);
     DD_ADD(DD_TX_COPY_BYTES,bytes);
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    uint16_t *panel = tx_slot_buf[tx_next];
+#else
     uint16_t *panel = tx_buf;
+#endif
     for (int r=0;r<rows;r++) put_strip(panel+r*cols,pixels+r*LCD_W+x,cols);
     DD_CLOSE(copy);
     if (g_board_async) {
         if (e == ESP_OK) {
             gpio_set_level(34, 1);
-            tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            spi_transaction_t *desc = tx_slot_desc[tx_next];
+#else
+            spi_transaction_t *desc = &tx_pending;
+#endif
+            *desc = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
 #ifdef KASANE_P0_BUS_PROBE
             atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
-            tx_pending.user=&lcd_data_isr_us;
+            desc->user=&lcd_data_isr_us;
 #endif
             { DD_SCOPE(DD_TX_SUBMIT);
               DD_ADD(DD_TX_SUBMITS,1);
-              e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+              e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            if (e == ESP_OK) { tx_queued++; tx_next ^= 1; }
+            tx_inflight = tx_queued != 0;
+#else
             tx_inflight = (e == ESP_OK);
+#endif
         }
     } else {
         if (e == ESP_OK) {
@@ -695,7 +779,12 @@ esp_err_t board_present_finish(void) {
     return e;
 }
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    // Depth 2 waits for a free slot inside board_present_rect instead.
+    esp_err_t e=g_board_depth<2?board_present_finish():ESP_OK;
+#else
     esp_err_t e=board_present_finish();
+#endif
     if(e==ESP_OK)e=board_present_rect(x,y,cols,rows,pixels);
     if(e!=ESP_OK)next_row=-1;
     return e;

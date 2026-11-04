@@ -49,6 +49,17 @@ esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pi
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
 esp_err_t board_present_finish(void);
 #endif
+// Measurement build (docs/platform/lcd-dma-driver.md, S0b): two panel buffers
+// and queue_size 2 on spi_master, so band j is copied and queued while band
+// j-1 is still on the wire and the driver's ISR starts j as soon as j-1 ends.
+// g_board_depth flips 1/2 at run time for a same-binary A/B; 1 is today's
+// behaviour (every submit waits for the previous band).
+#ifndef BOARD_LCD_DEPTH2
+#define BOARD_LCD_DEPTH2 0
+#endif
+#if BOARD_LCD_DEPTH2
+extern int g_board_depth;
+#endif
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 // Owner-task frame boundary, after transfer completion (success or failure).
 // Ends window reuse only; it does not drain DMA or acknowledge a transfer.
