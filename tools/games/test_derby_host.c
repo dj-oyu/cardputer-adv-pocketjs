@@ -957,6 +957,7 @@ static const char PRELUDE[]=
 
 int main(int argc,char **argv){
     if(getenv("KSN_STRIP_ROWS"))strip_rows_arm=(uint16_t)atoi(getenv("KSN_STRIP_ROWS"));
+    {extern int g_pocket_proc_ranges;if(getenv("KSN_PROC_RANGES"))g_pocket_proc_ranges=atoi(getenv("KSN_PROC_RANGES"));}
     /* DERBY_APP_DIR: the app as the firmware build embeds it, its @plan
      * functions lowered (tools/games/run_derby.py makes the copy with
      * tools/kasane_ir/lower_plans.mjs); apps/derby itself does not run. */

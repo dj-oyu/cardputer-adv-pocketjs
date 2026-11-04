@@ -81,7 +81,7 @@ int board_endian_ab_flip(void);
 #define BOARD_LCD_DIRECT 0
 #endif
 #ifndef BOARD_BUF_AB
-#define BOARD_BUF_AB 1  /* MEASUREMENT BUILD ONLY (reverted after the device run) */
+#define BOARD_BUF_AB 0
 #endif
 #if BOARD_BUF_AB
 // Measurement build: 0 copy (today), 1 zero-copy strips (1'), 2 the strip's

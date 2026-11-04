@@ -140,8 +140,9 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
  * parameter entry's negative rows fail the range test; the bias is looked at
  * only for an entry that reached the band. Out of line, so a frame without
  * pattern lines runs the loop below as it always did. */
-static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
-    for(unsigned j=0;j<frame->count;j++){
+static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                                                      unsigned first,unsigned end){
+    for(unsigned j=first;j<end;j++){
         const ksn_proc_segment *s=&frame->segments[j];
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;
@@ -153,9 +154,14 @@ static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *fram
     }
 }
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
-    if(!frame||!frame->ready||!pixels||y<0||height<0||y>KSN_PROC_H||height>KSN_PROC_H-y)return false;
-    if(frame->ext){render_band_ext(frame,pixels,y,height);return true;}
-    for(unsigned j=0;j<frame->count;j++){
+    return ksn_proc_render_band_range(frame,pixels,y,height,0,frame?frame->count:0);
+}
+bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                                unsigned first,unsigned end){
+    if(!frame||!frame->ready||!pixels||y<0||height<0||y>KSN_PROC_H||height>KSN_PROC_H-y||
+       first>end||end>frame->count)return false;
+    if(frame->ext){render_band_ext(frame,pixels,y,height,first,end);return true;}
+    for(unsigned j=first;j<end;j++){
         const ksn_proc_segment *s=&frame->segments[j];
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;

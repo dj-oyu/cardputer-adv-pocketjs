@@ -66,6 +66,12 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
 }
 /* Replays only the requested rows over an existing RGB565 backdrop. */
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
+/* The same, looking only at entries [first, end): the caller knows no entry
+ * outside them touches rows y..y+height-1 (pocket_proc's per-band ranges,
+ * docs/platform/lcd-dma-driver.md 9.5). first must start an entry. The
+ * pixels are those of ksn_proc_render_band. */
+bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                                unsigned first,unsigned end);
 /* 1 (default): a horizontal line (y0 == y1) is clipped to the panel once and
  * filled two pixels a store, instead of walked a pixel at a time. 0 is the
  * Bresenham walk for every line, the reference for a same-binary A/B. The

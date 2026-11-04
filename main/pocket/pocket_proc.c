@@ -101,6 +101,10 @@ static ksn_shiki_vm *shiki_vm;
 typedef struct {
     uint32_t hash[PROC_BANDS];
     uint8_t x0[PROC_BANDS],x1[PROC_BANDS];
+    /* The entries [first, end) hold every one that touches the band: a band
+     * is drawn walking those alone (ksn_proc_render_band_range,
+     * docs/platform/lcd-dma-driver.md 9.5). first > end: none touch it. */
+    uint16_t first[PROC_BANDS],end[PROC_BANDS];
 } proc_band_sig;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
@@ -213,7 +217,10 @@ static ksn_rect frame_damage(const proc_surface *surface){
     return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
 static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
-    for(unsigned b=0;b<PROC_BANDS;b++){sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;}
+    for(unsigned b=0;b<PROC_BANDS;b++){
+        sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
+        sig->first[b]=UINT16_MAX;sig->end[b]=0;
+    }
     unsigned i=0,cost;
     ksn_proc_segment geometry;
     bool pattern;
@@ -234,6 +241,8 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
             sig->hash[b]=h;
             if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
             if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
+            if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
+            sig->end[b]=(uint16_t)i;
         }
     }
 }
@@ -286,6 +295,28 @@ static void visit_stats(const ksn_proc_frame *frame){
     }
 }
 #endif
+/* Draw rows y..y+rows-1 of one of a surface's frames, walking only the
+ * entries its signature says can touch them. A frame without a signature
+ * that describes it (none yet) takes the whole walk; the pixels are the same
+ * either way. g_pocket_proc_ranges 0 is the whole walk always (A/B). */
+int g_pocket_proc_ranges=1;
+static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
+                        uint16_t *pixels,int y,int rows){
+    const proc_band_sig *sig=NULL;
+    if(g_pocket_proc_ranges&&rows>0){
+        if(frame==surface->candidate&&surface->sig_ready)sig=&surface->candidate_sig;
+        else if(frame==surface->committed&&surface->has_committed)sig=&surface->committed_sig;
+    }
+    if(!sig)return ksn_proc_render_band(frame,pixels,y,rows);
+    unsigned first=UINT16_MAX,end=0;
+    for(unsigned b=(unsigned)y/8u;b<=(unsigned)(y+rows-1)/8u&&b<PROC_BANDS;b++){
+        if(sig->first[b]>sig->end[b])continue;
+        if(sig->first[b]<first)first=sig->first[b];
+        if(sig->end[b]>end)end=sig->end[b];
+    }
+    if(first>end)first=end=0;
+    return ksn_proc_render_band_range(frame,pixels,y,rows,first,end);
+}
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
 #ifdef POCKET_PROC_NO_BAND_DAMAGE
     /* Host A/B only (run_megademo_app_host.py --no-band-damage). */
@@ -672,7 +703,7 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         uint32_t band_start=esp_cpu_get_cycle_count();
 #endif
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
-        if(frame&&!ksn_proc_render_band(frame,image_band,band_y,(int)rows))return KSN_INVALID;
+        if(frame&&!render_rows(surface,frame,image_band,band_y,(int)rows))return KSN_INVALID;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
         image_band_cycles+=esp_cpu_get_cycle_count()-band_start;
         image_band_count++;
@@ -727,7 +758,7 @@ static ksn_result image_rows(void *ctx,uint16_t variant,uint16_t frame_number,
         const uint32_t pair=(uint32_t)color|(uint32_t)color<<16;
         for(unsigned i=0;i<n/2;i++)w[i]=pair;
     }else for(unsigned i=0;i<n;i++)dst[i]=color;
-    if(frame&&!ksn_proc_render_band(frame,dst,y,rows))return KSN_INVALID;
+    if(frame&&!render_rows(surface,frame,dst,y,rows))return KSN_INVALID;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     image_band_cycles+=esp_cpu_get_cycle_count()-start;
     image_band_count++;
@@ -750,7 +781,7 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
     for(unsigned i=0;i<(unsigned)rows*KSN_PROC_W;i++)pixels[i]=color;
-    return !frame||ksn_proc_render_band(frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
+    return !frame||render_rows(surface,frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
 }
 void pocket_proc_present_result(ksn_result result){
     proc_surface *surface=&surfaces[pending_surface];
