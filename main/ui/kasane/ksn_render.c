@@ -13,7 +13,7 @@
 
 /* Boundary 7a-7b of docs/perf/kasane-opt-survey.md: the render path's own
  * counts. See ksn_render.h for what each field is and what it is not. */
-int g_ksn_prof=0;
+int g_ksn_prof=1;  /* MEASUREMENT BUILD ONLY */
 ksn_render_prof g_ksn_render_prof;
 void ksn_render_prof_read(ksn_render_prof *out){
     *out=g_ksn_render_prof;

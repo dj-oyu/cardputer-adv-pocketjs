@@ -2722,7 +2722,7 @@ static esp_err_t present_frame(void) {
                              (unsigned)stats.transferred_bytes,
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                              (unsigned)board_buf_underruns());
-                    int next=board_buf_mode_set((mode+1)%3);   /* copy, 1', 0 */
+                    int next=board_buf_mode_set(mode==0?2:0);   /* MEASUREMENT: copy <-> 0 */
                     if(next>=0)mode=next;
                 }
 #endif
