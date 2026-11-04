@@ -1,3 +1,5 @@
+/* MEASUREMENT BUILD ONLY: HEAP_TRACE (reverted after the device run). */
+#define POCKET_HEAP_TRACE 1
 #include "derby_detail.h"
 #include "app_session.h"
 #include "board.h"
@@ -2612,6 +2614,14 @@ static esp_err_t present_frame(void) {
             // the flag when a kasane session starts.
             if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
             if(painted==30) {
+#if defined(POCKET_HEAP_TRACE)&&POCKET_HEAP_TRACE
+                /* Measurement build: the internal heap while an app runs. */
+                ESP_LOGI("kasane","HEAP_TRACE free=%u min=%u largest=%u strip_half=%d",
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                         (int)BOARD_STRIP_HALF);
+#endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
                 {
                     uint32_t band_n,band_cy,span_n,span_cy;
