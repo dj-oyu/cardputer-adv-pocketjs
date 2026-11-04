@@ -2707,17 +2707,6 @@ static esp_err_t present_frame(void) {
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
-                /* MEASUREMENT ONLY (COMMIT_PROF): Shiki commit() over this
-                 * window: count, then ms per frame of the whole call, its
-                 * frame_damage and its band_signature (240 MHz). */
-                {
-                    extern uint32_t g_commit_prof[4];
-                    ESP_LOGI("kasane","COMMIT_PROF commits=%u total_ms=%.3f damage_ms=%.3f sig_ms=%.3f turn_ms=%.2f frames=%u",
-                             (unsigned)g_commit_prof[0],g_commit_prof[1]/240000.0/30,
-                             g_commit_prof[2]/240000.0/30,g_commit_prof[3]/240000.0/30,
-                             ticks?turn_sum/ticks/1000.0:0.0,painted);
-                    g_commit_prof[0]=g_commit_prof[1]=g_commit_prof[2]=g_commit_prof[3]=0;
-                }
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
                 /* Same-binary A/B of zero-copy strips (board.h): the window
                  * just printed used the mode named here, then it flips. */
