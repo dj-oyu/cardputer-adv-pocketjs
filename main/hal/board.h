@@ -55,7 +55,7 @@ esp_err_t board_present_finish(void);
 // g_board_depth flips 1/2 at run time for a same-binary A/B; 1 is today's
 // behaviour (every submit waits for the previous band).
 #ifndef BOARD_LCD_DEPTH2
-#define BOARD_LCD_DEPTH2 0
+#define BOARD_LCD_DEPTH2 1  /* MEASUREMENT BUILD ONLY (reverted after the device run) */
 #endif
 #if BOARD_LCD_DEPTH2
 extern int g_board_depth;
