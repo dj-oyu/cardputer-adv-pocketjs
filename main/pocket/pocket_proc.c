@@ -307,7 +307,6 @@ static void visit_stats(const ksn_proc_frame *frame){
  * that describes it (none yet) takes the whole walk; the pixels are the same
  * either way. g_pocket_proc_ranges 0 is the whole walk always (A/B). */
 int g_pocket_proc_ranges=1;
-int g_pocket_proc_carry=1;   /* MEASUREMENT ONLY (CARRY_AB) */
 static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
                         uint16_t *pixels,int y,int rows){
     const proc_band_sig *sig=NULL;
@@ -327,8 +326,7 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
      * 8-row strips never allocates it and beginFrame still takes exactly its
      * two frames (test_pocket_proc_turn_qjs.c). No room is no carry. */
     if(!half_carry&&rows<8)half_carry=shiki_or_sys_calloc(1,sizeof *half_carry);
-    extern int g_pocket_proc_carry;   /* MEASUREMENT ONLY (CARRY_AB) */
-    return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,g_pocket_proc_carry?half_carry:NULL);
+    return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,half_carry);
 }
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
 #ifdef POCKET_PROC_NO_BAND_DAMAGE
