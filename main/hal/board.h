@@ -63,7 +63,7 @@ extern int g_board_depth;
 // Measurement build: a same-binary A/B of the panel byte order (LSB first,
 // no swap) against MSB first with the swap. Call at a frame boundary.
 #ifndef BOARD_ENDIAN_AB
-#define BOARD_ENDIAN_AB 0
+#define BOARD_ENDIAN_AB 1  /* MEASUREMENT BUILD ONLY (reverted after the device run) */
 #endif
 #if BOARD_ENDIAN_AB
 int board_endian_ab_flip(void);
