@@ -52,6 +52,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 
 | 文書 | 内容 |
 | --- | --- |
+| [Shiki の画像を帯へ直接書く](image-rows.md) | 不透明・等倍の画像を 32 画素ずつではなく帯の行で直接書く `read_rows`（`ksn_ports.h`）と、覆われた帯の背景の塗りの省略。STRESS の実機の同じバイナリの A/B で描画 11.80 → 9.34 ms（送出の待ちは +0.63 ms）、塗りの省略は差なし（2026-11-04）|
 | [手続き型描画の実機診断](procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。対象 image の実測記録。現在の main の性能値ではない |
 | [手続き型描画の上限緩和の実機検証](procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
 | [MEGADEMO Act II](megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29） |
