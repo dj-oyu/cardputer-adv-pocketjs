@@ -73,7 +73,7 @@ static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
 // and MISO is unwired, so the only test is the glass: BOARD_ENDIAN_PROBE
 // alternates the two every 2 s and the owner looks for a change.
 static bool lcd_le;
-#define BOARD_ENDIAN_PROBE 0   /* issue #118: the eye test is pending */
+#define BOARD_ENDIAN_PROBE 1   /* MEASUREMENT BUILD ONLY: the eye test (reverted after) */
 static void put_strip(uint16_t *out,uint16_t *in,int count);
 static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
