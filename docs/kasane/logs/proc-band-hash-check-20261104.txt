@@ -1,0 +1,14 @@
+# The Shiki band hash (pocket_proc.c band_signature: 32-bit FNV-1a over each touching entry's 10 bytes, per 8-row band)
+# checked on the host, -DPOCKET_PROC_SIG_CHECK (tree 8891f20 + the check). For every present that compares a candidate
+# with the committed frame (same colour), per band:
+#   changed  = a splitmix64 chain over the same bytes differs (ground truth: the entry lists differ)
+#   fnv32/lo16/hi16/lo8 = the FNV value (or that slice of it) is nevertheless equal -> a collision at that width
+#   skipped  = FNV equal (the band is not redrawn); both frames rendered over the colour and compared pixel for pixel
+# ideal = changed / 2^width (a random hash). Host harnesses, 8-row presents.
+
+app        compared  changed  fnv32  lo16 (ideal)  hi16 (ideal)  lo8 (ideal)     skipped  pixel mismatch
+STRESS        15232    13108      0     0 (0.2)      0 (0.2)      48 (51.2)       2124    0
+MEGADEMO      37162    34035      0     2 (0.5)      0 (0.5)     176 (132.9)      3127    0
+  (baseline)   2856     2395      0     0 (0.0)      0 (0.0)      15 (9.4)         461    0
+BIG WAVE     123284   101659      0     2 (1.6)      1 (1.6)     442 (397.1)     21625    0
+DERBY        246806   184374      0    14 (2.8)      1 (2.8)    2718 (720.2)     62432    0

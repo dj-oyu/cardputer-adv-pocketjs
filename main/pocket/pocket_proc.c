@@ -105,6 +105,9 @@ typedef struct {
      * is drawn walking those alone (ksn_proc_render_band_range,
      * docs/platform/lcd-dma-driver.md 9.5). first > end: none touch it. */
     uint16_t first[PROC_BANDS],end[PROC_BANDS];
+#ifdef POCKET_PROC_SIG_CHECK
+    uint64_t strong[PROC_BANDS];   /* host only: the ground truth the hash is checked against */
+#endif
 } proc_band_sig;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
@@ -223,10 +226,32 @@ static ksn_rect frame_damage(const proc_surface *surface){
     if(y1>KSN_PROC_H)y1=KSN_PROC_H;
     return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
+#ifdef POCKET_PROC_SIG_CHECK
+/* Host check of the band hash (docs/platform/lcd-dma-driver.md 9.10): a
+ * splitmix64 chain over the same bytes stands in for "the entries differ". */
+static uint64_t sig_mix64(uint64_t z){
+    z+=0x9e3779b97f4a7c15ull;z=(z^(z>>30))*0xbf58476d1ce4e5b9ull;
+    z=(z^(z>>27))*0x94d049bb133111ebull;return z^(z>>31);
+}
+#include <stdio.h>
+static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,sig_lo8,sig_impossible,
+                          sig_skipped,sig_pixel_bad,sig_all;
+__attribute__((destructor)) static void sig_report(void){
+    if(!sig_compared&&!sig_all)return;
+    fprintf(stderr,"SIG_CHECK bands_compared=%llu changed=%llu fnv32_equal_when_changed=%llu "
+            "lo16=%llu (ideal %.1f) hi16=%llu (ideal %.1f) lo8=%llu (ideal %.1f) impossible=%llu "
+            "skipped=%llu pixel_mismatch_in_skipped=%llu whole_frame_damages=%llu\n",
+            sig_compared,sig_changed,sig_coll32,sig_lo16,sig_changed/65536.0,sig_hi16,sig_changed/65536.0,
+            sig_lo8,sig_changed/256.0,sig_impossible,sig_skipped,sig_pixel_bad,sig_all);
+}
+#endif
 static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
     for(unsigned b=0;b<PROC_BANDS;b++){
         sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
         sig->first[b]=UINT16_MAX;sig->end[b]=0;
+#ifdef POCKET_PROC_SIG_CHECK
+        sig->strong[b]=0x9e3779b97f4a7c15ull;
+#endif
     }
     unsigned i=0,cost;
     ksn_proc_segment geometry;
@@ -246,6 +271,10 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
             uint32_t h=sig->hash[b];
             for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)h=(h^bytes[k])*16777619u;
             sig->hash[b]=h;
+#ifdef POCKET_PROC_SIG_CHECK
+            for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)
+                sig->strong[b]=sig_mix64(sig->strong[b]^bytes[k]);
+#endif
             if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
             if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
             if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
@@ -337,6 +366,41 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
     if(index>=PROC_SURFACES||!surfaces[index].sig_ready)return false;
     const proc_surface *s=&surfaces[index];
     const bool all=!s->has_committed||s->candidate_color!=s->committed_color;
+#ifdef POCKET_PROC_SIG_CHECK
+    if(all)sig_all++;
+    else for(unsigned b=0;b<PROC_BANDS;b++){
+        const proc_band_sig *n=&s->candidate_sig,*o=&s->committed_sig;
+        const uint32_t hn=n->hash[b],ho=o->hash[b];
+        const bool fe=hn==ho,se=n->strong[b]==o->strong[b];
+        sig_compared++;
+        if(se&&!fe)sig_impossible++;
+        if(!se){
+            sig_changed++;
+            if(fe)sig_coll32++;
+            if(!((hn^ho)&0xffffu))sig_lo16++;
+            if((hn>>16)==(ho>>16))sig_hi16++;
+            if(!((hn^ho)&0xffu))sig_lo8++;
+        }
+        if(fe){
+            /* Skipped: both frames must draw the band alike over the colour. */
+            static uint16_t pa[KSN_PROC_W*8],pb[KSN_PROC_W*8];
+            const int y=(int)b*8,rows=y+8>KSN_PROC_H?KSN_PROC_H-y:8;
+            for(unsigned k=0;k<KSN_PROC_W*8u;k++)pa[k]=pb[k]=s->candidate_color;
+            /* The candidate is marked ready only when it is published. */
+            static ksn_proc_frame copy;
+            memcpy(&copy,s->candidate,frame_bytes(surface_segments(s)));copy.ready=true;
+            const bool ra=ksn_proc_render_band(&copy,pa,y,rows);
+            const bool rb=ksn_proc_render_band(s->committed,pb,y,rows);
+            sig_skipped++;
+            if(memcmp(pa,pb,sizeof pa)){
+                if(sig_pixel_bad<3)fprintf(stderr,"SIG_BAD band=%u ra=%d rb=%d ready=%d/%d count=%u/%u ext=%u/%u first=%u/%u end=%u/%u\n",
+                    b,ra,rb,s->candidate->ready,s->committed->ready,s->candidate->count,s->committed->count,
+                    s->candidate->ext,s->committed->ext,n->first[b],o->first[b],n->end[b],o->end[b]);
+                sig_pixel_bad++;
+            }
+        }
+    }
+#endif
     *bands=0;
     for(unsigned b=0;b<PROC_BANDS;b++){
         const proc_band_sig *n=&s->candidate_sig,*o=&s->committed_sig;
