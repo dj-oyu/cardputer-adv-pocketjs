@@ -136,54 +136,125 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
     }
 }
 #undef PATTERN_PIXEL
-/* A frame with pattern lines: the same order, the same plain lines. A
- * parameter entry's negative rows fail the range test; the bias is looked at
- * only for an entry that reached the band. Out of line, so a frame without
- * pattern lines runs the loop below as it always did. */
-static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
-                                                      unsigned first,unsigned end){
-    for(unsigned j=first;j<end;j++){
+/* A plain entry of a frame without pattern lines that reaches rows
+ * y..y+height-1: the walk of ksn_proc_render_band. */
+static inline __attribute__((always_inline)) void plain_entry(const ksn_proc_segment *s,uint16_t *pixels,
+                                                              int y,int height){
+    if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);return;}
+    int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
+    int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
+    /* A band can be reached without replaying the line's prefix: the
+     * Bresenham phase is rebuilt from its major-axis step count (clipping
+     * the endpoints and restarting would change ties). band_entry does it in
+     * 32 bits; the 64-bit form this replaced was a __divdi3 call per line and
+     * piece, twice as many with 4-row pieces (lcd-dma-driver.md 9.9). */
+    band_entry(s,s->x0,y,height,&x,&yy,&err);
+    for(;;){
+        if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
+        if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
+        if(x==s->x1&&yy==s->y1)break;
+        int twice=2*err;
+        if(twice>-dy){err-=dy;x+=sx;}
+        if(twice<dx){err+=dx;yy+=sy;}
+    }
+}
+/* Entry j, known to reach the rows: a pattern line takes j and j+1 (a
+ * parameter entry's negative rows never pass a range test, so j is never one).
+ * Out of line in the ext walk, so a frame without pattern lines runs its own
+ * loop below as it always did. */
+static inline __attribute__((always_inline)) void ext_entry(const ksn_proc_frame *frame,unsigned j,
+                                                            uint16_t *pixels,int y,int height){
+    const ksn_proc_segment *s=&frame->segments[j];
+    if(s->x0>=KSN_PROC_EXT_MIN){
+        if(j+1<frame->count)pattern_band(s,s+1,pixels,y,height);
+    }else plain_band(s,pixels,y,height);
+}
+/* The rest of an 8-row band after a first piece y..y+height-1 starting on the
+ * band: what the carry notes, and what the next piece must ask for to use it. */
+static inline bool carry_rest(int y,int height,int *rest_y,int *rest_end){
+    if((y&7)||height>=8)return false;
+    *rest_y=y+height;*rest_end=(y|7)+1;
+    if(*rest_end>KSN_PROC_H)*rest_end=KSN_PROC_H;
+    return *rest_y<*rest_end;
+}
+/* The walk over [first, end). With a carry: a first piece notes which entries
+ * also reach the rest of its band, and the rest, asked for next with the same
+ * frame and range, visits only those -- in the same order, so the pixels are
+ * the same (docs/platform/lcd-dma-driver.md 9.9). Every other call leaves the
+ * carry unused and invalid. */
+static bool render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                        unsigned first,unsigned end,ksn_proc_carry *carry){
+    if(!frame||!frame->ready||!pixels||y<0||height<0||y>KSN_PROC_H||height>KSN_PROC_H-y||
+       first>end||end>frame->count){if(carry)carry->valid=false;return false;}
+    const bool ext=frame->ext;
+    if(carry&&carry->valid&&carry->frame==frame&&carry->count==frame->count&&
+       carry->y==y&&carry->height==height&&carry->first==first&&carry->end==end){
+        carry->valid=false;
+        for(unsigned w=first>>5;w<=(end?(end-1)>>5:0)&&first<end;w++){
+            uint32_t bits=carry->bits[w];
+            while(bits){
+                const unsigned j=w*32u+(unsigned)__builtin_ctz(bits);
+                bits&=bits-1u;
+                if(ext)ext_entry(frame,j,pixels,y,height);
+                else plain_entry(&frame->segments[j],pixels,y,height);
+            }
+        }
+        return true;
+    }
+    int rest_y=0,rest_end=0;
+    const bool note=carry&&carry_rest(y,height,&rest_y,&rest_end);
+    if(carry){
+        carry->valid=false;
+        if(note)memset(carry->bits,0,sizeof carry->bits);
+    }
+    /* A first piece tests each entry against the whole band, as an 8-row
+     * strip did: most of [first, end) is outside it and costs no more than
+     * that. Only an entry inside is sorted into this piece, the rest, or
+     * both. rest_y is y + height, so "reaches the rest" is ymax >= rest_y. */
+    const int top=note?rest_end:y+height;
+    if(ext){
+        for(unsigned j=first;j<end;j++){
+            const ksn_proc_segment *s=&frame->segments[j];
+            int ymin=s->y0<s->y1?s->y0:s->y1;
+            int ymax=s->y0>s->y1?s->y0:s->y1;
+            if(ymax<y||ymin>=top)continue;
+            if(note){
+                if(ymax>=rest_y)carry->bits[j>>5]|=1u<<(j&31u);
+                if(ymin>=rest_y)continue;
+            }
+            ext_entry(frame,j,pixels,y,height);
+            if(s->x0>=KSN_PROC_EXT_MIN)j++;
+        }
+    }else if(note)for(unsigned j=first;j<end;j++){
+        const ksn_proc_segment *s=&frame->segments[j];
+        int ymin=s->y0<s->y1?s->y0:s->y1;
+        int ymax=s->y0>s->y1?s->y0:s->y1;
+        if(ymax<y||ymin>=top)continue;
+        if(ymax>=rest_y)carry->bits[j>>5]|=1u<<(j&31u);
+        if(ymin>=rest_y)continue;
+        plain_entry(s,pixels,y,height);
+    }else for(unsigned j=first;j<end;j++){
         const ksn_proc_segment *s=&frame->segments[j];
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;
         if(ymax<y||ymin>=y+height)continue;
-        if(s->x0>=KSN_PROC_EXT_MIN){
-            if(j+1<frame->count)pattern_band(s,s+1,pixels,y,height);
-            j++;
-        }else plain_band(s,pixels,y,height);
+        plain_entry(s,pixels,y,height);
     }
+    if(note){
+        carry->frame=frame;carry->count=frame->count;
+        carry->y=(uint16_t)rest_y;carry->height=(uint16_t)(rest_end-rest_y);
+        carry->first=(uint16_t)first;carry->end=(uint16_t)end;carry->valid=true;
+    }
+    return true;
 }
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
-    return ksn_proc_render_band_range(frame,pixels,y,height,0,frame?frame->count:0);
+    return render_band(frame,pixels,y,height,0,frame?frame->count:0,NULL);
 }
 bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
                                 unsigned first,unsigned end){
-    if(!frame||!frame->ready||!pixels||y<0||height<0||y>KSN_PROC_H||height>KSN_PROC_H-y||
-       first>end||end>frame->count)return false;
-    if(frame->ext){render_band_ext(frame,pixels,y,height,first,end);return true;}
-    for(unsigned j=first;j<end;j++){
-        const ksn_proc_segment *s=&frame->segments[j];
-        int ymin=s->y0<s->y1?s->y0:s->y1;
-        int ymax=s->y0>s->y1?s->y0:s->y1;
-        if(ymax<y||ymin>=y+height)continue;
-        if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);continue;}
-        int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
-        int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
-        /* A band can be reached without replaying the line's prefix: the
-         * Bresenham phase is rebuilt from its major-axis step count (clipping
-         * the endpoints and restarting would change ties). band_entry does it
-         * in 32 bits; the 64-bit form this replaced was a __divdi3 call per
-         * line and piece, twice as many with 4-row pieces (lcd-dma-driver.md
-         * 9.9). */
-        band_entry(s,s->x0,y,height,&x,&yy,&err);
-        for(;;){
-            if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
-            if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
-            if(x==s->x1&&yy==s->y1)break;
-            int twice=2*err;
-            if(twice>-dy){err-=dy;x+=sx;}
-            if(twice<dx){err+=dx;yy+=sy;}
-        }
-    }
-    return true;
+    return render_band(frame,pixels,y,height,first,end,NULL);
+}
+bool ksn_proc_render_band_carry(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                                unsigned first,unsigned end,ksn_proc_carry *carry){
+    return render_band(frame,pixels,y,height,first,end,carry);
 }

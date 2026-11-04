@@ -42,6 +42,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     -lm -o "$out/procedural-band-jump"
   "$out/procedural-band-jump"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_carry.c \
+    -lm -o "$out/procedural-carry"
+  "$out/procedural-carry"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_hspan.c \
     -lm -o "$out/procedural-hspan"
   "$out/procedural-hspan"

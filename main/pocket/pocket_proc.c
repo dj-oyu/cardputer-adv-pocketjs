@@ -126,6 +126,13 @@ static unsigned building_surface,pending_surface;
  * (sec.22). */
 #define PROC_IMAGE_BAND_ROWS 8u
 static uint16_t *image_band_buf;
+/* The 4-row pieces' note (ksn_proc_render_band_carry, 144 B from the Shiki
+ * arena when it has room): which entries the first piece of a band saw reach
+ * the second, so the second walks only those. Optional -- without it every
+ * piece takes the whole range. Dropped whenever a frame's entries can change
+ * (docs/platform/lcd-dma-driver.md 9.9). */
+static ksn_proc_carry *half_carry;
+static inline void carry_drop(void){if(half_carry)half_carry->valid=false;}
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
@@ -315,7 +322,11 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
         if(sig->end[b]>end)end=sig->end[b];
     }
     if(first>end)first=end=0;
-    return ksn_proc_render_band_range(frame,pixels,y,rows,first,end);
+    /* Taken the first time a piece shorter than a band is drawn, so a port of
+     * 8-row strips never allocates it and beginFrame still takes exactly its
+     * two frames (test_pocket_proc_turn_qjs.c). No room is no carry. */
+    if(!half_carry&&rows<8)half_carry=shiki_or_sys_calloc(1,sizeof *half_carry);
+    return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,half_carry);
 }
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
 #ifdef POCKET_PROC_NO_BAND_DAMAGE
@@ -368,7 +379,7 @@ JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark 
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     const ksn_proc_frame *c=surfaces[building_surface].candidate;
     *mark=(pocket_proc_mark){c->count,c->raster_steps,c->ext,(uint8_t)building_surface};
-    image_band_valid=false;
+    image_band_valid=false;carry_drop();
     return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
@@ -414,7 +425,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     surface->candidate->ready=true;
     surface->pending=true;
     pending_surface=building_surface;
-    image_band_valid=false;
+    image_band_valid=false;carry_drop();
     building=false;
 #ifdef KASANE_MEGADEMO_TRACE
     trace.commit_n++;trace_split=true;
@@ -570,7 +581,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     /* Straight into the tail: a draw that does not fit stops at LIMIT and
      * the count below is not advanced, so its segments are not the frame's. */
     ksn_proc_segment *tail=&candidate->segments[candidate->count];
-    image_band_valid=false;
+    image_band_valid=false;carry_drop();
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
     const uint32_t t_engine=pocket_cycles();
@@ -632,8 +643,9 @@ void pocket_proc_reset(void){
         surfaces[i]=(proc_surface){0};
     }
     shiki_or_sys_free(image_band_buf);image_band_buf=NULL;
+    shiki_or_sys_free(half_carry);half_carry=NULL;
     shiki_or_sys_free(shiki_vm);shiki_vm=NULL;
-    image_band_valid=false;image_band_frame=NULL;
+    image_band_valid=false;carry_drop();image_band_frame=NULL;
     building=js_call_active=false;building_surface=pending_surface=0;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
@@ -784,6 +796,7 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
     return !frame||render_rows(surface,frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
 }
 void pocket_proc_present_result(ksn_result result){
+    carry_drop();
     proc_surface *surface=&surfaces[pending_surface];
     bool repairing=false;
     for(unsigned i=0;i<PROC_SURFACES;i++)repairing|=surfaces[i].repair_required;
@@ -795,11 +808,11 @@ void pocket_proc_present_result(ksn_result result){
             surface->committed_color=surface->candidate_color;
             surface->committed_sig=surface->candidate_sig;
             surface->has_committed=true;surface->pending=false;
-            image_band_valid=false;
+            image_band_valid=false;carry_drop();
         }
         for(unsigned i=0;i<PROC_SURFACES;i++)surfaces[i].repair_required=false;
     }else if(result==KSN_IO){
-        image_band_valid=false;
+        image_band_valid=false;carry_drop();
         if(surface->image_mode){
             /* Kasane retries a submitted UI patch against the same image
              * resource. Keep its pixels paired with that ticket until ACK. */
