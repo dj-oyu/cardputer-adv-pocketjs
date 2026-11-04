@@ -2715,15 +2715,18 @@ static esp_err_t present_frame(void) {
                 /* Same-binary A/B of zero-copy strips (board.h): the window
                  * just printed used the mode named here, then it flips. */
                 {
-                    static int mode=0;
-                    ESP_LOGI("kasane","BUF_AB mode=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u free=%u underruns=%u",
-                             mode,ticks?turn_sum/ticks/1000.0:0.0,
+                    /* MEASUREMENT: arms copy/0 x ranges off/on (B). */
+                    static int arm=0;
+                    extern int g_pocket_proc_ranges;
+                    ESP_LOGI("kasane","BUF_AB arm=%d mode=%d ranges=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u free=%u underruns=%u image_cy=%u",
+                             arm,board_buf_mode(),g_pocket_proc_ranges,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
                              (unsigned)stats.transferred_bytes,
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                             (unsigned)board_buf_underruns());
-                    int next=board_buf_mode_set((mode+1)%3);   /* copy, 1', 0 */
-                    if(next>=0)mode=next;
+                             (unsigned)board_buf_underruns(),(unsigned)prof_sum.image_cy);
+                    arm=(arm+1)%4;
+                    if(board_buf_mode_set(arm&1?2:0)<0)arm=(arm+3)%4;
+                    g_pocket_proc_ranges=arm>=2;
                 }
 #endif
 #if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB
