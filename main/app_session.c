@@ -2668,6 +2668,14 @@ static esp_err_t present_frame(void) {
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif
                 }
+#if defined(POCKET_PROC_HSPAN_AB)&&POCKET_PROC_HSPAN_AB
+                /* Same-binary A/B of the band renderer's horizontal-line fill
+                 * (g_ksn_proc_hspan, ksn_procedural.h): the window just printed
+                 * ran with the value named here, then it flips. A measurement
+                 * build only (POCKET_PROC_HSPAN_AB 1); pixels are the same. */
+                ESP_LOGI("kasane","HSPAN_AB hspan=%d render_ms=%.2f",g_ksn_proc_hspan,render_sum/30/1000.0);
+                g_ksn_proc_hspan=!g_ksn_proc_hspan;
+#endif
 #if defined(POCKET_PROC_ROWS_AB)&&POCKET_PROC_ROWS_AB
                 /* Same-binary A/B of the Shiki image's row path and the covered
                  * band's skipped fill (ksn_render.h): the window just printed

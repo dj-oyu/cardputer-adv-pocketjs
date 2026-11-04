@@ -4,6 +4,31 @@
 #include <stdlib.h>
 #include <string.h>
 
+int g_ksn_proc_hspan=1;
+/* Columns a..b (inclusive, already on the panel) of one row in colour c, two
+ * pixels a 32-bit store once the address is 4-aligned. may_alias: the rest of
+ * the renderer reads and writes these pixels as uint16_t
+ * (docs/vm/aliasing-types.md). */
+static inline __attribute__((always_inline)) void fill_row(uint16_t *row,int a,int b,uint16_t c){
+    typedef uint32_t pixel_pair __attribute__((may_alias));
+    uint16_t *p=row+a;
+    unsigned n=(unsigned)(b-a+1);
+    if(((uintptr_t)p&2u)){*p++=c;n--;}
+    pixel_pair *w=(pixel_pair *)(void *)p;
+    const uint32_t v=(uint32_t)c|(uint32_t)c<<16;
+    for(unsigned i=n/2;i;i--)*w++=v;
+    if(n&1u)p[n-1]=c;
+}
+/* A horizontal line in the band (the caller's range test put its row there):
+ * the Bresenham walk of dy = 0 writes exactly the row's columns between the
+ * ends, so clip them to the panel and fill. */
+static inline __attribute__((always_inline)) void hspan(const ksn_proc_segment *s,int x0,
+                                                        uint16_t *pixels,int y){
+    int a=x0<s->x1?x0:s->x1,b=x0<s->x1?s->x1:x0;
+    if(a<0)a=0;
+    if(b>=KSN_PROC_W)b=KSN_PROC_W-1;
+    if(a<=b)fill_row(pixels+(s->y0-y)*KSN_PROC_W,a,b,s->color);
+}
 /* The Bresenham phase where line s (pen end x0) reaches band y..y+height-1
  * mid-way: x, yy, err moved there; returns the major-axis steps taken (the
  * pixel index), 0 when the line starts in the band. */
@@ -32,6 +57,7 @@ static inline __attribute__((always_inline)) int band_entry(const ksn_proc_segme
 /* A plain line in a frame with pattern lines: ksn_proc_render_band's walk. */
 static inline __attribute__((always_inline)) void plain_band(const ksn_proc_segment *s,uint16_t *pixels,int y,int height){
     if(!height)return;
+    if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);return;}
     int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
     int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
     band_entry(s,s->x0,y,height,&x,&yy,&err);
@@ -134,6 +160,7 @@ bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;
         if(ymax<y||ymin>=y+height)continue;
+        if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);continue;}
         int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
         int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
         if(dy){

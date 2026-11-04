@@ -16,6 +16,7 @@
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
+#include "ui/kasane/ksn_procedural.h"
 #include "text/ksn_font.h"
 #include "sound.h"
 #include <stdio.h>
@@ -186,7 +187,10 @@ int main(int argc,char **argv) {
     const char *rows_arm=getenv("KSN_IMAGE_ROWS"),*cover_arm=getenv("KSN_COVER_SKIP_FILL");
     if(rows_arm)g_ksn_image_rows=strcmp(rows_arm,"0")!=0;
     if(cover_arm)g_ksn_cover_skip_fill=strcmp(cover_arm,"0")!=0;
-    const bool digest=gradient_arm||rows_arm||cover_arm;
+    /* KSN_PROC_HSPAN=0: the band renderer walks horizontal lines too. */
+    const char *hspan_arm=getenv("KSN_PROC_HSPAN");
+    if(hspan_arm)g_ksn_proc_hspan=strcmp(hspan_arm,"0")!=0;
+    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");
@@ -297,8 +301,9 @@ int main(int argc,char **argv) {
            exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
-    if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d panel_digest=%08x\n",
-                           g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,panel_digest);
+    if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d hspan=%d panel_digest=%08x\n",
+                           g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,
+                           g_ksn_proc_hspan,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&!bad_suspect&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
               pressure_events>0&&pressure_trims>0&&
