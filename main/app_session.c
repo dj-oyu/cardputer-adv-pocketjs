@@ -2690,6 +2690,18 @@ static esp_err_t present_frame(void) {
                          render_sum/30/1000.0,present_sum/30/1000.0);
                 g_board_depth=g_board_depth<2?2:1;
 #endif
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+                /* Same-binary A/B of the LCD send path (board.h): the window
+                 * just printed used the path named here, then it flips. */
+                {
+                    static int direct=1;
+                    ESP_LOGI("kasane","DIRECT_AB direct=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u underruns=%u",
+                             direct,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
+                    direct=board_lcd_direct_set(!direct);
+                }
+#endif
 #if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB
                 /* Same-binary A/B of the panel byte order (board.h): the window
                  * just printed ran with the order named here, then it flips. */

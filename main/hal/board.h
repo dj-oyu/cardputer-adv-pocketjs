@@ -68,6 +68,16 @@ extern int g_board_depth;
 #if BOARD_ENDIAN_AB
 int board_endian_ab_flip(void);
 #endif
+// Measurement build: pixel strips go straight to GP-SPI2 + GDMA (lcd_spi.c)
+// instead of through spi_master's queue. board_lcd_direct_set flips it at a
+// frame boundary for a same-binary A/B; returns the new state.
+#ifndef BOARD_LCD_DIRECT
+#define BOARD_LCD_DIRECT 0
+#endif
+#if BOARD_LCD_DIRECT
+int board_lcd_direct_set(int on);
+uint32_t board_lcd_direct_underruns(void);
+#endif
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 // Owner-task frame boundary, after transfer completion (success or failure).
 // Ends window reuse only; it does not drain DMA or acknowledge a transfer.

@@ -4,6 +4,7 @@
 #include "motion.h"
 #include "sound.h"
 #include "ui/kasane/ksn_p0_probe.h"
+#include "lcd_spi.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
@@ -79,6 +80,12 @@ static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
 static spi_transaction_t tx_pending;
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+// Direct sends (board.h). tx_direct: the strip in flight went out through
+// lcd_spi.c, so its completion is the SPI's done bit, not a queue result.
+static int g_board_direct = 1;
+static bool tx_direct;
+#endif
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
 // Depth 2 (board.h): the second panel buffer and its descriptor. Strips go to
 // the two slots in turn; tx_queued of them (0..2) are owned by the driver,
@@ -138,6 +145,17 @@ static esp_err_t tx_reap(void) {
     return ESP_OK;
 #endif
     if (!tx_inflight) return ESP_OK;
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+    if (tx_direct) {
+        DD_SCOPE(DD_TX_REAP);
+        DD_ADD(DD_TX_REAPS,1);
+        esp_err_t e = lcd_spi_direct_wait();
+        DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+        tx_direct = false;
+        tx_inflight = false;
+        return e;
+    }
+#endif
     DD_SCOPE(DD_TX_REAP);
     DD_ADD(DD_TX_REAPS,1);
 #ifdef KASANE_P0_BUS_PROBE
@@ -235,6 +253,17 @@ int board_endian_ab_flip(void){
     if(set_endian(!lcd_le)!=ESP_OK)return -1;
     return lcd_le?1:0;
 }
+#endif
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+int board_lcd_direct_set(int on) {
+    // Both paths must be idle before the bus changes hands.
+    if (tx_reap() != ESP_OK) return g_board_direct;
+    if (on && !g_board_direct) lcd_spi_direct_enter();
+    if (!on && g_board_direct) lcd_spi_direct_leave();
+    g_board_direct = on ? 1 : 0;
+    return g_board_direct;
+}
+uint32_t board_lcd_direct_underruns(void) { return lcd_spi_direct_underruns(); }
 #endif
 #if BOARD_ENDIAN_PROBE
 static int64_t endian_flip_us;
@@ -456,6 +485,10 @@ esp_err_t board_init(void) {
 #endif
     };
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+    ESP_ERROR_CHECK(lcd_spi_direct_init());
+    if (g_board_direct) lcd_spi_direct_enter();
+#endif
     pie_swap=swap_agrees();
     // Says which clock is in the binary. Several sessions share this tree, and
     // a measurement once moved 6ms because a clock change nobody remembered
@@ -639,6 +672,13 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
 #endif
             { DD_SCOPE(DD_TX_SUBMIT);
               DD_ADD(DD_TX_SUBMITS,1);
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+              if (g_board_direct) {
+                  lcd_spi_direct_start(panel, bytes);
+                  e = ESP_OK;
+                  tx_direct = true;
+              } else
+#endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
@@ -744,6 +784,13 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
 #endif
             { DD_SCOPE(DD_TX_SUBMIT);
               DD_ADD(DD_TX_SUBMITS,1);
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+              if (g_board_direct) {
+                  lcd_spi_direct_start(panel, bytes);
+                  e = ESP_OK;
+                  tx_direct = true;
+              } else
+#endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
