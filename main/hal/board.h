@@ -28,7 +28,7 @@ uint16_t *board_strip_next(void);
 // where they were drawn; any other screen's whole strip goes out and is
 // finished before board_present returns. 0: today's copy into tx_buf.
 #ifndef BOARD_STRIP_HALF
-#define BOARD_STRIP_HALF 1
+#define BOARD_STRIP_HALF 0  /* MEASUREMENT BUILD ONLY: the copy path, for comparison */
 #endif
 // The rows of the strips board_strip_next hands out (4 with BOARD_STRIP_HALF).
 int board_strip_rows(void);
