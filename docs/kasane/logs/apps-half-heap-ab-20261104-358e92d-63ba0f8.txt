@@ -1,0 +1,25 @@
+# Design 0 + B (shipping 06c75b2) vs the copy path, four apps on the device, 2026-11-04.
+# A = 358e92d: 06c75b2 + HEAP_TRACE log (strip_half=1, no tx_buf). Broker jobs ta-stress, ta-derby, ta-megademo, ta-bigwave.
+# B = 63ba0f8: A + BOARD_STRIP_HALF 0 (copy path, tx_buf 3,840 B).  Broker jobs tb-bigwave, tb-derby, tb-stress.
+# Two binaries, two boots (not same-binary). HEAP_TRACE: heap_caps free / min-ever / largest (internal), once per second.
+# "min" is the minimum since boot, so it carries over from earlier apps in the same boot (A's 15,752 was set in MEGADEMO).
+# KASANE_PAINT render/send are means over 30 frames; under A, render includes waiting for the half still on the wire.
+# No errors, resets or underrun reports in any run.
+
+## App start (app: MEM after evaluation)
+STRESS   A free=98,816 largest=31,744   B free=94,420 largest=31,744   A-B=+4,396
+BIGWAVE  A free=73,644 largest=31,744   B free=70,136 largest=31,744   A-B=+3,508
+
+## Steady HEAP_TRACE free
+BIGWAVE  A 64,812-65,108 (largest 31,744)      B 60,956-61,868 (largest 31,744)    A-B ~ +3,940
+DERBY    pad:  A 36,732                        B 30,264-31,800
+         race: A 29,788-30,128 (largest 23,552) B 24,736-25,252 (largest 18,432)    A-B ~ +4,900
+STRESS   A 36,772-72,968 (GC swings)           B 64,604-75,900 (GC swings)         not comparable window to window
+MEGADEMO A 24,876-33,708 largest 18,432-28,672 (all scenes NEWS/TWIST/ZENITH/CORE/LOST/WAKE); B not run
+min      A 26,756 (STRESS, first app) / 19,776 (DERBY) / 15,752 (MEGADEMO)   B 24,192 (BIGWAVE) / 19,132 (DERBY)
+
+## Timing (ms, steady windows)
+           A render  A send  A sum    B render  B send  B sum
+BIGWAVE    4.30      4.05    8.35     4.17      1.78    7.95     turn_ms equal (~7.9)
+DERBY race 2.7-3.8   3.3-4.8          2.4-3.9   2.0-4.8          similar
+STRESS     8.35      2.4     10.75    7.0-7.3   2.9-3.3 10.2     A ~ +0.5 ms
