@@ -180,6 +180,13 @@ int main(int argc,char **argv) {
     const char *gradient_arm=getenv("KSN_VERTICAL_GRAD_PIE");
     const bool inject_dispatch_fault=getenv("STRESS_DISPATCH_FAULT")!=NULL;
     if(gradient_arm)g_ksn_vertical_gradient_pie=strcmp(gradient_arm,"0")!=0;
+    /* The Shiki image's row path and the covered band's skipped fill
+     * (ksn_render.h): KSN_IMAGE_ROWS=0 / KSN_COVER_SKIP_FILL=0 take the
+     * reference paths; the digest below must not move. */
+    const char *rows_arm=getenv("KSN_IMAGE_ROWS"),*cover_arm=getenv("KSN_COVER_SKIP_FILL");
+    if(rows_arm)g_ksn_image_rows=strcmp(rows_arm,"0")!=0;
+    if(cover_arm)g_ksn_cover_skip_fill=strcmp(cover_arm,"0")!=0;
+    const bool digest=gradient_arm||rows_arm||cover_arm;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");
@@ -263,7 +270,7 @@ int main(int argc,char **argv) {
         pocket_memory_sample((uint64_t)t*20000u,used,limit,false,0,0);
         pocket_memory_pump(false);
         if(!present()) bad_present++;
-        if(gradient_arm)for(size_t i=0;i<240u*135u;i++){
+        if(digest)for(size_t i=0;i<240u*135u;i++){
             panel_digest^=panel[i];panel_digest*=16777619u;
         }
         // STRESS_PPM=<prefix>: the panel as P6 at a few frames, for looking at;
@@ -290,8 +297,8 @@ int main(int argc,char **argv) {
            exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
-    if(gradient_arm)printf("gradient arm=%d panel_digest=%08x\n",
-                           g_ksn_vertical_gradient_pie,panel_digest);
+    if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d panel_digest=%08x\n",
+                           g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&!bad_suspect&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
               pressure_events>0&&pressure_trims>0&&

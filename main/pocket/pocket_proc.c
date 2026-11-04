@@ -642,10 +642,51 @@ span_done:
 #endif
     return KSN_OK;
 }
+/* read_rows (ksn_ports.h): whole rows written in place, as the backdrop below
+ * does -- the background, then the frame's band render over it -- so a band
+ * of an unscaled full-width image costs one render and no copies: no band
+ * buffer, no 32-pixel spans, no alpha. The same pixels as image_span: the
+ * same render of the same frame over the same colour (ksn_proc_render_band
+ * enters a line mid-way exactly, test_procedural_band_jump.c). Anything but
+ * whole rows is left to the span path. */
+static ksn_result image_rows(void *ctx,uint16_t variant,uint16_t frame_number,
+                             uint16_t y,uint16_t rows,uint16_t x,uint16_t count,
+                             uint16_t *dst,uint16_t stride){
+    uintptr_t key=(uintptr_t)ctx;
+    if(key<1||key>PROC_SURFACES)return KSN_STALE;
+    if(variant||frame_number||!dst||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
+    if(x||count!=KSN_PROC_W||stride!=KSN_PROC_W)return KSN_UNSUPPORTED;
+    if(!rows)return KSN_OK;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    uint32_t start=esp_cpu_get_cycle_count();
+#endif
+    const proc_surface *surface=&surfaces[key-1];
+    const ksn_proc_frame *frame=surface->pending?surface->candidate:
+        (surface->has_committed?surface->committed:NULL);
+    const uint16_t color=surface->pending?surface->candidate_color:
+        (surface->has_committed?surface->committed_color:0);
+    /* Two pixels a store: the strip's rows start 4-byte aligned (240 px).
+     * may_alias: the render below reads and writes these as uint16_t (the
+     * strict-aliasing trap of docs/vm/aliasing-types.md). */
+    typedef uint32_t pixel_pair __attribute__((may_alias));
+    const unsigned n=(unsigned)rows*KSN_PROC_W;
+    if(!((uintptr_t)dst&3u)){
+        pixel_pair *w=(pixel_pair *)(void *)dst;
+        const uint32_t pair=(uint32_t)color|(uint32_t)color<<16;
+        for(unsigned i=0;i<n/2;i++)w[i]=pair;
+    }else for(unsigned i=0;i<n;i++)dst[i]=color;
+    if(frame&&!ksn_proc_render_band(frame,dst,y,rows))return KSN_INVALID;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    image_band_cycles+=esp_cpu_get_cycle_count()-start;
+    image_band_count++;
+#endif
+    return KSN_OK;
+}
 void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
     if(out&&index<PROC_SURFACES)*out=(ksn_image_port){.ctx=(void *)(uintptr_t)(index+1),
                               .width=KSN_PROC_W,.height=KSN_PROC_H,
-                              .variants=1,.frames=1,.read_span=image_span,.opaque=true};
+                              .variants=1,.frames=1,.read_span=image_span,.opaque=true,
+                              .read_rows=image_rows};
 }
 void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0);}
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){

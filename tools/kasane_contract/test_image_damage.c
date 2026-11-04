@@ -41,7 +41,7 @@ static void check_region(unsigned x,unsigned y,unsigned w,unsigned h,uint16_t ex
 int main(void){
     ksn_core_init(&core);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port image={NULL,20,16,1,1,source,false};
+    ksn_image_port image={NULL,20,16,1,1,source,false,NULL};
     assert(ksn_core_register_image(&core,KSN_APP,&image,&resource)==KSN_OK);
     ksn_display_port display={NULL,buffer,send_full,240,135,8,NULL,send_rect};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;

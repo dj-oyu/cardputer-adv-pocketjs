@@ -42,7 +42,7 @@ static void check(const ksn_draw *d,unsigned frame){
 }
 static void run(unsigned width,bool edge,bool clipped){
     KSN_TEST_CORE(core,static);ksn_core_init(&core);
-    ksn_image_port port={NULL,256,160,1,2,source,true};ksn_resource image;
+    ksn_image_port port={NULL,256,160,1,2,source,true,NULL};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);ksn_tx tx;ksn_ref ref;
     int x=edge?240-(int)width:1,y=edge?126:0;

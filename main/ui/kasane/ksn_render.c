@@ -124,6 +124,8 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
  * decodes again from scratch. Owner task only, like every entry point here. */
 int g_ksn_decode_once=1;
 int g_ksn_opaque_image_occlusion=1;
+int g_ksn_image_rows=1;
+int g_ksn_cover_skip_fill=1;
 typedef struct {
     ksn_draw draw;
     bool visible,group_begin,group_end;
@@ -1999,6 +2001,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     const ksn_frame_view *command;
     uint32_t next_system_opaque=0;
     unsigned app_start[17]={0};
+    uint32_t app_whole=0;              /* bands an opaque APP image covers whole */
     unsigned app_cover[17]={0};
     ksn_rect app_cover_rect[17]={0};
     bool app_group=false;
@@ -2048,7 +2051,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     if(d->bounds.x0<=damage.x0[band]&&d->bounds.x1>=damage.x1[band]&&
                        d->clip.x0<=damage.x0[band]&&d->clip.x1>=damage.x1[band]&&
                        d->bounds.y0<=y0&&d->bounds.y1>=y1&&
-                       d->clip.y0<=y0&&d->clip.y1>=y1)app_start[band]=i;
+                       d->clip.y0<=y0&&d->clip.y1>=y1){app_start[band]=i;app_whole|=1u<<band;}
                 }
             }
             if(command->group_end)app_group=false;
@@ -2101,7 +2104,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         if(load_backdrop&&!(next_system_opaque&(1u<<band))){
             result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
-        }else if(!(next_system_opaque&(1u<<band))){KSN_PROF_BEGIN();
+        }else if(!(next_system_opaque&(1u<<band))&&
+                 !(g_ksn_cover_skip_fill&&(app_whole&(1u<<band)))){KSN_PROF_BEGIN();
             /* Whole strip in one call when the band is whole, which is every band
              * of a REPLACE and of any repair; otherwise the damaged columns of each
              * row, because the columns between them are not ours to touch. */
@@ -2241,6 +2245,19 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 const uint8_t *map_x=stretch_map.active&&layer==KSN_APP&&
                     i==stretch_map.index?stretch_map.x:NULL;
                 const uint8_t *map_y=map_x?stretch_map.y:NULL;
+                /* The whole band's part at once, straight into the strip: the
+                 * source of an unscaled image is the destination moved by the
+                 * bounds and the source origin. UNSUPPORTED falls through to
+                 * the span loop below, which then writes every pixel itself. */
+                if(g_ksn_image_rows&&reader.read_rows&&reader.opaque&&identity&&
+                   d->opacity==255&&!map_x){
+                    ksn_result rows_result=reader.read_rows(reader.ctx,reader.variant,reader.frame,
+                        (uint16_t)(d->data.image.source_y+(y0-d->bounds.y0)),(uint16_t)(y1-y0),
+                        (uint16_t)(d->data.image.source_x+(x0-d->bounds.x0)),(uint16_t)(x1-x0),
+                        pixels+(unsigned)((y0-y)*240+x0),240);
+                    if(rows_result==KSN_OK){KSN_PROF_END(image);continue;}
+                    if(rows_result!=KSN_UNSUPPORTED){ksn_core_failed(core,frame.ticket);return rows_result;}
+                }
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;){
                     unsigned count=(unsigned)(x1-x),limit=identity?32u:16u;
                     if(count>limit)count=limit;

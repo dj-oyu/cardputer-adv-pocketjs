@@ -2668,6 +2668,23 @@ static esp_err_t present_frame(void) {
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif
                 }
+#if defined(POCKET_PROC_ROWS_AB)&&POCKET_PROC_ROWS_AB
+                /* Same-binary A/B of the Shiki image's row path and the covered
+                 * band's skipped fill (ksn_render.h): the window just printed
+                 * ran with the switches named here, then the next arm is set.
+                 * Three arms: both on, rows off, fill-skip off, so each off
+                 * window has an all-on neighbour on either side. A measurement
+                 * build only (POCKET_PROC_ROWS_AB 1); pixels are the same in
+                 * every arm. */
+                {
+                    static unsigned rows_arm;
+                    ESP_LOGI("kasane","ROWS_AB image_rows=%d cover_skip_fill=%d render_ms=%.2f",
+                             g_ksn_image_rows,g_ksn_cover_skip_fill,render_sum/30/1000.0);
+                    rows_arm=(rows_arm+1)%3;
+                    g_ksn_image_rows=rows_arm!=1;
+                    g_ksn_cover_skip_fill=rows_arm!=2;
+                }
+#endif
 #ifdef KASANE_PROC_DEVICE_PROBE
                 {
                     pocket_grid_resize_profile resize_prof;
