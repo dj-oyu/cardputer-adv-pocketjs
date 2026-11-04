@@ -96,7 +96,16 @@
   - 2026-11-03 に stub の数え方を直した: OOM が stub の `read()` の中（`Uint8Array` の確保）に当たると、読み終わりを数えず
     `reads=449/448` で FAIL していた（旧版の `stress.js` でも同じ。失敗した読みも Promise は settle するので、`finally` で数える）。
   - `STRESS_DISPATCH_FAULT=1` の変種は、注入のスクリプト自身が例外を出して FAIL する。変更前の `51f5feb` でも同じ（未調査）。
-- 実機: Shiki 版はまだ実機で確かめていない（fps・`turn_ms`・`render_ms`・JIT の結果・空きヒープ）。
+- 実機（Shiki 版、`ff2815b`、2026-11-04、broker 経由、入力なしの LV1 で 90 秒）: 29.8 fps（1,920 フレーム／64.4 s）、
+  `turn_ms` 6.33〜6.64、`render_ms` 11.30〜12.31、`send_ms` 0.84〜0.94（30 フレームの窓 67 個）。Shiki は 1 フレーム 18 draw・
+  7,332 ステップで `engine_ms` 1.66〜1.68（JIT 有効、コード 6,640 B、JIT の失敗 0。最初の窓はコンパイル 26 回で 3.44）。
+  Shiki の区画 37,828 / 49,152 B（JIT のコードを含む、最大の空き 7,724 B）。評価後 `MEM free=95,280 largest=31,744 js=44,836`。
+  `err=0`、`natOk=ok`、HUD 9 コマンド。ログは [docs/kasane/logs/stress-shiki-device-20261104-ff2815b.txt](../../docs/kasane/logs/stress-shiki-device-20261104-ff2815b.txt)。
+  - **LV2・LV3（OOM からの回復）は実機で測っていない。** broker が返す `boot_id`（64 ビット）が JSON の倍精度で丸められ、
+    Enter（`action.tap`）が `stale_boot` で断られた。`tools/stress_app.py --port COM3` で直接回せば測れる。
+  - 時間の内訳: 1 フレームの Shiki の計算は 1.7 ms で、描画（`render_ms`、Shiki の帯のラスタと HUD の合成）の 11.8 ms が大きい。
+    旧版の実機の `render_ms` 6.4〜6.9 ms（2026-09-27、別のファーム）より約 5 ms 長い（同じバイナリの比較ではない）。
+    次に縮めるのは帯の描画（全線分を帯ごとに走査し、1 画素ずつ書く経路）。
 
 ## 実測（旧版、実機、2026-09-26、vm/main + F3）
 
