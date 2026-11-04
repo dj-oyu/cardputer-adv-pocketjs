@@ -2707,16 +2707,6 @@ static esp_err_t present_frame(void) {
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
-                /* MEASUREMENT ONLY (DIV_AB): Shiki plain-line band entry,
-                 * 64-bit (1) against band_entry (0), alternate windows. */
-                {
-                    extern int g_ksn_proc_div64;
-                    ESP_LOGI("kasane","DIV_AB div64=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u bands=%u",
-                             g_ksn_proc_div64,ticks?turn_sum/ticks/1000.0:0.0,
-                             render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes,band_count_last);
-                    g_ksn_proc_div64=!g_ksn_proc_div64;
-                }
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
                 /* Same-binary A/B of zero-copy strips (board.h): the window
                  * just printed used the mode named here, then it flips. */
