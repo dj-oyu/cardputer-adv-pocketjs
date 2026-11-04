@@ -72,7 +72,7 @@ int board_endian_ab_flip(void);
 // instead of through spi_master's queue. board_lcd_direct_set flips it at a
 // frame boundary for a same-binary A/B; returns the new state.
 #ifndef BOARD_LCD_DIRECT
-#define BOARD_LCD_DIRECT 0
+#define BOARD_LCD_DIRECT 1  /* MEASUREMENT BUILD ONLY (reverted after the device run) */
 #endif
 #if BOARD_LCD_DIRECT
 int board_lcd_direct_set(int on);
