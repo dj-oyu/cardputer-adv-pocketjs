@@ -153,7 +153,7 @@ esp_err_t lcd_spi_ring_submit(const uint16_t *pixels, int x, int cols, int rows)
         const unsigned k = ring_head;
         spi_dma_desc_t *dsc = &ring_desc[k];
         // Free once the GDMA has written the owner back (or never used).
-        while (*(volatile uint32_t *)&dsc->dw0 >> 31) {
+        while (((volatile spi_dma_desc_t *)dsc)->dw0.owner == DMA_DESCRIPTOR_BUFFER_OWNER_DMA) {
             if (esp_timer_get_time() - began > RING_TIMEOUT_US) return ESP_ERR_TIMEOUT;
         }
         memcpy(ring_rows[k], pixels + r * 240 + x, row_bytes);
