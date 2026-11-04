@@ -5,6 +5,7 @@
 #include <string.h>
 
 int g_ksn_proc_hspan=1;
+int g_ksn_proc_div64=0;   /* MEASUREMENT ONLY (DIV_AB) */
 /* Columns a..b (inclusive, already on the panel) of one row in colour c, two
  * pixels a 32-bit store once the address is 4-aligned. may_alias: the rest of
  * the renderer reads and writes these pixels as uint16_t
@@ -175,6 +176,26 @@ bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int
          * in 32 bits; the 64-bit form this replaced was a __divdi3 call per
          * line and piece, twice as many with 4-row pieces (lcd-dma-driver.md
          * 9.9). */
+        if(g_ksn_proc_div64){            /* MEASUREMENT ONLY: the 64-bit form */
+        if(dy){
+            int row=sy>0?y-s->y0:s->y0-(y+height-1);
+            if(row>0){
+                int major,minor,x_steps,y_steps;
+                if(dx>=dy){
+                    int64_t numerator=(int64_t)row*dx-(dx-1)/2;
+                    major=numerator>0?(int)((numerator+dy-1)/dy):0;
+                    minor=(int)(((int64_t)major*dy+(dx-1)/2)/dx);
+                    x_steps=major;y_steps=minor;
+                }else{
+                    major=row;
+                    minor=(int)(((int64_t)major*dx+(dy-1)/2)/dy);
+                    x_steps=minor;y_steps=major;
+                }
+                x+=sx*x_steps;yy+=sy*y_steps;
+                err=(int)((int64_t)dx-dy-(int64_t)x_steps*dy+(int64_t)y_steps*dx);
+            }
+        }
+        }else
         band_entry(s,s->x0,y,height,&x,&yy,&err);
         for(;;){
             if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
