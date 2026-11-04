@@ -169,27 +169,13 @@ bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int
         if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);continue;}
         int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
         int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
-        if(dy){
-            /* A band can be reached without replaying the line's prefix. The
-             * original Bresenham phase is reconstructed from its major-axis
-             * step count; clipping endpoints and restarting would change ties. */
-            int row=sy>0?y-s->y0:s->y0-(y+height-1);
-            if(row>0){
-                int major,minor,x_steps,y_steps;
-                if(dx>=dy){
-                    int64_t numerator=(int64_t)row*dx-(dx-1)/2;
-                    major=numerator>0?(int)((numerator+dy-1)/dy):0;
-                    minor=(int)(((int64_t)major*dy+(dx-1)/2)/dx);
-                    x_steps=major;y_steps=minor;
-                }else{
-                    major=row;
-                    minor=(int)(((int64_t)major*dx+(dy-1)/2)/dy);
-                    x_steps=minor;y_steps=major;
-                }
-                x+=sx*x_steps;yy+=sy*y_steps;
-                err=(int)((int64_t)dx-dy-(int64_t)x_steps*dy+(int64_t)y_steps*dx);
-            }
-        }
+        /* A band can be reached without replaying the line's prefix: the
+         * Bresenham phase is rebuilt from its major-axis step count (clipping
+         * the endpoints and restarting would change ties). band_entry does it
+         * in 32 bits; the 64-bit form this replaced was a __divdi3 call per
+         * line and piece, twice as many with 4-row pieces (lcd-dma-driver.md
+         * 9.9). */
+        band_entry(s,s->x0,y,height,&x,&yy,&err);
         for(;;){
             if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
             if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
