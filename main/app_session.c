@@ -568,6 +568,9 @@ static esp_err_t kasane_dma_submit(kasane_display_t *display,int x,int y,int col
     /* Depth 2 (board.h): the board waits for a free slot, not for the band
      * before. Failures still surface at the next submit or at finish. */
     esp_err_t result=g_board_depth<2?kasane_drain(display):ESP_OK;
+#elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    /* The ring (mode 2) waits for the rows it reuses, inside the board. */
+    esp_err_t result=board_buf_mode()==2?ESP_OK:kasane_drain(display);
 #else
     esp_err_t result=kasane_drain(display);
 #endif
@@ -585,7 +588,7 @@ static ksn_result kasane_finish(void *opaque) {
 }
 #endif
 static uint16_t *kasane_strip(void *opaque) {
-    (void)opaque;return board_strip();
+    (void)opaque;return board_strip_next();
 }
 static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
@@ -2700,6 +2703,21 @@ static esp_err_t present_frame(void) {
                              render_sum/30/1000.0,present_sum/30/1000.0,
                              (unsigned)stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
                     direct=board_lcd_direct_set(!direct);
+                }
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+                /* Same-binary A/B of zero-copy strips (board.h): the window
+                 * just printed used the mode named here, then it flips. */
+                {
+                    static int mode=0;
+                    ESP_LOGI("kasane","BUF_AB mode=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u free=%u underruns=%u",
+                             mode,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes,
+                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                             (unsigned)board_buf_underruns());
+                    int next=board_buf_mode_set((mode+1)%3);
+                    if(next>=0)mode=next;
                 }
 #endif
 #if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB

@@ -30,3 +30,23 @@ bool lcd_spi_direct_busy(void);
 // Transfers that ended with the out-FIFO-empty flag up (TRM p.1118: GDMA ran
 // short of the SPI's length). Must stay 0; a diagnostic, not an error path.
 uint32_t lcd_spi_direct_underruns(void);
+
+// ---- The row ring (docs/platform/lcd-dma-driver.md 9.4, design 2) ----------
+// Pixel strips are copied row by row into a ring of LCD_SPI_RING_ROWS rows,
+// each with its own descriptor, as soon as the GDMA has consumed the row
+// that was there (descriptor write-back). A band whose rows are all copied
+// waits as the pending transfer; the GDMA end-of-frame interrupt starts it
+// the moment the active one is done on the wire (SPI_TRANS_DONE). So the
+// caller can copy band j+1 and go on drawing band j+2 while band j is still
+// being sent, with 12 rows of transmit buffer rather than 16.
+#define LCD_SPI_RING_ROWS 12
+// rows[k]: the buffer of ring row k, 240 pixels, internal RAM. UI task only;
+// the interrupt is installed on the calling core (the UI task's).
+esp_err_t lcd_spi_ring_init(uint16_t *const rows[LCD_SPI_RING_ROWS]);
+void lcd_spi_ring_enter(void);
+void lcd_spi_ring_leave(void);
+// Copies `rows` rows of `cols` pixels from pixels + r*240 + x into the ring
+// and queues them as one transfer. Waits only for ring rows still in use.
+esp_err_t lcd_spi_ring_submit(const uint16_t *pixels, int x, int cols, int rows);
+// Waits until nothing is active or pending.
+esp_err_t lcd_spi_ring_drain(void);

@@ -17,6 +17,12 @@ esp_err_t board_spi3_acquire(void);
 bool board_key_event(board_keyevent_t *out);
 // The one strip buffer every screen draws into; board_present consumes it.
 uint16_t *board_strip(void);
+// Zero-copy strips (docs/platform/lcd-dma-driver.md 9.4): with
+// g_board_zero_copy set (BOARD_BUF_AB builds only, for now), the board's two strip buffers take turns as the draw
+// target and a strip is sent from where it was drawn, with no copy. This
+// returns the one that is not in flight. Needs LSB-first pixels (no swap).
+// Off (0) it returns board_strip(). Frame boundaries only may change it.
+uint16_t *board_strip_next(void);
 // TEMPORARY A/B switch for the panel transfer (see board.c): 1 = queue the strip
 // and reap the previous one on the next call (asynchronous, the shipping path),
 // 0 = the blocking polling transfer this file has always used. Both paths live in
@@ -73,6 +79,17 @@ int board_endian_ab_flip(void);
 // frame boundary for a same-binary A/B; returns the new state.
 #ifndef BOARD_LCD_DIRECT
 #define BOARD_LCD_DIRECT 0
+#endif
+#ifndef BOARD_BUF_AB
+#define BOARD_BUF_AB 0
+#endif
+#if BOARD_BUF_AB
+// Measurement build: 0 copy (today), 1 zero-copy strips, 2 the row ring
+// (docs/platform/lcd-dma-driver.md 9.4). At a frame boundary only.
+extern int g_board_zero_copy;
+int board_buf_mode_set(int mode);
+int board_buf_mode(void);
+uint32_t board_buf_underruns(void);
 #endif
 #if BOARD_LCD_DIRECT
 int board_lcd_direct_set(int on);

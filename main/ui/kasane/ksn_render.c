@@ -2096,8 +2096,17 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
     DD_CLOSE(prepare);
     ksn_span_scratch scratch;
+    bool first_band=true;
     for(unsigned band=0;band<17;band++){
         if(!(damage.bands&(1u<<band)))continue;
+        /* The port may hand out a different strip per band (the board's two
+         * buffers in turn, so a band is drawn while the last one is sent
+         * from the other). The first came above, before any band went out. */
+        if(!first_band){
+            pixels=display->strip(display->ctx);
+            if(!pixels){ksn_core_failed(core,frame.ticket);return KSN_OOM;}
+        }
+        first_band=false;
         int y=(int)band*8,rows=band==16?7:8;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
         DD_OPEN(backdrop,DD_BACKDROP);

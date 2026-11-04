@@ -80,6 +80,29 @@ static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
 static spi_transaction_t tx_pending;
+// Zero-copy (board.h): the slot (shared or tx_buf) the strip in flight is
+// sent from, NULL when the strip went out of a copy.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+int g_board_zero_copy = 0;
+// Design 2 (board.h): strips go into lcd_spi.c's row ring, built from
+// tx_buf's 8 rows and these 4 (+1,920 B).
+static int g_board_ring = 0;
+static bool ring_ready;
+static uint16_t ring_extra[4 * LCD_W] __attribute__((aligned(16)));
+static uint16_t *tx_from;
+// A strip that can be sent where it lies: one of the two slots, pixels LSB
+// first. Anything else (another screen's buffer) takes the copy.
+static bool zero_copy_strip(const uint16_t *pixels) {
+    return g_board_zero_copy && lcd_le && (pixels == shared || pixels == tx_buf);
+}
+#endif
+uint16_t *board_strip_next(void) {
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    // At most one strip is in flight (queue_size 1), so the other is free.
+    if (g_board_zero_copy) return (tx_inflight && tx_from == shared) ? tx_buf : shared;
+#endif
+    return shared;
+}
 #if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
 // Direct sends (board.h). tx_direct: the strip in flight went out through
 // lcd_spi.c, so its completion is the SPI's done bit, not a queue result.
@@ -145,6 +168,16 @@ static esp_err_t tx_reap(void) {
     return ESP_OK;
 #endif
     if (!tx_inflight) return ESP_OK;
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (g_board_ring) {
+        DD_SCOPE(DD_TX_REAP);
+        DD_ADD(DD_TX_REAPS,1);
+        esp_err_t e = lcd_spi_ring_drain();
+        DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+        tx_inflight = false;
+        return e;
+    }
+#endif
 #if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
     if (tx_direct) {
         DD_SCOPE(DD_TX_REAP);
@@ -264,6 +297,28 @@ int board_lcd_direct_set(int on) {
     return g_board_direct;
 }
 uint32_t board_lcd_direct_underruns(void) { return lcd_spi_direct_underruns(); }
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+int board_buf_mode(void) { return g_board_ring ? 2 : g_board_zero_copy ? 1 : 0; }
+uint32_t board_buf_underruns(void) { return lcd_spi_direct_underruns(); }
+int board_buf_mode_set(int mode) {
+    if (tx_reap() != ESP_OK) return -1;
+    if (g_board_ring && mode != 2) lcd_spi_ring_leave();
+    if (mode == 2 && !g_board_ring) {
+        if (!ring_ready) {
+            uint16_t *rows[LCD_SPI_RING_ROWS];
+            for (int k = 0; k < 8; k++) rows[k] = tx_buf + k * LCD_W;
+            for (int k = 0; k < 4; k++) rows[8 + k] = ring_extra + k * LCD_W;
+            // From the UI task, so the GDMA interrupt lands on its core.
+            if (lcd_spi_ring_init(rows) != ESP_OK) return -1;
+            ring_ready = true;
+        }
+        lcd_spi_ring_enter();
+    }
+    g_board_ring = mode == 2;
+    g_board_zero_copy = mode == 1;
+    return mode;
+}
 #endif
 #if BOARD_ENDIAN_PROBE
 static int64_t endian_flip_us;
@@ -485,6 +540,9 @@ esp_err_t board_init(void) {
 #endif
     };
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    ESP_ERROR_CHECK(lcd_spi_direct_init());
+#endif
 #if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
     ESP_ERROR_CHECK(lcd_spi_direct_init());
     if (g_board_direct) lcd_spi_direct_enter();
@@ -623,6 +681,23 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     size_t bytes = (size_t)LCD_W * rows * 2;
     // Commands may have drained already. A continued window has not: the
     // same TX payload/descriptor cannot be touched while the driver owns it.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (g_board_ring && g_board_async) {
+        // The ring waits only for the rows it reuses; DC stays high for every
+        // band the interrupt starts.
+        gpio_set_level(34, 1);
+        esp_err_t e;
+        { DD_SCOPE(DD_TX_SUBMIT);
+          DD_ADD(DD_TX_SUBMITS,1);
+          e = lcd_spi_ring_submit(pixels, 0, LCD_W, rows);
+          DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+          DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
+        if (e == ESP_OK) tx_inflight = true;
+        next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+        window_x=0;window_cols=LCD_W;
+        return e;
+    }
+#endif
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     esp_err_t e=tx_reap_slot();
 #else
@@ -636,15 +711,21 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         // Drawing/overlays may overlap DMA; the single TX copy starts only
         // after ownership is returned by the reap above.
         DD_OPEN(copy,DD_TX_COPY);
-        DD_ADD(DD_TX_COPY_BYTES,bytes);
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
         uint16_t *panel = tx_slot_buf[tx_next];
 #else
         uint16_t *panel = tx_buf;
 #endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+        if (zero_copy_strip(pixels)) {
+            panel = pixels;              // sent from where it was drawn
+        } else
+#endif
         if (g_board_swap_into) {
+            DD_ADD(DD_TX_COPY_BYTES,bytes);
             put_strip(panel,pixels,count);
         } else {
+            DD_ADD(DD_TX_COPY_BYTES,bytes);
             // The A/B arm: swap in place, then copy, the way 7fd965f shipped it.
             put_strip(pixels,pixels,count);
             memcpy(panel, pixels, bytes);
@@ -691,6 +772,9 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             tx_inflight = tx_queued != 0;
 #else
             tx_inflight = (e == ESP_OK);
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+            tx_from = panel;
 #endif
         }
     } else {
@@ -754,6 +838,20 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // make every packed row a whole number of the kernel's blocks at an aligned
     // address. Anything else falls to the scalar swap, which is the arm that
     // made the first narrow measurement slower than the full-width path.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (g_board_ring && g_board_async) {
+        gpio_set_level(34, 1);
+        { DD_SCOPE(DD_TX_SUBMIT);
+          DD_ADD(DD_TX_SUBMITS,1);
+          e = lcd_spi_ring_submit(pixels, x, cols, rows);
+          DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+          DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
+        if (e == ESP_OK) tx_inflight = true;
+        next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+        window_x=x;window_cols=cols;
+        return e;
+    }
+#endif
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     e=tx_reap_slot();
 #else
@@ -766,6 +864,14 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     uint16_t *panel = tx_slot_buf[tx_next];
 #else
     uint16_t *panel = tx_buf;
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (zero_copy_strip(pixels)) {
+        // Packed in place: row r moves from r*240+x down to r*cols, never past
+        // a row still to be read, and the strip is not used again this band.
+        panel = pixels;
+        for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
+    } else
 #endif
     for (int r=0;r<rows;r++) put_strip(panel+r*cols,pixels+r*LCD_W+x,cols);
     DD_CLOSE(copy);
@@ -799,6 +905,9 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
             tx_inflight = tx_queued != 0;
 #else
             tx_inflight = (e == ESP_OK);
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+            tx_from = panel;
 #endif
         }
     } else {
@@ -843,6 +952,9 @@ esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     // Depth 2 waits for a free slot inside board_present_rect instead.
     esp_err_t e=g_board_depth<2?board_present_finish():ESP_OK;
+#elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    // The ring waits for the rows it reuses inside board_present_rect.
+    esp_err_t e=g_board_ring?ESP_OK:board_present_finish();
 #else
     esp_err_t e=board_present_finish();
 #endif
