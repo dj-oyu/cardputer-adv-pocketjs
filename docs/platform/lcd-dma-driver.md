@@ -443,3 +443,25 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 **出力:** STRESS の digest `de4a66c5`（4 行・8 行）、DERBY の panel digest（先頭 `f2d667e3`）は不変。host の検査は CMake のフラグを使わないので、これは関数属性を足したソースが同じ画素を出すことの確認で、`-O2` のコード生成の確認ではない（`-O2` 版の画素は実機で目視していない）。
 
 機械語と性能カウンタでの内訳（減ったサイクルの 2/3 が命令数、1/3 が成立分岐、B の退行はフレームが 1,020 B を越えたことによる 3 命令のスタックアクセス）は [o2-machine-code.md](../perf/o2-machine-code.md)。
+
+### 9.13 60 fps の再確認（表示の周期 16 ms、2026-11-05）
+
+§9.8 と同じ方法（`VM_DISPLAY_PERIOD_MS` 33 → 16 の測定版、`KASANE_PAINT` の時刻から、測定後に revert）で、§9.9〜9.12
+（4 行の帯の高速化、ハッシュ、`-O2`）の後の木を測った（実測）。同じ測定版に QuickJS の PGO（docs/vm/qjs-pgo.md）を
+足したものも測ったが、差は揺れの中だった。記録は `docs/kasane/logs/apps-60fps-recheck-20261105.txt`。
+
+| アプリ | 11-04（§9.8） | 11-05 | 内訳（turn / render / send、ms） |
+| --- | --- | --- | --- |
+| BIG WAVE | 55.6 | **58.5** | 7.2 / 3.56 / 4.28 |
+| STRESS | 44.3 | **50.5** | 6.72 / 6.80 / 2.93 |
+| MEGADEMO | 50.5 | **52.2** | WAKE 38〜41（turn 11.5〜15）、NEWS 50〜58、TWIST 50〜59、ZENITH 58〜61、CORE 40〜59 |
+| DERBY | 55.5（レース） | **53.1** | パドック 57〜60、レース 54〜60、終盤の WIDE 2 で 41〜49（turn 13〜14.5） |
+
+- **60 fps には届いていない。** 張り付くのは MEGADEMO の ZENITH、DERBY のパドックと結果、BIG WAVE の一部の窓だけ。
+- 前回より上がった（STRESS +6.2 fps、BIG WAVE +2.9）。描画が速くなった分（STRESS の render 8.35 → 6.80 ms）。
+- 残りの壁は JS の turn。STRESS は render 6.8 ＋ turn 6.7 ＋ send 2.9 で 16.4 ms と、他の処理の前に 16.7 ms を使い切る。
+  MEGADEMO の WAKE は turn 11〜15 ms（tier-2 の plan の登録中）、DERBY の終盤は馬群が広がって SHIKI の draw が
+  31 → 53 に増え turn 13〜14.5 ms。
+- DERBY の平均が前回より低いのは、窓に入ったレースの区間が違うため（今回は終盤の重い WIDE 2 を含む）。同じ区間の比較ではない。
+- シーンの切り替えでの一時的な落ち込み（DERBY の結果画面 17 fps、ゲートからレースへ 26〜27 fps）は、シーンの構築の時間。
+

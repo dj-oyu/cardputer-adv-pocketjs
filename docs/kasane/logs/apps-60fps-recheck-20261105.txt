@@ -20,3 +20,24 @@ DERBY    r60a-derby    53.1 fps (99 windows/55.9 s; the first ~124 log lines wer
   gate -> race 2 start    one 27 window (scene build)
   race 2 (first half)     54-60 (mean 57.3)  turn 7.9 render 2.9 send 4.4
 No errors, resets or OOM in any run.
+
+## B (16 ms + CONFIG_POCKET_VM_QJS_PGO=y). The first PGO build (9085cfd) failed on the Windows broker
+## ("profile for function ... not found" for every static function); measured with f67662b (rekey.py).
+BIGWAVE  r60b-bigwave  58.5 fps (46 windows/23.6 s)  windows 57.3-60.2   turn 7.1  render 3.54 send 4.28
+STRESS   r60b-stress   50.7 fps (32 windows/18.9 s)  windows 49-52       turn 6.73 render 6.78 send 2.93
+MEGADEMO r60b-megademo 52.1 fps (76 windows/43.7 s)  windows 37-60       turn 7.04 render 4.12 send 4.41
+  WAKE 38-40 (turn 11.6) / NEWS 50-59 (6.6) / TWIST 49-59 (6.7) / ZENITH 58-60 (4.2) / CORE 40-59 (8.2) / LOST 37-46
+DERBY    r60b-derby    53.8 fps (101 windows/56.4 s; first 124 log lines dropped) windows 17-60
+  race 1 (tail)           52-60 (mean 56.4)  turn 8.2; WIDE 2 / WIDE 3 about 53 (turn 9)
+  photo/res               45 / 59-60 (one 17: scene build)
+  pad                     58-60 (mean 59.0)  turn 4.3
+  gate -> race 2 start    one 26 window
+  race 2                  WIDE/FIELD 52-60; WIDE 2 (to the end of the run) 41-54, mean 44.7, turn 13.4 (SHIKI draws 31 -> 53)
+No errors, resets or OOM.
+
+## Reading
+- A vs B: no difference beyond the window-to-window spread (BIGWAVE 58.5/58.5, STRESS 50.5/50.7, MEGADEMO 52.2/52.1,
+  DERBY 53.1/53.8 with different races in the window). JS turn 6.72/6.73 ms on STRESS. The QEMU model's 1-2 % is not seen.
+- 60 fps is held only by ZENITH (MEGADEMO), DERBY's paddock/results and BIG WAVE's best windows. Below it:
+  STRESS ~50 (render 6.8 + turn 6.7 + send 2.9 = 16.4 ms before anything else), MEGADEMO WAKE ~39 (turn 11-15),
+  CORE's first seconds ~40-47, DERBY's late-race WIDE 2 ~41-45 (turn 13-14.5 as the field spreads).
