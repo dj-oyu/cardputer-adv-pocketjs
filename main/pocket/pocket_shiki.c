@@ -1,6 +1,6 @@
 #include "pocket_shiki.h"
 #include "pocket_api.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "ksn_shiki.h"
 #include "ksn_shiki_bench.h"
 #include "ksn_shiki_jit.h"
@@ -468,7 +468,7 @@ static JSValue js_cycles(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return JS_NewUint32(ctx,esp_cpu_get_cycle_count());
 }
 /* drawProfile(on): returns the stage sums so far ({n, parse, lookup, engine,
- * copy} in cycles, pocket_proc.h) and restarts them, on or off. */
+ * copy} in cycles, pocket_shiki_frame.h) and restarts them, on or off. */
 static JSValue js_draw_profile(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     pocket_shiki_draw_prof *p=&pocket_shiki_prof;

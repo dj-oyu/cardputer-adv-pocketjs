@@ -15,7 +15,7 @@
 #include "pocket_kasane.h"
 #include "app_session.h"
 #ifdef KASANE_D2_OVERLAY_PROC_PROBE
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 static bool d2_overlay_fault_injected;
 static bool d2_overlay_retry;
 static int d2_overlay_sends_before_failure=-1;

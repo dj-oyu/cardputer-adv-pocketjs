@@ -1,12 +1,12 @@
 /* pocket.shapes against its contract (docs/api/shapes.md): the segments each
  * call draws for known shapes, the options, the errors, and that a call
  * stopped by the frame limit leaves nothing behind. The frame is a recorder
- * standing in for pocket_proc.c's native lines (same limit semantics: a
+ * standing in for pocket_shiki_frame.c's native lines (same limit semantics: a
  * line past the limit throws LIMIT_EXCEEDED, the caller rolls back). Host
  * only: tools/kasane_contract/run_pocket_shape.py. */
 #include "quickjs.h"
 #include "pocket_api.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_shape.h"
 #include <stdio.h>
 #include <stdlib.h>

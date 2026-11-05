@@ -28,7 +28,7 @@
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "ui/kasane/ksn_shiki_jit.h"
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
@@ -2643,7 +2643,7 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
-                /* What Shiki cost these frames (pocket_proc.c, docs/kasane/shiki-jit.md
+                /* What Shiki cost these frames (pocket_shiki_frame.c, docs/kasane/shiki-jit.md
                  * sec.9): draws and engine steps per frame, the engine (input
                  * conversion included) and the whole native draw, ms per frame. */
                 {
@@ -2689,7 +2689,7 @@ static esp_err_t present_frame(void) {
                 }
 #if defined(POCKET_PROC_HSPAN_AB)&&POCKET_PROC_HSPAN_AB
                 /* Same-binary A/B of the band renderer's horizontal-line fill
-                 * (g_ksn_proc_hspan, ksn_procedural.h): the window just printed
+                 * (g_ksn_proc_hspan, ksn_shiki_frame.h): the window just printed
                  * ran with the value named here, then it flips. A measurement
                  * build only (POCKET_PROC_HSPAN_AB 1); pixels are the same. */
                 ESP_LOGI("kasane","HSPAN_AB hspan=%d render_ms=%.2f",g_ksn_proc_hspan,render_sum/30/1000.0);

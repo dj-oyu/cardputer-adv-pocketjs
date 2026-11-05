@@ -4,7 +4,7 @@
 
 > 60 fps への道のり全体の要約は [60fps-roadmap.md](60fps-roadmap.md) にある。
 
-[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12 で、描画と転送の毎フレームの道（`ksn_font.c`・`ksn_render.c`・`ksn_core.c`・`pocket_kasane.c`・`pocket_proc.c`）を `-O2` にし、`render_group` だけ `-Os` に戻した。この文書は「なぜ速くなったか」を、逆アセンブルと XTPERF の実測で分けたもの。数字の区分は 3 つ: **実測**（実機の XTPERF）、**コード**（逆アセンブルで数えた事実）、**推定**。
+[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12 で、描画と転送の毎フレームの道（`ksn_font.c`・`ksn_render.c`・`ksn_core.c`・`pocket_kasane.c`・`pocket_shiki_frame.c`）を `-O2` にし、`render_group` だけ `-Os` に戻した。この文書は「なぜ速くなったか」を、逆アセンブルと XTPERF の実測で分けたもの。数字の区分は 3 つ: **実測**（実機の XTPERF）、**コード**（逆アセンブルで数えた事実）、**推定**。
 
 - 逆アセンブルは host の Xtensa GCC 15.2（`-mlongcalls -ffunction-sections -fdata-sections -fstrict-volatile-bitfields`、契約テストのスタブのヘッダ）で単体コンパイルしたもの。**ファームの ELF ではない**（形は同じはずだが、行数・番地は目安）。
 - 実測は、出荷版と、5 ファイルだけ `-Os` に戻した版の 2 ビルド（`59319d2` / `896e9fc`、計測後に revert 済み）。`render_rects_body` を囲み、その中の `display->present` を引いた区間で、PM0 = cycles、PM1 = 1 窓（30 フレーム）に 1 イベントで巡回（[ray-stall-census.md](ray-stall-census.md) と同じ方法）。記録は [logs/o2-xtperf-20261105.txt](logs/o2-xtperf-20261105.txt)。

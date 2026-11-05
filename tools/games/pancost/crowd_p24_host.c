@@ -1,5 +1,5 @@
 /* Draws crowd_p24.mjs's pictures with the firmware's own VM and band
- * renderer (main/ui/kasane/ksn_procedural.c). Host only.
+ * renderer (main/ui/kasane/ksn_shiki_frame.c). Host only.
  *
  *   crowd_p24_host OUT.rgb565 < cases.txt
  *
@@ -8,7 +8,7 @@
  *   D n                a draw: n rows "op dst a b value color", then
  *                      "I v0 .. v7"
  *   ENDFRAME
- * Each draw runs as pocket_proc.c runs it (a registered plan, then the
+ * Each draw runs as pocket_shiki_frame.c runs it (a registered plan, then the
  * frame replayed in 8-row bands) over the same pixels, in order. OUT gets
  * every picture, 240 x 135 uint16 little endian; stdout one line a picture:
  * draws, steps, frame entries, raster steps (summed over its draws). */

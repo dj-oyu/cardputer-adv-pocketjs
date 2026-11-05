@@ -161,7 +161,7 @@ plan の登録: 起動時に 6 本（波・海・空・泡・線）、残りの 
 
 ### 全画素の検証
 
-全フレーム（7,256 フレーム、63,883 draw）で、各 draw を `ksn_proc_plan_run`（`pocket_proc.c` が回す経路）、同じ plan のデバッグ単歩、`ksn_proc_step` の単歩の3通りで実行し、線分・ラスタ歩数・ステップ数・レジスタがビット一致。型付き点列はスカラー・PIE の模型・ディスパッチャの3通りが一致。フレームを plan の線分から一括で、VM の線分から 8 行の帯ごとに描いて全画素一致（235,094,400 画素）。失敗 0。手順は test_proc_megademo_scenes.c（v2.0 で削除。`427b308` の `tools/kasane_contract/test_proc_megademo_scenes.c`） と同じ。
+全フレーム（7,256 フレーム、63,883 draw）で、各 draw を `ksn_proc_plan_run`（`pocket_shiki_frame.c` が回す経路）、同じ plan のデバッグ単歩、`ksn_proc_step` の単歩の3通りで実行し、線分・ラスタ歩数・ステップ数・レジスタがビット一致。型付き点列はスカラー・PIE の模型・ディスパッチャの3通りが一致。フレームを plan の線分から一括で、VM の線分から 8 行の帯ごとに描いて全画素一致（235,094,400 画素）。失敗 0。手順は test_proc_megademo_scenes.c（v2.0 で削除。`427b308` の `tools/kasane_contract/test_proc_megademo_scenes.c`） と同じ。
 
 ## 負荷と上限
 

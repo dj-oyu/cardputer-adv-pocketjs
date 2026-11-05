@@ -1,5 +1,5 @@
-#ifndef KSN_PROCEDURAL_H
-#define KSN_PROCEDURAL_H
+#ifndef KSN_SHIKI_FRAME_H
+#define KSN_SHIKI_FRAME_H
 #include <stdbool.h>
 #include <stdint.h>
 

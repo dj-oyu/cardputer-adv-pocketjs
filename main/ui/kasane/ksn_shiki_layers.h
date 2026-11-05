@@ -1,6 +1,6 @@
-#ifndef KSN_PROCEDURAL_LAYERS_H
-#define KSN_PROCEDURAL_LAYERS_H
-#include "ksn_procedural_surface.h"
+#ifndef KSN_SHIKI_LAYERS_H
+#define KSN_SHIKI_LAYERS_H
+#include "ksn_shiki_surface.h"
 
 #define KSN_PROC_LAYER_MAX 3
 /* APP-local compositor: ordered, opaque RGB565 procedural surfaces over one

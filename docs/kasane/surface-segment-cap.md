@@ -78,7 +78,7 @@ proc.commit();
 
 scratch と VM を縮めなかったのは、1 本の plan が 1 回の `draw()` で最大 1,024 本を出せ、面への写しの前に数を確かめる形だから（面ごとの上限は写すときに効く）。
 
-**短いフレームが安全な理由**: フレームは `ksn_proc_frame` の先頭（`count`・`raster_steps`・`ready`、6 B）と n 本分だけを確保する。`pocket_proc.c` の中でフレームを読むのは `count` 本までの経路（`ksn_proc_render_band`、damage の計算、画像の帯）だけで、構造体を丸ごと写す・消す箇所は無い。`beginFrame` の `memset(sizeof *candidate)` は先頭 3 項目の初期化に替えた（1,024 本の面でも 10 KB の memset が無くなる）。`segments` が末尾で詰め物が無いことは `_Static_assert` で固定した。
+**短いフレームが安全な理由**: フレームは `ksn_proc_frame` の先頭（`count`・`raster_steps`・`ready`、6 B）と n 本分だけを確保する。`pocket_shiki_frame.c` の中でフレームを読むのは `count` 本までの経路（`ksn_proc_render_band`、damage の計算、画像の帯）だけで、構造体を丸ごと写す・消す箇所は無い。`beginFrame` の `memset(sizeof *candidate)` は先頭 3 項目の初期化に替えた（1,024 本の面でも 10 KB の memset が無くなる）。`segments` が末尾で詰め物が無いことは `_Static_assert` で固定した。
 
 ## host の検査
 

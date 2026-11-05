@@ -179,11 +179,11 @@ V' = cosΔ · V − sinΔ · U        （向きは曲がる方向で決まる）
 
 | 所 | 変更 |
 | --- | --- |
-| `ksn_procedural.h` | `ksn_proc_op` の**末尾**（`KSN_PROC_CUBIC` の後）に足す。既存の番号は動かないので、flash の表・詰めた plan はそのまま |
-| `ksn_procedural.c` | `valid_program` に 1 行（ADD/MUL と同じレジスタの検査）、`ksn_proc_step` に 1 行で `goto finite`。**除数 0 と桁あふれは、今の「算術の結果が非有限なら INVALID」にそのまま入る**（新しい失敗の種類は増えない） |
+| `ksn_shiki_frame.h` | `ksn_proc_op` の**末尾**（`KSN_PROC_CUBIC` の後）に足す。既存の番号は動かないので、flash の表・詰めた plan はそのまま |
+| `ksn_shiki_frame.c` | `valid_program` に 1 行（ADD/MUL と同じレジスタの検査）、`ksn_proc_step` に 1 行で `goto finite`。**除数 0 と桁あふれは、今の「算術の結果が非有限なら INVALID」にそのまま入る**（新しい失敗の種類は増えない） |
 | `ksn_proc_plan.c` | 算術の判定（6 行目）と実行（98 行目付近）に 1 行ずつ |
 | `ksn_proc_analysis.c` | 読み・書きの集合は MUL と同じ形。登録時の積和の認識（D3a）は DIV を知らないので、DIV を含む式は融合の対象外になり、スカラーに戻る（既存の plan の融合は変わらない） |
-| `pocket_proc.c` | 命令の番号の範囲の検査 |
+| `pocket_shiki_frame.c` | 命令の番号の範囲の検査 |
 | `tools/kasane_ir/`（`lower_plans.mjs`・`emit_rom_plans.mjs`） | `/` を DIV に落とす。定数での除算は今どおり逆数の MUL に畳む |
 | host の契約試験 | `test_procedural.c`・`test_proc_analysis.c`・`test_proc_plan.c`・`test_procedural_pattern_matrix.c` に DIV の行（0 除算・非有限・レジスタの範囲）、`check_equivalence.py` の JS の参照 |
 
@@ -214,7 +214,7 @@ esp32s3-hw-mcp の調査も同じ向きの結論を出している。`notes/card
   - 費用（推定。MCP の `pie_cost_estimate`、出所は pie-simd.md の実測の式「命令数 + 0.6 × ストア数」× 1.3〜1.4）: アフィン 8 点が 31 命令・ストア 2 で 32.2 サイクル（今の `block8`）。逆数（ex13 の 36 命令）＋ Newton 2 回（32 bit レーン、8 点で約 24 命令）＋積とマスク（約 19 命令）を足して **8 点で約 110 命令、1 点 約 14 サイクル、実動作で約 19 サイクル（0.08 µs）**。スカラー（0.46 µs）の約 6 倍速い。
   - 得: MID で 0.04〜0.12 ms、点が 1,000 個の桁になる HEAVY の観客で約 0.4 ms（推定）。**ウォーカー（P5）をスカラーで入れた後の、最後の一押し**の位置づけ。
 - **(b) 型付き点列の「動的アフィン」**: 今の `affineQ14Points` は係数と色が登録時に固定で、毎フレーム登録し直すと 74 µs/点（実測）。係数（6 個）と色を draw の入力で渡せるようにすると、登録済みのタイルを 1 点 0.69 µs（実測、JS のターン）で好きな位置・縮尺に置ける。
-  - native の変更: `pocket_proc.c` の `draw` で入力 6〜7 個を `KsnProcAffineQ14` に入れる（今は登録時の値を使う所）。`ksn_proc_points_pie.c` はそのまま使える（係数は呼び出しごとに `PieTerms` へ展開している）。点を線でつながず 1 点ずつ打つ指定（観客は点）も要る。規模は 1〜2 日（推定）。
+  - native の変更: `pocket_shiki_frame.c` の `draw` で入力 6〜7 個を `KsnProcAffineQ14` に入れる（今は登録時の値を使う所）。`ksn_proc_points_pie.c` はそのまま使える（係数は呼び出しごとに `PieTerms` へ展開している）。点を線でつながず 1 点ずつ打つ指定（観客は点）も要る。規模は 1〜2 日（推定）。
   - 価値: 観客を「区画ごとのタイル」にすると、点の費用が 6.9 µs → 約 2.1 µs（帯描画込み、実測の比で 1/3.5）。ただし JS から区画ごとに draw を呼ぶと、区画 1 つに投影 42 µs ＋配列 23 µs ＋固定費 37 µs がかかり、今の plan より高くなりうる（derby-camera-history.md §1 の結論）。**ウォーカーの中から区画ごとに呼ぶ形（JS の呼び出しは系列に 1 回）で初めて生きる。** 観客の見た目（市松＋散らし＋瞬き）は、タイルの点を今の式で作れば保てるが、散らしの 1.5 px が奥行きで縮む点が今と違う。**見た目の判断はユーザー。**
 - **(c) フレームの固定費 19 ms（帯描画 `rn` 9.5 ms、転送 `sd` 7.4 ms）**: 画素を扱う所で、PIE の本来の持ち場。27 fps の 37 ms のうち半分を占める。首振りのフレームの `rn` の内訳（背景の塗り・線分・文字）は、この考察では調べていない。**次に測る価値がある。**
 

@@ -63,7 +63,7 @@ retw.n
 
 ## 5. メモリ
 
-- コードは plan ごとに登録時（`ksn_shiki_register` の最後、`ksn_shiki_jit_attach`）に確保し、plan の `jit` に置く。plan を解放する所はすべて先に `ksn_shiki_plan_dispose()` を呼ぶ（`pocket_proc.c` の detach と reset、`pocket_shiki_api.c` の登録の失敗、`pocket_shiki.c` のテストとベンチ）。`VEACH` の無い plan は何も確保しない（今の出荷アプリは 0 B）。大きさは命令 1 つ 3〜4 B ＋ 前置きと後始末（推定 60〜100 B）。affine128 の本体（約 13 命令）なら 1 区間 150 B 前後（推定）。
+- コードは plan ごとに登録時（`ksn_shiki_register` の最後、`ksn_shiki_jit_attach`）に確保し、plan の `jit` に置く。plan を解放する所はすべて先に `ksn_shiki_plan_dispose()` を呼ぶ（`pocket_shiki_frame.c` の detach と reset、`pocket_shiki_api.c` の登録の失敗、`pocket_shiki.c` のテストとベンチ）。`VEACH` の無い plan は何も確保しない（今の出荷アプリは 0 B）。大きさは命令 1 つ 3〜4 B ＋ 前置きと後始末（推定 60〜100 B）。affine128 の本体（約 13 命令）なら 1 区間 150 B 前後（推定）。
 - 確保は `MALLOC_CAP_EXEC`（DIRAM。ゲストやシステムと同じプール）。Shiki heap（48 KiB の専用領域）は実行属性が無いので使えない。数を縛るため、1 plan の JIT コードの上限と全体の上限を決める（段階 2 で値を決める）。
 - 確保に失敗したら、その plan はインタプリタで動く（失敗を JS に見せない。速さだけが変わる）。
 
@@ -128,7 +128,7 @@ retw.n
 
 ## 9. ターンの中で Shiki が占める分（実機、2026-11-02、deca9f8）
 
-記録: [logs/shiki-turn-20261102-deca9f8.txt](logs/shiki-turn-20261102-deca9f8.txt)。`pocket_proc.c` が draw ごとに常に数え（draw の数・ステップ・入力の変換とエンジンのサイクル・ネイティブの draw 全体のサイクル）、30 フレームごとに `KASANE_PAINT` の後へ `SHIKI_TURN` の 1 行を出す。
+記録: [logs/shiki-turn-20261102-deca9f8.txt](logs/shiki-turn-20261102-deca9f8.txt)。`pocket_shiki_frame.c` が draw ごとに常に数え（draw の数・ステップ・入力の変換とエンジンのサイクル・ネイティブの draw 全体のサイクル）、30 フレームごとに `KASANE_PAINT` の後へ `SHIKI_TURN` の 1 行を出す。
 
 | アプリ・場面 | ターン（ms） | draw/フレーム | ステップ/フレーム | エンジン（ms） | ターンに占める割合 | ステップあたり |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -532,7 +532,7 @@ DERBY（engine_ms、実測）:
 
 2026-11-03 ユーザー決定。これまで 1 回の `draw()` は、面の部屋と関係なく 1,024 本入る作業領域（`workspace`、10,246 B）へ書き、終わってから「描画中のフレームの残りに入るか」を確かめ、入れば `memcpy` で写していた。入らない描画を「全部入るか、何も入らないか」にするための一時置き場だった。
 
-- **直し。** エンジンの状態に、その描画で出してよい線分の数 `cap` を持たせる（`ksn_shiki_vm.cap`、`ksn_shiki_draw_index_cap`）。`pocket_proc.c` は描画中のフレームの末尾 `&candidate->segments[count]` を出力先にし、`cap` を残りの本数にする。超える描画はその場で `LIMIT` で止まり、フレームの本数（`count`）を進めないので、書きかけはフレームに入らない（「全部か無か」は保たれる）。部屋を使い切った `LIMIT` は、以前と同じ `frame drawing limit` として返す。
+- **直し。** エンジンの状態に、その描画で出してよい線分の数 `cap` を持たせる（`ksn_shiki_vm.cap`、`ksn_shiki_draw_index_cap`）。`pocket_shiki_frame.c` は描画中のフレームの末尾 `&candidate->segments[count]` を出力先にし、`cap` を残りの本数にする。超える描画はその場で `LIMIT` で止まり、フレームの本数（`count`）を進めないので、書きかけはフレームに入らない（「全部か無か」は保たれる）。部屋を使い切った `LIMIT` は、以前と同じ `frame drawing limit` として返す。
 - `cap` を見るのは線分を出す 4 か所（`emit`、`LINE_PATTERN`、`EMIT_POINTS`・`EMIT_LINES` の速い道）。スカラーの JIT は線分を C の helper で出すので、同じ検査を通る。他の入口（`ksn_shiki_draw` など）は `cap = KSN_SHIKI_SEGMENTS`（今までどおり）。
 - **作業領域は、画像の面の帯のキャッシュ（240 × 8 × 2 = 3,840 B）だけになった。** 画像の面が選ばれた時（`resource()`、`pocket_proc_image_mode_at`）か、画像の面の `beginFrame` で取る。画像の面を使わないアプリは取らない。DERBY も MEGADEMO も画像の面を使う（DERBY は `derby_view.js` の `SK.resource({maxSegments: 768})`）。
 - 効果（コードからの計算）: 画像の面を使うアプリ（DERBY・MEGADEMO）で 10,246 − 3,840 = 6,406 B、使わないアプリで 10,246 B が区画から空く。描画ごとの `memcpy`（DERBY のレースで 1 フレーム数百本 × 10 B）も無くなる。実機では未測定。

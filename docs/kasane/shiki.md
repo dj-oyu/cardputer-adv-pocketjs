@@ -45,7 +45,7 @@
 
 | 名前空間 | 入口 | capability と `limits` | 実装 |
 | --- | --- | --- | --- |
-| `pocket.kasane.procedural` | `register`・`unregister`・`beginFrame`・`draw`・`commit`・`resource`・`createSurface` | **専用の capability なし**（`display.kasane` の名前空間に同居）。**上限は `limits` に出ていない** | `main/pocket/pocket_proc.c` |
+| `pocket.kasane.procedural` | `register`・`unregister`・`beginFrame`・`draw`・`commit`・`resource`・`createSurface` | **専用の capability なし**（`display.kasane` の名前空間に同居）。**上限は `limits` に出ていない** | `main/pocket/pocket_shiki_frame.c` |
 | `pocket.kasane.grid` | `register`・`registration`・`registerResize`・`registerResizeSource`・`run`・`profile`・`measure`・`resource`・`explain` | 同上（capability なし、`limits` なし） | `main/pocket/pocket_grid.c` |
 | グローバル `gridFold` | `fold`・`index`・`view`（初回使用時に JS の前段を読む） | — | 同上 |
 | `pocket.shapes` | `project`・`fill`・`outline` | `kasane.shapes`（manifest で宣言したアプリだけ）。`maxPoints` 1024・`maxPolygonPoints` 256・`maxHoles` 6 | `main/pocket/pocket_shape.c`、[shapes.md](../api/shapes.md) |
@@ -117,7 +117,7 @@
 4. **自作アプリは重い方式（A・B）しか使えない。** C・D はファームのビルド時に表を作る。実機のエディタで書くアプリには、ゲストに命令を持たせない経路が無い。
 5. **登録の待ち行列とヒープの門を各アプリが書いている**（§2.6）。
 6. **上限が `limits` に出ていない。** `procedural` と `grid` は専用の capability を持たず、§2.3 の値はアプリが feature-test で知れない（CLAUDE.md の「`limits` に出す値はコードで実際に強制している値だけ」の対象になっていない）。`shapes`・`derby.series` は出している。
-7. **アプリ名がフレームワークの中にある。** `pocket_proc.c` の `draw_run()` が `"derby.runner"` を名前で比べる特別経路（`POCKET_DERBY_RUNNER_AFFINE`、既定 OFF）。`pocket.derby` も DERBY 専用の面。
+7. **アプリ名がフレームワークの中にある。** `pocket_shiki_frame.c` の `draw_run()` が `"derby.runner"` を名前で比べる特別経路（`POCKET_DERBY_RUNNER_AFFINE`、既定 OFF）。`pocket.derby` も DERBY 専用の面。
 8. **入力 8 個・引数 8 個の壁**で、値を詰めるか式を分けている。
 9. **JS と Shiki エンジンで意味が少しずれる**（ループ回数が整数でないとき、JS は切り上げて回り、エンジンは draw ごと失敗する。`/` は定数でだけ、2 の冪以外は厳密でない。[js-to-ir.md](js-to-ir.md) §5.2）。
 10. **線の式と格子の式で、登録・実行・資源の API の形が違う**（`draw`＋`commit` と `run(handle, buffers, params)`＋`resource(handle)`、`explain`・`profile` は格子だけ）。
@@ -126,7 +126,7 @@
 
 ### 4.1 今の確保（コードで確認）
 
-ゲストの 160 KiB は QuickJS の確保量を数えて止める**上限値**（`JS_SetMemoryLimit`、`main/app_session.c` の `gc.heap_limit`）で、専用の区画ではない。Shiki の native 側も同じシステムヒープから `malloc`/`calloc` で取る（`pocket_proc.c`、`pocket_grid.c`）。ゲストの GC が作る穴と Shiki の大きなブロックが、同じヒープの中で混ざる。
+ゲストの 160 KiB は QuickJS の確保量を数えて止める**上限値**（`JS_SetMemoryLimit`、`main/app_session.c` の `gc.heap_limit`）で、専用の区画ではない。Shiki の native 側も同じシステムヒープから `malloc`/`calloc` で取る（`pocket_shiki_frame.c`、`pocket_grid.c`）。ゲストの GC が作る穴と Shiki の大きなブロックが、同じヒープの中で混ざる。
 
 | もの | 大きさ | 取る時 |
 | --- | --- | --- |
@@ -165,7 +165,7 @@
 
 **決定（2026-10-31、ユーザー）: 既定の予算は 48 KiB（49,152 B）。** 実測の最大 41,916 B（BIG WAVE のタイトル）に約 7 KB（17%）の余裕。アプリの開始時の 64 KiB の連続ブロックに入り、約 16 KB が残る。仕様 §9.2。
 
-`CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_proc.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ [logs/shiki-memstat-20261031.txt](logs/shiki-memstat-20261031.txt)。
+`CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_shiki_frame.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ [logs/shiki-memstat-20261031.txt](logs/shiki-memstat-20261031.txt)。
 
 | アプリ（何をしたか） | native 側の最大 | 内訳（ブロックの大きさ） | 最大の時の空き／最大の連続ブロック |
 | --- | ---: | --- | --- |
@@ -443,7 +443,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 仕様 §9 の実装。コミット `16e8a88`（式の大きさ）、`e644e40`（ヒープと API）。
 
 - **式は命令の数だけの大きさ**: 以前は 1 本あたり固定で約 1 KB（64 命令の配列と表）。`loop_end` と `level` を命令の 12 B の構造体の空き 2 B に移し、命令を可変長の末尾にした（ヘッダ + 12 B × 命令の数）。予算 48 KiB に BIG WAVE の 22 本が入るため。
-- **ヒープ**（`main/pocket/shiki_heap.c`）: manifest に `kasane.shiki` を挙げたアプリの開始時、ゲストを作る前に連続した区画を 1 つ取り（既定 48 KiB、manifest の `shiki_bytes` で変えられる）、固定長の表（128 件）で切り分ける（2026-11-03 まで ESP-IDF の `multi_heap`。置き換えの理由は [shiki-jit.md](shiki-jit.md) §21）。取れなければアプリを起動しない。そのセッションの `pocket_proc.c` の確保（フレーム・作業領域・VM・式・点）はすべて区画から。ゲストを壊した後に、区画が空なら返す。空でない間（presenter がまだ面を放さない）は閉じかけにして、最後の解放で返す。`kasane.shiki` を挙げないアプリは区画を持たず、確保は今までどおりシステムのヒープ。
+- **ヒープ**（`main/pocket/shiki_heap.c`）: manifest に `kasane.shiki` を挙げたアプリの開始時、ゲストを作る前に連続した区画を 1 つ取り（既定 48 KiB、manifest の `shiki_bytes` で変えられる）、固定長の表（128 件）で切り分ける（2026-11-03 まで ESP-IDF の `multi_heap`。置き換えの理由は [shiki-jit.md](shiki-jit.md) §21）。取れなければアプリを起動しない。そのセッションの `pocket_shiki_frame.c` の確保（フレーム・作業領域・VM・式・点）はすべて区画から。ゲストを壊した後に、区画が空なら返す。空でない間（presenter がまだ面を放さない）は閉じかけにして、最後の解放で返す。`kasane.shiki` を挙げないアプリは区画を持たず、確保は今までどおりシステムのヒープ。
 - **JS API**（`main/pocket/pocket_shiki_api.c`）: `register`（バイト列か組み込みの名前、引数、`options.data`）、`unregister`、`draw`、`heap()`、`data()`、`release()`、capability `kasane.shiki`（`supported`、区画があれば `available`、§9.1 の `limits`）。Shiki の式は手続き型の slot・handle・フレームを共有する slot の種類で、手続き型の呼び出しからは見えない。`beginFrame`・`commit`・`resource`・`createSurface` は手続き型の関数そのもの、`grid` は今の `pocket.kasane.grid`。組み込みの式の表はまだ空（DERBY の移行で埋める）。`grid` の確保はまだ区画の外。
 - **窓**: 外部メモリの ArrayBuffer の上の型付き配列。Shiki が窓と ArrayBuffer の両方を強く持ち、同一性は窓で比べる。`release` と `app_stop()` の reset（ゲストを壊す前）で detach → 参照を捨てる → 区画へ返す。解放済みの窓は detach されているので `CLOSED` で見分ける。
 - **`transfer` の門**（`components/quickjs-ng/quickjs-ng/quickjs.c` の `js_array_buffer_transfer`）: `free_func` が `js_array_buffer_free` でない ArrayBuffer は、長さに関わらず `TypeError`。`detached` の検査の直後、長さ 0 の分岐の前。

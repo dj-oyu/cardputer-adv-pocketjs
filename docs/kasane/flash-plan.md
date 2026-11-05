@@ -1,6 +1,6 @@
 # 組み込みアプリの plan を flash に置き、名前で登録する（q33）
 
-2026-10-01、ブランチ `vm/flash-plan`（`vm/main` 806b10b から）。[js-to-ir.md](js-to-ir.md) §4 B の設計を具体化し、native（`pocket_proc.c`・`ksn_proc_plan.*`・`ksn_procedural.*`）と表の生成器を実装して host で検証した。**firmware への表の組み込み（CMake・`make_app_chunks.py`）と DERBY の移行はしていない**（q34 の実機測定の後の別作業、§8）。`apps/` は変えていない。実機は使っていない。
+2026-10-01、ブランチ `vm/flash-plan`（`vm/main` 806b10b から）。[js-to-ir.md](js-to-ir.md) §4 B の設計を具体化し、native（`pocket_shiki_frame.c`・`ksn_proc_plan.*`・`ksn_procedural.*`）と表の生成器を実装して host で検証した。**firmware への表の組み込み（CMake・`make_app_chunks.py`）と DERBY の移行はしていない**（q34 の実機測定の後の別作業、§8）。`apps/` は変えていない。実機は使っていない。
 
 **2026-10-01 追記（ブランチ `vm/rom-plans`、`vm/main` 806b10b から。首振り（段階 3）は含まない）: §2 の組み込みと DERBY の 14 本の移行を実装し、実機で測った（§10）。**
 
@@ -44,7 +44,7 @@ const q = H.register(rows, points);                                  // 今ま�
 | 引数を当てた program を解析が拒む（例: `REPEAT $0` に 0） | INVALID_ARGUMENT | `invalid procedural program`（同） |
 | 点列 | 配列の経路と同じ（`point allocation failed` / `invalid typed point batch`） | |
 
-- **名前の名前空間**: `アプリのディレクトリ名.plan 名`（`apps/derby` の `@plan crowd` → `derby.crowd`）。生成器が表全体で重複を拒む（ビルド時）。**実行中のアプリが自分の名前空間しか使えない、という強制はしない**: plan は描くだけの関数で capability を持たず、他のアプリの plan を描けても害が無い。強制するには `pocket_proc.c` が実行中のアプリの id を知る必要があり、その配線に見合う利益が無い。
+- **名前の名前空間**: `アプリのディレクトリ名.plan 名`（`apps/derby` の `@plan crowd` → `derby.crowd`）。生成器が表全体で重複を拒む（ビルド時）。**実行中のアプリが自分の名前空間しか使えない、という強制はしない**: plan は描くだけの関数で capability を持たず、他のアプリの plan を描けても害が無い。強制するには `pocket_shiki_frame.c` が実行中のアプリの id を知る必要があり、その配線に見合う利益が無い。
 - **配列の経路より厳しい点（意図的）**: 使わない引数も有限の数でなければならない。配列の経路では `prog()` が使わない引数を読まないので、文字列でも通っていた。名前の経路は引数を float で保つので、数でないものは受け取れない。
 - **feature-test は足さない**: 組み込みの名前は firmware と同じビルドで作ったアプリだけが使う（§2）。SD やエディタのプログラムは配列の経路のまま。`capabilities` に出すのは、SD のアプリが組み込み plan を使いたくなったときに決める（CLAUDE.md の「実装した面だけ true」の規則に合わせ、実装した今なら出せる）。
 
@@ -90,13 +90,13 @@ node tools/kasane_ir/emit_rom_plans.mjs OUT.c derby=apps/derby/derby_prog.js [ap
 
 (ii) にした。RAM が小さく、「VM が自分の写しを検証してから実行する」という今の不変条件がそのまま残る。begin は今も毎回 plan から `vm->owned_code` へ写しているので、写す元が DRAM から flash に変わるだけ。
 
-- `ksn_proc_begin_bound(vm, program, binding, input, frame)`（`ksn_procedural.h`）: 写す → 当てる → `valid_program()`。欄ごとの検査（回数は 0..255 の整数、色は 0..65535 の整数、値は有限）は `apply_binding` 自身も持つ（登録時に検査済みでも、壊れた表や plan から VM を守る）。`binding` が NULL なら INVALID（プレースホルダの 0 のまま走らせない）。
+- `ksn_proc_begin_bound(vm, program, binding, input, frame)`（`ksn_shiki_frame.h`）: 写す → 当てる → `valid_program()`。欄ごとの検査（回数は 0..255 の整数、色は 0..65535 の整数、値は有限）は `apply_binding` 自身も持つ（登録時に検査済みでも、壊れた表や plan から VM を守る）。`binding` が NULL なら INVALID（プレースホルダの 0 のまま走らせない）。
 - 既存の `ksn_proc_begin_state()` は同じ内部関数を `binding` なしで呼ぶだけで、挙動は同じ（コンパイル後の 13 本の出力 12,971 ベクトルが、元の VM と新しい VM でバイト単位で同一、§5）。
 
 ## 4. native の型
 
 ```c
-typedef struct { uint8_t pc,field,param; } ksn_proc_patch;          /* ksn_procedural.h */
+typedef struct { uint8_t pc,field,param; } ksn_proc_patch;          /* ksn_shiki_frame.h */
 typedef struct {                                                      /* ksn_proc_plan.h: flash */
     const char *name; const ksn_proc_inst *code; const ksn_proc_patch *patch;
     uint8_t count,patches,params;
@@ -111,7 +111,7 @@ typedef struct {                                                      /* heap: 4
 ```
 
 - `_Static_assert(sizeof(void *)!=4 || (sizeof==40 && offsetof(args)==40))`: 実機と m32 host で 40 B を固定（Xtensa のコンパイルと m32 の DERBY のビルドで通った）。64 bit の host はヘッダが 48 B に伸びるので、`ksn_proc_rom_plan_bytes(p)` は `max(sizeof, offsetof(args) + 4p)`。
-- 固定長・sized の plan とは別の型にした（sized の plan にポインタを足すと、配列で登録する全 plan が 4 B ずつ太る）。`pocket_proc.c` のスロットは `uint32_t handle:31, rom:1; void *plan; proc_points *points;` で、種類の 1 bit を handle の語に入れた（handle は `INT32_MAX` 以下、`register` が保証）。**スロットは 12 B のまま**（`.bss` の `slots` 384 B、ビルド確認）。
+- 固定長・sized の plan とは別の型にした（sized の plan にポインタを足すと、配列で登録する全 plan が 4 B ずつ太る）。`pocket_shiki_frame.c` のスロットは `uint32_t handle:31, rom:1; void *plan; proc_points *points;` で、種類の 1 bit を handle の語に入れた（handle は `INT32_MAX` 以下、`register` が保証）。**スロットは 12 B のまま**（`.bss` の `slots` 384 B、ビルド確認）。
 - `ksn_proc_rom_entry_valid()`: 1..64 命令、引数 8 個以下、patch が pc 順で pc・引数・欄が範囲内。`register` は名前を引いた直後にこれを呼ぶ（壊れた項目は確保の前に拒む）。
 
 ## 5. 解析・融合の印・上限の検査: 登録時に行う
@@ -159,19 +159,19 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 | ファイル | 内容 |
 | --- | --- |
-| `main/ui/kasane/ksn_procedural.h/.c` | `ksn_proc_patch`・`ksn_proc_binding`・`ksn_proc_apply_binding()`・`ksn_proc_begin_bound()`。`ksn_proc_begin_state()` は同じ内部関数の束縛なしの呼び出しになった |
+| `main/ui/kasane/ksn_shiki_frame.h/.c` | `ksn_proc_patch`・`ksn_proc_binding`・`ksn_proc_apply_binding()`・`ksn_proc_begin_bound()`。`ksn_proc_begin_state()` は同じ内部関数の束縛なしの呼び出しになった |
 | `main/ui/kasane/ksn_proc_plan.h/.c` | `ksn_proc_rom_entry`・`ksn_proc_rom_plan` と prepare/begin/run、`rom_matches()`。`run_core()` のループを `run_loop()` に括り出した |
 | `main/ui/kasane/ksn_proc_plan_points.c` | 点列の登録と実行の rom 版 |
-| `main/pocket/pocket_proc.h/.c` | `register(name, args, points)`、`pocket_proc_rom_plans()`、スロットの種類の bit、点列の読みの括り出し（`attach_points()`、配列の経路も同じ関数を通る） |
+| `main/pocket/pocket_shiki_frame.h/.c` | `register(name, args, points)`、`pocket_proc_rom_plans()`、スロットの種類の bit、点列の読みの括り出し（`attach_points()`、配列の経路も同じ関数を通る） |
 | `tools/kasane_ir/emit_rom_plans.mjs` | 表の生成器（新規） |
 | `tools/kasane_ir/flash_plan_estimate.py` | §6 の見積もり（新規） |
 | `tools/kasane_contract/test_pocket_proc_rom_qjs.c`、`run_pocket_proc_rom_qjs.py` | §8 の試験（新規）。`run.sh` に追加 |
 
-**大きさ（ビルド確認、Xtensa `-Os`）**: `pocket_proc.c` の `.text`+`.literal`+`.rodata` が 7,702 → 8,873 B（+1,171、実際のビルドの `.obj`）、`ksn_proc_plan.c` の `.text` 1,032 → 1,734（+702）、`ksn_procedural.c` 2,472 → 2,820（+348）、`ksn_proc_plan_points.c` 320 → 472（+152）（後の 3 つは単独のコンパイル）。計 **約 +2.4 KB の flash**。IRAM には置いていない（リンカ断片に無い）。静的 DRAM は `rom_table`・`rom_count` の **+8 B**。DERBY の表を組み込めば flash がさらに **6,203 B**。`idf.py -B build_flashplan build` は通る（表は未リンク）。
+**大きさ（ビルド確認、Xtensa `-Os`）**: `pocket_shiki_frame.c` の `.text`+`.literal`+`.rodata` が 7,702 → 8,873 B（+1,171、実際のビルドの `.obj`）、`ksn_proc_plan.c` の `.text` 1,032 → 1,734（+702）、`ksn_shiki_frame.c` 2,472 → 2,820（+348）、`ksn_proc_plan_points.c` 320 → 472（+152）（後の 3 つは単独のコンパイル）。計 **約 +2.4 KB の flash**。IRAM には置いていない（リンカ断片に無い）。静的 DRAM は `rom_table`・`rom_count` の **+8 B**。DERBY の表を組み込めば flash がさらに **6,203 B**。`idf.py -B build_flashplan build` は通る（表は未リンク）。
 
 ## 8. 検証（host）
 
-`python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py [--mutate]`（WSL、`bash -lc`。捕獲が無ければ最初に約 3 分で作る）。実際の QuickJS と、`pocket_proc.c` を取り込んだ試験（アダプタの VM・scratch・スロットを直接読む）。ASan/UBSan、スカラーと偽 PIE の 2 通り。
+`python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py [--mutate]`（WSL、`bash -lc`。捕獲が無ければ最初に約 3 分で作る）。実際の QuickJS と、`pocket_shiki_frame.c` を取り込んだ試験（アダプタの VM・scratch・スロットを直接読む）。ASan/UBSan、スカラーと偽 PIE の 2 通り。
 
 1. **等価性**: DERBY の捕獲した入力（LIGHT・MID・HEAVY の台本）と摂動（check_equivalence.py と同じ `cases.json`）で、plan ごと・引数の組ごとに、**出荷しているアプリの詰めた文字列を出荷している復号器で行にして配列で登録したもの**と、**名前で登録したもの**を同じ入力で描き、JS の結果・VM の status・step・pc・レジスタ・ペン・scratch と candidate の全線分・ラスタ step を比べた。**40 登録・12,971 ベクトル（描けた 11,924、同じ形で失敗 1,047）で全件一致**。登録ごとに、名前の plan の確保がちょうど `ksn_proc_rom_plan_bytes(引数)` の 1 回であること、両者の融合の印が同じことも確認。runner の引数は捕獲に無い（`load()` が馬ごとに作る）ので、毛色と勝負服の色を与えた。
 2. **融合の経路**: 等価性の全描画で参照経路への fallback が 0 回（`--wrap=ksn_proc_run` で数えた）。同じ項目を別の引数で登録した plan で走らせた VM、1 バイト違う行から begin した VM は参照経路に落ち、結果は参照と同じ。NULL の束縛は INVALID。
@@ -251,7 +251,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 **前（draw 1 回ごと）**: `begin_core` が VM 全体（約 1 KB）を `memset` → 命令を VM へコピー（名前登録は flash から）→ 引数を当てる → `valid_program()` で全命令を検証 → `run` が「VM の命令がこの plan と同じか」を確かめる（配列登録は `memcmp`、名前登録は `rom_matches()` で flash と 1 命令ずつ）。
 
-**後**: `pocket_proc.c` の `draw_run` は `ksn_proc_sized_plan_draw` / `ksn_proc_rom_plan_draw`（`ksn_proc_plan.c`）を 1 回呼ぶ。begin と run を 1 つの呼び出しにまとめた。
+**後**: `pocket_shiki_frame.c` の `draw_run` は `ksn_proc_sized_plan_draw` / `ksn_proc_rom_plan_draw`（`ksn_proc_plan.c`）を 1 回呼ぶ。begin と run を 1 つの呼び出しにまとめた。
 
 | 処理 | 前 | 後 | 理由 |
 | --- | --- | --- | --- |

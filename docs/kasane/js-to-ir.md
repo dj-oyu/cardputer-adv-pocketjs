@@ -17,9 +17,9 @@
 
 **JS → IR のコンパイラ・アセンブラ・逆アセンブラはリポジトリに無い。** あるのは 1 命令 1 文字のテキストを配列にする 10 行の `prog()` で、DERBY（[derby_prog.js](../../apps/derby/derby_prog.js)）、MEGADEMO（[proc_megademo.js](../../apps/kasane/proc_megademo.js)、`U` の短縮つき）、BIG WAVE（[big_wave.js](../../apps/bigwave/big_wave.js)）がそれぞれ写しを持つ。文字 → op の表引きと `$n` の置換だけで、検査は native の登録に任せている。[grid_fold.js](../../apps/kasane/grid_fold.js) は symbolic な式 builder だが、対象は型付きメモリ IR（`ksn_proc_grid`）で、この float VM ではない。
 
-**登録時コンパイラ（D3a）はソース言語を持たない。** 入力は数値の行（`[op,dst,a,b,value,color]`）で、`pocket_proc.c` の `register_impl()` が読んで `ksn_proc_plan_prepare()`（ksn_proc_plan.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_plan.c`））に渡す。prepare がするのは、IR を plan の `code[64]` へ写す、ksn_proc_analysis.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_analysis.c`） で有界 CFG・def-use・生存・失敗条件を取る、同じ基本ブロックで依存のある隣り合った算術 2 命令に融合の印（`fused_at`）を付ける、の 3 つだけ。命令の移動・削除・レジスタの割り当ては無い（「No code is moved or elided」）。PIE の選択は型付き Q14 点列（`affineQ14Points`）と grid の IR に対してで、この float IR には掛からない。
+**登録時コンパイラ（D3a）はソース言語を持たない。** 入力は数値の行（`[op,dst,a,b,value,color]`）で、`pocket_shiki_frame.c` の `register_impl()` が読んで `ksn_proc_plan_prepare()`（ksn_proc_plan.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_plan.c`））に渡す。prepare がするのは、IR を plan の `code[64]` へ写す、ksn_proc_analysis.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_analysis.c`） で有界 CFG・def-use・生存・失敗条件を取る、同じ基本ブロックで依存のある隣り合った算術 2 命令に融合の印（`fused_at`）を付ける、の 3 つだけ。命令の移動・削除・レジスタの割り当ては無い（「No code is moved or elided」）。PIE の選択は型付き Q14 点列（`affineQ14Points`）と grid の IR に対してで、この float IR には掛からない。
 
-**命令セット**（[ksn_procedural.h](../../main/ui/kasane/ksn_procedural.h)、15 op）: `SET INPUT ADD MUL SIN REPEAT END MOVE PLOT LINE REPEAT_REG BREAK_IF_GT PLOT_COLOR_REG LINE_COLOR_REG CUBIC`。除算・減算・比較分岐・sqrt・floor・レジスタ間の MOV は無い（減算は `×−1` と加算、コピーは `+0`）。`CUBIC` は r0..r7 の 4 点を読む（dst=0 固定、分割 1..64）。制約: レジスタ 16、入力 8、1 plan 64 命令、ループの深さ 8、`REPEAT` 1..255（0 は検証で拒否）、`REPEAT_REG` 0..255 の整数（0 は本体を飛ばす）、1 draw の step 10,000・線分 1,024・ラスタ 8,192、座標 −480..720。`draw()` のたびに `begin` がプログラムを VM へ写して検証し直し、**レジスタは毎回 +0 から始まる**（`pocket_proc.c` は状態を持ち越す `begin_state` を使わない）。算術の結果が非有限、`REPEAT_REG`・色レジスタが範囲外の整数でない、座標が範囲外、のどれでも draw 全体が失敗する。
+**命令セット**（[ksn_shiki_frame.h](../../main/ui/kasane/ksn_shiki_frame.h)、15 op）: `SET INPUT ADD MUL SIN REPEAT END MOVE PLOT LINE REPEAT_REG BREAK_IF_GT PLOT_COLOR_REG LINE_COLOR_REG CUBIC`。除算・減算・比較分岐・sqrt・floor・レジスタ間の MOV は無い（減算は `×−1` と加算、コピーは `+0`）。`CUBIC` は r0..r7 の 4 点を読む（dst=0 固定、分割 1..64）。制約: レジスタ 16、入力 8、1 plan 64 命令、ループの深さ 8、`REPEAT` 1..255（0 は検証で拒否）、`REPEAT_REG` 0..255 の整数（0 は本体を飛ばす）、1 draw の step 10,000・線分 1,024・ラスタ 8,192、座標 −480..720。`draw()` のたびに `begin` がプログラムを VM へ写して検証し直し、**レジスタは毎回 +0 から始まる**（`pocket_shiki_frame.c` は状態を持ち越す `begin_state` を使わない）。算術の結果が非有限、`REPEAT_REG`・色レジスタが範囲外の整数でない、座標が範囲外、のどれでも draw 全体が失敗する。
 
 **メモリ**: `ksn_proc_inst` 12 B、`ksn_proc_plan` **872 B**（`code[64]` 768 B ＋ `fused_at[64]` ＋点列の係数）。Xtensa の `-Os` オブジェクトの `nm -S` で 0x368 = 872 B、m32 host でも同じ（ビルド確認）。plan は `calloc(1, sizeof *plan)` なので、1 命令の plan（DERBY の点列用 `S0,0` が 7 本）も 872 B を取る。VM（996 B）とフレームは共有で、plan の数に比例しない。（その後 [plan-sized-alloc.md](plan-sized-alloc.md) で、`register()` の plan を 40 + 12n B にした。）
 
@@ -135,7 +135,7 @@ repeat (96) {
 
 1. host のゲーム（LIGHT・MID・HEAVY の全台本）を、登録の引数と各 draw の入力をログに出す一時コピーで走らせ、実際の入力を捕獲する。
 2. plan ごと・引数の組ごと（runner は 8 頭、crowd・stands は段階で別）に、捕獲した入力 最大 400 と、それを摂動した 300（整数は 9 割保つ、10 本に 1 本は ±1000 の乱値。失敗の経路も通す）を作る。
-3. [`run_ir.c`](../../tools/kasane_ir/run_ir.c) が手書きとコンパイル後を実物の [ksn_procedural.c](../../main/ui/kasane/ksn_procedural.c) で走らせ、コンパイル後は登録された plan の経路（`ksn_proc_plan_run`、融合あり）でも走らせて、状態・線分（端点と色、順序）・ラスタ step を全部比べる。
+3. [`run_ir.c`](../../tools/kasane_ir/run_ir.c) が手書きとコンパイル後を実物の [ksn_shiki_frame.c](../../main/ui/kasane/ksn_shiki_frame.c) で走らせ、コンパイル後は登録された plan の経路（`ksn_proc_plan_run`、融合あり）でも走らせて、状態・線分（端点と色、順序）・ラスタ step を全部比べる。
 
 **結果: 基準 13 本・段階 3 の 18 本とも、捕獲した入力と摂動した入力のすべてで一致（`EQUIVALENCE PASS`、不一致 0）。** 摂動では両方が同じ入力で失敗し、失敗の種類（INVALID/LIMIT）も一致した。[`test_kir.mjs`](../../tools/kasane_ir/test_kir.mjs) は DERBY が通らない経路（17 値が同時に生きると失敗、再実体化、CUBIC の配置、`/3` の警告、65 命令以上の報告）を見る。
 
@@ -143,10 +143,10 @@ repeat (96) {
 
 ### A. plan を命令数ぶんだけ確保する（API 不変）
 
-- `ksn_proc_plan` の `code[]` を末尾へ移し（`fused_at` はその前）、`pocket_proc.c` だけが `offsetof(ksn_proc_plan, code) + count × 12` を確保する。prepare の失敗時の `memset(plan, 0, sizeof *plan)` を、確保した長さを越えない形に直す。プローブ（`ksn_proc_limits_device_probe.c` など）と試験は値で持つ 872 B の plan のままでよい。
+- `ksn_proc_plan` の `code[]` を末尾へ移し（`fused_at` はその前）、`pocket_shiki_frame.c` だけが `offsetof(ksn_proc_plan, code) + count × 12` を確保する。prepare の失敗時の `memset(plan, 0, sizeof *plan)` を、確保した長さを越えない形に直す。プローブ（`ksn_proc_limits_device_probe.c` など）と試験は値で持つ 872 B の plan のままでよい。
 - DERBY: 25 本・686 命令で 21,800 → 10,832 B（**−10,968 B**）、段階 3 は 30 本・916 命令で 26,160 → 14,112 B（**−12,048 B**）。推定（`sizeof` × 個数、TLSF の 1 ブロックの付加は今と同数）。
 - 危険: 同じ 872 B の塊が再利用されていたのが、大きさの違う塊になる。断片化で最大連続が下がりうる（実機で `largest free` を見る）。
-- 変更: `ksn_proc_plan.h/.c`、`pocket_proc.c`、`tools/kasane_contract/test_proc_plan.c`（構造体のコピーの契約は値で持つ plan だけに残す）。工数 0.5〜1 日＋実機測定（推定）。
+- 変更: `ksn_proc_plan.h/.c`、`pocket_shiki_frame.c`、`tools/kasane_contract/test_proc_plan.c`（構造体のコピーの契約は値で持つ plan だけに残す）。工数 0.5〜1 日＋実機測定（推定）。
 
 ### B. 組み込みアプリの plan を flash に置き、id で登録する
 
@@ -155,7 +155,7 @@ repeat (96) {
 - **native の RAM**: slot が「表への参照・引数 8 個（32 B）・融合の印」を持つ。融合の印は IR から決まるので、ビルド時に表へ入れれば RAM に要らない。1 本 約 48〜72 B → DERBY 25 本で約 1.2〜1.8 KB（**−20 KB 前後**、段階 3 で約 −24 KB、推定）。VM は draw のたびに flash から `owned_code` へ写し（今も plan から写している）、そこで patch を当ててから今までどおり検証する。`ksn_proc_plan_run()` の「VM のコードが plan と同じか」の `memcmp` は、patch 後のコードとは一致しないので、plan の識別子（ポインタと世代）で比べる形に変える。
 - **ゲスト**: §2 の最後の行（−7.1 / −8.1 KB、host）と、登録の一時的なピーク（最大 10 KB）が消える。
 - **host 契約試験への影響**: `run_pocket_proc_qjs.py`（登録の引数の型と誤りの文言）、`run_pocket_proc_limits_qjs.py`（32 本の上限は slot 数なので不変）、`test_proc_plan.c`（plan の所有と構造体のコピー）、`tools/games/test_derby_host.c`（表をリンクする）、`run_megademo_app_host.py`（配列の経路のまま、不変）。追加: 未知の名前、引数の数の不一致、patch 後の検証失敗、同じ名前の多重登録。
-- **変更するファイル**: `main/pocket/pocket_proc.c`、`main/ui/kasane/ksn_proc_plan.h/.c`、`ksn_procedural.c/.h`（patch つきの begin）、生成物 `main/ui/kasane/ksn_rom_plans.c/.h`（`main/CMakeLists.txt`）、`docs/api/common-api.md`、`apps/derby/derby_prog.js`・`derby_view.js`（`spec()` が名前と引数を返す）、上の試験。
+- **変更するファイル**: `main/pocket/pocket_shiki_frame.c`、`main/ui/kasane/ksn_proc_plan.h/.c`、`ksn_shiki_frame.c/.h`（patch つきの begin）、生成物 `main/ui/kasane/ksn_rom_plans.c/.h`（`main/CMakeLists.txt`）、`docs/api/common-api.md`、`apps/derby/derby_prog.js`・`derby_view.js`（`spec()` が名前と引数を返す）、上の試験。
 - **工数**: A を済ませた上で 2〜3 日（生成器と同期検査 0.5、native 1〜1.5、試験 0.5、DERBY の移行 0.5）＋実機測定 0.5 日（推定）。
 - **制約**: flash の plan は組み込みアプリにしか使えない（SD やエディタから入れたプログラムは配列の経路のまま）。plan を直すにはファームの再ビルドが要る。
 
@@ -230,7 +230,7 @@ const T = {
 **host（WSL、`bash -lc` で node を PATH に入れて走らせる）**
 
 - **IR**: `apps/derby/derby_prog.js` の 14 本が、`.kjs`（§3）と 14 本とも**同じ IR** になった（`node tools/kasane_ir/derby_plans.mjs --js apps/derby/derby_prog.js`）。名前の無かった 8 本（stands・gate・pole・photo・silk・map・vis・fr）は入力と中間値に名前を付け、IR が変わらないことをこの比較で確かめた。命令は手書き 468 → 454（−14）。
-- **JS の関数 = VM**（`python3 tools/kasane_ir/check_equivalence.py`。`apps/derby/derby_prog.js` に `@plan` があれば `--js` は既定でそれ）: 捕獲した入力 6,971 本と摂動した入力 6,000 本で、float32 の JS の結果と、コンパイルした IR を実物の `ksn_procedural.c` で走らせた結果（状態・線分・色・ラスタ step）が**全件一致**（`JS REFERENCE PASS`）。摂動で VM が失敗した 1,032 本も同じ種類の失敗で一致。関数の文面を double のまま走らせると、捕獲した入力で 29 本、摂動で 176 本が 1 画素以上ずれる（単精度の VM との差）。手書きの IR（[`derby_hand_ir.js`](../../tools/kasane_ir/derby_hand_ir.js)、e9b88bc まで出荷していた原本を凍結）とコンパイル後の比較も `EQUIVALENCE PASS`。`nil` は捕獲したゲームで draw されない（点列の plan）。
+- **JS の関数 = VM**（`python3 tools/kasane_ir/check_equivalence.py`。`apps/derby/derby_prog.js` に `@plan` があれば `--js` は既定でそれ）: 捕獲した入力 6,971 本と摂動した入力 6,000 本で、float32 の JS の結果と、コンパイルした IR を実物の `ksn_shiki_frame.c` で走らせた結果（状態・線分・色・ラスタ step）が**全件一致**（`JS REFERENCE PASS`）。摂動で VM が失敗した 1,032 本も同じ種類の失敗で一致。関数の文面を double のまま走らせると、捕獲した入力で 29 本、摂動で 176 本が 1 画素以上ずれる（単精度の VM との差）。手書きの IR（[`derby_hand_ir.js`](../../tools/kasane_ir/derby_hand_ir.js)、e9b88bc まで出荷していた原本を凍結）とコンパイル後の比較も `EQUIVALENCE PASS`。`nil` は捕獲したゲームで draw されない（点列の plan）。
 - **DERBY 全体**（`python3 tools/games/run_derby.py` と `--m32`）: 全 13 回（8 回の台本、デモ 3 本の手での再現、種の 2 回）の着順・完走時刻・デモ・種・オッズ・全画素ハッシュ（8 本）が、現行 e9b88bc と**全桁一致**（ASan と m32 の両方、結果の行 429 行が同一）。循環コレクタだけが解放したバイト数は全 40 場面で 0。
 - **移行の検査**（`python3 tools/kasane_ir/check_lowered.py`）: 変換後のコピーと、同じコピーの `derby_prog.js` を手書き IR の詰めた形に差し替えたものを、LIGHT・MID・HEAVY の全台本で比べた。フレームごとの描画の統計と着順が同一（`LOWERED PASS`）、VM の実行ステップは −0.6〜−1.1%、登録 20 巡でも循環コレクタだけのゴミは 0 B。
 - **大きさ**（host m32）: 評価後のゲスト 106,404 → 106,424 B（+20 B）、評価のピーク 120,816 → 120,836 B（+20 B）。コンパイルした IR は詰めると 1,109 B で、手書き（1,082 B）より 27 B 長い（命令は少ないのに長い理由は調べていない）。**plan を `function` の形で書いてグローバルの `const` にすると、評価のピークが +1,492 B**（評価後は同じ。トップレベルの束縛 14 個の解析用の構造が評価の終わりまで残るためと推測、確かめていない）。DERBY をメソッドの形にしたのはこのため。

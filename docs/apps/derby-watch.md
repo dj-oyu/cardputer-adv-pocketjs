@@ -204,7 +204,7 @@ host の全台本（MID、2 レース＋再生）: 登録 42、解除 30、同�
 
 ## ネイティブ heap（計算）
 
-`sizeof` は xtensa の計算値（plan 872 B は [plan-sized-alloc.md](../kasane/plan-sized-alloc.md)、フレーム 10,246 B は [surface-segment-cap.md](../kasane/surface-segment-cap.md)、VM 996 B は旧 procedural-ir-experiment.md、リポジトリ履歴）、点列は `pocket_proc.c` の `points_bytes()`。**実測ではない。**
+`sizeof` は xtensa の計算値（plan 872 B は [plan-sized-alloc.md](../kasane/plan-sized-alloc.md)、フレーム 10,246 B は [surface-segment-cap.md](../kasane/surface-segment-cap.md)、VM 996 B は旧 procedural-ir-experiment.md、リポジトリ履歴）、点列は `pocket_shiki_frame.c` の `points_bytes()`。**実測ではない。**
 
 | 場面 | 内訳 | 合計 |
 | --- | --- | --- |
@@ -1212,7 +1212,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 
 ### 代わりの案（どれも未実装）
 
-1. **ネイティブで、面ごとに表示待ちの候補を持つ**（`pocket_proc.c` の `any_pending()` を面ごとにし、1 回の表示で 2 面の候補を ACK する）。そうすれば中継ターンが無くなり、面0と面1を同じターンで `commit()` できる。面0ターンの測定値（MID VISION の JS 11.71 ms・描画 10.78 ms・転送 7.36 ms）に中継の draw 1〜2 ms を足すと、NF = 2〜4 でも 1 フレーム 31〜32 ms で 30 fps に収まる見込み（推定）。変更は `begin_impl` の門、`present_result` の ACK の配り方、repair の扱いで、D2 の host 契約試験（`test_pocket_proc_turn_qjs.c` の 2 面の場合）の作り直しが要る。メモリは今回と同じ約 6 KB 減る。
+1. **ネイティブで、面ごとに表示待ちの候補を持つ**（`pocket_shiki_frame.c` の `any_pending()` を面ごとにし、1 回の表示で 2 面の候補を ACK する）。そうすれば中継ターンが無くなり、面0と面1を同じターンで `commit()` できる。面0ターンの測定値（MID VISION の JS 11.71 ms・描画 10.78 ms・転送 7.36 ms）に中継の draw 1〜2 ms を足すと、NF = 2〜4 でも 1 フレーム 31〜32 ms で 30 fps に収まる見込み（推定）。変更は `begin_impl` の門、`present_result` の ACK の配り方、repair の扱いで、D2 の host 契約試験（`test_pocket_proc_turn_qjs.c` の 2 面の場合）の作り直しが要る。メモリは今回と同じ約 6 KB 減る。
 2. **面0のまま、合成の 1 ms を払わずに JS を削る**: 今回の面0ターンの差（中継の組み立て 2.9〜3.3 ms）が上限。以前試した「中継を数フレームに 1 回組み立てて入力をずらす」は +1 fps だった（上の「大型画面と演出カメラ」）。HEAVY WIDE（25.7 fps）と MID FIELD（27.3 fps）の画面ありが最も遅いので、効くのはこの 2 つ。
 3. **演出の幅**（中継カメラを本編と独立にする）は、面0のままでも `course()` の中継の呼び出しに渡すカメラを替えるだけでできる（中継カメラは既に本編カメラと独立に `[85·z, 3, …]` を使っている）。面1は前提ではない。
 

@@ -4,7 +4,7 @@
 
 ## 何を変えたか
 
-それまで、Shiki の画像（`pocket_proc.c` の `image_span`）は次の順で帯へ届いていた。
+それまで、Shiki の画像（`pocket_shiki_frame.c` の `image_span`）は次の順で帯へ届いていた。
 
 1. 8 行の帯のバッファを背景色で塗り、`ksn_proc_render_band` でラスタする（`image_band_buf`）。
 2. Kasane が 32 画素ごとに `image_read` → `image_span` を呼び、帯のバッファから scratch へ写し、alpha を 255 で埋める。
@@ -15,7 +15,7 @@
 - **`ksn_image_port.read_rows`（`ksn_ports.h`）:** 不透明の口だけが持てる任意の関数。元画像の行 `[y, y+rows)`・列 `[x, x+count)` を、`dst` へ行の幅 `stride` で直接書く。結果は `read_span` と同じ画素。`KSN_UNSUPPORTED` を返すと、Kasane は今までの 32 画素ずつの経路に戻る。
 - **core の別表（`ksn_core.c`）:** `read_rows` は `read_span` の関数をキーにした 2 枠の表に置く。core の画像の表は予算（`KSN_CORE_STORAGE_BYTES`）に入っていて、64 ビットのホストでは余裕が 48 B しかないため、表そのものは大きくしない。
 - **`ksn_render.c`:** 等倍（`image_stretch_identity`）・不透明・不透明度 255・回転なし・stretch map なしの画像は、帯の部分を `read_rows` に一度で頼む（`g_ksn_image_rows`、既定 1）。
-- **`pocket_proc.c` の `image_rows`:** 全幅の行だけを受ける（それ以外は `UNSUPPORTED`）。`pocket_proc_backdrop` と同じく、背景色で塗って（2 画素ずつの書き込み、`may_alias`）、その場で `ksn_proc_render_band` を走らせる。帯のバッファ・32 画素の写し・alpha の埋めが無くなる。
+- **`pocket_shiki_frame.c` の `image_rows`:** 全幅の行だけを受ける（それ以外は `UNSUPPORTED`）。`pocket_proc_backdrop` と同じく、背景色で塗って（2 画素ずつの書き込み、`may_alias`）、その場で `ksn_proc_render_band` を走らせる。帯のバッファ・32 画素の写し・alpha の埋めが無くなる。
 - **覆われた帯の背景を塗らない（`g_ksn_cover_skip_fill`、既定 1）:** 帯の全体（行と、変化した列）を不透明の APP の画像が覆うときは、背景色で先に塗らない。
 
 ## 正しさ
@@ -39,7 +39,7 @@
 
 ## 横線を塗る（1a、e07efdf）
 
-帯のラスタ（`ksn_procedural.c`）で、横線（`y0 == y1`）を 1 画素ずつ歩かず、x の範囲を画面に一度だけ切り詰めて 32 ビットの書き込みで 2 画素ずつ塗る（`g_ksn_proc_hspan`、既定 1）。模様の線を含むフレームの経路（`plain_band`）にも入れた。横の Bresenham の線は、その行の両端の間をちょうど塗るので、画素は同じ。STRESS では帯のラスタの歩みの 76%（1 フレーム 22,270 歩のうち 17,031 画素、host の数え）が横線だった。
+帯のラスタ（`ksn_shiki_frame.c`）で、横線（`y0 == y1`）を 1 画素ずつ歩かず、x の範囲を画面に一度だけ切り詰めて 32 ビットの書き込みで 2 画素ずつ塗る（`g_ksn_proc_hspan`、既定 1）。模様の線を含むフレームの経路（`plain_band`）にも入れた。横の Bresenham の線は、その行の両端の間をちょうど塗るので、画素は同じ。STRESS では帯のラスタの歩みの 76%（1 フレーム 22,270 歩のうち 17,031 画素、host の数え）が横線だった。
 
 - 正しさ（host）: 無作為のフレーム（横線が半分、端は −480〜720、点、帯の始まりと高さを全部、両方のループ、帯の前後に見張りの画素）で新旧が一致（`tools/kasane_contract/test_procedural_hspan.c`、107,421 帯、64 ビット ASan と m32 の O2。わざと 1 画素ずらした版は捕まえる）。STRESS の画面のダイジェストも新旧で同じ。`run.sh` 一式も PASS。
 - 実機（8efd336 = e07efdf + `POCKET_PROC_HSPAN_AB`、STRESS LV1、窓ごとに交互）。ログは [logs/stress-hspan-ab-20261104-8efd336.txt](logs/stress-hspan-ab-20261104-8efd336.txt)。

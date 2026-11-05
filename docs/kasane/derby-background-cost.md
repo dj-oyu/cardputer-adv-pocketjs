@@ -147,8 +147,8 @@ MID の 1 レースの BGP 窓から観客の 1 draw を拾うと、1 点あた�
 
 | 案 | 変更箇所 | 重さ | リスク |
 | --- | --- | --- | --- |
-| (A) 行ごとの横スクロールする画素帯 | `pocket_proc.c` の `image_span`（帯を作る前にキャッシュ行を写す）、新しい JS API（キャッシュの登録・行範囲・周期・オフセット）、`ksn_proc_render_band` は変えずに前景だけを重ねる | API と所有・解放・OOM の規則まで入れて数百行＋host の全画素検査の作り直し | 10〜30 KB の常駐（空きの約半分〜全部）。観客の見た目の変更が前提。浮動小数の位置（今は毎フレーム丸める）と整数スクロールの 1 px の差で、host の全画素一致が崩れる |
-| (B) 透明な 2 枚目の面 | `ksn_procedural_layers.c` の合成に色抜き、`pocket_proc_backdrop`／`image_span` で 2 面を重ねる、面ごとの帯キャッシュ | 合成と帯キャッシュの設計変更 | 20.5 KB（2 面目のフレーム）＋帯キャッシュ 3.8 KB。低頻度に描くとパンが 4 フレームごとに跳ぶので、平行移動を別に持つ必要がある |
+| (A) 行ごとの横スクロールする画素帯 | `pocket_shiki_frame.c` の `image_span`（帯を作る前にキャッシュ行を写す）、新しい JS API（キャッシュの登録・行範囲・周期・オフセット）、`ksn_proc_render_band` は変えずに前景だけを重ねる | API と所有・解放・OOM の規則まで入れて数百行＋host の全画素検査の作り直し | 10〜30 KB の常駐（空きの約半分〜全部）。観客の見た目の変更が前提。浮動小数の位置（今は毎フレーム丸める）と整数スクロールの 1 px の差で、host の全画素一致が崩れる |
+| (B) 透明な 2 枚目の面 | `ksn_shiki_layers.c` の合成に色抜き、`pocket_proc_backdrop`／`image_span` で 2 面を重ねる、面ごとの帯キャッシュ | 合成と帯キャッシュの設計変更 | 20.5 KB（2 面目のフレーム）＋帯キャッシュ 3.8 KB。低頻度に描くとパンが 4 フレームごとに跳ぶので、平行移動を別に持つ必要がある |
 
 **結論: 帯描画の側の上限が小さく（1.6 ms 以下）、JS 側の大きい部分はネイティブを触らずに取れる見込みなので、(A)・(B) のためにネイティブを触る価値は低い。** 先に試す価値があるのは、アプリ側の 2 点（どちらも未実装・未検証、出荷コードは変えていない）:
 
@@ -242,7 +242,7 @@ j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191)
 **前提の確認**:
 
 - **観客の位相に時間の項は無い。** 入力 5 は柱の番号だけで決まり、瞬きは別の入力（`(t >> 3) & 1`）。JS で作るのは 1 draw に 1 回の始まりの値だけ。
-- **VM に整数の AND・剰余・床は無い**（`main/ui/kasane/ksn_procedural.h` の `ksn_proc_op`: SET・INPUT・ADD・MUL・SIN・REPEAT・END・MOVE・PLOT・LINE・REPEAT_REG・BREAK_IF_GT・PLOT_COLOR_REG・LINE_COLOR_REG・CUBIC。レジスタは float）。どの方式も VM のプログラムは変えない（(3) はどれも満たす）。
+- **VM に整数の AND・剰余・床は無い**（`main/ui/kasane/ksn_shiki_frame.h` の `ksn_proc_op`: SET・INPUT・ADD・MUL・SIN・REPEAT・END・MOVE・PLOT・LINE・REPEAT_REG・BREAK_IF_GT・PLOT_COLOR_REG・LINE_COLOR_REG・CUBIC。レジスタは float）。どの方式も VM のプログラムは変えない（(3) はどれも満たす）。
 - **始まりを 0〜2π にしても、引数は 0〜2π に収まらない。** VM が点ごとに 2.39996 を足す（`A6,6,2`）ので、1 列の終わりでは始まり＋列の点の数×2.4 になる。HEAVY FIELD は 1 列が約 100 点で、終わりは約 250。(1) と (2) では、そこで引数が 201 を超える点が残る。
 
 **計算**（`node tools/games/bgcost/fold_model.mjs`: float32 で VM を模し、3 段階×4 カメラ×柱 −5〜89 の点を変更前と比べる）:
@@ -270,7 +270,7 @@ j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191)
 
 **結論**: 出荷の方式（2π の剰余＋中心寄せ）のままにする。(1) は速さが (2) と同じで、1 px のずれが約 10 倍多い。(2) は HEAVY FIELD で 0.9 ms 遅い。C 側に `x -= 2π·rintf(x/2π)` を足す案は、観客では要らない（アプリ側で 201 未満に収まる）。他のアプリが大きな引数で `SIN` を使うなら、そのときに考える。
 
-**追記（2026-10-29）**: MEGADEMO の Act I が 1 フレームに最大 447 回、201 を超える引数で `SIN` を使っていた（脳波の擬似雑音 `sin(n²k)` は JS の側で小さくできない）。VM の `SIN` を `ksn_proc_sinf()`（`main/ui/kasane/ksn_procedural.h`）にし、|x| が 201 を超えるときだけ 2π で折り返してから `sinf` に渡す。201 以下はそのまま `sinf` なので、DERBY を含む他のアプリの結果はビット単位で変わらない（[megademo-story.md](../apps/megademo-story.md) の「`SIN` の大きな引数」）。
+**追記（2026-10-29）**: MEGADEMO の Act I が 1 フレームに最大 447 回、201 を超える引数で `SIN` を使っていた（脳波の擬似雑音 `sin(n²k)` は JS の側で小さくできない）。VM の `SIN` を `ksn_proc_sinf()`（`main/ui/kasane/ksn_shiki_frame.h`）にし、|x| が 201 を超えるときだけ 2π で折り返してから `sinf` に渡す。201 以下はそのまま `sinf` なので、DERBY を含む他のアプリの結果はビット単位で変わらない（[megademo-story.md](../apps/megademo-story.md) の「`SIN` の大きな引数」）。
 
 ## 追記: 観客をフレームごとに半分だけ描く（q27、2026-09-30、ブランチ `vm/crowd-checker`、試作・出荷しない）
 

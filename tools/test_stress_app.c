@@ -16,7 +16,7 @@
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
-#include "ui/kasane/ksn_procedural.h"
+#include "ui/kasane/ksn_shiki_frame.h"
 #include "text/ksn_font.h"
 #include "sound.h"
 #include <stdio.h>

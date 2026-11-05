@@ -11,7 +11,7 @@
 ## 2. 測り方
 
 - アプリ `local.drawcost`（[apps/shikitest/draw_cost.js](../../apps/shikitest/draw_cost.js)、[README](../../apps/shikitest/README.md)）。JS のループ 200 回を `shikiDebug.cycles()` で包み、5 回の最小。
-- 同時に `shikiDebug.drawProfile()` がネイティブの段を積む（`main/pocket/pocket_proc.h` の `pocket_shiki_draw_prof`）: `parse`（`js_draw` の引数の検査と入力の読み取り）、`lookup`（handle・フレーム・作業領域の準備）、`engine`（`ksn_shiki_draw`）、`copy`（線分をフレームへ）。`total` からこれらを引いた残りが、JS の呼び出しの費用（QuickJS の関数呼び出し、引数の受け渡し）。
+- 同時に `shikiDebug.drawProfile()` がネイティブの段を積む（`main/pocket/pocket_shiki_frame.h` の `pocket_shiki_draw_prof`）: `parse`（`js_draw` の引数の検査と入力の読み取り）、`lookup`（handle・フレーム・作業領域の準備）、`engine`（`ksn_shiki_draw`）、`copy`（線分をフレームへ）。`total` からこれらを引いた残りが、JS の呼び出しの費用（QuickJS の関数呼び出し、引数の受け渡し）。
 - 対照: 空の JS 関数（`loop`）、ネイティブの空呼び出し（`native`、`cycles()` 自身）。
 
 ## 3. 結果（実機、`94aea92`、2026-11-01）

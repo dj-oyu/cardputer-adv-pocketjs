@@ -3,7 +3,7 @@
  * allocation and the per-surface segment cap, through pocket.kasane.shiki.
  * Built by run_pocket_proc_turn_qjs.py under ASan/UBSan with
  * proc_alloc_hook.h force-included into these sources only, so
- * pocket_proc.c's and the Shiki API's allocations can be failed and measured
+ * pocket_shiki_frame.c's and the Shiki API's allocations can be failed and measured
  * while the prebuilt engine allocates normally. No Shiki heap is opened, so
  * those allocations reach the hooked malloc/calloc one by one.
  *
@@ -19,7 +19,7 @@
  * pocket_proc_end_turn(); the choice itself is tools/test_session_dispatch.c. */
 #include "quickjs.h"
 #include "quickjs-vm.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_api.h"
 #include "pocket_shiki_api.h"
 #include "ksn_shiki.h"

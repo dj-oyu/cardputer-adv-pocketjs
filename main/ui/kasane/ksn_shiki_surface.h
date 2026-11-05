@@ -1,6 +1,6 @@
-#ifndef KSN_PROCEDURAL_SURFACE_H
-#define KSN_PROCEDURAL_SURFACE_H
-#include "ksn_procedural.h"
+#ifndef KSN_SHIKI_SURFACE_H
+#define KSN_SHIKI_SURFACE_H
+#include "ksn_shiki_frame.h"
 
 #define KSN_PROC_BANDS ((KSN_PROC_H+7)/8)
 typedef struct {

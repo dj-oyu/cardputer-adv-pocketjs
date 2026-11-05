@@ -60,7 +60,7 @@
  *      DERBY_HW=<uint32> (what pocket.random.seed() returns; fixed by default).
  */
 #include "pocket_kasane.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_derby.h"
 #include "pocket_input.h"
 #include "pocket_api.h"
@@ -271,7 +271,7 @@ static void tagged(unsigned tag,const double *in64,const ksn_proc_frame *fp){
              g[2].x1==a&&g[2].y1==d&&g[3].x1==a&&g[3].y1==b))bezel_bad++;
     }
 }
-/* pocket.derby's draws (pocket_proc.c calls this after each one that
+/* pocket.derby's draws (pocket_shiki_frame.c calls this after each one that
  * succeeded): replayed like the app's shiki.draw, tagged as the JS wrapper
  * tags them (__nt: -2 the screen's face, -3 a panning unit's hl, else -1);
  * and, with DERBY_SER_ORACLE, into the list __sercmp compares with the JS

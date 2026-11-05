@@ -44,7 +44,7 @@ pocket.derby.ser(h, w, s, g0, L, a, b)
 
 ## 4. 既存の `draw` の経路への接続
 
-`pocket_proc.c` の `draw_impl` を 2 つに分ける: 入力を読む前半（配列 / 数値引数）と、`float` の入力 8 個で VM を回して候補のフレームに足す後半。native 用に `pocket_proc_draw_numbers(ctx, handle, const double *in, n)` を足す。中身は JS の `H.draw(h, [...])` と同じ順の検査:
+`pocket_shiki_frame.c` の `draw_impl` を 2 つに分ける: 入力を読む前半（配列 / 数値引数）と、`float` の入力 8 個で VM を回して候補のフレームに足す後半。native 用に `pocket_proc_draw_numbers(ctx, handle, const double *in, n)` を足す。中身は JS の `H.draw(h, [...])` と同じ順の検査:
 
 1. `beginFrame` の中か（外なら `BUSY`「beginFrame required」）、再入でないか（`js_call_active`）。
 2. ハンドルの slot（無ければ `CLOSED`）。

@@ -42,9 +42,9 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 ### 2.2 消すもの・残すもの
 
-`beginFrame`・`commit`・`resource`・`createSurface`・`grid` は今も `pocket.kasane.shiki` から呼べる（`pocket_shiki_api.c` の `share()` が `procedural` の関数を写している）が、**実装は `pocket_proc.c` にある**（レビュー R1）。したがって `pocket_proc.c` は丸ごと消せない。
+`beginFrame`・`commit`・`resource`・`createSurface`・`grid` は今も `pocket.kasane.shiki` から呼べる（`pocket_shiki_api.c` の `share()` が `procedural` の関数を写している）が、**実装は `pocket_shiki_frame.c` にある**（レビュー R1）。したがって `pocket_shiki_frame.c` は丸ごと消せない。
 
-- **消す:** JS の `pocket.kasane.procedural` 名前空間とグローバルの `gridFold`。`pocket_proc.c` の plan の部分（plan の slot、`draw_run`、点の読み込みと結び付け、組み込み plan の登録、bgcost の計装）。float の VM（`ksn_procedural.c`・`ksn_proc_plan*.c`・`ksn_proc_analysis.c`・`ksn_proc_points*.c`）。`derby_runner_affine.c`（実験、既に未使用）。ビルドの経路の `@plan` の部分（`lower_plans.mjs` の詰めた形式と `emit_rom_plans.mjs`）。
+- **消す:** JS の `pocket.kasane.procedural` 名前空間とグローバルの `gridFold`。`pocket_shiki_frame.c` の plan の部分（plan の slot、`draw_run`、点の読み込みと結び付け、組み込み plan の登録、bgcost の計装）。float の VM（`ksn_shiki_frame.c`・`ksn_proc_plan*.c`・`ksn_proc_analysis.c`・`ksn_proc_points*.c`）。`derby_runner_affine.c`（実験、既に未使用）。ビルドの経路の `@plan` の部分（`lower_plans.mjs` の詰めた形式と `emit_rom_plans.mjs`）。
 - **残す:** フレーム（`beginFrame`・`commit`）、面（`createSurface`）、`resource`、image mode、帯の差分（band damage）、作業領域、`pocket_proc_native_*`（`pocket_shape.c` が使う）、`grid`。これらは `pocket.kasane.shiki` から直接載せる（`share()` をやめる）。
 - 効果（推定、未測定）: flash と、旧 API の `.bss`・作業領域の DRAM。§8 の手順で消す前後を測る。
 - 文書の更新: CLAUDE.md の「`@plan` が無いアプリは Node 不要」は、`@shiki` の組み込みの表（`emit_shiki_rom.mjs`）も Node を要るので「`@plan` か `@shiki` が無いアプリは」に直す（レビュー M6）。
@@ -77,7 +77,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 4. 検査用のアプリと heapprobe の DERBY。
    - 済（2026-11-02）: `proc_limits_probe.js`・`proc_multi_surface_probe.js`・`overlay_proc_multi_probe.js`・`proc_news_zoom.js` と、float の VM を測っていた実機の probe（`ksn_procedural_device_probe.c`・`ksn_proc_compiler_device_probe.c`・`ksn_proc_limits_device_probe.c`・`ksn_megademo_device_probe.c`）を消した。D2 の 2 つの面の probe は、overlay のセッションに Shiki の heap が無いので移せない（CMake のオプションを ON にすると configure が止まる）。`KASANE_PROC_DEVICE_PROBE` も同じ（grid・pixel の probe は残るが、呼ぶ入口が要る）。heapprobe の DERBY は、旧 DERBY の複製（`apps/heapprobe/derby_v0/`）をやめ、configure の時に今の DERBY から 1 本のスクリプトを作る形に作り直した（`tools/heapprobe_derby.py`、[derby-watch.md](../apps/derby-watch.md)「heapprobe の変種」）。`grid_fold_device_probe.js` は grid（残る）の検査なので残した。
 5. 旧 API の削除（§2.2）と、関係する host の検査・CI の整理。
-   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_proc.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_procedural.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
+   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_shiki_frame.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_shiki_frame.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
    - 実機（e7b6d28、2026-11-02、入力なし）: DERBY はデモのレースを FINISH まで（読み込み後の空き 47,640 B、ゲスト 97,556 B、ターン 4.9〜16.8 ms）、MEGADEMO は tier 2 で 1 周余り（空き 37,356 B、旧 API があった 427b308 の 36,820 B から +536 B）、BIG WAVE はデモ画面で 40 秒（空き 74,108 B、dedda13 の 73,808 B から +300 B）。いずれも失敗なし。ファームは DIRAM 180,924 B・flash 1,601,184 B（CI の memlog、削除前の値はまだ同じ形で採っていない）。ログは [logs/v2-removal-device-20261102-e7b6d28.txt](logs/v2-removal-device-20261102-e7b6d28.txt)。
    - CI: BIG WAVE を v2.0 より前の固定の版と並べて走らせる実験の 3 本（`validate-curl-section.yml`・`adopt-rock-distance.yml`・`bigwave-input-literals.yml`）は、旧版の側が動かないので外した（2026-11-02、利用者の了承。スクリプトは `tools/` に記録として残る）。
 

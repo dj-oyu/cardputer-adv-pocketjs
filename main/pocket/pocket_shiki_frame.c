@@ -1,4 +1,4 @@
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
@@ -9,7 +9,7 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_kasane.h"
 #endif
 #include "pocket_api.h"
-#include "ui/kasane/ksn_procedural.h"
+#include "ui/kasane/ksn_shiki_frame.h"
 #include "ui/kasane/ksn_shiki.h"
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"

@@ -209,7 +209,7 @@ LIMIT の平均が下がったのは、序盤で層を足していくため（�
 | `run_proc_megademo_scenes.py`（3 段階 × 7 場面 × 全 1,296 フレーム、plan・単歩・VM の一致、Act I は C 参照と全画素一致、上限の検査、15 opcode） | PASS。ハッシュ programs `6472050e2a2dbf89` pixels は版ごとに変わる |
 | `run_proc_megademo_js.py`（Act I の programs と C 参照、0〜95 フレームの draw、ズームの切替、942 フレームの読み込み） | PASS（拍を 2 回ずつ、縮小ソース 1 つ、部屋の組み直しに合わせて試験を更新） |
 | `run_megademo_app_host.py`（ASan/UBSan と `--m32`、1,264 フレーム、ズーム・段階・場面送り） | PASS。例外 0・DEGRADE 0・表示失敗 0、同時 plan 最大 16 |
-| `run_pocket_proc_qjs.py`（実 `pocket_proc.c` で 0〜95 フレームが Act I の参照と全画素一致、ズーム往復） | PASS（拍を 2 回ずつ、部屋から始まるカメラ、部屋の組み直しの REPLACE に合わせて試験を更新。`--out` の書き出しは参照フレームの番号で 1 回ずつ） |
+| `run_pocket_proc_qjs.py`（実 `pocket_shiki_frame.c` で 0〜95 フレームが Act I の参照と全画素一致、ズーム往復） | PASS（拍を 2 回ずつ、部屋から始まるカメラ、部屋の組み直しの REPLACE に合わせて試験を更新。`--out` の書き出しは参照フレームの番号で 1 回ずつ） |
 | Kasane のコマンド数（表示中） | 最大 43（ZENITH を部屋から見たとき）。上限 80 |
 
 `MEGA_PICKS=0,8,…` を付けると `run_megademo_app_host.py --ppm` の書き出すフレームを選べる（このために足した）。
@@ -396,7 +396,7 @@ host の glibc の丸めは実機の TLSF より粗い（上の節: 実機のゲ
 
 | 変更 | 効き目（host m32） |
 | --- | --- |
-| **draw に配列を渡さない**: `draw()` は入力を数の引数でも受ける（`pocket_proc.c` の `draw_impl`、`numeric`）。全場面を `E(plan, 入力...)` と `BG(背景)`（`megademo_act1.js`）で描くようにした。場面関数はリストを返さない。`procMegademo.frame()`（host の試験が読む形）だけが `[plan, [入力]]` のリストに集める | 1 フレームの確保 331 → 91 回、12.4 → 4.5 KB |
+| **draw に配列を渡さない**: `draw()` は入力を数の引数でも受ける（`pocket_shiki_frame.c` の `draw_impl`、`numeric`）。全場面を `E(plan, 入力...)` と `BG(背景)`（`megademo_act1.js`）で描くようにした。場面関数はリストを返さない。`procMegademo.frame()`（host の試験が読む形）だけが `[plan, [入力]]` のリストに集める | 1 フレームの確保 331 → 91 回、12.4 → 4.5 KB |
 | フレームごとのクロージャ・配列を消した: 複素数の補助関数（`cmul`/`zp`/`lerp`）を式に展開、`map`/`concat`/`filter`/`parseInt`、カメラのキーの `map`、波ごとの配列リテラル、目のクロージャ、`[W_CORE, 16]` のような毎回のリテラル、艦隊の `[0,1,0,-1,0][…]`、`WQ.set([...])`。表は平たい配列に（`POSE`・`EAR`・`WHISK`・`K`）、作業用は使い回しの配列（`PJ`・`QQ`・`EP`・`CC`・`BR`） | 同上。host の JS 時間 −30%（内容を足した後も 245 → 約 190 µs/フレーム） |
 | CORE の面の頂点を `parseInt(IFS[i], 16)` ではなく `charCodeAt` で引く（`hx()`）。面ごとの縮み `h` をループの外へ | 同上 |
 | `patch()` は値が変わったときだけ ref に書く（画像の矩形、猫の矩形とコマ、ランプ・輪の色、残機の位置、語りと章名の `setReveal`）。読み取り値は全画面で 2 フレームに 1 回、`'SIGNAL …'` などの文字列もそのときだけ作る。`V.patch`/`V.replace` に渡す関数は 1 回だけ作る | view のコマンドとゲストの確保が減る |

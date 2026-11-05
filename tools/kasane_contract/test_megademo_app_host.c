@@ -19,7 +19,7 @@
  */
 #include "pocket_shape.h"
 #include "pocket_kasane.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_shiki_api.h"
 #include "shiki_heap.h"
 #include "pocket_video.h"

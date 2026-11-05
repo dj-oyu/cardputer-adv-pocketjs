@@ -4,7 +4,7 @@
  * pattern lines, sub-ranges [first, end), another frame drawn between the two
  * pieces, a carry dropped by its owner, a second piece asked for twice (the
  * second time with no carry), and pieces that start anywhere. */
-#include "ksn_procedural.h"
+#include "ksn_shiki_frame.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

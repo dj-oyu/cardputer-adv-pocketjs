@@ -34,23 +34,23 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     "$out/proc-grid-pie"
   done
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural.c \
+    main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_procedural.c \
     -lm -o "$out/procedural"
   "$out/procedural"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_band_jump.c \
+    main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_procedural_band_jump.c \
     -lm -o "$out/procedural-band-jump"
   "$out/procedural-band-jump"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_carry.c \
+    main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_procedural_carry.c \
     -lm -o "$out/procedural-carry"
   "$out/procedural-carry"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_hspan.c \
+    main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_procedural_hspan.c \
     -lm -o "$out/procedural-hspan"
   "$out/procedural-hspan"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
+    main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_shiki_surface.c \
     tools/kasane_contract/test_proc_pattern_line.c -lm -o "$out/proc-pattern-line"
   "$out/proc-pattern-line"
   # Shiki v1.2 (docs/kasane/shiki-spec.md): the C engine must build clean under
@@ -94,17 +94,17 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     python3 tools/shiki_jit/test_scalar.py
   fi
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
+    main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_shiki_surface.c \
     tools/kasane_contract/test_procedural_surface.c -lm -o "$out/procedural-surface"
   "$out/procedural-surface"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
-    main/ui/kasane/ksn_procedural_layers.c \
+    main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_shiki_surface.c \
+    main/ui/kasane/ksn_shiki_layers.c \
     tools/kasane_contract/test_procedural_layers.c -lm -o "$out/procedural-layers"
   "$out/procedural-layers"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
-    main/ui/kasane/ksn_procedural_layers.c \
+    main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_shiki_surface.c \
+    main/ui/kasane/ksn_shiki_layers.c \
     tools/kasane_contract/test_procedural_pattern_matrix.c -lm -o "$out/procedural-patterns"
   "$out/procedural-patterns"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
@@ -125,8 +125,8 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/pixel-span"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
-    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
-    main/ui/kasane/ksn_procedural_layers.c main/ui/kasane/ksn_procedural_present.c \
+    main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_shiki_surface.c \
+    main/ui/kasane/ksn_shiki_layers.c main/ui/kasane/ksn_shiki_present.c \
     tools/kasane_contract/test_procedural_present.c -lm -o "$out/procedural-present"
   "$out/procedural-present"
   cc -std=c11 -Wall -Wextra -Werror $options -pthread \
@@ -369,7 +369,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
 done
 # The whole MEGADEMO app on the real pocket.kasane (loader, view, Shiki).
 python3 tools/kasane_contract/run_megademo_app_host.py
-# pocket_proc.c's frames, surfaces and image port through pocket.kasane.shiki,
+# pocket_shiki_frame.c's frames, surfaces and image port through pocket.kasane.shiki,
 # then its turn boundary, handle limit and segment cap (ASan/UBSan, LSan).
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
 python3 tools/kasane_contract/run_pocket_proc_turn_qjs.py

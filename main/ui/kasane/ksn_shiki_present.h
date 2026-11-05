@@ -1,6 +1,6 @@
-#ifndef KSN_PROCEDURAL_PRESENT_H
-#define KSN_PROCEDURAL_PRESENT_H
-#include "ksn_procedural_layers.h"
+#ifndef KSN_SHIKI_PRESENT_H
+#define KSN_SHIKI_PRESENT_H
+#include "ksn_shiki_layers.h"
 #include "ksn_render.h"
 
 /* Host integration boundary. If a core submission and procedural candidate

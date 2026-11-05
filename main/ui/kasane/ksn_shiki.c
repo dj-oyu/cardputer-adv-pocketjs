@@ -500,7 +500,7 @@ static __attribute__((noinline)) KSN_JIT_FAST ksn_shiki_status cubic(ksn_shiki_v
 }
 
 /* LINE_PATTERN from the valid pen to (x, y): 1, 2, 4 or 8 chords of two
- * entries each, in ksn_procedural.h's encoding (geometry with x0 biased by
+ * entries each, in ksn_shiki_frame.h's encoding (geometry with x0 biased by
  * KSN_PROC_EXT_PATTERN, then the parameters). The status to stop with, or
  * RUNNING; the caller moves the pen only on RUNNING, and chords already
  * added stay (sec.4.7.7). */

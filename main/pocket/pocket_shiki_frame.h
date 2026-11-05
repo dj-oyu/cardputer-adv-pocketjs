@@ -1,10 +1,10 @@
-#ifndef POCKET_PROC_H
-#define POCKET_PROC_H
+#ifndef POCKET_SHIKI_FRAME_H
+#define POCKET_SHIKI_FRAME_H
 #include <stdbool.h>
 #include "quickjs.h"
 #include "esp_err.h"
 #include "ui/kasane/ksn_ports.h"
-#include "ui/kasane/ksn_procedural.h"
+#include "ui/kasane/ksn_shiki_frame.h"
 
 /* The frames, surfaces and image resources Shiki draws into (the procedural
  * IR that first used them went in v2.0). beginFrame, commit, resource,
