@@ -23,7 +23,7 @@
 | [ホームと背景](scenes/README.md) | XMB、設定、FLOWER・SOLAR SAIL・LEVEL WAVE |
 | [アプリと機能](apps/README.md) | 操作・機能設計、DERBY・MEGADEMO・音声の実装と比較記録 |
 | [VM](vm/README.md) | QuickJS / FreeRTOS の仕様・設計、L0〜L3 の記録・台帳 |
-| [性能と描画](perf/README.md) | PIE、Flash、画像変換、測定方法と実験記録 |
+| [性能と描画](perf/README.md) | PIE、Flash、画像変換、測定方法と実験記録。60 fps への道のりは [60fps-roadmap](perf/60fps-roadmap.md) |
 | [Kasane](kasane/README.md) | 描画の契約、判断台帳、検証ゲート、動的描画 |
 | [過去の調査・実験・提案](archive/README.md) | 移動先一覧、旧手順・重複の扱い、比較未完の理由 |
 

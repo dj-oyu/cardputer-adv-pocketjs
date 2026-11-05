@@ -9,6 +9,8 @@ QEMU で STRESS を流して取った実行回数で QuickJS をコンパイル�
 
 ## 0. 結論
 
+> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+
 - **実機（2026-11-05、表示の周期 16 ms の測定版で、4 アプリの fps と JS の turn）では差が出なかった。**
   BIG WAVE 58.5 / 58.5 fps、STRESS 50.5 / 50.7 fps（turn 6.72 / 6.73 ms）、MEGADEMO 52.2 / 52.1 fps、
   DERBY 53.1 / 53.8 fps（窓のレースが違う）。模型の見込み（1〜2%）は窓ごとの揺れに埋もれた（§5）。既定は OFF のまま。

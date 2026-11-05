@@ -2,6 +2,8 @@
 
 [VMの文書](README.md)
 
+> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+
 「QuickJS の本体はジャンプしまくりだろうから、分岐を減らせないか。SIMD 化（PIE）や複数命令を PIE にまとめることも検討して」への答え。実測（XTPERF、`CONFIG_POCKET_VM_TURNPERF`）、コード（逆アセンブル）、推定を分けて書く。記録は [logs/turn-jumps-20261105.txt](logs/turn-jumps-20261105.txt)。
 
 ## 1. 結論

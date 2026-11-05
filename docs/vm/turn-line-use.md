@@ -2,6 +2,8 @@
 
 [VM の文書](README.md) / 前提: [turn-working-set.md](turn-working-set.md)（1 ターンに触る行）、[r5-icache.md](r5-icache.md)（模型）
 
+> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+
 問い: 「flash キャッシュ待ちがターンの 34〜43%（[turn-jumps-pie.md](turn-jumps-pie.md)、実測）なのは、命令が行に十分
 集まっていないせいか」。1 ターンが取り込む 32 B 行のうち、そのターンが実際に実行するバイトの割合を測った。
 
