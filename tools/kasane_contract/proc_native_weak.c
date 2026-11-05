@@ -1,10 +1,10 @@
-/* Weak stand-ins for pocket_proc.c's native line API, so a harness links
- * against a pocket_proc.c from before that API existed (the old
+/* Weak stand-ins for pocket_shiki_frame.c's native line API, so a harness links
+ * against a pocket_shiki_frame.c from before that API existed (the old
  * --proc-source baseline comparison of run_pocket_proc_qjs.py, gone with the
  * float VM in Shiki v2.0): pocket.shapes links and draws nothing. The tree's
- * pocket_proc.c defines the real ones, which the linker takes over these. */
+ * pocket_shiki_frame.c defines the real ones, which the linker takes over these. */
 #include "quickjs.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 
 __attribute__((weak)) JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
     (void)ctx;(void)op;*mark=(pocket_proc_mark){0};return JS_UNDEFINED;

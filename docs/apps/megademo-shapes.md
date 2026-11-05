@@ -34,7 +34,7 @@ JS のまま書き直す（行ごとの交点の代わりに辺の表）試作�
 
 - **倍精度でビルドした C**（`-DPOCKET_SHAPE_DOUBLE`）: 8,100 draw すべてがビット単位で一致（PASS）。C の移植が JS の演算順まで同じことの証明。
 - **単精度（実機と同じ）**: 104 フレーム中 103 で draw の数が同じ、入力の差の最大 0.00028 px。`run_megademo_app_host.py` の WAKE の 13 フレームは、JS の版と全画素一致。
-- 他の試験は `pocket.shapes` を同じ C で載せる: `run_proc_megademo_scenes.py`（WAKE は 310 セグメント・ラスタ 7,085・145 draw で変わらず）、`run_proc_megademo_js.py`、`run_pocket_proc_qjs.py`、`run_megademo_app_host.py`。本物の `pocket_proc.c` を持たない試験は `shape_draw_shim.c` が draw を JS へ戻す。
+- 他の試験は `pocket.shapes` を同じ C で載せる: `run_proc_megademo_scenes.py`（WAKE は 310 セグメント・ラスタ 7,085・145 draw で変わらず）、`run_proc_megademo_js.py`、`run_pocket_proc_qjs.py`、`run_megademo_app_host.py`。本物の `pocket_shiki_frame.c` を持たない試験は `shape_draw_shim.c` が draw を JS へ戻す。
 
 ## メモリ（host m32、`MEGA_HEAP_LIMIT=163840`）
 
@@ -74,7 +74,7 @@ JS のまま書き直す（行ごとの交点の代わりに辺の表）試作�
 
 手続き面の画像は毎フレーム全体（17 帯、64,800 B）を送っていた（Fable の指摘）。`commit()` の傷は 1 つの外接矩形で、さらに MEGADEMO の画像は等倍の STRETCH なので、その矩形も捨てられて画像の全体が傷になっていた。
 
-- **帯の署名**: `commit()` で、8 行の帯ごとに、その帯にかかる線分の並び（生のエントリ、パターン線のパラメータ込み）のハッシュと列の範囲を取る（`pocket_proc.c` の `band_signature`）。帯の画素は背景色とその並びだけで決まる（`ksn_proc_render_band`）ので、ハッシュが同じ帯は描き直さなくてよい。
+- **帯の署名**: `commit()` で、8 行の帯ごとに、その帯にかかる線分の並び（生のエントリ、パターン線のパラメータ込み）のハッシュと列の範囲を取る（`pocket_shiki_frame.c` の `band_signature`）。帯の画素は背景色とその並びだけで決まる（`ksn_proc_render_band`）ので、ハッシュが同じ帯は描き直さなくてよい。
 - **帯の傷**: パネルに出ている版（前に提示に成功したフレーム）とハッシュが違う帯だけを、両方の列の範囲の和で傷にする（`pocket_proc_band_damage`）。背景色が変わったフレームと最初のフレームは全部。
 - **等倍の画像へ**: `ksn_core_invalidate_image_source_damage()` が、等倍（`1X`、または回転なしで自分の大きさへの STRETCH）の画像のノードには帯ごとの矩形で傷を付け、それ以外（ズーム中、小窓の縮小）はノード全体にする。既存の `..._source_rect()` と試験の `publish_at(surface, rect)` の形はそのまま（`pocket_kasane.c` が帯の傷を取れるときだけ使う）。
 - `.bss` 約 400 B（面 2 つ × 署名 2 つ × 17 帯 × 6 B）。

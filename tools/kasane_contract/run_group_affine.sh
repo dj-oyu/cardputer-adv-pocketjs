@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Candidate 3c (docs/perf/kasane-group-affine.md): the folded group arm against
+# Candidate 3c (docs/perf/kasane-group.md): the folded group arm against
 # the isolated premultiplied tile chain, in one binary.
 #
 # This is the entry point for tools/kasane_contract/test_group_affine.c alone. It

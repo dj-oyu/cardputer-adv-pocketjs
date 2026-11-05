@@ -3,7 +3,7 @@
 // (e), f (at least CAMS[i][0] = 200, which it sits on below e = 34.3 m), the
 // chords in view (VC) and where the field lands on the panel (x of the
 // leader and the 8th runner at the rail's middle, panel 0..239).
-// docs/apps/derby-trig-cull-device.md. Host, the app's own wide()/shot()/pan().
+// docs/apps/derby-camera-history.md. Host, the app's own wide()/shot()/pan().
 //
 //   node tools/games/ovalcost/w3_check.mjs [--from 270] [--to 650] [--step 10]
 import { runSet } from './trig_cull.mjs';

@@ -1,4 +1,4 @@
-// Host: compile ksn_procedural.c and this file with -std=c11 -O2 -Wall
+// Host: compile ksn_shiki_frame.c and this file with -std=c11 -O2 -Wall
 // -Wextra -Werror -Imain/ui/kasane -lm.
 //
 // The band renderer's own contract: a frame replayed band by band (in any
@@ -6,7 +6,7 @@
 // a frame that is not ready draws nothing. The float VM that used to write
 // these frames went in Shiki v2.0, so the frames are built here directly from
 // segments -- the renderer never knew who wrote them.
-#include "ksn_procedural.h"
+#include "ksn_shiki_frame.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>

@@ -42,9 +42,9 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 ### 2.2 消すもの・残すもの
 
-`beginFrame`・`commit`・`resource`・`createSurface`・`grid` は今も `pocket.kasane.shiki` から呼べる（`pocket_shiki_api.c` の `share()` が `procedural` の関数を写している）が、**実装は `pocket_proc.c` にある**（レビュー R1）。したがって `pocket_proc.c` は丸ごと消せない。
+`beginFrame`・`commit`・`resource`・`createSurface`・`grid` は今も `pocket.kasane.shiki` から呼べる（`pocket_shiki_api.c` の `share()` が `procedural` の関数を写している）が、**実装は `pocket_shiki_frame.c` にある**（レビュー R1）。したがって `pocket_shiki_frame.c` は丸ごと消せない。
 
-- **消す:** JS の `pocket.kasane.procedural` 名前空間とグローバルの `gridFold`。`pocket_proc.c` の plan の部分（plan の slot、`draw_run`、点の読み込みと結び付け、組み込み plan の登録、bgcost の計装）。float の VM（`ksn_procedural.c`・`ksn_proc_plan*.c`・`ksn_proc_analysis.c`・`ksn_proc_points*.c`）。`derby_runner_affine.c`（実験、既に未使用）。ビルドの経路の `@plan` の部分（`lower_plans.mjs` の詰めた形式と `emit_rom_plans.mjs`）。
+- **消す:** JS の `pocket.kasane.procedural` 名前空間とグローバルの `gridFold`。`pocket_shiki_frame.c` の plan の部分（plan の slot、`draw_run`、点の読み込みと結び付け、組み込み plan の登録、bgcost の計装）。float の VM（`ksn_shiki_frame.c`・`ksn_proc_plan*.c`・`ksn_proc_analysis.c`・`ksn_proc_points*.c`）。`derby_runner_affine.c`（実験、既に未使用）。ビルドの経路の `@plan` の部分（`lower_plans.mjs` の詰めた形式と `emit_rom_plans.mjs`）。
 - **残す:** フレーム（`beginFrame`・`commit`）、面（`createSurface`）、`resource`、image mode、帯の差分（band damage）、作業領域、`pocket_proc_native_*`（`pocket_shape.c` が使う）、`grid`。これらは `pocket.kasane.shiki` から直接載せる（`share()` をやめる）。
 - 効果（推定、未測定）: flash と、旧 API の `.bss`・作業領域の DRAM。§8 の手順で消す前後を測る。
 - 文書の更新: CLAUDE.md の「`@plan` が無いアプリは Node 不要」は、`@shiki` の組み込みの表（`emit_shiki_rom.mjs`）も Node を要るので「`@plan` か `@shiki` が無いアプリは」に直す（レビュー M6）。
@@ -77,7 +77,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 4. 検査用のアプリと heapprobe の DERBY。
    - 済（2026-11-02）: `proc_limits_probe.js`・`proc_multi_surface_probe.js`・`overlay_proc_multi_probe.js`・`proc_news_zoom.js` と、float の VM を測っていた実機の probe（`ksn_procedural_device_probe.c`・`ksn_proc_compiler_device_probe.c`・`ksn_proc_limits_device_probe.c`・`ksn_megademo_device_probe.c`）を消した。D2 の 2 つの面の probe は、overlay のセッションに Shiki の heap が無いので移せない（CMake のオプションを ON にすると configure が止まる）。`KASANE_PROC_DEVICE_PROBE` も同じ（grid・pixel の probe は残るが、呼ぶ入口が要る）。heapprobe の DERBY は、旧 DERBY の複製（`apps/heapprobe/derby_v0/`）をやめ、configure の時に今の DERBY から 1 本のスクリプトを作る形に作り直した（`tools/heapprobe_derby.py`、[derby-watch.md](../apps/derby-watch.md)「heapprobe の変種」）。`grid_fold_device_probe.js` は grid（残る）の検査なので残した。
 5. 旧 API の削除（§2.2）と、関係する host の検査・CI の整理。
-   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_proc.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_procedural.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
+   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_shiki_frame.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_shiki_frame.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
    - 実機（e7b6d28、2026-11-02、入力なし）: DERBY はデモのレースを FINISH まで（読み込み後の空き 47,640 B、ゲスト 97,556 B、ターン 4.9〜16.8 ms）、MEGADEMO は tier 2 で 1 周余り（空き 37,356 B、旧 API があった 427b308 の 36,820 B から +536 B）、BIG WAVE はデモ画面で 40 秒（空き 74,108 B、dedda13 の 73,808 B から +300 B）。いずれも失敗なし。ファームは DIRAM 180,924 B・flash 1,601,184 B（CI の memlog、削除前の値はまだ同じ形で採っていない）。ログは [logs/v2-removal-device-20261102-e7b6d28.txt](logs/v2-removal-device-20261102-e7b6d28.txt)。
    - CI: BIG WAVE を v2.0 より前の固定の版と並べて走らせる実験の 3 本（`validate-curl-section.yml`・`adopt-rock-distance.yml`・`bigwave-input-literals.yml`）は、旧版の側が動かないので外した（2026-11-02、利用者の了承。スクリプトは `tools/` に記録として残る）。
 
@@ -109,7 +109,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 ### 3.4 割り算の書き方（規範ではなく、変換器の手引き）
 
-`@shiki` の `x / y`（`y` が変数）は v1 と同じく変換器が拒む。逆数が要る式は、逆数の表（`k_rec = 1` の領域、`R` 個の刻み）を `LOOKUP` で引いて初期値にし、Newton 1〜2 回（`r ← r (2 − y r)`、`MUL` 2・`SUB` 1）で詰める。精度と命令の数の手本を変換器の試験に置く（DERBY の投影の誤差 0.07 px、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md) §2）。
+`@shiki` の `x / y`（`y` が変数）は v1 と同じく変換器が拒む。逆数が要る式は、逆数の表（`k_rec = 1` の領域、`R` 個の刻み）を `LOOKUP` で引いて初期値にし、Newton 1〜2 回（`r ← r (2 − y r)`、`MUL` 2・`SUB` 1）で詰める。精度と命令の数の手本を変換器の試験に置く（DERBY の投影の誤差 0.07 px、[derby-camera-history.md](../apps/derby-camera-history.md) §1）。
 
 ## 4. アプリの状態をデータ領域に置く（構想の 3）
 
@@ -176,20 +176,20 @@ DERBY は走者の間に大写しの馬（今は旧 API の点）を挟む。§2
 
 ### 6.1 方針（決めること D6）
 
-v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自動の下ろしだけ（§8.4 of spec）。広げ方は 2 つある（[shiki-pie.md](shiki-pie.md) §3）。
+v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自動の下ろしだけ（§8.4 of spec）。広げ方は 2 つある（[shiki-jit.md](shiki-jit.md) §24.3）。
 
-- 案 **V（決定、2026-11-02、利用者）: ベクトルの命令を仕様に入れる。** 試作（[shiki-pie.md](shiki-pie.md) §8）を規範にする。実測で affine128 はスカラーの 4.4 倍（PIE、SoA）。書き手が 8 レーンを明示し、エンジンは命令をそのまま PIE に写す。自動の下ろしは v1.5 のまま残す（両方ある）。
+- 案 **V（決定、2026-11-02、利用者）: ベクトルの命令を仕様に入れる。** 試作（[shiki-jit.md](shiki-jit.md) §24.6）を規範にする。実測で affine128 はスカラーの 4.4 倍（PIE、SoA）。書き手が 8 レーンを明示し、エンジンは命令をそのまま PIE に写す。自動の下ろしは v1.5 のまま残す（両方ある）。
 - 案 A: 自動の下ろしを広げる（本体の一部の列、累算のある列）。書き手は変わらないが、下ろせるかの判定と、スカラーとのビット一致の証明が命令の組み合わせごとに要る。
 
 ### 6.2 案 V の命令（試作から）
 
-| `op` | 命令 | 動き（要旨。詳細は試作 `ksn_shiki.c` と shiki-pie.md §8.1） | 実行時の失敗 |
+| `op` | 命令 | 動き（要旨。詳細は試作 `ksn_shiki.c` と shiki-jit.md §24.6.1） | 実行時の失敗 |
 | ---: | --- | --- | --- |
 | 30 | `VEACH a, b, aux=f` | 領域 `a` を 8 レコードのブロックで回す。端数はマスク。本体の命令は 1 ブロックに 1 回・1 ステップ。開始レコードは §4.1 | 件数が **32,767 を超える**と `INVALID`（`VIOTA` が 16 ビットのため。`EACH` の 65,535 と違う。レビュー M4） |
 | 31・32 | `VLOAD vd, a, b=欄`・`VSTORE vd, a, b=欄` | `i16` の領域の欄の 8 レコード（面の 128 ビット、16 B 整列） | |
 | 33・34 | `VSPLAT vd, a`・`VIOTA vd` | スカラーを全レーンへ（飽和）・レーン番号（ブロックの先頭のレコード番号から） | |
 | 35〜38 | `VADD`・`VSUB`・`VMIN`・`VMAX` | 16 ビット、飽和 | |
-| 39〜43 | `VZACC`・`VMAC`・`VMACK`・`VACCSET`・`VOUT` | 40 ビットの蓄積器（飽和）。`VOUT` は floor のシフト（**0〜32**）と sat16 で結果を出し、**蓄積器にはシフト後・sat16 前の値を書き戻す**（試作の実機の照合、shiki-pie.md §8.2 の writeback。連続する `VOUT` の意味を決めるので規範に書く。レビュー M4） | |
+| 39〜43 | `VZACC`・`VMAC`・`VMACK`・`VACCSET`・`VOUT` | 40 ビットの蓄積器（飽和）。`VOUT` は floor のシフト（**0〜32**）と sat16 で結果を出し、**蓄積器にはシフト後・sat16 前の値を書き戻す**（試作の実機の照合、shiki-jit.md §24.6.2 の writeback。連続する `VOUT` の意味を決めるので規範に書く。レビュー M4） | |
 | 44・45 | `EMIT_POINTS`・`EMIT_LINES` | 領域の列から native のループで点・線を描く。開始レコードは §4.1 | 座標・上限。**命令全体で 1 ステップ**なので `maxSteps` は仕事量を抑えず、`maxSegments`（1,024）・`maxRasterSteps`（8,192）が門になる（§9.1 of spec の注に書く。レビュー M4） |
 
 - 登録の検査: `VEACH` の本体はベクトルの命令と `END` だけ、ベクトルの命令は `VEACH` の外に置けない、入れ子不可（試作のまま）。
@@ -221,7 +221,7 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | `points(r[.from(k)][.take(n)], c);`・`lines(...)` | `EMIT_POINTS`・`EMIT_LINES` | ベクトルのループの外。`r` は `i16`、欄 2 個（線は 4 個）以上、座標の Q は領域の Q（15 以下）。`c` は定数か登録の引数。`k`・`n` は Q0、両方あると連続の 2 レジスタ |
 
 - 変換: スカラーの被演算子（`splat`・`acc.set`・`acc.mack`）は `VEACH` の前で計算する（本体にスカラーの命令を置けないため。再計算（remat）も `VEACH` の前に置く）。ベクトルの値は本体の中だけで生きる直線のコードなので、最後に読まれた後でレジスタを返す線形の割り当てで `v0`〜`v7` に載せる。読まれない純粋な値（`VLOAD`・`VSPLAT` など）は消し、`VOUT` は蓄積器を書くので残す。同時に 9 個以上生きると誤り。
-- 検査: `tools/kasane_ir/test_shiki_vector_compile.mjs`。6 本の式（affine・演算の全部・蓄積器の持ち越し・2 つの領域と `lines`・`EMIT` の開始と件数・スカラーのループの中のベクトルのループ）を、**C のエンジン**（`ksn_shiki.c` を `shiki_run.c` で、ASan・UBSan 付き）で描き、AST の評価（`shiki_fix.mjs`）と状態・線分・全領域の中身で比べる（host の参照 `shiki_ref.mjs` はベクトルの命令を持たないため）。各 200 件で全一致、誤りの 15 件は期待した文言で拒む。DERBY・BIG WAVE・MEGADEMO の `@shiki` 関数と既存の検査の式（74 本）は、変更の前と同じバイト列になる。PIE の経路（実機）では未確認（C モデルと PIE の一致は試作の検査 shiki-pie.md §8.2 による）。
+- 検査: `tools/kasane_ir/test_shiki_vector_compile.mjs`。6 本の式（affine・演算の全部・蓄積器の持ち越し・2 つの領域と `lines`・`EMIT` の開始と件数・スカラーのループの中のベクトルのループ）を、**C のエンジン**（`ksn_shiki.c` を `shiki_run.c` で、ASan・UBSan 付き）で描き、AST の評価（`shiki_fix.mjs`）と状態・線分・全領域の中身で比べる（host の参照 `shiki_ref.mjs` はベクトルの命令を持たないため）。各 200 件で全一致、誤りの 15 件は期待した文言で拒む。DERBY・BIG WAVE・MEGADEMO の `@shiki` 関数と既存の検査の式（74 本）は、変更の前と同じバイト列になる。PIE の経路（実機）では未確認（C モデルと PIE の一致は試作の検査 shiki-jit.md §24.6.2 による）。
 - ビット一致: C モデルと PIE の照合（実機）を §10.2 of spec に足す。自動の下ろし（`.H`）とベクトルの命令が同じ領域を読む式も、スカラー・C モデル・PIE の 3 つで一致することを要件にする（レビュー M5）。
 
 ## 7. 決めることの一覧
@@ -241,7 +241,7 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 
 1. この草案のレビューの反映（済、§10）。D2〜D6 と §5.1 のリストの規則は決定（§7）。D7 は実装と一緒に詰め、凍結前の差分レビューに出す。
 2. 実装は §2.5 の順に、各段で host の照合（全画素・oracle）と実機（fps・ゲストと native のメモリ・評価の余裕）を移す前と比べる。旧 API の削除（§2.2）の前後で flash・`.bss`・空きヒープを `tools/memlog.py --port` で測る。
-3. 実機の照合: `LOAD`・`STORE`・`DRAW_INDEX`・開始レコードの JS API の検査（`apps/shikitest/`）、ベクトルの命令の C モデルと PIE の一致（shiki-pie.md §8.2 の形）。
+3. 実機の照合: `LOAD`・`STORE`・`DRAW_INDEX`・開始レコードの JS API の検査（`apps/shikitest/`）、ベクトルの命令の C モデルと PIE の一致（shiki-jit.md §24.6.2 の形）。
 4. 凍結の前に、実装の差分と本文を SLOW が読む（差分レビュー）。
 5. 凍結の時に [shiki-spec.md](shiki-spec.md) を v2.0 に書き換える（§11 の移行は完了として消し、§12 の未決を更新する）。
 
@@ -266,7 +266,7 @@ C の重大なバグは見つからず、host の検査はすべて通った（�
 
 **規範に書く（凍結の条件）**
 
-- **§10.1 の例外:** 参照実装（`tools/kasane_ir/shiki_ref.mjs`）は op 0〜29 まで。op 30〜45（ベクトル・`EMIT_*`）の規範は C モデル（`ksn_shiki.c` の `vec_exec` のスカラー側）とし、独立の照合は「C モデルと PIE の実機照合（shiki-pie.md §8.2 の形）」と「`@shiki` の AST 評価（`shiki_fix.mjs`）と C の一致（`test_shiki_vector_compile.mjs`）」で行う。後者は変換器と同じ AST を読むので、バイト列の意味を独立に決める参照ではない。
+- **§10.1 の例外:** 参照実装（`tools/kasane_ir/shiki_ref.mjs`）は op 0〜29 まで。op 30〜45（ベクトル・`EMIT_*`）の規範は C モデル（`ksn_shiki.c` の `vec_exec` のスカラー側）とし、独立の照合は「C モデルと PIE の実機照合（shiki-jit.md §24.6.2 の形）」と「`@shiki` の AST 評価（`shiki_fix.mjs`）と C の一致（`test_shiki_vector_compile.mjs`）」で行う。後者は変換器と同じ AST を読むので、バイト列の意味を独立に決める参照ではない。
 - **端数ブロックのレーン:** `VEACH` の最後のブロックの `live` 未満のレーンだけがレコードに当たる。マスクの外のレーンは、`VLOAD` が 0 を入れる。`VIOTA` は外でも `ブロックの先頭のレコード番号 + レーン`（飽和）。`VSPLAT`・`VADD`/`VSUB`/`VMIN`/`VMAX`・蓄積器の命令（`VZACC`/`VMAC`/`VMACK`/`VACCSET`/`VOUT`）は 8 レーン全部で動く。`VSTORE` だけが `live` のレーンに限る。蓄積器は draw の間残るので、端数ブロックで外のレーンに溜めた値は、後のループの満杯ブロックの `VOUT`・`VSTORE` に出る（決定的）。
 - **自動の下ろし（§8.4 of spec）は未実装:** エンジンの PIE は `VEACH` のベクトル命令だけ。§8.4 は「下ろしてよい」の許可で、実装したときに §10.2（スカラー・C モデル・PIE の一致）を満たす。§6.2 の「自動の下ろしは v1.5 のまま残す（両方ある）」と、末尾の「`.H` と `V*` の 3 つで一致」は、この意味に読み替える。
 - **`EMIT_POINTS`/`EMIT_LINES` の `imm`:** 0〜15 の Q として各座標を `floor((x + 2^(imm-1)) / 2^imm)` で画素にする（`imm` が 0 なら x のまま）。領域の Q と一致するかは検査しない。`@shiki` は領域の Q を置く。

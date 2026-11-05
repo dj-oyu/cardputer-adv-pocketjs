@@ -1,6 +1,6 @@
 # ゲストの行番号表を落とす（`CONFIG_POCKET_VM_STRIP_DEBUG`、2026-09-30）
 
-ブランチ `vm/strip-debug`（`vm/main` b692f0c から）。DERBY WATCH の首振りカメラ（段階 3、ブランチ `vm/pan-camera` の `docs/apps/derby-pan-memory.md`）が DRAM に収まらなかったので、「最後の手」として、ゲストの JS を行番号表（pc2line）なしでコンパイルする選択肢を入れて測った。**数値は種別を明記する**（実機の実測／host m32 の実測／推定）。
+ブランチ `vm/strip-debug`（`vm/main` b692f0c から）。DERBY WATCH の首振りカメラ（段階 3、ブランチ `vm/pan-camera` の `docs/apps/derby-camera-history.md`）が DRAM に収まらなかったので、「最後の手」として、ゲストの JS を行番号表（pc2line）なしでコンパイルする選択肢を入れて測った。**数値は種別を明記する**（実機の実測／host m32 の実測／推定）。
 
 ## 結論
 

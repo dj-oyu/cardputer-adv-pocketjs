@@ -1,4 +1,4 @@
-"""Compile and run the real QuickJS frame adapter (pocket_proc.c through
+"""Compile and run the real QuickJS frame adapter (pocket_shiki_frame.c through
 pocket.kasane.shiki) on the host: test_pocket_proc_qjs.c, under ASan/UBSan.
 
 The float procedural VM and its PIE point batches went in Shiki v2.0, so the
@@ -27,13 +27,13 @@ def main():
     rom.write_text('#include "ksn_shiki.h"\n'
                    'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
-             *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c','ksn_core.c',
+             *(ROOT/'main/ui/kasane'/name for name in ('ksn_shiki_frame.c','ksn_core.c',
                'ksn_render.c','ksn_blend_pie.c','ksn_shiki.c')),
-             ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',
+             ROOT/'main/pocket/pocket_shiki_frame.c',ROOT/'main/pocket/shiki_heap.c',
              ROOT/'main/pocket/pocket_shiki_api.c',
-             # pocket.shapes' native line API is pocket_proc.c's; nothing
+             # pocket.shapes' native line API is pocket_shiki_frame.c's; nothing
              # here draws through it, the weak stand-ins only satisfy the link
-             # for a pocket_proc.c that lacks it.
+             # for a pocket_shiki_frame.c that lacks it.
              ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
     command=[cc,'-std=gnu11','-O'+args.opt,'-g','-fsanitize=address,undefined','-fno-sanitize-recover',

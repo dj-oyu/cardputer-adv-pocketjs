@@ -22,7 +22,7 @@ cd "$build"
 python -m esptool --chip esp32s3 merge-bin --fill-flash-size 8MB -o qemu_flash.bin @flash_args
 rm -f serial.txt
 # -icount: the virtual clock follows the instruction count, as in the trace
-# runs (docs/vm/turn-line-use.md 4.1). -m 4M: PSRAM for the counters.
+# runs (docs/vm/turn-icache.md 3.4.1). -m 4M: PSRAM for the counters.
 "$qemu" -machine esp32s3 -m 4M -drive file=qemu_flash.bin,if=mtd,format=raw \
     -serial file:serial.txt -monitor none -display none -icount shift=2 &
 pid=$!

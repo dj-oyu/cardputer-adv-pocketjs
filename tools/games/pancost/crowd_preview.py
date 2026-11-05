@@ -1,5 +1,5 @@
 """Side-by-side host preview of the crowd variants priced in
-docs/apps/derby-pan-camera-cost.md ("観客をノイズにする案"). Draws the stands'
+docs/apps/derby-camera-history.md ("観客をノイズにする案"). Draws the stands'
 crowd of a MID WIDE side view four ways on 240 x 40 strips, stacked, scaled
 x3, as one PNG. The look is not judged here; this only hands the pictures over.
 

@@ -44,7 +44,7 @@ int main(void){""")
         subprocess.run([str(exe)], check=True)
 
     pocket = (root / "tools/test_pocket_kasane.c").read_text()
-    pocket = '#include <assert.h>\n#include "pocket_proc.h"\n' + pocket
+    pocket = '#include <assert.h>\n#include "pocket_shiki_frame.h"\n' + pocket
     boundary = "static uint16_t *get_strip(void *opaque)"
     assert boundary in pocket
     pocket = pocket.replace(boundary, """

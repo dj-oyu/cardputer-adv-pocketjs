@@ -1,8 +1,8 @@
 /* Host-only surface ownership and repair test. Compile with
- * ksn_procedural.c, ksn_procedural_surface.c, and -lm. The candidate frames
+ * ksn_shiki_frame.c, ksn_shiki_surface.c, and -lm. The candidate frames
  * are built here from segments: the float VM that once wrote them went in
  * Shiki v2.0, and the surface only ever saw the finished frame. */
-#include "ksn_procedural_surface.h"
+#include "ksn_shiki_surface.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

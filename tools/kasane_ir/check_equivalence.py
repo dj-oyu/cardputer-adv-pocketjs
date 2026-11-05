@@ -16,7 +16,7 @@ WSL only; node on PATH, so run it under bash -lc).
    (DERBY's plans as text until e9b88bc), or DIR's derby_prog_text.js or
    derby_prog.js when those are text.
 3. tools/kasane_ir/run_ir.c runs hand and compiled IR through
-   main/ui/kasane/ksn_procedural.c (and the compiled one also through
+   main/ui/kasane/ksn_shiki_frame.c (and the compiled one also through
    ksn_proc_plan.c) and compares status, segments and raster steps
    (EQUIVALENCE PASS).
 4. With plans from JS functions, tools/kasane_ir/check_js.mjs also runs
@@ -130,7 +130,7 @@ def main() -> None:
                     *(["--js", str(js)] if js else []), "--cases", str(draws), str(cases)], check=True)
     binary = CACHE / "run_ir"
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Imain/ui/kasane", "tools/kasane_ir/run_ir.c",
-                    "main/ui/kasane/ksn_procedural.c", "main/ui/kasane/ksn_proc_plan.c",
+                    "main/ui/kasane/ksn_shiki_frame.c", "main/ui/kasane/ksn_proc_plan.c",
                     "main/ui/kasane/ksn_proc_analysis.c",
                     "-lm", "-o", str(binary)], cwd=ROOT, check=True)
     dump = CACHE / "dump.txt"

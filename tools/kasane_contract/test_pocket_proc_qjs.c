@@ -1,4 +1,4 @@
-/* The frames, surfaces and image resources of pocket_proc.c through JS, on
+/* The frames, surfaces and image resources of pocket_shiki_frame.c through JS, on
  * real QuickJS: beginFrame/commit/resource/createSurface and Shiki draws on
  * pocket.kasane.shiki (pocket_shiki_api.c), the image port the presenter
  * reads, transfer failure and repair, two independent surfaces on the real
@@ -12,7 +12,7 @@
  * MEGADEMO's programs, which this harness used to run, went in Shiki v2.0;
  * the app itself is run by run_megademo_app_host.py. */
 #include "quickjs.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_api.h"
 #include "pocket_shiki_api.h"
 #include "shiki_heap.h"

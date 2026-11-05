@@ -15,13 +15,13 @@
 - **DERBY（段階 4）**: 観客は `crowd` 1 本（56 命令）で横見と首振りを描く。`pk` を消し、同時の plan は 30 → **29/32**、flash の表は 18 → 17 本。見た目の値は `KN`（`derby_prog.js`）の 1 か所（[apps/derby/README.md](../../apps/derby/README.md) の「観客」）。
 - **観客以外は変わらない**: host で観客の draw だけを外すと、全画素ハッシュが基準 45f309f と 3 段階とも一致。着順・時計・種・デモ・R 再生・オッズ・保存は全行一致。
 - **費用（実機、MID・HEAVY の VM draw + 帯描画の中央値の差、基準 → P24）**: 横見 WIDE −0.27 ms（MID）／−0.65 ms（HEAVY）、FIELD −0.53／−1.18 ms、首振りの直線 −0.54 ms（HEAVY）、楕円の首振り −0.38／−0.53 ms。fps は横見で変わらず（JS が律速）、楕円の首振りは 15.3 → 16.1 fps（`pk` の列を回す JS が消えたため）。
-- **メモリ**: 静的 DIRAM ±0、flash のコード +3,068 B・.rodata −656 B。ゲスト（host m32）は評価後 +292 B、評価のピーク +268 B、GC 後の最大 +184〜324 B。実機の評価の余裕は 22,810 → 22,670 B、レース中のゲスト最大は約 +200〜400 B（138,944 B、140,000 まで約 1.0 KB）。詳細は [derby-pan-memory.md](../apps/derby-pan-memory.md) §13。
+- **メモリ**: 静的 DIRAM ±0、flash のコード +3,068 B・.rodata −656 B。ゲスト（host m32）は評価後 +292 B、評価のピーク +268 B、GC 後の最大 +184〜324 B。実機の評価の余裕は 22,810 → 22,670 B、レース中のゲスト最大は約 +200〜400 B（138,944 B、140,000 まで約 1.0 KB）。詳細は [derby-camera-history.md](../apps/derby-camera-history.md) §5。
 - 見る資料: [derby-crowd-p24-preview.png](../apps/derby-crowd-p24-preview.png)（12 場面、左が以前の市松、右が P24、3 倍）、[derby-crowd-p24.gif](../apps/derby-crowd-p24.gif)（8 フレーム）。生成は [`crowd_p24.mjs`](../../tools/games/pancost/crowd_p24.mjs)（アプリの plan と `KN` をそのまま使う）。
 
 
 ## 結論（試作のとき）
 
-- **2 案とも host で動いた。** 手続き描画の VM と帯ラスタライザ（[`ksn_procedural.c`](../../main/ui/kasane/ksn_procedural.c)）に、試作の命令を 2 つ足した: 模様の線 `LINE_PATTERN`（案 1。24 ビットの模様のほかに、ハッシュで作るノイズと、遠近の補正を持つ）と、タイルの矩形 `TILE`（案 2）。12 場面の画は、この C の実装そのものが描いた。
+- **2 案とも host で動いた。** 手続き描画の VM と帯ラスタライザ（[`ksn_shiki_frame.c`](../../main/ui/kasane/ksn_shiki_frame.c)）に、試作の命令を 2 つ足した: 模様の線 `LINE_PATTERN`（案 1。24 ビットの模様のほかに、ハッシュで作るノイズと、遠近の補正を持つ）と、タイルの矩形 `TILE`（案 2）。12 場面の画は、この C の実装そのものが描いた。
 - **費用（実機の推定、12 場面の平均、今のチェッカー観客 = 1.00）: 模様線 0.51、ノイズ線 0.63、タイル 0.61。** 横見だけなら 0.44／0.60／0.47、首振りだけなら 0.58／0.66／0.75。draw（VM）の側は 865 → 約 210〜230 µs に減り、帯描画の側は 85 → 約 260〜360 µs に増える（画素を塗る量が、点 66 個から 1,400〜8,400 画素になるため）。**帯描画の画素の単価は実機で測っていない**（Xtensa の `-O2` の命令数に、今の線の実測 34 サイクル/画素から出した 1.1 サイクル/命令を掛けた）。合計が今の半分前後、という桁は確からしいが、±50% は動きうる。
 - **「桁違いに安い」にはならない。** タイルは UI の画像ノード（240×30 で約 2.5〜3 ms）の約 1/6〜1/7（推定）だが、今の観客と比べると半分前後。理由は、今の観客が「点 66 個」という極端に少ない画素しか塗っていないこと。新しい 2 案は、**同じかそれ以下の費用で、塗る画素を 20〜100 倍にする**（観客席を人で埋められる）、と読むのが正確。
 - **既存の出力は変わらない。** 新しい命令を使わないフレームは、バイト列も描画の経路も今と同じ（フレームの大きさ 10,246 B も同じ）。host の手続き描画の試験 13 本（ASan/UBSan と `-O2`）、QuickJS の adapter の試験、DERBY の host、IR の等価検査が通る。
@@ -41,7 +41,7 @@
 
 ```text
 JS  draw(handle, [入力 8 個])
- │   pocket_proc.c draw_impl: 入力を float にして plan を始める
+ │   pocket_shiki_frame.c draw_impl: 入力を float にして plan を始める
  ▼
 VM  ksn_proc_begin: 命令 (12 B × ≤64) を VM にコピー → 検証 (valid_program)
     ksn_proc_step を 1 命令ずつ: レジスタ 16 本 (float32)、入力 8、ループ深さ 8
@@ -63,7 +63,7 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
     実測: 帯に入る 1 回 0.35 µs、横の 1 画素 0.143 µs（34 サイクル）
 ```
 
-登録時: `ksn_proc_analyze`（読み書きするレジスタ、効果、失敗の種類、基本ブロック、ループ）→ 隣り合う算術 2 命令の融合の印（`ksn_proc_plan.c`）。組み込みの plan は命令が flash の表にあり、heap には 40 + 4 × 引数 B だけ（[flash-plan.md](flash-plan.md)）。フレームを歩く側は、帯描画のほかに damage の計算（`pocket_proc.c` `frame_damage`、`ksn_procedural_surface.c`）がある。
+登録時: `ksn_proc_analyze`（読み書きするレジスタ、効果、失敗の種類、基本ブロック、ループ）→ 隣り合う算術 2 命令の融合の印（`ksn_proc_plan.c`）。組み込みの plan は命令が flash の表にあり、heap には 40 + 4 × 引数 B だけ（[flash-plan.md](flash-plan.md)）。フレームを歩く側は、帯描画のほかに damage の計算（`pocket_shiki_frame.c` `frame_damage`、`ksn_shiki_surface.c`）がある。
 
 費用を決めているのは、VM 側が「ステップ 0.45 µs・SIN +1 µs・emit 約 1 µs・draw の固定費 50〜110 µs」、帯側が「エントリの数（0.85 µs/本/フレーム）と帯ごとの固定費 17 µs」（[derby-background-cost.md](derby-background-cost.md) の実測）。観客 1 人を点や線で描くかぎり、人数ぶんのステップと emit が要る。**新しいプリミティブの狙いは、人数に比例する部分を VM から帯ラスタライザの画素ループへ移すこと**（1 画素 10〜25 命令、VM の 1 ステップは約 108 サイクル）。
 
@@ -113,16 +113,16 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
 
 - 命令の符号化（12 B: op, dst, a, b, value, color）は変えない。flash の plan の表（`ksn_proc_rom_entry`、引数のパッチ先 A／VALUE／COLOR）もそのまま使える（タイル番号は COLOR、周期は VALUE のパッチで登録の引数にできる）。
 - **`plan_js.mjs`／`kir.mjs` は未対応**（試作の plan は手書きの IR）。出荷には、組み込み関数 `pline(x, y, pattern, a, b, u0, u1, w0, w1, N)` と `tile(x, y, id, u0, v0, u1, v1, frame)`、連続するレジスタ 7 本・5 本の割り当て（`CUBIC` の r0..r7 固定の処理が近い）、文字形式の文字 2 つ、float32 の参照実行（`reference()`）への追加が要る。
-- `pocket_proc.c` の `entry()` は op を値として通すので、API の形は変わらない。`capabilities` の `limits` に出す値も変わらない。
+- `pocket_shiki_frame.c` の `entry()` は op を値として通すので、API の形は変わらない。`capabilities` の `limits` に出す値も変わらない。
 
 ### 2.5 変更するファイル（試作で触ったもの = 出荷でも触るもの）
 
 | ファイル | 変更 | 行数（試作） |
 | --- | --- | --- |
-| `main/ui/kasane/ksn_procedural.h` | op 2 つ、2 エントリの符号化、`ext`、`ksn_proc_frame_next`、タイルの型 | +80 |
-| `main/ui/kasane/ksn_procedural.c` | 検証、emit、step の 2 命令、帯描画（模様線・タイル・拡張フレームのループ） | +270 |
+| `main/ui/kasane/ksn_shiki_frame.h` | op 2 つ、2 エントリの符号化、`ext`、`ksn_proc_frame_next`、タイルの型 | +80 |
+| `main/ui/kasane/ksn_shiki_frame.c` | 検証、emit、step の 2 命令、帯描画（模様線・タイル・拡張フレームのループ） | +270 |
 | `main/ui/kasane/ksn_proc_analysis.c` | 2 命令の読み・効果・失敗 | +17 |
-| `main/ui/kasane/ksn_procedural_surface.c`、`main/pocket/pocket_proc.c` | フレームを歩く 3 箇所を `ksn_proc_frame_next` に、`ext` の引き継ぎ | +20 |
+| `main/ui/kasane/ksn_shiki_surface.c`、`main/pocket/pocket_shiki_frame.c` | フレームを歩く 3 箇所を `ksn_proc_frame_next` に、`ext` の引き継ぎ | +20 |
 | `tools/kasane_contract/test_proc_crowd_prim.c`、`run.sh` | host 契約試験 | 新規 440 |
 | `tools/games/pancost/crowd_prim.mjs`、`crowd_prim_host.c`、`crowd_look.mjs`（export だけ） | 画・GIF・費用の表 | 新規 420 |
 | （出荷で追加）`tools/kasane_ir/{kir,plan_js,emit_rom_plans}.mjs`、タイル表の生成器と CMake、`apps/derby/*`、`KASANE_BGCOST_TRACE` の集計 | コンパイラ、資源、アプリ | 未着手 |

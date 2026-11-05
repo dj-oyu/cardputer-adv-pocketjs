@@ -1,6 +1,6 @@
 # MEGADEMO — NIGHT SIGNAL（シナリオと演出の設計）
 
-2026-10-27。対象は [apps/kasane/proc_megademo.js](../../apps/kasane/proc_megademo.js)（APPS の MEGADEMO）。上限を叩く場面の設計と数値は [megademo-limit-scenes.md](../kasane/megademo-limit-scenes.md)、実機の測定は [megademo-device-limits.md](../kasane/megademo-device-limits.md)。この文書はそれらの上に「物語」と「場面のつなぎ」を足したときの台本と、何をどこで変えたかの記録。
+2026-10-27。対象は [apps/kasane/proc_megademo.js](../../apps/kasane/proc_megademo.js)（APPS の MEGADEMO）。上限を叩く場面の設計と数値は [megademo-limit-scenes.md](../kasane/megademo-limits.md)、実機の測定は [megademo-device-limits.md](../kasane/megademo-limits.md)。この文書はそれらの上に「物語」と「場面のつなぎ」を足したときの台本と、何をどこで変えたかの記録。
 
 > **2026-10-28 以降の物語は「ASTRAL FIGHTER」**（下の [ASTRAL FIGHTER](#astral-fighter2026-10-28) の節）。その前の NIGHT SIGNAL の台本（猫がテレビの信号に呼ばれる話）は、場面の中身（Act I〜CORE の手続き面）の記録としてそのまま残す。アプリは 2026-10-28 から 4 つのチャンクに分けた（`apps/kasane/chunks.txt`、同じ節）。
 
@@ -98,7 +98,7 @@ ZENITH の **munching squares の小窓**（`pocket.kasane.pixel`）と **レー
 
 - ゲスト: 型付き配列を 1 つでも作ると、その機構だけで約 1.3 KB が常駐する（host m32、`new Uint16Array` 2 つで +1,312 B、`pixel.open` で +688 B）。2 つを外して評価後 −3.0 KB（host m32、103,488 → 100,464 B）。
 - ネイティブ: pixel のプール 1,888 B（`sizeof(ksn_pixel_pool)`、host m32）と、縮小のソース行 `resize_stream`（約 1.3 KB）が確保されなくなる。
-- 網羅表（[megademo-limit-scenes.md](../kasane/megademo-limit-scenes.md)）の `pixel.open` / `stage`、`sampling: 'nearest'`、`ref.setRotation` はこのアプリでは使わなくなった。`pixel` の試験は `apps/kasane/pixel_lab_probe.js` などにある。
+- 網羅表（[megademo-limit-scenes.md](../kasane/megademo-limits.md)）の `pixel.open` / `stage`、`sampling: 'nearest'`、`ref.setRotation` はこのアプリでは使わなくなった。`pixel` の試験は `apps/kasane/pixel_lab_probe.js` などにある。
 
 ## IV CORE の作り直し（2026-10-28）
 
@@ -188,7 +188,7 @@ CORE を入れた版は、実機で起動に失敗した（`EVAL_ERROR PocketErr
 | 実行中の live 最大（毎フレーム GC 後、どちらも ZENITH） | 110,124 | 114,832 | +4,708 |
 
 - 評価のピークは上限 163,840 B まで 33 KB 残る（旧版 46 KB）。
-- 実行中の常駐はゲストで +4.7 KB、ネイティブで −3.2 KB 程度（上の「外したもの」）。差し引き ZENITH で約 +1.5 KB の見込み（推定）。実機の ZENITH HEAVY のターン内の最小空きは 6,948 B（[megademo-device-limits.md](../kasane/megademo-device-limits.md)、2026-09-29）なので、**実機で `tools/kasane_contract/megademo_device.py run` の空き最小を確かめる必要がある**。
+- 実行中の常駐はゲストで +4.7 KB、ネイティブで −3.2 KB 程度（上の「外したもの」）。差し引き ZENITH で約 +1.5 KB の見込み（推定）。実機の ZENITH HEAVY のターン内の最小空きは 6,948 B（[megademo-device-limits.md](../kasane/megademo-limits.md)、2026-09-29）なので、**実機で `tools/kasane_contract/megademo_device.py run` の空き最小を確かめる必要がある**。
 - 途中の版は live 最大 +12.5 KB だった。削ったもの: 型付き配列（上）、部屋とニュースの表を文字列に、HUD の表示窓をクロージャから数値の組に、ナレーション・テロップを 1 本の文字列にして場面ごとに分解。コメントの量は効かなかった（コメントを全部外しても評価のピークは ±0.1 KB）。
 
 ### 負荷（host 計数、`run_proc_megademo_scenes.py`。2026-10-27 の版。LIMIT は 10-28 に CORE へ差し替えた）
@@ -209,7 +209,7 @@ LIMIT の平均が下がったのは、序盤で層を足していくため（�
 | `run_proc_megademo_scenes.py`（3 段階 × 7 場面 × 全 1,296 フレーム、plan・単歩・VM の一致、Act I は C 参照と全画素一致、上限の検査、15 opcode） | PASS。ハッシュ programs `6472050e2a2dbf89` pixels は版ごとに変わる |
 | `run_proc_megademo_js.py`（Act I の programs と C 参照、0〜95 フレームの draw、ズームの切替、942 フレームの読み込み） | PASS（拍を 2 回ずつ、縮小ソース 1 つ、部屋の組み直しに合わせて試験を更新） |
 | `run_megademo_app_host.py`（ASan/UBSan と `--m32`、1,264 フレーム、ズーム・段階・場面送り） | PASS。例外 0・DEGRADE 0・表示失敗 0、同時 plan 最大 16 |
-| `run_pocket_proc_qjs.py`（実 `pocket_proc.c` で 0〜95 フレームが Act I の参照と全画素一致、ズーム往復） | PASS（拍を 2 回ずつ、部屋から始まるカメラ、部屋の組み直しの REPLACE に合わせて試験を更新。`--out` の書き出しは参照フレームの番号で 1 回ずつ） |
+| `run_pocket_proc_qjs.py`（実 `pocket_shiki_frame.c` で 0〜95 フレームが Act I の参照と全画素一致、ズーム往復） | PASS（拍を 2 回ずつ、部屋から始まるカメラ、部屋の組み直しの REPLACE に合わせて試験を更新。`--out` の書き出しは参照フレームの番号で 1 回ずつ） |
 | Kasane のコマンド数（表示中） | 最大 43（ZENITH を部屋から見たとき）。上限 80 |
 
 `MEGA_PICKS=0,8,…` を付けると `run_megademo_app_host.py --ppm` の書き出すフレームを選べる（このために足した）。
@@ -396,7 +396,7 @@ host の glibc の丸めは実機の TLSF より粗い（上の節: 実機のゲ
 
 | 変更 | 効き目（host m32） |
 | --- | --- |
-| **draw に配列を渡さない**: `draw()` は入力を数の引数でも受ける（`pocket_proc.c` の `draw_impl`、`numeric`）。全場面を `E(plan, 入力...)` と `BG(背景)`（`megademo_act1.js`）で描くようにした。場面関数はリストを返さない。`procMegademo.frame()`（host の試験が読む形）だけが `[plan, [入力]]` のリストに集める | 1 フレームの確保 331 → 91 回、12.4 → 4.5 KB |
+| **draw に配列を渡さない**: `draw()` は入力を数の引数でも受ける（`pocket_shiki_frame.c` の `draw_impl`、`numeric`）。全場面を `E(plan, 入力...)` と `BG(背景)`（`megademo_act1.js`）で描くようにした。場面関数はリストを返さない。`procMegademo.frame()`（host の試験が読む形）だけが `[plan, [入力]]` のリストに集める | 1 フレームの確保 331 → 91 回、12.4 → 4.5 KB |
 | フレームごとのクロージャ・配列を消した: 複素数の補助関数（`cmul`/`zp`/`lerp`）を式に展開、`map`/`concat`/`filter`/`parseInt`、カメラのキーの `map`、波ごとの配列リテラル、目のクロージャ、`[W_CORE, 16]` のような毎回のリテラル、艦隊の `[0,1,0,-1,0][…]`、`WQ.set([...])`。表は平たい配列に（`POSE`・`EAR`・`WHISK`・`K`）、作業用は使い回しの配列（`PJ`・`QQ`・`EP`・`CC`・`BR`） | 同上。host の JS 時間 −30%（内容を足した後も 245 → 約 190 µs/フレーム） |
 | CORE の面の頂点を `parseInt(IFS[i], 16)` ではなく `charCodeAt` で引く（`hx()`）。面ごとの縮み `h` をループの外へ | 同上 |
 | `patch()` は値が変わったときだけ ref に書く（画像の矩形、猫の矩形とコマ、ランプ・輪の色、残機の位置、語りと章名の `setReveal`）。読み取り値は全画面で 2 フレームに 1 回、`'SIGNAL …'` などの文字列もそのときだけ作る。`V.patch`/`V.replace` に渡す関数は 1 回だけ作る | view のコマンドとゲストの確保が減る |

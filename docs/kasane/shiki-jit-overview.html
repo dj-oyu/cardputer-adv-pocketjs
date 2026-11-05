@@ -483,7 +483,7 @@ a{color:var(--accent)}
 <p>これまで 1 回の <code>draw()</code> は、1,024 本入る作業領域（<code>workspace</code>、10,246 B）へ書き、描画中のフレームの残りに入れば <code>memcpy</code> で写していた。「全部入るか、何も入らないか」にするための一時置き場だった（フレームの仕組みは <a href="pipeline-overview.html#shiki">パイプラインの §6</a>）。</p>
 <ul>
 <li><b>直し（c4d7a6c、ユーザー決定）。</b> エンジンにその描画で出してよい線分の数 <code>cap</code> を持たせ、描画中のフレームの末尾へ直接書く。超えたら <code>LIMIT</code> で止まり、フレームの本数（<code>count</code>）を進めないので、書きかけはフレームに入らない。</li>
-<li><b>作業領域は、画像の面の帯のキャッシュ（240 × 8 × 2 = 3,840 B）だけになった</b>（<code>pocket_proc.c</code> の <code>image_band_buf</code>、コードで確認）。画像の面を使わないアプリは取らない。</li>
+<li><b>作業領域は、画像の面の帯のキャッシュ（240 × 8 × 2 = 3,840 B）だけになった</b>（<code>pocket_shiki_frame.c</code> の <code>image_band_buf</code>、コードで確認）。画像の面を使わないアプリは取らない。</li>
 <li>効果: 画像の面を使うアプリ（DERBY・MEGADEMO）で 10,246 − 3,840 = <b>6,406 B</b>、使わないアプリで 10,246 B が区画から空く <span class="e">計算</span>。描画ごとの <code>memcpy</code> も無くなる。</li>
 </ul>
 <div class="card">

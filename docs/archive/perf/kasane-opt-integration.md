@@ -125,7 +125,7 @@ ASan に期待できるのは「たまたま通った 1 本の観測」までで
 （`KASANE_SOURCES` の 9 つの kasane ソースに無い。`grep ksn_blend_pie` も 0 件）。
 `ksn_render.c` からも参照していないので、ファームウェアのリンクには一切入らない。
 `ksn_blend_pie.c`・`tools/pie/*`（`piesim.py`/`stalls.py`/`test_kernels.py`/`models/blend_pack_model.c`）・
-`docs/perf/kasane-blend-pie.md` は `origin/perf/kasane-kernel` と**バイト一致**で、
+`docs/perf/kasane-blend.md` は `origin/perf/kasane-kernel` と**バイト一致**で、
 取り込みで 1 バイトも変わっていない（`git diff --quiet origin/perf/kasane-kernel -- <file>`）。
 **結線は次のコミットの仕事で、ここではまだ何も速くなっていない。**
 
@@ -219,7 +219,7 @@ decode 込み 576 B。decode 単独なら 944−368 = 576、基点からは 928�
 | 5.2.2 | `ksn_render.c`（`e7282ed`） 境界パス | こちらはクリップ済み箱から左右上下を取り、先方は同じ箱を到達表 `reach[]` へ入れる | 先方の表を採り、`command.draw` を `command->draw` に（2a の retype を戻さない）。こちらの「見えない・不透明でない子を落とす」は先方の `if(command->visible&&d->opacity)` に含まれる |
 | 5.2.3 | `ksn_render.c`（`e7282ed`） 子ごとの窓 | こちらのブロック単位の棄却（箱がこのブロックと交わらない子を読まない）と、先方の `lo..hi`（子の窓） | 両方。棄却は無条件、窓は `if(g_ksn_tile_reach||g_ksn_tile_smooth)` の中（`ca2e3fd` で滑らかな層も同じ窓を要るため） |
 | 5.2.4 | `ksn_render.c`（`e7282ed` / `ca2e3fd`） 合成ループ | こちらの `g_ksn_row_coverage` の 2 腕と、先方の `smooth_block` ＋ 先方の述語ループ | 先方の `smooth_block`（半径 0 の勾配だけ）を先に置いて `continue` し、その後ろに 2 腕を残した。滑らかな層の呼び出しも `KSN_PROF_BEGIN/END(blend)` の中 |
-| 5.2.5 | `ksn_render.c` / `ksn_render.h` **`group_pixel` の名前の衝突** | どちらも同名・同目的の関数を別の署名で持っていた（こちらは `const uint8_t *coverage`、先方は `uint8_t coverage` の値）。git は別々の挿入として見るが、そのまま並べると二重定義 | **先方の実装を残し**（`KSN_TILE_MEASURE` の out-of-line 属性と、`kasane-tile.md` が objdump で数える名前はそちら）、こちらの 2 つの呼び出し側をその署名へ寄せた（`coverage` を `scratch->text[dest]` で渡す）。合成の中身は 1 命令も変わらない（同じ `sample`・`premultiply_over`・同じ provenance ビット）。切替 `g_ksn_row_coverage` の 2 腕は両方生きている |
+| 5.2.5 | `ksn_render.c` / `ksn_render.h` **`group_pixel` の名前の衝突** | どちらも同名・同目的の関数を別の署名で持っていた（こちらは `const uint8_t *coverage`、先方は `uint8_t coverage` の値）。git は別々の挿入として見るが、そのまま並べると二重定義 | **先方の実装を残し**（`KSN_TILE_MEASURE` の out-of-line 属性と、`kasane-group.md` が objdump で数える名前はそちら）、こちらの 2 つの呼び出し側をその署名へ寄せた（`coverage` を `scratch->text[dest]` で渡す）。合成の中身は 1 命令も変わらない（同じ `sample`・`premultiply_over`・同じ provenance ビット）。切替 `g_ksn_row_coverage` の 2 腕は両方生きている |
 | 5.2.6 | `docs/README.md`（`a3e6426`） | 索引の 1 行が同じ位置 | 両方の行を残した（pet の行、その下に tile の行） |
 
 `ksn_render.c` の関数ブロックでは、git が共通文脈として残した `}` が
@@ -463,6 +463,6 @@ predicate arm covers=1744560` → **`1569456`** になる（runs 腕の `runs=25
    挿し直しのあとの仕事。
 3. **`ksn_blend_pie.c` のカーネルは厳密な `/255` を再現する**。粗いアーム
    （`g_ksn_scale256=1`）を既定にするなら、カーネル側も粗い版に揃える必要がある
-   （`kasane-alpha256.md` の注記のまま。この統合では既定を動かしていないので未処理）。
+   （`kasane-blend.md` の注記のまま。この統合では既定を動かしていないので未処理）。
 4. **`run_group_tile.sh` は run.sh に結線していない**（前段からの持ち越し。
    sanitizer が回るセッションの仕事）。

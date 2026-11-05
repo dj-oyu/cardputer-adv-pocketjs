@@ -1,6 +1,6 @@
 #ifndef KSN_SHIKI_BENCH_H
 #define KSN_SHIKI_BENCH_H
-/* Paired workloads for the PIE prototype (docs/kasane/shiki-pie.md sec.6):
+/* Paired workloads for the PIE prototype (docs/kasane/shiki-jit.md sec.24.5):
  * each pair is the same drawing written once with v1.3's scalar data
  * instructions and once with the prototype's vector / batch instructions.
  * The host test (tools/kasane_contract/test_shiki_vec.c) proves each pair

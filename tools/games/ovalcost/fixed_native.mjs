@@ -1,4 +1,4 @@
-// "What if pose() were native, in fixed point?" (docs/apps/derby-trig-cull.md
+// "What if pose() were native, in fixed point?" (docs/apps/derby-camera-history.md
 // section 9): the bend's pose() in C integer arithmetic, reproduced exactly
 // in JS (BigInt where C would use int64_t), against Math.cos/sin, over every
 // bend pose the panning frames make (trig_cull.mjs). Nothing here runs on the

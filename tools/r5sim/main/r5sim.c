@@ -1,4 +1,4 @@
-// STRESS's turns on the chip, for QEMU (docs/vm/r5-icache.md). The setup is
+// STRESS's turns on the chip, for QEMU (docs/vm/turn-icache.md sec.1). The setup is
 // tools/test_stress_app.c's -- real QuickJS, real pocket.kasane, a pocket.fs
 // stub -- but frame() is called as app_tick calls it (JS_Call, then the job
 // queue drained, then pocket_kasane_end_turn), not through JS_Eval, so the
@@ -30,7 +30,7 @@ void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(
 // STRESS uses none of them, and their real sources pull in the DERBY runner
 // and PIE kernels, so they are stubbed as tools/test_keytest_app.c does. On
 // the device each per-turn call is a flag test of a few instructions.
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 esp_err_t pocket_proc_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
 void pocket_proc_end_turn(void){}
 bool pocket_proc_has_frame(void){return false;}

@@ -1,4 +1,4 @@
-// Stage 2 of docs/apps/derby-trig-cull.md: ways to spend less on pose() and
+// Stage 2 of docs/apps/derby-camera-history.md: ways to spend less on pose() and
 // its cos/sin in DERBY WATCH's panning frames, compared on the host. Counts
 // (pose calls by where they land, distinct g, table reads) are exact for the
 // scripted frames; microseconds are those counts x the device's unit prices

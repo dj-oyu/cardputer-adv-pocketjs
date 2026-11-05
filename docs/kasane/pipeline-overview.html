@@ -95,7 +95,7 @@ ol.steps li{margin:4px 0}
 </div>
 <div class="card">
 <h3>Shiki の「複数の並び」は、画素ではなく記録</h3>
-<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_proc.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つを 1 本にする案は見送った（<a href="#plan">§10</a>）。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
+<p>1 面につき<b>表示中（committed）</b>と<b>組み立て中（candidate）</b>の 2 つ。どれも 10 B の線分を並べた配列で、画素は持たない。組み立て中を表示に切り替えるのは、LCD への転送が成功した後（<code>pocket_shiki_frame.c:670</code>）。c4d7a6c の直前までは、もう 1 つ、draw 1 回の下書きの<b>作業領域（workspace、1,024 本分）</b>があった。残る 2 つを 1 本にする案は見送った（<a href="#plan">§10</a>）。画素を持つのは image の面の帯のキャッシュ 3,840 B だけ。</p>
 </div>
 </div>
 
@@ -112,7 +112,7 @@ ol.steps li{margin:4px 0}
     <rect x="325" y="8" width="130" height="40" rx="6" fill="var(--js)" fill-opacity=".35" stroke="var(--js)"/>
     <text x="390" y="25">JS frame()</text><text x="390" y="41" font-weight="400" class="muted mono" font-size="10">QuickJS</text>
     <rect x="480" y="8" width="130" height="40" rx="6" fill="var(--shiki)" fill-opacity=".3" stroke="var(--shiki)"/>
-    <text x="545" y="25">Shiki</text><text x="545" y="41" font-weight="400" class="muted mono" font-size="10">pocket_proc.c</text>
+    <text x="545" y="25">Shiki</text><text x="545" y="41" font-weight="400" class="muted mono" font-size="10">pocket_shiki_frame.c</text>
     <rect x="635" y="8" width="130" height="40" rx="6" fill="var(--kasane)" fill-opacity=".3" stroke="var(--kasane)"/>
     <text x="700" y="25">Kasane</text><text x="700" y="41" font-weight="400" class="muted mono" font-size="10">ksn_render.c</text>
     <rect x="790" y="8" width="135" height="40" rx="6" fill="var(--board)" fill-opacity=".3" stroke="var(--board)"/>
@@ -142,7 +142,7 @@ ol.steps li{margin:4px 0}
     <line x1="397" y1="206" x2="541" y2="206" stroke="var(--fg)" marker-end="url(#ar)"/>
     <text x="403" y="200">④ beginFrame(色)</text>
     <text x="551" y="210">candidate.count = 0</text>
-    <text x="551" y="224" class="muted mono" font-size="10">pocket_proc.c:261–283</text>
+    <text x="551" y="224" class="muted mono" font-size="10">pocket_shiki_frame.c:261–283</text>
     <!-- 5 draw -->
     <line x1="397" y1="256" x2="541" y2="256" stroke="var(--fg)" marker-end="url(#ar)"/>
     <text x="403" y="250">⑤ draw / drawMany × N</text>
@@ -150,13 +150,13 @@ ol.steps li{margin:4px 0}
     <text x="558" y="272">VM が candidate の末尾へ直接</text>
     <text x="558" y="287">線分を書く（上限 = 残りの本数）</text>
     <text x="558" y="302">→ 最後まで出せたら count を進める</text>
-    <text x="558" y="318" class="muted mono" font-size="10">pocket_proc.c:473–527</text>
+    <text x="558" y="318" class="muted mono" font-size="10">pocket_shiki_frame.c:473–527</text>
     <!-- 6 commit -->
     <line x1="397" y1="352" x2="541" y2="352" stroke="var(--fg)" marker-end="url(#ar)"/>
     <text x="403" y="346">⑥ commit()</text>
     <text x="558" y="358">帯ごとの hash → 傷んだ帯</text>
     <text x="558" y="373">pending = true（まだ表示ではない）</text>
-    <text x="558" y="388" class="muted mono" font-size="10">pocket_proc.c:316–339</text>
+    <text x="558" y="388" class="muted mono" font-size="10">pocket_shiki_frame.c:316–339</text>
     <line x1="545" y1="396" x2="696" y2="396" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
     <text x="604" y="410" font-size="10.5">帯の傷を Kasane へ</text>
     <text x="604" y="423" class="muted mono" font-size="10">pocket_kasane.c:2941</text>
@@ -174,7 +174,7 @@ ol.steps li{margin:4px 0}
     <text x="463" y="545" font-weight="600">⑨ 傷んだ帯ごとに（最大 17 回） ksn_render.c:2096</text>
     <line x1="693" y1="566" x2="549" y2="566" stroke="var(--fg)" marker-end="url(#ar)"/>
     <text x="575" y="560" font-size="10.5">image の画素を読む</text>
-    <text x="463" y="580" class="muted mono" font-size="10">image_span pocket_proc.c:586</text>
+    <text x="463" y="580" class="muted mono" font-size="10">image_span pocket_shiki_frame.c:586</text>
     <text x="713" y="590" font-size="11">合成（背景 → APP → SYSTEM）</text>
     <line x1="707" y1="616" x2="853" y2="616" stroke="var(--fg)" marker-end="url(#ar)"/>
     <text x="713" y="610" font-size="11">kasane_send → board_present</text>
@@ -187,7 +187,7 @@ ol.steps li{margin:4px 0}
     <line x1="700" y1="690" x2="549" y2="690" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
     <text x="463" y="684" font-size="10.5">⑩ 最後の帯の DMA を待ち ACK</text>
     <text x="463" y="704" font-size="10.5">→ candidate と committed を入れ替え</text>
-    <text x="463" y="718" class="muted mono" font-size="10">ksn_render.c:2389–2394、pocket_proc.c:670</text>
+    <text x="463" y="718" class="muted mono" font-size="10">ksn_render.c:2389–2394、pocket_shiki_frame.c:670</text>
     <!-- 11 wait -->
     <line x1="235" y1="736" x2="84" y2="736" stroke="var(--fg)" stroke-dasharray="5 3" marker-end="url(#ar)"/>
     <text x="90" y="752" font-size="10.5">⑪ 33 ms の残りを待つ（main.c:1401、app_session.h:103）</text>
@@ -198,7 +198,7 @@ ol.steps li{margin:4px 0}
 <li><b>入口。</b><code>ui_task</code> は実行中なら <code>tick_run(have,&amp;stroke)</code>（<code>main.c:1196</code>）、その中でキーをボタンの bit にして <code>app_tick(buttons)</code>（<code>main.c:964</code>）。押した後に離した状態のターンをもう 1 回回す（<code>main.c:966</code>）。</li>
 <li><b>前置き。</b><code>app_tick</code> の頭で、前のターンから残った提出物があれば先に転送だけして帰る（<code>app_session.c:2248–2264</code>）。続けて <code>run_pumps()</code> が各面の <code>pocket_*_pump()</code> を決まった順に呼ぶ（<code>app_session.c:2140–2181</code>）。ここで解決した Promise は、この後の <code>frame()</code> から見える。</li>
 <li><b>JS。</b><code>dispatch_guest()</code> → <code>pocketjs_guest_frame()</code>（<code>app_session.c:2195–2200</code>）。DERBY なら <code>derby_scene.js:144</code> の <code>SK.beginFrame(4)</code> から <code>derby_scene.js:176</code> の <code>SK.commit()</code> までが 1 フレームの Shiki の描画。Kasane のノード（文字・矩形）は <code>patch</code> / <code>replace</code> で別に提出する。</li>
-<li><b>後始末。</b><code>end_guest_turn()</code>（<code>app_session.c:2188</code>）が <code>pocket_proc_end_turn()</code>（<code>pocket_proc.c:562</code>）を呼び、組み立て中のフレームを閉じる。<code>frame()</code> が VM に途中で止められた（park）ときだけは閉じずに次のターンへ持ち越す。</li>
+<li><b>後始末。</b><code>end_guest_turn()</code>（<code>app_session.c:2188</code>）が <code>pocket_proc_end_turn()</code>（<code>pocket_shiki_frame.c:562</code>）を呼び、組み立て中のフレームを閉じる。<code>frame()</code> が VM に途中で止められた（park）ときだけは閉じずに次のターンへ持ち越す。</li>
 <li><b>転送。</b><code>present_frame()</code>（<code>app_session.c:2481</code>）が表示ポート（作業台の帯 <code>kasane_strip</code>、送り口 <code>kasane_send</code>、240×135、8 行）を組んで Kasane に渡す（<code>app_session.c:2507–2509</code>）。Kasane は傷んだ帯だけを上から順に合成して送り、最後の DMA を待ってから「表示された」と記録する。</li>
 <li><b>待ち。</b>JS アプリの表示周期は 33 ms（<code>VM_DISPLAY_PERIOD_MS</code>、<code>app_session.h:103</code>）。使った時間を引いた残りを待つ（<code>main.c:1401</code>）。</li>
 </ol>
@@ -213,7 +213,7 @@ ol.steps li{margin:4px 0}
 <div class="card">
 <h3>絵を覚えているのは LCD の側</h3>
 <p>パネル（ST7789）は自分の表示用メモリ（GRAM）を持ち、書かれた画素を送られ直すまで表示し続ける。だから<b>変わった帯だけ送れば足りる</b>。番地の窓を開く命令は CASET／RASET／RAMWR（<code>board.c:478–482</code>）で、可視の 240×135 は x=40、y=53 から始まる窓（パネルのメモリの方が大きい）。</p>
-<p>ただし <b>MISO が配線されていないので GRAM は読めない</b>（<code>board.c:357–361</code>）。「いま画面に何が出ているか」は、ソフトの側の記録（Kasane の確定済みのコマンドと、Shiki の committed）でしか分からない。転送に失敗した帯は、記録から描き直す（修復、<code>pocket_proc.c:677–688</code>）。<code>board_capture</code> は byte swap の前の作業台を写すので、画面の正しさの証拠にはならない。</p>
+<p>ただし <b>MISO が配線されていないので GRAM は読めない</b>（<code>board.c:357–361</code>）。「いま画面に何が出ているか」は、ソフトの側の記録（Kasane の確定済みのコマンドと、Shiki の committed）でしか分からない。転送に失敗した帯は、記録から描き直す（修復、<code>pocket_shiki_frame.c:677–688</code>）。<code>board_capture</code> は byte swap の前の作業台を写すので、画面の正しさの証拠にはならない。</p>
 </div>
 </div>
 <p class="note">クラウドの言葉に置くと、LCD は「PUT はできるが GET ができない」オブジェクトストア。正本は手元の状態（説明）で、ストアには差分の帯を上書きしていく。</p>
@@ -242,7 +242,7 @@ ol.steps li{margin:4px 0}
   <text x="20" y="214" font-size="11" class="muted">帯 9・10・11 だけ傷んだ例:</text>
   <text x="20" y="230" font-size="11" class="muted mono">bytes=11520（3 × 3,840）</text>
   <text x="20" y="246" font-size="11" class="muted mono">bands=3 band_runs=1</text>
-  <text x="20" y="262" font-size="11" class="muted">（hello の実測と同じ形、kasane-text-damage.md）</text>
+  <text x="20" y="262" font-size="11" class="muted">（hello の実測と同じ形、kasane-text.md）</text>
 
   <!-- buffers -->
   <text x="400" y="20" font-size="12" font-weight="600">RAM に常駐する画素は 2 本だけ</text>
@@ -353,7 +353,7 @@ ol.steps li{margin:4px 0}
   <g font-size="12">
     <rect x="20" y="250" width="520" height="40" rx="6" fill="var(--host)" fill-opacity=".25" stroke="var(--host)"/>
     <text x="32" y="268" font-weight="600">① 下地: 背景色で塗る、または Shiki の背景（backdrop）</text>
-    <text x="32" y="284" font-size="10.5" class="muted mono">fill565 ksn_render.c:2108／load_backdrop :2102 → pocket_proc.c:651</text>
+    <text x="32" y="284" font-size="10.5" class="muted mono">fill565 ksn_render.c:2108／load_backdrop :2102 → pocket_shiki_frame.c:651</text>
     <rect x="20" y="196" width="520" height="46" rx="6" fill="var(--kasane)" fill-opacity=".28" stroke="var(--kasane)"/>
     <text x="32" y="214" font-weight="600">② APP の層: コマンド最大 80 個を順に（rect・文字・グラデーション・image）</text>
     <text x="32" y="232" font-size="10.5" class="muted">Shiki の image ノードもここ。DERBY は全画面 240×135 の image（derby_scene.js:29）</text>
@@ -389,11 +389,11 @@ ol.steps li{margin:4px 0}
 <div class="grid2">
 <div class="card">
 <h3>Shiki が下地になる場合（backdrop）</h3>
-<p>面 0 を <code>resource()</code> で image にしていないアプリでは、Shiki のフレームが帯の下地そのもの。<code>pocket_proc_backdrop()</code>（<code>pocket_proc.c:651–660</code>）が帯を背景色で塗り、その帯にかかる線分を描く。この形の <code>commit()</code> は <code>pocket_kasane_proc_publish()</code> で<b>画面全体</b>を傷にする（<code>pocket_kasane.c:2924</code>）。帯ごとの hash による絞り込みは使わない。</p>
+<p>面 0 を <code>resource()</code> で image にしていないアプリでは、Shiki のフレームが帯の下地そのもの。<code>pocket_proc_backdrop()</code>（<code>pocket_shiki_frame.c:651–660</code>）が帯を背景色で塗り、その帯にかかる線分を描く。この形の <code>commit()</code> は <code>pocket_kasane_proc_publish()</code> で<b>画面全体</b>を傷にする（<code>pocket_kasane.c:2924</code>）。帯ごとの hash による絞り込みは使わない。</p>
 </div>
 <div class="card">
 <h3>Shiki が image になる場合（DERBY）</h3>
-<p><code>SK.resource({maxSegments: 768})</code>（<code>derby_view.js:9</code>）で面 0 が image の資源になり（<code>pocket_kasane.c:1086</code>）、シーンの <code>tx.image({resource: res, bounds: [0,0,240,135]})</code>（<code>derby_scene.js:29</code>）が ② の APP の層に入る。合成はその image を 32 画素ずつ読む（<code>image_span</code>、<code>pocket_proc.c:586</code>）。<code>commit()</code> は帯の hash で傷を絞る（<code>pocket_kasane.c:2941</code>）。</p>
+<p><code>SK.resource({maxSegments: 768})</code>（<code>derby_view.js:9</code>）で面 0 が image の資源になり（<code>pocket_kasane.c:1086</code>）、シーンの <code>tx.image({resource: res, bounds: [0,0,240,135]})</code>（<code>derby_scene.js:29</code>）が ② の APP の層に入る。合成はその image を 32 画素ずつ読む（<code>image_span</code>、<code>pocket_shiki_frame.c:586</code>）。<code>commit()</code> は帯の hash で傷を絞る（<code>pocket_kasane.c:2941</code>）。</p>
 </div>
 </div>
 
@@ -401,11 +401,11 @@ ol.steps li{margin:4px 0}
 <h3>線分（segment）とフレーム</h3>
 <div class="grid2">
 <div class="card">
-<p><code>ksn_proc_segment</code> = <code>{int16 x0, y0, x1, y1; uint16 color}</code> = <b>10 B</b>（<code>ksn_procedural.h:16</code>）。1 画素幅の直線（Bresenham）。両端が同じなら 1 点。座標は −480〜720 まで許す。模様の線（<code>LINE_PATTERN</code>）は 2 つ分を使う（<code>ksn_procedural.h:17–31</code>）。</p>
-<p>フレーム <code>ksn_proc_frame</code> = 見出し 6 B（<code>count</code>、<code>raster_steps</code>、<code>ready</code>、<code>ext</code>）+ 線分の配列（<code>ksn_procedural.h:36–42</code>）。上限は 1,024 本（<code>KSN_PROC_SEGMENTS</code>）で 10,246 B。面ごとに <code>maxSegments</code>（1〜1,024）で短く取れる（<code>pocket_proc.c:62–81</code>）。DERBY は 768 本で 6 + 7,680 = <b>7,686 B</b> <span class="e">計算</span>。DERBY の 1 フレームの最多は 583 本 <span class="m">host 実測</span>（<code>apps/derby/README.md:234</code>）。</p>
+<p><code>ksn_proc_segment</code> = <code>{int16 x0, y0, x1, y1; uint16 color}</code> = <b>10 B</b>（<code>ksn_shiki_frame.h:16</code>）。1 画素幅の直線（Bresenham）。両端が同じなら 1 点。座標は −480〜720 まで許す。模様の線（<code>LINE_PATTERN</code>）は 2 つ分を使う（<code>ksn_shiki_frame.h:17–31</code>）。</p>
+<p>フレーム <code>ksn_proc_frame</code> = 見出し 6 B（<code>count</code>、<code>raster_steps</code>、<code>ready</code>、<code>ext</code>）+ 線分の配列（<code>ksn_shiki_frame.h:36–42</code>）。上限は 1,024 本（<code>KSN_PROC_SEGMENTS</code>）で 10,246 B。面ごとに <code>maxSegments</code>（1〜1,024）で短く取れる（<code>pocket_shiki_frame.c:62–81</code>）。DERBY は 768 本で 6 + 7,680 = <b>7,686 B</b> <span class="e">計算</span>。DERBY の 1 フレームの最多は 583 本 <span class="m">host 実測</span>（<code>apps/derby/README.md:234</code>）。</p>
 </div>
 <div class="card">
-<p>ラスタ化は帯ごと（<code>ksn_proc_render_band</code>、<code>ksn_procedural.c:129–168</code>）。<b>帯 1 本を描くたびに、フレームの線分を最初から最後まで全部見る</b>。縦の範囲が帯にかからない線分は 1 回の比較で飛ばし（1 線分 × 1 帯で 50 ns <span class="m">実測</span>、derby-background-cost.md §2）、かかる線分は、帯の上端までの Bresenham の位相を割り算で復元してから（<code>:142–158</code>）帯の中だけ画素を置く。17 帯なら 17 回なめる。</p>
+<p>ラスタ化は帯ごと（<code>ksn_proc_render_band</code>、<code>ksn_shiki_frame.c:129–168</code>）。<b>帯 1 本を描くたびに、フレームの線分を最初から最後まで全部見る</b>。縦の範囲が帯にかからない線分は 1 回の比較で飛ばし（1 線分 × 1 帯で 50 ns <span class="m">実測</span>、derby-background-cost.md §2）、かかる線分は、帯の上端までの Bresenham の位相を割り算で復元してから（<code>:142–158</code>）帯の中だけ画素を置く。17 帯なら 17 回なめる。</p>
 <p>線分の順が描く順なので、後の線分が前の線分を上書きする。</p>
 </div>
 </div>
@@ -422,10 +422,10 @@ ol.steps li{margin:4px 0}
     <text x="100" y="97" text-anchor="middle" font-size="10.5" class="muted">= 残りの本数</text>
     <line x1="180" y1="70" x2="606" y2="70" stroke="var(--fg)" marker-end="url(#ar4)"/>
     <text x="392" y="62" text-anchor="middle" font-size="10.5">candidate の末尾へ直接書く（ksn_shiki_draw_index_cap）</text>
-    <text x="392" y="88" text-anchor="middle" font-size="10.5" class="muted mono">tail=&amp;candidate-&gt;segments[count] pocket_proc.c:486–489</text>
+    <text x="392" y="88" text-anchor="middle" font-size="10.5" class="muted mono">tail=&amp;candidate-&gt;segments[count] pocket_shiki_frame.c:486–489</text>
     <line x1="300" y1="96" x2="300" y2="140" stroke="var(--spi)" marker-end="url(#ar4)"/>
     <text x="310" y="122" font-size="10.5" fill="var(--spi)">cap に達した → count を進めず LIMIT_EXCEEDED（書きかけは数に入らない）</text>
-    <text x="310" y="138" font-size="10.5" fill="var(--spi)">ただし building=false なので、このフレームはもう描けない（pocket_proc.c:513–522）</text>
+    <text x="310" y="138" font-size="10.5" fill="var(--spi)">ただし building=false なので、このフレームはもう描けない（pocket_shiki_frame.c:513–522）</text>
     <!-- candidate -->
     <rect x="610" y="30" width="300" height="76" rx="8" fill="var(--shiki)" fill-opacity=".35" stroke="var(--shiki)"/>
     <text x="760" y="52" text-anchor="middle" font-weight="600">candidate（組み立て中）</text>
@@ -436,7 +436,7 @@ ol.steps li{margin:4px 0}
     <text x="770" y="140" font-size="10.5">commit(): 帯の hash、pending</text>
     <rect x="610" y="170" width="300" height="56" rx="8" fill="var(--shiki)" fill-opacity=".35" stroke="var(--shiki)" stroke-width="2"/>
     <text x="760" y="194" text-anchor="middle" font-weight="600">candidate（pending）</text>
-    <text x="760" y="212" text-anchor="middle" font-size="10.5" class="muted">転送中の帯はこれを読む（pocket_proc.c:599、655）</text>
+    <text x="760" y="212" text-anchor="middle" font-size="10.5" class="muted">転送中の帯はこれを読む（pocket_shiki_frame.c:599、655）</text>
     <!-- swap -->
     <line x1="610" y1="198" x2="470" y2="198" stroke="var(--fg)" marker-end="url(#ar4)"/>
     <text x="540" y="190" text-anchor="middle" font-size="10.5">転送が成功</text>
@@ -444,15 +444,15 @@ ol.steps li{margin:4px 0}
     <rect x="210" y="170" width="256" height="56" rx="8" fill="var(--shiki)" fill-opacity=".6" stroke="var(--shiki)"/>
     <text x="338" y="194" text-anchor="middle" font-weight="600" fill="#fff">committed（表示中）</text>
     <text x="338" y="212" text-anchor="middle" font-size="10.5" fill="#fff">maxSegments 本分（DERBY 7,686 B）</text>
-    <text x="210" y="246" font-size="10.5" class="muted mono">pocket_proc.c:662–675。古い committed の領域が次の candidate になる（コピーは無い）</text>
+    <text x="210" y="246" font-size="10.5" class="muted mono">pocket_shiki_frame.c:662–675。古い committed の領域が次の candidate になる（コピーは無い）</text>
     <!-- throw -->
     <rect x="20" y="268" width="890" height="212" rx="8" fill="none" stroke="var(--line)"/>
     <text x="34" y="290" font-weight="600">今の失敗の扱い</text>
-    <text x="34" y="312" font-size="11.5">・frame() が commit の前に投げる → ターンの終わりに building=false（pocket_proc.c:562–569）。</text>
+    <text x="34" y="312" font-size="11.5">・frame() が commit の前に投げる → ターンの終わりに building=false（pocket_shiki_frame.c:562–569）。</text>
     <text x="34" y="330" font-size="11.5">　candidate は commit されず、次の beginFrame が count=0 に戻す。画面は committed のまま（前のフレームが出続ける）。</text>
     <text x="34" y="352" font-size="11.5">・draw がフレームの残りを超える → その draw の線分は数に入らず、building=false と LIMIT_EXCEEDED。</text>
     <text x="34" y="370" font-size="11.5">　後の draw も commit も「beginFrame required」で断られる。</text>
-    <text x="34" y="392" font-size="11.5">・commit 済みで転送待ちの間の beginFrame → BUSY（pocket_proc.c:269–270）。</text>
+    <text x="34" y="392" font-size="11.5">・commit 済みで転送待ちの間の beginFrame → BUSY（pocket_shiki_frame.c:269–270）。</text>
     <text x="34" y="410" font-size="11.5">　転送に失敗（KSN_IO）→ 修復の印。backdrop なら committed で描き直す（:677–688）。</text>
     <text x="34" y="432" font-size="11.5">・VM が frame() を途中で止めて次のターンへ持ち越す（park）間は、candidate を閉じない</text>
     <text x="34" y="450" font-size="11.5">　（end_guest_turn、app_session.c:2188–2191）。</text>
@@ -463,11 +463,11 @@ ol.steps li{margin:4px 0}
 <div class="grid2">
 <div class="card">
 <h3>なくなった 3 つ目: workspace（c4d7a6c まで）</h3>
-<p>直前の 56949dc までは、draw 1 回分を必ず 1,024 本入る下書き（<code>workspace</code>、10,246 B）へ書き、出し終えてから「candidate の残りに入るか」を調べて <code>memcpy</code> していた。入らない draw を「全部か無か」にするための一時置き場で、共用体として image の帯のキャッシュも兼ねていた。c4d7a6c で VM が出してよい本数 <code>cap</code> を持つようになり（<code>ksn_shiki_vm.cap</code>、<code>ksn_shiki.h:147</code>、<code>ksn_shiki_draw_index_cap</code> <code>:206</code>）、下書きと写しが消えた。残ったのは <b>image の面の帯のキャッシュ</b>（<code>image_band_buf</code>、240×8×2 = 3,840 B、<code>pocket_proc.c:123–124</code>）。image の面が選ばれた時に取る（<code>pocket_proc.c:577–584</code>）。経緯は <a href="shiki-jit.md">shiki-jit.md</a> §22。</p>
+<p>直前の 56949dc までは、draw 1 回分を必ず 1,024 本入る下書き（<code>workspace</code>、10,246 B）へ書き、出し終えてから「candidate の残りに入るか」を調べて <code>memcpy</code> していた。入らない draw を「全部か無か」にするための一時置き場で、共用体として image の帯のキャッシュも兼ねていた。c4d7a6c で VM が出してよい本数 <code>cap</code> を持つようになり（<code>ksn_shiki_vm.cap</code>、<code>ksn_shiki.h:147</code>、<code>ksn_shiki_draw_index_cap</code> <code>:206</code>）、下書きと写しが消えた。残ったのは <b>image の面の帯のキャッシュ</b>（<code>image_band_buf</code>、240×8×2 = 3,840 B、<code>pocket_shiki_frame.c:123–124</code>）。image の面が選ばれた時に取る（<code>pocket_shiki_frame.c:577–584</code>）。経緯は <a href="shiki-jit.md">shiki-jit.md</a> §22。</p>
 </div>
 <div class="card">
 <h3>帯の hash（どの帯が変わったか）</h3>
-<p><code>commit()</code> で <code>band_signature()</code>（<code>pocket_proc.c:215–239</code>）が、17 本の帯それぞれについて、その帯にかかる線分の<b>生のバイト</b>を順に FNV-1a で混ぜ、線分の左右の範囲も記録する。<code>pocket_proc_band_damage()</code>（<code>:240–260</code>）が committed の hash と比べ、違う帯だけを傷にし、列は 2 つのフレームの範囲の和。背景色が変わったか、まだ committed が無ければ全帯。帯の画素は「背景色と、その帯にかかる線分の並び」だけで決まるので、hash が同じなら描かずに済む。</p>
+<p><code>commit()</code> で <code>band_signature()</code>（<code>pocket_shiki_frame.c:215–239</code>）が、17 本の帯それぞれについて、その帯にかかる線分の<b>生のバイト</b>を順に FNV-1a で混ぜ、線分の左右の範囲も記録する。<code>pocket_proc_band_damage()</code>（<code>:240–260</code>）が committed の hash と比べ、違う帯だけを傷にし、列は 2 つのフレームの範囲の和。背景色が変わったか、まだ committed が無ければ全帯。帯の画素は「背景色と、その帯にかかる線分の並び」だけで決まるので、hash が同じなら描かずに済む。</p>
 <p class="note">別に <code>frame_damage()</code>（<code>:184–214</code>）が 2 つのフレームの全線分の外接矩形を出す。帯の hash が使えないときの予備（<code>pocket_kasane.c:2943–2944</code>）。</p>
 </div>
 </div>
@@ -477,15 +477,15 @@ ol.steps li{margin:4px 0}
 <div class="card">
 <table>
 <tr><th>#</th><th>何が</th><th>どこへ</th><th>大きさ</th><th>コード</th></tr>
-<tr><td>1–2</td><td>VM / JIT が線分を出す（c4d7a6c から下書きと写しは無い）</td><td>candidate の末尾</td><td class="num">10 B × 本</td><td><code>pocket_proc.c:489–504、523</code></td></tr>
-<tr><td>3</td><td>帯の初めに背景色で塗り、線分を全部なめて画素を置く</td><td>image の帯のキャッシュ <code>image_band_buf</code></td><td class="num">3,840 B／帯</td><td><code>pocket_proc.c:610–634</code>、<code>ksn_procedural.c:129</code></td></tr>
-<tr><td>4</td><td>32 画素ずつ写す（＋不透明度 255）</td><td>Kasane の span の作業域</td><td class="num">64 B／回</td><td><code>pocket_proc.c:636–637</code>、<code>ksn_render.c:141–146</code></td></tr>
+<tr><td>1–2</td><td>VM / JIT が線分を出す（c4d7a6c から下書きと写しは無い）</td><td>candidate の末尾</td><td class="num">10 B × 本</td><td><code>pocket_shiki_frame.c:489–504、523</code></td></tr>
+<tr><td>3</td><td>帯の初めに背景色で塗り、線分を全部なめて画素を置く</td><td>image の帯のキャッシュ <code>image_band_buf</code></td><td class="num">3,840 B／帯</td><td><code>pocket_shiki_frame.c:610–634</code>、<code>ksn_shiki_frame.c:129</code></td></tr>
+<tr><td>4</td><td>32 画素ずつ写す（＋不透明度 255）</td><td>Kasane の span の作業域</td><td class="num">64 B／回</td><td><code>pocket_shiki_frame.c:636–637</code>、<code>ksn_render.c:141–146</code></td></tr>
 <tr><td>5</td><td>帯の下地を背景色で塗った上に、image を書き込む（不透明なら上書き）</td><td><code>shared</code></td><td class="num">3,840 B／帯</td><td><code>ksn_render.c:2108</code>、合成 <code>:2114–</code></td></tr>
 <tr><td>6</td><td>HUD の文字・矩形、テキスト欄・ペット・印を重ねる</td><td><code>shared</code></td><td class="num">—</td><td><code>app_session.c:604</code>、<code>board.c:438–443</code></td></tr>
 <tr><td>7</td><td>byte swap しながら写す</td><td><code>tx_buf</code></td><td class="num">3,840 B／帯</td><td><code>board.c:506</code></td></tr>
 <tr><td>8</td><td>DMA</td><td>LCD の GRAM</td><td class="num">3,840 B／帯</td><td><code>board.c:532</code></td></tr>
 </table>
-<p class="note">1–2 は線分（記録）の書き込み、3〜8 は画素。3 の帯のキャッシュは、拡大縮小した image が同じ行を何度も読むときに線分をなめ直さないためのもの（<code>pocket_proc.c:126–127</code>）。DERBY は 1:1 なので、帯ごとに 1 回なめて 1 回使う。5 の背景色の塗りは、不透明な image が帯を全部覆う場合でも走るように読める（<code>ksn_render.c:2104–2110</code> に image の不透明さを見る条件が無い）<span class="u">実機の計測では未確認</span>。</p>
+<p class="note">1–2 は線分（記録）の書き込み、3〜8 は画素。3 の帯のキャッシュは、拡大縮小した image が同じ行を何度も読むときに線分をなめ直さないためのもの（<code>pocket_shiki_frame.c:126–127</code>）。DERBY は 1:1 なので、帯ごとに 1 回なめて 1 回使う。5 の背景色の塗りは、不透明な image が帯を全部覆う場合でも走るように読める（<code>ksn_render.c:2104–2110</code> に image の不透明さを見る条件が無い）<span class="u">実機の計測では未確認</span>。</p>
 </div>
 
 <h2 id="mem">8. Shiki の区画のメモリ（DERBY）</h2>
@@ -515,10 +515,10 @@ ol.steps li{margin:4px 0}
   <text x="855" y="72" text-anchor="middle" font-size="10" class="muted">上から、量は変動</text>
   <text x="740" y="106" text-anchor="middle" font-size="10.5" class="muted">持ち主の山の上 約 22.8 KB（推定）を空きと JIT で分ける</text>
   <text x="325" y="106" text-anchor="middle" font-size="10" class="muted">VM 372</text>
-  <text x="20" y="136" font-size="11.5">・帯のキャッシュは resource() の時（derby_view.js:9 → pocket_proc_image_mode_at、pocket_proc.c:577–584）、</text>
-  <text x="20" y="154" font-size="11.5">　A・B は最初の beginFrame の時（derby_view.js:10 → buffers()、pocket_proc.c:151–158）に取る。並びはコードの順からの推定。</text>
+  <text x="20" y="136" font-size="11.5">・帯のキャッシュは resource() の時（derby_view.js:9 → pocket_proc_image_mode_at、pocket_shiki_frame.c:577–584）、</text>
+  <text x="20" y="154" font-size="11.5">　A・B は最初の beginFrame の時（derby_view.js:10 → buffers()、pocket_shiki_frame.c:151–158）に取る。並びはコードの順からの推定。</text>
   <text x="20" y="172" font-size="11.5">・転送が成功するたびにポインタを入れ替えるので、A と B のどちらが candidate かはフレームごとに交代する。</text>
-  <text x="20" y="190" font-size="11.5">・VM の状態は最初の draw で取る（pocket_proc.c:481）。式・窓・データ領域は登録で取り、場面の切り替えで返す。</text>
+  <text x="20" y="190" font-size="11.5">・VM の状態は最初の draw で取る（pocket_shiki_frame.c:481）。式・窓・データ領域は登録で取り、場面の切り替えで返す。</text>
   <text x="20" y="208" font-size="11.5">・「約 14.9 KB」は変更前の host の山 40,914 B（実測）から、変更前の固定分 25,992 B（計算）を引いた差。個別には測っていない。</text>
   <text x="20" y="226" font-size="11.5">・持ち主の山は今 約 34.5 KB（= 14.9 KB + 固定分 19,588 B、推定）。空きと JIT の境は実行中に動く。</text>
 </svg>
@@ -533,9 +533,9 @@ ol.steps li{margin:4px 0}
 <div class="card scroll">
 <table>
 <tr><th>中身</th><th class="num">大きさ（B）</th><th>根拠</th><th>種類</th></tr>
-<tr><td>フレーム × 2（candidate・committed）</td><td class="num">2 × 7,686（区画では 4 B 単位で 7,688）</td><td><code>offsetof(ksn_proc_frame,segments)</code> 6 + 768 × <code>sizeof(ksn_proc_segment)</code> 10（<code>pocket_proc.c:78–80</code>）</td><td><span class="e">構造体から計算</span></td></tr>
-<tr><td>image の帯のキャッシュ</td><td class="num">3,840</td><td>240 × 8 × 2（<code>pocket_proc.c:123–124、577–584</code>）。image の面があるときだけ</td><td><span class="e">計算</span></td></tr>
-<tr><td>（c4d7a6c で廃止）workspace</td><td class="num">10,246（10,248）</td><td><code>sizeof(proc_workspace)==sizeof(ksn_proc_frame)</code>、1,024 本分の下書きと帯のキャッシュの共用体（56949dc の <code>pocket_proc.c:120–125</code>）</td><td><span class="e">計算</span></td></tr>
+<tr><td>フレーム × 2（candidate・committed）</td><td class="num">2 × 7,686（区画では 4 B 単位で 7,688）</td><td><code>offsetof(ksn_proc_frame,segments)</code> 6 + 768 × <code>sizeof(ksn_proc_segment)</code> 10（<code>pocket_shiki_frame.c:78–80</code>）</td><td><span class="e">構造体から計算</span></td></tr>
+<tr><td>image の帯のキャッシュ</td><td class="num">3,840</td><td>240 × 8 × 2（<code>pocket_shiki_frame.c:123–124、577–584</code>）。image の面があるときだけ</td><td><span class="e">計算</span></td></tr>
+<tr><td>（c4d7a6c で廃止）workspace</td><td class="num">10,246（10,248）</td><td><code>sizeof(proc_workspace)==sizeof(ksn_proc_frame)</code>、1,024 本分の下書きと帯のキャッシュの共用体（56949dc の <code>pocket_shiki_frame.c:120–125</code>）</td><td><span class="e">計算</span></td></tr>
 <tr><td>VM の状態 <code>ksn_shiki_vm</code></td><td class="num">372（cap を足す前は 368）</td><td>レジスタ 16 × 4、ループ 8 × 10、ペン・数・<code>cap</code>、<code>vraw</code> 207 B ほか、32 bit の整列で（<code>ksn_shiki.h:134–157</code>）</td><td><span class="e">構造体から計算</span></td></tr>
 <tr><td>式（plan）1 本</td><td class="num">64 + 12 × 命令数</td><td><code>ksn_shiki_plan_bytes</code>（<code>ksn_shiki.h:120</code>）、命令は最大 64（<code>KSN_SHIKI_CODE</code>、<code>:19</code>）で 832 B。handle は 32 まで</td><td><span class="e">構造体から計算</span></td></tr>
 <tr><td>データ領域・点の窓</td><td class="num">宣言しだい</td><td>最大 16（<code>pocket_shiki_api.c:28</code>）、16 B 境界（<code>shiki_heap_aligned</code>）</td><td>—</td></tr>
@@ -572,7 +572,7 @@ ol.steps li{margin:4px 0}
 <ul>
 <li><b>移しは memcpy ではなくバイトの入れ替え。</b>ST7789 は RGB565 を上位バイトから受け取り（リセット時の既定）、CPU は下位バイトから書く。入れ替えはどのみち全画素に要るので、入れ替えながら <code>tx_buf</code> に書けば（<code>g_board_swap_into=1</code>）、移しの手間はほぼ増えない <span class="e">コメントの値: 帯 1 本 約 10 µs</span>。以前はその場で入れ替えてから memcpy していた（7fd965f、遅かった）。</li>
 <li><b>描く先を交互に変えない理由。</b>描画先のポインタを 1 フレームの間持ち続ける呼び出し元が約 8 か所ある（<code>render_rects</code> の <code>display-&gt;strip()</code>、shell・editor・codeedit・tutorial・wifi_ui・workspace・pickmodal）<span class="u">調査の報告、行は未照合</span>。交互にするには、すべてで帯ごとに取り直す改修が要る。</li>
-<li>SPI は 80 MHz。帯 1 本 3,840 B は理論 384 µs、コメントの値で約 440 µs。非同期にした効果は FLOWER で 38.73 → 33.30 ms、fps 24.95 → 28.80 <span class="m">実測、docs/perf/pie-consolidation.md</span>。</li>
+<li>SPI は 80 MHz。帯 1 本 3,840 B は理論 384 µs、コメントの値で約 440 µs。非同期にした効果は FLOWER で 38.73 → 33.30 ms、fps 24.95 → 28.80 <span class="m">実測、docs/perf/pie-opt-plan.md</span>。</li>
 </ul>
 
 <h3>1.N バッファ（輪の中で書き込み先と送信元をずらす）</h3>

@@ -1,8 +1,8 @@
-// Stage 3 of docs/apps/derby-trig-cull.md: what each culling variant
+// Stage 3 of docs/apps/derby-camera-history.md: what each culling variant
 // (variants.mjs) removes from a panning frame of DERBY WATCH's oval, counted
 // on the host (exact for the scripted frames), and the device time that saves
 // (estimates, two ways: the hand-counted body model of trig_cull.mjs, and the
-// device's average ser() body of 1.2-1.5 ms, derby-pan-memory.md section 3).
+// device's average ser() body of 1.2-1.5 ms, derby-camera-history.md section 5).
 // Also the candidates of (c): bodies whose panel span lies inside a nearer
 // body's of the same series.
 //

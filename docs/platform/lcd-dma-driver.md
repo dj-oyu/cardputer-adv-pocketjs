@@ -206,6 +206,8 @@
 
 ## 9. 監査の結果（Fable、2026-11-04、7a1d79e まで）と対応
 
+> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+
 **判断: 凍結は不可。** 直してから再監査する。下は指摘の要約と、この文書での扱い。
 
 | # | 重さ | 指摘 | 扱い |
@@ -409,7 +411,7 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 **1. ハッシュを entry ごとに 1 回（987f395）。** 帯をまたぐたびに entry の 10 B を FNV にかけ直していたのを、entry ごとに murmur3 の混ぜで 32 bit を 1 回作り、帯ごとには回転・xor・奇数の掛け算の 1 段だけにした。§9.10 の点検を同じ 4 アプリで通した（32 bit の衝突 0、下位/上位 16 bit はランダムと同じ率、DERBY の下位 8 bit の偏り 2,718 → 673（ランダムで 720）、飛ばした帯の画素一致）。実機の効果は小さかった: STRESS の `band_signature` 約 1.37 → 1.24 ms（同じバイナリの A/B）。
 
-**2. 二つの歩きを `-O2` で、模様線の無いフレームは欄を直接読む（5535bea）。** `pocket_proc.c` はプロジェクト既定の `-Os` で、entry ごとに `ksn_proc_frame_next` を通っていた。entry を 1 回読むだけの歩きは 0.055 ms（STRESS、約 900 entry）なので、遅さはメモリではなくコード。関数属性で `-O2` にし、模様線の無いフレームは欄を直接読む（模様線のあるフレームは今までどおり `ksn_proc_frame_next`、こちらも `-O2`）。
+**2. 二つの歩きを `-O2` で、模様線の無いフレームは欄を直接読む（5535bea）。** `pocket_shiki_frame.c` はプロジェクト既定の `-Os` で、entry ごとに `ksn_proc_frame_next` を通っていた。entry を 1 回読むだけの歩きは 0.055 ms（STRESS、約 900 entry）なので、遅さはメモリではなくコード。関数属性で `-O2` にし、模様線の無いフレームは欄を直接読む（模様線のあるフレームは今までどおり `ksn_proc_frame_next`、こちらも `-O2`）。
 
 | | 今まで（`-Os`） | 変更後 |
 | --- | --- | --- |
@@ -422,11 +424,11 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 出荷版（5535bea）に計時だけを足した版で確認: STRESS 0.89〜0.96 ms（01c81e2 では 2.74〜2.81）、DERBY のレース 0.42〜0.51 ms（同 0.93〜1.15。模様線のあるフレームの道）、パドック 0.26 ms（同 0.48）。
 
-**読み:** 実機の時間を食っていたのはハッシュの計算量より、サイズ最適化のコードだった（1 だけでは −0.12 ms、2 で −1.2 ms）。`pocket_proc.c` のほかの毎フレームの道（描画の `render_rows` の周り、`image_span`）も同じ `-Os` で走っている。
+**読み:** 実機の時間を食っていたのはハッシュの計算量より、サイズ最適化のコードだった（1 だけでは −0.12 ms、2 で −1.2 ms）。`pocket_shiki_frame.c` のほかの毎フレームの道（描画の `render_rows` の周り、`image_span`）も同じ `-Os` で走っている。
 
 ### 9.12 描画と転送の毎フレームの道を `-O2` に（2026-11-05）
 
-§9.11 の読みどおり、`-Os` のまま毎フレーム走るファイルを `-O2` にした。対象は `text/ksn_font.c`・`ui/kasane/ksn_render.c`・`ui/kasane/ksn_core.c`・`pocket/pocket_kasane.c`・`pocket/pocket_proc.c`（`-ffp-contract=off` 付き。浮動小数の結果を `-Os` 版と同じに保つため、積和の融合を禁じる）。3 つのビルドを実機で比べた（`docs/kasane/logs/o2-render-ab-20261105.txt`。ビルド間の比較なので命令キャッシュの配置で約 15% 揺れる。同じバイナリの A/B ではない）。
+§9.11 の読みどおり、`-Os` のまま毎フレーム走るファイルを `-O2` にした。対象は `text/ksn_font.c`・`ui/kasane/ksn_render.c`・`ui/kasane/ksn_core.c`・`pocket/pocket_kasane.c`・`pocket/pocket_shiki_frame.c`（`-ffp-contract=off` 付き。浮動小数の結果を `-Os` 版と同じに保つため、積和の融合を禁じる）。3 つのビルドを実機で比べた（`docs/kasane/logs/o2-render-ab-20261105.txt`。ビルド間の比較なので命令キャッシュの配置で約 15% 揺れる。同じバイナリの A/B ではない）。
 
 | render_ms（1 フレーム） | A: 今まで（`-Os`） | B: 5 ファイル `-O2` | C: B ＋ `render_group` だけ `-Os` |
 | --- | --- | --- | --- |

@@ -161,7 +161,7 @@ plan の登録: 起動時に 6 本（波・海・空・泡・線）、残りの 
 
 ### 全画素の検証
 
-全フレーム（7,256 フレーム、63,883 draw）で、各 draw を `ksn_proc_plan_run`（`pocket_proc.c` が回す経路）、同じ plan のデバッグ単歩、`ksn_proc_step` の単歩の3通りで実行し、線分・ラスタ歩数・ステップ数・レジスタがビット一致。型付き点列はスカラー・PIE の模型・ディスパッチャの3通りが一致。フレームを plan の線分から一括で、VM の線分から 8 行の帯ごとに描いて全画素一致（235,094,400 画素）。失敗 0。手順は test_proc_megademo_scenes.c（v2.0 で削除。`427b308` の `tools/kasane_contract/test_proc_megademo_scenes.c`） と同じ。
+全フレーム（7,256 フレーム、63,883 draw）で、各 draw を `ksn_proc_plan_run`（`pocket_shiki_frame.c` が回す経路）、同じ plan のデバッグ単歩、`ksn_proc_step` の単歩の3通りで実行し、線分・ラスタ歩数・ステップ数・レジスタがビット一致。型付き点列はスカラー・PIE の模型・ディスパッチャの3通りが一致。フレームを plan の線分から一括で、VM の線分から 8 行の帯ごとに描いて全画素一致（235,094,400 画素）。失敗 0。手順は test_proc_megademo_scenes.c（v2.0 で削除。`427b308` の `tools/kasane_contract/test_proc_megademo_scenes.c`） と同じ。
 
 ## 負荷と上限
 
@@ -206,7 +206,7 @@ plan の登録: 起動時に 6 本（波・海・空・泡・線）、残りの 
 | ゲスト: 評価中の最大（コンパイル） | 126,732 B | 実測（host） |
 | ゲスト: 実行中の最大（GC 後） | 109,160 B | 実測（host） |
 | **評価と実行が通る最小の上限** | **約 135.0 KB（134,419 で失敗、134,996 で通過）、上限 163,840 の 82%** | 実測（host、二分探索） |
-| 参考: MEGADEMO の同じ値 | 123,125 B（75%） | 実測（host、[megademo-limit-scenes.md](../kasane/megademo-limit-scenes.md)） |
+| 参考: MEGADEMO の同じ値 | 123,125 B（75%） | 実測（host、[megademo-limit-scenes.md](../kasane/megademo-limits.md)） |
 | ネイティブ: plan 22 本 | 22 × 872 B = 19,184 B | 計算（i386 の構造体の大きさ） |
 | ネイティブ: サーファーの点列 14 本 | 14 × 211 B = 2,954 B | 計算（`points_bytes(24)`） |
 | ネイティブ: フレーム（面 0 の候補・確定・作業）＋ VM | 3 × 10,246 + 996 = 31,734 B | 計算 |

@@ -1,9 +1,9 @@
-/* pocket.kasane.shiki on the host: real QuickJS, the real pocket_proc.c,
+/* pocket.kasane.shiki on the host: real QuickJS, the real pocket_shiki_frame.c,
  * pocket_shiki_api.c, shiki_heap.c and ksn_shiki.c, with the presenter
  * stubbed. Runs apps/shikitest/shiki_api_test.js (the device's own suite)
  * and fails on any of its checks. run_pocket_shiki_api_qjs.py builds it. */
 #include "quickjs.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_api.h"
 #include "pocket_shiki_api.h"
 #include "shiki_heap.h"

@@ -1,4 +1,4 @@
-// Source patches of DERBY WATCH's panning view for docs/apps/derby-trig-cull.md:
+// Source patches of DERBY WATCH's panning view for docs/apps/derby-camera-history.md:
 // each variant rewrites derby_view.js / derby_pan.js text (exact substrings, so
 // a change in the app fails loudly here). trig_cull.mjs counts them on the
 // host; cull_shots.mjs runs them in the C harness for pixels.

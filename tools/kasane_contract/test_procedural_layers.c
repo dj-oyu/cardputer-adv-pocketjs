@@ -1,7 +1,7 @@
 /* Host-only APP-local multi-surface composition test. Each layer's frame is
  * one dot built here from a segment (the float VM that once wrote it went in
  * Shiki v2.0; the layers only see the finished frame). */
-#include "ksn_procedural_layers.h"
+#include "ksn_shiki_layers.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

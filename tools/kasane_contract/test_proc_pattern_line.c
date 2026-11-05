@@ -6,12 +6,12 @@
  * frame with pattern lines, and the surface's rejection of a broken entry.
  * Built by run.sh with ASan/UBSan and with -O2.
  *
- * The frames are encoded here, in the two-entry form ksn_procedural.h
+ * The frames are encoded here, in the two-entry form ksn_shiki_frame.h
  * documents, with u0 and du already in 8.8 cells: the float VM that used to
  * write them (and its float -> cell conversion, depth chords and step-time
  * rejections) went in Shiki v2.0, whose own LINE_PATTERN writes the same
  * entries and is checked by its own tests. */
-#include "ksn_procedural_surface.h"
+#include "ksn_shiki_surface.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

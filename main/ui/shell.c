@@ -15,7 +15,7 @@
 #include "pocket_kasane.h"
 #include "app_session.h"
 #ifdef KASANE_D2_OVERLAY_PROC_PROBE
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 static bool d2_overlay_fault_injected;
 static bool d2_overlay_retry;
 static int d2_overlay_sends_before_failure=-1;
@@ -1260,7 +1260,7 @@ void shell_draw(const char *error, unsigned phase) {
         // (CLAUDE.md: placement moves this part by up to 15%), which is why the
         // shipped firmware used to spend half its windows on the path it had
         // decided against. That measurement is done and recorded in
-        // docs/perf/pie-consolidation.md 3b (FLOWER: draw 38.73 -> 33.30 ms,
+        // docs/perf/pie-opt-plan.md (pie-consolidation section) 3b (FLOWER: draw 38.73 -> 33.30 ms,
         // fps 24.95 -> 28.80); the queue is what ships, and the flip would only
         // make the picture's cost depend on the second.
 #endif

@@ -187,7 +187,7 @@ menu "Pocket VM (diagnostics)"
         bool "Count the native allocations of the line/grid surfaces (diagnostic)"
         default n
         help
-            main/pocket/shiki_memstat.c: what pocket_proc.c, pocket_grid.c and
+            main/pocket/shiki_memstat.c: what pocket_shiki_frame.c, pocket_grid.c and
             pocket_derby.c allocate, per call site, with the heap block sizes,
             the peak, and the internal heap's free bytes and largest block
             beside each allocation. app_stop() logs "SHIKI_MEM ..." lines.

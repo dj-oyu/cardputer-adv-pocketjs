@@ -1,5 +1,5 @@
 """Replay a STRESS_ALLOC_TRACE (tools/test_stress_app.c) against small-block
-caches, for R3's design (docs/vm/allocator-cost.md).
+caches, for R3's design (docs/vm/r3-small-block-cache.md sec.7).
 
     python3 alloc_sim.py TRACE [--from F] [--to F]
 
