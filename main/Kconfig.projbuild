@@ -134,6 +134,21 @@ menu "Pocket VM (diagnostics)"
             Turn it off to give an app those 8 KiB back. After changing the
             fragment file, run idf.py reconfigure.
 
+    config POCKET_VM_QJS_PGO
+        bool "Compile QuickJS with the profile in tools/pgo/qjs (PGO)"
+        default n
+        help
+            Builds the QuickJS component with -fprofile-use and the .gcda
+            files tools/pgo/train.sh trained on STRESS in QEMU (r5sim), so
+            GCC lays each function's blocks out along the paths the training
+            ran (docs/vm/qjs-pgo.md). Code size stays within ~0.4%.
+
+            Trial: the gain is modelled in QEMU, not yet measured on the
+            device. The profile only fits the GCC that trained it
+            (esp-15.2.0); a stale one is reported by -Wmissing-profile.
+            Build it in a directory of its own with
+            sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n

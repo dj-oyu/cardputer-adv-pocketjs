@@ -7,6 +7,11 @@ cmake_minimum_required(VERSION 3.22)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 project(cardputer_pocketjs)
+# Profile-guided QuickJS (docs/vm/qjs-pgo.md), off by default.
+include("${CMAKE_SOURCE_DIR}/tools/pgo/qjs_pgo.cmake")
+if(CONFIG_POCKET_VM_QJS_PGO)
+    pocket_qjs_pgo(use "${CMAKE_SOURCE_DIR}/tools/pgo/qjs")
+endif()
 add_custom_target(flash_budget ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/check_flash.py" "${CMAKE_BINARY_DIR}/cardputer_pocketjs.bin"
     DEPENDS gen_project_binary VERBATIM)

@@ -40,6 +40,9 @@ Xtensa の GCC はプロファイル無しでは関数内の hot/cold 分割を�
 
 記録は [logs/turn-line-use-20261105.txt](logs/turn-line-use-20261105.txt)。
 
+この後 r5sim は QuickJS を `CONFIG_POCKET_VM_ROM_INTRINSICS` 付きで組むようになった（ファームと同じ目的コード、
+[qjs-pgo.md](qjs-pgo.md) §1.1）。この文書の数字はその前の r5sim（変更後は 1 ターン 1,281 行、使用率 58.1%）。
+
 ## 2. 結果
 
 ### 2.1 全体

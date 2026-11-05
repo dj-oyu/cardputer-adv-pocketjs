@@ -1,0 +1,22 @@
+# The PGO training image (R5SIM_PGO=generate, docs/vm/qjs-pgo.md).
+# - .gcov_info: the records -fprofile-info-section emits, kept in flash between
+#   _gcov_info_start and _gcov_info_end for r5sim.c to walk.
+# - the component's .bss, which holds the 64-bit arc counters
+#   (.bss.__gcov0$<function>, about 220 KB -- more than the DRAM): in QEMU's
+#   PSRAM (tools/r5sim/sdkconfig.pgo_gen.defaults). ldgen takes no wildcard
+#   inside a section name, so the whole .bss goes; only placement changes.
+[sections:gcov_info]
+entries:
+    .gcov_info
+
+[scheme:r5sim_gcov]
+entries:
+    gcov_info -> flash_rodata
+    bss -> extern_ram
+    common -> extern_ram
+
+[mapping:r5sim_gcov]
+archive: libquickjs-ng.a
+entries:
+    * (r5sim_gcov);
+        gcov_info -> flash_rodata KEEP() ALIGN(4) SURROUND(gcov_info)

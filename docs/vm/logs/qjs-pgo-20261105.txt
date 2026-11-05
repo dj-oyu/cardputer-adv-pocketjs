@@ -1,0 +1,66 @@
+# QuickJS PGO (tools/pgo), 2026-11-05. All numbers: QEMU trace of r5sim through the cache model (estimates), STRESS LV1 turns 61..120.
+# tree: claude/vigilant-einstein-capnag after a0c4c2a (+ this change); ESP-IDF v6.0.1, GCC esp-15.2.0_20251204; QEMU -icount shift=2
+# r5sim now builds QuickJS with CONFIG_POCKET_VM_ROM_INTRINSICS=1 (quickjs.c.obj disassembly identical to the firmware's, checked)
+# options: -Os -freorder-blocks-algorithm=stc -fno-reorder-functions, + -fprofile-use for B
+
+## training
+248573 bytes of gcda stream
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+quickjs-ng/dtoa.c.gcda 4836 B
+quickjs-ng/libregexp.c.gcda 7808 B
+quickjs-ng/libunicode.c.gcda 4940 B
+quickjs-ng/quickjs-vm.c.gcda 1460 B
+quickjs-ng/quickjs.c.gcda 228764 B
+
+## A: no profile  (JS_CallInternal 0x00005641 B, flash.text 475320 B)
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+r5sim.elf: 60 turns (from 61), 8-way 32 KiB LRU, own layout
+  total/turn: warm 869  cold 1441  lines 1281 (40.0 KiB)  union over turns 1862 lines (58.2 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             7.80     249     126     285       8.84      1.16
+  interp-helpers         11.95     382     256     444      15.75      2.22
+  object/alloc/GC         5.60     179     110     205       6.50      0.66
+  builtins                6.17     197     176     221      10.28      2.70
+  native boundary         8.32     266     193     276      13.94      2.01
+  libc/other              0.20       6       7       9       2.88      0.07
+  per turn: lines 1274 (39.8 KiB), executed 23679 B (23.1 KiB), use 58.1% (turns 56.2%..60.0%)
+  packed bound: 740 lines (23.1 KiB), i.e. at most 534 lines (16.7 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 17096 B, of which run in another turn 2499 B, run in no turn 14597 B
+  packed model (bytes no turn runs removed; upper bound, see packed_model):
+    layout     geometry lines/turn    warm    cold
+    as built   8-way          1274     856    1429
+    as built   full           1274     897    1383
+    packed     8-way           878      86     886
+    packed     full            878      20     878
+    packed image of the window: 38177 B (37.3 KiB) of code run in some turn
+
+## B: profile  (JS_CallInternal 0x0000567a B, flash.text 477196 B)
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+r5sim.elf: 60 turns (from 61), 8-way 32 KiB LRU, own layout
+  total/turn: warm 826  cold 1400  lines 1245 (38.9 KiB)  union over turns 1819 lines (56.8 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             7.96     255     133     300       9.16      1.28
+  interp-helpers         11.10     355     215     406      14.47      1.82
+  object/alloc/GC         5.43     174     105     201       6.28      0.59
+  builtins                5.89     188     160     208      10.09      2.54
+  native boundary         8.32     266     204     276      14.00      1.79
+  libc/other              0.20       6       8       9       2.84      0.07
+  per turn: lines 1242 (38.8 KiB), executed 23577 B (23.0 KiB), use 59.3% (turns 57.4%..61.3%)
+  packed bound: 737 lines (23.0 KiB), i.e. at most 505 lines (15.8 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 16151 B, of which run in another turn 2472 B, run in no turn 13679 B
+  packed model (bytes no turn runs removed; upper bound, see packed_model):
+    layout     geometry lines/turn    warm    cold
+    as built   8-way          1242     818    1395
+    as built   full           1242     824    1337
+    packed     8-way           852      60     853
+    packed     full            852      20     852
+    packed image of the window: 38133 B (37.2 KiB) of code run in some turn
+
+## executed (flash code), per turn
+A insns 170232 blocks 74584
+B insns 171964 blocks 70809
+
+## firmware (sdkconfig.defaults vs + sdkconfig.qjspgo.defaults), built in this container
+fw_base: .iram0.text=81687 .dram0.data=21893 .dram0.bss=76448 .flash.text=1629820 
+fw_pgo: .iram0.text=81859 .dram0.data=21893 .dram0.bss=76448 .flash.text=1631728 
+fw_pgo: -Wmissing-profile warnings: 0; JS_FreeAtom (IRAM helper) at 403885ac
