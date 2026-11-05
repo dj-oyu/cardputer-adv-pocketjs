@@ -272,7 +272,7 @@ L2cの本体は段3bまで部分実装済み（backlog.md #7）。以下は済�
 
 深いasync再帰の実際の壊れ方（D40が固定した値）: flatで深さ77（1段約1.9KB、ホスト`--profile device`）でヒープが尽き、エラーオブジェクトを作れず理由`null`、巻き戻し中に23段のawait登録が失敗して未処理の拒否が残りexit 2。D42/D43適用後は深さ82・未処理26に変わった（§5.3）。
 
-Stage Aの攻撃で見つかった二重解放（`JS_NewPromiseCapability` の2つ目のresolve関数の確保失敗で解放済み `resolving_funcs[0]` を再解放）は上流由来のバグとしてパッチ修正済み。報告書は `reports/upstream/` に保存（上流へは未送信）。
+Stage Aの攻撃で見つかった二重解放（`JS_NewPromiseCapability` の2つ目のresolve関数の確保失敗で解放済み `resolving_funcs[0]` を再解放）は上流由来のバグとしてパッチ修正済み。報告書は [quickjs-ng-resolving-functions-double-free.md](quickjs-ng-resolving-functions-double-free.md) に保存（パッチは `reports/upstream/`、上流へは未送信）。
 
 ### 4.2 段1・段2: L2cの関所とガード（実測(host)、`8d025ff`/`0020773`/`21c12a4`）
 

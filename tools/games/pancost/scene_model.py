@@ -1,5 +1,5 @@
 """Frame-cost model for a panning DERBY WATCH camera
-(docs/apps/derby-pan-camera-cost.md). Counts what one frame projects and
+(docs/apps/derby-camera-history.md). Counts what one frame projects and
 draws for a fixed camera turned toward the leader, and prices it with unit
 costs measured on the device. This is a calculation, not a device run.
 

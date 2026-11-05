@@ -14,7 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "ksn_procedural.h"   /* ksn_proc_segment, the frame's entry */
+#include "ksn_shiki_frame.h"   /* ksn_proc_segment, the frame's entry */
 
 #define KSN_SHIKI_CODE 64
 #define KSN_SHIKI_REGS 16
@@ -39,7 +39,7 @@ enum {
     /* v2.0 draft (docs/kasane/shiki-v2.md sec.3, 4): a record by number. */
     KSN_SHIKI_LOAD, KSN_SHIKI_STORE, KSN_SHIKI_DRAW_INDEX,
     /* v2.0 draft (shiki-v2.md sec.6, from the prototype of
-     * docs/kasane/shiki-pie.md): 8-lane vector instructions with PIE's
+     * docs/kasane/shiki-jit.md sec.24): 8-lane vector instructions with PIE's
      * semantics, interpreted once per block of 8 records, and batch emitters
      * that draw from a region natively. */
     KSN_SHIKI_VEACH, KSN_SHIKI_VLOAD, KSN_SHIKI_VSTORE, KSN_SHIKI_VSPLAT, KSN_SHIKI_VIOTA,
@@ -143,10 +143,10 @@ typedef struct {
     uint16_t count;                         /* segments emitted by this draw */
     /* The most this draw may emit (<= KSN_SHIKI_SEGMENTS): the room left in
      * the caller's frame, so a draw writes straight into the frame's tail
-     * and one that would not fit stops at LIMIT (pocket_proc.c). */
+     * and one that would not fit stops at LIMIT (pocket_shiki_frame.c). */
     uint16_t cap;
     bool ext;                               /* a LINE_PATTERN chord is among them */
-    /* The prototype's vector state (shiki-pie.md sec.3.1), kept in memory:
+    /* The prototype's vector state (shiki-jit.md sec.24.3), kept in memory:
      * v0..v7 (8 lanes of int16) then the accumulator (8 lanes of 40 bits,
      * sat40), both 16-B aligned inside raw for PIE's 128-bit accesses. The
      * accumulator is int64_t[8] for the C model and QACC's own image
@@ -187,7 +187,7 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
 
 /* Runs one draw: up to KSN_SHIKI_INPUTS inputs (n of them; missing ones are
  * 0, extra ones ignored, sec.4.8.7). Segments go to out[0..vm->count), a
- * LINE_PATTERN chord as two entries in ksn_procedural.h's encoding. The
+ * LINE_PATTERN chord as two entries in ksn_shiki_frame.h's encoding. The
  * vm is fully reset here; its state after the call is sec.4.8.8's. */
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);

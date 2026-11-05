@@ -5,7 +5,7 @@
  *
  * ksn_render.c divides by 255 exactly -- the compiler does it with a magic
  * reciprocal (objdump: l32r + muluh + srli 7) and the lane model with
- * (257*(y+1))>>16 (docs/perf/kasane-blend-pie.md 2.3). The coarse arm replaces
+ * (257*(y+1))>>16 (docs/perf/kasane-blend.md (kasane-blend-pie section) 2.3). The coarse arm replaces
  * each 255-weighted mix with scale256(b) = b + (b>>7) = round(b*256/255) and a
  * plain >>8, which is two instructions fewer per channel and is the shape the
  * eight-lane kernel wants. This model answers the only two questions that

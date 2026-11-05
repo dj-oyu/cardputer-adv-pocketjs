@@ -119,7 +119,7 @@ extern uint32_t g_ksn_image_anchor_builds,g_ksn_image_reject_tests,g_ksn_image_r
  * Off restores the per-pixel rational division. Owner task only; read once
  * per stretched span. */
 extern bool g_ksn_image_stretch_step;
-/* Tile-level work (docs/perf/kasane-tile.md). The group's children are
+/* Tile-level work (docs/perf/kasane-group.md). The group's children are
  * composited into a 64-pixel scratch tile block by block:
  *   g_ksn_tile_pixels -- the block's size, 64 or 16 (survey 3b).
  *   g_ksn_tile_reach  -- exact, default on: a child's loop runs over its own
@@ -181,11 +181,11 @@ extern int g_ksn_row_table;
  * gradient whose from == to), exact, default 1.
  * g_ksn_blend_lut_alpha = the text arm, whose parameter (the coverage-driven
  * effective alpha) is quantized to 16 levels, default 0 because that arm moves
- * pixels; the counts are in docs/perf/kasane-lut.md. Both 0 = the pre-LUT
+ * pixels; the counts are in docs/perf/kasane-blend.md. Both 0 = the pre-LUT
  * reference chain, which is what test_blend_lut.c compares against. */
 extern int g_ksn_blend_lut;
 extern int g_ksn_blend_lut_alpha;
-/* Boundary 3/4 candidate 3c (docs/perf/kasane-group-affine.md): 1 (default)
+/* Boundary 3/4 candidate 3c (docs/perf/kasane-group.md): 1 (default)
  * folds a group whose opacity is 255 and whose children are all opaque into one
  * affine map per group -- out = A*src + B*dst + C with A=255, B=C=0 on every
  * channel, applied as a store -- instead of the isolated premultiplied tile
@@ -205,14 +205,14 @@ extern int g_ksn_group_affine;
  * or not, so the coarse arm touches only the three channels that land in
  * pack565. Both paths live in one binary for a same-binary A/B. The default is
  * the measured arm, not the hoped-for one; tools/pie/models/scale256_model.c and
- * docs/perf/kasane-alpha256.md carry the moved-pixel counts and the objdump. */
+ * docs/perf/kasane-blend.md carry the moved-pixel counts and the objdump. */
 extern int g_ksn_scale256;
 /* Candidate 4a's kernel, the one place where the render path leaves C: 1 = an
  * aligned run of eight pixels of a constant-colour command is handed to
  * `ksn_blend8_pie` (main/ui/kasane/ksn_blend_pie.c) instead of the per-pixel
  * chain; 0 = the chain only. The kernel is exact -- it reproduces blend()'s own
  * expressions, proven over the whole per-channel space and over random multi
- * block runs (test_kernels.py, docs/perf/kasane-blend-pie.md sections 4 and 6) --
+ * block runs (test_kernels.py, docs/perf/kasane-blend.md sections 4 and 6) --
  * so both arms must produce byte identical panels. It is default 1 after a
  * same-binary device A/B showed a render gain. PIE is coprocessor 3, owned by
  * the UI task here. The kernel needs

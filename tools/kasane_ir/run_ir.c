@@ -1,4 +1,4 @@
-/* Runs two programs of the procedural VM (main/ui/kasane/ksn_procedural.c)
+/* Runs two programs of the procedural VM (main/ui/kasane/ksn_shiki_frame.c)
  * on the same inputs and compares everything a draw makes visible: status,
  * segments (ends and colour, in order) and raster steps. Host only.
  *
@@ -11,7 +11,7 @@
  *   I v0 .. v7 one line per input vector (as many as wanted)
  *   END
  * Both run through the reference VM (ksn_proc_begin/run); B also through
- * the registered plan (ksn_proc_plan_prepare/run), which pocket_proc.c uses.
+ * the registered plan (ksn_proc_plan_prepare/run), which pocket_shiki_frame.c uses.
  * Prints one line per case: vectors, mismatches, statuses, executed steps.
  * RUN_IR_DUMP=FILE also writes B's result per vector, one line each:
  * status (1 done, 2 invalid, 3 limit), segments, raster steps, then

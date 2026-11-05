@@ -5,7 +5,7 @@
 ## 結論
 
 - **DERBY WATCH（今のアプリ）の 25 本の plan が、ネイティブの heap で 22,500 → 9,696 B になった**（実測、登録ごとの `PLANSZ` の合計、−12.8 KB）。レース中の空きの最小は 23,056 → 35,580〜36,208 B、ターン内の最小（`mn`）は 14,220 → 25,648〜25,964 B で、どちらも約 +11.5〜12.5 KB（実測）。
-- **首振りカメラの段階 3（30 本、`vm/pan-camera` 55956e9 のアプリ）で、毎レース出ていた `GO LOADSTALL` が消えた。** 基準は 3 レースとも LOADSTALL、新しいファームは 2 回の起動の 6 レースすべて `GO`（実測）。plan が全部載った状態でのターン内の最小は 9,052〜9,068 B（基準は plan が欠けた状態で 7,140 B）。`vm/pan-camera` の docs/apps/derby-pan-memory.mdの受け入れ条件「ターン内の最小 ≥ 11,208 B」には、まだ約 2.2 KB 足りない。
+- **首振りカメラの段階 3（30 本、`vm/pan-camera` 55956e9 のアプリ）で、毎レース出ていた `GO LOADSTALL` が消えた。** 基準は 3 レースとも LOADSTALL、新しいファームは 2 回の起動の 6 レースすべて `GO`（実測）。plan が全部載った状態でのターン内の最小は 9,052〜9,068 B（基準は plan が欠けた状態で 7,140 B）。`vm/pan-camera` の docs/apps/derby-camera-history.mdの受け入れ条件「ターン内の最小 ≥ 11,208 B」には、まだ約 2.2 KB 足りない。
 - fps・JS のターン・帯描画・登録の時間は、測定の揺れの範囲で変わらない（実測、下の表）。
 - 出力はすべての桁で同じ。新しい plan と固定長の plan は同じ関数（`mark_fused` と `run_core`）を通る。host の `tools/kasane_contract/run.sh`（`GAMES_M32=0`）は全部通過し、MEGADEMO・DERBY・BIG WAVE・LCD CATCH の台本も基準と一致した。
 
@@ -24,7 +24,7 @@
 - `_Static_assert(sizeof(ksn_proc_sized_plan)==offsetof(ksn_proc_sized_plan,code))` で後ろに詰め物が無いことを固定し、`ksn_proc_sized_plan_bytes(n)` をちょうどの大きさにした。`KSN_PROC_CODE <= 64` も静的に検査する（融合の印が 64 ビットのため）。
 - `ksn_proc_sized_plan_prepare(plan, capacity, program)` は `program->count <= capacity` を検査し、`capacity` の外には書かない。失敗の経路の `memset` も `capacity` ぶんだけ。
 - 融合の判定（`mark_fused`）と実行（`run_core`）は、2 つの型で同じ関数を使う。挙動の差は、どこに置くか（配置）だけになる。
-- `pocket_proc.c` は `calloc(1, ksn_proc_sized_plan_bytes(count))` で確保する（`count` は 1..64 を先に検査済み）。上限（1..64 命令、レジスタ 16、`REPEAT_REG` 0..255、32 本、step・線分・ラスタ）の検査は、どれも元の場所のまま。
+- `pocket_shiki_frame.c` は `calloc(1, ksn_proc_sized_plan_bytes(count))` で確保する（`count` は 1..64 を先に検査済み）。上限（1..64 命令、レジスタ 16、`REPEAT_REG` 0..255、32 本、step・線分・ラスタ）の検査は、どれも元の場所のまま。
 
 ## 2. plan 1 本の大きさ
 
@@ -105,8 +105,8 @@ MEGADEMO は場面ごとに plan の登録と解除を繰り返すので、`mn` 
 ## 5. 検証
 
 - `tools/kasane_contract/test_proc_sized_plan.c`（新規、`run.sh` に追加。ASan/UBSan と `-O2 -fstrict-aliasing` の 2 通り）: 固定長の plan と比べて、prepare の成否・融合の印・VM の状態・フレームが全桁一致することを確かめる。容量 1・2・63・64 と乱数の n で 4,000 本超（完走 3,700 本）、debug step の有無の両方を回す。1 本ずつ、ちょうどの大きさの `malloc` に置く。拒否の経路（容量 0/65、`count > capacity`、NULL、自分の code の部分範囲からの再 prepare、点列の登録と、再 prepare による解除）も含む。
-- `test_pocket_proc_turn_qjs.c` に `plan_size_contract` を追加した。実際の QuickJS と `pocket_proc.c` で、n = 1/2/3/8/16/32/63/64 の `calloc` の大きさが `ksn_proc_sized_plan_bytes(n)` と一致すること、描画の画素、65 命令の INVALID_ARGUMENT、32 本の churn、33 本目の LIMIT_EXCEEDED を確かめる。既存の OOM の経路（`fail_alloc`）もそのまま通る。
-- 変異（どちらも手で入れて確認し、元に戻した）: `prepare` の `program->count > capacity` の検査を外すと、ASan が `memmove` の heap-buffer-overflow で止まる。`pocket_proc.c` の確保を 1 命令ぶん少なくすると、`run_pocket_proc_limits_qjs.py` が ASan で止まる。
+- `test_pocket_proc_turn_qjs.c` に `plan_size_contract` を追加した。実際の QuickJS と `pocket_shiki_frame.c` で、n = 1/2/3/8/16/32/63/64 の `calloc` の大きさが `ksn_proc_sized_plan_bytes(n)` と一致すること、描画の画素、65 命令の INVALID_ARGUMENT、32 本の churn、33 本目の LIMIT_EXCEEDED を確かめる。既存の OOM の経路（`fail_alloc`）もそのまま通る。
+- 変異（どちらも手で入れて確認し、元に戻した）: `prepare` の `program->count > capacity` の検査を外すと、ASan が `memmove` の heap-buffer-overflow で止まる。`pocket_shiki_frame.c` の確保を 1 命令ぶん少なくすると、`run_pocket_proc_limits_qjs.py` が ASan で止まる。
 - `run.sh`（`GAMES_M32=0`）は全部通過。WSL の git が worktree を読めないため、MEGADEMO の baseline を `.cache/kasane_megademo_app/proc_megademo_baseline.js` に置いた。
 
 ## 6. 確信の低い点

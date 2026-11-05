@@ -1,4 +1,4 @@
-#include "ksn_procedural.h"
+#include "ksn_shiki_frame.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

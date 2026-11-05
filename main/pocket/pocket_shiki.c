@@ -1,6 +1,6 @@
 #include "pocket_shiki.h"
 #include "pocket_api.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "ksn_shiki.h"
 #include "ksn_shiki_bench.h"
 #include "ksn_shiki_jit.h"
@@ -220,7 +220,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
     return true;
 }
 /* After the op rows, the PIE prototype (ksn_shiki_bench.c,
- * docs/kasane/shiki-pie.md sec.6):
+ * docs/kasane/shiki-jit.md sec.24.5):
  *   - the checks: each program drawn on the C model and on PIE, every
  *     observable compared ("same" or the first difference);
  *   - the pairs, each a whole draw, the minimum of seven, with the vector
@@ -468,7 +468,7 @@ static JSValue js_cycles(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return JS_NewUint32(ctx,esp_cpu_get_cycle_count());
 }
 /* drawProfile(on): returns the stage sums so far ({n, parse, lookup, engine,
- * copy} in cycles, pocket_proc.h) and restarts them, on or off. */
+ * copy} in cycles, pocket_shiki_frame.h) and restarts them, on or off. */
 static JSValue js_draw_profile(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     pocket_shiki_draw_prof *p=&pocket_shiki_prof;

@@ -1,6 +1,6 @@
 #include "pocket_derby.h"
 #include "pocket_api.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,7 +22,7 @@
  * frame and on random cameras (tools/games/derby_ser_oracle.js).
  *
  * Why C: the series were 27.6 of the oval bend's 44.25 ms JS turn on the
- * device (docs/apps/derby-native-survey.md). The plans, the VM and the draw
+ * device (docs/apps/derby-camera-history.md). The plans, the VM and the draw
  * path are untouched: each draw goes through pocket_proc_draw_numbers(), the
  * second half of H.draw(). */
 

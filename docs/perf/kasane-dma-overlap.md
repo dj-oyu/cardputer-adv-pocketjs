@@ -17,7 +17,7 @@ DD 診断 hook/列挙と transport fault/counter tests は保存した。
 旧診断 ON 構成、定量的な受入値、過去 artifact は元 #37 の固定 SHA に保存する。
 以下は元候補の履歴であり、この再提案の測定結果ではない。
 
-# Kasaneの既存DMAと次band描画の重ね合わせ
+## Kasaneの既存DMAと次band描画の重ね合わせ
 
 ## 対象と合流点
 
@@ -119,3 +119,12 @@ PR #111 の head `13e5d3e`（既定 OFF）と、同じソースで既定だけ�
 - 単独 boot・1 回ずつの比較なので、15% 未満の差は主張しない（命令キャッシュの配置差）。send の 5 ms はそれを大きく超える。
 
 この記録を根拠に、同じ PR #111 で既定を ON にした（`main/CMakeLists.txt`）。
+
+## 残りの候補（未測定）（旧 display-transport-candidates.md）
+
+> 吸収した旧文書: `display-transport-candidates.md`（#37 由来の分離候補 A/B と M5GFX 比較）。A（単一 TX payload）は上の DMA 重ね合わせとして出荷済み（現在の転送バッファの構成は `docs/platform/lcd-dma-driver.md` §9）。ここには B と比較材料だけを残す。実機の時間は**どれも未測定**で、下の数はホストのモデル出力。
+
+- **B: 狭い矩形の window 継続（未採用）。** 16 画素アラインの狭い帯（既存の閾値）で、CASET/RASET を毎帯送り直さず、同じ x/幅が続く限り RAMWR を継続し、window を panel 下端まで伸ばして保持する。コマンド・転送/制御の失敗・capture 範囲・完了したフレームで無効化する。モデルで 32 列幅 × 全 17 帯（最終 7 行を含む）の CASET/RASET/RAMWR コマンドは **51 → 3**、制御 SPI 呼び出しは **85 → 5**、画素 payload は 8,640 B で不変（**ホストのモデル観測であり、実機の時間ではない**）。window 境界の保持に 4 B の `.bss` を足す。
+- **単一 TX payload の代償。** TX を 1 本にすると、ネイティブ UI の「前のストリップの送信中に次をコピーする」重ね合わせは失われる（Kasane の submit 経路は先に回収するので影響なし）。ネイティブ UI のスループットへの影響は未測定。静的な -3,840 B（board オブジェクトの `.bss`、リンク全体や空きヒープの実測ではない）は guest の空きの増加を意味しない。
+- **M5GFX との比較（参照用、依存ではない）。** 検査した commit `a8ebd7bdaae2e9bdc2f3c69c25b83a84d819af72`: `Panel_LCD` の window キャッシュは変わらないアドレスレジスタの再送を避ける（RAM コマンドは毎回送る）、`Bus_SPI` の pixel 経路は DMA 用の flip バッファへ変換する。後者はコピーと重ね合わせの取引を示す例で、生きたネイティブ scratch を寿命の保証なしに DMA へ渡す根拠にはならない。
+- **採用前に要るもの。** 実機でのネイティブ UI タイミング、pixel/capture の確認、DMA OFF/ON の空きヒープ・最大連続ブロック。MISO 未配線のため、ホストの panel oracle と `board_capture` は glass への到達を保証しない。

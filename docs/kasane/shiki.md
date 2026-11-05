@@ -45,7 +45,7 @@
 
 | 名前空間 | 入口 | capability と `limits` | 実装 |
 | --- | --- | --- | --- |
-| `pocket.kasane.procedural` | `register`・`unregister`・`beginFrame`・`draw`・`commit`・`resource`・`createSurface` | **専用の capability なし**（`display.kasane` の名前空間に同居）。**上限は `limits` に出ていない** | `main/pocket/pocket_proc.c` |
+| `pocket.kasane.procedural` | `register`・`unregister`・`beginFrame`・`draw`・`commit`・`resource`・`createSurface` | **専用の capability なし**（`display.kasane` の名前空間に同居）。**上限は `limits` に出ていない** | `main/pocket/pocket_shiki_frame.c` |
 | `pocket.kasane.grid` | `register`・`registration`・`registerResize`・`registerResizeSource`・`run`・`profile`・`measure`・`resource`・`explain` | 同上（capability なし、`limits` なし） | `main/pocket/pocket_grid.c` |
 | グローバル `gridFold` | `fold`・`index`・`view`（初回使用時に JS の前段を読む） | — | 同上 |
 | `pocket.shapes` | `project`・`fill`・`outline` | `kasane.shapes`（manifest で宣言したアプリだけ）。`maxPoints` 1024・`maxPolygonPoints` 256・`maxHoles` 6 | `main/pocket/pocket_shape.c`、[shapes.md](../api/shapes.md) |
@@ -106,18 +106,18 @@
 ### 2.6 アプリの使い方の実態
 
 - 登録はどのアプリも**1 フレームに 1 本、空きヒープを見てから**行う: DERBY の `load()`（空き 18 KB 未満なら待つ、`apps/derby/derby_view.js`）、MEGADEMO の `prefetch()`（`LOAD[2]` の門、`apps/kasane/megademo_set.js`）、BIG WAVE の `pump()`（`apps/bigwave/big_wave.js`）。同じ仕組みを各アプリが自前で書いている。
-- 毎フレーム `beginFrame` → `draw` を何度も → `commit`。draw の回数は DERBY 15〜26・BIG WAVE 16・MEGADEMO 7 回/フレーム（[derby-native-survey.md](../apps/derby-native-survey.md)、[derby-pan-memory.md](../apps/derby-pan-memory.md)、[derby-finish-fx.md](../apps/derby-finish-fx.md)）。
+- 毎フレーム `beginFrame` → `draw` を何度も → `commit`。draw の回数は DERBY 15〜26・BIG WAVE 16・MEGADEMO 7 回/フレーム（[derby-camera-history.md](../apps/derby-camera-history.md)、[derby-camera-history.md](../apps/derby-camera-history.md)、[derby-finish-fx.md](../apps/derby-finish-fx.md)）。
 - 引数は登録時に固定。変えるには `unregister` → `register`。
 
 ## 3. 棚卸しで見えた問題
 
-1. **JS とネイティブの往復が費用の大半。** draw 1 回の固定費は約 100〜115 µs（実測、[derby-background-cost.md](derby-background-cost.md)）で、VM の 1 ステップ 0.45 µs の約 230 倍。式がデータの列を読めないので、項目ごとに JS で計算して draw を呼ぶ形になる（DERBY でこの固定費だけで 1.5〜3 ms/フレーム、推定）。JS で 1 点を投影すると 42 µs、入力の配列が 23 µs（実測、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）。`pocket.derby.ser()` の native 化が効いたのは、「列を 1 回の呼び出しで回す」をアプリ専用に作ったから。**メモリアクセス（データ領域を式から読む）は、これを汎用にする入口になる。**
+1. **JS とネイティブの往復が費用の大半。** draw 1 回の固定費は約 100〜115 µs（実測、[derby-background-cost.md](derby-background-cost.md)）で、VM の 1 ステップ 0.45 µs の約 230 倍。式がデータの列を読めないので、項目ごとに JS で計算して draw を呼ぶ形になる（DERBY でこの固定費だけで 1.5〜3 ms/フレーム、推定）。JS で 1 点を投影すると 42 µs、入力の配列が 23 µs（実測、[derby-camera-history.md](../apps/derby-camera-history.md)）。`pocket.derby.ser()` の native 化が効いたのは、「列を 1 回の呼び出しで回す」をアプリ専用に作ったから。**メモリアクセス（データ領域を式から読む）は、これを汎用にする入口になる。**
 2. **表で済む値を毎回計算している。** `SIN` を引数約 201 超で呼ぶと 7〜9 倍遅かった（実測、[derby-background-cost.md](derby-background-cost.md)。現在は 2π で折り返す修正済み、`bd1d829`）。BIG WAVE は除算が無いので `1/d` を級数で進めている（誤差 最大 3.1 px、[big-wave.md](../apps/big-wave.md)）。表を命令に焼き込むと 64 命令に当たって式を分け、draw がさらに増える（[derby-finish-fx.md](../apps/derby-finish-fx.md)）。
 3. **式の渡し方が 4 通り、原本の書き方が 3 通り**（`@plan` の JS、MEGADEMO の文字列テンプレート、手書きの文字列・配列）。
 4. **自作アプリは重い方式（A・B）しか使えない。** C・D はファームのビルド時に表を作る。実機のエディタで書くアプリには、ゲストに命令を持たせない経路が無い。
 5. **登録の待ち行列とヒープの門を各アプリが書いている**（§2.6）。
 6. **上限が `limits` に出ていない。** `procedural` と `grid` は専用の capability を持たず、§2.3 の値はアプリが feature-test で知れない（CLAUDE.md の「`limits` に出す値はコードで実際に強制している値だけ」の対象になっていない）。`shapes`・`derby.series` は出している。
-7. **アプリ名がフレームワークの中にある。** `pocket_proc.c` の `draw_run()` が `"derby.runner"` を名前で比べる特別経路（`POCKET_DERBY_RUNNER_AFFINE`、既定 OFF）。`pocket.derby` も DERBY 専用の面。
+7. **アプリ名がフレームワークの中にある。** `pocket_shiki_frame.c` の `draw_run()` が `"derby.runner"` を名前で比べる特別経路（`POCKET_DERBY_RUNNER_AFFINE`、既定 OFF）。`pocket.derby` も DERBY 専用の面。
 8. **入力 8 個・引数 8 個の壁**で、値を詰めるか式を分けている。
 9. **JS と Shiki エンジンで意味が少しずれる**（ループ回数が整数でないとき、JS は切り上げて回り、エンジンは draw ごと失敗する。`/` は定数でだけ、2 の冪以外は厳密でない。[js-to-ir.md](js-to-ir.md) §5.2）。
 10. **線の式と格子の式で、登録・実行・資源の API の形が違う**（`draw`＋`commit` と `run(handle, buffers, params)`＋`resource(handle)`、`explain`・`profile` は格子だけ）。
@@ -126,7 +126,7 @@
 
 ### 4.1 今の確保（コードで確認）
 
-ゲストの 160 KiB は QuickJS の確保量を数えて止める**上限値**（`JS_SetMemoryLimit`、`main/app_session.c` の `gc.heap_limit`）で、専用の区画ではない。Shiki の native 側も同じシステムヒープから `malloc`/`calloc` で取る（`pocket_proc.c`、`pocket_grid.c`）。ゲストの GC が作る穴と Shiki の大きなブロックが、同じヒープの中で混ざる。
+ゲストの 160 KiB は QuickJS の確保量を数えて止める**上限値**（`JS_SetMemoryLimit`、`main/app_session.c` の `gc.heap_limit`）で、専用の区画ではない。Shiki の native 側も同じシステムヒープから `malloc`/`calloc` で取る（`pocket_shiki_frame.c`、`pocket_grid.c`）。ゲストの GC が作る穴と Shiki の大きなブロックが、同じヒープの中で混ざる。
 
 | もの | 大きさ | 取る時 |
 | --- | --- | --- |
@@ -165,7 +165,7 @@
 
 **決定（2026-10-31、ユーザー）: 既定の予算は 48 KiB（49,152 B）。** 実測の最大 41,916 B（BIG WAVE のタイトル）に約 7 KB（17%）の余裕。アプリの開始時の 64 KiB の連続ブロックに入り、約 16 KB が残る。仕様 §9.2。
 
-`CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_proc.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ [logs/shiki-memstat-20261031.txt](logs/shiki-memstat-20261031.txt)。
+`CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_shiki_frame.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ [logs/shiki-memstat-20261031.txt](logs/shiki-memstat-20261031.txt)。
 
 | アプリ（何をしたか） | native 側の最大 | 内訳（ブロックの大きさ） | 最大の時の空き／最大の連続ブロック |
 | --- | ---: | --- | --- |
@@ -203,7 +203,7 @@
 
 **セッションの終了の順番**: ゲストを先に壊し（ここで `free_func` が呼ばれ切る）、Shiki の区画をその後に丸ごと捨てる。CLAUDE.md の「ゲストのコールバックを保持するモジュールはゲストより先に reset」とは逆向きの順序になるので、実装時に `app_stop()` へ明記する。
 
-**効き目（見込み）**: `memcpy` 自体は数百 B で小さい。大きいのは JS 側で配列を作る費用（入力の配列 23 µs、配列の読み 2.75 µs／要素、実測、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）が消えることと、データ領域を式から読めれば 1 回の draw で列を回せて draw の回数が減ること（§3 の 1）。
+**効き目（見込み）**: `memcpy` 自体は数百 B で小さい。大きいのは JS 側で配列を作る費用（入力の配列 23 µs、配列の読み 2.75 µs／要素、実測、[derby-camera-history.md](../apps/derby-camera-history.md)）が消えることと、データ領域を式から読めれば 1 回の draw で列を回せて draw の回数が減ること（§3 の 1）。
 
 **確かめること**: 外部 ArrayBuffer が `JS_SetMemoryLimit` の計数に入らないこと、`transfer()`・`structuredClone` 相当で外部 ArrayBuffer がどう扱われるか（コピーか、detach だけか）、ガベージコレクタが `free_func` を呼ぶ時期。いずれも host の試験で先に見る。
 
@@ -214,7 +214,7 @@
 ### 5.1 理由
 
 - **命令の取り出しが重い（1 ステップ約 108 サイクル）のは、次に解く壁が見えただけ**（ユーザーの判断）。データ領域で列を 1 回の draw で回し、本体を PIE に下ろせば、残るのは演算になる。その時点で整数の方が速い。
-- **PIE は整数しか持たない。** float の式を PIE へ暗黙に下ろす案は、丸めと途中の非有限値の意味論が違うので棄却していた（[d3-path-float-decision.md](d3-path-float-decision.md)。`0.4999 + 0.0002` が float では x=1、Q14 では x=0）。全部が固定小数なら、すべての式が最初から明示的に型付けされ、この棄却理由が消える。**この決定で D3 の「PIE は明示的に型付けした Q14 点列だけ」は、Shiki の全体へ広がる。**
+- **PIE は整数しか持たない。** float の式を PIE へ暗黙に下ろす案は、丸めと途中の非有限値の意味論が違うので棄却していた（旧 d3-path-float-decision.md、リポジトリ履歴。`0.4999 + 0.0002` が float では x=1、Q14 では x=0）。全部が固定小数なら、すべての式が最初から明示的に型付けされ、この棄却理由が消える。**この決定で D3 の「PIE は明示的に型付けした Q14 点列だけ」は、Shiki の全体へ広がる。**
 - **host と実機が整数で一致する。** 今は実機の `sinf`（newlib）と積和の縮約（`MADD.S`）が host の float32 と 1 ulp も違わないかを見ていない（[js-to-ir.md](js-to-ir.md) §5.5）。しかも実機の画素は読み戻せない（`board_capture` は転送前）。整数なら host の全画素ハッシュがそのまま実機の答えになる。
 - 1 ステップごとの `isfinite` の検査が要らない（代わりに桁あふれの規則を決める）。データ領域が int16 なら float32 の半分。
 
@@ -443,7 +443,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 仕様 §9 の実装。コミット `16e8a88`（式の大きさ）、`e644e40`（ヒープと API）。
 
 - **式は命令の数だけの大きさ**: 以前は 1 本あたり固定で約 1 KB（64 命令の配列と表）。`loop_end` と `level` を命令の 12 B の構造体の空き 2 B に移し、命令を可変長の末尾にした（ヘッダ + 12 B × 命令の数）。予算 48 KiB に BIG WAVE の 22 本が入るため。
-- **ヒープ**（`main/pocket/shiki_heap.c`）: manifest に `kasane.shiki` を挙げたアプリの開始時、ゲストを作る前に連続した区画を 1 つ取り（既定 48 KiB、manifest の `shiki_bytes` で変えられる）、固定長の表（128 件）で切り分ける（2026-11-03 まで ESP-IDF の `multi_heap`。置き換えの理由は [shiki-jit.md](shiki-jit.md) §21）。取れなければアプリを起動しない。そのセッションの `pocket_proc.c` の確保（フレーム・作業領域・VM・式・点）はすべて区画から。ゲストを壊した後に、区画が空なら返す。空でない間（presenter がまだ面を放さない）は閉じかけにして、最後の解放で返す。`kasane.shiki` を挙げないアプリは区画を持たず、確保は今までどおりシステムのヒープ。
+- **ヒープ**（`main/pocket/shiki_heap.c`）: manifest に `kasane.shiki` を挙げたアプリの開始時、ゲストを作る前に連続した区画を 1 つ取り（既定 48 KiB、manifest の `shiki_bytes` で変えられる）、固定長の表（128 件）で切り分ける（2026-11-03 まで ESP-IDF の `multi_heap`。置き換えの理由は [shiki-jit.md](shiki-jit.md) §21）。取れなければアプリを起動しない。そのセッションの `pocket_shiki_frame.c` の確保（フレーム・作業領域・VM・式・点）はすべて区画から。ゲストを壊した後に、区画が空なら返す。空でない間（presenter がまだ面を放さない）は閉じかけにして、最後の解放で返す。`kasane.shiki` を挙げないアプリは区画を持たず、確保は今までどおりシステムのヒープ。
 - **JS API**（`main/pocket/pocket_shiki_api.c`）: `register`（バイト列か組み込みの名前、引数、`options.data`）、`unregister`、`draw`、`heap()`、`data()`、`release()`、capability `kasane.shiki`（`supported`、区画があれば `available`、§9.1 の `limits`）。Shiki の式は手続き型の slot・handle・フレームを共有する slot の種類で、手続き型の呼び出しからは見えない。`beginFrame`・`commit`・`resource`・`createSurface` は手続き型の関数そのもの、`grid` は今の `pocket.kasane.grid`。組み込みの式の表はまだ空（DERBY の移行で埋める）。`grid` の確保はまだ区画の外。
 - **窓**: 外部メモリの ArrayBuffer の上の型付き配列。Shiki が窓と ArrayBuffer の両方を強く持ち、同一性は窓で比べる。`release` と `app_stop()` の reset（ゲストを壊す前）で detach → 参照を捨てる → 区画へ返す。解放済みの窓は detach されているので `CLOSED` で見分ける。
 - **`transfer` の門**（`components/quickjs-ng/quickjs-ng/quickjs.c` の `js_array_buffer_transfer`）: `free_func` が `js_array_buffer_free` でない ArrayBuffer は、長さに関わらず `TypeError`。`detached` の検査の直後、長さ 0 の分岐の前。
@@ -454,7 +454,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 ### 5.16 仕様 v1.4: データ領域を欄ごとの面だけに（2026-11-01、ユーザー決定）
 
 - **決定**: データ領域の並びを欄ごとの面（SoA、欄 `c`・レコード `j` を `c · S + j`、`S` はレコードの数を 8 の倍数に切り上げた値）だけにし、v1.3 のレコードごとの並び（AoS、`j · k_rec + c`）を廃止する。草案は仕様の冒頭の版の行のとおり。
-- **理由**: PIE の試作の実測（[shiki-pie.md](shiki-pie.md) §8）で、面の並びが遅かった行は無かった（スカラーの `FETCH` と `EMIT` は差なし、ベクトル・PIE は 3.3% 速い）。AoS が PIE の速い道に乗るのは 2 欄の読み（`VUNZIP`）だけで、書き込みと 3 欄以上は C のレーンのループに落ちる。面の並びなら `k_rec` によらず整列したアクセス 1 回。v1.3 のデータ領域を使うアプリは自前の試験（`apps/shikitest`）だけで、DERBY の移行（段階 3）の前の今が一番安い。
+- **理由**: PIE の試作の実測（[shiki-jit.md](shiki-jit.md) §24.6）で、面の並びが遅かった行は無かった（スカラーの `FETCH` と `EMIT` は差なし、ベクトル・PIE は 3.3% 速い）。AoS が PIE の速い道に乗るのは 2 欄の読み（`VUNZIP`）だけで、書き込みと 3 欄以上は C のレーンのループに落ちる。面の並びなら `k_rec` によらず整列したアクセス 1 回。v1.3 のデータ領域を使うアプリは自前の試験（`apps/shikitest`）だけで、DERBY の移行（段階 3）の前の今が一番安い。
 - **v1.3 の AoS の利点と、その扱い**: 詰め物が要らない → 1 領域あたり最大 7 レコード × `k_rec` × 要素の大きさ（i32・8 欄で 224 B）で、48 KiB の区画には小さい。JS で 1 レコードが連続して書ける → `shiki.fields(窓)` で欄ごとの view を出す（要るときだけ作る。窓ごとに常に持つと DERBY のゲストのヒープ（余裕 約 5 KB）を使う）。触る範囲が 1 区間 → 意味は同じで、面ごとの区間になるだけ。AoS の利点を理由に AoS を残す場面は、この機体では見つからなかった（キャッシュミスが無いので局所性は効かない）。
 - **変えないもの**: バイト列（版 `1`）、命令の意味、`@shiki` の書き方（`for (const [x, y] of pts)` も `put` も `table[i]` も同じ命令になる）。番地の計算はエンジンの中だけ。
 
@@ -463,7 +463,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 - **SLOW の独立レビュー**（草案 `598ae56`、重大 1・中 5・軽微 6）と反映:
   - 重大 R1: 詰め物の意味が §5.1（読んでも影響させない）と §5.4 の 6（読み書きしない）で食い違い、窓から観測できるのに検証の外だった。→ **観測で定義**した: 詰め物の値は結果に影響せず、draw の前後で変わらない（読む・同じ値を書き戻すのは可。PIE のマスクの旧値の書き戻しを許すため）。`N` 以降のレコードと書かない欄も同じ。`N = R` でも `R` が 8 の倍数でなければマスクが要る（§8.4）。検証は、実行器が詰め物を決まった値で埋め、変わっていれば結果の行に ` PADDING` を足す（§10.1）。**「不変」に決めた**（2026-11-01 ユーザー決定。別の用途の可能性は議論中）。
   - 中: §10.1 の行の 4 番目を要素の数 `n` からレコードの数 `R` に変え、v1.3 の行（`k_rec ≥ 2`）が黙って通らないようにした（M1）。`records` は丸めない整数、`length` のプロパティがあれば値によらず拒む（M2）。領域が区画から取る量 `k_rec · S · 要素の大きさ`（M3）。`S` を 8 の倍数にする理由に「ブロックのアクセスが面の外へ出ない」を足した（M4）。`fields()` の誤りを別の行に（M5）。
-  - 軽微: §5.4 の 6 のカーソルを `cur` に改名、§3 の「欄の数」、§5.4 の 5 の言い回し、shiki-pie.md §3.3 に v1.4 の決定の注記、生成器に `R` が 8 の倍数でない領域。**実装の注記の 1 件（`R = 65,535` で `S = 65,536` が 16 ビットに入らない）は、実装に実際にあった誤り**（`ksn_shiki_bound` の stride を `uint16_t` にしていた）で、`uint32_t` に直した。
+  - 軽微: §5.4 の 6 のカーソルを `cur` に改名、§3 の「欄の数」、§5.4 の 5 の言い回し、shiki-jit.md §24.4 に v1.4 の決定の注記、生成器に `R` が 8 の倍数でない領域。**実装の注記の 1 件（`R = 65,535` で `S = 65,536` が 16 ビットに入らない）は、実装に実際にあった誤り**（`ksn_shiki_bound` の stride を `uint16_t` にしていた）で、`uint32_t` に直した。
 - **実装**（エンジンと道具）: `ksn_shiki_region` はレコードの数 `records` を持ち、メモリは `k_rec · S` 要素（`ksn_shiki_stride`・`ksn_shiki_region_elements`）。`FETCH`・`PUT`・`LOOKUP`・ベクトルの `VLOAD`・`VSTORE`・`EMIT_*` は面の番地だけを読む。試作の AoS の経路（`VUNZIP`、領域の表の bit 1）は消した。参照実装（`shiki_ref.mjs`）は詰め物を持たない面（`S = R`）で同じ番地の式を使う。`shiki_run.c` は詰め物を 15036 で埋めて実行後に確かめる。`shiki.data({type, q, records, record})`・`shiki.fields(窓)`（`pocket_shiki_api.c`）。`shikiDebug.run` の領域の値も欄ごと（`pocket_shiki.c`）。
 - **確認**（host）: `test_shiki_ref.mjs` 39/39（v1.3 の並びで中身を書いていた 2 件と「レコードに割り切れない要素の数」の 1 件を v1.4 の形に直した）、`shiki_diff.mjs` 2 万件（`--data` も 3 万件）で C と参照が一致し ` PADDING` 無し、`test_shiki_data_compile.mjs` PASS（`shiki_fix.mjs` の番地を面に）、`test_shiki_vec.c` 92 件（面の `PUT` と詰め物、`LOOKUP` の端、結果の行）、JS API の host 試験 39 件（窓の長さ、`fields()`、詰め物が変わらない、v1.3 の形の拒否）。
 - **確認**（実機、`f505b0e`、2026-11-01）: JS API の自己試験 40/40（`SA END pass=40 fail=0`、host の 39 件に capability の 1 件）。データ領域の差分試験 600/600（`shiki_device.mjs --data`、各ケースの結果の行＝領域の中身を欄ごとに含む、が host のエンジンと参照に一致。[logs/shiki-device-20261101-v1.4-data.txt](logs/shiki-device-20261101-v1.4-data.txt)）。PIE の試作の照合 10/10（`VOUT` のシフトを 0〜32 にした後の shift32 を含む）、時間は affine128 のスカラー 751 µs・ベクトル C 249 µs・ベクトル PIE 169 µs、lines100 のスカラー 298 µs・`EMIT_LINES` 50 µs（[logs/shiki-pie-20261101-f505b0e.txt](logs/shiki-pie-20261101-f505b0e.txt)。`f3ec673` の SoA の行と ±4% で、命令キャッシュの揺れの内側）。
@@ -474,7 +474,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 
 - **主張役の候補**: A 領域に有効レコード数を添える、B `EMIT_*` のバッチ定数（`w0`・`w1`・`bits`・色・周期）を領域から読む（入力 8 本を使い切っている `crowd` の壁）、C `LOOKUP` 表に `g` と折り返しの旗を添えて登録時に命令を埋める、D JS だけが使う付随値を詰め物に置いてゲスト heap を節約、E エンジンが還元の結果を書き戻す。詰め物は `R` が 8 の倍数なら 0 個なので、主張役自身が A・B を「面の前の 8 要素のヘッダ」（保証された場所、領域あたり 16〜32 B）に移した。
 - **反論と結論**（主張役も同意）:
-  - A・B は仕様を変えずに書ける: 1 レコード・8 欄の `i32` 領域と `EACH`＋`FETCH aux=8` で、32 ビットの値 8 個が 3 ステップでレジスタに入る。費用は区画 256 B（`S = 8` で 7/8 が詰め物。SoA の弱点として認める）と式の領域 1 個。座標（`i16`）と定数（`i32`）はどのみち別の領域になるので、同じ領域にヘッダを添える利点は無い。ヘッダは番地の式・§10.1・参照実装・`fields()` を全部変える。領域の上限 4 が足りなくなる DERBY の式は挙げられなかった。→ ヘッダは採らない。慣用句として shiki-pie.md §3.2 に記録し、`crowd` の案 E 版で入力経由と比べる（未測定。推定は 3 ステップ 約 170 サイクル 対 `SET` 6 個 約 340 サイクル）。
+  - A・B は仕様を変えずに書ける: 1 レコード・8 欄の `i32` 領域と `EACH`＋`FETCH aux=8` で、32 ビットの値 8 個が 3 ステップでレジスタに入る。費用は区画 256 B（`S = 8` で 7/8 が詰め物。SoA の弱点として認める）と式の領域 1 個。座標（`i16`）と定数（`i32`）はどのみち別の領域になるので、同じ領域にヘッダを添える利点は無い。ヘッダは番地の式・§10.1・参照実装・`fields()` を全部変える。領域の上限 4 が足りなくなる DERBY の式は挙げられなかった。→ ヘッダは採らない。慣用句として shiki-jit.md §24.3 に記録し、`crowd` の案 E 版で入力経由と比べる（未測定。推定は 3 ステップ 約 170 サイクル 対 `SET` 6 個 約 340 サイクル）。
   - C は「登録後は命令が変わらない」（§6.1）を壊す → 撤回。
   - E は「draw で変わらない」に反する。横方向の還元は、書き手が宣言した出力の領域へ `VSTORE` で書く（v2） → 撤回。
   - D は今の文言で許されるが、置ける数が 0〜7 個で変わり、`fields()` に見えず、`S` の式に依存する → 仕様 §5.1 に「アプリのデータの置き場としても推奨しない」を足した。

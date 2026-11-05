@@ -1,6 +1,6 @@
 # DERBY WATCH: `ser()` を C に写す（S1b = N2 + N12）
 
-2026-10-01、ブランチ `vm/ser-native`（`vm/main` fac3552 から）。[derby-native-survey.md](derby-native-survey.md) のシナリオ S1b を実装する。目標は楕円コーナーの首振り WIDE 2 を 20 fps 以上にすること（今 実測 16.1 fps、MID）。**画素と結果は変えない。**
+2026-10-01、ブランチ `vm/ser-native`（`vm/main` fac3552 から）。[derby-camera-history.md](derby-camera-history.md) のシナリオ S1b を実装する。目標は楕円コーナーの首振り WIDE 2 を 20 fps 以上にすること（今 実測 16.1 fps、MID）。**画素と結果は変えない。**
 
 **結論（実測）: 楕円コーナーの首振り WIDE 2 は MID 15.9 → 24.6 fps（JS 44.11 → 22.00 ms）、HEAVY 16.0 → 24.4 fps。w=−3 でも 13.3 → 23.0 fps（MID）。** 着順・時計・種・デモ・R 再生・オッズ・保存と全画素ハッシュは vm/main fac3552 と全行一致（host）、JS の `ser()` と C の `draw` の入力はビット単位で一致（host の oracle、0 件の不一致）。ゲストの最大は 138.4〜138.6 KB → 133.2〜133.3 KB（実機 MID）、評価の余裕は 22,477 → 30,638 B（実機）。 §1〜§7 は実装の前に書いた設計で、§7 の数値は推定。試験の方法は §8、結果は §9 以降（実測と推定を書き分ける）。
 
@@ -44,7 +44,7 @@ pocket.derby.ser(h, w, s, g0, L, a, b)
 
 ## 4. 既存の `draw` の経路への接続
 
-`pocket_proc.c` の `draw_impl` を 2 つに分ける: 入力を読む前半（配列 / 数値引数）と、`float` の入力 8 個で VM を回して候補のフレームに足す後半。native 用に `pocket_proc_draw_numbers(ctx, handle, const double *in, n)` を足す。中身は JS の `H.draw(h, [...])` と同じ順の検査:
+`pocket_shiki_frame.c` の `draw_impl` を 2 つに分ける: 入力を読む前半（配列 / 数値引数）と、`float` の入力 8 個で VM を回して候補のフレームに足す後半。native 用に `pocket_proc_draw_numbers(ctx, handle, const double *in, n)` を足す。中身は JS の `H.draw(h, [...])` と同じ順の検査:
 
 1. `beginFrame` の中か（外なら `BUSY`「beginFrame required」）、再入でないか（`js_call_active`）。
 2. ハンドルの slot（無ければ `CLOSED`）。
@@ -105,7 +105,7 @@ N12 の列は harness の包み（数値引数を読む分）が評価前に +64
 
 ## 10. 実機（COM3、2026-10-02）
 
-- image: 同じ firmware（この枝の C、`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`、`-DSDKCONFIG` 分離）に、`apps/derby` だけを差し替えた 4 構成（基準 = fac3552 の JS / 今回、それぞれ WIDE 2 の楕円用 w = −100 / −3）。**デモの種は `HW = 0x2545f492` に固定**（`vm/trig-device` の derby-trig-cull-device.md と同じ値。保存は race=18 で、デモは直線 1・楕円 4、今回の構成は 420 秒で 6 本目の直線まで進む）。bin に入った JS（`S.view(`・`function ser(`・w・`HW`）を確かめた。
+- image: 同じ firmware（この枝の C、`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`、`-DSDKCONFIG` 分離）に、`apps/derby` だけを差し替えた 4 構成（基準 = fac3552 の JS / 今回、それぞれ WIDE 2 の楕円用 w = −100 / −3）。**デモの種は `HW = 0x2545f492` に固定**（`vm/trig-device` の derby-camera-history.md と同じ値。保存は race=18 で、デモは直線 1・楕円 4、今回の構成は 420 秒で 6 本目の直線まで進む）。bin に入った JS（`S.view(`・`function ser(`・w・`HW`）を確かめた。
 - 手順は [`tools/games/ovalcost/ser_device.py`](../../tools/games/ovalcost/ser_device.py)（書き込み → 6 秒後に DERBY → キーを押さずにデモ 420 秒。HEAVY はパドックで tab を 1 回押して 330 秒）。集計は切り替わりの後 3 ターンを捨てた中央値。**MID は 3 回の中央値（3 回の差は 0.1 fps・0.2 ms 以内）、HEAVY は 1 回。**
 - 全 run で `LOADSTALL`・`FRAMEFAIL`・`LOADFAIL`・`DEMOFAIL`・OOM なし。**レースごとの `FINISH`（着順・完走時刻の全桁）は 4 構成・全 15 run で同じ**（race 1000001〜1000005）。
 

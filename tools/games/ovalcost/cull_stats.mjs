@@ -1,5 +1,5 @@
 // The chord bodies of DERBY WATCH's panning frames by their size on the panel
-// (docs/apps/derby-trig-cull.md section 3): how many bodies, draws, VM steps
+// (docs/apps/derby-camera-history.md section 7): how many bodies, draws, VM steps
 // and segments sit in bodies whose box is under 1..4 px, and the device time
 // they cost (estimated from unit prices; trig_cull.mjs bodyCost()).
 //

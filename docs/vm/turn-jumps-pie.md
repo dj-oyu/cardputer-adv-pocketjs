@@ -2,13 +2,15 @@
 
 [VMの文書](README.md)
 
+> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+
 「QuickJS の本体はジャンプしまくりだろうから、分岐を減らせないか。SIMD 化（PIE）や複数命令を PIE にまとめることも検討して」への答え。実測（XTPERF、`CONFIG_POCKET_VM_TURNPERF`）、コード（逆アセンブル）、推定を分けて書く。記録は [logs/turn-jumps-20261105.txt](logs/turn-jumps-20261105.txt)。
 
 ## 1. 結論
 
 - **ジャンプは JS のターンのサイクルの 13〜15%（実測）。** 成立した制御移行 1 回 = バブル 2 サイクル（[perf/pie-simd.md](../perf/pie-simd.md) §3.9）が、ここでもそのまま成り立つ（STRESS で 2.10）。
 - **そのうちインタプリタの命令の振り分けは 1% 前後しかない。** 1 ターンに実行されるオペコードは STRESS で約 4,300、DERBY のレースで約 11,000（`jx` の回数、実測）。`JS_CallInternal` の振り分けを命令ごとに複製しても、得は STRESS 0.5%、DERBY 1.2%（推定）で、コードは +1.2 KB 増える。**採らない。**
-- **一番大きいのは今も flash キャッシュの待ち（34〜43%、実測）。** 分岐より先にここ（[turn-cpi.md](turn-cpi.md)、[turn-working-set.md](turn-working-set.md)、[p1-iram-placement.md](p1-iram-placement.md)）。
+- **一番大きいのは今も flash キャッシュの待ち（34〜43%、実測）。** 分岐より先にここ（[turn-cpi.md](turn-cpi.md)、[turn-icache.md](turn-icache.md)、[p1-iram-placement.md](p1-iram-placement.md)）。
 - **PIE（SIMD）で速くなる部分は QuickJS のターンにほぼ無い。** データ並列のループ（`memcpy`/`memset` など）は host の命令数で 2% 未満で、残りはポインタをたどる分岐の多いコード（推定、§4）。
 
 ## 2. 1 ターンの内訳（実測）
@@ -49,7 +51,7 @@ l8ui a3, pc, 0 / l32r a9, <表> / addi pc, pc, 1 / addx4 a9, a3, a9 / l32i a9, a
 
 で、成立した移行が 2 回（`j` と `jx`）。`JS_CallInternal` だけ `__attribute__((optimize("O2","no-inline-small-functions")))` にすると、`jx` が 273 本に複製され、関数は 23,384 → 24,626 B（+1.2 KB、ファイル全体 +3.8 KB）。`-O2` そのままだと 30,505 B（+30%）。
 
-**値段の見積もり（推定）**: 減るのはオペコードごとの `j` 1 回 = 3 サイクル。STRESS 4,300 × 3 = 1.3 万サイクル/ターン（0.8%）、DERBY 11,100 × 3 = 3.3 万（1.8%）。ただし増えた 1.2 KB は、すでに 32 KiB を超えている 1 ターンの作業集合（42 KiB、[turn-working-set.md](turn-working-set.md)）に乗る。得はビルド間の配置の揺れ（15%）の中にあり、同一バイナリの A/B もできない（関数属性はビルド時に決まる）ので、実機では測らず採らない（arm D はビルドしたが焼いていない）。
+**値段の見積もり（推定）**: 減るのはオペコードごとの `j` 1 回 = 3 サイクル。STRESS 4,300 × 3 = 1.3 万サイクル/ターン（0.8%）、DERBY 11,100 × 3 = 3.3 万（1.8%）。ただし増えた 1.2 KB は、すでに 32 KiB を超えている 1 ターンの作業集合（42 KiB、[turn-icache.md](turn-icache.md)）に乗る。得はビルド間の配置の揺れ（15%）の中にあり、同一バイナリの A/B もできない（関数属性はビルド時に決まる）ので、実機では測らず採らない（arm D はビルドしたが焼いていない）。
 
 **なぜ少ないのか**: STRESS の 1 ターンは QuickJS のバイトコードを 4,300 命令しか実行しない。時間の多くは、そこから呼ばれる C（Shiki の JIT の描画、commit、プロパティ・atom・数値の helper）と、そのコードを flash から取ってくる待ち。host の命令数でも `JS_CallInternal` はターンの 8%（[logs](../kasane/logs/stress-js-turn-prof-20261104.txt)）。
 

@@ -21,9 +21,9 @@ def main():
     rom.write_text('#include "ksn_shiki.h"\n'
                    'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
-             *(ROOT/'main/ui/kasane'/name for name in ('ksn_procedural.c',
+             *(ROOT/'main/ui/kasane'/name for name in ('ksn_shiki_frame.c',
                'ksn_core.c','ksn_render.c','ksn_blend_pie.c','ksn_shiki.c')),
-             ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/pocket/pocket_shiki_api.c',
+             ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/pocket_shiki_frame.c',ROOT/'main/pocket/shiki_heap.c',ROOT/'main/pocket/pocket_shiki_api.c',
              ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_shiki_api_qjs.c']
     command=[cc,'-std=gnu11','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover',

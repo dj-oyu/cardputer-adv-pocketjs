@@ -48,11 +48,16 @@ python tools/kasane_contract/run_mesh_memory.py
 ```
 
 real QuickJS（hardened、guest limit160 KiB）・Kasane compositor・managed mesh APIを実行。
-4/8行strip × direct rows on/off の4条件で150 panelsを、独立に手組みしたquadの
+4/8行strip × direct rows on/off × 同期/遅延転送の8条件で各150 panelsを、独立に手組みしたquadの
 入力経路から描く参照と全画素比較する。参照も同じpublic depth rasterを使うため、
 raster自体の独立数学oracleではない。既存のcoverage/shader契約は別の回帰試験を利用する。
 1回のpartial IO、retry、ACK、END後の追加submitなし、全破棄後の追跡allocation 0も検査する。
 
+遅延4行経路は交互のhalf-stripを借用し、完了までの画素不変・再利用禁止と
+mesh ACKより前のdrainを検査する。遅延8行経路はコピーする対照であり、
+実機design-0が8行を借用するという意味ではない。これらは実C compositorの
+transport callback試験で、SPI/DMA実機実行ではない。静的なtest panel/loan監視配列は
+requested allocation ledgerの外であり、実機の必要メモリへ足し込まない。
 hostのcycle関数はwrapを含むprotocol用stub。host cycle/FPSを実機へ外挿しない。
 要求byteのpeakはリンクしたobjectのheap要求の計測で、allocator overhead、共有libcや
 sanitizer内部、static（test panel/ledgerを含む）、stackを含まない。

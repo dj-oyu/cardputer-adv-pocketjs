@@ -2,7 +2,7 @@
 #include "ayatsuri_transform.h"
 #include "ayatsuri_visibility.h"
 #include "ayatsuri_shade.h"
-#include "../ui/kasane/ksn_procedural.h"
+#include "../ui/kasane/ksn_shiki_frame.h"
 #include <limits.h>
 
 typedef struct {

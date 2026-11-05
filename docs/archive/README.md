@@ -38,7 +38,7 @@ C・ゲスト JS から参照する資料は、実装やゲストのソースサ
 
 ## 重複・旧手順
 
-- FLOWER 装飾光線の正本は [perf/flower-decor-cost.md](../perf/flower-decor-cost.md)。ルート版にだけあった55行（固定点平方根と profile gate の結果）も統合し、[旧パス](../flower-decor-cost.md) は移動案内として維持。
+- FLOWER 装飾光線の正本は [perf/flower-perf.md](../perf/flower-perf.md)。ルート版にだけあった55行（固定点平方根と profile gate の結果）も統合した。旧パス docs/flower-decor-cost.md は削除した（git 履歴に残る）。
 - 固定点 pipeline の FPU 解釈は後続実測で訂正。保存先冒頭から FPU・平方根の再測定へ案内する。
 - 古い branch、build directory、COM port、測定値は再現条件の一部であり、初回導入には [現在の開発環境](../platform/build-environment.md) を使う。
 - [findings.md](findings.md) は2026-09-15に削除された旧記録の要約。原文は Git 履歴に残る。今回の整理では記録を削除していない。

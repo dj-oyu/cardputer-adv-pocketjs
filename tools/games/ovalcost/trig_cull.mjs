@@ -1,4 +1,4 @@
-// Host count of DERBY WATCH's panning frames for docs/apps/derby-trig-cull.md:
+// Host count of DERBY WATCH's panning frames for docs/apps/derby-camera-history.md:
 // pose() calls, distinct g, Math.sin/cos by caller, the chord bodies of ser()
 // and their size on the panel, and what the trig and culling variants
 // (variants.mjs) save. It runs the app's own pose()/wide()/shot()/pan()/ser()
@@ -16,8 +16,8 @@ const REF = arg('--ref', ''), TIER = +arg('--tier', 1), STEP = +arg('--step', 5)
 const ROOT = new URL('../../../', import.meta.url);
 const show = p => REF ? execFileSync('git', ['show', `${REF}:${p}`], { encoding: 'utf8' }) : readFileSync(new URL(p, ROOT), 'utf8');
 
-// Device unit prices, microseconds. docs/apps/derby-pan-camera-cost.md section 1
-// (JS ops, measured), docs/apps/derby-pan-memory.md section 3 "実機の内訳"
+// Device unit prices, microseconds. docs/apps/derby-camera-history.md section 1
+// (JS ops, measured), docs/apps/derby-camera-history.md section 5 "実機の内訳"
 // (pose 135 us on a bend, 26 us on the straight's shortcut; Math.sin 18.7 us
 // inside DERBY; a ser() body 1.2-1.5 ms; all measured on the device).
 export const P = { add: 2.27, mul: 2.50, div: 4.87, rd: 2.75, wr: 3.77, f32rd: 2.75, f32wr: 4.25, call: 4.44, prop: 2.18,

@@ -13,7 +13,7 @@ The earlier local candidate `951bdd8` is retained separately.
   mesh/depth view, transform/shade/visibility kernels and JS bindings.
 - Existing Hone Gouraud 7/8-argument painter API and its native shader/packet
   validation, plus opaque shared-depth opt-in via
-  `procedural.beginMeshFrame(color, bytes, work, rows[, surface])`.
+  `pocket.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`.
 - Owned bounded candidate/committed compact snapshots, rollback, retry/ACK,
   old-committed backdrop repair, reset and depth-only full-surface damage.
 - Class-owner registry dependency: main's fixed 16 process-lifetime owner slots

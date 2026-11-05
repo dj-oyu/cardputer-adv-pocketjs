@@ -17,7 +17,7 @@ counts (OPPROF_HIDE; the device API they call stays the app's, OPPROF_KEEP).
 Also runs bench_ops.js (the device bench's bodies) for the prices. Output:
 .cache/opprof/<name>.txt (opprof), <name>.csv (the harness's per-tick draws,
 VM steps and segments) and bench.txt; analyze.py reads them
-(docs/apps/derby-wide2-profile.md).
+(docs/apps/derby-camera-history.md).
 """
 from __future__ import annotations
 

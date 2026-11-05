@@ -1,6 +1,6 @@
 /* Real public app, QuickJS and Kasane compositor. Host cycles are protocol stubs. */
 #include "pocket_kasane.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_shape.h"
 #include "pocket_shiki_api.h"
 #include "app_registry.h"
@@ -25,12 +25,25 @@ void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(
 static uint16_t strip[240*8],panel[240*135],reference[240*135];
 static unsigned strip_rows,half,ready,start,ends,samples,presents;
 static bool fail_send;
+static bool delayed,dma_pending,dma_candidate;
+static const uint16_t *dma_loan;
+static uint16_t dma_saved[240*8],dma_y,dma_rows;
+static unsigned dma_finishes;
 static uint32_t clock_value=0xffffff00u;
-static uint16_t *get_strip(void *u){(void)u;uint16_t *p=strip+(strip_rows==4?(half++&1u)*960u:0);for(unsigned i=0;i<strip_rows*240;i++)p[i]=0xdead;return p;}
-static ksn_result send_strip(void *u,uint16_t y,uint16_t rows,const uint16_t *p){
- (void)u;memcpy(panel+y*240,p,(size_t)rows*240*2);if(fail_send){fail_send=false;return KSN_IO;}return KSN_OK;
+static void dma_flush(void){
+ if(!dma_pending)return;
+ CHECK(!memcmp(dma_loan,dma_saved,(size_t)dma_rows*240*2));
+ memcpy(panel+dma_y*240,dma_loan,(size_t)dma_rows*240*2);dma_pending=false;
 }
-static ksn_result present(void){ksn_display_port p={.strip=get_strip,.present=send_strip,.width=240,.height=135,.strip_rows=strip_rows,.text=&ksn_font_port};ksn_render_stats s;presents++;return pocket_kasane_present(&p,&s);}
+static uint16_t *get_strip(void *u){(void)u;uint16_t *p=strip+(strip_rows==4?(half++&1u)*960u:0);CHECK(!delayed||strip_rows!=4||!dma_pending||p!=dma_loan);for(unsigned i=0;i<strip_rows*240;i++)p[i]=0xdead;return p;}
+static ksn_result send_strip(void *u,uint16_t y,uint16_t rows,const uint16_t *p){
+ (void)u;
+ if(delayed){dma_flush();memcpy(dma_saved,p,(size_t)rows*240*2);dma_loan=strip_rows==4?p:dma_saved;dma_y=y;dma_rows=rows;dma_pending=true;}
+ else memcpy(panel+y*240,p,(size_t)rows*240*2);
+ if(fail_send){fail_send=false;return KSN_IO;}return KSN_OK;
+}
+static ksn_result dma_finish(void *u){(void)u;if(dma_candidate)CHECK(pocket_proc_pending());dma_flush();dma_finishes++;return KSN_OK;}
+static ksn_result present(void){ksn_display_port p={.strip=get_strip,.present=send_strip,.width=240,.height=135,.strip_rows=strip_rows,.text=&ksn_font_port};ksn_render_stats s;presents++;dma_candidate=pocket_proc_pending();const ksn_display_completion completion={NULL,dma_finish};ksn_result result=delayed?pocket_kasane_present_complete(&p,&completion,&s):pocket_kasane_present(&p,&s);CHECK(!dma_pending);dma_candidate=false;return result;}
 static JSValue log_line(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
  (void)self;const char *s=argc?JS_ToCString(c,argv[0]):NULL;CHECK(s);
  if(!strncmp(s,"MB READY ",9))ready++;
@@ -62,7 +75,7 @@ static void expected_frame(unsigned f){
  CHECK(ksn_mesh_render(&s,reference,0,135,scratch,1));
 }
 int main(int argc,char **argv){
- CHECK(argc==3);strip_rows=(unsigned)atoi(argv[1]);g_ksn_image_rows=atoi(argv[2]);CHECK(strip_rows==4||strip_rows==8);
+ CHECK(argc==3||argc==4);strip_rows=(unsigned)atoi(argv[1]);g_ksn_image_rows=atoi(argv[2]);delayed=argc==4&&atoi(argv[3]);CHECK(strip_rows==4||strip_rows==8);
  const app_manifest_t *manifest=app_registry_find("local.meshbench");CHECK(manifest&&app_registry_wants(manifest,"kasane.shapes")&&app_registry_wants(manifest,"kasane.shiki.debug"));
  static char source[8192];FILE *f=fopen("apps/meshbench/mesh_bench.js","rb");CHECK(f);size_t n=fread(source,1,sizeof source-1,f);CHECK(feof(f));fclose(f);source[n]=0;
  JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
@@ -81,5 +94,6 @@ int main(int argc,char **argv){
  pocket_proc_mesh_bytes memory;pocket_proc_mesh_memory(&memory);
  printf("MESH_BENCH_HOST strip=%u image_rows=%d frames=150 digest=%08x requested_live=%zu requested_peak=%zu guest_frame_sampled_peak=%zu capacity=%zu workspace=%zu metadata=%zu\n",strip_rows,g_ksn_image_rows,digest,live_bytes,peak_bytes,guest_peak,memory.candidate+memory.committed,memory.workspace,memory.metadata);
  pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks);
+ if(delayed){CHECK(dma_finishes>=151);printf("MESH_BENCH_DELAYED_PASS strip=%u borrowed_half=%u completion_before_ACK finishes=%u\n",strip_rows,strip_rows==4,dma_finishes);}
  puts("MESH_BENCH_HOST_PASS drawing_reference row_span IO_ACK bounded_END release0 host_cycles_are_stubs");return 0;
 }

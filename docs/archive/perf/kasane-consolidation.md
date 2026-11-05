@@ -85,16 +85,16 @@ git grep -nE '^(int|bool) g_ksn_' -- main/ui/kasane main/pet
 | 2 | `da13f79` フレームコマンドを1フレームに1回だけ展開 | `perf/kasane-decode` | `79fc53d` | — | `120 frames, 135 renders, 3 arms (on/off/alternating) byte-identical, 13 commands` / `read calls: switched on=1770 reference=32912 ratio=18.6x` |
 | 3 | `286573d` 可視しきい値スキップの当たり率を測る | `perf/kasane-visible` | `9ad51f2` | — （`test_visible_skip.c` に LUT を落とす 14 行の適応） | `CORPUS 5 scenes x 120 frames, 7490216 blend pixels ... step=1.8% bound=8.9% both=10.0% exact=0.8%` / `visible skip PASS: the counters change no pixel` |
 | 4 | `ce56f69` 直接ブレンド連鎖を量子化キー表に | `perf/kasane-lut` | `930e0bc` | — | `solid arm ... 214499328 per-channel comparisons ... 0 moved, worst channel step 0` / `alpha arm 16 levels ... 2047578 moved (24.505%), worst channel step 2` |
-| 5 | `58b717a` 565 ブレンド/パックの /255 を 255→256 へ | `perf/kasane-alpha256` | `1af4a90` | `docs/perf/kasane-alpha256.md`、`tools/pie/run_models.py` | `default ... 140838 of 3888000 panel pixels (3.622%) move ... worst 565 step 1` / `mismatches=0` |
+| 5 | `58b717a` 565 ブレンド/パックの /255 を 255→256 へ | `perf/kasane-alpha256` | `1af4a90` | `docs/perf/kasane-blend.md`、`tools/pie/run_models.py` | `default ... 140838 of 3888000 panel pixels (3.622%) move ... worst 565 step 1` / `mismatches=0` |
 | 6 | `1b643a2` 不透明群の層の連なりを 1 枚のアフィン写像へ | `perf/kasane-affine` | `b6a8211` | `tools/kasane_contract/test_group_affine.c` | `folded arm and isolated tile chain agree on 6966000 pixels` / `120 frames identical both ways (arms 0/1)` (hash `3db0d222`) / `folded rows: switch off=0, on=10575` |
 | 7 | `0896f47` x 依存の画素値を行ごとの表へ | `perf/kasane-rowtable` | `f7e46dc` | `tools/kasane_contract/test_row_table.c` | `table values match sample on 47939774 pixels over 3313229 rows` / `sample calls in one full REPLACE frame: (1,0) reference=19004 (1,1) table=102` |
-| 8 | `eb22dfb` 群の畳みを不透明でない連なりへ（近似） | `perf/kasane-affine` | `7795bb9` | `docs/perf/kasane-group-affine.md`、`test_group_affine.c` | `step 2 moved 86650 of 3888000 pixels ... worst 8-bit channel step r/g/b=9/5/9` |
-| 9 | `8e57dcb` 回転画像のソース添字を商と剰余の加算ステップへ | `perf/kasane-imgopt`（anchor / pet / stretch / tile の前提） | `d9a17d1` | `docs/perf/kasane-image-transform-step.md` | `image rotate arms PASS: 11833 configs, 23665 panel hashes, worst pixel step 0, fetches identical` |
-| 10 | `d025d9d` 拡大縮小画像スパンのソース添字を同型に | `perf/kasane-stretch` | `b9e65e4` | `docs/perf/kasane-image-transform-stretch-step.md`、`test_image_render.c`、`test_image_stretch_arms.c` | `image stretch arms PASS: 131 configs, 259 panel hashes, worst pixel step 0, fetches identical` |
+| 8 | `eb22dfb` 群の畳みを不透明でない連なりへ（近似） | `perf/kasane-affine` | `7795bb9` | `docs/perf/kasane-group.md`、`test_group_affine.c` | `step 2 moved 86650 of 3888000 pixels ... worst 8-bit channel step r/g/b=9/5/9` |
+| 9 | `8e57dcb` 回転画像のソース添字を商と剰余の加算ステップへ | `perf/kasane-imgopt`（anchor / pet / stretch / tile の前提） | `d9a17d1` | `docs/perf/kasane-image-transform.md` | `image rotate arms PASS: 11833 configs, 23665 panel hashes, worst pixel step 0, fetches identical` |
+| 10 | `d025d9d` 拡大縮小画像スパンのソース添字を同型に | `perf/kasane-stretch` | `b9e65e4` | `docs/perf/kasane-image-transform.md`、`test_image_render.c`、`test_image_stretch_arms.c` | `image stretch arms PASS: 131 configs, 259 panel hashes, worst pixel step 0, fetches identical` |
 | 11 | `e7282ed` 群のタイルを子の被覆区間と到達判定に合わせる | `perf/kasane-tile` | `a84b118` | — | `exact arms: 4050000 pixels identical (reach on/off, tile 64/16, smooth=1)` / `tile counters: ... waste 27.25%, blocks 214564 skipped 39773` |
 | 12 | `b93dcf1` PET 画像 provider の行の重複復号を 64 行キャッシュで消す | `perf/kasane-pet` | `dc0bb19` | `main/pet/ksn_pet.c`、`main/pet/ksn_pet.h`、`docs/perf/kasane-pet-row-cache.md`、`test_pet_row_cache_arms.c` | `48495 panel comparisons, worst pixel step 0, hash d6eb4edb, cache decodes 0.019% of the fetches, 64 of 330420` |
 | 13 | `ca2e3fd` 滑らかな層をブロック定数＋画素増分で書く | `perf/kasane-tile` | `d0bf4a1` | `tools/kasane_contract/test_group_tile.c` | `approximate arm: worst step 1 5/6/5 level(s) ... exact arm: 0` / `parameter space: 1555200 pixels compared, 9942 moved (0.64%)` |
-| 14 | `a3e6426` 群のタイル面の測定を記録する（doc のみ） | `perf/kasane-tile` | `7391fab` | `docs/perf/kasane-tile.md` | —（文書コミット） |
+| 14 | `a3e6426` 群のタイル面の測定を記録する（doc のみ） | `perf/kasane-tile` | `7391fab` | `docs/perf/kasane-group.md` | —（文書コミット） |
 
 補足:
 

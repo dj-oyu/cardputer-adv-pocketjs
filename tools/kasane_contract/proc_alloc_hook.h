@@ -1,6 +1,6 @@
 /* Force-included (-include) into test_pocket_proc_turn_qjs's own sources, not
  * into the prebuilt QuickJS objects: the engine keeps allocating normally while
- * pocket_proc.c's malloc/calloc can be made to fail or be measured. */
+ * pocket_shiki_frame.c's malloc/calloc can be made to fail or be measured. */
 #ifndef PROC_ALLOC_HOOK_H
 #define PROC_ALLOC_HOOK_H
 #include <stddef.h>

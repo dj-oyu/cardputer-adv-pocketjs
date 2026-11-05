@@ -6,7 +6,7 @@
 
 出所: 旧`docs/apps/tutorial-review.md`（予約日2026-09-07）。
 
-2026-09-07時点の着手条件は3つとも解消している: `apps/netcheck`（`pocket.net`、実機で往復済み・READMEに実出力ログあり）、`apps/bridge`（`pocket.bridge`のPC往復、同）、および§9.1圧縮音声（Opus実装済み、[opus-feasibility.md](opus-feasibility.md)）、§7 workspace（`pocket_workspace.c`実装済み）、§3 アプリ登録（`app_registry.c`実装済み）、§12 BLE（`pocket_ble.c`実装済み）。**着手を妨げるものは無い。**
+着手条件（`apps/netcheck`・`apps/bridge` の実機往復、圧縮音声、workspace、アプリ登録、BLE の名前空間）はすべて解消している。**着手を妨げるものは無い。**
 
 未決定・未着手:
 
@@ -30,7 +30,7 @@
 
 出所: [japanese-input.md](japanese-input.md)。
 
-1. **入力キューのoverflowが検知されない。** `main/main.c`の`xQueueSend(keys,&k,0)`が失敗を無視するため、取りこぼしたキー入力を利用者に知らせる手段が無い。overflow表示とキー保持状態の再同期は未実装。
+1. **入力キューのoverflowが検知されない。** `main/main.c`の`xQueueSend(keys,&k,0)`が失敗を無視するため、取りこぼしたキー入力を利用者に知らせる手段が無い（確認: 2026-11-05、`main.c:378`。キーパッドFIFOのあふれは `keymap.c` が `keystate_overflow()` で扱うが、この16件のキューは別）。overflow表示とキー保持状態の再同期は未実装。同じ項目が [platform/backlog.md](../platform/backlog.md) の「入力キュー」にある。
 2. **JS用日本語アトラスのreload失敗時に再試行・上限到達表示が無い。** 現在は登録集合だけ先に進む（`jsfont.c`）。
 
 ## 手つかずのまま残っている既知の実装課題

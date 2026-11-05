@@ -1,6 +1,6 @@
 #include "ayatsuri/ayatsuri_model.h"
 #include "ayatsuri/ayatsuri_shade.h"
-#include "ui/kasane/ksn_procedural.h"
+#include "ui/kasane/ksn_shiki_frame.h"
 #include "ui/kasane/ksn_mesh_depth.h"
 #include <assert.h>
 #include <stdio.h>

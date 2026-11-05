@@ -6,7 +6,7 @@
  * thing to prove is that the pixels the PANEL ends up with do not move: the
  * columns the narrow arm skips have to be exactly the columns whose value did
  * not change, or the display is quietly wrong in a way no timing number shows
- * (docs/perf/kasane-text-damage.md, and design-system.md 11's "部分描画: 同じ
+ * (docs/perf/kasane-text.md, and design-system.md 11's "部分描画: 同じ
  * 状態の全面スカラー描画と全画素一致").
  *
  * Two cores run the same script in lockstep. One is given a port without
@@ -206,7 +206,7 @@ int main(void){
          * advance, so its text command dirties all 184 declared columns and
          * goes out whole; the narrow arm is down to the one cell that changed,
          * rounded out to 16. That factor is the claim
-         * docs/perf/kasane-text-damage.md 6 makes, checked here rather than
+         * docs/perf/kasane-text.md (kasane-text-damage section) 6 makes, checked here rather than
          * asserted in prose. Zero bytes is its own success: a digit that lands
          * past the reveal changes no pixel and owes no transfer.
          *
@@ -217,7 +217,7 @@ int main(void){
         /* The length change, where every glyph after the first difference has
          * moved. The tight walk cannot answer it, but the wider of the two
          * runs' own widths still beats the declared box, which is the claim in
-         * docs/perf/kasane-text-damage.md 6 about content versus reservation. */
+         * docs/perf/kasane-text.md (kasane-text-damage section) 6 about content versus reservation. */
         if(step%40==6&&narrow.bytes&&narrow.bytes*2<=wide.bytes)grow_frames++;
         CHECK((narrow_stats.bands&~wide_stats.bands)==0);
         for(unsigned i=0;i<240*135;i++){

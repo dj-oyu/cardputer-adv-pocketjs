@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tile-level work on the group's compositing tile (docs/perf/kasane-tile.md):
+# Tile-level work on the group's compositing tile (docs/perf/kasane-group.md):
 # candidate 3a (blocks the group's bbox cannot reach), 3b (a 16-pixel tile) and
 # the smooth-layer shortcut. This is the entry point for
 # tools/kasane_contract/test_group_tile.c alone.

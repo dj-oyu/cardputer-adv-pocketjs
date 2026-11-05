@@ -2,7 +2,7 @@
 real QuickJS.
 
 QuickJS is compiled once without sanitizers and cached (vendor code, and its
-objects are reused between runs). pocket_proc.c, the Shiki API, the Shiki
+objects are reused between runs). pocket_shiki_frame.c, the Shiki API, the Shiki
 heap's fallback, the engine and the test are compiled with ASan/UBSan and
 proc_alloc_hook.h force-included, so their malloc/calloc can be failed and
 measured and LeakSanitizer decides whether reset() releases every frame and
@@ -38,8 +38,8 @@ def main():
     rom=OUT/'ksn_shiki_rom_none.c'
     rom.write_text('#include "ksn_shiki.h"\n'
                    'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
-    sources=[kasane/'ksn_procedural.c',kasane/'ksn_shiki.c',
-             ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/pocket_proc.c',ROOT/'main/pocket/shiki_heap.c',
+    sources=[kasane/'ksn_shiki_frame.c',kasane/'ksn_shiki.c',
+             ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/pocket_shiki_frame.c',ROOT/'main/pocket/shiki_heap.c',
              ROOT/'main/pocket/pocket_shiki_api.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_proc_turn_qjs.c']
     binary=OUT/'test_pocket_proc_turn'

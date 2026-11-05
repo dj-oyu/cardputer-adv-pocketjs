@@ -2,7 +2,7 @@
  * Includes the implementation to compare its private arithmetic with the
  * pinned pre-change int64 formula. No owner/buffer/lifetime changes. */
 
-#include "ksn_procedural.c"
+#include "ksn_shiki_frame.c"
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>

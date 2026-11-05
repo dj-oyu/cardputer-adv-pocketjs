@@ -2,7 +2,7 @@
  * a group whose opacity is 255 and whose children are all opaque folds its layer
  * chain into a single affine map per group -- out = A*src + B*dst + C with
  * A = 255 and B = C = 0 on every channel, applied as one store per covered
- * pixel. See docs/perf/kasane-group-affine.md.
+ * pixel. See docs/perf/kasane-group.md.
  *
  * ksn_render.c is included for its statics: `group_opaque_row` is the folded
  * arm's per-row entry, and the number of entries into it is how this file shows

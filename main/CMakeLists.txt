@@ -36,11 +36,11 @@ set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane
 list(APPEND KASANE_SOURCES
     "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
     "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
-    "pocket/pocket_proc.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_shiki.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_shiki.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
-    "ui/kasane/ksn_procedural.c" "ui/kasane/ksn_pixel_function.c"
+    "ui/kasane/ksn_shiki_frame.c" "ui/kasane/ksn_pixel_function.c"
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_shiki.c"
     "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
@@ -73,8 +73,8 @@ endif()
 set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
 if(KASANE_PROC_DEVICE_PROBE)
     list(APPEND KASANE_SOURCES
-        "ui/kasane/ksn_procedural_surface.c"
-        "ui/kasane/ksn_procedural_layers.c" "ui/kasane/ksn_procedural_present.c"
+        "ui/kasane/ksn_shiki_surface.c"
+        "ui/kasane/ksn_shiki_layers.c" "ui/kasane/ksn_shiki_present.c"
         "ui/kasane/ksn_pixel_span_device_probe.c"
         "ui/kasane/ksn_grid_scan_cost_device_probe.c")
 endif()
@@ -527,14 +527,14 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # and other components retain the project's size optimization.
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
 set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
-set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(ui/kasane/ksn_shiki_frame.c PROPERTIES COMPILE_OPTIONS "-O2")
 # The per-frame render and present path at -O2 (docs/platform/lcd-dma-driver.md
 # §9.12): render_ms -10 to -15% on four apps, +12.6 KB flash, +44 B DIRAM.
 # -ffp-contract=off keeps float results identical to the -Os build (no fused
 # multiply-add). ksn_render.c keeps render_group at -Os by function attribute.
 set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
     pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-set_source_files_properties(pocket/pocket_proc.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(pocket/pocket_shiki_frame.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
@@ -548,9 +548,9 @@ if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
     set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
 if(KASANE_PROC_DEVICE_PROBE)
-    set_source_files_properties(ui/kasane/ksn_procedural_surface.c
-        ui/kasane/ksn_procedural_layers.c
-        ui/kasane/ksn_procedural_present.c
+    set_source_files_properties(ui/kasane/ksn_shiki_surface.c
+        ui/kasane/ksn_shiki_layers.c
+        ui/kasane/ksn_shiki_present.c
         ui/kasane/ksn_grid_scan_cost_device_probe.c
         PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
@@ -594,4 +594,4 @@ set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "po
 
 # Keep managed mesh F32 evaluation and coverage order consistent with host.
 set_source_files_properties(ayatsuri/ayatsuri_model.c ayatsuri/ayatsuri_visibility.c ui/kasane/ksn_mesh_depth.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-set_property(SOURCE ui/kasane/ksn_procedural.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
+set_property(SOURCE ui/kasane/ksn_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")

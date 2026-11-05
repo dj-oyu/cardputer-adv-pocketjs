@@ -183,6 +183,22 @@ int main(void){
   "A.evaluate(new Float32Array([0,0,400,0,0,0,1,120,78]),new Float32Array([0,0,1,1,1,1]));"
   "P.beginMeshFrame(0,1024,8000000,1);A.submit();P.commit()");
  REQUIRE(pocket_proc_backdrop(NULL,0,135,expected)==KSN_OK);pocket_proc_present_result(KSN_OK);
+ /* Shared immutable cold data must not share evaluated instance packets.
+  * Deliberately asymmetric cameras make accidental reuse visible. A failed
+  * evaluation on A must not invalidate B or the last committed snapshot. */
+ static uint16_t independent[240*135];
+ eval_ok(ctx,"globalThis.B=M.instance();B.evaluate(new Float32Array([0,0,400,0,0,0,1,103,55]),new Float32Array([0,0,1,1,1,1]));"
+  "P.beginMeshFrame(0,1024,8000000,1);B.submit();P.commit()");
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,independent)==KSN_OK&&memcmp(independent,expected,sizeof expected));pocket_proc_present_result(KSN_OK);
+ eval_ok(ctx,"P.beginMeshFrame(0,1024,8000000,1);A.submit();P.commit()");
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(actual,expected,sizeof actual));pocket_proc_present_result(KSN_OK);
+ eval_error(ctx,"A.evaluate(new Float32Array([0,0,400,0,0,0,0,120,78]),new Float32Array([0,0,1,1,1,1]))");
+ eval_error(ctx,"P.beginMeshFrame(0,1024,8000000,1);A.submit()");
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(actual,expected,sizeof actual));
+ eval_ok(ctx,"P.beginMeshFrame(0,1024,8000000,1);B.submitClipped(new Uint16Array(0),new Uint8Array(0),new Float32Array(0));P.commit();B.dispose();B=null");JS_RunGC(rt);
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(actual,independent,sizeof actual));pocket_proc_present_result(KSN_OK);
+ eval_ok(ctx,"A.evaluate(new Float32Array([0,0,400,0,0,0,1,120,78]),new Float32Array([0,0,1,1,1,1]))");
+ puts("MESH_SHARED_MODEL_PASS asymmetric_instances evaluation_failure_isolation committed_unchanged recovery disposed_source");
  eval_ok(ctx,"P.beginMeshFrame(0,1024,8000000,8);A.submitClipped(new Uint16Array(0),new Uint8Array(0),new Float32Array(0));P.commit();A.dispose();M.dispose();A=M=null");JS_RunGC(rt);
  REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(actual,expected,sizeof actual));pocket_proc_present_result(KSN_OK);
  pocket_proc_mesh_memory(&bytes);JSMemoryUsage usage;JS_ComputeMemoryUsage(rt,&usage);

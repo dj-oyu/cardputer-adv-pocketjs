@@ -1,5 +1,5 @@
 #include "core_fixture.h"
-#include "ksn_procedural_present.h"
+#include "ksn_shiki_present.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

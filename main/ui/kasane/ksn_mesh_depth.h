@@ -1,7 +1,7 @@
 #ifndef KSN_MESH_DEPTH_H
 #define KSN_MESH_DEPTH_H
 #include "ayatsuri/compact_opaque.h"
-#include "ksn_procedural.h"
+#include "ksn_shiki_frame.h"
 /* Explicit bounded opaque scope. All packets in a snapshot share depth.
  * Larger evaluated view depth wins; exact ties retain first submitted face.
  * No alpha/holes/clips. No source pointers survive append. */

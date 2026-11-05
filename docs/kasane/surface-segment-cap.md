@@ -1,4 +1,6 @@
-# 面ごとの線分上限（`createSurface({maxSegments})`）
+# 面ごとの線分上限（`createSurface({maxSegments})`）と第2手続き面
+
+吸収した旧文書: d2-multi-procedural-surface.md（第2面の作成・フレーム寿命は「第2手続き面」の節）。
 
 ブランチ `vm/kasane-surface-cap`（`vm/main` e15e6eb から）。依頼は「DERBY WATCH の大型画面（面1）が、1 枚約 10 KB の連続領域を 2 枚取れずに失敗する。線分の上限を面ごとに宣言できれば第2面を確保できるか」。**数値は種別を明記する**: 実機の実測、host の実測、計算。
 
@@ -29,6 +31,42 @@ proc.beginFrame(0, small); // ここで確保（従来どおり最初の beginFr
 
 以前は引数を 1 つでも渡すと `INVALID_ARGUMENT` だったので、動いている既存アプリ（MEGADEMO・`proc_multi_surface_probe.js` など、どれも引数なし）の挙動は変わらない。
 
+## 第2手続き面（旧 d2-multi-procedural-surface.md）
+
+追加面はセッション内で一度だけ作れる。面0 の `beginFrame(color)`・`draw(handle, inputs)`・`commit()`・`resource()` は従来どおり。
+
+```js
+const proc = pocket.kasane.procedural;
+const foreground = proc.createSurface();
+const backImage = proc.resource();
+const frontImage = proc.resource(foreground);
+
+pocket.kasane.replace(tx => {
+  tx.background(0x000000ff);
+  tx.image({resource: backImage, bounds: [0, 0, 64, 48]});
+  tx.image({resource: frontImage, bounds: [80, 0, 144, 48]});
+});
+
+proc.beginFrame(0x0000);
+proc.draw(plan, [10, 10, 0, 0]);
+proc.commit();
+// 表示ACK後の別turnで更新する。
+proc.beginFrame(0x0000, foreground);
+proc.draw(plan, [20, 10, 0, 0]);
+proc.commit();
+```
+
+- **plan の解除。** `proc.unregister(handle)` は登録済み plan と点列領域を解放し slot を空ける（引数はちょうど1つ、戻り値 `undefined`）。未登録・解除済みの handle は `draw` と同じく `CLOSED`、引数不正は `INVALID_ARGUMENT`。handle 番号は再利用しないので、解除済み handle が後の plan を指すことはない。`draw` は線分を候補 frame へ写し終えているため、`beginFrame`〜`commit` の間に解除しても既に描いた分は残る。
+- **共有と寿命。** 登録済み plan は両面で共有できる。面の候補・確定 frame は別々の2スロットで、描画中の scratch と8行画像 cache だけを共有する。表示待ち候補は全体で1面までで、次の `beginFrame` は ACK か repair まで `BUSY`。面 ID は APP セッション終了で失効し、同じ番号を再利用しない（`createSurface()` のセッション世代 ID を `beginFrame(color,id)` と `resource(id)` へ渡す）。追加面は `resource(id)` を呼んだ後に `commit()` できる。APP 終了では native 画像資源を先に退役させてから frame を解放する。
+- **FLOWER 背景の overlay。** 画像資源としての手続き面は更新できる（画像面の成功 ACK と I/O 失敗は通常表示と同じく adapter へ返る）。native FLOWER 下地に描かれない従来の手続き backdrop は overlay で `commit()` を拒否する。backdrop の I/O 失敗で旧確定 frame の repair が残る間は、全 surface の新しい `beginFrame` を `BUSY` にする。
+- **damage。** 背景色が変われば画像全体が damage。同色なら旧・新線分の外接矩形を source 座標で計算し、1:1 画像ノードだけ表示座標へ写す（拡大・縮小・回転は全表示矩形）。LCD 矩形転送は16列単位へ丸める。表示失敗後は候補を同じ ticket で保持し、Kasane の全面 repair が成功してから確定する。
+
+検証:
+
+- **host**（O0/O2、fake PIE の計画実行経路も同じ試験）: 実 QuickJS→手続き IR→2つの Kasane 画像ノード→renderer で、各面の独立した画素、1点移動の256 B 転送、途中転送失敗後の64,800 B repair、APP reset 後の両資源 STALE を確認した。
+- **実機・通常 APP**（`KASANE_D2_MULTI_SURFACE_PROBE=ON` で VIDEO LAB を `apps/kasane/proc_multi_surface_probe.js` に一時差し替え、64×48 画像ノード2つへ毎 turn 交互に1点を移動、COM3 で2回）: どちらも64回表示・57回の256 B 矩形転送。2面確保後の内部 heap 最小空き 95,480/95,484 B、最大連続空き 51,200 B、UI task stack 最小余裕 23,708 B。1点更新の表示は約0.7 ms（実測）。診断後に通常 image を復元し `HOME_READY` を確認。
+- **実機・FLOWER overlay**（`KASANE_D2_OVERLAY_PROC_PROBE`、FLOWER を native backdrop に JS 手続き画像面2つを8 turn ずつ2回）: 各回の最初の候補が pending の4帯目で LCD 送出を1回失敗させ、候補を保持して64,800 B 全面再送後に ACK、もう一方の面と交互更新を続けた（`tools/kasane_contract/run_d2_overlay_proc_device.py` が背景と overlay 設定を戻す）。D4 pixel との同時使用は未検証なので診断フラグを相互排他とした。FLOWER との長時間性能、音声・低 heap との同時負荷は保証しない。
+
 ## メモリの内訳
 
 | 確保 | いつ | 大きさ（計算） |
@@ -40,7 +78,7 @@ proc.beginFrame(0, small); // ここで確保（従来どおり最初の beginFr
 
 scratch と VM を縮めなかったのは、1 本の plan が 1 回の `draw()` で最大 1,024 本を出せ、面への写しの前に数を確かめる形だから（面ごとの上限は写すときに効く）。
 
-**短いフレームが安全な理由**: フレームは `ksn_proc_frame` の先頭（`count`・`raster_steps`・`ready`、6 B）と n 本分だけを確保する。`pocket_proc.c` の中でフレームを読むのは `count` 本までの経路（`ksn_proc_render_band`、damage の計算、画像の帯）だけで、構造体を丸ごと写す・消す箇所は無い。`beginFrame` の `memset(sizeof *candidate)` は先頭 3 項目の初期化に替えた（1,024 本の面でも 10 KB の memset が無くなる）。`segments` が末尾で詰め物が無いことは `_Static_assert` で固定した。
+**短いフレームが安全な理由**: フレームは `ksn_proc_frame` の先頭（`count`・`raster_steps`・`ready`、6 B）と n 本分だけを確保する。`pocket_shiki_frame.c` の中でフレームを読むのは `count` 本までの経路（`ksn_proc_render_band`、damage の計算、画像の帯）だけで、構造体を丸ごと写す・消す箇所は無い。`beginFrame` の `memset(sizeof *candidate)` は先頭 3 項目の初期化に替えた（1,024 本の面でも 10 KB の memset が無くなる）。`segments` が末尾で詰め物が無いことは `_Static_assert` で固定した。
 
 ## host の検査
 
@@ -102,7 +140,7 @@ image は `build_surfcap`（この節の変更＋測定用コピー）。測定�
 - **各条件 1 回の測定。** 最大連続は起動ごとに 10,240〜20,480 B 揺れた。「256 なら通る」は 1 回（最も悪い 10,240 B のとき）、「512 なら通る」も 1 回。1,024 の失敗は 2 回。
 - 評価中に面1を確保する形（MEGADEMO・以前の DERBY の方式）では測っていない。
 - 空きの減りが計算より 5% 多い理由（級の丸め）は、数字が合うことからの推定。
-- 面1を実際に描いて表示した測定はしていない（確保と、その後の空き・plan 登録だけ）。描画の時間・帯キャッシュの取り替えは MEGADEMO の測定（megademo-device-limits.md）を参照。
+- 面1を実際に描いて表示した測定はしていない（確保と、その後の空き・plan 登録だけ）。描画の時間・帯キャッシュの取り替えは MEGADEMO の測定（megademo-limits.md）を参照。
 - 面0には上限を付けられない（面0は `createSurface` を通らない）。面0を小さくしたいアプリは今のところ無い。
 
 ## 追記: DERBY に適用した試作（2026-09-30、ブランチ `vm/derby-surface1`、見送り）

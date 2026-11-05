@@ -46,7 +46,7 @@ def main():
     sources += [ROOT/'main/pocket/pocket_shape.c', ROOT/'main/pocket/pocket_shiki_api.c',
                 ROOT/'main/pocket/app_registry.c', ROOT/'tools/kasane_contract/test_meshbench_app.c', rom]
     binary = out/'meshbench'
-    run(['cc', *flags, '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
+    run(['cc', *flags, '-DKASANE_DMA_OVERLAP=1', '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
          *['-Wl,--wrap='+n for n in ['malloc', 'calloc', 'realloc', 'free']], '-lm', '-o', binary])
     evidence = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                 'compiler': compiler, 'commands': commands, 'quickjs_cache_key': key,
@@ -55,17 +55,16 @@ def main():
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',
                UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
     digests = []
-    for rows in [4, 8]:
-        for image_rows in [0, 1]:
-            try:
-                result = run([binary, rows, image_rows], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as error:
-                (out/f'rows{rows}-direct{image_rows}.log').write_text(error.stdout or '')
-                print(error.stdout or '', end='')
-                raise
-            (out/f'rows{rows}-direct{image_rows}.log').write_text(result.stdout)
-            print(result.stdout, end='')
-            digests.append(re.search(r'digest=([0-9a-f]+)', result.stdout)[1])
+    for rows, image_rows, delayed in [(r, i, d) for r in [4, 8] for i in [0, 1] for d in [0, 1]]:
+        try:
+            result = run([binary, rows, image_rows, delayed], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            (out/f'rows{rows}-direct{image_rows}-delayed{delayed}.log').write_text(error.stdout or '')
+            print(error.stdout or '', end='')
+            raise
+        (out/f'rows{rows}-direct{image_rows}-delayed{delayed}.log').write_text(result.stdout)
+        print(result.stdout, end='')
+        digests.append(re.search(r'digest=([0-9a-f]+)', result.stdout)[1])
     assert len(set(digests))==1, digests
     print('MESH_BENCH_ALL_ARMS_PASS exact panels; host counters are stubs, not target cycles')
 

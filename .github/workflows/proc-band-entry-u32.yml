@@ -3,14 +3,14 @@ on:
   push:
     branches: [main]
     paths:
-      - main/ui/kasane/ksn_procedural.c
-      - main/ui/kasane/ksn_procedural.h
+      - main/ui/kasane/ksn_shiki_frame.c
+      - main/ui/kasane/ksn_shiki_frame.h
       - tools/kasane_contract/test_proc_band_entry_u32.c
       - .github/workflows/proc-band-entry-u32.yml
   pull_request:
     paths:
-      - main/ui/kasane/ksn_procedural.c
-      - main/ui/kasane/ksn_procedural.h
+      - main/ui/kasane/ksn_shiki_frame.c
+      - main/ui/kasane/ksn_shiki_frame.h
       - tools/kasane_contract/test_proc_band_entry_u32.c
       - .github/workflows/proc-band-entry-u32.yml
   workflow_dispatch:
@@ -51,16 +51,16 @@ jobs:
           # The frame and band renderer only: the float VM (and the old pattern
           # test's base-versus-candidate comparison, which ran it) went in Shiki
           # v2.0; test_proc_pattern_line.c now builds its frames from segments.
-          common=(main/ui/kasane/ksn_procedural_surface.c)
+          common=(main/ui/kasane/ksn_shiki_surface.c)
           gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" tools/kasane_contract/test_proc_band_entry_u32.c -lm -o artifacts/entry/boundary
           artifacts/entry/boundary | tee artifacts/entry/boundary.log
           if [ '${{ matrix.model }}' = m32 ]; then
             # x87 too: the renderer's pattern arithmetic is integer, so it must pass as SSE does.
-            gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -mfpmath=387 -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_proc_pattern_line.c -lm -o artifacts/entry/pattern-x87
+            gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -mfpmath=387 -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_proc_pattern_line.c -lm -o artifacts/entry/pattern-x87
             artifacts/entry/pattern-x87 | tee artifacts/entry/pattern-x87.log
             flags+=(-msse2 -mfpmath=sse)
           fi
-          gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_proc_pattern_line.c -lm -o artifacts/entry/pattern
+          gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_proc_pattern_line.c -lm -o artifacts/entry/pattern
           artifacts/entry/pattern | tee artifacts/entry/pattern.log
           file artifacts/entry/boundary | tee artifacts/entry/abi.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

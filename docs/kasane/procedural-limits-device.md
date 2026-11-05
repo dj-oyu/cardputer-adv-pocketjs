@@ -60,7 +60,7 @@ JS 測定アプリ（ゲスト約 112 KB、ソース 12 KB）の中で測った�
 - 8点の恒等バッチで −480 と 720 の端点をすべて通る線。
 - VM の `MOVE`/`LINE` で (−480,700)→(700,−480)。
 
-host 参照は adapter を使わず、各 draw を `ksn_proc_step()` で1命令ずつ進め、点列を scalar kernel で変換して線分列を作る。同じ host で実物の `pocket_proc.c` にも描かせ、参照と一致することを確かめてから実機と比べた。
+host 参照は adapter を使わず、各 draw を `ksn_proc_step()` で1命令ずつ進め、点列を scalar kernel で変換して線分列を作る。同じ host で実物の `pocket_shiki_frame.c` にも描かせ、参照と一致することを確かめてから実機と比べた。
 
 | 確認 | 結果 |
 | --- | --- |
@@ -233,13 +233,13 @@ MEGADEMO（APPS から起動→全画面→小窓→全画面→Back、2回）PA
 
 ### 原因（コードで確認）
 
-1. Back は `app_tick(0x2000)`。`arm_turn()` は leave で yield を切るので、park 中の frame() は継続で必ず最後まで走り、その `commit()` が面を pending にする（`pocket_proc.c` の `commit_impl`）。
+1. Back は `app_tick(0x2000)`。`arm_turn()` は leave で yield を切るので、park 中の frame() は継続で必ず最後まで走り、その `commit()` が面を pending にする（`pocket_shiki_frame.c` の `commit_impl`）。
 2. 継続の後の R3a の表示ゲートは `!leaving` 付きで、leave は表示せずに `run_pumps` → `frame(0x2000)` へ進む。ターン先頭のゲートは継続より前なので効かない。
 3. `frame(0x2000)` の最初の `beginFrame()` が `any_pending()` で `BUSY`（`previous frame awaits presentation or repair`）。同じフレームの `replace()`/`patch()` も、継続のフレームが出した ticket が残っていれば `BUSY`。
 
 MEGADEMO の frame() は先頭で `beginFrame` を呼び、`BUSY` を捕まえて `DEGRADE` した後の `replace()` が ticket の `BUSY` で投げるので、保存ターンが例外で終わり `main.c` の `end_run` が `EXECUTION FAILED` にする。
 
-**ただし APPS メニューから起動した MEGADEMO では起きない**（実測）。ソースを渡して起動するアプリは `app_session.c` の `FRAME_WRAP` を通り、本体が `f.apply()` のネイティブ再入の床で走るので park しない（[megademo-device-limits.md](megademo-device-limits.md) §場面切替、[../vm/backlog.md](../vm/backlog.md)）。起きるのは park できる frame() — 診断起動（`'}'` の limits probe、`'J'` の MEGADEMO）、`hello`、ジョブ（Promise handler）の中で描くアプリ — と、この wrapper の制約が外れた後のすべてのアプリ。
+**ただし APPS メニューから起動した MEGADEMO では起きない**（実測）。ソースを渡して起動するアプリは `app_session.c` の `FRAME_WRAP` を通り、本体が `f.apply()` のネイティブ再入の床で走るので park しない（[megademo-limits.md](megademo-limits.md) §7、[../vm/backlog.md](../vm/backlog.md)）。起きるのは park できる frame() — 診断起動（`'}'` の limits probe、`'J'` の MEGADEMO）、`hello`、ジョブ（Promise handler）の中で描くアプリ — と、この wrapper の制約が外れた後のすべてのアプリ。
 
 ### 修正
 
@@ -252,7 +252,7 @@ MEGADEMO の frame() は先頭で `beginFrame` を呼び、`BUSY` を捕まえ�
 
 | 案 | 却下の理由 |
 | --- | --- |
-| leave の `beginFrame` は pending を捨てて新しい候補を受け付ける | procedural のネイティブ仕様の変更で、`pocket_proc.c` に「leave」を知らせる経路が要る。確定済みのフレームが一度も表示されずに消える。ticket 側の `replace()`/`patch()` の `BUSY` は残る |
+| leave の `beginFrame` は pending を捨てて新しい候補を受け付ける | procedural のネイティブ仕様の変更で、`pocket_shiki_frame.c` に「leave」を知らせる経路が要る。確定済みのフレームが一度も表示されずに消える。ticket 側の `replace()`/`patch()` の `BUSY` は残る |
 | Back で park 中のフレームを完走させず終了させる（`JS_VMTerminate`） | finally とそのフレームの仕事（ジョブで park したなら保存そのもの）を飛ばす。leave は鎖を完了させるという §7 と vm-L1-design §5.2 の決定に反する |
 | Back を次のターンへ持ち越す（非 leave と同じ） | 次のターンは無い（`main.c` は直後に停止を要求する）。既存コメントどおり保存が黙って落ちる |
 | 表示の後に予算を張り直す（`arm_turn` をもう一度） | 予算と watchdog の意味を変える。frame() は切られないので要らない |

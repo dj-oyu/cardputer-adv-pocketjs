@@ -1,4 +1,4 @@
-/* The band renderer's horizontal-line fill (g_ksn_proc_hspan, ksn_procedural.h)
+/* The band renderer's horizontal-line fill (g_ksn_proc_hspan, ksn_shiki_frame.h)
  * against its own Bresenham walk (g_ksn_proc_hspan = 0) on random frames:
  * many lines overwriting each other in order, half of them horizontal, ends
  * anywhere in -480..720 (off the panel on either side, odd and even columns
@@ -6,7 +6,7 @@
  * both the plain loop and the one a frame with pattern lines takes
  * (frame.ext). The band sits between guard pixels so a fill that runs past
  * its row or its band is caught. */
-#include "ksn_procedural.h"
+#include "ksn_shiki_frame.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,6 +1,6 @@
 /* Structural pattern matrix: damage must cover every changed pixel, and
  * replay order must not depend on the order of 8-row strip requests. */
-#include "ksn_procedural_layers.h"
+#include "ksn_shiki_layers.h"
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>

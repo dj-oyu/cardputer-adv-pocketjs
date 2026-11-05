@@ -1,7 +1,7 @@
 // pocket.kasane.shiki (docs/kasane/shiki-spec.md sec.9): registration of
 // Shiki programs, data regions and their windows, the Shiki heap's report.
 // Drawing shares the procedural surface's slots, handles and frames
-// (pocket_proc.c): beginFrame, commit, resource and createSurface are the
+// (pocket_shiki_frame.c): beginFrame, commit, resource and createSurface are the
 // procedural functions themselves, and draw runs the Shiki engine into the
 // same frame. grid is the existing pocket.kasane.grid (sec.7).
 //
@@ -19,7 +19,7 @@
 // again with NULL (sec.9.2).
 #include "pocket_shiki_api.h"
 #include "pocket_api.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "shiki_heap.h"
 #include "ui/kasane/ksn_shiki.h"
 #include <math.h>

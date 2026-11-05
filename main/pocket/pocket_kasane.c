@@ -1,10 +1,10 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
-#include "pocket_proc.h"
+#include "pocket_shiki_frame.h"
 #include "pocket_grid.h"
 #include "pocket_video.h"
 #include "pocket_pixel.h"
-#include "ui/kasane/ksn_procedural.h"
+#include "ui/kasane/ksn_shiki_frame.h"
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 #include "esp_log.h"
 #endif

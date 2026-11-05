@@ -1,4 +1,4 @@
-// Pixels for docs/apps/derby-trig-cull.md: DERBY WATCH's oval under a held
+// Pixels for docs/apps/derby-camera-history.md: DERBY WATCH's oval under a held
 // panning WIDE 2, rendered by the real harness (tools/games/test_derby_host.c,
 // built by run_derby.py: QuickJS, the plans' VM, the Kasane renderer) for the
 // app as it is and for each variant of variants.mjs, then compared pixel for
