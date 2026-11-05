@@ -20002,11 +20002,6 @@ static bool needs_backtrace(JSValue exc)
 }
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
-/* MEASUREMENT ONLY (QJS_DISPATCH arm D): at -Os GCC factors every
- * `goto *dispatch_table[...]` into one shared jx and never duplicates it back
- * (pass_duplicate_computed_gotos is off for size); -O2 without small-function
- * inlining gives each handler its own jx for +1.2 KB. */
-__attribute__((optimize("O2","no-inline-small-functions")))
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                                JSValueConst this_obj, JSValueConst new_target,
                                int argc, JSValueConst *argv, int flags)
