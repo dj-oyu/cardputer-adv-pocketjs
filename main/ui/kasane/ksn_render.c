@@ -1622,7 +1622,9 @@ static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,
 /* `dx0`/`dx1` are the band's damaged columns: the group composites inside them
  * and nowhere else, because the strip outside them belongs to a band that has
  * already gone out. */
-/* MEASUREMENT ONLY (O2_AB arm C): the group path at -Os inside the -O2 file. */
+/* -Os inside the -O2 file: at -O2 the tile path inlines into render_rects and
+ * MEGADEMO's CORE scene ran its groups 27% slower on the device (lcd-dma-driver.md
+ * §9.12). The attribute also keeps -O2 helpers from inlining here. */
 __attribute__((optimize("Os")))
 static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,int dx0,int dx1,uint16_t *pixels){

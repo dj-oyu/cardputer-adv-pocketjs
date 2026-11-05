@@ -526,7 +526,10 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
 set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTIONS "-O2")
-# MEASUREMENT ONLY (O2_AB arm B): the per-frame render and present path at -O2.
+# The per-frame render and present path at -O2 (docs/platform/lcd-dma-driver.md
+# §9.12): render_ms -10 to -15% on four apps, +12.6 KB flash, +44 B DIRAM.
+# -ffp-contract=off keeps float results identical to the -Os build (no fused
+# multiply-add). ksn_render.c keeps render_group at -Os by function attribute.
 set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
     pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 set_source_files_properties(pocket/pocket_proc.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
