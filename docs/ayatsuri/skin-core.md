@@ -4,7 +4,8 @@
 rigid jointの次に必要なbind対応とweight変形を検査する、allocation-freeのC coreである。
 このheader単体は独立数値coreであり、firmwareのcapabilityや既定appは変えない。
 後続の[C描画接続](skin-render-bridge.md)がskin結果を既存Model/opaque rendererへ
-同期借用で渡す。JS scene/managed bindingとAYNM skin tableは未実装。公開の合成数値だけを使い、狐の資産は使わない。
+同期借用で渡す。[managed JS skin評価](skin-js.md)も別sliceとして追加する。
+scene facadeの自動skin制御とAYNM skin tableは未実装。公開の合成数値だけを使い、狐の資産は使わない。
 描画成功・実機性能・実キャラクター完成を示す変更ではない。
 
 ## 入出力と所有権

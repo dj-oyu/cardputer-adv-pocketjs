@@ -37,6 +37,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [optional native scene / motion](../ayatsuri/scene-motion.md) | 任意appからの名前付きhandle、明示時刻の演技、公開rigid-joint host検査と未完の狐工程 |
 | [合成skin scalar core](../ayatsuri/skin-core.md) | bind palette・4 influence変形・法線と原子的失敗のhost検査。AYNM/描画へは未接続 |
 | [skinのC描画接続](../ayatsuri/skin-render-bridge.md) | immutable Modelへの同期geometry借用、既存opaque renderer、寿命とメモリの合成host検査 |
+| [managed JS skin評価](../ayatsuri/skin-js.md) | typed入力からnative palette/skinを計算、guest work、実QuickJS/render/OOM/GC検査 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |

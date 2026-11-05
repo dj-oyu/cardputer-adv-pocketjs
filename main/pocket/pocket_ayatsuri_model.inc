@@ -2,7 +2,7 @@
 /* Immutable cold model + independently owned mutable instances. Include after
  * shade_buffer/fail helpers. No JS backing pointer survives a synchronous call.
  * All native storage is charged to the ordinary guest allocator. */
-#include "ayatsuri/ayatsuri_model.h"
+#include "ayatsuri/ayatsuri_model_skin.h"
 
 typedef struct {
     ayatsuri_model model;
@@ -15,6 +15,8 @@ typedef struct {
     JSValue owner;
     pocket_model_owner *shared;
     void *arena;
+    void *skin_work;
+    size_t skin_bytes;
     bool closed,busy;
 } pocket_model_actor;
 static JSClassID pocket_model_class,pocket_model_instance_class;
@@ -37,6 +39,7 @@ static bool managed_model_buffer(JSContext *ctx,JSValueConst value,JSTypedArrayE
      * opacity stays byte-addressed in the core and needs no alignment here. */
     if(ok&&(type==JS_TYPED_ARRAY_FLOAT32||type==JS_TYPED_ARRAY_UINT32))
         ok=!data||((uintptr_t)(data+offset)&3u)==0;
+    if(ok&&type==JS_TYPED_ARRAY_UINT16)ok=!data||((uintptr_t)(data+offset)&1u)==0;
     if(ok)*out=(shade_view){data?data+offset:NULL,bytes};
     JS_FreeValue(ctx,ab);return ok;
 }
@@ -79,6 +82,7 @@ static void managed_instance_release(JSRuntime *rt,pocket_model_actor *a){
         pocket_model_owner *m=a->shared;
         (void)ayatsuri_model_instance_dispose(&a->core,a,1);
         js_free_rt(rt,a->arena);a->arena=NULL;
+        js_free_rt(rt,a->skin_work);a->skin_work=NULL;a->skin_bytes=0;
         JSValue owner=a->owner;a->owner=JS_UNDEFINED;a->shared=NULL;a->closed=true;
         --m->instances;managed_model_detach(rt,m);
         /* JS_FreeValueRT may finalize Model first in a collected expando
@@ -167,6 +171,54 @@ static JSValue managed_instance_evaluate(JSContext *ctx,JSValueConst self,int ar
        managed_model_buffer(ctx,argv[1],JS_TYPED_ARRAY_FLOAT32,false,&light)&&light.bytes==24){
         float c[9],l[6];memcpy(c,camera.data,sizeof c);memcpy(l,light.data,sizeof l);
         status=ayatsuri_model_instance_evaluate(&a->core,a,1,c,l);
+    }
+    a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
+}
+/* Keep per-vertex/per-joint work on the guest heap, not the UI task stack.
+ * Input access below uses only strict number/typed-array primitives: no JS
+ * getters or coercions can detach a previously borrowed input buffer. */
+static __attribute__((noinline)) JSValue managed_instance_evaluate_skin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="ayatsuri.instance.evaluateSkin";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+    if(!a)return JS_EXCEPTION;
+    shade_view v[7];double node;bool valid=argc==8&&number(ctx,argv[2],&node)&&whole(node,0,UINT16_MAX);
+    const unsigned args[7]={0,1,3,4,5,6,7};
+    const JSTypedArrayEnum types[7]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,
+        JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16};
+    for(unsigned j=0;valid&&j<7;++j)valid=managed_model_buffer(ctx,argv[args[j]],types[j],false,v+j);
+    size_t joints=0,vertices=0;
+    if(valid){
+        joints=v[2].bytes/48;vertices=v[4].bytes/24;
+        valid=v[0].bytes==36&&v[1].bytes==24&&joints>0&&joints<=AYATSURI_MODEL_MAX_NODES&&
+            v[2].bytes==joints*48&&v[3].bytes==v[2].bytes&&vertices>=3&&vertices<=KSN_PROC_GOURAUD_VERTICES&&
+            v[4].bytes==vertices*24&&v[5].bytes==vertices*8&&v[6].bytes==vertices*8;
+    }
+    if(!valid){a->busy=false;return managed_model_error(ctx,op,AYATSURI_MODEL_INVALID);}
+    const size_t bytes=vertices*(sizeof(ayatsuri_skin_vertex)+sizeof(ayatsuri_skin_result))+joints*sizeof(ayatsuri_transform);
+    const bool grow=bytes>a->skin_bytes;void *work=grow?js_malloc(ctx,bytes):a->skin_work;
+    if(!work){a->busy=false;return JS_ThrowOutOfMemory(ctx);}
+    ayatsuri_skin_vertex *input=work;
+    ayatsuri_skin_result *result=(void *)(input+vertices);
+    ayatsuri_transform *palette=(void *)(result+vertices);
+    ayatsuri_status skin=AYATSURI_OK;
+    for(size_t j=0;j<joints&&skin==AYATSURI_OK;++j){
+        ayatsuri_transform global,bind;memcpy(&global,v[2].data+j*48,48);memcpy(&bind,v[3].data+j*48,48);
+        skin=ayatsuri_skin_palette(&global,&bind,1,palette+j);
+    }
+    for(size_t j=0;j<vertices;++j){
+        memcpy(input[j].position,v[4].data+j*24,12);memcpy(input[j].normal,v[4].data+j*24+12,12);
+        memcpy(input[j].joints,v[5].data+j*8,8);memcpy(input[j].weights,v[6].data+j*8,8);
+    }
+    if(skin==AYATSURI_OK)skin=ayatsuri_skin_evaluate(palette,joints,input,vertices,result);
+    ayatsuri_model_status status=skin==AYATSURI_OK?AYATSURI_MODEL_OK:
+        skin==AYATSURI_RANGE?AYATSURI_MODEL_RANGE:AYATSURI_MODEL_INVALID;
+    if(status==AYATSURI_MODEL_OK){
+        float c[9],l[6];memcpy(c,v[0].data,sizeof c);memcpy(l,v[1].data,sizeof l);
+        const ayatsuri_model_mesh_geometry geometry={(uint16_t)node,(uint16_t)vertices,result};
+        status=ayatsuri_model_instance_evaluate_meshes(&a->core,a,1,c,l,&geometry,1);
+    }
+    if(grow){
+        if(status==AYATSURI_MODEL_OK){js_free(ctx,a->skin_work);a->skin_work=work;a->skin_bytes=bytes;}
+        else js_free(ctx,work);
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
 }
@@ -325,6 +377,7 @@ static JSValue managed_instance_stats(JSContext *ctx,JSValueConst self,int argc,
     if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"nodes",JS_NewUint32(ctx,a->core.model->node_count))>=0;
     if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"packets",JS_NewUint32(ctx,a->core.model->packet_count))>=0;
     if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"arenaBytes",JS_NewFloat64(ctx,(double)a->core.arena_bytes))>=0;
+    if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"skinWorkBytes",JS_NewFloat64(ctx,(double)a->skin_bytes))>=0;
     if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"mutationEpoch",JS_NewUint32(ctx,a->core.mutation_epoch))>=0;
     if(valid)valid=JS_SetPropertyStr(ctx,argv[0],"evaluated",JS_NewBool(ctx,a->core.evaluated))>=0;
     const ayatsuri_model_stats s=a->core.stats;
@@ -368,6 +421,7 @@ static const JSCFunctionListEntry managed_model_methods[]={
     JS_CFUNC_DEF("dispose",0,managed_model_dispose)};
 static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("targets",4,managed_instance_targets),JS_CFUNC_DEF("evaluate",2,managed_instance_evaluate),
+    JS_CFUNC_DEF("evaluateSkin",8,managed_instance_evaluate_skin),
     JS_CFUNC_DEF("nodeKind",1,managed_instance_node_kind),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),
     JS_CFUNC_DEF("submitClipped",3,managed_instance_submit_clipped),

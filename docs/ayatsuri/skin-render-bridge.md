@@ -2,7 +2,8 @@
 
 [skin scalar core](skin-core.md) の結果を、immutableなAYNM v1 Modelの
 projection/shade/visibilityと既存opaque mesh rendererへ渡す最小のC接続である。
-新しいwire section、skinのJS API、appの自動ロードは追加しない。狐資産・実機・
+このC sliceは新しいwire section、skinのJS API、appの自動ロードを追加しない。
+後続の[managed JS skin評価](skin-js.md)がnative skin計算とこのC接続を呼ぶ。狐資産・実機・
 固定小数点/PIE作業は対象外。従来のrigid evaluate/submit経路を維持する。
 
 ## APIと座標系
@@ -112,7 +113,8 @@ immutable cold bytes、独立instance、skin法線による照明変化、片面
 
 ## 未完の工程
 
-JSからskin inputを設定するbinding、AYNM skin tableのwire契約、asset importer、
+managed JS bindingは[別slice](skin-js.md)で1meshの同期評価まで追加した。
+AYNM skin tableのwire契約、asset importer、
 armature/bind/rest対応、morph/表情、skin対応両面/holes、surface法線再計算、
 実キャラクター姿勢/遮蔽/ヒープ/速度、実機表示は未実装または未検証。
 このsliceは合成C描画接続の受入までであり、狐3Dの完成を意味しない。
