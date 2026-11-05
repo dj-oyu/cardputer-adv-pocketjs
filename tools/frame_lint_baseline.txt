@@ -1,0 +1,1 @@
+# tools/frame_lint.py baseline: function, far accesses allowed
