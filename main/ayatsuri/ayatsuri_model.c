@@ -3,6 +3,7 @@
 #include "ayatsuri_visibility.h"
 #include "ayatsuri_shade.h"
 #include "../ui/kasane/ksn_shiki_frame.h"
+#include "ayatsuri_model_provider.h"
 #include <limits.h>
 
 typedef struct {
@@ -542,10 +543,19 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
     return true;
 }
 /* Caller has entered the instance and prevalidated every override. */
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+static ayatsuri_model_status evaluate_meshes_core(ayatsuri_model_instance *i,
+        const float camera[9],const float light[6],const ayatsuri_model_mesh_geometry *meshes,size_t count,
+        ayatsuri_model_geometry_provider provider,void *context,ayatsuri_skin_result *slot){
+#else
 static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
         const float camera[9],const float light[6],const ayatsuri_model_mesh_geometry *meshes,size_t count){
+#endif
     add_count(&i->stats.eval_calls,1);
     bool same=i->evaluated&&!count&&!i->mesh_overridden;
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+    same=same&&!provider;
+#endif
     if(!camera||!light){i->evaluated=false;return leave(i,AYATSURI_MODEL_INVALID);}
     for(unsigned k=0;k<9;++k){if(!isfinite(camera[k])){i->evaluated=false;return leave(i,AYATSURI_MODEL_INVALID);}if(camera[k]!=i->camera[k])same=false;}
     for(unsigned k=0;k<6;++k){if(!isfinite(light[k])||(k>=3&&!unit(light[k]))){i->evaluated=false;return leave(i,AYATSURI_MODEL_INVALID);}if(light[k]!=i->light[k])same=false;}
@@ -570,13 +580,40 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
         memcpy(work(i,j),&result,48);states(i)[j].world_enabled=states(i)[j].enabled&&(parent<0||states(i)[parent].world_enabled);
         const ayatsuri_skin_result *geometry=NULL;
         for(size_t k=0;k<count;++k)if(meshes[k].node_id==j){geometry=meshes[k].vertices;break;}
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+        if(provider&&node[2]==3){
+            const uint8_t *d=row(i->model,9,m16(node+4),32);unsigned nv=m16(d+2);
+            if(!provider(context,j,nv,slot))return leave(i,AYATSURI_MODEL_INVALID);
+            for(unsigned v=0;v<nv;v++){
+                double length=0;
+                for(unsigned r=0;r<3;r++){
+                    if(!isfinite(slot[v].position[r])||fabsf(slot[v].position[r])>4096||!isfinite(slot[v].normal[r]))
+                        return leave(i,AYATSURI_MODEL_INVALID);
+                    length+=(double)slot[v].normal[r]*slot[v].normal[r];
+                }
+                if(fabs(length-1)>1e-4)return leave(i,AYATSURI_MODEL_INVALID);
+            }
+            geometry=slot;
+        }
+#endif
         if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward))||
            (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry)))
             return leave(i,AYATSURI_MODEL_RANGE);
         if(node[2]){add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);}
     }
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+    i->mesh_overridden=count!=0||provider!=NULL;i->evaluated=true;return leave(i,AYATSURI_MODEL_OK);
+#else
     i->mesh_overridden=count!=0;i->evaluated=true;return leave(i,AYATSURI_MODEL_OK);
+#endif
 }
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+/* Existing public entry points retain their original behavior. */
+static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
+        const float camera[9],const float light[6],const ayatsuri_model_mesh_geometry *meshes,size_t count){
+    return evaluate_meshes_core(i,camera,light,meshes,count,NULL,NULL,NULL);
+}
+#endif
 ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,const float camera[9],const float light[6]){
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
@@ -666,3 +703,26 @@ ayatsuri_model_status ayatsuri_model_instance_sided_mesh_view(ayatsuri_model_ins
     *out=(ayatsuri_model_sided_mesh_view){p,xy+2*p->header.vertices,back,(const uint8_t *)(back+2*p->header.vertices),id,p->header.vertices};
     return leave(i,AYATSURI_MODEL_OK);
 }
+
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+/* Opt-in trusted native experiment; never route a JS callback here.
+ * Candidate instance is disposable; ready snapshots belong to the caller. */
+ayatsuri_model_status ayatsuri_model_candidate_evaluate_provider(ayatsuri_model_instance *i,const void *owner,
+        uint32_t generation,const float camera[9],const float light[6],
+        ayatsuri_model_geometry_provider provider,void *context,ayatsuri_skin_result *slot){
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    if(!provider||!geometry_span(i,slot,32*sizeof *slot,_Alignof(ayatsuri_skin_result))||
+       overlaps(slot,32*sizeof *slot,i->model,sizeof *i->model)||
+       overlaps(slot,32*sizeof *slot,i->model->data,i->model->bytes)||
+       overlaps(slot,32*sizeof *slot,camera,9*sizeof(float))||
+       overlaps(slot,32*sizeof *slot,light,6*sizeof(float)))return leave(i,AYATSURI_MODEL_INVALID);
+    for(unsigned j=0;j<i->model->node_count;j++){
+        const uint8_t *node=row(i->model,1,j,16);
+        if(node[2]==3){const uint8_t *d=row(i->model,9,m16(node+4),32);
+            if(mesh_double(i->model,node)||d[10]||m16(d+2)>32)return leave(i,AYATSURI_MODEL_INVALID);
+        }
+    }
+    return evaluate_meshes_core(i,camera,light,NULL,0,provider,context,slot);
+}
+
+#endif /* AYATSURI_MODEL_EXPERIMENTAL_PROVIDER */
