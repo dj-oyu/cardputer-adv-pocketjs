@@ -47,6 +47,34 @@ ASan/UBSan、Shiki API（75/75）、turn、class registry、board半帯、STRESS
 後段のgame/m32等を含む総合script全体の完走とは扱わない。
 同一headのGitHub Actions runは照合時0件。PRを作ってCIを起動する操作は行わない。
 
+### 追加検証（a44b8ac、2026-11-05）
+
+前段の「後段未実行」は次の結果で更新する。対象は公開head
+`a44b8ac5838fd18f62be00b0ce37b7237a4e5720`。production codeの追加修正はない。
+
+- `GAMES_M32=0 bash tools/kasane_contract/run.sh`: entry pointがexit 0。
+  MEGADEMO、frame/turn、grid fold/resize/stream、video、LCD CATCH、DERBY
+  （camera条件・series oracle・odds校正）、BIG WAVE、末尾のprojection/PIE model/
+  counter/UTF-8/C++ header検査まで実行した。
+- JITの3検査はtoolchainを `~/.espressif` だけで探すためrunner内ではskip。
+  既存のESP-IDF 6.0.1用Xtensa toolchainのassemblerパスを
+  `gen_encoding.assembler(path)` に渡す独立orchestrationで補完した。
+  encoder 3,590件、vector 11 sections、scalarの45 shipped programsがPASS。
+  scalar random 5,000 programsはaggregate内の結果を利用し、補完では繰り返さない。
+- m32は未実行。使用する既存cacheにsysrootがなく、最小 `cc -m32` linkも
+  `Scrt1.o`、`crti.o`、`-lgcc` 等の欠落で失敗した。helperは不足時にpackage取得を行うため
+  呼ばず、追加導入を行っていない。非m32でのexit 0をm32合格と読み替えない。
+- fresh contextの独立内部reviewがmain `3ccd8fde` と旧mesh `b10976a3` の実diffを確認。
+  確定修正指摘0件。packet cursor/carry、read_rows/span/backdrop、depth damage、
+  rollback/retry/ACK/reset、build source/FP設定を調査した。
+  別作業領域のASan/UBSan O2試験もPASS。独立syntheticではheader offset
+  0/1/31/32/63/64/127/255/511/1000、1〜7行分割、全payload切断位置を確認した。
+
+これはhost検証とpublic code reviewであり、実機動作、m32 layoutでのguest peak、
+実機stack/heap peak、cycle/FPS、private modelの表示品質は未確認。
+Actions runとcheck-runsはa44b8acで各0件。branchへのpushで動くworkflowはなく、
+PRやCI設定の変更による起動は行わない。
+
 `pocket.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`
 opens an explicit opaque shared-depth scope. Limits remain 65536 bytes,
 8000000 work, 256 records, rows1 or8. Use ordinary `shiki.beginFrame` for
