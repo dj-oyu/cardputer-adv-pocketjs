@@ -408,13 +408,6 @@ static const struct {const char *name;uint16_t select,mask;} turnperf_events[]={
     {"exr_replay", XTPERF_CNT_EXR,     XTPERF_MASK_EXR_REPLAYS},
     {"load",       XTPERF_CNT_D_LOAD_U1,XTPERF_MASK_D_LOAD_ALL},
     {"imem_hit",   XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_HITS},
-    /* MEASUREMENT ONLY (QJS_PERF): retired control transfers by kind (INSN
-     * masks: JX 0x1, CALLX 0x2, RET 0x4, BRANCH_TAKEN 0x10, J 0x20, CALL 0x40,
-     * BRANCH_NOT_TAKEN 0x80). */
-    {"insn_jx",    XTPERF_CNT_INSN,    0x0001},
-    {"insn_brj",   XTPERF_CNT_INSN,    0x0030},
-    {"insn_callret",XTPERF_CNT_INSN,   0x0046},
-    {"insn_ntaken",XTPERF_CNT_INSN,    0x0080},
 };
 #define TURNPERF_EVENTS (sizeof turnperf_events/sizeof*turnperf_events)
 static unsigned turnperf_sel,turnperf_n,turnperf_cont_n;
