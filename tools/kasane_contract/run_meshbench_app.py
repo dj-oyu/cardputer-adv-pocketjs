@@ -9,9 +9,9 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def main():
-    subprocess.run(['node', 'apps/meshbench/generate.cjs', '--check'], cwd=ROOT, check=True)
-    out = ROOT/'.cache/meshbench-host'
+def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cache_name='meshbench-host', extra_sources=()):
+    """Build a public app-level native harness using the same real compositor."""
+    out = ROOT/'.cache'/cache_name
     out.mkdir(parents=True, exist_ok=True)
     qjs = ROOT/'components/quickjs-ng/quickjs-ng'
     flags = ['-std=gnu11', '-O2', '-g', '-ffp-contract=off', '-fsanitize=address,undefined',
@@ -44,7 +44,8 @@ def main():
     sources = list(dict.fromkeys(re.findall(r'(?:main|tools)/[\w/]+\.c', (ROOT/'tools/build_kasane_test.sh').read_text())))
     sources = [ROOT/p for p in sources if p!='tools/test_pocket_kasane.c']
     sources += [ROOT/'main/pocket/pocket_shape.c', ROOT/'main/pocket/pocket_shiki_api.c',
-                ROOT/'main/pocket/app_registry.c', ROOT/'tools/kasane_contract/test_meshbench_app.c', rom]
+                ROOT/'main/pocket/app_registry.c', ROOT/test_source, rom]
+    sources += [ROOT/p for p in extra_sources]
     binary = out/'meshbench'
     run(['cc', *flags, '-DKASANE_DMA_OVERLAP=1', '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
          *['-Wl,--wrap='+n for n in ['malloc', 'calloc', 'realloc', 'free']], '-lm', '-o', binary])
@@ -54,10 +55,17 @@ def main():
     (out/'commands.json').write_text(json.dumps(evidence, indent=2)+'\n')
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',
                UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
+    return binary, out, env
+
+
+def main():
+    subprocess.run(['node', 'apps/meshbench/generate.cjs', '--check'], cwd=ROOT, check=True)
+    binary, out, env = build_harness()
     digests = []
     for rows, image_rows, delayed in [(r, i, d) for r in [4, 8] for i in [0, 1] for d in [0, 1]]:
         try:
-            result = run([binary, rows, image_rows, delayed], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            result = subprocess.run(list(map(str, [binary, rows, image_rows, delayed])), cwd=ROOT,
+                                    check=True, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as error:
             (out/f'rows{rows}-direct{image_rows}-delayed{delayed}.log').write_text(error.stdout or '')
             print(error.stdout or '', end='')

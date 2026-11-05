@@ -2,8 +2,8 @@
 
 現在の公開mesh経路は `pocket.ayatsuri.modelOpen(buffer)`、共有Modelからの
 独立instance、`pocket.kasane.shiki` のframe APIを使う。
-PR #110のcharacter utilityは別の実験であり、このbranchはそのJS sceneや
-motion chunk全体を取り込んでいない。旧例の `pocket.kasane.procedural` は
+PR #110のnative sceneと軽量motionは[optional JS層](scene-motion.md)として抽出した。
+旧動的character engineや資産・デモ全体を取り込んだものではない。旧例の `pocket.kasane.procedural` は
 Shiki v2で削除済み。現行frame ownerは `pocket.kasane.shiki` である。
 
 アプリまたは環境adapterが時計、入力、tick/seek/pause、begin、commitと提示完了を
