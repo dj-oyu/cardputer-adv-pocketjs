@@ -44,6 +44,7 @@
 | [allocator-cost.md](allocator-cost.md) | 記録 | ゲストのアロケータの値段を実機で測った（`CONFIG_POCKET_VM_ALLOCPROBE`、計測後に削除）: malloc→free 1 組 約 1,800 サイクル、STRESS の JS のターンの 20.6%。経路は `heap_caps` の走査・クリティカルセクション・flash 上の読み戻し |
 | [r5-icache.md](r5-icache.md) | 記録 | R5: STRESS のターンを QEMU で記録し、命令キャッシュの模型に通した（`tools/r5sim/`）。触るのは 45.5 KiB、衝突は 15%。flash 内の並べ替えは効かない。IRAM 8 KiB は実機で JS −15%・空き −8.7 KiB で、見送り |
 | [turn-working-set.md](turn-working-set.md) | 記録 | 段つきインタプリタの予算の下調べ: STRESS の 1 ターンが触るコードを部品ごとに分けた（`tools/r5sim/turnset.py`、模型の推定）。試作 3 つを入れても 42.5 → 41.8 KiB、インタプリタ（core＋helper）は 21.3 KiB で予算 14 KiB を超え、主因は helper。R5 の模型の行の水増し（45.5 → 42.5 KiB）を修正 |
+| [turn-jumps-pie.md](turn-jumps-pie.md) | 記録 | JS のターンの分岐と PIE（2026-11-05、実測）: 分岐はサイクルの 13〜15%、うち振り分け（1 ターン 4,300〜11,000 オペコード）は約 1%。`-Os` の GCC が computed goto を 1 本の `jx` に畳む件と、複製の値段（+1.2 KB で 0.5〜1.2%、採らない）。flash キャッシュが 34〜43%。PIE の効く場所は QuickJS のターンにほぼ無い |
 | [turn-cpi.md](turn-cpi.md) | 記録 | R4: JS のターンを Xtensa の性能カウンタで測った（`CONFIG_POCKET_VM_TURNPERF`）。IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち。flash を QIO にして 1 フレームの JS 10.78 → 7.25 ms（同一配置） |
 | [gc-cap-backoff.md](gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
 | [spread-eval-oom.md](spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
