@@ -526,6 +526,10 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
 set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTIONS "-O2")
+# MEASUREMENT ONLY (O2_AB arm B): the per-frame render and present path at -O2.
+set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
+    pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(pocket/pocket_proc.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
