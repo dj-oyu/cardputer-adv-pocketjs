@@ -527,12 +527,8 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     const char *op="kasane.shiki.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
-    const uint32_t mp0=pocket_cycles();          /* MEASUREMENT ONLY (COMMIT_PROF) */
     surface->damage=frame_damage(surface);
-    const uint32_t mp1=pocket_cycles();
     band_signature(surface->candidate,&surface->candidate_sig);
-    {extern uint32_t g_commit_prof[4];const uint32_t mp2=pocket_cycles();
-     g_commit_prof[2]+=mp1-mp0;g_commit_prof[3]+=mp2-mp1;}
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
     visit_stats(surface->candidate);
@@ -585,12 +581,8 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
 #endif
     return result;
 }
-uint32_t g_commit_prof[4];   /* MEASUREMENT ONLY: commits, whole commit, frame_damage, band_signature (cycles) */
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    const uint32_t c0=pocket_cycles();
-    JSValue r=guarded(ctx,self,argc,argv,commit_impl);
-    g_commit_prof[0]++;g_commit_prof[1]+=pocket_cycles()-c0;
-    return r;
+    return guarded(ctx,self,argc,argv,commit_impl);
 }
 /* {maxSegments: 1..1024} (absent or undefined: 0, the 1,024 default). */
 static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segments){
