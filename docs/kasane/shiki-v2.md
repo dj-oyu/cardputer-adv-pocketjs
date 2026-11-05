@@ -109,7 +109,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 ### 3.4 割り算の書き方（規範ではなく、変換器の手引き）
 
-`@shiki` の `x / y`（`y` が変数）は v1 と同じく変換器が拒む。逆数が要る式は、逆数の表（`k_rec = 1` の領域、`R` 個の刻み）を `LOOKUP` で引いて初期値にし、Newton 1〜2 回（`r ← r (2 − y r)`、`MUL` 2・`SUB` 1）で詰める。精度と命令の数の手本を変換器の試験に置く（DERBY の投影の誤差 0.07 px、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md) §2）。
+`@shiki` の `x / y`（`y` が変数）は v1 と同じく変換器が拒む。逆数が要る式は、逆数の表（`k_rec = 1` の領域、`R` 個の刻み）を `LOOKUP` で引いて初期値にし、Newton 1〜2 回（`r ← r (2 − y r)`、`MUL` 2・`SUB` 1）で詰める。精度と命令の数の手本を変換器の試験に置く（DERBY の投影の誤差 0.07 px、[derby-camera-history.md](../apps/derby-camera-history.md) §1）。
 
 ## 4. アプリの状態をデータ領域に置く（構想の 3）
 

@@ -106,12 +106,12 @@
 ### 2.6 アプリの使い方の実態
 
 - 登録はどのアプリも**1 フレームに 1 本、空きヒープを見てから**行う: DERBY の `load()`（空き 18 KB 未満なら待つ、`apps/derby/derby_view.js`）、MEGADEMO の `prefetch()`（`LOAD[2]` の門、`apps/kasane/megademo_set.js`）、BIG WAVE の `pump()`（`apps/bigwave/big_wave.js`）。同じ仕組みを各アプリが自前で書いている。
-- 毎フレーム `beginFrame` → `draw` を何度も → `commit`。draw の回数は DERBY 15〜26・BIG WAVE 16・MEGADEMO 7 回/フレーム（[derby-native-survey.md](../apps/derby-native-survey.md)、[derby-pan-memory.md](../apps/derby-pan-memory.md)、[derby-finish-fx.md](../apps/derby-finish-fx.md)）。
+- 毎フレーム `beginFrame` → `draw` を何度も → `commit`。draw の回数は DERBY 15〜26・BIG WAVE 16・MEGADEMO 7 回/フレーム（[derby-camera-history.md](../apps/derby-camera-history.md)、[derby-camera-history.md](../apps/derby-camera-history.md)、[derby-finish-fx.md](../apps/derby-finish-fx.md)）。
 - 引数は登録時に固定。変えるには `unregister` → `register`。
 
 ## 3. 棚卸しで見えた問題
 
-1. **JS とネイティブの往復が費用の大半。** draw 1 回の固定費は約 100〜115 µs（実測、[derby-background-cost.md](derby-background-cost.md)）で、VM の 1 ステップ 0.45 µs の約 230 倍。式がデータの列を読めないので、項目ごとに JS で計算して draw を呼ぶ形になる（DERBY でこの固定費だけで 1.5〜3 ms/フレーム、推定）。JS で 1 点を投影すると 42 µs、入力の配列が 23 µs（実測、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）。`pocket.derby.ser()` の native 化が効いたのは、「列を 1 回の呼び出しで回す」をアプリ専用に作ったから。**メモリアクセス（データ領域を式から読む）は、これを汎用にする入口になる。**
+1. **JS とネイティブの往復が費用の大半。** draw 1 回の固定費は約 100〜115 µs（実測、[derby-background-cost.md](derby-background-cost.md)）で、VM の 1 ステップ 0.45 µs の約 230 倍。式がデータの列を読めないので、項目ごとに JS で計算して draw を呼ぶ形になる（DERBY でこの固定費だけで 1.5〜3 ms/フレーム、推定）。JS で 1 点を投影すると 42 µs、入力の配列が 23 µs（実測、[derby-camera-history.md](../apps/derby-camera-history.md)）。`pocket.derby.ser()` の native 化が効いたのは、「列を 1 回の呼び出しで回す」をアプリ専用に作ったから。**メモリアクセス（データ領域を式から読む）は、これを汎用にする入口になる。**
 2. **表で済む値を毎回計算している。** `SIN` を引数約 201 超で呼ぶと 7〜9 倍遅かった（実測、[derby-background-cost.md](derby-background-cost.md)。現在は 2π で折り返す修正済み、`bd1d829`）。BIG WAVE は除算が無いので `1/d` を級数で進めている（誤差 最大 3.1 px、[big-wave.md](../apps/big-wave.md)）。表を命令に焼き込むと 64 命令に当たって式を分け、draw がさらに増える（[derby-finish-fx.md](../apps/derby-finish-fx.md)）。
 3. **式の渡し方が 4 通り、原本の書き方が 3 通り**（`@plan` の JS、MEGADEMO の文字列テンプレート、手書きの文字列・配列）。
 4. **自作アプリは重い方式（A・B）しか使えない。** C・D はファームのビルド時に表を作る。実機のエディタで書くアプリには、ゲストに命令を持たせない経路が無い。
@@ -203,7 +203,7 @@
 
 **セッションの終了の順番**: ゲストを先に壊し（ここで `free_func` が呼ばれ切る）、Shiki の区画をその後に丸ごと捨てる。CLAUDE.md の「ゲストのコールバックを保持するモジュールはゲストより先に reset」とは逆向きの順序になるので、実装時に `app_stop()` へ明記する。
 
-**効き目（見込み）**: `memcpy` 自体は数百 B で小さい。大きいのは JS 側で配列を作る費用（入力の配列 23 µs、配列の読み 2.75 µs／要素、実測、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）が消えることと、データ領域を式から読めれば 1 回の draw で列を回せて draw の回数が減ること（§3 の 1）。
+**効き目（見込み）**: `memcpy` 自体は数百 B で小さい。大きいのは JS 側で配列を作る費用（入力の配列 23 µs、配列の読み 2.75 µs／要素、実測、[derby-camera-history.md](../apps/derby-camera-history.md)）が消えることと、データ領域を式から読めれば 1 回の draw で列を回せて draw の回数が減ること（§3 の 1）。
 
 **確かめること**: 外部 ArrayBuffer が `JS_SetMemoryLimit` の計数に入らないこと、`transfer()`・`structuredClone` 相当で外部 ArrayBuffer がどう扱われるか（コピーか、detach だけか）、ガベージコレクタが `free_func` を呼ぶ時期。いずれも host の試験で先に見る。
 

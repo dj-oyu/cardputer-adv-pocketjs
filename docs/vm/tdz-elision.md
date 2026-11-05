@@ -56,7 +56,7 @@
 | `dup` + `drop` | 771.8 | 465.2（`inc_loc`・`set_loc` が効くようになった） |
 
 - 消えた読みは、`get_loc8` と `get_loc0`〜`get_loc3`（1〜2 バイト）になった。
-- この worktree の HEAD は `ser()` がネイティブなので、derby-wide2-profile.md の 38,246 命令とは場面の中身が違う。
+- この worktree の HEAD は `ser()` がネイティブなので、derby-camera-history.md の 38,246 命令とは場面の中身が違う。
 - 5 構成とも、レースの結果（着順・タイム）は変更前と同じ。
 
 ### 4.2 評価のメモリ（実測（host））

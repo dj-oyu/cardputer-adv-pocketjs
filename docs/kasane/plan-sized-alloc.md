@@ -5,7 +5,7 @@
 ## 結論
 
 - **DERBY WATCH（今のアプリ）の 25 本の plan が、ネイティブの heap で 22,500 → 9,696 B になった**（実測、登録ごとの `PLANSZ` の合計、−12.8 KB）。レース中の空きの最小は 23,056 → 35,580〜36,208 B、ターン内の最小（`mn`）は 14,220 → 25,648〜25,964 B で、どちらも約 +11.5〜12.5 KB（実測）。
-- **首振りカメラの段階 3（30 本、`vm/pan-camera` 55956e9 のアプリ）で、毎レース出ていた `GO LOADSTALL` が消えた。** 基準は 3 レースとも LOADSTALL、新しいファームは 2 回の起動の 6 レースすべて `GO`（実測）。plan が全部載った状態でのターン内の最小は 9,052〜9,068 B（基準は plan が欠けた状態で 7,140 B）。`vm/pan-camera` の docs/apps/derby-pan-memory.mdの受け入れ条件「ターン内の最小 ≥ 11,208 B」には、まだ約 2.2 KB 足りない。
+- **首振りカメラの段階 3（30 本、`vm/pan-camera` 55956e9 のアプリ）で、毎レース出ていた `GO LOADSTALL` が消えた。** 基準は 3 レースとも LOADSTALL、新しいファームは 2 回の起動の 6 レースすべて `GO`（実測）。plan が全部載った状態でのターン内の最小は 9,052〜9,068 B（基準は plan が欠けた状態で 7,140 B）。`vm/pan-camera` の docs/apps/derby-camera-history.mdの受け入れ条件「ターン内の最小 ≥ 11,208 B」には、まだ約 2.2 KB 足りない。
 - fps・JS のターン・帯描画・登録の時間は、測定の揺れの範囲で変わらない（実測、下の表）。
 - 出力はすべての桁で同じ。新しい plan と固定長の plan は同じ関数（`mark_fused` と `run_core`）を通る。host の `tools/kasane_contract/run.sh`（`GAMES_M32=0`）は全部通過し、MEGADEMO・DERBY・BIG WAVE・LCD CATCH の台本も基準と一致した。
 

@@ -147,7 +147,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 - `derby_view.js` は変えていない（`load()` が `prog()` を呼ぶまま。評価中には呼ばれない）。
 - `T` の 14 個の短い文字列を消すだけで評価後が −2.6 KB も動くのは、atom 表・shape 表の段階的な伸長の閾値をまたぐためと見られる（js-to-ir.md §2 の注記と同じ、±1.5 KB 程度の揺れ）。id 形と `T` なしの間の差は、この揺れを含む。
-- 実機では host の約 1.3 倍になった前例（derby-pan-memory.md）で換算すると −4〜7 KB（推定）。
+- 実機では host の約 1.3 倍になった前例（derby-camera-history.md）で換算すると −4〜7 KB（推定）。
 - 登録 1 本の一時的なピーク（今は詰めた形で 6.2〜7.0 KB、js-to-ir.md §2.1）は、引数の配列（8 個以下）だけになる（測っていない）。
 
 ### 6.3 登録と描画の時間（推定、実機で測る）
@@ -223,7 +223,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 ## 11. 段階 3（首振り）を載せた実機の結果（q35、ブランチ `vm/pan-stage3`、2026-10-01）
 
-詳細は [derby-pan-memory.md](../apps/derby-pan-memory.md) §10。段階 3（首振り、plan 18 本・同時 30 本）を載せた DERBY で、同じ日の `vm/main` 806b10b と比べた（各 1 回、MID 6 レース・HEAVY 4 レース）。
+詳細は [derby-camera-history.md](../apps/derby-camera-history.md) §4。段階 3（首振り、plan 18 本・同時 30 本）を載せた DERBY で、同じ日の `vm/main` 806b10b と比べた（各 1 回、MID 6 レース・HEAVY 4 レース）。
 
 | | 基準 806b10b（配列登録、段階 3 なし） | 枝（名前登録、段階 3 あり、OFF） |
 | --- | ---: | ---: |

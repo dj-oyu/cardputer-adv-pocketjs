@@ -1,5 +1,7 @@
 # App control v1 (2026-10-22)
 
+旧 platform/native-app-control.md を末尾の節に吸収した。
+
 Firmware and broker normative shared contract. Native endpoint available at HOME;
 never a guest bridge session. No arbitrary source/path/raw serial.
 
@@ -98,3 +100,25 @@ writer may emit raw GS. Thus log bytes are not a command/ACK channel; CRC alone
 is not authentication. Preserve framed legacy B semantics and add host tests.
 Inbox-full has a reserved rejection response path; a silent drop is not an
 explicit queue_full acknowledgement. Control ledger never shares log capacity.
+
+## ネイティブ実装の挙動と検査（旧 platform/native-app-control.md）
+
+上の wire 契約の firmware 側の実装メモ。2026-10-27 に通常 main（`45a06e0`）へ app-control と USB console を抽出し直したときの記録のうち、挙動と検査の手順だけを残した（当時の PR の積み方・配置手順は削除）。以下は元の head の仕様と検証履歴で、現在の head の受入結果ではない。
+
+- **名前空間と所有**: native の `C` は HOME で使え、ゲストの `B` ブリッジがリセット・中断しても生きる。既存の入力タスクが両方の名前空間を解析し、ゲストの生成・再開・中断・tick・破棄は UI の所有者だけが行う。
+- **カタログ**: 前面アプリ 11 個の ID を、実際に埋め込まれたソースと安定した registry manifest に結びつける。エディタ・動的ワーク・プレイヤー・オーバーレイは利用不可と広告し、これらの型付き起動は未実装。VM PROBE は診断ワークロードを含むビルドでも利用不可と広告する。公開の起動が HELLO に落ちることはない。
+- **fresh / resume**: `fresh` は休眠ゲストを追い出して新しい run を作る。`resume` は現在の制御セッション内の SUSPEND の後に同じゲスト世代・run を保つ。新しい broker セッションは管理外の休眠ゲストに接続できず、初回 `start=resume` は broker が明示的に未対応とする。BACK は既存の action 経路で中断しうる。STOP は制御中のゲストを破棄し、HOME_READY から成功を推測しない。別インスタンス（同じ app ID でも）の物理・ゲスト起動は制御入力を無効にする。後始末は無関係な置換ゲストの破棄を拒み `needs_review` を報告する。
+- **上限**: firmware は利用者の操作を最大 60 件と有界な後始末を 64 エントリの台帳に収める。broker の計画は START が 1 操作を使うので対話操作を 59 件に絞る。キューは 4 リクエスト＋満杯拒否用の別の mailbox 1 つで、安定した `queue_full` の受領を返す。両方を超える敵対的な連打は ACK を失いうるので、クライアントは STATUS を聞き、証拠が無ければ `outcome_unknown` と報告し、入力を再送しない。拒否・消費の受領はコンソール出力と別で、ログの洪水で追い出されない。
+- **TTL**: UI はコマンドの間と、ブロックしうる所有者の呼び出しの後に固定のデバイス TTL を確認する。実行中のゲストのターンは先取りできない（既存のゲストのウォッチドッグが担う）。期限切れは制御中のゲストを破棄し、デバイス発行のセッション offer を退役させ、古い OPEN/START の再送を防ぐ。再接続・再起動・再送はしない。シーケンスと受領の保証はファームの再起動をまたがない。
+- **GS のエスケープ**: フレーム外の stdout/stderr は生の GS を可視の `\x1d` にするので、ゲストの文字列が native の ACK や旧フレームを偽造できない。生のフレームを書けるのは `usb_console_frame` だけ。CRC は破損の検出で認証ではない。認可・不変の計画・lease fencing・ログのマスクは broker にあり、firmware に二つ目の認証は無い。
+
+### ホストの検査
+
+```sh
+python tools/test_app_control.py
+python tools/test_usb_console.py
+python tools/test_session_dispatch.py
+python tools/test_app_control_broker_interop.py --broker-source /path/to/esp-device-broker-mcp
+```
+
+1 つ目は実際の native コントローラと共有の B/C パーサを、最適化・strict aliasing・ASan/UBSan でコンパイルし、ライフサイクル・同一性、キューとシーケンスの上限、ACK 喪失と STATUS、重複と衝突、レートとコマンドの上限、ブロックするターンをまたぐ TTL、置換されたゲスト世代、旧 B との隔離を調べる。interop 検査は broker の Python エンコーダ／デコーダを実際の C のファーム状態に対して実行する（シリアルのハードウェア無し）。既存のベンチマークのパーサと品質ゲートは独立で、転送の成功はベンチマーク品質の成功を意味しない。GCC の `-fstack-usage` はコンパイラ推定のスタックで、実測の最大値ではない。ファームは独立にレビューし、ビルドし、実機で検証してからマージ・書き込みする（ESP-IDF は 6.0.1 固定）。

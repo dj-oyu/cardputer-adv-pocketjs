@@ -10,7 +10,7 @@ v1（同日）を SLOW（Fable）がレビューし、予算の見積もりと�
 
 1. **インタプリタ本体（`JS_CallInternal`）を IRAM に置く案は、今の時点では第一候補にしない。** 冷たい命令を出しても本体は 13〜16 KB 残る（推定、§2.3）。模型の上では、本体は 1 KiB あたりの効きが R5 の helper 群の半分程度（推定、§2.4）。DRAM は 1:1 で払うので、同じ予算なら helper 群が先。
 2. 比べる相手を揃える: 「本体」「helper 群（R5 の候補を選び直したもの）」「両方」を、**同じ DRAM の予算で、検証済みの模型（`tools/r5sim/icache.py model`）に通して順位を付けてから**、実機へ行く。R5 §4 の再開手順（そのアプリで模型を回し直し、候補を選び直す）どおり。
-3. DERBY の現状（実測、`docs/apps/derby-pan-memory.md`）: 横見 WIDE の JS ターン 14.5〜15.7 ms、首振り WIDE 21.6 ms（フレーム間隔 41.0 ms、25.3 fps）。27 fps には JS ターンを約 4 ms 縮める必要がある。P1 の論拠は「30 fps に届く」ではなく「何 ms 削れるか」で書く。R5 と同率（−15%）なら首振り WIDE で約 3.2 ms（推定）。
+3. DERBY の現状（実測、`docs/apps/derby-camera-history.md`）: 横見 WIDE の JS ターン 14.5〜15.7 ms、首振り WIDE 21.6 ms（フレーム間隔 41.0 ms、25.3 fps）。27 fps には JS ターンを約 4 ms 縮める必要がある。P1 の論拠は「30 fps に届く」ではなく「何 ms 削れるか」で書く。R5 と同率（−15%）なら首振り WIDE で約 3.2 ms（推定）。
 4. 先にできる安い手: upstream の 1 行呼び出しのハンドラ（`OP_for_of_next` 193 B、`OP_for_in_next` 205 B、`OP_in` 164 B、`OP_delete` 156 B など、静的）は -Os で helper が inline されて膨らんでいる。**helper に `no_inline` を付けるだけ**で、正しさの検査をほぼ要さずに本体が数 KB 縮む（推定）。flash のままでも、熱いハンドラの密度が上がる。
 5. ジャンプテーブル（`dispatch_table`、1 KiB、flash の `.rodata`）を DRAM に置く手は、本体の配置とは独立に測れる（別 Kconfig）。
 

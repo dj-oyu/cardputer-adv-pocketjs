@@ -43,7 +43,7 @@ C の関数は、重複を除いて約18種類、呼び出しは約22回（コ�
 | sqrt | 1.0 | `M.sqrt` | `shot` |
 | **計** | **163.5** | 別名 110.8、`M.x` 52.9 | |
 
-[derby-wide2-profile.md](../apps/derby-wide2-profile.md) の 466 回は、`ser()` を native へ移す前の値。移した後は 163.5 回になった。1フレームの命令も 38,246 から 12,375 に減っている。
+[derby-camera-history.md](../apps/derby-camera-history.md) の 466 回は、`ser()` を native へ移す前の値。移した後は 163.5 回になった。1フレームの命令も 38,246 から 12,375 に減っている。
 
 ESP32-S3 の FPU は単精度だけなので、imul 以外はすべて倍精度のソフト浮動小数点で計算している。min / max の比較（`__unorddf2`・`__ltdf2`・`__eqdf2`）と、結果を整数に戻す `js_number` の `__fixdfsi` も同じ。
 
@@ -56,7 +56,7 @@ ESP32-S3 の FPU は単精度だけなので、imul 以外はすべて倍精度�
 | (c) 呼び出し箇所の特殊化 | (d) と同じ分と `get_var` / `get_field2` | 新しい命令と書き換え | 書き換えに場所が要る（ポインタを持つなら32bit限定） | 書き換えのタイミング、TDZ、`Math` / `M` の差し替えの監視、ガード |
 | **(d) 呼び出し命令の native 速い経路** | ○ の8種類 | **+68 B**（コード） | **0 / 0**（flash +399 B） | 引数が数値で、呼び先が純粋な組み込みのときだけ通る（§4） |
 
-- (a) で節約できる額は、実機のベンチで `M.sin` 13.1 µs と別名の `sin` 12.1 µs の差、1.0 µs/回（実測、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）。52.9 回で約0.05 ms/フレーム（推定）。
+- (a) で節約できる額は、実機のベンチで `M.sin` 13.1 µs と別名の `sin` 12.1 µs の差、1.0 µs/回（実測、[derby-camera-history.md](../apps/derby-camera-history.md)）。52.9 回で約0.05 ms/フレーム（推定）。
 - (c) で `get_var` を消す部分は、Math に限らない §4.2（get_var をスロットにする）と同じ仕組みになる。const のグローバルは初期化後に変わらないので、ガードが要らない。そのため Math 専用にせず、§4.2 で扱う方がよい。
 - (b) は Math のための案としては割に合わない。
 
@@ -95,6 +95,6 @@ native のフレームを省いても見分けがつかない理由:
 ## 6. 結果と残り
 
 - コード（Xtensa `-Os` の再現コンパイル）: `JS_CallInternal` 27,172 → 27,240 B（+68）。`js_call_math_fast` は 308 B。text の合計は +399 B（flash）。DRAM とゲストのヒープは増えない。
-- 推定: 1回あたり C の呼び出しが8回減り、`JS_CallInternal` への再入（300 B のウィンドウフレームと、その入口のキャッシュ行）が無くなる。呼び出しの深さも1〜2段浅くなるので、ウィンドウのあふれも減る見込み。実機の差は、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md) §1 の `sqrt` / `sin` / `M.sin` のベンチで測る（未実施）。命令キャッシュの配置だけで15%動くので、`CONFIG_POCKET_VM_TURNPERF` で同じ配置どうしを比べること。
+- 推定: 1回あたり C の呼び出しが8回減り、`JS_CallInternal` への再入（300 B のウィンドウフレームと、その入口のキャッシュ行）が無くなる。呼び出しの深さも1〜2段浅くなるので、ウィンドウのあふれも減る見込み。実機の差は、[derby-camera-history.md](../apps/derby-camera-history.md) §1 の `sqrt` / `sin` / `M.sin` のベンチで測る（未実施）。命令キャッシュの配置だけで15%動くので、`CONFIG_POCKET_VM_TURNPERF` で同じ配置どうしを比べること。
 - 次の一手（未実施）: 引数が数値なら `JS_FreeValue` を呼ばない。関数の参照を減らす処理をインライン化する。§4.4 の「`JS_FreeValue` のインライン化」と同じ話。
 - `mx.apply(null, xs)`（`OP_apply`、5回/フレーム）は対象外。

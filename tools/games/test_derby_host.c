@@ -90,7 +90,7 @@ typedef struct { size_t n; size_t pad[3]; } pk_hdr;
 static size_t cur_bytes,peak_bytes;
 /* The churn of the game's frame() alone (__churn(1) .. __churn(0) around
  * it): allocations and reallocations, their bytes, and the high water above
- * the heap at the start of the call (docs/apps/derby-pan-memory.md). */
+ * the heap at the start of the call (docs/apps/derby-camera-history.md). */
 static size_t n_alloc,b_alloc,turn_hi;
 static size_t tlsf_len(size_t n){n=(n+3)&~(size_t)3;return n<12?12:n;}
 static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;

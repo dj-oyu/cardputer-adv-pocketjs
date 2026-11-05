@@ -155,7 +155,7 @@ deopt は使わない。V8 では、フレームを作り直す重い処理を�
 
 ## 3. S2 から何が呼ばれているか（DERBY、1フレーム38,246命令）
 
-出典は [derby-wide2-profile.md](../apps/derby-wide2-profile.md) §3.2 の命令頻度（実測 host）。呼び先は `quickjs.c` と、2026-09-24 の ELF を逆アセンブルして読んだ（**現 HEAD の ELF ではない**）。`JS_CallInternal` の直接の呼び先は117種あった。
+出典は [derby-camera-history.md](../apps/derby-camera-history.md) §6 の命令頻度（実測 host）。呼び先は `quickjs.c` と、2026-09-24 の ELF を逆アセンブルして読んだ（**現 HEAD の ELF ではない**）。`JS_CallInternal` の直接の呼び先は117種あった。
 
 | 命令（/フレーム） | 速い経路 | 呼んでいる関数 |
 |---|---|---|
@@ -228,7 +228,7 @@ DERBY は浮動小数点が中心で、比較と除算のほとんどが「slow�
 
 ### 4.6 解放をターンの終わりにまとめる（S4）。**今は採らない**
 
-S2 から解放の連鎖とアロケータが抜ける。ただし、溜めた分だけゲストヒープのピークが上がる。DERBY の集計値から見積もると最大で約5.5 KB（推定、[derby-pan-memory.md](../apps/derby-pan-memory.md) の値から計算）。ゲストの余裕はすでに足りない（約24 KB、目標32 KB）。ターン単位で解放を追えるトレースは残っていないので、採るなら先に §6 の記録器でデータを取る。
+S2 から解放の連鎖とアロケータが抜ける。ただし、溜めた分だけゲストヒープのピークが上がる。DERBY の集計値から見積もると最大で約5.5 KB（推定、[derby-camera-history.md](../apps/derby-camera-history.md) の値から計算）。ゲストの余裕はすでに足りない（約24 KB、目標32 KB）。ターン単位で解放を追えるトレースは残っていないので、採るなら先に §6 の記録器でデータを取る。
 
 ### 4.7 FRAME_WRAP を直す（S1）
 
@@ -371,7 +371,7 @@ opprof の分類を、ハンドラと同じたどり方で、遅い経路（`get
 | prototype 1 段 | 9 |
 | 遅い経路（exotic 5、lazy 2） | 7（1.3%） |
 
-今のハンドラは IC が無くても自分のプロパティを inline のハッシュ検索で読むので、IC が省けるのはその検索（推定 15〜25 cycle）と shape 比較（推定 5〜8）の差だけになる。約 540 × 10〜15 cycle ≒ 5〜8 k cycle/ターンで、DERBY の JS ターン（横見 WIDE 14.5〜15.7 ms、首振り WIDE 21.6 ms、実機。`docs/apps/derby-pan-memory.md`）の 0.1〜0.2%（推定）。shape と添字の置き場（命令には atom の 4 B しか無い）に DRAM も要る。**T1 の IC は DERBY を理由には入れない。** STRESS では `get_field_slow_path` が 204 回/ターン（`turn-working-set.md` §4）で事情が違うので、入れるなら STRESS の内訳（exotic と lazy のどちらか）を数えてからにする。
+今のハンドラは IC が無くても自分のプロパティを inline のハッシュ検索で読むので、IC が省けるのはその検索（推定 15〜25 cycle）と shape 比較（推定 5〜8）の差だけになる。約 540 × 10〜15 cycle ≒ 5〜8 k cycle/ターンで、DERBY の JS ターン（横見 WIDE 14.5〜15.7 ms、首振り WIDE 21.6 ms、実機。`docs/apps/derby-camera-history.md`）の 0.1〜0.2%（推定）。shape と添字の置き場（命令には atom の 4 B しか無い）に DRAM も要る。**T1 の IC は DERBY を理由には入れない。** STRESS では `get_field_slow_path` が 204 回/ターン（`turn-working-set.md` §4）で事情が違うので、入れるなら STRESS の内訳（exotic と lazy のどちらか）を数えてからにする。
 
 **STRESS でも割に合わない（2026-10-26、host の数え上げ）。** `tools/test_stress_app.c` の 900 フレームを、opprof の写し（`patch_quickjs.py`）と端末と同じ 8 バイトの JSValue（`m32_sysroot.sh`）で走らせ、1 ターンを 1 窓に数えた（`main` の `467562d2`、T0 入り）:
 

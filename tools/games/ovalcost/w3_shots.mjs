@@ -1,4 +1,4 @@
-// Pixels for docs/apps/derby-trig-cull-device.md: DERBY WATCH's oval under a
+// Pixels for docs/apps/derby-camera-history.md: DERBY WATCH's oval under a
 // held panning WIDE 2 with its unit at w -100 (now) and -3 (u 14), every 10 m
 // of the leader over the bend, rendered by the real harness
 // (tools/games/test_derby_host.c, built by run_derby.py: QuickJS, the plans'

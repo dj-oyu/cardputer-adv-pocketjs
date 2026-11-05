@@ -1,11 +1,11 @@
-"""Tables for docs/apps/derby-wide2-profile.md from run_derby_prof.py's output.
+"""Tables for docs/apps/derby-camera-history.md from run_derby_prof.py's output.
 
     python3 tools/vmtest/opprof/analyze.py [--prices-only]
 
 Counts are host measurements (the profiler's dispatches, entries, native
 calls, array literals, allocations; the harness's draws, VM steps and
 segments). Microseconds are ESTIMATES: counts times the device prices in
-PRICE below, which come from the device bench (derby-pan-camera-cost.md
+PRICE below, which come from the device bench (derby-camera-history.md
 section 1) divided by the host count of the same bench bodies' bytecode
 (bench_ops.js; calibrate() prints the derivation). The model is compared
 with the device's measured JS turn (DEVICE_MS) per configuration.
@@ -24,11 +24,11 @@ import opprof_read as R
 ROOT = Path(__file__).resolve().parents[3]
 CACHE = ROOT / ".cache/opprof"
 
-# Device JS turn (median ms, MDT js=), derby-pan-memory.md section 13 (P24, 44fce25's parent build).
+# Device JS turn (median ms, MDT js=), derby-camera-history.md section 5 (P24, 44fce25's parent build).
 DEVICE_MS = {"straight_side_mid": 14.51, "straight_w2_heavy": 21.40, "oval_w2_mid_w100": 44.25,
              "oval_w2_heavy_w100": 43.95}
 
-# Device bench, us per loop turn (derby-pan-camera-cost.md section 1; loop is
+# Device bench, us per loop turn (derby-camera-history.md section 1; loop is
 # the raw empty loop, the others have it subtracted).
 BENCH_US = {"loop": 2.86, "mul": 2.50, "add": 2.27, "div": 4.87, "sqrt": 7.42, "atan2": 15.9, "sin": 12.1,
             "cos": 12.0, "msin": 13.1, "arr": 3.77, "arrr": 2.75, "call": 4.44, "prop": 2.18, "lit8": 22.7,

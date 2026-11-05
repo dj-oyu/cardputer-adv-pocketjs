@@ -7,7 +7,7 @@
 // Oval: 1,600 m inner rail (423 m straights, 120 m radius half-circle bends),
 // 1,000 m race started on the back straight: race distance 0-273 back
 // straight, 273-650 the bend, 650-1000 the home straight. The bend is not
-// measured lane by lane; it is a multiplier (docs/apps/derby-corner-model.md):
+// measured lane by lane; it is a multiplier (docs/apps/derby-watch.md):
 //   lane i (0 = rail):  1 + a * (3.5 - i) / 3.5
 //   per runner:         * (1 + u_i),  u_i uniform in [-s, s]
 // u_i comes from its own stream, rng(seed + 0x2545f491), so the race's own

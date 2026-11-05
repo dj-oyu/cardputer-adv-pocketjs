@@ -22,7 +22,7 @@
  * frame and on random cameras (tools/games/derby_ser_oracle.js).
  *
  * Why C: the series were 27.6 of the oval bend's 44.25 ms JS turn on the
- * device (docs/apps/derby-native-survey.md). The plans, the VM and the draw
+ * device (docs/apps/derby-camera-history.md). The plans, the VM and the draw
  * path are untouched: each draw goes through pocket_proc_draw_numbers(), the
  * second half of H.draw(). */
 
