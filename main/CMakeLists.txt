@@ -528,7 +528,7 @@ set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/f
 set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTIONS "-O2")
 # MEASUREMENT ONLY (O2_AB arm B): the per-frame render and present path at -O2.
 set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
-    pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2")
+    pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 set_source_files_properties(pocket/pocket_proc.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
