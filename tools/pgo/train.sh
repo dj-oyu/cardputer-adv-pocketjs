@@ -56,7 +56,24 @@ print(f'{len(data)} bytes of gcda stream')
 EOF
 "$gcov_tool" merge-stream < gcov.stream
 rm -rf "$out"
+# .ids: ident, line, file (relative to the component) and name of every
+# function, from the .gcno notes -- what tools/pgo/rekey.py needs to key the
+# profile for another tree.
+comp="$repo/components/quickjs-ng"
 (cd "$obj_dir" && find . -name '*.gcda' | while read -r f; do
-    mkdir -p "$out/$(dirname "$f")"; cp "$f" "$out/$f"; done)
+    mkdir -p "$out/$(dirname "$f")"; cp "$f" "$out/$f"
+    xtensa-esp32s3-elf-gcov-dump "${f%.gcda}.gcno" | python -c '
+import re, sys
+comp = sys.argv[1].rstrip("/") + "/"
+pat = re.compile(r"FUNCTION ident=(\d+),.*`([^\x27]+)\x27 (\S+?):(\d+):\d+-")
+for line in sys.stdin:
+    m = pat.search(line)
+    if m:
+        ident, name, path, ln = m.groups()
+        if not path.startswith(comp):
+            sys.exit(f"train.sh: {name} is defined outside the component: {path}")
+        print(ident, ln, path[len(comp):], name)
+' "$comp" > "$out/$f.ids"
+done)
 grep "R5SIM done" serial.txt
 find "$out" -name '*.gcda' -printf '%P %s B\n' | sort
