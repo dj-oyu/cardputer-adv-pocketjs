@@ -2707,20 +2707,6 @@ static esp_err_t present_frame(void) {
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
-                /* MEASUREMENT ONLY (SIG_AB): the window just printed hashed
-                 * with the arm named (old = per-band FNV, new = entry_hash +
-                 * band_mix), then it flips. The first commit after a flip
-                 * compares signatures of two arms and damages every band. */
-                {
-                    extern uint32_t g_commit_prof[4];
-                    extern int g_pocket_proc_sig_old;
-                    ESP_LOGI("kasane","SIG_AB old=%d commits=%u total_ms=%.3f damage_ms=%.3f sig_ms=%.3f turn_ms=%.2f render_ms=%.2f",
-                             g_pocket_proc_sig_old,(unsigned)g_commit_prof[0],g_commit_prof[1]/240000.0/30,
-                             g_commit_prof[2]/240000.0/30,g_commit_prof[3]/240000.0/30,
-                             ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0);
-                    g_commit_prof[0]=g_commit_prof[1]=g_commit_prof[2]=g_commit_prof[3]=0;
-                    g_pocket_proc_sig_old=!g_pocket_proc_sig_old;
-                }
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
                 /* Same-binary A/B of zero-copy strips (board.h): the window
                  * just printed used the mode named here, then it flips. */
