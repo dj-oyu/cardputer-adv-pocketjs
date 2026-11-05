@@ -308,6 +308,68 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
         }
     }
 }
+/* MEASUREMENT ONLY (COMMIT_AB): the same two walks at -O2, reading a frame
+ * without pattern lines field by field instead of through
+ * ksn_proc_frame_next; a frame with pattern lines takes the walks above. */
+static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig);
+__attribute__((optimize("O2")))
+static ksn_rect frame_damage_fast(const proc_surface *surface){
+    if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
+        return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
+    if(surface->candidate->ext||surface->committed->ext)return frame_damage(surface);
+    int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
+    const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
+    for(unsigned f=0;f<2;f++){
+        const ksn_proc_segment *seg=frames[f]->segments,*const stop=seg+frames[f]->count;
+        for(;seg<stop;seg++){
+            const int sx0=seg->x0,sx1=seg->x1,sy0=seg->y0,sy1=seg->y1;
+            const int ax=sx0<sx1?sx0:sx1,bx=sx0^sx1^ax,ay=sy0<sy1?sy0:sy1,by=sy0^sy1^ay;
+            if(ax<x0)x0=ax;
+            if(ay<y0)y0=ay;
+            if(bx+1>x1)x1=bx+1;
+            if(by+1>y1)y1=by+1;
+        }
+    }
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1>KSN_PROC_W)x1=KSN_PROC_W;
+    if(y1>KSN_PROC_H)y1=KSN_PROC_H;
+    return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
+}
+__attribute__((optimize("O2")))
+static void band_signature_fast(const ksn_proc_frame *frame,proc_band_sig *sig){
+    if(frame->ext){band_signature(frame,sig);return;}
+    for(unsigned b=0;b<PROC_BANDS;b++){
+        sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
+        sig->first[b]=UINT16_MAX;sig->end[b]=0;
+#ifdef POCKET_PROC_SIG_CHECK
+        sig->strong[b]=0x9e3779b97f4a7c15ull;
+#endif
+    }
+    const unsigned n=frame->count;
+    for(unsigned i=0;i<n;i++){
+        const ksn_proc_segment *g=&frame->segments[i];
+        const int sx0=g->x0,sx1=g->x1,sy0=g->y0,sy1=g->y1;
+        const int ya=sy0<sy1?sy0:sy1,yb=sy0^sy1^ya;
+        int xa=sx0<sx1?sx0:sx1,xb=(sx0^sx1^xa)+1;
+        if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)continue;
+        if(xa<0)xa=0;
+        if(xb>KSN_PROC_W)xb=KSN_PROC_W;
+        const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
+        const uint32_t e=entry_hash(g,1);
+        for(unsigned b=b0;b<=b1;b++){
+            sig->hash[b]=band_mix(sig->hash[b],e);
+#ifdef POCKET_PROC_SIG_CHECK
+            const uint8_t *bytes=(const uint8_t *)g;
+            for(size_t k=0;k<sizeof *g;k++)sig->strong[b]=sig_mix64(sig->strong[b]^bytes[k]);
+#endif
+            if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
+            if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
+            if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)i;
+            sig->end[b]=(uint16_t)(i+1);
+        }
+    }
+}
 #ifdef POCKET_PROC_VISIT_STATS
 /* Host diagnostic (docs/platform/lcd-dma-driver.md 9.5): for each committed
  * frame, how many entries a renderer looks at to draw every 8-row band and
@@ -499,8 +561,34 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     const char *op="kasane.shiki.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
-    surface->damage=frame_damage(surface);
-    band_signature(surface->candidate,&surface->candidate_sig);
+    extern int g_commit_fast;extern uint32_t g_commit_prof[5];   /* MEASUREMENT ONLY (COMMIT_AB) */
+    const uint32_t mp0=pocket_cycles();
+    surface->damage=g_commit_fast?frame_damage_fast(surface):frame_damage(surface);
+    const uint32_t mp1=pocket_cycles();
+    if(g_commit_fast)band_signature_fast(surface->candidate,&surface->candidate_sig);
+    else band_signature(surface->candidate,&surface->candidate_sig);
+    const uint32_t mp2=pocket_cycles();
+    {   /* calibration: one read of every entry's y0 and y1 */
+        volatile int32_t sink=0;int32_t acc=0;
+        const ksn_proc_frame *c=surface->candidate;
+        for(unsigned k=0;k<c->count;k++)acc+=c->segments[k].y0^c->segments[k].y1;
+        sink=acc;(void)sink;
+    }
+    const uint32_t mp3=pocket_cycles();
+    g_commit_prof[2]+=mp1-mp0;g_commit_prof[3]+=mp2-mp1;g_commit_prof[4]+=mp3-mp2;
+#ifdef POCKET_PROC_SIG_CHECK
+    {   /* both arms must agree exactly */
+        static proc_band_sig other;static unsigned long long arm_bad,arm_n;
+        const ksn_rect d2=g_commit_fast?frame_damage(surface):frame_damage_fast(surface);
+        if(g_commit_fast)band_signature(surface->candidate,&other);else band_signature_fast(surface->candidate,&other);
+        arm_n++;
+        if(memcmp(&d2,&surface->damage,sizeof d2)||memcmp(other.hash,surface->candidate_sig.hash,sizeof other.hash)||
+           memcmp(other.x0,surface->candidate_sig.x0,sizeof other.x0)||memcmp(other.x1,surface->candidate_sig.x1,sizeof other.x1)||
+           memcmp(other.first,surface->candidate_sig.first,sizeof other.first)||memcmp(other.end,surface->candidate_sig.end,sizeof other.end))
+            {if(!arm_bad)fprintf(stderr,"COMMIT_ARM_MISMATCH at %llu\n",arm_n);arm_bad++;}
+        if(arm_n%200==0)fprintf(stderr,"COMMIT_ARM checked=%llu mismatch=%llu\n",arm_n,arm_bad);
+    }
+#endif
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
     visit_stats(surface->candidate);
@@ -553,8 +641,13 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
 #endif
     return result;
 }
+uint32_t g_commit_prof[5];   /* MEASUREMENT ONLY: commits, whole, frame_damage, band_signature, calibration walk (cycles) */
+int g_commit_fast;           /* MEASUREMENT ONLY (COMMIT_AB) */
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    return guarded(ctx,self,argc,argv,commit_impl);
+    const uint32_t c0=pocket_cycles();
+    JSValue r=guarded(ctx,self,argc,argv,commit_impl);
+    g_commit_prof[0]++;g_commit_prof[1]+=pocket_cycles()-c0;
+    return r;
 }
 /* {maxSegments: 1..1024} (absent or undefined: 0, the 1,024 default). */
 static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segments){
