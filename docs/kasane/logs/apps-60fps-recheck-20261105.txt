@@ -1,0 +1,22 @@
+# 60 fps re-check, 2026-11-05: VM_DISPLAY_PERIOD_MS 33 -> 16 measurement builds (reverted afterwards).
+# A = 0d7bff2 (ad8a964 + the one line), B = 9085cfd (A + CONFIG_POCKET_VM_QJS_PGO=y).
+# Same method as apps-60fps-trial-20261104-ffbba5c.txt: fps = 30 painted frames / interval between consecutive
+# KASANE_PAINT lines (device log timestamps); the first window is dropped. All measured (device), broker jobs r60a-* / r60b-*.
+# turn/render/send: KASANE_PAINT window means (ms). "prev" = the 2026-11-04 trial at ffbba5c.
+
+## A (16 ms, no PGO)
+BIGWAVE  r60a-bigwave  58.5 fps (1140 f/19.5 s)  windows 57.3-60.7   turn 7.2  render 3.56 send 4.28   prev 55.6
+STRESS   r60a-stress   50.5 fps (960 f/19.0 s)   windows 49.6-51.9   turn 6.72 render 6.80 send 2.93   prev 44.3
+MEGADEMO r60a-megademo 52.2 fps (2280 f/43.7 s)  windows 36-61       turn 7.02 render 4.13 send 4.41   prev 50.5
+  WAKE   38-41   turn 11.5 render 2.5 send 5.2 (turn ~15 while tier-2 plans register)
+  NEWS   50-58   turn 6.7  render 4.1 send 4.3
+  TWIST  50-59   turn 6.6  render 4.0 send 4.5 (first windows of a visit 50-53)
+  ZENITH 58-61   turn 4.2  render 5.0 send 4.0
+  CORE   40-59   turn 8.3  render 4.9 send 4.4 (mid-scene 40-44: render 8.3-8.7, turn 10-11)
+DERBY    r60a-derby    53.1 fps (99 windows/55.9 s; the first ~124 log lines were dropped by the log cap) windows 17-61
+  race 1 (from mid-race)  41-60 (mean 51.8)  turn 10.4 render 3.1 send 3.8; CAM WIDE 2 -> HEAD ON: 9 windows 41-49, turn 13-14.5
+  photo/res               43 / 60-61 (one 17: 1.7 s scene build)
+  pad                     57-60 (mean 58.8)  turn 4.3 render 5.9 send 4.2
+  gate -> race 2 start    one 27 window (scene build)
+  race 2 (first half)     54-60 (mean 57.3)  turn 7.9 render 2.9 send 4.4
+No errors, resets or OOM in any run.
