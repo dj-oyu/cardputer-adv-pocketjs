@@ -12,3 +12,12 @@ MEGADEMO      37162    34035      0     2 (0.5)      0 (0.5)     176 (132.9)    
   (baseline)   2856     2395      0     0 (0.0)      0 (0.0)      15 (9.4)         461    0
 BIG WAVE     123284   101659      0     2 (1.6)      1 (1.6)     442 (397.1)     21625    0
 DERBY        246806   184374      0    14 (2.8)      1 (2.8)    2718 (720.2)     62432    0
+
+# After the change (entry_hash once per entry + band_mix per band, docs/platform/lcd-dma-driver.md 9.11), same check:
+app        compared  changed  hash32  lo16 (ideal)  hi16 (ideal)  lo8 (ideal)     skipped  pixel mismatch
+STRESS        15232    13108      0     0 (0.2)      2 (0.2)      42 (51.2)       2124    0
+MEGADEMO      37162    34035      0     0 (0.5)      0 (0.5)     150 (132.9)      3127    0
+  (baseline)   2856     2395      0     0 (0.0)      0 (0.0)       8 (9.4)         461    0
+BIG WAVE     123284   101659      0     2 (1.6)      0 (1.6)     370 (397.1)     21625    0
+DERBY        246806   184374      0     5 (2.8)      3 (2.8)     673 (720.2)     62432    0
+# four apps together: lo16 7 (ideal 5.1), hi16 5 (ideal 5.1); DERBY's lo8 2,718 -> 673 (ideal 720).

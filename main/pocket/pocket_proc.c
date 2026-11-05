@@ -245,6 +245,30 @@ __attribute__((destructor)) static void sig_report(void){
             sig_lo8,sig_changed/256.0,sig_impossible,sig_skipped,sig_pixel_bad,sig_all);
 }
 #endif
+/* One entry (or a pattern line's two) as 32 bits: murmur3's block step over
+ * its 16-bit fields packed in pairs, then its finaliser, so every input bit
+ * reaches every output bit -- the band step below relies on that. */
+static inline uint32_t rotl32(uint32_t v,unsigned r){return v<<r|v>>(32u-r);}
+static inline uint32_t entry_hash(const ksn_proc_segment *s,unsigned n){
+    uint32_t h=0x2545f491u;
+    for(unsigned k=0;k<n;k++){
+        const uint32_t w[3]={(uint16_t)s[k].x0|(uint32_t)(uint16_t)s[k].y0<<16,
+                             (uint16_t)s[k].x1|(uint32_t)(uint16_t)s[k].y1<<16,s[k].color};
+        for(unsigned j=0;j<3;j++){
+            uint32_t v=w[j]*0xcc9e2d51u;
+            v=rotl32(v,15)*0x1b873593u;
+            h=rotl32(h^v,13)*5u+0xe6546b64u;
+        }
+    }
+    h^=n;h^=h>>16;h*=0x85ebca6bu;h^=h>>13;h*=0xc2b2ae35u;h^=h>>16;
+    return h;
+}
+/* The band's running value and one entry's: order matters (the rotation),
+ * and the rotation brings the product's high bits back to the low ones, the
+ * weak end of a plain multiply (the FNV-1a check, sec.9.10). */
+static inline uint32_t band_mix(uint32_t h,uint32_t e){
+    return (rotl32(h,15)^e)*0x9e3779b1u;
+}
 static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
     for(unsigned b=0;b<PROC_BANDS;b++){
         sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
@@ -265,13 +289,15 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
         if(xa<0)xa=0;
         if(xb>KSN_PROC_W)xb=KSN_PROC_W;
         const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
+        /* The raw entries, a pattern line's parameters included, hashed once;
+         * each band they touch then takes one mixing step. Hashing the bytes
+         * again for every band was ~60% of commit() on the device
+         * (docs/platform/lcd-dma-driver.md 9.11). */
+        const uint32_t e=entry_hash(&frame->segments[start],i-start);
         for(unsigned b=b0;b<=b1;b++){
-            /* The raw entries, a pattern line's parameters included. */
-            const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
-            uint32_t h=sig->hash[b];
-            for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)h=(h^bytes[k])*16777619u;
-            sig->hash[b]=h;
+            sig->hash[b]=band_mix(sig->hash[b],e);
 #ifdef POCKET_PROC_SIG_CHECK
+            const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
             for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)
                 sig->strong[b]=sig_mix64(sig->strong[b]^bytes[k]);
 #endif
