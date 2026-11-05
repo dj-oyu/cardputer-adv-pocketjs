@@ -233,7 +233,7 @@ static bool check_inst(const ksn_shiki_inst *i,unsigned inputs,const region_decl
     case KSN_SHIKI_VMAC: return i->a<8&&i->b<8;
     case KSN_SHIKI_VMACK: return i->a<8;
     /* 0..32: on the device, EE.SRCMB.S16.QACC matched the model at shift
-     * 33 but not at 40 and/or 63 (docs/kasane/shiki-pie.md sec.8); the
+     * 33 but not at 40 and/or 63 (docs/kasane/shiki-jit.md sec.24.6); the
      * prototype keeps to the range checked plus margin. */
     case KSN_SHIKI_VOUT: return i->dst<8&&i->aux<=32;
     /* aux is the colour, so the flags are in dst: bit 0 the count, bit 1
@@ -684,7 +684,7 @@ static bool loop_range(const ksn_shiki_vm *vm,const ksn_shiki_inst *i,uint32_t r
     return true;
 }
 
-/* ---- vector instructions (shiki-v2.md sec.6, docs/kasane/shiki-pie.md sec.3.1)
+/* ---- vector instructions (shiki-v2.md sec.6, docs/kasane/shiki-jit.md sec.24.3)
  * The lanes are records base..base+7 of the VEACH's block; a lane at or past
  * the loop's N reads 0 and is never written (the masked tail, sec.3.4). */
 static int64_t sat40(int64_t v){
@@ -698,7 +698,7 @@ static vlanes *vregs(ksn_shiki_vm *vm){
 bool ksn_shiki_vec_pie=KSN_SHIKI_HAS_PIE;
 
 #if KSN_SHIKI_HAS_PIE
-/* ---- P2: the same instructions on PIE (shiki-pie.md sec.6 item 1). The
+/* ---- P2: the same instructions on PIE (shiki-jit.md sec.24.5 item 1). The
  * vector registers are the same int16[8] in memory either way, so a lane
  * loop of the C model below may serve any case PIE does not (a tail block,
  * an unaligned region, VIOTA). A field's 8 records are one aligned 128-bit

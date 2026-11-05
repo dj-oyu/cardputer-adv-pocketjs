@@ -39,7 +39,7 @@ enum {
     /* v2.0 draft (docs/kasane/shiki-v2.md sec.3, 4): a record by number. */
     KSN_SHIKI_LOAD, KSN_SHIKI_STORE, KSN_SHIKI_DRAW_INDEX,
     /* v2.0 draft (shiki-v2.md sec.6, from the prototype of
-     * docs/kasane/shiki-pie.md): 8-lane vector instructions with PIE's
+     * docs/kasane/shiki-jit.md sec.24): 8-lane vector instructions with PIE's
      * semantics, interpreted once per block of 8 records, and batch emitters
      * that draw from a region natively. */
     KSN_SHIKI_VEACH, KSN_SHIKI_VLOAD, KSN_SHIKI_VSTORE, KSN_SHIKI_VSPLAT, KSN_SHIKI_VIOTA,
@@ -146,7 +146,7 @@ typedef struct {
      * and one that would not fit stops at LIMIT (pocket_proc.c). */
     uint16_t cap;
     bool ext;                               /* a LINE_PATTERN chord is among them */
-    /* The prototype's vector state (shiki-pie.md sec.3.1), kept in memory:
+    /* The prototype's vector state (shiki-jit.md sec.24.3), kept in memory:
      * v0..v7 (8 lanes of int16) then the accumulator (8 lanes of 40 bits,
      * sat40), both 16-B aligned inside raw for PIE's 128-bit accesses. The
      * accumulator is int64_t[8] for the C model and QACC's own image

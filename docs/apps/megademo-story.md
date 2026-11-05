@@ -1,6 +1,6 @@
 # MEGADEMO — NIGHT SIGNAL（シナリオと演出の設計）
 
-2026-10-27。対象は [apps/kasane/proc_megademo.js](../../apps/kasane/proc_megademo.js)（APPS の MEGADEMO）。上限を叩く場面の設計と数値は [megademo-limit-scenes.md](../kasane/megademo-limit-scenes.md)、実機の測定は [megademo-device-limits.md](../kasane/megademo-device-limits.md)。この文書はそれらの上に「物語」と「場面のつなぎ」を足したときの台本と、何をどこで変えたかの記録。
+2026-10-27。対象は [apps/kasane/proc_megademo.js](../../apps/kasane/proc_megademo.js)（APPS の MEGADEMO）。上限を叩く場面の設計と数値は [megademo-limit-scenes.md](../kasane/megademo-limits.md)、実機の測定は [megademo-device-limits.md](../kasane/megademo-limits.md)。この文書はそれらの上に「物語」と「場面のつなぎ」を足したときの台本と、何をどこで変えたかの記録。
 
 > **2026-10-28 以降の物語は「ASTRAL FIGHTER」**（下の [ASTRAL FIGHTER](#astral-fighter2026-10-28) の節）。その前の NIGHT SIGNAL の台本（猫がテレビの信号に呼ばれる話）は、場面の中身（Act I〜CORE の手続き面）の記録としてそのまま残す。アプリは 2026-10-28 から 4 つのチャンクに分けた（`apps/kasane/chunks.txt`、同じ節）。
 
@@ -98,7 +98,7 @@ ZENITH の **munching squares の小窓**（`pocket.kasane.pixel`）と **レー
 
 - ゲスト: 型付き配列を 1 つでも作ると、その機構だけで約 1.3 KB が常駐する（host m32、`new Uint16Array` 2 つで +1,312 B、`pixel.open` で +688 B）。2 つを外して評価後 −3.0 KB（host m32、103,488 → 100,464 B）。
 - ネイティブ: pixel のプール 1,888 B（`sizeof(ksn_pixel_pool)`、host m32）と、縮小のソース行 `resize_stream`（約 1.3 KB）が確保されなくなる。
-- 網羅表（[megademo-limit-scenes.md](../kasane/megademo-limit-scenes.md)）の `pixel.open` / `stage`、`sampling: 'nearest'`、`ref.setRotation` はこのアプリでは使わなくなった。`pixel` の試験は `apps/kasane/pixel_lab_probe.js` などにある。
+- 網羅表（[megademo-limit-scenes.md](../kasane/megademo-limits.md)）の `pixel.open` / `stage`、`sampling: 'nearest'`、`ref.setRotation` はこのアプリでは使わなくなった。`pixel` の試験は `apps/kasane/pixel_lab_probe.js` などにある。
 
 ## IV CORE の作り直し（2026-10-28）
 
@@ -188,7 +188,7 @@ CORE を入れた版は、実機で起動に失敗した（`EVAL_ERROR PocketErr
 | 実行中の live 最大（毎フレーム GC 後、どちらも ZENITH） | 110,124 | 114,832 | +4,708 |
 
 - 評価のピークは上限 163,840 B まで 33 KB 残る（旧版 46 KB）。
-- 実行中の常駐はゲストで +4.7 KB、ネイティブで −3.2 KB 程度（上の「外したもの」）。差し引き ZENITH で約 +1.5 KB の見込み（推定）。実機の ZENITH HEAVY のターン内の最小空きは 6,948 B（[megademo-device-limits.md](../kasane/megademo-device-limits.md)、2026-09-29）なので、**実機で `tools/kasane_contract/megademo_device.py run` の空き最小を確かめる必要がある**。
+- 実行中の常駐はゲストで +4.7 KB、ネイティブで −3.2 KB 程度（上の「外したもの」）。差し引き ZENITH で約 +1.5 KB の見込み（推定）。実機の ZENITH HEAVY のターン内の最小空きは 6,948 B（[megademo-device-limits.md](../kasane/megademo-limits.md)、2026-09-29）なので、**実機で `tools/kasane_contract/megademo_device.py run` の空き最小を確かめる必要がある**。
 - 途中の版は live 最大 +12.5 KB だった。削ったもの: 型付き配列（上）、部屋とニュースの表を文字列に、HUD の表示窓をクロージャから数値の組に、ナレーション・テロップを 1 本の文字列にして場面ごとに分解。コメントの量は効かなかった（コメントを全部外しても評価のピークは ±0.1 KB）。
 
 ### 負荷（host 計数、`run_proc_megademo_scenes.py`。2026-10-27 の版。LIMIT は 10-28 に CORE へ差し替えた）
