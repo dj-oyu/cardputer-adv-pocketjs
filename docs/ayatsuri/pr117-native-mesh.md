@@ -38,6 +38,15 @@ image IO retry中のread_rows/span/backdrop一致を含む。
 これらは個別frameであり、呼出し鎖peakやcycle測定ではない。
 PR作成・merge・実機操作は行わない。
 
+統合head `891b65271cfc98e372fa4b999c119f4bf2348797` のmesh/Gouraud
+ASan/UBSan、Shiki API（75/75）、turn、class registry、board半帯、STRESS
+（900 frames）はPASS。firmwareのproject_versionも `891b652` と照合した。
+総合contract scriptのC描画・画像・repair・resource等は通過後、MEGADEMO harnessの
+初回cache作成漏れで停止した。baseline書込み前のmkdirを補い、
+`python tools/kasane_contract/run_megademo_app_host.py` を再実行して200 frames PASS。
+後段のgame/m32等を含む総合script全体の完走とは扱わない。
+同一headのGitHub Actions runは照合時0件。PRを作ってCIを起動する操作は行わない。
+
 `pocket.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`
 opens an explicit opaque shared-depth scope. Limits remain 65536 bytes,
 8000000 work, 256 records, rows1 or8. Use ordinary `shiki.beginFrame` for
