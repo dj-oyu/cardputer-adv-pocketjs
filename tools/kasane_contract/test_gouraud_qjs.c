@@ -51,7 +51,39 @@ static unsigned ga_encode(ksn_proc_segment *data,const ksn_proc_gouraud_patch *p
  unsigned words=(unsigned)KSN_PROC_GOURAUD_WORDS(p->header.vertices,p->header.triangles,p->header.holes);uint8_t *out=(uint8_t *)data;memset(out,0,words*sizeof *data);memcpy(out,&p->header,8);out+=8;
  size_t bytes=p->header.vertices*sizeof p->vertices[0];memcpy(out,p->vertices,bytes);out+=bytes;bytes=p->header.triangles*6u;memcpy(out,p->indices,bytes);out+=bytes;memcpy(out,p->clips,p->header.holes*sizeof p->clips[0]);return words;
 }
+static void native_ranges(void){
+ /* Payload words deliberately contain visible coordinates/marker-like bits.
+  * A culled packet still advances the logical cursor before later entries. */
+ static ksn_proc_frame frame;
+ static uint16_t whole[240*135],pieces[240*135];
+ ksn_proc_gouraud_patch p={0};p.header.vertices=3;p.header.triangles=1;
+ p.vertices[0]=(ksn_proc_gouraud_vertex){10,16,-1,63488,31};
+ p.vertices[1]=(ksn_proc_gouraud_vertex){30,16,1,63488,31};
+ p.vertices[2]=(ksn_proc_gouraud_vertex){10,31,-1,63488,31};p.indices[1]=1;p.indices[2]=2;
+ frame.ready=true;frame.ext=1;
+ frame.segments[0]=(ksn_proc_segment){KSN_PROC_EXT_GOURAUD_PATCH+10,16,30,31,0};
+ const unsigned next=1+ga_encode(frame.segments+1,&p);
+ frame.segments[next]=(ksn_proc_segment){0,4,239,4,2016};
+ frame.segments[next+1]=(ksn_proc_segment){0,134,239,134,65535};
+ frame.count=(uint16_t)(next+2);
+ memset(whole,0,sizeof whole);REQUIRE(ksn_proc_render_band(&frame,whole,0,135));
+ REQUIRE(whole[4*240]==2016&&whole[134*240]==65535&&whole[18*240+12]!=0);
+ for(unsigned clipped=0;clipped<2;clipped++){
+  const unsigned first=clipped?next:0;ksn_proc_carry carry={0};
+  memset(pieces,0,sizeof pieces);
+  for(unsigned y=0;y<135;y+=4){unsigned n=135-y<4?135-y:4;
+   REQUIRE(ksn_proc_render_band_carry(&frame,pieces+y*240,y,n,first,frame.count,&carry));
+  }
+  if(!clipped)REQUIRE(!memcmp(whole,pieces,sizeof whole));
+  else REQUIRE(pieces[4*240]==2016&&pieces[18*240+12]==0&&pieces[134*240]==65535);
+ }
+ ksn_proc_carry carry={0};
+ REQUIRE(!ksn_proc_render_band_carry(&frame,pieces,0,4,0,next-1,&carry)&&!carry.valid);
+ frame.count=2;REQUIRE(!ksn_proc_render_band(&frame,pieces,0,4));
+ puts("NATIVE_RANGE_CARRY_PASS culled_payload logical_ranges four_rows final_three truncation");
+}
 static void packet_contracts(void){
+ native_ranges();
  ksn_proc_gouraud_patch p={0},q;int l,t,r,b;unsigned cost,used;
  p.header.vertices=4;p.header.triangles=2;
  const float xy[8]={10,10,30,10,30,30,10,30};const uint16_t ix[6]={0,1,3,1,2,3};

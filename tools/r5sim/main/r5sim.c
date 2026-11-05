@@ -17,6 +17,7 @@
 #include "text/ksn_font.h"
 #include "sound.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void host_capabilities_clear(void);
@@ -52,8 +53,8 @@ void pocket_pixel_reset(void){}
 bool pocket_pixel_pending(void){return false;}
 void pocket_pixel_present_result(ksn_result r){(void)r;}
 
-extern const char stress_js_start[] asm("_binary_stress_js_start");
-extern const char stress_js_end[] asm("_binary_stress_js_end");
+extern const char stress_js_start[] asm("_binary_stress_r5_js_start");
+extern const char stress_js_end[] asm("_binary_stress_r5_js_end");
 
 #ifndef R5SIM_FRAMES
 #define R5SIM_FRAMES 120
@@ -122,6 +123,37 @@ static const char FS_STUB[]=
     "return{read:async function(m){__readStarted();let c=++n>3?null:new Uint8Array(m);"
     "__readFinished();return c},close:function(){}}}},memory:globalThis.memory};";
 
+#ifdef R5SIM_PGO_GEN
+// The PGO training dump (docs/vm/qjs-pgo.md): libgcov's freestanding interface
+// encodes each gcov_info record as a gcda stream, printed in hex lines that
+// tools/pgo/train.sh turns back into bytes for `gcov-tool merge-stream`.
+struct gcov_info;
+extern const struct gcov_info *const _gcov_info_start[], *const _gcov_info_end[];
+void __gcov_info_to_gcda(const struct gcov_info *, void (*)(const char *, void *),
+                         void (*)(const void *, unsigned, void *),
+                         void *(*)(unsigned, void *), void *);
+void __gcov_filename_to_gcfn(const char *, void (*)(const void *, unsigned, void *), void *);
+static void gcov_hex(const void *d, unsigned n, void *arg) {
+    (void)arg;
+    const uint8_t *p = d;
+    while (n) {
+        unsigned k = n < 48 ? n : 48;
+        printf("GCOV ");
+        for (unsigned i = 0; i < k; i++) printf("%02x", p[i]);
+        printf("\n");
+        p += k; n -= k;
+    }
+}
+static void gcov_name(const char *f, void *arg) { __gcov_filename_to_gcfn(f, gcov_hex, arg); }
+static void *gcov_alloc(unsigned n, void *arg) { (void)arg; return malloc(n); }
+static void gcov_dump(void) {
+    printf("GCOV begin\n");
+    for (const struct gcov_info *const *i = _gcov_info_start; i < _gcov_info_end; i++)
+        __gcov_info_to_gcda(*i, gcov_name, gcov_hex, gcov_alloc, NULL);
+    printf("GCOV end\n");
+}
+#endif
+
 void app_main(void) {
     rt=JS_NewRuntime();
     ctx=JS_NewContext(rt); host_capabilities_clear();
@@ -135,7 +167,7 @@ void app_main(void) {
     JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_nop,"readStarted",0));
     JS_SetPropertyStr(ctx,g,"__readFinished",JS_NewCFunction(ctx,js_nop,"readFinished",0));
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
-    bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),"stress.js")&&present();
+    bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),"stress_r5.js")&&present();
     printf("R5SIM eval %s\n",ok?"ok":"FAIL");
     // The device's arrangement (main/app_session.c, pocketjs_guest_create).
     JS_SetMemoryLimit(rt,160*1024);
@@ -161,6 +193,9 @@ void app_main(void) {
     }
     JS_FreeValue(ctx,frame);
     JS_FreeValue(ctx,g);
+#ifdef R5SIM_PGO_GEN
+    gcov_dump();
+#endif
     printf("R5SIM done frames=%u oom=%u fail=%u bad_present=%u\n",
            (unsigned)R5SIM_FRAMES,oom_lines,fail_lines,bad_present);
 }

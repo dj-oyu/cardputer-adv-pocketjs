@@ -1,0 +1,25 @@
+# STRESS TEST, same-binary A/B of the band renderer's horizontal-line fill
+# (g_ksn_proc_hspan). Measurement build 8efd336 (e07efdf plus
+# POCKET_PROC_HSPAN_AB 1), broker jobs hs1-build-8efd336 / hs1-flash-8efd336,
+# app_session hs1-stress-1: local.stress, LV1, no input. Each HSPAN_AB line
+# names the value the 30-frame window above it ran with. The first window
+# (JIT compiling) is left out of the summary. The broker kept 256 lines.
+I (65513) app: MEM free=95264 largest=31744 js=44836 frames=0
+I (66507) kasane: KASANE_PAINT turn_ms=7.65 render_ms=7.24 send_ms=2.92 bytes=64800 bands=17 frames=30
+I (66516) kasane: HSPAN_AB hspan=1 render_ms=7.24
+I (67514) kasane: KASANE_PAINT turn_ms=6.39 render_ms=9.65 send_ms=1.52 bytes=57120 bands=15 frames=30
+I (67523) kasane: HSPAN_AB hspan=0 render_ms=9.65
+I (68519) kasane: KASANE_PAINT turn_ms=6.45 render_ms=7.12 send_ms=2.75 bytes=49440 bands=13 frames=30
+I (68527) kasane: HSPAN_AB hspan=1 render_ms=7.12
+I (69526) kasane: KASANE_PAINT turn_ms=6.35 render_ms=9.51 send_ms=1.42 bytes=64800 bands=17 frames=30
+I (69535) kasane: HSPAN_AB hspan=0 render_ms=9.51
+# ... alternating the same way to I (112840). Every window, by arm (render_ms / send_ms):
+# hspan=1 (23): 7.12/2.75 7.57/3.06 7.31/2.87 7.25/2.77 7.38/2.96 7.40/3.08 7.08/2.72 7.57/2.80
+#               7.33/3.04 7.49/2.94 7.16/2.74 7.51/3.04 7.26/2.98 7.46/2.70 7.32/2.86 7.60/3.11
+#               7.24/2.83 7.38/2.79 7.38/3.05 7.49/2.90 7.23/2.78 7.58/2.95 7.39/3.07
+# hspan=0 (23): 9.65/1.52 9.51/1.42 9.46/1.37 9.95/1.50 9.56/1.44 9.30/1.35 9.55/1.48 9.72/1.43
+#               9.58/1.41 9.68/1.40 9.72/1.48 9.61/1.48 9.44/1.36 9.58/1.42 9.87/1.51 9.51/1.37
+#               9.50/1.39 9.91/1.48 9.52/1.44 9.46/1.36 9.86/1.49 9.80/1.47 9.54/1.36
+# Medians: hspan=1 render 7.38 send 2.90 sum 10.34; hspan=0 render 9.58 send 1.43 sum 11.00.
+# Shiki engine every window: draws=18.0 steps=7332 engine_ms=1.666..1.685 jit=1/6640 jitfail=0/0/0.
+# STRESS f=60..f=1380: err=0 natOk=ok cmds=9 throughout.

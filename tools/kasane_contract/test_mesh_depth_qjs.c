@@ -152,6 +152,17 @@ int main(void){
  pocket_proc_image_mode();eval_ok(ctx,"P.beginMeshFrame(0,1024,8000000,1)");append(ctx,&blue,z);eval_ok(ctx,"P.commit()");
  pocket_proc_present_result(KSN_IO);REQUIRE(pocket_proc_pending());
  ksn_image_port port;pocket_proc_image_port(&port);
+ /* Direct opaque rows must retain the pending candidate through an IO retry,
+  * including 4+3 final rows, exactly like span and backdrop rendering. */
+ REQUIRE(port.read_rows);
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,expected)==KSN_OK);
+ memset(actual,0,sizeof actual);
+ for(unsigned y=0;y<135;y+=4){const unsigned rows=135-y<4?135-y:4;
+  REQUIRE(port.read_rows(port.ctx,0,0,y,rows,0,240,actual+y*240,240)==KSN_OK);
+ }
+ REQUIRE(!memcmp(actual,expected,sizeof actual)&&actual[12*240+12]==31);
+ REQUIRE(port.read_rows(port.ctx,0,0,0,4,1,239,actual,240)==KSN_UNSUPPORTED);
+ REQUIRE(port.read_rows(port.ctx,0,0,134,2,0,240,actual,240)==KSN_INVALID);
  uint16_t pixel;uint8_t alpha;REQUIRE(port.read_span(port.ctx,0,0,12,12,1,&pixel,&alpha)==KSN_OK&&pixel==31&&alpha==255);
  REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&actual[12*240+12]==31);
  eval_error(ctx,"P.beginFrame(0)");pocket_proc_present_result(KSN_OK);REQUIRE(!pocket_proc_pending());

@@ -4,6 +4,7 @@
 #include "motion.h"
 #include "sound.h"
 #include "ui/kasane/ksn_p0_probe.h"
+#include "lcd_spi.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
@@ -64,7 +65,21 @@ int g_board_swap_into = 1;
 // of memcpy is ~10 us against the ~440 us of SPI the copy lets the CPU skip.
 // One TX payload; every write waits for the exact previous descriptor.
 // Native UI loses copy/DMA overlap; the stable shared drawing strip remains.
+#if !(defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF)
 static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
+#else
+// Design 0 (board.h, docs/platform/lcd-dma-driver.md 9.5): no tx_buf. The
+// strip's two 4-row halves take turns: one is sent from where it was drawn
+// while the other is drawn. half_lent is the half board_strip_next handed out
+// last (a present of it goes out asynchronously); half_from the one in
+// flight. Any other buffer -- a screen's own whole strip -- is sent and
+// finished before board_present returns, since its caller draws into it
+// again at once.
+static uint16_t *half_lent, *half_from;
+#if (defined(BOARD_BUF_AB)&&BOARD_BUF_AB)||(defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2)
+#error "BOARD_STRIP_HALF has no tx_buf: the measurement builds need it off"
+#endif
+#endif
 // The panel's byte order (RAMCTRL 0xB0, second parameter, ENDIAN = bit 3).
 // false: the ST7789's reset order, MSB first, so every strip is byte-swapped
 // on its way out. true: LSB first, the order the CPU draws in, so the strip
@@ -73,12 +88,72 @@ static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
 // and MISO is unwired, so the only test is the glass: BOARD_ENDIAN_PROBE
 // alternates the two every 2 s and the owner looks for a change.
 static bool lcd_le;
-#define BOARD_ENDIAN_PROBE 0   /* issue #118: the eye test is pending */
+#define BOARD_ENDIAN_PROBE 0   /* issue #118: the eye test passed 2026-11-04 (docs/platform/lcd-dma-driver.md 9.2) */
 static void put_strip(uint16_t *out,uint16_t *in,int count);
 static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
 static spi_transaction_t tx_pending;
+// Zero-copy (board.h): the slot (shared or tx_buf) the strip in flight is
+// sent from, NULL when the strip went out of a copy.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+int g_board_zero_copy = 0;
+// Design 2 (board.h): strips go into lcd_spi.c's row ring, built from
+// tx_buf's 8 rows and these 4 (+1,920 B).
+static int g_board_ring = 0;
+// Design 0 (board.h): the strip's two 4-row halves take turns (Kasane draws
+// 4-row pieces), so one 8-row buffer both draws and sends.
+static int g_board_half = 0;
+static bool ring_ready;
+static uint16_t ring_extra[4 * LCD_W] __attribute__((aligned(16)));
+static uint16_t *tx_from;
+// A strip that can be sent where it lies: one of the two slots, pixels LSB
+// first. Anything else (another screen's buffer) takes the copy.
+static bool zero_copy_strip(const uint16_t *pixels) {
+    return g_board_zero_copy && lcd_le &&
+           (pixels == shared || pixels == tx_buf || pixels == shared + 4 * LCD_W);
+}
+#endif
+int board_strip_rows(void) {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    return 4;
+#elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    return g_board_half ? 4 : STRIP_H;
+#else
+    return STRIP_H;
+#endif
+}
+uint16_t *board_strip_next(void) {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    // At most one strip is in flight (queue_size 1), so the other half is free.
+    half_lent = (tx_inflight && half_from == shared) ? shared + 4 * LCD_W : shared;
+    return half_lent;
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    // At most one strip is in flight (queue_size 1), so the other is free.
+    if (g_board_half) return (tx_inflight && tx_from == shared) ? shared + 4 * LCD_W : shared;
+    if (g_board_zero_copy) return (tx_inflight && tx_from == shared) ? tx_buf : shared;
+#endif
+    return shared;
+}
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+// Direct sends (board.h). tx_direct: the strip in flight went out through
+// lcd_spi.c, so its completion is the SPI's done bit, not a queue result.
+static int g_board_direct = 1;
+static bool tx_direct;
+#endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+// Depth 2 (board.h): the second panel buffer and its descriptor. Strips go to
+// the two slots in turn; tx_queued of them (0..2) are owned by the driver,
+// the oldest at slot (tx_next - tx_queued). spi_master returns results in
+// queue order, so reaping one always frees the oldest slot.
+int g_board_depth = 2;
+static uint16_t tx_buf_b[LCD_W * STRIP_H] __attribute__((aligned(16)));
+static spi_transaction_t tx_pending_b;
+static unsigned tx_queued, tx_next;
+static uint16_t *const tx_slot_buf[2] = {tx_buf, tx_buf_b};
+static spi_transaction_t *const tx_slot_desc[2] = {&tx_pending, &tx_pending_b};
+#endif
 #ifdef KASANE_P0_BUS_PROBE
 /* Diagnostic only. SPI post_cb runs in the SPI2 ISR just before the driver
  * places the result on ret_queue. This is an ISR-service timestamp, not the
@@ -101,8 +176,52 @@ static void IRAM_ATTR lcd_post_cb(spi_transaction_t *trans){
 // (the LCD device is configured with queue_size=1), so this is also the barrier
 // every command goes through before it ends the RAMWR session. Returns the
 // transfer's own error, or ESP_OK when there was nothing in flight.
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+// Reaps the oldest queued strip. A result that is not the expected descriptor
+// is a failure and leaves the slot owned, as tx_reap below does.
+static esp_err_t tx_reap_one(void) {
+    spi_transaction_t *want = tx_slot_desc[(tx_next + 2 - tx_queued) & 1], *done = NULL;
+    DD_SCOPE(DD_TX_REAP);
+    DD_ADD(DD_TX_REAPS,1);
+    esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+    if (e == ESP_OK && done != want) e = ESP_ERR_INVALID_STATE;
+    DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+    if (done == want) tx_queued--;
+    tx_inflight = tx_queued != 0;
+    return e;
+}
+#endif
 static esp_err_t tx_reap(void) {
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    // Every queued strip: the barrier for commands, sync and finish.
+    while (tx_queued) {
+        esp_err_t e = tx_reap_one();
+        if (e != ESP_OK) return e;
+    }
+    return ESP_OK;
+#endif
     if (!tx_inflight) return ESP_OK;
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (g_board_ring) {
+        DD_SCOPE(DD_TX_REAP);
+        DD_ADD(DD_TX_REAPS,1);
+        esp_err_t e = lcd_spi_ring_drain();
+        DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+        tx_inflight = false;
+        return e;
+    }
+#endif
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+    if (tx_direct) {
+        DD_SCOPE(DD_TX_REAP);
+        DD_ADD(DD_TX_REAPS,1);
+        esp_err_t e = lcd_spi_direct_wait();
+        DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+        tx_direct = false;
+        tx_inflight = false;
+        return e;
+    }
+#endif
     DD_SCOPE(DD_TX_REAP);
     DD_ADD(DD_TX_REAPS,1);
 #ifdef KASANE_P0_BUS_PROBE
@@ -145,6 +264,14 @@ static esp_err_t tx_reap(void) {
     tx_inflight = done != &tx_pending;
     return e;
 }
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+// Before copying a strip: depth 1 waits for everything (today), depth 2 only
+// for the slot the copy is about to overwrite.
+static esp_err_t tx_reap_slot(void) {
+    if (g_board_depth < 2) return tx_reap();
+    return tx_queued >= 2 ? tx_reap_one() : ESP_OK;
+}
+#endif
 // Open RAMWR position and horizontal bounds. A -1 row means no reusable window.
 static uint16_t window_x,window_cols;
 static bool capture,capture_turn_taken;
@@ -185,6 +312,49 @@ static esp_err_t set_endian(bool le){
     if(e==ESP_OK)lcd_le=le;
     return e;
 }
+#if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB
+// Measurement build (board.h): flips between LSB first with no swap and MSB
+// first with the swap, at a frame boundary. Returns the new LSB-first state.
+int board_endian_ab_flip(void){
+    if(set_endian(!lcd_le)!=ESP_OK)return -1;
+    return lcd_le?1:0;
+}
+#endif
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+int board_lcd_direct_set(int on) {
+    // Both paths must be idle before the bus changes hands.
+    if (tx_reap() != ESP_OK) return g_board_direct;
+    if (on && !g_board_direct) lcd_spi_direct_enter();
+    if (!on && g_board_direct) lcd_spi_direct_leave();
+    g_board_direct = on ? 1 : 0;
+    return g_board_direct;
+}
+uint32_t board_lcd_direct_underruns(void) { return lcd_spi_direct_underruns(); }
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+int board_buf_mode(void) { return g_board_ring ? 3 : g_board_half ? 2 : g_board_zero_copy ? 1 : 0; }
+
+uint32_t board_buf_underruns(void) { return lcd_spi_direct_underruns(); }
+int board_buf_mode_set(int mode) {
+    if (tx_reap() != ESP_OK) return -1;
+    if (g_board_ring && mode != 3) lcd_spi_ring_leave();
+    if (mode == 3 && !g_board_ring) {
+        if (!ring_ready) {
+            uint16_t *rows[LCD_SPI_RING_ROWS];
+            for (int k = 0; k < 8; k++) rows[k] = tx_buf + k * LCD_W;
+            for (int k = 0; k < 4; k++) rows[8 + k] = ring_extra + k * LCD_W;
+            // From the UI task, so the GDMA interrupt lands on its core.
+            if (lcd_spi_ring_init(rows) != ESP_OK) return -1;
+            ring_ready = true;
+        }
+        lcd_spi_ring_enter();
+    }
+    g_board_ring = mode == 3;
+    g_board_half = mode == 2;
+    g_board_zero_copy = mode == 1 || mode == 2;
+    return mode;
+}
+#endif
 #if BOARD_ENDIAN_PROBE
 static int64_t endian_flip_us;
 /* At a window change (no strip in flight, RAMWR about to reopen). */
@@ -394,12 +564,24 @@ esp_err_t board_init(void) {
     // the byte swap and the transfer, and MISO is unwired, so no software
     // check here can see what actually reaches the glass. Revert to 40000000
     // if any tearing or colour damage ever shows up.
-    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1
+    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37,
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+        .queue_size=2
+#else
+        .queue_size=1
+#endif
 #ifdef KASANE_P0_BUS_PROBE
         ,.post_cb=lcd_post_cb
 #endif
     };
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    ESP_ERROR_CHECK(lcd_spi_direct_init());
+#endif
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+    ESP_ERROR_CHECK(lcd_spi_direct_init());
+    if (g_board_direct) lcd_spi_direct_enter();
+#endif
     pie_swap=swap_agrees();
     // Says which clock is in the binary. Several sessions share this tree, and
     // a measurement once moved 6ms because a clock change nobody remembered
@@ -411,6 +593,12 @@ esp_err_t board_init(void) {
     uint8_t format=0x55, orientation=0x60;
     ESP_ERROR_CHECK(command(0x3a, &format, 1));
     ESP_ERROR_CHECK(command(0x36, &orientation, 1));
+    // LSB-first pixels (RAMCTRL ENDIAN): strips go out as drawn, and put_strip
+    // copies instead of byte-swapping. This 4-wire ST7789 honours it -- the
+    // owner's eye test of 2026-11-04 (docs/platform/lcd-dma-driver.md 9.2),
+    // with a deliberate-mismatch phase to show the test could see a wrong one.
+    ESP_ERROR_CHECK(set_endian(true));
+    ESP_LOGI("board","LCD byte order: LSB first (no swap)");
     ESP_ERROR_CHECK(command(0x21, NULL, 0));
     ESP_ERROR_CHECK(command(0x29, NULL, 0));
     gpio_set_level(38, 1);
@@ -528,7 +716,28 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     size_t bytes = (size_t)LCD_W * rows * 2;
     // Commands may have drained already. A continued window has not: the
     // same TX payload/descriptor cannot be touched while the driver owns it.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (g_board_ring && g_board_async) {
+        // The ring waits only for the rows it reuses; DC stays high for every
+        // band the interrupt starts.
+        gpio_set_level(34, 1);
+        esp_err_t e;
+        { DD_SCOPE(DD_TX_SUBMIT);
+          DD_ADD(DD_TX_SUBMITS,1);
+          e = lcd_spi_ring_submit(pixels, 0, LCD_W, rows);
+          DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+          DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
+        if (e == ESP_OK) tx_inflight = true;
+        next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+        window_x=0;window_cols=LCD_W;
+        return e;
+    }
+#endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    esp_err_t e=tx_reap_slot();
+#else
     esp_err_t e=tx_reap();
+#endif
     if(e!=ESP_OK){next_row=-1;return e;}
     if (g_board_async) {
 #ifdef KASANE_P0_BUS_PROBE
@@ -537,15 +746,32 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         // Drawing/overlays may overlap DMA; the single TX copy starts only
         // after ownership is returned by the reap above.
         DD_OPEN(copy,DD_TX_COPY);
-        DD_ADD(DD_TX_COPY_BYTES,bytes);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+        // Sent from where it was drawn; put_strip in place is nothing for
+        // LSB-first pixels and the swap otherwise.
+        uint16_t *panel = pixels;
+        put_strip(pixels,pixels,count);
+#else
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+        uint16_t *panel = tx_slot_buf[tx_next];
+#else
         uint16_t *panel = tx_buf;
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+        if (zero_copy_strip(pixels)) {
+            panel = pixels;              // sent from where it was drawn
+        } else
+#endif
         if (g_board_swap_into) {
+            DD_ADD(DD_TX_COPY_BYTES,bytes);
             put_strip(panel,pixels,count);
         } else {
+            DD_ADD(DD_TX_COPY_BYTES,bytes);
             // The A/B arm: swap in place, then copy, the way 7fd965f shipped it.
             put_strip(pixels,pixels,count);
             memcpy(panel, pixels, bytes);
         }
+#endif
 #ifdef KASANE_P0_BUS_PROBE
         ksn_p0_bus_phase_sample(KSN_P0_BUS_SWAP,
             (uint32_t)(esp_timer_get_time()-swap_began),false);
@@ -556,22 +782,45 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             // only other place that touches the line and it cannot be used here,
             // because it would block on the transfer this path exists to overlap.
             gpio_set_level(34, 1);
-            tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            spi_transaction_t *desc = tx_slot_desc[tx_next];
+#else
+            spi_transaction_t *desc = &tx_pending;
+#endif
+            *desc = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
 #ifdef KASANE_P0_BUS_PROBE
             atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
-            tx_pending.user=&lcd_data_isr_us;
+            desc->user=&lcd_data_isr_us;
             int64_t queue_began=esp_timer_get_time();
 #endif
             { DD_SCOPE(DD_TX_SUBMIT);
               DD_ADD(DD_TX_SUBMITS,1);
-              e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+              if (g_board_direct) {
+                  lcd_spi_direct_start(panel, bytes);
+                  e = ESP_OK;
+                  tx_direct = true;
+              } else
+#endif
+              e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #ifdef KASANE_P0_BUS_PROBE
             ksn_p0_bus_phase_sample(KSN_P0_BUS_QUEUE,
                 (uint32_t)(esp_timer_get_time()-queue_began),false);
 #endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            if (e == ESP_OK) { tx_queued++; tx_next ^= 1; }
+            tx_inflight = tx_queued != 0;
+#else
             tx_inflight = (e == ESP_OK);
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+            tx_from = panel;
+#endif
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+            half_from = panel;
+#endif
         }
     } else {
         DD_OPEN(copy,DD_TX_COPY);
@@ -584,6 +833,12 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0);
         }
     }
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    // A screen's own strip (not a lent half): finished before it is drawn
+    // into again.
+    if (pixels != half_lent && e == ESP_OK) e = tx_reap();
+    half_lent = NULL;
+#endif
     // Where the pointer lands once these rows are in. At the bottom of the
     // window it wraps to the window's own top, which is only row 0 when this
     // frame started there, so the end of the panel always re-windows. A failed
@@ -634,27 +889,102 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // make every packed row a whole number of the kernel's blocks at an aligned
     // address. Anything else falls to the scalar swap, which is the arm that
     // made the first narrow measurement slower than the full-width path.
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (g_board_ring && g_board_async) {
+        gpio_set_level(34, 1);
+        { DD_SCOPE(DD_TX_SUBMIT);
+          DD_ADD(DD_TX_SUBMITS,1);
+          e = lcd_spi_ring_submit(pixels, x, cols, rows);
+          DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+          DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
+        if (e == ESP_OK) tx_inflight = true;
+        next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+        window_x=x;window_cols=cols;
+        return e;
+    }
+#endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    e=tx_reap_slot();
+#else
     e=tx_reap();
+#endif
     if(e!=ESP_OK){next_row=-1;return e;}
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    const bool lent = pixels == half_lent;
+    half_lent = NULL;
+    if (!lent) {
+        // A screen's own strip: its rows outside the window are still the
+        // caller's, so nothing is packed in place. Row by row, finished here.
+        for (int r = 0; r < rows && e == ESP_OK; r++) {
+            DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
+            e = tx(true, pixels + r * LCD_W + x, (size_t)cols * 2u);
+            DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+        }
+        next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+        window_x=x;window_cols=cols;
+        return e;
+    }
+#endif
     DD_OPEN(copy,DD_TX_COPY);
     DD_ADD(DD_TX_COPY_BYTES,bytes);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    // A lent half, packed in place: row r moves from r*240+x down to r*cols,
+    // never past a row still to be read.
+    uint16_t *panel = pixels;
+    for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
+    if (0)
+#elif defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    uint16_t *panel = tx_slot_buf[tx_next];
+#else
     uint16_t *panel = tx_buf;
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    if (zero_copy_strip(pixels)) {
+        // Packed in place: row r moves from r*240+x down to r*cols, never past
+        // a row still to be read, and the strip is not used again this band.
+        panel = pixels;
+        for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
+    } else
+#endif
     for (int r=0;r<rows;r++) put_strip(panel+r*cols,pixels+r*LCD_W+x,cols);
     DD_CLOSE(copy);
     if (g_board_async) {
         if (e == ESP_OK) {
             gpio_set_level(34, 1);
-            tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            spi_transaction_t *desc = tx_slot_desc[tx_next];
+#else
+            spi_transaction_t *desc = &tx_pending;
+#endif
+            *desc = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
 #ifdef KASANE_P0_BUS_PROBE
             atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
-            tx_pending.user=&lcd_data_isr_us;
+            desc->user=&lcd_data_isr_us;
 #endif
             { DD_SCOPE(DD_TX_SUBMIT);
               DD_ADD(DD_TX_SUBMITS,1);
-              e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+              if (g_board_direct) {
+                  lcd_spi_direct_start(panel, bytes);
+                  e = ESP_OK;
+                  tx_direct = true;
+              } else
+#endif
+              e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+            if (e == ESP_OK) { tx_queued++; tx_next ^= 1; }
+            tx_inflight = tx_queued != 0;
+#else
             tx_inflight = (e == ESP_OK);
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+            tx_from = panel;
+#endif
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+            half_from = panel;
+#endif
         }
     } else {
         if (e == ESP_OK) {
@@ -695,7 +1025,15 @@ esp_err_t board_present_finish(void) {
     return e;
 }
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    // Depth 2 waits for a free slot inside board_present_rect instead.
+    esp_err_t e=g_board_depth<2?board_present_finish():ESP_OK;
+#elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    // The ring waits for the rows it reuses inside board_present_rect.
+    esp_err_t e=g_board_ring?ESP_OK:board_present_finish();
+#else
     esp_err_t e=board_present_finish();
+#endif
     if(e==ESP_OK)e=board_present_rect(x,y,cols,rows,pixels);
     if(e!=ESP_OK)next_row=-1;
     return e;

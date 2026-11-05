@@ -1,0 +1,28 @@
+# STRESS's JS turn on the host: callgrind, tools/vmtest/prof/stress_prof.sh (device layout -m32 -malign-double, -O2,
+# firmware VM defaults), STRESS_HEAP_LIMIT=163840 STRESS_FRAMES=299 (LV1, as on the device), collection toggled on
+# JS_Eval (frame() and the jobs it runs). Tree at 119f92e. Instruction counts: ratios inside one run, not milliseconds.
+# The host runs Shiki programs in the interpreter; the device runs them through the scalar JIT (SHIKI_TURN jit=1),
+# so the Shiki share below is the host's, not the device's.
+
+JS turn: 385.9M instructions over 299 frames (1.29M a frame); whole run 1,512M (present 1,119M = 74%).
+
+category (exclusive)                              M      share  top functions
+Shiki engine (host interpreter)               206.9   53.6%   ksn_shiki_resume 137.2, cubic 27.3, data_op 22.4, cubic_weights 12.2
+pocket_proc commit (js_commit)                 71.4   18.5%   js_commit 55.6 + ksn_proc_frame_next (inlined) 14.3; one call a frame
+QuickJS interpreter (JS_CallInternal)          31.6    8.2%
+alloc/free (malloc, js_malloc_rt, ...)         28.1    7.3%
+objects/properties/shapes                      14.8    3.8%   JS_SetPropertyValue 2.4, JS_DefineProperty 1.2, add_property 1.1
+other QuickJS                                  10.9    2.8%
+strings (concat, buffers)                       6.3    1.6%   JS_ConcatString2 1.3
+parser (host-only: the harness evals "frame(N)")  6.1   1.6%
+numbers/math                                    4.3    1.1%
+GC/refcount                                     3.0    0.8%
+pocket.kasane patch/replace                     2.2    0.6%
+
+js_commit = frame_damage (walks the candidate and committed frames, ~900 entries each) + band_signature (per entry,
+an FNV hash of its 10 bytes byte by byte, repeated for every 8-row band the entry spans, plus x range and first/end).
+Split between the two not measured (inlined); by count, band_signature is the larger (estimate).
+
+Device anchor (measured, 4-row, 33 ms): turn_ms 6.5 a tick, SHIKI_TURN engine_ms 1.67 / total_ms 1.70 a frame.
+Remaining ~4.8 ms = js_commit + QuickJS; split by the host ratio 71 : 101 -> ~2.0 ms : ~2.8 ms (estimate only;
+tight C loops and the branchy interpreter need not scale alike on Xtensa).

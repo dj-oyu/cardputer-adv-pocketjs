@@ -1,0 +1,91 @@
+# XTPERF over the Kasane render path (render_rects_body minus display->present), 30-frame windows. All measured (device).
+# A = 59319d2 (5 render/present files at -Os), S = 896e9fc (shipping 8744073: those files at -O2, render_group -Os). Jobs pfa-*, pfs-*.
+# Columns: event pm1 pm0 (pm1 = event count, pm0 = cycles in the same brackets). First window of each run dropped (counters armed mid-window).
+## a_stress
+cti 5246957 55308337
+cti 5330694 55905520
+ntaken 2684689 53901633
+ntaken 2697428 54009426
+istall_busy 4611607 55053505
+istall_busy 4663240 56229929
+istall 4981913 57396769
+istall 5055442 55145967
+istall_l32r 458930 54730479
+istall_l32r 455452 53532406
+bubbles 12698949 55437842
+bubbles 12774975 55771735
+regdep 2279111 57735023
+regdep 2247674 57029341
+dstall 203012 54757351
+dstall 203370 55571380
+insn 35922575 55052714
+## s_stress
+cti 4253242 47542993
+cti 4308842 47877249
+ntaken 2502878 46187198
+ntaken 2512951 46191802
+istall_busy 4465182 47169551
+istall_busy 4480166 48186251
+istall 4728797 49246580
+istall 4788287 47310417
+istall_l32r 325662 46808463
+istall_l32r 326609 45842544
+bubbles 10218469 47339775
+bubbles 10305465 47802617
+regdep 1841122 49331546
+regdep 1806821 48768936
+dstall 227758 46777656
+dstall 234632 47595591
+insn 30816750 47141552
+## a_derby
+insn 26584394 40350325
+insn 27297884 41287877
+cti 3416053 41561955
+cti 3328067 40609704
+ntaken 1589109 40440297
+ntaken 1594969 40712742
+istall_busy 4548392 40629300
+istall 4750264 41210675
+istall_l32r 417238 40434565
+bubbles 8183817 41170019
+regdep 1400536 40795140
+dstall 190559 40368360
+## s_derby
+insn 21747913 32762994
+insn 22226295 33580333
+cti 2327605 33634017
+cti 2271515 32896234
+ntaken 1533084 32710025
+ntaken 1563053 33181729
+istall_busy 4441713 33125949
+istall 4685829 33223893
+istall_l32r 314127 32815874
+bubbles 5734117 33642100
+regdep 1072466 32808102
+dstall 167131 32834633
+
+## Derived (tools: scratch cmp.py, numbers below are its output)
+== stress: cycles/window A 55.45M  S 47.48M  delta -7.97M (-14.4%)
+  insn         A  36.18M  S  31.04M  delta  -5.14M  (frac 0.653 -> 0.654)
+  cti          A   5.27M  S   4.26M  delta  -1.01M  (frac 0.095 -> 0.090)
+  ntaken       A   2.77M  S   2.58M  delta  -0.19M  (frac 0.050 -> 0.054)
+  istall       A   4.94M  S   4.68M  delta  -0.27M  (frac 0.089 -> 0.099)
+  istall_busy  A   4.62M  S   4.45M  delta  -0.17M  (frac 0.083 -> 0.094)
+  istall_l32r  A   0.47M  S   0.33M  delta  -0.13M  (frac 0.008 -> 0.007)
+  bubbles      A  12.70M  S  10.24M  delta  -2.46M  (frac 0.229 -> 0.216)
+  regdep       A   2.19M  S   1.77M  delta  -0.42M  (frac 0.039 -> 0.037)
+  dstall       A   0.20M  S   0.23M  delta  +0.03M  (frac 0.004 -> 0.005)
+  A: IPC 0.653  (bubbles-regdep)/cti = 1.99  closure insn+istall+bubbles+dstall = 0.974
+  S: IPC 0.654  (bubbles-regdep)/cti = 1.99  closure insn+istall+bubbles+dstall = 0.973
+== derby: cycles/window A 40.80M  S 33.10M  delta -7.70M (-18.9%)
+  insn         A  26.93M  S  21.94M  delta  -4.99M  (frac 0.660 -> 0.663)
+  cti          A   3.35M  S   2.29M  delta  -1.06M  (frac 0.082 -> 0.069)
+  ntaken       A   1.60M  S   1.56M  delta  -0.05M  (frac 0.039 -> 0.047)
+  istall       A   4.70M  S   4.67M  delta  -0.03M  (frac 0.115 -> 0.141)
+  istall_busy  A   4.57M  S   4.44M  delta  -0.13M  (frac 0.112 -> 0.134)
+  istall_l32r  A   0.42M  S   0.32M  delta  -0.10M  (frac 0.010 -> 0.010)
+  bubbles      A   8.11M  S   5.64M  delta  -2.47M  (frac 0.199 -> 0.170)
+  regdep       A   1.40M  S   1.08M  delta  -0.32M  (frac 0.034 -> 0.033)
+  dstall       A   0.19M  S   0.17M  delta  -0.02M  (frac 0.005 -> 0.005)
+  A: IPC 0.660  (bubbles-regdep)/cti = 2.00  closure insn+istall+bubbles+dstall = 0.979
+  S: IPC 0.663  (bubbles-regdep)/cti = 1.99  closure insn+istall+bubbles+dstall = 0.979

@@ -10,7 +10,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
-| [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
+| [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3、整数コードのサイクルの式は §3.9）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [pie-opt-plan.md](pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |
 | [flash-size-method.md](flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |
 | [backlog.md](backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
@@ -19,6 +19,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [o2-machine-code.md](o2-machine-code.md) | 調査（実測＋逆アセンブル） | 描画の道の `-O2` が何を速くしたか: XTPERF で減ったサイクルの 2/3 は命令数、1/3 は成立分岐（1 回 = バブル 2 サイクル）、IPC と flash キャッシュ待ちは不変。小関数の展開、1,020 B を越えるフレームの 3 命令アクセス（`render_group` を外に出した理由）、ループの unswitching |
 | [kasane-opt-survey.md](kasane-opt-survey.md) | 調査 | 描画経路の棚卸しと候補の選別（境界ごとに「何が律速か」と却下の理由） |
 | [derby-screen-projection.md](derby-screen-projection.md) | 最適化記録 | DERBY の screen projection の比較条件・実装範囲・検証結果。 |
 | [display-transport-candidates.md](display-transport-candidates.md) | 調査・提案 | 表示転送の候補比較。提案と実測済みの経路を分けて読む。 |

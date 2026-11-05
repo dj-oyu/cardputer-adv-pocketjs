@@ -8,6 +8,10 @@ execute_process(COMMAND "${PYTHON}" "${R}/tools/make_font.py" "${CMAKE_BINARY_DI
 execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../pet_header.py"
     "${R}/apps/pet/assets/pets-compact.bin" "${CMAKE_BINARY_DIR}/generated/kasane_pet_test_data.h"
     COMMAND_ERROR_IS_FATAL ANY)
+set(R5SIM_LDFRAGMENTS "")
+if(R5SIM_PGO STREQUAL "generate")
+    list(APPEND R5SIM_LDFRAGMENTS "gcov_info.lf")
+endif()
 idf_component_register(
     SRCS "r5sim.c"
         "${R}/tools/hostshim/pocket_api_stub.c" "${R}/tools/hostshim/jpfont.c"
@@ -28,6 +32,14 @@ idf_component_register(
     INCLUDE_DIRS "." "${R}/main" "${R}/main/pocket" "${R}/main/ui" "${R}/main/ui/kasane"
         "${R}/main/text" "${R}/main/hal" "${CMAKE_BINARY_DIR}/generated"
     REQUIRES quickjs-ng esp_timer esp_hw_support log esp_driver_i2c esp_driver_gpio esp_driver_spi esp_driver_i2s
-    EMBED_TXTFILES "${R}/apps/stress/stress.js")
+    # stress_r5.js is apps/stress/stress.js as of 51f5feb, byte for byte (the
+    # Kasane retained scene, before STRESS moved to Shiki): the workload of the
+    # R5 records (docs/vm/r5-icache.md, turn-working-set.md). This image does
+    # not link Shiki, and the records stay comparable.
+    EMBED_TXTFILES "${CMAKE_CURRENT_LIST_DIR}/stress_r5.js"
+    LDFRAGMENTS ${R5SIM_LDFRAGMENTS})
+if(R5SIM_PGO STREQUAL "generate")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_PGO_GEN)
+endif()
 set_source_files_properties("${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kasane/ksn_blend_pie.c"
     PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/r5sim_scalar.h")

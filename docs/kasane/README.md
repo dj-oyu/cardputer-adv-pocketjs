@@ -34,6 +34,9 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [Shiki JIT とメモリ配置（図解、HTML）](shiki-jit-overview.html) | Shiki の JIT とその機械語の置き場所を、一続きの問いとして読む図解（各章の冒頭に既知の事柄との対応）。インタプリタと JIT、実行できる RAM、Shiki の区画への相乗り、飽和チェックの除去、レジスタキャッシュ、RTC fast memory の拒否、56 KiB の実験、区画の固定長の表、作業領域の廃止、DERBY の engine_ms の推移と今の 48 KiB の区画（shiki-jit.md §11〜§23、2026-11-03） |
 | [Kasane の描画パイプライン（図解、HTML）](pipeline-overview.html) | フレームバッファを持たない理由、1 ターンの流れ（`frame()` → Shiki の beginFrame/draw/commit → 17 本の帯の合成 → SPI の DMA）、作業台の帯と転送用バッファ 1 本の重ね、`KASANE_PAINT` の各欄、帯の重ね合わせの順、Shiki の線分の並び（candidate・committed、帯の hash、作業領域の廃止）、DERBY の区画の内訳と、並びを 1 本にする予定（c4d7a6c 時点、2026-11-03） |
 | [Shiki の draw の束ね（作業中）](shiki-bundle.md) | draw 1 回の固定費の段ごとの実測と、複数の handle を 1 回で描く API |
+| [native mesh のShiki統合](../ayatsuri/pr117-native-mesh.md) | 公開mesh経路と#122のrange/carry・read_rowsの接続、回帰試験と正式buildの範囲 |
+| [opaque mesh depth](../ayatsuri/opaque-mesh-depth.md) | 明示的depth scope、所有権、予算、rollbackとretryの契約 |
+| [材質sidedness](../ayatsuri/material-sidedness-local.md) | 両面材質、面順とtie、旧asset互換とsnapshotの会計 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |
@@ -52,6 +55,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 
 | 文書 | 内容 |
 | --- | --- |
+| [Shiki の画像を帯へ直接書く・横線の塗り](image-rows.md) | 不透明・等倍の画像を 32 画素ずつではなく帯の行で直接書く `read_rows`（`ksn_ports.h`）、覆われた帯の背景の塗りの省略、帯のラスタで横線を 2 画素ずつ塗る `g_ksn_proc_hspan`。STRESS の実機の同じバイナリの A/B で描画 11.80 → 9.34 ms、さらに 9.58 → 7.38 ms。送出の待ちがそれぞれ +0.63・+1.47 ms 増え、1 フレームの合計は 12.7 → 10.3 ms。LCD の DMA が次の床（2026-11-04）|
 | [手続き型描画の実機診断](procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。対象 image の実測記録。現在の main の性能値ではない |
 | [手続き型描画の上限緩和の実機検証](procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
 | [MEGADEMO Act II](megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29） |

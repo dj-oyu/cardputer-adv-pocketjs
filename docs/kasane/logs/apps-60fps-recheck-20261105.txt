@@ -1,0 +1,43 @@
+# 60 fps re-check, 2026-11-05: VM_DISPLAY_PERIOD_MS 33 -> 16 measurement builds (reverted afterwards).
+# A = 0d7bff2 (ad8a964 + the one line), B = 9085cfd (A + CONFIG_POCKET_VM_QJS_PGO=y).
+# Same method as apps-60fps-trial-20261104-ffbba5c.txt: fps = 30 painted frames / interval between consecutive
+# KASANE_PAINT lines (device log timestamps); the first window is dropped. All measured (device), broker jobs r60a-* / r60b-*.
+# turn/render/send: KASANE_PAINT window means (ms). "prev" = the 2026-11-04 trial at ffbba5c.
+
+## A (16 ms, no PGO)
+BIGWAVE  r60a-bigwave  58.5 fps (1140 f/19.5 s)  windows 57.3-60.7   turn 7.2  render 3.56 send 4.28   prev 55.6
+STRESS   r60a-stress   50.5 fps (960 f/19.0 s)   windows 49.6-51.9   turn 6.72 render 6.80 send 2.93   prev 44.3
+MEGADEMO r60a-megademo 52.2 fps (2280 f/43.7 s)  windows 36-61       turn 7.02 render 4.13 send 4.41   prev 50.5
+  WAKE   38-41   turn 11.5 render 2.5 send 5.2 (turn ~15 while tier-2 plans register)
+  NEWS   50-58   turn 6.7  render 4.1 send 4.3
+  TWIST  50-59   turn 6.6  render 4.0 send 4.5 (first windows of a visit 50-53)
+  ZENITH 58-61   turn 4.2  render 5.0 send 4.0
+  CORE   40-59   turn 8.3  render 4.9 send 4.4 (mid-scene 40-44: render 8.3-8.7, turn 10-11)
+DERBY    r60a-derby    53.1 fps (99 windows/55.9 s; the first ~124 log lines were dropped by the log cap) windows 17-61
+  race 1 (from mid-race)  41-60 (mean 51.8)  turn 10.4 render 3.1 send 3.8; CAM WIDE 2 -> HEAD ON: 9 windows 41-49, turn 13-14.5
+  photo/res               43 / 60-61 (one 17: 1.7 s scene build)
+  pad                     57-60 (mean 58.8)  turn 4.3 render 5.9 send 4.2
+  gate -> race 2 start    one 27 window (scene build)
+  race 2 (first half)     54-60 (mean 57.3)  turn 7.9 render 2.9 send 4.4
+No errors, resets or OOM in any run.
+
+## B (16 ms + CONFIG_POCKET_VM_QJS_PGO=y). The first PGO build (9085cfd) failed on the Windows broker
+## ("profile for function ... not found" for every static function); measured with f67662b (rekey.py).
+BIGWAVE  r60b-bigwave  58.5 fps (46 windows/23.6 s)  windows 57.3-60.2   turn 7.1  render 3.54 send 4.28
+STRESS   r60b-stress   50.7 fps (32 windows/18.9 s)  windows 49-52       turn 6.73 render 6.78 send 2.93
+MEGADEMO r60b-megademo 52.1 fps (76 windows/43.7 s)  windows 37-60       turn 7.04 render 4.12 send 4.41
+  WAKE 38-40 (turn 11.6) / NEWS 50-59 (6.6) / TWIST 49-59 (6.7) / ZENITH 58-60 (4.2) / CORE 40-59 (8.2) / LOST 37-46
+DERBY    r60b-derby    53.8 fps (101 windows/56.4 s; first 124 log lines dropped) windows 17-60
+  race 1 (tail)           52-60 (mean 56.4)  turn 8.2; WIDE 2 / WIDE 3 about 53 (turn 9)
+  photo/res               45 / 59-60 (one 17: scene build)
+  pad                     58-60 (mean 59.0)  turn 4.3
+  gate -> race 2 start    one 26 window
+  race 2                  WIDE/FIELD 52-60; WIDE 2 (to the end of the run) 41-54, mean 44.7, turn 13.4 (SHIKI draws 31 -> 53)
+No errors, resets or OOM.
+
+## Reading
+- A vs B: no difference beyond the window-to-window spread (BIGWAVE 58.5/58.5, STRESS 50.5/50.7, MEGADEMO 52.2/52.1,
+  DERBY 53.1/53.8 with different races in the window). JS turn 6.72/6.73 ms on STRESS. The QEMU model's 1-2 % is not seen.
+- 60 fps is held only by ZENITH (MEGADEMO), DERBY's paddock/results and BIG WAVE's best windows. Below it:
+  STRESS ~50 (render 6.8 + turn 6.7 + send 2.9 = 16.4 ms before anything else), MEGADEMO WAKE ~39 (turn 11-15),
+  CORE's first seconds ~40-47, DERBY's late-race WIDE 2 ~41-45 (turn 13-14.5 as the field spreads).

@@ -1,0 +1,32 @@
+# STRESS TEST (Shiki version) on the device, ff2815b, 2026-11-04.
+# Broker jobs: st1-fetch-ff2815b -> st1-build-ff2815b -> st1-flash-ff2815b
+# (firmware ELF e687dcb7...), then app_session st1-stress-1: local.stress,
+# fresh, 90 s, no input (LV1 only: the broker's boot_id came back rounded by
+# JSON doubles, so action.tap was refused as stale_boot).
+# Excerpt: the start, the first two windows (JIT compiling), then one window
+# in every ten and the last lines. Every 30-frame window had
+# SHIKI_TURN draws=18.0 steps=7332 engine_ms=1.662..1.681 jit=1/6640 jitfail=0/0/0.
+I (76589) shiki: SHIKI_HEAP open bytes=49152
+I (76594) app: APP_ID local.stress
+I (76719) js: STRESS_READY
+I (76727) app: MEM free=95280 largest=31744 js=44836 frames=0
+I (76728) shell: RUN 11876 bytes -> ESP_OK
+I (76742) kasane: KASANE_FRAME_PRESENTED
+I (76778) js: STRESS_NATIVE ok len=414
+I (77732) kasane: KASANE_PAINT turn_ms=7.64 render_ms=11.58 send_ms=0.97 bytes=64800 bands=17 band_runs=1 band_mask=0x1ffff prof=0 frames=30
+I (77737) kasane: SHIKI_TURN draws=17.4 steps=7088 engine_ms=3.442 total_ms=3.475 frames=30 jit=1/6640 cubic=46.4/0.469 pat=0.0/0.000 jitfail=0/0/0 jitdrop=0/0 jitcc=26/0.251 sat=100/0/0/0/13 shk=37828/7724/49152
+I (78734) kasane: KASANE_PAINT turn_ms=6.40 render_ms=11.91 send_ms=0.89 bytes=57120 bands=15 band_runs=2 band_mask=0x1fff3 prof=0 frames=30
+I (78739) kasane: SHIKI_TURN draws=18.0 steps=7332 engine_ms=1.668 total_ms=1.702 frames=30 jit=1/6640 cubic=48.0/0.476 pat=0.0/0.000 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=100/0/0/0/13 shk=37828/7724/49152
+I (78757) js: STRESS f=60 lvl=1 pool=13 peak=18 oom=0 cyc=24 nat=15 natOk=ok err=0 cmds=9 native=10260 pressure=0 pe=0 trim=0 shiki=37828/49152
+I (88802) kasane: KASANE_PAINT turn_ms=6.35 render_ms=11.36 send_ms=0.89 bytes=49440 bands=13 band_runs=3 band_mask=0x1ffc9 prof=0 frames=30
+I (98867) kasane: KASANE_PAINT turn_ms=6.50 render_ms=11.97 send_ms=0.86 bytes=60960 bands=16 band_runs=2 band_mask=0x1ffef prof=0 frames=30
+I (108926) kasane: KASANE_PAINT turn_ms=6.35 render_ms=11.58 send_ms=0.90 bytes=57120 bands=15 band_runs=1 band_mask=0x1fffc prof=0 frames=30
+I (118983) kasane: KASANE_PAINT turn_ms=6.42 render_ms=12.10 send_ms=0.86 bytes=53280 bands=14 band_runs=3 band_mask=0x1ffd9 prof=0 frames=30
+I (129069) kasane: KASANE_PAINT turn_ms=6.39 render_ms=11.63 send_ms=0.90 bytes=57120 bands=15 band_runs=2 band_mask=0x1fffa prof=0 frames=30
+I (139108) kasane: KASANE_PAINT turn_ms=6.41 render_ms=11.97 send_ms=0.90 bytes=49440 bands=13 band_runs=3 band_mask=0x1ffca prof=0 frames=30
+I (143122) kasane: KASANE_PAINT turn_ms=6.34 render_ms=11.68 send_ms=0.88 bytes=57120 bands=15 band_runs=2 band_mask=0x1fff9 prof=0 frames=30
+I (143127) kasane: SHIKI_TURN draws=18.0 steps=7332 engine_ms=1.674 total_ms=1.707 frames=30 jit=1/6640 cubic=48.0/0.478 pat=0.0/0.000 jitfail=0/0/0 jitdrop=0/0 jitcc=0/0.000 sat=100/0/0/0/13 shk=37828/7724/49152
+I (143146) js: STRESS f=1980 lvl=1 pool=13 peak=18 oom=0 cyc=792 nat=495 natOk=ok err=0 cmds=9 native=10260 pressure=0 pe=0 trim=0 shiki=37828/49152
+# Summary (all 67 windows after the first): turn_ms 6.33..6.64, render_ms
+# 11.30..12.31, send_ms 0.84..0.94; f=60 at 78757 ms, f=1980 at 143146 ms:
+# 1,920 frames in 64.39 s = 29.8 fps. err=0, natOk=ok, cmds=9 throughout.

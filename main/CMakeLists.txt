@@ -173,7 +173,7 @@ set(POCKET_LDFRAGMENTS "")
 if(CONFIG_POCKET_VM_HELPER_IRAM)
     list(APPEND POCKET_LDFRAGMENTS "vm/helper_iram8.lf")
 endif()
-idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "hal/int_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
+idf_component_register(SRCS "hal/usb_console.c" "hal/fpu_latency.c" "hal/int_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "hal/lcd_spi.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/app_control.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../third_party/bmi270/bmi2.c" "../third_party/bmi270/bmi270.c"
     ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
@@ -528,6 +528,13 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
 set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTIONS "-O2")
+# The per-frame render and present path at -O2 (docs/platform/lcd-dma-driver.md
+# §9.12): render_ms -10 to -15% on four apps, +12.6 KB flash, +44 B DIRAM.
+# -ffp-contract=off keeps float results identical to the -Os build (no fused
+# multiply-add). ksn_render.c keeps render_group at -Os by function attribute.
+set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
+    pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(pocket/pocket_proc.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")

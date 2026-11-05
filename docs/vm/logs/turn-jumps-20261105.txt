@@ -1,0 +1,42 @@
+# TURNPERF (CONFIG_POCKET_VM_TURNPERF) on the JS turn, 30 turns a line. All measured (device).
+# Build d9673c6 = shipping 5898ac4 + TURNPERF on + four INSN events by kind (insn_jx/brj/callret/ntaken). Jobs qp-stress, qp-derby.
+# The turn is app_tick's dispatch_guest + pocket_kasane_end_turn: QuickJS, the Shiki draws it calls (JIT), and the commit.
+# cy = PM0 cycles in the turns, ev = PM1 event count. STRESS LV1 (first window dropped):
+istall cy=51114176 ev=18523306
+dstall cy=50473485 ev=1579530
+bubbles cy=51219683 ev=8618342
+exr cy=50792483 ev=111760
+istall_busy cy=51240281 ev=17210286
+istall_l32r cy=50918177 ev=2171894
+istall_idiv cy=50814335 ev=6425
+dstall_busy cy=50929354 ev=1605594
+dstall_bank cy=50977401 ev=7124
+regdep cy=51087061 ev=1288444
+cti cy=51331130 ev=7362540
+memw cy=50563794 ev=1050
+exr_window cy=51449213 ev=113625
+exr_replay cy=50602164 ev=824
+load cy=50993537 ev=4526488
+insn_jx cy=50645920 ev=129200
+insn_brj cy=50649168 ev=2363967
+insn_callret cy=51120821 ev=1020192
+insn_ntaken cy=50665058 ev=1615137
+insn cy=50833722 ev=22604817
+istall cy=50576145 ev=18251843
+dstall cy=50820319 ev=1633561
+bubbles cy=50648136 ev=8502277
+exr cy=50784045 ev=111222
+istall_busy cy=50721896 ev=17328369
+istall_l32r cy=50917282 ev=2188529
+istall_idiv cy=51033273 ev=9728
+dstall_busy cy=51130781 ev=1581773
+
+# DERBY, race (CAM FIELD/WIDE, 30-turn windows at ~54.5M cycles; scene-change windows left out):
+insn_jx cy=54434752 ev=332815
+insn_brj cy=54382584 ev=1887220
+insn_callret cy=54828689 ev=1418030
+insn_ntaken cy=55411839 ev=1495445
+insn cy=54479774 ev=20800380
+istall cy=54605020 ev=23639347
+dstall cy=54589100 ev=1813351
+# DERBY paddock (28.5M-cycle windows): istall_l32r ev=1450647 cy=28473068, regdep ev=457098 cy=28563672

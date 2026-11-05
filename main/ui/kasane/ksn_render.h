@@ -63,6 +63,14 @@ extern int g_ksn_decode_once;
  * clipped rectangle; whole-band coverage also skips those commands outright.
  * Zero is the reference composite path for same-binary pixel comparisons. */
 extern int g_ksn_opaque_image_occlusion;
+/* An unscaled opaque image whose port has read_rows (ksn_ports.h) is written
+ * a band at a time straight into the strip, instead of in 32-pixel spans
+ * through the scratch. Zero is the span path; pixels are the same either way. */
+extern int g_ksn_image_rows;
+/* A band that an ungrouped opaque APP image covers whole (the band rows and
+ * its damaged columns) is not filled with the background first: every pixel
+ * of it is the image's. Zero fills as before; pixels are the same. */
+extern int g_ksn_cover_skip_fill;
 /* Cache the exact source coordinate of each destination column and row for
  * one selected ungrouped STRETCH image per frame. Off uses span-local stepping. */
 extern bool g_ksn_image_stretch_map;

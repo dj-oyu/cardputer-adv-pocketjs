@@ -24,6 +24,9 @@ static const char *const CAPS_BIGWAVE_OPT[]= {"audio.tone", "kasane.shiki", NULL
 // MEGADEMO draws with Shiki's built-in programs (apps/kasane/megademo_prog.js)
 // and pocket.shapes.
 static const char *const CAPS_MEGADEMO_OPT[]= {"kasane.shapes", "kasane.shiki", NULL};
+// STRESS TEST draws its sea with Shiki's built-in programs (apps/stress/
+// stress_prog.js) and has no other way to draw it, so Shiki is required.
+static const char *const CAPS_STRESS[]= {"display.kasane", "input.action", "kasane.shiki", NULL};
 // The Shiki test (apps/shikitest): the engine through its test-only surface.
 static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
 // The Shiki API self-check (apps/shikitest/shiki_api_test.js): a kasane.shiki
@@ -79,7 +82,7 @@ static const app_manifest_t MANIFESTS[] = {
     // row so its fs owner is not hello's.
     {.id="local.stress", .title="STRESS TEST", .entry="apps/stress/stress.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
-     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+     .required=CAPS_STRESS, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The on-device half of Shiki's differential test (apps/shikitest/README.md,
     // docs/kasane/shiki-spec.md sec.10): not on the menu, started by the USB

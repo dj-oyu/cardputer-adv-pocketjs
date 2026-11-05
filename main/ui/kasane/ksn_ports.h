@@ -59,6 +59,16 @@ typedef struct {
      * each successful read_span writes alpha=255. Opt in only when this holds
      * for the resource's entire lifetime, including animated frames. */
     bool opaque;
+    /* Optional, opaque ports only: write source rows [y, y+rows), columns
+     * [x, x+count) straight into dst, row r at dst + r*stride, with exactly the
+     * pixels read_span would give. It lets the compositor skip the 32-pixel
+     * span round trip (a scratch copy, an alpha fill, a second copy) for an
+     * unscaled opaque image. KSN_UNSUPPORTED means "not these arguments": the
+     * compositor then reads spans as before, so a port may serve only the
+     * shapes it has a fast path for. */
+    ksn_result (*read_rows)(void *,uint16_t variant,uint16_t frame,uint16_t y,
+                            uint16_t rows,uint16_t x,uint16_t count,
+                            uint16_t *dst,uint16_t stride);
 } ksn_image_port;
 /* Source spans, not destination spans. Compositor resolves crop/scale.
  * Provider fills outputs without heap/I/O. Pet/PPT2 types stay in its adapter.

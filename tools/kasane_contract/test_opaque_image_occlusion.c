@@ -51,8 +51,8 @@ static void hidden_image_after_add(void){
     KSN_TEST_CORE(core,static);
     scene s={0};flat_source full={0x07e0,0},monitor={0xf800,0};
     ksn_core_init(&core);
-    ksn_image_port full_port={&full,240,135,1,1,flat_span,true};
-    ksn_image_port monitor_port={&monitor,112,63,1,1,flat_span,true};
+    ksn_image_port full_port={&full,240,135,1,1,flat_span,true,NULL};
+    ksn_image_port monitor_port={&monitor,112,63,1,1,flat_span,true,NULL};
     ksn_resource full_id,monitor_id;
     assert(ksn_core_register_image(&core,KSN_APP,&full_port,&full_id)==KSN_OK);
     assert(ksn_core_register_image(&core,KSN_APP,&monitor_port,&monitor_id)==KSN_OK);
@@ -89,8 +89,8 @@ static read_counts run(bool optimized,bool transparent,bool clipped,bool grouped
     scene s={0};s.transparent=transparent;
     source_ctx under={&s,true},cover={&s,false};
     ksn_core_init(&core);
-    ksn_image_port under_port={&under,240,135,1,1,source,false};
-    ksn_image_port cover_port={&cover,240,135,1,1,source,!transparent};
+    ksn_image_port under_port={&under,240,135,1,1,source,false,NULL};
+    ksn_image_port cover_port={&cover,240,135,1,1,source,!transparent,NULL};
     ksn_resource under_id,cover_id;
     assert(ksn_core_register_image(&core,KSN_APP,&under_port,&under_id)==KSN_OK);
     assert(ksn_core_register_image(&core,KSN_APP,&cover_port,&cover_id)==KSN_OK);

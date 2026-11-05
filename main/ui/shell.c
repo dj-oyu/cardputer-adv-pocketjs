@@ -813,7 +813,7 @@ typedef struct {
 } shell_overlay_port;
 
 static uint16_t *shell_overlay_strip(void *ctx) {
-    (void)ctx;return board_strip();
+    (void)ctx;return board_strip_next();
 }
 static ksn_result shell_overlay_backdrop(void *opaque,uint16_t y,uint16_t rows,
                                          uint16_t *pixels) {
@@ -992,7 +992,7 @@ void shell_draw(const char *error, unsigned phase) {
         bool host_top_dynamic=show_fps||volume_shown_us||board_capture_active();
         ksn_display_port port={.ctx=&host,.strip=shell_overlay_strip,
             .present=shell_overlay_send,.width=LCD_W,.height=LCD_H,
-            .strip_rows=STRIP_H,.text=&ksn_font_port};
+            .strip_rows=(uint16_t)board_strip_rows(),.text=&ksn_font_port};
         ksn_render_stats stats={0};
         unsigned loop_before=loop_us,hud_before=hud_us,present_before=present_us;
         int64_t composite_began=esp_timer_get_time();
@@ -1036,8 +1036,12 @@ void shell_draw(const char *error, unsigned phase) {
 #endif
         if(result!=KSN_OK)
             ESP_LOGW("overlay","Kasane composite failed: %u",(unsigned)result);
-    } else for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
-        strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y:STRIP_H;
+    } else for(strip_y=0;strip_y<LCD_H;strip_y+=board_strip_rows()) {
+        /* Design 0 (board.h): the strip's 4-row halves in turn, each sent
+         * from where it was drawn while the next is drawn. */
+        const int piece=board_strip_rows();
+        strip=board_strip_next();
+        strip_h=LCD_H-strip_y<piece ? LCD_H-strip_y:piece;
         int64_t band=esp_timer_get_time();
         kernel_cycles+=sc->draw(strip,strip_y,strip_h);
         loop_us+=(unsigned)(esp_timer_get_time()-band);

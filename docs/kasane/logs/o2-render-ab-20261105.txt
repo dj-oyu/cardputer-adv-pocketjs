@@ -1,0 +1,35 @@
+# -O2 for the per-frame render/present files, three builds on the device. All measured (device, KASANE_PAINT 30-frame windows, g_ksn_prof=1).
+# A = a98ce57 (shipping 5804035, files at -Os, prof on)       app 2,526,224 B  DIRAM 181,012 B
+# B = 2b7469d (ksn_font/ksn_render/ksn_core/pocket_kasane/pocket_proc at -O2 -ffp-contract=off)  app 2,543,232 B  DIRAM 181,056 B
+# C = adbd116 (B + render_group at -Os by attribute)          app 2,538,800 B  DIRAM 181,056 B
+# Jobs: to2a-*, to2b-*, to2c-*. Two-build comparisons carry ~15% icache-alignment noise; per-op cycles = category cycles / category count.
+# MEGADEMO: the same 29 windows in each run (the demo's scene schedule is deterministic); CORE = its 4 group-heavy windows.
+# DERBY: paddock only (13 windows); the race seed differs per run, so race windows are not compared.
+# BIG WAVE and DERBY were not run on C. C also changes render_rects (render_group is no longer inlined into it), so both are
+# re-run on the shipping build (see the end). send=0.00 below means the field was not copied, not a measurement.
+
+a_stress.txt: windows=14  turn=6.67 render=7.94 send=2.82  span: 4780 cy/op (total 260.3M over 54457)  blend: 2891 cy/op (total 170.7M over 59049)  read: 104 cy/op (total 11.9M over 114426)  image: 22424 cy/op (total 275.7M over 12294)
+b_stress.txt: windows=14  turn=6.74 render=7.02 send=0.00  span: 3735 cy/op (total 203.4M over 54457)  blend: 2381 cy/op (total 140.6M over 59049)  read: 113 cy/op (total 13.0M over 114426)  image: 22211 cy/op (total 273.1M over 12294)
+c_stress.txt: windows=13  turn=6.68 render=6.78 send=0.00  span: 3738 cy/op (total 189.5M over 50696)  blend: 2189 cy/op (total 120.3M over 54958)  read: 105 cy/op (total 11.2M over 106110)  image: 22176 cy/op (total 252.8M over 11400)
+a_mega.txt: windows=29  turn=6.73 render=5.32 send=0.00  fill: 203 cy/op (total 1.7M over 8317)  span: 1674 cy/op (total 106.6M over 63682)  tile: 3812 cy/op (total 100.0M over 26240)  blend: 2086 cy/op (total 205.5M over 98541)  read: 86 cy/op (total 43.3M over 501982)  image: 18543 cy/op (total 560.0M over 30202)
+b_mega.txt: windows=29  turn=6.74 render=5.02 send=0.00  fill: 170 cy/op (total 1.4M over 8317)  span: 1248 cy/op (total 79.5M over 63682)  tile: 4618 cy/op (total 121.2M over 26240)  blend: 2056 cy/op (total 202.6M over 98541)  read: 92 cy/op (total 46.1M over 501982)  image: 17594 cy/op (total 531.4M over 30202)
+c_mega.txt: windows=29  turn=6.75 render=4.62 send=0.00  fill: 162 cy/op (total 1.3M over 8317)  span: 1227 cy/op (total 78.1M over 63682)  tile: 3633 cy/op (total 95.3M over 26240)  blend: 1694 cy/op (total 166.9M over 98541)  read: 86 cy/op (total 43.1M over 501982)  image: 17251 cy/op (total 521.0M over 30202)
+a_mega_core.txt: windows=4  turn=8.57 render=8.00 send=0.00  span: 1661 cy/op (total 22.4M over 13486)  tile: 16352 cy/op (total 77.0M over 4710)  blend: 3824 cy/op (total 92.4M over 24171)  read: 84 cy/op (total 7.5M over 89620)  image: 16400 cy/op (total 72.8M over 4437)
+b_mega_core.txt: windows=4  turn=8.58 render=8.14 send=0.00  span: 1184 cy/op (total 16.0M over 13486)  tile: 20813 cy/op (total 98.0M over 4710)  blend: 4472 cy/op (total 108.1M over 24171)  read: 90 cy/op (total 8.1M over 89620)  image: 15276 cy/op (total 67.8M over 4437)
+c_mega_core.txt: windows=4  turn=8.55 render=7.01 send=0.00  span: 1162 cy/op (total 15.7M over 13486)  tile: 16068 cy/op (total 75.7M over 4710)  blend: 3517 cy/op (total 85.0M over 24171)  read: 83 cy/op (total 7.5M over 89620)  image: 14744 cy/op (total 65.4M over 4437)
+a_mega_rest.txt: windows=24  turn=6.35 render=4.92 send=0.00  fill: 200 cy/op (total 1.6M over 8007)  span: 1681 cy/op (total 82.4M over 49021)  tile: 1083 cy/op (total 22.4M over 20664)  blend: 1521 cy/op (total 111.5M over 73324)  read: 87 cy/op (total 34.2M over 394494)  image: 19026 cy/op (total 469.6M over 24681)
+b_mega_rest.txt: windows=24  turn=6.36 render=4.55 send=0.00  fill: 165 cy/op (total 1.3M over 8007)  span: 1270 cy/op (total 62.2M over 49021)  tile: 1088 cy/op (total 22.5M over 20664)  blend: 1273 cy/op (total 93.3M over 73324)  read: 92 cy/op (total 36.4M over 394494)  image: 18120 cy/op (total 447.2M over 24681)
+c_mega_rest.txt: windows=24  turn=6.37 render=4.27 send=0.00  fill: 157 cy/op (total 1.3M over 8007)  span: 1249 cy/op (total 61.2M over 49021)  tile: 923 cy/op (total 19.1M over 20664)  blend: 1102 cy/op (total 80.8M over 73324)  read: 86 cy/op (total 34.1M over 394494)  image: 17815 cy/op (total 439.7M over 24681)
+a_wave.txt: windows=14  turn=7.20 render=4.21 send=0.00  span: 2585 cy/op (total 54.8M over 21186)  blend: 1811 cy/op (total 35.3M over 19506)  read: 130 cy/op (total 7.9M over 61260)  image: 22848 cy/op (total 270.3M over 11832)
+b_wave.txt: windows=14  turn=7.26 render=3.77 send=0.00  span: 2022 cy/op (total 42.5M over 20998)  blend: 1321 cy/op (total 25.5M over 19318)  read: 144 cy/op (total 8.8M over 61330)  image: 20782 cy/op (total 246.2M over 11846)
+a_derby_pad.txt: windows=13  turn=4.32 render=6.07 send=0.00  fill: 102 cy/op (total 3.4M over 33150)  span: 1646 cy/op (total 138.8M over 84335)  blend: 2007 cy/op (total 174.7M over 87065)  read: 81 cy/op (total 31.2M over 386880)  image: 7923 cy/op (total 92.7M over 11700)
+b_derby_pad.txt: windows=13  turn=4.24 render=5.35 send=0.00  fill: 66 cy/op (total 2.2M over 33150)  span: 1274 cy/op (total 107.5M over 84394)  blend: 1698 cy/op (total 148.0M over 87188)  read: 87 cy/op (total 33.6M over 387008)  image: 7968 cy/op (total 93.3M over 11704)
+
+# Static sizes of ksn_render.c from the host cross-compiler (xtensa-esp32s3-elf-gcc 15.2, contract stubs; approximate):
+#   -Os text 18,356 B (render_rects 10,538); -O2 22,031 B (render_rects 13,720: render_group and row_table_for inlined);
+#   C: render_group out of line 2,024 B, render_rects 6,730.
+
+## Shipping build 8744073 (C without the profiler, g_ksn_prof=0; jobs to2s-bigwave, to2s-derby). render_ms per window:
+BIG WAVE   3.60 3.56 3.54 3.53 3.53 3.54 3.54 3.55 3.55 3.57 3.57 3.57 3.50 3.55 3.57   (A with prof: 4.21, B with prof: 3.77)
+DERBY pad  4.87 4.79 4.88 4.80 4.78 4.90 4.78 4.81 4.86 4.79 4.88 4.81 4.77           (A with prof: 6.07, B with prof: 5.35)
+# The profiler's own cost is in A/B/C and not here, so shipping vs A overstates the -O2 gain by that cost (not measured separately).
