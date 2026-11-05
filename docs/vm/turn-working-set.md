@@ -167,6 +167,9 @@ python tools/r5sim/icache.py model turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.elf 
 python tools/r5sim/turnset.py turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm <nm> --addr2line <addr2line> \
     --src components/quickjs-ng/quickjs-ng/quickjs.c --rom-ld $IDF_PATH/components/esp_rom/esp32s3/ld \
     --top 25 [--full] [--mapping out.tsv]
+# 触った行のうち、ターンが実際に実行したバイト（行の使用率）。命令長は ELF の逆アセンブルから取る
+python tools/r5sim/lineuse.py turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm <nm> --objdump <objdump> \
+    --top 25 [--tsv out.tsv]
 ```
 
 `turnset.py` の総数（行・warm・cold）は `icache.py model` を同じ ELF に写したときと一致する（確認済み）。
