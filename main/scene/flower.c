@@ -510,7 +510,7 @@ static inline int iceil (float x) { int t=(int)x;return t+(x>0.0f&&(float)t!=x);
 // is where the error can flip a pixel's visibility, so the picture is compared,
 // not argued about (tools/flower_frame_dump.c): at B=8, 0.0..0.2% of the pixels
 // of a frame differ, 1..3 of them by a lot (the flip), everything else by <=33
-// of 255; at B=10 see docs/flower-decor-cost.md.
+// of 255; at B=10 see docs/perf/flower-decor-cost.md.
 #ifndef FLOWER_SQRT_BITS
 #define FLOWER_SQRT_BITS 8
 #endif
@@ -539,7 +539,7 @@ static inline float flower_isqrt_q(float d) {
 // both sides: the SPLIT counters bracket the call and every window logs which
 // side ran (SPLIT3's sq=). B=8 is the B that was chosen with the picture's cost
 // known (0.02% of pixels, a few white pixels where the depth test flips at a
-// silhouette; docs/flower-decor-cost.md). Set B=14 if that ever reads as a
+// silhouette; docs/perf/flower-decor-cost.md). Set B=14 if that ever reads as a
 // defect on the glass: same loop, four more steps.
 //
 // And the conversions around it cost what the loop saved. Measured on the board,

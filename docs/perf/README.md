@@ -11,6 +11,7 @@
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
 | [pie-simd.md](pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3、整数コードのサイクルの式は §3.9）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
+| [tools/pie/README.md](../../tools/pie/README.md) | 手順書 | PIE カーネルのホスト検証ツール（`run_models.py` / `test_kernels.py` / `stalls.py` / `piesim.py`）の使い方、局面別の走らせ方、新カーネルの手順、前提と限界 |
 | [pie-opt-plan.md](pie-opt-plan.md) | 設計 | 残った重いパスの PIE 化（`perf/pie-opt`）。モチベーション（なぜ今、per-pixel ごとベクタ化しかないか）、対象の絞り込み（T1 `bell` 帯棄却 / T2 装飾光線の厳密カーネル / T3 MP3 FIR）、ホスト4層での検証 |
 | [flash-size-method.md](flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |
 | [backlog.md](backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
@@ -55,6 +56,6 @@
 | [kasane-opt-integration.md](../archive/perf/kasane-opt-integration.md) | 記録 | 最適化分岐の統合記録（順序・衝突の解決・各段の数値・オブジェクト増減・既定値の一覧） |
 | [kasane-consolidation.md](../archive/perf/kasane-consolidation.md) | 記録 | kasane 系統の一本化の判定。12 分岐のユニーク 14 コミットは **すべて `perf/kasane-opt` に内容として入っており cherry-pick は 0 本**（`git cherry` の `+` 18 行は統合が衝突を両側残しで解いたため patch-id が一致しないだけ）。元→統合コミットの対応・切替と既定・ホスト検証（suite 71 PASS / ビルド rc=0 / bin 2,210,544 B）・削除してよい 12 枝の一覧 |
 | [pie-consolidation.md](pie-consolidation.md) | 記録 | **`perf/mp3-fir` に何が入っているかの一覧と検証状態**（実機で測った値／ホストだけ／未計測の別、数字の出所つき）。flower-decor の性能19本の取り込みで何を両立させ、何を no-op とし、何を入れなかったか |
-| [flower-decor-cost.md](../flower-decor-cost.md) | 統合した過去の記録 | 2026-09-09〜15 の装飾光線・固定点平方根・profile gate。FPU 解釈は後続実測を優先。 |
+| [flower-rejection.md](flower-rejection.md) | 記録（却下） | 楕円体 span の行ごとの狭め（`tools/flower-rejection/`）。visit の 27〜50% を落とすがビット一致、実機で悪化した記録が後で訂正され、実際の価値は約 0.2 ms/30 ms。落とす画素が最安だったため |
 | [flower-optimisation-options.md](../archive/perf/flower-optimisation-options.md)（docs 直下） | 記録 | flower のフレームをこれ以上どう縮めるかの検討。各候補に「実機 / [obj] / 推定」の別と上限がつく |
 | [flower-fixed-point-pipeline.md](../archive/perf/flower-fixed-point-pipeline.md)（docs 直下） | 設計 | 固定小数点平方根を caller まで整数で持ち回す案（B=8 の実測が「時間は動かない」だった理由の続き。未実装） |

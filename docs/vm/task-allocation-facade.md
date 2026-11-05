@@ -5,7 +5,7 @@
 
 ## 実装範囲
 
-配置・チケット管理は [standalone/fp_ticket](../../standalone/fp_ticket/README.md) に実装済み。
+配置・チケット管理は [standalone/fp_ticket](../../standalone/fp_ticket/)（契約と限界は [fp-ticket.md](fp-ticket.md)） に実装済み。
 名称は `fp_ticket` だが非FPタスクも対象とする。既存ファームとビルド設定には接続していない。
 FreeRTOSのタスク作成・登録・終了をまとめる接続層は未実装で、本書のライフサイクル契約に従って追加する。
 本書の「接続層が行う」は今後の実装要件を示す。

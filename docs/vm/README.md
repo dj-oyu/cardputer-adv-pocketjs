@@ -9,11 +9,14 @@
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
 | [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) | 仕様 | L0〜L5 の全体仕様。各段の現状と、実装で確定した値 |
+| [tools/vmtest/README.md](../../tools/vmtest/README.md) | 手順書 | VM 改造のホスト側判定基盤の使い方: コーパス・Test262 部分集合・割り当てトレース・時間の基準、`vmrun`、`run.sh` の各フラグ、既知の脆さ（`floor/`・`prof/` の手順は各ディレクトリの README） |
 | [vm-branching.md](vm-branching.md) | 仕様 | `vm/*` ブランチとワークツリーの運用 |
 | [vm-L1-design.md](vm-L1-design.md) | 設計 | L1: ジョブ境界の実行制御と起床 |
 | [vm-L2-design.md](vm-L2-design.md) | 設計 | L2: 移動しない VM スタックと中断・再開。決定表 D1〜D43、整列（§2.2） |
 | [vm-L3-design.md](vm-L3-design.md) | 設計 | L3: 相対参照と移動可能スタック。決定表 D44〜D55、移動は中断中のみ（§2）、差分表（§3） |
 | [vm-tco-design.md](vm-tco-design.md) | 設計・検証記録 | strict末尾呼び出し最適化の実験実装。host/device検証済み、互換性維持のため既定n |
+| [fp-ticket.md](fp-ticket.md) | 仕様 | `standalone/fp_ticket` の契約（2 コア・最大 16 予約・FP は各コア 1 予約）、フラグと保存領域、同時実行と寿命、判断の限界。ファームには未接続 |
+| [function-allocation.md](function-allocation.md) | 提案 | 関数オブジェクトの確保をコンパクトにする提案（#46 の変更の再構成）。レイアウトと所有、道具は `tools/vmtest/function_allocation/` |
 | [task-allocation-facade.md](task-allocation-facade.md) | 設計 | FreeRTOS タスクの配置ファサード（`standalone/fp_ticket`、未接続） |
 | [r3-small-block-cache.md](r3-small-block-cache.md) | 設計 | R3: ゲストのアロケータの下に小ブロックの再利用リストを置く設計。確保の大きさの分布（上位 6 つで 92%）とキャッシュ方式ごとの命中率のシミュレーション、置き場所・上限の外に出る量・手放す時点・検査の仕方 |
 | [app-suspend-design.md](app-suspend-design.md) | 設計 | アプリの常駐中断: Back でゲストを壊さずに止めて残し、同じアプリを開くと続きから。状態遷移、各面の中断・再開の扱い、API（`suspend`/`resume` フック、`stop("evict")`）、退去の条件、メモリの予算、段と検証。決めること 4 つ |
@@ -51,4 +54,5 @@
 | [gc-cap-backoff.md](gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
 | [spread-eval-oom.md](spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
 | [aliasing-types.md](aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
+| [quickjs-ng-resolving-functions-double-free.md](quickjs-ng-resolving-functions-double-free.md) | 記録（上流報告書） | 確保失敗でresolving functionsが解放済みの値を残し `js_async_function_call` が二重解放する quickjs-ng のバグ。上流へは未送信、修正は本リポジトリで適用済み（パッチは `reports/upstream/`） |
 | [vm-ledger/](vm-ledger) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
