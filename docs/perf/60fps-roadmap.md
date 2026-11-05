@@ -91,9 +91,9 @@
 
 | issue | 内容 |
 | --- | --- |
-| [#119](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/119) | 残っている 60 fps の壁（題による。§0 の STRESS の合計 16.4 ms、WAKE・CORE・DERBY 終盤の turn がこれにあたると読んだが、issue 本文は未確認） |
-| [#120](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/120) | QuickJS の PGO の続き（題による。issue 本文は未確認）。文書側の次の一手は「模型と実機の差（`I_STALL_BUSY`）を先に測る」（[qjs-pgo.md](../vm/qjs-pgo.md) §5、未検証） |
-| [#121](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/121) | `frame_lint --check`（題による。issue 本文は未確認。道具は [o2-machine-code.md](o2-machine-code.md) §5） |
+| [#119](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/119) | 残りの壁は JS の turn。STRESS（render 6.8 ＋ turn 6.7 ＋ send 2.9 = 16.4 ms）、MEGADEMO WAKE（tier-2 の plan の登録中、turn 11〜15 ms）、CORE 序盤（40〜47 fps）、DERBY 終盤 WIDE 2（SHIKI の draws 31 → 53、turn 13〜14.5 ms）、シーン切り替えの一時停止（DERBY photo → res 1.7 s、gate → race 26〜27 fps の窓）、三つの計時の外の時間の分解 |
+| [#120](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/120) | QuickJS PGO: 模型（触る行 −2.8%、推定）が実機に出ない理由を、`TURNPERF` の `I_STALL_BUSY` で PGO なし／ありの 2 ビルドで比べて確かめる。効く見込みが立てば学習に DERBY を足し、立たなければ仕組みは残して閉じる（[qjs-pgo.md](../vm/qjs-pgo.md) §5） |
+| [#121](https://github.com/dj-oyu/cardputer-adv-pocketjs/issues/121) | `frame_lint` を報告のみからビルドを止める `--check` に切り替え、基準の更新手順を `docs/platform/test-commands.md` に書く（道具は [o2-machine-code.md](o2-machine-code.md) §5） |
 
 issue に無い、元の文書に「未」と書かれているもの:
 
