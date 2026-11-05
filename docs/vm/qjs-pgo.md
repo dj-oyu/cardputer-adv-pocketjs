@@ -1,9 +1,9 @@
 # QuickJS のプロファイル誘導最適化（PGO、2026-11-05）
 
-[VM の文書](README.md) / 前提: [turn-line-use.md](turn-line-use.md)（行の使用率 57.5%）、[r5-icache.md](r5-icache.md)（模型）
+[VM の文書](README.md) / 前提: [turn-icache.md](turn-icache.md) §3（行の使用率 57.5%）・§1（模型）
 
 QEMU で STRESS を流して取った実行回数で QuickJS をコンパイルし直す（`-fprofile-use`）。ねらいは
-[turn-line-use.md](turn-line-use.md) で見つけた「取り込んだ行の 4 割が走らないバイト」を減らすこと。
+[turn-icache.md](turn-icache.md) §3 で見つけた「取り込んだ行の 4 割が走らないバイト」を減らすこと。
 
 **状態: 試行（既定 OFF、`CONFIG_POCKET_VM_QJS_PGO`）。** 実機の 4 アプリで、効果は測れる大きさに無かった（§5、実測）。
 
@@ -48,7 +48,7 @@ QEMU で STRESS を流して取った実行回数で QuickJS をコンパイル�
   プロファイルがその関数を欠き、ファームのビルドが `Missing counts for called function`（`-Werror` で止まる）に
   なった。r5sim は今、この定義を QuickJS に付ける。`quickjs.c.obj` の逆アセンブルはファームと一致
   （確認済み）。**この変更で r5sim の記録は以前と比べられなくなった**（触る行は 1,305 → 1,281 前後）。
-  [turn-line-use.md](turn-line-use.md) の数字は変更前の r5sim。
+  [turn-icache.md](turn-icache.md) §3 の数字は変更前の r5sim。
 - **組む木ごとに鍵を作り直す（`tools/pgo/rekey.py`）。** GCC は関数の数え先を ident で探し、static 関数の ident は
   `crc(crc(crc(0, ソースの絶対パス), 名前), -o の相対パスから .obj を除いたもの)`、ソース位置の照合値は
   `crc(crc(行, パス), 名前)`（crc は GCC の `crc32_string`。esp-15.2.0 の `.gcno` と突き合わせて確かめた）。
@@ -151,7 +151,7 @@ tools/pgo/train.sh
 - 学習し直すべきとき: QuickJS（`components/quickjs-ng`）を直したとき、IDF/GCC を変えたとき、
   r5sim の作業（`stress_r5.js`）を変えたとき。古いプロファイルは、形の変わった関数だけ黙って外れる（§1.1）。
 - 模型で確かめる（r5sim を同じ指定で組んで記録する）: `idf.py -C tools/r5sim -B <dir> -DSDKCONFIG=<dir>/sdkconfig -DR5SIM_PGO=use build`、
-  その後は [turn-working-set.md](turn-working-set.md) §5 の手順（`-icount shift=2` を付ける）。
+  その後は [turn-icache.md](turn-icache.md) §2.5 の手順（`-icount shift=2` を付ける）。
 
 ## 5. 実機（2026-11-05、実測）
 

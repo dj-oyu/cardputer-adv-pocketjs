@@ -304,7 +304,7 @@ static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
  * pointer, low two bits flags (tlsf.c block_header_t.size; multi_heap adds no
  * owner word without CONFIG_HEAP_TASK_TRACKING) -- instead of
  * heap_caps_get_allocated_size(), which is in flash and scans the heap list
- * (~110 cycles, docs/vm/allocator-cost.md). Used only after
+ * (~110 cycles, docs/vm/r3-small-block-cache.md sec.7). Used only after
  * guest_tlsf_direct() has seen the two agree on this build's heap. */
 static int g_tlsf_direct = -1;
 static inline size_t tlsf_header_length(const void *pointer) {

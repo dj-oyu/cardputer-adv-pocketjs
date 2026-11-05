@@ -1,4 +1,4 @@
-// STRESS's turns on the chip, for QEMU (docs/vm/r5-icache.md). The setup is
+// STRESS's turns on the chip, for QEMU (docs/vm/turn-icache.md sec.1). The setup is
 // tools/test_stress_app.c's -- real QuickJS, real pocket.kasane, a pocket.fs
 // stub -- but frame() is called as app_tick calls it (JS_Call, then the job
 // queue drained, then pocket_kasane_end_turn), not through JS_Eval, so the

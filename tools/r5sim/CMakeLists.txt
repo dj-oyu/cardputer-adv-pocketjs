@@ -1,4 +1,4 @@
-# R5's offline instruction-cache model (docs/vm/r5-icache.md): STRESS's JS
+# R5's offline instruction-cache model (docs/vm/turn-icache.md sec.1): STRESS's JS
 # turns on an ESP32-S3 image that QEMU can run -- UART console, no display,
 # no keyboard -- built with the firmware's compiler settings, so every function
 # the turn runs is byte-for-byte the firmware's and a trace of it can be laid

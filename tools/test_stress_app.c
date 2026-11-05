@@ -38,7 +38,7 @@ void *__wrap_calloc(size_t count,size_t size) { return __real_calloc(count,size)
 
 static JSRuntime *rt;
 
-/* STRESS_ALLOC_TRACE=<file> (docs/vm/allocator-cost.md, R3's design): the
+/* STRESS_ALLOC_TRACE=<file> (docs/vm/r3-small-block-cache.md sec.7, R3's design): the
  * guest allocator's calls as text -- "m <usable> <id>", "f <id>",
  * "r <old id> <new id> <usable>", "F <frame>" -- with the device's tlsf
  * rounding (4 B, 12 B minimum) as the usable size, so a -m32 build's trace

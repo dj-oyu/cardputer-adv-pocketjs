@@ -1,11 +1,13 @@
 # R3 設計: 小さいブロックの再利用（2026-09-27、実装済み・常時有効）
 
+吸収した旧文書: allocator-cost.md（§7。出典となったアロケータの値段の実機測定）。
+
 > **現状（2026-09-27）**: `CONFIG_POCKET_VM_BLOCK_CACHE` として実装した。ホストの関所は通過、実機でアロケータの
 > 時間は 1.57 → 0.92 ms（−41%）。有効にすると STRESS の LV3 で Kasane の `BUSY` が出ていたが、原因はキャッシュではなく
 > `app_tick` の継続ターンの穴で、修正後はキャッシュ有りで 3/3 回 PASS（§6.2、backlog R3a）。これを受けて既定を y にした。
 > 同日、ビルドオプションではなくなり常に入る（backlog「ビルドオプションの整理」）。
 
-出典: [allocator-cost.md](allocator-cost.md)（実機: malloc 1 回 約 1,270 サイクル、free 約 620、ブロック長の読み戻し
+出典: 本文 §7（旧 allocator-cost.md。実機: malloc 1 回 約 1,270 サイクル、free 約 620、ブロック長の読み戻し
 約 110、STRESS の JS のターンの 20.6%）。道具は `tools/vmtest/prof/`（`alloc_sim.py`・`vmtrace2alloc.py`、
 `test_stress_app.c` の `STRESS_ALLOC_TRACE`）。
 
@@ -158,3 +160,45 @@ GC と例外の処理でターンが長くなり、frame() の途中で止まり
 **実機（キャッシュ有り＋計装、3 回）**: 3/3 回 `STRESS_APP_PASS`、`BUSY` 0 回。`R3A_CONT_PRESENT` は各回 3 回、
 どれも OOM の約 50 ms 後 — 修正前に `BUSY` が出ていた位置そのもの。LV1〜3 は 29.3〜29.7 fps。
 ログは `.cache/vm-archive/stress_r3fix{4,5,6}.log`。
+
+## 7. 設計の出典: ゲストのアロケータの値段（旧 allocator-cost.md、2026-09-27、`vm/runtime-speed`）
+
+計装は `CONFIG_POCKET_VM_ALLOCPROBE`（既定 n）: `components/pocketjs_guest/src/guest.c` のアロケータの入口
+（malloc/calloc・free・realloc・ブロック長の読み戻し）の中で使ったサイクルと回数を数え、`KASANE_PAINT` と同じ
+30 描画フレームの区切りで `ALLOCPROBE ...` として JS のターン時間と並べて出す。USB の `)` は `heap_caps` の
+マイクロベンチ（`ALLOCBENCH ...`）。
+
+### 7.1 実装で確認したこと（ESP-IDF v6.0.1）
+
+| QuickJS 側 | 実機で走るもの | 置き場所 |
+| --- | --- | --- |
+| `js_malloc_rt` | `heap_caps_malloc` → 優先度 3 段 × 登録ヒープを走査して caps が合うヒープを探す → `multi_heap_malloc`（クリティカルセクション）→ `tlsf_malloc` | IRAM |
+| 確保の直後 | `heap_caps_get_allocated_size`（上限の計上に実ブロック長を使う）→ `find_containing_heap`（ヒープ一覧の線形探索）→ `tlsf_block_size` | **flash** |
+| `js_free_rt` | 読み戻し → `heap_caps_free` → もう一度 `find_containing_heap` → クリティカルセクション → `tlsf_free` | IRAM |
+
+毒化・トレース・タスク追跡は無効、`CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH` も無効、ゲストは PSRAM を先に試さない
+（`prefer_psram=false`）。設定の取り違えは無い。
+
+### 7.2 実測（実機、同じバイナリ）
+
+`)` のマイクロベンチ（内部 RAM、200 個ずつ、2 回とも同じ値）:
+
+| 大きさ | malloc | ブロック長の読み戻し | free | malloc→free の組 |
+| --- | --- | --- | --- | --- |
+| 16〜48 B | 約 1,180 サイクル | 約 110 | 約 680 | 約 1,800（7.5 µs） |
+| 64〜256 B | 約 1,225 | 約 110 | 約 680 | 約 1,850 |
+
+見積もり（1 組 500 サイクル）の 3 倍以上。大きさにはほとんど依らない。
+
+STRESS（`stress_app.py`、各段階 20 秒、30 フレームの区切りごとの中央値）:
+
+| 段階 | JS のターン | うちアロケータ | 割合 | 1 フレームの呼び出し |
+| --- | --- | --- | --- | --- |
+| LV1 | 7.63 ms | **1.56 ms** | **20.6%** | malloc 166・free 165・realloc 11・読み戻し 389 |
+| LV2 | 7.59 ms | 1.57 ms | 20.7% | ほぼ同じ |
+| LV3 | 8.14 ms | 1.66 ms | 20.5% | ほぼ同じ |
+
+1 回あたり: malloc 約 1,270 サイクル、free 約 620、realloc 約 1,100、読み戻し約 110（全体の 1 割強）。
+アロケータの外に出るほど遅い経路は無く、**呼び出しの回数そのもの**が値段になっている。
+
+計装 `CONFIG_POCKET_VM_ALLOCPROBE` は常時有効ではなく計測用（既定 n）。この測定から R3（本文 §3）とブロック長の直読み（§3.2）が生まれた。

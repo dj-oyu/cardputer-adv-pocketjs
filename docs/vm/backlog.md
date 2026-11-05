@@ -8,7 +8,7 @@
 
 未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、YIELD は既定 y を経て 2026-09-27 にビルドオプションではなくなった（下の「ビルドオプションの整理」）。TCO と FAIR は採らなかった実験として同日に削除した。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
 
-- **ソースを渡して起動するアプリの frame() は park しない（2026-09-29 に実測で判明、未対応）。** `app_session.c` の `FRAME_WRAP` が frame を `f.apply(this,arguments)` で包むので、本体は `Function.prototype.apply` からのネイティブ再入の床で走り、D17r の止まってよい床にならない（§11.9「囲った経路」）。APPS の MEGADEMO は HEAVY 95 秒・2,228 ターンで park 0（JS 最長 57.5 ms）、wrapper を通らない診断起動 `'J'` では約 20 秒で 263 回。APPS の組み込みアプリ（hello を除く）・Playground・work はすべてこの wrapper を通るので、8 ms のターン予算は frame() には効いておらず、L2c の frame() の中断が届くのは hello・診断起動・ジョブだけ。直す案（未検証）: 例外の報告を JS の `try` ではなくホストの例外経路で拾い、`f.apply` を使わない。直すと出荷アプリの frame() が park し始め、R3a・`end_guest_turn()`・Back の表示（[procedural-limits-device.md](../kasane/procedural-limits-device.md) §8）が初めて出荷経路で効く。wrapper なしの MEGADEMO は ZENITH で OOM した（[megademo-device-limits.md](../kasane/megademo-device-limits.md) §場面切替）ので、heap の余裕も同時に見る。
+- **ソースを渡して起動するアプリの frame() は park しない（2026-09-29 に実測で判明、未対応）。** `app_session.c` の `FRAME_WRAP` が frame を `f.apply(this,arguments)` で包むので、本体は `Function.prototype.apply` からのネイティブ再入の床で走り、D17r の止まってよい床にならない（§11.9「囲った経路」）。APPS の MEGADEMO は HEAVY 95 秒・2,228 ターンで park 0（JS 最長 57.5 ms）、wrapper を通らない診断起動 `'J'` では約 20 秒で 263 回。APPS の組み込みアプリ（hello を除く）・Playground・work はすべてこの wrapper を通るので、8 ms のターン予算は frame() には効いておらず、L2c の frame() の中断が届くのは hello・診断起動・ジョブだけ。直す案（未検証）: 例外の報告を JS の `try` ではなくホストの例外経路で拾い、`f.apply` を使わない。直すと出荷アプリの frame() が park し始め、R3a・`end_guest_turn()`・Back の表示（[procedural-limits-device.md](../kasane/procedural-limits-device.md) §8）が初めて出荷経路で効く。wrapper なしの MEGADEMO は ZENITH で OOM した（[megademo-limits.md](../kasane/megademo-limits.md) §7 §場面切替）ので、heap の余裕も同時に見る。
 
 
 ## L3 / L4（移動可能スタックとコンパクション）
@@ -31,18 +31,6 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 
 旧 #2（D8: 駐機中のネイティブ確保が飛地を増やすか）・#3（出荷アプリは駐機しない）・#4（D55 の緩和）は、
 動かさない方針では問いにならないので閉じた。
-
-### 完了（参考）
-
-- G12（実機の断片化計測）: results §15。計装は既定 n の `CONFIG_POCKET_VM_OOMPROBE`。
-
-- L3a: 台帳 14 種、差分表による型付き補正、3層の毒化、世代・pin・4種の失敗。コーパス 74 件一致、
-  Test262 標準集合と部分集合 7,036 ファイルで対照と同一、負の対照 3 種を検出。実機で 34 回移動・最悪
-  235 µs・契約一致・smoke 20 周・予算内（results §3〜§9）。
-- L4a と D6 をホストで測り不採用（results §13〜§14、design D57・D59）。
-- L3 の作業中に見つけた、確保失敗時のコンパイル経路の不具合群は `vm/oom-truncated-bytecode` で修正し、
-  ホストと実機（smoke・`memlog --check`）を通して `vm/main` 経由で取り込んだ（2026-09-25、
-  [oom-parse-safety.md](oom-parse-safety.md) §9・§9.1）。
 
 ## F 系列（起動床の削減、VM の段とは独立）
 
@@ -86,11 +74,11 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | # | 項目 | 出典 | 状態 |
 | --- | --- | --- | --- |
 | R1 | 上限の手前での GC の空回り（天井を超えるとオブジェクトごとに GC） | [gc-cap-backoff.md](gc-cap-backoff.md) | 済（2026-09-27）: 実機 STRESS LV3 の turn_ms 11.41 → 8.04 ms、fps 26.4 → 29.4。確保失敗は増えず |
-| R2 | 普段のターン（LV1/LV2）の内訳 | [allocator-cost.md](allocator-cost.md) | 計測済み（2026-09-27、実機）: **アロケータが JS のターンの 20.6%**（7.63 ms 中 1.56 ms、1 フレーム約 340 回、malloc 1 回約 1,270 サイクル） |
+| R2 | 普段のターン（LV1/LV2）の内訳 | [r3-small-block-cache.md](r3-small-block-cache.md) §7 | 計測済み（2026-09-27、実機）: **アロケータが JS のターンの 20.6%**（7.63 ms 中 1.56 ms、1 フレーム約 340 回、malloc 1 回約 1,270 サイクル） |
 | R3 | 小さいブロックの再利用とブロック長の直読み | [r3-small-block-cache.md](r3-small-block-cache.md) | 実装済み・**既定 y**（2026-09-27、R3a 解決後）: 実機でアロケータ 1.57 → 0.92 ms、LV1 のターン 7.62 → 7.08 ms |
 | R3a | キャッシュ有りで STRESS LV3 に Kasane の `BUSY`（3/3 回、無しでは 0/2）。frame の外の確保失敗の約 2 フレーム後 | r3-small-block-cache.md §6.2 | **解決**: キャッシュでなく `app_tick` の穴。中断された frame() を継続ターンが終えて提出したまま次の frame() を呼んでいた。修正後 実機 3/3 PASS |
 | R4 | ターンのサイクルの内訳（性能カウンタ、`CONFIG_POCKET_VM_TURNPERF`） | [turn-cpi.md](turn-cpi.md) | 済（2026-09-27、実機）: **IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち**。flash を QIO にして（既定）LV1 の 1 フレームの JS 10.78 → 7.25 ms、描画 6.61 → 6.16 ms。旧 `turn_ms` 7.1 ms は予算で切られた通常＋継続の平均で、実際の合計は 10.8 ms だった |
-| R5 | QIO の後も 57% がミス待ち。ホットな関数の連続配置・一部 IRAM・flash 120 MHz | [r5-icache.md](r5-icache.md) | 模型で評価済み（2026-09-27、QEMU＋キャッシュ模型、推定）: 1 ターンが触るのは 45.5 KiB でキャッシュ超え、衝突は 15% 程度。**並べ替えは実リンクで −0.6%、不採用**。IRAM 8 KiB は**実機で 1 フレームの JS 7.00 → 5.93 ms（−15%）、空き −8.7 KiB。見送り**（払う DRAM に対して戻りが軽い、ユーザーの判断）。候補は `tools/r5sim/candidates/` |
+| R5 | QIO の後も 57% がミス待ち。ホットな関数の連続配置・一部 IRAM・flash 120 MHz | [turn-icache.md](turn-icache.md) §1 | 模型で評価済み（2026-09-27、QEMU＋キャッシュ模型、推定）: 1 ターンが触るのは 45.5 KiB でキャッシュ超え、衝突は 15% 程度。**並べ替えは実リンクで −0.6%、不採用**。IRAM 8 KiB は**実機で 1 フレームの JS 7.00 → 5.93 ms（−15%）、空き −8.7 KiB。見送り**（払う DRAM に対して戻りが軽い、ユーザーの判断）。候補は `tools/r5sim/candidates/` |
 | R4a | `pocket.fs` の open が OOM すると File のスロットが戻らない（`pocket_api_settled` の Promise 生成失敗で File が消え、ファイナライザ無し）。STRESS LV3 60 秒で 474 回 `two files are already open` | turn-cpi.md §4.1 | **解決**（2026-09-27）: `file_settled()` が失敗時にスロットを閉じ、`pocket_api_settled` は失敗を例外で返す。実機の負荷 `^`（OOMPROBE）で修正なし 5/5 漏れ → 修正あり 5/5 OK |
 | R4d | 解決した File を受け取る継続が OOM で登録できないと、File が参照を失いスロットが戻らない（ファイナライザ無しの設計） | turn-cpi.md §4.2 | **解決**（2026-09-27）: ファイナライザが印を付け、次の pump が破棄として閉じる。実機の負荷 `^` 段 1 で無し 3/3 漏れ → 有り 5/5 OK |
 | R4b | F2 の遅延の索引が、初回の読みの OOM で名前を失う（`fs.open` が "not a function" に、ホストでは `Object.fromEntries`）。`pocket.*` の名前空間も対象 | turn-cpi.md §4.1 | **解決**（2026-09-27）: 失敗時に「済み」の印を戻す。コーパス `lazy_touch_oom.js`（陰性対照で 18 中 13 が消える） |
@@ -119,25 +107,6 @@ VM 系の Kconfig を、出荷経路の切り替えではなく診断だけに�
 未完了の項目は無い（2026-09-25）。ホストの最終検証（[oom-parse-safety.md](oom-parse-safety.md) §9）と
 実機の smoke・`memlog --check`（§9.1）を通して `vm/main` へ戻した。修正前の assert や `exit(1)` が実機で
 再起動を起こしていたかは推論のまま（smoke は OOM を起こさない）。
-
-## L2 で完了済みの項目（参考）
-
-- flat復帰時の引数等の遅延復元を既定yへ採用。追加Test262 19,307判定が即時復元と失敗詳細まで一致、診断なしhostの68件・ASan・成長36比較・G1/D10、実機smoke20周・故障回復6種・メモリ予算を確認。静的DIRAM/Cフレーム不変、Flash Code +132B。即時復元への設定fallbackを維持（旧項目13、results §3.6〜3.7）。
-- 同一バイナリ内のflat/recur比較を実装し実機2回/256標本で測定。同期小関数群ではflatが3.2〜5.4%遅く、Cスタック増加は0B対304B/段。速度改善とは主張せず、スタック制約の解消とのトレードオフとして記録（旧項目12、results §3.5）。
-- セグメントサイズをhost6方針×6負荷、実機6方針×7負荷×2回で再検証。保持量と確保コストから512/4096B維持を確定（旧項目2、results §5.5〜5.8）。採取境界の欠落23条件は元を残して再採取し、最終84run/225windowを検証。
-- TCO実験実装はhost・実機の深さ/容量、GC/終了/破棄、fallback予算・確保失敗後の所有権と回復を検証。既定挙動維持のためnで確定（旧項目10、vm-tco-design.md §6〜10）。速度改善の主張は含まない。
-- G1/G5/G6 判定機構は作成済み（design §1.2）。
-- 継続ターンのメモリ採取を再監査し、周期リセットと継続中のwindow出力を修正。実機F/base 2回で継続採取87/86回を確認（旧L1範囲外項目4、results §4.14）。低頻度標本であり真のピーク保証ではない。
-- async再帰のflat/recur終了条件を現行ソースで再検証し、既存の変種別期待値とOOM計測が一致（旧項目4、results §4.12）。
-- 固定Test262全体53,582本を走査し、async/await・再帰関連8,332ファイルをflat/recurで比較。判定と失敗詳細の差0（旧項目5、results §4.13）。共通失敗・skipは残り、任意プログラムや将来revisionまでの互換性証明ではない。
-- HWMはUIタスク生涯値と確認し、現在のCフレーム位置を測る口を追加。flat/recurの実機各2回で0B/段対288B/段を確認（旧項目9、results §4.11）。UIスタック容量は未変更。
-- 内部余白と外部断片化を分けた現行6トレース×4方式のhost比較を実施（旧項目1、台帳07 §7）。23完走・1容量不足。実機の断片化や最適セグメントサイズの検証を代替しない。
-- H14の中断SEG容量・非SEGフレーム数の計測口を実装し、7起点の検査鎖でhost/device実測済み（results §4.9）。一般アプリの分布や断片化の検証とは別。
-- 組込み5種のjob経路とasync-from-syncのnative境界を監査し、追加2コーパスを毎中断GC・FAIRで検証済み（旧項目6、results §4.10）。外部埋込み側の独自jobはこの監査に含まない。
-- D1〜D43 は design §13 の決定表で「決定済み」と明記されたもの以外、上表に開いたものだけが残る（D6 は明示的に未決のまま design 側に残置）。
-- L2c の関所とガード（旧「段1・段2」）は着地済み（results §4.2）。
-- `JSAsyncFunctionData`は実機の`_Static_assert`とELF型情報で104Bを確認（旧項目3、results §4.4）。
-- L2cのasync/async-generator所有床とD36保留job、GC・Terminate/Discardは実装済み（旧項目7、results §4.5）。実機統合が済むまでyieldは既定off。
 
 ## L1 の範囲外として残った決定と、VM とは独立の不具合
 

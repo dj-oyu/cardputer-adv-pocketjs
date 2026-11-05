@@ -1,4 +1,4 @@
-# P1: 1ターンに触るコードを IRAM に置く（設計・素案 v2、2026-10-25）
+# P1: 1ターンに触るコードを IRAM に置く（設計・決定済み、素案 v2 を経て 2026-10-26 に採用）
 
 `interpreter-stages.md` §9 の続き。P0（guard の要らない T0 の変更）で、DERBY の命令の数から見える取り分はおおむね取った（dispatch −4.9%、host）。残る大きな手は、1ターンに触るコードを flash の命令キャッシュから外すこと（P1）。**数字は実測（実機）/ 実測（host・静的）/ 模型 / 推定を書き分ける。今日の変更は実機ではまだ何も測っていない。**
 
@@ -6,7 +6,7 @@
 
 v1（同日）を SLOW（Fable）がレビューし、予算の見積もりと、比べる相手の選び方に重大な誤りがあった。v2 はそれを直した版。指摘の要約は §8。
 
-## 0. 結論（素案 v2）
+## 0. 結論（素案 v2 の時点。最終の決定は冒頭と §9）
 
 1. **インタプリタ本体（`JS_CallInternal`）を IRAM に置く案は、今の時点では第一候補にしない。** 冷たい命令を出しても本体は 13〜16 KB 残る（推定、§2.3）。模型の上では、本体は 1 KiB あたりの効きが R5 の helper 群の半分程度（推定、§2.4）。DRAM は 1:1 で払うので、同じ予算なら helper 群が先。
 2. 比べる相手を揃える: 「本体」「helper 群（R5 の候補を選び直したもの）」「両方」を、**同じ DRAM の予算で、検証済みの模型（`tools/r5sim/icache.py model`）に通して順位を付けてから**、実機へ行く。R5 §4 の再開手順（そのアプリで模型を回し直し、候補を選び直す）どおり。
@@ -19,10 +19,10 @@ v1（同日）を SLOW（Fable）がレビューし、予算の見積もりと�
 | 事実 | 区分 | 出典 |
 | --- | --- | --- |
 | QIO の今、JS のターンのサイクルの 57% が flash キャッシュのミス待ち（IPC 0.25）。DIO のときは 70%・0.17 | 実測（実機） | `turn-cpi.md` §3 |
-| **STRESS** の 1ターンが触るコード 41.8 KiB（core 7.40、helpers 13.93、object/alloc 5.65、builtins 6.07、native 8.51）。`JS_CallInternal` のミスは warm 158/1,071（15%）、cold 305/1,630（19%） | 模型 | `turn-working-set.md` §2.2・§3 |
-| helper 8 KiB（95 関数）を IRAM へ: STRESS の JS 7.00 → 5.93 ms（−15%）、`I_STALL_BUSY` 819K → 588K、空き −8,752 B、最大連続ブロック 139,264 → 131,072 B。模型の予測（ミス 496 回減 × 約 450 サイクル）と合った | 実測（実機） | `r5-icache.md` §3.4 |
-| 同じ 8 KiB は見送り（ユーザーの判断、2026-09-27）。再開の条件は 30 fps に届かないアプリで、模型を回し直して候補を選び直す | 記録 | `r5-icache.md` §4 |
-| 同一バイナリでも揺れる: R5 の基準 1 → 基準 2 で LV3 が 7.09 → 7.75 ms（+9%）。アラインメントだけで同じカーネルが 15% 動く | 実測（実機） | `r5-icache.md` §3.4、`CLAUDE.md` |
+| **STRESS** の 1ターンが触るコード 41.8 KiB（core 7.40、helpers 13.93、object/alloc 5.65、builtins 6.07、native 8.51）。`JS_CallInternal` のミスは warm 158/1,071（15%）、cold 305/1,630（19%） | 模型 | `turn-icache.md` §2.2・§2.3 |
+| helper 8 KiB（95 関数）を IRAM へ: STRESS の JS 7.00 → 5.93 ms（−15%）、`I_STALL_BUSY` 819K → 588K、空き −8,752 B、最大連続ブロック 139,264 → 131,072 B。模型の予測（ミス 496 回減 × 約 450 サイクル）と合った | 実測（実機） | `turn-icache.md` §1.3.4 |
+| 同じ 8 KiB は見送り（ユーザーの判断、2026-09-27）。再開の条件は 30 fps に届かないアプリで、模型を回し直して候補を選び直す | 記録 | `turn-icache.md` §1.4 |
+| 同一バイナリでも揺れる: R5 の基準 1 → 基準 2 で LV3 が 7.09 → 7.75 ms（+9%）。アラインメントだけで同じカーネルが 15% 動く | 実測（実機） | `turn-icache.md` §1.3.4、`CLAUDE.md` |
 
 注意: 41.8 KiB と core の床（約 6 KiB）は STRESS の値で、DERBY の host opprof と同じアプリの数字ではない。r5sim は今 STRESS しか回せない（DERBY は `pocket.derby` などの面が無い）。
 
@@ -69,7 +69,7 @@ STRESS の模型で、`JS_CallInternal` が占めるミスは warm 15%・cold 19
 
 ### 2.5 模型での順位（模型、STRESS、2026-10-25）
 
-`tools/r5sim/icache.py model` に、指定した関数を先に IRAM に入れる `--force`（と、その値段を差し替える `--force-cost`）を足し、同じ DRAM の予算で並べた。記録は前回の STRESS の B（合流後、`turn-working-set.md` §2.2。今日の P0 の変更より前）、配置は r5sim 自身、8-way 32 KiB。本体の値段は §2.3 の見積もりの中間 14.5 KB（14,848 B）で計上した（outline した部分は実行されないので、模型の上では本体全体を IRAM に置くのと同じ）。
+`tools/r5sim/icache.py model` に、指定した関数を先に IRAM に入れる `--force`（と、その値段を差し替える `--force-cost`）を足し、同じ DRAM の予算で並べた。記録は前回の STRESS の B（合流後、`turn-icache.md` §2.2.2。今日の P0 の変更より前）、配置は r5sim 自身、8-way 32 KiB。本体の値段は §2.3 の見積もりの中間 14.5 KB（14,848 B）で計上した（outline した部分は実行されないので、模型の上では本体全体を IRAM に置くのと同じ）。
 
 | IRAM の予算 | 置くもの | ミス/ターン warm | cold | 触る行 |
 | --- | --- | ---: | ---: | ---: |
@@ -85,7 +85,7 @@ STRESS の模型で、`JS_CallInternal` が占めるミスは warm 15%・cold 19
 
 **どの予算でも helper 群だけのほうが効く。** 本体に予算を割くと、同じ予算の helper 群だけより悪くなる。レビューの「1 KiB あたりの効きは本体が helper 群の半分程度」を模型で確かめた。
 
-ms への換算（推定、ミス 1 回 450 サイクル・240 MHz、`r5-icache.md` §1.1）: helper 群 8 KiB で cold −467 回 ≒ −0.88 ms/ターン、14.5 KB で −665 回 ≒ −1.25 ms。R5 の実機（8 KiB で −1.07 ms）と同じ桁。DERBY では未確認（r5sim は DERBY を回せない）。
+ms への換算（推定、ミス 1 回 450 サイクル・240 MHz、`turn-icache.md` §1.1.1）: helper 群 8 KiB で cold −467 回 ≒ −0.88 ms/ターン、14.5 KB で −665 回 ≒ −1.25 ms。R5 の実機（8 KiB で −1.07 ms）と同じ桁。DERBY では未確認（r5sim は DERBY を回せない）。
 
 **P1 の結論（v2.1）: IRAM の予算は helper 群に使う。インタプリタ本体の outline と IRAM 配置は採らない。** 残る判断は予算の大きさ（DRAM との交換）で、ユーザーが決める。候補の関数の一覧は、実際のファームの ELF に写して選び直す（`--emit`。r5sim と本番で関数の大きさが違う）。
 
@@ -147,7 +147,7 @@ BREAK;
 
 - 本体: `noflash` ではなく `noflash_text` の linker fragment にする。`noflash` はエラー文字列や GCC の switch 表（`restore_call_inputs`・`special_object`・`with_*`）まで DRAM へ移し、予算外のバイトになる。
 - `dispatch_table`: 関数内の static なので `.rodata.dispatch_table.N` になり、fragment の規則に掛からない。IDF のときだけ定義するマクロ（`JS_DISPATCH_TABLE_ATTR`）で `DRAM_ATTR` を付ける。
-- 断片を差し替えたら `idf.py reconfigure`（`r5-icache.md` §4）。
+- 断片を差し替えたら `idf.py reconfigure`（`turn-icache.md` §1.4）。
 
 ## 4. 予算
 
