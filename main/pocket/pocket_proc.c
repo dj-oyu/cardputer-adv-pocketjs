@@ -293,8 +293,15 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
          * each band they touch then takes one mixing step. Hashing the bytes
          * again for every band was ~60% of commit() on the device
          * (docs/platform/lcd-dma-driver.md 9.11). */
-        const uint32_t e=entry_hash(&frame->segments[start],i-start);
+        extern int g_pocket_proc_sig_old;   /* MEASUREMENT ONLY (SIG_AB) */
+        const uint32_t e=g_pocket_proc_sig_old?0:entry_hash(&frame->segments[start],i-start);
         for(unsigned b=b0;b<=b1;b++){
+            if(g_pocket_proc_sig_old){
+                const uint8_t *ob=(const uint8_t *)&frame->segments[start];
+                uint32_t oh=sig->hash[b];
+                for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)oh=(oh^ob[k])*16777619u;
+                sig->hash[b]=oh;
+            }else
             sig->hash[b]=band_mix(sig->hash[b],e);
 #ifdef POCKET_PROC_SIG_CHECK
             const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
@@ -499,8 +506,12 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     const char *op="kasane.shiki.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
+    const uint32_t mp0=pocket_cycles();          /* MEASUREMENT ONLY (SIG_AB) */
     surface->damage=frame_damage(surface);
+    const uint32_t mp1=pocket_cycles();
     band_signature(surface->candidate,&surface->candidate_sig);
+    {extern uint32_t g_commit_prof[4];const uint32_t mp2=pocket_cycles();
+     g_commit_prof[2]+=mp1-mp0;g_commit_prof[3]+=mp2-mp1;}
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
     visit_stats(surface->candidate);
@@ -553,8 +564,13 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
 #endif
     return result;
 }
+uint32_t g_commit_prof[4];   /* MEASUREMENT ONLY: commits, whole commit, frame_damage, band_signature (cycles) */
+int g_pocket_proc_sig_old;   /* MEASUREMENT ONLY (SIG_AB): 1 = the per-band FNV of 01c81e2 */
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    return guarded(ctx,self,argc,argv,commit_impl);
+    const uint32_t c0=pocket_cycles();
+    JSValue r=guarded(ctx,self,argc,argv,commit_impl);
+    g_commit_prof[0]++;g_commit_prof[1]+=pocket_cycles()-c0;
+    return r;
 }
 /* {maxSegments: 1..1024} (absent or undefined: 0, the 1,024 default). */
 static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segments){
