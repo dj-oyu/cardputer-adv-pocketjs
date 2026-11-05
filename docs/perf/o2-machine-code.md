@@ -54,15 +54,17 @@ Xtensa の窓レジスタ ABI では、1 回の呼び出しは `l32r`＋`callx8`
 
 `l32i`/`s32i` のオフセットは 8 bit × 4 で **0〜1020 バイト**（`l32i a8,a1,1020` は 3 バイト 1 命令、`1024` はアセンブラが複数命令に展開する — esp32s3-hw の `check_asm` で確認）。フレームが 1 KB を超えると、奥の変数は 1 回の読み書きが `movi`＋`add`＋`l32i` の 3 命令になる。
 
-| `render_rects` | フレーム | 1 KB より奥へのアクセス（`movi 0x4xx` 以上の数） | `a1` 相対の普通の読み書き |
-| --- | ---: | ---: | ---: |
-| `-Os` | 1,232 B | 434 か所 | 319 |
-| `-O2`（B: `render_group` も展開） | 1,312 B | **835 か所** | 89 |
-| 出荷（C: `render_group` は `-Os` で外） | **896 B** | **2 か所** | 616 |
+| `render_rects` | フレーム | 1,020 B より奥への読み書き（`tools/frame_lint.py`） | 余分な命令 | `a1` 相対の普通の読み書き |
+| --- | ---: | ---: | ---: | ---: |
+| `-Os` | 1,232 B | 460 | 862 | 319 |
+| `-O2`（B: `render_group` も展開） | 1,312 B | **856** | **1,685** | 89 |
+| 出荷（C: `render_group` は `-Os` で外） | **896 B** | **0** | 0 | 616 |
+
+（最初の版はここを `movi 0x4xx` 以上の行の数で 434 / 835 / 2 と書いたが、それは `addmi` の形を数えず、フレームと無関係な定数の `movi` を数えていた。上の値は読み書きそのものを数える `tools/frame_lint.py` のもの。）
 
 `-Os` の 1 画素の道には、同じ番地へ `s32i` した直後に `l32i` し直す列（`movi a9,0x448 / add a9,a9,a1 / s32i a8,a9,0 / l32i a8,a9,0`）まであった。
 
-**これが §9.12 の B の退行の正体と読める（推定、B には計測器を付けていない）。** `-O2` は `render_group`（タイルの 256 B の共用体、到達表 144 B などを持つ）を `render_rects` に展開し、フレームが 1,312 B に膨らんで、退避した値の読み書きが「遠い」3 命令の形に倍増した。MEGADEMO の CORE の場面（群の不透明度）でタイルが 27% 遅くなったのはこの区間。C は `render_group` を外に出して `render_rects` のフレームを 896 B に収め（`render_group` 自身は 640 B）、遠いアクセスが 2 か所まで消えた。
+**これが §9.12 の B の退行の正体と読める（推定、B には計測器を付けていない）。** `-O2` は `render_group`（タイルの 256 B の共用体、到達表 144 B などを持つ）を `render_rects` に展開し、フレームが 1,312 B に膨らんで、退避した値の読み書きが「遠い」3 命令の形に倍増した。MEGADEMO の CORE の場面（群の不透明度）でタイルが 27% 遅くなったのはこの区間。C は `render_group` を外に出して `render_rects` のフレームを 896 B に収め（`render_group` 自身は 640 B）、遠いアクセスが 0 になった。
 
 ### 3.3 ループの中から不変量と分岐が出ていった
 
@@ -79,9 +81,37 @@ Xtensa の窓レジスタ ABI では、1 回の呼び出しは `l32r`＋`callx8`
 
 ## 4. 読み方と次の手
 
-規則としての要約は [pie-simd.md](pie-simd.md) §3.9（スカラー整数コードのサイクルの式）にある。
+規則としての要約は [pie-simd.md](pie-simd.md) §3.9（スカラー整数コードのサイクルの式）にある。遠いアクセスはビルドのたびに `tools/frame_lint.py` が数える（§5）。
 
 - **このコアで描画の道を速くするのは、命令数と成立分岐の数を減らすこと。** メモリ待ちはほぼ無く、IPC は最適化で変わらない。分岐 1 回 = 2 サイクルは、命令 2 個分と同じ重さとして数えてよい（実測）。
 - **大きな関数のフレームは 1,020 B 未満に保つ。** 越えると全部の退避が 3 倍の命令になる。インライン化はフレームを膨らませる方向に働くので、大きな局所配列を持つ関数（`render_group`）は外に置く。
 - **命令キャッシュは今は効いていないが、余白は小さい。** 次にコードを `-O2` にするときは `I_STALL_BUSY` の割合を見る（今 9〜13%）。
 - 未測定: B（`render_group` 展開）の XTPERF、MEGADEMO の CORE の場面の内訳、BIG WAVE。窓例外（`entry` の窓あふれ）の回数は、PM が CINTLEVEL 0 しか数えないので見えていない（`ccount − PM0` は 0.4〜0.5% で、割り込みと例外を合わせても小さい）。
+
+## 5. 機械的な検出: `tools/frame_lint.py`
+
+objdump を読み、関数ごとに `entry a1, N` からフレームを取り、`a1`＋K（K＞1020）を `movi`＋`add` か `addmi` で作ってから、そのレジスタを土台にした読み書きを数える（1 回あたり余分に 2 命令か 1 命令）。分岐の着地点では作った番地を忘れるので、数は下限（作り話はしない）。`tools/test_frame_lint.py` が既製の objdump の文で検査する。
+
+ビルドのたびに `main/` の object を報告する（`CMakeLists.txt` の `frame_lint`、`FRAME_LINT ...` の行）。`tools/frame_lint_baseline.txt` にない関数に遠いアクセスが出ると `NEW`、増えると `GREW` が付く。objdump が見つからないときは飛ばす（ビルドは止めない）。
+
+```bash
+python tools/frame_lint.py build_api/esp-idf/main --far-only     # main/ の関数だけ
+python tools/frame_lint.py build_api/cardputer_pocketjs.elf --top 20   # ELF 全体（ESP-IDF・QuickJS も）
+```
+
+出荷版のファーム（`e318f9f`、broker の `fl-build`）で `main/` に遠いアクセスが残る関数は 16 本、合計 726 か所（余分な命令 1,484、静的な箇所数）。それを `tools/frame_lint_baseline.txt` に書いた。
+
+| 関数 | 遠い読み書き | フレーム | 走る頻度 |
+| --- | ---: | ---: | --- |
+| `ksn_shiki_jit_scalar` | 169 | 1,600 B | JIT のコンパイラ。plan ごとに 1 回（冷たい） |
+| `run_impl`（`pocket_grid.c`） | 98 | 1,168 B | grid の run ごと（熱い可能性） |
+| `js_run`（`pocket_shiki.c`） | 95 | 1,616 B | Shiki の draw の呼び出しごと（熱い可能性） |
+| `js_list`・`js_open`・`js_write_text`・`js_copy`・`js_rename`・`js_file_read`（`pocket_fs.c`） | 12〜84 | 1.1〜1.5 KB | ファイル操作ごと（冷たい） |
+| `flower_draw`（`flower.c`） | 53 | 1,632 B | FLOWER の行ごと（熱い） |
+| `measure_impl`・`register_resize_source_impl`・`register_resize_impl`（`pocket_grid.c`） | 10〜37 | 1.3〜2.0 KB | 登録・計測ごと |
+| `perform_accel_foc`（BMI270） | 15 | 1,600 B | 較正（冷たい） |
+| `ksn_pixel_span_eval`・`file_picker_next_path` | 4・1 | 3,904・2,464 B | |
+
+`render_rects` は 0（出荷版）。B の形（`render_group` を展開）の object を `--check` に通すと `render_rects: 856 far accesses (baseline 0)` で落ちる — **この道具があれば、B の退行はビルドの時点で見えていた。**
+
+host のスタブのヘッダでコンパイルした object では数が少し変わる（`flower_draw` が 53 ではなく 63）。基準は必ず本物のビルドから取ること。QuickJS（`quickjs.c`、`-Os`、host でのコンパイル）は 0（`build_backtrace` はフレーム 2,720 B だが配列をポインタで触る）。**数は静的な箇所で、実行回数ではない** — 熱いかどうかは人が見る（候補: `flower_draw`、`js_run`、`run_impl`）。

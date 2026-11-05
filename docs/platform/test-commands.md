@@ -33,6 +33,8 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-pocket-input"   # pocket.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keytest_app_test.sh && /tmp/test-keytest-app"   # KEY TEST（apps/keytest）を実物のQuickJS・pocket.kasane・input.keysで、同時押し・タップ・FIFOあふれの台本（WSLのみ）
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
+python tools/test_frame_lint.py         # frame_lint の走査器を既製の objdump の文で検査
+python tools/frame_lint.py build_api/esp-idf/main --far-only   # 1,020 B より奥のスタックの読み書き（ビルドでも自動で報告、docs/perf/o2-machine-code.md §5）
 python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_scene_tables.py .cache/generated && gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/scene_stub -Imain/scene -I.cache/generated tools/test_wave.c -lm -o /tmp/tw && /tmp/tw"   # LEVEL WAVE: 水の体積保存・静止時の勾配・strip一致・傾きの全範囲（docs/scenes/level-wave.md）。tools/preview_wave.c は連番PPMのプレビュー
