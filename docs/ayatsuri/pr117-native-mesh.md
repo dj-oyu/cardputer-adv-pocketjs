@@ -75,6 +75,42 @@ ASan/UBSan、Shiki API（75/75）、turn、class registry、board半帯、STRESS
 Actions runとcheck-runsはa44b8acで各0件。branchへのpushで動くworkflowはなく、
 PRやCI設定の変更による起動は行わない。
 
+### Hostの描画・メモリ追加測定
+
+実機へ進む前の公開synthetic検証として、次を追加した。production codeはed880931
+（a44b8acと同一）のまま。private modelや別rendererは使用しない。
+
+```sh
+python tools/kasane_contract/run_mesh_memory.py
+```
+
+実際のC/QuickJS frame APIで、imageのrow/span/backdrop全画面一致、4/8行と最終3/7行、
+色・背景を変えた3cycleのimage IO retry/ACK、別modeのbackdrop IO後の旧committed修復を
+検査する。各workspaceでASan/UBSan/LSan成功、reset/runtime破棄後のtracked liveは0。
+計測はリンクしたobjectのmalloc/calloc/realloc/free要求を追跡する。
+
+| 64-bit hostの実測 | 1行workspace | 8行workspace |
+| --- | ---: | ---: |
+| tracked requested peak | 69,152 B | 75,872 B |
+| 最後のbackdrop phaseでのtracked live | 64,596 B | 71,316 B |
+| snapshot capacity合計 | 2,048 B | 2,048 B |
+| depth workspace | 960 B | 7,680 B |
+| metadata（host sizeof） | 204 B | 204 B |
+| guest memory_used / malloc_size（その時点） | 35,841 / 43,312 B | 35,841 / 43,312 B |
+| 全破棄後のtracked live / blocks | 0 / 0 | 0 / 0 |
+
+peakはguest/runtime・native・fixtureの追跡対象要求byteであり、共有libc/sanitizer内部、
+allocator overhead、stack、static領域（計測ledgerも含む）を含まない。
+guestの表の値はpeakではない。snapshot/workspaceはtracked合計の内数で、重ねて足さない。
+S3の静的DIRAM 181,200 Bとは別の測定で、host値と合算して実機fitとはしない。
+追加probeは独立read-only reviewも受け、同一色による検出漏れとmode混在の試験不備を
+修正後、未解決指摘0件。production修正は不要だった。
+
+クラウドm32の環境準備はAPT設定読取りのOS Permission deniedで停止中。
+取得・導入やm32 jobは始めていない。これを迂回せず、m32 layoutの描画・メモリ検証を残す。
+性能実機ownerへのready-to-flash指示は保留し、現時点ではread-only readiness/recovery
+確認に留める。公開syntheticからの将来の性能測定も、host結果と分離して記録する。
+
 `pocket.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`
 opens an explicit opaque shared-depth scope. Limits remain 65536 bytes,
 8000000 work, 256 records, rows1 or8. Use ordinary `shiki.beginFrame` for
