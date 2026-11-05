@@ -46,7 +46,7 @@ uint16_t *board_strip(void) { return shared; }
 //
 // It is FIXED at 1 now. shell.c used to invert it once per 2-second PERF window
 // so adjacent windows of the same run were the two paths; that measurement is
-// done (docs/perf/pie-consolidation.md 3b: FLOWER draw 38.73 -> 33.30 ms, fps
+// done (docs/perf/pie-opt-plan.md (pie-consolidation section) 3b: FLOWER draw 38.73 -> 33.30 ms, fps
 // 24.95 -> 28.80) and a shipped build must not spend every other window on the
 // path it rejected. The setter stays for the next A/B -- nothing calls it in
 // this build.

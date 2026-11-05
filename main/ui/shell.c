@@ -1260,7 +1260,7 @@ void shell_draw(const char *error, unsigned phase) {
         // (CLAUDE.md: placement moves this part by up to 15%), which is why the
         // shipped firmware used to spend half its windows on the path it had
         // decided against. That measurement is done and recorded in
-        // docs/perf/pie-consolidation.md 3b (FLOWER: draw 38.73 -> 33.30 ms,
+        // docs/perf/pie-opt-plan.md (pie-consolidation section) 3b (FLOWER: draw 38.73 -> 33.30 ms,
         // fps 24.95 -> 28.80); the queue is what ships, and the flip would only
         // make the picture's cost depend on the second.
 #endif

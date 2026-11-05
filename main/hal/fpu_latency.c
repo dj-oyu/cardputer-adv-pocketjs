@@ -1,6 +1,6 @@
 // What a dependent FPU instruction costs on THIS part.
 //
-// docs/perf/flower-shade.md 13 ends on a number that exists nowhere: the
+// docs/perf/flower-perf.md (flower-shade section) 13 ends on a number that exists nowhere: the
 // dependent-issue latency of the scalar FPU. esp32s3-hw-mcp measured the PIE
 // instructions and nothing else, the TRM does not print pipeline latencies for
 // the coprocessor, and three attempts to speed up flower.c's shade() were
@@ -88,11 +88,11 @@ static void olt_indep(void *p) { (void)p; BODY("olt.s b0,f1,f2\n bt b1,1f\n 1:")
 static void wfr_dep(void *p)   { (void)p; BODY("wfr f3,a8\n mul.s f4,f3,f1"); }
 static void wfr_indep(void *p) { (void)p; BODY("wfr f3,a8\n mul.s f4,f7,f1"); }
 // 7. The same value loaded straight into the FPU, which is what the material
-//    table in shade does instead (docs/perf/flower-shade.md 9).
+//    table in shade does instead (docs/perf/flower-perf.md (flower-shade section) 9).
 static void lsi_dep(void *p)   { BODY_P("lsi f3,%0,0\n mul.s f4,f3,f1", p); }
 static void lsi_indep(void *p) { BODY_P("lsi f3,%0,0\n mul.s f4,f7,f1", p); }
 // 8. Store then load at the SAME address, which is how shade's prologue
-//    receives its two by-value vectors (flower-shade.md 13).
+//    receives its two by-value vectors (flower-perf.md (flower-shade section) 13).
 static void fwd_dep(void *p)   { BODY_P("s32i.n a8,%0,0\n lsi f3,%0,0", p); }
 static void fwd_indep(void *p) { BODY_P("s32i.n a8,%0,8\n lsi f3,%0,0", p); }
 
@@ -108,7 +108,7 @@ static void chain3(void *p) { (void)p; BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n
 // this core is in-order, so the order the instructions are WRITTEN is the order
 // they execute. Weaving is nothing but that order, which is precisely what a
 // human can do and what the -O2 xtensa scheduler did not do inside shade
-// (flower-shade.md's ablation: one extra chain there cost 7.3 cycles an
+// (flower-perf.md's ablation: one extra chain there cost 7.3 cycles an
 // operation, worse than serial).
 //
 //   naive1  one copy, each sub-chain written out whole, then the next

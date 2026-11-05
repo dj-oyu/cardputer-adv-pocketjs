@@ -513,7 +513,7 @@ static unsigned clamp8(unsigned value){return value>255?255:value;}
  *
  * The scalar blend/pack path divides by 255 exactly, through the compiler's
  * magic reciprocal (objdump: l32r + muluh + srli 7) or, in the lane model, the
- * (257*(y+1))>>16 identity (docs/perf/kasane-blend-pie.md 2.3). The panel is
+ * (257*(y+1))>>16 identity (docs/perf/kasane-blend.md (kasane-blend-pie section) 2.3). The panel is
  * 240x135 RGB565, so a one-step error in an eight-bit channel is not something
  * the panel can show, and the user accepted that trade for this family; the 256
  * scale is also the shape the eight-lane kernel wants (a sixteen-bit product
@@ -541,7 +541,7 @@ static unsigned clamp8(unsigned value){return value>255?255:value;}
  * (3.622%) over 120 whole frames, 13.4% of the direct path's pixels (17.9% when
  * dithered) and touches the group path's channels by up to 2 steps, so the
  * exact path stays the default and the coarse arm is switch-only. The numbers
- * and the objdump are in docs/perf/kasane-alpha256.md;
+ * and the objdump are in docs/perf/kasane-blend.md;
  * KSN_SCALE256_ARM=0|1 pins one arm at compile time so an instruction count is
  * the count of the arm that runs. */
 int g_ksn_scale256=0;
@@ -1109,7 +1109,7 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
  * this change can win, so it has to be flipped inside one build. g_ksn_blend_lut
  * defaults to 1 (the solid arm is measured pixel-exact, worst step 0) and
  * g_ksn_blend_lut_alpha to 0 (the 16-level alpha quantization moves pixels by
- * more than one step; docs/perf/kasane-lut.md has the counts). */
+ * more than one step; docs/perf/kasane-blend.md has the counts). */
 int g_ksn_blend_lut=1;
 int g_ksn_blend_lut_alpha=0;
 
@@ -1233,12 +1233,12 @@ static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uin
     decode_view(view_slot(slot),&decoded.read);*out=view_slot(slot);
     return KSN_OK;
 }
-/* ---- tile-level switches and instrument (docs/perf/kasane-tile.md) -------- */
+/* ---- tile-level switches and instrument (docs/perf/kasane-group.md) -------- */
 /* A group's children are composited into a 64-pixel scratch tile, block by
  * block. These three switches change how that block is walked. Each keeps the
  * old path reachable and is read once per render, so the arms of a same-binary
  * A/B differ only in the technique. Sizes, error bounds and measured numbers are
- * in docs/perf/kasane-tile.md. */
+ * in docs/perf/kasane-group.md. */
 int g_ksn_tile_pixels=64;   /* the tile's block: 64 or 16 pixels */
 int g_ksn_tile_reach=1;     /* exact (default): a child's loop runs over its own
                              * clipped x interval, and a block no child can
@@ -1414,7 +1414,7 @@ KSN_TILE_MEASURED static void tile_row_over(uint16_t *pixels,const ksn_premultip
     }
 }
 /* Candidate 3c of docs/perf/kasane-opt-survey.md, boundary 3 and 4
- * (docs/perf/kasane-group-affine.md). A group's chain is a chain of
+ * (docs/perf/kasane-group.md). A group's chain is a chain of
  * premultiplied `over` writes into one tile followed by one `group_over`, and
  * every step of it floors: mul8 rounds to the nearest 8-bit value. When the
  * group's opacity is 255 and every one of its children is opaque, none of those
@@ -1464,7 +1464,7 @@ static bool child_opaque(const ksn_frame_view *command){
     default:return false;
     }
 }
-/* Candidate 3c, step 2 of docs/perf/kasane-group-affine.md: the same fold for a
+/* Candidate 3c, step 2 of docs/perf/kasane-group.md: the same fold for a
  * chain that is NOT opaque, which is where the floors it drops can move a pixel.
  * The chain's tile write is `mul8(src, a) + mul8(tile, 255-a)`, one floor to the
  * nearest 8-bit value per child per channel. Keeping the same expression in 8.8
@@ -1865,7 +1865,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
 
 /* ------------------------------------------------------------------------- *
  * Candidate 4a of docs/perf/kasane-opt-survey.md: the 565 blend/pack kernel
- * (docs/perf/kasane-blend-pie.md). One call blends eight destination pixels of a
+ * (docs/perf/kasane-blend.md). One call blends eight destination pixels of a
  * run from one source colour and one opacity; `thresholds` is NULL for the thin
  * pack or the run's eight bayer values (the 4-cycle column phase the scalar
  * pack reads per pixel). PIE is coprocessor 3: owner task only, and the

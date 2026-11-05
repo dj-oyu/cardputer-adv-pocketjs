@@ -510,7 +510,7 @@ static inline int iceil (float x) { int t=(int)x;return t+(x>0.0f&&(float)t!=x);
 // is where the error can flip a pixel's visibility, so the picture is compared,
 // not argued about (tools/flower_frame_dump.c): at B=8, 0.0..0.2% of the pixels
 // of a frame differ, 1..3 of them by a lot (the flip), everything else by <=33
-// of 255; at B=10 see docs/flower-decor-cost.md.
+// of 255; at B=10 see docs/perf/flower-perf.md.
 #ifndef FLOWER_SQRT_BITS
 #define FLOWER_SQRT_BITS 8
 #endif
@@ -539,7 +539,7 @@ static inline float flower_isqrt_q(float d) {
 // both sides: the SPLIT counters bracket the call and every window logs which
 // side ran (SPLIT3's sq=). B=8 is the B that was chosen with the picture's cost
 // known (0.02% of pixels, a few white pixels where the depth test flips at a
-// silhouette; docs/flower-decor-cost.md). Set B=14 if that ever reads as a
+// silhouette; docs/perf/flower-perf.md). Set B=14 if that ever reads as a
 // defect on the glass: same loop, four more steps.
 //
 // And the conversions around it cost what the loop saved. Measured on the board,
@@ -573,7 +573,7 @@ static inline float flower_isqrt_q(float d) {
 // instructions seeded by sqrt0.s, while flower_isqrt_q is a 16-iteration
 // integer loop with float conversions at both ends. Nothing in the tree had
 // ever flipped this switch, so the idea had survived on an estimate for as long
-// as it existed (docs/perf/flower-shade.md 7).
+// as it existed (docs/perf/flower-perf.md (flower-shade section) 7).
 int g_flower_fixed_sqrt = 0;
 // TEMPORARY A/B switch for the height-window rejection added 2026-09-20,
 // runtime rather than compile-time for the reason g_garden_canopy_pie is: this part
@@ -589,7 +589,7 @@ int g_bell_window = 1;
 // per window so a paired difference was a switch; a shipped build has to hold
 // one value each, and the walk was the one thing in this scene that changed the
 // picture by itself. What decided the values is recorded in
-// docs/perf/pie-consolidation.md 3b (one switch per window, 95 strict pairs,
+// docs/perf/pie-opt-plan.md (pie-consolidation section) 3b (one switch per window, 95 strict pairs,
 // canopy +0.87 ms of veg), and the walk itself is in dc58e00.
 //
 // They stay variables rather than becoming `#if 1`: the host harnesses that
@@ -651,7 +651,7 @@ void flower_prepare_rotating(float dt,int tilt_x,int tilt_y) {
             // them. That is how the same change measured -1.66 ms and +0.07 ms
             // on two runs -- the samples spanned 26 to 44 ms while the effect
             // being looked for was under 2. Hold one shot and the frames become
-            // comparable; docs/perf/flower-shade.md 10 is the standing warning.
+            // comparable; docs/perf/flower-perf.md (flower-shade section) 10 is the standing warning.
             bloom_view=0;bloom_elapsed=0;
             {
 #else
@@ -966,7 +966,7 @@ static int sh_grain;                     /* is this surface a leaf or a stem */
 // is not the body: it is the windowed call, the arguments crossing back through
 // general registers, and the scheduling barrier that stops the integer hash
 // overlapping the nine FPU products at the call site
-// (docs/perf/flower-shade.md 11).
+// (docs/perf/flower-perf.md (flower-shade section) 11).
 static inline __attribute__((always_inline)) uint16_t rgbd(int r,int g,int b) {
 #if FLOWER_DITHER
     // Two different jobs share one call. Every plant pixel gets its rounding
@@ -999,7 +999,7 @@ static inline __attribute__((always_inline)) uint16_t rgbd(int r,int g,int b) {
     // computed first and then overwritten here, which cost every leaf, herb and
     // filament pixel a whole garden_dither call whose result was discarded --
     // measured at 213 cycles for this function against normal()'s 151, which is
-    // what sent anyone looking (docs/perf/flower-shade.md). Same pixels: `d` is
+    // what sent anyone looking (docs/perf/flower-perf.md). Same pixels: `d` is
     // assigned exactly once on each path, from the same expression as before.
     int d;
     if(sh_grain) {
@@ -1079,7 +1079,7 @@ static inline __attribute__((always_inline)) uint16_t rgbd(int r,int g,int b) {
 // instructions, `l32r` into a general register and `wfr` across to the FPU.
 // Read through a pointer instead, the same constant is one `lsi`, which loads
 // an FPU register from memory directly and never touches a general register at
-// all (docs/perf/flower-shade.md 7).
+// all (docs/perf/flower-perf.md (flower-shade section) 7).
 //
 // Sixteen entries and a mask, not fourteen and a trust: the index is a field of
 // a Petal, and an out-of-range one would read past the table rather than fall
@@ -1097,7 +1097,7 @@ typedef struct {
 // A/B switch kept after the measurement, 1 = the table above, 0 = the seven arms
 // below. Both arms stay because the measurement said they cost the SAME: paired
 // windows in one run gave shade 675.7 cycles a hit with the table and 677.1
-// without, 0.2% apart (docs/perf/flower-shade.md 9). The table is the default
+// without, 0.2% apart (docs/perf/flower-perf.md (flower-shade section) 9). The table is the default
 // for its 344 fewer bytes of flash and six fewer compares, not for its speed.
 // Do not delete the other arm without measuring again -- it is the control.
 int g_flower_material_table = 1;
@@ -2113,7 +2113,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // the shipping ones, and this file no longer walks them: the walk was
         // the measurement, and a shipped build that flips `sq` every three
         // seconds is a shipped build whose picture moves. What replaced it is
-        // the record -- `docs/perf/pie-consolidation.md` §3b has the device A/B
+        // the record -- `docs/perf/pie-opt-plan.md` §3b has the device A/B
         // (one switch per window, 95 strict pairs) and the numbers it produced,
         // and `git show dc58e00:main/scene/flower.c` has the rotation itself if
         // the question is ever asked again. The four `name=value` fields stay in

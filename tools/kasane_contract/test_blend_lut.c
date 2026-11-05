@@ -31,7 +31,7 @@
  * Time is not measured here and is not claimed: the host has no rsr.ccount
  * (docs/perf/pie-simd.md 6.7), so the per-pixel cost is an -Os objdump count and
  * the coverage is an entry count. The instruction counts are in
- * docs/perf/kasane-lut.md with the commands that produced them. */
+ * docs/perf/kasane-blend.md with the commands that produced them. */
 #include "core_fixture.h"
 #include "ksn_cache.h"
 #include "ksn_render.c"

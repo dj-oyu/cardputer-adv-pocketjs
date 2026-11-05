@@ -3,7 +3,7 @@
  * tile instead of 64) and the smooth-layer shortcut the survey leaves for last
  * ("evaluate the layer once per block, write the block from a constant plus a
  * per-pixel increment"). The switches and the numbers are in
- * docs/perf/kasane-tile.md.
+ * docs/perf/kasane-group.md.
  *
  * Three proofs, all host-only:
  *   1. the two exact arms (reach off/on, tile 64/16) are compared against each

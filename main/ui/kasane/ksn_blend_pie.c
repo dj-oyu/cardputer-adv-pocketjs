@@ -163,7 +163,7 @@
  *    in the instruction-level model as on the part (loopgtz leaves its register
  *    alone there, so a shared counter would model differently from the device).
  *  - Cost, measured with the tools in this repository (nothing here is a device
- *    measurement; docs/perf/kasane-blend-pie.md has the commands):
+ *    measurement; docs/perf/kasane-blend.md has the commands):
  *
  *      ksn_blend8_thin     90 instructions a call, 74 of them EE, 11 before the
  *                          first EE; the per-block body is 79 instructions in

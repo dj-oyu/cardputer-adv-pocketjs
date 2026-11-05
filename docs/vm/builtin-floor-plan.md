@@ -38,7 +38,7 @@
 
 実行時の代償（§7）: 組み込みオブジェクトでの own-property の**外れ**が表探索になる。出荷アプリで最悪の
 imucal が約 53 回/フレーム（実測(host)、外れの回数）。1 回 0.1〜1 µs（**推定、未計測**）なら ≈53 µs/フレーム、
-imucal の JS ターン 4.4 ms（[kasane-text-damage.md](../perf/kasane-text-damage.md) §7、実測(device)）の ≈1.2%。
+imucal の JS ターン 4.4 ms（[kasane-text.md](../perf/kasane-text.md) §7、実測(device)）の ≈1.2%。
 
 ### 1.3 線の名前 — なぜ L6 ではないか
 
