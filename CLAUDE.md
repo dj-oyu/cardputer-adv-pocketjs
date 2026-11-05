@@ -47,7 +47,7 @@ idf.py -B build_api -p COM3 monitor
 
 `main/app_session.c` がJSセッションのすべてを所有する。`app_start_test()` がゲスト生成 → `pocketjs_guest_quickjs_install_once()` で各ネイティブ面を注入 → ソース評価、の順に組み立て、`app_stop()` が逆順に壊す。`app_tick()` が毎フレーム `pocket_*_pump()` を呼んでからゲストの `frame()` を回し、描画は `pocket.kasane`（`main/ui/kasane/`）が提出したものを `present_frame()` が転送する。旧 `ui.*`（Rust UIコア・Taffy・rgb565レンダラ）はファームから削除済みで、それを呼ぶ保存済みプログラムは起動前に `APP_LEGACY_UI` で断る。**ゲストのコールバックを保持するモジュールは、ゲストが死ぬ前に `app_stop()` から reset される必要がある。**
 
-`main/hal/board.c` がLCD・キーボード・I2Cバスを所有し、`board_present()` が唯一の転送口。描画用のストリップバッファは firmware 全体で1本（`board_strip()`）。転送は非同期で、`board_present()` は前のストリップの送信を回収（完了を待つ）してから、転送用バッファ1本（`tx_buf`）へバイトスワップしながら写して queue し、すぐ戻る。送信中に次のストリップを `board_strip()` へ描けるが、写す前には前の送信の完了を待つ（描画用と転送用の1本ずつ。一本化の検討は issue #118）。コマンドを送る前には必ず回収する（RAMWRセッションを終わらせるため）。
+`main/hal/board.c` がLCD・キーボード・I2Cバスを所有し、`board_present()` が唯一の転送口。描画用のストリップバッファは firmware 全体で1本（8 行、`board_strip()`）で、転送用のバッファは無い（設計 0、`BOARD_STRIP_HALF` 既定 1）。Kasane・ホーム・オーバーレイは `board_strip_next()` で 4 行の半分を交互に受け取り、片方を描いた場所から非同期に送る間にもう片方を描く。それ以外の画面が自分の帯を渡したときは、送り終えてから戻る（同期）。パネルは LSB 先（RAMCTRL の ENDIAN）なので、バイトの入れ替えはしない。コマンドを送る前には必ず送信を回収する（RAMWRセッションを終わらせるため）。経緯と実測は `docs/platform/lcd-dma-driver.md` §9。
 
 `main/` は役割ごとに分かれている。`hal/`（LCD・キーボード・IMU・音）、`pocket/`（`pocket.*` API と Wi-Fi）、`pet/`、`ui/`（画面とエディタ）、`text/`（フォント・字句解析・SKK・ソース保存）、`scene/`（背景と描画カーネル）、直下は `main.c` と `app_session.c` のみ。**全サブディレクトリが `INCLUDE_DIRS` に入っているので、`#include "board.h"` のような書き方は変わらない** — 移動でソースを1行も書き換えずに済ませるための構成。
 
