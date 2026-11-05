@@ -1,0 +1,22 @@
+# tools/frame_lint.py baseline: function, far accesses allowed.
+# Taken from the firmware build of e318f9f (broker job fl-build, 2026-11-05).
+# A build marks a function NEW or GREW when it exceeds this; lower a count when
+# a change removes far accesses, and raise one only on purpose.
+# Hot (per frame/row/draw): flower_draw, js_run, run_impl; the rest are per
+# call of a file, calibration or JIT-compile API.
+file_picker_next_path 1
+flower_draw 53
+js_copy 18
+js_file_read 12
+js_list 84
+js_open 59
+js_rename 14
+js_run 95
+js_write_text 30
+ksn_pixel_span_eval 4
+ksn_shiki_jit_scalar 169
+measure_impl 37
+perform_accel_foc 15
+register_resize_impl 10
+register_resize_source_impl 27
+run_impl 98

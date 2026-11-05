@@ -1,0 +1,6 @@
+# The PGO training image (tools/pgo/train.sh): instrumented at -O2 it is
+# about 1.7 MB, past the 1.5 MB of PARTITION_TABLE_SINGLE_APP_LARGE.
+# Name,   Type, SubType, Offset,  Size
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 4M,

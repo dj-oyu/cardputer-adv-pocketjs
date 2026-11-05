@@ -61,15 +61,17 @@ jobs:
           assert not any(k+'=y' in c for k in ('CONFIG_SECURE_BOOT','CONFIG_SECURE_BOOT_V2_ENABLED','CONFIG_SECURE_FLASH_ENC_ENABLED','CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK'))
           # main enables ROM intrinsics by default; the only sdkconfig delta
           # from the previous pin is its CONFIG line and '# default:' marker.
-          # POCKET_SHIKI_MEMSTAT (a diagnostic, default n) is the one option
-          # added since this pin: its line and '# default:' marker are dropped
-          # before hashing, so the pin still holds for every other line.
-          # CONFIG_ESP_SYSTEM_MEMPROT=n (sdkconfig.defaults, the Shiki JIT's
-          # executable RAM, 481f7ce) moved the pin; hash from CI at 56949dc.
+          # POCKET_SHIKI_MEMSTAT (a diagnostic) and POCKET_VM_QJS_PGO (the
+          # QuickJS PGO trial, docs/vm/qjs-pgo.md), both default n, are the
+          # options added since this pin: their lines and '# default:' markers
+          # are dropped before hashing, so the pin still holds for every other
+          # line. CONFIG_ESP_SYSTEM_MEMPROT=n (sdkconfig.defaults, the Shiki
+          # JIT's executable RAM, 481f7ce) moved the pin; hash from CI at 56949dc.
           lines=(b/'sdkconfig').read_text().splitlines(keepends=True)
-          i=next(i for i,l in enumerate(lines) if l.startswith('# CONFIG_POCKET_SHIKI_MEMSTAT is not set'))
-          del lines[i]
-          if i and lines[i-1].startswith('# default:'):del lines[i-1]
+          for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set'):
+              i=next(i for i,l in enumerate(lines) if l.startswith(off))
+              del lines[i]
+              if i and lines[i-1].startswith('# default:'):del lines[i-1]
           digest=hashlib.sha256(''.join(lines).encode()).hexdigest();print('sdkconfig pin',digest)
           assert digest=='ae17e595d95e1e53db934edfca9a12e728ddb1f00de9f9de25741cfd2bb2e215'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'

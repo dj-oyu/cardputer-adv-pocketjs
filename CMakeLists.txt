@@ -7,6 +7,11 @@ cmake_minimum_required(VERSION 3.22)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 project(cardputer_pocketjs)
+# Profile-guided QuickJS (docs/vm/qjs-pgo.md), off by default.
+include("${CMAKE_SOURCE_DIR}/tools/pgo/qjs_pgo.cmake")
+if(CONFIG_POCKET_VM_QJS_PGO)
+    pocket_qjs_pgo(use "${CMAKE_SOURCE_DIR}/tools/pgo/qjs")
+endif()
 add_custom_target(flash_budget ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/check_flash.py" "${CMAKE_BINARY_DIR}/cardputer_pocketjs.bin"
     DEPENDS gen_project_binary VERBATIM)
@@ -19,4 +24,14 @@ add_custom_target(memory_log ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/memlog.py"
             --map "${CMAKE_BINARY_DIR}/cardputer_pocketjs.map"
             --log "${CMAKE_BINARY_DIR}/memory.jsonl" --only-changes
+    DEPENDS gen_project_binary VERBATIM)
+# Stack accesses beyond the 1,020-byte reach of l32i/s32i: each costs 1-2 extra
+# instructions (docs/perf/pie-simd.md 3.9). Report only for now, over main/'s
+# objects; a function that gains far accesses against tools/frame_lint_baseline.txt
+# is marked NEW or GREW.
+add_custom_target(frame_lint ALL
+    COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/frame_lint.py"
+            "--objdump=${CMAKE_OBJDUMP}" --far-only
+            --baseline "${CMAKE_SOURCE_DIR}/tools/frame_lint_baseline.txt"
+            "${CMAKE_BINARY_DIR}/esp-idf/main"
     DEPENDS gen_project_binary VERBATIM)

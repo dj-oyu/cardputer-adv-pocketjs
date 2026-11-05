@@ -768,6 +768,28 @@ ksn_result ksn_core_advance_animations(ksn_core *storage,uint64_t now,bool reduc
     return r;
 }
 
+/* The ports' read_rows (ksn_ports.h), kept beside the image table rather
+ * than in it: the table is part of the core's budgeted storage
+ * (KSN_CORE_STORAGE_BYTES, 48 B to spare on a 64-bit host), and a provider's
+ * row reader is a property of its read_span function, not of a resource. Keyed
+ * by that function, so every registration of the provider shares one row; a
+ * provider that finds the table full only loses the fast path. */
+typedef ksn_result (*ksn_read_span_fn)(void *,uint16_t,uint16_t,uint16_t,uint16_t,uint16_t,
+                                       uint16_t *,uint8_t *);
+typedef ksn_result (*ksn_read_rows_fn)(void *,uint16_t,uint16_t,uint16_t,uint16_t,uint16_t,
+                                       uint16_t,uint16_t *,uint16_t);
+static struct { ksn_read_span_fn span; ksn_read_rows_fn rows; } row_readers[2];
+static void remember_rows(ksn_read_span_fn span,ksn_read_rows_fn rows){
+    for(unsigned i=0;i<sizeof row_readers/sizeof row_readers[0];i++){
+        if(row_readers[i].span==span){row_readers[i].rows=rows;return;}
+        if(!row_readers[i].span){row_readers[i].span=span;row_readers[i].rows=rows;return;}
+    }
+}
+static ksn_read_rows_fn rows_for(ksn_read_span_fn span){
+    for(unsigned i=0;i<sizeof row_readers/sizeof row_readers[0];i++)
+        if(row_readers[i].span==span)return row_readers[i].rows;
+    return NULL;
+}
 ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_image_port *port,ksn_resource *out){
     if(!storage||!valid_layer(layer)||!port||!out||!port->read_span||
        !port->width||!port->height||!port->variants||!port->frames)return KSN_INVALID;
@@ -777,6 +799,7 @@ ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_i
     ksn_image_entry *entry=&core->images[core->image_count++];
     *entry=(ksn_image_entry){port->ctx,port->width,port->height,port->variants,port->frames,
                              port->read_span,{++last_resource},(uint8_t)layer,(uint8_t)port->opaque};
+    if(port->opaque&&port->read_rows)remember_rows(port->read_span,port->read_rows);
     *out=entry->id;return KSN_OK;
 }
 ksn_result ksn_core_image_port(const ksn_core *storage,ksn_layer layer,
@@ -786,7 +809,8 @@ ksn_result ksn_core_image_port(const ksn_core *storage,ksn_layer layer,
     if(!entry)return KSN_STALE;
     *out=(ksn_image_port){.ctx=entry->ctx,.width=entry->width,
         .height=entry->height,.variants=entry->variants,.frames=entry->frames,
-        .read_span=entry->read_span,.opaque=entry->opaque};
+        .read_span=entry->read_span,.opaque=entry->opaque,
+        .read_rows=entry->opaque?rows_for(entry->read_span):NULL};
     return KSN_OK;
 }
 bool ksn_core_has_submission(const ksn_core *storage){return storage&&cimpl(storage)->submitted;}
@@ -1095,7 +1119,8 @@ ksn_result ksn_core_image_reader(const ksn_core *storage,ksn_tx ticket,bool prev
     const ksn_image_entry *entry=find_image(core,layer,(ksn_resource){p.resource});
     if(!entry)return KSN_STALE;
     *out=(ksn_image_reader){entry->ctx,entry->read_span,entry->width,entry->height,
-                            p.variant,p.frame,entry->opaque};
+                            p.variant,p.frame,entry->opaque,
+                            entry->opaque?rows_for(entry->read_span):NULL};
     return KSN_OK;
 }
 

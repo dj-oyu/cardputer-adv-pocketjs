@@ -1,0 +1,15 @@
+# Shiki commit() on the device: build d5fcced (shipping 4-row tree + COMMIT_PROF cycle counters, reverted in 52d0a3c).
+# Per 30-frame window: ms per frame of the whole js_commit, its frame_damage, its band_signature (240 MHz cycles).
+# All measured (device). Jobs tcp-stress, tcp-derby2, tcp-megademo, tcp-bigwave, 2026-11-05.
+# (tcp-derby stopped after 11 s with app_authority_lost: the music player overlay took the device; not repeated.)
+
+app / scene            commit   band_signature  frame_damage  rest   turn_ms   commit/turn
+STRESS                 2.74-2.81   1.59-1.66      1.04          ~0.1   6.5-6.7   ~42%
+MEGADEMO WAKE          0.69-0.98   0.34-0.51      0.22-0.33            15.1-15.5  ~5%
+MEGADEMO NEWS          1.76-1.88   1.05-1.11      0.58-0.62            7.6-8.4   ~22%
+MEGADEMO TWIST         1.67-2.51   0.97-1.68      0.56-0.71            7.1-11.2  ~22%
+BIG WAVE               1.23-1.27   0.75-0.77      0.39-0.40            7.8-8.2   ~16%
+DERBY demo pad         0.48-0.49   0.23           0.14                 4.5       ~11%
+DERBY race             0.93-1.15   0.54-0.67      0.28-0.37            8.4-14.9  ~7-13%
+
+band_signature is ~60% and frame_damage ~37% of every commit; the rest (publish) is under 0.1 ms.

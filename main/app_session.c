@@ -408,6 +408,14 @@ static const struct {const char *name;uint16_t select,mask;} turnperf_events[]={
     {"exr_replay", XTPERF_CNT_EXR,     XTPERF_MASK_EXR_REPLAYS},
     {"load",       XTPERF_CNT_D_LOAD_U1,XTPERF_MASK_D_LOAD_ALL},
     {"imem_hit",   XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_HITS},
+    // Retired control transfers by kind (INSN masks: JX 0x1, CALLX 0x2, RET 0x4,
+    // BRANCH_TAKEN 0x10, J 0x20, CALL 0x40, BRANCH_NOT_TAKEN 0x80). jx is the
+    // interpreter's dispatch at -Os, where every handler shares one jx, so it
+    // counts opcodes (docs/vm/turn-jumps-pie.md).
+    {"insn_jx",    XTPERF_CNT_INSN,    0x0001},
+    {"insn_brj",   XTPERF_CNT_INSN,    0x0030},
+    {"insn_callret",XTPERF_CNT_INSN,   0x0046},
+    {"insn_ntaken",XTPERF_CNT_INSN,    0x0080},
 };
 #define TURNPERF_EVENTS (sizeof turnperf_events/sizeof*turnperf_events)
 static unsigned turnperf_sel,turnperf_n,turnperf_cont_n;
@@ -564,7 +572,16 @@ static esp_err_t kasane_drain(kasane_display_t *display) {
 }
 static esp_err_t kasane_dma_submit(kasane_display_t *display,int x,int y,int cols,
                                    int rows,uint16_t *pixels) {
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+    /* Depth 2 (board.h): the board waits for a free slot, not for the band
+     * before. Failures still surface at the next submit or at finish. */
+    esp_err_t result=g_board_depth<2?kasane_drain(display):ESP_OK;
+#elif defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+    /* The ring (mode 2) waits for the rows it reuses, inside the board. */
+    esp_err_t result=board_buf_mode()==3?ESP_OK:kasane_drain(display);
+#else
     esp_err_t result=kasane_drain(display);
+#endif
     if(result!=ESP_OK)return result;
     result=board_present_submit(x,y,cols,rows,pixels);
     return result;
@@ -579,7 +596,7 @@ static ksn_result kasane_finish(void *opaque) {
 }
 #endif
 static uint16_t *kasane_strip(void *opaque) {
-    (void)opaque;return board_strip();
+    (void)opaque;return board_strip_next();
 }
 static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
@@ -2504,8 +2521,10 @@ static esp_err_t present_frame(void) {
         // damaged columns of a band. It is withdrawn while board_capture is
         // dumping rows, because those PIX lines print all 240 columns of the
         // shared strip and only the window would have been repainted.
+        /* Design 0 (board.h): 4-row pieces from the strip's halves. */
+        const uint16_t strip_rows=(uint16_t)board_strip_rows();
         ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
-                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H,.text=&ksn_font_port,
+                              .width=LCD_W,.height=LCD_H,.strip_rows=strip_rows,.text=&ksn_font_port,
                               .present_rect=board_capture_active()?NULL:kasane_send_rect};
         ksn_render_stats stats;
 #ifdef KASANE_D4_PIXEL_APP_PROBE
@@ -2668,6 +2687,78 @@ static esp_err_t present_frame(void) {
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif
                 }
+#if defined(POCKET_PROC_HSPAN_AB)&&POCKET_PROC_HSPAN_AB
+                /* Same-binary A/B of the band renderer's horizontal-line fill
+                 * (g_ksn_proc_hspan, ksn_procedural.h): the window just printed
+                 * ran with the value named here, then it flips. A measurement
+                 * build only (POCKET_PROC_HSPAN_AB 1); pixels are the same. */
+                ESP_LOGI("kasane","HSPAN_AB hspan=%d render_ms=%.2f",g_ksn_proc_hspan,render_sum/30/1000.0);
+                g_ksn_proc_hspan=!g_ksn_proc_hspan;
+#endif
+#if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
+                /* Same-binary A/B of the LCD queue depth (board.h): the window
+                 * just printed ran at the depth named here, then it flips. */
+                ESP_LOGI("kasane","DEPTH_AB depth=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f",
+                         g_board_depth,ticks?turn_sum/ticks/1000.0:0.0,
+                         render_sum/30/1000.0,present_sum/30/1000.0);
+                g_board_depth=g_board_depth<2?2:1;
+#endif
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+                /* Same-binary A/B of the LCD send path (board.h): the window
+                 * just printed used the path named here, then it flips. */
+                {
+                    static int direct=1;
+                    ESP_LOGI("kasane","DIRECT_AB direct=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u underruns=%u",
+                             direct,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
+                    direct=board_lcd_direct_set(!direct);
+                }
+#endif
+#if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
+                /* Same-binary A/B of zero-copy strips (board.h): the window
+                 * just printed used the mode named here, then it flips. */
+                {
+                    static int mode=0;
+                    ESP_LOGI("kasane","BUF_AB mode=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u free=%u underruns=%u",
+                             mode,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes,
+                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                             (unsigned)board_buf_underruns());
+                    int next=board_buf_mode_set((mode+1)%3);   /* copy, 1', 0 */
+                    if(next>=0)mode=next;
+                }
+#endif
+#if defined(BOARD_ENDIAN_AB)&&BOARD_ENDIAN_AB
+                /* Same-binary A/B of the panel byte order (board.h): the window
+                 * just printed ran with the order named here, then it flips. */
+                {
+                    static int endian_le=1;
+                    ESP_LOGI("kasane","ENDIAN_AB le=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
+                             endian_le,ticks?turn_sum/ticks/1000.0:0.0,
+                             render_sum/30/1000.0,present_sum/30/1000.0,
+                             (unsigned)stats.transferred_bytes);
+                    endian_le=board_endian_ab_flip();
+                }
+#endif
+#if defined(POCKET_PROC_ROWS_AB)&&POCKET_PROC_ROWS_AB
+                /* Same-binary A/B of the Shiki image's row path and the covered
+                 * band's skipped fill (ksn_render.h): the window just printed
+                 * ran with the switches named here, then the next arm is set.
+                 * Three arms: both on, rows off, fill-skip off, so each off
+                 * window has an all-on neighbour on either side. A measurement
+                 * build only (POCKET_PROC_ROWS_AB 1); pixels are the same in
+                 * every arm. */
+                {
+                    static unsigned rows_arm;
+                    ESP_LOGI("kasane","ROWS_AB image_rows=%d cover_skip_fill=%d render_ms=%.2f",
+                             g_ksn_image_rows,g_ksn_cover_skip_fill,render_sum/30/1000.0);
+                    rows_arm=(rows_arm+1)%3;
+                    g_ksn_image_rows=rows_arm!=1;
+                    g_ksn_cover_skip_fill=rows_arm!=2;
+                }
+#endif
 #ifdef KASANE_PROC_DEVICE_PROBE
                 {
                     pocket_grid_resize_profile resize_prof;

@@ -1,0 +1,18 @@
+# 60 fps trial: VM_DISPLAY_PERIOD_MS 33 -> 16 (measurement build ffbba5c = 116a3eb + that one line; reverted in 245be3d).
+# Design 0 + B (shipping). Broker jobs t60-bigwave, t60-derby, t60-stress, t60-megademo, 2026-11-04.
+# fps = 30 painted frames / interval between consecutive KASANE_PAINT lines (device log timestamps, ms).
+# Frames with nothing to paint are not counted, so this is the rate of new pictures. All measured (device).
+# No errors or resets in any run.
+
+app        fps (mean)           per-window fps      turn   render  send   (ms, window means)
+BIGWAVE    55.6 (1140 f/20.5s)  54.2-57.4           7.2-8.7 4.3    4.05
+DERBY race 55.5 (1020 f/18.4s)  53.0-59.9           7.7-9.7 2.5-4.3 1.4-5.4   (pad/gate dropped by the log cap)
+STRESS     44.3 (720 f/16.2s)   43.6-45.0           6.55   8.35    2.45   sum 17.35 vs 22.6 ms/frame
+MEGADEMO   50.5 (1680 f/33.3s)  37.4-60.0
+  WAKE     37-39                                    15.4   1.9-2.8 6.3-6.8
+  NEWS     52-54                                    7.6-8.4 3.5-5.1 4.0-4.7
+  TWIST    45-50 then 55-58                         9.4-11.5 6.0-6.2 2.8-3.4 / 6.7-7.5 4.8-5.4 3.2-3.8
+  ZENITH   58-60                                    5.0-5.6 6.2-7.2 2.7-3.4
+  CORE     38-56                                    7.0-11.5 4.2-9.7 3.6-4.5
+
+Reference, same apps at 33 ms (shipping): every app holds 30 fps (frames=30 per ~1.0 s).

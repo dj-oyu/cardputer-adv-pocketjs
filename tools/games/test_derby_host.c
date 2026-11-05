@@ -607,17 +607,33 @@ static bool eval(const char *src,size_t n,const char *name){
     pocket_kasane_end_turn();
     return ok;
 }
-static uint16_t *get_strip(void *o){(void)o;return strip_pixels;}
+/* KSN_STRIP_ROWS=4: the port of design 0 (docs/platform/lcd-dma-driver.md
+ * 9.5): 4-row pieces, the halves of the one strip in turn, poisoned before
+ * each is handed out. The panel digest over every presented frame must not
+ * move against the 8-row port. */
+static uint16_t strip_rows_arm=8;
+static unsigned strip_half;
+static uint32_t strip_panel_digest=2166136261u;
+static uint16_t *get_strip(void *o){
+    (void)o;
+    if(strip_rows_arm!=4)return strip_pixels;
+    uint16_t *half=strip_pixels+(strip_half++&1u)*4u*240u;
+    for(unsigned i=0;i<4u*240u;i++)half[i]=0xdead;
+    return half;
+}
 static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *p){
     (void)o;memcpy(panel+y*240,p,rows*240*sizeof *p);return KSN_OK;
 }
 static void present(uint64_t now_us){
     pocket_kasane_set_animation_time(now_us);
     (void)pocket_kasane_advance(now_us);
-    ksn_display_port port={.strip=get_strip,.present=send_strip,.width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
+    ksn_display_port port={.strip=get_strip,.present=send_strip,.width=240,.height=135,.strip_rows=strip_rows_arm,.text=&ksn_font_port};
     ksn_render_stats st;
     if(pocket_kasane_present(&port,&st)!=KSN_OK)bad_present++;
-    else pocket_kasane_animations_presented(now_us);
+    else{
+        pocket_kasane_animations_presented(now_us);
+        for(size_t i=0;i<240u*135u;i++){strip_panel_digest^=panel[i];strip_panel_digest*=16777619u;}
+    }
 }
 static const char *ppm_dir;
 static void ppm(const char *tag){
@@ -940,6 +956,8 @@ static const char PRELUDE[]=
     "set:(k,v)=>{__sets++;__store[k]=JSON.parse(JSON.stringify(v));return Promise.resolve({revision:1})}}};";
 
 int main(int argc,char **argv){
+    if(getenv("KSN_STRIP_ROWS"))strip_rows_arm=(uint16_t)atoi(getenv("KSN_STRIP_ROWS"));
+    {extern int g_pocket_proc_ranges;if(getenv("KSN_PROC_RANGES"))g_pocket_proc_ranges=atoi(getenv("KSN_PROC_RANGES"));}
     /* DERBY_APP_DIR: the app as the firmware build embeds it, its @plan
      * functions lowered (tools/games/run_derby.py makes the copy with
      * tools/kasane_ir/lower_plans.mjs); apps/derby itself does not run. */
@@ -1215,6 +1233,16 @@ int main(int argc,char **argv){
     printf("finish: %s\n",finishes?finish[0]:"-");
     if(finishes>1)printf("replay: %s\n",finish[1]);
     printf("pixels hash %016llx\n",(unsigned long long)pixel_hash);
+#ifdef POCKET_PROC_VISIT_STATS
+    {extern unsigned long long pocket_proc_visits[3][2];
+     printf("proc visits 8-row: all=%llu B=%llu A=%llu | 4-row: all=%llu B=%llu A=%llu\n",
+            pocket_proc_visits[0][0],pocket_proc_visits[1][0],pocket_proc_visits[2][0],
+            pocket_proc_visits[0][1],pocket_proc_visits[1][1],pocket_proc_visits[2][1]);
+     extern unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
+     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",pocket_proc_visit_frames,
+            pocket_proc_entries_max,pocket_proc_list_max[0],pocket_proc_list_max[1]);}
+#endif
+    printf("strip_rows=%u panel_digest=%08x\n",(unsigned)strip_rows_arm,(unsigned)strip_panel_digest);
     printf("guest heap (TLSF model, %zu-bit host): before eval %zu, peak during eval %zu (+%zu), after eval %zu, "
            "live peak after GC %zu, whole-run peak %zu; device limit 163840\n",sizeof(void *)*8,before,eval_peak,
            eval_peak-before,after_eval,heap_live_peak,peak_bytes);

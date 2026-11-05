@@ -4,6 +4,10 @@
 実機の配置（`-m32 -malign-double`）、`-O2`、ファームの既定の VM 設定。命令数は**同じ走行の中での比率**としてだけ
 使う（ミリ秒にはならない。描画は PIE の代わりにスカラーで走るので、ホストでは描画がほぼ全部を占める）。
 
+2026-11-03 に STRESS の描画が Shiki に移った（`apps/stress/README.md`）。それより前の記録は Kasane の保持シーン
+（75 コマンド）の版を測ったもので、今の `stress.js` の値とは比べられない。スクリプトは Shiki の組み込みの表を
+作るので Node 16 以上が要る。旧版の負荷を固定したまま測るのは `tools/r5sim`（`tools/r5sim/main/stress_r5.js`）。
+
 ```bash
 # valgrind はインストール不要（sudo が無い WSL 向け）: .deb を展開して使う
 mkdir -p ~/vg && cd ~/vg && apt-get download valgrind && dpkg-deb -x valgrind_*.deb root

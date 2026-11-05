@@ -1,0 +1,5 @@
+# Layered over sdkconfig.defaults for the profile-guided QuickJS build
+# (docs/vm/qjs-pgo.md):
+#   idf.py -B build_qjspgo -DSDKCONFIG=build_qjspgo/sdkconfig \
+#       -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.qjspgo.defaults" build
+CONFIG_POCKET_VM_QJS_PGO=y

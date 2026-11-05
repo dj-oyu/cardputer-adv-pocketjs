@@ -1,0 +1,46 @@
+# 4-row piece render speed-ups (docs/platform/lcd-dma-driver.md 9.9), STRESS on the device, same-binary A/B by window.
+# Each line: the arm named ran the 30-frame window just printed. render/send ms are window means. All measured (device).
+
+## DIV_AB (build d4e45d6, job tdiv-stress): 1 = the old 64-bit band entry, 0 = band_entry (32-bit)
+arm render send bytes bands
+0 7.92 2.76 64800 17   (first window, startup; dropped)
+1 8.35 2.63 57120 15
+0 7.81 2.58 49440 13
+1 8.29 2.41 64800 17
+0 8.36 2.81 60960 16
+1 8.25 2.35 49440 13
+0 8.05 2.68 57120 15
+1 8.64 2.57 49440 13
+0 7.93 2.61 49440 13
+1 8.29 2.50 57120 15
+0 8.12 2.73 53280 14
+1 8.10 2.29 49440 13
+0 8.18 2.86 57120 15
+1 8.28 2.51 53760 14
+0 7.76 2.55 52256 14
+1 8.41 2.55 57120 15
+0 8.25 2.60 57120 15
+1 8.35 2.39 53280 14
+# pairs (1 then the next 0): -0.54 +0.07 -0.20 -0.71 -0.17 +0.08 -0.52 -0.16 ; median -0.18 ms, mean -0.27 ms
+
+## CARRY_AB (build 68589ff, job tcar-stress, g_ksn_prof on from the 2nd window): 1 = carry, 0 = whole range each piece
+arm render image_cy image_n cy/call
+0 8.24 22557009 918 24572
+1 7.73 19100863 848 22524
+0 8.17 21567934 868 24848
+1 8.25 20131406 916 21977
+0 8.12 21481546 856 25095
+1 7.95 19722436 882 22361
+0 8.54 22306869 906 24621
+1 7.86 19118428 854 22387
+0 8.19 22000746 894 24609
+1 8.03 19929921 890 22393
+0 8.01 20810506 834 24952
+1 8.06 20033117 916 21870
+0 8.17 21712867 874 24843
+1 7.67 19029361 838 22708
+0 8.31 22870852 918 24914
+1 8.18 19381081 864 22432
+0 8.23 21324886 862 24739
+# Shiki image cycles per call: median 24,843 (0) -> 22,393 (1), -9.9%; render median 8.19 -> 8.00 ms (-0.19 ms)
+# MEGADEMO (job tcar-megademo): scenes change every few seconds and the image cost moves within a scene; no conclusion.

@@ -11,9 +11,12 @@
 #include "pocket_kasane.h"
 #include "pocket_memory.h"
 #include "pocket_av.h"
+#include "shiki_heap.h"
+#include "pocket_shiki_api.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
+#include "ui/kasane/ksn_procedural.h"
 #include "text/ksn_font.h"
 #include "sound.h"
 #include <stdio.h>
@@ -76,6 +79,9 @@ static unsigned bad_command_count,bad_native;
 static unsigned pressure_events, pressure_trims;
 static unsigned reads_started,reads_finished,reads_at_first_oom,unhandled_rejections;
 static unsigned dispatch_faults,reads_at_dispatch_fault,bad_fault_reads;
+/* The retained HUD over the Shiki frame (stress.js scene()): the image, two
+ * titles, the level, the panel and its border, the meter, two status lines. */
+#define STRESS_COMMANDS 9u
 
 static JSValue js_read_started(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
     (void)c;(void)self;(void)argc;(void)argv; reads_started++; return JS_UNDEFINED;
@@ -113,7 +119,7 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
     else if(!strncmp(s,"STRESS_FAIL",11)) { lines_fail++; printf("  %s\n",s); }
     else if(!strncmp(s,"STRESS f=",9)) {
         unsigned commands=0;const char *field=strstr(s," cmds=");
-        if(!field||sscanf(field," cmds=%u",&commands)!=1||commands!=75)bad_command_count++;
+        if(!field||sscanf(field," cmds=%u",&commands)!=1||commands!=STRESS_COMMANDS)bad_command_count++;
         field=strstr(s," pe=");if(field)sscanf(field," pe=%u",&pressure_events);
         field=strstr(s," trim=");if(field)sscanf(field," trim=%u",&pressure_trims);
         lines_stat++;if(lines_stat%5==1)printf("  %s\n",s);
@@ -145,33 +151,63 @@ static bool eval(const char *source,size_t len,const char *name) {
     return ok;
 }
 
-static uint16_t *get_strip(void *o) { (void)o; return strip_pixels; }
+/* KSN_STRIP_ROWS=4: the port of design 0 (docs/platform/lcd-dma-driver.md
+ * 9.5): 4-row pieces, the two halves of the one strip in turn, each poisoned
+ * before it is handed out so a piece that read pixels it did not draw would
+ * move the digest. */
+static uint16_t strip_rows_arm=8;
+static unsigned strip_half;
+static uint16_t *get_strip(void *o) {
+    (void)o;
+    if(strip_rows_arm!=4) return strip_pixels;
+    uint16_t *half=strip_pixels+(strip_half++&1u)*4u*240u;
+    for(unsigned i=0;i<4u*240u;i++)half[i]=0xdead;
+    return half;
+}
 static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pixels) {
     (void)o; memcpy(panel+y*240,pixels,rows*240*sizeof(*pixels)); return KSN_OK;
 }
 static bool present(void) {
     if(!pocket_kasane_needs_present()) return true;
     ksn_display_port port={.strip=get_strip,.present=send_strip,
-                           .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
+                           .width=240,.height=135,.strip_rows=strip_rows_arm,.text=&ksn_font_port};
     ksn_render_stats stats;
     return pocket_kasane_present(&port,&stats)==KSN_OK;
 }
 
 // A pocket.fs with the one shape the app uses: open() -> {read(n), close()},
-// three 1 KiB chunks then null (end of file).
+// three 1 KiB chunks then null (end of file). A read that fails (an OOM in
+// the Uint8Array) is finished too: its promise rejects, it does not hang, so
+// it counts in finally -- before, such a read left started one ahead and the
+// run failed on a read that had in fact settled.
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};"
     "globalThis.pocket={kasane:globalThis.kasane,fs:{open:async function(){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}let n=0;"
     "return{read:async function(m){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}"
-    "__readStarted();let c=++n>3?null:new Uint8Array(m);"
-    "__readFinished();return c},close:function(){}}}},memory:globalThis.memory};";
+    "__readStarted();try{return ++n>3?null:new Uint8Array(m)}finally{__readFinished()}},"
+    "close:function(){}}}},memory:globalThis.memory};";
 
 int main(int argc,char **argv) {
     const char *gradient_arm=getenv("KSN_VERTICAL_GRAD_PIE");
     const bool inject_dispatch_fault=getenv("STRESS_DISPATCH_FAULT")!=NULL;
     if(gradient_arm)g_ksn_vertical_gradient_pie=strcmp(gradient_arm,"0")!=0;
+    /* The Shiki image's row path and the covered band's skipped fill
+     * (ksn_render.h): KSN_IMAGE_ROWS=0 / KSN_COVER_SKIP_FILL=0 take the
+     * reference paths; the digest below must not move. */
+    const char *rows_arm=getenv("KSN_IMAGE_ROWS"),*cover_arm=getenv("KSN_COVER_SKIP_FILL");
+    if(rows_arm)g_ksn_image_rows=strcmp(rows_arm,"0")!=0;
+    if(cover_arm)g_ksn_cover_skip_fill=strcmp(cover_arm,"0")!=0;
+    /* KSN_PROC_HSPAN=0: the band renderer walks horizontal lines too. */
+    const char *hspan_arm=getenv("KSN_PROC_HSPAN");
+    if(hspan_arm)g_ksn_proc_hspan=strcmp(hspan_arm,"0")!=0;
+    /* KSN_PROC_RANGES=0: every band walks all of a Shiki frame's entries. */
+    const char *ranges_arm=getenv("KSN_PROC_RANGES");
+    {extern int g_pocket_proc_ranges;if(ranges_arm)g_pocket_proc_ranges=strcmp(ranges_arm,"0")!=0;}
+    const char *strip_arm=getenv("KSN_STRIP_ROWS");
+    if(strip_arm)strip_rows_arm=(uint16_t)atoi(strip_arm);
+    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm||ranges_arm;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");
@@ -186,6 +222,9 @@ int main(int argc,char **argv) {
     if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
     host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
+    /* The manifest names kasane.shiki: the session takes the Shiki heap
+     * before the guest (app_session.c), and kasane then has shiki. */
+    if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
     pocket_kasane_install(ctx,NULL);
     pocket_memory_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
@@ -195,7 +234,22 @@ int main(int argc,char **argv) {
     JS_SetPropertyStr(ctx,g,"__dispatchFault",JS_NewCFunction(ctx,js_dispatch_fault,"dispatchFault",0));
     JS_FreeValue(ctx,g);
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
+    // STRESS_HEAP_LIMIT also caps the evaluation, as on the device (the guest
+    // is created with its limit): with an -m32 build this is the check that
+    // the source still evaluates in 160 KiB. The used bytes after it follow.
+    const char *eval_limit=getenv("STRESS_HEAP_LIMIT");
+    if(eval_limit) {
+        size_t limit=(size_t)strtoul(eval_limit,NULL,0);
+        JS_SetMemoryLimit(rt,limit);
+        if(limit/2<JS_GetGCThreshold(rt)) JS_SetGCThreshold(rt,limit/2);
+    }
     bool ok=eval(src,n,path)&&present();
+    if(eval_limit) {
+        size_t used=0,limit=0;
+        JS_RunGC(rt);
+        JS_GetMemoryCounters(rt,&used,&limit);
+        printf("guest after eval: %zu of %zu B\n",used,limit);
+    }
     printf("%s eval + first present\n",ok?"ok  ":"FAIL");
     // A 64-bit host spends more per object than the device, so the cap is
     // set above the device's 160 KiB; L3 still has to reach it.
@@ -237,7 +291,7 @@ int main(int argc,char **argv) {
         pocket_memory_sample((uint64_t)t*20000u,used,limit,false,0,0);
         pocket_memory_pump(false);
         if(!present()) bad_present++;
-        if(gradient_arm)for(size_t i=0;i<240u*135u;i++){
+        if(digest)for(size_t i=0;i<240u*135u;i++){
             panel_digest^=panel[i];panel_digest*=16777619u;
         }
         // STRESS_PPM=<prefix>: the panel as P6 at a few frames, for looking at;
@@ -264,8 +318,18 @@ int main(int argc,char **argv) {
            exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
-    if(gradient_arm)printf("gradient arm=%d panel_digest=%08x\n",
-                           g_ksn_vertical_gradient_pie,panel_digest);
+#ifdef POCKET_PROC_VISIT_STATS
+    {extern unsigned long long pocket_proc_visits[3][2];
+     printf("proc visits 8-row: all=%llu B=%llu A=%llu | 4-row: all=%llu B=%llu A=%llu\n",
+            pocket_proc_visits[0][0],pocket_proc_visits[1][0],pocket_proc_visits[2][0],
+            pocket_proc_visits[0][1],pocket_proc_visits[1][1],pocket_proc_visits[2][1]);
+     extern unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
+     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",pocket_proc_visit_frames,
+            pocket_proc_entries_max,pocket_proc_list_max[0],pocket_proc_list_max[1]);}
+#endif
+    if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d hspan=%d strip_rows=%u panel_digest=%08x\n",
+                           g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,
+                           g_ksn_proc_hspan,(unsigned)strip_rows_arm,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&!bad_suspect&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
               pressure_events>0&&pressure_trims>0&&
@@ -273,7 +337,8 @@ int main(int argc,char **argv) {
               !unhandled_rejections&&
               (!inject_dispatch_fault||(dispatch_faults==1&&!bad_fault_reads&&
                                         reads_started>reads_at_dispatch_fault));
-    pocket_memory_reset();pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
+    pocket_memory_reset();pocket_shiki_api_reset();pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
+    shiki_heap_end();
     printf("%s\n",pass?"STRESS_HOST PASS":"STRESS_HOST FAIL");
     return pass?0:1;
 }

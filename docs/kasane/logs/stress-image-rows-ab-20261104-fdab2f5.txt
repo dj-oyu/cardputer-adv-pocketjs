@@ -1,0 +1,29 @@
+# STRESS TEST, same-binary A/B of the Shiki image's row path (read_rows) and
+# the covered band's skipped fill. Measurement build fdab2f5 (0d3054e plus
+# POCKET_PROC_ROWS_AB 1), broker jobs ab1-build-fdab2f5 / ab1-flash2-fdab2f5,
+# app_session ab1-stress-1: local.stress, LV1, no input. Each ROWS_AB line
+# names the switches the 30-frame window above it ran with. The first window
+# (JIT compiling) is in both arms' history but left out of the medians.
+# The broker kept 256 lines; the middle of the run (lines 90..100) overlaps.
+I (66821) app: MEM free=95180 largest=31744 js=44920 frames=0
+I (67819) kasane: KASANE_PAINT turn_ms=7.66 render_ms=9.18 send_ms=1.63 bytes=64800 bands=17 frames=30
+I (67827) kasane: ROWS_AB image_rows=1 cover_skip_fill=1 render_ms=9.18
+I (68823) kasane: KASANE_PAINT turn_ms=6.40 render_ms=11.87 send_ms=0.89 bytes=57120 bands=15 frames=30
+I (68832) kasane: ROWS_AB image_rows=0 cover_skip_fill=1 render_ms=11.87
+I (69826) kasane: KASANE_PAINT turn_ms=6.58 render_ms=9.11 send_ms=1.48 bytes=49440 bands=13 frames=30
+I (69835) kasane: ROWS_AB image_rows=1 cover_skip_fill=0 render_ms=9.11
+I (70832) kasane: KASANE_PAINT turn_ms=6.33 render_ms=9.27 send_ms=1.53 bytes=64800 bands=17 frames=30
+I (70840) kasane: ROWS_AB image_rows=1 cover_skip_fill=1 render_ms=9.27
+I (71841) kasane: KASANE_PAINT turn_ms=6.51 render_ms=12.19 send_ms=0.86 bytes=60960 bands=16 frames=30
+I (71850) kasane: ROWS_AB image_rows=0 cover_skip_fill=1 render_ms=12.19
+I (72840) kasane: KASANE_PAINT turn_ms=6.39 render_ms=9.24 send_ms=1.48 bytes=49440 bands=13 frames=30
+I (72848) kasane: ROWS_AB image_rows=1 cover_skip_fill=0 render_ms=9.24
+# ... the rotation continues the same way; all windows' render_ms by arm:
+# image_rows=0 cover=1 (16): 11.87 12.19 12.15 11.88 11.65 11.91 11.72 11.34 11.50 11.67 11.54 11.54 11.61 11.95 11.97 11.99
+#                            send_ms 0.86..0.94
+# image_rows=1 cover=1 (14): 9.27 9.35 9.33 9.46 9.48 9.46 9.61 9.32 9.35 9.26 9.35 9.23 9.19 9.30
+#                            send_ms 1.46..1.63
+# image_rows=1 cover=0 (15): 9.11 9.24 9.24 9.07 9.04 9.36 9.59 9.41 9.37 9.64 9.79 9.67 9.53 9.64 9.68
+#                            send_ms 1.46..1.63
+# Shiki engine every window: draws=18.0 steps=7332 engine_ms=1.660..1.676 jit=1/6640 jitfail=0/0/0.
+# STRESS f=60..f=1380: err=0 natOk=ok cmds=9 throughout.

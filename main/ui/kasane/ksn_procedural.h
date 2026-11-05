@@ -66,5 +66,32 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
 }
 /* Replays only the requested rows over an existing RGB565 backdrop. */
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
+/* The same, looking only at entries [first, end): the caller knows no entry
+ * outside them touches rows y..y+height-1 (pocket_proc's per-band ranges,
+ * docs/platform/lcd-dma-driver.md 9.5). first must start an entry. The
+ * pixels are those of ksn_proc_render_band. */
+bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                                unsigned first,unsigned end);
+/* A first 4-row piece of an 8-row band (y on the band, height < 8) notes in
+ * the carry which entries of [first, end) also reach the band's other rows;
+ * the next call for exactly those rows, frame and range visits only them, in
+ * the same order, so the pixels are those of ksn_proc_render_band_range. Any
+ * other call, or a mismatch, takes the whole walk and leaves the carry
+ * invalid. The owner invalidates it when a frame's entries change in place
+ * (docs/platform/lcd-dma-driver.md 9.9). NULL is the plain walk. */
+typedef struct {
+    const ksn_proc_frame *frame;
+    uint16_t count,y,height,first,end;
+    bool valid;
+    uint32_t bits[KSN_PROC_SEGMENTS/32];
+} ksn_proc_carry;
+bool ksn_proc_render_band_carry(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                                unsigned first,unsigned end,ksn_proc_carry *carry);
+/* 1 (default): a horizontal line (y0 == y1) is clipped to the panel once and
+ * filled two pixels a store, instead of walked a pixel at a time. 0 is the
+ * Bresenham walk for every line, the reference for a same-binary A/B. The
+ * pixels are the same: a horizontal Bresenham line is exactly x0..x1 on its
+ * row. */
+extern int g_ksn_proc_hspan;
 
 #endif

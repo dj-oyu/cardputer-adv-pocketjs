@@ -101,6 +101,13 @@ static ksn_shiki_vm *shiki_vm;
 typedef struct {
     uint32_t hash[PROC_BANDS];
     uint8_t x0[PROC_BANDS],x1[PROC_BANDS];
+    /* The entries [first, end) hold every one that touches the band: a band
+     * is drawn walking those alone (ksn_proc_render_band_range,
+     * docs/platform/lcd-dma-driver.md 9.5). first > end: none touch it. */
+    uint16_t first[PROC_BANDS],end[PROC_BANDS];
+#ifdef POCKET_PROC_SIG_CHECK
+    uint64_t strong[PROC_BANDS];   /* host only: the ground truth the hash is checked against */
+#endif
 } proc_band_sig;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
@@ -122,6 +129,13 @@ static unsigned building_surface,pending_surface;
  * (sec.22). */
 #define PROC_IMAGE_BAND_ROWS 8u
 static uint16_t *image_band_buf;
+/* The 4-row pieces' note (ksn_proc_render_band_carry, 144 B from the Shiki
+ * arena when it has room): which entries the first piece of a band saw reach
+ * the second, so the second walks only those. Optional -- without it every
+ * piece takes the whole range. Dropped whenever a frame's entries can change
+ * (docs/platform/lcd-dma-driver.md 9.9). */
+static ksn_proc_carry *half_carry;
+static inline void carry_drop(void){if(half_carry)half_carry->valid=false;}
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
@@ -181,12 +195,30 @@ static proc_slot *find_slot(uint32_t handle){
         if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
     return NULL;
 }
-static ksn_rect frame_damage(const proc_surface *surface){
+/* commit()'s two walks over every entry, at -O2 in a file kept at -Os: built
+ * for size, these walks took 1.0 + 1.1 ms a frame in STRESS (~900 entries);
+ * at -O2 and reading a frame without pattern lines field by field, 0.17 +
+ * 0.65 ms (device, same-binary A/B, docs/platform/lcd-dma-driver.md 9.11).
+ * A frame with pattern lines walks through ksn_proc_frame_next as before. */
+#define PROC_HOT __attribute__((optimize("O2")))
+PROC_HOT static ksn_rect frame_damage(const proc_surface *surface){
     if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
     int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
     const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
     for(unsigned f=0;f<2;f++){
+      if(!frames[f]->ext){
+        const ksn_proc_segment *seg=frames[f]->segments,*const stop=seg+frames[f]->count;
+        for(;seg<stop;seg++){
+            const int sx0=seg->x0,sx1=seg->x1,sy0=seg->y0,sy1=seg->y1;
+            const int ax=sx0<sx1?sx0:sx1,bx=sx0^sx1^ax,ay=sy0<sy1?sy0:sy1,by=sy0^sy1^ay;
+            if(ax<x0)x0=ax;
+            if(ay<y0)y0=ay;
+            if(bx+1>x1)x1=bx+1;
+            if(by+1>y1)y1=by+1;
+        }
+        continue;
+      }
       unsigned i=0,cost;
       ksn_proc_segment geometry;
       bool pattern;
@@ -212,30 +244,172 @@ static ksn_rect frame_damage(const proc_surface *surface){
     if(y1>KSN_PROC_H)y1=KSN_PROC_H;
     return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
-static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
-    for(unsigned b=0;b<PROC_BANDS;b++){sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;}
+#ifdef POCKET_PROC_SIG_CHECK
+/* Host check of the band hash (docs/platform/lcd-dma-driver.md 9.10): a
+ * splitmix64 chain over the same bytes stands in for "the entries differ". */
+static uint64_t sig_mix64(uint64_t z){
+    z+=0x9e3779b97f4a7c15ull;z=(z^(z>>30))*0xbf58476d1ce4e5b9ull;
+    z=(z^(z>>27))*0x94d049bb133111ebull;return z^(z>>31);
+}
+#include <stdio.h>
+static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,sig_lo8,sig_impossible,
+                          sig_skipped,sig_pixel_bad,sig_all;
+__attribute__((destructor)) static void sig_report(void){
+    if(!sig_compared&&!sig_all)return;
+    fprintf(stderr,"SIG_CHECK bands_compared=%llu changed=%llu fnv32_equal_when_changed=%llu "
+            "lo16=%llu (ideal %.1f) hi16=%llu (ideal %.1f) lo8=%llu (ideal %.1f) impossible=%llu "
+            "skipped=%llu pixel_mismatch_in_skipped=%llu whole_frame_damages=%llu\n",
+            sig_compared,sig_changed,sig_coll32,sig_lo16,sig_changed/65536.0,sig_hi16,sig_changed/65536.0,
+            sig_lo8,sig_changed/256.0,sig_impossible,sig_skipped,sig_pixel_bad,sig_all);
+}
+#endif
+/* One entry (or a pattern line's two) as 32 bits: murmur3's block step over
+ * its 16-bit fields packed in pairs, then its finaliser, so every input bit
+ * reaches every output bit -- the band step below relies on that. */
+static inline __attribute__((always_inline)) uint32_t rotl32(uint32_t v,unsigned r){return v<<r|v>>(32u-r);}
+static inline __attribute__((always_inline)) uint32_t entry_hash(const ksn_proc_segment *s,unsigned n){
+    uint32_t h=0x2545f491u;
+    for(unsigned k=0;k<n;k++){
+        const uint32_t w[3]={(uint16_t)s[k].x0|(uint32_t)(uint16_t)s[k].y0<<16,
+                             (uint16_t)s[k].x1|(uint32_t)(uint16_t)s[k].y1<<16,s[k].color};
+        for(unsigned j=0;j<3;j++){
+            uint32_t v=w[j]*0xcc9e2d51u;
+            v=rotl32(v,15)*0x1b873593u;
+            h=rotl32(h^v,13)*5u+0xe6546b64u;
+        }
+    }
+    h^=n;h^=h>>16;h*=0x85ebca6bu;h^=h>>13;h*=0xc2b2ae35u;h^=h>>16;
+    return h;
+}
+/* The band's running value and one entry's: order matters (the rotation),
+ * and the rotation brings the product's high bits back to the low ones, the
+ * weak end of a plain multiply (the FNV-1a check, sec.9.10). */
+static inline __attribute__((always_inline)) uint32_t band_mix(uint32_t h,uint32_t e){
+    return (rotl32(h,15)^e)*0x9e3779b1u;
+}
+/* One entry (or a pattern line's two, [start, i)) into each band it touches. */
+static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *frame,proc_band_sig *sig,
+                                                          const ksn_proc_segment *geometry,
+                                                          unsigned start,unsigned i){
+    const int ya=geometry->y0<geometry->y1?geometry->y0:geometry->y1,yb=geometry->y0^geometry->y1^ya;
+    int xa=geometry->x0<geometry->x1?geometry->x0:geometry->x1,xb=(geometry->x0^geometry->x1^xa)+1;
+    if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)return;
+    if(xa<0)xa=0;
+    if(xb>KSN_PROC_W)xb=KSN_PROC_W;
+    const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
+    /* The raw entries, a pattern line's parameters included, hashed once;
+     * each band they touch then takes one mixing step. Hashing the bytes
+     * again for every band was most of commit() on the device
+     * (docs/platform/lcd-dma-driver.md 9.11). */
+    const uint32_t e=entry_hash(&frame->segments[start],i-start);
+    for(unsigned b=b0;b<=b1;b++){
+        sig->hash[b]=band_mix(sig->hash[b],e);
+#ifdef POCKET_PROC_SIG_CHECK
+        const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
+        for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)
+            sig->strong[b]=sig_mix64(sig->strong[b]^bytes[k]);
+#endif
+        if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
+        if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
+        if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
+        sig->end[b]=(uint16_t)i;
+    }
+}
+PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
+    for(unsigned b=0;b<PROC_BANDS;b++){
+        sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
+        sig->first[b]=UINT16_MAX;sig->end[b]=0;
+#ifdef POCKET_PROC_SIG_CHECK
+        sig->strong[b]=0x9e3779b97f4a7c15ull;
+#endif
+    }
+    if(!frame->ext){
+        for(unsigned i=0;i<frame->count;i++)sig_add(frame,sig,&frame->segments[i],i,i+1);
+        return;
+    }
     unsigned i=0,cost;
     ksn_proc_segment geometry;
     bool pattern;
     for(;;){
         const unsigned start=i;
         if(!ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost))break;
-        const int ya=geometry.y0<geometry.y1?geometry.y0:geometry.y1,yb=geometry.y0^geometry.y1^ya;
-        int xa=geometry.x0<geometry.x1?geometry.x0:geometry.x1,xb=(geometry.x0^geometry.x1^xa)+1;
-        if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)continue;
-        if(xa<0)xa=0;
-        if(xb>KSN_PROC_W)xb=KSN_PROC_W;
-        const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
-        for(unsigned b=b0;b<=b1;b++){
-            /* The raw entries, a pattern line's parameters included. */
-            const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
-            uint32_t h=sig->hash[b];
-            for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)h=(h^bytes[k])*16777619u;
-            sig->hash[b]=h;
-            if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
-            if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
-        }
+        sig_add(frame,sig,&geometry,start,i);
     }
+}
+#ifdef POCKET_PROC_VISIT_STATS
+/* Host diagnostic (docs/platform/lcd-dma-driver.md 9.5): for each committed
+ * frame, how many entries a renderer looks at to draw every 8-row band and
+ * every 4-row piece -- all of them (today), only those between the first and
+ * the last entry touching it (design B), only those touching it (design A). */
+unsigned long long pocket_proc_visits[3][2];   /* [all,B,A][8-row,4-row] */
+unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
+static void visit_stats(const ksn_proc_frame *frame){
+    enum{PIECES=(KSN_PROC_H+3)/4};
+    int first[PIECES],last[PIECES];unsigned touch[PIECES]={0},touchb[PROC_BANDS]={0};
+    for(unsigned p=0;p<PIECES;p++){first[p]=-1;last[p]=-1;}
+    unsigned i=0,cost,entries=0;
+    ksn_proc_segment g;bool pattern;
+    for(;;){
+        const unsigned start=i;
+        if(!ksn_proc_frame_next(frame,&i,&g,&pattern,&cost))break;
+        entries++;
+        const int ya=g.y0<g.y1?g.y0:g.y1,yb=g.y0^g.y1^ya;
+        if(yb<0||ya>=KSN_PROC_H)continue;
+        const unsigned p0=(unsigned)(ya<0?0:ya)/4u,p1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/4u;
+        for(unsigned p=p0;p<=p1;p++){
+            if(first[p]<0)first[p]=(int)start;
+            last[p]=(int)start;touch[p]++;
+        }
+        for(unsigned b=p0/2u;b<=p1/2u;b++)touchb[b]++;
+    }
+    pocket_proc_visit_frames++;
+    if(entries>pocket_proc_entries_max)pocket_proc_entries_max=entries;
+    unsigned list4=0,list8=0;
+    for(unsigned p=0;p<PIECES;p++)list4+=touch[p];
+    for(unsigned b=0;b<PROC_BANDS;b++)list8+=touchb[b];
+    if(list4>pocket_proc_list_max[1])pocket_proc_list_max[1]=list4;
+    if(list8>pocket_proc_list_max[0])pocket_proc_list_max[0]=list8;
+    for(unsigned p=0;p<PIECES;p++){
+        pocket_proc_visits[0][1]+=entries;
+        if(first[p]>=0)pocket_proc_visits[1][1]+=(unsigned)(last[p]-first[p]+1);
+        pocket_proc_visits[2][1]+=touch[p];
+    }
+    for(unsigned b=0;b<PROC_BANDS;b++){
+        const unsigned pa=2*b,pb=2*b+1<PIECES?2*b+1:2*b;
+        int f=first[pa],l=last[pa];
+        if(first[pb]>=0&&(f<0||first[pb]<f))f=first[pb];
+        if(last[pb]>l)l=last[pb];
+        pocket_proc_visits[0][0]+=entries;
+        if(f>=0)pocket_proc_visits[1][0]+=(unsigned)(l-f+1);
+        pocket_proc_visits[2][0]+=touchb[b];
+    }
+}
+#endif
+/* Draw rows y..y+rows-1 of one of a surface's frames, walking only the
+ * entries its signature says can touch them. A frame without a signature
+ * that describes it (none yet) takes the whole walk; the pixels are the same
+ * either way. g_pocket_proc_ranges 0 is the whole walk always (A/B). */
+int g_pocket_proc_ranges=1;
+static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
+                        uint16_t *pixels,int y,int rows){
+    const proc_band_sig *sig=NULL;
+    if(g_pocket_proc_ranges&&rows>0){
+        if(frame==surface->candidate&&surface->sig_ready)sig=&surface->candidate_sig;
+        else if(frame==surface->committed&&surface->has_committed)sig=&surface->committed_sig;
+    }
+    if(!sig)return ksn_proc_render_band(frame,pixels,y,rows);
+    unsigned first=UINT16_MAX,end=0;
+    for(unsigned b=(unsigned)y/8u;b<=(unsigned)(y+rows-1)/8u&&b<PROC_BANDS;b++){
+        if(sig->first[b]>sig->end[b])continue;
+        if(sig->first[b]<first)first=sig->first[b];
+        if(sig->end[b]>end)end=sig->end[b];
+    }
+    if(first>end)first=end=0;
+    /* Taken the first time a piece shorter than a band is drawn, so a port of
+     * 8-row strips never allocates it and beginFrame still takes exactly its
+     * two frames (test_pocket_proc_turn_qjs.c). No room is no carry. */
+    if(!half_carry&&rows<8)half_carry=shiki_or_sys_calloc(1,sizeof *half_carry);
+    return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,half_carry);
 }
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
 #ifdef POCKET_PROC_NO_BAND_DAMAGE
@@ -246,6 +420,41 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
     if(index>=PROC_SURFACES||!surfaces[index].sig_ready)return false;
     const proc_surface *s=&surfaces[index];
     const bool all=!s->has_committed||s->candidate_color!=s->committed_color;
+#ifdef POCKET_PROC_SIG_CHECK
+    if(all)sig_all++;
+    else for(unsigned b=0;b<PROC_BANDS;b++){
+        const proc_band_sig *n=&s->candidate_sig,*o=&s->committed_sig;
+        const uint32_t hn=n->hash[b],ho=o->hash[b];
+        const bool fe=hn==ho,se=n->strong[b]==o->strong[b];
+        sig_compared++;
+        if(se&&!fe)sig_impossible++;
+        if(!se){
+            sig_changed++;
+            if(fe)sig_coll32++;
+            if(!((hn^ho)&0xffffu))sig_lo16++;
+            if((hn>>16)==(ho>>16))sig_hi16++;
+            if(!((hn^ho)&0xffu))sig_lo8++;
+        }
+        if(fe){
+            /* Skipped: both frames must draw the band alike over the colour. */
+            static uint16_t pa[KSN_PROC_W*8],pb[KSN_PROC_W*8];
+            const int y=(int)b*8,rows=y+8>KSN_PROC_H?KSN_PROC_H-y:8;
+            for(unsigned k=0;k<KSN_PROC_W*8u;k++)pa[k]=pb[k]=s->candidate_color;
+            /* The candidate is marked ready only when it is published. */
+            static ksn_proc_frame copy;
+            memcpy(&copy,s->candidate,frame_bytes(surface_segments(s)));copy.ready=true;
+            const bool ra=ksn_proc_render_band(&copy,pa,y,rows);
+            const bool rb=ksn_proc_render_band(s->committed,pb,y,rows);
+            sig_skipped++;
+            if(memcmp(pa,pb,sizeof pa)){
+                if(sig_pixel_bad<3)fprintf(stderr,"SIG_BAD band=%u ra=%d rb=%d ready=%d/%d count=%u/%u ext=%u/%u first=%u/%u end=%u/%u\n",
+                    b,ra,rb,s->candidate->ready,s->committed->ready,s->candidate->count,s->committed->count,
+                    s->candidate->ext,s->committed->ext,n->first[b],o->first[b],n->end[b],o->end[b]);
+                sig_pixel_bad++;
+            }
+        }
+    }
+#endif
     *bands=0;
     for(unsigned b=0;b<PROC_BANDS;b++){
         const proc_band_sig *n=&s->candidate_sig,*o=&s->committed_sig;
@@ -288,7 +497,7 @@ JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark 
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     const ksn_proc_frame *c=surfaces[building_surface].candidate;
     *mark=(pocket_proc_mark){c->count,c->raster_steps,c->ext,(uint8_t)building_surface};
-    image_band_valid=false;
+    image_band_valid=false;carry_drop();
     return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
@@ -321,6 +530,9 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     surface->damage=frame_damage(surface);
     band_signature(surface->candidate,&surface->candidate_sig);
     surface->sig_ready=true;
+#ifdef POCKET_PROC_VISIT_STATS
+    visit_stats(surface->candidate);
+#endif
     if(building_surface&&!surface->image_mode)
         return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
     ksn_result result=building_surface||surface->image_mode?
@@ -331,7 +543,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     surface->candidate->ready=true;
     surface->pending=true;
     pending_surface=building_surface;
-    image_band_valid=false;
+    image_band_valid=false;carry_drop();
     building=false;
 #ifdef KASANE_MEGADEMO_TRACE
     trace.commit_n++;trace_split=true;
@@ -487,7 +699,7 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     /* Straight into the tail: a draw that does not fit stops at LIMIT and
      * the count below is not advanced, so its segments are not the frame's. */
     ksn_proc_segment *tail=&candidate->segments[candidate->count];
-    image_band_valid=false;
+    image_band_valid=false;carry_drop();
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
     const uint32_t t_engine=pocket_cycles();
@@ -549,8 +761,9 @@ void pocket_proc_reset(void){
         surfaces[i]=(proc_surface){0};
     }
     shiki_or_sys_free(image_band_buf);image_band_buf=NULL;
+    shiki_or_sys_free(half_carry);half_carry=NULL;
     shiki_or_sys_free(shiki_vm);shiki_vm=NULL;
-    image_band_valid=false;image_band_frame=NULL;
+    image_band_valid=false;carry_drop();image_band_frame=NULL;
     building=js_call_active=false;building_surface=pending_surface=0;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
@@ -620,7 +833,7 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         uint32_t band_start=esp_cpu_get_cycle_count();
 #endif
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
-        if(frame&&!ksn_proc_render_band(frame,image_band,band_y,(int)rows))return KSN_INVALID;
+        if(frame&&!render_rows(surface,frame,image_band,band_y,(int)rows))return KSN_INVALID;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
         image_band_cycles+=esp_cpu_get_cycle_count()-band_start;
         image_band_count++;
@@ -642,10 +855,51 @@ span_done:
 #endif
     return KSN_OK;
 }
+/* read_rows (ksn_ports.h): whole rows written in place, as the backdrop below
+ * does -- the background, then the frame's band render over it -- so a band
+ * of an unscaled full-width image costs one render and no copies: no band
+ * buffer, no 32-pixel spans, no alpha. The same pixels as image_span: the
+ * same render of the same frame over the same colour (ksn_proc_render_band
+ * enters a line mid-way exactly, test_procedural_band_jump.c). Anything but
+ * whole rows is left to the span path. */
+static ksn_result image_rows(void *ctx,uint16_t variant,uint16_t frame_number,
+                             uint16_t y,uint16_t rows,uint16_t x,uint16_t count,
+                             uint16_t *dst,uint16_t stride){
+    uintptr_t key=(uintptr_t)ctx;
+    if(key<1||key>PROC_SURFACES)return KSN_STALE;
+    if(variant||frame_number||!dst||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
+    if(x||count!=KSN_PROC_W||stride!=KSN_PROC_W)return KSN_UNSUPPORTED;
+    if(!rows)return KSN_OK;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    uint32_t start=esp_cpu_get_cycle_count();
+#endif
+    const proc_surface *surface=&surfaces[key-1];
+    const ksn_proc_frame *frame=surface->pending?surface->candidate:
+        (surface->has_committed?surface->committed:NULL);
+    const uint16_t color=surface->pending?surface->candidate_color:
+        (surface->has_committed?surface->committed_color:0);
+    /* Two pixels a store: the strip's rows start 4-byte aligned (240 px).
+     * may_alias: the render below reads and writes these as uint16_t (the
+     * strict-aliasing trap of docs/vm/aliasing-types.md). */
+    typedef uint32_t pixel_pair __attribute__((may_alias));
+    const unsigned n=(unsigned)rows*KSN_PROC_W;
+    if(!((uintptr_t)dst&3u)){
+        pixel_pair *w=(pixel_pair *)(void *)dst;
+        const uint32_t pair=(uint32_t)color|(uint32_t)color<<16;
+        for(unsigned i=0;i<n/2;i++)w[i]=pair;
+    }else for(unsigned i=0;i<n;i++)dst[i]=color;
+    if(frame&&!render_rows(surface,frame,dst,y,rows))return KSN_INVALID;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    image_band_cycles+=esp_cpu_get_cycle_count()-start;
+    image_band_count++;
+#endif
+    return KSN_OK;
+}
 void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
     if(out&&index<PROC_SURFACES)*out=(ksn_image_port){.ctx=(void *)(uintptr_t)(index+1),
                               .width=KSN_PROC_W,.height=KSN_PROC_H,
-                              .variants=1,.frames=1,.read_span=image_span,.opaque=true};
+                              .variants=1,.frames=1,.read_span=image_span,.opaque=true,
+                              .read_rows=image_rows};
 }
 void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0);}
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
@@ -657,9 +911,10 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
     for(unsigned i=0;i<(unsigned)rows*KSN_PROC_W;i++)pixels[i]=color;
-    return !frame||ksn_proc_render_band(frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
+    return !frame||render_rows(surface,frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
 }
 void pocket_proc_present_result(ksn_result result){
+    carry_drop();
     proc_surface *surface=&surfaces[pending_surface];
     bool repairing=false;
     for(unsigned i=0;i<PROC_SURFACES;i++)repairing|=surfaces[i].repair_required;
@@ -671,11 +926,11 @@ void pocket_proc_present_result(ksn_result result){
             surface->committed_color=surface->candidate_color;
             surface->committed_sig=surface->candidate_sig;
             surface->has_committed=true;surface->pending=false;
-            image_band_valid=false;
+            image_band_valid=false;carry_drop();
         }
         for(unsigned i=0;i<PROC_SURFACES;i++)surfaces[i].repair_required=false;
     }else if(result==KSN_IO){
-        image_band_valid=false;
+        image_band_valid=false;carry_drop();
         if(surface->image_mode){
             /* Kasane retries a submitted UI patch against the same image
              * resource. Keep its pixels paired with that ticket until ACK. */

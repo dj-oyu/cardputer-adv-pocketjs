@@ -244,6 +244,9 @@ typedef struct {
                             uint16_t *,uint8_t *);
     uint16_t width,height,variant,frame;
     bool opaque;
+    /* The port's read_rows (ksn_ports.h), NULL when it has none. */
+    ksn_result (*read_rows)(void *,uint16_t,uint16_t,uint16_t,uint16_t,uint16_t,
+                            uint16_t,uint16_t *,uint16_t);
 } ksn_image_reader;
 ksn_result ksn_core_image_reader(const ksn_core *core,ksn_tx ticket,bool previous,
                                  ksn_layer layer,uint16_t index,ksn_image_reader *out);

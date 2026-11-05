@@ -1,0 +1,18 @@
+# Shiki commit() speed-ups on the device, same-binary A/B by 30-frame window. ms per frame. All measured (device).
+
+## SIG_AB (build b06b3e2, job tsig-stress): old = per-band FNV (01c81e2), new = entry_hash + band_mix (987f395)
+STRESS  old: sig 1.346-1.400  total 2.463-2.520     new: sig 1.191-1.278  total 2.239-2.398   -> sig ~ -0.12 ms
+        (both arms built at -Os; damage 1.02 in both)
+
+## COMMIT_AB (build feae7d1, jobs tca-stress, tca-bigwave): 0 = shipping 987f395 (-Os, through ksn_proc_frame_next),
+## 1 = -O2 function attribute, a frame without pattern lines read field by field. walk = one read of every entry.
+STRESS    0: total 2.150-2.296  damage 0.928-0.997  sig 1.073-1.149  walk 0.052-0.054
+          1: total 0.966-0.999  damage 0.165-0.169  sig 0.639-0.675  walk 0.055-0.057
+BIG WAVE  0: total 0.953-0.975  damage 0.374-0.384  sig 0.461-0.473  walk 0.020
+          1: total 0.464-0.482  damage 0.065-0.068  sig 0.277-0.295  walk 0.022-0.023
+# Host check of the two arms: identical damage and signatures on every commit (STRESS 800, DERBY 14,400).
+
+## Confirmation: shipping 5535bea + timers only (build 22f2ffe, jobs tcf-stress, tcf-derby)
+STRESS          total 0.889-0.963  damage 0.158-0.173  sig 0.628-0.686   (was 2.74-2.81 at 01c81e2)
+DERBY pad       total 0.260-0.263  damage 0.041-0.043  sig 0.105-0.108   (was 0.48-0.49)
+DERBY race      total 0.415-0.509  damage 0.075-0.104  sig 0.231-0.300   (was 0.93-1.15; pattern lines -> frame_next path, now -O2)

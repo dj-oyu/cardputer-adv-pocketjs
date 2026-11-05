@@ -17,6 +17,7 @@ jobs:
       - run: |
           python tools/test_board_dma_overlap.py
           python tools/test_board_transport.py
+          python tools/test_board_half.py
           python tools/test_board_transport_report.py
           python tools/test_kasane_dma_overlap.py
           python tools/test_dma_completion_owners.py

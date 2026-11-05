@@ -16,6 +16,7 @@
 | [wifi-autostart.md](wifi-autostart.md) | 設計 | Wi-Fi の自動起動: ホームのアイドルで一過性の時刻同期（アプリ優先で中断）、参照カウントの接続サービス `net_service`、常駐の背景サービスへの方針候補と実機で測る項目 |
 | [keystate.md](keystate.md) | 設計 | 物理キーの押下集合（HAL の keystate）と `pocket.input.keys`: 入力経路と消費者の一覧、ライフサイクル、却下案、実機で測る同時押し・ゴースト・FIFO あふれ |
 | [backlog.md](backlog.md) | backlog | srcstore とエディタの保存まわりの不具合2件（コードで再現確認済み）、入力キュー、Docs 機能 |
+| [lcd-dma-driver.md](lcd-dma-driver.md) | 仕様（草案） | LCD の送信を `spi_master` から GP-SPI2 + GDMA の直接の制御に置き換えるドライバ: TRM の制約（送信中にデータが尽きると最後のデータを繰り返す、32 KB の上限）、送信用の輪と行ごとの記述子、深さ 2 の待ち行列、ISR での転送の連続、変えない API、メモリ、検証、未決 |
 | [clean-checkout-dependencies.md](clean-checkout-dependencies.md) | 設計・記録 | 適用範囲と実装状態は本文冒頭を参照。 |
 
 ## 計測・調査・実験の記録
