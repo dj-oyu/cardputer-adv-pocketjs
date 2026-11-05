@@ -19,6 +19,7 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [o2-machine-code.md](o2-machine-code.md) | 調査（実測＋逆アセンブル） | 描画の道の `-O2` が何を速くしたか: XTPERF で減ったサイクルの 2/3 は命令数、1/3 は成立分岐（1 回 = バブル 2 サイクル）、IPC と flash キャッシュ待ちは不変。小関数の展開、1,020 B を越えるフレームの 3 命令アクセス（`render_group` を外に出した理由）、ループの unswitching |
 | [kasane-opt-survey.md](kasane-opt-survey.md) | 調査 | 描画経路の棚卸しと候補の選別（境界ごとに「何が律速か」と却下の理由） |
 | [derby-screen-projection.md](derby-screen-projection.md) | 最適化記録 | DERBY の screen projection の比較条件・実装範囲・検証結果。 |
 | [display-transport-candidates.md](display-transport-candidates.md) | 調査・提案 | 表示転送の候補比較。提案と実測済みの経路を分けて読む。 |
