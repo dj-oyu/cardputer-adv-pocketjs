@@ -195,12 +195,30 @@ static proc_slot *find_slot(uint32_t handle){
         if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
     return NULL;
 }
-static ksn_rect frame_damage(const proc_surface *surface){
+/* commit()'s two walks over every entry, at -O2 in a file kept at -Os: built
+ * for size, these walks took 1.0 + 1.1 ms a frame in STRESS (~900 entries);
+ * at -O2 and reading a frame without pattern lines field by field, 0.17 +
+ * 0.65 ms (device, same-binary A/B, docs/platform/lcd-dma-driver.md 9.11).
+ * A frame with pattern lines walks through ksn_proc_frame_next as before. */
+#define PROC_HOT __attribute__((optimize("O2")))
+PROC_HOT static ksn_rect frame_damage(const proc_surface *surface){
     if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
     int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
     const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
     for(unsigned f=0;f<2;f++){
+      if(!frames[f]->ext){
+        const ksn_proc_segment *seg=frames[f]->segments,*const stop=seg+frames[f]->count;
+        for(;seg<stop;seg++){
+            const int sx0=seg->x0,sx1=seg->x1,sy0=seg->y0,sy1=seg->y1;
+            const int ax=sx0<sx1?sx0:sx1,bx=sx0^sx1^ax,ay=sy0<sy1?sy0:sy1,by=sy0^sy1^ay;
+            if(ax<x0)x0=ax;
+            if(ay<y0)y0=ay;
+            if(bx+1>x1)x1=bx+1;
+            if(by+1>y1)y1=by+1;
+        }
+        continue;
+      }
       unsigned i=0,cost;
       ksn_proc_segment geometry;
       bool pattern;
@@ -248,8 +266,8 @@ __attribute__((destructor)) static void sig_report(void){
 /* One entry (or a pattern line's two) as 32 bits: murmur3's block step over
  * its 16-bit fields packed in pairs, then its finaliser, so every input bit
  * reaches every output bit -- the band step below relies on that. */
-static inline uint32_t rotl32(uint32_t v,unsigned r){return v<<r|v>>(32u-r);}
-static inline uint32_t entry_hash(const ksn_proc_segment *s,unsigned n){
+static inline __attribute__((always_inline)) uint32_t rotl32(uint32_t v,unsigned r){return v<<r|v>>(32u-r);}
+static inline __attribute__((always_inline)) uint32_t entry_hash(const ksn_proc_segment *s,unsigned n){
     uint32_t h=0x2545f491u;
     for(unsigned k=0;k<n;k++){
         const uint32_t w[3]={(uint16_t)s[k].x0|(uint32_t)(uint16_t)s[k].y0<<16,
@@ -266,10 +284,38 @@ static inline uint32_t entry_hash(const ksn_proc_segment *s,unsigned n){
 /* The band's running value and one entry's: order matters (the rotation),
  * and the rotation brings the product's high bits back to the low ones, the
  * weak end of a plain multiply (the FNV-1a check, sec.9.10). */
-static inline uint32_t band_mix(uint32_t h,uint32_t e){
+static inline __attribute__((always_inline)) uint32_t band_mix(uint32_t h,uint32_t e){
     return (rotl32(h,15)^e)*0x9e3779b1u;
 }
-static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
+/* One entry (or a pattern line's two, [start, i)) into each band it touches. */
+static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *frame,proc_band_sig *sig,
+                                                          const ksn_proc_segment *geometry,
+                                                          unsigned start,unsigned i){
+    const int ya=geometry->y0<geometry->y1?geometry->y0:geometry->y1,yb=geometry->y0^geometry->y1^ya;
+    int xa=geometry->x0<geometry->x1?geometry->x0:geometry->x1,xb=(geometry->x0^geometry->x1^xa)+1;
+    if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)return;
+    if(xa<0)xa=0;
+    if(xb>KSN_PROC_W)xb=KSN_PROC_W;
+    const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
+    /* The raw entries, a pattern line's parameters included, hashed once;
+     * each band they touch then takes one mixing step. Hashing the bytes
+     * again for every band was most of commit() on the device
+     * (docs/platform/lcd-dma-driver.md 9.11). */
+    const uint32_t e=entry_hash(&frame->segments[start],i-start);
+    for(unsigned b=b0;b<=b1;b++){
+        sig->hash[b]=band_mix(sig->hash[b],e);
+#ifdef POCKET_PROC_SIG_CHECK
+        const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
+        for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)
+            sig->strong[b]=sig_mix64(sig->strong[b]^bytes[k]);
+#endif
+        if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
+        if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
+        if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
+        sig->end[b]=(uint16_t)i;
+    }
+}
+PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
     for(unsigned b=0;b<PROC_BANDS;b++){
         sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
         sig->first[b]=UINT16_MAX;sig->end[b]=0;
@@ -277,35 +323,17 @@ static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
         sig->strong[b]=0x9e3779b97f4a7c15ull;
 #endif
     }
+    if(!frame->ext){
+        for(unsigned i=0;i<frame->count;i++)sig_add(frame,sig,&frame->segments[i],i,i+1);
+        return;
+    }
     unsigned i=0,cost;
     ksn_proc_segment geometry;
     bool pattern;
     for(;;){
         const unsigned start=i;
         if(!ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost))break;
-        const int ya=geometry.y0<geometry.y1?geometry.y0:geometry.y1,yb=geometry.y0^geometry.y1^ya;
-        int xa=geometry.x0<geometry.x1?geometry.x0:geometry.x1,xb=(geometry.x0^geometry.x1^xa)+1;
-        if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)continue;
-        if(xa<0)xa=0;
-        if(xb>KSN_PROC_W)xb=KSN_PROC_W;
-        const unsigned b0=(unsigned)(ya<0?0:ya)/8u,b1=(unsigned)(yb>=KSN_PROC_H?KSN_PROC_H-1:yb)/8u;
-        /* The raw entries, a pattern line's parameters included, hashed once;
-         * each band they touch then takes one mixing step. Hashing the bytes
-         * again for every band was ~60% of commit() on the device
-         * (docs/platform/lcd-dma-driver.md 9.11). */
-        const uint32_t e=entry_hash(&frame->segments[start],i-start);
-        for(unsigned b=b0;b<=b1;b++){
-            sig->hash[b]=band_mix(sig->hash[b],e);
-#ifdef POCKET_PROC_SIG_CHECK
-            const uint8_t *bytes=(const uint8_t *)&frame->segments[start];
-            for(size_t k=0;k<(size_t)(i-start)*sizeof frame->segments[0];k++)
-                sig->strong[b]=sig_mix64(sig->strong[b]^bytes[k]);
-#endif
-            if(xa<sig->x0[b])sig->x0[b]=(uint8_t)xa;
-            if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
-            if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
-            sig->end[b]=(uint16_t)i;
-        }
+        sig_add(frame,sig,&geometry,start,i);
     }
 }
 #ifdef POCKET_PROC_VISIT_STATS
