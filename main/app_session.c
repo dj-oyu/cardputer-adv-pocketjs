@@ -2707,19 +2707,6 @@ static esp_err_t present_frame(void) {
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
-                /* MEASUREMENT ONLY (COMMIT_AB): the window just printed ran
-                 * commit()'s two walks in the arm named (0 = shipping, 1 =
-                 * -O2 direct), then it flips; walk = one read of every entry. */
-                {
-                    extern uint32_t g_commit_prof[5];
-                    extern int g_commit_fast;
-                    ESP_LOGI("kasane","COMMIT_AB fast=%d commits=%u total_ms=%.3f damage_ms=%.3f sig_ms=%.3f walk_ms=%.3f turn_ms=%.2f",
-                             g_commit_fast,(unsigned)g_commit_prof[0],g_commit_prof[1]/240000.0/30,
-                             g_commit_prof[2]/240000.0/30,g_commit_prof[3]/240000.0/30,g_commit_prof[4]/240000.0/30,
-                             ticks?turn_sum/ticks/1000.0:0.0);
-                    for(unsigned k=0;k<5;k++)g_commit_prof[k]=0;
-                    g_commit_fast=!g_commit_fast;
-                }
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
                 /* Same-binary A/B of zero-copy strips (board.h): the window
                  * just printed used the mode named here, then it flips. */
