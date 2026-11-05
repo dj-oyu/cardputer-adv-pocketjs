@@ -38,7 +38,7 @@ The host QuickJS/renderer contract is
 registration and validation, two retained nodes, a second-band I/O failure,
 same-candidate retry, and the next generation. The pre-existing span
 equivalence and device diagnostic measurements are recorded in
-`dynamic-rendering-roadmap.md`. The ordinary JS-to-Kasane path also passed on
+the former dynamic-rendering roadmap (removed; see the repository history). The ordinary JS-to-Kasane path also passed on
 COM3: two nodes displayed the maximum 112×63×8 program, the injected second
 LCD send failed once and then succeeded on retry, and the APP stopped and
 restarted cleanly. Successful candidate presentations in the first run took
