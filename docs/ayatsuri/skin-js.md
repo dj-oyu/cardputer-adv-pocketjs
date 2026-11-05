@@ -7,8 +7,8 @@
 
 AYNM v1のcold dataと従来APIは変更しない。今回は**1回に1個の片面・holeなしmesh**を
 置換する小さいAPIで、**評価済みpacket全体を置き換え、他nodeはcold geometryで評価する**。
-別のmeshIdへ連続で呼んでもskinは蓄積せず、前のmeshはcoldへ戻る。複数meshをskinningする
-batch API、skin付きwire format/importer、scene facadeの自動skin制御はまだない。
+別のmeshIdへ連続で呼んでもskinは蓄積せず、前のmeshはcoldへ戻る。複数meshは後続の明示[batch API](skin-batch.md)で同時評価できる。
+skin付きwire format/importer、scene facadeの自動skin制御はまだない。
 狐の原本・派生資産は使用せず、実機受入や狐3D完成を意味しない。
 
 ## 呼出し
@@ -104,7 +104,7 @@ renderer全体の独立性を主張しない。それらの境界は先行core/C
 - 入力変更を評価後・submit前に行ってもpacketが変わらないこと、Model close後の利用、
   全source破棄後のpending frame描画、明示disposeとexpando cycleのGCを検査。
 
-最終4条件のhost実測では、240frameのpose/native skin評価範囲のlinked allocationは
+単mesh版を導入した時点の4条件のhost実測では、240frameのpose/native skin評価範囲のlinked allocationは
 0回、submit/present範囲は初期frame確保等を含め合計18回。guestのframe時点の標本最大は
 96793 B（設定上限160 KiB）。これはsource評価・OOM phaseを含む全時点のpeakではない。
 初回OOM sweepは16失敗/17成功、増量失敗では480 Bを保持し、復帰時576 Bを保持した。

@@ -87,7 +87,10 @@ static void oom(JSRuntime *rt,JSContext *ctx){
     call(ctx,grow,JS_UNDEFINED);eval(ctx,"inspectA(576)");JS_FreeValue(ctx,grow);
     printf("SKIN_JS_OOM_PASS initial_failures=%u successes=%u initial_ready_preserved growth480_preserved recovery576 instances_stable\n",failures,successes);
 }
-int main(int argc,char **argv){
+#ifndef SKIN_JS_MAIN
+#define SKIN_JS_MAIN main
+#endif
+int SKIN_JS_MAIN(int argc,char **argv){
     CHECK(argc==4);strip_rows=(unsigned)atoi(argv[1]);g_ksn_image_rows=atoi(argv[2]);delayed=true;CHECK(strip_rows==4||strip_rows==8);
     JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
     host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(pocket_kasane_install(ctx,NULL)==ESP_OK);CHECK(pocket_shape_install(ctx,NULL)==ESP_OK);

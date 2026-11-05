@@ -113,7 +113,8 @@ immutable cold bytes、独立instance、skin法線による照明変化、片面
 
 ## 未完の工程
 
-managed JS bindingは[別slice](skin-js.md)で1meshの同期評価まで追加した。
+managed JS bindingは[別slice](skin-js.md)で1meshの同期評価を追加し、
+後続の[明示batch](skin-batch.md)で複数meshを上限内で同時評価できる。
 AYNM skin tableのwire契約、asset importer、
 armature/bind/rest対応、morph/表情、skin対応両面/holes、surface法線再計算、
 実キャラクター姿勢/遮蔽/ヒープ/速度、実機表示は未実装または未検証。

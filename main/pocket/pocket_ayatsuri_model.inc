@@ -222,6 +222,72 @@ static __attribute__((noinline)) JSValue managed_instance_evaluate_skin(JSContex
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
 }
+/* A packed batch avoids getters/array iteration while typed spans are borrowed.
+ * All descriptor, copied input, result and palette bytes share the same bounded
+ * guest allocation as evaluateSkin; no maximum-node array lives on the stack. */
+enum { POCKET_SKIN_BATCH_BYTES=16*1024 };
+static uint16_t managed_skin_u16(const uint8_t *p){uint16_t value;memcpy(&value,p,sizeof value);return value;}
+static __attribute__((noinline)) JSValue managed_instance_evaluate_skins(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="ayatsuri.instance.evaluateSkins";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+    if(!a)return JS_EXCEPTION;
+    shade_view v[8];bool valid=argc==8;
+    const JSTypedArrayEnum types[8]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,
+        JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_UINT16};
+    for(unsigned j=0;valid&&j<8;++j)valid=managed_model_buffer(ctx,argv[j],types[j],false,v+j);
+    size_t count=0,vertices=0,joints=0;
+    if(valid){count=v[2].bytes/6;valid=v[0].bytes==36&&v[1].bytes==24&&
+        count<=a->core.model->node_count&&v[2].bytes==count*6;}
+    for(size_t k=0;valid&&k<count;++k){
+        const uint8_t *row=v[2].data+k*6;
+        const unsigned id=managed_skin_u16(row),nv=managed_skin_u16(row+2),nj=managed_skin_u16(row+4);
+        valid=id<a->core.model->node_count&&nv>=3&&nv<=KSN_PROC_GOURAUD_VERTICES&&nj>0&&nj<=AYATSURI_MODEL_MAX_NODES;
+        for(size_t prior=0;valid&&prior<k;++prior)valid=id!=managed_skin_u16(v[2].data+prior*6);
+        vertices+=nv;joints+=nj;
+    }
+    if(valid)valid=v[3].bytes==joints*48&&v[4].bytes==joints*48&&v[5].bytes==vertices*24&&
+        v[6].bytes==vertices*8&&v[7].bytes==vertices*8;
+    if(!valid){a->busy=false;return managed_model_error(ctx,op,AYATSURI_MODEL_INVALID);}
+    float c[9],l[6];memcpy(c,v[0].data,sizeof c);memcpy(l,v[1].data,sizeof l);
+    if(!count){
+        ayatsuri_model_status status=ayatsuri_model_instance_evaluate(&a->core,a,1,c,l);
+        a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
+    }
+    const size_t alignment=_Alignof(ayatsuri_model_mesh_geometry),bytes=alignment-1+count*sizeof(ayatsuri_model_mesh_geometry)+
+        vertices*(sizeof(ayatsuri_skin_vertex)+sizeof(ayatsuri_skin_result))+joints*sizeof(ayatsuri_transform);
+    if(joints>AYATSURI_MODEL_MAX_NODES||bytes>POCKET_SKIN_BATCH_BYTES){
+        a->busy=false;return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"skin batch exceeds 256 total joints or 16384 work bytes");
+    }
+    const bool grow=bytes>a->skin_bytes;void *work=grow?js_malloc(ctx,bytes):a->skin_work;
+    if(!work){a->busy=false;return JS_ThrowOutOfMemory(ctx);}
+    ayatsuri_model_mesh_geometry *geometry=(void *)(((uintptr_t)work+alignment-1)&~(uintptr_t)(alignment-1));
+    ayatsuri_skin_vertex *input=(void *)(geometry+count);
+    ayatsuri_skin_result *result=(void *)(input+vertices);
+    ayatsuri_transform *palette=(void *)(result+vertices);
+    ayatsuri_status skin=AYATSURI_OK;
+    for(size_t j=0;j<joints&&skin==AYATSURI_OK;++j){
+        ayatsuri_transform global,bind;memcpy(&global,v[3].data+j*48,48);memcpy(&bind,v[4].data+j*48,48);
+        skin=ayatsuri_skin_palette(&global,&bind,1,palette+j);
+    }
+    for(size_t j=0;j<vertices;++j){
+        memcpy(input[j].position,v[5].data+j*24,12);memcpy(input[j].normal,v[5].data+j*24+12,12);
+        memcpy(input[j].joints,v[6].data+j*8,8);memcpy(input[j].weights,v[7].data+j*8,8);
+    }
+    size_t vertex=0,joint=0;
+    for(size_t k=0;k<count&&skin==AYATSURI_OK;++k){
+        const uint8_t *row=v[2].data+k*6;const uint16_t nv=managed_skin_u16(row+2),nj=managed_skin_u16(row+4);
+        geometry[k]=(ayatsuri_model_mesh_geometry){managed_skin_u16(row),nv,result+vertex};
+        skin=ayatsuri_skin_evaluate(palette+joint,nj,input+vertex,nv,result+vertex);
+        vertex+=nv;joint+=nj;
+    }
+    ayatsuri_model_status status=skin==AYATSURI_OK?AYATSURI_MODEL_OK:
+        skin==AYATSURI_RANGE?AYATSURI_MODEL_RANGE:AYATSURI_MODEL_INVALID;
+    if(status==AYATSURI_MODEL_OK)status=ayatsuri_model_instance_evaluate_meshes(&a->core,a,1,c,l,geometry,count);
+    if(grow){
+        if(status==AYATSURI_MODEL_OK){js_free(ctx,a->skin_work);a->skin_work=work;a->skin_bytes=bytes;}
+        else js_free(ctx,work);
+    }
+    a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
+}
 static void managed_packet_ellipsoid(const ayatsuri_model_packet *packet,ksn_proc_ellipsoid *p){
     memset(p,0,sizeof *p);
     memcpy(p->screen,packet->storage+96,32);memcpy(p->normal,packet->storage+128,36);
@@ -422,6 +488,7 @@ static const JSCFunctionListEntry managed_model_methods[]={
 static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("targets",4,managed_instance_targets),JS_CFUNC_DEF("evaluate",2,managed_instance_evaluate),
     JS_CFUNC_DEF("evaluateSkin",8,managed_instance_evaluate_skin),
+    JS_CFUNC_DEF("evaluateSkins",8,managed_instance_evaluate_skins),
     JS_CFUNC_DEF("nodeKind",1,managed_instance_node_kind),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),
     JS_CFUNC_DEF("submitClipped",3,managed_instance_submit_clipped),
