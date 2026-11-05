@@ -138,5 +138,6 @@ bind/rest対応、weight/skinning、変形法線、morph/表情、実モデル�
 受入工程として扱う。
 
 公開の合成入力については、独立した[skin scalar core](skin-core.md)でbind paletteと
-4 influence変形のhost検査を追加した。ただしAYNM/scene/renderへは未接続であり、
-上記の実キャラクター工程の完了を意味しない。
+4 influence変形のhost検査を追加し、後続の[C描画接続](skin-render-bridge.md)で
+既存Model/opaque rendererへの同期借用を検査する。JS sceneのskin APIとAYNM skin tableは
+未実装であり、上記の実キャラクター工程の完了を意味しない。

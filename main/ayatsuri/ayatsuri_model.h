@@ -43,6 +43,8 @@ typedef struct {
     float camera[9], light[6], lighting[9];
     ayatsuri_model_stats stats;
     bool alive, busy, evaluated;
+    /* Internal cache key: ordinary evaluate must restore cold geometry. */
+    bool mesh_overridden;
 } ayatsuri_model_instance;
 enum {
     AYATSURI_TARGET_POSITION=1, AYATSURI_TARGET_ROTATION=2,

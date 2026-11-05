@@ -2,8 +2,9 @@
 
 `main/ayatsuri/ayatsuri_skin.h` は、[scene/motion](scene-motion.md) の
 rigid jointの次に必要なbind対応とweight変形を検査する、allocation-freeのC coreである。
-**AYNM、managed Model/Instance、JS scene、Shiki描画へは未接続**であり、firmwareの
-capabilityや既定appは変えない。公開の合成数値だけを使い、狐の資産は使わない。
+このheader単体は独立数値coreであり、firmwareのcapabilityや既定appは変えない。
+後続の[C描画接続](skin-render-bridge.md)がskin結果を既存Model/opaque rendererへ
+同期借用で渡す。JS scene/managed bindingとAYNM skin tableは未実装。公開の合成数値だけを使い、狐の資産は使わない。
 描画成功・実機性能・実キャラクター完成を示す変更ではない。
 
 ## 入出力と所有権
@@ -76,8 +77,9 @@ S3のRAM適合、stack watermark、cycles/FPSは未計測。
 
 ## 次の接続工程
 
-AYNM v1のmeshはimmutable cold verticesで、公開されたmutable vertex/skin APIがない。
-統合にはskin tableのwire契約と検証、instance所有の変形work、dirty/epochとrollback、
+AYNM v1のmeshはimmutable cold verticesのままである。後続の[C描画接続](skin-render-bridge.md)は
+Cの一回の評価だけでskin結果を借用し、cold dataを変更しない。完全なasset/JS統合には
+skin tableのwire契約と検証、instance所有の変形work、dirty/epochとrollback、
 法線/shade/projectionの再評価、frame snapshot所有権、JS bindingとメモリ会計が必要。
 別形式を暗黙追加したり毎frame Modelを作り直して接続済みとすることは避ける。
 scene/motion・既存rendererの回帰検査、実機表示・ヒープ・性能検査はそれぞれ別の受入工程。
