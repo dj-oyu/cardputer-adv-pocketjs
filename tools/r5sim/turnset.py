@@ -1,4 +1,4 @@
-"""Per-bucket working set of STRESS's JS turns (docs/vm/turn-working-set.md).
+"""Per-bucket working set of STRESS's JS turns (docs/vm/turn-icache.md sec.2).
 
 Reads the turns `icache.py extract` wrote and replays them, at the r5sim
 image's own addresses, through the same 8-way 32 KiB LRU as `icache.py model`

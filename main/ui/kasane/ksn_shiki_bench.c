@@ -1,7 +1,7 @@
 #include "ksn_shiki_bench.h"
 #include <string.h>
 
-/* The pairs (shiki-pie.md sec.6 items 1 and 2):
+/* The pairs (shiki-jit.md sec.24.5 items 1 and 2):
  *   affine128: 128 points (i16, x and y in -100..100) rotated by 30 degrees
  *     in Q14 and moved to (120, 67), drawn as points. Scalar: EACH + FETCH +
  *     MUL/ADD/SHIFT + PLOT per record. Vector: VEACH over blocks of 8 into a

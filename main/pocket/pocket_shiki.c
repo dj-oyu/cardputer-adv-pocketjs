@@ -220,7 +220,7 @@ static bool op_case_line(const op_case *c,char *out,size_t n){
     return true;
 }
 /* After the op rows, the PIE prototype (ksn_shiki_bench.c,
- * docs/kasane/shiki-pie.md sec.6):
+ * docs/kasane/shiki-jit.md sec.24.5):
  *   - the checks: each program drawn on the C model and on PIE, every
  *     observable compared ("same" or the first difference);
  *   - the pairs, each a whole draw, the minimum of seven, with the vector

@@ -1,4 +1,4 @@
-"""R5's instruction-cache model (docs/vm/r5-icache.md).
+"""R5's instruction-cache model (docs/vm/turn-icache.md sec.1).
 
 Replays the flash fetches of STRESS's JS turns, recorded by QEMU from the
 r5sim image, through a model of the ESP32-S3 instruction cache, laid out at
@@ -42,7 +42,7 @@ def symbols(nm, elf, flash_only=True):
     # utf8_decode, ...). Keyed by bare name, every copy was carried onto the
     # last copy's address and scaled by its size, which scattered the trace
     # over lines it never touched (+95 lines/turn, 2026-10-23,
-    # docs/vm/turn-working-set.md). The k-th flash copy in address order is
+    # docs/vm/turn-icache.md sec.2). The k-th flash copy in address order is
     # "name#k" in both images, which link the same objects in the same order.
     seen = collections.Counter()
     for i, (a, n, name) in enumerate(funcs):

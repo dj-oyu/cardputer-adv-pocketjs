@@ -239,7 +239,7 @@ MEGADEMO（APPS から起動→全画面→小窓→全画面→Back、2回）PA
 
 MEGADEMO の frame() は先頭で `beginFrame` を呼び、`BUSY` を捕まえて `DEGRADE` した後の `replace()` が ticket の `BUSY` で投げるので、保存ターンが例外で終わり `main.c` の `end_run` が `EXECUTION FAILED` にする。
 
-**ただし APPS メニューから起動した MEGADEMO では起きない**（実測）。ソースを渡して起動するアプリは `app_session.c` の `FRAME_WRAP` を通り、本体が `f.apply()` のネイティブ再入の床で走るので park しない（[megademo-device-limits.md](megademo-device-limits.md) §場面切替、[../vm/backlog.md](../vm/backlog.md)）。起きるのは park できる frame() — 診断起動（`'}'` の limits probe、`'J'` の MEGADEMO）、`hello`、ジョブ（Promise handler）の中で描くアプリ — と、この wrapper の制約が外れた後のすべてのアプリ。
+**ただし APPS メニューから起動した MEGADEMO では起きない**（実測）。ソースを渡して起動するアプリは `app_session.c` の `FRAME_WRAP` を通り、本体が `f.apply()` のネイティブ再入の床で走るので park しない（[megademo-limits.md](megademo-limits.md) §7、[../vm/backlog.md](../vm/backlog.md)）。起きるのは park できる frame() — 診断起動（`'}'` の limits probe、`'J'` の MEGADEMO）、`hello`、ジョブ（Promise handler）の中で描くアプリ — と、この wrapper の制約が外れた後のすべてのアプリ。
 
 ### 修正
 

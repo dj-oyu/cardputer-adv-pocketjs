@@ -1,6 +1,25 @@
-# Kasane の残タスク — 再評価用
+# Kasane の残タスク・ロードマップ
 
-関数アート・動的描画面・動画の新しい作業順序は[動的描画ロードマップ](dynamic-rendering-roadmap.md)に置く。この文書はKasane v1の判定と既存研究の再評価を扱う。
+吸収した旧文書: dynamic-rendering-roadmap.md（関数アート・動的描画面・動画の D0〜D6 の段階計画。2026-09-28〜29 の経過記録は削除、git 履歴に残る）。この文書は二つを扱う。(1) 動的描画（旧 D0〜D6）が出荷・置換・保留のどれになったか。(2) Kasane v1 の判定と既存研究の再評価。
+
+## 動的描画（旧 D0〜D6）の行方
+
+旧ロードマップは 2026-09-28 に D0〜D6 の初回採否を下し、その後の関数アート（手続き面）の実装は Shiki（[shiki.md](shiki.md)）が引き継いだ。下表の「採用した範囲」は 2026-09-28 時点の記録で、数値は host か実機の別を元資料で確かめる。旧 `pocket.kasane.procedural` の float の plan は Shiki v2.0 で廃止される（[shiki-v2.md](shiki-v2.md) §2、2026-11-02 起草・凍結前。CLAUDE.md は消えたと書く）ので、D2/D3 の API の記述は移行の目安であり現行 API の仕様ではない。
+
+| 段階 | 採用した範囲（2026-09-28 の採否） | 今の扱い・現行の文書 |
+| --- | --- | --- |
+| D0 基準 | FLOWER 14種と雨の固定 shot、帯順序・画素・RAM・LCD の比較基準。SD MP3 decoder と FLOWER の安定 4 窓 29.7–30.0 fps（実機）を基準負荷に含める | 出荷済み。[FLOWER](../scenes/flower.md)、[flower-row-invariants](../perf/flower-perf.md)、[verification.md](verification.md)。未了: 物理スピーカーの出音・音量、LCD GRAM 読戻し |
+| D1 フレーム境界 | 単一 FLOWER owner の確定/候補/描画 lease。14種で host と実機の送出前画素が一致、実 allocator 失敗時も旧 FLOWER＋雨を保つ | 出荷済み。未了: `scene_mem` を複数の独立 FLOWER 面で共有する一般化（予定なし） |
+| D2 手続き面 | 通常 JS の最大 2 面、面ごとの候補/確定、同時 pending は 1 面、矩形 damage、APP 終了での資源失効。FLOWER backdrop 上の 2 面と LCD 失敗後の再送は短い実機 gate で確認 | API は出荷済み、旧 API ごと Shiki v2.0 へ移行（[surface-segment-cap.md](surface-segment-cap.md) の「第2手続き面」、[shiki-v2.md](shiki-v2.md) §2）。未了: FLOWER＋2 面の長時間性能、音声・低 heap との同時負荷 |
+| D3/D3a 逐次 VM・登録時コンパイラ | 有界な逐次 VM と登録済み plan、動的な Bézier/path、明示 Q14 の独立点列の PIE、型付き積和/依存行 kernel。float の描画命令は意味を保つ scalar。**float→Q14 の暗黙変換は棄却**（`0.4999 + 0.0002` が float では x=1、Q14 では x=0 で最終画素が変わる。host） | **Shiki が置換**: 実数は固定小数だけ（[shiki.md](shiki.md) §5）、命令の仕様は [shiki-spec.md](shiki-spec.md)、`@plan`/`@shiki` の変換器は [js-to-ir.md](js-to-ir.md)・[flash-plan.md](flash-plan.md)、PIE は [shiki-jit.md](shiki-jit.md)。未了: 一般 path の適応分割・塗り・stroke join、任意式の実行時 JIT（JIT は shiki-jit.md が扱う） |
+| D3 格子の PIE（grid） | 型付きメモリ IR（`gridFold`）と登録時の積和認識、gather/affine/融合 MAC の候補から実機で選ぶ。prefix/IIR など 6 形状の実機費用を測定済み | 試作として残る。記法は [grid-js-notation.md](grid-js-notation.md)、PIE の費用は [pie-simd.md](../perf/pie-simd.md)。2 項を超える式は scalar のまま（合法性と費用の両方を示せるまで） |
+| D4 小窓 pixel | 下地なし・単一資源・最大 112×63×8 命令の関数画素を通常 JS 画像ノードへ公開。span backend と転送失敗後の同一候補再送。全画面 18 命令は評価 23.4 ms（実機）に合成・LCD が加わるため上限を広げない | 出荷済み: [pixel-small-window.md](pixel-small-window.md)。深度線は独立の host/診断経路。未了: 全画面の任意画素式、2 枚の全画面 underlay、複数独立 pixel lease、depth と pixel の一体 API |
+| D5 動画 | 3-slot の動画画像資源と、順方向・非圧縮の小型 KSV1 SD stream。worker で I/O し、owner turn で音声 clock に対する最新 frame を選ぶ | 出荷済み: [file-stream.md](file-stream.md)。未了: 圧縮 codec、network stream、seek、外部 revoke・200 ms 超 ACK・短読取り競合・LCD 失敗の実機同時注入 |
+| D6 複合 | FLOWER 上の SD KSV1＋SD MP3 の 10 秒代表負荷、通知＋低 heap＋LCD 修復の複合 gate を合格 | [verification.md](verification.md)。未了: 全負荷を一度に重ねた性能保証、物理的な音画同期、LCD GRAM 読戻し、任意解像度・bitrate への外挿 |
+
+**動的描画の未解決（優先順は付けない）。** Shiki の移行（旧 API の廃止、`LOAD`/`STORE`/`DRAW_INDEX`、PIE のベクトル命令、凍結前の差分レビュー）は [shiki-v2.md](shiki-v2.md) §8 と [shiki.md](shiki.md) §6 が持つ。上表の「未了」は、要求が出るまで着手しない保留であって、期限付きの作業ではない。
+
+## Kasane v1 の判定と再評価
 
 これは時系列の開発日誌ではない。各行に「目標」「実装」「実測」「残る判定」を分ける。詳細な数値と証拠の適用範囲は[verification.md](verification.md)、不採用理由は[decisions.md](decisions.md)。縮約した5文書だけを入力にしたAstraレビューを反映した。これは**資料の整合性と次の判定方法の提案**であり、コードや実機の独立再検証ではない。**ゲートの妥当性**と**実装の欠陥**を別々に評価し、過去の固定ゲートを事後変更しない。次回以降の試験条件を改訂するなら、改訂前に対象workload、独立boot数、試験時間/frame数、許容揺らぎ、全runの扱いを決める。
 

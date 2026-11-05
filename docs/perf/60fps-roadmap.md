@@ -56,8 +56,8 @@
 | 分岐 | サイクルの 13〜15%。うち命令の振り分け（`jx`）は約 1%（1 ターン STRESS 約 4,300、DERBY レース約 11,000 オペコード）。flash キャッシュ待ちが 34〜43%、IPC 0.445 / 0.38 | 実測（XTPERF） | [turn-jumps-pie.md](../vm/turn-jumps-pie.md) |
 | 振り分けの複製（`JS_CallInternal` を `-O2`） | 得は STRESS 0.5%、DERBY 1.2%（推定）、+1.2 KB。採らない | 推定 | 同上 |
 | PIE（SIMD） | QuickJS のターンにほぼ無い。データ並列は `memcpy`/`memset` 程度で host の命令数の 2% 未満 | host の計数と推定 | 同上 §4 |
-| 作業集合 | 1 ターンが触るコード 42.5 → 41.8 KiB（試作 3 つ入りでも）、インタプリタ（core ＋ helper）21.3 KiB は予算 14 KiB の約 1.5 倍 | 模型の推定 | [turn-working-set.md](../vm/turn-working-set.md) |
-| 行の使用率 | 取り込む 40.8 KiB のうち実行は 23.4 KiB（57.5%）。走らないバイトの多くはどのターンでも走らない冷たいコード。上限の模型で 27.7 KiB に収まり warm ミス 940 → 73 | 模型の推定 | [turn-line-use.md](../vm/turn-line-use.md) |
+| 作業集合 | 1 ターンが触るコード 42.5 → 41.8 KiB（試作 3 つ入りでも）、インタプリタ（core ＋ helper）21.3 KiB は予算 14 KiB の約 1.5 倍 | 模型の推定 | [turn-icache.md](../vm/turn-icache.md) §2 |
+| 行の使用率 | 取り込む 40.8 KiB のうち実行は 23.4 KiB（57.5%）。走らないバイトの多くはどのターンでも走らない冷たいコード。上限の模型で 27.7 KiB に収まり warm ミス 940 → 73 | 模型の推定 | [turn-icache.md](../vm/turn-icache.md) §3 |
 | PGO（`CONFIG_POCKET_VM_QJS_PGO`、既定 OFF） | 模型は触る行 −2.8%、warm ミス −4.9%（推定）。**実機は差なし**: BIG WAVE 58.5 / 58.5、STRESS 50.5 / 50.7、MEGADEMO 52.2 / 52.1、DERBY 53.1 / 53.8 fps（実測、DERBY は窓のレースが違う）、STRESS の turn 6.72 / 6.73 ms | 推定と実測 | [qjs-pgo.md](../vm/qjs-pgo.md) |
 
 つまり「JS の turn を速くする」決め手はまだ無い。最大の項は flash キャッシュ待ち（34〜43%）で、行の使用率の 57.5% がその一因と模型は言うが、効く打ち手と見込んだ hot/cold 分割は Xtensa の GCC が無効にする（[qjs-pgo.md](../vm/qjs-pgo.md) §0）。
@@ -111,7 +111,7 @@ issue に無い、元の文書に「未」と書かれているもの:
 | `-O2` の機械語と性能カウンタ、`frame_lint` | [o2-machine-code.md](o2-machine-code.md) |
 | スカラー整数コードのサイクルの式 | [pie-simd.md](pie-simd.md) §3.9 |
 | JS のターン: 分岐・PIE | [turn-jumps-pie.md](../vm/turn-jumps-pie.md) |
-| JS のターン: 作業集合、行の使用率 | [turn-working-set.md](../vm/turn-working-set.md)、[turn-line-use.md](../vm/turn-line-use.md) |
+| JS のターン: 作業集合、行の使用率 | [turn-icache.md](../vm/turn-icache.md) §2・§3 |
 | QuickJS の PGO | [qjs-pgo.md](../vm/qjs-pgo.md) |
 | JS のターンの CPI、flash を QIO に | [turn-cpi.md](../vm/turn-cpi.md) |
 | DMA の重ね合わせ | [kasane-dma-overlap.md](kasane-dma-overlap.md) |

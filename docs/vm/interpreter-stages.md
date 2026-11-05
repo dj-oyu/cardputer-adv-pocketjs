@@ -4,7 +4,7 @@
 
 ## 0. 何のための分割か
 
-STRESS の JS のターンでは、サイクルの 57% が命令キャッシュのミス待ちになっている（実測、[turn-cpi.md](turn-cpi.md)）。1ターンに触るコードは 45.5 KiB で、キャッシュの 32 KiB に入らない（推定、[r5-icache.md](r5-icache.md) §2）。データの読み書きで待つのは 4〜5% にとどまる（実測）。
+STRESS の JS のターンでは、サイクルの 57% が命令キャッシュのミス待ちになっている（実測、[turn-cpi.md](turn-cpi.md)）。1ターンに触るコードは 45.5 KiB で、キャッシュの 32 KiB に入らない（推定、[turn-icache.md](turn-icache.md) §1.2）。データの読み書きで待つのは 4〜5% にとどまる（実測）。
 
 遅い原因は、どれか1つの関数が重いことではない。**熱いループ（オペコードの dispatch）から、どの関数でも呼べてしまう**ことにある。そこで、インタプリタの1回の実行を段階に分ける。各段階が呼ぶ関数を閉じた小さな集合に絞り、答えが変わらない処理は前の段階へ、後片付けは後の段階へ移す。
 
@@ -346,7 +346,7 @@ handover の「約 80 組」より多いが、増えた分は型に依らない�
 
 **ジャンプテーブルの場所（未変更）。** `dispatch_table` は flash の `.rodata`（`0x3c1e2f84`、0x400 B、PR #69 の image の map）。dcache は 32 KiB・8-way・32 B 行。DRAM へ移すと 1 KiB を払う。効果は実機でしか分からないので P1 の IRAM 配置と一緒に決める。
 
-**cold への追い出し（後回し）。** `turn-working-set.md` §4 で、`JS_CallInternal` 7.40 KiB のうち稀な行は 1.18 KiB、遅い経路の名前の領域を足しても 約 1.5 KiB。作業集合 41.8 KiB の 3〜4% で、優先しない。
+**cold への追い出し（後回し）。** `turn-icache.md` §2.4 で、`JS_CallInternal` 7.40 KiB のうち稀な行は 1.18 KiB、遅い経路の名前の領域を足しても 約 1.5 KiB。作業集合 41.8 KiB の 3〜4% で、優先しない。
 
 ### 9.3 T1 の命令番号の見直し
 
@@ -371,7 +371,7 @@ opprof の分類を、ハンドラと同じたどり方で、遅い経路（`get
 | prototype 1 段 | 9 |
 | 遅い経路（exotic 5、lazy 2） | 7（1.3%） |
 
-今のハンドラは IC が無くても自分のプロパティを inline のハッシュ検索で読むので、IC が省けるのはその検索（推定 15〜25 cycle）と shape 比較（推定 5〜8）の差だけになる。約 540 × 10〜15 cycle ≒ 5〜8 k cycle/ターンで、DERBY の JS ターン（横見 WIDE 14.5〜15.7 ms、首振り WIDE 21.6 ms、実機。`docs/apps/derby-camera-history.md`）の 0.1〜0.2%（推定）。shape と添字の置き場（命令には atom の 4 B しか無い）に DRAM も要る。**T1 の IC は DERBY を理由には入れない。** STRESS では `get_field_slow_path` が 204 回/ターン（`turn-working-set.md` §4）で事情が違うので、入れるなら STRESS の内訳（exotic と lazy のどちらか）を数えてからにする。
+今のハンドラは IC が無くても自分のプロパティを inline のハッシュ検索で読むので、IC が省けるのはその検索（推定 15〜25 cycle）と shape 比較（推定 5〜8）の差だけになる。約 540 × 10〜15 cycle ≒ 5〜8 k cycle/ターンで、DERBY の JS ターン（横見 WIDE 14.5〜15.7 ms、首振り WIDE 21.6 ms、実機。`docs/apps/derby-camera-history.md`）の 0.1〜0.2%（推定）。shape と添字の置き場（命令には atom の 4 B しか無い）に DRAM も要る。**T1 の IC は DERBY を理由には入れない。** STRESS では `get_field_slow_path` が 204 回/ターン（`turn-icache.md` §2.4）で事情が違うので、入れるなら STRESS の内訳（exotic と lazy のどちらか）を数えてからにする。
 
 **STRESS でも割に合わない（2026-10-26、host の数え上げ）。** `tools/test_stress_app.c` の 900 フレームを、opprof の写し（`patch_quickjs.py`）と端末と同じ 8 バイトの JSValue（`m32_sysroot.sh`）で走らせ、1 ターンを 1 窓に数えた（`main` の `467562d2`、T0 入り）:
 
@@ -382,7 +382,7 @@ opprof の分類を、ハンドラと同じたどり方で、遅い経路（`get
 | `put_field` | 8.5 | 自分 95.3%、遅い経路（lazy）4.7% |
 
 - 遅い経路は 1 ターンの中央値 5 回・平均 13.7 回・最大 35 回で、100 フレームごとに見ても変わらない。94% が `get_field2` の exotic（12.8 回/ターン）。exotic な受け手（配列など）にメソッドを引く `obj.m()` の形と読める（推定。どの式かは数えていない）。
-- `turn-working-set.md` §4 の `get_field_slow_path` 204 回/ターンとは桁が違う。あちらは QEMU の命令の記録で関数の入り口を数えた値で、数え方もビルド（T0 の前）も違う。どちらが差を作ったかは確かめていない。
+- `turn-icache.md` §2.4 の `get_field_slow_path` 204 回/ターンとは桁が違う。あちらは QEMU の命令の記録で関数の入り口を数えた値で、数え方もビルド（T0 の前）も違う。どちらが差を作ったかは確かめていない。
 - **T1 の IC は STRESS を理由にも入れない。** 自分のプロパティは既にハンドラ内で読めている。残る exotic の 12.8 回に専用の道を作っても、1 回 100 cycle と置いて 1.3 k cycle/ターンで、STRESS の 1 ターン（約 1.7 M cycle、`turn-cpi.md`）の 0.1% 未満（推定）。
 
 ここまでで、DERBY の命令の数から見える guard 無しの取り分（P0）はおおむね取った。残る大きな手は配置（P1: T1 ループを IRAM、ジャンプテーブルを DRAM）で、これは実機の I_STALL でしか判断できない。

@@ -290,7 +290,7 @@ static struct {
 static unsigned mdt_seq;
 // '~' at HOME cycles the guest heap cap for the next start, to find how much
 // of the 160 KiB the app needs to evaluate and run (docs/kasane/
-// megademo-device-limits.md). 0 keeps the shipping value.
+// megademo-limits.md). 0 keeps the shipping value.
 static const uint32_t MDT_LIMITS[]={0,144*1024,136*1024,128*1024,124*1024,
                                     120*1024,116*1024,112*1024};
 static unsigned mdt_limit_index;

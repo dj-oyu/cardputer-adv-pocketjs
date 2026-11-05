@@ -1,4 +1,4 @@
-/* The PIE prototype's vector and batch instructions (docs/kasane/shiki-pie.md
+/* The PIE prototype's vector and batch instructions (docs/kasane/shiki-jit.md sec.24
  * sec.3.1, sec.3.2; not in the spec yet), host only:
  *   1. every bench pair (main/ui/kasane/ksn_shiki_bench.c) draws the same
  *      segments in both forms, and affine128 equals a direct computation;

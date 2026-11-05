@@ -58,7 +58,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   # reference is checked once below (shiki_diff.mjs builds its own ASan runner).
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki.c tools/kasane_contract/shiki_run.c -lm -o "$out/shiki-run"
-  # The PIE prototype's vector and batch instructions (docs/kasane/shiki-pie.md),
+  # The PIE prototype's vector and batch instructions (docs/kasane/shiki-jit.md sec.24),
   # outside the contract above: each bench pair draws the same segments.
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_bench.c \

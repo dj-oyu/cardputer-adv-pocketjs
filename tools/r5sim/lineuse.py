@@ -1,4 +1,4 @@
-"""How much of each fetched 32 B line a JS turn executes (docs/vm/turn-line-use.md).
+"""How much of each fetched 32 B line a JS turn executes (docs/vm/turn-icache.md sec.3).
 
 turnset.py counts the lines a turn touches; this counts the bytes inside them
 that the turn actually executes. The rest of each line was read from flash

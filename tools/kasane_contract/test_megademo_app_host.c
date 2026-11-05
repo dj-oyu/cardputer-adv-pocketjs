@@ -214,7 +214,7 @@ static size_t heap_req(void){
  * without changing what the app sees. pocket.memory.info() stands in for the
  * device's sampled internal free heap, which gates the app's prefetch: a
  * line fitted to the device's turn-boundary values (31 KB free with no plans
- * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-device-limits.md). */
+ * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-limits.md). */
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
     "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"

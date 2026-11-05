@@ -34,7 +34,7 @@ idf_component_register(
     REQUIRES quickjs-ng esp_timer esp_hw_support log esp_driver_i2c esp_driver_gpio esp_driver_spi esp_driver_i2s
     # stress_r5.js is apps/stress/stress.js as of 51f5feb, byte for byte (the
     # Kasane retained scene, before STRESS moved to Shiki): the workload of the
-    # R5 records (docs/vm/r5-icache.md, turn-working-set.md). This image does
+    # R5 records (docs/vm/turn-icache.md). This image does
     # not link Shiki, and the records stay comparable.
     EMBED_TXTFILES "${CMAKE_CURRENT_LIST_DIR}/stress_r5.js"
     LDFRAGMENTS ${R5SIM_LDFRAGMENTS})
