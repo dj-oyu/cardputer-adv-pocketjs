@@ -420,4 +420,6 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 （同じバイナリで窓ごとに交互。`docs/kasane/logs/proc-commit-ab-20261105.txt`。）出力は同じ: 両方の腕の damage と署名が host で全 commit 一致（STRESS 800、DERBY 14,400）、STRESS の digest、DERBY の 14 本の digest、ハッシュ点検の数も不変。
 
+出荷版（5535bea）に計時だけを足した版で確認: STRESS 0.89〜0.96 ms（01c81e2 では 2.74〜2.81）、DERBY のレース 0.42〜0.51 ms（同 0.93〜1.15。模様線のあるフレームの道）、パドック 0.26 ms（同 0.48）。
+
 **読み:** 実機の時間を食っていたのはハッシュの計算量より、サイズ最適化のコードだった（1 だけでは −0.12 ms、2 で −1.2 ms）。`pocket_proc.c` のほかの毎フレームの道（描画の `render_rows` の周り、`image_span`）も同じ `-Os` で走っている。
