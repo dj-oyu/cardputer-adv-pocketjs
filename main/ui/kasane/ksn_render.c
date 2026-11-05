@@ -3,7 +3,6 @@
 #include "ksn_image_transform.h"
 #include "ksn_p0_probe.h"
 #include <string.h>
-#include <stdio.h>
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 #include "esp_cpu.h"
@@ -15,64 +14,6 @@
 /* Boundary 7a-7b of docs/perf/kasane-opt-survey.md: the render path's own
  * counts. See ksn_render.h for what each field is and what it is not. */
 int g_ksn_prof=0;
-
-/* MEASUREMENT ONLY (PERF_AB, to be reverted): XTPERF counters over the render
- * path (render_rects_body minus display->present), garden.c's method: PM0 =
- * cycles, PM1 = one event, rotated per 30-frame window by ksn_render_perf_line.
- * ccount is accumulated over the same brackets: PM counts only CINTLEVEL 0
- * (kernelcnt 0), so ccount - PM0 is time in interrupts and window exceptions. */
-#ifdef ESP_PLATFORM
-#include "eri.h"
-#include "xtensa-debug-module.h"
-#include "xtensa/xt_perf_consts.h"
-static const struct {const char *name;uint16_t sel,mask;} ksn_perf_ev[]={
-    {"insn",XTPERF_CNT_INSN,XTPERF_MASK_INSN_ALL},
-    {"cti",XTPERF_CNT_INSN,0x0077},   /* jx callx ret branch_taken j call */
-    {"ntaken",XTPERF_CNT_INSN,0x0080},/* branch not taken */
-    {"istall_busy",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_BUSY},
-    {"istall",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_ALL},
-    {"istall_l32r",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_FAST_L32R},
-    {"bubbles",XTPERF_CNT_BUBBLES,XTPERF_MASK_BUBBLES_ALL},
-    {"regdep",XTPERF_CNT_BUBBLES,XTPERF_MASK_BUBBLES_R_HOLD_REG_DEP},
-    {"dstall",XTPERF_CNT_D_STALL,XTPERF_MASK_D_STALL_ALL},
-};
-#define KSN_PERF_N (sizeof ksn_perf_ev/sizeof*ksn_perf_ev)
-static unsigned ksn_perf_sel;static bool ksn_perf_armed;
-static uint32_t ksn_perf_pm0,ksn_perf_pm1,ksn_perf_cc;
-static void ksn_perf_arm(unsigned sel){
-    const uint16_t sels[2]={XTPERF_CNT_CYCLES,ksn_perf_ev[sel].sel};
-    const uint16_t masks[2]={XTPERF_MASK_CYCLES,ksn_perf_ev[sel].mask};
-    for(int id=0;id<2;id++){
-        uint32_t pmc=((uint32_t)(sels[id]&PMCTRL_SELECT_MASK)<<PMCTRL_SELECT_SHIFT)
-                    |((uint32_t)(masks[id]&PMCTRL_MASK_MASK)<<PMCTRL_MASK_SHIFT);
-        eri_write(ERI_PERFMON_PM0+id*4,0);
-        eri_write(ERI_PERFMON_PMCTRL0+id*4,pmc);
-    }
-    eri_write(ERI_PERFMON_PGM,PGM_PMEN);ksn_perf_armed=true;
-}
-typedef struct {uint32_t pm0,pm1,cc;} ksn_perf_mark;
-static inline ksn_perf_mark ksn_perf_now(void){
-    ksn_perf_mark m;m.cc=esp_cpu_get_cycle_count();
-    m.pm0=eri_read(ERI_PERFMON_PM0);m.pm1=eri_read(ERI_PERFMON_PM0+4);return m;
-}
-static inline void ksn_perf_add(ksn_perf_mark a,int sign){
-    ksn_perf_mark b=ksn_perf_now();
-    ksn_perf_pm0+=(uint32_t)sign*(b.pm0-a.pm0);ksn_perf_pm1+=(uint32_t)sign*(b.pm1-a.pm1);
-    ksn_perf_cc+=(uint32_t)sign*(b.cc-a.cc);
-}
-void ksn_render_perf_line(char *out,size_t n){
-    snprintf(out,n,"KSN_PERF ev=%s cc=%lu pm0=%lu pm1=%lu",ksn_perf_ev[ksn_perf_sel].name,
-             (unsigned long)ksn_perf_cc,(unsigned long)ksn_perf_pm0,(unsigned long)ksn_perf_pm1);
-    ksn_perf_pm0=ksn_perf_pm1=ksn_perf_cc=0;
-    ksn_perf_sel=(ksn_perf_sel+1)%KSN_PERF_N;ksn_perf_arm(ksn_perf_sel);
-}
-#define KSN_PERF_BEGIN() if(!ksn_perf_armed)ksn_perf_arm(0);ksn_perf_mark ksn_perf_t=ksn_perf_now()
-#define KSN_PERF_END(sign) ksn_perf_add(ksn_perf_t,(sign))
-#else
-void ksn_render_perf_line(char *out,size_t n){if(n)out[0]=0;}
-#define KSN_PERF_BEGIN() ((void)0)
-#define KSN_PERF_END(sign) ((void)0)
-#endif
 ksn_render_prof g_ksn_render_prof;
 void ksn_render_prof_read(ksn_render_prof *out){
     *out=g_ksn_render_prof;
@@ -2457,12 +2398,10 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         DD_CLOSE(composite);
         DD_ADD(DD_SHARED_OUTPUT_BYTES,(uint64_t)rows*(unsigned)(dx1-dx0)*2u);
         DD_OPEN(present,DD_TX_SYNC);
-        {KSN_PERF_BEGIN();
         result=(dx0==0&&dx1==240)?
             display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels):
             display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
-        KSN_PERF_END(-1);}
         DD_CLOSE(present);
         if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
@@ -2482,10 +2421,7 @@ ksn_result ksn_render_rects_complete(ksn_core *core,const ksn_display_port *disp
                                      ksn_render_stats *stats){
     DD_SCOPE(DD_RENDER);
     ksn_tx prepared={0};
-    ksn_result result;
-    {KSN_PERF_BEGIN();
-    result=render_rects_body(core,display,load,occlusion_safe,stats,&prepared);
-    KSN_PERF_END(1);}
+    ksn_result result=render_rects_body(core,display,load,occlusion_safe,stats,&prepared);
     /* A rejected caller owns no display work and must not drain another frame. */
     if(!prepared.value)return result;
     /* Even a provider failure after an earlier band must release the display
