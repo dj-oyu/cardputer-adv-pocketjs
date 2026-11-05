@@ -136,3 +136,7 @@ allocator overhead、共有library内の確保、stack、target全体は含ま�
 bind/rest対応、weight/skinning、変形法線、morph/表情、実モデルの遮蔽・姿勢・メモリ
 検証は未実装/未確認。固定小数点/PIEの独立作業も統合していない。これらは別々の
 受入工程として扱う。
+
+公開の合成入力については、独立した[skin scalar core](skin-core.md)でbind paletteと
+4 influence変形のhost検査を追加した。ただしAYNM/scene/renderへは未接続であり、
+上記の実キャラクター工程の完了を意味しない。
