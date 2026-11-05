@@ -4,7 +4,7 @@
 
 ## 動的描画（旧 D0〜D6）の行方
 
-旧ロードマップは 2026-09-28 に D0〜D6 の初回採否を下し、その後の関数アート（手続き面）の実装は Shiki（[shiki.md](shiki.md)）が引き継いだ。下表の「採用した範囲」は 2026-09-28 時点の記録で、数値は host か実機の別を元資料で確かめる。旧 `pocket.kasane.procedural` の float の plan は Shiki v2.0 で廃止される（[shiki-v2.md](shiki-v2.md) §2、2026-11-02 起草・凍結前。CLAUDE.md は消えたと書く）ので、D2/D3 の API の記述は移行の目安であり現行 API の仕様ではない。
+旧ロードマップは 2026-09-28 に D0〜D6 の初回採否を下し、その後の関数アート（手続き面）の実装は Shiki（[shiki.md](shiki.md)）が引き継いだ。下表の「採用した範囲」は 2026-09-28 時点の記録で、数値は host か実機の別を元資料で確かめる。旧 `pocket.kasane.procedural`（と float の VM の `@plan`）は Shiki v2.0 で消え、`pocket.kasane.shiki` に吸収された（`apps/shikitest/shiki_api_test.js` が `pocket.kasane.procedural === undefined` を検査する）。手続き面の実装（`main/pocket/pocket_proc.c`、`main/ui/kasane/ksn_procedural*.c`）は Shiki の面・提示・層として使われ続けていて、名前が当時のままなだけ。したがって下表の D2/D3 の API の記述は当時の記録で、現行 API の仕様は [shiki-spec.md](shiki-spec.md)。
 
 | 段階 | 採用した範囲（2026-09-28 の採否） | 今の扱い・現行の文書 |
 | --- | --- | --- |
