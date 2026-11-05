@@ -1,4 +1,4 @@
-/* Bytecode profiler for the host QuickJS (docs/apps/derby-wide2-profile.md).
+/* Bytecode profiler for the host QuickJS (docs/apps/derby-camera-history.md).
  *
  * Never part of the firmware or of any normal host build: patch_quickjs.py
  * writes a copy of quickjs.c that #includes this file at its end and calls

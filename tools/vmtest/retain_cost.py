@@ -9,7 +9,7 @@ versus precompiled bytecode with and without line tables (host, WSL only).
   python3 tools/vmtest/retain_cost.py --parts|--side [DIR]
       (--side: the side view's course() and plan strings instead)
       stage 3 of the panning cameras (the wip commit on vm/pan-camera, docs/apps/
-      derby-pan-memory.md): each of its top-level functions and plan strings
+      derby-camera-history.md): each of its top-level functions and plan strings
       removed in turn from those chunks (apps/derby or DIR), and what the
       compiled chunks lose (the part's own cost).
 

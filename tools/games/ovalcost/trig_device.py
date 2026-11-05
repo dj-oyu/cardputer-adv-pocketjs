@@ -1,4 +1,4 @@
-"""DERBY WATCH on the device for docs/apps/derby-trig-cull-device.md.
+"""DERBY WATCH on the device for docs/apps/derby-camera-history.md.
 
   run  --bin X.bin --boot DIR --out log [--seconds 420] [--heavy] [--no-flash]
        flash (bootloader and partition table from --boot), wait 6 s, open

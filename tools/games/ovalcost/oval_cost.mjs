@@ -16,7 +16,7 @@ const view = show('apps/derby/derby_view.js'), pan = show('apps/derby/derby_pan.
 // constants to the comment before course().
 const cut = view.slice(view.indexOf('const VS ='), view.indexOf('// Draws one frame of the course'));
 
-// Device unit prices, microseconds (docs/apps/derby-pan-camera-cost.md section 1).
+// Device unit prices, microseconds (docs/apps/derby-camera-history.md section 1).
 const P = { trig: 12.5, sqrt: 7.4, arith: 2.4, div: 4.9, cmp: 3.2, rd: 2.75, call: 4.4, arr8: 22.7, arr4: 14, arr2: 10,
   drawFixed: 37.3, step: 0.45, sinExtra: 1.45 };
 

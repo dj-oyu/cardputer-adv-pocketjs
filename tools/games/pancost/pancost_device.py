@@ -1,5 +1,5 @@
 """Summarise a device log of tools/games/pancost/bench/derby_watch.js
-(docs/apps/derby-pan-camera-cost.md).
+(docs/apps/derby-camera-history.md).
 
 Record the log with the bgcost runner (it starts the DERBY WATCH row, which
 the DERBY_BGCOST_SOURCE image replaced with the bench):

@@ -15,7 +15,7 @@
 - **DERBY（段階 4）**: 観客は `crowd` 1 本（56 命令）で横見と首振りを描く。`pk` を消し、同時の plan は 30 → **29/32**、flash の表は 18 → 17 本。見た目の値は `KN`（`derby_prog.js`）の 1 か所（[apps/derby/README.md](../../apps/derby/README.md) の「観客」）。
 - **観客以外は変わらない**: host で観客の draw だけを外すと、全画素ハッシュが基準 45f309f と 3 段階とも一致。着順・時計・種・デモ・R 再生・オッズ・保存は全行一致。
 - **費用（実機、MID・HEAVY の VM draw + 帯描画の中央値の差、基準 → P24）**: 横見 WIDE −0.27 ms（MID）／−0.65 ms（HEAVY）、FIELD −0.53／−1.18 ms、首振りの直線 −0.54 ms（HEAVY）、楕円の首振り −0.38／−0.53 ms。fps は横見で変わらず（JS が律速）、楕円の首振りは 15.3 → 16.1 fps（`pk` の列を回す JS が消えたため）。
-- **メモリ**: 静的 DIRAM ±0、flash のコード +3,068 B・.rodata −656 B。ゲスト（host m32）は評価後 +292 B、評価のピーク +268 B、GC 後の最大 +184〜324 B。実機の評価の余裕は 22,810 → 22,670 B、レース中のゲスト最大は約 +200〜400 B（138,944 B、140,000 まで約 1.0 KB）。詳細は [derby-pan-memory.md](../apps/derby-pan-memory.md) §13。
+- **メモリ**: 静的 DIRAM ±0、flash のコード +3,068 B・.rodata −656 B。ゲスト（host m32）は評価後 +292 B、評価のピーク +268 B、GC 後の最大 +184〜324 B。実機の評価の余裕は 22,810 → 22,670 B、レース中のゲスト最大は約 +200〜400 B（138,944 B、140,000 まで約 1.0 KB）。詳細は [derby-camera-history.md](../apps/derby-camera-history.md) §5。
 - 見る資料: [derby-crowd-p24-preview.png](../apps/derby-crowd-p24-preview.png)（12 場面、左が以前の市松、右が P24、3 倍）、[derby-crowd-p24.gif](../apps/derby-crowd-p24.gif)（8 フレーム）。生成は [`crowd_p24.mjs`](../../tools/games/pancost/crowd_p24.mjs)（アプリの plan と `KN` をそのまま使う）。
 
 
