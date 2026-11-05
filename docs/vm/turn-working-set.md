@@ -169,8 +169,10 @@ python tools/r5sim/turnset.py turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm 
     --top 25 [--full] [--mapping out.tsv]
 # 触った行のうち、ターンが実際に実行したバイト（行の使用率）。命令長は ELF の逆アセンブルから取る
 python tools/r5sim/lineuse.py turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm <nm> --objdump <objdump> \
-    --top 25 [--tsv out.tsv]
+    --top 25 [--tsv out.tsv] [--packed-model]
 ```
+
+クラウドのコンテナ（Linux の QEMU）で記録が先へ進まないときは `-icount shift=2` を足す（[turn-line-use.md](turn-line-use.md) §4.1）。
 
 `turnset.py` の総数（行・warm・cold）は `icache.py model` を同じ ELF に写したときと一致する（確認済み）。
 

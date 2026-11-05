@@ -61,6 +61,8 @@ def main():
     ap.add_argument('--objdump', default='xtensa-esp32s3-elf-objdump')
     ap.add_argument('--top', type=int, default=25)
     ap.add_argument('--tsv', help='per-function rows: bucket, function, lines/turn, used B/turn, use')
+    ap.add_argument('--packed-model', action='store_true',
+                    help='also replay the turns with every byte no turn runs removed (see below)')
     a = ap.parse_args()
 
     d = pickle.load(gzip.open(a.turns, 'rb'))
@@ -193,11 +195,81 @@ def main():
     rows = sorted(by_f.items(), key=lambda kv: -kv[1][0])
     for (fn, b), (l, u) in rows[:a.top]:
         print(f'    {kib(l/n):6.2f} {u/n/1024:6.2f} {u/(32*l):6.1%}  {fn}  {b}')
+    if a.packed_model:
+        packed_model(d, blk, any_mask)
     if a.tsv:
         with open(a.tsv, 'w') as f:
             f.write('bucket\tfunction\tlines_per_turn\tused_B_per_turn\tuse\n')
             for (fn, b), (l, u) in rows:
                 f.write(f'{b}\t{fn}\t{l/n:.1f}\t{u/n:.0f}\t{u/(32*l):.3f}\n')
+
+class Cache:
+    def __init__(self, sets, ways):
+        self.sets, self.ways = sets, ways
+        self.flush()
+    def flush(self):
+        self.lru = [collections.OrderedDict() for _ in range(self.sets)]
+    def access(self, line):
+        s = self.lru[line % self.sets]
+        if line in s:
+            s.move_to_end(line)
+            return False
+        if len(s) >= self.ways:
+            s.popitem(last=False)
+        s[line] = None
+        return True
+
+def packed_model(d, blk, any_mask):
+    """Misses with the window's never-run bytes squeezed out.
+
+    Every byte some turn of the window runs keeps its order; every byte no
+    turn runs is removed, so the code closes up. That is what a perfect
+    hot/cold split at byte granularity, trained on this very window, would
+    give: an upper bound, not a layout a compiler can produce (blocks keep
+    their alignment, branches over removed code still need their bytes, and
+    the split itself adds jumps)."""
+    order = sorted(any_mask)
+    newpos = {}
+    at = 0
+    for l in order:
+        m = any_mask[l]
+        for b in range(32):
+            if m >> b & 1:
+                newpos[(l << 5) | b] = at; at += 1
+    def lines_of(bi, packed):
+        out = []
+        for l, m, _ in blk[bi]:
+            if not packed:
+                out.append(l); continue
+            seen = set()
+            for b in range(32):
+                if m >> b & 1:
+                    nl = newpos[(l << 5) | b] >> 5
+                    if nl not in seen:
+                        seen.add(nl); out.append(nl)
+        return out
+    res = {}
+    for packed in (False, True):
+        bl = [lines_of(i, packed) for i in range(len(blk))]
+        for geo, (sets, ways) in (('8-way', (128, 8)), ('full', (1, 1024))):
+            warm, cold = Cache(sets, ways), Cache(sets, ways)
+            wm = cm = touched = 0
+            for t in d['turns']:
+                cold.flush(); u = set()
+                for bi in t:
+                    for l in bl[bi]:
+                        u.add(l)
+                        wm += warm.access(l); cm += cold.access(l)
+                touched += len(u)
+            n = len(d['turns'])
+            res[(packed, geo)] = (touched / n, wm / n, cm / n)
+    print('\n  packed model (bytes no turn runs removed; upper bound, see packed_model):')
+    print(f'    {"layout":10s} {"geometry":8s} {"lines/turn":>10s} {"warm":>7s} {"cold":>7s}')
+    for packed in (False, True):
+        for geo in ('8-way', 'full'):
+            t, w, c = res[(packed, geo)]
+            print(f'    {"packed" if packed else "as built":10s} {geo:8s} {t:10.0f} {w:7.0f} {c:7.0f}')
+    print(f'    packed image of the window: {at} B ({at / 1024:.1f} KiB) of code run in some turn')
 
 if __name__ == '__main__':
     main()

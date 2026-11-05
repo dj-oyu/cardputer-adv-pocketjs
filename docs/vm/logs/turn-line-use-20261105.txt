@@ -1,0 +1,84 @@
+# lineuse.py on STRESS LV1 turns 61..120 (r5sim, QEMU), 2026-11-05
+# tree cbb039e; ESP-IDF v6.0.1; QEMU esp_develop_9.2.2_20250817 (Linux)
+# qemu: -icount shift=2 -d exec,nochain,in_asm -dfilter 0x42000000..0x43ffffff
+# serial: R5SIM done frames=120 oom=0 fail=0 bad_present=0
+
+## turnset.py (cross-check of line counts)
+r5sim.elf: 60 turns (from 61), 8-way 32 KiB LRU, own layout
+  total/turn: warm 942  cold 1496  lines 1305 (40.8 KiB)  union over turns 1896 lines (59.2 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             7.82     250     147     301       9.03      1.27
+  interp-helpers         12.85     411     283     482      16.69      2.27
+  object/alloc/GC         5.56     178     114     204       6.47      0.52
+  builtins                5.94     190     182     214      10.16      2.55
+  native boundary         8.39     268     206     283      14.06      1.83
+  libc/other              0.23       7      10      12       2.84      0.13
+
+## lineuse.py --top 25 --packed-model
+r5sim.elf: 60 turns (from 61), own layout, 32 B lines; 27 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1304 (40.8 KiB), executed 23982 B (23.4 KiB), use 57.5% (turns 55.0%..59.6%)
+  packed bound: 750 lines (23.4 KiB), i.e. at most 555 lines (17.3 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 17753 B, of which run in another turn 2670 B, run in no turn 15083 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             7.82      5.15  65.8%       2.68
+  interp-helpers         12.80      6.25  48.8%       6.55
+  object/alloc/GC         5.52      3.03  54.9%       2.49
+  builtins                5.99      3.89  64.9%       2.10
+  native boundary         8.39      5.02  59.9%       3.37
+  libc/other              0.23      0.08  34.4%       0.15
+
+  lines by executed bytes (lines/turn, cumulative share of touched lines):
+     1.. 4 B    132.3   10.1%
+     5.. 8 B    150.9   21.7%
+     9..12 B    136.1   32.1%
+    13..16 B    151.7   43.8%
+    17..20 B    161.0   56.1%
+    21..24 B    150.2   67.6%
+    25..28 B    137.7   78.2%
+    29..31 B     96.9   85.6%
+    32..32 B    187.5  100.0%
+
+  by heat (block executions reaching the line per turn):
+         reach lines/turn  used KiB    use
+          0..1       38.5      0.62  51.7%
+          1..4      235.9      4.09  55.5%
+         4..16      360.6      6.87  61.0%
+        16..64      344.6      6.14  57.0%
+           64+      324.6      5.69  56.1%
+
+  top 25 functions by touched lines/turn:
+       KiB   used    use  function  bucket
+      7.82   5.15  65.8%  JS_CallInternal  interp-core
+      0.84   0.34  40.8%  JS_SetPropertyInternal2  interp-helpers
+      0.72   0.38  52.5%  core_change  native boundary
+      0.56   0.38  67.5%  apply_placement  native boundary
+      0.56   0.38  68.1%  run_build  native boundary
+      0.53   0.34  63.7%  js_array_every  builtins
+      0.50   0.35  69.8%  parse_placement  native boundary
+      0.46   0.19  41.7%  JS_GetPropertyInternal  interp-helpers
+      0.43   0.18  41.0%  JS_NewObjectFromShape  object/alloc/GC
+      0.41   0.36  88.2%  __kernel_cos  builtins
+      0.38   0.21  55.3%  js_call_c_function  interp-helpers
+      0.38   0.31  83.5%  core_begin  native boundary
+      0.38   0.23  61.1%  add_property  object/alloc/GC
+      0.37   0.23  61.4%  js_array_push  builtins
+      0.35   0.28  77.9%  __kernel_sin  builtins
+      0.35   0.16  45.4%  JS_CreateProperty  interp-helpers
+      0.34   0.14  39.9%  js_binary_logic_slow  interp-helpers
+      0.33   0.20  60.7%  js_typed_array_constructor  builtins
+      0.32   0.22  68.0%  __rem_pio2  builtins
+      0.31   0.21  68.8%  __JS_NewAtom  interp-helpers
+      0.31   0.17  54.7%  JS_ConcatString2  object/alloc/GC
+      0.30   0.18  60.5%  js_array_buffer_constructor3  builtins
+      0.28   0.14  48.3%  change_ref  native boundary
+      0.28   0.19  69.2%  parse_rect_mode  native boundary
+      0.28   0.12  42.9%  JS_DefineProperty  interp-helpers
+
+  packed model (bytes no turn runs removed; upper bound, see packed_model):
+    layout     geometry lines/turn    warm    cold
+    as built   8-way          1304     940    1493
+    as built   full           1304     942    1423
+    packed     8-way           886      73     891
+    packed     full            886      21     886
+    packed image of the window: 38927 B (38.0 KiB) of code run in some turn
