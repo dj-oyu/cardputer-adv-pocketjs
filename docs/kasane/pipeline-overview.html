@@ -242,7 +242,7 @@ ol.steps li{margin:4px 0}
   <text x="20" y="214" font-size="11" class="muted">帯 9・10・11 だけ傷んだ例:</text>
   <text x="20" y="230" font-size="11" class="muted mono">bytes=11520（3 × 3,840）</text>
   <text x="20" y="246" font-size="11" class="muted mono">bands=3 band_runs=1</text>
-  <text x="20" y="262" font-size="11" class="muted">（hello の実測と同じ形、kasane-text-damage.md）</text>
+  <text x="20" y="262" font-size="11" class="muted">（hello の実測と同じ形、kasane-text.md）</text>
 
   <!-- buffers -->
   <text x="400" y="20" font-size="12" font-weight="600">RAM に常駐する画素は 2 本だけ</text>
@@ -572,7 +572,7 @@ ol.steps li{margin:4px 0}
 <ul>
 <li><b>移しは memcpy ではなくバイトの入れ替え。</b>ST7789 は RGB565 を上位バイトから受け取り（リセット時の既定）、CPU は下位バイトから書く。入れ替えはどのみち全画素に要るので、入れ替えながら <code>tx_buf</code> に書けば（<code>g_board_swap_into=1</code>）、移しの手間はほぼ増えない <span class="e">コメントの値: 帯 1 本 約 10 µs</span>。以前はその場で入れ替えてから memcpy していた（7fd965f、遅かった）。</li>
 <li><b>描く先を交互に変えない理由。</b>描画先のポインタを 1 フレームの間持ち続ける呼び出し元が約 8 か所ある（<code>render_rects</code> の <code>display-&gt;strip()</code>、shell・editor・codeedit・tutorial・wifi_ui・workspace・pickmodal）<span class="u">調査の報告、行は未照合</span>。交互にするには、すべてで帯ごとに取り直す改修が要る。</li>
-<li>SPI は 80 MHz。帯 1 本 3,840 B は理論 384 µs、コメントの値で約 440 µs。非同期にした効果は FLOWER で 38.73 → 33.30 ms、fps 24.95 → 28.80 <span class="m">実測、docs/perf/pie-consolidation.md</span>。</li>
+<li>SPI は 80 MHz。帯 1 本 3,840 B は理論 384 µs、コメントの値で約 440 µs。非同期にした効果は FLOWER で 38.73 → 33.30 ms、fps 24.95 → 28.80 <span class="m">実測、docs/perf/pie-opt-plan.md</span>。</li>
 </ul>
 
 <h3>1.N バッファ（輪の中で書き込み先と送信元をずらす）</h3>

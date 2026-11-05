@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Candidate 4a (docs/perf/kasane-blend-pie.md): the PIE blend kernel's arm must
+# Candidate 4a (docs/perf/kasane-blend.md): the PIE blend kernel's arm must
 # move no pixel against the arms it replaces in main/ui/kasane/ksn_render.c.
 #
 # The switch is a runtime int (g_ksn_blend_pie, default 0), so the "on" build is

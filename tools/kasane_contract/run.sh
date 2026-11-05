@@ -344,7 +344,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     tools/kasane_contract/test_blend_lut.c -o "$out/blend-lut" main/ui/kasane/ksn_blend_pie.c
   "$out/blend-lut"
   # The same table with the coarse 255 -> 256 arm forced on (KSN_SCALE256_ARM=1,
-  # see docs/perf/kasane-alpha256.md): a row has to be built from the arm that is
+  # see docs/perf/kasane-blend.md): a row has to be built from the arm that is
   # running, so the solid arm must still move nothing. Without the switch in
   # blend_lut_build_row this arm reports the coarse chain's own one-step error.
   cc -std=c11 -Wall -Wextra -Werror $options -DKSN_SCALE256_ARM=1 -Imain/ui/kasane \

@@ -15,10 +15,10 @@
 | --- | --- |
 | [Kasane の境界と契約](architecture.md)、[判断台帳](decisions.md)、[検証](verification.md) | owner、ticket、dirty帯、APP/SYSTEM、途中転送失敗時の旧論理基準と全面修復。既存の画像 provider は不変な source span を読み、動的フレームの pin/release はまだ持たない。 |
 | [FLOWER のシーン](../scenes/flower.md)、[`flower.c`](../../main/scene/flower.c)、[`garden.c`](../../main/scene/garden.c) | `prepare` で最大56部品と係数を導出し、行描画で森→深度付きの花→元行を読む雨を順に合成する。全画面バッファなしで動く厳しい参照workload。 |
-| [FLOWER の行不変量](../perf/flower-row-invariants.md)、[shade の内訳](../perf/flower-shade.md)、[PIE の実測](../perf/pie-simd.md)、[命令キャッシュの調査](../perf/ray-stall-census.md) | 計算を frame/row/span/pixel の適切な頻度へ移す効果、棄却数と実時間の違い、native/PIE の局所最適化、命令配置による計測の揺れ。汎用IRの実行速度を推測で保証しない。 |
+| [FLOWER の行不変量](../perf/flower-perf.md)、[shade の内訳](../perf/flower-perf.md)、[PIE の実測](../perf/pie-simd.md)、[命令キャッシュの調査](../perf/ray-stall-census.md) | 計算を frame/row/span/pixel の適切な頻度へ移す効果、棄却数と実時間の違い、native/PIE の局所最適化、命令配置による計測の揺れ。汎用IRの実行速度を推測で保証しない。 |
 | ESP32-S3 hardware MCP（v2.0 で削除。`427b308` の `docs/kasane/https:/github.com/dj-oyu/esp32s3-hw-mcp`） の PIE命令・パイプライン資料と実機例題（v2.0 で削除。`427b308` の `docs/kasane/https:/github.com/dj-oyu/esp32s3-hw-mcp/blob/main/examples/README.md`） | TRM 由来の命令の意味・use/def 段、アセンブラとの不一致、実機で C/Python 参照と照合した頂点変換・画素演算・物理演算を D3a/D4 の kernel 候補と検証の参照にする。兄弟プロジェクトから取り込んだ cost model はこの文書の実測とは独立の再測定ではない。 |
 | [scene_mem](../../main/scene/scene_mem.h)、[ハードウェア制約](../platform/hardware-constraints.md) | 現在の背景用領域は「同時に一背景」の再利用が前提。複数描画面、旧フレーム保持、動画との同時使用には別の保持量と一時領域の予算が要る。 |
-| [Kasane の部分転送](../perf/kasane-text-damage.md)、[画像変換の調査](../archive/perf/kasane-image-transform-recon.md) | dirty列・帯の利益と、変換中の除算など画素単位コストの測り方。draw CPU と LCD 転送量を別々に判定する。 |
+| [Kasane の部分転送](../perf/kasane-text.md)、[画像変換の調査](../archive/perf/kasane-image-transform-recon.md) | dirty列・帯の利益と、変換中の除算など画素単位コストの測り方。draw CPU と LCD 転送量を別々に判定する。 |
 
 ## 実行順序と判定
 
