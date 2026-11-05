@@ -2635,6 +2635,8 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
+                {char perf_line[112];ksn_render_perf_line(perf_line,sizeof perf_line);
+                 ESP_LOGI("kasane","%s frames=%u",perf_line,painted);} /* MEASUREMENT ONLY (PERF_AB) */
                 /* What Shiki cost these frames (pocket_proc.c, docs/kasane/shiki-jit.md
                  * sec.9): draws and engine steps per frame, the engine (input
                  * conversion included) and the whole native draw, ms per frame. */

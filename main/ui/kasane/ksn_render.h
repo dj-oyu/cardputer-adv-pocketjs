@@ -46,6 +46,8 @@ extern int g_ksn_prof;
 extern ksn_render_prof g_ksn_render_prof;
 /* Snapshot and zero, so one log window can print its own counts. */
 void ksn_render_prof_read(ksn_render_prof *out);
+/* MEASUREMENT ONLY (PERF_AB): one window's counter line, then rotate the event. */
+void ksn_render_perf_line(char *out,size_t n);
 /* ksn_render_stats.bands is one bit per 8-row strip. The band count and the
  * number of contiguous runs are what the log line was missing: a 3.37 ms send
  * can be 7 bands or 14, and `bytes` alone cannot say which
