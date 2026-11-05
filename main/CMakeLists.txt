@@ -530,9 +530,7 @@ set_source_files_properties(ui/kasane/ksn_procedural.c PROPERTIES COMPILE_OPTION
 # §9.12): render_ms -10 to -15% on four apps, +12.6 KB flash, +44 B DIRAM.
 # -ffp-contract=off keeps float results identical to the -Os build (no fused
 # multiply-add). ksn_render.c keeps render_group at -Os by function attribute.
-set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
-    pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-set_source_files_properties(pocket/pocket_proc.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# MEASUREMENT ONLY (PERF_AB arm A): the five render/present files back at the project -Os.
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
