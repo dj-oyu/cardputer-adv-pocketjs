@@ -35,6 +35,7 @@ static const char *const CAPS_SHIKI_API[]= {"display.kasane", "kasane.shiki", NU
 // The draw cost probe (apps/shikitest/draw_cost.js): the Shiki API and the
 // test surface's cycle counter and draw profile.
 static const char *const CAPS_SHIKI_COST[]= {"display.kasane", "kasane.shiki", "kasane.shiki.debug", NULL};
+static const char *const CAPS_MESH_BENCH[]= {"display.kasane", "kasane.shiki", "kasane.shapes", "kasane.shiki.debug", NULL};
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -115,6 +116,11 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.drawcost", .title="DRAW COST", .entry="apps/shikitest/draw_cost.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_SHIKI_COST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // Bounded public synthetic mesh workload, launched by the existing app API.
+    {.id="local.meshbench", .title="MESH BENCH", .entry="apps/meshbench/mesh_bench.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_MESH_BENCH, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // MEGADEMO is an ordinary foreground app. Leaving it with Back and
     // reopening starts a new session with fresh Shiki programs.

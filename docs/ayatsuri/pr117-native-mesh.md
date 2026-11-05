@@ -111,6 +111,9 @@ S3の静的DIRAM 181,200 Bとは別の測定で、host値と合算して実機fi
 性能実機ownerへのready-to-flash指示は保留し、現時点ではread-only readiness/recovery
 確認に留める。公開syntheticからの将来の性能測定も、host結果と分離して記録する。
 
+後続の専用公開workloadは [MESH BENCH](../../apps/meshbench/README.md)。
+既存のModel/Instanceとapp登録だけを使い、privateデータ・別rendererやbroker API変更を要しない。
+
 `pocket.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`
 opens an explicit opaque shared-depth scope. Limits remain 65536 bytes,
 8000000 work, 256 records, rows1 or8. Use ordinary `shiki.beginFrame` for

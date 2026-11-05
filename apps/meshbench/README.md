@@ -1,0 +1,79 @@
+# Public native mesh benchmark
+
+`local.meshbench` / `apps/meshbench/mesh_bench.js` は通常のapp登録と既存の
+Model/Instance、`shiki.beginMeshFrame`、Kasane image compositorを使う専用synthetic。
+通常のSTRESS/Shiki線分の性能とは別のworkloadである。メニューには追加しない。
+
+## 固定入力と上限
+
+- 公開source `generate.cjs` の4 quads、16 vertices、8 triangles、4 logical mesh records。
+  平面の傾き・重なり・赤/緑/青/黄は固定。ambient-onlyの材質で色を固定する。
+- AYNMは1,280 B、SHA256
+  `43495668e4acc308672f9b3ae00784794c47b2b42c30f9c01fc0a2ab1bce4536`。
+  character・画像・外部profile・runtime file I/Oはない。
+- frame番号をf=1から数え、camera中心は
+  `(112+(f-1)%16, 64+((f-1)>>4)%4)`。入力キーを使わない。
+  同じ固定modelを毎frame evaluateし、submitする。heap pressure負荷を加えない。
+- scopeは4096 B/candidate、work=200000、depth workspace=1行（960 B）。
+  candidate+committed capacityは8,192 B。元の全体上限は変更しない。
+
+`node apps/meshbench/generate.cjs --check` で生成JSの一致を検査する。
+fixture変更時だけ同じコマンドの `--check` を外して再生成する。
+
+## Windowとcounter
+
+warmupは最初の30描画、測定は続く120描画。151回目のframe callbackでは新しいsubmitを
+せず `MB END` を出し、その後は描画しない。hostは最後のpresent/ACK後にこのcallbackを
+呼び、ENDが最後のsubmitより先に出ないことを検査する。app自体は終了せず、ownerのSTOPが必要。
+
+- `MB READY`: fixture/build identityと上限。
+- `MB SAMPLE_START f=30`: warmupの最後のsubmit直後。
+- `MB SAMPLE f=60/90/120/150`: 測定30/60/90/120回の累積counter。
+- `MB END n=120`: 測定callback完了。
+
+`evaluate_cy` はevaluate、`submit_commit_cy` はbeginMeshFrame+submit+commitの
+CPU cycle差の和。counter呼出し費用を差し引かない。raster/LCDは含まない。
+各差はu32 wrap対応だが、1つの測定区間がcounterの1周未満であることを前提とする。
+
+描画・送信は通常の `KASANE_PAINT turn_ms/render_ms/send_ms/bytes/bands/frames` を別に採る。
+これは30描画窓なので、warmup境界に重なる最初の窓は除外し、測定区間内に完全に入る
+窓だけを使う。native 120 samplesと同一の120描画平均であるとは主張しない。
+実際の窓数とframe範囲、ELF identityを必ず残す。
+
+## Host検証とメモリ
+
+```sh
+python tools/kasane_contract/run_meshbench_app.py
+python tools/kasane_contract/run_mesh_memory.py
+```
+
+real QuickJS（hardened、guest limit160 KiB）・Kasane compositor・managed mesh APIを実行。
+4/8行strip × direct rows on/off の4条件で150 panelsを、独立に手組みしたquadの
+入力経路から描く参照と全画素比較する。参照も同じpublic depth rasterを使うため、
+raster自体の独立数学oracleではない。既存のcoverage/shader契約は別の回帰試験を利用する。
+1回のpartial IO、retry、ACK、END後の追加submitなし、全破棄後の追跡allocation 0も検査する。
+
+hostのcycle関数はwrapを含むprotocol用stub。host cycle/FPSを実機へ外挿しない。
+要求byteのpeakはリンクしたobjectのheap要求の計測で、allocator overhead、共有libcや
+sanitizer内部、static（test panel/ledgerを含む）、stackを含まない。
+guest counterは各frame後の標本であり、guestの瞬間peakではない。
+容量・workspaceは追跡合計の内数。S3 static build memoryとは合算しない。
+m32 layoutでの検証と、S3 runtime fitは未完である。
+
+初回host4条件は全てdigest `924db725`。tracked requested peakは163,584 B、
+最後のliveは129,671 B、guest frame後の標本最大は64,359 B。
+snapshot capacityは8,192 B、workspace960 B、metadata204 B（host）。
+各runの破棄後tracked live/blocksは0。ASan/UBSan/LSan検出なし。
+独立内部reviewは登録・上限・oracle・counter・ACK/ENDを確認し、未解決指摘0件。
+
+## 後続の性能ownerへの条件付き引渡し
+
+通常のtracked defaults/partition、ESP-IDF 6.0.1、別builddir/sdkconfigを使う。
+既存のO2/FP設定を保持し、broker API・security設定・renderer既定は変えない。
+後続session案は60秒hard cap、ログ256 KiB以下、キー入力なし、`MB END`後にSTOP。
+capまでにENDがなければtimeout/partialとして記録し、120 samples完了扱いにしない。
+
+これは実行指示ではない。m32環境準備の拒否済みAPT readは停止したまま。
+host前提の残件と、専任ownerの安全なsource-cache・同caller recovery確認が解決するまで
+hardware job/fetch/flashを行わない。既存のfetch→build→flash後のholding ticketを
+session.requestで消費する手順に従う必要があり、app_sessionをsubmit.afterへ直接渡さない。
