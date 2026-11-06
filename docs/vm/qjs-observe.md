@@ -331,3 +331,67 @@ r5sim の STRESS（`stress_r5.js`、Kasane の保持型シーン）は今の Shi
 全命令のトレースでも、最初の 4 つの後で 549,105 → 509,159 命令/ターン（−7.3%、カウントでは −7.6%）。
 
 検査: vmtest コーパス asan・o2 とも 88/88、Test262 部分集合の退行 0（22,021 pass）、`tools/test_block_cache.c`・`tools/test_pocket_kasane.c`・`tools/test_stress_app.c`（STRESS_HOST PASS）・`tools/test_guest_cache_pressure.py`・`tools/games/run_derby.py --m32`（ODDS_CHECK PASS）。**実機では測っていない**（命令数の減りが、flash の待ちを含む実機のサイクルにどう出るかは未確認。§10.2 のとおり確保の効きはアプリで違う）。
+
+## 12. 今の STRESS を r5sim で回す（`-DR5SIM_APP=shiki`）
+
+§10.2 のとおり、r5sim の STRESS（`stress_r5.js`）は今のアプリではない。`-DR5SIM_APP=shiki` は `apps/stress/stress.js`（Shiki で描く版）を、`tools/build_stress_app_test.sh` がホストで組むのと同じ部品で回す: Shiki の表は `stress_prog.js` から Node で作り（`emit_shiki_rom.mjs`）、Shiki の区画はゲストより先に取る（`app_session.c` と同じ順）。`pocket_kasane.c` は `pocket.kasane.shiki` を弱い参照で探すので、`pocket_shiki_api.c` はリンカの `-u` で引き込む。
+
+- **Shiki のエンジンは C のモデルで走る**（QEMU に PIE が無く、スカラーの JIT は PIE の経路の中にある）。描画（`ksn_shiki_resume` など）の命令は実機のものではない。JS の側（QuickJS・アロケータ・libgcc・窓例外）は実機と同じコード。
+- **ファイルごとの最適化を実機に合わせた。** ファームは描画と Shiki の 7 ファイル（`ksn_font`・`ksn_render`・`ksn_core`・`pocket_kasane`・`pocket_shiki_frame`・`ksn_shiki`・`ksn_shiki_frame`）を `-O2` で組む（`main/CMakeLists.txt`、[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12）が、r5sim は全部 `-Os` だった。`-Os` では `ksn_shiki.c` の可変量の 64 bit シフトが全部 libgcc の呼び出し（`__ashldi3` 1,714・`__ashrdi3` 1,324 回/ターン）になり、**最初の Shiki 版の記録は 64 bit シフトの関数呼び出しが目立つ、実機には無い姿を見せていた**。`-O2` では呼び出しは 0（逆アセンブルで確認）。命令数は同じ（インラインのシフトが呼び出しと同じだけの命令）。
+- 1 ターン（Shiki 版、`-O2` に合わせた後、全命令のトレース）: 112.8 万命令のうち描画ほか 71.3 万、quickjs.c 17.3 万、アロケータ 12.7 万、libgcc 6.4 万（シフトを除くと約 4 万）、窓例外 2.7 万。JS の側（描画を除く）は約 38 万命令。実機の XTPERF の 1 ターンは 75.3 万命令（STRESS、Shiki の JIT の描画を含む、[turn-jumps-pie.md](turn-jumps-pie.md) §2）なので、残りの約 37 万が JIT の描画と commit という見積もりになる（推定、内訳は実機で分けていない）。
+- `pocket_kasane_end_turn` は 1 ターン 24 カウント。Shiki の描画は `frame()` の中（JS から呼ぶネイティブ）で走る。
+
+## 13. 続きの改善と、採らなかったもの
+
+速い計測（カウント/ターン）。左が Shiki 版 STRESS、右が古い STRESS。
+
+| 変更 | Shiki 版 | 古い STRESS | flash |
+| --- | ---: | ---: | ---: |
+| （§12 の `-O2` を合わせた後の基準） | 176,653 | 67,975 | |
+| `17ef0d1` 割り切れる int/int の `/` はハードウェアの除算で（−0 と `INT32_MIN / -1` は double のまま） | 176,434（−0.12%） | 67,769（−0.3%） | +28 B |
+| `f527f7e` 確保の補助関数（`guest_uses_block_cache` ほか 6 つ）を `always_inline`。`-Os` は `static inline` でも呼び出しのまま残していた | 175,750（−0.4%） | 66,852（−1.35%） | +20 B |
+| `dfefdf8` ブロックキャッシュの当たりの経路をヘッダのインラインに、外れは `guest.c` が heap_caps を直接呼ぶ（確保の鎖が 2 段浅くなる） | 173,606（−1.2%） | 64,260（−3.9%） | −80 B |
+
+**今日の全体**（今日の道具で、今日のソースの変更を取り消した木と比べた。`.cache` の作業ツリー）: Shiki 版 188,466 → 173,606（−7.9%）、古い STRESS 82,922 → 64,260（−22.5%）。flash ほぼ ±0、DIRAM +16 B。
+
+**命令キャッシュの模型でも損をしていない**（`icache.py`、自己配置、古い STRESS、`f527f7e` の時点）: warm ミス 684 → 629、cold 1,234 → 1,206、触る行 1,146 → 1,128。
+
+### 13.1 採らなかった: インタプリタの中だけ `js_dup`・`JS_FreeValue` をインライン化
+
+`JS_CallInternal` の中だけで使うインライン版を作った（他の呼び出し元は今の呼び出しのまま）。命令は減る（Shiki 版 −0.73%、古い STRESS −1.2%）が、`JS_CallInternal` が 22,927 → 24,876 B（flash +2.2 KB）になり、模型の命令キャッシュのミスが増えた:
+
+| | 前 | インライン版 |
+| --- | ---: | ---: |
+| 8-way warm / cold | 629 / 1,206 | 703 / 1,263 |
+| 完全連想 warm / cold | 700 / 1,186 | 712 / 1,201 |
+
+ミス 1 回を約 450 サイクル（QIO、[turn-icache.md](turn-icache.md) §1.1.1 の推定）とすると、8-way では +2.6〜3.3 万サイクルで、命令の減り（約 1 万サイクル）を上回る。完全連想ではほぼ相殺。この 2 つは IRAM（`helper_iram8.lf`）にあり、キャッシュを通らない場所から通る場所へ命令を移すことになる。**命令数だけで判断すると間違える例**として残す。
+
+### 13.2 見つけたが手を付けていない: heap_caps が最初の領域で失敗する
+
+Shiki 版のトレースで、ブロックキャッシュに外れた確保 80 回/ターンに対し `multi_heap_malloc`（tlsf の探索）が 161 回。QEMU のヒープの構成（`heap_caps_print_heap_info`）:
+
+| 領域 | 長さ | 空き | 最大の空き |
+| --- | ---: | ---: | ---: |
+| 0x600fe000（RTC fast） | 8,168 | 7,788 | 7,680 |
+| 0x3fce9710 | 22,308 | 936 | 224 |
+| 0x3fcf0000 | 32,768 | 32,032 | 31,744 |
+| 0x3fc9f100（主） | 304,656 | 168,340 | 143,360 |
+
+heap_caps は満杯で細切れの 0x3fce9710 を先に試し、失敗してから主の領域へ行く。失敗する試行は 1 回あたり排他区間の出入りと tlsf の探索で約 150 命令、1 ターン約 1.2 万命令（JS の側の約 3%）。**領域の境目は静的 DRAM の量で決まるので、実機（静的 DIRAM 111 KB）で同じことが起きているかは未確認。** 実機で `heap_caps_print_heap_info` を見てから決める。
+
+### 13.3 小さすぎて見送り
+
+`js_malloc_rt`/`js_free_rt` は確保・解放のたびに関数ポインタ経由で `guest_usable_size` を呼ぶ（430 回/ターン、1 回約 12 命令）。QuickJS の `JSMallocFunctions` の形を変える上流の API の変更になり、効果は約 0.6%。
+
+## 14. IRAM の helper の一覧は今の負荷でも保つ
+
+`main/vm/helper_iram8.lf`（`CONFIG_POCKET_VM_HELPER_IRAM`、8 KiB）は古い STRESS のトレースから選んだ一覧。今の Shiki 版 STRESS で選び直すと良くなるかを、helper を flash に残した像（`-DR5SIM_HELPER_IRAM=0`）の flash の命令列で比べた（`icache.py model`、自己配置、8-way 32 KiB）:
+
+| 一覧 | IRAM | warm | cold | 触る行 |
+| --- | ---: | ---: | ---: | ---: |
+| 一覧なし | 0 | 1,300 | 1,747 | 48.5 KiB |
+| 今の一覧（`--force-file main/vm/helper_iram8.lf`） | 7,555 B | 984 | 1,430 | 41.6 KiB |
+| 今の負荷で選び直し（`--iram-kib 8 --only <quickjs.c の関数>`） | 8,192 B | 976 | 1,391 | 40.9 KiB |
+
+選び直しの差（warm −0.8%、cold −2.7%）は配置の揺れ（約 15%）の中なので、一覧は変えない。この像の Shiki は C のモデルで flash を使う（実機では JIT のコードが RAM にある）ので、「一覧なし」の行は実機より悪く出ている。`icache.py` に足した `--force-file`（名前か `.lf` の一覧を強制）と `--only`（候補をこの名前に限る）はこの比較のため。

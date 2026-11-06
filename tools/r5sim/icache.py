@@ -188,11 +188,19 @@ def model(a):
     # size; --force-cost replaces that size (e.g. JS_CallInternal after its
     # cold handlers are outlined, which this model cannot see: the outlined
     # parts are not executed, so only the placement of the rest matters).
+    if a.force_file:
+        # one name per line, or an ldgen fragment's "obj: name (noflash_text)" lines
+        for line in open(a.force_file):
+            m = re.match(r'\s*(?:\w+:\s*)?([A-Za-z_]\w*)\s*(?:\(noflash\w*\))?\s*$', line)
+            if m and m.group(1) not in ('archive', 'entries', 'mapping'):
+                a.force = (a.force or []) + [m.group(1)]
+    only = set(open(a.only).read().split()) if a.only else None
     forced = [n for n in (a.force or []) if n in fw]
     forced_bytes = int(a.force_cost) if a.force_cost else sum(fw[n][1] for n in forced)
     iram, iram_bytes = [], 0
     if a.iram_kib:
-        ranked = sorted((n for n in touched if n in fw and n not in forced), key=lambda n: -uses[n] / fw[n][1])
+        ranked = sorted((n for n in touched if n in fw and n not in forced and
+                         (only is None or n.split('#')[0] in only)), key=lambda n: -uses[n] / fw[n][1])
         for n in ranked:
             if forced_bytes + iram_bytes + fw[n][1] > a.iram_kib * 1024:
                 continue
@@ -277,6 +285,8 @@ def main():
     m.add_argument('--pack-kib', type=float, default=0, help='pack the hottest functions contiguously up to this size')
     m.add_argument('--force', action='append', help='put this function in IRAM first (repeatable)')
     m.add_argument('--force-cost', type=float, default=0, help='bytes to charge for the forced functions (default: their size)')
+    m.add_argument('--force-file', help='force every function listed (names, or an ldgen .lf file)')
+    m.add_argument('--only', help='choose --iram-kib candidates only from the names in this file')
     m.add_argument('--top', type=int, default=0)
     m.add_argument('--emit', help='write the packed (or IRAM) function names here, one per line')
     for p in (e, m):

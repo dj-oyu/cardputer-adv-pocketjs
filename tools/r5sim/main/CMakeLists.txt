@@ -27,7 +27,9 @@ if(R5SIM_APP STREQUAL "shiki")
     set(R5SIM_APP_JS "${R}/apps/stress/stress.js")
 endif()
 set(R5SIM_LDFRAGMENTS "")
-if(R5SIM_DEVICE)
+# R5SIM_HELPER_IRAM=0 leaves them in flash, to choose the list again from a
+# trace (tools/r5sim/icache.py --iram-kib; docs/vm/qjs-observe.md sec.14).
+if(R5SIM_DEVICE AND NOT (DEFINED R5SIM_HELPER_IRAM AND NOT R5SIM_HELPER_IRAM))
     # The firmware's CONFIG_POCKET_VM_HELPER_IRAM=y (default): its QuickJS
     # helpers in IRAM, so the trace runs them from where the device does.
     list(APPEND R5SIM_LDFRAGMENTS "${R}/main/vm/helper_iram8.lf")
