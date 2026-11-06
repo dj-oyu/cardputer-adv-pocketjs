@@ -201,6 +201,134 @@ static proc_slot *find_slot(uint32_t handle){
  * 0.65 ms (device, same-binary A/B, docs/platform/lcd-dma-driver.md 9.11).
  * A frame with pattern lines walks through ksn_proc_frame_next as before. */
 #define PROC_HOT __attribute__((optimize("O2")))
+/* frame_damage's bounding box with PIE (docs/vm/qjs-observe.md sec.19): ~18
+ * cycles a segment in C (two frames of ~900 in STRESS, every commit). A
+ * segment is 5 halfwords (x0 y0 x1 y1 color), so 8 of them are 5 vectors
+ * whose lanes always hold the same fields: lane h of a group is field h % 5.
+ * Five running minima, then five maxima (8 Q registers do not hold ten
+ * accumulators and a load), then the lanes holding x and y are folded in C.
+ * Exact: the same min/max as the scalar loop. Owner task only (PIE is
+ * coprocessor 3), as every Shiki and Kasane kernel. */
+#if defined(__xtensa__) && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#define PROC_DAMAGE_PIE 1
+#endif
+#if defined(PROC_DAMAGE_PIE) || defined(PROC_DAMAGE_PIE_MODEL)
+#ifndef PROC_DAMAGE_PIE_MODEL
+static const int16_t damage_lo[8] __attribute__((aligned(16)))={INT16_MAX,INT16_MAX,INT16_MAX,INT16_MAX,
+                                                                INT16_MAX,INT16_MAX,INT16_MAX,INT16_MAX};
+static const int16_t damage_hi[8] __attribute__((aligned(16)))={INT16_MIN,INT16_MIN,INT16_MIN,INT16_MIN,
+                                                                INT16_MIN,INT16_MIN,INT16_MIN,INT16_MIN};
+#endif
+/* seg: 16-byte aligned, groups > 0 groups of 8 segments; out: 16-byte
+ * aligned, 40 halfwords. */
+static void __attribute__((noinline)) damage_pie_min(const ksn_proc_segment *seg,unsigned groups,
+                                                     int16_t *out){
+#ifdef PROC_DAMAGE_PIE_MODEL
+    for(unsigned h=0;h<40;h++)out[h]=INT16_MAX;
+    for(unsigned g=0;g<groups;g++)for(unsigned h=0;h<40;h++){
+        const int16_t v=((const int16_t *)seg)[g*40+h];if(v<out[h])out[h]=v;}
+#else
+    const int16_t *init=damage_lo;
+    __asm__ volatile(
+        "ee.vld.128.ip q0, %[init], 0\n"
+        "ee.vld.128.ip q1, %[init], 0\n"
+        "ee.vld.128.ip q2, %[init], 0\n"
+        "ee.vld.128.ip q3, %[init], 0\n"
+        "ee.vld.128.ip q4, %[init], 0\n"
+        "loopgtz %[groups], 1f\n"
+        "  ee.vld.128.ip q5, %[seg], 16\n"
+        "  ee.vld.128.ip q6, %[seg], 16\n"
+        "  ee.vmin.s16 q0, q0, q5\n"
+        "  ee.vld.128.ip q5, %[seg], 16\n"
+        "  ee.vmin.s16 q1, q1, q6\n"
+        "  ee.vld.128.ip q6, %[seg], 16\n"
+        "  ee.vmin.s16 q2, q2, q5\n"
+        "  ee.vld.128.ip q5, %[seg], 16\n"
+        "  ee.vmin.s16 q3, q3, q6\n"
+        "  ee.vmin.s16 q4, q4, q5\n"
+        "1:\n"
+        "ee.vst.128.ip q0, %[out], 16\n"
+        "ee.vst.128.ip q1, %[out], 16\n"
+        "ee.vst.128.ip q2, %[out], 16\n"
+        "ee.vst.128.ip q3, %[out], 16\n"
+        "ee.vst.128.ip q4, %[out], 16\n"
+        : [seg] "+&a"(seg), [out] "+&a"(out)
+        : [groups] "a"(groups), [init] "a"(init)
+        : "memory");
+#endif
+}
+static void __attribute__((noinline)) damage_pie_max(const ksn_proc_segment *seg,unsigned groups,
+                                                     int16_t *out){
+#ifdef PROC_DAMAGE_PIE_MODEL
+    for(unsigned h=0;h<40;h++)out[h]=INT16_MIN;
+    for(unsigned g=0;g<groups;g++)for(unsigned h=0;h<40;h++){
+        const int16_t v=((const int16_t *)seg)[g*40+h];if(v>out[h])out[h]=v;}
+#else
+    const int16_t *init=damage_hi;
+    __asm__ volatile(
+        "ee.vld.128.ip q0, %[init], 0\n"
+        "ee.vld.128.ip q1, %[init], 0\n"
+        "ee.vld.128.ip q2, %[init], 0\n"
+        "ee.vld.128.ip q3, %[init], 0\n"
+        "ee.vld.128.ip q4, %[init], 0\n"
+        "loopgtz %[groups], 1f\n"
+        "  ee.vld.128.ip q5, %[seg], 16\n"
+        "  ee.vld.128.ip q6, %[seg], 16\n"
+        "  ee.vmax.s16 q0, q0, q5\n"
+        "  ee.vld.128.ip q5, %[seg], 16\n"
+        "  ee.vmax.s16 q1, q1, q6\n"
+        "  ee.vld.128.ip q6, %[seg], 16\n"
+        "  ee.vmax.s16 q2, q2, q5\n"
+        "  ee.vld.128.ip q5, %[seg], 16\n"
+        "  ee.vmax.s16 q3, q3, q6\n"
+        "  ee.vmax.s16 q4, q4, q5\n"
+        "1:\n"
+        "ee.vst.128.ip q0, %[out], 16\n"
+        "ee.vst.128.ip q1, %[out], 16\n"
+        "ee.vst.128.ip q2, %[out], 16\n"
+        "ee.vst.128.ip q3, %[out], 16\n"
+        "ee.vst.128.ip q4, %[out], 16\n"
+        : [seg] "+&a"(seg), [out] "+&a"(out)
+        : [groups] "a"(groups), [init] "a"(init)
+        : "memory");
+#endif
+}
+_Static_assert(sizeof(ksn_proc_segment)==10,"damage_pie: 8 segments are 5 vectors");
+#endif
+/* One plain segment into the box (min, min, max+1, max+1). */
+static inline __attribute__((always_inline)) void damage_one(const ksn_proc_segment *seg,
+                                                             int *x0,int *y0,int *x1,int *y1){
+    const int sx0=seg->x0,sx1=seg->x1,sy0=seg->y0,sy1=seg->y1;
+    const int ax=sx0<sx1?sx0:sx1,bx=sx0^sx1^ax,ay=sy0<sy1?sy0:sy1,by=sy0^sy1^ay;
+    if(ax<*x0)*x0=ax;
+    if(ay<*y0)*y0=ay;
+    if(bx+1>*x1)*x1=bx+1;
+    if(by+1>*y1)*y1=by+1;
+}
+/* The bounding box of n plain segments. */
+PROC_HOT static void damage_plain(const ksn_proc_segment *seg,unsigned n,
+                                  int *x0,int *y0,int *x1,int *y1){
+#if defined(PROC_DAMAGE_PIE) || defined(PROC_DAMAGE_PIE_MODEL)
+    /* PIE rounds the address down: peel to a 16-byte boundary (10-byte steps
+     * from an even address reach one within 8), then whole groups of 8. */
+    while(n&&((uintptr_t)seg&15u)){damage_one(seg++,x0,y0,x1,y1);n--;}
+    const unsigned groups=n/8u;
+    if(groups){
+        int16_t lo[40] __attribute__((aligned(16))),hi[40] __attribute__((aligned(16)));
+        damage_pie_min(seg,groups,lo);
+        damage_pie_max(seg,groups,hi);
+        for(unsigned h=0;h<40;h++){
+            const unsigned field=h%5u;
+            if(field==4)continue;                     /* colour */
+            int *const a=field&1?y0:x0,*const b=field&1?y1:x1;   /* y0,y1 : x0,x1 */
+            if(lo[h]<*a)*a=lo[h];
+            if(hi[h]+1>*b)*b=hi[h]+1;
+        }
+        seg+=groups*8u;n-=groups*8u;
+    }
+#endif
+    for(const ksn_proc_segment *const stop=seg+n;seg<stop;seg++)damage_one(seg,x0,y0,x1,y1);
+}
 PROC_HOT static ksn_rect frame_damage(const proc_surface *surface){
     if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
@@ -208,15 +336,7 @@ PROC_HOT static ksn_rect frame_damage(const proc_surface *surface){
     const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
     for(unsigned f=0;f<2;f++){
       if(!frames[f]->ext){
-        const ksn_proc_segment *seg=frames[f]->segments,*const stop=seg+frames[f]->count;
-        for(;seg<stop;seg++){
-            const int sx0=seg->x0,sx1=seg->x1,sy0=seg->y0,sy1=seg->y1;
-            const int ax=sx0<sx1?sx0:sx1,bx=sx0^sx1^ax,ay=sy0<sy1?sy0:sy1,by=sy0^sy1^ay;
-            if(ax<x0)x0=ax;
-            if(ay<y0)y0=ay;
-            if(bx+1>x1)x1=bx+1;
-            if(by+1>y1)y1=by+1;
-        }
+        damage_plain(frames[f]->segments,frames[f]->count,&x0,&y0,&x1,&y1);
         continue;
       }
       unsigned i=0,cost;
