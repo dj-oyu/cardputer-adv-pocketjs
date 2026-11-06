@@ -10,6 +10,7 @@
 #include "net_autosync.h"
 #include "wifi_time.h"
 #include "rtc_task.h"
+#include "fetch_probe.h"
 #include "net_service.h"
 #include "tutorial.h"
 #include "jpfont.h"
@@ -1518,6 +1519,7 @@ void app_main(void) {
 #if POCKET_PROBES
     { extern void ble_probe(void); ble_probe(); }
 #endif
+    fetch_probe_run();   // no-op unless CONFIG_POCKET_FETCH_PROBE
     ESP_ERROR_CHECK(board_init());
     nvs_init();
     // Before shell_init(), which loads the AUTO TIME SYNC row into it.

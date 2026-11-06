@@ -149,6 +149,16 @@ menu "Pocket VM (diagnostics)"
             Build it in a directory of its own with
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
 
+    config POCKET_FETCH_PROBE
+        bool "Probe: time code fetched from IRAM, RTC fast memory and flash at boot"
+        default n
+        help
+            Measurement only (issue #116, RTC fast memory as a code tier).
+            Runs main/hal/fetch_probe.c once before the tasks start and logs
+            FETCHPROBE lines: cycles per instruction warm, and the cost of a
+            cold line from flash. Takes about 4.6 KB of RTC fast memory, so
+            the tasks' stacks fall back to DRAM while it is on.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n
