@@ -96,6 +96,28 @@ __attribute__((noinline,used)) void r5_turn_end(unsigned t){ r5_turn_done=t+1; }
 
 static JSRuntime *rt;
 static JSContext *ctx;
+#ifdef R5SIM_DEVICE
+// -DR5SIM_DEVICE=1: the session as the firmware builds it, through the same
+// component -- pocketjs_guest_create (allocator with the R3 block cache,
+// memory limit, GC threshold, stack limit, hardened context, interrupt
+// handler), pocketjs_guest_eval, and per turn arm_turn()'s watchdog deadline
+// and job budget around pocketjs_guest_frame (main/app_session.c). With the
+// firmware's helper-IRAM fragment linked (tools/r5sim/main/CMakeLists.txt).
+#include "pocketjs/guest.h"
+#include "pocketjs/guest_quickjs.h"
+#include "pocketjs/vm_sched.h"
+#include "esp_timer.h"
+static pocketjs_guest_t *guest;
+static int64_t r5_deadline;
+static int r5_watchdog(void *o){(void)o;return esp_timer_get_time()>r5_deadline;}  // app_session.c interrupt()
+static vm_budget_t r5_budget;
+static void r5_arm_turn(void){                                                     // app_session.c arm_turn()
+    r5_deadline=esp_timer_get_time()+250000;
+    vm_budget_begin(&r5_budget,VM_TURN_BUDGET_US);
+    pocketjs_guest_budget(guest,&r5_budget);
+    pocketjs_guest_yield_enabled(guest,true);
+}
+#endif
 static uint16_t strip_pixels[240*8];
 static unsigned oom_lines, fail_lines;
 
@@ -184,7 +206,19 @@ static void gcov_dump(void) {
 #endif
 
 void app_main(void) {
-#ifdef R5SIM_GUEST_ALLOC
+#if defined(R5SIM_DEVICE)
+    {
+        pocketjs_guest_config_t gc;
+        pocketjs_guest_config_defaults(&gc);
+        gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;  // app_session.c
+        if(pocketjs_guest_create(&gc,&guest)!=ESP_OK){ printf("R5SIM guest_create FAIL\n"); return; }
+        pocketjs_guest_set_watchdog(guest,r5_watchdog,NULL);
+        r5_deadline=esp_timer_get_time()+2000000;   // app_session.c: 2 s for the evaluation
+        ctx=pocketjs_guest_quickjs_context(guest);
+        rt=JS_GetRuntime(ctx);
+        printf("R5SIM device session\n");
+    }
+#elif defined(R5SIM_GUEST_ALLOC)
     {
         static const uint16_t classes[]={12,16,32,36,48,72,80,88};  // guest.c's
         void *probe=heap_caps_malloc(20,R5_CAPS);
@@ -197,7 +231,10 @@ void app_main(void) {
 #else
     rt=JS_NewRuntime();
 #endif
-    ctx=JS_NewContext(rt); host_capabilities_clear();
+#ifndef R5SIM_DEVICE
+    ctx=JS_NewContext(rt);
+#endif
+    host_capabilities_clear();
     pocket_kasane_install(ctx,NULL);
     // Rendering only has to consume each submission; a 16x8 viewport keeps the
     // scalar renderer from filling the trace with pixels.
@@ -208,14 +245,35 @@ void app_main(void) {
     JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_nop,"readStarted",0));
     JS_SetPropertyStr(ctx,g,"__readFinished",JS_NewCFunction(ctx,js_nop,"readFinished",0));
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
+#ifdef R5SIM_DEVICE
+    // pocketjs_guest_eval binds globalThis.frame and drains, as app_start_test.
+    bool ok=pocketjs_guest_eval(guest,stress_js_start,(size_t)(stress_js_end-stress_js_start-1),
+                                "stress_r5.js")==ESP_OK;
+    pocket_kasane_end_turn();
+    ok=ok&&present();
+    unsigned conts=0,frame_err=0;
+    const pocketjs_guest_frame_t input={.struct_size=sizeof(input),.buttons=0,.analog=0x8080};
+#else
     bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),"stress_r5.js")&&present();
-    printf("R5SIM eval %s\n",ok?"ok":"FAIL");
     // The device's arrangement (main/app_session.c, pocketjs_guest_create).
     JS_SetMemoryLimit(rt,160*1024);
     JS_SetGCThreshold(rt,80*1024);
     JSValue frame=JS_GetPropertyStr(ctx,g,"frame");
+#endif
+    printf("R5SIM eval %s\n",ok?"ok":"FAIL");
     unsigned bad_present=0;
     for(unsigned t=1;ok&&t<=R5SIM_FRAMES;t++) {
+#ifdef R5SIM_DEVICE
+        r5_arm_turn();
+        r5_turn_begin(t);
+        if(pocketjs_guest_frame(guest,&input)!=ESP_OK) frame_err++;
+        // A frame() cut by the 8 ms budget finishes in continuation turns on
+        // the device's next ticks; here they stay inside this turn's marks so
+        // a turn is a frame's whole JS. Counted, and normally 0 under QEMU.
+        while(pocketjs_guest_work_pending(guest)) { conts++; r5_arm_turn(); pocketjs_guest_continue(guest); }
+        pocket_kasane_end_turn();
+        r5_turn_end(t);
+#else
         JSValue b=JS_NewInt32(ctx,0);
         r5_turn_begin(t);
         JSValue r=JS_Call(ctx,frame,JS_UNDEFINED,1,&b);
@@ -223,6 +281,7 @@ void app_main(void) {
         JS_FreeValue(ctx,r);
         drain();
         r5_turn_end(t);
+#endif
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
         if(canary.count) pocket_memory_oom(&canary,(uint64_t)t*33333u);
@@ -232,7 +291,16 @@ void app_main(void) {
         pocket_memory_pump(false);
         if(!present()) bad_present++;
     }
+#ifdef R5SIM_DEVICE
+    pocketjs_guest_stats_t st={0};
+    st.struct_size=sizeof(st);
+    pocketjs_guest_stats(guest,&st);
+    printf("R5SIM device frames=%u frame_errors=%u yields=%u continuations=%u(%u) heap_used=%u\n",
+           (unsigned)st.frames,(unsigned)st.frame_errors,(unsigned)st.yields,
+           (unsigned)st.continuations,conts,(unsigned)st.heap_used);
+#else
     JS_FreeValue(ctx,frame);
+#endif
     JS_FreeValue(ctx,g);
 #ifdef R5SIM_PGO_GEN
     gcov_dump();

@@ -9,6 +9,11 @@ execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../pet_header.py"
     "${R}/apps/pet/assets/pets-compact.bin" "${CMAKE_BINARY_DIR}/generated/kasane_pet_test_data.h"
     COMMAND_ERROR_IS_FATAL ANY)
 set(R5SIM_LDFRAGMENTS "")
+if(R5SIM_DEVICE)
+    # The firmware's CONFIG_POCKET_VM_HELPER_IRAM=y (default): its QuickJS
+    # helpers in IRAM, so the trace runs them from where the device does.
+    list(APPEND R5SIM_LDFRAGMENTS "${R}/main/vm/helper_iram8.lf")
+endif()
 if(R5SIM_PGO STREQUAL "generate")
     list(APPEND R5SIM_LDFRAGMENTS "gcov_info.lf")
 endif()
@@ -29,10 +34,9 @@ idf_component_register(
         "${R}/main/ui/kasane/ksn_core.c" "${R}/main/ui/kasane/ksn_view.c"
         "${R}/main/ui/kasane/ksn_cache.c" "${R}/main/ui/kasane/ksn_modal.c"
         "${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kasane/ksn_blend_pie.c"
-        "${R}/components/pocketjs_guest/src/block_cache.c"
     INCLUDE_DIRS "." "${R}/main" "${R}/components/pocketjs_guest/include" "${R}/main/pocket" "${R}/main/ui" "${R}/main/ui/kasane"
         "${R}/main/text" "${R}/main/hal" "${CMAKE_BINARY_DIR}/generated"
-    REQUIRES quickjs-ng esp_timer esp_hw_support log esp_driver_i2c esp_driver_gpio esp_driver_spi esp_driver_i2s
+    REQUIRES quickjs-ng pocketjs_guest esp_timer esp_hw_support log esp_driver_i2c esp_driver_gpio esp_driver_spi esp_driver_i2s
     # stress_r5.js is apps/stress/stress.js as of 51f5feb, byte for byte (the
     # Kasane retained scene, before STRESS moved to Shiki): the workload of the
     # R5 records (docs/vm/turn-icache.md). This image does
@@ -47,6 +51,11 @@ endif()
 # Off by default so the R5/PGO records stay comparable.
 if(R5SIM_GUEST_ALLOC)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_GUEST_ALLOC)
+endif()
+# -DR5SIM_DEVICE=1: the whole firmware session (components/pocketjs_guest)
+# plus the helper-IRAM fragment (docs/vm/qjs-observe.md sec.7).
+if(R5SIM_DEVICE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_DEVICE)
 endif()
 set_source_files_properties("${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kasane/ksn_blend_pie.c"
     PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/r5sim_scalar.h")

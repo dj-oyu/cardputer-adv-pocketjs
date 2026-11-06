@@ -125,6 +125,7 @@ def main():
     # TB table keyed by host pointer (stable while the TB lives; a new IN:
     # block followed by its Trace line rebinds it).
     tbs = {}
+    insn_text = {}          # pc -> (mnemonic, full text, length)
     pending = None          # insns of the IN: block just read
     started = False; turn = 0; begins = 0
     # per-turn-window accumulators
@@ -140,6 +141,8 @@ def main():
     region_insn = collections.Counter()
     exc_entries = collections.Counter()
     edges = collections.Counter()
+    pc_exec = collections.Counter()        # per instruction address, in the window
+    backedges = collections.Counter()      # (last pc, target pc, kind)
     prev = None   # (tb, func_at_end)
 
     def summarize(insns):
@@ -147,7 +150,7 @@ def main():
         n = len(insns)
         lu = 0; lu_at = []
         for i in range(n - 1):
-            pc, ln, mn, d, s, ld = insns[i]
+            pc, ln, mn, d, s, ld = insns[i][:6]
             if ld and d and d[0] in insns[i + 1][4]:
                 lu += 1
         return lu
@@ -161,7 +164,9 @@ def main():
                 pc = int(sp[1], 16)
                 host = raw[9:raw.index(b' ', 9)]
                 if pending is not None:
-                    ins = pending; pending = None
+                    ins = [tuple(x) for x in pending]; pending = None
+                    for x in ins:
+                        insn_text.setdefault(x[0], (x[2], x[6], x[1]))
                     tb = (pc, ins, summarize(ins), func_of(ins[-1][0]) if ins else '?')
                     tbs[host] = tb
                 else:
@@ -187,14 +192,21 @@ def main():
                         k = 'fall_branch' if (lmn.startswith('b') and lmn != 'break') else 'fall_split'
                     elif lmn in CALLS: k = 'call'
                     elif lmn in RETS: k = 'ret'
-                    elif lmn in JUMPS: k = 'jump' if lmn == 'j' else 'jx'
+                    elif lmn in JUMPS:
+                        k = 'jump' if lmn == 'j' else 'jx'
+                        if k == 'jump' and pc <= last[0] and func_of(pc) == pfunc:
+                            backedges[(last[0], pc, 'jump')] += 1   # top-tested loop's j back
                     elif lmn.startswith('b') and lmn != 'break':
                         k = 'branch_taken'
                         if pc <= last[0] and func_of(pc) == pfunc:
+                            backedges[(last[0], pc, 'branch')] += 1
                             loops[(pfunc, last[0])] += 1
                             loop_body.setdefault((pfunc, last[0]), (pc, last[0] + last[1] - pc))
                     else:
                         k = 'other'   # exception/interrupt entry, zero-overhead loop back
+                        if pc <= last[0] and func_of(pc) == pfunc:
+                            k = 'zloop'   # LEND -> LBEG of a loop/loopnez/loopgtz
+                            backedges[(last[0], pc, 'zloop')] += 1
                     xfer[k] += 1
                     if k in ('call', 'ret', 'jump', 'jx', 'branch_taken'):
                         taken_by_func[pfunc] += 1
@@ -214,7 +226,8 @@ def main():
                     helper_calls[fn0] += 1
                     helper_callers[(fn0, prev[3] if prev else '?')] += 1
                 # this TB's instructions
-                for (ipc, ln, mn, d, s, ld) in ins:
+                for (ipc, ln, mn, d, s, ld, _t) in ins:
+                    pc_exec[ipc] += 1
                     fn = func_of(ipc)
                     insn_by_func[fn] += 1
                     mnem[mn] += 1
@@ -237,7 +250,7 @@ def main():
                 text = text.strip()
                 pc = int(addr_s, 16)
                 mn, d, sr, ld = parse_insn(text)
-                pending.append([pc, 0, mn, d, sr, ld])
+                pending.append([pc, 0, mn, d, sr, ld, text])
             elif c == b'\n' and in_block:
                 in_block = False
                 if pending:
@@ -297,7 +310,11 @@ def main():
                    'helper_callers': {f'{k[0]}<-{k[1]}': v for k, v in helper_callers.items()},
                    'loops': {f'{k[0]}@{k[1]:#x}': v for k, v in loops.items()},
                    'exc_entries': exc_entries, 'region_insn': region_insn,
-                   'edges': {f'{k[0]}->{k[1]}': v for k, v in edges.items()}}, open(a.json, 'w'), indent=1)
+                   'edges': {f'{k[0]}->{k[1]}': v for k, v in edges.items()},
+                   # for tools/r5sim/pie_rank.py: every executed instruction
+                   # and every backward transfer inside one function
+                   'pcs': {f'{pc:#x}': [v, *insn_text[pc], func_of(pc)] for pc, v in pc_exec.items()},
+                   'backedges': [[f'{b:#x}', f'{t:#x}', k, v] for (b, t, k), v in backedges.items()]}, open(a.json, 'w'), indent=1)
 
 
 if __name__ == '__main__':

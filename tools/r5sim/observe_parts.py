@@ -11,7 +11,7 @@ ins=d['insn_by_func']; tk=d['taken_by_func']; lu=d['loaduse_by_func']; l32=d['l3
 qjs=set(open(sys.argv[2]).read().split())
 def part(f):
     if f.startswith('_Window'): return 'window exceptions'
-    if re.match(r'^(tlsf_|heap_caps_|multi_heap_|xPortEnterCritical|vPortExitCritical|vPortEnterCritical|xPortInIsrContext|_xtos_set_intlevel|__call__xtos|esp_cpu_compare_and_set|assert_valid_block|block_cache_|r5_|js_malloc_rt|js_free_rt|js_realloc_rt|js_calloc_rt|js_def_|js_malloc$|js_free$|js_mallocz|esp_heap_adjust)',f): return 'allocator'
+    if re.match(r'^(tlsf_|heap_caps_|multi_heap_|xPortEnterCritical|vPortExitCritical|vPortEnterCritical|xPortInIsrContext|_xtos_set_intlevel|__call__xtos|esp_cpu_compare_and_set|assert_valid_block|block_cache_|r5_|guest_malloc|guest_free|guest_calloc|guest_realloc|guest_usable_size|guest_uses_block_cache|guest_block_length|xTaskGetCurrentTaskHandle|js_malloc_rt|js_free_rt|js_realloc_rt|js_calloc_rt|js_def_|js_malloc$|js_free$|js_mallocz|esp_heap_adjust)',f): return 'allocator'
     if re.match(r'^__(.*[sd]f[23]|.*di3|float|fix|extend|trunc)',f): return 'libgcc soft-double/64bit'
     if re.match(r'^(__kernel_|__rem_pio2|__ieee754|sin$|cos$|floor|ceil|fmod|sqrt|round|trunc|scalbn|copysign|fabs)',f): return 'libm (double)'
     if re.match(r'^(__call_)?(memcpy|memset|memcmp|memmove|strlen|strcmp|__memcpy_aux|bzero)$',f): return 'mem*/str*'

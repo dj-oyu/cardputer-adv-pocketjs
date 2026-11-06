@@ -10,6 +10,11 @@
 
 ## 0. 結論
 
+**2026-11-06 追記（§7・§8）: 実機と同じゲスト部品で取り直した（`-DR5SIM_DEVICE=1`）。** 以下の §0〜§6 は確保関数だけを揃えた版（A）の記録で、比は大きくは変わらない。新しい数字は §7、PIE などの特殊命令のランキングは §8。
+
+- **実機同等（§7）**: 1 ターン 54.9 万命令、模型 80.2 万サイクル（IPC 0.68）。アロケータは **37.9%** に増えた。実機の確保関数は 1 回ごとに `xTaskGetCurrentTaskHandle()`（割り込みレベルの上げ下げを含む）で所有タスクを確かめていて、1 ターン 493 回、約 2.2 万サイクル（模型の 2.7%）。helper の IRAM 化で flash の命令は 27.5 万 → 17.1 万。
+- **PIE のランキング（§8）**: 候補は全部合わせて模型の **0.1%**（1 ターン約 750 サイクル）。最大は ROM の `memcpy` を PIE 版に替える案で 0.05%（1 回平均 37 B しか写さない）。GCC はスカラーの特殊命令（`moveqz`/`movnez`・`min`/`max`・`nsau`・ゼロオーバーヘッドの `loop`）を既に使っている。**STRESS のターンでは、PIE や特殊命令への誘導で取れるものはほぼ無い。**
+
 - **(1) 精度: 64 bit 整数の除算は STRESS のターンにほぼ無い。** `__udivdi3` は FreeRTOS の tick 割り込みの 1 ターン 4 回だけ、`__ashldi3` が `js_number` から 20 回（§3.1）。**重いのは 64 bit 整数ではなく double**で、ソフトウェア double（ROM の libgcc）と libm の double が 1 ターン 3.8 万命令、全命令の 7.3%。`__divdf3` は 1 回 **392 命令**、`Math.sin`/`cos` は 1 回あたり double の乗算・減算を 10 本前後呼ぶ。整数で済む場所（`parse_i16`、整数どうしの演算）も double を通っている。
 - **(2) flash: 命令の 53% は flash、32% は IRAM、15% は ROM で走る（§2）。** IRAM の大半はアロケータと窓例外。flash の取得待ちは模型に無いので、実機の `I_STALL_BUSY`（実測）との差で読む（§2.2）。
 - **(3) 特殊回路への誘導路: 一番多いのは「1 命令で済むことを関数呼び出しでしている」形。** QuickJS がバイトコードのオペランドを読む `get_u32`/`get_u16` はインライン展開されず、中で **ROM の `memcpy` を呼ぶ**（1 ターン 356 回、§3.3）。R3 のブロックキャッシュも、ポインタ 1 語の読み書きを `memcpy` の呼び出しで行う（236 回）。ESP-IDF の tlsf は小ブロックの区分を毎回**ハードウェア除算 2 本**で求める（2 の冪の割り算）。PIE（SIMD）で速くなるループは、今回もターンの中に見つからなかった（§3.3.4、[turn-jumps-pie.md](turn-jumps-pie.md) §4 と同じ結論）。
@@ -142,6 +147,7 @@ libgcc の補助関数（1 ターンあたり。「命令/回」は補助関数�
 
 | 候補 | 対象（1 ターン） | 模型での減り（推定） | 気を付けること |
 | --- | --- | --- | --- |
+| 確保関数の所有タスクの確認（`guest_uses_block_cache` → `xTaskGetCurrentTaskHandle`）をターンの始めの 1 回に（§7.2） | 493 回 | 約 2.2 万サイクル | 別タスクからの確保（音・ネットの完了など）がキャッシュを通らない、という今の保証を別の形で保つ |
 | `get_u32`/`get_u16`（と `get_i32` など同族）を `l8ui` の組み立てで常にインラインに | `memcpy` の呼び出し 356 回 | 約 1.2 万サイクル（STRESS）、DERBY はオペコードが 2.6 倍 | 上流パッチ（`cutils.h`）。flash は増えうる（呼び出し 1 箇所 → 7 命令前後） |
 | ブロックキャッシュのリンクを整列した 1 語の読み書きに | `memcpy` 236 回 | 約 8 千サイクル | strict aliasing（[aliasing-types.md](aliasing-types.md)）に触れない書き方にする |
 | `parse_i16` などに `JS_TAG_INT` の早道 | double の補助関数 約 300 回 | 約 8 千命令 | Kasane の契約（丸め・範囲外の拒否）を保つ |
@@ -173,3 +179,84 @@ python tools/r5sim/observe.py r5.log <dir>/r5sim.elf --nm xtensa-esp32s3-elf-nm 
 ```
 
 `--json` は関数ごと・呼び出しの辺ごとの数を残すので、部品の集計や呼び出し元の表は記録を読み直さずに作れる。
+
+## 7. 実機同等で取り直す（`-DR5SIM_DEVICE=1`、2026-11-06）
+
+### 7.1 何を揃えたか
+
+§1 の `-DR5SIM_GUEST_ALLOC=1` は確保関数だけを真似ていた。実機のゲストは、それ以外にもメモリ上限・GC の閾値・スタック上限・harden・割り込みハンドラ（ターンの期限）・ターンの予算を持つ。r5sim は上限と GC の閾値だけは評価後に設定していたが、残りは無かった。`-DR5SIM_DEVICE=1` では手で真似るのをやめ、**実機の部品そのもの**を使う:
+
+| 項目 | 実機（`main/app_session.c`） | `-DR5SIM_DEVICE=1` |
+| --- | --- | --- |
+| ゲスト | `pocketjs_guest_create`（160 KiB、スタック 20 KiB、PSRAM なし） | 同じ関数・同じ値 |
+| 確保 | `guest.c` の確保関数（R3 のブロックキャッシュ、所有タスクの確認） | 同じ（部品をリンク） |
+| harden・GC の閾値・割り込みハンドラ | `pocketjs_guest_create` の中 | 同じ |
+| 評価 | `pocketjs_guest_eval`、期限 2 秒 | 同じ |
+| ターン | `arm_turn()`（期限 250 ms、予算 `VM_TURN_BUDGET_US`）→ `pocketjs_guest_frame` → `pocket_kasane_end_turn` | 同じ順。予算で切られた残り（継続ターン）は同じ区切りの中で続ける（今回 0 回） |
+| helper の IRAM 化 | `CONFIG_POCKET_VM_HELPER_IRAM=y`（既定）で `main/vm/helper_iram8.lf` | 同じ断片をリンク |
+
+揃っていないもの: `app_tick` のゲストの外の仕事（presenter、通知、`sample_memory_pressure`）、Shiki・proc などの面、描画（16×8 のスカラー）。ゲストの外は区切りの外か、STRESS が使わない面。
+
+### 7.2 結果（STRESS LV1、ターン 61〜120）
+
+`frames=120 frame_errors=0 yields=0 continuations=0 oom=0 fail=0`。
+
+| 部品 | 命令/ターン | 模型のサイクル | % |
+| --- | ---: | ---: | ---: |
+| アロケータ（`guest_*` の確保関数と所有タスクの確認を含む） | 200,685 | 298,300 | 37.9% |
+| quickjs.c | 169,286 | 249,698 | 31.7% |
+| Kasane・pocket ほか | 63,612 | 86,753 | 11.0% |
+| 窓例外 | 42,997 | 51,597 | 6.6% |
+| libgcc（ソフトウェア double・64 bit） | 34,486 | 46,421 | 5.9% |
+| `memcpy` など | 29,409 | 41,293 | 5.2% |
+| RTOS・割り込み | 4,923 | 7,090 | 0.9% |
+| libm（double） | 3,707 | 5,435 | 0.7% |
+| 計 | 549,105 | 786,587（除算込みで 802,390） | |
+
+- 置き場所: IRAM 295,168、flash 170,879、ROM 83,058 命令/ターン。A（§2）の flash 27.5 万から約 10 万が IRAM に移った。helper の IRAM 化（[p1-iram-placement.md](p1-iram-placement.md)）がそのまま見えている。
+- A との差は +2.9 万命令。ほぼ全部が実機の確保関数のラッパー: `guest_usable_size` +7,045（QuickJS が確保・解放のたびに大きさを聞く、585 回/ターン）、`guest_uses_block_cache` +6,053 と `xTaskGetCurrentTaskHandle` +5,708 と `_xtos_set_intlevel` +5,574（所有タスクの確認、493 回/ターン）、`guest_malloc`/`guest_free` +6,265。
+- **所有タスクの確認**（`components/pocketjs_guest/src/guest.c` の `guest_uses_block_cache`）は、確保・解放のたびに `xTaskGetCurrentTaskHandle()` を呼ぶ。この関数は割り込みを止めてコアの番号を読むので、1 回あたり約 35 命令と呼び出し 2 段。1 ターン約 2.2 万サイクル（模型の 2.7%）。ゲストのターンは常に所有タスクで走るので、ターンの始めに 1 回確かめて印を持てば消える（未着手、§4 の表）。
+- 窓例外（overflow 2,018 回/ターン）、libgcc の表、`get_u32`/`get_u16` → `memcpy`（356 回/ターン）は A と同じ。
+
+## 8. 特殊命令のランキング（`tools/r5sim/pie_rank.py`）
+
+### 8.1 道具
+
+`observe.py --json` は、全命令の実行回数と、関数の中で後ろへ戻る移行（成立した分岐、`j`、ゼロオーバーヘッドのループの LEND → LBEG）も書き出す。`pie_rank.py` はそれを読み（数秒、記録を読み直さない）、模型で減るサイクルの順に並べる:
+
+| 種類 | 何を探すか | 置き換え |
+| --- | --- | --- |
+| PIE copy / fill / search / reduce / map | 本体が連続した読み書き（帰納変数のポインタ）だけでできたループ | `EE.VLD.128.IP`・`EE.LD.128.USAR.IP`＋`EE.SRC.Q`・`EE.VST.128.IP`・`EE.VCMP.*`・`EE.VADDS.*` など |
+| LOOP | 帰納変数で回数が決まり、戻りが成立分岐（2 バブル）のループ | `LOOPNEZ`/`LOOPGTZ` |
+| MOVcc / MIN/MAX | 1 命令の移動を飛び越す分岐 | `MOVEQZ`/`MOVNEZ`/`MOVLTZ`/`MOVGEZ`、`MIN`/`MAX`/`MINU`/`MAXU` |
+| DIV | 2 の冪の定数による `quos`/`quou`/`rems`/`remu` | シフト・`EXTUI` |
+
+- 退ける理由も出す: 本体に呼び出しがある、ポインタをたどる（番地が読んだ値から来る）、番地を計算している（gather）、1 回の入りで扱うバイトが 16 B のベクタに足りない。
+- PIE の値段は実機の測定（1 命令 1 サイクル、`EE.VST.128.IP` は +0.6、[perf/pie-simd.md](../perf/pie-simd.md)）。整列していない読みは `EE.LD.128.USAR.IP`＋`EE.SRC.Q` の 2 命令、書きは頭の数バイトをスカラーで揃える前提で、頭と尾の合計 15 B と準備 6 サイクルをスカラーで払う（仮定）。命令名は esp32s3-hw-mcp の TRM 抽出（`data/pie_instructions.json`）で確かめ、ページを付ける。
+- **これはパターン照合で、ベクトル化器ではない。** 候補は「命令の組み合わせと回数から見て PIE で速くなりうる量」で、意味・別名・整列の正しさは書き換える側が示す。
+- 照合の試験: `tools/r5sim/test_pie_rank.py`（コピー・塗り・ポインタたどり・分岐越しの移動・回数の決まったループを手で書いて、分類が合うことを見る）。
+
+### 8.2 結果（§7 の実機同等の記録）
+
+| # | 減るサイクル/ターン | % | 種類 | 場所 | 1 回の入り | 置き換え |
+| ---: | ---: | ---: | --- | --- | --- | --- |
+| 1 | 382 | 0.05% | PIE copy | ROM の `memcpy` | 平均 37 B、127.5 回/ターン | `EE.LD.128.USAR.IP`＋`EE.SRC.Q`、`EE.VST.128.IP` |
+| 2 | 105 | 0.01% | PIE fill | ROM の `memset` | 平均 64 B、23.4 回 | `EE.ZERO.Q`、`EE.VST.128.IP` |
+| 3〜11 | 各 8〜56 | ≤0.01% | PIE reduce/search、LOOP、MOVcc | `apply_outcome`・`JS_NewStringLen`・`ksn_core_damage` ほか | | |
+| 計 | 約 750 | 0.1% | | | | |
+
+- 一番時間を使っているループ（`JS_CallInternal` の命令ループ 4.2 万サイクル/ターン、heap の排他区間、`find_own_property`、`heap_caps_free` の探索）は、どれも本体に呼び出しがあるか、ポインタをたどる。ROM の `memcmp` は 1 回 15 B しか比べない。
+- GCC はスカラーの特殊命令を既に使っている（1 ターンあたり実行回数）: `moveqz` 1,832、`movnez` 747、`max`/`maxu` 1,129、`min`/`minu` 579、`nsau` 1,674、`salt`/`saltu` 856、ゼロオーバーヘッドのループの戻り 1,493。残っている「1 命令の移動を飛び越す分岐」は 16 箇所・472 回/ターンだけ。
+- tlsf の `quos` は除数がレジスタ（制御構造の値）なので、この道具の DIV（定数の 2 の冪）には当たらない（§3.3.2 の判断は ESP-IDF の値を読んだもの）。
+
+**読み方**: STRESS の JS のターンでは、PIE や特殊命令への誘導で取れるものはほぼ無い（[turn-jumps-pie.md](turn-jumps-pie.md) §4 の結論を、全命令と実機同等の構成で確かめた）。道具は記録を選ばないので、PIE が効きうるのは描画・ネイティブの面（Shiki、proc）のように連続したデータを回すコード。それを測るには、r5sim にその面を足すか、ターンの外を区切る印が要る。
+
+### 8.3 再現
+
+```bash
+idf.py -C tools/r5sim -B <dir> -DSDKCONFIG=<dir>/sdkconfig -DR5SIM_DEVICE=1 build
+# QEMU と observe.py は §6 と同じ（--json を付ける）
+python tools/r5sim/observe_parts.py obs.json qjs_funcs.txt     # 部品ごと
+python tools/r5sim/pie_rank.py obs.json --top 30 [--min-cycles 100] [--pie-db <esp32s3-hw-mcp>/data/pie_instructions.json]
+python tools/r5sim/test_pie_rank.py
+```
