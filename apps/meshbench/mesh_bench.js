@@ -11,16 +11,23 @@
   const light=new Float32Array([0,0,1,1,1,1]);
   const resource=P.resource();
   V.replace(tx=>{tx.background(0x080808ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});});
+  const telemetry=(phase)=>{if(typeof D.meshQ7Telemetry==='function')console.log('MQ7 TELEMETRY '+JSON.stringify({phase,submitted:f,cumulative:D.meshQ7Telemetry()}));};
+  if(typeof D.meshQ7Preflight==='function'){
+    const report=D.meshQ7Preflight();console.log('MQ7 PREFLIGHT '+JSON.stringify(report));
+    if(!report.ok)throw new Error('Q7 numeric/RAM admission failed');
+  }
   let f=0,done=false,evalCycles=0,submitCycles=0;
   console.log('MB READY warmup=30 measure=120 meshes=4 triangles=8 bytes=4096 work=200000 rows=1 fixture=43495668e4acc308672f9b3ae00784794c47b2b42c30f9c01fc0a2ab1bce4536 build='+D.benchBuild());
+  telemetry('ready');
   globalThis.frame=function(){
     if(done)return;
-    if(f===150){done=true;console.log('MB END n=120 evaluate_cy='+evalCycles+' submit_commit_cy='+submitCycles);return;}
+    if(f===150){done=true;console.log('MB END n=120 evaluate_cy='+evalCycles+' submit_commit_cy='+submitCycles);telemetry('end');return;}
+    if(f===30)telemetry('warmup_ack');
     camera[7]=112+(f%16);camera[8]=64+((f>>4)%4);f++;
     const t0=D.cycles();actor.evaluate(camera,light);const t1=D.cycles();
     P.beginMeshFrame(0x0841,4096,200000,1);actor.submit();P.commit();const t2=D.cycles();
     if(f>30){evalCycles+=(t1-t0)>>>0;submitCycles+=(t2-t1)>>>0;}
     if(f===30)console.log('MB SAMPLE_START f=30');
-    if(f>30&&f%30===0)console.log('MB SAMPLE f='+f+' n='+(f-30)+' evaluate_cy='+evalCycles+' submit_commit_cy='+submitCycles);
+    if(f>30&&f%30===0){console.log('MB SAMPLE f='+f+' n='+(f-30)+' evaluate_cy='+evalCycles+' submit_commit_cy='+submitCycles);telemetry('submitted');}
   };
 })();

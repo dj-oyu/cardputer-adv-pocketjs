@@ -8,6 +8,11 @@
 #include "ksn_render.h"
 #include "ksn_mesh_depth.h"
 #include "ksn_font.h"
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+#include "ksn_mesh_q7_certified.h"
+extern const ksn_mesh_q7_snapshot *pocket_proc_q7_host_snapshot(unsigned,bool);
+extern void pocket_proc_q7_bench_stats(ksn_mesh_q7_stats *);
+#endif
 #include "pocket_av.h"
 #include "system/sys_device.h"
 #include "sound.h"
@@ -92,12 +97,20 @@ int main(int argc,char **argv){
   eval(ctx,"frame()");CHECK(pocket_proc_pending());
   if(frame==79){fail_send=true;CHECK(present()==KSN_IO&&pocket_proc_pending());}
   CHECK(present()==KSN_OK&&!pocket_proc_pending());expected_frame(frame);CHECK(!memcmp(panel,reference,sizeof panel));
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+  const ksn_mesh_q7_snapshot *q=pocket_proc_q7_host_snapshot(0,true);
+  CHECK(q&&q->valid&&!q->fallback&&q->count==8);
+  ksn_mesh_q7_stats st;pocket_proc_q7_bench_stats(&st);
+  CHECK(st.depth_fast&&st.mask_fast&&!st.frame_fallback);
+#endif
   for(unsigned i=0;i<240*135;i++){digest^=panel[i];digest*=16777619u;}
   size_t used,limit;JS_GetMemoryCounters(rt,&used,&limit);if(used>guest_peak)guest_peak=used;CHECK(limit==160*1024);
  }
  CHECK(start==1&&ends==0&&samples==4);unsigned before=presents;eval(ctx,"frame();frame()");CHECK(ends==1&&!pocket_proc_pending()&&!pocket_kasane_needs_present()&&presents==before);
  pocket_proc_mesh_bytes memory;pocket_proc_mesh_memory(&memory);
  printf("MESH_BENCH_HOST strip=%u image_rows=%d frames=150 digest=%08x requested_live=%zu requested_peak=%zu guest_frame_sampled_peak=%zu capacity=%zu workspace=%zu metadata=%zu\n",strip_rows,g_ksn_image_rows,digest,live_bytes,peak_bytes,guest_peak,memory.candidate+memory.committed,memory.workspace,memory.metadata);
+ const char *capture=getenv("MESHBENCH_CAPTURE_RGB565");
+ if(capture){FILE *out=fopen(capture,"wb");CHECK(out);for(unsigned i=0;i<240*135;i++){CHECK(fputc(panel[i]&255,out)!=EOF);CHECK(fputc(panel[i]>>8,out)!=EOF);}CHECK(fclose(out)==0);}
  pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks&&!mb_live);
  if(delayed){CHECK(dma_finishes>=151);printf("MESH_BENCH_DELAYED_PASS strip=%u borrowed_half=%u completion_before_ACK finishes=%u\n",strip_rows,strip_rows==4,dma_finishes);}
  puts("MESH_BENCH_HOST_PASS drawing_reference row_span IO_ACK bounded_END release0 host_cycles_are_stubs");return 0;

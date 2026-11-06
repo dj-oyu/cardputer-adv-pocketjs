@@ -1,3 +1,6 @@
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+#include "ui/kasane/ksn_mesh_q7_certified.h"
+#endif
 #ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
 #include "ui/kasane/ksn_mesh_q7_certified.h"
 #endif
@@ -181,6 +184,16 @@ void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
     }
 }
 
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+void pocket_proc_q7_bench_stats(ksn_mesh_q7_stats *out){
+    if(!out)return;
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    *out=q7_backend_stats;
+#else
+    memset(out,0,sizeof *out);
+#endif
+}
+#endif
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
 /* An image surface's raster cache: one 8-row band of pixels, taken with an

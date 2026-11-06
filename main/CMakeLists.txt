@@ -1,3 +1,4 @@
+# Benchmark-only default options. Do not merge into production defaults.
 # WHEN YOU ADD A .c HERE, ADD IT BEFORE THE FIRST CALLER REFERENCES IT.
 # Several agents and the owner build against this tree continuously and there is
 # no signal that it has gone red except somebody else's build failing. On
@@ -48,16 +49,25 @@ list(APPEND KASANE_SOURCES
 option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
 option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
 option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" OFF)
+option(KASANE_MESH_Q7_BENCH_PREFLIGHT "Compile benchmark-only numeric and RAM admission probes" ON)
+if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND KASANE_MESH_EDGE4_PROTOTYPE)
+    message(FATAL_ERROR "Q7 benchmark preflight requires edge4 OFF")
+endif()
 if(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE)
     if(NOT KASANE_MESH_PREPARED_PROTOTYPE OR KASANE_MESH_EDGE4_PROTOTYPE)
         message(FATAL_ERROR "Q7 certified requires prepared ON and edge4 OFF")
     endif()
+endif()
+if(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE OR KASANE_MESH_Q7_BENCH_PREFLIGHT)
     list(APPEND KASANE_SOURCES "ui/kasane/ksn_mesh_q7_certified.c")
+endif()
+if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_mesh_q7_preflight.c")
 endif()
 if(KASANE_MESH_EDGE4_PROTOTYPE AND NOT KASANE_MESH_PREPARED_PROTOTYPE)
     message(FATAL_ERROR "Mesh edge4 requires KASANE_MESH_PREPARED_PROTOTYPE=ON")
 endif()
-if(KASANE_MESH_PREPARED_PROTOTYPE)
+if(KASANE_MESH_PREPARED_PROTOTYPE OR KASANE_MESH_Q7_BENCH_PREFLIGHT)
     list(APPEND KASANE_SOURCES "ui/kasane/ksn_mesh_prepared.c")
 endif()
 if(KASANE_MESH_EDGE4_PROTOTYPE)
@@ -634,6 +644,15 @@ endif()
 # Default-OFF Q7 experiment: no PIE leaf, strict arithmetic required for certification.
 if(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_Q7_CERTIFIED_PROTOTYPE=1)
+endif()
+if(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE OR KASANE_MESH_Q7_BENCH_PREFLIGHT)
     set_source_files_properties(ui/kasane/ksn_mesh_q7_certified.c ui/kasane/ksn_mesh_prepared.c ui/kasane/ksn_mesh_depth.c PROPERTIES
         COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
+endif()
+
+if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_Q7_BENCH_PREFLIGHT=1)
+    set_source_files_properties(ui/kasane/ksn_mesh_q7_preflight.c PROPERTIES
+        COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
+    set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
