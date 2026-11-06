@@ -8,6 +8,8 @@
 #include "app_session.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "rtc_task.h"
+#include "freertos/semphr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdatomic.h>
@@ -253,8 +255,7 @@ static size_t largest_internal(void) {
     return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
 }
 
-static void attempt_task(void *arg) {
-    (void)arg;
+static void run_auto(void) {
     int64_t t0=esp_timer_get_time();
     size_t before=free_internal();
     // The local low-water mark is the number this feature has to be judged by:
@@ -275,13 +276,78 @@ static void attempt_task(void *arg) {
              (unsigned)low,(unsigned)free_internal(),mon?"":" (shared monitor)");
     atomic_store(&posted,(int)out);
     atomic_store(&active,false);
-    ESP_LOGI(TAG,"AUTOSYNC_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
-    vTaskDelete(NULL);
+}
+
+// The manual sync. The same attempt as above, minus the policy: the person
+// asked, so there is no idle wait and no memory gate, and the outcome is not
+// reported to the policy (a manual success is picked up by the "already
+// synchronized" check in net_autosync_poll(), a failure is the person's to see
+// on the Wi-Fi screen). `active` is shared with the automatic attempt so the two cannot
+// overlap, and so net_autosync_yield() ends either.
+static void run_manual(void) {
+    ESP_LOGI(TAG,"SYNC_START");
+    autosync_outcome_t out=autosync_attempt(&device_ops);
+    // BUSY is the only outcome with no status of its own: the radio was taken
+    // between net_autosync_sync_now()'s look and the acquire.
+    if(out==AUTOSYNC_BUSY)
+        wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_INIT,ESP_ERR_INVALID_STATE);
+    wifi_time_status_t st=wifi_time_status();
+    ESP_LOGI(TAG,"SYNC_DONE %s state=%d stage=%s free=%u",autosync_outcome_name(out),
+             (int)st.state,wifi_time_stage_name(st.stage),(unsigned)free_internal());
+    atomic_store(&active,false);
+}
+
+// ONE permanent task runs both kinds of attempt, its stack a fixed block in RTC
+// fast memory (rtc_task.h). It is not the Wi-Fi worker's task on purpose: an
+// attempt waits on the link, which that worker runs, so sharing a task would
+// have the attempt wait for itself. The starter owns `active` and `job_manual`
+// until the job clears `active`. 2 KiB: autosync measured ~1.45 KiB (#116).
+static TaskHandle_t sync_worker;
+static atomic_bool job_manual;
+
+static void sync_worker_task(void *arg) {
+    (void)arg;
+    for(;;) {
+        ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+        // Read before the job: it clears `active`, after which a new start may
+        // rewrite the flag while this task is still logging.
+        bool manual=atomic_load(&job_manual);
+        if(manual) run_manual(); else run_auto();
+        ESP_LOGI(TAG,"%s_STACK_HWM free=%u",manual?"SYNC":"AUTOSYNC",
+                 (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    }
+}
+
+static bool sync_worker_post(bool manual) {
+    if(!sync_worker) return false;
+    atomic_store(&job_manual,manual);
+    xTaskNotifyGive(sync_worker);
+    return true;
+}
+
+esp_err_t net_autosync_sync_now(void) {
+    bool expected=false;
+    if(wifi_time_busy() ||
+       !atomic_compare_exchange_strong(&active,&expected,true))
+        return ESP_ERR_INVALID_STATE;
+    atomic_store(&abort_req,false);
+    // Before the task exists, so a caller polling at once reads this attempt's
+    // state and not the last one's.
+    wifi_time_status_settle(WIFI_TIME_RUNNING,WIFI_TIME_STAGE_NVS,0);
+    if(!sync_worker_post(true)) {
+        wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_INIT,ESP_ERR_NO_MEM);
+        atomic_store(&active,false);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
 }
 
 void net_autosync_init(void) {
     net_service_init();
     autosync_policy_init(&policy);
+    // Priority 4, below the UI task (5): this task mostly sleeps, and when it
+    // does not it must not take a frame from the home screen.
+    sync_worker=rtc_task_create(sync_worker_task,"timesync",2048,4);
 }
 
 bool net_autosync_enabled(void) { return enabled; }
@@ -346,9 +412,7 @@ void net_autosync_poll(bool eligible, bool key) {
     case AUTOSYNC_START:
         atomic_store(&abort_req,false);
         atomic_store(&active,true);
-        // Below the UI task (5): this task mostly sleeps, and when it does not
-        // it must not take a frame from the home screen.
-        if(xTaskCreate(attempt_task,"autosync",4096,NULL,4,NULL)!=pdPASS) {
+        if(!sync_worker_post(false)) {
             atomic_store(&active,false);
             autosync_policy_record(&policy,AUTOSYNC_BUSY,now);
             ESP_LOGW(TAG,"AUTOSYNC_NO_TASK free=%u",(unsigned)in.free_bytes);

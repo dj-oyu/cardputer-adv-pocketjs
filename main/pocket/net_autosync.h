@@ -129,6 +129,14 @@ void net_autosync_poll(bool eligible, bool key);
 #define AUTOSYNC_YIELD_WAIT_MS 3000
 void net_autosync_yield(const char *why);
 
+// A manual sync (the Wi-Fi screen), on the same path as the automatic one:
+// net_service link -> SNTP -> release, in one task that is created per call.
+// Returns at once; poll wifi_time_status(). ESP_ERR_INVALID_STATE when anything
+// holds the radio (a scan, an app's lease, an automatic attempt). Unlike the
+// automatic attempt it is not subject to the policy -- no idle wait, no memory
+// gate, no counting -- and a yield (net_autosync_yield) still ends it.
+esp_err_t net_autosync_sync_now(void);
+
 // The AUTO TIME SYNC setting. Default on. Turning it on resets the policy, so
 // it is also how a person asks for another try after the boot gave up.
 bool net_autosync_enabled(void);
