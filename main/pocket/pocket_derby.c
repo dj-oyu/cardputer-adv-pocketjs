@@ -2,6 +2,9 @@
 #include "pocket_api.h"
 #include "pocket_shiki_frame.h"
 #include <math.h>
+// sin/cos are QuickJS's Math.sin/Math.cos (pocket_trig.h), so the C series
+// still gives the JS's draw inputs bit for bit (docs/vm/qjs-observe.md sec.18).
+#include "pocket_trig.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -111,7 +114,7 @@ static void course_pose(const derby_course *path,double g,double w,double o[4]){
     const double *e=path->sec+SECTION_TERMS*i;
     double x=e[2],z=e[3],c=e[4],d=e[5];
     if(e[1]!=0){
-        const double r=1/e[1]+path->dnr,C=cos(e[6]+e[1]*g),S=sin(e[6]+e[1]*g);
+        const double r=1/e[1]+path->dnr,C=pocket_cos(e[6]+e[1]*g),S=pocket_sin(e[6]+e[1]*g);
         x+=(S-d)*r;z-=(C-c)*r;c=C;d=S;g=0;
     }
     o[0]=x+g*c-w*d;o[1]=z+g*d+w*c;o[2]=c;o[3]=d;
@@ -124,7 +127,7 @@ static void pose(double g,double w,double o[4]){
     const double *e=course->sec+SECTION_TERMS*i;
     double x=e[2],z=e[3],c=e[4],d=e[5];
     if(e[1]!=0){
-        const double r=1/e[1]+course->dnr,C=cos(e[6]+e[1]*g),S=sin(e[6]+e[1]*g);
+        const double r=1/e[1]+course->dnr,C=pocket_cos(e[6]+e[1]*g),S=pocket_sin(e[6]+e[1]*g);
         x+=(S-d)*r;z-=(C-c)*r;c=C;d=S;g=0;
     }
     o[0]=x+g*c-w*d;o[1]=z+g*d+w*c;o[2]=c;o[3]=d;

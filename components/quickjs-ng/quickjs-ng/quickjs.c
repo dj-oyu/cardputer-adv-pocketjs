@@ -45,6 +45,7 @@
 #include "cutils.h"
 #include "list.h"
 #include "quickjs.h"
+#include "pocket_trig.h"   /* POCKET: Math.sin/cos/tan (docs/vm/qjs-observe.md sec.18) */
 #include "libregexp.h"
 #include "dtoa.h"
 // F1-F3 (docs/vm/builtin-floor-plan.md): builtin names in flash, builtin
@@ -55035,7 +55036,7 @@ static double js_math_atan2(double a, double b)
 }
 static double js_math_cos(double d)
 {
-    return cos(d);
+    return pocket_cos(d);   /* POCKET: pocket_trig.h */
 }
 static double js_math_exp(double d)
 {
@@ -55047,11 +55048,11 @@ static double js_math_log(double d)
 }
 static double js_math_sin(double d)
 {
-    return sin(d);
+    return pocket_sin(d);   /* POCKET: pocket_trig.h */
 }
 static double js_math_tan(double d)
 {
-    return tan(d);
+    return pocket_tan(d);   /* POCKET: pocket_trig.h */
 }
 static double js_math_trunc(double d)
 {
