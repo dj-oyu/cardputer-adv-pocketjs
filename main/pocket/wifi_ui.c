@@ -1,5 +1,6 @@
 #include "wifi_ui.h"
 #include "wifi_time.h"
+#include "net_autosync.h"
 #include "board.h"
 #include "paint.h"
 #include "skk_session.h"
@@ -217,7 +218,7 @@ static bool save(void) {
 // not be made to ask for a passphrase it cannot read back.
 static void start_sync(bool write) {
     if(write && !save()) return;
-    esp_err_t err=wifi_time_sync_start();
+    esp_err_t err=net_autosync_sync_now();
     if(err==ESP_ERR_INVALID_STATE) {
         // The scan and the sync share one radio and one lock. This is what
         // pressing sync during a scan looks like, and it clears on its own.

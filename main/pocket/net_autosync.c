@@ -279,6 +279,45 @@ static void attempt_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+// The manual sync. The same attempt as above, minus the policy: the person
+// asked, so there is no idle wait and no memory gate, and the outcome is not
+// reported to the policy (a manual success is picked up by the "already
+// synchronized" check in net_autosync_poll(), a failure is the person's to see
+// on the Wi-Fi screen). `active` is shared with attempt_task so the two cannot
+// overlap, and so net_autosync_yield() ends either.
+static void manual_task(void *arg) {
+    (void)arg;
+    ESP_LOGI(TAG,"SYNC_START");
+    autosync_outcome_t out=autosync_attempt(&device_ops);
+    // BUSY is the only outcome with no status of its own: the radio was taken
+    // between net_autosync_sync_now()'s look and the acquire.
+    if(out==AUTOSYNC_BUSY)
+        wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_INIT,ESP_ERR_INVALID_STATE);
+    wifi_time_status_t st=wifi_time_status();
+    ESP_LOGI(TAG,"SYNC_DONE %s state=%d stage=%s free=%u",autosync_outcome_name(out),
+             (int)st.state,wifi_time_stage_name(st.stage),(unsigned)free_internal());
+    atomic_store(&active,false);
+    ESP_LOGI(TAG,"SYNC_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
+    vTaskDelete(NULL);
+}
+
+esp_err_t net_autosync_sync_now(void) {
+    bool expected=false;
+    if(wifi_time_busy() ||
+       !atomic_compare_exchange_strong(&active,&expected,true))
+        return ESP_ERR_INVALID_STATE;
+    atomic_store(&abort_req,false);
+    // Before the task exists, so a caller polling at once reads this attempt's
+    // state and not the last one's.
+    wifi_time_status_settle(WIFI_TIME_RUNNING,WIFI_TIME_STAGE_NVS,0);
+    if(xTaskCreate(manual_task,"wifi_time",4096,NULL,4,NULL)!=pdPASS) {
+        wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_INIT,ESP_ERR_NO_MEM);
+        atomic_store(&active,false);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
 void net_autosync_init(void) {
     net_service_init();
     autosync_policy_init(&policy);

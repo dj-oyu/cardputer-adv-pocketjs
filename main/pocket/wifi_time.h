@@ -65,9 +65,9 @@ bool      wifi_time_has_credentials(void);
 // nothing is stored; out is set to "" in that case so the UI can print it.
 esp_err_t wifi_time_ssid_get(char *out, size_t size);
 
-// Starts the one-shot task. Returns immediately; poll wifi_time_status().
-// ESP_ERR_INVALID_STATE if an attempt is already running.
-esp_err_t wifi_time_sync_start(void);
+// There is no sync starter here any more: a manual sync is
+// net_autosync_sync_now() (net_autosync.h), the same link-plus-SNTP path the
+// automatic one takes. Poll wifi_time_status() for its progress either way.
 
 // Safe from any task at any time.
 wifi_time_status_t wifi_time_status(void);
