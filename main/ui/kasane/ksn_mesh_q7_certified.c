@@ -45,14 +45,17 @@ static void make_certificate(ksn_mesh_q7_triangle *t){
  }
  c->valid=true;
 }
-static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,int y,float *out){
- double v=c->p[0][0]*x+c->p[0][1]*y+c->p[0][2],err=c->error[0];
- float lo=(float)(v-err),hi=(float)(v+err);uint32_t a,b;memcpy(&a,&lo,4);memcpy(&b,&hi,4);
- if(a!=b||!isfinite(lo)||(lo!=0&&fabsf(lo)<FLT_MIN))return false;
+static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,double row_product,float *out){
+ double v=c->p[0][0]*x+row_product+c->p[0][2],err=c->error[0];
+ float lo=(float)(v-err),hi=(float)(v+err);
+ /* C union representation reads retain signed-zero equality without the two
+  * out-of-line memcpy calls emitted by the target's no-builtin build. */
+ union {float f;uint32_t u;} lo_bits={.f=lo},hi_bits={.f=hi};
+ if(lo_bits.u!=hi_bits.u||!isfinite(lo)||(lo!=0&&fabsf(lo)<FLT_MIN))return false;
  *out=lo;return true;
 }
-static bool certified_mask(const ksn_mesh_q7_certificate*c,int x,int y,bool *out){
- double v=c->p[1][0]*x+c->p[1][1]*y+c->p[1][2],err=c->error[1];
+static bool certified_mask(const ksn_mesh_q7_certificate*c,int x,double row_product,bool *out){
+ double v=c->p[1][0]*x+row_product+c->p[1][2],err=c->error[1];
  if(v-err>=0){*out=true;return true;}if(v+err<0){*out=false;return true;}return false;
 }
 size_t ksn_mesh_q7_bytes(const ksn_mesh_prepared *p){return !p||!p->valid||p->capacity>64||p->count>p->capacity||p->count>64?0:sizeof(ksn_mesh_q7_snapshot)+p->count*sizeof(ksn_mesh_q7_triangle);}
@@ -99,6 +102,10 @@ static uint16_t original_color(const co_vertex*v,const double*w,bool second){
  const float cw[3]={(float)w[0],(float)w[1],(float)w[2]};
  unsigned r=(unsigned)lroundf(fmaxf(0,fminf(31,cw[0]*(a>>11)+cw[1]*(b>>11)+cw[2]*(c>>11)))),g=(unsigned)lroundf(fmaxf(0,fminf(63,cw[0]*((a>>5)&63)+cw[1]*((b>>5)&63)+cw[2]*((c>>5)&63)))),bl=(unsigned)lroundf(fmaxf(0,fminf(31,cw[0]*(a&31)+cw[1]*(b&31)+cw[2]*(c&31))));return (uint16_t)((r<<11)|(g<<5)|bl);
 }
+static uint16_t fixed_color(const int64_t rgb[3]){
+ unsigned c[3];for(unsigned ch=0;ch<3;ch++){int64_t a=rgb[ch],max=ch==1?63:31;if(a<0)a=0;if(a>max*65536)a=max*65536;c[ch]=(unsigned)((a+32768)>>16);}
+ return (uint16_t)((c[0]<<11)|(c[1]<<5)|c[2]);
+}
 bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,unsigned height,float*z,uint8_t*owner,unsigned rows,ksn_mesh_q7_stats*stats){
  if(!s||!s->valid||s->count>s->capacity||s->capacity>64||!pixels||!z||!owner||!stats||(rows!=1&&rows!=8)||y>135||height>135-y)return false;
  bool rounding=ieee_environment();
@@ -108,10 +115,18 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
   for(unsigned f=0;f<s->count;f++){uint64_t bands=0;for(unsigned band=sy/8;band<=(sy+n-1)/8;band++)bands|=s->bands[band];if(!(bands&(UINT64_C(1)<<f)))continue;const ksn_mesh_q7_triangle*t=&s->triangles[f];const ksn_prepared_triangle*o=&t->original;const co_vertex*v=o->v;
    for(int yy=(int)sy;yy<(int)(sy+n);yy++){int lo,hi;bool original=s->fallback;
     if(original){if(yy<o->top||yy>o->bottom)continue;lo=o->left;hi=o->right;}else if(!ksn_mesh_q7_span(&t->fixed,yy,&lo,&hi))continue;
-    stats->rows++;int64_t color[2][3];for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++){const double *pl=t->fixed.rgb[pal][ch];color[pal][ch]=original?0:llround((pl[0]*lo+pl[1]*yy+pl[2])*65536.);}
+    stats->rows++;double row_x=lo,row_y=yy;int64_t color[2][3];for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++){const double *pl=t->fixed.rgb[pal][ch];color[pal][ch]=original?0:llround((pl[0]*row_x+pl[1]*row_y+pl[2])*65536.);}
+    /* Hoist only the y product, not its addition with the constant: retaining
+     * (p0*x + row_product) + p2 preserves the certificate's rounding order. */
+    bool fast=!original&&rounding&&t->cert.valid;
+    double depth_y=((Q7_CERT_MODE&1)&&fast)?t->cert.p[0][1]*row_y:0,mask_y=0;
+    bool mask_row_ready=false,mask_cached=false,cached_second=false;
+    bool flat=!original;
+    if(flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)if(t->fixed.dx[pal][ch])flat=false;
+    uint16_t flat_rgb[2]={0,0};if(flat){flat_rgb[0]=fixed_color(color[0]);flat_rgb[1]=fixed_color(color[1]);}
     for(int x=lo;x<=hi;x++){
-     double w[3]={0};bool have_weights=false,inside=true;float d=0;bool fast=!original&&rounding&&t->cert.valid;
-     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,yy,&d)){stats->depth_fast++;}else{
+     double w[3]={0};bool have_weights=false,inside=true;float d=0;
+     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d)){stats->depth_fast++;}else{
       stats->depth_exact++;for(unsigned k=0;k<3;k++){w[k]=edge(&o->edge[k],x,yy);if(w[k]<0||(w[k]==0&&!o->edge[k].closed))inside=false;w[k]*=o->inverse;}have_weights=true;
       if(original){stats->original_pixels++;if(!inside)continue;}
       d=(float)(w[0]*v[0].depth+w[1]*v[1].depth+w[2]*v[2].depth);
@@ -120,11 +135,17 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
      if(!isfinite(d))return false;
      unsigned at=(unsigned)(yy-(int)sy)*240+(unsigned)x;
      if(d<=zz[at])stats->depth_reject++;else{zz[at]=d;oo[at]=(uint8_t)f;stats->mask_evals++;bool second;
-      if((Q7_CERT_MODE&2)&&fast&&certified_mask(&t->cert,x,yy,&second))stats->mask_fast++;
+      /* Delay mask work until a depth winner, as before. Cache only a
+       * certified x-constant result; an uncertain sign keeps exact fallback. */
+      if((Q7_CERT_MODE&2)&&fast&&!mask_row_ready){mask_y=t->cert.p[1][1]*row_y;mask_row_ready=true;}
+      if(mask_cached){second=cached_second;stats->mask_fast++;}
+      else if((Q7_CERT_MODE&2)&&fast&&certified_mask(&t->cert,x,mask_y,&second)){
+       stats->mask_fast++;if(t->cert.p[1][0]==0){cached_second=second;mask_cached=true;}
+      }
       else{stats->mask_exact++;if(!have_weights)for(unsigned k=0;k<3;k++)w[k]=edge(&o->edge[k],x,yy)*o->inverse;second=w[0]*v[0].mask+w[1]*v[1].mask+w[2]*v[2].mask>=0;}
-      if(original){pp[at]=original_color(v,w,second);stats->color_fallback++;}else{unsigned c[3];for(unsigned ch=0;ch<3;ch++){int64_t a=color[second][ch],max=ch==1?63:31;if(a<0)a=0;if(a>max*65536)a=max*65536;c[ch]=(unsigned)((a+32768)>>16);}pp[at]=(uint16_t)((c[0]<<11)|(c[1]<<5)|c[2]);}
+      if(original){pp[at]=original_color(v,w,second);stats->color_fallback++;}else pp[at]=flat?flat_rgb[second]:fixed_color(color[second]);
      }
-     if(!original)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
+     if(!original&&!flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
     }
    }
   }
