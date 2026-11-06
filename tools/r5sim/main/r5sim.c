@@ -70,9 +70,42 @@ static void r5_bf(void *c,void *b){(void)c;heap_caps_free(b);}
 static size_t r5_bl(void *c,const void *b){(void)c;return r5_len(b);}
 static const block_cache_backend_t R5_BACKEND={r5_bm,r5_bf,r5_bl,NULL};
 static inline size_t r5_round(size_t n){ size_t a=(n+3U)&~(size_t)3U; return a<12U?12U:a; }
-static void *r5_malloc(void *o,size_t n){(void)o;return n?block_cache_malloc(&r5_cache,n,r5_round(n)):NULL;}
+// Which sizes miss the cache, and which frees it cannot keep, in the measured
+// turns (docs/vm/qjs-observe.md sec.10): index = rounded length / 4, the last
+// slot everything above BLOCK_CACHE_MAX_SIZE.
+static bool r5_hist_on;
+static size_t r5_held_max;
+static uint32_t r5_miss_hist[BLOCK_CACHE_MAX_SIZE/4+2], r5_spill_hist[BLOCK_CACHE_MAX_SIZE/4+2], r5_alloc_hist[BLOCK_CACHE_MAX_SIZE/4+2];
+static inline unsigned r5_slot(size_t n){ return n>BLOCK_CACHE_MAX_SIZE?BLOCK_CACHE_MAX_SIZE/4+1:(unsigned)(n/4); }
+static void *r5_malloc(void *o,size_t n){
+    (void)o;
+    if(!n) return NULL;
+    const uint32_t m=r5_cache.misses;
+    void *p=block_cache_malloc(&r5_cache,n,r5_round(n));
+    if(r5_hist_on&&r5_cache.misses!=m) r5_miss_hist[r5_slot(r5_round(n))]++;
+    if(r5_hist_on) r5_alloc_hist[r5_slot(r5_round(n))]++;
+    return p;
+}
 static void *r5_calloc(void *o,size_t k,size_t n){ if(k&&n>SIZE_MAX/k)return NULL; void *p=r5_malloc(o,k*n); if(p)memset(p,0,k*n); return p; }
-static void r5_free(void *o,void *p){(void)o;block_cache_free(&r5_cache,p);}
+static void r5_free(void *o,void *p){
+    (void)o;
+    const uint32_t q=r5_cache.pushes;
+    const size_t n=p?r5_len(p):0;
+    block_cache_free(&r5_cache,p);
+    if(r5_hist_on&&p&&r5_cache.pushes==q) r5_spill_hist[r5_slot(n)]++;
+}
+static void r5_hist_print(const char *what,const uint32_t *h){
+    uint32_t total=0; for(unsigned i=0;i<BLOCK_CACHE_MAX_SIZE/4+2;i++) total+=h[i];
+    printf("R5SIM %s total=%u:",what,(unsigned)total);
+    for(unsigned k=0;k<16;k++){
+        unsigned best=0; for(unsigned i=1;i<BLOCK_CACHE_MAX_SIZE/4+2;i++) if(h[i]>h[best]) best=i;
+        if(!h[best]) break;
+        if(best==BLOCK_CACHE_MAX_SIZE/4+1) printf(" >%u:%u",(unsigned)BLOCK_CACHE_MAX_SIZE,(unsigned)h[best]);
+        else printf(" %u:%u",best*4,(unsigned)h[best]);
+        ((uint32_t *)h)[best]=0;
+    }
+    printf("\n");
+}
 static void *r5_realloc(void *o,void *p,size_t n){
     if(!p)return r5_malloc(o,n);
     if(!n){r5_free(o,p);return NULL;}
@@ -120,6 +153,8 @@ static void r5_arm_turn(void){                                                  
 #endif
 static uint16_t strip_pixels[240*8];
 static unsigned oom_lines, fail_lines;
+#include "esp_cpu.h"
+#define R5_CC_TAKE() do { if(t>60){ uint32_t d=esp_cpu_get_cycle_count()-cc0; r5_cc+=d; if(d>r5_cc_max)r5_cc_max=d; } } while(0)
 
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
     (void)self;
@@ -220,7 +255,10 @@ void app_main(void) {
     }
 #elif defined(R5SIM_GUEST_ALLOC)
     {
-        static const uint16_t classes[]={12,16,32,36,48,72,80,88};  // guest.c's
+#ifndef R5SIM_CLASSES
+#define R5SIM_CLASSES 12,16,24,28,32,36,48,80   /* guest.c's */
+#endif
+        static const uint16_t classes[]={R5SIM_CLASSES};  // guest.c's unless overridden
         void *probe=heap_caps_malloc(20,R5_CAPS);
         bool direct=probe&&r5_len(probe)==heap_caps_get_allocated_size(probe);
         heap_caps_free(probe);
@@ -262,7 +300,14 @@ void app_main(void) {
 #endif
     printf("R5SIM eval %s\n",ok?"ok":"FAIL");
     unsigned bad_present=0;
+    // The fast measure (docs/vm/qjs-observe.md sec.9): under -icount QEMU's
+    // CCOUNT advances in proportion to executed instructions, so the turns'
+    // CCOUNT is their instruction count up to one constant -- read without
+    // the -d trace (seconds instead of half an hour). Turns 61..120 as the
+    // trace records use.
+    uint64_t r5_cc=0, r5_cc_max=0;
     for(unsigned t=1;ok&&t<=R5SIM_FRAMES;t++) {
+        const uint32_t cc0=esp_cpu_get_cycle_count();
 #ifdef R5SIM_DEVICE
         r5_arm_turn();
         r5_turn_begin(t);
@@ -273,14 +318,20 @@ void app_main(void) {
         while(pocketjs_guest_work_pending(guest)) { conts++; r5_arm_turn(); pocketjs_guest_continue(guest); }
         pocket_kasane_end_turn();
         r5_turn_end(t);
+        R5_CC_TAKE();
 #else
         JSValue b=JS_NewInt32(ctx,0);
+#ifdef R5SIM_GUEST_ALLOC
+        r5_hist_on=t>60;
+        if(r5_hist_on&&block_cache_held(&r5_cache)>r5_held_max) r5_held_max=block_cache_held(&r5_cache);
+#endif
         r5_turn_begin(t);
         JSValue r=JS_Call(ctx,frame,JS_UNDEFINED,1,&b);
         if(JS_IsException(r)) JS_FreeValue(ctx,JS_GetException(ctx));
         JS_FreeValue(ctx,r);
         drain();
         r5_turn_end(t);
+        R5_CC_TAKE();
 #endif
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
@@ -306,9 +357,15 @@ void app_main(void) {
     gcov_dump();
 #endif
 #ifdef R5SIM_GUEST_ALLOC
+    r5_hist_print("alloc_by_size",r5_alloc_hist);
+    r5_hist_print("miss_by_size",r5_miss_hist);
+    r5_hist_print("spill_by_size",r5_spill_hist);
+    printf("R5SIM block_cache held_max=%u\n",(unsigned)r5_held_max);
     printf("R5SIM block_cache hits=%u misses=%u pushes=%u flushes=%u\n",(unsigned)r5_cache.hits,
            (unsigned)r5_cache.misses,(unsigned)r5_cache.pushes,(unsigned)r5_cache.flushes);
 #endif
+    printf("R5SIM ccount turns=61..%u per_turn=%llu max=%llu\n",(unsigned)R5SIM_FRAMES,
+           (unsigned long long)(r5_cc/(R5SIM_FRAMES>60?R5SIM_FRAMES-60:1)),(unsigned long long)r5_cc_max);
     printf("R5SIM done frames=%u oom=%u fail=%u bad_present=%u\n",
            (unsigned)R5SIM_FRAMES,oom_lines,fail_lines,bad_present);
 }

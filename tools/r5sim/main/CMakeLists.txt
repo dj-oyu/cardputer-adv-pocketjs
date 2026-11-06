@@ -51,6 +51,9 @@ endif()
 # Off by default so the R5/PGO records stay comparable.
 if(R5SIM_GUEST_ALLOC)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_GUEST_ALLOC)
+    if(R5SIM_CLASSES)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE "R5SIM_CLASSES=${R5SIM_CLASSES}")
+    endif()
 endif()
 # -DR5SIM_DEVICE=1: the whole firmware session (components/pocketjs_guest)
 # plus the helper-IRAM fragment (docs/vm/qjs-observe.md sec.7).

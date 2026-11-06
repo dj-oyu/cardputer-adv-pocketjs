@@ -9,6 +9,11 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components/quickjs-ng"
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
+# Allocator experiments (docs/vm/qjs-observe.md sec.10): the R3 cache's depth
+# for every component, and with -DR5SIM_GUEST_ALLOC=1 its size classes.
+if(R5SIM_CACHE_DEPTH)
+    idf_build_set_property(COMPILE_DEFINITIONS "BLOCK_CACHE_DEPTH=${R5SIM_CACHE_DEPTH}" APPEND)
+endif()
 project(r5sim)
 # The firmware's QuickJS options that live in main/Kconfig.projbuild, which this
 # project does not have: CONFIG_POCKET_VM_ROM_INTRINSICS (default y) is the

@@ -95,17 +95,31 @@ static size_t n_alloc,b_alloc,turn_hi;
 static size_t tlsf_len(size_t n){n=(n+3)&~(size_t)3;return n<12?12:n;}
 static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;
     if(cur_bytes>turn_hi)turn_hi=cur_bytes;}
+/* DERBY_ALLOC_TRACE=<file>: the allocations of frame() alone (inside
+ * __churn) in tools/test_stress_app.c's STRESS_ALLOC_TRACE format -- "m
+ * <usable> <id>", "f <id>", "r <old> <new> <usable>", "F <frame>" -- for
+ * the block cache's size classes (tools/vmtest/prof/cache_classes.py). The
+ * harness's own per-frame eval stays out: the device calls frame() directly. */
+static FILE *alloc_trace;
+static bool trace_on;
+static uint32_t trace_id=1,trace_frame;
 static void *pk_malloc(void *o,size_t n){(void)o;if(!n)return NULL;
     pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;n_alloc++;b_alloc+=tlsf_len(n);
+    h->pad[0]=trace_id++;
+    if(trace_on)fprintf(alloc_trace,"m %zu %zu\n",tlsf_len(n),h->pad[0]);
     pk_count(tlsf_len(n),0);return h+1;}
 static void *pk_calloc(void *o,size_t c,size_t n){void *p=pk_malloc(o,c*n);if(p)memset(p,0,c*n);return p;}
-static void pk_free(void *o,void *p){(void)o;if(!p)return;pk_hdr *h=(pk_hdr *)p-1;pk_count(0,tlsf_len(h->n));free(h);}
+static void pk_free(void *o,void *p){(void)o;if(!p)return;pk_hdr *h=(pk_hdr *)p-1;
+    if(trace_on)fprintf(alloc_trace,"f %zu\n",h->pad[0]);
+    pk_count(0,tlsf_len(h->n));free(h);}
 static void *pk_realloc(void *o,void *p,size_t n){
     if(!p)return pk_malloc(o,n);
     if(!n){pk_free(o,p);return NULL;}
-    pk_hdr *h=(pk_hdr *)p-1;size_t old=h->n;
+    pk_hdr *h=(pk_hdr *)p-1;size_t old=h->n,old_id=h->pad[0];
     pk_hdr *q=realloc(h,sizeof *q+tlsf_len(n));if(!q)return NULL;
     n_alloc++;b_alloc+=tlsf_len(n);
+    q->pad[0]=trace_id++;
+    if(trace_on)fprintf(alloc_trace,"r %zu %zu %zu\n",old_id,q->pad[0],tlsf_len(n));
     q->n=n;pk_count(tlsf_len(n),tlsf_len(old));return q+1;}
 static size_t pk_usable(const void *p){return p?tlsf_len(((const pk_hdr *)p-1)->n):0;}
 static const JSMallocFunctions PEAK_MF={pk_calloc,pk_malloc,pk_free,pk_realloc,pk_usable};
@@ -696,6 +710,7 @@ static struct { unsigned frames; size_t n,b,hi,gc; } churn[5];
 static size_t churn_n,churn_b,churn_base;
 static JSValue js_churn(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;
+    if(alloc_trace){trace_on=num(argv[0])!=0;if(trace_on)fprintf(alloc_trace,"F %u\n",++trace_frame);}
     if(num(argv[0])){churn_n=n_alloc;churn_b=b_alloc;churn_base=turn_hi=cur_bytes;return JS_UNDEFINED;}
     for(unsigned i=0;i<5;i++)if(!strcmp(scene,CHURN_SCENE[i])){
         churn[i].frames++;churn[i].n+=n_alloc-churn_n;churn[i].b+=b_alloc-churn_b;
@@ -977,6 +992,7 @@ int main(int argc,char **argv){
     if(app_chunks_host_read(list))return 2;
     atexit(app_chunks_host_clear);
     app_registry_select("local.derby");
+    if(getenv("DERBY_ALLOC_TRACE"))alloc_trace=fopen(getenv("DERBY_ALLOC_TRACE"),"w");
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);
     // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
     // POCKET_NO_HARDEN=1 skips it, for host A/B only.

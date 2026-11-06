@@ -21,7 +21,9 @@ extern "C" {
 #endif
 
 #define BLOCK_CACHE_CLASSES 8
+#ifndef BLOCK_CACHE_DEPTH
 #define BLOCK_CACHE_DEPTH 8
+#endif
 #define BLOCK_CACHE_MAX_SIZE 252  // largest class a lookup table covers (4 B steps)
 
 typedef struct {
