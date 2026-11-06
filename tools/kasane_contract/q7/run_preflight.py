@@ -26,3 +26,9 @@ with tempfile.TemporaryDirectory(prefix='q7-preflight-') as directory:
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',
                UBSAN_OPTIONS='halt_on_error=1')
     subprocess.run([str(binary)], check=True, env=env)
+    workspace = Path(directory) / 'workspace'
+    subprocess.run([os.environ.get('CC', 'cc'), *flags,
+                    '-I'+str(ROOT/'main/ui/kasane'),
+                    str(ROOT/'tools/kasane_contract/q7/test_workspace.c'),
+                    '-o', str(workspace)], check=True)
+    subprocess.run([str(workspace)], check=True, env=env)

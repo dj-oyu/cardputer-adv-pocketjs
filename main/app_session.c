@@ -1078,6 +1078,9 @@ void app_stop(void) {
     pocket_memory_reset();
     // Holds guest values (the data regions' windows): before the guest goes.
     pocket_shiki_api_reset();
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+    pocket_shiki_debug_reset();
+#endif
     pocket_api_reset();
     // Read before the runtime goes: app_report() below runs with guest == NULL,
     // so this is the last point at which "was anything still queued" has an

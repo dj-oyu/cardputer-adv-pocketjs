@@ -23,6 +23,9 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "ui/kasane/ksn_shiki.h"
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
+#if defined(KSN_MESH_PREPARED_PROTOTYPE) || defined(KSN_MESH_Q7_CERTIFIED_PROTOTYPE)
+#include "esp_heap_caps.h"
+#endif
 #endif
 #include <math.h>
 #include <stddef.h>
@@ -164,6 +167,27 @@ static void *depth_calloc(size_t n,size_t size){
 #endif
     return calloc(n,size);
 }
+#if defined(KSN_MESH_PREPARED_PROTOTYPE) || defined(KSN_MESH_Q7_CERTIFIED_PROTOTYPE)
+/* IDF calloc only guarantees 4-byte alignment; derived snapshots contain
+ * double/uint64_t members. Keep their checked byte sizes unchanged and their
+ * allocations compatible with free(), including candidate/committed swaps. */
+static void *depth_snapshot_calloc(size_t bytes,size_t alignment){
+#ifdef ESP_PLATFORM
+#ifdef KSN_PROC_HOST_TEST
+    if(depth_fail_after==0)return NULL;
+    if(depth_fail_after>0)--depth_fail_after;
+#endif
+    void *p=heap_caps_aligned_alloc(alignment,bytes,MALLOC_CAP_DEFAULT);
+    if(p)memset(p,0,bytes);
+    return p;
+#else
+    /* Host calloc supplies max_align_t alignment and consumes the OOM hook
+     * exactly once, just like the snapshot's former depth_calloc call. */
+    (void)alignment;
+    return depth_calloc(1,bytes);
+#endif
+}
+#endif
 void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
     if(!out)return;
     *out=(pocket_proc_mesh_bytes){.workspace=depth_rows*KSN_PROC_W*sizeof(float),.metadata=sizeof(ksn_mesh_snapshot)*2*PROC_SURFACES+sizeof depth_workspace+sizeof depth_rows};
@@ -794,7 +818,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     if(surface->depth_candidate.enabled){
         size_t need=ksn_mesh_prepared_bytes(&surface->depth_candidate);
         if(need&&need>surface->prepared_candidate_bytes){
-            ksn_mesh_prepared *fresh=depth_calloc(1,need);
+            ksn_mesh_prepared *fresh=depth_snapshot_calloc(need,_Alignof(ksn_mesh_prepared));
             if(fresh){free(surface->prepared_candidate);surface->prepared_candidate=fresh;
                 surface->prepared_candidate_bytes=need;}
         }
@@ -813,7 +837,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
         if(need&&q7_owner_workspace){
             if(need!=surface->q7_candidate_bytes){
                 free(surface->q7_candidate);surface->q7_candidate=NULL;surface->q7_candidate_bytes=0;
-                surface->q7_candidate=depth_calloc(1,need);
+                surface->q7_candidate=depth_snapshot_calloc(need,_Alignof(ksn_mesh_q7_snapshot));
                 if(surface->q7_candidate)surface->q7_candidate_bytes=need;
             }
             if(surface->q7_candidate&&ksn_mesh_q7_prepare(q7_source,surface->q7_candidate,surface->q7_candidate_bytes)){
