@@ -47,6 +47,13 @@ list(APPEND KASANE_SOURCES
 # Private mesh architecture experiments; never implicitly enabled.
 option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
 option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
+option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" OFF)
+if(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE)
+    if(NOT KASANE_MESH_PREPARED_PROTOTYPE OR KASANE_MESH_EDGE4_PROTOTYPE)
+        message(FATAL_ERROR "Q7 certified requires prepared ON and edge4 OFF")
+    endif()
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_mesh_q7_certified.c")
+endif()
 if(KASANE_MESH_EDGE4_PROTOTYPE AND NOT KASANE_MESH_PREPARED_PROTOTYPE)
     message(FATAL_ERROR "Mesh edge4 requires KASANE_MESH_PREPARED_PROTOTYPE=ON")
 endif()
@@ -622,4 +629,11 @@ if(KASANE_MESH_EDGE4_PROTOTYPE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_EDGE4=1)
     set_source_files_properties(ui/kasane/pie_edge4.c ui/kasane/pie_edge4_raw.c PROPERTIES
         COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
+endif()
+
+# Default-OFF Q7 experiment: no PIE leaf, strict arithmetic required for certification.
+if(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_Q7_CERTIFIED_PROTOTYPE=1)
+    set_source_files_properties(ui/kasane/ksn_mesh_q7_certified.c ui/kasane/ksn_mesh_prepared.c ui/kasane/ksn_mesh_depth.c PROPERTIES
+        COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
 endif()
