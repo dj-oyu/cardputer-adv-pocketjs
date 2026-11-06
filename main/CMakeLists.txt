@@ -44,6 +44,21 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_shiki.c"
     "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
+# Private mesh architecture experiments; never implicitly enabled.
+option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
+option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
+if(KASANE_MESH_EDGE4_PROTOTYPE AND NOT KASANE_MESH_PREPARED_PROTOTYPE)
+    message(FATAL_ERROR "Mesh edge4 requires KASANE_MESH_PREPARED_PROTOTYPE=ON")
+endif()
+if(KASANE_MESH_PREPARED_PROTOTYPE)
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_mesh_prepared.c")
+endif()
+if(KASANE_MESH_EDGE4_PROTOTYPE)
+    if(NOT IDF_TARGET STREQUAL "esp32s3")
+        message(FATAL_ERROR "Mesh edge4 is verified only for ESP32-S3")
+    endif()
+    list(APPEND KASANE_SOURCES "ui/kasane/pie_edge4.c" "ui/kasane/pie_edge4_raw.c")
+endif()
 # Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
 # turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
 option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
@@ -595,3 +610,16 @@ set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "po
 # Keep managed mesh F32 evaluation and coverage order consistent with host.
 set_source_files_properties(ayatsuri/ayatsuri_model.c ayatsuri/ayatsuri_visibility.c ui/kasane/ksn_mesh_depth.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 set_property(SOURCE ui/kasane/ksn_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
+
+# Preserve the external raw-assembly ABI boundary and exact reference FP order.
+if(KASANE_MESH_PREPARED_PROTOTYPE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_PROTOTYPE=1)
+    set_source_files_properties(ui/kasane/ksn_mesh_prepared.c PROPERTIES
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
+    set_property(SOURCE pocket/pocket_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+endif()
+if(KASANE_MESH_EDGE4_PROTOTYPE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_EDGE4=1)
+    set_source_files_properties(ui/kasane/pie_edge4.c ui/kasane/pie_edge4_raw.c PROPERTIES
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
+endif()

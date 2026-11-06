@@ -1,3 +1,6 @@
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+#include "ui/kasane/ksn_mesh_prepared.h"
+#endif
 #include "pocket_shiki_frame.h"
 #include "ui/kasane/ksn_mesh_depth.h"
 #ifdef KSN_PROC_HOST_TEST
@@ -113,6 +116,10 @@ typedef struct {
 typedef struct {
     ksn_proc_frame *candidate,*committed;
     ksn_mesh_snapshot depth_candidate,depth_committed;
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+    ksn_mesh_prepared *prepared_candidate,*prepared_committed;
+    size_t prepared_candidate_bytes,prepared_committed_bytes;
+#endif
     proc_band_sig candidate_sig,committed_sig;
     uint16_t candidate_color,committed_color;
     bool pending,has_committed,repair_required,image_mode;
@@ -142,6 +149,10 @@ void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
     for(unsigned i=0;i<PROC_SURFACES;i++){
         out->candidate+=surfaces[i].depth_candidate.packets.capacity;
         out->committed+=surfaces[i].depth_committed.packets.capacity;
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+        out->metadata+=surfaces[i].prepared_candidate_bytes+surfaces[i].prepared_committed_bytes+
+            2*sizeof(void *)+2*sizeof(size_t);
+#endif
     }
 }
 
@@ -443,6 +454,12 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
     if(!render_painter_rows(surface,frame,pixels,y,rows))return false;
     const ksn_mesh_snapshot *mesh=frame==surface->candidate?
         &surface->depth_candidate:&surface->depth_committed;
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+    const ksn_mesh_prepared *prepared=frame==surface->candidate?
+        surface->prepared_candidate:surface->prepared_committed;
+    if(mesh->enabled&&prepared&&prepared->valid)
+        return ksn_mesh_prepared_render(prepared,pixels,y,rows,depth_workspace,depth_rows);
+#endif
     return !mesh->enabled||ksn_mesh_render(mesh,pixels,y,rows,depth_workspace,depth_rows);
 }
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
@@ -727,6 +744,21 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     proc_surface *surface=&surfaces[building_surface];
     if(surface->depth_candidate.enabled&&surface->candidate->count)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"mesh scope cannot contain painter entries");
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+    /* Derived state is candidate-owned. OOM/over-cap uses unchanged oracle;
+     * preparation cannot mutate committed repair or a submitted DMA loan. */
+    if(surface->prepared_candidate)surface->prepared_candidate->valid=false;
+    if(surface->depth_candidate.enabled){
+        size_t need=ksn_mesh_prepared_bytes(&surface->depth_candidate);
+        if(need&&need>surface->prepared_candidate_bytes){
+            ksn_mesh_prepared *fresh=depth_calloc(1,need);
+            if(fresh){free(surface->prepared_candidate);surface->prepared_candidate=fresh;
+                surface->prepared_candidate_bytes=need;}
+        }
+        if(need&&need<=surface->prepared_candidate_bytes)
+            (void)ksn_mesh_prepare(&surface->depth_candidate,surface->prepared_candidate,surface->prepared_candidate_bytes);
+    }
+#endif
     surface->damage=frame_damage(surface);
     band_signature(surface->candidate,&surface->candidate_sig);
     surface->sig_ready=true;
@@ -964,6 +996,9 @@ void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);shiki_or_sys_free(surfaces[i].committed);
         free(surfaces[i].depth_candidate.packets.data);free(surfaces[i].depth_committed.packets.data);
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+        free(surfaces[i].prepared_candidate);free(surfaces[i].prepared_committed);
+#endif
         surfaces[i]=(proc_surface){0};
     }
     free(depth_workspace);depth_workspace=NULL;depth_rows=0;
@@ -1132,6 +1167,12 @@ void pocket_proc_present_result(ksn_result result){
             surface->committed=surface->candidate;surface->candidate=old;
             ksn_mesh_snapshot old_depth=surface->depth_committed;
             surface->depth_committed=surface->depth_candidate;surface->depth_candidate=old_depth;
+#ifdef KSN_MESH_PREPARED_PROTOTYPE
+            ksn_mesh_prepared *old_prepared=surface->prepared_committed;
+            surface->prepared_committed=surface->prepared_candidate;surface->prepared_candidate=old_prepared;
+            size_t old_bytes=surface->prepared_committed_bytes;
+            surface->prepared_committed_bytes=surface->prepared_candidate_bytes;surface->prepared_candidate_bytes=old_bytes;
+#endif
             surface->committed_color=surface->candidate_color;
             surface->committed_sig=surface->candidate_sig;
             surface->has_committed=true;surface->pending=false;
