@@ -21,8 +21,10 @@ extern "C" {
 #endif
 
 #define BLOCK_CACHE_CLASSES 8
+// 16 since 2026-11-06 (8 before): fewer misses into the heap's deep call
+// chain for ~2.2 KB more held at most (docs/vm/qjs-observe.md sec.17).
 #ifndef BLOCK_CACHE_DEPTH
-#define BLOCK_CACHE_DEPTH 8
+#define BLOCK_CACHE_DEPTH 16
 #endif
 #define BLOCK_CACHE_MAX_SIZE 252  // largest class a lookup table covers (4 B steps)
 

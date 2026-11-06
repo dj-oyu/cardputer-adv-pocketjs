@@ -66,6 +66,7 @@ def main():
     ap.add_argument('traces', nargs='+')
     ap.add_argument('--depth', type=int, default=8)
     ap.add_argument('--classes', default='12,16,32,36,48,72,80,88')   # the previous set
+    ap.add_argument('--no-greedy', action='store_true', help='skip the greedy search (slow on long traces)')
     ap.add_argument('--from', dest='f0', type=int, default=30)
     ap.add_argument('--to', dest='f1', type=int, default=10**9)
     a = ap.parse_args()
@@ -85,7 +86,7 @@ def main():
     # greedy over lengths that appear in any trace, mean hit share over traces
     lengths = sorted({u for m in mix.values() for u in m if u <= 252})
     chosen = []
-    while len(chosen) < MAX_CLASSES:
+    while not a.no_greedy and len(chosen) < MAX_CLASSES:
         best = None
         for u in lengths:
             if u in chosen:
