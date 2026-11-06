@@ -526,8 +526,28 @@ static JSValue js_mesh_q7_telemetry(JSContext *ctx,JSValueConst self,int argc,JS
     q7_num(ctx,o,"candidate",m.candidate);q7_num(ctx,o,"committed",m.committed);
     q7_num(ctx,o,"workspace",m.workspace);q7_num(ctx,o,"metadata",m.metadata);
     ksn_mesh_q7_stats st;pocket_proc_q7_bench_stats(&st);q7_stats(ctx,o,&st);
+
     return o;
 }
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+static JSValue js_mesh_q7_gate(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    JSValue o=JS_NewObject(ctx);if(JS_IsException(o))return o;
+    ksn_mesh_q7_gate_diagnostic d;ksn_mesh_q7_gate_read(&d);
+#define GATE_FIELD(k) q7_num(ctx,o,#k,(double)d.k)
+    GATE_FIELD(first_attempts);GATE_FIELD(first_success);GATE_FIELD(inexact_before);
+    GATE_FIELD(inexact_after);GATE_FIELD(inexact_raised);GATE_FIELD(inexact_cleared);GATE_FIELD(inexact_clear);
+    GATE_FIELD(prepare_attempts);GATE_FIELD(error_reject);GATE_FIELD(inexact_reject);
+    GATE_FIELD(type_reject);GATE_FIELD(coefficient_reject);GATE_FIELD(radius_reject);
+    GATE_FIELD(scale_reject);GATE_FIELD(endpoint_reject);GATE_FIELD(integer_rows);
+    GATE_FIELD(integer_pixels);GATE_FIELD(integer_uncertain);GATE_FIELD(integer_carry_reject);
+    GATE_FIELD(first_fsr_changed);GATE_FIELD(first_fcr_changed);GATE_FIELD(setup_fcr_changed);GATE_FIELD(setup_fsr_changed);
+    GATE_FIELD(fsr_before_or);GATE_FIELD(fsr_after_or);
+    GATE_FIELD(setup_fsr_before_or);GATE_FIELD(setup_fsr_after_or);GATE_FIELD(raw_fsr);
+#undef GATE_FIELD
+    return o;
+}
+#endif
 /* Bounded adaptive native batch per guest frame, never a startup loop.
  * app_session teardown releases an abandoned workspace before the VM dies. */
 static struct {
@@ -548,6 +568,9 @@ static struct {
     bool started_once,finished,ok,admitted,registers_ok;
 } q7_preflight_state;
 void pocket_shiki_debug_reset(void){
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+    ksn_mesh_q7_gate_reset();
+#endif
     heap_caps_free(q7_preflight_state.raw);
     memset(&q7_preflight_state,0,sizeof q7_preflight_state);
 }
@@ -730,6 +753,9 @@ esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
 #ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
         ,JS_CFUNC_DEF("meshQ7Preflight",0,js_mesh_q7_preflight)
         ,JS_CFUNC_DEF("meshQ7Telemetry",0,js_mesh_q7_telemetry)
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+        ,JS_CFUNC_DEF("meshQ7Gate",0,js_mesh_q7_gate)
+#endif
 #endif
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;

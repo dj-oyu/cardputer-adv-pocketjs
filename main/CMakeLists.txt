@@ -45,10 +45,10 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_shiki.c"
     "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
-# Private mesh architecture experiments; never implicitly enabled.
-option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
+# Diagnostic benchmark branch only: prepared/Q7 enabled for fresh broker builds.
+option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" ON)
 option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
-option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" OFF)
+option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" ON)
 option(KASANE_MESH_Q7_BENCH_PREFLIGHT "Compile benchmark-only numeric and RAM admission probes" ON)
 if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND KASANE_MESH_EDGE4_PROTOTYPE)
     message(FATAL_ERROR "Q7 benchmark preflight requires edge4 OFF")
@@ -655,4 +655,13 @@ if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
     set_source_files_properties(ui/kasane/ksn_mesh_q7_preflight.c PROPERTIES
         COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
     set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+endif()
+
+# Diagnostic-only branch: enabled here for a fresh broker build; not a production default.
+option(KASANE_Q7_DEPTH_GATE_DIAGNOSTIC "Observe integer depth gate without changing FP state" ON)
+if(KASANE_Q7_DEPTH_GATE_DIAGNOSTIC)
+    if(NOT KASANE_MESH_Q7_CERTIFIED_PROTOTYPE OR NOT KASANE_MESH_Q7_BENCH_PREFLIGHT OR KASANE_MESH_EDGE4_PROTOTYPE)
+        message(FATAL_ERROR "Depth gate diagnostics require Q7 and preflight ON, edge4 OFF")
+    endif()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_Q7_DEPTH_GATE_DIAGNOSTIC=1)
 endif()

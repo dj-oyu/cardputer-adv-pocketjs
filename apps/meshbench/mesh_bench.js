@@ -11,7 +11,13 @@
   const light=new Float32Array([0,0,1,1,1,1]);
   const resource=P.resource();
   V.replace(tx=>{tx.background(0x080808ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});});
-  const telemetry=(phase)=>{if(typeof D.meshQ7Telemetry==='function')console.log('MQ7 TELEMETRY '+JSON.stringify({phase,submitted:f,cumulative:D.meshQ7Telemetry()}));};
+  const telemetry=(phase)=>{
+    if(typeof D.meshQ7Telemetry==='function')console.log('MQ7 TELEMETRY '+JSON.stringify({phase,submitted:f,cumulative:D.meshQ7Telemetry()}));
+    if(typeof D.meshQ7Gate==='function'){
+      const gate=D.meshQ7Gate(),keys=Object.keys(gate);
+      for(let i=0;i<keys.length;i+=2)console.log('QG '+phase+' f='+f+' part='+(i/2)+'/'+Math.ceil(keys.length/2)+' '+keys.slice(i,i+2).map(k=>k+'='+gate[k]).join(' '));
+    }
+  };
   let preflightDone=typeof D.meshQ7Preflight!=='function',preflightJson=null,preflightOk=false,part=0;
   let f=0,done=false,evalCycles=0,submitCycles=0;
   const ready=()=>{

@@ -11,6 +11,32 @@ _Static_assert(sizeof(float)==4 && sizeof(double)==8,"IEEE storage required");
 #ifndef Q7_CERT_MODE
 #define Q7_CERT_MODE 3
 #endif
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+static ksn_mesh_q7_gate_diagnostic gate_diagnostic;
+#define GATE_COUNT(name) (++gate_diagnostic.name)
+static uint32_t gate_read_fsr(void){
+#if defined(__XTENSA__)
+ uint32_t fsr;__asm__ volatile("rur.fsr %0":"=a"(fsr));return fsr;
+#else
+ return (uint32_t)fetestexcept(FE_ALL_EXCEPT);
+#endif
+}
+static uint32_t gate_read_fcr(void){
+#if defined(__XTENSA__)
+ uint32_t fcr;__asm__ volatile("rur.fcr %0":"=a"(fcr));return fcr;
+#else
+ return (uint32_t)fegetround();
+#endif
+}
+void ksn_mesh_q7_gate_read(ksn_mesh_q7_gate_diagnostic*out){if(out){*out=gate_diagnostic;
+#if defined(__XTENSA__)
+ out->raw_fsr=true;
+#endif
+}}
+void ksn_mesh_q7_gate_reset(void){memset(&gate_diagnostic,0,sizeof gate_diagnostic);}
+#else
+#define GATE_COUNT(name) ((void)0)
+#endif
 static int64_t fld(int64_t n,int64_t d){int64_t q=n/d,r=n%d;return q-((r!=0)&&((r<0)!=(d<0)));}
 static int64_t cld(int64_t n,int64_t d){return -fld(-n,d);}
 bool ksn_mesh_q7_span(const ksn_mesh_q7_extra *t,int y,int *lo,int *hi){
@@ -53,6 +79,43 @@ static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,double row_pro
  union {float f;uint32_t u;} lo_bits={.f=lo},hi_bits={.f=hi};
  if(lo_bits.u!=hi_bits.u||!isfinite(lo)||(lo!=0&&fabsf(lo)<FLT_MIN))return false;
  *out=lo;return true;
+}
+/* Experimental single-binade Q16-ULP row certificate. All rejection paths
+ * retain the existing double certificate and original-depth fallback. */
+typedef struct {int64_t q,step;uint32_t radius,bits;bool valid;} depth_integer_row;
+static double positive_upadd(double a,double b){double v=a+b;return v==0?0:nextafter(v,INFINITY);}
+static double positive_upmul(double a,double b){double v=a*b;return v==0?0:nextafter(v,INFINITY);}
+static bool depth_coeff_safe(double a){return a==0||(fabs(a)>=0x1p-900&&fabs(a)<=0x1p800);}
+static depth_integer_row depth_integer_prepare(const ksn_mesh_q7_certificate*c,int lo,int hi,double by,float first){
+ depth_integer_row r={0};
+ GATE_COUNT(prepare_attempts);
+ if(!isfinite(c->error[0])||c->error[0]<1e-250){GATE_COUNT(error_reject);return r;}
+ if(!(fetestexcept(FE_INEXACT)&FE_INEXACT)){GATE_COUNT(inexact_reject);return r;}
+ if(first==0||!isfinite(first)||fabsf(first)<FLT_MIN){GATE_COUNT(type_reject);return r;}
+ double a=c->p[0][0],constant=c->p[0][2];
+ if(!depth_coeff_safe(a)||!depth_coeff_safe(by)||!depth_coeff_safe(constant)){GATE_COUNT(coefficient_reject);return r;}
+ union{float f;uint32_t u;} repr={.f=first};unsigned exponent=(repr.u>>23)&255;
+ if(!exponent||exponent==255){GATE_COUNT(type_reject);return r;}
+ double scale=ldexp(1.,39-((int)exponent-127));
+ double mag=positive_upadd(positive_upadd(positive_upmul(fabs(a),239),fabs(by)),fabs(constant));
+ double bound=positive_upadd(c->error[0],positive_upmul(8*DBL_EPSILON,mag));
+ double radius=ceil(positive_upmul(bound,scale))+122;
+ if(!isfinite(radius)||radius>=32768||radius<122){GATE_COUNT(radius_reject);return r;}
+ double sign=(repr.u>>31)?-1.:1.;
+ double seed=sign*((a*lo+by)+constant)*scale,step=sign*a*scale;
+ if(!isfinite(seed)||!isfinite(step)||fabs(seed)>0x1p41||fabs(step)>0x1p40){GATE_COUNT(scale_reject);return r;}
+ r.q=llround(seed);r.step=llround(step);r.radius=(uint32_t)radius;
+ int64_t last=r.q+r.step*(hi-lo),lower=INT64_C(1)<<39,upper=(INT64_C(1)<<40)-1;
+ if(r.q<lower+r.radius||r.q>upper-r.radius||last<lower+r.radius||last>upper-r.radius){GATE_COUNT(endpoint_reject);return (depth_integer_row){0};}
+ r.bits=repr.u&UINT32_C(0xff800000);r.valid=true;GATE_COUNT(integer_rows);return r;
+}
+static bool depth_integer_get(const depth_integer_row*r,float*out){
+ unsigned fraction=(unsigned)r->q&65535,dist=fraction>32768?fraction-32768:32768-fraction;
+ if(dist<=r->radius){GATE_COUNT(integer_uncertain);return false;}
+ uint32_t significand=(uint32_t)((uint64_t)r->q>>16)+(fraction>32768);
+ if(significand>=UINT32_C(0x1000000)){GATE_COUNT(integer_carry_reject);return false;}
+ union{uint32_t u;float f;} result={.u=r->bits+(significand-UINT32_C(0x800000))};
+ *out=result.f;GATE_COUNT(integer_pixels);return true;
 }
 static bool certified_mask(const ksn_mesh_q7_certificate*c,int x,double row_product,bool *out){
  double v=c->p[1][0]*x+row_product+c->p[1][2],err=c->error[1];
@@ -124,9 +187,41 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
     bool flat=!original;
     if(flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)if(t->fixed.dx[pal][ch])flat=false;
     uint16_t flat_rgb[2]={0,0};if(flat){flat_rgb[0]=fixed_color(color[0]);flat_rgb[1]=fixed_color(color[1]);}
+    depth_integer_row depth_row={0};float first_depth=0;
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+    uint32_t fsr_before=0,fcr_before=0;bool inexact_before=false;
+    if((Q7_CERT_MODE&1)&&fast){fsr_before=gate_read_fsr();fcr_before=gate_read_fcr();inexact_before=(fetestexcept(FE_INEXACT)&FE_INEXACT)!=0;}
+#endif
+    bool first_certified=(Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,lo,depth_y,&first_depth);
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+    if((Q7_CERT_MODE&1)&&fast){
+     uint32_t fsr_after=gate_read_fsr();bool inexact_after=(fetestexcept(FE_INEXACT)&FE_INEXACT)!=0;
+     if(fsr_after!=fsr_before)GATE_COUNT(first_fsr_changed);
+     if(gate_read_fcr()!=fcr_before)GATE_COUNT(first_fcr_changed);
+     GATE_COUNT(first_attempts);if(first_certified)GATE_COUNT(first_success);
+     if(inexact_before)GATE_COUNT(inexact_before);
+     if(inexact_after)GATE_COUNT(inexact_after);
+     if(!inexact_before&&inexact_after)GATE_COUNT(inexact_raised);
+     if(inexact_before&&!inexact_after)GATE_COUNT(inexact_cleared);
+     if(!inexact_after)GATE_COUNT(inexact_clear);
+     gate_diagnostic.fsr_before_or|=fsr_before;gate_diagnostic.fsr_after_or|=fsr_after;
+    }
+#endif
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+    uint32_t setup_fsr=0,setup_fcr=0;
+    if(first_certified){setup_fsr=gate_read_fsr();setup_fcr=gate_read_fcr();}
+#endif
+    if(first_certified)depth_row=depth_integer_prepare(&t->cert,lo,hi,depth_y,first_depth);
+#ifdef KSN_Q7_DEPTH_GATE_DIAGNOSTIC
+    if(first_certified){uint32_t after=gate_read_fsr();
+     if(after!=setup_fsr)GATE_COUNT(setup_fsr_changed);
+     if(gate_read_fcr()!=setup_fcr)GATE_COUNT(setup_fcr_changed);
+     gate_diagnostic.setup_fsr_before_or|=setup_fsr;gate_diagnostic.setup_fsr_after_or|=after;
+    }
+#endif
     for(int x=lo;x<=hi;x++){
      double w[3]={0};bool have_weights=false,inside=true;float d=0;
-     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d)){stats->depth_fast++;}else{
+     if((x==lo&&first_certified&&(d=first_depth,true))||(depth_row.valid&&depth_integer_get(&depth_row,&d))||(x!=lo&&(Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d))){stats->depth_fast++;}else{
       stats->depth_exact++;for(unsigned k=0;k<3;k++){w[k]=edge(&o->edge[k],x,yy);if(w[k]<0||(w[k]==0&&!o->edge[k].closed))inside=false;w[k]*=o->inverse;}have_weights=true;
       if(original){stats->original_pixels++;if(!inside)continue;}
       d=(float)(w[0]*v[0].depth+w[1]*v[1].depth+w[2]*v[2].depth);
@@ -145,6 +240,7 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
       else{stats->mask_exact++;if(!have_weights)for(unsigned k=0;k<3;k++)w[k]=edge(&o->edge[k],x,yy)*o->inverse;second=w[0]*v[0].mask+w[1]*v[1].mask+w[2]*v[2].mask>=0;}
       if(original){pp[at]=original_color(v,w,second);stats->color_fallback++;}else pp[at]=flat?flat_rgb[second]:fixed_color(color[second]);
      }
+     if(depth_row.valid)depth_row.q+=depth_row.step;
      if(!original&&!flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
     }
    }
