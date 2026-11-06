@@ -675,7 +675,11 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     /* Before the runtime exists: JS_NewRuntime2's own allocations already go
      * through the allocator. PSRAM-preferring guests keep the plain path (the
      * cache's heap is internal RAM). */
-    static const uint16_t classes[] = {12, 16, 32, 36, 48, 72, 80, 88};
+    /* The device's (-m32) lengths, chosen by tools/vmtest/prof/cache_classes.py
+     * over STRESS, DERBY and the vmtest benches (docs/vm/qjs-observe.md
+     * sec.10). The first set came from the 64-bit host, where 72 and 88 are
+     * common; on the device they are ~0% and 24/28 are ~10% of DERBY's. */
+    static const uint16_t classes[] = {12, 16, 24, 28, 32, 36, 48, 80};
     guest->owner_task = guest_task_id();
     guest->block_cache_on = !guest->prefer_psram && guest_tlsf_direct();
     block_cache_init(&guest->block_cache, &BLOCK_CACHE_HEAP, classes,
