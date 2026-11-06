@@ -119,6 +119,20 @@ menu "Pocket VM (diagnostics)"
             Off by default: development builds keep exact positions. A
             shipping build may turn it on when an app needs the room.
 
+    config POCKET_VM_GUEST_ARENA_KB
+        int "Guest allocation arena (KiB, 0 = none)"
+        range 0 128
+        default 64
+        help
+            At guest creation, take this much internal RAM in one piece and
+            make it the guest's own TLSF heap without a lock
+            (docs/vm/qjs-observe.md sec.20): the guest's allocations go there
+            (after the small-block cache) before heap_caps, which skips its
+            region search, its heap lock and three call levels, and keeps the
+            guest's small blocks out of the system heap. Taken only when the
+            largest free block holds it plus 56 KiB; overlays take none. An app
+            that uses less than this holds the rest until it exits.
+
     config POCKET_VM_HELPER_IRAM
         bool "Run the hottest QuickJS helpers from IRAM (about 8 KiB of DRAM)"
         default y

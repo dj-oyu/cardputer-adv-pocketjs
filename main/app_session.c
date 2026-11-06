@@ -1545,6 +1545,9 @@ esp_err_t app_start_test(char test) {
     // being smaller, and lowering it only added a second unknown to a start
     // that was already failing.
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
+    // The arena (docs/vm/qjs-observe.md sec.20) is the foreground guest's: an
+    // overlay runs beside a drawing scene and takes no fixed region.
+    if(overlay_session) gc.arena_bytes=0;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     // The Shiki heap (docs/kasane/shiki-spec.md sec.9.2): one contiguous
     // region for a session whose manifest names kasane.shiki, taken now,

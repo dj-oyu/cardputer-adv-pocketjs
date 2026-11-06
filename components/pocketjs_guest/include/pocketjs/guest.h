@@ -21,6 +21,10 @@ typedef struct {
   size_t heap_limit;
   size_t stack_limit;
   bool prefer_psram;
+  /** Bytes of internal RAM taken at creation as the guest's private arena
+   * (docs/vm/qjs-observe.md sec.20); 0 for none. A caller built against the
+   * shorter struct gets pocketjs_guest_config_defaults()'s value. */
+  size_t arena_bytes;
 } pocketjs_guest_config_t;
 
 typedef struct {

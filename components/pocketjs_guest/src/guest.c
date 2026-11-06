@@ -128,6 +128,7 @@ typedef struct surface {
 
 #ifdef ESP_PLATFORM
 #include "pocketjs/block_cache.h"
+#include "multi_heap.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #ifdef __XTENSA__
@@ -148,6 +149,14 @@ struct pocketjs_guest {
   block_cache_t block_cache;
   uintptr_t owner_task;     /* guest_task_id() of the creating task */
   bool block_cache_on;
+  /* The arena (docs/vm/qjs-observe.md sec.20): one region taken at creation
+   * and made a private TLSF heap with no lock -- the owner's allocations go
+   * there before heap_caps, skipping its region search, its heap lock and
+   * three levels of calls. NULL when it could not be taken. */
+  multi_heap_handle_t arena;
+  uint8_t *arena_lo, *arena_hi;
+  void *_Atomic deferred;   /* arena blocks freed by another task, for the owner */
+  block_cache_backend_t cache_backend;
 #endif
   atomic_uint interrupt_epoch;
   unsigned int handled_interrupt_epoch;
@@ -335,6 +344,54 @@ static inline __attribute__((always_inline)) size_t guest_block_length(const voi
   return g_tlsf_direct == 1 ? tlsf_header_length(pointer)
                             : heap_caps_get_allocated_size((void *)pointer);
 }
+/* The arena's default size: CONFIG_POCKET_VM_GUEST_ARENA_KB (main/Kconfig.projbuild),
+ * or POCKET_GUEST_ARENA_BYTES for builds without that Kconfig (r5sim). */
+#ifndef POCKET_GUEST_ARENA_BYTES
+#ifdef CONFIG_POCKET_VM_GUEST_ARENA_KB
+#define POCKET_GUEST_ARENA_BYTES ((size_t)CONFIG_POCKET_VM_GUEST_ARENA_KB * 1024U)
+#else
+#define POCKET_GUEST_ARENA_BYTES (64U * 1024U)
+#endif
+#endif
+/* What the arena must leave: pocket_net.c's NET_RADIO_MIN_FREE, the largest
+ * single need after a guest exists. */
+#define GUEST_ARENA_LEAVE (56U * 1024U)
+static inline __attribute__((always_inline)) bool
+guest_in_arena(const pocketjs_guest_t *guest, const void *pointer) {
+  return (const uint8_t *)pointer >= guest->arena_lo &&
+         (const uint8_t *)pointer < guest->arena_hi;
+}
+/* A block back to whichever heap it came from (owner task only for the
+ * arena: it has no lock). */
+static inline __attribute__((always_inline)) void
+guest_heap_free(pocketjs_guest_t *guest, void *pointer) {
+  if (guest_in_arena(guest, pointer))
+    multi_heap_free(guest->arena, pointer);
+  else
+    heap_caps_free(pointer);
+}
+/* Another task freed an arena block: a lock-free stack through the block's
+ * first word, given back by the owner's next allocation or free. QuickJS
+ * runs on the owner only; this keeps a stray free correct, not fast. */
+static void guest_defer_free(pocketjs_guest_t *guest, void *pointer) {
+  void *head = atomic_load_explicit(&guest->deferred, memory_order_relaxed);
+  do {
+    *(void **)pointer = head;
+  } while (!atomic_compare_exchange_weak_explicit(&guest->deferred, &head, pointer,
+                                                  memory_order_release,
+                                                  memory_order_relaxed));
+}
+static void guest_drain_deferred(pocketjs_guest_t *guest) {
+  void *block = atomic_exchange_explicit(&guest->deferred, NULL, memory_order_acquire);
+  while (block != NULL) {
+    void *next = *(void **)block;
+    multi_heap_free(guest->arena, block);
+    block = next;
+  }
+}
+static void block_cache_guest_free(void *ctx, void *block) {
+  guest_heap_free(ctx, block);
+}
 static void *block_cache_heap_malloc(void *ctx, size_t size) {
   (void)ctx;
   return heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
@@ -392,10 +449,14 @@ static void *guest_malloc(void *opaque, size_t size) {
     /* block_cache_malloc's policy, with heap_caps called directly. */
     void *block = block_cache_pop(&guest->block_cache, guest_tlsf_round(size));
     if (block == NULL) {
-      block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+      if (atomic_load_explicit(&guest->deferred, memory_order_relaxed) != NULL)
+        guest_drain_deferred(guest);
+      if (guest->arena != NULL) block = multi_heap_malloc(guest->arena, size);
+      if (block == NULL) block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
       if (block == NULL && block_cache_held(&guest->block_cache) != 0) {
         block_cache_flush(&guest->block_cache);
-        block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+        if (guest->arena != NULL) block = multi_heap_malloc(guest->arena, size);
+        if (block == NULL) block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
       }
     }
     return block;
@@ -423,14 +484,17 @@ static void *guest_calloc(void *opaque, size_t count, size_t size) {
 }
 
 static void guest_free(void *opaque, void *pointer) {
-  if (guest_uses_block_cache(opaque)) {
-    if (pointer != NULL &&
-        !block_cache_push(&((pocketjs_guest_t *)opaque)->block_cache, pointer,
-                          guest_block_length(pointer)))
-      heap_caps_free(pointer);
+  pocketjs_guest_t *guest = opaque;
+  if (pointer == NULL) return;
+  if (guest_uses_block_cache(guest)) {
+    if (!block_cache_push(&guest->block_cache, pointer, guest_block_length(pointer)))
+      guest_heap_free(guest, pointer);
     return;
   }
-  heap_caps_free(pointer);
+  if (guest != NULL && guest_in_arena(guest, pointer))
+    guest_defer_free(guest, pointer);
+  else
+    heap_caps_free(pointer);
 }
 
 static size_t guest_usable_size(const void *pointer) {
@@ -445,6 +509,19 @@ static void *guest_realloc(void *opaque, void *pointer, size_t size) {
   if (size == 0U) {
     guest_free(opaque, pointer);
     return NULL;
+  }
+  if (guest != NULL && guest_in_arena(guest, pointer)) {
+    /* In place or moved inside the arena when it can; else anywhere. */
+    if (guest_task_id() == guest->owner_task) {
+      void *moved = multi_heap_realloc(guest->arena, pointer, size);
+      if (moved != NULL) return moved;
+    }
+    const size_t old = guest_block_length(pointer);
+    void *next = guest_malloc(opaque, size);
+    if (next == NULL) return NULL;
+    memcpy(next, pointer, old < size ? old : size);
+    guest_free(opaque, pointer);
+    return next;
   }
   if (guest != NULL && guest->prefer_psram) {
     return heap_caps_realloc_prefer(pointer, size, 2, GUEST_CAPS_PSRAM,
@@ -668,6 +745,7 @@ void pocketjs_guest_config_defaults(pocketjs_guest_config_t *config) {
       .heap_limit = 4U * 1024U * 1024U,
       .stack_limit = 256U * 1024U,
       .prefer_psram = true,
+      .arena_bytes = POCKET_GUEST_ARENA_BYTES,
   };
 }
 
@@ -698,7 +776,31 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     static const uint16_t classes[] = {12, 16, 24, 28, 32, 36, 48, 80};
     guest->owner_task = guest_task_id();
     guest->block_cache_on = !guest->prefer_psram && guest_tlsf_direct();
-    block_cache_init(&guest->block_cache, &BLOCK_CACHE_HEAP, classes,
+    /* The arena, while the heap is clean: only with the cache's direct block
+     * lengths (the arena's TLSF headers read the same; heap_caps knows
+     * nothing of the arena's blocks). */
+    atomic_init(&guest->deferred, NULL);
+    const size_t arena_bytes =
+        config->struct_size >= offsetof(pocketjs_guest_config_t, arena_bytes) + sizeof(size_t)
+            ? config->arena_bytes : (size_t)POCKET_GUEST_ARENA_BYTES;
+    /* Taken only with room left over in one piece, so a later radio start or
+     * a large native allocation is not refused for it. */
+    if (guest->block_cache_on && arena_bytes >= 4096U &&
+        heap_caps_get_largest_free_block(GUEST_CAPS_INTERNAL) >= arena_bytes + GUEST_ARENA_LEAVE) {
+      uint8_t *region = heap_caps_malloc(arena_bytes, GUEST_CAPS_INTERNAL);
+      guest->arena = region ? multi_heap_register(region, arena_bytes) : NULL;
+      if (guest->arena != NULL) {
+        guest->arena_lo = region;
+        guest->arena_hi = region + arena_bytes;
+      } else if (region != NULL) {
+        heap_caps_free(region);
+      }
+    }
+    ESP_LOGI("guest", "GUEST_ARENA bytes=%u", guest->arena != NULL ? (unsigned)arena_bytes : 0U);
+    guest->cache_backend = BLOCK_CACHE_HEAP;
+    guest->cache_backend.free = block_cache_guest_free;
+    guest->cache_backend.ctx = guest;
+    block_cache_init(&guest->block_cache, &guest->cache_backend, classes,
                      sizeof(classes) / sizeof(classes[0]), guest->block_cache_on);
   }
 #endif
@@ -1360,6 +1462,13 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
     block_cache_flush(&guest->block_cache);
 #endif
   }
+#ifdef ESP_PLATFORM
+  if (guest->arena != NULL) {
+    guest_drain_deferred(guest);
+    heap_caps_free(guest->arena_lo);   /* every block in it is gone with the runtime */
+    guest->arena = NULL;
+  }
+#endif
   while (guest->surfaces) {
     surface_t *entry = guest->surfaces;
     guest->surfaces = entry->next;

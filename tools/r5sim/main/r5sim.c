@@ -305,7 +305,7 @@ void app_main(void) {
     pocket_kasane_end_turn();
     ok=ok&&present();
     unsigned conts=0,frame_err=0;
-    const pocketjs_guest_frame_t input={.struct_size=sizeof(input),.buttons=0,.analog=0x8080};
+    pocketjs_guest_frame_t input={.struct_size=sizeof(input),.buttons=0,.analog=0x8080};
 #else
     bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),R5SIM_APP_NAME)&&present();
     // The device's arrangement (main/app_session.c, pocketjs_guest_create).
@@ -327,6 +327,11 @@ void app_main(void) {
     for(unsigned t=1;ok&&t<=R5SIM_FRAMES;t++) {
         const uint32_t cc0=esp_cpu_get_cycle_count();
 #ifdef R5SIM_DEVICE
+#ifdef R5SIM_LEVEL_UP
+        // STRESS L1 -> L2 -> L3 as the host test does at 300/600: here at
+        // 40/80, so the run reaches L3's deliberate OOM and its recovery.
+        input.buttons=(t==40||t==80)?0x4000u:0u;
+#endif
         r5_arm_turn();
         r5_turn_begin(t);
         if(pocketjs_guest_frame(guest,&input)!=ESP_OK) frame_err++;
