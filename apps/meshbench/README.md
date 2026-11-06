@@ -82,3 +82,36 @@ capまでにENDがなければtimeout/partialとして記録し、120 samples完
 host前提の残件と、専任ownerの安全なsource-cache・同caller recovery確認が解決するまで
 hardware job/fetch/flashを行わない。既存のfetch→build→flash後のholding ticketを
 session.requestで消費する手順に従う必要があり、app_sessionをsubmit.afterへ直接渡さない。
+
+## 起動時のfixture展開（2026-11-06）
+
+1,280要素の数値配列literalを、`\\xNN` byte文字列と添字によるUint8Arrayへのコピーに
+置き換えた。generatorは生成したdecoderを別のNode VMで実行し、modelOpenへ渡される
+全byteがcold fixtureと一致することを検査する。fixture/hash、modelOpen以後の処理、
+160 KiBのguest上限、renderer、app登録は変えない。sourceは4,654 Bから6,676 Bへ増えるが、
+大量の数値literalのcompile用領域と一時JS配列を避ける。
+
+同一64-bit host・real QuickJS・同一allocatorで旧sourceと新sourceを比較した結果:
+
+- 起動JS_Eval中のguest usable byte peak: 114,592 → 63,104 B。
+- 同区間の最大allocation/reallocation要求: 33,520 → 4,915 B。
+- eval直前のusable byte: 両方44,700 B、eval後: 60,420 → 58,984 B。
+- 8条件すべて150 panels、digest `924db725`、partial IO/retry/ACK/ENDと解放後ledger 0を確認。
+
+`meshbench_eval_alloc.h`は4 B丸め・最小12 Bのusable lengthを模倣する。
+usable peakはQuickJSのblockごとのquota overheadを含まない。host pointerは8 B、
+JSValueは16 Bであり、実機layout、TLSFの断片化、block cache、realloc移動中の物理peakを
+再現しない。これらの数値はS3実測ではない。最大要求の計測はallocatorへ届いた要求だけで、
+先にQuickJSのquota判定で拒否された要求を含まない。
+
+`python tools/kasane_contract/run_meshbench_app.py` は既定で起動時の単一要求に16 KiBの
+上限を課し、巨大literalへの回帰を検出する。これはtestのstressorであり、製品の上限や
+実機のlargest-free-blockではない。`--request-ceiling 0`は比較計測用に制限を外す。
+LSanがptrace環境で実行できないhostでは`--no-lsan`を明示する。今回の8条件はこのoptionで
+ASan/UBSanとallocation ledgerを検査した。LSan成功とは主張しない。
+
+実機では以前、起動評価が`OOM first_req=33520 used=53280`で失敗した。
+`native_launch`は起動失敗を`unsupported`へ変換するため、この表示だけでapp未登録と
+判断してはいけない。今回のhost検証は実機での起動成功の代わりにはならない。
+次は通常defaultsの別builddir/sdkconfig、同一fixture、`MB READY`から120 samplesの
+`MB END`、STOPと復旧確認までを専任ownerが検証する。

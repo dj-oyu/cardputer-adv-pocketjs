@@ -1,4 +1,5 @@
 """Compile the real public mesh app on the host; no device or external inputs."""
+import argparse
 import hashlib
 import json
 import os
@@ -59,8 +60,18 @@ def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cach
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--no-lsan', action='store_true', help='Disable LSan only for hosts where ptrace prevents it; ASan/UBSan and allocation ledgers remain enabled')
+    parser.add_argument('--request-ceiling', type=int, default=16384, help='Maximum startup guest allocation request in bytes (0: unlimited); a host stressor, not target RAM')
+    args = parser.parse_args()
+    if args.request_ceiling < 0:
+        parser.error('--request-ceiling must be nonnegative')
     subprocess.run(['node', 'apps/meshbench/generate.cjs', '--check'], cwd=ROOT, check=True)
     binary, out, env = build_harness()
+    if args.no_lsan:
+        env['ASAN_OPTIONS'] = 'detect_leaks=0:abort_on_error=1'
+        print('LSAN_DISABLED host restriction; requested allocation release is checked separately', flush=True)
+    env['MESHBENCH_REQUEST_CEILING'] = str(args.request_ceiling)
     digests = []
     for rows, image_rows, delayed in [(r, i, d) for r in [4, 8] for i in [0, 1] for d in [0, 1]]:
         try:

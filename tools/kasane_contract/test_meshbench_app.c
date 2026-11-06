@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "host_requested_alloc.h"
+#include "meshbench_eval_alloc.h"
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"%s:%d %s\n",__FILE__,__LINE__,#x);exit(1);}}while(0)
 void host_capabilities_clear(void);
 int32_t pocket_av_ui_current_player(void){return 0;}
@@ -77,11 +78,15 @@ static void expected_frame(unsigned f){
 int main(int argc,char **argv){
  CHECK(argc==3||argc==4);strip_rows=(unsigned)atoi(argv[1]);g_ksn_image_rows=atoi(argv[2]);delayed=argc==4&&atoi(argv[3]);CHECK(strip_rows==4||strip_rows==8);
  const app_manifest_t *manifest=app_registry_find("local.meshbench");CHECK(manifest&&app_registry_wants(manifest,"kasane.shapes")&&app_registry_wants(manifest,"kasane.shiki.debug"));
- static char source[8192];FILE *f=fopen("apps/meshbench/mesh_bench.js","rb");CHECK(f);size_t n=fread(source,1,sizeof source-1,f);CHECK(feof(f));fclose(f);source[n]=0;
- JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
+ static char source[8192];const char *source_path=getenv("MESHBENCH_SOURCE");FILE *f=fopen(source_path?source_path:"apps/meshbench/mesh_bench.js","rb");CHECK(f);size_t n=fread(source,1,sizeof source-1,f);CHECK(feof(f));fclose(f);source[n]=0;
+ JSRuntime *rt=JS_NewRuntime2(&MB_ALLOC,NULL);CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
  host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(pocket_kasane_install(ctx,NULL)==ESP_OK);CHECK(pocket_shape_install(ctx,NULL)==ESP_OK);
  JSValue g=JS_GetGlobalObject(ctx),d=JS_NewObject(ctx);JS_SetPropertyStr(ctx,d,"cycles",JS_NewCFunction(ctx,cycles,"cycles",0));JS_SetPropertyStr(ctx,d,"benchBuild",JS_NewCFunction(ctx,build,"benchBuild",0));JS_SetPropertyStr(ctx,g,"shikiDebug",d);JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,log_line,"log",1));JS_FreeValue(ctx,g);
- eval(ctx,"globalThis.pocket={kasane,ayatsuri,shikiDebug};globalThis.console={log:__log}");eval(ctx,source);CHECK(ready==1);CHECK(present()==KSN_OK);
+ eval(ctx,"globalThis.pocket={kasane,ayatsuri,shikiDebug};globalThis.console={log:__log}");
+ const char *ceiling=getenv("MESHBENCH_REQUEST_CEILING");mb_ceiling=ceiling?(size_t)strtoul(ceiling,NULL,10):0;
+ size_t eval_before=mb_live;mb_peak=mb_live;mb_tracking=true;
+ eval(ctx,source);mb_tracking=false;CHECK(ready==1&&!mb_rejected);
+ printf("MESH_BENCH_EVAL usable_before=%zu usable_peak=%zu usable_after=%zu largest_request=%zu ceiling=%zu rejected=%zu host_pointer_bytes=%zu host_jsvalue_bytes=%zu tlsf_length_model_only=1\n",eval_before,mb_peak,mb_live,mb_max_request,mb_ceiling,mb_rejected,sizeof(void*),sizeof(JSValue));CHECK(present()==KSN_OK);
  uint32_t digest=2166136261u;size_t guest_peak=0;
  for(unsigned frame=0;frame<150;frame++){
   eval(ctx,"frame()");CHECK(pocket_proc_pending());
@@ -93,7 +98,7 @@ int main(int argc,char **argv){
  CHECK(start==1&&ends==0&&samples==4);unsigned before=presents;eval(ctx,"frame();frame()");CHECK(ends==1&&!pocket_proc_pending()&&!pocket_kasane_needs_present()&&presents==before);
  pocket_proc_mesh_bytes memory;pocket_proc_mesh_memory(&memory);
  printf("MESH_BENCH_HOST strip=%u image_rows=%d frames=150 digest=%08x requested_live=%zu requested_peak=%zu guest_frame_sampled_peak=%zu capacity=%zu workspace=%zu metadata=%zu\n",strip_rows,g_ksn_image_rows,digest,live_bytes,peak_bytes,guest_peak,memory.candidate+memory.committed,memory.workspace,memory.metadata);
- pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks);
+ pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks&&!mb_live);
  if(delayed){CHECK(dma_finishes>=151);printf("MESH_BENCH_DELAYED_PASS strip=%u borrowed_half=%u completion_before_ACK finishes=%u\n",strip_rows,strip_rows==4,dma_finishes);}
  puts("MESH_BENCH_HOST_PASS drawing_reference row_span IO_ACK bounded_END release0 host_cycles_are_stubs");return 0;
 }
