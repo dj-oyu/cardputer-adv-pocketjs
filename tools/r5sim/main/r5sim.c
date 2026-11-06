@@ -53,6 +53,35 @@ void pocket_pixel_reset(void){}
 bool pocket_pixel_pending(void){return false;}
 void pocket_pixel_present_result(ksn_result r){(void)r;}
 
+#ifdef R5SIM_GUEST_ALLOC
+// The firmware guest's allocator (components/pocketjs_guest/src/guest.c,
+// -DR5SIM_GUEST_ALLOC=1): the R3 small-block cache over heap_caps, same
+// classes, block length read from the tlsf header. Without it the image runs
+// JS_NewRuntime's malloc -> tlsf + heap lock on every allocation, which was
+// 44% of a turn's instructions (docs/vm/qjs-observe.md sec.2) -- a cost the
+// device does not pay on a cache hit.
+#include "esp_heap_caps.h"
+#include "pocketjs/block_cache.h"
+#define R5_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+static block_cache_t r5_cache;
+static size_t r5_len(const void *p){ return *(const uint32_t *)((const char *)p-4)&~(uint32_t)3U; }
+static void *r5_bm(void *c,size_t n){(void)c;return heap_caps_malloc(n,R5_CAPS);}
+static void r5_bf(void *c,void *b){(void)c;heap_caps_free(b);}
+static size_t r5_bl(void *c,const void *b){(void)c;return r5_len(b);}
+static const block_cache_backend_t R5_BACKEND={r5_bm,r5_bf,r5_bl,NULL};
+static inline size_t r5_round(size_t n){ size_t a=(n+3U)&~(size_t)3U; return a<12U?12U:a; }
+static void *r5_malloc(void *o,size_t n){(void)o;return n?block_cache_malloc(&r5_cache,n,r5_round(n)):NULL;}
+static void *r5_calloc(void *o,size_t k,size_t n){ if(k&&n>SIZE_MAX/k)return NULL; void *p=r5_malloc(o,k*n); if(p)memset(p,0,k*n); return p; }
+static void r5_free(void *o,void *p){(void)o;block_cache_free(&r5_cache,p);}
+static void *r5_realloc(void *o,void *p,size_t n){
+    if(!p)return r5_malloc(o,n);
+    if(!n){r5_free(o,p);return NULL;}
+    return heap_caps_realloc(p,n,R5_CAPS);
+}
+static size_t r5_usable(const void *p){return p?r5_len(p):0;}
+static const JSMallocFunctions R5_ALLOC={r5_calloc,r5_malloc,r5_free,r5_realloc,r5_usable};
+#endif
+
 extern const char stress_js_start[] asm("_binary_stress_r5_js_start");
 extern const char stress_js_end[] asm("_binary_stress_r5_js_end");
 
@@ -155,7 +184,19 @@ static void gcov_dump(void) {
 #endif
 
 void app_main(void) {
+#ifdef R5SIM_GUEST_ALLOC
+    {
+        static const uint16_t classes[]={12,16,32,36,48,72,80,88};  // guest.c's
+        void *probe=heap_caps_malloc(20,R5_CAPS);
+        bool direct=probe&&r5_len(probe)==heap_caps_get_allocated_size(probe);
+        heap_caps_free(probe);
+        printf("R5SIM guest_alloc direct=%d\n",(int)direct);
+        block_cache_init(&r5_cache,&R5_BACKEND,classes,sizeof(classes)/sizeof(classes[0]),direct);
+    }
+    rt=JS_NewRuntime2(&R5_ALLOC,NULL);
+#else
     rt=JS_NewRuntime();
+#endif
     ctx=JS_NewContext(rt); host_capabilities_clear();
     pocket_kasane_install(ctx,NULL);
     // Rendering only has to consume each submission; a 16x8 viewport keeps the
@@ -195,6 +236,10 @@ void app_main(void) {
     JS_FreeValue(ctx,g);
 #ifdef R5SIM_PGO_GEN
     gcov_dump();
+#endif
+#ifdef R5SIM_GUEST_ALLOC
+    printf("R5SIM block_cache hits=%u misses=%u pushes=%u flushes=%u\n",(unsigned)r5_cache.hits,
+           (unsigned)r5_cache.misses,(unsigned)r5_cache.pushes,(unsigned)r5_cache.flushes);
 #endif
     printf("R5SIM done frames=%u oom=%u fail=%u bad_present=%u\n",
            (unsigned)R5SIM_FRAMES,oom_lines,fail_lines,bad_present);
