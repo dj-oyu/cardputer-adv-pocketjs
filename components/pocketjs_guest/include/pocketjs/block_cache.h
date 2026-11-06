@@ -62,6 +62,11 @@ void *block_cache_malloc(block_cache_t *cache, size_t size, size_t rounded);
 // it to the backend.
 void block_cache_free(block_cache_t *cache, void *block);
 
+// The same, for a caller that already knows the block's real length (what the
+// backend's length() would return): the guest reads it inline from the tlsf
+// header, saving the indirect call on every free.
+void block_cache_free_sized(block_cache_t *cache, void *block, size_t length);
+
 // Every cached block back to the backend.
 void block_cache_flush(block_cache_t *cache);
 

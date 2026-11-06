@@ -310,7 +310,7 @@ static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
  * (~110 cycles, docs/vm/r3-small-block-cache.md sec.7). Used only after
  * guest_tlsf_direct() has seen the two agree on this build's heap. */
 static int g_tlsf_direct = -1;
-static inline size_t tlsf_header_length(const void *pointer) {
+static inline __attribute__((always_inline)) size_t tlsf_header_length(const void *pointer) {
   return *(const uint32_t *)((const char *)pointer - 4) & ~(uint32_t)3U;
 }
 static bool guest_tlsf_direct(void) {
@@ -331,7 +331,7 @@ static bool guest_tlsf_direct(void) {
   }
   return g_tlsf_direct == 1;
 }
-static inline size_t guest_block_length(const void *pointer) {
+static inline __attribute__((always_inline)) size_t guest_block_length(const void *pointer) {
   return g_tlsf_direct == 1 ? tlsf_header_length(pointer)
                             : heap_caps_get_allocated_size((void *)pointer);
 }
@@ -352,7 +352,7 @@ static const block_cache_backend_t BLOCK_CACHE_HEAP = {
 /* tlsf's own rounding of a request (adjust_request_size): what the cache's
  * classes are keyed on. The cache only ever holds blocks whose real length
  * is a class, so a hit is never shorter than this. */
-static inline size_t guest_tlsf_round(size_t size) {
+static inline __attribute__((always_inline)) size_t guest_tlsf_round(size_t size) {
   size_t aligned = (size + 3U) & ~(size_t)3U;
   return aligned < 12U ? 12U : aligned;
 }
@@ -365,7 +365,10 @@ static inline size_t guest_tlsf_round(size_t size) {
  * portasm.S), so one RUR names the task without masking anything. Two live
  * tasks never share it; inside an ISR it is the interrupted task's, as the
  * TCB read was. */
-static inline uintptr_t guest_task_id(void) {
+/* always_inline on these few-instruction helpers of every allocation and
+ * free: -Os GCC kept each a call (entry/retw, two taken transfers, window
+ * pressure) inside the allocator's own call (docs/vm/qjs-observe.md sec.13). */
+static inline __attribute__((always_inline)) uintptr_t guest_task_id(void) {
 #if defined(__XTENSA__) && XCHAL_HAVE_THREADPTR
   uintptr_t tp;
   __asm__ volatile("rur.threadptr %0" : "=a"(tp));
@@ -374,7 +377,8 @@ static inline uintptr_t guest_task_id(void) {
   return (uintptr_t)xTaskGetCurrentTaskHandle();
 #endif
 }
-static inline bool guest_uses_block_cache(const pocketjs_guest_t *guest) {
+static inline __attribute__((always_inline)) bool
+guest_uses_block_cache(const pocketjs_guest_t *guest) {
   return guest != NULL && guest->block_cache_on &&
          guest_task_id() == guest->owner_task;
 }
@@ -411,7 +415,9 @@ static void *guest_calloc(void *opaque, size_t count, size_t size) {
 
 static void guest_free(void *opaque, void *pointer) {
   if (guest_uses_block_cache(opaque)) {
-    block_cache_free(&((pocketjs_guest_t *)opaque)->block_cache, pointer);
+    if (pointer != NULL)
+      block_cache_free_sized(&((pocketjs_guest_t *)opaque)->block_cache, pointer,
+                             guest_block_length(pointer));
     return;
   }
   heap_caps_free(pointer);

@@ -18,8 +18,8 @@ CACHE = Path(os.environ.get("CACHE", "/tmp/qjs-kasane-host"))
 
 def function(path, name):
     text = (ROOT / path).read_text()
-    match = re.search(r"(?ms)^(?:static )?(?:inline )?(?:void|bool) "
-                      + re.escape(name) + r"\([^;{]*\{.*?^}", text)
+    match = re.search(r"(?ms)^(?:static )?(?:inline )?(?:__attribute__\(\([a-z_]+\)\) )?"
+                      r"(?:void|bool)\s+" + re.escape(name) + r"\([^;{]*\{.*?^}", text)
     if match is None:
         raise RuntimeError(f"function body not found: {path}: {name}")
     return match.group(0)

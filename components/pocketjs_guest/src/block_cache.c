@@ -53,7 +53,8 @@ void block_cache_set_enabled(block_cache_t *cache, bool enabled) {
   cache->enabled = enabled;
 }
 
-static int class_index(const block_cache_t *cache, size_t length) {
+static inline __attribute__((always_inline)) int class_index(const block_cache_t *cache,
+                                                         size_t length) {
   if (length > BLOCK_CACHE_MAX_SIZE || (length & 3U)) return -1;
   return (int)cache->class_of[length / 4U] - 1;
 }
@@ -83,10 +84,16 @@ void *block_cache_malloc(block_cache_t *cache, size_t size, size_t rounded) {
 }
 
 void block_cache_free(block_cache_t *cache, void *block) {
+  if (block == NULL) return;
+  const block_cache_backend_t *b = cache->backend;
+  block_cache_free_sized(cache, block, cache->enabled ? b->length(b->ctx, block) : 0);
+}
+
+void block_cache_free_sized(block_cache_t *cache, void *block, size_t length) {
   const block_cache_backend_t *b = cache->backend;
   if (block == NULL) return;
   if (cache->enabled) {
-    const int c = class_index(cache, b->length(b->ctx, block));
+    const int c = class_index(cache, length);
     if (c >= 0 && cache->count[c] < BLOCK_CACHE_DEPTH) {
       BC_NEXT(block) = cache->head[c];
       cache->head[c] = block;
