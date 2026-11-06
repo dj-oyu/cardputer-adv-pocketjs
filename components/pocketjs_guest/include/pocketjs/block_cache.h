@@ -70,6 +70,71 @@ void block_cache_free_sized(block_cache_t *cache, void *block, size_t length);
 // Every cached block back to the backend.
 void block_cache_flush(block_cache_t *cache);
 
+// ---- the hit paths, inline (docs/vm/qjs-observe.md sec.13). The guest's
+// allocator calls these and goes to heap_caps itself on a miss: a hit is no
+// call at all, and a miss is two levels shallower than block_cache_malloc's
+// backend call (fewer window overflows on the deepest chains).
+// Under ASan a cached block is poisoned: to the sanitizer it stays "freed"
+// until the cache hands it out again. The first word is the list link.
+#if defined(__SANITIZE_ADDRESS__)
+#define BLOCK_CACHE_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define BLOCK_CACHE_ASAN 1
+#endif
+#endif
+#ifdef BLOCK_CACHE_ASAN
+#include <sanitizer/asan_interface.h>
+#define BLOCK_CACHE_POISON(p, n) ASAN_POISON_MEMORY_REGION((p), (n))
+#define BLOCK_CACHE_UNPOISON(p, n) ASAN_UNPOISON_MEMORY_REGION((p), (n))
+#else
+#define BLOCK_CACHE_POISON(p, n) ((void)0)
+#define BLOCK_CACHE_UNPOISON(p, n) ((void)0)
+#endif
+// The link is the block's first word; blocks come from malloc, so it is
+// pointer aligned, and may_alias keeps the access legal (aliasing-types.md).
+typedef struct {
+  void *next;
+} __attribute__((may_alias)) block_cache_link_t;
+
+static inline __attribute__((always_inline)) int block_cache_class(const block_cache_t *cache,
+                                                                    size_t length) {
+  if (length > BLOCK_CACHE_MAX_SIZE || (length & 3U)) return -1;
+  return (int)cache->class_of[length / 4U] - 1;
+}
+
+// A cached block of `rounded` length, or NULL (a miss, counted).
+static inline __attribute__((always_inline)) void *block_cache_pop(block_cache_t *cache,
+                                                                   size_t rounded) {
+  if (!cache->enabled) return NULL;
+  const int c = block_cache_class(cache, rounded);
+  void *block = c >= 0 ? cache->head[c] : NULL;
+  if (block == NULL) {
+    cache->misses++;
+    return NULL;
+  }
+  BLOCK_CACHE_UNPOISON(block, cache->size[c]);
+  cache->head[c] = ((block_cache_link_t *)block)->next;
+  cache->count[c]--;
+  cache->hits++;
+  return block;
+}
+
+// Keeps a block of real length `length` if its class has room; false: the
+// caller frees it to the backend.
+static inline __attribute__((always_inline)) bool block_cache_push(block_cache_t *cache, void *block,
+                                                                   size_t length) {
+  if (!cache->enabled) return false;
+  const int c = block_cache_class(cache, length);
+  if (c < 0 || cache->count[c] >= BLOCK_CACHE_DEPTH) return false;
+  ((block_cache_link_t *)block)->next = cache->head[c];
+  cache->head[c] = block;
+  cache->count[c]++;
+  cache->pushes++;
+  BLOCK_CACHE_POISON(block, cache->size[c]);
+  return true;
+}
+
 // Bytes the cache holds right now (outside the guest's accounting).
 size_t block_cache_held(const block_cache_t *cache);
 

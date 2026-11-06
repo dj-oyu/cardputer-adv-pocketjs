@@ -389,7 +389,16 @@ static void *guest_malloc(void *opaque, size_t size) {
     return NULL;
   }
   if (guest_uses_block_cache(guest)) {
-    return block_cache_malloc(&guest->block_cache, size, guest_tlsf_round(size));
+    /* block_cache_malloc's policy, with heap_caps called directly. */
+    void *block = block_cache_pop(&guest->block_cache, guest_tlsf_round(size));
+    if (block == NULL) {
+      block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+      if (block == NULL && block_cache_held(&guest->block_cache) != 0) {
+        block_cache_flush(&guest->block_cache);
+        block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+      }
+    }
+    return block;
   }
   void *memory = NULL;
   if (guest != NULL && guest->prefer_psram) {
@@ -415,9 +424,10 @@ static void *guest_calloc(void *opaque, size_t count, size_t size) {
 
 static void guest_free(void *opaque, void *pointer) {
   if (guest_uses_block_cache(opaque)) {
-    if (pointer != NULL)
-      block_cache_free_sized(&((pocketjs_guest_t *)opaque)->block_cache, pointer,
-                             guest_block_length(pointer));
+    if (pointer != NULL &&
+        !block_cache_push(&((pocketjs_guest_t *)opaque)->block_cache, pointer,
+                          guest_block_length(pointer)))
+      heap_caps_free(pointer);
     return;
   }
   heap_caps_free(pointer);
