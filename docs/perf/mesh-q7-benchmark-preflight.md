@@ -45,40 +45,37 @@ Q7 counters are sampled at READY, every 30 measured frames and END. Samples
 occur outside app evaluate/submit cycle intervals, but logging and sampling can
 still affect wall time and scheduling. Both arms must use the same diagnostics.
 Capture serial failures/watchdog/reset/OOM and stop; do not relax admission
-without reviewing the actual target evidence. The numeric step still performs exactly one paired one-row comparison, at most
-one two-face setup and two 240-pixel one-row renders. All 3376 steps and all
-810240 compared slots remain mandatory. The native wrapper groups at most 32
-steps per ordinary guest frame. Its soft wall-time budget is 4 ms; another step
-is admitted only if twice the estimated step cost plus 100 us fits. The estimate
-is the larger of the latest step and 75% (rounded upward) of its previous value,
-so one scheduler outlier does not permanently force one-step batches. The actual
-maximum remains separately reported. This estimate is not a future-cost bound. At least one step is attempted unless
-the run has already expired or failed. A 32-step batch spans at most two scene
-setups and 30720 triangle-pixel visits, plus comparisons and fenv handling.
+without reviewing the actual target evidence. All 3376 logical row comparisons
+and 810240 compared slots remain mandatory. The native wrapper schedules setup,
+each render arm and comparison separately, at most 32 quanta per ordinary guest
+frame. The detailed phase/estimate/report contract is below. Its 4 ms soft budget
+uses separate decaying estimates for each phase, while retaining measured maxima.
+An estimate is not a future-cost bound. At least one quantum is attempted unless
+the run has already expired or failed.
 
-Begin and every step save/restore the current guest caller fenv; a separate
+Begin and every quantum save/restore the current guest caller fenv; a separate
 numeric fenv persists in the owned workspace between turns. Raw FCR/FSR equality
-is checked cumulatively around begin and every step. The frame callback returns
+is checked cumulatively around begin and every quantum. The frame callback returns
 after one bounded batch and does not evaluate/submit benchmark geometry until
 completion. No numeric work runs inside guest startup. No sleeps, watchdog
 changes, manual feeding, or repeated debug calls in one guest turn are used.
 
-A native batch over 12 ms, an individual step over 20 ms, or total preflight
+A native batch over 12 ms, an individual quantum over 20 ms, or total preflight
 over 45 s causes failure and frees the workspace. The batch limit is stricter
 than the individual-step limit. These are retrospective stop conditions, not
 hard execution-time bounds. Total expiry is also checked before doing another
-numeric step. The batch timer includes initial admission/allocation/begin but
+numeric quantum. The batch timer includes initial admission/allocation/begin but
 excludes final JS result construction. Existing 2 s startup and 250 ms turn
 watchdogs are unchanged. Session teardown frees abandoned state before the VM
 is destroyed. A JS object-allocation failure does no numeric work and leaves
 any existing state available for teardown/retry.
 
 Reports include batch count, maximum batch steps, maximum step/batch time and
-total elapsed time. With 32 steps per frame, the work-count minimum is 106 frame
-calls; slow target steps can cause smaller batches. No target-duration prediction
+total elapsed time. With 32 quanta per frame, the work-count minimum is 318 native frame
+calls; slow target quanta can cause smaller batches. Report drainage adds frames. No target-duration prediction
 is implied. The former one-step-per-frame plan needed about 111 seconds and did
 not fit the broker's 90 s lease / 87 s run limit. Neither limit is increased.
-The 45 s preflight stop leaves nominal room for warmup, measurement, logs and
+The 45 s numeric preflight stop (excluding subsequent report drainage) leaves nominal room for warmup, measurement, logs and
 capture; the device owner must account for actual boot/session overhead and
 completed-frame time. If the corpus cannot finish within budget, report failure
 rather than skipping cases, widening limits or reporting benchmark results.
@@ -129,3 +126,52 @@ apply; do not treat that optional allocator attribution as total native usage.
 The host wrapper test extracts the exact debug wrapper and stubs ESP/JS boundary
 APIs to test 4-aligned raw allocations, completion, teardown, OOM and time-stop
 cleanup. It does not execute app_session, target registers or FreeRTOS.
+
+
+## Diagnostic quantum scheduling
+
+The diagnostic wrapper uses `ksn_mesh_q7_preflight_quantum`, not the legacy
+row-pair `step`. Phase IDs are 0 setup, 1 enabled render, 2 disabled render,
+3 buffer comparison. There are 25 setups and 3376 of each remaining phase:
+10153 independently scheduled quanta, unchanged 3376 logical checkpoints and
+810240 compared pixels. The final rejected-call test uses scene index 25,
+fixture 39 and row 135. Other fixture IDs are scene index 0..14 or index+15.
+A checkpoint advances only after comparison; repeated checkpoint values in
+successive guest callbacks are normal. The synchronous gate remains available;
+legacy step completes one logical checkpoint even after a partial quantum row.
+
+Each quantum independently restores the current caller raw floating environment
+and preserves the numeric stream in the workspace. The wrapper snapshots the
+work descriptor before running it. `lastPhase/Scene/Fixture/Row` and
+`lastStepUs` identify the last executed quantum; corresponding `max` fields
+identify the measured maximum. Per-phase `MaxUs` and `EstimateUs` distinguish
+setup, enabled render, disabled render and comparison. `runtimeFailure` is
+0 none, 1 clock/budget, 2 numeric/progress, 3 register restoration. If time
+expires before work, last work remains the preceding quantum; `quanta=0`
+means no work descriptor is valid. Existing `maxStepUs`, `maxBatchSteps` and
+`stepEstimateUs` now describe quanta (the last estimate for the latter), not
+row pairs. `checkpoints` retains its original meaning.
+
+The wrapper uses fresh time before every quantum and the next phase's decaying
+estimate, leaving twice its cost plus 100 us inside the 4 ms soft budget. A batch
+may execute one quantum for forward progress even if the estimate exceeds the
+soft budget. At most 32 quanta execute in one callback. The 12 ms hard batch,
+20 ms individual operation and 45 s total limits are unchanged. These are
+post-operation rejection conditions, not WCET guarantees or native preemption.
+A single render exceeding 12 ms fails closed; no watchdog feed, sleep or limit
+increase is introduced. Host injected timing verifies scheduling and attribution,
+not target CPU, IRQ or scheduler timing.
+
+Final report delivery is staged at one 150-byte ASCII JSON piece per guest
+frame. The finalized JSON and success flag are cached once; no further native
+preflight calls occur while draining. The string is released after the final
+piece, then READY is emitted on success or the failure is thrown (terminal
+state). Numeric/render evaluation never begins before that point. This adds
+`ceil(JSON bytes/150)-1` guest frames after native completion and temporarily
+retains the JSON string plus ordinary stringify/slice overhead, not a new native
+workspace. `preflightUs` ends at native report creation and excludes drainage.
+The protocol host test uses all native numeric keys with conservative values,
+checks each message below 200 bytes and the complete chunk-prefixed burst below
+4096 bytes. Staging reduces per-turn output; it does not prove the 1536-byte log
+arena retains an undrained full report. Capture every indexed piece and require
+complete reassembly before interpreting a device result.

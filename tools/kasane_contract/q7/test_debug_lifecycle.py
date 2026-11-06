@@ -28,7 +28,7 @@ typedef int JSValue;
 typedef int JSValueConst;
 typedef int JSContext;
 enum { MALLOC_CAP_INTERNAL=1, MALLOC_CAP_8BIT=2, OBJECT=1, EXCEPTION=-1,
-       STEPS=3376, RENDERS=STEPS*2, BATCH_LIMIT=32 };
+       STEPS=3376, RENDERS=STEPS*2, QUANTA=STEPS*3+25, BATCH_LIMIT=32 };
 static bool done,ok,heap_oom,object_oom,begin_fail;
 static unsigned active,allocations,frees,allocation_attempts;
 static size_t available=100000,largest=100000;
@@ -43,7 +43,7 @@ static bool record_oracle;
 static uint64_t oracle_trace[RENDERS];
 static ksn_mesh_q7_preflight_report oracle;
 static ksn_mesh_q7_stats emitted_stats;
-static struct { const char *key; double value; } numbers[64];
+static struct { const char *key; double value; } numbers[96];
 static unsigned number_count;
 
 static JSValue JS_NewObject(JSContext *c){
@@ -62,7 +62,7 @@ static void JS_SetPropertyStr(JSContext *c,JSValue o,const char *k,JSValue v){
     else assert(false);
 }
 static void q7_num(JSContext *c,JSValue o,const char *k,double n){
-    (void)c;assert(o==OBJECT && number_count<64);
+    (void)c;assert(o==OBJECT && number_count<96);
     numbers[number_count].key=k;numbers[number_count++].value=n;
 }
 static void q7_heap(JSContext *c,JSValue o){(void)c;assert(o==OBJECT);}
@@ -109,7 +109,7 @@ static int64_t esp_timer_get_time(void){
 '''
 suffix = r'''
 extern bool __real_ksn_mesh_q7_preflight_begin(void *,size_t,ksn_mesh_q7_preflight_report *);
-extern ksn_mesh_q7_preflight_step_result __real_ksn_mesh_q7_preflight_step(
+extern ksn_mesh_q7_preflight_step_result __real_ksn_mesh_q7_preflight_quantum(
     void *,size_t,ksn_mesh_q7_preflight_report *);
 extern bool __real_ksn_mesh_q7_render(const ksn_mesh_q7_snapshot *,uint16_t *,
     unsigned,unsigned,float *,uint8_t *,unsigned,ksn_mesh_q7_stats *);
@@ -152,17 +152,20 @@ bool __wrap_ksn_mesh_q7_preflight_begin(void *memory,size_t size,
     now+=begin_cost;
     return result && !begin_fail;
 }
-ksn_mesh_q7_preflight_step_result __wrap_ksn_mesh_q7_preflight_step(
+ksn_mesh_q7_preflight_step_result __wrap_ksn_mesh_q7_preflight_quantum(
     void *memory,size_t size,ksn_mesh_q7_preflight_report *report){
     unsigned before=render_calls;
     uint64_t checkpoint=report->checkpoints;
     int mode=fegetround(),flags=fetestexcept(FE_ALL_EXCEPT);
-    assert(checkpoint==step_calls && checkpoint<STEPS);
+    assert(checkpoint<STEPS && step_calls<QUANTA);
+    ksn_mesh_q7_preflight_work work;
+    assert(ksn_mesh_q7_preflight_progress(memory,size,report,&work));
     ksn_mesh_q7_preflight_step_result result=
-        __real_ksn_mesh_q7_preflight_step(memory,size,report);
+        __real_ksn_mesh_q7_preflight_quantum(memory,size,report);
     step_calls++;
-    assert(report->checkpoints==checkpoint+1 && render_calls==before+2);
-    assert(result==(step_calls==STEPS?KSN_MESH_Q7_PREFLIGHT_DONE:KSN_MESH_Q7_PREFLIGHT_MORE));
+    assert(report->checkpoints==checkpoint+(work.phase==KSN_MESH_Q7_COMPARE));
+    assert(render_calls==before+(work.phase==KSN_MESH_Q7_RENDER_ENABLED || work.phase==KSN_MESH_Q7_RENDER_DISABLED));
+    assert(result==(step_calls==QUANTA?KSN_MESH_Q7_PREFLIGHT_DONE:KSN_MESH_Q7_PREFLIGHT_MORE));
     assert(fegetround()==mode && fetestexcept(FE_ALL_EXCEPT)==flags);
     now+=slow_at==step_calls?slow_cost:step_cost;
     if(sample_gap_at==step_calls)pending_sample_gap=after_sample_gap;
@@ -207,10 +210,10 @@ static unsigned call(void){
     assert(js_mesh_q7_preflight(NULL,0,0,NULL)==OBJECT);
     assert(fegetround()==mode && fetestexcept(FE_ALL_EXCEPT)==flags);
     unsigned delta=step_calls-before;
-    assert(delta<=BATCH_LIMIT && render_calls==2*step_calls);
-    assert(number("checkpoints")==step_calls);
-    assert(q7_preflight_state.report.checkpoints==step_calls);
-    assert(q7_preflight_state.report.pixels==(uint64_t)step_calls*KSN_PROC_W);
+    assert(delta<=BATCH_LIMIT);
+    assert(number("checkpoints")==q7_preflight_state.report.checkpoints);
+    assert(q7_preflight_state.quanta==step_calls);
+    assert(q7_preflight_state.report.pixels==q7_preflight_state.report.checkpoints*KSN_PROC_W);
     assert(q7_preflight_state.max_batch_steps<=BATCH_LIMIT);
     if(finished)assert(!delta && q7_preflight_state.batches==batches);
     if(!done){
@@ -223,7 +226,7 @@ static unsigned call(void){
 }
 static void assert_complete(void){
     assert(done && ok && !active && begin_calls==1);
-    assert(step_calls==STEPS && render_calls==RENDERS);
+    assert(step_calls==QUANTA && render_calls==RENDERS);
     assert(memcmp(&oracle,&q7_preflight_state.report,sizeof oracle)==0);
     assert(memcmp(&oracle.enabled,&emitted_stats,sizeof emitted_stats)==0);
     assert(number("batches")==q7_preflight_state.batches);
@@ -247,24 +250,24 @@ static void assert_complete(void){
 }
 static void fast_test(void){
     fresh();
-    for(unsigned i=0;i<(STEPS+BATCH_LIMIT-1)/BATCH_LIMIT;i++){
-        unsigned remaining=STEPS-step_calls;
+    for(unsigned i=0;i<(QUANTA+BATCH_LIMIT-1)/BATCH_LIMIT;i++){
+        unsigned remaining=QUANTA-step_calls;
         assert(call()==(remaining<BATCH_LIMIT?remaining:BATCH_LIMIT));
     }
-    assert(q7_preflight_state.batches==106 && q7_preflight_state.max_batch_steps==32);
+    assert(q7_preflight_state.batches==318 && q7_preflight_state.max_batch_steps==32);
     assert(q7_preflight_state.max_step==1 && q7_preflight_state.max_batch<4000);
     assert_complete();
-    puts("Q7_DEBUG_FAST_PASS 3376 steps, 106 batches, full synchronous numeric/output oracle");
+    puts("Q7_DEBUG_FAST_PASS 10153 quanta, 318 batches, full synchronous numeric/output oracle");
 }
 static void adaptive_test(void){
     fresh();step_cost=650;
     unsigned calls=0;
     do{
         unsigned rows=call();
-        assert(rows>=1 && rows<32 && ++calls<=STEPS);
+        assert(rows>=1 && rows<32 && ++calls<=QUANTA);
         assert(q7_preflight_state.max_batch<=4000);
     }while(!done);
-    assert(calls>106 && q7_preflight_state.max_batch_steps==4);
+    assert(calls>318 && q7_preflight_state.max_batch_steps==4);
     assert_complete();
     /* An isolated expensive step initially shortens batches. The conservative
      * estimate must recover as cheaper rows are observed, while maxStepUs
@@ -273,22 +276,15 @@ static void adaptive_test(void){
     assert(call()==1 && !done);
     assert(q7_preflight_state.step_estimate==q7_preflight_state.max_step);
     calls=1;bool recovered=false;
-    for(unsigned i=0;i<3;i++){
-        int64_t previous=q7_preflight_state.step_estimate;
-        assert(call()==1 && !done);calls++;
-        assert(q7_preflight_state.step_estimate<previous);
-        assert(q7_preflight_state.max_step==5001);
-    }
     do{
         unsigned rows=call();
-        assert(rows>=1 && rows<=32 && ++calls<=STEPS);
+        assert(rows>=1 && rows<=32 && ++calls<=QUANTA);
         if(rows==32)recovered=true;
-        if(calls==8)assert(recovered);
         assert(q7_preflight_state.max_step==5001);
     }while(!done);
-    assert(recovered && calls>106 && calls<128);
+    assert(recovered && calls>318 && calls<400);
     assert(q7_preflight_state.max_batch_steps==32);
-    assert(q7_preflight_state.step_estimate<q7_preflight_state.max_step);
+    assert(q7_preflight_state.phase_estimate[KSN_MESH_Q7_SETUP]<5001);
     assert(q7_preflight_state.max_batch>4000 && q7_preflight_state.max_batch<12000);
     assert_complete();
     /* Even a sustained row cost above the soft budget must make progress. */
@@ -333,6 +329,30 @@ static void timing_tests(void){
     assert(call()==1);assert_stopped(1);
     puts("Q7_DEBUG_TIMING_PASS expired entry has zero work; setup/mid-batch expiry, hard/step stops");
 }
+static void phase_timing_tests(void){
+    /* Inject each phase independently; reports must identify the actual last
+     * quantum, not infer its identity from a previous high-water value. */
+    for(unsigned phase=0;phase<KSN_MESH_Q7_PHASE_COUNT;phase++){
+        fresh();slow_at=phase+1;slow_cost=12001;
+        assert(call()==phase+1);assert_stopped(phase+1);
+        assert(number("lastPhase")==phase && number("maxPhase")==phase);
+        assert(number("lastScene")==0 && number("lastFixture")==0 && number("lastRow")==0);
+        assert(number("lastStepUs")==12002 && number("runtimeFailure")==1);
+        assert(q7_preflight_state.phase_max[phase]==12002);
+    }
+    fresh();slow_at=1;slow_cost=5000;assert(call()==1);
+    slow_at=2;slow_cost=700;assert(call()>1);
+    assert(q7_preflight_state.phase_estimate[KSN_MESH_Q7_SETUP]==5001);
+    assert(q7_preflight_state.phase_max[KSN_MESH_Q7_RENDER_ENABLED]==701);
+    assert(q7_preflight_state.last_step<q7_preflight_state.max_step);
+    fresh();slow_at=20*(1+135*3)+2;slow_cost=12001;
+    do{call();}while(!done);
+    assert_stopped(slow_at);
+    assert(number("lastPhase")==KSN_MESH_Q7_RENDER_ENABLED);
+    assert(number("lastScene")==20 && number("lastFixture")==35 && number("lastRow")==0);
+    assert(number("checkpoints")==2700);
+    puts("Q7_DEBUG_PHASE_PASS independent estimates and phase/scene/fixture/row timing attribution");
+}
 static void oom_tests(void){
     fresh();begin_fail=true;
     assert(call()==0 && begin_calls==1);
@@ -363,7 +383,7 @@ static void oom_tests(void){
     for(unsigned i=0;i<3;i++){
         assert(js_mesh_q7_preflight(NULL,0,0,NULL)==EXCEPTION);
         assert(!memcmp(saved,&q7_preflight_state,sizeof saved));
-        assert(active==1 && step_calls==32 && render_calls==64);
+        assert(active==1 && step_calls==32);
     }
     object_oom=false;assert(call()==32 && active==1 && begin_calls==1);
     object_oom=true;
@@ -378,7 +398,7 @@ static void reset_tests(void){
     for(unsigned i=0;i<sizeof stops/sizeof stops[0];i++){
         fresh();step_cost=650;
         for(unsigned j=0;j<stops[i];j++)assert(call()==4 && !done);
-        assert(step_calls==4*stops[i] && step_calls<STEPS);
+        assert(step_calls==4*stops[i] && step_calls<QUANTA);
         pocket_shiki_debug_reset();assert(!active && allocations==frees);
         pocket_shiki_debug_reset();assert(!active && allocations==frees);
     }
@@ -392,7 +412,7 @@ static void reset_tests(void){
 }
 int main(void){
     fenv_t saved;assert(fegetenv(&saved)==0);
-    make_oracle();fast_test();adaptive_test();timing_tests();oom_tests();reset_tests();
+    make_oracle();fast_test();adaptive_test();timing_tests();phase_timing_tests();oom_tests();reset_tests();
     assert(fesetenv(&saved)==0);
     puts("Q7_DEBUG_LIFECYCLE_PASS deliberately4aligned allocations; caller fenv every batch; host stubs only");
     return 0;
@@ -417,7 +437,7 @@ with tempfile.TemporaryDirectory(prefix='q7-debug-') as directory:
         '-I' + str(ROOT / 'main'), str(path),
         *[str(ROOT / item) for item in sources],
         '-Wl,--wrap=ksn_mesh_q7_preflight_begin',
-        '-Wl,--wrap=ksn_mesh_q7_preflight_step',
+        '-Wl,--wrap=ksn_mesh_q7_preflight_quantum',
         '-Wl,--wrap=ksn_mesh_q7_render', '-lm', '-o', str(binary),
     ], check=True)
     subprocess.run([str(binary)], check=True, env=dict(

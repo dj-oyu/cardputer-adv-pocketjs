@@ -115,12 +115,12 @@ int main(void){
     model_fcr=0;model_fsr=128;
     assert(ksn_mesh_q7_preflight_begin(memory,bytes,&report));
     assert(model_fcr==0 && model_fsr==128);
-    for(unsigned step=0;step<3376;step++){
+    for(unsigned step=0;step<10153;step++){
         uint32_t caller_fcr=(step%3)+1,caller_fsr=UINT32_C(1)<<(step%32);
         model_fcr=caller_fcr;model_fsr=caller_fsr;
         ksn_mesh_q7_preflight_step_result result=
-            ksn_mesh_q7_preflight_step(memory,bytes,&report);
-        assert(result==(step==3375?KSN_MESH_Q7_PREFLIGHT_DONE:KSN_MESH_Q7_PREFLIGHT_MORE));
+            ksn_mesh_q7_preflight_quantum(memory,bytes,&report);
+        assert(result==(step==10152?KSN_MESH_Q7_PREFLIGHT_DONE:KSN_MESH_Q7_PREFLIGHT_MORE));
         assert(model_fcr==caller_fcr && model_fsr==caller_fsr);
     }
     assert(renders==6752 && report.checkpoints==3376 && report.pixels==810240);
@@ -130,7 +130,7 @@ int main(void){
     assert(report.cancelled && report.checkpoints==1 && renders==2);
     assert(model_fcr==0 && model_fsr==128);
     free(memory);
-    puts("Q7_ENVIRONMENT_INTEGRATION_MODEL_PASS full3376 steps; changing caller raw pair; numeric status persists; cancellation restores caller; host math not target simulation");
+    puts("Q7_ENVIRONMENT_INTEGRATION_MODEL_PASS full10153 quanta; changing caller raw pair; numeric status persists; cancellation restores caller; host math not target simulation");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='q7-environment-integration-') as directory:

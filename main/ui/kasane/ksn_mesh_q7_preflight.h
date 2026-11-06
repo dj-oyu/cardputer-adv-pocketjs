@@ -45,4 +45,21 @@ bool ksn_mesh_q7_preflight_begin(void *workspace,size_t bytes,
                                ksn_mesh_q7_preflight_report *report);
 ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
     void *workspace,size_t bytes,ksn_mesh_q7_preflight_report *report);
+/* Diagnostic scheduling unit. A quantum does setup, one render arm, or the
+ * comparison, never a row pair. No WCET guarantee: callers must time and reject
+ * overruns. Logical checkpoint counts/corpus are identical to step/run.
+ * Progress describes the NEXT quantum; false after termination/invalid state.
+ * step may also resume a partially completed row. */
+typedef enum {
+    KSN_MESH_Q7_SETUP, KSN_MESH_Q7_RENDER_ENABLED,
+    KSN_MESH_Q7_RENDER_DISABLED, KSN_MESH_Q7_COMPARE,
+    KSN_MESH_Q7_PHASE_COUNT
+} ksn_mesh_q7_preflight_phase;
+typedef struct {
+    unsigned phase, scene, fixture, row;
+} ksn_mesh_q7_preflight_work;
+bool ksn_mesh_q7_preflight_progress(void *workspace,size_t bytes,
+    ksn_mesh_q7_preflight_report *report,ksn_mesh_q7_preflight_work *work);
+ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_quantum(
+    void *workspace,size_t bytes,ksn_mesh_q7_preflight_report *report);
 #endif

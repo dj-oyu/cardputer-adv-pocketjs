@@ -18,7 +18,8 @@ typedef struct {
     uint8_t owner[2][KSN_PROC_W];
     uint32_t version, active;
     uintptr_t report_address;
-    unsigned scene, row;
+    unsigned scene, row, phase;
+    bool render_ok[2];
     ksn_q7_environment numeric_environment;
 } workspace;
 _Static_assert(sizeof(workspace)<16384,"preflight workspace budget");
@@ -64,13 +65,15 @@ static bool build(workspace *w,unsigned scene){
     return ksn_mesh_prepare(&source,p,sizeof w->prepared) &&
         p->count<=FACES && ksn_mesh_q7_prepare(p,(void *)w->q7,sizeof w->q7);
 }
-static void compare(workspace *w,ksn_mesh_q7_preflight_report *r,unsigned y,bool invalid){
-    ksn_mesh_q7_snapshot *q=(void *)w->q7,*e=(void *)w->exact;
-    memset(w->rgb,0x35,sizeof w->rgb);
-    memset(w->depth,0xa5,sizeof w->depth);
-    memset(w->owner,0x7e,sizeof w->owner);
-    bool a=ksn_mesh_q7_render(q,w->rgb[0],y,1,w->depth[0],w->owner[0],1,&r->enabled);
-    bool b=ksn_mesh_q7_render(e,w->rgb[1],y,1,w->depth[1],w->owner[1],1,&r->disabled);
+static void render_arm(workspace *w,ksn_mesh_q7_preflight_report *r,unsigned y,unsigned arm){
+    memset(w->rgb[arm],0x35,sizeof w->rgb[arm]);
+    memset(w->depth[arm],0xa5,sizeof w->depth[arm]);
+    memset(w->owner[arm],0x7e,sizeof w->owner[arm]);
+    w->render_ok[arm]=ksn_mesh_q7_render(arm?(void *)w->exact:(void *)w->q7,
+        w->rgb[arm],y,1,w->depth[arm],w->owner[arm],1,arm?&r->disabled:&r->enabled);
+}
+static void compare_buffers(workspace *w,ksn_mesh_q7_preflight_report *r,bool invalid){
+    bool a=w->render_ok[0],b=w->render_ok[1];
     r->failure_result_mismatches+=(a!=b);
     r->render_failures+=!a;
     if(invalid && (a||b))r->invariant_failures++;
@@ -89,6 +92,9 @@ static void compare(workspace *w,ksn_mesh_q7_preflight_report *r,unsigned y,bool
             memcmp(&w->depth[0][x],&w->depth[1][x],sizeof(float)) ||
             w->owner[0][x]!=w->owner[1][x];
     }
+}
+static void compare(workspace *w,ksn_mesh_q7_preflight_report *r,unsigned y,bool invalid){
+    render_arm(w,r,y,0);render_arm(w,r,y,1);compare_buffers(w,r,invalid);
 }
 static bool checkpoint(ksn_mesh_q7_preflight_report *r,const ksn_q7_environment *caller,
                        ksn_mesh_q7_preflight_checkpoint_fn callback,void *context){
@@ -161,7 +167,7 @@ bool ksn_mesh_q7_preflight_run(void *memory,size_t bytes,ksn_mesh_q7_preflight_r
 
 /* Version is private to this exact state layout. Caller must not persist or
  * copy active state across module versions or workspace addresses. */
-#define PREFLIGHT_STATE_VERSION UINT32_C(0x51375002)
+#define PREFLIGHT_STATE_VERSION UINT32_C(0x51375003)
 static bool incremental_arguments(void *memory,size_t bytes,
                                   ksn_mesh_q7_preflight_report *r){
     if(!memory || !r || bytes<sizeof(workspace) ||
@@ -195,7 +201,7 @@ static void incremental_validate(ksn_mesh_q7_preflight_report *r){
     if((r->round_before!=FE_TONEAREST || !r->subnormal_ok) &&
        (r->enabled.depth_fast || r->enabled.mask_fast))r->invariant_failures++;
 }
-ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
+ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_quantum(
     void *memory,size_t bytes,ksn_mesh_q7_preflight_report *r){
     if(!incremental_arguments(memory,bytes,r))return KSN_MESH_Q7_PREFLIGHT_FAILED;
     workspace *w=memory;
@@ -204,7 +210,8 @@ ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
     memcpy(&version,&w->version,sizeof version);
     if(version!=PREFLIGHT_STATE_VERSION || w->active!=1 ||
        w->report_address!=(uintptr_t)r)return KSN_MESH_Q7_PREFLIGHT_FAILED;
-    if(w->scene>CASES || w->row>=KSN_PROC_H ||
+    if(w->scene>CASES || w->row>=KSN_PROC_H || w->phase>=KSN_MESH_Q7_PHASE_COUNT ||
+       (w->phase==KSN_MESH_Q7_SETUP && (w->row!=0 || w->scene==CASES)) ||
        r->checkpoints!=(uint64_t)w->scene*KSN_PROC_H+w->row){
         w->active=0;r->invariant_failures++;return KSN_MESH_Q7_PREFLIGHT_FAILED;
     }
@@ -214,21 +221,30 @@ ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
     ksn_mesh_q7_preflight_step_result result=KSN_MESH_Q7_PREFLIGHT_MORE;
     if(ksn_q7_environment_set(&w->numeric_environment)!=0){r->invariant_failures++;goto step_restore;}
     if(fegetround()!=r->round_before){r->invariant_failures++;goto step_restore;}
-    if(w->scene<CASES){
-        if(w->row==0){
-            if(!build(w,w->scene<15?w->scene:w->scene+15)){r->invariant_failures++;goto step_restore;}
-            ksn_mesh_q7_snapshot *q=(void *)w->q7,*e=(void *)w->exact;
-            memcpy(e,q,sizeof w->q7);
-            bool cert=false;
-            for(unsigned f=0;f<q->count;f++){cert|=q->triangles[f].cert.valid;e->triangles[f].cert.valid=false;}
-            r->cases++;r->certificate_cases+=cert&&!q->fallback;
-            r->safe_fallback_cases+=!cert||q->fallback;
-        }
-        compare(w,r,w->row,false);r->checkpoints++;
-        if(++w->row==KSN_PROC_H){w->row=0;w->scene++;}
+    if(w->phase==KSN_MESH_Q7_SETUP){
+        if(!build(w,w->scene<15?w->scene:w->scene+15)){r->invariant_failures++;goto step_restore;}
+        ksn_mesh_q7_snapshot *q=(void *)w->q7,*e=(void *)w->exact;
+        memcpy(e,q,sizeof w->q7);
+        bool cert=false;
+        for(unsigned f=0;f<q->count;f++){cert|=q->triangles[f].cert.valid;e->triangles[f].cert.valid=false;}
+        r->cases++;r->certificate_cases+=cert&&!q->fallback;
+        r->safe_fallback_cases+=!cert||q->fallback;
+        w->phase=KSN_MESH_Q7_RENDER_ENABLED;
+    }else if(w->phase==KSN_MESH_Q7_RENDER_ENABLED || w->phase==KSN_MESH_Q7_RENDER_DISABLED){
+        render_arm(w,r,w->scene==CASES?KSN_PROC_H:w->row,
+                   w->phase==KSN_MESH_Q7_RENDER_DISABLED);
+        w->phase++;
     }else{
-        compare(w,r,KSN_PROC_H,true);r->cases++;r->checkpoints++;
-        incremental_validate(r);result=KSN_MESH_Q7_PREFLIGHT_DONE;
+        compare_buffers(w,r,w->scene==CASES);r->checkpoints++;
+        if(w->scene==CASES){
+            r->cases++;incremental_validate(r);result=KSN_MESH_Q7_PREFLIGHT_DONE;
+        }else{
+            w->phase=KSN_MESH_Q7_RENDER_ENABLED;
+            if(++w->row==KSN_PROC_H){
+                w->row=0;w->scene++;
+                if(w->scene<CASES)w->phase=KSN_MESH_Q7_SETUP;
+            }
+        }
     }
     r->round_after=fegetround();
     if(r->round_after!=r->round_before || ksn_q7_environment_get(&w->numeric_environment)!=0)r->invariant_failures++;
@@ -239,5 +255,31 @@ step_restore:
     if(r->invariant_failures || r->mismatch_count || r->failure_result_mismatches || r->cancelled)
         result=KSN_MESH_Q7_PREFLIGHT_FAILED;
     if(result!=KSN_MESH_Q7_PREFLIGHT_MORE)w->active=0;
+    return result;
+}
+
+bool ksn_mesh_q7_preflight_progress(void *memory,size_t bytes,
+    ksn_mesh_q7_preflight_report *r,ksn_mesh_q7_preflight_work *work){
+    if(!work || !incremental_arguments(memory,bytes,r))return false;
+    workspace *w=memory;uint32_t version;
+    memcpy(&version,&w->version,sizeof version);
+    if(version!=PREFLIGHT_STATE_VERSION || w->active!=1 ||
+       w->report_address!=(uintptr_t)r || w->scene>CASES || w->row>=KSN_PROC_H ||
+       w->phase>=KSN_MESH_Q7_PHASE_COUNT ||
+       (w->phase==KSN_MESH_Q7_SETUP && (w->row!=0 || w->scene==CASES)) ||
+       r->checkpoints!=(uint64_t)w->scene*KSN_PROC_H+w->row)return false;
+    *work=(ksn_mesh_q7_preflight_work){w->phase,w->scene,
+        w->scene==CASES?39:w->scene<15?w->scene:w->scene+15,
+        w->scene==CASES?KSN_PROC_H:w->row};
+    return true;
+}
+ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
+    void *memory,size_t bytes,ksn_mesh_q7_preflight_report *r){
+    ksn_mesh_q7_preflight_work work;
+    if(!ksn_mesh_q7_preflight_progress(memory,bytes,r,&work))return KSN_MESH_Q7_PREFLIGHT_FAILED;
+    uint64_t before=r->checkpoints;
+    ksn_mesh_q7_preflight_step_result result;
+    do{result=ksn_mesh_q7_preflight_quantum(memory,bytes,r);}
+    while(result==KSN_MESH_Q7_PREFLIGHT_MORE && r->checkpoints==before);
     return result;
 }

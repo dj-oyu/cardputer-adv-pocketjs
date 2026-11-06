@@ -149,12 +149,49 @@ static void incremental_tests(void *memory,size_t n){
     assert(fegetround()==original_mode && fetestexcept(FE_ALL_EXCEPT)==original_flags);
     puts("PREFLIGHT_INCREMENTAL_PASS steps=3376 two_renders_per_step exact_totals guest_fenv_isolation lifecycle cancellation");
 }
+static void quantum_tests(void *memory,size_t n){
+    ksn_mesh_q7_preflight_report oracle,r;
+    assert(ksn_mesh_q7_preflight_run(memory,n,&oracle));
+    assert(ksn_mesh_q7_preflight_begin(memory,n,&r));
+    unsigned phase_counts[KSN_MESH_Q7_PHASE_COUNT]={0};
+    for(unsigned i=0;i<10153;i++){
+        ksn_mesh_q7_preflight_work work;
+        assert(ksn_mesh_q7_preflight_progress(memory,n,&r,&work));
+        assert(work.scene==r.checkpoints/KSN_PROC_H);
+        assert(work.fixture==(work.scene==25?39:work.scene<15?work.scene:work.scene+15));
+        assert(work.row==(work.scene==25?KSN_PROC_H:r.checkpoints%KSN_PROC_H));
+        if(work.phase==KSN_MESH_Q7_SETUP)assert(work.row==0 && work.scene<25);
+        phase_counts[work.phase]++;
+        unsigned before=render_calls;uint64_t checkpoints=r.checkpoints;
+        int mode=fegetround(),flags=fetestexcept(FE_ALL_EXCEPT);
+        assert(ksn_mesh_q7_preflight_quantum(memory,n,&r)==
+            (i==10152?KSN_MESH_Q7_PREFLIGHT_DONE:KSN_MESH_Q7_PREFLIGHT_MORE));
+        assert(render_calls-before==(unsigned)(work.phase==KSN_MESH_Q7_RENDER_ENABLED ||
+                                               work.phase==KSN_MESH_Q7_RENDER_DISABLED));
+        assert(r.checkpoints==checkpoints+(work.phase==KSN_MESH_Q7_COMPARE));
+        assert(fegetround()==mode && fetestexcept(FE_ALL_EXCEPT)==flags);
+    }
+    assert(phase_counts[0]==25 && phase_counts[1]==3376 && phase_counts[2]==3376 && phase_counts[3]==3376);
+    assert(memcmp(&oracle,&r,sizeof r)==0);
+    ksn_mesh_q7_preflight_work work;
+    assert(!ksn_mesh_q7_preflight_progress(memory,n,&r,&work));
+    assert(ksn_mesh_q7_preflight_quantum(memory,n,&r)==KSN_MESH_Q7_PREFLIGHT_FAILED);
+    /* Legacy callers may finish any partial quantum row without skipping it. */
+    for(unsigned partial=1;partial<=3;partial++){
+        assert(ksn_mesh_q7_preflight_begin(memory,n,&r));
+        for(unsigned i=0;i<partial;i++)assert(ksn_mesh_q7_preflight_quantum(memory,n,&r)==KSN_MESH_Q7_PREFLIGHT_MORE);
+        assert(r.checkpoints==0);
+        assert(ksn_mesh_q7_preflight_step(memory,n,&r)==KSN_MESH_Q7_PREFLIGHT_MORE);
+        assert(r.checkpoints==1 && r.pixels==KSN_PROC_W);
+    }
+    puts("PREFLIGHT_QUANTUM_PASS 25 setup + 3376 per render/compare; exact corpus; partial row compatibility");
+}
 int main(void){
     fenv_t saved;assert(fegetenv(&saved)==0);
     size_t n=ksn_mesh_q7_preflight_bytes();void *memory=malloc(n);assert(memory);
     assert(n<16384 && (size_t)memory%ksn_mesh_q7_preflight_alignment()==0);
-    assert(fesetround(FE_TONEAREST)==0);assert(feraiseexcept(FE_INVALID)==0);run(memory);cooperative_tests(memory,n);incremental_tests(memory,n);
-    assert(fesetround(FE_DOWNWARD)==0);run(memory);cooperative_tests(memory,n);incremental_tests(memory,n);
+    assert(fesetround(FE_TONEAREST)==0);assert(feraiseexcept(FE_INVALID)==0);run(memory);cooperative_tests(memory,n);incremental_tests(memory,n);quantum_tests(memory,n);
+    assert(fesetround(FE_DOWNWARD)==0);run(memory);cooperative_tests(memory,n);incremental_tests(memory,n);quantum_tests(memory,n);
     assert(fesetround(FE_UPWARD)==0);run(memory);
     assert(fesetround(FE_TOWARDZERO)==0);run(memory);
     assert(fesetround(FE_TONEAREST)==0);
