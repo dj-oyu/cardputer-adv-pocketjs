@@ -45,24 +45,43 @@ Q7 counters are sampled at READY, every 30 measured frames and END. Samples
 occur outside app evaluate/submit cycle intervals, but logging and sampling can
 still affect wall time and scheduling. Both arms must use the same diagnostics.
 Capture serial failures/watchdog/reset/OOM and stop; do not relax admission
-without reviewing the actual target evidence. The incremental runner performs one paired one-row comparison per native call
-(3376 calls total), at most one two-face setup and two 240-pixel one-row renders.
+without reviewing the actual target evidence. The numeric step still performs exactly one paired one-row comparison, at most
+one two-face setup and two 240-pixel one-row renders. All 3376 steps and all
+810240 compared slots remain mandatory. The native wrapper groups at most 32
+steps per ordinary guest frame. Its soft wall-time budget is 4 ms; another step
+is admitted only if twice the estimated step cost plus 100 us fits. The estimate
+is the larger of the latest step and 75% (rounded upward) of its previous value,
+so one scheduler outlier does not permanently force one-step batches. The actual
+maximum remains separately reported. This estimate is not a future-cost bound. At least one step is attempted unless
+the run has already expired or failed. A 32-step batch spans at most two scene
+setups and 30720 triangle-pixel visits, plus comparisons and fenv handling.
+
 Begin and every step save/restore the current guest caller fenv; a separate
 numeric fenv persists in the owned workspace between turns. Raw FCR/FSR equality
 is checked cumulatively around begin and every step. The frame callback returns
-after one step and does not evaluate/submit benchmark geometry until completion.
-No preflight work is run inside guest startup. No sleeps, watchdog changes,
-manual feeding, or repeated native calls in the same guest turn are used.
+after one bounded batch and does not evaluate/submit benchmark geometry until
+completion. No numeric work runs inside guest startup. No sleeps, watchdog
+changes, manual feeding, or repeated debug calls in one guest turn are used.
 
-A step over 20 ms or total elapsed preflight over 180 s causes failure and frees
-the workspace. This is a retrospective stop condition, not a hard execution-time
-bound. The step timer includes initial admission/allocation/begin but excludes
-final JS result construction. Existing guest startup/turn watchdogs are unchanged.
-Session teardown frees abandoned state before destroying the VM. The persistent
-diagnostic state uses additional static RAM; inspect the target build report.
-At normal 33 ms frame cadence, 3376 steps need about 111 seconds before READY.
-The device owner's whole-session timeout must allow preflight plus warmup,
-measurement, log collection and capture; 60 seconds is insufficient.
+A native batch over 12 ms, an individual step over 20 ms, or total preflight
+over 45 s causes failure and frees the workspace. The batch limit is stricter
+than the individual-step limit. These are retrospective stop conditions, not
+hard execution-time bounds. Total expiry is also checked before doing another
+numeric step. The batch timer includes initial admission/allocation/begin but
+excludes final JS result construction. Existing 2 s startup and 250 ms turn
+watchdogs are unchanged. Session teardown frees abandoned state before the VM
+is destroyed. A JS object-allocation failure does no numeric work and leaves
+any existing state available for teardown/retry.
+
+Reports include batch count, maximum batch steps, maximum step/batch time and
+total elapsed time. With 32 steps per frame, the work-count minimum is 106 frame
+calls; slow target steps can cause smaller batches. No target-duration prediction
+is implied. The former one-step-per-frame plan needed about 111 seconds and did
+not fit the broker's 90 s lease / 87 s run limit. Neither limit is increased.
+The 45 s preflight stop leaves nominal room for warmup, measurement, logs and
+capture; the device owner must account for actual boot/session overhead and
+completed-frame time. If the corpus cannot finish within budget, report failure
+rather than skipping cases, widening limits or reporting benchmark results.
 
 Production prepared/Q7 snapshot allocations also require alignment 8. Their
 feature-gated allocator uses heap_caps_aligned_alloc with MALLOC_CAP_DEFAULT on
