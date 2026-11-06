@@ -24,7 +24,10 @@
     if(!preflightDone){
       const report=D.meshQ7Preflight();
       if(report.done){
-        console.log('MQ7 PREFLIGHT '+JSON.stringify(report));
+        // USB host_print caps each argument at 200 bytes. Numeric report is ASCII.
+        const json=JSON.stringify(report),parts=Math.ceil(json.length/150);
+        for(let part=0;part<parts;part++)
+          console.log('MQ7 PREFLIGHT '+(part+1)+'/'+parts+' '+json.slice(part*150,(part+1)*150));
         if(!report.ok)throw new Error('Q7 numeric/RAM admission failed');
         preflightDone=true;ready();
       }

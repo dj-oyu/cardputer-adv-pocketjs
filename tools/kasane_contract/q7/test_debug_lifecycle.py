@@ -29,7 +29,7 @@ typedef int JSValueConst;
 typedef int JSContext;
 enum { MALLOC_CAP_INTERNAL=1, MALLOC_CAP_8BIT=2, OBJECT=1, EXCEPTION=-1,
        STEPS=3376, RENDERS=STEPS*2, BATCH_LIMIT=32 };
-static bool done,ok,heap_oom,object_oom;
+static bool done,ok,heap_oom,object_oom,begin_fail;
 static unsigned active,allocations,frees,allocation_attempts;
 static size_t available=100000,largest=100000;
 static unsigned stack_watermark=16000;
@@ -150,7 +150,7 @@ bool __wrap_ksn_mesh_q7_preflight_begin(void *memory,size_t size,
     assert(render_calls==before);
     assert(fegetround()==mode && fetestexcept(FE_ALL_EXCEPT)==flags);
     now+=begin_cost;
-    return result;
+    return result && !begin_fail;
 }
 ksn_mesh_q7_preflight_step_result __wrap_ksn_mesh_q7_preflight_step(
     void *memory,size_t size,ksn_mesh_q7_preflight_report *report){
@@ -193,7 +193,7 @@ static void fresh(void){
     pocket_shiki_debug_reset();assert(!active && allocations==frees);
     assert(!q7_preflight_state.started_once && !q7_preflight_state.raw);
     available=largest=100000;stack_watermark=16000;
-    heap_oom=object_oom=false;
+    heap_oom=object_oom=begin_fail=false;
     now=0;tick=1;step_cost=begin_cost=object_cost=slow_cost=0;slow_at=0;
     pending_sample_gap=after_sample_gap=0;sample_gap_at=0;
     render_calls=step_calls=begin_calls=guest_calls=allocation_attempts=0;
@@ -233,6 +233,7 @@ static void assert_complete(void){
     assert(number("stepEstimateUs")==q7_preflight_state.step_estimate);
     assert(number("batchStepLimit")==32 && number("softBatchUs")==4000);
     assert(number("hardBatchUs")==12000 && number("totalLimitUs")==45000000);
+    assert(number("initFailure")==0 && number("allocated")==1 && number("aligned")==1 && number("begun")==1);
     assert(number("registersRestored")==1 && number("environment_restored")==1);
     assert(number("cases")==26 && number("pixels")==810240);
     assert(number("mismatch_count")==0 && number("invariant_failures")==0);
@@ -333,6 +334,11 @@ static void timing_tests(void){
     puts("Q7_DEBUG_TIMING_PASS expired entry has zero work; setup/mid-batch expiry, hard/step stops");
 }
 static void oom_tests(void){
+    fresh();begin_fail=true;
+    assert(call()==0 && begin_calls==1);
+    assert(number("initFailure")==4 && number("allocated")==1 &&
+           number("aligned")==1 && number("begun")==0);
+    assert_stopped(0);
     for(unsigned kind=0;kind<4;kind++){
         fresh();
         if(kind==0)available=0;
@@ -340,7 +346,10 @@ static void oom_tests(void){
         if(kind==2)stack_watermark=8191;
         if(kind==3)heap_oom=true;
         assert(call()==0 && !begin_calls);
-        assert(allocation_attempts==(kind==3));assert_stopped(0);
+        assert(allocation_attempts==(kind==3));
+        assert(number("initFailure")== (kind==3?2:1));
+        assert(number("allocated")==0 && number("aligned")==0 && number("begun")==0);
+        assert_stopped(0);
     }
     fresh();object_oom=true;
     unsigned char saved[sizeof q7_preflight_state];

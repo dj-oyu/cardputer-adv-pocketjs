@@ -536,6 +536,10 @@ static struct {
     ksn_mesh_q7_preflight_report report;
     int64_t started,max_step,max_batch,step_estimate;
     unsigned batches,max_batch_steps;
+    /* Diagnostic only: 1 admission, 2 allocation, 3 alignment, 4 begin,
+     * 5 begin registers. Later runtime failures retain code zero. */
+    unsigned init_failure;
+    bool allocated,aligned,begun;
     uint32_t fcr_before,fcr_after,fsr_before,fsr_after;
     bool started_once,finished,ok,admitted,registers_ok;
 } q7_preflight_state;
@@ -563,8 +567,10 @@ static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JS
             heap_caps_get_largest_free_block(cap)>=n&&
             uxTaskGetStackHighWaterMark(NULL)>=8192;
         if(q7_preflight_state.admitted)q7_preflight_state.raw=heap_caps_malloc(n,cap);
+        q7_preflight_state.allocated=q7_preflight_state.raw!=NULL;
         q7_preflight_state.workspace=ksn_mesh_q7_workspace_align(q7_preflight_state.raw,n,
             q7_preflight_state.bytes,q7_preflight_state.alignment);
+        q7_preflight_state.aligned=q7_preflight_state.workspace!=NULL;
 #if defined(__XTENSA__)
         __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_before));
         __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_before));
@@ -578,7 +584,13 @@ static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JS
         q7_preflight_state.registers_ok&=
             q7_preflight_state.fcr_before==q7_preflight_state.fcr_after&&
             q7_preflight_state.fsr_before==q7_preflight_state.fsr_after;
-        if(!begun||!q7_preflight_state.registers_ok)q7_preflight_state.finished=true;
+        q7_preflight_state.begun=begun;
+        if(!begun||!q7_preflight_state.registers_ok){
+            q7_preflight_state.init_failure=!q7_preflight_state.admitted?1:
+                !q7_preflight_state.allocated?2:!q7_preflight_state.aligned?3:
+                !begun?4:5;
+            q7_preflight_state.finished=true;
+        }
     }
     if(!q7_preflight_state.finished){
         unsigned steps=0;
@@ -641,6 +653,10 @@ static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JS
     if(!q7_preflight_state.finished)return o;
     ksn_mesh_q7_preflight_report *r=&q7_preflight_state.report;
     q7_num(ctx,o,"admitted",q7_preflight_state.admitted);
+    q7_num(ctx,o,"initFailure",q7_preflight_state.init_failure);
+    q7_num(ctx,o,"allocated",q7_preflight_state.allocated);
+    q7_num(ctx,o,"aligned",q7_preflight_state.aligned);
+    q7_num(ctx,o,"begun",q7_preflight_state.begun);
     q7_num(ctx,o,"preflightBytes",q7_preflight_state.bytes);
     q7_num(ctx,o,"allocationBytes",q7_preflight_state.allocation);
     q7_num(ctx,o,"alignment",q7_preflight_state.alignment);
