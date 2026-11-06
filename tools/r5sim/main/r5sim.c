@@ -32,6 +32,7 @@ void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(
 // the device each per-turn call is a flag test of a few instructions.
 #include "pocket_shiki_frame.h"
 esp_err_t pocket_proc_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+#ifndef R5SIM_APP_SHIKI   // pocket_shiki_frame.c has the real ones
 void pocket_proc_end_turn(void){}
 bool pocket_proc_has_frame(void){return false;}
 bool pocket_proc_pending(void){return false;}
@@ -39,6 +40,7 @@ bool pocket_proc_backdrop_pending(void){return false;}
 bool pocket_proc_is_image_mode(void){return false;}
 ksn_result pocket_proc_backdrop(void *o,uint16_t y,uint16_t rows,uint16_t *px){(void)o;(void)y;(void)rows;(void)px;return KSN_OK;}
 void pocket_proc_present_result(ksn_result r){(void)r;}
+#endif
 esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
 void pocket_grid_reset(void){}
 bool pocket_grid_pending(void){return false;}
@@ -115,8 +117,16 @@ static size_t r5_usable(const void *p){return p?r5_len(p):0;}
 static const JSMallocFunctions R5_ALLOC={r5_calloc,r5_malloc,r5_free,r5_realloc,r5_usable};
 #endif
 
+#ifdef R5SIM_APP_SHIKI
+#include "shiki_heap.h"
+extern const char stress_js_start[] asm("_binary_stress_js_start");
+extern const char stress_js_end[] asm("_binary_stress_js_end");
+#define R5SIM_APP_NAME "stress.js"
+#else
 extern const char stress_js_start[] asm("_binary_stress_r5_js_start");
 extern const char stress_js_end[] asm("_binary_stress_r5_js_end");
+#define R5SIM_APP_NAME "stress_r5.js"
+#endif
 
 #ifndef R5SIM_FRAMES
 #define R5SIM_FRAMES 120
@@ -241,6 +251,11 @@ static void gcov_dump(void) {
 #endif
 
 void app_main(void) {
+#ifdef R5SIM_APP_SHIKI
+    // The manifest names kasane.shiki: the session takes the Shiki heap before
+    // the guest (app_session.c), and pocket.kasane then has shiki.
+    if(!shiki_heap_begin(0)){ printf("R5SIM shiki heap FAIL\n"); return; }
+#endif
 #if defined(R5SIM_DEVICE)
     {
         pocketjs_guest_config_t gc;
@@ -286,26 +301,29 @@ void app_main(void) {
 #ifdef R5SIM_DEVICE
     // pocketjs_guest_eval binds globalThis.frame and drains, as app_start_test.
     bool ok=pocketjs_guest_eval(guest,stress_js_start,(size_t)(stress_js_end-stress_js_start-1),
-                                "stress_r5.js")==ESP_OK;
+                                R5SIM_APP_NAME)==ESP_OK;
     pocket_kasane_end_turn();
     ok=ok&&present();
     unsigned conts=0,frame_err=0;
     const pocketjs_guest_frame_t input={.struct_size=sizeof(input),.buttons=0,.analog=0x8080};
 #else
-    bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),"stress_r5.js")&&present();
+    bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),R5SIM_APP_NAME)&&present();
     // The device's arrangement (main/app_session.c, pocketjs_guest_create).
     JS_SetMemoryLimit(rt,160*1024);
     JS_SetGCThreshold(rt,80*1024);
     JSValue frame=JS_GetPropertyStr(ctx,g,"frame");
 #endif
     printf("R5SIM eval %s\n",ok?"ok":"FAIL");
+#ifdef R5SIM_HEAP_INFO
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+#endif
     unsigned bad_present=0;
     // The fast measure (docs/vm/qjs-observe.md sec.9): under -icount QEMU's
     // CCOUNT advances in proportion to executed instructions, so the turns'
     // CCOUNT is their instruction count up to one constant -- read without
     // the -d trace (seconds instead of half an hour). Turns 61..120 as the
     // trace records use.
-    uint64_t r5_cc=0, r5_cc_max=0;
+    uint64_t r5_cc=0, r5_cc_max=0, r5_cc_end=0;   // r5_cc_end: pocket_kasane_end_turn's share
     for(unsigned t=1;ok&&t<=R5SIM_FRAMES;t++) {
         const uint32_t cc0=esp_cpu_get_cycle_count();
 #ifdef R5SIM_DEVICE
@@ -316,7 +334,9 @@ void app_main(void) {
         // the device's next ticks; here they stay inside this turn's marks so
         // a turn is a frame's whole JS. Counted, and normally 0 under QEMU.
         while(pocketjs_guest_work_pending(guest)) { conts++; r5_arm_turn(); pocketjs_guest_continue(guest); }
+        const uint32_t cc_js=esp_cpu_get_cycle_count();
         pocket_kasane_end_turn();
+        if(t>60) r5_cc_end+=esp_cpu_get_cycle_count()-cc_js;
         r5_turn_end(t);
         R5_CC_TAKE();
 #else
@@ -364,8 +384,9 @@ void app_main(void) {
     printf("R5SIM block_cache hits=%u misses=%u pushes=%u flushes=%u\n",(unsigned)r5_cache.hits,
            (unsigned)r5_cache.misses,(unsigned)r5_cache.pushes,(unsigned)r5_cache.flushes);
 #endif
-    printf("R5SIM ccount turns=61..%u per_turn=%llu max=%llu\n",(unsigned)R5SIM_FRAMES,
-           (unsigned long long)(r5_cc/(R5SIM_FRAMES>60?R5SIM_FRAMES-60:1)),(unsigned long long)r5_cc_max);
+    printf("R5SIM ccount turns=61..%u per_turn=%llu max=%llu end_turn=%llu\n",(unsigned)R5SIM_FRAMES,
+           (unsigned long long)(r5_cc/(R5SIM_FRAMES>60?R5SIM_FRAMES-60:1)),(unsigned long long)r5_cc_max,
+           (unsigned long long)(r5_cc_end/(R5SIM_FRAMES>60?R5SIM_FRAMES-60:1)));
     printf("R5SIM done frames=%u oom=%u fail=%u bad_present=%u\n",
            (unsigned)R5SIM_FRAMES,oom_lines,fail_lines,bad_present);
 }
