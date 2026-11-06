@@ -305,3 +305,21 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
   - `AUTOSYNC_DONE ok stage=assoc` の `stage=assoc` は、後始末の disconnect イベントが status の stage を上書きするため（この変更の前からある。OK の判定には影響しない）。
 - **未検証**: 手動 sync・scan（設定画面と `pocket.net`）— ブローカーはキー入力を送れず、この環境からは動かせなかった。`wifi` の scan 側と `timesync` の手動側の HWM、`input` のキー入力の遅れ、`test_settings.py` / `capture_home.py`。人が設定画面で sync と scan を1回ずつ押し、`SYNC_DONE` / `SCAN_DONE` / `WIFI_STACK_HWM` / `SYNC_STACK_HWM` を見る。
 - `AUTOSYNC_DONE ok` の直後でも PERF の `clock=DEMO` は変わらなかった。この表示がいつ実時刻に切り替わるかは未確認（自動同期の経路はこの変更で変えていない）。
+
+## 14. RTC FAST を命令の置き場にできるか（実測、2026-11-06、`f9d9934` のプローブビルド）
+
+`CONFIG_POCKET_FETCH_PROBE`（既定 n、`main/hal/fetch_probe.c`、`tools/gen_fetch_probe.py`）が、同じ中身のコード（`add` の並び 512 命令＝1,536 B と、32 B ごとに 1 ラインずつ別のラインへ飛ぶ 48 ライン）を IRAM・RTC FAST・flash から走らせて時間を測る。ブート直後、割り込み禁止、他のタスクなし。3 回の繰り返しは全項目同じ値。**実測（実機）。**
+
+| 場所 | 並び（サイクル／命令） | 飛び（サイクル／命令） | flash のミス（サイクル／ライン） |
+| --- | --- | --- | --- |
+| IRAM（flash のキャッシュ当たりも同じ） | 1.02 | 1.25 | — |
+| RTC FAST | 4.55 | 5.19 | — |
+| flash（空のキャッシュから） | — | — | 並び 190、飛び 294 |
+
+- RTC FAST のコードは IRAM より 1 命令あたり約 3.5〜3.9 サイクル遅い。32 B のライン 1 本（約 10 命令）を最後まで走ると約 36 サイクルの上乗せ。
+- flash のミスは 1 ライン 190〜294 サイクルで、`turn-icache.md` §1.3.4 の約 450 より小さい（あちらは実アプリの値で、描画の DMA や他の bus 使用が重なる可能性がある。ここは静かなブート直後）。
+- つまり RTC FAST は、そのラインの実行の 12〜19% 以上がミスになる行でだけ flash に勝つ（36 ÷ 294 〜 36 ÷ 190）。ミスせずキャッシュに乗る行は、置くと 3.5〜4.5 倍遅くなる。
+
+**予算の前提が崩れた（実測）。** このブート（`BMI270 init=0`、IMU が動いている）では `INPUT_STACK_HWM free=472`、2,048 B 中 1,576 B を使う。§13 の 1,240 B（`free=808`）は IMU の初期化が失敗した（`init=-2`）ブートの値で、楽観的だった。`input` は 1,536 B に縮められない。`timesync` は 1,492 B（`free=556`）、`wifi` は 2,312 B（`free=760`）で、これらも縮められない。**3 本を削って RTC FAST のコード用に回せる量は、今の残り約 600 B（`TASK_STACK` の `rtc_free`）にほぼ限られる**（スタック自体の使用量を減らせば増やせるが、未着手）。
+
+**結論（推定）。** 約 600 B（約 19 ライン、約 200 命令）に置ける効果は、DERBY の 1 ターン（約 12 ms）に対して 1% 未満と見込む。IRAM の helper 8 KiB が 1 KiB あたり約 0.19 ms（`p1-iram-placement.md` §9）で、RTC FAST のコードはそれより 1 命令あたり遅いので、同じ 1 バイトなら上限は IRAM 以下になる。スタックを RTC FAST に置いて DIRAM を約 7 KB 空け、その分を IRAM の helper に回すほうが、1 バイトあたりの効きは大きい。**RTC FAST をコード置き場にする案は、この予算では見送る。**
