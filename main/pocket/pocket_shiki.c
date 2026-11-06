@@ -9,7 +9,9 @@
 #include "esp_app_desc.h"
 #ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
 #include "ksn_mesh_q7_preflight.h"
+#include "ksn_mesh_q7_workspace.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #endif
@@ -526,44 +528,109 @@ static JSValue js_mesh_q7_telemetry(JSContext *ctx,JSValueConst self,int argc,JS
     ksn_mesh_q7_stats st;pocket_proc_q7_bench_stats(&st);q7_stats(ctx,o,&st);
     return o;
 }
+/* One native step per ordinary guest frame, never a blocking startup loop.
+ * app_session teardown releases an abandoned workspace before the VM dies. */
+static struct {
+    void *raw,*workspace;
+    size_t bytes,allocation,alignment;
+    ksn_mesh_q7_preflight_report report;
+    int64_t started,max_step;
+    uint32_t fcr_before,fcr_after,fsr_before,fsr_after;
+    bool started_once,finished,ok,admitted,registers_ok;
+} q7_preflight_state;
+void pocket_shiki_debug_reset(void){
+    heap_caps_free(q7_preflight_state.raw);
+    memset(&q7_preflight_state,0,sizeof q7_preflight_state);
+}
 static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;
+    int64_t call_start=esp_timer_get_time();
     JSValue o=JS_NewObject(ctx);if(JS_IsException(o))return o;
     const uint32_t cap=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
-    const size_t bytes=ksn_mesh_q7_preflight_bytes();
-    /* For the fixed 8-triangle, 4096 packet-byte, one-row meshbench scene:
-     * two Q7 copies 7728 + packets 8192 + depth 960 + owner 1920 +
-     * temporary prepared 1624 = 20424; reserve 32768 beyond this subtotal.
-     * Legacy frames, VM, display and allocator overhead are NOT covered. */
     const size_t required=20424+32768;
-    bool admitted=heap_caps_get_free_size(cap)>=required+bytes &&
-        heap_caps_get_largest_free_block(cap)>=bytes &&
-        uxTaskGetStackHighWaterMark(NULL)>=8192;
-    q7_num(ctx,o,"admitted",admitted);q7_num(ctx,o,"requiredFree",required+bytes);
-    q7_num(ctx,o,"preflightBytes",bytes);q7_heap(ctx,o);
-    ksn_mesh_q7_preflight_report r={0};
-    void *work=admitted?heap_caps_malloc(bytes,cap):NULL;
-    uint32_t fcr_before=0,fcr_after=0;
+    if(!q7_preflight_state.started_once){
+        q7_preflight_state.started_once=true;
+        q7_preflight_state.registers_ok=true;
+        q7_preflight_state.started=esp_timer_get_time();
+        q7_preflight_state.bytes=ksn_mesh_q7_preflight_bytes();
+        q7_preflight_state.alignment=ksn_mesh_q7_preflight_alignment();
+        bool layout=ksn_mesh_q7_workspace_allocation(q7_preflight_state.bytes,
+            q7_preflight_state.alignment,&q7_preflight_state.allocation);
+        size_t n=q7_preflight_state.allocation;
+        q7_preflight_state.admitted=layout&&n<=SIZE_MAX-required&&
+            heap_caps_get_free_size(cap)>=required+n&&
+            heap_caps_get_largest_free_block(cap)>=n&&
+            uxTaskGetStackHighWaterMark(NULL)>=8192;
+        if(q7_preflight_state.admitted)q7_preflight_state.raw=heap_caps_malloc(n,cap);
+        q7_preflight_state.workspace=ksn_mesh_q7_workspace_align(q7_preflight_state.raw,n,
+            q7_preflight_state.bytes,q7_preflight_state.alignment);
 #if defined(__XTENSA__)
-    __asm__ volatile ("rur.fcr %0" : "=a"(fcr_before));
+        __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_before));
+        __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_before));
 #endif
-    bool exact=work&&ksn_mesh_q7_preflight_run(work,bytes,&r);
+        bool begun=q7_preflight_state.workspace&&ksn_mesh_q7_preflight_begin(
+            q7_preflight_state.workspace,q7_preflight_state.bytes,&q7_preflight_state.report);
 #if defined(__XTENSA__)
-    __asm__ volatile ("rur.fcr %0" : "=a"(fcr_after));
+        __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_after));
+        __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_after));
 #endif
-    q7_num(ctx,o,"fcrBefore",fcr_before);q7_num(ctx,o,"fcrAfter",fcr_after);
-    heap_caps_free(work);
-    bool ok=exact&&fcr_before==fcr_after&&r.environment_restored&&r.enabled.depth_fast&&r.enabled.mask_fast;
-    JS_SetPropertyStr(ctx,o,"ok",JS_NewBool(ctx,ok));
-    JS_SetPropertyStr(ctx,o,"numericExact",JS_NewBool(ctx,exact));
-#define Q7_REPORT(k) q7_num(ctx,o,#k,(double)r.k)
+        q7_preflight_state.registers_ok&=
+            q7_preflight_state.fcr_before==q7_preflight_state.fcr_after&&
+            q7_preflight_state.fsr_before==q7_preflight_state.fsr_after;
+        if(!begun||!q7_preflight_state.registers_ok)q7_preflight_state.finished=true;
+    }
+    if(!q7_preflight_state.finished){
+        int64_t step_start=call_start;
+#if defined(__XTENSA__)
+        __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_before));
+        __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_before));
+#endif
+        ksn_mesh_q7_preflight_step_result result=ksn_mesh_q7_preflight_step(
+            q7_preflight_state.workspace,q7_preflight_state.bytes,&q7_preflight_state.report);
+#if defined(__XTENSA__)
+        __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_after));
+        __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_after));
+#endif
+        q7_preflight_state.registers_ok&=
+            q7_preflight_state.fcr_before==q7_preflight_state.fcr_after&&
+            q7_preflight_state.fsr_before==q7_preflight_state.fsr_after;
+        int64_t now=esp_timer_get_time(),step=now-step_start;
+        if(step>q7_preflight_state.max_step)q7_preflight_state.max_step=step;
+        bool time_ok=step>=0&&step<=20000&&now-q7_preflight_state.started<=180000000;
+        if(result!=KSN_MESH_Q7_PREFLIGHT_MORE||!time_ok||!q7_preflight_state.registers_ok){
+            q7_preflight_state.finished=true;
+            q7_preflight_state.ok=result==KSN_MESH_Q7_PREFLIGHT_DONE&&time_ok&&
+                q7_preflight_state.registers_ok&&q7_preflight_state.report.environment_restored&&
+                q7_preflight_state.report.enabled.depth_fast&&q7_preflight_state.report.enabled.mask_fast;
+        }
+    }
+    if(q7_preflight_state.finished){
+        heap_caps_free(q7_preflight_state.raw);
+        q7_preflight_state.raw=q7_preflight_state.workspace=NULL;
+    }
+    JS_SetPropertyStr(ctx,o,"done",JS_NewBool(ctx,q7_preflight_state.finished));
+    JS_SetPropertyStr(ctx,o,"ok",JS_NewBool(ctx,!q7_preflight_state.finished||q7_preflight_state.ok));
+    q7_num(ctx,o,"checkpoints",q7_preflight_state.report.checkpoints);
+    if(!q7_preflight_state.finished)return o;
+    ksn_mesh_q7_preflight_report *r=&q7_preflight_state.report;
+    q7_num(ctx,o,"admitted",q7_preflight_state.admitted);
+    q7_num(ctx,o,"preflightBytes",q7_preflight_state.bytes);
+    q7_num(ctx,o,"allocationBytes",q7_preflight_state.allocation);
+    q7_num(ctx,o,"alignment",q7_preflight_state.alignment);
+    q7_num(ctx,o,"preflightUs",esp_timer_get_time()-q7_preflight_state.started);
+    q7_num(ctx,o,"maxStepUs",q7_preflight_state.max_step);
+    q7_num(ctx,o,"registersRestored",q7_preflight_state.registers_ok);
+    q7_num(ctx,o,"fcrBefore",q7_preflight_state.fcr_before);q7_num(ctx,o,"fcrAfter",q7_preflight_state.fcr_after);
+    q7_num(ctx,o,"fsrBefore",q7_preflight_state.fsr_before);q7_num(ctx,o,"fsrAfter",q7_preflight_state.fsr_after);
+    q7_heap(ctx,o);
+#define Q7_REPORT(k) q7_num(ctx,o,#k,(double)r->k)
     Q7_REPORT(cases);Q7_REPORT(pixels);Q7_REPORT(mismatch_count);
     Q7_REPORT(failure_result_mismatches);Q7_REPORT(invariant_failures);
     Q7_REPORT(safe_fallback_cases);Q7_REPORT(certificate_cases);Q7_REPORT(render_failures);
     Q7_REPORT(round_before);Q7_REPORT(round_after);Q7_REPORT(subnormal_ok);
     Q7_REPORT(environment_restored);
 #undef Q7_REPORT
-    q7_stats(ctx,o,&r.enabled);
+    q7_stats(ctx,o,&r->enabled);
     return o;
 }
 #endif
