@@ -22363,7 +22363,16 @@ mul_fp_res:
                     int v1, v2;
                     v1 = JS_VALUE_GET_INT(op1);
                     v2 = JS_VALUE_GET_INT(op2);
-                    sp[-2] = js_number((double)v1 / (double)v2);
+                    /* POCKET: an exact quotient is the int js_number() would
+                       give, from the hardware divider (~16 cycles) instead of
+                       soft-float __divdf3 (~350 instructions on the ESP32-S3,
+                       docs/vm/qjs-observe.md sec.13). Not for a zero dividend
+                       over a negative divisor (-0) or INT32_MIN / -1 (2^31). */
+                    if (v2 != 0 && !(v1 == 0 && v2 < 0) &&
+                        !(v1 == INT32_MIN && v2 == -1) && v1 % v2 == 0)
+                        sp[-2] = js_int32(v1 / v2);
+                    else
+                        sp[-2] = js_number((double)v1 / (double)v2);
                     sp--;
                 } else if (js_both_number(op1, op2, &d1, &d2)) {
                     /* js_binary_arith_slow's handle_float64: js_float64,
