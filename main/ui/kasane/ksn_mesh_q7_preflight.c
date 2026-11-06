@@ -1,5 +1,5 @@
 #include "ksn_mesh_q7_preflight.h"
-#include <fenv.h>
+#include "ksn_mesh_q7_environment.h"
 #include <float.h>
 #include <math.h>
 #include <stdint.h>
@@ -19,7 +19,7 @@ typedef struct {
     uint32_t version, active;
     uintptr_t report_address;
     unsigned scene, row;
-    fenv_t numeric_environment;
+    ksn_q7_environment numeric_environment;
 } workspace;
 _Static_assert(sizeof(workspace)<16384,"preflight workspace budget");
 size_t ksn_mesh_q7_preflight_bytes(void){return sizeof(workspace);}
@@ -90,16 +90,16 @@ static void compare(workspace *w,ksn_mesh_q7_preflight_report *r,unsigned y,bool
             w->owner[0][x]!=w->owner[1][x];
     }
 }
-static bool checkpoint(ksn_mesh_q7_preflight_report *r,const fenv_t *caller,
+static bool checkpoint(ksn_mesh_q7_preflight_report *r,const ksn_q7_environment *caller,
                        ksn_mesh_q7_preflight_checkpoint_fn callback,void *context){
     r->checkpoints++;
     if(!callback)return true;
-    fenv_t numeric;
-    if(fegetenv(&numeric)!=0 || fesetenv(caller)!=0){r->invariant_failures++;return false;}
+    ksn_q7_environment numeric;
+    if(ksn_q7_environment_get(&numeric)!=0 || ksn_q7_environment_set(caller)!=0){r->invariant_failures++;return false;}
     r->yield_count++;
     bool proceed=callback(context);
     if(!proceed)r->cancelled=true;
-    if(fesetenv(&numeric)!=0){r->invariant_failures++;return false;}
+    if(ksn_q7_environment_set(&numeric)!=0){r->invariant_failures++;return false;}
     return proceed;
 }
 bool ksn_mesh_q7_preflight_run_cooperative(void *memory,size_t bytes,
@@ -116,8 +116,8 @@ bool ksn_mesh_q7_preflight_run_cooperative(void *memory,size_t bytes,
        (start<end+sizeof *r && end<start+sizeof(workspace))){
         r->invariant_failures++;return false;
     }
-    fenv_t saved;
-    if(fegetenv(&saved)!=0){r->invariant_failures++;return false;}
+    ksn_q7_environment saved;
+    if(ksn_q7_environment_get(&saved)!=0){r->invariant_failures++;return false;}
     workspace *w=memory;
     r->subnormal_ok=probe();
     for(unsigned scene=0;scene<CASES;scene++){
@@ -148,7 +148,7 @@ bool ksn_mesh_q7_preflight_run_cooperative(void *memory,size_t bytes,
     if((r->round_before!=FE_TONEAREST || !r->subnormal_ok) &&
        (r->enabled.depth_fast || r->enabled.mask_fast))r->invariant_failures++;
 restore:
-    if(fesetenv(&saved)!=0)r->invariant_failures++;
+    if(ksn_q7_environment_set(&saved)!=0)r->invariant_failures++;
     else r->environment_restored=true;
     r->round_after=fegetround();
     if(r->round_before!=r->round_after){r->environment_restored=false;r->invariant_failures++;}
@@ -161,7 +161,7 @@ bool ksn_mesh_q7_preflight_run(void *memory,size_t bytes,ksn_mesh_q7_preflight_r
 
 /* Version is private to this exact state layout. Caller must not persist or
  * copy active state across module versions or workspace addresses. */
-#define PREFLIGHT_STATE_VERSION UINT32_C(0x51375001)
+#define PREFLIGHT_STATE_VERSION UINT32_C(0x51375002)
 static bool incremental_arguments(void *memory,size_t bytes,
                                   ksn_mesh_q7_preflight_report *r){
     if(!memory || !r || bytes<sizeof(workspace) ||
@@ -172,14 +172,14 @@ static bool incremental_arguments(void *memory,size_t bytes,
 }
 bool ksn_mesh_q7_preflight_begin(void *memory,size_t bytes,ksn_mesh_q7_preflight_report *r){
     if(!incremental_arguments(memory,bytes,r))return false;
-    fenv_t caller;
-    if(fegetenv(&caller)!=0)return false;
+    ksn_q7_environment caller;
+    if(ksn_q7_environment_get(&caller)!=0)return false;
     workspace *w=memory;
     memset(w,0,sizeof *w);memset(r,0,sizeof *r);
     r->round_before=r->round_after=fegetround();
     r->subnormal_ok=probe();
-    bool saved=fegetenv(&w->numeric_environment)==0;
-    bool restored=fesetenv(&caller)==0 && fegetround()==r->round_before;
+    bool saved=ksn_q7_environment_get(&w->numeric_environment)==0;
+    bool restored=ksn_q7_environment_set(&caller)==0 && fegetround()==r->round_before;
     r->environment_restored=restored;
     if(!saved || !restored){r->invariant_failures++;return false;}
     w->version=PREFLIGHT_STATE_VERSION;w->active=1;w->report_address=(uintptr_t)r;
@@ -208,11 +208,11 @@ ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
        r->checkpoints!=(uint64_t)w->scene*KSN_PROC_H+w->row){
         w->active=0;r->invariant_failures++;return KSN_MESH_Q7_PREFLIGHT_FAILED;
     }
-    fenv_t caller;
-    if(fegetenv(&caller)!=0){w->active=0;r->invariant_failures++;return KSN_MESH_Q7_PREFLIGHT_FAILED;}
+    ksn_q7_environment caller;
+    if(ksn_q7_environment_get(&caller)!=0){w->active=0;r->invariant_failures++;return KSN_MESH_Q7_PREFLIGHT_FAILED;}
     int caller_round=fegetround();
     ksn_mesh_q7_preflight_step_result result=KSN_MESH_Q7_PREFLIGHT_MORE;
-    if(fesetenv(&w->numeric_environment)!=0){r->invariant_failures++;goto step_restore;}
+    if(ksn_q7_environment_set(&w->numeric_environment)!=0){r->invariant_failures++;goto step_restore;}
     if(fegetround()!=r->round_before){r->invariant_failures++;goto step_restore;}
     if(w->scene<CASES){
         if(w->row==0){
@@ -231,9 +231,9 @@ ksn_mesh_q7_preflight_step_result ksn_mesh_q7_preflight_step(
         incremental_validate(r);result=KSN_MESH_Q7_PREFLIGHT_DONE;
     }
     r->round_after=fegetround();
-    if(r->round_after!=r->round_before || fegetenv(&w->numeric_environment)!=0)r->invariant_failures++;
+    if(r->round_after!=r->round_before || ksn_q7_environment_get(&w->numeric_environment)!=0)r->invariant_failures++;
 step_restore:
-    if(fesetenv(&caller)!=0 || fegetround()!=caller_round){
+    if(ksn_q7_environment_set(&caller)!=0 || fegetround()!=caller_round){
         r->environment_restored=false;r->invariant_failures++;
     }
     if(r->invariant_failures || r->mismatch_count || r->failure_result_mismatches || r->cancelled)
