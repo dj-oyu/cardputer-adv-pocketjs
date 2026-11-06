@@ -528,13 +528,14 @@ static JSValue js_mesh_q7_telemetry(JSContext *ctx,JSValueConst self,int argc,JS
     ksn_mesh_q7_stats st;pocket_proc_q7_bench_stats(&st);q7_stats(ctx,o,&st);
     return o;
 }
-/* One native step per ordinary guest frame, never a blocking startup loop.
+/* Bounded adaptive native batch per guest frame, never a startup loop.
  * app_session teardown releases an abandoned workspace before the VM dies. */
 static struct {
     void *raw,*workspace;
     size_t bytes,allocation,alignment;
     ksn_mesh_q7_preflight_report report;
-    int64_t started,max_step;
+    int64_t started,max_step,max_batch,step_estimate;
+    unsigned batches,max_batch_steps;
     uint32_t fcr_before,fcr_after,fsr_before,fsr_after;
     bool started_once,finished,ok,admitted,registers_ok;
 } q7_preflight_state;
@@ -580,29 +581,55 @@ static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JS
         if(!begun||!q7_preflight_state.registers_ok)q7_preflight_state.finished=true;
     }
     if(!q7_preflight_state.finished){
-        int64_t step_start=call_start;
+        unsigned steps=0;
+        int64_t now=esp_timer_get_time();
+        while(!q7_preflight_state.finished&&steps<32){
+            now=esp_timer_get_time();
+            int64_t elapsed=now-call_start,total=now-q7_preflight_state.started;
+            if(elapsed<0||total<0||elapsed>12000||total>45000000){
+                q7_preflight_state.finished=true;break;
+            }
+            /* Decaying observed cost is a scheduling estimate, never a proof.
+             * Leave twice that cost plus 100 us inside the 4 ms soft budget.
+             * Always allow one bounded row pair, then return to the guest. */
+            if(steps&&(elapsed>=4000||
+                q7_preflight_state.step_estimate>(4000-elapsed-100)/2))break;
+            int64_t step_start=esp_timer_get_time();
 #if defined(__XTENSA__)
-        __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_before));
-        __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_before));
+            __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_before));
+            __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_before));
 #endif
-        ksn_mesh_q7_preflight_step_result result=ksn_mesh_q7_preflight_step(
-            q7_preflight_state.workspace,q7_preflight_state.bytes,&q7_preflight_state.report);
+            ksn_mesh_q7_preflight_step_result result=ksn_mesh_q7_preflight_step(
+                q7_preflight_state.workspace,q7_preflight_state.bytes,&q7_preflight_state.report);
 #if defined(__XTENSA__)
-        __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_after));
-        __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_after));
+            __asm__ volatile ("rur.fcr %0" : "=a"(q7_preflight_state.fcr_after));
+            __asm__ volatile ("rur.fsr %0" : "=a"(q7_preflight_state.fsr_after));
 #endif
-        q7_preflight_state.registers_ok&=
-            q7_preflight_state.fcr_before==q7_preflight_state.fcr_after&&
-            q7_preflight_state.fsr_before==q7_preflight_state.fsr_after;
-        int64_t now=esp_timer_get_time(),step=now-step_start;
-        if(step>q7_preflight_state.max_step)q7_preflight_state.max_step=step;
-        bool time_ok=step>=0&&step<=20000&&now-q7_preflight_state.started<=180000000;
-        if(result!=KSN_MESH_Q7_PREFLIGHT_MORE||!time_ok||!q7_preflight_state.registers_ok){
-            q7_preflight_state.finished=true;
-            q7_preflight_state.ok=result==KSN_MESH_Q7_PREFLIGHT_DONE&&time_ok&&
-                q7_preflight_state.registers_ok&&q7_preflight_state.report.environment_restored&&
-                q7_preflight_state.report.enabled.depth_fast&&q7_preflight_state.report.enabled.mask_fast;
+            q7_preflight_state.registers_ok&=
+                q7_preflight_state.fcr_before==q7_preflight_state.fcr_after&&
+                q7_preflight_state.fsr_before==q7_preflight_state.fsr_after;
+            now=esp_timer_get_time();
+            int64_t step=now-step_start;
+            if(step>q7_preflight_state.max_step)q7_preflight_state.max_step=step;
+            /* Recover from isolated scheduler outliers without discarding
+             * the measured maximum. Admission remains only an estimate. */
+            int64_t decayed=(q7_preflight_state.step_estimate*3+3)/4;
+            q7_preflight_state.step_estimate=step>decayed?step:decayed;
+            steps++;
+            bool time_ok=step>=0&&step<=20000&&now>=call_start&&
+                now-call_start<=12000&&now>=q7_preflight_state.started&&
+                now-q7_preflight_state.started<=45000000;
+            if(result!=KSN_MESH_Q7_PREFLIGHT_MORE||!time_ok||!q7_preflight_state.registers_ok){
+                q7_preflight_state.finished=true;
+                q7_preflight_state.ok=result==KSN_MESH_Q7_PREFLIGHT_DONE&&time_ok&&
+                    q7_preflight_state.registers_ok&&q7_preflight_state.report.environment_restored&&
+                    q7_preflight_state.report.enabled.depth_fast&&q7_preflight_state.report.enabled.mask_fast;
+            }
         }
+        q7_preflight_state.batches++;
+        if(steps>q7_preflight_state.max_batch_steps)q7_preflight_state.max_batch_steps=steps;
+        int64_t batch=now-call_start;
+        if(batch>q7_preflight_state.max_batch)q7_preflight_state.max_batch=batch;
     }
     if(q7_preflight_state.finished){
         heap_caps_free(q7_preflight_state.raw);
@@ -619,6 +646,12 @@ static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JS
     q7_num(ctx,o,"alignment",q7_preflight_state.alignment);
     q7_num(ctx,o,"preflightUs",esp_timer_get_time()-q7_preflight_state.started);
     q7_num(ctx,o,"maxStepUs",q7_preflight_state.max_step);
+    q7_num(ctx,o,"maxBatchUs",q7_preflight_state.max_batch);
+    q7_num(ctx,o,"stepEstimateUs",q7_preflight_state.step_estimate);
+    q7_num(ctx,o,"maxBatchSteps",q7_preflight_state.max_batch_steps);
+    q7_num(ctx,o,"batches",q7_preflight_state.batches);
+    q7_num(ctx,o,"batchStepLimit",32);q7_num(ctx,o,"softBatchUs",4000);
+    q7_num(ctx,o,"hardBatchUs",12000);q7_num(ctx,o,"totalLimitUs",45000000);
     q7_num(ctx,o,"registersRestored",q7_preflight_state.registers_ok);
     q7_num(ctx,o,"fcrBefore",q7_preflight_state.fcr_before);q7_num(ctx,o,"fcrAfter",q7_preflight_state.fcr_after);
     q7_num(ctx,o,"fsrBefore",q7_preflight_state.fsr_before);q7_num(ctx,o,"fsrAfter",q7_preflight_state.fsr_after);
