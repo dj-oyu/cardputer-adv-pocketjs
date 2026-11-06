@@ -668,9 +668,19 @@ ksn_result pocket_kasane_presenter_step(bool *blocked){
     return state->provider->step(state->provider_state,blocked);
 }
 
+// An int-tagged value needs no rounding, finiteness or integrality test, only
+// the range: answered without the soft-double helpers (__floatsidf, __ltdf2,
+// __gtdf2, __fixdfsi) that the double path calls -- ~300 calls a STRESS turn
+// for coordinates that are almost always ints (docs/vm/qjs-observe.md sec.3.1).
 static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
                       double *out) {
     double n;
+    if(JS_VALUE_GET_TAG(value)==JS_TAG_INT){
+        const int32_t i=JS_VALUE_GET_INT(value);
+        if(i<lo||i>hi) return false;
+        *out=i;
+        return true;
+    }
     if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&n,value)<0||!isfinite(n)||
        floor(n)!=n||n<lo||n>hi) return false;
     *out=n;
@@ -679,6 +689,12 @@ static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
 
 static bool parse_i16(JSContext *ctx, JSValueConst value, int16_t *out) {
     double n;
+    if(JS_VALUE_GET_TAG(value)==JS_TAG_INT){
+        const int32_t i=JS_VALUE_GET_INT(value);
+        if(i<INT16_MIN||i>INT16_MAX) return false;
+        *out=(int16_t)i;
+        return true;
+    }
     if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&n,value)<0||!isfinite(n)) return false;
     n=round(n);
     if(n<INT16_MIN||n>INT16_MAX)return false;
