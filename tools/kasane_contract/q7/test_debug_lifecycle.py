@@ -272,6 +272,12 @@ static void adaptive_test(void){
     assert(call()==1 && !done);
     assert(q7_preflight_state.step_estimate==q7_preflight_state.max_step);
     calls=1;bool recovered=false;
+    for(unsigned i=0;i<3;i++){
+        int64_t previous=q7_preflight_state.step_estimate;
+        assert(call()==1 && !done);calls++;
+        assert(q7_preflight_state.step_estimate<previous);
+        assert(q7_preflight_state.max_step==5001);
+    }
     do{
         unsigned rows=call();
         assert(rows>=1 && rows<=32 && ++calls<=STEPS);
