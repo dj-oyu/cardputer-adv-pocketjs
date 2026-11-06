@@ -136,6 +136,10 @@ extern const char stress_js_end[] asm("_binary_stress_r5_js_end");
 volatile unsigned r5_turn_now, r5_turn_done;
 __attribute__((noinline,used)) void r5_turn_begin(unsigned t){ r5_turn_now=t; }
 __attribute__((noinline,used)) void r5_turn_end(unsigned t){ r5_turn_done=t+1; }
+// The render's own marks (observe.py --begin r5_render_begin --end r5_render_end).
+volatile unsigned r5_render_now;
+__attribute__((noinline,used)) void r5_render_begin(unsigned t){ r5_render_now=t; }
+__attribute__((noinline,used)) void r5_render_end(unsigned t){ r5_render_now=t+1000; }
 
 static JSRuntime *rt;
 static JSContext *ctx;
@@ -365,7 +369,15 @@ void app_main(void) {
         JS_GetMemoryCounters(rt,&used,&limit);
         pocket_memory_sample((uint64_t)t*33333u,used,limit,false,0,0);
         pocket_memory_pump(false);
+#ifdef R5SIM_FULL_RENDER
+        // The whole panel from frame 59, to observe the render itself
+        // (docs/vm/qjs-observe.md sec.21) without paying for it in the trace
+        // of the first 58 frames.
+        if(t==59) pocket_kasane_set_viewport(0,0,240,135);
+#endif
+        r5_render_begin(t);
         if(!present()) bad_present++;
+        r5_render_end(t);
     }
 #ifdef R5SIM_DEVICE
     pocketjs_guest_stats_t st={0};

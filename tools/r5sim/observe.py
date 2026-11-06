@@ -103,6 +103,8 @@ def main():
     ap.add_argument('log'); ap.add_argument('elf')
     ap.add_argument('--nm', default='xtensa-esp32s3-elf-nm')
     ap.add_argument('--rom-elf', help='esp-rom-elfs esp32s3_rev0_rom.elf')
+    ap.add_argument('--begin', default='r5_turn_begin', help='the window opens at this function')
+    ap.add_argument('--end', default='r5_turn_end', help='and closes at this one')
     ap.add_argument('--first', type=int, default=61)
     ap.add_argument('--last', type=int, default=120)
     ap.add_argument('--top', type=int, default=40)
@@ -110,8 +112,8 @@ def main():
     a = ap.parse_args()
 
     saddr, sname = symbols(a.nm, a.elf, a.rom_elf)
-    begin_pc = saddr[sname.index('r5_turn_begin')]
-    end_pc = saddr[sname.index('r5_turn_end')]
+    begin_pc = saddr[sname.index(a.begin)]
+    end_pc = saddr[sname.index(a.end)]
     func_cache = {}
 
     def func_of(pc):
@@ -127,7 +129,7 @@ def main():
     tbs = {}
     insn_text = {}          # pc -> (mnemonic, full text, length)
     pending = None          # insns of the IN: block just read
-    started = False; turn = 0; begins = 0
+    started = False; inside = False; turn = 0; begins = 0
     # per-turn-window accumulators
     insn_by_func = collections.Counter()
     taken_by_func = collections.Counter()
@@ -179,7 +181,14 @@ def main():
                     begins += 1
                     if begins == a.first:
                         started = True
-                if not started:
+                    if started:
+                        inside = True
+                # Only between a begin and its end: what runs between two
+                # windows (the render between turns, the turn between
+                # renders) is not the window's. Until 2026-11-06 the count ran
+                # on from the first begin, so the turn figures before then
+                # include r5sim's 16x8 present() between turns.
+                if not started or not inside:
                     prev = tb
                     continue
                 ins = tb[1]
@@ -244,6 +253,7 @@ def main():
                 prev = tb
                 if pc == end_pc:
                     turn += 1
+                    inside = False
                     if begins >= a.last:
                         break
             elif c == b'I' and raw.startswith(b'IN:'):
