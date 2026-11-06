@@ -60,14 +60,15 @@ static size_t length(void *ctx, const void *p) {
 static const block_cache_backend_t backend = {allocate, release, length, NULL};
 struct pocketjs_guest {
     block_cache_t block_cache;
-    int owner_task;
+    uintptr_t owner_task;
     bool block_cache_on;
     JSContext *ctx;
 };
 static pocketjs_guest_t *guest;
 #define MALLOC_CAP_INTERNAL 1u
 #define MALLOC_CAP_8BIT 2u
-static int xTaskGetCurrentTaskHandle(void) { return task; }
+/* guest.c's task identity (THREADPTR on the device) */
+static uintptr_t guest_task_id(void) { return (uintptr_t)task; }
 static int64_t esp_timer_get_time(void) { return (int64_t)clock_us; }
 static size_t heap_caps_get_free_size(unsigned caps) {
     assert(caps == (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
