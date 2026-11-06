@@ -23,6 +23,16 @@
 #define BC_UNPOISON(p, n) ((void)0)
 #endif
 
+// The list link is the block's first word. Blocks come from the backend's
+// malloc, so the word is pointer aligned; may_alias keeps the accesses legal
+// under strict aliasing (docs/vm/aliasing-types.md). memcpy said the same,
+// but -Os GCC on Xtensa made every pointer-sized memcpy a call to ROM memcpy
+// (236 calls a STRESS turn, docs/vm/qjs-observe.md sec.3.3.1).
+typedef struct {
+  void *next;
+} __attribute__((may_alias)) bc_link_t;
+#define BC_NEXT(block) (((bc_link_t *)(block))->next)
+
 void block_cache_init(block_cache_t *cache, const block_cache_backend_t *backend,
                       const uint16_t *sizes, unsigned n, bool enabled) {
   memset(cache, 0, sizeof(*cache));
@@ -55,7 +65,7 @@ void *block_cache_malloc(block_cache_t *cache, size_t size, size_t rounded) {
     if (c >= 0 && cache->head[c] != NULL) {
       void *block = cache->head[c];
       BC_UNPOISON(block, cache->size[c]);
-      memcpy(&cache->head[c], block, sizeof(void *));
+      cache->head[c] = BC_NEXT(block);
       cache->count[c]--;
       cache->hits++;
       return block;
@@ -78,7 +88,7 @@ void block_cache_free(block_cache_t *cache, void *block) {
   if (cache->enabled) {
     const int c = class_index(cache, b->length(b->ctx, block));
     if (c >= 0 && cache->count[c] < BLOCK_CACHE_DEPTH) {
-      memcpy(block, &cache->head[c], sizeof(void *));
+      BC_NEXT(block) = cache->head[c];
       cache->head[c] = block;
       cache->count[c]++;
       cache->pushes++;
@@ -94,9 +104,8 @@ void block_cache_flush(block_cache_t *cache) {
   for (unsigned c = 0; c < BLOCK_CACHE_CLASSES; c++) {
     void *block = cache->head[c];
     while (block != NULL) {
-      void *next;
       BC_UNPOISON(block, cache->size[c]);
-      memcpy(&next, block, sizeof(void *));
+      void *next = BC_NEXT(block);
       b->free(b->ctx, block);
       block = next;
     }
