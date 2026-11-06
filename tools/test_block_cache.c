@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
   srand(12345);
   const size_t pick[] = {5, 12, 13, 16, 30, 32, 36, 40, 48, 60, 72, 80, 88, 100, 200};
-  const size_t cap = 8 * (12 + 16 + 32 + 36 + 48 + 72 + 80 + 88);
+  const size_t cap = BLOCK_CACHE_DEPTH * (12 + 16 + 32 + 36 + 48 + 72 + 80 + 88);
   for (unsigned step = 0; step < 400000; step++) {
     unsigned s = (unsigned)rand() % SLOTS;
     if (live[s].p) {
