@@ -657,8 +657,8 @@ if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
     set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
 
-# Diagnostic-only branch: enabled here for a fresh broker build; not a production default.
-option(KASANE_Q7_DEPTH_GATE_DIAGNOSTIC "Observe integer depth gate without changing FP state" ON)
+# Performance comparison branch: gate instrumentation stays OFF.
+option(KASANE_Q7_DEPTH_GATE_DIAGNOSTIC "Observe integer depth gate without changing FP state" OFF)
 if(KASANE_Q7_DEPTH_GATE_DIAGNOSTIC)
     if(NOT KASANE_MESH_Q7_CERTIFIED_PROTOTYPE OR NOT KASANE_MESH_Q7_BENCH_PREFLIGHT OR KASANE_MESH_EDGE4_PROTOTYPE)
         message(FATAL_ERROR "Depth gate diagnostics require Q7 and preflight ON, edge4 OFF")
