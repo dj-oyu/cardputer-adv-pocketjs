@@ -49,6 +49,11 @@ typedef struct {
     char ip[16];              // "" until DHCP completes
 } wifi_time_status_t;
 
+// Once at boot, before any start: creates the permanent worker task that runs
+// scans and links, with its stack in RTC fast memory (rtc_task.h). Without it
+// the starts below return ESP_ERR_NO_MEM.
+void wifi_time_init(void);
+
 // Stable lower-case token for the log marker and for the UI, e.g. "auth".
 const char *wifi_time_stage_name(wifi_time_stage_t stage);
 

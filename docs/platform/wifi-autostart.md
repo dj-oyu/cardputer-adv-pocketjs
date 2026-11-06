@@ -288,3 +288,14 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 - `sntp_lock` の正しさは、「link タスクは UP 以外の状態を書いてから `tear_down()` に入る」という順序に依存する（`wifi_time.c` の現状の2経路で確認。経路を足すときはこの順序を保つこと、コメントに記した）。
 - IDF 側に残る競合: `sync_time_cb` は `s_storage` を2度読むので、deinit と tcpip スレッド上のコールバックが重なると NULL 参照の余地がある（IDF の内部、手動同期にも同じくある。今回の変更の外）。
 - 5分の中断間隔は設計値で、使い方の実測に基づかない。
+
+## 13. 手動 sync の一本化と常駐タスク（issue #116）
+
+- 手動 sync（Wi-Fi 設定画面）は `net_autosync_sync_now()`。自動と同じ `autosync_attempt()`（net_service のリンク → SNTP → 解放）で、方針（アイドル待ち・メモリの門・試行回数）には従わない。`sync_task` と `wifi_time_sync_start()` は削除した。
+- タスクは常駐 3 本、スタックはすべて RTC FAST（`hal/rtc_task.c`、コア 0 固定、確保失敗なら DIRAM）。TCB は DIRAM（推定 約350 B/本。文脈切替のたびに触るため）。
+  - `input` 2,048 B（実測 最大使用 約1,250 B）
+  - `wifi` 3,072 B: link と scan を載せる（`running` で排他）。実測 link 約2,000 B。
+  - `timesync` 2,048 B: 自動・手動の試行。実測 約1,450 B。wifi と別タスクにしたのは、試行がリンク（wifi 側）を待つため、同じタスクだと自分を待つから。
+  - 合計 7,168 B。仕事は通知（`xTaskNotifyGive`）で渡す。確保は起動時 1 回で解放しないので、削除前のスタック再利用は起きない。
+- 起動ログ `TASK_STACK <name> rtc|dram bytes= rtc_free= rtc_largest=`、HWM は `WIFI_STACK_HWM` / `AUTOSYNC_STACK_HWM` / `SYNC_STACK_HWM`（`SYNC_START` / `SYNC_DONE` も）。`INPUT_STACK_HWM` は据え置き。
+- **未検証（このセッションには ESP-IDF も実機もない）**: ファームのビルド、各 HWM（sync と scan は未測定）、RTC FAST の残り、同期中の `min_free`、入力遅延、`test_settings.py` / `capture_home.py`。ホスト試験 `tools/build_net_autosync_test.sh` は通過（ただし ESP_PLATFORM 側のコードは対象外）。2,048 B は余裕が約600 B なので、実機で HWM を見て足りなければ戻す。

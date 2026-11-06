@@ -1,4 +1,5 @@
 #include "wifi_time.h"
+#include "rtc_task.h"
 #include "system/sys_clock.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -438,6 +439,49 @@ static void finish(wifi_time_stage_t stage, int reason) {
     ESP_LOGW(TAG,"SYNC_FAILED stage=%s reason=%d",wifi_time_stage_name(stage),reason);
 }
 
+// ------------------------------------------------------------ the worker
+//
+// One permanent task runs every radio job (link and scan; the `running` lock
+// already made them exclusive), so its stack can be a fixed block in RTC fast
+// memory that is never freed and reused behind a live task. A start wins the
+// lock, names the job, and wakes the worker; the lock is released by the job
+// itself, so the next start can only name a job after the last one is done
+// with the variable. 3 KiB: link measured ~2.0 KiB of a 4 KiB stack (#116).
+
+typedef enum { WIFI_JOB_NONE, WIFI_JOB_LINK, WIFI_JOB_SCAN } wifi_job_t;
+static atomic_int  wifi_job;
+static TaskHandle_t wifi_worker;
+
+static void do_scan(void);
+static void do_link(void);
+
+static void wifi_worker_task(void *arg) {
+    (void)arg;
+    for(;;) {
+        ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+        switch((wifi_job_t)atomic_load(&wifi_job)) {
+        case WIFI_JOB_LINK: do_link(); break;
+        case WIFI_JOB_SCAN: do_scan(); break;
+        default: break;
+        }
+        ESP_LOGI("wifi","WIFI_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
+    }
+}
+
+void wifi_time_init(void) {
+    if(wifi_worker) return;
+    wifi_worker=rtc_task_create(wifi_worker_task,"wifi",3072,5);
+}
+
+// False when there is no worker (boot allocation failed); the caller undoes
+// what it set up, as it did when xTaskCreate failed.
+static bool wifi_worker_post(wifi_job_t job) {
+    if(!wifi_worker) return false;
+    atomic_store(&wifi_job,(int)job);
+    xTaskNotifyGive(wifi_worker);
+    return true;
+}
+
 // ------------------------------------------------------------------ scanning
 
 static portMUX_TYPE scan_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -526,8 +570,7 @@ static void scan_insert(const wifi_ap_record_t *ap) {
     scan_count++;
 }
 
-static void scan_task(void *arg) {
-    (void)arg;
+static void do_scan(void) {
     taskENTER_CRITICAL(&scan_lock);
     scan_state=WIFI_TIME_RUNNING; scan_count=0; scan_truncated=false;
     taskEXIT_CRITICAL(&scan_lock);
@@ -570,9 +613,6 @@ static void scan_task(void *arg) {
     ESP_LOGI(TAG,"SCAN_DONE state=%d free=%u",
              (int)wifi_time_scan_state(),(unsigned)esp_get_free_heap_size());
     atomic_store(&running,false);
-    /* Stack high-water mark, to size a shared stack (shiki-jit.md sec.19). */
-    ESP_LOGI("wifi","WIFI_STACK_HWM %s free=%u",pcTaskGetName(NULL),(unsigned)uxTaskGetStackHighWaterMark(NULL));
-    vTaskDelete(NULL);
 }
 
 esp_err_t wifi_time_scan_start(void) {
@@ -586,7 +626,7 @@ esp_err_t wifi_time_scan_start(void) {
     taskENTER_CRITICAL(&scan_lock);
     scan_state=WIFI_TIME_RUNNING;
     taskEXIT_CRITICAL(&scan_lock);
-    if(xTaskCreate(scan_task,"wifi_scan",4096,NULL,5,NULL)!=pdPASS) {
+    if(!wifi_worker_post(WIFI_JOB_SCAN)) {
         taskENTER_CRITICAL(&scan_lock);
         scan_state=WIFI_TIME_FAILED;
         taskEXIT_CRITICAL(&scan_lock);
@@ -641,8 +681,7 @@ void wifi_time_link_stop_for(wifi_time_link_owner_t owner) {
 
 void wifi_time_link_stop(void) { wifi_time_link_stop_for(WIFI_TIME_LINK_APP); }
 
-static void link_task(void *arg) {
-    (void)arg;
+static void do_link(void) {
     esp_err_t err;
 
     taskENTER_CRITICAL(&status_lock);
@@ -721,9 +760,6 @@ done:
     atomic_store(&link_stop_req,false);
     atomic_store(&link_owner_v,0);
     atomic_store(&running,false);
-    /* Stack high-water mark, to size a shared stack (shiki-jit.md sec.19). */
-    ESP_LOGI("wifi","WIFI_STACK_HWM %s free=%u",pcTaskGetName(NULL),(unsigned)uxTaskGetStackHighWaterMark(NULL));
-    vTaskDelete(NULL);
 }
 
 esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
@@ -736,9 +772,7 @@ esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
     // Set before the task exists so that a caller polling immediately sees
     // connecting rather than the state the last lease left behind.
     atomic_store(&link_state_v,WIFI_TIME_LINK_CONNECTING);
-    // 4 KiB, the same as the other two: this task waits, and the driver and
-    // LWIP have their own stacks sized by Kconfig.
-    if(xTaskCreate(link_task,"wifi_link",4096,NULL,5,NULL)!=pdPASS) {
+    if(!wifi_worker_post(WIFI_JOB_LINK)) {
         atomic_store(&link_state_v,WIFI_TIME_LINK_DOWN);
         atomic_store(&link_owner_v,0);
         atomic_store(&running,false);
