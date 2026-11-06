@@ -395,3 +395,30 @@ heap_caps は満杯で細切れの 0x3fce9710 を先に試し、失敗してか�
 | 今の負荷で選び直し（`--iram-kib 8 --only <quickjs.c の関数>`） | 8,192 B | 976 | 1,391 | 40.9 KiB |
 
 選び直しの差（warm −0.8%、cold −2.7%）は配置の揺れ（約 15%）の中なので、一覧は変えない。この像の Shiki は C のモデルで flash を使う（実機では JIT のコードが RAM にある）ので、「一覧なし」の行は実機より悪く出ている。`icache.py` に足した `--force-file`（名前か `.lf` の一覧を強制）と `--only`（候補をこの名前に限る）はこの比較のため。
+
+## 15. 窓例外はどこで起きるか（Shiki 版、`dfefdf8` の後）
+
+`observe.py` は窓例外の直前に走っていた関数（溢れを起こした呼び先）も数える（`exc_from`）。Shiki 版 STRESS で窓の overflow は 1 ターン 1,280 回（§12 の時点）→ **827 回**（当たりの経路のインライン化の後）。命令は 1,128,040 → 1,105,135/ターン。
+
+| 溢れを起こした関数 | 回/ターン | % |
+| --- | ---: | ---: |
+| `esp_heap_adjust_alignment_to_hw` | 96.7 | 11.7% |
+| `xPortInIsrContext` | 84.6 | 10.2% |
+| `tlsf_get_pool` | 63.2 | 7.6% |
+| `guest_malloc` | 56.4 | 6.8% |
+| `heap_caps_aligned_alloc_base` | 56.1 | 6.8% |
+| `heap_caps_malloc_base` | 54.2 | 6.6% |
+| `js_malloc_rt` | 47.3 | 5.7% |
+| `assert_valid_block` | 36.4 | 4.4% |
+| `memcpy` | 28.1 | 3.4% |
+| その他（`heap_caps_*`・`u32toa`・`guest_usable_size`・`js_shape_hash_unlink` …） | | |
+
+7 割以上がブロックキャッシュに外れた確保の鎖（`js_malloc_rt` → `guest_malloc` → heap_caps → multi_heap → tlsf → 排他区間、ESP-IDF の部分だけで 8 段前後）の奥で起きる。ここから先を減らす手は「外れの回数」を減らすことで、§10.4 の深さ（DRAM との交換）か、アプリの確保そのもの。STRESS はわざとヒープを荒らすアプリなので、その確保を減らす手は取らない。
+
+## 16. 次に決めること・確かめること
+
+- **実機で測る**: 今日の変更はすべて QEMU の命令数と模型の上の結果。実機の turn（`stress_app.py`、`KASANE_PAINT`、XTPERF の `TURNPERF`）で確かめる。flash の配置が変わるので、ビルド間の 15% の揺れに注意（同じバイナリでの比較が要るものは A/B ビルドで）。
+- **ブロックキャッシュの深さ**（§10.4）: 8 → 16 で古い STRESS −3.8%・上限の外 +1.5 KB。DRAM と速さの交換。
+- **`Math.sin`/`cos` の精度**（§3.1）: double の libm が Shiki 版で 1 ターン約 2 万命令。仕様は近似を許す。アプリの見た目と決定性への影響を決めてから。
+- **heap_caps の最初の領域**（§13.2）: 実機の `heap_caps_print_heap_info` で、ゲストの確保が満杯の小さな領域を毎回試しているかを見る。
+- **DERBY を r5sim で**: 一番重いアプリ。時間の進め方・チャンクの読み込み・入力の台本が要る（`tools/games/test_derby_host.c` 相当）。

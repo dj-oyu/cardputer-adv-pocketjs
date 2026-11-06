@@ -140,6 +140,7 @@ def main():
     loop_body = {}
     region_insn = collections.Counter()
     exc_entries = collections.Counter()
+    exc_from = collections.Counter()
     edges = collections.Counter()
     pc_exec = collections.Counter()        # per instruction address, in the window
     backedges = collections.Counter()      # (last pc, target pc, kind)
@@ -212,6 +213,10 @@ def main():
                         taken_by_func[pfunc] += 1
                     if k == 'other' and region(pc) == 'iram':
                         exc_entries[func_of(pc)] += 1
+                        # the function running when the exception was taken:
+                        # for a window overflow, the callee whose entry (or
+                        # first register use) found the frame still live
+                        exc_from[(func_of(pc), pfunc)] += 1
                     # load-use across the TB boundary
                     if last[5] and last[3] and ins and last[3][0] in ins[0][4]:
                         loaduse_by_func[pfunc] += 1
@@ -311,6 +316,7 @@ def main():
                    'loops': {f'{k[0]}@{k[1]:#x}': v for k, v in loops.items()},
                    'exc_entries': exc_entries, 'region_insn': region_insn,
                    'edges': {f'{k[0]}->{k[1]}': v for k, v in edges.items()},
+                   'exc_from': {f'{k[0]}<-{k[1]}': v for k, v in exc_from.items()},
                    # for tools/r5sim/pie_rank.py: every executed instruction
                    # and every backward transfer inside one function
                    'pcs': {f'{pc:#x}': [v, *insn_text[pc], func_of(pc)] for pc, v in pc_exec.items()},
