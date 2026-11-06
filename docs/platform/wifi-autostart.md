@@ -306,9 +306,9 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 - **未検証**: 手動 sync・scan（設定画面と `pocket.net`）— ブローカーはキー入力を送れず、この環境からは動かせなかった。`wifi` の scan 側と `timesync` の手動側の HWM、`input` のキー入力の遅れ、`test_settings.py` / `capture_home.py`。人が設定画面で sync と scan を1回ずつ押し、`SYNC_DONE` / `SCAN_DONE` / `WIFI_STACK_HWM` / `SYNC_STACK_HWM` を見る。
 - `AUTOSYNC_DONE ok` の直後でも PERF の `clock=DEMO` は変わらなかった。この表示がいつ実時刻に切り替わるかは未確認（自動同期の経路はこの変更で変えていない）。
 
-## 14. RTC FAST を命令の置き場にできるか（実測、2026-11-06、`f9d9934` のプローブビルド）
+## 14. RTC FAST を命令の置き場にできるか（実測、2026-11-06、`f9d9934` のプローブビルド。再現するならこのコミットを使う）
 
-`CONFIG_POCKET_FETCH_PROBE`（既定 n、`main/hal/fetch_probe.c`、`tools/gen_fetch_probe.py`）が、同じ中身のコード（`add` の並び 512 命令＝1,536 B と、32 B ごとに 1 ラインずつ別のラインへ飛ぶ 48 ライン）を IRAM・RTC FAST・flash から走らせて時間を測る。ブート直後、割り込み禁止、他のタスクなし。3 回の繰り返しは全項目同じ値。**実測（実機）。**
+測定用のプローブ（`CONFIG_POCKET_FETCH_PROBE`。測定後に除去した。コードはコミット `ab03f25` にある）が、同じ中身のコード（`add` の並び 512 命令＝1,536 B と、32 B ごとに 1 ラインずつ別のラインへ飛ぶ 48 ライン）を IRAM・RTC FAST・flash から走らせて時間を測る。ブート直後、割り込み禁止、他のタスクなし。3 回の繰り返しは全項目同じ値。**実測（実機）。**
 
 | 場所 | 並び（サイクル／命令） | 飛び（サイクル／命令） | flash のミス（サイクル／ライン） |
 | --- | --- | --- | --- |
