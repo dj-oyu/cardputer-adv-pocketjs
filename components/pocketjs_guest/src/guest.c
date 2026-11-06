@@ -130,6 +130,9 @@ typedef struct surface {
 #include "pocketjs/block_cache.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#ifdef __XTENSA__
+#include "xtensa/config/core-isa.h"   /* XCHAL_HAVE_THREADPTR for guest_task_id() */
+#endif
 #endif
 
 struct pocketjs_guest {
@@ -143,7 +146,7 @@ struct pocketjs_guest {
    * allocation of their length. Used only from the task that created the
    * guest; any other caller goes straight to heap_caps. */
   block_cache_t block_cache;
-  TaskHandle_t owner_task;
+  uintptr_t owner_task;     /* guest_task_id() of the creating task */
   bool block_cache_on;
 #endif
   atomic_uint interrupt_epoch;
@@ -353,9 +356,27 @@ static inline size_t guest_tlsf_round(size_t size) {
   size_t aligned = (size + 3U) & ~(size_t)3U;
   return aligned < 12U ? 12U : aligned;
 }
+/* Which task is running, for the owner test on every allocation and free
+ * (~500 a turn). xTaskGetCurrentTaskHandle() masks interrupts around reading
+ * the core's TCB (SMP), ~45 cycles with the call, 2.7% of a STRESS turn
+ * (docs/vm/qjs-observe.md sec.7.2). The Xtensa port gives every task its own
+ * THREADPTR (its TLS base, computed from the task's stack and restored on
+ * each context switch: freertos/.../xtensa/port.c uxInitialiseStackTLS,
+ * portasm.S), so one RUR names the task without masking anything. Two live
+ * tasks never share it; inside an ISR it is the interrupted task's, as the
+ * TCB read was. */
+static inline uintptr_t guest_task_id(void) {
+#if defined(__XTENSA__) && XCHAL_HAVE_THREADPTR
+  uintptr_t tp;
+  __asm__ volatile("rur.threadptr %0" : "=a"(tp));
+  return tp;
+#else
+  return (uintptr_t)xTaskGetCurrentTaskHandle();
+#endif
+}
 static inline bool guest_uses_block_cache(const pocketjs_guest_t *guest) {
   return guest != NULL && guest->block_cache_on &&
-         xTaskGetCurrentTaskHandle() == guest->owner_task;
+         guest_task_id() == guest->owner_task;
 }
 
 static void *guest_malloc(void *opaque, size_t size) {
@@ -655,7 +676,7 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
      * through the allocator. PSRAM-preferring guests keep the plain path (the
      * cache's heap is internal RAM). */
     static const uint16_t classes[] = {12, 16, 32, 36, 48, 72, 80, 88};
-    guest->owner_task = xTaskGetCurrentTaskHandle();
+    guest->owner_task = guest_task_id();
     guest->block_cache_on = !guest->prefer_psram && guest_tlsf_direct();
     block_cache_init(&guest->block_cache, &BLOCK_CACHE_HEAP, classes,
                      sizeof(classes) / sizeof(classes[0]), guest->block_cache_on);
@@ -1331,7 +1352,7 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
 void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
 #ifdef ESP_PLATFORM
   if (guest != NULL && guest->block_cache_on &&
-      xTaskGetCurrentTaskHandle() == guest->owner_task)
+      guest_task_id() == guest->owner_task)
     block_cache_flush(&guest->block_cache);
 #else
   (void)guest;
