@@ -6,7 +6,7 @@
 //
 // wifi_time.c has no way in of its own: the SSID and the passphrase live in
 // NVS and nothing was ever able to put them there. This is that screen, and it
-// is the only caller of wifi_time_sync_start().
+// is the only caller of net_autosync_sync_now().
 //
 // The passphrase is write-only here as well as in wifi_time.c. It is typed
 // into a buffer this module wipes when it leaves, drawn as one dot per byte,

@@ -8,6 +8,8 @@
 #include "codeedit.h"
 #include "wifi_ui.h"
 #include "net_autosync.h"
+#include "wifi_time.h"
+#include "rtc_task.h"
 #include "net_service.h"
 #include "tutorial.h"
 #include "jpfont.h"
@@ -1523,6 +1525,7 @@ void app_main(void) {
     nvs_init();
     // Before shell_init(), which loads the AUTO TIME SYNC row into it.
     net_autosync_init();
+    wifi_time_init();
     pet_hub_init();
     shell_init();
     // After shell_init(), which is where the stored arming bit reaches the
@@ -1550,23 +1553,10 @@ void app_main(void) {
     };
     uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
     app_control_init(boot_id,&native_hooks);
-    /* The input task's stack is RTC fast memory (docs/kasane/shiki-jit.md
-     * sec.19): 8 KB on the APB clock, slow for code and data, and the heap
-     * hands it to whoever asks next -- the Shiki JIT's code ran 3x slower
-     * there. A task that only polls the keyboard does not mind the speed,
-     * and taking the memory at boot leaves 4 KB more of DIRAM. Pinned to
-     * core 0, the one that reaches RTC fast memory on every chip. */
-    {
-        static StaticTask_t input_tcb;
-        StackType_t *input_stack=heap_caps_malloc(4096,MALLOC_CAP_RTCRAM);
-        if(input_stack)
-            configASSERT(xTaskCreateStaticPinnedToCore(input_task,"input",4096/sizeof(StackType_t),NULL,6,
-                                                       input_stack,&input_tcb,0));
-        else configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
-        ESP_LOGI("boot","INPUT_STACK %s rtc_free=%u rtc_largest=%u",input_stack?"rtc":"dram",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_RTCRAM),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RTCRAM));
-    }
+    /* The system's slow tasks take RTC fast memory (8 KB, APB clock) at boot so
+     * the JIT's code can never land there: 3x slower (shiki-jit.md sec.15).
+     * input 2 KB here, wifi 3 KB and timesync 2 KB in their own inits. */
+    configASSERT(rtc_task_create(input_task,"input",2048,6));
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
     // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
     // and nothing else -- the three settings are one binary family, which is

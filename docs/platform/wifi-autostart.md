@@ -288,3 +288,38 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 - `sntp_lock` の正しさは、「link タスクは UP 以外の状態を書いてから `tear_down()` に入る」という順序に依存する（`wifi_time.c` の現状の2経路で確認。経路を足すときはこの順序を保つこと、コメントに記した）。
 - IDF 側に残る競合: `sync_time_cb` は `s_storage` を2度読むので、deinit と tcpip スレッド上のコールバックが重なると NULL 参照の余地がある（IDF の内部、手動同期にも同じくある。今回の変更の外）。
 - 5分の中断間隔は設計値で、使い方の実測に基づかない。
+
+## 13. 手動 sync の一本化と常駐タスク（issue #116）
+
+- 手動 sync（Wi-Fi 設定画面）は `net_autosync_sync_now()`。自動と同じ `autosync_attempt()`（net_service のリンク → SNTP → 解放）で、方針（アイドル待ち・メモリの門・試行回数）には従わない。`sync_task` と `wifi_time_sync_start()` は削除した。
+- タスクは常駐 3 本、スタックはすべて RTC FAST（`hal/rtc_task.c`、コア 0 固定、確保失敗なら DIRAM）。TCB は DIRAM（推定 約350 B/本。文脈切替のたびに触るため）。
+  - `input` 2,048 B（実測 最大使用 約1,250 B）
+  - `wifi` 3,072 B: link と scan を載せる（`running` で排他）。実測 link 約2,000 B。
+  - `timesync` 2,048 B: 自動・手動の試行。実測 約1,450 B。wifi と別タスクにしたのは、試行がリンク（wifi 側）を待つため、同じタスクだと自分を待つから。
+  - 合計 7,168 B。仕事は通知（`xTaskNotifyGive`）で渡す。確保は起動時 1 回で解放しないので、削除前のスタック再利用は起きない。
+- 起動ログ `TASK_STACK <name> rtc|dram bytes= rtc_free= rtc_largest=`、HWM は `WIFI_STACK_HWM` / `AUTOSYNC_STACK_HWM` / `SYNC_STACK_HWM`（`SYNC_START` / `SYNC_DONE` も）。`INPUT_STACK_HWM` は据え置き。
+- **実機の実測（2026-11-06、`fce073e`、ブローカー経由で焼いて restart → 30 s 観察）**
+  - 3本とも `rtc`: `TASK_STACK timesync rtc bytes=2048 rtc_free=5736`、`wifi rtc bytes=3072 rtc_free=2660`、`input rtc bytes=2048 rtc_free=608 rtc_largest=576`。RTC FAST は約 7.8 KB（7,784 B）で、残り 608 B。
+  - 最大使用量（確保 − 空き）: `input` 1,240 B（`INPUT_STACK_HWM free=808`）、`wifi` 2,308 B（link のみ。`free=764`）、`timesync` 1,472 B（自動のみ。`free=576`）。**余裕は 576〜808 B で、2,048 B の `timesync` が一番薄い。** `wifi` は旧計測（link 約2,000 B）より約300 B 増えた（ワーカーのループとログの分と推定）。
+  - 自動同期は通った: `AUTOSYNC_START free=155668` → `LINK_UP` → `AUTOSYNC_DONE ok ms=3713 min_free=113520 free_after=149972`。旧実測の `min_free=104548` より約9 KB 高い（スタックを RTC に移した分と、タスクを作らない分。内訳は未分離）。ホームは約 30 fps のまま（`PERF fps=29.6〜30.2`）。
+  - `AUTOSYNC_DONE ok stage=assoc` の `stage=assoc` は、後始末の disconnect イベントが status の stage を上書きするため（この変更の前からある。OK の判定には影響しない）。
+- **未検証**: 手動 sync・scan（設定画面と `pocket.net`）— ブローカーはキー入力を送れず、この環境からは動かせなかった。`wifi` の scan 側と `timesync` の手動側の HWM、`input` のキー入力の遅れ、`test_settings.py` / `capture_home.py`。人が設定画面で sync と scan を1回ずつ押し、`SYNC_DONE` / `SCAN_DONE` / `WIFI_STACK_HWM` / `SYNC_STACK_HWM` を見る。
+- `AUTOSYNC_DONE ok` の直後でも PERF の `clock=DEMO` は変わらなかった。この表示がいつ実時刻に切り替わるかは未確認（自動同期の経路はこの変更で変えていない）。
+
+## 14. RTC FAST を命令の置き場にできるか（実測、2026-11-06、`f9d9934` のプローブビルド。再現するならこのコミットを使う）
+
+測定用のプローブ（`CONFIG_POCKET_FETCH_PROBE`。測定後に除去した。コードはコミット `ab03f25` にある）が、同じ中身のコード（`add` の並び 512 命令＝1,536 B と、32 B ごとに 1 ラインずつ別のラインへ飛ぶ 48 ライン）を IRAM・RTC FAST・flash から走らせて時間を測る。ブート直後、割り込み禁止、他のタスクなし。3 回の繰り返しは全項目同じ値。**実測（実機）。**
+
+| 場所 | 並び（サイクル／命令） | 飛び（サイクル／命令） | flash のミス（サイクル／ライン） |
+| --- | --- | --- | --- |
+| IRAM（flash のキャッシュ当たりも同じ） | 1.02 | 1.25 | — |
+| RTC FAST | 4.55 | 5.19 | — |
+| flash（空のキャッシュから） | — | — | 並び 190、飛び 294 |
+
+- RTC FAST のコードは IRAM より 1 命令あたり約 3.5〜3.9 サイクル遅い。32 B のライン 1 本（約 10 命令）を最後まで走ると約 36 サイクルの上乗せ。
+- flash のミスは 1 ライン 190〜294 サイクルで、`turn-icache.md` §1.3.4 の約 450 より小さい（あちらは実アプリの値で、描画の DMA や他の bus 使用が重なる可能性がある。ここは静かなブート直後）。
+- つまり RTC FAST は、そのラインの実行の 12〜19% 以上がミスになる行でだけ flash に勝つ（36 ÷ 294 〜 36 ÷ 190）。ミスせずキャッシュに乗る行は、置くと 3.5〜4.5 倍遅くなる。
+
+**予算の前提が崩れた（実測）。** このブート（`BMI270 init=0`、IMU が動いている）では `INPUT_STACK_HWM free=472`、2,048 B 中 1,576 B を使う。§13 の 1,240 B（`free=808`）は IMU の初期化が失敗した（`init=-2`）ブートの値で、楽観的だった。`input` は 1,536 B に縮められない。`timesync` は 1,492 B（`free=556`）、`wifi` は 2,312 B（`free=760`）で、これらも縮められない。**3 本を削って RTC FAST のコード用に回せる量は、今の残り約 600 B（`TASK_STACK` の `rtc_free`）にほぼ限られる**（スタック自体の使用量を減らせば増やせるが、未着手）。
+
+**結論（推定）。** 約 600 B（約 19 ライン、約 200 命令）に置ける効果は、DERBY の 1 ターン（約 12 ms）に対して 1% 未満と見込む。IRAM の helper 8 KiB が 1 KiB あたり約 0.19 ms（`p1-iram-placement.md` §9）で、RTC FAST のコードはそれより 1 命令あたり遅いので、同じ 1 バイトなら上限は IRAM 以下になる。スタックを RTC FAST に置いて DIRAM を約 7 KB 空け、その分を IRAM の helper に回すほうが、1 バイトあたりの効きは大きい。**RTC FAST をコード置き場にする案は、この予算では見送る。**
