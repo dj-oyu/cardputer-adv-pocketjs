@@ -7,6 +7,12 @@
 #include "int_latency.h"
 #include "esp_cpu.h"
 #include "esp_app_desc.h"
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+#include "ksn_mesh_q7_preflight.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -483,12 +489,96 @@ static JSValue js_draw_profile(JSContext *ctx,JSValueConst self,int argc,JSValue
     return o;
 }
 
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+/* Benchmark diagnostics only. Margins are stop conditions, not a proof of RAM
+ * fitness. No allocations persist; sampling is outside app timed intervals. */
+extern void pocket_proc_q7_bench_stats(ksn_mesh_q7_stats *out);
+_Static_assert(sizeof(StackType_t)==1,"IDF stack watermark must be bytes");
+static void q7_num(JSContext *ctx,JSValue o,const char *key,double n){
+    JS_SetPropertyStr(ctx,o,key,JS_NewFloat64(ctx,n));
+}
+static void q7_heap(JSContext *ctx,JSValue o){
+    const uint32_t cap=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    q7_num(ctx,o,"free",heap_caps_get_free_size(cap));
+    q7_num(ctx,o,"minimum",heap_caps_get_minimum_free_size(cap));
+    q7_num(ctx,o,"largest",heap_caps_get_largest_free_block(cap));
+    q7_num(ctx,o,"stackHwmBytes",uxTaskGetStackHighWaterMark(NULL));
+}
+static void q7_stats(JSContext *ctx,JSValue o,const ksn_mesh_q7_stats *s){
+#define Q7_STAT(k) q7_num(ctx,o,#k,(double)s->k)
+    Q7_STAT(rows);Q7_STAT(span_pixels);Q7_STAT(original_pixels);Q7_STAT(depth_reject);
+    Q7_STAT(frame_fallback);Q7_STAT(color_fallback);Q7_STAT(depth_fast);
+    Q7_STAT(depth_exact);Q7_STAT(mask_fast);Q7_STAT(mask_exact);
+#undef Q7_STAT
+}
+static JSValue js_mesh_q7_telemetry(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    JSValue o=JS_NewObject(ctx);if(JS_IsException(o))return o;
+    q7_heap(ctx,o);
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    q7_num(ctx,o,"q7",1);
+#else
+    q7_num(ctx,o,"q7",0);
+#endif
+    pocket_proc_mesh_bytes m;pocket_proc_mesh_memory(&m);
+    q7_num(ctx,o,"candidate",m.candidate);q7_num(ctx,o,"committed",m.committed);
+    q7_num(ctx,o,"workspace",m.workspace);q7_num(ctx,o,"metadata",m.metadata);
+    ksn_mesh_q7_stats st;pocket_proc_q7_bench_stats(&st);q7_stats(ctx,o,&st);
+    return o;
+}
+static JSValue js_mesh_q7_preflight(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    JSValue o=JS_NewObject(ctx);if(JS_IsException(o))return o;
+    const uint32_t cap=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    const size_t bytes=ksn_mesh_q7_preflight_bytes();
+    /* For the fixed 8-triangle, 4096 packet-byte, one-row meshbench scene:
+     * two Q7 copies 7728 + packets 8192 + depth 960 + owner 1920 +
+     * temporary prepared 1624 = 20424; reserve 32768 beyond this subtotal.
+     * Legacy frames, VM, display and allocator overhead are NOT covered. */
+    const size_t required=20424+32768;
+    bool admitted=heap_caps_get_free_size(cap)>=required+bytes &&
+        heap_caps_get_largest_free_block(cap)>=bytes &&
+        uxTaskGetStackHighWaterMark(NULL)>=8192;
+    q7_num(ctx,o,"admitted",admitted);q7_num(ctx,o,"requiredFree",required+bytes);
+    q7_num(ctx,o,"preflightBytes",bytes);q7_heap(ctx,o);
+    ksn_mesh_q7_preflight_report r={0};
+    void *work=admitted?heap_caps_malloc(bytes,cap):NULL;
+    uint32_t fcr_before=0,fcr_after=0;
+#if defined(__XTENSA__)
+    __asm__ volatile ("rur.fcr %0" : "=a"(fcr_before));
+#endif
+    bool exact=work&&ksn_mesh_q7_preflight_run(work,bytes,&r);
+#if defined(__XTENSA__)
+    __asm__ volatile ("rur.fcr %0" : "=a"(fcr_after));
+#endif
+    q7_num(ctx,o,"fcrBefore",fcr_before);q7_num(ctx,o,"fcrAfter",fcr_after);
+    heap_caps_free(work);
+    bool ok=exact&&fcr_before==fcr_after&&r.environment_restored&&r.enabled.depth_fast&&r.enabled.mask_fast;
+    JS_SetPropertyStr(ctx,o,"ok",JS_NewBool(ctx,ok));
+    JS_SetPropertyStr(ctx,o,"numericExact",JS_NewBool(ctx,exact));
+#define Q7_REPORT(k) q7_num(ctx,o,#k,(double)r.k)
+    Q7_REPORT(cases);Q7_REPORT(pixels);Q7_REPORT(mismatch_count);
+    Q7_REPORT(failure_result_mismatches);Q7_REPORT(invariant_failures);
+    Q7_REPORT(safe_fallback_cases);Q7_REPORT(certificate_cases);Q7_REPORT(render_failures);
+    Q7_REPORT(round_before);Q7_REPORT(round_after);Q7_REPORT(subnormal_ok);
+    Q7_REPORT(environment_restored);
+#undef Q7_REPORT
+    q7_stats(ctx,o,&r.enabled);
+    return o;
+}
+#endif
+
 esp_err_t pocket_shiki_debug_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={JS_CFUNC_DEF("run",4,js_run),JS_CFUNC_DEF("bench",1,js_bench),
         JS_CFUNC_DEF("benchCount",0,js_bench_count),
         JS_CFUNC_DEF("benchBuild",0,js_bench_build),
-        JS_CFUNC_DEF("cycles",0,js_cycles),JS_CFUNC_DEF("drawProfile",1,js_draw_profile)};
+        JS_CFUNC_DEF("cycles",0,js_cycles),JS_CFUNC_DEF("drawProfile",1,js_draw_profile)
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+        ,JS_CFUNC_DEF("meshQ7Preflight",0,js_mesh_q7_preflight)
+        ,JS_CFUNC_DEF("meshQ7Telemetry",0,js_mesh_q7_telemetry)
+#endif
+    };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 /* No limits: the engine's are the spec's (sec.9.1); this surface adds none. */
