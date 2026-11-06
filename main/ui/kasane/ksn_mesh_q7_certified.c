@@ -106,6 +106,21 @@ static uint16_t fixed_color(const int64_t rgb[3]){
  unsigned c[3];for(unsigned ch=0;ch<3;ch++){int64_t a=rgb[ch],max=ch==1?63:31;if(a<0)a=0;if(a>max*65536)a=max*65536;c[ch]=(unsigned)((a+32768)>>16);}
  return (uint16_t)((c[0]<<11)|(c[1]<<5)|c[2]);
 }
+/* A row covers at most 240 pixels. Accumulate exactly in 32 bits, then
+ * merge into the public wrapping uint64 counters once per row. This aims to reduce
+ * 64-bit loads, carries and stores in the S3 pixel loop. */
+typedef struct {uint32_t depth_fast,depth_exact,original_pixels,span_pixels,depth_reject,mask_evals,mask_fast,mask_exact,color_fallback;} q7_row_stats;
+static void row_stats_commit(ksn_mesh_q7_stats *out,const q7_row_stats *r){
+ out->depth_fast+=r->depth_fast;
+ out->depth_exact+=r->depth_exact;
+ out->original_pixels+=r->original_pixels;
+ out->span_pixels+=r->span_pixels;
+ out->depth_reject+=r->depth_reject;
+ out->mask_evals+=r->mask_evals;
+ out->mask_fast+=r->mask_fast;
+ out->mask_exact+=r->mask_exact;
+ out->color_fallback+=r->color_fallback;
+}
 bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,unsigned height,float*z,uint8_t*owner,unsigned rows,ksn_mesh_q7_stats*stats){
  if(!s||!s->valid||s->count>s->capacity||s->capacity>64||!pixels||!z||!owner||!stats||(rows!=1&&rows!=8)||y>135||height>135-y)return false;
  bool rounding=ieee_environment();
@@ -124,29 +139,31 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
     bool flat=!original;
     if(flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)if(t->fixed.dx[pal][ch])flat=false;
     uint16_t flat_rgb[2]={0,0};if(flat){flat_rgb[0]=fixed_color(color[0]);flat_rgb[1]=fixed_color(color[1]);}
+    q7_row_stats row_stats={0};
     for(int x=lo;x<=hi;x++){
      double w[3]={0};bool have_weights=false,inside=true;float d=0;
-     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d)){stats->depth_fast++;}else{
-      stats->depth_exact++;for(unsigned k=0;k<3;k++){w[k]=edge(&o->edge[k],x,yy);if(w[k]<0||(w[k]==0&&!o->edge[k].closed))inside=false;w[k]*=o->inverse;}have_weights=true;
-      if(original){stats->original_pixels++;if(!inside)continue;}
+     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d)){row_stats.depth_fast++;}else{
+      row_stats.depth_exact++;for(unsigned k=0;k<3;k++){w[k]=edge(&o->edge[k],x,yy);if(w[k]<0||(w[k]==0&&!o->edge[k].closed))inside=false;w[k]*=o->inverse;}have_weights=true;
+      if(original){row_stats.original_pixels++;if(!inside)continue;}
       d=(float)(w[0]*v[0].depth+w[1]*v[1].depth+w[2]*v[2].depth);
      }
-     if(!original)stats->span_pixels++;
-     if(!isfinite(d))return false;
+     if(!original)row_stats.span_pixels++;
+     if(!isfinite(d)){row_stats_commit(stats,&row_stats);return false;}
      unsigned at=(unsigned)(yy-(int)sy)*240+(unsigned)x;
-     if(d<=zz[at])stats->depth_reject++;else{zz[at]=d;oo[at]=(uint8_t)f;stats->mask_evals++;bool second;
+     if(d<=zz[at])row_stats.depth_reject++;else{zz[at]=d;oo[at]=(uint8_t)f;row_stats.mask_evals++;bool second;
       /* Delay mask work until a depth winner, as before. Cache only a
        * certified x-constant result; an uncertain sign keeps exact fallback. */
       if((Q7_CERT_MODE&2)&&fast&&!mask_row_ready){mask_y=t->cert.p[1][1]*row_y;mask_row_ready=true;}
-      if(mask_cached){second=cached_second;stats->mask_fast++;}
+      if(mask_cached){second=cached_second;row_stats.mask_fast++;}
       else if((Q7_CERT_MODE&2)&&fast&&certified_mask(&t->cert,x,mask_y,&second)){
-       stats->mask_fast++;if(t->cert.p[1][0]==0){cached_second=second;mask_cached=true;}
+       row_stats.mask_fast++;if(t->cert.p[1][0]==0){cached_second=second;mask_cached=true;}
       }
-      else{stats->mask_exact++;if(!have_weights)for(unsigned k=0;k<3;k++)w[k]=edge(&o->edge[k],x,yy)*o->inverse;second=w[0]*v[0].mask+w[1]*v[1].mask+w[2]*v[2].mask>=0;}
-      if(original){pp[at]=original_color(v,w,second);stats->color_fallback++;}else pp[at]=flat?flat_rgb[second]:fixed_color(color[second]);
+      else{row_stats.mask_exact++;if(!have_weights)for(unsigned k=0;k<3;k++)w[k]=edge(&o->edge[k],x,yy)*o->inverse;second=w[0]*v[0].mask+w[1]*v[1].mask+w[2]*v[2].mask>=0;}
+      if(original){pp[at]=original_color(v,w,second);row_stats.color_fallback++;}else pp[at]=flat?flat_rgb[second]:fixed_color(color[second]);
      }
      if(!original&&!flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
     }
+    row_stats_commit(stats,&row_stats);
    }
   }
  }
