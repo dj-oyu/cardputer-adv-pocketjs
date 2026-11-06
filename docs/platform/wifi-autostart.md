@@ -298,4 +298,10 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
   - `timesync` 2,048 B: 自動・手動の試行。実測 約1,450 B。wifi と別タスクにしたのは、試行がリンク（wifi 側）を待つため、同じタスクだと自分を待つから。
   - 合計 7,168 B。仕事は通知（`xTaskNotifyGive`）で渡す。確保は起動時 1 回で解放しないので、削除前のスタック再利用は起きない。
 - 起動ログ `TASK_STACK <name> rtc|dram bytes= rtc_free= rtc_largest=`、HWM は `WIFI_STACK_HWM` / `AUTOSYNC_STACK_HWM` / `SYNC_STACK_HWM`（`SYNC_START` / `SYNC_DONE` も）。`INPUT_STACK_HWM` は据え置き。
-- **未検証（このセッションには ESP-IDF も実機もない）**: ファームのビルド、各 HWM（sync と scan は未測定）、RTC FAST の残り、同期中の `min_free`、入力遅延、`test_settings.py` / `capture_home.py`。ホスト試験 `tools/build_net_autosync_test.sh` は通過（ただし ESP_PLATFORM 側のコードは対象外）。2,048 B は余裕が約600 B なので、実機で HWM を見て足りなければ戻す。
+- **実機の実測（2026-11-06、`fce073e`、ブローカー経由で焼いて restart → 30 s 観察）**
+  - 3本とも `rtc`: `TASK_STACK timesync rtc bytes=2048 rtc_free=5736`、`wifi rtc bytes=3072 rtc_free=2660`、`input rtc bytes=2048 rtc_free=608 rtc_largest=576`。RTC FAST は約 7.8 KB（7,784 B）で、残り 608 B。
+  - 最大使用量（確保 − 空き）: `input` 1,240 B（`INPUT_STACK_HWM free=808`）、`wifi` 2,308 B（link のみ。`free=764`）、`timesync` 1,472 B（自動のみ。`free=576`）。**余裕は 576〜808 B で、2,048 B の `timesync` が一番薄い。** `wifi` は旧計測（link 約2,000 B）より約300 B 増えた（ワーカーのループとログの分と推定）。
+  - 自動同期は通った: `AUTOSYNC_START free=155668` → `LINK_UP` → `AUTOSYNC_DONE ok ms=3713 min_free=113520 free_after=149972`。旧実測の `min_free=104548` より約9 KB 高い（スタックを RTC に移した分と、タスクを作らない分。内訳は未分離）。ホームは約 30 fps のまま（`PERF fps=29.6〜30.2`）。
+  - `AUTOSYNC_DONE ok stage=assoc` の `stage=assoc` は、後始末の disconnect イベントが status の stage を上書きするため（この変更の前からある。OK の判定には影響しない）。
+- **未検証**: 手動 sync・scan（設定画面と `pocket.net`）— ブローカーはキー入力を送れず、この環境からは動かせなかった。`wifi` の scan 側と `timesync` の手動側の HWM、`input` のキー入力の遅れ、`test_settings.py` / `capture_home.py`。人が設定画面で sync と scan を1回ずつ押し、`SYNC_DONE` / `SCAN_DONE` / `WIFI_STACK_HWM` / `SYNC_STACK_HWM` を見る。
+- `AUTOSYNC_DONE ok` の直後でも PERF の `clock=DEMO` は変わらなかった。この表示がいつ実時刻に切り替わるかは未確認（自動同期の経路はこの変更で変えていない）。
