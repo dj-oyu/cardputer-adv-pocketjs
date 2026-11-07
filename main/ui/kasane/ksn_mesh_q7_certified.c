@@ -51,8 +51,19 @@ static void make_certificate(ksn_mesh_q7_triangle *t){
  }
  c->valid=true;
 }
+/* Screen x is an integer in [0,239]. Its binary64 low word is zero.
+ * Construct the exact exponent/significand with integer operations instead
+ * of a soft-double integer conversion in the target pixel loop. */
+_Static_assert(UINT_MAX==UINT32_MAX,"screen coordinate CLZ requires 32-bit unsigned");
+static inline double screen_x_double(unsigned x){
+ if(!x)return 0.0;
+ unsigned exponent=31u-(unsigned)__builtin_clz(x);
+ uint32_t high=((1023u+exponent)<<20)|((x<<(20u-exponent))&UINT32_C(0xfffff));
+ union {uint64_t bits;double value;} result={.bits=(uint64_t)high<<32};
+ return result.value;
+}
 static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,double row_product,float *out){
- double v=c->p[0][0]*x+row_product+c->p[0][2],err=c->error[0];
+ double v=c->p[0][0]*screen_x_double((unsigned)x)+row_product+c->p[0][2],err=c->error[0];
  float lo=(float)(v-err),hi=(float)(v+err);
  /* C union representation reads retain signed-zero equality without the two
   * out-of-line memcpy calls emitted by the target's no-builtin build. */
