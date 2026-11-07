@@ -35,7 +35,8 @@ jobs:
           - {name: shiki-api, command: 'python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py'}
           - {name: megademo, command: 'python3 tools/kasane_contract/run_megademo_app_host.py'}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ env.SOURCE_HEAD }}
           submodules: recursive
@@ -48,7 +49,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/native-mesh
-          git rev-parse HEAD | tee artifacts/native-mesh/source-head.txt
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' | tee artifacts/native-mesh/source-head.txt
           cc --version > artifacts/native-mesh/compiler.txt
           ${{ matrix.command }} 2>&1 | tee artifacts/native-mesh/contract.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -65,7 +67,8 @@ jobs:
     env:
       IDF_COMPONENT_MANAGER: '0'
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ env.SOURCE_HEAD }}
           submodules: recursive
@@ -79,7 +82,8 @@ jobs:
           set -euo pipefail
           . "$IDF_PATH/export.sh"
           idf.py -B build_native -D SDKCONFIG=build_native/sdkconfig build
-          git rev-parse HEAD > build_native/source-head.txt
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' > build_native/source-head.txt
           grep -qx 'KASANE_MESH_PREPARED_PROTOTYPE:BOOL=OFF' build_native/CMakeCache.txt
           grep -qx 'KASANE_MESH_EDGE4_PROTOTYPE:BOOL=OFF' build_native/CMakeCache.txt
           xtensa-esp32s3-elf-nm build_native/cardputer_pocketjs.elf > build_native/symbols.txt
