@@ -1,4 +1,3 @@
-# Benchmark-only default options. Do not merge into production defaults.
 # WHEN YOU ADD A .c HERE, ADD IT BEFORE THE FIRST CALLER REFERENCES IT.
 # Several agents and the owner build against this tree continuously and there is
 # no signal that it has gone red except somebody else's build failing. On
@@ -46,10 +45,10 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_shiki.c"
     "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
 # Private mesh architecture experiments; never implicitly enabled.
-option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" ON)
+option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
 option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
-option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" ON)
-option(KASANE_MESH_Q7_BENCH_PREFLIGHT "Compile benchmark-only numeric and RAM admission probes" ON)
+option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" OFF)
+option(KASANE_MESH_Q7_BENCH_PREFLIGHT "Compile benchmark-only numeric and RAM admission probes" OFF)
 if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND KASANE_MESH_EDGE4_PROTOTYPE)
     message(FATAL_ERROR "Q7 benchmark preflight requires edge4 OFF")
 endif()
