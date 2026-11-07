@@ -71,6 +71,33 @@ static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,double row_pro
  if(lo_bits.u!=hi_bits.u||!isfinite(lo)||(lo!=0&&fabsf(lo)<FLT_MIN))return false;
  *out=lo;return true;
 }
+/* Interior normal binary64 -> binary32 RN-even, without FP operations.
+ * The domain excludes overflow, subnormal and zero results. discarded!=0
+ * identifies exactly when a real conversion can raise INEXACT. */
+static inline bool normal_float_bits(double value,uint32_t *bits,uint32_t *discarded){
+ union {double d;uint64_t u;} raw={.d=value};
+ uint32_t high=(uint32_t)(raw.u>>32),low=(uint32_t)raw.u;
+ unsigned exponent=(high>>20)&2047u;
+ if(exponent<898u||exponent>1149u)return false;
+ uint32_t result=(high&UINT32_C(0x80000000))|((exponent-896u)<<23)|
+                 ((high&UINT32_C(0xfffff))<<3)|(low>>29);
+ uint32_t remainder=low&UINT32_C(0x1fffffff);
+ if(remainder>UINT32_C(0x10000000)||(remainder==UINT32_C(0x10000000)&&(result&1u)))result++;
+ *bits=result;*discarded=remainder;return true;
+}
+/* Keep one real conversion: choose an inexact endpoint if either is inexact.
+ * Both admitted conversions can only raise INEXACT, so their sticky union is
+ * preserved without assuming INEXACT was already set. Volatile retains the
+ * conversion even when the predicted bounds differ and the pixel falls back. */
+static inline bool certified_depth_once(const ksn_mesh_q7_certificate*c,int x,double row_product,float*out){
+ double v=c->p[0][0]*screen_x_double((unsigned)x)+row_product+c->p[0][2];
+ double lower=v-c->error[0],upper=v+c->error[0];
+ uint32_t lb,hb,lr,hr;
+ if(!normal_float_bits(lower,&lb,&lr)||!normal_float_bits(upper,&hb,&hr))return certified_depth(c,x,row_product,out);
+ volatile float rounded=(float)(lr?lower:upper);
+ if(lb!=hb)return false;
+ *out=rounded;return true;
+}
 static bool certified_mask(const ksn_mesh_q7_certificate*c,int x,double row_product,bool *out){
  double v=c->p[1][0]*x+row_product+c->p[1][2],err=c->error[1];
  if(v-err>=0){*out=true;return true;}if(v+err<0){*out=false;return true;}return false;
@@ -154,7 +181,7 @@ static Q7_SPAN_HOT int flat_span_run(const q7_flat_span *span,int x,int hi,q7_ro
  int start=x;unsigned rejected=0;
  for(;x<=hi;x++){
   float depth;
-  if(!certified_depth(span->cert,x,span->depth_y,&depth))break;
+  if(!certified_depth_once(span->cert,x,span->depth_y,&depth))break;
   if(depth<=span->z[x])rejected++;
   else{span->z[x]=depth;span->owner[x]=span->face;span->pixels[x]=span->color;}
  }
