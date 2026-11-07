@@ -4,6 +4,12 @@
 #include <string.h>
 #include <float.h>
 #include <fenv.h>
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#define Q7_SPAN_HOT IRAM_ATTR
+#else
+#define Q7_SPAN_HOT
+#endif
 #if defined(__FAST_MATH__) || FLT_RADIX != 2 || DBL_MANT_DIG != 53 || FLT_MANT_DIG != 24 || FLT_EVAL_METHOD != 0 || FLT_MAX_EXP != 128 || FLT_MIN_EXP != -125 || DBL_MAX_EXP != 1024 || DBL_MIN_EXP != -1021
 #error Certified path requires strict IEEE binary32/binary64 arithmetic
 #endif
@@ -121,6 +127,31 @@ static void row_stats_commit(ksn_mesh_q7_stats *out,const q7_row_stats *r){
  out->mask_exact+=r->mask_exact;
  out->color_fallback+=r->color_fallback;
 }
+/* Continue a row only after its x-invariant mask has been certified on an
+ * actual depth winner. Keep the frequent flat span separate from generic
+ * interpolation storage. A failed depth certificate returns the first
+ * untouched x to the original loop; no pixel or counter is lost. */
+typedef struct {
+ const ksn_mesh_q7_certificate *cert;
+ float *z;uint8_t *owner;uint16_t *pixels;
+ double depth_y;uint16_t color;uint8_t face;
+} q7_flat_span;
+/* Keep the small target loop in internal instruction RAM; generic fallback
+ * and its larger interpolation state remain outside this hot function. */
+__attribute__((noinline))
+static Q7_SPAN_HOT int flat_span_run(const q7_flat_span *span,int x,int hi,q7_row_stats *stats){
+ int start=x;unsigned rejected=0;
+ for(;x<=hi;x++){
+  float depth;
+  if(!certified_depth(span->cert,x,span->depth_y,&depth))break;
+  if(depth<=span->z[x])rejected++;
+  else{span->z[x]=depth;span->owner[x]=span->face;span->pixels[x]=span->color;}
+ }
+ unsigned count=(unsigned)(x-start),won=count-rejected;
+ stats->depth_fast+=count;stats->span_pixels+=count;stats->depth_reject+=rejected;
+ stats->mask_evals+=won;stats->mask_fast+=won;
+ return x;
+}
 bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,unsigned height,float*z,uint8_t*owner,unsigned rows,ksn_mesh_q7_stats*stats){
  if(!s||!s->valid||s->count>s->capacity||s->capacity>64||!pixels||!z||!owner||!stats||(rows!=1&&rows!=8)||y>135||height>135-y)return false;
  bool rounding=ieee_environment();
@@ -160,6 +191,11 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
       }
       else{row_stats.mask_exact++;if(!have_weights)for(unsigned k=0;k<3;k++)w[k]=edge(&o->edge[k],x,yy)*o->inverse;second=w[0]*v[0].mask+w[1]*v[1].mask+w[2]*v[2].mask>=0;}
       if(original){pp[at]=original_color(v,w,second);row_stats.color_fallback++;}else pp[at]=flat?flat_rgb[second]:fixed_color(color[second]);
+     }
+     if(flat&&mask_cached&&(Q7_CERT_MODE&1)&&fast&&x<hi){
+      unsigned row=(unsigned)(yy-(int)sy)*240;
+      q7_flat_span span={&t->cert,zz+row,oo+row,pp+row,depth_y,flat_rgb[cached_second],(uint8_t)f};
+      x=flat_span_run(&span,x+1,hi,&row_stats)-1;
      }
      if(!original&&!flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
     }
