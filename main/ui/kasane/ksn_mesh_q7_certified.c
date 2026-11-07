@@ -54,6 +54,37 @@ static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,double row_pro
  if(lo_bits.u!=hi_bits.u||!isfinite(lo)||(lo!=0&&fabsf(lo)<FLT_MIN))return false;
  *out=lo;return true;
 }
+/* Experimental row recurrence. Conservative extra error covers <=240
+ * additions plus the direct affine evaluation. No FP environment writes.
+ * With u=DBL_EPSILON/2 and M=239|a|+|row_y|+|c|+1, the
+ * recurrence/direct center difference is bounded by 246uM. The additional
+ * 8192uM radius also covers radius construction and endpoint rounding.
+ * Requiring 0<=old_error<=M makes that extra margin representable. Thus
+ * successful recurrence certification implies direct certification succeeds.
+ * The same-sign endpoint guard leaves >0.5 magnitude after drift/radius;
+ * bounded operands keep values below 2^40. Float under/overflow cannot be
+ * introduced. Extra inexact is harmless only when already sticky on entry. */
+typedef struct { double value,step,error; bool valid; } q7_depth_recurrence;
+static bool recurrence_operand(double a){return a==0||(fabs(a)>=0x1p-100&&fabs(a)<=0x1p30);}
+static q7_depth_recurrence recurrence_prepare(const ksn_mesh_q7_certificate*c,int lo,int hi,double ry){
+ q7_depth_recurrence r={0};
+ if(!(fetestexcept(FE_INEXACT)&FE_INEXACT))return r;
+ double a=c->p[0][0],b=ry,z=c->p[0][2],e=c->error[0];
+ if(!recurrence_operand(a)||!recurrence_operand(b)||!recurrence_operand(z)||!recurrence_operand(e))return r;
+ double first=(a*lo+b)+z,last=(a*hi+b)+z;
+ double magnitude=fabs(a)*239+fabs(b)+fabs(z)+1;
+ if(e<0||e>magnitude)return r;
+ double error=e+4096*DBL_EPSILON*magnitude;
+ double guard=2*error+1;
+ if(!((first>guard&&last>guard)||(first< -guard&&last< -guard)))return r;
+ r.value=first;r.step=a;r.error=error;r.valid=true;return r;
+}
+static bool recurrence_get(const q7_depth_recurrence*r,float*out){
+ float lo=(float)(r->value-r->error),hi=(float)(r->value+r->error);
+ union {float f;uint32_t u;} lb={.f=lo},hb={.f=hi};
+ if(lb.u!=hb.u)return false;
+ *out=lo;return true;
+}
 static bool certified_mask(const ksn_mesh_q7_certificate*c,int x,double row_product,bool *out){
  double v=c->p[1][0]*x+row_product+c->p[1][2],err=c->error[1];
  if(v-err>=0){*out=true;return true;}if(v+err<0){*out=false;return true;}return false;
@@ -140,9 +171,11 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
     if(flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)if(t->fixed.dx[pal][ch])flat=false;
     uint16_t flat_rgb[2]={0,0};if(flat){flat_rgb[0]=fixed_color(color[0]);flat_rgb[1]=fixed_color(color[1]);}
     q7_row_stats row_stats={0};
+    q7_depth_recurrence recurrence={0};
+    if((Q7_CERT_MODE&1)&&fast)recurrence=recurrence_prepare(&t->cert,lo,hi,depth_y);
     for(int x=lo;x<=hi;x++){
      double w[3]={0};bool have_weights=false,inside=true;float d=0;
-     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d)){row_stats.depth_fast++;}else{
+     if((recurrence.valid&&recurrence_get(&recurrence,&d))||((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d))){row_stats.depth_fast++;}else{
       row_stats.depth_exact++;for(unsigned k=0;k<3;k++){w[k]=edge(&o->edge[k],x,yy);if(w[k]<0||(w[k]==0&&!o->edge[k].closed))inside=false;w[k]*=o->inverse;}have_weights=true;
       if(original){row_stats.original_pixels++;if(!inside)continue;}
       d=(float)(w[0]*v[0].depth+w[1]*v[1].depth+w[2]*v[2].depth);
@@ -161,6 +194,7 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
       else{row_stats.mask_exact++;if(!have_weights)for(unsigned k=0;k<3;k++)w[k]=edge(&o->edge[k],x,yy)*o->inverse;second=w[0]*v[0].mask+w[1]*v[1].mask+w[2]*v[2].mask>=0;}
       if(original){pp[at]=original_color(v,w,second);row_stats.color_fallback++;}else pp[at]=flat?flat_rgb[second]:fixed_color(color[second]);
      }
+     if(recurrence.valid&&x<hi)recurrence.value+=recurrence.step;
      if(!original&&!flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
     }
     row_stats_commit(stats,&row_stats);
