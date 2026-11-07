@@ -30,6 +30,15 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [Shiki JIT とメモリ配置（図解、HTML）](shiki-jit-overview.html) | Shiki の JIT とその機械語の置き場所を、一続きの問いとして読む図解（各章の冒頭に既知の事柄との対応）。インタプリタと JIT、実行できる RAM、Shiki の区画への相乗り、飽和チェックの除去、レジスタキャッシュ、RTC fast memory の拒否、56 KiB の実験、区画の固定長の表、作業領域の廃止、DERBY の engine_ms の推移と今の 48 KiB の区画（shiki-jit.md §11〜§23、2026-11-03） |
 | [Kasane の描画パイプライン（図解、HTML）](pipeline-overview.html) | フレームバッファを持たない理由、1 ターンの流れ（`frame()` → Shiki の beginFrame/draw/commit → 17 本の帯の合成 → SPI の DMA）、作業台の帯と転送用バッファ 1 本の重ね、`KASANE_PAINT` の各欄、帯の重ね合わせの順、Shiki の線分の並び（candidate・committed、帯の hash、作業領域の廃止）、DERBY の区画の内訳と、並びを 1 本にする予定（c4d7a6c 時点、2026-11-03） |
 | [Shiki の draw の束ね（作業中）](shiki-bundle.md) | draw 1 回の固定費の段ごとの実測と、複数の handle を 1 回で描く API |
+| [native mesh のShiki統合](../ayatsuri/pr117-native-mesh.md) | 公開mesh経路と#122のrange/carry・read_rowsの接続、回帰試験と正式buildの範囲 |
+| [opaque mesh depth](../ayatsuri/opaque-mesh-depth.md) | 明示的depth scope、所有権、予算、rollbackとretryの契約 |
+| [材質sidedness](../ayatsuri/material-sidedness-local.md) | 両面材質、面順とtie、旧asset互換とsnapshotの会計 |
+| [キャラクター評価とframeの責務](../ayatsuri/character-lifecycle.md) | 明示clock、共有Modelと独立instance、借用packetとframe-owned snapshot、失敗・ACK・解放 |
+| [optional native scene / motion](../ayatsuri/scene-motion.md) | 任意appからの名前付きhandle、明示時刻の演技、公開rigid-joint host検査と未完の狐工程 |
+| [合成skin scalar core](../ayatsuri/skin-core.md) | bind palette・4 influence変形・法線と原子的失敗のhost検査。AYNM/描画へは未接続 |
+| [skinのC描画接続](../ayatsuri/skin-render-bridge.md) | immutable Modelへの同期geometry借用、既存opaque renderer、寿命とメモリの合成host検査 |
+| [managed JS skin評価](../ayatsuri/skin-js.md) | typed入力からnative palette/skinを計算、guest work、実QuickJS/render/OOM/GC検査 |
+| [複数meshのJS skin batch](../ayatsuri/skin-batch.md) | packed typed入力、16KiB work上限、全batch失敗原子性、実QuickJS複数mesh描画 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |

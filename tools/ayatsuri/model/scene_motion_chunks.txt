@@ -1,0 +1,4 @@
+# Optional library-integration build only; meshbench's normal entry is unchanged.
+app local.meshbench
+native-scene ../../../apps/lib/ayatsuri_model.js
+motion ../../../apps/lib/ayatsuri_motion.js

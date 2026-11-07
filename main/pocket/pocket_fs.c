@@ -1133,7 +1133,7 @@ static JSClassID file_class;
 // compared against, because the allocator can hand the next session a runtime
 // at the same address -- and skipping registration there would leave the class
 // unregistered in a realm about to use it.
-static JSRuntime *class_rt;
+static pocket_class_owner_t file_owner;
 
 static fs_file_t *file_of(uint32_t handle) {
     if(!handle) return NULL;
@@ -4030,7 +4030,7 @@ static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {
     // 163,840-byte ceiling -- and the guest was told "no memory", which is what
     // the lazy wrapper calls every failure. Two wrong diagnoses came out of
     // that message before the log printed the id.
-    if(!pocket_api_class_ready(rt,&class_rt,&file_class)) {
+    if(!pocket_api_class_ready(rt,&file_owner,&file_class)) {
         JS_NewClassID(rt,&file_class);
         if(JS_NewClass(rt,file_class,&file_class_def)<0) {
             ESP_LOGE(TAG,"JS_NewClass failed for file_class=%u",
@@ -4074,7 +4074,7 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_fs_reset(void) {
-    class_rt=NULL;
+    pocket_api_class_forget(&file_owner);
     // A folder or file screen still up goes back to the shell, and its
     // promise is settled by the completion picker_finish() posts.
     sd_picker_reset();
