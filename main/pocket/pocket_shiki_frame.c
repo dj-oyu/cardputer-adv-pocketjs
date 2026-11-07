@@ -11,6 +11,7 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_api.h"
 #include "ui/kasane/ksn_shiki_frame.h"
 #include "ui/kasane/ksn_shiki.h"
+#include "proc_band_hash.h"
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
 #endif
@@ -383,23 +384,13 @@ __attribute__((destructor)) static void sig_report(void){
             sig_lo8,sig_changed/256.0,sig_impossible,sig_skipped,sig_pixel_bad,sig_all);
 }
 #endif
-/* One entry (or a pattern line's two) as 32 bits: murmur3's block step over
- * its 16-bit fields packed in pairs, then its finaliser, so every input bit
- * reaches every output bit -- the band step below relies on that. */
+/* One entry (or a pattern line's two) as 32 bits, every input bit reaching
+ * every output bit -- the band step below relies on that. proc_band_hash.h:
+ * two products on the 32 x 32 -> 64 multiplier a segment instead of
+ * murmur3's nine multiplies and rotations (docs/vm/qjs-observe.md sec.22). */
 static inline __attribute__((always_inline)) uint32_t rotl32(uint32_t v,unsigned r){return v<<r|v>>(32u-r);}
 static inline __attribute__((always_inline)) uint32_t entry_hash(const ksn_proc_segment *s,unsigned n){
-    uint32_t h=0x2545f491u;
-    for(unsigned k=0;k<n;k++){
-        const uint32_t w[3]={(uint16_t)s[k].x0|(uint32_t)(uint16_t)s[k].y0<<16,
-                             (uint16_t)s[k].x1|(uint32_t)(uint16_t)s[k].y1<<16,s[k].color};
-        for(unsigned j=0;j<3;j++){
-            uint32_t v=w[j]*0xcc9e2d51u;
-            v=rotl32(v,15)*0x1b873593u;
-            h=rotl32(h^v,13)*5u+0xe6546b64u;
-        }
-    }
-    h^=n;h^=h>>16;h*=0x85ebca6bu;h^=h>>13;h*=0xc2b2ae35u;h^=h>>16;
-    return h;
+    return proc_band_entry_hash(s,n);
 }
 /* The band's running value and one entry's: order matters (the rotation),
  * and the rotation brings the product's high bits back to the low ones, the
