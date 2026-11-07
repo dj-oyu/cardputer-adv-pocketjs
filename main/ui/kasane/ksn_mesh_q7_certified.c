@@ -71,6 +71,23 @@ static bool certified_depth(const ksn_mesh_q7_certificate*c,int x,double row_pro
  if(lo_bits.u!=hi_bits.u||!isfinite(lo)||(lo!=0&&fabsf(lo)<FLT_MIN))return false;
  *out=lo;return true;
 }
+/* Reuse only successful certificates, within this render call. With a
+ * bitwise +/-zero y coefficient, multiplying any nonnegative screen y gives
+ * the same signed zero. Every depth operation and result therefore repeats.
+ * The first evaluation already accumulates its sticky exceptions; this API
+ * requires a stable environment and no path here clears those flags.
+ * Eight bounded slots cost 7,936 bytes, with no heap or snapshot ABI change. */
+typedef struct {float depth[240];uint32_t ready[8];} q7_depth_cache;
+static inline bool cached_depth(const ksn_mesh_q7_certificate *c,int x,
+ double row_product,float *out,q7_depth_cache *cache){
+ if(cache){
+  unsigned word=(unsigned)x>>5;uint32_t bit=UINT32_C(1)<<((unsigned)x&31);
+  if(cache->ready[word]&bit){*out=cache->depth[x];return true;}
+  if(!certified_depth(c,x,row_product,out))return false;
+  cache->depth[x]=*out;cache->ready[word]|=bit;return true;
+ }
+ return certified_depth(c,x,row_product,out);
+}
 static bool certified_mask(const ksn_mesh_q7_certificate*c,int x,double row_product,bool *out){
  double v=c->p[1][0]*x+row_product+c->p[1][2],err=c->error[1];
  if(v-err>=0){*out=true;return true;}if(v+err<0){*out=false;return true;}return false;
@@ -146,6 +163,7 @@ typedef struct {
  const ksn_mesh_q7_certificate *cert;
  float *z;uint8_t *owner;uint16_t *pixels;
  double depth_y;uint16_t color;uint8_t face;
+ q7_depth_cache *cache;
 } q7_flat_span;
 /* Keep the small target loop in internal instruction RAM; generic fallback
  * and its larger interpolation state remain outside this hot function. */
@@ -154,7 +172,7 @@ static Q7_SPAN_HOT int flat_span_run(const q7_flat_span *span,int x,int hi,q7_ro
  int start=x;unsigned rejected=0;
  for(;x<=hi;x++){
   float depth;
-  if(!certified_depth(span->cert,x,span->depth_y,&depth))break;
+  if(!cached_depth(span->cert,x,span->depth_y,&depth,span->cache))break;
   if(depth<=span->z[x])rejected++;
   else{span->z[x]=depth;span->owner[x]=span->face;span->pixels[x]=span->color;}
  }
@@ -166,10 +184,20 @@ static Q7_SPAN_HOT int flat_span_run(const q7_flat_span *span,int x,int hi,q7_ro
 bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,unsigned height,float*z,uint8_t*owner,unsigned rows,ksn_mesh_q7_stats*stats){
  if(!s||!s->valid||s->count>s->capacity||s->capacity>64||!pixels||!z||!owner||!stats||(rows!=1&&rows!=8)||y>135||height>135-y)return false;
  bool rounding=ieee_environment();
+ q7_depth_cache cache[8];int8_t slot[64];unsigned used=0;
+ memset(slot,-1,sizeof slot);
+ if((Q7_CERT_MODE&1)&&rounding&&!s->fallback&&height>1){
+  for(unsigned f=0;f<s->count&&used<8;f++){
+   union {double d;uint64_t u;} slope={.d=s->triangles[f].cert.p[0][1]};
+   if(s->triangles[f].cert.valid&&(slope.u&UINT64_C(0x7fffffffffffffff))==0){
+    slot[f]=(int8_t)used;memset(cache[used].ready,0,sizeof cache[used].ready);used++;
+   }
+  }
+ }
  for(unsigned strip=0;strip<height;strip+=rows){unsigned n=height-strip;if(n>rows)n=rows;unsigned sy=y+strip;float *zz=z;uint8_t *oo=owner;uint16_t*pp=pixels+strip*240;
   for(unsigned i=0;i<n*240;i++){zz[i]=-INFINITY;oo[i]=255;}
   if(s->fallback)stats->frame_fallback++;
-  for(unsigned f=0;f<s->count;f++){uint64_t bands=0;for(unsigned band=sy/8;band<=(sy+n-1)/8;band++)bands|=s->bands[band];if(!(bands&(UINT64_C(1)<<f)))continue;const ksn_mesh_q7_triangle*t=&s->triangles[f];const ksn_prepared_triangle*o=&t->original;const co_vertex*v=o->v;
+  for(unsigned f=0;f<s->count;f++){uint64_t bands=0;for(unsigned band=sy/8;band<=(sy+n-1)/8;band++)bands|=s->bands[band];if(!(bands&(UINT64_C(1)<<f)))continue;const ksn_mesh_q7_triangle*t=&s->triangles[f];const ksn_prepared_triangle*o=&t->original;const co_vertex*v=o->v;q7_depth_cache *dc=slot[f]<0?NULL:&cache[(unsigned)slot[f]];
    for(int yy=(int)sy;yy<(int)(sy+n);yy++){int lo,hi;bool original=s->fallback;
     if(original){if(yy<o->top||yy>o->bottom)continue;lo=o->left;hi=o->right;}else if(!ksn_mesh_q7_span(&t->fixed,yy,&lo,&hi))continue;
     stats->rows++;double row_x=lo,row_y=yy;int64_t color[2][3];for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++){const double *pl=t->fixed.rgb[pal][ch];color[pal][ch]=original?0:llround((pl[0]*row_x+pl[1]*row_y+pl[2])*65536.);}
@@ -184,7 +212,7 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
     q7_row_stats row_stats={0};
     for(int x=lo;x<=hi;x++){
      double w[3]={0};bool have_weights=false,inside=true;float d=0;
-     if((Q7_CERT_MODE&1)&&fast&&certified_depth(&t->cert,x,depth_y,&d)){row_stats.depth_fast++;}else{
+     if((Q7_CERT_MODE&1)&&fast&&cached_depth(&t->cert,x,depth_y,&d,dc)){row_stats.depth_fast++;}else{
       row_stats.depth_exact++;for(unsigned k=0;k<3;k++){w[k]=edge(&o->edge[k],x,yy);if(w[k]<0||(w[k]==0&&!o->edge[k].closed))inside=false;w[k]*=o->inverse;}have_weights=true;
       if(original){row_stats.original_pixels++;if(!inside)continue;}
       d=(float)(w[0]*v[0].depth+w[1]*v[1].depth+w[2]*v[2].depth);
@@ -205,7 +233,7 @@ bool ksn_mesh_q7_render(const ksn_mesh_q7_snapshot*s,uint16_t*pixels,unsigned y,
      }
      if(flat&&mask_cached&&(Q7_CERT_MODE&1)&&fast&&x<hi){
       unsigned row=(unsigned)(yy-(int)sy)*240;
-      q7_flat_span span={&t->cert,zz+row,oo+row,pp+row,depth_y,flat_rgb[cached_second],(uint8_t)f};
+      q7_flat_span span={&t->cert,zz+row,oo+row,pp+row,depth_y,flat_rgb[cached_second],(uint8_t)f,dc};
       x=flat_span_run(&span,x+1,hi,&row_stats)-1;
      }
      if(!original&&!flat)for(unsigned pal=0;pal<2;pal++)for(unsigned ch=0;ch<3;ch++)color[pal][ch]+=t->fixed.dx[pal][ch];
