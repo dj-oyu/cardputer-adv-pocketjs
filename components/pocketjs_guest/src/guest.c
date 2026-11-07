@@ -353,9 +353,14 @@ static inline __attribute__((always_inline)) size_t guest_block_length(const voi
 #define POCKET_GUEST_ARENA_BYTES (64U * 1024U)
 #endif
 #endif
-/* What the arena must leave: pocket_net.c's NET_RADIO_MIN_FREE, the largest
- * single need after a guest exists. */
+/* What the arena must leave: pocket_net.c's NET_RADIO_MIN_FREE (a total, as
+ * pocket_net.c checks it), the largest single need after a guest exists, and
+ * one piece of GUEST_ARENA_KEEP_PIECE. Sizes are tried from the configured one
+ * down in GUEST_ARENA_STEP to GUEST_ARENA_MIN. */
 #define GUEST_ARENA_LEAVE (56U * 1024U)
+#define GUEST_ARENA_KEEP_PIECE (24U * 1024U)
+#define GUEST_ARENA_STEP (8U * 1024U)
+#define GUEST_ARENA_MIN (16U * 1024U)
 static inline __attribute__((always_inline)) bool
 guest_in_arena(const pocketjs_guest_t *guest, const void *pointer) {
   return (const uint8_t *)pointer >= guest->arena_lo &&
@@ -783,20 +788,31 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     const size_t arena_bytes =
         config->struct_size >= offsetof(pocketjs_guest_config_t, arena_bytes) + sizeof(size_t)
             ? config->arena_bytes : (size_t)POCKET_GUEST_ARENA_BYTES;
-    /* Taken only with room left over in one piece, so a later radio start or
-     * a large native allocation is not refused for it. */
-    if (guest->block_cache_on && arena_bytes >= 4096U &&
-        heap_caps_get_largest_free_block(GUEST_CAPS_INTERNAL) >= arena_bytes + GUEST_ARENA_LEAVE) {
-      uint8_t *region = heap_caps_malloc(arena_bytes, GUEST_CAPS_INTERNAL);
-      guest->arena = region ? multi_heap_register(region, arena_bytes) : NULL;
-      if (guest->arena != NULL) {
-        guest->arena_lo = region;
-        guest->arena_hi = region + arena_bytes;
-      } else if (region != NULL) {
+    /* Sized to the heap as it is: the device's largest free piece at app
+     * start is ~80 KiB of ~190 KiB free, so arena + 56 KiB in one piece (the
+     * first rule) never held there. Now the 56 KiB radio floor is on the
+     * total free (what pocket_net.c checks), and after taking it some piece
+     * of GUEST_ARENA_KEEP_PIECE must remain for native allocations (Kasane's
+     * arena, sockets); else it is given back and a smaller one tried. */
+    size_t taken = 0U;
+    for (size_t want = arena_bytes; guest->block_cache_on && want >= GUEST_ARENA_MIN;
+         want -= GUEST_ARENA_STEP) {
+      if (heap_caps_get_free_size(GUEST_CAPS_INTERNAL) < want + GUEST_ARENA_LEAVE ||
+          heap_caps_get_largest_free_block(GUEST_CAPS_INTERNAL) < want)
+        continue;
+      uint8_t *region = heap_caps_malloc(want, GUEST_CAPS_INTERNAL);
+      if (region == NULL) continue;
+      if (heap_caps_get_largest_free_block(GUEST_CAPS_INTERNAL) < GUEST_ARENA_KEEP_PIECE ||
+          (guest->arena = multi_heap_register(region, want)) == NULL) {
         heap_caps_free(region);
+        continue;
       }
+      guest->arena_lo = region;
+      guest->arena_hi = region + want;
+      taken = want;
+      break;
     }
-    ESP_LOGI("guest", "GUEST_ARENA bytes=%u", guest->arena != NULL ? (unsigned)arena_bytes : 0U);
+    ESP_LOGI("guest", "GUEST_ARENA bytes=%u", (unsigned)taken);
     guest->cache_backend = BLOCK_CACHE_HEAP;
     guest->cache_backend.free = block_cache_guest_free;
     guest->cache_backend.ctx = guest;
