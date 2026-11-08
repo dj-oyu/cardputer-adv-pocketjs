@@ -156,3 +156,7 @@ MEGADEMO の I・II を作り直した版が、実機で最初の `beginFrame` �
 - 強制は面1と同じ（`draw()` が超えると `LIMIT_EXCEEDED`、フレームは閉じる）。
 - 検査: `test_pocket_proc_turn_qjs.c` の `cap_contract`（確保量 `6 + 10·96`、上限での `LIMIT_EXCEEDED`、確保後の `BUSY`、`reset()` 後の 1,024）。
 - MEGADEMO は 768（いちばん多いフレームは HEAVY の TWIST で 648 本、`run_proc_megademo_scenes.py`）。フレーム 2 枚が 10,246 → 7,686 B（計 5,120 B 減）、要る連続領域も 7.7 KB になる。
+
+## 2026-11-08: バッファは面ごとに 1 本、`spare` で予備を宣言する
+
+面の候補・確定フレームは 1 本のバッファになった（`docs/vm/qjs-observe.md` §25）。最初の `beginFrame` で `6 + 10·(maxSegments + spare)` B を 1 回だけ取る。`spare` を省くと `maxSegments` と同じ（2 本のときと同じ量）。表示中のフレームと次のフレームが合わせて `maxSegments + spare`（表示中の分は偶数に切り上げ）に収まらないと、`draw` は `LIMIT_EXCEEDED` で失敗し、途中で確保はしない。DERBY は `resource({maxSegments: 768, spare: 512})`、BIG WAVE は `resource({spare: 0})`。上の節の「フレーム 2 枚」の確保量は、この日より前の値。

@@ -40,3 +40,7 @@ python3 tools/games/run_big_wave.py            # ASan/UBSan
 python3 tools/games/run_big_wave.py --m32      # 実機と同じ 8 B JSValue（ゲストヒープの数字はこちら）
 python3 tools/games/run_big_wave.py --sheet    # docs/apps/big-wave-preview.png を作り直す
 ```
+
+## フレームのバッファ（2026-11-08）
+
+`P.resource({spare: 0})`: 面 0 のバッファは 1 本で、表示中のフレームと次のフレームが 1,024 線分に収まる必要がある（`docs/vm/qjs-observe.md` §25）。1 フレームの最多は host の全場面で 444 なので、予備なしで足りる（2 本で 888 以下）。512 を超えるフレームを描くようにしたら、予備を足す。バッファは 10,246 B（2 本のときは 20,492 B、計算）。

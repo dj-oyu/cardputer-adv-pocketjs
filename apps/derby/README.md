@@ -232,6 +232,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - host の全検査は通り、レースの結果は同じ。画素のハッシュは変わる（float から Q16 へ）。
 - 型付きの点（大写しの馬の 6 コマ、HEAD ON の `hd`）も Shiki: 点を `i16` の窓（x, y）に置き、`EACH`・`FETCH`・`LINE` の 4 命令で折れ線を描く（`derby_view.js` の `poly()`。旧 API の affine は floor だったので、JS で同じ floor をして Q0 で置く。画素は同じ）。DERBY は旧 API の plan を使わない。
 - **Shiki のヒープ（48 KiB）:** 最初の実機（e47ac03）は `band` の登録が毎フレーム「the Shiki heap's budget」で失敗した（host の山は 46,934 B、最小の空き 1,724 B）。面 0 のフレームを 768 線分にし（`resource({maxSegments: 768})`。1 フレームの最多は host の全段階で 583）、折れ線を点で持つようにして、host の山は 40,914 B（最小の空き 7,772 B）。
+- **フレームのバッファ（2026-11-08）:** 面 0 のバッファは 1 本で、表示中のフレームと次のフレームが `768 + spare` 線分に収まる必要がある（`docs/vm/qjs-observe.md` §25）。`resource({maxSegments: 768, spare: 512})`: host の 19 本の検査で必要だった予備は最大 399（表示中の線分数 ＋ 次のフレーム − 768）。収まらないフレームは `LIMIT_EXCEEDED`（「exceed maxSegments + spare」）で失敗する。バッファは 12,806 B（2 本のときは 15,372 B、計算）。
 - **実機（b30dc1d、1 回、レースは別。`docs/kasane/logs/derby-shiki-all-20261102-b30dc1d.txt`）:** FINISH まで走り、`LOADFAIL` なし。ターンは整数化の版（6841f73）と同じか少し速い（FIELD 8.7〜9.0 ms、VISION 10.0〜10.7、HEAD ON 7.3〜8.3）。読み込み後の空きはネイティブ 48,492 B（前 47,556）、ゲスト 97,424 B（前 97,684）。画面は目で見ていない（`board_capture` は転送前で、表示の正しさはソフトだけでは確かめられない）。
 
 ### sin は Shiki（2026-11-01）
