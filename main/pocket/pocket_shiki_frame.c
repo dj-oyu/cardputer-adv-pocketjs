@@ -110,30 +110,23 @@ typedef struct {
 #endif
 } proc_band_sig;
 /* One buffer a surface (docs/vm/qjs-observe.md sec.25). candidate and
- * committed are the same allocation. The committed frame's entries stay at
- * its front, untouched until commit(): the panel may be redrawn from them at
- * any time before then (a parked frame(), another Kasane node changing, a
- * thrown frame leaving them on screen). The frame being built goes behind
- * them (tail_used entries from tail_base), and what does not fit there into
- * the overflow (over_used entries), which grows as frames need it and is
- * kept until reset. commit() moves the two to the front. The two frames used
- * to be two buffers: DERBY's 768-entry ones were 15,372 B together; the
- * frames of BIG WAVE (444 entries at most) and most of DERBY's fit one. */
+ * committed are the same allocation, taken once at the first beginFrame
+ * for maxSegments + spare entries and kept until reset: an allocation in
+ * the middle of a session would cut the Shiki heap into pieces. The
+ * committed frame's entries stay at its front, untouched until commit():
+ * the panel may be redrawn from them at any time before then (a parked
+ * frame(), another Kasane node changing, a thrown frame leaving them on
+ * screen). The frame being built goes behind them (tail_used entries from
+ * tail_base); commit() moves it to the front. So a frame fits when the
+ * committed one and it fit maxSegments + spare (resource({spare}),
+ * maxSegments by default: room for two full frames, as the two buffers
+ * this replaced). */
 typedef struct {
     ksn_proc_frame *candidate,*committed;   /* the same buffer */
-    ksn_proc_segment *over;  /* over_raw, or 2 B on (over_align) */
-    void *over_raw;
-    uint16_t over_cap,over_used;
-    uint16_t tail_base;      /* the committed frame's count when the frame began */
+    uint16_t tail_base;      /* the committed frame's count when the frame began, rounded up to even */
     uint16_t tail_used;      /* the new frame's entries behind it */
     uint16_t tail_raster;
     uint8_t tail_ext;
-    bool in_over;            /* the tail is closed: entries go to the overflow */
-    /* Calls (draws and native shapes) this frame, and the call at which the
-     * last frame moved to the overflow: this one moves there before that
-     * call instead of running it into the tail, finding the end, and running
-     * it again (STRESS: one draw a frame; -0.1% on r5sim). */
-    uint16_t calls,over_at;
     bool committed_lost;     /* commit() wrote the new frame over the committed one */
     proc_band_sig candidate_sig,committed_sig;
     uint16_t candidate_color,committed_color;
@@ -142,6 +135,8 @@ typedef struct {
     uint32_t handle;
     ksn_rect damage;
     uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (no option) */
+    uint16_t spare;        /* entries past max_segments, when spare_set */
+    bool spare_set;        /* false: as many again as max_segments */
 } proc_surface;
 static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
@@ -186,9 +181,13 @@ static bool integer(JSContext *ctx,JSValueConst value,uint32_t max,uint32_t *out
 static unsigned surface_segments(const proc_surface *surface){
     return surface->max_segments?surface->max_segments:KSN_PROC_SEGMENTS;
 }
-/* The surface's one frame buffer (candidate and committed). */
+/* The buffer: the frame's own entries and the spare behind them. */
+static unsigned surface_place(const proc_surface *surface){
+    return surface_segments(surface)+(surface->spare_set?surface->spare:surface_segments(surface));
+}
+/* The surface's one frame buffer (candidate and committed), once. */
 static bool buffers(proc_surface *surface){
-    const size_t bytes=frame_bytes(surface_segments(surface));
+    const size_t bytes=frame_bytes(surface_place(surface));
     if(!surface->candidate)surface->candidate=surface->committed=shiki_or_sys_calloc(1,bytes);
     if(surface->image_mode&&!image_band_buf)
         image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
@@ -415,11 +414,14 @@ static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,
 /* The committed frame as it was before commit() merged over it, so a
  * skipped band is checked against the frame on the panel. */
 static ksn_proc_frame *sig_old;
-static unsigned long long one_merges,one_over,one_over_cap,one_reruns,one_copied;
+static unsigned long long one_merges,one_spare_need;
 __attribute__((destructor)) static void one_report(void){
-    if(one_merges)fprintf(stderr,"ONE_BUFFER merges=%llu with_overflow=%llu overflow_entries_max=%llu "
-                          "draws_run_again=%llu entries_copied=%llu\n",
-                          one_merges,one_over,one_over_cap,one_reruns,one_copied);
+    if(!one_merges)return;
+    fprintf(stderr,"ONE_BUFFER merges=%llu spare_needed=%llu\n",one_merges,one_spare_need);
+    if(getenv("POCKET_ONE_REPORT")){
+        FILE *f=fopen(getenv("POCKET_ONE_REPORT"),"a");
+        if(f){fprintf(f,"spare_needed=%llu merges=%llu\n",one_spare_need,one_merges);fclose(f);}
+    }
 }
 __attribute__((destructor)) static void sig_report(void){
     if(!sig_compared&&!sig_all)return;
@@ -625,67 +627,23 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
     return true;
 }
 /* ---- The frame being built (proc_surface's note) */
-static unsigned built(const proc_surface *s){return (unsigned)s->tail_used+s->over_used;}
-/* Where the next entries go and how many fit there, never past the frame's
- * own limit: behind the committed frame until that runs out, then the
- * overflow. */
-static ksn_proc_segment *write_at(const proc_surface *s,unsigned *room){
-    const unsigned frame_room=surface_segments(s)-built(s);
-    unsigned r;
-    ksn_proc_segment *at;
-    if(!s->in_over){
-        r=surface_segments(s)-s->tail_base-s->tail_used;
-        at=&s->candidate->segments[s->tail_base+s->tail_used];
-    }else{
-        r=(unsigned)s->over_cap-s->over_used;
-        at=s->over?&s->over[s->over_used]:NULL;
-    }
-    *room=r<frame_room?r:frame_room;
-    return at;
+/* Where the next entries go and how many fit there: behind the committed
+ * frame, never past the frame's own limit. *frame_room: the frame's. */
+static ksn_proc_segment *write_at(const proc_surface *s,unsigned *room,unsigned *frame_room){
+    const unsigned place=surface_place(s)-s->tail_base-s->tail_used;
+    *frame_room=surface_segments(s)-s->tail_used;
+    *room=place<*frame_room?place:*frame_room;
+    return &s->candidate->segments[s->tail_base+s->tail_used];
 }
-/* The place ran out before the frame did: close the tail, or grow the
- * overflow at once to all the frame can still take (cap - tail_used), not
- * step by step: each step left a hole in the Shiki heap (DERBY's smallest
- * largest-free-block 11,472 B growing by half, 12,912 B at once; 14,820 B
- * with two buffers, docs/vm/qjs-observe.md sec.25). False only when the
- * allocation fails. */
-static void over_align(proc_surface *s);
-static bool more_room(proc_surface *s){
-    if(!s->in_over){s->in_over=true;s->over_at=s->calls;over_align(s);return true;}
-    const unsigned want=surface_segments(s)-s->tail_used;
-    if(want<=s->over_cap)return false;   /* not reached: write_at caps at the frame's room */
-    void *raw=shiki_or_sys_calloc(1,(size_t)want*sizeof(ksn_proc_segment)+2u);
-    if(!raw)return false;
-    ksn_proc_segment *grown=(ksn_proc_segment *)(void *)((uint8_t *)raw+((uintptr_t)s->over-(uintptr_t)s->over_raw));
-    if(!s->over_raw)grown=raw;
-    if(s->over_used)memcpy(grown,s->over,(size_t)s->over_used*sizeof *grown);
-    shiki_or_sys_free(s->over_raw);
-    s->over_raw=raw;s->over=grown;s->over_cap=(uint16_t)want;
-    if(!s->over_used)over_align(s);
-    return true;
-}
-/* The overflow's first entry on the alignment (mod 4) of its place in the
- * merged frame, set while it is empty (the tail is closed, so that place is
- * fixed): commit()'s copy then moves words. */
-static void over_align(proc_surface *s){
-    if(!s->over_raw||s->over_used)return;
-    const uintptr_t dst=(uintptr_t)&s->candidate->segments[s->tail_used]&3u;
-    const uintptr_t raw=(uintptr_t)s->over_raw&3u;
-    s->over=(ksn_proc_segment *)(void *)((uint8_t *)s->over_raw+((dst-raw)&2u));
-}
-/* A draw or a native shape starts: past the call at which the last frame
- * moved to the overflow, this one moves there now. */
-static void call_start(proc_surface *s){
-    if(!s->in_over&&s->over_at&&s->calls+1u>=s->over_at&&s->over){s->in_over=true;over_align(s);}
-    s->calls++;
-}
-/* n entries just written at write_at(): counted where they went. */
+/* n entries just written at write_at(). */
 static void wrote(proc_surface *s,unsigned n,unsigned raster,bool ext){
-    if(s->in_over)s->over_used=(uint16_t)(s->over_used+n);
-    else s->tail_used=(uint16_t)(s->tail_used+n);
+    s->tail_used=(uint16_t)(s->tail_used+n);
     s->tail_raster=(uint16_t)(s->tail_raster+raster);
     if(ext)s->tail_ext=1;
 }
+/* The frame fits its limit but not, with the committed one, the buffer:
+ * the spare is too small for this app (resource({spare})). */
+static const char spare_limit[]="frame drawing limit (the committed frame and this one exceed maxSegments + spare)";
 static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.shiki.beginFrame";
@@ -703,11 +661,10 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     /* Even, so the tail and the front share their alignment mod 4 (an
      * entry is 10 B): commit()'s copy then moves words, not bytes. */
     unsigned base=(surface->has_committed?surface->committed->count+1u:0u)&~1u;
-    if(base>surface_segments(surface))base=surface_segments(surface);
+    if(base>surface_place(surface))base=surface_place(surface);
     surface->tail_base=(uint16_t)base;
-    surface->tail_used=surface->over_used=surface->tail_raster=0;
-    surface->tail_ext=0;surface->in_over=false;
-    surface->calls=0;
+    surface->tail_used=surface->tail_raster=0;
+    surface->tail_ext=0;
     surface->sig_ready=false;
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
@@ -719,10 +676,8 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
-    proc_surface *s=&surfaces[building_surface];
-    call_start(s);
-    *mark=(pocket_proc_mark){s->tail_used,s->tail_raster,s->over_used,s->tail_ext,
-                             (uint8_t)building_surface,s->in_over};
+    const proc_surface *s=&surfaces[building_surface];
+    *mark=(pocket_proc_mark){s->tail_used,s->tail_raster,s->tail_ext,(uint8_t)building_surface};
     image_band_valid=false;carry_drop();
     return JS_UNDEFINED;
 }
@@ -734,18 +689,12 @@ JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int 
     }
     proc_surface *s=&surfaces[building_surface];
     const unsigned dx=(unsigned)abs(x1-x0),dy=(unsigned)abs(y1-y0),cost=(dx>dy?dx:dy)+1u;
-    if(built(s)>=surface_segments(s)||cost>(unsigned)UINT16_MAX-s->tail_raster){
+    unsigned room,frame_room;
+    ksn_proc_segment *at=write_at(s,&room,&frame_room);
+    if(!room||cost>(unsigned)UINT16_MAX-s->tail_raster){
         building=false;
-        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
-    }
-    unsigned room;
-    ksn_proc_segment *at=write_at(s,&room);
-    while(!room){
-        if(!more_room(s)){
-            building=false;
-            return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame overflow allocation failed");
-        }
-        at=write_at(s,&room);
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,
+                       frame_room&&cost<=(unsigned)UINT16_MAX-s->tail_raster?spare_limit:"frame drawing limit");
     }
     *at=(ksn_proc_segment){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1,color};
     wrote(s,1,cost,false);
@@ -754,8 +703,7 @@ JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int 
 void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     proc_surface *s=&surfaces[mark->surface<PROC_SURFACES?mark->surface:0];
     if(!s->candidate)return;
-    s->tail_used=mark->count;s->tail_raster=mark->raster;s->over_used=mark->entries;
-    s->tail_ext=mark->ext;s->in_over=mark->over;
+    s->tail_used=mark->count;s->tail_raster=mark->raster;s->tail_ext=mark->ext;
 }
 #ifdef POCKET_PROC_SIG_CHECK
 static void sig_keep_old(const proc_surface *s){
@@ -766,7 +714,7 @@ static void sig_keep_old(const proc_surface *s){
 }
 #endif
 /* n entries from src to dst, front to back (dst <= src when they overlap),
- * both on the same alignment mod 4 (tail_base and over_align see to it):
+ * both on the same alignment mod 4 (tail_base is even, so they are):
  * four words a step. The C library's memmove/memcpy took ~1.8 instructions
  * a byte here on r5sim (STRESS: 8.9 KB a frame, ~2,500 counts a turn). */
 typedef uint32_t proc_word __attribute__((may_alias));
@@ -796,12 +744,13 @@ static void merge(proc_surface *s){
     ksn_proc_frame *f=s->candidate;
     s->committed_lost=s->has_committed;
     copy_entries(f->segments,&f->segments[s->tail_base],s->tail_used);
-    copy_entries(&f->segments[s->tail_used],s->over,s->over_used);
-    f->count=(uint16_t)built(s);f->raster_steps=s->tail_raster;f->ext=s->tail_ext;f->ready=false;
-    if(!s->in_over)s->over_at=0;   /* this frame fit behind the committed one */
+    f->count=s->tail_used;f->raster_steps=s->tail_raster;f->ext=s->tail_ext;f->ready=false;
 #ifdef POCKET_PROC_SIG_CHECK
-    one_merges++;if(s->in_over)one_over++;one_copied+=built(s);
-    if(s->over_cap>one_over_cap)one_over_cap=s->over_cap;
+    one_merges++;
+    {
+        const long need=(long)s->tail_base+(long)s->tail_used-(long)surface_segments(s);
+        if(need>(long)one_spare_need)one_spare_need=(unsigned long long)need;
+    }
 #endif
 }
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -891,21 +840,39 @@ static bool segments_option(JSContext *ctx,JSValueConst object,uint32_t *segment
     if(!ok)*segments=0;
     return ok;
 }
+/* {spare: 0..1024}: the entries the buffer holds past maxSegments, for the
+ * committed frame and the next to share it (proc_surface's note). Absent
+ * or undefined: *set false, as many as maxSegments. */
+static bool spare_option(JSContext *ctx,JSValueConst object,uint32_t *spare,bool *set){
+    *spare=0;*set=false;
+    JSValue v=JS_GetPropertyStr(ctx,object,"spare");
+    bool ok=!JS_IsException(v);
+    if(ok&&!JS_IsUndefined(v)){ok=integer(ctx,v,KSN_PROC_SEGMENTS,spare);*set=ok;}
+    JS_FreeValue(ctx,v);
+    if(!ok)*spare=0;
+    return ok;
+}
 static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.shiki.resource";
     unsigned index=0;
-    /* resource({maxSegments}): surface 0's image, its two frames sized for
-     * maxSegments (createSurface()'s option for surface 1). Decided before
-     * surface 0's first beginFrame allocates them; after that only the same
-     * value is accepted. */
+    /* resource({maxSegments, spare}): surface 0's image, its buffer sized
+     * for maxSegments + spare (createSurface()'s options for surface 1).
+     * Decided before surface 0's first beginFrame allocates it; after that
+     * only the same values are accepted. */
     if(argc==1&&JS_IsObject(argv[0])){
-        uint32_t segments=0;
+        uint32_t segments=0,spare=0;
+        bool spare_set=false;
         if(!segments_option(ctx,argv[0],&segments))
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"maxSegments must be an integer 1..1024");
-        if(surfaces[0].candidate&&surface_segments(&surfaces[0])!=(segments?segments:KSN_PROC_SEGMENTS))
+        if(!spare_option(ctx,argv[0],&spare,&spare_set))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"spare must be an integer 0..1024");
+        const unsigned want=segments?segments:KSN_PROC_SEGMENTS;
+        if(surfaces[0].candidate&&(surface_segments(&surfaces[0])!=want||
+                                   surface_place(&surfaces[0])!=want+(spare_set?spare:want)))
             return failure(ctx,op,POCKET_ERR_BUSY,"surface 0's frames are already allocated");
         surfaces[0].max_segments=(uint16_t)segments;
+        surfaces[0].spare=(uint16_t)spare;surfaces[0].spare_set=spare_set;
         return pocket_kasane_proc_resource(ctx);
     }
     if(argc>1||(argc==1&&!surface_index(ctx,argv[0],&index)))
@@ -916,27 +883,32 @@ static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,resource_impl);
 }
-/* createSurface() or createSurface({maxSegments: 1..1024}). The option only
- * shrinks the surface's two frames; it is enforced by draw() exactly as the
- * 1,024 default is (LIMIT_EXCEEDED "frame drawing limit", candidate kept
- * short of the draw). The limit is decided before the surface exists: a bad
+/* createSurface() or createSurface({maxSegments: 1..1024, spare: 0..1024}).
+ * maxSegments only shrinks the surface's frame; it is enforced by draw()
+ * exactly as the 1,024 default is (LIMIT_EXCEEDED "frame drawing limit",
+ * candidate kept short of the draw). spare sizes the buffer behind it
+ * (proc_surface's note). Both are decided before the surface exists: a bad
  * option issues no handle. */
 static JSValue create_surface_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.shiki.createSurface";
-    uint32_t segments=0;
+    uint32_t segments=0,spare=0;
+    bool spare_set=false;
     if(argc>1)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
-                             "expected optional {maxSegments}");
+                             "expected optional {maxSegments, spare}");
     if(argc==1&&!JS_IsUndefined(argv[0])){
         if(!JS_IsObject(argv[0]))
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected optional {maxSegments}");
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected optional {maxSegments, spare}");
         if(!segments_option(ctx,argv[0],&segments))
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
                            "maxSegments must be an integer 1..1024");
+        if(!spare_option(ctx,argv[0],&spare,&spare_set))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"spare must be an integer 0..1024");
     }
     if(surfaces[1].handle||next_surface_handle==INT32_MAX)
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"two surfaces maximum");
     surfaces[1].max_segments=(uint16_t)segments;
+    surfaces[1].spare=(uint16_t)spare;surfaces[1].spare_set=spare_set;
     surfaces[1].handle=++next_surface_handle;
     return JS_NewInt32(ctx,(int32_t)surfaces[1].handle);
 }
@@ -1008,50 +980,29 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
         args=fx;nargs=pl->inputs;
     }
     /* Straight into the frame's place: a draw that does not fit stops at
-     * LIMIT and nothing is counted, so its segments are not the frame's. If
-     * the place, not the frame, ran out, the draw runs again in the overflow. */
-    ksn_shiki_status s;
-    bool full;
+     * LIMIT and nothing is counted, so its segments are not the frame's. */
+    ksn_shiki_status st;
+    unsigned room,frame_room;
+    ksn_proc_segment *at=write_at(surface,&room,&frame_room);
     shiki_turn.draws++;
-    call_start(surface);
-    for(;;){
-        unsigned room;
-        ksn_proc_segment *at=write_at(surface,&room);
-        const unsigned frame_room=surface_segments(surface)-built(surface);
-        if(!room&&frame_room){
-            if(!more_room(surface)){
-                building=false;
-                return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame overflow allocation failed");
-            }
-            continue;
-        }
-        const uint32_t t_engine=pocket_cycles();
-        if(good)s=ksn_shiki_draw_index_cap(pl,args,nargs,index,shiki_vm,at,room);
-        else{memset(shiki_vm,0,sizeof *shiki_vm);s=KSN_SHIKI_BADINPUT;}
-        shiki_turn.engine_cy+=pocket_cycles()-t_engine;
-        shiki_turn.steps+=shiki_vm->steps;
-        /* A pattern line needs two entries: one left reads as full too. */
-        full=s==KSN_SHIKI_LIMIT&&room<KSN_SHIKI_SEGMENTS&&shiki_vm->count+1u>=room;
-        if(!(full&&room<frame_room))break;
-#ifdef POCKET_PROC_SIG_CHECK
-        one_reruns++;
-#endif
-        if(!more_room(surface)){
-            building=false;
-            return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame overflow allocation failed");
-        }
-    }
+    const uint32_t t_engine=pocket_cycles();
+    if(good)st=ksn_shiki_draw_index_cap(pl,args,nargs,index,shiki_vm,at,room);
+    else{memset(shiki_vm,0,sizeof *shiki_vm);st=KSN_SHIKI_BADINPUT;}
+    shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    shiki_turn.steps+=shiki_vm->steps;
+    /* A pattern line needs two entries: one left reads as full too. */
+    const bool full=st==KSN_SHIKI_LIMIT&&room<KSN_SHIKI_SEGMENTS&&shiki_vm->count+1u>=room;
     if(pf->on){const uint32_t t=pocket_cycles();pf->engine+=t-pf->mark;pf->mark=t;}
     /* Out of the frame's room reads as the frame's limit, as when the room
      * was checked after the draw; the engine's own per-draw limits as its. */
-    if(s!=KSN_SHIKI_DONE&&!full){
+    if(st!=KSN_SHIKI_DONE&&!full){
         building=false;
-        return failure(ctx,op,s==KSN_SHIKI_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
-                       s==KSN_SHIKI_BADINPUT?"non-finite input":"Shiki execution failed");
+        return failure(ctx,op,st==KSN_SHIKI_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
+                       st==KSN_SHIKI_BADINPUT?"non-finite input":"Shiki execution failed");
     }
     if(full||(unsigned)shiki_vm->raster>(unsigned)UINT16_MAX-surface->tail_raster){
         building=false;
-        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,full&&room<frame_room?spare_limit:"frame drawing limit");
     }
     wrote(surface,shiki_vm->count,shiki_vm->raster,shiki_vm->ext);
     if(pf->on){pf->copy+=pocket_cycles()-pf->mark;pf->n++;}
@@ -1077,7 +1028,6 @@ void pocket_proc_reset(void){
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);   /* committed is the same buffer */
-        shiki_or_sys_free(surfaces[i].over_raw);
         surfaces[i]=(proc_surface){0};
     }
     shiki_or_sys_free(image_band_buf);image_band_buf=NULL;

@@ -60,10 +60,7 @@ extern bool pocket_proc_hook_dry;
  * draw() does (LIMIT_EXCEEDED / INVALID_ARGUMENT, beginFrame again), and the
  * caller rolls back to the mark so the candidate keeps no part of the call.
  * Each returns JS_UNDEFINED or JS_EXCEPTION. */
-/* Where the frame being built stood before the call: its entries behind the
- * committed frame (count), in the overflow (entries), and whether it had
- * moved to the overflow (over) (pocket_shiki_frame.c, one buffer). */
-typedef struct { uint16_t count,raster,entries; uint8_t ext,surface,over; } pocket_proc_mark;
+typedef struct { uint16_t count,raster; uint8_t ext,surface; } pocket_proc_mark;
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark);
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color);
 void pocket_proc_native_rollback(const pocket_proc_mark *mark);
