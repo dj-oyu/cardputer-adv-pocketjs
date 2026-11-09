@@ -106,17 +106,28 @@ def extract(a):
     print(f'{len(turns)} turns, {len(blocks)} blocks, {sum(len(t) for t in turns)} executions -> {a.out}')
 
 class Cache:
-    def __init__(self, sets, ways):
+    """LRU sets. Locked lines (the ICache's preload-and-lock sections) always
+    hit and each takes one way of its set from everything else."""
+    def __init__(self, sets, ways, locked=()):
         self.sets, self.ways = sets, ways
+        self.locked = set(locked)
+        self.room = [ways] * sets
+        for l in self.locked:
+            self.room[l % sets] -= 1
+        if min(self.room) < 1:
+            raise SystemExit('lock leaves a set with no free way')
         self.flush()
     def flush(self):
         self.lru = [collections.OrderedDict() for _ in range(self.sets)]
     def access(self, line):
-        s = self.lru[line % self.sets]
+        if line in self.locked:
+            return False
+        i = line % self.sets
+        s = self.lru[i]
         if line in s:
             s.move_to_end(line)
             return False
-        if len(s) >= self.ways:
+        if len(s) >= self.room[i]:
             s.popitem(last=False)
         s[line] = None
         return True
@@ -209,6 +220,8 @@ def model(a):
         print(f'  forced: {", ".join(forced)} counted as {forced_bytes} B')
     iram = set(iram) | set(forced)
     iram_bytes += forced_bytes
+    if a.lock_kib:
+        a.pack_kib = a.lock_kib
     pack, pack_bytes = pick(a.pack_kib) if a.pack_kib else ([], 0)
     base = {}
     if pack:
@@ -241,7 +254,13 @@ def model(a):
         tb_lines.append((tuple(ls), addrs[0][0]))
 
     sets, ways = (1, 1024) if a.full else (128, 8)
-    warm, cold = Cache(sets, ways), Cache(sets, ways)
+    # --lock-kib: the packed run is one preload-and-lock section.
+    locked = []
+    if a.lock_kib and pack:
+        lo = min(base.values()) >> 5
+        hi = (max(base[n] + fw[n][1] for n in pack) + 31) >> 5
+        locked = range(lo, hi)
+    warm, cold = Cache(sets, ways, locked), Cache(sets, ways, locked)
     per_turn = []; miss_by_fn = collections.Counter()
     for t in d['turns']:
         cold.flush(); uniq = set(); wm = cm = 0
@@ -261,7 +280,7 @@ def model(a):
     if iram:
         print(f'  IRAM: {len(iram)} functions, {iram_bytes} B of DRAM')
     if pack:
-        print(f'  packed: {len(pack)} functions, {pack_bytes} B')
+        print(f'  packed{" and locked" if locked else ""}: {len(pack)} functions, {pack_bytes} B')
     if a.emit:
         with open(a.emit, 'w') as f:
             f.write(''.join(n + '\n' for n in (pack or sorted(iram))))
@@ -283,6 +302,7 @@ def main():
     m.add_argument('--full', action='store_true', help='fully associative: no conflict misses')
     m.add_argument('--iram-kib', type=float, default=0, help='take the hottest functions out of the cache up to this size')
     m.add_argument('--pack-kib', type=float, default=0, help='pack the hottest functions contiguously up to this size')
+    m.add_argument('--lock-kib', type=float, default=0, help='pack the hottest functions up to this size and lock them in the cache')
     m.add_argument('--force', action='append', help='put this function in IRAM first (repeatable)')
     m.add_argument('--force-cost', type=float, default=0, help='bytes to charge for the forced functions (default: their size)')
     m.add_argument('--force-file', help='force every function listed (names, or an ldgen .lf file)')
