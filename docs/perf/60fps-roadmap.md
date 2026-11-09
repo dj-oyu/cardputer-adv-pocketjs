@@ -58,6 +58,7 @@
 | PIE（SIMD） | QuickJS のターンにほぼ無い。データ並列は `memcpy`/`memset` 程度で host の命令数の 2% 未満 | host の計数と推定 | 同上 §4 |
 | 作業集合 | 1 ターンが触るコード 42.5 → 41.8 KiB（試作 3 つ入りでも）、インタプリタ（core ＋ helper）21.3 KiB は予算 14 KiB の約 1.5 倍 | 模型の推定 | [turn-icache.md](../vm/turn-icache.md) §2 |
 | 行の使用率 | 取り込む 40.8 KiB のうち実行は 23.4 KiB（57.5%）。走らないバイトの多くはどのターンでも走らない冷たいコード。上限の模型で 27.7 KiB に収まり warm ミス 940 → 73 | 模型の推定 | [turn-icache.md](../vm/turn-icache.md) §3 |
+| 命令キャッシュの先読み・固定（2026-11-09） | 自動の先読みは STRESS の 1 フレーム 16.20 → 16.16〜16.88 ms、Shiki の実行は +1〜4%、DERBY の同じ場面で JS +12%。固定・手動の先読み・関数の手での分割は模型で得が小さい | 実測と推定 | [turn-icache.md](../vm/turn-icache.md) §4 |
 | PGO（`CONFIG_POCKET_VM_QJS_PGO`、既定 OFF） | 模型は触る行 −2.8%、warm ミス −4.9%（推定）。**実機は差なし**: BIG WAVE 58.5 / 58.5、STRESS 50.5 / 50.7、MEGADEMO 52.2 / 52.1、DERBY 53.1 / 53.8 fps（実測、DERBY は窓のレースが違う）、STRESS の turn 6.72 / 6.73 ms | 推定と実測 | [qjs-pgo.md](../vm/qjs-pgo.md) |
 
 つまり「JS の turn を速くする」決め手はまだ無い。最大の項は flash キャッシュ待ち（34〜43%）で、行の使用率の 57.5% がその一因と模型は言うが、効く打ち手と見込んだ hot/cold 分割は Xtensa の GCC が無効にする（[qjs-pgo.md](../vm/qjs-pgo.md) §0）。

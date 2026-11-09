@@ -222,6 +222,8 @@ def model(a):
     iram_bytes += forced_bytes
     if a.lock_kib:
         a.pack_kib = a.lock_kib
+    if a.preload_kib:
+        a.pack_kib = a.preload_kib
     pack, pack_bytes = pick(a.pack_kib) if a.pack_kib else ([], 0)
     base = {}
     if pack:
@@ -261,9 +263,18 @@ def model(a):
         hi = (max(base[n] + fw[n][1] for n in pack) + 31) >> 5
         locked = range(lo, hi)
     warm, cold = Cache(sets, ways, locked), Cache(sets, ways, locked)
+    # --preload-kib: the packed run is fetched into the cache at the start of
+    # every turn (a manual preload), after the cold model's flush.
+    preload = []
+    if a.preload_kib and pack:
+        lo = min(base.values()) >> 5
+        hi = (max(base[n] + fw[n][1] for n in pack) + 31) >> 5
+        preload = list(range(lo, hi))
     per_turn = []; miss_by_fn = collections.Counter()
     for t in d['turns']:
         cold.flush(); uniq = set(); wm = cm = 0
+        for l in preload:
+            warm.access(l); cold.access(l)
         for i in t:
             ls, name = tb_lines[i]
             for l in ls:
@@ -281,6 +292,8 @@ def model(a):
         print(f'  IRAM: {len(iram)} functions, {iram_bytes} B of DRAM')
     if pack:
         print(f'  packed{" and locked" if locked else ""}: {len(pack)} functions, {pack_bytes} B')
+    if preload:
+        print(f'  preloaded each turn: {len(preload)} lines')
     if a.emit:
         with open(a.emit, 'w') as f:
             f.write(''.join(n + '\n' for n in (pack or sorted(iram))))
@@ -302,6 +315,7 @@ def main():
     m.add_argument('--full', action='store_true', help='fully associative: no conflict misses')
     m.add_argument('--iram-kib', type=float, default=0, help='take the hottest functions out of the cache up to this size')
     m.add_argument('--pack-kib', type=float, default=0, help='pack the hottest functions contiguously up to this size')
+    m.add_argument('--preload-kib', type=float, default=0, help='pack the hottest functions up to this size and preload them before every turn')
     m.add_argument('--lock-kib', type=float, default=0, help='pack the hottest functions up to this size and lock them in the cache')
     m.add_argument('--force', action='append', help='put this function in IRAM first (repeatable)')
     m.add_argument('--force-cost', type=float, default=0, help='bytes to charge for the forced functions (default: their size)')
