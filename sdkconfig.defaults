@@ -153,3 +153,6 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 # firmware bug can land in code and run instead of faulting at the
 # code/data boundary.
 CONFIG_ESP_SYSTEM_MEMPROT=n
+
+# MEASUREMENT ONLY (to be reverted): I-cache auto-preload A/B.
+CONFIG_POCKET_ICACHE_AB=y
