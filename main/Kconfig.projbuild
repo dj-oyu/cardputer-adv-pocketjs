@@ -163,6 +163,15 @@ menu "Pocket VM (diagnostics)"
             Build it in a directory of its own with
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
 
+    config POCKET_ICACHE_AB
+        bool "Probe: I-cache auto-preload on/off, rotated by paint window"
+        default n
+        help
+            Diagnostic (docs/vm/turn-icache.md sec.4). Configures the ICache
+            autoload over the flash text and rotates its mode every
+            KASANE_PAINT window (30 frames), logging "ICACHE_AB win=... mode=..."
+            after each window, so turn_ms can be compared within one image.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n

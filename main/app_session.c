@@ -90,6 +90,7 @@ static int64_t hp_eval_t0;
 #include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
+#include "icache_ab.h"
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
@@ -2408,6 +2409,7 @@ esp_err_t app_tick(uint32_t buttons) {
     end_guest_turn();
     // The JS side of the frame: frame() in QuickJS. Timed on every tick, painted or not, so turn_ms is its own number
     // next to render_ms rather than hidden inside the frame period.
+    icache_ab_turn();
     int64_t turning=esp_timer_get_time();
 #ifdef CONFIG_POCKET_VM_TURNPERF
     uint32_t tp0,tp1; turnperf_read(&tp0,&tp1);
@@ -2646,6 +2648,7 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
+                icache_ab_window();
                 /* What Shiki cost these frames (pocket_shiki_frame.c, docs/kasane/shiki-jit.md
                  * sec.9): draws and engine steps per frame, the engine (input
                  * conversion included) and the whole native draw, ms per frame. */
