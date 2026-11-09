@@ -98,7 +98,7 @@
 
 issue に無い、元の文書に「未」と書かれているもの:
 
-- 三つの計時の外の 1.5〜5 ms の内訳（[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.8、未分解）。
+- 三つの計時の外の 1.5〜5 ms の内訳（[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.8）。**2026-11-09 に分けた**: 外は約 0.85 ms で、残りは周期の刻み・超過時の 1 tick・ログを書くフレーム（[frame-breakdown.md](frame-breakdown.md)、実測と推定）。
 - シーン切り替えの落ち込み: DERBY の結果画面 17 fps、ゲートからレースへ 26〜27 fps はシーンの構築の時間（§9.13）。
 - `-O2` の B 案の XTPERF、MEGADEMO の CORE の場面の内訳、BIG WAVE（[o2-machine-code.md](o2-machine-code.md) §4）。
 - 窓例外（`entry` の窓あふれ）の 1 回の値段（STRESS で 30 ターン 11.4 万回、[turn-jumps-pie.md](../vm/turn-jumps-pie.md) §5）。
