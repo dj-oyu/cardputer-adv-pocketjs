@@ -91,6 +91,7 @@ static int64_t hp_eval_t0;
 #include "pocket_input.h"
 #include "ksn_font.h"
 #include "icache_ab.h"
+#include "frame_bd.h"
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
@@ -2220,7 +2221,14 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
                       pocketjs_guest_frame(guest,&input);
 }
 
+static esp_err_t app_tick_body(uint32_t buttons);
 esp_err_t app_tick(uint32_t buttons) {
+    const int64_t began=esp_timer_get_time();
+    const esp_err_t e=app_tick_body(buttons);
+    frame_bd_tick((uint32_t)(esp_timer_get_time()-began));
+    return e;
+}
+static esp_err_t app_tick_body(uint32_t buttons) {
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
     // later turn for a deferred 0x2000 to be delivered on. sec.5.2 says so in
@@ -2322,6 +2330,7 @@ esp_err_t app_tick(uint32_t buttons) {
         end_guest_turn();
         uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
         turn_sum+=(double)continuation_us; ticks++;
+        frame_bd_js(continuation_us);
 #ifdef KASANE_MEGADEMO_TRACE
         mdt.kind=pocketjs_guest_work_pending(guest)?'P':'C';
         mdt.js_us=continuation_us;
@@ -2429,6 +2438,7 @@ esp_err_t app_tick(uint32_t buttons) {
 #endif
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+    frame_bd_js((uint32_t)turn_us);
 #ifdef KASANE_MEGADEMO_TRACE
     // Q: a frame() the VM parked; its continuation is the next line.
     mdt.kind=pocketjs_guest_work_pending(guest)?'Q':'F';
@@ -2597,6 +2607,7 @@ static esp_err_t present_frame(void) {
         if(stats.bands) {
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
+            frame_bd_present(whole-display_state.sent_us,display_state.sent_us);
 #ifdef KASANE_MEGADEMO_TRACE
             mdt.render_us+=whole-display_state.sent_us;mdt.send_us+=display_state.sent_us;
             mdt.bytes+=stats.transferred_bytes;mdt.bands=ksn_render_band_count(stats.bands);

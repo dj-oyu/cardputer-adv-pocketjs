@@ -163,6 +163,16 @@ menu "Pocket VM (diagnostics)"
             Build it in a directory of its own with
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
 
+    config POCKET_FRAME_BREAKDOWN
+        bool "Probe: per-frame breakdown of a guest frame (JS/render/send/other/wait)"
+        default n
+        help
+            Diagnostic (docs/perf/60fps-roadmap.md). Times every frame() period
+            of a running guest and logs one "FRAME_BD" line per 60 frames:
+            averages of the JS turn, render, send, the rest of app_tick, the
+            rest of the UI loop and the wait, plus the worst period and how
+            many periods ran past 16.7 and 33.3 ms.
+
     config POCKET_ICACHE_AB
         bool "Probe: I-cache auto-preload on/off, rotated by paint window"
         default n

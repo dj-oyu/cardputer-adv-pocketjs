@@ -1,4 +1,5 @@
 #include "board.h"
+#include "frame_bd.h"
 #include "shell.h"
 #include "overlay.h"
 #include "motion.h"
@@ -1476,7 +1477,11 @@ static void ui_task(void *arg) {
                 }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
-                period_began=esp_timer_get_time();
+                {
+                    const int64_t now=esp_timer_get_time();
+                    frame_bd_period(last_frame_us,(uint32_t)(now-period_began));
+                    period_began=now;
+                }
             }
             continue;
         }
