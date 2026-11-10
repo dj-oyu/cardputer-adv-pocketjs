@@ -1,5 +1,6 @@
 #include "board.h"
 #include "frame_bd.h"
+#include "freertos/FreeRTOS.h"
 #include "esp_freertos_hooks.h"
 #include "shell.h"
 #include "overlay.h"
