@@ -13,6 +13,7 @@ void block_cache_init(block_cache_t *cache, const block_cache_backend_t *backend
   memset(cache, 0, sizeof(*cache));
   cache->backend = backend;
   cache->enabled = enabled;
+  cache->depth = BLOCK_CACHE_DEPTH;
   if (n > BLOCK_CACHE_CLASSES) n = BLOCK_CACHE_CLASSES;
   for (unsigned i = 0; i < n; i++) {
     const uint16_t s = sizes[i];
@@ -26,6 +27,22 @@ void block_cache_set_enabled(block_cache_t *cache, bool enabled) {
   if (cache->enabled == enabled) return;
   if (!enabled) block_cache_flush(cache);
   cache->enabled = enabled;
+}
+
+void block_cache_set_depth(block_cache_t *cache, unsigned depth) {
+  if (depth < 1) depth = 1;
+  if (depth > BLOCK_CACHE_DEPTH) depth = BLOCK_CACHE_DEPTH;
+  cache->depth = (uint8_t)depth;
+  const block_cache_backend_t *b = cache->backend;
+  for (unsigned c = 0; c < BLOCK_CACHE_CLASSES; c++) {
+    while (cache->count[c] > depth) {
+      void *block = cache->head[c];
+      BC_UNPOISON(block, cache->size[c]);
+      cache->head[c] = BC_NEXT(block);
+      cache->count[c]--;
+      b->free(b->ctx, block);
+    }
+  }
 }
 
 void *block_cache_malloc(block_cache_t *cache, size_t size, size_t rounded) {

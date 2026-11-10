@@ -1507,8 +1507,10 @@ void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
 void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
                                             bool pressured) {
 #ifdef ESP_PLATFORM
+  // Pressure shrinks the cache rather than stopping it (block_cache.h).
   if (guest_uses_block_cache(guest))
-    block_cache_set_enabled(&guest->block_cache, !pressured);
+    block_cache_set_depth(&guest->block_cache,
+                          pressured ? BLOCK_CACHE_PRESSURE_DEPTH : BLOCK_CACHE_DEPTH);
 #else
   (void)guest;
   (void)pressured;

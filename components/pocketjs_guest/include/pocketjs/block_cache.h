@@ -26,6 +26,13 @@ extern "C" {
 #ifndef BLOCK_CACHE_DEPTH
 #define BLOCK_CACHE_DEPTH 16
 #endif
+// Under native-heap pressure the cache keeps this many per class instead of
+// stopping: at most ~1.1 KB held instead of 4.4 KB, and in the host replay of
+// STRESS/DERBY 82%/89% of the full depth's hits (docs/perf/frame-breakdown.md
+// sec.9). Stopping it cost the JS turn 7-13% (sec.7).
+#ifndef BLOCK_CACHE_PRESSURE_DEPTH
+#define BLOCK_CACHE_PRESSURE_DEPTH 4
+#endif
 #define BLOCK_CACHE_MAX_SIZE 252  // largest class a lookup table covers (4 B steps)
 
 typedef struct {
@@ -38,6 +45,7 @@ typedef struct {
 typedef struct {
   const block_cache_backend_t *backend;
   bool enabled;
+  uint8_t depth;                                   // blocks kept per class, <= BLOCK_CACHE_DEPTH
   uint8_t class_of[BLOCK_CACHE_MAX_SIZE / 4 + 1];  // length/4 -> class+1, 0 = not cached
   uint16_t size[BLOCK_CACHE_CLASSES];
   uint8_t count[BLOCK_CACHE_CLASSES];
@@ -54,6 +62,10 @@ void block_cache_init(block_cache_t *cache, const block_cache_backend_t *backend
 // Disabling returns held blocks and routes subsequent calls to the backend.
 // Re-enabling starts empty. The caller retains any backend eligibility policy.
 void block_cache_set_enabled(block_cache_t *cache, bool enabled);
+
+// Blocks kept per class from now on (1..BLOCK_CACHE_DEPTH); lowering it
+// returns each class's excess to the backend at once.
+void block_cache_set_depth(block_cache_t *cache, unsigned depth);
 
 // `rounded`: the length the backend would give the request (the caller's
 // rounding, e.g. tlsf's 4 B / 12 B minimum). A miss, or a length not listed,
@@ -128,7 +140,7 @@ static inline __attribute__((always_inline)) bool block_cache_push(block_cache_t
                                                                    size_t length) {
   if (!cache->enabled) return false;
   const int c = block_cache_class(cache, length);
-  if (c < 0 || cache->count[c] >= BLOCK_CACHE_DEPTH) return false;
+  if (c < 0 || cache->count[c] >= cache->depth) return false;
   ((block_cache_link_t *)block)->next = cache->head[c];
   cache->head[c] = block;
   cache->count[c]++;

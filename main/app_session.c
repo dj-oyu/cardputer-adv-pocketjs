@@ -247,10 +247,11 @@ static void sample_memory_pressure(void) {
         largest=heap_caps_get_largest_free_block(caps);
     }
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
-    // Return cached blocks and stop retaining later frees for the whole native
-    // pressure episode, including recovery hysteresis. A one-time flush lets
-    // the next JS turn retain them again while RAM is still short. GUEST-only
-    // pressure is different: these blocks are outside the guest's accounting.
+    // Shrink the cached blocks to a small depth for the whole native pressure
+    // episode, including recovery hysteresis: stopping the cache outright cost
+    // the JS turn 7-13% (docs/perf/frame-breakdown.md sec.7), and a scene that
+    // dips under the threshold once stays there. GUEST-only pressure is
+    // different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
     pocketjs_guest_block_cache_set_pressure(guest,frame_bd_pressure_override(mask!=0));
     frame_bd_pressure(mask!=0,native,(uint32_t)free_bytes,(uint32_t)largest);

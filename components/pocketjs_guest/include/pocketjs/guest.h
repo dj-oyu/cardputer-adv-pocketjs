@@ -167,8 +167,10 @@ void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
  * one that created the guest. */
 void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
 
-/* Suspend small-block retention while native free/contiguous RAM is under
- * pressure; false permits reuse again after the host's recovery hysteresis.
+/* Shrink small-block retention to BLOCK_CACHE_PRESSURE_DEPTH per class while
+ * native free/contiguous RAM is under pressure (the excess goes back to the
+ * heap at once); false restores the full depth after the host's recovery
+ * hysteresis.
  * Owner-task only, and never enables a cache rejected at guest creation.
  * This does not change the guest's live allocation accounting or heap limit. */
 void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
