@@ -2680,6 +2680,33 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
                 icache_ab_window();
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+                /* What the guest holds by kind, every 8th PAINT window (~4 s at
+                 * 60 fps): the native heap's free bytes and the guest's own
+                 * malloc_size come from the same system heap, so this is what
+                 * a scene costs the pressure threshold. The walk allocates
+                 * nothing but takes ms, hence the rate. */
+                {
+                    static unsigned mu_win;
+                    if(guest && (mu_win++&7u)==0) {
+                        JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+                        JSMemoryUsage m;
+                        JS_ComputeMemoryUsage(rt,&m);
+                        const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+                        ESP_LOGI("app","FRAME_MU free=%u largest=%u malloc=%lld n=%lld atom=%lld/%lld "
+                                 "str=%lld/%lld obj=%lld/%lld prop=%lld/%lld shape=%lld/%lld "
+                                 "fn=%lld/%lld code=%lld arr=%lld fast=%lld/%lld bin=%lld/%lld",
+                                 (unsigned)heap_caps_get_free_size(caps),
+                                 (unsigned)heap_caps_get_largest_free_block(caps),
+                                 m.malloc_size,m.malloc_count,m.atom_count,m.atom_size,
+                                 m.str_count,m.str_size,m.obj_count,m.obj_size,
+                                 m.prop_count,m.prop_size,m.shape_count,m.shape_size,
+                                 m.js_func_count,m.js_func_size,m.js_func_code_size,
+                                 m.array_count,m.fast_array_count,m.fast_array_elements,
+                                 m.binary_object_count,m.binary_object_size);
+                    }
+                }
+#endif
                 /* What Shiki cost these frames (pocket_shiki_frame.c, docs/kasane/shiki-jit.md
                  * sec.9): draws and engine steps per frame, the engine (input
                  * conversion included) and the whole native draw, ms per frame. */
