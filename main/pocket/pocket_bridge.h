@@ -78,6 +78,11 @@ esp_err_t pocket_bridge_emit_namespace(uint8_t ns, const uint8_t *body, size_t l
 // Runs on the input task.
 bool pocket_bridge_usb(uint8_t byte);
 
+/* Bind before input tasks. Native D parsing survives guest teardown and remains
+ * reserved even when the diagnostic capability is disabled. */
+struct diagnostic_wire;
+void pocket_bridge_bind_diagnostic(struct diagnostic_wire *);
+
 // pocket.bridge.connect(). Pass to pocketjs_guest_quickjs_install_once().
 esp_err_t pocket_bridge_install(JSContext *ctx, void *user_data);
 

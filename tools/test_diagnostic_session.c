@@ -3,10 +3,12 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../main/ui/diagnostic_session.h"
+#include "../main/ui/diagnostic_control.h"
 #define ESP_OK 0
 static unsigned ksn_probe_owner;
 static diagnostic_session ksn_probe_session=DIAGNOSTIC_SESSION_INIT;
+static diagnostic_control native_diagnostic;
+static const uint8_t typed_id[16]={1};
 static const char *home_error;
 static unsigned home_phase;
 static struct {
@@ -65,6 +67,7 @@ static diagnostic_session_result pump(bool admitted){return diagnostic_session_p
 static void reset(void){
     /* Distinct fixture construction, never a firmware recovery operation. */
     ksn_probe_session=(diagnostic_session)DIAGNOSTIC_SESSION_INIT;
+    assert(diagnostic_control_init(&native_diagnostic,1,true,&ksn_probe_session));
     memset(&f,0,sizeof f);home_phase=0;
     running=modal=overlay=starting=guest=dormant=false;screen=0;ready=terminal=0;
 }
@@ -121,6 +124,48 @@ int main(void){
         reset();f.fail=failure;(void)diagnostic_command_request(&ksn_probe_session.command);
         dispatch();assert(terminal==1&&!ready&&f.borrow== (failure==1?0:failure==2||failure==4?2:3));
         unsigned used=f.used;dispatch();assert(terminal==2&&!ready&&f.used==used);
+    }
+    /* Execute the typed and manual priority block extracted from main.c,
+     * with its actual callbacks, admission expression and final-drain barrier. */
+    for(unsigned blocked=0;blocked<7;blocked++){
+        reset();
+        if(blocked==0)running=true;
+        if(blocked==1)screen=1;
+        if(blocked==2)modal=true;
+        if(blocked==3)overlay=true;
+        if(blocked==4)starting=true;
+        if(blocked==5)guest=true;
+        if(blocked==6)dormant=true;
+        assert(diagnostic_control_request(&native_diagnostic,1,typed_id).state==DC_PENDING);
+        dispatch();
+        diagnostic_control_snapshot st=diagnostic_control_status(&native_diagnostic,1,typed_id);
+        assert(st.state==DC_REFUSED&&st.flags==DC_NOT_STARTED&&!f.used&&!ready);
+        running=modal=overlay=starting=guest=dormant=false;screen=0;
+        dispatch();assert(!f.used); /* No replay after the admission refusal. */
+    }
+    for(unsigned cancel=0;cancel<2;cancel++){
+        reset();f.borrow=1;f.buffer[0]=1;
+        assert(diagnostic_control_request(&native_diagnostic,1,typed_id).state==DC_PENDING);
+        if(cancel)assert(diagnostic_control_cancel(&native_diagnostic,1,typed_id).state==DC_CANCEL_REQUESTED);
+        dispatch();
+        diagnostic_control_snapshot st=diagnostic_control_status(&native_diagnostic,1,typed_id);
+        assert(st.state==(cancel?DC_CANCELLED:DC_COMPLETED));
+        assert(st.flags==(cancel?0x3e:0x1f));
+        assert(!strcmp(f.events,cancel?"ADRBL":"ADWBRFL"));
+        assert(f.releases==1&&!f.borrow&&ready==1&&!terminal);
+        unsigned used=f.used;
+        (void)diagnostic_control_request(&native_diagnostic,1,typed_id);
+        dispatch();assert(f.used==used&&ready==1);
+    }
+    for(unsigned failure=1;failure<=5;failure++){
+        reset();f.fail=failure;
+        (void)diagnostic_control_request(&native_diagnostic,1,typed_id);
+        dispatch();
+        diagnostic_control_snapshot st=diagnostic_control_status(&native_diagnostic,1,typed_id);
+        assert(st.state==DC_QUARANTINED&&!ready&&terminal==1&&!f.releases);
+        assert(ksn_probe_session.lifecycle.owner==&ksn_probe_owner);
+        unsigned used=f.used;dispatch();assert(f.used==used&&terminal==2);
+        assert(diagnostic_control_cancel(&native_diagnostic,1,typed_id).state==DC_QUARANTINED);
     }
     puts("diagnostic firmware callback/session/UI-dispatch integration: PASS");return 0;
 }

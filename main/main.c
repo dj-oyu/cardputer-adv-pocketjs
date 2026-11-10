@@ -37,6 +37,8 @@
 #endif
 #include "pocket_bridge.h"
 #include "app_control.h"
+#include "ui/diagnostic_control.h"
+#include "ui/diagnostic_wire.h"
 #include "esp_app_desc.h"
 #include "esp_random.h"
 #include "pocket_text.h"
@@ -57,8 +59,11 @@
 #include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
+#include <stdlib.h>
 #include "hal/fpu_latency.h"
 static atomic_bool fpu_probe_requested;
+static diagnostic_control native_diagnostic;
+static diagnostic_wire native_diagnostic_wire;
 #ifdef KASANE_PROC_DEVICE_PROBE
 static atomic_bool proc_probe_requested;
 void ksn_proc_device_probe_run(void);
@@ -242,7 +247,11 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // whichever build is being optimised -- which is the shipping one.
     if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
 #ifdef CONFIG_KSN_DEVICE_PROBE
-    if(c=='~') { (void)diagnostic_command_request(&ksn_probe_session.command); return false; }
+    if(c=='~') {
+        if(!diagnostic_control_busy(&native_diagnostic))
+            (void)diagnostic_command_request(&ksn_probe_session.command);
+        return false;
+    }
     if(c=='N'||c=='O'||c=='Z'){atomic_store(&system_probe_requested,c);return false;}
 #endif
     if(c=='c') { motion_recenter(); return false; }
@@ -379,6 +388,7 @@ static void input_task(void *arg) {
             // interrupted rather than waited out. Everything else is ordered.
             if(k.force_stop) {
 #ifdef CONFIG_KSN_DEVICE_PROBE
+                diagnostic_control_local_cancel(&native_diagnostic);
                 (void)diagnostic_command_cancel(&ksn_probe_session.command);
 #endif
                 atomic_store(&stop,true); app_request_stop();
@@ -1076,6 +1086,11 @@ static bool native_stop(void) {
 static bool native_emit(const uint8_t *body,size_t size) {
     return pocket_bridge_emit_namespace('C',body,size)==ESP_OK;
 }
+/* Input-task D responses are at most80 bytes; do not use the guest encoder's
+ * maximum-size1KiB stack buffer or route them through a blocked UI queue. */
+static bool native_diagnostic_emit(void *ctx,const uint8_t *frame,size_t size){
+    (void)ctx;return usb_console_frame(frame,size)==ESP_OK;
+}
 static uint64_t native_clock_ms(void) { return (uint64_t)esp_timer_get_time()/1000; }
 static void native_fingerprint(uint8_t hash[32],char version[48]) {
     const esp_app_desc_t *description=esp_app_get_description();
@@ -1123,6 +1138,7 @@ static void ui_task(void *arg) {
         /* No UI/guest/other diagnostic may reuse uncertain display storage.
          * Cancellation is deferred, never an I/O abort or quarantine reset. */
         if(atomic_load(&ksn_probe_session.command.state)==DIAG_CMD_TERMINAL){
+            (void)diagnostic_control_pump(&native_diagnostic,&ksn_probe_ops,false);
             vTaskDelay(pdMS_TO_TICKS(33));
             continue;
         }
@@ -1139,6 +1155,16 @@ static void ui_task(void *arg) {
         }
 #endif
 #ifdef CONFIG_KSN_DEVICE_PROBE
+        bool diagnostic_admitted=!running&&screen==SCREEN_HOME&&!home_modal()&&
+            !overlay_running()&&!overlay_starting()&&!app_guest_present()&&!app_dormant_id()[0];
+        diagnostic_control_owner_result typed_result=diagnostic_control_pump(
+            &native_diagnostic,&ksn_probe_ops,diagnostic_admitted);
+        if(typed_result==DC_OWNER_TERMINAL){
+            ESP_LOGE("shell","DIAGNOSTIC_QUARANTINED");continue;
+        }
+        if(typed_result==DC_OWNER_SAFE_END)ESP_LOGI("shell","HOME_READY");
+        /* Manual ~ remains a local request, never the broker transport. */
+        if(!diagnostic_control_busy(&native_diagnostic)){
         diagnostic_session_result probe_result=diagnostic_session_pump(
             &ksn_probe_session,&ksn_probe_ops,
             !running&&screen==SCREEN_HOME&&!home_modal()&&!overlay_running()&&
@@ -1149,6 +1175,7 @@ static void ui_task(void *arg) {
         }
         if(probe_result==DIAG_SESSION_COMPLETE||probe_result==DIAG_SESSION_CANCELLED)
             ESP_LOGI("shell","HOME_READY");
+        }
 #endif
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&fpu_probe_requested,false)){
             fpu_latency_run();
@@ -1182,7 +1209,8 @@ static void ui_task(void *arg) {
 #ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
-            (void)diagnostic_command_request(&ksn_probe_session.command);
+            if(!diagnostic_control_busy(&native_diagnostic))
+                (void)diagnostic_command_request(&ksn_probe_session.command);
             continue;
         }
 #endif
@@ -1592,7 +1620,16 @@ void app_main(void) {
         .clock_ms=native_clock_ms,
     };
     uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
+    if(!boot_id)boot_id=1;
     app_control_init(boot_id,&native_hooks);
+#ifdef CONFIG_KSN_DEVICE_PROBE
+    bool diagnostic_initialized=diagnostic_control_init(&native_diagnostic,boot_id,true,&ksn_probe_session);
+#else
+    bool diagnostic_initialized=diagnostic_control_init(&native_diagnostic,boot_id,false,NULL);
+#endif
+    if(!diagnostic_initialized)abort();
+    diagnostic_wire_init(&native_diagnostic_wire,&native_diagnostic,native_diagnostic_emit,NULL);
+    pocket_bridge_bind_diagnostic(&native_diagnostic_wire);
     /* The system's slow tasks take RTC fast memory (8 KB, APB clock) at boot so
      * the JIT's code can never land there: 3x slower (shiki-jit.md sec.15).
      * input 2 KB here, wifi 3 KB and timesync 2 KB in their own inits. */

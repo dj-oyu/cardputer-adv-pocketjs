@@ -7,7 +7,7 @@ main=(root/'main/main.c').read_text()
 a=main.index('static void *ksn_probe_acquire(')
 b=main.index('static const diagnostic_lifecycle_ops ksn_probe_ops=',a)
 (out/'diagnostic_main_callbacks.inc').write_text(main[a:b])
-a=main.index('        diagnostic_session_result probe_result=diagnostic_session_pump(')
+a=main.index('        bool diagnostic_admitted=')
 b=main.index('\n#endif',a)
 (out/'diagnostic_main_dispatch.inc').write_text(main[a:b]+'\n')
 shell=(root/'main/ui/shell.c').read_text()
@@ -24,6 +24,6 @@ assert 'diagnostic_command_cancel(&ksn_probe_session.command)' in main
 assert '!overlay_starting()&&!app_guest_present()&&!app_dormant_id()[0]' in main
 flags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror']
 if '--sanitize' in sys.argv:flags+=['-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie']
-cmd=['cc',*flags,'-I'+str(out),str(root/'tools/test_diagnostic_session.c'),'-o',str(out/'test')]
+cmd=['cc',*flags,'-I'+str(out),str(root/'tools/test_diagnostic_session.c'),str(root/'main/ui/diagnostic_control.c'),'-o',str(out/'test')]
 print(' '.join(cmd),flush=True);subprocess.run(cmd,check=True)
 subprocess.run([str(out/'test')],check=True,env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',UBSAN_OPTIONS='halt_on_error=1'))
