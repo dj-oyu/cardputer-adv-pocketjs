@@ -1015,7 +1015,7 @@ esp_err_t board_present_sync(int y, int rows, uint16_t *pixels) {
     return e;
 }
 
-#ifdef KASANE_DMA_OVERLAP
+#if defined(KASANE_DMA_OVERLAP) || defined(CONFIG_KSN_DEVICE_PROBE)
 esp_err_t board_present_finish(void) {
     esp_err_t e;
     /* portMAX_DELAY normally cannot time out. If it does, the driver still
@@ -1024,6 +1024,8 @@ esp_err_t board_present_finish(void) {
     if(e!=ESP_OK)next_row=-1;
     return e;
 }
+#endif
+#ifdef KASANE_DMA_OVERLAP
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     // Depth 2 waits for a free slot inside board_present_rect instead.

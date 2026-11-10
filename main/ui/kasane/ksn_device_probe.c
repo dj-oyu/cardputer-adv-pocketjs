@@ -227,12 +227,12 @@ static ksn_result view_demo(void){
     return KSN_OK;
 }
 
-void ksn_device_probe_run(void){
+bool ksn_device_probe_run(void){
     const char *tag="KSN_PROBE";
     failures=0;
     ESP_LOGI(tag,"START core=%u frame_command=%u",(unsigned)KSN_CORE_RESERVED_BYTES,(unsigned)sizeof(ksn_frame_command));
     int core_result=ksn_probe_core_tests(),review_result=ksn_probe_review_tests();
-    if(core_result||review_result){ESP_LOGE(tag,"FAIL regression core=%d review=%d",core_result,review_result);return;}
+    if(core_result||review_result){ESP_LOGE(tag,"FAIL regression core=%d review=%d",core_result,review_result);return false;}
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_cache_bind(&probe_cache,&probe_cache_commands,&probe_cache_text);
     ksn_client app=ksn_core_client(&probe_core,KSN_APP),system=ksn_core_client(&probe_core,KSN_SYSTEM);
@@ -333,8 +333,9 @@ void ksn_device_probe_run(void){
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelay(pdMS_TO_TICKS(5000));
-    return;
+    return true;
 fail:
     ESP_LOGE(tag,"FAIL display/transaction");
+    return false;
 }
 #endif

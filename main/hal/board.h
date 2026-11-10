@@ -57,11 +57,13 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
 // A transfer failure invalidates the panel write position.
 esp_err_t board_present_sync(int y, int rows, uint16_t *pixels);
 esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels);
-#ifdef KASANE_DMA_OVERLAP
+#if defined(KASANE_DMA_OVERLAP) || defined(CONFIG_KSN_DEVICE_PROBE)
 // UI owner only. Copies pixels before return; TX/descriptor remain board-owned
 // until finish. Never acknowledge a frame until finish succeeds. A non-timeout
 // driver error without descriptor return quarantines TX until a later finish.
+#ifdef KASANE_DMA_OVERLAP
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
+#endif
 esp_err_t board_present_finish(void);
 #endif
 // Measurement build (docs/platform/lcd-dma-driver.md, S0b): two panel buffers

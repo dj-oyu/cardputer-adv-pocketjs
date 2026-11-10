@@ -76,9 +76,10 @@ static atomic_bool reloc_requested;
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
 #include "ui/kasane/ksn_runtime.h"
-static atomic_bool ksn_probe_requested;
+#include "ui/diagnostic_session.h"
+static diagnostic_session ksn_probe_session=DIAGNOSTIC_SESSION_INIT;
 static atomic_int system_probe_requested;
-void ksn_device_probe_run(void);
+bool ksn_device_probe_run(void);
 static void system_probe(int command){
     const uint32_t owner=UINT32_MAX;
     sys_notify *notices=sys_device_notifications();sys_timer *timers=sys_device_timers();
@@ -241,7 +242,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // whichever build is being optimised -- which is the shipping one.
     if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
 #ifdef CONFIG_KSN_DEVICE_PROBE
-    if(c=='~') { atomic_store(&ksn_probe_requested,true); return false; }
+    if(c=='~') { (void)diagnostic_command_request(&ksn_probe_session.command); return false; }
     if(c=='N'||c=='O'||c=='Z'){atomic_store(&system_probe_requested,c);return false;}
 #endif
     if(c=='c') { motion_recenter(); return false; }
@@ -376,7 +377,12 @@ static void input_task(void *arg) {
             // Only the force stop jumps the queue, and it does so because the
             // drawing task may be inside a guest call that has to be
             // interrupted rather than waited out. Everything else is ordered.
-            if(k.force_stop) { atomic_store(&stop,true); app_request_stop(); }
+            if(k.force_stop) {
+#ifdef CONFIG_KSN_DEVICE_PROBE
+                (void)diagnostic_command_cancel(&ksn_probe_session.command);
+#endif
+                atomic_store(&stop,true); app_request_stop();
+            }
             else xQueueSend(keys,&k,0);
         }
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -1079,6 +1085,29 @@ static void native_fingerprint(uint8_t hash[32],char version[48]) {
     memcpy(version,description->version,n);version[n]=0;
 }
 
+#ifdef CONFIG_KSN_DEVICE_PROBE
+/* The static probe owns its scene storage for the firmware lifetime. This
+ * token reserves its use until both probe and home output have completed. */
+static unsigned ksn_probe_owner;
+static void *ksn_probe_acquire(void *ctx){(void)ctx;return &ksn_probe_owner;}
+static bool ksn_probe_drain(void *ctx){
+    (void)ctx;return board_present_finish()==ESP_OK;
+}
+static bool ksn_probe_work(void *ctx,void *owner){
+    (void)ctx;(void)owner;return ksn_device_probe_run()&&board_present_finish()==ESP_OK;
+}
+static bool ksn_probe_restore(void *ctx){
+    (void)ctx;
+    return shell_draw_checked(home_error,home_phase++)==ESP_OK&&
+           board_present_finish()==ESP_OK;
+}
+static void ksn_probe_release(void *ctx,void *owner){(void)ctx;(void)owner;}
+static const diagnostic_lifecycle_ops ksn_probe_ops={
+    .acquire=ksn_probe_acquire,.drain=ksn_probe_drain,.work=ksn_probe_work,
+    .restore=ksn_probe_restore,.release=ksn_probe_release
+};
+#endif
+
 static void ui_task(void *arg) {
     (void)arg;
     // Before anything can post: every producer of a completion runs on a task
@@ -1090,6 +1119,14 @@ static void ui_task(void *arg) {
     int64_t previous_overlay_frame_started=0;
 #endif
     while(1) {
+#ifdef CONFIG_KSN_DEVICE_PROBE
+        /* No UI/guest/other diagnostic may reuse uncertain display storage.
+         * Cancellation is deferred, never an I/O abort or quarantine reset. */
+        if(atomic_load(&ksn_probe_session.command.state)==DIAG_CMD_TERMINAL){
+            vTaskDelay(pdMS_TO_TICKS(33));
+            continue;
+        }
+#endif
         native_observe();
         app_control_pump((uint64_t)esp_timer_get_time()/1000);
         /* App teardown can time out while an SD read is in progress. Reap its
@@ -1102,10 +1139,16 @@ static void ui_task(void *arg) {
         }
 #endif
 #ifdef CONFIG_KSN_DEVICE_PROBE
-        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ksn_probe_requested,false)){
-            ksn_device_probe_run();
-            ESP_LOGI("shell","HOME_READY");
+        diagnostic_session_result probe_result=diagnostic_session_pump(
+            &ksn_probe_session,&ksn_probe_ops,
+            !running&&screen==SCREEN_HOME&&!home_modal()&&!overlay_running()&&
+            !overlay_starting()&&!app_guest_present()&&!app_dormant_id()[0]);
+        if(probe_result==DIAG_SESSION_TERMINAL){
+            ESP_LOGE("shell","DIAGNOSTIC_QUARANTINED");
+            continue;
         }
+        if(probe_result==DIAG_SESSION_COMPLETE||probe_result==DIAG_SESSION_CANCELLED)
+            ESP_LOGI("shell","HOME_READY");
 #endif
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&fpu_probe_requested,false)){
             fpu_latency_run();
@@ -1139,7 +1182,7 @@ static void ui_task(void *arg) {
 #ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
-            atomic_store(&ksn_probe_requested,true);
+            (void)diagnostic_command_request(&ksn_probe_session.command);
             continue;
         }
 #endif
