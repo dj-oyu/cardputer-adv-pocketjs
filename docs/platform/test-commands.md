@@ -32,6 +32,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keystate_test.sh"   # 物理キーの押下集合（keystate）を1書き手・2読み手でASanとTSanに（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-pocket-input"   # pocket.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keytest_app_test.sh && /tmp/test-keytest-app"   # KEY TEST（apps/keytest）を実物のQuickJS・pocket.kasane・input.keysで、同時押し・タップ・FIFOあふれの台本（WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/motion_shim -Itools/hostshim -Ithird_party/bmi270 -Imain/hal tools/test_motion_demand.c -lm -o /tmp/tmd && /tmp/tmd"   # IMUの読み手の需要: 読み手が無ければI2Cを読まない・ホームの期限・休止明けに古いサンプルを出さない・gyroの要求（WSLのみ、third_party/bmi270 要）
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/test_frame_lint.py         # frame_lint の走査器を既製の objdump の文で検査
 python tools/frame_lint.py build_api/esp-idf/main --far-only   # 1,020 B より奥のスタックの読み書き（ビルドでも自動で報告、docs/perf/o2-machine-code.md §5）
