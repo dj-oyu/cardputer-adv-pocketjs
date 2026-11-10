@@ -39,8 +39,6 @@
 #endif
 #ifdef KASANE_PROC_DEVICE_PROBE
 #include "pocket_grid.h"
-#include "pocket_video.h"
-#include "sound.h"
 #include "ui/kasane/ksn_proc_grid_resize.h"
 #endif
 #ifdef POCKET_KEYTEST
@@ -94,6 +92,13 @@ static int64_t hp_eval_t0;
 #include "ksn_font.h"
 #include "icache_ab.h"
 #include "frame_bd.h"
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+/* The P0 eligibility mask (frame_bd_eligible()). */
+#include "pocket_pixel.h"
+#include "pocket_grid.h"
+#include "pocket_video.h"
+#include "sound.h"
+#endif
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
