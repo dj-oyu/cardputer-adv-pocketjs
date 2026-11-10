@@ -173,6 +173,16 @@ menu "Pocket VM (diagnostics)"
             rest of the UI loop and the wait, plus the worst period and how
             many periods ran past 16.7 and 33.3 ms.
 
+    config POCKET_FRAME_BD_PACE_AB
+        bool "Probe: rotate the display pacing rule per FRAME_BD window"
+        depends on POCKET_FRAME_BREAKDOWN
+        default n
+        help
+            Measurement only (docs/perf/frame-breakdown.md sec.6). Cycles the
+            pacing between the shipping rule, no one-tick yield after an
+            overrun (unless the UI core's idle task starved for 500 ms), and an
+            absolute microsecond deadline, one 60-frame window each.
+
     config POCKET_ICACHE_AB
         bool "Probe: I-cache auto-preload on/off, rotated by paint window"
         default n

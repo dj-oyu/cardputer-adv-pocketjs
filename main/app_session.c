@@ -246,6 +246,7 @@ static void sample_memory_pressure(void) {
     // pressure is different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
     pocketjs_guest_block_cache_set_pressure(guest,mask!=0);
+    frame_bd_pressure(mask!=0);
 }
 static atomic_bool stop_requested;
 static int64_t deadline;
@@ -2645,6 +2646,7 @@ static esp_err_t present_frame(void) {
                              (unsigned)span_cy,painted);
                 }
 #endif
+                const int64_t fbd_log0=esp_timer_get_time();
                 ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
                          "bytes=%u bands=%u band_runs=%u band_mask=0x%05x prof=%d "
                          "fill_n=%u fill_cy=%u span_n=%u span_cy=%u tile_n=%u tile_cy=%u "
@@ -2704,6 +2706,7 @@ static esp_err_t present_frame(void) {
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif
                 }
+                frame_bd_log((uint32_t)(esp_timer_get_time()-fbd_log0));
 #if defined(POCKET_PROC_HSPAN_AB)&&POCKET_PROC_HSPAN_AB
                 /* Same-binary A/B of the band renderer's horizontal-line fill
                  * (g_ksn_proc_hspan, ksn_shiki_frame.h): the window just printed

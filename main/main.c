@@ -1019,6 +1019,11 @@ static void paint(const screen_ops_t *s) {
 // previous frame()'s turn finished waiting. Continuation turns run inside it
 // without restarting it; see the rule at the bottom of ui_task().
 static int64_t period_began;
+// The frame_bd probe's DEADLINE pacing (frame_bd.h); 0 when not in use.
+static int64_t pace_deadline_us;
+#ifndef VM_DISPLAY_PERIOD_US
+#define VM_DISPLAY_PERIOD_US ((int64_t)VM_DISPLAY_PERIOD_MS*1000)
+#endif
 
 static bool ui_key_receive(keystroke_t *stroke) {
     bool have=xQueueReceive(keys,stroke,0)==pdTRUE;
@@ -1454,7 +1459,23 @@ static void ui_task(void *arg) {
                     vTaskDelay(pdMS_TO_TICKS(floor_ms));
                     since+=floor_ms;
                 }
-                rest = since<VM_DISPLAY_PERIOD_MS ? VM_DISPLAY_PERIOD_MS-since : 0;
+                // OLD unless the frame_bd probe rotates the pacing rule.
+                const unsigned pace=frame_bd_pace_mode();
+                if(pace==FRAME_BD_PACE_DEADLINE) {
+                    // Absolute deadline in us: a period of 16.667 ms is not a
+                    // whole number of ticks, and a late frame's debt is paid
+                    // back by the next ones, capped at one period.
+                    const int64_t now=esp_timer_get_time();
+                    if(!pace_deadline_us) pace_deadline_us=period_began;
+                    pace_deadline_us+=VM_DISPLAY_PERIOD_US;
+                    if(pace_deadline_us<now-VM_DISPLAY_PERIOD_US)
+                        pace_deadline_us=now-VM_DISPLAY_PERIOD_US;
+                    const int64_t left=pace_deadline_us-now;
+                    rest = left>=500 ? (unsigned)((left+500)/1000) : 0;
+                } else {
+                    pace_deadline_us=0;
+                    rest = since<VM_DISPLAY_PERIOD_MS ? VM_DISPLAY_PERIOD_MS-since : 0;
+                }
                 // A completion posted by another task or an ISR cuts the frame
                 // cap short instead of waiting out the period; the measured
                 // (device) cost it removes is the "up to one frame period"
@@ -1473,7 +1494,10 @@ static void ui_task(void *arg) {
                     // frame, docs/kasane/shiki.md sec.5.11). One tick, as the
                     // continuation branch already owes; only frames over the
                     // period pay it.
-                    vTaskDelay(1);
+                    if(pace==FRAME_BD_PACE_OLD || frame_bd_idle_starved()) {
+                        vTaskDelay(1);
+                        frame_bd_yielded();
+                    }
                 }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
