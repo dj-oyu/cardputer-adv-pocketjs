@@ -28,10 +28,35 @@
 static ksn_core probe_core;
 static ksn_core_command_block probe_commands[2];
 static ksn_core_text_block probe_text[2];
-static ksn_cache probe_cache;
-static ksn_cache_command_block probe_cache_commands;
-static ksn_cache_text_block probe_cache_text;
-static ksn_frost probe_frost;
+/* One UI-owned reservation covers both phases. Cache commands are copied
+ * into the separate core banks; the view host which borrows this cache is
+ * local to view_demo. No cache user survives its synchronous final present.
+ * Glass/stress then use frost; text/image only rebind the separate core.
+ * Keep this storage reserved on failure, including uncertain output borrows.
+ * Re-entry starts with cache_bind, which initializes the entire cached arm. */
+typedef union {
+    struct {
+        ksn_cache cache;
+        ksn_cache_command_block commands;
+        ksn_cache_text_block text;
+    } cached;
+    ksn_frost frost;
+} probe_workspace;
+static probe_workspace probe_workspace_storage;
+_Static_assert(sizeof(probe_workspace)==sizeof(((probe_workspace *)0)->cached),
+               "cache and frost phases must share fixed storage");
+#define probe_cache (probe_workspace_storage.cached.cache)
+#define probe_cache_commands (probe_workspace_storage.cached.commands)
+#define probe_cache_text (probe_workspace_storage.cached.text)
+#define probe_frost (probe_workspace_storage.frost)
+
+static bool probe_begin_frost(void){
+    /* A failed completion cannot authorize overwriting the previous phase.
+     * The outer lifecycle retains the whole reservation and quarantines it. */
+    if(board_present_finish()!=ESP_OK)return false;
+    ksn_frost_init(&probe_frost);
+    return true;
+}
 ksn_result ksn_stress_probe_run(ksn_frost *frost);
 static uint16_t glass_pattern(int x,int y){
     x%=120;
@@ -325,6 +350,7 @@ bool ksn_device_probe_run(void){
        ksn_modal_route(&modal,&probe_core,false)!=KSN_INPUT_APP||modal.focus!=42)goto fail;
     ESP_LOGI(tag,"COMPOSITION group_alpha=128 modal=open-close focus=42 PASS");
     if(view_demo()!=KSN_OK)goto fail;
+    if(!probe_begin_frost())goto fail;
     if(glass_demo()!=KSN_OK)goto fail;
     if(text_demo()!=KSN_OK)goto fail;
     if(image_demo()!=KSN_OK)goto fail;
