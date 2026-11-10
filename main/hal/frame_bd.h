@@ -38,6 +38,9 @@ void frame_bd_pressure(bool on, bool native, uint32_t free_bytes, uint32_t large
 // work, period_us the whole period including its wait.
 void frame_bd_period(uint32_t held_us, uint32_t period_us);
 unsigned frame_bd_pace_mode(void);
+// P1 (POCKET_FRAME_BD_DISP_AB): whether this window presents on the display
+// task; otherwise as CONFIG_POCKET_DISP_TASK says.
+bool frame_bd_disp_on_task(void);
 // The block-cache pressure sample_memory_pressure() should apply: `on` as
 // measured, or forced on/off by POCKET_FRAME_BD_PRESS_AB.
 bool frame_bd_pressure_override(bool on);
@@ -55,6 +58,7 @@ static inline void frame_bd_log(uint32_t us) {(void)us;}
 static inline void frame_bd_pressure(bool on, bool n, uint32_t f, uint32_t l) {(void)on;(void)n;(void)f;(void)l;}
 static inline void frame_bd_period(uint32_t h, uint32_t p) {(void)h;(void)p;}
 static inline unsigned frame_bd_pace_mode(void) {return FRAME_BD_PACE_NOYIELD;}
+static inline bool frame_bd_disp_on_task(void) {return true;}
 static inline bool frame_bd_pressure_override(bool on) {return on;}
 static inline void frame_bd_yielded(void) {}
 #endif

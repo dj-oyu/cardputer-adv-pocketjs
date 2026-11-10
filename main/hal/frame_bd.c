@@ -14,6 +14,7 @@
 #ifdef CONFIG_POCKET_FRAME_BREAKDOWN
 #include "esp_log.h"
 #include "usb_console.h"
+#include "disp.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -36,6 +37,8 @@ static unsigned mode=FRAME_BD_PACE_OLD;
 static unsigned mode=FRAME_BD_PACE_NOYIELD;
 #endif
 static unsigned window,press_mode,log_whole=1;
+static bool disp_task_on=true;
+bool frame_bd_disp_on_task(void){return disp_task_on;}
 /* P0: the turn's start, its first join point (0: none yet), the window's
  * sums, turns with no join point, joins per site, ineligible reasons. */
 static int64_t turn_t0,turn_join;
@@ -120,12 +123,13 @@ void frame_bd_period(uint32_t held,uint32_t period){
     stack_min=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
     ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
              "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u "
-             "heap_free_min=%u heap_largest_min=%u",
+             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u",
              window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
              (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
              (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
              (unsigned)why_n[2],(unsigned)why_n[3],(unsigned)why_n[4],(unsigned)why_n[5],
-             (unsigned)stack_min,(unsigned)free_min,(unsigned)largest_min);
+             (unsigned)stack_min,(unsigned)free_min,(unsigned)largest_min,
+             disp_task_on?"task":"inline",(unsigned)disp_stack_free());
     free_min=largest_min=UINT32_MAX;
     s_pre=s_post=0;turns=no_join=presents=eligible=0;
     for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;
@@ -137,6 +141,9 @@ void frame_bd_period(uint32_t held,uint32_t period){
     window++;
 #ifdef CONFIG_POCKET_FRAME_BD_PACE_AB
     mode=(mode+1u)%NMODES;
+#endif
+#ifdef CONFIG_POCKET_FRAME_BD_DISP_AB
+    disp_task_on=!disp_task_on;
 #endif
 #ifdef CONFIG_POCKET_FRAME_BD_PRESS_AB
     press_mode=(press_mode+1u)%3u;

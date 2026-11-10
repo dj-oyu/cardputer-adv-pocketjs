@@ -92,6 +92,7 @@ static int64_t hp_eval_t0;
 #include "ksn_font.h"
 #include "icache_ab.h"
 #include "frame_bd.h"
+#include "disp.h"
 #ifdef CONFIG_POCKET_FRAME_BREAKDOWN
 /* The P0 eligibility mask (frame_bd_eligible()). */
 #include "pocket_pixel.h"
@@ -2530,7 +2531,14 @@ void app_vm_back_selftest(void) {
 // turn has no frame() of its own but still has a picture to show -- whatever
 // its jobs submitted -- and a display frozen for the length of a long drain
 // would be a visible regression the level does not need to cause.
+static esp_err_t present_frame_body(void);
+// P1 of docs/perf/two-core-pipeline.md: the present may run on the display
+// task (disp.h), the UI task waiting for it. A capture prints its PIX rows
+// from inside the present, so it stays here.
 static esp_err_t present_frame(void) {
+    return disp_run(present_frame_body,frame_bd_disp_on_task()&&!board_capture_active());
+}
+static esp_err_t present_frame_body(void) {
     last_present_us=esp_timer_get_time();
     {
 #ifdef KASANE_P2_REPAIR_PROBE

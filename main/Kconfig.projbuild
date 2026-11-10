@@ -163,6 +163,26 @@ menu "Pocket VM (diagnostics)"
             Build it in a directory of its own with
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
 
+    config POCKET_DISP_TASK
+        bool "Display task: present frames from a task of its own (two-core P1)"
+        default n
+        help
+            docs/perf/two-core-pipeline.md, stage P1. present_frame() runs on a
+            pinned task while the UI task waits for it, so nothing overlaps
+            yet. With POCKET_FRAME_BD_DISP_AB the probe alternates it with the
+            inline path every 60-frame window.
+
+    config POCKET_DISP_CORE
+        int "Display task core"
+        depends on POCKET_DISP_TASK
+        range 0 1
+        default 0
+
+    config POCKET_DISP_STACK
+        int "Display task stack (bytes)"
+        depends on POCKET_DISP_TASK
+        default 6144
+
     config POCKET_FRAME_BREAKDOWN
         bool "Probe: per-frame breakdown of a guest frame (JS/render/send/other/wait)"
         default n
@@ -190,6 +210,13 @@ menu "Pocket VM (diagnostics)"
         help
             Measurement only (docs/perf/frame-breakdown.md sec.7). Flips
             usb_console_log_whole() so max_log compares the two paths.
+
+    config POCKET_FRAME_BD_DISP_AB
+        bool "Probe: alternate inline and display-task presents per FRAME_BD window"
+        depends on POCKET_FRAME_BREAKDOWN && POCKET_DISP_TASK
+        default n
+        help
+            Measurement only (docs/perf/two-core-pipeline.md sec.5, P1).
 
     config POCKET_FRAME_BD_PACE_AB
         bool "Probe: rotate the display pacing rule per FRAME_BD window"

@@ -1,5 +1,6 @@
 #include "board.h"
 #include "frame_bd.h"
+#include "disp.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_freertos_hooks.h"
 #include "shell.h"
@@ -1111,6 +1112,7 @@ static void ui_task(void *arg) {
     // this one starts, or on an interrupt armed from it.
     vm_wake_bind();
     ui_idle_watch();
+    ESP_ERROR_CHECK(disp_init());
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
 #ifdef KASANE_P0_PROBE
