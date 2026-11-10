@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+#include <pthread.h>
 #include "app_control.h"
 #include "pocket_wire.h"
 #include <assert.h>
@@ -131,6 +133,69 @@ static void open_session(void) {
     pocket_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);
     assert(result()==AC_OK && state()==AC_READY && next()==1);
 }
+
+static diagnostic_control diag;
+static diagnostic_session diag_session=DIAGNOSTIC_SESSION_INIT;
+static diagnostic_wire diag_wire;
+static pthread_barrier_t diag_barrier;
+static unsigned diag_work,diag_restore,diag_release;
+static bool diag_raw_emit(void *ctx,const uint8_t *p,size_t n){(void)ctx;return usb_console_frame(p,n)==ESP_OK;}
+static void diag_send(const char *s){
+    incoming_size=strlen(s);assert(incoming_size<=sizeof incoming);
+    memcpy(incoming,s,incoming_size);incoming_at=1;
+    assert(pocket_bridge_usb(incoming[0]));assert(incoming_at==incoming_size);
+    assert(emitted_size<=80);emitted[emitted_size]=0;
+}
+static void diag_wait(void){int e=pthread_barrier_wait(&diag_barrier);assert(e==0||e==PTHREAD_BARRIER_SERIAL_THREAD);}
+static void *diag_acquire(void *ctx){return ctx;}
+static bool diag_drain(void *ctx){(void)ctx;return true;}
+static bool diag_body(void *ctx,void *owner){assert(ctx==owner);diag_work++;diag_wait();diag_wait();return true;}
+static bool diag_home(void *ctx){(void)ctx;diag_restore++;return true;}
+static void diag_free(void *ctx,void *owner){assert(ctx==owner);diag_release++;}
+static void *diag_owner(void *arg){
+    (void)arg;diagnostic_lifecycle_ops ops={&diag,diag_acquire,diag_drain,diag_body,diag_home,diag_free};
+    assert(diagnostic_control_pump(&diag,&ops,true)==DC_OWNER_SAFE_END);return NULL;
+}
+static void diagnostic_transport_tests(void){
+    /* No UI/control pump is involved in D replies, even during live work. */
+    assert(diagnostic_control_init(&diag,UINT64_C(0x123456789abcdef0),false,NULL));
+    diagnostic_wire_init(&diag_wire,&diag,diag_raw_emit,NULL);pocket_bridge_bind_diagnostic(&diag_wire);
+    diag_send("\x1d" "D1 STATUS 00000000000000000000000000000000 0000000000000000\n");
+    assert(strstr((char *)emitted,"REFUSED 00 123456789abcdef0 0"));
+    diag_send("\x1d" "D1 REQUEST 11111111111111111111111111111111 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"REFUSED 20")&&!atomic_load(&diag.used));
+    unsigned char malformed[]={0x1d,'D','2',' ','q',27,'\n'};
+    for(unsigned i=0;i<sizeof malformed;i++)assert(pocket_bridge_usb(malformed[i]));
+    assert(!pocket_bridge_usb('q')&&!pocket_bridge_usb(27));
+    assert(pocket_bridge_usb(0x1d));assert(pocket_bridge_usb('D'));
+    for(unsigned i=0;i<1000;i++)assert(pocket_bridge_usb('q'));
+    assert(pocket_bridge_usb(27)&&pocket_bridge_usb('\n'));
+    assert(!pocket_bridge_usb('q'));
+    assert(pocket_bridge_usb(0x1d)&&pocket_bridge_usb('D')&&pocket_bridge_usb('1'));
+    /* New GS resynchronizes a truncated D frame into a complete D frame. */
+    diag_send("\x1d" "D1 STATUS 00000000000000000000000000000000 0000000000000000\n");
+    assert(strstr((char *)emitted,"REFUSED 00"));
+    assert(diagnostic_control_init(&diag,UINT64_C(0x123456789abcdef0),true,&diag_session));
+    diag_send("\x1d" "D1 REQUEST 11111111111111111111111111111111 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"PENDING 20"));
+    assert(!pthread_barrier_init(&diag_barrier,NULL,2));pthread_t owner;
+    assert(!pthread_create(&owner,NULL,diag_owner,NULL));diag_wait();
+    diag_send("\x1d" "D1 STATUS 11111111111111111111111111111111 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"RUNNING 00"));
+    diag_send("\x1d" "D1 CANCEL 22222222222222222222222222222222 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"REFUSED 00"));
+    diag_send("\x1d" "D1 CANCEL 11111111111111111111111111111111 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"CANCEL_REQUESTED 00"));
+    diag_wait();assert(!pthread_join(owner,NULL));assert(!pthread_barrier_destroy(&diag_barrier));
+    diag_send("\x1d" "D1 STATUS 11111111111111111111111111111111 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"CANCELLED 1f")&&diag_work==1&&diag_restore==1&&diag_release==1);
+    /* Retried REQUEST is a receipt read; another owner pump does no work. */
+    diag_send("\x1d" "D1 REQUEST 11111111111111111111111111111111 123456789abcdef0\n");
+    assert(strstr((char *)emitted,"CANCELLED 1f")&&diag_work==1);
+    assert(diagnostic_control_pump(&diag,NULL,true)==DC_OWNER_NONE);
+    pocket_bridge_bind_diagnostic(NULL);
+    printf("DIAGNOSTIC_TRANSPORT PASS: reserved D/disabled/no key leakage/status+cancel while UI blocked/receipt replay\n");
+}
 int main(void) {
     reset();uint8_t body[72];memset(body,0,72);body[0]=1;body[1]=AC_CATALOG;body[2]=60;
     feed(body,72);app_control_pump(now_ms);
@@ -254,5 +319,6 @@ int main(void) {
     incoming_size=emitted_size+1;incoming_at=1;assert(pocket_bridge_usb(incoming[0]));
     app_control_pump(now_ms);assert(reply_count==recorded);
     assert(atomic_load(&inbox_dropped)==0); /* malformed C does not disturb B */
+    diagnostic_transport_tests();
     printf("APP_CONTROL PASS: identity/lifecycle/order/dedup/ACK loss/queue/rate/TTL/legacy CRC; static_bytes=%zu\n",app_control_static_bytes());
 }

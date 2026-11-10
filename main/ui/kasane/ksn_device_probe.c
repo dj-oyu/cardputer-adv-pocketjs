@@ -28,10 +28,35 @@
 static ksn_core probe_core;
 static ksn_core_command_block probe_commands[2];
 static ksn_core_text_block probe_text[2];
-static ksn_cache probe_cache;
-static ksn_cache_command_block probe_cache_commands;
-static ksn_cache_text_block probe_cache_text;
-static ksn_frost probe_frost;
+/* One UI-owned reservation covers both phases. Cache commands are copied
+ * into the separate core banks; the view host which borrows this cache is
+ * local to view_demo. No cache user survives its synchronous final present.
+ * Glass/stress then use frost; text/image only rebind the separate core.
+ * Keep this storage reserved on failure, including uncertain output borrows.
+ * Re-entry starts with cache_bind, which initializes the entire cached arm. */
+typedef union {
+    struct {
+        ksn_cache cache;
+        ksn_cache_command_block commands;
+        ksn_cache_text_block text;
+    } cached;
+    ksn_frost frost;
+} probe_workspace;
+static probe_workspace probe_workspace_storage;
+_Static_assert(sizeof(probe_workspace)==sizeof(((probe_workspace *)0)->cached),
+               "cache and frost phases must share fixed storage");
+#define probe_cache (probe_workspace_storage.cached.cache)
+#define probe_cache_commands (probe_workspace_storage.cached.commands)
+#define probe_cache_text (probe_workspace_storage.cached.text)
+#define probe_frost (probe_workspace_storage.frost)
+
+static bool probe_begin_frost(void){
+    /* A failed completion cannot authorize overwriting the previous phase.
+     * The outer lifecycle retains the whole reservation and quarantines it. */
+    if(board_present_finish()!=ESP_OK)return false;
+    ksn_frost_init(&probe_frost);
+    return true;
+}
 ksn_result ksn_stress_probe_run(ksn_frost *frost);
 static uint16_t glass_pattern(int x,int y){
     x%=120;
@@ -227,12 +252,12 @@ static ksn_result view_demo(void){
     return KSN_OK;
 }
 
-void ksn_device_probe_run(void){
+bool ksn_device_probe_run(void){
     const char *tag="KSN_PROBE";
     failures=0;
     ESP_LOGI(tag,"START core=%u frame_command=%u",(unsigned)KSN_CORE_RESERVED_BYTES,(unsigned)sizeof(ksn_frame_command));
     int core_result=ksn_probe_core_tests(),review_result=ksn_probe_review_tests();
-    if(core_result||review_result){ESP_LOGE(tag,"FAIL regression core=%d review=%d",core_result,review_result);return;}
+    if(core_result||review_result){ESP_LOGE(tag,"FAIL regression core=%d review=%d",core_result,review_result);return false;}
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_cache_bind(&probe_cache,&probe_cache_commands,&probe_cache_text);
     ksn_client app=ksn_core_client(&probe_core,KSN_APP),system=ksn_core_client(&probe_core,KSN_SYSTEM);
@@ -325,6 +350,7 @@ void ksn_device_probe_run(void){
        ksn_modal_route(&modal,&probe_core,false)!=KSN_INPUT_APP||modal.focus!=42)goto fail;
     ESP_LOGI(tag,"COMPOSITION group_alpha=128 modal=open-close focus=42 PASS");
     if(view_demo()!=KSN_OK)goto fail;
+    if(!probe_begin_frost())goto fail;
     if(glass_demo()!=KSN_OK)goto fail;
     if(text_demo()!=KSN_OK)goto fail;
     if(image_demo()!=KSN_OK)goto fail;
@@ -333,8 +359,9 @@ void ksn_device_probe_run(void){
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelay(pdMS_TO_TICKS(5000));
-    return;
+    return true;
 fail:
     ESP_LOGE(tag,"FAIL display/transaction");
+    return false;
 }
 #endif

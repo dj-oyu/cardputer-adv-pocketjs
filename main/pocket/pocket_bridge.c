@@ -1,5 +1,6 @@
 #include "pocket_bridge.h"
 #include "app_control.h"
+#include "ui/diagnostic_wire.h"
 #include "pocket_wire.h"
 #include "pocket_api.h"
 #include "driver/usb_serial_jtag.h"
@@ -67,7 +68,7 @@ static atomic_uint   inbox_head, inbox_tail;
 // Section 5 asks for a lost message to be counted rather than swallowed.
 static atomic_uint   inbox_dropped;
 
-enum { RX_IDLE=0, RX_TYPE, RX_HIGH, RX_LOW, RX_SKIP };
+enum { RX_IDLE=0, RX_TYPE, RX_HIGH, RX_LOW, RX_SKIP, RX_DIAGNOSTIC };
 static uint8_t        rx_state;
 static uint8_t        rx_high;
 static uint16_t       rx_length;
@@ -75,6 +76,8 @@ static bridge_slot_t *rx_slot;
 /* C has independent assembly and owner inbox, surviving guest teardown. */
 static bridge_slot_t control_slot;
 static uint8_t rx_namespace;
+static diagnostic_wire *native_diagnostic_wire;
+void pocket_bridge_bind_diagnostic(diagnostic_wire *wire){native_diagnostic_wire=wire;}
 
 static int hex_digit(uint8_t c) {
     if(c>='0'&&c<='9') return c-'0';
@@ -112,6 +115,11 @@ static void rx_feed(uint8_t c) {
         return;
     case RX_TYPE:
         if(c==0x1d) return;                   // a restart inside a restart
+        if(c=='D'){
+            rx_namespace=c;rx_state=RX_DIAGNOSTIC;
+            if(native_diagnostic_wire)diagnostic_wire_begin(native_diagnostic_wire);
+            return;
+        }
         if(c!='B' && c!='C') { rx_state=RX_SKIP; return; }
         rx_namespace=c;
         if(c=='B' && atomic_load(&inbox_head)-atomic_load(&inbox_tail)>=2) {
@@ -124,6 +132,13 @@ static void rx_feed(uint8_t c) {
         rx_slot=c=='C'?&control_slot:&inbox[atomic_load(&inbox_head)&1u];
         rx_length=0;
         rx_state=RX_HIGH;
+        return;
+    case RX_DIAGNOSTIC:
+        if(c==0x1d){
+            if(native_diagnostic_wire)diagnostic_wire_abort(native_diagnostic_wire);
+            rx_state=RX_TYPE;return;
+        }
+        if(diagnostic_wire_feed(native_diagnostic_wire,c))rx_state=RX_IDLE;
         return;
     case RX_HIGH:
     case RX_LOW: {

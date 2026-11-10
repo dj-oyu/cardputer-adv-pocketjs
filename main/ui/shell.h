@@ -18,6 +18,10 @@ unsigned shell_app(void);   // which Apps entry Enter would launch
 // after shell_key(); SHELL_SCREEN_NONE means stay on the home screen.
 shell_screen_t shell_pending_screen(void);
 void shell_draw(const char *error, unsigned phase);
+#ifdef CONFIG_KSN_DEVICE_PROBE
+/* Submission status only; caller must drain the final display transfer. */
+esp_err_t shell_draw_checked(const char *error,unsigned phase);
+#endif
 // The home backdrop is no longer read while another screen or a foreground
 // guest owns the display. Call after releasing a home overlay, if any.
 void shell_release_background_frames(void);

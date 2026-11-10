@@ -874,7 +874,7 @@ static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
 
-void shell_draw(const char *error, unsigned phase) {
+static esp_err_t shell_draw_impl(const char *error, unsigned phase) {
 #ifdef KASANE_P5_NOTICE_PROBE
     static int last_notice_active=-1;
     sys_notice current_notice;
@@ -1071,7 +1071,8 @@ void shell_draw(const char *error, unsigned phase) {
         // 13 ms of bit time whatever the arithmetic above costs, and that is
         // the floor any optimisation of it is measured against.
         int64_t sent=esp_timer_get_time();
-        ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
+        esp_err_t presented=board_present(strip_y,strip_h,strip);
+        if(presented!=ESP_OK)return presented;
         present_us+=(unsigned)(esp_timer_get_time()-sent);
     }
 #ifndef KASANE_FLOWER_FRAME_PROBE
@@ -1268,4 +1269,13 @@ void shell_draw(const char *error, unsigned phase) {
         hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
         max_us=0;window_start=now;
     }
+    return ESP_OK;
 }
+void shell_draw(const char *error,unsigned phase){
+    ESP_ERROR_CHECK(shell_draw_impl(error,phase));
+}
+#ifdef CONFIG_KSN_DEVICE_PROBE
+esp_err_t shell_draw_checked(const char *error,unsigned phase){
+    return shell_draw_impl(error,phase);
+}
+#endif
