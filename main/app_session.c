@@ -253,7 +253,7 @@ static void sample_memory_pressure(void) {
     // pressure is different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
     pocketjs_guest_block_cache_set_pressure(guest,frame_bd_pressure_override(mask!=0));
-    frame_bd_pressure(mask!=0);
+    frame_bd_pressure(mask!=0,native,(uint32_t)free_bytes,(uint32_t)largest);
 }
 static atomic_bool stop_requested;
 static int64_t deadline;

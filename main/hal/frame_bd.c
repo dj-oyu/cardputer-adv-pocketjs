@@ -63,15 +63,19 @@ void frame_bd_eligible(unsigned why){
     presents++;
     if(!why)eligible++;
     for(unsigned i=0;i<6;i++)if(why&(1u<<i))why_n[i]++;
-    /* Words on ESP-IDF's FreeRTOS are bytes. */
-    const uint32_t hw=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
-    if(hw<stack_min)stack_min=hw;
 }
 void frame_bd_js(uint32_t us){cur_js+=us;}
 void frame_bd_present(uint32_t r,uint32_t s){cur_rn+=r;cur_sd+=s;}
 void frame_bd_tick(uint32_t us){cur_tick+=us;}
 void frame_bd_log(uint32_t us){if(us>max_log)max_log=us;}
-void frame_bd_pressure(bool on){cur_press|=on;}
+static uint32_t free_min=UINT32_MAX,largest_min=UINT32_MAX;
+void frame_bd_pressure(bool on,bool native,uint32_t free_bytes,uint32_t largest){
+    cur_press|=on;
+    if(native){
+        if(free_bytes<free_min)free_min=free_bytes;
+        if(largest<largest_min)largest_min=largest;
+    }
+}
 unsigned frame_bd_pace_mode(void){return mode;}
 bool frame_bd_pressure_override(bool on){
     return press_mode==1?true:press_mode==2?false:on;
@@ -110,13 +114,19 @@ void frame_bd_period(uint32_t held,uint32_t period){
     /* P0: js_pre/js_post per turn (ms), joins per window by site, presents
      * that could overlap, ineligible reasons (cont/capture/text/notice/
      * resource/sound capture), and the UI task's minimum free stack. */
+    /* A watermark since the task started, so once a window is enough: the
+     * scan of the unused stack cost ~1 ms when it ran every frame. Words on
+     * ESP-IDF's FreeRTOS are bytes. */
+    stack_min=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
     ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
-             "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u",
+             "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u "
+             "heap_free_min=%u heap_largest_min=%u",
              window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
              (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
              (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
              (unsigned)why_n[2],(unsigned)why_n[3],(unsigned)why_n[4],(unsigned)why_n[5],
-             (unsigned)stack_min);
+             (unsigned)stack_min,(unsigned)free_min,(unsigned)largest_min);
+    free_min=largest_min=UINT32_MAX;
     s_pre=s_post=0;turns=no_join=presents=eligible=0;
     for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;
     for(unsigned i=0;i<6;i++)why_n[i]=0;

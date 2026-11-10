@@ -31,8 +31,9 @@ void frame_bd_present(uint32_t render_us, uint32_t send_us);
 void frame_bd_tick(uint32_t us);
 // The KASANE_PAINT/SHIKI_TURN print, timed around both lines.
 void frame_bd_log(uint32_t us);
-// Native-heap pressure as sample_memory_pressure() hands it to the block cache.
-void frame_bd_pressure(bool on);
+// Native-heap pressure as sample_memory_pressure() hands it to the block cache,
+// and the native sample that decided it when one was taken (native=true).
+void frame_bd_pressure(bool on, bool native, uint32_t free_bytes, uint32_t largest);
 // End of one frame() period, from main.c: held_us is the loop iteration's
 // work, period_us the whole period including its wait.
 void frame_bd_period(uint32_t held_us, uint32_t period_us);
@@ -51,7 +52,7 @@ static inline void frame_bd_js(uint32_t us) {(void)us;}
 static inline void frame_bd_present(uint32_t r, uint32_t s) {(void)r;(void)s;}
 static inline void frame_bd_tick(uint32_t us) {(void)us;}
 static inline void frame_bd_log(uint32_t us) {(void)us;}
-static inline void frame_bd_pressure(bool on) {(void)on;}
+static inline void frame_bd_pressure(bool on, bool n, uint32_t f, uint32_t l) {(void)on;(void)n;(void)f;(void)l;}
 static inline void frame_bd_period(uint32_t h, uint32_t p) {(void)h;(void)p;}
 static inline unsigned frame_bd_pace_mode(void) {return FRAME_BD_PACE_NOYIELD;}
 static inline bool frame_bd_pressure_override(bool on) {return on;}
