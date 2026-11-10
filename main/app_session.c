@@ -245,7 +245,7 @@ static void sample_memory_pressure(void) {
     // the next JS turn retain them again while RAM is still short. GUEST-only
     // pressure is different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
-    pocketjs_guest_block_cache_set_pressure(guest,mask!=0);
+    pocketjs_guest_block_cache_set_pressure(guest,frame_bd_pressure_override(mask!=0));
     frame_bd_pressure(mask!=0);
 }
 static atomic_bool stop_requested;

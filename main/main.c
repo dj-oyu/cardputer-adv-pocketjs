@@ -1,5 +1,6 @@
 #include "board.h"
 #include "frame_bd.h"
+#include "esp_freertos_hooks.h"
 #include "shell.h"
 #include "overlay.h"
 #include "motion.h"
@@ -1019,6 +1020,24 @@ static void paint(const screen_ops_t *s) {
 // previous frame()'s turn finished waiting. Continuation turns run inside it
 // without restarting it; see the rule at the bottom of ui_task().
 static int64_t period_began;
+// When the UI core's idle task last ran. A frame over the display period
+// waits nowhere, so the shipping rule used to yield a tick after every such
+// frame for the idle task's sake (see the overrun branch in ui_task). The
+// frame's own send wait already blocks for 3-5 ms in a painting frame, and
+// that one tick cost STRESS 1.05 ms a frame at a 16 ms period (measured,
+// docs/perf/frame-breakdown.md sec.6), so it is now paid only when the idle
+// task really has not run.
+static volatile int64_t ui_idle_last_us;
+static bool ui_idle_hook(void) { ui_idle_last_us=esp_timer_get_time(); return true; }
+static void ui_idle_watch(void) {
+    ui_idle_last_us=esp_timer_get_time();
+#if CONFIG_POCKET_UI_TASK_CORE>=0
+    if(esp_register_freertos_idle_hook_for_cpu(ui_idle_hook,CONFIG_POCKET_UI_TASK_CORE)!=ESP_OK)
+#endif
+        ui_idle_last_us=INT64_MIN/2;  // no hook: always yield, the old rule
+}
+// 500 ms: a tenth of the task watchdog's 5 s.
+static bool ui_idle_starved(void) { return esp_timer_get_time()-ui_idle_last_us>500000; }
 // The frame_bd probe's DEADLINE pacing (frame_bd.h); 0 when not in use.
 static int64_t pace_deadline_us;
 #ifndef VM_DISPLAY_PERIOD_US
@@ -1090,6 +1109,7 @@ static void ui_task(void *arg) {
     // Before anything can post: every producer of a completion runs on a task
     // this one starts, or on an interrupt armed from it.
     vm_wake_bind();
+    ui_idle_watch();
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
 #ifdef KASANE_P0_PROBE
@@ -1492,9 +1512,10 @@ static void ui_task(void *arg) {
                     // core: CPU 1's idle task starved and the task watchdog
                     // warned every 5 s (seen with apps/shikitest at 60 ms a
                     // frame, docs/kasane/shiki.md sec.5.11). One tick, as the
-                    // continuation branch already owes; only frames over the
-                    // period pay it.
-                    if(pace==FRAME_BD_PACE_OLD || frame_bd_idle_starved()) {
+                    // continuation branch already owes -- but only when the
+                    // idle task has not run for 500 ms (ui_idle_starved()):
+                    // a frame that painted blocked in its send wait already.
+                    if(pace==FRAME_BD_PACE_OLD || ui_idle_starved()) {
                         vTaskDelay(1);
                         frame_bd_yielded();
                     }
