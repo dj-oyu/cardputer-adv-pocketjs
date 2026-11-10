@@ -11,6 +11,7 @@
 // three can be compared inside one image, and keeps a 1 ms histogram of the
 // periods: an average cannot tell a steady 16.5 ms from 16/17 alternating.
 #include "frame_bd.h"
+#include <stdatomic.h>
 #ifdef CONFIG_POCKET_FRAME_BREAKDOWN
 #include "esp_log.h"
 #include "usb_console.h"
@@ -39,6 +40,17 @@ static unsigned mode=FRAME_BD_PACE_NOYIELD;
 static unsigned window,press_mode,log_whole=1;
 static bool disp_task_on=true;
 bool frame_bd_disp_on_task(void){return disp_task_on;}
+/* P1: DISP_AB rotates inline, task at 5, task at 6 (input_task's priority:
+ * equal priority does not preempt, so a poll waits for the task to block). */
+static unsigned disp_mode=1;
+static const char *const DISP_NAME[3]={"inline","task5","task6"};
+/* input_task runs on CPU 0 and this on CPU 1: atomics, read once a window. */
+static _Atomic uint32_t inp_us,inp_n,inp_max;
+void frame_bd_input(uint32_t us){
+    atomic_fetch_add(&inp_us,us);atomic_fetch_add(&inp_n,1u);
+    uint32_t m=atomic_load(&inp_max);
+    while(us>m&&!atomic_compare_exchange_weak(&inp_max,&m,us)){}
+}
 /* P0: the turn's start, its first join point (0: none yet), the window's
  * sums, turns with no join point, joins per site, ineligible reasons. */
 static int64_t turn_t0,turn_join;
@@ -123,13 +135,15 @@ void frame_bd_period(uint32_t held,uint32_t period){
     stack_min=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
     ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
              "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u "
-             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u",
+             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u inp_ms=%.2f inp_n=%u inp_max=%u",
              window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
              (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
              (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
              (unsigned)why_n[2],(unsigned)why_n[3],(unsigned)why_n[4],(unsigned)why_n[5],
              (unsigned)stack_min,(unsigned)free_min,(unsigned)largest_min,
-             disp_task_on?"task":"inline",(unsigned)disp_stack_free());
+             DISP_NAME[disp_task_on?disp_mode:0u],(unsigned)disp_stack_free(),
+             atomic_exchange(&inp_us,0u)/1000.0,(unsigned)atomic_exchange(&inp_n,0u),
+             (unsigned)atomic_exchange(&inp_max,0u));
     free_min=largest_min=UINT32_MAX;
     s_pre=s_post=0;turns=no_join=presents=eligible=0;
     for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;
@@ -143,7 +157,9 @@ void frame_bd_period(uint32_t held,uint32_t period){
     mode=(mode+1u)%NMODES;
 #endif
 #ifdef CONFIG_POCKET_FRAME_BD_DISP_AB
-    disp_task_on=!disp_task_on;
+    disp_mode=(disp_mode+1u)%3u;
+    disp_task_on=disp_mode!=0u;
+    if(disp_task_on)disp_set_priority(disp_mode==1u?5u:6u);
 #endif
 #ifdef CONFIG_POCKET_FRAME_BD_PRESS_AB
     press_mode=(press_mode+1u)%3u;

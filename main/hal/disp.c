@@ -49,6 +49,10 @@ esp_err_t disp_run(disp_job_fn fn, bool on_task) {
     return job_result;
 }
 
+void disp_set_priority(unsigned prio) {
+    if(task) vTaskPrioritySet(task,prio);
+}
+
 uint32_t disp_stack_free(void) {
     return task ? (uint32_t)uxTaskGetStackHighWaterMark(task) : 0;
 }

@@ -369,8 +369,14 @@ static void input_task(void *arg) {
         if(++polls==2000)
             ESP_LOGI("boot","INPUT_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
         keystroke_t k;
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+        const int64_t poll_t0=esp_timer_get_time();
+#endif
         bool have=keymap_poll(&k);
         motion_poll();
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+        frame_bd_input((uint32_t)(esp_timer_get_time()-poll_t0));
+#endif
         char c;
         if(!have && usb_serial_jtag_read_bytes(&c,1,0)>0) have=usb_stroke(c,&k);
         if(have) {

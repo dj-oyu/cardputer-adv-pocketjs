@@ -19,8 +19,11 @@ esp_err_t disp_init(void);
 esp_err_t disp_run(disp_job_fn fn, bool on_task);
 // The display task's free stack at its lowest so far, in bytes.
 uint32_t disp_stack_free(void);
+// The task's priority (FRAME_BD's P1 A/B, which also tries one above input).
+void disp_set_priority(unsigned prio);
 #else
 static inline esp_err_t disp_init(void) { return ESP_OK; }
 static inline esp_err_t disp_run(disp_job_fn fn, bool on_task) { (void)on_task; return fn(); }
 static inline uint32_t disp_stack_free(void) { return 0; }
+static inline void disp_set_priority(unsigned prio) { (void)prio; }
 #endif

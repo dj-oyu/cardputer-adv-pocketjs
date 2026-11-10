@@ -212,11 +212,13 @@ menu "Pocket VM (diagnostics)"
             usb_console_log_whole() so max_log compares the two paths.
 
     config POCKET_FRAME_BD_DISP_AB
-        bool "Probe: alternate inline and display-task presents per FRAME_BD window"
+        bool "Probe: rotate inline and display-task presents per FRAME_BD window"
         depends on POCKET_FRAME_BREAKDOWN && POCKET_DISP_TASK
         default n
         help
             Measurement only (docs/perf/two-core-pipeline.md sec.5, P1).
+            Rotates inline, the task at priority 5, and the task at 6
+            (input_task's, which then cannot preempt it on CPU 0).
 
     config POCKET_FRAME_BD_PACE_AB
         bool "Probe: rotate the display pacing rule per FRAME_BD window"
