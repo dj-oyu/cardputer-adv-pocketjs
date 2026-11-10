@@ -19,6 +19,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Two-core P0 probe (docs/perf/two-core-pipeline.md sec.5): where the JS
+ * turn first touches state the display would read. Device only. */
+#if defined(ESP_PLATFORM)
+#include "frame_bd.h"
+#else
+#define frame_bd_join_point(site) ((void)0)
+#endif
 
 #define KASANE_REF_LIMIT 32u
 #define KASANE_REF_STORAGE 64u
@@ -1658,6 +1665,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
     if(!tx_proto(ctx)||!modal_proto(ctx)) return JS_EXCEPTION;
     apply_outcome();
+    frame_bd_join_point(FRAME_BD_JOIN_KASANE_TX);
     ksn_tx tx;ksn_result result=ksn_view_begin(view(),mode,&tx);
     if(result!=KSN_OK) return throw_result(ctx,result,op);
     state->building=tx;

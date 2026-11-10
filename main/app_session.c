@@ -39,6 +39,8 @@
 #endif
 #ifdef KASANE_PROC_DEVICE_PROBE
 #include "pocket_grid.h"
+#include "pocket_video.h"
+#include "sound.h"
 #include "ui/kasane/ksn_proc_grid_resize.h"
 #endif
 #ifdef POCKET_KEYTEST
@@ -2424,8 +2426,10 @@ static esp_err_t app_tick_body(uint32_t buttons) {
 #ifdef CONFIG_POCKET_VM_TURNPERF
     uint32_t tp0,tp1; turnperf_read(&tp0,&tp1);
 #endif
+    frame_bd_turn_begin();
     esp_err_t e=dispatch_guest(false,buttons);
     end_guest_turn();
+    frame_bd_turn_end();
 #ifdef CONFIG_POCKET_VM_TURNPERF
     turnperf_add(tp0,tp1,(uint32_t)(esp_timer_get_time()-turning));
 #endif
@@ -2453,6 +2457,15 @@ static esp_err_t app_tick_body(uint32_t buttons) {
     vmprobe_frame_sample(guest,turn_us);
 #endif
     if(e)return e;
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+    frame_bd_eligible((pocketjs_guest_work_pending(guest)?FRAME_BD_NO_CONT:0u)|
+                      (board_capture_active()?FRAME_BD_NO_CAPTURE:0u)|
+                      (pocket_text_active()?FRAME_BD_NO_TEXT:0u)|
+                      (have_notice?FRAME_BD_NO_NOTICE:0u)|
+                      (pocket_pixel_pending()||pocket_video_pending()||pocket_grid_pending()?
+                       FRAME_BD_NO_RESOURCE:0u)|
+                      (sound_capture_active()?FRAME_BD_NO_SOUND_CAPTURE:0u));
+#endif
     return present_frame();
 }
 

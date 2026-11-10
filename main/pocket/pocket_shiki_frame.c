@@ -57,6 +57,13 @@ void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
 // session has one (kasane.shiki, docs/kasane/shiki-spec.md sec.9.2), from the
 // system heap otherwise.
 #include "shiki_heap.h"
+/* Two-core P0 probe (docs/perf/two-core-pipeline.md sec.5): where the JS
+ * turn first touches state the display would read. Device only. */
+#if defined(ESP_PLATFORM)
+#include "frame_bd.h"
+#else
+#define frame_bd_join_point(site) ((void)0)
+#endif
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
  * grows), so a released handle can never alias a later program. */
@@ -756,6 +763,7 @@ static void merge(proc_surface *s){
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.shiki.commit";
+    frame_bd_join_point(FRAME_BD_JOIN_SHIKI_COMMIT);
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     proc_surface *surface=&surfaces[building_surface];
     if(building_surface&&!surface->image_mode)

@@ -14,6 +14,9 @@
 #ifdef CONFIG_POCKET_FRAME_BREAKDOWN
 #include "esp_log.h"
 #include "usb_console.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define WINDOW 60u
 #define NMODES 3u
@@ -33,7 +36,37 @@ static unsigned mode=FRAME_BD_PACE_OLD;
 static unsigned mode=FRAME_BD_PACE_NOYIELD;
 #endif
 static unsigned window,press_mode,log_whole=1;
+/* P0: the turn's start, its first join point (0: none yet), the window's
+ * sums, turns with no join point, joins per site, ineligible reasons. */
+static int64_t turn_t0,turn_join;
+static bool in_turn;
+static uint64_t s_pre,s_post;
+static uint32_t turns,no_join,site_n[FRAME_BD_JOIN_SITES],presents,eligible,why_n[6];
+static uint32_t stack_min=UINT32_MAX;
 
+void frame_bd_turn_begin(void){turn_t0=esp_timer_get_time();turn_join=0;in_turn=true;}
+void frame_bd_join_point(unsigned site){
+    if(!in_turn||site>=FRAME_BD_JOIN_SITES)return;
+    site_n[site]++;
+    if(!turn_join)turn_join=esp_timer_get_time();
+}
+void frame_bd_turn_end(void){
+    if(!in_turn)return;
+    in_turn=false;
+    const int64_t end=esp_timer_get_time();
+    turns++;
+    if(!turn_join){no_join++;s_pre+=(uint64_t)(end-turn_t0);return;}
+    s_pre+=(uint64_t)(turn_join-turn_t0);
+    s_post+=(uint64_t)(end-turn_join);
+}
+void frame_bd_eligible(unsigned why){
+    presents++;
+    if(!why)eligible++;
+    for(unsigned i=0;i<6;i++)if(why&(1u<<i))why_n[i]++;
+    /* Words on ESP-IDF's FreeRTOS are bytes. */
+    const uint32_t hw=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
+    if(hw<stack_min)stack_min=hw;
+}
 void frame_bd_js(uint32_t us){cur_js+=us;}
 void frame_bd_present(uint32_t r,uint32_t s){cur_rn+=r;cur_sd+=s;}
 void frame_bd_tick(uint32_t us){cur_tick+=us;}
@@ -74,6 +107,20 @@ void frame_bd_period(uint32_t held,uint32_t period){
              (unsigned)late16,(unsigned)late33,(unsigned)yields,(unsigned)press,
              hist[0],hist[1],hist[2],hist[3],hist[4],hist[5],hist[6],hist[7],
              hist[8],hist[9],hist[10],(unsigned)n);
+    /* P0: js_pre/js_post per turn (ms), joins per window by site, presents
+     * that could overlap, ineligible reasons (cont/capture/text/notice/
+     * resource/sound capture), and the UI task's minimum free stack. */
+    ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
+             "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u",
+             window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
+             (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
+             (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
+             (unsigned)why_n[2],(unsigned)why_n[3],(unsigned)why_n[4],(unsigned)why_n[5],
+             (unsigned)stack_min);
+    s_pre=s_post=0;turns=no_join=presents=eligible=0;
+    for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;
+    for(unsigned i=0;i<6;i++)why_n[i]=0;
+    stack_min=UINT32_MAX;
     s_js=s_rn=s_sd=s_tick=s_held=s_period=0;
     max_period=max_held=max_js=max_log=late16=late33=n=press=yields=0;
     for(unsigned i=0;i<HIST;i++)hist[i]=0;
