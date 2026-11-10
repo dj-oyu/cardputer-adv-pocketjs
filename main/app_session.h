@@ -100,8 +100,7 @@ esp_err_t app_tick(uint32_t buttons);
 // and the ceiling on how often a continuation turn reaches the panel
 // (app_session.c). One constant because the two are the same decision seen
 // from both ends: how often a person may be shown a new picture.
-#define VM_DISPLAY_PERIOD_MS 16
-#define VM_DISPLAY_PERIOD_US 16667
+#define VM_DISPLAY_PERIOD_MS 33
 // True when the turn app_tick() just ran was a CONTINUATION that returned with
 // the job queue still non-empty -- a turn with no frame() and, after the
 // throttle in app_session.c, usually no transfer either. main.c asks because
