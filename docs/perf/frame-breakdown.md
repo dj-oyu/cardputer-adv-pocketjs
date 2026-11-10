@@ -190,3 +190,27 @@ Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビ�
 
 - レースの 3 回の標本（約 8 秒おき）で、`malloc_size` は 110,000〜110,128 B とほぼ一定。レース中に JS ヒープが育っているのではない。
 - チャンクはすべて起動時に読み込まれ（`apps/derby/chunks.txt`）、パドック・結果画面のコードもレース中に常駐している。
+
+## 10. 判定中も block cache を深さ 4 で残す、DERBY のレース中の常駐を削る（2026-11-10、実測）
+
+**block cache。** a58fe4d で、逼迫の判定中は block cache を止めるのではなく、クラスごとの深さを 16 → 4 に絞るようにした（`BLOCK_CACHE_PRESSURE_DEPTH`、`block_cache_set_depth()`、`pocketjs_guest_block_cache_set_pressure()`）。抱えるのは最大約 1.1 KB（出荷のクラスで 4 × 276 B）。host: `tools/test_block_cache.c`（`PRESSURE_DEPTH`）と `tools/test_guest_cache_pressure.py` が通る。
+
+実機（同一バイナリ、`POCKET_FRAME_BD_PRESS_AB` で窓ごとに「測ったまま／強制 ON／強制 OFF」、周期 16 ms、ジョブ `d4-stress-1`・`dm-derby-1`）:
+
+| 場面 | 強制 ON（深さ 4） | 測ったまま・強制 OFF（深さ 16） | 差 | 以前（§7、cache を止めた） |
+| --- | --- | --- | --- | --- |
+| STRESS LV1（JS、ms） | 6.99、7.02、7.03、7.12 | 6.80〜6.91 | 約 +0.18 ms（+2.6%） | +0.9 ms（+13%） |
+| DERBY レース FIELD（JS、ms） | 7.24、7.34 | 7.16〜7.26 | 約 +0.1 ms（+1.4%） | +0.5 ms（+7%） |
+
+host の再生からの見積もり（§9、STRESS +2.3%）と合う。
+
+**DERBY の常駐。** 3883770 で 2 つ削った（`apps/derby/README.md`「レース中のネイティブ heap」）: チャンクを `option strip-debug` でコンパイルする、ゲートに入るとき前のレースの `fin`・`photoX` を捨てる。host の `tools/games/run_derby.py` は全系列で合格（毎フレームの画素の照合を含む）。
+
+| | 変更前（`mu-derby-1`、起動直後の DERBY） | 変更後（`dm-derby-1`、STRESS の後の DERBY） |
+| --- | --- | --- |
+| ゲストの `malloc_size`（レース中） | 110,000〜110,128 B | 107,040〜107,160 B（約 −3.0 KB） |
+| ネイティブの空きの最小（レース中の窓） | 24,652〜25,040 B | 28,408〜29,108 B（約 +3.5 KB） |
+
+- 2 つの回はビルドも起動の状態も違う（同一バイナリの比較ではない）。`malloc_size` の差はほぼ行番号表の分（以前の測定 −3.2 KB と合う）。
+- 逼迫の線（24,576 B）までの余裕は、レース中に約 0.1 KB → 約 3.8 KB になった。今回のレースでは判定は立たなかった（`press=0`）。
+- Sonnet の洗い出しで挙がったが採らなかった候補は、`apps/derby/README.md` に書いた。
