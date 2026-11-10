@@ -153,7 +153,3 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 # firmware bug can land in code and run instead of faulting at the
 # code/data boundary.
 CONFIG_ESP_SYSTEM_MEMPROT=n
-
-# MEASUREMENT ONLY (to be reverted): block-cache pressure A/B at a 16 ms period.
-CONFIG_POCKET_FRAME_BREAKDOWN=y
-CONFIG_POCKET_FRAME_BD_PRESS_AB=y
