@@ -5,6 +5,7 @@
 #include <time.h>
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
 #endif
@@ -60,6 +61,18 @@ static void set_mask(uint8_t mask) {
         if(pressure.episode<UINT32_MAX)pressure.episode++;
         pressure.episode_reasons=0;
     }
+#ifdef ESP_PLATFORM
+    /* Every change of the mask, with what decided it: the native pressure
+     * bits turn the guest block cache off, which costs the JS turn 7-13%
+     * (docs/perf/frame-breakdown.md sec.7), and how often that happens was
+     * not known. Values are from the latest samples (native: <= 100 ms old). */
+    ESP_LOGI("memory","MEM_PRESSURE mask=0x%x was=0x%x free=%u largest=%u guest_free=%u episode=%u",
+             (unsigned)mask,(unsigned)pressure.mask,(unsigned)pressure.internal_free,
+             (unsigned)pressure.internal_largest,
+             (unsigned)(pressure.guest_limit>pressure.guest_used?
+                        pressure.guest_limit-pressure.guest_used:0),
+             (unsigned)pressure.episode);
+#endif
     pressure.mask=mask;
     pressure.episode_reasons|=mask;
     if(pressure.open)pressure.pending=true;
