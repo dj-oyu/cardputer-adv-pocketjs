@@ -183,6 +183,16 @@ menu "Pocket VM (diagnostics)"
         depends on POCKET_DISP_TASK
         default 6144
 
+    config POCKET_LCD_ISR_CORE
+        int "Core the LCD SPI completion interrupt runs on (-1: the core that sets up the bus)"
+        range -1 1
+        default -1
+        help
+            Each strip sent (~30 a frame) ends in this ISR, which wakes the
+            task reaping it. -1 leaves it where spi_bus_initialize() runs
+            (app_main, CPU 0). The two-core pipeline (docs/perf/two-core-pipeline.md)
+            measures which core should pay for it.
+
     config POCKET_KEY_INT_GPIO
         int "GPIO wired to the keyboard's INT (-1: none, poll the FIFO over I2C)"
         range -1 48

@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "usb_console.h"
 #include "disp.h"
+#include "board.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -135,7 +136,7 @@ void frame_bd_period(uint32_t held,uint32_t period){
     stack_min=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
     ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
              "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u "
-             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u inp_ms=%.2f inp_n=%u inp_max=%u",
+             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u inp_ms=%.2f inp_n=%u inp_max=%u lcd_tx=%u",
              window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
              (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
              (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
@@ -143,7 +144,7 @@ void frame_bd_period(uint32_t held,uint32_t period){
              (unsigned)stack_min,(unsigned)free_min,(unsigned)largest_min,
              DISP_NAME[disp_task_on?disp_mode:0u],(unsigned)disp_stack_free(),
              atomic_exchange(&inp_us,0u)/1000.0,(unsigned)atomic_exchange(&inp_n,0u),
-             (unsigned)atomic_exchange(&inp_max,0u));
+             (unsigned)atomic_exchange(&inp_max,0u),(unsigned)board_lcd_tx_take());
     free_min=largest_min=UINT32_MAX;
     s_pre=s_post=0;turns=no_join=presents=eligible=0;
     for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;

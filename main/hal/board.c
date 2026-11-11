@@ -88,6 +88,14 @@ static uint16_t *half_lent, *half_from;
 // and MISO is unwired, so the only test is the glass: BOARD_ENDIAN_PROBE
 // alternates the two every 2 s and the owner looks for a change.
 static bool lcd_le;
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+// FRAME_BD: strips queued to the SPI driver, one completion ISR each.
+static _Atomic uint32_t lcd_tx_n;
+uint32_t board_lcd_tx_take(void) { return atomic_exchange(&lcd_tx_n, 0u); }
+#define LCD_TX_COUNT(e) do { if ((e) == ESP_OK) atomic_fetch_add(&lcd_tx_n, 1u); } while (0)
+#else
+#define LCD_TX_COUNT(e) ((void)0)
+#endif
 #define BOARD_ENDIAN_PROBE 0   /* issue #118: the eye test passed 2026-11-04 (docs/platform/lcd-dma-driver.md 9.2) */
 static void put_strip(uint16_t *out,uint16_t *in,int count);
 static bool tx_inflight;
@@ -556,6 +564,10 @@ esp_err_t board_init(void) {
         .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)
 #ifdef KASANE_P1_LCD_ISR_CORE1
         ,.isr_cpu_id=ESP_INTR_CPU_AFFINITY_1
+#elif CONFIG_POCKET_LCD_ISR_CORE >= 0
+        // Every strip completes in this ISR, which then wakes whoever reaps it
+        // (~30 a frame): its core pays for that (POCKET_LCD_ISR_CORE help).
+        ,.isr_cpu_id=CONFIG_POCKET_LCD_ISR_CORE ? ESP_INTR_CPU_AFFINITY_1 : ESP_INTR_CPU_AFFINITY_0
 #endif
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
@@ -899,6 +911,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
               } else
 #endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
+              LCD_TX_COUNT(e);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #ifdef KASANE_P0_BUS_PROBE
@@ -1067,6 +1080,7 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
               } else
 #endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
+              LCD_TX_COUNT(e);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
