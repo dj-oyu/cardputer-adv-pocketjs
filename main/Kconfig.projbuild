@@ -172,6 +172,16 @@ menu "Pocket VM (diagnostics)"
             yet. With POCKET_FRAME_BD_DISP_AB the probe alternates it with the
             inline path every 60-frame window.
 
+    config POCKET_DISP_ASSERT
+        bool "Display task: abort when a job is started or joined off the UI task"
+        default n
+        help
+            docs/perf/two-core-pipeline.md sec.2.6 / sec.7.2 (F12). disp_start
+            and disp_join keep their state without a lock because only the UI
+            task calls them; a join on the display task itself would wait for
+            ever. This checks the caller on every start and every join that
+            has something to wait for.
+
     config POCKET_DISP_CORE
         int "Display task core"
         depends on POCKET_DISP_TASK

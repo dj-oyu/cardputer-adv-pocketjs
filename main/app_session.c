@@ -693,6 +693,7 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
+    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
 #ifdef CONFIG_POCKET_VM_RELOC
     // Before the chain is closed, not after: prepare_stop resumes the parked
     // chain in order to terminate it, and the counters belong to the run that
@@ -1020,6 +1021,7 @@ bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
 
 void app_stop(void) {
+    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     bool p0_had_guest=guest!=NULL;
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage)board_capture(false);
@@ -1188,6 +1190,7 @@ static bool settle_all(int64_t until_us) {
 }
 
 esp_err_t app_suspend(void) {
+    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
     int64_t began=esp_timer_get_time();
     // The Back turn's arming: its deadline bounds the hook, and yield is off,
@@ -1254,6 +1257,7 @@ esp_err_t app_suspend(void) {
 }
 
 esp_err_t app_resume(void) {
+    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
         return ESP_ERR_INVALID_STATE;
     // The identity is global and a host screen may have moved it; the stores
@@ -1483,6 +1487,7 @@ static void js_join_hook(JSContext *ctx) {
 }
 
 esp_err_t app_start_test(char test) {
+    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
@@ -2064,6 +2069,7 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // here; strip composition and the LCD bus remain in shell_draw(), where the
 // native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
+    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!guest) return ESP_ERR_INVALID_STATE;
     sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
@@ -2578,6 +2584,27 @@ static esp_err_t present_run(void) {
     return ESP_OK;
 }
 #endif
+// The present job's inputs and outputs (pf_*). Static, not locals of
+// present_frame_body: with P2a the job outlives the call that started it
+// (two-core-pipeline.md sec.7.2, F11).
+static kasane_display_t pf_display;
+static ksn_display_port pf_port;
+static ksn_render_stats pf_stats;
+static ksn_display_completion pf_completion;
+static int64_t pf_began,pf_end;
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+static bool pf_d4_pixel_candidate;
+#endif
+static esp_err_t present_account(ksn_result result);
+#ifdef KASANE_DMA_OVERLAP
+static ksn_result pf_result;
+// The finish step: the acknowledgement only (F6).
+static void present_ack(esp_err_t run) {
+    (void)run;
+    pf_result=pocket_kasane_present_end(&present_job);
+    pf_end=esp_timer_get_time();
+}
+#endif
 static esp_err_t present_frame_body(void) {
     last_present_us=esp_timer_get_time();
     {
@@ -2599,49 +2626,62 @@ static esp_err_t present_frame_body(void) {
 #endif
         ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
         if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
-        kasane_display_t display_state={0};
+        pf_display=(kasane_display_t){0};
         // Offering present_rect is what lets the renderer composite only the
         // damaged columns of a band. It is withdrawn while board_capture is
         // dumping rows, because those PIX lines print all 240 columns of the
         // shared strip and only the window would have been repainted.
         /* Design 0 (board.h): 4-row pieces from the strip's halves. */
         const uint16_t strip_rows=(uint16_t)board_strip_rows();
-        ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
+        pf_port=(ksn_display_port){.ctx=&pf_display,.strip=kasane_strip,.present=kasane_send,
                               .width=LCD_W,.height=LCD_H,.strip_rows=strip_rows,.text=&ksn_font_port,
                               .present_rect=board_capture_active()?NULL:kasane_send_rect};
-        ksn_render_stats stats;
+        pf_stats=(ksn_render_stats){0};
 #ifdef KASANE_D4_PIXEL_APP_PROBE
-        bool d4_pixel_candidate=pocket_pixel_pending();
-        if(d4_pixel_candidate&&!d4_pixel_injected){
+        pf_d4_pixel_candidate=pocket_pixel_pending();
+        if(pf_d4_pixel_candidate&&!d4_pixel_injected){
             d4_pixel_injected=true;d4_pixel_fail_after=1;
             ESP_LOGI("D4_PIXEL","ARMED second_send");
         }
 #endif
-        int64_t began=esp_timer_get_time();
+        pf_began=esp_timer_get_time();
 #ifdef KASANE_DMA_OVERLAP
-        const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
-        present_job=(pocket_kasane_present_job){.present={.render={.display=&port,
-                                                .completion=&completion,.stats=&stats}}};
+        pf_completion=(ksn_display_completion){.ctx=&pf_display,.finish=kasane_finish};
+        present_job=(pocket_kasane_present_job){.present={.render={.display=&pf_port,
+                                                .completion=&pf_completion,.stats=&pf_stats}}};
         pocket_kasane_present_begin(&present_job);
-        disp_run(present_run,frame_bd_disp_on_task()&&!board_capture_active());
-        ksn_result result=pocket_kasane_present_end(&present_job);
+        disp_start(present_run,present_ack,frame_bd_disp_on_task()&&!board_capture_active());
+        // P2a moves this join to the next turn for frames that may overlap.
+        disp_join();
+        return present_account(pf_result);
 #else
-        ksn_result result=pocket_kasane_present(&port,&stats);
+        ksn_result result=pocket_kasane_present(&pf_port,&pf_stats);
         board_present_frame_end();
+        pf_end=esp_timer_get_time();
+        return present_account(result);
 #endif
+    }
+}
+
+// What a present leaves behind, on the UI task: animation and frame counts,
+// the transfer-failure path, the accounting and the logs. Separate from the
+// finish step (present_ack), which runs wherever the join happens -- inside
+// a native call, at any JS depth -- and so only acknowledges.
+static esp_err_t present_account(ksn_result result) {
+    {
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",
-                 (unsigned)result,(unsigned)stats.transferred_bytes,
-                 (unsigned)(esp_timer_get_time()-began),
+                 (unsigned)result,(unsigned)pf_stats.transferred_bytes,
+                 (unsigned)(esp_timer_get_time()-pf_began),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                  (unsigned)uxTaskGetStackHighWaterMark(NULL));
 #endif
 #ifdef KASANE_D4_PIXEL_APP_PROBE
-        if(d4_pixel_candidate)
+        if(pf_d4_pixel_candidate)
             ESP_LOGI("D4_PIXEL","PRESENT result=%u duration_us=%u stack_hwm_bytes=%u",
-                     (unsigned)result,(unsigned)(esp_timer_get_time()-began),
+                     (unsigned)result,(unsigned)(esp_timer_get_time()-pf_began),
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
         if(d4_pixel_retry&&result==KSN_OK){
             ESP_LOGI("D4_PIXEL","RETRY_OK stack_hwm_bytes=%u",
@@ -2650,7 +2690,7 @@ static esp_err_t present_frame_body(void) {
         }
 #endif
         if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
-        unsigned whole=(unsigned)(esp_timer_get_time()-began);
+        unsigned whole=(unsigned)(pf_end-pf_began);
         frames++;
         if(result==KSN_IO) {
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -2668,30 +2708,30 @@ static esp_err_t present_frame_body(void) {
             return ESP_FAIL;
         }
 #ifdef KASANE_P2_REPAIR_PROBE
-        if(p2_repair_stage==2&&stats.bands) {
+        if(p2_repair_stage==2&&pf_stats.bands) {
             ESP_LOGI("KSN_P2","REPAIR_OK bands=%u bytes=%u",
-                     ksn_render_band_count(stats.bands),(unsigned)stats.transferred_bytes);
+                     ksn_render_band_count(pf_stats.bands),(unsigned)pf_stats.transferred_bytes);
             board_capture(false);
             p2_repair_stage=0;
             p2_capture_repair_only=false;
         }
 #endif
-        if(stats.bands) {
-            painted++;render_sum+=whole-display_state.sent_us;
-            present_sum+=display_state.sent_us;
-            frame_bd_present(whole-display_state.sent_us,display_state.sent_us);
+        if(pf_stats.bands) {
+            painted++;render_sum+=whole-pf_display.sent_us;
+            present_sum+=pf_display.sent_us;
+            frame_bd_present(whole-pf_display.sent_us,pf_display.sent_us);
 #ifdef KASANE_MEGADEMO_TRACE
-            mdt.render_us+=whole-display_state.sent_us;mdt.send_us+=display_state.sent_us;
-            mdt.bytes+=stats.transferred_bytes;mdt.bands=ksn_render_band_count(stats.bands);
+            mdt.render_us+=whole-pf_display.sent_us;mdt.send_us+=pf_display.sent_us;
+            mdt.bytes+=pf_stats.transferred_bytes;mdt.bands=ksn_render_band_count(pf_stats.bands);
             mdt.presents++;
             pocket_proc_trace_presented();
 #endif
 #if KASANE_STRESS_GRAD_AB
-            grad_ab_bytes+=stats.transferred_bytes;
+            grad_ab_bytes+=pf_stats.transferred_bytes;
 #endif
-            ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-display_state.sent_us);
-            ksn_p0_probe_sample(KSN_P0_APP_SEND,display_state.sent_us);
-            ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
+            ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-pf_display.sent_us);
+            ksn_p0_probe_sample(KSN_P0_APP_SEND,pf_display.sent_us);
+            ksn_p0_probe_transfer(pf_stats.transferred_bytes,ksn_render_band_count(pf_stats.bands));
             // This frame's counts into the window's. The millisecond columns on
             // the line are averages and these are sums, which the line says with
             // `frames=`; the renderer resets its accumulators on read, so the
@@ -2701,9 +2741,9 @@ static esp_err_t present_frame_body(void) {
             // is a count and `band_runs` the number of contiguous runs, because
             // 7 bands of 8 rows and 14 of 4 leave the same bytes behind and the
             // send average cannot tell them apart (kasane-opt-survey.md 10.1).
-            band_mask_last=stats.bands;
-            band_count_last=ksn_render_band_count(stats.bands);
-            band_runs_last=ksn_render_band_runs(stats.bands);
+            band_mask_last=pf_stats.bands;
+            band_count_last=ksn_render_band_count(pf_stats.bands);
+            band_runs_last=ksn_render_band_runs(pf_stats.bands);
             // Session-scoped rather than process-scoped: design-contracts resets
             // the flag when a kasane session starts.
             if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
@@ -2724,7 +2764,7 @@ static esp_err_t present_frame_body(void) {
                          "blend_n=%u blend_cy=%u read_n=%u read_cy=%u "
                          "image_n=%u image_cy=%u frames=%u",
                          ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,
-                         present_sum/30/1000.0,(unsigned)stats.transferred_bytes,
+                         present_sum/30/1000.0,(unsigned)pf_stats.transferred_bytes,
                          band_count_last,band_runs_last,band_mask_last,g_ksn_prof,
                          (unsigned)prof_sum.fill_n,(unsigned)prof_sum.fill_cy,
                          (unsigned)prof_sum.span_n,(unsigned)prof_sum.span_cy,
@@ -2829,7 +2869,7 @@ static esp_err_t present_frame_body(void) {
                     ESP_LOGI("kasane","DIRECT_AB direct=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u underruns=%u",
                              direct,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
+                             (unsigned)pf_stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
@@ -2841,7 +2881,7 @@ static esp_err_t present_frame_body(void) {
                     ESP_LOGI("kasane","BUF_AB mode=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u free=%u underruns=%u",
                              mode,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes,
+                             (unsigned)pf_stats.transferred_bytes,
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                              (unsigned)board_buf_underruns());
                     int next=board_buf_mode_set((mode+1)%3);   /* copy, 1', 0 */
@@ -2856,7 +2896,7 @@ static esp_err_t present_frame_body(void) {
                     ESP_LOGI("kasane","ENDIAN_AB le=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
                              endian_le,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes);
+                             (unsigned)pf_stats.transferred_bytes);
                     endian_le=board_endian_ab_flip();
                 }
 #endif

@@ -15,6 +15,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "esp_log.h"
+#endif
+#ifdef CONFIG_POCKET_DISP_ASSERT
+#include <assert.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+// The first task to start a job is the UI task; nobody else may start or join.
+static TaskHandle_t owner;
+static void check_owner(void) {
+    TaskHandle_t self=xTaskGetCurrentTaskHandle();
+    if(!owner) owner=self;
+    assert(self==owner);
+}
+#else
+static inline void check_owner(void) {}
 #endif
 
 static disp_finish_fn pending_finish;
@@ -71,6 +86,7 @@ uint32_t disp_stack_free(void) {
 #endif
 
 void disp_start(disp_job_fn fn, disp_finish_fn finish, bool on_task) {
+    check_owner();
     disp_join();
     pending_finish=finish;
     pending=true;
@@ -89,9 +105,13 @@ void disp_start(disp_job_fn fn, disp_finish_fn finish, bool on_task) {
 
 void disp_join(void) {
     if(!pending) return;
+    check_owner();
 #ifdef CONFIG_POCKET_DISP_TASK
     if(in_flight) {
-        xSemaphoreTake(done,portMAX_DELAY);
+        // A present takes milliseconds; a second means the task is stuck
+        // (an SPI send that never completes), which should say so (F14).
+        while(xSemaphoreTake(done,pdMS_TO_TICKS(1000))!=pdTRUE)
+            ESP_LOGW("disp","join waiting > 1 s");
         in_flight=false;
     }
 #endif

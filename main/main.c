@@ -897,8 +897,12 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 static void tick_run(bool have, const keystroke_t *stroke) {
     // The three pickers below keep the guest from being ticked, so its
     // input.keys cannot see that the keys pressed meanwhile were theirs.
-    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal()) {
         pocket_input_keys_withhold();
+        // A modal draws through the board directly (two-core-pipeline.md
+        // sec.2.3 D): no present may be in flight.
+        disp_join();
+    }
     // The works picker is a host screen over a live guest: while it is up the
     // guest is not ticked and the keys are the picker's. Its promise settles on
     // the turn after it closes, which is the first turn the guest runs again.
@@ -965,9 +969,9 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         jsconsole_set_error("STOPPED (NO frame)");
 
     bool shot=atomic_exchange(&capture,false);
-    if(shot) { board_capture(true); app_force_redraw(); }
+    if(shot) { disp_join(); board_capture(true); app_force_redraw(); }
 #ifdef KASANE_MEGADEMO_TRACE
-    if(!shot&&atomic_load(&raw_capture)>0) { atomic_fetch_sub(&raw_capture,1); shot=true; board_capture(true); }
+    if(!shot&&atomic_load(&raw_capture)>0) { atomic_fetch_sub(&raw_capture,1); shot=true; disp_join(); board_capture(true); }
 #endif
     if(!leave) {
         if(key==KEY_ENTER) sound_play(1);
@@ -1004,7 +1008,7 @@ static void paint(const screen_ops_t *s) {
     bool shot=atomic_exchange(&capture,false);
     if(!shot && !pet_repaint && !s->dirty()) return;
     if((shot||pet_repaint) && s->repaint_all) s->repaint_all();
-    if(shot) board_capture(true);
+    if(shot) { disp_join(); board_capture(true); }
     s->draw();
     if(shot) board_capture(false);
     if(shot || s->frame_ms>=33) return;      // the home screen logs its own
@@ -1250,6 +1254,8 @@ static void ui_task(void *arg) {
             // nothing behind it. The order is tick_run()'s, for the reason
             // given there.
             if(!running && screen==SCREEN_HOME && overlay_running()) {
+                if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+                    disp_join();   // sec.2.3 D, as in tick_run
                 if(pocket_workspace_modal()) {
                     if(have) pocket_workspace_modal_key(&stroke);
                     if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
