@@ -469,4 +469,4 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 ### 9.14 前後半の帯での直書き、表示タスクと掛け合わせた A/B（2026-11-11）
 
-`BOARD_LCD_DIRECT` を、設計 0（前後半の帯）のまま表示タスク（docs/perf/two-core-pipeline.md）と掛け合わせて測った。STRESS の描画＋転送は、キュー 9.62 ms に対して直書き 9.21 ms（inline）、表示タスクでは 9.94 → 9.13 ms。転送は約 3.0 → 2.35 ms。表示タスクを使うビルドで既定にした（`CONFIG_POCKET_DISP_TASK` に従う）。30 フレームごとの切り替え（`DIRECT_AB`）は `BOARD_LCD_DIRECT_AB` に分けた。詳細は docs/perf/frame-breakdown.md §11。前後半の帯での目視は未確認。
+`BOARD_LCD_DIRECT` を、設計 0（前後半の帯）のまま表示タスク（docs/perf/two-core-pipeline.md）と掛け合わせて測った。STRESS の描画＋転送は、キュー 9.62 ms に対して直書き 9.21 ms（inline）、表示タスクでは 9.94 → 9.13 ms。転送は約 3.0 → 2.35 ms。既定にした（`BOARD_LCD_DIRECT` 1、出荷の inline のビルドも）。30 フレームごとの切り替え（`DIRECT_AB`）は `BOARD_LCD_DIRECT_AB` に分けた。詳細は docs/perf/frame-breakdown.md §11。前後半の帯での目視は未確認。

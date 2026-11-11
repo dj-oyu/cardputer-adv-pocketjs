@@ -85,20 +85,13 @@ int board_endian_ab_flip(void);
 #endif
 // Pixel strips go straight to GP-SPI2 + GDMA (lcd_spi.c) instead of through
 // spi_master's queue: no per-strip ISR, queue or task wake (~29 a frame), the
-// strip reaped by polling the done bit. On by default with the display task
-// (CONFIG_POCKET_DISP_TASK), where the ISR's cost had landed on the display
-// core: STRESS render+send 9.62 -> 9.21 ms inline, and the task's +0.32 ms
-// gone (docs/perf/frame-breakdown.md sec.11). Uses ESP-IDF private headers.
+// strip reaped by polling the done bit. On by default: STRESS render+send
+// 9.62 -> 9.21 ms inline, and 9.94 -> 9.13 ms on the display task, whose
+// extra cost had been that ISR on its core (docs/perf/frame-breakdown.md
+// sec.11). Uses ESP-IDF private headers: re-check on an IDF upgrade.
 // board_lcd_direct_set flips it at a frame boundary; returns the new state.
-#if __has_include("sdkconfig.h")
-#include "sdkconfig.h"
-#endif
 #ifndef BOARD_LCD_DIRECT
-#ifdef CONFIG_POCKET_DISP_TASK
 #define BOARD_LCD_DIRECT 1
-#else
-#define BOARD_LCD_DIRECT 0
-#endif
 #endif
 // Measurement: app_session.c flips the send path every 30-frame paint window.
 #ifndef BOARD_LCD_DIRECT_AB
