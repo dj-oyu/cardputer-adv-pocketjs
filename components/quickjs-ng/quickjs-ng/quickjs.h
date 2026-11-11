@@ -1288,6 +1288,9 @@ JS_EXTERN void JS_MarkCFunctions(JSRuntime *rt, bool on);
 /* The mark count now (> 0: functions created now are marked), and the hook
    called by hand, for a native function that joins only on some paths. */
 JS_EXTERN int JS_GetCFunctionMark(JSRuntime *rt);
+/* Sets the count and returns the old one: a span of unmarked functions
+   inside a marked one (count 0, then the old count back). */
+JS_EXTERN int JS_SetCFunctionMark(JSRuntime *rt, int count);
 JS_EXTERN void JS_CFunctionJoin(JSContext *ctx);
 JS_EXTERN bool JS_SetCFunctionJoin(JSValueConst func, bool join);
 JS_EXTERN int JS_GetCFunctionJoin(JSValueConst func);

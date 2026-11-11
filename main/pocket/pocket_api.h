@@ -410,3 +410,16 @@ unsigned pocket_api_open_count(void);
 // the JS task while the guest is still alive -- app_stop() before it destroys
 // the guest -- next to the surfaces' own resets.
 void pocket_api_reset(void);
+
+// Native functions created between these two do not join the display task
+// before they run (docs/perf/two-core-pipeline.md sec.7.2). Everything a
+// surface creates joins unless it is inside such a span, so a span is a
+// claim: the functions in it never read or write what a present in flight
+// reads (sec.1.2). Function lists keep the mark they were registered under
+// however late they are first read.
+static inline int pocket_nojoin_begin(JSContext *ctx) {
+    return JS_SetCFunctionMark(JS_GetRuntime(ctx),0);
+}
+static inline void pocket_nojoin_end(JSContext *ctx, int saved) {
+    JS_SetCFunctionMark(JS_GetRuntime(ctx),saved);
+}

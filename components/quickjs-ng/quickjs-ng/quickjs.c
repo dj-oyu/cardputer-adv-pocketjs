@@ -8038,6 +8038,13 @@ int JS_GetCFunctionMark(JSRuntime *rt)
     return rt->cfunc_mark;
 }
 
+int JS_SetCFunctionMark(JSRuntime *rt, int count)
+{
+    int old = rt->cfunc_mark;
+    rt->cfunc_mark = count;
+    return old;
+}
+
 void JS_CFunctionJoin(JSContext *ctx)
 {
     if (ctx->rt->cfunc_join)

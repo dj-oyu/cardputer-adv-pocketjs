@@ -1026,13 +1026,21 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
 }
 
 // The frame's functions on kasane.shiki (pocket_shiki_api.c).
-static const JSCFunctionListEntry frame_methods[]={
+// beginFrame writes only the tail, so it does not join; the others change
+// what a present reads and do (two-core-pipeline.md sec.2.3 A).
+static const JSCFunctionListEntry begin_method[]={
     JS_CFUNC_DEF("beginFrame",1,js_begin),
+};
+static const JSCFunctionListEntry frame_methods[]={
     JS_CFUNC_DEF("commit",0,js_commit),
     JS_CFUNC_DEF("resource",0,js_resource),
     JS_CFUNC_DEF("createSurface",0,js_create_surface),
 };
 esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
+    int mark=pocket_nojoin_begin(ctx);
+    int r=JS_SetPropertyFunctionList(ctx,obj,begin_method,1);
+    pocket_nojoin_end(ctx,mark);
+    if(r<0)return ESP_ERR_NO_MEM;
     return JS_SetPropertyFunctionList(ctx,obj,frame_methods,
                                       (int)(sizeof frame_methods/sizeof frame_methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
 }

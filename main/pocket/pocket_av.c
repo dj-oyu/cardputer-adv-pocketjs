@@ -1939,10 +1939,15 @@ static esp_err_t build_audio(JSContext *ctx, JSValueConst ns, void *user) {
         JS_NewCFunction(ctx,js_cue,"cue",1),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"tone",
         JS_NewCFunction(ctx,js_tone,"tone",2),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ns,"outputSource",
-        JS_NewCFunction(ctx,pocket_av_output_source,"outputSource",0),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ns,"playbackSource",
-        JS_NewCFunction(ctx,pocket_av_playback_source,"playbackSource",0),JS_PROP_ENUMERABLE);
+    // These two reach Kasane (pocket_kasane_source_capability), unlike the
+    // rest of av, which app_session installs outside the join mark: they
+    // join, and so does what they create while running.
+    JSValue output_source=JS_NewCFunction(ctx,pocket_av_output_source,"outputSource",0);
+    JSValue playback_source=JS_NewCFunction(ctx,pocket_av_playback_source,"playbackSource",0);
+    JS_SetCFunctionJoin(output_source,true);
+    JS_SetCFunctionJoin(playback_source,true);
+    JS_DefinePropertyValueStr(ctx,ns,"outputSource",output_source,JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,ns,"playbackSource",playback_source,JS_PROP_ENUMERABLE);
     // audio.capture is pocket_capture.c's, contributed to this same
     // namespace by a second lazy builder.
     // A realm going away takes its listeners with it, so the table starts empty

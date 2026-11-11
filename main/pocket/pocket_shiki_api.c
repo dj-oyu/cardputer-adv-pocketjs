@@ -579,7 +579,13 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("drawList",3,js_draw_list),
         JS_CFUNC_DEF("releaseList",1,js_release_list),
     };
+    // Drawing writes only the tail behind the frame a present may be
+    // reading; the slots, regions, lists and the Shiki heap are not read by
+    // a present (two-core-pipeline.md sec.1.2); sin/cos are pure. So none of
+    // these join. commit, resource and createSurface do (frame_methods).
+    int mark=pocket_nojoin_begin(ctx);
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
+    pocket_nojoin_end(ctx,mark);
     ok=ok&&pocket_proc_frame_install(ctx,shiki)==ESP_OK;
     ok=ok&&share(ctx,kasane,shiki,"grid");
     if(!ok){JS_FreeValue(ctx,shiki);return ESP_ERR_NO_MEM;}

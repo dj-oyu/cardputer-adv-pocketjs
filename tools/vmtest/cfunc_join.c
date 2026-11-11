@@ -124,6 +124,14 @@ int main(void)
     CHECK(JS_SetCFunctionJoin(optout, false), "opt-out refused");
     set_fn(ctx, pocket, "optout", optout);
     JS_SetPropertyFunctionList(ctx, pocket, list, 3);
+    // A span with the count zeroed inside a marked one: unmarked, list too.
+    int saved = JS_SetCFunctionMark(rt, 0);
+    set_fn(ctx, pocket, "span", JS_NewCFunction(ctx, fn_plain, "span", 0));
+    static const JSCFunctionListEntry span_list[] = {
+        JS_CFUNC_DEF("spanListed", 0, fn_plain),
+    };
+    JS_SetPropertyFunctionList(ctx, pocket, span_list, 1);
+    CHECK(JS_SetCFunctionMark(rt, saved) == 0, "span count");
     // data_len gave its top bit to the flag
     JSValue many[128] = {0};
     for (int i = 0; i < 128; i++) many[i] = JS_UNDEFINED;
@@ -146,7 +154,8 @@ int main(void)
         { "pocket.prop", 3, 1 },
         { "pocket.optout()", 1, 0 },
         { "pocket.nested.deep()", 1, 1 },
-        { "Object.keys(pocket).length", 5, 0 },
+        { "pocket.span() + pocket.spanListed()", 2, 0 },
+        { "Object.keys(pocket).length", 6, 0 },
         { "engine.listed() + engine.prop", 4, 0 },
         // a function made by a marked call is marked: maker + its product
         { "pocket.maker()()", 7, 2 },

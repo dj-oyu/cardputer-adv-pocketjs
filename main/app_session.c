@@ -1618,17 +1618,27 @@ esp_err_t app_start_test(char test) {
     JSRuntime *join_rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
     JS_SetCFunctionJoinHook(join_rt,js_join_hook);
     JS_MarkCFunctions(join_rt,true);
-    TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"memory",pocket_memory_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
+    // TRY_NOJOIN: a surface whose functions never touch what a present in
+    // flight reads (the survey behind sec.7.2: kasane, capture, pet-hub and
+    // overlay do; av joins only for its two Kasane sources, which it marks
+    // itself). A surface not listed here joins, which is the safe default.
+#define TRY_NOJOIN(name,install) do{ \
+        int saved_mark_=JS_SetCFunctionMark(join_rt,0); \
+        esp_err_t nojoin_err_=pocketjs_guest_quickjs_install_once(guest,name,install,NULL); \
+        JS_SetCFunctionMark(join_rt,saved_mark_); \
+        TRY(nojoin_err_); \
+    }while(0)
+    TRY_NOJOIN("pocket",pocket_api_install);
+    TRY_NOJOIN("memory",pocket_memory_install);
+    TRY_NOJOIN("random",pocket_random_install);
+    TRY_NOJOIN("storage",pocket_storage_install);
     // 3.1: an overlay's default capability set is NARROWER than a foreground
     // app's, because it runs while nobody is looking at it. The narrowing is
     // done by not installing the surface at all, so capabilities.get() answers
     // supported=false for the radio, the microphone and the buses -- which is
     // the honest answer for this session, and costs the guest nothing.
     if(overlay_session) {
-        TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+        TRY_NOJOIN("app",pocket_app_install);
         TRY(pocketjs_guest_quickjs_install_once(guest,"overlay",pocket_overlay_install,NULL));
         TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
         // fs and av joined this list on 2026-09-09, and the reason is worth
@@ -1646,30 +1656,30 @@ esp_err_t app_start_test(char test) {
         // radio, the microphone or the buses, so capabilities.get() answers
         // supported=false for them, which is the honest answer for this session
         // and costs the guest nothing.
-        TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
-        TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
+        TRY_NOJOIN("fs",pocket_fs_install);
+        TRY_NOJOIN("av",pocket_av_install);
         goto surfaces_done;
     }
-    TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
+    TRY_NOJOIN("fs",pocket_fs_install);
+    TRY_NOJOIN("imu",pocket_imu_install);
+    TRY_NOJOIN("av",pocket_av_install);
     // After "av": both contribute to pocket.audio, and the substrate runs
     // contributors in the order they registered.
     TRY(pocketjs_guest_quickjs_install_once(guest,"capture",pocket_capture_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
+    TRY_NOJOIN("io",pocket_io_install);
+    TRY_NOJOIN("net",pocket_net_install);
+    TRY_NOJOIN("ble",pocket_ble_install);
     TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"input",pocket_input_install,NULL));
+    TRY_NOJOIN("input",pocket_input_install);
     // After "input": both contribute to pocket.input, and contributors run in
     // the order they registered.
-    TRY(pocketjs_guest_quickjs_install_once(guest,"text",pocket_text_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"bridge",pocket_bridge_install,NULL));
+    TRY_NOJOIN("text",pocket_text_install);
+    TRY_NOJOIN("bridge",pocket_bridge_install);
     // After "console": it wraps print and console.log onto the section 7 ring.
-    TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+    TRY_NOJOIN("app",pocket_app_install);
     // After "app": launchContext and info join pocket.app, and a contributor
     // runs in the order it registered.
-    TRY(pocketjs_guest_quickjs_install_once(guest,"workspace",pocket_workspace_install,NULL));
+    TRY_NOJOIN("workspace",pocket_workspace_install);
 surfaces_done:
     if(overlay_session) goto source_ready;
     // pocket.pet is the surface of two native apps, Pocket Pet and Pet
@@ -1681,16 +1691,16 @@ surfaces_done:
     // pocket.derby, DERBY WATCH's series in C, the same way: only for the
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
     if(app_registry_wants(app_registry_current(),"derby.series"))
-        TRY(pocketjs_guest_quickjs_install_once(guest,"derby",pocket_derby_install,NULL));
+        TRY_NOJOIN("derby",pocket_derby_install);
     // pocket.shikiDebug, the Shiki engine for the on-device differential test
     // (apps/shikitest), the same way: only for kasane.shiki.debug.
     if(app_registry_wants(app_registry_current(),"kasane.shiki.debug"))
-        TRY(pocketjs_guest_quickjs_install_once(guest,"shiki-debug",pocket_shiki_debug_install,NULL));
+        TRY_NOJOIN("shiki-debug",pocket_shiki_debug_install);
     // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
     // 'J' diagnostic, which runs MEGADEMO without a manifest).
     // docs/apps/megademo-shapes.md.
     if(app_registry_wants(app_registry_current(),"kasane.shapes")||test=='J')
-        TRY(pocketjs_guest_quickjs_install_once(guest,"shapes",pocket_shape_install,NULL));
+        TRY_NOJOIN("shapes",pocket_shape_install);
 source_ready:;
     JS_MarkCFunctions(join_rt,false);
     const char *source=user_source?user_source:hello_start;
