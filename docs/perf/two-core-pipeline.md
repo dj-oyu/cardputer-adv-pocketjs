@@ -2,7 +2,7 @@
 
 [性能と描画の文書](README.md) / [1 フレームの内訳](frame-breakdown.md)
 
-状態: **P0 の探針と P1b（表示タスク、すぐ join、`CONFIG_POCKET_DISP_TASK` 既定 n）まで実装。** 実測は [frame-breakdown.md](frame-breakdown.md) §8（P0）と §11（P1）。CPU 0 に置くと描画＋転送が +0.9 ms（+9.6%）延びた。IMU を読み手がいるときだけ読み、キーボードを INT ピンで門にした後は +0.41 ms。残りは LCD の SPI 完了割り込み（1 フレーム約 29 回、CPU 0）で、割り込みを CPU 1 に移すと −0.09 ms になり、合格の基準（+0.15 ms）を満たす（frame-breakdown.md §11）。送信をレジスタ直書き（`lcd_spi.c`、割り込みなし）にすると、表示タスクで 9.13 ms、inline 9.21 ms（キューの inline は 9.62 ms）で、表示タスクを使うビルドの既定にした。同じコアなら +0.10 ms。以下の本文は 2026-11-10 にコードを読んで作った（HEAD 881887f、ビルド・測定なし）。行番号は ±数行の目安。数値は「実測（出典）」か「推定（式）」を付けてある。未確認の前提は §6 にまとめた。
+状態: **P0 の探針、P1b（表示タスク、すぐ join、`CONFIG_POCKET_DISP_TASK` 既定 n）、P1a の 1〜6 まで実装（§7）。** 実測は [frame-breakdown.md](frame-breakdown.md) §8（P0）と §11（P1）。CPU 0 に置くと描画＋転送が +0.9 ms（+9.6%）延びた。IMU を読み手がいるときだけ読み、キーボードを INT ピンで門にした後は +0.41 ms。残りは LCD の SPI 完了割り込み（1 フレーム約 29 回、CPU 0）で、割り込みを CPU 1 に移すと −0.09 ms になり、合格の基準（+0.15 ms）を満たす（frame-breakdown.md §11）。送信をレジスタ直書き（`lcd_spi.c`、割り込みなし）にすると、表示タスクで 9.13 ms、inline 9.21 ms（キューの inline は 9.62 ms）で、表示タスクを使うビルドの既定にした。同じコアなら +0.10 ms。以下の本文は 2026-11-10 にコードを読んで作った（HEAD 881887f、ビルド・測定なし）。行番号は ±数行の目安。数値は「実測（出典）」か「推定（式）」を付けてある。未確認の前提は §6 にまとめた。
 
 フレーム N の描画・転送を別のタスク（CPU 0）で回している間に、UI タスク（CPU 1）がフレーム N+1 の JS を進める。JS が描画の読む状態に触れる所でだけ待ち合わせる（join）。
 
@@ -201,3 +201,20 @@ P1a の中身:
 - **R9** 続きのターン・park・Back の保存ターン・強制停止と表示相の組み合わせ。
 - **R10** 待ち方との噛み合わせ（`last_frame_us` に join の待ちが入る）。
 - **R11** 見込みの値（キャッシュと CPU 0 の影響を含まない）。P0 の実測から引き直す。
+
+## 7. 実装の記録
+
+### 7.1 P1a（2026-11-11）
+
+§5 の P1a の 1〜6 を入れた。どれも inline で動く間は振る舞いを変えない（host の検査で確かめた）。
+
+| 項目 | 入れたもの | コミット |
+| --- | --- | --- |
+| 1 | `render_rects_body` は `const ksn_core *` と準備済みの frame を受け取り、失敗の記録（defer repair／failed）を値で返す。中で使う 5 つの helper も `const` にし、core を書かないことをコンパイラに保証させた | aa84cfd |
+| 2〜4 | `ksn_render_begin/run/end`、`ksn_view_host_present_begin/end`、`ksn_runtime_present_begin/end`、`pocket_kasane_present_begin/end`。begin と end が core を変え（UI）、run（描画と completion の finish）は読むだけ。`app_session.c` は advance・begin・end・集計・ログを UI に残し、`present_run`（描画・送信・`board_present_frame_end`）だけを表示タスクに渡す | aa84cfd |
+| 5a〜5d | `tail_color`、tail の起点を pending の frame の後ろにも、`sig_ready=false` と image band・carry の無効化を `merge` へ、`half_carry` の確保を `pocket_proc_prepare_render`（present の前、UI）へ | 6c5cc69 |
+| 6 | `board_host_overlays`: pet・マイク・文字欄・notice の重ね描きを止めるスイッチ（今は常に on） | 6c5cc69 |
+
+- host: `test_kasane_dma_overlap`、`test_dma_completion_owners`、Kasane の一式（`KASANE_DMA_OVERLAP` あり・なし）、Shiki の proc・turn・api、STRESS の digest `84a31336`（4 行・8 行 × 範囲あり・なしで変更前と同じ）、DERBY の全 tier、board の half・transport・overlap、session dispatch。
+- 実機（c474b9d、測定用のコミットは戻した）: STRESS と DERBY で誤りなし。STRESS の描画＋転送は inline 9.01〜9.23 ms、表示タスク 9.12〜9.50 ms。DERBY のレースの FIELD では周期 16.4〜16.5 ms。
+- 残り: 7（host の「遅い join」）は P2a の仕組みと一緒に入れる。
