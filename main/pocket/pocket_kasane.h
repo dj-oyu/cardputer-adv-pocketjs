@@ -79,6 +79,21 @@ void pocket_kasane_invalidate_bands(uint32_t bands);
 uint32_t pocket_kasane_opaque_system_bands(void);
 ksn_result pocket_kasane_present_complete(const ksn_display_port *,
                                           const ksn_display_completion *,ksn_render_stats *);
+#ifdef KASANE_DMA_OVERLAP
+// pocket_kasane_present_complete in three parts, so the render can run on the
+// display task (docs/perf/two-core-pipeline.md P1a): begin and end on the UI
+// task, ksn_present_job_run(&job.present) on either in between. The caller
+// fills job.present.render's display, completion and stats. end returns the
+// present's result; between begin and end the Kasane state answers BUSY.
+typedef struct {
+    ksn_present_job present;
+    bool after;           // the present ran: end owes the per-resource results
+    bool proc_candidate;
+    ksn_result result;
+} pocket_kasane_present_job;
+void pocket_kasane_present_begin(pocket_kasane_present_job *);
+ksn_result pocket_kasane_present_end(pocket_kasane_present_job *);
+#endif
 ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,

@@ -53,6 +53,11 @@ bool ksn_runtime_invalidate_image_source_damage(ksn_resource resource,const ksn_
 uint32_t ksn_runtime_opaque_system_bands(void);
 ksn_result ksn_runtime_present_complete(const ksn_display_port *,ksn_backdrop_loader,bool,
                                         const ksn_display_completion *,ksn_render_stats *);
+#ifdef KASANE_DMA_OVERLAP
+/* ksn_runtime_present_complete in parts (ksn_present_job, ksn_view_host.h). */
+ksn_result ksn_runtime_present_begin(ksn_present_job *);
+ksn_result ksn_runtime_present_end(ksn_present_job *);
+#endif
 ksn_result ksn_runtime_present(const ksn_display_port *,ksn_render_stats *);
 ksn_result ksn_runtime_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
                                         bool occlusion_safe,ksn_render_stats *);

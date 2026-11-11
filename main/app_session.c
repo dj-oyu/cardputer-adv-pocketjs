@@ -2532,12 +2532,23 @@ void app_vm_back_selftest(void) {
 // its jobs submitted -- and a display frozen for the length of a long drain
 // would be a visible regression the level does not need to cause.
 static esp_err_t present_frame_body(void);
-// P1 of docs/perf/two-core-pipeline.md: the present may run on the display
-// task (disp.h), the UI task waiting for it. A capture prints its PIX rows
-// from inside the present, so it stays here.
 static esp_err_t present_frame(void) {
-    return disp_run(present_frame_body,frame_bd_disp_on_task()&&!board_capture_active());
+    return present_frame_body();
 }
+#ifdef KASANE_DMA_OVERLAP
+/* P1 of docs/perf/two-core-pipeline.md: the part of a present that only reads
+ * the Kasane core -- the render, its sends and the board's frame end -- may
+ * run on the display task (disp.h) while the UI task waits. The rest of
+ * present_frame_body (advance, the begin and end that change the core, the
+ * accounting and logs) stays on the UI task. A capture prints its PIX rows
+ * from inside the render, so it stays here too. */
+static pocket_kasane_present_job present_job;
+static esp_err_t present_run(void) {
+    ksn_present_job_run(&present_job.present);
+    board_present_frame_end();
+    return ESP_OK;
+}
+#endif
 static esp_err_t present_frame_body(void) {
     last_present_us=esp_timer_get_time();
     {
@@ -2580,11 +2591,15 @@ static esp_err_t present_frame_body(void) {
         int64_t began=esp_timer_get_time();
 #ifdef KASANE_DMA_OVERLAP
         const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
-        ksn_result result=pocket_kasane_present_complete(&port,&completion,&stats);
+        present_job=(pocket_kasane_present_job){.present={.render={.display=&port,
+                                                .completion=&completion,.stats=&stats}}};
+        pocket_kasane_present_begin(&present_job);
+        disp_run(present_run,frame_bd_disp_on_task()&&!board_capture_active());
+        ksn_result result=pocket_kasane_present_end(&present_job);
 #else
         ksn_result result=pocket_kasane_present(&port,&stats);
-#endif
         board_present_frame_end();
+#endif
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",

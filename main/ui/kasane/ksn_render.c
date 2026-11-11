@@ -275,7 +275,7 @@ static void stretch_axis(uint8_t *out,unsigned destination,unsigned source){
         else{rem+=r;index+=q;}
     }
 }
-static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
+static ksn_result image_read(const ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
                              const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch,
                              const uint8_t *map_x,const uint8_t *map_y,
                              const ksn_image_reader *reader){
@@ -1218,7 +1218,7 @@ static void cache_view(unsigned slot,const ksn_frame_command *command){
     decoded.valid[slot>>5]|=1u<<(slot&31u);
 }
 /* previous=false only: the renderer never reads the displayed bank. */
-static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index,
+static ksn_result frame_command(const ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index,
                                 const ksn_frame_view **out){
     unsigned slot=(layer==KSN_APP?0u:KSN_APP_COMMANDS)+index;
     if(g_ksn_decode_once&&slot<KSN_COMMANDS&&(decoded.valid[slot>>5]&(1u<<(slot&31u)))){
@@ -1524,7 +1524,7 @@ static void fold_pixel(ksn_fold_acc *acc,uint32_t *provenance,const ksn_frame_vi
  * own gate, so only the arithmetic between them differs. A TEXT child's span is
  * taken for the chunk (32 pixels) where the pre-3c path took it for 64; the port
  * is per-pixel by contract, and the pixels are compared either way. */
-static ksn_result group_folded_chunk(ksn_core *core,const ksn_text_port *text,ksn_tx ticket,
+static ksn_result group_folded_chunk(const ksn_core *core,const ksn_text_port *text,ksn_tx ticket,
                                      ksn_layer layer,unsigned first,unsigned end,uint8_t opacity,
                                      int py,int x0,int band_y,int count,uint8_t *coverage,
                                      bool has_dither,ksn_fold_acc *acc,uint16_t *pixels){
@@ -1585,7 +1585,7 @@ static ksn_result group_folded_chunk(ksn_core *core,const ksn_text_port *text,ks
  * `dither` is the topmost covering child's own provenance, and only when some
  * child of the group is a dithered gradient at all -- with has_dither false the
  * old chain's provenance bit was never set either. */
-static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned first,
+static ksn_result group_opaque_row(const ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned first,
                                    unsigned end,int py,int band_y,int dx0,int dx1,
                                    bool has_dither,uint16_t *pixels){
     const ksn_frame_view *command;
@@ -1626,7 +1626,7 @@ static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,
  * MEGADEMO's CORE scene ran its groups 27% slower on the device (lcd-dma-driver.md
  * §9.12). The attribute also keeps -O2 helpers from inlining here. */
 __attribute__((optimize("Os")))
-static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
+static ksn_result render_group(const ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,int dx0,int dx1,uint16_t *pixels){
     if(!opacity)return KSN_OK;
     /* One 256-byte scratch for both arms, so the fold costs no stack: the
@@ -1942,33 +1942,53 @@ static unsigned outside_opaque(ksn_rect box,ksn_rect opaque,ksn_rect out[4]){
     if(y1<box.y1)out[count++]=(ksn_rect){x0,y1,x1,box.y1};
     return count;
 }
+static bool render_args_ok(const ksn_core *core,const ksn_display_port *display,
+                           const ksn_render_stats *stats){
+    return core&&display&&stats&&display->strip&&display->present&&
+           display->width==240&&display->height==135&&
+           (display->strip_rows==8||display->strip_rows==4);
+}
 #ifdef KASANE_DMA_OVERLAP
-static ksn_result render_rects_body(ksn_core *core,const ksn_display_port *display,
+/* How a failed body must be recorded on the core, by its caller. */
+typedef enum {KSN_RENDER_OK,KSN_RENDER_DEFER_REPAIR,KSN_RENDER_FAILED} ksn_render_fate;
+#endif
+#ifdef KASANE_DMA_OVERLAP
+/* The renderer reads the core and changes nothing in it: the frame is
+ * prepared by the caller, and how a failure must be recorded comes back in
+ * *fate for the caller to apply (docs/perf/two-core-pipeline.md P1a). That is
+ * what lets the body run on another task while the UI task owns the core. */
+static ksn_result render_rects_body(const ksn_core *core,const ksn_frame *given,
+                               const ksn_display_port *display,
                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
-                               ksn_render_stats *stats,ksn_tx *prepared){
+                               ksn_render_stats *stats,ksn_render_fate *fate){
+#define RENDER_DEFER() (*fate=KSN_RENDER_DEFER_REPAIR)
+#define RENDER_FAILED() (*fate=KSN_RENDER_FAILED)
 #else
 static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
                                ksn_render_stats *stats){
     DD_SCOPE(DD_RENDER);
+#define RENDER_DEFER() ksn_core_defer_repair(core,frame.ticket)
+#define RENDER_FAILED() ksn_core_failed(core,frame.ticket)
 #endif
     DD_OPEN(prepare,DD_RENDER_PREPARE);
-    if(!core||!display||!stats||!display->strip||!display->present||
-       display->width!=240||display->height!=135||
-       (display->strip_rows!=8&&display->strip_rows!=4))return KSN_INVALID;
+#ifndef KASANE_DMA_OVERLAP
+    if(!render_args_ok(core,display,stats))return KSN_INVALID;
+#endif
     stretch_map.active=false;
     *stats=(ksn_render_stats){0};
     /* One frame's worth of decoded commands; a retried frame starts over. */
     memset(decoded.valid,0,sizeof(decoded.valid));
     uint32_t occluded=load_backdrop&&occlusion_safe?
         ksn_core_opaque_system_bands(core):0;
+#ifdef KASANE_DMA_OVERLAP
+    const ksn_frame frame=*given;ksn_result result=KSN_OK;
+#else
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
-#ifdef KASANE_DMA_OVERLAP
-    *prepared=frame.ticket;
 #endif
     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
-    if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+    if(result!=KSN_OK){RENDER_DEFER();return result;}
     damage.bands&=~occluded;
 #ifdef KASANE_DMA_OVERLAP
     if(!damage.bands)return KSN_OK;
@@ -2016,9 +2036,9 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         {KSN_PROF_BEGIN();
         result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
         KSN_PROF_END(read);}
-        if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+        if(result!=KSN_OK){RENDER_DEFER();return result;}
         if(command->draw.kind<KSN_RECT||command->draw.kind>KSN_IMAGE){
-            ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
+            RENDER_DEFER();return KSN_UNSUPPORTED;
         }
         if(layer==KSN_APP){
             if(command->group_begin)app_group=true;
@@ -2084,11 +2104,11 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             result=display->text&&display->text->span?
                 display->text->span(display->text->ctx,&command->draw,command->reveal,0,0,0,NULL):KSN_UNSUPPORTED;
             KSN_PROF_END(span);}
-            if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+            if(result!=KSN_OK){RENDER_DEFER();return result;}
         }
         if(command->draw.kind==KSN_IMAGE){
             result=ksn_core_image_span(core,frame.ticket,false,(ksn_layer)layer,i,0,0,0,NULL,NULL);
-            if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+            if(result!=KSN_OK){RENDER_DEFER();return result;}
         }
     }
     if(map_area){
@@ -2098,7 +2118,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         stretch_map.active=true;
     }
     uint16_t *pixels=display->strip(display->ctx);
-    if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
+    if(!pixels){RENDER_DEFER();return KSN_OOM;}
     DD_CLOSE(prepare);
     ksn_span_scratch scratch;
     bool first_band=true;
@@ -2117,7 +2137,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
          * other). The first came above, before anything went out. */
         if(!first_band){
             pixels=display->strip(display->ctx);
-            if(!pixels){ksn_core_failed(core,frame.ticket);return KSN_OOM;}
+            if(!pixels){RENDER_FAILED();return KSN_OOM;}
         }
         first_band=false;
         int y=piece_y,rows=band_y+band_rows-piece_y;
@@ -2126,7 +2146,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         DD_OPEN(backdrop,DD_BACKDROP);
         if(load_backdrop&&!(next_system_opaque&(1u<<band))){
             result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
-            if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+            if(result!=KSN_OK){RENDER_FAILED();return result;}
         }else if(!(next_system_opaque&(1u<<band))&&
                  !(g_ksn_cover_skip_fill&&(app_whole&(1u<<band)))){KSN_PROF_BEGIN();
             /* Whole strip in one call when the band is whole, which is every band
@@ -2144,20 +2164,20 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             {KSN_PROF_BEGIN();
             result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
             KSN_PROF_END(read);}
-            if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+            if(result!=KSN_OK){RENDER_FAILED();return result;}
             if(command->group_begin){
                 unsigned first=i;uint8_t opacity=command->group_opacity;
                 while(!command->group_end){
-                    if(++i>=frame.next[layer].commands){ksn_core_failed(core,frame.ticket);return KSN_INVALID;}
+                    if(++i>=frame.next[layer].commands){RENDER_FAILED();return KSN_INVALID;}
                     {KSN_PROF_BEGIN();
                     result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
                     KSN_PROF_END(read);}
-                    if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    if(result!=KSN_OK){RENDER_FAILED();return result;}
                 }
                 {KSN_PROF_BEGIN();
                 result=render_group(core,display->text,&scratch,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,dx0,dx1,pixels);
                 KSN_PROF_END(tile);}
-                if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                if(result!=KSN_OK){RENDER_FAILED();return result;}
                 continue;
             }
             const ksn_draw *d=&command->draw;
@@ -2195,7 +2215,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     {KSN_PROF_BEGIN();
                     result=display->text->span(display->text->ctx,d,command->reveal,x,py,count,scratch.text);
                     KSN_PROF_END(span);}
-                    if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    if(result!=KSN_OK){RENDER_FAILED();return result;}
                     {KSN_PROF_BEGIN();
                     uint16_t *row=pixels+(py-y)*240;
                     bool pie_row=g_ksn_text_pie&&g_ksn_blend_pie&&
@@ -2262,7 +2282,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 if(!d->data.image.rotation){
                     result=ksn_core_image_reader(core,frame.ticket,false,(ksn_layer)layer,
                                                  (uint16_t)i,&reader);
-                    if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    if(result!=KSN_OK){RENDER_FAILED();return result;}
                 }
                 bool identity=image_stretch_identity(d);
                 const uint8_t *map_x=stretch_map.active&&layer==KSN_APP&&
@@ -2279,14 +2299,14 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                         (uint16_t)(d->data.image.source_x+(x0-d->bounds.x0)),(uint16_t)(x1-x0),
                         pixels+(unsigned)((y0-y)*240+x0),240);
                     if(rows_result==KSN_OK){KSN_PROF_END(image);continue;}
-                    if(rows_result!=KSN_UNSUPPORTED){ksn_core_failed(core,frame.ticket);return rows_result;}
+                    if(rows_result!=KSN_UNSUPPORTED){RENDER_FAILED();return rows_result;}
                 }
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;){
                     unsigned count=(unsigned)(x1-x),limit=identity?32u:16u;
                     if(count>limit)count=limit;
                     result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,&count,&scratch,
                                       map_x,map_y,d->data.image.rotation?NULL:&reader);
-                    if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    if(result!=KSN_OK){RENDER_FAILED();return result;}
                     if(reader.opaque&&d->opacity==255){
                         uint16_t *dest=pixels+(unsigned)((py-y)*240+x);
                         if(identity)memcpy(dest,scratch.image.rgb,count*sizeof(*dest));
@@ -2403,7 +2423,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
         DD_CLOSE(present);
-        if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+        if(result!=KSN_OK){RENDER_FAILED();return result;}
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
         }
         stats->bands|=1u<<band;
@@ -2413,27 +2433,51 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
 #else
     return KSN_OK;
 #endif
+#undef RENDER_DEFER
+#undef RENDER_FAILED
 }
 #ifdef KASANE_DMA_OVERLAP
+ksn_result ksn_render_begin(ksn_render_job *job){
+    if(!job||!render_args_ok(job->core,job->display,job->stats))return KSN_INVALID;
+    /* A rejected caller owns no display work and must not drain another frame. */
+    ksn_result result=ksn_core_prepare_frame(job->core,&job->frame);
+    job->result=job->finished=KSN_OK;job->fate=KSN_RENDER_OK;
+    return result;
+}
+void ksn_render_run(ksn_render_job *job){
+    DD_SCOPE(DD_RENDER);
+    ksn_render_fate fate=KSN_RENDER_OK;
+    job->result=render_rects_body(job->core,&job->frame,job->display,job->load,
+                                  job->occlusion_safe,job->stats,&fate);
+    job->fate=(uint8_t)fate;
+    /* Even a provider failure after an earlier band must release the display
+     * borrow; the finish runs here, on the task that did the sends. */
+    job->finished=job->completion&&job->completion->finish?
+        job->completion->finish(job->completion->ctx):KSN_OK;
+}
+ksn_result ksn_render_end(ksn_render_job *job){
+    const ksn_tx prepared=job->frame.ticket;
+    if(job->fate==KSN_RENDER_DEFER_REPAIR)ksn_core_defer_repair(job->core,prepared);
+    else if(job->fate==KSN_RENDER_FAILED)ksn_core_failed(job->core,prepared);
+    /* Preserve the first error; completion failure must never ACK. */
+    ksn_result result=job->result;
+    if(job->finished!=KSN_OK){
+        if(prepared.value)ksn_core_failed(job->core,prepared);
+        if(result==KSN_OK)result=job->finished;
+    }
+    if(result==KSN_OK)return ksn_core_presented(job->core,prepared);
+    return result;
+}
 ksn_result ksn_render_rects_complete(ksn_core *core,const ksn_display_port *display,
                                      ksn_backdrop_loader load,bool occlusion_safe,
                                      const ksn_display_completion *completion,
                                      ksn_render_stats *stats){
-    DD_SCOPE(DD_RENDER);
-    ksn_tx prepared={0};
-    ksn_result result=render_rects_body(core,display,load,occlusion_safe,stats,&prepared);
-    /* A rejected caller owns no display work and must not drain another frame. */
-    if(!prepared.value)return result;
-    /* Even a provider failure after an earlier band must release the display
-     * borrow. Preserve the first error; completion failure must never ACK. */
-    ksn_result finished=completion&&completion->finish?
-        completion->finish(completion->ctx):KSN_OK;
-    if(finished!=KSN_OK){
-        if(prepared.value)ksn_core_failed(core,prepared);
-        if(result==KSN_OK)result=finished;
-    }
-    if(result==KSN_OK)return ksn_core_presented(core,prepared);
-    return result;
+    ksn_render_job job={.core=core,.display=display,.load=load,.occlusion_safe=occlusion_safe,
+                        .completion=completion,.stats=stats};
+    ksn_result result=ksn_render_begin(&job);
+    if(result!=KSN_OK)return result;
+    ksn_render_run(&job);
+    return ksn_render_end(&job);
 }
 #endif
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){

@@ -3047,22 +3047,68 @@ void pocket_kasane_invalidate(void) {
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     return pocket_kasane_present_complete(display,NULL,stats);
 }
-ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
-                                          const ksn_display_completion *completion,
-                                          ksn_render_stats *stats) {
-#else
-ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
-#endif
-    if(!stats) return KSN_INVALID;
+void pocket_kasane_present_begin(pocket_kasane_present_job *job) {
+    job->after=false;job->present.running=false;
+    ksn_render_stats *stats=job->present.render.stats;
+    const ksn_display_completion *completion=job->present.render.completion;
+    if(!stats) {job->result=KSN_INVALID;return;}
     *stats=(ksn_render_stats){0};
-#ifdef KASANE_DMA_OVERLAP
     /* No renderer will run on the empty path below. Complete any earlier
      * board work before its no-damage native acknowledgements as well. */
     if(!pocket_kasane_needs_present()&&completion&&completion->finish){
         ksn_result done=completion->finish(completion->ctx);
-        if(done!=KSN_OK)return done;
+        if(done!=KSN_OK) {job->result=done;return;}
+    }
+    if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
+        if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
+        else pocket_proc_present_result(KSN_OK);
+    }
+    if(pocket_grid_pending()&&!pocket_kasane_needs_present())
+        pocket_grid_present_result(KSN_OK);
+    if(pocket_video_pending()&&!pocket_kasane_needs_present())
+        pocket_video_present_result(KSN_OK);
+    if(pocket_pixel_pending()&&!pocket_kasane_needs_present())
+        pocket_pixel_present_result(KSN_OK);
+    if(!pocket_kasane_needs_present()) {job->result=KSN_OK;return;}
+    job->proc_candidate=pocket_proc_pending();
+    job->present.render.load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
+        pocket_proc_backdrop:NULL;
+    job->present.render.occlusion_safe=false;
+    job->after=true;
+    job->result=ksn_runtime_present_begin(&job->present);
+}
+ksn_result pocket_kasane_present_end(pocket_kasane_present_job *job) {
+    if(!job->after)return job->result;
+    job->after=false;
+    ksn_render_stats *stats=job->present.render.stats;
+    ksn_result result=ksn_runtime_present_end(&job->present);
+    if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
+        ksn_runtime_invalidate();
+    else pocket_proc_present_result(result);
+    pocket_grid_present_result(result);
+    pocket_video_present_result(result);
+    pocket_pixel_present_result(result);
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    if(job->proc_candidate&&result==KSN_OK&&stats->transferred_bytes){
+        ESP_LOGI("PROC_JS","frame=%lu bytes=%lu",
+                 (unsigned long)proc_log_frame++,(unsigned long)stats->transferred_bytes);
     }
 #endif
+    apply_outcome();return result;
+}
+ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
+                                          const ksn_display_completion *completion,
+                                          ksn_render_stats *stats) {
+    pocket_kasane_present_job job={.present={.render={.display=display,.completion=completion,
+                                                      .stats=stats}}};
+    pocket_kasane_present_begin(&job);
+    ksn_present_job_run(&job.present);
+    return pocket_kasane_present_end(&job);
+}
+#else
+ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
+    if(!stats) return KSN_INVALID;
+    *stats=(ksn_render_stats){0};
     if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
         if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
         else pocket_proc_present_result(KSN_OK);
@@ -3075,15 +3121,9 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
         pocket_pixel_present_result(KSN_OK);
     if(!pocket_kasane_needs_present()) return KSN_OK;
     bool proc_candidate=pocket_proc_pending();
-#ifdef KASANE_DMA_OVERLAP
-    ksn_backdrop_loader load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
-        pocket_proc_backdrop:NULL;
-    ksn_result result=ksn_runtime_present_complete(display,load,false,completion,stats);
-#else
     ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
         ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
         ksn_runtime_present(display,stats);
-#endif
     if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
         ksn_runtime_invalidate();
     else pocket_proc_present_result(result);
@@ -3100,6 +3140,7 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
 #endif
     apply_outcome();return result;
 }
+#endif
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
                                           ksn_backdrop_loader load,bool occlusion_safe,
                                           ksn_render_stats *stats) {
