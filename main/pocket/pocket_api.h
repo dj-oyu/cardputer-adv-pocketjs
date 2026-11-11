@@ -417,9 +417,9 @@ void pocket_api_reset(void);
 // claim: the functions in it never read or write what a present in flight
 // reads (sec.1.2). Function lists keep the mark they were registered under
 // however late they are first read.
-static inline int pocket_nojoin_begin(JSContext *ctx) {
-    return JS_SetCFunctionMark(JS_GetRuntime(ctx),0);
+static inline JSCFunctionMark pocket_nojoin_begin(JSContext *ctx) {
+    return JS_SetCFunctionMark(JS_GetRuntime(ctx),false);
 }
-static inline void pocket_nojoin_end(JSContext *ctx, int saved) {
-    JS_SetCFunctionMark(JS_GetRuntime(ctx),saved);
+static inline void pocket_nojoin_end(JSContext *ctx, JSCFunctionMark saved) {
+    JS_RestoreCFunctionMark(JS_GetRuntime(ctx),saved);
 }

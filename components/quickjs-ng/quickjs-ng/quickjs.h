@@ -1278,19 +1278,27 @@ JS_EXTERN void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, voi
 /* if can_block is true, Atomics.wait() can be used */
 JS_EXTERN void JS_SetCanBlock(JSRuntime *rt, bool can_block);
 /* Pocket (docs/perf/two-core-pipeline.md, P2a): a native function marked
-   "join" calls the runtime's join hook before it runs. Functions created
-   while the mark count is above zero are marked; JS_MarkCFunctions(rt, true)
-   raises it and (rt, false) lowers it, and a marked call raises it for its
-   own duration. JS_SetCFunctionJoin changes one function (false when it is
-   not a native function); JS_GetCFunctionJoin returns 0/1, or -1. */
+   "join" calls the runtime's join hook before it runs. A function is marked
+   when it is created while marking is on and the current stack frame is the
+   one that turned it on: JS_MarkCFunctions / JS_SetCFunctionMark turn it on
+   or off for the caller's frame, and a marked call turns it on for its own,
+   so functions its body creates are marked and functions created by any JS
+   it runs (or builtins instantiated meanwhile) are not. Function lists keep
+   the mark they were registered under, however late they are first read.
+   JS_SetCFunctionJoin changes one function (false when it is not a native
+   function); JS_GetCFunctionJoin returns 0/1, or -1. */
+typedef struct JSCFunctionMark { int marking; void *frame; } JSCFunctionMark;
 JS_EXTERN void JS_SetCFunctionJoinHook(JSRuntime *rt, void (*hook)(JSContext *ctx));
 JS_EXTERN void JS_MarkCFunctions(JSRuntime *rt, bool on);
-/* The mark count now (> 0: functions created now are marked), and the hook
-   called by hand, for a native function that joins only on some paths. */
+JS_EXTERN bool JS_SetCFunctionJoin(JSValueConst func, bool join);
+JS_EXTERN int JS_GetCFunctionJoin(JSValueConst func);
+/* Whether a function created here and now would be marked. */
 JS_EXTERN int JS_GetCFunctionMark(JSRuntime *rt);
-/* Sets the count and returns the old one: a span of unmarked functions
-   inside a marked one (count 0, then the old count back). */
-JS_EXTERN int JS_SetCFunctionMark(JSRuntime *rt, int count);
+/* Turns marking on or off for the caller's frame and returns the previous
+   state, for JS_RestoreCFunctionMark. */
+JS_EXTERN JSCFunctionMark JS_SetCFunctionMark(JSRuntime *rt, bool on);
+JS_EXTERN void JS_RestoreCFunctionMark(JSRuntime *rt, JSCFunctionMark saved);
+/* The hook called by hand, for a native function that joins on some paths. */
 JS_EXTERN void JS_CFunctionJoin(JSContext *ctx);
 JS_EXTERN bool JS_SetCFunctionJoin(JSValueConst func, bool join);
 JS_EXTERN int JS_GetCFunctionJoin(JSValueConst func);

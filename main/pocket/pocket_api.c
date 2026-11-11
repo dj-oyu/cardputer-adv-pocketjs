@@ -768,9 +768,11 @@ static JSValue js_lazy_namespace(JSContext *ctx, JSValueConst this_val,
         if(lazy[i].join && !strcmp(lazy[i].name,name)) { JS_CFunctionJoin(ctx); break; }
     for(unsigned i=(unsigned)magic;i<lazy_count && err==ESP_OK;i++)
         if(!strcmp(lazy[i].name,name)) {
-            if(lazy[i].join) JS_MarkCFunctions(rt,true);
+            // Its own mark, not the reader's (a namespace first read from
+            // inside a marked call is built as it would be anywhere else).
+            JSCFunctionMark mark=JS_SetCFunctionMark(rt,lazy[i].join);
             err=lazy[i].contribute(ctx,ns,lazy[i].user);
-            if(lazy[i].join) JS_MarkCFunctions(rt,false);
+            JS_RestoreCFunctionMark(rt,mark);
         }
     if(err!=ESP_OK) {
         // Nothing half-built is ever installed: the partial object goes and the

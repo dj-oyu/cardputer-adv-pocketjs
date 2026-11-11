@@ -1623,9 +1623,9 @@ esp_err_t app_start_test(char test) {
     // overlay do; av joins only for its two Kasane sources, which it marks
     // itself). A surface not listed here joins, which is the safe default.
 #define TRY_NOJOIN(name,install) do{ \
-        int saved_mark_=JS_SetCFunctionMark(join_rt,0); \
+        JSCFunctionMark saved_mark_=JS_SetCFunctionMark(join_rt,false); \
         esp_err_t nojoin_err_=pocketjs_guest_quickjs_install_once(guest,name,install,NULL); \
-        JS_SetCFunctionMark(join_rt,saved_mark_); \
+        JS_RestoreCFunctionMark(join_rt,saved_mark_); \
         TRY(nojoin_err_); \
     }while(0)
     TRY_NOJOIN("pocket",pocket_api_install);

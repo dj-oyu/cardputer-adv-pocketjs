@@ -55,6 +55,22 @@ static JSValue fn_throw(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_ThrowTypeError(ctx, "boom");
 }
 
+// A surface method that runs a guest callback, as Kasane's scene build does.
+static JSValue fn_call(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_UNDEFINED;
+    JSValue r = JS_Call(ctx, argv[0], JS_UNDEFINED, 0, NULL);
+    if (JS_IsException(r))
+        return r;
+    JS_FreeValue(ctx, r);
+    // and creates a function of its own after the callback: still marked
+    JSValue one = JS_NewInt32(ctx, 9);
+    return JS_NewCFunctionData(ctx, fn_data, 0, 0, 1, &one);
+}
+
 static JSValue fn_get(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
@@ -120,18 +136,21 @@ int main(void)
     set_fn(ctx, pocket, "data", JS_NewCFunctionData(ctx, fn_data, 0, 0, 1, &d));
     set_fn(ctx, pocket, "maker", JS_NewCFunction(ctx, fn_maker, "maker", 0));
     set_fn(ctx, pocket, "thrower", JS_NewCFunction(ctx, fn_throw, "thrower", 0));
+    set_fn(ctx, pocket, "callIt", JS_NewCFunction(ctx, fn_call, "callIt", 1));
     JSValue optout = JS_NewCFunction(ctx, fn_plain, "optout", 0);
     CHECK(JS_SetCFunctionJoin(optout, false), "opt-out refused");
     set_fn(ctx, pocket, "optout", optout);
     JS_SetPropertyFunctionList(ctx, pocket, list, 3);
     // A span with the count zeroed inside a marked one: unmarked, list too.
-    int saved = JS_SetCFunctionMark(rt, 0);
+    JSCFunctionMark saved = JS_SetCFunctionMark(rt, false);
     set_fn(ctx, pocket, "span", JS_NewCFunction(ctx, fn_plain, "span", 0));
     static const JSCFunctionListEntry span_list[] = {
         JS_CFUNC_DEF("spanListed", 0, fn_plain),
     };
     JS_SetPropertyFunctionList(ctx, pocket, span_list, 1);
-    CHECK(JS_SetCFunctionMark(rt, saved) == 0, "span count");
+    CHECK(JS_GetCFunctionMark(rt) == 0, "span not off");
+    JS_RestoreCFunctionMark(rt, saved);
+    CHECK(JS_GetCFunctionMark(rt) == 1, "span restore");
     // data_len gave its top bit to the flag
     JSValue many[128] = {0};
     for (int i = 0; i < 128; i++) many[i] = JS_UNDEFINED;
@@ -147,6 +166,11 @@ int main(void)
     CHECK(JS_GetCFunctionJoin(g) == -1, "plain object reported as native");
 
     struct { const char *src; int want_result; int want_hooks; } cases[] = {
+        // Builtins first touched, and engine functions made, by guest JS that
+        // a marked call runs: unmarked. callIt + its product = 2 hooks.
+        { "pocket.callIt(() => { 'a'.padStart(3); [1].findLast(x => x);"
+          " Promise.resolve(1).finally(() => 0); new Map(); })()", 9, 2 },
+        { "'a'.padStart(3).length + [1].findLast(x => x) + new Map().size", 4, 0 },
         { "early()", 1, 0 },
         { "pocket.plain()", 1, 1 },
         { "pocket.data()", 5, 1 },
@@ -155,7 +179,7 @@ int main(void)
         { "pocket.optout()", 1, 0 },
         { "pocket.nested.deep()", 1, 1 },
         { "pocket.span() + pocket.spanListed()", 2, 0 },
-        { "Object.keys(pocket).length", 6, 0 },
+        { "Object.keys(pocket).length", 7, 0 },
         { "engine.listed() + engine.prop", 4, 0 },
         // a function made by a marked call is marked: maker + its product
         { "pocket.maker()()", 7, 2 },

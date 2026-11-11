@@ -1037,7 +1037,7 @@ static const JSCFunctionListEntry frame_methods[]={
     JS_CFUNC_DEF("createSurface",0,js_create_surface),
 };
 esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
-    int mark=pocket_nojoin_begin(ctx);
+    JSCFunctionMark mark=pocket_nojoin_begin(ctx);
     int r=JS_SetPropertyFunctionList(ctx,obj,begin_method,1);
     pocket_nojoin_end(ctx,mark);
     if(r<0)return ESP_ERR_NO_MEM;

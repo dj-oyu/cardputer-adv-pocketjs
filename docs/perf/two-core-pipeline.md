@@ -224,9 +224,22 @@ P1a の中身:
 §2.3 A は「join する関数を手で並べる」形だった。並べ漏れはその関数が表示タスクと競合するだけで、host でも実機でもまず見つからない。そこで、同梱の quickjs-ng（このリポジトリで直接変更している。上流には出さない）に、**ファームが作ったネイティブ関数は呼ばれる前に join のフックを呼ぶ**という印を入れた。join しない関数（§2.3 A の除外）だけを手で外す。
 
 - 印: `JSObject.u.cfunc` の `cproto` を 7 bit にして空いた 1 bit、`JSCFunctionDataRecord` の `data_len` の最上位 bit（data は 127 個まで。超えると RangeError）。オブジェクトの大きさは変わらない。
-- 付け方: `JS_MarkCFunctions(rt, true/false)` で数を上げ下げし、0 より大きい間に作られた関数に印が付く。印のある関数を呼んでいる間も数が上がるので、面が実行中に作る関数（cancel トークン、購読の `close` など）にも付く。エンジンが自分で作る関数（`Promise.finally`、`Promise.all` の要素関数など）には付かない。
-- 遅延生成: 関数表（`JS_SetPropertyFunctionList`）の関数は最初に読まれたときに作られるので、登録の時点の印を残しておく。autoinit は未使用だった id 3（`JS_AUTOINIT_ID_PROP_JOIN`）、遅延リストは `len` の 1 bit。入れ子の `JS_OBJECT_DEF` にも伝わる。
+- 付け方: 印は「印を立てたスタックフレーム」から直接作られた関数にだけ付く（`rt->cfunc_marking` と `rt->cfunc_mark_sf`）。`JS_MarkCFunctions` / `JS_SetCFunctionMark` は呼び手のフレームで立て・下ろし、印のある関数の呼び出しは自分のフレームで立てる。したがって面が実行中に作る関数（cancel トークン、購読の `close` など）には付き、その呼び出しが走らせる JS（Kasane の scene の build など）と、その JS が作る・初めて使う組み込み（`Promise.finally` の thunk、`Array.prototype.map` など）には付かない。
+  - 最初の版は「数を足す」形で、印のある呼び出しの中で初めて使われた組み込みにまで永久に印が付いた（Fable のレビュー F1）。重なりが黙って消える種類の誤りなので、フレームで限る形に直した。
+- 遅延生成: 関数表（`JS_SetPropertyFunctionList`）の関数は最初に読まれたときに作られるので、登録の時点の印を残し、作るときはその印に**置き換える**（読み手の印は使わない）。autoinit は未使用だった id 3（`JS_AUTOINIT_ID_PROP_JOIN`）、遅延リストは `len` の 1 bit。入れ子の `JS_OBJECT_DEF` にも伝わる。エンジンの遅延 intrinsic（`Map` など）は常に印なし。遅延名前空間（`pocket_api_lazy`）も貢献者ごとに登録時の印に置き換える。
 - 呼び出し側: `js_call_c_function` と `js_call_c_function_data` の 2 か所（ほかの経路は iterator の近道だけで、印のある関数は近道を通らない）。印の無い関数の費用は分岐 1 つ（推定。未計測）。
 - 外す: `JS_SetCFunctionJoin(func, false)`。
 - 検査: `tools/vmtest/cfunc_join.sh`（asan）。直接作った関数・data 関数・関数表・getter・入れ子・実行中に作った関数・`call`/`bind`/`map` 経由・例外の後で数が 0 に戻ること・エンジンの関数には付かないこと。フックの呼び出しを消す変異、遅延リストの印を消す変異は、どちらも検査が落ちる。`tools/vmtest/run.sh` の 88 件は変わらず通る。
-- ファームはまだ呼んでいない（フック未登録、印も付けていない）。次は `disp_start`/`disp_join` とフックの登録、印の範囲（install と遅延名前空間）、除外の一覧。
+- 外す面（`app_session.c` の `TRY_NOJOIN`）: 表示相の状態に触れない面を調べた結果（pocket の土台、memory、random、storage、app、fs、av、imu、io、net、ble、input、text、bridge、workspace、derby、shiki-debug、shapes）。kasane・capture・pet-hub・overlay は外さない。av の `outputSource`・`playbackSource` は Kasane に届くので、av 自身が印を付ける。`kasane.shiki` は `beginFrame`・`draw*`・slot/region/list・`heap`・`sin/cos` を外し、`commit`・`resource`・`createSurface` は join する。載っていない面は join する（安全側）。
+- `disp_start` / `disp_join`（`main/hal/disp.c`）: start は表示タスクに渡してすぐ戻り、join は待ってから finish を UI タスクで走らせる。タスクが無いときはその場で走らせ、finish は join まで待つ。フックは `disp_join`。present はまだ `disp_run`（同期）なので、今は何も重ならない。
+
+#### 配線の前に直すこと（Fable のレビュー、2026-11-11）
+
+- F6: finish は「確認」（`present_end`、結果・統計・時刻を静的な job に残す）だけにする。集計・ログ・`ESP_FAIL`・§2.3 E のやり直しは次の `present_frame` / `app_tick` で。フックは任意の JS の深さで走り、エラーを返せない。
+- F7: host の重ね描き（text・pet・capture）を、遅延するフレームでは止める（`board_host_overlays` を job ごとに）。それまでは text の `TRY_NOJOIN` は成り立たない。
+- F8: `beginFrame` の BUSY を、表示中のフレームについては緩める。そのとき `commit` は join の後・`merge()` の前に `any_pending()||any_repair()` を見直す。`buffers()` が `image_band_buf` を確保するのは `resource` / `prepare_render` だけにする。
+- F11: `port`・`stats`・`display_state`・`completion` は `present_frame_body` の局所変数。job から指しているので、遅延すると宙に浮く。静的にする。
+- F12: `disp_join` を UI タスク以外から呼んだら止める assert（`CONFIG_POCKET_DISP_ASSERT`）。表示タスクから呼ぶと永久に待つ。
+- F13: §2.3 の B・C・D の join（`app_stop` は面の reset とランタイムの解放の前）。
+- F14: 待ちに 1 秒の診断、join した場所の計数（重なりが消えた原因を見えるように）。
+- F3・F4（済・記録）: `js_call_math_fast` は印のある関数を通さない。GC の finalizer は join しない native の入口なので、表示相が読むものを finalizer で解放しない。

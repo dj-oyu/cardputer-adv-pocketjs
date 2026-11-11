@@ -315,12 +315,17 @@ struct JSRuntime {
     /* Pocket: called before any native function marked "join" runs
        (docs/perf/two-core-pipeline.md, P2a). The display task may still be
        reading the render state that such a function writes; the hook waits
-       for it. cfunc_mark > 0 marks every native function created meanwhile:
-       the firmware raises it while it installs its surfaces, and a marked
-       call raises it for its own duration, so what a surface creates at run
-       time (a cancel token, a subscription's close) is marked too. */
+       for it. A native function is marked when it is created while
+       cfunc_marking is set AND the current stack frame is the one that set
+       it (js_cfunc_marking): the firmware sets it while it installs its
+       surfaces, and a marked call sets it for its own frame, so what a
+       surface creates at run time (a cancel token, a subscription's close)
+       is marked, while whatever JS that call runs -- and every builtin that
+       JS reaches, or instantiates on first use -- runs in other frames and
+       creates unmarked functions. */
     void (*cfunc_join)(JSContext *ctx);
-    int cfunc_mark;
+    bool cfunc_marking;
+    struct JSStackFrame *cfunc_mark_sf;
 
     int atom_hash_size; /* power of two */
     int atom_count;
@@ -472,6 +477,28 @@ struct JSRuntime {
     void *libc_opaque;
     JSRuntimeFinalizerState *finalizers;
 };
+
+/* Pocket: whether a native function created now is marked "join" */
+static inline bool js_cfunc_marking(JSRuntime *rt)
+{
+    return rt->cfunc_marking && rt->current_stack_frame == rt->cfunc_mark_sf;
+}
+
+/* Pocket: sets the mark for the current frame; returns what it replaced */
+static inline JSCFunctionMark js_mark_set(JSRuntime *rt, bool on)
+{
+    JSCFunctionMark old = { rt->cfunc_marking, rt->cfunc_mark_sf };
+    rt->cfunc_marking = on;
+    rt->cfunc_mark_sf = rt->current_stack_frame;
+    return old;
+}
+
+static inline void js_mark_restore(JSRuntime *rt, JSCFunctionMark m)
+{
+    rt->cfunc_marking = m.marking;
+    rt->cfunc_mark_sf = m.frame;
+}
+
 
 struct JSClass {
     uint32_t class_id; /* 0 means free entry */
@@ -7511,7 +7538,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p->u.cfunc.c_function.generic = func;
     p->u.cfunc.length = length;
     p->u.cfunc.cproto = cproto;
-    p->u.cfunc.join = ctx->rt->cfunc_mark > 0;
+    p->u.cfunc.join = js_cfunc_marking(ctx->rt);
     p->u.cfunc.magic = magic;
     p->is_constructor = (cproto == JS_CFUNC_constructor ||
                          cproto == JS_CFUNC_constructor_magic ||
@@ -7958,9 +7985,9 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     if (unlikely(s->join)) {
         if (rt->cfunc_join)
             rt->cfunc_join(ctx);
-        rt->cfunc_mark++;
+        JSCFunctionMark m = js_mark_set(rt, true);   /* this frame: sf */
         ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
-        rt->cfunc_mark--;
+        js_mark_restore(rt, m);
     } else {
         ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
     }
@@ -7995,7 +8022,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
     s->func = func;
     s->length = length;
     s->data_len = data_len;
-    s->join = ctx->rt->cfunc_mark > 0;
+    s->join = js_cfunc_marking(ctx->rt);
     s->magic = magic;
     for (i = 0; i < data_len; i++) {
         s->data[i] = js_dup(data[i]);
@@ -8030,19 +8057,22 @@ void JS_SetCFunctionJoinHook(JSRuntime *rt, void (*hook)(JSContext *ctx))
 
 void JS_MarkCFunctions(JSRuntime *rt, bool on)
 {
-    rt->cfunc_mark += on ? 1 : -1;
+    js_mark_set(rt, on);
 }
 
 int JS_GetCFunctionMark(JSRuntime *rt)
 {
-    return rt->cfunc_mark;
+    return js_cfunc_marking(rt);
 }
 
-int JS_SetCFunctionMark(JSRuntime *rt, int count)
+JSCFunctionMark JS_SetCFunctionMark(JSRuntime *rt, bool on)
 {
-    int old = rt->cfunc_mark;
-    rt->cfunc_mark = count;
-    return old;
+    return js_mark_set(rt, on);
+}
+
+void JS_RestoreCFunctionMark(JSRuntime *rt, JSCFunctionMark saved)
+{
+    js_mark_restore(rt, saved);
 }
 
 void JS_CFunctionJoin(JSContext *ctx)
@@ -8096,7 +8126,7 @@ static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
 /* Pocket: the id a function-list entry is deferred under */
 static JSAutoInitIDEnum js_autoinit_prop_id(JSRuntime *rt)
 {
-    return rt->cfunc_mark > 0 ? JS_AUTOINIT_ID_PROP_JOIN : JS_AUTOINIT_ID_PROP;
+    return js_cfunc_marking(rt) ? JS_AUTOINIT_ID_PROP_JOIN : JS_AUTOINIT_ID_PROP;
 }
 
 static void js_autoinit_free(JSRuntime *rt, JSProperty *pr)
@@ -10562,22 +10592,11 @@ fail:
 /* return the value associated to the autoinit property or an exception */
 typedef JSValue JSAutoInitFunc(JSContext *ctx, JSObject *p, JSAtom atom, void *opaque);
 
-static JSValue js_instantiate_prop_join(JSContext *ctx, JSObject *p,
-                                        JSAtom atom, void *opaque)
-{
-    JSValue val;
-
-    ctx->rt->cfunc_mark++;
-    val = JS_InstantiateFunctionListItem2(ctx, p, atom, opaque);
-    ctx->rt->cfunc_mark--;
-    return val;
-}
-
 static JSAutoInitFunc *const js_autoinit_func_table[] = {
     js_instantiate_prototype, /* JS_AUTOINIT_ID_PROTOTYPE */
     js_module_ns_autoinit, /* JS_AUTOINIT_ID_MODULE_NS */
     JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP */
-    js_instantiate_prop_join, /* JS_AUTOINIT_ID_PROP_JOIN */
+    JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP_JOIN */
 };
 
 /* warning: 'prs' is reallocated after it */
@@ -10594,8 +10613,13 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
 
     realm = js_autoinit_get_realm(pr);
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
+    /* Pocket: under the mark the entry was registered with, whoever reads
+       it first: a builtin first used inside a marked call stays unmarked. */
+    JSCFunctionMark mark = js_mark_set(ctx->rt,
+                                       js_autoinit_get_id(pr) == JS_AUTOINIT_ID_PROP_JOIN);
     /* 'func' shall not modify the object properties 'pr' */
     val = func(realm, p, prop, pr->u.init.opaque);
+    js_mark_restore(ctx->rt, mark);
     /* PocketJS: upstream turned the property into a plain `undefined` before
      * looking at the result, so one failed instantiation (an OOM in
      * JS_NewCFunction2 on first use) removed the builtin for the rest of the
@@ -19789,6 +19813,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     int arg_count, i;
     JSCFunctionEnum cproto;
     int join;
+    JSCFunctionMark saved_mark = { 0, NULL };
 
     p = JS_VALUE_GET_OBJ(func_obj);
     cproto = p->u.cfunc.cproto;
@@ -19798,18 +19823,18 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     if (js_check_stack_overflow(rt, sizeof(arg_buf[0]) * arg_count)) {
         return JS_ThrowStackOverflow(ctx);
     }
-    /* Pocket: after the only early return, which would leak the mark. The
-       hook runs no JS and cannot fail. */
+    /* Pocket: after the only early return. The hook runs no JS and cannot
+       fail. The mark is set once this call's frame is current: what the
+       body creates is marked, what JS it calls creates is not. */
     join = p->u.cfunc.join;
-    if (unlikely(join)) {
-        if (rt->cfunc_join)
-            rt->cfunc_join(ctx);
-        rt->cfunc_mark++;
-    }
+    if (unlikely(join) && rt->cfunc_join)
+        rt->cfunc_join(ctx);
 
     prev_sf = rt->current_stack_frame;
     sf->prev_frame = prev_sf;
     rt->current_stack_frame = sf;
+    if (unlikely(join))
+        saved_mark = js_mark_set(rt, true);
     ctx = js_cfunc_realm(ctx, p); /* change the current realm */
 
     sf->is_strict_mode = false;
@@ -19911,8 +19936,9 @@ not_a_constructor:
         abort();
     }
 
+    if (unlikely(join))
+        js_mark_restore(rt, saved_mark);
     js_vm_pop_frame(rt, sf);
-    rt->cfunc_mark -= join;
     return ret_val;
 }
 
@@ -19958,7 +19984,9 @@ static no_inline bool js_call_math_fast(JSContext *ctx, JSValueConst func_obj,
     if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(func_obj);
-    if (p->class_id != JS_CLASS_C_FUNCTION || argc < p->u.cfunc.length)
+    /* Pocket: a marked function takes the full call, which joins */
+    if (p->class_id != JS_CLASS_C_FUNCTION || argc < p->u.cfunc.length ||
+            p->u.cfunc.join)
         return false;
     for (i = 0; i < argc; i++) {
         uint32_t tag = JS_VALUE_GET_TAG(argv[i]);
@@ -45024,17 +45052,16 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
     return 0;
 }
 
-/* Pocket: lazy_define for an entry of list `l`, under the list's join mark.
-   `l` is read before the call only: rt->lazy may move under it. */
+/* Pocket: lazy_define for an entry of list `l`, under the mark the list was
+   registered with (not the reader's). `l` is read before the call only:
+   rt->lazy may move under it. */
 static int lazy_define_list(JSLazyList *l, JSObject *p, JSAtom atom,
                             const JSCFunctionListEntry *e)
 {
     JSContext *realm = l->realm;
-    int join = l->join, ret;
-
-    realm->rt->cfunc_mark += join;
-    ret = lazy_define(realm, p, atom, e);
-    realm->rt->cfunc_mark -= join;
+    JSCFunctionMark mark = js_mark_set(realm->rt, l->join);
+    int ret = lazy_define(realm, p, atom, e);
+    js_mark_restore(realm->rt, mark);
     return ret;
 }
 
@@ -45328,7 +45355,7 @@ static int lazy_register(JSContext *ctx, JSValueConst obj,
     memmove(&rt->lazy[end + 1], &rt->lazy[end], (rt->lazy_count - end) * sizeof(rt->lazy[0]));
     rt->lazy_count++;
     rt->lazy[end] = (JSLazyList){ .obj = p, .realm = ctx, .tab = tab,
-                                  .len = (uint16_t)len, .join = rt->cfunc_mark > 0,
+                                  .len = (uint16_t)len, .join = js_cfunc_marking(rt),
                                   .pos = (uint16_t)q };
     js_obj_set_lazy(p, true);
     /* The builtins are created with their shape pre-sized for the list
@@ -70726,7 +70753,13 @@ static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id)
        not expected. Kept as the safe answer. */
     if (!JS_IsNull(ctx->class_proto[class_id]))
         return JS_GetProperty(ctx, ctx->class_proto[class_id], JS_ATOM_constructor);
-    return js_lazy_make(ctx, class_id);
+    {
+        /* Pocket: an intrinsic is the engine's, whoever touches it first */
+        JSCFunctionMark mark = js_mark_set(ctx->rt, false);
+        JSValue v = js_lazy_make(ctx, class_id);
+        js_mark_restore(ctx->rt, mark);
+        return v;
+    }
 }
 
 /* A class_proto read found JS_NULL (LAZY_CLASS_MISSING). 0 = the prototype
@@ -70758,7 +70791,11 @@ static int js_lazy_class_ensure(JSContext *ctx, int class_id)
                 return JS_AutoInitProperty(ctx, g, atom, pr, prs);
         }
     }
-    ctor = js_lazy_make(ctx, class_id);
+    {
+        JSCFunctionMark mark = js_mark_set(ctx->rt, false);
+        ctor = js_lazy_make(ctx, class_id);
+        js_mark_restore(ctx->rt, mark);
+    }
     if (JS_IsException(ctor))
         return -1;
     JS_FreeValue(ctx, ctor);
