@@ -255,7 +255,8 @@ menu "Pocket VM (diagnostics)"
         depends on POCKET_FRAME_BREAKDOWN
         default n
         help
-            Measurement only. Needs a BOARD_LCD_DIRECT build (main/hal/board.h):
+            Measurement only. Needs BOARD_LCD_DIRECT (main/hal/board.h; on with
+            POCKET_DISP_TASK):
             lcd_spi.c's register-driven sends against spi_master's queue,
             crossed with POCKET_FRAME_BD_DISP_AB's three display modes.
 
