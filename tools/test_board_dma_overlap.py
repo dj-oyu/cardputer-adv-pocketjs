@@ -22,6 +22,7 @@ typedef int esp_err_t;
 enum {DD_TX_FAILURES,DD_TX_REAPS,DD_TX_COPY_BYTES,DD_TX_SUBMITS,DD_TX_PAYLOAD_BYTES,DD_EVENTS};
 static unsigned detail[DD_EVENTS];
 #define DD_ADD(event,amount) (detail[event]+=(unsigned)(amount))
+#define LCD_TX_COUNT(e) ((void)(e))
 #define ESP_OK 0
 #define ESP_ERR_INVALID_ARG 22
 #define ESP_ERR_TIMEOUT 23

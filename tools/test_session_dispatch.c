@@ -95,6 +95,13 @@ PUMP(pocket_av_pump,'v')
 /* Silent, like the pumps added after the call strings were fixed. */
 static void pocket_video_sd_stream_reap(void){}
 static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
+/* Measurement probes (frame_bd.h, icache_ab), compiled out on the device by
+ * default: silent here, none of them decides an ordering. */
+static void frame_bd_turn_begin(void){}
+static void frame_bd_turn_end(void){}
+static void frame_bd_js(uint32_t us){(void)us;}
+static void frame_bd_tick(uint32_t us){(void)us;}
+static void icache_ab_turn(void){}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;

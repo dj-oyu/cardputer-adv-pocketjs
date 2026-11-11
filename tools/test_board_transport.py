@@ -53,6 +53,7 @@ typedef int esp_err_t;
 #define DD_OPEN(x,y) ((void)0)
 #define DD_CLOSE(x) ((void)0)
 #define DD_ADD(x,y) ((void)(y))
+#define LCD_TX_COUNT(e) ((void)(e))
 #define pdMS_TO_TICKS(x) (x)
 #define vTaskDelay(x) ((void)(x))
 #define gpio_set_level(p,v) ((void)(p),(void)(v))
