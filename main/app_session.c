@@ -630,16 +630,18 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     // what was committed into it. Every band is refilled from the scene's
     // background, so nothing drawn here survives into the next frame, and a
     // field that changed invalidates the bands it covers (main.c).
-    pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
-    // Kasane promotes its command bank only after acknowledged transfers.
-    pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    if(board_host_overlays) {
+        pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
+        // Kasane promotes its command bank only after acknowledged transfers.
+        pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    }
     esp_err_t result;
 #ifdef KASANE_DMA_OVERLAP
     { result=kasane_dma_submit(display,0,y,LCD_W,rows,(uint16_t *)pixels); }
 #else
     { result=board_present_sync(y,rows,(uint16_t *)pixels); }
 #endif
-    pet_hub_overlay_suppress(false);
+    if(board_host_overlays) pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
@@ -663,15 +665,17 @@ static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t c
     if(p2_fail_this_send(y))return KSN_IO;
 #endif
     int64_t began=esp_timer_get_time();
-    pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
-    pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    if(board_host_overlays) {
+        pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
+        pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    }
     esp_err_t result;
 #ifdef KASANE_DMA_OVERLAP
     { result=kasane_dma_submit(display,x,y,cols,rows,(uint16_t *)pixels); }
 #else
     { result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels); }
 #endif
-    pet_hub_overlay_suppress(false);
+    if(board_host_overlays) pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }

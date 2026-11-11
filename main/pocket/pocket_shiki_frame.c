@@ -137,6 +137,10 @@ typedef struct {
     bool committed_lost;     /* commit() wrote the new frame over the committed one */
     proc_band_sig candidate_sig,committed_sig;
     uint16_t candidate_color,committed_color;
+    /* beginFrame's colour, for the frame being built: commit() makes it the
+     * candidate's. candidate_color itself is the front frame's, which the
+     * display may be drawing meanwhile (docs/perf/two-core-pipeline.md 5a). */
+    uint16_t tail_color;
     bool pending,has_committed,repair_required,image_mode;
     bool sig_ready; /* candidate_sig describes the candidate (commit .. next beginFrame) */
     uint32_t handle;
@@ -390,7 +394,7 @@ PROC_HOT static void damage_add(const ksn_proc_frame *frame,int *bx0,int *by0,in
 typedef struct { int x0,y0,x1,y1; bool whole; } proc_box;
 static proc_box old_box(const proc_surface *surface){
     proc_box b={KSN_PROC_W,KSN_PROC_H,0,0,
-                !surface->has_committed||surface->candidate_color!=surface->committed_color};
+                !surface->has_committed||surface->tail_color!=surface->committed_color};
     if(!b.whole)damage_add(surface->committed,&b.x0,&b.y0,&b.x1,&b.y1);
     return b;
 }
@@ -571,10 +575,8 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
         if(sig->end[b]>end)end=sig->end[b];
     }
     if(first>end)first=end=0;
-    /* Taken the first time a piece shorter than a band is drawn, so a port of
-     * 8-row strips never allocates it and beginFrame still takes exactly its
-     * two frames (test_pocket_proc_turn_qjs.c). No room is no carry. */
-    if(!half_carry&&rows<8)half_carry=shiki_or_sys_calloc(1,sizeof *half_carry);
+    /* half_carry: taken by pocket_proc_prepare_render, never here -- this
+     * may run on the display task, which allocates nothing (5d). */
     return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,half_carry);
 }
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
@@ -667,13 +669,14 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
      * theirs until commit()); the new frame goes behind them. */
     /* Even, so the tail and the front share their alignment mod 4 (an
      * entry is 10 B): commit()'s copy then moves words, not bytes. */
-    unsigned base=(surface->has_committed?surface->committed->count+1u:0u)&~1u;
+    /* Behind whichever frame is at the front: the committed one, or a
+     * pending one still on its way to the panel (5b). */
+    unsigned base=(surface->has_committed||surface->pending?surface->candidate->count+1u:0u)&~1u;
     if(base>surface_place(surface))base=surface_place(surface);
     surface->tail_base=(uint16_t)base;
     surface->tail_used=surface->tail_raster=0;
     surface->tail_ext=0;
-    surface->sig_ready=false;
-    surface->candidate_color=(uint16_t)color;
+    surface->tail_color=(uint16_t)color;
     building_surface=index;
     building=true;
     return JS_UNDEFINED;
@@ -685,7 +688,6 @@ JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark 
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     const proc_surface *s=&surfaces[building_surface];
     *mark=(pocket_proc_mark){s->tail_used,s->tail_raster,s->tail_ext,(uint8_t)building_surface};
-    image_band_valid=false;carry_drop();
     return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
@@ -749,6 +751,12 @@ static void copy_entries(ksn_proc_segment *dst,const ksn_proc_segment *src,unsig
 /* The new frame to the front of the buffer, over the committed one. */
 static void merge(proc_surface *s){
     ksn_proc_frame *f=s->candidate;
+    /* The front frame changes here and only here: what describes or caches
+     * it goes stale now. Drawing writes the tail alone, so the display may
+     * read the front, its colour, signature and carry until this point (5c). */
+    s->sig_ready=false;
+    s->candidate_color=s->tail_color;
+    image_band_valid=false;carry_drop();
     s->committed_lost=s->has_committed;
     copy_entries(f->segments,&f->segments[s->tail_base],s->tail_used);
     f->count=s->tail_used;f->raster_steps=s->tail_raster;f->ext=s->tail_ext;f->ready=false;
@@ -972,7 +980,6 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"no room for the engine's state");
     }
     proc_surface *surface=&surfaces[building_surface];
-    image_band_valid=false;carry_drop();
     pocket_shiki_draw_prof *pf=&pocket_shiki_prof;
     if(pf->on){const uint32_t t=pocket_cycles();pf->lookup+=t-pf->mark;pf->mark=t;}
     /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
@@ -1057,6 +1064,17 @@ void pocket_proc_end_turn(void){
      * resumes in the continuation and still owns its candidate
      * (pocket_kasane_park_turn, end_guest_turn in app_session.c). */
     building=false;
+}
+/* Before a present: the first one drawn in pieces shorter than a band takes
+ * the carry, so a port of 8-row strips never allocates it and beginFrame
+ * still takes exactly its two frames (test_pocket_proc_turn_qjs.c). No room
+ * is no carry. On the UI task: the render that uses it may not be (5d). */
+void pocket_proc_prepare_render(unsigned strip_rows){
+    if(half_carry||strip_rows>=8)return;
+    for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].candidate){
+        half_carry=shiki_or_sys_calloc(1,sizeof *half_carry);
+        return;
+    }
 }
 bool pocket_proc_has_frame(void){
     const proc_surface *s=&surfaces[0];

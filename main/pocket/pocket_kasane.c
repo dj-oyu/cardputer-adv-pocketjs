@@ -3071,6 +3071,7 @@ void pocket_kasane_present_begin(pocket_kasane_present_job *job) {
         pocket_pixel_present_result(KSN_OK);
     if(!pocket_kasane_needs_present()) {job->result=KSN_OK;return;}
     job->proc_candidate=pocket_proc_pending();
+    if(job->present.render.display)pocket_proc_prepare_render(job->present.render.display->strip_rows);
     job->present.render.load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
         pocket_proc_backdrop:NULL;
     job->present.render.occlusion_safe=false;
@@ -3121,6 +3122,7 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
         pocket_pixel_present_result(KSN_OK);
     if(!pocket_kasane_needs_present()) return KSN_OK;
     bool proc_candidate=pocket_proc_pending();
+    if(display)pocket_proc_prepare_render(display->strip_rows);
     ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
         ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
         ksn_runtime_present(display,stats);
@@ -3153,6 +3155,7 @@ ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
         pocket_pixel_present_result(KSN_OK);
         return KSN_OK;
     }
+    if(display)pocket_proc_prepare_render(display->strip_rows);
     ksn_result result=ksn_runtime_present_backdrop(display,load,occlusion_safe,stats);
     pocket_proc_overlay_present_result(result);
     pocket_grid_present_result(result);

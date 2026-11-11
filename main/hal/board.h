@@ -10,6 +10,11 @@ typedef enum { KEY_NONE, KEY_ENTER, KEY_BACK, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_D
 // (see board_key_event). The event itself is still valid.
 typedef struct { uint8_t row, col; bool pressed, overflow; } board_keyevent_t;
 esp_err_t board_init(void);
+// The pet and microphone overlays board_present draws on every strip. A
+// present on the display task turns them off: their state is the UI task's,
+// and the frames it defers are the ones where neither shows
+// (docs/perf/two-core-pipeline.md 1.3).
+extern bool board_host_overlays;
 // Brings up the SPI3 bus the microSD slot and the EXT connector share, once.
 // Idempotent, lazy, and never released: callers add a device, they do not own
 // the bus. See the comment at the definition for why it lives here.

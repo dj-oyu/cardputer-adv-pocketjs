@@ -763,14 +763,17 @@ static bool key_decode(uint8_t event, board_keyevent_t *out) {
 // second one.
 #include "pet_hub.h"
 #include "pocket_capture.h"
+// board.h: the host's overlays on every strip, unless a present on the
+// display task (which may not read their state) turned them off.
+bool board_host_overlays = true;
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
-    pet_hub_overlay(pixels,y,rows);
+    if (board_host_overlays) pet_hub_overlay(pixels,y,rows);
     // docs/api/common-api.md 9 makes showing that the microphone is live the
     // host's obligation, so it is drawn here, at the one transfer to the
     // panel, rather than by whichever screen happens to be up: an app can
     // paint the corner it occupies, but not after this.
-    pocket_capture_overlay(pixels,y,rows);
+    if (board_host_overlays) pocket_capture_overlay(pixels,y,rows);
     if(capture) {
         static char line[LCD_W*4+1];
         const char *hex="0123456789abcdef";
@@ -973,8 +976,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         next_row=-1;return ESP_ERR_INVALID_ARG;
     }
     if (cols==LCD_W) return board_present(y,rows,pixels);
-    pet_hub_overlay(pixels,y,rows);
-    pocket_capture_overlay(pixels,y,rows);
+    if (board_host_overlays) {
+        pet_hub_overlay(pixels,y,rows);
+        pocket_capture_overlay(pixels,y,rows);
+    }
     // No capture arm: board_capture dumps whole rows and the columns outside
     // the window hold the previous band, so a caller that is capturing must not
     // narrow. board_capture_active() is how it finds that out.
