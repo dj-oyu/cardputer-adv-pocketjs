@@ -37,6 +37,8 @@ typedef int esp_err_t;
 #define ESP_OK 0
 #define CONFIG_POCKET_KEY_INT_GPIO 11
 #define KEY_INT_PROBE 0
+// The safety net off: this test checks the gate alone.
+#define KEY_INT_RESCAN 1000000u
 typedef struct { uint8_t row, col; bool pressed, overflow; } board_keyevent_t;
 static bool key_decode(uint8_t event, board_keyevent_t *out);
 

@@ -673,9 +673,17 @@ bool board_key_event(board_keyevent_t *out) {
 // again and pulls the pin low, and one that landed before it is in the count.
 // Clearing after the count (as the polling path does) could wipe the latch of
 // an event the count had not seen. Only bits that were read are cleared.
+//
+// Safety net: every KEY_INT_RESCAN-th quiet poll reads the count anyway, so an
+// event the pin did not report (none known; the probe below looks for them)
+// waits at most that many polls instead of until the next key.
+#ifndef KEY_INT_RESCAN
+#define KEY_INT_RESCAN 20u
+#endif
 static uint8_t key_left;
+static unsigned key_quiet;
 #if KEY_INT_PROBE
-static uint32_t probe_polls, probe_skipped, probe_low, probe_events, probe_miss;
+static uint32_t probe_polls, probe_skipped, probe_low, probe_events, probe_miss, probe_late;
 static int64_t probe_last;
 #endif
 bool board_key_event(board_keyevent_t *out) {
@@ -686,23 +694,29 @@ bool board_key_event(board_keyevent_t *out) {
     const int64_t now = esp_timer_get_time();
     if (now - probe_last >= 2000000) {
         probe_last = now;
-        ESP_LOGI("board", "KEY_INT_STAT polls=%u skipped=%u low=%u events=%u miss=%u",
+        ESP_LOGI("board", "KEY_INT_STAT polls=%u skipped=%u low=%u events=%u miss=%u late=%u",
                  (unsigned)probe_polls, (unsigned)probe_skipped, (unsigned)probe_low,
-                 (unsigned)probe_events, (unsigned)probe_miss);
+                 (unsigned)probe_events, (unsigned)probe_miss, (unsigned)probe_late);
     }
 #endif
     if (!low && !key_left) {
 #if KEY_INT_PROBE
-        // What the gate would have skipped, read anyway: an event here is one
-        // the gate would have lost. Handled as usual so the probe drops none.
+        // What the gate would have skipped, read anyway, and handled as usual
+        // so the probe drops none. An event that landed after the pin was
+        // sampled pulls it low by now: the next poll would have read it
+        // (late). Only one with the pin still high would have been lost (miss).
         probe_skipped++;
         if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
-        probe_miss++;
-        ESP_LOGW("board", "KEY_INT_MISS count=%u", (unsigned)(count & 15));
+        const bool late = gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO) == 0;
+        if (late) probe_late++; else probe_miss++;
+        ESP_LOGW("board", "KEY_INT_%s count=%u", late ? "LATE" : "MISS", (unsigned)(count & 15));
 #else
-        return false;
+        if (++key_quiet < KEY_INT_RESCAN) return false;
+        key_quiet = 0;
+        if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
 #endif
     }
+    key_quiet = 0;
     if (low) {
         if (kread(0x02, &status) != ESP_OK) return false;
         if (status) kwrite(0x02, status);
