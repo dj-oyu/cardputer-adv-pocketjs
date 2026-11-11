@@ -243,3 +243,11 @@ P1a の中身:
 - F13: §2.3 の B・C・D の join（`app_stop` は面の reset とランタイムの解放の前）。
 - F14: 待ちに 1 秒の診断、join した場所の計数（重なりが消えた原因を見えるように）。
 - F3・F4（済・記録）: `js_call_math_fast` は印のある関数を通さない。GC の finalizer は join しない native の入口なので、表示相が読むものを finalizer で解放しない。
+
+### 7.3 P2a: join を遅らせる（2026-11-11）
+
+- `CONFIG_POCKET_DISP_DEFER`（`POCKET_DISP_TASK` が y のときだけ、既定 y）。`app_tick_body` の末尾の present だけが対象で、`present_deferrable()` が §1.3 を判定する: フォアグラウンド、Back・停止・続きのターンでない、ジョブの待ちが無い、表示タスクで動く、capture・text・録音・pet の alert・通知が無い、pixel・video・grid の保留が無い、Kasane 側（`pocket_kasane_present_deferrable`: schema・provider・video/pixel/grid の resource・animation block・modal・notice が無い）、前に転送の失敗が無い。
+- 遅らせたフレームは `board_host_overlays=false` で描き、`present_ack`（join の中）で戻す。集計（`present_account`）は `present_settle()` で、次の present の冒頭・次のターンの冒頭・遷移で行う。
+- 次のターンの冒頭（§2.3 B）: まだ表示中で、フレームが条件を満たし続けていれば join しない。そのときは `set_animation_time` と `needs_present` の門を飛ばし、`prior_submission` は false とみなす（表示中のフレームは core から見ると submission）。条件を外れていれば先に join する。続きのターンの `has_submission`/`proc_pending` は settle の後に読む。
+- 転送の失敗（`KSN_IO`）を見たら、そのセッションの残りは遅らせない（§2.3 E）。
+- FRAME_P0 の行に `defer`（遅らせたフレーム数）、`hook`/`hook_ms`（印のある native の呼び出しで待った回数と時間）、`settle`/`settle_ms`（host 側で待った回数と時間）を足した。

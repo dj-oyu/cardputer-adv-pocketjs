@@ -48,6 +48,11 @@ void frame_bd_input(uint32_t us);
 bool frame_bd_pressure_override(bool on);
 // An overrun frame took the one-tick yield.
 void frame_bd_yielded(void);
+// P2a: a frame was deferred; a join waited `us` for the display task, from a
+// marked native call (hook) or from the host (settle: the next present, the
+// turn's start, a transition).
+void frame_bd_deferred(void);
+void frame_bd_join_wait(bool hook, uint32_t us);
 #else
 static inline void frame_bd_turn_begin(void) {}
 static inline void frame_bd_turn_end(void) {}
@@ -64,4 +69,6 @@ static inline bool frame_bd_disp_on_task(void) {return true;}
 static inline void frame_bd_input(uint32_t us) {(void)us;}
 static inline bool frame_bd_pressure_override(bool on) {return on;}
 static inline void frame_bd_yielded(void) {}
+static inline void frame_bd_deferred(void) {}
+static inline void frame_bd_join_wait(bool h, uint32_t us) {(void)h;(void)us;}
 #endif

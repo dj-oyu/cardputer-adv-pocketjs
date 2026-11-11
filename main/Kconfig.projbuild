@@ -172,6 +172,17 @@ menu "Pocket VM (diagnostics)"
             yet. With POCKET_FRAME_BD_DISP_AB the probe alternates it with the
             inline path every 60-frame window.
 
+    config POCKET_DISP_DEFER
+        bool "Display task: let the next JS turn run while a frame is presented (P2a)"
+        depends on POCKET_DISP_TASK
+        default y
+        help
+            docs/perf/two-core-pipeline.md sec.1.3 / sec.7.3. A frame that meets
+            the eligibility rules is handed to the display task and the turn
+            returns at once; the join happens when JS first calls a native
+            function marked "join", or at the next present. Other frames are
+            joined at once, as in P1.
+
     config POCKET_DISP_ASSERT
         bool "Display task: abort when a job is started or joined off the UI task"
         default n

@@ -258,6 +258,7 @@ static void sample_memory_pressure(void) {
     frame_bd_pressure(mask!=0,native,(uint32_t)free_bytes,(uint32_t)largest);
 }
 static atomic_bool stop_requested;
+static esp_err_t present_settle(void);
 static int64_t deadline;
 // L1 (docs/vm/vm-L1-design.md). Armed once per turn and handed to the guest, so
 // frame()'s drain and the next turn's continuation drain measure against the
@@ -693,7 +694,7 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
-    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
 #ifdef CONFIG_POCKET_VM_RELOC
     // Before the chain is closed, not after: prepare_stop resumes the parked
     // chain in order to terminate it, and the counters belong to the run that
@@ -1021,7 +1022,7 @@ bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
 
 void app_stop(void) {
-    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     bool p0_had_guest=guest!=NULL;
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage)board_capture(false);
@@ -1190,7 +1191,7 @@ static bool settle_all(int64_t until_us) {
 }
 
 esp_err_t app_suspend(void) {
-    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
     int64_t began=esp_timer_get_time();
     // The Back turn's arming: its deadline bounds the hook, and yield is off,
@@ -1257,7 +1258,7 @@ esp_err_t app_suspend(void) {
 }
 
 esp_err_t app_resume(void) {
-    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
         return ESP_ERR_INVALID_STATE;
     // The identity is global and a host screen may have moved it; the stores
@@ -1483,11 +1484,14 @@ static void hp_report(const char *phase, esp_err_t err) {
 // The engine calls this before a native function marked "join" runs.
 static void js_join_hook(JSContext *ctx) {
     (void)ctx;
+    if(!disp_busy()) return;
+    const int64_t t=esp_timer_get_time();
     disp_join();
+    frame_bd_join_wait(true,(uint32_t)(esp_timer_get_time()-t));
 }
 
 esp_err_t app_start_test(char test) {
-    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
@@ -1528,6 +1532,7 @@ esp_err_t app_start_test(char test) {
         scene_mem_release();
     }
     atomic_store(&stop_requested,false); frames=0; frameless=false;
+    defer_off=false;
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;
     // Cleared with them: a start that fails before a guest exists reaches
@@ -2069,7 +2074,7 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // here; strip composition and the LCD bus remain in shell_draw(), where the
 // native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
-    disp_join();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!guest) return ESP_ERR_INVALID_STATE;
     sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
@@ -2267,6 +2272,25 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
 }
 
 static esp_err_t app_tick_body(uint32_t buttons);
+// Two-core-pipeline.md sec.1.3: whether this turn's frame may be presented
+// while the next turn runs. Everything here is host state the next turn's host
+// work or a host overlay would otherwise touch under the display task.
+static bool present_deferrable(uint32_t buttons) {
+#if defined(CONFIG_POCKET_DISP_DEFER) && defined(KASANE_DMA_OVERLAP)
+    sys_notice notice;
+    return !defer_off && !overlay_session && guest &&
+           !(buttons&0x2000) && !atomic_load(&stop_requested) &&
+           !turn_continued && !pocketjs_guest_work_pending(guest) &&
+           frame_bd_disp_on_task() && !board_capture_active() &&
+           !pocket_text_active() && !sound_capture_active() && !pet_hub_alert_shown() &&
+           !sys_notify_active(sys_device_notifications(),&notice) &&
+           !pocket_pixel_pending() && !pocket_video_pending() && !pocket_grid_pending() &&
+           pocket_kasane_present_deferrable();
+#else
+    (void)buttons;
+    return false;
+#endif
+}
 esp_err_t app_tick(uint32_t buttons) {
     const int64_t began=esp_timer_get_time();
     const esp_err_t e=app_tick_body(buttons);
@@ -2297,11 +2321,24 @@ static esp_err_t app_tick_body(uint32_t buttons) {
     mdt.btn=buttons;
 #endif
     sample_memory_pressure();
-    pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    /* P2a (two-core-pipeline.md sec.2.3 B): the last frame may still be on
+     * the display task. The host work below only reads Kasane, or does
+     * nothing, while the frame stays eligible; otherwise join first. A frame
+     * joined meanwhile (by a marked native call) is accounted for here. */
+    if(disp_busy() && !present_deferrable(buttons&0x2000)) disp_join();
+    if(!disp_busy()) {
+        esp_err_t settled=present_settle();
+        if(settled!=ESP_OK) return settled;
+    }
+    const bool in_flight=disp_busy();
+    // Animation time is core state; there are no animation blocks while a
+    // frame is in flight (eligibility), so it has nothing to drive meanwhile.
+    if(!in_flight) pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     /* A ticket retained from a prior turn keeps its dedicated display turn.
      * A fresh native presenter ticket below does not: after it reaches the
-     * panel, due JS promises and input must still run this turn. */
-    bool prior_submission=pocket_kasane_has_submission()&&
+     * panel, due JS promises and input must still run this turn. The frame
+     * in flight is not such a ticket (sec.2.3 B). */
+    bool prior_submission=!in_flight&&pocket_kasane_has_submission()&&
         !pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
     bool presenter_blocked=false;
     ksn_result presenter_result=pocket_kasane_presenter_step(&presenter_blocked);
@@ -2319,7 +2356,9 @@ static esp_err_t app_tick_body(uint32_t buttons) {
     // as its own owner turn. The same gate retries a partial LCD transfer
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
-    if(pocket_kasane_needs_present()) {
+    // In flight, the core reports the frame being presented as a submission;
+    // whatever was invalidated meanwhile goes out with this turn's present.
+    if(!in_flight&&pocket_kasane_needs_present()) {
         esp_err_t pending=present_frame();
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live
@@ -2440,6 +2479,9 @@ static esp_err_t app_tick_body(uint32_t buttons) {
         // opens its frame first (MEGADEMO does) lost the save to BUSY and the
         // session ended EXECUTION FAILED. The present's time comes out of the
         // leave budget's job allowance, not the save: frame() is never cut.
+        // sec.2.3 B: read after a join, not of the frame in flight.
+        esp_err_t settled=present_settle();
+        if(settled!=ESP_OK) return settled;
         if(pocket_kasane_has_submission()||pocket_proc_pending()) {
             if(!leaving) {
                 deferred_buttons|=buttons;
@@ -2508,6 +2550,7 @@ static esp_err_t app_tick_body(uint32_t buttons) {
                        FRAME_BD_NO_RESOURCE:0u)|
                       (sound_capture_active()?FRAME_BD_NO_SOUND_CAPTURE:0u));
 #endif
+    present_defer=present_deferrable(buttons);
     return present_frame();
 }
 
@@ -2596,16 +2639,43 @@ static int64_t pf_began,pf_end;
 static bool pf_d4_pixel_candidate;
 #endif
 static esp_err_t present_account(ksn_result result);
+// P2a (two-core-pipeline.md sec.7.3): the last frame was handed over without
+// a join; its accounting waits for present_settle(). present_defer asks the
+// next present_frame() to defer, and defer_off stops deferring for the rest
+// of the session after a transfer failure (sec.2.3 E).
+static bool pf_deferred,present_defer,defer_off;
 #ifdef KASANE_DMA_OVERLAP
 static ksn_result pf_result;
-// The finish step: the acknowledgement only (F6).
+// The finish step: the acknowledgement only (F6). Runs wherever the join is.
 static void present_ack(esp_err_t run) {
     (void)run;
     pf_result=pocket_kasane_present_end(&present_job);
     pf_end=esp_timer_get_time();
+    board_host_overlays=true;
 }
 #endif
+// Joins the frame in flight, if any, and accounts for a deferred one. Only on
+// the UI task outside any native call: present_account logs and may fail.
+static esp_err_t present_settle(void) {
+    if(disp_busy()) {
+        const int64_t t=esp_timer_get_time();
+        disp_join();
+        frame_bd_join_wait(false,(uint32_t)(esp_timer_get_time()-t));
+    }
+    if(!pf_deferred) return ESP_OK;
+    pf_deferred=false;
+#ifdef KASANE_DMA_OVERLAP
+    return present_account(pf_result);
+#else
+    return ESP_OK;
+#endif
+}
 static esp_err_t present_frame_body(void) {
+    bool may_defer=present_defer;
+    present_defer=false;
+    // sec.2.3 B: the frame before is joined and accounted for first.
+    esp_err_t settled=present_settle();
+    if(settled!=ESP_OK) return settled;
     last_present_us=esp_timer_get_time();
     {
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -2649,12 +2719,22 @@ static esp_err_t present_frame_body(void) {
         pf_completion=(ksn_display_completion){.ctx=&pf_display,.finish=kasane_finish};
         present_job=(pocket_kasane_present_job){.present={.render={.display=&pf_port,
                                                 .completion=&pf_completion,.stats=&pf_stats}}};
+        // A deferred frame draws no host overlay (sec.1.2): the text field,
+        // the pet alert and the recording dot are UI state the next turn may
+        // change while the display task renders. Eligibility already asked
+        // that none is showing; present_ack turns them back on.
+        if(may_defer) board_host_overlays=false;
         pocket_kasane_present_begin(&present_job);
         disp_start(present_run,present_ack,frame_bd_disp_on_task()&&!board_capture_active());
-        // P2a moves this join to the next turn for frames that may overlap.
+        if(may_defer) {
+            pf_deferred=true;
+            frame_bd_deferred();
+            return ESP_OK;
+        }
         disp_join();
         return present_account(pf_result);
 #else
+        (void)may_defer;
         ksn_result result=pocket_kasane_present(&pf_port,&pf_stats);
         board_present_frame_end();
         pf_end=esp_timer_get_time();
@@ -2701,6 +2781,7 @@ static esp_err_t present_account(ksn_result result) {
             }
 #endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
+            defer_off=true;   // sec.2.3 E: the rest of the session presents in step
             return ESP_OK;
         }
         if(result!=KSN_OK) {

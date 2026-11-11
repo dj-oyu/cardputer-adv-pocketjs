@@ -70,6 +70,10 @@ bool pocket_kasane_has_submission(void);
 uint32_t pocket_kasane_source_wait_ticks(uint64_t now_us,uint32_t cap,uint32_t hz);
 ksn_result pocket_kasane_advance(uint64_t now_us);
 bool pocket_kasane_animation_pending(void);
+/* The Kasane half of two-core-pipeline.md sec.1.3: nothing that a present in
+ * flight would race with the next turn's host work -- a schema, a provider,
+ * a pixel, video or grid resource, animation blocks, a modal, a notice. */
+bool pocket_kasane_present_deferrable(void);
 void pocket_kasane_animations_presented(uint64_t now_us);
 void pocket_kasane_set_animation_time(uint64_t now_us);
 bool pocket_kasane_needs_present(void);
