@@ -8033,6 +8033,17 @@ void JS_MarkCFunctions(JSRuntime *rt, bool on)
     rt->cfunc_mark += on ? 1 : -1;
 }
 
+int JS_GetCFunctionMark(JSRuntime *rt)
+{
+    return rt->cfunc_mark;
+}
+
+void JS_CFunctionJoin(JSContext *ctx)
+{
+    if (ctx->rt->cfunc_join)
+        ctx->rt->cfunc_join(ctx);
+}
+
 bool JS_SetCFunctionJoin(JSValueConst func, bool join)
 {
     JSObject *p;

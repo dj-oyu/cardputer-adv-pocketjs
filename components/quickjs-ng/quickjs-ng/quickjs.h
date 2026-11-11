@@ -1285,6 +1285,10 @@ JS_EXTERN void JS_SetCanBlock(JSRuntime *rt, bool can_block);
    not a native function); JS_GetCFunctionJoin returns 0/1, or -1. */
 JS_EXTERN void JS_SetCFunctionJoinHook(JSRuntime *rt, void (*hook)(JSContext *ctx));
 JS_EXTERN void JS_MarkCFunctions(JSRuntime *rt, bool on);
+/* The mark count now (> 0: functions created now are marked), and the hook
+   called by hand, for a native function that joins only on some paths. */
+JS_EXTERN int JS_GetCFunctionMark(JSRuntime *rt);
+JS_EXTERN void JS_CFunctionJoin(JSContext *ctx);
 JS_EXTERN bool JS_SetCFunctionJoin(JSValueConst func, bool join);
 JS_EXTERN int JS_GetCFunctionJoin(JSValueConst func);
 /* set the [IsHTMLDDA] internal slot */

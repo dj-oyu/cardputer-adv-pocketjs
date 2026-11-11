@@ -737,6 +737,11 @@ typedef struct {
     const char         *name;       // static; not copied
     pocket_namespace_fn contribute;
     void               *user;
+    // The engine's "join" mark when the contributor registered
+    // (docs/perf/two-core-pipeline.md sec.7.2): its functions are created
+    // under the same mark however late the namespace is first read, and
+    // independently of the other contributors to the same name.
+    bool                join;
 } pocket_lazy_t;
 
 static pocket_lazy_t lazy[POCKET_MAX_LAZY];
@@ -756,9 +761,17 @@ static JSValue js_lazy_namespace(JSContext *ctx, JSValueConst this_val,
     JSValue ns=JS_NewObject(ctx);
     if(JS_IsException(ns)) return ns;
     esp_err_t err=ESP_OK;
+    JSRuntime *rt=JS_GetRuntime(ctx);
+    // The getter itself is unmarked (a namespace may be built from functions
+    // that never join), so it joins by hand when a contributor would.
+    for(unsigned i=(unsigned)magic;i<lazy_count;i++)
+        if(lazy[i].join && !strcmp(lazy[i].name,name)) { JS_CFunctionJoin(ctx); break; }
     for(unsigned i=(unsigned)magic;i<lazy_count && err==ESP_OK;i++)
-        if(!strcmp(lazy[i].name,name))
+        if(!strcmp(lazy[i].name,name)) {
+            if(lazy[i].join) JS_MarkCFunctions(rt,true);
             err=lazy[i].contribute(ctx,ns,lazy[i].user);
+            if(lazy[i].join) JS_MarkCFunctions(rt,false);
+        }
     if(err!=ESP_OK) {
         // Nothing half-built is ever installed: the partial object goes and the
         // accessor stays, so a read after the heap has moved builds it properly
@@ -795,7 +808,8 @@ esp_err_t pocket_api_lazy(JSContext *ctx, const char *name,
     for(unsigned i=0;i<lazy_count;i++)
         if(!strcmp(lazy[i].name,name)) { first=false; break; }
     unsigned slot=lazy_count;
-    lazy[slot]=(pocket_lazy_t){.name=name,.contribute=contribute,.user=user};
+    lazy[slot]=(pocket_lazy_t){.name=name,.contribute=contribute,.user=user,
+                               .join=JS_GetCFunctionMark(JS_GetRuntime(ctx))>0};
     lazy_count++;
     if(!first) return ESP_OK;   // the accessor is already on the root
 
@@ -813,6 +827,7 @@ esp_err_t pocket_api_lazy(JSContext *ctx, const char *name,
     // the one that needs no cast between incompatible function pointers.
     JSValue getter=JS_NewCFunctionMagic(ctx,js_lazy_namespace,name,0,
                                         JS_CFUNC_generic_magic,(int)slot);
+    JS_SetCFunctionJoin(getter,false);
     JSAtom atom=JS_NewAtom(ctx,name);
     // Configurable, unlike the property it becomes: replacing an accessor with
     // a value needs it, and the window in which it is configurable ends with

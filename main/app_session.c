@@ -1476,6 +1476,12 @@ static void hp_report(const char *phase, esp_err_t err) {
 }
 #endif
 
+// The engine calls this before a native function marked "join" runs.
+static void js_join_hook(JSContext *ctx) {
+    (void)ctx;
+    disp_join();
+}
+
 esp_err_t app_start_test(char test) {
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
@@ -1604,6 +1610,14 @@ esp_err_t app_start_test(char test) {
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
+    // P2a (docs/perf/two-core-pipeline.md sec.7.2): every native function the
+    // surfaces below create -- now, on a namespace's first read, or later
+    // from inside one of their own calls -- waits for the display task before
+    // it runs. Console is outside: it only appends to the log ring, and a
+    // log line must not end the overlap.
+    JSRuntime *join_rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+    JS_SetCFunctionJoinHook(join_rt,js_join_hook);
+    JS_MarkCFunctions(join_rt,true);
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"memory",pocket_memory_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
@@ -1678,6 +1692,7 @@ surfaces_done:
     if(app_registry_wants(app_registry_current(),"kasane.shapes")||test=='J')
         TRY(pocketjs_guest_quickjs_install_once(guest,"shapes",pocket_shape_install,NULL));
 source_ready:;
+    JS_MarkCFunctions(join_rt,false);
     const char *source=user_source?user_source:hello_start;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
     // USB-only diagnostics exercise the same lifecycle and resource limits.
