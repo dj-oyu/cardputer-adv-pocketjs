@@ -186,12 +186,14 @@ menu "Pocket VM (diagnostics)"
     config POCKET_KEY_INT_GPIO
         int "GPIO wired to the keyboard's INT (-1: none, poll the FIFO over I2C)"
         range -1 48
-        default -1
+        default 11
         help
-            The TCA8418 pulls INT low while a key event is latched. With the
-            pin given, a poll that finds it high (and nothing left from the
-            last FIFO count) skips the I2C read (main/hal/board.c,
-            board_key_event). -1 keeps the I2C read every poll.
+            The TCA8418 pulls INT low while a key event is latched; on the
+            Cardputer ADV it is GPIO 11 (confirmed on the board 2026-11-11:
+            the pin went low for every key event read). A poll that finds it
+            high (and nothing left from the last FIFO count) skips the I2C
+            read, with a count read every 20th quiet poll as a safety net
+            (main/hal/board.c, board_key_event). -1 reads the FIFO every poll.
 
     config POCKET_KEY_INT_PROBE
         bool "Probe: read the FIFO anyway when the INT gate would skip"

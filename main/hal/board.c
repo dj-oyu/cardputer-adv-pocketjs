@@ -675,7 +675,8 @@ bool board_key_event(board_keyevent_t *out) {
 // an event the count had not seen. Only bits that were read are cleared.
 //
 // Safety net: every KEY_INT_RESCAN-th quiet poll reads the count anyway, so an
-// event the pin did not report (none known; the probe below looks for them)
+// event the pin did not report (the probe's 3 of 122 on the board were not told apart from a
+// sample-then-read race)
 // waits at most that many polls instead of until the next key.
 #ifndef KEY_INT_RESCAN
 #define KEY_INT_RESCAN 20u
