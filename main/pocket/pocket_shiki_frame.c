@@ -9,7 +9,13 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_kasane.h"
 #endif
 #include "pocket_api.h"
+#ifdef ESP_PLATFORM
 #include "disp.h"
+#else
+/* Host tests (not all put main/hal on the path): nothing is ever in flight. */
+static inline void disp_join(void) {}
+static inline bool disp_busy(void) { return false; }
+#endif
 #include "ui/kasane/ksn_shiki_frame.h"
 #include "ui/kasane/ksn_shiki.h"
 #include "proc_band_hash.h"
