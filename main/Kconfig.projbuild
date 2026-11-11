@@ -183,6 +183,24 @@ menu "Pocket VM (diagnostics)"
         depends on POCKET_DISP_TASK
         default 6144
 
+    config POCKET_KEY_INT_GPIO
+        int "GPIO wired to the keyboard's INT (-1: none, poll the FIFO over I2C)"
+        range -1 48
+        default -1
+        help
+            The TCA8418 pulls INT low while a key event is latched. With the
+            pin given, a poll that finds it high (and nothing left from the
+            last FIFO count) skips the I2C read (main/hal/board.c,
+            board_key_event). -1 keeps the I2C read every poll.
+
+    config POCKET_KEY_INT_PROBE
+        bool "Probe: read the FIFO anyway when the INT gate would skip"
+        default n
+        help
+            Measurement only. Logs KEY_INT_MISS for every event the gate would
+            have lost, and KEY_INT_STAT every 2 s. Keys are still handled.
+            Needs POCKET_KEY_INT_GPIO >= 0.
+
     config POCKET_FRAME_BREAKDOWN
         bool "Probe: per-frame breakdown of a guest frame (JS/render/send/other/wait)"
         default n

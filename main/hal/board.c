@@ -372,6 +372,12 @@ static esp_err_t kwrite(uint8_t reg, uint8_t value) {
 static esp_err_t kread(uint8_t reg, uint8_t *value) {
     return i2c_master_transmit_receive(keyboard, &reg, 1, value, 1, 30);
 }
+static bool key_decode(uint8_t event, board_keyevent_t *out);
+#ifdef CONFIG_POCKET_KEY_INT_PROBE
+#define KEY_INT_PROBE 1
+#else
+#define KEY_INT_PROBE 0
+#endif
 
 // ---------------------------------------------------------------------------
 // The panel wants each RGB565 pixel's two bytes the other way round.
@@ -617,6 +623,14 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(kwrite(0x01, 0x01));
     for (int i=0;i<10;i++) { uint8_t value; kread(0x04, &value); }
     ESP_ERROR_CHECK(kwrite(0x02, 0x1f));
+#if CONFIG_POCKET_KEY_INT_GPIO >= 0
+    // Open-drain, active low: the pull-up is what makes "no event" read 1.
+    gpio_config_t key_int = {.pin_bit_mask=1ULL<<CONFIG_POCKET_KEY_INT_GPIO,
+        .mode=GPIO_MODE_INPUT, .pull_up_en=GPIO_PULLUP_ENABLE};
+    ESP_ERROR_CHECK(gpio_config(&key_int));
+    ESP_LOGI("board", "KEY_INT gpio=%d level=%d%s", CONFIG_POCKET_KEY_INT_GPIO,
+             gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO), KEY_INT_PROBE ? " probe" : "");
+#endif
     ESP_LOGI("board", "ADV keyboard detected; LCD 240x135 RGB565; no PSRAM");
     battery_init();
     motion_init(ih);
@@ -637,12 +651,79 @@ esp_err_t board_init(void) {
 // (docs/platform/keystate.md). If it stays silent, a lost release leaves that
 // key reading as down until it is next pressed and released (keystate.h), and
 // an app started meanwhile does not see it (pocket_input.c) -- not forever.
+#if CONFIG_POCKET_KEY_INT_GPIO < 0
 bool board_key_event(board_keyevent_t *out) {
     uint8_t count=0, event=0, status=0;
     if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
     out->overflow=(count & 15) >= 10 && kread(0x02, &status) == ESP_OK && (status & 0x08);
     if (kread(0x04, &event) != ESP_OK) return false;
     kwrite(0x02, 0x1f);
+    return key_decode(event, out);
+}
+#else
+// With INT wired (CONFIG_POCKET_KEY_INT_GPIO), a poll that finds the pin high
+// and nothing left over from the last count does no I2C at all: that empty
+// read was ~0.3 ms of CPU 0 every 5 ms (frame-breakdown.md sec.11).
+//
+// Two things keep an event from hiding behind a high pin. key_left: the count
+// said more events were queued behind the one just read, so the next polls read
+// them whatever the pin says (whether INT stays low while the FIFO is not
+// empty is not relied on). And the order: on a low pin the latch is cleared
+// BEFORE the count is read, so an event that lands after the clear sets K_INT
+// again and pulls the pin low, and one that landed before it is in the count.
+// Clearing after the count (as the polling path does) could wipe the latch of
+// an event the count had not seen. Only bits that were read are cleared.
+static uint8_t key_left;
+#if KEY_INT_PROBE
+static uint32_t probe_polls, probe_skipped, probe_low, probe_events, probe_miss;
+static int64_t probe_last;
+#endif
+bool board_key_event(board_keyevent_t *out) {
+    uint8_t count=0, event=0, status=0;
+    const bool low = gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO) == 0;
+#if KEY_INT_PROBE
+    probe_polls++; probe_low += low;
+    const int64_t now = esp_timer_get_time();
+    if (now - probe_last >= 2000000) {
+        probe_last = now;
+        ESP_LOGI("board", "KEY_INT_STAT polls=%u skipped=%u low=%u events=%u miss=%u",
+                 (unsigned)probe_polls, (unsigned)probe_skipped, (unsigned)probe_low,
+                 (unsigned)probe_events, (unsigned)probe_miss);
+    }
+#endif
+    if (!low && !key_left) {
+#if KEY_INT_PROBE
+        // What the gate would have skipped, read anyway: an event here is one
+        // the gate would have lost. Handled as usual so the probe drops none.
+        probe_skipped++;
+        if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
+        probe_miss++;
+        ESP_LOGW("board", "KEY_INT_MISS count=%u", (unsigned)(count & 15));
+#else
+        return false;
+#endif
+    }
+    if (low) {
+        if (kread(0x02, &status) != ESP_OK) return false;
+        if (status) kwrite(0x02, status);
+    }
+    if (!count && (kread(0x03, &count) != ESP_OK || !(count & 15))) { key_left=0; return false; }
+    if ((count & 15) >= 10 && !low) {
+        // Overflow latched during a burst read with the pin high: clear that
+        // bit alone, never K_INT, whose event the count may not include.
+        uint8_t late=0;
+        if (kread(0x02, &late) == ESP_OK && (late & 0x08)) { status |= 0x08; kwrite(0x02, 0x08); }
+    }
+    out->overflow=(status & 0x08) != 0;
+    if (kread(0x04, &event) != ESP_OK) return false;
+    key_left=(count & 15) - 1;
+#if KEY_INT_PROBE
+    probe_events++;
+#endif
+    return key_decode(event, out);
+}
+#endif
+static bool key_decode(uint8_t event, board_keyevent_t *out) {
     int code=(event & 0x7f)-1;
     if (code < 0 || code/10 >= 7 || code%10 >= 8) return false;
     out->row=(code%10)%4;
