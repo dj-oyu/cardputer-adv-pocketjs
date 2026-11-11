@@ -250,6 +250,15 @@ menu "Pocket VM (diagnostics)"
             Rotates inline, the task at priority 5, and the task at 6
             (input_task's, which then cannot preempt it on CPU 0).
 
+    config POCKET_FRAME_BD_LCD_DIRECT_AB
+        bool "Probe: flip the LCD send path (queue / direct) every 3 FRAME_BD windows"
+        depends on POCKET_FRAME_BREAKDOWN
+        default n
+        help
+            Measurement only. Needs a BOARD_LCD_DIRECT build (main/hal/board.h):
+            lcd_spi.c's register-driven sends against spi_master's queue,
+            crossed with POCKET_FRAME_BD_DISP_AB's three display modes.
+
     config POCKET_FRAME_BD_PACE_AB
         bool "Probe: rotate the display pacing rule per FRAME_BD window"
         depends on POCKET_FRAME_BREAKDOWN

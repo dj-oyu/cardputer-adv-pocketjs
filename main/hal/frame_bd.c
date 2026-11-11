@@ -44,6 +44,15 @@ bool frame_bd_disp_on_task(void){return disp_task_on;}
 /* P1: DISP_AB rotates inline, task at 5, task at 6 (input_task's priority:
  * equal priority does not preempt, so a poll waits for the task to block). */
 static unsigned disp_mode=1;
+/* POCKET_FRAME_BD_LCD_DIRECT_AB (BOARD_LCD_DIRECT builds): the LCD send path,
+ * flipped every 3 windows so each display mode sees both. Starts direct, as
+ * board.c does. */
+#if defined(CONFIG_POCKET_FRAME_BD_LCD_DIRECT_AB)&&defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+static int lcd_direct=1;
+#define LCD_PATH_NAME (lcd_direct?"direct":"queue")
+#else
+#define LCD_PATH_NAME "queue"
+#endif
 static const char *const DISP_NAME[3]={"inline","task5","task6"};
 /* input_task runs on CPU 0 and this on CPU 1: atomics, read once a window. */
 static _Atomic uint32_t inp_us,inp_n,inp_max;
@@ -136,7 +145,7 @@ void frame_bd_period(uint32_t held,uint32_t period){
     stack_min=(uint32_t)uxTaskGetStackHighWaterMark(NULL);
     ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
              "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u "
-             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u inp_ms=%.2f inp_n=%u inp_max=%u lcd_tx=%u",
+             "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u inp_ms=%.2f inp_n=%u inp_max=%u lcd_tx=%u lcd=%s",
              window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
              (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
              (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
@@ -144,7 +153,7 @@ void frame_bd_period(uint32_t held,uint32_t period){
              (unsigned)stack_min,(unsigned)free_min,(unsigned)largest_min,
              DISP_NAME[disp_task_on?disp_mode:0u],(unsigned)disp_stack_free(),
              atomic_exchange(&inp_us,0u)/1000.0,(unsigned)atomic_exchange(&inp_n,0u),
-             (unsigned)atomic_exchange(&inp_max,0u),(unsigned)board_lcd_tx_take());
+             (unsigned)atomic_exchange(&inp_max,0u),(unsigned)board_lcd_tx_take(),LCD_PATH_NAME);
     free_min=largest_min=UINT32_MAX;
     s_pre=s_post=0;turns=no_join=presents=eligible=0;
     for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;
@@ -161,6 +170,11 @@ void frame_bd_period(uint32_t held,uint32_t period){
     disp_mode=(disp_mode+1u)%3u;
     disp_task_on=disp_mode!=0u;
     if(disp_task_on)disp_set_priority(disp_mode==1u?5u:6u);
+#endif
+#if defined(CONFIG_POCKET_FRAME_BD_LCD_DIRECT_AB)&&defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+    /* Between frames on the UI task; P1 joins the display task at once, so
+     * nothing is in flight that board_lcd_direct_set would not reap. */
+    if(window%3u==0u)lcd_direct=board_lcd_direct_set(!lcd_direct);
 #endif
 #ifdef CONFIG_POCKET_FRAME_BD_PRESS_AB
     press_mode=(press_mode+1u)%3u;

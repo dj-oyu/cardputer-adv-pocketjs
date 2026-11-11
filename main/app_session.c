@@ -2777,7 +2777,7 @@ static esp_err_t present_frame_body(void) {
                          render_sum/30/1000.0,present_sum/30/1000.0);
                 g_board_depth=g_board_depth<2?2:1;
 #endif
-#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT&&!defined(CONFIG_POCKET_FRAME_BD_LCD_DIRECT_AB)
                 /* Same-binary A/B of the LCD send path (board.h): the window
                  * just printed used the path named here, then it flips. */
                 {
