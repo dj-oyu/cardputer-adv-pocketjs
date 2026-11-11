@@ -10,10 +10,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
-#include "sdkconfig.h"
 
 typedef esp_err_t (*disp_job_fn)(void);
 typedef void (*disp_finish_fn)(esp_err_t result);
+
+#ifndef ESP_PLATFORM
+// Host tests: no display task and nothing ever in flight, so the pocket code
+// that joins compiles and runs unchanged (a deferred join is not modelled).
+static inline void disp_join(void) {}
+static inline bool disp_busy(void) { return false; }
+#else
+#include "sdkconfig.h"
 
 // One job in flight at most; a start while one is in flight joins it first.
 // UI task only, like disp_join().
@@ -40,4 +47,5 @@ static inline esp_err_t disp_init(void) { return ESP_OK; }
 static inline esp_err_t disp_run(disp_job_fn fn, bool on_task) { (void)on_task; disp_join(); return fn(); }
 static inline uint32_t disp_stack_free(void) { return 0; }
 static inline void disp_set_priority(unsigned prio) { (void)prio; }
+#endif
 #endif

@@ -9,6 +9,7 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_kasane.h"
 #endif
 #include "pocket_api.h"
+#include "disp.h"
 #include "ui/kasane/ksn_shiki_frame.h"
 #include "ui/kasane/ksn_shiki.h"
 #include "proc_band_hash.h"
@@ -200,8 +201,12 @@ static unsigned surface_place(const proc_surface *surface){
 static bool buffers(proc_surface *surface){
     const size_t bytes=frame_bytes(surface_place(surface));
     if(!surface->candidate)surface->candidate=surface->committed=shiki_or_sys_calloc(1,bytes);
-    if(surface->image_mode&&!image_band_buf)
+    if(surface->image_mode&&!image_band_buf) {
+        /* The image band is the display task's while a present is in flight
+         * (two-core-pipeline.md sec.1.2): made only with none in flight. */
+        disp_join();
         image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
+    }
     return surface->candidate&&(!surface->image_mode||image_band_buf);
 }
 static bool any_pending(void){
@@ -661,7 +666,10 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     if((argc!=1&&argc!=2)||!integer(ctx,argv[0],UINT16_MAX,&color)||
        (argc==2&&!surface_index(ctx,argv[1],&index)))
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected RGB565 and optional live surface ID");
-    if(any_pending()||any_repair())
+    /* A pending frame that is on its way to the panel (a present in flight,
+     * P2a) does not hold the next one up: the new frame is built behind it
+     * (the tail) and commit() joins before it touches the front. */
+    if((any_pending()&&!disp_busy())||any_repair())
         return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
     proc_surface *surface=&surfaces[index];
     if(!buffers(surface))return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
@@ -773,6 +781,14 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     const char *op="kasane.shiki.commit";
     frame_bd_join_point(FRAME_BD_JOIN_SHIKI_COMMIT);
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    /* commit joined before it ran (it is marked): the frame beginFrame let
+     * through as in flight has been acknowledged by now. If it did not reach
+     * the panel (a transfer failure leaves it pending or asks for repair),
+     * merge() must not overwrite its front (two-core-pipeline.md sec.7.2 F8). */
+    if(any_pending()||any_repair()){
+        building=false;
+        return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
+    }
     proc_surface *surface=&surfaces[building_surface];
     if(building_surface&&!surface->image_mode)
         return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
