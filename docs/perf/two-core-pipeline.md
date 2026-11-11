@@ -218,3 +218,15 @@ P1a の中身:
 - host: `test_kasane_dma_overlap`、`test_dma_completion_owners`、Kasane の一式（`KASANE_DMA_OVERLAP` あり・なし）、Shiki の proc・turn・api、STRESS の digest `84a31336`（4 行・8 行 × 範囲あり・なしで変更前と同じ）、DERBY の全 tier、board の half・transport・overlap、session dispatch。
 - 実機（c474b9d、測定用のコミットは戻した）: STRESS と DERBY で誤りなし。STRESS の描画＋転送は inline 9.01〜9.23 ms、表示タスク 9.12〜9.50 ms。DERBY のレースの FIELD では周期 16.4〜16.5 ms。
 - 残り: 7（host の「遅い join」）は P2a の仕組みと一緒に入れる。
+
+### 7.2 P2a: A の入口を QuickJS で網羅する（2026-11-11、エンジン側のみ）
+
+§2.3 A は「join する関数を手で並べる」形だった。並べ漏れはその関数が表示タスクと競合するだけで、host でも実機でもまず見つからない。そこで、同梱の quickjs-ng（このリポジトリで直接変更している。上流には出さない）に、**ファームが作ったネイティブ関数は呼ばれる前に join のフックを呼ぶ**という印を入れた。join しない関数（§2.3 A の除外）だけを手で外す。
+
+- 印: `JSObject.u.cfunc` の `cproto` を 7 bit にして空いた 1 bit、`JSCFunctionDataRecord` の `data_len` の最上位 bit（data は 127 個まで。超えると RangeError）。オブジェクトの大きさは変わらない。
+- 付け方: `JS_MarkCFunctions(rt, true/false)` で数を上げ下げし、0 より大きい間に作られた関数に印が付く。印のある関数を呼んでいる間も数が上がるので、面が実行中に作る関数（cancel トークン、購読の `close` など）にも付く。エンジンが自分で作る関数（`Promise.finally`、`Promise.all` の要素関数など）には付かない。
+- 遅延生成: 関数表（`JS_SetPropertyFunctionList`）の関数は最初に読まれたときに作られるので、登録の時点の印を残しておく。autoinit は未使用だった id 3（`JS_AUTOINIT_ID_PROP_JOIN`）、遅延リストは `len` の 1 bit。入れ子の `JS_OBJECT_DEF` にも伝わる。
+- 呼び出し側: `js_call_c_function` と `js_call_c_function_data` の 2 か所（ほかの経路は iterator の近道だけで、印のある関数は近道を通らない）。印の無い関数の費用は分岐 1 つ（推定。未計測）。
+- 外す: `JS_SetCFunctionJoin(func, false)`。
+- 検査: `tools/vmtest/cfunc_join.sh`（asan）。直接作った関数・data 関数・関数表・getter・入れ子・実行中に作った関数・`call`/`bind`/`map` 経由・例外の後で数が 0 に戻ること・エンジンの関数には付かないこと。フックの呼び出しを消す変異、遅延リストの印を消す変異は、どちらも検査が落ちる。`tools/vmtest/run.sh` の 88 件は変わらず通る。
+- ファームはまだ呼んでいない（フック未登録、印も付けていない）。次は `disp_start`/`disp_join` とフックの登録、印の範囲（install と遅延名前空間）、除外の一覧。

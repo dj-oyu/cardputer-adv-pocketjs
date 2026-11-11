@@ -312,6 +312,15 @@ struct JSRuntime {
     JSMallocFunctions mf;
     JSMallocState malloc_state;
     const char *rt_info;
+    /* Pocket: called before any native function marked "join" runs
+       (docs/perf/two-core-pipeline.md, P2a). The display task may still be
+       reading the render state that such a function writes; the hook waits
+       for it. cfunc_mark > 0 marks every native function created meanwhile:
+       the firmware raises it while it installs its surfaces, and a marked
+       call raises it for its own duration, so what a surface creates at run
+       time (a cancel token, a subscription's close) is marked too. */
+    void (*cfunc_join)(JSContext *ctx);
+    int cfunc_mark;
 
     int atom_hash_size; /* power of two */
     int atom_count;
@@ -634,6 +643,10 @@ typedef enum {
     JS_AUTOINIT_ID_PROTOTYPE,
     JS_AUTOINIT_ID_MODULE_NS,
     JS_AUTOINIT_ID_PROP,
+    /* Pocket: JS_AUTOINIT_ID_PROP registered while native functions were
+       being marked "join" (JS_MarkCFunctions); instantiated under the mark,
+       so the function made on first read is marked too. */
+    JS_AUTOINIT_ID_PROP_JOIN,
 } JSAutoInitIDEnum;
 
 /* must be large enough to have a negligible runtime cost and small
@@ -1361,7 +1374,8 @@ struct JSObject {
             JSContext *realm;
             JSCFunctionType c_function;
             uint8_t length;
-            uint8_t cproto;
+            uint8_t cproto : 7;
+            uint8_t join : 1; /* Pocket: call rt->cfunc_join first */
             int16_t magic;
         } cfunc;
         /* array part for fast arrays and typed arrays */
@@ -1419,7 +1433,10 @@ typedef struct JSLazyList {
     JSObject *obj;
     JSContext *realm;                /* the context that registered it */
     const JSCFunctionListEntry *tab; /* in flash */
-    uint16_t len;
+    uint16_t len : 15;               /* at most 64 (lazy_eligible) */
+    /* Pocket: registered while native functions were being marked "join";
+       its entries are materialized under the mark (lazy_define_list). */
+    uint16_t join : 1;
     /* How many of the object's own, non-list properties preceded this list
        when it was registered: where its entries go when the object is fully
        materialized, so property order stays the definition order. */
@@ -7494,6 +7511,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p->u.cfunc.c_function.generic = func;
     p->u.cfunc.length = length;
     p->u.cfunc.cproto = cproto;
+    p->u.cfunc.join = ctx->rt->cfunc_mark > 0;
     p->u.cfunc.magic = magic;
     p->is_constructor = (cproto == JS_CFUNC_constructor ||
                          cproto == JS_CFUNC_constructor_magic ||
@@ -7524,7 +7542,8 @@ JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
 typedef struct JSCFunctionDataRecord {
     JSCFunctionData *func;
     uint8_t length;
-    uint8_t data_len;
+    uint8_t data_len : 7;
+    uint8_t join : 1; /* Pocket: as cfunc.join */
     uint16_t magic;
     JSValue data[];
 } JSCFunctionDataRecord;
@@ -7936,7 +7955,15 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     sf->is_strict_mode = false;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    if (unlikely(s->join)) {
+        if (rt->cfunc_join)
+            rt->cfunc_join(ctx);
+        rt->cfunc_mark++;
+        ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+        rt->cfunc_mark--;
+    } else {
+        ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    }
     js_vm_pop_frame(rt, sf);
     return ret;
 }
@@ -7951,6 +7978,10 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
     JSValue func_obj;
     int i;
 
+    /* data_len gave up its top bit to the join flag */
+    if (data_len < 0 || data_len > 127) {
+        return JS_ThrowRangeError(ctx, "too many function data");
+    }
     func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
                                       JS_CLASS_C_FUNCTION_DATA);
     if (JS_IsException(func_obj)) {
@@ -7964,6 +7995,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
     s->func = func;
     s->length = length;
     s->data_len = data_len;
+    s->join = ctx->rt->cfunc_mark > 0;
     s->magic = magic;
     for (i = 0; i < data_len; i++) {
         s->data[i] = js_dup(data[i]);
@@ -7989,6 +8021,50 @@ JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
     return JS_NewCFunctionData2(ctx, func, NULL, length, magic, data_len, data);
 }
 
+/* Pocket: native functions marked "join" (docs/perf/two-core-pipeline.md,
+   P2a). */
+void JS_SetCFunctionJoinHook(JSRuntime *rt, void (*hook)(JSContext *ctx))
+{
+    rt->cfunc_join = hook;
+}
+
+void JS_MarkCFunctions(JSRuntime *rt, bool on)
+{
+    rt->cfunc_mark += on ? 1 : -1;
+}
+
+bool JS_SetCFunctionJoin(JSValueConst func, bool join)
+{
+    JSObject *p;
+
+    if (!JS_IsObject(func))
+        return false;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION) {
+        p->u.cfunc.join = join;
+        return true;
+    }
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA) {
+        p->u.c_function_data_record->join = join;
+        return true;
+    }
+    return false;
+}
+
+int JS_GetCFunctionJoin(JSValueConst func)
+{
+    JSObject *p;
+
+    if (!JS_IsObject(func))
+        return -1;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION)
+        return p->u.cfunc.join;
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA)
+        return p->u.c_function_data_record->join;
+    return -1;
+}
+
 static JSContext *js_autoinit_get_realm(JSProperty *pr)
 {
     return (JSContext *)(pr->u.init.realm_and_id & ~3);
@@ -7997,6 +8073,12 @@ static JSContext *js_autoinit_get_realm(JSProperty *pr)
 static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
 {
     return pr->u.init.realm_and_id & 3;
+}
+
+/* Pocket: the id a function-list entry is deferred under */
+static JSAutoInitIDEnum js_autoinit_prop_id(JSRuntime *rt)
+{
+    return rt->cfunc_mark > 0 ? JS_AUTOINIT_ID_PROP_JOIN : JS_AUTOINIT_ID_PROP;
 }
 
 static void js_autoinit_free(JSRuntime *rt, JSProperty *pr)
@@ -10462,10 +10544,22 @@ fail:
 /* return the value associated to the autoinit property or an exception */
 typedef JSValue JSAutoInitFunc(JSContext *ctx, JSObject *p, JSAtom atom, void *opaque);
 
+static JSValue js_instantiate_prop_join(JSContext *ctx, JSObject *p,
+                                        JSAtom atom, void *opaque)
+{
+    JSValue val;
+
+    ctx->rt->cfunc_mark++;
+    val = JS_InstantiateFunctionListItem2(ctx, p, atom, opaque);
+    ctx->rt->cfunc_mark--;
+    return val;
+}
+
 static JSAutoInitFunc *const js_autoinit_func_table[] = {
     js_instantiate_prototype, /* JS_AUTOINIT_ID_PROTOTYPE */
     js_module_ns_autoinit, /* JS_AUTOINIT_ID_MODULE_NS */
     JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP */
+    js_instantiate_prop_join, /* JS_AUTOINIT_ID_PROP_JOIN */
 };
 
 /* warning: 'prs' is reallocated after it */
@@ -18834,8 +18928,10 @@ static JSValue JS_IteratorNext2(JSContext *ctx, JSValueConst enum_obj,
        intermediate result object) */
     if (JS_IsObject(method)) {
         JSObject *p = JS_VALUE_GET_OBJ(method);
+        /* Pocket: a marked function takes the full call, which joins */
         if (p->class_id == JS_CLASS_C_FUNCTION &&
-                p->u.cfunc.cproto == JS_CFUNC_iterator_next) {
+                p->u.cfunc.cproto == JS_CFUNC_iterator_next &&
+                !p->u.cfunc.join) {
             JSCFunctionType func;
             JSValueConst args[1];
 
@@ -19674,6 +19770,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     JSValueConst *arg_buf;
     int arg_count, i;
     JSCFunctionEnum cproto;
+    int join;
 
     p = JS_VALUE_GET_OBJ(func_obj);
     cproto = p->u.cfunc.cproto;
@@ -19682,6 +19779,14 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     /* better to always check stack overflow */
     if (js_check_stack_overflow(rt, sizeof(arg_buf[0]) * arg_count)) {
         return JS_ThrowStackOverflow(ctx);
+    }
+    /* Pocket: after the only early return, which would leak the mark. The
+       hook runs no JS and cannot fail. */
+    join = p->u.cfunc.join;
+    if (unlikely(join)) {
+        if (rt->cfunc_join)
+            rt->cfunc_join(ctx);
+        rt->cfunc_mark++;
     }
 
     prev_sf = rt->current_stack_frame;
@@ -19789,6 +19894,7 @@ not_a_constructor:
     }
 
     js_vm_pop_frame(rt, sf);
+    rt->cfunc_mark -= join;
     return ret_val;
 }
 
@@ -44652,7 +44758,7 @@ static int JS_InstantiateFunctionListItem(JSContext *ctx, JSValueConst obj,
             /* Function.prototype[Symbol.hasInstance] is not writable nor configurable */
             prop_flags = 0;
         }
-        JS_DefineAutoInitProperty(ctx, obj, atom, JS_AUTOINIT_ID_PROP,
+        JS_DefineAutoInitProperty(ctx, obj, atom, js_autoinit_prop_id(ctx->rt),
                                   (void *)e, prop_flags);
         return 0;
     case JS_DEF_CGETSET: /* XXX: use autoinit again ? */
@@ -44698,7 +44804,7 @@ static int JS_InstantiateFunctionListItem(JSContext *ctx, JSValueConst obj,
         break;
     case JS_DEF_PROP_STRING:
     case JS_DEF_OBJECT:
-        JS_DefineAutoInitProperty(ctx, obj, atom, JS_AUTOINIT_ID_PROP,
+        JS_DefineAutoInitProperty(ctx, obj, atom, js_autoinit_prop_id(ctx->rt),
                                   (void *)e, prop_flags);
         return 0;
     default:
@@ -44828,7 +44934,7 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
         pr = add_property(ctx, p, atom, (prop_flags & lock_mask & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
         if (!pr)
             return -1;
-        pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | JS_AUTOINIT_ID_PROP;
+        pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | js_autoinit_prop_id(ctx->rt);
         pr->u.init.opaque = (void *)e;
         return 0;
     case JS_DEF_CGETSET:
@@ -44900,6 +45006,20 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
     return 0;
 }
 
+/* Pocket: lazy_define for an entry of list `l`, under the list's join mark.
+   `l` is read before the call only: rt->lazy may move under it. */
+static int lazy_define_list(JSLazyList *l, JSObject *p, JSAtom atom,
+                            const JSCFunctionListEntry *e)
+{
+    JSContext *realm = l->realm;
+    int join = l->join, ret;
+
+    realm->rt->cfunc_mark += join;
+    ret = lazy_define(realm, p, atom, e);
+    realm->rt->cfunc_mark -= join;
+    return ret;
+}
+
 /* A lookup of `atom` missed p's shape: if one of p's lists still holds it,
    put it in the shape. 1 = materialized (look again), 0 = not in any list,
    -1 = exception (out of memory). */
@@ -44918,7 +45038,7 @@ static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
             /* Marked first: add_property below looks the name up again. */
             const JSCFunctionListEntry *tab = l->tab;
             lazy_set_done(l, k);
-            if (lazy_define(l->realm, p, atom, &tab[k])) {
+            if (lazy_define_list(l, p, atom, &tab[k])) {
                 lazy_undo_done(rt, p, tab, k);
                 return -1;
             }
@@ -45129,7 +45249,7 @@ static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only)
                 return -1;
             const JSCFunctionListEntry *tab = l->tab;
             lazy_set_done(l, k);
-            int ret = lazy_define(l->realm, p, atom, &tab[k]);
+            int ret = lazy_define_list(l, p, atom, &tab[k]);
             JS_FreeAtom(ctx, atom);
             if (ret) {
                 lazy_undo_done(rt, p, tab, k);
@@ -45190,7 +45310,8 @@ static int lazy_register(JSContext *ctx, JSValueConst obj,
     memmove(&rt->lazy[end + 1], &rt->lazy[end], (rt->lazy_count - end) * sizeof(rt->lazy[0]));
     rt->lazy_count++;
     rt->lazy[end] = (JSLazyList){ .obj = p, .realm = ctx, .tab = tab,
-                                  .len = (uint16_t)len, .pos = (uint16_t)q };
+                                  .len = (uint16_t)len, .join = rt->cfunc_mark > 0,
+                                  .pos = (uint16_t)q };
     js_obj_set_lazy(p, true);
     /* The builtins are created with their shape pre-sized for the list
        (JS_NewObjectProtoClassAlloc(.., n_fields), JS_NewCFunction3(..,

@@ -33,6 +33,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-pocket-input"   # pocket.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keytest_app_test.sh && /tmp/test-keytest-app"   # KEY TEST（apps/keytest）を実物のQuickJS・pocket.kasane・input.keysで、同時押し・タップ・FIFOあふれの台本（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/motion_shim -Itools/hostshim -Ithird_party/bmi270 -Imain/hal tools/test_motion_demand.c -lm -o /tmp/tmd && /tmp/tmd"   # IMUの読み手の需要: 読み手が無ければI2Cを読まない・ホームの期限・休止明けに古いサンプルを出さない・gyroの要求（WSLのみ、third_party/bmi270 要）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && tools/vmtest/cfunc_join.sh"   # QuickJS のネイティブ関数の join の印: ファームが作った関数（関数表・getter・入れ子・実行中に作った関数を含む）だけがフックを呼ぶ（docs/perf/two-core-pipeline.md §7.2、WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_key_int_gate.py"   # キーボードのINTピンの門（CONFIG_POCKET_KEY_INT_GPIO）: TCA8418の模型にI2Cの合間で辺を差し込み、取りこぼし0・順序・あふれの報告をASanで（WSLのみ）
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/test_frame_lint.py         # frame_lint の走査器を既製の objdump の文で検査

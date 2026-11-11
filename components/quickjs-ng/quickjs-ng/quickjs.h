@@ -1277,6 +1277,16 @@ typedef int JSInterruptHandler(JSRuntime *rt, void *opaque);
 JS_EXTERN void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque);
 /* if can_block is true, Atomics.wait() can be used */
 JS_EXTERN void JS_SetCanBlock(JSRuntime *rt, bool can_block);
+/* Pocket (docs/perf/two-core-pipeline.md, P2a): a native function marked
+   "join" calls the runtime's join hook before it runs. Functions created
+   while the mark count is above zero are marked; JS_MarkCFunctions(rt, true)
+   raises it and (rt, false) lowers it, and a marked call raises it for its
+   own duration. JS_SetCFunctionJoin changes one function (false when it is
+   not a native function); JS_GetCFunctionJoin returns 0/1, or -1. */
+JS_EXTERN void JS_SetCFunctionJoinHook(JSRuntime *rt, void (*hook)(JSContext *ctx));
+JS_EXTERN void JS_MarkCFunctions(JSRuntime *rt, bool on);
+JS_EXTERN bool JS_SetCFunctionJoin(JSValueConst func, bool join);
+JS_EXTERN int JS_GetCFunctionJoin(JSValueConst func);
 /* set the [IsHTMLDDA] internal slot */
 JS_EXTERN void JS_SetIsHTMLDDA(JSContext *ctx, JSValueConst obj);
 
