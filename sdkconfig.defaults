@@ -153,7 +153,3 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 # firmware bug can land in code and run instead of faulting at the
 # code/data boundary.
 CONFIG_ESP_SYSTEM_MEMPROT=n
-
-# MEASUREMENT ONLY (to be reverted): keyboard INT wiring probe on GPIO 11.
-CONFIG_POCKET_KEY_INT_GPIO=11
-CONFIG_POCKET_KEY_INT_PROBE=y
