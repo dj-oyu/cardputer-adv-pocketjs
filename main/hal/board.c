@@ -36,7 +36,19 @@ static i2c_master_dev_handle_t keyboard;
 // write somewhere else. A row is 480 bytes, itself a multiple of 16, so every
 // row start lands correctly once the base does.
 static uint16_t shared[LCD_W * STRIP_H] __attribute__((aligned(16)));
-uint16_t *board_strip(void) { return shared; }
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+static bool tx_stopped;
+static uint16_t *half_lent;
+static _Noreturn void tx_stop(void);
+static void tx_before_write(const void *pixels, size_t bytes);
+#endif
+uint16_t *board_strip(void) {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    tx_before_write(shared, sizeof shared);
+    half_lent = NULL;
+#endif
+    return shared;
+}
 // The A/B switch for the asynchronous transfer below: 1 = queue the strip and
 // come back for its result on the next call (the shipping path), 0 = the
 // blocking polling transfer this file has always used. Both paths are in ONE
@@ -75,7 +87,7 @@ static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
 // flight. Any other buffer -- a screen's own whole strip -- is sent and
 // finished before board_present returns, since its caller draws into it
 // again at once.
-static uint16_t *half_lent, *half_from;
+static uint16_t *half_from;
 #if (defined(BOARD_BUF_AB)&&BOARD_BUF_AB)||(defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2)
 #error "BOARD_STRIP_HALF has no tx_buf: the measurement builds need it off"
 #endif
@@ -126,7 +138,9 @@ int board_strip_rows(void) {
 uint16_t *board_strip_next(void) {
 #if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
     // At most one strip is in flight (queue_size 1), so the other half is free.
-    half_lent = (tx_inflight && half_from == shared) ? shared + 4 * LCD_W : shared;
+    uint16_t *next = (tx_inflight && half_from == shared) ? shared + 4 * LCD_W : shared;
+    tx_before_write(next, 4u * LCD_W * sizeof *next);
+    half_lent = next;
     return half_lent;
 #endif
 #if defined(BOARD_BUF_AB)&&BOARD_BUF_AB
@@ -264,6 +278,25 @@ static esp_err_t tx_reap(void) {
     tx_inflight = done != &tx_pending;
     return e;
 }
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+/* No error return may give a caller back storage still borrowed by SPI.
+ * Stay on the owner task's stack, retaining its descriptor, payload and all
+ * outer callers. No automatic recovery/reset or watchdog guarantee. */
+static _Noreturn void tx_stop(void) {
+    tx_stopped = true;
+    for (;;) vTaskDelay(portMAX_DELAY);
+}
+static void tx_before_write(const void *pixels, size_t bytes) {
+    if (tx_stopped) tx_stop();
+    if (!tx_inflight) return;
+    uintptr_t a = (uintptr_t)pixels, b = (uintptr_t)tx_pending.tx_buffer;
+    size_t pending_bytes = (tx_pending.length + 7u) / 8u;
+    /* Subtractions avoid overflow; compare the whole borrowed range, not
+     * just its base: a legacy shared eight-row send owns BOTH halves. */
+    bool overlaps = a <= b ? b - a < bytes : a - b < pending_bytes;
+    if (overlaps && tx_reap() != ESP_OK) tx_stop();
+}
+#endif
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
 // Before copying a strip: depth 1 waits for everything (today), depth 2 only
 // for the slot the copy is about to overwrite.
@@ -284,7 +317,13 @@ void board_capture(bool enabled) {
 bool board_capture_active(void) { return capture; }
 // Called after the renderer's completion barrier, including failed frames.
 // Invalidating addressing never releases a descriptor or acknowledges DMA.
-void board_present_frame_end(void) { next_row=-1; }
+void board_present_frame_end(void) {
+    next_row=-1;
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    /* Discard an unused draw loan, never an in-flight SPI borrow. */
+    half_lent=NULL;
+#endif
+}
 bool board_capture_take_turn(void) {
     if(!capture||capture_turn_taken)return false;
     capture_turn_taken=true;
@@ -294,7 +333,15 @@ bool board_capture_take_turn(void) {
 static esp_err_t tx(bool data, const void *bytes, size_t n) {
     gpio_set_level(34, data);
     spi_transaction_t t = {.length = n * 8, .tx_buffer = bytes};
-    return spi_device_polling_transmit(lcd, &t);
+    esp_err_t e = spi_device_polling_transmit(lcd, &t);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    /* Success proves the polling call completed. An error alone does not
+     * distinguish an unaccepted call from an unfinished injected failure.
+     * Conservatively stop even for a completed polling error: this API has
+     * no returned-descriptor witness. The local descriptor must not unwind. */
+    if (e != ESP_OK) tx_stop();
+#endif
+    return e;
 }
 static esp_err_t command(uint8_t c, const void *data, size_t n) {
     // Any command at all ends the RAMWR session, so nothing may be in flight
@@ -657,6 +704,9 @@ bool board_key_event(board_keyevent_t *out) {
 #include "pocket_capture.h"
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    tx_before_write(pixels, (size_t)rows * LCD_W * sizeof *pixels);
+#endif
     pet_hub_overlay(pixels,y,rows);
     // docs/api/common-api.md 9 makes showing that the microphone is live the
     // host's obligation, so it is drawn here, at the one transfer to the
@@ -802,7 +852,18 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
                   tx_direct = true;
               } else
 #endif
+              {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+              /* Publish the borrow before calling an API whose error has
+               * no acceptance witness. A failed submission cannot unwind. */
+              tx_inflight = true;
+              half_from = panel;
+#endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+              if (e != ESP_OK) tx_stop();
+#endif
+              }
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #ifdef KASANE_P0_BUS_PROBE
@@ -836,7 +897,10 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
 #if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
     // A screen's own strip (not a lent half): finished before it is drawn
     // into again.
-    if (pixels != half_lent && e == ESP_OK) e = tx_reap();
+    if (pixels != half_lent && e == ESP_OK) {
+        e = tx_reap();
+        if (tx_inflight) tx_stop();
+    }
     half_lent = NULL;
 #endif
     // Where the pointer lands once these rows are in. At the bottom of the
@@ -864,6 +928,9 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         next_row=-1;return ESP_ERR_INVALID_ARG;
     }
     if (cols==LCD_W) return board_present(y,rows,pixels);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+    tx_before_write(pixels, (size_t)rows * LCD_W * sizeof *pixels);
+#endif
     pet_hub_overlay(pixels,y,rows);
     pocket_capture_overlay(pixels,y,rows);
     // No capture arm: board_capture dumps whole rows and the columns outside
@@ -970,7 +1037,16 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
                   tx_direct = true;
               } else
 #endif
+              {
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+              tx_inflight = true;
+              half_from = panel;
+#endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
+#if defined(BOARD_STRIP_HALF)&&BOARD_STRIP_HALF
+              if (e != ESP_OK) tx_stop();
+#endif
+              }
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2

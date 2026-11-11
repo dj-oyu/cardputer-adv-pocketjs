@@ -15,7 +15,9 @@ esp_err_t board_init(void);
 // the bus. See the comment at the definition for why it lives here.
 esp_err_t board_spi3_acquire(void);
 bool board_key_event(board_keyevent_t *out);
-// The one strip buffer every screen draws into; board_present consumes it.
+// UI owner only. Drawing storage is returned only after overlapping SPI
+// borrows complete. No NULL result: uncertain completion stops the owner.
+// A stopped owner retains caller storage; it has no automatic recovery.
 uint16_t *board_strip(void);
 // Zero-copy strips (docs/platform/lcd-dma-driver.md 9.4): with
 // g_board_zero_copy set (BOARD_BUF_AB builds only, for now), the board's two strip buffers take turns as the draw
@@ -53,14 +55,22 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels);
 // of bounds or a discontinuity costs three commands. The existing renderer
 // narrow threshold and 16-pixel alignment are unchanged.
 esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels);
+// HALF external-buffer sends do not return while SPI may still borrow caller
+// storage. A submitted lending half remains borrowed until finish/reap; draw
+// only storage obtained through board_strip_next/board_strip after that call.
+// SPI errors with no completion/acceptance witness stop the owner rather than
+// returning an unsafe borrow. Even a known unaccepted/polling error can stop:
+// the public SPI return code alone is not an independent completion witness.
 // Owner-task barrier: acknowledges completed transfer, including prior work.
 // A transfer failure invalidates the panel write position.
 esp_err_t board_present_sync(int y, int rows, uint16_t *pixels);
 esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels);
 #ifdef KASANE_DMA_OVERLAP
-// UI owner only. Copies pixels before return; TX/descriptor remain board-owned
-// until finish. Never acknowledge a frame until finish succeeds. A non-timeout
-// driver error without descriptor return quarantines TX until a later finish.
+// UI owner only. Non-HALF copies pixels; HALF may borrow a lending half until
+// finish, and completes external caller storage before return. TX/descriptor
+// remain owned until completion; uncertain external completion stops the owner.
+// Never acknowledge a frame until finish succeeds. A failed finish does not
+// release an unreturned descriptor; HAL storage getters still enforce overlap.
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
 esp_err_t board_present_finish(void);
 #endif

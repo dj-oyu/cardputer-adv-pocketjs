@@ -38,7 +38,7 @@ def function(signature):
 
 DECLARATIONS = '\n'.join(re.findall(
     r'^static (?:uint16_t|int|bool|spi_transaction_t) '
-    r'(?:shared|tx_inflight|tx_pending|next_row|window_x|window_cols|\*half_lent)\b[^;]*;',
+    r'(?:shared|tx_stopped|tx_inflight|tx_pending|next_row|window_x|window_cols|\*half_lent|\*half_from)\b[^;]*;',
     source, re.M))
 assert 'half_lent' in DECLARATIONS, 'board.c has no design-0 state'
 
@@ -70,6 +70,8 @@ typedef struct {size_t length; const void *tx_buffer;} spi_transaction_t;
 @DECLARATIONS@
 static bool capture,capture_turn_taken,pie_swap,lcd_le=true;
 static int g_board_async=1,g_board_swap_into=1,lcd;
+static esp_err_t tx_reap(void);
+static void tx_before_write(const void *,size_t);
 static uint16_t glass[LCD_W*LCD_H],expected[LCD_W*LCD_H];
 static uint8_t snapshot[LCD_W*STRIP_H*2];
 static const uint8_t *borrowed;
@@ -142,6 +144,14 @@ static void kasane_frame(int x,int cols,int salt){
 }
 int main(void){
  assert(board_strip_rows()==4);
+ /* An unused half loan must not classify a legacy whole-strip caller as async. */
+ (void)board_strip_next();
+ assert(board_strip()==shared && half_lent==NULL);
+ draw(shared,0,STRIP_H,90);expect(0,0,LCD_W,STRIP_H,90);
+ assert(board_present(0,STRIP_H,shared)==ESP_OK && !bus_pending);
+ (void)board_strip_next();board_present_frame_end();assert(half_lent==NULL);
+ draw(shared,0,STRIP_H,91);expect(0,0,LCD_W,STRIP_H,91);
+ assert(board_present(0,STRIP_H,shared)==ESP_OK && !bus_pending);
  /* Kasane, full width then narrow. */
  kasane_frame(0,LCD_W,1);
  assert(memcmp(glass,expected,sizeof glass)==0);
@@ -182,6 +192,9 @@ int main(void){
 '''
 
 parts = [function(x) for x in (
+    'uint16_t *board_strip(void) {',
+    'static _Noreturn void tx_stop(void) {',
+    'static void tx_before_write(const void *pixels, size_t bytes) {',
     'static void put_strip(uint16_t *out,uint16_t *in,int count){', 'int board_strip_rows(',
     'uint16_t *board_strip_next(', 'static esp_err_t tx_reap(', 'void board_capture(',
     'bool board_capture_take_turn(', 'static esp_err_t command(', 'esp_err_t board_present(',
