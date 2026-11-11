@@ -259,6 +259,9 @@ static void sample_memory_pressure(void) {
 }
 static atomic_bool stop_requested;
 static esp_err_t present_settle(void);
+// P2a, see present_settle(): a deferred frame awaits its accounting; the next
+// present may defer; deferring is off for the session after a failed transfer.
+static bool pf_deferred,present_defer,defer_off;
 static int64_t deadline;
 // L1 (docs/vm/vm-L1-design.md). Armed once per turn and handed to the guest, so
 // frame()'s drain and the next turn's continuation drain measure against the
@@ -2643,7 +2646,7 @@ static esp_err_t present_account(ksn_result result);
 // a join; its accounting waits for present_settle(). present_defer asks the
 // next present_frame() to defer, and defer_off stops deferring for the rest
 // of the session after a transfer failure (sec.2.3 E).
-static bool pf_deferred,present_defer,defer_off;
+// (declared at the top: the session start and the turn read them too)
 #ifdef KASANE_DMA_OVERLAP
 static ksn_result pf_result;
 // The finish step: the acknowledgement only (F6). Runs wherever the join is.
