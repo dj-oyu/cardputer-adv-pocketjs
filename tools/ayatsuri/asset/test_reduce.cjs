@@ -54,3 +54,18 @@ const lineage=structuredClone(s);lineage.sourceVertexIds=[0];assert.throws(()=>r
 const large=structuredClone(s);large.positions=Array(4097).fill([0,0,0]);large.normals=Array(4097).fill([0,0,1]);assert.throws(()=>reduceSurface(large,{targetVertices:49}),/PROTOTYPE_INPUT_LIMIT/);
 assert.deepEqual(ir,before);
 console.log(JSON.stringify({status:'PASS',sourceVertices:81,reducedVertices:49,parts:compiled.parts.length,coldBytes:compiled.bytes.length,curvedSampleErrors:errors,blender:'NOT_TESTED',nativeRenderer:'NOT_TESTED',foxArt:'NOT_ACCEPTED'}));
+const {composeLineage}=require('./source_lineage.cjs');
+const namedIR={...ir,surfaces:[namedReduced]},namedCompiled=compileStatic(namedIR,options),lineageReport=composeLineage(namedIR,namedCompiled);
+assert.equal(lineageReport.flatMap(p=>p.triangles).length,namedReduced.triangles.length);
+for(const p of lineageReport)for(const t of p.triangles)assert.equal(t.sourceTriangleId,namedReduced.sourceTriangleIds[t.reducedTriangle]);
+const corrupted=structuredClone(namedCompiled);corrupted.parts[0].origins[0].triangle=9999;assert.throws(()=>composeLineage(namedIR,corrupted),/INVALID_TRIANGLE_ORIGIN/);
+const sparse=structuredClone(namedCompiled);delete sparse.parts[0].origins[0];assert.throws(()=>composeLineage(namedIR,sparse),/INVALID_TRIANGLE_ORIGIN/);
+assert.throws(()=>composeLineage({surfaces:[]},{parts:Array(1)}),/INVALID_PART_LINEAGE/);
+if(process.argv[2]){
+ const fs=require('node:fs'),path=require('node:path'),output=process.argv[2];fs.mkdirSync(output,{recursive:true});
+ const cases={identity:compileStatic(ir,options),reduced:compiled};
+ for(const [name,result] of Object.entries(cases))fs.writeFileSync(path.join(output,name+'.aynm'),result.bytes);
+ fs.writeFileSync(path.join(output,'source.ir.json'),JSON.stringify(ir,null,2)+'\n');
+ fs.writeFileSync(path.join(output,'reduced.ir.json'),JSON.stringify(selected,null,2)+'\n');
+ fs.writeFileSync(path.join(output,'lineage.json'),JSON.stringify(composeLineage(selected,compiled),null,2)+'\n');
+}

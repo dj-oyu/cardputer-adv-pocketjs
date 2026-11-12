@@ -59,3 +59,28 @@ sparse 属性/indices 拒否、現在の single/double-sided compilation を試�
 
 人工 fixture PASS を Blender、狐造形、実 renderer、実機の受入と呼ばない。
 私有モデル・Library 原本は公開 repository に追加しない。
+
+## 第2工程: lineage と現行 native 平面画像の回帰
+
+`source_lineage.cjs` は現行 compiler の `parts.origins` を縮小済み IR の
+`sourceTriangleIds` と合成する。非連番 ID、分割を跨ぐ全 triangle、
+未知 index と sparse origin の拒否を試験する。ID は collapse survivor の由来で、
+変形した三角形の面上対応や隠面の正しさを証明しない。
+
+```sh
+python3 tools/ayatsuri/asset/verify_source_native.py --asan --output-dir .cache/source-native-new
+```
+
+出力先は新規 directory のみ。入力/実装 hash と compiler/flags、画像 hash を記録する。
+実際の C `ayatsuri_model` が AYNM を読み、evaluate → 所有 snapshot への copy →
+actor/arena/cold bytes 解放 → `ksn_mesh_render` の順で描画する。
+全画像の 1 行/8 行 scratch 一致も検査する。
+
+人工平面の原本81頂点と縮小49頂点は yaw -35/0/+35° の各 240×135 RGB565 が完全一致。
+被覆数は 5200/6400/5200 pixel。正面は原本の既知の 80×80 正方形との独立被覆比較も行う。
+1 byte 改変負例は比較に失敗する。host arena はこの fixture で 5988 → 3092 bytes、
+snapshot record は 4 → 2。実機メモリや高速化の主張ではない。
+ASan/UBSan を使用、実行環境の制約から LSan は明示的に無効として記録する。
+
+これは現在の Model/mesh 経路に接続した**平面の差分回帰**であり、独立の shader/depth oracle ではない。
+曲面の量子化後誤差・意味的対応・遮蔽、Blender/狐造形の品質、guest/実機の計測は未完。
