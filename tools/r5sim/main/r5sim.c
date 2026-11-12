@@ -8,6 +8,7 @@
 // QEMU's exec log names a translation block by its address, and these two
 // are the only code at theirs, so tools/r5sim/icache.py cuts the fetch stream
 // at them without any clock or output having to line up.
+#include "esp_heap_caps.h"
 #include "pocket_kasane.h"
 #include "pocket_memory.h"
 #include "pocket_av.h"
@@ -165,6 +166,9 @@ static void r5_arm_turn(void){                                                  
     pocketjs_guest_yield_enabled(guest,true);
 }
 #endif
+#ifdef R5SIM_GC_TRACE
+void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before, size_t *last_after);
+#endif
 static uint16_t strip_pixels[240*8];
 static unsigned oom_lines, fail_lines;
 #include "esp_cpu.h"
@@ -318,6 +322,20 @@ void app_main(void) {
     JSValue frame=JS_GetPropertyStr(ctx,g,"frame");
 #endif
     printf("R5SIM eval %s\n",ok?"ok":"FAIL");
+#ifdef R5SIM_FREE_KIB
+    {
+        /* The device's free internal heap when STRESS starts (MEM free=~91 KB
+         * after the evaluation, measured): QEMU has no radio and no panel. */
+        const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+        const size_t target=(size_t)R5SIM_FREE_KIB*1024u;
+        unsigned chunks=0;
+        while(heap_caps_get_free_size(caps)>target+8192u&&heap_caps_malloc(4096,caps)) chunks++;
+        size_t f=heap_caps_get_free_size(caps);
+        if(f>target+64u&&heap_caps_malloc(f-target-64u,caps)) chunks++;
+        printf("R5SIM ballast chunks=%u free=%u largest=%u\n",chunks,
+               (unsigned)heap_caps_get_free_size(caps),(unsigned)heap_caps_get_largest_free_block(caps));
+    }
+#endif
 #ifdef R5SIM_HEAP_INFO
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
 #endif
@@ -367,6 +385,32 @@ void app_main(void) {
         if(canary.count) pocket_memory_oom(&canary,(uint64_t)t*33333u);
         size_t used=0,limit=0;
         JS_GetMemoryCounters(rt,&used,&limit);
+#ifdef R5SIM_GC_TRACE
+        {
+            static uint32_t runs_seen; static uint64_t freed_seen;
+            uint32_t runs; uint64_t freed; size_t lb,la;
+            JS_PocketGCStats(&runs,&freed,&lb,&la);
+            const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+            printf("R5SIM GC t=%u used=%u thr=%u gc=%u(+%u) freed=+%u last=%u->%u "
+                   "oom=%u q=%u a=%u req=%u sys_free=%u sys_largest=%u\n",
+                   t,(unsigned)used,(unsigned)JS_GetGCThreshold(rt),(unsigned)runs,
+                   (unsigned)(runs-runs_seen),(unsigned)(freed-freed_seen),(unsigned)lb,(unsigned)la,
+                   (unsigned)canary.count,(unsigned)canary.quota_count,(unsigned)canary.allocator_count,
+                   (unsigned)canary.first_req,(unsigned)heap_caps_get_free_size(caps),
+                   (unsigned)heap_caps_get_largest_free_block(caps));
+            runs_seen=runs; freed_seen=freed;
+        }
+#endif
+#ifdef R5SIM_GC_ON_OOM
+        /* The experiment: the system heap refused this turn; collect now
+         * (between turns, where a GC is safe) and report what it freed. */
+        if(canary.allocator_count) {
+            size_t u0=used;
+            JS_RunGC(rt);
+            JS_GetMemoryCounters(rt,&used,&limit);
+            printf("R5SIM GC_ON_OOM t=%u used=%u->%u\n",t,(unsigned)u0,(unsigned)used);
+        }
+#endif
         pocket_memory_sample((uint64_t)t*33333u,used,limit,false,0,0);
         pocket_memory_pump(false);
 #ifdef R5SIM_FULL_RENDER

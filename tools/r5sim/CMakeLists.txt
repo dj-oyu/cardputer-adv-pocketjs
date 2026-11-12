@@ -25,6 +25,11 @@ project(r5sim)
 # setup code than the firmware (and the PGO profile missed those functions).
 idf_component_get_property(_qjs_lib quickjs-ng COMPONENT_LIB)
 target_compile_definitions(${_qjs_lib} PRIVATE CONFIG_POCKET_VM_ROM_INTRINSICS=1)
+# -DR5SIM_GC_TRACE=1: QuickJS's collection counters (JS_PocketGCStats) for the
+# per-turn heap line (docs/vm/lv3-heap-exhaustion.md).
+if(R5SIM_GC_TRACE)
+    target_compile_definitions(${_qjs_lib} PRIVATE POCKET_GC_STATS=1)
+endif()
 # Profile-guided QuickJS (docs/vm/qjs-pgo.md): -DR5SIM_PGO=generate trains,
 # -DR5SIM_PGO=use builds with tools/pgo/qjs (to model the result).
 include("${CMAKE_CURRENT_LIST_DIR}/../pgo/qjs_pgo.cmake")

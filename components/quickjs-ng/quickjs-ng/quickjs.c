@@ -8956,8 +8956,27 @@ static void gc_free_cycles(JSRuntime *rt)
     init_list_head(&rt->gc_zero_ref_count_list);
 }
 
+#ifdef POCKET_GC_STATS
+/* Measurement only (tools/r5sim, docs/vm/qjs-observe.md): collections run
+   and the bytes they freed, read with JS_PocketGCStats. */
+static uint32_t pocket_gc_runs;
+static uint64_t pocket_gc_freed;
+static size_t pocket_gc_last_before, pocket_gc_last_after;
+void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before,
+                      size_t *last_after)
+{
+    *runs = pocket_gc_runs;
+    *freed = pocket_gc_freed;
+    *last_before = pocket_gc_last_before;
+    *last_after = pocket_gc_last_after;
+}
+#endif
+
 void JS_RunGC(JSRuntime *rt)
 {
+#ifdef POCKET_GC_STATS
+    size_t before = rt->malloc_state.malloc_size;
+#endif
     /* decrement the reference of the children of each object. mark =
        1 after this pass. */
     gc_decref(rt);
@@ -8967,6 +8986,13 @@ void JS_RunGC(JSRuntime *rt)
 
     /* free the GC objects in a cycle */
     gc_free_cycles(rt);
+#ifdef POCKET_GC_STATS
+    pocket_gc_runs++;
+    pocket_gc_last_before = before;
+    pocket_gc_last_after = rt->malloc_state.malloc_size;
+    if (before > pocket_gc_last_after)
+        pocket_gc_freed += before - pocket_gc_last_after;
+#endif
 }
 
 /* Return false if not an object or if the object has already been

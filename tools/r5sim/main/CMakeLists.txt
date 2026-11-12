@@ -90,6 +90,20 @@ endif()
 if(R5SIM_LEVEL_UP)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_LEVEL_UP)
 endif()
+# STRESS LV3's heap exhaustion (docs/vm/lv3-heap-exhaustion.md):
+# R5SIM_GC_TRACE prints a heap/GC line per turn; R5SIM_FREE_KIB leaves only
+# that much of the internal heap free after the evaluation (QEMU has no radio
+# and no panel, so far more than the device); R5SIM_GC_ON_OOM collects after
+# a turn whose allocations the system heap refused.
+if(R5SIM_GC_TRACE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_GC_TRACE)
+endif()
+if(R5SIM_FREE_KIB)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_FREE_KIB=${R5SIM_FREE_KIB})
+endif()
+if(R5SIM_GC_ON_OOM)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_GC_ON_OOM)
+endif()
 if(R5SIM_APP STREQUAL "shiki")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_SHIKI)
     # pocket_kasane.c reaches pocket.kasane.shiki through weak references,
