@@ -36,6 +36,9 @@ shader.inputs['Metallic'].default_value = 0
 shader.inputs['Roughness'].default_value = .8
 mat.use_backface_culling = True
 obj.data.materials.append(mat)
+# Capture authored mesh normals before the exporter runs, not from GLB.
+source_normals = [{"vertex": loop.vertex_index, "normal": list(mesh.corner_normals[loop.index].vector)}
+                  for loop in mesh.loops]
 bpy.ops.wm.save_as_mainfile(filepath=str(out / 'source.blend'))
 bpy.ops.export_scene.gltf(filepath=str(out / 'source.glb'), export_format='GLB',
                           use_selection=True, export_animations=False,
@@ -45,4 +48,5 @@ bpy.ops.export_scene.gltf(filepath=str(out / 'source.glb'), export_format='GLB',
 (out / 'blender-source.json').write_text(json.dumps({
     'scope': 'SYNTHETIC GRID, NOT PRIVATE ART OR FOX ACCEPTANCE',
     'blenderVersion': bpy.app.version_string, 'vertices': vertices, 'faces': faces,
+    'cornerNormals': source_normals,
     'units': 'Blender scene units', 'exportYUp': True}) + '\n')

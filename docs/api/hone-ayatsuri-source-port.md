@@ -122,7 +122,7 @@ node tools/ayatsuri/asset/verify_blender_grid.cjs .cache/blender-grid-new
 出力先は新規のみで、再編集できる `source.blend` と実GLB export、元頂点/面JSONを残す。
 Blender4.3.2で81頂点/128面の人工曲面をexportし、Z-up→Y-up→Hone変換と
 反射後のwindingを原本JSONから検証した。最大座標差は約2.98e-9原本単位。
-原本座標/面向きの改変負例は拒否。exportされたnormalの独立検算はまだ行わない。
+原本座標/面向きの改変負例は拒否。normalは以下の限定oracleで別に検証する。
 65頂点縮小の標本距離最大約0.006595、法線角最大約1.610°、3parts/3648bytes。
 Blenderからの実export経路の証拠であって、任意Blenderシーンや狐造形の受入ではない。
 
@@ -132,3 +132,18 @@ Blenderからの実export経路の証拠であって、任意Blenderシーンや
 量子化単独の最大距離は3e-9未満。原本→packedの法線角最大は約1.32e-8/1.884/3.353°。
 ゼロ誤差要求・頂点破損負例を拒否する。標本点集合は分割で複製されるため、
 段階間の平均値は同じ母集団の比較ではない。連続面最大・pixel・遮蔽・狐品質は未認証。
+
+## Blender corner normal の独立変換検査
+
+export前の384 corner normalsを原本meshから記録し、位置対応とは別に各cornerの
+頂点IDを原本faceと照合する。identity objectのsmoothな人工gridを対象とし、
+既知のBlender→Hone基底 `[x,-z,-y]` と出力normalの方向・単位長を検証する。
+Blender 4.3.2 exporterはcorner normalを小数4桁へ丸めてから正規化するため、
+各成分誤差0.5e-4の理論上限から `asin(sqrt(3)*0.5e-4)+1e-6` radを使用する。
+追加1e-6はF32演算と原本単位長丸め分で、観測値に合わせた閾値ではない。
+最大観測角6.90475e-5rad、上限8.76025e-5rad。GLB/model hashは以前と同一。
+符号反転・軸交換・非単位長・NaN・0.001rad回転・corner頂点対応改変を拒否する。
+これはexporter/importerから独立した基底・誤差境界の検証で、Blender自身の
+smooth normal生成アルゴリズムの独立検算、split/custom normalsや非一様scale、
+任意シーン・pixel・実機の受入ではない。従来のvertex normal厳密比較は丸め契約と
+corner基準を考慮しておらず不合格だったが、製品描画不具合の証拠ではなかった。
