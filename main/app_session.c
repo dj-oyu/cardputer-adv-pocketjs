@@ -230,6 +230,32 @@ static void report_oom_if_any(void) {
 #ifdef CONFIG_POCKET_VM_OOMPROBE
         oomprobe_canary(canary.count,canary.first_req,canary.first_used);
 #endif
+#ifdef CONFIG_POCKET_OOM_GC_PROBE
+        /* Measurement: is the memory live, or garbage not yet collected, or
+         * just fragmented? Who refused (quota or allocator), the guest's
+         * bytes and the system heap, then the same after a full GC. At most
+         * once a second: an app at its limit refuses every frame. */
+        static int64_t gc_probe_last;
+        const int64_t now=esp_timer_get_time();
+        if(now-gc_probe_last>=1000000) {
+            gc_probe_last=now;
+            JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+            const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+            size_t u0=0,l0=0,u1=0,l1=0;
+            JS_GetMemoryCounters(rt,&u0,&l0);
+            const size_t f0=heap_caps_get_free_size(caps),b0=heap_caps_get_largest_free_block(caps);
+            const int64_t g0=esp_timer_get_time();
+            JS_RunGC(rt);
+            const unsigned gc_us=(unsigned)(esp_timer_get_time()-g0);
+            JS_GetMemoryCounters(rt,&u1,&l1);
+            ESP_LOGW("app","OOM_GC quota=%u allocator=%u guest=%u->%u limit=%u "
+                     "sys_free=%u->%u sys_largest=%u->%u gc_us=%u",
+                     (unsigned)canary.quota_count,(unsigned)canary.allocator_count,
+                     (unsigned)u0,(unsigned)u1,(unsigned)l0,
+                     (unsigned)f0,(unsigned)heap_caps_get_free_size(caps),
+                     (unsigned)b0,(unsigned)heap_caps_get_largest_free_block(caps),gc_us);
+        }
+#endif
     }
 }
 

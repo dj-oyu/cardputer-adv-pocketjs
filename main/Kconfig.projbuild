@@ -172,6 +172,16 @@ menu "Pocket VM (diagnostics)"
             yet. With POCKET_FRAME_BD_DISP_AB the probe alternates it with the
             inline path every 60-frame window.
 
+    config POCKET_OOM_GC_PROBE
+        bool "Probe: on a guest OOM, log who refused and the heaps before and after a full GC"
+        default n
+        help
+            Measurement only. At most once a second, after a guest allocation
+            failed: the quota/allocator refusal counts, the guest's bytes and
+            the system heap (free, largest block), then the same after
+            JS_RunGC. Garbage that a GC frees, live data, and a fragmented
+            heap each leave a different line.
+
     config POCKET_DISP_DEFER
         bool "Display task: let the next JS turn run while a frame is presented (P2a)"
         depends on POCKET_DISP_TASK
