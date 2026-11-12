@@ -1,0 +1,5 @@
+# Opt-in only: deliberately NOT named chunks.txt (no default CMake glob).
+app local.skinsample
+motion ../lib/ayatsuri_motion.js
+scene ../lib/ayatsuri_model.js
+sample skin_sample.js
