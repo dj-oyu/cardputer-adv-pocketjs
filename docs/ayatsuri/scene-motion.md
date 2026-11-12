@@ -140,5 +140,35 @@ bind/rest対応、weight/skinning、変形法線、morph/表情、実モデル�
 公開の合成入力については、独立した[skin scalar core](skin-core.md)でbind paletteと
 4 influence変形のhost検査を追加し、後続の[C描画接続](skin-render-bridge.md)で
 既存Model/opaque rendererへの同期借用を検査する。[managed JS skin評価](skin-js.md)は
-instance単位で利用できるが、このscene facadeの自動skin制御とAYNM skin tableは未実装。
+instance単位で利用でき、sceneの明示入口は下記を参照。このscene facadeの自動skin制御とAYNM skin tableは未実装。
 上記の実キャラクター工程の完了を意味しない。
+
+## 明示的な単mesh skin評価
+
+`scene.evaluateSkin(timeMs, meshId, jointGlobals, inverseBind, bindVertices,
+jointIndices, weights)` は、scene所有のcamera/lightとdirty targetsを既存の
+`instance.evaluateSkin`へ接続する明示入口である。timeMsはfiniteな数値必須で、
+自動再生や内部timerには使わない。Motionの評価とjoint行列の構築はcallerの責務。
+配列の型、mesh-local座標系、weight、片面/holeなし、同期借用の制約は
+[managed JS skin](skin-js.md)と同じ。rig情報・配列をsceneへ保存せず、モデル形式も変えない。
+
+成功後は通常の`scene.render()`で提出する。別meshを連続評価して蓄積はせず、
+通常の`scene.evaluate(time)`へ戻すとcold geometryに復帰する。batch skinや
+scene handleからjointを自動抽出する機能はこの入口に含まない。
+
+finite time検証より後の失敗ではsceneをnot-readyにしてrenderを拒否し、正常な
+再評価で復帰する。dirty targetsはskin呼出し前に適用されるため、skin失敗が
+target適用も巻き戻すとは限らない。既にcommitされたframeは不変。
+不正timeは通常evaluateと同じく処理開始前に拒否する。busy中の再入/dispose拒否、
+例外後のbusy解除、冪等dispose、Model借用とsnapshot所有権は従来どおり。
+
+```sh
+python3 tools/ayatsuri/skin/run_scene.py --no-leak-check
+```
+
+公開6頂点/2jointのみを実QuickJSのMotion→compose→scene入口→native skin→
+rendererへ接続する。240往復frame、24同時刻pause、dirty visibility、cold復帰、
+busy再入、OOM復帰、入力変更後のpacket、source破棄後pending描画を4条件で検査。
+referenceは同じnative coreを共有するため独立shader証明ではない。実機・狐資産・
+GLB skin importer・一般補間・batchの受入ではなく、hostの明示入口の試験である。
+LSan無効時もASan/UBSanと要求allocation ledgerを検査し、結果へ区別して記録する。
