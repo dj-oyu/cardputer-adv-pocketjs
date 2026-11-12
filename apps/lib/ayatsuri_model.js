@@ -81,6 +81,14 @@ globalThis.AyatsuriNative=(()=>{
       s.instance.evaluateSkin(s.cameraState,s.lightState,meshId,
         jointGlobals,inverseBind,bindVertices,jointIndices,weights);s.ready=true;
     }finally{s.busy=false;}
+  },evaluateSkins(timeMs,descriptors,jointGlobals,inverseBind,bindVertices,jointIndices,weights){
+    const s=this;alive(s);finite(timeMs);s.busy=true;s.ready=false;
+    try{let dirty=false;for(let k=0;k<s.n;k++)if(s.mask[k]){dirty=true;break;}
+      if(dirty){s.instance.targets(s.mask,s.poses,s.colors,s.opacity);s.mask.fill(0);}
+      // One validated native batch, never a loop of single-mesh snapshots.
+      s.instance.evaluateSkins(s.cameraState,s.lightState,descriptors,
+        jointGlobals,inverseBind,bindVertices,jointIndices,weights);s.ready=true;
+    }finally{s.busy=false;}
   },render(){
     const s=this;alive(s);if(!s.ready)throw new Error('AyatsuriNative: evaluate before render');s.busy=true;
     try{s.instance.submit();}finally{s.busy=false;}

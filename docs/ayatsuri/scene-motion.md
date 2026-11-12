@@ -172,3 +172,27 @@ busy再入、OOM復帰、入力変更後のpacket、source破棄後pending描画
 referenceは同じnative coreを共有するため独立shader証明ではない。実機・狐資産・
 GLB skin importer・一般補間・batchの受入ではなく、hostの明示入口の試験である。
 LSan無効時もASan/UBSanと要求allocation ledgerを検査し、結果へ区別して記録する。
+
+### Explicit bounded multi-part skin evaluation
+
+`scene.evaluateSkins(timeMs, descriptors, G, IB, V, J, W)` forwards one
+synchronous batch to the existing native instance API. Descriptors are Uint16
+triples `[meshNodeId, vertexCount, jointCount]`; all other typed arrays are
+concatenated in that order, using the existing mesh-local skin contract.
+It does not loop `evaluateSkin`: each successful call creates one all-part
+snapshot. Input arrays are borrowed only for the call; reuse them afterwards.
+Dirty Scene targets are applied first. An error after evaluation starts clears
+Scene readiness (render is refused) and always clears busy. Targets already
+applied are not rolled back. Invalid time is rejected before evaluation starts.
+Successful retry or ordinary `evaluate()` restores readiness; ordinary evaluate
+returns to cold geometry. Pending submitted snapshots survive Scene disposal.
+
+Existing native bounds remain: 3..32 vertices per part, unique mesh node IDs,
+256 total palette entries and 16384 bytes of work. Work is alignment padding +
+part descriptors + 64 bytes per vertex + 48 bytes per palette entry. Duplicated
+boundary vertices and palettes count again. No mesh partitioner or wire change
+is added here. A 1322-vertex audit total would alone need 84608 vertex-work bytes
+if all vertices were skinned in one batch; that audit total is NOT a declaration
+that all character geometry requires skinning. Rigid, DQ, morph and transparent
+workloads need separate verified contracts. This small synthetic acceptance is
+not full-character support or physical-device 20 fps evidence.
