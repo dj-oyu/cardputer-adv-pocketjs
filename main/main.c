@@ -1593,6 +1593,10 @@ void app_main(void) {
     wifi_time_init();
     pet_hub_init();
     shell_init();
+    // After shell_init(), which loads the AUTO TIME SYNC row: the boot that
+    // will sync puts lwIP's permanent blocks beside the other boot residents
+    // instead of between the holes a later start would find.
+    if(net_autosync_enabled()) wifi_time_stack_early();
     // After shell_init(), which is where the stored arming bit reaches the
     // overlay's setter, and before the UI task, which is what would start it.
     // This is the boot that decides whether an overlay that did not survive

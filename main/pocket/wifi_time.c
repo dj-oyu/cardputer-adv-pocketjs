@@ -468,6 +468,16 @@ static void wifi_worker_task(void *arg) {
     }
 }
 
+void wifi_time_stack_early(void) {
+    // radio_up's own esp_netif_init() then finds the core running and returns
+    // ESP_OK. The default event loop is not made here: radio_down deletes it
+    // after each use, which a permanent one would forfeit.
+    esp_err_t err=esp_netif_init();
+    ESP_LOGI(TAG,"NETIF_EARLY %s free=%u largest=%u",err==ESP_OK?"ok":esp_err_to_name(err),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+}
+
 void wifi_time_init(void) {
     if(wifi_worker) return;
     wifi_worker=rtc_task_create(wifi_worker_task,"wifi",3072,5);

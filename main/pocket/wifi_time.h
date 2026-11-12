@@ -53,6 +53,12 @@ typedef struct {
 // scans and links, with its stack in RTC fast memory (rtc_task.h). Without it
 // the starts below return ESP_ERR_NO_MEM.
 void wifi_time_init(void);
+// Start lwIP's core (esp_netif_init) now, at boot, when the radio is going to
+// come up anyway (AUTO TIME SYNC on). What it allocates is permanent
+// (esp_netif_deinit is not supported), and made later it lands in the middle
+// of the heap: the tcpip thread's stack split DERBY's two largest holes
+// (docs/vm/lv3-heap-exhaustion.md sec.6.6). The radio itself stays lazy.
+void wifi_time_stack_early(void);
 
 // Stable lower-case token for the log marker and for the UI, e.g. "auth".
 const char *wifi_time_stage_name(wifi_time_stage_t stage);
