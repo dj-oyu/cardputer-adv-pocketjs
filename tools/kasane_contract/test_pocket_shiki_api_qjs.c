@@ -14,6 +14,8 @@
 #define REQUIRE(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
 
 ksn_result pocket_kasane_proc_publish(void){return KSN_OK;}
+/* These tests present by hand after commit, so Kasane always has work. */
+bool pocket_kasane_needs_present(void){return true;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){(void)surface;(void)damage;return KSN_OK;}
 void pocket_kasane_invalidate(void){}
 JSValue pocket_kasane_proc_resource(JSContext *ctx){pocket_proc_image_mode();return JS_NewObject(ctx);}

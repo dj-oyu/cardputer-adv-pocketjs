@@ -1,6 +1,7 @@
 #include "pocket_shiki_frame.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
+bool pocket_kasane_needs_present(void);
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
 void pocket_kasane_invalidate(void);
 JSValue pocket_kasane_proc_resource(JSContext *ctx);

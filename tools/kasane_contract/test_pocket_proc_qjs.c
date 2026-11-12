@@ -48,6 +48,8 @@ static ksn_result multi_send_rect(void *ctx,uint16_t x,uint16_t y,uint16_t cols,
 }
 
 ksn_result pocket_kasane_proc_publish(void){publishes++;return KSN_OK;}
+/* These tests present by hand after commit, so Kasane always has work. */
+bool pocket_kasane_needs_present(void){return true;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
     publishes++;
     if(multi_active&&surface<2&&multi_resource[surface].value)

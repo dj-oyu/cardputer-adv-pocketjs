@@ -46,6 +46,8 @@ void *proc_test_calloc(size_t count,size_t size){
 }
 
 ksn_result pocket_kasane_proc_publish(void){return KSN_OK;}
+/* These tests present by hand after commit, so Kasane always has work. */
+bool pocket_kasane_needs_present(void){return true;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
     (void)surface;(void)damage;return KSN_OK;
 }
