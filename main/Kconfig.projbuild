@@ -119,6 +119,18 @@ menu "Pocket VM (diagnostics)"
             Off by default: development builds keep exact positions. A
             shipping build may turn it on when an app needs the room.
 
+    config POCKET_VM_GUEST_CHUNK_KB
+        int "Growable guest arena: chunk size (KiB, 0 = one fixed arena)"
+        range 0 64
+        default 0
+        help
+            docs/vm/guest-memory-design.md sec.5. The guest's arena starts as
+            one chunk of this size and takes another (or one of half the size)
+            when full, while the system keeps the native floor; empty chunks go
+            back at the end of a turn (one spare for 30 turns). Requests above
+            2 KiB go to the shared heap. POCKET_VM_GUEST_ARENA_KB = 0 still
+            means no arena.
+
     config POCKET_VM_GUEST_ARENA_KB
         int "Guest allocation arena (KiB, 0 = none)"
         range 0 128

@@ -407,17 +407,24 @@ void app_main(void) {
             JS_PocketGCStats(&runs,&freed,&lb,&la);
             static uint64_t ticks_seen; uint64_t ticks; uint32_t tmax;
             JS_PocketGCTime(&ticks,&tmax);
+            unsigned ck_n; size_t ck_b; uint32_t ck_t,ck_r;
+            pocketjs_guest_chunk_stats(guest,&ck_n,&ck_b,&ck_t,&ck_r);
+#ifdef R5SIM_CHUNK_TRACE
+            { void pocketjs_guest_chunk_trace(pocketjs_guest_t *, unsigned);
+              if(canary.count||t%50==0) pocketjs_guest_chunk_trace(guest,t); }
+#endif
             const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
             printf("R5SIM GC t=%u used=%u lim=%u thr=%u gc=%u(+%u) freed=+%u last=%u->%u "
                    "oom=%u q=%u a=%u req=%u sys_free=%u sys_largest=%u pend=%d needs=%d sub=%d "
-                   "gc_cc=+%u gc_cc_max=%u\n",
+                   "gc_cc=+%u gc_cc_max=%u chunks=%u/%u taken=%u ret=%u\n",
                    t,(unsigned)used,(unsigned)limit,(unsigned)JS_GetGCThreshold(rt),(unsigned)runs,
                    (unsigned)(runs-runs_seen),(unsigned)(freed-freed_seen),(unsigned)lb,(unsigned)la,
                    (unsigned)canary.count,(unsigned)canary.quota_count,(unsigned)canary.allocator_count,
                    (unsigned)canary.first_req,(unsigned)heap_caps_get_free_size(caps),
                    (unsigned)heap_caps_get_largest_free_block(caps),
                    (int)pocket_proc_pending(),(int)pocket_kasane_needs_present(),
-                   (int)pocket_kasane_has_submission(),(unsigned)(ticks-ticks_seen),(unsigned)tmax);
+                   (int)pocket_kasane_has_submission(),(unsigned)(ticks-ticks_seen),(unsigned)tmax,
+                   ck_n,(unsigned)ck_b,(unsigned)ck_t,(unsigned)ck_r);
             runs_seen=runs; freed_seen=freed; ticks_seen=ticks;
         }
 #endif

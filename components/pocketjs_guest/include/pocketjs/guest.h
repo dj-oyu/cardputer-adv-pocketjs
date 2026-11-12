@@ -188,6 +188,17 @@ void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
 size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
                                 size_t native_floor);
 
+/* Give the system what the guest holds but does not use (docs/vm/
+ * guest-memory-design.md sec.6.1): the small-block cache, and every empty
+ * chunk of the growable arena. Owner task, between turns; a no-op elsewhere.
+ * For native pressure, dormancy and a radio start. */
+void pocketjs_guest_release_memory(pocketjs_guest_t *guest);
+
+/* The growable arena's state: chunks held, their bytes, and chunks taken and
+ * returned since creation. All zero without chunks. */
+void pocketjs_guest_chunk_stats(const pocketjs_guest_t *guest, unsigned *chunks,
+                                size_t *bytes, uint32_t *taken, uint32_t *returned);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

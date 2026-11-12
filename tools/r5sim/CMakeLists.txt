@@ -11,6 +11,14 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 # Allocator experiments (docs/vm/qjs-observe.md sec.10): the R3 cache's depth
 # for every component, and with -DR5SIM_GUEST_ALLOC=1 its size classes.
+# -DR5SIM_CHUNK_KIB=16: the growable arena (docs/vm/guest-memory-design.md sec.5).
+if(DEFINED R5SIM_CHUNK_KIB)
+    math(EXPR _r5_chunk "${R5SIM_CHUNK_KIB} * 1024")
+    idf_build_set_property(COMPILE_DEFINITIONS "POCKET_GUEST_CHUNK_BYTES=${_r5_chunk}U" APPEND)
+endif()
+if(R5SIM_CHUNK_TRACE)
+    idf_build_set_property(COMPILE_DEFINITIONS "POCKET_GUEST_CHUNK_TRACE=1;R5SIM_CHUNK_TRACE=1" APPEND)
+endif()
 if(DEFINED R5SIM_ARENA_KIB)
     math(EXPR _r5_arena "${R5SIM_ARENA_KIB} * 1024")
     idf_build_set_property(COMPILE_DEFINITIONS "POCKET_GUEST_ARENA_BYTES=${_r5_arena}U" APPEND)

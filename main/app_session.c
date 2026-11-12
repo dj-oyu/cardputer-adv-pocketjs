@@ -320,6 +320,15 @@ static void sample_memory_pressure(void) {
     // dips under the threshold once stays there. GUEST-only pressure is
     // different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
+    /* On entering native pressure, the guest's empty arena chunks and cached
+     * blocks go back at once (docs/vm/guest-memory-design.md sec.6.1). Once
+     * per episode: the cache refills, and flushing it every sample would cost
+     * the turn what the reduced depth below avoids. */
+    static bool native_pressed;
+    if(native&&(mask!=0)!=native_pressed){
+        native_pressed=mask!=0;
+        if(native_pressed)pocketjs_guest_release_memory(guest);
+    }
     pocketjs_guest_block_cache_set_pressure(guest,frame_bd_pressure_override(mask!=0));
     frame_bd_pressure(mask!=0,native,(uint32_t)free_bytes,(uint32_t)largest);
 }

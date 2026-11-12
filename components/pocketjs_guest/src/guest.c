@@ -136,6 +136,37 @@ typedef struct surface {
 #endif
 #endif
 
+/* The growable arena's chunk (docs/vm/guest-memory-design.md sec.5). 0 keeps
+ * the single fixed arena. r5sim sets it with -DPOCKET_GUEST_CHUNK_BYTES. */
+#ifndef POCKET_GUEST_CHUNK_BYTES
+#ifdef CONFIG_POCKET_VM_GUEST_CHUNK_KB
+#define POCKET_GUEST_CHUNK_BYTES ((size_t)CONFIG_POCKET_VM_GUEST_CHUNK_KB * 1024U)
+#else
+#define POCKET_GUEST_CHUNK_BYTES 0U
+#endif
+#endif
+#if defined(ESP_PLATFORM) && POCKET_GUEST_CHUNK_BYTES
+#define GUEST_CHUNK_BYTES POCKET_GUEST_CHUNK_BYTES
+#else
+#define GUEST_CHUNK_BYTES 0
+#endif
+#if GUEST_CHUNK_BYTES
+/* 12 x 16 KiB covers the 160 KiB limit. Requests above GUEST_CHUNK_DIRECT go
+ * to heap_caps: few, and one of them would pin a whole chunk. An empty chunk
+ * beyond the current one is kept GUEST_CHUNK_SPARE_TURNS turn ends as a spare,
+ * so a guest at its limit does not take and give one back every turn. */
+#define GUEST_CHUNKS 12
+#define GUEST_CHUNK_DIRECT 2048U
+#define GUEST_CHUNK_SPARE_TURNS 30U
+#define GUEST_CHUNK_FLOOR_DEFAULT (16U * 1024U)
+typedef struct {
+  multi_heap_handle_t heap;
+  uint8_t *lo, *hi;
+  size_t empty_free;        /* multi_heap_free_size right after registering */
+  uint8_t idle;             /* turn ends seen empty in a row */
+} guest_chunk_t;
+#endif
+
 struct pocketjs_guest {
   JSRuntime *runtime;
   JSContext *context;
@@ -156,6 +187,16 @@ struct pocketjs_guest {
   multi_heap_handle_t arena;
   uint8_t *arena_lo, *arena_hi;
   void *_Atomic deferred;   /* arena blocks freed by another task, for the owner */
+#if GUEST_CHUNK_BYTES
+  /* The growable arena (docs/vm/guest-memory-design.md sec.5): chunks taken
+   * when the current one is full and given back once empty, oldest first in
+   * the table. arena/arena_lo/arena_hi above always name chunk[chunk_cur], so
+   * the fast path is the single arena's. */
+  guest_chunk_t chunk[GUEST_CHUNKS];
+  uint8_t chunk_n, chunk_cur;
+  size_t chunk_floor;       /* system free a new chunk must leave */
+  uint32_t chunk_taken, chunk_returned;
+#endif
   block_cache_backend_t cache_backend;
 #endif
   atomic_uint interrupt_epoch;
@@ -362,16 +403,36 @@ static inline __attribute__((always_inline)) size_t guest_block_length(const voi
 #define GUEST_ARENA_STEP (8U * 1024U)
 #define GUEST_ARENA_MIN (16U * 1024U)
 static inline __attribute__((always_inline)) bool
-guest_in_arena(const pocketjs_guest_t *guest, const void *pointer) {
+guest_in_current(const pocketjs_guest_t *guest, const void *pointer) {
   return (const uint8_t *)pointer >= guest->arena_lo &&
          (const uint8_t *)pointer < guest->arena_hi;
 }
+#if GUEST_CHUNK_BYTES
+/* The arena heap holding `pointer`, or NULL for a heap_caps block. The
+ * current chunk first: most frees are of recent blocks. */
+static multi_heap_handle_t guest_chunk_heap(const pocketjs_guest_t *guest,
+                                            const void *pointer) {
+  if (guest_in_current(guest, pointer))
+    return guest->arena;
+  for (unsigned i = 0; i < guest->chunk_n; i++)
+    if ((const uint8_t *)pointer >= guest->chunk[i].lo &&
+        (const uint8_t *)pointer < guest->chunk[i].hi)
+      return guest->chunk[i].heap;
+  return NULL;
+}
+#else
+static inline __attribute__((always_inline)) multi_heap_handle_t
+guest_chunk_heap(const pocketjs_guest_t *guest, const void *pointer) {
+  return guest_in_current(guest, pointer) ? guest->arena : NULL;
+}
+#endif
 /* A block back to whichever heap it came from (owner task only for the
  * arena: it has no lock). */
 static inline __attribute__((always_inline)) void
 guest_heap_free(pocketjs_guest_t *guest, void *pointer) {
-  if (guest_in_arena(guest, pointer))
-    multi_heap_free(guest->arena, pointer);
+  multi_heap_handle_t heap = guest_chunk_heap(guest, pointer);
+  if (heap != NULL)
+    multi_heap_free(heap, pointer);
   else
     heap_caps_free(pointer);
 }
@@ -390,7 +451,7 @@ static void guest_drain_deferred(pocketjs_guest_t *guest) {
   void *block = atomic_exchange_explicit(&guest->deferred, NULL, memory_order_acquire);
   while (block != NULL) {
     void *next = *(void **)block;
-    multi_heap_free(guest->arena, block);
+    guest_heap_free(guest, block);
     block = next;
   }
 }
@@ -445,6 +506,64 @@ guest_uses_block_cache(const pocketjs_guest_t *guest) {
          guest_task_id() == guest->owner_task;
 }
 
+#if GUEST_CHUNK_BYTES
+/* Take a chunk of `want` bytes if the system keeps chunk_floor after it. */
+static bool guest_chunk_add(pocketjs_guest_t *guest, size_t want) {
+  if (guest->chunk_n >= GUEST_CHUNKS ||
+      heap_caps_get_free_size(GUEST_CAPS_INTERNAL) < want + guest->chunk_floor)
+    return false;
+  uint8_t *region = heap_caps_malloc(want, GUEST_CAPS_INTERNAL);
+  if (region == NULL)
+    return false;
+  multi_heap_handle_t heap = multi_heap_register(region, want);
+  if (heap == NULL) {
+    heap_caps_free(region);
+    return false;
+  }
+  guest_chunk_t *c = &guest->chunk[guest->chunk_n];
+  *c = (guest_chunk_t){heap, region, region + want, multi_heap_free_size(heap), 0};
+  guest->chunk_n++;
+  guest->chunk_taken++;
+  return true;
+}
+static void guest_chunks_trim(pocketjs_guest_t *guest, bool all);
+static void guest_chunk_select(pocketjs_guest_t *guest, unsigned i) {
+  guest->chunk_cur = (uint8_t)i;
+  guest->arena = guest->chunk[i].heap;
+  guest->arena_lo = guest->chunk[i].lo;
+  guest->arena_hi = guest->chunk[i].hi;
+}
+#endif
+/* The current arena refused (or there is none). With chunks: a large block
+ * from heap_caps; else an older chunk with room (long-lived blocks pack into
+ * old chunks so new ones can empty); else a new chunk while the system keeps
+ * its floor; else heap_caps, as the single arena did. */
+static __attribute__((noinline)) void *guest_malloc_slow(pocketjs_guest_t *guest,
+                                                         size_t size) {
+#if GUEST_CHUNK_BYTES
+  if (guest->chunk_n != 0U && size <= GUEST_CHUNK_DIRECT) {
+    for (unsigned i = 0; i < guest->chunk_n; i++) {
+      if (i == guest->chunk_cur || multi_heap_free_size(guest->chunk[i].heap) <= size)
+        continue;
+      void *block = multi_heap_malloc(guest->chunk[i].heap, size);
+      if (block != NULL) {
+        guest_chunk_select(guest, i);
+        return block;
+      }
+    }
+    if (guest_chunk_add(guest, GUEST_CHUNK_BYTES) ||
+        guest_chunk_add(guest, GUEST_CHUNK_BYTES / 2U)) {
+      guest_chunk_select(guest, guest->chunk_n - 1U);
+      return multi_heap_malloc(guest->arena, size);
+    }
+    /* No chunk has a hole this size and none can be taken: the shared heap,
+     * as the single arena did. Refusing here instead failed 1-1.3 KB requests
+     * below the limit (r5sim, STRESS LV3: the holes are inside the chunks). */
+  }
+#endif
+  return heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+}
+
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U) {
@@ -457,11 +576,11 @@ static void *guest_malloc(void *opaque, size_t size) {
       if (atomic_load_explicit(&guest->deferred, memory_order_relaxed) != NULL)
         guest_drain_deferred(guest);
       if (guest->arena != NULL) block = multi_heap_malloc(guest->arena, size);
-      if (block == NULL) block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+      if (block == NULL) block = guest_malloc_slow(guest, size);
       if (block == NULL && block_cache_held(&guest->block_cache) != 0) {
         block_cache_flush(&guest->block_cache);
         if (guest->arena != NULL) block = multi_heap_malloc(guest->arena, size);
-        if (block == NULL) block = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+        if (block == NULL) block = guest_malloc_slow(guest, size);
       }
     }
     return block;
@@ -496,7 +615,7 @@ static void guest_free(void *opaque, void *pointer) {
       guest_heap_free(guest, pointer);
     return;
   }
-  if (guest != NULL && guest_in_arena(guest, pointer))
+  if (guest != NULL && guest_chunk_heap(guest, pointer) != NULL)
     guest_defer_free(guest, pointer);
   else
     heap_caps_free(pointer);
@@ -515,10 +634,11 @@ static void *guest_realloc(void *opaque, void *pointer, size_t size) {
     guest_free(opaque, pointer);
     return NULL;
   }
-  if (guest != NULL && guest_in_arena(guest, pointer)) {
+  multi_heap_handle_t heap = guest != NULL ? guest_chunk_heap(guest, pointer) : NULL;
+  if (heap != NULL) {
     /* In place or moved inside the arena when it can; else anywhere. */
     if (guest_task_id() == guest->owner_task) {
-      void *moved = multi_heap_realloc(guest->arena, pointer, size);
+      void *moved = multi_heap_realloc(heap, pointer, size);
       if (moved != NULL) return moved;
     }
     const size_t old = guest_block_length(pointer);
@@ -738,6 +858,10 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
    * segments the stack kept for reuse during it go back to the heap. Kept
    * across a YIELDED drain above, which is the same logical turn. */
   JS_VMStackTrim(guest->runtime);
+#if GUEST_CHUNK_BYTES
+  if (guest_uses_block_cache(guest))
+    guest_chunks_trim(guest, false);
+#endif
   return report_rejections(guest);
 }
 
@@ -795,6 +919,18 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
      * of GUEST_ARENA_KEEP_PIECE must remain for native allocations (Kasane's
      * arena, sockets); else it is given back and a smaller one tried. */
     size_t taken = 0U;
+#if GUEST_CHUNK_BYTES
+    /* One chunk now; more as the guest grows (sec.5.3). arena_bytes only
+     * says whether this guest has an arena at all (0: the overlay). */
+    guest->chunk_floor = GUEST_CHUNK_FLOOR_DEFAULT;
+    if (guest->block_cache_on && arena_bytes != 0U &&
+        (guest_chunk_add(guest, GUEST_CHUNK_BYTES) ||
+         guest_chunk_add(guest, GUEST_CHUNK_BYTES / 2U))) {
+      guest_chunk_select(guest, 0U);
+      taken = (size_t)(guest->arena_hi - guest->arena_lo);
+    }
+    if (false)
+#endif
     for (size_t want = arena_bytes; guest->block_cache_on && want >= GUEST_ARENA_MIN;
          want -= GUEST_ARENA_STEP) {
       if (heap_caps_get_free_size(GUEST_CAPS_INTERNAL) < want + GUEST_ARENA_LEAVE ||
@@ -1167,7 +1303,7 @@ esp_err_t pocketjs_guest_set_dormant(pocketjs_guest_t *guest, bool dormant) {
    * small-block cache holds memory nobody else can use. A FinalizationRegistry
    * callback the collection queues stays queued until the wake. */
   JS_RunGC(guest->runtime);
-  pocketjs_guest_block_cache_flush(guest);
+  pocketjs_guest_release_memory(guest);
   guest->dormant = true;
   return ESP_OK;
 }
@@ -1481,7 +1617,13 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
 #ifdef ESP_PLATFORM
   if (guest->arena != NULL) {
     guest_drain_deferred(guest);
+#if GUEST_CHUNK_BYTES
+    for (unsigned i = 0; i < guest->chunk_n; i++)
+      heap_caps_free(guest->chunk[i].lo);   /* every block is gone with the runtime */
+    guest->chunk_n = 0;
+#else
     heap_caps_free(guest->arena_lo);   /* every block in it is gone with the runtime */
+#endif
     guest->arena = NULL;
   }
 #endif
@@ -1504,6 +1646,85 @@ void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
 #endif
 }
 
+#if GUEST_CHUNK_BYTES
+/* Give empty chunks back (owner task, between turns; sec.5.3). The current
+ * chunk always stays. One other empty chunk stays as a spare for
+ * GUEST_CHUNK_SPARE_TURNS calls unless `all`. Blocks the small-block cache
+ * holds keep their chunk; `all` callers flush it first. */
+static void guest_chunks_trim(pocketjs_guest_t *guest, bool all) {
+  if (guest->chunk_n <= 1U)
+    return;
+  guest_drain_deferred(guest);
+  bool spare = false;
+  unsigned out = 0;
+  for (unsigned i = 0; i < guest->chunk_n; i++) {
+    guest_chunk_t c = guest->chunk[i];
+    bool empty = i != guest->chunk_cur &&
+                 multi_heap_free_size(c.heap) == c.empty_free;
+    c.idle = empty ? (uint8_t)(c.idle < 255U ? c.idle + 1U : 255U) : 0U;
+    if (empty && (all || spare || c.idle > GUEST_CHUNK_SPARE_TURNS)) {
+      heap_caps_free(c.lo);
+      guest->chunk_returned++;
+      continue;
+    }
+    if (empty)
+      spare = true;
+    if (i == guest->chunk_cur)
+      guest->chunk_cur = (uint8_t)out;
+    guest->chunk[out++] = c;
+  }
+  guest->chunk_n = (uint8_t)out;
+}
+#endif
+
+void pocketjs_guest_release_memory(pocketjs_guest_t *guest) {
+#if GUEST_CHUNK_BYTES
+  if (guest == NULL || !guest->block_cache_on ||
+      guest_task_id() != guest->owner_task)
+    return;
+  block_cache_flush(&guest->block_cache);
+  guest_chunks_trim(guest, true);
+#else
+  pocketjs_guest_block_cache_flush(guest);
+#endif
+}
+
+#if defined(POCKET_GUEST_CHUNK_TRACE) && GUEST_CHUNK_BYTES
+/* r5sim only: bytes in use per chunk (whose blocks pin it), and how many of
+ * them the small-block cache holds. */
+#include <stdio.h>
+void pocketjs_guest_chunk_trace(pocketjs_guest_t *guest, unsigned turn) {
+  printf("R5SIM CHUNKS t=%u cur=%u", turn, guest->chunk_cur);
+  for (unsigned i = 0; i < guest->chunk_n; i++) {
+    const guest_chunk_t *c = &guest->chunk[i];
+    size_t chunk_cached = 0;
+    for (unsigned k = 0; k < BLOCK_CACHE_CLASSES; k++)
+      for (void *b = guest->block_cache.head[k]; b != NULL; b = *(void **)b)
+        if ((uint8_t *)b >= c->lo && (uint8_t *)b < c->hi)
+          chunk_cached += guest_block_length(b);
+    printf(" %u:%u/%u", i, (unsigned)(c->empty_free - multi_heap_free_size(c->heap)),
+           (unsigned)chunk_cached);
+  }
+  printf("\n");
+}
+#endif
+
+void pocketjs_guest_chunk_stats(const pocketjs_guest_t *guest, unsigned *chunks,
+                                size_t *bytes, uint32_t *taken, uint32_t *returned) {
+  *chunks = 0U; *bytes = 0U; *taken = 0U; *returned = 0U;
+#if GUEST_CHUNK_BYTES
+  if (guest == NULL)
+    return;
+  *chunks = guest->chunk_n;
+  for (unsigned i = 0; i < guest->chunk_n; i++)
+    *bytes += (size_t)(guest->chunk[i].hi - guest->chunk[i].lo);
+  *taken = guest->chunk_taken;
+  *returned = guest->chunk_returned;
+#else
+  (void)guest;
+#endif
+}
+
 size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
                                 size_t native_floor) {
   if (guest == NULL || guest->runtime == NULL)
@@ -1511,9 +1732,24 @@ size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
   size_t used = 0U, limit = 0U;
   JS_GetMemoryCounters(guest->runtime, &used, &limit);
   size_t room = system_free > native_floor ? system_free - native_floor : 0U;
+#if GUEST_CHUNK_BYTES
+  /* The system's share is reachable only as a whole chunk (small requests)
+   * or a direct block (> GUEST_CHUNK_DIRECT): free memory in pieces smaller
+   * than the smallest chunk is not room, and counting it let the allocator
+   * refuse below the limit (r5sim, STRESS LV3). */
+  if (guest->chunk_n != 0U &&
+      heap_caps_get_largest_free_block(GUEST_CAPS_INTERNAL) < GUEST_CHUNK_BYTES / 2U)
+    room = 0U;
+#endif
 #ifdef ESP_PLATFORM
+#if GUEST_CHUNK_BYTES
+  guest->chunk_floor = native_floor;
+  for (unsigned i = 0; i < guest->chunk_n; i++)
+    room += multi_heap_free_size(guest->chunk[i].heap);
+#else
   if (guest->arena != NULL)
     room += multi_heap_free_size(guest->arena);
+#endif
   if (guest->block_cache_on)
     room += block_cache_held(&guest->block_cache);
 #endif
