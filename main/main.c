@@ -506,6 +506,13 @@ extern const char derby_watch_start[] asm("_binary_derby_watch_js_start");
 extern const char derby_watch_end[] asm("_binary_derby_watch_js_end");
 extern const char big_wave_start[] asm("_binary_big_wave_js_start");
 extern const char big_wave_end[] asm("_binary_big_wave_js_end");
+// pocket.net's self-check and the HTTPS cycle (apps/netcheck/README.md): not on
+// the menu, started by the USB broker so the network can be measured without
+// hands on the device (docs/platform/lwip-resource-review.md).
+extern const char netcheck_start[] asm("_binary_netcheck_js_start");
+extern const char netcheck_end[] asm("_binary_netcheck_js_end");
+extern const char tlscycle_start[] asm("_binary_tlscycle_js_start");
+extern const char tlscycle_end[] asm("_binary_tlscycle_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 extern const char pixel_lab_probe_start[] asm("_binary_pixel_lab_probe_js_start");
 extern const char pixel_lab_probe_end[] asm("_binary_pixel_lab_probe_js_end");
@@ -670,6 +677,8 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.lcdcatch","LCD CATCH",lcd_catch_start,lcd_catch_end,5),
     NATIVE_APP("local.derby","DERBY WATCH",derby_watch_start,derby_watch_end,5),
     NATIVE_APP("local.bigwave","BIG WAVE",big_wave_start,big_wave_end,5),
+    NATIVE_APP("local.netcheck","NET CHECK",netcheck_start,netcheck_end,5),
+    NATIVE_APP("local.tlscycle","TLS CYCLE",tlscycle_start,tlscycle_end,5),
     NATIVE_APP("local.player","MUSIC PLAYER (host launch unsupported)",NULL,NULL,0),
     NATIVE_APP("local.playground","PLAYGROUND (dynamic source unsupported)",NULL,NULL,0),
     NATIVE_APP("local.tutorial","TUTORIAL (dynamic source unsupported)",NULL,NULL,0),

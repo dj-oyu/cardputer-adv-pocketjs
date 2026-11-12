@@ -45,6 +45,7 @@ static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", "pet.companion", NULL};
 static const char *const CAPS_WORK[]   = {"workspace", NULL};
 static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", "pet.companion", NULL};
+static const char *const CAPS_NET[]    = {"net.wifi", "net.http", NULL};
 static const char *const CAPS_OVERLAY[]= {"ui.overlay", "display.kasane", "time", NULL};
 static const char *const CAPS_PLAY[]    = {"ui.overlay", "display.kasane",
                                            "audio.playback", "fs.volume.sd", NULL};
@@ -115,6 +116,17 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.drawcost", .title="DRAW COST", .entry="apps/shikitest/draw_cost.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_SHIKI_COST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // pocket.net's self-check and the HTTPS cycle (apps/netcheck/README.md):
+    // not on the menu, started by the USB broker. Both draw nothing; they log
+    // NETCHK / CYC lines, and the session's end logs the tcpip thread's stack
+    // low mark (NET_STACK).
+    {.id="local.netcheck", .title="NET CHECK", .entry="apps/netcheck/netcheck.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_NET, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.tlscycle", .title="TLS CYCLE", .entry="apps/netcheck/tlscycle.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_NET, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // MEGADEMO is an ordinary foreground app. Leaving it with Back and
     // reopening starts a new session with fresh Shiki programs.
