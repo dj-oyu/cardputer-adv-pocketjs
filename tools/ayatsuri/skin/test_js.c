@@ -87,6 +87,12 @@ static void oom(JSRuntime *rt,JSContext *ctx){
     call(ctx,grow,JS_UNDEFINED);eval(ctx,"inspectA(576)");JS_FreeValue(ctx,grow);
     printf("SKIN_JS_OOM_PASS initial_failures=%u successes=%u initial_ready_preserved growth480_preserved recovery576 instances_stable\n",failures,successes);
 }
+#ifndef SKIN_JS_SETUP
+#define SKIN_JS_SETUP(ctx) ((void)0)
+#endif
+#ifndef SKIN_JS_POST_WARM
+#define SKIN_JS_POST_WARM(rt,ctx,actor,owner) ((void)0)
+#endif
 #ifndef SKIN_JS_MAIN
 #define SKIN_JS_MAIN main
 #endif
@@ -99,7 +105,7 @@ int SKIN_JS_MAIN(int argc,char **argv){
     install_foreign(ctx,"foreignJ",48);install_foreign(ctx,"foreignG",96);
     expose_fixture(ctx,argv[3],"plain","fixture");expose_fixture(ctx,argv[3],"holes","holes");expose_fixture(ctx,argv[3],"sided","sided");expose_fixture(ctx,argv[3],"plain","cycleFixture");
     eval(ctx,"globalThis.pocket={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
-    FILE *f=fopen("tools/ayatsuri/skin/js_scenario.js","rb");CHECK(f);static char source[16384];size_t count=fread(source,1,sizeof source-1,f);CHECK(feof(f)&&fclose(f)==0);source[count]=0;eval(ctx,source);eval(ctx,"setup()");
+    FILE *f=fopen("tools/ayatsuri/skin/js_scenario.js","rb");CHECK(f);static char source[16384];size_t count=fread(source,1,sizeof source-1,f);CHECK(feof(f)&&fclose(f)==0);source[count]=0;eval(ctx,source);SKIN_JS_SETUP(ctx);eval(ctx,"setup()");
     size_t blob_bytes;uint8_t *blob=load_fixture(argv[3],"plain",&blob_bytes);ayatsuri_model model;CHECK(ayatsuri_model_open(blob,blob_bytes,&model)==AYATSURI_MODEL_OK);
     size_t arena_bytes=ayatsuri_model_instance_bytes(&model);void *arena=malloc(arena_bytes);CHECK(arena);unsigned owner=0;ayatsuri_model_instance direct;
     CHECK(ayatsuri_model_instance_init(&model,arena,arena_bytes,&owner,1,&direct)==AYATSURI_MODEL_OK);
@@ -116,6 +122,7 @@ int SKIN_JS_MAIN(int argc,char **argv){
         size_t used,limit;JS_GetMemoryCounters(rt,&used,&limit);CHECK(limit==160*1024);if(used>guest_peak)guest_peak=used;
     }
     CHECK(!warm_evaluate&&hashes[0]!=hashes[30]);
+    SKIN_JS_POST_WARM(rt,ctx,&direct,&owner);
     eval(ctx,"drawB()");CHECK(present()==KSN_OK);uint32_t rigid_hash=2166136261u;for(unsigned j=0;j<240*135;++j)rigid_hash=(rigid_hash^panel[j])*16777619u;CHECK(rigid_hash==hashes[0]);
     /* Both actors own separate skin work and cached packets. */
     call(ctx,tick_fn,JS_NewInt32(ctx,30));CHECK(present()==KSN_OK);memcpy(isolated,panel,sizeof panel);
