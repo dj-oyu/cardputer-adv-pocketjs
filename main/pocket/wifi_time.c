@@ -7,6 +7,7 @@
 #include "esp_netif_sntp.h"
 #include "esp_heap_caps.h"
 #include "esp_wifi.h"
+#include "esp_private/wifi_os_adapter.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -492,9 +493,35 @@ void wifi_time_stack_early(void) {
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
 }
 
+// The Wi-Fi driver blocks its caller on a per-task counting semaphore that
+// the OS adapter makes on first use (esp_adapter.c wifi_thread_semphr_get_wrapper)
+// and keeps in pthread TLS until the task exits. Our worker never exits, so the
+// semaphore and three 12 B TLS blocks were permanent, made on the first radio
+// start in the middle of the heap: they split a 24.7 KB and a 44.3 KB hole
+// (docs/vm/lv3-heap-exhaustion.md sec.6.7, lwip-resource-review.md sec.4).
+// The worker gets a static one in RTC fast memory instead (its stack is there
+// already; a few takes per radio start do not mind the slower bus). Any other
+// task keeps the adapter's own. Relies on IDF's private adapter table
+// (esp_private/wifi_os_adapter.h): look again when IDF is upgraded.
+static void *(*adapter_thread_semphr_get)(void);
+static SemaphoreHandle_t worker_sem;
+static void *thread_semphr_get(void) {
+    if(worker_sem && xTaskGetCurrentTaskHandle()==wifi_worker) return worker_sem;
+    return adapter_thread_semphr_get();
+}
+static void worker_sem_install(void) {
+    StaticSemaphore_t *buf=heap_caps_malloc(sizeof *buf,MALLOC_CAP_RTCRAM);
+    if(!buf) { ESP_LOGW(TAG,"WIFI_SEM dram (no rtc room)"); return; }
+    worker_sem=xSemaphoreCreateCountingStatic(1,0,buf);
+    adapter_thread_semphr_get=g_wifi_osi_funcs._wifi_thread_semphr_get;
+    g_wifi_osi_funcs._wifi_thread_semphr_get=thread_semphr_get;
+    ESP_LOGI(TAG,"WIFI_SEM rtc rtc_free=%u",(unsigned)heap_caps_get_free_size(MALLOC_CAP_RTCRAM));
+}
+
 void wifi_time_init(void) {
     if(wifi_worker) return;
     wifi_worker=rtc_task_create(wifi_worker_task,"wifi",3072,5);
+    if(wifi_worker) worker_sem_install();
 }
 
 // False when there is no worker (boot allocation failed); the caller undoes
