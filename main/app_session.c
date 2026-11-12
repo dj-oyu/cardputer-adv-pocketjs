@@ -2296,13 +2296,14 @@ static unsigned present_defer_block(uint32_t buttons) {
     if(pet_hub_alert_shown()) why|=1u<<9;
     if(sys_notify_active(sys_device_notifications(),&notice)) why|=1u<<10;
     if(pocket_pixel_pending()||pocket_video_pending()||pocket_grid_pending()) why|=1u<<11;
-    // Kasane's own reasons from bit 12: active, schema/provider, resource,
-    // notice (one bit), animation, modal folded into bits 12-15.
+    // Kasane's own reasons from bit 12: not active, schema/provider or a
+    // resource, notice, animation blocks, modal.
     unsigned k=pocket_kasane_defer_block();
     if(k&1u) why|=1u<<12;
     if(k&(2u|4u)) why|=1u<<13;
-    if(k&(8u|32u)) why|=1u<<14;
+    if(k&8u) why|=1u<<14;
     if(k&16u) why|=1u<<15;
+    if(k&32u) why|=1u<<16;
     return why;
 #else
     (void)buttons;

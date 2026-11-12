@@ -1,4 +1,10 @@
 #include "pocket_kasane.h"
+#ifdef ESP_PLATFORM
+#include "disp.h"
+#else
+/* Host tests: nothing is ever in flight. */
+static inline bool disp_busy(void) { return false; }
+#endif
 #include "pocket_api.h"
 #include "pocket_shiki_frame.h"
 #include "pocket_grid.h"
@@ -3034,7 +3040,9 @@ unsigned pocket_kasane_defer_block(void){
     for(unsigned i=0;i<POCKET_GRID_MAX_SLOTS;i++)if(state->grid_resources[i].value)why|=4u;
     if(state->notice_tx.value||state->notice_displayed||state->notice_pending)why|=8u;
     if(ksn_runtime_animation_enabled())why|=16u;
-    if(ksn_runtime_input_scope(false)!=KSN_INPUT_APP)why|=32u;
+    /* The modal itself, not the input scope: the scope also reads BLOCKED
+     * whenever bands are merely invalidated, which every Shiki commit does. */
+    if(ksn_runtime_modal_active())why|=32u;
     return why;
 }
 bool pocket_kasane_present_deferrable(void){return pocket_kasane_defer_block()==0;}
@@ -3188,5 +3196,14 @@ void pocket_kasane_park_turn(void) {
     if(state) { ksn_runtime_app_end_turn(state->lease); apply_outcome(); }
 }
 ksn_input_scope pocket_kasane_input_scope(bool host_priority) {
-    return ksn_runtime_input_scope(host_priority);
+    ksn_input_scope scope=ksn_runtime_input_scope(host_priority);
+    /* P2a (two-core-pipeline.md sec.7.3): a frame on the display task keeps
+     * its repair bands until it is acknowledged, so the scope reads BLOCKED
+     * for the whole time it is in flight. Without the overlap the next turn
+     * starts after that present, so it is answered as it would be then. A
+     * modal or a pending modal change still blocks; a frame that then fails
+     * to reach the panel ends deferring for the session. */
+    if(scope==KSN_INPUT_BLOCKED&&disp_busy()&&!ksn_runtime_modal_active())
+        scope=KSN_INPUT_APP;
+    return scope;
 }

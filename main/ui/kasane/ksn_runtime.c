@@ -147,6 +147,9 @@ void ksn_runtime_set_hidden(bool hidden){if(runtime)runtime->hidden=hidden;}
 void ksn_runtime_set_reduce_motion(bool enabled){if(runtime)runtime->reduce_motion=enabled;}
 bool ksn_runtime_animation_pending(void){return runtime&&runtime->host.animation_submission.value;}
 bool ksn_runtime_animation_enabled(void){return runtime&&ksn_core_animation_bytes(&runtime->core)>0;}
+bool ksn_runtime_modal_active(void){
+    return runtime&&(runtime->host.modal.phase!=KSN_MODAL_CLOSED||runtime->host.modal.pending.value);
+}
 uint32_t ksn_runtime_cache_bytes(void){return runtime&&runtime->cache?KSN_CACHE_RESERVED_BYTES:0;}
 ksn_view_stats ksn_runtime_stats(ksn_layer layer){
     return runtime?ksn_view_get_stats(ksn_view_host_endpoint(&runtime->host,layer)):(ksn_view_stats){0};

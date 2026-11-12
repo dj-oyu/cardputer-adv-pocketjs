@@ -40,6 +40,8 @@ uint64_t ksn_runtime_animation_deadline(void);
 bool ksn_runtime_animation_pending(void);
 /* The core has animation blocks (some ref was ever animated). */
 bool ksn_runtime_animation_enabled(void);
+/* A modal is open, opening, closing, or has a transaction pending. */
+bool ksn_runtime_modal_active(void);
 void ksn_runtime_set_hidden(bool hidden);
 void ksn_runtime_set_reduce_motion(bool enabled);
 uint32_t ksn_runtime_reserved_bytes(void);
