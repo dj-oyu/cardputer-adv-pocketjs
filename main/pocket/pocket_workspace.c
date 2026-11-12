@@ -144,7 +144,7 @@ static void slot_title(const ws_index_t *index, int slot,
 // is one range for one run, not a standing permission.
 static uint16_t picked_mask;
 static JSClassID  ref_class;
-static JSRuntime  *ref_rt;
+static pocket_class_owner_t ref_owner;
 
 static bool slot_picked(int slot) {
     return slot>=0 && slot<16 && (picked_mask&(uint16_t)(1u<<slot));
@@ -1007,7 +1007,7 @@ static const JSCFunctionListEntry workspace_methods[] = {
 static esp_err_t build_workspace(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    if(!pocket_api_class_ready(rt,&ref_rt,&ref_class)) {
+    if(!pocket_api_class_ready(rt,&ref_owner,&ref_class)) {
         JS_NewClassID(rt,&ref_class);
         if(JS_NewClass(rt,ref_class,&ref_class_def)<0) return ESP_FAIL;
     }
