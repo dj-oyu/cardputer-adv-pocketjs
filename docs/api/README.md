@@ -13,3 +13,4 @@
 | [shapes.md](shapes.md) | 仕様 | `pocket.shapes`（capability `kasane.shapes`、名乗ったアプリだけ）: 射影行列で 3D の点を写す `project`、多角形・楕円から穴を抜いて塗る `fill`、隠す形つきの `outline`。手続き面のフレームへ直接描く |
 | [backlog.md](backlog.md) | backlog | BLE、Opus の採否、SD の帯域、PC bridge の wire 形式など |
 | [app-control-v1.md](app-control-v1.md) | 仕様 | HOME の native app-control と broker の共通契約。末尾にファーム側の挙動（fresh/resume、上限、TTL、GS のエスケープ）とホスト検査（旧 platform/native-app-control.md） |
+| [hone-ayatsuri-source-port.md](hone-ayatsuri-source-port.md) | experimental | Hone/Ayatsuri Source 縮小の選択移植と現行 compiler の検証境界 |
