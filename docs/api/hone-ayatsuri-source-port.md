@@ -110,3 +110,25 @@ F32 normal の長さ丸めを角度と誤認しないよう、標本normalと比
 単位化して `atan2(|cross|, dot)` で方向差を計算する。同一のF32対角normal同士で
 従来は約0.0106°と報告し得た。修正後は同一方向と実0.1rad差を回帰試験する。
 geometry・縮小選択・packed bytes・native描画は変更せず、報告する角度の精度を直す。
+## 次段階の曲面・実Blender synthetic export 検査
+
+```sh
+node tools/ayatsuri/asset/test_reduced_packed.cjs
+blender --background --factory-startup --python tools/ayatsuri/asset/blender_grid.py -- .cache/blender-grid-new
+node tools/ayatsuri/asset/verify_blender_grid.cjs .cache/blender-grid-new
+```
+
+インストール済み Blender を使う任意host検査。自動install・私有asset・実機を使わない。
+出力先は新規のみで、再編集できる `source.blend` と実GLB export、元頂点/面JSONを残す。
+Blender4.3.2で81頂点/128面の人工曲面をexportし、Z-up→Y-up→Hone変換と
+反射後のwindingを原本JSONから検証した。最大座標差は約2.98e-9原本単位。
+原本座標/面向きの改変負例は拒否。exportされたnormalの独立検算はまだ行わない。
+65頂点縮小の標本距離最大約0.006595、法線角最大約1.610°、3parts/3648bytes。
+Blenderからの実export経路の証拠であって、任意Blenderシーンや狐造形の受入ではない。
+
+別の人工曲面検査では、現compilerのAYNM byteをdescriptor/vertex/indexから再読込し、
+原本→縮小、縮小→packed、原本→packedを分けて比較する。
+81/65/49頂点candidateの原本→packed最大標本距離は順に約2.97e-9/0.006595/0.009324。
+量子化単独の最大距離は3e-9未満。原本→packedの法線角最大は約1.32e-8/1.884/3.353°。
+ゼロ誤差要求・頂点破損負例を拒否する。標本点集合は分割で複製されるため、
+段階間の平均値は同じ母集団の比較ではない。連続面最大・pixel・遮蔽・狐品質は未認証。
