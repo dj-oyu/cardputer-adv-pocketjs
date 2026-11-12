@@ -1504,6 +1504,27 @@ void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
 #endif
 }
 
+size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
+                                size_t native_floor) {
+  if (guest == NULL || guest->runtime == NULL)
+    return 0U;
+  size_t used = 0U, limit = 0U;
+  JS_GetMemoryCounters(guest->runtime, &used, &limit);
+  size_t room = system_free > native_floor ? system_free - native_floor : 0U;
+#ifdef ESP_PLATFORM
+  if (guest->arena != NULL)
+    room += multi_heap_free_size(guest->arena);
+  if (guest->block_cache_on)
+    room += block_cache_held(&guest->block_cache);
+#endif
+  size_t fit = used + room;
+  if (fit > guest->heap_limit || fit < used)
+    fit = guest->heap_limit;
+  if (fit != limit)
+    JS_SetMemoryLimit(guest->runtime, fit);
+  return fit;
+}
+
 void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
                                             bool pressured) {
 #ifdef ESP_PLATFORM

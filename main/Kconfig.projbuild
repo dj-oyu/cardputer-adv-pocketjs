@@ -172,6 +172,19 @@ menu "Pocket VM (diagnostics)"
             yet. With POCKET_FRAME_BD_DISP_AB the probe alternates it with the
             inline path every 60-frame window.
 
+    config POCKET_GUEST_NATIVE_FLOOR_KB
+        int "Guest limit: internal RAM left to natives (KiB, 0 = fixed limit)"
+        range 0 64
+        default 16
+        help
+            docs/vm/lv3-heap-exhaustion.md sec.5. Every native memory sample
+            (100 ms) the guest's limit becomes its current bytes plus its
+            arena's and small-block cache's room plus the system's free RAM
+            above this floor, capped at 160 KiB. The guest then runs out as a
+            quota OOM it can catch, with this much left to Kasane, the radio
+            and the display, instead of at the shared heap where the refusal
+            can land before an app's own try. 0 keeps the fixed limit.
+
     config POCKET_OOM_GC_PROBE
         bool "Probe: on a guest OOM, log who refused and the heaps before and after a full GC"
         default n

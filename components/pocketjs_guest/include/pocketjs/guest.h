@@ -176,6 +176,18 @@ void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
 void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
                                             bool pressured);
 
+/* Fit the guest's memory limit to what it can really get (docs/vm/
+ * lv3-heap-exhaustion.md sec.5): its current bytes, the room left in its arena
+ * and small-block cache, and whatever of `system_free` lies above
+ * `native_floor` (the working room natives need), capped at the configured
+ * limit. Past that point an allocation used to reach the shared heap and be
+ * refused there -- uncatchable at a frame's entry, and below the GC's
+ * trigger, so cyclic garbage was never collected. With the limit there the
+ * refusal is a quota OOM the app can catch, and the GC cap (a fraction of the
+ * limit) is reachable again. Returns the limit set. Between turns only. */
+size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
+                                size_t native_floor);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

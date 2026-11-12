@@ -219,6 +219,12 @@ static void report_oom_if_any(void) {
     pocketjs_guest_take_oom_detail(guest,&canary);
     if(canary.count>0) {
         pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
+        /* The shared heap refused, below the guest's limit: QuickJS does not
+         * collect on a refusal, and its GC trigger sits near the limit, which
+         * this guest never reached -- cyclic garbage piled up turn after turn
+         * (docs/vm/lv3-heap-exhaustion.md sec.3.1). Between turns a GC is
+         * safe. Before the probe below, which would otherwise see it first. */
+        if(canary.allocator_count) JS_RunGC(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
 #ifdef POCKET_HEAPPROBE
@@ -272,6 +278,13 @@ static void sample_memory_pressure(void) {
         const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
         free_bytes=heap_caps_get_free_size(caps);
         largest=heap_caps_get_largest_free_block(caps);
+#if CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB > 0
+        /* docs/vm/lv3-heap-exhaustion.md sec.5: the guest's limit is what it
+         * can really get, so it runs out as a quota OOM it can catch, with
+         * the natives' working room intact, instead of at the shared heap. */
+        limit=pocketjs_guest_fit_limit(guest,free_bytes,
+                                       (size_t)CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB*1024u);
+#endif
     }
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
     // Shrink the cached blocks to a small depth for the whole native pressure

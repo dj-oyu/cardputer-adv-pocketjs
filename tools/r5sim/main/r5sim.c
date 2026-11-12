@@ -388,6 +388,10 @@ void app_main(void) {
         r5_turn_end(t);
         R5_CC_TAKE();
 #endif
+#if defined(R5SIM_FIT_LIMIT_KIB) && defined(R5SIM_DEVICE)
+        pocketjs_guest_fit_limit(guest,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+                                 (size_t)R5SIM_FIT_LIMIT_KIB*1024u);
+#endif
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
         if(canary.count) pocket_memory_oom(&canary,(uint64_t)t*33333u);
@@ -399,9 +403,9 @@ void app_main(void) {
             uint32_t runs; uint64_t freed; size_t lb,la;
             JS_PocketGCStats(&runs,&freed,&lb,&la);
             const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
-            printf("R5SIM GC t=%u used=%u thr=%u gc=%u(+%u) freed=+%u last=%u->%u "
+            printf("R5SIM GC t=%u used=%u lim=%u thr=%u gc=%u(+%u) freed=+%u last=%u->%u "
                    "oom=%u q=%u a=%u req=%u sys_free=%u sys_largest=%u pend=%d needs=%d sub=%d\n",
-                   t,(unsigned)used,(unsigned)JS_GetGCThreshold(rt),(unsigned)runs,
+                   t,(unsigned)used,(unsigned)limit,(unsigned)JS_GetGCThreshold(rt),(unsigned)runs,
                    (unsigned)(runs-runs_seen),(unsigned)(freed-freed_seen),(unsigned)lb,(unsigned)la,
                    (unsigned)canary.count,(unsigned)canary.quota_count,(unsigned)canary.allocator_count,
                    (unsigned)canary.first_req,(unsigned)heap_caps_get_free_size(caps),

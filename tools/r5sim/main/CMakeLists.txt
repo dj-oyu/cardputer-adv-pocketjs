@@ -105,6 +105,11 @@ endif()
 if(R5SIM_GC_ON_OOM)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_GC_ON_OOM)
 endif()
+# -DR5SIM_FIT_LIMIT_KIB=16: the firmware's pocketjs_guest_fit_limit every turn,
+# with that native floor (CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB).
+if(R5SIM_FIT_LIMIT_KIB)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_FIT_LIMIT_KIB=${R5SIM_FIT_LIMIT_KIB})
+endif()
 if(R5SIM_APP STREQUAL "shiki")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_SHIKI)
     # pocket_kasane.c reaches pocket.kasane.shiki through weak references,
