@@ -54,6 +54,7 @@ idf_component_register(
         "${R}/main/ui/kasane/ksn_core.c" "${R}/main/ui/kasane/ksn_view.c"
         "${R}/main/ui/kasane/ksn_cache.c" "${R}/main/ui/kasane/ksn_modal.c"
         "${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kasane/ksn_blend_pie.c"
+        "${R}/main/hal/disp.c"
         ${R5SIM_APP_SOURCES}
     INCLUDE_DIRS "." "${R}/main" "${R}/components/pocketjs_guest/include" "${R}/main/pocket" "${R}/main/ui" "${R}/main/ui/kasane"
         "${R}/main/text" "${R}/main/hal" "${CMAKE_BINARY_DIR}/generated"

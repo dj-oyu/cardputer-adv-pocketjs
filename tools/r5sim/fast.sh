@@ -20,7 +20,7 @@ rm -f "$D/fast-serial.txt"
 "$QEMU" -machine esp32s3 -m 4M -drive file="$D/qemu_flash.bin",if=mtd,format=raw \
     -serial file:"$D/fast-serial.txt" -monitor none -display none -icount shift=2 &
 QP=$!
-for _ in $(seq 1 600); do
+for _ in $(seq 1 "${FAST_WAIT_TICKS:-600}"); do   # 0.5 s each
     grep -qE "R5SIM done|FAIL|Guru|abort" "$D/fast-serial.txt" 2>/dev/null && break
     sleep 0.5
 done

@@ -829,6 +829,13 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     pending_surface=building_surface;
     image_band_valid=false;carry_drop();
     building=false;
+    /* A frame that changed nothing invalidates nothing (publish_at gets empty
+     * damage), and with no other Kasane work no present runs to acknowledge
+     * it: pending would stay set and every later beginFrame fail BUSY. Seen
+     * in r5sim (STRESS LV3, docs/vm/lv3-heap-exhaustion.md): an OOM turn whose
+     * HUD patch failed committed an unchanged frame, and the app never drew
+     * again. Nothing to show, so it counts as shown. */
+    if(!pocket_kasane_needs_present())pocket_proc_present_result(KSN_OK);
 #ifdef KASANE_MEGADEMO_TRACE
     trace.commit_n++;trace_split=true;
 #endif

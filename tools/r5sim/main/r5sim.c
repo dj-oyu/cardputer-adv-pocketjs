@@ -167,6 +167,7 @@ static void r5_arm_turn(void){                                                  
 }
 #endif
 #ifdef R5SIM_GC_TRACE
+bool pocket_proc_pending(void);
 void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before, size_t *last_after);
 #endif
 static uint16_t strip_pixels[240*8];
@@ -217,7 +218,14 @@ static bool present(void) {
     ksn_display_port port={.strip=get_strip,.present=send_strip,
                            .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
     ksn_render_stats stats;
-    return pocket_kasane_present(&port,&stats)==KSN_OK;
+    ksn_result r=pocket_kasane_present(&port,&stats);
+#ifdef R5SIM_GC_TRACE
+    if(r!=KSN_OK)
+        printf("R5SIM PRESENT_FAIL r=%u sys_free=%u sys_largest=%u\n",(unsigned)r,
+               (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+#endif
+    return r==KSN_OK;
 }
 
 // tools/test_stress_app.c's pocket.fs stub, without its fault-injection hooks.
@@ -392,12 +400,14 @@ void app_main(void) {
             JS_PocketGCStats(&runs,&freed,&lb,&la);
             const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
             printf("R5SIM GC t=%u used=%u thr=%u gc=%u(+%u) freed=+%u last=%u->%u "
-                   "oom=%u q=%u a=%u req=%u sys_free=%u sys_largest=%u\n",
+                   "oom=%u q=%u a=%u req=%u sys_free=%u sys_largest=%u pend=%d needs=%d sub=%d\n",
                    t,(unsigned)used,(unsigned)JS_GetGCThreshold(rt),(unsigned)runs,
                    (unsigned)(runs-runs_seen),(unsigned)(freed-freed_seen),(unsigned)lb,(unsigned)la,
                    (unsigned)canary.count,(unsigned)canary.quota_count,(unsigned)canary.allocator_count,
                    (unsigned)canary.first_req,(unsigned)heap_caps_get_free_size(caps),
-                   (unsigned)heap_caps_get_largest_free_block(caps));
+                   (unsigned)heap_caps_get_largest_free_block(caps),
+                   (int)pocket_proc_pending(),(int)pocket_kasane_needs_present(),
+                   (int)pocket_kasane_has_submission());
             runs_seen=runs; freed_seen=freed;
         }
 #endif
