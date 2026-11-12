@@ -31,6 +31,12 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     _GNU_SOURCE
 )
 
+# Measurement build (main/Kconfig.projbuild POCKET_GC_STATS): the firmware
+# supplies pocket_gc_clock and reads JS_PocketGCStats / JS_PocketGCTime.
+if(CONFIG_POCKET_GC_STATS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_GC_STATS=1)
+endif()
+
 # Third-party source files: suppress warnings that are noisy but harmless in upstream code.
 # -Wincompatible-pointer-types stays on (an error in GCC 14+): an int * handed to
 # an int32_t * parameter is a strict-aliasing miscompile on Xtensa, where

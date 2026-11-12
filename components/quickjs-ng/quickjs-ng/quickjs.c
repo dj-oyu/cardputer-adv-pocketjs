@@ -8962,6 +8962,17 @@ static void gc_free_cycles(JSRuntime *rt)
 static uint32_t pocket_gc_runs;
 static uint64_t pocket_gc_freed;
 static size_t pocket_gc_last_before, pocket_gc_last_after;
+/* Time per collection, in the clock the embedder supplies (the device: CPU
+   cycles). Total and the longest single run since the last read. */
+uint32_t pocket_gc_clock(void);
+static uint64_t pocket_gc_ticks;
+static uint32_t pocket_gc_ticks_max;
+void JS_PocketGCTime(uint64_t *total, uint32_t *max_run)
+{
+    *total = pocket_gc_ticks;
+    *max_run = pocket_gc_ticks_max;
+    pocket_gc_ticks_max = 0;
+}
 void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before,
                       size_t *last_after)
 {
@@ -8976,6 +8987,7 @@ void JS_RunGC(JSRuntime *rt)
 {
 #ifdef POCKET_GC_STATS
     size_t before = rt->malloc_state.malloc_size;
+    uint32_t t0 = pocket_gc_clock();
 #endif
     /* decrement the reference of the children of each object. mark =
        1 after this pass. */
@@ -8987,6 +8999,10 @@ void JS_RunGC(JSRuntime *rt)
     /* free the GC objects in a cycle */
     gc_free_cycles(rt);
 #ifdef POCKET_GC_STATS
+    uint32_t dt = pocket_gc_clock() - t0;
+    pocket_gc_ticks += dt;
+    if (dt > pocket_gc_ticks_max)
+        pocket_gc_ticks_max = dt;
     pocket_gc_runs++;
     pocket_gc_last_before = before;
     pocket_gc_last_after = rt->malloc_state.malloc_size;

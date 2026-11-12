@@ -265,6 +265,30 @@ static void report_oom_if_any(void) {
     }
 }
 
+#ifdef CONFIG_POCKET_GC_STATS
+/* Measurement (docs/vm/guest-memory-design.md G1): how long the guest's
+ * collections take, at most one line a second and only when one ran. */
+void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before, size_t *last_after);
+void JS_PocketGCTime(uint64_t *total, uint32_t *max_run);
+uint32_t pocket_gc_clock(void) { return esp_cpu_get_cycle_count(); }
+static void gc_stats_log(uint64_t now) {
+    static uint64_t last; static uint32_t runs_seen; static uint64_t freed_seen,ticks_seen;
+    if(now-last<1000000u)return;
+    last=now;
+    uint32_t runs,tmax; uint64_t freed,ticks; size_t lb,la,used=0,limit=0;
+    JS_PocketGCStats(&runs,&freed,&lb,&la);
+    JS_PocketGCTime(&ticks,&tmax);
+    if(runs!=runs_seen){
+        JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&used,&limit);
+        const uint32_t mhz=CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+        ESP_LOGI("app","GC_STATS runs=+%u us=+%u max_us=%u freed=+%u last=%u->%u used=%u limit=%u",
+                 (unsigned)(runs-runs_seen),(unsigned)((ticks-ticks_seen)/mhz),(unsigned)(tmax/mhz),
+                 (unsigned)(freed-freed_seen),(unsigned)lb,(unsigned)la,(unsigned)used,(unsigned)limit);
+    }
+    runs_seen=runs; freed_seen=freed; ticks_seen=ticks;
+}
+#endif
+
 /* Constant-time VM counters every owner turn; native heap is sampled at most
  * once per 100 ms. Also runs on display-only turns so pressure can recover. */
 static void sample_memory_pressure(void) {
@@ -286,6 +310,9 @@ static void sample_memory_pressure(void) {
                                        (size_t)CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB*1024u);
 #endif
     }
+#ifdef CONFIG_POCKET_GC_STATS
+    gc_stats_log(now);
+#endif
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
     // Shrink the cached blocks to a small depth for the whole native pressure
     // episode, including recovery hysteresis: stopping the cache outright cost

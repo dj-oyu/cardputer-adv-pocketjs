@@ -1520,6 +1520,17 @@ size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
   size_t fit = used + room;
   if (fit > guest->heap_limit || fit < used)
     fit = guest->heap_limit;
+  // A ceiling that moves by a few hundred bytes every sample crosses the
+  // usage near it back and forth, and each crossing can cost the 3-8 GCs of
+  // a limit hit (docs/vm/guest-memory-design.md G2). Whole KiB only, and down
+  // only once the room is a full KiB under the current ceiling; the floor
+  // absorbs the at most ~2 KiB this lets the ceiling lag.
+  const size_t raw = fit;
+  fit &= ~(size_t)1023U;
+  if (fit < limit && raw + 1024U > limit && limit <= guest->heap_limit)
+    fit = limit;
+  if (fit < used)
+    fit = used;
   if (fit != limit)
     JS_SetMemoryLimit(guest->runtime, fit);
   return fit;
