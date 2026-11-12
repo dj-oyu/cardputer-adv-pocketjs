@@ -7,6 +7,41 @@ static void known_rotation(double t,const double v[3],double out[3]){
  double a=1/sqrt(2.),c=cos(t),s=sin(t),dot=a*(v[0]+v[2]);double cross[3]={-a*v[1],a*(v[0]-v[2]),a*v[1]};
  for(int k=0;k<3;k++)out[k]=c*v[k]+s*cross[k]+(k==1?0:a)*dot*(1-c);
 }
+/* Fixed-buffer exhaustion is not allocator/JS OOM. A single append is
+ * transactional; callers must not expose a partial multi-mesh snapshot. */
+static void capacity_contract(ayatsuri_model_instance *actor,const void *owner){
+ ayatsuri_model_mesh_view view;
+ assert(ayatsuri_model_instance_mesh_view(actor,owner,1,1,&view)==AYATSURI_MODEL_OK);
+ uint8_t bytes[2048],before[2048];memset(bytes,0xa5,sizeof bytes);
+ ksn_mesh_snapshot s=snapshot(bytes,sizeof bytes);
+ const size_t alloc_before=calls;
+ assert(ksn_mesh_append(&s,view.patch,view.depth,1));
+ const size_t need=s.packets.size;const unsigned work=s.work;
+ assert(need>0&&need*2<sizeof bytes&&work>0);
+ for(unsigned mode=0;mode<3;mode++){
+  memset(bytes,0xa5,sizeof bytes);s=snapshot(bytes,mode==0?0:mode==1?need-1:sizeof bytes);
+  if(mode==2)s.work_limit=work-1;
+  memcpy(before,bytes,sizeof bytes);
+  assert(!ksn_mesh_append(&s,view.patch,view.depth,1));
+  assert(s.packets.size==0&&s.packets.packets==0&&s.work==0);
+  assert(!memcmp(before,bytes,sizeof bytes));
+  s.packets.capacity=need;s.work_limit=work;
+  assert(ksn_mesh_append(&s,view.patch,view.depth,1));
+  assert(s.packets.size==need&&s.packets.packets==1&&s.work==work);
+ }
+ /* A failed second append preserves the first packet and every guard byte. */
+ memcpy(before,bytes,sizeof bytes);s.packets.capacity=need*2-1;s.work_limit=work*2;
+ assert(!ksn_mesh_append(&s,view.patch,view.depth,1));
+ assert(s.packets.size==need&&s.packets.packets==1&&s.work==work);
+ assert(!memcmp(before,bytes,sizeof bytes));
+ s.packets.capacity=need*2;
+ assert(ksn_mesh_append(&s,view.patch,view.depth,1));
+ assert(s.packets.size==need*2&&s.packets.packets==2&&s.work==work*2);
+ assert(!memcmp(bytes,bytes+need,need));
+ for(size_t j=need*2;j<sizeof bytes;j++)assert(bytes[j]==0xa5);
+ assert(calls==alloc_before);
+ printf("DQ_SNAPSHOT_CAPACITY_PASS zero short exact worklimit prefix_retry guards noalloc\n");
+}
 int main(int argc,char **argv){
  assert(argc==2);size_t bytes;uint8_t *blob=load(argv[1],"plain",&bytes);ayatsuri_model model;assert(ayatsuri_model_open(blob,bytes,&model)==AYATSURI_MODEL_OK);
  size_t n=ayatsuri_model_instance_bytes(&model);void *arena=malloc(n),*refarena=malloc(n);unsigned owner=1,refowner=2;ayatsuri_model_instance actor,reference_actor;
@@ -24,6 +59,7 @@ int main(int argc,char **argv){
  for(int i=0;i<6;i++)for(int k=0;k<3;k++){assert(fabsf(actual[i].position[k]-expected[i].position[k])<5e-6f);assert(fabsf(actual[i].normal[k]-expected[i].normal[k])<2e-6f);}
  const float cam[9]={200,0,400,0,0,0,1,120,67};ayatsuri_model_mesh_geometry ga={1,6,actual},ge={1,6,expected};
  assert(ayatsuri_model_instance_evaluate_meshes(&actor,&owner,1,cam,light,&ga,1)==AYATSURI_MODEL_OK);assert(ayatsuri_model_instance_evaluate_meshes(&reference_actor,&refowner,1,cam,light,&ge,1)==AYATSURI_MODEL_OK);
+ capacity_contract(&actor,&owner);
  uint8_t sa[2048]={0},se[2048]={0};float scratch[240*8];ksn_mesh_snapshot a=snapshot(sa,sizeof sa),e=snapshot(se,sizeof se);append_model(&actor,&owner,&a);append_model(&reference_actor,&refowner,&e);
  render(&a,pixels,actual_z,4,1,scratch);render(&e,reference,reference_z,8,8,scratch);assert(!memcmp(pixels,reference,sizeof pixels));
  /* Cold rendering must differ: background-only/no overridden mesh cannot pass. */
