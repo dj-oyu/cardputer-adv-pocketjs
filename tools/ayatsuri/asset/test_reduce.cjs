@@ -63,7 +63,11 @@ const sparse=structuredClone(namedCompiled);delete sparse.parts[0].origins[0];as
 assert.throws(()=>composeLineage({surfaces:[]},{parts:Array(1)}),/INVALID_PART_LINEAGE/);
 if(process.argv[2]){
  const fs=require('node:fs'),path=require('node:path'),output=process.argv[2];fs.mkdirSync(output,{recursive:true});
- const cases={identity:compileStatic(ir,options),reduced:compiled};
+ const crossingSurfaces=[1,-1].map((sign,i)=>({...structuredClone(s),stableId:'cross/'+i,materialId:'cross-material/'+i,positions:s.positions.map(p=>[p[0],p[1],sign*(p[0]-.0125)*.2])}));
+ const crossingIR={...ir,materials:[0,1].map(i=>({...ir.materials[0],stableId:'cross-material/'+i})),surfaces:crossingSurfaces};
+ const crossingOptions={scale:40,scopeBySurface:new Map(crossingSurfaces.map(s=>[s.stableId,s.stableId])),materials:Object.fromEntries([0,1].map(i=>['cross-material/'+i,{albedo565:i?31:63488,hone:[1,0,0,1,0,0,0,0,0,0,0]}]))};
+ const crossingReduced={...crossingIR,surfaces:crossingSurfaces.map(s=>reduceSurface(s,{targetVertices:49}).surface)};
+ const cases={identity:compileStatic(ir,options),reduced:compiled,crossing:compileStatic(crossingIR,crossingOptions),'crossing-reduced':compileStatic(crossingReduced,crossingOptions),'crossing-reversed':compileStatic({...crossingIR,surfaces:crossingSurfaces.slice().reverse()},crossingOptions)};
  for(const [name,result] of Object.entries(cases))fs.writeFileSync(path.join(output,name+'.aynm'),result.bytes);
  fs.writeFileSync(path.join(output,'source.ir.json'),JSON.stringify(ir,null,2)+'\n');
  fs.writeFileSync(path.join(output,'reduced.ir.json'),JSON.stringify(selected,null,2)+'\n');
