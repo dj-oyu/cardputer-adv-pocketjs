@@ -207,6 +207,18 @@ menu "Pocket VM (diagnostics)"
             JS_RunGC. Garbage that a GC frees, live data, and a fragmented
             heap each leave a different line.
 
+    config POCKET_HEAP_MAP
+        bool "Probe: print the internal heap's free blocks before a guest, after its evaluation, and after it is gone"
+        default n
+        help
+            Measurement only (docs/vm/guest-memory-design.md sec.10 step 3).
+            heap_caps_walk over the internal heap at three points: before
+            the guest is created (Shiki heap already taken), after the
+            source is evaluated, and after the guest is destroyed (Shiki
+            heap still held). Free blocks of 256 B or more are listed with
+            their offsets, used blocks between them as count/bytes. A hole
+            that closes when the guest is gone was cut by the guest.
+
     config POCKET_GC_STATS
         bool "Probe: log the guest's GC runs, time and bytes freed once a second"
         default n

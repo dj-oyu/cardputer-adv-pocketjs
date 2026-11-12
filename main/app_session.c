@@ -289,6 +289,59 @@ static void gc_stats_log(uint64_t now) {
 }
 #endif
 
+#ifdef CONFIG_POCKET_HEAP_MAP
+/* Measurement (docs/vm/guest-memory-design.md sec.10 step 3): who cuts the
+ * internal heap's contiguous room after an evaluation, the guest or the
+ * natives. Built into a static buffer during the walk (no allocation while
+ * the heap is being walked), printed after. */
+static char heap_map_buf[6144];
+static size_t heap_map_len;
+static intptr_t heap_map_region;
+static unsigned heap_map_ucount;
+static size_t heap_map_ubytes;
+static void heap_map_put(const char *fmt,unsigned a,unsigned b) {
+    if(heap_map_len+40>=sizeof heap_map_buf)return;
+    heap_map_len+=(size_t)snprintf(heap_map_buf+heap_map_len,sizeof heap_map_buf-heap_map_len,fmt,a,b);
+}
+static void heap_map_flush_used(void) {
+    if(heap_map_ucount)heap_map_put(" u%u/%u",heap_map_ucount,(unsigned)heap_map_ubytes);
+    heap_map_ucount=0;heap_map_ubytes=0;
+}
+static bool heap_map_cb(walker_heap_into_t h,walker_block_info_t b,void *u) {
+    (void)u;
+    if(h.start!=heap_map_region){
+        heap_map_flush_used();
+        heap_map_region=h.start;
+        heap_map_put("\n R%x+%u:",(unsigned)h.start,(unsigned)(h.end-h.start));
+    }
+    if(!b.used&&b.size>=256){
+        heap_map_flush_used();
+        heap_map_put(" @%x f%u",(unsigned)((intptr_t)b.ptr-h.start),(unsigned)b.size);
+    }else{
+        heap_map_ucount++;heap_map_ubytes+=b.size;
+    }
+    return true;
+}
+static void heap_map(const char *tag) {
+    const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    heap_map_len=0;heap_map_region=0;heap_map_ucount=0;heap_map_ubytes=0;
+    heap_caps_walk(caps,heap_map_cb,NULL);
+    heap_map_flush_used();
+    ESP_LOGI("app","HEAP_MAP %s free=%u largest=%u",tag,
+             (unsigned)heap_caps_get_free_size(caps),(unsigned)heap_caps_get_largest_free_block(caps));
+    // One log line per region, cut to the broker's 1 KB line.
+    char *p=heap_map_buf;
+    while(*p){
+        if(*p=='\n')p++;
+        char *e=strchr(p,'\n');
+        size_t n=e?(size_t)(e-p):strlen(p);
+        for(size_t o=0;o<n;o+=900)
+            ESP_LOGI("app","HEAP_MAP %s%.*s",tag,(int)(n-o<900?n-o:900),p+o);
+        p+=n;
+    }
+}
+#endif
+
 /* Constant-time VM counters every owner turn; native heap is sampled at most
  * once per 100 ms. Also runs on display-only turns so pressure can recover. */
 static void sample_memory_pressure(void) {
@@ -1190,6 +1243,9 @@ void app_stop(void) {
     oomprobe_set_runtime(NULL);
 #endif
     if(guest) pocketjs_guest_destroy(guest);
+#ifdef CONFIG_POCKET_HEAP_MAP
+    if(guest)heap_map("stop");
+#endif
     guest=NULL;
     // After the guest: its finalizers may still call the windows' free_func
     // (a no-op). The region goes back once nothing lives in it.
@@ -1672,6 +1728,9 @@ esp_err_t app_start_test(char test) {
             err=ESP_ERR_NO_MEM;goto fail;
         }
     }
+#ifdef CONFIG_POCKET_HEAP_MAP
+    if(!overlay_session)heap_map("pre");
+#endif
     TRY(pocketjs_guest_create(&gc,&guest));
     if(++guest_generation==0)++guest_generation;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
@@ -2093,6 +2152,9 @@ source_ready:;
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
 #ifdef POCKET_HEAPPROBE
     if(hp) hp_report("eval",err);
+#endif
+#ifdef CONFIG_POCKET_HEAP_MAP
+    if(!overlay_session)heap_map("eval");
 #endif
     end_guest_turn();
     if(err!=ESP_OK)goto fail;
