@@ -74,6 +74,9 @@ bool pocket_kasane_animation_pending(void);
  * flight would race with the next turn's host work -- a schema, a provider,
  * a pixel, video or grid resource, animation blocks, a modal, a notice. */
 bool pocket_kasane_present_deferrable(void);
+/* Why not, as bits (0: deferrable): 1 not active, 2 schema/provider,
+ * 4 video/pixel/grid resource, 8 notice, 16 animation blocks, 32 modal. */
+unsigned pocket_kasane_defer_block(void);
 void pocket_kasane_animations_presented(uint64_t now_us);
 void pocket_kasane_set_animation_time(uint64_t now_us);
 bool pocket_kasane_needs_present(void);

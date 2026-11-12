@@ -3026,15 +3026,18 @@ ksn_result pocket_kasane_advance(uint64_t now_us){
     apply_outcome();return ksn_runtime_advance_animations(now_us);
 }
 bool pocket_kasane_animation_pending(void){return ksn_runtime_animation_pending();}
-bool pocket_kasane_present_deferrable(void){
-    if(dormant||!state||!state->active)return false;
-    if(state->schema||state->provider)return false;
-    if(state->video_resource.value||state->pixel_resource.value)return false;
-    for(unsigned i=0;i<POCKET_GRID_MAX_SLOTS;i++)if(state->grid_resources[i].value)return false;
-    if(state->notice_tx.value||state->notice_displayed||state->notice_pending)return false;
-    if(ksn_runtime_animation_enabled())return false;
-    return ksn_runtime_input_scope(false)==KSN_INPUT_APP;
+unsigned pocket_kasane_defer_block(void){
+    if(dormant||!state||!state->active)return 1u;
+    unsigned why=0;
+    if(state->schema||state->provider)why|=2u;
+    if(state->video_resource.value||state->pixel_resource.value)why|=4u;
+    for(unsigned i=0;i<POCKET_GRID_MAX_SLOTS;i++)if(state->grid_resources[i].value)why|=4u;
+    if(state->notice_tx.value||state->notice_displayed||state->notice_pending)why|=8u;
+    if(ksn_runtime_animation_enabled())why|=16u;
+    if(ksn_runtime_input_scope(false)!=KSN_INPUT_APP)why|=32u;
+    return why;
 }
+bool pocket_kasane_present_deferrable(void){return pocket_kasane_defer_block()==0;}
 void pocket_kasane_animations_presented(uint64_t now_us){ksn_runtime_animations_presented(now_us);}
 void pocket_kasane_set_animation_time(uint64_t now_us){
     owner_now_us=now_us;

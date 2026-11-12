@@ -53,6 +53,8 @@ void frame_bd_yielded(void);
 // turn's start, a transition).
 void frame_bd_deferred(void);
 void frame_bd_join_wait(bool hook, uint32_t us);
+// The end-of-turn present was not deferred, for these reasons (bits).
+void frame_bd_defer_why(unsigned bits);
 #else
 static inline void frame_bd_turn_begin(void) {}
 static inline void frame_bd_turn_end(void) {}
@@ -71,4 +73,5 @@ static inline bool frame_bd_pressure_override(bool on) {return on;}
 static inline void frame_bd_yielded(void) {}
 static inline void frame_bd_deferred(void) {}
 static inline void frame_bd_join_wait(bool h, uint32_t us) {(void)h;(void)us;}
+static inline void frame_bd_defer_why(unsigned bits) {(void)bits;}
 #endif

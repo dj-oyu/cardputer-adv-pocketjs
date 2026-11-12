@@ -51,7 +51,7 @@ static unsigned disp_mode=1;
 static int lcd_direct=1;
 #define LCD_PATH_NAME (lcd_direct?"direct":"queue")
 #else
-#define LCD_PATH_NAME "queue"
+#define LCD_PATH_NAME (BOARD_LCD_DIRECT?"direct":"queue")
 #endif
 static const char *const DISP_NAME[3]={"inline","task5","task6"};
 /* input_task runs on CPU 0 and this on CPU 1: atomics, read once a window. */
@@ -109,6 +109,11 @@ void frame_bd_yielded(void){yields++;}
 static unsigned defer_n,hook_n,settle_n;
 static uint64_t hook_us,settle_us;
 void frame_bd_deferred(void){defer_n++;}
+#define DEFER_WHY 16u
+static unsigned defer_why[DEFER_WHY];
+void frame_bd_defer_why(unsigned bits){
+    for(unsigned i=0;i<DEFER_WHY;i++)if(bits&(1u<<i))defer_why[i]++;
+}
 void frame_bd_join_wait(bool hook,uint32_t us){
     if(hook){hook_n++;hook_us+=us;}else{settle_n++;settle_us+=us;}
 }
@@ -152,7 +157,8 @@ void frame_bd_period(uint32_t held,uint32_t period){
     ESP_LOGI("frame","FRAME_P0 win=%u js_pre=%.2f js_post=%.2f turns=%u no_join=%u "
              "commit=%u tx=%u eligible=%u/%u why=%u,%u,%u,%u,%u,%u stack_free=%u "
              "heap_free_min=%u heap_largest_min=%u disp=%s disp_stack_free=%u inp_ms=%.2f inp_n=%u inp_max=%u lcd_tx=%u lcd=%s "
-             "defer=%u hook=%u hook_ms=%.2f settle=%u settle_ms=%.2f",
+             "defer=%u hook=%u hook_ms=%.2f settle=%u settle_ms=%.2f "
+             "nodefer=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
              window,turns?s_pre/(turns*1000.0):0.0,turns?s_post/(turns*1000.0):0.0,
              (unsigned)turns,(unsigned)no_join,(unsigned)site_n[0],(unsigned)site_n[1],
              (unsigned)eligible,(unsigned)presents,(unsigned)why_n[0],(unsigned)why_n[1],
@@ -161,8 +167,12 @@ void frame_bd_period(uint32_t held,uint32_t period){
              DISP_NAME[disp_task_on?disp_mode:0u],(unsigned)disp_stack_free(),
              atomic_exchange(&inp_us,0u)/1000.0,(unsigned)atomic_exchange(&inp_n,0u),
              (unsigned)atomic_exchange(&inp_max,0u),(unsigned)board_lcd_tx_take(),LCD_PATH_NAME,
-             defer_n,hook_n,hook_us/1000.0,settle_n,settle_us/1000.0);
+             defer_n,hook_n,hook_us/1000.0,settle_n,settle_us/1000.0,
+             defer_why[0],defer_why[1],defer_why[2],defer_why[3],defer_why[4],defer_why[5],
+             defer_why[6],defer_why[7],defer_why[8],defer_why[9],defer_why[10],defer_why[11],
+             defer_why[12],defer_why[13],defer_why[14],defer_why[15]);
     defer_n=hook_n=settle_n=0;hook_us=settle_us=0;
+    for(unsigned i=0;i<DEFER_WHY;i++)defer_why[i]=0;
     free_min=largest_min=UINT32_MAX;
     s_pre=s_post=0;turns=no_join=presents=eligible=0;
     for(unsigned i=0;i<FRAME_BD_JOIN_SITES;i++)site_n[i]=0;

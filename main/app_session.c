@@ -2278,21 +2278,39 @@ static esp_err_t app_tick_body(uint32_t buttons);
 // Two-core-pipeline.md sec.1.3: whether this turn's frame may be presented
 // while the next turn runs. Everything here is host state the next turn's host
 // work or a host overlay would otherwise touch under the display task.
-static bool present_deferrable(uint32_t buttons) {
+// Why the frame may not be presented while the next turn runs, as bits (0:
+// it may). The reasons are counted on FRAME_P0's nodefer= in this order.
+static unsigned present_defer_block(uint32_t buttons) {
 #if defined(CONFIG_POCKET_DISP_DEFER) && defined(KASANE_DMA_OVERLAP)
     sys_notice notice;
-    return !defer_off && !overlay_session && guest &&
-           !(buttons&0x2000) && !atomic_load(&stop_requested) &&
-           !turn_continued && !pocketjs_guest_work_pending(guest) &&
-           frame_bd_disp_on_task() && !board_capture_active() &&
-           !pocket_text_active() && !sound_capture_active() && !pet_hub_alert_shown() &&
-           !sys_notify_active(sys_device_notifications(),&notice) &&
-           !pocket_pixel_pending() && !pocket_video_pending() && !pocket_grid_pending() &&
-           pocket_kasane_present_deferrable();
+    unsigned why=0;
+    if(defer_off) why|=1u<<0;
+    if(overlay_session||!guest) why|=1u<<1;
+    if((buttons&0x2000)||atomic_load(&stop_requested)) why|=1u<<2;
+    if(turn_continued) why|=1u<<3;
+    if(guest&&pocketjs_guest_work_pending(guest)) why|=1u<<4;
+    if(!frame_bd_disp_on_task()) why|=1u<<5;
+    if(board_capture_active()) why|=1u<<6;
+    if(pocket_text_active()) why|=1u<<7;
+    if(sound_capture_active()) why|=1u<<8;
+    if(pet_hub_alert_shown()) why|=1u<<9;
+    if(sys_notify_active(sys_device_notifications(),&notice)) why|=1u<<10;
+    if(pocket_pixel_pending()||pocket_video_pending()||pocket_grid_pending()) why|=1u<<11;
+    // Kasane's own reasons from bit 12: active, schema/provider, resource,
+    // notice (one bit), animation, modal folded into bits 12-15.
+    unsigned k=pocket_kasane_defer_block();
+    if(k&1u) why|=1u<<12;
+    if(k&(2u|4u)) why|=1u<<13;
+    if(k&(8u|32u)) why|=1u<<14;
+    if(k&16u) why|=1u<<15;
+    return why;
 #else
     (void)buttons;
-    return false;
+    return 1u;
 #endif
+}
+static bool present_deferrable(uint32_t buttons) {
+    return present_defer_block(buttons)==0;
 }
 esp_err_t app_tick(uint32_t buttons) {
     const int64_t began=esp_timer_get_time();
@@ -2553,7 +2571,11 @@ static esp_err_t app_tick_body(uint32_t buttons) {
                        FRAME_BD_NO_RESOURCE:0u)|
                       (sound_capture_active()?FRAME_BD_NO_SOUND_CAPTURE:0u));
 #endif
-    present_defer=present_deferrable(buttons);
+    {
+        unsigned why=present_defer_block(buttons);
+        present_defer=why==0;
+        if(why) frame_bd_defer_why(why);
+    }
     return present_frame();
 }
 
