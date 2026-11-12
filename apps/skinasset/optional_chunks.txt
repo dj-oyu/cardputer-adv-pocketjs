@@ -1,0 +1,4 @@
+# Opt-in only; not included by default chunks.txt glob.
+app local.skinasset
+scene ../lib/ayatsuri_model.js
+sample generated_skin_sample.js
