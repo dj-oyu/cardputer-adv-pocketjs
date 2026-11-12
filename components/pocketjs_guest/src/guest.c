@@ -140,7 +140,7 @@ typedef struct surface {
  * the single fixed arena. r5sim sets it with -DPOCKET_GUEST_CHUNK_BYTES. */
 #ifndef POCKET_GUEST_CHUNK_BYTES
 #ifdef CONFIG_POCKET_VM_GUEST_CHUNK_KB
-#define POCKET_GUEST_CHUNK_BYTES ((size_t)CONFIG_POCKET_VM_GUEST_CHUNK_KB * 1024U)
+#define POCKET_GUEST_CHUNK_BYTES (CONFIG_POCKET_VM_GUEST_CHUNK_KB * 1024U)  /* no cast: #if reads it */
 #else
 #define POCKET_GUEST_CHUNK_BYTES 0U
 #endif
