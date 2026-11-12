@@ -197,6 +197,27 @@ static void drain(void) {
     while(JS_ExecutePendingJob(rt,&c)>0) {}
     pocket_kasane_end_turn();
 }
+#ifdef R5SIM_MEMUSAGE
+static void memusage(const char *name) {
+    /* What the guest holds after evaluating `name`, before and after a GC:
+     * which of it the app needs to run, and which a host could purge. */
+    for(int pass=0;pass<2;pass++) {
+        if(pass) JS_RunGC(rt);
+        JSMemoryUsage u; JS_ComputeMemoryUsage(rt,&u);
+        printf("R5SIM MEMUSAGE %s gc=%d malloc=%lld/%lld used=%lld/%lld atoms=%lld/%lld str=%lld/%lld "
+               "obj=%lld/%lld prop=%lld/%lld shape=%lld/%lld jsfunc=%lld/%lld code=%lld pc2line=%lld/%lld "
+               "cfunc=%lld arrays=%lld fast=%lld/%lld bin=%lld/%lld\n",name,pass,
+               (long long)u.malloc_count,(long long)u.malloc_size,(long long)u.memory_used_count,
+               (long long)u.memory_used_size,(long long)u.atom_count,(long long)u.atom_size,
+               (long long)u.str_count,(long long)u.str_size,(long long)u.obj_count,(long long)u.obj_size,
+               (long long)u.prop_count,(long long)u.prop_size,(long long)u.shape_count,(long long)u.shape_size,
+               (long long)u.js_func_count,(long long)u.js_func_size,(long long)u.js_func_code_size,
+               (long long)u.js_func_pc2line_count,(long long)u.js_func_pc2line_size,(long long)u.c_func_count,
+               (long long)u.array_count,(long long)u.fast_array_count,(long long)u.fast_array_elements,
+               (long long)u.binary_object_count,(long long)u.binary_object_size);
+    }
+}
+#endif
 static bool eval(const char *source,size_t len,const char *name) {
     JSValue v=JS_Eval(ctx,source,len,name,JS_EVAL_TYPE_GLOBAL);
     bool ok=!JS_IsException(v);
@@ -209,6 +230,9 @@ static bool eval(const char *source,size_t len,const char *name) {
     }
     JS_FreeValue(ctx,v);
     drain();
+#ifdef R5SIM_MEMUSAGE
+    memusage(name);
+#endif
     return ok;
 }
 
@@ -321,6 +345,9 @@ void app_main(void) {
     // pocketjs_guest_eval binds globalThis.frame and drains, as app_start_test.
     bool ok=pocketjs_guest_eval(guest,stress_js_start,(size_t)(stress_js_end-stress_js_start-1),
                                 R5SIM_APP_NAME)==ESP_OK;
+#ifdef R5SIM_MEMUSAGE
+    memusage(R5SIM_APP_NAME);
+#endif
     pocket_kasane_end_turn();
     ok=ok&&present();
     unsigned conts=0,frame_err=0;
