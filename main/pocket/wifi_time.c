@@ -470,13 +470,15 @@ static void wifi_worker_task(void *arg) {
 }
 
 void wifi_time_stack_report(const char *why) {
-    // lwIP's tcpip thread is "tiT"; it exists once esp_netif_init() ran. Its
+    // lwIP's tcpip thread, named "tcpip" in IDF v6.0.1 (TCPIP_THREAD_NAME,
+    // components/lwip/port/include/lwipopts.h); it exists once
+    // esp_netif_init() ran. Its
     // stack (CONFIG_LWIP_TCPIP_TASK_STACK_SIZE) is permanent, so the least it
     // ever had left decides whether it can be smaller
     // (docs/platform/lwip-resource-review.md).
-    TaskHandle_t t=xTaskGetHandle("tiT");
+    TaskHandle_t t=xTaskGetHandle("tcpip");
     if(!t)return;
-    ESP_LOGI(TAG,"NET_STACK %s tiT_min_free=%u stack=%u",why,
+    ESP_LOGI(TAG,"NET_STACK %s tcpip_min_free=%u stack=%u",why,
              (unsigned)uxTaskGetStackHighWaterMark(t),(unsigned)CONFIG_LWIP_TCPIP_TASK_STACK_SIZE);
 }
 
