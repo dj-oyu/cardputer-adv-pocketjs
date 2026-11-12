@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22)
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components/quickjs-ng")
+set(COMPONENTS main)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+idf_build_set_property(MINIMAL_BUILD ON)
+project(scenebatch_sim)
+idf_component_get_property(_qjs_lib quickjs-ng COMPONENT_LIB)
+target_compile_definitions(${_qjs_lib} PRIVATE CONFIG_POCKET_VM_ROM_INTRINSICS=1)
