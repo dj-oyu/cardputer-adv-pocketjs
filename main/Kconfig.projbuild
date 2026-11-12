@@ -122,7 +122,7 @@ menu "Pocket VM (diagnostics)"
     config POCKET_VM_GUEST_CHUNK_KB
         int "Growable guest arena: chunk size (KiB, 0 = one fixed arena)"
         range 0 64
-        default 0
+        default 16
         help
             docs/vm/guest-memory-design.md sec.5. The guest's arena starts as
             one chunk of this size and takes another (or one of half the size)
