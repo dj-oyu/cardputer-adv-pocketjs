@@ -103,3 +103,10 @@ ASan/UBSan を使用、実行環境の制約から LSan は明示的に無効と
 
 ここで depth の検査とは前面 surface の選択（visibility/order）の検査であり、
 数値 depth buffer の誤差を計測したものではない。
+
+## Normal角度 metric の修正
+
+F32 normal の長さ丸めを角度と誤認しないよう、標本normalと比較先normalの両方を
+単位化して `atan2(|cross|, dot)` で方向差を計算する。同一のF32対角normal同士で
+従来は約0.0106°と報告し得た。修正後は同一方向と実0.1rad差を回帰試験する。
+geometry・縮小選択・packed bytes・native描画は変更せず、報告する角度の精度を直す。

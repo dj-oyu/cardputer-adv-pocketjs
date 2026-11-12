@@ -17,6 +17,10 @@ function fixture(size=9,bump=0){
   const glb=Buffer.alloc(28+json.length+data.length);glb.writeUInt32LE(0x46546c67);glb.writeUInt32LE(2,4);glb.writeUInt32LE(glb.length,8);glb.writeUInt32LE(json.length,12);glb.writeUInt32LE(0x4e4f534a,16);json.copy(glb,20);const off=20+json.length;glb.writeUInt32LE(data.length,off);glb.writeUInt32LE(0x004e4942,off+4);data.copy(glb,off+8);return {glb,editable:{positions,normals,indices}};
 }
 
+const diagonal=Math.fround(Math.SQRT1_2),constant={positions:[[0,0,0],[1,0,0],[0,1,0]],normals:Array.from({length:3},()=>[diagonal,diagonal,0]),triangles:[[0,1,2]]};
+assert(sampleErrors(constant,constant).normalDegrees.max<1e-10);
+const rotated={...constant,normals:Array.from({length:3},()=>[Math.cos(Math.PI/4+.1),Math.sin(Math.PI/4+.1),0])};
+assert(Math.abs(sampleErrors(constant,rotated).normalDegrees.max-.1*180/Math.PI)<1e-10);
 const ir=importGlb(fixture().glb),s=ir.surfaces[0],before=structuredClone(ir);
 const reduced=reduceSurface(s,{targetVertices:49});
 assert.equal(reduced.stats.outputVertices,49);assert.equal(reduced.stats.collapses,32);

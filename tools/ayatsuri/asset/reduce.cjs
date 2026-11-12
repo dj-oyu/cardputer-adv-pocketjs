@@ -123,7 +123,8 @@ function sampleErrors(source,reduced){
     for(const t of a.triangles)samples.push({p:[0,1,2].map(j=>t.reduce((v,i)=>v+a.positions[i][j]/3,0)),n:unit([0,1,2].map(j=>t.reduce((v,i)=>v+a.normals[i][j],0)))});
     for(const {p,n} of samples){let best;
       for(const t of b.triangles){const r=closest(p,...t.map(i=>b.positions[i]));if(!best||r.distance<best.distance){const bn=[0,1,2].map(j=>t.reduce((v,id,k)=>v+r.w[k]*b.normals[id][j],0));best={...r,n:unit(bn)};}}
-      distances.push(best.distance);angles.push(Math.acos(Math.max(-1,Math.min(1,dot(n,best.n))))*180/Math.PI);
+      // F32 unit normals have rounded lengths; compare directions, not magnitudes.
+      const normal=unit(n);distances.push(best.distance);angles.push(Math.atan2(length(cross(normal,best.n)),dot(normal,best.n))*180/Math.PI);
     }
   }
   const stats=xs=>{const sorted=xs.slice().sort((a,b)=>a-b);return {max:sorted.at(-1),p95:sorted[Math.ceil(sorted.length*.95)-1],mean:xs.reduce((a,b)=>a+b,0)/xs.length};};
