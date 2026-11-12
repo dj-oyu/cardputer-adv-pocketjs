@@ -209,7 +209,7 @@ menu "Pocket VM (diagnostics)"
 
     config POCKET_GC_STATS
         bool "Probe: log the guest's GC runs, time and bytes freed once a second"
-        default y
+        default n
         help
             Measurement only (docs/vm/guest-memory-design.md G1). Builds
             QuickJS with POCKET_GC_STATS and logs GC_STATS when a collection
