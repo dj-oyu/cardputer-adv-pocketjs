@@ -303,6 +303,60 @@ static void heap_map_put(const char *fmt,unsigned a,unsigned b) {
     if(heap_map_len+40>=sizeof heap_map_buf)return;
     heap_map_len+=(size_t)snprintf(heap_map_buf+heap_map_len,sizeof heap_map_buf-heap_map_len,fmt,a,b);
 }
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+/* The blocks of the current used run, and the runs that sit between two
+ * large holes: those pin the holes apart. */
+#include "esp_heap_trace.h"
+#define HEAP_PIN_RUN 16
+#define HEAP_PIN_MAX 48
+typedef struct { void *ptr; unsigned size, left, right; } heap_pin_t;
+static heap_pin_t heap_run[HEAP_PIN_RUN], heap_pins[HEAP_PIN_MAX];
+static unsigned heap_run_n, heap_pin_n, heap_left_free;
+static bool heap_run_over, heap_pin_on;
+static heap_trace_record_t heap_trace_recs[300];
+void heap_origin_start(void) {
+    if(heap_trace_init_standalone(heap_trace_recs,300)==ESP_OK)heap_trace_start(HEAP_TRACE_LEAKS);
+}
+static void heap_pin_free(unsigned size) {
+    if(!heap_pin_on)return;
+    if(size>=2048){
+        unsigned bytes=0;
+        for(unsigned i=0;i<heap_run_n;i++)bytes+=heap_run[i].size;
+        if(heap_left_free&&heap_run_n&&!heap_run_over&&bytes<=8192)
+            for(unsigned i=0;i<heap_run_n&&heap_pin_n<HEAP_PIN_MAX;i++){
+                heap_pins[heap_pin_n]=heap_run[i];
+                heap_pins[heap_pin_n].left=heap_left_free;
+                heap_pins[heap_pin_n++].right=size;
+            }
+        heap_left_free=size;
+    }else if(size>=256)heap_left_free=0;   /* a medium hole breaks the pair */
+    heap_run_n=0;heap_run_over=false;
+}
+static void heap_pin_used(void *ptr,unsigned size) {
+    if(!heap_pin_on)return;
+    if(heap_run_n<HEAP_PIN_RUN)heap_run[heap_run_n++]=(heap_pin_t){ptr,size,0,0};
+    else heap_run_over=true;
+}
+static void heap_pin_report(void) {
+    heap_trace_stop();   /* nothing is recorded while we read */
+    const size_t n=heap_trace_get_count();
+    ESP_LOGI("app","HEAP_PIN blocks=%u traced=%u",heap_pin_n,(unsigned)n);
+    for(unsigned k=0;k<heap_pin_n;k++){
+        const heap_pin_t *p=&heap_pins[k];
+        heap_trace_record_t r; bool hit=false;
+        for(size_t i=0;i<n&&!hit;i++)
+            if(heap_trace_get(i,&r)==ESP_OK&&r.address==p->ptr)hit=true;
+        char by[96]="untraced";
+        if(hit){
+            size_t o=0;
+            for(int d=0;d<CONFIG_HEAP_TRACING_STACK_DEPTH;d++)
+                o+=(size_t)snprintf(by+o,sizeof by-o,"%s%08x",d?",":"",(unsigned)(uintptr_t)r.alloced_by[d]);
+        }
+        ESP_LOGI("app","HEAP_PIN %p size=%u left=%u right=%u by=%s",p->ptr,p->size,p->left,p->right,by);
+    }
+    heap_trace_resume();
+}
+#endif
 static void heap_map_flush_used(void) {
     if(heap_map_ucount)heap_map_put(" u%u/%u",heap_map_ucount,(unsigned)heap_map_ubytes);
     heap_map_ucount=0;heap_map_ubytes=0;
@@ -311,20 +365,32 @@ static bool heap_map_cb(walker_heap_into_t h,walker_block_info_t b,void *u) {
     (void)u;
     if(h.start!=heap_map_region){
         heap_map_flush_used();
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+        heap_left_free=0;heap_run_n=0;heap_run_over=false;
+#endif
         heap_map_region=h.start;
         heap_map_put("\n R%x+%u:",(unsigned)h.start,(unsigned)(h.end-h.start));
     }
     if(!b.used&&b.size>=256){
         heap_map_flush_used();
         heap_map_put(" @%x f%u",(unsigned)((intptr_t)b.ptr-h.start),(unsigned)b.size);
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+        heap_pin_free((unsigned)b.size);
+#endif
     }else{
         heap_map_ucount++;heap_map_ubytes+=b.size;
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+        if(b.used)heap_pin_used(b.ptr,(unsigned)b.size);
+#endif
     }
     return true;
 }
 static void heap_map(const char *tag) {
     const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
     heap_map_len=0;heap_map_region=0;heap_map_ucount=0;heap_map_ubytes=0;
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+    heap_pin_on=strcmp(tag,"pre")==0;heap_pin_n=0;heap_run_n=0;heap_left_free=0;heap_run_over=false;
+#endif
     heap_caps_walk(caps,heap_map_cb,NULL);
     heap_map_flush_used();
     ESP_LOGI("app","HEAP_MAP %s free=%u largest=%u",tag,
@@ -339,6 +405,10 @@ static void heap_map(const char *tag) {
             ESP_LOGI("app","HEAP_MAP %s%.*s",tag,(int)(n-o<900?n-o:900),p+o);
         p+=n;
     }
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+    if(heap_pin_on)heap_pin_report();
+    heap_pin_on=false;
+#endif
 }
 #endif
 

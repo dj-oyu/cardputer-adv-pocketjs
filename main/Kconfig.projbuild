@@ -207,6 +207,18 @@ menu "Pocket VM (diagnostics)"
             JS_RunGC. Garbage that a GC frees, live data, and a fragmented
             heap each leave a different line.
 
+    config POCKET_HEAP_ORIGIN
+        bool "Probe: name the caller of each native block that splits two large holes"
+        depends on POCKET_HEAP_MAP && HEAP_TRACING_STANDALONE
+        default n
+        help
+            Measurement only (docs/vm/lv3-heap-exhaustion.md sec.6.5). Starts
+            heap tracing (leaks mode, 300 records) at boot; at the heap map
+            taken before a guest, every used block in a short run (<= 8 KiB)
+            between two free blocks of 2 KiB or more is printed as HEAP_PIN
+            with the call stack that allocated it, or "untraced" for blocks
+            older than the trace.
+
     config POCKET_HEAP_MAP
         bool "Probe: print the internal heap's free blocks before a guest, after its evaluation, and after it is gone"
         default n

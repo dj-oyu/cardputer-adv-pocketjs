@@ -1576,6 +1576,9 @@ static void nvs_init(void) {
 }
 
 void app_main(void) {
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+    { extern void heap_origin_start(void); heap_origin_start(); }
+#endif
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
     ESP_ERROR_CHECK(usb_console_init());
