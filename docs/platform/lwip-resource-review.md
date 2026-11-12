@@ -205,3 +205,12 @@
 - **tcpip スレッドのスタックの最小の空き: 1,716 B / 3,072 B**（実測(device)、`1f2896d`、`NET_STACK app_stop tcpip_min_free=1716`）。使ったのは最大 1,356 B。測ったのは起動後の HELLO（起動時の自動時刻同期を含むと見ている。同期がこの時点までに走ったかはログで確かめていない）。**HTTPS と Opus の流し込みはまだ通していない**（netcheck は broker の起動できるアプリの一覧に無い）。
   - 2,560 B にすると余裕は 1,204 B、2,048 B なら 692 B（計算）。HTTPS・Opus の後の値を見るまで変えない。
 - `NET_STACK` は無線を止めたとき（`radio_down`）とアプリの終わりに出る。スレッド名は IDF v6.0.1 では `tcpip`（`lwipopts.h` の `TCPIP_THREAD_NAME`）。
+
+### 9.1 HTTPS と設定の削減、Wi-Fi のセマフォ（2026-11-12、実機）
+
+- **HTTPS（`local.tlscycle`、2 回のリースで 16 回の GET）の後も tcpip の最小の空きは 1,716 B / 3,584 B のまま**（`b4cd3cb`）。HTTPS は tcpip スレッドの最大使用量を増やさない。1 回の TLS は約 5.9 KB を一時的に使い、全部戻る（`TLSCOST`）。
+- **`CONFIG_LWIP_TCPIP_TASK_STACK_SIZE` 3,072 → 2,560、`DNS_TABLE_SIZE` 4 → 2、`ARP_TABLE_SIZE` 10 → 4**（`6da834c`）。ELF で `dns_table` 1,104 → 552 B、`arp_table` 240 → 96 B（静的 −696 B）。tcpip の恒久のスタックが −512 B。実機で `tcpip_min_free=1204`（2,560 ＋ 512 のうち）、DERBY 一周と TLS CYCLE 16 回が通過。
+- **Wi-Fi ワーカーの駆動用セマフォを RTC FAST に置いた**（`9c59273` の前のコミット）。OS アダプタの表（`g_wifi_osi_funcs._wifi_thread_semphr_get`）を差し替え、ワーカーには RTC FAST の静的なカウンティングセマフォ（88 B）を返す。他のタスクは元の関数。主ヒープの 12 B のブロック 2 個（pthread の TLS）が消え、DERBY の起動直前の主ヒープの穴は 24.7・44.3 KB → **25.7・46.8 KB**、最大ブロック 43.0 → **45.1 KB**。TLS の間の最大ブロックも 45,056 B のまま動かない（修正前の別の実行では 43,008 → 34,816 B に落ちた）。RTC FAST の空きは 600 → 508 B。
+- **見つけて直した不具合:** `pocket_api.c` の class owner の表が 16 で、所有者は 18 あった（Kasane 11、net 2 ほか）。DERBY の後に `local.tlscycle` を起動すると assert で再起動した。24 に広げた（`6f5f65d`）。出荷アプリで pocket.net を使うのは PET COMPANION だけで、同じ並びで起きうる不具合だった。
+- Wi-Fi ワーカーのスタックの最小の空きが 700 B（3,072 のうち）だった。以前の測定（`b4cd3cb`）は 1,116 B。どの経路（走査・リンク）で深くなったかは分けていない。
+- 残り: Wi-Fi の静的 RX バッファ 4 → 2（約 3.2 KB、無線中のみ）は、Opus の流し込みを実機で試すまで変えない。
