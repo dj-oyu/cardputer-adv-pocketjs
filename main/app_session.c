@@ -125,6 +125,7 @@ static int64_t hp_eval_t0;
 #include "vm_wake.h"
 #include <stdatomic.h>
 #include <stdio.h>
+#include "wifi_time.h"
 #include <string.h>
 // Defined next to dispatch_guest(); the evaluation and overlay turns use it too.
 static void end_guest_turn(void);
@@ -1341,6 +1342,7 @@ void app_stop(void) {
 #endif
     shiki_memstat_reset();
     ESP_LOGI("app","APP_STOPPED");
+    wifi_time_stack_report("app_stop");
 }
 
 // ------------------------------------------------------ resident suspension

@@ -1593,10 +1593,12 @@ void app_main(void) {
     wifi_time_init();
     pet_hub_init();
     shell_init();
-    // After shell_init(), which loads the AUTO TIME SYNC row: the boot that
-    // will sync puts lwIP's permanent blocks beside the other boot residents
-    // instead of between the holes a later start would find.
-    if(net_autosync_enabled()) wifi_time_stack_early();
+    // Whenever a network is stored (auto sync, a manual sync, a scan or an
+    // app's pocket.net may start the radio later): lwIP's permanent blocks go
+    // beside the other boot residents instead of between the holes a later
+    // start would find (docs/vm/lv3-heap-exhaustion.md sec.6.7). No stored
+    // network, no radio, and nothing is made.
+    if(wifi_time_has_credentials()) wifi_time_stack_early();
     // After shell_init(), which is where the stored arming bit reaches the
     // overlay's setter, and before the UI task, which is what would start it.
     // This is the boot that decides whether an overlay that did not survive

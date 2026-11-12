@@ -351,6 +351,7 @@ static void tear_down(void) {
     if(wifi_inited) { esp_wifi_deinit(); wifi_inited=false; }
     if(sta_netif) { esp_netif_destroy_default_wifi(sta_netif); sta_netif=NULL; }
     if(owns_event_loop) { esp_event_loop_delete_default(); owns_event_loop=false; }
+    wifi_time_stack_report("radio_down");
 }
 
 // The stored network, read the same way for the clock and for a lease. One copy
@@ -466,6 +467,17 @@ static void wifi_worker_task(void *arg) {
         }
         ESP_LOGI("wifi","WIFI_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
     }
+}
+
+void wifi_time_stack_report(const char *why) {
+    // lwIP's tcpip thread is "tiT"; it exists once esp_netif_init() ran. Its
+    // stack (CONFIG_LWIP_TCPIP_TASK_STACK_SIZE) is permanent, so the least it
+    // ever had left decides whether it can be smaller
+    // (docs/platform/lwip-resource-review.md).
+    TaskHandle_t t=xTaskGetHandle("tiT");
+    if(!t)return;
+    ESP_LOGI(TAG,"NET_STACK %s tiT_min_free=%u stack=%u",why,
+             (unsigned)uxTaskGetStackHighWaterMark(t),(unsigned)CONFIG_LWIP_TCPIP_TASK_STACK_SIZE);
 }
 
 void wifi_time_stack_early(void) {
