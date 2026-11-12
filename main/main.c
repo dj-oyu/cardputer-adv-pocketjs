@@ -1613,7 +1613,9 @@ void app_main(void) {
         .instance=app_guest_generation,
         .clock_ms=native_clock_ms,
     };
-    uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
+    /* 53 bits: the broker's clients read JSON numbers as doubles, so a wider
+     * id came back rounded and every action.tap was refused as stale_boot. */
+    uint64_t boot_id=(((uint64_t)esp_random()<<32)|esp_random())&((1ull<<53)-1u);
     app_control_init(boot_id,&native_hooks);
     /* The system's slow tasks take RTC fast memory (8 KB, APB clock) at boot so
      * the JIT's code can never land there: 3x slower (shiki-jit.md sec.15).
