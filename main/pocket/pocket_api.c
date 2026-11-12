@@ -549,9 +549,14 @@ void pocket_api_cancel_all(const char *code) {
 unsigned pocket_api_open_count(void) { return promise_open; }
 
 // Every static that pocket_api_class_ready() has filled in, so the end of a
-// session can clear them (see pocket_api.h). Twelve owners exist today; the
-// assert is for the surface that adds the seventeenth, not for runtime input.
-static JSRuntime **class_owners[16];
+// session can clear them (see pocket_api.h). Owners are remembered across
+// sessions (one entry per static, never removed), so the table must hold every
+// owner the firmware has, not one session's: 18 today (Kasane 11, net 2, fs,
+// storage, text, workspace, music view). It held 16 while the count was 18,
+// and the first session to register pocket.net after DERBY tripped the assert
+// (local.tlscycle, 2026-11-12). The assert is for the surface that adds the
+// 25th, not for runtime input.
+static JSRuntime **class_owners[24];
 static unsigned class_owner_count;
 
 bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
