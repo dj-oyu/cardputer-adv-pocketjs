@@ -209,7 +209,7 @@ menu "Pocket VM (diagnostics)"
 
     config POCKET_HEAP_MAP
         bool "Probe: print the internal heap's free blocks before a guest, after its evaluation, and after it is gone"
-        default n
+        default y
         help
             Measurement only (docs/vm/guest-memory-design.md sec.10 step 3).
             heap_caps_walk over the internal heap at three points: before
