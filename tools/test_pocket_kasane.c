@@ -2148,6 +2148,39 @@ int main(void) {
           "draw-reference exposure is capped at 32");
     check(!pocket_kasane_has_submission(),"limit failure aborts the whole replace");
 
+    /* api-reorg P3: setRect/setClip take four integers as well as the array,
+     * replace/patch return the ticket as a number, and a tx the app does not
+     * keep is the next build's tx (no allocation); one it keeps stays CLOSED. */
+    check(run("globalThis.t1=kasane.patch(tx=>{newRef.setRect(tx,[5,5,22,22]);"
+              "newRef.setClip(tx,[0,0,240,135])});"
+              "if(typeof t1!=='number'||t1!==kasane.poll().ticket)throw Error('ticket number')")&&
+          present(&stats)==KSN_OK,"patch returns the ticket as a number");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(run("kasane.patch(tx=>newRef.setRect(tx,1,2,9,9))")&&present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "integer setRect moves the reference");
+    check(run("globalThis.w=null;kasane.patch(tx=>{w=new WeakRef(tx);"
+              "newRef.setRect(tx,5,5,22,22);newRef.setClip(tx,0,0,240,135)})")&&
+          present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))==0,
+          "integer setRect/setClip draw what the array form drew");
+    check(run("let same=false;kasane.cancel(kasane.patch(tx=>{same=w.deref()===tx;"
+              "newRef.setColor(tx,0xffffffff)}));if(!same)throw Error('tx not reused')"),
+          "a tx the app does not keep is the next build's tx");
+    check(run("globalThis.kept=null;kasane.cancel(kasane.patch(tx=>{kept=tx;"
+              "newRef.setColor(tx,0xffffffff)}));let closed=false;"
+              "try{kept.background(1)}catch(e){closed=e.code==='CLOSED'}"
+              "let other=false,inner=false;kasane.cancel(kasane.patch(tx=>{other=tx!==kept;"
+              "try{newRef.setColor(kept,1)}catch(e){inner=e.code==='CLOSED'}"
+              "newRef.setColor(tx,0xffffffff)}));"
+              "if(!closed||!other||!inner)throw Error('kept tx '+closed+other+inner)"),
+          "a kept tx stays CLOSED, in later callbacks too");
+    check(run("const bad=[[1,2,0,9],[1,2,9,1e6],[1,2,NaN,9]];let n=0;for(const a of bad){"
+              "try{kasane.patch(tx=>newRef.setRect(tx,...a))}catch(e){n+=e.code==='INVALID_ARGUMENT'}}"
+              "if(n!==3)throw Error('integer rect checks '+n)"),
+          "integer setRect checks range and edges as the array form does");
+    check(!pocket_kasane_has_submission(),"rejected integer rectangles abort their patch");
+
     check(run("if(kasane.stats().nativeBytes<=kasane.stats().cache.reservedBytes)throw Error('native accounting')"),
           "stats reports the allocated native arena");
     atomicity_tests();

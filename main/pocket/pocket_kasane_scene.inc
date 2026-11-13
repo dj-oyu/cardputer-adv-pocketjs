@@ -44,8 +44,63 @@ static JSValue scene_callback(JSContext *ctx,kasane_scene *scene,JSValueConst tx
     return JS_ThrowTypeError(ctx,"scene build must return an object containing candidate refs");
 }
 
-/* scene is NULL for view.replace/patch(build): the ticket is created and the
- * JS function called. A scene discards the ticket, so none is allocated. */
+/* The tx and modal wrappers of replace/patch (docs/kasane/api-reorg.md
+ * sec.3.2). They used to be made for every call, with the ticket and an own
+ * "modal" property: four guest allocations a call on the per-turn path. Now a
+ * build reuses the pair of the build before -- unless the app kept one (a
+ * reference besides ours: stored, captured, returned), in which case ours is
+ * dropped and the next build makes a fresh one. So a tx that outlives its
+ * callback stays CLOSED for good, in later callbacks too, exactly as when
+ * every call made its own (R4); an app that keeps nothing allocates nothing.
+ * The opaque holds the transaction only while the callback runs. tx.modal is
+ * a getter on the prototype. They are guest values: pocket_kasane_reset() --
+ * app_stop(), before the guest goes -- drops them (release_build_wrappers). */
+static JSValue build_tx={0},build_modal={0};
+static JSContext *build_ctx;
+/* The count QuickJS keeps in front of every object (JSRefCountHeader in
+ * quickjs.c, the first field of JSGCObjectHeader); not in quickjs.h. */
+typedef struct { int ref_count; } build_ref_header;
+static bool build_shared(JSValueConst v) {
+    return JS_IsObject(v)&&((const build_ref_header *)JS_VALUE_GET_PTR(v))->ref_count>1;
+}
+static void release_build_wrappers(void) {
+    if(!build_ctx) return;
+    JS_FreeValue(build_ctx,build_tx);JS_FreeValue(build_ctx,build_modal);
+    build_tx=build_modal=JS_UNDEFINED;build_ctx=NULL;
+}
+static bool build_wrappers(JSContext *ctx) {
+    if(build_ctx!=ctx) {
+        release_build_wrappers();
+        build_tx=build_modal=JS_UNDEFINED;build_ctx=ctx;
+    }
+    if(JS_IsUndefined(build_tx)) {
+        build_tx=wrap_direct(ctx,tx_class,0);
+        if(JS_IsException(build_tx)) { build_tx=JS_UNDEFINED;return false; }
+    }
+    if(JS_IsUndefined(build_modal)) {
+        build_modal=wrap_direct(ctx,modal_class,0);
+        if(JS_IsException(build_modal)) { build_modal=JS_UNDEFINED;return false; }
+    }
+    return true;
+}
+/* After a callback: the opaques close, and a wrapper the app kept is left
+ * to it (CLOSED) instead of being handed to the next build. */
+static void settle_build_wrappers(JSContext *ctx) {
+    JS_SetOpaque(build_tx,NULL);JS_SetOpaque(build_modal,NULL);
+    if(build_shared(build_tx)) { JS_FreeValue(ctx,build_tx);build_tx=JS_UNDEFINED; }
+    if(build_shared(build_modal)) { JS_FreeValue(ctx,build_modal);build_modal=JS_UNDEFINED; }
+}
+static JSValue js_tx_modal(JSContext *ctx, JSValueConst self) {
+    /* Only the live tx's modal; a kept, closed tx gets a closed modal. */
+    if(build_ctx==ctx&&JS_IsObject(self)&&JS_IsObject(build_tx)&&
+       JS_VALUE_GET_PTR(self)==JS_VALUE_GET_PTR(build_tx))
+        return JS_DupValue(ctx,build_modal);
+    return wrap_direct(ctx,modal_class,0);
+}
+
+/* scene is NULL for view.replace/patch(build): the JS function is called and
+ * the ticket returned as a number (a uint32: no allocation; cancel() takes it
+ * back). A scene discards the ticket. */
 static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene,
                          ksn_update_mode mode, const char *op) {
     if(!scene&&!JS_IsFunction(ctx,build))
@@ -56,28 +111,21 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     /* Keep the callback closed to reentrant builds after an inner abort. */
     if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
     if(!tx_proto(ctx)||!modal_proto(ctx)) return JS_EXCEPTION;
+    /* Before the transaction: a failure here has nothing to cancel. */
+    if(!build_wrappers(ctx)) return JS_EXCEPTION;
     apply_outcome();
     frame_bd_join_point(FRAME_BD_JOIN_KASANE_TX);
     ksn_tx tx;ksn_result result=ksn_view_begin(view(),mode,&tx);
     if(result!=KSN_OK) return throw_result(ctx,result,op);
     state->building=tx;
-    JSValue ticket=JS_UNDEFINED,tx_object=JS_UNDEFINED,modal_object=JS_UNDEFINED;
+    JS_SetOpaque(build_tx,(void *)(uintptr_t)tx.value);
+    JS_SetOpaque(build_modal,(void *)(uintptr_t)tx.value);
     /* No fallible allocation may follow successful native submission. */
-    if(!scene) {
-        ticket=wrap_direct(ctx,ticket_class,tx.value);
-        if(JS_IsException(ticket)) goto fail;
-    }
-    tx_object=wrap_direct(ctx,tx_class,tx.value);
-    if(JS_IsException(tx_object)) goto fail;
-    modal_object=wrap_direct(ctx,modal_class,tx.value);
-    if(JS_IsException(modal_object)) goto fail;
-    if(JS_DefinePropertyValueStr(ctx,tx_object,"modal",JS_DupValue(ctx,modal_object),
-                                 JS_PROP_C_W_E)<0) goto fail;
-    JSValue arg=JS_DupValue(ctx,tx_object);
+    JSValue arg=JS_DupValue(ctx,build_tx);
     JSValue returned=scene?scene_callback(ctx,scene,arg,mode)
                           :JS_Call(ctx,build,JS_UNDEFINED,1,&arg);
     JS_FreeValue(ctx,arg);
-    JS_SetOpaque(tx_object,NULL);JS_SetOpaque(modal_object,NULL);
+    JS_SetOpaque(build_tx,NULL);JS_SetOpaque(build_modal,NULL);
     if(JS_IsException(returned)) goto fail;
     bool thenable=false;
     if(JS_IsObject(returned)) {
@@ -88,6 +136,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
         thenable=JS_IsFunction(ctx,then);JS_FreeValue(ctx,then);
     }
     JS_FreeValue(ctx,returned);
+    settle_build_wrappers(ctx);
     if(thenable) {
         pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "build must not return a Promise or thenable",false,
@@ -106,12 +155,9 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     state->building=(ksn_tx){0};
     state->submitted=tx;state->submitted_mode=mode;state->active=true;
     ksn_runtime_app_activate(state->lease);
-    JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);
-    return ticket;
+    return scene?JS_UNDEFINED:JS_NewUint32(ctx,tx.value);
 fail:
-    if(JS_IsObject(tx_object)) JS_SetOpaque(tx_object,NULL);
-    if(JS_IsObject(modal_object)) JS_SetOpaque(modal_object,NULL);
-    JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);JS_FreeValue(ctx,ticket);
+    settle_build_wrappers(ctx);
     ksn_view_cancel(view(),tx);discard_candidates(tx);state->building=(ksn_tx){0};
     return JS_EXCEPTION;
 }
@@ -299,7 +345,7 @@ static JSValue js_poll(JSContext *ctx, JSValueConst self, int argc,
     JSValue out=JS_NewObject(ctx);
     if(JS_IsException(out)) return out;
     PUT(out,"ticket",submission.ticket.value
-        ?wrap_direct(ctx,ticket_class,submission.ticket.value):JS_NULL);
+        ?JS_NewUint32(ctx,submission.ticket.value):JS_NULL);
     PUT(out,"status",JS_NewString(ctx,status_name(submission.status)));
     PUT(out,"reason",JS_NewString(ctx,result_code(submission.reason)));
     PUT(out,"layer",JS_NewString(ctx,"app"));
@@ -311,7 +357,10 @@ fail:
 static JSValue js_cancel(JSContext *ctx, JSValueConst self, int argc,
                          JSValueConst *argv) {
     (void)self;
-    uint32_t raw=argc?opaque_value(argv[0],ticket_class):0;
+    /* The ticket is the number replace/patch and poll() give (api-reorg P3). */
+    double n=0;
+    uint32_t raw=argc&&JS_IsNumber(argv[0])&&JS_ToFloat64(ctx,&n,argv[0])==0&&
+                 n>=1&&n<=4294967295.0&&n==floor(n)?(uint32_t)n:0;
     if(!state||!raw)
         return pocket_api_throw(ctx,POCKET_ERR_CLOSED,"kasane.cancel",
                                 "ticket is closed",false,NULL);
@@ -404,6 +453,7 @@ static const JSCFunctionListEntry tx_methods[]={
     JS_CFUNC_DEF("image",1,js_tx_image_checked),
     JS_CFUNC_DEF("group",3,js_tx_group_checked),
     JS_CFUNC_DEF("instantiate",2,js_tx_instantiate_checked),
+    JS_CGETSET_DEF("modal",js_tx_modal,NULL),
 };
 static const JSCFunctionListEntry modal_methods[]={
     JS_CFUNC_DEF("open",1,js_modal_open_checked),JS_CFUNC_DEF("close",0,js_modal_close_checked),

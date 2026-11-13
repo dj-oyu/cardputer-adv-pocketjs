@@ -258,6 +258,9 @@ static const JSClassDef modal_def={.class_name=KASANE_CLASS};
 static const JSClassDef ref_def={.class_name=KASANE_CLASS,.finalizer=ref_finalizer};
 static const JSClassDef template_def={.class_name=KASANE_CLASS};
 static const JSClassDef instance_def={.class_name=KASANE_CLASS};
+/* No ticket object is made since api-reorg P3 (tickets are numbers); the
+ * class stays registered until P5 removes poll/cancel with the owner ledger
+ * (tools/pocket/run_class_registry.py). */
 static const JSClassDef ticket_def={.class_name=KASANE_CLASS};
 static const JSClassDef image_def={.class_name=KASANE_CLASS};
 static const JSClassDef animation_def={.class_name=KASANE_CLASS};
@@ -703,7 +706,16 @@ static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
 #include "pocket_kasane_tx.inc"
 #include "pocket_kasane_scene.inc"
 #include "pocket_kasane_schema.inc"
+/* QuickJS keeps these entries for lazy function materialization. */
+static const JSCFunctionListEntry cache_functions[]={
+    JS_CFUNC_DEF("create",1,js_cache_create),JS_CFUNC_DEF("release",1,js_cache_release),
+};
+/* cache is an object entry of the list: the fork's lazy lists build it on the
+ * first touch of the name (api-reorg.md sec.3.1), so HELLO's mount never
+ * pays for it. grid, video and pixel are added the same way by their own
+ * files (pocket_grid_install & co.). */
 static const JSCFunctionListEntry functions[]={
+    JS_OBJECT_DEF("cache",cache_functions,2,JS_PROP_C_W_E),
     JS_CFUNC_DEF("resource",1,js_resource),
     JS_CFUNC_DEF("mount",1,js_presenter_mount),
     JS_CFUNC_DEF("createScene",1,js_create_scene),
@@ -763,6 +775,10 @@ __attribute__((weak)) esp_err_t pocket_shiki_api_register(void);
 __attribute__((weak)) bool shiki_heap_active(void);
 static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
+    /* A new session's namespace: wrappers still remembered belong to a guest
+     * that is gone without a reset (only host fixtures do that). Forget them;
+     * freeing into a dead runtime is not possible. */
+    build_ctx=NULL;
     /* Instance and animation prototypes are built on first use (above). */
     if(!register_class(ctx,&tx_class,&tx_owner,&tx_def)||
        !register_class(ctx,&modal_class,&modal_owner,&modal_def)||
@@ -786,16 +802,6 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     JS_SetClassProto(ctx,scene_class,object_proto);
     if(JS_SetPropertyFunctionList(ctx,ns,functions,
        (int)(sizeof(functions)/sizeof(functions[0])))<0) return ESP_ERR_NO_MEM;
-    JSValue cache=JS_NewObject(ctx);
-    if(JS_IsException(cache)) return ESP_ERR_NO_MEM;
-    /* QuickJS keeps these entries for lazy function materialization. */
-    static const JSCFunctionListEntry cache_functions[]={
-        JS_CFUNC_DEF("create",1,js_cache_create),JS_CFUNC_DEF("release",1,js_cache_release),
-    };
-    if(JS_SetPropertyFunctionList(ctx,cache,cache_functions,2)<0) {
-        JS_FreeValue(ctx,cache);return ESP_ERR_NO_MEM;
-    }
-    if(JS_SetPropertyStr(ctx,ns,"cache",cache)<0)return ESP_ERR_NO_MEM;
     if(pocket_grid_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_video_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
     if(pocket_pixel_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
@@ -812,6 +818,12 @@ static const pocket_limit_t kasane_limits[]={
     {.name="references",.kind=POCKET_LIMIT_INT,.number=KASANE_REF_LIMIT},
     {.name="cacheTemplates",.kind=POCKET_LIMIT_INT,.number=KSN_CACHE_TEMPLATES},
     {.name="cacheInstances",.kind=POCKET_LIMIT_INT,.number=KSN_CACHE_INSTANCES},
+    /* api-reorg.md sec.3.2: what features() also reported, each enforced --
+     * text bytes of a scene (ksn_core.h), animation tracks, the commands of
+     * one cache template (ksn_cache.h). */
+    {.name="textBytes",.kind=POCKET_LIMIT_INT,.number=KSN_APP_TEXT_BYTES},
+    {.name="animations",.kind=POCKET_LIMIT_INT,.number=KSN_APP_TRACKS},
+    {.name="cacheCommands",.kind=POCKET_LIMIT_INT,.number=KSN_CACHE_COMMANDS},
     {0},
 };
 static const pocket_capability_t capability={
@@ -879,6 +891,8 @@ JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *regi
 static bool dormant;
 
 bool pocket_kasane_reset(void) {
+    /* First, and whatever the detach below says: they are guest values. */
+    release_build_wrappers();
     dormant=false;
     const pocket_app_view_provider *provider=state?state->provider:NULL;
     void *provider_state=state?state->provider_state:NULL;
