@@ -50,7 +50,7 @@ endif()
 #   -DPOCKET_QJS_HOTCOLD_PAD=<bytes>   shift the hot code (measurement)
 # A device A/B through a builder that only takes the default Kconfig: a
 # `measure:` commit sets the next line to "use" (and reverts it afterwards).
-set(_qjs_hc "use")
+set(_qjs_hc "")
 set(_qjs_hc_pad 0)
 if(POCKET_QJS_HOTCOLD)
     set(_qjs_hc "${POCKET_QJS_HOTCOLD}")
