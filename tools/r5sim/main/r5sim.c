@@ -449,16 +449,43 @@ static int64_t r5_live(void){ JSMemoryUsage u; JS_ComputeMemoryUsage(rt,&u); ret
 // split of a turn: frame() (js, which includes the native calls it makes),
 // the Shiki draws inside it (shk: pocket_shiki_turn's total, the whole native
 // draw) and pocket_kasane_end_turn (end), with the Shiki draws a turn.
-typedef struct { const char *name; unsigned n; uint64_t cc, max, allocs, js, shk, end, draws; } r5_scene;
-static r5_scene r5_scenes[16];
+// pat: LINE_PATTERN calls (the crowd's rows) inside the turn's Shiki draws,
+// as SHIKI_TURN's pat= on the device. The panning units are also filed a
+// second time under wide1/wide2/wide3 (the oval's WIDE 2 is the heavy one).
+#include "ui/kasane/ksn_shiki_jit.h"
+#define R5_SCENES 24
+typedef struct { const char *name; unsigned n; uint64_t cc, max, allocs, js, shk, end, draws, pat;
+#ifdef R5SIM_DERBY_PROF
+    uint64_t pcy[12], pshk[12], pn[12], pdr[12];
+#endif
+} r5_scene;
+#ifdef R5SIM_DERBY_PROF
+extern uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12];
+extern pocket_shiki_turn derby_prof_carry;
+static uint32_t r5_pcy0[12],r5_pshk0[12],r5_pn0[12],r5_pdr0[12];
+extern uint32_t derby_ser_cy[9];
+static uint32_t r5_ser0[9];
+static uint64_t r5_ser_w2[9]; static unsigned r5_ser_w2n;
+#endif
+static r5_scene r5_scenes[R5_SCENES];
 static void r5_scene_add(const char *name,uint64_t cc,uint32_t allocs,uint64_t js,uint64_t shk,uint64_t end,
-                         uint32_t draws) {
+                         uint32_t draws,uint32_t pat) {
     unsigned i=0;
-    while(i<16&&r5_scenes[i].name&&strcmp(r5_scenes[i].name,name)) i++;
-    if(i==16) return;
+    while(i<R5_SCENES&&r5_scenes[i].name&&strcmp(r5_scenes[i].name,name)) i++;
+    if(i==R5_SCENES) return;
     r5_scene *s=&r5_scenes[i];
     s->name=name; s->n++; s->cc+=cc; s->allocs+=allocs; if(cc>s->max) s->max=cc;
-    s->js+=js; s->shk+=shk; s->end+=end; s->draws+=draws;
+    s->js+=js; s->shk+=shk; s->end+=end; s->draws+=draws; s->pat+=pat;
+#ifdef R5SIM_DERBY_PROF
+    for(unsigned k=0;k<12;k++){ s->pcy[k]+=derby_prof_cy[k]-r5_pcy0[k]; s->pshk[k]+=derby_prof_shk[k]-r5_pshk0[k];
+        s->pn[k]+=derby_prof_n[k]-r5_pn0[k]; s->pdr[k]+=derby_prof_draws[k]-r5_pdr0[k]; }
+#endif
+}
+static const char *derby_unit(void) {
+    if(!strcmp(derby_cam,"WIDE 1")) return "wide1";
+    if(!strcmp(derby_cam,"WIDE 2")) return "wide2";
+    if(!strcmp(derby_cam,"WIDE 3")) return "wide3";
+    return NULL;
 }
 #endif
 
@@ -618,6 +645,14 @@ void app_main(void) {
         const uint32_t m0=r5_mallocs();
         if(t==61){ r5_live60=r5_live(); r5_m61=m0; }
 #endif
+#ifdef R5SIM_APP_DERBY
+        const uint32_t pat0=ksn_shiki_curve_n[1];
+#ifdef R5SIM_DERBY_PROF
+        memcpy(r5_pcy0,derby_prof_cy,sizeof r5_pcy0); memcpy(r5_pshk0,derby_prof_shk,sizeof r5_pshk0);
+        memcpy(r5_pn0,derby_prof_n,sizeof r5_pn0); memcpy(r5_pdr0,derby_prof_draws,sizeof r5_pdr0);
+        memcpy(r5_ser0,derby_ser_cy,sizeof r5_ser0);
+#endif
+#endif
         const uint32_t cc0=esp_cpu_get_cycle_count();
 #ifdef R5SIM_DEVICE
 #ifdef R5SIM_LEVEL_UP
@@ -636,6 +671,10 @@ void app_main(void) {
 #ifdef R5SIM_APP_DERBY
         pocket_shiki_turn r5_shk;
         pocket_shiki_turn_take(&r5_shk);
+#ifdef R5SIM_DERBY_PROF
+        r5_shk.draws+=derby_prof_carry.draws; r5_shk.total_cy+=derby_prof_carry.total_cy;
+        r5_shk.engine_cy+=derby_prof_carry.engine_cy; derby_prof_carry=(pocket_shiki_turn){0};
+#endif
         const uint32_t cc_end0=esp_cpu_get_cycle_count();
 #endif
         pocket_kasane_end_turn();
@@ -651,7 +690,15 @@ void app_main(void) {
 #ifdef R5SIM_APP_DERBY
             // Every turn after the first 30 (the evaluation's garbage and
             // the first plans), filed under what it showed.
-            if(t>30) r5_scene_add(derby_class(),turn_cc,da,cc_js-cc0,r5_shk.total_cy,cc_end,r5_shk.draws);
+            if(t>30) {
+                const char *c=derby_class(),*u=derby_unit();
+                const uint32_t pat=ksn_shiki_curve_n[1]-pat0;
+                r5_scene_add(c,turn_cc,da,cc_js-cc0,r5_shk.total_cy,cc_end,r5_shk.draws,pat);
+                if(u&&!strcmp(c,"wide")) r5_scene_add(u,turn_cc,da,cc_js-cc0,r5_shk.total_cy,cc_end,r5_shk.draws,pat);
+#ifdef R5SIM_DERBY_PROF
+                if(u&&!strcmp(u,"wide2")){ r5_ser_w2n++; for(unsigned k=0;k<9;k++) r5_ser_w2[k]+=derby_ser_cy[k]-r5_ser0[k]; }
+#endif
+            }
 #else
             (void)turn_cc;
 #endif
@@ -776,14 +823,28 @@ void app_main(void) {
     }
 #endif
 #ifdef R5SIM_APP_DERBY
+#ifdef R5SIM_DERBY_PROF
+    if(r5_ser_w2n) printf("R5SIM serprof wide2 setup=%llu ou=%llu pose=%llu lim=%llu kloop=%llu drawin=%llu draw=%llu chords=%.2f drawn=%.2f\n",
+        r5_ser_w2[0]/r5_ser_w2n,r5_ser_w2[1]/r5_ser_w2n,r5_ser_w2[2]/r5_ser_w2n,r5_ser_w2[3]/r5_ser_w2n,r5_ser_w2[4]/r5_ser_w2n,
+        r5_ser_w2[5]/r5_ser_w2n,r5_ser_w2[6]/r5_ser_w2n,r5_ser_w2[7]/(double)r5_ser_w2n,r5_ser_w2[8]/(double)r5_ser_w2n);
+#endif
+#ifdef R5SIM_DERBY_PROF
+#endif
     printf("R5SIM derby demo starts=%u ends=%u last_turn=%u\n",derby_demo_starts,derby_demo_ends,r5_last);
-    for(unsigned i=0;i<16&&r5_scenes[i].name;i++) {
+    for(unsigned i=0;i<R5_SCENES&&r5_scenes[i].name;i++) {
         const r5_scene *sc=&r5_scenes[i];
         printf("R5SIM ccount scene=%s turns=%u per_turn=%llu max=%llu alloc_per_turn=%llu js=%llu shiki=%llu end=%llu "
-               "draws=%llu\n",sc->name,sc->n,
+               "draws=%llu pat=%llu\n",sc->name,sc->n,
                (unsigned long long)(sc->cc/sc->n),(unsigned long long)sc->max,(unsigned long long)(sc->allocs/sc->n),
                (unsigned long long)(sc->js/sc->n),(unsigned long long)(sc->shk/sc->n),(unsigned long long)(sc->end/sc->n),
-               (unsigned long long)(sc->draws/sc->n));
+               (unsigned long long)(sc->draws/sc->n),(unsigned long long)(sc->pat/sc->n));
+#ifdef R5SIM_DERBY_PROF
+        static const char *const pname[12]={"view","ser","side","aim","wide","part","lanes","head","runners","screen","course","-"};
+        for(unsigned k=0;k<11;k++) if(sc->pn[k])
+            printf("R5SIM prof scene=%s fn=%s calls=%.2f cy=%llu shiki=%llu draws=%.2f\n",sc->name,pname[k],
+                   sc->pn[k]/(double)sc->n,(unsigned long long)(sc->pcy[k]/sc->n),(unsigned long long)(sc->pshk[k]/sc->n),
+                   sc->pdr[k]/(double)sc->n);
+#endif
     }
 #endif
 #ifdef R5SIM_DEVICE

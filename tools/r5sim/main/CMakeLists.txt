@@ -138,6 +138,11 @@ foreach(_chunk IN LISTS R5SIM_CHUNK_FILES)
 endforeach()
 if(R5SIM_APP STREQUAL "derby")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_DERBY)
+    # -DR5SIM_DERBY_PROF=1: cycles a turn in each pocket.derby function (and
+    # the Shiki draws inside it), "R5SIM prof" lines per scene.
+    if(R5SIM_DERBY_PROF)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_DERBY_PROF)
+    endif()
 elseif(R5SIM_APP STREQUAL "hud")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_HUD)
 elseif(R5SIM_APP STREQUAL "shiki_v1")
