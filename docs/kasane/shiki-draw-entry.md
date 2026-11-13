@@ -170,3 +170,15 @@ DERBY_SERDRAW frames=<views> n=<rails+turf>/<hl>/<crowd> cy=…/…/… eng=…/
 - 実機の数は全部推定。r5sim はエンジンがインタプリタで、窓の例外と flash の待ちの重さが実機と違う。
 - 「1 カウント ≒ 6.54 命令」は api-reorg.md の STRESS での値の引用で、この区間で確かめていない。
 - `vraw` を `VEACH` まで初期化しないことで、`VEACH` の無い draw の後の vm の `vraw` は前の draw の値が残る。今のコードに、それを読む所は無い（`ksn_shiki_result` と cycle bench、コード）が、vm の全体を比べる道具を足すときはこの点に気をつける。
+
+## 実機の結果（`a59ed42`＝draw の入口の軽量化＋PIE の改善＋プローブ、broker の app_session、2026-11-13、実測）
+
+このレースは直線のコース（`chords` 5/フレーム）で、楕円の重い CAM WIDE 2 は出なかった。直線の CAM WIDE 3 の窓を、以前の像（`1954cdb`、同じプローブ）の同じ場面と比べた。値はパンするフレーム 1 枚あたり。
+
+| 項目 | `1954cdb` | `a59ed42` |
+| --- | ---: | ---: |
+| `draw_insn`（配置に依らない） | 43.5k〜44.2k | **39.6k〜41.6k（約 −7%）** |
+| `draw_cy` | 78.5k〜79.2k | 72.0k〜75.4k（約 −6%） |
+| `ser_cy` | 160.6k〜161.8k | 154k〜160k |
+
+`DERBY_SERDRAW`（同じ窓）: レール・芝 7 draw で `cy` 約 52k・`eng` 約 44k（入口の費用は約 8.5k、1 draw 約 1.2k）、`hl` 1 draw で約 2.1k、観客 1 draw で約 20.5k（`LINE_PATTERN` 9 回で約 18.6k）。draw の費用の大半はプランの側（レール・芝の Newton の段と `LINE_PATTERN`）で、入口の軽量化で取れるのは数 % に留まる。
