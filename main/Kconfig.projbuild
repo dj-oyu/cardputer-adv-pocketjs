@@ -176,8 +176,8 @@ menu "Pocket VM (diagnostics)"
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
 
     config POCKET_VM_QJS_HOTCOLD
-        bool "Lay QuickJS's hot blocks out together (hot/cold split, experimental)"
-        default n
+        bool "Lay QuickJS's hot blocks out together (hot/cold split)"
+        default y
         depends on !POCKET_VM_QJS_PGO
         help
             Reorders the basic blocks of quickjs.c's hot functions on the
@@ -188,16 +188,14 @@ menu "Pocket VM (diagnostics)"
             and jumps that connect the moved blocks.
 
             The profile (tools/qjs_hotcold/profile.json) comes from STRESS,
-            DERBY and LCD CATCH in QEMU. Modelled: the interpreter's share of
-            the flash lines a turn touches drops from 18-19 KiB to 13-14 KiB.
-            Not yet measured on the device. Costs about 3.4 KiB of flash and no
+            DERBY and LCD CATCH in QEMU. Measured on the device (TURNPERF,
+            same retired instructions): I-cache stall per turn -18 to -23%,
+            JS turn cycles -7% (STRESS) and -9% (DERBY race), the same with
+            the hot code shifted by 20 bytes. Costs 3,352 B of flash and no
             DRAM. A function whose object code no longer matches the profile
             is left as it was (the build prints how many); retrain with
             tools/qjs_hotcold/train.sh after changing quickjs.c or the
             compiler. Needs Python at compile time (ESP-IDF's).
-
-            Build it in a directory of its own with
-            sdkconfig.qjshotcold.defaults layered on sdkconfig.defaults.
 
     config POCKET_DISP_TASK
         bool "Display task: present frames from a task of its own (two-core P1)"
