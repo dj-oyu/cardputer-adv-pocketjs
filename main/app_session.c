@@ -1,3 +1,4 @@
+#define CONFIG_POCKET_VM_TURNPERF 1
 #include "derby_detail.h"
 #include "app_session.h"
 #include "board.h"
