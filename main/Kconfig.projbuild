@@ -403,6 +403,25 @@ menu "Pocket VM (diagnostics)"
 
             Regenerate the header after any change to the builtins.
 
+    config POCKET_SHIKI_DEBUG
+        bool "Shiki diagnostics: pocket.shikiDebug and the six test/bench apps"
+        default n
+        help
+            Builds main/pocket/pocket_shiki.c (pocket.shikiDebug, the test-only
+            surface of the Shiki engine) and main/ui/kasane/ksn_shiki_bench.c,
+            and embeds the six diagnostic apps that need them or the Shiki
+            self-check: apps/shikitest/{shiki_test,shiki_data_test,
+            shiki_api_test,cycle_bench,draw_cost}.js and apps/meshbench/
+            mesh_bench.js, with their app_registry rows and the host-launch
+            (native_apps) rows. None of them is on the home menu; the USB
+            broker starts them. The home menu does not change either way.
+
+            Off by default: the product image carries none of it (about 47 KB
+            of flash, estimate from the map of 4840504, docs/kasane/
+            api-reorg.md sec.3.6). Turn it on for the on-device differential
+            test, cycle/draw-cost probes and the mesh bench
+            (docs/kasane/shiki-spec.md sec.10, apps/shikitest/README.md).
+
     config POCKET_SHIKI_MEMSTAT
         bool "Count the native allocations of the line/grid surfaces (diagnostic)"
         default n

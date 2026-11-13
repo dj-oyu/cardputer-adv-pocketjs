@@ -103,7 +103,9 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
 #include "pocket_shiki.h"
+#endif
 #include "shiki_memstat.h"
 #include "shiki_heap.h"
 #include "pocket_shiki_api.h"
@@ -1918,8 +1920,10 @@ surfaces_done:
         TRY_NOJOIN("derby",pocket_derby_install);
     // pocket.shikiDebug, the Shiki engine for the on-device differential test
     // (apps/shikitest), the same way: only for kasane.shiki.debug.
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
     if(app_registry_wants(app_registry_current(),"kasane.shiki.debug"))
         TRY_NOJOIN("shiki-debug",pocket_shiki_debug_install);
+#endif
     // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
     // 'J' diagnostic, which runs MEGADEMO without a manifest).
     // docs/apps/megademo-shapes.md.

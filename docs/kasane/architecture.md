@@ -44,4 +44,4 @@ cache は明示的な不変 template（8件）と独立 instance（8件）を持
 
 ## コードと試験の入口
 
-`main/ui/kasane/ksn_core.c`, `ksn_schema.c`, `ksn_schema_session.c`, `ksn_presenter.c`, `ksn_view*`; `main/pocket/pocket_kasane.c`, `app_view_assets.h`, `app_music_view.c`; `main/system/`; `tools/kasane_contract/run.sh`。API の正確な名前・feature flag・バイト数は、これらとビルド済みターゲットの `sizeof` / map を優先する。
+`main/ui/kasane/ksn_core.c`, `ksn_schema.c`, `ksn_schema_session.c`, `ksn_view*`; `main/pocket/pocket_kasane.c`, `app_view_assets.h`, `app_music_view.c`, `app_legacy_presenter.c`（`ksn_presenter_*` の実装）; `main/system/`; `tools/kasane_contract/run.sh`。API の正確な名前・feature flag・バイト数は、これらとビルド済みターゲットの `sizeof` / map を優先する。
