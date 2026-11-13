@@ -18,8 +18,24 @@
  * EE.SRCMB.S16.QACC gives the same numbers. */
 #include <stdbool.h>
 #include <stdint.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+/* The integer path's per-frame functions in IRAM instead of flash: a
+ * measurement build only (CONFIG_POCKET_DERBY_SER_IRAM, default n, or
+ * POCKET_DERBY_SER_IRAM defined here; +6.5 KB of DIRAM taken from every
+ * app, docs/apps/derby-ser-division.md sec.12). */
+#if defined(CONFIG_POCKET_DERBY_SER_IRAM) && !defined(POCKET_DERBY_SER_IRAM)
+#define POCKET_DERBY_SER_IRAM 1
+#endif
+#if defined(POCKET_DERBY_SER_IRAM) && defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define DERBY_SER_HOT IRAM_ATTR
+#else
+#define DERBY_SER_HOT
+#endif
 
-#define DERBY_Q_ENDS 32u        /* chord ends at most (DERBY_ENDS_MAX) */
+#define DERBY_Q_ENDS 32u       /* chord ends at most (DERBY_ENDS_MAX) */
 #define DERBY_Q_SLOTS 8u        /* series tables held at once */
 
 /* ---- The PIE boundary: one lane per chord end, lanes rounded up to a

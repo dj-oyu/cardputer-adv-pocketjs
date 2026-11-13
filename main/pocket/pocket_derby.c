@@ -15,6 +15,15 @@
 // (docs/kasane/shiki.md sec.4.5); nothing otherwise.
 #define SHIKI_MS_FILE SHIKI_MS_DERBY
 #include "shiki_memstat.h"
+#ifdef POCKET_DERBY_SER_PROBE
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define PROBE_PRINT(...) ESP_LOGI("kasane",__VA_ARGS__)
+#else
+#include <stdio.h>
+#define PROBE_PRINT(...) (printf(__VA_ARGS__),putchar('\n'))
+#endif
+#endif
 
 /* DERBY WATCH's panning series (ser() in apps/derby/derby_pan.js as of vm/main
  * fac3552) translated to C, docs/apps/derby-ser-native.md. The JS is the
@@ -114,6 +123,58 @@ static struct {
     int64_t f,h,hy,x0,o,R,e;
     bool K,aimed;
 } cam;
+#ifdef POCKET_DERBY_SER_PROBE
+/* The series' path probe (CONFIG_POCKET_DERBY_SER_PROBE, default n; host:
+ * -DPOCKET_DERBY_SER_PROBE): which path view() and ser() took, why a call
+ * fell back to the doubles, and their cycles (pocket_cycles), the Shiki
+ * draws inside ser() apart. One DERBY_SER line a KASANE_PAINT window
+ * (pocket_derby_ser_probe_log). docs/apps/derby-ser-division.md sec.12. */
+enum {VFB_MODE,VFB_QOK,VFB_POS,VFB_F,VFB_ZF,VFB_N};
+enum {FB_L,FB_S,FB_GW,FB_PLAN,FB_STANDS,FB_MALLOC,FB_TABLE,FB_N};
+static struct {
+    uint32_t views[2],vfb[VFB_N],calls[2],fb[FB_N],tables;
+    uint32_t view_cy[2],ser_cy[2],draw_cy[2],draws[2],chords[2];
+    /* The core's counters (PM0 retired instructions, PM1 instruction-fetch
+     * stall cycles: the flash cache's misses show here), whole ser() and its
+     * draws, by path. */
+    uint32_t insn[2],ist[2],draw_insn[2],draw_ist[2];
+    uint32_t draw_acc,draw_n,draw_insn_acc,draw_ist_acc;
+    int path;                   /* this ser() call: 0 integers, 1 doubles */
+    bool in_ser;
+    uint8_t bad_q[8],bad_inputs;
+} serp;
+#ifdef ESP_PLATFORM
+/* Armed on first use, as app_session.c's TURNPERF arms them (so not in a
+ * build with CONFIG_POCKET_VM_TURNPERF; apptrace off): task level only. */
+#include "eri.h"
+#include "xtensa-debug-module.h"
+#include "xtensa/xt_perf_consts.h"
+static bool serp_pm_on;
+static inline void serp_pm(uint32_t *insn,uint32_t *ist){
+    if(!serp_pm_on){
+        const uint16_t sels[2]={XTPERF_CNT_INSN,XTPERF_CNT_I_STALL},masks[2]={XTPERF_MASK_INSN_ALL,XTPERF_MASK_I_STALL_ALL};
+        for(int id=0;id<2;id++){
+            eri_write(ERI_PERFMON_PM0+id*4,0);
+            eri_write(ERI_PERFMON_PMCTRL0+id*4,((uint32_t)(sels[id]&PMCTRL_SELECT_MASK)<<PMCTRL_SELECT_SHIFT)|
+                                               ((uint32_t)(masks[id]&PMCTRL_MASK_MASK)<<PMCTRL_MASK_SHIFT));
+        }
+        eri_write(ERI_PERFMON_PGM,PGM_PMEN);
+        serp_pm_on=true;
+    }
+    *insn=eri_read(ERI_PERFMON_PM0);*ist=eri_read(ERI_PERFMON_PM0+4);
+}
+#else
+static inline void serp_pm(uint32_t *insn,uint32_t *ist){*insn=*ist=0;}
+#endif
+#define SERP(x) do{x;}while(0)
+/* A draw inside ser(): its cycles and counts apart from the geometry's. */
+#define SERP_DRAW(call) ({uint32_t _i,_s;serp_pm(&_i,&_s);const uint32_t _t=pocket_cycles();JSValue _r=(call); \
+    if(serp.in_ser){uint32_t _i1,_s1;const uint32_t _t1=pocket_cycles();serp_pm(&_i1,&_s1); \
+        serp.draw_acc+=_t1-_t;serp.draw_n++;serp.draw_insn_acc+=_i1-_i;serp.draw_ist_acc+=_s1-_s;}_r;})
+#else
+#define SERP(x) do{}while(0)
+#define SERP_DRAW(call) (call)
+#endif
 
 /* ---- QuickJS's Math, as quickjs.c has it (js_math_round, js_fmin, js_fmax,
  * js_math_min_max): signed zeros and NaN behave as in the JS. */
@@ -269,7 +330,7 @@ static bool length_of(JSContext *ctx,JSValueConst array,uint32_t *out){
     return ok;
 }
 static JSValue draw(JSContext *ctx,uint32_t handle,const double in[8]){
-    return handle?pocket_proc_draw_numbers(ctx,handle,in,8):JS_UNDEFINED;
+    return handle?SERP_DRAW(pocket_proc_draw_numbers(ctx,handle,in,8)):JS_UNDEFINED;
 }
 
 static void free_course(derby_course *c){
@@ -369,7 +430,10 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
  * series' range (sec.4.4: the camera within +-6,000 m, f 32..4,095 px). */
 static bool cam_q(void){
     const double *pc=view.pc;
-    if(!(fabs(pc[0])<=6000&&fabs(pc[1])<=6000&&pc[4]>=32&&pc[4]<4095&&view.zf>0&&view.zf<20000))return false;
+    if(!(fabs(pc[0])<=6000&&fabs(pc[1])<=6000&&pc[4]>=32&&pc[4]<4095&&view.zf>0&&view.zf<20000)){
+        SERP(serp.vfb[!(fabs(pc[0])<=6000&&fabs(pc[1])<=6000)?VFB_POS:!(pc[4]>=32&&pc[4]<4095)?VFB_F:VFB_ZF]++);
+        return false;
+    }
     course->camq.ex=(int32_t)floor(pc[0]*65536+.5);course->camq.ez=(int32_t)floor(pc[1]*65536+.5);
     course->camq.dx=(int32_t)floor(pc[2]*1073741824.0+.5);course->camq.dz=(int32_t)floor(pc[3]*1073741824.0+.5);
     course->camq.cx=(int16_t)floor(pc[2]*16384+.5);course->camq.cz=(int16_t)floor(pc[3]*16384+.5);
@@ -422,6 +486,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     const double *pc=view.pc;
     course->in_view=0;
     view.q=false;
+    SERP(if(ser_mode)serp.vfb[VFB_MODE]++;else if(!course->qok)serp.vfb[VFB_QOK]++);
     if(!ser_mode&&course->qok&&cam_q()){
         /* The integer path: the ends rotated on the int16 lanes, the chords
          * in view as a keep-mask (no VE, VC). */
@@ -593,6 +658,7 @@ static bool plan_q(uint32_t h,const uint8_t q[8]){
     const ksn_shiki_plan *pl=pocket_proc_shiki_plan(h);
     if(!pl)return false;
     const bool ok=pl->inputs==8&&!memcmp(pl->input_q,q,8);
+    SERP(if(!ok){memcpy(serp.bad_q,pl->input_q,8);serp.bad_inputs=pl->inputs;});
     course->plan_ok[course->plan_ok_next].h=h;course->plan_ok[course->plan_ok_next].q=ok?q:NULL;
     course->plan_ok_next=(course->plan_ok_next+1u)%(sizeof course->plan_ok/sizeof course->plan_ok[0]);
     return ok;
@@ -605,26 +671,33 @@ static derby_chord_q *series_rows(int32_t w,int32_t s,int32_t g0){
         if(c->slot[i]&&c->key[i][0]==w&&c->key[i][1]==s&&c->key[i][2]==g0){c->used[i]=++c->clock;return c->slot[i];}
         if(!c->slot[i]||c->used[i]<c->used[at])at=i;
     }
-    if(!c->slot[at]&&!(c->slot[at]=malloc((c->ends-1u)*sizeof(derby_chord_q))))return NULL;
+    if(!c->slot[at]&&!(c->slot[at]=malloc((c->ends-1u)*sizeof(derby_chord_q)))){SERP(serp.fb[FB_MALLOC]++);return NULL;}
     c->used[at]=0;
-    if(!derby_ser_table(c->slot[at],c->qch,c->ends,w,s,g0,pose_of,c)){free(c->slot[at]);c->slot[at]=NULL;return NULL;}
+    SERP(serp.tables++);
+    if(!derby_ser_table(c->slot[at],c->qch,c->ends,w,s,g0,pose_of,c)){
+        SERP(serp.fb[FB_TABLE]++);
+        free(c->slot[at]);c->slot[at]=NULL;return NULL;
+    }
     c->key[at][0]=w;c->key[at][1]=s;c->key[at][2]=g0;c->used[at]=++c->clock;
     return c->slot[at];
 }
 typedef struct {JSContext *ctx;const derby_course *c;} ser_emit;
 static int emit_q(void *user,uint32_t h,const int32_t in[8]){
     const ser_emit *e=user;
-    if(JS_IsException(pocket_proc_draw_fixed(e->ctx,h,in,8,0)))return 1;
+    if(JS_IsException(SERP_DRAW(pocket_proc_draw_fixed(e->ctx,h,in,8,0))))return 1;
     return course!=e->c?2:0;
 }
 /* The integer call, or -1 when it is out of the integers' range (the caller
  * draws it with doubles): L >= 1, s 0.25..32 m, |g0| <= 10,000 m, |w| <= 125
  * m, the plans in the expected Q formats, a table. 1: an exception. */
 static int ser_q(JSContext *ctx,uint32_t h,bool turf,int32_t w,int32_t s,int32_t g0,int32_t L,int32_t a,int32_t b){
-    if(L<1||s<Q16/4||s>32*Q16||g0<-10000*Q16||g0>10000*Q16||w<-125*Q16||w>125*Q16)return -1;
+    if(L<1||s<Q16/4||s>32*Q16||g0<-10000*Q16||g0>10000*Q16||w<-125*Q16||w>125*Q16){
+        SERP(serp.fb[L<1?FB_L:s<Q16/4||s>32*Q16?FB_S:FB_GW]++);
+        return -1;
+    }
     const bool stands=!turf&&b<0;
-    if(!plan_q(h,turf?derby_q_pt:derby_q_prail)||
-       (stands&&(!plan_q(view.hl,derby_q_hl)||!plan_q(view.crowd,derby_q_crowd))))return -1;
+    if(!plan_q(h,turf?derby_q_pt:derby_q_prail)){SERP(serp.fb[FB_PLAN]++);return -1;}
+    if(stands&&(!plan_q(view.hl,derby_q_hl)||!plan_q(view.crowd,derby_q_crowd))){SERP(serp.fb[FB_STANDS]++);return -1;}
     const derby_chord_q *rows=series_rows(w,s,g0);
     if(!rows)return -1;
     SP(0);
@@ -639,6 +712,7 @@ static int ser_q(JSContext *ctx,uint32_t h,bool turf,int32_t w,int32_t s,int32_t
 #else
     derby_ser_stats stats={0},*const st=&stats;    /* nothing reads them on the device */
 #endif
+    SERP(serp.chords[0]+=(uint32_t)__builtin_popcount(keep));
     for(uint32_t m=keep;m;m&=m-1u){
         const int rc=derby_ser_chord_q(&course->camq,&p,&rows[__builtin_ctz(m)],(unsigned)__builtin_ctz(m),emit_q,&e,st);
         if(rc==1)return 1;
@@ -670,6 +744,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         if(rc==1)return JS_EXCEPTION;
         if(!rc)return JS_UNDEFINED;
     }
+    SERP(serp.path=1);
     /* zp: lim()'s far bound zf/f, the same division hoisted out of the
      * chords (sec.4 B; bit-identical). */
     const double *pc=view.pc,zf=view.zf,zp=zf/pc[4];
@@ -682,6 +757,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
          * the integer culling's chords (it keeps every chord ou() keeps). */
         const uint32_t keep=ve?course->qvc&keep_mask(wi,si):course->qvc;
         SP(1);
+        SERP(serp.chords[1]+=(uint32_t)__builtin_popcount(keep));
         for(uint32_t m=keep;m;m&=m-1u){
             const int rc=ser_chord(ctx,(unsigned)__builtin_ctz(m),h,turf,w,s,g0,L,a,b,zp,&cy,&r);
             if(rc==1)return r;
@@ -693,6 +769,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         const unsigned j=course->vc[i];
         if(ve&&ou(j,w,s,zf)){SP(1);continue;}
         SP(1);
+        SERP(serp.chords[1]++);
         const int rc=ser_chord(ctx,j,h,turf,w,s,g0,L,a,b,zp,&cy,&r);
         if(rc==1)return r;
         if(rc)break;
@@ -1050,6 +1127,59 @@ static JSValue js_screen(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return JS_NewInt32(ctx,1);
 }
 
+#ifdef POCKET_DERBY_SER_PROBE
+/* view() and ser() timed whole (the probe above). ser()'s path is the one
+ * its body marked (serp.path: set to 1 where it goes to the doubles). */
+static JSValue js_view_serp(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const uint32_t t=pocket_cycles();
+    const JSValue r=js_view(ctx,self,argc,argv);
+    const int k=view.q?0:1;
+    serp.view_cy[k]+=pocket_cycles()-t;serp.views[k]++;
+    return r;
+}
+static JSValue js_ser_serp(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    serp.path=0;serp.draw_acc=serp.draw_n=serp.draw_insn_acc=serp.draw_ist_acc=0;serp.in_ser=true;
+    uint32_t i0,s0,i1,s1;
+    serp_pm(&i0,&s0);
+    const uint32_t t=pocket_cycles();
+    const JSValue r=js_ser(ctx,self,argc,argv);
+    const uint32_t dt=pocket_cycles()-t;
+    serp_pm(&i1,&s1);
+    serp.in_ser=false;
+    const int k=view.q?serp.path:1;
+    serp.calls[k]++;serp.ser_cy[k]+=dt;serp.draw_cy[k]+=serp.draw_acc;serp.draws[k]+=serp.draw_n;
+    serp.insn[k]+=i1-i0;serp.ist[k]+=s1-s0;serp.draw_insn[k]+=serp.draw_insn_acc;serp.draw_ist[k]+=serp.draw_ist_acc;
+    return r;
+}
+#define js_view js_view_serp
+#define js_ser js_ser_serp
+void pocket_derby_ser_probe_log(unsigned frames){
+    if(serp.views[0]+serp.views[1]+serp.calls[0]+serp.calls[1]){
+        /* Per panning frame (a view()), not per tick: a frame() the turn
+         * budget parks runs on in a continuation tick (frames= counts ticks). */
+        const unsigned v=serp.views[0]+serp.views[1],f=v?v:1u;
+        PROBE_PRINT("DERBY_SER mode=%s ticks=%u views=%u/%u vfb=mode:%u,qok:%u,pos:%u,f:%u,zf:%u int=%u dbl=%u "
+                    "fb=L:%u,s:%u,gw:%u,plan:%u,stands:%u,malloc:%u,table:%u tables=%u "
+                    "int_cy=%u int_draw=%u dbl_cy=%u dbl_draw=%u view_cy=%u/%u draws=%u/%u chords=%u/%u "
+                    "int_insn=%u/%u int_ist=%u/%u dbl_insn=%u/%u dbl_ist=%u/%u "
+                    "badq=%u:%02x%02x%02x%02x%02x%02x%02x%02x",
+                    ser_mode?"DOUBLE":"INT",frames,(unsigned)serp.views[0],(unsigned)serp.views[1],
+                    (unsigned)serp.vfb[VFB_MODE],(unsigned)serp.vfb[VFB_QOK],(unsigned)serp.vfb[VFB_POS],
+                    (unsigned)serp.vfb[VFB_F],(unsigned)serp.vfb[VFB_ZF],(unsigned)serp.calls[0],(unsigned)serp.calls[1],
+                    (unsigned)serp.fb[FB_L],(unsigned)serp.fb[FB_S],(unsigned)serp.fb[FB_GW],(unsigned)serp.fb[FB_PLAN],
+                    (unsigned)serp.fb[FB_STANDS],(unsigned)serp.fb[FB_MALLOC],(unsigned)serp.fb[FB_TABLE],(unsigned)serp.tables,
+                    (unsigned)(serp.ser_cy[0]/f),(unsigned)(serp.draw_cy[0]/f),(unsigned)(serp.ser_cy[1]/f),
+                    (unsigned)(serp.draw_cy[1]/f),(unsigned)(serp.view_cy[0]/f),(unsigned)(serp.view_cy[1]/f),
+                    (unsigned)serp.draws[0],(unsigned)serp.draws[1],(unsigned)serp.chords[0],(unsigned)serp.chords[1],
+                    (unsigned)(serp.insn[0]/f),(unsigned)(serp.draw_insn[0]/f),(unsigned)(serp.ist[0]/f),
+                    (unsigned)(serp.draw_ist[0]/f),(unsigned)(serp.insn[1]/f),(unsigned)(serp.draw_insn[1]/f),
+                    (unsigned)(serp.ist[1]/f),(unsigned)(serp.draw_ist[1]/f),
+                    (unsigned)serp.bad_inputs,serp.bad_q[0],serp.bad_q[1],serp.bad_q[2],serp.bad_q[3],serp.bad_q[4],
+                    serp.bad_q[5],serp.bad_q[6],serp.bad_q[7]);
+    }
+    memset(&serp,0,sizeof serp);
+}
+#endif
 #ifdef R5SIM_DERBY_PROF
 /* r5sim only (tools/r5sim, -DR5SIM_DERBY_PROF=1): cycles in each native
  * function and the Shiki draws' cycles inside it; the turn's Shiki carry
@@ -1123,4 +1253,12 @@ void pocket_derby_reset(void){
 #endif
     memset(&view,0,sizeof view);
     memset(&cam,0,sizeof cam);
+    /* The path back to its default: the next session's JS starts its A/B
+     * flag at the integers (derby_view.js AB = 0), and a mode(1) left by
+     * this one would run it on the doubles under the INT label. */
+#ifdef POCKET_DERBY_SER_DOUBLE
+    ser_mode=1;
+#else
+    ser_mode=0;
+#endif
 }

@@ -1,6 +1,6 @@
 # DERBY WATCH: `ser()` の除算と倍精度をやめる設計（固定小数、PIE の扱い）
 
-2026-11-13、設計（SLOW）。**同日、S0・S1 と S2 の `view()` を実装した（§10、STEADY）: r5sim の重い WIDE 2 は 229,120 → 145,550 カウント/ターン（−36.5%、実測）、実機は未測定。**[derby-ser-cost.md](derby-ser-cost.md) の続きで、重い CAM WIDE 2 の `pocket.derby.ser()`（`main/pocket/pocket_derby.c`）の倍精度の計算（r5sim で 1 ターン約 76k カウント、実機換算の推定で約 3.7 ms）を減らす方法を比べ、推奨と段階を決める。
+2026-11-13、設計（SLOW）。**同日、S0・S1 と S2 の `view()` を実装した（§10、STEADY）: r5sim の重い WIDE 2 は 229,120 → 145,550 カウント/ターン（−36.5%、実測）、実機は未測定。** **§12: 実機で差が見えなかった件の診断（直線のコースでは r5sim −9.0%、計装 `DERBY_SER`）。**[derby-ser-cost.md](derby-ser-cost.md) の続きで、重い CAM WIDE 2 の `pocket.derby.ser()`（`main/pocket/pocket_derby.c`）の倍精度の計算（r5sim で 1 ターン約 76k カウント、実機換算の推定で約 3.7 ms）を減らす方法を比べ、推奨と段階を決める。
 
 利用者の方針（2026-11-13）: 有望さは (c) 固定小数・整数 ＞ (b) float32 ＞ (d) 構造の変更 ＞ (a) ビット一致のまま。**精度にはこだわらない**（画素と oracle のビット一致は必須ではない）。(c) で作れるなら PIE も一緒に考える。PIE の実証は実機で行い、asm を書くときは esp32s3-hw MCP を使う。
 
@@ -523,3 +523,95 @@ SERPIE ok=3072 mismatch=0 scalar_cy=8967 pie_cy=1908 rot_mismatch=0 unsafe=0 cas
 - 軽い場面では差が見えない（r5sim の見込みは wide1 で −14%）。重い CAM WIDE 2 は未測定。
 - 2 本ともレースを FINISH・写真判定まで走り、OOM・FRAMEFAIL なし。
 - 原因（整数の経路が実機で使われていない／flash の命令キャッシュの待ちで相殺）を調べている（§12 の予定）。
+
+## 12. 実機で整数と倍精度の差が見えない件の診断（2026-11-13、STEADY）
+
+ブランチ `ser-int-diag`（`8bff275` から）。**host と r5sim の数字は実測、実機の数字はこの節にはまだ無い**（§12.6 の手順で取る）。ms への換算は全部推定。
+
+### 12.1 問い
+
+実機（`8bff275`、同一バイナリ、`up` で `DERBY AB INT` ↔ `DOUBLE`、`KASANE_PAINT turn_ms` の 30 フレーム平均）で、軽い CAM WIDE 2（draws 27〜29、`pat=9`）が INT 7.30〜7.46 ms・DOUBLE 7.24〜7.43 ms と差が無かった。VISION（33 draws）・CLOSE（20 draws）は横のカメラで `ser()` を呼ばないので、差が無いのは当然（r5sim でも ±0.1%）。問いは WIDE 2 だけ。
+
+### 12.2 整数の経路は host で必ず通っているか（実測）
+
+計装（§12.5 の `DERBY_SER`）を host の harness にも入れ（`KSN_HOST_CFLAGS=-DPOCKET_DERBY_SER_PROBE`、30 ターンに 1 行）、`run_derby.py --m32` の 16 構成を回した。
+
+- `view()` 14,385 回が全部整数（`mode`・`course`・カメラの位置・`f`・`zf` の理由 0）。`ser()` 71,925 回が全部整数、倍精度への戻り 0（`L`・`s`・`w`/`g0`・plan の Q 形式・スタンドの plan・表の malloc・表の範囲、全部 0）。系列の表を作った回数 160。16 構成 PASS。
+- plan の Q 形式の確認（`plan_q()`）がファームで外れる可能性: ファームの組み込みの表（`build/generated/ksn_shiki_rom.c`）の見出しを読むと、`derby.prail` `16,16,24,24,0,16,0,16`、`derby.pt` `16,16,24,24,0,16,16,24`、`derby.hl` `16×6,0,0`、`derby.crowd` `16×8` で、`derby_q_*` と一致する（実測）。host と r5sim と実機は同じ `ksn_shiki_register()` を通る。
+- **host で整数の経路を外す理由は見つからなかった。** 実機だけで外れうるのは、native heap が尽きたときの系列の表の `malloc`（直線は表 1 つ 32 B、楕円は 576 B）くらいで、計装の `fb=…malloc:` で分かる。
+
+### 12.3 実機の場面は直線のコース（r5sim、実測）
+
+レースの種はブートごとに違う（`derby_watch.js` の `OV` で直線か楕円）。§11.5 の r5sim は楕円のレース。直線のレースは、`OV[0]` を 0 にした一時の写しで r5sim を回した（`R5SIM_ICOUNT=shift=2,sleep=off`、`-DR5SIM_DERBY_PROF=0`、カウント/ターン）。
+
+| 場面 | 楕円 整数 | 楕円 倍精度 | 差 | 直線 整数 | 直線 倍精度 | 差 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| wide1 | 129,235 | 150,339 | −14.0% | 121,394 | 133,939 | −9.4% |
+| wide2 | 145,372（draws 46・`pat` 37） | 228,896 | −36.5% | **128,290（draws 28・`pat` 9）** | **140,925** | **−12,635（−9.0%）** |
+| wide3 | 139,937 | 189,821 | −26.3% | 126,878 | 139,502 | −9.0% |
+| field | 106,634 | 106,726 | −0.1% | 103,505 | 103,540 | 0.0% |
+| close | 92,245 | 92,343 | −0.1% | 88,258 | 88,289 | 0.0% |
+| vision | 116,029 | 116,136 | −0.1% | 112,893 | 112,927 | 0.0% |
+| 全体（61..1773） | 105,173 | 131,331 | −19.9% | 93,791 | 96,551 | −2.9% |
+
+- 楕円の整数の行は §11.5 と同じ数（wide2 145,372）で、この節の変更（§12.5）で r5sim は動いていない。着順と時計は各コースの中で 4 つの像とも同じ。
+- **実機の「軽い WIDE 2」（draws 27〜29・`pat=9`）は直線の WIDE 2（28・9）と同じ形。** 直線では弦が 1 本しかなく（`sections = 0`）、`ser()` は 1 フレーム 5 回 × 弦 1 本。楕円の重い WIDE 2（弦 28 本前後、draws 46）とは別物で、§11.5 の −36% はこの場面には当てはまらない。（楕円の wide1 も 25・9 で形が近いので、どちらのコースだったかは実機の `DERBY_SER` の `chords=` で確かめる: 直線は 1 フレーム 5、楕円は 18 以上。）
+- 計測用の像（`-DR5SIM_DERBY_PROF=1`）の直線 wide2: `ser` の計 38,529 → 25,592（うち Shiki 24,523 → 23,230）、`serprof` の幾何（入口・`pose`・`lim`・LOD・draw の入力）13.1k → 2.1k。
+- **それでも直線 wide2 で −12.6k カウント。** 実機の比（直線の倍精度 140.9k ↔ 実機 7.3 ms、1k ≈ 0.052 ms、推定）なら約 −0.65 ms で、実機の窓の揺れ（±0.1 ms）より大きい。**実機の 0 とは食い違う。原因はまだ分からない**（§12.4 の候補）。
+
+### 12.4 費用の模型と候補（推定）
+
+- **倍精度の算術はほぼ ROM。** `__divdf3`・`__muldf3`・`__adddf3`・`__subdf3`・`__divdi3`・`__udivdi3` は 0x4000xxxx（ESP32-S3 の内蔵 ROM、`nm` で確認）で、flash のキャッシュを通らない。整数の経路の 64 ビットの除算も ROM の `__divdi3`。
+- **flash に載るコードの量は両方の経路で同じくらい**（-O2、`nm -S`、実測）: 倍精度は `js_ser` 1,836 B ＋ `ser_chord` 4,419 B ＋ `pose` 559 B ＋ `lim` 327 B ＋ libm の `floor`・`ceil`・`sqrt`（約 0.8 KB）＋ draw ごとの `ksn_shiki_from_double` 494 B。整数は `js_ser` ＋ `derby_ser_chord_q` 5,389 B ＋ `emit_q`・`plan_q`・`series_rows`（直線では `keep_mask` と回転・除外は走らない）。命令キャッシュは 32 KB・8 way・32 B の行（sdkconfig）、QIO のミス 1 回は約 450 サイクル（docs/vm/turn-icache.md §1.1.1、推定）。1 フレームの中で `ser()` の間に JS と Shiki が走るので、5 回の呼び出しのたびに冷えている（推定）としても、冷えたミスは両方の経路に同じくらいかかる。**命令キャッシュだけで 0.6 ms の差が消えるとは考えにくい（推定）。**
+- `derby_ser_int.c` を -Os にすると `derby_ser_chord_q` は 3,771 B（＋`inrq` 175 B 等。-O2 は 5,389 B、実測）。行の数は約 3 割減るが、上の理由で決め手にはならない見込み（推定）。
+- IRAM に置く（`CONFIG_POCKET_DERBY_SER_IRAM`、§12.5）と **DIRAM +6,552 B**（172,776 → 179,328、`idf.py size` 相当、実測）。全アプリのヒープから引かれる（CLAUDE.md）ので製品には入れない。測定の像で「flash の待ちの分」を分けるためだけに使う。
+- **`turn_ms` の分母はフレームではなく tick。** `turn_ms = turn_sum/ticks` で、ターンの予算（`VM_TURN_BUDGET_US` 8 ms、L2c）で `frame()` が途中で止まると、続きのターン（continuation）も 1 tick として数える（`main/app_session.c`）。7.3 ms は予算の 8 ms に近く、倍精度の側だけ予算を越えて続きに分かれるフレームがあると、その窓の `turn_ms` は 1 フレームの JS の時間より小さく出る（推定。窓の中で何回分かれたかは今のログに無い）。計装は `ser()` の時間を view() 1 回（1 フレーム）あたりで出すので、この影響を受けない。
+- 候補の順（推定）: (1) `turn_ms` の分母（続きのターン）か窓の場面の混ざりで、差が見えなかった。(2) 実機だけで整数の経路を外れている（native heap の `malloc` 失敗など）。(3) 実機で整数の経路のほうが命令あたり遅い（flash の待ち・`mull`/`muluh`・除算）。(1)〜(3) は全部 `DERBY_SER` の 1 行で切り分けられる。
+
+### 12.5 入れたもの
+
+- **`CONFIG_POCKET_DERBY_SER_PROBE`（既定 n）**: `main/pocket/pocket_derby.c` に計数と時間。既定の像では何も入らない（`SERP()`・`SERP_DRAW()` は空、関数表も前のまま。既定の像は Flash Code +4 B（下の直しの分）、DIRAM 0、実測）。ON の像は `KASANE_PAINT` の行の直後に 1 行:
+
+  ```
+  DERBY_SER mode=INT ticks=30 views=30/0 vfb=mode:0,qok:0,pos:0,f:0,zf:0 int=150 dbl=0
+    fb=L:0,s:0,gw:0,plan:0,stands:0,malloc:0,table:0 tables=0
+    int_cy=… int_draw=… dbl_cy=… dbl_draw=… view_cy=…/… draws=…/… chords=…/…
+    int_insn=…/… int_ist=…/… dbl_insn=…/… dbl_ist=…/… badq=0:0000000000000000
+  ```
+
+  - `views=整数/倍精度`: その窓の `view()` の回数（パンのフレーム数）。`vfb`: `view()` が倍精度になった理由（`mode(1)`、コースが範囲外、カメラの位置・`f`・`zf`）。
+  - `int=`・`dbl=`: `ser()` の呼び出しの数（経路別）。`fb`: 整数の `view()` の中で倍精度に戻った `ser()` の理由。`tables`: 作った系列の表。`badq`: Q 形式が合わなかった plan の入力数と Q 形式。
+  - `int_cy`・`dbl_cy`: `ser()` 全体のサイクル（`esp_cpu_get_cycle_count`）、**パンの 1 フレームあたり**。`int_draw`・`dbl_draw`: そのうち Shiki の draw の分（幾何は差）。`view_cy`: `view()` のサイクル（整数/倍精度）。`draws`・`chords`: 窓の合計。
+  - `int_insn=全体/draw`・`int_ist=全体/draw`（`dbl_` も）: コアの性能カウンタ（PM0 = 完了した命令、PM1 = 命令フェッチの停止サイクル。flash のキャッシュのミスはここに出る）、1 フレームあたり。`CONFIG_POCKET_VM_TURNPERF` と同じカウンタを使うので一緒に入れない。
+  - host でも `-DPOCKET_DERBY_SER_PROBE` で同じ行（サイクルは 0）。
+- **`CONFIG_POCKET_DERBY_SER_IRAM`（既定 n）**: `derby_ser_int.c` の毎フレームの関数（`derby_ser_chord_q`、`derby_ser_prepare`・`rotate_ref`・`cull_ref`・`cull_params`、`isqrt`・`plane`・`inrq`）を `IRAM_ATTR` に。測定の像だけ。
+- **直し: `pocket_derby_reset()` が `ser_mode` を戻していなかった。** あるセッションで `up` を奇数回押して終わると、次の DERBY は JS の `AB = 0`（INT のつもり）のまま倍精度で走り、最初の `up` まで印と中身が逆になる。`reset()` で既定（整数）に戻すようにした。
+
+### 12.6 実機の手順（親が broker で）
+
+broker は既定の Kconfig でしか組めないので、一時の `measure:` コミットでマクロを直接立てる（`sdkconfig` が残っていても効く）。
+
+1. **像 M1（計装）**: `main/pocket/pocket_derby.h` の `#ifdef ESP_PLATFORM` の直前に `#define POCKET_DERBY_SER_PROBE 1` を 1 行足したコミット（`measure: DERBY_SER probe`）。`main/Kconfig.projbuild` の `POCKET_DERBY_SER_PROBE` の `default n` を `y` にしても同じだが、ビルドディレクトリの `sdkconfig` に `# … is not set` が残っていると効かない。
+2. broker の `app_session` で DERBY を開き、デモのレースを待つ。レースの間 `KASANE_PAINT` の直後に `DERBY_SER` が出る（パンの無い窓では出ない）。
+3. WIDE 1/2/3 の間に `up` を押して `DERBY AB DOUBLE`、もう 1 回で `INT`。切り替えた直後の 1 窓は捨てる（`views=` が両方 0 でない窓）。
+4. 読む値:
+   - INT の窓で `views=N/0`・`int=5N`・`dbl=0`・`fb` が全部 0 なら、整数の経路は通っている。そうでなければ `fb`/`vfb`/`badq` が理由。
+   - `chords=` が 1 フレーム 5（直線）か 18 以上（楕円）か。
+   - 幾何のサイクル `int_cy − int_draw` と `dbl_cy − dbl_draw`（1 フレーム）。r5sim の見込み（直線、推定）は整数が倍精度より約 0.5 ms（約 12 万サイクル）少ない。
+   - `int_ist − int_ist(draw)` と `dbl_ist − dbl_ist(draw)`: 幾何の命令フェッチの停止。`int_insn` が `dbl_insn` より大きく減っているのに `cy` が減っていなければ、停止の分が食っている。
+   - `ticks` が `views` より多い窓は、フレームが予算で続きに分かれている（`turn_ms` の分母が増える）。
+5. **像 M2（IRAM、M1 で幾何のサイクルが減っていなかったときだけ）**: M1 に加えて `main/pocket/derby_ser_int.h` の先頭（`#include` より前）に `#define POCKET_DERBY_SER_IRAM 1`。同じ手順で、整数の幾何のサイクルと `int_ist` を M1 と比べる（像が違うので配置の揺れ ±15% がある。比べるのは同じ像の中の倍精度との差）。
+6. 終わったら通常の像に戻す。
+
+### 12.7 確信の低い点
+
+- 実機の場面が直線だったという読みは draws と `pat` の形だけによる（楕円の wide1 も 25・9）。`chords=` で確かめる。
+- ms への換算（1k ≈ 0.049〜0.052 ms）は r5sim の比で、flash の待ちを数えていない。
+- host の `--m32` の計装の像は既定の像と別のバイナリ（`-DPOCKET_DERBY_SER_PROBE`）。計数は経路の判定だけで、描画の結果は変えない（16 構成 PASS）。
+
+### 12.8 次の段（利用者の方針、2026-11-13: 倍精度の `ser()` は残さない。まだ実装していない）
+
+最終の形は「整数の `ser()` ＋ PIE の回転と除外の核（§10、実機の自己検査で核は 4.7 倍・不一致 0）」。§12.6 の M1 は倍精度を同じバイナリの参照に使うので、**M1 を測ってから**次の 2 段に進む。
+
+1. **PIE を `view()`・`ser()` につなぐ（`up` は PIE ↔ スカラーの整数）。** `course()` で `dsp_set_course()`（法線は `qt30` の (−tz, tx)）、`view()` で `dsp_set_camera()`（`qpos`、`camq` の `ex`・`ez`・`dx`・`dz`）と `dsp_rotate_pie()` を 1 回、`ser()` ごとに `dsp_cull_consts()`＋`dsp_cull_pie()`、`valid` の外（±2,047 m を越える端）の弦は今の `derby_ser_cull_wide()`。スカラーの側は今の `derby_ser_rotate_ref()`・`derby_ser_cull_ref()`。PIE の除外の余白（m + 1 m）は整数の参照（m + 3 m）と違うので、残る弦の集合は違ってよいが、どちらも倍精度の `ou()` の安全側で、余分な弦は `lim()` で落ちる（host の画素ハッシュで確かめる）。`CONFIG_POCKET_DERBY_SER_PIE` は既定 y にし、host は `DERBY_SERPIE_HOST` の参照で回す。計装（§12.5）の `path` は「PIE / スカラー」に読み替える。
+2. **倍精度の `ser()` を消し、範囲の戻り道を丸めに替える。** `L = 0` → 1、`s` → 0.25〜32 m に丸める、カメラの位置 ±6,000 m・`f` 32〜4,095 px・`zf` を範囲に丸める（アプリの範囲の中では何も変わらない。fuzz の範囲外の入力は絵が変わってよい）。`ser_chord()`・`ou()`・`VE`・`VC`・`mode()` の 1 を消す。host の `DERBY_SER_ORACLE` の倍精度のビット一致と `--ser-double` は、JS の oracle との許容差の照合（§11.4）だけを残す。flash −約 5 KB（§11.8）。

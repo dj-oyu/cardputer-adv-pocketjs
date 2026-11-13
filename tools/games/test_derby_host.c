@@ -863,6 +863,11 @@ static void frame(unsigned buttons){
     {size_t g=heap_used();for(unsigned i=0;i<5;i++)if(!strcmp(scene,CHURN_SCENE[i]))churn[i].gc+=h>g?h-g:0;}
     h=heap_used();if(h>heap_live_peak)heap_live_peak=h;
     tick++;scene_t++;
+#ifdef POCKET_DERBY_SER_PROBE
+    /* The device's DERBY_SER line, every 30 turns (KSN_HOST_CFLAGS=
+     * -DPOCKET_DERBY_SER_PROBE; the host's cycles read 0). */
+    if(!(tick%30u)){printf("[tick %u %s] ",tick,scene);pocket_derby_ser_probe_log(30);putchar('\n');}
+#endif
 }
 static void tap(const char *k){edge(k,true);frame(0);edge(k,false);frame(0);}
 static void run_until(const char *s,unsigned limit){

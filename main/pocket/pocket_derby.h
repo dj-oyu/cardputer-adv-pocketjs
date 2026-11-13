@@ -21,6 +21,20 @@ void pocket_derby_reset(void);
  * which must stay 0). The firmware keeps none (no .bss). */
 void pocket_derby_ser_stats(derby_ser_stats *out);
 #endif
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(CONFIG_POCKET_DERBY_SER_PROBE) && !defined(POCKET_DERBY_SER_PROBE)
+#define POCKET_DERBY_SER_PROBE 1
+#endif
+#ifdef POCKET_DERBY_SER_PROBE
+/* Measurement builds only (CONFIG_POCKET_DERBY_SER_PROBE): logs the series'
+ * path counts and cycles since the last call as one DERBY_SER line (nothing
+ * when DERBY drew no series), cycles per panning frame (view() call), ticks
+ * (the window's host turns) as given, and starts again. Also enabled by
+ * defining POCKET_DERBY_SER_PROBE above this point (a measurement commit). */
+void pocket_derby_ser_probe_log(unsigned ticks);
+#endif
 #if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
 typedef struct {
     uint32_t course_replacements,cache_bytes,registration_poses,view_poses;
