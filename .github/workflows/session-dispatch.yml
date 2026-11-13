@@ -7,6 +7,14 @@ on:
       - 'main/hal/board.h'
       - 'tools/test_session_dispatch.c'
       - 'tools/test_session_dispatch.py'
+      - 'tools/test_session_query_headers.py'
+      - 'main/hal/sound*.h'
+      - 'main/hal/ima_adpcm.h'
+      - 'main/pocket/pocket_pixel.h'
+      - 'main/pocket/pocket_grid.h'
+      - 'main/pocket/pocket_video.h'
+      - 'main/ui/kasane/*.h'
+      - 'components/quickjs-ng/quickjs-ng/*.h'
       - '.github/workflows/session-dispatch.yml'
 permissions:
   contents: read
@@ -25,3 +33,5 @@ jobs:
           persist-credentials: false
       - name: Actual session functions with synthetic ports, sanitizers and optimized build
         run: python3 tools/test_session_dispatch.py
+      - name: Session query declarations across display configurations
+        run: python3 tools/test_session_query_headers.py
