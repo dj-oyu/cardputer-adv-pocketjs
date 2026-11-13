@@ -37,6 +37,48 @@ if(CONFIG_POCKET_GC_STATS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_GC_STATS=1)
 endif()
 
+# Experimental hot/cold layout of quickjs.c (docs/vm/qjs-hotcold.md).
+# main/Kconfig.projbuild POCKET_VM_QJS_HOTCOLD (default n) lays the basic
+# blocks of its hot functions out by tools/qjs_hotcold/profile.json. Not a
+# line of QuickJS changes: tools/qjs_hotcold/hc_cc.py stands in front of the
+# compiler for this component, and for quickjs.c alone compiles to assembly,
+# moves the blocks (hc_asm.py, which also verifies the result against GCC's
+# output), and assembles that.
+#   -DPOCKET_QJS_HOTCOLD=use|gen   the same without the Kconfig (tools/r5sim
+#       has none); `gen` only adds a symbol per block, for training
+#   -DPOCKET_QJS_HOTCOLD_PROFILE=<file>   another profile
+#   -DPOCKET_QJS_HOTCOLD_PAD=<bytes>   shift the hot code (measurement)
+# A device A/B through a builder that only takes the default Kconfig: a
+# `measure:` commit sets the next line to "use" (and reverts it afterwards).
+set(_qjs_hc "")
+set(_qjs_hc_pad 0)
+if(POCKET_QJS_HOTCOLD)
+    set(_qjs_hc "${POCKET_QJS_HOTCOLD}")
+elseif(CONFIG_POCKET_VM_QJS_HOTCOLD)
+    set(_qjs_hc "use")
+endif()
+if(POCKET_QJS_HOTCOLD_PAD)
+    set(_qjs_hc_pad "${POCKET_QJS_HOTCOLD_PAD}")
+endif()
+if(_qjs_hc)
+    get_filename_component(_qjs_hc_dir "${CMAKE_CURRENT_LIST_DIR}/../../tools/qjs_hotcold" ABSOLUTE)
+    if(NOT POCKET_QJS_HOTCOLD_PROFILE)
+        set(POCKET_QJS_HOTCOLD_PROFILE "${_qjs_hc_dir}/profile.json")
+    endif()
+    get_filename_component(_qjs_hc_profile "${POCKET_QJS_HOTCOLD_PROFILE}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    idf_build_get_property(_qjs_hc_python PYTHON)
+    set_property(TARGET ${COMPONENT_LIB} PROPERTY C_COMPILER_LAUNCHER
+        "${_qjs_hc_python}" "${_qjs_hc_dir}/hc_cc.py" --mode "${_qjs_hc}" --profile "${_qjs_hc_profile}"
+        --pad "${_qjs_hc_pad}" --keep-out "${CMAKE_CURRENT_LIST_DIR}/../../main/vm/helper_iram8.lf"
+        --only quickjs.c --)
+    set(_qjs_hc_deps "${_qjs_hc_dir}/hc_cc.py" "${_qjs_hc_dir}/hc_asm.py")
+    if(_qjs_hc STREQUAL "use")
+        list(APPEND _qjs_hc_deps "${_qjs_hc_profile}")
+    endif()
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/quickjs-ng/quickjs.c" APPEND PROPERTY OBJECT_DEPENDS ${_qjs_hc_deps})
+    message(STATUS "quickjs-ng: hot/cold layout '${_qjs_hc}' (${_qjs_hc_profile})")
+endif()
+
 # Third-party source files: suppress warnings that are noisy but harmless in upstream code.
 # -Wincompatible-pointer-types stays on (an error in GCC 14+): an int * handed to
 # an int32_t * parameter is a strict-aliasing miscompile on Xtensa, where
