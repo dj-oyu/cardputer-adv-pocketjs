@@ -3,10 +3,12 @@ import argparse, hashlib, os, subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 QJS=ROOT/'components/quickjs-ng/quickjs-ng'
-def main():
+def main(extra_flags=(), cache_name="mesh-shiki-contract"):
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--opt',choices=['0','2'],default='2');a=p.parse_args()
- out=ROOT/'.cache/mesh-shiki-contract';out.mkdir(parents=True,exist_ok=True)
+ out=ROOT/'.cache'/cache_name;out.mkdir(parents=True,exist_ok=True)
  flags=['-std=gnu11','-O'+a.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-omit-frame-pointer','-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST']
+ # Include opt-in flags before hashing AND compiling QuickJS objects.
+ flags += list(extra_flags)
  includes=['-I'+str(x) for x in [QJS,ROOT/'main',ROOT/'main/pocket',ROOT/'main/ui/kasane',ROOT/'main/ayatsuri',ROOT/'tools/kasane_contract',ROOT/'tools/hostshim']]
  env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
  def run(cmd): subprocess.run(list(map(str,cmd)),cwd=ROOT,env=env,check=True)
