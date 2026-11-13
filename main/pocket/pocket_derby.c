@@ -52,9 +52,12 @@ void pocket_derby_projection_counts(DerbyProjectionCounts *out){if(out)*out=proj
 static uint64_t course_generation,view_generation;
 #endif
 /* view(): the camera pc = [x, z, unit x, unit z, f, distance], the far depth,
- * the scene frame t, the stands' plans and their two constants. */
+ * the scene frame t, the stands' plans and their two constants. fr is
+ * sqrt(f*f+25600), ou()'s margin scale: aim() computes it once, by the same
+ * expression, instead of every candidate chord (docs/apps/derby-ser-cost.md
+ * sec.4 A; bit-identical). */
 static struct {
-    double pc[6],zf,t,hl_color,cells;
+    double pc[6],fr,zf,t,hl_color,cells;
     uint32_t hl,crowd;
     bool set;
 } view;
@@ -134,7 +137,7 @@ static void pose(double g,double w,double o[4]){
 }
 /* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
 static bool ou(unsigned j,double w,double m,double zf){
-    const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
+    const double *V=course->ve+4u*j,f=view.pc[4],k=m*view.fr,
         l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
     return (d<.02*f-m&&D<.02*f-m)||(d>zf+m&&D>zf+m)||(160*d+l*f<-k&&160*D+L*f<-k)||
            (160*d-l*f<-k&&160*D-L*f<-k);
@@ -407,7 +410,9 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected plan, Q16 w, s, g0, L, a and optional Q16 b");
     L=Li;a=turf?ai/65536.0:ai;
     if(!course||!view.set)return fail(ctx,op,POCKET_ERR_BUSY,"view required");
-    const double *pc=view.pc,zf=view.zf;
+    /* zp: lim()'s far bound zf/f, the same division hoisted out of the
+     * chords (sec.4 B; bit-identical). */
+    const double *pc=view.pc,zf=view.zf,zp=zf/pc[4];
     const bool ve=course->sections!=0;
     double P[4]={0},pg=0;
     bool have_pg=false;
@@ -428,7 +433,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
             Q=(X*pc[2]+Y*pc[3])/pc[4],q[2]={X*pc[3]-Y*pc[2]+120*Q,Q},u=(dx*pc[2]+dz*pc[3])/pc[4],
             v=dx*pc[3]-dz*pc[2]+120*u;
         double Lo=ga-g0,Hi=gb-g0;
-        lim(&Lo,&Hi,q[1]-.02,u);lim(&Lo,&Hi,zf/pc[4]-q[1],-u);lim(&Lo,&Hi,q[0]+40*q[1],v+40*u);
+        lim(&Lo,&Hi,q[1]-.02,u);lim(&Lo,&Hi,zp-q[1],-u);lim(&Lo,&Hi,q[0]+40*q[1],v+40*u);
         lim(&Lo,&Hi,280*q[1]-q[0],280*u-v);
         if(!(Lo<Hi)){SP(3);continue;}
         SP(3);SC(8);
@@ -524,6 +529,7 @@ static JSValue js_aim(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     const double x=a[0]-q[0],z=a[1]-q[1],e=sqrt(x*x+z*z);
     double *pc=view.pc;
     pc[0]=q[0];pc[1]=q[1];pc[2]=x/e;pc[3]=z/e;pc[4]=js_min(fmax,js_max(fmin,px*e/2.4));pc[5]=e;
+    view.fr=sqrt(pc[4]*pc[4]+25600);
     cam.aimed=true;view.set=false;
     return JS_NewInt32(ctx,(int32_t)js_round(pc[4]));
 }
