@@ -341,7 +341,10 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 // property read (shiki-bundle.md sec.3: a call is ~1,200 cycles and an array
 // element ~400). Draws run in order; the first that fails throws as draw()
 // does, with the draw's position as the error's index, and abandons the
-// frame, as draw() does.
+// frame, as draw() does. count (api-reorg.md sec.3.3): draw only the first
+// count handles, inputs then needing at least count * stride; so a batch
+// filled to a varying length needs no subarray() views. Absent (or
+// undefined), every handle, with inputs exactly handles.length * stride.
 static const void *typed_data(JSContext *ctx,JSValueConst v,int kind,size_t *count){
     if(JS_GetTypedArrayType(v)!=kind)return NULL;
     size_t off=0,len=0,bpe=0,size=0;
@@ -361,6 +364,13 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     const uint32_t *handles=argc>=1?typed_data(ctx,argv[0],JS_TYPED_ARRAY_UINT32,&count):NULL;
     if(!handles||argc<3||!whole(ctx,argv[2],0,KSN_SHIKI_INPUTS,&stride))
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected (Uint32Array handles, Float64Array|Int32Array inputs, stride 0..8)");
+    const bool counted=argc>=4&&!JS_IsUndefined(argv[3]);
+    if(counted){
+        uint32_t n=0;
+        if(!whole(ctx,argv[3],0,(double)count,&n))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"count: an integer 0..handles.length");
+        count=n;
+    }
     if(count>DRAWS_PER_CALL)
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"more than 256 draws in one call");
     const double *real=NULL;
@@ -368,8 +378,8 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     if(stride){
         real=typed_data(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,&ninputs);
         if(!real)fixed=typed_data(ctx,argv[1],JS_TYPED_ARRAY_INT32,&ninputs);
-        if((!real&&!fixed)||ninputs!=count*stride)
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs: a Float64Array or Int32Array of handles.length * stride");
+        if((!real&&!fixed)||(counted?ninputs<count*stride:ninputs!=count*stride))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs: a Float64Array or Int32Array of handles.length * stride (at least count * stride)");
     }
     for(size_t i=0;i<count;i++){
         if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
@@ -553,11 +563,22 @@ static JSValue js_heap(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 }
 
 // ------------------------------------------------------------- install
-// grid is kasane's own (pocket_grid_install), shared: copied from there.
-static bool share(JSContext *ctx,JSValueConst from,JSValueConst to,const char *name){
-    JSValue f=JS_GetPropertyStr(ctx,from,name);
-    if(JS_IsException(f))return false;
-    return JS_SetPropertyStr(ctx,to,name,f)>=0;
+// grid is kasane's own (pocket_grid_install), the same object (sec.7). It was
+// copied here at install, which now would build kasane.grid (an object entry
+// of a lazy list, api-reorg.md sec.3.1) for every Shiki session; so it is a
+// getter that reads kasane.grid on the first read of shiki.grid and puts
+// the value in its place. P5 removes the copy. grid_owner is the kasane
+// namespace install was given, borrowed (no reference): it holds shiki, so
+// it is alive whenever the getter can run; the reset forgets it.
+static JSValue grid_owner;
+static JSValue js_grid(JSContext *ctx,JSValueConst self){
+    if(!owner||!JS_IsObject(grid_owner))return JS_UNDEFINED;
+    JSValue grid=JS_GetPropertyStr(ctx,grid_owner,"grid");
+    if(JS_IsException(grid)||!JS_IsObject(self))return grid;
+    if(JS_DefinePropertyValueStr(ctx,self,"grid",JS_DupValue(ctx,grid),JS_PROP_C_W_E)<0){
+        JS_FreeValue(ctx,grid);return JS_EXCEPTION;
+    }
+    return grid;
 }
 esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
     JSValue shiki=JS_NewObject(ctx);
@@ -570,7 +591,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("data",1,js_data),
         JS_CFUNC_DEF("release",1,js_release),
         JS_CFUNC_DEF("fields",1,js_fields),
-        JS_CFUNC_DEF("drawMany",3,js_draw_many),
+        JS_CFUNC_DEF("drawMany",4,js_draw_many),
         JS_CFUNC_MAGIC_DEF("sin",1,js_sin,0),
         JS_CFUNC_MAGIC_DEF("cos",1,js_sin,1),
         JS_CFUNC_DEF("sinMany",3,js_sin_many),
@@ -578,6 +599,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("setList",3,js_set_list),
         JS_CFUNC_DEF("drawList",3,js_draw_list),
         JS_CFUNC_DEF("releaseList",1,js_release_list),
+        JS_CGETSET_DEF("grid",js_grid,NULL),
     };
     // Drawing writes only the tail behind the frame a present may be
     // reading; the slots, regions, lists and the Shiki heap are not read by
@@ -587,9 +609,8 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
     pocket_nojoin_end(ctx,mark);
     ok=ok&&pocket_proc_frame_install(ctx,shiki)==ESP_OK;
-    ok=ok&&share(ctx,kasane,shiki,"grid");
     if(!ok){JS_FreeValue(ctx,shiki);return ESP_ERR_NO_MEM;}
-    owner=ctx;
+    owner=ctx;grid_owner=kasane;
     return JS_SetPropertyStr(ctx,kasane,"shiki",shiki)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 
@@ -629,5 +650,5 @@ void pocket_shiki_api_reset(void){
     for(int k=0;k<LISTS;k++)if(lists[k].h)shiki_heap_free(lists[k].h);
     memset(lists,0,sizeof lists);
     memset(binds,0,sizeof binds);
-    owner=NULL;
+    owner=NULL;grid_owner=JS_UNDEFINED;
 }

@@ -107,6 +107,11 @@ globalThis.shikiApiTest = function (pocket, log) {
   ok('many fixed', box[0] === viaReal);
   S.draw(put, 0.5);
   ok('many = draw', box[0] === 32768);
+  S.drawMany(new Uint32Array([put, put, put]), new Float64Array([1.5, 2.25, 9, 7]), 1, 2);
+  ok('many count', box[0] === 2.25 * 65536);
+  S.drawMany(new Uint32Array([put]), new Float64Array(0), 1, 0);
+  throws('many count range', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put]), new Float64Array(2), 1, 2));
+  throws('many count inputs', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put, put]), new Float64Array(1), 1, 2));
   throws('many length', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put, put]), new Float64Array([1]), 1));
   throws('many array', 'INVALID_ARGUMENT', () => S.drawMany([put], new Float64Array([1]), 1));
   throws('many type', 'INVALID_ARGUMENT', () => S.drawMany(new Uint32Array([put]), new Float32Array([1]), 1));

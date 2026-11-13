@@ -414,7 +414,12 @@ static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
                                 false,NULL);
     ksn_change change={.property=property};
     if(property==KSN_SET_RECT||property==KSN_SET_CLIP) {
-        if(!parse_rect(ctx,argc>1?argv[1]:JS_UNDEFINED,&change.value.rect,op)) return JS_EXCEPTION;
+        /* setRect(tx, x0, y0, x1, y1): four integers, no array to build and
+         * no element reads (api-reorg.md sec.3.2); the array form stays. */
+        if(argc>=5&&JS_IsNumber(argv[1])) {
+            if(!parse_rect_ints(ctx,argv+1,&change.value.rect,op)) return JS_EXCEPTION;
+        } else if(!parse_rect(ctx,argc>1?argv[1]:JS_UNDEFINED,&change.value.rect,op))
+            return JS_EXCEPTION;
         if(property==KSN_SET_CLIP)viewport_clip(&change.value.rect);
     } else if(property==KSN_SET_COLOR) {
         if(argc<2||!parse_u32(ctx,argv[1],&change.value.color))

@@ -389,19 +389,20 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 | `options` | `{data: [領域, ...]}`。旧 API の型付きの点（`points`）は持たない（v1.3、ユーザー決定）: 点の束は `i16` の領域と `EACH`・`FETCH`・`PLOT` で書く | |
 | `unregister(handle)` | | 古い handle: `CLOSED` |
 | `beginFrame`・`draw(handle, ...inputs)`・`commit`・`resource`・`createSurface` | 旧 API と同じ意味。`draw` の入力は §2.4 で変換する | 旧 API と同じ |
-| `drawMany(handles, inputs, stride)`（v1.5） | 下の注 | 下の注 |
+| `drawMany(handles, inputs, stride, count?)`（v1.5。`count` は v2.0 の草案、下の注） | 下の注 | 下の注 |
 | `sin(t)`・`cos(t)`・`sinMany(t, out, offset?)`（v1.5） | 下の注 | 下の注 |
 | `heap()` | | |
 | `data(desc)`・`release(窓)` | §9.3、§9.2 | 予算・領域の数: `LIMIT_EXCEEDED`。結び付いた handle が残る: `BUSY`。別の view: `INVALID_ARGUMENT`。解放済み: `CLOSED` |
 | `fields(窓)` | §9.3 | 別の view（`fields()` の view を含む）: `INVALID_ARGUMENT`。解放済み: `CLOSED`。view を作るゲストのメモリが足りなければ、QuickJS の例外（`PocketError` ではない） |
-| `grid.*` | §7 | 旧 API と同じ |
+| `grid.*` | §7。`pocket.kasane.grid` と同じオブジェクト（`shiki.grid === pocket.kasane.grid`）。api-reorg P3（2026-11-13）から、`shiki.grid` は最初に読んだ時に `pocket.kasane.grid` を読んで値に置き換わる getter（`shiki` を読むだけでは grid を作らない）。この写しは [api-reorg.md](api-reorg.md) の P5 で消す | 旧 API と同じ |
 
 **`drawMany(handles, inputs, stride)`（v1.5）**: 複数の draw を 1 回の呼び出しで行う。
 
 - 引数: `handles` は `Uint32Array`（Shiki の handle を描く順に）、`stride` は 1 回の draw の入力の数（0〜8 の整数）、`inputs` は `handles.length × stride` 個の要素を持つ `Float64Array` か `Int32Array`（draw `i` の入力は `inputs[i·stride .. i·stride + stride − 1]`）。`stride = 0` なら `inputs` は**読まず、検査もしない**（`null` でよい）。`subarray` などオフセットの付いた view でよく、同じ配列を別の呼び出しで使い回してよい。
 - 意味: draw `i` は、`handles[i]` の式を、次の入力で実行する。`Float64Array` なら JS の数として §2.4 で変換する（`draw()` と同じ変換。有限でない値は §4.8 の 7 の誤り）。`Int32Array` なら、各値を **`handles[i]` の式が宣言した、その位置の入力の Q 形式の `fixed`** として読み、変換しない（同じ位置でも handle ごとに Q 形式が違いうる。換算は JS の責任）。式が宣言した入力より `stride` が大きければ残りは捨て、小さければ足りない分は 0（§4.8 の 7）。入力の変換と実行は、同じ入力で `draw()` を呼んだときと同じ。
 - 読む時: draw `i` の handle と入力は、**draw `i` の始めに**読む。したがって `handles`・`inputs` がデータ領域の窓（またはその ArrayBuffer の上の view）なら、前の draw の `PUT` の書き込みが後の draw の handle と入力に映る。呼び出しの途中で JS は動かないので、配列の長さと detach の状態は始めに一度だけ検査する。
-- 検査の順と誤り（どれも、どの draw も行わずに投げる）: `handles` が `Uint32Array` でない、`stride` が 0〜8 の整数でない → `INVALID_ARGUMENT`。`handles.length` が `maxDrawsPerCall` を超える → `LIMIT_EXCEEDED`。`stride ≥ 1` で `inputs` が `Float64Array`・`Int32Array` でない、長さが `handles.length × stride` でない、detach されている → `INVALID_ARGUMENT`。`handles.length = 0` なら何もせず戻る（`beginFrame` が無くても誤りにしない）。
+- **`count`（v2.0 の草案に入れる追加。[api-reorg.md](api-reorg.md) P3、2026-11-13、凍結前）**: 省く（または `undefined`）と上のとおり。渡すと、`handles` の**先頭の `count` 個**だけを描く（`count` は 0〜`handles.length` の整数）。`inputs` は `count × stride` 個**以上**あればよい（ちょうどでなくてよい。先頭から読む）。上限の検査（`maxDrawsPerCall`）は `count` に対して行う。可変の個数を詰めた使い回しの配列から `subarray` の view を毎回作らずに描くため（view 1 つでゲストの確保が 2 回前後）。`count` が整数でない・範囲外 → `INVALID_ARGUMENT`。
+- 検査の順と誤り（どれも、どの draw も行わずに投げる）: `handles` が `Uint32Array` でない、`stride` が 0〜8 の整数でない、`count` が上のとおりでない → `INVALID_ARGUMENT`。`handles.length` が `maxDrawsPerCall` を超える → `LIMIT_EXCEEDED`。`stride ≥ 1` で `inputs` が `Float64Array`・`Int32Array` でない、長さが `handles.length × stride` でない、detach されている → `INVALID_ARGUMENT`。`handles.length = 0` なら何もせず戻る（`beginFrame` が無くても誤りにしない）。
 - draw の誤り: draw `i` の誤りは、`draw()` と同じ `PocketError`（`code`・`operation` `"kasane.shiki.draw"`・`retryable`・`outcome`）に、**何番目の draw か（0 から）を読み取り専用の `index` プロパティで付けて**投げ、残りの draw は行わない（`index` は common-api §4 の、面が足すプロパティ）。`outcome` は失敗した draw 自身を指す。`handles[i]` が登録された Shiki の handle でない（0、別の種類の handle、2^31 以上を含む）なら `CLOSED`（`draw()` は範囲外の値を `INVALID_ARGUMENT` にするので、ここは `draw()` と違う）。フレームの扱いは `draw()` の失敗と同じで、そのフレームは捨てられる（前の draw の線分も）。前の draw がデータ領域に書いた値は残る（§5.3 の 3）。誤りがオブジェクトでない（ゲストのメモリが尽きた例外など）か、`index` を付けられなかった場合、`index` は無い。
 - 割り込み: `drawMany` はネイティブの中で回り、その間はゲストの割り込みの検査（停止の要求、ターンの期限）が走らない。draw と draw の間でも確かめない（2026-11-01 ユーザー決定。draw ごとの確認の費用を払うほどの害が無いため）。したがって 1 回の呼び出しは、最悪で `maxDrawsPerCall`（256）回 × 1 回の draw の上限（最大 `maxSteps` のステップ、推定 3〜4.5 ms）＝**約 1 秒（推定、未測定）止められない**。起きるのは、停止（Back・外からの停止）への応答の遅れと、そのフレームの遅れ。止めるのは呼び出しが戻った後の、ゲストの次の割り込みの検査。
 - 型付き配列にする理由（実測、[shiki-bundle.md](shiki-bundle.md) §3・§6）: JS からネイティブを 1 回呼ぶ費用は 約 1,200 サイクル、配列の要素の読み取りは 1 つ 約 400 サイクル。型付き配列ならポインタを 1 回取り、入力は 1 つずつのメモリの読み出しになる。入力 8 の draw は、1 回ずつ 19.5 µs、`Float64Array` で 7.7 µs、`Int32Array` で 2.5 µs。

@@ -152,6 +152,13 @@ int main(int argc, char **argv)
     pocket_grid_test_frontend = frontend;
     eval(ctx, program, false);
     free(frontend); free(program);
+    /* api-reorg P3: grid.fold/index/view are the gridFold proxies, and no
+     * plan table exists before the first register (pending reads none). */
+    CHECK(!pocket_grid_pending());
+    eval(ctx, "if(typeof kasane.grid.fold!=='function'||"
+              "JSON.stringify(kasane.grid.index({x:1,y:4}))!=="
+              "JSON.stringify(gridFold.index({x:1,y:4})))throw Error('grid.index');", false);
+    eval(ctx, "kasane.grid.run(1,{0:new Int16Array(4)})", true);
     eval(ctx, "globalThis.h=kasane.grid.register(gridFoldDeviceProgram);"
               "let registered=kasane.grid.registration(h);"
               "if(registered.irCount!==gridFoldDeviceProgram.count||"

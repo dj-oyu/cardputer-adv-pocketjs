@@ -73,6 +73,27 @@ static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
     return parse_rect_mode(ctx,value,out,op,true);
 }
 
+/* The same rectangle as four arguments (ref.setRect/setClip(tx, x0, y0, x1,
+ * y1)): the same rounding, int16 range and edge rule as the array form. */
+static bool parse_rect_ints(JSContext *ctx, JSValueConst *argv, ksn_rect *out,
+                            const char *op) {
+    int16_t c[4];
+    for(unsigned i=0;i<4;i++)
+        if(!parse_i16(ctx,argv[i],&c[i])) {
+            pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                             "rounded coordinates must fit int16",false,NULL);
+            return false;
+        }
+    *out=(ksn_rect){c[0],c[1],c[2],c[3]};
+    if(out->x0>out->x1||out->y0>out->y1) {
+        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                         "rectangle edges are reversed",false,NULL);
+        return false;
+    }
+    viewport_rect(out);
+    return true;
+}
+
 static bool property_rect(JSContext *ctx, JSValueConst object, const char *name,
                           ksn_rect fallback, ksn_rect *out, const char *op) {
     JSValue value=JS_GetPropertyStr(ctx,object,name);
