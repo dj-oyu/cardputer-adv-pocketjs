@@ -3,6 +3,7 @@
  * shade_buffer/fail helpers. No JS backing pointer survives a synchronous call.
  * All native storage is charged to the ordinary guest allocator. */
 #include "ayatsuri/ayatsuri_model_skin.h"
+#include "ayatsuri/ayatsuri_skin_dq.h"
 
 typedef struct {
     ayatsuri_model model;
@@ -177,8 +178,8 @@ static JSValue managed_instance_evaluate(JSContext *ctx,JSValueConst self,int ar
 /* Keep per-vertex/per-joint work on the guest heap, not the UI task stack.
  * Input access below uses only strict number/typed-array primitives: no JS
  * getters or coercions can detach a previously borrowed input buffer. */
-static __attribute__((noinline)) JSValue managed_instance_evaluate_skin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    const char *op="ayatsuri.instance.evaluateSkin";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+static __attribute__((noinline)) JSValue managed_instance_evaluate_skin_mode(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,bool rigid_dq){
+    const char *op=rigid_dq?"ayatsuri.instance.evaluateSkinRigidDQ":"ayatsuri.instance.evaluateSkin";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
     if(!a)return JS_EXCEPTION;
     shade_view v[7];double node;bool valid=argc==8&&number(ctx,argv[2],&node)&&whole(node,0,UINT16_MAX);
     const unsigned args[7]={0,1,3,4,5,6,7};
@@ -202,13 +203,17 @@ static __attribute__((noinline)) JSValue managed_instance_evaluate_skin(JSContex
     ayatsuri_status skin=AYATSURI_OK;
     for(size_t j=0;j<joints&&skin==AYATSURI_OK;++j){
         ayatsuri_transform global,bind;memcpy(&global,v[2].data+j*48,48);memcpy(&bind,v[3].data+j*48,48);
-        skin=ayatsuri_skin_palette(&global,&bind,1,palette+j);
+        if(rigid_dq){
+            double q[4],d[4];
+            if(!ayatsuri_dq_from_rigid(&global,q,d)||!ayatsuri_dq_from_rigid(&bind,q,d))skin=AYATSURI_INVALID;
+        }
+        if(skin==AYATSURI_OK)skin=ayatsuri_skin_palette(&global,&bind,1,palette+j);
     }
     for(size_t j=0;j<vertices;++j){
         memcpy(input[j].position,v[4].data+j*24,12);memcpy(input[j].normal,v[4].data+j*24+12,12);
         memcpy(input[j].joints,v[5].data+j*8,8);memcpy(input[j].weights,v[6].data+j*8,8);
     }
-    if(skin==AYATSURI_OK)skin=ayatsuri_skin_evaluate(palette,joints,input,vertices,result);
+    if(skin==AYATSURI_OK)skin=rigid_dq?ayatsuri_skin_evaluate_rigid_dq(palette,joints,input,vertices,result):ayatsuri_skin_evaluate(palette,joints,input,vertices,result);
     ayatsuri_model_status status=skin==AYATSURI_OK?AYATSURI_MODEL_OK:
         skin==AYATSURI_RANGE?AYATSURI_MODEL_RANGE:AYATSURI_MODEL_INVALID;
     if(status==AYATSURI_MODEL_OK){
@@ -221,6 +226,14 @@ static __attribute__((noinline)) JSValue managed_instance_evaluate_skin(JSContex
         else js_free(ctx,work);
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
+}
+static JSValue managed_instance_evaluate_skin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return managed_instance_evaluate_skin_mode(ctx,self,argc,argv,false);
+}
+/* Explicit opt-in: caller guarantees authored rigid transforms. Matrix checks
+ * reject observed nonrigid G/IB, but cannot prove provenance already erased. */
+static JSValue managed_instance_evaluate_skin_rigid_dq(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return managed_instance_evaluate_skin_mode(ctx,self,argc,argv,true);
 }
 /* A packed batch avoids getters/array iteration while typed spans are borrowed.
  * All descriptor, copied input, result and palette bytes share the same bounded
@@ -488,6 +501,7 @@ static const JSCFunctionListEntry managed_model_methods[]={
 static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("targets",4,managed_instance_targets),JS_CFUNC_DEF("evaluate",2,managed_instance_evaluate),
     JS_CFUNC_DEF("evaluateSkin",8,managed_instance_evaluate_skin),
+    JS_CFUNC_DEF("evaluateSkinRigidDQ",8,managed_instance_evaluate_skin_rigid_dq),
     JS_CFUNC_DEF("evaluateSkins",8,managed_instance_evaluate_skins),
     JS_CFUNC_DEF("nodeKind",1,managed_instance_node_kind),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),

@@ -81,6 +81,15 @@ globalThis.AyatsuriNative=(()=>{
       s.instance.evaluateSkin(s.cameraState,s.lightState,meshId,
         jointGlobals,inverseBind,bindVertices,jointIndices,weights);s.ready=true;
     }finally{s.busy=false;}
+  },evaluateSkinRigidDQ(timeMs,meshId,jointGlobals,inverseBind,bindVertices,jointIndices,weights){
+    const s=this;alive(s);finite(timeMs);s.busy=true;s.ready=false;
+    try{let dirty=false;for(let k=0;k<s.n;k++)if(s.mask[k]){dirty=true;break;}
+      if(dirty){s.instance.targets(s.mask,s.poses,s.colors,s.opacity);s.mask.fill(0);}
+      // Explicit opt-in rigid DQ. Native validation owns rigid-palette constraints.
+      // Normals are transported; no surface-normal or source-provenance claim.
+      s.instance.evaluateSkinRigidDQ(s.cameraState,s.lightState,meshId,
+        jointGlobals,inverseBind,bindVertices,jointIndices,weights);s.ready=true;
+    }finally{s.busy=false;}
   },evaluateSkins(timeMs,descriptors,jointGlobals,inverseBind,bindVertices,jointIndices,weights){
     const s=this;alive(s);finite(timeMs);s.busy=true;s.ready=false;
     try{let dirty=false;for(let k=0;k<s.n;k++)if(s.mask[k]){dirty=true;break;}
