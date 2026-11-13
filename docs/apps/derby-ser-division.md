@@ -593,3 +593,10 @@ broker は既定の Kconfig でしか組めないので、一時の `measure:` �
 - 実機の場面が直線だったという読みは draws と `pat` の形だけによる（楕円の wide1 も 25・9）。`chords=` で確かめる。
 - ms への換算（1k ≈ 0.049〜0.052 ms）は r5sim の比で、flash の待ちを数えていない。
 - host の `--m32` の計装の像は既定の像と別のバイナリ（`-DPOCKET_DERBY_SER_PROBE`）。計数は経路の判定だけで、描画の結果は変えない（16 構成 PASS）。
+
+### 12.8 次の段（利用者の方針、2026-11-13: 倍精度の `ser()` は残さない。まだ実装していない）
+
+最終の形は「整数の `ser()` ＋ PIE の回転と除外の核（§10、実機の自己検査で核は 4.7 倍・不一致 0）」。§12.6 の M1 は倍精度を同じバイナリの参照に使うので、**M1 を測ってから**次の 2 段に進む。
+
+1. **PIE を `view()`・`ser()` につなぐ（`up` は PIE ↔ スカラーの整数）。** `course()` で `dsp_set_course()`（法線は `qt30` の (−tz, tx)）、`view()` で `dsp_set_camera()`（`qpos`、`camq` の `ex`・`ez`・`dx`・`dz`）と `dsp_rotate_pie()` を 1 回、`ser()` ごとに `dsp_cull_consts()`＋`dsp_cull_pie()`、`valid` の外（±2,047 m を越える端）の弦は今の `derby_ser_cull_wide()`。スカラーの側は今の `derby_ser_rotate_ref()`・`derby_ser_cull_ref()`。PIE の除外の余白（m + 1 m）は整数の参照（m + 3 m）と違うので、残る弦の集合は違ってよいが、どちらも倍精度の `ou()` の安全側で、余分な弦は `lim()` で落ちる（host の画素ハッシュで確かめる）。`CONFIG_POCKET_DERBY_SER_PIE` は既定 y にし、host は `DERBY_SERPIE_HOST` の参照で回す。計装（§12.5）の `path` は「PIE / スカラー」に読み替える。
+2. **倍精度の `ser()` を消し、範囲の戻り道を丸めに替える。** `L = 0` → 1、`s` → 0.25〜32 m に丸める、カメラの位置 ±6,000 m・`f` 32〜4,095 px・`zf` を範囲に丸める（アプリの範囲の中では何も変わらない。fuzz の範囲外の入力は絵が変わってよい）。`ser_chord()`・`ou()`・`VE`・`VC`・`mode()` の 1 を消す。host の `DERBY_SER_ORACLE` の倍精度のビット一致と `--ser-double` は、JS の oracle との許容差の照合（§11.4）だけを残す。flash −約 5 KB（§11.8）。
