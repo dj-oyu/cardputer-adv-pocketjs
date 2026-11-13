@@ -1,0 +1,6 @@
+app_session.c 0adf0d1ca1b088037d0d6438f508f16dcb1a7e4235fb6a1263f4a3841a433ad0
+shiki_heap.c 1b0b7e8cd3232153831bc362a34c08d7bbe06c00a770f14632ed5942ecd0cc82
+test.c 3f8607e66765e6081a23df92e77c74ce765ce7e278099b8a97d77c991f91a3c7
+stop.inc 0684e8fdac2bc891f9493b416090185fb45b4e6ba9c3babbb787128e24ccb9d8
+actual app_stop / stub owners: partial startup, finalizer, delayed release, repeated stop: PASS
+actual app_stop / stub owners: partial startup, finalizer, delayed release, repeated stop: PASS
