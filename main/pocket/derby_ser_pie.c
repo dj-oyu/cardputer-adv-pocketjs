@@ -17,10 +17,10 @@
 #include <string.h>
 
 static inline int16_t sat16(int32_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; }
-static int16_t clamp16(int64_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; }
+static inline int16_t clamp16(int64_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; }
 /* Q30 -> Q14 rounded half up (an arithmetic shift is a floor); Q16 -> Q3 the
  * same way, inline in dsp_set_camera(). */
-static int32_t q30_q14(int32_t v) { return (int32_t)(((int64_t)v + 32768) >> 16); }
+static inline int32_t q30_q14(int32_t v) { return (int32_t)(((int64_t)v + 32768) >> 16); }
 
 void dsp_set_course(dsp_ends *E, unsigned ends, const int32_t *nx, const int32_t *nz) {
     memset(E, 0, sizeof *E);
@@ -34,48 +34,75 @@ void dsp_set_course(dsp_ends *E, unsigned ends, const int32_t *nx, const int32_t
     }
 }
 
-void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px, const int32_t *pz, unsigned stride,
-                    int32_t camx, int32_t camz, int32_t cx, int32_t cz) {
-    uint64_t ok = 0;
-    for (unsigned i = 0; i < E->ends; i++) {
-        const int64_t x = ((int64_t)px[i * stride] - camx + 4096) >> 13, z = ((int64_t)pz[i * stride] - camz + 4096) >> 13;
-        const bool in = x >= -DSP_REL_MAX_Q3 && x <= DSP_REL_MAX_Q3 && z >= -DSP_REL_MAX_Q3 && z <= DSP_REL_MAX_Q3;
-        E->in[i / 8].v[0][i % 8] = in ? (int16_t)x : 0;
-        E->in[i / 8].v[1][i % 8] = in ? (int16_t)z : 0;
-        ok |= (uint64_t)in << i;
+/* Once a frame, so int32 only (no 64-bit shifts): end minus camera is
+ * exact in int32 unless it overflows, and an overflow is past the range
+ * anyway. In range: (d + 4096) >> 13 within +-DSP_REL_MAX_Q3, i.e. d within
+ * [-DSP_REL_MAX_Q3 x 8192 - 4096, DSP_REL_MAX_Q3 x 8192 + 4095], one unsigned
+ * compare. Chord j is valid when ends j and j + 1 both are. */
+#define DSP_D_LO (-DSP_REL_MAX_Q3 * 8192 - 4096)
+#define DSP_D_SPAN ((uint32_t)DSP_REL_MAX_Q3 * 16384u + 8191u)
+DSP_HOT void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px, const int32_t *pz, unsigned stride,
+                            int32_t camx, int32_t camz, int32_t cx, int32_t cz) {
+    uint32_t valid = 0;
+    bool prev = false;
+    const unsigned n = E->ends;
+    for (unsigned i = 0; i < n; i++) {
+        int32_t x, z;
+        const bool in = !__builtin_sub_overflow(px[i * stride], camx, &x) &&
+                        !__builtin_sub_overflow(pz[i * stride], camz, &z) &&
+                        (uint32_t)x - (uint32_t)DSP_D_LO <= DSP_D_SPAN && (uint32_t)z - (uint32_t)DSP_D_LO <= DSP_D_SPAN;
+        dsp_blk *const b = &E->in[i / 8];
+        b->v[0][i % 8] = in ? (int16_t)((x + 4096) >> 13) : 0;
+        b->v[1][i % 8] = in ? (int16_t)((z + 4096) >> 13) : 0;
+        if (in && prev) valid |= 1u << (i - 1);
+        prev = in;
     }
-    E->valid = (uint32_t)(ok & ok >> 1 & (((uint64_t)1 << E->chords) - 1));
+    E->valid = valid;
     const int16_t c = clamp16(q30_q14(cx)), s = clamp16(q30_q14(cz));
     memset(rk, 0, sizeof *rk);
     rk->c[0] = s; rk->c[1] = (int16_t)-c; rk->c[2] = c;
 }
 
-bool dsp_cull_consts(dsp_cull_k *k, int32_t f, int32_t fr, int32_t zf, int32_t w, int32_t m) {
-    if (f < 65536 || f >= (1 << 28) - 4096 || fr < f || fr < 160 * 65536 || (int64_t)fr > 4100LL * 65536 ||
-        zf < 0 || w < -(1 << 23) || w > (1 << 23) || m < 0 || m > 64 * 65536)
-        return false;
+/* The table in two steps (derby_ser_pie.h): the frame's part once, the
+ * series' four broadcasts per ou() series (six a frame), with no 64-bit
+ * division (__divdi3), only shifts of positive values (ceilings) and one
+ * 32-bit division. The values are the exact ceil/floor of the formulas in
+ * derby_ser_pie.h. */
+DSP_HOT bool dsp_cull_frame(dsp_cull_k *k, int32_t f, int32_t fr, int32_t zf) {
     memset(k, 0, sizeof *k);
-    /* Once per ser() call (six a frame): no 64-bit division (__divdi3), only
-     * shifts of positive values (ceilings) and one 32-bit division. The
-     * values are the exact ceil/floor of the formulas in derby_ser_pie.h. */
+    if (f < 65536 || f >= (1 << 28) - 4096 || fr < f || fr < 160 * 65536 || (int64_t)fr > 4100LL * 65536 || zf < 0)
+        return false;
+    k->c[DSPK_ONE] = 16384;
+    k->c[DSPK_B1] = 1; k->c[DSPK_B2] = 2; k->c[DSPK_B4] = 4; k->c[DSPK_B8] = 8;
+    k->c[DSPK_C1280] = 1280;
+    k->c[DSPK_KB] = 1024;
+    k->c[DSPK_F] = (int16_t)((f + 4096) >> 13);
+    k->c[DSPK_NF] = (int16_t)-k->c[DSPK_F];
+    for (int i = 0; i < 8; i++) k->negw[i] = (int16_t)-(1 << i);
+    k->f = f; k->fr = fr; k->zf = zf;
+    return true;
+}
+
+DSP_HOT bool dsp_cull_series(dsp_cull_k *k, int32_t w, int32_t m) {
+    /* k->f == 0: dsp_cull_frame() refused the frame. */
+    if (!k->f || w < -(1 << 23) || w > (1 << 23) || m < 0 || m > 64 * 65536) return false;
+    const int32_t f = k->f;
     const int64_t m1 = (int64_t)m + 65536;                    /* m + 1 m, Q16 */
-    const int64_t K6 = ((m1 * fr + ((int64_t)1 << 26) - 1) >> 26) + 64 * 200;   /* ceil(m1 fr / 2^26) + 12,800 */
+    const int64_t K6 = ((m1 * k->fr + ((int64_t)1 << 26) - 1) >> 26) + 64 * 200;   /* ceil(m1 fr / 2^26) + 12,800 */
     const int64_t KA = (K6 + 1023) >> 10;                     /* ceil(K6 / 1024) */
     if (KA > 32767) return false;
     /* TN = floor((8 f - 400 m1) / (50 x 65536)) = floor((f - 50 m1) / 409600);
      * |f - 50 m1| < 2^29. */
     const int32_t tn = f - 50 * (int32_t)m1, tq = tn / 409600 - (tn % 409600 < 0);
     k->c[DSPK_W] = (int16_t)((w + 4096) >> 13);
-    k->c[DSPK_ONE] = 16384;
     k->c[DSPK_TN] = clamp16(tq);
-    k->c[DSPK_TF] = clamp16(((int64_t)zf + m1 + 8191) >> 13);  /* ceil((zf + m1) / 8192) */
-    k->c[DSPK_B1] = 1; k->c[DSPK_B2] = 2; k->c[DSPK_B4] = 4; k->c[DSPK_B8] = 8;
-    k->c[DSPK_C1280] = 1280;
-    k->c[DSPK_KA] = (int16_t)KA; k->c[DSPK_KB] = 1024;
-    k->c[DSPK_F] = (int16_t)((f + 4096) >> 13);
-    k->c[DSPK_NF] = (int16_t)-k->c[DSPK_F];
-    for (int i = 0; i < 8; i++) k->negw[i] = (int16_t)-(1 << i);
+    k->c[DSPK_TF] = clamp16(((int64_t)k->zf + m1 + 8191) >> 13);  /* ceil((zf + m1) / 8192) */
+    k->c[DSPK_KA] = (int16_t)KA;
     return true;
+}
+
+bool dsp_cull_consts(dsp_cull_k *k, int32_t f, int32_t fr, int32_t zf, int32_t w, int32_t m) {
+    return dsp_cull_frame(k, f, fr, zf) && dsp_cull_series(k, w, m);
 }
 
 /* ---- scalar reference: what each lane of the kernels computes ----
@@ -134,7 +161,7 @@ uint32_t dsp_cull_ref(const dsp_ends *E, const dsp_cull_k *k) {
 /* Rotation: per block of 8 ends, 4 loads, 4 x (ZERO.QACC, 2 VMULAS, SRCMB by
  * 14, store). SRCMB is an arithmetic shift (a floor) with saturation (TRM
  * p.130), which is dsp_rotate_ref()'s `sat16(x >> 14)`. */
-void dsp_rotate_pie(dsp_ends *E, const dsp_rot_k *rk) {
+DSP_HOT void dsp_rotate_pie(dsp_ends *E, const dsp_rot_k *rk) {
     const dsp_blk *in = E->in;
     dsp_blk *out = E->out;
     const int16_t *kp = rk->c;
@@ -180,7 +207,7 @@ void dsp_rotate_pie(dsp_ends *E, const dsp_rot_k *rk) {
  * EE.VMULAS.S16.ACCX against (-1, -2, ..., -128). Iteration 0 folds a
  * garbage block into m[0], which is dropped: the loop body stays one piece
  * with no peeled first block. q6 = 0, q7 = F_{e-1}. */
-uint32_t dsp_cull_pie(const dsp_ends *E, const dsp_cull_k *k) {
+DSP_HOT uint32_t dsp_cull_pie(const dsp_ends *E, const dsp_cull_k *k) {
     uint8_t m[DSP_EBLK_MAX];
     const dsp_blk *v = E->out;
     const int16_t *kp = k->c;

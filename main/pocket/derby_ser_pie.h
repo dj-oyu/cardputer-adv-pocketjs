@@ -1,8 +1,9 @@
 /* DERBY WATCH ser(): the chord cull (ou()) and the chord-end rotation in
  * int16 lanes, as a PIE kernel and as the scalar integer reference it must
  * match bit for bit. Stage S3 of docs/apps/derby-ser-division.md (sec.6.3,
- * sec.10, sec.13): pocket_derby.c's view() rotates once a frame and each ser()
- * call culls with these when CONFIG_POCKET_DERBY_SER_PIE is on (default y);
+ * sec.10, sec.13, sec.14): pocket_derby.c's view() rotates once a frame and
+ * culls every series in one batch with these when CONFIG_POCKET_DERBY_SER_PIE
+ * is on (default y);
  * the up key's A/B swaps them for derby_ser_int.c's scalar rotation and cull.
  * The host and r5sim (no PIE) run the scalar reference in the kernels' place
  * (DERBY_SERPIE_HOST) or the scalar path.
@@ -37,6 +38,23 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+/* The per-frame PIE functions (dsp_set_camera, dsp_rotate_pie,
+ * dsp_cull_frame, dsp_cull_series, dsp_cull_pie) in IRAM instead of flash: a
+ * measurement build's (CONFIG_POCKET_DERBY_SER_PIE_IRAM, default n, or
+ * POCKET_DERBY_SER_PIE_IRAM defined here). +1,092 B of DIRAM taken from
+ * every app (idf.py size); docs/apps/derby-ser-division.md sec.14. */
+#if defined(CONFIG_POCKET_DERBY_SER_PIE_IRAM) && !defined(POCKET_DERBY_SER_PIE_IRAM)
+#define POCKET_DERBY_SER_PIE_IRAM 1
+#endif
+#if defined(POCKET_DERBY_SER_PIE_IRAM) && defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define DSP_HOT IRAM_ATTR
+#else
+#define DSP_HOT
+#endif
 
 #define DSP_LANES 8
 #define DSP_CBLK_MAX 4                        /* chord blocks: 32 chords */
@@ -64,6 +82,7 @@ enum { DSPK_W, DSPK_ONE, DSPK_TN, DSPK_TF, DSPK_B1, DSPK_B2, DSPK_C1280, DSPK_KA
 typedef struct __attribute__((aligned(16))) {
     int16_t c[16];                /* DSPK_* then padding to 32 bytes */
     int16_t negw[8];              /* -1, -2, ..., -128: ACCX = the lane mask */
+    int32_t f, fr, zf;            /* the frame's (Q16), for dsp_cull_series() */
 } dsp_cull_k;
 
 /* Setup (scalar, every build). */
@@ -77,9 +96,17 @@ void dsp_set_course(dsp_ends *E, unsigned ends, const int32_t *nx_q30, const int
 void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px_q16, const int32_t *pz_q16, unsigned stride,
                     int32_t camx_q16, int32_t camz_q16, int32_t cx_q30, int32_t cz_q30);
 /* Per ou() series: f, fr = sqrt(f^2 + 160^2) (px), zf, w and m (m), all Q16.
- * False when a value is out of range: the whole call goes to the scalar ou(). */
+ * False when a value is out of range: the whole call goes to the scalar ou().
+ * The same table in two steps (docs/apps/derby-ser-division.md sec.14): once a
+ * frame, dsp_cull_frame() (f, fr, zf: the broadcasts that do not depend on the
+ * series, the fold weights), then per series dsp_cull_series() (W, TN, TF,
+ * KA only). dsp_cull_consts() is the two in a row; the table is the same
+ * byte for byte. A false dsp_cull_frame() leaves the table unusable for every
+ * series of the frame. */
 bool dsp_cull_consts(dsp_cull_k *k, int32_t f_q16, int32_t fr_q16, int32_t zf_q16,
                      int32_t w_q16, int32_t m_q16);
+bool dsp_cull_frame(dsp_cull_k *k, int32_t f_q16, int32_t fr_q16, int32_t zf_q16);
+bool dsp_cull_series(dsp_cull_k *k, int32_t w_q16, int32_t m_q16);
 
 /* The scalar integer reference (the specification of the kernels). */
 void dsp_rotate_ref(dsp_ends *E, const dsp_rot_k *rk);

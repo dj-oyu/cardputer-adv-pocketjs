@@ -430,12 +430,26 @@ menu "Pocket VM (diagnostics)"
             and chord cull (ou()) as PIE kernels next to their scalar integer
             reference (docs/apps/derby-ser-division.md sec.10, sec.13).
             pocket.derby's view() rotates the oval's chord ends with it once a
-            frame and each ser() call culls with it; chords whose ends are
+            frame and culls every series' chords with it in one batch
+            (sec.14); chords whose ends are
             past the kernel's range (+-2,047 m from the camera) go to the
             scalar int64 cull. The up key flips to the scalar integer
             rotation and cull of derby_ser_int.c (same binary A/B, logged
             "DERBY AB PIE" / "DERBY AB SCALAR"). Off: only the scalar path,
             and the file compiles to nothing.
+
+    config POCKET_DERBY_SER_PIE_IRAM
+        bool "Measurement: DERBY's per-frame PIE functions in IRAM"
+        depends on POCKET_DERBY_SER_PIE
+        default n
+        help
+            Places dsp_set_camera, dsp_rotate_pie, dsp_cull_frame,
+            dsp_cull_series and dsp_cull_pie (main/pocket/derby_ser_pie.c) in
+            IRAM instead of flash, so that view()'s rotation and culls (one
+            batch a frame, docs/apps/derby-ser-division.md sec.14) pay no
+            flash cache misses for them. IRAM is the same pool as DRAM:
+            +1,092 B of DIRAM measured, which every app loses. Off by
+            default.
 
     config POCKET_DERBY_SER_PIE_SELFTEST
         bool "Measurement: the DERBY PIE kernels' self-test at every DERBY start"
