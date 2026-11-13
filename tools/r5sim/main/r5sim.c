@@ -134,10 +134,6 @@ extern const char stress_js_end[] asm("_binary_derby_watch_js_end");
 extern const char stress_js_start[] asm("_binary_lcd_catch_js_start");
 extern const char stress_js_end[] asm("_binary_lcd_catch_js_end");
 #define R5SIM_APP_NAME "lcd_catch.js"
-#elif defined(R5SIM_APP_SHIKI_V1)
-extern const char stress_js_start[] asm("_binary_stress_shiki_v1_js_start");
-extern const char stress_js_end[] asm("_binary_stress_shiki_v1_js_end");
-#define R5SIM_APP_NAME "stress_shiki_v1.js"
 #elif defined(R5SIM_APP_SHIKI)
 extern const char stress_js_start[] asm("_binary_stress_js_start");
 extern const char stress_js_end[] asm("_binary_stress_js_end");

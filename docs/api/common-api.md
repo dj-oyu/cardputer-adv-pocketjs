@@ -57,7 +57,7 @@ Docs・チュートリアル自身を直ちにJS化する必要はない。ネ�
 公開ルートは読み取り専用の `globalThis.pocket`。`__pjs_*` を教材の安定APIにしない（旧 `ui.setProp` などの `ui.*` はファームから削除済み）。DOM、Node.js、ブラウザーfetch、Web Bluetooth互換を名乗らない。
 
 ```ts
-pocket.apiVersion: string;                    // 例 "0.1.0"
+pocket.apiVersion: string;                    // 例 "0.2.0"
 pocket.device.info(): DeviceInfo;
 pocket.capabilities.get(name: string): Capability;
 pocket.capabilities.onChange(fn: (c: Capability) => void): Subscription;
@@ -171,7 +171,8 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 overlay sessionにも`pocket.kasane`を注入する。座標はmanifest region相対で、adapterがLCD座標へ
 変換しregionでclipする。shellは現在のnative sceneを各帯のbackdropとして供給し、その上へ同じ
 APP layerを合成するため、OVERLAYという第三layerやfull-frame bufferは持たない。`pocket.overlay`の
-旧display listは互換経路として残り、新規overlayではregion limitsとkey listenerだけを担う。
+旧display list（`begin`/`rect`/`text`、24項目・1,440 Bの`.bss`）はapiVersion 0.2.0で消した。
+`pocket.overlay`はregion limitsとkey listenerだけを担う。
 Kasane modalは全画面scrim/SOLID背景がregion付きbackdropと両立しないためoverlayでは非対応。
 submission/repair中は通常入力と次のguest turnを止め、Kasane合成費用もoverlay予算へ含める。
 
@@ -181,7 +182,7 @@ submission/repair中は通常入力と次のguest turnを止め、Kasane合成�
 ESCが `action_of()` で名前を持たず落ちたからで、それは偶然である。
 **「構造で保証する」と書いたら、その構造がどの行かを名指しできること。**
 
-`ui.overlay` の `limits` は `maxItems`、`maxTextChars`、`regionWidth`、
+`ui.overlay` の `limits` は `regionWidth`、
 `regionHeight`、`keyListeners`、そして `reservedKeys`（`"back"`）を報告する。
 最後のものは、待っても来ないキーをアプリが待たずに済むためにある。
 
@@ -326,12 +327,12 @@ globalThis.frame = () => drawScene();   // モジュールの名前はグロー�
 
 **`pocket.ui`（capability `ui.basic`）は実装していない。** 下の `pocket.ui.*` は当初案で、旧UIコアの上に載せた実装（`pocket_ui.c`）は旧UI経路とともに削除した。`capabilities.get("ui.basic")` は supported=false を返す。画面の描画は `pocket.kasane` を使う。入力（`pocket.input.*`）とTextSessionは実装済みで、TextSessionの編集欄はKasaneが描いた帯へホストが合成する。
 
-**`pocket.kasane`（capability `display.kasane`）の、[Kasane API の整理](../kasane/api-reorg.md) P3 で足した形（2026-11-13、古い形はすべてそのまま動く）。** 境界と契約は[Kasaneの現行境界](../kasane/architecture.md)、Shiki は[仕様](../kasane/shiki-spec.md) §9。
+**`pocket.kasane`（capability `display.kasane`）の、[Kasane API の整理](../kasane/api-reorg.md) P3 で足し、P5 で古い形を消した現在の形（2026-11-13、`apiVersion` は `"0.2.0"`）。** 境界と契約は[Kasaneの現行境界](../kasane/architecture.md)、Shiki は[仕様](../kasane/shiki-spec.md) §9。
 
 - `ref.setRect(tx, x0, y0, x1, y1)`・`ref.setClip(tx, x0, y0, x1, y1)`: 配列 `[x0, y0, x1, y1]` と同じ矩形を整数 4 つで渡す（丸め・int16 の範囲・辺の向きの検査は配列の形と同じ）。毎ターンの配列を作らずに済む。
-- `replace(build)`・`patch(build)` の戻り値は、提出の ticket を**数**（uint32）で返す。`cancel(ticket)` はこの数を受け、`poll().ticket` も同じ数（以前はオブジェクト。ticket・`poll`・`cancel` は P5 で消す）。`build` に渡る `tx` は、アプリが手元に残さなければ次の `replace`/`patch` でも同じオブジェクトが使われる（呼び出しごとのゲストの確保をしない）。残した `tx` は、コールバックの外でも、後の別のコールバックの中でも `CLOSED`。`tx.modal` は prototype の getter。
-- `cache`・`grid`・`video`・`pixel` は、その名前を最初に読んだ時に作る（`pocket.kasane` を読んだだけでは作らない）。`grid.fold`・`grid.index`・`grid.view` は、グローバルの `gridFold` と同じ（`gridFold` は P5 で消す）。`grid` の計画の表（ネイティブ 7,200 B）は、最初の `grid.register*` で確保し、アプリの終わりに返す。
-- `display.kasane` の `limits` に `textBytes`（1 つの画面の文字のバイト数、896）・`animations`（6）・`cacheCommands`（1 つのテンプレートのコマンド数、48）を足した。`features()` が返していた値のうち、コードが強制しているもの（`features()` は P5 で消す）。
+- `replace(build)`・`patch(build)` は**何も返さない**。結果は、`build` が投げた例外（`BUSY` など）と画面に出たものでわかる。ticket・`poll()`・`cancel()`・`features()`・`createScene()`・`inputScope()` は P5 で消した（呼ぶと存在しない関数の `TypeError`）。保存済みのプログラムが使う見込みが低いので、起動前に断る検査は足していない（旧 `ui.*` の `APP_LEGACY_UI` とは違う）。`build` に渡る `tx` は、アプリが手元に残さなければ次の `replace`/`patch` でも同じオブジェクトが使われる（呼び出しごとのゲストの確保をしない）。残した `tx` は、コールバックの外でも、後の別のコールバックの中でも `CLOSED`。`tx.modal` は prototype の getter。
+- `cache`・`grid`・`video`・`pixel` は、その名前を最初に読んだ時に作る（`pocket.kasane` を読んだだけでは作らない）。`grid.fold`・`grid.index`・`grid.view` が記号的な式の入口で、グローバルの `gridFold` と `pocket.kasane.shiki.grid`（`grid` の写し）は P5 で消した。`grid` の計画の表（ネイティブ 7,200 B）は、最初の `grid.register*` で確保し、アプリの終わりに返す。
+- `display.kasane` の `limits` に `textBytes`（1 つの画面の文字のバイト数、896）・`animations`（6）・`cacheCommands`（1 つのテンプレートのコマンド数、48）を足した。消した `features()` が返していた値のうち、コードが強制しているもの。
 
 ```ts
 pocket.ui.screen({background: number}): Screen;

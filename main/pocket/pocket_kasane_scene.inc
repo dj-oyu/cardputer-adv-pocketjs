@@ -1,49 +1,11 @@
-/* The native scene controller of createScene(): kasane_scene, its build/flush
- * turn, the stats result builder, and the method tables for
- * tx/modal/ref/animation/instance. It is an .inc, not a .c, because
- * pocket_kasane.c is one translation unit: the statics it shares with the tx
- * and parse code must keep inlining at -O2 and the object name
+/* The tx and modal wrappers of replace/patch, the cache handles, stats and
+ * the method tables for tx/modal/ref/animation/instance. It is an .inc, not a
+ * .c, because pocket_kasane.c is one translation unit: the statics it shares
+ * with the tx and parse code must keep inlining at -O2 and the object name
  * `pocket_kasane:` used by main/vm/helper_iram8.lf must keep matching.
  * Function order is the original order on purpose. Included only from
- * pocket_kasane.c. */
-/* The scene controller of createScene(), native since the guest-memory work
- * (docs/kasane/decisions.md). As JS it cost each Kasane app
- * four closures, their bytecode and source copies, a dozen var_refs and the
- * atoms of every local name; here it is one opaque holder and two bound
- * functions. apps/kasane/create_scene.js remains as the reference model the
- * node tests drive, and the flush below is that file transcribed statement by
- * statement: keep the two in step. */
-typedef struct {
-    JSValue build,patch,refs,candidate,model;
-    bool pending,pending_replace,dirty,rebuild,running;
-} kasane_scene;
-static JSClassID scene_class;
-static pocket_class_owner_t scene_owner;
-
-static void scene_set(JSContext *ctx,JSValue *slot,JSValue value) {
-    JSValue old=*slot;*slot=value;JS_FreeValue(ctx,old);
-}
-
-/* build(tx, model) must yield a non-null, non-callable object (the candidate
- * refs); patch(tx, refs, model) promotes the displayed refs unchanged. */
-static JSValue scene_callback(JSContext *ctx,kasane_scene *scene,JSValueConst tx,
-                              ksn_update_mode mode) {
-    if(mode==KSN_PATCH) {
-        JSValueConst args[]={tx,scene->refs,scene->model};
-        JSValue returned=JS_Call(ctx,scene->patch,JS_UNDEFINED,3,args);
-        if(!JS_IsException(returned))
-            scene_set(ctx,&scene->candidate,JS_DupValue(ctx,scene->refs));
-        return returned;
-    }
-    JSValueConst args[]={tx,scene->model};
-    JSValue returned=JS_Call(ctx,scene->build,JS_UNDEFINED,2,args);
-    if(JS_IsException(returned)) return returned;
-    scene_set(ctx,&scene->candidate,JS_DupValue(ctx,returned));
-    if(JS_IsObject(returned)&&!JS_IsFunction(ctx,returned)) return returned;
-    JS_FreeValue(ctx,returned);
-    return JS_ThrowTypeError(ctx,"scene build must return an object containing candidate refs");
-}
-
+ * pocket_kasane.c. (createScene and its native scene controller were removed
+ * in api-reorg P5; a scene is now the app's own loop over replace/patch.) */
 /* The tx and modal wrappers of replace/patch (docs/kasane/api-reorg.md
  * sec.3.2). They used to be made for every call, with the ticket and an own
  * "modal" property: four guest allocations a call on the per-turn path. Now a
@@ -98,12 +60,12 @@ static JSValue js_tx_modal(JSContext *ctx, JSValueConst self) {
     return wrap_direct(ctx,modal_class,0);
 }
 
-/* scene is NULL for view.replace/patch(build): the JS function is called and
- * the ticket returned as a number (a uint32: no allocation; cancel() takes it
- * back). A scene discards the ticket. */
-static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene,
+/* view.replace/patch(build): the JS function is called and nothing is
+ * returned (api-reorg P5 removed tickets, poll and cancel: the app learns
+ * the outcome from the thrown error and from what the screen shows). */
+static JSValue run_build(JSContext *ctx, JSValueConst build,
                          ksn_update_mode mode, const char *op) {
-    if(!scene&&!JS_IsFunction(ctx,build))
+    if(!JS_IsFunction(ctx,build))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "build must be a synchronous function",false,NULL);
     if(!ensure_state(ctx,op)) return JS_EXCEPTION;
@@ -122,8 +84,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     JS_SetOpaque(build_modal,(void *)(uintptr_t)tx.value);
     /* No fallible allocation may follow successful native submission. */
     JSValue arg=JS_DupValue(ctx,build_tx);
-    JSValue returned=scene?scene_callback(ctx,scene,arg,mode)
-                          :JS_Call(ctx,build,JS_UNDEFINED,1,&arg);
+    JSValue returned=JS_Call(ctx,build,JS_UNDEFINED,1,&arg);
     JS_FreeValue(ctx,arg);
     JS_SetOpaque(build_tx,NULL);JS_SetOpaque(build_modal,NULL);
     if(JS_IsException(returned)) goto fail;
@@ -155,7 +116,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     state->building=(ksn_tx){0};
     state->submitted=tx;state->submitted_mode=mode;state->active=true;
     ksn_runtime_app_activate(state->lease);
-    return scene?JS_UNDEFINED:JS_NewUint32(ctx,tx.value);
+    return JS_UNDEFINED;
 fail:
     settle_build_wrappers(ctx);
     ksn_view_cancel(view(),tx);discard_candidates(tx);state->building=(ksn_tx){0};
@@ -166,112 +127,23 @@ static JSValue js_replace(JSContext *ctx, JSValueConst self, int argc,
                           JSValueConst *argv) {
     (void)self;
 #ifdef KASANE_MEGADEMO_TRACE
-    JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
-    if(!JS_IsException(ticket))pocket_proc_trace_view();
-    return ticket;
+    JSValue done=run_build(ctx,argc?argv[0]:JS_UNDEFINED,KSN_REPLACE,"kasane.replace");
+    if(!JS_IsException(done))pocket_proc_trace_view();
+    return done;
 #else
-    return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
+    return run_build(ctx,argc?argv[0]:JS_UNDEFINED,KSN_REPLACE,"kasane.replace");
 #endif
 }
 static JSValue js_patch(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
     (void)self;
 #ifdef KASANE_MEGADEMO_TRACE
-    JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
-    if(!JS_IsException(ticket))pocket_proc_trace_view();
-    return ticket;
+    JSValue done=run_build(ctx,argc?argv[0]:JS_UNDEFINED,KSN_PATCH,"kasane.patch");
+    if(!JS_IsException(done))pocket_proc_trace_view();
+    return done;
 #else
-    return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+    return run_build(ctx,argc?argv[0]:JS_UNDEFINED,KSN_PATCH,"kasane.patch");
 #endif
-}
-
-static void scene_finalizer(JSRuntime *rt, JSValue value) {
-    kasane_scene *scene=JS_GetOpaque(value,scene_class);
-    if(!scene) return;
-    JS_FreeValueRT(rt,scene->build);JS_FreeValueRT(rt,scene->patch);
-    JS_FreeValueRT(rt,scene->refs);JS_FreeValueRT(rt,scene->candidate);
-    JS_FreeValueRT(rt,scene->model);js_free_rt(rt,scene);
-}
-static void scene_mark(JSRuntime *rt, JSValueConst value, JS_MarkFunc *mark) {
-    kasane_scene *scene=JS_GetOpaque(value,scene_class);
-    if(!scene) return;
-    JS_MarkValue(rt,scene->build,mark);JS_MarkValue(rt,scene->patch,mark);
-    JS_MarkValue(rt,scene->refs,mark);JS_MarkValue(rt,scene->candidate,mark);
-    JS_MarkValue(rt,scene->model,mark);
-}
-static const JSClassDef scene_def={.class_name=KASANE_CLASS,.finalizer=scene_finalizer,
-                                   .gc_mark=scene_mark};
-
-static JSValue scene_invalidate(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,
-                                int magic,JSValueConst *data) {
-    (void)self;(void)magic;
-    kasane_scene *scene=JS_GetOpaque(data[0],scene_class);
-    scene->dirty=true;
-    if(argc&&JS_ToBool(ctx,argv[0])) scene->rebuild=true;
-    return JS_UNDEFINED;
-}
-
-static JSValue scene_flush_turn(JSContext *ctx,kasane_scene *scene,JSValueConst model) {
-    if(scene->pending) {
-        apply_outcome();
-        ksn_submission outcome=state?ksn_view_poll(view()):(ksn_submission){0};
-        if(outcome.status==KSN_SUBMITTED) return JS_FALSE;
-        if(outcome.status==KSN_PRESENTED)
-            scene_set(ctx,&scene->refs,JS_DupValue(ctx,scene->candidate));
-        else if(outcome.status==KSN_DISCARDED) {
-            scene->dirty=true;
-            if(scene->pending_replace) scene->rebuild=true;
-        } else return JS_ThrowPlainError(ctx,"scene lost its submission");
-        scene_set(ctx,&scene->candidate,JS_NULL);
-        scene->pending=false;
-    }
-    if(!scene->dirty) return JS_TRUE;
-    bool replacing=scene->rebuild||JS_IsNull(scene->refs)||JS_IsUndefined(scene->patch);
-    scene->dirty=false;
-    scene->rebuild=false;
-    scene_set(ctx,&scene->model,JS_DupValue(ctx,model));
-    JSValue submitted=replacing?run_build(ctx,JS_UNDEFINED,scene,KSN_REPLACE,"kasane.replace")
-                               :run_build(ctx,JS_UNDEFINED,scene,KSN_PATCH,"kasane.patch");
-    JSValue out=JS_FALSE;
-    if(!JS_IsException(submitted)) {
-        scene->pending_replace=replacing;
-        scene->pending=true;
-        goto done;
-    }
-    JSValue error=JS_GetException(ctx);
-    /* An interrupt skips catch and finally in JS too: pass it straight on. */
-    if(JS_IsUncatchableError(error)) { JS_Throw(ctx,error);return JS_EXCEPTION; }
-    scene_set(ctx,&scene->candidate,JS_NULL);
-    scene->dirty=true;
-    if(replacing) scene->rebuild=true;
-    bool busy=false;
-    if(JS_ToBool(ctx,error)) {
-        JSValue code=JS_GetPropertyStr(ctx,error,"code");
-        if(JS_IsException(code)) { JS_FreeValue(ctx,error);out=JS_EXCEPTION;goto done; }
-        if(JS_IsString(code)) {
-            size_t length;const char *text=JS_ToCStringLen(ctx,&length,code);
-            if(!text) { JS_FreeValue(ctx,code);JS_FreeValue(ctx,error);out=JS_EXCEPTION;goto done; }
-            busy=length==4&&!memcmp(text,"BUSY",4);
-            JS_FreeCString(ctx,text);
-        }
-        JS_FreeValue(ctx,code);
-    }
-    if(busy) JS_FreeValue(ctx,error);
-    else { JS_Throw(ctx,error);out=JS_EXCEPTION; }
-done:
-    scene_set(ctx,&scene->model,JS_UNDEFINED);
-    return out;
-}
-
-static JSValue scene_flush(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,
-                           int magic,JSValueConst *data) {
-    (void)self;(void)magic;
-    kasane_scene *scene=JS_GetOpaque(data[0],scene_class);
-    if(scene->running) return JS_ThrowPlainError(ctx,"scene flush is not reentrant");
-    scene->running=true;
-    JSValue out=scene_flush_turn(ctx,scene,argc?argv[0]:JS_UNDEFINED);
-    scene->running=false;
-    return out;
 }
 
 static JSValue js_cache_create(JSContext *ctx, JSValueConst self, int argc,
@@ -320,15 +192,6 @@ static JSValue js_cache_release(JSContext *ctx, JSValueConst self, int argc,
     JS_SetOpaque(argv[0],NULL);return JS_UNDEFINED;
 }
 
-static const char *status_name(ksn_submission_status status) {
-    switch(status) {
-    case KSN_SUBMITTED:return "SUBMITTED";
-    case KSN_PRESENTED:return "PRESENTED";
-    case KSN_DISCARDED:return "DISCARDED";
-    default:return "NONE";
-    }
-}
-
 /* Defining own properties avoids invoking user-installed prototype setters.
  * JS_DefinePropertyValueStr consumes value on both success and failure. */
 static bool put(JSContext *ctx, JSValueConst object, const char *name, JSValue value) {
@@ -336,72 +199,6 @@ static bool put(JSContext *ctx, JSValueConst object, const char *name, JSValue v
     return JS_DefinePropertyValueStr(ctx,object,name,value,JS_PROP_C_W_E)>=0;
 }
 #define PUT(object,name,value) do { if(!put(ctx,object,name,value)) goto fail; } while(0)
-
-static JSValue js_poll(JSContext *ctx, JSValueConst self, int argc,
-                       JSValueConst *argv) {
-    (void)self;(void)argc;(void)argv;
-    apply_outcome();
-    ksn_submission submission=state?ksn_view_poll(view()):(ksn_submission){0};
-    JSValue out=JS_NewObject(ctx);
-    if(JS_IsException(out)) return out;
-    PUT(out,"ticket",submission.ticket.value
-        ?JS_NewUint32(ctx,submission.ticket.value):JS_NULL);
-    PUT(out,"status",JS_NewString(ctx,status_name(submission.status)));
-    PUT(out,"reason",JS_NewString(ctx,result_code(submission.reason)));
-    PUT(out,"layer",JS_NewString(ctx,"app"));
-    return out;
-fail:
-    JS_FreeValue(ctx,out);return JS_EXCEPTION;
-}
-
-static JSValue js_cancel(JSContext *ctx, JSValueConst self, int argc,
-                         JSValueConst *argv) {
-    (void)self;
-    /* The ticket is the number replace/patch and poll() give (api-reorg P3). */
-    double n=0;
-    uint32_t raw=argc&&JS_IsNumber(argv[0])&&JS_ToFloat64(ctx,&n,argv[0])==0&&
-                 n>=1&&n<=4294967295.0&&n==floor(n)?(uint32_t)n:0;
-    if(!state||!raw)
-        return pocket_api_throw(ctx,POCKET_ERR_CLOSED,"kasane.cancel",
-                                "ticket is closed",false,NULL);
-    ksn_result result=ksn_view_cancel(view(),(ksn_tx){raw});
-    if(result!=KSN_OK) return throw_result(ctx,result,"kasane.cancel");
-    apply_outcome();return JS_UNDEFINED;
-}
-
-static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
-                           JSValueConst *argv) {
-    (void)self;(void)argc;(void)argv;
-    JSValue out=JS_UNDEFINED,capacity=JS_UNDEFINED,cache=JS_UNDEFINED;
-    out=JS_NewObject(ctx);if(JS_IsException(out)) goto fail;
-    capacity=JS_NewObject(ctx);if(JS_IsException(capacity)) goto fail;
-    cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
-    PUT(out,"rect",JS_NewBool(ctx,true));
-    PUT(out,"roundRect",JS_NewBool(ctx,true));
-    PUT(out,"strokeRect",JS_NewBool(ctx,true));
-    PUT(out,"gradient",JS_NewBool(ctx,true));
-    PUT(out,"text",JS_NewBool(ctx,true));
-    PUT(out,"image",JS_NewBool(ctx,true));
-    PUT(out,"imageStretch",JS_NewBool(ctx,true));
-    PUT(out,"imageRotation",JS_NewBool(ctx,true));
-    PUT(out,"groupOpacity",JS_NewBool(ctx,true));
-    PUT(out,"modal",JS_NewBool(ctx,!overlay_profile));
-    PUT(out,"animation",JS_NewBool(ctx,true));
-    PUT(out,"frosted",JS_NewBool(ctx,false));
-    PUT(capacity,"commands",JS_NewInt32(ctx,KSN_APP_COMMANDS));
-    PUT(capacity,"textBytes",JS_NewInt32(ctx,KSN_APP_TEXT_BYTES));
-    PUT(capacity,"refs",JS_NewInt32(ctx,KASANE_REF_LIMIT));
-    PUT(capacity,"animations",JS_NewInt32(ctx,KSN_APP_TRACKS));
-    PUT(cache,"commands",JS_NewInt32(ctx,KSN_CACHE_COMMANDS));
-    PUT(cache,"templates",JS_NewInt32(ctx,KSN_CACHE_TEMPLATES));
-    PUT(cache,"instances",JS_NewInt32(ctx,KSN_CACHE_INSTANCES));
-    PUT(out,"capacity",JS_DupValue(ctx,capacity));
-    PUT(out,"cache",JS_DupValue(ctx,cache));
-    JS_FreeValue(ctx,capacity);JS_FreeValue(ctx,cache);return out;
-fail:
-    JS_FreeValue(ctx,out);JS_FreeValue(ctx,capacity);JS_FreeValue(ctx,cache);
-    return JS_EXCEPTION;
-}
 
 static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
@@ -435,14 +232,6 @@ fail:
 }
 #undef PUT
 
-static JSValue js_input_scope(JSContext *ctx, JSValueConst self, int argc,
-                              JSValueConst *argv) {
-    (void)self;(void)argc;(void)argv;
-    ksn_input_scope scope=pocket_kasane_input_scope(false);
-    const char *name=scope==KSN_INPUT_MODAL?"modal":scope==KSN_INPUT_BLOCKED?"blocked":"app";
-    return JS_NewString(ctx,name);
-}
-
 static const JSCFunctionListEntry tx_methods[]={
     JS_CFUNC_DEF("background",1,js_tx_background_checked),
     JS_CFUNC_DEF("rect",1,js_tx_rect_checked),
@@ -474,3 +263,19 @@ static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),
     JS_CFUNC_DEF("setVisible",2,js_instance_visible_checked),
 };
+
+#ifdef POCKET_KASANE_TEST_HOOKS
+/* Host tests only (tools/build_kasane_test.sh defines the macro; the firmware
+ * never does, so this costs no flash). api-reorg P5 removed kasane.poll and
+ * kasane.cancel from JS, but the repair path after a cancelled or failed
+ * presentation is still real C behaviour -- the shell discards an APP
+ * submission when it must -- and these two functions let a test drive it. */
+ksn_submission pocket_kasane_test_poll(void){
+    apply_outcome();
+    return state?ksn_view_poll(view()):(ksn_submission){0};
+}
+bool pocket_kasane_test_cancel(uint32_t ticket){
+    if(!state||!ticket||ksn_view_cancel(view(),(ksn_tx){ticket})!=KSN_OK)return false;
+    apply_outcome();return true;
+}
+#endif

@@ -404,6 +404,8 @@ Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の
 
 受け入れ基準: (a) `apps/` と `main/` に、消した名前の呼び出しが無い（grep）。(b) Q4: flash の減りを測って記録する。`overlay` の項目を消した場合は静的 DRAM −1,440 B。(c) r5sim の `shiki`・`derby`・`hud` のカウントが増えない。(d) host の検査一式、`tools/test_settings.py`・`capture_home.py`（メニューの行を変えた場合）。(e) 実機: smoke（`smoke_device.py`）、player の overlay（`onKey` が動く）、HELLO、DERBY、STRESS。
 
+**実施（2026-11-13、`p5-remove`）。** 消したもの: `features`、`poll`・`cancel`・ticket（`replace`/`patch` は何も返さない。ticket の JS クラスと owner 台帳 2 件 `ticket_owner`・`scene_owner` も消し、`tools/pocket/run_class_registry.py` の台帳は 22 → 20）、`createScene`（ネイティブの scene 制御器ごと。参照モデルの `apps/kasane/create_scene.js` も消した）、`inputScope`、グローバルの `gridFold`（`grid_fold.js` は `{fold, index, view}` を評価値として返し、`pocket_grid.c` が `pocket.kasane.grid` の裏で保持する）、`shiki.grid`、`pocket.overlay.begin/rect/text`（`items[24]` と合成の経路 `overlay_paint`）。`modal` は残した。`apiVersion` は `"0.2.0"`、manifest の範囲は `>=0.2.0 <0.3.0`。起動前の拒否は足していない（§7.3）。r5sim の `shiki_v1` は外した（[計測記録](logs/api-reorg-perf.md) §5）。実測: ファームの DIRAM −1,488 B（174,064 → 172,576）、Flash Code −5,184 B（1,696,768 → 1,691,584）、r5sim の `shiki`/`hud`/`derby` のカウントは揺れの内（+5/−3/+3）。host の検査は、`poll`/`cancel` の復旧経路を試験する `tools/test_pocket_kasane.c` のために、`POCKET_KASANE_TEST_HOOKS`（`tools/build_kasane_test.sh` だけが定義し、ファームには入らない）の `pocket_kasane_test_poll/cancel` を足した。実機の検査（smoke・player・HELLO・DERBY・STRESS）は未実施。
+
 ### P6 — ファイルの改名（任意。Sonnet、機械的）
 
 範囲: §4.4 の 2 ファイル。先に `grep -rn "main/" tools/` で参照元の一覧を作り、同じコミットで全部直す。

@@ -15,9 +15,8 @@ execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../pet_header.py"
 #            pocket.kasane.shiki), as tools/build_stress_app_test.sh builds it
 #            on the host: the app's Shiki programs become the built-in table
 #            (Node 16+).
-#   shiki_v1 the same STRESS frozen as of 4840504 (stress_shiki_v1.js and its
-#            programs stress_shiki_v1_prog.js, byte for byte): the old API's
-#            calls, kept running while the apps move to the new ones.
+#            (A frozen copy of the pre-reorg STRESS, "shiki_v1", ran here until
+#            api-reorg P5 removed the calls it exercised.)
 #   derby    DERBY WATCH's demo race (apps/derby, its chunks lowered and its
 #            @shiki programs compiled as main/CMakeLists.txt does), with
 #            pocket.derby, pocket.app.load and pocket.input; counts per scene.
@@ -31,9 +30,6 @@ set(R5SIM_SHIKI_ROM "")
 if(R5SIM_APP STREQUAL "shiki")
     set(R5SIM_SHIKI_ROM "stress=apps/stress/stress_prog.js")
     set(R5SIM_APP_JS "${R}/apps/stress/stress.js")
-elseif(R5SIM_APP STREQUAL "shiki_v1")
-    set(R5SIM_SHIKI_ROM "stress=tools/r5sim/main/stress_shiki_v1_prog.js")
-    set(R5SIM_APP_JS "${CMAKE_CURRENT_LIST_DIR}/stress_shiki_v1.js")
 elseif(R5SIM_APP STREQUAL "derby")
     # pocket.app.load()'s table for local.derby alone, as main/CMakeLists.txt
     # makes it; the prog chunk without its @shiki functions (lower_plans.mjs),
@@ -60,7 +56,7 @@ elseif(R5SIM_APP STREQUAL "derby")
 elseif(R5SIM_APP STREQUAL "hud")
     set(R5SIM_APP_JS "${R}/apps/lcdcatch/lcd_catch.js")
 elseif(R5SIM_APP)
-    message(FATAL_ERROR "R5SIM_APP=${R5SIM_APP}: one of shiki, shiki_v1, derby, hud (or unset)")
+    message(FATAL_ERROR "R5SIM_APP=${R5SIM_APP}: one of shiki, derby, hud (or unset)")
 endif()
 if(R5SIM_SHIKI_ROM)
     find_program(R5SIM_NODE node REQUIRED)
@@ -140,8 +136,6 @@ if(R5SIM_APP STREQUAL "derby")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_DERBY)
 elseif(R5SIM_APP STREQUAL "hud")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_HUD)
-elseif(R5SIM_APP STREQUAL "shiki_v1")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_SHIKI_V1)
 endif()
 # -DR5SIM_GUEST_ALLOC=1: the firmware guest's allocator (R3 block cache over
 # heap_caps) instead of JS_NewRuntime's malloc (docs/vm/qjs-observe.md).

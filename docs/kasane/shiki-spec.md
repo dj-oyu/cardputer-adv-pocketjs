@@ -281,7 +281,7 @@ v1 の凍結後、2 つの独立した実装（C のエンジンと参照実装�
 
 ## 7. 格子の式
 
-v1 では、今の `pocket.kasane.grid` の int16 の IR（`CONST`・`LOAD`・`ADD`・`MUL`・`MIN`、[grid-js-notation.md](grid-js-notation.md)）を、意味を変えずに `pocket.kasane.shiki.grid` へ移す。線の式との番地の規則の統一は v2。
+v1 では、今の `pocket.kasane.grid` の int16 の IR（`CONST`・`LOAD`・`ADD`・`MUL`・`MIN`、[grid-js-notation.md](grid-js-notation.md)）を、意味を変えずに `pocket.kasane.shiki.grid` へ移す、としていた。**実装は移さず、`pocket.kasane.grid` のまま使う**（api-reorg P5、2026-11-13 で、写しの `shiki.grid` を消した。入口は 1 つ）。線の式との番地の規則の統一は v2。
 
 ## 8. `@shiki` の記法
 
@@ -394,7 +394,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 | `heap()` | | |
 | `data(desc)`・`release(窓)` | §9.3、§9.2 | 予算・領域の数: `LIMIT_EXCEEDED`。結び付いた handle が残る: `BUSY`。別の view: `INVALID_ARGUMENT`。解放済み: `CLOSED` |
 | `fields(窓)` | §9.3 | 別の view（`fields()` の view を含む）: `INVALID_ARGUMENT`。解放済み: `CLOSED`。view を作るゲストのメモリが足りなければ、QuickJS の例外（`PocketError` ではない） |
-| `grid.*` | §7。`pocket.kasane.grid` と同じオブジェクト（`shiki.grid === pocket.kasane.grid`）。api-reorg P3（2026-11-13）から、`shiki.grid` は最初に読んだ時に `pocket.kasane.grid` を読んで値に置き換わる getter（`shiki` を読むだけでは grid を作らない）。この写しは [api-reorg.md](api-reorg.md) の P5 で消す | 旧 API と同じ |
+| `grid.*` | **無い**。格子は §7 のとおり `pocket.kasane.grid`（`fold`・`index`・`view`・`register`…）を使う。`shiki.grid` は、`pocket.kasane.grid` と同じオブジェクトの写しだったが、api-reorg P5（2026-11-13）で消した（読むと `undefined`） | — |
 
 **`drawMany(handles, inputs, stride)`（v1.5）**: 複数の draw を 1 回の呼び出しで行う。
 
@@ -430,7 +430,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 3. DERBY の式の移行（`prail`・`pt` は `@q` を足す）。`pocket.derby.ser()` は実数のまま渡す（§2.4）。MEGADEMO・BIG WAVE。
 4. データ領域（`EACH`・`FETCH`・`PUT`・`LOOKUP`）と Shiki のヒープ、`js_array_buffer_transfer` の門。旧 API の型付きの点（`points`）を使う式は、`i16` の領域と `EACH`・`FETCH`・`PLOT` に書き直す。
 5. `.H` の列の PIE への下ろし。
-6. すべてのアプリが移ったら、旧 API（float の plan、`pocket.kasane.procedural`、グローバルの `gridFold`）を消す。
+6. すべてのアプリが移ったら、旧 API（float の plan、`pocket.kasane.procedural`、グローバルの `gridFold`）を消す。float の plan と `procedural` は Shiki v2.0、`gridFold` のグローバルと `shiki.grid` は api-reorg P5 で消した（`fold`・`index`・`view` は `pocket.kasane.grid` の中）。
 
 ## 12. 未決の一覧
 

@@ -9,7 +9,7 @@
 | 負荷 | 中身 | ターン |
 | --- | --- | --- |
 | `shiki` | 今の `apps/stress/stress.js`（Shiki で描く STRESS、LV1） | 120、61〜120 を数える |
-| `shiki_v1` | `4840504` の `stress.js` と `stress_prog.js` の固定の写し（`tools/r5sim/main/stress_shiki_v1*.js`）。アプリを新しい呼び方へ移した後も、古い呼び方のままの負荷でファームの退行を見る（P5 で古い呼び方を消す時に終わる） | 120、61〜120 |
+| `shiki_v1` | `4840504` の `stress.js` と `stress_prog.js` の固定の写し（`tools/r5sim/main/stress_shiki_v1*.js`）。アプリを新しい呼び方へ移した後も、古い呼び方のままの負荷でファームの退行を見るためのもの。**P5（2026-11-13）で終わった**: 呼んでいた `poll`・`cancel`・`features`・`gridFold`・`shiki.grid` などを消したので、負荷と `tools/r5sim/main/stress_shiki_v1*.js`・`-DR5SIM_APP=shiki_v1` を `reorg.sh` から外した。以後の行は、この列が無い（下の「§3.1 の P5 以降の表」）。 | 120、61〜120 |
 | `hud` | LCD CATCH（`apps/lcdcatch`）。Shiki なし、保持型（`replace`/`patch`・ref・cache）だけ。ターン 30 で GAME A、以後は `test_lcd_catch_host.c` と同じボット（一番下の星の列へ 1 ターン 1 回の打鍵）がターンの外で `lcdCatch.sky` を読んで `pocket.input` へ鍵を入れる | 240、61〜240 |
 | `derby` | DERBY WATCH のデモのレース 1 本。チャンクは `make_app_chunks.py` と `lower_plans.mjs`、Shiki の表は `emit_shiki_rom.mjs` でファームと同じに作る。`pocket.derby`・`pocket.app.load`・`pocket.input` は本物、店・音・乱数の種は `test_derby_host.c` の台本と同じ（1500 点、レース 3、種 `0x2545f491`）。`pocket.time.now()` は 1 ターン 33.3 ms で、ターン 91 で 15 s 進めてデモを始める（450 ターンの待機を省く）。デモの終わり（`DERBY DEMO END`）で止める | 1773（今の像）、場面別は 31 から、全体は 61 から |
 
@@ -196,3 +196,15 @@ host（実測）:
 | 900 フレーム（`-m32`、上限 160 KiB） | OOM 11（すべて `frame`）、表示の誤り 0、PASS | OOM 11（すべて `frame`）、表示の誤り 0、PASS |
 
 900 フレームの digest は一致しない: LV3 の最初の OOM が前は 700 フレームの後の `read`、後は 702 フレームの `frame` で起き（ターンの確保が減ってヒープの並びが動いた）、`frame` の OOM は `paint()` を飛ばすので泡の位置がそこから 1 歩ずれる。式への入力・データ領域・HUD の文字は、記録する stub で前後の `stress.js` を 6,000 フレーム走らせ、毎フレーム一致を確かめた（Float64 の入力は §2.4 で換算して比べる。省いた VHS の draw は、前の版で y −40 の画面外）。
+
+## 5. P5（古い呼び方を消した後、2026-11-13）
+
+`shiki_v1` の負荷が終わったので、表の列が 1 つ減った（`tools/r5sim/reorg.sh` の行も 1 列短い）。列: `shiki` / `hud` / `derby` の `per_turn`、`derby` の場面、確保は `shiki` / `hud` / `derby`、`heap_used` は同じ順。比べる前の行は P4 の後の `69c92cc`（ファーム DIRAM 174,064、Flash Code 1,696,768、いずれも同じ作業木の外の worktree で組んだ値）。
+
+| 日付 | sha | shiki | hud | derby | wait | wide | field | vision | headon | 確保/ターン | heap_used | r5sim flash | fw DIRAM | fw flash |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-13 | `69c92cc` (P4 の後) | 142560 | 10375 | 134217 | - | - | - | - | - | 156 / 3 / 57 | 74696 / 47900 / 101108 | 554296 | 174064 | 1696768 |
+| 2026-11-13 | `69c92cc+dirty` (P5) | 142565 | 10372 | 134220 | 44097 | 201085 | 106691 | 116151 | 79644 | 156 / 3 / 57 | 74696 / 47900 / 101108 | 550204 | 172576 | 1691584 |
+
+- **カウント**: `shiki` +5（+0.004%）、`hud` −3、`derby` +3。どれも配置の揺れ（0.05% 未満、§2）の内で、確保の回数と `heap_used` は同一。JS の仕事は変わっていない（消したのは呼ばれていない入口）。
+- **大きさ（map、`idf.py size`）**: ファームの DIRAM −1,488 B（`pocket_overlay.c` の `items[24]` の `.bss` −1,440 B が主で、残りの 48 B は内訳を取っていない）、Flash Code −5,184 B。r5sim の像（`shiki`）の Flash Code は −4,092 B。

@@ -36,7 +36,7 @@ run() {   # run <workload>: fast.sh's lines in $OUT/<workload>.txt
     grep -q "R5SIM done frames=[0-9]* oom=0 fail=0 bad_present=0" "$OUT/$1.txt" ||
         { cat "$OUT/$1.txt" >&2; echo "reorg.sh: $1 did not finish cleanly" >&2; exit 1; }
 }
-for w in shiki shiki_v1 hud derby; do run "$w"; done
+for w in shiki hud derby; do run "$w"; done
 
 # field <file> <line pattern> <key>: the value of key= on the first such line.
 field() { grep -E "$2" "$1" | head -1 | tr ' ' '\n' | sed -n "s/^$3=//p" | head -1; }
@@ -58,10 +58,10 @@ fi
 
 SHA=$(git -C "$R" rev-parse --short HEAD)
 git -C "$R" diff --quiet HEAD -- main components apps tools/r5sim 2>/dev/null || SHA="$SHA+dirty"
-ROW="| $(date +%F) | \`$SHA\` | $(turn shiki) | $(turn shiki_v1) | $(turn hud) | $(turn derby) |"
+ROW="| $(date +%F) | \`$SHA\` | $(turn shiki) | $(turn hud) | $(turn derby) |"
 ROW="$ROW $(scene wait) | $(scene wide) | $(scene field) | $(scene vision) | $(scene headon) |"
-ROW="$ROW $(alloc shiki) / $(alloc shiki_v1) / $(alloc hud) / $(alloc derby) |"
-ROW="$ROW $(heap shiki) / $(heap shiki_v1) / $(heap hud) / $(heap derby) |"
+ROW="$ROW $(alloc shiki) / $(alloc hud) / $(alloc derby) |"
+ROW="$ROW $(heap shiki) / $(heap hud) / $(heap derby) |"
 ROW="$ROW $(flash shiki) | $FW_DIRAM | $FW_FLASH |"
 echo "$ROW"
 if [ "$APPEND" = 1 ]; then

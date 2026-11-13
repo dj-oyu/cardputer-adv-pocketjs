@@ -3,8 +3,8 @@
  *
  * On the device pocket.kasane is a lazy namespace: the first read runs
  * build_kasane (main/pocket/pocket_kasane.c), which registers the classes,
- * the functions, cache, and the grid, video and pixel members (grid also puts
- * gridFold on the global object), and kasane.shiki when the session has a
+ * the functions, cache, and the grid, video and pixel members,
+ * and kasane.shiki when the session has a
  * Shiki heap. The host's pocket_api_lazy (tools/hostshim/pocket_api_stub.c)
  * runs that same build at install, so the guest heap just before and just
  * after pocket_kasane_install is the cost of the first read, without the
@@ -13,7 +13,7 @@
  *
  * The heap is charged as the device's TLSF would be (request rounded up to
  * 4 B, 12 B minimum: the model of tools/games/test_lcd_catch_host.c), after a
- * GC on both sides. Then grid (with the global gridFold), video and pixel are
+ * GC on both sides. Then grid, video and pixel are
  * each installed alone on a fresh object in a fresh session: their share.
  * kasane.shiki's is the difference between the two sessions.
  *
@@ -57,10 +57,10 @@ void pocket_video_sd_stream_release(pocket_video_sd_stream *s){(void)s;}
 int pocket_video_sd_stream_state(const pocket_video_sd_stream *s){(void)s;return -1;}
 bool pocket_video_sd_stream_stop(pocket_video_sd_stream *s){(void)s;return true;}
 void pocket_video_sd_stream_reap(void){}
-/* gridFold is a lazy global evaluated from apps/kasane/grid_fold.js when
- * first read, so its source is not part of the first read of pocket.kasane
+/* The grid frontend (fold/index/view) is evaluated from apps/kasane/grid_fold.js
+ * on its first call, so its source is not part of the first read of pocket.kasane
  * (as tools/kasane_contract/test_megademo_app_host.c stands it in). */
-const char grid_fold_js_start[] asm("_binary_grid_fold_js_start") = "globalThis.gridFold={};";
+const char grid_fold_js_start[] asm("_binary_grid_fold_js_start") = "({});";
 const char grid_fold_js_end[] asm("_binary_grid_fold_js_end") = "";
 /* No built-in Shiki programs: register() is not called here. */
 const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return NULL;}
@@ -111,7 +111,7 @@ static void session(bool shiki){
 }
 
 /* One member alone, installed on a fresh object of a fresh session: what it
- * adds to every first read (grid also defines the lazy global gridFold). */
+ * adds to every first read. */
 static void member(const char *name,esp_err_t (*install)(JSContext *,JSValueConst)){
     JSRuntime *rt=JS_NewRuntime2(&PEAK_MF,NULL);
     JSContext *ctx=JS_NewContext(rt);
@@ -133,7 +133,7 @@ int main(void){
     session(false);
     session(true);
     printf("the members, each alone:\n");
-    member("grid (and gridFold)",pocket_grid_install);
+    member("grid",pocket_grid_install);
     member("video",pocket_video_install);
     member("pixel",pocket_pixel_install);
     printf("%s\n",fails?"KASANE_NS_COST FAIL":"KASANE_NS_COST PASS");
