@@ -1,0 +1,10 @@
+baseline heap 1b0b7e8cd3232153831bc362a34c08d7bbe06c00a770f14632ed5942ecd0cc82 stop a5627b5830f7e103aae4bf1d05261cfb66a65bfe8db79828c5cbc892713c482e
+actual app_stop / stub owners: partial startup, finalizer, delayed release, repeated stop: PASS
+actual app_stop / stub owners: partial startup, finalizer, delayed release, repeated stop: PASS
+reset-return matrix: AV/Kasane 4 combinations, held owner, repeated stop, restart: PASS
+reset-return matrix: AV/Kasane 4 combinations, held owner, repeated stop, restart: PASS
+closing rejects restart; last free permits clean restart: PASS
+closing rejects restart; last free permits clean restart: PASS
+PR131 heap 1b0b7e8cd3232153831bc362a34c08d7bbe06c00a770f14632ed5942ecd0cc82 stop abeae399896470ff139c3f992c7a45ed07b0dfd5577955156b361f25291ed639
+PR131 stop with stub settle returning error: AV/Kasane 4 combinations, held owner, repeated stop, restart: PASS
+PR131 stop with stub settle returning error: AV/Kasane 4 combinations, held owner, repeated stop, restart: PASS
