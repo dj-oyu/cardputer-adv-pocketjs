@@ -15,3 +15,19 @@ Not accepted: production method dispatch, JS/Scene integration, OOM/ready/worksp
 Snapshot capacity follow-up: the native test also checks zero/one-byte-short packet capacity, work-limit exhaustion, exact-capacity retry, and failed second-append prefix/guard preservation without allocation. This is single-packet append admission, not heap OOM, multi-node cursor retry, or whole-frame rollback. Existing snapshot-after-free image checks remain separate.
 
 Known-axis follow-up: 48 signed-permutation cases cover X/Y/Z rotations by 0/90/180/270 degrees, all four influence slots, arbitrary translation and independently normalized normals. These exercise all matrix-to-quaternion conversion branches. Single-influence half-turn acceptance is separate from the existing ambiguous multi-influence half-turn rejection. The test-only DQ header was byte-equal to the published mixed branch production header at 3fc5166a (SHA-256 a926365a010507b935b7ce31f0cff84c3a498562f554818274f6a7cc5707a455); this does not establish full production dispatch or target behavior.
+
+## Connect the same oracle to production headers
+
+Run `python3 tools/ayatsuri/dq-oracle/host/run.py NEW_OUTPUT --product-root PRODUCT_CHECKOUT`.
+This compiles the **same** core and native tests against that checkout's
+`main/ayatsuri/ayatsuri_skin_dq.h`, model/renderer sources, fixture generator,
+and existing render helper. No test-support include directory is added in this mode;
+a missing production DQ header is an error, not a fallback to the experimental copy.
+Compiler header traces (`*.compile.log`), separate test/source heads, source hashes,
+commands and logs are saved. Both checkouts remain untouched.
+
+The product-header mode was exercised against the Scene integration tree
+`75f005d233f1fa32799c1cc7af50591fc6dbda09` (public commit `94fde6ab`).
+This closes the copied-header-only oracle gap, but it does not invoke JS dispatch,
+Scene admission, allocator failure paths, real display, or the device. Those require
+the distinct integration tests; do not describe this runner as full product acceptance.
