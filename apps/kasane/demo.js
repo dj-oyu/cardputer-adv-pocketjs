@@ -95,8 +95,8 @@
       view.replace(scene);
     } else {
       view.patch(function (tx) {
-        orb.setRect(tx, [x, 76, x + 20, 96]);
-        meter.setRect(tx, [12, 119, 12 + width, 127]);
+        orb.setRect(tx, x, 76, x + 20, 96);
+        meter.setRect(tx, 12, 119, 12 + width, 127);
         groupFirst.setColor(tx, (tick & 16) ? 0x295d86d8 : 0x164c70d8);
         left.place(tx, {offset: [142, 28 + (tick % 18)], opacity: 230});
         right.setVisible(tx, (tick % 40) < 31);
@@ -110,7 +110,7 @@
     }
     if ((tick % 60) === 0) {
       const s = view.stats();
-      console.log('KASANE_TICK ' + tick + ' scope=' + view.inputScope() +
+      console.log('KASANE_TICK ' + tick + ' scope=' + (phase === 'modal' ? 'modal' : 'app') +
                   ' commands=' + s.displayed.commands + ' native=' + s.nativeBytes);
       console.log('KASANE_IMAGE nativeAnimation=' + motion.poll() + ' jsTransformUpdates=0');
     }

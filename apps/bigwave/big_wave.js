@@ -347,7 +347,7 @@
     if (!ch.length || fr - built < 2) return;
     V.patch(tx => ch.forEach(k => {
       const w = k === 'm' ? 12 : 6, x = k === 'm' || k === 's' ? rnd(120 - o[k].length * w / 2) : 0;
-      if (x) R[k].setRect(tx, [x, k === 'm' ? 22 : 116, 240, k === 'm' ? 40 : 126]);
+      if (x) R[k].setRect(tx, x, k === 'm' ? 22 : 116, 240, k === 'm' ? 40 : 126);
       R[k].setText(tx, o[k] || ' '); shown[k] = o[k];
     }));
     shown.st = s.st;

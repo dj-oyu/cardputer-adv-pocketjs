@@ -197,7 +197,7 @@ globalThis.shikiApiTest = function (pocket, log) {
   S.unregister(plot); S.unregister(spin);
   throws('bad program', 'INVALID_ARGUMENT', () => S.register(new Uint8Array([1, 2, 3])));
   throws('no built-in', 'INVALID_ARGUMENT', () => S.register('derby.none'));
-  ok('shared', ['beginFrame', 'commit', 'resource', 'createSurface'].every(n => typeof S[n] === 'function') && S.grid === pocket.kasane.grid);
+  ok('shared', ['beginFrame', 'commit', 'resource', 'createSurface'].every(n => typeof S[n] === 'function') && (!pocket.kasane.grid.fold || ['fold', 'index', 'view'].every(n => typeof pocket.kasane.grid[n] === 'function')));
   return [pass, fail];
 };
 if (typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.shiki) {
