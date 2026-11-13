@@ -13,18 +13,24 @@
  * (posts' feet and tops, the turf stripes' ends, the stands' tier ends) and
  * matched both ways (nearest point, max of |dx|, |dy|, on-screen points only).
  *
+ * The cull runs on both integer paths, the PIE kernels' (their scalar
+ * reference, main/pocket/derby_ser_pie.c with DERBY_SERPIE_HOST: margin
+ * m + 1 m) and the scalar one (derby_ser_int.c: m + 3 m); the integer side
+ * draws with the PIE path's, the product's default (sec.13).
+ *
  * Gate (the user's decision, sec. "利用者の決定"): no saturated input, no
  * skipped draw, Newton's start and step, the line counts, the chords' joins
- * within 1 px, the integer cull keeping every chord the double ou() keeps,
+ * within 1 px, both integer culls keeping every chord the double ou() keeps,
  * no call where the double draws on the screen and the integers draw
  * nothing, and calls with a point over 2 px apart (a tie flipped: one post
  * or stripe) at most 1 in 10,000. The distances are recorded, not gated.
  *
- *   gcc -O2 -DDERBY_SER_CHECK -DDERBY_SER_COUNT -Imain/pocket tools/games/test_derby_serq.c \
- *       main/pocket/derby_ser_int.c -lm -o test-derby-serq && ./test-derby-serq [fuzz cases]
+ *   gcc -O2 -DDERBY_SER_CHECK -DDERBY_SER_COUNT -DDERBY_SERPIE_HOST -Imain/pocket tools/games/test_derby_serq.c \
+ *       main/pocket/derby_ser_int.c main/pocket/derby_ser_pie.c -lm -o test-derby-serq && ./test-derby-serq [fuzz cases]
  * (tools/games/run_derby.py builds and runs it with 10,000 fuzz cases; the
  * full 40,000 of the design's table by hand.) */
 #include "derby_ser_int.h"
+#include "derby_ser_pie.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,6 +45,8 @@ static int nsec,nends;
 static double sec[4][7],dnr=11,ch[32];
 static int32_t qch[32],qpos[32][2],qt30[32][2];
 static int16_t qt14[32][2];
+static dsp_ends dsE;
+static dsp_rot_k dsK;
 static void pose(double g,double w,double o[4]){
     if(!nsec){o[0]=g;o[1]=w;o[2]=1;o[3]=0;return;}
     int i=0;
@@ -70,6 +78,9 @@ static void course(bool oval){
         qt30[i][0]=(int32_t)floor(m[2]*1073741824.0+.5);qt30[i][1]=(int32_t)floor(m[3]*1073741824.0+.5);
         qt14[i][0]=(int16_t)floor(m[2]*16384+.5);qt14[i][1]=(int16_t)floor(m[3]*16384+.5);
     }
+    int32_t nx[32],nz[32];
+    for(int i=0;i<nends;i++){nx[i]=-qt30[i][1];nz[i]=qt30[i][0];}
+    dsp_set_course(&dsE,(unsigned)nends,nx,nz);
     nslot=0;
 }
 
@@ -89,27 +100,42 @@ static bool ou(int j,double w,double m,double zf_){
     const double *V=VE+4*j,f=pc[4],k=m*fr,l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
     return (d<.02*f-m&&D<.02*f-m)||(d>zf_+m&&D>zf_+m)||(160*d+l*f<-k&&160*D+L*f<-k)||(160*d-l*f<-k&&160*D-L*f<-k);
 }
-static long cull_calls,cull_lost,cull_extra,cull_kept;
-static uint32_t keep_mask(int32_t w,int32_t m){
+static long cull_calls,cull_lost,cull_extra,cull_kept,pie_lost,pie_extra,pie_scalar_diff;
+/* pocket_derby.c's cull() on both paths. */
+static uint32_t cull_path(bool pie,int32_t w,int32_t m){
     const unsigned chords=(unsigned)nends-1u;
     const uint32_t all=(1u<<chords)-1u;
-    derby_cull_q p;
-    if(!derby_ser_cull_params(&cq,w,m,&p))return all;
-    uint32_t keep=derby_ser_cull_ref(&soa,chords,&p);
-    const uint32_t wc=(qwide|qwide>>1)&all;
-    keep&=~wc;
+    uint32_t keep,wc;
+    if(pie){
+        dsp_cull_k k;
+        if(!dsp_cull_consts(&k,cq.f,cq.fr16,cq.zf,w,m))return all;
+        keep=dsE.valid&~dsp_cull_ref(&dsE,&k);
+        wc=all&~dsE.valid;
+    }else{
+        derby_cull_q p;
+        if(!derby_ser_cull_params(&cq,w,m,&p))return all;
+        wc=(qwide|qwide>>1)&all;
+        keep=derby_ser_cull_ref(&soa,chords,&p)&~wc;
+    }
     for(uint32_t b=wc;b;b&=b-1u){
         const unsigned j=(unsigned)__builtin_ctz(b);
         if(!derby_ser_cull_wide(&cq,qpos[j],qpos[j+1],qt30[j],qt30[j+1],w,m))keep|=1u<<j;
     }
-    /* Conservative: every chord the double ou() keeps. */
+    return keep;
+}
+static uint32_t keep_mask(int32_t w,int32_t m){
+    const uint32_t keep=cull_path(true,w,m),ks=cull_path(false,w,m);
+    /* Conservative: every chord the double ou() keeps, on both paths. */
     if(nsec){
         cull_calls++;
-        for(unsigned j=0;j<chords;j++){
-            const bool d=!ou((int)j,w/QM,m/QM,zf),q=keep>>j&1;
+        for(unsigned j=0;j<(unsigned)nends-1u;j++){
+            const bool d=!ou((int)j,w/QM,m/QM,zf),q=ks>>j&1,p=keep>>j&1;
             if(d&&!q)cull_lost++;
             if(q&&!d)cull_extra++;
+            if(d&&!p)pie_lost++;
+            if(p&&!d)pie_extra++;
             if(d)cull_kept++;
+            if(p!=q)pie_scalar_diff++;
         }
     }
     return keep;
@@ -130,11 +156,13 @@ static void view(double extra){
     cq.dx=(int32_t)floor(pc[2]*1073741824.0+.5);cq.dz=(int32_t)floor(pc[3]*1073741824.0+.5);
     cq.cx=(int16_t)floor(pc[2]*16384+.5);cq.cz=(int16_t)floor(pc[3]*16384+.5);
     cq.f=(int32_t)floor(pc[4]*65536+.5);cq.invf=(int32_t)floor(4294967296.0/pc[4]+.5);
-    cq.zf=(int32_t)floor(zf*65536+.5);cq.zn=cq.f/50;cq.fr3=(int32_t)ceil(fr*8);
+    cq.zf=(int32_t)floor(zf*65536+.5);cq.zn=cq.f/50;cq.fr3=(int32_t)ceil(fr*8);cq.fr16=(int32_t)ceil(fr*65536);
     if(nsec){
         derby_ends_soa_init(&soa,soa_mem,(unsigned)nends);
         qwide=derby_ser_prepare(&soa,&cq,(const int32_t (*)[2])qpos,(const int16_t (*)[2])qt14,(unsigned)nends);
         derby_ser_rotate_ref(&soa,cq.cx,cq.cz);
+        dsp_set_camera(&dsE,&dsK,&qpos[0][0],&qpos[0][1],2,cq.ex,cq.ez,cq.dx,cq.dz);
+        dsp_rotate_ref(&dsE,&dsK);
         qvc=keep_mask(1671168,30*65536);
     }else qvc=1;
 }
@@ -292,8 +320,9 @@ static void report(const char *name,double swap_limit){
     printf("  on-screen points %ld: <=0.01 px %ld, <=0.1 %ld, <=0.5 %ld, <=1 %ld, <=2 %ld, >2 %ld; worst %.4f px\n",
            npts,hist[0],hist[1],hist[2],hist[3],hist[4],hist[5],worst);
     printf("  calls with a point over 2 px %ld (limit %.0f), calls drawn by the double only %ld\n",swap_calls,swap_limit,missing);
-    printf("  cull: %ld series x chords kept by ou() %ld, lost by the integers %ld, extra %ld (%.1f%%)\n",cull_calls,cull_kept,
-           cull_lost,cull_extra,cull_kept?100.0*cull_extra/cull_kept:0);
+    printf("  cull: %ld series x chords kept by ou() %ld; PIE path (drawn) lost %ld, extra %ld (%.1f%%); scalar lost %ld, "
+           "extra %ld (%.1f%%); kept by one path only %ld\n",cull_calls,cull_kept,pie_lost,pie_extra,
+           cull_kept?100.0*pie_extra/cull_kept:0,cull_lost,cull_extra,cull_kept?100.0*cull_extra/cull_kept:0,pie_scalar_diff);
     printf("  integers: chords %u (drawn %u), draws %u, saturated %u, skipped %u",st.chords,st.drawn,st.draws,st.sat,st.bad);
 #ifdef DERBY_SER_CHECK
     printf(", newton start %u step %u, counts %u, joins %u (over 1 px %u, worst %.4f px)",st.newton_start,st.newton_step,
@@ -304,13 +333,13 @@ static void report(const char *name,double swap_limit){
     printf("  per chord: mul64 %.1f, div64 %.2f, div32 %.2f, isqrt %.2f\n",(double)st.mul64/st.chords,(double)st.div64/st.chords,
            (double)st.div32/st.chords,(double)st.isqrt/st.chords);
 #endif
-    bool bad=st.sat||st.bad||cull_lost||missing||swap_calls>swap_limit;
+    bool bad=st.sat||st.bad||cull_lost||pie_lost||missing||swap_calls>swap_limit;
 #ifdef DERBY_SER_CHECK
     bad=bad||st.newton_start||st.newton_step||st.count_range||st.join_bad;
 #endif
     if(bad){printf("  FAIL\n");failures++;}
     memset(hist,0,sizeof hist);npts=calls=draw_diff=cnt_ref=cnt_int=swap_calls=missing=on_a=on_b=0;worst=0;
-    cull_calls=cull_lost=cull_extra=cull_kept=0;memset(&st,0,sizeof st);
+    cull_calls=cull_lost=cull_extra=cull_kept=pie_lost=pie_extra=pie_scalar_diff=0;memset(&st,0,sizeof st);
 }
 int main(int argc,char **argv){
     const int cases=argc>1?atoi(argv[1]):40000;

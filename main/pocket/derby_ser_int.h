@@ -11,8 +11,10 @@
  * the camera's frame and the chord culling (ou()) work on int16 lanes in a
  * struct of arrays: derby_ser_rotate_ref() and derby_ser_cull_ref() are the
  * scalar references, and a kernel that replaces them must give the very same
- * int16 outputs and keep-mask for every input (bit for bit; the scalar ones
- * are what the firmware runs until then). Everything they compute is defined
+ * int16 outputs and keep-mask for every input (bit for bit). The PIE kernels
+ * that ship (derby_ser_pie.h) took another form, with their own margin
+ * (m + 1 m against m + 3 m here): these two are the up key's scalar side of
+ * the A/B and the path of a build without PIE. Everything they compute is defined
  * below in exact integer terms (floor shifts, no rounding left to the
  * compiler), so a QACC accumulate (EE.VMULAS.S16.QACC) followed by a 14-bit
  * EE.SRCMB.S16.QACC gives the same numbers. */
@@ -104,6 +106,7 @@ typedef struct {
     int32_t zf;             /* far depth, Q16 m */
     int32_t zn;             /* near depth f/50, Q16 m */
     int32_t fr3;            /* sqrt(f^2 + 160^2) rounded up, Q3 px (the cull's margin scale) */
+    int32_t fr16;           /* the same, Q16 px (the PIE cull's, derby_ser_pie.h) */
     int16_t cx,cz;          /* dx, dz in Q14 (the rotation's) */
 } derby_cam_q;
 /* One chord of one series (w, s, g0), frame independent: its ends on the s
@@ -162,7 +165,7 @@ bool derby_ser_cull_wide(const derby_cam_q *c,const int32_t pa[2],const int32_t 
                          const int32_t tb[2],int32_t w,int32_t margin_q16);
 /* Fills one series' chord table: pose(g, w, out[4]) is the course's double
  * pose (x, z, tangent x, z); ends: the chord ends CH (Q16). False if a value
- * is out of range (then the series stays on the double path). */
+ * is out of range (then the call draws nothing). */
 typedef void (*derby_pose_fn)(void *user,double g,double w,double out[4]);
 bool derby_ser_table(derby_chord_q *rows,const int32_t *ends,unsigned n_ends,int32_t w,int32_t s,int32_t g0,
                      derby_pose_fn pose,void *user);

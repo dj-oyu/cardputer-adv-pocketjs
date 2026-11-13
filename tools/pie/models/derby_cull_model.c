@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
         for (unsigned i = 0; i < n; i++) {
             dspv_case K;
             if (pop) wide_case(&K, i); else dspv_case_make(&K, i);
-            dsp_set_camera(&E, &rk, C.px, C.pz, K.camx, K.camz, K.cx, K.cz);
+            dsp_set_camera(&E, &rk, C.px, C.pz, 1, K.camx, K.camz, K.cx, K.cz);
             dsp_rotate_ref(&E, &rk);
             const double cx = K.cx / 1073741824.0, cz = K.cz / 1073741824.0;
             for (unsigned e = 0; e < E.ends; e++) {

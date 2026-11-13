@@ -140,12 +140,9 @@ if(R5SIM_APP STREQUAL "derby")
     if(R5SIM_DERBY_PROF)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_DERBY_PROF)
     endif()
-    # -DR5SIM_DERBY_SER_DOUBLE=1: the series on the doubles of before from the
-    # start (pocket.derby.mode(1), the up key's B side), to measure both paths
-    # of one source (docs/apps/derby-ser-division.md sec.7.3).
-    if(R5SIM_DERBY_SER_DOUBLE)
-        target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_DERBY_SER_DOUBLE)
-    endif()
+    # The series run the scalar integer path here: QEMU has no PIE, and this
+    # image has no CONFIG_POCKET_DERBY_SER_PIE (docs/apps/derby-ser-division.md
+    # sec.13). The double series of before (R5SIM_DERBY_SER_DOUBLE) is gone.
 elseif(R5SIM_APP STREQUAL "hud")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_HUD)
 endif()

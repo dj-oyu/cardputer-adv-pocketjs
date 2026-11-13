@@ -1,9 +1,11 @@
 /* DERBY WATCH ser(): chord cull and chord-end rotation in int16 lanes, PIE
  * kernel and scalar reference. The contract is in derby_ser_pie.h; the design,
  * the error budget and the verification are docs/apps/derby-ser-division.md
- * sec.10. Firmware: compiled only with CONFIG_POCKET_DERBY_SER_PIE (default
- * off). Host: tools/pie/ builds the scalar half with DERBY_SERPIE_HOST and
- * runs the asm text through piesim.py. */
+ * sec.10 and sec.13. Firmware: compiled with CONFIG_POCKET_DERBY_SER_PIE
+ * (default y; pocket_derby.c calls it), the self-test only with
+ * CONFIG_POCKET_DERBY_SER_PIE_SELFTEST (default n). Host: tools/pie/ and the
+ * DERBY harness build the scalar half with DERBY_SERPIE_HOST; tools/pie runs
+ * the asm text through piesim.py. */
 #if defined(DERBY_SERPIE_HOST)
 #include "derby_ser_pie.h"
 #else
@@ -15,8 +17,6 @@
 #include <string.h>
 
 static inline int16_t sat16(int32_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; }
-static int64_t floor_div(int64_t a, int64_t b) { int64_t q = a / b; return (a % b && (a < 0) != (b < 0)) ? q - 1 : q; }
-static int64_t ceil_div(int64_t a, int64_t b) { return -floor_div(-a, b); }
 static int16_t clamp16(int64_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; }
 /* Q30 -> Q14 rounded half up (an arithmetic shift is a floor); Q16 -> Q3 the
  * same way, inline in dsp_set_camera(). */
@@ -34,11 +34,11 @@ void dsp_set_course(dsp_ends *E, unsigned ends, const int32_t *nx, const int32_t
     }
 }
 
-void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px, const int32_t *pz,
+void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px, const int32_t *pz, unsigned stride,
                     int32_t camx, int32_t camz, int32_t cx, int32_t cz) {
     uint64_t ok = 0;
     for (unsigned i = 0; i < E->ends; i++) {
-        const int64_t x = ((int64_t)px[i] - camx + 4096) >> 13, z = ((int64_t)pz[i] - camz + 4096) >> 13;
+        const int64_t x = ((int64_t)px[i * stride] - camx + 4096) >> 13, z = ((int64_t)pz[i * stride] - camz + 4096) >> 13;
         const bool in = x >= -DSP_REL_MAX_Q3 && x <= DSP_REL_MAX_Q3 && z >= -DSP_REL_MAX_Q3 && z <= DSP_REL_MAX_Q3;
         E->in[i / 8].v[0][i % 8] = in ? (int16_t)x : 0;
         E->in[i / 8].v[1][i % 8] = in ? (int16_t)z : 0;
@@ -55,14 +55,20 @@ bool dsp_cull_consts(dsp_cull_k *k, int32_t f, int32_t fr, int32_t zf, int32_t w
         zf < 0 || w < -(1 << 23) || w > (1 << 23) || m < 0 || m > 64 * 65536)
         return false;
     memset(k, 0, sizeof *k);
+    /* Once per ser() call (six a frame): no 64-bit division (__divdi3), only
+     * shifts of positive values (ceilings) and one 32-bit division. The
+     * values are the exact ceil/floor of the formulas in derby_ser_pie.h. */
     const int64_t m1 = (int64_t)m + 65536;                    /* m + 1 m, Q16 */
-    const int64_t K6 = ceil_div(m1 * fr, (int64_t)1 << 26) + 64 * 200;
-    const int64_t KA = ceil_div(K6, 1024);
+    const int64_t K6 = ((m1 * fr + ((int64_t)1 << 26) - 1) >> 26) + 64 * 200;   /* ceil(m1 fr / 2^26) + 12,800 */
+    const int64_t KA = (K6 + 1023) >> 10;                     /* ceil(K6 / 1024) */
     if (KA > 32767) return false;
+    /* TN = floor((8 f - 400 m1) / (50 x 65536)) = floor((f - 50 m1) / 409600);
+     * |f - 50 m1| < 2^29. */
+    const int32_t tn = f - 50 * (int32_t)m1, tq = tn / 409600 - (tn % 409600 < 0);
     k->c[DSPK_W] = (int16_t)((w + 4096) >> 13);
     k->c[DSPK_ONE] = 16384;
-    k->c[DSPK_TN] = clamp16(floor_div(8 * (int64_t)f - 400 * m1, 50 * 65536));
-    k->c[DSPK_TF] = clamp16(ceil_div((int64_t)zf + m1, 8192));
+    k->c[DSPK_TN] = clamp16(tq);
+    k->c[DSPK_TF] = clamp16(((int64_t)zf + m1 + 8191) >> 13);  /* ceil((zf + m1) / 8192) */
     k->c[DSPK_B1] = 1; k->c[DSPK_B2] = 2; k->c[DSPK_B4] = 4; k->c[DSPK_B8] = 8;
     k->c[DSPK_C1280] = 1280;
     k->c[DSPK_KA] = (int16_t)KA; k->c[DSPK_KB] = 1024;
@@ -250,7 +256,8 @@ uint32_t dsp_cull_pie(const dsp_ends *E, const dsp_cull_k *k) {
     return out & E->valid;
 }
 
-/* ---- device self-test and microbenchmark ---- */
+/* ---- device self-test and microbenchmark (a measurement build's) ---- */
+#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
 #include "derby_ser_pie_vec.h"
 
 #ifndef DSP_SELFTEST_CASES
@@ -275,7 +282,7 @@ void dsp_selftest(void) {
     for (unsigned i = 0; i < DSP_SELFTEST_CASES; i++) {
         dspv_case K;
         dspv_case_make(&K, i);
-        dsp_set_camera(&st_a, &rk, C.px, C.pz, K.camx, K.camz, K.cx, K.cz);
+        dsp_set_camera(&st_a, &rk, C.px, C.pz, 1, K.camx, K.camz, K.cx, K.cz);
         st_b = st_a;
         uint32_t t0 = esp_cpu_get_cycle_count();
         dsp_rotate_ref(&st_b, &rk);
@@ -326,5 +333,6 @@ void dsp_selftest(void) {
              (unsigned)min_rs, (unsigned)min_rp, (unsigned)min_cs, (unsigned)min_cp,
              valid_chords, culled, culled_double);
 }
+#endif /* CONFIG_POCKET_DERBY_SER_PIE_SELFTEST */
 #endif /* __XTENSA__ && CONFIG_POCKET_DERBY_SER_PIE */
 #endif /* DERBY_SERPIE_HOST || CONFIG_POCKET_DERBY_SER_PIE */

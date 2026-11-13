@@ -287,22 +287,15 @@ static void tagged(unsigned tag,const double *in64,const ksn_proc_frame *fp){
 }
 /* pocket.derby's draws (pocket_shiki_frame.c calls this after each one that
  * succeeded): replayed like the app's shiki.draw, tagged as the JS wrapper
- * tags them (__nt: -2 the screen's face, -3 a panning unit's hl, else -1);
- * and, with DERBY_SER_ORACLE, into the list __sercmp compares with the JS
- * ser()'s. */
+ * tags them (__nt: -2 the screen's face, -3 a panning unit's hl, else -1).
+ * (ser() draws with integer inputs only: the hook below.) */
 static bool ser_oracle;
 static double ser_buf[1<<16];
-static unsigned ser_n,ser_bad;
-static bool ser_overflow,ser_fixed;
+static unsigned ser_n;
+static bool ser_overflow;
 static unsigned long ser_calls,ser_fuzz_calls,ser_draws,ser_fuzz_draws;
 static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n,unsigned tag);
 void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
-    if(ser_oracle){
-        if(ser_n+9<=sizeof ser_buf/sizeof ser_buf[0]){
-            ser_buf[ser_n++]=handle;
-            for(unsigned i=0;i<8;i++)ser_buf[ser_n++]=i<n?in[i]:0;
-        }else ser_overflow=true;
-    }
     if(pocket_proc_hook_dry)return;
     JSValue g=JS_GetGlobalObject(ctx),fn=JS_GetPropertyStr(ctx,g,"__nt"),h=JS_NewInt32(ctx,(int32_t)handle);
     JSValue r=JS_Call(ctx,fn,g,1,&h);
@@ -318,13 +311,12 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
  * the app's drawMany with an Int32Array, replayed untagged as those were. */
 void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *fx,unsigned n){
     REQ(n<=KSN_SHIKI_INPUTS);
-    /* The integer ser()'s draws (pocket.derby.ser on its integer path): the
-     * raw Q values, turned into numbers by __sercmp, which knows the plan. */
+    /* The integer ser()'s draws (pocket.derby.ser): the raw Q values,
+     * turned into numbers by __sercmp, which knows the plan. */
     if(ser_oracle){
         if(ser_n+9<=sizeof ser_buf/sizeof ser_buf[0]){
             ser_buf[ser_n++]=handle;
             for(unsigned i=0;i<8;i++)ser_buf[ser_n++]=i<n?fx[i]:0;
-            ser_fixed=true;
         }else ser_overflow=true;
     }
     if(pocket_proc_hook_dry)return;
@@ -335,7 +327,7 @@ void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *fx,unsigned n){
 }
 static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;(void)argv;
-    ser_n=0;ser_overflow=false;ser_fixed=false;
+    ser_n=0;ser_overflow=false;
     return JS_UNDEFINED;
 }
 static JSValue js_serdry(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -394,45 +386,28 @@ static double spt_match(const spt *A,unsigned na,const spt *B,unsigned nb,unsign
 static spt tol_a[8192],tol_b[8192];
 static double tol_rec[1<<16];
 /* __sercmp(rec, fuzz, turf, hl, crowd): the JS ser()'s draws [handle, 8
- * inputs]... against the C's: the C's double path every double bit for bit
- * (two NaNs count as equal: such a draw is refused by draw() either way),
- * its integer path by the tolerance above. */
+ * inputs]... against the C's by the tolerance above (the C's double series,
+ * once compared bit for bit, is gone: docs/apps/derby-ser-division.md sec.13). */
 static JSValue js_sercmp(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;
     const unsigned n=len(argv[0]);
     const bool fz=JS_ToBool(ctx,argv[1]);
     if(fz){ser_fuzz_calls++;ser_fuzz_draws+=n/9;}else{ser_calls++;ser_draws+=n/9;}
     REQ(!ser_overflow);
-    if(ser_fixed){
-        REQ(argc>=5&&n<=sizeof tol_rec/sizeof tol_rec[0]);
-        for(unsigned i=0;i<n;i++)tol_rec[i]=at(argv[0],i);
-        const bool turf=JS_ToBool(ctx,argv[2]);
-        const uint32_t hl=(uint32_t)num(argv[3]),cr=(uint32_t)num(argv[4]);
-        const unsigned na=ser_points(tol_rec,n,turf,hl,cr,false,tol_a,8192),nb=ser_points(ser_buf,ser_n,turf,hl,cr,true,tol_b,8192);
-        unsigned oa=0,ob=0;
-        const double w=fmax(spt_match(tol_a,na,tol_b,nb,&oa),spt_match(tol_b,nb,tol_a,na,&ob));
-        tol_calls++;
-        if(n!=ser_n)tol_draw_diff++;
-        if(oa&&!ob)tol_missing++;
-        if(w>2){
-            if(tol_swaps++<8)printf("SER_TOL %.2f px%s: JS %u draws, C %u draws\n",w,fz?" (fuzz)":"",n/9,ser_n/9);
-        }
-        if(w>tol_worst)tol_worst=w;
-        ser_n=0;ser_fixed=false;
-        return JS_UNDEFINED;
+    REQ(argc>=5&&n<=sizeof tol_rec/sizeof tol_rec[0]);
+    for(unsigned i=0;i<n;i++)tol_rec[i]=at(argv[0],i);
+    const bool turf=JS_ToBool(ctx,argv[2]);
+    const uint32_t hl=(uint32_t)num(argv[3]),cr=(uint32_t)num(argv[4]);
+    const unsigned na=ser_points(tol_rec,n,turf,hl,cr,false,tol_a,8192),nb=ser_points(ser_buf,ser_n,turf,hl,cr,true,tol_b,8192);
+    unsigned oa=0,ob=0;
+    const double w=fmax(spt_match(tol_a,na,tol_b,nb,&oa),spt_match(tol_b,nb,tol_a,na,&ob));
+    tol_calls++;
+    if(n!=ser_n)tol_draw_diff++;
+    if(oa&&!ob)tol_missing++;
+    if(w>2){
+        if(tol_swaps++<8)printf("SER_TOL %.2f px%s: JS %u draws, C %u draws\n",w,fz?" (fuzz)":"",n/9,ser_n/9);
     }
-    bool bad=n!=ser_n;
-    unsigned at_i=0;
-    for(unsigned i=0;i<n&&i<ser_n&&!bad;i++){
-        const double a=at(argv[0],i),b=ser_buf[i];
-        if(memcmp(&a,&b,sizeof a)&&!(isnan(a)&&isnan(b))){bad=true;at_i=i;}
-    }
-    if(bad&&ser_bad++<8){
-        printf("SER_ORACLE MISMATCH%s: JS %u draws, C %u draws",fz?" (fuzz)":"",n/9,ser_n/9);
-        if(n==ser_n)printf("; draw %u input %d: JS %.17g (%a) C %.17g (%a)",at_i/9,(int)(at_i%9)-1,
-                           at(argv[0],at_i),at(argv[0],at_i),ser_buf[at_i],ser_buf[at_i]);
-        printf("\n");
-    }
+    if(w>tol_worst)tol_worst=w;
     ser_n=0;
     return JS_UNDEFINED;
 }
@@ -1157,10 +1132,11 @@ int main(int argc,char **argv){
     /* DERBY_JS: any script run after the app's (e.g. moving the screen so
      * that a panning unit sees it: run_derby.py). */
     if(getenv("DERBY_JS"))REQ(eval(getenv("DERBY_JS"),strlen(getenv("DERBY_JS")),"env.js"));
-    /* DERBY_SER_DOUBLE=1: the series on the doubles of before (the up key's
-     * B side; docs/apps/derby-ser-division.md sec.7.3): the pixels must be the
-     * ones before the integers, and the oracle compares bit for bit. */
-    if(getenv("DERBY_SER_DOUBLE")){const char *m="pocket.derby.mode(1)";REQ(eval(m,strlen(m),"mode.js"));}
+    /* DERBY_SER_SCALAR=1: the series' rotation and cull on the scalar path
+     * (the up key's B side; docs/apps/derby-ser-division.md sec.13) instead of
+     * the PIE kernels' (here their scalar reference, DERBY_SERPIE_HOST):
+     * run_derby.py requires the same pixels. */
+    if(getenv("DERBY_SER_SCALAR")){const char *m="pocket.derby.mode(1)";REQ(eval(m,strlen(m),"mode.js"));}
     /* DERBY_SER_ORACLE=1: the JS ser() of vm/main beside the C on every call,
      * then DERBY_SER_FUZZ random cases (default 4000) before the game. */
     if(getenv("DERBY_SER_ORACLE")){
@@ -1172,7 +1148,7 @@ int main(int argc,char **argv){
         char fz[96];
         snprintf(fz,sizeof fz,"__serfuzz(%d,%u)",getenv("DERBY_SER_FUZZ")?atoi(getenv("DERBY_SER_FUZZ")):4000,hw);
         REQ(eval(fz,strlen(fz),"fuzz.js"));
-        printf("ser oracle fuzz: %lu calls, %lu draws, %u mismatches\n",ser_fuzz_calls,ser_fuzz_draws,ser_bad);
+        printf("ser oracle fuzz: %lu calls, %lu draws\n",ser_fuzz_calls,ser_fuzz_draws);
     }
     REQ(loaded_seen==1);                    /* the stored points and race number */
     /* Paddock: let the plans load and the odds settle, cycle the tier. */
@@ -1381,9 +1357,8 @@ int main(int argc,char **argv){
     else pass=pass&&!demo_starts;
     if(csv)fclose(csv);
     if(ser_oracle){
-        printf("ser oracle: %lu calls in the game, %lu draws, %lu fuzz calls, %u mismatches\n",ser_calls,ser_draws,
-               ser_fuzz_calls,ser_bad);
-        pass=pass&&!ser_bad&&ser_fuzz_calls>0;
+        printf("ser oracle: %lu calls in the game, %lu draws, %lu fuzz calls\n",ser_calls,ser_draws,ser_fuzz_calls);
+        pass=pass&&ser_fuzz_calls>0;
         /* The integer calls (tolerance). */
         printf("ser tolerance: %lu integer calls (another draw count %lu), on-screen points %lu: <=0.01 px %lu, <=0.1 %lu, "
                "<=0.5 %lu, <=1 %lu, <=2 %lu, >2 %lu; worst %.4f px; calls over 2 px %lu, drawn by the JS only %lu\n",
@@ -1398,7 +1373,7 @@ int main(int argc,char **argv){
                "joins %u (over 1 px %u, worst %.4f px)\n",st.chords,st.drawn,st.draws,st.sat,st.bad,st.newton_start,
                st.newton_step,st.count_range,st.joins,st.join_bad,st.join_worst);
         pass=pass&&!st.sat&&!st.bad&&!st.newton_start&&!st.newton_step&&!st.count_range&&!st.join_bad&&
-             (getenv("DERBY_SER_DOUBLE")||!getenv("DERBY_PAN")||st.draws>0);
+             (!getenv("DERBY_PAN")||st.draws>0);
     }
     pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"DERBY_HOST PASS":"DERBY_HOST FAIL");
