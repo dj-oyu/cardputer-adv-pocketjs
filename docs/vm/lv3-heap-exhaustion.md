@@ -179,3 +179,12 @@ AUTO TIME SYNC が ON のとき、`shell_init()` の直後に `esp_netif_init()`
 - HELLO（Shiki のヒープなし）でも、11,792＋3,584＋26,780 が **44,296 B の 1 つの穴**になった。
 - 主領域にはまだ 12 B のブロックが 2 個、穴を分けている（24,700 | 1,456、2,356 | 44,296）。Fable のレビュー（[lwip-resource-review.md](../platform/lwip-resource-review.md)）では、Wi-Fi のタスク別セマフォ（`esp_adapter.c` の `wifi_thread_semphr_get_wrapper`）。`esp_netif_init` を早めても動かない。
 - アリーナが 40 KiB になったのは、`GUEST_ARENA_KEEP_PIECE`（24 KiB の連続領域を残す）を満たせる大きさが増えたため。ゲストの使用量の内訳は変わらない。
+
+### 6.8 G3: 空振りの GC を続けない（`0825262`、r5sim と実機）
+
+天井の GC が「上限/32 の 1/4」未満しか回収しなかったら、次の予算を半分に詰めない（`quickjs.c` の `g_gc_cap_dry`）。上限が断ったターンの後にも 1 回 GC する（`app_session.c`）。設計は [guest-memory-design.md](guest-memory-design.md) の G3。
+
+- r5sim（STRESS LV3、400 フレーム）: GC 105 → 25 回、GC のサイクル 3.58 M → 0.52 M、ターンあたり 174,814 → 163,330 命令。上限が断ったターン 14 → 14、OOM のときの床 41.2〜43.3 KB。host のコーパス 88 件すべて通過。
+- 実機（STRESS LV3、計測ビルド、約 10 秒の窓、`GC_STATS`）: GC **約 10 → 3.3 回/秒**、GC の時間 **約 16.6 → 4.2 ms/秒**、OOM 約 1.3 → 1.2 回/秒（実測）。GC 1 回は 0.7〜1.8 ms のまま。
+- 1 秒に 5〜6 回の窓が残る。OOM の後の GC と、回収があった後の天井の GC が重なっている。
+- ほとんど回収しない GC はまだ続くことがある（1 秒に 6 回で計 3,672 B、最後の 1 回は `121996->121996`）。空振りの判定は 1 回ごとなので、上限の直下で回収が少しだけある GC が続くと、半分に詰める規則に戻る。次に詰めるならここ。
