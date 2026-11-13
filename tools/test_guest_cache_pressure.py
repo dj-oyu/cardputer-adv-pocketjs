@@ -125,6 +125,9 @@ int main(void) {
     assert((pocket_memory_mask() & 6) == 6);
     assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH &&
            block_cache_held(&g.block_cache) <= BLOCK_CACHE_PRESSURE_DEPTH * 48);
+    // Entering native pressure returns the cached blocks at once
+    // (pocketjs_guest_release_memory, guest-memory-design.md sec.6.1).
+    assert(block_cache_held(&g.block_cache) == 0);
     for (unsigned i = 0; i < 20; i++) {
         reuse_once();
         clock_us += 1000; // No new native sample yet: pressure must persist.
@@ -132,6 +135,8 @@ int main(void) {
         assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH &&
            block_cache_held(&g.block_cache) <= BLOCK_CACHE_PRESSURE_DEPTH * 48);
     }
+    // Once per episode: the samples inside it did not flush the refilled cache.
+    assert(block_cache_held(&g.block_cache) > 0);
     task = 2;
     pocketjs_guest_block_cache_set_pressure(&g, false);
     assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
@@ -186,6 +191,7 @@ def main():
         function("components/pocketjs_guest/src/guest.c", "guest_uses_block_cache"),
         function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_block_cache_flush"),
         function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_block_cache_set_pressure"),
+        function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_release_memory"),
         function("main/app_session.c", "sample_memory_pressure"),
     ])
     with tempfile.TemporaryDirectory(prefix="guest-cache-pressure-") as tmp:
