@@ -8,7 +8,40 @@ static void rotate(double angle,const double v[3],double out[3]){
  const double cross[3]={-a*v[1],a*(v[0]-v[2]),a*v[1]};
  for(int k=0;k<3;k++)out[k]=v[k]*c+cross[k]*s+(k==1?0:a*d*(1-c));
 }
+/* Signed-permutation expectations do not use quaternion or matrix helpers.
+ * Covers trace-positive and all three dominant-diagonal conversion branches.
+ * A single full-weight 180-degree rotation is valid; only ambiguous blends
+ * between different positive influences are rejected by the rigid contract. */
+static void known_axis_contract(void){
+ const float source[3]={2,-3,5}, normal[3]={2,-3,6}, translation[3]={.25f,-.5f,1.25f};
+ unsigned checked=0;
+ for(unsigned axis=0;axis<3;axis++)for(unsigned turns=0;turns<4;turns++){
+  unsigned a=(axis+1)%3,b=(axis+2)%3;
+  ayatsuri_transform p=identity;
+  for(unsigned row=0;row<3;row++)p.m[row*4+3]=translation[row];
+  float ep[3],en[3];memcpy(ep,source,sizeof ep);memcpy(en,normal,sizeof en);
+  for(unsigned step=0;step<turns;step++){
+   float old=ep[a];ep[a]=-ep[b];ep[b]=old;
+   old=en[a];en[a]=-en[b];en[b]=old;
+  }
+  static const int cos_quarter[4]={1,0,-1,0},sin_quarter[4]={0,1,0,-1};
+  p.m[a*4+a]=p.m[b*4+b]=(float)cos_quarter[turns];
+  p.m[a*4+b]=(float)-sin_quarter[turns];p.m[b*4+a]=(float)sin_quarter[turns];
+  for(unsigned slot=0;slot<4;slot++){
+   ayatsuri_skin_vertex v={0};memcpy(v.position,source,sizeof source);memcpy(v.normal,normal,sizeof normal);v.weights[slot]=65535;
+   ayatsuri_skin_result result;
+   assert(ayatsuri_skin_evaluate_rigid_dq(&p,1,&v,1,&result)==AYATSURI_OK);
+   for(unsigned k=0;k<3;k++){
+    assert(fabs(result.position[k]-(ep[k]+translation[k]))<1e-6);
+    assert(fabs(result.normal[k]-en[k]/7.0)<1e-7);
+   }
+   checked++;
+  }
+ }
+ printf("DQ_AXIS_BRANCH_PASS cases=%u axes=xyz quarter_turns=0,1,2,3 influence_slots=4 translated_points unit_normals\n",checked);
+}
 int main(void){
+ known_axis_contract();
  const double theta=1.047197551196597746;ayatsuri_transform p[2]={identity,identity};
  for(int col=0;col<3;col++){double e[3]={0},o[3];e[col]=1;rotate(theta,e,o);for(int row=0;row<3;row++)p[1].m[row*4+col]=(float)o[row];}
  for(int row=0;row<3;row++)p[1].m[row*4+3]=(row==0?1:0)-p[1].m[row*4];
