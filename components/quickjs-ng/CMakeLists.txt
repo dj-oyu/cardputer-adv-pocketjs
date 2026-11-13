@@ -37,23 +37,27 @@ if(CONFIG_POCKET_GC_STATS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_GC_STATS=1)
 endif()
 
-# Experimental hot/cold layout of quickjs.c (docs/vm/qjs-hotcold.md).
-# main/Kconfig.projbuild POCKET_VM_QJS_HOTCOLD (default n) lays the basic
-# blocks of its hot functions out by tools/qjs_hotcold/profile.json. Not a
-# line of QuickJS changes: tools/qjs_hotcold/hc_cc.py stands in front of the
-# compiler for this component, and for quickjs.c alone compiles to assembly,
-# moves the blocks (hc_asm.py, which also verifies the result against GCC's
-# output), and assembles that.
-#   -DPOCKET_QJS_HOTCOLD=use|gen   the same without the Kconfig (tools/r5sim
-#       has none); `gen` only adds a symbol per block, for training
+# Hot/cold layout of quickjs.c (docs/vm/qjs-hotcold.md).
+# main/Kconfig.projbuild POCKET_VM_QJS_HOTCOLD (default y since the device A/B,
+# qjs-hotcold.md §7) lays the basic blocks of its hot functions out by
+# tools/qjs_hotcold/profile.json. Not a line of QuickJS changes:
+# tools/qjs_hotcold/hc_cc.py stands in front of the compiler for this
+# component, and for quickjs.c alone compiles to assembly, moves the blocks
+# (hc_asm.py, which also verifies the result against GCC's output), and
+# assembles that.
+#   -DPOCKET_QJS_HOTCOLD=use|gen|off   overrides the Kconfig (tools/r5sim has
+#       none, so there it is off unless given); `gen` only adds a symbol per
+#       block, for training
 #   -DPOCKET_QJS_HOTCOLD_PROFILE=<file>   another profile
 #   -DPOCKET_QJS_HOTCOLD_PAD=<bytes>   shift the hot code (measurement)
 # A device A/B through a builder that only takes the default Kconfig: a
-# `measure:` commit sets the next line to "use" (and reverts it afterwards).
+# `measure:` commit sets POCKET_VM_QJS_HOTCOLD's default (or the pad below).
 set(_qjs_hc "")
 set(_qjs_hc_pad 0)
-if(POCKET_QJS_HOTCOLD)
-    set(_qjs_hc "${POCKET_QJS_HOTCOLD}")
+if(DEFINED POCKET_QJS_HOTCOLD)
+    if(POCKET_QJS_HOTCOLD STREQUAL "use" OR POCKET_QJS_HOTCOLD STREQUAL "gen")
+        set(_qjs_hc "${POCKET_QJS_HOTCOLD}")
+    endif()
 elseif(CONFIG_POCKET_VM_QJS_HOTCOLD)
     set(_qjs_hc "use")
 endif()
