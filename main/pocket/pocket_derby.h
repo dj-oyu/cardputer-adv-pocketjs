@@ -21,6 +21,7 @@ void pocket_derby_reset(void);
  * which must stay 0). The firmware keeps none (no .bss). */
 void pocket_derby_ser_stats(derby_ser_stats *out);
 #endif
+#define POCKET_DERBY_SER_PROBE 1
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 #endif
