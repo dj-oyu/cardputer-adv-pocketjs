@@ -326,6 +326,13 @@ globalThis.frame = () => drawScene();   // モジュールの名前はグロー�
 
 **`pocket.ui`（capability `ui.basic`）は実装していない。** 下の `pocket.ui.*` は当初案で、旧UIコアの上に載せた実装（`pocket_ui.c`）は旧UI経路とともに削除した。`capabilities.get("ui.basic")` は supported=false を返す。画面の描画は `pocket.kasane` を使う。入力（`pocket.input.*`）とTextSessionは実装済みで、TextSessionの編集欄はKasaneが描いた帯へホストが合成する。
 
+**`pocket.kasane`（capability `display.kasane`）の、[Kasane API の整理](../kasane/api-reorg.md) P3 で足した形（2026-11-13、古い形はすべてそのまま動く）。** 境界と契約は[Kasaneの現行境界](../kasane/architecture.md)、Shiki は[仕様](../kasane/shiki-spec.md) §9。
+
+- `ref.setRect(tx, x0, y0, x1, y1)`・`ref.setClip(tx, x0, y0, x1, y1)`: 配列 `[x0, y0, x1, y1]` と同じ矩形を整数 4 つで渡す（丸め・int16 の範囲・辺の向きの検査は配列の形と同じ）。毎ターンの配列を作らずに済む。
+- `replace(build)`・`patch(build)` の戻り値は、提出の ticket を**数**（uint32）で返す。`cancel(ticket)` はこの数を受け、`poll().ticket` も同じ数（以前はオブジェクト。ticket・`poll`・`cancel` は P5 で消す）。`build` に渡る `tx` は、アプリが手元に残さなければ次の `replace`/`patch` でも同じオブジェクトが使われる（呼び出しごとのゲストの確保をしない）。残した `tx` は、コールバックの外でも、後の別のコールバックの中でも `CLOSED`。`tx.modal` は prototype の getter。
+- `cache`・`grid`・`video`・`pixel` は、その名前を最初に読んだ時に作る（`pocket.kasane` を読んだだけでは作らない）。`grid.fold`・`grid.index`・`grid.view` は、グローバルの `gridFold` と同じ（`gridFold` は P5 で消す）。`grid` の計画の表（ネイティブ 7,200 B）は、最初の `grid.register*` で確保し、アプリの終わりに返す。
+- `display.kasane` の `limits` に `textBytes`（1 つの画面の文字のバイト数、896）・`animations`（6）・`cacheCommands`（1 つのテンプレートのコマンド数、48）を足した。`features()` が返していた値のうち、コードが強制しているもの（`features()` は P5 で消す）。
+
 ```ts
 pocket.ui.screen({background: number}): Screen;
 type Screen = {

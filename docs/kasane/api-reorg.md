@@ -358,6 +358,18 @@ heapprobe の DERBY（評価の余裕の二分探索）は、6・7 の後に今�
 
 ### P3 — API を足す（非破壊）（Opus）
 
+**実施（2026-11-13、ブランチ `p3-api`。数は [logs/api-reorg-perf.md](logs/api-reorg-perf.md) §6）。** 足したもの:
+
+- `replace`/`patch` の tx・modal を使い回す。前の呼び出しのものを、**アプリが手元に残していなければ**（参照の数が 1）次の呼び出しで使い、残していれば手放して次は新しく作る。だから残した tx は、後の別のコールバックの中でも `CLOSED` のまま（R4 の「世代の番号」の代わりに参照の数で保った。既存の検査「foreign transaction tokens」がこれを求めていた）。`tx.modal` は prototype の getter。2 つは `pocket_kasane_reset()`（`app_stop()`）の最初に手放す。ticket は uint32 の**数**で返す（§3.2 の「`undefined`」ではなく、`cancel(ticket)` の古い呼び方が動くように。`cancel` は数を受け、`poll().ticket` も数）。ticket のクラスは登録したまま（P5 で `poll`・`cancel` と一緒に消す。`tools/pocket/run_class_registry.py` の台帳もその時に）。
+- `ref.setRect`・`setClip` の整数 4 つ（配列の形と同じ検査）。
+- `cache`・`grid`・`video`・`pixel` の遅延は、§3.1 の「土台に子の遅延を足す」ではなく、QuickJS の fork の遅延リスト（`JS_OBJECT_DEF`、[builtin-floor-plan.md](../vm/builtin-floor-plan.md) §13）の項目にした。触るまでゲストの確保が 0 で、`pocket_api.c` も変えずに済む。`gridFold` のグローバルは eager のまま（グローバルオブジェクトは遅延リストを持てず、`grid` を読む前に `gridFold.fold` を呼ぶプログラムが動くように）。`shiki.grid` は最初に読んだ時に `pocket.kasane.grid` に置き換わる getter。
+- `pocket.kasane.grid.fold/index/view`。
+- grid の `slots`（7,200 B）を最初の `register*` で確保し、`pocket_grid_reset()` で返す。
+- `display.kasane.limits` に `textBytes`・`animations`・`cacheCommands`。
+- `shiki.drawMany(handles, inputs, stride, count?)`（[shiki-spec.md](shiki-spec.md) §9.4 に v2.0 の草案として）。
+
+**行わなかったもの:** (1) capability `kasane.grid`・`kasane.video`・`kasane.pixel` と manifest の門。§7.2 の 4（PLAYGROUND・WORK に何を与えるか）が未決で、門を入れると今の manifest の gridlab・megademo・videolab と保存済みのプログラムが P4 の前に動かなくなる。また capability の表（`POCKET_MAX_REGISTERED` 32）には、ソースに 33 の名前の登録がある（`kasane.shiki.debug` は既定で登録しない。セッションごとに実際にいくつ登録されるかは確かめていない）。門と一緒に P4 で入れる。(2) handle の表の統合（§3.3）。`binds` は 384 B（32 × 12 B）で、統合すると毎 draw の `lookup`（`pocket_shiki_frame.c`）とリストの参照の数の簿記に触る。得る `.bss` が小さく、毎ターンの経路の変更を P3 に混ぜないことにした。
+
 範囲: §3.1 の遅延と manifest の門（土台の「子の遅延」を含む）、grid の `slots` を使う時に確保、§3.2 の `replace`/`patch` の確保の除去と整数の `setRect`・`setClip`、`limits` の追加、§3.3 の `drawMany` の `count` と handle の表の統合、`pocket.kasane.grid.fold/index/view`（`gridFold` は残す）。仕様の文書（[shiki-spec.md](shiki-spec.md) §9、common-api）を同じ変更で直す。
 
 Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の `lookup`（1 draw 約 107〜138 サイクル、実測（引用））、静的 DRAM、ゲストの寿命（使い回す tx のオブジェクトと `app_stop()` の reset の順）に触る。
