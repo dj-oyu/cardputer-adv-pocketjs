@@ -95,6 +95,22 @@ PUMP(pocket_av_pump,'v')
 /* Silent, like the pumps added after the call strings were fixed. */
 static void pocket_video_sd_stream_reap(void){}
 static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
+/* Measurement probes (frame_bd.h, icache_ab), compiled out on the device by
+ * default: silent here, none of them decides an ordering. */
+static void frame_bd_turn_begin(void){}
+static void frame_bd_turn_end(void){}
+static void frame_bd_js(uint32_t us){(void)us;}
+static void frame_bd_tick(uint32_t us){(void)us;}
+static void icache_ab_turn(void){}
+/* P2a (two-core-pipeline.md sec.2.3 B). present_defer_block() is 1 without
+ * CONFIG_POCKET_DISP_DEFER, so no frame is ever left on a display task here:
+ * nothing is in flight, the join and the settling have nothing to do, and the
+ * call strings above stay those of the inline present. */
+static bool present_defer;
+static bool disp_busy(void){return false;}
+static void disp_join(void){}
+static esp_err_t present_settle(void){return ESP_OK;}
+static void frame_bd_defer_why(unsigned why){(void)why;}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;

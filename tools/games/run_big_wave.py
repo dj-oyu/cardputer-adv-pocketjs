@@ -85,7 +85,7 @@ def build(m32: bool) -> Path:
     binary = cache / "test-big-wave"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *os.environ.get("KSN_HOST_CFLAGS", "").split(), "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/games/test_big_wave_host.c", *kasane_sources(), *EXTRA, *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],

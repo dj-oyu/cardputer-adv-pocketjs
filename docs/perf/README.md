@@ -20,6 +20,8 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [two-core-pipeline.md](two-core-pipeline.md) | 設計（未実装） | 2 コアのフレームパイプライン: 所有権トークン ＋ `disp_join()`、join の全箇所、不変条件と表明、表示タスクを CPU 0 に置く案（stack 4 KB）、命令キャッシュの取り合いの決め方、段階 P0〜P4 の合格・中止の基準 |
+| [frame-breakdown.md](frame-breakdown.md) | 計測（実機、16 ms） | 1 フレームの内訳（JS・描画・転送・その外・待ち）。三つの計時の外は約 0.85 ms、周期の刻みと超過時の 1 tick で約 0.5〜1 ms、ログを書くフレームは約 8 ms 長い。2 コアで JS と描画・転送を重ねた見込み（DERBY レース約 16 → 9 ms、推定） |
 | [o2-machine-code.md](o2-machine-code.md) | 調査（実測＋逆アセンブル） | 描画の道の `-O2` が何を速くしたか: XTPERF で減ったサイクルの 2/3 は命令数、1/3 は成立分岐（1 回 = バブル 2 サイクル）、IPC と flash キャッシュ待ちは不変。小関数の展開、1,020 B を越えるフレームの 3 命令アクセス（`render_group` を外に出した理由）、ループの unswitching |
 | [kasane-opt-survey.md](kasane-opt-survey.md) | 調査 | 描画経路の棚卸しと候補の選別（境界ごとに「何が律速か」と却下の理由） |
 | [kasane-dma-overlap.md](kasane-dma-overlap.md) | 既定 ON | #37 から通常 main へ抽出。MEGADEMO の実機 A/B で send −5 ms/frame、#111 で既定 ON。末尾に未測定の残り候補（狭い矩形の window 継続など） |

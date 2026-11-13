@@ -90,6 +90,16 @@ static int64_t hp_eval_t0;
 #include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
+#include "icache_ab.h"
+#include "frame_bd.h"
+#include "disp.h"
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+/* The P0 eligibility mask (frame_bd_eligible()). */
+#include "pocket_pixel.h"
+#include "pocket_grid.h"
+#include "pocket_video.h"
+#include "sound.h"
+#endif
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
@@ -115,6 +125,7 @@ static int64_t hp_eval_t0;
 #include "vm_wake.h"
 #include <stdatomic.h>
 #include <stdio.h>
+#include "wifi_time.h"
 #include <string.h>
 // Defined next to dispatch_guest(); the evaluation and overlay turns use it too.
 static void end_guest_turn(void);
@@ -209,6 +220,17 @@ static void report_oom_if_any(void) {
     pocketjs_guest_take_oom_detail(guest,&canary);
     if(canary.count>0) {
         pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
+        /* A refusal, by the shared heap or by the guest's limit: QuickJS does
+         * not collect on one. The shared heap's came below the GC trigger, so
+         * cyclic garbage piled up turn after turn (docs/vm/lv3-heap-exhaustion.md
+         * sec.3.1). The limit's now too: once the cap has collected for
+         * nothing it stops halving its margin (G3, quickjs.c g_gc_cap_dry), so
+         * garbage grown in the last 1/32 is collected here, once per refused
+         * turn, instead of by GCs before it (docs/vm/guest-memory-design.md
+         * sec.7.3). Between turns a GC is safe. Before the probe below, which
+         * would otherwise see it first. */
+        if(canary.allocator_count||canary.quota_count)
+            JS_RunGC(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
 #ifdef POCKET_HEAPPROBE
@@ -220,8 +242,181 @@ static void report_oom_if_any(void) {
 #ifdef CONFIG_POCKET_VM_OOMPROBE
         oomprobe_canary(canary.count,canary.first_req,canary.first_used);
 #endif
+#ifdef CONFIG_POCKET_OOM_GC_PROBE
+        /* Measurement: is the memory live, or garbage not yet collected, or
+         * just fragmented? Who refused (quota or allocator), the guest's
+         * bytes and the system heap, then the same after a full GC. At most
+         * once a second: an app at its limit refuses every frame. */
+        static int64_t gc_probe_last;
+        const int64_t now=esp_timer_get_time();
+        if(now-gc_probe_last>=1000000) {
+            gc_probe_last=now;
+            JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+            const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+            size_t u0=0,l0=0,u1=0,l1=0;
+            JS_GetMemoryCounters(rt,&u0,&l0);
+            const size_t f0=heap_caps_get_free_size(caps),b0=heap_caps_get_largest_free_block(caps);
+            const int64_t g0=esp_timer_get_time();
+            JS_RunGC(rt);
+            const unsigned gc_us=(unsigned)(esp_timer_get_time()-g0);
+            JS_GetMemoryCounters(rt,&u1,&l1);
+            ESP_LOGW("app","OOM_GC quota=%u allocator=%u guest=%u->%u limit=%u "
+                     "sys_free=%u->%u sys_largest=%u->%u gc_us=%u",
+                     (unsigned)canary.quota_count,(unsigned)canary.allocator_count,
+                     (unsigned)u0,(unsigned)u1,(unsigned)l0,
+                     (unsigned)f0,(unsigned)heap_caps_get_free_size(caps),
+                     (unsigned)b0,(unsigned)heap_caps_get_largest_free_block(caps),gc_us);
+        }
+#endif
     }
 }
+
+#ifdef CONFIG_POCKET_GC_STATS
+/* Measurement (docs/vm/guest-memory-design.md G1): how long the guest's
+ * collections take, at most one line a second and only when one ran. */
+void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before, size_t *last_after);
+void JS_PocketGCTime(uint64_t *total, uint32_t *max_run);
+uint32_t pocket_gc_clock(void) { return esp_cpu_get_cycle_count(); }
+static void gc_stats_log(uint64_t now) {
+    static uint64_t last; static uint32_t runs_seen; static uint64_t freed_seen,ticks_seen;
+    if(now-last<1000000u)return;
+    last=now;
+    uint32_t runs,tmax; uint64_t freed,ticks; size_t lb,la,used=0,limit=0;
+    JS_PocketGCStats(&runs,&freed,&lb,&la);
+    JS_PocketGCTime(&ticks,&tmax);
+    if(runs!=runs_seen){
+        JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&used,&limit);
+        const uint32_t mhz=CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+        ESP_LOGI("app","GC_STATS runs=+%u us=+%u max_us=%u freed=+%u last=%u->%u used=%u limit=%u",
+                 (unsigned)(runs-runs_seen),(unsigned)((ticks-ticks_seen)/mhz),(unsigned)(tmax/mhz),
+                 (unsigned)(freed-freed_seen),(unsigned)lb,(unsigned)la,(unsigned)used,(unsigned)limit);
+    }
+    runs_seen=runs; freed_seen=freed; ticks_seen=ticks;
+}
+#endif
+
+#ifdef CONFIG_POCKET_HEAP_MAP
+/* Measurement (docs/vm/guest-memory-design.md sec.10 step 3): who cuts the
+ * internal heap's contiguous room after an evaluation, the guest or the
+ * natives. Built into a static buffer during the walk (no allocation while
+ * the heap is being walked), printed after. */
+static char heap_map_buf[6144];
+static size_t heap_map_len;
+static intptr_t heap_map_region;
+static unsigned heap_map_ucount;
+static size_t heap_map_ubytes;
+static void heap_map_put(const char *fmt,unsigned a,unsigned b) {
+    if(heap_map_len+40>=sizeof heap_map_buf)return;
+    heap_map_len+=(size_t)snprintf(heap_map_buf+heap_map_len,sizeof heap_map_buf-heap_map_len,fmt,a,b);
+}
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+/* The blocks of the current used run, and the runs that sit between two
+ * large holes: those pin the holes apart. */
+#include "esp_heap_trace.h"
+#define HEAP_PIN_RUN 16
+#define HEAP_PIN_MAX 48
+typedef struct { void *ptr; unsigned size, left, right; } heap_pin_t;
+static heap_pin_t heap_run[HEAP_PIN_RUN], heap_pins[HEAP_PIN_MAX];
+static unsigned heap_run_n, heap_pin_n, heap_left_free;
+static bool heap_run_over, heap_pin_on;
+static heap_trace_record_t heap_trace_recs[300];
+void heap_origin_start(void) {
+    if(heap_trace_init_standalone(heap_trace_recs,300)==ESP_OK)heap_trace_start(HEAP_TRACE_LEAKS);
+}
+static void heap_pin_free(unsigned size) {
+    if(!heap_pin_on)return;
+    if(size>=2048){
+        unsigned bytes=0;
+        for(unsigned i=0;i<heap_run_n;i++)bytes+=heap_run[i].size;
+        if(heap_left_free&&heap_run_n&&!heap_run_over&&bytes<=8192)
+            for(unsigned i=0;i<heap_run_n&&heap_pin_n<HEAP_PIN_MAX;i++){
+                heap_pins[heap_pin_n]=heap_run[i];
+                heap_pins[heap_pin_n].left=heap_left_free;
+                heap_pins[heap_pin_n++].right=size;
+            }
+        heap_left_free=size;
+    }else if(size>=256)heap_left_free=0;   /* a medium hole breaks the pair */
+    heap_run_n=0;heap_run_over=false;
+}
+static void heap_pin_used(void *ptr,unsigned size) {
+    if(!heap_pin_on)return;
+    if(heap_run_n<HEAP_PIN_RUN)heap_run[heap_run_n++]=(heap_pin_t){ptr,size,0,0};
+    else heap_run_over=true;
+}
+static void heap_pin_report(void) {
+    heap_trace_stop();   /* nothing is recorded while we read */
+    const size_t n=heap_trace_get_count();
+    ESP_LOGI("app","HEAP_PIN blocks=%u traced=%u",heap_pin_n,(unsigned)n);
+    for(unsigned k=0;k<heap_pin_n;k++){
+        const heap_pin_t *p=&heap_pins[k];
+        heap_trace_record_t r; bool hit=false;
+        for(size_t i=0;i<n&&!hit;i++)
+            if(heap_trace_get(i,&r)==ESP_OK&&r.address==p->ptr)hit=true;
+        char by[96]="untraced";
+        if(hit){
+            size_t o=0;
+            for(int d=0;d<CONFIG_HEAP_TRACING_STACK_DEPTH;d++)
+                o+=(size_t)snprintf(by+o,sizeof by-o,"%s%08x",d?",":"",(unsigned)(uintptr_t)r.alloced_by[d]);
+        }
+        ESP_LOGI("app","HEAP_PIN %p size=%u left=%u right=%u by=%s",p->ptr,p->size,p->left,p->right,by);
+    }
+    heap_trace_resume();
+}
+#endif
+static void heap_map_flush_used(void) {
+    if(heap_map_ucount)heap_map_put(" u%u/%u",heap_map_ucount,(unsigned)heap_map_ubytes);
+    heap_map_ucount=0;heap_map_ubytes=0;
+}
+static bool heap_map_cb(walker_heap_into_t h,walker_block_info_t b,void *u) {
+    (void)u;
+    if(h.start!=heap_map_region){
+        heap_map_flush_used();
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+        heap_left_free=0;heap_run_n=0;heap_run_over=false;
+#endif
+        heap_map_region=h.start;
+        heap_map_put("\n R%x+%u:",(unsigned)h.start,(unsigned)(h.end-h.start));
+    }
+    if(!b.used&&b.size>=256){
+        heap_map_flush_used();
+        heap_map_put(" @%x f%u",(unsigned)((intptr_t)b.ptr-h.start),(unsigned)b.size);
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+        heap_pin_free((unsigned)b.size);
+#endif
+    }else{
+        heap_map_ucount++;heap_map_ubytes+=b.size;
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+        if(b.used)heap_pin_used(b.ptr,(unsigned)b.size);
+#endif
+    }
+    return true;
+}
+static void heap_map(const char *tag) {
+    const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    heap_map_len=0;heap_map_region=0;heap_map_ucount=0;heap_map_ubytes=0;
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+    heap_pin_on=strcmp(tag,"pre")==0;heap_pin_n=0;heap_run_n=0;heap_left_free=0;heap_run_over=false;
+#endif
+    heap_caps_walk(caps,heap_map_cb,NULL);
+    heap_map_flush_used();
+    ESP_LOGI("app","HEAP_MAP %s free=%u largest=%u",tag,
+             (unsigned)heap_caps_get_free_size(caps),(unsigned)heap_caps_get_largest_free_block(caps));
+    // One log line per region, cut to the broker's 1 KB line.
+    char *p=heap_map_buf;
+    while(*p){
+        if(*p=='\n')p++;
+        char *e=strchr(p,'\n');
+        size_t n=e?(size_t)(e-p):strlen(p);
+        for(size_t o=0;o<n;o+=900)
+            ESP_LOGI("app","HEAP_MAP %s%.*s",tag,(int)(n-o<900?n-o:900),p+o);
+        p+=n;
+    }
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+    if(heap_pin_on)heap_pin_report();
+    heap_pin_on=false;
+#endif
+}
+#endif
 
 /* Constant-time VM counters every owner turn; native heap is sampled at most
  * once per 100 ms. Also runs on display-only turns so pressure can recover. */
@@ -236,16 +431,41 @@ static void sample_memory_pressure(void) {
         const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
         free_bytes=heap_caps_get_free_size(caps);
         largest=heap_caps_get_largest_free_block(caps);
+#if CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB > 0
+        /* docs/vm/lv3-heap-exhaustion.md sec.5: the guest's limit is what it
+         * can really get, so it runs out as a quota OOM it can catch, with
+         * the natives' working room intact, instead of at the shared heap. */
+        limit=pocketjs_guest_fit_limit(guest,free_bytes,
+                                       (size_t)CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB*1024u);
+#endif
     }
+#ifdef CONFIG_POCKET_GC_STATS
+    gc_stats_log(now);
+#endif
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
-    // Return cached blocks and stop retaining later frees for the whole native
-    // pressure episode, including recovery hysteresis. A one-time flush lets
-    // the next JS turn retain them again while RAM is still short. GUEST-only
-    // pressure is different: these blocks are outside the guest's accounting.
+    // Shrink the cached blocks to a small depth for the whole native pressure
+    // episode, including recovery hysteresis: stopping the cache outright cost
+    // the JS turn 7-13% (docs/perf/frame-breakdown.md sec.7), and a scene that
+    // dips under the threshold once stays there. GUEST-only pressure is
+    // different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
-    pocketjs_guest_block_cache_set_pressure(guest,mask!=0);
+    /* On entering native pressure, the guest's empty arena chunks and cached
+     * blocks go back at once (docs/vm/guest-memory-design.md sec.6.1). Once
+     * per episode: the cache refills, and flushing it every sample would cost
+     * the turn what the reduced depth below avoids. */
+    static bool native_pressed;
+    if(native&&(mask!=0)!=native_pressed){
+        native_pressed=mask!=0;
+        if(native_pressed)pocketjs_guest_release_memory(guest);
+    }
+    pocketjs_guest_block_cache_set_pressure(guest,frame_bd_pressure_override(mask!=0));
+    frame_bd_pressure(mask!=0,native,(uint32_t)free_bytes,(uint32_t)largest);
 }
 static atomic_bool stop_requested;
+static esp_err_t present_settle(void);
+// P2a, see present_settle(): a deferred frame awaits its accounting; the next
+// present may defer; deferring is off for the session after a failed transfer.
+static bool pf_deferred,present_defer,defer_off;
 static int64_t deadline;
 // L1 (docs/vm/vm-L1-design.md). Armed once per turn and handed to the guest, so
 // frame()'s drain and the next turn's continuation drain measure against the
@@ -618,16 +838,18 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     // what was committed into it. Every band is refilled from the scene's
     // background, so nothing drawn here survives into the next frame, and a
     // field that changed invalidates the bands it covers (main.c).
-    pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
-    // Kasane promotes its command bank only after acknowledged transfers.
-    pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    if(board_host_overlays) {
+        pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
+        // Kasane promotes its command bank only after acknowledged transfers.
+        pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    }
     esp_err_t result;
 #ifdef KASANE_DMA_OVERLAP
     { result=kasane_dma_submit(display,0,y,LCD_W,rows,(uint16_t *)pixels); }
 #else
     { result=board_present_sync(y,rows,(uint16_t *)pixels); }
 #endif
-    pet_hub_overlay_suppress(false);
+    if(board_host_overlays) pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
@@ -651,15 +873,17 @@ static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t c
     if(p2_fail_this_send(y))return KSN_IO;
 #endif
     int64_t began=esp_timer_get_time();
-    pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
-    pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    if(board_host_overlays) {
+        pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
+        pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    }
     esp_err_t result;
 #ifdef KASANE_DMA_OVERLAP
     { result=kasane_dma_submit(display,x,y,cols,rows,(uint16_t *)pixels); }
 #else
     { result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels); }
 #endif
-    pet_hub_overlay_suppress(false);
+    if(board_host_overlays) pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
@@ -677,6 +901,7 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
 #ifdef CONFIG_POCKET_VM_RELOC
     // Before the chain is closed, not after: prepare_stop resumes the parked
     // chain in order to terminate it, and the counters belong to the run that
@@ -1004,6 +1229,7 @@ bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
 
 void app_stop(void) {
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     bool p0_had_guest=guest!=NULL;
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage)board_capture(false);
@@ -1096,6 +1322,9 @@ void app_stop(void) {
     oomprobe_set_runtime(NULL);
 #endif
     if(guest) pocketjs_guest_destroy(guest);
+#ifdef CONFIG_POCKET_HEAP_MAP
+    if(guest)heap_map("stop");
+#endif
     guest=NULL;
     // After the guest: its finalizers may still call the windows' free_func
     // (a no-op). The region goes back once nothing lives in it.
@@ -1121,6 +1350,7 @@ void app_stop(void) {
 #endif
     shiki_memstat_reset();
     ESP_LOGI("app","APP_STOPPED");
+    wifi_time_stack_report("app_stop");
 }
 
 // ------------------------------------------------------ resident suspension
@@ -1175,6 +1405,7 @@ static bool settle_all(int64_t until_us) {
 }
 
 esp_err_t app_suspend(void) {
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
     int64_t began=esp_timer_get_time();
     // The Back turn's arming: its deadline bounds the hook, and yield is off,
@@ -1241,6 +1472,7 @@ esp_err_t app_suspend(void) {
 }
 
 esp_err_t app_resume(void) {
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
         return ESP_ERR_INVALID_STATE;
     // The identity is global and a host screen may have moved it; the stores
@@ -1463,7 +1695,17 @@ static void hp_report(const char *phase, esp_err_t err) {
 }
 #endif
 
+// The engine calls this before a native function marked "join" runs.
+static void js_join_hook(JSContext *ctx) {
+    (void)ctx;
+    if(!disp_busy()) return;
+    const int64_t t=esp_timer_get_time();
+    disp_join();
+    frame_bd_join_wait(true,(uint32_t)(esp_timer_get_time()-t));
+}
+
 esp_err_t app_start_test(char test) {
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
@@ -1504,6 +1746,7 @@ esp_err_t app_start_test(char test) {
         scene_mem_release();
     }
     atomic_store(&stop_requested,false); frames=0; frameless=false;
+    defer_off=false;
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;
     // Cleared with them: a start that fails before a guest exists reaches
@@ -1548,6 +1791,9 @@ esp_err_t app_start_test(char test) {
     // being smaller, and lowering it only added a second unknown to a start
     // that was already failing.
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
+    // The arena (docs/vm/qjs-observe.md sec.20) is the foreground guest's: an
+    // overlay runs beside a drawing scene and takes no fixed region.
+    if(overlay_session) gc.arena_bytes=0;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     // The Shiki heap (docs/kasane/shiki-spec.md sec.9.2): one contiguous
     // region for a session whose manifest names kasane.shiki, taken now,
@@ -1562,6 +1808,9 @@ esp_err_t app_start_test(char test) {
             err=ESP_ERR_NO_MEM;goto fail;
         }
     }
+#ifdef CONFIG_POCKET_HEAP_MAP
+    if(!overlay_session)heap_map("pre");
+#endif
     TRY(pocketjs_guest_create(&gc,&guest));
     if(++guest_generation==0)++guest_generation;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
@@ -1588,17 +1837,35 @@ esp_err_t app_start_test(char test) {
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"memory",pocket_memory_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
+    // P2a (docs/perf/two-core-pipeline.md sec.7.2): every native function the
+    // surfaces below create -- now, on a namespace's first read, or later
+    // from inside one of their own calls -- waits for the display task before
+    // it runs. Console is outside: it only appends to the log ring, and a
+    // log line must not end the overlap.
+    JSRuntime *join_rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+    JS_SetCFunctionJoinHook(join_rt,js_join_hook);
+    JS_MarkCFunctions(join_rt,true);
+    // TRY_NOJOIN: a surface whose functions never touch what a present in
+    // flight reads (the survey behind sec.7.2: kasane, capture, pet-hub and
+    // overlay do; av joins only for its two Kasane sources, which it marks
+    // itself). A surface not listed here joins, which is the safe default.
+#define TRY_NOJOIN(name,install) do{ \
+        JSCFunctionMark saved_mark_=JS_SetCFunctionMark(join_rt,false); \
+        esp_err_t nojoin_err_=pocketjs_guest_quickjs_install_once(guest,name,install,NULL); \
+        JS_RestoreCFunctionMark(join_rt,saved_mark_); \
+        TRY(nojoin_err_); \
+    }while(0)
+    TRY_NOJOIN("pocket",pocket_api_install);
+    TRY_NOJOIN("memory",pocket_memory_install);
+    TRY_NOJOIN("random",pocket_random_install);
+    TRY_NOJOIN("storage",pocket_storage_install);
     // 3.1: an overlay's default capability set is NARROWER than a foreground
     // app's, because it runs while nobody is looking at it. The narrowing is
     // done by not installing the surface at all, so capabilities.get() answers
     // supported=false for the radio, the microphone and the buses -- which is
     // the honest answer for this session, and costs the guest nothing.
     if(overlay_session) {
-        TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+        TRY_NOJOIN("app",pocket_app_install);
         TRY(pocketjs_guest_quickjs_install_once(guest,"overlay",pocket_overlay_install,NULL));
         TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
         // fs and av joined this list on 2026-09-09, and the reason is worth
@@ -1616,30 +1883,30 @@ esp_err_t app_start_test(char test) {
         // radio, the microphone or the buses, so capabilities.get() answers
         // supported=false for them, which is the honest answer for this session
         // and costs the guest nothing.
-        TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
-        TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
+        TRY_NOJOIN("fs",pocket_fs_install);
+        TRY_NOJOIN("av",pocket_av_install);
         goto surfaces_done;
     }
-    TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
+    TRY_NOJOIN("fs",pocket_fs_install);
+    TRY_NOJOIN("imu",pocket_imu_install);
+    TRY_NOJOIN("av",pocket_av_install);
     // After "av": both contribute to pocket.audio, and the substrate runs
     // contributors in the order they registered.
     TRY(pocketjs_guest_quickjs_install_once(guest,"capture",pocket_capture_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
+    TRY_NOJOIN("io",pocket_io_install);
+    TRY_NOJOIN("net",pocket_net_install);
+    TRY_NOJOIN("ble",pocket_ble_install);
     TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"input",pocket_input_install,NULL));
+    TRY_NOJOIN("input",pocket_input_install);
     // After "input": both contribute to pocket.input, and contributors run in
     // the order they registered.
-    TRY(pocketjs_guest_quickjs_install_once(guest,"text",pocket_text_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"bridge",pocket_bridge_install,NULL));
+    TRY_NOJOIN("text",pocket_text_install);
+    TRY_NOJOIN("bridge",pocket_bridge_install);
     // After "console": it wraps print and console.log onto the section 7 ring.
-    TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+    TRY_NOJOIN("app",pocket_app_install);
     // After "app": launchContext and info join pocket.app, and a contributor
     // runs in the order it registered.
-    TRY(pocketjs_guest_quickjs_install_once(guest,"workspace",pocket_workspace_install,NULL));
+    TRY_NOJOIN("workspace",pocket_workspace_install);
 surfaces_done:
     if(overlay_session) goto source_ready;
     // pocket.pet is the surface of two native apps, Pocket Pet and Pet
@@ -1651,17 +1918,18 @@ surfaces_done:
     // pocket.derby, DERBY WATCH's series in C, the same way: only for the
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
     if(app_registry_wants(app_registry_current(),"derby.series"))
-        TRY(pocketjs_guest_quickjs_install_once(guest,"derby",pocket_derby_install,NULL));
+        TRY_NOJOIN("derby",pocket_derby_install);
     // pocket.shikiDebug, the Shiki engine for the on-device differential test
     // (apps/shikitest), the same way: only for kasane.shiki.debug.
     if(app_registry_wants(app_registry_current(),"kasane.shiki.debug"))
-        TRY(pocketjs_guest_quickjs_install_once(guest,"shiki-debug",pocket_shiki_debug_install,NULL));
+        TRY_NOJOIN("shiki-debug",pocket_shiki_debug_install);
     // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
     // 'J' diagnostic, which runs MEGADEMO without a manifest).
     // docs/apps/megademo-shapes.md.
     if(app_registry_wants(app_registry_current(),"kasane.shapes")||test=='J')
-        TRY(pocketjs_guest_quickjs_install_once(guest,"shapes",pocket_shape_install,NULL));
+        TRY_NOJOIN("shapes",pocket_shape_install);
 source_ready:;
+    JS_MarkCFunctions(join_rt,false);
     const char *source=user_source?user_source:hello_start;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
     // USB-only diagnostics exercise the same lifecycle and resource limits.
@@ -1965,6 +2233,9 @@ source_ready:;
 #ifdef POCKET_HEAPPROBE
     if(hp) hp_report("eval",err);
 #endif
+#ifdef CONFIG_POCKET_HEAP_MAP
+    if(!overlay_session)heap_map("eval");
+#endif
     end_guest_turn();
     if(err!=ESP_OK)goto fail;
 #ifdef CONFIG_POCKET_VM_PROBE
@@ -2023,6 +2294,7 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // here; strip composition and the LCD bus remain in shell_draw(), where the
 // native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
+    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!guest) return ESP_ERR_INVALID_STATE;
     sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
@@ -2219,7 +2491,52 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
                       pocketjs_guest_frame(guest,&input);
 }
 
+static esp_err_t app_tick_body(uint32_t buttons);
+// Two-core-pipeline.md sec.1.3: whether this turn's frame may be presented
+// while the next turn runs. Everything here is host state the next turn's host
+// work or a host overlay would otherwise touch under the display task.
+// Why the frame may not be presented while the next turn runs, as bits (0:
+// it may). The reasons are counted on FRAME_P0's nodefer= in this order.
+static unsigned present_defer_block(uint32_t buttons) {
+#if defined(CONFIG_POCKET_DISP_DEFER) && defined(KASANE_DMA_OVERLAP)
+    sys_notice notice;
+    unsigned why=0;
+    if(defer_off) why|=1u<<0;
+    if(overlay_session||!guest) why|=1u<<1;
+    if((buttons&0x2000)||atomic_load(&stop_requested)) why|=1u<<2;
+    if(turn_continued) why|=1u<<3;
+    if(guest&&pocketjs_guest_work_pending(guest)) why|=1u<<4;
+    if(!frame_bd_disp_on_task()) why|=1u<<5;
+    if(board_capture_active()) why|=1u<<6;
+    if(pocket_text_active()) why|=1u<<7;
+    if(sound_capture_active()) why|=1u<<8;
+    if(pet_hub_alert_shown()) why|=1u<<9;
+    if(sys_notify_active(sys_device_notifications(),&notice)) why|=1u<<10;
+    if(pocket_pixel_pending()||pocket_video_pending()||pocket_grid_pending()) why|=1u<<11;
+    // Kasane's own reasons from bit 12: not active, schema/provider or a
+    // resource, notice, animation blocks, modal.
+    unsigned k=pocket_kasane_defer_block();
+    if(k&1u) why|=1u<<12;
+    if(k&(2u|4u)) why|=1u<<13;
+    if(k&8u) why|=1u<<14;
+    if(k&16u) why|=1u<<15;
+    if(k&32u) why|=1u<<16;
+    return why;
+#else
+    (void)buttons;
+    return 1u;
+#endif
+}
+static bool present_deferrable(uint32_t buttons) {
+    return present_defer_block(buttons)==0;
+}
 esp_err_t app_tick(uint32_t buttons) {
+    const int64_t began=esp_timer_get_time();
+    const esp_err_t e=app_tick_body(buttons);
+    frame_bd_tick((uint32_t)(esp_timer_get_time()-began));
+    return e;
+}
+static esp_err_t app_tick_body(uint32_t buttons) {
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
     // later turn for a deferred 0x2000 to be delivered on. sec.5.2 says so in
@@ -2243,11 +2560,24 @@ esp_err_t app_tick(uint32_t buttons) {
     mdt.btn=buttons;
 #endif
     sample_memory_pressure();
-    pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    /* P2a (two-core-pipeline.md sec.2.3 B): the last frame may still be on
+     * the display task. The host work below only reads Kasane, or does
+     * nothing, while the frame stays eligible; otherwise join first. A frame
+     * joined meanwhile (by a marked native call) is accounted for here. */
+    if(disp_busy() && !present_deferrable(buttons&0x2000)) disp_join();
+    if(!disp_busy()) {
+        esp_err_t settled=present_settle();
+        if(settled!=ESP_OK) return settled;
+    }
+    const bool in_flight=disp_busy();
+    // Animation time is core state; there are no animation blocks while a
+    // frame is in flight (eligibility), so it has nothing to drive meanwhile.
+    if(!in_flight) pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     /* A ticket retained from a prior turn keeps its dedicated display turn.
      * A fresh native presenter ticket below does not: after it reaches the
-     * panel, due JS promises and input must still run this turn. */
-    bool prior_submission=pocket_kasane_has_submission()&&
+     * panel, due JS promises and input must still run this turn. The frame
+     * in flight is not such a ticket (sec.2.3 B). */
+    bool prior_submission=!in_flight&&pocket_kasane_has_submission()&&
         !pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
     bool presenter_blocked=false;
     ksn_result presenter_result=pocket_kasane_presenter_step(&presenter_blocked);
@@ -2265,7 +2595,9 @@ esp_err_t app_tick(uint32_t buttons) {
     // as its own owner turn. The same gate retries a partial LCD transfer
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
-    if(pocket_kasane_needs_present()) {
+    // In flight, the core reports the frame being presented as a submission;
+    // whatever was invalidated meanwhile goes out with this turn's present.
+    if(!in_flight&&pocket_kasane_needs_present()) {
         esp_err_t pending=present_frame();
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live
@@ -2321,6 +2653,7 @@ esp_err_t app_tick(uint32_t buttons) {
         end_guest_turn();
         uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
         turn_sum+=(double)continuation_us; ticks++;
+        frame_bd_js(continuation_us);
 #ifdef KASANE_MEGADEMO_TRACE
         mdt.kind=pocketjs_guest_work_pending(guest)?'P':'C';
         mdt.js_us=continuation_us;
@@ -2385,6 +2718,9 @@ esp_err_t app_tick(uint32_t buttons) {
         // opens its frame first (MEGADEMO does) lost the save to BUSY and the
         // session ended EXECUTION FAILED. The present's time comes out of the
         // leave budget's job allowance, not the save: frame() is never cut.
+        // sec.2.3 B: read after a join, not of the frame in flight.
+        esp_err_t settled=present_settle();
+        if(settled!=ESP_OK) return settled;
         if(pocket_kasane_has_submission()||pocket_proc_pending()) {
             if(!leaving) {
                 deferred_buttons|=buttons;
@@ -2408,12 +2744,15 @@ esp_err_t app_tick(uint32_t buttons) {
     end_guest_turn();
     // The JS side of the frame: frame() in QuickJS. Timed on every tick, painted or not, so turn_ms is its own number
     // next to render_ms rather than hidden inside the frame period.
+    icache_ab_turn();
     int64_t turning=esp_timer_get_time();
 #ifdef CONFIG_POCKET_VM_TURNPERF
     uint32_t tp0,tp1; turnperf_read(&tp0,&tp1);
 #endif
+    frame_bd_turn_begin();
     esp_err_t e=dispatch_guest(false,buttons);
     end_guest_turn();
+    frame_bd_turn_end();
 #ifdef CONFIG_POCKET_VM_TURNPERF
     turnperf_add(tp0,tp1,(uint32_t)(esp_timer_get_time()-turning));
 #endif
@@ -2427,6 +2766,7 @@ esp_err_t app_tick(uint32_t buttons) {
 #endif
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+    frame_bd_js((uint32_t)turn_us);
 #ifdef KASANE_MEGADEMO_TRACE
     // Q: a frame() the VM parked; its continuation is the next line.
     mdt.kind=pocketjs_guest_work_pending(guest)?'Q':'F';
@@ -2440,6 +2780,20 @@ esp_err_t app_tick(uint32_t buttons) {
     vmprobe_frame_sample(guest,turn_us);
 #endif
     if(e)return e;
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+    frame_bd_eligible((pocketjs_guest_work_pending(guest)?FRAME_BD_NO_CONT:0u)|
+                      (board_capture_active()?FRAME_BD_NO_CAPTURE:0u)|
+                      (pocket_text_active()?FRAME_BD_NO_TEXT:0u)|
+                      (have_notice?FRAME_BD_NO_NOTICE:0u)|
+                      (pocket_pixel_pending()||pocket_video_pending()||pocket_grid_pending()?
+                       FRAME_BD_NO_RESOURCE:0u)|
+                      (sound_capture_active()?FRAME_BD_NO_SOUND_CAPTURE:0u));
+#endif
+    {
+        unsigned why=present_defer_block(buttons);
+        present_defer=why==0;
+        if(why) frame_bd_defer_why(why);
+    }
     return present_frame();
 }
 
@@ -2498,7 +2852,73 @@ void app_vm_back_selftest(void) {
 // turn has no frame() of its own but still has a picture to show -- whatever
 // its jobs submitted -- and a display frozen for the length of a long drain
 // would be a visible regression the level does not need to cause.
+static esp_err_t present_frame_body(void);
 static esp_err_t present_frame(void) {
+    return present_frame_body();
+}
+#ifdef KASANE_DMA_OVERLAP
+/* P1 of docs/perf/two-core-pipeline.md: the part of a present that only reads
+ * the Kasane core -- the render, its sends and the board's frame end -- may
+ * run on the display task (disp.h) while the UI task waits. The rest of
+ * present_frame_body (advance, the begin and end that change the core, the
+ * accounting and logs) stays on the UI task. A capture prints its PIX rows
+ * from inside the render, so it stays here too. */
+static pocket_kasane_present_job present_job;
+static esp_err_t present_run(void) {
+    ksn_present_job_run(&present_job.present);
+    board_present_frame_end();
+    return ESP_OK;
+}
+#endif
+// The present job's inputs and outputs (pf_*). Static, not locals of
+// present_frame_body: with P2a the job outlives the call that started it
+// (two-core-pipeline.md sec.7.2, F11).
+static kasane_display_t pf_display;
+static ksn_display_port pf_port;
+static ksn_render_stats pf_stats;
+static ksn_display_completion pf_completion;
+static int64_t pf_began,pf_end;
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+static bool pf_d4_pixel_candidate;
+#endif
+static esp_err_t present_account(ksn_result result);
+// P2a (two-core-pipeline.md sec.7.3): the last frame was handed over without
+// a join; its accounting waits for present_settle(). present_defer asks the
+// next present_frame() to defer, and defer_off stops deferring for the rest
+// of the session after a transfer failure (sec.2.3 E).
+// (declared at the top: the session start and the turn read them too)
+#ifdef KASANE_DMA_OVERLAP
+static ksn_result pf_result;
+// The finish step: the acknowledgement only (F6). Runs wherever the join is.
+static void present_ack(esp_err_t run) {
+    (void)run;
+    pf_result=pocket_kasane_present_end(&present_job);
+    pf_end=esp_timer_get_time();
+    board_host_overlays=true;
+}
+#endif
+// Joins the frame in flight, if any, and accounts for a deferred one. Only on
+// the UI task outside any native call: present_account logs and may fail.
+static esp_err_t present_settle(void) {
+    if(disp_busy()) {
+        const int64_t t=esp_timer_get_time();
+        disp_join();
+        frame_bd_join_wait(false,(uint32_t)(esp_timer_get_time()-t));
+    }
+    if(!pf_deferred) return ESP_OK;
+    pf_deferred=false;
+#ifdef KASANE_DMA_OVERLAP
+    return present_account(pf_result);
+#else
+    return ESP_OK;
+#endif
+}
+static esp_err_t present_frame_body(void) {
+    bool may_defer=present_defer;
+    present_defer=false;
+    // sec.2.3 B: the frame before is joined and accounted for first.
+    esp_err_t settled=present_settle();
+    if(settled!=ESP_OK) return settled;
     last_present_us=esp_timer_get_time();
     {
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -2519,45 +2939,72 @@ static esp_err_t present_frame(void) {
 #endif
         ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
         if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
-        kasane_display_t display_state={0};
+        pf_display=(kasane_display_t){0};
         // Offering present_rect is what lets the renderer composite only the
         // damaged columns of a band. It is withdrawn while board_capture is
         // dumping rows, because those PIX lines print all 240 columns of the
         // shared strip and only the window would have been repainted.
         /* Design 0 (board.h): 4-row pieces from the strip's halves. */
         const uint16_t strip_rows=(uint16_t)board_strip_rows();
-        ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
+        pf_port=(ksn_display_port){.ctx=&pf_display,.strip=kasane_strip,.present=kasane_send,
                               .width=LCD_W,.height=LCD_H,.strip_rows=strip_rows,.text=&ksn_font_port,
                               .present_rect=board_capture_active()?NULL:kasane_send_rect};
-        ksn_render_stats stats;
+        pf_stats=(ksn_render_stats){0};
 #ifdef KASANE_D4_PIXEL_APP_PROBE
-        bool d4_pixel_candidate=pocket_pixel_pending();
-        if(d4_pixel_candidate&&!d4_pixel_injected){
+        pf_d4_pixel_candidate=pocket_pixel_pending();
+        if(pf_d4_pixel_candidate&&!d4_pixel_injected){
             d4_pixel_injected=true;d4_pixel_fail_after=1;
             ESP_LOGI("D4_PIXEL","ARMED second_send");
         }
 #endif
-        int64_t began=esp_timer_get_time();
+        pf_began=esp_timer_get_time();
 #ifdef KASANE_DMA_OVERLAP
-        const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
-        ksn_result result=pocket_kasane_present_complete(&port,&completion,&stats);
+        pf_completion=(ksn_display_completion){.ctx=&pf_display,.finish=kasane_finish};
+        present_job=(pocket_kasane_present_job){.present={.render={.display=&pf_port,
+                                                .completion=&pf_completion,.stats=&pf_stats}}};
+        // A deferred frame draws no host overlay (sec.1.2): the text field,
+        // the pet alert and the recording dot are UI state the next turn may
+        // change while the display task renders. Eligibility already asked
+        // that none is showing; present_ack turns them back on.
+        if(may_defer) board_host_overlays=false;
+        pocket_kasane_present_begin(&present_job);
+        disp_start(present_run,present_ack,frame_bd_disp_on_task()&&!board_capture_active());
+        if(may_defer) {
+            pf_deferred=true;
+            frame_bd_deferred();
+            return ESP_OK;
+        }
+        disp_join();
+        return present_account(pf_result);
 #else
-        ksn_result result=pocket_kasane_present(&port,&stats);
-#endif
+        (void)may_defer;
+        ksn_result result=pocket_kasane_present(&pf_port,&pf_stats);
         board_present_frame_end();
+        pf_end=esp_timer_get_time();
+        return present_account(result);
+#endif
+    }
+}
+
+// What a present leaves behind, on the UI task: animation and frame counts,
+// the transfer-failure path, the accounting and the logs. Separate from the
+// finish step (present_ack), which runs wherever the join happens -- inside
+// a native call, at any JS depth -- and so only acknowledges.
+static esp_err_t present_account(ksn_result result) {
+    {
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",
-                 (unsigned)result,(unsigned)stats.transferred_bytes,
-                 (unsigned)(esp_timer_get_time()-began),
+                 (unsigned)result,(unsigned)pf_stats.transferred_bytes,
+                 (unsigned)(esp_timer_get_time()-pf_began),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                  (unsigned)uxTaskGetStackHighWaterMark(NULL));
 #endif
 #ifdef KASANE_D4_PIXEL_APP_PROBE
-        if(d4_pixel_candidate)
+        if(pf_d4_pixel_candidate)
             ESP_LOGI("D4_PIXEL","PRESENT result=%u duration_us=%u stack_hwm_bytes=%u",
-                     (unsigned)result,(unsigned)(esp_timer_get_time()-began),
+                     (unsigned)result,(unsigned)(esp_timer_get_time()-pf_began),
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
         if(d4_pixel_retry&&result==KSN_OK){
             ESP_LOGI("D4_PIXEL","RETRY_OK stack_hwm_bytes=%u",
@@ -2566,7 +3013,7 @@ static esp_err_t present_frame(void) {
         }
 #endif
         if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
-        unsigned whole=(unsigned)(esp_timer_get_time()-began);
+        unsigned whole=(unsigned)(pf_end-pf_began);
         frames++;
         if(result==KSN_IO) {
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -2577,6 +3024,7 @@ static esp_err_t present_frame(void) {
             }
 #endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
+            defer_off=true;   // sec.2.3 E: the rest of the session presents in step
             return ESP_OK;
         }
         if(result!=KSN_OK) {
@@ -2584,29 +3032,30 @@ static esp_err_t present_frame(void) {
             return ESP_FAIL;
         }
 #ifdef KASANE_P2_REPAIR_PROBE
-        if(p2_repair_stage==2&&stats.bands) {
+        if(p2_repair_stage==2&&pf_stats.bands) {
             ESP_LOGI("KSN_P2","REPAIR_OK bands=%u bytes=%u",
-                     ksn_render_band_count(stats.bands),(unsigned)stats.transferred_bytes);
+                     ksn_render_band_count(pf_stats.bands),(unsigned)pf_stats.transferred_bytes);
             board_capture(false);
             p2_repair_stage=0;
             p2_capture_repair_only=false;
         }
 #endif
-        if(stats.bands) {
-            painted++;render_sum+=whole-display_state.sent_us;
-            present_sum+=display_state.sent_us;
+        if(pf_stats.bands) {
+            painted++;render_sum+=whole-pf_display.sent_us;
+            present_sum+=pf_display.sent_us;
+            frame_bd_present(whole-pf_display.sent_us,pf_display.sent_us);
 #ifdef KASANE_MEGADEMO_TRACE
-            mdt.render_us+=whole-display_state.sent_us;mdt.send_us+=display_state.sent_us;
-            mdt.bytes+=stats.transferred_bytes;mdt.bands=ksn_render_band_count(stats.bands);
+            mdt.render_us+=whole-pf_display.sent_us;mdt.send_us+=pf_display.sent_us;
+            mdt.bytes+=pf_stats.transferred_bytes;mdt.bands=ksn_render_band_count(pf_stats.bands);
             mdt.presents++;
             pocket_proc_trace_presented();
 #endif
 #if KASANE_STRESS_GRAD_AB
-            grad_ab_bytes+=stats.transferred_bytes;
+            grad_ab_bytes+=pf_stats.transferred_bytes;
 #endif
-            ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-display_state.sent_us);
-            ksn_p0_probe_sample(KSN_P0_APP_SEND,display_state.sent_us);
-            ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
+            ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-pf_display.sent_us);
+            ksn_p0_probe_sample(KSN_P0_APP_SEND,pf_display.sent_us);
+            ksn_p0_probe_transfer(pf_stats.transferred_bytes,ksn_render_band_count(pf_stats.bands));
             // This frame's counts into the window's. The millisecond columns on
             // the line are averages and these are sums, which the line says with
             // `frames=`; the renderer resets its accumulators on read, so the
@@ -2616,9 +3065,9 @@ static esp_err_t present_frame(void) {
             // is a count and `band_runs` the number of contiguous runs, because
             // 7 bands of 8 rows and 14 of 4 leave the same bytes behind and the
             // send average cannot tell them apart (kasane-opt-survey.md 10.1).
-            band_mask_last=stats.bands;
-            band_count_last=ksn_render_band_count(stats.bands);
-            band_runs_last=ksn_render_band_runs(stats.bands);
+            band_mask_last=pf_stats.bands;
+            band_count_last=ksn_render_band_count(pf_stats.bands);
+            band_runs_last=ksn_render_band_runs(pf_stats.bands);
             // Session-scoped rather than process-scoped: design-contracts resets
             // the flag when a kasane session starts.
             if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
@@ -2632,13 +3081,14 @@ static esp_err_t present_frame(void) {
                              (unsigned)span_cy,painted);
                 }
 #endif
+                const int64_t fbd_log0=esp_timer_get_time();
                 ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
                          "bytes=%u bands=%u band_runs=%u band_mask=0x%05x prof=%d "
                          "fill_n=%u fill_cy=%u span_n=%u span_cy=%u tile_n=%u tile_cy=%u "
                          "blend_n=%u blend_cy=%u read_n=%u read_cy=%u "
                          "image_n=%u image_cy=%u frames=%u",
                          ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,
-                         present_sum/30/1000.0,(unsigned)stats.transferred_bytes,
+                         present_sum/30/1000.0,(unsigned)pf_stats.transferred_bytes,
                          band_count_last,band_runs_last,band_mask_last,g_ksn_prof,
                          (unsigned)prof_sum.fill_n,(unsigned)prof_sum.fill_cy,
                          (unsigned)prof_sum.span_n,(unsigned)prof_sum.span_cy,
@@ -2646,6 +3096,34 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
+                icache_ab_window();
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+                /* What the guest holds by kind, every 8th PAINT window (~4 s at
+                 * 60 fps): the native heap's free bytes and the guest's own
+                 * malloc_size come from the same system heap, so this is what
+                 * a scene costs the pressure threshold. The walk allocates
+                 * nothing but takes ms, hence the rate. */
+                {
+                    static unsigned mu_win;
+                    if(guest && (mu_win++&7u)==0) {
+                        JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+                        JSMemoryUsage m;
+                        JS_ComputeMemoryUsage(rt,&m);
+                        const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+                        ESP_LOGI("app","FRAME_MU free=%u largest=%u malloc=%lld n=%lld atom=%lld/%lld "
+                                 "str=%lld/%lld obj=%lld/%lld prop=%lld/%lld shape=%lld/%lld "
+                                 "fn=%lld/%lld code=%lld arr=%lld fast=%lld/%lld bin=%lld/%lld",
+                                 (unsigned)heap_caps_get_free_size(caps),
+                                 (unsigned)heap_caps_get_largest_free_block(caps),
+                                 m.malloc_size,m.malloc_count,m.atom_count,m.atom_size,
+                                 m.str_count,m.str_size,m.obj_count,m.obj_size,
+                                 m.prop_count,m.prop_size,m.shape_count,m.shape_size,
+                                 m.js_func_count,m.js_func_size,m.js_func_code_size,
+                                 m.array_count,m.fast_array_count,m.fast_array_elements,
+                                 m.binary_object_count,m.binary_object_size);
+                    }
+                }
+#endif
                 /* What Shiki cost these frames (pocket_shiki_frame.c, docs/kasane/shiki-jit.md
                  * sec.9): draws and engine steps per frame, the engine (input
                  * conversion included) and the whole native draw, ms per frame. */
@@ -2690,6 +3168,7 @@ static esp_err_t present_frame(void) {
                     ksn_shiki_jit_scalar_on=!ksn_shiki_jit_scalar_on;
 #endif
                 }
+                frame_bd_log((uint32_t)(esp_timer_get_time()-fbd_log0));
 #if defined(POCKET_PROC_HSPAN_AB)&&POCKET_PROC_HSPAN_AB
                 /* Same-binary A/B of the band renderer's horizontal-line fill
                  * (g_ksn_proc_hspan, ksn_shiki_frame.h): the window just printed
@@ -2706,7 +3185,7 @@ static esp_err_t present_frame(void) {
                          render_sum/30/1000.0,present_sum/30/1000.0);
                 g_board_depth=g_board_depth<2?2:1;
 #endif
-#if defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+#if BOARD_LCD_DIRECT&&BOARD_LCD_DIRECT_AB&&!defined(CONFIG_POCKET_FRAME_BD_LCD_DIRECT_AB)
                 /* Same-binary A/B of the LCD send path (board.h): the window
                  * just printed used the path named here, then it flips. */
                 {
@@ -2714,7 +3193,7 @@ static esp_err_t present_frame(void) {
                     ESP_LOGI("kasane","DIRECT_AB direct=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u underruns=%u",
                              direct,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
+                             (unsigned)pf_stats.transferred_bytes,(unsigned)board_lcd_direct_underruns());
                     direct=board_lcd_direct_set(!direct);
                 }
 #endif
@@ -2726,7 +3205,7 @@ static esp_err_t present_frame(void) {
                     ESP_LOGI("kasane","BUF_AB mode=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u free=%u underruns=%u",
                              mode,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes,
+                             (unsigned)pf_stats.transferred_bytes,
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                              (unsigned)board_buf_underruns());
                     int next=board_buf_mode_set((mode+1)%3);   /* copy, 1', 0 */
@@ -2741,7 +3220,7 @@ static esp_err_t present_frame(void) {
                     ESP_LOGI("kasane","ENDIAN_AB le=%d turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
                              endian_le,ticks?turn_sum/ticks/1000.0:0.0,
                              render_sum/30/1000.0,present_sum/30/1000.0,
-                             (unsigned)stats.transferred_bytes);
+                             (unsigned)pf_stats.transferred_bytes);
                     endian_le=board_endian_ab_flip();
                 }
 #endif

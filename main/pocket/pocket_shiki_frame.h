@@ -91,6 +91,8 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark);
  * colour). False outside commit(). pocket_kasane.c turns it into image
  * damage instead of commit()'s one bounding rectangle. */
 bool pocket_proc_band_damage(unsigned surface,uint32_t *bands,int16_t x0[],int16_t x1[]);
+// Takes what a present drawn in strip_rows pieces needs, before it runs.
+void pocket_proc_prepare_render(unsigned strip_rows);
 bool pocket_proc_has_frame(void);
 bool pocket_proc_pending(void);
 bool pocket_proc_backdrop_pending(void);

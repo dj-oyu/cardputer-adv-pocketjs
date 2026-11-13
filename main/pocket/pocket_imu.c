@@ -153,6 +153,7 @@ void pocket_imu_reset(void) {
     // gyroscope for nothing, so there is nothing here to put back.
     if(!built) return;
     built=false;
+    motion_want_app(false);
     pocket_api_sub_close_all(&watch_table);
     watch_table.ctx=NULL;
     // A program that ended without closing its watches must not leave the
@@ -166,8 +167,12 @@ void pocket_imu_reset(void) {
 // open and keep their place in the sample stream, so the first delivery after
 // the wake reports what the sleep skipped in `dropped`; the gyroscope's current
 // is what is given back.
-void pocket_imu_suspend(void) { if(built) motion_request_gyro(false); }
-void pocket_imu_resume(void)  { if(built) follow_gyro_demand(&watch_table); }
+void pocket_imu_suspend(void) {
+    if(built) { motion_request_gyro(false); motion_want_app(false); }
+}
+void pocket_imu_resume(void) {
+    if(built) { motion_want_app(true); follow_gyro_demand(&watch_table); }
+}
 
 // ---------------------------------------------------------------- capability
 
@@ -202,6 +207,9 @@ static esp_err_t build_sensors(JSContext *ctx, JSValueConst ns, void *user) {
     }
     watch_table.open=0;
     watch_table.ctx=ctx;
+    // Reading pocket.sensors is the program saying it uses the IMU; a program
+    // that never does costs no I2C (motion.h, motion_want_app).
+    motion_want_app(true);
     follow_gyro_demand(&watch_table);
 
     JSValue imu=JS_NewObject(ctx);

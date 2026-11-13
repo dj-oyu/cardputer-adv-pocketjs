@@ -146,6 +146,10 @@ uint64_t ksn_runtime_animation_deadline(void){
 void ksn_runtime_set_hidden(bool hidden){if(runtime)runtime->hidden=hidden;}
 void ksn_runtime_set_reduce_motion(bool enabled){if(runtime)runtime->reduce_motion=enabled;}
 bool ksn_runtime_animation_pending(void){return runtime&&runtime->host.animation_submission.value;}
+bool ksn_runtime_animation_enabled(void){return runtime&&ksn_core_animation_bytes(&runtime->core)>0;}
+bool ksn_runtime_modal_active(void){
+    return runtime&&(runtime->host.modal.phase!=KSN_MODAL_CLOSED||runtime->host.modal.pending.value);
+}
 uint32_t ksn_runtime_cache_bytes(void){return runtime&&runtime->cache?KSN_CACHE_RESERVED_BYTES:0;}
 ksn_view_stats ksn_runtime_stats(ksn_layer layer){
     return runtime?ksn_view_get_stats(ksn_view_host_endpoint(&runtime->host,layer)):(ksn_view_stats){0};
@@ -172,14 +176,27 @@ uint32_t ksn_runtime_opaque_system_bands(void){
     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
 }
 #ifdef KASANE_DMA_OVERLAP
+ksn_result ksn_runtime_present_begin(ksn_present_job *job){
+    job->running=false;
+    if(!job->render.stats)return job->result=KSN_INVALID;
+    *job->render.stats=(ksn_render_stats){0};
+    if(ksn_runtime_needs_present())return ksn_view_host_present_begin(&runtime->host,job);
+    const ksn_display_completion *completion=job->render.completion;
+    return job->result=completion&&completion->finish?completion->finish(completion->ctx):KSN_OK;
+}
+ksn_result ksn_runtime_present_end(ksn_present_job *job){
+    /* runtime cannot go away while its host presents: reset answers BUSY. */
+    return job->running?ksn_view_host_present_end(&runtime->host,job):job->result;
+}
 ksn_result ksn_runtime_present_complete(const ksn_display_port *port,ksn_backdrop_loader load,
                                         bool occlusion_safe,const ksn_display_completion *completion,
                                         ksn_render_stats *stats){
-    if(!stats)return KSN_INVALID;
-    *stats=(ksn_render_stats){0};
-    return ksn_runtime_needs_present()?
-        ksn_view_host_present_complete(&runtime->host,port,load,occlusion_safe,completion,stats):
-        (completion&&completion->finish?completion->finish(completion->ctx):KSN_OK);
+    ksn_present_job job={.render={.display=port,.load=load,.occlusion_safe=occlusion_safe,
+                                  .completion=completion,.stats=stats}};
+    ksn_result r=ksn_runtime_present_begin(&job);
+    if(!job.running)return r;
+    ksn_present_job_run(&job);
+    return ksn_runtime_present_end(&job);
 }
 #endif
 ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *stats){

@@ -106,17 +106,28 @@ def extract(a):
     print(f'{len(turns)} turns, {len(blocks)} blocks, {sum(len(t) for t in turns)} executions -> {a.out}')
 
 class Cache:
-    def __init__(self, sets, ways):
+    """LRU sets. Locked lines (the ICache's preload-and-lock sections) always
+    hit and each takes one way of its set from everything else."""
+    def __init__(self, sets, ways, locked=()):
         self.sets, self.ways = sets, ways
+        self.locked = set(locked)
+        self.room = [ways] * sets
+        for l in self.locked:
+            self.room[l % sets] -= 1
+        if min(self.room) < 1:
+            raise SystemExit('lock leaves a set with no free way')
         self.flush()
     def flush(self):
         self.lru = [collections.OrderedDict() for _ in range(self.sets)]
     def access(self, line):
-        s = self.lru[line % self.sets]
+        if line in self.locked:
+            return False
+        i = line % self.sets
+        s = self.lru[i]
         if line in s:
             s.move_to_end(line)
             return False
-        if len(s) >= self.ways:
+        if len(s) >= self.room[i]:
             s.popitem(last=False)
         s[line] = None
         return True
@@ -188,11 +199,19 @@ def model(a):
     # size; --force-cost replaces that size (e.g. JS_CallInternal after its
     # cold handlers are outlined, which this model cannot see: the outlined
     # parts are not executed, so only the placement of the rest matters).
+    if a.force_file:
+        # one name per line, or an ldgen fragment's "obj: name (noflash_text)" lines
+        for line in open(a.force_file):
+            m = re.match(r'\s*(?:\w+:\s*)?([A-Za-z_]\w*)\s*(?:\(noflash\w*\))?\s*$', line)
+            if m and m.group(1) not in ('archive', 'entries', 'mapping'):
+                a.force = (a.force or []) + [m.group(1)]
+    only = set(open(a.only).read().split()) if a.only else None
     forced = [n for n in (a.force or []) if n in fw]
     forced_bytes = int(a.force_cost) if a.force_cost else sum(fw[n][1] for n in forced)
     iram, iram_bytes = [], 0
     if a.iram_kib:
-        ranked = sorted((n for n in touched if n in fw and n not in forced), key=lambda n: -uses[n] / fw[n][1])
+        ranked = sorted((n for n in touched if n in fw and n not in forced and
+                         (only is None or n.split('#')[0] in only)), key=lambda n: -uses[n] / fw[n][1])
         for n in ranked:
             if forced_bytes + iram_bytes + fw[n][1] > a.iram_kib * 1024:
                 continue
@@ -201,6 +220,10 @@ def model(a):
         print(f'  forced: {", ".join(forced)} counted as {forced_bytes} B')
     iram = set(iram) | set(forced)
     iram_bytes += forced_bytes
+    if a.lock_kib:
+        a.pack_kib = a.lock_kib
+    if a.preload_kib:
+        a.pack_kib = a.preload_kib
     pack, pack_bytes = pick(a.pack_kib) if a.pack_kib else ([], 0)
     base = {}
     if pack:
@@ -233,10 +256,25 @@ def model(a):
         tb_lines.append((tuple(ls), addrs[0][0]))
 
     sets, ways = (1, 1024) if a.full else (128, 8)
-    warm, cold = Cache(sets, ways), Cache(sets, ways)
+    # --lock-kib: the packed run is one preload-and-lock section.
+    locked = []
+    if a.lock_kib and pack:
+        lo = min(base.values()) >> 5
+        hi = (max(base[n] + fw[n][1] for n in pack) + 31) >> 5
+        locked = range(lo, hi)
+    warm, cold = Cache(sets, ways, locked), Cache(sets, ways, locked)
+    # --preload-kib: the packed run is fetched into the cache at the start of
+    # every turn (a manual preload), after the cold model's flush.
+    preload = []
+    if a.preload_kib and pack:
+        lo = min(base.values()) >> 5
+        hi = (max(base[n] + fw[n][1] for n in pack) + 31) >> 5
+        preload = list(range(lo, hi))
     per_turn = []; miss_by_fn = collections.Counter()
     for t in d['turns']:
         cold.flush(); uniq = set(); wm = cm = 0
+        for l in preload:
+            warm.access(l); cold.access(l)
         for i in t:
             ls, name = tb_lines[i]
             for l in ls:
@@ -253,7 +291,9 @@ def model(a):
     if iram:
         print(f'  IRAM: {len(iram)} functions, {iram_bytes} B of DRAM')
     if pack:
-        print(f'  packed: {len(pack)} functions, {pack_bytes} B')
+        print(f'  packed{" and locked" if locked else ""}: {len(pack)} functions, {pack_bytes} B')
+    if preload:
+        print(f'  preloaded each turn: {len(preload)} lines')
     if a.emit:
         with open(a.emit, 'w') as f:
             f.write(''.join(n + '\n' for n in (pack or sorted(iram))))
@@ -275,8 +315,12 @@ def main():
     m.add_argument('--full', action='store_true', help='fully associative: no conflict misses')
     m.add_argument('--iram-kib', type=float, default=0, help='take the hottest functions out of the cache up to this size')
     m.add_argument('--pack-kib', type=float, default=0, help='pack the hottest functions contiguously up to this size')
+    m.add_argument('--preload-kib', type=float, default=0, help='pack the hottest functions up to this size and preload them before every turn')
+    m.add_argument('--lock-kib', type=float, default=0, help='pack the hottest functions up to this size and lock them in the cache')
     m.add_argument('--force', action='append', help='put this function in IRAM first (repeatable)')
     m.add_argument('--force-cost', type=float, default=0, help='bytes to charge for the forced functions (default: their size)')
+    m.add_argument('--force-file', help='force every function listed (names, or an ldgen .lf file)')
+    m.add_argument('--only', help='choose --iram-kib candidates only from the names in this file')
     m.add_argument('--top', type=int, default=0)
     m.add_argument('--emit', help='write the packed (or IRAM) function names here, one per line')
     for p in (e, m):

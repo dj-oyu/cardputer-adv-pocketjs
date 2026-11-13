@@ -119,6 +119,32 @@ menu "Pocket VM (diagnostics)"
             Off by default: development builds keep exact positions. A
             shipping build may turn it on when an app needs the room.
 
+    config POCKET_VM_GUEST_CHUNK_KB
+        int "Growable guest arena: chunk size (KiB, 0 = one fixed arena)"
+        range 0 64
+        default 0
+        help
+            docs/vm/guest-memory-design.md sec.5. The guest's arena starts as
+            one chunk of this size and takes another (or one of half the size)
+            when full, while the system keeps the native floor; empty chunks go
+            back at the end of a turn (one spare for 30 turns). Requests above
+            2 KiB go to the shared heap. POCKET_VM_GUEST_ARENA_KB = 0 still
+            means no arena.
+
+    config POCKET_VM_GUEST_ARENA_KB
+        int "Guest allocation arena (KiB, 0 = none)"
+        range 0 128
+        default 64
+        help
+            At guest creation, take this much internal RAM in one piece and
+            make it the guest's own TLSF heap without a lock
+            (docs/vm/qjs-observe.md sec.20): the guest's allocations go there
+            (after the small-block cache) before heap_caps, which skips its
+            region search, its heap lock and three call levels, and keeps the
+            guest's small blocks out of the system heap. Taken only when the
+            largest free block holds it plus 56 KiB; overlays take none. An app
+            that uses less than this holds the rest until it exits.
+
     config POCKET_VM_HELPER_IRAM
         bool "Run the hottest QuickJS helpers from IRAM (about 8 KiB of DRAM)"
         default y
@@ -148,6 +174,200 @@ menu "Pocket VM (diagnostics)"
             (esp-15.2.0); a stale one is reported by -Wmissing-profile.
             Build it in a directory of its own with
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
+
+    config POCKET_DISP_TASK
+        bool "Display task: present frames from a task of its own (two-core P1)"
+        default n
+        help
+            docs/perf/two-core-pipeline.md, stage P1. present_frame() runs on a
+            pinned task while the UI task waits for it, so nothing overlaps
+            yet. With POCKET_FRAME_BD_DISP_AB the probe alternates it with the
+            inline path every 60-frame window.
+
+    config POCKET_GUEST_NATIVE_FLOOR_KB
+        int "Guest limit: internal RAM left to natives (KiB, 0 = fixed limit)"
+        range 0 64
+        default 16
+        help
+            docs/vm/lv3-heap-exhaustion.md sec.5. Every native memory sample
+            (100 ms) the guest's limit becomes its current bytes plus its
+            arena's and small-block cache's room plus the system's free RAM
+            above this floor, capped at 160 KiB. The guest then runs out as a
+            quota OOM it can catch, with this much left to Kasane, the radio
+            and the display, instead of at the shared heap where the refusal
+            can land before an app's own try. 0 keeps the fixed limit.
+
+    config POCKET_OOM_GC_PROBE
+        bool "Probe: on a guest OOM, log who refused and the heaps before and after a full GC"
+        default n
+        help
+            Measurement only. At most once a second, after a guest allocation
+            failed: the quota/allocator refusal counts, the guest's bytes and
+            the system heap (free, largest block), then the same after
+            JS_RunGC. Garbage that a GC frees, live data, and a fragmented
+            heap each leave a different line.
+
+    config POCKET_HEAP_ORIGIN
+        bool "Probe: name the caller of each native block that splits two large holes"
+        depends on POCKET_HEAP_MAP && HEAP_TRACING_STANDALONE
+        default n
+        help
+            Measurement only (docs/vm/lv3-heap-exhaustion.md sec.6.5). Starts
+            heap tracing (leaks mode, 300 records) at boot; at the heap map
+            taken before a guest, every used block in a short run (<= 8 KiB)
+            between two free blocks of 2 KiB or more is printed as HEAP_PIN
+            with the call stack that allocated it, or "untraced" for blocks
+            older than the trace.
+
+    config POCKET_HEAP_MAP
+        bool "Probe: print the internal heap's free blocks before a guest, after its evaluation, and after it is gone"
+        default n
+        help
+            Measurement only (docs/vm/guest-memory-design.md sec.10 step 3).
+            heap_caps_walk over the internal heap at three points: before
+            the guest is created (Shiki heap already taken), after the
+            source is evaluated, and after the guest is destroyed (Shiki
+            heap still held). Free blocks of 256 B or more are listed with
+            their offsets, used blocks between them as count/bytes. A hole
+            that closes when the guest is gone was cut by the guest.
+
+    config POCKET_GC_STATS
+        bool "Probe: log the guest's GC runs, time and bytes freed once a second"
+        default n
+        help
+            Measurement only (docs/vm/guest-memory-design.md G1). Builds
+            QuickJS with POCKET_GC_STATS and logs GC_STATS when a collection
+            ran in the last second: runs, total and longest run in us, bytes
+            freed, and the guest's usage and limit.
+
+    config POCKET_DISP_DEFER
+        bool "Display task: let the next JS turn run while a frame is presented (P2a)"
+        depends on POCKET_DISP_TASK
+        default y
+        help
+            docs/perf/two-core-pipeline.md sec.1.3 / sec.7.3. A frame that meets
+            the eligibility rules is handed to the display task and the turn
+            returns at once; the join happens when JS first calls a native
+            function marked "join", or at the next present. Other frames are
+            joined at once, as in P1.
+
+    config POCKET_DISP_ASSERT
+        bool "Display task: abort when a job is started or joined off the UI task"
+        default n
+        help
+            docs/perf/two-core-pipeline.md sec.2.6 / sec.7.2 (F12). disp_start
+            and disp_join keep their state without a lock because only the UI
+            task calls them; a join on the display task itself would wait for
+            ever. This checks the caller on every start and every join that
+            has something to wait for.
+
+    config POCKET_DISP_CORE
+        int "Display task core"
+        depends on POCKET_DISP_TASK
+        range 0 1
+        default 0
+
+    config POCKET_DISP_STACK
+        int "Display task stack (bytes)"
+        depends on POCKET_DISP_TASK
+        default 6144
+
+    config POCKET_LCD_ISR_CORE
+        int "Core the LCD SPI completion interrupt runs on (-1: the core that sets up the bus)"
+        range -1 1
+        default -1
+        help
+            Each strip sent (~30 a frame) ends in this ISR, which wakes the
+            task reaping it. -1 leaves it where spi_bus_initialize() runs
+            (app_main, CPU 0). The two-core pipeline (docs/perf/two-core-pipeline.md)
+            measures which core should pay for it.
+
+    config POCKET_KEY_INT_GPIO
+        int "GPIO wired to the keyboard's INT (-1: none, poll the FIFO over I2C)"
+        range -1 48
+        default 11
+        help
+            The TCA8418 pulls INT low while a key event is latched; on the
+            Cardputer ADV it is GPIO 11 (confirmed on the board 2026-11-11:
+            the pin went low for every key event read). A poll that finds it
+            high (and nothing left from the last FIFO count) skips the I2C
+            read, with a count read every 20th quiet poll as a safety net
+            (main/hal/board.c, board_key_event). -1 reads the FIFO every poll.
+
+    config POCKET_KEY_INT_PROBE
+        bool "Probe: read the FIFO anyway when the INT gate would skip"
+        default n
+        help
+            Measurement only. Logs KEY_INT_MISS for every event the gate would
+            have lost, and KEY_INT_STAT every 2 s. Keys are still handled.
+            Needs POCKET_KEY_INT_GPIO >= 0.
+
+    config POCKET_FRAME_BREAKDOWN
+        bool "Probe: per-frame breakdown of a guest frame (JS/render/send/other/wait)"
+        default n
+        help
+            Diagnostic (docs/perf/60fps-roadmap.md). Times every frame() period
+            of a running guest and logs one "FRAME_BD" line per 60 frames:
+            averages of the JS turn, render, send, the rest of app_tick, the
+            rest of the UI loop and the wait, plus the worst period and how
+            many periods ran past 16.7 and 33.3 ms.
+
+    config POCKET_FRAME_BD_PRESS_AB
+        bool "Probe: force the guest block cache's pressure per FRAME_BD window"
+        depends on POCKET_FRAME_BREAKDOWN
+        default n
+        help
+            Measurement only (docs/perf/frame-breakdown.md sec.7). Cycles the
+            pressure that sample_memory_pressure() hands the guest block cache
+            between as measured, forced on and forced off, one window each.
+            Forced off keeps the cache under real native-heap pressure.
+
+    config POCKET_FRAME_BD_LOG_AB
+        bool "Probe: whole-line log writes on/off every 3 FRAME_BD windows"
+        depends on POCKET_FRAME_BREAKDOWN
+        default n
+        help
+            Measurement only (docs/perf/frame-breakdown.md sec.7). Flips
+            usb_console_log_whole() so max_log compares the two paths.
+
+    config POCKET_FRAME_BD_DISP_AB
+        bool "Probe: rotate inline and display-task presents per FRAME_BD window"
+        depends on POCKET_FRAME_BREAKDOWN && POCKET_DISP_TASK
+        default n
+        help
+            Measurement only (docs/perf/two-core-pipeline.md sec.5, P1).
+            Rotates inline, the task at priority 5, and the task at 6
+            (input_task's, which then cannot preempt it on CPU 0).
+
+    config POCKET_FRAME_BD_LCD_DIRECT_AB
+        bool "Probe: flip the LCD send path (queue / direct) every 3 FRAME_BD windows"
+        depends on POCKET_FRAME_BREAKDOWN
+        default n
+        help
+            Measurement only. Needs BOARD_LCD_DIRECT (main/hal/board.h; on with
+            POCKET_DISP_TASK):
+            lcd_spi.c's register-driven sends against spi_master's queue,
+            crossed with POCKET_FRAME_BD_DISP_AB's three display modes.
+
+    config POCKET_FRAME_BD_PACE_AB
+        bool "Probe: rotate the display pacing rule per FRAME_BD window"
+        depends on POCKET_FRAME_BREAKDOWN
+        default n
+        help
+            Measurement only (docs/perf/frame-breakdown.md sec.6). Cycles the
+            pacing between the old rule (a one-tick yield after every
+            overrun), the shipping rule (that yield only when the UI core's
+            idle task starved for 500 ms), and an absolute microsecond
+            deadline, one 60-frame window each.
+
+    config POCKET_ICACHE_AB
+        bool "Probe: I-cache auto-preload on/off, rotated by paint window"
+        default n
+        help
+            Diagnostic (docs/vm/turn-icache.md sec.4). Configures the ICache
+            autoload over the flash text and rotates its mode every
+            KASANE_PAINT window (30 frames), logging "ICACHE_AB win=... mode=..."
+            after each window, so turn_ms can be compared within one image.
 
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"

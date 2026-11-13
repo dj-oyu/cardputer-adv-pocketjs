@@ -53,6 +53,10 @@ jobs:
           printf '%s\n' '${{ steps.source.outputs.commit }}' | tee artifacts/native-mesh/source-head.txt
           cc --version > artifacts/native-mesh/compiler.txt
           ${{ matrix.command }} 2>&1 | tee artifacts/native-mesh/contract.log
+          if [ "${{ matrix.name }}" = depth ]; then
+            node tools/ayatsuri/asset/test_reduced_packed.cjs | tee artifacts/native-mesh/curved-packed.json
+            python3 tools/ayatsuri/asset/verify_source_native.py --asan --output-dir artifacts/native-mesh/source-native
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

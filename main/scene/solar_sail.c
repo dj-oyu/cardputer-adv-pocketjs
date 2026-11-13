@@ -1,4 +1,5 @@
 #include "solar_sail.h"
+#include "pocket_trig.h"   // the firmware's one double sin (docs/vm/qjs-observe.md sec.18)
 #include "fxmath.h"
 #include "scene_mem.h"
 #include "solar_time.h"
@@ -384,7 +385,7 @@ void solar_sail_prepare(float dt,int tx,int ty) {
     center=add(mul(orbits[from].pos,1-blend),mul(orbits[to].pos,blend));
     float scale=expf(logf(orbits[from].a)*(1-blend)+logf(orbits[to].a)*blend);
     zoom=83/scale;
-    float yaw=.38f+(float)sin(elapsed*.009)*.18f+steer_x*.48f;
+    float yaw=.38f+(float)pocket_sin(elapsed*.009)*.18f+steer_x*.48f;
     float elevation=.60f+steer_y*.38f;
     right=(Vec){fx_cosf(yaw),fx_sinf(yaw),0};
     front=(Vec){fx_sinf(yaw)*fx_cosf(elevation),-fx_cosf(yaw)*fx_cosf(elevation),fx_sinf(elevation)};

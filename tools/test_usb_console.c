@@ -17,6 +17,11 @@ static bool deny_lock, nested_bridge;
 int64_t esp_timer_get_time(void) { return now; }
 bool usb_serial_jtag_is_driver_installed(void) { return true; }
 SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *s) { return s; }
+// usb_console_init() routes ESP_LOG through its whole-line writer; the host
+// has no log, so the hook is only recorded.
+#include "esp_log.h"
+static vprintf_like_t log_hook;
+vprintf_like_t esp_log_set_vprintf(vprintf_like_t f) { vprintf_like_t old=log_hook; log_hook=f; return old; }
 int xSemaphoreTake(SemaphoreHandle_t s, TickType_t ticks) {
     assert(ticks<=50);
     if(deny_lock || s->held) return 0;

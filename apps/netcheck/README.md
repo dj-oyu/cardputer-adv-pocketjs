@@ -3,9 +3,10 @@
 `docs/api/common-api.md` §11 と、§4 の期限・キャンセル契約が実機で仕様どおりかを、1回の
 起動で確かめる。実装は `main/pocket_net.c` と `main/wifi_time.c` のリンク部分。
 
-このファイルは `shell.c` にも `main/CMakeLists.txt` にも配線していない（他セッションが
-それらを持っているため触っていない）。**Playground に貼って実行する**か、
-`EMBED_TXTFILES` に足して使う。ソースは 3,055 バイトで、ゲストの解析コストは実測の
+`netcheck.js` と `tlscycle.js` は `EMBED_TXTFILES` に入り、`local.netcheck` /
+`local.tlscycle` として USB broker の `app_session` から起動できる（メニューの行は無い。
+`main/main.c` の `native_apps[]`、`main/pocket/app_registry.c`）。`tlshosts.js` と
+`tlsleak.js` は今も配線していないので、**Playground に貼って実行する**。ソースは 3,055 バイトで、ゲストの解析コストは実測の
 閾値（6.5KB でゲスト107KiB）より十分小さい。
 
 ## 実行に必要なもの

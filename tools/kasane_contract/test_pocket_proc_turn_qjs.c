@@ -46,10 +46,13 @@ void *proc_test_calloc(size_t count,size_t size){
 }
 
 ksn_result pocket_kasane_proc_publish(void){return KSN_OK;}
+/* These tests present by hand after commit, so Kasane always has work. */
+bool pocket_kasane_needs_present(void){return true;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
     (void)surface;(void)damage;return KSN_OK;
 }
-void pocket_kasane_invalidate(void){}
+static unsigned invalidates;
+void pocket_kasane_invalidate(void){invalidates++;}
 JSValue pocket_kasane_proc_resource(JSContext *ctx){
     pocket_proc_image_mode();return JS_NewObject(ctx);
 }
@@ -303,10 +306,11 @@ static void plan_size_contract(JSContext *ctx){
 }
 
 /* Per-surface segment cap: createSurface({maxSegments}) sizes that surface's
- * two frames to header + n entries, and draw() enforces n exactly as it
- * enforces 1,024 on surface 0. ASan fails the run if any path (draw's copy,
- * damage, image spans, the present swap) touches an entry past
- * the short allocation; LeakSanitizer checks reset() frees both frames. */
+ * frame buffer (one since docs/vm/qjs-observe.md sec.25) to header + n
+ * entries and as many again of spare (no {spare}), and draw() enforces n
+ * exactly as it enforces 1,024 on surface 0. ASan fails the run if any path
+ * (draw's copy, damage, image spans, the merge) touches an entry past the
+ * short allocation; LeakSanitizer checks reset() frees the buffer. */
 static void cap_contract(JSContext *ctx){
     const size_t head=offsetof(ksn_proc_frame,segments);
     const size_t full=sizeof(ksn_proc_frame);
@@ -328,12 +332,12 @@ static void cap_contract(JSContext *ctx){
         "{maxSegments:1.5},{maxSegments:'256'},{maxSegments:-1},{maxSegments:NaN}])"
         "expect(()=>proc.createSurface(bad),'INVALID_ARGUMENT');"
         "expect(()=>proc.createSurface({maxSegments:8},1),'INVALID_ARGUMENT')");
-    /* Surface 0: two full frames and nothing else -- draws go straight into
-     * the candidate, no scratch frame (shiki-jit.md sec.22); the engine's
-     * state comes with the first draw. */
+    /* Surface 0: one full frame buffer and nothing else -- draws go straight
+     * into it, no scratch frame (shiki-jit.md sec.22); the engine's state
+     * comes with the first draw. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==2&&callocs[0]==full&&callocs[1]==full);
+    REQUIRE(calloc_n==1&&callocs[0]==head+2048u*10u);
     eval_ok(ctx,
         "for(let i=0;i<8;i++)proc.draw(p128,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')");
@@ -342,14 +346,14 @@ static void cap_contract(JSContext *ctx){
     settle(actual);
     REQUIRE(actual[40*KSN_PROC_W+40]==0xf800);
 
-    /* Surface 1 at 256: two frames of 6 + 2,560 B, nothing else allocated. */
+    /* Surface 1 at 256: one buffer of 6 + 2 x 2,560 B, nothing else allocated. */
     eval_ok(ctx,"globalThis.small=proc.createSurface({maxSegments:256});proc.resource(small)");
     fail_alloc=true;
     eval_ok(ctx,"expect(()=>proc.beginFrame(0,small),'OUT_OF_MEMORY')");
     fail_alloc=false;
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0,small)");
-    REQUIRE(calloc_n==2&&callocs[0]==head+256u*10u&&callocs[1]==head+256u*10u);
+    REQUIRE(calloc_n==1&&callocs[0]==head+512u*10u);
     /* Exactly full across three programs (128 + 127 + 1 = 256), then
      * one more is refused and the frame is closed. */
     eval_ok(ctx,
@@ -370,7 +374,8 @@ static void cap_contract(JSContext *ctx){
     REQUIRE(span[5]==0xffe0&&span[9]==0x07e0);
     pocket_proc_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
-    /* Presented, swapped, and drawn again into the other short frame. */
+    /* Presented, and drawn again behind the full committed frame, in the
+     * spare: nothing allocated. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0,small);proc.draw(dot,[]);proc.commit()");
     REQUIRE(calloc_n==0);
@@ -400,7 +405,7 @@ static void cap_contract(JSContext *ctx){
         pocket_proc_end_turn();
         calloc_n=0;
         eval_ok(ctx,"proc.beginFrame(0,s)");
-        REQUIRE(calloc_n==2&&callocs[0]==head+cases[k].segments*10u);
+        REQUIRE(calloc_n==1&&callocs[0]==head+2u*cases[k].segments*10u);
         snprintf(source,sizeof source,
                  "for(let i=0;i<%u;i++)proc.draw(dot,[]);"
                  "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')",cases[k].segments);
@@ -408,7 +413,7 @@ static void cap_contract(JSContext *ctx){
         pocket_proc_end_turn();
         session_reset();
     }
-    /* Surface 0 through resource({maxSegments}): its two frames shrink (no
+    /* Surface 0 through resource({maxSegments}): its buffer shrinks (no
      * scratch frame since sec.22; the image band cache came with resource());
      * draw() enforces the cap; once the frames exist only the same value is
      * accepted. */
@@ -421,7 +426,7 @@ static void cap_contract(JSContext *ctx){
         "globalThis.dot=proc.register(dotAt(40,40,0xf800))");
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==2&&callocs[0]==head+96u*10u&&callocs[1]==head+96u*10u);
+    REQUIRE(calloc_n==1&&callocs[0]==head+192u*10u);
     eval_ok(ctx,
         "for(let i=0;i<3;i++)proc.draw(p32,[]);"
         "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
@@ -433,11 +438,101 @@ static void cap_contract(JSContext *ctx){
     settle(actual);
     REQUIRE(actual[40*KSN_PROC_W+40]==0xf800);
     session_reset();
-    /* reset() forgets the cap: the next frames are full again. */
+    /* reset() forgets the cap: the next buffer is full again. */
     calloc_n=0;
     eval_ok(ctx,"proc.beginFrame(0)");
-    REQUIRE(calloc_n==2&&callocs[0]==full&&callocs[1]==full);
+    REQUIRE(calloc_n==1&&callocs[0]==head+2048u*10u&&full==10246u);
     pocket_proc_end_turn();
+    session_reset();
+}
+
+/* One buffer (docs/vm/qjs-observe.md sec.25): the committed frame stays at
+ * the buffer's front, intact and drawable, while the next is built behind it
+ * in maxSegments + spare entries; commit() moves the new one to the front.
+ * Nothing is allocated after the first beginFrame: a frame that does not fit
+ * with the committed one is refused (LIMIT_EXCEEDED, "spare"). */
+static uint16_t pixel(const uint16_t *pixels,unsigned x,unsigned y){return pixels[y*KSN_PROC_W+x];}
+static void one_buffer_contract(JSContext *ctx){
+    session_reset();
+    const size_t head=offsetof(ksn_proc_frame,segments);
+    /* The option: an integer 0..1024, refused before anything exists. */
+    eval_ok(ctx,
+        "for(const bad of [{spare:-1},{spare:1025},{spare:1.5},{spare:'4'},{spare:null},{spare:NaN}])"
+        "{expect(()=>proc.createSurface(bad),'INVALID_ARGUMENT');"
+        "expect(()=>proc.resource(bad),'INVALID_ARGUMENT')}");
+    /* 96 entries and 4 of spare: frame A takes 94, so the next has 6 behind
+     * it (the tail starts on an even entry). */
+    calloc_n=0;
+    eval_ok(ctx,
+        "proc.resource({maxSegments:96,spare:4});"
+        "globalThis.p32=proc.register(plots(32,0xffe0));"
+        "globalThis.p31=proc.register(plots(31,0xffe0));"
+        "globalThis.p30=proc.register(plots(30,0xffe0));"
+        "globalThis.red=proc.register(dotAt(10,10,0xf800));"
+        "globalThis.green=proc.register(dotAt(10,10,0x07e0));"
+        "globalThis.blue=proc.register(dotAt(20,20,0x001f));"
+        "proc.beginFrame(0);proc.draw(p32,[]);proc.draw(p31,[]);proc.draw(p30,[]);proc.draw(blue,[]);"
+        "proc.commit()");
+    {
+        bool buffer=false;   /* resource() takes the image band cache too */
+        for(unsigned i=0;i<calloc_n&&i<8;i++)buffer|=callocs[i]==head+100u*10u;
+        REQUIRE(buffer);
+    }
+    eval_ok(ctx,"expect(()=>proc.resource({maxSegments:96,spare:8}),'BUSY');proc.resource({maxSegments:96,spare:4})");
+    settle(actual);
+    REQUIRE(pixel(actual,5,7)==0xffe0&&pixel(actual,20,20)==0x001f&&pixel(actual,10,10)==0);
+    /* Frame B, red then green behind A. While it is built (and after a
+     * thrown frame), A is what the panel redraws. */
+    calloc_n=0;
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(red,[])");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+    REQUIRE(pixel(actual,5,7)==0xffe0&&pixel(actual,20,20)==0x001f&&pixel(actual,10,10)==0);
+    pocket_proc_end_turn();                 /* thrown: nothing carried */
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+    REQUIRE(pixel(actual,20,20)==0x001f&&pixel(actual,10,10)==0);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(red,[]);proc.draw(green,[]);proc.commit()");
+    settle(actual);
+    /* Drawing order kept; A is gone. */
+    REQUIRE(pixel(actual,10,10)==0x07e0&&pixel(actual,5,7)==0&&pixel(actual,20,20)==0);
+    /* Two committed entries in front: a full frame (96) fits behind. */
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(p32,[]);proc.draw(p32,[]);proc.draw(p32,[]);"
+                "expect(()=>proc.draw(red,[]),'LIMIT_EXCEEDED');");
+    pocket_proc_end_turn();
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(p32,[]);proc.draw(p32,[]);proc.draw(p32,[]);proc.commit()");
+    settle(actual);
+    REQUIRE(pixel(actual,5,7)==0xffe0&&pixel(actual,10,10)==0);
+    /* 96 committed: 4 behind them. A frame the limit allows but the spare
+     * does not is refused, and says why; the committed frame stays. */
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(red,[]);says(()=>proc.draw(p32,[]),'spare')");
+    pocket_proc_end_turn();
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+    REQUIRE(pixel(actual,5,7)==0xffe0&&pixel(actual,10,10)==0);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(red,[]);proc.commit()");
+    settle(actual);
+    REQUIRE(pixel(actual,10,10)==0xf800&&pixel(actual,5,7)==0);
+    REQUIRE(calloc_n==0);                   /* nothing since the first beginFrame */
+    /* A failed transfer of a backdrop (no resource()) repaints the committed
+     * frame; commit() wrote the new one over the old, so the new one is
+     * repainted. */
+    session_reset();
+    eval_ok(ctx,
+        "globalThis.red=proc.register(dotAt(10,10,0xf800));"
+        "globalThis.green=proc.register(dotAt(10,10,0x07e0));"
+        "globalThis.blue=proc.register(dotAt(20,20,0x001f));"
+        "proc.beginFrame(0);proc.draw(blue,[]);proc.commit()");
+    settle(actual);
+    REQUIRE(!pocket_proc_is_image_mode()&&pixel(actual,20,20)==0x001f);
+    const unsigned inv0=invalidates;
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(green,[]);proc.commit()");
+    pocket_proc_present_result(KSN_IO);
+    REQUIRE(!pocket_proc_pending()&&pocket_proc_has_frame()&&invalidates>inv0);
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+    REQUIRE(pixel(actual,10,10)==0x07e0&&pixel(actual,20,20)==0);
+    eval_ok(ctx,"expect(()=>proc.beginFrame(0),'BUSY')");   /* the repair is owed */
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(red,[]);proc.commit()");
+    settle(actual);
+    REQUIRE(pixel(actual,10,10)==0xf800);
     session_reset();
 }
 
@@ -458,10 +553,12 @@ int main(void){
     limit_contract(ctx);
     plan_size_contract(ctx);
     cap_contract(ctx);
+    one_buffer_contract(ctx);
     session_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated/thrown "
            "frame carries nothing, Back's save frame opens after the finished frame is presented, "
-           "handle limit before allocation, per-count plans, per-surface segment cap\n");
+           "handle limit before allocation, per-count plans, per-surface segment cap, "
+           "one buffer with its spare\n");
     return 0;
 }

@@ -6,7 +6,7 @@ const S = pocket.derby, QM = 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson),
 // 768 segments each: the most in a frame is 583 (host, every tier), and the
 // Shiki heap holds the frames, the programs and the windows (README).
-const res = SK.resource({maxSegments: 768}), live = {}, win = {}, queue = [];
+const res = SK.resource({maxSegments: 768, spare: 512}), live = {}, win = {}, queue = [];
 SK.beginFrame(0);
 derby.L = live; // the host oracle names plans by these handles
 let reg = 0;

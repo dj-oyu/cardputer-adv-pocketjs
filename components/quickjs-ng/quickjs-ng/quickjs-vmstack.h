@@ -650,19 +650,34 @@ static inline void js_vm_stack_free(JSRuntime *rt, JSVMStack *st)
 
 // D43: JS_VMStackTrim. Frees only the cache -- empty segments no frame is
 // in -- so it is safe with a live chain; the resident bottom segment stays.
+//
+// D44 (docs/vm/lv3-heap-exhaustion.md sec.4): one cached segment of at most
+// JS_VM_SEG_KEEP bytes stays. An app whose frame() goes one segment deep
+// (STRESS: the second, 1,024 B) otherwise wins that block back from the heap
+// at every frame entry, and when the heap is exhausted the call fails before
+// the app's own try -- an OOM it cannot catch. ~1 KB resident instead.
+#ifndef JS_VM_SEG_KEEP
+#define JS_VM_SEG_KEEP (2 * JS_VM_SEG_FIRST)
+#endif
 static inline void js_vm_stack_trim(JSRuntime *rt, JSVMStack *st)
 {
-    JSVMSeg *s, *p;
+    JSVMSeg *s, *p, *keep = NULL;
     if (!st->cache)
         return;
     for (s = st->cache; s; s = p) {
         p = s->prev;
+        if (!keep && js_vm_seg_payload(s) <= JS_VM_SEG_KEEP) {
+            keep = s;
+            continue;
+        }
         js_vm_seg_del(rt, st, s);
     }
-    st->cache = NULL;
-    st->cache_n = 0;
+    if (keep)
+        keep->prev = NULL;
+    st->cache = keep;
+    st->cache_n = keep ? 1 : 0;
 #ifdef JS_VM_STACK_STATS
-    st->cached = 0;
+    st->cached = keep ? js_vm_seg_payload(keep) + js_vm_seg_overhead() : 0;
     st->trims++;
 #endif
 }

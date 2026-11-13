@@ -7,6 +7,7 @@
 #include "esp_netif_sntp.h"
 #include "esp_heap_caps.h"
 #include "esp_wifi.h"
+#include "esp_private/wifi_os_adapter.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -351,6 +352,7 @@ static void tear_down(void) {
     if(wifi_inited) { esp_wifi_deinit(); wifi_inited=false; }
     if(sta_netif) { esp_netif_destroy_default_wifi(sta_netif); sta_netif=NULL; }
     if(owns_event_loop) { esp_event_loop_delete_default(); owns_event_loop=false; }
+    wifi_time_stack_report("radio_down");
 }
 
 // The stored network, read the same way for the clock and for a lease. One copy
@@ -468,9 +470,58 @@ static void wifi_worker_task(void *arg) {
     }
 }
 
+void wifi_time_stack_report(const char *why) {
+    // lwIP's tcpip thread, named "tcpip" in IDF v6.0.1 (TCPIP_THREAD_NAME,
+    // components/lwip/port/include/lwipopts.h); it exists once
+    // esp_netif_init() ran. Its
+    // stack (CONFIG_LWIP_TCPIP_TASK_STACK_SIZE) is permanent, so the least it
+    // ever had left decides whether it can be smaller
+    // (docs/platform/lwip-resource-review.md).
+    TaskHandle_t t=xTaskGetHandle("tcpip");
+    if(!t)return;
+    ESP_LOGI(TAG,"NET_STACK %s tcpip_min_free=%u stack=%u",why,
+             (unsigned)uxTaskGetStackHighWaterMark(t),(unsigned)CONFIG_LWIP_TCPIP_TASK_STACK_SIZE);
+}
+
+void wifi_time_stack_early(void) {
+    // radio_up's own esp_netif_init() then finds the core running and returns
+    // ESP_OK. The default event loop is not made here: radio_down deletes it
+    // after each use, which a permanent one would forfeit.
+    esp_err_t err=esp_netif_init();
+    ESP_LOGI(TAG,"NETIF_EARLY %s free=%u largest=%u",err==ESP_OK?"ok":esp_err_to_name(err),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+}
+
+// The Wi-Fi driver blocks its caller on a per-task counting semaphore that
+// the OS adapter makes on first use (esp_adapter.c wifi_thread_semphr_get_wrapper)
+// and keeps in pthread TLS until the task exits. Our worker never exits, so the
+// semaphore and three 12 B TLS blocks were permanent, made on the first radio
+// start in the middle of the heap: they split a 24.7 KB and a 44.3 KB hole
+// (docs/vm/lv3-heap-exhaustion.md sec.6.7, lwip-resource-review.md sec.4).
+// The worker gets a static one in RTC fast memory instead (its stack is there
+// already; a few takes per radio start do not mind the slower bus). Any other
+// task keeps the adapter's own. Relies on IDF's private adapter table
+// (esp_private/wifi_os_adapter.h): look again when IDF is upgraded.
+static void *(*adapter_thread_semphr_get)(void);
+static SemaphoreHandle_t worker_sem;
+static void *thread_semphr_get(void) {
+    if(worker_sem && xTaskGetCurrentTaskHandle()==wifi_worker) return worker_sem;
+    return adapter_thread_semphr_get();
+}
+static void worker_sem_install(void) {
+    StaticSemaphore_t *buf=heap_caps_malloc(sizeof *buf,MALLOC_CAP_RTCRAM);
+    if(!buf) { ESP_LOGW(TAG,"WIFI_SEM dram (no rtc room)"); return; }
+    worker_sem=xSemaphoreCreateCountingStatic(1,0,buf);
+    adapter_thread_semphr_get=g_wifi_osi_funcs._wifi_thread_semphr_get;
+    g_wifi_osi_funcs._wifi_thread_semphr_get=thread_semphr_get;
+    ESP_LOGI(TAG,"WIFI_SEM rtc rtc_free=%u",(unsigned)heap_caps_get_free_size(MALLOC_CAP_RTCRAM));
+}
+
 void wifi_time_init(void) {
     if(wifi_worker) return;
     wifi_worker=rtc_task_create(wifi_worker_task,"wifi",3072,5);
+    if(wifi_worker) worker_sem_install();
 }
 
 // False when there is no worker (boot allocation failed); the caller undoes

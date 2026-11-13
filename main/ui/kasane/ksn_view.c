@@ -187,21 +187,43 @@ ksn_result ksn_view_modal_close(ksn_view *v,ksn_tx tx){
 }
 void ksn_view_host_end_turn(ksn_view_host *h){if(h)abort_builder(h);}
 #ifdef KASANE_DMA_OVERLAP
+ksn_result ksn_view_host_present_begin(ksn_view_host *h,ksn_present_job *job){
+    job->running=false;
+    ksn_render_stats *stats=job->render.stats;
+    if(!h||!h->core||!stats)return job->result=KSN_INVALID;
+    *stats=(ksn_render_stats){0};
+    if(h->presenting)return job->result=KSN_BUSY;
+    job->submitted=ksn_core_has_submission(h->core);
+    if(!job->submitted&&!ksn_core_needs_repair(h->core)){
+        const ksn_display_completion *completion=job->render.completion;
+        return job->result=completion&&completion->finish?completion->finish(completion->ctx):KSN_OK;
+    }
+    /* Held from here to end: the view, cache and modal answer BUSY meanwhile. */
+    h->presenting=true;
+    job->render.core=h->core;
+    ksn_result r=ksn_render_begin(&job->render);
+    if(r!=KSN_OK){h->presenting=false;return job->result=r;}
+    job->running=true;
+    return job->result=KSN_OK;
+}
+ksn_result ksn_view_host_present_end(ksn_view_host *h,ksn_present_job *job){
+    if(!job->running)return job->result;
+    job->running=false;
+    ksn_result r=ksn_render_end(&job->render);
+    h->presenting=false;
+    if(r==KSN_OK&&job->submitted)resolve(h);
+    return job->result=r;
+}
 ksn_result ksn_view_host_present_complete(ksn_view_host *h,const ksn_display_port *port,
                                           ksn_backdrop_loader load,bool occlusion_safe,
                                           const ksn_display_completion *completion,
                                           ksn_render_stats *stats){
-    if(!h||!h->core||!stats)return KSN_INVALID;
-    *stats=(ksn_render_stats){0};
-    if(h->presenting)return KSN_BUSY;
-    bool submitted=ksn_core_has_submission(h->core);
-    if(!submitted&&!ksn_core_needs_repair(h->core))
-        return completion&&completion->finish?completion->finish(completion->ctx):KSN_OK;
-    h->presenting=true;
-    ksn_result r=ksn_render_rects_complete(h->core,port,load,occlusion_safe,completion,stats);
-    h->presenting=false;
-    if(r==KSN_OK&&submitted)resolve(h);
-    return r;
+    ksn_present_job job={.render={.display=port,.load=load,.occlusion_safe=occlusion_safe,
+                                  .completion=completion,.stats=stats}};
+    ksn_result r=ksn_view_host_present_begin(h,&job);
+    if(!job.running)return r;
+    ksn_present_job_run(&job);
+    return ksn_view_host_present_end(h,&job);
 }
 #endif
 ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,ksn_render_stats *stats){

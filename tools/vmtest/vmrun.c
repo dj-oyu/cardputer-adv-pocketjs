@@ -100,7 +100,7 @@ static const block_cache_backend_t BC_BACKEND = {bc_backend_malloc, bc_backend_f
                                                  bc_backend_length, NULL};
 static block_cache_t g_block_cache;
 static void storage_init(void) {
-  static const uint16_t device[] = {12, 16, 32, 36, 48, 72, 80, 88};
+  static const uint16_t device[] = {12, 16, 24, 28, 32, 36, 48, 80};
   uint16_t sizes[8];
   for (int i = 0; i < 8; i++) sizes[i] = (uint16_t)(device[i] + sizeof(allocation_header_t));
   block_cache_init(&g_block_cache, &BC_BACKEND, sizes, 8, true);

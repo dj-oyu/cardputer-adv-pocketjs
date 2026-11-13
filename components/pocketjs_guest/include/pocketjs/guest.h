@@ -21,6 +21,10 @@ typedef struct {
   size_t heap_limit;
   size_t stack_limit;
   bool prefer_psram;
+  /** Bytes of internal RAM taken at creation as the guest's private arena
+   * (docs/vm/qjs-observe.md sec.20); 0 for none. A caller built against the
+   * shorter struct gets pocketjs_guest_config_defaults()'s value. */
+  size_t arena_bytes;
 } pocketjs_guest_config_t;
 
 typedef struct {
@@ -163,12 +167,37 @@ void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
  * one that created the guest. */
 void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
 
-/* Suspend small-block retention while native free/contiguous RAM is under
- * pressure; false permits reuse again after the host's recovery hysteresis.
+/* Shrink small-block retention to BLOCK_CACHE_PRESSURE_DEPTH per class while
+ * native free/contiguous RAM is under pressure (the excess goes back to the
+ * heap at once); false restores the full depth after the host's recovery
+ * hysteresis.
  * Owner-task only, and never enables a cache rejected at guest creation.
  * This does not change the guest's live allocation accounting or heap limit. */
 void pocketjs_guest_block_cache_set_pressure(pocketjs_guest_t *guest,
                                             bool pressured);
+
+/* Fit the guest's memory limit to what it can really get (docs/vm/
+ * lv3-heap-exhaustion.md sec.5): its current bytes, the room left in its arena
+ * and small-block cache, and whatever of `system_free` lies above
+ * `native_floor` (the working room natives need), capped at the configured
+ * limit. Past that point an allocation used to reach the shared heap and be
+ * refused there -- uncatchable at a frame's entry, and below the GC's
+ * trigger, so cyclic garbage was never collected. With the limit there the
+ * refusal is a quota OOM the app can catch, and the GC cap (a fraction of the
+ * limit) is reachable again. Returns the limit set. Between turns only. */
+size_t pocketjs_guest_fit_limit(pocketjs_guest_t *guest, size_t system_free,
+                                size_t native_floor);
+
+/* Give the system what the guest holds but does not use (docs/vm/
+ * guest-memory-design.md sec.6.1): the small-block cache, and every empty
+ * chunk of the growable arena. Owner task, between turns; a no-op elsewhere.
+ * For native pressure, dormancy and a radio start. */
+void pocketjs_guest_release_memory(pocketjs_guest_t *guest);
+
+/* The growable arena's state: chunks held, their bytes, and chunks taken and
+ * returned since creation. All zero without chunks. */
+void pocketjs_guest_chunk_stats(const pocketjs_guest_t *guest, unsigned *chunks,
+                                size_t *bytes, uint32_t *taken, uint32_t *returned);
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 

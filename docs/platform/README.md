@@ -22,4 +22,5 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
+| [lwip-resource-review.md](lwip-resource-review.md) | 調査 | ネットワークスタック（lwIP・esp_netif・Wi-Fi・mbedTLS）の資源レビュー: 静的 DIRAM 約 25 KB のアーカイブ別内訳（map の実測）、`esp_netif_init` の恒久ブロックの持ち主（Wi-Fi のタスク別セマフォは lwIP ではない）、設定だけ / コード変更 / 既に最小 の判定と、実機で測る項目 |
 | [idf-tls-txbuffer-report.md](idf-tls-txbuffer-report.md) | 記録 | ESP-IDF の TLS 送信バッファの二重計上（上流への報告草稿、未送信） |

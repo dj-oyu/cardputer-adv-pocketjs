@@ -149,6 +149,29 @@ extern int g_ksn_tile_pixels,g_ksn_tile_reach,g_ksn_tile_smooth;
 ksn_result ksn_render_rects_complete(ksn_core *,const ksn_display_port *,
                                      ksn_backdrop_loader,bool occlusion_safe,
                                      const ksn_display_completion *,ksn_render_stats *);
+#ifdef KASANE_DMA_OVERLAP
+/* ksn_render_rects_complete in three parts, for a present that runs on
+ * another task (docs/perf/two-core-pipeline.md P1a). begin and end change the
+ * core and run on its owner; run only reads the core, so it may run on the
+ * display task while the owner leaves the core alone. The caller fills the
+ * inputs; the rest is the job's. begin returning KSN_OK means display work was
+ * reserved: run and end must follow, in that order, exactly once. */
+typedef struct {
+    ksn_core *core;
+    const ksn_display_port *display;
+    ksn_backdrop_loader load;
+    bool occlusion_safe;
+    const ksn_display_completion *completion;
+    ksn_render_stats *stats;
+    /* The job's own. */
+    ksn_frame frame;
+    ksn_result result,finished;
+    uint8_t fate;
+} ksn_render_job;
+ksn_result ksn_render_begin(ksn_render_job *job);
+void ksn_render_run(ksn_render_job *job);
+ksn_result ksn_render_end(ksn_render_job *job);
+#endif
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats);
 /* As ksn_render_rects, but load the host's replayable scene below the command
  * layers. Kept as a separate entry point so the stable display-port ABI and

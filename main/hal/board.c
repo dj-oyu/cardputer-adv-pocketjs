@@ -88,6 +88,14 @@ static uint16_t *half_lent, *half_from;
 // and MISO is unwired, so the only test is the glass: BOARD_ENDIAN_PROBE
 // alternates the two every 2 s and the owner looks for a change.
 static bool lcd_le;
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+// FRAME_BD: strips queued to the SPI driver, one completion ISR each.
+static _Atomic uint32_t lcd_tx_n;
+uint32_t board_lcd_tx_take(void) { return atomic_exchange(&lcd_tx_n, 0u); }
+#define LCD_TX_COUNT(e) do { if ((e) == ESP_OK) atomic_fetch_add(&lcd_tx_n, 1u); } while (0)
+#else
+#define LCD_TX_COUNT(e) ((void)0)
+#endif
 #define BOARD_ENDIAN_PROBE 0   /* issue #118: the eye test passed 2026-11-04 (docs/platform/lcd-dma-driver.md 9.2) */
 static void put_strip(uint16_t *out,uint16_t *in,int count);
 static bool tx_inflight;
@@ -372,6 +380,12 @@ static esp_err_t kwrite(uint8_t reg, uint8_t value) {
 static esp_err_t kread(uint8_t reg, uint8_t *value) {
     return i2c_master_transmit_receive(keyboard, &reg, 1, value, 1, 30);
 }
+static bool key_decode(uint8_t event, board_keyevent_t *out);
+#ifdef CONFIG_POCKET_KEY_INT_PROBE
+#define KEY_INT_PROBE 1
+#else
+#define KEY_INT_PROBE 0
+#endif
 
 // ---------------------------------------------------------------------------
 // The panel wants each RGB565 pixel's two bytes the other way round.
@@ -550,6 +564,10 @@ esp_err_t board_init(void) {
         .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)
 #ifdef KASANE_P1_LCD_ISR_CORE1
         ,.isr_cpu_id=ESP_INTR_CPU_AFFINITY_1
+#elif CONFIG_POCKET_LCD_ISR_CORE >= 0
+        // Every strip completes in this ISR, which then wakes whoever reaps it
+        // (~30 a frame): its core pays for that (POCKET_LCD_ISR_CORE help).
+        ,.isr_cpu_id=CONFIG_POCKET_LCD_ISR_CORE ? ESP_INTR_CPU_AFFINITY_1 : ESP_INTR_CPU_AFFINITY_0
 #endif
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
@@ -617,6 +635,14 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(kwrite(0x01, 0x01));
     for (int i=0;i<10;i++) { uint8_t value; kread(0x04, &value); }
     ESP_ERROR_CHECK(kwrite(0x02, 0x1f));
+#if CONFIG_POCKET_KEY_INT_GPIO >= 0
+    // Open-drain, active low: the pull-up is what makes "no event" read 1.
+    gpio_config_t key_int = {.pin_bit_mask=1ULL<<CONFIG_POCKET_KEY_INT_GPIO,
+        .mode=GPIO_MODE_INPUT, .pull_up_en=GPIO_PULLUP_ENABLE};
+    ESP_ERROR_CHECK(gpio_config(&key_int));
+    ESP_LOGI("board", "KEY_INT gpio=%d level=%d%s", CONFIG_POCKET_KEY_INT_GPIO,
+             gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO), KEY_INT_PROBE ? " probe" : "");
+#endif
     ESP_LOGI("board", "ADV keyboard detected; LCD 240x135 RGB565; no PSRAM");
     battery_init();
     motion_init(ih);
@@ -637,12 +663,94 @@ esp_err_t board_init(void) {
 // (docs/platform/keystate.md). If it stays silent, a lost release leaves that
 // key reading as down until it is next pressed and released (keystate.h), and
 // an app started meanwhile does not see it (pocket_input.c) -- not forever.
+#if CONFIG_POCKET_KEY_INT_GPIO < 0
 bool board_key_event(board_keyevent_t *out) {
     uint8_t count=0, event=0, status=0;
     if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
     out->overflow=(count & 15) >= 10 && kread(0x02, &status) == ESP_OK && (status & 0x08);
     if (kread(0x04, &event) != ESP_OK) return false;
     kwrite(0x02, 0x1f);
+    return key_decode(event, out);
+}
+#else
+// With INT wired (CONFIG_POCKET_KEY_INT_GPIO), a poll that finds the pin high
+// and nothing left over from the last count does no I2C at all: that empty
+// read was ~0.3 ms of CPU 0 every 5 ms (frame-breakdown.md sec.11).
+//
+// Two things keep an event from hiding behind a high pin. key_left: the count
+// said more events were queued behind the one just read, so the next polls read
+// them whatever the pin says (whether INT stays low while the FIFO is not
+// empty is not relied on). And the order: on a low pin the latch is cleared
+// BEFORE the count is read, so an event that lands after the clear sets K_INT
+// again and pulls the pin low, and one that landed before it is in the count.
+// Clearing after the count (as the polling path does) could wipe the latch of
+// an event the count had not seen. Only bits that were read are cleared.
+//
+// Safety net: every KEY_INT_RESCAN-th quiet poll reads the count anyway, so an
+// event the pin did not report (the probe's 3 of 122 on the board were not told apart from a
+// sample-then-read race)
+// waits at most that many polls instead of until the next key.
+#ifndef KEY_INT_RESCAN
+#define KEY_INT_RESCAN 20u
+#endif
+static uint8_t key_left;
+static unsigned key_quiet;
+#if KEY_INT_PROBE
+static uint32_t probe_polls, probe_skipped, probe_low, probe_events, probe_miss, probe_late;
+static int64_t probe_last;
+#endif
+bool board_key_event(board_keyevent_t *out) {
+    uint8_t count=0, event=0, status=0;
+    const bool low = gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO) == 0;
+#if KEY_INT_PROBE
+    probe_polls++; probe_low += low;
+    const int64_t now = esp_timer_get_time();
+    if (now - probe_last >= 2000000) {
+        probe_last = now;
+        ESP_LOGI("board", "KEY_INT_STAT polls=%u skipped=%u low=%u events=%u miss=%u late=%u",
+                 (unsigned)probe_polls, (unsigned)probe_skipped, (unsigned)probe_low,
+                 (unsigned)probe_events, (unsigned)probe_miss, (unsigned)probe_late);
+    }
+#endif
+    if (!low && !key_left) {
+#if KEY_INT_PROBE
+        // What the gate would have skipped, read anyway, and handled as usual
+        // so the probe drops none. An event that landed after the pin was
+        // sampled pulls it low by now: the next poll would have read it
+        // (late). Only one with the pin still high would have been lost (miss).
+        probe_skipped++;
+        if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
+        const bool late = gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO) == 0;
+        if (late) probe_late++; else probe_miss++;
+        ESP_LOGW("board", "KEY_INT_%s count=%u", late ? "LATE" : "MISS", (unsigned)(count & 15));
+#else
+        if (++key_quiet < KEY_INT_RESCAN) return false;
+        key_quiet = 0;
+        if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
+#endif
+    }
+    key_quiet = 0;
+    if (low) {
+        if (kread(0x02, &status) != ESP_OK) return false;
+        if (status) kwrite(0x02, status);
+    }
+    if (!count && (kread(0x03, &count) != ESP_OK || !(count & 15))) { key_left=0; return false; }
+    if ((count & 15) >= 10 && !low) {
+        // Overflow latched during a burst read with the pin high: clear that
+        // bit alone, never K_INT, whose event the count may not include.
+        uint8_t late=0;
+        if (kread(0x02, &late) == ESP_OK && (late & 0x08)) { status |= 0x08; kwrite(0x02, 0x08); }
+    }
+    out->overflow=(status & 0x08) != 0;
+    if (kread(0x04, &event) != ESP_OK) return false;
+    key_left=(count & 15) - 1;
+#if KEY_INT_PROBE
+    probe_events++;
+#endif
+    return key_decode(event, out);
+}
+#endif
+static bool key_decode(uint8_t event, board_keyevent_t *out) {
     int code=(event & 0x7f)-1;
     if (code < 0 || code/10 >= 7 || code%10 >= 8) return false;
     out->row=(code%10)%4;
@@ -655,14 +763,17 @@ bool board_key_event(board_keyevent_t *out) {
 // second one.
 #include "pet_hub.h"
 #include "pocket_capture.h"
+// board.h: the host's overlays on every strip, unless a present on the
+// display task (which may not read their state) turned them off.
+bool board_host_overlays = true;
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
-    pet_hub_overlay(pixels,y,rows);
+    if (board_host_overlays) pet_hub_overlay(pixels,y,rows);
     // docs/api/common-api.md 9 makes showing that the microphone is live the
     // host's obligation, so it is drawn here, at the one transfer to the
     // panel, rather than by whichever screen happens to be up: an app can
     // paint the corner it occupies, but not after this.
-    pocket_capture_overlay(pixels,y,rows);
+    if (board_host_overlays) pocket_capture_overlay(pixels,y,rows);
     if(capture) {
         static char line[LCD_W*4+1];
         const char *hex="0123456789abcdef";
@@ -803,6 +914,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
               } else
 #endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
+              LCD_TX_COUNT(e);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #ifdef KASANE_P0_BUS_PROBE
@@ -864,8 +976,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         next_row=-1;return ESP_ERR_INVALID_ARG;
     }
     if (cols==LCD_W) return board_present(y,rows,pixels);
-    pet_hub_overlay(pixels,y,rows);
-    pocket_capture_overlay(pixels,y,rows);
+    if (board_host_overlays) {
+        pet_hub_overlay(pixels,y,rows);
+        pocket_capture_overlay(pixels,y,rows);
+    }
     // No capture arm: board_capture dumps whole rows and the columns outside
     // the window hold the previous band, so a caller that is capturing must not
     // narrow. board_capture_active() is how it finds that out.
@@ -971,6 +1085,7 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
               } else
 #endif
               e = spi_device_queue_trans(lcd, desc, portMAX_DELAY);
+              LCD_TX_COUNT(e);
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2

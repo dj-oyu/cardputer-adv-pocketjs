@@ -2,6 +2,10 @@
 # derby_watch.js (the entry: the race model) loads the first five while it
 # evaluates, in this order; demo loads when the demo first starts.
 app local.derby
+# No line tables (docs/vm/strip-debug.md): a runtime error names each
+# function's first line; the race's native heap sits ~1-2 KB above the
+# pressure line (docs/perf/frame-breakdown.md sec.9), and this keeps ~3 KB.
+option strip-debug
 prog   derby_prog.js
 view   derby_view.js
 scene  derby_scene.js
