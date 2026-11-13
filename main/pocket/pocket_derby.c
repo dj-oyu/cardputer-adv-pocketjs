@@ -634,49 +634,137 @@ static JSValue js_part(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     }
     return r;
 }
-/* lanes(xs, lz, out, pan): each runner's hip X, scale S (px a unit), ground
- * Y, all Q16 px, and its depth (Q16 m): on the side camera (side()) from xs
- * (Q16 m along) and lz (Q16 m deep); with pan, on the panning unit (aim())
- * through pose() and pj() (depth 0: behind the camera). X is held within
- * +-16,000 px. */
+/* A runner's hip X, scale S (px a unit), ground Y, all Q16 px, and its depth
+ * (Q16 m): on the side camera (side()) from x (Q16 m along) and z (Q16 m
+ * deep); with pan, on the panning unit (aim()) through pose() and pj()
+ * (depth 0: behind the camera). X is held within +-16,000 px. */
+static void lane(bool pan,int32_t x,int32_t z,int32_t o[4]){
+    int64_t X,S,Y,Z;
+    if(pan&&cam.aimed&&course){
+        double P[4],p[2];
+        pose(x/65536.0-12.5/6,z/65536.0,P);pj(P,p);
+        const double r=p[1]>0?1/p[1]:0;
+        X=(int64_t)js_round(js_max(-16000,js_min(16000,p[0]*r))*65536);
+        S=(int64_t)js_round(r/6*65536);Y=(int64_t)js_round((28+6*r)*65536);
+        Z=p[1]>.02?(int64_t)js_round(p[1]*65536):0;
+    }else{
+        const int64_t q=fdiv(cam.f*Q16,z);
+        X=cam.o+fdiv(((int64_t)x-136533-cam.x0)*q,Q16);
+        S=q/6;Y=gy(z);Z=z;
+    }
+    o[0]=(int32_t)lmax(-16000LL*Q16,lmin(16000LL*Q16,X));
+    o[1]=(int32_t)S;o[2]=(int32_t)Y;o[3]=(int32_t)lmin(INT32_MAX,Z);
+}
+/* lanes(xs, lz, out, pan): lane() for each runner, 4 a lane in out. */
 static JSValue js_lanes(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const int32_t *xs=argc>=3?i32array(ctx,argv[0],8):NULL,*lz=xs?i32array(ctx,argv[1],8):NULL;
     int32_t *out=lz?i32array(ctx,argv[2],32):NULL;
     if(!out)return fail(ctx,"derby.lanes",POCKET_ERR_INVALID_ARGUMENT,"expected Int32Array(8) x2 and Int32Array(32)");
-    for(int l=0;l<8;l++){
-        int64_t X,S,Y,Z;
-        if(argc>=4&&JS_ToBool(ctx,argv[3])&&cam.aimed&&course){
-            double P[4],p[2];
-            pose(xs[l]/65536.0-12.5/6,lz[l]/65536.0,P);pj(P,p);
-            const double r=p[1]>0?1/p[1]:0;
-            X=(int64_t)js_round(js_max(-16000,js_min(16000,p[0]*r))*65536);
-            S=(int64_t)js_round(r/6*65536);Y=(int64_t)js_round((28+6*r)*65536);
-            Z=p[1]>.02?(int64_t)js_round(p[1]*65536):0;
-        }else{
-            const int64_t p=fdiv(cam.f*Q16,lz[l]);
-            X=cam.o+fdiv(((int64_t)xs[l]-136533-cam.x0)*p,Q16);
-            S=p/6;Y=gy(lz[l]);Z=lz[l];
-        }
-        out[4*l]=(int32_t)lmax(-16000LL*Q16,lmin(16000LL*Q16,X));
-        out[4*l+1]=(int32_t)S;out[4*l+2]=(int32_t)Y;out[4*l+3]=(int32_t)lmin(INT32_MAX,Z);
-    }
+    const bool pan=argc>=4&&JS_ToBool(ctx,argv[3]);
+    for(int l=0;l<8;l++)lane(pan,xs[l],lz[l],out+4*l);
     return JS_UNDEFINED;
 }
-/* head(xs, lz, out): HEAD ON, a still camera 12 m past the line, 2.2 m up,
- * looking back: each horse's x, ground y and px a unit (Q16; out 3 a lane). */
+/* HEAD ON, a still camera 12 m past the line, 2.2 m up, looking back: a
+ * horse's x, ground y and px a unit (Q16). */
+static void head(int32_t x,int32_t z,int32_t o[3]){
+    const int64_t d=lmax(Q16/16,1012LL*Q16-x),q=fdiv(400LL*Q16*Q16,d);
+    o[0]=(int32_t)(120*Q16+fdiv(((int64_t)z-1081344)*q,Q16));
+    o[1]=(int32_t)(50*Q16+fdiv(q*144179,Q16));
+    o[2]=(int32_t)(q/6);
+}
+/* head(xs, lz, out): head() for each horse, 3 a lane in out. */
 static JSValue js_head(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const int32_t *xs=argc>=3?i32array(ctx,argv[0],8):NULL,*lz=xs?i32array(ctx,argv[1],8):NULL;
     int32_t *out=lz?i32array(ctx,argv[2],24):NULL;
     if(!out)return fail(ctx,"derby.head",POCKET_ERR_INVALID_ARGUMENT,"expected Int32Array(8) x2 and Int32Array(24)");
-    for(int l=0;l<8;l++){
-        const int64_t z=lmax(Q16/16,1012LL*Q16-xs[l]),q=fdiv(400LL*Q16*Q16,z);
-        out[3*l]=(int32_t)(120*Q16+fdiv(((int64_t)lz[l]-1081344)*q,Q16));
-        out[3*l+1]=(int32_t)(50*Q16+fdiv(q*144179,Q16));
-        out[3*l+2]=(int32_t)(q/6);
-    }
+    for(int l=0;l<8;l++)head(xs[l],lz[l],out+3*l);
     return JS_UNDEFINED;
+}
+/* runners(xs, lz, order, co, ha, hb, mode, close, mask, from): the runners'
+ * draws, which derby_view.js made in JS until P4b (docs/apps/derby-runners-native.md;
+ * derby_ab.js keeps that JS for the A/B). order is the JS array of the 8
+ * lanes (zo, or ro for HEAD ON), co an Int32Array of the coats (0..7) and
+ * silks (8..15). Each runner drawn is two Shiki draws with integer inputs
+ * (as drawMany's Int32Array: no conversion), ha then hb, the far one first:
+ *   mode 0, the side camera: lanes in order from from, those in mask; ha legs
+ *     (X, S, Y, d, coat, 0, 0), hb run (..., silk, silk ^ 0x8410), d = x +
+ *     67797 l. Within the screen's face (side()'s K) a runner wholly on it,
+ *     else X within -160..400 px. The close-up lane is not drawn: the call
+ *     returns its place in order (the JS draws it and calls again from the
+ *     next);
+ *   mode 1, the panning unit: order sorted far to near first (stably, as the
+ *     JS sort was, and written back: the next frame's sort starts from it),
+ *     then every lane in front of the camera with X within -160..400 px;
+ *   mode 2, HEAD ON: order from its end, every lane: ha frl, hb frb (x, y, s,
+ *     d, coat, silk).
+ * A handle that is 0 draws nothing (the JS's live[n] not loaded). Returns -1,
+ * or the close-up lane's place. A draw that fails throws as drawMany does. */
+static JSValue js_runners(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="derby.runners";
+    const int32_t *xs=argc>=10?i32array(ctx,argv[0],8):NULL,*lz=xs?i32array(ctx,argv[1],8):NULL,
+        *co=lz?i32array(ctx,argv[3],16):NULL;
+    uint32_t ha=0,hb=0;
+    int32_t mode,close,mask,from,ord[8];
+    if(!co||!plan_handle(ctx,argv[4],&ha)||!plan_handle(ctx,argv[5],&hb)||!in32(argv[6],&mode)||mode<0||mode>2||
+       !in32(argv[7],&close)||!in32(argv[8],&mask)||!in32(argv[9],&from)||from<0||from>8)
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected Int32Array(8) x2, an order, Int32Array(16), two plans and 4 ints");
+    for(int i=0;i<8;i++){
+        JSValue v=JS_GetPropertyUint32(ctx,argv[2],(uint32_t)i);
+        const bool ok=in32(v,&ord[i])&&ord[i]>=0&&ord[i]<8;
+        JS_FreeValue(ctx,v);
+        if(!ok)return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"order: the 8 lanes");
+    }
+    int32_t p[8][4];
+    if(mode<2)for(int l=0;l<8;l++)lane(mode==1,xs[l],lz[l],p[l]);
+    if(mode==1){
+        /* zo.sort((a, b) => Z[b] - Z[a]): stable, so by insertion. */
+        int32_t s[8];
+        memcpy(s,ord,sizeof s);
+        for(int i=1;i<8;i++){
+            const int32_t k=s[i];
+            int j=i;
+            for(;j>0&&p[s[j-1]][3]<p[k][3];j--)s[j]=s[j-1];
+            s[j]=k;
+        }
+        for(int i=0;i<8;i++)if(s[i]!=ord[i]){
+            ord[i]=s[i];
+            if(JS_SetPropertyUint32(ctx,argv[2],(uint32_t)i,JS_NewInt32(ctx,s[i]))<0)return JS_EXCEPTION;
+        }
+    }
+    unsigned k=0;
+    for(int i=from;i<8;i++){
+        const int l=ord[mode==2?7-i:i];
+        int32_t in[7];
+        const int32_t d=(int32_t)((int64_t)xs[l]+67797LL*l),coat=co[l],silk=co[8+l];
+        unsigned n=7;
+        if(mode==2){
+            int32_t h[3];
+            head(xs[l],lz[l],h);
+            in[0]=h[0];in[1]=h[1];in[2]=h[2];in[3]=d;in[4]=coat;in[5]=silk;n=6;
+        }else{
+            const int64_t X=p[l][0],S=p[l][1];
+            if(mode==1){
+                if(!p[l][3]||!(X>-160LL*Q16&&X<400LL*Q16))continue;
+            }else{
+                if(!(mask>>l&1))continue;
+                if(l==close)return JS_NewInt32(ctx,i);
+                /* 5 * s >> 1 is ToInt32 of the double, then the shift. */
+                const int64_t a=(int32_t)(uint32_t)(uint64_t)(5*S)>>1,b=(int32_t)(uint32_t)(uint64_t)(25*S)>>1;
+                if(!(cam.K?X-a>=cam.e&&X+b<=cam.R:X>-160LL*Q16&&X<400LL*Q16))continue;
+            }
+            in[0]=(int32_t)X;in[1]=(int32_t)S;in[2]=p[l][2];in[3]=d;in[4]=coat;in[5]=0;in[6]=0;
+        }
+        if(!ha||!hb)continue;
+        JSValue r=pocket_proc_draw_fixed(ctx,ha,in,n,k++);
+        if(JS_IsException(r))return r;
+        if(mode<2){in[5]=silk;in[6]=silk^0x8410;}
+        r=pocket_proc_draw_fixed(ctx,hb,in,n,k++);
+        if(JS_IsException(r))return r;
+    }
+    return JS_NewInt32(ctx,-1);
 }
 /* screen(out, pan, x, d, w, b, t): the big screen (centre x, depth d, half
  * width w, bottom b and top t, m) on the side camera (or with pan, the
@@ -722,6 +810,7 @@ esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
         JS_CFUNC_DEF("part",8,js_part),
         JS_CFUNC_DEF("lanes",4,js_lanes),
         JS_CFUNC_DEF("head",3,js_head),
+        JS_CFUNC_DEF("runners",10,js_runners),
         JS_CFUNC_DEF("screen",7,js_screen),
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?

@@ -376,6 +376,8 @@ Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の
 
 ### P4b — DERBY の走者を状態の領域と `drawList` へ（Opus。§7 の 10 で行うと決めた場合）
 
+**実施（2026-11-13、[derby-runners-native.md](../apps/derby-runners-native.md)）: 状態の領域と `drawList` ではなく、`pocket.derby.runners()`（C）1 回に下ろした（同文書 §4 で比較）。r5sim の `derby` のレースの場面 −8.8〜−18.3%、確保 78 → 66 回/ターン、host の全フレームの画素一致。トレースの代わりに、走者の経路を落とした 2 つの変種の r5sim の差で経路の重さを測った（同 §1）。実機の A/B は未実施（同 §7）。DERBY は `drawMany` を使わなくなったので、§5 の 6 の `bflush` の項は不要になった。**
+
 範囲: §5 の 7。先に P0 の DERBY のトレースで、走者の経路（`rin`・`bput`・`bflush`・`pocket.derby.lanes`）が JS 側の何 % かを出し、**見込みが小さければ行わない**（見積もりを文書に残して終える）。
 
 受け入れ基準: (a) host の 19 本の検査で画素が一致、(b) r5sim の `derby` のカウントが場面ごとに P4 より小さい、(c) 実機: 同じバイナリの中で新旧の JS を切り替えた A/B で `turn_ms` を比べる（15% 未満の差を主張するため）。`SHIKI_TURN` の `shk=` の最大の空き塊が、最も厳しい窓（HEAD ON・FINISH）で 2,492 B を下回らない。評価余裕とゲスト最大が悪化しない。レースを FINISH・写真判定まで走り、予備不足・`FRAMEFAIL`・OOM が 0。

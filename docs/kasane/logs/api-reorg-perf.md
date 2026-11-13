@@ -96,3 +96,21 @@
 - 確保の回数は大きさ別ではなく回数だけ（大きさ別は従来どおり `-DR5SIM_GUEST_ALLOC=1` の版）。
 - r5sim の像にチェックアウトのパスの写しを足した（§2）。
 - P0 の 6（トレース）と 7（実機）は行っていない。
+
+## 5. P4b（DERBY の走者を `pocket.derby.runners()` へ、2026-11-13）
+
+[derby-runners-native.md](../../apps/derby-runners-native.md) §5。`derby` の場面の行に、ターンの内訳 `js=`（`frame()`）・`shiki=`（その中の Shiki の draw の native、`pocket_shiki_turn` の `total_cy`）・`end=`（`pocket_kasane_end_turn`）・`draws=` を足した（`tools/r5sim/main/r5sim.c`）。下の数は `2ef6480` の worktree で、内訳を足した後の像どうし（`reorg.sh` の行ではない。`shiki`・`shiki_v1`・`hud` はこの段で変わらないので回していない）。
+
+| 場面 | 前（`2ef6480`） | 後（P4b） | 確保/ターン |
+| --- | ---: | ---: | --- |
+| wait | 45,314 | 45,283 | 82 → 78 |
+| gate | 93,370 | 77,714 | 88 → 78 |
+| wide | 220,734 | 201,364 | 83 → 70 |
+| field | 123,404 | 107,169 | 75 → 65 |
+| close | 104,117 | 92,718 | 85 → 71 |
+| vision | 142,654 | 116,535 | 98 → 77 |
+| headon | 94,343 | 80,103 | 72 → 66 |
+| finish | 113,312 | 96,649 | 73 → 63 |
+| 全体（61〜1773） | 150,175 | 134,636 | 78 → 66 |
+
+`heap_used` 104,220 → 100,780 B。

@@ -36,7 +36,10 @@ const curtain = () => (mx(0, mn(256, mx(dm ? 0 : (mn(nw - idle, 1000000) - DEMO_
 globalThis.frame = function (b) {
   if (b & 0x2000) { if (dm) demo(0); save(); return log('SAVE points=' + pts + ' race=' + raceNo); }
   try {
-    attract(b);
+    // The up action (b & 16; the broker's up) flips the runners' path (AB,
+    // derby_view.js) and is no key for the demo.
+    if (b & 16) try { if (typeof abRun === 'undefined') pocket.app.load('ab'); AB ^= 1; log('AB ' + (AB ? 'JS' : 'NATIVE')); } catch (e) { log('ABFAIL ' + e); }
+    attract(b & ~16);
     // The frame inline, not a function: ~150 B less resident (README).
     fr: {
       const P = k => dk === 0 ? K.pressed(k) : k === dk;

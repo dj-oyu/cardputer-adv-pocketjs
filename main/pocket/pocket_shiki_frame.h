@@ -45,7 +45,13 @@ void pocket_proc_end_turn(void);
  * inputs as numbers, with shiki.draw()'s checks and PocketError. Returns
  * JS_UNDEFINED or JS_EXCEPTION. */
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
+/* The same with the inputs already in each input's Q format (as drawMany's
+ * Int32Array: no conversion) and the draw's number (DRAW_INDEX):
+ * pocket.derby.runners. */
+JSValue pocket_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index);
 #ifdef POCKET_PROC_DRAW_HOOK
+/* Host harness only: pocket_proc_draw_fixed's draws that succeeded. */
+void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *in,unsigned n);
 /* Host harness only: called after each native draw that succeeded, with the
  * inputs as given; with pocket_proc_hook_dry set, the draw is not run at all
  * (the harness compares input lists without frames or plans). */

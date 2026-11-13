@@ -3,7 +3,7 @@
 // enter the stalls), race, photo (still), res (result).
 function enter(s) {
   scene = s; t = 0; need = 1;
-  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field(add(rng(HW ^ M.imul(sn, 0x9e3779b9))(), M.imul(raceNo, 0x9e3779b9))); log('ODDS ' + (od = odds(F.h, F.o)).map(ot) + (F.o ? ' OVAL' : ''));
+  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field(add(rng(HW ^ M.imul(sn, 0x9e3779b9))(), M.imul(raceNo, 0x9e3779b9))); F.h.forEach((h, i) => { CO[i] = h.coat; CO[8 + i] = SILK[i]; }); log('ODDS ' + (od = odds(F.h, F.o)).map(ot) + (F.o ? ' OVAL' : ''));
     // The oval's bend in 16 chords (pocket.derby's series).
     CRS = F.o ? OC : 0; CH = [-655360000];
     if (F.o) for (let j = 0; j <= 16; ++j) CH.push(OB + j * 1544156);
@@ -132,7 +132,7 @@ function settle() {
 
 // The screen's rect, then the frame's draws: the course (with the screen
 // and its feed) for camera c, or HEAD ON; then extra ([plan, inputs] or null).
-const VR = new Int32Array(4), HO = new Int32Array(24), RW = {14: 4681, 20: 3277, 60: 1092};
+const VR = new Int32Array(4), RW = {14: 4681, 20: 3277, 60: 1092};
 function paint(c, xs, close, gate, extra) {
   // Its face on this camera (pocket.derby.screen), or null out of view or
   // over the map (y < 13): fill, bezel, feed and lettering use these px.
@@ -152,18 +152,9 @@ function paint(c, xs, close, gate, extra) {
   else course(c, cx, xs, close, gate);
   for (let j = 0, f = t - e[20], d = e[17] * f - (q ? 0 : (cx - e[21] >> 4) * (c[0] >> 16)), r = q ? 0 : e[14] * f; j < (q < 0 ? 0 : 3); ++j) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
-    // down the course; each horse scaled by its own 1/z (pocket.derby.head),
+    // down the course; each horse scaled by its own 1/z (pocket.derby.runners),
     // the last (farthest) first.
-    if (j === 1 && q && live.frl && live.frb) {
-      bs = 6;
-      S.head(xs, lz, HO);
-      for (let i = 7; i >= 0; --i) {
-        const l = ro[i], o = 3 * l, d = DO(xs[l], l), c = F.h[l].coat;
-        bput(live.frl, HO[o], HO[o + 1], HO[o + 2], d, c, SILK[l]);
-        bput(live.frb, HO[o], HO[o + 1], HO[o + 2], d, c, SILK[l]);
-      }
-      bflush();
-    }
+    if (j === 1 && q && live.frl && live.frb) AB ? abHead(xs) : S.runners(xs, lz, ro, CO, live.frl, live.frb, 2, -1, 255, 0);
     const w = e[q + 4 + j];
     if (!w) continue;
     if (j > 1) { dr('band', w, (f * 21846 >> 16) % 6); continue; }
