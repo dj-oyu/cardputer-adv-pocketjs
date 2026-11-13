@@ -209,3 +209,23 @@ host（実測）:
 
 - **カウント**: `shiki` +5（+0.004%）、`hud` −3、`derby` +3。どれも配置の揺れ（0.05% 未満、§2）の内で、確保の回数と `heap_used` は同一。JS の仕事は変わっていない（消したのは呼ばれていない入口）。
 - **大きさ（map、`idf.py size`）**: ファームの DIRAM −1,488 B（`pocket_overlay.c` の `items[24]` の `.bss` −1,440 B が主で、残りの 48 B は内訳を取っていない）、Flash Code −5,184 B。r5sim の像（`shiki`）の Flash Code は −4,092 B。
+
+## 10. 最終の実機（`daecd0c`、P0〜P5・P4b・ser の hoist、broker の app_session、2026-11-13、実測）
+
+起点は `4840504`（§3 と `.cache/reorg/perf.log` の実機の値）。像が違うので `turn_ms` の差はビルド間の揺れ（15%）を含む。メモリは配置で揺れないのでそのまま比べられる。
+
+| 指標 | `4840504` | `daecd0c` | 差 |
+| --- | ---: | ---: | ---: |
+| STRESS LV1 `turn_ms`（30 フレームの平均の窓） | 6.04〜6.40（約 6.20） | 5.63〜5.78（約 5.72） | 約 −8% |
+| STRESS 起動直後 `MEM free` / `js` | 70,072 / 44,936 | 82,328 / 43,476 | +12,256 / −1,460 |
+| DERBY 起動直後 `MEM free` / `js` | 44,888 / 95,196 | 57,328 / 91,256 | +12,440 / −3,940 |
+| DERBY 待機画面 `turn_ms` | 3.91〜3.95 | 3.75〜3.81 | 約 −4% |
+| DERBY CAM WIDE（draws 22） | 7.31〜7.37 | 6.27〜6.29 | 約 −14% |
+| DERBY CAM FIELD（draws 23） | 7.46〜7.51 | 6.40〜6.46 | 約 −14% |
+| DERBY CAM WIDE 2・重い窓（draws 47〜53、pat 37〜47） | 12.45〜12.67（`4840504`）、12.4〜12.9（同じ像の旧 JS、§7） | 10.24〜11.34 | 約 −11% |
+| DERBY CAM VISION（draws 33〜34） | 8.40〜8.66（§7 の旧 JS） | 6.59〜6.96 | 約 −20% |
+| DERBY FINISH の `shk=` の最大の空き塊 | 2,492 | 3,804 | +1,312 |
+| ファームの DIRAM used / Flash Code | 181,332 / 1,722,132 | 172,576 / 1,691,600 | −8,756 / −30,532 |
+
+- DERBY はレースを FINISH・写真判定・結果まで走り、OOM・FRAMEFAIL なし。
+- 重い CAM WIDE 2 の残りは `ser()` のソフトウェア倍精度（[derby-ser-cost.md](../../apps/derby-ser-cost.md)）。整数化の設計は [derby-ser-division.md](../../apps/derby-ser-division.md)。
