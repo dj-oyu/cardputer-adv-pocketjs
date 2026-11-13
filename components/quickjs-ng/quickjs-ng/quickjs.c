@@ -2020,6 +2020,16 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
     force_gc = true;
 #else
     size_t threshold = js_gc_effective_threshold(rt);
+    /* G3's dry state describes the heap the dry collection left. Once the
+       heap is below that floor (refcount freed since), it no longer holds:
+       the next crossing of the cap must collect and back off as before.
+       Checked on every allocation, not only on a crossing, because the heap
+       can drop and climb back above the floor between two crossings; the
+       vmtest corpus's gc_threshold_near_limit (fill to OOM, drop a quarter,
+       make cycles) otherwise reached the limit with no collection. */
+    if (g_gc_cap_dry &&
+        rt->malloc_state.malloc_size < ((size_t)rt->gc_cap_floor << 6))
+        g_gc_cap_dry = false;
     force_gc = ((rt->malloc_state.malloc_size + size) > threshold);
     /* Only the cap backs off (see above): a crossing of the ordinary
        threshold collects as it always did. */
