@@ -154,7 +154,7 @@ function paint(c, xs, close, gate, extra) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
     // down the course; each horse scaled by its own 1/z (pocket.derby.runners),
     // the last (farthest) first.
-    if (j === 1 && q && live.frl && live.frb) AB ? abHead(xs) : S.runners(xs, lz, ro, CO, live.frl, live.frb, 2, -1, 255, 0);
+    if (j === 1 && q && live.frl && live.frb) S.runners(xs, lz, ro, CO, live.frl, live.frb, 2, -1, 255, 0);
     const w = e[q + 4 + j];
     if (!w) continue;
     if (j > 1) { dr('band', w, (f * 21846 >> 16) % 6); continue; }

@@ -80,8 +80,9 @@ QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
          # pocket.app.load and its table, read from apps/derby/chunks.txt
          "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c",
-         # pocket.derby, the series in C (docs/apps/derby-ser-native.md)
-         "main/pocket/pocket_derby.c",
+         # pocket.derby, the series in C (docs/apps/derby-ser-native.md), and
+         # its integer path (docs/apps/derby-ser-division.md)
+         "main/pocket/pocket_derby.c", "main/pocket/derby_ser_int.c",
          # pocket.kasane.shiki: the runners and HEAD ON's horses (derby_prog.js @shiki)
          "main/pocket/pocket_shiki_api.c"]
 
@@ -138,7 +139,8 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     # KSN_HOST_CFLAGS: extra flags for a profiling build (-DKSN_SHIKI_OPSTATS,
     # docs/kasane/shiki-jit.md sec.10).
     extra = os.environ.get("KSN_HOST_CFLAGS", "").split()
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DPOCKET_PROC_DRAW_HOOK",
+                    "-DDERBY_SER_CHECK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
@@ -277,12 +279,28 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
         raise SystemExit("seed analysis failed")
 
 
+def check_serq(flags: list[str], cases: int = 10000) -> None:
+    """Stage S0 of docs/apps/derby-ser-division.md: the integer ser()
+    (main/pocket/derby_ser_int.c) against the double series on the app's
+    cameras and random ones (tools/games/test_derby_serq.c)."""
+    out = CACHE / "test-derby-serq"
+    CACHE.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["gcc", "-std=gnu11", "-O2", "-g", *flags, "-ffp-contract=off", "-Wall", "-Wextra", "-Werror",
+                    "-DDERBY_SER_CHECK", "-DDERBY_SER_COUNT", "-Imain/pocket", "tools/games/test_derby_serq.c",
+                    "main/pocket/derby_ser_int.c", "-lm", "-o", str(out)], cwd=ROOT, check=True)
+    print(f"==== integer ser() against the double (test_derby_serq, {cases} random cameras)", flush=True)
+    if subprocess.run([str(out), str(cases)], cwd=ROOT).returncode:
+        raise SystemExit("integer ser() check failed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
     parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
     parser.add_argument("--oracle", action="store_true", help="the JS ser() oracle in every run, not three")
+    parser.add_argument("--ser-double", action="store_true",
+                        help="every run on the double ser() of before (pocket.derby.mode(1)): its pixel hashes are the old ones")
     parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
                         help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
     args = parser.parse_args()
@@ -304,9 +322,13 @@ def main() -> None:
         (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0"}) for t in (0, 2)] + [
         (0, {"DERBY_NOCAM": "1", "DERBY_PAN": "0,1", "DERBY_PANFACE": "1", "DERBY_JS": "VS[0]=700;VS[1]=150"})] + [
         (1, {"DERBY_NOCAM": "1", "DERBY_SER_ORACLE": "1"})] + [
-        (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1"}) for t in (0, 2)]
+        (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1"}) for t in (0, 2)] + [
+        # The double path the up key's A/B keeps, bit for bit against the JS.
+        (2, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1", "DERBY_SER_DOUBLE": "1"})]
     if args.oracle:
         runs = [(t, dict(x, DERBY_SER_ORACLE="1")) for t, x in runs if "DERBY_SER_ORACLE" not in x]
+    if args.ser_double:
+        runs = [(t, dict(x, DERBY_SER_DOUBLE="1")) for t, x in runs if "DERBY_SER_DOUBLE" not in x]
     # i386 computes doubles on the x87 in 80 bits: the C (expressions kept in
     # registers) and the interpreter (each operation stored) then differ in
     # the last bit, which neither the device (IEEE soft float) nor the 64-bit
@@ -338,6 +360,7 @@ def main() -> None:
     if len(set(finish.values())) > 1:
         raise SystemExit(f"the player's race differs between runs: {finish}")
     if not args.heap_limit:
+        check_serq([] if args.m32 else ["-fsanitize=address,undefined"])
         print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
         if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
             raise SystemExit("odds calibration check failed")

@@ -206,12 +206,11 @@ function course(c, x0, xs, close, gate, K) {
 // projects, culls and orders them and draws them with integer inputs
 // (docs/apps/derby-runners-native.md). It stops at the close-up lane (its
 // place in zo) and goes on from the next. CO: coats 0..7, silks 8..15. DO:
-// the legs' phase as a distance, xs plus the lane's offset (README). AB 1:
-// the JS path of before (derby_ab.js), for the A/B on the device.
+// the legs' phase as a distance, xs plus the lane's offset (README). AB:
+// the series' path (pocket.derby.mode(), the up key's A/B).
 const CO = new Int32Array(16), DO = (x, l) => x + l * 67797;
 let AB = 0;
 function runners(xs, pan, close, K) {
-  if (AB) return abRun(xs, pan, close, K);
   let m = 255;
   if (K) for (let i = m = 0; i < FN[tier]; ++i) m |= 1 << ro[i];
   for (let i = 0; (i = S.runners(xs, lz, zo, CO, live.legs, live.run, pan, close, m, i)) >= 0; ++i) {

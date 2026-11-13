@@ -1120,6 +1120,9 @@ bool pocket_proc_hook_dry;
 JSValue pocket_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index){
     if(handle>INT32_MAX||n>KSN_SHIKI_INPUTS)
         return failure(ctx,"kasane.shiki.draw",POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(pocket_proc_hook_dry){pocket_proc_draw_fixed_hook(handle,in,n);return JS_UNDEFINED;}
+#endif
     JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,NULL,in,n,index);
 #ifdef POCKET_PROC_DRAW_HOOK
     if(!JS_IsException(result))pocket_proc_draw_fixed_hook(handle,in,n);

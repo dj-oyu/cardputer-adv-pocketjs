@@ -3,6 +3,7 @@
 #include "quickjs.h"
 #include "esp_err.h"
 #include <stdint.h>
+#include "derby_ser_int.h"
 
 /* pocket.derby: DERBY WATCH's panning series in C (docs/apps/derby-ser-native.md).
  * Not part of the common API: app_session.c installs it only into a session
@@ -14,6 +15,12 @@ esp_err_t pocket_derby_fill(JSContext *ctx, JSValueConst ns, void *unused);
 /* Frees the course and forgets the view. Holds no guest values, so its place
  * in app_stop() only has to be before the next session. */
 void pocket_derby_reset(void);
+#ifdef DERBY_SER_CHECK
+/* Host checks only: the integer series' counters since the process began
+ * (derby_ser_int.h: saturations, skipped draws and the invariants, all of
+ * which must stay 0). The firmware keeps none (no .bss). */
+void pocket_derby_ser_stats(derby_ser_stats *out);
+#endif
 #if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
 typedef struct {
     uint32_t course_replacements,cache_bytes,registration_poses,view_poses;
