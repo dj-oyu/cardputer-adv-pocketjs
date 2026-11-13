@@ -9,7 +9,7 @@ fixture_hash={str(p.name):hashlib.sha256(p.read_bytes()).hexdigest() for p in (o
 def hashes():return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
 before=hashes();head=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip();commands=[];logs={}
 for mode,flags in [('o2',['-O2']),('san',['-g','-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
- for test in ['core','admission','native']:
+ for test in ['core','admission','weight_normal','native']:
   exe=out/(test+'-'+mode)
   cmd=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-ffp-contract=off','-fno-fast-math',*flags,*['-I'+str(p) for p in [here/'support',here/'support/ayatsuri',root/'main',root/'main/ayatsuri',root/'tools/hostshim',root/'tools/ayatsuri/skin']],str(here/('test_'+test+'.c'))]
   if test=='native':cmd+=list(map(str,sources))+['-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free']
