@@ -3108,6 +3108,9 @@ static esp_err_t present_account(ksn_result result) {
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
                 icache_ab_window();
+#ifdef POCKET_DERBY_SER_PROBE
+                pocket_derby_ser_probe_log(ticks);
+#endif
 #ifdef CONFIG_POCKET_FRAME_BREAKDOWN
                 /* What the guest holds by kind, every 8th PAINT window (~4 s at
                  * 60 fps): the native heap's free bytes and the guest's own

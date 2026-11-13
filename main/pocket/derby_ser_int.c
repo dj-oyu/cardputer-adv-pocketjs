@@ -60,7 +60,7 @@ static inline int16_t sat16(int32_t v){return (int16_t)(v>32767?32767:v<-32768?-
  * 2^-16, moved the LOD's near bound by one level 13 times in the straight's
  * 125,280 app calls (a post 3.8 to 7.2 px off; tools/games/test_derby_serq.c),
  * against 1 with the exact root. */
-static uint32_t isqrt32(uint32_t v){
+static DERBY_SER_HOT uint32_t isqrt32(uint32_t v){
     uint32_t r=0,bit=1u<<30;
     while(bit>v)bit>>=2;
     while(bit){
@@ -69,7 +69,7 @@ static uint32_t isqrt32(uint32_t v){
     }
     return r;
 }
-static i64 isqrt64(i64 v){
+static DERBY_SER_HOT i64 isqrt64(i64 v){
     if(v<=0)return 0;
     unsigned sh=0;
     while((uint64_t)v>>sh>0xffffffffull)sh+=2;
@@ -92,7 +92,7 @@ void derby_ends_soa_init(derby_ends_soa *s,void *mem,unsigned ends){
     for(unsigned i=0;i<12;i++){*a[i]=p;p+=n;}
     memset(s->rx,0,12u*2u*n);
 }
-void derby_ser_rotate_ref(derby_ends_soa *s,int16_t cx,int16_t cz){
+DERBY_SER_HOT void derby_ser_rotate_ref(derby_ends_soa *s,int16_t cx,int16_t cz){
     const unsigned n=s->n;
     for(unsigned i=0;i<n;i++){
         const int32_t rx=s->rx[i],rz=s->rz[i],tx=s->tx[i],tz=s->tz[i];
@@ -105,7 +105,7 @@ void derby_ser_rotate_ref(derby_ends_soa *s,int16_t cx,int16_t cz){
     for(unsigned i=0;i+1<n;i++){s->v0n[i]=s->v0[i+1];s->v1n[i]=s->v1[i+1];s->v2n[i]=s->v2[i+1];s->v3n[i]=s->v3[i+1];}
     s->v0n[n-1]=s->v1n[n-1]=s->v2n[n-1]=s->v3n[n-1]=0;
 }
-uint32_t derby_ser_cull_ref(const derby_ends_soa *s,unsigned chords,const derby_cull_q *p){
+DERBY_SER_HOT uint32_t derby_ser_cull_ref(const derby_ends_soa *s,unsigned chords,const derby_cull_q *p){
     const int32_t w=p->w,f=p->f,nr=p->near,fa=p->far,k=-p->k;
     uint32_t keep=0;
     for(unsigned j=0;j<chords;j++){
@@ -118,7 +118,7 @@ uint32_t derby_ser_cull_ref(const derby_ends_soa *s,unsigned chords,const derby_
 }
 
 /* ---- The frame's inputs. */
-uint32_t derby_ser_prepare(derby_ends_soa *s,const derby_cam_q *c,const int32_t (*pos)[2],const int16_t (*tan14)[2],
+DERBY_SER_HOT uint32_t derby_ser_prepare(derby_ends_soa *s,const derby_cam_q *c,const int32_t (*pos)[2],const int16_t (*tan14)[2],
                            unsigned n_ends){
     uint32_t wide=0;
     for(unsigned i=0;i<s->n;i++){
@@ -133,7 +133,7 @@ uint32_t derby_ser_prepare(derby_ends_soa *s,const derby_cam_q *c,const int32_t 
     }
     return wide;
 }
-bool derby_ser_cull_params(const derby_cam_q *c,int32_t w,int32_t m,derby_cull_q *out){
+DERBY_SER_HOT bool derby_ser_cull_params(const derby_cam_q *c,int32_t w,int32_t m,derby_cull_q *out){
     const i64 w3=((i64)w+4096)>>13;
     if(ab64(w3)>DERBY_Q_W)return false;
     /* margin m + 3 m, Q3 rounded up: covers Q3 positions, the Q14 direction
@@ -200,12 +200,12 @@ static inline i64 Zat(const qline *l,int32_t G){return l->Zq+m30(G,l->uz);}
 static inline i64 Xat(const qline *l,int32_t G){return l->Xq+m30(G,l->ux);}
 /* The planes of lim(), as values with the double's sign: near Z - f/50, far
  * zf - Z, left f X + 160 Z (x >= -40), right 160 Z - f X (x <= 280). */
-static i64 plane(const derby_cam_q *c,int p,i64 Z,i64 X){
+static DERBY_SER_HOT i64 plane(const derby_cam_q *c,int p,i64 Z,i64 X){
     const i64 fx=((i64)c->f*X)>>16;
     return p==0?Z-c->zn:p==1?(i64)c->zf-Z:p==2?fx+160*Z:160*Z-fx;
 }
 /* inr(): in front, and x within -400..640 px. */
-static bool inrq(const derby_cam_q *c,const qline *l,int32_t G){
+static DERBY_SER_HOT bool inrq(const derby_cam_q *c,const qline *l,int32_t G){
     const i64 Z=Zat(l,G),X=Xat(l,G),fx=((i64)c->f*X)>>16;
     return Z>c->zn&&fx+520*Z>0&&520*Z-fx>0;
 }
@@ -218,7 +218,7 @@ static bool screen_at(const derby_cam_q *c,const qline *l,int32_t G,double *x,do
     return *x>-400&&*x<640;
 }
 #endif
-int derby_ser_chord_q(const derby_cam_q *c,const derby_series_q *p,const derby_chord_q *ch,unsigned j,
+DERBY_SER_HOT int derby_ser_chord_q(const derby_cam_q *c,const derby_series_q *p,const derby_chord_q *ch,unsigned j,
                       derby_emit_fn emit,void *user,derby_ser_stats *st){
     (void)j;
     if(ch->tx==DERBY_CHORD_SKIP){SP(2);return 0;}

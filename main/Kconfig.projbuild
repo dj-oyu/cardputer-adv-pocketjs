@@ -437,6 +437,36 @@ menu "Pocket VM (diagnostics)"
             product image is unchanged. Use a build directory with its own
             sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
 
+    config POCKET_DERBY_SER_PROBE
+        bool "Measurement: DERBY ser() path and cycles, one DERBY_SER line a KASANE_PAINT window"
+        default n
+        help
+            Counts, in main/pocket/pocket_derby.c, which path view() and ser()
+            took (integers or doubles), why a call fell back to the doubles
+            (L, s, w/g0, a plan's Q formats, the stands' plans, a table's
+            malloc or range; view(): mode(1), the course, the camera's
+            position, f or zf), and their cycles with the Shiki draws inside
+            ser() apart. After every KASANE_PAINT line it logs
+            "DERBY_SER mode=INT|DOUBLE frames=30 views=<int>/<dbl> ...
+            int_cy=<cycles a frame> int_draw=... dbl_cy=... dbl_draw=...
+            view_cy=<int>/<dbl> ..." (docs/apps/derby-ser-division.md
+            sec.12). The up key still flips the path (same binary A/B).
+            Off by default: the product image is unchanged. Also counts the
+            core's retired instructions and instruction-fetch stall cycles
+            inside ser() (performance counters PM0/PM1; do not combine with
+            POCKET_VM_TURNPERF, which arms the same two counters).
+
+    config POCKET_DERBY_SER_IRAM
+        bool "Measurement: DERBY's integer ser() functions in IRAM"
+        default n
+        help
+            Places the integer series' per-frame functions
+            (main/pocket/derby_ser_int.c: derby_ser_chord_q, the cull, the
+            rotation and their helpers) in IRAM instead of flash, to tell
+            the flash cache's share of their cost (docs/apps/derby-ser-division.md
+            sec.12). +6,552 B of DIRAM measured (IRAM is the same pool as
+            DRAM): every app loses that much heap. Off by default.
+
     config POCKET_SHIKI_MEMSTAT
         bool "Count the native allocations of the line/grid surfaces (diagnostic)"
         default n
