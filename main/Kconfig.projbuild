@@ -424,7 +424,7 @@ menu "Pocket VM (diagnostics)"
 
     config POCKET_DERBY_SER_PIE
         bool "Prototype: DERBY ser() chord cull in PIE, with its self-test at DERBY start"
-        default n
+        default y
         help
             Builds main/pocket/derby_ser_pie.c: the int16 chord-end rotation
             and chord cull (ou()) as a PIE kernel next to its scalar integer
