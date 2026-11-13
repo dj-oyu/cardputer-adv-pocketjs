@@ -93,8 +93,9 @@ static int64_t hp_eval_t0;
 #include "icache_ab.h"
 #include "frame_bd.h"
 #include "disp.h"
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
-/* The P0 eligibility mask (frame_bd_eligible()). */
+#if defined(CONFIG_POCKET_FRAME_BREAKDOWN) || \
+    (defined(CONFIG_POCKET_DISP_DEFER) && defined(KASANE_DMA_OVERLAP))
+/* P0 eligibility and deferred-present blockers use these host queries. */
 #include "pocket_pixel.h"
 #include "pocket_grid.h"
 #include "pocket_video.h"
