@@ -1,0 +1,152 @@
+name: Mesh Q7 contracts
+on:
+  pull_request:
+    paths:
+      - 'main/**'
+      - 'tools/hostshim/**'
+      - 'tools/build_kasane_test.sh'
+      - 'tools/ayatsuri/**'
+      - 'tools/kasane_contract/**'
+      - 'apps/meshbench/**'
+      - 'components/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'tools/gen*'
+      - '.gitmodules'
+      - '.github/workflows/mesh-q7.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'main/**'
+      - 'tools/hostshim/**'
+      - 'tools/build_kasane_test.sh'
+      - 'tools/ayatsuri/**'
+      - 'tools/kasane_contract/**'
+      - 'apps/meshbench/**'
+      - 'components/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'tools/gen*'
+      - '.gitmodules'
+      - '.github/workflows/mesh-q7.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mesh-q7-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  numeric:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [plain, sanitize]
+    steps:
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          persist-credentials: false
+      - name: Verify exact certificates, bounded preflight and flat-span equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/q7
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' | tee artifacts/q7/source-head.txt
+          sha256sum main/ui/kasane/ksn_mesh_q7_certified.c | tee artifacts/q7/renderer.sha256
+          cc --version > artifacts/q7/compiler.txt
+          plain=(); flat=()
+          if [ '${{ matrix.mode }}' = plain ]; then plain=(--plain); else flat=(--sanitize); fi
+          python3 tools/kasane_contract/run_mesh_q7.py "${plain[@]}" 2>&1 | tee artifacts/q7/numeric.log
+          python3 tools/kasane_contract/q7/run_preflight.py "${plain[@]}" 2>&1 | tee artifacts/q7/preflight.log
+          python3 tools/kasane_contract/q7/run_flat_span.py "${flat[@]}" 2>&1 | tee artifacts/q7/flat-span.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mesh-q7-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
+          path: artifacts/q7/
+          retention-days: 14
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Verify environment, wrapper scheduling and managed lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/q7
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' | tee artifacts/q7/source-head.txt
+          python3 tools/kasane_contract/q7/test_environment.py 2>&1 | tee artifacts/q7/environment.log
+          python3 tools/kasane_contract/q7/test_debug_lifecycle.py 2>&1 | tee artifacts/q7/debug-lifecycle.log
+          node tools/kasane_contract/test_meshbench_preflight_hooks.cjs 2>&1 | tee artifacts/q7/hooks.log
+          python3 tools/kasane_contract/run_mesh_q7_lifecycle.py 2>&1 | tee artifacts/q7/lifecycle.log
+          python3 tools/kasane_contract/run_meshbench_q7_compare.py 2>&1 | tee artifacts/q7/public-scene.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mesh-q7-integration-${{ env.SOURCE_HEAD }}
+          path: artifacts/q7/
+          retention-days: 14
+  product-opt-in:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: espressif/idf:v6.0.1
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build explicit Q7 benchmark profile without changing defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          idf.py -B build_q7 -D SDKCONFIG=build_q7/sdkconfig -D KASANE_MESH_PREPARED_PROTOTYPE=ON -D KASANE_MESH_Q7_CERTIFIED_PROTOTYPE=ON -D KASANE_MESH_Q7_BENCH_PREFLIGHT=ON -D KASANE_MESH_EDGE4_PROTOTYPE=OFF build
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' > build_q7/source-head.txt
+          for key in KASANE_MESH_PREPARED_PROTOTYPE KASANE_MESH_Q7_CERTIFIED_PROTOTYPE KASANE_MESH_Q7_BENCH_PREFLIGHT; do
+            grep -qx "$key:BOOL=ON" build_q7/CMakeCache.txt
+          done
+          grep -qx 'KASANE_MESH_EDGE4_PROTOTYPE:BOOL=OFF' build_q7/CMakeCache.txt
+          xtensa-esp32s3-elf-nm -S build_q7/cardputer_pocketjs.elf > build_q7/symbols.txt
+          grep 'ksn_mesh_q7_render' build_q7/symbols.txt
+          sha256sum main/ui/kasane/ksn_mesh_q7_certified.c build_q7/cardputer_pocketjs.bin build_q7/cardputer_pocketjs.elf > build_q7/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mesh-q7-opt-in-product-${{ env.SOURCE_HEAD }}
+          path: |
+            build_q7/source-head.txt
+            build_q7/CMakeCache.txt
+            build_q7/sdkconfig
+            build_q7/compile_commands.json
+            build_q7/symbols.txt
+            build_q7/SHA256SUMS
+            build_q7/cardputer_pocketjs.map
+            build_q7/**/*.su
+          retention-days: 14
