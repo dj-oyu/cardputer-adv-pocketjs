@@ -161,3 +161,11 @@ STRESS の LV3（host、900 フレーム）は、後の像では最初の OOM �
 - A はレースを FINISH・写真判定まで走り、OOM・FRAMEFAIL なし。FINISH の窓の `shk=` の最大の空き塊は 2,492 B（従来と同じ下限）。
 - 旧像（`4840504`）との比較（像が違うので参考）: 待機画面 3.92 → 3.83 ms、CAM WIDE 7.3 → 6.15 ms、CAM FIELD 7.5 → 6.3〜6.4 ms。
 - **次の山:** draws が 50 前後になる CAM WIDE 2 は native でも 11〜12 ms。Shiki の engine は 0.5〜0.6 ms なので、残りは JS 側（観客の pat の draw の組み立て）と見られる（推定。r5sim の場面別の内訳で確かめる）。
+
+## 8. P3 の実機（`67c2fc6`、broker の app_session、2026-11-13、実測）
+
+- STRESS LV1: `turn_ms` 6.19〜6.34（`4840504` は 6.04〜6.40。アプリ未移行なので変わらないのが期待どおり）。起動直後の `MEM free=78,712 largest=31,744 js=44,648`（`4840504` は free=70,072・js=44,936。+8.6 KB は P1 と grid の表を使う時に確保した分）。
+- GRID LAB: 3 本の plan を登録（`GRID_APP REGISTER 3..5`）、PIE で `FRAME 48..192`、MODE 0→1。エラー無し。
+- MEGADEMO: チャンク 7 本を読み込み、WAKE → NEWS（plans=14 を登録）、エラー無し。
+- VIDEO LAB: `FRAME 0..180`、`turn_ms` 1.3、エラー無し。
+- 物理の表示（LCD）は見ていない（`board_capture` は転送前のバッファを写すので、ソフトウェアでは確かめられない）。
