@@ -115,6 +115,7 @@ bool pet_hub_key(board_key_t key) {
     else if(sys_notify_ack(hub.notifications,alert_owner,alert_id)!=NOTICE_OK)return true;
     alert_id=0;alert[0]=0;changed=true;return true;
 }
+bool pet_hub_alert_shown(void) { return !overlay_suppressed && alert[0]; }
 void pet_hub_overlay(uint16_t *pixels, int y, int rows) {
     if(overlay_suppressed||!alert[0]||y>=48)return;
     paint_begin(pixels,y,rows);paint_fill(0,0,240,48,board_rgb(8,12,32));

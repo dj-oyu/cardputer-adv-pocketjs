@@ -2,32 +2,18 @@
 
 #include <string.h>
 
-// Under ASan a cached block is poisoned: to the sanitizer it stays "freed"
-// until the cache hands it out again, so a use-after-free the cache would
-// otherwise hide (the block is still allocated as far as malloc knows) is
-// still reported. The first word is the list link and is unpoisoned only
-// while the cache itself reads or writes it.
-#if defined(__SANITIZE_ADDRESS__)
-#define BC_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define BC_ASAN 1
-#endif
-#endif
-#ifdef BC_ASAN
-#include <sanitizer/asan_interface.h>
-#define BC_POISON(p, n) ASAN_POISON_MEMORY_REGION((p), (n))
-#define BC_UNPOISON(p, n) ASAN_UNPOISON_MEMORY_REGION((p), (n))
-#else
-#define BC_POISON(p, n) ((void)0)
-#define BC_UNPOISON(p, n) ((void)0)
-#endif
+// Poisoning, the link word and the hit paths are in block_cache.h (inline,
+// shared with the guest's allocator).
+#define BC_POISON BLOCK_CACHE_POISON
+#define BC_UNPOISON BLOCK_CACHE_UNPOISON
+#define BC_NEXT(block) (((block_cache_link_t *)(block))->next)
 
 void block_cache_init(block_cache_t *cache, const block_cache_backend_t *backend,
                       const uint16_t *sizes, unsigned n, bool enabled) {
   memset(cache, 0, sizeof(*cache));
   cache->backend = backend;
   cache->enabled = enabled;
+  cache->depth = BLOCK_CACHE_DEPTH;
   if (n > BLOCK_CACHE_CLASSES) n = BLOCK_CACHE_CLASSES;
   for (unsigned i = 0; i < n; i++) {
     const uint16_t s = sizes[i];
@@ -43,26 +29,27 @@ void block_cache_set_enabled(block_cache_t *cache, bool enabled) {
   cache->enabled = enabled;
 }
 
-static int class_index(const block_cache_t *cache, size_t length) {
-  if (length > BLOCK_CACHE_MAX_SIZE || (length & 3U)) return -1;
-  return (int)cache->class_of[length / 4U] - 1;
+void block_cache_set_depth(block_cache_t *cache, unsigned depth) {
+  if (depth < 1) depth = 1;
+  if (depth > BLOCK_CACHE_DEPTH) depth = BLOCK_CACHE_DEPTH;
+  cache->depth = (uint8_t)depth;
+  const block_cache_backend_t *b = cache->backend;
+  for (unsigned c = 0; c < BLOCK_CACHE_CLASSES; c++) {
+    while (cache->count[c] > depth) {
+      void *block = cache->head[c];
+      BC_UNPOISON(block, cache->size[c]);
+      cache->head[c] = BC_NEXT(block);
+      cache->count[c]--;
+      b->free(b->ctx, block);
+    }
+  }
 }
 
 void *block_cache_malloc(block_cache_t *cache, size_t size, size_t rounded) {
   const block_cache_backend_t *b = cache->backend;
-  if (cache->enabled) {
-    const int c = class_index(cache, rounded);
-    if (c >= 0 && cache->head[c] != NULL) {
-      void *block = cache->head[c];
-      BC_UNPOISON(block, cache->size[c]);
-      memcpy(&cache->head[c], block, sizeof(void *));
-      cache->count[c]--;
-      cache->hits++;
-      return block;
-    }
-    cache->misses++;
-  }
-  void *block = b->malloc(b->ctx, size);
+  void *block = block_cache_pop(cache, rounded);
+  if (block != NULL) return block;
+  block = b->malloc(b->ctx, size);
   if (block == NULL && cache->enabled && block_cache_held(cache) != 0) {
     // Small blocks held here may be what keeps the heap from having room
     // (they cannot merge with their free neighbours): give them back first.
@@ -73,20 +60,15 @@ void *block_cache_malloc(block_cache_t *cache, size_t size, size_t rounded) {
 }
 
 void block_cache_free(block_cache_t *cache, void *block) {
+  if (block == NULL) return;
+  const block_cache_backend_t *b = cache->backend;
+  block_cache_free_sized(cache, block, cache->enabled ? b->length(b->ctx, block) : 0);
+}
+
+void block_cache_free_sized(block_cache_t *cache, void *block, size_t length) {
   const block_cache_backend_t *b = cache->backend;
   if (block == NULL) return;
-  if (cache->enabled) {
-    const int c = class_index(cache, b->length(b->ctx, block));
-    if (c >= 0 && cache->count[c] < BLOCK_CACHE_DEPTH) {
-      memcpy(block, &cache->head[c], sizeof(void *));
-      cache->head[c] = block;
-      cache->count[c]++;
-      cache->pushes++;
-      BC_POISON(block, cache->size[c]);
-      return;
-    }
-  }
-  b->free(b->ctx, block);
+  if (!block_cache_push(cache, block, length)) b->free(b->ctx, block);
 }
 
 void block_cache_flush(block_cache_t *cache) {
@@ -94,9 +76,8 @@ void block_cache_flush(block_cache_t *cache) {
   for (unsigned c = 0; c < BLOCK_CACHE_CLASSES; c++) {
     void *block = cache->head[c];
     while (block != NULL) {
-      void *next;
       BC_UNPOISON(block, cache->size[c]);
-      memcpy(&next, block, sizeof(void *));
+      void *next = BC_NEXT(block);
       b->free(b->ctx, block);
       block = next;
     }

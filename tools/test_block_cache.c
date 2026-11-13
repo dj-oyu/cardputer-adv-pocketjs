@@ -96,6 +96,46 @@ static void pressure_retention(const uint16_t *sizes, unsigned n) {
   printf("PRESSURE_RETENTION released_usable=%zu held_during_pressure=0 turns=1000\n", cap);
 }
 
+// Pressure shrinks the cache to BLOCK_CACHE_PRESSURE_DEPTH per class at once
+// and keeps it there; recovery restores the full depth. Live blocks are never
+// touched.
+static void pressure_depth(const uint16_t *sizes, unsigned n) {
+  block_cache_t cache;
+  block_cache_init(&cache, &BE, sizes, n, true);
+  void *held[BLOCK_CACHE_CLASSES][BLOCK_CACHE_DEPTH];
+  for (unsigned c = 0; c < n; c++)
+    for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++)
+      held[c][i] = block_cache_malloc(&cache, sizes[c], sizes[c]);
+  unsigned char *live_block = block_cache_malloc(&cache, 48, 48);
+  memset(live_block, 0x5a, 48);
+  for (unsigned c = 0; c < n; c++)
+    for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++)
+      block_cache_free(&cache, held[c][i]);
+  size_t small = 0;
+  for (unsigned c = 0; c < n; c++) small += sizes[c] * (size_t)BLOCK_CACHE_PRESSURE_DEPTH;
+  block_cache_set_depth(&cache, BLOCK_CACHE_PRESSURE_DEPTH);
+  CHECK(block_cache_held(&cache) == small, "pressure did not trim to the small depth");
+  CHECK(backend_live == 1 + n * BLOCK_CACHE_PRESSURE_DEPTH, "trimmed blocks not freed");
+  for (unsigned turn = 0; turn < 1000; turn++) {
+    block_cache_set_depth(&cache, BLOCK_CACHE_PRESSURE_DEPTH);
+    void *p[BLOCK_CACHE_DEPTH];
+    for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++) p[i] = block_cache_malloc(&cache, 32, 32);
+    for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++) block_cache_free(&cache, p[i]);
+    CHECK(block_cache_held(&cache) <= small, "cache grew past the small depth under pressure");
+  }
+  for (unsigned i = 0; i < 48; i++) CHECK(live_block[i] == 0x5a, "trim changed a live block");
+  block_cache_set_depth(&cache, BLOCK_CACHE_DEPTH);
+  void *q[BLOCK_CACHE_DEPTH];
+  for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++) q[i] = block_cache_malloc(&cache, 32, 32);
+  for (unsigned i = 0; i < BLOCK_CACHE_DEPTH; i++) block_cache_free(&cache, q[i]);
+  CHECK(cache.count[block_cache_class(&cache, 32)] == BLOCK_CACHE_DEPTH,
+        "recovery did not restore the full depth");
+  block_cache_free(&cache, live_block);
+  block_cache_flush(&cache);
+  CHECK(backend_live == 0, "depth test leaked");
+  printf("PRESSURE_DEPTH held_under_pressure=%zu depth=%d\n", small, BLOCK_CACHE_PRESSURE_DEPTH);
+}
+
 int main(int argc, char **argv) {
   static const uint16_t sizes[] = {12, 16, 32, 36, 48, 72, 80, 88};
   block_cache_t cache;
@@ -112,7 +152,7 @@ int main(int argc, char **argv) {
 
   srand(12345);
   const size_t pick[] = {5, 12, 13, 16, 30, 32, 36, 40, 48, 60, 72, 80, 88, 100, 200};
-  const size_t cap = 8 * (12 + 16 + 32 + 36 + 48 + 72 + 80 + 88);
+  const size_t cap = BLOCK_CACHE_DEPTH * (12 + 16 + 32 + 36 + 48 + 72 + 80 + 88);
   for (unsigned step = 0; step < 400000; step++) {
     unsigned s = (unsigned)rand() % SLOTS;
     if (live[s].p) {
@@ -154,6 +194,7 @@ int main(int argc, char **argv) {
   block_cache_free(&off, x);
   CHECK(block_cache_held(&off) == 0 && backend_live == 0, "disabled cache kept a block");
   pressure_retention(sizes, sizeof(sizes) / sizeof(sizes[0]));
+  pressure_depth(sizes, sizeof(sizes) / sizeof(sizes[0]));
   printf("hits=%u misses=%u pushes=%u flushes=%u\n", cache.hits, cache.misses, cache.pushes, cache.flushes);
   printf("%s: %u failure(s)\n", failures ? "BLOCK_CACHE FAIL" : "BLOCK_CACHE PASS", failures);
   return failures ? 1 : 0;

@@ -6,7 +6,7 @@ p=argparse.ArgumentParser();p.add_argument('--sanitize',action='store_true');a=p
 out=R/'.cache'/('keyboard-probe-sanitize' if a.sanitize else 'keyboard-probe')
 stubs={
  'driver/i2c_master.h':'#pragma once\n#include <stdint.h>\n#include "esp_err.h"\ntypedef void *i2c_master_bus_handle_t;\nesp_err_t i2c_master_probe(i2c_master_bus_handle_t,uint16_t,int);\n',
- 'driver/gpio.h':'#pragma once\nint gpio_get_level(int);\n',
+ 'driver/gpio.h':'#pragma once\n#include <stdint.h>\n#include "esp_err.h"\ntypedef enum {GPIO_MODE_INPUT=1} gpio_mode_t;\ntypedef enum {GPIO_PULLUP_DISABLE,GPIO_PULLUP_ENABLE} gpio_pullup_t;\ntypedef struct {uint64_t pin_bit_mask;gpio_mode_t mode;gpio_pullup_t pull_up_en;} gpio_config_t;\nesp_err_t gpio_config(const gpio_config_t *);\nint gpio_get_level(int);\n',
  'freertos/FreeRTOS.h':'#pragma once\n#include <stdint.h>\ntypedef uint32_t TickType_t;\n#define pdMS_TO_TICKS(ms) ((TickType_t)((ms)*configTICK_RATE_HZ/1000))\n',
  'freertos/task.h':'#pragma once\n#include "FreeRTOS.h"\nvoid vTaskDelay(TickType_t);\n',
  'esp_log.h':'#pragma once\nvoid test_log(char,const char*,const char*,...);\n#define ESP_LOGI(t,...) test_log(\'I\',t,__VA_ARGS__)\n#define ESP_LOGW(t,...) test_log(\'W\',t,__VA_ARGS__)\n#define ESP_LOGE(t,...) test_log(\'E\',t,__VA_ARGS__)\n',
@@ -17,10 +17,11 @@ board=(R/'main/hal/board.c').read_text()
 start=board.index('    esp_err_t keyboard_error = keyboard_probe_startup(ih);')
 end=board.index('    battery_init();',start)
 (out/'include/keyboard_stage.inc').write_text(board[start:end])
-for hz in [100,1000]:
- binary=out/f'keyboard-probe-{hz}'
+# The keyboard's INT gate as shipped (GPIO 11, sdkconfig default) and off.
+for hz,key_int in [(100,11),(1000,11),(100,-1),(1000,-1)]:
+ binary=out/f'keyboard-probe-{hz}-int{key_int}'
  flags=['-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie'] if a.sanitize else ['-O2']
  subprocess.run([os.environ.get('CC','gcc'),'-std=c11','-Wall','-Wextra','-Werror',*flags,
-     f'-DconfigTICK_RATE_HZ={hz}','-I'+str(out/'include'),'-Itools/hostshim','-Imain/hal',
+     f'-DconfigTICK_RATE_HZ={hz}',f'-DCONFIG_POCKET_KEY_INT_GPIO={key_int}','-I'+str(out/'include'),'-Itools/hostshim','-Imain/hal',
      'tools/board_test/test_keyboard_probe.c','main/hal/keyboard_probe.c','-o',str(binary)],cwd=R,check=True)
  subprocess.run([str(binary)],cwd=R,check=True)

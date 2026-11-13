@@ -18,8 +18,8 @@ CACHE = Path(os.environ.get("CACHE", "/tmp/qjs-kasane-host"))
 
 def function(path, name):
     text = (ROOT / path).read_text()
-    match = re.search(r"(?ms)^(?:static )?(?:inline )?(?:void|bool) "
-                      + re.escape(name) + r"\([^;{]*\{.*?^}", text)
+    match = re.search(r"(?ms)^(?:static )?(?:inline )?(?:__attribute__\(\([a-z_]+\)\) )?"
+                      r"(?:void|bool)\s+" + re.escape(name) + r"\([^;{]*\{.*?^}", text)
     if match is None:
         raise RuntimeError(f"function body not found: {path}: {name}")
     return match.group(0)
@@ -60,14 +60,18 @@ static size_t length(void *ctx, const void *p) {
 static const block_cache_backend_t backend = {allocate, release, length, NULL};
 struct pocketjs_guest {
     block_cache_t block_cache;
-    int owner_task;
+    uintptr_t owner_task;
     bool block_cache_on;
     JSContext *ctx;
 };
 static pocketjs_guest_t *guest;
 #define MALLOC_CAP_INTERNAL 1u
 #define MALLOC_CAP_8BIT 2u
-static int xTaskGetCurrentTaskHandle(void) { return task; }
+/* main/hal/frame_bd.h's probe hooks, compiled out on the device by default. */
+#define frame_bd_pressure_override(on) (on)
+#define frame_bd_pressure(on, native, free_bytes, largest) ((void)0)
+/* guest.c's task identity (THREADPTR on the device) */
+static uintptr_t guest_task_id(void) { return (uintptr_t)task; }
 static int64_t esp_timer_get_time(void) { return (int64_t)clock_us; }
 static size_t heap_caps_get_free_size(unsigned caps) {
     assert(caps == (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
@@ -102,7 +106,8 @@ int main(void) {
     task = 2;
     pocketjs_guest_block_cache_flush(&g);
     pocketjs_guest_block_cache_set_pressure(&g, true);
-    assert(g.block_cache.enabled && block_cache_held(&g.block_cache) == 48);
+    assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_DEPTH &&
+           block_cache_held(&g.block_cache) == 48);
     task = 1;
     sample_memory_pressure();
     assert(pocket_memory_mask() == 0 && g.block_cache.enabled);
@@ -118,16 +123,23 @@ int main(void) {
     clock_us += 100000;
     sample_memory_pressure();
     assert((pocket_memory_mask() & 6) == 6);
-    assert(!g.block_cache.enabled && backend_live == 0);
+    assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH &&
+           block_cache_held(&g.block_cache) <= BLOCK_CACHE_PRESSURE_DEPTH * 48);
+    // Entering native pressure returns the cached blocks at once
+    // (pocketjs_guest_release_memory, guest-memory-design.md sec.6.1).
+    assert(block_cache_held(&g.block_cache) == 0);
     for (unsigned i = 0; i < 20; i++) {
         reuse_once();
         clock_us += 1000; // No new native sample yet: pressure must persist.
         sample_memory_pressure();
-        assert(!g.block_cache.enabled && backend_live == 0);
+        assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH &&
+           block_cache_held(&g.block_cache) <= BLOCK_CACHE_PRESSURE_DEPTH * 48);
     }
+    // Once per episode: the samples inside it did not flush the refilled cache.
+    assert(block_cache_held(&g.block_cache) > 0);
     task = 2;
     pocketjs_guest_block_cache_set_pressure(&g, false);
-    assert(!g.block_cache.enabled);
+    assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     task = 1;
     native_free = 50000; // Largest still pressured, so neither partial nor
     clock_us += 100000; // complete FREE recovery may re-enable retention.
@@ -135,17 +147,18 @@ int main(void) {
     clock_us += 500000;
     sample_memory_pressure();
     assert((pocket_memory_mask() & 6) == POCKET_MEMORY_LARGEST);
-    assert(!g.block_cache.enabled);
+    assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     native_largest = 30000;
     clock_us += 100000;
     sample_memory_pressure();
-    assert(!g.block_cache.enabled);
+    assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     clock_us += 499999;
     sample_memory_pressure();
-    assert(!g.block_cache.enabled);
+    assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     clock_us += 100000;
     sample_memory_pressure();
-    assert(pocket_memory_mask() == POCKET_MEMORY_GUEST && g.block_cache.enabled);
+    assert(pocket_memory_mask() == POCKET_MEMORY_GUEST && g.block_cache.enabled &&
+           g.block_cache.depth == BLOCK_CACHE_DEPTH);
     size_t after_used, after_limit;
     JS_GetMemoryCounters(rt, &after_used, &after_limit);
     assert(after_used == used && after_limit == used + 4096);
@@ -167,7 +180,7 @@ int main(void) {
     JS_FreeContext(g.ctx);
     JS_FreeRuntime(rt);
     assert(backend_live == 0);
-    puts("GUEST_CACHE_PRESSURE PASS: owner/eligibility/guest-only/sustained/partial-recovery/hysteresis/accounting");
+    puts("GUEST_CACHE_PRESSURE PASS: owner/eligibility/guest-only/sustained-small-depth/partial-recovery/hysteresis/accounting");
     return 0;
 }
 '''
@@ -178,6 +191,7 @@ def main():
         function("components/pocketjs_guest/src/guest.c", "guest_uses_block_cache"),
         function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_block_cache_flush"),
         function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_block_cache_set_pressure"),
+        function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_release_memory"),
         function("main/app_session.c", "sample_memory_pressure"),
     ])
     with tempfile.TemporaryDirectory(prefix="guest-cache-pressure-") as tmp:

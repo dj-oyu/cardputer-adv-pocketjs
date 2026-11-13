@@ -59,16 +59,18 @@ int main(void){
    pocket_proc_present_result(KSN_IO);REQUIRE(pocket_proc_pending());compare_ports(&port,fg,bg);
    eval_error(ctx,"P.beginFrame(0)");pocket_proc_present_result(KSN_OK);REQUIRE(!pocket_proc_pending());compare_ports(&port,fg,bg);
   }
-  /* Backdrop-mode IO discards the candidate and repairs old committed data,
-   * unlike image-mode retry. Distinct colors detect stale snapshot selection. */
+  /* Backdrop-mode IO repairs instead of retrying (unlike image mode). One
+   * buffer a surface (docs/vm/qjs-observe.md sec.25): commit() wrote the new
+   * frame over the committed one, so the repair repaints the new frame, with
+   * the new depth snapshot. Distinct colors detect stale snapshot selection. */
   pocket_proc_reset();
   snprintf(begin,sizeof begin,"P.beginMeshFrame(24,1024,8000000,%u)",rows);
   eval_ok(ctx,begin);append(ctx,31,1);eval_ok(ctx,"P.commit()");
   compare_backdrop(31,24);pocket_proc_present_result(KSN_OK);
   snprintf(begin,sizeof begin,"P.beginMeshFrame(25,1024,8000000,%u)",rows);
   eval_ok(ctx,begin);append(ctx,2016,1);eval_ok(ctx,"P.commit()");compare_backdrop(2016,25);
-  pocket_proc_present_result(KSN_IO);REQUIRE(!pocket_proc_pending());compare_backdrop(31,24);
-  eval_error(ctx,"P.beginFrame(0)");pocket_proc_present_result(KSN_OK);compare_backdrop(31,24);
+  pocket_proc_present_result(KSN_IO);REQUIRE(!pocket_proc_pending());compare_backdrop(2016,25);
+  eval_error(ctx,"P.beginFrame(0)");pocket_proc_present_result(KSN_OK);compare_backdrop(2016,25);
   pocket_proc_mesh_bytes bytes;pocket_proc_mesh_memory(&bytes);JSMemoryUsage usage;JS_ComputeMemoryUsage(rt,&usage);
   printf("HOST_MEMORY rows=%u pointer_bits=%zu tracked_requested_live=%zu peak=%zu blocks=%zu successful_alloc_calls=%zu guest_used=%lld guest_malloc=%lld snapshot_capacity=%zu workspace=%zu metadata=%zu\n",rows,8*sizeof(void *),live_bytes,peak_bytes,live_blocks,alloc_calls,(long long)usage.memory_used_size,(long long)usage.malloc_size,bytes.candidate+bytes.committed,bytes.workspace,bytes.metadata);
   pocket_proc_reset();pocket_proc_mesh_memory(&bytes);REQUIRE(!bytes.candidate&&!bytes.committed&&!bytes.workspace);

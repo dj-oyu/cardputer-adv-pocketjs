@@ -9,7 +9,11 @@ import subprocess
 
 from run import ROOT, QJS, run
 
-BASE = '05f472ecc9535b71aefbdd0ed73d8891dfb4aace'
+# dd36a29 adopted Math.sin/cos/tan from Shiki's sine table (pocket_trig.h,
+# accepted by the owner; math_fast_call's expected sin/cos were re-blessed
+# there). It descends from the earlier pin 05f472e, so every VM change since
+# that pin other than the trig is still checked byte for byte.
+BASE = 'dd36a294f6ca4710e3cee83118bfd87e83cebf74'
 
 
 def main():

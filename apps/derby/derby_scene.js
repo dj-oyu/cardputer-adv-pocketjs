@@ -9,7 +9,7 @@ function enter(s) {
     if (F.o) for (let j = 0; j <= 16; ++j) CH.push(OB + j * 1544156);
     CH.push(655360000); S.course(CH, CRS, 720896);
   }
-  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); rs.l = lz.map((_, i) => PW[20 * i]); F.k = z8(0);
+  if (s === 'gate') { drop(['conf']); want(RUN); fin = photoX = null; rs = race(F); rs.l = lz.map((_, i) => PW[20 * i]); F.k = z8(0);
     for (let i = 0; i < 64; ++i) F.k[i >> 3] += F.m[i & 7] > F.m[i >> 3]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
   if (s === 'photo') { drop(['band']); want(['photo']); }

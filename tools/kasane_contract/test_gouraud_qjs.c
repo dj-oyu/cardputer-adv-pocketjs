@@ -228,7 +228,9 @@ int main(void){
  eval_ok(ctx,"xy.fill(NaN);ca.fill(0);mask.fill(NaN)");REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(expected,actual,sizeof expected));pocket_proc_present_result(KSN_OK);
  /* All data fields participate in the band signature and IO repair. */
  eval_ok(ctx,"init();ca.fill(65535);P.beginFrame(2016);draw();P.commit()");uint32_t damage;int16_t x0[17],x1[17];REQUIRE(pocket_proc_band_damage(0,&damage,x0,x1)&&damage);REQUIRE(pocket_proc_backdrop(NULL,0,135,previous)==KSN_OK&&memcmp(expected,previous,sizeof expected));pocket_proc_present_result(KSN_IO);
- REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(expected,actual,sizeof expected));eval_error(ctx,"P.beginFrame(2016)");pocket_proc_present_result(KSN_OK);
+ /* One buffer a surface (docs/vm/qjs-observe.md sec.25): commit() wrote the new
+  * frame over the committed one, so the backdrop repair repaints the new one. */
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(previous,actual,sizeof previous));eval_error(ctx,"P.beginFrame(2016)");pocket_proc_present_result(KSN_OK);
  /* Validation and budget reject without changing the existing candidate. */
  eval_ok(ctx,"init();P.beginFrame(2016);draw()");pocket_proc_mark mark;JSValue value=pocket_proc_native_begin(ctx,"gouraud-test",&mark);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
  const char *bad[]={"xy[7]=NaN;draw()","xy[7]=5000;draw()","mask[3]=Infinity;draw()","ix[5]=4;draw()","ix.set([0,3,1,1,2,3]);draw()","ix.set([0,0,3,1,2,3]);draw()","H.gouraudPatch(xy,ix,ca,cb,new Float32Array(3),hxy,hc)","hxy=new Float32Array([12,12,20,12,16,14,20,20]);hc=new Uint8Array([4]);draw()","hc=new Uint8Array([2]);draw()","H.gouraudPatch(xy,ix,ca,cb,mask,hxy,new Uint16Array(0))","H.gouraudPatch(xy,ix,ca,cb,mask,new Float32Array(0),new Uint8Array([3]))"};
@@ -256,8 +258,9 @@ int main(void){
  band_equal();memcpy(previous,expected,sizeof previous);pocket_proc_present_result(KSN_OK);
  eval_ok(ctx,"ix[5]=3;P.beginFrame(2016);H.gouraudPatch(xy,ix,ca,cb,mask,hxy,hc,2);P.commit()");
  REQUIRE(pocket_proc_band_damage(0,&damage,x0,x1)&&damage);
- REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&memcmp(previous,actual,sizeof actual));pocket_proc_present_result(KSN_IO);
- REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(previous,actual,sizeof actual));pocket_proc_present_result(KSN_OK);
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,expected)==KSN_OK&&memcmp(previous,expected,sizeof expected));pocket_proc_present_result(KSN_IO);
+ /* One buffer a surface: the backdrop repair repaints the new frame. */
+ REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(expected,actual,sizeof actual));pocket_proc_present_result(KSN_OK);
  eval_ok(ctx,"P.beginFrame(2016);H.gouraudPatch(xy,ix,ca,cb,mask,hxy,hc,1)");
  value=pocket_proc_native_begin(ctx,"gouraud-test",&mark);REQUIRE(!JS_IsException(value));JS_FreeValue(ctx,value);
  const char *bad_count[]={"0","-1","3","1.5","NaN","Infinity","'1'","true","undefined"};

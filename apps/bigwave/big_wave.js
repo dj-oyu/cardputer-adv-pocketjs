@@ -394,7 +394,7 @@
 
   globalThis.bigWave = {S: S, PL: PL, queue: queue, curlAt: curlAt};
   if (!P) return;
-  res = P.resource();
+  res = P.resource({spare: 0});
   loadSet(0); load('ln');
   while (queue.length) pump();
   for (let i = 0; i < 14; ++i) load('sp' + i);

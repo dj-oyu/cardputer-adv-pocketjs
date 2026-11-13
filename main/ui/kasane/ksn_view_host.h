@@ -49,6 +49,22 @@ void ksn_view_host_end_turn(ksn_view_host *);
 ksn_result ksn_view_host_present_complete(ksn_view_host *,const ksn_display_port *,
                                           ksn_backdrop_loader,bool,
                                           const ksn_display_completion *,ksn_render_stats *);
+#ifdef KASANE_DMA_OVERLAP
+/* ksn_view_host_present_complete in three parts (ksn_render_job): begin and
+ * end on the core's owner, ksn_present_job_run on any task in between. The
+ * caller fills render's inputs (display, load, occlusion_safe, completion,
+ * stats). begin's result is final unless it set running; end returns it then. */
+typedef struct {
+    ksn_render_job render;
+    bool running,submitted;
+    ksn_result result;
+} ksn_present_job;
+ksn_result ksn_view_host_present_begin(ksn_view_host *,ksn_present_job *);
+ksn_result ksn_view_host_present_end(ksn_view_host *,ksn_present_job *);
+static inline void ksn_present_job_run(ksn_present_job *job){
+    if(job->running)ksn_render_run(&job->render);
+}
+#endif
 ksn_result ksn_view_host_present(ksn_view_host *,const ksn_display_port *,ksn_render_stats *);
 ksn_result ksn_view_host_present_backdrop(ksn_view_host *,const ksn_display_port *,
                                           ksn_backdrop_loader,bool occlusion_safe,ksn_render_stats *);

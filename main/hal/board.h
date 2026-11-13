@@ -10,6 +10,11 @@ typedef enum { KEY_NONE, KEY_ENTER, KEY_BACK, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_D
 // (see board_key_event). The event itself is still valid.
 typedef struct { uint8_t row, col; bool pressed, overflow; } board_keyevent_t;
 esp_err_t board_init(void);
+// The pet and microphone overlays board_present draws on every strip. A
+// present on the display task turns them off: their state is the UI task's,
+// and the frames it defers are the ones where neither shows
+// (docs/perf/two-core-pipeline.md 1.3).
+extern bool board_host_overlays;
 // Brings up the SPI3 bus the microSD slot and the EXT connector share, once.
 // Idempotent, lazy, and never released: callers add a device, they do not own
 // the bus. See the comment at the definition for why it lives here.
@@ -83,11 +88,19 @@ extern int g_board_depth;
 #if BOARD_ENDIAN_AB
 int board_endian_ab_flip(void);
 #endif
-// Measurement build: pixel strips go straight to GP-SPI2 + GDMA (lcd_spi.c)
-// instead of through spi_master's queue. board_lcd_direct_set flips it at a
-// frame boundary for a same-binary A/B; returns the new state.
+// Pixel strips go straight to GP-SPI2 + GDMA (lcd_spi.c) instead of through
+// spi_master's queue: no per-strip ISR, queue or task wake (~29 a frame), the
+// strip reaped by polling the done bit. On by default: STRESS render+send
+// 9.62 -> 9.21 ms inline, and 9.94 -> 9.13 ms on the display task, whose
+// extra cost had been that ISR on its core (docs/perf/frame-breakdown.md
+// sec.11). Uses ESP-IDF private headers: re-check on an IDF upgrade.
+// board_lcd_direct_set flips it at a frame boundary; returns the new state.
 #ifndef BOARD_LCD_DIRECT
-#define BOARD_LCD_DIRECT 0
+#define BOARD_LCD_DIRECT 1
+#endif
+// Measurement: app_session.c flips the send path every 30-frame paint window.
+#ifndef BOARD_LCD_DIRECT_AB
+#define BOARD_LCD_DIRECT_AB 0
 #endif
 #ifndef BOARD_BUF_AB
 #define BOARD_BUF_AB 0
@@ -117,6 +130,10 @@ bool board_capture_active(void);
 // One app display turn per BEGIN/END scope, including press/release wrappers.
 // UI-owner only, like board_capture(); the next scope resets the allowance.
 bool board_capture_take_turn(void);
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+// Strips queued to the SPI driver since the last call (FRAME_BD).
+uint32_t board_lcd_tx_take(void);
+#endif
 #ifdef KASANE_P0_BUS_PROBE
 // Observed by the SPI2 post-completion callback, not inferred from config.
 int board_lcd_isr_core(void);

@@ -7,6 +7,13 @@ cmake_minimum_required(VERSION 3.22)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 project(cardputer_pocketjs)
+# lwIP's DNS and ARP tables (docs/platform/lwip-resource-review.md K3). No
+# Kconfig for either and lwipopts.h leaves both to opt.h's #ifndef defaults
+# (4 and 10), which only dns.c and etharp.c read. A station that asks for one
+# NTP host and one HTTP host at a time, behind one gateway, needs 2 and 4:
+# -552 B and -144 B of .bss.
+idf_component_get_property(_lwip_lib lwip COMPONENT_LIB)
+target_compile_definitions(${_lwip_lib} PRIVATE DNS_TABLE_SIZE=2 ARP_TABLE_SIZE=4)
 # Profile-guided QuickJS (docs/vm/qjs-pgo.md), off by default.
 include("${CMAKE_SOURCE_DIR}/tools/pgo/qjs_pgo.cmake")
 if(CONFIG_POCKET_VM_QJS_PGO)

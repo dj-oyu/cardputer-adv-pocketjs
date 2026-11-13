@@ -12,7 +12,7 @@
 typedef struct {
     int64_t time_us;      // esp_timer_get_time() when the sample was read
     uint32_t sequence;    // 1 for the first sample, then one per sample taken
-    uint32_t dropped;     // estimated samples missed since motion_init
+    uint32_t dropped;     // estimated samples missed while someone was reading
     float accel_x, accel_y, accel_z;
     float gyro_x, gyro_y, gyro_z;
     float roll, pitch;
@@ -39,3 +39,9 @@ bool motion_latest(motion_sample_t *out);
 // gyroscope is off after motion_init because it draws several times the
 // accelerometer's current (datasheet figure, not measured here).
 void motion_request_gyro(bool on);
+// Whether a running program reads the IMU. pocket_imu.c sets it when the
+// program first reads pocket.sensors and clears it when the run ends. The
+// home wallpaper needs no call: motion_get() itself keeps the sensor read for
+// a short while. With neither, motion_poll() reads nothing, and
+// motion_latest() reports no sample until a fresh one has been read.
+void motion_want_app(bool on);

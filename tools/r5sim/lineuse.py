@@ -63,6 +63,11 @@ def main():
     ap.add_argument('--tsv', help='per-function rows: bucket, function, lines/turn, used B/turn, use')
     ap.add_argument('--packed-model', action='store_true',
                     help='also replay the turns with every byte no turn runs removed (see below)')
+    ap.add_argument('--squeeze', action='append', default=[],
+                    help='remove the never-run bytes inside this function only (repeatable), '
+                         'everything after it closing up; see squeeze_model')
+    ap.add_argument('--squeeze-top', type=int, default=0,
+                    help='as --squeeze, for the N functions with the most touched lines')
     a = ap.parse_args()
 
     d = pickle.load(gzip.open(a.turns, 'rb'))
@@ -197,6 +202,9 @@ def main():
         print(f'    {kib(l/n):6.2f} {u/n/1024:6.2f} {u/(32*l):6.1%}  {fn}  {b}')
     if a.packed_model:
         packed_model(d, blk, any_mask)
+    if a.squeeze or a.squeeze_top:
+        names = list(a.squeeze) + [fn for (fn, b), _ in rows[:a.squeeze_top]]
+        squeeze_model(d, blk, any_mask, syms, names)
     if a.tsv:
         with open(a.tsv, 'w') as f:
             f.write('bucket\tfunction\tlines_per_turn\tused_B_per_turn\tuse\n')
@@ -270,6 +278,62 @@ def packed_model(d, blk, any_mask):
             t, w, c = res[(packed, geo)]
             print(f'    {"packed" if packed else "as built":10s} {geo:8s} {t:10.0f} {w:7.0f} {c:7.0f}')
     print(f'    packed image of the window: {at} B ({at / 1024:.1f} KiB) of code run in some turn')
+
+def squeeze_model(d, blk, any_mask, syms, names):
+    """Misses when only the named functions lose their never-run bytes.
+
+    What splitting those functions by hand (cold paths out to the end of the
+    image) would give at best: the window's never-run bytes inside them go,
+    and every byte after them moves down by what was removed before it. The
+    rest of the image keeps its layout. An upper bound like packed_model's
+    (trained on the window it measures, no branch over the removed code)."""
+    want = set(names)
+    removed = {}                                    # line -> mask of removed bytes
+    total = 0
+    for s, z, n in syms:
+        if n not in want:
+            continue
+        for b in range(s, s + z):
+            l = b >> 5
+            if not (any_mask.get(l, 0) >> (b & 31) & 1):
+                removed[l] = removed.get(l, 0) | (1 << (b & 31)); total += 1
+    rl = sorted(removed)
+    pref = [0]
+    for l in rl:
+        pref.append(pref[-1] + bin(removed[l]).count('1'))
+    def newline(l, m):
+        i = bisect.bisect_left(rl, l)
+        before = pref[i]
+        out = set()
+        rm = removed.get(l, 0)
+        for b in range(32):
+            if m >> b & 1:
+                below = bin(rm & ((1 << b) - 1)).count('1')
+                out.add(((l << 5) + b - before - below) >> 5)
+        return out
+    bl = []
+    for i in range(len(blk)):
+        ls = []
+        for l, m, _ in blk[i]:
+            for nl in newline(l, m):
+                if nl not in ls:
+                    ls.append(nl)
+        bl.append(ls)
+    res = []
+    for lines_of in ([[l for l, m, _ in blk[i]] for i in range(len(blk))], bl):
+        warm, cold = Cache(128, 8), Cache(128, 8)
+        wm = cm = touched = 0
+        for t in d['turns']:
+            cold.flush(); u = set()
+            for bi in t:
+                for l in lines_of[bi]:
+                    u.add(l); wm += warm.access(l); cm += cold.access(l)
+            touched += len(u)
+        n = len(d['turns'])
+        res.append((touched / n, wm / n, cm / n))
+    print(f'\n  squeeze model: {len(want)} functions, {total} never-run bytes removed (upper bound, see squeeze_model)')
+    for label, (t, w, c) in zip(('as built', 'squeezed'), res):
+        print(f'    {label:10s} lines/turn {t:6.0f}  warm {w:6.0f}  cold {c:6.0f}')
 
 if __name__ == '__main__':
     main()

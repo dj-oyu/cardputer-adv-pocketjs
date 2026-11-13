@@ -85,7 +85,7 @@ python tools/kasane_contract/run_mesh_memory.py
 ```
 
 実際のC/QuickJS frame APIで、imageのrow/span/backdrop全画面一致、4/8行と最終3/7行、
-色・背景を変えた3cycleのimage IO retry/ACK、別modeのbackdrop IO後の旧committed修復を
+色・背景を変えた3cycleのimage IO retry/ACK、別modeのbackdrop IO後の修復（面のバッファが1本になった後は新しいフレームを描き直す。[qjs-observe.md](../vm/qjs-observe.md) §25.7）を
 検査する。各workspaceでASan/UBSan/LSan成功、reset/runtime破棄後のtracked liveは0。
 計測はリンクしたobjectのmalloc/calloc/realloc/free要求を追跡する。
 
@@ -131,7 +131,9 @@ plan-dispose on detach/reset, and JIT behavior remain on the PR117 path.
 Depth candidate/committed payloads use separately bounded native ownership;
 mark/rollback includes their bytes, records and work. Commit keeps both copies;
 ACK swaps them. Image IO failure retains the candidate for retry; backdrop IO
-failure repairs from old committed state. Mesh/depth changes invalidate damage
+failure repairs from old committed state. (Superseded by the one frame buffer a
+surface, docs/vm/qjs-observe.md sec.25.7: commit's merge() swaps the depth
+snapshots, and a backdrop IO repaints the new frame, which overwrote the old.) Mesh/depth changes invalidate damage
 conservatively, including depth-only edits and transitions back to painter.
 Reset releases owned storage. The existing class registry is extended with the
 validated owner-list implementation to support Model/Instance without a fixed

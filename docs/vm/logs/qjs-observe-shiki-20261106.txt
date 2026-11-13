@@ -1,0 +1,181 @@
+# -DR5SIM_DEVICE=1 -DR5SIM_APP=shiki at aa4a793, turns 61..120
+turns 60 (61..120); per turn below
+insns 1,105,135  by region flash 856,359, iram 189,034, rom 59,742
+transfers: branch_taken 116,464, fall_branch 78,412, jump 44,345, fall_split 20,574, ret 18,019, call 15,391, zloop 4,971, jx 4,561, other 1,018
+model cycles (no cache): insns 1,105,135 + 2x taken 198,780 + load-use 56,705 + div~16 x 967 = 1,574,874 (IPC 0.702)
+l32r 43,348  window/exception vector entries _WindowOverflow8 827.4, _UserExceptionVector 6.7, tlsf_malloc 0.1, JS_FreeValueRT 0.1, multi_heap_aligned_free 0.0, multi_heap_internal_unlock 0.0, js_malloc_rt 0.0, vPortExitCritical 0.0
+
+== mul/div/fpu mnemonics per turn
+  mull         14,790.4
+  mulsh         5,071.1
+  muluh         1,335.4
+  loop            888.0
+  quos            845.3
+  loopnez         327.3
+  rems             74.8
+  mul16u           31.7
+  quou             29.3
+  remu             17.6
+
+== libgcc helpers (entries per turn, insns per turn inside)
+  __muldf3         calls     203.1  insns     12,525  (62/call)
+      from __kernel_sin                                  73.3
+      from __kernel_cos                                  65.7
+      from __rem_pio2                                    40.1
+      from JS_CallInternal                               24.0
+  __floatsidf      calls     159.2  insns      2,795  (18/call)
+      from JS_CallInternal                              137.6
+      from __rem_pio2                                    13.3
+      from JS_ToFloat64Free                               7.0
+  __subdf3         calls     149.1  insns      6,927  (46/call)
+      from __rem_pio2                                    54.7
+      from __kernel_sin                                  43.4
+      from __kernel_cos                                  41.1
+      from JS_CallInternal                               10.0
+  __adddf3         calls      62.1  insns      1,516  (24/call)
+      from __kernel_cos                                  19.7
+      from __kernel_sin                                  15.2
+      from JS_CallInternal                               13.9
+      from __rem_pio2                                    13.3
+  __divdf3         calls      35.8  insns     12,662  (354/call)
+      from JS_CallInternal                               35.8
+  __ashldi3        calls      34.3  insns        275  (8/call)
+      from js_number                                     30.8
+      from js_typed_array_constructor                     2.3
+      from typed_array_init                               1.2
+  __ltdf2          calls      33.3  insns        425  (13/call)
+      from JS_CallInternal                               30.0
+      from integer                                        2.0
+      from whole                                          1.0
+  __fixdfsi        calls      30.1  insns        542  (18/call)
+      from JS_ToInt32Free                                16.8
+      from __rem_pio2                                    13.3
+  __udivdi3        calls       8.8  insns        388  (44/call)
+      from SysTickIsrHandler                              8.8
+  __gtdf2          calls       5.4  insns         32  (6/call)
+      from whole                                          2.0
+      from JS_CallInternal                                2.0
+      from integer                                        1.0
+      from number_in                                      0.4
+  __fixunsdfsi     calls       2.3  insns         46  (20/call)
+      from integer                                        1.0
+      from whole                                          1.0
+      from property_color                                 0.1
+      from property_u8                                    0.1
+  __nedf2          calls       2.1  insns          4  (2/call)
+      from integer                                        1.0
+      from whole                                          1.0
+      from number_in                                      0.1
+  __eqdf2          calls       2.1  insns         15  (7/call)
+      from __nedf2                                        2.1
+  __floatunsidf    calls       1.1  insns          6  (6/call)
+      from integer                                        1.0
+      from property_u16$constprop$0                       0.1
+  helpers total insns/turn 38,159 (3.5% of insns)
+
+== top functions (insns/turn, taken/turn, load-use/turn, l32r/turn, model cyc share)
+  ksn_shiki_resume                               382,795   89,674  21,793  10,274  37.08%
+  js_commit                                      154,646   11,554   2,737  14,025  11.46%
+  cubic                                           80,505   15,321   1,275     987   7.14%
+  JS_CallInternal                                 72,347   12,590   4,734   5,466   6.49%
+  data_op                                         51,742    6,226   1,226     867   4.15%
+  cubic_weights                                   16,518    3,871       0     258   1.54%
+  tlsf_malloc                                     14,744    1,899     985       0   1.24%
+  ksn_shiki_sin                                   14,027    1,586       0     661   1.09%
+  xPortEnterCriticalTimeout                       11,705    2,223     837     834   1.08%
+  __divdf3                                        12,662    2,074      36     107   1.07%
+  __muldf3                                        12,525    1,587     203     608   1.01%
+  JS_FreeValueRT                                   8,762    2,543     715       0   0.92%
+  vPortExitCritical                                8,639    1,388   1,668   1,110   0.83%
+  _WindowOverflow8                                 9,082      908       0       0   0.69%
+  _WindowUnderflow8                                9,081      908       0       0   0.69%
+  tlsf_free                                        8,190      997     607      25   0.69%
+  guest_malloc                                     6,700    1,255   1,354     161   0.67%
+  heap_caps_aligned_alloc_base                     6,407    1,533   1,050      85   0.67%
+  js_dup                                           6,132    1,786     472       0   0.65%
+  xPortInIsrContext                                6,627    1,090   1,091   1,091   0.63%
+  guest_free                                       7,091      607   1,416     253   0.62%
+  _xtos_set_intlevel                               7,394      822       0       0   0.57%
+  __subdf3                                         6,927      941     149     298   0.57%
+  js_malloc_rt                                     4,798    1,116     865       0   0.50%
+  find_own_property                                5,894      650     370       0   0.48%
+  memcpy                                           6,188      626      58       0   0.48%
+  JS_FreeValue                                     4,224    1,413       0       0   0.45%
+  guest_usable_size                                5,191      431     861     431   0.44%
+  heap_caps_free                                   3,034    1,078     853     242   0.38%
+  multi_heap_malloc                                3,743      973     169       0   0.37%
+  JS_SetPropertyValue                              3,600      857     192      99   0.35%
+  pocket_proc_shiki_draw_inputs                    3,994      289     485     234   0.32%
+  strv                                             3,047      762     381       0   0.31%
+  js_free_rt                                       3,183      707       0       0   0.29%
+  js_poll_safepoint                                3,351      479     239       0   0.29%
+  render_rects                                     3,659      270     164      45   0.28%
+  string_buffer_putc16                             2,761      614     307       0   0.27%
+  add_property                                     2,988      445     333      55   0.27%
+  memset                                           3,738      223       0       0   0.27%
+  multi_heap_internal_lock                         2,150      856     259       0   0.26%
+  __call__xtos_set_intlevel                        1,643      821     821     821   0.26%
+  JS_ConcatString2                                 2,853      544     149      64   0.26%
+  ksn_shiki_from_double                            3,166      374      85      85   0.25%
+  free_gc_object                                   2,388      539     177       0   0.23%
+  multi_heap_internal_unlock                       1,811      776     259       0   0.23%
+
+== hottest loops (backward taken branches): func, branch pc, iterations/turn, body bytes
+  js_commit                                0x42012ccf     1,705  body 49 B @ 0x42012ca1
+  js_commit                                0x42012e5b     1,557  body 44 B @ 0x42012e32
+  cubic                                    0x42013e4e     1,479  body 31 B @ 0x42013e32
+  cubic                                    0x42013e41     1,479  body 276 B @ 0x42013d30
+  cubic                                    0x42013d36     1,032  body 79 B @ 0x42013cea
+  cubic                                    0x42013e83       516  body 418 B @ 0x42013ce4
+  data_op                                  0x42014e01       360  body 409 B @ 0x42014c6b
+  data_op                                  0x42014ec3       360  body 538 B @ 0x42014cac
+  data_op                                  0x42014d41       326  body 112 B @ 0x42014cd4
+  data_op                                  0x42014d7e       288  body 144 B @ 0x42014cf1
+  cubic_weights                            0x42013b23       258  body 208 B @ 0x42013a56
+  cubic_weights                            0x42013bb4       258  body 344 B @ 0x42013a5f
+  cubic_weights                            0x42013b6a       258  body 178 B @ 0x42013abb
+  cubic_weights                            0x42013b8a       258  body 160 B @ 0x42013aed
+  cubic_weights                            0x42013baa       258  body 142 B @ 0x42013b1f
+  cubic_weights                            0x42013b4a       258  body 193 B @ 0x42013a8c
+  data_op                                  0x42014d49       186  body 91 B @ 0x42014cf1
+  heap_caps_aligned_alloc_base             0x40379d3b       161  body 17 B @ 0x40379d2d
+  data_op                                  0x42014edd        82  body 429 B @ 0x42014d33
+  JS_CallInternal                          0x42045970        81  body 33 B @ 0x42045952
+  guest_malloc                             0x4201b7fc        80  body 56 B @ 0x4201b7c7
+  heap_caps_aligned_alloc_base             0x40379d59        76  body 47 B @ 0x40379d2d
+  apply_outcome                            0x42035ea7        62  body 13 B @ 0x42035e9d
+  esp_vApplicationTickHook                 0x4037dfd6        62  body 14 B @ 0x4037dfcb
+  heap_caps_realloc_base                   0x40379e08        60  body 19 B @ 0x40379df8
+  memcmp                                   0x40056ede        59  body 19 B @ 0x40056ece
+  guest_free                               0x4201bab3        57  body 93 B @ 0x4201ba59
+  ksn_shiki_resume                         0x42016779        55  body 1951 B @ 0x42015fdd
+  systimer_hal_get_counter_value           0x4037fb5f        53  body 21 B @ 0x4037fb4d
+  systimer_hal_get_counter_value           0x4037fb7d        53  body 24 B @ 0x4037fb68
+  utf8_count                               0x40381079        50  body 49 B @ 0x4038104b
+  memcmp                                   0x40056efb        49  body 26 B @ 0x40056ee4
+  js_call_math_fast                        0x42058463        38  body 27 B @ 0x4205844b
+  tlsf_malloc                              0x40380340        34  body 38 B @ 0x4038031d
+  ksn_shiki_from_double                    0x42015397        32  body 337 B @ 0x42015249
+  u32toa                                   0x403814e0        31  body 29 B @ 0x403814c6
+  esp_vApplicationIdleHook                 0x4037dfae        31  body 20 B @ 0x4037df9d
+  render_rects                             0x42010ed3        31  body 93 B @ 0x42010e79
+  pocket_proc_shiki_draw_inputs            0x420132c5        27  body 39 B @ 0x420132a1
+  run_width                                0x42033b54        26  body 74 B @ 0x42033b0d
+  __subdf3                                 0x40054a85        26  body 52 B @ 0x40054a54
+  __JS_AtomToValue                         0x420517a0        25  body 84 B @ 0x4205174f
+  __memcpy_aux                             0x40056f14        25  body 18 B @ 0x40056f05
+  JS_FreeValueRT                           0x4038180e        24  body 64 B @ 0x403817d1
+  __divdf3                                 0x40054c38        23  body 63 B @ 0x40054bfc
+
+## parts
+part                        insn/turn  %insn    taken  loaduse    l32r  model cyc      %
+kasane/pocket/other           734,372  66.5%  132,130   28,959  28,061  1,027,591  65.9%
+quickjs.c                     172,958  15.7%   33,784   11,412   6,965    251,938  16.2%
+allocator                     118,710  10.7%   22,336   13,864   5,370    177,246  11.4%
+libgcc soft-double/64bit       38,400   3.5%    5,631      804   1,492     50,465   3.2%
+window exceptions              18,163   1.6%    1,816        0       0     21,795   1.4%
+mem*/str*                      12,268   1.1%    1,486      522     351     15,761   1.0%
+rtos/isr                        6,959   0.6%      976      716     361      9,628   0.6%
+libm (double)                   3,305   0.3%      621      428     747      4,976   0.3%
+total                       1,105,135         198,780   56,705  43,348  1,559,400
+calls/turn 15390.8 rets 18019.333333333332
