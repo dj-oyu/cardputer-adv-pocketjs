@@ -427,6 +427,14 @@ P0 → P1 → P2 → P3 → P4 →（P4b）→ P5 →（P6）。P1 と P2 は順
 | 10 | DERBY の走者を状態の領域と `drawList` へ移す（P4b）を、この作業に含めるか | P0 の DERBY のトレースの結果を見てから決める。含めない場合も、P4 までで API の整理は完結する |
 | 11 | `pocket.overlay.begin/rect/text` を消すか | 消す（呼ぶアプリが無く、`.bss` 1,440 B が全セッションで常駐）。overlay のアプリを Kasane で描く方針（player の先頭のコメント）と合う |
 
+### 7.3 利用者の決定（2026-11-13）
+
+- **未使用の入口（§7.2 の 2・3・11）:** `modal` 以外は P5 で消す。`poll`・`cancel`・ticket の戻り値、`createScene`、`inputScope`、`overlay.begin/rect/text`、`gridFold` のグローバル、`shiki.grid` の写しが対象。`modal` は残す。
+- **診断（§7.2 の 1）:** 製品 image から**既定で外す**（`CONFIG_POCKET_SHIKI_DEBUG` の既定は `n`）。メニューの行が変わるので、`tools/test_settings.py` と `tools/capture_home.py` を同じ変更で直す。
+- **DERBY の P4b（§7.2 の 10）:** この作業に**含める**。P0 のトレースは見込みの記録として残すが、実施の可否の門にはしない。
+- **保持型の一本化（§7.2 の 6）:** **調査だけ**行う（別の文書。実装はしない）。
+- 9（実機の経路）は broker の `derby`・`app_session` で取れる範囲を使い、取れない指標は段の区切りで別に相談する。
+
 ## 8. 読んだもの
 
 - Kasane: [README.md](README.md)、[architecture.md](architecture.md)、[decisions.md](decisions.md)、[shiki.md](shiki.md) §2・§3、[shiki-spec.md](shiki-spec.md) §9、[shiki-v2.md](shiki-v2.md)、[shiki-bundle.md](shiki-bundle.md)、[flash-plan.md](flash-plan.md)・[plan-sized-alloc.md](plan-sized-alloc.md)・[surface-segment-cap.md](surface-segment-cap.md)・[image-rows.md](image-rows.md)（索引の要約と該当の節）。
