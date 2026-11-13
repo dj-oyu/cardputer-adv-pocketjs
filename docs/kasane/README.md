@@ -30,6 +30,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [Shiki JIT とメモリ配置（図解、HTML）](shiki-jit-overview.html) | Shiki の JIT とその機械語の置き場所を、一続きの問いとして読む図解（各章の冒頭に既知の事柄との対応）。インタプリタと JIT、実行できる RAM、Shiki の区画への相乗り、飽和チェックの除去、レジスタキャッシュ、RTC fast memory の拒否、56 KiB の実験、区画の固定長の表、作業領域の廃止、DERBY の engine_ms の推移と今の 48 KiB の区画（shiki-jit.md §11〜§23、2026-11-03） |
 | [Kasane の描画パイプライン（図解、HTML）](pipeline-overview.html) | フレームバッファを持たない理由、1 ターンの流れ（`frame()` → Shiki の beginFrame/draw/commit → 17 本の帯の合成 → SPI の DMA）、作業台の帯と転送用バッファ 1 本の重ね、`KASANE_PAINT` の各欄、帯の重ね合わせの順、Shiki の線分の並び（candidate・committed、帯の hash、作業領域の廃止）、DERBY の区画の内訳と、並びを 1 本にする予定（c4d7a6c 時点、2026-11-03） |
 | [Shiki の draw の束ね（作業中）](shiki-bundle.md) | draw 1 回の固定費の段ごとの実測と、複数の handle を 1 回で描く API |
+| [Shiki の native の draw の入口](shiki-draw-entry.md) | DERBY の `ser()` の draw の内訳（plan ごとの本数・ステップ・模様線、エンジンの外の命令）と、入口を軽くした変更（slot の当て推量、`pocket_proc_draw_fixed` 専用の入口と入力のその場読み、vm の初期化 372 → 162 B）、r5sim で重い WIDE 2 の draw −4.7%、実機の `DERBY_SERDRAW` の手順と見込み、束ねを入れなかった理由（2026-11-13）|
 | [native mesh のShiki統合](../ayatsuri/pr117-native-mesh.md) | 公開mesh経路と#122のrange/carry・read_rowsの接続、回帰試験と正式buildの範囲 |
 | [opaque mesh depth](../ayatsuri/opaque-mesh-depth.md) | 明示的depth scope、所有権、予算、rollbackとretryの契約 |
 | [材質sidedness](../ayatsuri/material-sidedness-local.md) | 両面材質、面順とtie、旧asset互換とsnapshotの会計 |
