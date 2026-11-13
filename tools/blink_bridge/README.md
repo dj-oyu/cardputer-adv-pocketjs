@@ -14,3 +14,5 @@ The prior Node adapter validated three own indexed controls before constructing 
 Run `python tools/blink_bridge/run.py`. The runner records sources, compiler commands and four arms (4/8 strip rows × direct 0/1). ASan/UBSan are enabled; LSan is disabled and the explicit allocation ledger must be zero.
 
 This only connects a test adapter to existing host Scene behavior. It does not create a production blink API or prove native OOM transactionality, atomic reads of hostile/mutating objects, arbitrary alpha/private-shader equivalence, target admission or physical 20 FPS. Native evaluation/submission failures are not claimed to restore Scene state. Getter rejection checks do not undo arbitrary side effects performed by user-supplied getters themselves.
+
+See [PRECISION.md](PRECISION.md) for why this synthetic binary64 visibility rule must not be generalized to authored models.
