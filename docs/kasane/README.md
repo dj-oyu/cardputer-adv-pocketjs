@@ -42,6 +42,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [native mesh foundation の採用](../ayatsuri/native-mesh-adoption.md) | main へ入れた native mesh の土台の範囲、CI と文書の追加、レビューの層 |
 | [実験用 native provider](../ayatsuri/provider-candidate.md) | 既定で無効の `AYATSURI_MODEL_EXPERIMENTAL_PROVIDER` による一回評価と、その host 検査 |
 | [Kasane ファームの整理と JS API の再設計](api-reorg.md) | 設計書（2026-11-13、未実装）: JS API の面の棚卸し（利用アプリ・実装・使われない入口・ビルドに入らないファイル、map の大きさ）、QuickJS-ng と Shiki の最適化から導く API の原則、新しい名前空間と capability、`pocket_kasane.c` の `.inc` 分割と診断の門、アプリの移行の順、P0（r5sim に DERBY と保持型の負荷を足しベースラインを取る）〜P6 の段と受け入れ基準・難易度のラベル、利用者が決めること |
+| [保持型の 2 系統を一本化するかの調査](retained-unify-study.md) | 調査（2026-11-13、実装なし）: `mount`＋`set` と `replace`/`patch`＋ref の実装と利用アプリ（file:line）、ゲームの HUD のコマンド・ref の数（LCD CATCH 78/80・31/32、DERBY のパドック 32・19）、一本化の 3 案の DRAM・ゲストヒープ・flash・ターン時間（推定）、一本化しない推奨と、api-reorg の P3 で足りる理由 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |
