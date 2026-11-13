@@ -379,8 +379,21 @@ static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 #endif
 /* ser(h, w, s, g0, L, a, b): ser(n, w, s, g0, L, zf, a, b) of derby_pan.js,
  * zf from view(). b omitted: the turf (t0, t1). */
+/* SP(k): r5sim only (-DR5SIM_DERBY_PROF=1), cycles since the last mark into
+ * part k of a call (docs/apps/derby-ser-cost.md sec.2); SC(k) counts. */
+#ifdef R5SIM_DERBY_PROF
+uint32_t derby_ser_cy[9];
+#define SP(k) do{const uint32_t _t=pocket_cycles();derby_ser_cy[k]+=_t-sp_t;sp_t=_t;}while(0)
+#define SC(k) (derby_ser_cy[k]++)
+#else
+#define SP(k) do{}while(0)
+#define SC(k) ((void)0)
+#endif
 static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+#ifdef R5SIM_DERBY_PROF
+    uint32_t sp_t=pocket_cycles();
+#endif
     const char *op="derby.ser";
     uint32_t h;
     double w,s,g0,L,a,b=0;
@@ -398,9 +411,11 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     const bool ve=course->sections!=0;
     double P[4]={0},pg=0;
     bool have_pg=false;
+    SP(0);
     for(unsigned i=0;i<course->in_view;i++){
         const unsigned j=course->vc[i];
-        if(ve&&ou(j,w,s,zf))continue;
+        if(ve&&ou(j,w,s,zf)){SP(1);continue;}
+        SP(1);SC(7);
         const double ga=g0+js_round((course->ch[j]-g0)/s)*s,gb=g0+js_round((course->ch[j+1]-g0)/s)*s;
         double A[4],B[4];
         if(have_pg&&ga==pg)memcpy(A,P,sizeof A);
@@ -408,13 +423,15 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         pg=gb;have_pg=true;
         pose(pg,w,B);
         memcpy(P,B,sizeof P);
+        SP(2);
         const double dx=(B[0]-A[0])/(gb-ga),dz=(B[1]-A[1])/(gb-ga),X=A[0]+(g0-ga)*dx-pc[0],Y=A[1]+(g0-ga)*dz-pc[1],
             Q=(X*pc[2]+Y*pc[3])/pc[4],q[2]={X*pc[3]-Y*pc[2]+120*Q,Q},u=(dx*pc[2]+dz*pc[3])/pc[4],
             v=dx*pc[3]-dz*pc[2]+120*u;
         double Lo=ga-g0,Hi=gb-g0;
         lim(&Lo,&Hi,q[1]-.02,u);lim(&Lo,&Hi,zf/pc[4]-q[1],-u);lim(&Lo,&Hi,q[0]+40*q[1],v+40*u);
         lim(&Lo,&Hi,280*q[1]-q[0],280*u-v);
-        if(!(Lo<Hi))continue;
+        if(!(Lo<Hi)){SP(3);continue;}
+        SP(3);SC(8);
         double c0=a,c1=b;
         if(turf){
             const double l=a/sqrt(dx*dx+dz*dz),x=-dz*l,z=dx*l;
@@ -427,6 +444,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         if(!inr(q,U,V,e))e-=k;
         if(!inr(q,U,V,n0))n0+=s;
         if(!(L!=0&&!isnan(L))&&(js_int32(js_round(o*e/s)+view.t)&1))e-=s;
+        SP(4);
         for(;;){
             Z/=M_SQRT2;
             const double hh=k>s?ceil(js_max(U>1e-7?(js_max(Z,k*U/.3)-q[1])/U:-1e9,n0)/k)*k:n0,
@@ -434,12 +452,15 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
             if(c>0){
                 const double in[8]={q[0]+e*V,-V*k,-z,U*k,js_min(255,c),1/z,
                     (L!=0&&!isnan(L))?c0:fmod(-e/s*2.39996,2*M_PI)-2*M_PI*js_round(c*.191)+1.8,c1};
+                SP(5);
                 JSValue r=draw(ctx,h,in);
+                SP(6);
                 if(JS_IsException(r))return r;
             }
             if(k==s)break;
             e=js_min(e,hh);k/=2;
         }
+        SP(5);
         if(!turf&&b<0){
             const double y=q[1]+Lo*u,z=q[1]+Hi*u,xa=(q[0]+Lo*v)/y,xb=(q[0]+Hi*v)/z;
             const double in_hl[8]={xa,1/y,xb,1/z,6,-2.4,view.hl_color,21130},
@@ -448,6 +469,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
             if(JS_IsException(r))return r;
             r=draw(ctx,view.crowd,in_crowd);
             if(JS_IsException(r))return r;
+            SP(6);
         }
         /* A draw's host hook (harness only) may call course(). */
         if(!course)break;
@@ -795,6 +817,33 @@ static JSValue js_screen(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return JS_NewInt32(ctx,1);
 }
 
+#ifdef R5SIM_DERBY_PROF
+/* r5sim only (tools/r5sim, -DR5SIM_DERBY_PROF=1): cycles in each native
+ * function and the Shiki draws' cycles inside it; the turn's Shiki carry
+ * (the draws taken out here, for r5sim's per-turn total). */
+uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12];
+pocket_shiki_turn derby_prof_carry;
+#define PROF(i,f) static JSValue f##_p(JSContext *c,JSValueConst s,int a,JSValueConst *v){ \
+    pocket_shiki_turn x,y;pocket_shiki_turn_take(&x); \
+    derby_prof_carry.draws+=x.draws;derby_prof_carry.total_cy+=x.total_cy;derby_prof_carry.engine_cy+=x.engine_cy; \
+    const uint32_t t=pocket_cycles();JSValue r=f(c,s,a,v);derby_prof_cy[i]+=pocket_cycles()-t;derby_prof_n[i]++; \
+    pocket_shiki_turn_take(&y);derby_prof_shk[i]+=y.total_cy;derby_prof_draws[i]+=y.draws; \
+    derby_prof_carry.draws+=y.draws;derby_prof_carry.total_cy+=y.total_cy;derby_prof_carry.engine_cy+=y.engine_cy; \
+    return r;}
+PROF(0,js_view) PROF(1,js_ser) PROF(2,js_side) PROF(3,js_aim) PROF(4,js_wide) PROF(5,js_part)
+PROF(6,js_lanes) PROF(7,js_head) PROF(8,js_runners) PROF(9,js_screen) PROF(10,js_course)
+#define js_view js_view_p
+#define js_ser js_ser_p
+#define js_side js_side_p
+#define js_aim js_aim_p
+#define js_wide js_wide_p
+#define js_part js_part_p
+#define js_lanes js_lanes_p
+#define js_head js_head_p
+#define js_runners js_runners_p
+#define js_screen js_screen_p
+#define js_course js_course_p
+#endif
 esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={

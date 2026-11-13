@@ -119,3 +119,4 @@ B を選んだのは、[derby-ser-native.md](derby-ser-native.md) と同じ理�
 
 - WIDE の 1 ターンの残り（r5sim で約 165k、Shiki を除く）の内訳は分けていない。候補は HUD の文字列（毎ターンの連結と比較）、`at()` の `zo.sort` と `mx.apply`、`attract()` の `K.down().join()` と 9 回の `K.pressed`。パドックでも 45k ある。
 - 実機の `turn_ms`・評価余裕・ゲスト最大・`SHIKI_TURN` の `shk=` は、親が A/B で測る（§7）。
+- 実機の重い CAM WIDE 2（draws 約 50・`pat=` 約 40 で 11.5 ms）の原因は JS ではなく `ser()`（C）の倍精度の計算だった（r5sim の内訳、[derby-ser-cost.md](derby-ser-cost.md)）。
