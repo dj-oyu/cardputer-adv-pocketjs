@@ -12,4 +12,3 @@ scene  derby_scene.js
 pan    derby_pan.js
 play   derby_play.js
 demo   derby_demo.js
-ab     derby_ab.js

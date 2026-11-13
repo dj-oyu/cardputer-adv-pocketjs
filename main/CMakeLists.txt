@@ -36,7 +36,7 @@ set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane
 list(APPEND KASANE_SOURCES
     "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
     "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
-    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_derby.c" "pocket/derby_ser_int.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
@@ -544,6 +544,9 @@ set_source_files_properties(pocket/pocket_shiki_frame.c PROPERTIES COMPILE_OPTIO
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# Its integer path (docs/apps/derby-ser-division.md sec.4): integers only but
+# for the chord tables' doubles, made once a series.
+set_source_files_properties(pocket/derby_ser_int.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # pocket.shapes: the same scan conversion on host and device (no fused madd.s).
 set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # Shiki (docs/kasane/shiki-spec.md): integer engine; the only floating point is

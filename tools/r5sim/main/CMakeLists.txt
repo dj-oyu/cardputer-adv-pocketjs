@@ -50,7 +50,8 @@ elseif(R5SIM_APP STREQUAL "derby")
     set(R5SIM_CHUNK_FILES ${APP_CHUNK_FILES})
     set(R5SIM_APP_JS "${R}/apps/derby/derby_watch.js")
     set(R5SIM_APP_SOURCES "${_g}/app_chunks.c" "${R}/main/pocket/pocket_app_load.c"
-        "${R}/main/pocket/app_registry.c" "${R}/main/pocket/pocket_derby.c" "${R}/main/pocket/shiki_memstat.c")
+        "${R}/main/pocket/app_registry.c" "${R}/main/pocket/pocket_derby.c" "${R}/main/pocket/derby_ser_int.c"
+        "${R}/main/pocket/shiki_memstat.c")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${R}/apps/derby/chunks.txt"
         "${R}/apps/derby/derby_prog.js")
 elseif(R5SIM_APP STREQUAL "hud")
@@ -139,6 +140,12 @@ if(R5SIM_APP STREQUAL "derby")
     if(R5SIM_DERBY_PROF)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_DERBY_PROF)
     endif()
+    # -DR5SIM_DERBY_SER_DOUBLE=1: the series on the doubles of before from the
+    # start (pocket.derby.mode(1), the up key's B side), to measure both paths
+    # of one source (docs/apps/derby-ser-division.md sec.7.3).
+    if(R5SIM_DERBY_SER_DOUBLE)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_DERBY_SER_DOUBLE)
+    endif()
 elseif(R5SIM_APP STREQUAL "hud")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_HUD)
 endif()
@@ -202,6 +209,11 @@ set_source_files_properties("${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kas
 set_property(SOURCE "${R}/main/text/ksn_font.c" "${R}/main/ui/kasane/ksn_render.c"
     "${R}/main/ui/kasane/ksn_core.c" "${R}/main/pocket/pocket_kasane.c"
     APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# DERBY's integer series as the firmware builds it (-O2; pocket_derby.c itself
+# stays at this image's -Os, as the r5sim figures before it were taken).
+if(R5SIM_APP STREQUAL "derby")
+    set_property(SOURCE "${R}/main/pocket/derby_ser_int.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
+endif()
 if(R5SIM_SHIKI_ROM)
     set_property(SOURCE "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/ui/kasane/ksn_shiki.c"
         APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
