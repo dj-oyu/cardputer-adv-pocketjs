@@ -3,7 +3,8 @@ compiler is available (gcc, clang, cc, or `zig cc`).
 
     python tools/pie/run_models.py            every model
     python tools/pie/run_models.py ocean      one of: ocean, wave, garden,
-                                              fir, canopy, disc, blendpack, scale256
+                                              fir, canopy, disc, blendpack, scale256,
+                                              derbycull
 
 Each model prints its own verdict; this script fails if any of them reports a
 mismatch or a non-zero exit. The ocean and blendpack models need a few seconds,
@@ -30,6 +31,7 @@ TARGETS = {
     'disc': (['disc_model.c'], []),
     'blendpack': (['blend_pack_model.c'], []),
     'scale256': (['scale256_model.c'], []),
+    'derbycull': (['derby_cull_model.c'], []),
 }
 
 

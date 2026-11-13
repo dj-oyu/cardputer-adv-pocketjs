@@ -11,6 +11,7 @@
 | `stalls.py` | **静的パイプライン解析。** インラインアセンブリを読み、TRM 表 1.7-2 に基づいて「ロード / `EE.VMUL` / `EE.VRELU` の結果を直後に使っている」ストール箇所を列挙する。メモリ命令の比率、`loopgtz` の 256B 制限に対する本体サイズも出す | 即時 |
 | `test_kernels.py` | **命令レベルの実行検証。** C ソースからアセンブリと定数配列 `k[]` を抜き出し、`piesim.py` で実行してスカラー参照（`ocean_row_scalar` / `wave_row_scalar` / Rust の合成式）と全画素比較する | 約 1 秒 |
 | `piesim.py` | 上記 2 つが使うライブラリ。TRM 1.8 の擬似コードどおりに q0〜q7・QACC・SAR・メモリを模倣する解釈実行器と、C ソースからアセンブリ文字列・`k[]` 初期化子を取り出す関数 | — |
+| `test_derby_ser_pie.py` + `derby_ser_pie_dump.c` | DERBY の `ser()` の弦の除外・端の回転の核（`main/pocket/derby_ser_pie.c`）を `piesim.py` で実行し、同じファイルのスカラーの参照と全ビット比較する（幾何のベクトル 512 ＋ ランダムなレーン 512。[derby-ser-division.md](../../docs/apps/derby-ser-division.md) §10） | 約 5 秒 |
 | `run_models.py` + `models/*.c` | **算術の総当たり証明。** カーネルが使う式（表の畳み込み、逆数乗算、/255 の恒等式、565↔888 の展開）が参照実装とビット一致することを入力の全域で確認する C プログラム | 数秒 |
 
 3 つの層で守っているものが違います。
@@ -45,6 +46,11 @@ python tools/pie/test_kernels.py
 # 算術の総当たり（ocean / wave / blendpack などを個別指定も可）
 python tools/pie/run_models.py
 python tools/pie/run_models.py blendpack
+
+# DERBY の ser() の核（算術: 倍精度の ou() の安全側か / asm: 参照とビット一致 / 停止）
+python tools/pie/run_models.py derbycull
+python tools/pie/test_derby_ser_pie.py
+python tools/pie/stalls.py main/pocket/derby_ser_pie.c "uint32_t dsp_cull_pie("
 ```
 
 `stalls.py` の出力例（海面 v1 → v2 の差）:
