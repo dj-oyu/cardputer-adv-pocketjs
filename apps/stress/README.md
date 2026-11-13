@@ -31,6 +31,14 @@
   240 px の行は 34 行まで、だから空と海は 2 本の帯。線分は 1 フレーム約 900 本で、上限 1,024 の近くまで使う
   （ヤシの葉の分割数と波の刻みは、この上限で決めた）。段階は描画の量を
   変えない（ヒープの段階だけを比べるため）。120 フレームごとに HUD を `replace` で作り直す。
+- **ターンの JS**（2026-11-13、[docs/kasane/api-reorg.md](../../docs/kasane/api-reorg.md) §5 の 2）: 入力は
+  `Int32Array` で、各入力の Q 形式の値（`sky` の行数だけ Q0、ほかは Q16）。JS は `drawMany` が `Float64Array` に
+  行う換算（[shiki-spec.md](../../docs/kasane/shiki-spec.md) §2.4、半分は 0 から遠い方）と同じ丸めで換算するので、
+  式に届く値は前の版と同じ。整数の座標はシフトだけ。VHS が画面外で待つ間は `drawMany` の `count` で最後の draw を
+  省く。HUD は段階と `native` の行を変わった時だけ `setText` し、`setRect` は整数 4 つ。ターンの中で配列・
+  クロージャを作らない（残る確保は `load()` の塊と `pocket.fs` の読み取りで、それが試験の負荷）。
+  `onPressure` の callback は確保をしない。LV3 は本当の割り当て失敗の時だけ保持プールを捨て、最初の OOM と
+  その回復の確認を残す。
 
 ## Shiki の式（`stress_prog.js`）
 
@@ -54,6 +62,7 @@
 - 式は組み込みの表（`stress.<name>`）。`stress_prog.js` の `@shiki` 関数をビルドが flash の表にし、チャンクからは消す（`chunks.txt` の `prog`。アプリは読み込まない）。
 - Shiki の区画は既定の 48 KiB（マニフェストは `kasane.shiki` を required に挙げる。Shiki が無いと描けないため）。host（m32）の使用量は約 30 KB（フレーム 2 枚・式・領域）。実機では同じ区画に JIT のコードが加わる（未測定）。
 - ゲストのヒープ（host、m32、上限 160 KiB で評価）: 評価後 61,991 B。同じ条件で旧版は 54,941 B（+7.1 KB）。
+- 同じ条件で、ターンの JS を書き換えた後（2026-11-13）: 評価後 61,715 → 61,012 B、評価のピーク +49,980 → +47,240 B（`tools/vmtest/compile_peak.py`）。r5sim の `shiki` 153,906 → 142,560 カウント/ターン、確保 172 → 156 回/ターン（[docs/kasane/logs/api-reorg-perf.md](../../docs/kasane/logs/api-reorg-perf.md) §8）。
 
 ## Kasane の制約（旧版で踏んだもの）
 
