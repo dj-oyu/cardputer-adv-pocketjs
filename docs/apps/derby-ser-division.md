@@ -508,3 +508,18 @@ SERPIE ok=3072 mismatch=0 scalar_cy=8967 pie_cy=1908 rot_mismatch=0 unsafe=0 cas
 - native の heap（DERBY の実行中）: `course()` の塊 +約 1.2 KB（楕円: 端 19 個の整数の姿勢 380 B、Q16 の端 76 B、int16 の列 591 B、カメラの固定小数と plan の確認の表 約 140 B）と、系列の表 5 × 576 B ＝ 2,880 B（＋malloc の頭）。計 約 4.1 KB（計算）。倍精度の `VE` は残した（A/B の B のため）。**実機では `memlog.py --port` で確かめていない**（DERBY は native heap の余裕が 1〜2 KB と記録がある。docs/perf/frame-breakdown.md §9）。
 - 整数の範囲（カメラ ±6,000 m、`s` 32 m 以下）はアプリと fuzz の範囲で決めた。範囲外は倍精度に戻るので絵は出る。
 - 倍精度の経路は A/B の後に消す（利用者の決定）。消すと flash −約 5 KB、`ser_chord()` と `ou()` と `VE` が消える。
+
+### 11.x 実機の最初の A/B（`8bff275`、同じ像、broker の app_session、2026-11-13、実測）
+
+2 回のデモのレース（種は起動ごとに違い、どちらも観客の多い重い CAM WIDE 2 にはならなかった）。`KASANE_PAINT turn_ms`（30 フレームの平均）を、draws の揃う窓どうしで比べた。
+
+| 場面 | INT | DOUBLE |
+| --- | ---: | ---: |
+| 軽い CAM WIDE 2（draws 27〜29、pat 9） | 6.96、7.30〜7.46 | 7.24〜7.43 |
+| CAM WIDE（draws 22） | 6.02〜6.18 | 6.09〜6.14 |
+| CAM VISION（draws 33〜34） | 6.73〜6.84 | 6.77〜6.87 |
+| CAM CLOSE（draws 16〜20） | 6.00〜6.05 | 5.94〜6.14 |
+
+- 軽い場面では差が見えない（r5sim の見込みは wide1 で −14%）。重い CAM WIDE 2 は未測定。
+- 2 本ともレースを FINISH・写真判定まで走り、OOM・FRAMEFAIL なし。
+- 原因（整数の経路が実機で使われていない／flash の命令キャッシュの待ちで相殺）を調べている（§12 の予定）。
