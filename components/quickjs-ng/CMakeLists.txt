@@ -51,7 +51,7 @@ endif()
 # A device A/B through a builder that only takes the default Kconfig: a
 # `measure:` commit sets the next line to "use" (and reverts it afterwards).
 set(_qjs_hc "use")
-set(_qjs_hc_pad 20)
+set(_qjs_hc_pad 0)
 if(POCKET_QJS_HOTCOLD)
     set(_qjs_hc "${POCKET_QJS_HOTCOLD}")
 elseif(CONFIG_POCKET_VM_QJS_HOTCOLD)
