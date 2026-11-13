@@ -8,9 +8,12 @@
  * frame on the device (docs/apps/megademo-shapes.md). project() turns model
  * points into screen points; fill() scan-converts a polygon or an ellipse
  * less polygon holes into horizontal-line trapezoid draws; outline() draws a
- * polygon's edges, leaving out those inside other polygons. The drawing goes
- * through pocket_proc_draw_numbers(), the second half of H.draw(): plans, VM
- * and frame limits are untouched.
+ * polygon's edges, leaving out those inside other polygons. These write
+ * directly into the candidate procedural frame under its existing limits.
+ * gouraudPatch() snapshots bounded screen vertices/indices/colour fields
+ * and holes, interpolating RGB565 without a framebuffer or depth sort.
+ * shade() is a separate bounded SNORM16 normal/albedo/thickness kernel:
+ * borrowed typed arrays in, RGB565 sample colours out, no frame required.
  * Not part of the common API: app_session.c installs it only into a session
  * whose manifest names kasane.shapes, as it does pocket.derby. */
 esp_err_t pocket_shape_install(JSContext *ctx, void *unused);

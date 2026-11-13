@@ -682,3 +682,13 @@ host の DERBY（`spare: 512`、19 本すべて通過、確定したフレーム
 - レースの中で使用量が伸びるのは JIT のコード（`jit=` が 8,788 → 14,776 B）で、フレームのバッファは最初の `beginFrame` 以降は動かない。最も厳しい窓の最大の空き塊は 2,492 B で、追加領域の版（2,740 B）とほぼ同じ。そこを詰めているのは JIT の側。
 - 待機画面の turn_ms は 3.91〜3.94 ms で、§25.5 と同じ。レースは場面の区切りが前の測定と揃わないので、ここでは比べない。
 - 実機を使い終えたあと、通常の image（`bc96d3f`）に戻した。
+
+### 25.7 不透明メッシュの深度と 1 本のバッファ（main との統合、2026-11-13）
+
+main に入った不透明メッシュ（`beginMeshFrame`、`ksn_mesh_depth.h`。[opaque-mesh-depth.md](../ayatsuri/opaque-mesh-depth.md)）は、2 本のバッファを前提にしていた。深度の写し（`depth_candidate` / `depth_committed`）は ACK で入れ替え、描くときは「描くフレームが candidate かどうか」で写しを選ぶ。1 本のバッファでは candidate と committed が同じポインタなので、この選び方は使えない。統合では次のようにした。
+
+- 深度の写しは線分のバッファの外にあるので、2 つのままにする。作っているフレームは `depth_candidate` に書き、`merge()`（新しいフレームを前へ動かす所）で 2 つを入れ替える。表示は前のフレームだけを描くので、いつも `depth_committed` を読む。P2a で表示が前のフレームを描いている間に、次のフレームは `depth_candidate` を書ける（two-core-pipeline.md §2.3 B と同じ分け方）。
+- `beginMeshFrame` は深度の作業領域を取り直すことがあるので、join する側の関数に置く（`beginFrame` だけが join しない）。もともと、前のフレームが表示待ちの間は `BUSY` を返す。
+- main で足されたネイティブの図形（楕円・切り抜き楕円・ブレンド・ブレンド領域・Gouraud）は、`write_at()` / `wrote()` で後ろの領域に書くように直した。予備が足りないときの文言（`spare_limit`）も `draw` と同じになる。
+- **backdrop の転送失敗（`KSN_IO`）は、新しいフレームを描き直す**（§25.1 のとおり、`commit()` が古いフレームの上に書いた）。main の 3 つの host 試験（`test_mesh_depth_qjs.c`、`test_mesh_memory_qjs.c`、`test_gouraud_qjs.c`）は古いフレームの修復を確かめていたので、新しいフレームを確かめるように直した。image の面の再送（同じフレームを ACK まで保つ）は変わらない。
+- 統合した版で、native-mesh の host 試験 13 本と Shiki の host 試験（proc・turn・grid・pixel・video・shape・meshbench・MEGADEMO）が通る。実機での確認はまだ。

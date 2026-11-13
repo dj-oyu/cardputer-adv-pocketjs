@@ -1,0 +1,108 @@
+name: Native mesh framework contracts
+on:
+  pull_request:
+    paths: ['main/**', 'tools/hostshim/**', 'tools/build_kasane_test.sh', 'tools/ayatsuri/**', 'tools/kasane_contract/**', 'tools/pocket/**', 'apps/lib/**', 'apps/meshbench/**', 'components/**', 'CMakeLists.txt', 'sdkconfig*', 'partitions.csv', 'tools/gen*', '.gitmodules', '.github/workflows/native-mesh.yml']
+  push:
+    branches: [main]
+    paths: ['main/**', 'tools/hostshim/**', 'tools/build_kasane_test.sh', 'tools/ayatsuri/**', 'tools/kasane_contract/**', 'tools/pocket/**', 'apps/lib/**', 'apps/meshbench/**', 'components/**', 'CMakeLists.txt', 'sdkconfig*', 'partitions.csv', 'tools/gen*', '.gitmodules', '.github/workflows/native-mesh.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-mesh-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: depth, command: 'python3 tools/kasane_contract/run_mesh_depth.py'}
+          - {name: memory, command: 'python3 tools/kasane_contract/run_mesh_memory.py'}
+          - {name: class-registry, command: 'python3 tools/pocket/run_class_registry.py'}
+          - {name: scene, command: 'python3 tools/kasane_contract/run_scene_motion.py'}
+          - {name: skin, command: 'python3 tools/ayatsuri/skin/run.py --sanitize'}
+          - {name: skin-render, command: 'python3 tools/ayatsuri/skin/run_render.py --sanitize'}
+          - {name: skin-js, command: 'python3 tools/ayatsuri/skin/run_js.py'}
+          - {name: skin-batch, command: 'python3 tools/ayatsuri/skin/run_batch.py'}
+          - {name: provider, command: 'python3 tools/ayatsuri/provider/run.py --sanitize'}
+          - {name: prepared, command: 'python3 tools/kasane_contract/run_mesh_prepared.py unit'}
+          - {name: prepared-lifecycle, command: 'python3 tools/kasane_contract/run_mesh_prepared.py depth'}
+          - {name: shiki-api, command: 'python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py'}
+          - {name: megademo, command: 'python3 tools/kasane_contract/run_megademo_app_host.py'}
+    steps:
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Run production-source host contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/native-mesh
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' | tee artifacts/native-mesh/source-head.txt
+          cc --version > artifacts/native-mesh/compiler.txt
+          ${{ matrix.command }} 2>&1 | tee artifacts/native-mesh/contract.log
+          if [ "${{ matrix.name }}" = depth ]; then
+            node tools/ayatsuri/asset/test_reduced_packed.cjs | tee artifacts/native-mesh/curved-packed.json
+            python3 tools/ayatsuri/asset/verify_source_native.py --asan --output-dir artifacts/native-mesh/source-native
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-mesh-${{ matrix.name }}-${{ env.SOURCE_HEAD }}
+          path: artifacts/native-mesh/
+          retention-days: 14
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: espressif/idf:v6.0.1
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build default-off native framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          idf.py -B build_native -D SDKCONFIG=build_native/sdkconfig build
+          test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
+          printf '%s\n' '${{ steps.source.outputs.commit }}' > build_native/source-head.txt
+          grep -qx 'KASANE_MESH_PREPARED_PROTOTYPE:BOOL=OFF' build_native/CMakeCache.txt
+          grep -qx 'KASANE_MESH_EDGE4_PROTOTYPE:BOOL=OFF' build_native/CMakeCache.txt
+          xtensa-esp32s3-elf-nm build_native/cardputer_pocketjs.elf > build_native/symbols.txt
+          if grep -q 'ksn_mesh_q7_render' build_native/symbols.txt; then exit 1; fi
+          sha256sum build_native/cardputer_pocketjs.bin build_native/cardputer_pocketjs.elf > build_native/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-mesh-product-${{ env.SOURCE_HEAD }}
+          path: |
+            build_native/source-head.txt
+            build_native/CMakeCache.txt
+            build_native/sdkconfig
+            build_native/compile_commands.json
+            build_native/symbols.txt
+            build_native/SHA256SUMS
+            build_native/cardputer_pocketjs.map
+          retention-days: 14

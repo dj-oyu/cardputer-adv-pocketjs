@@ -114,6 +114,7 @@ def main() -> None:
     # The baseline must be on Shiki too (the float VM is gone): one binary
     # runs both.
     base_list = None
+    CACHE.mkdir(parents=True, exist_ok=True)
     old = CACHE / "proc_megademo_baseline.js"
     shown = subprocess.run(["git", "show", f"{args.baseline_rev}:apps/kasane/proc_megademo.js"],
                            cwd=ROOT, capture_output=True)

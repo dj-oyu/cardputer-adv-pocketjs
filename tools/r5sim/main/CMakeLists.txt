@@ -22,7 +22,9 @@ if(R5SIM_APP STREQUAL "shiki")
         WORKING_DIRECTORY "${R}" OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
     set(R5SIM_SHIKI_SOURCES "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/pocket/shiki_heap.c"
         "${R}/main/ui/kasane/ksn_shiki.c" "${R}/main/ui/kasane/ksn_shiki_frame.c"
-        "${R}/main/pocket/pocket_shiki_api.c")
+        "${R}/main/pocket/pocket_shiki_api.c"
+        # pocket_shiki_frame.c draws opaque mesh depth (beginMeshFrame).
+        "${R}/main/ui/kasane/ksn_mesh_depth.c" "${R}/main/ayatsuri/compact_opaque.c")
     set(R5SIM_APP_SOURCES ${R5SIM_SHIKI_SOURCES} "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c")
     set(R5SIM_APP_JS "${R}/apps/stress/stress.js")
 endif()

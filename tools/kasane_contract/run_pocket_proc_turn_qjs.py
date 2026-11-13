@@ -39,7 +39,7 @@ def main():
     rom.write_text('#include "ksn_shiki.h"\n'
                    'const ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *count){*count=0;return 0;}\n')
     sources=[kasane/'ksn_shiki_frame.c',kasane/'ksn_shiki.c',
-             ROOT/'main/pocket/pocket_shiki_frame.c',ROOT/'main/pocket/shiki_heap.c',
+             ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/pocket/pocket_shiki_frame.c',ROOT/'main/pocket/shiki_heap.c',
              ROOT/'main/pocket/pocket_shiki_api.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_proc_turn_qjs.c']
     binary=OUT/'test_pocket_proc_turn'

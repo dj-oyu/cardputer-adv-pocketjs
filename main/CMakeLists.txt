@@ -34,6 +34,8 @@ set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 list(APPEND KASANE_SOURCES
+    "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
+    "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
     "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_shiki.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
@@ -42,6 +44,21 @@ list(APPEND KASANE_SOURCES
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_shiki.c"
     "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
+# Private mesh architecture experiments; never implicitly enabled.
+option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
+option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
+if(KASANE_MESH_EDGE4_PROTOTYPE AND NOT KASANE_MESH_PREPARED_PROTOTYPE)
+    message(FATAL_ERROR "Mesh edge4 requires KASANE_MESH_PREPARED_PROTOTYPE=ON")
+endif()
+if(KASANE_MESH_PREPARED_PROTOTYPE)
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_mesh_prepared.c")
+endif()
+if(KASANE_MESH_EDGE4_PROTOTYPE)
+    if(NOT IDF_TARGET STREQUAL "esp32s3")
+        message(FATAL_ERROR "Mesh edge4 is verified only for ESP32-S3")
+    endif()
+    list(APPEND KASANE_SOURCES "ui/kasane/pie_edge4.c" "ui/kasane/pie_edge4_raw.c")
+endif()
 # Default ON since 2026-10-30: MEGADEMO on the device, send -5 ms/frame,
 # turn/render and heap unchanged (docs/perf/kasane-dma-overlap.md).
 option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
@@ -183,7 +200,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/rtc_task.c" "hal/fpu_latenc
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/meshbench/mesh_bench.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
@@ -590,3 +607,20 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_mbedtls_add_tx_
 # Compile-time stack evidence for the native endpoint; no runtime instrumentation.
 set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "pocket/app_control.c"
              APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+
+# Keep managed mesh F32 evaluation and coverage order consistent with host.
+set_source_files_properties(ayatsuri/ayatsuri_model.c ayatsuri/ayatsuri_visibility.c ui/kasane/ksn_mesh_depth.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_property(SOURCE ui/kasane/ksn_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
+
+# Preserve the external raw-assembly ABI boundary and exact reference FP order.
+if(KASANE_MESH_PREPARED_PROTOTYPE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_PROTOTYPE=1)
+    set_source_files_properties(ui/kasane/ksn_mesh_prepared.c PROPERTIES
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
+    set_property(SOURCE pocket/pocket_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+endif()
+if(KASANE_MESH_EDGE4_PROTOTYPE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_EDGE4=1)
+    set_source_files_properties(ui/kasane/pie_edge4.c ui/kasane/pie_edge4_raw.c PROPERTIES
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
+endif()
