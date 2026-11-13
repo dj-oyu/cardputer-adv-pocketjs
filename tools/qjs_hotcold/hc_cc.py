@@ -17,6 +17,9 @@ output, <obj>.hc.s is what was assembled.
 """
 import json, os, re, subprocess, sys
 
+# The build must not write into the source tree: a __pycache__ next to this
+# file changes the source snapshot the build broker verifies after a build.
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hc_asm  # noqa: E402
 

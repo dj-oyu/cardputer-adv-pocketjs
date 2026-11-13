@@ -68,7 +68,7 @@ if(_qjs_hc)
     get_filename_component(_qjs_hc_profile "${POCKET_QJS_HOTCOLD_PROFILE}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
     idf_build_get_property(_qjs_hc_python PYTHON)
     set_property(TARGET ${COMPONENT_LIB} PROPERTY C_COMPILER_LAUNCHER
-        "${_qjs_hc_python}" "${_qjs_hc_dir}/hc_cc.py" --mode "${_qjs_hc}" --profile "${_qjs_hc_profile}"
+        "${_qjs_hc_python}" -B "${_qjs_hc_dir}/hc_cc.py" --mode "${_qjs_hc}" --profile "${_qjs_hc_profile}"
         --pad "${_qjs_hc_pad}" --keep-out "${CMAKE_CURRENT_LIST_DIR}/../../main/vm/helper_iram8.lf"
         --only quickjs.c --)
     set(_qjs_hc_deps "${_qjs_hc_dir}/hc_cc.py" "${_qjs_hc_dir}/hc_asm.py")
