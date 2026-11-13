@@ -39,6 +39,8 @@ extern pocket_shiki_draw_prof pocket_shiki_prof;
  * total: the whole native draw (lookup, engine, copy into the frame). */
 typedef struct { uint32_t draws,steps,engine_cy,total_cy; } pocket_shiki_turn;
 void pocket_shiki_turn_take(pocket_shiki_turn *out);
+/* The same without the reset (a probe's before and after, pocket_derby.c). */
+void pocket_shiki_turn_peek(pocket_shiki_turn *out);
 uint32_t pocket_cycles(void);
 void pocket_proc_end_turn(void);
 /* One draw for a native caller (pocket_derby.c): a Shiki handle and its

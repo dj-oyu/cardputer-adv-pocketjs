@@ -108,6 +108,11 @@ typedef struct {
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
+/* The slot a handle was attached to, by its low bits: find_slot's first
+ * guess (checked against the slot, so a stale hint only costs the walk).
+ * The walk was ~100 instructions a draw for DERBY's series plans, which are
+ * attached late (docs/kasane/shiki-draw-entry.md). */
+static uint8_t slot_hint[PROC_HANDLES];
 /* The Shiki engine's state for draw (pocket_proc_shiki_draw), taken with the
  * frames on the first Shiki draw. */
 static ksn_shiki_vm *shiki_vm;
@@ -276,6 +281,8 @@ static bool surface_index(JSContext *ctx,JSValueConst value,unsigned *index){
  * lookup must require a plan, not just a matching number. */
 static proc_slot *find_slot(uint32_t handle){
     if(!handle)return NULL;
+    proc_slot *const hinted=&slots[slot_hint[handle%PROC_HANDLES]];
+    if(hinted->plan&&hinted->handle==handle)return hinted;
     for(unsigned i=0;i<PROC_HANDLES;i++)
         if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
     return NULL;
@@ -1115,15 +1122,19 @@ static JSValue js_begin_mesh(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 #ifdef POCKET_PROC_DRAW_HOOK
 bool pocket_proc_hook_dry;
 #endif
+static inline __attribute__((always_inline)) JSValue
+draw_impl(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,unsigned index,
+          const bool native_fixed);
 /* The same with the inputs already in each input's Q format (drawMany's
- * Int32Array), and the draw's number (DRAW_INDEX): pocket.derby.runners. */
+ * Int32Array), and the draw's number (DRAW_INDEX): pocket.derby.runners,
+ * pocket.derby.ser. */
 JSValue pocket_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index){
     if(handle>INT32_MAX||n>KSN_SHIKI_INPUTS)
         return failure(ctx,"kasane.shiki.draw",POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
 #ifdef POCKET_PROC_DRAW_HOOK
     if(pocket_proc_hook_dry){pocket_proc_draw_fixed_hook(handle,in,n);return JS_UNDEFINED;}
 #endif
-    JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,NULL,in,n,index);
+    JSValue result=draw_impl(ctx,handle,NULL,in,n,index,true);
 #ifdef POCKET_PROC_DRAW_HOOK
     if(!JS_IsException(result))pocket_proc_draw_fixed_hook(handle,in,n);
 #endif
@@ -1239,6 +1250,7 @@ uint32_t pocket_proc_shiki_attach(void *plan){
     if(slot==PROC_HANDLES||next_handle==PROC_HANDLE_MAX)return 0;
     const uint32_t handle=++next_handle;
     slots[slot]=(proc_slot){.handle=handle,.plan=plan};
+    slot_hint[handle%PROC_HANDLES]=(uint8_t)slot;
     return handle;
 }
 void *pocket_proc_shiki_plan(uint32_t handle){
@@ -1258,6 +1270,7 @@ bool pocket_proc_shiki_detach(uint32_t handle){
 pocket_shiki_draw_prof pocket_shiki_prof;
 static pocket_shiki_turn shiki_turn;
 void pocket_shiki_turn_take(pocket_shiki_turn *out){*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
+void pocket_shiki_turn_peek(pocket_shiki_turn *out){*out=shiki_turn;}
 uint32_t pocket_cycles(void){
 #ifdef ESP_PLATFORM
     return esp_cpu_get_cycle_count();
@@ -1268,8 +1281,13 @@ uint32_t pocket_cycles(void){
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
     return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
 }
-JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
-                                      unsigned index){
+/* One draw: pocket_proc_shiki_draw_inputs, and pocket_proc_draw_fixed's own
+ * copy (in_place: fixed holds n >= the plan's inputs, read where they are;
+ * the native callers', one call level and the copies fewer,
+ * docs/kasane/shiki-draw-entry.md). */
+static inline __attribute__((always_inline)) JSValue
+draw_impl(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,unsigned index,
+          const bool native_fixed){
     const char *op="kasane.shiki.draw";
     if(pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     const uint32_t t_in=pocket_cycles();
@@ -1287,25 +1305,32 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
      * its number (DRAW_INDEX, Shiki v2.0 draft sec.4.1). */
     const ksn_shiki_plan *pl=slot->plan;
-    int32_t fx[KSN_SHIKI_INPUTS]={0};
-    const int32_t *args=fixed;
-    unsigned nargs=n;
-    bool good=true;
-    if(!fixed){
-        for(unsigned k=0;k<pl->inputs&&good;k++)
-            good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
-        args=fx;nargs=pl->inputs;
-    }
     /* Straight into the frame's place: a draw that does not fit stops at
      * LIMIT and nothing is counted, so its segments are not the frame's. */
     ksn_shiki_status st;
     unsigned room,frame_room;
     ksn_proc_segment *at=write_at(surface,&room,&frame_room);
-    shiki_turn.draws++;
-    const uint32_t t_engine=pocket_cycles();
-    if(good)st=ksn_shiki_draw_index_cap(pl,args,nargs,index,shiki_vm,at,room);
-    else{memset(shiki_vm,0,sizeof *shiki_vm);st=KSN_SHIKI_BADINPUT;}
-    shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    if(native_fixed&&n>=pl->inputs){
+        shiki_turn.draws++;
+        const uint32_t t_engine=pocket_cycles();
+        st=ksn_shiki_draw_in_place(pl,fixed,index,shiki_vm,at,room);
+        shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    }else{
+        int32_t fx[KSN_SHIKI_INPUTS]={0};
+        const int32_t *args=fixed;
+        unsigned nargs=n;
+        bool good=true;
+        if(!fixed){
+            for(unsigned k=0;k<pl->inputs&&good;k++)
+                good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
+            args=fx;nargs=pl->inputs;
+        }
+        shiki_turn.draws++;
+        const uint32_t t_engine=pocket_cycles();
+        if(good)st=ksn_shiki_draw_index_cap(pl,args,nargs,index,shiki_vm,at,room);
+        else{memset(shiki_vm,0,sizeof *shiki_vm);st=KSN_SHIKI_BADINPUT;}
+        shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    }
     shiki_turn.steps+=shiki_vm->steps;
     /* A pattern line needs two entries: one left reads as full too. */
     const bool full=st==KSN_SHIKI_LIMIT&&room<KSN_SHIKI_SEGMENTS&&shiki_vm->count+1u>=room;
@@ -1325,6 +1350,10 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     if(pf->on){pf->copy+=pocket_cycles()-pf->mark;pf->n++;}
     shiki_turn.total_cy+=pocket_cycles()-t_in;
     return JS_UNDEFINED;
+}
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
+                                      unsigned index){
+    return draw_impl(ctx,handle,in,fixed,n,index,false);
 }
 
 // The frame's functions on kasane.shiki (pocket_shiki_api.c).

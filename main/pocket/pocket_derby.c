@@ -687,9 +687,58 @@ static derby_chord_q *series_rows(int32_t w,int32_t s,int32_t g0){
     return c->slot[at];
 }
 typedef struct {JSContext *ctx;const derby_course *c;} ser_emit;
+#ifdef POCKET_DERBY_SER_PROBE
+/* The probe's draws inside ser() by plan (docs/kasane/shiki-draw-entry.md):
+ * 0 the series' own plan (prail: rails and stand faces, pt: turf), 1 hl
+ * (the stand tiers), 2 crowd. Per class: draws, the whole call's cycles,
+ * the engine's (pocket_shiki_turn's engine_cy: the vm reset and the plan's
+ * code), Shiki steps, retired instructions and instruction-fetch stalls;
+ * and the LINE_PATTERN calls and their cycles (ksn_shiki_curve_*[1], the
+ * crowd's rows). One DERBY_SERDRAW line after each DERBY_SER line. The
+ * call is timed once, for DERBY_SER's draw_* as well (SERP_DRAW's). */
+#include "ui/kasane/ksn_shiki_jit.h"
+static struct {uint32_t n[3],cy[3],eng[3],steps[3],insn[3],ist[3],pat_n,pat_cy;} serd;
+static JSValue serd_draw(const ser_emit *e,uint32_t h,const int32_t in[8]){
+    const unsigned k=h&&h==view.hl?1u:h&&h==view.crowd?2u:0u;
+    pocket_shiki_turn a,b;
+    pocket_shiki_turn_peek(&a);
+    const uint32_t pn=ksn_shiki_curve_n[1],pcy=ksn_shiki_curve_cy[1];
+    uint32_t i0,s0,i1,s1;
+    serp_pm(&i0,&s0);
+    const uint32_t t0=pocket_cycles();
+    const JSValue r=pocket_proc_draw_fixed(e->ctx,h,in,8,0);
+    const uint32_t t1=pocket_cycles();
+    serp_pm(&i1,&s1);
+    pocket_shiki_turn_peek(&b);
+    if(serp.in_ser){
+        serp.draw_acc+=t1-t0;serp.draw_n++;serp.draw_insn_acc+=i1-i0;serp.draw_ist_acc+=s1-s0;
+        serd.n[k]++;serd.cy[k]+=t1-t0;serd.eng[k]+=b.engine_cy-a.engine_cy;serd.steps[k]+=b.steps-a.steps;
+        serd.insn[k]+=i1-i0;serd.ist[k]+=s1-s0;
+        serd.pat_n+=ksn_shiki_curve_n[1]-pn;serd.pat_cy+=ksn_shiki_curve_cy[1]-pcy;
+    }
+    return r;
+}
+static void serd_log(unsigned frames){
+    /* Per panning frame, as DERBY_SER's: n=rails+turf/hl/crowd draws. */
+    const unsigned f=frames?frames:1u;
+    PROBE_PRINT("DERBY_SERDRAW frames=%u n=%u/%u/%u cy=%u/%u/%u eng=%u/%u/%u steps=%u/%u/%u "
+                "insn=%u/%u/%u ist=%u/%u/%u pat=%u/%u",f,
+                (unsigned)(serd.n[0]/f),(unsigned)(serd.n[1]/f),(unsigned)(serd.n[2]/f),
+                (unsigned)(serd.cy[0]/f),(unsigned)(serd.cy[1]/f),(unsigned)(serd.cy[2]/f),
+                (unsigned)(serd.eng[0]/f),(unsigned)(serd.eng[1]/f),(unsigned)(serd.eng[2]/f),
+                (unsigned)(serd.steps[0]/f),(unsigned)(serd.steps[1]/f),(unsigned)(serd.steps[2]/f),
+                (unsigned)(serd.insn[0]/f),(unsigned)(serd.insn[1]/f),(unsigned)(serd.insn[2]/f),
+                (unsigned)(serd.ist[0]/f),(unsigned)(serd.ist[1]/f),(unsigned)(serd.ist[2]/f),
+                (unsigned)(serd.pat_n/f),(unsigned)(serd.pat_cy/f));
+    memset(&serd,0,sizeof serd);
+}
+#define SERD_DRAW(e,h,in) serd_draw(e,h,in)
+#else
+#define SERD_DRAW(e,h,in) pocket_proc_draw_fixed((e)->ctx,h,in,8,0)
+#endif
 static int emit_q(void *user,uint32_t h,const int32_t in[8]){
     const ser_emit *e=user;
-    if(JS_IsException(SERP_DRAW(pocket_proc_draw_fixed(e->ctx,h,in,8,0))))return 1;
+    if(JS_IsException(SERD_DRAW(e,h,in)))return 1;
     return course!=e->c?2:0;
 }
 /* v within lo..hi, counted by the probe as clamp k. */
@@ -1153,6 +1202,7 @@ void pocket_derby_ser_probe_log(unsigned frames){
                     (unsigned)(serp.insn[0]/f0),(unsigned)(serp.insn[1]/f1),(unsigned)(serp.draw_insn[0]/f0),
                     (unsigned)(serp.draw_insn[1]/f1),(unsigned)(serp.ist[0]/f0),(unsigned)(serp.ist[1]/f1),
                     (unsigned)(serp.draw_ist[0]/f0),(unsigned)(serp.draw_ist[1]/f1));
+        serd_log(v);
     }
     memset(&serp,0,sizeof serp);
 }
@@ -1161,13 +1211,13 @@ void pocket_derby_ser_probe_log(unsigned frames){
 /* r5sim only (tools/r5sim, -DR5SIM_DERBY_PROF=1): cycles in each native
  * function and the Shiki draws' cycles inside it; the turn's Shiki carry
  * (the draws taken out here, for r5sim's per-turn total). */
-uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12];
+uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12],derby_prof_eng[12];
 pocket_shiki_turn derby_prof_carry;
 #define PROF(i,f) static JSValue f##_p(JSContext *c,JSValueConst s,int a,JSValueConst *v){ \
     pocket_shiki_turn x,y;pocket_shiki_turn_take(&x); \
     derby_prof_carry.draws+=x.draws;derby_prof_carry.total_cy+=x.total_cy;derby_prof_carry.engine_cy+=x.engine_cy; \
     const uint32_t t=pocket_cycles();JSValue r=f(c,s,a,v);derby_prof_cy[i]+=pocket_cycles()-t;derby_prof_n[i]++; \
-    pocket_shiki_turn_take(&y);derby_prof_shk[i]+=y.total_cy;derby_prof_draws[i]+=y.draws; \
+    pocket_shiki_turn_take(&y);derby_prof_shk[i]+=y.total_cy;derby_prof_draws[i]+=y.draws;derby_prof_eng[i]+=y.engine_cy; \
     derby_prof_carry.draws+=y.draws;derby_prof_carry.total_cy+=y.total_cy;derby_prof_carry.engine_cy+=y.engine_cy; \
     return r;}
 PROF(0,js_view) PROF(1,js_ser) PROF(2,js_side) PROF(3,js_aim) PROF(4,js_wide) PROF(5,js_part)

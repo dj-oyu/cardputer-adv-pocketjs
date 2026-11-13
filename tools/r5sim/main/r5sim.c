@@ -452,13 +452,13 @@ static int64_t r5_live(void){ JSMemoryUsage u; JS_ComputeMemoryUsage(rt,&u); ret
 #define R5_SCENES 24
 typedef struct { const char *name; unsigned n; uint64_t cc, max, allocs, js, shk, end, draws, pat;
 #ifdef R5SIM_DERBY_PROF
-    uint64_t pcy[12], pshk[12], pn[12], pdr[12];
+    uint64_t pcy[12], pshk[12], pn[12], pdr[12], peng[12];
 #endif
 } r5_scene;
 #ifdef R5SIM_DERBY_PROF
-extern uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12];
+extern uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12],derby_prof_eng[12];
 extern pocket_shiki_turn derby_prof_carry;
-static uint32_t r5_pcy0[12],r5_pshk0[12],r5_pn0[12],r5_pdr0[12];
+static uint32_t r5_pcy0[12],r5_pshk0[12],r5_pn0[12],r5_pdr0[12],r5_peng0[12];
 extern uint32_t derby_ser_cy[9];
 static uint32_t r5_ser0[9];
 static uint64_t r5_ser_w2[9]; static unsigned r5_ser_w2n;
@@ -474,7 +474,7 @@ static void r5_scene_add(const char *name,uint64_t cc,uint32_t allocs,uint64_t j
     s->js+=js; s->shk+=shk; s->end+=end; s->draws+=draws; s->pat+=pat;
 #ifdef R5SIM_DERBY_PROF
     for(unsigned k=0;k<12;k++){ s->pcy[k]+=derby_prof_cy[k]-r5_pcy0[k]; s->pshk[k]+=derby_prof_shk[k]-r5_pshk0[k];
-        s->pn[k]+=derby_prof_n[k]-r5_pn0[k]; s->pdr[k]+=derby_prof_draws[k]-r5_pdr0[k]; }
+        s->pn[k]+=derby_prof_n[k]-r5_pn0[k]; s->pdr[k]+=derby_prof_draws[k]-r5_pdr0[k]; s->peng[k]+=derby_prof_eng[k]-r5_peng0[k]; }
 #endif
 }
 static const char *derby_unit(void) {
@@ -645,7 +645,7 @@ void app_main(void) {
         const uint32_t pat0=ksn_shiki_curve_n[1];
 #ifdef R5SIM_DERBY_PROF
         memcpy(r5_pcy0,derby_prof_cy,sizeof r5_pcy0); memcpy(r5_pshk0,derby_prof_shk,sizeof r5_pshk0);
-        memcpy(r5_pn0,derby_prof_n,sizeof r5_pn0); memcpy(r5_pdr0,derby_prof_draws,sizeof r5_pdr0);
+        memcpy(r5_pn0,derby_prof_n,sizeof r5_pn0); memcpy(r5_pdr0,derby_prof_draws,sizeof r5_pdr0); memcpy(r5_peng0,derby_prof_eng,sizeof r5_peng0);
         memcpy(r5_ser0,derby_ser_cy,sizeof r5_ser0);
 #endif
 #endif
@@ -837,9 +837,9 @@ void app_main(void) {
 #ifdef R5SIM_DERBY_PROF
         static const char *const pname[12]={"view","ser","side","aim","wide","part","lanes","head","runners","screen","course","-"};
         for(unsigned k=0;k<11;k++) if(sc->pn[k])
-            printf("R5SIM prof scene=%s fn=%s calls=%.2f cy=%llu shiki=%llu draws=%.2f\n",sc->name,pname[k],
+            printf("R5SIM prof scene=%s fn=%s calls=%.2f cy=%llu shiki=%llu engine=%llu draws=%.2f\n",sc->name,pname[k],
                    sc->pn[k]/(double)sc->n,(unsigned long long)(sc->pcy[k]/sc->n),(unsigned long long)(sc->pshk[k]/sc->n),
-                   sc->pdr[k]/(double)sc->n);
+                   (unsigned long long)(sc->peng[k]/sc->n),sc->pdr[k]/(double)sc->n);
 #endif
     }
 #endif
