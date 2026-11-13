@@ -422,6 +422,21 @@ menu "Pocket VM (diagnostics)"
             test, cycle/draw-cost probes and the mesh bench
             (docs/kasane/shiki-spec.md sec.10, apps/shikitest/README.md).
 
+    config POCKET_DERBY_SER_PIE
+        bool "Prototype: DERBY ser() chord cull in PIE, with its self-test at DERBY start"
+        default n
+        help
+            Builds main/pocket/derby_ser_pie.c: the int16 chord-end rotation
+            and chord cull (ou()) as a PIE kernel next to its scalar integer
+            reference (docs/apps/derby-ser-division.md sec.10). Nothing calls
+            the kernel from ser() yet. When DERBY WATCH (local.derby) gets
+            pocket.derby, the session runs the self-test once, before the
+            app's source is evaluated, and logs one line:
+            "SERPIE ok=<n> mismatch=<n> scalar_cy=<n> pie_cy=<n> ...".
+            Off by default: with it off the file compiles to nothing and the
+            product image is unchanged. Use a build directory with its own
+            sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
+
     config POCKET_SHIKI_MEMSTAT
         bool "Count the native allocations of the line/grid surfaces (diagnostic)"
         default n

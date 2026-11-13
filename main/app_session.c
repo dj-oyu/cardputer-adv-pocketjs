@@ -103,6 +103,9 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#ifdef CONFIG_POCKET_DERBY_SER_PIE
+#include "derby_ser_pie.h"
+#endif
 #ifdef CONFIG_POCKET_SHIKI_DEBUG
 #include "pocket_shiki.h"
 #endif
@@ -1916,8 +1919,15 @@ surfaces_done:
         TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
     // pocket.derby, DERBY WATCH's series in C, the same way: only for the
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
-    if(app_registry_wants(app_registry_current(),"derby.series"))
+    if(app_registry_wants(app_registry_current(),"derby.series")) {
         TRY_NOJOIN("derby",pocket_derby_install);
+#ifdef CONFIG_POCKET_DERBY_SER_PIE
+        // The ser() PIE prototype's self-test and microbenchmark, at every
+        // DERBY start, before the source runs (docs/apps/derby-ser-division.md
+        // sec.10.4). About 0.2 s; probe builds only.
+        dsp_selftest();
+#endif
+    }
     // pocket.shikiDebug, the Shiki engine for the on-device differential test
     // (apps/shikitest), the same way: only for kasane.shiki.debug.
 #ifdef CONFIG_POCKET_SHIKI_DEBUG
