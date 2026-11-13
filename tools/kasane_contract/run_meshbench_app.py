@@ -48,7 +48,9 @@ def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cach
                 ROOT/'main/pocket/app_registry.c', ROOT/test_source, rom]
     sources += [ROOT/p for p in extra_sources]
     binary = out/'meshbench'
-    run(['cc', *flags, '-DKASANE_DMA_OVERLAP=1', '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
+    run(['cc', *flags, '-DKASANE_DMA_OVERLAP=1',
+         # app_registry.c's local.meshbench row exists only with the Shiki diagnostics.
+         '-DCONFIG_POCKET_SHIKI_DEBUG=1', '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
          *['-Wl,--wrap='+n for n in ['malloc', 'calloc', 'realloc', 'free']], '-lm', '-o', binary])
     evidence = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                 'compiler': compiler, 'commands': commands, 'quickjs_cache_key': key,

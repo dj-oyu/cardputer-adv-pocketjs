@@ -1,5 +1,7 @@
 # SHIKI TEST — Shiki エンジンの実機での突き合わせ
 
+**製品 image には入らない（2026-11-13〜）。** このアプリは `CONFIG_POCKET_SHIKI_DEBUG=y`（既定 `n`、`main/Kconfig.projbuild`）で組んだ image にだけ埋め込まれ、`pocket.shikiDebug` も同じ門の中。`-DSDKCONFIG=<dir>/sdkconfig` で別のビルドディレクトリに分け、`sdkconfig.defaults` に `CONFIG_POCKET_SHIKI_DEBUG=y` の overlay を重ねて組む（`docs/kasane/api-reorg.md` §4.3）。
+
 [Shiki 仕様書](../../docs/kasane/shiki-spec.md) §10 の実機側。C のエンジン（`main/ui/kasane/ksn_shiki.c`）が、実機（Xtensa、double はソフトウェア）でも host と同じビットを出すかを確かめる。**メニューには出さない**。USB broker の `app_session` で `local.shikitest` を起動する。
 
 ## 流れ

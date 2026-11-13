@@ -27,6 +27,7 @@ static const char *const CAPS_MEGADEMO_OPT[]= {"kasane.shapes", "kasane.shiki", 
 // STRESS TEST draws its sea with Shiki's built-in programs (apps/stress/
 // stress_prog.js) and has no other way to draw it, so Shiki is required.
 static const char *const CAPS_STRESS[]= {"display.kasane", "input.action", "kasane.shiki", NULL};
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
 // The Shiki test (apps/shikitest): the engine through its test-only surface.
 static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
 // The Shiki API self-check (apps/shikitest/shiki_api_test.js): a kasane.shiki
@@ -36,6 +37,7 @@ static const char *const CAPS_SHIKI_API[]= {"display.kasane", "kasane.shiki", NU
 // test surface's cycle counter and draw profile.
 static const char *const CAPS_SHIKI_COST[]= {"display.kasane", "kasane.shiki", "kasane.shiki.debug", NULL};
 static const char *const CAPS_MESH_BENCH[]= {"display.kasane", "kasane.shiki", "kasane.shapes", "kasane.shiki.debug", NULL};
+#endif
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -86,6 +88,7 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_STRESS, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
     // The on-device half of Shiki's differential test (apps/shikitest/README.md,
     // docs/kasane/shiki-spec.md sec.10): not on the menu, started by the USB
     // broker's app_session; it logs one hash per generated case.
@@ -122,6 +125,7 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.meshbench", .title="MESH BENCH", .entry="apps/meshbench/mesh_bench.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_MESH_BENCH, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+#endif
     // pocket.net's self-check and the HTTPS cycle (apps/netcheck/README.md):
     // not on the menu, started by the USB broker. Both draw nothing; they log
     // NETCHK / CYC lines, and the session's end logs the tcpip thread's stack

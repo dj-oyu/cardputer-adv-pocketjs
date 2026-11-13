@@ -477,6 +477,7 @@ extern const char companion_start[] asm("_binary_companion_js_start");
 extern const char companion_end[] asm("_binary_companion_js_end");
 // Heap churn + drawing load (apps/stress/README.md), a test app kept on the menu.
 extern const char stress_start[] asm("_binary_stress_js_start");
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
 // Shiki's on-device differential test (apps/shikitest): launched only by the
 // USB broker (native_apps below), never from the menu.
 extern const char shiki_test_start[] asm("_binary_shiki_test_js_start");
@@ -495,6 +496,7 @@ extern const char draw_cost_start[] asm("_binary_draw_cost_js_start");
 extern const char draw_cost_end[] asm("_binary_draw_cost_js_end");
 extern const char mesh_bench_start[] asm("_binary_mesh_bench_js_start");
 extern const char mesh_bench_end[] asm("_binary_mesh_bench_js_end");
+#endif
 extern const char stress_end[] asm("_binary_stress_js_end");
 extern const char proc_megademo_start[] asm("_binary_proc_megademo_js_start");
 extern const char proc_megademo_end[] asm("_binary_proc_megademo_js_end");
@@ -668,12 +670,14 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),
     NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,7),
     NATIVE_APP("local.stress","STRESS TEST",stress_start,stress_end,5),
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
     NATIVE_APP("local.shikitest","SHIKI TEST",shiki_test_start,shiki_test_end,5),
     NATIVE_APP("local.shikidata","SHIKI DATA",shiki_data_test_start,shiki_data_test_end,5),
     NATIVE_APP("local.shikiapi","SHIKI API",shiki_api_test_start,shiki_api_test_end,5),
     NATIVE_APP("local.cyclebench","CYCLE BENCH",cycle_bench_start,cycle_bench_end,5),
     NATIVE_APP("local.drawcost","DRAW COST",draw_cost_start,draw_cost_end,5),
     NATIVE_APP("local.meshbench","MESH BENCH",mesh_bench_start,mesh_bench_end,5),
+#endif
     NATIVE_APP("local.megademo","MEGADEMO",proc_megademo_start,proc_megademo_end,5),
     NATIVE_APP("local.gridlab","GRID LAB",grid_lab_start,grid_lab_end,5),
     NATIVE_APP("local.videolab","VIDEO LAB",video_lab_start,video_lab_end,5),

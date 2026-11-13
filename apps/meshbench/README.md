@@ -1,5 +1,7 @@
 # Public native mesh benchmark
 
+**製品 image には入らない（2026-11-13〜）。** このアプリは `CONFIG_POCKET_SHIKI_DEBUG=y`（既定 `n`、`main/Kconfig.projbuild`）で組んだ image にだけ埋め込まれ、`pocket.shikiDebug` も同じ門の中。`-DSDKCONFIG=<dir>/sdkconfig` で別のビルドディレクトリに分け、`sdkconfig.defaults` に `CONFIG_POCKET_SHIKI_DEBUG=y` の overlay を重ねて組む（`docs/kasane/api-reorg.md` §4.3）。
+
 `local.meshbench` / `apps/meshbench/mesh_bench.js` は通常のapp登録と既存の
 Model/Instance、`shiki.beginMeshFrame`、Kasane image compositorを使う専用synthetic。
 通常のSTRESS/Shiki線分の性能とは別のworkloadである。メニューには追加しない。

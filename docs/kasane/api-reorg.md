@@ -342,6 +342,8 @@ heapprobe の DERBY（評価の余裕の二分探索）は、6・7 の後に今�
 
 ### P1 — ビルドに入らないものを消し、診断を門の中へ（Sonnet、STEADY が合格を判定）
 
+**実施済み（§7.3 の決定により `CONFIG_POCKET_SHIKI_DEBUG` の既定は `n`。下の「既定 `y` で足すだけ」「メニューは変わらない」は、メニューが元々変わらない（試験アプリはホームの行ではなく `native_apps`／`app_registry` の行）ことを除いて置き換わった）。** 実測（map、`.flash.text`／`.flash.rodata`／`.dram0.bss`／`.iram0.text`）: `CONFIG_POCKET_SHIKI_DEBUG=y` の image は P0 の `4840504` とバイト単位で同一（1,722,132／822,644／76,640／81,771）。`=n` の image は `.flash.text` −27,324 B、`.flash.rodata` −39,200 B、`.dram0.bss` −16 B、`.iram0.text` ±0（合計 −66,540 B。§3.6 の見積もり −47.3 KB より大きいのは、診断だけが呼んでいた関数も `--gc-sections` で落ちたため）。
+
 範囲: §4.3 の表の上 4 行。`CONFIG_POCKET_SHIKI_DEBUG` は**既定 `y` で足すだけ**（メニューは変わらない）。[architecture.md](architecture.md) の `ksn_presenter.c` の参照を直す。
 
 受け入れ基準: (a) ファームの `.flash.text`・`.flash.rodata`・`.dram0.bss`・`.iram0.text` の大きさが P0 と**同一**（Q4。消したのはリンクされていなかったものだけ、という主張の確認）。(b) r5sim の 4 負荷のカウントが同一。(c) `tools/kasane_contract/run.sh` と host の検査一式が通る。(d) `CONFIG_POCKET_SHIKI_DEBUG=n` で組めて、flash の減りが §3.6 の 47.3 KB と合う（別のビルドディレクトリと `-DSDKCONFIG=`）。(e) `python tools/check_docs.py`。実機: (d) の image は焼かない（既定は変えていない）。
