@@ -67,6 +67,12 @@ typedef struct {
     derby_chord_q *slot[DERBY_Q_SLOTS];
     int32_t key[DERBY_Q_SLOTS][3];
     uint32_t used[DERBY_Q_SLOTS],clock;
+    /* The frame's camera for the integers (view()), and the plans checked
+     * for the integers' Q formats (plan_q). Here, not static: DIRAM's .bss
+     * is every app's, the course block only DERBY's (CLAUDE.md). */
+    derby_cam_q camq;
+    struct {uint32_t h;const uint8_t *q;} plan_ok[6];   /* prail, t0, t1, hl, crowd */
+    unsigned plan_ok_next;
 } derby_course;
 static derby_course *course;
 #if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
@@ -96,9 +102,11 @@ static int ser_mode=1;
 #else
 static int ser_mode=0;
 #endif
-static derby_cam_q camq;
+#ifdef DERBY_SER_CHECK
+/* Host checks only: the integer series' counters and invariants. */
 static derby_ser_stats ser_stats;
 void pocket_derby_ser_stats(derby_ser_stats *out){if(out)*out=ser_stats;}
+#endif
 /* The frame's camera for the integer calls (side(), aim()): a side unit
  * (all Q16: f px, height h m, horizon hy px, x0 m, the centre o and the right
  * bound R px, the left edge e px), or a panning unit (aim(): view.pc). */
@@ -362,12 +370,12 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
 static bool cam_q(void){
     const double *pc=view.pc;
     if(!(fabs(pc[0])<=6000&&fabs(pc[1])<=6000&&pc[4]>=32&&pc[4]<4095&&view.zf>0&&view.zf<20000))return false;
-    camq.ex=(int32_t)floor(pc[0]*65536+.5);camq.ez=(int32_t)floor(pc[1]*65536+.5);
-    camq.dx=(int32_t)floor(pc[2]*1073741824.0+.5);camq.dz=(int32_t)floor(pc[3]*1073741824.0+.5);
-    camq.cx=(int16_t)floor(pc[2]*16384+.5);camq.cz=(int16_t)floor(pc[3]*16384+.5);
-    camq.f=(int32_t)floor(pc[4]*65536+.5);camq.invf=(int32_t)floor(4294967296.0/pc[4]+.5);
-    camq.zf=(int32_t)floor(view.zf*65536+.5);camq.zn=camq.f/50;
-    camq.fr3=(int32_t)ceil(view.fr*8);
+    course->camq.ex=(int32_t)floor(pc[0]*65536+.5);course->camq.ez=(int32_t)floor(pc[1]*65536+.5);
+    course->camq.dx=(int32_t)floor(pc[2]*1073741824.0+.5);course->camq.dz=(int32_t)floor(pc[3]*1073741824.0+.5);
+    course->camq.cx=(int16_t)floor(pc[2]*16384+.5);course->camq.cz=(int16_t)floor(pc[3]*16384+.5);
+    course->camq.f=(int32_t)floor(pc[4]*65536+.5);course->camq.invf=(int32_t)floor(4294967296.0/pc[4]+.5);
+    course->camq.zf=(int32_t)floor(view.zf*65536+.5);course->camq.zn=course->camq.f/50;
+    course->camq.fr3=(int32_t)ceil(view.fr*8);
     return true;
 }
 /* The chords of the oval not wholly out by m (Q16 m) at offset w (Q16 m),
@@ -378,13 +386,13 @@ static uint32_t keep_mask(int32_t w,int32_t m){
     const unsigned chords=course->ends-1u;
     const uint32_t all=chords>=32u?~0u:(1u<<chords)-1u;
     derby_cull_q p;
-    if(!derby_ser_cull_params(&camq,w,m,&p))return all;
+    if(!derby_ser_cull_params(&course->camq,w,m,&p))return all;
     uint32_t keep=derby_ser_cull_ref(&course->soa,chords,&p);
     const uint32_t wc=(course->qwide|course->qwide>>1)&all;
     keep&=~wc;
     for(uint32_t b=wc;b;b&=b-1u){
         const unsigned j=(unsigned)__builtin_ctz(b);
-        if(!derby_ser_cull_wide(&camq,course->qpos[j],course->qpos[j+1],course->qt30[j],course->qt30[j+1],w,m))keep|=1u<<j;
+        if(!derby_ser_cull_wide(&course->camq,course->qpos[j],course->qpos[j+1],course->qt30[j],course->qt30[j+1],w,m))keep|=1u<<j;
     }
     return keep;
 }
@@ -419,9 +427,9 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
          * in view as a keep-mask (no VE, VC). */
         view.q=true;
         if(course->sections){
-            course->qwide=derby_ser_prepare(&course->soa,&camq,(const int32_t (*)[2])course->qpos,
+            course->qwide=derby_ser_prepare(&course->soa,&course->camq,(const int32_t (*)[2])course->qpos,
                                             (const int16_t (*)[2])course->qt14,course->ends);
-            derby_ser_rotate_ref(&course->soa,camq.cx,camq.cz);
+            derby_ser_rotate_ref(&course->soa,course->camq.cx,course->camq.cz);
             course->qvc=keep_mask(1671168,30*Q16);      /* ou(j, 25.5, 30, zf) */
         }else course->qvc=1;
     }else if(course->sections){
@@ -576,19 +584,17 @@ static int ser_chord(JSContext *ctx,unsigned j,uint32_t h,bool turf,double w,dou
 /* ---- The integer series (derby_ser_int.c). A plan takes integer inputs
  * only in the Q formats derby_ser_chord_q writes (checked once a handle:
  * handles are not reused within a session, and reset() forgets them). */
-static struct {uint32_t h;const uint8_t *q;} plan_ok[6];
-static unsigned plan_ok_next;
 static bool plan_q(uint32_t h,const uint8_t q[8]){
     if(!h)return true;
 #ifdef POCKET_PROC_DRAW_HOOK
     if(pocket_proc_hook_dry)return true;          /* the harness's fuzz: handles not registered */
 #endif
-    for(unsigned i=0;i<sizeof plan_ok/sizeof plan_ok[0];i++)if(plan_ok[i].h==h)return plan_ok[i].q==q;
+    for(unsigned i=0;i<sizeof course->plan_ok/sizeof course->plan_ok[0];i++)if(course->plan_ok[i].h==h)return course->plan_ok[i].q==q;
     const ksn_shiki_plan *pl=pocket_proc_shiki_plan(h);
     if(!pl)return false;
     const bool ok=pl->inputs==8&&!memcmp(pl->input_q,q,8);
-    plan_ok[plan_ok_next].h=h;plan_ok[plan_ok_next].q=ok?q:NULL;
-    plan_ok_next=(plan_ok_next+1u)%(sizeof plan_ok/sizeof plan_ok[0]);
+    course->plan_ok[course->plan_ok_next].h=h;course->plan_ok[course->plan_ok_next].q=ok?q:NULL;
+    course->plan_ok_next=(course->plan_ok_next+1u)%(sizeof course->plan_ok/sizeof course->plan_ok[0]);
     return ok;
 }
 /* The series (w, s, g0)'s chord table, made on first use. */
@@ -628,10 +634,13 @@ static int ser_q(JSContext *ctx,uint32_t h,bool turf,int32_t w,int32_t s,int32_t
         .cells=view.cells_q,.h=h,.hl=view.hl,.crowd=view.crowd};
     ser_emit e={ctx,course};
 #ifdef DERBY_SER_CHECK
+    derby_ser_stats *const st=&ser_stats;
     ser_stats.last_j=-1;
+#else
+    derby_ser_stats stats={0},*const st=&stats;    /* nothing reads them on the device */
 #endif
     for(uint32_t m=keep;m;m&=m-1u){
-        const int rc=derby_ser_chord_q(&camq,&p,&rows[__builtin_ctz(m)],(unsigned)__builtin_ctz(m),emit_q,&e,&ser_stats);
+        const int rc=derby_ser_chord_q(&course->camq,&p,&rows[__builtin_ctz(m)],(unsigned)__builtin_ctz(m),emit_q,&e,st);
         if(rc==1)return 1;
         if(rc)break;
     }
@@ -1106,7 +1115,6 @@ esp_err_t pocket_derby_install(JSContext *ctx,void *unused){
 void pocket_derby_reset(void){
     free_course(course);
     course=NULL;
-    memset(plan_ok,0,sizeof plan_ok);
 #ifdef POCKET_DERBY_PROJECT_BATCH
     ++course_generation;++view_generation;
 #endif

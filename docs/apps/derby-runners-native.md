@@ -110,6 +110,8 @@ B を選んだのは、[derby-ser-native.md](derby-ser-native.md) と同じ理�
 
 ## 7. 実機の A/B（同じバイナリ）
 
+**2026-11-13 に退役した**（利用者の決定。[derby-ser-division.md](derby-ser-division.md) §10）: `derby_ab.js` とチャンク `ab` を消し、up は `ser()` の整数／倍精度の切り替え（`DERBY AB INT`／`DERBY AB DOUBLE`）になった。以下はこの A/B があった間の記録。
+
 - **切り替え:** broker の `action: up`（`frame(b)` の `b & 16`）。最初の 1 回で `derby_ab.js`（旧経路、チャンク `ab`）を読み込み、以後押すたびに `AB` を反転する。ログに `DERBY AB JS`（旧）／`DERBY AB NATIVE`（新）が出る。既定は新（NATIVE）。
 - この up は**デモを止めるキーに数えない**（`attract()` に渡す前に落とす）。だから「DERBY を開く → 15 秒待ってデモのレースを始めさせる → レースの途中で up を押す」で、同じレースの中で新旧を切り替えられる。読み込みに失敗したら `DERBY ABFAIL ...` を出して何もしない（アプリは止まらない）。
 - 物理キーの `;` も up（`keymap.c` の nav）なので同じく切り替わるが、`K.down()` に出るのでデモは止まる。

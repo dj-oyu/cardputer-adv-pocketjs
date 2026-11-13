@@ -8,3 +8,5 @@
 - `serc.c` — 倍精度の `ser()` の除算・sqrt などの回数を数える版。
 
 各ファイルの先頭のコメントに組み方がある。ここの数字は設計書の §（実測）に記録した。
+
+段 S0 で正式な検査 `tools/games/test_derby_serq.c`（ファームの `main/pocket/derby_ser_int.c` そのものを倍精度と照合し、`run_derby.py` から回る）になった。ここの試作は設計の数字の出所として残す。
