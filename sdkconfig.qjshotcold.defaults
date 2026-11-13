@@ -1,0 +1,5 @@
+# Layered over sdkconfig.defaults for the hot/cold layout of QuickJS
+# (docs/vm/qjs-hotcold.md):
+#   idf.py -B build_qjshc -DSDKCONFIG=build_qjshc/sdkconfig \
+#       -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.qjshotcold.defaults" build
+CONFIG_POCKET_VM_QJS_HOTCOLD=y
