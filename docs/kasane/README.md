@@ -41,6 +41,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [複数meshのJS skin batch](../ayatsuri/skin-batch.md) | packed typed入力、16KiB work上限、全batch失敗原子性、実QuickJS複数mesh描画 |
 | [native mesh foundation の採用](../ayatsuri/native-mesh-adoption.md) | main へ入れた native mesh の土台の範囲、CI と文書の追加、レビューの層 |
 | [実験用 native provider](../ayatsuri/provider-candidate.md) | 既定で無効の `AYATSURI_MODEL_EXPERIMENTAL_PROVIDER` による一回評価と、その host 検査 |
+| [Kasane ファームの整理と JS API の再設計](api-reorg.md) | 設計書（2026-11-13、未実装）: JS API の面の棚卸し（利用アプリ・実装・使われない入口・ビルドに入らないファイル、map の大きさ）、QuickJS-ng と Shiki の最適化から導く API の原則、新しい名前空間と capability、`pocket_kasane.c` の `.inc` 分割と診断の門、アプリの移行の順、P0（r5sim に DERBY と保持型の負荷を足しベースラインを取る）〜P6 の段と受け入れ基準・難易度のラベル、利用者が決めること |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |
