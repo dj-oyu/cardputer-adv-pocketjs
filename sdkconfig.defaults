@@ -158,3 +158,6 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 # firmware bug can land in code and run instead of faulting at the
 # code/data boundary.
 CONFIG_ESP_SYSTEM_MEMPROT=n
+
+# measure (revert after the device run): GC stats
+CONFIG_POCKET_GC_STATS=y
