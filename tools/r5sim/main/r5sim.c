@@ -458,7 +458,7 @@ void app_main(void) {
 #ifdef R5SIM_GC_ON_OOM
         /* The experiment: the system heap refused this turn; collect now
          * (between turns, where a GC is safe) and report what it freed. */
-        if(canary.allocator_count) {
+        if(canary.allocator_count||canary.quota_count) {   // as app_session.c
             size_t u0=used;
             JS_RunGC(rt);
             JS_GetMemoryCounters(rt,&used,&limit);

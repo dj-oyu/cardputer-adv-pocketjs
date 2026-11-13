@@ -220,12 +220,17 @@ static void report_oom_if_any(void) {
     pocketjs_guest_take_oom_detail(guest,&canary);
     if(canary.count>0) {
         pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
-        /* The shared heap refused, below the guest's limit: QuickJS does not
-         * collect on a refusal, and its GC trigger sits near the limit, which
-         * this guest never reached -- cyclic garbage piled up turn after turn
-         * (docs/vm/lv3-heap-exhaustion.md sec.3.1). Between turns a GC is
-         * safe. Before the probe below, which would otherwise see it first. */
-        if(canary.allocator_count) JS_RunGC(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
+        /* A refusal, by the shared heap or by the guest's limit: QuickJS does
+         * not collect on one. The shared heap's came below the GC trigger, so
+         * cyclic garbage piled up turn after turn (docs/vm/lv3-heap-exhaustion.md
+         * sec.3.1). The limit's now too: once the cap has collected for
+         * nothing it stops halving its margin (G3, quickjs.c g_gc_cap_dry), so
+         * garbage grown in the last 1/32 is collected here, once per refused
+         * turn, instead of by GCs before it (docs/vm/guest-memory-design.md
+         * sec.7.3). Between turns a GC is safe. Before the probe below, which
+         * would otherwise see it first. */
+        if(canary.allocator_count||canary.quota_count)
+            JS_RunGC(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
 #ifdef POCKET_HEAPPROBE

@@ -1990,6 +1990,17 @@ JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
  * collection left it: garbage that would need collecting is growth, however
  * few or many objects it is made of. Below the cap nothing changes. */
 #define GC_CAP_GROWTH_SHIFT 5
+/* G3 (docs/vm/guest-memory-design.md sec.7.3): the last collection the cap
+ * triggered freed less than a quarter of the growth it was allowed. Until one
+ * frees again, the allowed growth stays the whole limit >> GC_CAP_GROWTH_SHIFT
+ * instead of halving towards the limit: with a fitted limit (the guest's room
+ * is what the system has) the live heap sits just under it for whole seconds
+ * (apps/stress LV3), and the halving collected 5-18 times a second for nothing
+ * (measured on the device, 1.3-1.8 ms each). Cyclic garbage that grows in the
+ * last 1/32 is left to the host's collection after a refused allocation
+ * (main/app_session.c report_oom_if_any). A static, not a JSRuntime field, for
+ * the reason g_oom_canary gives below; one runtime at a time. */
+static bool g_gc_cap_dry;
 static size_t js_gc_effective_threshold(JSRuntime *rt)
 {
     size_t threshold = rt->malloc_gc_threshold;
@@ -2019,7 +2030,7 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
         size_t limit = rt->malloc_state.malloc_limit;
         size_t room = limit > floor ? (limit - floor) >> 1 : 0;
         size_t budget = limit >> GC_CAP_GROWTH_SHIFT;
-        if (room < budget)
+        if (room < budget && !g_gc_cap_dry)
             budget = room;
         /* A heap below the floor has freed since (refcount): the floor says
            nothing about it any more, and it collects as before. */
@@ -2034,7 +2045,22 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
             printf("GC: size=%zd\n", rt->malloc_state.malloc_size);
         }
 #endif
+#ifndef FORCE_GC_AT_MALLOC
+        bool by_cap = threshold < rt->malloc_gc_threshold;
+#endif
+        size_t before_gc = rt->malloc_state.malloc_size;
         JS_RunGC(rt);
+#ifndef FORCE_GC_AT_MALLOC
+        {
+            size_t freed = before_gc > rt->malloc_state.malloc_size ?
+                           before_gc - rt->malloc_state.malloc_size : 0;
+            size_t limit = rt->malloc_state.malloc_limit;
+            g_gc_cap_dry = by_cap && limit != 0 &&
+                           freed < (limit >> GC_CAP_GROWTH_SHIFT) >> 2;
+        }
+#else
+        (void)before_gc;
+#endif
         rt->malloc_gc_threshold = rt->malloc_state.malloc_size +
                                   (rt->malloc_state.malloc_size >> 1);
         /* Still above the cap: nothing more to free until the heap grows.
@@ -2525,6 +2551,7 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     /* A fresh runtime starts with a fresh canary: see g_oom_canary's comment
      * for why this is process-wide state rather than a field of `ms`. */
     g_oom_canary = (JSOOMCanary){0};
+    g_gc_cap_dry = false;
 
     rt = mf->js_calloc(opaque, 1, sizeof(JSRuntime));
     if (!rt) {
