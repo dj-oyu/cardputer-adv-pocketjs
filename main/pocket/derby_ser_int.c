@@ -148,19 +148,26 @@ DERBY_SER_HOT bool derby_ser_cull_params(const derby_cam_q *c,int32_t w,int32_t 
     out->k=(int32_t)(mq3*c->fr3);
     return true;
 }
-bool derby_ser_cull_wide(const derby_cam_q *c,const int32_t pa[2],const int32_t pb[2],const int32_t ta[2],
-                         const int32_t tb[2],int32_t w,int32_t margin_q16){
+void derby_ser_wide_end(const derby_cam_q *c,const int32_t p[2],const int32_t t[2],derby_wide_end *o){
+    const i64 rx=(i64)p[0]-c->ex,rz=(i64)p[1]-c->ez;
+    o->lat=(rx*c->dz-rz*c->dx)>>30;o->dep=(rx*c->dx+rz*c->dz)>>30;
+    o->nl=((i64)-t[1]*c->dz-(i64)t[0]*c->dx)>>30;o->nd=((i64)t[0]*c->dz-(i64)t[1]*c->dx)>>30;
+}
+bool derby_ser_wide_test(const derby_cam_q *c,const derby_wide_end *a,const derby_wide_end *b,int32_t w,int32_t margin_q16){
     const i64 M=(i64)margin_q16+Q16,fr=(i64)c->fr3<<13,k=-((M*fr)>>16);
     bool o[2][4];
     for(int e=0;e<2;e++){
-        const int32_t *p=e?pb:pa,*t=e?tb:ta;
-        const i64 rx=(i64)p[0]-c->ex,rz=(i64)p[1]-c->ez,
-            lat=(rx*c->dz-rz*c->dx)>>30,dep=(rx*c->dx+rz*c->dz)>>30,
-            nl=((i64)-t[1]*c->dz-(i64)t[0]*c->dx)>>30,nd=((i64)t[0]*c->dz-(i64)t[1]*c->dx)>>30,
-            d=dep+((w*nd)>>30),l=lat+((w*nl)>>30),fl=(c->f*l)>>16;
+        const derby_wide_end *v=e?b:a;
+        const i64 d=v->dep+((w*v->nd)>>30),l=v->lat+((w*v->nl)>>30),fl=(c->f*l)>>16;
         o[e][0]=d<(i64)c->zn-M;o[e][1]=d>(i64)c->zf+M;o[e][2]=160*d+fl<k;o[e][3]=160*d-fl<k;
     }
     return (o[0][0]&&o[1][0])||(o[0][1]&&o[1][1])||(o[0][2]&&o[1][2])||(o[0][3]&&o[1][3]);
+}
+bool derby_ser_cull_wide(const derby_cam_q *c,const int32_t pa[2],const int32_t pb[2],const int32_t ta[2],
+                         const int32_t tb[2],int32_t w,int32_t margin_q16){
+    derby_wide_end a,b;
+    derby_ser_wide_end(c,pa,ta,&a);derby_ser_wide_end(c,pb,tb,&b);
+    return derby_ser_wide_test(c,&a,&b,w,margin_q16);
 }
 
 /* ---- The chord tables. */

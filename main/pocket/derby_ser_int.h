@@ -163,6 +163,12 @@ int derby_ser_chord_q(const derby_cam_q *c,const derby_series_q *p,const derby_c
  * normal is (-tz, tx)), w: offset (Q16). */
 bool derby_ser_cull_wide(const derby_cam_q *c,const int32_t pa[2],const int32_t pb[2],const int32_t ta[2],
                          const int32_t tb[2],int32_t w,int32_t margin_q16);
+/* The same in two steps (docs/apps/derby-ser-division.md sec.14): an end's
+ * camera-frame values, which do not depend on the series (once a frame), and
+ * the planes for one series. derby_ser_cull_wide() is the two in a row. */
+typedef struct {int64_t lat,dep,nl,nd;} derby_wide_end;
+void derby_ser_wide_end(const derby_cam_q *c,const int32_t p[2],const int32_t t[2],derby_wide_end *o);
+bool derby_ser_wide_test(const derby_cam_q *c,const derby_wide_end *a,const derby_wide_end *b,int32_t w,int32_t margin_q16);
 /* Fills one series' chord table: pose(g, w, out[4]) is the course's double
  * pose (x, z, tangent x, z); ends: the chord ends CH (Q16). False if a value
  * is out of range (then the call draws nothing). */
