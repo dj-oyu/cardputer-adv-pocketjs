@@ -4,7 +4,8 @@
 #include <string.h>
 
 /* pocket.derby.ser() in integers: docs/apps/derby-ser-division.md sec.4 and
- * derby_ser_int.h. The double ser() in pocket_derby.c is the specification
+ * derby_ser_int.h. The double ser() that pocket_derby.c had until sec.13
+ * (its copy is tools/games/test_derby_serq.c's ser_ref) is the specification
  * this follows step by step (the same clip, LOD and draw order); the numbers
  * differ by rounding, within the tolerance of sec.5 and the user's decision
  * (a few px at most, invariants exact). Every product of two Q values is

@@ -423,38 +423,52 @@ menu "Pocket VM (diagnostics)"
             (docs/kasane/shiki-spec.md sec.10, apps/shikitest/README.md).
 
     config POCKET_DERBY_SER_PIE
-        bool "Prototype: DERBY ser() chord cull in PIE, with its self-test at DERBY start"
-        default n
+        bool "DERBY ser(): chord-end rotation and chord cull in PIE"
+        default y
         help
             Builds main/pocket/derby_ser_pie.c: the int16 chord-end rotation
-            and chord cull (ou()) as a PIE kernel next to its scalar integer
-            reference (docs/apps/derby-ser-division.md sec.10). Nothing calls
-            the kernel from ser() yet. When DERBY WATCH (local.derby) gets
-            pocket.derby, the session runs the self-test once, before the
-            app's source is evaluated, and logs one line:
-            "SERPIE ok=<n> mismatch=<n> scalar_cy=<n> pie_cy=<n> ...".
-            Off by default: with it off the file compiles to nothing and the
-            product image is unchanged. Use a build directory with its own
-            sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
+            and chord cull (ou()) as PIE kernels next to their scalar integer
+            reference (docs/apps/derby-ser-division.md sec.10, sec.13).
+            pocket.derby's view() rotates the oval's chord ends with it once a
+            frame and each ser() call culls with it; chords whose ends are
+            past the kernel's range (+-2,047 m from the camera) go to the
+            scalar int64 cull. The up key flips to the scalar integer
+            rotation and cull of derby_ser_int.c (same binary A/B, logged
+            "DERBY AB PIE" / "DERBY AB SCALAR"). Off: only the scalar path,
+            and the file compiles to nothing.
+
+    config POCKET_DERBY_SER_PIE_SELFTEST
+        bool "Measurement: the DERBY PIE kernels' self-test at every DERBY start"
+        depends on POCKET_DERBY_SER_PIE
+        default n
+        help
+            When DERBY WATCH (local.derby) gets pocket.derby, the session runs
+            the kernels' self-test and microbenchmark once, before the app's
+            source is evaluated (about 0.2 s), and logs one line:
+            "SERPIE ok=<n> mismatch=<n> scalar_cy=<n> pie_cy=<n> ..."
+            (docs/apps/derby-ser-division.md sec.10.4). Its test copies are
+            about 1.5 KB of .bss (every app's heap), so the product image
+            leaves it out. Use a build directory with its own sdkconfig
+            (-D SDKCONFIG=<dir>/sdkconfig).
 
     config POCKET_DERBY_SER_PROBE
         bool "Measurement: DERBY ser() path and cycles, one DERBY_SER line a KASANE_PAINT window"
         default n
         help
             Counts, in main/pocket/pocket_derby.c, which path view() and ser()
-            took (integers or doubles), why a call fell back to the doubles
-            (L, s, w/g0, a plan's Q formats, the stands' plans, a table's
-            malloc or range; view(): mode(1), the course, the camera's
-            position, f or zf), and their cycles with the Shiki draws inside
-            ser() apart. After every KASANE_PAINT line it logs
-            "DERBY_SER mode=INT|DOUBLE frames=30 views=<int>/<dbl> ...
-            int_cy=<cycles a frame> int_draw=... dbl_cy=... dbl_draw=...
-            view_cy=<int>/<dbl> ..." (docs/apps/derby-ser-division.md
-            sec.12). The up key still flips the path (same binary A/B).
-            Off by default: the product image is unchanged. Also counts the
-            core's retired instructions and instruction-fetch stall cycles
-            inside ser() (performance counters PM0/PM1; do not combine with
-            POCKET_VM_TURNPERF, which arms the same two counters).
+            took (PIE or scalar: the up key's A/B), the inputs clamped into the
+            integer series' range (L, s, w/g0, the camera), the chord tables
+            that could not be made (malloc, range), and their cycles with the
+            Shiki draws inside ser() apart. The rotation and the cull run on
+            both paths every frame (the other one as a shadow, its cycles
+            taken out of ser()'s), so one window gives both paths' cycles.
+            After every KASANE_PAINT line it logs "DERBY_SER mode=PIE|SCALAR
+            ticks=30 views=<pie>/<scalar> ... rot_cy=<pie>/<scalar>
+            cull_cy=<pie>/<scalar> ..." (docs/apps/derby-ser-division.md
+            sec.12, sec.13). Off by default: the product image is unchanged.
+            Also counts the core's retired instructions and instruction-fetch
+            stall cycles inside ser() (performance counters PM0/PM1; do not
+            combine with POCKET_VM_TURNPERF, which arms the same two counters).
 
     config POCKET_DERBY_SER_IRAM
         bool "Measurement: DERBY's integer ser() functions in IRAM"

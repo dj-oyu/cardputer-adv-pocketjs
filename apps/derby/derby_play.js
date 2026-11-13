@@ -36,9 +36,9 @@ const curtain = () => (mx(0, mn(256, mx(dm ? 0 : (mn(nw - idle, 1000000) - DEMO_
 globalThis.frame = function (b) {
   if (b & 0x2000) { if (dm) demo(0); save(); return log('SAVE points=' + pts + ' race=' + raceNo); }
   try {
-    // The up action (b & 16; the broker's up) flips the series' path (A/B:
-    // integers, doubles) and is no key for the demo.
-    if (b & 16) log('AB ' + (S.mode(AB ^= 1) ? 'DOUBLE' : 'INT'));
+    // The up action (b & 16; the broker's up) flips the series' cull (A/B:
+    // PIE, scalar) and is no key for the demo.
+    if (b & 16) log('AB ' + (S.mode(AB ^= 1) ? 'SCALAR' : 'PIE'));
     attract(b & ~16);
     // The frame inline, not a function: ~150 B less resident (README).
     fr: {

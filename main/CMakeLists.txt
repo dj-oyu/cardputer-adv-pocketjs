@@ -544,8 +544,8 @@ set_source_files_properties(pocket/pocket_shiki_frame.c PROPERTIES COMPILE_OPTIO
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-# The ser() PIE prototype (CONFIG_POCKET_DERBY_SER_PIE, empty otherwise): its
-# scalar reference is timed against the kernel, at pocket_derby.c's level.
+# The ser() PIE kernels (CONFIG_POCKET_DERBY_SER_PIE, default y; empty when
+# off): their scalar reference is timed against them, at pocket_derby.c's level.
 set_source_files_properties(pocket/derby_ser_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 # Its integer path (docs/apps/derby-ser-division.md sec.4): integers only but
 # for the chord tables' doubles, made once a series.

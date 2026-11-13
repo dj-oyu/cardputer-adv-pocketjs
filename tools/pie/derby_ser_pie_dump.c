@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
     for (unsigned i = 0; i < n; i++) {
         dspv_case K;
         dspv_case_make(&K, i);
-        dsp_set_camera(&E, &rk, C.px, C.pz, K.camx, K.camz, K.cx, K.cz);
+        dsp_set_camera(&E, &rk, C.px, C.pz, 1, K.camx, K.camz, K.cx, K.cz);
         dsp_rotate_ref(&E, &rk);
         printf("R %u %u %u %d %d %d", E.eblk, E.ends, E.valid, rk.c[0], rk.c[1], rk.c[2]);
         for (unsigned b = 0; b < E.eblk; b++)

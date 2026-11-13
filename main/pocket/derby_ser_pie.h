@@ -1,15 +1,18 @@
 /* DERBY WATCH ser(): the chord cull (ou()) and the chord-end rotation in
  * int16 lanes, as a PIE kernel and as the scalar integer reference it must
- * match bit for bit. Stage S3 / P1 of docs/apps/derby-ser-division.md (sec.6.3,
- * sec.10): a prototype, compiled only with CONFIG_POCKET_DERBY_SER_PIE (default
- * off), so the product image does not change.
+ * match bit for bit. Stage S3 of docs/apps/derby-ser-division.md (sec.6.3,
+ * sec.10, sec.13): pocket_derby.c's view() rotates once a frame and each ser()
+ * call culls with these when CONFIG_POCKET_DERBY_SER_PIE is on (default y);
+ * the up key's A/B swaps them for derby_ser_int.c's scalar rotation and cull.
+ * The host and r5sim (no PIE) run the scalar reference in the kernels' place
+ * (DERBY_SERPIE_HOST) or the scalar path.
  *
  * The data, per frame (all int16, 16-byte aligned, SoA in blocks of 8 ends):
  *   in  block: rx, rz  chord end minus camera, world axes, Q3 m (0.125 m)
  *              nx, nz  the end's unit normal (-tangent z, tangent x), Q14
  *   out block: lat, dep    rx,rz turned into the camera frame, Q3 m
  *              nlat, ndep  the normal turned the same way, Q14
- * which are pocket_derby.c's VE[4j..4j+3] (V0..V3) in 16-bit form.
+ * (the double ser()'s VE[4j..4j+3] of before, in 16-bit form).
  *
  * Chord j joins ends j and j+1. The cull is the double ou() with the margin
  * widened so that the integer answer "out" implies the double answer "out"
@@ -67,10 +70,11 @@ typedef struct __attribute__((aligned(16))) {
 /* Once per course: the chord ends' unit normals, Q30 (pocket_derby.c's pose()
  * gives the tangent (c, d); the normal is (-d, c)). Clears in/out. */
 void dsp_set_course(dsp_ends *E, unsigned ends, const int32_t *nx_q30, const int32_t *nz_q30);
-/* Per frame: the ends' world positions and the camera position, Q16 m, and the
- * camera's unit direction, Q30. Fills in[].rx/rz, valid and the rotation's
- * constants. An end out of range gets zero lanes; its chords leave `valid`. */
-void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px_q16, const int32_t *pz_q16,
+/* Per frame: the ends' world positions (end i at px_q16[i * stride],
+ * pz_q16[i * stride]) and the camera position, Q16 m, and the camera's unit
+ * direction, Q30. Fills in[].rx/rz, valid and the rotation's constants. An
+ * end out of range gets zero lanes; its chords leave `valid`. */
+void dsp_set_camera(dsp_ends *E, dsp_rot_k *rk, const int32_t *px_q16, const int32_t *pz_q16, unsigned stride,
                     int32_t camx_q16, int32_t camz_q16, int32_t cx_q30, int32_t cz_q30);
 /* Per ou() series: f, fr = sqrt(f^2 + 160^2) (px), zf, w and m (m), all Q16.
  * False when a value is out of range: the whole call goes to the scalar ou(). */
@@ -88,9 +92,13 @@ uint32_t dsp_cull_ref(const dsp_ends *E, const dsp_cull_k *k);
 #if defined(__XTENSA__) && defined(CONFIG_POCKET_DERBY_SER_PIE)
 void dsp_rotate_pie(dsp_ends *E, const dsp_rot_k *rk);
 uint32_t dsp_cull_pie(const dsp_ends *E, const dsp_cull_k *k);
+#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
 /* The device self-test (docs/apps/derby-ser-division.md sec.10.4): logs one
- * "SERPIE ok=... mismatch=... scalar_cy=... pie_cy=..." line. */
+ * "SERPIE ok=... mismatch=... scalar_cy=... pie_cy=..." line. A measurement
+ * build's (CONFIG_POCKET_DERBY_SER_PIE_SELFTEST, default n): its test copies
+ * are about 1.5 KB of .bss. */
 void dsp_selftest(void);
+#endif
 #endif
 
 #endif

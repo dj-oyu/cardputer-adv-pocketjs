@@ -103,7 +103,7 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
-#ifdef CONFIG_POCKET_DERBY_SER_PIE
+#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
 #include "derby_ser_pie.h"
 #endif
 #ifdef CONFIG_POCKET_SHIKI_DEBUG
@@ -1921,10 +1921,10 @@ surfaces_done:
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
     if(app_registry_wants(app_registry_current(),"derby.series")) {
         TRY_NOJOIN("derby",pocket_derby_install);
-#ifdef CONFIG_POCKET_DERBY_SER_PIE
-        // The ser() PIE prototype's self-test and microbenchmark, at every
-        // DERBY start, before the source runs (docs/apps/derby-ser-division.md
-        // sec.10.4). About 0.2 s; probe builds only.
+#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
+        // The ser() PIE kernels' self-test and microbenchmark, at every DERBY
+        // start, before the source runs (docs/apps/derby-ser-division.md
+        // sec.10.4). About 0.2 s; measurement builds only.
         dsp_selftest();
 #endif
     }
