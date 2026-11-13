@@ -350,6 +350,8 @@ heapprobe の DERBY（評価の余裕の二分探索）は、6・7 の後に今�
 
 ### P2 — `pocket_kasane.c` を `.inc` に分ける（Sonnet、STEADY がレビュー）
 
+**実施済み。** 分割は元の順番のまま、連続した区間を `.inc` にした: `pocket_kasane.c` 955 行（旧 1〜701 と 2730〜2978）、`pocket_kasane_parse.inc`（旧 702〜971）、`_tx.inc`（972〜1622）、`_scene.inc`（1623〜2040）、`_schema.inc`（2041〜2729）、`_present.inc`（2979〜3209）。§4.2 の表と違い、`functions[]`・`build_kasane`・install・reset・source capability は順番を守るため `.c` に残した。`scene_owner` が `_scene.inc` に移ったので `tools/pocket/run_class_registry.py` の台帳を直した。実測: `pocket_kasane.c.obj` の全セクション（デバッグ以外）と ELF の `.flash.text`／`.flash.rodata`／`.iram0.text`／`.dram0.data` がバイト単位で同一、`mutate`・`parse_i16`・`parse_rect_mode` のアドレスも同一。
+
 範囲: §4.2。関数の順番を変えない（順番が変わると配置が動く）。
 
 受け入れ基準: (a) `pocket_kasane.c.obj` の各セクションの大きさが同一、ファームの大きさが同一。(b) r5sim の 4 負荷のカウントが同一。(c) `helper_iram8.lf` の `pocket_kasane:` の 3 行が今も当たっている（map で `mutate`・`parse_i16`・`parse_rect_mode` が `.iram0.text` にある）。(d) host の検査一式。実機: 起動と HELLO・STRESS の動作だけ（数値は取らなくてよい。大きさとカウントが同一なら機械語は同じ）。

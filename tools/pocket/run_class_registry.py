@@ -19,6 +19,7 @@ LEGACY_FIXTURE = ROOT / 'tools/pocket/fixtures/class_registry_16.inc'
 SCENARIOS = ('reuse', 'history1-instance17', 'history2-model17', 'full-ledger', 'reset-bounded', 'overflow')
 LEDGER_FILES = ('main/app_session.c', 'main/pocket/pocket_api.c', 'main/pocket/pocket_api.h',
                 'main/pocket/pocket_class_registry.h', 'main/pocket/pocket_kasane.c',
+                'main/pocket/pocket_kasane_scene.inc',
                 'main/pocket/pocket_fs.c', 'main/pocket/pocket_storage.c', 'main/pocket/pocket_net.c',
                 'main/pocket/pocket_text.c', 'main/pocket/pocket_workspace.c',
                 'main/pocket/app_music_view.c',
@@ -27,7 +28,8 @@ EXPECTED_OWNERS = {
     'main/pocket/pocket_api.c': ('hub_owner', 'token_owner'),
     'main/pocket/pocket_kasane.c': ('tx_owner', 'modal_owner', 'ref_owner', 'template_owner',
                                   'instance_owner', 'ticket_owner', 'image_owner', 'animation_owner',
-                                  'schema_class_owner', 'source_cap_owner', 'scene_owner'),
+                                  'schema_class_owner', 'source_cap_owner'),
+    'main/pocket/pocket_kasane_scene.inc': ('scene_owner',),
     'main/pocket/pocket_fs.c': ('file_owner',),
     'main/pocket/pocket_storage.c': ('hub_owner',),
     'main/pocket/pocket_net.c': ('lease_owner', 'response_owner'),
