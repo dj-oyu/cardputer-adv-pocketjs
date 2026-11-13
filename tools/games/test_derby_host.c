@@ -314,6 +314,15 @@ void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
     sspec *ss=sfind((int)handle);REQ(ss);
     sdraw_run(ss,in,NULL,n,tag);
 }
+/* pocket.derby.runners' draws (pocket_proc_draw_fixed): integer inputs, as
+ * the app's drawMany with an Int32Array, replayed untagged as those were. */
+void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *fx,unsigned n){
+    REQ(n<=KSN_SHIKI_INPUTS);
+    double in[KSN_SHIKI_INPUTS];
+    for(unsigned i=0;i<n;i++)in[i]=fx[i];
+    sspec *ss=sfind((int)handle);REQ(ss);
+    sdraw_run(ss,in,fx,n,0);
+}
 static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;(void)argv;
     ser_n=0;ser_overflow=false;

@@ -1115,6 +1115,17 @@ static JSValue js_begin_mesh(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 #ifdef POCKET_PROC_DRAW_HOOK
 bool pocket_proc_hook_dry;
 #endif
+/* The same with the inputs already in each input's Q format (drawMany's
+ * Int32Array), and the draw's number (DRAW_INDEX): pocket.derby.runners. */
+JSValue pocket_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index){
+    if(handle>INT32_MAX||n>KSN_SHIKI_INPUTS)
+        return failure(ctx,"kasane.shiki.draw",POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    JSValue result=pocket_proc_shiki_draw_inputs(ctx,handle,NULL,in,n,index);
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(!JS_IsException(result))pocket_proc_draw_fixed_hook(handle,in,n);
+#endif
+    return result;
+}
 /* One draw for a native caller (pocket_derby.c): a Shiki handle, the inputs
  * converted by sec.2.4 of the spec. */
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n){

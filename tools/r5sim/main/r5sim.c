@@ -445,15 +445,20 @@ static uint32_t r5_mallocs(void){ uint32_t m=0,k=0; pocketjs_guest_alloc_counts(
 static int64_t r5_live(void){ JSMemoryUsage u; JS_ComputeMemoryUsage(rt,&u); return u.malloc_count; }
 #endif
 #ifdef R5SIM_APP_DERBY
-// Per scene: turns, their counts (sum, max) and guest allocations.
-typedef struct { const char *name; unsigned n; uint64_t cc, max, allocs; } r5_scene;
+// Per scene: turns, their counts (sum, max) and guest allocations; and the
+// split of a turn: frame() (js, which includes the native calls it makes),
+// the Shiki draws inside it (shk: pocket_shiki_turn's total, the whole native
+// draw) and pocket_kasane_end_turn (end), with the Shiki draws a turn.
+typedef struct { const char *name; unsigned n; uint64_t cc, max, allocs, js, shk, end, draws; } r5_scene;
 static r5_scene r5_scenes[16];
-static void r5_scene_add(const char *name,uint64_t cc,uint32_t allocs) {
+static void r5_scene_add(const char *name,uint64_t cc,uint32_t allocs,uint64_t js,uint64_t shk,uint64_t end,
+                         uint32_t draws) {
     unsigned i=0;
     while(i<16&&r5_scenes[i].name&&strcmp(r5_scenes[i].name,name)) i++;
     if(i==16) return;
     r5_scene *s=&r5_scenes[i];
     s->name=name; s->n++; s->cc+=cc; s->allocs+=allocs; if(cc>s->max) s->max=cc;
+    s->js+=js; s->shk+=shk; s->end+=end; s->draws+=draws;
 }
 #endif
 
@@ -628,8 +633,16 @@ void app_main(void) {
         // a turn is a frame's whole JS. Counted, and normally 0 under QEMU.
         while(pocketjs_guest_work_pending(guest)) { conts++; r5_arm_turn(); pocketjs_guest_continue(guest); }
         const uint32_t cc_js=esp_cpu_get_cycle_count();
+#ifdef R5SIM_APP_DERBY
+        pocket_shiki_turn r5_shk;
+        pocket_shiki_turn_take(&r5_shk);
+        const uint32_t cc_end0=esp_cpu_get_cycle_count();
+#endif
         pocket_kasane_end_turn();
         if(t>60) r5_cc_end+=esp_cpu_get_cycle_count()-cc_js;
+#ifdef R5SIM_APP_DERBY
+        const uint32_t cc_end=esp_cpu_get_cycle_count()-cc_end0;
+#endif
         r5_turn_end(t);
         R5_CC_TAKE();
         {
@@ -638,7 +651,7 @@ void app_main(void) {
 #ifdef R5SIM_APP_DERBY
             // Every turn after the first 30 (the evaluation's garbage and
             // the first plans), filed under what it showed.
-            if(t>30) r5_scene_add(derby_class(),turn_cc,da);
+            if(t>30) r5_scene_add(derby_class(),turn_cc,da,cc_js-cc0,r5_shk.total_cy,cc_end,r5_shk.draws);
 #else
             (void)turn_cc;
 #endif
@@ -766,8 +779,11 @@ void app_main(void) {
     printf("R5SIM derby demo starts=%u ends=%u last_turn=%u\n",derby_demo_starts,derby_demo_ends,r5_last);
     for(unsigned i=0;i<16&&r5_scenes[i].name;i++) {
         const r5_scene *sc=&r5_scenes[i];
-        printf("R5SIM ccount scene=%s turns=%u per_turn=%llu max=%llu alloc_per_turn=%llu\n",sc->name,sc->n,
-               (unsigned long long)(sc->cc/sc->n),(unsigned long long)sc->max,(unsigned long long)(sc->allocs/sc->n));
+        printf("R5SIM ccount scene=%s turns=%u per_turn=%llu max=%llu alloc_per_turn=%llu js=%llu shiki=%llu end=%llu "
+               "draws=%llu\n",sc->name,sc->n,
+               (unsigned long long)(sc->cc/sc->n),(unsigned long long)sc->max,(unsigned long long)(sc->allocs/sc->n),
+               (unsigned long long)(sc->js/sc->n),(unsigned long long)(sc->shk/sc->n),(unsigned long long)(sc->end/sc->n),
+               (unsigned long long)(sc->draws/sc->n));
     }
 #endif
 #ifdef R5SIM_DEVICE
