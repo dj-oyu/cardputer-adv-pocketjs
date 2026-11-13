@@ -40,6 +40,11 @@ CONFIG_LWIP_IPV6=n
 CONFIG_LWIP_DHCPS=n
 CONFIG_LWIP_MAX_SOCKETS=4
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
+# The tcpip thread's stack is permanent once lwIP starts (esp_netif_deinit is
+# not supported). Its least free was 1,716 B of 3,584 (3,072 + IDF's 512) after
+# a boot sync and 16 HTTPS requests over two leases (NET_STACK, measured on the
+# device): 1,868 B used. 2,560 leaves 1,204 B (docs/platform/lwip-resource-review.md).
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=2560
 # RFC 4330 asks for a random 0-5000 ms delay before the first NTP request, so
 # that a street full of devices powering up together does not hit a public
 # pool at once. This device syncs once, when a person presses a key, and the

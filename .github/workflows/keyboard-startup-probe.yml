@@ -67,13 +67,20 @@ jobs:
           # are dropped before hashing, so the pin still holds for every other
           # line. CONFIG_ESP_SYSTEM_MEMPROT=n (sdkconfig.defaults, the Shiki
           # JIT's executable RAM, 481f7ce) moved the pin; hash from CI at 56949dc.
+          # The guest-memory and two-core work (PR 131) moved it again: new
+          # options, every probe default n (POCKET_GC_STATS, HEAP_MAP, OOM_GC_PROBE,
+          # DISP_TASK, DISP_ASSERT, FRAME_BREAKDOWN, ICACHE_AB, KEY_INT_PROBE),
+          # VM_GUEST_CHUNK_KB=0, VM_GUEST_ARENA_KB=64, GUEST_NATIVE_FLOOR_KB=16,
+          # LCD_ISR_CORE=-1, KEY_INT_GPIO=11, and LWIP_TCPIP_TASK_STACK_SIZE
+          # 3072 -> 2560 (sdkconfig.defaults). The old pin reproduces on main;
+          # this one locally and in CI at 6d6c214, with nothing else changed.
           lines=(b/'sdkconfig').read_text().splitlines(keepends=True)
           for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set'):
               i=next(i for i,l in enumerate(lines) if l.startswith(off))
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
           digest=hashlib.sha256(''.join(lines).encode()).hexdigest();print('sdkconfig pin',digest)
-          assert digest=='ae17e595d95e1e53db934edfca9a12e728ddb1f00de9f9de25741cfd2bb2e215'
+          assert digest=='40794fa4e16f09ef6449a01a7c6bd8c6ff17a91b472b2c4eaf184102a5bc9c24'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
           for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):

@@ -1,0 +1,235 @@
+# tools/r5sim/observe.py + pie_rank.py, -DR5SIM_DEVICE=1, STRESS LV1, turns 61..120
+# tree: 6ced5e4 + this change
+
+R5SIM device session
+R5SIM eval ok
+R5SIM STRESS f=60 lvl=1 pool=12 peak=18 oom=0 cyc=24 nat=23 natOk=ok err=0 cmds=75 native=13380 pressure=0 pe=0 trim=0
+R5SIM STRESS f=120 lvl=1 pool=15 peak=18 oom=0 cyc=48 nat=45 natOk=ok err=0 cmds=75 native=13380 pressure=0 pe=0 trim=0
+R5SIM device frames=120 frame_errors=0 yields=0 continuations=0(0) heap_used=71448
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+
+turns 60 (61..120); per turn below
+insns 549,105  by region iram 295,168, flash 170,879, rom 83,058
+transfers: fall_branch 41,392, branch_taken 30,661, ret 29,099, fall_split 29,004, call 22,782, jump 10,908, jx 5,109, other 2,772, zloop 1,493
+model cycles (no cache): insns 549,105 + 2x taken 98,559 + load-use 40,364 + div~16 x 988 = 802,390 (IPC 0.684)
+l32r 21,718  window/exception vector entries _WindowOverflow8 2,017.8, _UserExceptionVector 2.9, tlsf_malloc 0.1, heap_caps_aligned_alloc_base 0.1, _WindowUnderflow8 0.1, xPortEnterCriticalTimeout 0.1, private_command 0.1, js_dup 0.1
+
+== mul/div/fpu mnemonics per turn
+  mull          1,700.4
+  quos            941.5
+  loopnez         937.6
+  muluh           751.2
+  mul16u           92.2
+  mulsh            47.7
+  loop             45.8
+  quou             26.6
+  rems             10.8
+  remu              8.8
+
+== libgcc helpers (entries per turn, insns per turn inside)
+  __muldf3         calls     171.1  insns     10,587  (62/call)
+      from __kernel_sin                                  63.3
+      from __kernel_cos                                  55.7
+      from __rem_pio2                                    34.1
+      from JS_CallInternal                               18.0
+  __floatsidf      calls     161.6  insns      2,829  (18/call)
+      from JS_CallInternal                               82.0
+      from JS_ToFloat64Free                              65.2
+      from __rem_pio2                                    11.3
+  __gtdf2          calls     133.8  insns        803  (6/call)
+      from parse_i16                                    125.7
+      from number_in                                      6.1
+  __subdf3         calls     129.0  insns      6,007  (47/call)
+      from __rem_pio2                                    46.7
+      from __kernel_sin                                  37.4
+      from __kernel_cos                                  34.9
+      from JS_CallInternal                               10.0
+  __fixdfsi        calls     102.2  insns      1,813  (18/call)
+      from parse_i16                                     62.9
+      from JS_ToInt32Free                                24.6
+      from __rem_pio2                                    11.3
+      from js_number                                      3.4
+  __ltdf2          calls      73.9  insns        838  (11/call)
+      from parse_i16                                     62.9
+      from JS_CallInternal                                8.0
+      from number_in                                      3.0
+  __adddf3         calls      57.1  insns      1,441  (25/call)
+      from __kernel_cos                                  16.7
+      from JS_CallInternal                               15.9
+      from __kernel_sin                                  13.2
+      from __rem_pio2                                    11.3
+  __divdf3         calls      21.0  insns      8,235  (392/call)
+      from JS_CallInternal                               21.0
+  __ashldi3        calls      20.3  insns        162  (8/call)
+      from js_number                                     16.8
+      from js_typed_array_constructor                     2.3
+      from typed_array_init                               1.2
+  __udivdi3        calls       4.4  insns        194  (44/call)
+      from SysTickIsrHandler                              4.4
+  __nedf2          calls       3.0  insns          6  (2/call)
+      from number_in                                      3.0
+  __eqdf2          calls       3.0  insns         21  (7/call)
+      from __nedf2                                        3.0
+  __fixunsdfsi     calls       3.0  insns         60  (20/call)
+      from property_u8                                    2.5
+      from parse_u32                                      0.6
+  __floatunsidf    calls       0.1  insns          1  (6/call)
+      from js_uint32                                      0.1
+  helpers total insns/turn 32,996 (6.0% of insns)
+
+== top functions (insns/turn, taken/turn, load-use/turn, l32r/turn, model cyc share)
+  JS_CallInternal                                 46,285    8,012   3,411   3,641   8.19%
+  tlsf_malloc                                     23,070    2,969   1,539       0   3.81%
+  memcpy                                          20,568    2,867      61       0   3.29%
+  _WindowUnderflow8                               21,499    2,150       0       0   3.22%
+  _WindowOverflow8                                21,498    2,150       0       0   3.22%
+  xPortEnterCriticalTimeout                       17,569    3,340   1,256   1,252   3.18%
+  vPortExitCritical                               12,968    2,087   2,506   1,668   2.45%
+  _xtos_set_intlevel                              15,645    1,738       0       0   2.38%
+  tlsf_free                                       12,980    1,567     969      45   2.13%
+  heap_caps_aligned_alloc_base                    10,264    2,458   1,683     132   2.10%
+  JS_FreeValueRT                                   9,862    2,975     750       0   2.06%
+  xPortInIsrContext                               10,083    1,658   1,659   1,659   1.88%
+  __muldf3                                        10,587    1,338     171     513   1.67%
+  js_malloc_rt                                     6,691    1,573   1,204       0   1.38%
+  __divdf3                                         8,235    1,191      21      63   1.33%
+  find_own_property                                8,156      943     549       0   1.32%
+  core_change                                      6,755    1,510     714     237   1.31%
+  block_cache_free                                 7,387      987     755     118   1.26%
+  heap_caps_free                                   4,980    1,758   1,386     385   1.23%
+  block_cache_malloc                               7,164      889     914     118   1.23%
+  guest_usable_size                                7,045      586   1,170     585   1.17%
+  multi_heap_malloc                                5,975    1,556     265       0   1.17%
+  __call__xtos_set_intlevel                        3,476    1,738   1,738   1,738   1.08%
+  xTaskGetCurrentTaskHandle                        5,709      987     987     987   1.08%
+  guest_uses_block_cache                           6,053      986     493       0   1.06%
+  js_dup                                           5,023    1,499     385       0   1.05%
+  JS_FreeValue                                     4,666    1,600       0       0   0.98%
+  __subdf3                                         6,007      812     129     258   0.97%
+  ksn_core_damage                                  4,873    1,060     490      89   0.93%
+  memcmp                                           4,676      937     468       0   0.87%
+  command_box                                      5,630      516     107     107   0.84%
+  js_free_rt                                       4,529    1,105       0       0   0.84%
+  multi_heap_internal_lock                         3,371    1,346     405       0   0.81%
+  private_command                                  4,951      449     231     231   0.76%
+  guest_malloc                                     4,183      877       0       0   0.74%
+  free_gc_object                                   3,744      828     283       0   0.71%
+  JS_NewObjectFromShape                            4,526      518     112       0   0.71%
+  multi_heap_internal_unlock                       2,836    1,216     405       0   0.71%
+  apply_placement                                  4,445      469     214       8   0.70%
+  bank_command                                     4,828      336       0       0   0.69%
+  multi_heap_aligned_free                          3,555      898     128       0   0.68%
+  parse_i16                                        3,773      629     377     566   0.67%
+  strv                                             3,285      821     411       0   0.67%
+  add_property                                     3,453      555     389      67   0.62%
+  __call_memcpy                                    1,812      906     906     906   0.56%
+
+== hottest loops (backward taken branches): func, branch pc, iterations/turn, body bytes
+  heap_caps_aligned_alloc_base             0x40379d2b       258  body 17 B @ 0x40379d1d
+  memcmp                                   0x40056ede       202  body 19 B @ 0x40056ece
+  memcmp                                   0x40056efb       190  body 26 B @ 0x40056ee4
+  block_cache_malloc                       0x42015293       131  body 28 B @ 0x4201527a
+  heap_caps_aligned_alloc_base             0x40379d49       126  body 47 B @ 0x40379d1d
+  JS_CallInternal                          0x4203b8b1       119  body 35 B @ 0x4203b891
+  heap_caps_realloc_base                   0x40379df8        70  body 19 B @ 0x40379de8
+  tlsf_malloc                              0x40380330        63  body 38 B @ 0x4038030d
+  __ltdf2                                  0x4003380d        61  body 7 B @ 0x40033809
+  memcmp                                   0x40056ed2        53  body 12 B @ 0x40056ec9
+  utf8_count                               0x4038111f        53  body 53 B @ 0x403810ed
+  js_call_math_fast                        0x4204e31b        50  body 27 B @ 0x4204e303
+  apply_placement                          0x4200bc90        46  body 200 B @ 0x4200bbcb
+  apply_placement                          0x4200bc1d        46  body 88 B @ 0x4200bbc8
+  parse_rect_mode                          0x403813e5        41  body 64 B @ 0x403813a8
+  systimer_hal_get_counter_value           0x4037fb4f        40  body 21 B @ 0x4037fb3d
+  systimer_hal_get_counter_value           0x4037fb6d        40  body 24 B @ 0x4037fb58
+  u32toa                                   0x4038149c        31  body 29 B @ 0x40381482
+  esp_vApplicationTickHook                 0x4037dfc6        31  body 14 B @ 0x4037dfbb
+  JS_NewStringLen                          0x420497cf        29  body 15 B @ 0x420497c3
+  JS_FreeValueRT                           0x403817ca        29  body 64 B @ 0x4038178d
+  JS_GetPropertyInternal                   0x4204f664        27  body 617 B @ 0x4204f3fe
+  __JS_AtomToValue                         0x42047654        25  body 84 B @ 0x42047603
+  __memcpy_aux                             0x40056f14        25  body 18 B @ 0x40056f05
+  JS_CallInternal                          0x4203eaa3        25  body 38 B @ 0x4203ea80
+  JS_ToInt64Clamp                          0x40381e0f        25  body 8 B @ 0x40381e0a
+  __subdf3                                 0x40054a85        22  body 52 B @ 0x40054a54
+  JS_CallInternal                          0x4203d595        21  body 136 B @ 0x4203d510
+  mutate                                   0x40381290        21  body 55 B @ 0x4038125c
+  JS_CallInternal                          0x4203abb3        19  body 32 B @ 0x4203ab96
+  heap_caps_realloc_base                   0x40379e63        17  body 211 B @ 0x40379d93
+  ksn_core_damage                          0x4202b00a        16  body 57 B @ 0x4202afd4
+  esp_vApplicationIdleHook                 0x4037df9e        15  body 20 B @ 0x4037df8d
+  strlen                                   0x400556e2        15  body 16 B @ 0x400556d5
+  parse_rect_mode                          0x40381393        14  body 52 B @ 0x40381362
+  JS_GetPropertyInternal                   0x4204f667        11  body 230 B @ 0x4204f584
+  __subdf3                                 0x40054983        11  body 72 B @ 0x4005493e
+  __memcpy_aux                             0x40056f28        10  body 38 B @ 0x40056f05
+  js_vm_stack_push                         0x4203829b         8  body 7 B @ 0x42038297
+  js_vm_stack_push                         0x4203831b         8  body 137 B @ 0x42038295
+  js_array_every                           0x42073f1d         8  body 175 B @ 0x42073e71
+  __divdf3                                 0x40054c38         6  body 63 B @ 0x40054bfc
+  expose_ref                               0x4202d0ba         6  body 14 B @ 0x4202d0af
+  JS_NewAtomLen                            0x420499a3         5  body 36 B @ 0x42049982
+  hash_string                              0x4203669b         5  body 34 B @ 0x4203667c
+
+## parts
+part                        insn/turn  %insn    taken  loaduse    l32r  model cyc      %
+allocator                     200,685  36.5%   38,402   20,811   9,615    298,300  37.9%
+quickjs.c                     169,286  30.8%   34,415   11,581   5,988    249,698  31.7%
+kasane/pocket/other            63,612  11.6%    9,502    4,137   2,273     86,753  11.0%
+window exceptions              42,997   7.8%    4,300        0       0     51,597   6.6%
+libgcc soft-double/64bit       34,486   6.3%    5,303    1,328   1,899     46,421   5.9%
+mem*/str*                      29,409   5.4%    5,150    1,584   1,111     41,293   5.2%
+rtos/isr                        4,923   0.9%      804      558     197      7,090   0.9%
+libm (double)                   3,707   0.7%      682      365     635      5,435   0.7%
+total                         549,105          98,559   40,364  21,718    786,587
+calls/turn 22782.133333333335 rets 29098.65
+
+## pie_rank --min-cycles 5
+turns 60; model cycles/turn 802,390 (no flash wait); savings are model estimates
+
+== candidates (saved cycles/turn, % of the model turn)
+  #    saved      %  kind         where                                            trip  entries  B/entry  now cyc  instructions (TRM page)  note
+  1      382  0.05%  PIE copy     memcpy @0x40056f5c                                2.3    127.5       37    2,988  EE.VLD.128.IP p164, EE.LD.128.USAR.IP p93, EE.SRC.Q p125, EE.VST.128.IP p275   (ROM: replace by linking an own version)
+  2      105  0.01%  PIE fill     memset @0x400570e8                                4.0     23.4       64      471  EE.ZERO.Q p299, EE.VLDBC.32 p173, EE.VST.128.IP p275   (ROM: replace by linking an own version)
+  3       56  0.01%  PIE reduce   apply_outcome @0x4202c6b2                        64.0      1.0     1024      189  EE.LD.128.USAR.IP p93, EE.VMULAS.S16.ACCX p210  data-dependent branches inside the body
+  4       48  0.01%  PIE reduce   esp_vApplicationIdleHook @0x4037df8d              8.0      2.2       32      123  EE.LD.128.USAR.IP p93, EE.VMULAS.S16.ACCX p210  data-dependent branches inside the body
+  5       43  0.01%  LOOP         JS_NewStringLen @0x420497c3                       6.6      5.2 -      274  LOOPNEZ, LOOPGTZ  trip count must be known on entry
+  6       36  0.00%  PIE reduce   expose_ref @0x4202d07d                           64.0      0.5     1024      101  EE.LD.128.USAR.IP p93, EE.VMULAS.S16.ACCX p210  data-dependent branches inside the body
+  7       29  0.00%  LOOP         ksn_core_damage @0x4202afd4                      17.0      1.0 -      134  LOOPNEZ, LOOPGTZ  trip count must be known on entry
+  8       24  0.00%  LOOP         esp_vApplicationIdleHook @0x4037df8d              8.0      2.2 -      123  LOOPNEZ, LOOPGTZ  trip count must be known on entry
+  9       13  0.00%  PIE search   expose_ref @0x4202d0af                           12.9      0.5      207       48  EE.LD.128.USAR.IP p93, EE.SRC.Q p125, EE.VCMP.EQ.S8 p157, EE.MOVI.32.A p118  
+ 10       10  0.00%  PIE reduce   strnlen @0x4005724a                             114.0      0.0      114       11  EE.LD.128.USAR.IP p93, EE.VMULAS.S16.ACCX p210, EE.VSUBS.S8 p287  data-dependent branches inside the body (ROM: replace by linking an own version)
+ 11        8  0.00%  MOVcc        JS_CallInternal @0x4203eb42                    -      8.0 - -  MOVGEZ  bltz over movi.n
+    all 11 candidates together: 752 cycles/turn (0.1%; overlapping candidates are counted twice)
+
+== hottest rejected (cycles/turn spent there now, why not)
+      42,462  JS_CallInternal @0x4203a8eb                        trip    9.6 entries     0.6  call in the body
+      13,380  xPortEnterCriticalTimeout @0x4037e321              trip  364.2 entries     1.1  call in the body
+       7,333  __divdf3 @0x40054bf0                               trip   51.9 entries    21.0  no streaming memory access (ROM: replace by linking an own version)
+       7,120  vPortExitCritical @0x4037e277                      trip  418.8 entries     1.0  no streaming memory access (computed addresses)
+       5,842  xPortEnterCriticalTimeout @0x4037e343              trip  136.5 entries     3.1  call in the body
+       5,426  js_malloc_rt @0x4038277a                           trip 14451.0 entries     0.0  call in the body
+       5,202  command_box @0x42028b92                            trip  918.7 entries     0.1  pointer chasing (address from a load)
+       5,133  heap_caps_free @0x40379cab                         trip    3.9 entries   128.2  pointer chasing (address from a load)
+       4,182  tlsf_malloc @0x40380214 (quos)                     trip - entries   261.4  divisor in a register: not a shift
+       4,182  tlsf_malloc @0x40380217 (quos)                     trip - entries   261.4  divisor in a register: not a shift
+       4,178  xPortEnterCriticalTimeout @0x4037e3c1              trip 25066.0 entries     0.0  no streaming memory access
+       4,176  core_change @0x420299a6                            trip   35.1 entries     3.1  call in the body
+       4,122  heap_caps_aligned_alloc_base @0x40379d1d           trip    3.0 entries   126.1  pointer chasing (address from a load)
+       3,504  apply_placement @0x4200bbcb                        trip  921.0 entries     0.1  call in the body
+       3,353  heap_caps_aligned_alloc_base @0x40379d0d           trip    3.9 entries   132.4  pointer chasing (address from a load)
+       3,187  ksn_core_damage @0x4202aeff                        trip 4426.0 entries     0.0  call in the body
+       3,165  ksn_core_damage @0x4202aef7                        trip   60.0 entries     0.0  call in the body
+       3,144  parse_i16 @0x403812cb                              trip 1258.3 entries     0.1  call in the body
+       3,075  ksn_core_damage @0x4202aed7                        trip    2.0 entries     1.0  call in the body
+       3,012  free_gc_object @0x40382199                         trip    2.3 entries    56.6  call in the body
+       2,956  ksn_core_damage @0x4202af98                        trip    3.5 entries    20.9  call in the body
+       2,853  JS_CallInternal @0x4203f6e7                        trip   68.0 entries     0.0  call in the body
+       2,841  JS_CallInternal @0x4203f633                        trip    4.7 entries     1.1  call in the body
+       2,790  memcmp @0x40056ece                                 trip    3.7 entries    76.0  search: 15 B per entry is too few for 16 B vectors (ROM: replace by linking an own version)
+       2,519  JS_CallInternal @0x4203b891                        trip    3.4 entries    48.9  call in the body
+       2,431  block_cache_malloc @0x4201527a                     trip    2.1 entries   118.0  call in the body
+       2,396  __JS_FindAtom$constprop$0 @0x42037cae              trip    6.9 entries    20.1  call in the body
+       2,183  memcmp @0x40056ee4                                 trip 5699.0 entries     0.0  pointer chasing (address from a load) (ROM: replace by linking an own version)
+       2,136  core_change @0x42029a21                            trip    1.8 entries    59.0  pointer chasing (address from a load)
+       2,062  JS_CallInternal @0x4203a5c1                        trip    4.7 entries    10.8  call in the body

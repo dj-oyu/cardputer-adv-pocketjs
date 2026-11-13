@@ -147,7 +147,9 @@ int main(void){
  pocket_proc_present_result(KSN_OK);
  eval_ok(ctx,"P.beginMeshFrame(0,1024,8000000,8)");append(ctx,&blue,z);eval_ok(ctx,"P.commit()");
  REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&actual[12*240+12]==31);
- pocket_proc_present_result(KSN_IO);REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&actual[12*240+12]==63488);
+ /* One buffer a surface (docs/vm/qjs-observe.md sec.25): commit() wrote the
+  * new frame over the committed one, so a backdrop IO repaints the new one. */
+ pocket_proc_present_result(KSN_IO);REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&actual[12*240+12]==31);
  eval_error(ctx,"P.beginFrame(0)");pocket_proc_present_result(KSN_OK);
  pocket_proc_image_mode();eval_ok(ctx,"P.beginMeshFrame(0,1024,8000000,1)");append(ctx,&blue,z);eval_ok(ctx,"P.commit()");
  pocket_proc_present_result(KSN_IO);REQUIRE(pocket_proc_pending());

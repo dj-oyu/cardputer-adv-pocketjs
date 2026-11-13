@@ -55,6 +55,17 @@ static int64_t last_sample;
 static atomic_bool gyro_wanted;
 static bool gyro_running;
 
+// Who wants samples. The IMU read is the larger half of input_task's time on
+// CPU 0 (a 1.8 ms poll every 20 ms against ~0.24 ms for the keyboard's, from
+// FRAME_P0's inp_max/inp_ms), and most programs never read it, so nobody
+// asking means no read. The wallpaper's demand is a lease that motion_get()
+// renews every home frame (33 ms), so leaving home ends it without a call.
+#define HOME_LEASE_MS 250u
+static atomic_bool app_wanted;
+static atomic_uint home_until_ms;
+static atomic_bool idle;
+static uint32_t now_ms(void){return (uint32_t)(esp_timer_get_time()/1000);}
+
 static int8_t read_reg(uint8_t reg,uint8_t *data,uint32_t len,void *ctx) {
     (void)ctx;return i2c_master_transmit_receive(device,&reg,1,data,len,10)==ESP_OK?0:-1;
 }
@@ -90,12 +101,18 @@ void motion_init(i2c_master_bus_handle_t bus) {
     ESP_LOGI("motion","BMI270 addr=0x%x chip=0x%x init=%d accel=50Hz gyro=configured,off",addr,imu.chip_id,rc);
 }
 void motion_recenter(void){centered=false;}
-void motion_get(int *x,int *y){*x=atomic_load(&tilt_x);*y=atomic_load(&tilt_y);}
+void motion_get(int *x,int *y){
+    atomic_store(&home_until_ms,now_ms()+HOME_LEASE_MS);
+    *x=atomic_load(&tilt_x);*y=atomic_load(&tilt_y);
+}
+void motion_want_app(bool on){atomic_store(&app_wanted,on);}
 bool motion_present(void){return ready;}
 unsigned motion_rate_hz(void){return 1000000u/SAMPLE_PERIOD_US;}
 void motion_request_gyro(bool on){atomic_store(&gyro_wanted,on);}
 bool motion_latest(motion_sample_t *out) {
-    if(!ready)return false;
+    // A sample from before the reads stopped would carry a stale timeMs that
+    // looks current to a program that just started reading: report none.
+    if(!ready||atomic_load(&idle))return false;
     for(int attempt=0;attempt<8;attempt++) {
         unsigned before=atomic_load(&version);
         if(before&1u)continue;
@@ -120,7 +137,21 @@ static void apply_gyro_request(void) {
     ESP_LOGI("motion","gyro %s",want?"on":"off");
 }
 void motion_poll(void) {
-    int64_t now=esp_timer_get_time();if(!ready||now-last_read<SAMPLE_PERIOD_US)return;last_read=now;
+    if(!ready)return;
+    // Signed difference: the lease survives the millisecond counter wrapping.
+    if(!atomic_load(&app_wanted)&&(int32_t)(atomic_load(&home_until_ms)-now_ms())<=0) {
+        // A program that ended with a watch open asked for the gyroscope off;
+        // apply it now, since no read will follow to do it.
+        apply_gyro_request();
+        if(!atomic_load(&idle)) {
+            atomic_store(&idle,true);
+            ESP_LOGI("motion","idle: no reader");
+        }
+        return;
+    }
+    int64_t now=esp_timer_get_time();if(now-last_read<SAMPLE_PERIOD_US)return;last_read=now;
+    // Samples nobody asked for were not dropped: restart the gap estimate.
+    if(atomic_load(&idle))last_sample=0;
     apply_gyro_request();
     struct bmi2_sens_data data={0};
     if(bmi2_get_sensor_data(&data,&imu)!=BMI2_OK){
@@ -173,6 +204,10 @@ void motion_poll(void) {
     atomic_fetch_add(&version,1u);
     latest=sample;
     atomic_fetch_add(&version,1u);
+    if(atomic_load(&idle)) {
+        atomic_store(&idle,false);
+        ESP_LOGI("motion","reading: %s",atomic_load(&app_wanted)?"app":"home");
+    }
 
     // Every two seconds, in the units section 8 publishes, because the axis
     // check in acceptance condition 7 is read off this line: hold the device in

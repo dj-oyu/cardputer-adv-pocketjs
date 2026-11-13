@@ -62,7 +62,7 @@
 | `beginFrame(color, surface?)` | RGB565、面の ID（省略で面 0） | `BUSY`: previous frame awaits presentation or repair、`OUT_OF_MEMORY`: frame allocation failed |
 | `draw(handle, ...inputs)` または `draw(handle, [inputs])` | 0〜8 個の有限な数（足りない分は 0） | `BUSY`: beginFrame required、`CLOSED`、`INVALID_ARGUMENT`: non-finite input／typed point run failed、`LIMIT_EXCEEDED`: frame drawing limit |
 | `commit()` | | `BUSY`: resource(surface ID) required（面 1 で `resource` 前） |
-| `resource({maxSegments}?)`／`createSurface({maxSegments}?)` | 1〜1,024 | `LIMIT_EXCEEDED`: two surfaces maximum |
+| `resource({maxSegments, spare}?)`／`createSurface({maxSegments, spare}?)` | `maxSegments` 1〜1,024、`spare` 0〜1,024（省略で `maxSegments` と同じ。面のバッファは `maxSegments + spare` 線分を 1 回だけ確保し、表示中のフレームと組み立て中のフレームがそこに収まる。`docs/vm/qjs-observe.md` §25） | `LIMIT_EXCEEDED`: two surfaces maximum。収まらないフレームは `draw` が `LIMIT_EXCEEDED`（frame drawing limit (… exceed maxSegments + spare)） |
 
 `pocket.derby.ser()` は JS を通らずに `pocket_proc_draw_numbers()`（`draw` の後半）を呼ぶ。`pocket.shapes` は組み立て中のフレームへ直接書く（`pocket_proc_native_line()` など）。
 

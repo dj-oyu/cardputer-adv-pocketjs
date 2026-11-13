@@ -1,4 +1,8 @@
 #include "board.h"
+#include "frame_bd.h"
+#include "disp.h"
+#include "freertos/FreeRTOS.h"
+#include "esp_freertos_hooks.h"
 #include "shell.h"
 #include "overlay.h"
 #include "motion.h"
@@ -365,8 +369,14 @@ static void input_task(void *arg) {
         if(++polls==2000)
             ESP_LOGI("boot","INPUT_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
         keystroke_t k;
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+        const int64_t poll_t0=esp_timer_get_time();
+#endif
         bool have=keymap_poll(&k);
         motion_poll();
+#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+        frame_bd_input((uint32_t)(esp_timer_get_time()-poll_t0));
+#endif
         char c;
         if(!have && usb_serial_jtag_read_bytes(&c,1,0)>0) have=usb_stroke(c,&k);
         if(have) {
@@ -498,6 +508,13 @@ extern const char derby_watch_start[] asm("_binary_derby_watch_js_start");
 extern const char derby_watch_end[] asm("_binary_derby_watch_js_end");
 extern const char big_wave_start[] asm("_binary_big_wave_js_start");
 extern const char big_wave_end[] asm("_binary_big_wave_js_end");
+// pocket.net's self-check and the HTTPS cycle (apps/netcheck/README.md): not on
+// the menu, started by the USB broker so the network can be measured without
+// hands on the device (docs/platform/lwip-resource-review.md).
+extern const char netcheck_start[] asm("_binary_netcheck_js_start");
+extern const char netcheck_end[] asm("_binary_netcheck_js_end");
+extern const char tlscycle_start[] asm("_binary_tlscycle_js_start");
+extern const char tlscycle_end[] asm("_binary_tlscycle_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 extern const char pixel_lab_probe_start[] asm("_binary_pixel_lab_probe_js_start");
 extern const char pixel_lab_probe_end[] asm("_binary_pixel_lab_probe_js_end");
@@ -663,6 +680,8 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.lcdcatch","LCD CATCH",lcd_catch_start,lcd_catch_end,5),
     NATIVE_APP("local.derby","DERBY WATCH",derby_watch_start,derby_watch_end,5),
     NATIVE_APP("local.bigwave","BIG WAVE",big_wave_start,big_wave_end,5),
+    NATIVE_APP("local.netcheck","NET CHECK",netcheck_start,netcheck_end,5),
+    NATIVE_APP("local.tlscycle","TLS CYCLE",tlscycle_start,tlscycle_end,5),
     NATIVE_APP("local.player","MUSIC PLAYER (host launch unsupported)",NULL,NULL,0),
     NATIVE_APP("local.playground","PLAYGROUND (dynamic source unsupported)",NULL,NULL,0),
     NATIVE_APP("local.tutorial","TUTORIAL (dynamic source unsupported)",NULL,NULL,0),
@@ -890,8 +909,12 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 static void tick_run(bool have, const keystroke_t *stroke) {
     // The three pickers below keep the guest from being ticked, so its
     // input.keys cannot see that the keys pressed meanwhile were theirs.
-    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal()) {
         pocket_input_keys_withhold();
+        // A modal draws through the board directly (two-core-pipeline.md
+        // sec.2.3 D): no present may be in flight.
+        disp_join();
+    }
     // The works picker is a host screen over a live guest: while it is up the
     // guest is not ticked and the keys are the picker's. Its promise settles on
     // the turn after it closes, which is the first turn the guest runs again.
@@ -958,9 +981,9 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         jsconsole_set_error("STOPPED (NO frame)");
 
     bool shot=atomic_exchange(&capture,false);
-    if(shot) { board_capture(true); app_force_redraw(); }
+    if(shot) { disp_join(); board_capture(true); app_force_redraw(); }
 #ifdef KASANE_MEGADEMO_TRACE
-    if(!shot&&atomic_load(&raw_capture)>0) { atomic_fetch_sub(&raw_capture,1); shot=true; board_capture(true); }
+    if(!shot&&atomic_load(&raw_capture)>0) { atomic_fetch_sub(&raw_capture,1); shot=true; disp_join(); board_capture(true); }
 #endif
     if(!leave) {
         if(key==KEY_ENTER) sound_play(1);
@@ -997,7 +1020,7 @@ static void paint(const screen_ops_t *s) {
     bool shot=atomic_exchange(&capture,false);
     if(!shot && !pet_repaint && !s->dirty()) return;
     if((shot||pet_repaint) && s->repaint_all) s->repaint_all();
-    if(shot) board_capture(true);
+    if(shot) { disp_join(); board_capture(true); }
     s->draw();
     if(shot) board_capture(false);
     if(shot || s->frame_ms>=33) return;      // the home screen logs its own
@@ -1021,6 +1044,29 @@ static void paint(const screen_ops_t *s) {
 // previous frame()'s turn finished waiting. Continuation turns run inside it
 // without restarting it; see the rule at the bottom of ui_task().
 static int64_t period_began;
+// When the UI core's idle task last ran. A frame over the display period
+// waits nowhere, so the shipping rule used to yield a tick after every such
+// frame for the idle task's sake (see the overrun branch in ui_task). The
+// frame's own send wait already blocks for 3-5 ms in a painting frame, and
+// that one tick cost STRESS 1.05 ms a frame at a 16 ms period (measured,
+// docs/perf/frame-breakdown.md sec.6), so it is now paid only when the idle
+// task really has not run.
+static volatile int64_t ui_idle_last_us;
+static bool ui_idle_hook(void) { ui_idle_last_us=esp_timer_get_time(); return true; }
+static void ui_idle_watch(void) {
+    ui_idle_last_us=esp_timer_get_time();
+#if CONFIG_POCKET_UI_TASK_CORE>=0
+    if(esp_register_freertos_idle_hook_for_cpu(ui_idle_hook,CONFIG_POCKET_UI_TASK_CORE)!=ESP_OK)
+#endif
+        ui_idle_last_us=INT64_MIN/2;  // no hook: always yield, the old rule
+}
+// 500 ms: a tenth of the task watchdog's 5 s.
+static bool ui_idle_starved(void) { return esp_timer_get_time()-ui_idle_last_us>500000; }
+// The frame_bd probe's DEADLINE pacing (frame_bd.h); 0 when not in use.
+static int64_t pace_deadline_us;
+#ifndef VM_DISPLAY_PERIOD_US
+#define VM_DISPLAY_PERIOD_US ((int64_t)VM_DISPLAY_PERIOD_MS*1000)
+#endif
 
 static bool ui_key_receive(keystroke_t *stroke) {
     bool have=xQueueReceive(keys,stroke,0)==pdTRUE;
@@ -1087,6 +1133,8 @@ static void ui_task(void *arg) {
     // Before anything can post: every producer of a completion runs on a task
     // this one starts, or on an interrupt armed from it.
     vm_wake_bind();
+    ui_idle_watch();
+    ESP_ERROR_CHECK(disp_init());
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
 #ifdef KASANE_P0_PROBE
@@ -1218,6 +1266,8 @@ static void ui_task(void *arg) {
             // nothing behind it. The order is tick_run()'s, for the reason
             // given there.
             if(!running && screen==SCREEN_HOME && overlay_running()) {
+                if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+                    disp_join();   // sec.2.3 D, as in tick_run
                 if(pocket_workspace_modal()) {
                     if(have) pocket_workspace_modal_key(&stroke);
                     if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
@@ -1456,7 +1506,23 @@ static void ui_task(void *arg) {
                     vTaskDelay(pdMS_TO_TICKS(floor_ms));
                     since+=floor_ms;
                 }
-                rest = since<VM_DISPLAY_PERIOD_MS ? VM_DISPLAY_PERIOD_MS-since : 0;
+                // OLD unless the frame_bd probe rotates the pacing rule.
+                const unsigned pace=frame_bd_pace_mode();
+                if(pace==FRAME_BD_PACE_DEADLINE) {
+                    // Absolute deadline in us: a period of 16.667 ms is not a
+                    // whole number of ticks, and a late frame's debt is paid
+                    // back by the next ones, capped at one period.
+                    const int64_t now=esp_timer_get_time();
+                    if(!pace_deadline_us) pace_deadline_us=period_began;
+                    pace_deadline_us+=VM_DISPLAY_PERIOD_US;
+                    if(pace_deadline_us<now-VM_DISPLAY_PERIOD_US)
+                        pace_deadline_us=now-VM_DISPLAY_PERIOD_US;
+                    const int64_t left=pace_deadline_us-now;
+                    rest = left>=500 ? (unsigned)((left+500)/1000) : 0;
+                } else {
+                    pace_deadline_us=0;
+                    rest = since<VM_DISPLAY_PERIOD_MS ? VM_DISPLAY_PERIOD_MS-since : 0;
+                }
                 // A completion posted by another task or an ISR cuts the frame
                 // cap short instead of waiting out the period; the measured
                 // (device) cost it removes is the "up to one frame period"
@@ -1473,13 +1539,21 @@ static void ui_task(void *arg) {
                     // core: CPU 1's idle task starved and the task watchdog
                     // warned every 5 s (seen with apps/shikitest at 60 ms a
                     // frame, docs/kasane/shiki.md sec.5.11). One tick, as the
-                    // continuation branch already owes; only frames over the
-                    // period pay it.
-                    vTaskDelay(1);
+                    // continuation branch already owes -- but only when the
+                    // idle task has not run for 500 ms (ui_idle_starved()):
+                    // a frame that painted blocked in its send wait already.
+                    if(pace==FRAME_BD_PACE_OLD || ui_idle_starved()) {
+                        vTaskDelay(1);
+                        frame_bd_yielded();
+                    }
                 }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
-                period_began=esp_timer_get_time();
+                {
+                    const int64_t now=esp_timer_get_time();
+                    frame_bd_period(last_frame_us,(uint32_t)(now-period_began));
+                    period_began=now;
+                }
             }
             continue;
         }
@@ -1514,6 +1588,9 @@ static void nvs_init(void) {
 }
 
 void app_main(void) {
+#ifdef CONFIG_POCKET_HEAP_ORIGIN
+    { extern void heap_origin_start(void); heap_origin_start(); }
+#endif
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
     ESP_ERROR_CHECK(usb_console_init());
@@ -1528,6 +1605,12 @@ void app_main(void) {
     wifi_time_init();
     pet_hub_init();
     shell_init();
+    // Whenever a network is stored (auto sync, a manual sync, a scan or an
+    // app's pocket.net may start the radio later): lwIP's permanent blocks go
+    // beside the other boot residents instead of between the holes a later
+    // start would find (docs/vm/lv3-heap-exhaustion.md sec.6.7). No stored
+    // network, no radio, and nothing is made.
+    if(wifi_time_has_credentials()) wifi_time_stack_early();
     // After shell_init(), which is where the stored arming bit reaches the
     // overlay's setter, and before the UI task, which is what would start it.
     // This is the boot that decides whether an overlay that did not survive
@@ -1551,7 +1634,9 @@ void app_main(void) {
         .instance=app_guest_generation,
         .clock_ms=native_clock_ms,
     };
-    uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
+    /* 53 bits: the broker's clients read JSON numbers as doubles, so a wider
+     * id came back rounded and every action.tap was refused as stale_boot. */
+    uint64_t boot_id=(((uint64_t)esp_random()<<32)|esp_random())&((1ull<<53)-1u);
     app_control_init(boot_id,&native_hooks);
     /* The system's slow tasks take RTC fast memory (8 KB, APB clock) at boot so
      * the JIT's code can never land there: 3x slower (shiki-jit.md sec.15).

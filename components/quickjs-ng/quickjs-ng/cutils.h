@@ -288,6 +288,49 @@ static inline void put_u64(uint8_t *tab, uint64_t val)
     memcpy(tab, &val, sizeof(val));
 }
 
+/* POCKET: on a little-endian target the 16/32-bit accessors assemble bytes
+ * instead of memcpy'ing. Xtensa has no unaligned load, and -Os GCC turns a
+ * 4-byte memcpy of unknown alignment into a call to ROM memcpy (~25
+ * instructions behind two calls): the interpreter reads its unaligned
+ * bytecode operands through these, 356 times a STRESS turn
+ * (docs/vm/qjs-observe.md sec.3.3.1). x86 GCC folds the byte form back into
+ * one load, so the host tests run this same code. Big-endian keeps memcpy. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static inline uint32_t get_u32(const uint8_t *tab)
+{
+    return (uint32_t)tab[0] | ((uint32_t)tab[1] << 8) |
+           ((uint32_t)tab[2] << 16) | ((uint32_t)tab[3] << 24);
+}
+
+static inline int32_t get_i32(const uint8_t *tab)
+{
+    return (int32_t)get_u32(tab);
+}
+
+static inline void put_u32(uint8_t *tab, uint32_t val)
+{
+    tab[0] = (uint8_t)val;
+    tab[1] = (uint8_t)(val >> 8);
+    tab[2] = (uint8_t)(val >> 16);
+    tab[3] = (uint8_t)(val >> 24);
+}
+
+static inline uint32_t get_u16(const uint8_t *tab)
+{
+    return (uint32_t)tab[0] | ((uint32_t)tab[1] << 8);
+}
+
+static inline int32_t get_i16(const uint8_t *tab)
+{
+    return (int16_t)get_u16(tab);
+}
+
+static inline void put_u16(uint8_t *tab, uint16_t val)
+{
+    tab[0] = (uint8_t)val;
+    tab[1] = (uint8_t)(val >> 8);
+}
+#else
 static inline uint32_t get_u32(const uint8_t *tab)
 {
     uint32_t v;
@@ -325,6 +368,8 @@ static inline void put_u16(uint8_t *tab, uint16_t val)
 {
     memcpy(tab, &val, sizeof(val));
 }
+
+#endif
 
 static inline uint32_t get_u8(const uint8_t *tab)
 {

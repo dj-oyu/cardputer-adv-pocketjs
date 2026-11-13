@@ -1,4 +1,10 @@
 #include "pocket_kasane.h"
+#ifdef ESP_PLATFORM
+#include "disp.h"
+#else
+/* Host tests: nothing is ever in flight. */
+static inline bool disp_busy(void) { return false; }
+#endif
 #include "pocket_api.h"
 #include "pocket_shiki_frame.h"
 #include "pocket_grid.h"
@@ -19,6 +25,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Two-core P0 probe (docs/perf/two-core-pipeline.md sec.5): where the JS
+ * turn first touches state the display would read. Device only. */
+#if defined(ESP_PLATFORM)
+#include "frame_bd.h"
+#else
+#define frame_bd_join_point(site) ((void)0)
+#endif
 
 #define KASANE_REF_LIMIT 32u
 #define KASANE_REF_STORAGE 64u
@@ -668,9 +681,19 @@ ksn_result pocket_kasane_presenter_step(bool *blocked){
     return state->provider->step(state->provider_state,blocked);
 }
 
+// An int-tagged value needs no rounding, finiteness or integrality test, only
+// the range: answered without the soft-double helpers (__floatsidf, __ltdf2,
+// __gtdf2, __fixdfsi) that the double path calls -- ~300 calls a STRESS turn
+// for coordinates that are almost always ints (docs/vm/qjs-observe.md sec.3.1).
 static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
                       double *out) {
     double n;
+    if(JS_VALUE_GET_TAG(value)==JS_TAG_INT){
+        const int32_t i=JS_VALUE_GET_INT(value);
+        if(i<lo||i>hi) return false;
+        *out=i;
+        return true;
+    }
     if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&n,value)<0||!isfinite(n)||
        floor(n)!=n||n<lo||n>hi) return false;
     *out=n;
@@ -679,6 +702,12 @@ static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
 
 static bool parse_i16(JSContext *ctx, JSValueConst value, int16_t *out) {
     double n;
+    if(JS_VALUE_GET_TAG(value)==JS_TAG_INT){
+        const int32_t i=JS_VALUE_GET_INT(value);
+        if(i<INT16_MIN||i>INT16_MAX) return false;
+        *out=(int16_t)i;
+        return true;
+    }
     if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&n,value)<0||!isfinite(n)) return false;
     n=round(n);
     if(n<INT16_MIN||n>INT16_MAX)return false;
@@ -1642,6 +1671,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
     if(!tx_proto(ctx)||!modal_proto(ctx)) return JS_EXCEPTION;
     apply_outcome();
+    frame_bd_join_point(FRAME_BD_JOIN_KASANE_TX);
     ksn_tx tx;ksn_result result=ksn_view_begin(view(),mode,&tx);
     if(result!=KSN_OK) return throw_result(ctx,result,op);
     state->building=tx;
@@ -3002,6 +3032,20 @@ ksn_result pocket_kasane_advance(uint64_t now_us){
     apply_outcome();return ksn_runtime_advance_animations(now_us);
 }
 bool pocket_kasane_animation_pending(void){return ksn_runtime_animation_pending();}
+unsigned pocket_kasane_defer_block(void){
+    if(dormant||!state||!state->active)return 1u;
+    unsigned why=0;
+    if(state->schema||state->provider)why|=2u;
+    if(state->video_resource.value||state->pixel_resource.value)why|=4u;
+    for(unsigned i=0;i<POCKET_GRID_MAX_SLOTS;i++)if(state->grid_resources[i].value)why|=4u;
+    if(state->notice_tx.value||state->notice_displayed||state->notice_pending)why|=8u;
+    if(ksn_runtime_animation_enabled())why|=16u;
+    /* The modal itself, not the input scope: the scope also reads BLOCKED
+     * whenever bands are merely invalidated, which every Shiki commit does. */
+    if(ksn_runtime_modal_active())why|=32u;
+    return why;
+}
+bool pocket_kasane_present_deferrable(void){return pocket_kasane_defer_block()==0;}
 void pocket_kasane_animations_presented(uint64_t now_us){ksn_runtime_animations_presented(now_us);}
 void pocket_kasane_set_animation_time(uint64_t now_us){
     owner_now_us=now_us;
@@ -3023,22 +3067,69 @@ void pocket_kasane_invalidate(void) {
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     return pocket_kasane_present_complete(display,NULL,stats);
 }
-ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
-                                          const ksn_display_completion *completion,
-                                          ksn_render_stats *stats) {
-#else
-ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
-#endif
-    if(!stats) return KSN_INVALID;
+void pocket_kasane_present_begin(pocket_kasane_present_job *job) {
+    job->after=false;job->present.running=false;
+    ksn_render_stats *stats=job->present.render.stats;
+    const ksn_display_completion *completion=job->present.render.completion;
+    if(!stats) {job->result=KSN_INVALID;return;}
     *stats=(ksn_render_stats){0};
-#ifdef KASANE_DMA_OVERLAP
     /* No renderer will run on the empty path below. Complete any earlier
      * board work before its no-damage native acknowledgements as well. */
     if(!pocket_kasane_needs_present()&&completion&&completion->finish){
         ksn_result done=completion->finish(completion->ctx);
-        if(done!=KSN_OK)return done;
+        if(done!=KSN_OK) {job->result=done;return;}
+    }
+    if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
+        if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
+        else pocket_proc_present_result(KSN_OK);
+    }
+    if(pocket_grid_pending()&&!pocket_kasane_needs_present())
+        pocket_grid_present_result(KSN_OK);
+    if(pocket_video_pending()&&!pocket_kasane_needs_present())
+        pocket_video_present_result(KSN_OK);
+    if(pocket_pixel_pending()&&!pocket_kasane_needs_present())
+        pocket_pixel_present_result(KSN_OK);
+    if(!pocket_kasane_needs_present()) {job->result=KSN_OK;return;}
+    job->proc_candidate=pocket_proc_pending();
+    if(job->present.render.display)pocket_proc_prepare_render(job->present.render.display->strip_rows);
+    job->present.render.load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
+        pocket_proc_backdrop:NULL;
+    job->present.render.occlusion_safe=false;
+    job->after=true;
+    job->result=ksn_runtime_present_begin(&job->present);
+}
+ksn_result pocket_kasane_present_end(pocket_kasane_present_job *job) {
+    if(!job->after)return job->result;
+    job->after=false;
+    ksn_render_stats *stats=job->present.render.stats;
+    ksn_result result=ksn_runtime_present_end(&job->present);
+    if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
+        ksn_runtime_invalidate();
+    else pocket_proc_present_result(result);
+    pocket_grid_present_result(result);
+    pocket_video_present_result(result);
+    pocket_pixel_present_result(result);
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    if(job->proc_candidate&&result==KSN_OK&&stats->transferred_bytes){
+        ESP_LOGI("PROC_JS","frame=%lu bytes=%lu",
+                 (unsigned long)proc_log_frame++,(unsigned long)stats->transferred_bytes);
     }
 #endif
+    apply_outcome();return result;
+}
+ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
+                                          const ksn_display_completion *completion,
+                                          ksn_render_stats *stats) {
+    pocket_kasane_present_job job={.present={.render={.display=display,.completion=completion,
+                                                      .stats=stats}}};
+    pocket_kasane_present_begin(&job);
+    ksn_present_job_run(&job.present);
+    return pocket_kasane_present_end(&job);
+}
+#else
+ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
+    if(!stats) return KSN_INVALID;
+    *stats=(ksn_render_stats){0};
     if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
         if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
         else pocket_proc_present_result(KSN_OK);
@@ -3051,15 +3142,10 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
         pocket_pixel_present_result(KSN_OK);
     if(!pocket_kasane_needs_present()) return KSN_OK;
     bool proc_candidate=pocket_proc_pending();
-#ifdef KASANE_DMA_OVERLAP
-    ksn_backdrop_loader load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
-        pocket_proc_backdrop:NULL;
-    ksn_result result=ksn_runtime_present_complete(display,load,false,completion,stats);
-#else
+    if(display)pocket_proc_prepare_render(display->strip_rows);
     ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
         ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
         ksn_runtime_present(display,stats);
-#endif
     if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
         ksn_runtime_invalidate();
     else pocket_proc_present_result(result);
@@ -3076,6 +3162,7 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
 #endif
     apply_outcome();return result;
 }
+#endif
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
                                           ksn_backdrop_loader load,bool occlusion_safe,
                                           ksn_render_stats *stats) {
@@ -3088,6 +3175,7 @@ ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
         pocket_pixel_present_result(KSN_OK);
         return KSN_OK;
     }
+    if(display)pocket_proc_prepare_render(display->strip_rows);
     ksn_result result=ksn_runtime_present_backdrop(display,load,occlusion_safe,stats);
     pocket_proc_overlay_present_result(result);
     pocket_grid_present_result(result);
@@ -3108,5 +3196,14 @@ void pocket_kasane_park_turn(void) {
     if(state) { ksn_runtime_app_end_turn(state->lease); apply_outcome(); }
 }
 ksn_input_scope pocket_kasane_input_scope(bool host_priority) {
-    return ksn_runtime_input_scope(host_priority);
+    ksn_input_scope scope=ksn_runtime_input_scope(host_priority);
+    /* P2a (two-core-pipeline.md sec.7.3): a frame on the display task keeps
+     * its repair bands until it is acknowledged, so the scope reads BLOCKED
+     * for the whole time it is in flight. Without the overlap the next turn
+     * starts after that present, so it is answered as it would be then. A
+     * modal or a pending modal change still blocks; a frame that then fails
+     * to reach the panel ends deferring for the session. */
+    if(scope==KSN_INPUT_BLOCKED&&disp_busy()&&!ksn_runtime_modal_active())
+        scope=KSN_INPUT_APP;
+    return scope;
 }

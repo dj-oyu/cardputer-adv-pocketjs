@@ -11,7 +11,11 @@ import sys
 ROOT = Path(__file__).resolve().parents[3]
 # Both VM translation units must use the adopted header/ROM ABI.
 # The historical e0 A/B remains separate recorded evidence.
-BASE = '06523d9fe78c3bd1db293eb09ab17522954807f9'
+# dd36a29 adopted Math.sin/cos/tan from Shiki's sine table (pocket_trig.h,
+# max error 1.1e-5, accepted by the owner), which changes BIG WAVE's panels
+# on purpose; it was 06523d9 before. Every VM change since leaves numeric.log,
+# BIG WAVE's behaviour and its panels byte for byte (checked 2026-11-13).
+BASE = 'dd36a294f6ca4710e3cee83118bfd87e83cebf74'
 QJS = ROOT / 'components/quickjs-ng/quickjs-ng'
 sys.path.insert(0, str(ROOT / 'tools/games'))
 import run_big_wave as bw
@@ -87,6 +91,16 @@ def main():
     (out / 'app.c').write_text(harness)
     baseline = subprocess.check_output(
         ['git', 'show', BASE + ':components/quickjs-ng/quickjs-ng/quickjs.c'], cwd=ROOT)
+    if b'JS_SetCFunctionMark' not in baseline:
+        # The join mark (docs/perf/two-core-pipeline.md sec.2.3 A) is newer
+        # than BASE, and the firmware's surfaces call it at install. It only
+        # tells a display task which native calls must wait for a present;
+        # the host has none, so the baseline arm gets marks that do nothing.
+        # Numbers and panels are what this comparison checks.
+        baseline += (b'\nJSCFunctionMark JS_SetCFunctionMark(JSRuntime *rt, bool on)'
+                     b'{ (void)rt; (void)on; return (JSCFunctionMark){0, NULL}; }\n'
+                     b'void JS_RestoreCFunctionMark(JSRuntime *rt, JSCFunctionMark saved)'
+                     b'{ (void)rt; (void)saved; }\n')
     sources = {'base': baseline, 'candidate': (QJS / 'quickjs.c').read_bytes()}
     for mode, source in sources.items():
         folder = out / mode

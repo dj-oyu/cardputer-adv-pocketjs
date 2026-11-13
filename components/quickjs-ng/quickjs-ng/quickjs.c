@@ -45,6 +45,7 @@
 #include "cutils.h"
 #include "list.h"
 #include "quickjs.h"
+#include "pocket_trig.h"   /* POCKET: Math.sin/cos/tan (docs/vm/qjs-observe.md sec.18) */
 #include "libregexp.h"
 #include "dtoa.h"
 // F1-F3 (docs/vm/builtin-floor-plan.md): builtin names in flash, builtin
@@ -311,6 +312,20 @@ struct JSRuntime {
     JSMallocFunctions mf;
     JSMallocState malloc_state;
     const char *rt_info;
+    /* Pocket: called before any native function marked "join" runs
+       (docs/perf/two-core-pipeline.md, P2a). The display task may still be
+       reading the render state that such a function writes; the hook waits
+       for it. A native function is marked when it is created while
+       cfunc_marking is set AND the current stack frame is the one that set
+       it (js_cfunc_marking): the firmware sets it while it installs its
+       surfaces, and a marked call sets it for its own frame, so what a
+       surface creates at run time (a cancel token, a subscription's close)
+       is marked, while whatever JS that call runs -- and every builtin that
+       JS reaches, or instantiates on first use -- runs in other frames and
+       creates unmarked functions. */
+    void (*cfunc_join)(JSContext *ctx);
+    bool cfunc_marking;
+    struct JSStackFrame *cfunc_mark_sf;
 
     int atom_hash_size; /* power of two */
     int atom_count;
@@ -462,6 +477,28 @@ struct JSRuntime {
     void *libc_opaque;
     JSRuntimeFinalizerState *finalizers;
 };
+
+/* Pocket: whether a native function created now is marked "join" */
+static inline bool js_cfunc_marking(JSRuntime *rt)
+{
+    return rt->cfunc_marking && rt->current_stack_frame == rt->cfunc_mark_sf;
+}
+
+/* Pocket: sets the mark for the current frame; returns what it replaced */
+static inline JSCFunctionMark js_mark_set(JSRuntime *rt, bool on)
+{
+    JSCFunctionMark old = { rt->cfunc_marking, rt->cfunc_mark_sf };
+    rt->cfunc_marking = on;
+    rt->cfunc_mark_sf = rt->current_stack_frame;
+    return old;
+}
+
+static inline void js_mark_restore(JSRuntime *rt, JSCFunctionMark m)
+{
+    rt->cfunc_marking = m.marking;
+    rt->cfunc_mark_sf = m.frame;
+}
+
 
 struct JSClass {
     uint32_t class_id; /* 0 means free entry */
@@ -633,6 +670,10 @@ typedef enum {
     JS_AUTOINIT_ID_PROTOTYPE,
     JS_AUTOINIT_ID_MODULE_NS,
     JS_AUTOINIT_ID_PROP,
+    /* Pocket: JS_AUTOINIT_ID_PROP registered while native functions were
+       being marked "join" (JS_MarkCFunctions); instantiated under the mark,
+       so the function made on first read is marked too. */
+    JS_AUTOINIT_ID_PROP_JOIN,
 } JSAutoInitIDEnum;
 
 /* must be large enough to have a negligible runtime cost and small
@@ -1360,7 +1401,8 @@ struct JSObject {
             JSContext *realm;
             JSCFunctionType c_function;
             uint8_t length;
-            uint8_t cproto;
+            uint8_t cproto : 7;
+            uint8_t join : 1; /* Pocket: call rt->cfunc_join first */
             int16_t magic;
         } cfunc;
         /* array part for fast arrays and typed arrays */
@@ -1418,7 +1460,10 @@ typedef struct JSLazyList {
     JSObject *obj;
     JSContext *realm;                /* the context that registered it */
     const JSCFunctionListEntry *tab; /* in flash */
-    uint16_t len;
+    uint16_t len : 15;               /* at most 64 (lazy_eligible) */
+    /* Pocket: registered while native functions were being marked "join";
+       its entries are materialized under the mark (lazy_define_list). */
+    uint16_t join : 1;
     /* How many of the object's own, non-list properties preceded this list
        when it was registered: where its entries go when the object is fully
        materialized, so property order stays the definition order. */
@@ -1945,6 +1990,17 @@ JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
  * collection left it: garbage that would need collecting is growth, however
  * few or many objects it is made of. Below the cap nothing changes. */
 #define GC_CAP_GROWTH_SHIFT 5
+/* G3 (docs/vm/guest-memory-design.md sec.7.3): the last collection the cap
+ * triggered freed less than a quarter of the growth it was allowed. Until one
+ * frees again, the allowed growth stays the whole limit >> GC_CAP_GROWTH_SHIFT
+ * instead of halving towards the limit: with a fitted limit (the guest's room
+ * is what the system has) the live heap sits just under it for whole seconds
+ * (apps/stress LV3), and the halving collected 5-18 times a second for nothing
+ * (measured on the device, 1.3-1.8 ms each). Cyclic garbage that grows in the
+ * last 1/32 is left to the host's collection after a refused allocation
+ * (main/app_session.c report_oom_if_any). A static, not a JSRuntime field, for
+ * the reason g_oom_canary gives below; one runtime at a time. */
+static bool g_gc_cap_dry;
 static size_t js_gc_effective_threshold(JSRuntime *rt)
 {
     size_t threshold = rt->malloc_gc_threshold;
@@ -1964,6 +2020,16 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
     force_gc = true;
 #else
     size_t threshold = js_gc_effective_threshold(rt);
+    /* G3's dry state describes the heap the dry collection left. Once the
+       heap is below that floor (refcount freed since), it no longer holds:
+       the next crossing of the cap must collect and back off as before.
+       Checked on every allocation, not only on a crossing, because the heap
+       can drop and climb back above the floor between two crossings; the
+       vmtest corpus's gc_threshold_near_limit (fill to OOM, drop a quarter,
+       make cycles) otherwise reached the limit with no collection. */
+    if (g_gc_cap_dry &&
+        rt->malloc_state.malloc_size < ((size_t)rt->gc_cap_floor << 6))
+        g_gc_cap_dry = false;
     force_gc = ((rt->malloc_state.malloc_size + size) > threshold);
     /* Only the cap backs off (see above): a crossing of the ordinary
        threshold collects as it always did. */
@@ -1974,7 +2040,7 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
         size_t limit = rt->malloc_state.malloc_limit;
         size_t room = limit > floor ? (limit - floor) >> 1 : 0;
         size_t budget = limit >> GC_CAP_GROWTH_SHIFT;
-        if (room < budget)
+        if (room < budget && !g_gc_cap_dry)
             budget = room;
         /* A heap below the floor has freed since (refcount): the floor says
            nothing about it any more, and it collects as before. */
@@ -1989,7 +2055,22 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
             printf("GC: size=%zd\n", rt->malloc_state.malloc_size);
         }
 #endif
+#ifndef FORCE_GC_AT_MALLOC
+        bool by_cap = threshold < rt->malloc_gc_threshold;
+#endif
+        size_t before_gc = rt->malloc_state.malloc_size;
         JS_RunGC(rt);
+#ifndef FORCE_GC_AT_MALLOC
+        {
+            size_t freed = before_gc > rt->malloc_state.malloc_size ?
+                           before_gc - rt->malloc_state.malloc_size : 0;
+            size_t limit = rt->malloc_state.malloc_limit;
+            g_gc_cap_dry = by_cap && limit != 0 &&
+                           freed < (limit >> GC_CAP_GROWTH_SHIFT) >> 2;
+        }
+#else
+        (void)before_gc;
+#endif
         rt->malloc_gc_threshold = rt->malloc_state.malloc_size +
                                   (rt->malloc_state.malloc_size >> 1);
         /* Still above the cap: nothing more to free until the heap grows.
@@ -2480,6 +2561,7 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     /* A fresh runtime starts with a fresh canary: see g_oom_canary's comment
      * for why this is process-wide state rather than a field of `ms`. */
     g_oom_canary = (JSOOMCanary){0};
+    g_gc_cap_dry = false;
 
     rt = mf->js_calloc(opaque, 1, sizeof(JSRuntime));
     if (!rt) {
@@ -7493,6 +7575,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p->u.cfunc.c_function.generic = func;
     p->u.cfunc.length = length;
     p->u.cfunc.cproto = cproto;
+    p->u.cfunc.join = js_cfunc_marking(ctx->rt);
     p->u.cfunc.magic = magic;
     p->is_constructor = (cproto == JS_CFUNC_constructor ||
                          cproto == JS_CFUNC_constructor_magic ||
@@ -7523,7 +7606,8 @@ JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
 typedef struct JSCFunctionDataRecord {
     JSCFunctionData *func;
     uint8_t length;
-    uint8_t data_len;
+    uint8_t data_len : 7;
+    uint8_t join : 1; /* Pocket: as cfunc.join */
     uint16_t magic;
     JSValue data[];
 } JSCFunctionDataRecord;
@@ -7935,7 +8019,15 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     sf->is_strict_mode = false;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    if (unlikely(s->join)) {
+        if (rt->cfunc_join)
+            rt->cfunc_join(ctx);
+        JSCFunctionMark m = js_mark_set(rt, true);   /* this frame: sf */
+        ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+        js_mark_restore(rt, m);
+    } else {
+        ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    }
     js_vm_pop_frame(rt, sf);
     return ret;
 }
@@ -7950,6 +8042,10 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
     JSValue func_obj;
     int i;
 
+    /* data_len gave up its top bit to the join flag */
+    if (data_len < 0 || data_len > 127) {
+        return JS_ThrowRangeError(ctx, "too many function data");
+    }
     func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
                                       JS_CLASS_C_FUNCTION_DATA);
     if (JS_IsException(func_obj)) {
@@ -7963,6 +8059,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
     s->func = func;
     s->length = length;
     s->data_len = data_len;
+    s->join = js_cfunc_marking(ctx->rt);
     s->magic = magic;
     for (i = 0; i < data_len; i++) {
         s->data[i] = js_dup(data[i]);
@@ -7988,6 +8085,71 @@ JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
     return JS_NewCFunctionData2(ctx, func, NULL, length, magic, data_len, data);
 }
 
+/* Pocket: native functions marked "join" (docs/perf/two-core-pipeline.md,
+   P2a). */
+void JS_SetCFunctionJoinHook(JSRuntime *rt, void (*hook)(JSContext *ctx))
+{
+    rt->cfunc_join = hook;
+}
+
+void JS_MarkCFunctions(JSRuntime *rt, bool on)
+{
+    js_mark_set(rt, on);
+}
+
+int JS_GetCFunctionMark(JSRuntime *rt)
+{
+    return js_cfunc_marking(rt);
+}
+
+JSCFunctionMark JS_SetCFunctionMark(JSRuntime *rt, bool on)
+{
+    return js_mark_set(rt, on);
+}
+
+void JS_RestoreCFunctionMark(JSRuntime *rt, JSCFunctionMark saved)
+{
+    js_mark_restore(rt, saved);
+}
+
+void JS_CFunctionJoin(JSContext *ctx)
+{
+    if (ctx->rt->cfunc_join)
+        ctx->rt->cfunc_join(ctx);
+}
+
+bool JS_SetCFunctionJoin(JSValueConst func, bool join)
+{
+    JSObject *p;
+
+    if (!JS_IsObject(func))
+        return false;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION) {
+        p->u.cfunc.join = join;
+        return true;
+    }
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA) {
+        p->u.c_function_data_record->join = join;
+        return true;
+    }
+    return false;
+}
+
+int JS_GetCFunctionJoin(JSValueConst func)
+{
+    JSObject *p;
+
+    if (!JS_IsObject(func))
+        return -1;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION)
+        return p->u.cfunc.join;
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA)
+        return p->u.c_function_data_record->join;
+    return -1;
+}
+
 static JSContext *js_autoinit_get_realm(JSProperty *pr)
 {
     return (JSContext *)(pr->u.init.realm_and_id & ~3);
@@ -7996,6 +8158,12 @@ static JSContext *js_autoinit_get_realm(JSProperty *pr)
 static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
 {
     return pr->u.init.realm_and_id & 3;
+}
+
+/* Pocket: the id a function-list entry is deferred under */
+static JSAutoInitIDEnum js_autoinit_prop_id(JSRuntime *rt)
+{
+    return js_cfunc_marking(rt) ? JS_AUTOINIT_ID_PROP_JOIN : JS_AUTOINIT_ID_PROP;
 }
 
 static void js_autoinit_free(JSRuntime *rt, JSProperty *pr)
@@ -8825,8 +8993,39 @@ static void gc_free_cycles(JSRuntime *rt)
     init_list_head(&rt->gc_zero_ref_count_list);
 }
 
+#ifdef POCKET_GC_STATS
+/* Measurement only (tools/r5sim, docs/vm/qjs-observe.md): collections run
+   and the bytes they freed, read with JS_PocketGCStats. */
+static uint32_t pocket_gc_runs;
+static uint64_t pocket_gc_freed;
+static size_t pocket_gc_last_before, pocket_gc_last_after;
+/* Time per collection, in the clock the embedder supplies (the device: CPU
+   cycles). Total and the longest single run since the last read. */
+uint32_t pocket_gc_clock(void);
+static uint64_t pocket_gc_ticks;
+static uint32_t pocket_gc_ticks_max;
+void JS_PocketGCTime(uint64_t *total, uint32_t *max_run)
+{
+    *total = pocket_gc_ticks;
+    *max_run = pocket_gc_ticks_max;
+    pocket_gc_ticks_max = 0;
+}
+void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before,
+                      size_t *last_after)
+{
+    *runs = pocket_gc_runs;
+    *freed = pocket_gc_freed;
+    *last_before = pocket_gc_last_before;
+    *last_after = pocket_gc_last_after;
+}
+#endif
+
 void JS_RunGC(JSRuntime *rt)
 {
+#ifdef POCKET_GC_STATS
+    size_t before = rt->malloc_state.malloc_size;
+    uint32_t t0 = pocket_gc_clock();
+#endif
     /* decrement the reference of the children of each object. mark =
        1 after this pass. */
     gc_decref(rt);
@@ -8836,6 +9035,17 @@ void JS_RunGC(JSRuntime *rt)
 
     /* free the GC objects in a cycle */
     gc_free_cycles(rt);
+#ifdef POCKET_GC_STATS
+    uint32_t dt = pocket_gc_clock() - t0;
+    pocket_gc_ticks += dt;
+    if (dt > pocket_gc_ticks_max)
+        pocket_gc_ticks_max = dt;
+    pocket_gc_runs++;
+    pocket_gc_last_before = before;
+    pocket_gc_last_after = rt->malloc_state.malloc_size;
+    if (before > pocket_gc_last_after)
+        pocket_gc_freed += before - pocket_gc_last_after;
+#endif
 }
 
 /* Return false if not an object or if the object has already been
@@ -10465,6 +10675,7 @@ static JSAutoInitFunc *const js_autoinit_func_table[] = {
     js_instantiate_prototype, /* JS_AUTOINIT_ID_PROTOTYPE */
     js_module_ns_autoinit, /* JS_AUTOINIT_ID_MODULE_NS */
     JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP */
+    JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP_JOIN */
 };
 
 /* warning: 'prs' is reallocated after it */
@@ -10481,8 +10692,13 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
 
     realm = js_autoinit_get_realm(pr);
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
+    /* Pocket: under the mark the entry was registered with, whoever reads
+       it first: a builtin first used inside a marked call stays unmarked. */
+    JSCFunctionMark mark = js_mark_set(ctx->rt,
+                                       js_autoinit_get_id(pr) == JS_AUTOINIT_ID_PROP_JOIN);
     /* 'func' shall not modify the object properties 'pr' */
     val = func(realm, p, prop, pr->u.init.opaque);
+    js_mark_restore(ctx->rt, mark);
     /* PocketJS: upstream turned the property into a plain `undefined` before
      * looking at the result, so one failed instantiation (an OOM in
      * JS_NewCFunction2 on first use) removed the builtin for the rest of the
@@ -18833,8 +19049,10 @@ static JSValue JS_IteratorNext2(JSContext *ctx, JSValueConst enum_obj,
        intermediate result object) */
     if (JS_IsObject(method)) {
         JSObject *p = JS_VALUE_GET_OBJ(method);
+        /* Pocket: a marked function takes the full call, which joins */
         if (p->class_id == JS_CLASS_C_FUNCTION &&
-                p->u.cfunc.cproto == JS_CFUNC_iterator_next) {
+                p->u.cfunc.cproto == JS_CFUNC_iterator_next &&
+                !p->u.cfunc.join) {
             JSCFunctionType func;
             JSValueConst args[1];
 
@@ -19673,6 +19891,8 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     JSValueConst *arg_buf;
     int arg_count, i;
     JSCFunctionEnum cproto;
+    int join;
+    JSCFunctionMark saved_mark = { 0, NULL };
 
     p = JS_VALUE_GET_OBJ(func_obj);
     cproto = p->u.cfunc.cproto;
@@ -19682,10 +19902,18 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     if (js_check_stack_overflow(rt, sizeof(arg_buf[0]) * arg_count)) {
         return JS_ThrowStackOverflow(ctx);
     }
+    /* Pocket: after the only early return. The hook runs no JS and cannot
+       fail. The mark is set once this call's frame is current: what the
+       body creates is marked, what JS it calls creates is not. */
+    join = p->u.cfunc.join;
+    if (unlikely(join) && rt->cfunc_join)
+        rt->cfunc_join(ctx);
 
     prev_sf = rt->current_stack_frame;
     sf->prev_frame = prev_sf;
     rt->current_stack_frame = sf;
+    if (unlikely(join))
+        saved_mark = js_mark_set(rt, true);
     ctx = js_cfunc_realm(ctx, p); /* change the current realm */
 
     sf->is_strict_mode = false;
@@ -19787,6 +20015,8 @@ not_a_constructor:
         abort();
     }
 
+    if (unlikely(join))
+        js_mark_restore(rt, saved_mark);
     js_vm_pop_frame(rt, sf);
     return ret_val;
 }
@@ -19833,7 +20063,9 @@ static no_inline bool js_call_math_fast(JSContext *ctx, JSValueConst func_obj,
     if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(func_obj);
-    if (p->class_id != JS_CLASS_C_FUNCTION || argc < p->u.cfunc.length)
+    /* Pocket: a marked function takes the full call, which joins */
+    if (p->class_id != JS_CLASS_C_FUNCTION || argc < p->u.cfunc.length ||
+            p->u.cfunc.join)
         return false;
     for (i = 0; i < argc; i++) {
         uint32_t tag = JS_VALUE_GET_TAG(argv[i]);
@@ -22363,7 +22595,16 @@ mul_fp_res:
                     int v1, v2;
                     v1 = JS_VALUE_GET_INT(op1);
                     v2 = JS_VALUE_GET_INT(op2);
-                    sp[-2] = js_number((double)v1 / (double)v2);
+                    /* POCKET: an exact quotient is the int js_number() would
+                       give, from the hardware divider (~16 cycles) instead of
+                       soft-float __divdf3 (~350 instructions on the ESP32-S3,
+                       docs/vm/qjs-observe.md sec.13). Not for a zero dividend
+                       over a negative divisor (-0) or INT32_MIN / -1 (2^31). */
+                    if (v2 != 0 && !(v1 == 0 && v2 < 0) &&
+                        !(v1 == INT32_MIN && v2 == -1) && v1 % v2 == 0)
+                        sp[-2] = js_int32(v1 / v2);
+                    else
+                        sp[-2] = js_number((double)v1 / (double)v2);
                     sp--;
                 } else if (js_both_number(op1, op2, &d1, &d2)) {
                     /* js_binary_arith_slow's handle_float64: js_float64,
@@ -44642,7 +44883,7 @@ static int JS_InstantiateFunctionListItem(JSContext *ctx, JSValueConst obj,
             /* Function.prototype[Symbol.hasInstance] is not writable nor configurable */
             prop_flags = 0;
         }
-        JS_DefineAutoInitProperty(ctx, obj, atom, JS_AUTOINIT_ID_PROP,
+        JS_DefineAutoInitProperty(ctx, obj, atom, js_autoinit_prop_id(ctx->rt),
                                   (void *)e, prop_flags);
         return 0;
     case JS_DEF_CGETSET: /* XXX: use autoinit again ? */
@@ -44688,7 +44929,7 @@ static int JS_InstantiateFunctionListItem(JSContext *ctx, JSValueConst obj,
         break;
     case JS_DEF_PROP_STRING:
     case JS_DEF_OBJECT:
-        JS_DefineAutoInitProperty(ctx, obj, atom, JS_AUTOINIT_ID_PROP,
+        JS_DefineAutoInitProperty(ctx, obj, atom, js_autoinit_prop_id(ctx->rt),
                                   (void *)e, prop_flags);
         return 0;
     default:
@@ -44818,7 +45059,7 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
         pr = add_property(ctx, p, atom, (prop_flags & lock_mask & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
         if (!pr)
             return -1;
-        pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | JS_AUTOINIT_ID_PROP;
+        pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | js_autoinit_prop_id(ctx->rt);
         pr->u.init.opaque = (void *)e;
         return 0;
     case JS_DEF_CGETSET:
@@ -44890,6 +45131,19 @@ static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
     return 0;
 }
 
+/* Pocket: lazy_define for an entry of list `l`, under the mark the list was
+   registered with (not the reader's). `l` is read before the call only:
+   rt->lazy may move under it. */
+static int lazy_define_list(JSLazyList *l, JSObject *p, JSAtom atom,
+                            const JSCFunctionListEntry *e)
+{
+    JSContext *realm = l->realm;
+    JSCFunctionMark mark = js_mark_set(realm->rt, l->join);
+    int ret = lazy_define(realm, p, atom, e);
+    js_mark_restore(realm->rt, mark);
+    return ret;
+}
+
 /* A lookup of `atom` missed p's shape: if one of p's lists still holds it,
    put it in the shape. 1 = materialized (look again), 0 = not in any list,
    -1 = exception (out of memory). */
@@ -44908,7 +45162,7 @@ static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
             /* Marked first: add_property below looks the name up again. */
             const JSCFunctionListEntry *tab = l->tab;
             lazy_set_done(l, k);
-            if (lazy_define(l->realm, p, atom, &tab[k])) {
+            if (lazy_define_list(l, p, atom, &tab[k])) {
                 lazy_undo_done(rt, p, tab, k);
                 return -1;
             }
@@ -45119,7 +45373,7 @@ static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only)
                 return -1;
             const JSCFunctionListEntry *tab = l->tab;
             lazy_set_done(l, k);
-            int ret = lazy_define(l->realm, p, atom, &tab[k]);
+            int ret = lazy_define_list(l, p, atom, &tab[k]);
             JS_FreeAtom(ctx, atom);
             if (ret) {
                 lazy_undo_done(rt, p, tab, k);
@@ -45180,7 +45434,8 @@ static int lazy_register(JSContext *ctx, JSValueConst obj,
     memmove(&rt->lazy[end + 1], &rt->lazy[end], (rt->lazy_count - end) * sizeof(rt->lazy[0]));
     rt->lazy_count++;
     rt->lazy[end] = (JSLazyList){ .obj = p, .realm = ctx, .tab = tab,
-                                  .len = (uint16_t)len, .pos = (uint16_t)q };
+                                  .len = (uint16_t)len, .join = js_cfunc_marking(rt),
+                                  .pos = (uint16_t)q };
     js_obj_set_lazy(p, true);
     /* The builtins are created with their shape pre-sized for the list
        (JS_NewObjectProtoClassAlloc(.., n_fields), JS_NewCFunction3(..,
@@ -55026,7 +55281,7 @@ static double js_math_atan2(double a, double b)
 }
 static double js_math_cos(double d)
 {
-    return cos(d);
+    return pocket_cos(d);   /* POCKET: pocket_trig.h */
 }
 static double js_math_exp(double d)
 {
@@ -55038,11 +55293,11 @@ static double js_math_log(double d)
 }
 static double js_math_sin(double d)
 {
-    return sin(d);
+    return pocket_sin(d);   /* POCKET: pocket_trig.h */
 }
 static double js_math_tan(double d)
 {
-    return tan(d);
+    return pocket_tan(d);   /* POCKET: pocket_trig.h */
 }
 static double js_math_trunc(double d)
 {
@@ -70577,7 +70832,13 @@ static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id)
        not expected. Kept as the safe answer. */
     if (!JS_IsNull(ctx->class_proto[class_id]))
         return JS_GetProperty(ctx, ctx->class_proto[class_id], JS_ATOM_constructor);
-    return js_lazy_make(ctx, class_id);
+    {
+        /* Pocket: an intrinsic is the engine's, whoever touches it first */
+        JSCFunctionMark mark = js_mark_set(ctx->rt, false);
+        JSValue v = js_lazy_make(ctx, class_id);
+        js_mark_restore(ctx->rt, mark);
+        return v;
+    }
 }
 
 /* A class_proto read found JS_NULL (LAZY_CLASS_MISSING). 0 = the prototype
@@ -70609,7 +70870,11 @@ static int js_lazy_class_ensure(JSContext *ctx, int class_id)
                 return JS_AutoInitProperty(ctx, g, atom, pr, prs);
         }
     }
-    ctor = js_lazy_make(ctx, class_id);
+    {
+        JSCFunctionMark mark = js_mark_set(ctx->rt, false);
+        ctor = js_lazy_make(ctx, class_id);
+        js_mark_restore(ctx->rt, mark);
+    }
     if (JS_IsException(ctor))
         return -1;
     JS_FreeValue(ctx, ctor);

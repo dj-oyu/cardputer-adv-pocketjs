@@ -9,7 +9,9 @@ transmit copy. Pixels go out LSB first (no swap) and land on a model glass.
 Cases: a Kasane-style frame of 4-row pieces, full width and narrow (the lent
 half is packed in place); a screen's own whole strip, full width and narrow,
 which must be finished on return and, narrow, left untouched; and the two
-mixed across a frame end.
+mixed across a frame end. Run again with BOARD_LCD_DIRECT (lcd_spi.c's
+register-driven sends, no per-strip ISR): the same cases, every async piece
+started and reaped directly.
 """
 from pathlib import Path
 import os
@@ -38,7 +40,7 @@ def function(signature):
 
 DECLARATIONS = '\n'.join(re.findall(
     r'^static (?:uint16_t|int|bool|spi_transaction_t) '
-    r'(?:shared|tx_inflight|tx_pending|next_row|window_x|window_cols|\*half_lent)\b[^;]*;',
+    r'(?:shared|tx_inflight|tx_pending|next_row|window_x|window_cols|\*half_lent|g_board_direct|tx_direct)\b[^;]*;',
     source, re.M))
 assert 'half_lent' in DECLARATIONS, 'board.c has no design-0 state'
 
@@ -63,6 +65,8 @@ typedef int esp_err_t;
 #define DD_OPEN(x,y) ((void)0)
 #define DD_CLOSE(x) ((void)0)
 #define DD_ADD(x,y) ((void)(y))
+#define LCD_TX_COUNT(e) ((void)(e))
+static bool board_host_overlays=true;
 #define gpio_set_level(p,v) ((void)(p),(void)(v))
 #define pdMS_TO_TICKS(x) (x)
 #define vTaskDelay(x) ((void)(x))
@@ -74,7 +78,7 @@ static uint16_t glass[LCD_W*LCD_H],expected[LCD_W*LCD_H];
 static uint8_t snapshot[LCD_W*STRIP_H*2];
 static const uint8_t *borrowed;
 static size_t borrow_bytes;
-static bool bus_pending,ramwr;
+static bool bus_pending,ramwr,pending_direct;
 static unsigned queues,polled_rows;
 static int last_cmd,x0,x1,y0,y1,px,py;
 static void check_borrow(void){
@@ -107,9 +111,27 @@ static esp_err_t spi_device_queue_trans(int device,spi_transaction_t *t,int wait
  memcpy(snapshot,borrowed,borrow_bytes);bus_pending=true;return ESP_OK;
 }
 static esp_err_t spi_device_get_trans_result(int device,spi_transaction_t **done,int wait){
- (void)device;(void)wait;assert(bus_pending);check_borrow();
+ (void)device;(void)wait;assert(bus_pending&&!pending_direct);check_borrow();
  *done=&tx_pending;bus_pending=false;pixels(borrowed,borrow_bytes);return ESP_OK;
 }
+#ifndef BOARD_LCD_DIRECT
+#define BOARD_LCD_DIRECT 0
+#endif
+#if BOARD_LCD_DIRECT
+/* lcd_spi.c: the strip starts on GP-SPI2/GDMA directly and is reaped by its
+ * done bit, with no queue or ISR; same ownership rules as the queue. */
+static unsigned direct_starts;
+static void lcd_spi_direct_start(const void *data,size_t bytes){
+ assert(!bus_pending);queues++;direct_starts++;
+ borrowed=data;borrow_bytes=bytes;assert(borrow_bytes<=sizeof(snapshot));
+ memcpy(snapshot,borrowed,borrow_bytes);bus_pending=pending_direct=true;
+}
+static esp_err_t lcd_spi_direct_wait(void){
+ /* The done bit is polled only for a strip started directly. */
+ if(!bus_pending)return ESP_OK;
+ assert(pending_direct);check_borrow();bus_pending=pending_direct=false;pixels(borrowed,borrow_bytes);return ESP_OK;
+}
+#endif
 static void pet_hub_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
 static void pocket_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
 static void swap_scalar(uint16_t *out,const uint16_t *in,int n){(void)out;(void)in;(void)n;assert(0);}
@@ -175,8 +197,11 @@ int main(void){
   board_present_frame_end();
  }
  assert(memcmp(glass,expected,sizeof glass)==0);
- printf("BOARD_HALF PASS: %u queued pieces, %u polled rows; no write into a payload in flight\n",
-        queues,polled_rows);
+ #if BOARD_LCD_DIRECT
+ assert(direct_starts==queues);           /* every async piece went direct */
+#endif
+ printf("BOARD_HALF PASS%s: %u queued pieces, %u polled rows; no write into a payload in flight\n",
+        BOARD_LCD_DIRECT?" (direct sends)":"",queues,polled_rows);
  return 0;
 }
 '''
@@ -190,7 +215,9 @@ parts = [function(x) for x in (
 with tempfile.TemporaryDirectory(prefix='board-half-') as tmp:
     path = Path(tmp) / 'test.c'
     path.write_text(HEADER.replace('@DECLARATIONS@', DECLARATIONS) + '\n'.join(parts) + CASES)
-    for flags in (['-O2', '-fstrict-aliasing'], ['-g', '-fsanitize=address,undefined']):
+    for flags in (['-O2', '-fstrict-aliasing'], ['-g', '-fsanitize=address,undefined'],
+                  ['-g', '-fsanitize=address,undefined', '-DBOARD_LCD_DIRECT=1'],
+                  ['-O2', '-fstrict-aliasing', '-DBOARD_LCD_DIRECT=1']):
         exe = Path(tmp) / 'test'
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
                         '-Wno-unused-variable', '-Wno-unused-function', '-DKASANE_DMA_OVERLAP=1',

@@ -5,6 +5,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <errno.h>
+#include <stdarg.h>
+#include "esp_log.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -88,6 +90,36 @@ refused:
     errno=EAGAIN;
     return done ? (ssize_t)done : -1;
 }
+// Whole log lines. stdout is unbuffered (usb_console_init()), and the libc
+// then hands vprintf's output to console_write() in pieces (inferred: every
+// piece takes tx_lock and queues on the driver by itself). Two 30-frame KASANE_PAINT
+// and SHIKI_TURN lines measured 8.56-8.74 ms on the UI task this way
+// (docs/perf/frame-breakdown.md sec.6). Formatting into one buffer first sends
+// a line as one transmit(). One shared buffer, not a stack one: input and
+// timesync log from 2 KB stacks. A line that does not fit, or a second task
+// logging at the same moment, takes the old path, so nothing is truncated
+// and nobody waits for the buffer.
+#define LOG_LINE_MAX 384
+static char log_line[LOG_LINE_MAX];
+static StaticSemaphore_t log_lock_storage;
+static SemaphoreHandle_t log_lock;
+static atomic_bool log_whole=true;
+void usb_console_log_whole(bool on) { atomic_store(&log_whole,on); }
+static int log_vprintf(const char *fmt, va_list ap) {
+    if(atomic_load(&log_whole) && log_lock && xSemaphoreTake(log_lock,0)==pdTRUE) {
+        va_list copy;
+        va_copy(copy,ap);
+        const int n=vsnprintf(log_line,sizeof log_line,fmt,copy);
+        va_end(copy);
+        if(n>=0 && n<(int)sizeof log_line) {
+            const ssize_t sent=transmit(1,log_line,(size_t)n,false);
+            xSemaphoreGive(log_lock);
+            return sent<0 ? -1 : (int)sent;
+        }
+        xSemaphoreGive(log_lock);
+    }
+    return vprintf(fmt,ap);
+}
 static ssize_t console_write(int fd, const void *data, size_t size) {
     return transmit(fd,data,size,false);
 }
@@ -113,6 +145,8 @@ esp_err_t usb_console_init(void) {
        !freopen(CONSOLE_PATH "/err","w",stderr)) return ESP_FAIL;
     // Separate buffered tails must not be reordered across streams or bridge.
     if(setvbuf(stdout,NULL,_IONBF,0) || setvbuf(stderr,NULL,_IONBF,0)) return ESP_FAIL;
+    log_lock=xSemaphoreCreateMutexStatic(&log_lock_storage);
+    if(log_lock) esp_log_set_vprintf(log_vprintf);
     return ESP_OK;
 }
 esp_err_t usb_console_frame(const void *data, size_t size) {
