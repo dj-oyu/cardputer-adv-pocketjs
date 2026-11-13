@@ -18,7 +18,7 @@
 // pocket_api_capability_changed() calls into JS and must not be reached from an
 // ISR, a driver task or a worker.
 
-#define POCKET_API_VERSION "0.1.0"
+#define POCKET_API_VERSION "0.2.0"
 
 // The common error codes of docs/api/common-api.md section 4. The JS side sees the
 // same strings through pocket.errorCodes.

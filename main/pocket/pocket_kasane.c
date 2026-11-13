@@ -143,11 +143,11 @@ static uint64_t owner_now_us;
 static uint32_t proc_log_frame;
 #endif
 static JSClassID tx_class, modal_class, ref_class, template_class;
-static JSClassID instance_class, ticket_class, image_class, animation_class;
+static JSClassID instance_class, image_class, animation_class;
 static JSClassID schema_class;
 static JSClassID source_cap_class;
 static pocket_class_owner_t tx_owner, modal_owner, ref_owner, template_owner;
-static pocket_class_owner_t instance_owner, ticket_owner, image_owner, animation_owner;
+static pocket_class_owner_t instance_owner, image_owner, animation_owner;
 static pocket_class_owner_t schema_class_owner;
 static pocket_class_owner_t source_cap_owner;
 typedef struct {
@@ -258,10 +258,6 @@ static const JSClassDef modal_def={.class_name=KASANE_CLASS};
 static const JSClassDef ref_def={.class_name=KASANE_CLASS,.finalizer=ref_finalizer};
 static const JSClassDef template_def={.class_name=KASANE_CLASS};
 static const JSClassDef instance_def={.class_name=KASANE_CLASS};
-/* No ticket object is made since api-reorg P3 (tickets are numbers); the
- * class stays registered until P5 removes poll/cancel with the owner ledger
- * (tools/pocket/run_class_registry.py). */
-static const JSClassDef ticket_def={.class_name=KASANE_CLASS};
 static const JSClassDef image_def={.class_name=KASANE_CLASS};
 static const JSClassDef animation_def={.class_name=KASANE_CLASS};
 static const JSClassDef schema_def={.class_name=KASANE_CLASS};
@@ -718,11 +714,8 @@ static const JSCFunctionListEntry functions[]={
     JS_OBJECT_DEF("cache",cache_functions,2,JS_PROP_C_W_E),
     JS_CFUNC_DEF("resource",1,js_resource),
     JS_CFUNC_DEF("mount",1,js_presenter_mount),
-    JS_CFUNC_DEF("createScene",1,js_create_scene),
     JS_CFUNC_DEF("replace",1,js_replace),JS_CFUNC_DEF("patch",1,js_patch),
-    JS_CFUNC_DEF("poll",0,js_poll),JS_CFUNC_DEF("cancel",1,js_cancel),
-    JS_CFUNC_DEF("features",0,js_features),JS_CFUNC_DEF("stats",0,js_stats),
-    JS_CFUNC_DEF("inputScope",0,js_input_scope),
+    JS_CFUNC_DEF("stats",0,js_stats),
 };
 
 static bool register_class(JSContext *ctx, JSClassID *id, pocket_class_owner_t *owner,
@@ -787,10 +780,8 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !register_class(ctx,&animation_class,&animation_owner,&animation_def)||
        !register_class(ctx,&template_class,&template_owner,&template_def)||
        !register_class(ctx,&image_class,&image_owner,&image_def)||
-       !register_class(ctx,&ticket_class,&ticket_owner,&ticket_def)||
-       !register_class(ctx,&scene_class,&scene_owner,&scene_def)||
        !register_class(ctx,&schema_class,&schema_class_owner,&schema_def)) return ESP_ERR_NO_MEM;
-    /* Handles with no methods, and scenes (whose methods are own properties),
+    /* Handles with no methods,
      * inherit Object.prototype directly instead of each owning an empty object. */
     JSValue plain=JS_NewObject(ctx);
     if(JS_IsException(plain)) return ESP_ERR_NO_MEM;
@@ -798,8 +789,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     JS_FreeValue(ctx,plain);
     JS_SetClassProto(ctx,template_class,JS_DupValue(ctx,object_proto));
     JS_SetClassProto(ctx,image_class,JS_DupValue(ctx,object_proto));
-    JS_SetClassProto(ctx,ticket_class,JS_DupValue(ctx,object_proto));
-    JS_SetClassProto(ctx,scene_class,object_proto);
+    JS_FreeValue(ctx,object_proto);
     if(JS_SetPropertyFunctionList(ctx,ns,functions,
        (int)(sizeof(functions)/sizeof(functions[0])))<0) return ESP_ERR_NO_MEM;
     if(pocket_grid_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
@@ -818,7 +808,7 @@ static const pocket_limit_t kasane_limits[]={
     {.name="references",.kind=POCKET_LIMIT_INT,.number=KASANE_REF_LIMIT},
     {.name="cacheTemplates",.kind=POCKET_LIMIT_INT,.number=KSN_CACHE_TEMPLATES},
     {.name="cacheInstances",.kind=POCKET_LIMIT_INT,.number=KSN_CACHE_INSTANCES},
-    /* api-reorg.md sec.3.2: what features() also reported, each enforced --
+    /* api-reorg.md sec.3.2: what the removed features() reported, each enforced --
      * text bytes of a scene (ksn_core.h), animation tracks, the commands of
      * one cache template (ksn_cache.h). */
     {.name="textBytes",.kind=POCKET_LIMIT_INT,.number=KSN_APP_TEXT_BYTES},

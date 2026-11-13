@@ -119,7 +119,12 @@ typedef struct {
 static grid_slot *slots;
 static uint32_t next_handle;
 static bool js_call_active;
+/* The symbolic frontend object grid_fold.js evaluates to. It is held here, not
+ * on the global object: api-reorg P5 removed the gridFold global, so fold,
+ * index and view are reachable only through pocket.kasane.grid. */
 static bool frontend_loaded;
+static JSValue frontend_obj;
+static JSContext *frontend_ctx;
 
 static JSValue fail(JSContext *ctx, const char *op, const char *code,
                     const char *message)
@@ -1012,8 +1017,16 @@ static JSValue js_explain(JSContext *ctx, JSValueConst self, int argc,
 { (void)self; return guarded(ctx, argc, argv, explain_impl); }
 
 /* Ordinary apps should not pay the symbolic frontend's parse cost unless
- * they use it. These three small proxies load the same embedded JS on first
- * use, then delegate to the frontend object it installs. */
+ * they use it. These three small proxies load the embedded JS on first use
+ * (the script's completion value is the frozen {fold, index, view} object,
+ * kept in frontend_obj), then delegate to it. */
+static void release_frontend(void)
+{
+    if (frontend_loaded && frontend_ctx) JS_FreeValue(frontend_ctx, frontend_obj);
+    frontend_loaded = false;
+    frontend_ctx = NULL;
+    frontend_obj = JS_UNDEFINED;
+}
 static JSValue lazy_frontend(JSContext *ctx, const char *name,
                              int argc, JSValueConst *argv)
 {
@@ -1028,18 +1041,18 @@ static JSValue lazy_frontend(JSContext *ctx, const char *name,
         JSValue loaded = JS_Eval(ctx, source, length,
                                  "grid_fold.js", JS_EVAL_TYPE_GLOBAL);
         if (JS_IsException(loaded)) return loaded;
-        JS_FreeValue(ctx, loaded);
+        if (!JS_IsObject(loaded)) {
+            JS_FreeValue(ctx, loaded);
+            return JS_ThrowTypeError(ctx, "grid_fold.js did not yield the frontend");
+        }
+        frontend_obj = loaded;
+        frontend_ctx = ctx;
         frontend_loaded = true;
     }
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue frontend = JS_GetPropertyStr(ctx, global, "gridFold");
-    JS_FreeValue(ctx, global);
-    if (JS_IsException(frontend)) return frontend;
-    JSValue method = JS_GetPropertyStr(ctx, frontend, name);
-    if (JS_IsException(method)) { JS_FreeValue(ctx, frontend); return method; }
-    JSValue result = JS_Call(ctx, method, frontend, argc, argv);
+    JSValue method = JS_GetPropertyStr(ctx, frontend_obj, name);
+    if (JS_IsException(method)) return method;
+    JSValue result = JS_Call(ctx, method, frontend_obj, argc, argv);
     JS_FreeValue(ctx, method);
-    JS_FreeValue(ctx, frontend);
     return result;
 }
 static JSValue js_fold_lazy(JSContext *ctx, JSValueConst self, int argc,
@@ -1052,8 +1065,7 @@ static JSValue js_view_lazy(JSContext *ctx, JSValueConst self, int argc,
                             JSValueConst *argv)
 { (void)self; return lazy_frontend(ctx, "view", argc, argv); }
 
-/* fold/index/view are also grid's own (api-reorg.md sec.3.1): the same
- * proxies as the global gridFold, which stays until P5. */
+/* fold/index/view are grid's own (api-reorg.md sec.3.1). */
 static const JSCFunctionListEntry grid_methods[] = {
     JS_CFUNC_DEF("register", 1, js_register),
     JS_CFUNC_DEF("registration", 1, js_registration),
@@ -1081,24 +1093,11 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
 {
     if (JS_SetPropertyFunctionList(ctx, ns, grid_entry, 1) < 0 ||
         JS_HasException(ctx)) return ESP_ERR_NO_MEM;
+    /* A frontend left by a session whose guest is gone without a reset
+     * cannot be freed into the dead runtime: forget it. */
     frontend_loaded = false;
-    /* The global stays eager: a program may fold before it reads
-     * pocket.kasane.grid, and the global object takes no lazy list. */
-    JSValue lazy = JS_NewObject(ctx);
-    if (JS_IsException(lazy)) return ESP_ERR_NO_MEM;
-    static const JSCFunctionListEntry frontend_methods[] = {
-        JS_CFUNC_DEF("fold", 2, js_fold_lazy),
-        JS_CFUNC_DEF("index", 1, js_index_lazy),
-        JS_CFUNC_DEF("view", 1, js_view_lazy),
-    };
-    if (JS_SetPropertyFunctionList(ctx, lazy, frontend_methods, 3) < 0) {
-        JS_FreeValue(ctx, lazy); return ESP_ERR_NO_MEM;
-    }
-    JSValue global = JS_GetGlobalObject(ctx);
-    if (JS_IsException(global)) { JS_FreeValue(ctx, lazy); return ESP_ERR_NO_MEM; }
-    int result = JS_SetPropertyStr(ctx, global, "gridFold", lazy);
-    JS_FreeValue(ctx, global);
-    if (result < 0) return ESP_ERR_NO_MEM;
+    frontend_ctx = NULL;
+    frontend_obj = JS_UNDEFINED;
     return ESP_OK;
 }
 
@@ -1116,7 +1115,7 @@ void pocket_grid_reset(void)
     free(slots);
     slots = NULL;
     js_call_active = false;
-    frontend_loaded = false;
+    release_frontend();
 }
 void pocket_grid_source_invalidated(uint32_t resource_id)
 {

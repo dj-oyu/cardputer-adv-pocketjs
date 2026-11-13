@@ -59,7 +59,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 
 | 文書 | 内容 |
 | --- | --- |
-| [Kasane API 整理の計測記録](logs/api-reorg-perf.md) | api-reorg.md の段ごとの指標の表（r5sim の 4 負荷 `shiki`・`shiki_v1`・`hud`・`derby` のカウント、DERBY の場面別、1 ターンの確保の回数、`heap_used`、像の大きさ）、`tools/r5sim/reorg.sh` の使い方、カウントが像の配置で 0.01〜0.03% 動くことと `sleep=off` での決定性、`pocket.kasane` を最初に読む費用（host、M32 で 1,856 B）。P0 のベースライン（2026-11-13）|
+| [Kasane API 整理の計測記録](logs/api-reorg-perf.md) | api-reorg.md の段ごとの指標の表（r5sim の負荷 `shiki`・`hud`・`derby`（`shiki_v1` は P5 で終了）のカウント、DERBY の場面別、1 ターンの確保の回数、`heap_used`、像の大きさ）、`tools/r5sim/reorg.sh` の使い方、カウントが像の配置で 0.01〜0.03% 動くことと `sleep=off` での決定性、`pocket.kasane` を最初に読む費用（host、M32 で 1,856 B）。P0 のベースライン（2026-11-13）|
 | [Shiki の画像を帯へ直接書く・横線の塗り](image-rows.md) | 不透明・等倍の画像を 32 画素ずつではなく帯の行で直接書く `read_rows`（`ksn_ports.h`）、覆われた帯の背景の塗りの省略、帯のラスタで横線を 2 画素ずつ塗る `g_ksn_proc_hspan`。STRESS の実機の同じバイナリの A/B で描画 11.80 → 9.34 ms、さらに 9.58 → 7.38 ms。送出の待ちがそれぞれ +0.63・+1.47 ms 増え、1 フレームの合計は 12.7 → 10.3 ms。LCD の DMA が次の床（2026-11-04）|
 | [手続き型描画の上限緩和の実機検証](procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
 | [MEGADEMO Act II の上限と実機の負荷](megademo-limits.md) | 手続き面の上限を叩く場面（ねじれ廊下・Apple II 風 ZENITH）の設計の芯、実機で初めて動かした結果（ZENITH で落ちていた）、破綻の境界（面の確保・plan の同時数・回転読み出し・登録時間・ゲストヒープ）、決めた `KN`/`LOAD` と既定段階、場面切替の最初のフレーム（2026-09-29 実測。LIMIT は 10-28 に外れ、その表は落とした） |

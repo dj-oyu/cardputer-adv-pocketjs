@@ -83,21 +83,9 @@ void overlay_release(void);
 // for the menu, not for silence; a second Back on the menu is what stops it.
 void overlay_yield(const char *claimant, bool keep_music);
 
-// Composites the overlay's display list. Called from shell_draw() per strip,
-// AFTER the scene and BEFORE the shell's own labels.
-//
-// That order was 3.1's old rule, and 3.1 no longer asks for it: as of
-// 2026-09-09 an overlay is meant to end the menu and stand in its place, with
-// only the shell's MODAL surfaces above it. What the menu was protecting was
-// reachability, and a reserved key the shell never delegates gives that
-// directly -- see the reserved-key caller of overlay_yield(). The compatibility
-// code is behind the section; shell.c says the same at the call site.
-void overlay_paint(uint16_t *strip, int strip_y, int strip_h);
-
 // A migrated overlay uses the normal Kasane APP lease, but the shell supplies
 // each live scene band through the backdrop-loader callback. The retained
-// command bank is recomposited every home frame; legacy pocket.overlay lists use
-// overlay_paint() above during the compatibility window.
+// command bank is recomposited every home frame.
 bool overlay_kasane_active(void);
 ksn_result overlay_kasane_present(const ksn_display_port *,ksn_backdrop_loader,
                                   bool host_top_dynamic,ksn_render_stats *);

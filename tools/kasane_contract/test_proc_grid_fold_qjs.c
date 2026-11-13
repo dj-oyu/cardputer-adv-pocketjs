@@ -283,7 +283,9 @@ static void run_example(JSValueConst example)
     JS_FreeCString(js, name); JS_FreeValue(js, label);
 }
 
-static void evaluate(const char *path)
+/* The completion value is returned (owned by the caller): grid_fold.js
+ * evaluates to the frontend object, which has no global since api-reorg P5. */
+static JSValue evaluate(const char *path)
 {
     FILE *file = fopen(path, "rb");
     CHECK(file && fseek(file, 0, SEEK_END) == 0);
@@ -302,8 +304,8 @@ static void evaluate(const char *path)
         JS_FreeValue(js, error);
         exit(1);
     }
-    JS_FreeValue(js, result);
     free(source);
+    return result;
 }
 
 int main(int argc, char **argv)
@@ -323,9 +325,14 @@ int main(int argc, char **argv)
     CHECK(runtime);
     js = JS_NewContext(runtime);
     CHECK(js);
-    evaluate(argv[1]);
-    evaluate(argv[2]);
     JSValue global = JS_GetGlobalObject(js);
+    /* The firmware keeps the frontend behind pocket.kasane.grid. */
+    JSValue frontend = evaluate(argv[1]);
+    JSValue kasane = JS_NewObject(js), pocket = JS_NewObject(js);
+    CHECK(JS_SetPropertyStr(js, kasane, "grid", frontend) == 1);
+    CHECK(JS_SetPropertyStr(js, pocket, "kasane", kasane) == 1);
+    CHECK(JS_SetPropertyStr(js, global, "pocket", pocket) == 1);
+    JS_FreeValue(js, evaluate(argv[2]));
     JSValue examples = prop(global, "gridFoldExamples");
     uint32_t count = length(examples);
     CHECK(count == 29);

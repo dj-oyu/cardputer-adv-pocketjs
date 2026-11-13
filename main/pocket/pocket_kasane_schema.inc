@@ -1,4 +1,4 @@
-/* js_create_scene, the schema methods, the runtime descriptor compiler and the
+/* The schema methods, the runtime descriptor compiler and the
  * presenter mount: code that mostly runs at registration time. It is an .inc,
  * not a .c, because pocket_kasane.c is one translation unit; a separate
  * (possibly -Os) object would shift code placement and break the
@@ -6,52 +6,6 @@
  * change cannot be compared against the 15% instruction-cache alignment noise
  * (docs/kasane/api-reorg.md section 4.2). Function order is the original order
  * on purpose. Included only from pocket_kasane.c. */
-/* Returns {invalidate, flush} as own data properties holding bound functions,
- * the shape the JS factory's object literal had, so detached calls still work.
- * The returned object is also the state's holder (its class inherits
- * Object.prototype): each bound function keeps it alive through its data slot,
- * a cycle the collector breaks through scene_mark. One object fewer than a
- * separate hidden holder. */
-static JSValue js_create_scene(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;
-    JSValueConst options=argc?argv[0]:JS_UNDEFINED;
-    JSValue build=JS_UNDEFINED,patch=JS_UNDEFINED;
-    bool valid=false;
-    if(JS_ToBool(ctx,options)) {
-        build=JS_GetPropertyStr(ctx,options,"build");
-        if(JS_IsException(build)) return build;
-        if(JS_IsFunction(ctx,build)) {
-            patch=JS_GetPropertyStr(ctx,options,"patch");
-            if(JS_IsException(patch)) { JS_FreeValue(ctx,build);return patch; }
-            valid=JS_IsUndefined(patch)||JS_IsFunction(ctx,patch);
-        }
-    }
-    if(!valid) {
-        JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
-        return JS_ThrowTypeError(ctx,"createScene requires build and optional patch callbacks");
-    }
-    JSValue out=JS_NewObjectClass(ctx,scene_class);
-    kasane_scene *scene=JS_IsException(out)?NULL:js_mallocz(ctx,sizeof(*scene));
-    if(!scene) {
-        JS_FreeValue(ctx,out);JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
-        return JS_EXCEPTION;
-    }
-    *scene=(kasane_scene){.build=build,.patch=patch,.refs=JS_NULL,.candidate=JS_NULL,
-                          .model=JS_UNDEFINED,.dirty=true,.rebuild=true};
-    JS_SetOpaque(out,scene);
-    JSValueConst data[]={out};
-    JSValue invalidate=JS_NewCFunctionData2(ctx,scene_invalidate,"invalidate",1,0,1,data);
-    if(JS_IsException(invalidate)||
-       JS_DefinePropertyValueStr(ctx,out,"invalidate",invalidate,JS_PROP_C_W_E)<0) goto fail;
-    JSValue flush=JS_NewCFunctionData2(ctx,scene_flush,"flush",1,0,1,data);
-    if(JS_IsException(flush)||
-       JS_DefinePropertyValueStr(ctx,out,"flush",flush,JS_PROP_C_W_E)<0) goto fail;
-    return out;
-fail:
-    JS_FreeValue(ctx,out);
-    return JS_EXCEPTION;
-}
-
 static schema_state *schema_owner(JSValueConst self){
     uint32_t handle=(uint32_t)(uintptr_t)JS_GetOpaque(self,schema_class);
     return handle&&state&&state->schema&&state->schema->handle==handle?

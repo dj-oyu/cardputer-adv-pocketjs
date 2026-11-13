@@ -146,18 +146,25 @@ int main(int argc, char **argv)
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ns = JS_NewObject(ctx);
     CHECK(pocket_grid_install(ctx, ns) == ESP_OK);
-    CHECK(JS_SetPropertyStr(ctx, global, "kasane", ns) == 1);
+    CHECK(JS_SetPropertyStr(ctx, global, "kasane", JS_DupValue(ctx, ns)) == 1);
+    /* The probe program reads pocket.kasane.grid, as an app does. */
+    JSValue pocket = JS_NewObject(ctx);
+    CHECK(JS_SetPropertyStr(ctx, pocket, "kasane", ns) == 1);
+    CHECK(JS_SetPropertyStr(ctx, global, "pocket", pocket) == 1);
     JS_FreeValue(ctx, global);
     char *frontend = read_file(argv[1]), *program = read_file(argv[2]);
     pocket_grid_test_frontend = frontend;
     eval(ctx, program, false);
-    free(frontend); free(program);
-    /* api-reorg P3: grid.fold/index/view are the gridFold proxies, and no
-     * plan table exists before the first register (pending reads none). */
+    /* The frontend text stays allocated: a reset forgets the loaded object and
+     * the next fold reloads it from pocket_grid_test_frontend. */
+    free(program);
+    /* api-reorg P5: fold/index/view are reachable only through grid (the
+     * gridFold global is gone), and no plan table exists before the first
+     * register (pending reads none). */
     CHECK(!pocket_grid_pending());
-    eval(ctx, "if(typeof kasane.grid.fold!=='function'||"
-              "JSON.stringify(kasane.grid.index({x:1,y:4}))!=="
-              "JSON.stringify(gridFold.index({x:1,y:4})))throw Error('grid.index');", false);
+    eval(ctx, "if(typeof kasane.grid.fold!=='function'||typeof gridFold!=='undefined'||"
+              "kasane.grid.index({x:1,y:4}).length!==5)"
+              "throw Error('grid.index');", false);
     eval(ctx, "kasane.grid.run(1,{0:new Int16Array(4)})", true);
     eval(ctx, "globalThis.h=kasane.grid.register(gridFoldDeviceProgram);"
               "let registered=kasane.grid.registration(h);"
@@ -335,8 +342,8 @@ int main(int argc, char **argv)
               "if(!detail.includes('body[0]')||"
               "!detail.includes('invalid destination register'))"
               "throw Error('IR diagnostic '+detail);"
-              "let at=gridFold.index({x:1,y:8});"
-              "let slow=gridFold.fold({width:8,height:1,tapWidth:1,"
+              "let at=kasane.grid.index({x:1,y:8});"
+              "let slow=kasane.grid.fold({width:8,height:1,tapWidth:1,"
               "tapHeight:1,output:at},g=>g.add(g.acc,g.min("
               "g.load(0,at),g.constant(0))));"
               "let slowHandle=kasane.grid.register(slow);"
@@ -350,8 +357,8 @@ int main(int argc, char **argv)
               "slowRoute.candidateMask!==0)"
               "throw Error(JSON.stringify(slowRoute));", false);
     pocket_grid_reset();
-    eval(ctx, "let narrow=gridFold.index({x:1,y:7});"
-              "let narrowPlan=gridFold.fold({width:7,height:1,tapWidth:1,"
+    eval(ctx, "let narrow=kasane.grid.index({x:1,y:7});"
+              "let narrowPlan=kasane.grid.fold({width:7,height:1,tapWidth:1,"
               "tapHeight:1,output:narrow},g=>g.add(g.acc,g.load(0,narrow)));"
               "let narrowHandle=kasane.grid.register(narrowPlan);"
               "if(kasane.grid.run(narrowHandle,{0:new Int16Array(7).fill(1)})"
@@ -361,8 +368,8 @@ int main(int argc, char **argv)
               "narrowRoute.scalarReason!=='VECTOR_LAYOUT'||"
               "narrowRoute.candidateMask!==0)"
               "throw Error(JSON.stringify(narrowRoute));"
-              "let wide=gridFold.index({x:1,y:8});"
-              "let rangePlan=gridFold.fold({width:8,height:1,tapWidth:1,"
+              "let wide=kasane.grid.index({x:1,y:8});"
+              "let rangePlan=kasane.grid.fold({width:8,height:1,tapWidth:1,"
               "tapHeight:1,output:wide},g=>{"
               "let sample=g.load(0,wide);let square=g.mul(sample,sample);"
               "return g.add(g.acc,g.mul(square,square));});"

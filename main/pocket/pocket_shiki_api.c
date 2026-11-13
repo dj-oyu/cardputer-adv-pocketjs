@@ -3,7 +3,8 @@
 // Drawing shares the procedural surface's slots, handles and frames
 // (pocket_shiki_frame.c): beginFrame, commit, resource and createSurface are the
 // procedural functions themselves, and draw runs the Shiki engine into the
-// same frame. grid is the existing pocket.kasane.grid (sec.7).
+// same frame. The grid is pocket.kasane.grid (sec.7); shiki.grid, a copy of it,
+// was removed in api-reorg P5.
 //
 // Data regions (sec.5.1, 9.2, 9.3; v1.4 field planes). data() takes the
 // memory from the Shiki heap, 16-byte aligned, and hands JS a typed array over
@@ -563,23 +564,6 @@ static JSValue js_heap(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 }
 
 // ------------------------------------------------------------- install
-// grid is kasane's own (pocket_grid_install), the same object (sec.7). It was
-// copied here at install, which now would build kasane.grid (an object entry
-// of a lazy list, api-reorg.md sec.3.1) for every Shiki session; so it is a
-// getter that reads kasane.grid on the first read of shiki.grid and puts
-// the value in its place. P5 removes the copy. grid_owner is the kasane
-// namespace install was given, borrowed (no reference): it holds shiki, so
-// it is alive whenever the getter can run; the reset forgets it.
-static JSValue grid_owner;
-static JSValue js_grid(JSContext *ctx,JSValueConst self){
-    if(!owner||!JS_IsObject(grid_owner))return JS_UNDEFINED;
-    JSValue grid=JS_GetPropertyStr(ctx,grid_owner,"grid");
-    if(JS_IsException(grid)||!JS_IsObject(self))return grid;
-    if(JS_DefinePropertyValueStr(ctx,self,"grid",JS_DupValue(ctx,grid),JS_PROP_C_W_E)<0){
-        JS_FreeValue(ctx,grid);return JS_EXCEPTION;
-    }
-    return grid;
-}
 esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
     JSValue shiki=JS_NewObject(ctx);
     if(JS_IsException(shiki))return ESP_ERR_NO_MEM;
@@ -599,7 +583,6 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("setList",3,js_set_list),
         JS_CFUNC_DEF("drawList",3,js_draw_list),
         JS_CFUNC_DEF("releaseList",1,js_release_list),
-        JS_CGETSET_DEF("grid",js_grid,NULL),
     };
     // Drawing writes only the tail behind the frame a present may be
     // reading; the slots, regions, lists and the Shiki heap are not read by
@@ -610,7 +593,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
     pocket_nojoin_end(ctx,mark);
     ok=ok&&pocket_proc_frame_install(ctx,shiki)==ESP_OK;
     if(!ok){JS_FreeValue(ctx,shiki);return ESP_ERR_NO_MEM;}
-    owner=ctx;grid_owner=kasane;
+    owner=ctx;
     return JS_SetPropertyStr(ctx,kasane,"shiki",shiki)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 
@@ -650,5 +633,5 @@ void pocket_shiki_api_reset(void){
     for(int k=0;k<LISTS;k++)if(lists[k].h)shiki_heap_free(lists[k].h);
     memset(lists,0,sizeof lists);
     memset(binds,0,sizeof binds);
-    owner=NULL;grid_owner=JS_UNDEFINED;
+    owner=NULL;
 }
