@@ -240,8 +240,8 @@ static JSValue managed_instance_evaluate_skin_rigid_dq(JSContext *ctx,JSValueCon
  * guest allocation as evaluateSkin; no maximum-node array lives on the stack. */
 enum { POCKET_SKIN_BATCH_BYTES=16*1024 };
 static uint16_t managed_skin_u16(const uint8_t *p){uint16_t value;memcpy(&value,p,sizeof value);return value;}
-static __attribute__((noinline)) JSValue managed_instance_evaluate_skins(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    const char *op="ayatsuri.instance.evaluateSkins";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
+static __attribute__((noinline)) JSValue managed_instance_evaluate_skins_mode(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,bool rigid_dq){
+    const char *op=rigid_dq?"ayatsuri.instance.evaluateSkinsRigidDQ":"ayatsuri.instance.evaluateSkins";pocket_model_actor *a=managed_instance_enter(ctx,self,op,false);
     if(!a)return JS_EXCEPTION;
     shade_view v[8];bool valid=argc==8;
     const JSTypedArrayEnum types[8]={JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_FLOAT32,JS_TYPED_ARRAY_UINT16,
@@ -279,7 +279,11 @@ static __attribute__((noinline)) JSValue managed_instance_evaluate_skins(JSConte
     ayatsuri_status skin=AYATSURI_OK;
     for(size_t j=0;j<joints&&skin==AYATSURI_OK;++j){
         ayatsuri_transform global,bind;memcpy(&global,v[3].data+j*48,48);memcpy(&bind,v[4].data+j*48,48);
-        skin=ayatsuri_skin_palette(&global,&bind,1,palette+j);
+        if(rigid_dq){
+            double q[4],d[4];
+            if(!ayatsuri_dq_from_rigid(&global,q,d)||!ayatsuri_dq_from_rigid(&bind,q,d))skin=AYATSURI_INVALID;
+        }
+        if(skin==AYATSURI_OK)skin=ayatsuri_skin_palette(&global,&bind,1,palette+j);
     }
     for(size_t j=0;j<vertices;++j){
         memcpy(input[j].position,v[5].data+j*24,12);memcpy(input[j].normal,v[5].data+j*24+12,12);
@@ -289,7 +293,8 @@ static __attribute__((noinline)) JSValue managed_instance_evaluate_skins(JSConte
     for(size_t k=0;k<count&&skin==AYATSURI_OK;++k){
         const uint8_t *row=v[2].data+k*6;const uint16_t nv=managed_skin_u16(row+2),nj=managed_skin_u16(row+4);
         geometry[k]=(ayatsuri_model_mesh_geometry){managed_skin_u16(row),nv,result+vertex};
-        skin=ayatsuri_skin_evaluate(palette+joint,nj,input+vertex,nv,result+vertex);
+        skin=rigid_dq?ayatsuri_skin_evaluate_rigid_dq(palette+joint,nj,input+vertex,nv,result+vertex):
+            ayatsuri_skin_evaluate(palette+joint,nj,input+vertex,nv,result+vertex);
         vertex+=nv;joint+=nj;
     }
     ayatsuri_model_status status=skin==AYATSURI_OK?AYATSURI_MODEL_OK:
@@ -300,6 +305,14 @@ static __attribute__((noinline)) JSValue managed_instance_evaluate_skins(JSConte
         else js_free(ctx,work);
     }
     a->busy=false;return status==AYATSURI_MODEL_OK?JS_UNDEFINED:managed_model_error(ctx,op,status);
+}
+static JSValue managed_instance_evaluate_skins(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return managed_instance_evaluate_skins_mode(ctx,self,argc,argv,false);
+}
+/* All parts finish validation/deformation before the one core evaluation.
+ * Scratch contents may change on failure; no whole-frame rollback is promised. */
+static JSValue managed_instance_evaluate_skins_rigid_dq(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return managed_instance_evaluate_skins_mode(ctx,self,argc,argv,true);
 }
 static void managed_packet_ellipsoid(const ayatsuri_model_packet *packet,ksn_proc_ellipsoid *p){
     memset(p,0,sizeof *p);
@@ -503,6 +516,7 @@ static const JSCFunctionListEntry managed_instance_methods[]={
     JS_CFUNC_DEF("evaluateSkin",8,managed_instance_evaluate_skin),
     JS_CFUNC_DEF("evaluateSkinRigidDQ",8,managed_instance_evaluate_skin_rigid_dq),
     JS_CFUNC_DEF("evaluateSkins",8,managed_instance_evaluate_skins),
+    JS_CFUNC_DEF("evaluateSkinsRigidDQ",8,managed_instance_evaluate_skins_rigid_dq),
     JS_CFUNC_DEF("nodeKind",1,managed_instance_node_kind),
     JS_CFUNC_DEF("submit",0,managed_instance_submit),JS_CFUNC_DEF("stats",1,managed_instance_stats),
     JS_CFUNC_DEF("submitClipped",3,managed_instance_submit_clipped),
