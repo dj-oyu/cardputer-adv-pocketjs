@@ -369,6 +369,20 @@ SERPIE ok=<n> mismatch=<n> scalar_cy=<n> pie_cy=<n> rot_mismatch=<n> unsafe=<n> 
 - **核どうしの比は約 4〜5 倍、利得は 1 フレーム 約 27 µs（推定、全部の弦を判定する比べ方）。** ただし今の `ser()` がスカラーで判定する量（下の注意）と比べると、差は 1 フレーム 約 3k サイクル（約 12 µs、推定）で、§6.2 の「0.01〜0.02 ms」と同じ桁。どちらも 1 ターンの時間（11.6 ms）の 0.1〜0.3% で、ターンの時間には出ない。実機の `scalar_cy`・`pie_cy` の差がこの桁なら、§7.2 の S3 の基準どおり「効かなかった」と記録して既定 OFF のままにする。
 - **比べる相手に注意。** 参照は 18 本の弦を全部判定する。今の倍精度の `ser()` が `ou()` を呼ぶのは `view()` が残した候補の弦だけ（5 回で計 約 40.7 本、§1.1）で、`view()` は 18 本。核を入れると、`ser()` の 5 回も 18 本全部をまとめて判定する形になる（候補の数によらず一定）。だから実機の `scalar_cy` は「整数の `ou()` を全部の弦に使った場合」で、S1 の `ser()` がする量より多めに出る。A/B の結論は、`ser()` に組み込んだ後の §7.3 の `DERBY SERCY` で出す。
 
+
+#### 10.5.1 実機の結果（2026-11-13、`ce7c0c0`＝`CONFIG_POCKET_DERBY_SER_PIE=y` の測定用の像、broker の app_session で DERBY を起動、実測）
+
+```
+SERPIE ok=3072 mismatch=0 scalar_cy=8967 pie_cy=1908 rot_mismatch=0 unsafe=0 cases=512 calls=3072
+  rot_scalar_cy=1167 rot_pie_cy=138 cull_scalar_cy=1300 cull_pie_cy=295 rot_min=1160/136 cull_min=1293/293
+  double_chords=6144 culled=5376 culled_double=5397
+```
+
+- **一致:** 3,072 呼び出しで `mismatch=0`・`rot_mismatch=0`・`unsafe=0`。
+- **速さ（同一バイナリ）:** 回転 1,167 → 138 サイクル（8.5 倍）、除外 1,300 → 295 サイクル（4.4 倍）、1 フレーム分（回転 1 回＋除外 6 回）8,967 → 1,908 サイクル（4.7 倍）。見込み（§10.5、スカラー約 8,800・PIE 2,070〜2,220）と合う。
+- **フレームへの効き:** 差は約 7,000 サイクル ≈ 29 µs（240 MHz）。重い CAM WIDE 2 のターン（約 11 ms）の約 0.3%。核そのものは 4〜8 倍速いが、`ser()` の中で除外と回転が占める割合が小さいので、ターンには効かない（§7.2 の予想どおり）。`ser()` に組み込む価値は、整数化（S1・S2）の後に残る計算の内訳を実機で見てから決める。
+- 測定用のコミットは取り消した（製品の像は `CONFIG_POCKET_DERBY_SER_PIE=n` のまま）。
+
 ### 10.6 ビルド
 
 - フラグ ON・OFF の両方で、それぞれ専用のビルドディレクトリ（`-D SDKCONFIG=<dir>/sdkconfig`）で組んで通ることを確かめた（ESP-IDF v6.0.1、警告なし）。ON の ELF に `dsp_rotate_pie`（0x63 B）・`dsp_cull_pie`（0xF7 B）・参照・`dsp_selftest` があり、`objdump` で除外の `loopgtz` の本体は 163 B（256 B 以内）。静的な RAM は検査用の `dsp_ends` 2 個（0x290 B ずつ）と小物。OFF では `derby_ser_pie.c.obj` の text・data・bss が 0 で、ELF に `dsp_` の記号は無い（`app_session.c` の呼び出しは `#ifdef` の中）。
