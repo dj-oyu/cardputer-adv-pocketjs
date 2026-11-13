@@ -5,17 +5,18 @@
   var m = globalThis.VMC | 0, f = globalThis.frame, log = console.log;
   var P = pocket, t = null;
   if (m & 1) {
-    var st = {n: 0}, sc = P.kasane.createScene({
-      build: function (tx) {
-        tx.background(0x101820ff);
-        tx.rect({bounds: [0, 96, 240, 135], color: 0x203048ff});
-        return {t: tx.text({bounds: [6, 108, 234, 120], font: 'caption',
-          color: 0xd0e0ffff, text: 'VMPROBE 0', capacity: 24})};
-      },
-      patch: function (tx, r, s) { r.t.setText(tx, 'VMPROBE ' + s.n); }
+    var st = {n: 0}, V = P.kasane, tt;
+    V.replace(function (tx) {
+      tx.background(0x101820ff);
+      tx.rect({bounds: [0, 96, 240, 135], color: 0x203048ff});
+      tt = tx.text({bounds: [6, 108, 234, 120], font: 'caption',
+        color: 0xd0e0ffff, text: 'VMPROBE 0', capacity: 24});
     });
-    t = function () { st.n = (st.n + 1) & 1023; sc.invalidate(); sc.flush(st); };
-    sc.flush(st);
+    // A patch before the last picture is presented is refused: skip that turn.
+    t = function () {
+      st.n = (st.n + 1) & 1023;
+      try { V.patch(function (tx) { tt.setText(tx, 'VMPROBE ' + st.n); }); } catch (e) {}
+    };
     log('VMCOND ui on');
   }
   if (m & 2) {
