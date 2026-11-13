@@ -8,25 +8,87 @@ execute_process(COMMAND "${PYTHON}" "${R}/tools/make_font.py" "${CMAKE_BINARY_DI
 execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../pet_header.py"
     "${R}/apps/pet/assets/pets-compact.bin" "${CMAKE_BINARY_DIR}/generated/kasane_pet_test_data.h"
     COMMAND_ERROR_IS_FATAL ANY)
-# -DR5SIM_APP=shiki: today's STRESS (apps/stress/stress.js, drawn with
-# pocket.kasane.shiki), as tools/build_stress_app_test.sh builds it on the host:
-# the app's Shiki programs become the built-in table (Node 16+). Default: the
-# R5 records' Kasane-retained STRESS (stress_r5.js). docs/vm/qjs-observe.md sec.12.
+# The workload (docs/kasane/api-reorg.md sec.6 P0):
+#   (unset)  the R5 records' Kasane-retained STRESS (stress_r5.js), no Shiki.
+#            docs/vm/qjs-observe.md sec.12.
+#   shiki    today's STRESS (apps/stress/stress.js, drawn with
+#            pocket.kasane.shiki), as tools/build_stress_app_test.sh builds it
+#            on the host: the app's Shiki programs become the built-in table
+#            (Node 16+).
+#   shiki_v1 the same STRESS frozen as of 4840504 (stress_shiki_v1.js and its
+#            programs stress_shiki_v1_prog.js, byte for byte): the old API's
+#            calls, kept running while the apps move to the new ones.
+#   derby    DERBY WATCH's demo race (apps/derby, its chunks lowered and its
+#            @shiki programs compiled as main/CMakeLists.txt does), with
+#            pocket.derby, pocket.app.load and pocket.input; counts per scene.
+#   hud      LCD CATCH (apps/lcdcatch): retained mode only (replace/patch,
+#            refs, cache), no Shiki; pocket.input fed by a bot.
 set(R5SIM_APP_SOURCES "")
 set(R5SIM_APP_JS "${CMAKE_CURRENT_LIST_DIR}/stress_r5.js")
 set(R5SIM_SHIKI_SOURCES "")
+set(R5SIM_CHUNK_FILES "")
+set(R5SIM_SHIKI_ROM "")
 if(R5SIM_APP STREQUAL "shiki")
+    set(R5SIM_SHIKI_ROM "stress=apps/stress/stress_prog.js")
+    set(R5SIM_APP_JS "${R}/apps/stress/stress.js")
+elseif(R5SIM_APP STREQUAL "shiki_v1")
+    set(R5SIM_SHIKI_ROM "stress=tools/r5sim/main/stress_shiki_v1_prog.js")
+    set(R5SIM_APP_JS "${CMAKE_CURRENT_LIST_DIR}/stress_shiki_v1.js")
+elseif(R5SIM_APP STREQUAL "derby")
+    # pocket.app.load()'s table for local.derby alone, as main/CMakeLists.txt
+    # makes it; the prog chunk without its @shiki functions (lower_plans.mjs),
+    # done here at configure time (this image has no other chunk to rebuild).
+    find_program(R5SIM_NODE node REQUIRED)
+    set(_g "${CMAKE_BINARY_DIR}/generated/derby")
+    execute_process(COMMAND "${PYTHON}" "${R}/tools/make_app_chunks.py" "${_g}" "${R}/apps/derby/chunks.txt"
+        OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
+    include("${_g}/app_chunks.cmake")
+    set(_lower ${APP_CHUNK_LOWER})
+    while(_lower)
+        list(POP_FRONT _lower _src _dst _how)
+        string(REGEX REPLACE "^rom:" "" _app "${_how}")
+        execute_process(COMMAND "${R5SIM_NODE}" "${R}/tools/kasane_ir/lower_plans.mjs" --rom "${_app}"
+            --file "${_src}" "${_dst}" WORKING_DIRECTORY "${R}" OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
+    endwhile()
+    set(R5SIM_SHIKI_ROM ${APP_CHUNK_SHIKI})
+    set(R5SIM_CHUNK_FILES ${APP_CHUNK_FILES})
+    set(R5SIM_APP_JS "${R}/apps/derby/derby_watch.js")
+    set(R5SIM_APP_SOURCES "${_g}/app_chunks.c" "${R}/main/pocket/pocket_app_load.c"
+        "${R}/main/pocket/app_registry.c" "${R}/main/pocket/pocket_derby.c" "${R}/main/pocket/shiki_memstat.c")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${R}/apps/derby/chunks.txt"
+        "${R}/apps/derby/derby_prog.js")
+elseif(R5SIM_APP STREQUAL "hud")
+    set(R5SIM_APP_JS "${R}/apps/lcdcatch/lcd_catch.js")
+elseif(R5SIM_APP)
+    message(FATAL_ERROR "R5SIM_APP=${R5SIM_APP}: one of shiki, shiki_v1, derby, hud (or unset)")
+endif()
+if(R5SIM_SHIKI_ROM)
     find_program(R5SIM_NODE node REQUIRED)
     execute_process(COMMAND "${R5SIM_NODE}" "${R}/tools/kasane_ir/emit_shiki_rom.mjs"
-        "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c" "stress=apps/stress/stress_prog.js"
+        "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c" ${R5SIM_SHIKI_ROM}
         WORKING_DIRECTORY "${R}" OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
     set(R5SIM_SHIKI_SOURCES "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/pocket/shiki_heap.c"
         "${R}/main/ui/kasane/ksn_shiki.c" "${R}/main/ui/kasane/ksn_shiki_frame.c"
         "${R}/main/pocket/pocket_shiki_api.c"
         # pocket_shiki_frame.c draws opaque mesh depth (beginMeshFrame).
         "${R}/main/ui/kasane/ksn_mesh_depth.c" "${R}/main/ayatsuri/compact_opaque.c")
-    set(R5SIM_APP_SOURCES ${R5SIM_SHIKI_SOURCES} "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c")
-    set(R5SIM_APP_JS "${R}/apps/stress/stress.js")
+    list(APPEND R5SIM_APP_SOURCES ${R5SIM_SHIKI_SOURCES} "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c")
+endif()
+if(R5SIM_APP STREQUAL "derby" OR R5SIM_APP STREQUAL "hud")
+    # pocket.input.keys, real (keymap + keystate), with pocket_api.c's
+    # subscription code verbatim as the host harnesses take it
+    # (tools/games/run_lcd_catch.sh): r5sim.c includes pocket_sub_impl.inc.
+    file(READ "${R}/main/pocket/pocket_api.c" _api)
+    string(FIND "${_api}" "// ----------------------------------------------------------- subscriptions" _a)
+    string(FIND "${_api}" "// ------------------------------------------------------- async completions" _b)
+    if(_a LESS 0 OR _b LESS _a)
+        message(FATAL_ERROR "pocket_api.c: the subscriptions section moved; update tools/r5sim/main/CMakeLists.txt")
+    endif()
+    math(EXPR _n "${_b} - ${_a}")
+    string(SUBSTRING "${_api}" ${_a} ${_n} _sub)
+    file(WRITE "${CMAKE_BINARY_DIR}/generated/pocket_sub_impl.inc" "${_sub}")
+    list(APPEND R5SIM_APP_SOURCES "${R}/main/pocket/pocket_input.c" "${R}/main/hal/keymap.c"
+        "${R}/main/hal/keystate.c")
 endif()
 set(R5SIM_LDFRAGMENTS "")
 # R5SIM_HELPER_IRAM=0 leaves them in flash, to choose the list again from a
@@ -70,6 +132,17 @@ idf_component_register(
 if(R5SIM_PGO STREQUAL "generate")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_PGO_GEN)
 endif()
+# The chunks (derby): TEXT, so a NUL follows each, as the firmware embeds them.
+foreach(_chunk IN LISTS R5SIM_CHUNK_FILES)
+    target_add_binary_data(${COMPONENT_LIB} "${_chunk}" TEXT)
+endforeach()
+if(R5SIM_APP STREQUAL "derby")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_DERBY)
+elseif(R5SIM_APP STREQUAL "hud")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_HUD)
+elseif(R5SIM_APP STREQUAL "shiki_v1")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_SHIKI_V1)
+endif()
 # -DR5SIM_GUEST_ALLOC=1: the firmware guest's allocator (R3 block cache over
 # heap_caps) instead of JS_NewRuntime's malloc (docs/vm/qjs-observe.md).
 # Off by default so the R5/PGO records stay comparable.
@@ -112,7 +185,7 @@ endif()
 if(R5SIM_FIT_LIMIT_KIB)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_FIT_LIMIT_KIB=${R5SIM_FIT_LIMIT_KIB})
 endif()
-if(R5SIM_APP STREQUAL "shiki")
+if(R5SIM_SHIKI_ROM)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_SHIKI)
     # pocket_kasane.c reaches pocket.kasane.shiki through weak references,
     # which do not pull pocket_shiki_api.c out of the archive by themselves.
@@ -130,7 +203,7 @@ set_source_files_properties("${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kas
 set_property(SOURCE "${R}/main/text/ksn_font.c" "${R}/main/ui/kasane/ksn_render.c"
     "${R}/main/ui/kasane/ksn_core.c" "${R}/main/pocket/pocket_kasane.c"
     APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
-if(R5SIM_APP STREQUAL "shiki")
+if(R5SIM_SHIKI_ROM)
     set_property(SOURCE "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/ui/kasane/ksn_shiki.c"
         APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
     set_property(SOURCE "${R}/main/ui/kasane/ksn_shiki_frame.c" APPEND PROPERTY COMPILE_OPTIONS "-O2")

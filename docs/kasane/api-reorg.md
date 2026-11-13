@@ -303,7 +303,7 @@ heapprobe の DERBY（評価の余裕の二分探索）は、6・7 の後に今�
 共通の規則:
 
 - 各段は worktree（`.claude/worktrees/<名前>`、ブランチ `vm/<題目>`）で行い、`git merge --no-ff` で入れる（CLAUDE.md）。
-- **各段の前後で §6.1 の指標を取り、`docs/kasane/logs/api-reorg-perf.md`（P0 で作る）に 1 行ずつ足す。** コミットの sha、何を測ったか（実測か、QEMU のカウントか）を必ず書く。
+- **各段の前後で §6.1 の指標を取り、[`docs/kasane/logs/api-reorg-perf.md`](logs/api-reorg-perf.md)（P0 で作った。ベースラインと読み方）に 1 行ずつ足す。** コミットの sha、何を測ったか（実測か、QEMU のカウントか）を必ず書く。
 - 実機が要る検証を host だけで済ませない。実機を使い終えたら通常の image に戻す。
 - FAST（Sonnet）の段でも、合格基準の数字の解釈は STEADY が行う（CLAUDE.md のルーティング）。
 
