@@ -384,6 +384,8 @@ Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の
 
 ### P4 — アプリを移す（§5 の 1〜6: Sonnet／STRESS の `Int32Array`: Opus）
 
+**STRESS（§5 の 2、`Int32Array` を含む）は実施（2026-11-13）。** r5sim の `shiki` 153,906 → 142,560（`shiki_v1` 153,964 より小さい）、確保 172 → 156 回/ターン、評価後のゲスト・評価のピークとも減った。LV1・LV2 の digest は同一、LV3 は OOM の起きるフレームが動くため digest は比べられず、式への入力の一致を stub で確かめた（[logs/api-reorg-perf.md](logs/api-reorg-perf.md) §8）。
+
 範囲: §5 の表の 1〜6。1 アプリ 1 コミット。
 
 受け入れ基準: 各アプリで、(a) host の画素の一致（DERBY は 19 本の検査、STRESS は digest、BIG WAVE・LCD CATCH・MEGADEMO は各 host の検査）、(b) Q5 のゲストヒープと評価のピークが増えない、(c) r5sim: `shiki`（書き換えた STRESS）のカウントが `shiki_v1` より小さい、`derby` のカウントと確保の回数が P3 より小さい、(d) 実機: そのアプリの `turn_ms` が悪化しない、DERBY は評価余裕 28.9 KB・ゲスト最大 134.8 KB を悪化させない。段の終わりに Q3（トレース）を `shiki` と `derby` で取り、アロケータ比を P0 と比べる。
