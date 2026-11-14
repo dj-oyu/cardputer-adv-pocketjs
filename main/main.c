@@ -41,6 +41,9 @@
 #endif
 #include "pocket_bridge.h"
 #include "app_control.h"
+#ifdef CONFIG_POCKET_EDGE_BENCH
+#include "edge_bench/edge_bench_device.h"
+#endif
 #include "esp_app_desc.h"
 #include "esp_random.h"
 #include "pocket_text.h"
@@ -665,6 +668,9 @@ typedef struct {
 } native_app_t;
 #define NATIVE_APP(id,title,source,end,flags) {{id,title,flags},source,end}
 static const native_app_t native_apps[]={
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    NATIVE_APP("local.edgebench","SYNTHETIC EDGE BENCH",NULL,NULL,1),
+#endif
     NATIVE_APP("local.hello","HELLO WORLD",NULL,NULL,5),
     NATIVE_APP("local.imucal","IMU CALIBRATION",imucal_start,imucal_end,7),
     NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),
@@ -700,12 +706,22 @@ static bool native_catalog(unsigned index,app_control_descriptor_t *out) {
     *out=native_apps[index].info;return true;
 }
 static uint8_t native_start(const char *id,bool resume) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    edge_device_poll();
+    if(edge_device_owned())return AC_BUSY;
+#endif
     const native_app_t *d=NULL;
     for(unsigned i=0;i<native_catalog_count();i++)
         if(!strcmp(native_apps[i].info.id,id)) { d=&native_apps[i];break; }
     if(!d || !app_registry_find(id))return AC_UNKNOWN_APP;
     if(!(d->info.flags&1))return AC_UNSUPPORTED;
     if(running || screen!=SCREEN_HOME || home_modal() || pocket_text_active())return AC_BUSY;
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    if(!strcmp(id,"local.edgebench")) {
+        if(resume||app_guest_present()||app_dormant_id()[0]||overlay_running())return AC_BUSY;
+        return edge_device_start()?AC_OK:AC_BUSY;
+    }
+#endif
     if(resume) {
         if(strcmp(app_dormant_id(),id))return AC_STALE_RUN;
     } else if(app_dormant_id()[0])app_stop();
@@ -854,6 +870,10 @@ static void take_pending_run(void) {
 // is gone.
 static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
                       const char *source, size_t len) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    edge_device_poll();
+    if(edge_device_owned()){home_error="BENCH BUSY";run_started=ESP_ERR_INVALID_STATE;return;}
+#endif
     owner=screen;
     // APPS FIRST (docs/platform/wifi-autostart.md). A clock sync the idle home
     // screen started holds about 48 KB while the radio is up; the guest below,
@@ -1084,10 +1104,22 @@ static bool ui_key_receive(keystroke_t *stroke) {
     return have;
 }
 
+static uint32_t native_instance(void) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    if(edge_device_owned())return edge_device_instance();
+#endif
+    return app_guest_generation();
+}
 static void native_observe(void) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    if(edge_device_owned()){app_control_observe(true,"","local.edgebench",edge_device_instance());return;}
+#endif
     app_control_observe(running,app_dormant_id(),app_registry_current()->id,app_guest_generation());
 }
 static uint8_t native_tap(uint8_t action) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    if(edge_device_owned())return AC_UNSUPPORTED;
+#endif
     if(!running || app_guest_generation()!=native_generation || home_modal() || pocket_text_active() ||
        pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return AC_BLOCKED;
     static const board_key_t nav[]={KEY_NONE,KEY_ENTER,KEY_BACK,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
@@ -1101,6 +1133,9 @@ static uint8_t native_tap(uint8_t action) {
 }
 static bool native_stop(void);
 static uint8_t native_suspend(void) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    if(edge_device_owned())return AC_UNSUPPORTED;
+#endif
     if(!running || home_modal() || pocket_text_active())return AC_BLOCKED;
     if(!app_can_suspend())return AC_UNSUPPORTED;
     if(app_suspend()!=ESP_OK) {
@@ -1113,6 +1148,9 @@ static uint8_t native_suspend(void) {
     suspend_run();return AC_OK;
 }
 static bool native_stop(void) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    if(edge_device_owned())return edge_device_stop();
+#endif
     /* app_stop destroys the guest before returning, including dormant guests.
      * No BACK/HOME marker is interpreted as a teardown acknowledgment. */
     if(app_guest_present() && (!native_generation || app_guest_generation()!=native_generation))return false;
@@ -1145,8 +1183,19 @@ static void ui_task(void *arg) {
     int64_t previous_overlay_frame_started=0;
 #endif
     while(1) {
+#ifdef CONFIG_POCKET_EDGE_BENCH
+        edge_device_poll();
+#endif
         native_observe();
         app_control_pump((uint64_t)esp_timer_get_time()/1000);
+#ifdef CONFIG_POCKET_EDGE_BENCH
+        if(edge_device_owned()){
+            /* No other app/diagnostic or physical screen action while owned.
+             * Typed STOP/expiry are still pumped; no key becomes a cancel. */
+            keystroke_t ignored;while(xQueueReceive(keys,&ignored,0)==pdTRUE){}
+            vTaskDelay(1);continue;
+        }
+#endif
         /* App teardown can time out while an SD read is in progress. Reap its
          * acknowledged lease even when HOME has no guest turns to pump. */
         pocket_video_sd_stream_reap();
@@ -1635,13 +1684,19 @@ void app_main(void) {
         .catalog_count=native_catalog_count,.catalog=native_catalog,.start=native_start,
         .tap=native_tap,.suspend=native_suspend,.stop=native_stop,.emit=native_emit,
         .fingerprint=native_fingerprint,
-        .instance=app_guest_generation,
+        .instance=native_instance,
+#ifdef CONFIG_POCKET_EDGE_BENCH
+        .started=edge_device_bind,
+#endif
         .clock_ms=native_clock_ms,
     };
     /* 53 bits: the broker's clients read JSON numbers as doubles, so a wider
      * id came back rounded and every action.tap was refused as stale_boot. */
     uint64_t boot_id=(((uint64_t)esp_random()<<32)|esp_random())&((1ull<<53)-1u);
     app_control_init(boot_id,&native_hooks);
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    edge_device_init(boot_id);
+#endif
     /* The system's slow tasks take RTC fast memory (8 KB, APB clock) at boot so
      * the JIT's code can never land there: 3x slower (shiki-jit.md sec.15).
      * input 2 KB here, wifi 3 KB and timesync 2 KB in their own inits. */

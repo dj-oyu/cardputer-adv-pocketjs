@@ -578,3 +578,22 @@ menu "Pocket VM (diagnostics)"
             measurement across them is not confounded by a code-path change.
 
 endmenu
+
+menu "Synthetic edge benchmark (measurement only)"
+config POCKET_EDGE_BENCH
+    bool "Enable explicit local.edgebench typed native app"
+    depends on IDF_TARGET_ESP32S3
+    default n
+    help
+        No automatic startup. Synthetic scalar64/PIE wrapper comparison only.
+config POCKET_EDGE_BENCH_CORE
+    int "Pinned benchmark worker core"
+    depends on POCKET_EDGE_BENCH
+    range 0 1
+    default 1
+config POCKET_EDGE_BENCH_STACK
+    int "Benchmark worker stack bytes"
+    depends on POCKET_EDGE_BENCH
+    range 4096 16384
+    default 8192
+endmenu

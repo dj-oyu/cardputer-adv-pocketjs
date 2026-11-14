@@ -26,6 +26,8 @@ typedef struct {
     void (*fingerprint)(uint8_t hash[32], char version[48]);
     uint32_t (*instance)(void);
     uint64_t (*clock_ms)(void);  // optional; recheck TTL between blocking owner calls
+    // Owner callback after accepted START identity assignment, before reply.
+    void (*started)(const char *id,uint32_t run,uint32_t instance);
 } app_control_hooks_t;
 /* Initialize before input/UI tasks. boot must be fresh and nonzero per boot. */
 void app_control_init(uint64_t boot, const app_control_hooks_t *hooks);

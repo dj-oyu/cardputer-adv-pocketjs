@@ -84,6 +84,10 @@ static const app_manifest_t MANIFESTS[] = {
     // A test app (apps/stress/README.md): it draws and churns its own heap,
     // and reads assets: through pocket.fs, which every session has. Its own
     // row so its fs owner is not hello's.
+#ifdef CONFIG_POCKET_EDGE_BENCH
+    {.id="local.edgebench",.title="SYNTHETIC EDGE BENCH",.entry="native:edge_bench",
+     .runtime=APP_RUNTIME_POCKET,.api=API_0_2,.required=CAPS_NONE,.optional=CAPS_NONE,.works=APP_WORKS_NONE},
+#endif
     {.id="local.stress", .title="STRESS TEST", .entry="apps/stress/stress.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_STRESS, .optional=CAPS_NONE, .works=APP_WORKS_NONE},

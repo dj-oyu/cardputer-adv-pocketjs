@@ -652,3 +652,23 @@ if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
         COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
     set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
+
+if(CONFIG_POCKET_EDGE_BENCH)
+    if(CONFIG_POCKET_UI_TASK_CORE LESS 0 OR NOT CONFIG_POCKET_UI_TASK_CORE EQUAL CONFIG_POCKET_EDGE_BENCH_CORE)
+        message(FATAL_ERROR "Edge bench requires UI and worker pinned to the same core for synchronous task reclamation")
+    endif()
+    set(_edge_sources "edge_bench/bench_core.c" "edge_bench/edge3x4_sched_leaf.c" "edge_bench/edge_bench_device.c")
+    target_sources(${COMPONENT_LIB} PRIVATE ${_edge_sources})
+    set_source_files_properties(${_edge_sources} PROPERTIES COMPILE_OPTIONS "-O2;-fno-lto;-fstack-usage")
+    set(_edge_identity "47e1a4c642fc0807759e44a09ee07898f1f0ae3e")
+    foreach(_f IN ITEMS main.c pocket/app_control.c pocket/app_control.h pocket/app_registry.c
+        edge_bench/bench_core.c edge_bench/bench_core.h edge_bench/generic_wrapper.c
+        edge_bench/edge3x4_sched_leaf.c edge_bench/edge_bench_device.c
+        edge_bench/edge_bench_device.h edge_bench/edge_bench_owner.h)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/${_f}")
+        file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/${_f}" _edge_hash)
+        string(APPEND _edge_identity "${_f}:${_edge_hash};")
+    endforeach()
+    string(SHA256 _edge_id "${_edge_identity}")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE EDGE_BENCH_SOURCE_ID="${_edge_id}")
+endif()

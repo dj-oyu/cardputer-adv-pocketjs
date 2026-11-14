@@ -175,6 +175,7 @@ static void handle(const request_t *r) {
                 if(!arg) { if(++control.run_counter==0)++control.run_counter;control.run=control.run_counter; }
                 memset(control.app,0,32);text((uint8_t *)control.app,32,d.id);control.state=AC_RUNNING;
                 control.instance=control.hooks.instance();
+                if(control.hooks.started)control.hooks.started(control.app,control.run,control.instance);
             }
         }
         break;
