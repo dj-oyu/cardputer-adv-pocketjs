@@ -190,6 +190,15 @@ typedef struct {
      * there; false once the front changes any other way. */
     int16_t front_x0,front_y0,front_x1,front_y1;
     bool front_box;
+    /* Which entries touch each band, of the frame candidate_sig describes:
+     * PROC_BANDS rows of band_words words, bit j of a row = the entry
+     * starting at j (band_signature's sig_add). A band is then drawn
+     * walking only those (render_painter_rows, band_bits below). Taken at
+     * the first commit on the UI task, kept until reset; none (no room)
+     * is the walk over [first, end). */
+    uint32_t *band_bits;
+    uint16_t band_words;
+    bool band_bits_valid;
     uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (no option) */
     uint16_t spare;        /* entries past max_segments, when spare_set */
     bool spare_set;        /* false: as many again as max_segments */
@@ -524,6 +533,9 @@ typedef struct { int x0,y0,x1,y1; bool whole; } proc_box;
  * from its own commit), 0 walks both frames for it as before. Same damage
  * (the host's POCKET_PROC_SIG_CHECK compares them on every commit). */
 int g_pocket_proc_box_reuse=1;
+/* Same-binary A/B arm: 1 draws each band from its entry bitmap (band_bits),
+ * 0 walks [first, end) testing every entry. Same pixels. */
+int g_pocket_proc_band_bits=1;
 static proc_box old_box(const proc_surface *surface){
     proc_box b={KSN_PROC_W,KSN_PROC_H,0,0,
                 !surface->has_committed||surface->tail_color!=surface->committed_color||
@@ -647,7 +659,8 @@ static inline __attribute__((always_inline)) uint32_t band_mix(uint32_t h,uint32
 /* One entry (or a pattern line's two, [start, i)) into each band it touches. */
 static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *frame,proc_band_sig *sig,
                                                           const ksn_proc_segment *geometry,
-                                                          unsigned start,unsigned i){
+                                                          unsigned start,unsigned i,
+                                                          uint32_t *bits,unsigned words){
     const int ya=geometry->y0<geometry->y1?geometry->y0:geometry->y1,yb=geometry->y0^geometry->y1^ya;
     int xa=geometry->x0<geometry->x1?geometry->x0:geometry->x1,xb=(geometry->x0^geometry->x1^xa)+1;
     if(xa<sig->box_x0)sig->box_x0=(int16_t)xa;
@@ -674,9 +687,12 @@ static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *
         if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
         if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
         sig->end[b]=(uint16_t)i;
+        if(bits)bits[b*words+(start>>5)]|=1u<<(start&31u);
     }
 }
-PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
+PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig,
+                                    uint32_t *bits,unsigned words){
+    if(bits)memset(bits,0,(size_t)PROC_BANDS*words*sizeof *bits);
     sig->box_x0=KSN_PROC_W;sig->box_y0=KSN_PROC_H;sig->box_x1=0;sig->box_y1=0;
     for(unsigned b=0;b<PROC_BANDS;b++){
         sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
@@ -686,7 +702,7 @@ PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *s
 #endif
     }
     if(!frame->ext){
-        for(unsigned i=0;i<frame->count;i++)sig_add(frame,sig,&frame->segments[i],i,i+1);
+        for(unsigned i=0;i<frame->count;i++)sig_add(frame,sig,&frame->segments[i],i,i+1,bits,words);
         return;
     }
     unsigned i=0,cost;
@@ -695,7 +711,7 @@ PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *s
     for(;;){
         const unsigned start=i;
         if(!ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost))break;
-        sig_add(frame,sig,&geometry,start,i);
+        sig_add(frame,sig,&geometry,start,i,bits,words);
     }
 }
 #ifdef POCKET_PROC_VISIT_STATS
@@ -767,9 +783,14 @@ static bool render_painter_rows(const proc_surface *surface,const ksn_proc_frame
         if(sig->end[b]>end)end=sig->end[b];
     }
     if(first>end)first=end=0;
+    /* The band's entries alone, when the rows are one band's and the bitmap
+     * describes this frame (candidate_sig's, written by the same commit). */
+    const uint32_t *bits=NULL;
+    if(sig==&surface->candidate_sig&&surface->band_bits_valid&&(unsigned)y/8u==(unsigned)(y+rows-1)/8u)
+        bits=surface->band_bits+((unsigned)y/8u)*surface->band_words;
     /* half_carry: taken by pocket_proc_prepare_render, never here -- this
      * may run on the display task, which allocates nothing (5d). */
-    return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,half_carry);
+    return ksn_proc_render_band_bits(frame,pixels,y,rows,first,end,bits,half_carry);
 }
 /* Depth snapshots use their own bounded workspace for any strip height. */
 static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
@@ -1184,7 +1205,7 @@ static void merge(proc_surface *s){
     /* The front frame changes here and only here: what describes or caches
      * it goes stale now. Drawing writes the tail alone, so the display may
      * read the front, its colour, signature and carry until this point (5c). */
-    s->sig_ready=false;s->front_box=false;
+    s->sig_ready=false;s->front_box=false;s->band_bits_valid=false;
     s->candidate_color=s->tail_color;
     image_band_valid=false;carry_drop();
     s->committed_lost=s->has_committed;
@@ -1273,7 +1294,16 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     sig_keep_old(surface);
 #endif
     merge(surface);
-    band_signature(surface->candidate,&surface->candidate_sig);
+    if(g_pocket_proc_band_bits&&!surface->band_bits){
+        const unsigned words=(surface_segments(surface)+31u)/32u;
+        if((surface->band_bits=shiki_or_sys_calloc((size_t)PROC_BANDS*words,sizeof *surface->band_bits)))
+            surface->band_words=(uint16_t)words;
+    }
+    /* The front's entries are fewer than surface_segments (merge), so every
+     * start index has its bit. */
+    const bool bits=g_pocket_proc_band_bits&&surface->band_bits&&surface->candidate->count<=32u*surface->band_words;
+    band_signature(surface->candidate,&surface->candidate_sig,bits?surface->band_bits:NULL,surface->band_words);
+    surface->band_bits_valid=bits;
     if(g_pocket_proc_box_reuse){
         surface->damage=box_damage(surface,old);
 #ifdef POCKET_PROC_SIG_CHECK
@@ -1313,7 +1343,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
             surface->committed_lost=false;surface->has_committed=false;
             if(!surface->image_mode)pocket_kasane_invalidate();
         }
-        surface->candidate->count=0;surface->front_box=false;
+        surface->candidate->count=0;surface->front_box=false;surface->band_bits_valid=false;
         return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
                        POCKET_ERR_BUSY,"Kasane presentation unavailable");
     }
@@ -1614,6 +1644,7 @@ void pocket_proc_reset(void){
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);   /* committed is the same buffer */
+        shiki_or_sys_free(surfaces[i].band_bits);
         free(surfaces[i].depth_candidate.packets.data);free(surfaces[i].depth_committed.packets.data);
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
         free(surfaces[i].prepared_candidate);free(surfaces[i].prepared_committed);

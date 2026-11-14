@@ -225,6 +225,11 @@ typedef struct {
 } ksn_proc_carry;
 bool ksn_proc_render_band_carry(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
                                 unsigned first,unsigned end,ksn_proc_carry *carry);
+/* The same, visiting only the entries of [first, end) that `bits` names (one
+ * band's row of a bitmap, bit j = the entry starting at j touches the band;
+ * NULL: every entry). The rows must lie in that one band. */
+bool ksn_proc_render_band_bits(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                               unsigned first,unsigned end,const uint32_t *bits,ksn_proc_carry *carry);
 /* 1 (default): a horizontal line (y0 == y1) is clipped to the panel once and
  * filled two pixels a store, instead of walked a pixel at a time. 0 is the
  * Bresenham walk for every line, the reference for a same-binary A/B. The

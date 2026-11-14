@@ -214,9 +214,12 @@ int main(int argc,char **argv) {
     /* KSN_BLEND_LUT_ALPHA=1: the text alpha table (off in the shipped build). */
     const char *lut_alpha_arm=getenv("KSN_BLEND_LUT_ALPHA");
     if(lut_alpha_arm)g_ksn_blend_lut_alpha=strcmp(lut_alpha_arm,"0")!=0;
+    /* KSN_BAND_BITS=0: bands walk every entry of their range, not the bitmap. */
+    const char *bits_arm=getenv("KSN_BAND_BITS");
+    {extern int g_pocket_proc_band_bits;if(bits_arm)g_pocket_proc_band_bits=strcmp(bits_arm,"0")!=0;}
     const char *runs_arm=getenv("KSN_TEXT_RUNS");
     if(runs_arm)g_ksn_text_runs=strcmp(runs_arm,"0")!=0;
-    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm||ranges_arm||extent_arm||runs_arm||lut_alpha_arm;
+    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm||ranges_arm||extent_arm||runs_arm||lut_alpha_arm||bits_arm;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");

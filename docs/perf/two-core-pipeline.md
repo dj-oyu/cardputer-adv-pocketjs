@@ -251,3 +251,122 @@ P1a の中身:
 - 次のターンの冒頭（§2.3 B）: まだ表示中で、フレームが条件を満たし続けていれば join しない。そのときは `set_animation_time` と `needs_present` の門を飛ばし、`prior_submission` は false とみなす（表示中のフレームは core から見ると submission）。条件を外れていれば先に join する。続きのターンの `has_submission`/`proc_pending` は settle の後に読む。
 - 転送の失敗（`KSN_IO`）を見たら、そのセッションの残りは遅らせない（§2.3 E）。
 - FRAME_P0 の行に `defer`（遅らせたフレーム数）、`hook`/`hook_ms`（印のある native の呼び出しで待った回数と時間）、`settle`/`settle_ms`（host 側で待った回数と時間）を足した。
+
+## 8. 計画の改訂（2026-11-14、Fable、コード読解のみ。#2 の実装・実測は §8.7）
+
+この節は、§5 の段階表を、2026-11-11 以降の実装（P2a）と 11-13〜14 の実測（HUD の run、`plain_walk`、`box_reuse`、hot/cold、`KASANE_PIECES`）に合わせて引き直したもの。**ビルド・host 試験・実機は使っていない。** 読んだ木は HEAD `eaa9a78` と、作業ツリーの未コミットの変更（`band_bits`、下の #2）。数値には「実測（出典）」か「推定（式）」を付けた。行番号は ±数行の目安。
+
+### 8.0 結論
+
+- **遅延モード（P2a、`CONFIG_POCKET_DISP_DEFER`）は、実機で一度も測られていない。** コードは入っている（§8.1）が、文書に遅延モードの `FRAME_P0`（`defer=` `hook_ms=` `settle_ms=`）の記録もジョブ名も無い。実機の記録は P1（すぐ join）まで（frame-breakdown.md §11、lcd-dma-driver.md §9.14）。この checkout の履歴では `main/hal/disp.c` が `a767306` の 1 コミットに畳まれていて、測定用コミットの有無は履歴からは確かめられない。§2.6 の検査（チェックサム、影の再描画、host の「遅い join」）も未実装。
+- **2 コア化の値打ちは、11-10 の見込みから変わった。**
+  - 出荷の周期 33 ms では、どの場面も 1 フレームの仕事が 11〜16 ms（推定、§8.3）で周期に収まる。**33 ms のままなら 2 コア化で fps は変わらず、払うのは DRAM（静的 約 +6.6 KB）と危険だけ。**
+  - 16 ms では、inline のままでも STRESS・パドック・軽いレースは平均で 16.67 ms を下回る見込み（推定 11.4〜15.9 ms。11-09 の実測は 13.4〜17.5 ms）。**inline で届かないのは JS が長い窓（DERBY の WIDE 2、MEGADEMO の WAKE）と、ログ・GC・続きのターンのフレーム**。2 コア化はそこに 4〜7 ms の余裕を作る（推定）。
+  - **重ねた後は、ほとんどの場面で表示側（描画＋転送）が律速になる**（推定: STRESS は表示 6.7〜7.6 ms に対し UI 側 4.6〜4.8 ms）。このとき `js_pre` を削る変更（#6）はフレームを縮めず、縮むのは `js_post`（commit を含む）と、送信が隠していない描画（実測 0.44〜1.5 ms、lcd-dma-driver.md §9.17）だけ。JS が律速の窓（WIDE 2）では逆になる。
+- **次の一手は実装ではなく測定**: 同じバイナリで inline / sync / defer を窓ごとに巡回させる 16 ms の変種（`sdkconfig.variant.twocore_ab`）を作り、DERBY と STRESS を 1 回ずつ走らせる（§8.5）。これ 1 本で、(a) 今の木の inline の 16 ms の実力、(b) 遅延モードの最初の実測、(c) 命令キャッシュの共有による JS の伸び（R1）が同時に出る。
+
+### 8.1 各段の現状（コードで確認）
+
+| 段 | 状態 | 確認した場所 | 実機 |
+| --- | --- | --- | --- |
+| P0 探針 | 済 | `main/hal/frame_bd.c` の `FRAME_P0`（`js_pre`/`js_post`、適格、`nodefer=` の 17 項目） | 実測済（frame-breakdown.md §8） |
+| P1a 整理 1〜6 | 済 | `present_run`（`app_session.c:2885`）は `ksn_present_job_run` と `board_present_frame_end` だけ。`board_host_overlays`（`:850-895`） | 実測済（§7.1） |
+| P1a 7（host の「遅い join」） | **未実装** | `tools/` に `disp_start` を遅らせて実行する試験は無い。あるのはエンジンの印の検査 `tools/vmtest/cfunc_join.sh` だけ。`tools/test_session_dispatch.c:105` は「`present_defer_block()` は常に 1」で、遅延の経路を通らない | — |
+| P1b 表示タスク | 済、既定 n | `disp.c`: 静的タスク、`CONFIG_POCKET_DISP_CORE` 既定 0、優先度 5、**stack は `CONFIG_POCKET_DISP_STACK` 既定 6,144 B**（§0 の 4,096 B ではない） | 実測済。直書きの送信で inline 9.21 / 表示タスク 9.13 ms（frame-breakdown.md §11）。音の途切れ・10 分の WDT・影の再描画は未確認のまま |
+| P2a エンジンの印 | 済 | `JS_SetCFunctionJoinHook(join_rt, js_join_hook)`（`app_session.c:1855`）、`TRY_NOJOIN`（`:1861-1948`） | 未測定（印の無い関数の費用「分岐 1 つ」は推定のまま） |
+| P2a join を遅らせる | 実装済、**実機未測定** | `present_defer_block`（`:2518`）、`present_frame_body`（`:2934`: `may_defer` なら `board_host_overlays=false` → `disp_start` → join せず戻る）、`present_ack`（`:2911`、確認だけ = F6）、`present_settle`（`:2920`）、`present_account`（`:3011`、`KSN_IO` で `defer_off`）、`app_tick_body` の冒頭（`:2585-2590`）、遷移の `present_settle()`（`:913, 1241, 1417, 1484, 1717, 2315`）、`main.c:920, 988, 990, 1027, 1274` の `disp_join()` | **無し** |
+| F8（`beginFrame` の BUSY） | 済 | `pocket_shiki_frame.c:944`（`any_pending() && !disp_busy()`）、`commit_impl:1247` で join 後に見直し、`buffers():336` は `image_band_buf` の確保の前に join | 未測定 |
+| F11（job の静的化） | 済 | `pf_display`/`pf_port`/`pf_stats`/`pf_completion`（`app_session.c:2895-2898`） | — |
+| F12（持ち主の assert） | 済 | `disp.c:20-33`（`CONFIG_POCKET_DISP_ASSERT`） | — |
+| F14（1 秒の診断、join の計数） | 済 | `disp.c` の `join waiting > 1 s`、`frame_bd_join_wait` | — |
+| §2.6 の 1（要所の持ち主タグ）・2（入力のチェックサム）・3（影の再描画） | **未実装** | `ASSERT_UI_JOINED` などの語は木に無い | — |
+| 3 モードの巡回（`inline\|sync\|defer`） | **形が違う** | `POCKET_FRAME_BD_DISP_AB` は `inline / task5 / task6`（`frame_bd.c:189-191`）。`DISP_DEFER=y` のビルドでは task の窓が遅延になり、**sync の腕が無い** | — |
+| P2b・P3・P4 | 未着手 | — | — |
+
+実装が §7.3 の記述と合うことは読んで確かめた。合わない点は 2 つ: stack の既定（上）、`CONFIG_POCKET_DISP_DEFER` は `DISP_TASK` に従属して既定 y（`DISP_TASK=y` にしたビルドは、そのまま遅延する）。
+
+**Shiki の 1 フレームの形（§8.4 の前提）。** 面のバッファは 1 本で、表示中のフレームは前面 `[0, count)`、新しいフレームは後ろ（tail）に積む。`commit_impl` は、join（印）→ `old_box` → `merge()`（tail を前面へ写す）→ `band_signature` → `box_damage` → publish の順（`pocket_shiki_frame.c:1238-1335`）。つまり **commit の仕事はすべて join の後 = `js_post`** にある。
+
+### 8.2 改訂した段階
+
+共通の道具: ブローカーの変種（`sdkconfig.variant.<name>` の Kconfig 断片）。今あるのは `kasane_ab`（`POCKET_KASANE_AB`）と `turnperf`（`POCKET_VM_TURNPERF` ＋ `POCKET_FIXED_RANDOM_SEED`）。測定用コミットを積んで revert する方式は使わない。
+
+| 段 | 中身 | 合格 | 中止 | 実機の測定 |
+| --- | --- | --- | --- | --- |
+| **M0** 測定の道具（挙動は変えない） | (1) 周期を Kconfig に: `VM_DISPLAY_PERIOD_MS`（`app_session.h:103` の `#define 33`）を `CONFIG_POCKET_VM_DISPLAY_PERIOD_MS`（既定 33）から取る。(2) `DISP_AB` の腕を `inline / sync / defer` にする（優先度 6 の腕は外す: 直書きの後は 5 と 6 の差が −0.08 / −0.06 ms で無い、実測 frame-breakdown.md §11）。(3) `sdkconfig.variant.frame_bd`（`POCKET_FRAME_BREAKDOWN` ＋ 周期 16）、`sdkconfig.variant.twocore_ab`（それに `POCKET_DISP_TASK`・`POCKET_DISP_DEFER`・`POCKET_FRAME_BD_DISP_AB`・`POCKET_DISP_ASSERT`） | 既定のビルドの bin が変わらない（周期の既定 33）。host の一式 | — | なし |
+| **M1** 遅延モードの最初の実測 | `twocore_ab` で DERBY（デモのレース 1 本、WIDE 2 を含む）と STRESS LV1。窓ごとに `FRAME_BD`（`js` `rn` `sd` 周期）と `FRAME_P0`（`js_pre` `js_post` `defer` `hook_ms` `settle_ms` `nodefer=`） | 判定ではなく記録。読むもの: ① inline の窓の仕事の和（今の木の 16 ms の実力）、② defer の窓の周期、③ JS の CPU 時間 = `js − hook_ms`（defer と inline の差 = 命令キャッシュの共有、R1）、④ `rn + sd` の sync と inline の差（CPU 0 の費用の再確認）、⑤ `defer / presents`、⑥ 表示タスクの stack の空き | 止まる・WDT・`join waiting > 1 s`・画面の乱れ → 遅延を切って原因を調べる（P2a の検査を先に入れる） | DERBY 1、STRESS 1。持ち主の目視（下） |
+| **G1** 判断（持ち主） | M1 の ①〜③ で、2 コア化を続けるか決める（§8.5） | — | — | — |
+| **P2a-V** 遅延の正しさの検査 | §2.6 の 2（handoff で前面・bank・`candidate_sig`・`band_bits` の FNV、join で比較）と P1a の 7（host の「遅い join」＋ TSan）を入れる。`CONFIG_POCKET_DISP_ASSERT` の下 | host: 遅い join で STRESS・DERBY の digest が変わらない、TSan 0 件。実機: チェックサムの不一致 0（DERBY 1 レース、STRESS 2 分） | 不一致が 1 件でも出たら、その入口を join に戻す（`TRY_NOJOIN` から外す） | `twocore_ab`（`DISP_ASSERT` 入り）で DERBY・STRESS |
+| **P2a** 遅延を「使える」と認める | 上の 2 つの後で、合格の線を引き直す（右） | 16 ms の defer の窓で、1 フレームの仕事（周期 − 待ち）が **STRESS ≤ 10.0 ms、DERBY レース（WIDE 2 以外）≤ 10.5 ms、WIDE 2 ≤ 13.5 ms、パドック ≤ 9.5 ms**（§8.3 の推定＋約 0.8 ms）。JS の CPU 時間が inline の窓の +10% 以下、`rn + sd` が +0.15 ms 以下。`defer` がレースで 95% 以上、STRESS で 90% 以上（続きのターンは設計どおり重ねない、実測 54/60）。10 分で WDT の警告なし。DERBY の効果音に途切れなし（耳）。`memlog.py --port --check` で空きヒープを記録 | JS の CPU 時間 +25% 超 → P4（`render_band` を IRAM、DRAM −3.2 KB）を試し、それでも越えるなら 2 コア化を止める。**CPU 1 の変種は退避先にしない**（重なるのは転送の待ち 2.0〜4.4 ms だけで、inline がすでに 12〜14 ms なら得が小さい、推定） | `twocore_ab` で DERBY・STRESS・BIG WAVE・MEGADEMO |
+| **P3'** commit の署名を join の前へ | §8.4 の形（署名とビット表を 2 面にして入れ替える）。#2 が入った後、P2a の合格の後 | 16 ms の defer の窓で STRESS の 1 フレームの仕事 **−0.4 ms 以上**（旧 −0.5。`box_reuse` で commit が縮んだ分を引いた）。digest と `POCKET_PROC_SIG_CHECK` が不変 | −0.3 ms 未満、または digest が動く | 同じバイナリの腕（`g_pocket_proc_sig_early`）を `DISP_AB` と掛ける |
+| **P2b** 適格を広げる | notice・animation・text を 1 つずつ。M1 の `nodefer=` で、実際に遅延を止めている項目だけ | P2a と同じ | — | 項目ごと |
+| **P4** | `render_band` を IRAM に | P2a の中止の線に掛かったときだけ。配置を変えた A/B（同じカーネルが配置で 15% 動く） | 逼迫判定の回数が増える | — |
+| **60 fps の出荷**（別の文書の範囲） | 周期 16 ms を既定に、µs の期限（frame-breakdown.md §6 の `deadline`）、ログのフレーム | 持ち主の判断 | — | — |
+
+M1 を P2a-V より先に置く理由: 時間の測定は検査なしでも成り立ち、G1 で「続けない」になれば検査の実装が要らない。ただし **M1 の結果を「遅延は正しく動く」の根拠にしない**（競合は黙って画素を壊す種類の誤りで、`board_capture` は遅延を止めるのでソフトウェアでは見えない）。M1 では持ち主に DERBY のレースと STRESS の画面の目視を頼む。
+
+M1 で初めて起きる組み合わせ（未確認の前提）:
+- **PIE を 2 つのタスクが同時に使う。** 描画（表示タスク、CPU 0）と `pocket.derby` の `ser()`（`CONFIG_POCKET_DERBY_SER_PIE`、UI、CPU 1）。どちらもコアに固定されていて、コプロセッサの状態はコアごと・タスクごとなので成り立つはず（推定）。P1 は表示タスクが描く間 UI が待っていたので、同時には使っていない。R8 は P1 で半分だけ解けた。
+- **DRAM。** 静的 +約 6.6 KB（推定: stack 6,144 ＋ TCB・セマフォ 約 0.5 KB）。表示タスクの stack の空きは 3,288〜3,384 B（実測、frame-breakdown.md §11）なので、4,096 B に縮めると空き 約 1.2〜1.3 KB（推定）で、§5 の条件（1 KB 以上）の際。DERBY のレースの空きは逼迫の線（24,576 B）のすぐ上（実測 26.1〜26.3 KB、frame-breakdown.md §8。その後の変更で動いているので取り直す）。R5 は未解決。
+
+### 8.3 1 フレームの見込み（すべて推定。元の値は実測）
+
+元にした実測（30 フレームの窓、**出荷の周期 33 ms**。kasane-text.md 追補、lcd-dma-driver.md §9.16〜9.17、qjs-hotcold.md §13.7）:
+
+| 場面 | JS のターン | 描画 | 転送 | D = 描画＋転送 |
+| --- | --- | --- | --- | --- |
+| DERBY レース | 5.1〜7.0 | 2.7〜5.2 | 2.0〜4.4 | 5.5〜8.0（窓の対で見た目安。両端の和は 4.7〜9.6） |
+| DERBY パドック | 約 3.0 | 約 4.0 | 約 3.5 | 約 7.5 |
+| STRESS | 5.2〜5.3 | 4.4〜4.7 | 2.3〜2.9 | 6.7〜7.6 |
+
+仮定（それぞれ未測定）:
+- 三つの計時の外（`tick_other` ＋ `loop_other`）は 0.85 ms（実測 0.79〜0.88、frame-breakdown.md §0、11-09。その後は取り直していない）。
+- `js_post` は 11-10 の実測（STRESS 1.81〜1.86、レース 1.80〜1.95、パドック 1.37〜1.41）に、ターン全体の縮み（約 ×0.77）を掛けた値: STRESS 約 1.4、レース 約 1.45、パドック 約 1.05。**今の `js_pre` / `js_post` は測っていない**（M1 で出る）。
+- 周期を 16 ms にしても、各部の時間は 33 ms のときと同じ（11-05 と 11-09 の比較では STRESS の 3 つの値がほぼ同じだった、実測）。
+- 表示タスクを CPU 0 に置く費用は 0〜+0.1 ms（実測 −0.08、直書き、STRESS）。handoff 0.05 ms（§2.5 の推定）。**命令キャッシュの共有による JS の伸びは入れていない**（R1。+10% なら JS 律速の窓で約 +1 ms）。
+- WIDE 2 のターンは 11-10 の実測 13.0〜13.4 ms に ×0.77〜0.85 を掛けた 10.0〜11.4 ms（**今の木では未測定**）、D は 5〜7 ms。
+
+式: inline = JS ＋ D ＋ 0.85。2 コア = max(D, `js_pre` ＋ 0.85) ＋ `js_post` ＋ 0.1。
+
+| 場面 | inline の仕事 | 2 コアの仕事 | 律速 | 周期 33 ms | 周期 16 ms（inline → 2 コア） |
+| --- | --- | --- | --- | --- | --- |
+| DERBY レース | 11.5〜15.9 | 7.1〜9.6 | 表示（軽い窓）／ほぼ同じ（重い窓） | どちらも 30 fps。変わらない | 平均は届く。余裕 0.8〜5 ms → 7〜9.5 ms |
+| DERBY レース WIDE 2 | 16〜19.5 | 11〜12.4 | **JS** | どちらも 30 fps | **届かない（51〜60 fps 相当）→ 届く** |
+| DERBY パドック | 約 11.4 | 約 8.7 | 表示 | 変わらない | 届く → 届く（余裕 5.3 → 8 ms） |
+| STRESS | 12.8〜13.8 | 8.2〜9.2 | 表示 | 変わらない | 届く（余裕 2.9〜3.9 ms）→ 余裕 7.5〜8.5 ms |
+
+- 11-10 の見込み（STRESS 11.5〜11.8、レース 10〜10.3、WIDE 2 13.6〜13.9 ms、frame-breakdown.md §8）より 2〜3 ms 短い。inline も同じだけ縮んだので、**2 コア化で縮む幅は 7 ms 前後から 3〜6 ms に減った**。
+- 16 ms の inline の「届く」は平均の話。ログを書くフレーム、GC、続きのターン（STRESS で 6/60、実測）は別に乗る。11-09 の 16 ms 実測では、仕事 13.4 ms のパドックでも窓の最長は 21.7〜22.4 ms だった（その後 `ESP_LOG` を 1 行 1 回の送信にした。今の最長は未測定）。
+- 33 ms のまま 2 コア化して得るものは、UI タスクが 1 フレームに塞がる時間が減ることだけ（入力の取り込みが早くなる、など）。表示が出る時刻は変わらない（§0）。電力は測っていない。
+
+### 8.4 候補の置き場所
+
+| 候補 | 中身 | 置く場所 | inline での見込み | 2 コアでの見込み |
+| --- | --- | --- | --- | --- |
+| **#1** 模様線のフレームで、捨てる entry ごとの `packet_next` を近道に（`ksn_shiki_frame.c` の ext の歩み） | 描画側 | **#2 の後で要否を決める。** #2 のビット表が有効な帯は、掛かる entry しか訪れない（作業ツリーの `BAND_FOR(start)`）ので、捨てる entry がほぼ無くなる。残るのは、表が無い（確保できない・帯をまたぐ行・`candidate_sig` 以外）ときの道だけ | 描画 −0.1〜0.3 ms、フレーム −0.05〜0.2 ms（推定、lcd-dma-driver.md §9.17）。#2 の後は、そのうち残る道の分だけ | 同じ。描画は表示側なので、効くのは「送信が隠していない描画」の範囲（実測の上限: レース 0.44〜1.5、STRESS 0.56〜0.69 ms） |
+| **#2** 帯ごとの「掛かる entry」のビット表（`band_bits`、実装中） | commit（署名の歩みで作る）＋描画（表だけを歩く） | **P2a より前、inline で入れて測る。** `kasane_ab` に腕 `band_bits`（`g_pocket_proc_band_bits`）を足し、`KASANE_PIECES` の「隠れない描画」と、ターン（commit が延びる分）の両方を見る | 描画 −0.2〜0.6 ms、commit ＋0.03〜0.06 ms（どちらも推定、根拠は弱い: memset 約 2.2 KB と entry×帯ごとの OR）。フレームに届くのは隠れない描画まで | **差し引きが変わる。** commit の増分は `js_post`（直列）に丸ごと乗り、描画の得は表示側の隠れない分だけ。表示が律速の場面では得がそのまま届き、JS が律速の窓（WIDE 2）では commit の増分だけが残る（推定 +0.03〜0.06 ms、小さい） |
+| **#3** 汚れた帯の中で送信を狭める | 送信 | 採らない（lcd-dma-driver.md §9.15・§9.17: 狭い窓が Shiki の遅い道に落ちる、開き直しの費用、差し引き ±0.3 ms、推定） | — | 2 コア化の後は表示側が律速なので、送る bytes を減らす価値は上がる（host の計数で STRESS 56〜70%）。**P2a の実測で表示が律速と確かまったら見積もり直す。** 遅い道の問題はそのまま |
+| **#4** 不透明のパネル | 描画（画素が変わる） | 持ち主の判断。2 コア化と独立。入れるなら M1 の後（基準を動かさない） | 未見積もり | 効くのは隠れない描画の範囲。2 コア化で価値は増えも減りもしない |
+| **#5** 2 コアの重ね合わせ | — | M0 → M1 → G1 → P2a-V → P2a | — | §8.3 |
+| **#6a** `pocket_derby.c` の soft-double の残り（`cam_q` `:482-495`、`js_aim` `:922-940`、レーンの pan、`PART_PANVIS`/`PART_PANPOLES` `:1041-1055`） | JS のターン（`pocket.derby` は `TRY_NOJOIN` なので `js_pre`） | **2 コア化と独立、いつでも。** 先に `turnperf` で事象ごとのサイクルを取り、0.1 ms 未満なら手を付けない | −0.1〜0.4 ms（推定、根拠は弱い: 1 フレームに double の演算 100〜数百回 ＋ sqrt 数回。S3 の FPU は単精度だけ） | **表示が律速の場面では 0。** JS が律速の窓（WIDE 2）では inline と同じだけ縮む。60 fps を inline で狙うなら、WIDE 2 を縮める手はここと `drawMany` の類しかない |
+| **#6b** `derby_prog.js` `prail()` の Newton 3 段（`:390-397`、Shiki の VM で走る） | JS のターン（commit の前 = `js_pre` のはず。`FRAME_P0` で確かめる） | 同上 | −0.05 ms 以下（推定: 柱 1 本あたり掛け算 2〜4 回の差）。精度の検討（遠→近で発散しない条件）が要るので、測ってから | 同上 |
+| **#6c** Gouraud の double の辺関数（`ksn_shiki_frame.c:335-372`、`gouraud_band`） | **JS のターンではなく描画**（帯を描くときに画素ごとに評価する） | #1・#2 と同じ扱い: 描画側。どのアプリのどの場面が通るかを先に数える（未確認） | 未見積もり（画素あたり double の積和 3 本 ＋ 補間。面積に比例） | 表示側。隠れない描画の範囲で効く。Gouraud の帯は描画が送信より重くなりやすいので、通る場面があるなら隠れない分は大きいはず（推定） |
+
+**旧 P3（commit の前倒し）と `box_reuse`・#2 の関係。**
+- 旧 P3 が前へ出そうとした 2 つのうち、`frame_damage` の歩みは `box_reuse` で消えた（表示中のフレームの箱は `front_box` に持つ。実測: ターン −0.1〜0.27 ms、lcd-dma-driver.md §9.16）。残っているのは `band_signature`（11-05 の実測で STRESS 0.64〜0.68 ms、レースの commit 全体 0.42〜0.51 ms、パドック 0.26 ms、lcd-dma-driver.md §9.11。その後の hot/cold で 1 割ほど短いはず、推定）。
+- `band_signature` は今、`merge()` の後の前面を読み、`candidate_sig` と（#2 で）`band_bits` に書く。**どちらも表示タスクが読む**（§1.2 の `candidate_sig` の行。`band_bits` も同じ行に入る: 書くのは join の後の commit だけ、`merge()` が `band_bits_valid=false`、確保は UI の commit。作業ツリーの変更は I1 を守っている）。したがって join の前に書くには **2 面目が要る**。
+- **P3' の形**: tail のまま署名する（entry の添字は `start − tail_base`）。書き先は 2 面目の署名（1 面 約 180 B、推定: hash 68 ＋ x0/x1 34 ＋ first/end 68 ＋ 箱 8）と 2 面目のビット表（1 面 = 17 帯 × ⌈entry 数 / 32⌉ 語 × 4 B。STRESS の 1,024 entry で 2,176 B、DERBY の 768 で 1,632 B）。箱からの damage もスカラーなので前に出せる。join の後に残るのは、`any_pending()` の見直し、`merge()` の写し、2 面のポインタの入れ替え、publish。
+- **値段**: Shiki のヒープに面あたりもう 1 枚（STRESS で +2.2 KB、合わせて 約 4.4 KB）。#2 を入れずに P3' だけなら +180 B で済むが、#2 を入れた後で表だけ join の後に作ると歩みが 2 回になり、P3' の得を食う。**#2 と P3' はまとめて「2 面にするか」を決める。**
+- **見込み（推定）**: 表示が律速の場面で、`js_post` から `js_pre` へ移した分がそのまま縮む（STRESS −0.5〜0.6 ms、レース −0.3〜0.4 ms、パドック −0.1〜0.2 ms）。JS が律速の窓では 0。inline では 0（順番が変わるだけ）。
+
+### 8.5 次の一手と、持ち主が決めること
+
+**次の実装は M0（測定の道具）、続けて M1 の実機 2 本。** 出荷の挙動を変えない小さな変更で、今の計画でいちばん大きい未知（遅延モードが実機でどう動くか、inline が 16 ms でどこまで届いているか、命令キャッシュの共有で JS がどれだけ伸びるか）が 1 回で埋まる。#2 は並行して inline で進めてよい（`kasane_ab` の腕で測る。M1 の基準を動かさないよう、M1 のビルドは #2 の腕を固定する）。
+
+持ち主が決めること:
+1. **60 fps（周期 16 ms）を出荷の目標にするか。** しないなら、2 コア化は P2a（既定 n）で凍結するのが筋（33 ms では得が無い、§8.3）。
+2. **G1（M1 の後）**: inline の 16 ms の実測を見て、(a) 平均が届いていて足りないのは重い窓だけ → 2 コア化を続ける／#6 と JS 側で詰める、のどちらを先にするか、(b) JS の CPU 時間の伸びが +10% を越えたときに P4（DRAM −3.2 KB）まで払うか。
+3. **DRAM**: 表示タスクの静的 約 +6.6 KB（stack 6,144 B）。stack を 4,096 B に縮めるか（空き 約 1.2 KB、推定）、UI の stack を 32,768 → 28,672 B に縮めて相殺するか（UI の空きの最小は実測 22,764 B）。DERBY のレースの逼迫の線との距離は M1 で取り直す。
+4. **Shiki のヒープ**: #2 の 1 面（STRESS 2.2 KB、DERBY 1.6 KB）、P3' を入れるなら 2 面。
+5. **#4 不透明のパネル**（画素が変わる）。
+6. **目視**: M1 と P2a で、遅延したフレームの画面（DERBY のレース、STRESS）と DERBY の効果音。ソフトウェアでは確かめられない（`board_capture` は遅延を止める。MISO は未配線）。

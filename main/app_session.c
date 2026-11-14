@@ -3343,6 +3343,7 @@ static esp_err_t present_account(ksn_result result) {
                         {"plain_walk",&g_ksn_proc_plain_walk},
                         /* box_reuse moves commit (turn_ms), not render_ms. */
                         {"box_reuse",&g_pocket_proc_box_reuse},
+                        {"band_bits",&g_pocket_proc_band_bits},
                     };
                     const unsigned rows=sizeof(switches)/sizeof(switches[0]);
                     static unsigned ab_arm;

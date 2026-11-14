@@ -7,6 +7,8 @@
 #include "ui/kasane/ksn_shiki_frame.h"
 /* Same-binary A/B arm: commit()'s damage from the signature's boxes (1) or a walk (0). */
 extern int g_pocket_proc_box_reuse;
+/* Same-binary A/B arm: bands drawn from their entry bitmap (1) or the range walk (0). */
+extern int g_pocket_proc_band_bits;
 
 /* The frames, surfaces and image resources Shiki draws into (the procedural
  * IR that first used them went in v2.0). beginFrame, commit, resource,
