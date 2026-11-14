@@ -1,3 +1,9 @@
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+#include "ui/kasane/ksn_mesh_q7_certified.h"
+#endif
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+#include "ui/kasane/ksn_mesh_q7_certified.h"
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
 #include "ui/kasane/ksn_mesh_prepared.h"
 #endif
@@ -26,6 +32,9 @@ static inline bool disp_busy(void) { return false; }
 #include "proc_band_hash.h"
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
+#if defined(KSN_MESH_PREPARED_PROTOTYPE) || defined(KSN_MESH_Q7_CERTIFIED_PROTOTYPE)
+#include "esp_heap_caps.h"
+#endif
 #endif
 #include <math.h>
 #include <stddef.h>
@@ -160,6 +169,10 @@ typedef struct {
     ksn_mesh_prepared *prepared_candidate,*prepared_committed;
     size_t prepared_candidate_bytes,prepared_committed_bytes;
 #endif
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    ksn_mesh_q7_snapshot *q7_candidate,*q7_committed;
+    size_t q7_candidate_bytes,q7_committed_bytes;
+#endif
     proc_band_sig candidate_sig,committed_sig;
     uint16_t candidate_color,committed_color;
     /* beginFrame's colour, for the frame being built: commit() makes it the
@@ -178,6 +191,17 @@ static proc_surface surfaces[PROC_SURFACES];
 /* Native heap, separately accounted from guest and Shiki heaps. */
 static float *depth_workspace;
 static unsigned depth_rows;
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+/* Shared by the same serialized renderer as depth_workspace, never a DMA loan. */
+static uint8_t *q7_owner_workspace;
+static ksn_mesh_q7_stats q7_backend_stats;
+#ifdef KSN_PROC_HOST_TEST
+const ksn_mesh_q7_snapshot *pocket_proc_q7_host_snapshot(unsigned index,bool committed){
+    if(index>=PROC_SURFACES)return NULL;
+    return committed?surfaces[index].q7_committed:surfaces[index].q7_candidate;
+}
+#endif
+#endif
 #ifdef KSN_PROC_HOST_TEST
 static int depth_fail_after=-1;
 void pocket_proc_mesh_fail_after(int n){depth_fail_after=n;}
@@ -189,12 +213,40 @@ static void *depth_calloc(size_t n,size_t size){
 #endif
     return calloc(n,size);
 }
+#if defined(KSN_MESH_PREPARED_PROTOTYPE) || defined(KSN_MESH_Q7_CERTIFIED_PROTOTYPE)
+/* IDF calloc only guarantees 4-byte alignment; derived snapshots contain
+ * double/uint64_t members. Keep their checked byte sizes unchanged and their
+ * allocations compatible with free(), including candidate/committed swaps. */
+static void *depth_snapshot_calloc(size_t bytes,size_t alignment){
+#ifdef ESP_PLATFORM
+#ifdef KSN_PROC_HOST_TEST
+    if(depth_fail_after==0)return NULL;
+    if(depth_fail_after>0)--depth_fail_after;
+#endif
+    void *p=heap_caps_aligned_alloc(alignment,bytes,MALLOC_CAP_DEFAULT);
+    if(p)memset(p,0,bytes);
+    return p;
+#else
+    /* Host calloc supplies max_align_t alignment and consumes the OOM hook
+     * exactly once, just like the snapshot's former depth_calloc call. */
+    (void)alignment;
+    return depth_calloc(1,bytes);
+#endif
+}
+#endif
 void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
     if(!out)return;
     *out=(pocket_proc_mesh_bytes){.workspace=depth_rows*KSN_PROC_W*sizeof(float),.metadata=sizeof(ksn_mesh_snapshot)*2*PROC_SURFACES+sizeof depth_workspace+sizeof depth_rows};
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    if(q7_owner_workspace)out->workspace+=KSN_PROC_W*8;
+    out->metadata+=sizeof q7_owner_workspace+sizeof q7_backend_stats;
+#endif
     for(unsigned i=0;i<PROC_SURFACES;i++){
         out->candidate+=surfaces[i].depth_candidate.packets.capacity;
         out->committed+=surfaces[i].depth_committed.packets.capacity;
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+        out->metadata+=surfaces[i].q7_candidate_bytes+surfaces[i].q7_committed_bytes+2*sizeof(void*)+2*sizeof(size_t);
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
         out->metadata+=surfaces[i].prepared_candidate_bytes+surfaces[i].prepared_committed_bytes+
             2*sizeof(void *)+2*sizeof(size_t);
@@ -202,6 +254,16 @@ void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
     }
 }
 
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+void pocket_proc_q7_bench_stats(ksn_mesh_q7_stats *out){
+    if(!out)return;
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    *out=q7_backend_stats;
+#else
+    memset(out,0,sizeof *out);
+#endif
+}
+#endif
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
 /* An image surface's raster cache: one 8-row band of pixels, taken with an
@@ -679,6 +741,11 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
     (void)frame;
     const ksn_mesh_snapshot *mesh=&surface->depth_committed;
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    const ksn_mesh_q7_snapshot *q7=surface->q7_committed;
+    if(mesh->enabled&&q7&&q7->valid&&q7_owner_workspace)
+        return ksn_mesh_q7_render(q7,pixels,y,rows,depth_workspace,q7_owner_workspace,depth_rows,&q7_backend_stats);
+#endif
     const ksn_mesh_prepared *prepared=surface->prepared_committed;
     if(mesh->enabled&&prepared&&prepared->valid)
         return ksn_mesh_prepared_render(prepared,pixels,y,rows,depth_workspace,depth_rows);
@@ -1094,6 +1161,12 @@ static void merge(proc_surface *s){
     const size_t prepared_bytes=s->prepared_committed_bytes;
     s->prepared_committed_bytes=s->prepared_candidate_bytes;s->prepared_candidate_bytes=prepared_bytes;
 #endif
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    ksn_mesh_q7_snapshot *q7=s->q7_committed;
+    s->q7_committed=s->q7_candidate;s->q7_candidate=q7;
+    const size_t q7_bytes=s->q7_committed_bytes;
+    s->q7_committed_bytes=s->q7_candidate_bytes;s->q7_candidate_bytes=q7_bytes;
+#endif
 #ifdef POCKET_PROC_SIG_CHECK
     one_merges++;
     {
@@ -1127,12 +1200,33 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     if(surface->depth_candidate.enabled){
         size_t need=ksn_mesh_prepared_bytes(&surface->depth_candidate);
         if(need&&need>surface->prepared_candidate_bytes){
-            ksn_mesh_prepared *fresh=depth_calloc(1,need);
+            ksn_mesh_prepared *fresh=depth_snapshot_calloc(need,_Alignof(ksn_mesh_prepared));
             if(fresh){free(surface->prepared_candidate);surface->prepared_candidate=fresh;
                 surface->prepared_candidate_bytes=need;}
         }
         if(need&&need<=surface->prepared_candidate_bytes)
             (void)ksn_mesh_prepare(&surface->depth_candidate,surface->prepared_candidate,surface->prepared_candidate_bytes);
+    }
+#endif
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    /* The prior present has joined. Build only the spare Q7 slot here;
+     * merge() moves it with depth/prepared to the single front frame. */
+    if(surface->q7_candidate)surface->q7_candidate->valid=false;
+    ksn_mesh_prepared *q7_source=surface->prepared_candidate;
+    if(surface->depth_candidate.enabled&&q7_source&&q7_source->valid){
+        size_t need=ksn_mesh_q7_bytes(q7_source);
+        if(!q7_owner_workspace)q7_owner_workspace=depth_calloc(KSN_PROC_W*8,1);
+        if(need&&q7_owner_workspace){
+            if(need!=surface->q7_candidate_bytes){
+                free(surface->q7_candidate);surface->q7_candidate=NULL;surface->q7_candidate_bytes=0;
+                surface->q7_candidate=depth_snapshot_calloc(need,_Alignof(ksn_mesh_q7_snapshot));
+                if(surface->q7_candidate)surface->q7_candidate_bytes=need;
+            }
+            if(surface->q7_candidate&&ksn_mesh_q7_prepare(q7_source,surface->q7_candidate,surface->q7_candidate_bytes)){
+                /* Q7 owns all reconstruction geometry, including exact fallback. */
+                free(surface->prepared_candidate);surface->prepared_candidate=NULL;surface->prepared_candidate_bytes=0;
+            }
+        }
     }
 #endif
     const proc_box old=old_box(surface);
@@ -1141,6 +1235,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
 #endif
     merge(surface);
     surface->damage=frame_damage(surface,old);
+
     band_signature(surface->candidate,&surface->candidate_sig);
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
@@ -1462,8 +1557,14 @@ void pocket_proc_reset(void){
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
         free(surfaces[i].prepared_candidate);free(surfaces[i].prepared_committed);
 #endif
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+        free(surfaces[i].q7_candidate);free(surfaces[i].q7_committed);
+#endif
         surfaces[i]=(proc_surface){0};
     }
+#ifdef KSN_MESH_Q7_CERTIFIED_PROTOTYPE
+    free(q7_owner_workspace);q7_owner_workspace=NULL;memset(&q7_backend_stats,0,sizeof q7_backend_stats);
+#endif
     free(depth_workspace);depth_workspace=NULL;depth_rows=0;
     shiki_or_sys_free(image_band_buf);image_band_buf=NULL;
     shiki_or_sys_free(half_carry);half_carry=NULL;
@@ -1639,6 +1740,7 @@ void pocket_proc_present_result(ksn_result result){
         if(surface->pending){
             /* One buffer: the candidate already is the committed frame, and
              * merge() moved its depth to the front. */
+
             surface->committed_color=surface->candidate_color;
             surface->committed_sig=surface->candidate_sig;
             surface->has_committed=true;surface->pending=false;surface->committed_lost=false;

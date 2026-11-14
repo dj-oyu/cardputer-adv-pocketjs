@@ -93,8 +93,9 @@ static int64_t hp_eval_t0;
 #include "icache_ab.h"
 #include "frame_bd.h"
 #include "disp.h"
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
-/* The P0 eligibility mask (frame_bd_eligible()). */
+#if defined(CONFIG_POCKET_FRAME_BREAKDOWN) || \
+    (defined(CONFIG_POCKET_DISP_DEFER) && defined(KASANE_DMA_OVERLAP))
+/* P0 eligibility and deferred-present blockers use these host queries. */
 #include "pocket_pixel.h"
 #include "pocket_grid.h"
 #include "pocket_video.h"
@@ -1309,6 +1310,9 @@ void app_stop(void) {
     pocket_memory_reset();
     // Holds guest values (the data regions' windows): before the guest goes.
     pocket_shiki_api_reset();
+#ifdef KSN_MESH_Q7_BENCH_PREFLIGHT
+    pocket_shiki_debug_reset();
+#endif
     pocket_api_reset();
     // Read before the runtime goes: app_report() below runs with guest == NULL,
     // so this is the last point at which "was anything still queued" has an

@@ -10,13 +10,14 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cache_name='meshbench-host', extra_sources=()):
+def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cache_name='meshbench-host', extra_sources=(), extra_flags=()):
     """Build a public app-level native harness using the same real compositor."""
     out = ROOT/'.cache'/cache_name
     out.mkdir(parents=True, exist_ok=True)
     qjs = ROOT/'components/quickjs-ng/quickjs-ng'
     flags = ['-std=gnu11', '-O2', '-g', '-ffp-contract=off', '-fsanitize=address,undefined',
              '-fno-omit-frame-pointer', '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
+    flags += list(extra_flags)
     compiler = subprocess.check_output(['cc', '--version'], text=True)
     key = hashlib.sha256((' '.join(flags)+compiler+''.join(
         hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(qjs.glob('*'))
