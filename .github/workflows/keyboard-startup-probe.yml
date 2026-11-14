@@ -77,8 +77,10 @@ jobs:
           # POCKET_VM_QJS_HOTCOLD (docs/vm/qjs-hotcold.md) is dropped the same
           # way as the two options above, in either state: it was default n when
           # this pin was taken and is default y since the device A/B.
+          # POCKET_NATIVE_HOTCOLD (the same layout on main/, qjs-hotcold.md
+          # sec.13, default y) is dropped likewise.
           lines=(b/'sdkconfig').read_text().splitlines(keepends=True)
-          for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set',('# CONFIG_POCKET_VM_QJS_HOTCOLD is not set','CONFIG_POCKET_VM_QJS_HOTCOLD=y')):
+          for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set',('# CONFIG_POCKET_VM_QJS_HOTCOLD is not set','CONFIG_POCKET_VM_QJS_HOTCOLD=y'),('# CONFIG_POCKET_NATIVE_HOTCOLD is not set','CONFIG_POCKET_NATIVE_HOTCOLD=y')):
               i=next(i for i,l in enumerate(lines) if l.startswith(off))
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]

@@ -198,7 +198,7 @@ menu "Pocket VM (diagnostics)"
             compiler. Needs Python at compile time (ESP-IDF's).
 
     config POCKET_NATIVE_HOTCOLD
-        bool "Lay the hot blocks of main's turn-path files out together (trial)"
+        bool "Lay the hot blocks of main's turn-path files out together"
         default y
         help
             The hot/cold layout of POCKET_VM_QJS_HOTCOLD, on the main/ files
@@ -206,7 +206,11 @@ menu "Pocket VM (diagnostics)"
             POCKET_NATIVE_HOTCOLD_FILES in tools/qjs_hotcold/hotcold.cmake),
             with tools/qjs_hotcold/profile_native.json (TARGET=native
             tools/qjs_hotcold/train.sh). Each file gets one section of its
-            own, hot blocks first. docs/vm/qjs-hotcold.md sec.13.
+            own, hot blocks first. Measured on the device (TURNPERF, same
+            retired instructions): I-cache stall per turn -6% (STRESS) and
+            -8% (DERBY race), JS turn cycles -1.9% and -2.8%, the same with
+            the hot code shifted by 20 bytes. Costs about 0.9 KB of flash,
+            no DRAM. docs/vm/qjs-hotcold.md sec.13.
 
     config POCKET_DISP_TASK
         bool "Display task: present frames from a task of its own (two-core P1)"
