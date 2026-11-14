@@ -31,7 +31,7 @@ def main():
     only = opts[opts.index('--only') + 1].split(',') if '--only' in opts else ['quickjs.c']
     profile = opts[opts.index('--profile') + 1] if '--profile' in opts else None
     pad = int(opts[opts.index('--pad') + 1]) if '--pad' in opts else 0
-    keep_out = opts[opts.index('--keep-out') + 1] if '--keep-out' in opts else None
+    keep_out = opts[opts.index('--keep-out') + 1].split(',') if '--keep-out' in opts else []
 
     src = None
     if '-c' in cmd and '-o' in cmd:
@@ -54,23 +54,30 @@ def main():
     if r:
         sys.exit(r)
     lines = open(s0).read().split('\n')
+    base = os.path.basename(src)
+    tag = hc_asm.file_tag(base)
+    # quickjs.c keeps the section name its profile and docs were written
+    # with; every other file gets its own, so two objects never contribute
+    # to a section of the same name (each is placed where its object is).
+    section = hc_asm.SECTION if base == 'quickjs.c' else f'.text.hc_{tag}_'
     if mode == 'gen':
-        new = hc_asm.gen(lines)
+        new = hc_asm.gen(lines, tag)
     elif mode == 'use':
         prof = json.load(open(profile))
-        fns = dict(prof.get('files', {}).get(os.path.basename(src), {}))
-        if keep_out and os.path.exists(keep_out):
+        fns = dict(prof.get('files', {}).get(base, {}))
+        for lf in keep_out:
             # Functions a linker fragment places by name (the IRAM helpers,
             # main/vm/helper_iram8.lf) must stay in their own .text.<name>
             # sections, or the fragment would silently stop matching them.
-            for name in re.findall(r'^\s*(?:\S+:\s*)?([\w$.]+)\s+\(noflash', open(keep_out).read(), re.M):
-                fns.pop(name, None)
+            if os.path.exists(lf):
+                for name in re.findall(r'^\s*(?:\S+:\s*)?([\w$.]+)\s+\(', open(lf).read(), re.M):
+                    fns.pop(name, None)
         st = {}
         lines = hc_asm.hoist_files(lines)
-        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1))
+        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section)
         st['verified'] = hc_asm.verify(lines, new)
         # One line in the build log: a stale profile is visible, not silent.
-        print(f'hc_cc: {os.path.basename(src)}: {st["matched"]} functions laid out hot/cold '
+        print(f'hc_cc: {base}: {st["matched"]} functions laid out hot/cold '
               f'({st["missed"]} of the profile\'s did not match this object code and were left alone)',
               file=sys.stderr)
         if fns and st['matched'] * 2 < len(fns):

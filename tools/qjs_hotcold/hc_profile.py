@@ -1,7 +1,7 @@
 """The per-block profile of the hot/cold layout (docs/vm/qjs-hotcold.md sec.4).
 
     python hc_profile.py run <qemu log or FIFO> <r5sim.elf> <run.json> [--nm NM] [--chunk 60]
-    python hc_profile.py merge <quickjs.c.obj.hc0.s> <profile.json> <run.json>... [--hot 0.5]
+    python hc_profile.py merge <profile.json> <run.json>... --asm <X.c.obj.hc0.s> [--asm ...] [--hot 0.5]
 
 `run` reads a QEMU `-d exec,nochain,in_asm` log of an r5sim image built with
 -DPOCKET_QJS_HOTCOLD=gen (hc_asm.py gen: a symbol in front of every basic
@@ -116,7 +116,6 @@ def run(a):
 
 def merge(a):
     runs = [json.load(open(r)) for r in a.runs]
-    lines = open(a.asm).read().split('\n')
     # A hot block's class is the set of runs it is hot in. Blocks hot in every
     # run come first, then the larger sets: an app then finds the blocks it
     # shares with the others together, and its own together, instead of
@@ -128,20 +127,50 @@ def merge(a):
     hot = max(len(sigs), 1)
     if hot + 2 > len(hc_asm.DIGITS):
         raise SystemExit('hc_profile: too many runs for one digit a class; merge some first or pass --single')
-    funcs = {}
+    files = {}
     counts = {}
+    by_src = {}
+    for asm in a.asm:
+        # <obj dir>/<source>.obj.hc0.s; the profile is keyed by the source's name
+        by_src.setdefault(os.path.basename(asm)[:-len('.obj.hc0.s')], []).append(asm)
+    for src, paths in sorted(by_src.items()):
+        # Two workloads' images can compile a file differently (r5sim builds
+        # some sources per app). A function whose code is not the same in all
+        # of them has block numbers that mean different blocks: leave it out.
+        texts = [open(p).read().split('\n') for p in paths]
+        hashes = [{f.name: f.hash() for f in hc_asm.parse(t) if isinstance(f, hc_asm.Func)} for t in texts]
+        differ = {n for h in hashes[1:] for n in h if n in hashes[0] and h[n] != hashes[0][n]}
+        if differ:
+            print(f'hc_profile: {src}: {len(differ)} functions differ between the workloads\' builds, left out',
+                  file=sys.stderr)
+        funcs = files.setdefault(src, {})
+        merge_file(texts[0], hc_asm.file_tag(src), runs, a.hot, klass, sigs, hot, funcs, counts, differ)
+        if not funcs:
+            del files[src]
+    meta = {'runs': [{'elf': r['elf'], 'turns': r['turns']} for r in runs], 'chunk': runs[0]['chunk'], 'hot': a.hot,
+            'hot_classes': hot, 'note': a.note or '',
+            'classes': [[os.path.basename(os.path.dirname(os.path.abspath(a.runs[i]))) for i in range(len(runs)) if m >> i & 1]
+                        for m in sigs]}
+    with open(a.out, 'w') as fh:
+        json.dump({'meta': meta, 'files': files}, fh, indent=0, sort_keys=True)
+        fh.write('\n')
+    print(f'hc_profile: ' + ', '.join(f'{k} {len(v)}' for k, v in sorted(files.items()))
+          + ' functions with hot blocks; instructions by class '
+          + ' '.join(f'{hc_asm.tier_name(t, hot)}={counts.get(t, 0)}' for t in range(hot + 2)) + f' -> {a.out}')
+
+def merge_file(lines, tag, runs, hot_frac, klass, sigs, hot, funcs, counts, skip=()):
     for f in hc_asm.parse(lines):
-        if not isinstance(f, hc_asm.Func):
+        if not isinstance(f, hc_asm.Func) or f.name in skip:
             continue
         tiers = []
         for k in range(len(f.blocks)):
-            name = f.name if k == 0 else hc_asm.sym(f.name, k)
+            name = hc_asm.sym(f.name, k, tag)
             mask = 0; ran = False
             for i, r in enumerate(runs):
                 s = r['symbols'].get(name)
                 if s:
                     ran = True
-                    if s[1] >= a.hot:
+                    if s[1] >= hot_frac:
                         mask |= 1 << i
             tiers.append((klass[mask] if sigs else 0) if mask else hot if ran else hot + 1)
         if min(tiers) >= hot:
@@ -149,15 +178,6 @@ def merge(a):
         for b, t in zip(f.blocks, tiers):
             counts[t] = counts.get(t, 0) + len(b.insns)
         funcs[f.name] = {'h': f.hash(), 't': ''.join(hc_asm.DIGITS[t] for t in tiers)}
-    meta = {'runs': [{'elf': r['elf'], 'turns': r['turns']} for r in runs], 'chunk': runs[0]['chunk'], 'hot': a.hot,
-            'hot_classes': hot, 'note': a.note or '',
-            'classes': [[os.path.basename(os.path.dirname(os.path.abspath(a.runs[i]))) for i in range(len(runs)) if m >> i & 1]
-                        for m in sigs]}
-    with open(a.out, 'w') as fh:
-        json.dump({'meta': meta, 'files': {'quickjs.c': funcs}}, fh, indent=0, sort_keys=True)
-        fh.write('\n')
-    print(f'hc_profile: {len(funcs)} functions with hot blocks; instructions by class '
-          + ' '.join(f'{hc_asm.tier_name(t, hot)}={counts.get(t, 0)}' for t in range(hot + 2)) + f' -> {a.out}')
 
 def main():
     ap = argparse.ArgumentParser()
@@ -167,7 +187,8 @@ def main():
     r.add_argument('--nm', default='xtensa-esp32s3-elf-nm')
     r.add_argument('--chunk', type=int, default=60)
     m = sub.add_parser('merge')
-    m.add_argument('asm'); m.add_argument('out'); m.add_argument('runs', nargs='+')
+    m.add_argument('out'); m.add_argument('runs', nargs='+')
+    m.add_argument('--asm', action='append', required=True, help='a gen build\'s <source>.obj.hc0.s (repeatable)')
     m.add_argument('--hot', type=float, default=0.5)
     m.add_argument('--note')
     m.add_argument('--single', action='store_true', help='one hot class, not one per set of runs')

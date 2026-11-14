@@ -199,10 +199,19 @@ def parse(lines):
         i = k + 1
     return out
 
-def sym(name, k):
-    return f'__hc_{name}__{k}'
+def file_tag(src):
+    """A source's name as it appears in block symbols and section names:
+    quickjs.c -> quickjs, ksn_shiki.c -> ksn_shiki."""
+    return re.sub(r'\W', '_', src.rsplit('/', 1)[-1].rsplit('.', 1)[0])
 
-def gen(lines):
+def sym(name, k, tag=None):
+    """The symbol `gen` puts in front of block k. With a tag (the source
+    file's), block 0 gets one too: static functions of the same name in two
+    files would otherwise share their block symbols, and the trace would
+    count one copy's turns for the other."""
+    return f'__hc_{tag}__{name}__{k}' if tag else f'__hc_{name}__{k}'
+
+def gen(lines, tag=None):
     out = []
     for it in parse(lines):
         if isinstance(it, str):
@@ -211,8 +220,8 @@ def gen(lines):
         for k, b in enumerate(it.blocks):
             at = b.insns[0][0] if b.insns else len(b.lines)
             out.extend(b.lines[:at])
-            if k:                       # block 0 is the function's own symbol
-                out.append(sym(it.name, k) + ':')
+            if k or tag:                # untagged, block 0 is the function's own symbol
+                out.append(sym(it.name, k, tag) + ':')
             out.extend(b.lines[at:])
         out.extend(it.tail)
     return out
@@ -235,8 +244,8 @@ class Group:
     """The text of one section: one buffer a class, written out in class order.
     (Not assembler subsections: this gas dies in subseg_set_rest on a
     longcall's literal once a text section has a second subsection.)"""
-    def __init__(self, number, pad=0, hot=1):
-        self.section = f'{SECTION}{number}'
+    def __init__(self, number, pad=0, hot=1, section=SECTION):
+        self.section = f'{section}{number}'
         self.number = number
         self.pad = pad
         self.hot = hot
@@ -266,7 +275,7 @@ def hoist_files(lines):
     rest = [l for l in lines if not FILE_N.match(l)]
     return rest[:1] + files + rest[1:]
 
-def use(lines, profile, stats=None, pad=0, hot=1):
+def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION):
     """Lay out the functions the profile calls hot. A block's class is one
     base-36 digit of the profile's string: classes 0..hot-1 are hot (several,
     when the profile groups blocks by the workloads that use them), class
@@ -295,7 +304,7 @@ def use(lines, profile, stats=None, pad=0, hot=1):
         tier[0] = min(tier)
         est = estimate(it)
         if group is None or (est > group.room and group.room != GROUP_LIMIT):
-            group = Group(ngroups, pad, hot); ngroups += 1
+            group = Group(ngroups, pad, hot, section); ngroups += 1
             out.append(group)       # the section's text goes where its first function was
         group.room -= est
         emit_function(group, it, tier)

@@ -65,22 +65,13 @@ if(POCKET_QJS_HOTCOLD_PAD)
     set(_qjs_hc_pad "${POCKET_QJS_HOTCOLD_PAD}")
 endif()
 if(_qjs_hc)
-    get_filename_component(_qjs_hc_dir "${CMAKE_CURRENT_LIST_DIR}/../../tools/qjs_hotcold" ABSOLUTE)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../tools/qjs_hotcold/hotcold.cmake")
     if(NOT POCKET_QJS_HOTCOLD_PROFILE)
-        set(POCKET_QJS_HOTCOLD_PROFILE "${_qjs_hc_dir}/profile.json")
+        set(POCKET_QJS_HOTCOLD_PROFILE "${POCKET_HOTCOLD_DIR}/profile.json")
     endif()
-    get_filename_component(_qjs_hc_profile "${POCKET_QJS_HOTCOLD_PROFILE}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
-    idf_build_get_property(_qjs_hc_python PYTHON)
-    set_property(TARGET ${COMPONENT_LIB} PROPERTY C_COMPILER_LAUNCHER
-        "${_qjs_hc_python}" -B "${_qjs_hc_dir}/hc_cc.py" --mode "${_qjs_hc}" --profile "${_qjs_hc_profile}"
-        --pad "${_qjs_hc_pad}" --keep-out "${CMAKE_CURRENT_LIST_DIR}/../../main/vm/helper_iram8.lf"
-        --only quickjs.c --)
-    set(_qjs_hc_deps "${_qjs_hc_dir}/hc_cc.py" "${_qjs_hc_dir}/hc_asm.py")
-    if(_qjs_hc STREQUAL "use")
-        list(APPEND _qjs_hc_deps "${_qjs_hc_profile}")
-    endif()
-    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/quickjs-ng/quickjs.c" APPEND PROPERTY OBJECT_DEPENDS ${_qjs_hc_deps})
-    message(STATUS "quickjs-ng: hot/cold layout '${_qjs_hc}' (${_qjs_hc_profile})")
+    pocket_hotcold(NAME quickjs-ng MODE "${_qjs_hc}" PROFILE "${POCKET_QJS_HOTCOLD_PROFILE}" PAD "${_qjs_hc_pad}"
+        ONLY quickjs.c SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/quickjs-ng/quickjs.c"
+        KEEP_OUT "${CMAKE_CURRENT_LIST_DIR}/../../main/vm/helper_iram8.lf")
 endif()
 
 # Third-party source files: suppress warnings that are noisy but harmless in upstream code.

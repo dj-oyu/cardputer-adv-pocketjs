@@ -198,6 +198,10 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/rtc_task.c" "hal/fpu_latenc
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
+# The hot/cold layout of the turn-path files (POCKET_NATIVE_HOTCOLD,
+# docs/vm/qjs-hotcold.md sec.13).
+include("${CMAKE_CURRENT_LIST_DIR}/../tools/qjs_hotcold/hotcold.cmake")
+pocket_native_hotcold("${CMAKE_CURRENT_LIST_DIR}")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_font.py")

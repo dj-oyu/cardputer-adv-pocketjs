@@ -6,6 +6,8 @@
 #
 #   tools/qjs_hotcold/train.sh [<build root>]        (default .cache/hc_train)
 #   WORKLOADS="shiki hud" tools/qjs_hotcold/train.sh   (a subset; default "shiki derby hud")
+#   TARGET=native tools/qjs_hotcold/train.sh           (main/'s files: profile_native.json;
+#       quickjs.c is laid out by its own profile meanwhile, as on the device)
 #
 # Needs the ESP-IDF environment, Espressif's QEMU (QEMU=... to override) and
 # Node 16+ (the Shiki workloads). The trace goes through a FIFO, not to disk
@@ -17,15 +19,23 @@
 # it (hc_cc.py prints how many).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-B=$(realpath -m "${1:-$R/.cache/hc_train}")
+B=$(realpath -m "${1:-$R/.cache/hc_train${TARGET:+_$TARGET}}")
 QEMU=${QEMU:-$(ls -d "$HOME"/.espressif/tools/tools/qemu-xtensa/*/qemu/bin/qemu-system-xtensa 2>/dev/null | head -1)}
 WORKLOADS=${WORKLOADS:-shiki derby hud}
+TARGET=${TARGET:-quickjs}
+if [ "$TARGET" = native ]; then
+    GEN=(-DPOCKET_QJS_HOTCOLD=use -DPOCKET_NATIVE_HOTCOLD=gen)
+    PROFILE=$R/tools/qjs_hotcold/profile_native.json
+else
+    GEN=(-DPOCKET_QJS_HOTCOLD=gen)
+    PROFILE=$R/tools/qjs_hotcold/profile.json
+fi
 mkdir -p "$B"
 RUNS=()
 for w in $WORKLOADS; do
     D="$B/$w"
     idf.py -C "$R/tools/r5sim" -B "$D" -DSDKCONFIG="$D/sdkconfig" -DR5SIM_DEVICE=1 -DR5SIM_APP="$w" \
-        -DPOCKET_QJS_HOTCOLD=gen build > "$D.build.log" 2>&1 || { tail -30 "$D.build.log"; exit 1; }
+        "${GEN[@]}" build > "$D.build.log" 2>&1 || { tail -30 "$D.build.log"; exit 1; }
     (cd "$D" && python -m esptool --chip esp32s3 merge-bin --pad-to-size 8MB -o qemu_flash.bin @flash_args > /dev/null)
     rm -f "$D/serial.txt" "$D/trace.fifo"
     mkfifo "$D/trace.fifo"
@@ -46,7 +56,15 @@ for w in $WORKLOADS; do
         { grep -E "R5SIM|Guru|abort" "$D/serial.txt" | tail -5; echo "train.sh: $w did not finish cleanly" >&2; exit 1; }
     RUNS+=("$D/run.json")
 done
-# Every image compiles quickjs.c the same way; take the assembly of the first.
-ASM=$(ls "$B"/${WORKLOADS%% *}/esp-idf/quickjs-ng/CMakeFiles/*/quickjs-ng/quickjs.c.obj.hc0.s | head -1)
-python "$R/tools/qjs_hotcold/hc_profile.py" merge "$ASM" "$R/tools/qjs_hotcold/profile.json" "${RUNS[@]}" \
+# Every workload's assembly of the laid-out files (merge drops a function
+# that two images compile differently).
+ASM=()
+for w in $WORKLOADS; do
+    if [ "$TARGET" = native ]; then
+        while IFS= read -r f; do ASM+=(--asm "$f"); done < <(find "$B/$w/esp-idf/main" -name '*.c.obj.hc0.s' | sort)
+    else
+        ASM+=(--asm "$(ls "$B/$w"/esp-idf/quickjs-ng/CMakeFiles/*/quickjs-ng/quickjs.c.obj.hc0.s | head -1)")
+    fi
+done
+python "$R/tools/qjs_hotcold/hc_profile.py" merge "$PROFILE" "${RUNS[@]}" "${ASM[@]}" \
     --note "r5sim -DR5SIM_DEVICE=1, workloads: $WORKLOADS, $(git -C "$R" rev-parse --short HEAD)"

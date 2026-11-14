@@ -126,6 +126,10 @@ idf_component_register(
     # not link Shiki, and the records stay comparable.
     EMBED_TXTFILES "${R5SIM_APP_JS}"
     LDFRAGMENTS ${R5SIM_LDFRAGMENTS})
+# The native hot/cold layout, as the firmware does it (-DPOCKET_NATIVE_HOTCOLD=
+# use|gen; this image has no Kconfig, so it is off unless asked for).
+include("${R}/tools/qjs_hotcold/hotcold.cmake")
+pocket_native_hotcold("${R}/main")
 if(R5SIM_PGO STREQUAL "generate")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_PGO_GEN)
 endif()
