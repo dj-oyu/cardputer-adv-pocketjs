@@ -759,13 +759,8 @@ static inline bool carry_rest(int y,int height,int *rest_y,int *rest_end){
 /* The entries of [first, end) a band bitmap names (bit j = the entry
  * starting at j touches the band, pocket_shiki_frame.c's band_signature),
  * in the same ascending order as the plain walk. */
-#define BAND_FOR(j) \
-    for(unsigned bw_=first>>5,bwe_=end?((end-1u)>>5):0u;first<end&&bw_<=bwe_;bw_++) \
-        for(uint32_t bm_=bits[bw_] \
-                &(bw_==(first>>5)?(0xffffffffu<<(first&31u)):0xffffffffu) \
-                &(bw_==bwe_&&(end&31u)?(0xffffffffu>>(32u-(end&31u))):0xffffffffu); \
-            bm_;bm_&=bm_-1u) \
-            for(unsigned j=bw_*32u+(unsigned)__builtin_ctz(bm_),once_=1;once_;once_=0)
+#include "ksn_band_bits.h"
+#define BAND_FOR(j) KSN_BAND_FOR(j, bits, first, end)
 static bool render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
                         unsigned first,unsigned end,const uint32_t *bits,ksn_proc_carry *carry){
     if(!frame||!frame->ready||!pixels||y<0||height<0||y>KSN_PROC_H||height>KSN_PROC_H-y||

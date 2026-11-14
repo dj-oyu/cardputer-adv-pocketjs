@@ -1,3 +1,6 @@
+#ifdef FOX_SHIKI_PROVIDER
+#include "private_fox/shiki_app.h"
+#endif
 #include "board.h"
 #include "frame_bd.h"
 #include "disp.h"
@@ -665,6 +668,9 @@ typedef struct {
 } native_app_t;
 #define NATIVE_APP(id,title,source,end,flags) {{id,title,flags},source,end}
 static const native_app_t native_apps[]={
+#ifdef FOX_SHIKI_PROVIDER
+    NATIVE_APP("local.fox","FOX",fox_shiki_app,fox_shiki_app+sizeof fox_shiki_app,5),
+#endif
     NATIVE_APP("local.hello","HELLO WORLD",NULL,NULL,5),
     NATIVE_APP("local.imucal","IMU CALIBRATION",imucal_start,imucal_end,7),
     NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),

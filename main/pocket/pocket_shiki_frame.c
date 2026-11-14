@@ -8,6 +8,12 @@
 #include "ui/kasane/ksn_mesh_prepared.h"
 #endif
 #include "pocket_shiki_frame.h"
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+#ifndef FOX_SHIKI_PROVIDER
+#error "Native fox hook requires its verified provider profile"
+#endif
+#include "../private_fox/shiki_provider.h"
+#endif
 #include "ui/kasane/ksn_mesh_depth.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
@@ -818,6 +824,10 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
     (void)bands;(void)x0;(void)x1;(void)index;
     return false;
 #endif
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    /* Conservative damage includes old occupied bands and background clearing. */
+    if(index==0&&fox_shiki_active())return false;
+#endif
     if(index>=PROC_SURFACES||!surfaces[index].sig_ready)return false;
     const proc_surface *s=&surfaces[index];
     const bool all=s->depth_candidate.enabled||s->depth_committed.enabled||
@@ -944,6 +954,9 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     if((any_pending()&&!disp_busy())||any_repair())
         return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
     proc_surface *surface=&surfaces[index];
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    if(fox_shiki_active())return failure(ctx,op,POCKET_ERR_BUSY,"native fox surface owned");
+#endif
     if(!buffers(surface))return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
     /* The committed entries stay where they are (and so does the header,
      * theirs until commit()); the new frame goes behind them. */
@@ -1637,7 +1650,28 @@ esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
     return JS_SetPropertyFunctionList(ctx,obj,frame_methods,
                                       (int)(sizeof frame_methods/sizeof frame_methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
 }
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+/* Owner task only. No board_fox transport, callbacks, or copied frame image.
+ * publish merely admits a presentation; render may only follow its return. */
+bool pocket_proc_fox_publish(lease_pool *pool,lease_key key,render_scratch *scratch){
+    disp_join();
+    proc_surface *s=&surfaces[0];
+    if(building||any_pending()||any_repair()||(!fox_shiki_active()&&(s->candidate||s->has_committed)))return false;
+    if(!fox_shiki_offer(pool,key,scratch))return false;
+    const ksn_rect whole={0,0,KSN_PROC_W,KSN_PROC_H};
+    ksn_result result=s->image_mode?pocket_kasane_proc_publish_at(0,whole):pocket_kasane_proc_publish();
+    if(result!=KSN_OK){fox_shiki_reject();return false;}
+    fox_shiki_accept();s->pending=true;pending_surface=0;
+    s->damage=whole;s->sig_ready=false;image_band_valid=false;carry_drop();
+    /* Match Shiki no-work acknowledgement; this is not a physical LCD claim. */
+    if(!pocket_kasane_needs_present())pocket_proc_present_result(KSN_OK);
+    return true;
+}
+#endif
 void pocket_proc_reset(void){
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    disp_join();fox_shiki_close();
+#endif
     for(unsigned i=0;i<PROC_HANDLES;i++){
         if(slots[i].plan)ksn_shiki_plan_dispose(slots[i].plan);
         shiki_or_sys_free(slots[i].plan);slots[i]=(proc_slot){0};
@@ -1715,6 +1749,21 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
     if(variant||frame_number||y>=KSN_PROC_H||x>KSN_PROC_W||
        count>KSN_PROC_W-x||(count&&(!rgb565||!alpha)))return KSN_INVALID;
     if(!count)return KSN_OK;
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    if(index==0&&fox_shiki_active()){
+        if(!image_band_buf)return KSN_OOM;
+        const unsigned by=y&~(PROC_IMAGE_BAND_ROWS-1u);
+        if(!image_band_valid||image_band_surface!=0||image_band_y!=by){
+            image_band_valid=false;
+            unsigned rows=KSN_PROC_H-by;if(rows>PROC_IMAGE_BAND_ROWS)rows=PROC_IMAGE_BAND_ROWS;
+            memset(image_band_buf,0,rows*KSN_PROC_W*sizeof *image_band_buf);
+            if(!fox_shiki_rows(image_band_buf,by,rows))return KSN_INVALID;
+            image_band_surface=0;image_band_y=by;image_band_valid=true;
+        }
+        memcpy(rgb565,image_band_buf+(y-by)*KSN_PROC_W+x,count*sizeof *rgb565);
+        memset(alpha,255,count);return KSN_OK;
+    }
+#endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     uint32_t span_start=esp_cpu_get_cycle_count();
 #endif
@@ -1779,6 +1828,13 @@ static ksn_result image_rows(void *ctx,uint16_t variant,uint16_t frame_number,
     if(variant||frame_number||!dst||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
     if(x||count!=KSN_PROC_W||stride!=KSN_PROC_W)return KSN_UNSUPPORTED;
     if(!rows)return KSN_OK;
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    if(key==1&&fox_shiki_active()){
+        if(rows>8)return KSN_UNSUPPORTED;
+        memset(dst,0,(size_t)rows*KSN_PROC_W*sizeof *dst);
+        return fox_shiki_rows(dst,y,rows)?KSN_OK:KSN_INVALID;
+    }
+#endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     uint32_t start=esp_cpu_get_cycle_count();
 #endif
@@ -1814,6 +1870,14 @@ void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
     (void)ctx;
     if(!pixels||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
+    if(!rows)return KSN_OK;
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    if(fox_shiki_active()){
+        if(rows>8)return KSN_UNSUPPORTED;
+        memset(pixels,0,(size_t)rows*KSN_PROC_W*sizeof *pixels);
+        return fox_shiki_rows(pixels,y,rows)?KSN_OK:KSN_INVALID;
+    }
+#endif
     const proc_surface *surface=&surfaces[0];
     const ksn_proc_frame *frame=surface->pending?surface->candidate:
         (surface->has_committed?surface->committed:NULL);
@@ -1824,6 +1888,15 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
 }
 void pocket_proc_present_result(ksn_result result){
     carry_drop();
+#ifdef POCKET_FOX_NATIVE_PROVIDER
+    if(fox_shiki_active()&&pending_surface==0){
+        proc_surface *s=&surfaces[0];
+        image_band_valid=false;
+        if(result==KSN_OK){fox_shiki_ack(true);s->pending=false;s->repair_required=false;s->has_committed=true;}
+        else if(result==KSN_IO){fox_shiki_ack(false);s->repair_required=true;pocket_kasane_invalidate();}
+        return;
+    }
+#endif
     proc_surface *surface=&surfaces[pending_surface];
     bool repairing=false;
     for(unsigned i=0;i<PROC_SURFACES;i++)repairing|=surfaces[i].repair_required;

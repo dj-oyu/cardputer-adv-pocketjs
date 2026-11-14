@@ -1,3 +1,6 @@
+#ifdef FOX_SHIKI_PROVIDER
+#include "private_fox/bridge.h"
+#endif
 #include "derby_detail.h"
 #include "app_session.h"
 #include "board.h"
@@ -1238,6 +1241,10 @@ bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
 
 void app_stop(void) {
+#ifdef FOX_SHIKI_PROVIDER
+    /* Close before guest stop hooks; Kasane reset below joins/releases leases. */
+    fox_bridge_close();
+#endif
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     bool p0_had_guest=guest!=NULL;
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -1304,6 +1311,10 @@ void app_stop(void) {
         pocket_pool_probe_reset();
 #endif
     }
+#ifdef FOX_SHIKI_PROVIDER
+    /* Never free snapshots retained by a failed/busy Kasane detach. */
+    if(!fox_composed_finish())ESP_LOGW("app","FOX_SHIKI_DRAIN_PENDING");
+#endif
     pocket_input_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
@@ -1716,6 +1727,9 @@ static void js_join_hook(JSContext *ctx) {
 esp_err_t app_start_test(char test) {
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     esp_err_t err;
+#ifdef FOX_SHIKI_PROVIDER
+    if(fox_composed_shutdown_pending())return ESP_ERR_INVALID_STATE;
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
     // Whatever the home screen refused since the last session is its own,
@@ -1917,6 +1931,12 @@ esp_err_t app_start_test(char test) {
     // runs in the order it registered.
     TRY_NOJOIN("workspace",pocket_workspace_install);
 surfaces_done:
+#ifdef FOX_SHIKI_PROVIDER
+    /* Only the registered private app gets this asset-specific frontend. */
+    if(!overlay_session&&app_registry_current()&&
+       !strcmp(app_registry_current()->id,"local.fox"))
+        TRY(fox_bridge_install(pocketjs_guest_quickjs_context(guest))>=0?ESP_OK:ESP_ERR_INVALID_STATE);
+#endif
     if(overlay_session) goto source_ready;
     // pocket.pet is the surface of two native apps, Pocket Pet and Pet
     // Companion, not part of the common API. It goes only to a session whose

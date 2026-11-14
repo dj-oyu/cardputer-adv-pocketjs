@@ -652,3 +652,8 @@ if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
         COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
     set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
+
+# Local-only optional provider; ordinary upstream builds remain unchanged.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/private_fox/shiki_provider.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/private_fox/shiki_provider.cmake")
+endif()
