@@ -80,11 +80,13 @@ def main():
                     fns.pop(name, None)
         st = {}
         lines = hc_asm.hoist_files(lines)
-        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section)
+        lmap = prof.get('lines', {}).get(base)
+        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section, lmap)
         st['verified'] = hc_asm.verify(lines, new)
         # One line in the build log: a stale profile is visible, not silent.
         print(f'hc_cc: {base}: {st["matched"]} functions laid out hot/cold '
-              f'({st["missed"]} of the profile\'s did not match this object code and were left alone)',
+              f'({st["missed"]} of the profile\'s did not match this object code; '
+              f'{st["by_lines"]} placed by source line instead)',
               file=sys.stderr)
         if fns and st['matched'] * 2 < len(fns):
             print('hc_cc: warning: most of the profile is stale; retrain (tools/qjs_hotcold/train.sh)',

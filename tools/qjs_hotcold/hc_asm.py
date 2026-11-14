@@ -199,6 +199,52 @@ def parse(lines):
         i = k + 1
     return out
 
+LOC = re.compile(r'^\t\.loc (\d+) (\d+)\b')
+FILE_DECL = re.compile(r'^\t\.file (\d+) "([^"]+)"')
+
+def file_table(lines):
+    """`.file N "path"` -> {N: basename}; the line map keys by basename, so
+    two trees (r5sim, the firmware, another machine) agree."""
+    out = {}
+    for l in lines:
+        m = FILE_DECL.match(l)
+        if m:
+            out[m.group(1)] = re.split(r'[\\/]', m.group(2))[-1]
+    return out
+
+def block_locs(f, files):
+    """Per block, the source lines ("file.c:123") its `.loc` directives name.
+    A block without one runs under the last line in effect before it."""
+    out, last = [], None
+    for b in f.blocks:
+        keys = []
+        for l in b.lines:
+            m = LOC.match(l)
+            if m and m.group(2) != '0' and m.group(1) in files:
+                keys.append(f'{files[m.group(1)]}:{m.group(2)}')
+        if keys:
+            last = keys[-1]
+        elif last:
+            keys = [last]
+        out.append(keys)
+    return out
+
+def tiers_from_lines(f, files, lmap):
+    """Block classes for a function whose code differs from the training's
+    (the profile's hash does not match), through its source lines: a block is
+    as hot as the hottest line in it, and a line the training never compiled
+    (code only this build has: the device's PIE path, another inline choice)
+    counts as hot (class 0). Wrong guesses cost speed, not correctness:
+    `verify` checks the instructions and successors either way."""
+    out = []
+    for keys in block_locs(f, files):
+        vals = [lmap.get(k) for k in keys]
+        if not keys or any(v is None for v in vals):
+            out.append(0)
+        else:
+            out.append(min(DIGITS.index(v) for v in vals))
+    return out
+
 def file_tag(src):
     """A source's name as it appears in block symbols and section names:
     quickjs.c -> quickjs, ksn_shiki.c -> ksn_shiki."""
@@ -275,7 +321,7 @@ def hoist_files(lines):
     rest = [l for l in lines if not FILE_N.match(l)]
     return rest[:1] + files + rest[1:]
 
-def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION):
+def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION, lmap=None):
     """Lay out the functions the profile calls hot. A block's class is one
     base-36 digit of the profile's string: classes 0..hot-1 are hot (several,
     when the profile groups blocks by the workloads that use them), class
@@ -283,7 +329,8 @@ def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION):
     without a hot block (run in the training, but in no steady turn) is left
     as GCC wrote it: splitting it would only help a path that is not hot."""
     out = []                # str, or a Group where its section's text goes
-    matched = missed = skipped = 0
+    matched = missed = skipped = by_lines = 0
+    files = file_table(lines) if lmap else {}
     group = None
     ngroups = 0
     for it in parse(lines):
@@ -293,6 +340,16 @@ def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION):
         if p and (p['h'] != it.hash() or len(p['t']) != len(it.blocks)):
             missed += 1; p = None
         tier = [min(DIGITS.index(c), hot + 1) for c in p['t']] if p else None
+        if not p and lmap:
+            # No block profile fits this code: place it by its source lines.
+            t = [min(x, hot + 1) for x in tiers_from_lines(it, files, lmap)]
+            # Only a function the training saw run hot: one whose only hot
+            # blocks are lines it never compiled would pull unknown code
+            # into the hot region.
+            seen_hot = any(DIGITS.index(lmap[k]) < hot for ks in block_locs(it, files) for k in ks if k in lmap)
+            if seen_hot and min(t) < hot and max(t) >= hot:
+                tier, p = t, True
+                by_lines += 1
         if p and min(tier) >= hot:
             skipped += 1; p = None
         if not p:
@@ -312,7 +369,7 @@ def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION):
     for it in out:
         flat.extend(it.lines() if isinstance(it, Group) else [it])
     if stats is not None:
-        stats.update(matched=matched, missed=missed, skipped=skipped, groups=ngroups)
+        stats.update(matched=matched, missed=missed, skipped=skipped, groups=ngroups, by_lines=by_lines)
     return flat
 
 def emit_function(g, f, tier):
