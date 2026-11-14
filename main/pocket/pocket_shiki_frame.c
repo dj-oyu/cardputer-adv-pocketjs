@@ -481,6 +481,12 @@ static uint64_t sig_mix64(uint64_t z){
 #include <stdio.h>
 static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,sig_lo8,sig_impossible,
                           sig_skipped,sig_pixel_bad,sig_all;
+/* The other side (host census): bands the hash marks dirty whose pixels come
+ * out the same, and for the ones that do change, how much of the damage did:
+ * 4-row halves alike, 16-px columns that differ, and the bytes a damage cut
+ * to the changed pixels of each half would send against today's. */
+static unsigned long long sig_dirty,sig_dirty_same,sig_halves,sig_halves_same,
+                          sig_cols,sig_cols_changed,sig_bytes_now,sig_bytes_tight,sig_bytes_same;
 /* The committed frame as it was before commit() merged over it, so a
  * skipped band is checked against the frame on the panel. */
 static ksn_proc_frame *sig_old;
@@ -500,6 +506,18 @@ __attribute__((destructor)) static void sig_report(void){
             "skipped=%llu pixel_mismatch_in_skipped=%llu whole_frame_damages=%llu\n",
             sig_compared,sig_changed,sig_coll32,sig_lo16,sig_changed/65536.0,sig_hi16,sig_changed/65536.0,
             sig_lo8,sig_changed/256.0,sig_impossible,sig_skipped,sig_pixel_bad,sig_all);
+    char line[512];
+    snprintf(line,sizeof line,"SIG_DIRTY dirty=%llu pixel_same=%llu (%.1f%%) halves=%llu halves_same=%llu (%.1f%%) "
+             "cols16=%llu cols16_changed=%llu (%.1f%%) bytes_now=%llu bytes_same=%llu bytes_tight=%llu (%.1f%%)\n",
+             sig_dirty,sig_dirty_same,sig_dirty?100.0*sig_dirty_same/sig_dirty:0.0,
+             sig_halves,sig_halves_same,sig_halves?100.0*sig_halves_same/sig_halves:0.0,
+             sig_cols,sig_cols_changed,sig_cols?100.0*sig_cols_changed/sig_cols:0.0,
+             sig_bytes_now,sig_bytes_same,sig_bytes_tight,sig_bytes_now?100.0*sig_bytes_tight/sig_bytes_now:0.0);
+    fputs(line,stderr);
+    if(getenv("POCKET_SIG_REPORT")){
+        FILE *f=fopen(getenv("POCKET_SIG_REPORT"),"a");
+        if(f){fputs(line,f);fclose(f);}
+    }
 }
 #endif
 /* One entry (or a pattern line's two) as 32 bits, every input bit reaching
@@ -678,16 +696,45 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
             if((hn>>16)==(ho>>16))sig_hi16++;
             if(!((hn^ho)&0xffu))sig_lo8++;
         }
+        /* Both frames drawn over the colour, for either side of the check. */
+        static uint16_t pa[KSN_PROC_W*8],pb[KSN_PROC_W*8];
+        const int y=(int)b*8,rows=y+8>KSN_PROC_H?KSN_PROC_H-y:8;
+        for(unsigned k=0;k<KSN_PROC_W*8u;k++)pa[k]=pb[k]=s->candidate_color;
+        /* The candidate is marked ready only when it is published. */
+        static ksn_proc_frame copy;
+        memcpy(&copy,s->candidate,frame_bytes(surface_segments(s)));copy.ready=true;
+        const bool ra=ksn_proc_render_band(&copy,pa,y,rows);
+        const bool rb=ksn_proc_render_band(sig_old?sig_old:s->committed,pb,y,rows);
+        if(!fe){
+            /* Dirty: the columns commit() damages (as below), sent per row. */
+            const unsigned a=n->x0[b]<o->x0[b]?n->x0[b]:o->x0[b],z=n->x1[b]>o->x1[b]?n->x1[b]:o->x1[b];
+            const unsigned w=a<z?z-a:0;
+            sig_dirty++;
+            sig_bytes_now+=(unsigned long long)w*(unsigned)rows*2u;
+            if(!memcmp(pa,pb,sizeof pa)){
+                sig_dirty_same++;
+                sig_bytes_same+=(unsigned long long)w*(unsigned)rows*2u;
+            }else{
+                for(int h0=0;h0<rows;h0+=4){
+                    const int hr=h0+4>rows?rows-h0:4;
+                    int lo=KSN_PROC_W,hi=-1;
+                    for(int r=h0;r<h0+hr;r++)for(int x=0;x<KSN_PROC_W;x++)
+                        if(pa[r*KSN_PROC_W+x]!=pb[r*KSN_PROC_W+x]){if(x<lo)lo=x;if(x>hi)hi=x;}
+                    sig_halves++;
+                    if(hi<0)sig_halves_same++;
+                    else sig_bytes_tight+=(unsigned long long)(hi-lo+1)*(unsigned)hr*2u;
+                }
+                for(unsigned c=a/16u*16u;c<z;c+=16u){
+                    bool diff=false;
+                    for(int r=0;r<rows&&!diff;r++)for(unsigned x=c;x<c+16u&&x<KSN_PROC_W;x++)
+                        if(pa[r*KSN_PROC_W+x]!=pb[r*KSN_PROC_W+x]){diff=true;break;}
+                    sig_cols++;
+                    if(diff)sig_cols_changed++;
+                }
+            }
+        }
         if(fe){
             /* Skipped: both frames must draw the band alike over the colour. */
-            static uint16_t pa[KSN_PROC_W*8],pb[KSN_PROC_W*8];
-            const int y=(int)b*8,rows=y+8>KSN_PROC_H?KSN_PROC_H-y:8;
-            for(unsigned k=0;k<KSN_PROC_W*8u;k++)pa[k]=pb[k]=s->candidate_color;
-            /* The candidate is marked ready only when it is published. */
-            static ksn_proc_frame copy;
-            memcpy(&copy,s->candidate,frame_bytes(surface_segments(s)));copy.ready=true;
-            const bool ra=ksn_proc_render_band(&copy,pa,y,rows);
-            const bool rb=ksn_proc_render_band(sig_old?sig_old:s->committed,pb,y,rows);
             sig_skipped++;
             if(memcmp(pa,pb,sizeof pa)){
                 if(sig_pixel_bad<3)fprintf(stderr,"SIG_BAD band=%u ra=%d rb=%d ready=%d/%d count=%u/%u ext=%u/%u first=%u/%u end=%u/%u\n",
