@@ -386,3 +386,25 @@ ASan 腕がループに入る）が全通し。`test_font.c` には「チャン�
 ### 残り（Fable のレビューの A2・A3）
 
 1 コマンド × 1 半帯の復号を 1 回にして行とチャンクで使い回す（A2）、2 値・不透明の字を帯へ直接書く口（A3）。パドックと STRESS はテキストの面積が大きく、ここが残りの大半（推定）。
+
+### 追補: インクの run で描く（`runs`、2026-11-14）
+
+上の `extent` は走査の範囲を切っただけで、`span` が行 × 64 px ごとに文字列を歩き直し、被覆バッファを 1 画素ずつ読み戻す形は残っていた。Fable のレビューの A2・A3 を 1 つの口で入れた。
+
+- `ksn_text_port.runs(ctx, draw, reveal, x0, x1, y0, y1, run, user)`（`ksn_ports.h`、2 値の port だけ）: 矩形（コマンドの帯の一部）の中のインクを横の run で返す。フォントは文字列を矩形につき 1 回歩き、グリフの行を 1 語のビット列にして run を取り出す（セルは最大 16 px）。
+- 描画（`text_ink_run`）は、run の画素に、被覆ループが 255 のバイトに与えたのと同じ演算をする: 実効αが 255 なら `rgb565` の代入、alpha 表が有効ならその表、それ以外は `blend()`。2 値の port は被覆が 255 なので、色のαは `mul8(a, 255) = a` で変わらない。
+- 同じバイナリの A/B の行 `text_runs`。`span_n`/`blend_n` は、この行では対照にならない（runs の呼び出しは合成を含めて span の括り 1 つ）。
+
+検証（host）: STRESS `a93618d1`・DERBY `ecf35bcd` の digest が runs の 0/1 で一致（STRESS は alpha 表 on でも `b63fde30` で一致）。`test_span_count.c`・`test_font.c`（mapped の字形）で runs と span のインクを画素ごとに比較、`test_text_runs.c` でレンダラの 2 経路を色α × opacity（実効α 0・1・254・255）、alpha 表、scale256、帯の高さ 8/4 で比較（`KSN_COUNT_VISIBLE` の build でも）。Fable の独立レビューで画素が変わる入力は無し。
+
+実機（47e1a4c、`sdkconfig.variant.kasane_ab`、30 フレームの窓、実測）:
+
+| 場面 | runs on | runs off | 差 |
+| --- | ---: | ---: | ---: |
+| DERBY パドック（静止した場面） | render 3.97〜4.06 ms | 5.06 ms | **約 −1.0 ms** |
+| STRESS | 4.37〜4.75 ms | 5.64・5.75 ms | **約 −1.0〜1.2 ms** |
+| DERBY レース | — | — | 文字が少なく、窓の間の場面の変化に埋もれる |
+
+`runs` の後では `text_extent` の行は効かない（runs が矩形を自分で切る）。
+
+この A/B の前の `KASANE_AB` の記録（上の `extent` の表を含む）は、`lut_alpha=1`（出荷しない近似の alpha 表）が全窓で on だった。出荷の既定は 0 なので、回転の行から外した。

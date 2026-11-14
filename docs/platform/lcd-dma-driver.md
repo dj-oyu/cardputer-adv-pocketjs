@@ -485,3 +485,8 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 - **帯の汚れの判定に過剰は無い**（同じ画素の帯は 1 割を大きく下回る）。ハッシュの入力を切り詰め後の座標にする変更は採らない。ハッシュの精度（ビット数）を落としても衝突が増えるだけで、許容の閾値にはならない。
 - 残るのは、本当に変わる帯の中の、変わらない列。半帯ごとに列を切ると DERBY の Shiki の送信が 2 割前後減る見込み（上の表、host の計算）。ただし帯の損傷を 8 行単位で持つコア・修復・`test_dma_overlap.c` などに波及し、送信が詰まっていないフレームでは効かない。保留。
+
+### 9.16 線の歩みと commit の損傷（2026-11-14）
+
+- **`plain_walk`**（`ksn_shiki_frame.c` `plain_entry`）: 帯の判定を yy が動いたときだけにし、行のポインタで書き、x が画面外へ遠ざかる側に出たら止める（x は単調）。旧の歩み（`plain_entry_ref`）は A/B の腕と、帯の手前から入る線の受け皿として残した。`test_plain_walk.c` が 60,000 本 × 全帯 × 帯の高さ 1〜8 で両者を比較。実機（STRESS、同じバイナリ）で Shiki の画像の 1 呼び出しあたりのサイクルが off で +10〜12%、描画 約 −0.3 ms。DERBY のパドックは線が少なく差なし。
+- **`box_reuse`**（`pocket_shiki_frame.c`）: commit の外接矩形を `band_signature` の歩みで取り、表示中のフレームの矩形はそれ自身の commit のときの値を持つ。全 entry を 2 回余分に歩かない。host の `POCKET_PROC_SIG_CHECK` が毎 commit で旧の歩みと比べる（STRESS 897 回、DERBY 全場面で不一致 0）。host の命令数で commit 116 → 93 M（STRESS）。実機の turn は DERBY のパドック 3.16 → 3.02 ms、STRESS 約 −0.1〜0.27 ms。
