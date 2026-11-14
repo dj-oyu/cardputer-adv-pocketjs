@@ -459,3 +459,9 @@ A は quickjs ON・native OFF、B は両方 ON、B'' は B の熱い領域を 20
 - 直した版で、ファームの `pocket_derby.c` は 1 → 9 関数（8 が行で）、`ksn_shiki.c` は 5 → 6 関数。他のファイルは 0。
 - **実機（DERBY のレース、19 窓、TURNPERF）: 行で写した像 1.3208 M サイクル／ターン、行なしの B 1.3177 M（+0.23%）。** `insn` +0.24%、`istall` −0.8%、`istall_busy` +0.4%。揺れの内側で、効果は見えない。
 - **この方式の適用先は `pocket_derby.c` しかなく、そこで効果が出なかったので、コードは削除した**（道具とプロファイルは `9e9a6fa` の状態に戻した。実装は `b542894`・`1da67cf` に残る）。残った `pocket_derby.c` の無駄を詰めるには、実機で取ったプロファイルが要る（QEMU は PIE を走らせられない）が、見込みは 1% 程度（推定）で、取得の手間に見合わないと判断した。
+
+### 13.7 pocket_derby.c の学習条件（2026-11-14）
+
+r5sim は `pocket_derby.c` を `-Os` のまま組んでいた（それ以前の r5sim の数字と比べられるように）が、ファームは `-O2 -ffp-contract=off`。プロファイルは命令が一致する関数にしか当たらないので、**このファイルの 22 関数のうち 21 はファームで一度も並べ替えられていなかった**（ビルドのログ `hc_cc: pocket_derby.c: 1 functions laid out ... (21 ... did not match)`）。学習のビルド（`POCKET_NATIVE_HOTCOLD=gen`）だけファームと同じ指定にした（`tools/r5sim/main/CMakeLists.txt`）。一致は 17 / 22（残りは r5sim 自身の `#if` で命令が違う）。同時に、merge と commit の箱の変更で古くなった `pocket_shiki_frame.c`（15 中 7 が不一致）も学習し直した。
+
+実機（DERBY のレース、`sdkconfig.variant.turnperf` = TURNPERF ＋ `POCKET_FIXED_RANDOM_SEED`、2 ビルド、同じ 24 窓 × 30 ターン、実測）: 旧プロファイル（af0033a）1.2537 M → 新（aa9713d）1.2516 M サイクル/ターン（**−0.17%**、窓ごとの中央値 −0.16%、幅 −1.1〜+0.8%）。退役命令は同じ（`insn` 15.54 M / 30 ターン）、I-cache の待ち（`istall`）−0.4%、`istall_busy` −2.3%。**効果は誤差の範囲**（命令キャッシュの配置だけで同じカーネルが 15% 動く機体なので、これは「害はない」の確認）。新しいプロファイルは今のコードに一致するので、そのまま使う。
