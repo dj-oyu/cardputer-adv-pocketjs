@@ -370,3 +370,21 @@ M1 で初めて起きる組み合わせ（未確認の前提）:
 4. **Shiki のヒープ**: #2 の 1 面（STRESS 2.2 KB、DERBY 1.6 KB）、P3' を入れるなら 2 面。
 5. **#4 不透明のパネル**（画素が変わる）。
 6. **目視**: M1 と P2a で、遅延したフレームの画面（DERBY のレース、STRESS）と DERBY の効果音。ソフトウェアでは確かめられない（`board_capture` は遅延を止める。MISO は未配線）。
+
+### 8.7 #2 帯ごとの entry のビット表（`band_bits`、2026-11-14、実装・実測）
+
+§8.4 のとおり P2a の前に inline で入れた。`band_signature`（commit、UI タスク、join の後）が、`sig_add` の帯の判定と同じ条件で「帯 b に掛かる entry の先頭 j」のビットを立てる。表は面ごとに 1 枚（17 × ⌈区画/32⌉ 語、1,024 entry で 2,176 B、Shiki の heap から最初の commit で取る。取れなければ従来の歩み）。`render_band` は表のビットだけを昇順にたどる（描く順は同じ）。模様線のあるフレームは各 entry をその先頭から読む（§8.4 の #1 の大半はこれで不要）。同じバイナリの A/B の行 `band_bits`。
+
+- host: STRESS `a93618d1`・DERBY `ecf35bcd` の digest が 0/1 と 8・4 行の帯で一致、`tools/kasane_contract/run.sh` 通過。callgrind（STRESS、4 行）: `render_band` 331 → 225 M（−32%）、commit +1.8 M。
+- 実機（a61c5e3、`sdkconfig.variant.kasane_ab`、30 フレームの窓、実測）:
+
+| 場面 | band_bits on | off | 差 |
+| --- | ---: | ---: | ---: |
+| STRESS: render | 3.73〜3.91 ms | 4.48 ms | **約 −0.6 ms** |
+| STRESS: Shiki の画像（1 呼び出し） | 12.8〜13.5 k サイクル | 18.1 k | −27〜30% |
+| DERBY レース（CLOSE）: render | 2.36 ms | 3.55 ms | **約 −1.2 ms** |
+| DERBY レース: Shiki の画像（30 フレーム、1,020 呼び出し） | 9.54 M サイクル | 18.25 M | **−48%** |
+| DERBY レース: 送信が隠していない描画（`KASANE_PIECES`） | 0.19〜0.36 ms | — | §9.17 の 0.44〜1.5 ms から |
+
+- **DERBY のレースの描画は、ほぼ全部が送信の陰に入った**（描画 1.8〜2.9 ms に対し DMA 待ち 3.5〜5.3 ms）。inline でフレームを縮めるのは送信（バイト数）だけになり、2 コア化（§8.2 の M0/M1）の後も表示側の律速は送信。
+- turn（commit を含む）の差は窓のばらつきの中（STRESS 5.46〜5.48 ms）。
