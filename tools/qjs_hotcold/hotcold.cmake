@@ -10,6 +10,7 @@
 # same files as paths: they get the tools and the profile as dependencies, so
 # a new profile recompiles them. KEEP_OUT: linker fragments whose functions,
 # placed by name, must stay in their own sections.
+set(POCKET_NATIVE_HOTCOLD_PAD 20)
 get_filename_component(POCKET_HOTCOLD_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
 
 function(pocket_hotcold)
