@@ -1884,6 +1884,23 @@ int g_ksn_vertical_gradient_pie=1;
 /* Binary font coverage may be consumed directly as eight 0/A PIE lanes.
  * Keep this candidate off until a same-image device A/B establishes a gain. */
 int g_ksn_text_pie=0;
+/* Same-binary A/B arm (app_session.c's switches[]): 1 walks a text command
+ * only where its port's extent() says it can ink; 0 walks the declared box.
+ * The pixels are the same (test_text_render.c compares the arms). */
+int g_ksn_text_extent=1;
+/* Same-binary A/B arm: 1 draws a binary port's text from its ink runs
+ * (ksn_ports.h runs()), each inked pixel taking the operation the coverage
+ * loop below gives a 255 byte; 0 is that loop. */
+int g_ksn_text_runs=1;
+/* What every inked pixel of one text command becomes. A binary port's
+ * coverage is 255, so the colour's alpha passes mul8(a, 255) = a unchanged
+ * and the operation is the same for every pixel of the command. */
+typedef struct {
+    uint16_t *pixels;int y;
+    ksn_rgba color;uint8_t opacity;
+    unsigned mode;            /* 0: blend(), 1: solid, 2: the alpha table */
+    uint16_t solid;unsigned lut_level;
+} ksn_text_ink;
 #ifdef KSN_TEXT_PIE_COUNT
 uint32_t ksn_text_pie_blocks;
 uint32_t ksn_text_pie_mixed_blocks;
@@ -1926,6 +1943,14 @@ static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int 
         b=(((src>>8)&255)*a+b*(255-a)+127)/255;
     }
     return pack565(r,g,b,dither,x,y);
+}
+static void text_ink_run(void *user,int x,int y,unsigned n){
+    const ksn_text_ink *t=user;
+    uint16_t *p=t->pixels+(y-t->y)*240+x;
+    if(t->mode==1){for(unsigned i=0;i<n;i++)p[i]=t->solid;return;}
+    if(t->mode==2){for(unsigned i=0;i<n;i++)p[i]=blend_lut_pack(p[i],blend_lut_alpha[t->lut_level]);return;}
+    for(unsigned i=0;i<n;i++)
+        p[i]=KSN_BLEND(KSN_SLOT(KSN_TEXT,false),p[i],t->color,t->opacity,false,x+(int)i,y);
 }
 /* Partition a command's visible box around a later opaque image. Keeping the
  * original coordinates also keeps gradient sampling and dither phase intact. */
@@ -2122,6 +2147,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     DD_CLOSE(prepare);
     ksn_span_scratch scratch;
     bool first_band=true;
+    uint32_t piece_send_cy=0;   /* the last piece's send, for the next one's excess */
     for(unsigned band=0;band<17;band++){
         if(!(damage.bands&(1u<<band)))continue;
         /* A port with strip_rows 4 gets each 8-row band as two 4-row pieces,
@@ -2135,9 +2161,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         /* The port may hand out a different strip per piece (the board's
          * buffers in turn, so one is drawn while the last is sent from the
          * other). The first came above, before anything went out. */
+        const bool piece_prof=g_ksn_prof!=0;
+        const bool piece_first=first_band;
+        uint32_t piece_t=piece_prof?ksn_cycles():0u;
         if(!first_band){
             pixels=display->strip(display->ctx);
             if(!pixels){RENDER_FAILED();return KSN_OOM;}
+            if(piece_prof){const uint32_t now=ksn_cycles();g_ksn_render_prof.piece_wait_cy+=now-piece_t;piece_t=now;}
         }
         first_band=false;
         int y=piece_y,rows=band_y+band_rows-piece_y;
@@ -2209,7 +2239,32 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 /* The alpha arm's rows are the 16 effective-alpha buckets.
                  * The coverage buffer is the frame scratch's (2a retype), the
                  * one the span below fills. */
+                if(g_ksn_text_extent&&display->text->extent){
+                    unsigned ew,eh;
+                    display->text->extent(display->text->ctx,d,command->reveal,&ew,&eh);
+                    if(x1>d->bounds.x0+(int)ew)x1=d->bounds.x0+(int)ew;
+                    if(y1>d->bounds.y0+(int)eh)y1=d->bounds.y0+(int)eh;
+                    if(x0>=x1||y0>=y1)continue;
+                }
                 bool lut=g_ksn_blend_lut_alpha!=0&&blend_lut_alpha_prime(d->data.text.color,d->opacity);
+                if(g_ksn_text_runs&&display->text->runs&&display->text->binary_coverage&&
+                   !(g_ksn_text_pie&&g_ksn_blend_pie)){
+                    ksn_text_ink ink={.pixels=pixels,.y=y,.color=d->data.text.color,.opacity=d->opacity};
+                    const unsigned ca=d->data.text.color&255u;
+                    if(lut){
+                        const unsigned a=mul8(ca,d->opacity);
+                        if(!a)continue;
+                        ink.mode=2;ink.lut_level=a>>4;
+                    }
+#ifndef KSN_COUNT_VISIBLE
+                    /* blend() of an alpha that reaches 255, undithered. */
+                    else if((ca*d->opacity+127u)/255u==255u){ink.mode=1;ink.solid=rgb565(d->data.text.color);}
+#endif
+                    KSN_PROF_BEGIN();
+                    display->text->runs(display->text->ctx,d,command->reveal,x0,x1,y0,y1,text_ink_run,&ink);
+                    KSN_PROF_END(span);
+                    continue;
+                }
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;
                     {KSN_PROF_BEGIN();
@@ -2417,12 +2472,22 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         }
         DD_CLOSE(composite);
         DD_ADD(DD_SHARED_OUTPUT_BYTES,(uint64_t)rows*(unsigned)(dx1-dx0)*2u);
+        uint32_t piece_c=0;
+        if(piece_prof){
+            piece_c=ksn_cycles();
+            const uint32_t draw=piece_c-piece_t;
+            g_ksn_render_prof.piece_n++;g_ksn_render_prof.piece_draw_cy+=draw;
+            if(piece_first){g_ksn_render_prof.piece_first_cy+=draw;g_ksn_render_prof.piece_excess_cy+=draw;}
+            else if(draw>piece_send_cy)g_ksn_render_prof.piece_excess_cy+=draw-piece_send_cy;
+            piece_send_cy=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u*24u;
+        }
         DD_OPEN(present,DD_TX_SYNC);
         result=(dx0==0&&dx1==240)?
             display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels):
             display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
         DD_CLOSE(present);
+        if(piece_prof)g_ksn_render_prof.piece_wait_cy+=ksn_cycles()-piece_c;
         if(result!=KSN_OK){RENDER_FAILED();return result;}
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
         }

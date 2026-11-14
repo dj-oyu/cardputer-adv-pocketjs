@@ -19,6 +19,7 @@ LEGACY_FIXTURE = ROOT / 'tools/pocket/fixtures/class_registry_16.inc'
 SCENARIOS = ('reuse', 'history1-instance17', 'history2-model17', 'full-ledger', 'reset-bounded', 'overflow')
 LEDGER_FILES = ('main/app_session.c', 'main/pocket/pocket_api.c', 'main/pocket/pocket_api.h',
                 'main/pocket/pocket_class_registry.h', 'main/pocket/pocket_kasane.c',
+                'main/pocket/pocket_kasane_scene.inc',
                 'main/pocket/pocket_fs.c', 'main/pocket/pocket_storage.c', 'main/pocket/pocket_net.c',
                 'main/pocket/pocket_text.c', 'main/pocket/pocket_workspace.c',
                 'main/pocket/app_music_view.c',
@@ -26,8 +27,8 @@ LEDGER_FILES = ('main/app_session.c', 'main/pocket/pocket_api.c', 'main/pocket/p
 EXPECTED_OWNERS = {
     'main/pocket/pocket_api.c': ('hub_owner', 'token_owner'),
     'main/pocket/pocket_kasane.c': ('tx_owner', 'modal_owner', 'ref_owner', 'template_owner',
-                                  'instance_owner', 'ticket_owner', 'image_owner', 'animation_owner',
-                                  'schema_class_owner', 'source_cap_owner', 'scene_owner'),
+                                  'instance_owner', 'image_owner', 'animation_owner',
+                                  'schema_class_owner', 'source_cap_owner'),
     'main/pocket/pocket_fs.c': ('file_owner',),
     'main/pocket/pocket_storage.c': ('hub_owner',),
     'main/pocket/pocket_net.c': ('lease_owner', 'response_owner'),
@@ -56,7 +57,7 @@ def owner_ledger():
         if names:
             found[path.relative_to(ROOT).as_posix()] = sorted(names)
     expected = {path: sorted(names) for path, names in EXPECTED_OWNERS.items()}
-    if found != expected or sum(map(len, found.values())) != 22:
+    if found != expected or sum(map(len, found.values())) != 20:
         raise ValueError('Production owner ledger changed; update the reviewed regression ledger: ' + json.dumps(found, sort_keys=True))
     return found
 
@@ -206,9 +207,9 @@ def main():
     proof = dict(kind='HOST REGISTRY UNIT CONTRACT', baseline_origin_commit=BASELINE,
                  baseline_fragment_sha256=BASELINE_FRAGMENT_SHA,
                  baseline_origin='Exact production helper/reset fragment matched Git origin before vendoring; default run requires no Git history',
-                 production_helper_and_reset_extracted=True, native_owner_ledger_count=22,
+                 production_helper_and_reset_extracted=True, native_owner_ledger_count=20,
                  production_owner_declarations=ledger,
-                 runtime_type='opaque identities for reset/reuse; real QuickJS synthetic 22-class registration/finalizer test for current header; no physical namespace installation claim',
+                 runtime_type='opaque identities for reset/reuse; real QuickJS synthetic 20-class registration/finalizer test for current header; no physical namespace installation claim',
                  sanitizers=not args.no_sanitizers,
                  dependency_sha256=dependencies,
                  passed=unchanged and all(c['passed'] for r in runs for c in r['cases']),

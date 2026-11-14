@@ -490,11 +490,6 @@ void overlay_yield(const char *claimant, bool keep_music) {
     stop_with("YIELDED",OVERLAY_STOPPED,keep_music);
 }
 
-void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {
-    if(state!=OVERLAY_RUNNING) return;
-    pocket_overlay_paint(strip,strip_y,strip_h);
-}
-
 bool overlay_kasane_active(void) {
     return state==OVERLAY_RUNNING&&pocket_kasane_active();
 }

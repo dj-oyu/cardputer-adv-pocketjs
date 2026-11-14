@@ -100,7 +100,7 @@ for (let n = 0; n < 140; ++n) PW[n + 1] = PW[n] + (PW[n] * 268 >> 16);
 // Lanes drawn, the order far to near; xs (Q16 m along) and lz (Q16 m deep)
 // as Int32Array for pocket.derby; at()'s sway angles a / 40 + 2.4 i (Q16
 // turns), one sinMany a frame.
-const XS = new Int32Array(8), LT = new Int32Array(8), LS = new Int32Array(8), PO = new Int32Array(32);
+const XS = new Int32Array(8), LT = new Int32Array(8), LS = new Int32Array(8);
 let lz = new Int32Array(8).map((_, i) => PW[20 * i]), zo = [7, 6, 5, 4, 3, 2, 1, 0];
 const h4 = v => ('000' + v.toString(16).toUpperCase()).slice(-4), hex = s => h4(s >>> 16) + h4(s & 65535), num = i => 'NO.' + (i + 1),
   th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
@@ -199,33 +199,25 @@ function course(c, x0, xs, close, gate, K) {
     S.part(3, live.pole);
     if (gate) S.part(4, live.gate);
   }
-  S.lanes(xs, lz, PO, 0);
-  const L = K ? K[0] * QM : -160 * QM, R = K ? (K[2] - 1) * QM : 400 * QM;
-  for (const l of zo) {
-    if (K && ro.indexOf(l) >= FN[tier]) continue;
-    const X = PO[4 * l], s = PO[4 * l + 1];
-    if (l === close) {
-      bflush();
-      const g = ((DO(xs[l], l) >> 12) * 60495 >> 20) % 6;
-      dr('g' + g, []);
-      dr('silk', SILK[l], HS * bob(g) + 128 >> 8);
-    } else if (K ? X - (5 * s >> 1) >= L && X + (25 * s >> 1) <= R : X > L && X < R) rin(l, X, s, PO[4 * l + 2], DO(xs[l], l));
-  }
-  bflush();
+  runners(xs, 0, close, K);
   S.part(1, live.rail, 720896, 0xffff, k[4]);
 }
-// Shiki draws batched into one drawMany, Q16 inputs; DO: the legs' phase as
-// a distance, xs plus the lane's offset (its gate phase; README).
-const BH = new Uint32Array(32), BI = new Int32Array(32 * 7), DO = (x, l) => x + l * 67797;
-let bn = 0, bs = 7;
-function bput(h, a, b, c, d, e, f, g) { const o = bn * bs; BH[bn++] = h; BI[o] = a; BI[o + 1] = b; BI[o + 2] = c; BI[o + 3] = d; BI[o + 4] = e; BI[o + 5] = f; if (bs > 6) BI[o + 6] = g; }
-function bflush() { if (bn) SK.drawMany(BH.subarray(0, bn), BI.subarray(0, bn * bs), bs); bn = 0; }
-// A runner: hip X, ground Y, S px per unit (Q16), distance d (Q16 m).
-function rin(l, X, S, Y, d) {
-  if (!live.run || !live.legs) return;
-  bs = 7; const c = F.h[l].coat;
-  bput(live.legs, X, S, Y, d, c, 0, 0);
-  bput(live.run, X, S, Y, d, c, SILK[l], SILK[l] ^ 0x8410);
+// The runners (legs, run), far to near, in one call: pocket.derby.runners
+// projects, culls and orders them and draws them with integer inputs
+// (docs/apps/derby-runners-native.md). It stops at the close-up lane (its
+// place in zo) and goes on from the next. CO: coats 0..7, silks 8..15. DO:
+// the legs' phase as a distance, xs plus the lane's offset (README). AB:
+// the series' path (pocket.derby.mode(), the up key's A/B).
+const CO = new Int32Array(16), DO = (x, l) => x + l * 67797;
+let AB = 0;
+function runners(xs, pan, close, K) {
+  let m = 255;
+  if (K) for (let i = m = 0; i < FN[tier]; ++i) m |= 1 << ro[i];
+  for (let i = 0; (i = S.runners(xs, lz, zo, CO, live.legs, live.run, pan, close, m, i)) >= 0; ++i) {
+    const l = zo[i], g = ((DO(xs[l], l) >> 12) * 60495 >> 20) % 6;
+    dr('g' + g, []);
+    dr('silk', SILK[l], HS * bob(g) + 128 >> 8);
+  }
 }
 // The screen's feed on its face vr at scale z (Q16): a low camera 6 m behind
 // the leader.

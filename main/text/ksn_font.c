@@ -164,4 +164,96 @@ static unsigned advance_of(void *ctx,ksn_font font,uint32_t codepoint){
     return ksn_font_advance(font,codepoint);
 }
 
-const ksn_text_port ksn_font_port={.span=span,.advance=advance_of,.binary_coverage=true};
+/* The part of the box span can ink (ksn_ports.h): the advances of the scalars
+ * the reveal lets through -- a cell inks only its first `width` <= `advance`
+ * columns, tofu included -- and one line. The walk is span's own, so the two
+ * count the same scalars. */
+static void extent(void *ctx,const ksn_draw *draw,uint16_t reveal,unsigned *width,unsigned *height){
+    (void)ctx;
+    *width=0;*height=0;
+    if(!draw||draw->kind!=KSN_TEXT||(unsigned)draw->data.text.font>KSN_DISPLAY)return;
+    ksn_font font=draw->data.text.font;
+    const char *s=draw->data.text.utf8;
+    size_t bytes=draw->data.text.bytes;
+    unsigned pen=0;
+    for(size_t at=0;at<bytes&&reveal;reveal--){
+        size_t consumed;
+        uint32_t cp=utf8_decode(s,bytes,at,&consumed);at+=consumed;
+        pen+=ksn_font_advance(font,cp);
+    }
+    *width=pen;
+    *height=pen?(font==KSN_BODY?12u:font==KSN_DISPLAY?16u:8u):0u;
+}
+
+/* The ink of span_columns, as runs over a rectangle (ksn_ports.h). Each
+ * scalar is decoded and looked up once for all the rectangle's rows; a cell
+ * owns the columns [pen, pen+width), so the cells' runs never overlap. The
+ * ink tests are span_columns' own, line for line. */
+static void runs(void *ctx,const ksn_draw *draw,uint16_t reveal,int x0,int x1,int y0,int y1,
+                 ksn_ink_run run,void *user){
+    (void)ctx;
+    if(!draw||draw->kind!=KSN_TEXT||(unsigned)draw->data.text.font>KSN_DISPLAY||!run)return;
+    ksn_font font=draw->data.text.font;
+    unsigned scale=font==KSN_DISPLAY?2:1;
+    unsigned shift=font==KSN_DISPLAY?1u:0u;
+    unsigned line_height=font==KSN_BODY?12:8*scale;
+    const int top=draw->bounds.y0;
+    if(y0<top)y0=top;
+    if(y1>top+(int)line_height)y1=top+(int)line_height;
+    if(y0>=y1||x0>=x1)return;
+    int pen=draw->bounds.x0;
+    const char *s=draw->data.text.utf8;
+    size_t bytes=draw->data.text.bytes;
+    for(size_t at=0;at<bytes&&reveal&&pen<x1;reveal--){
+        size_t consumed;
+        uint32_t cp=utf8_decode(s,bytes,at,&consumed);at+=consumed;
+        jpfont_bitmap_view glyph={0};
+        bool mapped=(font==KSN_BODY||cp>=128)&&
+            jpfont_bitmap(font==KSN_BODY?JPFONT_TEXT:JPFONT_SMALL,cp,&glyph);
+        unsigned advance=ksn_font_advance(font,cp);
+        unsigned width=mapped?glyph.width*scale:advance;
+        if(width>advance)width=advance;
+        const int left=pen;
+        pen+=(int)advance;
+        int c0=left>x0?left:x0,c1=left+(int)width<x1?left+(int)width:x1;
+        if(c0>=c1)continue;
+        unsigned ch=cp>=32&&cp<=126?cp:'?';
+        /* The cell's columns in the rectangle, as bits of gx (bit i: gx=i):
+         * a cell is at most 24 columns, so one row of it is one word. */
+        const uint32_t window=(uint32_t)((((uint64_t)1<<(c1-left))-1u)&~(((uint64_t)1<<(c0-left))-1u));
+        for(int y=y0;y<y1;y++){
+            const unsigned gy=(unsigned)(y-top),row=gy>>shift;
+            uint32_t ink=0;
+            if(mapped){
+                if(row>=glyph.height)continue;
+                /* The row's cells, MSB first, then each glyph column c widened
+                 * to its `scale` pixels gx = c<<shift... */
+                const uint8_t *bits=glyph.bits+row*glyph.stride;
+                const unsigned cols=(width+scale-1)>>shift;   /* glyph columns that reach gx < width */
+                for(unsigned c=0;c<cols;c++)
+                    if(bits[c>>3]&(0x80u>>(c&7)))ink|=(scale==2?3u:1u)<<(c<<shift);
+            }else if(cp<128){
+                if(row>=7)continue;
+                const unsigned r=font_rows[(ch-32)*7+row];
+                for(unsigned c=0;c<5;c++)
+                    if(r&(1u<<(4-c)))ink|=(scale==2?3u:1u)<<(c<<shift);
+            }else{
+                /* Tofu: the cell's outline, gx < advance-1 and gy < line-1. */
+                if((int)gy>=(int)line_height-1||advance<2)continue;
+                const uint32_t inner=(uint32_t)((((uint64_t)1<<(advance-1))-1u));
+                ink=gy==0||(int)gy==(int)line_height-2?inner:(1u|(1u<<(advance-2)))&inner;
+            }
+            /* ...and only the columns in the rectangle and under the cell's width. */
+            ink&=window&(uint32_t)((((uint64_t)1<<width)-1u));
+            while(ink){
+                const unsigned at=(unsigned)__builtin_ctz(ink);
+                const unsigned n=(unsigned)__builtin_ctz(~(ink>>at));
+                run(user,left+(int)at,y,n);
+                ink&=~(uint32_t)((((uint64_t)1<<n)-1u)<<at);
+            }
+        }
+    }
+}
+
+const ksn_text_port ksn_font_port={.span=span,.advance=advance_of,.binary_coverage=true,.extent=extent,
+                                   .runs=runs};

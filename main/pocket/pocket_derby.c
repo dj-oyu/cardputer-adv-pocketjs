@@ -1,6 +1,23 @@
 #include "pocket_derby.h"
 #include "pocket_api.h"
 #include "pocket_shiki_frame.h"
+#include "derby_ser_int.h"
+#include "ui/kasane/ksn_shiki.h"
+/* The PIE rotation and cull (derby_ser_pie.h): the kernels on the device
+ * (CONFIG_POCKET_DERBY_SER_PIE, default y), their scalar reference on the host
+ * harness (DERBY_SERPIE_HOST; bit for bit the kernels' outputs, piesim.py and
+ * the device self-test). Neither (r5sim, PIE off): the scalar path only. */
+#if (defined(__XTENSA__) && defined(CONFIG_POCKET_DERBY_SER_PIE)) || defined(DERBY_SERPIE_HOST)
+#include "derby_ser_pie.h"
+#define DERBY_PIE 1
+#if defined(__XTENSA__) && defined(CONFIG_POCKET_DERBY_SER_PIE)
+#define DSP_ROTATE dsp_rotate_pie
+#define DSP_CULL dsp_cull_pie
+#else
+#define DSP_ROTATE dsp_rotate_ref
+#define DSP_CULL dsp_cull_ref
+#endif
+#endif
 #include <math.h>
 // sin/cos are QuickJS's Math.sin/Math.cos (pocket_trig.h), so the C series
 // still gives the JS's draw inputs bit for bit (docs/vm/qjs-observe.md sec.18).
@@ -13,6 +30,15 @@
 // (docs/kasane/shiki.md sec.4.5); nothing otherwise.
 #define SHIKI_MS_FILE SHIKI_MS_DERBY
 #include "shiki_memstat.h"
+#ifdef POCKET_DERBY_SER_PROBE
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define PROBE_PRINT(...) ESP_LOGI("kasane",__VA_ARGS__)
+#else
+#include <stdio.h>
+#define PROBE_PRINT(...) (printf(__VA_ARGS__),putchar('\n'))
+#endif
+#endif
 
 /* DERBY WATCH's panning series (ser() in apps/derby/derby_pan.js as of vm/main
  * fac3552) translated to C, docs/apps/derby-ser-native.md. The JS is the
@@ -27,21 +53,78 @@
  * Why C: the series were 27.6 of the oval bend's 44.25 ms JS turn on the
  * device (docs/apps/derby-camera-history.md). The plans, the VM and the draw
  * path are untouched: each draw goes through pocket_proc_draw_numbers(), the
- * second half of H.draw(). */
+ * second half of H.draw().
+ *
+ * Since 2026-11-13 view() and ser() run in integers only (derby_ser_int.c,
+ * docs/apps/derby-ser-division.md sec.4, sec.13), the draws going to the plans
+ * already in their Q formats (pocket_proc_draw_fixed); the double series is
+ * gone (the user's decision). Inputs past the integers' range are clamped
+ * into it (L >= 1, s 0.25..32 m, |w| <= 125 m, |g0| <= 10,000 m, the camera
+ * within +-6,000 m, f 32..4,095 px, zf 0..20,000 m): the app's never are, and
+ * a clamped call only draws another picture. On the oval, view() rotates the
+ * chord ends and culls the chords for every series the last frame's ser()
+ * calls named, in one batch (sec.14), with the PIE kernels (derby_ser_pie.h)
+ * or, after the up key (mode(1)), with derby_ser_int.c's scalar ones: the
+ * same binary's A/B. The JS stays the geometry's reference,
+ * within a tolerance (tools/games/derby_ser_oracle.js). aim() and the side
+ * view still work in doubles. */
 
 #define DERBY_ENDS_MAX 32u
 #define DERBY_SECTIONS_MAX 4u
 #define SECTION_TERMS 7u    /* length, curvature, x, z, tangent x, z, heading */
 
+/* The PIE kernels' lanes and rotation constants, 16-byte aligned inside the
+ * course block (malloc gives less). */
+#ifdef DERBY_PIE
+typedef struct {dsp_ends E;dsp_rot_k rk;dsp_cull_k k;} derby_pie;
+#endif
+/* The frame's culls, all in view() (docs/apps/derby-ser-division.md sec.14):
+ * the keys (w, m) the last frame's ser() calls asked for, view()'s own first.
+ * A ser() that finds its key takes the mask; one that does not culls on the
+ * spot (the same function on the same inputs: the same mask). */
+#define PRE_MAX 8u
+typedef struct {int32_t w,m;uint32_t keep;} derby_pre;
 /* One heap block per course() (freed by course() again and reset()): the
- * chord ends (CH), the sections (OC, none for the straight, whose pose() is
- * [g, w, 1, 0]), and the per-frame chord ends seen from the camera (VE, four
- * a chord end) with the chords that may be in view (VC). */
+ * chord ends (CH) and the sections (OC, none for the straight, whose pose()
+ * is [g, w, 1, 0]). */
 typedef struct {
-    unsigned ends,sections,in_view;
+    unsigned ends,sections;
     double dnr;
-    double *ch,*sec,*ve;
-    uint8_t *vc;
+    double *ch,*sec;
+#ifdef POCKET_DERBY_COURSE_CACHE
+    double *pcache;     /* the ends' poses, made at registration (an experiment) */
+#endif
+    /* The integer series (derby_ser_int.c, docs/apps/derby-ser-division.md
+     * sec.4; course() refuses ends and sections past +-10,000 m). The ends
+     * as Q16 (qch), on the oval also their poses (qpos Q16, the unit tangent
+     * qt14 Q14 and qt30 Q30, made once here instead of every view()), the
+     * scalar path's lanes soa and wide ends, the PIE path's lanes (pie),
+     * view()'s keep-mask qvc; the series' chord tables, made on first use (8
+     * at most, the least recently used given up). */
+    int32_t *qch,(*qpos)[2],(*qt30)[2];
+    int16_t (*qt14)[2];
+    derby_ends_soa soa;
+#ifdef DERBY_PIE
+    derby_pie *pie;
+#endif
+    uint32_t qvc,qwide;
+    derby_pre pre[PRE_MAX];         /* this frame's keys and masks */
+    int32_t seen[PRE_MAX][2];       /* the keys ser() asked for since view() */
+    unsigned npre,nseen;
+    bool kok;                       /* dsp_cull_frame() took this frame's camera */
+    /* The wide chords' ends in the camera frame, made on first use in a
+     * frame (derby_ser_wide_end; sec.14): end index, values. */
+    struct {unsigned end;derby_wide_end v;} wend[PRE_MAX];
+    unsigned nwend;
+    derby_chord_q *slot[DERBY_Q_SLOTS];
+    int32_t key[DERBY_Q_SLOTS][3];
+    uint32_t used[DERBY_Q_SLOTS],clock;
+    /* The frame's camera for the integers (view()), and the plans checked
+     * for the integers' Q formats (plan_q). Here, not static: DIRAM's .bss
+     * is every app's, the course block only DERBY's (CLAUDE.md). */
+    derby_cam_q camq;
+    struct {uint32_t h;const uint8_t *q;} plan_ok[6];   /* prail, t0, t1, hl, crowd */
+    unsigned plan_ok_next;
 } derby_course;
 static derby_course *course;
 #if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
@@ -52,12 +135,27 @@ void pocket_derby_projection_counts(DerbyProjectionCounts *out){if(out)*out=proj
 static uint64_t course_generation,view_generation;
 #endif
 /* view(): the camera pc = [x, z, unit x, unit z, f, distance], the far depth,
- * the scene frame t, the stands' plans and their two constants. */
+ * the scene frame t, the stands' plans and their two constants. fr is
+ * sqrt(f*f+25600), ou()'s margin scale: aim() computes it once, by the same
+ * expression, instead of every candidate chord (docs/apps/derby-ser-cost.md
+ * sec.4 A; bit-identical). */
 static struct {
-    double pc[6],zf,t,hl_color,cells;
+    double pc[6],fr,zf,t,hl_color,cells;
     uint32_t hl,crowd;
     bool set;
+    bool pie;               /* this frame's rotation and cull: PIE (else scalar) */
+    int32_t cells_q;        /* cells, Q16 */
 } view;
+/* The rotation and cull: 0 the PIE kernels (default), 1 derby_ser_int.c's
+ * scalar ones (pocket.derby.mode(), the up key's A/B on the device). Taken at
+ * view(). Without PIE (r5sim, CONFIG_POCKET_DERBY_SER_PIE off) both are the
+ * scalar path. */
+static int ser_mode=0;
+#ifdef DERBY_SER_CHECK
+/* Host checks only: the integer series' counters and invariants. */
+static derby_ser_stats ser_stats;
+void pocket_derby_ser_stats(derby_ser_stats *out){if(out)*out=ser_stats;}
+#endif
 /* The frame's camera for the integer calls (side(), aim()): a side unit
  * (all Q16: f px, height h m, horizon hy px, x0 m, the centre o and the right
  * bound R px, the left edge e px), or a panning unit (aim(): view.pc). */
@@ -65,6 +163,66 @@ static struct {
     int64_t f,h,hy,x0,o,R,e;
     bool K,aimed;
 } cam;
+/* The inputs clamped into the integers' range (the probe counts them). */
+enum {CL_L,CL_S,CL_GW,CL_CAM,CL_N};
+#ifdef POCKET_DERBY_SER_PROBE
+/* The series' probe (CONFIG_POCKET_DERBY_SER_PROBE, default n; host:
+ * -DPOCKET_DERBY_SER_PROBE): which path view() and ser() took (index 0 PIE,
+ * 1 scalar), the inputs clamped into the integers' range, the tables that
+ * could not be made, and the cycles (pocket_cycles), the Shiki draws inside
+ * ser() apart. The rotation and the cull run on both paths every frame, the
+ * other path as a shadow whose cycles are taken out of view()'s and ser()'s
+ * (rot_cy, cull_cy: both paths on the same frames). One DERBY_SER line a
+ * KASANE_PAINT window (pocket_derby_ser_probe_log). docs/apps/derby-ser-division.md
+ * sec.12, sec.13. */
+enum {FB_MALLOC,FB_TABLE,FB_N};
+static struct {
+    uint32_t views[2],calls[2],clamp[CL_N],fb[FB_N],tables;
+    uint32_t view_cy[2],ser_cy[2],draw_cy[2],draws[2],chords[2];
+    uint32_t rot_cy[2],cull_cy[2],culls,cull_diff,wide[2],shadow_acc;
+    /* sec.14: the first cull of view()'s batch (the cold one), ser()'s keys
+     * found in the batch or culled on the spot, the path order's flip, the
+     * marks inside frame_culls(). */
+    uint32_t cull1_cy[2],pre_hit,pre_miss,flip,t_rot,t_cull1,first_cy[2],first_n[2];
+    /* The core's counters (PM0 retired instructions, PM1 instruction-fetch
+     * stall cycles: the flash cache's misses show here), whole ser() and its
+     * draws, by path (the shadow cull's included). */
+    uint32_t insn[2],ist[2],draw_insn[2],draw_ist[2];
+    uint32_t draw_acc,draw_n,draw_insn_acc,draw_ist_acc;
+    bool in_ser;
+} serp;
+#ifdef ESP_PLATFORM
+/* Armed on first use, as app_session.c's TURNPERF arms them (so not in a
+ * build with CONFIG_POCKET_VM_TURNPERF; apptrace off): task level only. */
+#include "eri.h"
+#include "xtensa-debug-module.h"
+#include "xtensa/xt_perf_consts.h"
+static bool serp_pm_on;
+static inline void serp_pm(uint32_t *insn,uint32_t *ist){
+    if(!serp_pm_on){
+        const uint16_t sels[2]={XTPERF_CNT_INSN,XTPERF_CNT_I_STALL},masks[2]={XTPERF_MASK_INSN_ALL,XTPERF_MASK_I_STALL_ALL};
+        for(int id=0;id<2;id++){
+            eri_write(ERI_PERFMON_PM0+id*4,0);
+            eri_write(ERI_PERFMON_PMCTRL0+id*4,((uint32_t)(sels[id]&PMCTRL_SELECT_MASK)<<PMCTRL_SELECT_SHIFT)|
+                                               ((uint32_t)(masks[id]&PMCTRL_MASK_MASK)<<PMCTRL_MASK_SHIFT));
+        }
+        eri_write(ERI_PERFMON_PGM,PGM_PMEN);
+        serp_pm_on=true;
+    }
+    *insn=eri_read(ERI_PERFMON_PM0);*ist=eri_read(ERI_PERFMON_PM0+4);
+}
+#else
+static inline void serp_pm(uint32_t *insn,uint32_t *ist){*insn=*ist=0;}
+#endif
+#define SERP(x) do{x;}while(0)
+/* A draw inside ser(): its cycles and counts apart from the geometry's. */
+#define SERP_DRAW(call) ({uint32_t _i,_s;serp_pm(&_i,&_s);const uint32_t _t=pocket_cycles();JSValue _r=(call); \
+    if(serp.in_ser){uint32_t _i1,_s1;const uint32_t _t1=pocket_cycles();serp_pm(&_i1,&_s1); \
+        serp.draw_acc+=_t1-_t;serp.draw_n++;serp.draw_insn_acc+=_i1-_i;serp.draw_ist_acc+=_s1-_s;}_r;})
+#else
+#define SERP(x) do{}while(0)
+#define SERP_DRAW(call) (call)
+#endif
 
 /* ---- QuickJS's Math, as quickjs.c has it (js_math_round, js_fmin, js_fmax,
  * js_math_min_max): signed zeros and NaN behave as in the JS. */
@@ -95,14 +253,6 @@ static double js_max(double a,double b){
     if(a==0&&b==0){f64 x={.d=a},y={.d=b};x.u&=y.u;return x.d;}
     return a<b?b:a;
 }
-/* ToInt32 (only the L = 0 series' parity reads it). */
-static int32_t js_int32(double d){
-    if(!isfinite(d))return 0;
-    d=trunc(d);
-    double m=fmod(d,4294967296.0);
-    if(m<0)m+=4294967296.0;
-    return (int32_t)(uint32_t)m;
-}
 
 /* pose(g, w) of derby_view.js: the point g m along the course, w m out. The
  * JS loop's bound 2 is its section count less one. */
@@ -132,24 +282,12 @@ static void pose(double g,double w,double o[4]){
     }
     o[0]=x+g*c-w*d;o[1]=z+g*d+w*c;o[2]=c;o[3]=d;
 }
-/* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
-static bool ou(unsigned j,double w,double m,double zf){
-    const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
-        l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
-    return (d<.02*f-m&&D<.02*f-m)||(d>zf+m&&D>zf+m)||(160*d+l*f<-k&&160*D+L*f<-k)||
-           (160*d-l*f<-k&&160*D-L*f<-k);
+/* The same on a course not yet published (course()) and for the integer
+ * tables' callback (derby_ser_table). */
+static void pose_of(void *user,double g,double w,double o[4]){
+    derby_course *const saved=course;
+    course=user;pose(g,w,o);course=saved;
 }
-static bool inr(const double q[2],double U,double V,double e){
-    const double z=q[1]+e*U,x=(q[0]+e*V)/z;
-    return z>.02&&x>-400&&x<640;
-}
-/* lim(c0, c1): narrows lo..hi to c0 + c1 g >= 0. */
-static void lim(double *lo,double *hi,double c0,double c1){
-    if(c1>0)*lo=js_max(*lo,-c0/c1);
-    else if(c1<0)*hi=js_min(*hi,-c0/c1);
-    else if(c0<0)*hi=-1e9;
-}
-
 static JSValue fail(JSContext *ctx,const char *op,const char *code,const char *message){
     return pocket_api_throw(ctx,code,op,message,false,POCKET_OUTCOME_NOT_APPLIED);
 }
@@ -217,6 +355,12 @@ static JSValue draw(JSContext *ctx,uint32_t handle,const double in[8]){
     return handle?pocket_proc_draw_numbers(ctx,handle,in,8):JS_UNDEFINED;
 }
 
+static void free_course(derby_course *c){
+    if(!c)return;
+    for(unsigned i=0;i<DERBY_Q_SLOTS;i++)free(c->slot[i]);
+    free(c);
+}
+#define QRANGE 10000.0      /* m: course() refuses ends and section origins past it */
 /* course(ends, sections, dnr): CH, OC (or falsy: the straight) and DNR. */
 static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
@@ -230,19 +374,37 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     if(ends>DERBY_ENDS_MAX||sections>DERBY_SECTIONS_MAX)
         return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"32 chord ends and 4 sections maximum");
     /* Read into a new block first: a bad argument leaves the old course. */
-    const size_t doubles=ends+(size_t)SECTION_TERMS*sections+4u*ends;
+    const size_t doubles=ends+(size_t)SECTION_TERMS*sections;
 #ifdef POCKET_DERBY_COURSE_CACHE
     const size_t cache_doubles=sections?4u*ends:0;
 #else
     const size_t cache_doubles=0;
 #endif
-    derby_course *c=malloc(sizeof *c+(doubles+cache_doubles)*sizeof(double)+ends);
+    /* The integer series' part (4-byte aligned): the ends as Q16, and on the
+     * oval their poses, the scalar path's lanes and the PIE path's (16-byte
+     * aligned by hand). */
+#ifdef DERBY_PIE
+    const size_t pie_bytes=sizeof(derby_pie)+15u;
+#else
+    const size_t pie_bytes=0;
+#endif
+    const size_t qoff=(doubles+cache_doubles)*sizeof(double),
+        qbytes=4u*ends+(sections?20u*ends+derby_ends_soa_bytes(ends)+pie_bytes:0u);
+    derby_course *c=malloc(sizeof *c+qoff+qbytes);
     if(!c)return fail(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"course allocation failed");
-    c->ends=ends;c->sections=sections;c->in_view=0;c->dnr=dnr;
-    c->ch=(double *)(c+1);c->sec=c->ch+ends;c->ve=c->sec+SECTION_TERMS*sections;
-    c->vc=(uint8_t *)(c->ve+4u*ends);
+    memset(c,0,sizeof *c);
+    c->ends=ends;c->sections=sections;c->dnr=dnr;
+    c->qch=(int32_t *)(void *)((uint8_t *)(c+1)+qoff);
+    if(sections){
+        c->qpos=(int32_t (*)[2])(c->qch+ends);c->qt30=c->qpos+ends;c->qt14=(int16_t (*)[2])(c->qt30+ends);
+        derby_ends_soa_init(&c->soa,c->qt14+ends,ends);
+#ifdef DERBY_PIE
+        c->pie=(derby_pie *)(((uintptr_t)(c->qt14+ends)+derby_ends_soa_bytes(ends)+15u)&~(uintptr_t)15u);
+#endif
+    }
+    c->ch=(double *)(c+1);c->sec=c->ch+ends;
 #ifdef POCKET_DERBY_COURSE_CACHE
-    if(sections)c->vc=(uint8_t *)(c->ve+8u*ends);
+    c->pcache=c->sec+SECTION_TERMS*sections;
 #endif
     bool ok=true;
     for(uint32_t i=0;i<ends&&ok;i++)ok=qelement(ctx,argv[0],i,&c->ch[i]);
@@ -264,11 +426,38 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         free(c);
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"chord ends and section terms must be Q16 integers");
     }
+    /* The integer series' range (docs/apps/derby-ser-division.md sec.4.4):
+     * every end and section origin within +-10,000 m (the app's are). There
+     * is no other path for a course past it. */
+    for(unsigned i=0;i<ends&&ok;i++){ok=fabs(c->ch[i])<=QRANGE;c->qch[i]=(int32_t)(c->ch[i]*65536);}
+    for(unsigned i=0;i<sections&&ok;i++)ok=fabs(c->sec[SECTION_TERMS*i+2])<=QRANGE&&fabs(c->sec[SECTION_TERMS*i+3])<=QRANGE;
+    if(!ok){
+        free(c);
+        return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"chord ends and section origins within +-10,000 m");
+    }
+    if(sections){
+#ifdef DERBY_PIE
+        int32_t nx[DERBY_ENDS_MAX],nz[DERBY_ENDS_MAX];
+#endif
+        for(unsigned i=0;i<ends;i++){
+            double m[4];
+            pose_of(c,c->ch[i],0,m);
+            c->qpos[i][0]=(int32_t)floor(m[0]*65536+.5);c->qpos[i][1]=(int32_t)floor(m[1]*65536+.5);
+            c->qt30[i][0]=(int32_t)floor(m[2]*1073741824.0+.5);c->qt30[i][1]=(int32_t)floor(m[3]*1073741824.0+.5);
+            c->qt14[i][0]=(int16_t)floor(m[2]*16384+.5);c->qt14[i][1]=(int16_t)floor(m[3]*16384+.5);
+#ifdef DERBY_PIE
+            nx[i]=-c->qt30[i][1];nz[i]=c->qt30[i][0];     /* the normal (-tz, tx) */
+#endif
+        }
+#ifdef DERBY_PIE
+        dsp_set_course(&c->pie->E,ends,nx,nz);
+#endif
+    }
 #ifdef POCKET_DERBY_COURSE_CACHE
     /* Precompute against the validated new registration before publication. */
-    if(sections)for(unsigned i=0;i<ends;i++)course_pose(c,c->ch[i],0,c->ve+4u*ends+4u*i);
+    if(sections)for(unsigned i=0;i<ends;i++)course_pose(c,c->ch[i],0,c->pcache+4u*i);
 #endif
-    free(course);
+    free_course(course);
     course=c;
 #ifdef POCKET_DERBY_PROJECT_BATCH
     ++course_generation;
@@ -283,8 +472,142 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     view.set=false;
     return JS_UNDEFINED;
 }
+/* v within lo..hi (NaN: lo). */
+static double clampd(double v,double lo,double hi){return v>=lo?(v<=hi?v:hi):lo;}
+/* camq from aim()'s pc, view()'s zf and fr, clamped into the integer series'
+ * range (sec.4.4: the camera within +-6,000 m, f 32..4,095 px, zf 0..20,000
+ * m; the app's cameras are inside it). A direction that is not a unit (aim()
+ * at its own point: 0/0) looks down x. */
+static void cam_q(void){
+    const double *pc=view.pc;
+    const double x=clampd(pc[0],-6000,6000),z=clampd(pc[1],-6000,6000),f=clampd(pc[4],32,4095-1/65536.0),
+        zf=clampd(view.zf,0,20000),fr=f==pc[4]?view.fr:sqrt(f*f+25600);
+    double dx=pc[2],dz=pc[3];
+    if(!(fabs(dx)<=1&&fabs(dz)<=1)){dx=1;dz=0;}
+    SERP(if(x!=pc[0]||z!=pc[1]||f!=pc[4]||zf!=view.zf||dx!=pc[2]||dz!=pc[3])serp.clamp[CL_CAM]++);
+    derby_cam_q *const q=&course->camq;
+    q->ex=(int32_t)floor(x*65536+.5);q->ez=(int32_t)floor(z*65536+.5);
+    q->dx=(int32_t)floor(dx*1073741824.0+.5);q->dz=(int32_t)floor(dz*1073741824.0+.5);
+    q->cx=(int16_t)floor(dx*16384+.5);q->cz=(int16_t)floor(dz*16384+.5);
+    q->f=(int32_t)floor(f*65536+.5);q->invf=(int32_t)floor(4294967296.0/f+.5);
+    q->zf=(int32_t)floor(zf*65536+.5);q->zn=q->f/50;
+    q->fr3=(int32_t)ceil(fr*8);q->fr16=(int32_t)ceil(fr*65536);
+}
+/* The frame's rotation of the oval's chord ends on one path: the PIE lanes
+ * (derby_ser_pie.h; ends past +-2,047 m leave E.valid) or the scalar ones
+ * (derby_ser_int.h; ends past +-2,750 m are qwide). The PIE path also takes
+ * the cull table's frame part here (dsp_cull_frame). */
+static void rotate(bool pie){
+    derby_course *const c=course;
+#ifdef DERBY_PIE
+    if(pie){
+        dsp_set_camera(&c->pie->E,&c->pie->rk,&c->qpos[0][0],&c->qpos[0][1],2,c->camq.ex,c->camq.ez,c->camq.dx,c->camq.dz);
+        DSP_ROTATE(&c->pie->E,&c->pie->rk);
+        c->kok=dsp_cull_frame(&c->pie->k,c->camq.f,c->camq.fr16,c->camq.zf);
+        return;
+    }
+#else
+    (void)pie;
+#endif
+    c->qwide=derby_ser_prepare(&c->soa,&c->camq,(const int32_t (*)[2])c->qpos,(const int16_t (*)[2])c->qt14,c->ends);
+    derby_ser_rotate_ref(&c->soa,c->camq.cx,c->camq.cz);
+}
+/* End i of a wide chord in the camera frame: this frame's, made once
+ * (derby_ser_cull_wide()'s first half, which does not depend on the series),
+ * or in tmp when the frame's slots are full. */
+static const derby_wide_end *wide_end(unsigned i,derby_wide_end *tmp){
+    derby_course *const c=course;
+    for(unsigned k=0;k<c->nwend;k++)if(c->wend[k].end==i)return &c->wend[k].v;
+    derby_wide_end *const o=c->nwend<PRE_MAX?&c->wend[c->nwend].v:tmp;
+    derby_ser_wide_end(&c->camq,c->qpos[i],c->qt30[i],o);
+    if(c->nwend<PRE_MAX)c->wend[c->nwend++].end=i;
+    return o;
+}
+/* The chords of the oval not wholly out by m (Q16 m) at offset w (Q16 m),
+ * the integer ou() on one path: the lanes' cull (PIE: margin m + 1 m, scalar:
+ * m + 3 m), the chords past the lanes' range by derby_ser_cull_wide (int64,
+ * Q16). Conservative either way: every chord the double ou() keeps is kept
+ * (the two keep different extra chords, which lim() then drops). */
+static uint32_t cull(bool pie,int32_t w,int32_t m){
+    derby_course *const c=course;
+    const unsigned chords=c->ends-1u;
+    const uint32_t all=chords>=32u?~0u:(1u<<chords)-1u;
+    uint32_t keep,wc;
+#ifdef DERBY_PIE
+    if(pie){
+        if(!c->kok||!dsp_cull_series(&c->pie->k,w,m))return all;
+        keep=c->pie->E.valid&~DSP_CULL(&c->pie->E,&c->pie->k);
+        wc=all&~c->pie->E.valid;
+    }else
+#else
+    (void)pie;
+#endif
+    {
+        derby_cull_q p;
+        if(!derby_ser_cull_params(&c->camq,w,m,&p))return all;
+        wc=(c->qwide|c->qwide>>1)&all;
+        keep=derby_ser_cull_ref(&c->soa,chords,&p)&~wc;
+    }
+    SERP(serp.wide[pie?0:1]+=(uint32_t)__builtin_popcount(wc));
+    for(uint32_t b=wc;b;b&=b-1u){
+        const unsigned j=(unsigned)__builtin_ctz(b);
+        derby_wide_end ta,tb;
+        if(!derby_ser_wide_test(&c->camq,wide_end(j,&ta),wide_end(j+1,&tb),w,m))keep|=1u<<j;
+    }
+    return keep;
+}
+/* One path's frame: the rotation, then every key's cull back to back, while
+ * the cull's code is still in the cache (between two ser() calls the Shiki
+ * draws can evict it: sec.14). keep[i] for c->pre[i]. */
+static void frame_culls(bool pie,uint32_t *keep){
+    derby_course *const c=course;
+    c->nwend=0;
+    rotate(pie);
+#ifdef POCKET_DERBY_SER_PROBE
+    serp.t_rot=serp.t_cull1=pocket_cycles();
+#endif
+    for(unsigned i=0;i<c->npre;i++){
+        keep[i]=cull(pie,c->pre[i].w,c->pre[i].m);
+#ifdef POCKET_DERBY_SER_PROBE
+        if(!i)serp.t_cull1=pocket_cycles();
+#endif
+    }
+}
+static void pre_add(int32_t w,int32_t m){
+    derby_course *const c=course;
+    for(unsigned i=0;i<c->npre;i++)if(c->pre[i].w==w&&c->pre[i].m==m)return;
+    if(c->npre<PRE_MAX){c->pre[c->npre].w=w;c->pre[c->npre].m=m;c->pre[c->npre].keep=0;c->npre++;}
+}
+/* ser()'s mask: the frame's, else culled now (and kept for the frame's
+ * later calls). A probe build also culls on the other path then (a shadow:
+ * both paths' cycles on the same frames, its own taken out of the
+ * caller's) and counts the chords the two keep differently. */
+static uint32_t keep_mask(int32_t w,int32_t m){
+    derby_course *const c=course;
+    unsigned i;
+    for(i=0;i<c->nseen;i++)if(c->seen[i][0]==w&&c->seen[i][1]==m)break;
+    if(i==c->nseen&&i<PRE_MAX){c->seen[i][0]=w;c->seen[i][1]=m;c->nseen++;}
+    for(i=0;i<c->npre;i++)if(c->pre[i].w==w&&c->pre[i].m==m){SERP(serp.pre_hit++);return c->pre[i].keep;}
+    SERP(serp.pre_miss++);
+#if defined(POCKET_DERBY_SER_PROBE) && defined(DERBY_PIE)
+    const int k=view.pie?0:1;
+    const uint32_t t0=pocket_cycles(),a=cull(view.pie,w,m),t1=pocket_cycles(),b=cull(!view.pie,w,m),t2=pocket_cycles();
+    serp.cull_cy[k]+=t1-t0;serp.cull_cy[k^1]+=t2-t1;serp.shadow_acc+=t2-t1;
+    serp.culls++;serp.cull_diff+=(uint32_t)__builtin_popcount(a^b);
+#elif defined(POCKET_DERBY_SER_PROBE)
+    const uint32_t t0=pocket_cycles(),a=cull(false,w,m);
+    serp.cull_cy[1]+=pocket_cycles()-t0;serp.culls++;
+#else
+    const uint32_t a=cull(view.pie,w,m);
+#endif
+    if(c->npre<PRE_MAX){c->pre[c->npre].w=w;c->pre[c->npre].m=m;c->pre[c->npre].keep=a;c->npre++;}
+    return a;
+}
+#define VIEW_W 1671168          /* ou(j, 25.5, 30, zf): view()'s own cull */
+#define VIEW_M (30*Q16)
 /* view(pc, zf, t, hl, crowd, hlColor, cells): the frame's camera. On the oval
- * it computes VE and VC as pan() did. */
+ * it rotates the chord ends and culls the chords for view() itself (qvc)
+ * and for the keys the last frame's ser() calls used. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
 #ifdef POCKET_DERBY_PROJECT_BATCH
@@ -298,7 +621,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     int32_t t,hc;
     bool ok=argc>=6&&cam.aimed&&qn(argv[0],&extra)&&in32(argv[1],&t)&&
        plan_handle(ctx,argv[2],&view.hl)&&plan_handle(ctx,argv[3],&view.crowd)&&
-       in32(argv[4],&hc)&&qn(argv[5],&view.cells);
+       in32(argv[4],&hc)&&in32(argv[5],&view.cells_q)&&qn(argv[5],&view.cells);
     if(ok){view.zf=view.pc[5]+extra;view.t=t;view.hl_color=hc;}
     /* JS getters may have replaced the course while pc was read. */
     if(!ok||!course){
@@ -306,26 +629,48 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         return fail(ctx,op,!ok?POCKET_ERR_INVALID_ARGUMENT:POCKET_ERR_BUSY,
                     !ok?"expected aim(), Q16 depth, frame, two plans, colour and Q16 cells":"course required");
     }
-    const double *pc=view.pc;
-    course->in_view=0;
-    if(course->sections){
-        for(unsigned i=0;i<course->ends;i++){
-#ifdef POCKET_DERBY_COURSE_CACHE
-            const double *m=course->ve+4u*course->ends+4u*i;
+    cam_q();
+#ifdef DERBY_PIE
+    view.pie=!ser_mode;
 #else
-            double m[4];
-            pose(course->ch[i],0,m);
-#ifdef POCKET_DERBY_PROJECT_BATCH
-            ++projection_counts.view_poses;
+    view.pie=false;
 #endif
-#endif
-            const double x=m[0]-pc[0],z=m[1]-pc[1];
-            double *V=course->ve+4u*i;
-            V[0]=x*pc[3]-z*pc[2];V[1]=x*pc[2]+z*pc[3];V[2]=-m[3]*pc[3]-m[2]*pc[2];V[3]=m[2]*pc[3]-m[3]*pc[2];
+    derby_course *const c=course;
+    c->npre=0;
+    pre_add(VIEW_W,VIEW_M);
+    for(unsigned i=0;i<c->nseen;i++)pre_add(c->seen[i][0],c->seen[i][1]);
+    c->nseen=0;
+    if(c->sections){
+        uint32_t keep[PRE_MAX];
+#if defined(POCKET_DERBY_SER_PROBE) && defined(DERBY_PIE)
+        /* Both paths, the order flipped every frame: the second finds the
+         * first's shared code (cull(), the wide chords' tests) in the cache. */
+        uint32_t other[PRE_MAX],cy[2][3];
+        const bool flip=(serp.flip^=1u)!=0;
+        for(int r=0;r<2;r++){
+            const bool pie=(r==0)==(flip?!view.pie:view.pie);
+            const uint32_t t0=pocket_cycles();
+            frame_culls(pie,pie==view.pie?keep:other);
+            const uint32_t t1=pocket_cycles(),i=pie?0:1;
+            cy[i][0]=serp.t_rot-t0;cy[i][1]=t1-serp.t_rot;cy[i][2]=serp.t_cull1-serp.t_rot;
+            if(!r){serp.first_cy[i]+=t1-t0;serp.first_n[i]++;}
+            if(pie!=view.pie)serp.shadow_acc+=t1-t0;
         }
-        for(unsigned j=1;j<course->ends;j++)
-            if(!ou(j-1u,25.5,30,view.zf))course->vc[course->in_view++]=(uint8_t)(j-1u);
-    }else course->vc[course->in_view++]=0;
+        for(int i=0;i<2;i++){serp.rot_cy[i]+=cy[i][0];serp.cull_cy[i]+=cy[i][1];serp.cull1_cy[i]+=cy[i][2];}
+        serp.culls+=c->npre;
+        for(unsigned i=0;i<c->npre;i++)serp.cull_diff+=(uint32_t)__builtin_popcount(keep[i]^other[i]);
+#elif defined(POCKET_DERBY_SER_PROBE)
+        const uint32_t t0=pocket_cycles();
+        frame_culls(false,keep);
+        const uint32_t t1=pocket_cycles();
+        serp.rot_cy[1]+=serp.t_rot-t0;serp.cull_cy[1]+=t1-serp.t_rot;serp.cull1_cy[1]+=serp.t_cull1-serp.t_rot;
+        serp.culls+=c->npre;
+#else
+        frame_culls(view.pie,keep);
+#endif
+        for(unsigned i=0;i<c->npre;i++)c->pre[i].keep=keep[i];
+        c->qvc=keep[0];
+    }else c->qvc=1;
     view.set=true;
     return JS_UNDEFINED;
 }
@@ -379,80 +724,168 @@ static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 #endif
 /* ser(h, w, s, g0, L, a, b): ser(n, w, s, g0, L, zf, a, b) of derby_pan.js,
  * zf from view(). b omitted: the turf (t0, t1). */
+/* SP(k): r5sim only (-DR5SIM_DERBY_PROF=1), cycles since the last mark into
+ * part k of a call (docs/apps/derby-ser-cost.md sec.2); SC(k) counts. The
+ * running mark is global: derby_ser_int.c marks the integer chords too. */
+#ifdef R5SIM_DERBY_PROF
+uint32_t derby_ser_cy[9],derby_sp_t;
+#define SP(k) do{const uint32_t _t=pocket_cycles();derby_ser_cy[k]+=_t-derby_sp_t;derby_sp_t=_t;}while(0)
+#else
+#define SP(k) do{}while(0)
+#endif
+
+/* ---- The series (derby_ser_int.c). A plan takes integer inputs only in the
+ * Q formats derby_ser_chord_q writes (checked once a handle: handles are not
+ * reused within a session, and reset() forgets them). */
+static bool plan_q(uint32_t h,const uint8_t q[8]){
+    if(!h)return true;
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(pocket_proc_hook_dry)return true;          /* the harness's fuzz: handles not registered */
+#endif
+    for(unsigned i=0;i<sizeof course->plan_ok/sizeof course->plan_ok[0];i++)if(course->plan_ok[i].h==h)return course->plan_ok[i].q==q;
+    const ksn_shiki_plan *pl=pocket_proc_shiki_plan(h);
+    if(!pl)return false;
+    const bool ok=pl->inputs==8&&!memcmp(pl->input_q,q,8);
+    course->plan_ok[course->plan_ok_next].h=h;course->plan_ok[course->plan_ok_next].q=ok?q:NULL;
+    course->plan_ok_next=(course->plan_ok_next+1u)%(sizeof course->plan_ok/sizeof course->plan_ok[0]);
+    return ok;
+}
+/* The series (w, s, g0)'s chord table, made on first use. */
+static derby_chord_q *series_rows(int32_t w,int32_t s,int32_t g0){
+    derby_course *c=course;
+    unsigned at=0;
+    for(unsigned i=0;i<DERBY_Q_SLOTS;i++){
+        if(c->slot[i]&&c->key[i][0]==w&&c->key[i][1]==s&&c->key[i][2]==g0){c->used[i]=++c->clock;return c->slot[i];}
+        if(!c->slot[i]||c->used[i]<c->used[at])at=i;
+    }
+    if(!c->slot[at]&&!(c->slot[at]=malloc((c->ends-1u)*sizeof(derby_chord_q)))){SERP(serp.fb[FB_MALLOC]++);return NULL;}
+    c->used[at]=0;
+    SERP(serp.tables++);
+    if(!derby_ser_table(c->slot[at],c->qch,c->ends,w,s,g0,pose_of,c)){
+        SERP(serp.fb[FB_TABLE]++);
+        free(c->slot[at]);c->slot[at]=NULL;return NULL;
+    }
+    c->key[at][0]=w;c->key[at][1]=s;c->key[at][2]=g0;c->used[at]=++c->clock;
+    return c->slot[at];
+}
+typedef struct {JSContext *ctx;const derby_course *c;} ser_emit;
+#ifdef POCKET_DERBY_SER_PROBE
+/* The probe's draws inside ser() by plan (docs/kasane/shiki-draw-entry.md):
+ * 0 the series' own plan (prail: rails and stand faces, pt: turf), 1 hl
+ * (the stand tiers), 2 crowd. Per class: draws, the whole call's cycles,
+ * the engine's (pocket_shiki_turn's engine_cy: the vm reset and the plan's
+ * code), Shiki steps, retired instructions and instruction-fetch stalls;
+ * and the LINE_PATTERN calls and their cycles (ksn_shiki_curve_*[1], the
+ * crowd's rows). One DERBY_SERDRAW line after each DERBY_SER line. The
+ * call is timed once, for DERBY_SER's draw_* as well (SERP_DRAW's). */
+#include "ui/kasane/ksn_shiki_jit.h"
+static struct {uint32_t n[3],cy[3],eng[3],steps[3],insn[3],ist[3],pat_n,pat_cy;} serd;
+static JSValue serd_draw(const ser_emit *e,uint32_t h,const int32_t in[8]){
+    const unsigned k=h&&h==view.hl?1u:h&&h==view.crowd?2u:0u;
+    pocket_shiki_turn a,b;
+    pocket_shiki_turn_peek(&a);
+    const uint32_t pn=ksn_shiki_curve_n[1],pcy=ksn_shiki_curve_cy[1];
+    uint32_t i0,s0,i1,s1;
+    serp_pm(&i0,&s0);
+    const uint32_t t0=pocket_cycles();
+    const JSValue r=pocket_proc_draw_fixed(e->ctx,h,in,8,0);
+    const uint32_t t1=pocket_cycles();
+    serp_pm(&i1,&s1);
+    pocket_shiki_turn_peek(&b);
+    if(serp.in_ser){
+        serp.draw_acc+=t1-t0;serp.draw_n++;serp.draw_insn_acc+=i1-i0;serp.draw_ist_acc+=s1-s0;
+        serd.n[k]++;serd.cy[k]+=t1-t0;serd.eng[k]+=b.engine_cy-a.engine_cy;serd.steps[k]+=b.steps-a.steps;
+        serd.insn[k]+=i1-i0;serd.ist[k]+=s1-s0;
+        serd.pat_n+=ksn_shiki_curve_n[1]-pn;serd.pat_cy+=ksn_shiki_curve_cy[1]-pcy;
+    }
+    return r;
+}
+static void serd_log(unsigned frames){
+    /* Per panning frame, as DERBY_SER's: n=rails+turf/hl/crowd draws. */
+    const unsigned f=frames?frames:1u;
+    PROBE_PRINT("DERBY_SERDRAW frames=%u n=%u/%u/%u cy=%u/%u/%u eng=%u/%u/%u steps=%u/%u/%u "
+                "insn=%u/%u/%u ist=%u/%u/%u pat=%u/%u",f,
+                (unsigned)(serd.n[0]/f),(unsigned)(serd.n[1]/f),(unsigned)(serd.n[2]/f),
+                (unsigned)(serd.cy[0]/f),(unsigned)(serd.cy[1]/f),(unsigned)(serd.cy[2]/f),
+                (unsigned)(serd.eng[0]/f),(unsigned)(serd.eng[1]/f),(unsigned)(serd.eng[2]/f),
+                (unsigned)(serd.steps[0]/f),(unsigned)(serd.steps[1]/f),(unsigned)(serd.steps[2]/f),
+                (unsigned)(serd.insn[0]/f),(unsigned)(serd.insn[1]/f),(unsigned)(serd.insn[2]/f),
+                (unsigned)(serd.ist[0]/f),(unsigned)(serd.ist[1]/f),(unsigned)(serd.ist[2]/f),
+                (unsigned)(serd.pat_n/f),(unsigned)(serd.pat_cy/f));
+    memset(&serd,0,sizeof serd);
+}
+#define SERD_DRAW(e,h,in) serd_draw(e,h,in)
+#else
+#define SERD_DRAW(e,h,in) pocket_proc_draw_fixed((e)->ctx,h,in,8,0)
+#endif
+static int emit_q(void *user,uint32_t h,const int32_t in[8]){
+    const ser_emit *e=user;
+    if(JS_IsException(SERD_DRAW(e,h,in)))return 1;
+    return course!=e->c?2:0;
+}
+/* v within lo..hi, counted by the probe as clamp k. */
+static int32_t clampi(int32_t v,int32_t lo,int32_t hi,int k){
+    (void)k;
+    if(v>=lo&&v<=hi)return v;
+    SERP(serp.clamp[k]++);
+    return v<lo?lo:hi;
+}
 static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+#ifdef R5SIM_DERBY_PROF
+    derby_sp_t=pocket_cycles();
+#endif
     const char *op="derby.ser";
     uint32_t h;
-    double w,s,g0,L,a,b=0;
-    int32_t Li,ai;
+    int32_t L,a,w,s,g0,b=0;
     const bool turf=argc<7||JS_IsUndefined(argv[6]);
     /* w, s, g0 and b are Q16 m; a is a colour (rails, int) or, for the turf
      * (no b), a Q16 width. */
-    if(argc<6||!plan_handle(ctx,argv[0],&h)||!qn(argv[1],&w)||!qn(argv[2],&s)||
-       !qn(argv[3],&g0)||!in32(argv[4],&Li)||!in32(argv[5],&ai)||
-       (!turf&&!qn(argv[6],&b)))
+    if(argc<6||!plan_handle(ctx,argv[0],&h)||!in32(argv[1],&w)||!in32(argv[2],&s)||
+       !in32(argv[3],&g0)||!in32(argv[4],&L)||!in32(argv[5],&a)||
+       (!turf&&!in32(argv[6],&b)))
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected plan, Q16 w, s, g0, L, a and optional Q16 b");
-    L=Li;a=turf?ai/65536.0:ai;
     if(!course||!view.set)return fail(ctx,op,POCKET_ERR_BUSY,"view required");
-    const double *pc=view.pc,zf=view.zf;
-    const bool ve=course->sections!=0;
-    double P[4]={0},pg=0;
-    bool have_pg=false;
-    for(unsigned i=0;i<course->in_view;i++){
-        const unsigned j=course->vc[i];
-        if(ve&&ou(j,w,s,zf))continue;
-        const double ga=g0+js_round((course->ch[j]-g0)/s)*s,gb=g0+js_round((course->ch[j+1]-g0)/s)*s;
-        double A[4],B[4];
-        if(have_pg&&ga==pg)memcpy(A,P,sizeof A);
-        else pose(ga,w,A);
-        pg=gb;have_pg=true;
-        pose(pg,w,B);
-        memcpy(P,B,sizeof P);
-        const double dx=(B[0]-A[0])/(gb-ga),dz=(B[1]-A[1])/(gb-ga),X=A[0]+(g0-ga)*dx-pc[0],Y=A[1]+(g0-ga)*dz-pc[1],
-            Q=(X*pc[2]+Y*pc[3])/pc[4],q[2]={X*pc[3]-Y*pc[2]+120*Q,Q},u=(dx*pc[2]+dz*pc[3])/pc[4],
-            v=dx*pc[3]-dz*pc[2]+120*u;
-        double Lo=ga-g0,Hi=gb-g0;
-        lim(&Lo,&Hi,q[1]-.02,u);lim(&Lo,&Hi,zf/pc[4]-q[1],-u);lim(&Lo,&Hi,q[0]+40*q[1],v+40*u);
-        lim(&Lo,&Hi,280*q[1]-q[0],280*u-v);
-        if(!(Lo<Hi))continue;
-        double c0=a,c1=b;
-        if(turf){
-            const double l=a/sqrt(dx*dx+dz*dz),x=-dz*l,z=dx*l;
-            c1=-(x*pc[2]+z*pc[3])/pc[4];c0=x*pc[3]-z*pc[2]-120*c1;
-        }
-        const double o=u<0?-1:1,U=u*o,V=v*o,t1=o>0?Hi:-Lo;
-        double k=s,Z=sqrt(fabs(v*q[1]-q[0]*u)*s/L),n0=floor((o>0?Lo:-Hi)/s)*s,e;
-        while(Z<q[1]+t1*U&&2*k*U<.3*(q[1]+t1*U)&&k<64*s)k*=2,Z*=M_SQRT2;
-        e=ceil(t1/k)*k;
-        if(!inr(q,U,V,e))e-=k;
-        if(!inr(q,U,V,n0))n0+=s;
-        if(!(L!=0&&!isnan(L))&&(js_int32(js_round(o*e/s)+view.t)&1))e-=s;
-        for(;;){
-            Z/=M_SQRT2;
-            const double hh=k>s?ceil(js_max(U>1e-7?(js_max(Z,k*U/.3)-q[1])/U:-1e9,n0)/k)*k:n0,
-                c=js_round((e-hh)/k),z=q[1]+e*U;
-            if(c>0){
-                const double in[8]={q[0]+e*V,-V*k,-z,U*k,js_min(255,c),1/z,
-                    (L!=0&&!isnan(L))?c0:fmod(-e/s*2.39996,2*M_PI)-2*M_PI*js_round(c*.191)+1.8,c1};
-                JSValue r=draw(ctx,h,in);
-                if(JS_IsException(r))return r;
-            }
-            if(k==s)break;
-            e=js_min(e,hh);k/=2;
-        }
-        if(!turf&&b<0){
-            const double y=q[1]+Lo*u,z=q[1]+Hi*u,xa=(q[0]+Lo*v)/y,xb=(q[0]+Hi*v)/z;
-            const double in_hl[8]={xa,1/y,xb,1/z,6,-2.4,view.hl_color,21130},
-                in_crowd[8]={xa,28+4.8/y,xb,28+4.8/z,-2.4/y,-2.4/z,Lo*view.cells,Hi*view.cells};
-            JSValue r=draw(ctx,view.hl,in_hl);
-            if(JS_IsException(r))return r;
-            r=draw(ctx,view.crowd,in_crowd);
-            if(JS_IsException(r))return r;
-        }
-        /* A draw's host hook (harness only) may call course(). */
-        if(!course)break;
+    /* The integers' range (the app's calls are inside it; L = 0 was the
+     * JS's unused pattern mode). */
+    L=clampi(L,1,INT32_MAX,CL_L);
+    s=clampi(s,Q16/4,32*Q16,CL_S);
+    w=clampi(w,-125*Q16,125*Q16,CL_GW);
+    g0=clampi(g0,-10000*Q16,10000*Q16,CL_GW);
+    const bool stands=!turf&&b<0;
+    if(!plan_q(h,turf?derby_q_pt:derby_q_prail)||(stands&&(!plan_q(view.hl,derby_q_hl)||!plan_q(view.crowd,derby_q_crowd))))
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"a plan's inputs are not in the series' Q formats");
+    /* No table (the native heap, a value past the table's range): nothing drawn. */
+    const derby_chord_q *rows=series_rows(w,s,g0);
+    if(!rows)return JS_UNDEFINED;
+    SP(0);
+    const uint32_t keep=course->sections?course->qvc&keep_mask(w,s):course->qvc;
+    SP(1);
+    const derby_series_q p={.s=s,.g0=g0,.L=L,.a=a,.b=turf?0:b,.turf=turf,.hl_lines=(int32_t)view.hl_color,
+        .cells=view.cells_q,.h=h,.hl=view.hl,.crowd=view.crowd};
+    ser_emit e={ctx,course};
+#ifdef DERBY_SER_CHECK
+    derby_ser_stats *const st=&ser_stats;
+    ser_stats.last_j=-1;
+#else
+    derby_ser_stats stats={0},*const st=&stats;    /* nothing reads them on the device */
+#endif
+    SERP(serp.chords[view.pie?0:1]+=(uint32_t)__builtin_popcount(keep));
+    for(uint32_t m=keep;m;m&=m-1u){
+        const int rc=derby_ser_chord_q(&course->camq,&p,&rows[__builtin_ctz(m)],(unsigned)__builtin_ctz(m),emit_q,&e,st);
+        if(rc==1)return JS_EXCEPTION;
+        if(rc)break;
     }
     return JS_UNDEFINED;
+}
+/* mode(n): the rotation and cull from the next view(): 0 the PIE kernels, 1
+ * the scalar ones (the A/B, docs/apps/derby-ser-division.md sec.13). Returns it. */
+static JSValue js_mode(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    int32_t m;
+    if(argc<1||!in32(argv[0],&m)||m<0||m>1)return fail(ctx,"derby.mode",POCKET_ERR_INVALID_ARGUMENT,"expected 0 or 1");
+    ser_mode=m;
+    return JS_NewInt32(ctx,m);
 }
 
 /* ---- The side view and the projections, in integers (docs/apps/derby-integer.md
@@ -502,6 +935,7 @@ static JSValue js_aim(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     const double x=a[0]-q[0],z=a[1]-q[1],e=sqrt(x*x+z*z);
     double *pc=view.pc;
     pc[0]=q[0];pc[1]=q[1];pc[2]=x/e;pc[3]=z/e;pc[4]=js_min(fmax,js_max(fmin,px*e/2.4));pc[5]=e;
+    view.fr=sqrt(pc[4]*pc[4]+25600);
     cam.aimed=true;view.set=false;
     return JS_NewInt32(ctx,(int32_t)js_round(pc[4]));
 }
@@ -634,49 +1068,137 @@ static JSValue js_part(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     }
     return r;
 }
-/* lanes(xs, lz, out, pan): each runner's hip X, scale S (px a unit), ground
- * Y, all Q16 px, and its depth (Q16 m): on the side camera (side()) from xs
- * (Q16 m along) and lz (Q16 m deep); with pan, on the panning unit (aim())
- * through pose() and pj() (depth 0: behind the camera). X is held within
- * +-16,000 px. */
+/* A runner's hip X, scale S (px a unit), ground Y, all Q16 px, and its depth
+ * (Q16 m): on the side camera (side()) from x (Q16 m along) and z (Q16 m
+ * deep); with pan, on the panning unit (aim()) through pose() and pj()
+ * (depth 0: behind the camera). X is held within +-16,000 px. */
+static void lane(bool pan,int32_t x,int32_t z,int32_t o[4]){
+    int64_t X,S,Y,Z;
+    if(pan&&cam.aimed&&course){
+        double P[4],p[2];
+        pose(x/65536.0-12.5/6,z/65536.0,P);pj(P,p);
+        const double r=p[1]>0?1/p[1]:0;
+        X=(int64_t)js_round(js_max(-16000,js_min(16000,p[0]*r))*65536);
+        S=(int64_t)js_round(r/6*65536);Y=(int64_t)js_round((28+6*r)*65536);
+        Z=p[1]>.02?(int64_t)js_round(p[1]*65536):0;
+    }else{
+        const int64_t q=fdiv(cam.f*Q16,z);
+        X=cam.o+fdiv(((int64_t)x-136533-cam.x0)*q,Q16);
+        S=q/6;Y=gy(z);Z=z;
+    }
+    o[0]=(int32_t)lmax(-16000LL*Q16,lmin(16000LL*Q16,X));
+    o[1]=(int32_t)S;o[2]=(int32_t)Y;o[3]=(int32_t)lmin(INT32_MAX,Z);
+}
+/* lanes(xs, lz, out, pan): lane() for each runner, 4 a lane in out. */
 static JSValue js_lanes(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const int32_t *xs=argc>=3?i32array(ctx,argv[0],8):NULL,*lz=xs?i32array(ctx,argv[1],8):NULL;
     int32_t *out=lz?i32array(ctx,argv[2],32):NULL;
     if(!out)return fail(ctx,"derby.lanes",POCKET_ERR_INVALID_ARGUMENT,"expected Int32Array(8) x2 and Int32Array(32)");
-    for(int l=0;l<8;l++){
-        int64_t X,S,Y,Z;
-        if(argc>=4&&JS_ToBool(ctx,argv[3])&&cam.aimed&&course){
-            double P[4],p[2];
-            pose(xs[l]/65536.0-12.5/6,lz[l]/65536.0,P);pj(P,p);
-            const double r=p[1]>0?1/p[1]:0;
-            X=(int64_t)js_round(js_max(-16000,js_min(16000,p[0]*r))*65536);
-            S=(int64_t)js_round(r/6*65536);Y=(int64_t)js_round((28+6*r)*65536);
-            Z=p[1]>.02?(int64_t)js_round(p[1]*65536):0;
-        }else{
-            const int64_t p=fdiv(cam.f*Q16,lz[l]);
-            X=cam.o+fdiv(((int64_t)xs[l]-136533-cam.x0)*p,Q16);
-            S=p/6;Y=gy(lz[l]);Z=lz[l];
-        }
-        out[4*l]=(int32_t)lmax(-16000LL*Q16,lmin(16000LL*Q16,X));
-        out[4*l+1]=(int32_t)S;out[4*l+2]=(int32_t)Y;out[4*l+3]=(int32_t)lmin(INT32_MAX,Z);
-    }
+    const bool pan=argc>=4&&JS_ToBool(ctx,argv[3]);
+    for(int l=0;l<8;l++)lane(pan,xs[l],lz[l],out+4*l);
     return JS_UNDEFINED;
 }
-/* head(xs, lz, out): HEAD ON, a still camera 12 m past the line, 2.2 m up,
- * looking back: each horse's x, ground y and px a unit (Q16; out 3 a lane). */
+/* HEAD ON, a still camera 12 m past the line, 2.2 m up, looking back: a
+ * horse's x, ground y and px a unit (Q16). */
+static void head(int32_t x,int32_t z,int32_t o[3]){
+    const int64_t d=lmax(Q16/16,1012LL*Q16-x),q=fdiv(400LL*Q16*Q16,d);
+    o[0]=(int32_t)(120*Q16+fdiv(((int64_t)z-1081344)*q,Q16));
+    o[1]=(int32_t)(50*Q16+fdiv(q*144179,Q16));
+    o[2]=(int32_t)(q/6);
+}
+/* head(xs, lz, out): head() for each horse, 3 a lane in out. */
 static JSValue js_head(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const int32_t *xs=argc>=3?i32array(ctx,argv[0],8):NULL,*lz=xs?i32array(ctx,argv[1],8):NULL;
     int32_t *out=lz?i32array(ctx,argv[2],24):NULL;
     if(!out)return fail(ctx,"derby.head",POCKET_ERR_INVALID_ARGUMENT,"expected Int32Array(8) x2 and Int32Array(24)");
-    for(int l=0;l<8;l++){
-        const int64_t z=lmax(Q16/16,1012LL*Q16-xs[l]),q=fdiv(400LL*Q16*Q16,z);
-        out[3*l]=(int32_t)(120*Q16+fdiv(((int64_t)lz[l]-1081344)*q,Q16));
-        out[3*l+1]=(int32_t)(50*Q16+fdiv(q*144179,Q16));
-        out[3*l+2]=(int32_t)(q/6);
-    }
+    for(int l=0;l<8;l++)head(xs[l],lz[l],out+3*l);
     return JS_UNDEFINED;
+}
+/* runners(xs, lz, order, co, ha, hb, mode, close, mask, from): the runners'
+ * draws, which derby_view.js made in JS until P4b (docs/apps/derby-runners-native.md;
+ * the JS path was retired with the A/B's chunk). order is the JS array of the 8
+ * lanes (zo, or ro for HEAD ON), co an Int32Array of the coats (0..7) and
+ * silks (8..15). Each runner drawn is two Shiki draws with integer inputs
+ * (as drawMany's Int32Array: no conversion), ha then hb, the far one first:
+ *   mode 0, the side camera: lanes in order from from, those in mask; ha legs
+ *     (X, S, Y, d, coat, 0, 0), hb run (..., silk, silk ^ 0x8410), d = x +
+ *     67797 l. Within the screen's face (side()'s K) a runner wholly on it,
+ *     else X within -160..400 px. The close-up lane is not drawn: the call
+ *     returns its place in order (the JS draws it and calls again from the
+ *     next);
+ *   mode 1, the panning unit: order sorted far to near first (stably, as the
+ *     JS sort was, and written back: the next frame's sort starts from it),
+ *     then every lane in front of the camera with X within -160..400 px;
+ *   mode 2, HEAD ON: order from its end, every lane: ha frl, hb frb (x, y, s,
+ *     d, coat, silk).
+ * A handle that is 0 draws nothing (the JS's live[n] not loaded). Returns -1,
+ * or the close-up lane's place. A draw that fails throws as drawMany does. */
+static JSValue js_runners(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="derby.runners";
+    const int32_t *xs=argc>=10?i32array(ctx,argv[0],8):NULL,*lz=xs?i32array(ctx,argv[1],8):NULL,
+        *co=lz?i32array(ctx,argv[3],16):NULL;
+    uint32_t ha=0,hb=0;
+    int32_t mode,close,mask,from,ord[8];
+    if(!co||!plan_handle(ctx,argv[4],&ha)||!plan_handle(ctx,argv[5],&hb)||!in32(argv[6],&mode)||mode<0||mode>2||
+       !in32(argv[7],&close)||!in32(argv[8],&mask)||!in32(argv[9],&from)||from<0||from>8)
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected Int32Array(8) x2, an order, Int32Array(16), two plans and 4 ints");
+    for(int i=0;i<8;i++){
+        JSValue v=JS_GetPropertyUint32(ctx,argv[2],(uint32_t)i);
+        const bool ok=in32(v,&ord[i])&&ord[i]>=0&&ord[i]<8;
+        JS_FreeValue(ctx,v);
+        if(!ok)return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"order: the 8 lanes");
+    }
+    int32_t p[8][4];
+    if(mode<2)for(int l=0;l<8;l++)lane(mode==1,xs[l],lz[l],p[l]);
+    if(mode==1){
+        /* zo.sort((a, b) => Z[b] - Z[a]): stable, so by insertion. */
+        int32_t s[8];
+        memcpy(s,ord,sizeof s);
+        for(int i=1;i<8;i++){
+            const int32_t k=s[i];
+            int j=i;
+            for(;j>0&&p[s[j-1]][3]<p[k][3];j--)s[j]=s[j-1];
+            s[j]=k;
+        }
+        for(int i=0;i<8;i++)if(s[i]!=ord[i]){
+            ord[i]=s[i];
+            if(JS_SetPropertyUint32(ctx,argv[2],(uint32_t)i,JS_NewInt32(ctx,s[i]))<0)return JS_EXCEPTION;
+        }
+    }
+    unsigned k=0;
+    for(int i=from;i<8;i++){
+        const int l=ord[mode==2?7-i:i];
+        int32_t in[7];
+        const int32_t d=(int32_t)((int64_t)xs[l]+67797LL*l),coat=co[l],silk=co[8+l];
+        unsigned n=7;
+        if(mode==2){
+            int32_t h[3];
+            head(xs[l],lz[l],h);
+            in[0]=h[0];in[1]=h[1];in[2]=h[2];in[3]=d;in[4]=coat;in[5]=silk;n=6;
+        }else{
+            const int64_t X=p[l][0],S=p[l][1];
+            if(mode==1){
+                if(!p[l][3]||!(X>-160LL*Q16&&X<400LL*Q16))continue;
+            }else{
+                if(!(mask>>l&1))continue;
+                if(l==close)return JS_NewInt32(ctx,i);
+                /* 5 * s >> 1 is ToInt32 of the double, then the shift. */
+                const int64_t a=(int32_t)(uint32_t)(uint64_t)(5*S)>>1,b=(int32_t)(uint32_t)(uint64_t)(25*S)>>1;
+                if(!(cam.K?X-a>=cam.e&&X+b<=cam.R:X>-160LL*Q16&&X<400LL*Q16))continue;
+            }
+            in[0]=(int32_t)X;in[1]=(int32_t)S;in[2]=p[l][2];in[3]=d;in[4]=coat;in[5]=0;in[6]=0;
+        }
+        if(!ha||!hb)continue;
+        JSValue r=pocket_proc_draw_fixed(ctx,ha,in,n,k++);
+        if(JS_IsException(r))return r;
+        if(mode<2){in[5]=silk;in[6]=silk^0x8410;}
+        r=pocket_proc_draw_fixed(ctx,hb,in,n,k++);
+        if(JS_IsException(r))return r;
+    }
+    return JS_NewInt32(ctx,-1);
 }
 /* screen(out, pan, x, d, w, b, t): the big screen (centre x, depth d, half
  * width w, bottom b and top t, m) on the side camera (or with pan, the
@@ -707,6 +1229,101 @@ static JSValue js_screen(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return JS_NewInt32(ctx,1);
 }
 
+#ifdef POCKET_DERBY_SER_PROBE
+/* view() and ser() timed whole (the probe above), the shadow path's cycles
+ * taken out. */
+static JSValue js_view_serp(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    serp.shadow_acc=0;
+    const uint32_t t=pocket_cycles();
+    const JSValue r=js_view(ctx,self,argc,argv);
+    const int k=view.pie?0:1;
+    serp.view_cy[k]+=pocket_cycles()-t-serp.shadow_acc;serp.views[k]++;
+    return r;
+}
+static JSValue js_ser_serp(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    serp.draw_acc=serp.draw_n=serp.draw_insn_acc=serp.draw_ist_acc=serp.shadow_acc=0;serp.in_ser=true;
+    uint32_t i0,s0,i1,s1;
+    serp_pm(&i0,&s0);
+    const uint32_t t=pocket_cycles();
+    const JSValue r=js_ser(ctx,self,argc,argv);
+    const uint32_t dt=pocket_cycles()-t-serp.shadow_acc;
+    serp_pm(&i1,&s1);
+    serp.in_ser=false;
+    const int k=view.pie?0:1;
+    serp.calls[k]++;serp.ser_cy[k]+=dt;serp.draw_cy[k]+=serp.draw_acc;serp.draws[k]+=serp.draw_n;
+    serp.insn[k]+=i1-i0;serp.ist[k]+=s1-s0;serp.draw_insn[k]+=serp.draw_insn_acc;serp.draw_ist[k]+=serp.draw_ist_acc;
+    return r;
+}
+#define js_view js_view_serp
+#define js_ser js_ser_serp
+void pocket_derby_ser_probe_log(unsigned frames){
+    if(serp.views[0]+serp.views[1]+serp.calls[0]+serp.calls[1]){
+        /* Per panning frame (a view()), not per tick: a frame() the turn
+         * budget parks runs on in a continuation tick (ticks= counts ticks).
+         * X/Y: PIE/scalar. ser_cy, draw_cy, view_cy, insn, ist: the frames
+         * on that path; rot_cy, cull_cy: every frame, both paths (the other
+         * one a shadow); culls: cull calls, cull_diff: chords the two paths
+         * keep differently (their margins differ), wide: chords culled in
+         * int64 past the lanes' range. Since sec.14 view() runs both
+         * paths' rotation and culls in an order flipped every frame;
+         * cull1_cy: the first (cold) cull of view()'s batch, inside cull_cy;
+         * pre: ser() calls whose mask the batch had / culled on the spot;
+         * first_cy: a path's rotation and batch on the frames it ran first
+         * (none of the other path's shared code in the cache, as in a
+         * product image, where it runs alone). */
+        const unsigned v=serp.views[0]+serp.views[1],f=v?v:1u,f0=serp.views[0]?serp.views[0]:1u,
+            f1=serp.views[1]?serp.views[1]:1u;
+        PROBE_PRINT("DERBY_SER mode=%s ticks=%u views=%u/%u ser=%u/%u clamp=L:%u,s:%u,gw:%u,cam:%u "
+                    "fb=malloc:%u,table:%u tables=%u ser_cy=%u/%u draw_cy=%u/%u view_cy=%u/%u "
+                    "rot_cy=%u/%u cull_cy=%u/%u culls=%u cull_diff=%u wide=%u/%u draws=%u/%u chords=%u/%u "
+                    "insn=%u/%u draw_insn=%u/%u ist=%u/%u draw_ist=%u/%u cull1_cy=%u/%u pre=%u/%u first_cy=%u/%u",
+                    ser_mode?"SCALAR":"PIE",frames,(unsigned)serp.views[0],(unsigned)serp.views[1],
+                    (unsigned)serp.calls[0],(unsigned)serp.calls[1],(unsigned)serp.clamp[CL_L],(unsigned)serp.clamp[CL_S],
+                    (unsigned)serp.clamp[CL_GW],(unsigned)serp.clamp[CL_CAM],(unsigned)serp.fb[FB_MALLOC],
+                    (unsigned)serp.fb[FB_TABLE],(unsigned)serp.tables,
+                    (unsigned)(serp.ser_cy[0]/f0),(unsigned)(serp.ser_cy[1]/f1),(unsigned)(serp.draw_cy[0]/f0),
+                    (unsigned)(serp.draw_cy[1]/f1),(unsigned)(serp.view_cy[0]/f0),(unsigned)(serp.view_cy[1]/f1),
+                    (unsigned)(serp.rot_cy[0]/f),(unsigned)(serp.rot_cy[1]/f),(unsigned)(serp.cull_cy[0]/f),
+                    (unsigned)(serp.cull_cy[1]/f),(unsigned)serp.culls,(unsigned)serp.cull_diff,
+                    (unsigned)serp.wide[0],(unsigned)serp.wide[1],
+                    (unsigned)serp.draws[0],(unsigned)serp.draws[1],(unsigned)serp.chords[0],(unsigned)serp.chords[1],
+                    (unsigned)(serp.insn[0]/f0),(unsigned)(serp.insn[1]/f1),(unsigned)(serp.draw_insn[0]/f0),
+                    (unsigned)(serp.draw_insn[1]/f1),(unsigned)(serp.ist[0]/f0),(unsigned)(serp.ist[1]/f1),
+                    (unsigned)(serp.draw_ist[0]/f0),(unsigned)(serp.draw_ist[1]/f1),
+                    (unsigned)(serp.cull1_cy[0]/f),(unsigned)(serp.cull1_cy[1]/f),(unsigned)serp.pre_hit,(unsigned)serp.pre_miss,
+                    (unsigned)(serp.first_n[0]?serp.first_cy[0]/serp.first_n[0]:0),(unsigned)(serp.first_n[1]?serp.first_cy[1]/serp.first_n[1]:0));
+        serd_log(v);
+    }
+    memset(&serp,0,sizeof serp);
+}
+#endif
+#ifdef R5SIM_DERBY_PROF
+/* r5sim only (tools/r5sim, -DR5SIM_DERBY_PROF=1): cycles in each native
+ * function and the Shiki draws' cycles inside it; the turn's Shiki carry
+ * (the draws taken out here, for r5sim's per-turn total). */
+uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12],derby_prof_eng[12];
+pocket_shiki_turn derby_prof_carry;
+#define PROF(i,f) static JSValue f##_p(JSContext *c,JSValueConst s,int a,JSValueConst *v){ \
+    pocket_shiki_turn x,y;pocket_shiki_turn_take(&x); \
+    derby_prof_carry.draws+=x.draws;derby_prof_carry.total_cy+=x.total_cy;derby_prof_carry.engine_cy+=x.engine_cy; \
+    const uint32_t t=pocket_cycles();JSValue r=f(c,s,a,v);derby_prof_cy[i]+=pocket_cycles()-t;derby_prof_n[i]++; \
+    pocket_shiki_turn_take(&y);derby_prof_shk[i]+=y.total_cy;derby_prof_draws[i]+=y.draws;derby_prof_eng[i]+=y.engine_cy; \
+    derby_prof_carry.draws+=y.draws;derby_prof_carry.total_cy+=y.total_cy;derby_prof_carry.engine_cy+=y.engine_cy; \
+    return r;}
+PROF(0,js_view) PROF(1,js_ser) PROF(2,js_side) PROF(3,js_aim) PROF(4,js_wide) PROF(5,js_part)
+PROF(6,js_lanes) PROF(7,js_head) PROF(8,js_runners) PROF(9,js_screen) PROF(10,js_course)
+#define js_view js_view_p
+#define js_ser js_ser_p
+#define js_side js_side_p
+#define js_aim js_aim_p
+#define js_wide js_wide_p
+#define js_part js_part_p
+#define js_lanes js_lanes_p
+#define js_head js_head_p
+#define js_runners js_runners_p
+#define js_screen js_screen_p
+#define js_course js_course_p
+#endif
 esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
@@ -716,12 +1333,14 @@ esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
         JS_CFUNC_DEF("project",4,js_project),
 #endif
         JS_CFUNC_DEF("ser",7,js_ser),
+        JS_CFUNC_DEF("mode",1,js_mode),
         JS_CFUNC_DEF("side",6,js_side),
         JS_CFUNC_DEF("aim",6,js_aim),
         JS_CFUNC_DEF("wide",3,js_wide),
         JS_CFUNC_DEF("part",8,js_part),
         JS_CFUNC_DEF("lanes",4,js_lanes),
         JS_CFUNC_DEF("head",3,js_head),
+        JS_CFUNC_DEF("runners",10,js_runners),
         JS_CFUNC_DEF("screen",7,js_screen),
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?
@@ -741,7 +1360,7 @@ esp_err_t pocket_derby_install(JSContext *ctx,void *unused){
     return err==ESP_OK?pocket_api_lazy(ctx,"derby",pocket_derby_fill,NULL):err;
 }
 void pocket_derby_reset(void){
-    free(course);
+    free_course(course);
     course=NULL;
 #ifdef POCKET_DERBY_PROJECT_BATCH
     ++course_generation;++view_generation;
@@ -751,4 +1370,8 @@ void pocket_derby_reset(void){
 #endif
     memset(&view,0,sizeof view);
     memset(&cam,0,sizeof cam);
+    /* The path back to its default: the next session's JS starts its A/B
+     * flag at PIE (derby_view.js AB = 0), and a mode(1) left by this one
+     * would run it on the scalar path under the PIE label. */
+    ser_mode=0;
 }

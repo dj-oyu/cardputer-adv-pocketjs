@@ -65,6 +65,11 @@ ksn_result pocket_kasane_update_notice(const sys_notice *,uint16_t variant);
 bool pocket_kasane_notice_composited(void);
 bool pocket_kasane_system_pending(void);
 bool pocket_kasane_has_submission(void);
+#ifdef POCKET_KASANE_TEST_HOOKS
+/* Host tests only: the removed kasane.poll()/cancel() as C (see the .inc). */
+ksn_submission pocket_kasane_test_poll(void);
+bool pocket_kasane_test_cancel(uint32_t ticket);
+#endif
 /* Bound the owner wait by the next native-source expiry. A due/failed source
  * is retried by the regular frame, so it cannot create a zero-tick spin. */
 uint32_t pocket_kasane_source_wait_ticks(uint64_t now_us,uint32_t cap,uint32_t hz);

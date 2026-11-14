@@ -175,6 +175,53 @@ menu "Pocket VM (diagnostics)"
             Build it in a directory of its own with
             sdkconfig.qjspgo.defaults layered on sdkconfig.defaults.
 
+    config POCKET_VM_QJS_HOTCOLD
+        bool "Lay QuickJS's hot blocks out together (hot/cold split)"
+        default y
+        depends on !POCKET_VM_QJS_PGO
+        help
+            Reorders the basic blocks of quickjs.c's hot functions on the
+            assembly GCC writes (tools/qjs_hotcold, docs/vm/qjs-hotcold.md):
+            the blocks a JS turn runs, of all functions, sit back to back,
+            and the blocks it never runs go behind them. QuickJS's source
+            is not touched, and no instruction changes except the branches
+            and jumps that connect the moved blocks.
+
+            The profile (tools/qjs_hotcold/profile.json) comes from STRESS,
+            DERBY and LCD CATCH in QEMU. Measured on the device (TURNPERF,
+            same retired instructions): I-cache stall per turn -18 to -23%,
+            JS turn cycles -7% (STRESS) and -9% (DERBY race), the same with
+            the hot code shifted by 20 bytes. Costs 3,352 B of flash and no
+            DRAM. A function whose object code no longer matches the profile
+            is left as it was (the build prints how many); retrain with
+            tools/qjs_hotcold/train.sh after changing quickjs.c or the
+            compiler. Needs Python at compile time (ESP-IDF's).
+
+    config POCKET_NATIVE_HOTCOLD
+        bool "Lay the hot blocks of main's turn-path files out together"
+        default y
+        help
+            The hot/cold layout of POCKET_VM_QJS_HOTCOLD, on the main/ files
+            a JS turn runs most of (Kasane, Shiki, pocket_derby;
+            POCKET_NATIVE_HOTCOLD_FILES in tools/qjs_hotcold/hotcold.cmake),
+            with tools/qjs_hotcold/profile_native.json (TARGET=native
+            tools/qjs_hotcold/train.sh). Each file gets one section of its
+            own, hot blocks first. Measured on the device (TURNPERF, same
+            retired instructions): I-cache stall per turn -6% (STRESS) and
+            -8% (DERBY race), JS turn cycles -1.9% and -2.8%, the same with
+            the hot code shifted by 20 bytes. Costs about 0.9 KB of flash,
+            no DRAM. docs/vm/qjs-hotcold.md sec.13.
+
+    config POCKET_KASANE_AB
+        bool "Kasane render A/B: rotate the render path's switches per window"
+        default n
+        help
+            The same-binary A/B of main/app_session.c (KASANE_AB): every
+            30-frame window turns one of the render path's runtime switches off
+            (the rest on) and logs "AB arm=..." with render_ms and send_ms, so
+            each switch is compared against all-on windows of the same scene.
+            Diagnostic only; the broker builds it as sdkconfig.variant.kasane_ab.
+
     config POCKET_DISP_TASK
         bool "Display task: present frames from a task of its own (two-core P1)"
         default n
@@ -369,6 +416,15 @@ menu "Pocket VM (diagnostics)"
             KASANE_PAINT window (30 frames), logging "ICACHE_AB win=... mode=..."
             after each window, so turn_ms can be compared within one image.
 
+    config POCKET_FIXED_RANDOM_SEED
+        bool "Fixed pocket.random seed (measurement builds)"
+        default n
+        help
+            pocket.random's hardware seed becomes the constant 0x5eed1234, so
+            two builds play the same races (DERBY) and the same STRESS cycle
+            and their TURNPERF windows compare. Measurement only; the broker
+            builds it with POCKET_VM_TURNPERF as sdkconfig.variant.turnperf.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n
@@ -402,6 +458,98 @@ menu "Pocket VM (diagnostics)"
             Turn it off to get the builtins built in RAM again.
 
             Regenerate the header after any change to the builtins.
+
+    config POCKET_SHIKI_DEBUG
+        bool "Shiki diagnostics: pocket.shikiDebug and the six test/bench apps"
+        default n
+        help
+            Builds main/pocket/pocket_shiki.c (pocket.shikiDebug, the test-only
+            surface of the Shiki engine) and main/ui/kasane/ksn_shiki_bench.c,
+            and embeds the six diagnostic apps that need them or the Shiki
+            self-check: apps/shikitest/{shiki_test,shiki_data_test,
+            shiki_api_test,cycle_bench,draw_cost}.js and apps/meshbench/
+            mesh_bench.js, with their app_registry rows and the host-launch
+            (native_apps) rows. None of them is on the home menu; the USB
+            broker starts them. The home menu does not change either way.
+
+            Off by default: the product image carries none of it (about 47 KB
+            of flash, estimate from the map of 4840504, docs/kasane/
+            api-reorg.md sec.3.6). Turn it on for the on-device differential
+            test, cycle/draw-cost probes and the mesh bench
+            (docs/kasane/shiki-spec.md sec.10, apps/shikitest/README.md).
+
+    config POCKET_DERBY_SER_PIE
+        bool "DERBY ser(): chord-end rotation and chord cull in PIE"
+        default y
+        help
+            Builds main/pocket/derby_ser_pie.c: the int16 chord-end rotation
+            and chord cull (ou()) as PIE kernels next to their scalar integer
+            reference (docs/apps/derby-ser-division.md sec.10, sec.13).
+            pocket.derby's view() rotates the oval's chord ends with it once a
+            frame and culls every series' chords with it in one batch
+            (sec.14); chords whose ends are
+            past the kernel's range (+-2,047 m from the camera) go to the
+            scalar int64 cull. The up key flips to the scalar integer
+            rotation and cull of derby_ser_int.c (same binary A/B, logged
+            "DERBY AB PIE" / "DERBY AB SCALAR"). Off: only the scalar path,
+            and the file compiles to nothing.
+
+    config POCKET_DERBY_SER_PIE_IRAM
+        bool "Measurement: DERBY's per-frame PIE functions in IRAM"
+        depends on POCKET_DERBY_SER_PIE
+        default n
+        help
+            Places dsp_set_camera, dsp_rotate_pie, dsp_cull_frame,
+            dsp_cull_series and dsp_cull_pie (main/pocket/derby_ser_pie.c) in
+            IRAM instead of flash, so that view()'s rotation and culls (one
+            batch a frame, docs/apps/derby-ser-division.md sec.14) pay no
+            flash cache misses for them. IRAM is the same pool as DRAM:
+            +1,092 B of DIRAM measured, which every app loses. Off by
+            default.
+
+    config POCKET_DERBY_SER_PIE_SELFTEST
+        bool "Measurement: the DERBY PIE kernels' self-test at every DERBY start"
+        depends on POCKET_DERBY_SER_PIE
+        default n
+        help
+            When DERBY WATCH (local.derby) gets pocket.derby, the session runs
+            the kernels' self-test and microbenchmark once, before the app's
+            source is evaluated (about 0.2 s), and logs one line:
+            "SERPIE ok=<n> mismatch=<n> scalar_cy=<n> pie_cy=<n> ..."
+            (docs/apps/derby-ser-division.md sec.10.4). Its test copies are
+            about 1.5 KB of .bss (every app's heap), so the product image
+            leaves it out. Use a build directory with its own sdkconfig
+            (-D SDKCONFIG=<dir>/sdkconfig).
+
+    config POCKET_DERBY_SER_PROBE
+        bool "Measurement: DERBY ser() path and cycles, one DERBY_SER line a KASANE_PAINT window"
+        default n
+        help
+            Counts, in main/pocket/pocket_derby.c, which path view() and ser()
+            took (PIE or scalar: the up key's A/B), the inputs clamped into the
+            integer series' range (L, s, w/g0, the camera), the chord tables
+            that could not be made (malloc, range), and their cycles with the
+            Shiki draws inside ser() apart. The rotation and the cull run on
+            both paths every frame (the other one as a shadow, its cycles
+            taken out of ser()'s), so one window gives both paths' cycles.
+            After every KASANE_PAINT line it logs "DERBY_SER mode=PIE|SCALAR
+            ticks=30 views=<pie>/<scalar> ... rot_cy=<pie>/<scalar>
+            cull_cy=<pie>/<scalar> ..." (docs/apps/derby-ser-division.md
+            sec.12, sec.13). Off by default: the product image is unchanged.
+            Also counts the core's retired instructions and instruction-fetch
+            stall cycles inside ser() (performance counters PM0/PM1; do not
+            combine with POCKET_VM_TURNPERF, which arms the same two counters).
+
+    config POCKET_DERBY_SER_IRAM
+        bool "Measurement: DERBY's integer ser() functions in IRAM"
+        default n
+        help
+            Places the integer series' per-frame functions
+            (main/pocket/derby_ser_int.c: derby_ser_chord_q, the cull, the
+            rotation and their helpers) in IRAM instead of flash, to tell
+            the flash cache's share of their cost (docs/apps/derby-ser-division.md
+            sec.12). +6,552 B of DIRAM measured (IRAM is the same pool as
+            DRAM): every app loses that much heap. Off by default.
 
     config POCKET_SHIKI_MEMSTAT
         bool "Count the native allocations of the line/grid surfaces (diagnostic)"

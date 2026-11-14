@@ -77,7 +77,7 @@ void pocket_video_reset(void){}
 bool pocket_video_pending(void){return false;}
 void pocket_video_present_result(ksn_result result){(void)result;}
 /* grid.fold/index/view load this lazily; the app never calls them. */
-const char grid_fold_js_start[] asm("_binary_grid_fold_js_start") = "globalThis.gridFold={};";
+const char grid_fold_js_start[] asm("_binary_grid_fold_js_start") = "({});";
 const char grid_fold_js_end[] asm("_binary_grid_fold_js_end") = "";
 
 static JSRuntime *rt;

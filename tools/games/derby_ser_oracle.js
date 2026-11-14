@@ -14,6 +14,12 @@
 // camera (aim()); the oracle captures those calls and keeps its own doubles
 // (CH, the sections, pc), converted exactly as the C converts them, and its
 // own pose() (the vm/main JS).
+//
+// Since the integer ser() (docs/apps/derby-ser-division.md) this JS is the
+// geometry's reference: every call is compared by the points on the screen
+// within a tolerance (__sercmp gets turf and the stands' handles to know each
+// plan). The C's double series is gone (sec.13) and the C clamps L to 1 or
+// more, so the JS is given that L too (L = 0 was a pattern mode no app uses).
 (function () {
   const S = pocket.derby, NV = S.view, NS = S.ser, NC = S.course, NA = S.aim, q16 = v => v / 65536,
     flo = M.floor, rnd = M.round, PI = M.PI;
@@ -110,10 +116,10 @@
   };
   S.ser = function (h, w, s, g0, L, a, b) {
     rec = [];
-    ser(h, b === undefined, q16(w), q16(s), q16(g0), L, ZF, b === undefined ? q16(a) : a, b === undefined ? b : q16(b));
+    ser(h, b === undefined, q16(w), q16(s), q16(g0), mx(L, 1), ZF, b === undefined ? q16(a) : a, b === undefined ? b : q16(b)); //* L
     __serbegin();
     const r = NS.apply(S, arguments);
-    __sercmp(rec, fuzz);
+    __sercmp(rec, fuzz, b === undefined, HL, CR);
     return r;
   };
   // n random cases, each a course, a camera and the five series of pan() at a

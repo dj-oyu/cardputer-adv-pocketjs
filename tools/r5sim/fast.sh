@@ -9,6 +9,8 @@
 #
 # Needs the ESP-IDF environment (idf.py, esptool) and Espressif's QEMU
 # (QEMU=... to override). Prints the image's flash/IRAM sizes too.
+# R5SIM_ICOUNT=shift=2,sleep=off: every count the same from run to run
+# (tools/r5sim/reorg.sh; docs/kasane/logs/api-reorg-perf.md sec.2).
 set -euo pipefail
 D=$(realpath -m "$1"); shift
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -18,7 +20,7 @@ idf.py -C "$R/tools/r5sim" -B "$D" -DSDKCONFIG="$D/sdkconfig" "$@" build > "$D.f
 (cd "$D" && python -m esptool --chip esp32s3 merge-bin --fill-flash-size 8MB -o qemu_flash.bin @flash_args > /dev/null)
 rm -f "$D/fast-serial.txt"
 "$QEMU" -machine esp32s3 -m 4M -drive file="$D/qemu_flash.bin",if=mtd,format=raw \
-    -serial file:"$D/fast-serial.txt" -monitor none -display none -icount shift=2 &
+    -serial file:"$D/fast-serial.txt" -monitor none -display none -icount "${R5SIM_ICOUNT:-shift=2}" &
 QP=$!
 for _ in $(seq 1 "${FAST_WAIT_TICKS:-600}"); do   # 0.5 s each
     grep -qE "R5SIM done|FAIL|Guru|abort" "$D/fast-serial.txt" 2>/dev/null && break

@@ -1,3 +1,6 @@
+/* Not built into the firmware: only the host checks in tools/kasane_contract/run.sh
+ * compile this file (it belonged to the removed KASANE_PROC_DEVICE_PROBE build).
+ * Kept in place because those checks name its path (docs/kasane/api-reorg.md sec.4.3). */
 #include "ksn_shiki_surface.h"
 #include <stdlib.h>
 #include <string.h>

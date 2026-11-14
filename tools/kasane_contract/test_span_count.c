@@ -74,6 +74,12 @@ static void repaint(const hello_line *line,uint32_t *columns,uint32_t *cells){
            line->name,spans,aligned_blocks,uniform_ink,uniform_zero,mask_blocks,mask_ink_pixels);
 }
 
+static void mark_run(void *user,int x,int y,unsigned n){
+    uint8_t (*got)[240]=user;
+    assert(n>0&&x>=0&&x+(int)n<=240&&y>=0&&y<45);
+    for(unsigned i=0;i<n;i++){assert(!got[y][x+(int)i]);got[y][x+(int)i]=1;}
+}
+
 int main(void){
     uint32_t columns,cells;
     for(unsigned i=0;i<sizeof(lines)/sizeof(lines[0]);i++){
@@ -98,5 +104,57 @@ int main(void){
     uint8_t out[64];
     assert(ksn_font_port.span(NULL,&d,255,192,0,48,out)==KSN_OK);
     assert(ksn_span_columns-before<=48);
+    /* extent(): span inks nothing outside it (the renderer walks only that
+     * part of the box, ksn_render.c g_ksn_text_extent), for every font, every
+     * reveal, ASCII, the missing-face tofu and an empty run. */
+    static const char *texts[]={"KEY PRESSES: 1234","Hello, World!","iiWW  ..",
+        "\xe3\x81\x82\xe3\x81\x84" "A","",NULL};
+    unsigned checked=0;
+    for(unsigned t=0;texts[t];t++)for(unsigned f=0;f<=KSN_DISPLAY;f++)
+        for(unsigned reveal=0;reveal<=20;reveal++){
+            ksn_draw e={.kind=KSN_TEXT,.bounds={3,5,240,40},.clip={0,0,240,135},.opacity=255,
+                .data.text={.utf8=texts[t],.bytes=strlen(texts[t]),.font=(ksn_font)f}};
+            unsigned w,h;
+            ksn_font_port.extent(NULL,&e,(uint16_t)reveal,&w,&h);
+            assert(!w==!h);
+            for(int y=0;y<45;y++)for(int x=0;x<240;x+=64){
+                unsigned count=240u-(unsigned)x;if(count>64)count=64;
+                assert(ksn_font_port.span(NULL,&e,(uint16_t)reveal,x,y,count,out)==KSN_OK);
+                for(unsigned i=0;i<count;i++){
+                    const int px=x+(int)i;
+                    const bool inside=px>=e.bounds.x0&&px<e.bounds.x0+(int)w&&
+                                      y>=e.bounds.y0&&y<e.bounds.y0+(int)h;
+                    assert(inside||!out[i]);
+                    checked++;
+                }
+            }
+        }
+    printf("  extent: %u pixels checked, no ink outside\n",checked);
+    /* runs(): exactly span's 255 pixels, each once, over rectangles that cut
+     * the run on every side (ksn_ports.h). */
+    unsigned rects=0,inked=0;
+    static const int cuts[][4]={{0,240,0,45},{3,240,5,9},{10,57,7,13},{0,64,30,40},{100,101,5,45},{60,59,0,45}};
+    for(unsigned t=0;texts[t];t++)for(unsigned f=0;f<=KSN_DISPLAY;f++)
+        for(unsigned reveal=0;reveal<=20;reveal+=reveal<4?1:4)
+            for(unsigned c=0;c<sizeof cuts/sizeof cuts[0];c++){
+                ksn_draw e={.kind=KSN_TEXT,.bounds={3,5,240,40},.clip={0,0,240,135},.opacity=255,
+                    .data.text={.utf8=texts[t],.bytes=strlen(texts[t]),.font=(ksn_font)f}};
+                static uint8_t got[45][240];
+                memset(got,0,sizeof got);
+                ksn_font_port.runs(NULL,&e,(uint16_t)reveal,cuts[c][0],cuts[c][1],cuts[c][2],cuts[c][3],
+                                   mark_run,got);
+                for(int y=0;y<45;y++)for(int x=0;x<240;x+=64){
+                    unsigned count=240u-(unsigned)x;if(count>64)count=64;
+                    assert(ksn_font_port.span(NULL,&e,(uint16_t)reveal,x,y,count,out)==KSN_OK);
+                    for(unsigned i=0;i<count;i++){
+                        const int px=x+(int)i;
+                        const bool in=px>=cuts[c][0]&&px<cuts[c][1]&&y>=cuts[c][2]&&y<cuts[c][3];
+                        assert(got[y][px]==(in&&out[i]?1:0));
+                        inked+=got[y][px];
+                    }
+                }
+                rects++;
+            }
+    printf("  runs: %u rectangles, %u inked pixels, each exactly once and only where span inks\n",rects,inked);
     puts("span count PASS: narrow walks the cells' columns, the control walks the chunk");
 }

@@ -104,7 +104,12 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
+#include "derby_ser_pie.h"
+#endif
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
 #include "pocket_shiki.h"
+#endif
 #include "shiki_memstat.h"
 #include "shiki_heap.h"
 #include "pocket_shiki_api.h"
@@ -588,6 +593,9 @@ static void prof_accumulate(const ksn_render_prof *frame){
     prof_sum.blend_cy+=frame->blend_cy;prof_sum.blend_n+=frame->blend_n;
     prof_sum.read_cy+=frame->read_cy;prof_sum.read_n+=frame->read_n;
     prof_sum.image_cy+=frame->image_cy;prof_sum.image_n+=frame->image_n;
+    prof_sum.piece_n+=frame->piece_n;prof_sum.piece_draw_cy+=frame->piece_draw_cy;
+    prof_sum.piece_wait_cy+=frame->piece_wait_cy;prof_sum.piece_excess_cy+=frame->piece_excess_cy;
+    prof_sum.piece_first_cy+=frame->piece_first_cy;
 }
 #ifdef CONFIG_POCKET_VM_TURNPERF
 // R4 (docs/vm/turn-cpi.md): the ordinary JS turn against the core's own
@@ -1918,12 +1926,21 @@ surfaces_done:
         TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
     // pocket.derby, DERBY WATCH's series in C, the same way: only for the
     // manifest that names derby.series (docs/apps/derby-ser-native.md).
-    if(app_registry_wants(app_registry_current(),"derby.series"))
+    if(app_registry_wants(app_registry_current(),"derby.series")) {
         TRY_NOJOIN("derby",pocket_derby_install);
+#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
+        // The ser() PIE kernels' self-test and microbenchmark, at every DERBY
+        // start, before the source runs (docs/apps/derby-ser-division.md
+        // sec.10.4). About 0.2 s; measurement builds only.
+        dsp_selftest();
+#endif
+    }
     // pocket.shikiDebug, the Shiki engine for the on-device differential test
     // (apps/shikitest), the same way: only for kasane.shiki.debug.
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
     if(app_registry_wants(app_registry_current(),"kasane.shiki.debug"))
         TRY_NOJOIN("shiki-debug",pocket_shiki_debug_install);
+#endif
     // pocket.shapes, MEGADEMO's WAKE geometry in C, the same way (and for the
     // 'J' diagnostic, which runs MEGADEMO without a manifest).
     // docs/apps/megademo-shapes.md.
@@ -3098,6 +3115,9 @@ static esp_err_t present_account(ksn_result result) {
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
                 icache_ab_window();
+#ifdef POCKET_DERBY_SER_PROBE
+                pocket_derby_ser_probe_log(ticks);
+#endif
 #ifdef CONFIG_POCKET_FRAME_BREAKDOWN
                 /* What the guest holds by kind, every 8th PAINT window (~4 s at
                  * 60 fps): the native heap's free bytes and the guest's own
@@ -3271,6 +3291,9 @@ static esp_err_t present_account(ksn_result result) {
                          reach_ab_window++,g_ksn_tile_reach);
                 g_ksn_tile_reach^=1;
 #endif
+#if !defined(KASANE_AB)&&defined(CONFIG_POCKET_KASANE_AB)
+#define KASANE_AB 1
+#endif
 #ifndef KASANE_AB
 #define KASANE_AB 0
 #endif
@@ -3298,14 +3321,29 @@ static esp_err_t present_account(ksn_result result) {
                         {"row_cov",&g_ksn_row_coverage},
                         {"row_tbl",&g_ksn_row_table},
                         {"lut",&g_ksn_blend_lut},
-                        {"lut_alpha",&g_ksn_blend_lut_alpha},
+                        /* lut_alpha is not a row either: the shipped build
+                         * has it off (ksn_render.c), and a row's on is every
+                         * other window's state. */
                         {"affine",&g_ksn_group_affine},
-                        {"scale256",&g_ksn_scale256},
+                        /* scale256 is not a row: the rows' "on" is every
+                         * window's state, and its on is the coarse colour arm
+                         * the shipped build does not take (ksn_render.c). */
                         {"pie",&g_ksn_blend_pie},
                         {"tile_reach",&g_ksn_tile_reach},
                         {"tile_smooth",&g_ksn_tile_smooth},
                         {"decode1",&g_ksn_decode_once},
                         {"span_narrow",&g_ksn_span_narrow},
+                        {"text_extent",&g_ksn_text_extent},
+                        /* text_runs moves span_n and blend_n by construction
+                         * (ksn_render.h: a runs call is one span bracket with
+                         * its composite inside), so for this row they are not
+                         * a control. With it on, span_narrow's off window
+                         * reaches only text inside groups. */
+                        {"text_runs",&g_ksn_text_runs},
+                        {"plain_walk",&g_ksn_proc_plain_walk},
+                        /* box_reuse moves commit (turn_ms), not render_ms. */
+                        {"box_reuse",&g_pocket_proc_box_reuse},
+                        {"band_bits",&g_pocket_proc_band_bits},
                     };
                     const unsigned rows=sizeof(switches)/sizeof(switches[0]);
                     static unsigned ab_arm;
@@ -3324,6 +3362,18 @@ static esp_err_t present_account(ksn_result result) {
                              (unsigned)prof_sum.fill_n,(unsigned)prof_sum.span_n,
                              (unsigned)prof_sum.tile_n,(unsigned)prof_sum.blend_n,
                              (unsigned)prof_sum.read_n,painted);
+                    /* Where the frame's present time goes (ksn_render.h's
+                     * piece fields): per frame, the pieces' drawing, the CPU
+                     * waiting on the DMA, and the drawing the send did not
+                     * hide. Its own line: KASANE_PAINT's fields are a contract. */
+                    if(painted){
+                        const double per=painted*240000.0;
+                        ESP_LOGI("kasane","KASANE_PIECES arm=%u pieces=%.1f draw_ms=%.2f wait_ms=%.2f "
+                                 "excess_ms=%.2f first_ms=%.2f frames=%u",arm,
+                                 (double)prof_sum.piece_n/painted,prof_sum.piece_draw_cy/per,
+                                 prof_sum.piece_wait_cy/per,prof_sum.piece_excess_cy/per,
+                                 prof_sum.piece_first_cy/per,painted);
+                    }
                     for(unsigned r=0;r<rows;r++)*switches[r].flag=arm!=r+1;
                     ab_arm++;
                 }

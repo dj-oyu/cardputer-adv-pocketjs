@@ -1,7 +1,7 @@
 // Executable JS expressions for MACs, dependent scans and DP recurrences.
-// `expected` is computed independently of gridFold's generated instructions.
+// `expected` is computed independently of the fold frontend's generated instructions.
 (function (global) {
-  const {fold, index, view} = global.gridFold;
+  const {fold, index, view} = global.pocket.kasane.grid;
   const sat = (sum, shift) => Math.max(-32768, Math.min(32767,
     Math.floor(sum / 2 ** shift)));
   const examples = [];

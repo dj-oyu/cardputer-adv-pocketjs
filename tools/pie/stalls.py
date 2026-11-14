@@ -63,7 +63,7 @@ def operands(op, qs):
     # QACC forms read their QR operands but write the accumulator, not a QR.
     # Both signed and unsigned spellings use every listed q operand (including
     # the first operand of VMULAS), even when the same register was just loaded.
-    if op in ('ee.vst.128.ip', 'ee.vmulas.u16.qacc', 'ee.vmulas.s16.qacc',
+    if op in ('ee.vst.128.ip', 'ee.vmulas.u16.qacc', 'ee.vmulas.s16.qacc', 'ee.vmulas.s16.accx',
               'ee.mov.u16.qacc', 'ee.mov.s16.qacc'):
         return [], qs
     if op in ('ee.vunzip.16', 'ee.vzip.8'):

@@ -218,6 +218,34 @@ static bool run(const char *source) {
     }
     JS_FreeValue(ctx,value);return ok;
 }
+/* The removed kasane.poll()/cancel() as test globals (see the test hooks in
+ * pocket_kasane_scene.inc): testPoll() reports the APP submission, testCancel()
+ * discards the current one. Installed after every pocket_kasane_install(). */
+static JSValue js_test_poll(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    ksn_submission sub=pocket_kasane_test_poll();
+    const char *status=sub.status==KSN_SUBMITTED?"SUBMITTED":sub.status==KSN_PRESENTED?"PRESENTED":
+                       sub.status==KSN_DISCARDED?"DISCARDED":"NONE";
+    const char *reason=sub.reason==KSN_OK?"OK":sub.reason==KSN_CANCELLED?"CANCELLED":"OTHER";
+    JSValue out=JS_NewObject(c);
+    JS_DefinePropertyValueStr(c,out,"ticket",sub.ticket.value?JS_NewUint32(c,sub.ticket.value):JS_NULL,JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(c,out,"status",JS_NewString(c,status),JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(c,out,"reason",JS_NewString(c,reason),JS_PROP_C_W_E);
+    return out;
+}
+static JSValue js_test_cancel(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    ksn_submission sub=pocket_kasane_test_poll();
+    if(!pocket_kasane_test_cancel(sub.ticket.value))
+        return JS_ThrowTypeError(c,"testCancel: nothing to cancel");
+    return JS_UNDEFINED;
+}
+static void install_test_hooks(JSContext *c){
+    JSValue global=JS_GetGlobalObject(c);
+    JS_SetPropertyStr(c,global,"testPoll",JS_NewCFunction(c,js_test_poll,"testPoll",0));
+    JS_SetPropertyStr(c,global,"testCancel",JS_NewCFunction(c,js_test_cancel,"testCancel",0));
+    JS_FreeValue(c,global);
+}
 static uint16_t *get_strip(void *opaque) {(void)opaque;return strip_pixels;}
 static ksn_result send_strip(void *opaque,uint16_t y,uint16_t rows,
                             const uint16_t *pixels) {
@@ -1339,11 +1367,11 @@ static void atomicity_tests(void) {
     check(present(&stats)==KSN_OK,"full reference quota remains usable after repeated aborts");
     check(run("Object.defineProperty(Object.prototype,'modal',{configurable:true,"
               "set(){throw Error('prototype setter')}});"
-              "try{kasane.patch(()=>{});kasane.cancel(kasane.poll().ticket)}"
+              "try{kasane.patch(()=>{});testCancel()}"
               "finally{delete Object.prototype.modal;}"
               "Object.defineProperty(Object.prototype,'status',{configurable:true,"
               "set(){throw Error('prototype setter')}});"
-              "try{if(kasane.poll().status!=='DISCARDED')throw Error('own status')}"
+              "try{if(testPoll().status!=='DISCARDED')throw Error('own status')}"
               "finally{delete Object.prototype.status;}"),
           "adapter properties do not invoke inherited setters");
 }
@@ -1362,15 +1390,15 @@ static void repair_tests(void) {
     memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
     bool all_bands=true;
     for(unsigned band=0;band<17;band++) {
-        if(!run("globalThis.ticket=kasane.replace(tx=>{tx.background(0xff00ffff);"
+        if(!run("kasane.replace(tx=>{tx.background(0xff00ffff);"
                 "tx.modal.close();globalThis.candidate=tx.rect(shape);tx.instantiate(tpl);});")) {
             all_bands=false;break;
         }
         fail_band=(int)band;transfers=0;
         if(present(&stats)!=KSN_IO||transfers!=band+1||!pocket_kasane_has_submission())
             all_bands=false;
-        if(!run("kasane.cancel(ticket);if(kasane.poll().status!=='DISCARDED'||"
-                "kasane.poll().reason!=='CANCELLED')throw Error('cancel');")) all_bands=false;
+        if(!run("testCancel();if(testPoll().status!=='DISCARDED'||"
+                "testPoll().reason!=='CANCELLED')throw Error('cancel');")) all_bands=false;
         if(pocket_kasane_has_submission()||!pocket_kasane_needs_present()||
            pocket_kasane_input_scope(false)!=KSN_INPUT_BLOCKED) all_bands=false;
         /* No JS callback/update from cancel through failed repair and retry. */
@@ -1382,12 +1410,12 @@ static void repair_tests(void) {
            memcmp(panel_pixels,committed_pixels,sizeof(panel_pixels))||
            pocket_kasane_needs_present()||pocket_kasane_input_scope(false)!=KSN_INPUT_MODAL)
             all_bands=false;
-        if(!run("if(kasane.poll().status!=='DISCARDED'||kasane.poll().reason!=='CANCELLED')"
+        if(!run("if(testPoll().status!=='DISCARDED'||testPoll().reason!=='CANCELLED')"
                 "throw Error('repair changed poll');var s=kasane.stats();"
                 "if(s.displayed.commands!==3||s.cache.templates!==1||s.cache.instances!==1)"
                 "throw Error('repair changed quota');"
                 "kasane.patch(tx=>{baseRef.setColor(tx,0x00ff00ff);baseInst.place(tx,{offset:[4,4]})});"
-                "kasane.cancel(kasane.poll().ticket);")) all_bands=false;
+                "testCancel();")) all_bands=false;
         if(!all_bands)break;
     }
     fail_band=-1;
@@ -1419,13 +1447,14 @@ static bool open_fault_runtime(const char *exercise) {
     if(!ctx) return false;
     host_capabilities_clear();
     if(pocket_kasane_install(ctx,NULL)!=ESP_OK) return false;
+    install_test_hooks(ctx);
     JSValue global=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,global,"armFault",JS_NewCFunction(ctx,arm_fault,"armFault",0));
     JS_SetPropertyStr(ctx,global,"disarmFault",JS_NewCFunction(ctx,disarm_fault,"disarmFault",0));
     JS_FreeValue(ctx,global);
     /* Materialize QuickJS's lazy namespace functions before faulting adapter
      * work; a failed engine-level lazy property read occurs before C entry. */
-    if(!run("kasane.features();kasane.stats();kasane.poll();"
+    if(!run("kasane.stats();testPoll();"
             "globalThis.shape={bounds:[0,0,10,10],color:0xff0000ff};"
             "globalThis.placement={offset:[1,1]};"
             "globalThis.tpl=kasane.cache.create([shape]);"
@@ -1463,7 +1492,7 @@ static void fault_sweep(const char *label,const char *exercise,bool arm_inside) 
             if(!run("let s=kasane.stats();if(s.displayed.commands!==2||s.cache.instances!==1||"
                     "s.cache.templates!==1||s.cache.commands!==1)throw Error('fault quota');"
                     "kasane.patch(tx=>baseRef.setColor(tx,0x00ff00ff));"
-                    "kasane.cancel(kasane.poll().ticket);")) passed=false;
+                    "testCancel();")) passed=false;
         } else {
             if(JS_IsException(result)||JS_HasException(ctx)) {
                 JSValue error=JS_GetException(ctx);const char *message=JS_ToCString(ctx,error);
@@ -1507,10 +1536,6 @@ static void allocator_tests(void) {
                 "tx.rect(shape);armFault();try{tx.instantiate(tpl,placement)}catch(e){}finally{disarmFault()}});",true);
     fault_sweep("template wrapper failures preserve template and command quotas",
                 "globalThis.definition=[shape];globalThis.exercise=()=>kasane.cache.create(definition);",false);
-    fault_sweep("poll allocation failures return an exception without partial properties",
-                "globalThis.exercise=()=>kasane.poll();",false);
-    fault_sweep("features allocation failures clean all nested objects",
-                "globalThis.exercise=()=>kasane.features();",false);
     fault_sweep("stats allocation failures clean all nested objects",
                 "globalThis.exercise=()=>kasane.stats();",false);
 
@@ -1588,7 +1613,7 @@ static void lazy_cache_tests(void) {
         size_t base=native_bytes;
         check(run("globalThis.baseBytes=kasane.stats().nativeBytes;"
                   "if(kasane.stats().cache.reservedBytes!==0)throw Error('eager cache');"
-                  "globalThis.oldTicket=kasane.poll().ticket;"),"cache reservation is zero before use");
+                  ""),"cache reservation is zero before use");
         native_max=0;native_after=fault;
         check(run("var failed=false;try{kasane.cache.create([shape])}"
                   "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('missing OOM');"
@@ -1599,7 +1624,7 @@ static void lazy_cache_tests(void) {
         pocket_kasane_invalidate();
         check(present(&stats)==KSN_OK,"committed frame repairs after cache OOM");
         check(run("kasane.patch(tx=>r.setColor(tx,0xabcdef80));"
-                  "kasane.cancel(kasane.poll().ticket);"
+                  "testCancel();"
                   "globalThis.newTpl=kasane.cache.create([shape]);"
                   "var s=kasane.stats();if(s.cache.reservedBytes<=0||"
                   "s.nativeBytes!==baseBytes+s.cache.reservedBytes)throw Error('accounting');"
@@ -1718,8 +1743,7 @@ static void primitive_tests(void) {
               "caught=e.code==='LIMIT_EXCEEDED'&&e.message.includes('scene command limit')};"
               "kasane.cache.release(t);if(!caught)throw Error('command limit diagnostic '+detail)})()"),
           "command-cap failure identifies the scene budget");
-    check(run("var f=kasane.features();if(!f.roundRect||!f.strokeRect||!f.gradient)throw Error('features');"
-              "kasane.replace(tx=>{tx.background(0x000000ff);"
+    check(run("kasane.replace(tx=>{tx.background(0x000000ff);"
               "globalThis.pr=tx.roundRect({bounds:[0.5,0.5,20.5,20.5],radius:8,color:0xff0000ff});"
               "tx.strokeRect({bounds:[24,1,44,21],width:2,color:0x00ff00ff});"
               "globalThis.pg=tx.gradient({bounds:[50,0,60,8],axis:'x',from:0xff0000ff,to:0x0000ffff});"
@@ -1761,8 +1785,8 @@ static void primitive_tests(void) {
     pocket_kasane_invalidate();
     check(present(&stats)==KSN_OK&&!memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels)),
           "rejected primitives leave committed pixels intact");
-    check(run("var t=kasane.replace(tx=>{tx.background(255);tx.gradient({bounds:[0,0,20,20],from:255,to:255,"
-              "radius:4,dither:true});});kasane.cancel(t);"),"rounded dither gradient can be cancelled");
+    check(run("kasane.replace(tx=>{tx.background(255);tx.gradient({bounds:[0,0,20,20],from:255,to:255,"
+              "radius:4,dither:true});});testCancel();"),"rounded dither gradient can be cancelled");
     close_fault_runtime();
     check(ksn_runtime_shutdown()==KSN_OK,"primitive native owner shuts down");
 }
@@ -1801,8 +1825,7 @@ static void viewport_tests(void) {
           command.draw.bounds.y0==46&&command.draw.bounds.y1==56,
           "overlay cache translates once and clips after placement");
     check(present(&stats)==KSN_OK,"overlay cache placement presents");
-    check(run("if(kasane.features().modal)throw Error('overlay modal advertised');"
-              "let inner=false,outer=false;try{kasane.replace(tx=>{try{"
+    check(run("let inner=false,outer=false;try{kasane.replace(tx=>{try{"
               "tx.modal.open({backdrop:'dim-live',color:0xff0000ff})"
               "}catch(e){inner=e.code==='UNSUPPORTED'}})}catch(e){outer=true}"
               "if(!inner||!outer)throw Error('overlay modal escaped');"),
@@ -1813,8 +1836,7 @@ static void viewport_tests(void) {
     check(open_fault_runtime(""),"foreground cache regression fixture opens");
     system=NULL;
     check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect foreground cache placement");
-    check(run("if(!kasane.features().modal)throw Error('foreground modal lost');"
-              "var foregroundTemplate=kasane.cache.create(["
+    check(run("var foregroundTemplate=kasane.cache.create(["
               "{bounds:[-10,0,10,10],color:0xffffffff}]);"
               "kasane.replace(tx=>{tx.background(255);"
               "tx.instantiate(foregroundTemplate,{offset:[20,0]});});"),
@@ -1831,8 +1853,7 @@ static void viewport_tests(void) {
 static void text_tests(void){
     check(open_fault_runtime(""),"text fixture opens");
     ksn_view *system=NULL;check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect text through native owner");
-    check(run("if(!kasane.features().text)throw Error('feature');"
-              "kasane.replace(tx=>{tx.background(255);globalThis.label=tx.text({bounds:[0,7,240,23],"
+    check(run("kasane.replace(tx=>{tx.background(255);globalThis.label=tx.text({bounds:[0,7,240,23],"
               "text:'Aあ😀B',capacity:32,font:'caption',color:0xffffffff});label.setReveal(tx,3)});"),
           "JS text submits counted UTF-8 and scalar reveal");
     ksn_frame frame;ksn_frame_command cmd;ksn_render_stats stats;
@@ -1891,7 +1912,7 @@ static void image_tests(void){
     ksn_render_stats stats;ksn_image_port port;
     check(ksn_pet_builtin_image(&port)==KSN_OK,"real embedded PPT2 provider validates");
     check(run("globalThis.asset=kasane.resource('pets');globalThis.sprite=null;"
-              "if(!kasane.features().image||asset.width!==64||asset.frames!==6||asset.variants!==12)throw Error('metadata');"
+              "if(asset.width!==64||asset.frames!==6||asset.variants!==12)throw Error('metadata');"
               "for(let i=0;i<100;i++)kasane.resource('pets');"
               "kasane.replace(tx=>{tx.background(255);sprite=tx.image({resource:asset,bounds:[0,0,64,64],clip:[0,0,240,135]})});"),
           "JS exposes a borrowed image and repeated handles");
@@ -2000,7 +2021,7 @@ static void animation_tests(void){
     }
     check(transfers>0&&live_allocations==live&&ksn_runtime_reserved_bytes()==native,
           "movement scaling and rotation advance with no JS calls or allocations");
-    check(run("if(motion.poll()!=='finished'||kasane.poll().status!=='PRESENTED')throw Error('completion');"
+    check(run("if(motion.poll()!=='finished'||testPoll().status!=='PRESENTED')throw Error('completion');"
               "kasane.patch(tx=>sprite.setImageFrame(tx,3,2));"),"completion keeps guest outcome and DrawRef usable");
     check(present(&stats)==KSN_OK,"ordinary JS patch follows automatic completion");
     check(run("kasane.patch(tx=>{motion= sprite.animate(tx,Object.assign({},motionSpec,{repeat:'ping-pong'}))});"),"ping-pong can restart on same DrawRef");
@@ -2013,7 +2034,7 @@ static void animation_tests(void){
     check(run("kasane.patch(tx=>sprite.setImageFrame(tx,4,3));")&&!pocket_kasane_animation_pending(),
           "guest update includes due animation sample in one submission");
     check(present(&stats)==KSN_OK&&ksn_runtime_animation_deadline()==3833334,"coalesced guest frame advances animation clock");
-    check(run("let t=kasane.patch(tx=>motion.stop(tx));kasane.cancel(t);"
+    check(run("kasane.patch(tx=>motion.stop(tx));testCancel();"
               "if(motion.poll()!=='running')throw Error('cancelled stop');"
               "kasane.patch(tx=>{motion.stop(tx);sprite.setRect(tx,[1,2,33,34])});"),"stop cancellation and explicit manual takeover");
     check(present(&stats)==KSN_OK&&ksn_runtime_animation_deadline()==UINT64_MAX,"stopped animation schedules no further wake");
@@ -2040,10 +2061,11 @@ static void namespace_heap_tests(void) {
     if(ctx){JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&before);}
     check(ctx&&pocket_kasane_install(ctx,NULL)==ESP_OK,
           "heap fixture installs Kasane namespace");
+    if(ctx)install_test_hooks(ctx);
     if(!ctx)return;
     JSMemoryUsage base,loaded,mounted;
     JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&base);
-    check(run("kasane.features();"),"heap fixture materializes Kasane namespace");
+    check(run("kasane.stats();"),"heap fixture materializes Kasane namespace");
     JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&loaded);
     check(run("globalThis.heapView=kasane.mount('hello');"),
           "heap fixture mounts native hello view");
@@ -2061,10 +2083,10 @@ static void namespace_heap_tests(void) {
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
-    check(run("if(kasane.features().capacity.refs!==32)throw Error('features');"
-              "if(kasane.stats().active||kasane.stats().nativeBytes!==0)throw Error('lazy')"),
-          "features do not allocate the native arena");
-    check(!pocket_kasane_active(),"native display remains inactive after feature test");
+    install_test_hooks(ctx);
+    check(run("if(kasane.stats().active||kasane.stats().nativeBytes!==0)throw Error('lazy')"),
+          "reading stats does not allocate the native arena");
+    check(!pocket_kasane_active(),"native display remains inactive after the stats test");
 
     presenter_tests();
     app_presenter_tests();
@@ -2082,7 +2104,7 @@ int main(void) {
               "{bounds:[0,0,10,10],color:0xff0000ff},"
               "{bounds:[2,2,8,8],color:0x00ff00aa,opacity:180}]);"
               "globalThis.oldRef=null;globalThis.inst=null;"
-              "globalThis.ticket=kasane.replace(tx=>{tx.background(0x000010ff);"
+              "kasane.replace(tx=>{tx.background(0x000010ff);"
               "oldRef=tx.rect({bounds:[3,3,20,20],color:0xffffffff,opacity:200});"
               "let second=tx.rect({bounds:[8,8,25,25],color:0x2080ffff});"
               "tx.group(oldRef,2,190);inst=tx.instantiate(tpl,{offset:[30,20]});});"),
@@ -2092,17 +2114,17 @@ int main(void) {
     ksn_render_stats stats;transfers=0;
     check(present(&stats)==KSN_OK&&transfers==17&&stats.transferred_bytes==240*135*2,
           "initial replace presents all display bands");
-    check(run("if(kasane.poll().status!=='PRESENTED')throw Error('poll')"),
+    check(run("if(testPoll().status!=='PRESENTED')throw Error('poll')"),
           "poll reports presented state");
 
-    check(run("ticket=kasane.patch(tx=>{oldRef.setRect(tx,[4,12,24,28]);"
+    check(run("kasane.patch(tx=>{oldRef.setRect(tx,[4,12,24,28]);"
               "oldRef.setColor(tx,0xf08020ff);inst.place(tx,{offset:[38,24],opacity:170});});"),
           "patch mutates refs without rebuilding topology");
     transfers=0;
     check(present(&stats)==KSN_OK&&transfers>0&&transfers<17,
           "patch transfers only dirty bands");
 
-    check(run("globalThis.modalRef=null;ticket=kasane.replace(tx=>{"
+    check(run("globalThis.modalRef=null;kasane.replace(tx=>{"
               "tx.background(0x001020ff);tx.rect({bounds:[0,0,240,135],color:0x103050ff});"
               "tx.modal.open({backdrop:'dim-live',color:0x00000088,focus:7});"
               "modalRef=tx.rect({bounds:[40,25,200,110],color:0x80c0eedd,opacity:230});});"),
@@ -2113,18 +2135,18 @@ int main(void) {
               "catch(e){stale=e.code==='CLOSED'}if(!stale)throw Error('old ref live')"),
           "successful replace invalidates old draw refs");
 
-    check(run("ticket=kasane.replace(tx=>{tx.background(0x101820ff);"
+    check(run("kasane.replace(tx=>{tx.background(0x101820ff);"
               "globalThis.newRef=tx.rect({bounds:[2,2,20,20],color:0xffffffff});"
               "tx.modal.close();});"),"modal close rebuilds app state");
     check(present(&stats)==KSN_OK&&pocket_kasane_input_scope(false)==KSN_INPUT_APP,
           "modal returns input to app after presentation");
 
-    check(run("ticket=kasane.patch(tx=>newRef.setColor(tx,0x00ffffff));kasane.cancel(ticket);"
-              "if(kasane.poll().status!=='DISCARDED')throw Error('cancel')"),
+    check(run("kasane.patch(tx=>newRef.setColor(tx,0x00ffffff));testCancel();"
+              "if(testPoll().status!=='DISCARDED')throw Error('cancel')"),
           "explicit cancel preserves the displayed state");
     check(!pocket_kasane_has_submission(),"cancel leaves no pending submission");
 
-    check(run("ticket=kasane.patch(tx=>newRef.setRect(tx,[5,5,22,22]))"),
+    check(run("kasane.patch(tx=>newRef.setRect(tx,[5,5,22,22]))"),
           "retry test submits a patch");
     fail_once=true;transfers=0;
     check(present(&stats)==KSN_IO&&pocket_kasane_has_submission()&&
@@ -2147,6 +2169,37 @@ int main(void) {
               "if(!limited)throw Error('ref limit')"),
           "draw-reference exposure is capped at 32");
     check(!pocket_kasane_has_submission(),"limit failure aborts the whole replace");
+
+    /* api-reorg P3: setRect/setClip take four integers as well as the array,
+     * and a tx the app does not keep is the next build's tx (no allocation); one it keeps stays CLOSED. */
+    check(run("if(kasane.patch(tx=>{newRef.setRect(tx,[5,5,22,22]);"
+              "newRef.setClip(tx,[0,0,240,135])})!==undefined)throw Error('patch returns a ticket')")&&
+          present(&stats)==KSN_OK,"patch returns nothing (api-reorg P5)");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(run("kasane.patch(tx=>newRef.setRect(tx,1,2,9,9))")&&present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "integer setRect moves the reference");
+    check(run("globalThis.w=null;kasane.patch(tx=>{w=new WeakRef(tx);"
+              "newRef.setRect(tx,5,5,22,22);newRef.setClip(tx,0,0,240,135)})")&&
+          present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))==0,
+          "integer setRect/setClip draw what the array form drew");
+    check(run("let same=false;kasane.patch(tx=>{same=w.deref()===tx;"
+              "newRef.setColor(tx,0xffffffff)});testCancel();if(!same)throw Error('tx not reused')"),
+          "a tx the app does not keep is the next build's tx");
+    check(run("globalThis.kept=null;kasane.patch(tx=>{kept=tx;"
+              "newRef.setColor(tx,0xffffffff)});testCancel();let closed=false;"
+              "try{kept.background(1)}catch(e){closed=e.code==='CLOSED'}"
+              "let other=false,inner=false;kasane.patch(tx=>{other=tx!==kept;"
+              "try{newRef.setColor(kept,1)}catch(e){inner=e.code==='CLOSED'}"
+              "newRef.setColor(tx,0xffffffff)});testCancel();"
+              "if(!closed||!other||!inner)throw Error('kept tx '+closed+other+inner)"),
+          "a kept tx stays CLOSED, in later callbacks too");
+    check(run("const bad=[[1,2,0,9],[1,2,9,1e6],[1,2,NaN,9]];let n=0;for(const a of bad){"
+              "try{kasane.patch(tx=>newRef.setRect(tx,...a))}catch(e){n+=e.code==='INVALID_ARGUMENT'}}"
+              "if(n!==3)throw Error('integer rect checks '+n)"),
+          "integer setRect checks range and edges as the array form does");
+    check(!pocket_kasane_has_submission(),"rejected integer rectangles abort their patch");
 
     check(run("if(kasane.stats().nativeBytes<=kasane.stats().cache.reservedBytes)throw Error('native accounting')"),
           "stats reports the allocated native arena");

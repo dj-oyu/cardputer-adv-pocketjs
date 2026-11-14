@@ -3,7 +3,8 @@
 // Drawing shares the procedural surface's slots, handles and frames
 // (pocket_shiki_frame.c): beginFrame, commit, resource and createSurface are the
 // procedural functions themselves, and draw runs the Shiki engine into the
-// same frame. grid is the existing pocket.kasane.grid (sec.7).
+// same frame. The grid is pocket.kasane.grid (sec.7); shiki.grid, a copy of it,
+// was removed in api-reorg P5.
 //
 // Data regions (sec.5.1, 9.2, 9.3; v1.4 field planes). data() takes the
 // memory from the Shiki heap, 16-byte aligned, and hands JS a typed array over
@@ -341,7 +342,10 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 // property read (shiki-bundle.md sec.3: a call is ~1,200 cycles and an array
 // element ~400). Draws run in order; the first that fails throws as draw()
 // does, with the draw's position as the error's index, and abandons the
-// frame, as draw() does.
+// frame, as draw() does. count (api-reorg.md sec.3.3): draw only the first
+// count handles, inputs then needing at least count * stride; so a batch
+// filled to a varying length needs no subarray() views. Absent (or
+// undefined), every handle, with inputs exactly handles.length * stride.
 static const void *typed_data(JSContext *ctx,JSValueConst v,int kind,size_t *count){
     if(JS_GetTypedArrayType(v)!=kind)return NULL;
     size_t off=0,len=0,bpe=0,size=0;
@@ -361,6 +365,13 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     const uint32_t *handles=argc>=1?typed_data(ctx,argv[0],JS_TYPED_ARRAY_UINT32,&count):NULL;
     if(!handles||argc<3||!whole(ctx,argv[2],0,KSN_SHIKI_INPUTS,&stride))
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected (Uint32Array handles, Float64Array|Int32Array inputs, stride 0..8)");
+    const bool counted=argc>=4&&!JS_IsUndefined(argv[3]);
+    if(counted){
+        uint32_t n=0;
+        if(!whole(ctx,argv[3],0,(double)count,&n))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"count: an integer 0..handles.length");
+        count=n;
+    }
     if(count>DRAWS_PER_CALL)
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"more than 256 draws in one call");
     const double *real=NULL;
@@ -368,8 +379,8 @@ static JSValue js_draw_many(JSContext *ctx,JSValueConst self,int argc,JSValueCon
     if(stride){
         real=typed_data(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,&ninputs);
         if(!real)fixed=typed_data(ctx,argv[1],JS_TYPED_ARRAY_INT32,&ninputs);
-        if((!real&&!fixed)||ninputs!=count*stride)
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs: a Float64Array or Int32Array of handles.length * stride");
+        if((!real&&!fixed)||(counted?ninputs<count*stride:ninputs!=count*stride))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"inputs: a Float64Array or Int32Array of handles.length * stride (at least count * stride)");
     }
     for(size_t i=0;i<count;i++){
         if(pocket_shiki_prof.on)pocket_shiki_prof.mark=pocket_cycles();
@@ -553,12 +564,6 @@ static JSValue js_heap(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 }
 
 // ------------------------------------------------------------- install
-// grid is kasane's own (pocket_grid_install), shared: copied from there.
-static bool share(JSContext *ctx,JSValueConst from,JSValueConst to,const char *name){
-    JSValue f=JS_GetPropertyStr(ctx,from,name);
-    if(JS_IsException(f))return false;
-    return JS_SetPropertyStr(ctx,to,name,f)>=0;
-}
 esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
     JSValue shiki=JS_NewObject(ctx);
     if(JS_IsException(shiki))return ESP_ERR_NO_MEM;
@@ -570,7 +575,7 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
         JS_CFUNC_DEF("data",1,js_data),
         JS_CFUNC_DEF("release",1,js_release),
         JS_CFUNC_DEF("fields",1,js_fields),
-        JS_CFUNC_DEF("drawMany",3,js_draw_many),
+        JS_CFUNC_DEF("drawMany",4,js_draw_many),
         JS_CFUNC_MAGIC_DEF("sin",1,js_sin,0),
         JS_CFUNC_MAGIC_DEF("cos",1,js_sin,1),
         JS_CFUNC_DEF("sinMany",3,js_sin_many),
@@ -587,7 +592,6 @@ esp_err_t pocket_shiki_api_install(JSContext *ctx,JSValueConst kasane){
     bool ok=JS_SetPropertyFunctionList(ctx,shiki,methods,(int)(sizeof methods/sizeof methods[0]))>=0;
     pocket_nojoin_end(ctx,mark);
     ok=ok&&pocket_proc_frame_install(ctx,shiki)==ESP_OK;
-    ok=ok&&share(ctx,kasane,shiki,"grid");
     if(!ok){JS_FreeValue(ctx,shiki);return ESP_ERR_NO_MEM;}
     owner=ctx;
     return JS_SetPropertyStr(ctx,kasane,"shiki",shiki)<0?ESP_ERR_NO_MEM:ESP_OK;

@@ -14,6 +14,7 @@
 | 結果 | `1` | 次のレース（種が変わる。種は起動ごとにハードウェアの乱数と混ぜる、下の「種」） |
 | 結果 | `R` | 同じレースをもう一度（同じ種。持ち点は動かない） |
 | どこでも | `tab` | 負荷段階 LIGHT → MID → HEAVY（既定 MID）。スタンドと観客の plan を登録し直す |
+| どこでも | up（broker の `up`、`;`） | 首振りの系列 `pocket.derby.ser()` の経路を整数（既定）⇔ 倍精度で切り替える（A/B の計測用。ログ `AB INT`／`AB DOUBLE`。docs/apps/derby-ser-division.md §7.3）。broker の up はデモを止めない |
 | どこでも | `` ` ``（Back） | 終了。main.c の保存ターン `frame(0x2000)` で持ち点を保存 |
 | デモ中 | どのキーでも | デモをやめてパドックへ（そのキーはゲームの操作にならない） |
 
@@ -219,6 +220,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - 走者（ゲートと FIELD）は Shiki の組み込みの式 `run`（胴と騎手）と `legs`（脚 4 本）、HEAD ON の正面の馬は `frl`（前脚）と `frb`（胴と騎手）。`derby_prog.js` の `@shiki` 関数で、ビルドが flash の表にする（`tools/kasane_ir/emit_shiki_rom.mjs`）。色を入力にしたので全馬で共通、旧 API の `r0`〜`r7` と `fr`（9 個）が 4 個になった（handle の上限 32）。
 - **脚の位相は距離から**: 1 歩 6.5 m なので、位相 = 2π × 距離 / 6.5。距離 `d` は表示の位置 `xs[l]`（スロー再生では `at()` が step の途中まで補間する）に馬ごとのずらし `l × 1.0345 m`（ゲートの位相 l rad）を足したもの（`DO`）。`sin` は式の中の `SIN` 命令で、JS は位相の配列を持たず、`Math.sin` も double → int の変換もしない。大写しの馬のコマ（`g0`〜`g5`）も同じ距離から `⌊d × 6 / 6.5⌋ mod 6`。
 - **束ねて描く**: 1 頭が 2 本の draw（脚が先）で、`drawMany` 1 回にまとめる（`bput`・`bflush`）。z 順を保つため、大写しの馬（旧 API の draw）の前で書き出す。入力は `Float64Array`（変換はネイティブ側）。
+  - **2026-11-13 から `pocket.derby.runners()`（C）**: 投影・間引き・奥から手前の並べ替え・入力の組み立て・draw を 1 回の呼び出しで行う（1 頭 2 本、整数の入力）。大写しの馬のレーンに来たら止まってその位置を返し、JS が大写しの 2 本を描いて続きを呼ぶ。HEAD ON の `frl`・`frb` も同じ関数（mode 2）。`bput`・`bflush` の JS は A/B 用のチャンク `ab`（`derby_ab.js`）に移し、その A/B は 2026-11-13 に退役した（up は系列の整数／倍精度の A/B に使う）。理由と r5sim の前後は docs/apps/derby-runners-native.md。
 - 正面の馬の前脚の持ち上げ `max(0, ±1.5 s sin)` は、Shiki に max の命令が無いので、1 回だけ回すループと `break` で書く。
 - `kasane.shiki` を宣言するので、セッションの始めに Shiki のヒープ（既定 48 KiB）を取り、旧 API のフレームもその中に置かれる。
 
