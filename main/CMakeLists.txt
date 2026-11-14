@@ -32,23 +32,39 @@ set(POCKET_INPUT_SOURCES "pocket/pocket_input.c")
 set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.c" "system/sys_notify.c" "system/sys_timer.c" "system/sys_ringer.c" "system/sys_wall.c" "pocket/pocket_power.c" "pocket/pocket_clock_source.c" "pocket/pocket_clock.c" "pocket/pocket_mutex_arena.c" "pocket/pocket_av_output_source.c" "pocket/pocket_av_playback_source.c")
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
-set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
+set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c")
 list(APPEND KASANE_SOURCES
     "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
     "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
-    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_shiki.c" "pocket/pocket_derby.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_derby.c" "pocket/derby_ser_int.c" "pocket/derby_ser_pie.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
     "ui/kasane/ksn_shiki_frame.c" "ui/kasane/ksn_pixel_function.c"
     "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_shiki.c"
-    "ui/kasane/ksn_shiki_bench.c" "ui/kasane/ksn_shiki_jit.c")
+    "ui/kasane/ksn_shiki_jit.c")
+# Only the CONFIG_KSN_DEVICE_PROBE diagnostic calls these (ksn_frost.c is its
+# frost kernel), and --gc-sections already dropped them from the 4840504 map,
+# so building them only for the probe leaves the product image as it was.
+if(CONFIG_KSN_DEVICE_PROBE)
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
+endif()
+# pocket.shikiDebug, the Shiki bench programs and the six diagnostic apps that
+# use them (docs/kasane/api-reorg.md sec.4.3). Off in the product image.
+set(POCKET_SHIKI_DEBUG_APPS "")
+if(CONFIG_POCKET_SHIKI_DEBUG)
+    list(APPEND KASANE_SOURCES "pocket/pocket_shiki.c" "ui/kasane/ksn_shiki_bench.c")
+    set(POCKET_SHIKI_DEBUG_APPS "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/meshbench/mesh_bench.js")
+endif()
 # Private mesh architecture experiments; never implicitly enabled.
 option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
 option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
 option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" OFF)
 option(KASANE_MESH_Q7_BENCH_PREFLIGHT "Compile benchmark-only numeric and RAM admission probes" OFF)
+if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND NOT CONFIG_POCKET_SHIKI_DEBUG)
+    message(FATAL_ERROR "Q7 benchmark preflight requires CONFIG_POCKET_SHIKI_DEBUG=y; enable it only in the benchmark sdkconfig")
+endif()
 if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND KASANE_MESH_EDGE4_PROTOTYPE)
     message(FATAL_ERROR "Q7 benchmark preflight requires edge4 OFF")
 endif()
@@ -81,12 +97,6 @@ option(KASANE_DMA_OVERLAP "Copied LCD DMA overlap with next Kasane band" ON)
 if(KASANE_DMA_OVERLAP AND NOT CMAKE_BUILD_EARLY_EXPANSION)
     add_compile_definitions(KASANE_DMA_OVERLAP=1)
 endif()
-option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
-if(KASANE_PROC_DEVICE_PROBE)
-    # Its driver (ksn_procedural_device_probe.c) measured the float VM, which
-    # Shiki v2.0 removed; the grid and pixel probes it also ran need a new one.
-    message(FATAL_ERROR "KASANE_PROC_DEVICE_PROBE went with the float VM (Shiki v2.0)")
-endif()
 option(KASANE_FLOWER_FRAME_PROBE "Measure two captured FLOWER frames on the device" OFF)
 option(KASANE_FLOWER_D1_PROBE "Verify fixed FLOWER species and heap-pressure repair on device" OFF)
 option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation failure after first ACK" OFF)
@@ -102,13 +112,6 @@ if(POCKET_DERBY_COURSE_CACHE)
     add_compile_definitions(POCKET_DERBY_COURSE_CACHE=1)
 endif()
 set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
-if(KASANE_PROC_DEVICE_PROBE)
-    list(APPEND KASANE_SOURCES
-        "ui/kasane/ksn_shiki_surface.c"
-        "ui/kasane/ksn_shiki_layers.c" "ui/kasane/ksn_shiki_present.c"
-        "ui/kasane/ksn_pixel_span_device_probe.c"
-        "ui/kasane/ksn_grid_scan_cost_device_probe.c")
-endif()
 if(KASANE_FLOWER_D1_PROBE)
     list(APPEND KASANE_SOURCES "scene/flower_d1_species_probe.c" "scene/flower_d1_pressure_probe.c")
 endif()
@@ -131,13 +134,6 @@ option(KASANE_D6_VIDEO_OVERLAY_PROBE "Run JS video over the native FLOWER backdr
 option(KASANE_D6_SD_AV_STREAM_PROBE "Run SD KSV1 and SD MP3 together over FLOWER (diagnostic only)" OFF)
 option(KASANE_D5_SD_STREAM_PROBE "Replace VIDEO LAB with temporary SD stream diagnostic" OFF)
 option(KASANE_D4_PIXEL_APP_PROBE "Replace VIDEO LAB with bounded pixel function APP and inject second-band failure" OFF)
-option(KASANE_D2_MULTI_SURFACE_PROBE "Replace VIDEO LAB with two independent procedural image surfaces" OFF)
-option(KASANE_D2_OVERLAY_PROC_PROBE "Run two procedural image surfaces over FLOWER with one LCD failure" OFF)
-if(KASANE_D2_OVERLAY_PROC_PROBE OR KASANE_D2_MULTI_SURFACE_PROBE)
-    # Their apps drew with the float VM's procedural plans (Shiki v2.0 removed
-    # them); an overlay session has no Shiki heap to draw with instead.
-    message(FATAL_ERROR "The D2 surface probes went with the float VM (Shiki v2.0)")
-endif()
 set(KASANE_VIDEO_LAB_SOURCE "../apps/kasane/video_lab.js")
 if(KASANE_D5_SD_STREAM_PROBE)
     set(KASANE_VIDEO_LAB_SOURCE "../apps/kasane/video_stream_lab.js")
@@ -216,11 +212,15 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/rtc_task.c" "hal/fpu_latenc
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/meshbench/mesh_bench.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" ${POCKET_SHIKI_DEBUG_APPS} "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
+# The hot/cold layout of the turn-path files (POCKET_NATIVE_HOTCOLD,
+# docs/vm/qjs-hotcold.md sec.13).
+include("${CMAKE_CURRENT_LIST_DIR}/../tools/qjs_hotcold/hotcold.cmake")
+pocket_native_hotcold("${CMAKE_CURRENT_LIST_DIR}")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_font.py")
@@ -243,9 +243,6 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 # firmware compiles and links exactly as before, and main.c's calls are compiled out.
 if(POCKET_PROBES)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_PROBES=1)
-endif()
-if(KASANE_PROC_DEVICE_PROBE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_DEVICE_PROBE=1)
 endif()
 if(KASANE_FLOWER_FRAME_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_FRAME_PROBE=1)
@@ -570,6 +567,12 @@ set_source_files_properties(pocket/pocket_shiki_frame.c PROPERTIES COMPILE_OPTIO
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# The ser() PIE kernels (CONFIG_POCKET_DERBY_SER_PIE, default y; empty when
+# off): their scalar reference is timed against them, at pocket_derby.c's level.
+set_source_files_properties(pocket/derby_ser_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
+# Its integer path (docs/apps/derby-ser-division.md sec.4): integers only but
+# for the chord tables' doubles, made once a series.
+set_source_files_properties(pocket/derby_ser_int.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # pocket.shapes: the same scan conversion on host and device (no fused madd.s).
 set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # Shiki (docs/kasane/shiki-spec.md): integer engine; the only floating point is
@@ -578,13 +581,6 @@ set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O
 set_source_files_properties(ui/kasane/ksn_shiki.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
     set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
-endif()
-if(KASANE_PROC_DEVICE_PROBE)
-    set_source_files_properties(ui/kasane/ksn_shiki_surface.c
-        ui/kasane/ksn_shiki_layers.c
-        ui/kasane/ksn_shiki_present.c
-        ui/kasane/ksn_grid_scan_cost_device_probe.c
-        PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 
 # The VM probe (docs/vm/quickjs-freertos-vm-spec.md sec.5), off by default

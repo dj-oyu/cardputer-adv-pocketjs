@@ -5,6 +5,10 @@
 #include "esp_err.h"
 #include "ui/kasane/ksn_ports.h"
 #include "ui/kasane/ksn_shiki_frame.h"
+/* Same-binary A/B arm: commit()'s damage from the signature's boxes (1) or a walk (0). */
+extern int g_pocket_proc_box_reuse;
+/* Same-binary A/B arm: bands drawn from their entry bitmap (1) or the range walk (0). */
+extern int g_pocket_proc_band_bits;
 
 /* The frames, surfaces and image resources Shiki draws into (the procedural
  * IR that first used them went in v2.0). beginFrame, commit, resource,
@@ -39,13 +43,21 @@ extern pocket_shiki_draw_prof pocket_shiki_prof;
  * total: the whole native draw (lookup, engine, copy into the frame). */
 typedef struct { uint32_t draws,steps,engine_cy,total_cy; } pocket_shiki_turn;
 void pocket_shiki_turn_take(pocket_shiki_turn *out);
+/* The same without the reset (a probe's before and after, pocket_derby.c). */
+void pocket_shiki_turn_peek(pocket_shiki_turn *out);
 uint32_t pocket_cycles(void);
 void pocket_proc_end_turn(void);
 /* One draw for a native caller (pocket_derby.c): a Shiki handle and its
  * inputs as numbers, with shiki.draw()'s checks and PocketError. Returns
  * JS_UNDEFINED or JS_EXCEPTION. */
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
+/* The same with the inputs already in each input's Q format (as drawMany's
+ * Int32Array: no conversion) and the draw's number (DRAW_INDEX):
+ * pocket.derby.runners. */
+JSValue pocket_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index);
 #ifdef POCKET_PROC_DRAW_HOOK
+/* Host harness only: pocket_proc_draw_fixed's draws that succeeded. */
+void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *in,unsigned n);
 /* Host harness only: called after each native draw that succeeded, with the
  * inputs as given; with pocket_proc_hook_dry set, the draw is not run at all
  * (the harness compares input lists without frames or plans). */

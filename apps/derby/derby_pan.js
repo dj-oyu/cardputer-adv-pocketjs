@@ -16,12 +16,6 @@ function pan(xs) {
   S.ser(live.t0, 720896, 2 * k[5] * QM, 0, L, 760218);
   S.ser(live.t1, 720896, 2 * k[5] * QM, k[5] * QM, L, 760218);
   S.part(7, live.pole);
-  S.lanes(xs, lz, PO, 1);
-  zo.sort((a, b) => PO[4 * b + 3] - PO[4 * a + 3]);
-  for (const l of zo) {
-    const X = PO[4 * l];
-    if (PO[4 * l + 3] && X > -10485760 && X < 26214400) rin(l, X, PO[4 * l + 1], PO[4 * l + 2], DO(xs[l], l));
-  }
-  bflush();
+  runners(xs, 1, -1);
   S.ser(live.prail, 720896, k[4] * QM, 0, L, 0xffff, 321126);
 }

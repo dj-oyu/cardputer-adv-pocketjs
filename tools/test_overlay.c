@@ -223,8 +223,8 @@ static void home_survives_without_the_overlay(void) {
     // layout that depended on it, would make the home screen's drawing depend
     // on a guest, which is the dependency 3.1 forbids however the painting is
     // ordered.
-    CHECK(occurrences(shell,"overlay_paint(strip")==1,
-          "shell.c composites the overlay exactly once");
+    CHECK(occurrences(shell,"overlay_paint(")==0,
+          "the display-list compositor is gone (api-reorg P5)");
     CHECK(occurrences(shell,"pocket_overlay_")==0,
           "the shell does not reach past ui/overlay.c into the JS surface");
     CHECK(occurrences(shell,"app_overlay_tick")==0 &&

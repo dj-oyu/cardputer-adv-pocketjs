@@ -112,10 +112,19 @@ typedef struct {
     grid_run_profile run_profile;
 } grid_slot;
 
-static grid_slot slots[GRID_APP_SLOTS];
+/* The plan table (GRID_APP_SLOTS x about 1.2 KB) is allocated by the first
+ * register* call and freed by pocket_grid_reset(): as .bss it was 7,200 B
+ * resident in every session, grid or not (api-reorg.md sec.3.1). NULL until
+ * then, and every reader below takes NULL as "no plans". */
+static grid_slot *slots;
 static uint32_t next_handle;
 static bool js_call_active;
+/* The symbolic frontend object grid_fold.js evaluates to. It is held here, not
+ * on the global object: api-reorg P5 removed the gridFold global, so fold,
+ * index and view are reachable only through pocket.kasane.grid. */
 static bool frontend_loaded;
+static JSValue frontend_obj;
+static JSContext *frontend_ctx;
 
 static JSValue fail(JSContext *ctx, const char *op, const char *code,
                     const char *message)
@@ -249,7 +258,7 @@ static bool read_program(JSContext *ctx, JSValueConst spec,
 static grid_slot *find(JSContext *ctx, JSValueConst value)
 {
     int64_t handle;
-    if (!number(ctx, value, 1, INT32_MAX, &handle)) return NULL;
+    if (!slots || !number(ctx, value, 1, INT32_MAX, &handle)) return NULL;
     for (unsigned i = 0; i < GRID_APP_SLOTS; ++i)
         if (slots[i].handle == (uint32_t)handle) return &slots[i];
     return NULL;
@@ -263,15 +272,30 @@ static bool aligned_buffer(size_t count, void **raw, int16_t **aligned)
     return true;
 }
 
+/* A free plan slot for a register* call, the table made on the first. */
+static bool claim_slot(JSContext *ctx, const char *op, unsigned *out)
+{
+    if (!slots && !(slots = calloc(GRID_APP_SLOTS, sizeof *slots))) {
+        fail(ctx, op, POCKET_ERR_OUT_OF_MEMORY, "grid plan table allocation failed");
+        return false;
+    }
+    unsigned free_slot = 0;
+    while (free_slot < GRID_APP_SLOTS && slots[free_slot].handle) ++free_slot;
+    if (free_slot == GRID_APP_SLOTS || next_handle == INT32_MAX) {
+        fail(ctx, op, POCKET_ERR_LIMIT_EXCEEDED, "grid plan limit");
+        return false;
+    }
+    *out = free_slot;
+    return true;
+}
+
 static JSValue register_impl(JSContext *ctx, int argc, JSValueConst *argv)
 {
     const char *op = "kasane.grid.register";
     if (argc != 1) return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                                "expected a gridFold program");
-    unsigned free_slot = 0;
-    while (free_slot < GRID_APP_SLOTS && slots[free_slot].handle) ++free_slot;
-    if (free_slot == GRID_APP_SLOTS || next_handle == INT32_MAX)
-        return fail(ctx, op, POCKET_ERR_LIMIT_EXCEEDED, "grid plan limit");
+    unsigned free_slot;
+    if (!claim_slot(ctx, op, &free_slot)) return JS_EXCEPTION;
     uint32_t heap_before = grid_internal_free();
     uint32_t largest_before = grid_internal_largest();
     int64_t started = grid_measure_now_us();
@@ -378,10 +402,8 @@ static JSValue register_resize_impl(JSContext *ctx, int argc,
     if (argc != 1 || !JS_IsObject(argv[0]))
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                     "expected sourceWidth, sourceHeight, width, height");
-    unsigned free_slot = 0;
-    while (free_slot < GRID_APP_SLOTS && slots[free_slot].handle) ++free_slot;
-    if (free_slot == GRID_APP_SLOTS || next_handle == INT32_MAX)
-        return fail(ctx, op, POCKET_ERR_LIMIT_EXCEEDED, "grid plan limit");
+    unsigned free_slot;
+    if (!claim_slot(ctx, op, &free_slot)) return JS_EXCEPTION;
     int64_t sw, sh, width, height;
     if (!field(ctx, argv[0], "sourceWidth", 1, 256, &sw) ||
         !field(ctx, argv[0], "sourceHeight", 1, 256, &sh) ||
@@ -422,10 +444,8 @@ static JSValue register_resize_source_impl(JSContext *ctx, int argc,
     if (argc != 1 || !JS_IsObject(argv[0]))
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                     "expected source image, width, height");
-    unsigned free_slot = 0;
-    while (free_slot < GRID_APP_SLOTS && slots[free_slot].handle) ++free_slot;
-    if (free_slot == GRID_APP_SLOTS || next_handle == INT32_MAX)
-        return fail(ctx, op, POCKET_ERR_LIMIT_EXCEEDED, "grid plan limit");
+    unsigned free_slot;
+    if (!claim_slot(ctx, op, &free_slot)) return JS_EXCEPTION;
     int64_t width, height;
     JSValue source = JS_GetPropertyStr(ctx, argv[0], "source");
     grid_slot fresh = {0};
@@ -997,8 +1017,16 @@ static JSValue js_explain(JSContext *ctx, JSValueConst self, int argc,
 { (void)self; return guarded(ctx, argc, argv, explain_impl); }
 
 /* Ordinary apps should not pay the symbolic frontend's parse cost unless
- * they use it. These three small proxies load the same embedded JS on first
- * use, then delegate to the frontend object it installs. */
+ * they use it. These three small proxies load the embedded JS on first use
+ * (the script's completion value is the frozen {fold, index, view} object,
+ * kept in frontend_obj), then delegate to it. */
+static void release_frontend(void)
+{
+    if (frontend_loaded && frontend_ctx) JS_FreeValue(frontend_ctx, frontend_obj);
+    frontend_loaded = false;
+    frontend_ctx = NULL;
+    frontend_obj = JS_UNDEFINED;
+}
 static JSValue lazy_frontend(JSContext *ctx, const char *name,
                              int argc, JSValueConst *argv)
 {
@@ -1013,18 +1041,18 @@ static JSValue lazy_frontend(JSContext *ctx, const char *name,
         JSValue loaded = JS_Eval(ctx, source, length,
                                  "grid_fold.js", JS_EVAL_TYPE_GLOBAL);
         if (JS_IsException(loaded)) return loaded;
-        JS_FreeValue(ctx, loaded);
+        if (!JS_IsObject(loaded)) {
+            JS_FreeValue(ctx, loaded);
+            return JS_ThrowTypeError(ctx, "grid_fold.js did not yield the frontend");
+        }
+        frontend_obj = loaded;
+        frontend_ctx = ctx;
         frontend_loaded = true;
     }
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue frontend = JS_GetPropertyStr(ctx, global, "gridFold");
-    JS_FreeValue(ctx, global);
-    if (JS_IsException(frontend)) return frontend;
-    JSValue method = JS_GetPropertyStr(ctx, frontend, name);
-    if (JS_IsException(method)) { JS_FreeValue(ctx, frontend); return method; }
-    JSValue result = JS_Call(ctx, method, frontend, argc, argv);
+    JSValue method = JS_GetPropertyStr(ctx, frontend_obj, name);
+    if (JS_IsException(method)) return method;
+    JSValue result = JS_Call(ctx, method, frontend_obj, argc, argv);
     JS_FreeValue(ctx, method);
-    JS_FreeValue(ctx, frontend);
     return result;
 }
 static JSValue js_fold_lazy(JSContext *ctx, JSValueConst self, int argc,
@@ -1037,47 +1065,45 @@ static JSValue js_view_lazy(JSContext *ctx, JSValueConst self, int argc,
                             JSValueConst *argv)
 { (void)self; return lazy_frontend(ctx, "view", argc, argv); }
 
+/* fold/index/view are grid's own (api-reorg.md sec.3.1). */
+static const JSCFunctionListEntry grid_methods[] = {
+    JS_CFUNC_DEF("register", 1, js_register),
+    JS_CFUNC_DEF("registration", 1, js_registration),
+    JS_CFUNC_DEF("registerResize", 1, js_register_resize),
+    JS_CFUNC_DEF("registerResizeSource", 1, js_register_resize_source),
+    JS_CFUNC_DEF("run", 4, js_run),
+    JS_CFUNC_DEF("profile", 1, js_profile),
+    JS_CFUNC_DEF("measure", 2, js_measure),
+    JS_CFUNC_DEF("resource", 1, js_resource),
+    JS_CFUNC_DEF("explain", 1, js_explain),
+    JS_CFUNC_DEF("fold", 2, js_fold_lazy),
+    JS_CFUNC_DEF("index", 1, js_index_lazy),
+    JS_CFUNC_DEF("view", 1, js_view_lazy),
+};
+/* An object entry of a function list: the fork's lazy lists build the grid
+ * object on the first touch of kasane.grid (api-reorg.md sec.3.1), so a
+ * session that never names it pays nothing for it. */
+static const JSCFunctionListEntry grid_entry[] = {
+    JS_OBJECT_DEF("grid", grid_methods,
+                  (int)(sizeof grid_methods / sizeof grid_methods[0]),
+                  JS_PROP_C_W_E),
+};
+
 esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
 {
-    JSValue grid = JS_NewObject(ctx);
-    if (JS_IsException(grid)) return ESP_ERR_NO_MEM;
-    static const JSCFunctionListEntry methods[] = {
-        JS_CFUNC_DEF("register", 1, js_register),
-        JS_CFUNC_DEF("registration", 1, js_registration),
-        JS_CFUNC_DEF("registerResize", 1, js_register_resize),
-        JS_CFUNC_DEF("registerResizeSource", 1, js_register_resize_source),
-        JS_CFUNC_DEF("run", 4, js_run),
-        JS_CFUNC_DEF("profile", 1, js_profile),
-        JS_CFUNC_DEF("measure", 2, js_measure),
-        JS_CFUNC_DEF("resource", 1, js_resource),
-        JS_CFUNC_DEF("explain", 1, js_explain),
-    };
-    if (JS_SetPropertyFunctionList(ctx, grid, methods, 9) < 0) {
-        JS_FreeValue(ctx, grid); return ESP_ERR_NO_MEM;
-    }
-    if (JS_SetPropertyStr(ctx, ns, "grid", grid) < 0) return ESP_ERR_NO_MEM;
+    if (JS_SetPropertyFunctionList(ctx, ns, grid_entry, 1) < 0 ||
+        JS_HasException(ctx)) return ESP_ERR_NO_MEM;
+    /* A frontend left by a session whose guest is gone without a reset
+     * cannot be freed into the dead runtime: forget it. */
     frontend_loaded = false;
-    JSValue lazy = JS_NewObject(ctx);
-    if (JS_IsException(lazy)) return ESP_ERR_NO_MEM;
-    static const JSCFunctionListEntry frontend_methods[] = {
-        JS_CFUNC_DEF("fold", 2, js_fold_lazy),
-        JS_CFUNC_DEF("index", 1, js_index_lazy),
-        JS_CFUNC_DEF("view", 1, js_view_lazy),
-    };
-    if (JS_SetPropertyFunctionList(ctx, lazy, frontend_methods, 3) < 0) {
-        JS_FreeValue(ctx, lazy); return ESP_ERR_NO_MEM;
-    }
-    JSValue global = JS_GetGlobalObject(ctx);
-    if (JS_IsException(global)) { JS_FreeValue(ctx, lazy); return ESP_ERR_NO_MEM; }
-    int result = JS_SetPropertyStr(ctx, global, "gridFold", lazy);
-    JS_FreeValue(ctx, global);
-    if (result < 0) return ESP_ERR_NO_MEM;
+    frontend_ctx = NULL;
+    frontend_obj = JS_UNDEFINED;
     return ESP_OK;
 }
 
 void pocket_grid_reset(void)
 {
-    for (unsigned i = 0; i < GRID_APP_SLOTS; ++i) {
+    for (unsigned i = 0; slots && i < GRID_APP_SLOTS; ++i) {
         free(slots[i].plan);
         free(slots[i].resize);
         free(slots[i].stream);
@@ -1085,14 +1111,15 @@ void pocket_grid_reset(void)
         free(slots[i].output_raw[1]);
         for (unsigned j = 0; j < KSN_GRID_BUFFERS; ++j)
             free(slots[i].input_raw[j]);
-        slots[i] = (grid_slot){0};
     }
+    free(slots);
+    slots = NULL;
     js_call_active = false;
-    frontend_loaded = false;
+    release_frontend();
 }
 void pocket_grid_source_invalidated(uint32_t resource_id)
 {
-    if (!resource_id) return;
+    if (!resource_id || !slots) return;
     for (unsigned i = 0; i < GRID_APP_SLOTS; ++i) {
         grid_slot *slot = &slots[i];
         if (!slot->stream || slot->stream->source_id != resource_id) continue;
@@ -1102,13 +1129,13 @@ void pocket_grid_source_invalidated(uint32_t resource_id)
 }
 bool pocket_grid_pending(void)
 {
-    for (unsigned i = 0; i < GRID_APP_SLOTS; ++i)
+    for (unsigned i = 0; slots && i < GRID_APP_SLOTS; ++i)
         if (slots[i].pending) return true;
     return false;
 }
 void pocket_grid_present_result(ksn_result result)
 {
-    for (unsigned i = 0; i < GRID_APP_SLOTS; ++i) {
+    for (unsigned i = 0; slots && i < GRID_APP_SLOTS; ++i) {
         grid_slot *slot = &slots[i];
         if (!slot->pending) continue;
         if (result == KSN_OK) {

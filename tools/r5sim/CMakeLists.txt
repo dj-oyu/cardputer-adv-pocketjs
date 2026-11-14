@@ -27,6 +27,19 @@ if(DEFINED R5SIM_ARENA_KIB)
     math(EXPR _r5_arena "${R5SIM_ARENA_KIB} * 1024")
     idf_build_set_property(COMPILE_DEFINITIONS "POCKET_GUEST_ARENA_BYTES=${_r5_arena}U" APPEND)
 endif()
+# The checkout's path out of the image: ESP-IDF maps only this project's
+# directory and its own in __FILE__, so main/'s and components/' asserts kept
+# the absolute path in .flash.rodata, and the counts moved with the checkout
+# (154,595 at the main checkout, 154,611 in a worktree, the same commit:
+# docs/kasane/logs/api-reorg-perf.md). -DR5SIM_PATH_MAP=0 keeps the old image.
+get_filename_component(_r5_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+if(NOT DEFINED R5SIM_PATH_MAP OR R5SIM_PATH_MAP)
+    idf_build_set_property(COMPILE_OPTIONS "-fmacro-prefix-map=${_r5_root}=." APPEND)
+endif()
+# -DR5SIM_DEVICE=1: guest.c's read of its allocation counters (R5SIM alloc).
+if(R5SIM_DEVICE)
+    idf_build_set_property(COMPILE_DEFINITIONS "POCKET_GUEST_ALLOC_COUNTS=1" APPEND)
+endif()
 if(R5SIM_CACHE_DEPTH)
     idf_build_set_property(COMPILE_DEFINITIONS "BLOCK_CACHE_DEPTH=${R5SIM_CACHE_DEPTH}" APPEND)
 endif()

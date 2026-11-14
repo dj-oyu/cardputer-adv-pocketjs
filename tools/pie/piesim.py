@@ -27,6 +27,7 @@ Supported instructions (TRM section in brackets):
     ee.vmulas.s16.qacc.ld.ip/.ld.xp/.ldbc.incp [1.8.140/142/144]
     ee.vmulas.s16.qacc.ld.ip.qup [1.8.141]
     ee.srcmb.s16.qacc [1.8.54]
+    ee.zero.accx, ee.vmulas.s16.accx [p.210], rur.accx_0, wur.sar_byte [p.64], s8i
     ee.vprelu.s16 [1.8.182]  and the fused forms ee.vadds.s16.ld.incp [1.8.71],
     ee.vsubs.s16.ld.incp [1.8.199], ee.vmul.s16.ld.incp [1.8.123], ee.vmul.u16.ld.incp [1.8.129]
 Anything else raises NotImplementedError, on purpose: add the instruction here
@@ -68,6 +69,7 @@ class Sim:
         self.qacc = [0] * 8
         self.sar = 0
         self.sar_byte = 0
+        self.accx = 0          # ACCX, its own 40-bit register (TRM p.45); see ee.srs.accx below
         self.ar = {}
         self.count = 0
 
@@ -314,8 +316,26 @@ class Sim:
                 # whatever wrote the shift last -- a USAR load or a plain `wsr.sar` (the FIR kernel
                 # walks the byte offset with wsr.sar and never loads through USAR).
                 Q[qi(a[0])] = self._src_q(Q[qi(a[1])], Q[qi(a[2])])
+            elif op == 'wur.sar_byte':
+                # TRM p.47/p.64: SAR_BYTE is its own 4-bit register, the byte count EE.SRC.Q shifts by.
+                self.sar_byte = arv(a[0]) & 15
+            elif op == 'ee.zero.accx':
+                self.accx = 0
+            elif op == 'ee.vmulas.s16.accx':
+                # TRM p.210: ACCX = clamp(ACCX + sum over 8 lanes of qx[i]*qy[i], -2^39, 2^39-1).
+                x, y = Q[qi(a[0])], Q[qi(a[1])]
+                acc = self.accx + sum(s16(x[i]) * s16(y[i]) for i in range(8))
+                self.accx = max(-(1 << 39), min(acc, (1 << 39) - 1))
+            elif op == 'rur.accx_0':
+                # The low 32 bits of ACCX, as the AR sees them (two's complement).
+                v = self.accx & 0xFFFFFFFF
+                arset(a[0], v - (1 << 32) if v & 0x80000000 else v)
+            elif op == 's8i':
+                self.mem[arv(a[1]) + int(a[2])] = arv(a[0]) & 0xFF
             elif op == 'ee.srs.accx':
                 # 1.8.65: ACCX >>= as[5:0] (in place); au = clamp(that, -2^31, 2^31-1).
+                # Older model: it stands ACCX in for QACC lane 0 (test_piesim.py relies on that).
+                # The ACCX instructions added for derby_ser_pie.c use self.accx; no kernel mixes the two.
                 n = arv(a[1]) & 63
                 self.qacc[0] = self.qacc[0] >> n
                 arset(a[0], max(-(1 << 31), min(self.qacc[0], (1 << 31) - 1)))

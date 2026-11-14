@@ -117,6 +117,11 @@ typedef struct {
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
+/* The slot a handle was attached to, by its low bits: find_slot's first
+ * guess (checked against the slot, so a stale hint only costs the walk).
+ * The walk was ~100 instructions a draw for DERBY's series plans, which are
+ * attached late (docs/kasane/shiki-draw-entry.md). */
+static uint8_t slot_hint[PROC_HANDLES];
 /* The Shiki engine's state for draw (pocket_proc_shiki_draw), taken with the
  * frames on the first Shiki draw. */
 static ksn_shiki_vm *shiki_vm;
@@ -133,6 +138,9 @@ typedef struct {
      * is drawn walking those alone (ksn_proc_render_band_range,
      * docs/platform/lcd-dma-driver.md 9.5). first > end: none touch it. */
     uint16_t first[PROC_BANDS],end[PROC_BANDS];
+    /* The box of every entry, unclamped (damage_add's): the walk that hashes
+     * the frame gives commit() its damage too (box_reuse below). */
+    int16_t box_x0,box_y0,box_x1,box_y1;
 #ifdef POCKET_PROC_SIG_CHECK
     uint64_t strong[PROC_BANDS];   /* host only: the ground truth the hash is checked against */
 #endif
@@ -178,6 +186,19 @@ typedef struct {
     bool sig_ready; /* candidate_sig describes the candidate (commit .. next beginFrame) */
     uint32_t handle;
     ksn_rect damage;
+    /* The front frame's box (proc_band_sig's), from the commit that put it
+     * there; false once the front changes any other way. */
+    int16_t front_x0,front_y0,front_x1,front_y1;
+    bool front_box;
+    /* Which entries touch each band, of the frame candidate_sig describes:
+     * PROC_BANDS rows of band_words words, bit j of a row = the entry
+     * starting at j (band_signature's sig_add). A band is then drawn
+     * walking only those (render_painter_rows, band_bits below). Taken at
+     * the first commit on the UI task, kept until reset; none (no room)
+     * is the walk over [first, end). */
+    uint32_t *band_bits;
+    uint16_t band_words;
+    bool band_bits_valid;
     uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (no option) */
     uint16_t spare;        /* entries past max_segments, when spare_set */
     bool spare_set;        /* false: as many again as max_segments */
@@ -338,6 +359,8 @@ static bool surface_index(JSContext *ctx,JSValueConst value,unsigned *index){
  * lookup must require a plan, not just a matching number. */
 static proc_slot *find_slot(uint32_t handle){
     if(!handle)return NULL;
+    proc_slot *const hinted=&slots[slot_hint[handle%PROC_HANDLES]];
+    if(hinted->plan&&hinted->handle==handle)return hinted;
     for(unsigned i=0;i<PROC_HANDLES;i++)
         if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
     return NULL;
@@ -505,12 +528,40 @@ PROC_HOT static void damage_add(const ksn_proc_frame *frame,int *bx0,int *by0,in
 /* The committed frame's box, taken before commit() moves the new frame
  * over it (whole: no committed frame, or another colour). */
 typedef struct { int x0,y0,x1,y1; bool whole; } proc_box;
+/* Same-binary A/B arm (app_session.c's switches[]): 1 takes commit()'s
+ * damage from the boxes band_signature already walks for (the front's kept
+ * from its own commit), 0 walks both frames for it as before. Same damage
+ * (the host's POCKET_PROC_SIG_CHECK compares them on every commit). */
+int g_pocket_proc_box_reuse=1;
+/* Same-binary A/B arm: 1 draws each band from its entry bitmap (band_bits),
+ * 0 walks [first, end) testing every entry. Same pixels. */
+int g_pocket_proc_band_bits=1;
 static proc_box old_box(const proc_surface *surface){
     proc_box b={KSN_PROC_W,KSN_PROC_H,0,0,
                 !surface->has_committed||surface->tail_color!=surface->committed_color||
                 surface->depth_candidate.enabled||surface->depth_committed.enabled};
-    if(!b.whole)damage_add(surface->committed,&b.x0,&b.y0,&b.x1,&b.y1);
+    if(b.whole)return b;
+    if(g_pocket_proc_box_reuse&&surface->front_box){
+        b.x0=surface->front_x0;b.y0=surface->front_y0;b.x1=surface->front_x1;b.y1=surface->front_y1;
+        return b;
+    }
+    damage_add(surface->committed,&b.x0,&b.y0,&b.x1,&b.y1);
     return b;
+}
+/* frame_damage from the candidate's signature box instead of a walk. */
+static ksn_rect box_damage(const proc_surface *surface,proc_box b){
+    if(b.whole)return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
+    const proc_band_sig *sig=&surface->candidate_sig;
+    int x0=b.x0,y0=b.y0,x1=b.x1,y1=b.y1;
+    if(sig->box_x0<x0)x0=sig->box_x0;
+    if(sig->box_y0<y0)y0=sig->box_y0;
+    if(sig->box_x1>x1)x1=sig->box_x1;
+    if(sig->box_y1>y1)y1=sig->box_y1;
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1>KSN_PROC_W)x1=KSN_PROC_W;
+    if(y1>KSN_PROC_H)y1=KSN_PROC_H;
+    return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
 /* The candidate's damage: the box of both frames' entries. */
 PROC_HOT static ksn_rect frame_damage(const proc_surface *surface,proc_box b){
@@ -536,6 +587,23 @@ static uint64_t sig_mix64(uint64_t z){
 #include <stdio.h>
 static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,sig_lo8,sig_impossible,
                           sig_skipped,sig_pixel_bad,sig_all;
+/* The other side (host census): bands the hash marks dirty whose pixels come
+ * out the same, and for the ones that do change, how much of the damage did:
+ * 4-row halves alike, 16-px columns that differ, and the bytes a damage cut
+ * to the changed pixels of each half would send against today's. */
+static unsigned long long sig_box_checked,sig_box_bad;
+static unsigned long long sig_dirty,sig_dirty_same,sig_halves,sig_halves_same,
+                          sig_cols,sig_cols_changed,sig_bytes_now,sig_bytes_tight,sig_bytes_same;
+/* The same as present_frame sends it (ksn_render.c: the window rounded out to
+ * 16 px, wider than KSN_NARROW_MAX 192 sent whole): today's damage, the band's
+ * changed pixels, each 4-row half's changed pixels. */
+static unsigned long long sig_send_now,sig_send_band,sig_send_half;
+static unsigned sig_send_w(int lo,int hi){
+    if(hi<=lo)return 0;
+    int a=lo&~15,z=(hi+15)&~15;
+    if(z>KSN_PROC_W)z=KSN_PROC_W;
+    return z-a>192?KSN_PROC_W:(unsigned)(z-a);
+}
 /* The committed frame as it was before commit() merged over it, so a
  * skipped band is checked against the frame on the panel. */
 static ksn_proc_frame *sig_old;
@@ -555,6 +623,23 @@ __attribute__((destructor)) static void sig_report(void){
             "skipped=%llu pixel_mismatch_in_skipped=%llu whole_frame_damages=%llu\n",
             sig_compared,sig_changed,sig_coll32,sig_lo16,sig_changed/65536.0,sig_hi16,sig_changed/65536.0,
             sig_lo8,sig_changed/256.0,sig_impossible,sig_skipped,sig_pixel_bad,sig_all);
+    char line[512];
+    snprintf(line,sizeof line,"SIG_DIRTY dirty=%llu pixel_same=%llu (%.1f%%) halves=%llu halves_same=%llu (%.1f%%) "
+             "cols16=%llu cols16_changed=%llu (%.1f%%) bytes_now=%llu bytes_same=%llu bytes_tight=%llu (%.1f%%)\n",
+             sig_dirty,sig_dirty_same,sig_dirty?100.0*sig_dirty_same/sig_dirty:0.0,
+             sig_halves,sig_halves_same,sig_halves?100.0*sig_halves_same/sig_halves:0.0,
+             sig_cols,sig_cols_changed,sig_cols?100.0*sig_cols_changed/sig_cols:0.0,
+             sig_bytes_now,sig_bytes_same,sig_bytes_tight,sig_bytes_now?100.0*sig_bytes_tight/sig_bytes_now:0.0);
+    snprintf(line+strlen(line),sizeof line-strlen(line),
+             "SIG_BOX checked=%llu mismatched=%llu\n"
+             "SIG_SEND now=%llu band_tight=%llu (%.1f%%) half_tight=%llu (%.1f%%)\n",sig_box_checked,sig_box_bad,
+             sig_send_now,sig_send_band,sig_send_now?100.0*sig_send_band/sig_send_now:0.0,
+             sig_send_half,sig_send_now?100.0*sig_send_half/sig_send_now:0.0);
+    fputs(line,stderr);
+    if(getenv("POCKET_SIG_REPORT")){
+        FILE *f=fopen(getenv("POCKET_SIG_REPORT"),"a");
+        if(f){fputs(line,f);fclose(f);}
+    }
 }
 #endif
 /* One entry (or a pattern line's two) as 32 bits, every input bit reaching
@@ -574,9 +659,14 @@ static inline __attribute__((always_inline)) uint32_t band_mix(uint32_t h,uint32
 /* One entry (or a pattern line's two, [start, i)) into each band it touches. */
 static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *frame,proc_band_sig *sig,
                                                           const ksn_proc_segment *geometry,
-                                                          unsigned start,unsigned i){
+                                                          unsigned start,unsigned i,
+                                                          uint32_t *bits,unsigned words){
     const int ya=geometry->y0<geometry->y1?geometry->y0:geometry->y1,yb=geometry->y0^geometry->y1^ya;
     int xa=geometry->x0<geometry->x1?geometry->x0:geometry->x1,xb=(geometry->x0^geometry->x1^xa)+1;
+    if(xa<sig->box_x0)sig->box_x0=(int16_t)xa;
+    if(ya<sig->box_y0)sig->box_y0=(int16_t)ya;
+    if(xb>sig->box_x1)sig->box_x1=(int16_t)xb;
+    if(yb+1>sig->box_y1)sig->box_y1=(int16_t)(yb+1);
     if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)return;
     if(xa<0)xa=0;
     if(xb>KSN_PROC_W)xb=KSN_PROC_W;
@@ -597,9 +687,13 @@ static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *
         if(xb>sig->x1[b])sig->x1[b]=(uint8_t)xb;
         if(sig->first[b]==UINT16_MAX)sig->first[b]=(uint16_t)start;
         sig->end[b]=(uint16_t)i;
+        if(bits)bits[b*words+(start>>5)]|=1u<<(start&31u);
     }
 }
-PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
+PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig,
+                                    uint32_t *bits,unsigned words){
+    if(bits)memset(bits,0,(size_t)PROC_BANDS*words*sizeof *bits);
+    sig->box_x0=KSN_PROC_W;sig->box_y0=KSN_PROC_H;sig->box_x1=0;sig->box_y1=0;
     for(unsigned b=0;b<PROC_BANDS;b++){
         sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
         sig->first[b]=UINT16_MAX;sig->end[b]=0;
@@ -608,7 +702,7 @@ PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *s
 #endif
     }
     if(!frame->ext){
-        for(unsigned i=0;i<frame->count;i++)sig_add(frame,sig,&frame->segments[i],i,i+1);
+        for(unsigned i=0;i<frame->count;i++)sig_add(frame,sig,&frame->segments[i],i,i+1,bits,words);
         return;
     }
     unsigned i=0,cost;
@@ -617,7 +711,7 @@ PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *s
     for(;;){
         const unsigned start=i;
         if(!ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost))break;
-        sig_add(frame,sig,&geometry,start,i);
+        sig_add(frame,sig,&geometry,start,i,bits,words);
     }
 }
 #ifdef POCKET_PROC_VISIT_STATS
@@ -689,9 +783,14 @@ static bool render_painter_rows(const proc_surface *surface,const ksn_proc_frame
         if(sig->end[b]>end)end=sig->end[b];
     }
     if(first>end)first=end=0;
+    /* The band's entries alone, when the rows are one band's and the bitmap
+     * describes this frame (candidate_sig's, written by the same commit). */
+    const uint32_t *bits=NULL;
+    if(sig==&surface->candidate_sig&&surface->band_bits_valid&&(unsigned)y/8u==(unsigned)(y+rows-1)/8u)
+        bits=surface->band_bits+((unsigned)y/8u)*surface->band_words;
     /* half_carry: taken by pocket_proc_prepare_render, never here -- this
      * may run on the display task, which allocates nothing (5d). */
-    return ksn_proc_render_band_carry(frame,pixels,y,rows,first,end,half_carry);
+    return ksn_proc_render_band_bits(frame,pixels,y,rows,first,end,bits,half_carry);
 }
 /* Depth snapshots use their own bounded workspace for any strip height. */
 static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
@@ -738,16 +837,59 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
             if((hn>>16)==(ho>>16))sig_hi16++;
             if(!((hn^ho)&0xffu))sig_lo8++;
         }
+        /* Both frames drawn over the colour, for either side of the check. */
+        static uint16_t pa[KSN_PROC_W*8],pb[KSN_PROC_W*8];
+        const int y=(int)b*8,rows=y+8>KSN_PROC_H?KSN_PROC_H-y:8;
+        for(unsigned k=0;k<KSN_PROC_W*8u;k++)pa[k]=pb[k]=s->candidate_color;
+        /* The candidate is marked ready only when it is published. */
+        static ksn_proc_frame copy;
+        memcpy(&copy,s->candidate,frame_bytes(surface_segments(s)));copy.ready=true;
+        const bool ra=ksn_proc_render_band(&copy,pa,y,rows);
+        const bool rb=ksn_proc_render_band(sig_old?sig_old:s->committed,pb,y,rows);
+        if(!fe){
+            /* Dirty: the columns commit() damages (as below), sent per row. */
+            const unsigned a=n->x0[b]<o->x0[b]?n->x0[b]:o->x0[b],z=n->x1[b]>o->x1[b]?n->x1[b]:o->x1[b];
+            const unsigned w=a<z?z-a:0;
+            sig_dirty++;
+            sig_bytes_now+=(unsigned long long)w*(unsigned)rows*2u;
+            sig_send_now+=(unsigned long long)sig_send_w((int)a,(int)z)*(unsigned)rows*2u;
+            {
+                int blo=KSN_PROC_W,bhi=0;
+                for(int h0=0;h0<rows;h0+=4){
+                    const int hr=h0+4>rows?rows-h0:4;
+                    int lo=KSN_PROC_W,hi=0;
+                    for(int r=h0;r<h0+hr;r++)for(int x=0;x<KSN_PROC_W;x++)
+                        if(pa[r*KSN_PROC_W+x]!=pb[r*KSN_PROC_W+x]){if(x<lo)lo=x;if(x+1>hi)hi=x+1;}
+                    sig_send_half+=(unsigned long long)sig_send_w(lo,hi)*(unsigned)hr*2u;
+                    if(lo<blo)blo=lo;
+                    if(hi>bhi)bhi=hi;
+                }
+                sig_send_band+=(unsigned long long)sig_send_w(blo,bhi)*(unsigned)rows*2u;
+            }
+            if(!memcmp(pa,pb,sizeof pa)){
+                sig_dirty_same++;
+                sig_bytes_same+=(unsigned long long)w*(unsigned)rows*2u;
+            }else{
+                for(int h0=0;h0<rows;h0+=4){
+                    const int hr=h0+4>rows?rows-h0:4;
+                    int lo=KSN_PROC_W,hi=-1;
+                    for(int r=h0;r<h0+hr;r++)for(int x=0;x<KSN_PROC_W;x++)
+                        if(pa[r*KSN_PROC_W+x]!=pb[r*KSN_PROC_W+x]){if(x<lo)lo=x;if(x>hi)hi=x;}
+                    sig_halves++;
+                    if(hi<0)sig_halves_same++;
+                    else sig_bytes_tight+=(unsigned long long)(hi-lo+1)*(unsigned)hr*2u;
+                }
+                for(unsigned c=a/16u*16u;c<z;c+=16u){
+                    bool diff=false;
+                    for(int r=0;r<rows&&!diff;r++)for(unsigned x=c;x<c+16u&&x<KSN_PROC_W;x++)
+                        if(pa[r*KSN_PROC_W+x]!=pb[r*KSN_PROC_W+x]){diff=true;break;}
+                    sig_cols++;
+                    if(diff)sig_cols_changed++;
+                }
+            }
+        }
         if(fe){
             /* Skipped: both frames must draw the band alike over the colour. */
-            static uint16_t pa[KSN_PROC_W*8],pb[KSN_PROC_W*8];
-            const int y=(int)b*8,rows=y+8>KSN_PROC_H?KSN_PROC_H-y:8;
-            for(unsigned k=0;k<KSN_PROC_W*8u;k++)pa[k]=pb[k]=s->candidate_color;
-            /* The candidate is marked ready only when it is published. */
-            static ksn_proc_frame copy;
-            memcpy(&copy,s->candidate,frame_bytes(surface_segments(s)));copy.ready=true;
-            const bool ra=ksn_proc_render_band(&copy,pa,y,rows);
-            const bool rb=ksn_proc_render_band(sig_old?sig_old:s->committed,pb,y,rows);
             sig_skipped++;
             if(memcmp(pa,pb,sizeof pa)){
                 if(sig_pixel_bad<3)fprintf(stderr,"SIG_BAD band=%u ra=%d rb=%d ready=%d/%d count=%u/%u ext=%u/%u first=%u/%u end=%u/%u\n",
@@ -1063,7 +1205,7 @@ static void merge(proc_surface *s){
     /* The front frame changes here and only here: what describes or caches
      * it goes stale now. Drawing writes the tail alone, so the display may
      * read the front, its colour, signature and carry until this point (5c). */
-    s->sig_ready=false;
+    s->sig_ready=false;s->front_box=false;s->band_bits_valid=false;
     s->candidate_color=s->tail_color;
     image_band_valid=false;carry_drop();
     s->committed_lost=s->has_committed;
@@ -1152,9 +1294,40 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     sig_keep_old(surface);
 #endif
     merge(surface);
-    surface->damage=frame_damage(surface,old);
-
-    band_signature(surface->candidate,&surface->candidate_sig);
+    if(g_pocket_proc_band_bits&&!surface->band_bits){
+        const unsigned words=(surface_segments(surface)+31u)/32u;
+        if((surface->band_bits=shiki_or_sys_calloc((size_t)PROC_BANDS*words,sizeof *surface->band_bits)))
+            surface->band_words=(uint16_t)words;
+    }
+    /* The front's entries are fewer than surface_segments (merge), so every
+     * start index has its bit. */
+    const bool bits=g_pocket_proc_band_bits&&surface->band_bits&&surface->candidate->count<=32u*surface->band_words;
+    band_signature(surface->candidate,&surface->candidate_sig,bits?surface->band_bits:NULL,surface->band_words);
+    surface->band_bits_valid=bits;
+    if(g_pocket_proc_box_reuse){
+        surface->damage=box_damage(surface,old);
+#ifdef POCKET_PROC_SIG_CHECK
+        {   /* The walk this replaces, on the same frames: the same damage. */
+            proc_box walked=old;
+            if(!walked.whole){
+                walked=(proc_box){KSN_PROC_W,KSN_PROC_H,0,0,false};
+                if(sig_old)damage_add(sig_old,&walked.x0,&walked.y0,&walked.x1,&walked.y1);
+            }
+            const ksn_rect w=frame_damage(surface,walked);
+            sig_box_checked++;
+            if(memcmp(&w,&surface->damage,sizeof w)){
+                if(sig_box_bad<3)fprintf(stderr,"SIG_BOX_BAD %d,%d,%d,%d vs %d,%d,%d,%d\n",w.x0,w.y0,w.x1,w.y1,
+                    surface->damage.x0,surface->damage.y0,surface->damage.x1,surface->damage.y1);
+                sig_box_bad++;
+            }
+        }
+#endif
+    }else surface->damage=frame_damage(surface,old);
+    {
+        const proc_band_sig *sig=&surface->candidate_sig;
+        surface->front_x0=sig->box_x0;surface->front_y0=sig->box_y0;
+        surface->front_x1=sig->box_x1;surface->front_y1=sig->box_y1;surface->front_box=true;
+    }
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
     visit_stats(surface->candidate);
@@ -1170,7 +1343,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
             surface->committed_lost=false;surface->has_committed=false;
             if(!surface->image_mode)pocket_kasane_invalidate();
         }
-        surface->candidate->count=0;
+        surface->candidate->count=0;surface->front_box=false;surface->band_bits_valid=false;
         return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
                        POCKET_ERR_BUSY,"Kasane presentation unavailable");
     }
@@ -1210,6 +1383,24 @@ static JSValue js_begin_mesh(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 #ifdef POCKET_PROC_DRAW_HOOK
 bool pocket_proc_hook_dry;
 #endif
+static inline __attribute__((always_inline)) JSValue
+draw_impl(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,unsigned index,
+          const bool native_fixed);
+/* The same with the inputs already in each input's Q format (drawMany's
+ * Int32Array), and the draw's number (DRAW_INDEX): pocket.derby.runners,
+ * pocket.derby.ser. */
+JSValue pocket_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index){
+    if(handle>INT32_MAX||n>KSN_SHIKI_INPUTS)
+        return failure(ctx,"kasane.shiki.draw",POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(pocket_proc_hook_dry){pocket_proc_draw_fixed_hook(handle,in,n);return JS_UNDEFINED;}
+#endif
+    JSValue result=draw_impl(ctx,handle,NULL,in,n,index,true);
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(!JS_IsException(result))pocket_proc_draw_fixed_hook(handle,in,n);
+#endif
+    return result;
+}
 /* One draw for a native caller (pocket_derby.c): a Shiki handle, the inputs
  * converted by sec.2.4 of the spec. */
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
@@ -1320,6 +1511,7 @@ uint32_t pocket_proc_shiki_attach(void *plan){
     if(slot==PROC_HANDLES||next_handle==PROC_HANDLE_MAX)return 0;
     const uint32_t handle=++next_handle;
     slots[slot]=(proc_slot){.handle=handle,.plan=plan};
+    slot_hint[handle%PROC_HANDLES]=(uint8_t)slot;
     return handle;
 }
 void *pocket_proc_shiki_plan(uint32_t handle){
@@ -1339,6 +1531,7 @@ bool pocket_proc_shiki_detach(uint32_t handle){
 pocket_shiki_draw_prof pocket_shiki_prof;
 static pocket_shiki_turn shiki_turn;
 void pocket_shiki_turn_take(pocket_shiki_turn *out){*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
+void pocket_shiki_turn_peek(pocket_shiki_turn *out){*out=shiki_turn;}
 uint32_t pocket_cycles(void){
 #ifdef ESP_PLATFORM
     return esp_cpu_get_cycle_count();
@@ -1349,8 +1542,13 @@ uint32_t pocket_cycles(void){
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
     return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
 }
-JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
-                                      unsigned index){
+/* One draw: pocket_proc_shiki_draw_inputs, and pocket_proc_draw_fixed's own
+ * copy (in_place: fixed holds n >= the plan's inputs, read where they are;
+ * the native callers', one call level and the copies fewer,
+ * docs/kasane/shiki-draw-entry.md). */
+static inline __attribute__((always_inline)) JSValue
+draw_impl(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,unsigned index,
+          const bool native_fixed){
     const char *op="kasane.shiki.draw";
     if(pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     const uint32_t t_in=pocket_cycles();
@@ -1368,25 +1566,32 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     /* Real inputs: sec.2.4's conversion (ksn_shiki_draw's), then the draw by
      * its number (DRAW_INDEX, Shiki v2.0 draft sec.4.1). */
     const ksn_shiki_plan *pl=slot->plan;
-    int32_t fx[KSN_SHIKI_INPUTS]={0};
-    const int32_t *args=fixed;
-    unsigned nargs=n;
-    bool good=true;
-    if(!fixed){
-        for(unsigned k=0;k<pl->inputs&&good;k++)
-            good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
-        args=fx;nargs=pl->inputs;
-    }
     /* Straight into the frame's place: a draw that does not fit stops at
      * LIMIT and nothing is counted, so its segments are not the frame's. */
     ksn_shiki_status st;
     unsigned room,frame_room;
     ksn_proc_segment *at=write_at(surface,&room,&frame_room);
-    shiki_turn.draws++;
-    const uint32_t t_engine=pocket_cycles();
-    if(good)st=ksn_shiki_draw_index_cap(pl,args,nargs,index,shiki_vm,at,room);
-    else{memset(shiki_vm,0,sizeof *shiki_vm);st=KSN_SHIKI_BADINPUT;}
-    shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    if(native_fixed&&n>=pl->inputs){
+        shiki_turn.draws++;
+        const uint32_t t_engine=pocket_cycles();
+        st=ksn_shiki_draw_in_place(pl,fixed,index,shiki_vm,at,room);
+        shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    }else{
+        int32_t fx[KSN_SHIKI_INPUTS]={0};
+        const int32_t *args=fixed;
+        unsigned nargs=n;
+        bool good=true;
+        if(!fixed){
+            for(unsigned k=0;k<pl->inputs&&good;k++)
+                good=ksn_shiki_from_double(k<n?in[k]:0.0,pl->input_q[k],&fx[k]);
+            args=fx;nargs=pl->inputs;
+        }
+        shiki_turn.draws++;
+        const uint32_t t_engine=pocket_cycles();
+        if(good)st=ksn_shiki_draw_index_cap(pl,args,nargs,index,shiki_vm,at,room);
+        else{memset(shiki_vm,0,sizeof *shiki_vm);st=KSN_SHIKI_BADINPUT;}
+        shiki_turn.engine_cy+=pocket_cycles()-t_engine;
+    }
     shiki_turn.steps+=shiki_vm->steps;
     /* A pattern line needs two entries: one left reads as full too. */
     const bool full=st==KSN_SHIKI_LIMIT&&room<KSN_SHIKI_SEGMENTS&&shiki_vm->count+1u>=room;
@@ -1406,6 +1611,10 @@ JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const doubl
     if(pf->on){pf->copy+=pocket_cycles()-pf->mark;pf->n++;}
     shiki_turn.total_cy+=pocket_cycles()-t_in;
     return JS_UNDEFINED;
+}
+JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
+                                      unsigned index){
+    return draw_impl(ctx,handle,in,fixed,n,index,false);
 }
 
 // The frame's functions on kasane.shiki (pocket_shiki_api.c).
@@ -1435,6 +1644,7 @@ void pocket_proc_reset(void){
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);   /* committed is the same buffer */
+        shiki_or_sys_free(surfaces[i].band_bits);
         free(surfaces[i].depth_candidate.packets.data);free(surfaces[i].depth_committed.packets.data);
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
         free(surfaces[i].prepared_candidate);free(surfaces[i].prepared_committed);

@@ -128,15 +128,14 @@ static JSValue stage_pixel(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     pocket_kasane_pixel_invalidate();
     return JS_NewBool(ctx,true);
 }
+static const JSCFunctionListEntry pixel_functions[]={
+    JS_CFUNC_DEF("open",2,open_pixel),JS_CFUNC_DEF("stage",4,stage_pixel)
+};
+/* An object entry: built on the first touch of kasane.pixel (sec.3.1). */
+static const JSCFunctionListEntry pixel_entry[]={
+    JS_OBJECT_DEF("pixel",pixel_functions,2,JS_PROP_C_W_E),
+};
 esp_err_t pocket_pixel_install(JSContext *ctx,JSValueConst kasane){
-    JSValue object=JS_NewObject(ctx);
-    if(JS_IsException(object))return ESP_ERR_NO_MEM;
-    static const JSCFunctionListEntry functions[]={
-        JS_CFUNC_DEF("open",2,open_pixel),JS_CFUNC_DEF("stage",4,stage_pixel)
-    };
-    if(JS_SetPropertyFunctionList(ctx,object,functions,2)<0){
-        JS_FreeValue(ctx,object);return ESP_ERR_NO_MEM;
-    }
-    if(JS_SetPropertyStr(ctx,(JSValue)kasane,"pixel",object)<0)return ESP_ERR_NO_MEM;
-    return ESP_OK;
+    return JS_SetPropertyFunctionList(ctx,kasane,pixel_entry,1)<0||JS_HasException(ctx)?
+           ESP_ERR_NO_MEM:ESP_OK;
 }

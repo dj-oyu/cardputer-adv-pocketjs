@@ -23,7 +23,9 @@ void ksn_render_decode_cycle_report(void);
  * time is a device question, counts are a host question.
  *
  * The five brackets: fill = one fill565 call (a band background, or one row of
- * an opaque rect), span = one text->span, tile = one whole render_group,
+ * an opaque rect), span = one text->span, or one text->runs call (a command's
+ * part of a band, its composite included: such text adds nothing to blend),
+ * tile = one whole render_group,
  * blend = one per-pixel composite loop entered (covers+sample+blend, or the
  * group's child loop), read = one command decode the renderer asked for: a
  * ksn_core_read on its own, or, now that boundary 2a is integrated, one
@@ -41,6 +43,13 @@ void ksn_render_decode_cycle_report(void);
 typedef struct {
     uint32_t fill_cy,span_cy,tile_cy,blend_cy,read_cy,image_cy;
     uint32_t fill_n,span_n,tile_n,blend_n,read_n,image_n;
+    /* The pieces (4- or 8-row strips) against the send (fable_next_step,
+     * lcd-dma-driver.md 9.17): draw = strip handed out .. present called;
+     * wait = cycles inside strip() and present() (the CPU waiting for the
+     * DMA); excess = sum of max(0, draw - the previous piece's send), the
+     * send taken as its bytes x 24 cycles (80 MHz SPI at 240 MHz); first =
+     * the first piece's draw, which nothing overlaps. */
+    uint32_t piece_n,piece_draw_cy,piece_wait_cy,piece_excess_cy,piece_first_cy;
 } ksn_render_prof;
 extern int g_ksn_prof;
 extern ksn_render_prof g_ksn_render_prof;
@@ -247,6 +256,8 @@ extern int g_ksn_vertical_gradient_pie;
 /* Candidate for binary text masks: aligned eight-pixel blocks are consumed by
  * a zero-copy, per-lane-alpha PIE kernel. Disabled until its own device A/B. */
 extern int g_ksn_text_pie;
+extern int g_ksn_text_extent;
+extern int g_ksn_text_runs;
 #ifdef __cplusplus
 }
 #endif

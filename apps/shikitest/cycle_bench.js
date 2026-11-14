@@ -19,7 +19,7 @@ function show() {
   try {
     V.patch(function (tx) {
       count.setText(tx, i + ' / ' + total + ' CASES');
-      bar.setRect(tx, [BAR[0], BAR[1], BAR[0] + Math.max(1, Math.round((BAR[2] - BAR[0]) * i / total)), BAR[3]]);
+      bar.setRect(tx, BAR[0], BAR[1], BAR[0] + Math.max(1, Math.round((BAR[2] - BAR[0]) * i / total)), BAR[3]);
       if (done) note.setText(tx, 'DONE');
     });
   } catch (e) { /* the last picture is not presented yet: the next case's patch shows the count */ }

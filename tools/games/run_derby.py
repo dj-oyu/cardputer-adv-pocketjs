@@ -24,12 +24,17 @@ then runs:
      150 m deep and f held at 200, so that a panning unit sees it (its face,
      feed and occlusion checked; the side units' faces are not, the screen
      being out of place for them).
-The series run in C (pocket.derby, main/pocket/pocket_derby.c): three runs of the 64-bit build
-(MID, and LIGHT and HEAVY panning for every WIDE, the director alone) carry
-DERBY_SER_ORACLE, which runs the JS ser() of vm/main
+The series run in C, in integers (pocket.derby, main/pocket/pocket_derby.c and
+derby_ser_int.c; the rotation and cull on the PIE path, here the kernels'
+scalar reference derby_ser_pie.c with DERBY_SERPIE_HOST): three runs of the
+64-bit build (MID, and LIGHT and HEAVY panning for every WIDE, the director
+alone) carry DERBY_SER_ORACLE, which runs the JS ser() of vm/main
 (tools/games/derby_ser_oracle.js) beside the C on every call and on 4,000
-random cameras and courses, and requires every draw input equal bit for bit;
+random cameras and courses, and requires every call's points on the screen
+within the tolerance (docs/apps/derby-ser-division.md sec.5, sec.13);
 --oracle puts it in every run (their guest heap figures then include it).
+HEAVY panning for every WIDE runs again on the scalar rotation and cull (the
+up key's B side, DERBY_SER_SCALAR): its pixels must be the PIE path's.
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
@@ -80,8 +85,9 @@ QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
          # pocket.app.load and its table, read from apps/derby/chunks.txt
          "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c",
-         # pocket.derby, the series in C (docs/apps/derby-ser-native.md)
-         "main/pocket/pocket_derby.c",
+         # pocket.derby, the series in C (docs/apps/derby-ser-native.md), and
+         # its integer path (docs/apps/derby-ser-division.md)
+         "main/pocket/pocket_derby.c", "main/pocket/derby_ser_int.c", "main/pocket/derby_ser_pie.c",
          # pocket.kasane.shiki: the runners and HEAD ON's horses (derby_prog.js @shiki)
          "main/pocket/pocket_shiki_api.c"]
 
@@ -138,7 +144,8 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     # KSN_HOST_CFLAGS: extra flags for a profiling build (-DKSN_SHIKI_OPSTATS,
     # docs/kasane/shiki-jit.md sec.10).
     extra = os.environ.get("KSN_HOST_CFLAGS", "").split()
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DPOCKET_PROC_DRAW_HOOK",
+                    "-DDERBY_SER_CHECK", "-DDERBY_SERPIE_HOST", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
@@ -277,6 +284,22 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
         raise SystemExit("seed analysis failed")
 
 
+def check_serq(flags: list[str], cases: int = 10000) -> None:
+    """Stage S0 of docs/apps/derby-ser-division.md: the integer ser()
+    (main/pocket/derby_ser_int.c, both culls: the scalar one and the PIE
+    kernels' reference, main/pocket/derby_ser_pie.c) against the double series
+    on the app's cameras and random ones (tools/games/test_derby_serq.c)."""
+    out = CACHE / "test-derby-serq"
+    CACHE.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["gcc", "-std=gnu11", "-O2", "-g", *flags, "-ffp-contract=off", "-Wall", "-Wextra", "-Werror",
+                    "-DDERBY_SER_CHECK", "-DDERBY_SER_COUNT", "-DDERBY_SERPIE_HOST", "-Imain/pocket",
+                    "tools/games/test_derby_serq.c", "main/pocket/derby_ser_int.c", "main/pocket/derby_ser_pie.c",
+                    "-lm", "-o", str(out)], cwd=ROOT, check=True)
+    print(f"==== integer ser() against the double (test_derby_serq, {cases} random cameras)", flush=True)
+    if subprocess.run([str(out), str(cases)], cwd=ROOT).returncode:
+        raise SystemExit("integer ser() check failed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
@@ -304,17 +327,18 @@ def main() -> None:
         (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0"}) for t in (0, 2)] + [
         (0, {"DERBY_NOCAM": "1", "DERBY_PAN": "0,1", "DERBY_PANFACE": "1", "DERBY_JS": "VS[0]=700;VS[1]=150"})] + [
         (1, {"DERBY_NOCAM": "1", "DERBY_SER_ORACLE": "1"})] + [
-        (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1"}) for t in (0, 2)]
+        (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1"}) for t in (0, 2)] + [
+        # The up key's B side: the scalar rotation and cull (sec.13).
+        (2, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_SCALAR": "1"})]
     if args.oracle:
         runs = [(t, dict(x, DERBY_SER_ORACLE="1")) for t, x in runs if "DERBY_SER_ORACLE" not in x]
-    # i386 computes doubles on the x87 in 80 bits: the C (expressions kept in
-    # registers) and the interpreter (each operation stored) then differ in
-    # the last bit, which neither the device (IEEE soft float) nor the 64-bit
-    # host (SSE2) does. The oracle's verdict is the 64-bit build's; m32 is for
-    # the heap figures (its pixels still match: the inputs become floats).
+    # The oracle's verdict is the 64-bit build's (i386 computes the JS's and
+    # the aim()'s doubles on the x87 in 80 bits, which neither the device nor
+    # the 64-bit host does); m32 is for the heap figures, which the oracle's
+    # own JS would inflate.
     if args.m32:
         runs = [(t, x) for t, x in runs if "DERBY_SER_ORACLE" not in x]
-    finish = {}
+    finish, pixels = {}, {}
     for tier, extra in runs:
         e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)
         if args.heap_limit:
@@ -328,6 +352,7 @@ def main() -> None:
         print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
         out = run(binary, e)
         finish[(tier, *extra)] = re.search(r"^finish: (.*)$", out, re.M).group(1)
+        pixels[(tier, *sorted(extra.items()))] = re.search(r"^pixels hash (\w+)", out, re.M).group(1)
         if args.ppm and tier == 1 and not extra:
             pan_shots = re.findall(r"^PANSHOT (\w+) (\d+)", out, re.M)
         if tier == 1 and not extra and not args.heap_limit:
@@ -337,7 +362,16 @@ def main() -> None:
     # tier, the camera keys nor the pick may move the player's race.
     if len(set(finish.values())) > 1:
         raise SystemExit(f"the player's race differs between runs: {finish}")
+    # The PIE path and the scalar one keep different extra chords (margins
+    # m + 1 m and m + 3 m), which lim() drops: the same pixels.
+    pie = (2, ("DERBY_NOCAM", "1"), ("DERBY_PAN", "0"))
+    scalar = (2, ("DERBY_NOCAM", "1"), ("DERBY_PAN", "0"), ("DERBY_SER_SCALAR", "1"))
+    if pie in pixels and scalar in pixels:
+        if pixels[pie] != pixels[scalar]:
+            raise SystemExit(f"the scalar rotation and cull drew other pixels: PIE {pixels[pie]}, scalar {pixels[scalar]}")
+        print(f"PIE and scalar paths: the same pixels ({pixels[pie]})")
     if not args.heap_limit:
+        check_serq([] if args.m32 else ["-fsanitize=address,undefined"])
         print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
         if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
             raise SystemExit("odds calibration check failed")

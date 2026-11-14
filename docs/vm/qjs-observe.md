@@ -340,6 +340,7 @@ r5sim の STRESS（`stress_r5.js`、Kasane の保持型シーン）は今の Shi
 - **ファイルごとの最適化を実機に合わせた。** ファームは描画と Shiki の 7 ファイル（`ksn_font`・`ksn_render`・`ksn_core`・`pocket_kasane`・`pocket_shiki_frame`・`ksn_shiki`・`ksn_shiki_frame`）を `-O2` で組む（`main/CMakeLists.txt`、[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12）が、r5sim は全部 `-Os` だった。`-Os` では `ksn_shiki.c` の可変量の 64 bit シフトが全部 libgcc の呼び出し（`__ashldi3` 1,714・`__ashrdi3` 1,324 回/ターン）になり、**最初の Shiki 版の記録は 64 bit シフトの関数呼び出しが目立つ、実機には無い姿を見せていた**。`-O2` では呼び出しは 0（逆アセンブルで確認）。命令数は同じ（インラインのシフトが呼び出しと同じだけの命令）。
 - 1 ターン（Shiki 版、`-O2` に合わせた後、全命令のトレース）: 112.8 万命令のうち描画ほか 71.3 万、quickjs.c 17.3 万、アロケータ 12.7 万、libgcc 6.4 万（シフトを除くと約 4 万）、窓例外 2.7 万。JS の側（描画を除く）は約 38 万命令。実機の XTPERF の 1 ターンは 75.3 万命令（STRESS、Shiki の JIT の描画を含む、[turn-jumps-pie.md](turn-jumps-pie.md) §2）なので、残りの約 37 万が JIT の描画と commit という見積もりになる（推定、内訳は実機で分けていない）。
 - `pocket_kasane_end_turn` は 1 ターン 24 カウント。Shiki の描画は `frame()` の中（JS から呼ぶネイティブ）で走る。
+- 2026-11-13 に負荷が 3 つ増えた（`shiki_v1`＝`4840504` の STRESS の固定の写し、`derby`＝DERBY のデモのレースを場面別に、`hud`＝LCD CATCH）。`-DR5SIM_DEVICE=1` では `R5SIM alloc per_turn=`（ゲストの確保の回数）も出る。使い方・決定性（`-icount shift=2,sleep=off`）・ベースラインは [api-reorg-perf.md](../kasane/logs/api-reorg-perf.md)。
 
 ## 13. 続きの改善と、採らなかったもの
 

@@ -434,8 +434,8 @@ void shell_volume_touched(void) { volume_shown_us=esp_timer_get_time(); }
 static void paint_volume(void) {
     if(!volume_shown_us) return;
     if(esp_timer_get_time()-volume_shown_us>1500000) { volume_shown_us=0; return; }
-    // paint.c keeps the live strip in module state and overlay_paint() may have
-    // pointed it somewhere else this pass, so it is set again here rather than
+    // paint.c keeps the live strip in module state and the scene or overlay may
+    // have pointed it somewhere else this pass, so it is set again here rather than
     // assumed.
     paint_begin(strip,strip_y,strip_h);
     const uint16_t ink=board_rgb(237,246,255), dim=board_rgb(40,60,84),
@@ -1048,14 +1048,12 @@ void shell_draw(const char *error, unsigned phase) {
         band=esp_timer_get_time();
         HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
         if(sc->overlay)sc->overlay(strip,strip_y,strip_h);
-        // Scene, then overlay. Nothing of the shell's own goes on top of it
-        // here any more: 3.1 asks that only MODAL surfaces beat an overlay, and
-        // those are whole screens of their own drawn from main.c's loop, not
-        // rows composited into this frame. The menu that used to land on top of
-        // this line does not exist while an overlay is up (see menu_layout
-        // above), which is what makes the ordering here uninteresting rather
-        // than load bearing.
-        overlay_paint(strip,strip_y,strip_h);
+        // Scene, then overlay (sc->overlay above). Nothing of the shell's own
+        // goes on top of it here any more: 3.1 asks that only MODAL surfaces
+        // beat an overlay, and those are whole screens of their own drawn from
+        // main.c's loop, not rows composited into this frame. The menu that
+        // used to land on top of this line does not exist while an overlay is
+        // up (see menu_layout above).
         HUD_FENCE;uint32_t h1=esp_cpu_get_cycle_count();HUD_FENCE;
         if(show_fps)text(194,8,meter,1,muted);
         HUD_FENCE;uint32_t h3=esp_cpu_get_cycle_count();HUD_FENCE;

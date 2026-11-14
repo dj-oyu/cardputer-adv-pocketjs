@@ -47,7 +47,7 @@
 | --- | --- | --- | --- |
 | `pocket.kasane.procedural` | `register`・`unregister`・`beginFrame`・`draw`・`commit`・`resource`・`createSurface` | **専用の capability なし**（`display.kasane` の名前空間に同居）。**上限は `limits` に出ていない** | `main/pocket/pocket_shiki_frame.c` |
 | `pocket.kasane.grid` | `register`・`registration`・`registerResize`・`registerResizeSource`・`run`・`profile`・`measure`・`resource`・`explain` | 同上（capability なし、`limits` なし） | `main/pocket/pocket_grid.c` |
-| グローバル `gridFold` | `fold`・`index`・`view`（初回使用時に JS の前段を読む） | — | 同上 |
+| グローバル `gridFold`（api-reorg P5 で消した。`pocket.kasane.grid.fold/index/view`） | `fold`・`index`・`view`（初回使用時に JS の前段を読む） | — | 同上 |
 | `pocket.shapes` | `project`・`fill`・`outline` | `kasane.shapes`（manifest で宣言したアプリだけ）。`maxPoints` 1024・`maxPolygonPoints` 256・`maxHoles` 6 | `main/pocket/pocket_shape.c`、[shapes.md](../api/shapes.md) |
 | `pocket.derby` | `course`・`view`・`ser`（`project` は実験フラグ `POCKET_DERBY_PROJECT_BATCH`、既定 OFF） | `derby.series`（DERBY だけ）。`maxEnds` 32・`maxSections` 4 | `main/pocket/pocket_derby.c`、[derby-ser-native.md](../apps/derby-ser-native.md) |
 

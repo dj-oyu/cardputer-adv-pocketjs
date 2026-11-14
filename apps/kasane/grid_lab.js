@@ -16,10 +16,10 @@
     mode.resource = null;
   }
   const foldWidth = 48, foldHeight = 28;
-  const foldIndex = gridFold.index({x: 1, y: foldWidth});
-  const mirrorIndex = gridFold.index({base: foldWidth - 1,
+  const foldIndex = grid.index({x: 1, y: foldWidth});
+  const mirrorIndex = grid.index({base: foldWidth - 1,
                                      x: -1, y: foldWidth});
-  const foldProgram = gridFold.fold({
+  const foldProgram = grid.fold({
     width: foldWidth, height: foldHeight, tapWidth: 1, tapHeight: 1,
     output: foldIndex, shift: 2
   }, g => {
@@ -33,25 +33,25 @@
               source: new Int16Array(foldWidth * foldHeight),
               handle: grid.register(foldProgram), resource: null});
   const pairWidth = 48, pairHeight = 20, pairPitch = 64;
-  const pairProgram = gridFold.fold({
+  const pairProgram = grid.fold({
     width: pairWidth, height: pairHeight, tapWidth: 1, tapHeight: 1,
-    output: gridFold.index({x: 1, y: pairWidth}), shift: 2
+    output: grid.index({x: 1, y: pairWidth}), shift: 2
   }, g => g.add(g.acc, g.add(
-    g.mul(g.load(0, gridFold.index({x: 1, y: pairPitch})),
+    g.mul(g.load(0, grid.index({x: 1, y: pairPitch})),
           g.constant(2)),
-    g.load(0, gridFold.index({base: 8, x: 1, y: pairPitch})))));
+    g.load(0, grid.index({base: 8, x: 1, y: pairPitch})))));
   modes.push({width: pairWidth, height: pairHeight, label: 'FOLD PAIR',
               kind: 'fold', sourceWidth: pairPitch,
               source: new Int16Array(pairPitch * pairHeight),
               handle: grid.register(pairProgram), resource: null});
   const weightWidth = 40, weightHeight = 20;
-  const weightProgram = gridFold.fold({
+  const weightProgram = grid.fold({
     width: weightWidth, height: weightHeight, tapWidth: 1, tapHeight: 1,
-    output: gridFold.index({x: 1, y: weightWidth}), shift: 2
+    output: grid.index({x: 1, y: weightWidth}), shift: 2
   }, g => g.add(g.acc, g.add(
-    g.mul(g.load(0, gridFold.index({x: 1, y: weightWidth})),
-          g.load(2, gridFold.index({x: 1, y: weightWidth}))),
-    g.load(0, gridFold.index({base: weightWidth - 1,
+    g.mul(g.load(0, grid.index({x: 1, y: weightWidth})),
+          g.load(2, grid.index({x: 1, y: weightWidth}))),
+    g.load(0, grid.index({base: weightWidth - 1,
                              x: -1, y: weightWidth})))));
   modes.push({width: weightWidth, height: weightHeight, label: 'FOLD WEIGHT',
               kind: 'fold', sourceWidth: weightWidth,

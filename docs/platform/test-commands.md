@@ -43,6 +43,7 @@ python tools/pie/run_models.py          # カーネルが使う式の全域ビ�
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_scene_tables.py .cache/generated && gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/scene_stub -Imain/scene -I.cache/generated tools/test_wave.c -lm -o /tmp/tw && /tmp/tw"   # LEVEL WAVE: 水の体積保存・静止時の勾配・strip一致・傾きの全範囲（docs/scenes/level-wave.md）。tools/preview_wave.c は連番PPMのプレビュー
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasane・Shikiで900フレーム（Kasaneが断るシーン・Shikiのdrawの失敗を焼く前に、WSLのみ、Node要）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && M32=1 bash tools/build_kasane_ns_cost_test.sh && /tmp/test-kasane-ns-cost-m32"   # pocket.kasane を最初に読む時のゲストヒープ（grid・video・pixel・shiki の内訳、実機と同じ 8 B の JSValue。docs/kasane/logs/api-reorg-perf.md §3.3）
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
 python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```

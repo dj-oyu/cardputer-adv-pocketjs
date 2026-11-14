@@ -1,7 +1,9 @@
 // Registration-time symbolic fold for the typed int16 grid IR experiment.
 // Values are immutable expressions. Only the returned expression updates acc;
 // native code runs the rectangular loops after registration.
-(function (global) {
+// The script evaluates to the frozen {fold, index, view} object: the firmware
+// keeps it behind pocket.kasane.grid and there is no gridFold global.
+(function () {
   const CONST = 1, LOAD = 2, ADD = 3, MUL = 4, MIN = 5, NO_PARAM = 255;
   const int = (n, low, high) => {
     if (!Number.isSafeInteger(n) || n < low || n > high) throw RangeError("grid integer");
@@ -137,5 +139,5 @@
                          -2147483648, 2147483647),
             body, output: checkedIndex(spec.output), shape};
   };
-  global.gridFold = Object.freeze({fold, index, view});
-})(globalThis);
+  return Object.freeze({fold, index, view});
+})();

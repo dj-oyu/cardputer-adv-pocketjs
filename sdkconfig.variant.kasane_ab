@@ -1,0 +1,2 @@
+# Kasane render A/B (main/app_session.c KASANE_AB): one switch off per 30-frame window
+CONFIG_POCKET_KASANE_AB=y

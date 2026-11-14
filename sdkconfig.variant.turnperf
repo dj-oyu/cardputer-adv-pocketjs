@@ -1,0 +1,3 @@
+# Two-build comparisons (TURNPERF windows, the same seed in both)
+CONFIG_POCKET_VM_TURNPERF=y
+CONFIG_POCKET_FIXED_RANDOM_SEED=y

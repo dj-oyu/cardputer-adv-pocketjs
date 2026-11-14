@@ -5,6 +5,10 @@
 #include <string.h>
 
 int g_ksn_proc_hspan=1;
+/* Same-binary A/B arm (app_session.c's switches[]): 1 is plain_entry's walk
+ * below, 0 the walk it replaced (plain_entry_ref). Same pixels
+ * (tools/kasane_contract/test_plain_walk.c compares them). */
+int g_ksn_proc_plain_walk=1;
 /* Columns a..b (inclusive, already on the panel) of one row in colour c, two
  * pixels a 32-bit store once the address is 4-aligned. may_alias: the rest of
  * the renderer reads and writes these pixels as uint16_t
@@ -630,9 +634,8 @@ static void blend_ellipsoids_band(const ksn_proc_blend_ellipsoids *p,const ksn_p
 }
 /* A plain entry of a frame without pattern lines that reaches rows
  * y..y+height-1: the walk of ksn_proc_render_band. */
-static inline __attribute__((always_inline)) void plain_entry(const ksn_proc_segment *s,uint16_t *pixels,
-                                                              int y,int height){
-    if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);return;}
+static __attribute__((noinline)) void plain_entry_ref(const ksn_proc_segment *s,uint16_t *pixels,
+                                                       int y,int height){
     int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
     int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
     /* A band can be reached without replaying the line's prefix: the
@@ -648,6 +651,48 @@ static inline __attribute__((always_inline)) void plain_entry(const ksn_proc_seg
         int twice=2*err;
         if(twice>-dy){err-=dy;x+=sx;}
         if(twice<dx){err+=dx;yy+=sy;}
+    }
+}
+/* The same walk as plain_entry_ref, pixel for pixel, with its per-step tests
+ * moved to where they can change:
+ * - the band is left only when yy moves, so that is where it is tested, and
+ *   the entry point is in the band (tested once), so the store needs only the
+ *   column test, against a row pointer that moves with yy;
+ * - x is monotonic, so once it is off the panel on the side it is moving
+ *   towards (or not moving at all), no later pixel can land: the walk stops
+ *   there instead of stepping to the far endpoint.
+ * The endpoint test stays the reference's (x and yy both). */
+static inline __attribute__((always_inline)) void plain_entry(const ksn_proc_segment *s,uint16_t *pixels,
+                                                              int y,int height){
+    if(g_ksn_proc_hspan&&s->y0==s->y1){hspan(s,s->x0,pixels,y);return;}
+    if(!g_ksn_proc_plain_walk){plain_entry_ref(s,pixels,y,height);return;}
+    int x=s->x0,yy=s->y0;
+    const int dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
+    const int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1;
+    int err=dx-dy;
+    band_entry(s,s->x0,y,height,&x,&yy,&err);
+    if((unsigned)(yy-y)>=(unsigned)height){
+        /* Past the band: the reference stops at once. Short of it (an entry
+         * band_entry does not move, a line that starts above or below the
+         * band and walks into it): the reference's own walk. */
+        if((sy>0&&yy>=y+height)||(sy<0&&yy<y))return;
+        plain_entry_ref(s,pixels,y,height);return;
+    }
+    const int x1=s->x1,y1=s->y1;
+    const uint16_t color=s->color;
+    uint16_t *row=pixels+(yy-y)*KSN_PROC_W;
+    const int stride=sy*KSN_PROC_W;
+    for(;;){
+        if((unsigned)x<(unsigned)KSN_PROC_W)row[x]=color;
+        else if(!dx||(x<0)==(sx<0))return;
+        if(x==x1&&yy==y1)return;
+        const int twice=2*err;
+        if(twice>-dy){err-=dy;x+=sx;}
+        if(twice<dx){
+            err+=dx;yy+=sy;
+            if((unsigned)(yy-y)>=(unsigned)height)return;
+            row+=stride;
+        }
     }
 }
 /* Entry j, known to reach the rows: a pattern line takes j and j+1 (a
@@ -711,8 +756,18 @@ static inline bool carry_rest(int y,int height,int *rest_y,int *rest_end){
  * frame and range, visits only those -- in the same order, so the pixels are
  * the same (docs/platform/lcd-dma-driver.md 9.9). Every other call leaves the
  * carry unused and invalid. */
+/* The entries of [first, end) a band bitmap names (bit j = the entry
+ * starting at j touches the band, pocket_shiki_frame.c's band_signature),
+ * in the same ascending order as the plain walk. */
+#define BAND_FOR(j) \
+    for(unsigned bw_=first>>5,bwe_=end?((end-1u)>>5):0u;first<end&&bw_<=bwe_;bw_++) \
+        for(uint32_t bm_=bits[bw_] \
+                &(bw_==(first>>5)?(0xffffffffu<<(first&31u)):0xffffffffu) \
+                &(bw_==bwe_&&(end&31u)?(0xffffffffu>>(32u-(end&31u))):0xffffffffu); \
+            bm_;bm_&=bm_-1u) \
+            for(unsigned j=bw_*32u+(unsigned)__builtin_ctz(bm_),once_=1;once_;once_=0)
 static bool render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
-                        unsigned first,unsigned end,ksn_proc_carry *carry){
+                        unsigned first,unsigned end,const uint32_t *bits,ksn_proc_carry *carry){
     if(!frame||!frame->ready||!pixels||y<0||height<0||y>KSN_PROC_H||height>KSN_PROC_H-y||
        frame->count>KSN_PROC_SEGMENTS||first>end||end>frame->count){if(carry)carry->valid=false;return false;}
     const bool ext=frame->ext;
@@ -744,7 +799,23 @@ static bool render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int h
     if(ext){
         /* Advance by logical entries even when culled: payload bytes can look
          * like markers or visible line coordinates. Carry bits name headers. */
-        for(unsigned j=first;j<end;){
+        if(bits){
+            /* Only the entries that start a logical entry have bits, so each
+             * is read from its own start. */
+            BAND_FOR(start){
+                unsigned j=start;
+                ksn_proc_segment geometry;
+                if(!packet_next(frame,&j,&geometry)||j>end)return false;
+                const int ymin=geometry.y0<geometry.y1?geometry.y0:geometry.y1;
+                const int ymax=geometry.y0>geometry.y1?geometry.y0:geometry.y1;
+                if(ymax<y||ymin>=top)continue;
+                if(note){
+                    if(ymax>=rest_y)carry->bits[start>>5]|=1u<<(start&31u);
+                    if(ymin>=rest_y)continue;
+                }
+                ext_entry(frame,start,pixels,y,height);
+            }
+        }else for(unsigned j=first;j<end;){
             const unsigned start=j;
             ksn_proc_segment geometry;
             if(!packet_next(frame,&j,&geometry)||j>end)return false;
@@ -757,20 +828,31 @@ static bool render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int h
             }
             ext_entry(frame,start,pixels,y,height);
         }
-    }else if(note)for(unsigned j=first;j<end;j++){
-        const ksn_proc_segment *s=&frame->segments[j];
-        int ymin=s->y0<s->y1?s->y0:s->y1;
-        int ymax=s->y0>s->y1?s->y0:s->y1;
-        if(ymax<y||ymin>=top)continue;
-        if(ymax>=rest_y)carry->bits[j>>5]|=1u<<(j&31u);
-        if(ymin>=rest_y)continue;
-        plain_entry(s,pixels,y,height);
-    }else for(unsigned j=first;j<end;j++){
-        const ksn_proc_segment *s=&frame->segments[j];
-        int ymin=s->y0<s->y1?s->y0:s->y1;
-        int ymax=s->y0>s->y1?s->y0:s->y1;
-        if(ymax<y||ymin>=y+height)continue;
-        plain_entry(s,pixels,y,height);
+    }else{
+        /* One entry of the plain walk; `continue` skips it in either loop. */
+#define NOTE_ENTRY(j) { \
+        const ksn_proc_segment *s=&frame->segments[j]; \
+        int ymin=s->y0<s->y1?s->y0:s->y1; \
+        int ymax=s->y0>s->y1?s->y0:s->y1; \
+        if(ymax<y||ymin>=top)continue; \
+        if(ymax>=rest_y)carry->bits[(j)>>5]|=1u<<((j)&31u); \
+        if(ymin>=rest_y)continue; \
+        plain_entry(s,pixels,y,height); }
+#define PLAIN_ENTRY(j) { \
+        const ksn_proc_segment *s=&frame->segments[j]; \
+        int ymin=s->y0<s->y1?s->y0:s->y1; \
+        int ymax=s->y0>s->y1?s->y0:s->y1; \
+        if(ymax<y||ymin>=y+height)continue; \
+        plain_entry(s,pixels,y,height); }
+        if(note){
+            if(bits)BAND_FOR(j)NOTE_ENTRY(j)
+            else for(unsigned j=first;j<end;j++)NOTE_ENTRY(j)
+        }else{
+            if(bits)BAND_FOR(j)PLAIN_ENTRY(j)
+            else for(unsigned j=first;j<end;j++)PLAIN_ENTRY(j)
+        }
+#undef NOTE_ENTRY
+#undef PLAIN_ENTRY
     }
     if(note){
         carry->frame=frame;carry->count=frame->count;
@@ -780,13 +862,17 @@ static bool render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int h
     return true;
 }
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
-    return render_band(frame,pixels,y,height,0,frame?frame->count:0,NULL);
+    return render_band(frame,pixels,y,height,0,frame?frame->count:0,NULL,NULL);
 }
 bool ksn_proc_render_band_range(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
                                 unsigned first,unsigned end){
-    return render_band(frame,pixels,y,height,first,end,NULL);
+    return render_band(frame,pixels,y,height,first,end,NULL,NULL);
+}
+bool ksn_proc_render_band_bits(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
+                               unsigned first,unsigned end,const uint32_t *bits,ksn_proc_carry *carry){
+    return render_band(frame,pixels,y,height,first,end,bits,carry);
 }
 bool ksn_proc_render_band_carry(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height,
                                 unsigned first,unsigned end,ksn_proc_carry *carry){
-    return render_band(frame,pixels,y,height,first,end,carry);
+    return render_band(frame,pixels,y,height,first,end,NULL,carry);
 }

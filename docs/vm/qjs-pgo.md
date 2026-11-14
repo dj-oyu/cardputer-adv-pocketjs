@@ -21,6 +21,8 @@ QEMU で STRESS を流して取った実行回数で QuickJS をコンパイル�
 - **本命の hot/cold 分割は、この GCC では使えない。** `-freorder-blocks-and-partition` は Xtensa の GCC
   （esp-15.2.0）が指定を無視して切る（`-Q --help=optimizers` が `[disabled]`。同じ玩具は x86 の GCC なら分割する）。
   [p1-iram-placement.md](p1-iram-placement.md) の「関数内の hot/cold 分割をしない」と同じ壁。
+  （2026-11-13: GCC に頼らず、GCC の出すアセンブリの上で分割する試作は [qjs-hotcold.md](qjs-hotcold.md)。`-Os` の関数は
+  プロファイルが無いと `likely`/`cold` を付けても並べ替えられないことも、そこで確かめた。）
 - **使えるのは関数内のブロックの並べ替え。** `-Os` のまま、プロファイルと `-freorder-blocks-algorithm=stc`
   で、走った経路をつなげて置き、走らなかったブロックを関数の後ろへ寄せる。
 - **模型の効果は小さい（推定）。** 1 ターンに触る行 1,281 → 1,245（−2.8%）、warm ミス 869 → 826（−4.9%）、

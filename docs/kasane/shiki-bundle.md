@@ -97,3 +97,7 @@
 - JS API の自己試験 **60/60**（`drawMany` の両方の経路・別名・`index`・範囲外の handle、`sin` が 16 の角度で `SIN` 命令と一致、`cos`・`sinMany`・誤り）。
 - `drawMany`（draw の間の監視なし）: `many0` 585・`many8` 1,854・`many8fixed` 607 サイクル/draw で、`ad10726` と同じ（±1.5%）。
 - 正弦（1 回・1 値あたり）: `Math.sin` 2,736 サイクル（11.4 µs）、`shiki.sin` 1,153（4.8 µs、2.4 倍）、`sinMany` **79（0.33 µs、35 倍）**（実測）。`shiki.sin` の費用は空のネイティブ呼び出し（1,162）と同じで、表を引く計算はほぼ無料。速さが要るなら、まとめて 1 回で求める（`sinMany`）か、式の中で `SIN` を使う。
+
+## 10. native の呼び出し元（2026-11-13）
+
+`pocket.derby` が 1 本ずつ出す draw（`pocket_proc_draw_fixed`）の入口の内訳と、それを軽くした変更は [shiki-draw-entry.md](shiki-draw-entry.md)。

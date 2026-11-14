@@ -7,8 +7,8 @@
 #include "keymap.h"
 
 // pocket.overlay — the region and input contract of docs/api/common-api.md 3.1.
-// New overlay drawing uses the region-scoped pocket.kasane APP endpoint. The
-// display-list calls below remain as a compatibility path for saved overlays.
+// Overlay drawing uses the region-scoped pocket.kasane APP endpoint. The old
+// display-list calls (begin/rect/text) were removed in api-reorg P5.
 //
 // WHY THIS IS NOT ui.basic, which is what 3.1 names.
 //
@@ -45,14 +45,7 @@ esp_err_t pocket_overlay_install(JSContext *ctx, void *user_data);
 // limits an app reads are taken from it.
 void pocket_overlay_set_region(const overlay_region_t *region);
 
-// Composites the current display list into one strip of the shell's frame.
-// Cheap and silent when nothing is published.
-void pocket_overlay_paint(uint16_t *strip, int strip_y, int strip_h);
-
-// True when the guest published anything this session.
-bool pocket_overlay_drawn(void);
-
-// Drops the display list, the region and the key listeners. Called from
+// Drops the region and the key listeners. Called from
 // app_stop() before the guest dies, with every other surface.
 void pocket_overlay_reset(void);
 

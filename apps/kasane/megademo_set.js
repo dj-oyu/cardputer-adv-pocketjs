@@ -170,7 +170,7 @@ function patch(tx) {
   const k = scene === 5 ? t - 118 : -1;
   if (on && k >= 0 && k < 12) {
     const a = 6 * (1 - k / 12), x = rnd(a * M.sin(t * 2.7)), y = rnd(a * M.cos(t * 3.9));
-    img.setRect(tx, [x, y, 240 + x, 135 + y]);
+    img.setRect(tx, x, y, 240 + x, 135 + y);
     zb = -1;
   }
   // Shutters: the TV turns on in the first news frames and off at the end
@@ -181,8 +181,8 @@ function patch(tx) {
     t > 175 && t < 206 ? .3 + .05 * M.sin(t * 2.3) : 1;
   if (o < 1 || R.cv < 1) {
     const E = scene === 7 ? FULL : ZB, m = (E[1] + E[3]) / 2, h = (E[3] - E[1]) * o / 2;
-    R.top.setRect(tx, [E[0], E[1], E[2], rnd(m - h)]);
-    R.bot.setRect(tx, [E[0], rnd(m + h), E[2], E[3]]);
+    R.top.setRect(tx, E[0], E[1], E[2], rnd(m - h));
+    R.bot.setRect(tx, E[0], rnd(m + h), E[2], E[3]);
     if ((o < 1) !== (R.cv < 1)) { R.top.setVisible(tx, o < 1); R.bot.setVisible(tx, o < 1); }
     R.cv = o;
   }
@@ -230,7 +230,7 @@ function patch(tx) {
   }
   if (R.tag) {
     const g = on && TGX === TGX;
-    if (g) R.tag.setRect(tx, [rnd(TGX) + 7, rnd(TGY) - 11, rnd(TGX) + 47, rnd(TGY) - 2]);
+    if (g) R.tag.setRect(tx, rnd(TGX) + 7, rnd(TGY) - 11, rnd(TGX) + 47, rnd(TGY) - 2);
     if (g !== R.tgv) { R.tag.setVisible(tx, g); R.tgv = g; }
   }
   if (scene < 3) return;
@@ -253,7 +253,7 @@ function patch(tx) {
   if (lc !== R.lc) { R.lamp.setColor(tx, lc); R.lc = lc; }
   if (scene !== 4) {
     const p = M.min(100, t);
-    if (p !== R.k) { R.k = p; R.meter.setRect(tx, [64, 128, 65 + rnd(1.69 * p), 130]); }
+    if (p !== R.k) { R.k = p; R.meter.setRect(tx, 64, 128, 65 + rnd(1.69 * p), 130); }
     if (!(t & 1)) R.stat.setText(tx, 'SIGNAL ' + p);
     // Tear: each band shows when a per-frame hash is under the eased
     // interference level, at a hashed height and offset.
@@ -262,8 +262,8 @@ function patch(tx) {
       const r = R.tear[i], h = M.sin(t * 12.9898 + i * 78.233) * 43758.5453, u = h - M.floor(h), v = u < nz;
       if (v) {
         const y = rnd(u / nz * 124), dx = rnd(((u * 7) % 1 - .5) * 36 * nz);
-        r.setRect(tx, [dx, 0, 240 + dx, 135]);
-        r.setClip(tx, [0, y, 240, y + 3 + i * 4]);
+        r.setRect(tx, dx, 0, 240 + dx, 135);
+        r.setClip(tx, 0, y, 240, y + 3 + i * 4);
       }
       if (v !== !!R.tv[i]) { r.setVisible(tx, v); R.tv[i] = v; }
     }

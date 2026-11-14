@@ -65,6 +65,13 @@ def extract(a):
     turns = []           # one array of block indices per turn in the window
     cur = None; turn = 0; seq = None
     # The host pointer is "0x..." from the Linux build, bare hex from Windows.
+    def keep(listing):
+        # With -icount QEMU lists a block again, shorter, when the instruction
+        # budget runs out inside it (a one-off retranslation up to that
+        # instruction). The last listing used to win, so a hot block could
+        # lose its tail for the whole record: keep the longest.
+        if listing and len(listing) > len(tb_insns.get(listing[0], ())):
+            tb_insns[listing[0]] = listing
     trace = re.compile(r'^Trace \d+: (?:0x)?[0-9a-f]+ \[[0-9a-f]+/([0-9a-f]+)/')
     insn = re.compile(r'^0x([0-9a-f]+):')
     with open(a.log, 'r', errors='replace') as fh:
@@ -74,7 +81,7 @@ def extract(a):
                 m = trace.match(line)
                 if not m:
                     continue
-                pc = int(m.group(1), 16); cur = None
+                pc = int(m.group(1), 16); keep(cur); cur = None
                 if pc == begin:
                     turn += 1
                     seq = array('I') if a.first <= turn <= a.last else None
@@ -85,22 +92,20 @@ def extract(a):
                 elif seq is not None:
                     i = ids.get(pc)
                     if i is None:
-                        addrs = tb_insns.get(pc)
-                        if not addrs:
+                        if not tb_insns.get(pc):
                             continue
-                        i = ids[pc] = len(blocks); blocks.append(tuple(addrs))
+                        i = ids[pc] = len(blocks); blocks.append(pc)
                     seq.append(i)
             elif c == 'I' and line.startswith('IN:'):
-                cur = []
+                keep(cur); cur = []
             elif c == '0' and cur is not None:
                 m = insn.match(line)
                 if m:
-                    ad = int(m.group(1), 16)
-                    if not cur:
-                        tb_insns[ad] = cur
-                    cur.append(ad)
+                    cur.append(int(m.group(1), 16))
             elif c == '-':
-                cur = None
+                keep(cur); cur = None
+    # (a block is resolved to its listing here, after the whole log: see keep)
+    blocks = [tuple(tb_insns[pc]) for pc in blocks]
     with gzip.open(a.out, 'wb') as f:
         pickle.dump({'first': a.first, 'blocks': blocks, 'turns': turns}, f)
     print(f'{len(turns)} turns, {len(blocks)} blocks, {sum(len(t) for t in turns)} executions -> {a.out}')

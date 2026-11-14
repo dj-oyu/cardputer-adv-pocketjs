@@ -146,6 +146,12 @@ typedef struct {
      * and one that would not fit stops at LIMIT (pocket_shiki_frame.c). */
     uint16_t cap;
     bool ext;                               /* a LINE_PATTERN chord is among them */
+    /* vraw is this draw's (zeroed): set by the first VEACH. A draw clears
+     * the vm up to here only, and vraw at its first VEACH, the only place
+     * vector state is read or written (registration keeps vector ops inside
+     * VEACH bodies): most draws have none, and clearing vraw's 207 B was
+     * over half of each draw's reset (docs/kasane/shiki-draw-entry.md). */
+    bool vinit;
     /* The prototype's vector state (shiki-jit.md sec.24.3), kept in memory:
      * v0..v7 (8 lanes of int16) then the accumulator (8 lanes of 40 bits,
      * sat40), both 16-B aligned inside raw for PIE's 128-bit accesses. The
@@ -188,7 +194,8 @@ bool ksn_shiki_register(const uint8_t *code,size_t len,const double *args,unsign
 /* Runs one draw: up to KSN_SHIKI_INPUTS inputs (n of them; missing ones are
  * 0, extra ones ignored, sec.4.8.7). Segments go to out[0..vm->count), a
  * LINE_PATTERN chord as two entries in ksn_shiki_frame.h's encoding. The
- * vm is fully reset here; its state after the call is sec.4.8.8's. */
+ * vm is reset here (its vector state at the draw's first VEACH, vinit);
+ * its state after the call is sec.4.8.8's. */
 ksn_shiki_status ksn_shiki_draw(const ksn_shiki_plan *plan,const double *inputs,unsigned n,
                                 ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]);
 /* The same draw from inputs already in each input's Q format (as sec.2.4
@@ -205,6 +212,11 @@ ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *
  * entry points take the full KSN_SHIKI_SEGMENTS. */
 ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
                                           unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap);
+/* ksn_shiki_draw_index_cap for a native caller holding plan->inputs inputs
+ * or more (n >= plan->inputs): they are read in place, not copied (the
+ * engine reads only inputs below plan->inputs, registration's rule). */
+ksn_shiki_status ksn_shiki_draw_in_place(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned index,
+                                         ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap);
 /* The result line of the shared text contract (tools/kasane_ir/shiki_ref.mjs
  * format(), tools/kasane_contract/shiki_run.c), handed to put in pieces so a
  * caller can print it or hash it without holding a line that 1,024 segments

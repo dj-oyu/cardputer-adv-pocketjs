@@ -1709,6 +1709,19 @@ void pocketjs_guest_chunk_trace(pocketjs_guest_t *guest, unsigned turn) {
 }
 #endif
 
+#if defined(POCKET_GUEST_ALLOC_COUNTS) && defined(ESP_PLATFORM)
+/* r5sim only (-DR5SIM_DEVICE=1, docs/kasane/api-reorg.md sec.6 P0): the
+ * small-block cache's own counters, which every build keeps. Every
+ * guest_malloc asks the cache first and counts a hit or a miss, so
+ * hits + misses is the guest's allocations (zero with the cache disabled);
+ * pushes is the frees the cache kept. Reading them adds nothing to a turn. */
+void pocketjs_guest_alloc_counts(const pocketjs_guest_t *guest, uint32_t *mallocs,
+                                 uint32_t *kept) {
+  *mallocs = guest->block_cache.hits + guest->block_cache.misses;
+  *kept = guest->block_cache.pushes;
+}
+#endif
+
 void pocketjs_guest_chunk_stats(const pocketjs_guest_t *guest, unsigned *chunks,
                                 size_t *bytes, uint32_t *taken, uint32_t *returned) {
   *chunks = 0U; *bytes = 0U; *taken = 0U; *returned = 0U;

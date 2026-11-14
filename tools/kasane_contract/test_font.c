@@ -18,6 +18,32 @@ static void setup(void){
 static void read_span(ksn_draw *d,unsigned reveal,int x,int y,unsigned count,uint8_t *out){
     assert(ksn_font_port.span(NULL,d,(uint16_t)reveal,x,y,count,out)==KSN_OK);
 }
+/* runs() gives exactly span's 255 pixels, each once (ksn_ports.h), here with
+ * a mapped face: rectangles that cut the cells on every side. */
+static uint8_t got[40][240];
+static void mark(void *user,int x,int y,unsigned n){
+    (void)user;
+    assert(n>0&&x>=0&&x+(int)n<=240&&y>=0&&y<40);
+    for(unsigned i=0;i<n;i++){assert(!got[y][x+(int)i]);got[y][x+(int)i]=1;}
+}
+static unsigned runs_checked;
+static void check_runs(ksn_draw *d,unsigned reveal){
+    static const int cuts[][4]={{0,240,0,40},{0,5,7,9},{4,17,10,19},{12,13,0,40},{2,240,8,8}};
+    for(unsigned c=0;c<sizeof cuts/sizeof cuts[0];c++){
+        memset(got,0,sizeof got);
+        ksn_font_port.runs(NULL,d,(uint16_t)reveal,cuts[c][0],cuts[c][1],cuts[c][2],cuts[c][3],mark,NULL);
+        for(int y=0;y<40;y++)for(int x=0;x<240;x+=60){
+            uint8_t row[60];
+            read_span(d,reveal,x,y,60,row);
+            for(int i=0;i<60;i++){
+                const int px=x+i;
+                const bool in=px>=cuts[c][0]&&px<cuts[c][1]&&y>=cuts[c][2]&&y<cuts[c][3];
+                assert(got[y][px]==(in&&row[i]==255?1:0));
+                runs_checked+=got[y][px];
+            }
+        }
+    }
+}
 int main(void){
     setup();
     assert(ksn_font_port.binary_coverage);
@@ -37,6 +63,12 @@ int main(void){
         for(int x=12;x<24;x++)assert(actual[x]==0);
         uint8_t clipped[7];read_span(&d,1,2,row+7,7,clipped);
         assert(!memcmp(clipped,expanded+row*12+5,7));
+    }
+    for(unsigned reveal=0;reveal<=3;reveal++){
+        check_runs(&d,reveal);
+        d.data.text.font=KSN_DISPLAY;check_runs(&d,reveal);
+        d.data.text.font=KSN_CAPTION;check_runs(&d,reveal);
+        d.data.text.font=KSN_BODY;
     }
     read_span(&d,0,-3,7,24,actual);for(int i=0;i<24;i++)assert(actual[i]==0);
     read_span(&d,2,-3,7,24,actual);assert(actual[12]==255);
@@ -71,6 +103,9 @@ int main(void){
     memset(faces,0,sizeof(faces));d.data.text.font=KSN_BODY;
     read_span(&d,2,-3,7,24,actual);assert(actual[10]==255&&actual[11]==0);
     assert(!memcmp(actual+12,a,6));
+    check_runs(&d,2);
+    assert(runs_checked>0);
+    printf("  runs: %u inked pixels match span (mapped face, builtin, tofu, no face)\n",runs_checked);
     assert(ksn_font_port.span(NULL,&d,2,0,0,0,NULL)==KSN_OK);
     assert(ksn_font_port.span(NULL,&d,2,0,0,65,actual)==KSN_INVALID);
     puts("font PASS: mapped 1bpp/UTF-8/reveal, negative clipping, caption/body/display, fallback metrics");

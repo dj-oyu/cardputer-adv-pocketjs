@@ -1050,6 +1050,8 @@ step(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,ksn_shiki_vm *v
             break;
         case KSN_SHIKI_DRAW_INDEX: r[i->dst]=(int32_t)index; break;
         case KSN_SHIKI_VEACH: {
+            /* The draw's vector state starts at zero (ksn_shiki_vm.vinit). */
+            if(!vm->vinit){memset(vm->vraw,0,sizeof vm->vraw);vm->vinit=true;}
             /* As EACH, a frame per block of 8 records; a last record number
              * above int16 is refused so that VIOTA's numbers fit a lane. */
             uint32_t start,count;
@@ -1162,13 +1164,14 @@ ksn_shiki_status ksn_shiki_draw_index(const ksn_shiki_plan *plan,const int32_t *
                                       unsigned index,ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS]){
     return ksn_shiki_draw_index_cap(plan,inputs,n,index,vm,out,KSN_SHIKI_SEGMENTS);
 }
-ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
-                                          unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap){
-    memset(vm,0,sizeof *vm);
+/* The draw from inputs in place: both entries below have their own copy,
+ * so neither adds a call level (docs/kasane/shiki-draw-entry.md). */
+static inline __attribute__((always_inline)) ksn_shiki_status
+draw_from(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,
+          unsigned cap){
+    memset(vm,0,offsetof(ksn_shiki_vm,vraw));      /* vraw: at the first VEACH */
     vm->cap=(uint16_t)(cap<KSN_SHIKI_SEGMENTS?cap:KSN_SHIKI_SEGMENTS);
     vm->pie=KSN_SHIKI_HAS_PIE&&ksn_shiki_vec_pie;
-    int32_t in[KSN_SHIKI_INPUTS]={0};
-    for(unsigned k=0;k<plan->inputs&&k<n;k++)in[k]=inputs[k];
     unsigned pc=0;
 #if KSN_SHIKI_HAS_PIE
     /* The scalar JIT (shiki-jit.md sec.11) runs the plan to its end, or
@@ -1181,6 +1184,16 @@ ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32
     }
 #endif
     return ksn_shiki_resume(plan,in,index,vm,out,pc);
+}
+ksn_shiki_status ksn_shiki_draw_index_cap(const ksn_shiki_plan *plan,const int32_t *inputs,unsigned n,
+                                          unsigned index,ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap){
+    int32_t in[KSN_SHIKI_INPUTS]={0};
+    for(unsigned k=0;k<plan->inputs&&k<n;k++)in[k]=inputs[k];
+    return draw_from(plan,in,index,vm,out,cap);
+}
+ksn_shiki_status ksn_shiki_draw_in_place(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
+                                         ksn_shiki_vm *vm,ksn_proc_segment *out,unsigned cap){
+    return draw_from(plan,in,index,vm,out,cap);
 }
 ksn_shiki_status ksn_shiki_resume(const ksn_shiki_plan *plan,const int32_t *in,unsigned index,
                                   ksn_shiki_vm *vm,ksn_proc_segment out[KSN_SHIKI_SEGMENTS],unsigned pc){

@@ -22,8 +22,8 @@ static void promise_release(pocket_promise_t *p){atomic_store(&p->request,0);}
 static const char *const names[]={
     "api.hub_rt","api.token_rt",
     "kasane.tx_rt","kasane.modal_rt","kasane.ref_rt","kasane.instance_rt",
-    "kasane.animation_rt","kasane.template_rt","kasane.image_rt","kasane.ticket_rt",
-    "kasane.scene_rt","kasane.schema_rt","fs.class_rt","storage.hub_rt",
+    "kasane.animation_rt","kasane.template_rt","kasane.image_rt",
+    "kasane.schema_rt","fs.class_rt","storage.hub_rt",
     "ayatsuri.model_runtime","ayatsuri.model_instance_runtime",
     "net.lease_rt","net.response_rt","text.session_rt","workspace.ref_rt",
     "music.music_rt","kasane.source_cap_rt"
@@ -74,7 +74,7 @@ static void real_qjs(void){
         for(unsigned i=0;i<LEDGER_COUNT;i++)JS_FreeValue(ctx,objects[i]);
         JS_FreeContext(ctx);JS_FreeRuntime(rt);
     }
-    assert(finalized==20*LEDGER_COUNT);printf("CLASS_REGISTRY_REAL_QJS classes=22 runtimes=20 finalizers=%u resetBeforeFinalizers=1\n",finalized);
+    assert(finalized==20*LEDGER_COUNT);printf("CLASS_REGISTRY_REAL_QJS classes=20 runtimes=20 finalizers=%u resetBeforeFinalizers=1\n",finalized);
 }
 #endif
 int main(int argc,char **argv){

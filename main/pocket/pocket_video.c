@@ -283,26 +283,25 @@ static JSValue reset_timeline(JSContext *ctx,JSValueConst self,int argc,JSValueC
     video.audio_seen=false;
     return JS_NewBool(ctx,true);
 }
+static const JSCFunctionListEntry video_functions[]={
+    JS_CFUNC_DEF("open",2,open_video),
+    JS_CFUNC_DEF("push",2,push_video),
+    JS_CFUNC_DEF("select",1,select_video),
+    JS_CFUNC_DEF("selectAudio",0,select_audio),
+    JS_CFUNC_DEF("resetTimeline",0,reset_timeline),
+    JS_CFUNC_DEF("streamStart",1,stream_start),
+    JS_CFUNC_DEF("streamPoll",1,stream_poll),
+    JS_CFUNC_DEF("streamPause",1,stream_pause),
+    JS_CFUNC_DEF("streamState",0,stream_state),
+    JS_CFUNC_DEF("streamStop",0,stream_stop)
+};
+/* An object entry: built on the first touch of kasane.video by the fork's
+ * lazy lists (api-reorg.md sec.3.1), so other sessions pay nothing. */
+static const JSCFunctionListEntry video_entry[]={
+    JS_OBJECT_DEF("video",video_functions,
+                  (int)(sizeof video_functions/sizeof video_functions[0]),JS_PROP_C_W_E),
+};
 esp_err_t pocket_video_install(JSContext *ctx,JSValueConst kasane){
-    JSValue object=JS_NewObject(ctx);
-    if(JS_IsException(object))return ESP_ERR_NO_MEM;
-    static const JSCFunctionListEntry functions[]={
-        JS_CFUNC_DEF("open",2,open_video),
-        JS_CFUNC_DEF("push",2,push_video),
-        JS_CFUNC_DEF("select",1,select_video),
-        JS_CFUNC_DEF("selectAudio",0,select_audio),
-        JS_CFUNC_DEF("resetTimeline",0,reset_timeline),
-        JS_CFUNC_DEF("streamStart",1,stream_start),
-        JS_CFUNC_DEF("streamPoll",1,stream_poll),
-        JS_CFUNC_DEF("streamPause",1,stream_pause),
-        JS_CFUNC_DEF("streamState",0,stream_state),
-        JS_CFUNC_DEF("streamStop",0,stream_stop)
-    };
-    if(JS_SetPropertyFunctionList(ctx,object,functions,
-         sizeof functions/sizeof functions[0])<0){
-        JS_FreeValue(ctx,object);return ESP_ERR_NO_MEM;
-    }
-    if(JS_SetPropertyStr(ctx,(JSValue)kasane,"video",object)<0)
-        return ESP_ERR_NO_MEM;
-    return ESP_OK;
+    return JS_SetPropertyFunctionList(ctx,kasane,video_entry,1)<0||JS_HasException(ctx)?
+           ESP_ERR_NO_MEM:ESP_OK;
 }

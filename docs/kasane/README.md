@@ -30,6 +30,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [Shiki JIT とメモリ配置（図解、HTML）](shiki-jit-overview.html) | Shiki の JIT とその機械語の置き場所を、一続きの問いとして読む図解（各章の冒頭に既知の事柄との対応）。インタプリタと JIT、実行できる RAM、Shiki の区画への相乗り、飽和チェックの除去、レジスタキャッシュ、RTC fast memory の拒否、56 KiB の実験、区画の固定長の表、作業領域の廃止、DERBY の engine_ms の推移と今の 48 KiB の区画（shiki-jit.md §11〜§23、2026-11-03） |
 | [Kasane の描画パイプライン（図解、HTML）](pipeline-overview.html) | フレームバッファを持たない理由、1 ターンの流れ（`frame()` → Shiki の beginFrame/draw/commit → 17 本の帯の合成 → SPI の DMA）、作業台の帯と転送用バッファ 1 本の重ね、`KASANE_PAINT` の各欄、帯の重ね合わせの順、Shiki の線分の並び（candidate・committed、帯の hash、作業領域の廃止）、DERBY の区画の内訳と、並びを 1 本にする予定（c4d7a6c 時点、2026-11-03） |
 | [Shiki の draw の束ね（作業中）](shiki-bundle.md) | draw 1 回の固定費の段ごとの実測と、複数の handle を 1 回で描く API |
+| [Shiki の native の draw の入口](shiki-draw-entry.md) | DERBY の `ser()` の draw の内訳（plan ごとの本数・ステップ・模様線、エンジンの外の命令）と、入口を軽くした変更（slot の当て推量、`pocket_proc_draw_fixed` 専用の入口と入力のその場読み、vm の初期化 372 → 162 B）、r5sim で重い WIDE 2 の draw −4.7%、実機の `DERBY_SERDRAW` の手順と見込み、束ねを入れなかった理由（2026-11-13）|
 | [native mesh のShiki統合](../ayatsuri/pr117-native-mesh.md) | 公開mesh経路と#122のrange/carry・read_rowsの接続、回帰試験と正式buildの範囲 |
 | [opaque mesh depth](../ayatsuri/opaque-mesh-depth.md) | 明示的depth scope、所有権、予算、rollbackとretryの契約 |
 | [材質sidedness](../ayatsuri/material-sidedness-local.md) | 両面材質、面順とtie、旧asset互換とsnapshotの会計 |
@@ -41,6 +42,8 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [複数meshのJS skin batch](../ayatsuri/skin-batch.md) | packed typed入力、16KiB work上限、全batch失敗原子性、実QuickJS複数mesh描画 |
 | [native mesh foundation の採用](../ayatsuri/native-mesh-adoption.md) | main へ入れた native mesh の土台の範囲、CI と文書の追加、レビューの層 |
 | [実験用 native provider](../ayatsuri/provider-candidate.md) | 既定で無効の `AYATSURI_MODEL_EXPERIMENTAL_PROVIDER` による一回評価と、その host 検査 |
+| [Kasane ファームの整理と JS API の再設計](api-reorg.md) | 設計書（2026-11-13、未実装）: JS API の面の棚卸し（利用アプリ・実装・使われない入口・ビルドに入らないファイル、map の大きさ）、QuickJS-ng と Shiki の最適化から導く API の原則、新しい名前空間と capability、`pocket_kasane.c` の `.inc` 分割と診断の門、アプリの移行の順、P0（r5sim に DERBY と保持型の負荷を足しベースラインを取る）〜P6 の段と受け入れ基準・難易度のラベル、利用者が決めること |
+| [保持型の 2 系統を一本化するかの調査](retained-unify-study.md) | 調査（2026-11-13、実装なし）: `mount`＋`set` と `replace`/`patch`＋ref の実装と利用アプリ（file:line）、ゲームの HUD のコマンド・ref の数（LCD CATCH 78/80・31/32、DERBY のパドック 32・19）、一本化の 3 案の DRAM・ゲストヒープ・flash・ターン時間（推定）、一本化しない推奨と、api-reorg の P3 で足りる理由 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |
@@ -57,6 +60,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 
 | 文書 | 内容 |
 | --- | --- |
+| [Kasane API 整理の計測記録](logs/api-reorg-perf.md) | api-reorg.md の段ごとの指標の表（r5sim の負荷 `shiki`・`hud`・`derby`（`shiki_v1` は P5 で終了）のカウント、DERBY の場面別、1 ターンの確保の回数、`heap_used`、像の大きさ）、`tools/r5sim/reorg.sh` の使い方、カウントが像の配置で 0.01〜0.03% 動くことと `sleep=off` での決定性、`pocket.kasane` を最初に読む費用（host、M32 で 1,856 B）。P0 のベースライン（2026-11-13）|
 | [Shiki の画像を帯へ直接書く・横線の塗り](image-rows.md) | 不透明・等倍の画像を 32 画素ずつではなく帯の行で直接書く `read_rows`（`ksn_ports.h`）、覆われた帯の背景の塗りの省略、帯のラスタで横線を 2 画素ずつ塗る `g_ksn_proc_hspan`。STRESS の実機の同じバイナリの A/B で描画 11.80 → 9.34 ms、さらに 9.58 → 7.38 ms。送出の待ちがそれぞれ +0.63・+1.47 ms 増え、1 フレームの合計は 12.7 → 10.3 ms。LCD の DMA が次の床（2026-11-04）|
 | [手続き型描画の上限緩和の実機検証](procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
 | [MEGADEMO Act II の上限と実機の負荷](megademo-limits.md) | 手続き面の上限を叩く場面（ねじれ廊下・Apple II 風 ZENITH）の設計の芯、実機で初めて動かした結果（ZENITH で落ちていた）、破綻の境界（面の確保・plan の同時数・回転読み出し・登録時間・ゲストヒープ）、決めた `KN`/`LOAD` と既定段階、場面切替の最初のフレーム（2026-09-29 実測。LIMIT は 10-28 に外れ、その表は落とした） |

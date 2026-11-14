@@ -1,0 +1,249 @@
+QuickJS hot/cold layout (docs/vm/qjs-hotcold.md), 2026-11-13, branch qjs-hotcold on 340af32.
+r5sim -DR5SIM_DEVICE=1 (helper IRAM on), QEMU esp_develop_9.2.2 -icount shift=2,sleep=off, flash-only block trace,
+tools/r5sim/icache.py extract (fixed: longest listing per block) -> turnset.py / lineuse.py / jumps.py.
+Every figure is the model's (QEMU trace + cache model), none is from the device.
+
+==== STRESS(shiki) turns 61-120, flag off
+R5SIM alloc turns=61..120 per_turn=156 free_per_turn=152 max=413 between=0 live_delta=242
+R5SIM ccount turns=61..120 per_turn=142565 max=192912 end_turn=24
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+│ Flash Code          │       550204 │          │                │               │
+r5sim.elf: 60 turns (from 61), 8-way 32 KiB LRU, own layout
+  total/turn: warm 944  cold 1391  lines 1275 (39.9 KiB)  union over turns 1977 lines (61.8 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             8.33     266     152     299       9.56      1.58
+  interp-helpers          9.54     305     211     350      15.06      2.10
+  object/alloc/GC         1.50      48      46      56       3.34      0.48
+  builtins                4.35     139     136     162       7.53      2.44
+  native boundary        14.02     449     354     450      21.16      5.30
+  libc/other              2.12      68      46      74       5.12      0.89
+r5sim.elf: 60 turns (from 61), own layout, 32 B lines; 15 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1272 (39.8 KiB), executed 26952 B (26.3 KiB), use 66.2% (turns 65.2%..67.4%)
+  packed bound: 843 lines (26.3 KiB), i.e. at most 430 lines (13.4 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 13754 B, of which run in another turn 991 B, run in no turn 12763 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             8.33      6.28  75.4%       2.05
+  interp-helpers          9.50      4.95  52.1%       4.55
+  object/alloc/GC         1.48      0.99  66.7%       0.49
+  builtins                4.37      2.88  65.9%       1.49
+  native boundary        13.96      9.94  71.2%       4.02
+  libc/other              2.12      1.29  60.9%       0.83
+r5sim.elf: 60 turns; per turn: 755411 instructions in flash, 201459 blocks, 140970 taken transfers; instructions + 2 x taken = 1037351
+
+==== STRESS(shiki) turns 61-120, flag on (profile: shiki+derby+hud)
+R5SIM alloc turns=61..120 per_turn=156 free_per_turn=152 max=413 between=0 live_delta=242
+R5SIM ccount turns=61..120 per_turn=142578 max=192770 end_turn=24
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+│ Flash Code          │       553216 │          │                │               │
+r5sim.elf: 60 turns (from 61), 8-way 32 KiB LRU, own layout
+  total/turn: warm 590  cold 1130  lines 1096 (34.2 KiB)  union over turns 1768 lines (55.2 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             7.01     224      75     232       8.53      1.12
+  interp-helpers          6.19     198      92     212      11.03      0.80
+  object/alloc/GC         1.23      39      23      43       2.91      0.32
+  builtins                3.50     112      75     118       6.22      1.57
+  native boundary        14.17     453     286     454      21.41      5.42
+  libc/other              2.14      69      38      71       5.16      0.91
+r5sim.elf: 60 turns (from 61), own layout, 32 B lines; 16 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1092 (34.1 KiB), executed 26723 B (26.1 KiB), use 76.4% (turns 72.5%..79.1%)
+  packed bound: 836 lines (26.1 KiB), i.e. at most 257 lines (8.0 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 8235 B, of which run in another turn 737 B, run in no turn 7498 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             7.03      6.31  89.8%       0.72
+  interp-helpers          6.04      4.68  77.5%       1.36
+  object/alloc/GC         1.26      1.02  81.4%       0.23
+  builtins                3.60      2.86  79.4%       0.74
+  native boundary        14.07      9.94  70.6%       4.14
+  libc/other              2.14      1.29  60.2%       0.85
+r5sim.elf: 60 turns; per turn: 755521 instructions in flash, 203410 blocks, 142609 taken transfers; instructions + 2 x taken = 1040738
+
+==== STRESS(shiki) turns 61-120, flag on, profile without STRESS (derby+hud)
+R5SIM alloc turns=61..120 per_turn=156 free_per_turn=152 max=413 between=0 live_delta=242
+R5SIM ccount turns=61..120 per_turn=142585 max=192777 end_turn=24
+R5SIM done frames=120 oom=0 fail=0 bad_present=0
+│ Flash Code          │       552452 │          │                │               │
+r5sim.elf: 60 turns (from 61), 8-way 32 KiB LRU, own layout
+  total/turn: warm 818  cold 1281  lines 1211 (37.9 KiB)  union over turns 1884 lines (58.9 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             7.85     251     112     262       9.38      1.80
+  interp-helpers          8.02     257     173     291      12.66      1.62
+  object/alloc/GC         1.32      42      29      46       2.88      0.30
+  builtins                4.35     139     118     154       7.41      2.41
+  native boundary        14.17     453     344     454      21.41      5.42
+  libc/other              2.14      69      43      73       5.16      0.91
+r5sim.elf: 60 turns (from 61), own layout, 32 B lines; 15 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1206 (37.7 KiB), executed 26887 B (26.3 KiB), use 69.7% (turns 68.7%..70.7%)
+  packed bound: 841 lines (26.3 KiB), i.e. at most 366 lines (11.4 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 11698 B, of which run in another turn 1015 B, run in no turn 10683 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             7.91      6.31  79.8%       1.60
+  interp-helpers          7.88      4.85  61.5%       3.04
+  object/alloc/GC         1.33      1.00  75.4%       0.33
+  builtins                4.34      2.87  66.1%       1.47
+  native boundary        14.07      9.94  70.6%       4.14
+  libc/other              2.14      1.29  60.2%       0.85
+r5sim.elf: 60 turns; per turn: 755605 instructions in flash, 203478 blocks, 142425 taken transfers; instructions + 2 x taken = 1040455
+
+==== DERBY WIDE 2 turns 601-660, flag off
+R5SIM ccount scene=wide2 turns=108 per_turn=140332 max=151963 alloc_per_turn=62 js=140299 shiki=34607 end=25 draws=44 pat=31
+R5SIM alloc turns=61..662 per_turn=60 free_per_turn=60 max=980 between=0 live_delta=62
+R5SIM ccount turns=61..662 per_turn=101614 max=419828 end_turn=27
+R5SIM done frames=662 oom=0 fail=0 bad_present=0
+│ Flash Code          │       582164 │          │                │               │
+r5sim.elf: 60 turns (from 601), 8-way 32 KiB LRU, own layout
+  total/turn: warm 1572  cold 1985  lines 1750 (54.7 KiB)  union over turns 1770 lines (55.3 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             8.52     273     151     329       8.53      0.77
+  interp-helpers         10.54     337     310     444      10.66      2.10
+  object/alloc/GC         1.78      57      58      83       1.78      0.41
+  builtins                2.99      96      90     117       3.00      0.49
+  native boundary        22.22     711     702     717      22.59      7.49
+  libc/other              8.63     276     262     295       8.75      1.04
+r5sim.elf: 60 turns (from 601), own layout, 32 B lines; 15 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1747 (54.6 KiB), executed 39510 B (38.6 KiB), use 70.7% (turns 70.4%..70.9%)
+  packed bound: 1235 lines (38.6 KiB), i.e. at most 512 lines (16.0 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 16389 B, of which run in another turn 182 B, run in no turn 16207 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             8.52      6.30  74.0%       2.22
+  interp-helpers         10.57      5.73  54.2%       4.84
+  object/alloc/GC         1.75      1.05  59.9%       0.70
+  builtins                2.99      1.98  66.4%       1.00
+  native boundary        22.13     16.74  75.6%       5.39
+  libc/other              8.63      6.78  78.6%       1.85
+r5sim.elf: 60 turns; per turn: 650660 instructions in flash, 152205 blocks, 98389 taken transfers; instructions + 2 x taken = 847439
+
+==== DERBY WIDE 2 turns 601-660, flag on (profile: shiki+derby+hud)
+R5SIM ccount scene=wide2 turns=108 per_turn=140498 max=152186 alloc_per_turn=62 js=140464 shiki=34637 end=25 draws=44 pat=31
+R5SIM alloc turns=61..662 per_turn=60 free_per_turn=60 max=980 between=0 live_delta=62
+R5SIM ccount turns=61..662 per_turn=101733 max=420361 end_turn=27
+R5SIM done frames=662 oom=0 fail=0 bad_present=0
+│ Flash Code          │       585436 │          │                │               │
+r5sim.elf: 60 turns (from 601), 8-way 32 KiB LRU, own layout
+  total/turn: warm 1267  cold 1693  lines 1538 (48.1 KiB)  union over turns 1557 lines (48.7 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             6.87     220      90     249       6.88      0.37
+  interp-helpers          6.83     218     165     292       6.94      0.51
+  object/alloc/GC         1.22      39      28      54       1.22      0.06
+  builtins                2.47      79      69      92       2.47      0.31
+  native boundary        22.01     704     653     707      22.38      7.18
+  libc/other              8.68     278     260     300       8.78      1.06
+r5sim.elf: 60 turns (from 601), own layout, 32 B lines; 15 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1536 (48.0 KiB), executed 39316 B (38.4 KiB), use 80.0% (turns 79.7%..80.2%)
+  packed bound: 1229 lines (38.4 KiB), i.e. at most 307 lines (9.6 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 9830 B, of which run in another turn 169 B, run in no turn 9661 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             6.83      6.32  92.5%       0.51
+  interp-helpers          6.86      5.56  81.1%       1.30
+  object/alloc/GC         1.17      1.03  87.7%       0.14
+  builtins                2.52      1.97  78.2%       0.55
+  native boundary        21.93     16.73  76.3%       5.19
+  libc/other              8.68      6.78  78.1%       1.90
+r5sim.elf: 60 turns; per turn: 651624 instructions in flash, 153188 blocks, 104203 taken transfers; instructions + 2 x taken = 860030
+
+==== DERBY WIDE 2 turns 601-660, flag on, profile without DERBY (shiki+hud)
+R5SIM ccount scene=wide2 turns=108 per_turn=140502 max=152174 alloc_per_turn=62 js=140468 shiki=34627 end=25 draws=44 pat=31
+R5SIM alloc turns=61..662 per_turn=60 free_per_turn=60 max=980 between=0 live_delta=62
+R5SIM ccount turns=61..662 per_turn=101734 max=420202 end_turn=27
+R5SIM done frames=662 oom=0 fail=0 bad_present=0
+│ Flash Code          │       584644 │          │                │               │
+r5sim.elf: 60 turns (from 601), 8-way 32 KiB LRU, own layout
+  total/turn: warm 1467  cold 1866  lines 1668 (52.1 KiB)  union over turns 1687 lines (52.7 KiB)
+  bucket              KiB/turn   lines    warm    cold  union KiB  rare KiB
+  interp-core             7.86     252     138     303       7.88      0.68
+  interp-helpers          8.98     287     244     365       9.09      1.69
+  object/alloc/GC         1.62      52      54      77       1.62      0.41
+  builtins                3.08      99      87     115       3.09      0.55
+  native boundary        21.89     700     676     705      22.25      7.03
+  libc/other              8.68     278     269     301       8.78      1.06
+r5sim.elf: 60 turns (from 601), own layout, 32 B lines; 13 instruction fetches had no disassembly (length guessed)
+  per turn: lines 1666 (52.1 KiB), executed 39519 B (38.6 KiB), use 74.1% (turns 73.7%..74.3%)
+  packed bound: 1235 lines (38.6 KiB), i.e. at most 431 lines (13.5 KiB) of the touched lines are bytes this turn did not run
+  unused bytes of touched lines/turn: 13805 B, of which run in another turn 167 B, run in no turn 13638 B
+
+  bucket              KiB/turn  used KiB    use  waste KiB
+  interp-core             7.87      6.34  80.6%       1.53
+  interp-helpers          8.97      5.68  63.3%       3.30
+  object/alloc/GC         1.62      1.08  66.4%       0.55
+  builtins                3.08      1.98  64.3%       1.10
+  native boundary        21.84     16.73  76.6%       5.11
+  libc/other              8.68      6.78  78.1%       1.90
+r5sim.elf: 60 turns; per turn: 651650 instructions in flash, 153154 blocks, 103050 taken transfers; instructions + 2 x taken = 857751
+
+==== fast counts, whole runs (tools/r5sim/fast.sh, R5SIM_ICOUNT=shift=2,sleep=off)
+-- DERBY off
+R5SIM ccount scene=wait turns=61 per_turn=44027 max=339041 alloc_per_turn=69 js=43996 shiki=7865 end=24 draws=7 pat=9
+R5SIM ccount scene=pad turns=72 per_turn=42746 max=419830 alloc_per_turn=66 js=42713 shiki=7615 end=25 draws=7 pat=9
+R5SIM ccount scene=gate turns=41 per_turn=77708 max=122748 alloc_per_turn=70 js=77675 shiki=17940 end=25 draws=21 pat=8
+R5SIM ccount scene=race turns=2 per_turn=79442 max=139779 alloc_per_turn=152 js=79415 shiki=9451 end=20 draws=11 pat=4
+R5SIM ccount scene=wide turns=759 per_turn=136000 max=250026 alloc_per_turn=61 js=135967 shiki=33334 end=25 draws=39 pat=27
+R5SIM ccount scene=wide1 turns=83 per_turn=129586 max=250026 alloc_per_turn=62 js=129553 shiki=31899 end=25 draws=25 pat=9
+R5SIM ccount scene=field turns=145 per_turn=107060 max=108412 alloc_per_turn=56 js=107026 shiki=22325 end=26 draws=22 pat=9
+R5SIM ccount scene=wide2 turns=455 per_turn=145698 max=164210 alloc_per_turn=62 js=145664 shiki=36525 end=25 draws=46 pat=37
+R5SIM ccount scene=wide3 turns=100 per_turn=140339 max=156808 alloc_per_turn=61 js=140306 shiki=38972 end=25 draws=35 pat=18
+R5SIM ccount scene=close turns=98 per_turn=93028 max=98485 alloc_per_turn=62 js=92995 shiki=14041 end=25 draws=18 pat=9
+R5SIM ccount scene=vision turns=146 per_turn=116497 max=121286 alloc_per_turn=68 js=116463 shiki=24256 end=25 draws=32 pat=9
+R5SIM ccount scene=headon turns=53 per_turn=80056 max=85803 alloc_per_turn=57 js=80023 shiki=14014 end=25 draws=19 pat=0
+R5SIM ccount scene=finish turns=103 per_turn=96518 max=130692 alloc_per_turn=54 js=96485 shiki=29035 end=25 draws=25 pat=9
+R5SIM ccount scene=photo turns=111 per_turn=54734 max=717956 alloc_per_turn=45 js=54701 shiki=15099 end=25 draws=18 pat=8
+R5SIM ccount scene=res turns=152 per_turn=50629 max=83154 alloc_per_turn=27 js=50596 shiki=21607 end=25 draws=7 pat=8
+R5SIM ccount turns=61..1773 per_turn=105522 max=717954 end_turn=27
+-- DERBY on
+R5SIM ccount turns=61..240 per_turn=10384 max=27289 end_turn=13
+R5SIM ccount scene=wait turns=61 per_turn=44047 max=339669 alloc_per_turn=69 js=44016 shiki=7880 end=24 draws=7 pat=9
+R5SIM ccount scene=pad turns=72 per_turn=42774 max=420363 alloc_per_turn=66 js=42741 shiki=7609 end=25 draws=7 pat=9
+R5SIM ccount scene=gate turns=41 per_turn=77755 max=122900 alloc_per_turn=70 js=77722 shiki=17937 end=25 draws=21 pat=8
+R5SIM ccount scene=race turns=2 per_turn=79533 max=139919 alloc_per_turn=152 js=79506 shiki=9452 end=20 draws=11 pat=4
+R5SIM ccount scene=wide turns=759 per_turn=136146 max=250227 alloc_per_turn=61 js=136113 shiki=33328 end=25 draws=39 pat=27
+R5SIM ccount scene=wide1 turns=83 per_turn=129728 max=250227 alloc_per_turn=62 js=129695 shiki=31896 end=25 draws=25 pat=9
+R5SIM ccount scene=field turns=145 per_turn=107206 max=108431 alloc_per_turn=56 js=107172 shiki=22326 end=25 draws=22 pat=9
+R5SIM ccount scene=wide2 turns=455 per_turn=145847 max=164352 alloc_per_turn=62 js=145814 shiki=36520 end=25 draws=46 pat=37
+R5SIM ccount scene=wide3 turns=100 per_turn=140479 max=156941 alloc_per_turn=61 js=140446 shiki=38955 end=25 draws=35 pat=18
+R5SIM ccount scene=close turns=98 per_turn=93161 max=98715 alloc_per_turn=62 js=93127 shiki=14038 end=25 draws=18 pat=9
+R5SIM ccount scene=vision turns=146 per_turn=116642 max=121425 alloc_per_turn=68 js=116609 shiki=24239 end=25 draws=32 pat=9
+R5SIM ccount scene=headon turns=53 per_turn=80189 max=85931 alloc_per_turn=57 js=80156 shiki=14001 end=25 draws=19 pat=0
+R5SIM ccount scene=finish turns=103 per_turn=96608 max=130746 alloc_per_turn=54 js=96575 shiki=29048 end=25 draws=25 pat=9
+R5SIM ccount scene=photo turns=111 per_turn=54778 max=720214 alloc_per_turn=45 js=54745 shiki=15098 end=25 draws=18 pat=8
+R5SIM ccount scene=res turns=152 per_turn=50645 max=83225 alloc_per_turn=27 js=50612 shiki=21612 end=25 draws=7 pat=8
+R5SIM ccount turns=61..1773 per_turn=105635 max=720211 end_turn=27
+-- HUD off
+R5SIM ccount turns=61..240 per_turn=10372 max=27275 end_turn=13
+-- HUD on
+R5SIM ccount turns=61..240 per_turn=10384 max=27289 end_turn=13
+
+==== torture (tools/qjs_hotcold/torture.sh, seeds 1 2)
+selftest: random tiers 0: 959 functions partitioned, verified, assembled
+hc_cc: quickjs.c: 904 functions laid out hot/cold (0 of the profile's did not match this object code and were left alone)
+torture: seed 1 shiki: same as the plain image (R5SIM ccount turns=61..120 per_turn=143095 max=193827 end_turn=24)
+hc_cc: quickjs.c: 904 functions laid out hot/cold (0 of the profile's did not match this object code and were left alone)
+torture: seed 1 derby: same as the plain image (R5SIM ccount turns=61..1773 per_turn=106859 max=734052 end_turn=27)
+hc_cc: quickjs.c: 904 functions laid out hot/cold (0 of the profile's did not match this object code and were left alone)
+torture: seed 1 hud: same as the plain image (R5SIM ccount turns=61..240 per_turn=10766 max=27965 end_turn=13)
+selftest: random tiers 0: 931 functions partitioned, verified, assembled
+hc_cc: quickjs.c: 875 functions laid out hot/cold (0 of the profile's did not match this object code and were left alone)
+torture: seed 2 shiki: same as the plain image (R5SIM ccount turns=61..120 per_turn=143087 max=193925 end_turn=26)
+hc_cc: quickjs.c: 875 functions laid out hot/cold (0 of the profile's did not match this object code and were left alone)
+torture: seed 2 derby: same as the plain image (R5SIM ccount turns=61..1773 per_turn=106680 max=733210 end_turn=27)
+hc_cc: quickjs.c: 875 functions laid out hot/cold (0 of the profile's did not match this object code and were left alone)
+torture: seed 2 hud: same as the plain image (R5SIM ccount turns=61..240 per_turn=10623 max=27692 end_turn=13)
+torture: all runs match
+
+==== training (tools/qjs_hotcold/train.sh)
+hc_profile: 120 turns, 4979 symbols reached -> .cache/hc/train/shiki/run.json
+hc_profile: 1773 turns, 6044 symbols reached -> .cache/hc/train/derby/run.json
+hc_profile: 240 turns, 4447 symbols reached -> .cache/hc/train/hud/run.json
+hc_profile: 188 functions with hot blocks; instructions hot/warm/cold 9219/2200/9323 -> tools/qjs_hotcold/profile.json
+(the last line is the first merge, one hot class; the profile in the tree has one hot class per set of workloads:)
+hc_profile: 188 functions with hot blocks; instructions by class hot=1911 hot1=313 hot2=64 hot3=1249 hot4=138 hot5=2750 hot6=2794 warm=2200 cold=9323
+
+==== firmware (idf.py size; sdkconfig.defaults vs + sdkconfig.qjshotcold.defaults)
+off: Flash Code 1699976  Flash Data 782836  DIRAM 172592 (.text 81687 .bss 68016 .data 21861)
+on : Flash Code 1703328  Flash Data 782836  DIRAM 172592 (.text 81687 .bss 68016 .data 21861)
+on : hc_cc: quickjs.c: 188 functions laid out hot/cold (0 of the profile's did not match)
+on : .text.qjshc0 0xeaf8 (60152 B), .literal.qjshc0 0x171c
+on : JS_CallInternal 0xf5f, .hot1..6 0x201 0xb4 0x42d 0x3d 0x661 0x855, .warm 0xb87, .cold 0x2ba2 (off: 0x5999)
+on : JS_FreeAtom stays at 0x40388554 (IRAM), as off

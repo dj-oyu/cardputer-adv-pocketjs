@@ -27,6 +27,7 @@ static const char *const CAPS_MEGADEMO_OPT[]= {"kasane.shapes", "kasane.shiki", 
 // STRESS TEST draws its sea with Shiki's built-in programs (apps/stress/
 // stress_prog.js) and has no other way to draw it, so Shiki is required.
 static const char *const CAPS_STRESS[]= {"display.kasane", "input.action", "kasane.shiki", NULL};
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
 // The Shiki test (apps/shikitest): the engine through its test-only surface.
 static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
 // The Shiki API self-check (apps/shikitest/shiki_api_test.js): a kasane.shiki
@@ -36,6 +37,7 @@ static const char *const CAPS_SHIKI_API[]= {"display.kasane", "kasane.shiki", NU
 // test surface's cycle counter and draw profile.
 static const char *const CAPS_SHIKI_COST[]= {"display.kasane", "kasane.shiki", "kasane.shiki.debug", NULL};
 static const char *const CAPS_MESH_BENCH[]= {"display.kasane", "kasane.shiki", "kasane.shapes", "kasane.shiki.debug", NULL};
+#endif
 // LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
 static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
@@ -54,111 +56,113 @@ static const char *const CAPS_PLAY[]    = {"ui.overlay", "display.kasane",
 // The one range this build knows. It is written out per row rather than shared
 // so that a row can be moved forward on its own, which is what a version range
 // per app is for.
-#define API_0_1 ">=0.1.0 <0.2.0"
+#define API_0_2 ">=0.2.0 <0.3.0"
 
 static const app_manifest_t MANIFESTS[] = {
     // The built-in Kasane demo, no storage or works: it draws and counts.
     {.id="local.hello", .title="HELLO WORLD", .entry="apps/hello/main.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The calibration program exists for a board whose sensor is wrong, so the
     // sensor is required: starting it without one would show axes that are not
     // measurements.
     {.id="local.imucal", .title="IMU CALIBRATION", .entry="apps/imucal/imucal.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_IMU, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The pet keeps state between runs, so its store is required; the tilt and
     // the sound are what make it pleasant and not what make it work.
     {.id="local.pet", .title="POCKET PET", .entry="apps/pet/pet.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KV, .optional=CAPS_PET_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/companion.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KV, .optional=CAPS_COMP, .works=APP_WORKS_NONE},
 
     // A test app (apps/stress/README.md): it draws and churns its own heap,
     // and reads assets: through pocket.fs, which every session has. Its own
     // row so its fs owner is not hello's.
     {.id="local.stress", .title="STRESS TEST", .entry="apps/stress/stress.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_STRESS, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
+#ifdef CONFIG_POCKET_SHIKI_DEBUG
     // The on-device half of Shiki's differential test (apps/shikitest/README.md,
     // docs/kasane/shiki-spec.md sec.10): not on the menu, started by the USB
     // broker's app_session; it logs one hash per generated case.
     {.id="local.shikitest", .title="SHIKI TEST", .entry="apps/shikitest/shiki_test.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The data-region half of the same test (apps/shikitest/shiki_data_test.js,
     // spec v1.3 sec.5): the same way, one hash per case with its regions.
     {.id="local.shikidata", .title="SHIKI DATA", .entry="apps/shikitest/shiki_data_test.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // pocket.kasane.shiki's self-check (apps/shikitest/shiki_api_test.js,
     // spec sec.9): the same way, "SA ..." lines and "SA END pass= fail=".
     {.id="local.shikiapi", .title="SHIKI API", .entry="apps/shikitest/shiki_api_test.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_SHIKI_API, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The integer instruction latency probe (apps/shikitest/cycle_bench.js,
     // docs/perf/int-latency.md): not on the menu, started by the USB broker;
     // it logs one line of cycle counts per case.
     {.id="local.cyclebench", .title="CYCLE BENCH", .entry="apps/shikitest/cycle_bench.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // What one Shiki draw costs, by stage (apps/shikitest/draw_cost.js,
     // docs/kasane/shiki-bundle.md): not on the menu, started by the broker.
     {.id="local.drawcost", .title="DRAW COST", .entry="apps/shikitest/draw_cost.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_SHIKI_COST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // Bounded public synthetic mesh workload, launched by the existing app API.
     {.id="local.meshbench", .title="MESH BENCH", .entry="apps/meshbench/mesh_bench.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_MESH_BENCH, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+#endif
     // pocket.net's self-check and the HTTPS cycle (apps/netcheck/README.md):
     // not on the menu, started by the USB broker. Both draw nothing; they log
     // NETCHK / CYC lines, and the session's end logs the tcpip thread's stack
     // low mark (NET_STACK).
     {.id="local.netcheck", .title="NET CHECK", .entry="apps/netcheck/netcheck.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_NET, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
     {.id="local.tlscycle", .title="TLS CYCLE", .entry="apps/netcheck/tlscycle.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_NET, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // MEGADEMO is an ordinary foreground app. Leaving it with Back and
     // reopening starts a new session with fresh Shiki programs.
     {.id="local.megademo", .title="MEGADEMO", .entry="apps/kasane/proc_megademo.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KASANE, .optional=CAPS_MEGADEMO_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.gridlab", .title="GRID LAB", .entry="apps/kasane/grid_lab.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     {.id="local.videolab", .title="VIDEO LAB", .entry="apps/kasane/video_lab.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The three games. One row each, kept apart so that each game can change
     // its own capabilities without touching its neighbours.
     {.id="local.lcdcatch", .title="LCD CATCH", .entry="apps/lcdcatch/lcd_catch.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_GAME, .optional=CAPS_LCD_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.derby", .title="DERBY WATCH", .entry="apps/derby/derby_watch.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_GAME, .optional=CAPS_DERBY_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.bigwave", .title="BIG WAVE", .entry="apps/bigwave/big_wave.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_GAME, .optional=CAPS_BIGWAVE_OPT, .works=APP_WORKS_NONE},
 
     // Both of its capabilities are REQUIRED rather than optional, and that is
@@ -178,14 +182,14 @@ static const app_manifest_t MANIFESTS[] = {
     // has never mattered, and changing an app's identity moves its stored
     // files.
     {.id="local.player", .title="MUSIC PLAYER", .entry="apps/player/player.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_PLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The Playground runs whatever the person typed, so it is the one identity
     // that may reach the whole library: the picker is the person choosing their
     // own work, on the screen they were already editing on.
     {.id="local.playground", .title="PLAYGROUND", .entry="src:0",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_PICK},
 
     // A lesson copies a worked example into its own chapter slot and never
@@ -194,7 +198,7 @@ static const app_manifest_t MANIFESTS[] = {
     // sentence with teeth. create() still works, so a chapter that teaches
     // saving has something to save into.
     {.id="local.tutorial", .title="TUTORIAL", .entry="src:1",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_SELF},
 
     // The overlay of section 3.1. Its runtime is not one of the two above --
@@ -205,13 +209,13 @@ static const app_manifest_t MANIFESTS[] = {
     // with nowhere to draw are not degraded, they are pointless, and 3.1 asks
     // for that to be said before the guest is built rather than after.
     {.id="local.deskclock", .title="DESK CLOCK", .entry="apps/deskclock/deskclock.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_OVERLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // A work started by pocket.workspace.run(). Its own identity, so its
     // storage is its own and the Playground's is out of reach.
     {.id=APP_ID_WORK, .title="WORK", .entry="src:work",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_PICK},
 };
 

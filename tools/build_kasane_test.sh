@@ -25,7 +25,7 @@ for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   fi
 done
 gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Werror \
-  -fno-omit-frame-pointer \
+  -fno-omit-frame-pointer -DPOCKET_KASANE_TEST_HOOKS \
   -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
   -I main/text -I main/hal -I "$CACHE" \
   "$TEST_SOURCE" ${EXTRA_SOURCES:-} tools/hostshim/pocket_api_stub.c tools/hostshim/pocket_surface_stubs.c \
