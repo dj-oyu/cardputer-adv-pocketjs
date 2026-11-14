@@ -138,6 +138,9 @@ typedef struct {
      * is drawn walking those alone (ksn_proc_render_band_range,
      * docs/platform/lcd-dma-driver.md 9.5). first > end: none touch it. */
     uint16_t first[PROC_BANDS],end[PROC_BANDS];
+    /* The box of every entry, unclamped (damage_add's): the walk that hashes
+     * the frame gives commit() its damage too (box_reuse below). */
+    int16_t box_x0,box_y0,box_x1,box_y1;
 #ifdef POCKET_PROC_SIG_CHECK
     uint64_t strong[PROC_BANDS];   /* host only: the ground truth the hash is checked against */
 #endif
@@ -183,6 +186,10 @@ typedef struct {
     bool sig_ready; /* candidate_sig describes the candidate (commit .. next beginFrame) */
     uint32_t handle;
     ksn_rect damage;
+    /* The front frame's box (proc_band_sig's), from the commit that put it
+     * there; false once the front changes any other way. */
+    int16_t front_x0,front_y0,front_x1,front_y1;
+    bool front_box;
     uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (no option) */
     uint16_t spare;        /* entries past max_segments, when spare_set */
     bool spare_set;        /* false: as many again as max_segments */
@@ -512,12 +519,37 @@ PROC_HOT static void damage_add(const ksn_proc_frame *frame,int *bx0,int *by0,in
 /* The committed frame's box, taken before commit() moves the new frame
  * over it (whole: no committed frame, or another colour). */
 typedef struct { int x0,y0,x1,y1; bool whole; } proc_box;
+/* Same-binary A/B arm (app_session.c's switches[]): 1 takes commit()'s
+ * damage from the boxes band_signature already walks for (the front's kept
+ * from its own commit), 0 walks both frames for it as before. Same damage
+ * (the host's POCKET_PROC_SIG_CHECK compares them on every commit). */
+int g_pocket_proc_box_reuse=1;
 static proc_box old_box(const proc_surface *surface){
     proc_box b={KSN_PROC_W,KSN_PROC_H,0,0,
                 !surface->has_committed||surface->tail_color!=surface->committed_color||
                 surface->depth_candidate.enabled||surface->depth_committed.enabled};
-    if(!b.whole)damage_add(surface->committed,&b.x0,&b.y0,&b.x1,&b.y1);
+    if(b.whole)return b;
+    if(g_pocket_proc_box_reuse&&surface->front_box){
+        b.x0=surface->front_x0;b.y0=surface->front_y0;b.x1=surface->front_x1;b.y1=surface->front_y1;
+        return b;
+    }
+    damage_add(surface->committed,&b.x0,&b.y0,&b.x1,&b.y1);
     return b;
+}
+/* frame_damage from the candidate's signature box instead of a walk. */
+static ksn_rect box_damage(const proc_surface *surface,proc_box b){
+    if(b.whole)return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
+    const proc_band_sig *sig=&surface->candidate_sig;
+    int x0=b.x0,y0=b.y0,x1=b.x1,y1=b.y1;
+    if(sig->box_x0<x0)x0=sig->box_x0;
+    if(sig->box_y0<y0)y0=sig->box_y0;
+    if(sig->box_x1>x1)x1=sig->box_x1;
+    if(sig->box_y1>y1)y1=sig->box_y1;
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1>KSN_PROC_W)x1=KSN_PROC_W;
+    if(y1>KSN_PROC_H)y1=KSN_PROC_H;
+    return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
 /* The candidate's damage: the box of both frames' entries. */
 PROC_HOT static ksn_rect frame_damage(const proc_surface *surface,proc_box b){
@@ -547,6 +579,7 @@ static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,
  * out the same, and for the ones that do change, how much of the damage did:
  * 4-row halves alike, 16-px columns that differ, and the bytes a damage cut
  * to the changed pixels of each half would send against today's. */
+static unsigned long long sig_box_checked,sig_box_bad;
 static unsigned long long sig_dirty,sig_dirty_same,sig_halves,sig_halves_same,
                           sig_cols,sig_cols_changed,sig_bytes_now,sig_bytes_tight,sig_bytes_same;
 /* The same as present_frame sends it (ksn_render.c: the window rounded out to
@@ -586,7 +619,8 @@ __attribute__((destructor)) static void sig_report(void){
              sig_cols,sig_cols_changed,sig_cols?100.0*sig_cols_changed/sig_cols:0.0,
              sig_bytes_now,sig_bytes_same,sig_bytes_tight,sig_bytes_now?100.0*sig_bytes_tight/sig_bytes_now:0.0);
     snprintf(line+strlen(line),sizeof line-strlen(line),
-             "SIG_SEND now=%llu band_tight=%llu (%.1f%%) half_tight=%llu (%.1f%%)\n",
+             "SIG_BOX checked=%llu mismatched=%llu\n"
+             "SIG_SEND now=%llu band_tight=%llu (%.1f%%) half_tight=%llu (%.1f%%)\n",sig_box_checked,sig_box_bad,
              sig_send_now,sig_send_band,sig_send_now?100.0*sig_send_band/sig_send_now:0.0,
              sig_send_half,sig_send_now?100.0*sig_send_half/sig_send_now:0.0);
     fputs(line,stderr);
@@ -616,6 +650,10 @@ static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *
                                                           unsigned start,unsigned i){
     const int ya=geometry->y0<geometry->y1?geometry->y0:geometry->y1,yb=geometry->y0^geometry->y1^ya;
     int xa=geometry->x0<geometry->x1?geometry->x0:geometry->x1,xb=(geometry->x0^geometry->x1^xa)+1;
+    if(xa<sig->box_x0)sig->box_x0=(int16_t)xa;
+    if(ya<sig->box_y0)sig->box_y0=(int16_t)ya;
+    if(xb>sig->box_x1)sig->box_x1=(int16_t)xb;
+    if(yb+1>sig->box_y1)sig->box_y1=(int16_t)(yb+1);
     if(yb<0||ya>=KSN_PROC_H||xb<=0||xa>=KSN_PROC_W)return;
     if(xa<0)xa=0;
     if(xb>KSN_PROC_W)xb=KSN_PROC_W;
@@ -639,6 +677,7 @@ static inline __attribute__((always_inline)) void sig_add(const ksn_proc_frame *
     }
 }
 PROC_HOT static void band_signature(const ksn_proc_frame *frame,proc_band_sig *sig){
+    sig->box_x0=KSN_PROC_W;sig->box_y0=KSN_PROC_H;sig->box_x1=0;sig->box_y1=0;
     for(unsigned b=0;b<PROC_BANDS;b++){
         sig->hash[b]=2166136261u;sig->x0[b]=255;sig->x1[b]=0;
         sig->first[b]=UINT16_MAX;sig->end[b]=0;
@@ -1145,7 +1184,7 @@ static void merge(proc_surface *s){
     /* The front frame changes here and only here: what describes or caches
      * it goes stale now. Drawing writes the tail alone, so the display may
      * read the front, its colour, signature and carry until this point (5c). */
-    s->sig_ready=false;
+    s->sig_ready=false;s->front_box=false;
     s->candidate_color=s->tail_color;
     image_band_valid=false;carry_drop();
     s->committed_lost=s->has_committed;
@@ -1234,9 +1273,31 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     sig_keep_old(surface);
 #endif
     merge(surface);
-    surface->damage=frame_damage(surface,old);
-
     band_signature(surface->candidate,&surface->candidate_sig);
+    if(g_pocket_proc_box_reuse){
+        surface->damage=box_damage(surface,old);
+#ifdef POCKET_PROC_SIG_CHECK
+        {   /* The walk this replaces, on the same frames: the same damage. */
+            proc_box walked=old;
+            if(!walked.whole){
+                walked=(proc_box){KSN_PROC_W,KSN_PROC_H,0,0,false};
+                if(sig_old)damage_add(sig_old,&walked.x0,&walked.y0,&walked.x1,&walked.y1);
+            }
+            const ksn_rect w=frame_damage(surface,walked);
+            sig_box_checked++;
+            if(memcmp(&w,&surface->damage,sizeof w)){
+                if(sig_box_bad<3)fprintf(stderr,"SIG_BOX_BAD %d,%d,%d,%d vs %d,%d,%d,%d\n",w.x0,w.y0,w.x1,w.y1,
+                    surface->damage.x0,surface->damage.y0,surface->damage.x1,surface->damage.y1);
+                sig_box_bad++;
+            }
+        }
+#endif
+    }else surface->damage=frame_damage(surface,old);
+    {
+        const proc_band_sig *sig=&surface->candidate_sig;
+        surface->front_x0=sig->box_x0;surface->front_y0=sig->box_y0;
+        surface->front_x1=sig->box_x1;surface->front_y1=sig->box_y1;surface->front_box=true;
+    }
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
     visit_stats(surface->candidate);
@@ -1252,7 +1313,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
             surface->committed_lost=false;surface->has_committed=false;
             if(!surface->image_mode)pocket_kasane_invalidate();
         }
-        surface->candidate->count=0;
+        surface->candidate->count=0;surface->front_box=false;
         return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
                        POCKET_ERR_BUSY,"Kasane presentation unavailable");
     }

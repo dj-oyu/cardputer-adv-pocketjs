@@ -1888,6 +1888,19 @@ int g_ksn_text_pie=0;
  * only where its port's extent() says it can ink; 0 walks the declared box.
  * The pixels are the same (test_text_render.c compares the arms). */
 int g_ksn_text_extent=1;
+/* Same-binary A/B arm: 1 draws a binary port's text from its ink runs
+ * (ksn_ports.h runs()), each inked pixel taking the operation the coverage
+ * loop below gives a 255 byte; 0 is that loop. */
+int g_ksn_text_runs=1;
+/* What every inked pixel of one text command becomes. A binary port's
+ * coverage is 255, so the colour's alpha passes mul8(a, 255) = a unchanged
+ * and the operation is the same for every pixel of the command. */
+typedef struct {
+    uint16_t *pixels;int y;
+    ksn_rgba color;uint8_t opacity;
+    unsigned mode;            /* 0: blend(), 1: solid, 2: the alpha table */
+    uint16_t solid;unsigned lut_level;
+} ksn_text_ink;
 #ifdef KSN_TEXT_PIE_COUNT
 uint32_t ksn_text_pie_blocks;
 uint32_t ksn_text_pie_mixed_blocks;
@@ -1930,6 +1943,14 @@ static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int 
         b=(((src>>8)&255)*a+b*(255-a)+127)/255;
     }
     return pack565(r,g,b,dither,x,y);
+}
+static void text_ink_run(void *user,int x,int y,unsigned n){
+    const ksn_text_ink *t=user;
+    uint16_t *p=t->pixels+(y-t->y)*240+x;
+    if(t->mode==1){for(unsigned i=0;i<n;i++)p[i]=t->solid;return;}
+    if(t->mode==2){for(unsigned i=0;i<n;i++)p[i]=blend_lut_pack(p[i],blend_lut_alpha[t->lut_level]);return;}
+    for(unsigned i=0;i<n;i++)
+        p[i]=KSN_BLEND(KSN_SLOT(KSN_TEXT,false),p[i],t->color,t->opacity,false,x+(int)i,y);
 }
 /* Partition a command's visible box around a later opaque image. Keeping the
  * original coordinates also keeps gradient sampling and dither phase intact. */
@@ -2221,6 +2242,24 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     if(x0>=x1||y0>=y1)continue;
                 }
                 bool lut=g_ksn_blend_lut_alpha!=0&&blend_lut_alpha_prime(d->data.text.color,d->opacity);
+                if(g_ksn_text_runs&&display->text->runs&&display->text->binary_coverage&&
+                   !(g_ksn_text_pie&&g_ksn_blend_pie)){
+                    ksn_text_ink ink={.pixels=pixels,.y=y,.color=d->data.text.color,.opacity=d->opacity};
+                    const unsigned ca=d->data.text.color&255u;
+                    if(lut){
+                        const unsigned a=mul8(ca,d->opacity);
+                        if(!a)continue;
+                        ink.mode=2;ink.lut_level=a>>4;
+                    }
+#ifndef KSN_COUNT_VISIBLE
+                    /* blend() of an alpha that reaches 255, undithered. */
+                    else if((ca*d->opacity+127u)/255u==255u){ink.mode=1;ink.solid=rgb565(d->data.text.color);}
+#endif
+                    KSN_PROF_BEGIN();
+                    display->text->runs(display->text->ctx,d,command->reveal,x0,x1,y0,y1,text_ink_run,&ink);
+                    KSN_PROF_END(span);
+                    continue;
+                }
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;
                     {KSN_PROF_BEGIN();

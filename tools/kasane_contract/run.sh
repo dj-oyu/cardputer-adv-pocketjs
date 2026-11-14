@@ -38,6 +38,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     -lm -o "$out/procedural"
   "$out/procedural"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    tools/kasane_contract/test_plain_walk.c -lm -o "$out/plain-walk"
+  "$out/plain-walk"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_shiki_frame.c tools/kasane_contract/test_procedural_band_jump.c \
     -lm -o "$out/procedural-band-jump"
   "$out/procedural-band-jump"
@@ -256,6 +259,14 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_render_prof.c -o "$out/render-prof"
   "$out/render-prof"
+  # The text paths inside one binary: the port's ink runs and span's coverage
+  # bytes paint the same panel (also in the visible-alpha counting build).
+  for visible in '' '-DKSN_COUNT_VISIBLE'; do
+    cc -std=c11 -Wall -Wextra -Werror $options $visible -Imain/ui/kasane -Itools/kasane_contract \
+      main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+      tools/kasane_contract/test_text_runs.c -o "$out/text-runs"
+    "$out/text-runs"
+  done
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_primitives.c -o "$out/primitives"
   "$out/primitives"

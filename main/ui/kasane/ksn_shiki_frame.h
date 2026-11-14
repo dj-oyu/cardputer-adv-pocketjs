@@ -231,5 +231,6 @@ bool ksn_proc_render_band_carry(const ksn_proc_frame *frame,uint16_t *pixels,int
  * pixels are the same: a horizontal Bresenham line is exactly x0..x1 on its
  * row. */
 extern int g_ksn_proc_hspan;
+extern int g_ksn_proc_plain_walk;
 
 #endif

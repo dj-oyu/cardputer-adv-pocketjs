@@ -23,7 +23,9 @@ void ksn_render_decode_cycle_report(void);
  * time is a device question, counts are a host question.
  *
  * The five brackets: fill = one fill565 call (a band background, or one row of
- * an opaque rect), span = one text->span, tile = one whole render_group,
+ * an opaque rect), span = one text->span, or one text->runs call (a command's
+ * part of a band, its composite included: such text adds nothing to blend),
+ * tile = one whole render_group,
  * blend = one per-pixel composite loop entered (covers+sample+blend, or the
  * group's child loop), read = one command decode the renderer asked for: a
  * ksn_core_read on its own, or, now that boundary 2a is integrated, one
@@ -248,6 +250,7 @@ extern int g_ksn_vertical_gradient_pie;
  * a zero-copy, per-lane-alpha PIE kernel. Disabled until its own device A/B. */
 extern int g_ksn_text_pie;
 extern int g_ksn_text_extent;
+extern int g_ksn_text_runs;
 #ifdef __cplusplus
 }
 #endif

@@ -3318,7 +3318,9 @@ static esp_err_t present_account(ksn_result result) {
                         {"row_cov",&g_ksn_row_coverage},
                         {"row_tbl",&g_ksn_row_table},
                         {"lut",&g_ksn_blend_lut},
-                        {"lut_alpha",&g_ksn_blend_lut_alpha},
+                        /* lut_alpha is not a row either: the shipped build
+                         * has it off (ksn_render.c), and a row's on is every
+                         * other window's state. */
                         {"affine",&g_ksn_group_affine},
                         /* scale256 is not a row: the rows' "on" is every
                          * window's state, and its on is the coarse colour arm
@@ -3329,6 +3331,15 @@ static esp_err_t present_account(ksn_result result) {
                         {"decode1",&g_ksn_decode_once},
                         {"span_narrow",&g_ksn_span_narrow},
                         {"text_extent",&g_ksn_text_extent},
+                        /* text_runs moves span_n and blend_n by construction
+                         * (ksn_render.h: a runs call is one span bracket with
+                         * its composite inside), so for this row they are not
+                         * a control. With it on, span_narrow's off window
+                         * reaches only text inside groups. */
+                        {"text_runs",&g_ksn_text_runs},
+                        {"plain_walk",&g_ksn_proc_plain_walk},
+                        /* box_reuse moves commit (turn_ms), not render_ms. */
+                        {"box_reuse",&g_pocket_proc_box_reuse},
                     };
                     const unsigned rows=sizeof(switches)/sizeof(switches[0]);
                     static unsigned ab_arm;

@@ -1,6 +1,8 @@
 #ifndef KSN_PORTS_H
 #define KSN_PORTS_H
 #include "ksn_types.h"
+/* One horizontal run of ink: pixels [x, x+n) of row y (text_port.runs). */
+typedef void (*ksn_ink_run)(void *user,int x,int y,unsigned n);
 typedef struct {
     void *ctx;
     /* Absolute destination coordinates, at most 64 coverage bytes. count=0
@@ -26,6 +28,17 @@ typedef struct {
      * walks only that part of the declared box -- a box is usually given
      * room to grow, and an empty one is skipped whole. NULL: the box. */
     void (*extent)(void *,const ksn_draw *,uint16_t reveal,unsigned *width,unsigned *height);
+    /* Optional, binary_coverage ports only. The inked pixels of the rectangle
+     * [x0,x1) x [y0,y1) as runs: exactly the pixels span would give 255, each
+     * once, in no promised order. One walk of the string for the whole
+     * rectangle, where span walks it again for every row and 64-px chunk, and
+     * no coverage bytes for the renderer to scan back. Same immutable-data
+     * rules as span; run must not reenter the port. It reports no failure:
+     * the renderer calls it only for a draw span accepts (the availability
+     * probe before the first band, and the core's validation of the text),
+     * and an invalid draw yields no runs. */
+    void (*runs)(void *,const ksn_draw *,uint16_t reveal,int x0,int x1,int y0,int y1,
+                 ksn_ink_run run,void *user);
 } ksn_text_port;
 typedef struct {
     void *ctx;
