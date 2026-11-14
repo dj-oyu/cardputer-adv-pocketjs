@@ -487,6 +487,16 @@ static unsigned long long sig_compared,sig_changed,sig_coll32,sig_lo16,sig_hi16,
  * to the changed pixels of each half would send against today's. */
 static unsigned long long sig_dirty,sig_dirty_same,sig_halves,sig_halves_same,
                           sig_cols,sig_cols_changed,sig_bytes_now,sig_bytes_tight,sig_bytes_same;
+/* The same as present_frame sends it (ksn_render.c: the window rounded out to
+ * 16 px, wider than KSN_NARROW_MAX 192 sent whole): today's damage, the band's
+ * changed pixels, each 4-row half's changed pixels. */
+static unsigned long long sig_send_now,sig_send_band,sig_send_half;
+static unsigned sig_send_w(int lo,int hi){
+    if(hi<=lo)return 0;
+    int a=lo&~15,z=(hi+15)&~15;
+    if(z>KSN_PROC_W)z=KSN_PROC_W;
+    return z-a>192?KSN_PROC_W:(unsigned)(z-a);
+}
 /* The committed frame as it was before commit() merged over it, so a
  * skipped band is checked against the frame on the panel. */
 static ksn_proc_frame *sig_old;
@@ -513,6 +523,10 @@ __attribute__((destructor)) static void sig_report(void){
              sig_halves,sig_halves_same,sig_halves?100.0*sig_halves_same/sig_halves:0.0,
              sig_cols,sig_cols_changed,sig_cols?100.0*sig_cols_changed/sig_cols:0.0,
              sig_bytes_now,sig_bytes_same,sig_bytes_tight,sig_bytes_now?100.0*sig_bytes_tight/sig_bytes_now:0.0);
+    snprintf(line+strlen(line),sizeof line-strlen(line),
+             "SIG_SEND now=%llu band_tight=%llu (%.1f%%) half_tight=%llu (%.1f%%)\n",
+             sig_send_now,sig_send_band,sig_send_now?100.0*sig_send_band/sig_send_now:0.0,
+             sig_send_half,sig_send_now?100.0*sig_send_half/sig_send_now:0.0);
     fputs(line,stderr);
     if(getenv("POCKET_SIG_REPORT")){
         FILE *f=fopen(getenv("POCKET_SIG_REPORT"),"a");
@@ -711,6 +725,20 @@ bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t
             const unsigned w=a<z?z-a:0;
             sig_dirty++;
             sig_bytes_now+=(unsigned long long)w*(unsigned)rows*2u;
+            sig_send_now+=(unsigned long long)sig_send_w((int)a,(int)z)*(unsigned)rows*2u;
+            {
+                int blo=KSN_PROC_W,bhi=0;
+                for(int h0=0;h0<rows;h0+=4){
+                    const int hr=h0+4>rows?rows-h0:4;
+                    int lo=KSN_PROC_W,hi=0;
+                    for(int r=h0;r<h0+hr;r++)for(int x=0;x<KSN_PROC_W;x++)
+                        if(pa[r*KSN_PROC_W+x]!=pb[r*KSN_PROC_W+x]){if(x<lo)lo=x;if(x+1>hi)hi=x+1;}
+                    sig_send_half+=(unsigned long long)sig_send_w(lo,hi)*(unsigned)hr*2u;
+                    if(lo<blo)blo=lo;
+                    if(hi>bhi)bhi=hi;
+                }
+                sig_send_band+=(unsigned long long)sig_send_w(blo,bhi)*(unsigned)rows*2u;
+            }
             if(!memcmp(pa,pb,sizeof pa)){
                 sig_dirty_same++;
                 sig_bytes_same+=(unsigned long long)w*(unsigned)rows*2u;

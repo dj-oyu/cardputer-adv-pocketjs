@@ -212,6 +212,16 @@ menu "Pocket VM (diagnostics)"
             the hot code shifted by 20 bytes. Costs about 0.9 KB of flash,
             no DRAM. docs/vm/qjs-hotcold.md sec.13.
 
+    config POCKET_KASANE_AB
+        bool "Kasane render A/B: rotate the render path's switches per window"
+        default n
+        help
+            The same-binary A/B of main/app_session.c (KASANE_AB): every
+            30-frame window turns one of the render path's runtime switches off
+            (the rest on) and logs "AB arm=..." with render_ms and send_ms, so
+            each switch is compared against all-on windows of the same scene.
+            Diagnostic only; the broker builds it as sdkconfig.variant.kasane_ab.
+
     config POCKET_DISP_TASK
         bool "Display task: present frames from a task of its own (two-core P1)"
         default n

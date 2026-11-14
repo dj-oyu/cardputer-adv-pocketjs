@@ -1040,6 +1040,8 @@ static const char PRELUDE[]=
 
 int main(int argc,char **argv){
     if(getenv("KSN_STRIP_ROWS"))strip_rows_arm=(uint16_t)atoi(getenv("KSN_STRIP_ROWS"));
+    /* KSN_TEXT_EXTENT=0: text walks its whole declared box; the digest must not move. */
+    if(getenv("KSN_TEXT_EXTENT"))g_ksn_text_extent=atoi(getenv("KSN_TEXT_EXTENT"));
     {extern int g_pocket_proc_ranges;if(getenv("KSN_PROC_RANGES"))g_pocket_proc_ranges=atoi(getenv("KSN_PROC_RANGES"));}
     /* DERBY_APP_DIR: the app as the firmware build embeds it, its @plan
      * functions lowered (tools/games/run_derby.py makes the copy with

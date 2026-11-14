@@ -247,6 +247,7 @@ extern int g_ksn_vertical_gradient_pie;
 /* Candidate for binary text masks: aligned eight-pixel blocks are consumed by
  * a zero-copy, per-lane-alpha PIE kernel. Disabled until its own device A/B. */
 extern int g_ksn_text_pie;
+extern int g_ksn_text_extent;
 #ifdef __cplusplus
 }
 #endif

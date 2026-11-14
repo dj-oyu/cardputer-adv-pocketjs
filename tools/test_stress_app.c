@@ -207,7 +207,10 @@ int main(int argc,char **argv) {
     {extern int g_pocket_proc_ranges;if(ranges_arm)g_pocket_proc_ranges=strcmp(ranges_arm,"0")!=0;}
     const char *strip_arm=getenv("KSN_STRIP_ROWS");
     if(strip_arm)strip_rows_arm=(uint16_t)atoi(strip_arm);
-    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm||ranges_arm;
+    /* KSN_TEXT_EXTENT=0: text walks its whole declared box (ksn_render.c). */
+    const char *extent_arm=getenv("KSN_TEXT_EXTENT");
+    if(extent_arm)g_ksn_text_extent=strcmp(extent_arm,"0")!=0;
+    const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm||ranges_arm||extent_arm;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");

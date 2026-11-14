@@ -98,5 +98,31 @@ int main(void){
     uint8_t out[64];
     assert(ksn_font_port.span(NULL,&d,255,192,0,48,out)==KSN_OK);
     assert(ksn_span_columns-before<=48);
+    /* extent(): span inks nothing outside it (the renderer walks only that
+     * part of the box, ksn_render.c g_ksn_text_extent), for every font, every
+     * reveal, ASCII, the missing-face tofu and an empty run. */
+    static const char *texts[]={"KEY PRESSES: 1234","Hello, World!","iiWW  ..",
+        "\xe3\x81\x82\xe3\x81\x84" "A","",NULL};
+    unsigned checked=0;
+    for(unsigned t=0;texts[t];t++)for(unsigned f=0;f<=KSN_DISPLAY;f++)
+        for(unsigned reveal=0;reveal<=20;reveal++){
+            ksn_draw e={.kind=KSN_TEXT,.bounds={3,5,240,40},.clip={0,0,240,135},.opacity=255,
+                .data.text={.utf8=texts[t],.bytes=strlen(texts[t]),.font=(ksn_font)f}};
+            unsigned w,h;
+            ksn_font_port.extent(NULL,&e,(uint16_t)reveal,&w,&h);
+            assert(!w==!h);
+            for(int y=0;y<45;y++)for(int x=0;x<240;x+=64){
+                unsigned count=240u-(unsigned)x;if(count>64)count=64;
+                assert(ksn_font_port.span(NULL,&e,(uint16_t)reveal,x,y,count,out)==KSN_OK);
+                for(unsigned i=0;i<count;i++){
+                    const int px=x+(int)i;
+                    const bool inside=px>=e.bounds.x0&&px<e.bounds.x0+(int)w&&
+                                      y>=e.bounds.y0&&y<e.bounds.y0+(int)h;
+                    assert(inside||!out[i]);
+                    checked++;
+                }
+            }
+        }
+    printf("  extent: %u pixels checked, no ink outside\n",checked);
     puts("span count PASS: narrow walks the cells' columns, the control walks the chunk");
 }

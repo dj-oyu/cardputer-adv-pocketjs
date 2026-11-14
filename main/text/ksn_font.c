@@ -164,4 +164,25 @@ static unsigned advance_of(void *ctx,ksn_font font,uint32_t codepoint){
     return ksn_font_advance(font,codepoint);
 }
 
-const ksn_text_port ksn_font_port={.span=span,.advance=advance_of,.binary_coverage=true};
+/* The part of the box span can ink (ksn_ports.h): the advances of the scalars
+ * the reveal lets through -- a cell inks only its first `width` <= `advance`
+ * columns, tofu included -- and one line. The walk is span's own, so the two
+ * count the same scalars. */
+static void extent(void *ctx,const ksn_draw *draw,uint16_t reveal,unsigned *width,unsigned *height){
+    (void)ctx;
+    *width=0;*height=0;
+    if(!draw||draw->kind!=KSN_TEXT||(unsigned)draw->data.text.font>KSN_DISPLAY)return;
+    ksn_font font=draw->data.text.font;
+    const char *s=draw->data.text.utf8;
+    size_t bytes=draw->data.text.bytes;
+    unsigned pen=0;
+    for(size_t at=0;at<bytes&&reveal;reveal--){
+        size_t consumed;
+        uint32_t cp=utf8_decode(s,bytes,at,&consumed);at+=consumed;
+        pen+=ksn_font_advance(font,cp);
+    }
+    *width=pen;
+    *height=pen?(font==KSN_BODY?12u:font==KSN_DISPLAY?16u:8u):0u;
+}
+
+const ksn_text_port ksn_font_port={.span=span,.advance=advance_of,.binary_coverage=true,.extent=extent};

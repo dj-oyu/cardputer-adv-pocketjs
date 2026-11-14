@@ -1884,6 +1884,10 @@ int g_ksn_vertical_gradient_pie=1;
 /* Binary font coverage may be consumed directly as eight 0/A PIE lanes.
  * Keep this candidate off until a same-image device A/B establishes a gain. */
 int g_ksn_text_pie=0;
+/* Same-binary A/B arm (app_session.c's switches[]): 1 walks a text command
+ * only where its port's extent() says it can ink; 0 walks the declared box.
+ * The pixels are the same (test_text_render.c compares the arms). */
+int g_ksn_text_extent=1;
 #ifdef KSN_TEXT_PIE_COUNT
 uint32_t ksn_text_pie_blocks;
 uint32_t ksn_text_pie_mixed_blocks;
@@ -2209,6 +2213,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 /* The alpha arm's rows are the 16 effective-alpha buckets.
                  * The coverage buffer is the frame scratch's (2a retype), the
                  * one the span below fills. */
+                if(g_ksn_text_extent&&display->text->extent){
+                    unsigned ew,eh;
+                    display->text->extent(display->text->ctx,d,command->reveal,&ew,&eh);
+                    if(x1>d->bounds.x0+(int)ew)x1=d->bounds.x0+(int)ew;
+                    if(y1>d->bounds.y0+(int)eh)y1=d->bounds.y0+(int)eh;
+                    if(x0>=x1||y0>=y1)continue;
+                }
                 bool lut=g_ksn_blend_lut_alpha!=0&&blend_lut_alpha_prime(d->data.text.color,d->opacity);
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;

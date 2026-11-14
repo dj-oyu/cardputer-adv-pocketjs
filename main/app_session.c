@@ -3284,6 +3284,9 @@ static esp_err_t present_account(ksn_result result) {
                          reach_ab_window++,g_ksn_tile_reach);
                 g_ksn_tile_reach^=1;
 #endif
+#if !defined(KASANE_AB)&&defined(CONFIG_POCKET_KASANE_AB)
+#define KASANE_AB 1
+#endif
 #ifndef KASANE_AB
 #define KASANE_AB 0
 #endif
@@ -3313,12 +3316,15 @@ static esp_err_t present_account(ksn_result result) {
                         {"lut",&g_ksn_blend_lut},
                         {"lut_alpha",&g_ksn_blend_lut_alpha},
                         {"affine",&g_ksn_group_affine},
-                        {"scale256",&g_ksn_scale256},
+                        /* scale256 is not a row: the rows' "on" is every
+                         * window's state, and its on is the coarse colour arm
+                         * the shipped build does not take (ksn_render.c). */
                         {"pie",&g_ksn_blend_pie},
                         {"tile_reach",&g_ksn_tile_reach},
                         {"tile_smooth",&g_ksn_tile_smooth},
                         {"decode1",&g_ksn_decode_once},
                         {"span_narrow",&g_ksn_span_narrow},
+                        {"text_extent",&g_ksn_text_extent},
                     };
                     const unsigned rows=sizeof(switches)/sizeof(switches[0]);
                     static unsigned ab_arm;

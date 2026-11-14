@@ -20,6 +20,12 @@ typedef struct {
      * aligned eight-byte mask directly in a PIE lane kernel; other providers
      * keep the general 0..255 scalar path. */
     bool binary_coverage;
+    /* Optional. Where span can ink at all for this command and reveal: the
+     * columns [bounds.x0, bounds.x0+*width) and rows [bounds.y0,
+     * bounds.y0+*height). span writes 0 everywhere else, so the renderer
+     * walks only that part of the declared box -- a box is usually given
+     * room to grow, and an empty one is skipped whole. NULL: the box. */
+    void (*extent)(void *,const ksn_draw *,uint16_t reveal,unsigned *width,unsigned *height);
 } ksn_text_port;
 typedef struct {
     void *ctx;
