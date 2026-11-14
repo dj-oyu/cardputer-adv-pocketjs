@@ -128,8 +128,6 @@ def merge(a):
     if hot + 2 > len(hc_asm.DIGITS):
         raise SystemExit('hc_profile: too many runs for one digit a class; merge some first or pass --single')
     files = {}
-    line_maps = {}
-    known = {}          # src -> every function the training compiled
     counts = {}
     by_src = {}
     for asm in a.asm:
@@ -146,9 +144,7 @@ def merge(a):
             print(f'hc_profile: {src}: {len(differ)} functions differ between the workloads\' builds, left out',
                   file=sys.stderr)
         funcs = files.setdefault(src, {})
-        lmap = line_maps.setdefault(src, {})
-        known[src] = sorted({f.name for t in texts for f in hc_asm.parse(t) if isinstance(f, hc_asm.Func)})
-        merge_file(texts[0], hc_asm.file_tag(src), runs, a.hot, klass, sigs, hot, funcs, counts, differ, lmap)
+        merge_file(texts[0], hc_asm.file_tag(src), runs, a.hot, klass, sigs, hot, funcs, counts, differ)
         if not funcs:
             del files[src]
     meta = {'runs': [{'elf': r['elf'], 'turns': r['turns']} for r in runs], 'chunk': runs[0]['chunk'], 'hot': a.hot,
@@ -156,16 +152,13 @@ def merge(a):
             'classes': [[os.path.basename(os.path.dirname(os.path.abspath(a.runs[i]))) for i in range(len(runs)) if m >> i & 1]
                         for m in sigs]}
     with open(a.out, 'w') as fh:
-        json.dump({'meta': meta, 'files': files, 'lines': {k: v for k, v in line_maps.items() if k in files},
-                   'known': {k: v for k, v in known.items() if k in files}},
-                  fh, indent=0, sort_keys=True)
+        json.dump({'meta': meta, 'files': files}, fh, indent=0, sort_keys=True)
         fh.write('\n')
     print(f'hc_profile: ' + ', '.join(f'{k} {len(v)}' for k, v in sorted(files.items()))
           + ' functions with hot blocks; instructions by class '
           + ' '.join(f'{hc_asm.tier_name(t, hot)}={counts.get(t, 0)}' for t in range(hot + 2)) + f' -> {a.out}')
 
-def merge_file(lines, tag, runs, hot_frac, klass, sigs, hot, funcs, counts, skip=(), lmap=None):
-    files = hc_asm.file_table(lines)
+def merge_file(lines, tag, runs, hot_frac, klass, sigs, hot, funcs, counts, skip=()):
     for f in hc_asm.parse(lines):
         if not isinstance(f, hc_asm.Func) or f.name in skip:
             continue
@@ -180,14 +173,6 @@ def merge_file(lines, tag, runs, hot_frac, klass, sigs, hot, funcs, counts, skip
                     if s[1] >= hot_frac:
                         mask |= 1 << i
             tiers.append((klass[mask] if sigs else 0) if mask else hot if ran else hot + 1)
-        if lmap is not None:
-            # Every compiled line, run or not, with the hottest class of a
-            # block that carries it (hc_asm.tiers_from_lines reads this for
-            # code the build compiles differently from the training).
-            for keys, t in zip(hc_asm.block_locs(f, files), tiers):
-                for k in keys:
-                    if k not in lmap or hc_asm.DIGITS.index(lmap[k]) > t:
-                        lmap[k] = hc_asm.DIGITS[t]
         if min(tiers) >= hot:
             continue
         for b, t in zip(f.blocks, tiers):

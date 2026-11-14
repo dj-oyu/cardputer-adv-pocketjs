@@ -13,7 +13,7 @@
 get_filename_component(POCKET_HOTCOLD_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
 
 function(pocket_hotcold)
-    cmake_parse_arguments(HC "LINES" "MODE;PROFILE;PAD;NAME" "ONLY;SOURCES;KEEP_OUT" ${ARGN})
+    cmake_parse_arguments(HC "" "MODE;PROFILE;PAD;NAME" "ONLY;SOURCES;KEEP_OUT" ${ARGN})
     if(NOT HC_PAD)
         set(HC_PAD 0)
     endif()
@@ -24,10 +24,6 @@ function(pocket_hotcold)
     if(HC_KEEP_OUT)
         list(JOIN HC_KEEP_OUT "," _k)
         set(_keep --keep-out "${_k}")
-    endif()
-    set(_lines "")
-    if(HC_LINES)
-        set(_lines --lines)
     endif()
     # ccache (RULE_LAUNCH_COMPILE, `idf.py --ccache`) would run in front of
     # the launcher and take Python for the compiler; run it behind instead.
@@ -40,7 +36,7 @@ function(pocket_hotcold)
     # -B: the build must not write a __pycache__ into the source tree.
     set_property(TARGET ${COMPONENT_LIB} PROPERTY C_COMPILER_LAUNCHER
         "${_python}" -B "${POCKET_HOTCOLD_DIR}/hc_cc.py" --mode "${HC_MODE}" --profile "${_profile}"
-        --pad "${HC_PAD}" ${_keep} ${_wrap} ${_lines} --only "${_only}" --)
+        --pad "${HC_PAD}" ${_keep} ${_wrap} --only "${_only}" --)
     set(_deps "${POCKET_HOTCOLD_DIR}/hc_cc.py" "${POCKET_HOTCOLD_DIR}/hc_asm.py")
     if(HC_MODE STREQUAL "use")
         list(APPEND _deps "${_profile}")
@@ -84,13 +80,7 @@ function(pocket_native_hotcold main_dir)
         list(APPEND _only "${_b}")
         list(APPEND _paths "${main_dir}/${f}")
     endforeach()
-    # -DPOCKET_NATIVE_HOTCOLD_LINES=ON: also place, by source line, the
-    # functions the block profile misses (off: no device gain, sec.13.6).
-    set(_lines "")
-    if(POCKET_NATIVE_HOTCOLD_LINES)
-        set(_lines LINES)
-    endif()
-    pocket_hotcold(NAME main ${_lines} MODE "${_mode}" PROFILE "${POCKET_NATIVE_HOTCOLD_PROFILE}"
+    pocket_hotcold(NAME main MODE "${_mode}" PROFILE "${POCKET_NATIVE_HOTCOLD_PROFILE}"
         PAD "${POCKET_NATIVE_HOTCOLD_PAD}" ONLY ${_only} SOURCES ${_paths}
         KEEP_OUT "${main_dir}/vm/helper_iram8.lf")
 endfunction()

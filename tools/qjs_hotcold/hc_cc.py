@@ -71,7 +71,6 @@ def main():
     elif mode == 'use':
         prof = json.load(open(profile))
         fns = dict(prof.get('files', {}).get(base, {}))
-        keep = set()
         for lf in keep_out:
             # Functions a linker fragment places by name (the IRAM helpers,
             # main/vm/helper_iram8.lf) must stay in their own .text.<name>
@@ -79,21 +78,13 @@ def main():
             if os.path.exists(lf):
                 for name in re.findall(r'^\s*(?:\S+:\s*)?([\w$.]+)\s+\(', open(lf).read(), re.M):
                     fns.pop(name, None)
-                    keep.add(name)
         st = {}
         lines = hc_asm.hoist_files(lines)
-        # --lines: place functions the block profile misses by their source
-        # lines (hc_asm.tiers_from_lines). Off by default: on the device it
-        # moved 8 pocket_derby.c functions and the DERBY turn did not change
-        # (+0.23%, docs/vm/qjs-hotcold.md sec.13.6).
-        lmap = prof.get('lines', {}).get(base) if '--lines' in opts else None
-        known = set(prof.get('known', {}).get(base, ()))
-        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section, lmap, known, keep)
+        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section)
         st['verified'] = hc_asm.verify(lines, new)
         # One line in the build log: a stale profile is visible, not silent.
         print(f'hc_cc: {base}: {st["matched"]} functions laid out hot/cold '
-              f'({st["missed"]} of the profile\'s did not match this object code; '
-              f'{st["by_lines"]} placed by source line instead)',
+              f'({st["missed"]} of the profile\'s did not match this object code and were left alone)',
               file=sys.stderr)
         if fns and st['matched'] * 2 < len(fns):
             print('hc_cc: warning: most of the profile is stale; retrain (tools/qjs_hotcold/train.sh)',
