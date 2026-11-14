@@ -199,7 +199,7 @@ menu "Pocket VM (diagnostics)"
 
     config POCKET_NATIVE_HOTCOLD
         bool "Lay the hot blocks of main's turn-path files out together (trial)"
-        default n
+        default y
         help
             The hot/cold layout of POCKET_VM_QJS_HOTCOLD, on the main/ files
             a JS turn runs most of (Kasane, Shiki, pocket_derby;
