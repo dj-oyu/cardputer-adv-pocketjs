@@ -82,7 +82,11 @@ def main():
                     keep.add(name)
         st = {}
         lines = hc_asm.hoist_files(lines)
-        lmap = prof.get('lines', {}).get(base)
+        # --lines: place functions the block profile misses by their source
+        # lines (hc_asm.tiers_from_lines). Off by default: on the device it
+        # moved 8 pocket_derby.c functions and the DERBY turn did not change
+        # (+0.23%, docs/vm/qjs-hotcold.md sec.13.6).
+        lmap = prof.get('lines', {}).get(base) if '--lines' in opts else None
         known = set(prof.get('known', {}).get(base, ()))
         new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section, lmap, known, keep)
         st['verified'] = hc_asm.verify(lines, new)
