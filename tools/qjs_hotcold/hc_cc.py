@@ -32,13 +32,19 @@ def main():
     profile = opts[opts.index('--profile') + 1] if '--profile' in opts else None
     pad = int(opts[opts.index('--pad') + 1]) if '--pad' in opts else 0
     keep_out = opts[opts.index('--keep-out') + 1].split(',') if '--keep-out' in opts else []
+    # --wrap: the build's own compile launcher (ESP-IDF's RULE_LAUNCH_COMPILE,
+    # ccache), which pocket_hotcold() takes off the target so that it runs
+    # here, in front of the compiler. In front of this script, ccache took
+    # Python for the compiler, and on Windows a long command reached Python as
+    # `python @response-file`, which Python reads as a script name.
+    wrap = opts[opts.index('--wrap') + 1].split(';') if '--wrap' in opts else []
 
     src = None
     if '-c' in cmd and '-o' in cmd:
         cand = [a for a in cmd[1:] if a.endswith('.c') and not a.startswith('-')]
         src = cand[-1] if cand else None
     if not src or os.path.basename(src) not in only:
-        sys.exit(subprocess.call(cmd))
+        sys.exit(subprocess.call(wrap + cmd))
 
     obj = cmd[cmd.index('-o') + 1]
     s0, s1 = obj + '.hc0.s', obj + '.hc.s'

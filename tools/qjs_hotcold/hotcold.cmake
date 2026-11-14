@@ -25,10 +25,18 @@ function(pocket_hotcold)
         list(JOIN HC_KEEP_OUT "," _k)
         set(_keep --keep-out "${_k}")
     endif()
+    # ccache (RULE_LAUNCH_COMPILE, `idf.py --ccache`) would run in front of
+    # the launcher and take Python for the compiler; run it behind instead.
+    get_property(_rule GLOBAL PROPERTY RULE_LAUNCH_COMPILE)
+    set(_wrap "")
+    if(_rule)
+        set_property(TARGET ${COMPONENT_LIB} PROPERTY RULE_LAUNCH_COMPILE "")
+        set(_wrap --wrap "${_rule}")
+    endif()
     # -B: the build must not write a __pycache__ into the source tree.
     set_property(TARGET ${COMPONENT_LIB} PROPERTY C_COMPILER_LAUNCHER
         "${_python}" -B "${POCKET_HOTCOLD_DIR}/hc_cc.py" --mode "${HC_MODE}" --profile "${_profile}"
-        --pad "${HC_PAD}" ${_keep} --only "${_only}" --)
+        --pad "${HC_PAD}" ${_keep} ${_wrap} --only "${_only}" --)
     set(_deps "${POCKET_HOTCOLD_DIR}/hc_cc.py" "${POCKET_HOTCOLD_DIR}/hc_asm.py")
     if(HC_MODE STREQUAL "use")
         list(APPEND _deps "${_profile}")
