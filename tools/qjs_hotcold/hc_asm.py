@@ -321,7 +321,7 @@ def hoist_files(lines):
     rest = [l for l in lines if not FILE_N.match(l)]
     return rest[:1] + files + rest[1:]
 
-def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION, lmap=None):
+def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION, lmap=None, known=(), keep=()):
     """Lay out the functions the profile calls hot. A block's class is one
     base-36 digit of the profile's string: classes 0..hot-1 are hot (several,
     when the profile groups blocks by the workloads that use them), class
@@ -340,7 +340,12 @@ def use(lines, profile, stats=None, pad=0, hot=1, section=SECTION, lmap=None):
         if p and (p['h'] != it.hash() or len(p['t']) != len(it.blocks)):
             missed += 1; p = None
         tier = [min(DIGITS.index(c), hot + 1) for c in p['t']] if p else None
-        if not p and lmap:
+        # By source line only where the block profile has nothing to say: a
+        # function it lists whose code differs here, or one the training did
+        # not compile at all. One the training compiled and saw no hot block
+        # in stays put (its lines can be hot through a helper inlined
+        # elsewhere), and so does one a linker fragment places by name.
+        if not p and lmap and it.name not in keep and (it.name in profile or it.name not in known):
             # No block profile fits this code: place it by its source lines.
             t = [min(x, hot + 1) for x in tiers_from_lines(it, files, lmap)]
             # Only a function the training saw run hot: one whose only hot

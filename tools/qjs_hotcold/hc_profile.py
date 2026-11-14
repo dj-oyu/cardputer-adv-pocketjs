@@ -129,6 +129,7 @@ def merge(a):
         raise SystemExit('hc_profile: too many runs for one digit a class; merge some first or pass --single')
     files = {}
     line_maps = {}
+    known = {}          # src -> every function the training compiled
     counts = {}
     by_src = {}
     for asm in a.asm:
@@ -146,6 +147,7 @@ def merge(a):
                   file=sys.stderr)
         funcs = files.setdefault(src, {})
         lmap = line_maps.setdefault(src, {})
+        known[src] = sorted({f.name for t in texts for f in hc_asm.parse(t) if isinstance(f, hc_asm.Func)})
         merge_file(texts[0], hc_asm.file_tag(src), runs, a.hot, klass, sigs, hot, funcs, counts, differ, lmap)
         if not funcs:
             del files[src]
@@ -154,7 +156,8 @@ def merge(a):
             'classes': [[os.path.basename(os.path.dirname(os.path.abspath(a.runs[i]))) for i in range(len(runs)) if m >> i & 1]
                         for m in sigs]}
     with open(a.out, 'w') as fh:
-        json.dump({'meta': meta, 'files': files, 'lines': {k: v for k, v in line_maps.items() if k in files}},
+        json.dump({'meta': meta, 'files': files, 'lines': {k: v for k, v in line_maps.items() if k in files},
+                   'known': {k: v for k, v in known.items() if k in files}},
                   fh, indent=0, sort_keys=True)
         fh.write('\n')
     print(f'hc_profile: ' + ', '.join(f'{k} {len(v)}' for k, v in sorted(files.items()))

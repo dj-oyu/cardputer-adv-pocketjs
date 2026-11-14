@@ -71,6 +71,7 @@ def main():
     elif mode == 'use':
         prof = json.load(open(profile))
         fns = dict(prof.get('files', {}).get(base, {}))
+        keep = set()
         for lf in keep_out:
             # Functions a linker fragment places by name (the IRAM helpers,
             # main/vm/helper_iram8.lf) must stay in their own .text.<name>
@@ -78,10 +79,12 @@ def main():
             if os.path.exists(lf):
                 for name in re.findall(r'^\s*(?:\S+:\s*)?([\w$.]+)\s+\(', open(lf).read(), re.M):
                     fns.pop(name, None)
+                    keep.add(name)
         st = {}
         lines = hc_asm.hoist_files(lines)
         lmap = prof.get('lines', {}).get(base)
-        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section, lmap)
+        known = set(prof.get('known', {}).get(base, ()))
+        new = hc_asm.use(lines, fns, st, pad, prof.get('meta', {}).get('hot_classes', 1), section, lmap, known, keep)
         st['verified'] = hc_asm.verify(lines, new)
         # One line in the build log: a stale profile is visible, not silent.
         print(f'hc_cc: {base}: {st["matched"]} functions laid out hot/cold '
