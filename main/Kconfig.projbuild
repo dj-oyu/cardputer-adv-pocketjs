@@ -416,6 +416,15 @@ menu "Pocket VM (diagnostics)"
             KASANE_PAINT window (30 frames), logging "ICACHE_AB win=... mode=..."
             after each window, so turn_ms can be compared within one image.
 
+    config POCKET_FIXED_RANDOM_SEED
+        bool "Fixed pocket.random seed (measurement builds)"
+        default n
+        help
+            pocket.random's hardware seed becomes the constant 0x5eed1234, so
+            two builds play the same races (DERBY) and the same STRESS cycle
+            and their TURNPERF windows compare. Measurement only; the broker
+            builds it with POCKET_VM_TURNPERF as sdkconfig.variant.turnperf.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n

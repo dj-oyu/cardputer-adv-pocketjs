@@ -215,6 +215,14 @@ set_property(SOURCE "${R}/main/text/ksn_font.c" "${R}/main/ui/kasane/ksn_render.
 if(R5SIM_APP STREQUAL "derby")
     set_property(SOURCE "${R}/main/pocket/derby_ser_int.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
 endif()
+# Training the native hot/cold profile (TARGET=native train.sh) needs the
+# firmware's object code: a function's profile applies only where its
+# instructions match. At -Os here, 21 of pocket_derby.c's 22 profiled
+# functions never matched the firmware's -O2 build and were left as GCC wrote
+# them (docs/vm/qjs-hotcold.md sec.13.7).
+if(POCKET_NATIVE_HOTCOLD STREQUAL "gen")
+    set_property(SOURCE "${R}/main/pocket/pocket_derby.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
+endif()
 if(R5SIM_SHIKI_ROM)
     set_property(SOURCE "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/ui/kasane/ksn_shiki.c"
         APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
