@@ -593,6 +593,9 @@ static void prof_accumulate(const ksn_render_prof *frame){
     prof_sum.blend_cy+=frame->blend_cy;prof_sum.blend_n+=frame->blend_n;
     prof_sum.read_cy+=frame->read_cy;prof_sum.read_n+=frame->read_n;
     prof_sum.image_cy+=frame->image_cy;prof_sum.image_n+=frame->image_n;
+    prof_sum.piece_n+=frame->piece_n;prof_sum.piece_draw_cy+=frame->piece_draw_cy;
+    prof_sum.piece_wait_cy+=frame->piece_wait_cy;prof_sum.piece_excess_cy+=frame->piece_excess_cy;
+    prof_sum.piece_first_cy+=frame->piece_first_cy;
 }
 #ifdef CONFIG_POCKET_VM_TURNPERF
 // R4 (docs/vm/turn-cpi.md): the ordinary JS turn against the core's own
@@ -3358,6 +3361,18 @@ static esp_err_t present_account(ksn_result result) {
                              (unsigned)prof_sum.fill_n,(unsigned)prof_sum.span_n,
                              (unsigned)prof_sum.tile_n,(unsigned)prof_sum.blend_n,
                              (unsigned)prof_sum.read_n,painted);
+                    /* Where the frame's present time goes (ksn_render.h's
+                     * piece fields): per frame, the pieces' drawing, the CPU
+                     * waiting on the DMA, and the drawing the send did not
+                     * hide. Its own line: KASANE_PAINT's fields are a contract. */
+                    if(painted){
+                        const double per=painted*240000.0;
+                        ESP_LOGI("kasane","KASANE_PIECES arm=%u pieces=%.1f draw_ms=%.2f wait_ms=%.2f "
+                                 "excess_ms=%.2f first_ms=%.2f frames=%u",arm,
+                                 (double)prof_sum.piece_n/painted,prof_sum.piece_draw_cy/per,
+                                 prof_sum.piece_wait_cy/per,prof_sum.piece_excess_cy/per,
+                                 prof_sum.piece_first_cy/per,painted);
+                    }
                     for(unsigned r=0;r<rows;r++)*switches[r].flag=arm!=r+1;
                     ab_arm++;
                 }

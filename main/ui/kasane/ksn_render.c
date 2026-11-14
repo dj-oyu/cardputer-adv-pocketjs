@@ -2147,6 +2147,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     DD_CLOSE(prepare);
     ksn_span_scratch scratch;
     bool first_band=true;
+    uint32_t piece_send_cy=0;   /* the last piece's send, for the next one's excess */
     for(unsigned band=0;band<17;band++){
         if(!(damage.bands&(1u<<band)))continue;
         /* A port with strip_rows 4 gets each 8-row band as two 4-row pieces,
@@ -2160,9 +2161,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         /* The port may hand out a different strip per piece (the board's
          * buffers in turn, so one is drawn while the last is sent from the
          * other). The first came above, before anything went out. */
+        const bool piece_prof=g_ksn_prof!=0;
+        const bool piece_first=first_band;
+        uint32_t piece_t=piece_prof?ksn_cycles():0u;
         if(!first_band){
             pixels=display->strip(display->ctx);
             if(!pixels){RENDER_FAILED();return KSN_OOM;}
+            if(piece_prof){const uint32_t now=ksn_cycles();g_ksn_render_prof.piece_wait_cy+=now-piece_t;piece_t=now;}
         }
         first_band=false;
         int y=piece_y,rows=band_y+band_rows-piece_y;
@@ -2467,12 +2472,22 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         }
         DD_CLOSE(composite);
         DD_ADD(DD_SHARED_OUTPUT_BYTES,(uint64_t)rows*(unsigned)(dx1-dx0)*2u);
+        uint32_t piece_c=0;
+        if(piece_prof){
+            piece_c=ksn_cycles();
+            const uint32_t draw=piece_c-piece_t;
+            g_ksn_render_prof.piece_n++;g_ksn_render_prof.piece_draw_cy+=draw;
+            if(piece_first){g_ksn_render_prof.piece_first_cy+=draw;g_ksn_render_prof.piece_excess_cy+=draw;}
+            else if(draw>piece_send_cy)g_ksn_render_prof.piece_excess_cy+=draw-piece_send_cy;
+            piece_send_cy=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u*24u;
+        }
         DD_OPEN(present,DD_TX_SYNC);
         result=(dx0==0&&dx1==240)?
             display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels):
             display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
         DD_CLOSE(present);
+        if(piece_prof)g_ksn_render_prof.piece_wait_cy+=ksn_cycles()-piece_c;
         if(result!=KSN_OK){RENDER_FAILED();return result;}
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
         }
