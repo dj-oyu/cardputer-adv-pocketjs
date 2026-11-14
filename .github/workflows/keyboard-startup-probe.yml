@@ -80,7 +80,7 @@ jobs:
           # POCKET_NATIVE_HOTCOLD (the same layout on main/, qjs-hotcold.md
           # sec.13, default y) is dropped likewise.
           lines=(b/'sdkconfig').read_text().splitlines(keepends=True)
-          for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set',('# CONFIG_POCKET_VM_QJS_HOTCOLD is not set','CONFIG_POCKET_VM_QJS_HOTCOLD=y'),('# CONFIG_POCKET_NATIVE_HOTCOLD is not set','CONFIG_POCKET_NATIVE_HOTCOLD=y')):
+          for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set',('# CONFIG_POCKET_VM_QJS_HOTCOLD is not set','CONFIG_POCKET_VM_QJS_HOTCOLD=y'),('# CONFIG_POCKET_NATIVE_HOTCOLD is not set','CONFIG_POCKET_NATIVE_HOTCOLD=y'), '# CONFIG_POCKET_KASANE_AB is not set', '# CONFIG_POCKET_SHIKI_DEBUG is not set', ('# CONFIG_POCKET_DERBY_SER_PIE is not set', 'CONFIG_POCKET_DERBY_SER_PIE=y'), '# CONFIG_POCKET_DERBY_SER_PIE_IRAM is not set', '# CONFIG_POCKET_DERBY_SER_PIE_SELFTEST is not set', '# CONFIG_POCKET_DERBY_SER_PROBE is not set', '# CONFIG_POCKET_DERBY_SER_IRAM is not set'):
               i=next(i for i,l in enumerate(lines) if l.startswith(off))
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
