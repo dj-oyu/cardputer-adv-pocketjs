@@ -7,6 +7,7 @@
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lease_freertos.h"
 static lease_mutex mutex;
@@ -31,12 +32,13 @@ static lease_reader readers[4];
 static bool opened,initialized,closed=true;
 static unsigned allocation_attempts,accepted_sequence,presented_sequence;
 static unsigned accepted_hidden,presented_hidden;
-static void *allocate(size_t bytes){
+static void *allocate(size_t bytes,size_t alignment){
  allocation_attempts++;
 #ifdef ESP_PLATFORM
- return heap_caps_calloc(1,bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+ /* Scratch carries over-aligned raster preparation storage. */
+ return heap_caps_aligned_calloc(alignment,1,bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
 #else
- return calloc(1,bytes);
+ (void)alignment;return calloc(1,bytes);
 #endif
 }
 static void release(void){
@@ -48,12 +50,12 @@ static void release(void){
 }
 static bool init(void){
  if(initialized)return true;
- scratch=allocate(sizeof *scratch);if(!scratch)goto failed;
+ scratch=allocate(sizeof *scratch,_Alignof(render_scratch));if(!scratch)goto failed;
 #ifdef FOX_STATIC_WEIGHT_BIN
  if(!fox_scene_static_load_embedded(&scratch->workspace))goto failed;
 #endif
  for(unsigned i=0;i<2;i++){
-  snapshots[i]=allocate(sizeof *snapshots[i]);if(!snapshots[i])goto failed;
+  snapshots[i]=allocate(sizeof *snapshots[i],_Alignof(fox_eye_snapshot));if(!snapshots[i])goto failed;
   slots[i].payload=snapshots[i];
  }
 #ifdef ESP_PLATFORM
