@@ -24,15 +24,23 @@ static int add(row_work*w,unsigned x,frag f,float opaque){
  while(at&&(a[at-1].z>f.z||(a[at-1].z==f.z&&a[at-1].order<f.order))){a[at]=a[at-1];at--;}
  a[at]=f;w->count[x]++;return 1;
 }
+static int count_only(row_work*w,unsigned x,frag f,float opaque){
+ if(x>=W||!isfinite(f.z))return 0;
+ if(!f.alpha||f.z<=opaque)return 1;
+ if(w->count[x]==K)return 0;
+ w->count[x]++;return 1;
+}
 static int scan(uint16_t*dst,int overflow,unsigned strip_rows,int write){
  uint16_t candidate[W];
  for(unsigned band=0;band<H;band+=strip_rows)for(unsigned y=band;y<H&&y<band+strip_rows;y++){
-  row_work row={0};memcpy(candidate,dst+y*W,sizeof candidate);
+  row_work row={0};if(write)memcpy(candidate,dst+y*W,sizeof candidate);
   for(unsigned x=0;x<W;x++){
    float opaque=x==0?100:-100;
    frag a={(float)x,1,0xf800,128,0},b={(float)(W-1-x),2,0x001f,128,0};
-   if(!add(&row,x,a,opaque)||!add(&row,x,b,opaque))return 0;
-   if(overflow&&y==H-1&&x==W-1)for(unsigned k=0;k<K;k++)if(!add(&row,x,(frag){30+(float)k,3+k,0xffff,64,0},opaque))return 0;
+   if(write){if(!add(&row,x,a,opaque)||!add(&row,x,b,opaque))return 0;}
+   else if(!count_only(&row,x,a,opaque)||!count_only(&row,x,b,opaque))return 0;
+   if(overflow&&y==H-1&&x==W-1)for(unsigned k=0;k<K;k++)if(!(write?add(&row,x,(frag){30+(float)k,3+k,0xffff,64,0},opaque):count_only(&row,x,(frag){30+(float)k,3+k,0xffff,64,0},opaque)))return 0;
+   if(!write)continue;
    uint16_t color=candidate[x];
    for(unsigned k=0;k<row.count[x];k++)color=blend(row.slots[x*K+k].rgb,color,row.slots[x*K+k].alpha);
    candidate[x]=color;
