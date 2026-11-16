@@ -1,3 +1,6 @@
+#ifdef AYATSURI_TEST_WEDGE_LUT
+#include "../../hone/source_package/native_wedge_lut_candidate.c"
+#endif
 #ifdef AYATSURI_TEST_REBUILD_NORMALS
 #include "ayatsuri/ayatsuri_smooth_normals.h"
 #endif
@@ -83,6 +86,16 @@ static void deform(unsigned frame,ayatsuri_transform *global,const ayatsuri_tran
     assert(ayatsuri_transform_evaluate(&pose,NULL,global+1)==AYATSURI_OK);
     assert(ayatsuri_skin_palette(global,bind,2,palette)==AYATSURI_OK);
     assert(ayatsuri_skin_evaluate(palette,2,v,6,out)==AYATSURI_OK);
+#ifdef AYATSURI_TEST_WEDGE_LUT
+    /* Host candidate scratch is unpublished until the numeric stage succeeds. */
+    float positions[18],corner_normals[36];double work[18];
+    uint32_t offsets[5]={0,3,6,9,12},topology[12];uint8_t smooth[4]={1,1,1,1};
+    for(unsigned j=0;j<6;j++)memcpy(positions+3*j,out[j].position,3*sizeof(float));
+    for(unsigned j=0;j<12;j++)topology[j]=indices[j];
+    assert(polygon_normals(positions,6,offsets,topology,smooth,4,12,work,corner_normals));
+    for(unsigned j=0;j<12;j++)memcpy(out[topology[j]].normal,corner_normals+3*j,3*sizeof(float));
+#endif
+
 #ifdef AYATSURI_TEST_REBUILD_NORMALS
     /* Explicit all-smooth test mesh; production/runtime behavior is unchanged. */
     float p[6][3],n[6][3];double work[6][3];uint32_t topology[12];
@@ -226,6 +239,17 @@ int main(int argc,char **argv){
     assert(ayatsuri_model_instance_evaluate(&actor,&owner,1,camera,light)==AYATSURI_MODEL_OK);
     assert(ayatsuri_model_instance_evaluate(&other,&other_owner,1,camera,light)==AYATSURI_MODEL_OK);
     ksn_mesh_snapshot baseline=snapshot(storage,2048);append_model(&actor,&owner,&baseline);render(&baseline,rest,actual_z,4,1,scratch);
+#ifdef AYATSURI_TEST_WEDGE_LUT
+    /* Numeric failure writes only caller-owned candidate buffers. It must not
+     * mutate the Model or the already-published snapshot; retry remains valid. */
+    const ayatsuri_model_instance committed_actor=actor;
+    float bad_p[15]={0,0,0,1,0,0,-1,0,0,0,1,0,0,0,1},bad_normals[18];double bad_work[15];
+    uint32_t bad_offsets[3]={0,3,6},bad_indices[6]={0,1,2,0,3,4};uint8_t bad_smooth[2]={1,1};
+    assert(!polygon_normals(bad_p,5,bad_offsets,bad_indices,bad_smooth,2,6,bad_work,bad_normals));
+    assert(!memcmp(&actor,&committed_actor,sizeof actor));
+    render(&baseline,pixels,actual_z,4,1,scratch);assert(!memcmp(pixels,rest,sizeof pixels));
+    deform(0,global,bind,palette,input,result);
+#endif
     rejection_cases(&actor,&owner,result);unsupported(argv[1],"holes",result);unsupported(argv[1],"sided",result);
     size_t warm_calls=calls,warm_live=live;uint32_t hashes[120];size_t max_snapshot=0;unsigned changed=0;
     for(unsigned visit=0;visit<240;++visit){

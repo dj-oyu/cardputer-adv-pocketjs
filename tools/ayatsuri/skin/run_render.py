@@ -7,6 +7,7 @@ import subprocess
 
 root = Path(__file__).resolve().parents[3]
 p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('--wedge-lut', action='store_true', help='Host-only measured LUT normal candidate; default unchanged')
 p.add_argument('--sanitize', action='store_true')
 p.add_argument('--smooth-normals', action='store_true', help='Exercise explicit smooth-normal stage before model evaluation')
 p.add_argument('--opt', choices=['0', '2'], default='2')
@@ -23,6 +24,9 @@ command = [os.environ.get('CC', 'cc'), '-std=gnu11', '-O'+a.opt, '-g',
            '-I'+str(root/'main'), '-I'+str(root/'tools/hostshim'),
            *[str(root/s) for s in sources], '-lm',
            '-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free', '-o', str(out/'skin_render')]
+if a.wedge_lut:
+    if a.smooth_normals: p.error('choose only one normal experiment')
+    command[1:1] = ['-DAYATSURI_TEST_WEDGE_LUT']
 if a.smooth_normals:
     command[1:1] = ['-DAYATSURI_TEST_REBUILD_NORMALS']
 if a.sanitize:
