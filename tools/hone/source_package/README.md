@@ -47,3 +47,9 @@ blender -b --factory-startup --disable-autoexec -t 1 --python tools/hone/source_
 ```
 
 Cost remains unmeasured on target. The prototype uses one polygon normalization, two edge normalizations and an acos per smooth corner, plus vertex normalization; work storage is 24 bytes per source vertex. Do not extrapolate host equivalence to device frame rate.
+
+Two additional Blender synthetic contract tests remain separate from device admission:
+- `test_combined_rig.py`: combines two relative morphs with a single rigid-weight bone and preserve-volume modifier, comparing evaluated positions to an independent matrix calculation over four poses.
+- `test_opacity_frame_contract.py`: updates bilateral/side driver inputs and render-object transforms together, checks inverse-world recovery of object-local coordinates, and retains fractional scalar factors rather than converting them to booleans. This is not a GPU shader/alpha renderer comparison.
+
+Neither fixture validates a private multi-bone rig, combined production driver graph, procedural material rendering or target performance. Normals computed from Blender-provided deformed positions do not independently validate native skinning.
