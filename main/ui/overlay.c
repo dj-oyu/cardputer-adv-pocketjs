@@ -191,6 +191,15 @@ void overlay_init(void) {
     announce("init");
 }
 
+/* A failed drain retains the exact owner transition, not just the guest. */
+static enum { OVERLAY_EXIT_NONE, OVERLAY_EXIT_RELEASE, OVERLAY_EXIT_STOP } pending_exit;
+static char pending_label[32];
+static overlay_state_t pending_next;
+static bool pending_music;
+static bool pending_choice_valid;
+static unsigned pending_choice;
+bool overlay_stop_pending(void) { return pending_exit!=OVERLAY_EXIT_NONE||pending_choice_valid; }
+
 unsigned overlay_armed_get(void) { return choice; }
 
 void overlay_armed_set(unsigned value) {
@@ -202,10 +211,12 @@ void overlay_armed_set(unsigned value) {
     if(value && value==choice &&
        (state==OVERLAY_RUNNING||state==OVERLAY_STARTING)) return;
     unsigned was=choice;
+    if((was && was!=value)||!value) {
+        if(!overlay_release()) { pending_choice_valid=true;pending_choice=value;return; }
+    }
     choice=value;
-    if(was && was!=value) { overlay_release(); label_reset(was); }
+    if(was && was!=value) label_reset(was);
     if(!choice) {
-        overlay_release();
         state=OVERLAY_OFF;
         // Turning it off is the human act 3.1 requires before a blocked
         // overlay may run again, so this is where the flag is cleared.
@@ -233,9 +244,13 @@ void overlay_armed_set(unsigned value) {
 
 static void stop_with(const char *label, overlay_state_t next, bool keep_music) {
     if(session_up) {
-        if(keep_music) app_stop_keep_music(); else app_stop();
+        if(!(keep_music?app_stop_keep_music():app_stop())) {
+            pending_exit=OVERLAY_EXIT_STOP;pending_next=next;pending_music=keep_music;
+            snprintf(pending_label,sizeof pending_label,"%s",label);return;
+        }
         session_up=false;
     }
+    pending_exit=OVERLAY_EXIT_NONE;
     if(flag_stored) flag_set(false);
     state=next;
     budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
@@ -244,10 +259,11 @@ static void stop_with(const char *label, overlay_state_t next, bool keep_music) 
              label,(unsigned)budget.worst_us,(unsigned)budget.turns);
 }
 
-void overlay_release(void) {
+bool overlay_release(void) {
     if(session_up) {
         // Giving the display away is not a stop: the music goes on (S5).
-        app_stop_keep_music(); session_up=false;
+        if(!app_stop_keep_music()) { pending_exit=OVERLAY_EXIT_RELEASE;return false; }
+        session_up=false;
         // Back to armed-but-not-up, so the home screen starts it again when it
         // gets the frame back. A release is not a fault, so REFUSED and
         // STOPPED are left standing: those are decisions, and giving the
@@ -257,6 +273,23 @@ void overlay_release(void) {
     if(flag_stored) flag_set(false);
     budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     pocket_overlay_reset();
+    pending_exit=OVERLAY_EXIT_NONE;
+    return true;
+}
+bool overlay_retry_stop(void) {
+    if(pending_exit==OVERLAY_EXIT_RELEASE) {
+        if(!overlay_release())return false;
+    } else if(pending_exit==OVERLAY_EXIT_STOP) {
+        /* Avoid snprintf with overlapping input/output if retry fails. */
+        char label[sizeof pending_label];memcpy(label,pending_label,sizeof label);
+        stop_with(label,pending_next,pending_music);
+        if(pending_exit!=OVERLAY_EXIT_NONE)return false;
+    }
+    if(pending_choice_valid) {
+        unsigned value=pending_choice;pending_choice_valid=false;
+        overlay_armed_set(value);
+    }
+    return !overlay_stop_pending();
 }
 
 // ------------------------------------------------------- room, before and after
@@ -408,6 +441,7 @@ static void start(void) {
 }
 
 void overlay_tick(uint32_t frame_us) {
+    if(overlay_stop_pending()||app_stop_pending())return;
     if(state==OVERLAY_STARTING) { start(); return; }
     if(state!=OVERLAY_RUNNING) return;
 
@@ -491,12 +525,12 @@ void overlay_yield(const char *claimant, bool keep_music) {
 }
 
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {
-    if(state!=OVERLAY_RUNNING) return;
+    if(state!=OVERLAY_RUNNING||overlay_stop_pending()||app_stop_pending()) return;
     pocket_overlay_paint(strip,strip_y,strip_h);
 }
 
 bool overlay_kasane_active(void) {
-    return state==OVERLAY_RUNNING&&pocket_kasane_active();
+    return state==OVERLAY_RUNNING&&!overlay_stop_pending()&&!app_stop_pending()&&pocket_kasane_active();
 }
 
 ksn_result overlay_kasane_present(const ksn_display_port *port,ksn_backdrop_loader load,

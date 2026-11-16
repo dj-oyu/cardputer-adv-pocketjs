@@ -51,6 +51,9 @@ bool ksn_runtime_invalidate_image(ksn_resource resource);
 bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect source_rect);
 bool ksn_runtime_invalidate_image_source_damage(ksn_resource resource,const ksn_damage *source);
 uint32_t ksn_runtime_opaque_system_bands(void);
+/* Drain the same display without replaying or ACKing any candidate. Caller
+ * supplies a fresh synchronous completion context; failure retains APP hold. */
+ksn_result ksn_runtime_finish_display(const ksn_display_completion *);
 ksn_result ksn_runtime_present_complete(const ksn_display_port *,ksn_backdrop_loader,bool,
                                         const ksn_display_completion *,ksn_render_stats *);
 ksn_result ksn_runtime_present(const ksn_display_port *,ksn_render_stats *);

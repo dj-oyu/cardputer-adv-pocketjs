@@ -1,3 +1,6 @@
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include "board.h"
 #include "shell.h"
 #include "overlay.h"
@@ -676,7 +679,10 @@ static bool native_catalog(unsigned index,app_control_descriptor_t *out) {
     if(index>=native_catalog_count())return false;
     *out=native_apps[index].info;return true;
 }
+static bool transition_pending(void);
+static void cancel_deferred_start(void);
 static uint8_t native_start(const char *id,bool resume) {
+    if(transition_pending())return AC_BUSY;
     const native_app_t *d=NULL;
     for(unsigned i=0;i<native_catalog_count();i++)
         if(!strcmp(native_apps[i].info.id,id)) { d=&native_apps[i];break; }
@@ -685,10 +691,15 @@ static uint8_t native_start(const char *id,bool resume) {
     if(running || screen!=SCREEN_HOME || home_modal() || pocket_text_active())return AC_BUSY;
     if(resume) {
         if(strcmp(app_dormant_id(),id))return AC_STALE_RUN;
-    } else if(app_dormant_id()[0])app_stop();
+    } else if(app_dormant_id()[0]&&!app_stop())return AC_BUSY;
     home_error=NULL;
     begin_run(id,NULL,0,d->source,d->source?(size_t)(d->end-d->source-1):0);
     if(running && run_started==ESP_OK)native_generation=app_guest_generation();
+    if(app_stop_pending()||overlay_stop_pending()) {
+        /* AC_BUSY does not accept a future start or allocate a generation.
+         * Finish retained teardown, but let the controller retry the start. */
+        cancel_deferred_start();return AC_BUSY;
+    }
     return running && run_started==ESP_OK ? AC_OK:AC_UNSUPPORTED;
 }
 
@@ -749,7 +760,46 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
     },
 };
 
+/* Owner-only deferred transitions. Never reuse the old screen/source storage
+ * until app_stop acknowledges that display borrowing has ended. */
+static bool end_pending, enter_pending, native_stop_pending;
+static esp_err_t pending_tick_error;
+static screen_id_t pending_screen;
+static struct {
+    bool active;
+    char *storage;
+    const char *id,*prelude,*source;
+    size_t prelude_len,length;
+} pending_start;
+static void cancel_deferred_start(void) {
+    free(pending_start.storage);
+    memset(&pending_start,0,sizeof pending_start);
+}
+static bool transition_pending(void) {
+    return app_stop_pending()||overlay_stop_pending()||end_pending||enter_pending||
+           native_stop_pending||pending_start.active;
+}
+static bool defer_start(const char *id,const char *pre,size_t pre_len,const char *src,size_t len) {
+    if(pending_start.active)return false;
+    size_t id_len=strlen(id)+1;
+    if(pre_len>SIZE_MAX-id_len-2||len>SIZE_MAX-id_len-pre_len-2)return false;
+    char *copy=malloc(id_len+pre_len+len+2);
+    if(!copy){home_error="START DEFER FAILED";return false;}
+    memcpy(copy,id,id_len);
+    char *p=copy+id_len;
+    if(pre_len)memcpy(p,pre,pre_len);
+    p[pre_len]=0;
+    char *q=p+pre_len+1;
+    if(len)memcpy(q,src,len);
+    q[len]=0;
+    pending_start.storage=copy;pending_start.id=copy;
+    pending_start.prelude=pre?p:NULL;pending_start.source=src?q:NULL;
+    pending_start.prelude_len=pre_len;pending_start.length=len;pending_start.active=true;
+    return true;
+}
+
 static void enter(screen_id_t next) {
+    if(app_stop_pending()) { enter_pending=true;pending_screen=next;return; }
     // docs/api/common-api.md 3.1 moves the guest's lifetime from "entering and
     // leaving the app screen" to "the home screen owning the frame", and this
     // is the leaving half: the home screen is giving the display away, so the
@@ -757,13 +807,14 @@ static void enter(screen_id_t next) {
     // because app_stop() tears down surfaces that the arriving screen may
     // immediately build again.
     if(next!=SCREEN_HOME) {
-        overlay_release();
+        if(!overlay_release()) { enter_pending=true;pending_screen=next;return; }
         shell_release_background_frames();
         // Every other screen either starts a guest (the editors) or wants the
         // radio itself (Wi-Fi: its scan starts on arrival and would be refused
         // as busy). A home-screen clock sync gives way to both.
         net_autosync_yield("screen");
     }
+    enter_pending=false;
     if(SCREENS[screen].close) SCREENS[screen].close();
     screen=next;
     atomic_store(&text_screen,SCREENS[next].takes_text);
@@ -779,7 +830,8 @@ static void go_home(void) {
 static void take_pending_run(void);
 
 static void end_run(esp_err_t tick_err) {
-    app_stop();
+    if(!app_stop()) { end_pending=true;pending_tick_error=tick_err;return; }
+    end_pending=false;
     running=false;
     xQueueReset(keys);
     const screen_ops_t *o=&SCREENS[owner];
@@ -831,6 +883,16 @@ static void take_pending_run(void) {
 // is gone.
 static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
                       const char *source, size_t len) {
+    if(app_stop_pending()||overlay_stop_pending()) {
+        (void)defer_start(app_id,prelude,prelude_len,source,len);return;
+    }
+    /* Preserve all source ownership until prior session teardown succeeds. */
+    if(app_dormant_id()[0]&&strcmp(app_dormant_id(),app_id)&&!app_stop()) {
+        (void)defer_start(app_id,prelude,prelude_len,source,len);return;
+    }
+    if(!overlay_release()) {
+        (void)defer_start(app_id,prelude,prelude_len,source,len);return;
+    }
     owner=screen;
     // APPS FIRST (docs/platform/wifi-autostart.md). A clock sync the idle home
     // screen started holds about 48 KB while the radio is up; the guest below,
@@ -855,7 +917,9 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
             ESP_LOGI(SCREENS[owner].tag,"RESUME %s",app_id);
             return;
         }
-        app_stop();
+        if(!app_stop()) {
+            (void)defer_start(app_id,prelude,prelude_len,source,len);return;
+        }
     }
     // The other half of the same rule. Every path that builds a foreground
     // guest comes through here, and app_session.c holds ONE set of statics --
@@ -863,7 +927,7 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     // that reached app_start_test() without passing here would silently
     // overwrite a live guest pointer; the one that exists (the USB
     // diagnostics) releases the overlay itself.
-    overlay_release();
+    // Prior overlay release was acknowledged before any source mutation.
     // app_session releases background scratch before every foreground start,
     // including diagnostics, while preserving it for background overlays.
     app_registry_select(app_id);
@@ -877,7 +941,7 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     if(run_started==ESP_OK) { running=true; return; }
     // The guest never came up, so there is nothing to tick or stop; report it
     // to whoever asked and stay where we are.
-    app_stop();
+    if(!app_stop()) { end_pending=true;pending_tick_error=run_started;return; }
     running=false;
     const screen_ops_t *o=&SCREENS[owner];
     if(o->run_restore) o->run_restore();
@@ -888,6 +952,7 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
 static void tick_run(bool have, const keystroke_t *stroke) {
+    if(transition_pending())return;
     // The three pickers below keep the guest from being ticked, so its
     // input.keys cannot see that the keys pressed meanwhile were theirs.
     if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
@@ -945,8 +1010,12 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // Not a work launched by workspace.run(): every work shares APP_ID_WORK, so a
     // kept one could not be told from the next.
     if(leave && owner==SCREEN_HOME && app_can_suspend() &&
-       strcmp(app_registry_current()->id,APP_ID_WORK) && app_suspend()==ESP_OK) {
-        suspend_run();
+       strcmp(app_registry_current()->id,APP_ID_WORK)) {
+        esp_err_t suspended=app_suspend();
+        if(suspended==ESP_OK)suspend_run();
+        else end_run(suspended);
+        /* A failed suspend can have released drivers or retained a DMA loan.
+         * Never run another guest turn before acknowledged stop. */
         return;
     }
     // Let the guest persist its last state before cancellation tears it down.
@@ -993,6 +1062,7 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 
 // Repaint, and report what one costs. The frame cap would hide it otherwise.
 static void paint(const screen_ops_t *s) {
+    if(transition_pending())return;
     int64_t began=esp_timer_get_time();
     bool shot=atomic_exchange(&capture,false);
     if(!shot && !pet_repaint && !s->dirty()) return;
@@ -1038,6 +1108,7 @@ static void native_observe(void) {
     app_control_observe(running,app_dormant_id(),app_registry_current()->id,app_guest_generation());
 }
 static uint8_t native_tap(uint8_t action) {
+    if(transition_pending())return AC_BUSY;
     if(!running || app_guest_generation()!=native_generation || home_modal() || pocket_text_active() ||
        pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return AC_BLOCKED;
     static const board_key_t nav[]={KEY_NONE,KEY_ENTER,KEY_BACK,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
@@ -1051,6 +1122,7 @@ static uint8_t native_tap(uint8_t action) {
 }
 static bool native_stop(void);
 static uint8_t native_suspend(void) {
+    if(transition_pending())return AC_BUSY;
     if(!running || home_modal() || pocket_text_active())return AC_BLOCKED;
     if(!app_can_suspend())return AC_UNSUPPORTED;
     if(app_suspend()!=ESP_OK) {
@@ -1066,9 +1138,27 @@ static bool native_stop(void) {
     /* app_stop destroys the guest before returning, including dormant guests.
      * No BACK/HOME marker is interpreted as a teardown acknowledgment. */
     if(app_guest_present() && (!native_generation || app_guest_generation()!=native_generation))return false;
-    app_stop();running=false;xQueueReset(keys);
+    if(!app_stop()) { native_stop_pending=true;return false; }
+    native_stop_pending=false;running=false;xQueueReset(keys);
     if(screen!=SCREEN_HOME)enter(SCREEN_HOME);
     return !app_guest_present();
+}
+static bool retry_transitions(void) {
+    if(!overlay_retry_stop())return false;
+    if(end_pending) { end_run(pending_tick_error);if(end_pending)return false; }
+    if(native_stop_pending&&!native_stop())return false;
+    if(app_stop_pending()&&!app_stop())return false;
+    if(enter_pending) { enter(pending_screen);if(enter_pending)return false; }
+    if(pending_start.active) {
+        /* Transfer local ownership so a fresh failure can retain its own copy. */
+        char *storage=pending_start.storage;
+        const char *id=pending_start.id,*pre=pending_start.prelude,*src=pending_start.source;
+        size_t pre_len=pending_start.prelude_len,len=pending_start.length;
+        pending_start.active=false;pending_start.storage=NULL;
+        begin_run(id,pre,pre_len,src,len);
+        free(storage);
+    }
+    return !transition_pending();
 }
 static bool native_emit(const uint8_t *body,size_t size) {
     return pocket_bridge_emit_namespace('C',body,size)==ESP_OK;
@@ -1092,9 +1182,12 @@ static void ui_task(void *arg) {
 #ifdef KASANE_P0_PROBE
     int64_t previous_overlay_frame_started=0;
 #endif
+    int deferred_diagnostic=0;
     while(1) {
+        if(!retry_transitions()) { vTaskDelay(pdMS_TO_TICKS(10));continue; }
         native_observe();
         app_control_pump((uint64_t)esp_timer_get_time()/1000);
+        if(transition_pending()) { vTaskDelay(1);continue; }
         /* App teardown can time out while an SD read is in progress. Reap its
          * acknowledged lease even when HOME has no guest turns to pump. */
         pocket_video_sd_stream_reap();
@@ -1197,6 +1290,7 @@ static void ui_task(void *arg) {
             have=false;
         }
 
+        if(transition_pending()) { vTaskDelay(1);continue; }
         if(running) {
             tick_run(have,&stroke);
         } else {
@@ -1257,7 +1351,7 @@ static void ui_task(void *arg) {
                         // host scripts read -- they open with Back and wait for
                         // this line, and an armed overlay would otherwise make
                         // that wait forever.
-                        ESP_LOGI("shell","HOME_READY");
+                        if(!overlay_stop_pending())ESP_LOGI("shell","HOME_READY");
                         have=false;
                         break;
                     }
@@ -1267,11 +1361,12 @@ static void ui_task(void *arg) {
             }
             while(have) {
                 if(!s->key(&stroke)) { go_home(); break; }
-                if(screen!=was) break;
+                if(screen!=was||transition_pending()) break;
                 const char *ignored; size_t ignored_len;
                 if(s->wants_run && s->wants_run(&ignored,&ignored_len)) break;
                 have=ui_key_receive(&stroke);
             }
+            if(transition_pending()) { vTaskDelay(1);continue; }
             s=&SCREENS[screen];              // key() may have moved us
             // One overlay turn, before the frame it will be composited into
             // and only where the home screen still owns the display. It runs
@@ -1291,6 +1386,7 @@ static void ui_task(void *arg) {
                 if(overlay_starting()) net_autosync_yield("overlay");
                 overlay_tick(last_frame_us);
             }
+            if(transition_pending()) { vTaskDelay(1);continue; }
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len)) {
                 const char *pre=NULL; size_t pre_len=0;
@@ -1303,7 +1399,14 @@ static void ui_task(void *arg) {
 
             framed:
         {
-            int test=atomic_exchange(&diagnostic,0);
+            if(transition_pending()) { vTaskDelay(1);continue; }
+            int test=deferred_diagnostic?deferred_diagnostic:atomic_exchange(&diagnostic,0);
+            deferred_diagnostic=0;
+            if(test&&!running&&screen==SCREEN_HOME) {
+                if((app_dormant_id()[0]&&!app_stop())||!overlay_release()) {
+                    deferred_diagnostic=test;vTaskDelay(1);continue;
+                }
+            }
 #ifdef KASANE_P0_PROBE
             if(test=='R'){
                 ksn_p0_probe_reset();
@@ -1315,13 +1418,13 @@ static void ui_task(void *arg) {
             // The diagnostics below assume no guest exists; a kept one is ended
             // first, the way any other start ends it. Outside the SELFTEST
             // block: 'K', '1'..'6' and the sound checks are in every build.
-            if(test && !running && screen==SCREEN_HOME && app_dormant_id()[0]) app_stop();
+            /* Dormant/overlay ownership was released before diagnostics above. */
             // Every diagnostic below builds a guest or measures the heap, and
             // neither wants a radio in the middle of it.
             if(test && !running && screen==SCREEN_HOME) net_autosync_yield("diagnostic");
 #ifdef CONFIG_POCKET_VM_SELFTEST
             if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
-                overlay_release();
+                if(!overlay_release()) { deferred_diagnostic=test;continue; }
                 scene_mem_release();
                 if(test=='L') vmtest_lifecycle_device();
                 else {
@@ -1354,7 +1457,7 @@ static void ui_task(void *arg) {
             }
 #endif
             if(test && !running && screen==SCREEN_HOME) {
-                overlay_release();
+                if(!overlay_release()) { deferred_diagnostic=test;continue; }
                 owner=SCREEN_HOME;
                 // A diagnostic normally runs as the default app. The two app
                 // letters must not: the manifest decides which capabilities are
@@ -1369,7 +1472,10 @@ static void ui_task(void *arg) {
                 app_registry_select(diag_id);
                 run_started=app_start_test(test);
                 running = run_started==ESP_OK;
-                if(!running) { app_stop(); home_error="TEST ERROR"; }
+                if(!running) {
+                    if(!app_stop()) { end_pending=true;pending_tick_error=run_started; }
+                    home_error="TEST ERROR";
+                }
             }
             }
         }

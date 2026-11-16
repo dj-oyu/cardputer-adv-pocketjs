@@ -3034,8 +3034,8 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
 #ifdef KASANE_DMA_OVERLAP
     /* No renderer will run on the empty path below. Complete any earlier
      * board work before its no-damage native acknowledgements as well. */
-    if(!pocket_kasane_needs_present()&&completion&&completion->finish){
-        ksn_result done=completion->finish(completion->ctx);
+    if(!pocket_kasane_needs_present()){
+        ksn_result done=ksn_runtime_finish_display(completion);
         if(done!=KSN_OK)return done;
     }
 #endif

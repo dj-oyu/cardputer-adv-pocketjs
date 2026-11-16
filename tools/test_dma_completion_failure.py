@@ -76,6 +76,10 @@ source=source.replace(needle,'''    {
         CHECK(sends==retained_sends&&blocks==retained_blocks);
         /* Fresh context object, no saved pointer to the old completion struct. */
         ksn_display_completion fresh={&loan_port,finish};
+        ksn_tx before_drain=ksn_core_poll(&runtime->core).ticket;
+        CHECK(ksn_runtime_finish_display(&fresh)==KSN_OK);
+        CHECK(sends==retained_sends&&ksn_core_has_submission(&runtime->core));
+        CHECK(ksn_core_poll(&runtime->core).ticket.value==before_drain.value);
         CHECK(ksn_runtime_present_complete(&loan_port,NULL,false,&fresh,&stats)==KSN_OK);
         CHECK(sends>retained_sends);
         CHECK(ksn_runtime_app_detach(loan_app)==KSN_OK&&!blocks);

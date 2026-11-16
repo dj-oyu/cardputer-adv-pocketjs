@@ -30,6 +30,7 @@
 #include "pocket_kasane.h"
 #include "pocket_shiki_frame.h"
 #include "ui/kasane/ksn_shiki_jit.h"
+#include "ui/kasane/ksn_runtime.h"
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
 #endif
@@ -1003,8 +1004,23 @@ static uint32_t guest_generation;
 bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
 
-void app_stop(void) {
+static bool stop_pending,stop_prepared,stop_av_stopped;
+bool app_stop_pending(void) { return stop_pending; }
+static bool app_drain_display(void) {
+#ifdef KASANE_DMA_OVERLAP
+    kasane_display_t display_state={0};
+    const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
+    return ksn_runtime_finish_display(&completion)==KSN_OK;
+#else
+    return true;
+#endif
+}
+bool app_stop(void) {
+    stop_pending=true;
+    /* Before any hook, source reset, guest destruction or shared-strip reuse. */
+    if(!app_drain_display())return false;
     bool p0_had_guest=guest!=NULL;
+    if(!stop_prepared){
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage)board_capture(false);
     p2_repair_stage=0;
@@ -1043,7 +1059,7 @@ void app_stop(void) {
     // S5: an overlay that is giving the display away (not being stopped) hands
     // a playing player to the host before its audio is reset.
     if(keep_music_once && overlay_session) pocket_av_detach_background();
-    bool av_stopped=pocket_av_reset();
+    stop_av_stopped=pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
     // codec's ADC, and a read still waiting holds a promise slot.
     pocket_capture_reset();
@@ -1061,9 +1077,14 @@ void app_stop(void) {
     shiki_memstat_report();
     // Holds no guest values (docs/apps/derby-ser-native.md section 3).
     pocket_derby_reset();
-    if(pocket_kasane_reset()){
+    stop_prepared=true;
+    }
+    /* A reentrant refusal must not fall through into guest/source destruction.
+     * Prepared resets and the stop hook are never repeated on the next retry. */
+    if(!pocket_kasane_reset())return false;
+    {
         pocket_clock_reset();
-        pocket_av_output_source_reset(av_stopped);
+        pocket_av_output_source_reset(stop_av_stopped);
         pocket_av_playback_source_reset();
 #ifdef KASANE_P0_PROBE
         pocket_pool_probe_reset();
@@ -1118,6 +1139,9 @@ void app_stop(void) {
 #endif
     shiki_memstat_reset();
     ESP_LOGI("app","APP_STOPPED");
+    stop_pending=stop_prepared=false;
+    keep_music_once=false;
+    return true;
 }
 
 // ------------------------------------------------------ resident suspension
@@ -1142,14 +1166,13 @@ void app_stop(void) {
 
 // The overlay's way out when it is giving the display away rather than being
 // stopped: music that is playing goes on as the host's (S5).
-void app_stop_keep_music(void) {
-    keep_music_once=true;
-    app_stop();
-    keep_music_once=false;
+bool app_stop_keep_music(void) {
+    if(!stop_prepared)keep_music_once=true;
+    return app_stop();
 }
 
 bool app_can_suspend(void) {
-    return guest && !overlay_session && !atomic_load(&stop_requested) &&
+    return guest && !stop_pending && !overlay_session && !atomic_load(&stop_requested) &&
            pocket_app_can_suspend();
 }
 
@@ -1173,6 +1196,7 @@ static bool settle_all(int64_t until_us) {
 
 esp_err_t app_suspend(void) {
     if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
+    if(!app_drain_display()){stop_pending=true;return ESP_ERR_TIMEOUT;}
     int64_t began=esp_timer_get_time();
     // The Back turn's arming: its deadline bounds the hook, and yield is off,
     // so nothing below can be parked half way.
@@ -1238,6 +1262,7 @@ esp_err_t app_suspend(void) {
 }
 
 esp_err_t app_resume(void) {
+    if(stop_pending)return ESP_ERR_INVALID_STATE;
     if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
         return ESP_ERR_INVALID_STATE;
     // The identity is global and a host screen may have moved it; the stores
@@ -1461,6 +1486,7 @@ static void hp_report(const char *phase, esp_err_t err) {
 #endif
 
 esp_err_t app_start_test(char test) {
+    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
@@ -2000,11 +2026,13 @@ fail:
     app_stop();return err;
 }
 esp_err_t app_start(void) {
+    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
     user_source=NULL; user_prelude=NULL; overlay_session=false;
     return app_start_test(0);
 }
 
 esp_err_t app_start_overlay(const char *source, size_t length) {
+    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
     overlay_guest_last_us=0;
     user_source=source; user_length=length;
     user_prelude=NULL; overlay_session=true;
@@ -2020,6 +2048,7 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // here; strip composition and the LCD bus remain in shell_draw(), where the
 // native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
+    if(stop_pending)return ESP_ERR_INVALID_STATE;
     if(!guest) return ESP_ERR_INVALID_STATE;
     sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
@@ -2133,6 +2162,7 @@ esp_err_t app_overlay_tick(void) {
 
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length) {
+    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
     user_source=source; user_length=length;
     user_prelude=prelude; user_prelude_length=prelude_length;
     overlay_session=false;
@@ -2217,6 +2247,7 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
 }
 
 esp_err_t app_tick(uint32_t buttons) {
+    if(stop_pending)return ESP_ERR_INVALID_STATE;
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
     // later turn for a deferred 0x2000 to be delivered on. sec.5.2 says so in
@@ -2477,7 +2508,7 @@ void app_vm_back_selftest(void) {
             if(!err && !aborting) err=app_tick(0x2000);
         }
         app_request_stop();
-        app_stop();
+        if(!app_stop()) { ESP_LOGE("app","VM_BACK stop drain pending"); return; }
         const unsigned expected=aborting?156:123456;
         bool passed=!err && vm_back_trace==expected;
         ESP_LOGI("app","VM_BACK mode=%d abort=%d trace=%u expected=%u err=%d %s",

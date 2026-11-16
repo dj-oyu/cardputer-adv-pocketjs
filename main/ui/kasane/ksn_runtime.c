@@ -193,6 +193,11 @@ static ksn_result tracked_finish(void *ctx){
     runtime->drain_pending=result!=KSN_OK;
     return result;
 }
+ksn_result ksn_runtime_finish_display(const ksn_display_completion *completion){
+    if(runtime&&runtime->completion_active)return KSN_BUSY;
+    if(!completion||!completion->finish)return display_borrowed()?KSN_BUSY:KSN_OK;
+    return runtime?tracked_finish((void *)completion):completion->finish(completion->ctx);
+}
 ksn_result ksn_runtime_present_complete(const ksn_display_port *port,ksn_backdrop_loader load,
                                         bool occlusion_safe,const ksn_display_completion *completion,
                                         ksn_render_stats *stats){
