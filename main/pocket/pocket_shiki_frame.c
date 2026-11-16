@@ -66,9 +66,11 @@ void pocket_proc_trace_take(pocket_proc_trace *out){
     trace=(pocket_proc_trace){0};
 }
 void pocket_proc_trace_view(void){
-    if(!proc_owner())return;trace.view_n++;trace_split=false;}
+    if(!proc_owner())return;
+    trace.view_n++;trace_split=false;}
 void pocket_proc_trace_presented(void){
-    if(!proc_owner())return;if(trace_split)trace.split_n++;}
+    if(!proc_owner())return;
+    if(trace_split)trace.split_n++;}
 #endif
 // Counts this file's allocations when CONFIG_POCKET_SHIKI_MEMSTAT is on
 // (docs/kasane/shiki.md sec.4.5); nothing otherwise.
@@ -153,7 +155,8 @@ static unsigned depth_rows;
 #ifdef KSN_PROC_HOST_TEST
 static int depth_fail_after=-1;
 void pocket_proc_mesh_fail_after(int n){
-    if(!proc_owner())return;depth_fail_after=n;}
+    if(!proc_owner())return;
+    depth_fail_after=n;}
 #endif
 static void *depth_calloc(size_t n,size_t size){
 #ifdef KSN_PROC_HOST_TEST
@@ -594,7 +597,8 @@ oom:
     return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"bounded depth storage allocation failed");
 }
 bool pocket_proc_native_mesh_depth(void){
-    if(!proc_owner())return false;return building&&surfaces[building_surface].depth_candidate.enabled;}
+    if(!proc_owner())return false;
+    return building&&surfaces[building_surface].depth_candidate.enabled;}
 JSValue pocket_proc_native_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p,const float *depth,uint16_t node){
     if(!proc_owner())return JS_EXCEPTION;
     if(!pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_BUSY,"beginMeshFrame required");
@@ -944,7 +948,8 @@ bool pocket_proc_shiki_detach(uint32_t handle){
 pocket_shiki_draw_prof pocket_shiki_prof;
 static pocket_shiki_turn shiki_turn;
 void pocket_shiki_turn_take(pocket_shiki_turn *out){
-    if(!proc_owner())return;*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
+    if(!proc_owner())return;
+    *out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
 uint32_t pocket_cycles(void){
 #ifdef ESP_PLATFORM
     return esp_cpu_get_cycle_count();
@@ -1071,11 +1076,14 @@ bool pocket_proc_has_frame(void){
     return s->pending||s->has_committed||s->repair_required;
 }
 bool pocket_proc_pending(void){
-    if(!proc_owner())return false;return any_pending();}
+    if(!proc_owner())return false;
+    return any_pending();}
 bool pocket_proc_backdrop_pending(void){
-    if(!proc_owner())return false;return surfaces[0].pending&&!surfaces[0].image_mode;}
+    if(!proc_owner())return false;
+    return surfaces[0].pending&&!surfaces[0].image_mode;}
 bool pocket_proc_is_image_mode(void){
-    if(!proc_owner())return false;return surfaces[0].image_mode;}
+    if(!proc_owner())return false;
+    return surfaces[0].image_mode;}
 void pocket_proc_image_mode_at(unsigned index){
     if(!proc_owner())return;
     if(index>=PROC_SURFACES)return;
@@ -1086,7 +1094,8 @@ void pocket_proc_image_mode_at(unsigned index){
         image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
 }
 void pocket_proc_image_mode(void){
-    if(!proc_owner())return;pocket_proc_image_mode_at(0);}
+    if(!proc_owner())return;
+    pocket_proc_image_mode_at(0);}
 static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
                              uint16_t y,uint16_t x,uint16_t count,
                              uint16_t *rgb565,uint8_t *alpha){
@@ -1196,7 +1205,8 @@ void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
                               .read_rows=image_rows};
 }
 void pocket_proc_image_port(ksn_image_port *out){
-    if(!proc_owner())return;pocket_proc_image_port_at(out,0);}
+    if(!proc_owner())return;
+    pocket_proc_image_port_at(out,0);}
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
     if(!proc_owner())return KSN_INVALID;
     (void)ctx;

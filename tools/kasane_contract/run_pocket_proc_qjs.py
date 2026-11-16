@@ -42,6 +42,13 @@ def main():
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),
              '-I',str(ROOT/'tools/hostshim'),
              *(str(s) for s in sources),'-lm','-o',str(binary)]
+    # Keep production adapter warnings fatal without imposing our warning
+    # policy on third-party QuickJS translation units.
+    subprocess.run([cc,'-std=gnu11','-fsyntax-only','-Wall','-Wextra','-Werror',
+        '-DKSN_PROC_HOST_TEST','-I',str(QJS),'-I',str(ROOT/'main'),
+        '-I',str(ROOT/'main/pocket'),'-I',str(ROOT/'main/ui/kasane'),
+        '-I',str(ROOT/'tools/hostshim'),str(ROOT/'main/pocket/pocket_shiki_frame.c')],
+        cwd=ROOT,check=True)
     subprocess.run(command,cwd=ROOT,check=True)
     env=os.environ.copy();env.setdefault('ASAN_OPTIONS','detect_leaks=1')
     subprocess.run([str(binary)],cwd=ROOT,env=env,check=True)
