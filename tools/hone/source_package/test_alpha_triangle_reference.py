@@ -24,8 +24,7 @@ print('PASS orthographic shared-edge ownership, crossing depth, visibility, obje
 
 assert render([a],5,5,depth_bounds=(0,2))==render([a],5,5)
 assert all(c==(0.,0.,0.) for c in render([a],5,5,depth_bounds=(2,3)))
-try:render([c],5,5,depth_bounds=(1,3))
-except ValueError:pass
-else:raise AssertionError('unimplemented plane clipping silently accepted')
+from depth_clip_reference import clip_triangle
+assert render([c],5,5,depth_bounds=(1,3))==render([dict(c,vertices=v) for v in clip_triangle(c['vertices'],1,3)],5,5)
 assert render([a,b],5,5)==old
-print('PASS near/far interval inclusion, full exclusion, crossing fail-closed and retry')
+print('PASS near/far interval inclusion, full exclusion, crossing clip reference and retry')

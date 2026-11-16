@@ -24,9 +24,12 @@ so is not the low-memory implementation and has no MCU timing claim. Native
 rig/driver positions and actual material graphs are not yet wired into it.
 Saved pose images and passing synthetic cases do not complete animation.
 
-Depth interval admission is now explicit: wholly outside triangles are excluded,
-wholly inside triangles accepted, and crossing triangles reject until a real
-near/far clipper exists. Rejection must not be mistaken for successful clipping.
+The host reference now clips crossing triangles against both depth planes with
+up to five polygon vertices and three fan triangles. Position and object-local
+mask coordinate are interpolated together. Whole-scene slot/span checks still
+run after clipping. This is not a production packet-format or native clipper;
+production admission stays closed for crossings until that separate integration
+and capacity/ownership validation exist.
 
 The source exporter preserves SHRINKWRAP target/auxiliary target, mode/method,
 offset, group and projection/culling settings in modifier-list order. It does
