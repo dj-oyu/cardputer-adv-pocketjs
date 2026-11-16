@@ -24,3 +24,18 @@ Only the transparent experiment uses these structures. Existing opaque code
 is unmodified; its host240frame/240pause raster regression passes. No reliable
 same-condition whole-renderer timing comparison or device performance claim
 is established by a fragment-only fixture.
+
+## Ownership and numerical gates
+
+The synchronous fixture rejects input/output and depth/output aliasing before
+writes and bounds the synthetic input count. Inputs must remain exclusively
+owned and immutable until return; there is no retained pointer or callback.
+This does not prove concurrent producer ownership or actual LCD STOP/retry.
+
+A separate private Blender material-factor oracle compares linear-emission
+samples on an object-local plane. It excludes discontinuity boundary pixels;
+passing it cannot establish original shaded mesh, RGB565 color-space, depth or
+antialiasing equivalence. Alpha8 quantization can differ by up to0.5/255 from
+the continuous factor and needs explicit rendering acceptance, not silent
+replacement with binary opacity. Full rig/driver -> mesh packet -> alpha
+renderer integration remains closed.

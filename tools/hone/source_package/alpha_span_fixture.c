@@ -29,8 +29,18 @@ static int bounds(const sample*in,unsigned n,span*out){
  }
  return 1;
 }
+static int overlaps(const void*a,size_t na,const void*b,size_t nb){
+ uintptr_t aa=(uintptr_t)a,bb=(uintptr_t)b;
+ if(na>UINTPTR_MAX-aa||nb>UINTPTR_MAX-bb)return 1;
+ return aa<bb+nb&&bb<aa+na;
+}
 static int render(const sample*in,unsigned n,uint16_t*pixels,const float*opaque,unsigned rows){
  if(!in||!pixels||!opaque||(rows!=1&&rows!=4&&rows!=8))return 0;
+ /* Caller exclusively owns immutable inputs for this synchronous call. No
+  * callback or retained pointer; reject aliasing before any output writes. */
+ if(n>65536||
+    overlaps(in,(size_t)n*sizeof(sample),pixels,WIDTH*HEIGHT*sizeof(*pixels))||
+    overlaps(opaque,WIDTH*HEIGHT*sizeof(*opaque),pixels,WIDTH*HEIGHT*sizeof(*pixels)))return 0;
  span ranges[HEIGHT];work w;
  if(!bounds(in,n,ranges))return 0;
  /* Whole-frame preflight: no pixel mutation before all count/depth checks. */
@@ -73,5 +83,7 @@ int main(void){
  for(unsigned i=0;i<3;i++)input[n+i]=(sample){133,HEIGHT-1,{90+(float)i,3+i,0xffff,128,0}};
  assert(!render(input,n+3,p,z,1));assert(!memcmp(p,old,sizeof p));assert(render(input,n,p,z,1));
  input[n]=(sample){0,0,{NAN,0,0,0,0}};memcpy(old,p,sizeof p);assert(!render(input,n+1,p,z,1));assert(!memcmp(old,p,sizeof p));
- printf("PASS span54/crossing band identity and out-of-view/width/late slot overflow atomic+retry; work=%zu ranges=%zu bytes; no hardware claim\n",sizeof(work),sizeof(span)*HEIGHT);
+ memcpy(old,p,sizeof p);assert(!render((const sample*)p,1,p,z,1));assert(!memcmp(p,old,sizeof p));
+ assert(!render(input,n,p,(const float*)p,1));assert(!memcmp(p,old,sizeof p));
+ printf("PASS alias rejection/span54/crossing band identity and out-of-view/width/late slot overflow atomic+retry; work=%zu ranges=%zu bytes; no hardware claim\n",sizeof(work),sizeof(span)*HEIGHT);
 }
