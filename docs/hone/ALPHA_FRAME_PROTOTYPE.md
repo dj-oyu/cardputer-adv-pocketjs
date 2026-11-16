@@ -1,6 +1,8 @@
 # Opt-in owned alpha frame lane
 
-Enable with CMake `-DKASANE_ALPHA_FRAME_PROTOTYPE=ON`. Default OFF adds no alpha
+Enable with CMake `-DKASANE_ALPHA_FRAME_PROTOTYPE=ON`, or the source-bound
+broker variant `alpha-frame-prototype` (Kconfig symbol
+`CONFIG_KASANE_ALPHA_FRAME_PROTOTYPE=y`). Default OFF adds no alpha
 fields, branches, allocations or packet copies to the existing frame path.
 This is a production-path prototype, not a shipped full-character application.
 

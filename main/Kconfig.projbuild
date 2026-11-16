@@ -1,5 +1,13 @@
 menu "Pocket VM (diagnostics)"
 
+    config KASANE_ALPHA_FRAME_PROTOTYPE
+        bool "Enable owned alpha frame preflight/replay prototype"
+        default n
+        help
+            Experimental copied native alpha packets. Does not install model
+            assets, an application caller, or prove target performance.
+
+
     config POCKET_VM_SELFTEST
         bool "Enable USB L lifecycle self-test"
         default n

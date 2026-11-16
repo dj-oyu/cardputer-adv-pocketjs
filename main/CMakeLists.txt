@@ -612,7 +612,7 @@ set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "po
 set_source_files_properties(ayatsuri/ayatsuri_model.c ayatsuri/ayatsuri_visibility.c ui/kasane/ksn_mesh_depth.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 set_property(SOURCE ui/kasane/ksn_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
 
-if(KASANE_ALPHA_FRAME_PROTOTYPE)
+if(KASANE_ALPHA_FRAME_PROTOTYPE OR CONFIG_KASANE_ALPHA_FRAME_PROTOTYPE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_ALPHA_FRAME_PROTOTYPE=1)
     set_property(SOURCE pocket/pocket_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off;-fstack-usage")
 endif()
