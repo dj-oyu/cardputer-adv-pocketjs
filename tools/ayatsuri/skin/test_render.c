@@ -1,3 +1,6 @@
+#ifdef AYATSURI_TEST_REBUILD_NORMALS
+#include "ayatsuri/ayatsuri_smooth_normals.h"
+#endif
 #include "ayatsuri/ayatsuri_model_skin.h"
 #include "ayatsuri/ayatsuri_shade.h"
 #include "ui/kasane/ksn_mesh_depth.h"
@@ -80,6 +83,14 @@ static void deform(unsigned frame,ayatsuri_transform *global,const ayatsuri_tran
     assert(ayatsuri_transform_evaluate(&pose,NULL,global+1)==AYATSURI_OK);
     assert(ayatsuri_skin_palette(global,bind,2,palette)==AYATSURI_OK);
     assert(ayatsuri_skin_evaluate(palette,2,v,6,out)==AYATSURI_OK);
+#ifdef AYATSURI_TEST_REBUILD_NORMALS
+    /* Explicit all-smooth test mesh; production/runtime behavior is unchanged. */
+    float p[6][3],n[6][3];double work[6][3];uint32_t topology[12];
+    for(unsigned j=0;j<6;j++)memcpy(p[j],out[j].position,sizeof p[j]);
+    for(unsigned j=0;j<12;j++)topology[j]=indices[j];
+    assert(ayatsuri_smooth_normals(p,6,topology,12,work,n)==AYATSURI_OK);
+    for(unsigned j=0;j<6;j++)memcpy(out[j].normal,n[j],sizeof n[j]);
+#endif
 }
 static ksn_proc_gouraud_patch oracle(const ayatsuri_skin_result *v,float depth[6]){
     /* Independent node-local projection and SNORM preparation. The existing
