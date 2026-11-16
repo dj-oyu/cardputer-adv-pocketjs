@@ -1,3 +1,6 @@
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+#include "ui/kasane/frame_lane_candidate.h"
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
 #include "ui/kasane/ksn_mesh_prepared.h"
 #endif
@@ -136,6 +139,11 @@ typedef struct {
 typedef struct {
     ksn_proc_frame *candidate,*committed;
     ksn_mesh_snapshot depth_candidate,depth_committed;
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    uint64_t alpha_serial;
+    hone_alpha_snapshot alpha_candidate,alpha_committed;
+    hone_frame_lane alpha_candidate_lane,alpha_committed_lane;
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
     ksn_mesh_prepared *prepared_candidate,*prepared_committed;
     size_t prepared_candidate_bytes,prepared_committed_bytes;
@@ -477,6 +485,15 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
     if(!render_painter_rows(surface,frame,pixels,y,rows))return false;
     const ksn_mesh_snapshot *mesh=frame==surface->candidate?
         &surface->depth_candidate:&surface->depth_committed;
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    const hone_alpha_snapshot *alpha=frame==surface->candidate?
+        &surface->alpha_candidate:&surface->alpha_committed;
+    if(alpha->count){
+        const hone_frame_lane *lane=frame==surface->candidate?
+            &surface->alpha_candidate_lane:&surface->alpha_committed_lane;
+        return hone_frame_band(lane,surface,1,pixels,(unsigned)y,(unsigned)rows,depth_workspace);
+    }
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
     const ksn_mesh_prepared *prepared=frame==surface->candidate?
         surface->prepared_candidate:surface->prepared_committed;
@@ -554,6 +571,10 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     if(any_pending()||any_repair())
         return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
     proc_surface *surface=&surfaces[index];
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    if(surface->alpha_serial==UINT64_MAX)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"alpha revision exhausted");
+#endif
     if(!buffers(surface))return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
     /* Header only: the frame may be shorter than sizeof(ksn_proc_frame). */
     surface->candidate->count=0;
@@ -563,6 +584,13 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     surface->sig_ready=false;
     surface->depth_candidate.enabled=false;surface->depth_candidate.packets.size=0;
     surface->depth_candidate.packets.packets=0;surface->depth_candidate.work=0;
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    /* No pending/repair remains: old candidate ownership can be reused now. */
+    surface->alpha_candidate.count=0;surface->alpha_candidate.ready=0;
+    surface->alpha_candidate.pinned=0;surface->alpha_candidate.owner=surface;
+    surface->alpha_candidate.generation=1;surface->alpha_candidate.revision=++surface->alpha_serial;
+    surface->alpha_candidate_lane=(hone_frame_lane){0};
+#endif
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
     building=true;
@@ -596,6 +624,38 @@ oom:
     free(fresh);free(scratch);
     return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"bounded depth storage allocation failed");
 }
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+JSValue pocket_proc_native_alpha(JSContext *ctx,const hone_alpha_packet *packets,
+                                 size_t count,float near,float far){
+    const char *op="kasane.shiki.nativeAlpha";
+    if(!proc_owner())return JS_EXCEPTION;
+    if(!building||!surfaces[building_surface].depth_candidate.enabled)
+        return failure(ctx,op,POCKET_ERR_BUSY,"owned mesh frame required");
+    hone_alpha_snapshot *a=&surfaces[building_surface].alpha_candidate;
+    const size_t limit=65536/sizeof(*packets);
+    if(!packets||!count||count>limit/3||a->count>limit-count*3||a->pinned||a->ready)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"bounded alpha packet input");
+    if(!hone_alpha_disjoint(packets,count*sizeof(*packets),a->packets,a->capacity*sizeof(*packets)))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"alpha input aliases owned storage");
+    /* Clip/validate before allocation or mutation of the owned candidate. */
+    size_t extra=0;
+    for(size_t i=0;i<count;i++){
+        hone_alpha_packet clipped[3];int n=hone_alpha_clip(packets+i,near,far,clipped);
+        if(n<0)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid alpha packet");
+        extra+=(size_t)n;
+    }
+    size_t need=a->count+extra;
+    if(need>a->capacity){
+        hone_alpha_packet *fresh=depth_calloc(need,sizeof(*fresh));
+        if(!fresh)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"alpha storage allocation failed");
+        if(a->count)memcpy(fresh,a->packets,a->count*sizeof(*fresh));
+        free(a->packets);a->packets=fresh;a->capacity=need;
+    }
+    if(extra&&!hone_alpha_append(a,a->owner,1,packets,count,near,far))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"alpha append rejected");
+    return JS_UNDEFINED;
+}
+#endif
 bool pocket_proc_native_mesh_depth(void){
     if(!proc_owner())return false;
     return building&&surfaces[building_surface].depth_candidate.enabled;}
@@ -625,6 +685,10 @@ JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark 
         .depth_bytes=surfaces[building_surface].depth_candidate.packets.size,
         .depth_packets=surfaces[building_surface].depth_candidate.packets.packets,
         .depth_work=surfaces[building_surface].depth_candidate.work};
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    mark->alpha_count=surfaces[building_surface].alpha_candidate.count;
+    mark->alpha_revision=surfaces[building_surface].alpha_candidate.revision;
+#endif
     image_band_valid=false;carry_drop();
     return JS_UNDEFINED;
 }
@@ -649,6 +713,12 @@ JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int 
 }
 void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     if(!proc_owner())return;
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    if(!mark||!building||mark->surface!=building_surface)return;
+    hone_alpha_snapshot *alpha=&surfaces[building_surface].alpha_candidate;
+    if(alpha->pinned||alpha->ready||alpha->revision!=mark->alpha_revision||mark->alpha_count>alpha->count)return;
+    alpha->count=mark->alpha_count;
+#endif
     ksn_proc_frame *c=surfaces[mark->surface<PROC_SURFACES?mark->surface:0].candidate;
     if(!c)return;
     c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;carry_drop();
@@ -780,6 +850,8 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     proc_surface *surface=&surfaces[building_surface];
     if(surface->depth_candidate.enabled&&surface->candidate->count)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"mesh scope cannot contain painter entries");
+    if(building_surface&&!surface->image_mode)
+        return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
     /* Derived state is candidate-owned. OOM/over-cap uses unchanged oracle;
      * preparation cannot mutate committed repair or a submitted DMA loan. */
@@ -795,19 +867,36 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
             (void)ksn_mesh_prepare(&surface->depth_candidate,surface->prepared_candidate,surface->prepared_candidate_bytes);
     }
 #endif
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    if(surface->alpha_candidate.count){
+        hone_alpha_snapshot *a=&surface->alpha_candidate;
+        a->ready=1;
+        surface->alpha_candidate_lane=(hone_frame_lane){.opaque=&surface->depth_candidate,
+            .alpha=a,.owner=surface,.generation=1};
+        if(!hone_frame_preflight_pin(&surface->alpha_candidate_lane,surface,1,KSN_PROC_W)){
+            a->ready=0;
+            return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"alpha full-frame preflight rejected");
+        }
+    }
+#endif
     surface->damage=frame_damage(surface);
     band_signature(surface->candidate,&surface->candidate_sig);
     surface->sig_ready=true;
 #ifdef POCKET_PROC_VISIT_STATS
     visit_stats(surface->candidate);
 #endif
-    if(building_surface&&!surface->image_mode)
-        return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
+
     ksn_result result=building_surface||surface->image_mode?
         pocket_kasane_proc_publish_at(building_surface,surface->damage):
         pocket_kasane_proc_publish();
-    if(result!=KSN_OK)return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
-                                   POCKET_ERR_BUSY,"Kasane presentation unavailable");
+    if(result!=KSN_OK){
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+        surface->alpha_candidate.pinned=0;surface->alpha_candidate.ready=0;
+        surface->alpha_candidate_lane.pinned=0;
+#endif
+        return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
+                       POCKET_ERR_BUSY,"Kasane presentation unavailable");
+    }
     surface->candidate->ready=true;
     surface->pending=true;
     pending_surface=building_surface;
@@ -1043,6 +1132,9 @@ void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_SURFACES;i++){
         shiki_or_sys_free(surfaces[i].candidate);shiki_or_sys_free(surfaces[i].committed);
         free(surfaces[i].depth_candidate.packets.data);free(surfaces[i].depth_committed.packets.data);
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+        free(surfaces[i].alpha_candidate.packets);free(surfaces[i].alpha_committed.packets);
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
         free(surfaces[i].prepared_candidate);free(surfaces[i].prepared_committed);
 #endif
@@ -1232,6 +1324,16 @@ void pocket_proc_present_result(ksn_result result){
             surface->committed=surface->candidate;surface->candidate=old;
             ksn_mesh_snapshot old_depth=surface->depth_committed;
             surface->depth_committed=surface->depth_candidate;surface->depth_candidate=old_depth;
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+            hone_alpha_snapshot old_alpha=surface->alpha_committed;
+            surface->alpha_committed=surface->alpha_candidate;surface->alpha_candidate=old_alpha;
+            hone_frame_lane old_lane=surface->alpha_committed_lane;
+            surface->alpha_committed_lane=surface->alpha_candidate_lane;surface->alpha_candidate_lane=old_lane;
+            surface->alpha_committed_lane.opaque=&surface->depth_committed;
+            surface->alpha_committed_lane.alpha=&surface->alpha_committed;
+            surface->alpha_candidate_lane.opaque=&surface->depth_candidate;
+            surface->alpha_candidate_lane.alpha=&surface->alpha_candidate;
+#endif
 #ifdef KSN_MESH_PREPARED_PROTOTYPE
             ksn_mesh_prepared *old_prepared=surface->prepared_committed;
             surface->prepared_committed=surface->prepared_candidate;surface->prepared_candidate=old_prepared;

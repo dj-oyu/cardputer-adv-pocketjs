@@ -5,6 +5,11 @@
 #include "esp_err.h"
 #include "ui/kasane/ksn_ports.h"
 #include "ui/kasane/ksn_shiki_frame.h"
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+#include "ui/kasane/alpha_packet_candidate.h"
+/* Opt-in native copied-packet lane. Mesh frame must already be building. */
+JSValue pocket_proc_native_alpha(JSContext *,const hone_alpha_packet *,size_t,float,float);
+#endif
 
 /* The frames, surfaces and image resources Shiki draws into (the procedural
  * IR that first used them went in v2.0). beginFrame, commit, resource,
@@ -60,7 +65,11 @@ extern bool pocket_proc_hook_dry;
  * draw() does (LIMIT_EXCEEDED / INVALID_ARGUMENT, beginFrame again), and the
  * caller rolls back to the mark so the candidate keeps no part of the call.
  * Each returns JS_UNDEFINED or JS_EXCEPTION. */
-typedef struct { uint16_t count,raster; uint8_t ext,surface; size_t depth_bytes; unsigned depth_packets; uint32_t depth_work; } pocket_proc_mark;
+typedef struct { uint16_t count,raster; uint8_t ext,surface; size_t depth_bytes; unsigned depth_packets; uint32_t depth_work;
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    size_t alpha_count;uint64_t alpha_revision;
+#endif
+} pocket_proc_mark;
 typedef struct {size_t candidate,committed,workspace,metadata;} pocket_proc_mesh_bytes;
 /* Explicit payload/metadata accounting; allocator overhead, guest/model and
  * legacy frame/workspaces are separate. Does not claim physical RAM fitness. */

@@ -27,6 +27,7 @@
 void pocket_proc_test_owner(bool allowed);
 static uint16_t actual[KSN_PROC_W*KSN_PROC_H], expected[KSN_PROC_W*KSN_PROC_H];
 static unsigned publishes,invalidates;
+static bool reject_publish;
 KSN_TEST_CORE(multi_core,static);
 static bool multi_active;
 static ksn_resource multi_resource[2];
@@ -48,9 +49,10 @@ static ksn_result multi_send_rect(void *ctx,uint16_t x,uint16_t y,uint16_t cols,
     return y==multi_fail_y?KSN_IO:KSN_OK;
 }
 
-ksn_result pocket_kasane_proc_publish(void){publishes++;return KSN_OK;}
+ksn_result pocket_kasane_proc_publish(void){publishes++;return reject_publish?KSN_BUSY:KSN_OK;}
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
     publishes++;
+    if(reject_publish)return KSN_BUSY;
     if(multi_active&&surface<2&&multi_resource[surface].value)
         ksn_core_invalidate_image_source_rect(&multi_core,multi_resource[surface],damage);
     return KSN_OK;
@@ -471,6 +473,91 @@ int main(void){
     eval_ok(ctx,"const newLayerId=S.createSurface();"
                 "if(newLayerId===layerId)throw Error('stale surface ID reused')");
     session_reset();
+#ifdef KSN_ALPHA_FRAME_PROTOTYPE
+    eval_ok(ctx,"S.beginMeshFrame(0,512,100000,1);S.resource()");
+    hone_alpha_packet tri={.v={{10,10,1,0},{30,10,1,0},{10,30,1,0}},
+        .rgb={1,0,0},.alpha=.5f};
+    pocket_proc_test_owner(false);
+    REQUIRE(JS_IsException(pocket_proc_native_alpha(NULL,&tri,1,-10,10)));
+    pocket_proc_test_owner(true);
+    pocket_proc_mark alpha_mark;
+    REQUIRE(!JS_IsException(pocket_proc_native_begin(ctx,"alpha-test",&alpha_mark)));
+    JSValue added=pocket_proc_native_alpha(ctx,&tri,1,-10,10);
+    REQUIRE(!JS_IsException(added));JS_FreeValue(ctx,added);
+    pocket_proc_native_rollback(&alpha_mark);
+    added=pocket_proc_native_alpha(ctx,&tri,1,-10,10);
+    REQUIRE(!JS_IsException(added));JS_FreeValue(ctx,added);
+    tri.rgb[0]=0; /* The frame owns its copy, not this mutable source. */
+    reject_publish=true;eval_error(ctx,"S.commit()");
+    REQUIRE(!pocket_proc_pending());
+    clock_t alpha_preflight=clock();
+    reject_publish=false;eval_ok(ctx,"S.commit()");
+    alpha_preflight=clock()-alpha_preflight;
+    REQUIRE(pocket_proc_pending());
+    pocket_proc_native_rollback(&alpha_mark); /* Cannot mutate a pinned submission. */
+    pocket_proc_image_port(&image);
+    REQUIRE(image.read_span(image.ctx,0,0,15,15,1,span,alpha)==KSN_OK&&span[0]==0x8000);
+    pocket_proc_present_result(KSN_IO);
+    REQUIRE(pocket_proc_pending());
+    eval_error(ctx,"S.beginFrame(0)");
+    clock_t alpha_rows=clock();
+    for(unsigned band=1;band<=8;band*=2){
+        for(unsigned y=0;y<KSN_PROC_H;y+=band){
+            unsigned n=KSN_PROC_H-y<band?KSN_PROC_H-y:band;
+            REQUIRE(pocket_proc_backdrop(NULL,y,n,actual+y*KSN_PROC_W)==KSN_OK);
+        }
+        if(band==1)memcpy(expected,actual,sizeof actual);
+        else REQUIRE(!memcmp(expected,actual,sizeof actual));
+    }
+    alpha_rows=clock()-alpha_rows;
+    printf("alpha synthetic 1 triangle: preflight_publish_us=%.1f four_frame_partition_replay_us=%.1f packet_bytes=%zu\n",
+           1e6*(double)alpha_preflight/CLOCKS_PER_SEC,1e6*(double)alpha_rows/CLOCKS_PER_SEC,sizeof(hone_alpha_packet));
+    pocket_proc_present_result(KSN_OK);REQUIRE(!pocket_proc_pending());
+    REQUIRE(image.read_span(image.ctx,0,0,15,15,1,span,alpha)==KSN_OK&&span[0]==0x8000);
+    eval_ok(ctx,"S.beginMeshFrame(0,512,1,1)");
+    tri.rgb[0]=1;
+    added=pocket_proc_native_alpha(ctx,&tri,1,-10,10);
+    REQUIRE(!JS_IsException(added));JS_FreeValue(ctx,added);
+    eval_error(ctx,"S.commit()"); /* Explicit total frame work budget. */
+    REQUIRE(!pocket_proc_pending());
+    REQUIRE(image.read_span(image.ctx,0,0,15,15,1,span,alpha)==KSN_OK&&span[0]==0x8000);
+    /* Fifth overlapping fragment must fail whole-frame preflight, not paint a
+     * prefix of the new frame or change the old committed resource. */
+    eval_ok(ctx,"S.beginMeshFrame(0,512,100000,1)");
+    tri.rgb[0]=1;hone_alpha_packet crowded[5];
+    for(unsigned i=0;i<5;i++){crowded[i]=tri;crowded[i].order=i;}
+    added=pocket_proc_native_alpha(ctx,crowded,5,-10,10);
+    REQUIRE(!JS_IsException(added));JS_FreeValue(ctx,added);
+    pocket_proc_native_rollback(&alpha_mark); /* Stale frame cannot erase crowded candidate. */
+    eval_error(ctx,"S.commit()");REQUIRE(!pocket_proc_pending());
+    REQUIRE(image.read_span(image.ctx,0,0,15,15,1,span,alpha)==KSN_OK&&span[0]==0x8000);
+    session_reset();
+    /* Backdrop IO drops candidate display but repairs from prior committed alpha. */
+    for(unsigned frame=0;frame<4;frame++){
+        eval_ok(ctx,"S.beginMeshFrame(0,512,100000,1)");
+        tri.rgb[0]=frame&1?0:1;tri.rgb[2]=frame&1?1:0;
+        added=pocket_proc_native_alpha(ctx,&tri,1,-10,10);
+        REQUIRE(!JS_IsException(added));JS_FreeValue(ctx,added);eval_ok(ctx,"S.commit()");
+        REQUIRE(pocket_proc_backdrop(NULL,15,1,actual)==KSN_OK);
+        REQUIRE(actual[15]==(frame&1?0x0010:0x8000));
+        if(frame&1){
+            pocket_proc_present_result(KSN_IO);REQUIRE(!pocket_proc_pending());
+            eval_error(ctx,"S.beginFrame(0)");
+            REQUIRE(pocket_proc_backdrop(NULL,15,1,actual)==KSN_OK&&actual[15]==0x8000);
+        }
+        pocket_proc_present_result(KSN_OK);
+    }
+    session_reset();
+    eval_ok(ctx,"const alphaSurface=S.createSurface();S.beginMeshFrame(0,512,100000,1,alphaSurface)");
+    added=pocket_proc_native_alpha(ctx,&tri,1,-10,10);
+    REQUIRE(!JS_IsException(added));JS_FreeValue(ctx,added);
+    eval_error(ctx,"S.commit()"); /* Missing image admission must not leave a pin. */
+    REQUIRE(!pocket_proc_pending());
+    eval_ok(ctx,"S.resource(alphaSurface);S.commit()");
+    REQUIRE(pocket_proc_pending());pocket_proc_present_result(KSN_OK);
+    REQUIRE(!pocket_proc_pending());session_reset();
+    puts("PASS alpha actual proc caller: copied source, rejected publish/overflow, pinned retry, ACK, 1/2/4/8-row identity");
+#endif
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     shiki_heap_end();
     uint32_t bytes,used,largest;shiki_heap_info(&bytes,&used,&largest);

@@ -17,11 +17,15 @@ OUT=ROOT/'.cache/kasane_pocket_proc_qjs'
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--opt',choices=('0','1','2'),default='1',help='host compiler optimization level')
+    parser.add_argument('--alpha-prototype',action='store_true')
+    parser.add_argument('--alpha-full-scan-reference',action='store_true')
     args=parser.parse_args()
+    alpha_flags=['-DKSN_ALPHA_FRAME_PROTOTYPE','-fstack-usage'] if args.alpha_prototype else []
+    if args.alpha_full_scan_reference:alpha_flags+=['-DKSN_ALPHA_FULL_SCAN_REFERENCE']
     cc=shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
     if not cc:raise SystemExit('No host C compiler found')
     OUT.mkdir(parents=True,exist_ok=True)
-    binary=OUT/('test_pocket_proc_qjs_O'+args.opt)
+    binary=OUT/('test_pocket_proc_qjs_O'+args.opt+('_alpha' if args.alpha_prototype else '')+('_fullscan' if args.alpha_full_scan_reference else ''))
     # No app table: the empty one the firmware links when no app has @shiki.
     rom=OUT/'ksn_shiki_rom_none.c'
     rom.write_text('#include "ksn_shiki.h"\n'
@@ -36,7 +40,7 @@ def main():
              # for a pocket_shiki_frame.c that lacks it.
              ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
-    command=[cc,'-std=gnu11','-O'+args.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-sanitize-recover',
+    command=[cc,*alpha_flags,'-std=gnu11','-O'+args.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-sanitize-recover',
              '-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),
@@ -44,7 +48,7 @@ def main():
              *(str(s) for s in sources),'-lm','-o',str(binary)]
     # Keep production adapter warnings fatal without imposing our warning
     # policy on third-party QuickJS translation units.
-    subprocess.run([cc,'-std=gnu11','-fsyntax-only','-Wall','-Wextra','-Werror',
+    subprocess.run([cc,*alpha_flags,'-std=gnu11','-fsyntax-only','-Wall','-Wextra','-Werror',
         '-DKSN_PROC_HOST_TEST','-I',str(QJS),'-I',str(ROOT/'main'),
         '-I',str(ROOT/'main/pocket'),'-I',str(ROOT/'main/ui/kasane'),
         '-I',str(ROOT/'tools/hostshim'),str(ROOT/'main/pocket/pocket_shiki_frame.c')],
