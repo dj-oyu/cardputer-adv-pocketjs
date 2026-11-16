@@ -21,3 +21,9 @@ blender -b --factory-startup --disable-autoexec -t 1 --python tools/hone/source_
 ```
 
 Optional arguments after the output path are exact object names to exclude. Unknown exclusions fail. Keep generated output outside public repository staging.
+
+## Consumer compatibility checkpoint
+
+`consumer_plan.py` validates mesh/morph/corner references with explicit errors and plans a corner-split transient geometry mapping. It preserves source vertex/corner and polygon IDs so expression positions and skin weights can be duplicated without welding away a hard edge. Stored corner normals are rest/source data, not deformed normals. Run `python tools/hone/source_package/test_consumer_plan.py` for pure-Python synthetic tests.
+
+This is a host adapter plan, not an AYNM loader. `admit_runtime` always rejects. Existing `ayatsuri_model_instance_evaluate_meshes` requires matching cold vertex counts and node-local unit normals; newly split topology cannot be submitted against the old cold mesh. Cold topology generation, deformed corner normals, skin/transform mapping and material opacity remain mandatory work. No production rendering path changes here.
