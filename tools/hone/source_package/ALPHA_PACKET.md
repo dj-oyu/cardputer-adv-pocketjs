@@ -46,3 +46,34 @@ Do not enable runtime admission until that work and device budgets are verified.
 `test_alpha_raster.c` checks band identity, continuous blend, foreground rejection,
 late slot/depth failure with unchanged output, alias refusal and retry. Its tiny
 synthetic timing is not whole-scene performance or target latency.
+
+## Row-scratch frame owner checkpoint
+
+`frame_lane_candidate.h` shares actual `ksn_mesh_render` one-row depth output
+with alpha replay. It needs existing band pixels plus 240 depth floats (960 bytes),
+not a full-frame buffer or separate row-color buffer. A frame descriptor binds
+both immutable snapshots, owner and generation. Preflight validates opaque packet
+topology WITHOUT opaque rasterization, then guarantees transparent capacity before
+opaque occlusion. Occlusion can only reduce fragment count, so this is safe but
+may reject a scene that would fit only after hidden fragments are removed.
+
+The earlier opaque-raster preflight design doubled host opaque work and was
+rejected. This candidate does one opaque raster pass. Transparent geometry still
+gets capacity preflight and replay; its cost must be measured on the real scene.
+Do not call the small synthetic alpha fixture a whole-character benchmark.
+
+Full-frame preflight completes before descriptor commit. Pinned frame snapshots
+remain alive until final band ACK; commit rejects a pinned old frame. Caller must
+retain every referenced snapshot and packet buffer. No callback or allocator is
+added. Existing opaque writes and alpha blends use the caller's band directly.
+
+The existing LCD scheduler must call preflight before its first submission,
+commit once and hold the owner pin through all bands. This candidate does NOT
+install a production LCD hook by itself. `test_frame_lane.py` runs the real opaque
+renderer with late alpha overflow, retained old descriptor, pinned commit rejection
+and band comparisons, and records legacy/preflight/replay host timings separately.
+An empty-alpha production frame can keep the existing opaque path unchanged.
+
+Device stack/time/heap, actual LCD lifecycle and full-character alpha boundary
+comparison remain required. Host stack high-water includes the entire test worker,
+not isolated helper stack or ESP32 stack usage. Public tests are synthetic.

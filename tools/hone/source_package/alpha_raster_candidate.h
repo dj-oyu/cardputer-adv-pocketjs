@@ -28,7 +28,7 @@ static inline int hone_alpha_render(const hone_alpha_snapshot*s,const void*owner
  if(!hone_alpha_disjoint(pixels,size*sizeof *pixels,depth,size*sizeof *depth)||!hone_alpha_disjoint(pixels,size*sizeof *pixels,s->packets,s->count*sizeof *s->packets)||!hone_alpha_disjoint(pixels,size*sizeof *pixels,s,sizeof *s))return 0;
  for(size_t i=0;i<s->count;i++){hone_alpha_packet temp[3];if(hone_alpha_clip(s->packets+i,-1e20f,1e20f,temp)<0)return 0;for(unsigned j=0;j<3;j++)if(fabsf(s->packets[i].v[j].x)>1e6f||fabsf(s->packets[i].v[j].y)>1e6f||fabsf(s->packets[i].v[j].z)>1e10f||fabsf(s->packets[i].v[j].mask)>1e10f)return 0;}
  for(unsigned y=0;y<height;y++){unsigned left=width,right=0;for(unsigned x=0;x<width;x++){
-  if(!isfinite(depth[(size_t)y*width+x]))return 0;hone_alpha_fragment f[4];int n=hone_alpha_fragments(s,x,y,depth[(size_t)y*width+x],f);if(n<0)return 0;if(n){if(x<left)left=x;right=x+1;}}
+  if(isnan(depth[(size_t)y*width+x])||depth[(size_t)y*width+x]==INFINITY)return 0;hone_alpha_fragment f[4];int n=hone_alpha_fragments(s,x,y,depth[(size_t)y*width+x],f);if(n<0)return 0;if(n){if(x<left)left=x;right=x+1;}}
   if(right&&right-left>span_limit)return 0;
  }
  for(unsigned band=0;band<height;band+=rows)for(unsigned y=band;y<height&&y<band+rows;y++)for(unsigned x=0;x<width;x++){
