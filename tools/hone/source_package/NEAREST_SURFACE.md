@@ -47,3 +47,13 @@ invalid input and retry. Run `python test_nearest_batch.py` and compile/run
 `test_nearest_batch.c` at O2 and with ASan/UBSan (leak detection separately).
 Host benchmarks must include refit and validation and compare the same batch
 API with zero workspace. No hardware speed or full-renderer claim follows.
+
+`test_nearest_provider.py --root <checkout> --out <build-directory>` injects a
+synthetic plane-wrap producer into the existing provider caller fixture without
+changing its production sources. It checks wrap output against the independent
+original geometry, then executes real model evaluation, pending snapshot append,
+publication and row rendering including failure/rollback/retry and pin ownership.
+`--sanitize` enables ASan/UBSan, excluding leak checks. This is a host integration
+seam test, NOT the restored full character, firmware integration or target timing.
+Full-character cold chunk identity, deformed corner normals, visibility/alpha and
+near clipping still need the scene adapter before runtime admission can open.
