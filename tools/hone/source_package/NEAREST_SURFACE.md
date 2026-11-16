@@ -74,3 +74,16 @@ seed, changing only the component under investigation. These images must remain
 private if their source is private. Zero quantized pixel differences in sampled
 views does not waive normal/geometry tolerance or prove continuous animation,
 production raster equivalence, hardware speed or absence of rare boundary cases.
+
+## Cold corner-slot connection
+
+`cold_slot_candidate.h` gathers up to 32 positions and corner normals directly
+into the existing provider slot using separate source vertex/corner identities.
+It rejects mismatched pose generations, invalid indices and invalid numeric
+results. Cold-model identity, exclusive ownership and disjoint live spans are
+scene-adapter preconditions. No full-character copy or new callback layer is
+introduced. Failure remains candidate-local and must not publish a snapshot.
+`test_cold_slot.c` covers split corner normals, stale generations and retry;
+`test_nearest_provider.py` also runs nonidentity cold maps through the actual
+provider and snapshot caller. Real-source mapping correctness is a separate gate
+from source deformation accuracy, alpha support and complete scene publication.

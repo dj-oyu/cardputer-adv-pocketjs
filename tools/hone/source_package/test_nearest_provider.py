@@ -12,6 +12,7 @@ adapter='''
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmisleading-indentation"
 #include "nearest_batch_candidate.c"
+#include "cold_slot_candidate.h"
 #pragma GCC diagnostic pop
 static void geometry(unsigned frame,unsigned node,ayatsuri_skin_result*out){
  original_geometry(frame,node,out);
@@ -23,6 +24,15 @@ static void geometry(unsigned frame,unsigned node,ayatsuri_skin_result*out){
   assert(fabs(result[3*i+k]-out[i].position[k])<1e-10);
   out[i].position[k]=(float)result[3*i+k];
  }
+ /* Nonidentity cold mapping exercises vertex/corner gathers before the real
+  * provider consumes its reusable slot. Separate normal indices are retained. */
+ float positions[96],normals[96];hone_cold_corner map[32];
+ for(unsigned i=0;i<32;i++){
+  map[i]=(hone_cold_corner){31-i,i};
+  for(unsigned k=0;k<3;k++){positions[3*(31-i)+k]=out[i].position[k];normals[3*i+k]=out[i].normal[k];}
+ }
+ assert(!hone_cold_slot(positions,32,normals,32,map,32,1,2,1,out));
+ assert(hone_cold_slot(positions,32,normals,32,map,32,1,1,1,out));
 }
 '''
 source=source.replace(anchor,'\n'+adapter+anchor)
