@@ -57,3 +57,20 @@ publication and row rendering including failure/rollback/retry and pin ownership
 seam test, NOT the restored full character, firmware integration or target timing.
 Full-character cold chunk identity, deformed corner normals, visibility/alpha and
 near clipping still need the scene adapter before runtime admission can open.
+
+## Precision diagnosis and image evidence
+
+For query-to-surface gap d and nonzero offset h, direction normalization can
+amplify small tangential closest-point errors approximately by |h|/d. Report
+that condition number separately from source position, matrix conversion,
+nearest-face tie and normal-rebuild errors. Substituting oracle inputs isolates
+causes; an oracle-API improvement is not a native implementation improvement.
+Simply changing all calculations to float is not an accuracy guarantee.
+
+`image_error_metrics.py` reports all-pixel linear RGB difference and a diagnostic
+linear RGB565 quantization difference. Run `test_image_error_metrics.py`.
+Paired images must retain renderer, camera, materials, lights, samples and random
+seed, changing only the component under investigation. These images must remain
+private if their source is private. Zero quantized pixel differences in sampled
+views does not waive normal/geometry tolerance or prove continuous animation,
+production raster equivalence, hardware speed or absence of rare boundary cases.
