@@ -9,7 +9,7 @@
 #endif
 #include "pocket_shiki_frame.h"
 #ifdef POCKET_FOX_NATIVE_PROVIDER
-#ifndef FOX_SHIKI_PROVIDER
+#if !defined(FOX_SHIKI_PROVIDER) && !defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
 #error "Native fox hook requires its verified provider profile"
 #endif
 #include "../private_fox/shiki_provider.h"
@@ -1939,3 +1939,4 @@ void pocket_proc_overlay_present_result(ksn_result result){
     if(any_pending()&&surfaces[pending_surface].image_mode)
         pocket_proc_present_result(result);
 }
+

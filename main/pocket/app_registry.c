@@ -60,7 +60,7 @@ static const char *const CAPS_PLAY[]    = {"ui.overlay", "display.kasane",
 
 static const app_manifest_t MANIFESTS[] = {
     // The built-in Kasane demo, no storage or works: it draws and counts.
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
     {.id="local.fox", .title="FOX", .entry="private_fox/shiki_app.h",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_GAME, .works=APP_WORKS_NONE},

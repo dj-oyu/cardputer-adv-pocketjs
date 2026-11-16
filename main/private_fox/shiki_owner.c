@@ -1,7 +1,7 @@
 #include "bridge.h"
 #include "render_adapter.h"
 #include "shiki_provider.h"
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,3 +129,4 @@ unsigned fox_composed_hidden(void){owner_check();refresh();return presented_hidd
 unsigned fox_composed_allocation_attempts(void){owner_check();return allocation_attempts;}
 unsigned fox_composed_mode(int mode){owner_check();(void)mode;return 0;}
 #endif
+

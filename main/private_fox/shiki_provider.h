@@ -1,7 +1,10 @@
 #ifndef FOX_SHIKI_PROVIDER_H
 #define FOX_SHIKI_PROVIDER_H
+#if defined(FOX_SHIKI_OLD_FLOAT_BASELINE) && (defined(FOX_SHIKI_PROVIDER) || defined(FOX_STATIC_WEIGHT_BIN) || defined(FOX_LOCAL_Q29))
+#error "Old float baseline conflicts with fixed profile"
+#endif
 #include "render_adapter.h"
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
 /* Single owner only, after display join. This module borrows published leases;
  * the publisher still owns lease_retire. All pools/payloads/scratch outlive close.
  * offer preflights a staged token; accept after Shiki publish success, reject on
@@ -24,3 +27,4 @@ bool fox_shiki_active(void);
 bool fox_shiki_pending(void);
 #endif
 #endif
+

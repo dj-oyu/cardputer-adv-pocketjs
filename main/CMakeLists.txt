@@ -657,3 +657,11 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/private_fox/shiki_provider.cmake")
     include("${CMAKE_CURRENT_LIST_DIR}/private_fox/shiki_provider.cmake")
 endif()
+
+
+# Explicit old-float comparison; fixed provider gate above is unchanged.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/private_fox/shiki_old_float_baseline.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/private_fox/shiki_old_float_baseline.cmake")
+elseif(FOX_SHIKI_OLD_FLOAT_BASELINE)
+    message(FATAL_ERROR "Requested old-float baseline module is missing")
+endif()

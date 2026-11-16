@@ -1,5 +1,5 @@
 #include "shiki_provider.h"
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
 #include <assert.h>
 #include <string.h>
 typedef struct {
@@ -63,3 +63,4 @@ void fox_shiki_close(void){
 bool fox_shiki_active(void){return pending.live||committed.live;}
 bool fox_shiki_pending(void){return pending.live;}
 #endif
+

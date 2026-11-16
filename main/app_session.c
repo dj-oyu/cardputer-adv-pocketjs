@@ -1,4 +1,4 @@
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
 #include "private_fox/bridge.h"
 #endif
 #include "derby_detail.h"
@@ -1241,7 +1241,7 @@ bool app_guest_present(void) { return guest!=NULL; }
 uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
 
 void app_stop(void) {
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
     /* Close before guest stop hooks; Kasane reset below joins/releases leases. */
     fox_bridge_close();
 #endif
@@ -1311,7 +1311,7 @@ void app_stop(void) {
         pocket_pool_probe_reset();
 #endif
     }
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
     /* Never free snapshots retained by a failed/busy Kasane detach. */
     if(!fox_composed_finish())ESP_LOGW("app","FOX_SHIKI_DRAIN_PENDING");
 #endif
@@ -1727,7 +1727,7 @@ static void js_join_hook(JSContext *ctx) {
 esp_err_t app_start_test(char test) {
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     esp_err_t err;
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
     if(fox_composed_shutdown_pending())return ESP_ERR_INVALID_STATE;
 #endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
@@ -1931,7 +1931,7 @@ esp_err_t app_start_test(char test) {
     // runs in the order it registered.
     TRY_NOJOIN("workspace",pocket_workspace_install);
 surfaces_done:
-#ifdef FOX_SHIKI_PROVIDER
+#if defined(FOX_SHIKI_PROVIDER) || defined(FOX_SHIKI_OLD_FLOAT_BASELINE)
     /* Only the registered private app gets this asset-specific frontend. */
     if(!overlay_session&&app_registry_current()&&
        !strcmp(app_registry_current()->id,"local.fox"))
