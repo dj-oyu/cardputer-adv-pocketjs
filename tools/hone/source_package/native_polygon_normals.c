@@ -13,9 +13,13 @@ int polygon_normals(const float *p,size_t nv,const uint32_t *offset,const uint32
  }
  for(size_t f=0;f<np;f++){
   size_t a=offset[f],b=offset[f+1];double n[3]={0,0,0};
-  /* Newell polygon normal preserves one face contribution across its diagonal. */
-  for(size_t k=a;k<b;k++){const float *v=p+3*vi[k],*w=p+3*vi[k+1==b?a:k+1];n[0]+=((double)v[1]-w[1])*((double)v[2]+w[2]);n[1]+=((double)v[2]-w[2])*((double)v[0]+w[0]);n[2]+=((double)v[0]-w[0])*((double)v[1]+w[1]);}
-  if(normalize(n)==0){n[0]=n[1]=0;n[2]=1;}
+  /* Binary32 last-to-first cyclic ordering matches the reference's cached
+   * polygon path, which differs numerically from its quad inspection path. */
+  float nf[3]={0,0,0};
+  for(size_t k=a;k<b;k++){const float *v=p+3*vi[k==a?b-1:k-1],*w=p+3*vi[k];nf[0]+=(v[1]-w[1])*(v[2]+w[2]);nf[1]+=(v[2]-w[2])*(v[0]+w[0]);nf[2]+=(v[0]-w[0])*(v[1]+w[1]);}
+  float length=sqrtf(nf[0]*nf[0]+nf[1]*nf[1]+nf[2]*nf[2]);
+  if(length==0){nf[0]=nf[1]=0;nf[2]=1;}else{float inverse=1.0f/length;for(int j=0;j<3;j++)nf[j]*=inverse;}
+  for(int j=0;j<3;j++)n[j]=nf[j];
   for(size_t k=a;k<b;k++){
    for(int j=0;j<3;j++)out[3*k+j]=(float)n[j];
    if(smooth[f]){const float *v=p+3*vi[k],*prev=p+3*vi[k==a?b-1:k-1],*next=p+3*vi[k+1==b?a:k+1];double x[3],y[3];for(int j=0;j<3;j++){x[j]=prev[j]-v[j];y[j]=next[j]-v[j];}normalize(x);normalize(y);double d=x[0]*y[0]+x[1]*y[1]+x[2]*y[2];double angle=acos(fmax(-1.,fmin(1.,d)));for(int j=0;j<3;j++)work[3*vi[k]+j]+=angle*n[j];}
