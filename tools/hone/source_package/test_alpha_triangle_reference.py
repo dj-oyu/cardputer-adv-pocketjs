@@ -21,3 +21,11 @@ else:raise AssertionError('overflow accepted')
 assert old==r and render([a,b],5,5)==old
 m=tri(((0,0,1,-2),(4,0,1,2),(0,4,1,-2)),alpha=.05,mask=(-.1,.1));assert render([m],5,5)[7][0]==1
 print('PASS orthographic shared-edge ownership, crossing depth, visibility, object-local mask and reject/retry; flat-linear RGB only')
+
+assert render([a],5,5,depth_bounds=(0,2))==render([a],5,5)
+assert all(c==(0.,0.,0.) for c in render([a],5,5,depth_bounds=(2,3)))
+try:render([c],5,5,depth_bounds=(1,3))
+except ValueError:pass
+else:raise AssertionError('unimplemented plane clipping silently accepted')
+assert render([a,b],5,5)==old
+print('PASS near/far interval inclusion, full exclusion, crossing fail-closed and retry')

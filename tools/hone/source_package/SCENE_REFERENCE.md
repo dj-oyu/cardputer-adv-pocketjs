@@ -23,3 +23,15 @@ committed frame. It allocates whole-frame fragment lists for reference use,
 so is not the low-memory implementation and has no MCU timing claim. Native
 rig/driver positions and actual material graphs are not yet wired into it.
 Saved pose images and passing synthetic cases do not complete animation.
+
+Depth interval admission is now explicit: wholly outside triangles are excluded,
+wholly inside triangles accepted, and crossing triangles reject until a real
+near/far clipper exists. Rejection must not be mistaken for successful clipping.
+
+The source exporter preserves SHRINKWRAP target/auxiliary target, mode/method,
+offset, group and projection/culling settings in modifier-list order. It does
+not bake or silently discard that modifier. Relative shape evaluation precedes
+modifier processing; target evaluated geometry/transforms are a dependency of
+wrapping. `test_shrinkwrap_contract.py` checks a synthetic plane with four morph
+weights and preserved settings. Native curved/moving-target shrinkwrap remains
+unsupported and those meshes must remain rejected by the runtime consumer.

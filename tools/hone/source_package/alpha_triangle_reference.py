@@ -4,14 +4,19 @@ linear RGB to isolate visibility/depth/alpha. No PBR or perspective claim.
 """
 import math
 
-def render(triangles,width,height,slots=4,span_limit=54):
+def render(triangles,width,height,slots=4,span_limit=54,depth_bounds=None):
  if width<1 or height<1 or slots<1:raise ValueError('limits')
+ if depth_bounds is not None and (len(depth_bounds)!=2 or not all(math.isfinite(x) for x in depth_bounds) or depth_bounds[0]>=depth_bounds[1]):raise ValueError('depth interval')
  opaque=[(-math.inf,(0.,0.,0.)) for _ in range(width*height)];fragments=[[] for _ in opaque]
  for order,t in enumerate(triangles):
   if type(t.get('visible',True)) is not bool:raise ValueError('visibility')
   if not t.get('visible',True):continue
   v=[tuple(x) for x in t['vertices']];color=tuple(t['color']);alpha=t['alpha']
   if len(v)!=3 or any(len(x)!=4 for x in v) or len(color)!=3 or not all(math.isfinite(x) for p in v for x in p) or not all(math.isfinite(x) and 0<=x<=1 for x in color) or not math.isfinite(alpha) or not 0<=alpha<=1:raise ValueError('invalid triangle')
+  if depth_bounds is not None:
+   low,high=depth_bounds;lo=min(p[2] for p in v);hi=max(p[2] for p in v)
+   if hi<low or lo>high:continue
+   if lo<low or hi>high:raise ValueError('depth-plane crossing requires clipper')
   # Fourth coordinate is authored object-local mask coordinate, not screen x.
   mask=t.get('mask')
   if mask and (len(mask)!=2 or not all(math.isfinite(x) for x in mask) or mask[0]>mask[1]):raise ValueError('mask')
