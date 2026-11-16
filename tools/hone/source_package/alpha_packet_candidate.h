@@ -9,7 +9,7 @@
 #include <string.h>
 typedef struct {float x,y,z,mask;} hone_alpha_vertex;
 typedef struct {hone_alpha_vertex v[3];float rgb[3],alpha,mask_low,mask_high;uint32_t order,node;unsigned mask_enabled;} hone_alpha_packet;
-typedef struct {hone_alpha_packet *packets;size_t count,capacity;const void *owner;uint32_t generation;int pinned,ready;} hone_alpha_snapshot;
+typedef struct {hone_alpha_packet *packets;size_t count,capacity;const void *owner;uint32_t generation;int pinned,ready;uint64_t revision;} hone_alpha_snapshot;
 static inline int hone_alpha_disjoint(const void*a,size_t an,const void*b,size_t bn){
  uintptr_t x=(uintptr_t)a,y=(uintptr_t)b;return an<=UINTPTR_MAX-x&&bn<=UINTPTR_MAX-y&&(x+an<=y||y+bn<=x);
 }
@@ -46,9 +46,9 @@ static inline int hone_alpha_append(hone_alpha_snapshot*s,const void*owner,uint3
 /* Ready snapshots are immutable and pinned snapshots cannot be replaced.
  * A failure never changes the existing visible snapshot. Both buffers disjoint. */
 static inline int hone_alpha_publish(hone_alpha_snapshot*ready,hone_alpha_snapshot*candidate,const void*owner,uint32_t generation){
- if(!ready||!candidate||ready==candidate||!owner||ready->owner!=owner||candidate->owner!=owner||candidate->generation!=generation||!generation||candidate->ready||candidate->pinned||ready->pinned||candidate->count>candidate->capacity||!ready->packets||!candidate->packets||ready->capacity>SIZE_MAX/sizeof(hone_alpha_packet)||candidate->capacity>SIZE_MAX/sizeof(hone_alpha_packet))return 0;
+ if(!ready||!candidate||ready==candidate||!owner||ready->owner!=owner||candidate->owner!=owner||candidate->generation!=generation||!generation||candidate->ready||candidate->pinned||ready->pinned||ready->revision==UINT64_MAX||candidate->count>candidate->capacity||!ready->packets||!candidate->packets||ready->capacity>SIZE_MAX/sizeof(hone_alpha_packet)||candidate->capacity>SIZE_MAX/sizeof(hone_alpha_packet))return 0;
  if(!hone_alpha_disjoint(ready,sizeof *ready,candidate,sizeof *candidate)||!hone_alpha_disjoint(ready,sizeof *ready,ready->packets,ready->capacity*sizeof(hone_alpha_packet))||!hone_alpha_disjoint(candidate,sizeof *candidate,candidate->packets,candidate->capacity*sizeof(hone_alpha_packet))||!hone_alpha_disjoint(ready,sizeof *ready,candidate->packets,candidate->capacity*sizeof(hone_alpha_packet))||!hone_alpha_disjoint(candidate,sizeof *candidate,ready->packets,ready->capacity*sizeof(hone_alpha_packet)))return 0;
  if(!hone_alpha_disjoint(ready->packets,ready->capacity*sizeof(hone_alpha_packet),candidate->packets,candidate->capacity*sizeof(hone_alpha_packet)))return 0;
- hone_alpha_snapshot old=*ready;*ready=*candidate;ready->ready=1;*candidate=old;candidate->ready=0;candidate->count=0;candidate->generation=generation;return 1;
+ hone_alpha_snapshot old=*ready;*ready=*candidate;ready->revision=old.revision+1;ready->ready=1;*candidate=old;candidate->ready=0;candidate->count=0;candidate->generation=generation;return 1;
 }
 #endif

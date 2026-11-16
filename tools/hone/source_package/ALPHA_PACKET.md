@@ -77,3 +77,17 @@ An empty-alpha production frame can keep the existing opaque path unchanged.
 Device stack/time/heap, actual LCD lifecycle and full-character alpha boundary
 comparison remain required. Host stack high-water includes the entire test worker,
 not isolated helper stack or ESP32 stack usage. Public tests are synthetic.
+
+
+Independent review found and reproduced missing depth-scratch alias rejection,
+uncoupled alpha/frame pin state, and reversed alpha boundary ownership. Candidate
+repairs add explicit scratch/source alias refusal, coupled pin/unpin APIs and
+actual opaque-renderer edge parity tests. Publication increments an alpha revision;
+preflight captures it, and commit/pin/replay reject stale revisions even when the
+pose generation is unchanged or buffers return to their previous addresses.
+`hone_frame_preflight_pin` is the preferred synchronous entry. Pinning blocks
+legal alpha publication until ACK/drain unpins. Opaque pointer/size changes also
+reject. These are lifetime/identity checks, not a thread-safe lock: production
+scheduler ownership must prevent concurrent mutation and retain source storage.
+`test_frame_lane_review.c` contains independent alias, same-generation republish,
+ABA and shared-edge reproductions. No LCD enablement follows from these repairs.

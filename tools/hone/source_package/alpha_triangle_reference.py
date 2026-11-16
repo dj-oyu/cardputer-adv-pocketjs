@@ -34,7 +34,7 @@ def render(triangles,width,height,slots=4,span_limit=54,depth_bounds=None):
   for y in range(max(0,math.ceil(min(p[1] for p in v))),min(height-1,math.floor(max(p[1] for p in v)))+1):
    for x in range(max(0,math.ceil(min(p[0] for p in v))),min(width-1,math.floor(max(p[0] for p in v)))+1):
     pairs=((v[1],v[2]),(v[2],v[0]),(v[0],v[1]));es=[edge(a,b,x,y) for a,b in pairs]
-    if any(e<0 or (e==0 and not (b[1]>a[1] or (b[1]==a[1] and b[0]<a[0]))) for e,(a,b) in zip(es,pairs)):continue
+    if any(e<0 or (e==0 and not (b[1]<a[1] or (b[1]==a[1] and b[0]>a[0]))) for e,(a,b) in zip(es,pairs)):continue
     w=[e/area for e in es];z=sum(w[i]*v[i][2] for i in range(3));local=sum(w[i]*v[i][3] for i in range(3));a=1. if mask and mask[0]<local<mask[1] else alpha;at=y*width+x
     if a==1:
      if z>opaque[at][0]:opaque[at]=(z,color)

@@ -16,14 +16,17 @@ static void render(const ksn_mesh_snapshot*s,uint16_t*out,unsigned band,unsigned
  clock_t tick=clock();for(unsigned y=0;y<135;y+=band)assert(ksn_mesh_render(s,out+y*240,y,135-y<band?135-y:band,depthwork,1));legacy_ticks+=clock()-tick;
  unsigned owner=1;float z[240];
  hone_alpha_packet packets[5];packets[0]=(hone_alpha_packet){{{0,130,999,0},{4,130,999,4},{0,134,999,0}},{1,0,0},.37f,0,0,1,0,0};for(int i=1;i<5;i++)packets[i]=packets[0];
- hone_alpha_snapshot alpha={packets,1,5,&owner,1,0,1};
- hone_frame_lane candidate={s,&alpha,&owner,1,0,0},ready={s,&alpha,&owner,1,0,0};
+ hone_alpha_snapshot alpha={packets,1,5,&owner,1,0,1,0};
+ hone_frame_lane candidate={s,&alpha,&owner,1,0,0,0,NULL,0},ready={s,&alpha,&owner,1,0,0,0,NULL,0};
  tick=clock();assert(hone_frame_preflight(&candidate,&owner,1,54));preflight_ticks+=clock()-tick;assert(hone_frame_commit(&ready,&candidate,&owner,1));
  hone_frame_lane old=ready;hone_alpha_snapshot bad=alpha;bad.count=5;candidate.alpha=&bad;assert(!hone_frame_preflight(&candidate,&owner,1,54));assert(!hone_frame_commit(&ready,&candidate,&owner,1));assert(!memcmp(&ready,&old,sizeof ready));candidate.alpha=&alpha;
- assert(hone_frame_preflight(&candidate,&owner,1,54));ready.pinned=1;assert(!hone_frame_commit(&ready,&candidate,&owner,1));ready.pinned=0;assert(hone_frame_commit(&ready,&candidate,&owner,1));ready.pinned=1;
+ assert(hone_frame_preflight(&candidate,&owner,1,54));assert(hone_frame_pin(&ready,&owner,1));assert(!hone_frame_commit(&ready,&candidate,&owner,1));assert(hone_frame_unpin(&ready,&owner,1));assert(hone_frame_commit(&ready,&candidate,&owner,1));assert(hone_frame_pin(&ready,&owner,1));
+ assert(!hone_frame_band(&ready,&owner,1,out,0,1,(float*)ready.alpha));
+ assert(!hone_frame_band(&ready,&owner,1,out,0,1,(float*)ready.opaque));
+ assert(!hone_frame_band(&ready,&owner,1,out,0,1,(float*)packets));
  for(unsigned j=0;j<240*135;j++)out[j]=17;
  tick=clock();for(unsigned y=0;y<135;y+=band)assert(hone_frame_band(&ready,&owner,1,out+y*240,y,135-y<band?135-y:band,z));
- replay_ticks+=clock()-tick;timed_frames++;ready.pinned=0;
+ replay_ticks+=clock()-tick;timed_frames++;assert(hone_frame_unpin(&ready,&owner,1));
 }
 ''' + s[end:];s=s.replace('__real_free(stack);}', '__real_free(stack);printf("host same opaque fixture row1 mean us/frame legacy=%.2f preflight=%.2f alpha_replay=%.2f frames=%u\\n",1e6*legacy_ticks/CLOCKS_PER_SEC/timed_frames,1e6*preflight_ticks/CLOCKS_PER_SEC/timed_frames,1e6*replay_ticks/CLOCKS_PER_SEC/timed_frames,timed_frames);}')
 s=s.replace('for(unsigned j=0;j<240*135;j++)assert(pixels[j]==17);','for(unsigned j=0;j<240*135;j++)if(j/240<130||j%240>4)assert(pixels[j]==17);');(out/'test.c').write_text(s)

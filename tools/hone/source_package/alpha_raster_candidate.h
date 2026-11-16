@@ -8,7 +8,7 @@ static inline double hone_alpha_edge(hone_alpha_vertex a,hone_alpha_vertex b,dou
 static inline int hone_alpha_sample(const hone_alpha_packet*p,unsigned x,unsigned y,float opaque,hone_alpha_fragment*out){
  hone_alpha_vertex v[3];memcpy(v,p->v,sizeof v);double area=hone_alpha_edge(v[0],v[1],v[2].x,v[2].y);if(area==0)return 0;
  if(area<0){hone_alpha_vertex t=v[1];v[1]=v[2];v[2]=t;area=-area;}
- double w[3];for(unsigned i=0;i<3;i++){hone_alpha_vertex a=v[(i+1)%3],b=v[(i+2)%3];double e=hone_alpha_edge(a,b,x,y);if(e<0||(e==0&&!(b.y>a.y||(b.y==a.y&&b.x<a.x))))return 0;w[i]=e/area;}
+ double w[3];for(unsigned i=0;i<3;i++){hone_alpha_vertex a=v[(i+1)%3],b=v[(i+2)%3];double e=hone_alpha_edge(a,b,x,y);if(e<0||(e==0&&!(b.y<a.y||(b.y==a.y&&b.x>a.x))))return 0;w[i]=e/area;}
  double z=0,mask=0;for(unsigned i=0;i<3;i++){z+=w[i]*v[i].z;mask+=w[i]*v[i].mask;}float alpha=p->mask_enabled&&mask>p->mask_low&&mask<p->mask_high?1:p->alpha;
  if(z<=opaque||alpha==0)return 0;
  *out=(hone_alpha_fragment){(float)z,alpha,{p->rgb[0],p->rgb[1],p->rgb[2]},p->order};return 1;
