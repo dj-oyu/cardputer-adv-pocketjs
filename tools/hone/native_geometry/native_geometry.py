@@ -18,7 +18,7 @@ HEADER = '''/* Generated private geometry candidate. Do not publish asset payloa
 typedef struct { uint32_t group; float weight; } hone_input_weight;
 typedef struct { uint32_t first, count; } hone_input_range;
 typedef struct {
- uint32_t vertices, triangles, morphs, groups;
+ uint32_t vertices, triangles, morphs, groups, relative_morph;
  const float *position, *normal;
  const uint32_t *index, *source_vertex, *source_corner, *source_polygon;
  const uint8_t *smooth;
@@ -67,11 +67,13 @@ def emit(package):
         array('hone_input_range',prefix+'_weight_ranges',ranges)
         array('hone_input_weight',prefix+'_weights',weights or ['{0,0}'])
         keys=mesh['shape_keys']['blocks'] if mesh['shape_keys'] else []
+        if len(keys)>4096:
+            raise ValueError('morph bound')
         names=[k['name'] for k in keys]
         floats('morph_positions',[p for k in keys for p in k['positions']])
         ints('morph_relative',[names.index(k['relative_key']) for k in keys])
         fields=['position','normal','index','source_vertex','source_corner','source_polygon','smooth','weight_ranges','weights','morph_positions','morph_relative']
-        records.append('{'+','.join([str(count),str(len(mesh['triangles'])),str(len(keys)),str(len(original['vertex_groups']))]+[prefix+'_'+x for x in fields])+'}')
+        records.append('{'+','.join([str(count),str(len(mesh['triangles'])),str(len(keys)),str(len(original['vertex_groups'])),str(int(bool(mesh['shape_keys'] and mesh['shape_keys'].get('use_relative') is True)))]+[prefix+'_'+x for x in fields])+'}')
     array('hone_input_mesh','hone_input_meshes',records or ['{0}'])
     out.append(f'static const uint32_t hone_input_mesh_count = {len(records)};\n')
     out.append('#endif\n')

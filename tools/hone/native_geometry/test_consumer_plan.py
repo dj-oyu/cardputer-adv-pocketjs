@@ -4,7 +4,7 @@ from consumer_plan import prepare,admit_runtime,Unsupported
 def fixture():
     pts=[[0,0,0],[1,0,0],[0,1,0],[0,0,1]]
     key=dict(name='Basis',relative_key='Basis',positions=pts)
-    return dict(schema='hone.source-preservation.v1',runtime_ready=False,meshes=[dict(name='mixed',vertices=pts,corner_normals=[[0,0,1]]*3+[[0,1,0]]*3,weights=[[] for _ in pts],vertex_groups=[],shape_keys=dict(blocks=[key,dict(key,name='Smile',positions=[*pts[:3],[0,0,.5]])]),polygons=[dict(vertices=[0,1,2],loops=[0,1,2],smooth=True),dict(vertices=[0,3,1],loops=[3,4,5],smooth=False)],triangles=[dict(vertices=[0,1,2],loops=[0,1,2],polygon=0),dict(vertices=[0,3,1],loops=[3,4,5],polygon=1)])])
+    return dict(schema='hone.source-preservation.v1',runtime_ready=False,meshes=[dict(name='mixed',vertices=pts,corner_normals=[[0,0,1]]*3+[[0,1,0]]*3,weights=[[] for _ in pts],vertex_groups=[],shape_keys=dict(use_relative=True,blocks=[key,dict(key,name='Smile',positions=[*pts[:3],[0,0,.5]])]),polygons=[dict(vertices=[0,1,2],loops=[0,1,2],smooth=True),dict(vertices=[0,3,1],loops=[3,4,5],smooth=False)],triangles=[dict(vertices=[0,1,2],loops=[0,1,2],polygon=0),dict(vertices=[0,3,1],loops=[3,4,5],polygon=1)])])
 class Test(unittest.TestCase):
     def test_split_and_morph(self):
         p=prepare(fixture());m=p['meshes'][0]
