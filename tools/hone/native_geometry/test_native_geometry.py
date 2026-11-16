@@ -55,6 +55,16 @@ int main(void) {
             subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(d/'test.c'),'-o',str(d/'test')],check=True)
             import os
             subprocess.run([str(d/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
+    def test_unsafe_float_options_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            d=pathlib.Path(td)
+            (d/'candidate.h').write_text(emit(fixture()))
+            (d/'native_morph.h').write_text((pathlib.Path(__file__).parent/'native_morph.h').read_text())
+            (d/'test.c').write_text('#include "candidate.h"\n#include "native_morph.h"\nint main(void){return 0;}\n')
+            for flag in ['-ffast-math','-ffinite-math-only']:
+                r=subprocess.run(['cc','-std=c11',flag,'-c',str(d/'test.c'),'-o',str(d/'test.o')],capture_output=True,text=True)
+                self.assertNotEqual(r.returncode,0)
+                self.assertIn('hone morph requires finite checks',r.stderr)
     def test_bound_and_rounding(self):
         for bad in [float('nan'),1e100]:
             p=fixture();p['meshes'][0]['vertices'][0][0]=bad

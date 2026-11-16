@@ -2,6 +2,9 @@
 #define HONE_NATIVE_MORPH_CANDIDATE_H
 #include <math.h>
 #include <stddef.h>
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
+#error "hone morph requires finite checks; disable fast-math and finite-math-only"
+#endif
 /* Include the generated geometry header first. This candidate reads immutable
  * generated arrays only. The caller resolves Blender drivers and per-vertex
  * masks in source key order; no defaults silently drop a masked shape.

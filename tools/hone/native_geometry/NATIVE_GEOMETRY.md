@@ -43,3 +43,21 @@ The consumer's finite-value and overflow rejection requires normal IEEE floating
 point semantics. Do not compile it with `-ffast-math`, `-ffinite-math-only`, or
 other options that assume finite inputs or remove NaN/Inf checks. Firmware
 integration must enforce this for every translation unit that includes it.
+
+## Provider partition admission plan
+
+`python provider_partition.py source.json mapping.private.json` computes an
+order-preserving offline triangle partition for the existing 32-vertex provider.
+Each part has at most 64 triangles and retains exact prepared triangle IDs.
+`prepared_vertices` indexes the prepared corner-split/emitted arrays, NOT original
+Blender vertices or source loop IDs. Gather all
+position/morph/weight/normal channels through that same mapping during packaging.
+The tool does not duplicate geometry at runtime or change triangle order.
+Mappings generated from private models are private; publish only synthetic tests.
+
+The reported geometry-node count is a lower bound on total model nodes. Reserve
+hierarchy and other nodes within the 256-node model cap; material boundaries may
+require additional splits. A count below 256 is not runtime admission. Node IDs,
+local transforms, rig controls, material/alpha and the production caller remain
+unbound. Empty meshes yield no geometry part and must retain scene-node semantics
+elsewhere. This plan must not silently replace a complete scene representation.
