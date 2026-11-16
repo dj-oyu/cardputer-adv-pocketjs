@@ -93,3 +93,27 @@ then transform back to mesh-local space. Do not quaternion-convert the conjugate
 mesh palette: mesh scale/shear can make it non-rigid even when bones are rigid.
 This preserves the existing five-pose DQ oracle's coordinate contract without
 reimplementing its deformation algorithm.
+
+## Thin DQ vertex bridge
+
+`native_dq.h` calls the existing `source_package/rigid_dq_candidate.c` directly.
+It gathers up to four weights through the emitted prepared-corner index and an
+explicit group-to-joint mapping, transforms the supplied morphed position into
+rig space and back, and commits one float32 point on success. More than four
+influences reject rather than truncate. Palette quaternions must already satisfy
+the existing proper-rigid gate, with matching same-frame transforms. Cold spans
+are trusted complete generated arrays; this is not an untrusted binary parser.
+
+No mesh copy, allocation or second DQ algorithm is introduced. Normal evaluation,
+frame-level atomicity, alpha packet construction, drivers and firmware registration
+remain caller responsibilities, not claims of this bridge. Link the public DQ C
+source when testing. In a staging checkout set `HONE_DQ_SOURCE` to its file path;
+the repository layout uses `../source_package/rigid_dq_candidate.c` by default.
+
+The mapping must resolve every referenced group to a valid bone palette entry.
+Unmapped non-bone groups reject; the four-entry bound includes zero-weight entries.
+No groups are filtered and no influences are truncated implicitly. Supporting a
+broader source requires an explicit, source-faithful binding contract first.
+Compile the separately linked `rigid_dq_candidate.c` with normal IEEE semantics
+as well: the bridge's preprocessor guard cannot inspect another translation unit.
+Neither file may use fast-math/finite-math-only assumptions.
