@@ -14,6 +14,9 @@ typedef struct {
     uint32_t tail_capacity;
     bool tail_separate;
     bool system_owned,app_active,hidden,reduce_motion;
+#ifdef KASANE_DMA_OVERLAP
+    bool completion_active, drain_pending;
+#endif
 } runtime_storage;
 /* One allocation for the control state, both command banks and both text
  * banks (and the APP tail). They used to be five callocs made while the guest
@@ -27,6 +30,13 @@ typedef struct {
 static runtime_storage *runtime;
 /* Process-lifetime identities prevent leases reviving after heap address reuse. */
 static uint32_t last_lease;
+static bool display_borrowed(void){
+#ifdef KASANE_DMA_OVERLAP
+    return runtime&&(runtime->completion_active||runtime->drain_pending);
+#else
+    return false;
+#endif
+}
 _Static_assert(sizeof(runtime_storage)<=3072,"runtime control allocation budget");
 #define BASE_BYTES ((sizeof(runtime_block)+KSN_RUNTIME_TAIL_ALIGN-1)&~(size_t)(KSN_RUNTIME_TAIL_ALIGN-1))
 _Static_assert(BASE_BYTES<=KSN_RUNTIME_BASE_BUDGET,"runtime block budget");
@@ -67,7 +77,7 @@ ksn_view *ksn_runtime_app_system_view(ksn_app_lease lease){
 ksn_result ksn_runtime_app_attach(ksn_app_lease *out){return ksn_runtime_app_attach_tail(out,0,NULL);}
 ksn_result ksn_runtime_app_attach_tail(ksn_app_lease *out,uint32_t bytes,void **tail){
     if(!out||(bytes&&!tail)||bytes>KSN_RUNTIME_TAIL_BUDGET)return KSN_INVALID;
-    if(runtime&&(runtime->app.value||runtime->host.presenting))return KSN_BUSY;
+    if(runtime&&(runtime->app.value||runtime->host.presenting||display_borrowed()))return KSN_BUSY;
     if(last_lease==UINT32_MAX)return KSN_LIMIT;
     bool created=!runtime;
     ksn_result r=ensure(bytes);if(r!=KSN_OK)return r;
@@ -82,6 +92,7 @@ ksn_result ksn_runtime_app_attach_tail(ksn_app_lease *out,uint32_t bytes,void **
 }
 ksn_result ksn_runtime_app_detach(ksn_app_lease lease){
     if(!ksn_runtime_app_view(lease))return KSN_STALE;
+    if(display_borrowed())return KSN_BUSY;
     ksn_result r=ksn_view_host_reset_app(&runtime->host);if(r!=KSN_OK)return r;
     runtime->app=(ksn_app_lease){0};runtime->app_active=false;
     if(!runtime->system_owned)destroy();
@@ -103,13 +114,13 @@ ksn_result ksn_runtime_system_acquire(ksn_view **out){
 }
 ksn_result ksn_runtime_shutdown(void){
     if(!runtime)return KSN_OK;
-    if(runtime->app.value||runtime->host.presenting||runtime->host.builder.value||
+    if(display_borrowed()||runtime->app.value||runtime->host.presenting||runtime->host.builder.value||
        ksn_core_has_submission(&runtime->core))return KSN_BUSY;
     destroy();return KSN_OK;
 }
 ksn_result ksn_runtime_cache_create(ksn_view *v,const ksn_draw *draws,uint16_t count,ksn_template *out){
     if(!runtime||!v||v->host!=&runtime->host||!out)return KSN_INVALID;
-    if(runtime->host.presenting||runtime->host.builder.value||ksn_core_has_submission(&runtime->core))return KSN_BUSY;
+    if(display_borrowed()||runtime->host.presenting||runtime->host.builder.value||ksn_core_has_submission(&runtime->core))return KSN_BUSY;
     if(runtime->cache)return ksn_view_cache_create(v,draws,count,out);
     ksn_cache *cache=calloc(1,sizeof(*cache));if(!cache)return KSN_OOM;
     ksn_cache_command_block *commands=calloc(1,sizeof(*commands));
@@ -172,25 +183,46 @@ uint32_t ksn_runtime_opaque_system_bands(void){
     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
 }
 #ifdef KASANE_DMA_OVERLAP
+/* Never release APP source/tail after an unsuccessful physical drain. Retain
+ * only the pending bit: the display completion context may be stack-local. */
+static ksn_result tracked_finish(void *ctx){
+    const ksn_display_completion *completion=ctx;
+    runtime->completion_active=true;
+    ksn_result result=completion->finish(completion->ctx);
+    runtime->completion_active=false;
+    runtime->drain_pending=result!=KSN_OK;
+    return result;
+}
 ksn_result ksn_runtime_present_complete(const ksn_display_port *port,ksn_backdrop_loader load,
                                         bool occlusion_safe,const ksn_display_completion *completion,
                                         ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+    if(!runtime)return completion&&completion->finish?completion->finish(completion->ctx):KSN_OK;
+    if(runtime->completion_active)return KSN_BUSY;
+    if(runtime->drain_pending){
+        if(!completion||!completion->finish)return KSN_BUSY;
+        ksn_result drained=tracked_finish((void *)completion);
+        if(drained!=KSN_OK)return drained;
+    }
+    ksn_display_completion tracked={(void *)completion,tracked_finish};
+    const ksn_display_completion *finish=completion&&completion->finish?&tracked:NULL;
     return ksn_runtime_needs_present()?
-        ksn_view_host_present_complete(&runtime->host,port,load,occlusion_safe,completion,stats):
-        (completion&&completion->finish?completion->finish(completion->ctx):KSN_OK);
+        ksn_view_host_present_complete(&runtime->host,port,load,occlusion_safe,finish,stats):
+        (finish?finish->finish(finish->ctx):KSN_OK);
 }
 #endif
 ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+    if(display_borrowed())return KSN_BUSY;
     return ksn_runtime_needs_present()?ksn_view_host_present(&runtime->host,port,stats):KSN_OK;
 }
 ksn_result ksn_runtime_present_backdrop(const ksn_display_port *port,ksn_backdrop_loader load,
                                         bool occlusion_safe,ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+    if(display_borrowed())return KSN_BUSY;
     return ksn_runtime_needs_present()?
         ksn_view_host_present_backdrop(&runtime->host,port,load,occlusion_safe,stats):KSN_OK;
 }
