@@ -23,6 +23,12 @@ class Test(unittest.TestCase):
 int main(void) {
  const hone_input_mesh *m=hone_input_meshes;
  assert(hone_input_mesh_count==1 && m->vertices==6 && m->triangles==2);
+ assert(m->source_corner_count==6);
+ assert(m->source_vertex_count==4 && m->polygon_count==2 && m->polygon_corner_count==6);
+ assert(m->source_representative[0]==0 && m->source_representative[3]==4);
+ assert(m->polygon_offsets[2]==6 && m->polygon_vertices[4]==3 && m->polygon_corners[4]==4);
+ assert(m->polygon_smooth[0]==1 && m->polygon_smooth[1]==0);
+ assert(m->source_position[11]==1);
  assert(m->morphs==2 && m->groups==1 && m->relative_morph);
  assert(m->source_vertex[4]==3 && m->source_corner[4]==4);
  assert(m->smooth[0]==1 && m->smooth[1]==0);
@@ -86,6 +92,27 @@ int main(void) {
         self.assertIn('hone_input_mesh_count = 1',emit(p))
     def test_float32_rounding(self):
         self.assertEqual(f32(16777217),f32(16777216))
+    def test_source_topology_and_loose_vertex(self):
+        p=fixture();m=p['meshes'][0]
+        for block in m['shape_keys']['blocks']:block['positions']=[v[:] for v in block['positions']]
+        m['vertices'].append([2,3,4]);m['weights'].append([])
+        for block in m['shape_keys']['blocks']:block['positions'].append([2,3,4])
+        self.assertIn('4294967295',emit(p))
+        m['polygons'].append(dict(vertices=[4,0,1],loops=[6,7,8],smooth=True))
+        m['corner_normals'].extend([[0,0,1]]*3)
+        with self.assertRaisesRegex(ValueError,'no deformation representative'):emit(p)
+    def test_sparse_source_corners(self):
+        p=fixture();m=p['meshes'][0]
+        m['corner_normals']=[[0,0,1]]*6+m['corner_normals']
+        for poly in m['polygons']:poly['loops']=[v+6 for v in poly['loops']]
+        for triangle in m['triangles']:triangle['loops']=[v+6 for v in triangle['loops']]
+        emitted=emit(p)
+        self.assertIn('hone_input_0_polygon_corners[] = {6,7,8,9,10,11}',emitted)
+        self.assertIn(',4,2,6,12,hone_input_0_source_position',emitted)
+    def test_invalid_source_polygon(self):
+        p=fixture();m=p['meshes'][0]
+        m['polygons'].append(dict(vertices=[],loops=[],smooth=True))
+        with self.assertRaises(ValueError):emit(p)
     def test_no_overwrite_receipt(self):
         with tempfile.TemporaryDirectory() as td:
             d=pathlib.Path(td);(d/'source').write_text(json.dumps(fixture()))

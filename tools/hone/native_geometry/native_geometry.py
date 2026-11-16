@@ -26,6 +26,10 @@ typedef struct {
  const hone_input_weight *weights;
  const float *morph_positions;
  const uint32_t *morph_relative;
+ uint32_t source_vertex_count, polygon_count, polygon_corner_count, source_corner_count;
+ const float *source_position;
+ const uint32_t *source_representative, *polygon_offsets, *polygon_vertices, *polygon_corners;
+ const uint8_t *polygon_smooth;
 } hone_input_mesh;
 '''
 
@@ -72,8 +76,31 @@ def emit(package):
         names=[k['name'] for k in keys]
         floats('morph_positions',[p for k in keys for p in k['positions']])
         ints('morph_relative',[names.index(k['relative_key']) for k in keys])
+        # Preserve original polygon topology before corner splitting/partitioning.
+        # UINT32_MAX identifies an unused source vertex, never a valid representative.
+        reps=[4294967295]*len(original['vertices'])
+        for prepared_index,source_index in enumerate(mesh['source_vertices']):
+            if reps[source_index]==4294967295: reps[source_index]=prepared_index
+        offsets=[0]; polygon_vertices=[]; polygon_corners=[]; polygon_smooth=[]
+        for polygon in original['polygons']:
+            if len(polygon['vertices'])<3:
+                raise ValueError('source polygon requires at least three vertices')
+            if type(polygon['smooth']) is not bool:
+                raise ValueError('source polygon smooth mode')
+            if any(reps[v]==4294967295 for v in polygon['vertices']):
+                raise ValueError('polygon vertex has no deformation representative')
+            polygon_vertices.extend(polygon['vertices'])
+            polygon_corners.extend(polygon['loops'])
+            polygon_smooth.append(int(bool(polygon['smooth'])))
+            offsets.append(len(polygon_vertices))
+        if len(original['vertices'])>1000000 or len(polygon_vertices)>3000000 or len(original['corner_normals'])>3000000:
+            raise ValueError('source topology bound')
+        floats('source_position',original['vertices'])
+        ints('source_representative',reps);ints('polygon_offsets',offsets)
+        ints('polygon_vertices',polygon_vertices);ints('polygon_corners',polygon_corners)
+        ints('polygon_smooth',polygon_smooth,'uint8_t')
         fields=['position','normal','index','source_vertex','source_corner','source_polygon','smooth','weight_ranges','weights','morph_positions','morph_relative']
-        records.append('{'+','.join([str(count),str(len(mesh['triangles'])),str(len(keys)),str(len(original['vertex_groups'])),str(int(bool(mesh['shape_keys'] and mesh['shape_keys'].get('use_relative') is True)))]+[prefix+'_'+x for x in fields])+'}')
+        records.append('{'+','.join([str(count),str(len(mesh['triangles'])),str(len(keys)),str(len(original['vertex_groups'])),str(int(bool(mesh['shape_keys'] and mesh['shape_keys'].get('use_relative') is True)))]+[prefix+'_'+x for x in fields]+[str(len(original['vertices'])),str(len(original['polygons'])),str(len(polygon_vertices)),str(len(original['corner_normals']))]+[prefix+'_'+x for x in ['source_position','source_representative','polygon_offsets','polygon_vertices','polygon_corners','polygon_smooth']])+'}')
     array('hone_input_mesh','hone_input_meshes',records or ['{0}'])
     out.append(f'static const uint32_t hone_input_mesh_count = {len(records)};\n')
     out.append('#endif\n')

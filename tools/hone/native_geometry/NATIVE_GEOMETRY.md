@@ -117,3 +117,24 @@ broader source requires an explicit, source-faithful binding contract first.
 Compile the separately linked `rigid_dq_candidate.c` with normal IEEE semantics
 as well: the bridge's preprocessor guard cannot inspect another translation unit.
 Neither file may use fast-math/finite-math-only assumptions.
+
+## Deform once, reconstruct full-source normals, then gather
+
+Generated descriptors retain original source positions, polygon offsets/vertices,
+source corner IDs and polygon smoothing. `source_representative` maps each source
+vertex to a prepared corner carrying the same weights/morph coordinates. Evaluate
+that representative once per source vertex, not once per duplicated corner.
+UINT32_MAX means an isolated source vertex without a prepared representative;
+it must never be dereferenced. A polygon referencing such a vertex rejects.
+
+Compute normals on the full original polygon mesh before gathering into 32-vertex
+parts. Recomputing normals independently per part would break smoothing at part
+boundaries. These fields preserve the necessary topology; they do not admit the
+host normal candidate or claim its remaining Blender tolerances are satisfied.
+
+`polygon_corner_count` counts packed polygon entries, whereas `source_corner_count`
+is the original normal/loop-index span. Raw `polygon_corners` may be sparse and
+must only index buffers sized by `source_corner_count`, never the packed count.
+Both spans are bounded. Polygons with fewer than three vertices reject; polygons
+larger than quads remain source data and are not implicitly admitted by the
+triangle/quad-only normal candidate.
