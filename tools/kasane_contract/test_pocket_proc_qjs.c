@@ -24,6 +24,7 @@
 #include <time.h>
 
 #define REQUIRE(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
+void pocket_proc_test_owner(bool allowed);
 static uint16_t actual[KSN_PROC_W*KSN_PROC_H], expected[KSN_PROC_W*KSN_PROC_H];
 static unsigned publishes,invalidates;
 KSN_TEST_CORE(multi_core,static);
@@ -201,6 +202,21 @@ int main(void){
     const unsigned invalidates0=invalidates;
     for(unsigned f=0;f<FRAMES;f++){
         char call[48];snprintf(call,sizeof call,"frameAt(%u)",f);eval_ok(ctx,call);
+        REQUIRE(pocket_proc_pending());
+        /* A denied context must not touch QuickJS, snapshots, outputs or ACK.
+         * NULL JSContext deliberately catches accidental error construction. */
+        pocket_proc_test_owner(false);
+        pocket_proc_reset();pocket_proc_present_result(KSN_OK);
+        pocket_proc_overlay_present_result(KSN_IO);pocket_proc_end_turn();
+        REQUIRE(JS_IsException(pocket_proc_native_begin(NULL,"denied",NULL)));
+        REQUIRE(JS_IsException(pocket_proc_native_line(NULL,"denied",0,0,1,1,0)));
+        REQUIRE(pocket_proc_shiki_attach(NULL)==0);
+        memset(actual,0x5a,sizeof actual);
+        REQUIRE(pocket_proc_backdrop(NULL,0,1,actual)==KSN_INVALID);
+        REQUIRE(image.read_rows(image.ctx,0,0,0,1,0,KSN_PROC_W,actual,KSN_PROC_W)==KSN_INVALID);
+        REQUIRE(image.read_span(image.ctx,0,0,0,0,1,actual,alpha)==KSN_INVALID);
+        for(unsigned k=0;k<sizeof actual/sizeof actual[0];k++)REQUIRE(actual[k]==0x5a5a);
+        pocket_proc_test_owner(true);
         REQUIRE(pocket_proc_pending());
         REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
         reference(f);

@@ -8,6 +8,11 @@ static TaskHandle_t owner;
 
 void vm_wake_bind(void) { owner = xTaskGetCurrentTaskHandle(); }
 
+bool vm_wake_is_owner(void) {
+  return !xPortInIsrContext() && owner != NULL &&
+         xTaskGetCurrentTaskHandle() == owner;
+}
+
 void vm_wake_post(void) {
   TaskHandle_t task = owner;
   if (task == NULL)

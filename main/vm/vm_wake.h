@@ -30,6 +30,10 @@
  * the owner task (ui_task). */
 void vm_wake_bind(void);
 
+/** Read-only owner admission. False before bind, from another task or ISR.
+ * Bind once before starting producers; this does not acquire a mutex. */
+bool vm_wake_is_owner(void);
+
 /** Ask the owner task to stop waiting. Safe from any task AND from an ISR
  * (the context is detected inside); safe before vm_wake_bind(), when it does
  * nothing and nobody is waiting yet.

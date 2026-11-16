@@ -2,6 +2,7 @@
 #include "ui/kasane/ksn_mesh_prepared.h"
 #endif
 #include "pocket_shiki_frame.h"
+static bool proc_owner(void);
 #include "ui/kasane/ksn_mesh_depth.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
@@ -22,11 +23,25 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+/* No frame state or QuickJS access is legal outside the bound VM task.
+ * ISR completion producers post events; the owner consumes them before ACK.
+ * Reject before reading non-atomic frame flags, revisions or packet pointers. */
+#ifdef KSN_PROC_HOST_TEST
+static _Thread_local bool proc_test_owner=true;
+void pocket_proc_test_owner(bool allowed){proc_test_owner=allowed;}
+static bool proc_owner(void){return proc_test_owner;}
+#elif defined(ESP_PLATFORM)
+#include "vm/vm_wake.h"
+static bool proc_owner(void){return vm_wake_is_owner();}
+#else
+static bool proc_owner(void){return false;}
+#endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 #include "esp_cpu.h"
 static uint32_t image_band_count,image_band_cycles,image_span_count,image_span_cycles;
 void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
                                  uint32_t *span_count,uint32_t *span_cycles){
+    if(!proc_owner())return;
     if(band_count)*band_count=image_band_count;
     if(band_cycles)*band_cycles=image_band_cycles;
     if(span_count)*span_count=image_span_count;
@@ -46,11 +61,14 @@ static pocket_proc_trace trace;
 /* Survives trace_take(): a commit and its view update can be turns apart. */
 static bool trace_split;
 void pocket_proc_trace_take(pocket_proc_trace *out){
+    if(!proc_owner())return;
     if(out)*out=trace;
     trace=(pocket_proc_trace){0};
 }
-void pocket_proc_trace_view(void){trace.view_n++;trace_split=false;}
-void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
+void pocket_proc_trace_view(void){
+    if(!proc_owner())return;trace.view_n++;trace_split=false;}
+void pocket_proc_trace_presented(void){
+    if(!proc_owner())return;if(trace_split)trace.split_n++;}
 #endif
 // Counts this file's allocations when CONFIG_POCKET_SHIKI_MEMSTAT is on
 // (docs/kasane/shiki.md sec.4.5); nothing otherwise.
@@ -134,7 +152,8 @@ static float *depth_workspace;
 static unsigned depth_rows;
 #ifdef KSN_PROC_HOST_TEST
 static int depth_fail_after=-1;
-void pocket_proc_mesh_fail_after(int n){depth_fail_after=n;}
+void pocket_proc_mesh_fail_after(int n){
+    if(!proc_owner())return;depth_fail_after=n;}
 #endif
 static void *depth_calloc(size_t n,size_t size){
 #ifdef KSN_PROC_HOST_TEST
@@ -144,6 +163,7 @@ static void *depth_calloc(size_t n,size_t size){
     return calloc(n,size);
 }
 void pocket_proc_mesh_memory(pocket_proc_mesh_bytes *out){
+    if(!proc_owner())return;
     if(!out)return;
     *out=(pocket_proc_mesh_bytes){.workspace=depth_rows*KSN_PROC_W*sizeof(float),.metadata=sizeof(ksn_mesh_snapshot)*2*PROC_SURFACES+sizeof depth_workspace+sizeof depth_rows};
     for(unsigned i=0;i<PROC_SURFACES;i++){
@@ -463,6 +483,7 @@ static bool render_rows(const proc_surface *surface,const ksn_proc_frame *frame,
     return !mesh->enabled||ksn_mesh_render(mesh,pixels,y,rows,depth_workspace,depth_rows);
 }
 bool pocket_proc_band_damage(unsigned index,uint32_t *bands,int16_t x0[],int16_t x1[]){
+    if(!proc_owner())return false;
 #ifdef POCKET_PROC_NO_BAND_DAMAGE
     /* Host A/B only (run_megademo_app_host.py --no-band-damage). */
     (void)bands;(void)x0;(void)x1;(void)index;
@@ -572,8 +593,10 @@ oom:
     free(fresh);free(scratch);
     return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"bounded depth storage allocation failed");
 }
-bool pocket_proc_native_mesh_depth(void){return building&&surfaces[building_surface].depth_candidate.enabled;}
+bool pocket_proc_native_mesh_depth(void){
+    if(!proc_owner())return false;return building&&surfaces[building_surface].depth_candidate.enabled;}
 JSValue pocket_proc_native_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p,const float *depth,uint16_t node){
+    if(!proc_owner())return JS_EXCEPTION;
     if(!pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_BUSY,"beginMeshFrame required");
     if(!ksn_mesh_append(&surfaces[building_surface].depth_candidate,p,depth,node))
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported or over-budget opaque mesh");
@@ -581,6 +604,7 @@ JSValue pocket_proc_native_mesh(JSContext *ctx,const char *op,const ksn_proc_gou
 }
 JSValue pocket_proc_native_sided_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p,
         const float *depth,const uint16_t *colors,const uint8_t bits[8],uint16_t node){
+    if(!proc_owner())return JS_EXCEPTION;
     if(!pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_BUSY,"beginMeshFrame required");
     if(!ksn_mesh_append_sided(&surfaces[building_surface].depth_candidate,p,depth,colors,bits,node))
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"unsupported or over-budget sided mesh");
@@ -589,6 +613,7 @@ JSValue pocket_proc_native_sided_mesh(JSContext *ctx,const char *op,const ksn_pr
 /* Native drawing straight into the candidate (pocket_shape.c): draw()'s
  * frame limits without a plan or the VM. */
 JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark *mark){
+    if(!proc_owner())return JS_EXCEPTION;
     if(js_call_active)return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant procedural call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     const ksn_proc_frame *c=surfaces[building_surface].candidate;
@@ -600,6 +625,7 @@ JSValue pocket_proc_native_begin(JSContext *ctx,const char *op,pocket_proc_mark 
     return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color){
+    if(!proc_owner())return JS_EXCEPTION;
     if(pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     if(x0< -480||x0>720||y0< -480||y0>720||x1< -480||x1>720||y1< -480||y1>720){
@@ -618,6 +644,7 @@ JSValue pocket_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int 
     return JS_UNDEFINED;
 }
 void pocket_proc_native_rollback(const pocket_proc_mark *mark){
+    if(!proc_owner())return;
     ksn_proc_frame *c=surfaces[mark->surface<PROC_SURFACES?mark->surface:0].candidate;
     if(!c)return;
     c->count=mark->count;c->raster_steps=mark->raster;c->ext=mark->ext;carry_drop();
@@ -626,6 +653,7 @@ void pocket_proc_native_rollback(const pocket_proc_mark *mark){
     image_band_valid=false;
 }
 JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *p){
+    if(!proc_owner())return JS_EXCEPTION;
     if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     int left,top,right,bottom;
@@ -650,6 +678,7 @@ JSValue pocket_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_pro
     return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *p){
+    if(!proc_owner())return JS_EXCEPTION;
     if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(js_call_active)return failure(ctx,op,POCKET_ERR_BUSY,"reentrant procedural call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
@@ -671,6 +700,7 @@ JSValue pocket_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const
     image_band_valid=false;return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p){
+    if(!proc_owner())return JS_EXCEPTION;
     if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     int left,top,right,bottom;
@@ -693,6 +723,7 @@ JSValue pocket_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const 
 }
 JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *p,
         const ksn_proc_blend_region_mask *mask){
+    if(!proc_owner())return JS_EXCEPTION;
     if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     int left,top,right,bottom;
@@ -714,6 +745,7 @@ JSValue pocket_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_
     image_band_valid=false;return JS_UNDEFINED;
 }
 JSValue pocket_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *p){
+    if(!proc_owner())return JS_EXCEPTION;
     if(pocket_proc_native_mesh_depth())return failure(ctx,"kasane.shiki",POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     if(js_call_active)return failure(ctx,op,POCKET_ERR_BUSY,"reentrant procedural call");
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
@@ -785,6 +817,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
 typedef JSValue (*proc_js_method)(JSContext *,JSValueConst,int,JSValueConst *);
 static JSValue guarded(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,
                        proc_js_method method){
+    if(!proc_owner())return JS_EXCEPTION;
     if(js_call_active)
         return failure(ctx,"kasane.shiki",POCKET_ERR_BUSY,"reentrant drawing call");
     js_call_active=true;
@@ -804,6 +837,7 @@ bool pocket_proc_hook_dry;
 /* One draw for a native caller (pocket_derby.c): a Shiki handle, the inputs
  * converted by sec.2.4 of the spec. */
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
+    if(!proc_owner())return JS_EXCEPTION;
     const char *op="kasane.shiki.draw";
 #ifdef POCKET_PROC_DRAW_HOOK
     if(pocket_proc_hook_dry){pocket_proc_draw_hook(handle,in,n);return JS_UNDEFINED;}
@@ -883,6 +917,7 @@ static JSValue js_create_surface(JSContext *ctx,JSValueConst self,int argc,JSVal
 }
 /* ---- Shiki programs (pocket.kasane.shiki, pocket_shiki_api.c) */
 uint32_t pocket_proc_shiki_attach(void *plan){
+    if(!proc_owner())return 0;
     unsigned slot=0;
     while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
     if(slot==PROC_HANDLES||next_handle==PROC_HANDLE_MAX)return 0;
@@ -891,10 +926,12 @@ uint32_t pocket_proc_shiki_attach(void *plan){
     return handle;
 }
 void *pocket_proc_shiki_plan(uint32_t handle){
+    if(!proc_owner())return NULL;
     proc_slot *slot=find_slot(handle);
     return slot?slot->plan:NULL;
 }
 bool pocket_proc_shiki_detach(uint32_t handle){
+    if(!proc_owner())return false;
     /* As unregister(): legal between beginFrame() and commit(), since draw
      * copies the segments out and keeps nothing of the plan. */
     proc_slot *slot=find_slot(handle);
@@ -906,7 +943,8 @@ bool pocket_proc_shiki_detach(uint32_t handle){
 }
 pocket_shiki_draw_prof pocket_shiki_prof;
 static pocket_shiki_turn shiki_turn;
-void pocket_shiki_turn_take(pocket_shiki_turn *out){*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
+void pocket_shiki_turn_take(pocket_shiki_turn *out){
+    if(!proc_owner())return;*out=shiki_turn;shiki_turn=(pocket_shiki_turn){0};}
 uint32_t pocket_cycles(void){
 #ifdef ESP_PLATFORM
     return esp_cpu_get_cycle_count();
@@ -915,10 +953,12 @@ uint32_t pocket_cycles(void){
 #endif
 }
 JSValue pocket_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
+    if(!proc_owner())return JS_EXCEPTION;
     return pocket_proc_shiki_draw_inputs(ctx,handle,in,NULL,n,0);
 }
 JSValue pocket_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
                                       unsigned index){
+    if(!proc_owner())return JS_EXCEPTION;
     const char *op="kasane.shiki.draw";
     if(pocket_proc_native_mesh_depth())return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"painter entries are outside opaque mesh scope");
     const uint32_t t_in=pocket_cycles();
@@ -985,10 +1025,12 @@ static const JSCFunctionListEntry frame_methods[]={
     JS_CFUNC_DEF("createSurface",0,js_create_surface),
 };
 esp_err_t pocket_proc_frame_install(JSContext *ctx,JSValueConst obj){
+    if(!proc_owner())return ESP_FAIL;
     return JS_SetPropertyFunctionList(ctx,obj,frame_methods,
                                       (int)(sizeof frame_methods/sizeof frame_methods[0]))<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 void pocket_proc_reset(void){
+    if(!proc_owner())return;
     for(unsigned i=0;i<PROC_HANDLES;i++){
         if(slots[i].plan)ksn_shiki_plan_dispose(slots[i].plan);
         shiki_or_sys_free(slots[i].plan);slots[i]=(proc_slot){0};
@@ -1015,6 +1057,7 @@ void pocket_proc_reset(void){
 #endif
 }
 void pocket_proc_end_turn(void){
+    if(!proc_owner())return;
     /* A thrown JS frame must not carry an unfinished candidate into the next
      * owner turn. Previously committed or pending presentation stays intact.
      * Not called at the end of a host turn that the VM parked: that frame()
@@ -1023,13 +1066,18 @@ void pocket_proc_end_turn(void){
     building=false;
 }
 bool pocket_proc_has_frame(void){
+    if(!proc_owner())return false;
     const proc_surface *s=&surfaces[0];
     return s->pending||s->has_committed||s->repair_required;
 }
-bool pocket_proc_pending(void){return any_pending();}
-bool pocket_proc_backdrop_pending(void){return surfaces[0].pending&&!surfaces[0].image_mode;}
-bool pocket_proc_is_image_mode(void){return surfaces[0].image_mode;}
+bool pocket_proc_pending(void){
+    if(!proc_owner())return false;return any_pending();}
+bool pocket_proc_backdrop_pending(void){
+    if(!proc_owner())return false;return surfaces[0].pending&&!surfaces[0].image_mode;}
+bool pocket_proc_is_image_mode(void){
+    if(!proc_owner())return false;return surfaces[0].image_mode;}
 void pocket_proc_image_mode_at(unsigned index){
+    if(!proc_owner())return;
     if(index>=PROC_SURFACES)return;
     surfaces[index].image_mode=true;
     /* A frame may already exist (resource() after beginFrame); the next
@@ -1037,10 +1085,12 @@ void pocket_proc_image_mode_at(unsigned index){
     if(!image_band_buf)
         image_band_buf=shiki_or_sys_calloc(KSN_PROC_W*PROC_IMAGE_BAND_ROWS,sizeof *image_band_buf);
 }
-void pocket_proc_image_mode(void){pocket_proc_image_mode_at(0);}
+void pocket_proc_image_mode(void){
+    if(!proc_owner())return;pocket_proc_image_mode_at(0);}
 static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
                              uint16_t y,uint16_t x,uint16_t count,
                              uint16_t *rgb565,uint8_t *alpha){
+    if(!proc_owner())return KSN_INVALID;
     uintptr_t key=(uintptr_t)ctx;
     if(key<1||key>PROC_SURFACES)return KSN_STALE;
     unsigned index=(unsigned)(key-1);
@@ -1107,6 +1157,7 @@ span_done:
 static ksn_result image_rows(void *ctx,uint16_t variant,uint16_t frame_number,
                              uint16_t y,uint16_t rows,uint16_t x,uint16_t count,
                              uint16_t *dst,uint16_t stride){
+    if(!proc_owner())return KSN_INVALID;
     uintptr_t key=(uintptr_t)ctx;
     if(key<1||key>PROC_SURFACES)return KSN_STALE;
     if(variant||frame_number||!dst||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
@@ -1138,13 +1189,16 @@ static ksn_result image_rows(void *ctx,uint16_t variant,uint16_t frame_number,
     return KSN_OK;
 }
 void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
+    if(!proc_owner())return;
     if(out&&index<PROC_SURFACES)*out=(ksn_image_port){.ctx=(void *)(uintptr_t)(index+1),
                               .width=KSN_PROC_W,.height=KSN_PROC_H,
                               .variants=1,.frames=1,.read_span=image_span,.opaque=true,
                               .read_rows=image_rows};
 }
-void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0);}
+void pocket_proc_image_port(ksn_image_port *out){
+    if(!proc_owner())return;pocket_proc_image_port_at(out,0);}
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
+    if(!proc_owner())return KSN_INVALID;
     (void)ctx;
     if(!pixels||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
     const proc_surface *surface=&surfaces[0];
@@ -1156,6 +1210,7 @@ ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pix
     return !frame||render_rows(surface,frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
 }
 void pocket_proc_present_result(ksn_result result){
+    if(!proc_owner())return;
     carry_drop();
     proc_surface *surface=&surfaces[pending_surface];
     bool repairing=false;
@@ -1194,6 +1249,7 @@ void pocket_proc_present_result(ksn_result result){
     }
 }
 void pocket_proc_overlay_present_result(ksn_result result){
+    if(!proc_owner())return;
     if(any_pending()&&surfaces[pending_surface].image_mode)
         pocket_proc_present_result(result);
 }
