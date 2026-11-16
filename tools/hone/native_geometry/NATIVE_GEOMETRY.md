@@ -61,3 +61,35 @@ require additional splits. A count below 256 is not runtime admission. Node IDs,
 local transforms, rig controls, material/alpha and the production caller remain
 unbound. Empty meshes yield no geometry part and must retain scene-node semantics
 elsewhere. This plan must not silently replace a complete scene representation.
+
+## Source-bound layout and rig-space reference
+
+`provider_binding.binding_plan` additionally splits at material changes without
+reordering triangles. Each geometry node references its source mesh transform;
+partition siblings share that evaluated transform. No transform-only parent is
+silently inserted per source mesh. This is an offline binding map, not AYNM data
+or a production caller. Original scene parenting and rig evaluation stay required.
+Generated binding maps contain private geometry relationships and remain private.
+
+`rig_space.mesh_palette` computes the affine bone-space conjugation
+`inverse(M) * A * P * inverse(B) * inverse(A) * M`, with source mesh-world `M`,
+armature-world `A`, evaluated pose-global `P` and rest-global `B`. Geometry is
+returned to mesh-node-local space; applying `M` afterwards is exactly once.
+The reference uses Python floating point, no coordinate-axis or TRS conversion,
+and is not a target performance/precision guarantee. Integration must enforce
+condition/residual and target numeric error limits and supply evaluated matrices
+for each pose rather than freeze the recovered pose as an animation substitute.
+
+This matrix composition is NOT a skinning algorithm. A source modifier with
+preserve-volume requires its dual-quaternion semantics; the existing linear-blend
+skin evaluator cannot silently replace it. Shrinkwrap, constraints, morph drivers,
+normal recomputation and material/alpha acceptance are separate unresolved gates.
+A material-bound geometry count below 256 still does not prove the complete scene
+or memory budget fits. Neither helper changes `runtime_ready` to true.
+
+For the existing rigid-DQ candidate, use `dq_factors`: transform the point into
+armature space, blend `P * inverse(B)` with the existing validated DQ routine,
+then transform back to mesh-local space. Do not quaternion-convert the conjugated
+mesh palette: mesh scale/shear can make it non-rigid even when bones are rigid.
+This preserves the existing five-pose DQ oracle's coordinate contract without
+reimplementing its deformation algorithm.
