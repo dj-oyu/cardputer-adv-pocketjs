@@ -41,9 +41,9 @@
 #include "pocket_bridge.h"
 #include "app_control.h"
 #include "esp_app_desc.h"
+#include "ayatsuri/ayatsuri_pose_dma_probe.h"
 #ifdef CONFIG_AYATSURI_STREAM_DEVICE_PROBE
 #include "ayatsuri/ayatsuri_stream_device_probe.h"
-#include "ayatsuri/ayatsuri_pose_dma_probe.h"
 #endif
 #include "esp_random.h"
 #include "pocket_text.h"
