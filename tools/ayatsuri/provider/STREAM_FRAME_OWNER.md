@@ -44,7 +44,9 @@ keeping the committed packets for rendering; production must then cease.
 
 ## Memory and performance consequences
 
-The wrapper adds 144 bytes on the tested 64-bit host and no heap allocations.
+The original wrapper added 144 bytes on the tested 64-bit host. With the two
+immutable material payload pointers described in STREAM_MATERIAL.md it is now
+160 bytes; neither version allocates heap storage.
 Target `sizeof`, placement and stack usage remain unmeasured. It retains exactly
 two packet capacities, not a third frame. With the earlier private host maximum
 of 35,280 bytes per snapshot, that is 70,560 packet bytes; it does not reduce the

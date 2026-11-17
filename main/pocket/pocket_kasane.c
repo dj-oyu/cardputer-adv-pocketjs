@@ -20,6 +20,7 @@ static struct {
     float *depth;
     ayatsuri_stream_frame_preflight preflight;
     void *context;
+    pocket_stream_material_hooks material;
 } stream_actor;
 #endif
 #include "app_notice.h"
@@ -3060,6 +3061,9 @@ ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
             if(recovered!=KSN_OK)return recovered;
         }
         if(dormant)return pocket_present_with_backdrop(display,completion,stats,NULL);
+        if(stream_actor.material.band)return pocket_stream_candidate_material(&stream_actor.bridge,
+            stream_actor.frame,stream_actor.identity,stream_actor.generation,stream_actor.depth,
+            &stream_actor.material,display,completion,stats,!stream_actor.frame->produced);
         return stream_actor.frame->produced?
             pocket_stream_candidate_present(&stream_actor.bridge,stream_actor.frame,
                 stream_actor.identity,stream_actor.generation,stream_actor.depth,
@@ -3104,6 +3108,15 @@ ksn_result pocket_kasane_stream_actor_unbind(const ksn_display_completion*comple
     memset(&stream_actor,0,sizeof stream_actor);ksn_runtime_invalidate();return KSN_OK;
 }
 bool pocket_kasane_stream_actor_bound(void){return stream_actor.frame!=NULL;}
+static bool material_preflight_marker(void*c,const ksn_mesh_snapshot*s){(void)c;(void)s;return false;}
+ksn_result pocket_kasane_stream_actor_bind_material(ayatsuri_stream_frame_owner*f,const void*id,
+    uint32_t generation,float depth[240],const pocket_stream_material_hooks*hooks){
+    if(!hooks||!hooks->preflight||!hooks->band)return KSN_INVALID;
+    pocket_stream_material_hooks copy=*hooks;
+    ksn_result result=pocket_kasane_stream_actor_bind(f,id,generation,depth,material_preflight_marker,NULL);
+    if(result==KSN_OK)stream_actor.material=copy;
+    return result;
+}
 ksn_result pocket_kasane_redraw_stream_backdrop(const ksn_display_port *display,
     const ksn_display_completion *completion,ksn_render_stats *stats,ksn_backdrop_loader load){
     if(stream_actor.frame&&!stream_actor.bridge.busy)return KSN_BUSY;

@@ -9,6 +9,9 @@
  * Generation must not be reused across owner lifetimes. */
 typedef struct {
     ksn_mesh_snapshot snapshots[2];
+    /* Immutable frame-associated material/program/driver package, if admitted.
+     * Borrowed until this slot is replaced or its unpinned owner is released. */
+    const void *payload[2];
     ayatsuri_stream_candidate *stream;
     const void *identity;
     uint32_t generation;
@@ -63,12 +66,20 @@ static inline ayatsuri_model_status ayatsuri_stream_frame_produce(ayatsuri_strea
        !ay_stream_owner_disjoint(f,sizeof *f,light,6*sizeof *light))return AYATSURI_MODEL_INVALID;
     for(unsigned j=0;j<2;j++)if(!ay_stream_owner_disjoint(f->snapshots[j].packets.data,
         f->snapshots[j].packets.capacity,slot,32*sizeof *slot))return AYATSURI_MODEL_INVALID;
-    f->busy=true;f->produced=false;
+    f->busy=true;f->produced=false;f->payload[1-f->committed]=NULL;
     ayatsuri_model_status status=ayatsuri_stream_candidate_frame(f->stream,id,gen,camera,light,
         provider,context,slot,&f->snapshots[1-f->committed]);
     f->busy=false;
     if(status==AYATSURI_MODEL_OK){f->revision++;f->produced=true;}
     return status;
+}
+/* Stage only after successful production, before preflight/acquire. No copying
+ * of payload data: caller freezes its complete dependency graph through ACK and
+ * every subsequent READY redraw. A replacement uses a distinct payload arena. */
+static inline bool ayatsuri_stream_frame_payload(ayatsuri_stream_frame_owner*f,
+    const void*id,uint32_t gen,const void*payload){
+    if(!ay_stream_owner_valid(f,id,gen)||!f->produced||f->pinned)return false;
+    f->payload[1-f->committed]=payload;return true;
 }
 /* Invalid token is all-zero. Acquire pins after complete preflight succeeds,
  * before first display submission. Committed frame is retained until ACK. */
@@ -96,6 +107,7 @@ static inline bool ayatsuri_stream_frame_complete(ayatsuri_stream_frame_owner*f,
     ayatsuri_stream_frame_token token,bool drained,bool accepted){
     if(!ayatsuri_stream_frame_borrow(f,token)||!drained)return false;
     if(accepted){f->committed=1-f->committed;f->ready=true;}
+    else f->payload[1-f->committed]=NULL;
     f->pinned=false;f->produced=false;return true;
 }
 /* Borrow expires at next accepted completion, not at geometry production. */

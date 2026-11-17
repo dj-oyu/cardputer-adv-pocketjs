@@ -11,6 +11,7 @@ typedef struct {
     pocket_stream_candidate *state;
     const ksn_display_port *port;
     const ksn_display_completion *completion;
+    const pocket_stream_material_hooks *material;
     bool drained;
 } display_call;
 static bool outside_frame(const ayatsuri_stream_frame_owner*f,const void*p,size_t n){
@@ -40,6 +41,10 @@ static ksn_result backdrop(void*ctx,uint16_t y,uint16_t rows,uint16_t*p){
     size_t bytes=(size_t)rows*240*sizeof *p;
     if(!outside_frame(s->frame,p,bytes)||!ay_stream_owner_disjoint(p,bytes,s,sizeof *s)||
        !ay_stream_owner_disjoint(p,bytes,s->depth,240*sizeof *s->depth))return KSN_INVALID;
+    if(c->material){
+        unsigned which=s->ready_borrow?s->frame->committed:1-s->frame->committed;
+        return c->material->band(c->material->context,frame,s->frame->payload[which],y,rows,p,s->depth);
+    }
     /* Explicit diagnostic background. Real material/shader composition is absent. */
     for(unsigned j=0;j<(unsigned)rows*240;j++)p[j]=0;
     return ksn_mesh_render(frame,p,y,rows,s->depth,1)?KSN_OK:KSN_INVALID;
@@ -48,10 +53,15 @@ static bool depth_valid(const pocket_stream_candidate*s,const ayatsuri_stream_fr
     return d&&outside_frame(f,d,240*sizeof *d)&&outside_frame(f,s,sizeof *s)&&
         ay_stream_owner_disjoint(d,240*sizeof *d,s,sizeof *s);
 }
+typedef struct {const pocket_stream_material_hooks*hooks;const void*payload;} material_check;
+static bool check_material(void*ctx,const ksn_mesh_snapshot*s){
+    material_check*c=ctx;return c->hooks->preflight(c->hooks->context,s,c->payload);
+}
 static ksn_result present_frame(pocket_stream_candidate*s,
     ayatsuri_stream_frame_owner*f,const void*id,uint32_t gen,float depth[240],
     ayatsuri_stream_frame_preflight preflight,void*context,const ksn_display_port*port,
-    const ksn_display_completion*completion,ksn_render_stats*stats,bool redraw){
+    const ksn_display_completion*completion,ksn_render_stats*stats,bool redraw,
+    const pocket_stream_material_hooks*material){
     if(!s||s->busy||s->held)return KSN_BUSY;
     if(!ay_stream_owner_valid(f,id,gen)||!f->stream||!f->stream->core.alive||
        !f->stream->core.model||!port||!port->strip||!port->present||
@@ -63,6 +73,16 @@ static ksn_result present_frame(pocket_stream_candidate*s,
     for(unsigned j=0;j<2;j++)if(!ay_stream_owner_disjoint(s,sizeof *s,inputs[j],input_bytes[j])||
         !ay_stream_owner_disjoint(stats,sizeof *stats,inputs[j],input_bytes[j])||
         !ay_stream_owner_disjoint(depth,240*sizeof *depth,inputs[j],input_bytes[j]))return KSN_INVALID;
+    material_check check={0};
+    if(material){
+        if(!material->preflight||!material->band||!f->payload[redraw?f->committed:1-f->committed]||
+           !outside_frame(f,material,sizeof *material)||
+           !ay_stream_owner_disjoint(material,sizeof *material,s,sizeof *s)||
+           !ay_stream_owner_disjoint(material,sizeof *material,stats,sizeof *stats)||
+           !ay_stream_owner_disjoint(material,sizeof *material,depth,240*sizeof *depth))return KSN_INVALID;
+        check=(material_check){material,f->payload[redraw?f->committed:1-f->committed]};
+        preflight=check_material;context=&check;
+    }
     *stats=(ksn_render_stats){0};s->busy=true;
     /* Establish that no prior display borrow remains before acquiring a frame. */
     ksn_result r=ksn_runtime_finish_display(completion);
@@ -80,7 +100,7 @@ static ksn_result present_frame(pocket_stream_candidate*s,
         if(!t.owner){s->busy=false;return KSN_INVALID;}
     }
     s->frame=f;s->token=t;s->depth=depth;s->held=true;s->ready_borrow=redraw;s->snapshot=snapshot;
-    display_call call={s,port,completion,true};
+    display_call call={s,port,completion,material,true};
     ksn_display_port proxy=*port;proxy.ctx=&call;proxy.strip=strip;proxy.present=send;
     if(port->present_rect)proxy.present_rect=send_rect;
     ksn_display_completion done={&call,finish};
@@ -99,13 +119,20 @@ ksn_result pocket_stream_candidate_present(pocket_stream_candidate*s,
     ayatsuri_stream_frame_owner*f,const void*id,uint32_t gen,float depth[240],
     ayatsuri_stream_frame_preflight preflight,void*context,const ksn_display_port*port,
     const ksn_display_completion*completion,ksn_render_stats*stats){
-    return present_frame(s,f,id,gen,depth,preflight,context,port,completion,stats,false);
+    return present_frame(s,f,id,gen,depth,preflight,context,port,completion,stats,false,NULL);
 }
 ksn_result pocket_stream_candidate_redraw(pocket_stream_candidate*s,
     ayatsuri_stream_frame_owner*f,const void*id,uint32_t gen,float depth[240],
     ayatsuri_stream_frame_preflight preflight,void*context,const ksn_display_port*port,
     const ksn_display_completion*completion,ksn_render_stats*stats){
-    return present_frame(s,f,id,gen,depth,preflight,context,port,completion,stats,true);
+    return present_frame(s,f,id,gen,depth,preflight,context,port,completion,stats,true,NULL);
+}
+ksn_result pocket_stream_candidate_material(pocket_stream_candidate*s,
+    ayatsuri_stream_frame_owner*f,const void*id,uint32_t gen,float depth[240],
+    const pocket_stream_material_hooks*material,const ksn_display_port*port,
+    const ksn_display_completion*completion,ksn_render_stats*stats,bool redraw){
+    if(!material)return KSN_INVALID;
+    return present_frame(s,f,id,gen,depth,NULL,NULL,port,completion,stats,redraw,material);
 }
 ksn_result pocket_stream_candidate_recover(pocket_stream_candidate*s,const ksn_display_completion*c){
     if(!s||s->busy||!s->held||!c||!c->finish)return KSN_INVALID;
