@@ -35,6 +35,15 @@ int main(void){
   }
   assert(hits==ref);if(hits)assert(fabsf(actual.z-expected.z)<1e-6f&&actual.alpha==expected.alpha);
  }
+ /* A fully admitted triangle preserves order, endpoints, and signed zero. */
+ const hone_graph_triangle inside={{{-0.f,0,2,{-0.f,1,2}},{4,0,3,{3,4,5}},{0,4,4,{6,7,8}}},&alpha,color};
+ memset(result,0x5a,sizeof result);memcpy(saved,result,sizeof result);count=777;
+ assert(!hone_graph_clip_viewport(&inside,0,0,4,4,result,0,&count));
+ assert(count==777&&!memcmp(result,saved,sizeof result));
+ assert(hone_graph_clip_viewport(&inside,0,0,4,4,result,1,&count)&&count==1);
+ assert(!memcmp(result[0].v,inside.v,sizeof inside.v));
+ assert(result[0].alpha==inside.alpha&&result[0].color==inside.color);
+ assert(!memcmp(result+1,saved+1,5*sizeof *result));
  /* All clipped away and late invalid input. */
  assert(hone_graph_clip_viewport(&input,10,10,11,11,result,6,&count)&&count==0);
  memset(result,0x5a,sizeof result);memcpy(saved,result,sizeof result);count=777;input.v[2].local[1]=NAN;

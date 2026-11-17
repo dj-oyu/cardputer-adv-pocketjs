@@ -18,6 +18,10 @@
 
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
 #include "ayatsuri_live_model_fixture_api.h"
+#include "ayatsuri_dma_damage.h"
+#include "pet/pet_hub.h"
+#include "hal/sound.h"
+static ay_damage_history displayed;
 #define MODEL_SHA256 AY_LIVE_MODEL_SHA256
 #define POSE_COUNT AY_LIVE_MODEL_POSE_COUNT
 #define MODEL_RENDERER "compact_opaque"
@@ -222,9 +226,27 @@ static bool present_pose(int pose, const char *label, bool measure)
     }
 
     bool ok = true;
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    bool submitted=false;
+    bool overlay=pet_hub_overlay_visible() || sound_capture_active();
+    ay_damage_frame damage=ay_damage_begin(&displayed,board_panel_write_epoch(),label,overlay,
+                                          board_capture_active() || pose<0);
+#endif
     for (unsigned y = 0; y < HEIGHT; y += BAND_ROWS) {
         const unsigned rows = HEIGHT - y < BAND_ROWS ? HEIGHT - y : BAND_ROWS;
         int64_t started = esp_timer_get_time();
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+        unsigned left=0,right=0;
+        if (pose>=0 && !ay_live_model_band(y,storage.band,&left,&right)) {ok=false; break;}
+        if (pose<0) memset(storage.band,0,rows*sizeof storage.row);
+        ay_damage_span window=ay_damage_plan(&displayed,&damage,y/BAND_ROWS,
+                                             (ay_damage_span){(uint8_t)left,(uint8_t)right});
+        unsigned x=window.left,cols=window.right-window.left;
+        /* A completed benchmark frame always includes an acknowledged transfer,
+         * even when both the previous and current scene are empty. */
+        if (!cols && !submitted && y+rows==HEIGHT) { x=0; cols=16; }
+#else
+        unsigned x=0,cols=WIDTH;
         if (pose < 0) {
             memset(storage.band, 0, rows * sizeof storage.row);
         } else {
@@ -237,7 +259,12 @@ static bool present_pose(int pose, const char *label, bool measure)
             }
         }
         if (!ok) break;
+#endif
 
+        if (!cols) {
+            if (measure) probe.raster_us+=esp_timer_get_time()-started;
+            continue;
+        }
         paint_begin(storage.band, (int)y, (int)rows);
         paint_fill(0, 0, WIDTH, 30, 0x0841);
         paint_ascii(6, 3, MODEL_LABEL, 0xffff);
@@ -246,7 +273,21 @@ static bool present_pose(int pose, const char *label, bool measure)
         const int64_t rendered = esp_timer_get_time();
         if (measure) probe.raster_us += rendered - started;
 
-        const esp_err_t result = board_present_submit(0, (int)y, WIDTH, (int)rows, storage.band);
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+        /* On boards with two 4-row draw halves, use the lent DMA source.
+         * A private narrow strip otherwise uses one synchronous SPI call per row. */
+        esp_err_t result=ESP_OK;
+        submitted=true;
+        const unsigned step=(unsigned)board_strip_rows();
+        for (unsigned off=0;off<rows && result==ESP_OK;off+=step) {
+            unsigned n=rows-off<step ? rows-off : step;
+            uint16_t *strip=board_strip_next();
+            memcpy(strip,storage.band+off*WIDTH,n*sizeof storage.row);
+            result=board_present_submit((int)x,(int)(y+off),(int)cols,(int)n,strip);
+        }
+#else
+        const esp_err_t result = board_present_submit((int)x, (int)y, (int)cols, (int)rows, storage.band);
+#endif
         if (measure) probe.submit_us += esp_timer_get_time() - rendered;
         if (result != ESP_OK) {
             ESP_LOGE(tag, "FAIL phase=lcd_submit pose=%d row=%u error=%d", pose, y, (int)result);
@@ -261,12 +302,19 @@ static bool present_pose(int pose, const char *label, bool measure)
     if (measure) probe.finish_us += esp_timer_get_time() - started;
     board_present_frame_end();
     const bool released = pose < 0 || finish_pose(drained == ESP_OK);
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    ay_damage_finish(&displayed,&damage,board_panel_write_epoch(),label,
+                     ok && drained==ESP_OK && released && !board_capture_active());
+#endif
     if (measure && ok && released && frame.fast) ++probe.flat_completed;
     return ok && drained == ESP_OK && released;
 }
 
 static void begin_benchmark(uint32_t generation)
 {
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    displayed.known=false;
+#endif
     memset(&probe, 0, sizeof probe);
     probe.generation = generation;
     const esp_app_desc_t *app = esp_app_get_description();

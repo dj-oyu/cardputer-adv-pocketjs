@@ -46,6 +46,8 @@ extern int g_board_swap_into;
 int board_async_get(void);
 void board_async_set(int on);
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
+/* Owner-task invalidation token for incremental native LCD presentation. */
+uint32_t board_panel_write_epoch(void);
 // Columns [x, x+cols) of `rows` strip rows, each row read at pixels+row*240+x.
 // The rest of the strip is not read and not sent, which is the point: a caller
 // that recomposited six columns of a band pays for six columns on the wire. The

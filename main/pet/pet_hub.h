@@ -7,5 +7,6 @@ bool pet_hub_pump(void);
 bool pet_hub_key(board_key_t key);
 void pet_hub_overlay(uint16_t *pixels, int y, int rows);
 void pet_hub_overlay_suppress(bool suppress);
+bool pet_hub_overlay_visible(void);
 uint16_t pet_hub_selected(void);
 esp_err_t pet_hub_install(JSContext *ctx, void *unused);

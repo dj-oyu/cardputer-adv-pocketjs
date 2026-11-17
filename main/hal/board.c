@@ -655,7 +655,15 @@ bool board_key_event(board_keyevent_t *out) {
 // second one.
 #include "pet_hub.h"
 #include "pocket_capture.h"
+/* The UI owner serializes panel writes. Saturation forces full transfers. */
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+static uint32_t panel_write_epoch;
+uint32_t board_panel_write_epoch(void) { return panel_write_epoch; }
+#endif
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if (panel_write_epoch!=UINT32_MAX) ++panel_write_epoch;
+#endif
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
     pet_hub_overlay(pixels,y,rows);
     // docs/api/common-api.md 9 makes showing that the microphone is live the
@@ -864,6 +872,9 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         next_row=-1;return ESP_ERR_INVALID_ARG;
     }
     if (cols==LCD_W) return board_present(y,rows,pixels);
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if (panel_write_epoch!=UINT32_MAX) ++panel_write_epoch;
+#endif
     pet_hub_overlay(pixels,y,rows);
     pocket_capture_overlay(pixels,y,rows);
     // No capture arm: board_capture dumps whole rows and the columns outside

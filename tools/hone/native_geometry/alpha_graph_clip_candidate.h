@@ -10,11 +10,20 @@ static inline int hone_graph_clip_viewport(const hone_graph_triangle *input,
  float left,float top,float right,float bottom,hone_graph_triangle *out,size_t capacity,size_t *count){
  if(!input||!out||!count||!input->alpha||!input->color||!isfinite(left)||!isfinite(top)||
     !isfinite(right)||!isfinite(bottom)||!(left<right)||!(top<bottom))return 0;
- hone_graph_vertex a[8],b[8];memcpy(a,input->v,sizeof input->v);size_t n=3;
- for(size_t i=0;i<n;i++){
-  if(!isfinite(a[i].x)||!isfinite(a[i].y)||!isfinite(a[i].z))return 0;
-  for(unsigned k=0;k<3;k++)if(!isfinite(a[i].local[k]))return 0;
+ int inside=1;
+ for(unsigned i=0;i<3;i++){
+  const hone_graph_vertex *v=&input->v[i];
+  if(!isfinite(v->x)||!isfinite(v->y)||!isfinite(v->z))return 0;
+  for(unsigned k=0;k<3;k++)if(!isfinite(v->local[k]))return 0;
+  if(v->x<left||v->x>right||v->y<top||v->y>bottom)inside=0;
  }
+ if(inside){
+  if(!capacity)return 0;
+  *out=*input;
+  *count=1;
+  return 1;
+ }
+ hone_graph_vertex a[8],b[8];memcpy(a,input->v,sizeof input->v);size_t n=3;
  const double edge[4]={left,right,top,bottom};
  for(unsigned side=0;side<4;side++){
   size_t used=0;if(!n)break;
