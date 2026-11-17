@@ -11,7 +11,7 @@
 #include "freertos/task.h"
 #include "hal/board.h"
 #include "ui/paint.h"
-#include "../../tools/hone/native_geometry/graph_index_band_candidate.h"
+#include "../../tools/hone/native_geometry/graph_block_band_candidate.h"
 #include "private/assets/ay_pose_dma_fixture.h"
 
 enum {
@@ -73,7 +73,7 @@ static bool check_pose(unsigned pose)
     unsigned visible_pixels = 0;
     uint32_t hash = UINT32_C(2166136261);
     for (unsigned y = 0; y < HEIGHT; ++y) {
-        if (!hone_graph_index_band_row(&opaque, &payload, &index, pose + 1, &work, y)) return false;
+        if (!hone_graph_block_row(&opaque, &payload, &index, &work, y)) return false;
         for (unsigned x = 0; x < WIDTH; ++x) {
             const uint16_t pixel = storage.row[x];
             visible_pixels += pixel != 0;
@@ -103,8 +103,7 @@ static bool present_pose(int pose, const char *label, bool measure)
             memset(storage.band, 0, rows * sizeof storage.row);
         } else {
             for (unsigned row = 0; row < rows; ++row) {
-                if (!hone_graph_index_band_row(&opaque, &payload, &index,
-                                                (unsigned)pose + 1, &work, y + row)) {
+                if (!hone_graph_block_row(&opaque, &payload, &index, &work, y + row)) {
                     ok = false;
                     break;
                 }
@@ -142,7 +141,7 @@ static void begin_benchmark(uint32_t generation)
     memset(&probe, 0, sizeof probe);
     probe.generation = generation;
     const esp_app_desc_t *app = esp_app_get_description();
-    ESP_LOGI(tag, "BEGIN model_sha256=%s baked_poses=%u live_deformation=false lighting=false "
+    ESP_LOGI(tag, "BEGIN model_sha256=%s baked_poses=%u renderer=block16 live_deformation=false lighting=false "
              "elf_sha_prefix=%02x%02x%02x%02x%02x%02x%02x%02x",
              AY_POSE_DMA_FIXTURE_MODEL_SHA256, (unsigned)AY_POSE_DMA_FIXTURE_COUNT,
              app->app_elf_sha256[0], app->app_elf_sha256[1], app->app_elf_sha256[2],
@@ -197,7 +196,7 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, bool captur
         const int64_t elapsed = esp_timer_get_time() - probe.started;
         if (!ok || probe.completed == MEASURE_FRAMES || elapsed >= measure_limit_us) {
             end_benchmark(ok, elapsed);
-            if (!ok) (void)present_pose(-1, probe.result, false);
+            if (probe.phase == FAILED) (void)present_pose(-1, probe.result, false);
         }
     } else if (probe.phase == DEMO && esp_timer_get_time() - probe.last_demo >= demo_interval_us) {
         if (!present_pose((int)probe.demo_pose, probe.result, false)) {
