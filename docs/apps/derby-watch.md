@@ -204,7 +204,7 @@ host の全台本（MID、2 レース＋再生）: 登録 42、解除 30、同�
 
 ## ネイティブ heap（計算）
 
-`sizeof` は xtensa の計算値（plan 872 B は [plan-sized-alloc.md](../kasane/plan-sized-alloc.md)、フレーム 10,246 B は [surface-segment-cap.md](../kasane/surface-segment-cap.md)、VM 996 B は旧 procedural-ir-experiment.md、リポジトリ履歴）、点列は `pocket_shiki_frame.c` の `points_bytes()`。**実測ではない。**
+`sizeof` は xtensa の計算値（plan 872 B は plan-sized-alloc.md、フレーム 10,246 B は [surface-segment-cap.md](../kasane/surface-segment-cap.md)、VM 996 B は旧 procedural-ir-experiment.md、リポジトリ履歴）、点列は `pocket_shiki_frame.c` の `points_bytes()`。**実測ではない。**
 
 | 場面 | 内訳 | 合計 |
 | --- | --- | --- |

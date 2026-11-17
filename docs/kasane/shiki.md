@@ -165,7 +165,7 @@
 
 **決定（2026-10-31、ユーザー）: 既定の予算は 48 KiB（49,152 B）。** 実測の最大 41,916 B（BIG WAVE のタイトル）に約 7 KB（17%）の余裕。アプリの開始時の 64 KiB の連続ブロックに入り、約 16 KB が残る。仕様 §9.2。
 
-`CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_shiki_frame.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ [logs/shiki-memstat-20261031.txt](logs/shiki-memstat-20261031.txt)。
+`CONFIG_POCKET_SHIKI_MEMSTAT`（既定 OFF。`main/pocket/shiki_memstat.c`）で、`pocket_shiki_frame.c`・`pocket_grid.c`・`pocket_derby.c` の確保を呼び出し位置ごとに数えた。大きさはアロケータが実際に取ったブロック（`heap_caps_get_allocated_size`）。計測用のビルド `392ffe2`（`sdkconfig.defaults` で ON にし、次のコミット `5e0511d` で戻した）、USB broker の `app_session` で各 90 秒。ログ logs/shiki-memstat-20261031.txt。
 
 | アプリ（何をしたか） | native 側の最大 | 内訳（ブロックの大きさ） | 最大の時の空き／最大の連続ブロック |
 | --- | ---: | --- | --- |
@@ -328,7 +328,7 @@ SLOW のレビュー（M2）で、§5.5・§5.6 の計測スクリプトの規�
 [shiki-spec.md](shiki-spec.md) §11 の 1 段目（`main/ui/kasane/ksn_shiki.c`）を、C を見ずに仕様だけから書いた参照実装（`tools/kasane_ir/shiki_ref.mjs`）と比べた。
 
 - **host**: `tools/kasane_ir/shiki_diff.mjs`（ランダムな式と 2 割のバイト列の破損）で、3 つのシード計 6 万本の登録の可否・終わり方・ステップ数・ペン・レジスタ・線分・sin の表が全件一致。C に 1 つずつ入れた 18 種類の誤りは、すべて検出された（試験の感度の確認）。
-- **実機**（USB broker、ESP-IDF v6.0.1・Xtensa GCC 15.2、コミット `1216959`、COM3）: 試験アプリ `local.shikitest`（[apps/shikitest/README.md](../../apps/shikitest/README.md)）が生成した 600 本（正常終了 161・検査での失敗 309・上限 18・登録の拒否 112）で、**ケースのハッシュ（実機の QuickJS と Node が同じ式・同じ入力を作った）と結果のハッシュ（C と参照実装の結果の行）が全件一致**（`node tools/kasane_ir/shiki_device.mjs docs/kasane/logs/shiki-device-20261031.txt` が `SHIKI DEVICE PASS`）。JS の数を固定小数にする変換（§2.4）が、実機のソフトウェアの double でも host と同じビットを出すことを含む。ログは [logs/shiki-device-20261031.txt](logs/shiki-device-20261031.txt)（broker の app ログの SK 行を書き写したもの）。
+- **実機**（USB broker、ESP-IDF v6.0.1・Xtensa GCC 15.2、コミット `1216959`、COM3）: 試験アプリ `local.shikitest`（[apps/shikitest/README.md](../../apps/shikitest/README.md)）が生成した 600 本（正常終了 161・検査での失敗 309・上限 18・登録の拒否 112）で、**ケースのハッシュ（実機の QuickJS と Node が同じ式・同じ入力を作った）と結果のハッシュ（C と参照実装の結果の行）が全件一致**（`node tools/kasane_ir/shiki_device.mjs docs/kasane/logs/shiki-device-20261031.txt` が `SHIKI DEVICE PASS`）。JS の数を固定小数にする変換（§2.4）が、実機のソフトウェアの double でも host と同じビットを出すことを含む。ログは logs/shiki-device-20261031.txt（broker の app ログの SK 行を書き写したもの）。
 - 1 回目（`0622880`）は 1 フレームに 20 本で、8 本目の後にターンの上限で中断された（`InternalError: interrupted`）。その 8 本も一致していた。
 - **気づいたこと**: 試験アプリは 1 フレームを 60 ms 使い続けるので、5 秒ごとにタスクのウォッチドッグの警告が出た（`task_wdt: IDLE1 (CPU 1)`、ui タスクが CPU 1 を空けない）。試験は止まらず最後まで走った。アプリの問題で、エンジンの問題ではない。1 フレームを短くして直す。
 - 書き込みで、実機に入っていた別のセッション（hone110）のファームを上書きした。今の実機は `1216959` のファーム。
@@ -354,7 +354,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 
   `bokeh` 以外の 14 本の合計は 699 → 573（−18%）。`fr`（78）・`vis`（75）・`map`（65）は v1 では 64 命令の上限を超えていた。`bokeh` は座標の 0.5 を持つ値が同時に 16 本を超えてレジスタに入らなかったが、v1.1 で入る。`crowd`・`pole`・`silk`・`stands` は `cubic`・`linePattern` を使うので、どちらの版でも 1 段目の対象外。
 - **確認**（host）: `test_shiki_ref.mjs` 24 件（座標の試験を v1.1 の端 −480·65536−32768 / −32769、720·65536+32767 / +32768 に書き換え）、`shiki_diff.mjs` 3 シード計 6 万本で C と参照実装が全件一致、`test_shiki_compile.mjs` で 15 本すべてが `shiki_fix`（§8.3 の意味論）とビット単位で一致。**§5.8 の実機の突き合わせは v1 の意味のもの。**
-- **実機**（2026-10-31、実測。USB broker、コミット `48b777c`、COM3）: §5.8 と同じ `local.shikitest` の 600 本（正常終了 164・検査での失敗 307・上限 17・登録の拒否 112）で、ケースのハッシュと結果のハッシュが全件一致（`node tools/kasane_ir/shiki_device.mjs docs/kasane/logs/shiki-device-20261031-v1.1.txt` が `SHIKI DEVICE PASS`）。ログは [logs/shiki-device-20261031-v1.1.txt](logs/shiki-device-20261031-v1.1.txt)。v1 の実機ログ（§5.8）を今の host と比べると 133 本の結果が違う（`SHIKI DEVICE FAIL`）。半端な座標の丸めと端の検査が変わったケースで、試験がこの変更を見分けている確認になる。ウォッチドッグの警告（§5.8）は今回も 5 秒ごとに出た（未修正）。
+- **実機**（2026-10-31、実測。USB broker、コミット `48b777c`、COM3）: §5.8 と同じ `local.shikitest` の 600 本（正常終了 164・検査での失敗 307・上限 17・登録の拒否 112）で、ケースのハッシュと結果のハッシュが全件一致（`node tools/kasane_ir/shiki_device.mjs docs/kasane/logs/shiki-device-20261031-v1.1.txt` が `SHIKI DEVICE PASS`）。ログは logs/shiki-device-20261031-v1.1.txt。v1 の実機ログ（§5.8）を今の host と比べると 133 本の結果が違う（`SHIKI DEVICE FAIL`）。半端な座標の丸めと端の検査が変わったケースで、試験がこの変更を見分けている確認になる。ウォッチドッグの警告（§5.8）は今回も 5 秒ごとに出た（未修正）。
 
 ### 5.10 仕様 v1.2: 未決の決定（2026-10-31、ユーザー決定）
 
@@ -407,7 +407,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 
 - **参照実装**（`tools/kasane_ir/shiki_ref.mjs` の `cubicOp`・`patternOp`）と **C のエンジン**（`main/ui/kasane/ksn_shiki.c`）を、別々に仕様だけから書いた（C は参照実装・試験のスクリプトを読まない別のエージェント）。C の実行時の割り算はすべて 32 ビット（Xtensa のオブジェクトに `__divdi3`・`__moddi3` の呼び出しが無いことを objdump で確認）。
 - **host の差分試験**（`shiki_diff.mjs`。生成器に、範囲の内側の座標とペン、弦の数の境界ちょうどの重みの組、`λ` がちょうど半分になる比を足した）: 3 シード計 6 万本で全件一致。C に入れた変異（弦の判定 `50W < 51V`・`5W < 6V` を `≤` に、重みの正規化の 13 を 12 に、`3 · MUL` を `MUL(3·uu, …)` に、`u0q` の丸めの半分）は 2 万本で検出。`ub` の丸めの半分（`+8192` を `+8191`）は、出力に出るのが `u0q`・`d` が 1/256 の境目を跨ぐときだけなので、6 万本で 1〜3 件だけ検出された。`B ≤ A` を `B < A` にする変異は等価（重みが等しいと弦は 1 本で、切れ目を作らない）。
-- **実機**（USB broker、コミット `2f492a6`、COM3）: 試験アプリの生成器に `CUBIC`・`LINE_PATTERN` を足し、600 本のうち `CUBIC` を含む 245 本・`LINE_PATTERN` を含む 242 本を含めて、**ケースのハッシュと結果のハッシュが全件一致**（`node tools/kasane_ir/shiki_device.mjs docs/kasane/logs/shiki-device-20261031-v1.2.txt` が `SHIKI DEVICE PASS`）。ログは [logs/shiki-device-20261031-v1.2.txt](logs/shiki-device-20261031-v1.2.txt)。タスクのウォッチドッグの警告（§5.8）は今回も出た。原因は、33 ms を超えるフレームの後は描画のループが待たないので、CPU 1 のアイドルタスクが走らないこと。試験アプリが 10 フレームに 1 回何もしないフレームを入れるようにして（`4f84f8a`）、実機で警告が 0 回、600 本が全件一致、所要は 23.7 秒 → 24.8 秒になった。その後、他のアプリも同じなので描画のループの側で直した（`a53193b`、`main/main.c`: 周期を超えたフレームの後に 1 tick 譲る。周期内のフレームは変わらない）。試験アプリの回避は外し、実機で警告 0 回・所要 23.9 秒。
+- **実機**（USB broker、コミット `2f492a6`、COM3）: 試験アプリの生成器に `CUBIC`・`LINE_PATTERN` を足し、600 本のうち `CUBIC` を含む 245 本・`LINE_PATTERN` を含む 242 本を含めて、**ケースのハッシュと結果のハッシュが全件一致**（`node tools/kasane_ir/shiki_device.mjs docs/kasane/logs/shiki-device-20261031-v1.2.txt` が `SHIKI DEVICE PASS`）。ログは logs/shiki-device-20261031-v1.2.txt。タスクのウォッチドッグの警告（§5.8）は今回も出た。原因は、33 ms を超えるフレームの後は描画のループが待たないので、CPU 1 のアイドルタスクが走らないこと。試験アプリが 10 フレームに 1 回何もしないフレームを入れるようにして（`4f84f8a`）、実機で警告が 0 回、600 本が全件一致、所要は 23.7 秒 → 24.8 秒になった。その後、他のアプリも同じなので描画のループの側で直した（`a53193b`、`main/main.c`: 周期を超えたフレームの後に 1 tick 譲る。周期内のフレームは変わらない）。試験アプリの回避は外し、実機で警告 0 回・所要 23.9 秒。
 - **変換器**: `cubic()`・`linePattern()` の値を、`CUBIC` は r0〜r7、`LINE_PATTERN` のブロックは r10〜r15 に固定して置く（旧の `kir.mjs` と同じ割り当て）。DERBY の 19 本すべてが 64 命令に入り（`crowd` 60・`pole` 38・`silk` 33・`stands` 27）、`shiki_fix` とビット単位で一致（`test_shiki_compile.mjs`）。
 
 ### 5.12 仕様 v1.3: データ領域の細部（2026-10-31、ユーザー決定。同日凍結）
@@ -426,7 +426,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 - **エンジン（C）**: `ksn_shiki.c` に領域の表・結び付け（型・Q・`k_rec`・レコード 1〜65,535、渡す数は宣言と同じ）、§6.1 の検査、`EACH`・`FETCH`・`PUT`・`LOOKUP`。`FETCH`・`PUT` が読む `EACH` の段は登録時に段の深さとして決める。`EACH` のカーソルは `total − remaining` で、`END` は変えていない。`FETCH`・`PUT`・`LOOKUP` は `noinline` の `data_op`。
 - **参照実装（JS）**: 別のエージェントが仕様だけから書いた（C を読まない）。解釈の分かれ目 7 点を報告させ、1 点で C が仕様から外れていた（`EACH` の使わない `imm` を Q0 の欄に数えていた。§3 の列挙に無い）ので C を直した。
 - **突き合わせ（host）**: `shiki_diff.mjs` に領域の生成器（`--data`）。2 万本 × 5 シード（4 割が領域つき）と、全部が領域つきの 2 万本で全件一致。文字の契約は `CASE … DATA <r> (<型> <Q> <k_rec> <n> <要素…> | ALIAS j)…`、結果の行に ` D <r> (<n> <要素…>)…`（`tools/kasane_contract/shiki_run.c` の先頭）。
-- **実機**: 新しい試験アプリ `local.shikidata`（`apps/shikitest/shiki_data_test.js`）で 600 本が全件一致（`3749326`、ログ [logs/shiki-device-20261031-v1.3-data.txt](logs/shiki-device-20261031-v1.3-data.txt)）。同じ版で `local.shikitest` が全件 REJECT になった: 試験の面 `run()` が、データを渡さない呼び出しで「領域が正しい」の旗を立てていなかった（`calloc` の 0。host の実行器にこの旗は無いので host では出ない）。`a4b389d` で直して 600 本が全件一致（ログ [logs/shiki-device-20261031-v1.3.txt](logs/shiki-device-20261031-v1.3.txt)）。
+- **実機**: 新しい試験アプリ `local.shikidata`（`apps/shikitest/shiki_data_test.js`）で 600 本が全件一致（`3749326`、ログ logs/shiki-device-20261031-v1.3-data.txt）。同じ版で `local.shikitest` が全件 REJECT になった: 試験の面 `run()` が、データを渡さない呼び出しで「領域が正しい」の旗を立てていなかった（`calloc` の 0。host の実行器にこの旗は無いので host では出ない）。`a4b389d` で直して 600 本が全件一致（ログ logs/shiki-device-20261031-v1.3.txt）。
 - **命令の費用**: ベースライン `d6111b83` と比べて行ごとに −10.4〜+13.6、平均 +1.7 サイクル（+2%）。スタックへの追い出しは無い（objdump）。[int-latency.md](../perf/int-latency.md)。
 - **残り（§11 の 4）**: Shiki のヒープと `data()`・`release()`・`register` の `options.data`、`js_array_buffer_transfer` の門は、予算の既定値を測ってから（§12）。変換器は §5.14。
 
@@ -466,7 +466,7 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
   - 軽微: §5.4 の 6 のカーソルを `cur` に改名、§3 の「欄の数」、§5.4 の 5 の言い回し、shiki-jit.md §24.4 に v1.4 の決定の注記、生成器に `R` が 8 の倍数でない領域。**実装の注記の 1 件（`R = 65,535` で `S = 65,536` が 16 ビットに入らない）は、実装に実際にあった誤り**（`ksn_shiki_bound` の stride を `uint16_t` にしていた）で、`uint32_t` に直した。
 - **実装**（エンジンと道具）: `ksn_shiki_region` はレコードの数 `records` を持ち、メモリは `k_rec · S` 要素（`ksn_shiki_stride`・`ksn_shiki_region_elements`）。`FETCH`・`PUT`・`LOOKUP`・ベクトルの `VLOAD`・`VSTORE`・`EMIT_*` は面の番地だけを読む。試作の AoS の経路（`VUNZIP`、領域の表の bit 1）は消した。参照実装（`shiki_ref.mjs`）は詰め物を持たない面（`S = R`）で同じ番地の式を使う。`shiki_run.c` は詰め物を 15036 で埋めて実行後に確かめる。`shiki.data({type, q, records, record})`・`shiki.fields(窓)`（`pocket_shiki_api.c`）。`shikiDebug.run` の領域の値も欄ごと（`pocket_shiki.c`）。
 - **確認**（host）: `test_shiki_ref.mjs` 39/39（v1.3 の並びで中身を書いていた 2 件と「レコードに割り切れない要素の数」の 1 件を v1.4 の形に直した）、`shiki_diff.mjs` 2 万件（`--data` も 3 万件）で C と参照が一致し ` PADDING` 無し、`test_shiki_data_compile.mjs` PASS（`shiki_fix.mjs` の番地を面に）、`test_shiki_vec.c` 92 件（面の `PUT` と詰め物、`LOOKUP` の端、結果の行）、JS API の host 試験 39 件（窓の長さ、`fields()`、詰め物が変わらない、v1.3 の形の拒否）。
-- **確認**（実機、`f505b0e`、2026-11-01）: JS API の自己試験 40/40（`SA END pass=40 fail=0`、host の 39 件に capability の 1 件）。データ領域の差分試験 600/600（`shiki_device.mjs --data`、各ケースの結果の行＝領域の中身を欄ごとに含む、が host のエンジンと参照に一致。[logs/shiki-device-20261101-v1.4-data.txt](logs/shiki-device-20261101-v1.4-data.txt)）。PIE の試作の照合 10/10（`VOUT` のシフトを 0〜32 にした後の shift32 を含む）、時間は affine128 のスカラー 751 µs・ベクトル C 249 µs・ベクトル PIE 169 µs、lines100 のスカラー 298 µs・`EMIT_LINES` 50 µs（[logs/shiki-pie-20261101-f505b0e.txt](logs/shiki-pie-20261101-f505b0e.txt)。`f3ec673` の SoA の行と ±4% で、命令キャッシュの揺れの内側）。
+- **確認**（実機、`f505b0e`、2026-11-01）: JS API の自己試験 40/40（`SA END pass=40 fail=0`、host の 39 件に capability の 1 件）。データ領域の差分試験 600/600（`shiki_device.mjs --data`、各ケースの結果の行＝領域の中身を欄ごとに含む、が host のエンジンと参照に一致。logs/shiki-device-20261101-v1.4-data.txt）。PIE の試作の照合 10/10（`VOUT` のシフトを 0〜32 にした後の shift32 を含む）、時間は affine128 のスカラー 751 µs・ベクトル C 249 µs・ベクトル PIE 169 µs、lines100 のスカラー 298 µs・`EMIT_LINES` 50 µs（logs/shiki-pie-20261101-f505b0e.txt。`f3ec673` の SoA の行と ±4% で、命令キャッシュの揺れの内側）。
 
 ### 5.18 詰め物の別の用途の議論（2026-11-01、ユーザーの依頼）
 
@@ -489,4 +489,4 @@ v1 では、座標の 0.5（画素の中央へ寄せる丸め）を変換器（`
 3. 設計と仕様は SLOW の独立レビューにかける（CLAUDE.md のルーティング）。
 4. **改名の実施**は 1 が固まってから一度に行う。CLAUDE.md の規則どおり、コードが参照するファイル名・節番号・決定番号は保ち、移したら参照を直して `python tools/check_docs.py` を通す。旧名（procedural・plan・IR・VM）で書かれた既存の文書は書き換えず、この文書の §1.3 を対応表とする。
 
-関連: [js-to-ir.md](js-to-ir.md)（JS → IR のコンパイラと `@plan`）、[flash-plan.md](flash-plan.md)（組み込みの式）、[grid-js-notation.md](grid-js-notation.md)（格子の式の記法）、[plan-sized-alloc.md](plan-sized-alloc.md)、[derby-background-cost.md](derby-background-cost.md)（費用モデル）、[oval-pie-design.md](oval-pie-design.md)（列のウォーカー P5）。
+関連: [js-to-ir.md](js-to-ir.md)（JS → IR のコンパイラと `@plan`）、[flash-plan.md](flash-plan.md)（組み込みの式）、[grid-js-notation.md](grid-js-notation.md)（格子の式の記法）、plan-sized-alloc.md、[derby-background-cost.md](derby-background-cost.md)（費用モデル）、[oval-pie-design.md](oval-pie-design.md)（列のウォーカー P5）。

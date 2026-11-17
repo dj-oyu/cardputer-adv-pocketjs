@@ -316,9 +316,9 @@ python tools\vm_l0_capture.py --port COM3 --workloads D --conditions wifi       
 
 | 台帳 | 要点 |
 | --- | --- |
-| [01 呼び出し経路](vm-ledger/01-call-paths.md) | 通常の JS 呼び出しは C の再帰になる。フレームを解放する経路（`done` か `done_generator` か）は、コンパイル時の `b->func_kind` で決まる。C から JS への再入は ToPrimitive、getter/setter、`prepareStackTrace` を通じてどこからでも起きるので、有限のリストにはならない。**opcode の種類ではなく、実行時のネイティブ深さで判定する必要がある。** |
+| 01 呼び出し経路 | 通常の JS 呼び出しは C の再帰になる。フレームを解放する経路（`done` か `done_generator` か）は、コンパイル時の `b->func_kind` で決まる。C から JS への再入は ToPrimitive、getter/setter、`prepareStackTrace` を通じてどこからでも起きるので、有限のリストにはならない。**opcode の種類ではなく、実行時のネイティブ深さで判定する必要がある。** |
 | [02 フレームのポインタ](vm-ledger/02-frame-pointers.md) | フレームを指すポインタは 3 系統ある: `rt->current_stack_frame`、呼び出し先の `prev_frame`、切り離されていない `JSVarRef.stack_frame`。`JS_CallInternal` の C ローカル変数（`sp`、`pc`、`var_buf` など）も、フレームへの 2 組目の生ポインタになっている。**GC はフレームを走査しない**（値は参照カウントだけで生きている）。 |
-| [03 ジョブと割り込み](vm-ledger/03-jobs-interrupts.md) | 1 ティックの順序は「resolve でキューに積む → `frame()` → drain」。`frame()` が例外を投げたティックは drain しない。`app_session` の割り込みハンドラが上書きするので、guest.c 側の epoch 方式の割り込みは死んでいる。**割り込まれた `await` の Promise は、永久に pending のまま残る。** |
+| 03 ジョブと割り込み | 1 ティックの順序は「resolve でキューに積む → `frame()` → drain」。`frame()` が例外を投げたティックは drain しない。`app_session` の割り込みハンドラが上書きするので、guest.c 側の epoch 方式の割り込みは死んでいる。**割り込まれた `await` の Promise は、永久に pending のまま残る。** |
 | [04 opcode の確認地点](vm-ledger/04-opcode-checkpoints.md) | `js_poll_interrupts` は 14 箇所（opcode 内は goto 系と if 系の 7 箇所）。call、return、yield、catch、反復系の opcode には確認が 1 つも無い。正規表現も割り込みを投げる（`js_regexp_exec`）。 |
 | [05 確保](vm-ledger/05-allocation.md) | `guest_realloc` は常に malloc+コピー+free で、slack は常に 0 に見える。`JSFunctionBytecode` は自分自身を指すポインタを持つ。`js_array_buffer_update_typed_arrays` は、移動したあとで参照を貼り直す既存の前例になる。 |
 | [06 アロケータ基準](vm-ledger/06-allocator-baseline.md) | §2 の通り。 |

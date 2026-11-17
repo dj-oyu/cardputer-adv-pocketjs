@@ -9,7 +9,7 @@ QEMU で STRESS を流して取った実行回数で QuickJS をコンパイル�
 
 ## 0. 結論
 
-> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+> 60 fps への道のり全体の要約は perf/60fps-roadmap.md にある。
 
 - **実機（2026-11-05、表示の周期 16 ms の測定版で、4 アプリの fps と JS の turn）では差が出なかった。**
   BIG WAVE 58.5 / 58.5 fps、STRESS 50.5 / 50.7 fps（turn 6.72 / 6.73 ms）、MEGADEMO 52.2 / 52.1 fps、
@@ -160,7 +160,7 @@ tools/pgo/train.sh
 ## 5. 実機（2026-11-05、実測）
 
 表示の周期 16 ms の測定版の上で、PGO なし（A）とあり（B、rekey 後の `f67662b`）を、同じ 4 アプリで比べた。fps は
-`KASANE_PAINT`（30 フレームごと）の時刻から。記録は [../kasane/logs/apps-60fps-recheck-20261105.txt](../kasane/logs/apps-60fps-recheck-20261105.txt)。
+`KASANE_PAINT`（30 フレームごと）の時刻から。記録は ../kasane/logs/apps-60fps-recheck-20261105.txt。
 
 | アプリ | A fps | B fps | A turn | B turn |
 | --- | --- | --- | --- | --- |

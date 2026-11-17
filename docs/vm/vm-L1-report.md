@@ -1,6 +1,6 @@
 # VM L1 報告: ジョブ境界の実行制御と起床（`vm/l1-host-sched`）
 
-対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §6。設計は [vm-L1-design.md](vm-L1-design.md)、基準値は [vm-L0-report.md](vm-L0-report.md) §2.1/§2.2、1 ティックの実際の順序は [vm-ledger/03-jobs-interrupts.md](vm-ledger/03-jobs-interrupts.md)。2026-09-12 時点。
+対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §6。設計は [vm-L1-design.md](vm-L1-design.md)、基準値は [vm-L0-report.md](vm-L0-report.md) §2.1/§2.2、1 ティックの実際の順序は vm-ledger/03-jobs-interrupts.md。2026-09-12 時点。
 
 本書は**ユーザーが「L1 を完了と認めるか」「`vm/main` へマージするか」「L2 に進むか」を判断するための報告**で、設計判断の理由は設計書側にある。数値は **実測(device) / 実測(build) / 実測(host) / 推定** を毎回書く。実機の数値は 2026-09-12 に揃った（§2）。
 

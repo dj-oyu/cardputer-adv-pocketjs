@@ -903,7 +903,7 @@ MP3の `info().durationMs` は **Xing/Info/VBRIタグの総フレーム数**か�
 確保できなければ従来同様 `OUT_OF_MEMORY` とfree/largestを返す。
 
 Apps末尾の **MP3 PLAYBACK** は3種類の合成音源を巡回し、交互にpause/resumeを検査する。
-実測、制約、再現手順は [mp3-implementation.md](../apps/mp3-implementation.md) を参照。
+実測、制約、再現手順は mp3-implementation.md を参照。
 
 ### 9.2 録音（実装）
 

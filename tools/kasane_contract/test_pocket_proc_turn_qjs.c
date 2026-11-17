@@ -149,7 +149,7 @@ static void park_contract(JSContext *ctx){
         "globalThis.frame=()=>{proc.beginFrame(0);requestYield();spin();"
         "proc.draw(a,[]);proc.commit()}");
     /* What the firmware did: the parked host turn ends the procedural frame,
-     * and the resumed frame() meets BUSY (procedural-limits-device.md sec.5). */
+     * and the resumed frame() meets BUSY (removed docs/kasane/procedural-limits-device.md sec.5, in git history). */
     REQUIRE(call_frame(ctx,&threw));
     pocket_proc_end_turn();
     REQUIRE(!resume(ctx,&threw)&&threw);

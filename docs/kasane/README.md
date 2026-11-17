@@ -1,6 +1,6 @@
 # Kasane — 読む順番と判定の前提
 
-Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤。ここには**現行の判断に必要な設計契約、コードから復元しにくい選択理由、検証の到達範囲**だけを置く。過去の試行を時系列で追う必要はない。保存資料は [archive の索引](../archive/README.md)、関連文書は末尾の一覧から探す。
+Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤。ここには**現行の判断に必要な設計契約、コードから復元しにくい選択理由、検証の到達範囲**だけを置く。過去の試行を時系列で追う必要はない。関連文書は末尾の一覧から探す。
 
 1. [architecture.md](architecture.md) — owner、表示、source、System、失敗時の契約。新しい利用側を作るときに読む。
 2. [decisions.md](decisions.md) — 採用・不採用の理由と、再検討時に満たすべき条件。最適化案を出す前に読む。
@@ -32,18 +32,14 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | [Shiki の draw の束ね（作業中）](shiki-bundle.md) | draw 1 回の固定費の段ごとの実測と、複数の handle を 1 回で描く API |
 | [Shiki の native の draw の入口](shiki-draw-entry.md) | DERBY の `ser()` の draw の内訳（plan ごとの本数・ステップ・模様線、エンジンの外の命令）と、入口を軽くした変更（slot の当て推量、`pocket_proc_draw_fixed` 専用の入口と入力のその場読み、vm の初期化 372 → 162 B）、r5sim で重い WIDE 2 の draw −4.7%、実機の `DERBY_SERDRAW` の手順と見込み、束ねを入れなかった理由（2026-11-13）|
 | [native mesh のShiki統合](../ayatsuri/pr117-native-mesh.md) | 公開mesh経路と#122のrange/carry・read_rowsの接続、回帰試験と正式buildの範囲 |
-| [opaque mesh depth](../ayatsuri/opaque-mesh-depth.md) | 明示的depth scope、所有権、予算、rollbackとretryの契約 |
-| [材質sidedness](../ayatsuri/material-sidedness-local.md) | 両面材質、面順とtie、旧asset互換とsnapshotの会計 |
 | [キャラクター評価とframeの責務](../ayatsuri/character-lifecycle.md) | 明示clock、共有Modelと独立instance、借用packetとframe-owned snapshot、失敗・ACK・解放 |
 | [optional native scene / motion](../ayatsuri/scene-motion.md) | 任意appからの名前付きhandle、明示時刻の演技、公開rigid-joint host検査と未完の狐工程 |
 | [合成skin scalar core](../ayatsuri/skin-core.md) | bind palette・4 influence変形・法線と原子的失敗のhost検査。AYNM/描画へは未接続 |
 | [skinのC描画接続](../ayatsuri/skin-render-bridge.md) | immutable Modelへの同期geometry借用、既存opaque renderer、寿命とメモリの合成host検査 |
 | [managed JS skin評価](../ayatsuri/skin-js.md) | typed入力からnative palette/skinを計算、guest work、実QuickJS/render/OOM/GC検査 |
 | [複数meshのJS skin batch](../ayatsuri/skin-batch.md) | packed typed入力、16KiB work上限、全batch失敗原子性、実QuickJS複数mesh描画 |
-| [native mesh foundation の採用](../ayatsuri/native-mesh-adoption.md) | main へ入れた native mesh の土台の範囲、CI と文書の追加、レビューの層 |
 | [実験用 native provider](../ayatsuri/provider-candidate.md) | 既定で無効の `AYATSURI_MODEL_EXPERIMENTAL_PROVIDER` による一回評価と、その host 検査 |
 | [Kasane ファームの整理と JS API の再設計](api-reorg.md) | 設計書（2026-11-13、未実装）: JS API の面の棚卸し（利用アプリ・実装・使われない入口・ビルドに入らないファイル、map の大きさ）、QuickJS-ng と Shiki の最適化から導く API の原則、新しい名前空間と capability、`pocket_kasane.c` の `.inc` 分割と診断の門、アプリの移行の順、P0（r5sim に DERBY と保持型の負荷を足しベースラインを取る）〜P6 の段と受け入れ基準・難易度のラベル、利用者が決めること |
-| [保持型の 2 系統を一本化するかの調査](retained-unify-study.md) | 調査（2026-11-13、実装なし）: `mount`＋`set` と `replace`/`patch`＋ref の実装と利用アプリ（file:line）、ゲームの HUD のコマンド・ref の数（LCD CATCH 78/80・31/32、DERBY のパドック 32・19）、一本化の 3 案の DRAM・ゲストヒープ・flash・ターン時間（推定）、一本化しない推奨と、api-reorg の P3 で足りる理由 |
 | [Shiki](shiki.md) | 高速化用の命令セットと API（旧 procedural・plan・IR・VM と grid IR）の総称 Shiki の決定、旧名との対応表、API の棚卸しと問題点 |
 | [境界と契約](architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
 | [判断台帳](decisions.md) | トレードオフ、不採用案と再検討条件 |
@@ -62,10 +58,8 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 | --- | --- |
 | [Kasane API 整理の計測記録](logs/api-reorg-perf.md) | api-reorg.md の段ごとの指標の表（r5sim の負荷 `shiki`・`hud`・`derby`（`shiki_v1` は P5 で終了）のカウント、DERBY の場面別、1 ターンの確保の回数、`heap_used`、像の大きさ）、`tools/r5sim/reorg.sh` の使い方、カウントが像の配置で 0.01〜0.03% 動くことと `sleep=off` での決定性、`pocket.kasane` を最初に読む費用（host、M32 で 1,856 B）。P0 のベースライン（2026-11-13）|
 | [Shiki の画像を帯へ直接書く・横線の塗り](image-rows.md) | 不透明・等倍の画像を 32 画素ずつではなく帯の行で直接書く `read_rows`（`ksn_ports.h`）、覆われた帯の背景の塗りの省略、帯のラスタで横線を 2 画素ずつ塗る `g_ksn_proc_hspan`。STRESS の実機の同じバイナリの A/B で描画 11.80 → 9.34 ms、さらに 9.58 → 7.38 ms。送出の待ちがそれぞれ +0.63・+1.47 ms 増え、1 フレームの合計は 12.7 → 10.3 ms。LCD の DMA が次の床（2026-11-04）|
-| [手続き型描画の上限緩和の実機検証](procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
 | [MEGADEMO Act II の上限と実機の負荷](megademo-limits.md) | 手続き面の上限を叩く場面（ねじれ廊下・Apple II 風 ZENITH）の設計の芯、実機で初めて動かした結果（ZENITH で落ちていた）、破綻の境界（面の確保・plan の同時数・回転読み出し・登録時間・ゲストヒープ）、決めた `KN`/`LOAD` と既定段階、場面切替の最初のフレーム（2026-09-29 実測。LIMIT は 10-28 に外れ、その表は落とした） |
 | [megademo-limit-scenes.md](megademo-limit-scenes.md)・[megademo-device-limits.md](megademo-device-limits.md) | 上の megademo-limits.md へ統合した旧文書の移動案内。MEGADEMO の JS のコメントが旧パスを引くため残す |
 | [DERBY WATCH の背景は何が重いか](derby-background-cost.md) | 観客席・観客・柵・刈り目の plan を外した差（カメラ×段階）、帯描画の費用モデル（1 線分・1 帯・1 画素）、VM の SIN が引数約 201 超で約 7〜9 倍遅い発見、画素キャッシュと透明な面の効果の上限とメモリ（2026-09-30 実測）。追記に観客をフレームごとに半分描く試作（q27、出荷しない）の画・GIF・実機の費用 |
 | [観客を「模様の線」と「タイル」で描く（試作）と、模様線 P24 の本実装](crowd-primitives-design.md) | 手続き描画の新しい命令 `LINE_PATTERN`（24 ビットの模様と 2 色目、遠近の弦）の設計・試作（タイルとノイズ線も）、実機の帯の単価（水平 0.061〜0.088 µs/画素、見積もりの 1.0〜1.4 倍）、本実装で変えたこと（パラメータのエントリの行を負に、色 A を命令に）、DERBY の観客の置き換えの費用（横見の VM draw + 帯 −0.27〜−1.18 ms）と画・GIF（`docs/apps/derby-crowd-p24-*`、2026-10-01）|
-| [plan を命令数ぶんだけ確保する](plan-sized-alloc.md) | `ksn_proc_sized_plan`（40 + 12n B、以前は 872 B）、命令数ごとの heap のブロック、DERBY の 25 本 22.5 → 9.7 KB とターン内の最小 +11.4 KB、首振り段階 3 の LOADSTALL の解消、断片化（`lg`）、flash の id 登録への見通し（2026-09-30 実測）|
 | [楕円・首振りの描画を速くする設計の考察](oval-pie-design.md) | 曲線 93 ms の内訳（`pose()` が 1 回 12 個の三角関数で 56%、計数と推定）、Möbius 変換と Newton の段数の条件、円弧の回転の漸化式（float32 の誤差）、有理ベジエ・チェビシェフを棄却した理由、VM の DIV の効果（+0.3 fps）、PIE が向く所と向かない所、区間の表（P0）と native のウォーカー（P5）の順序と合格基準、host の数値実験 `tools/games/ovalcost/` |

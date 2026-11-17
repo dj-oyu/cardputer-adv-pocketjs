@@ -16,7 +16,7 @@
 
 ## 3. 結果（実機、`94aea92`、2026-11-01）
 
-ログ: [logs/shiki-drawcost-20261101-94aea92.txt](logs/shiki-drawcost-20261101-94aea92.txt)。1 回あたりのサイクル（240 MHz、200 回 × 5 回の最小）。「JS 側」は `total` からネイティブの 4 段を引いた残り（計算）。
+ログ: logs/shiki-drawcost-20261101-94aea92.txt。1 回あたりのサイクル（240 MHz、200 回 × 5 回の最小）。「JS 側」は `total` からネイティブの 4 段を引いた残り（計算）。
 
 | 変種 | total | µs | parse | lookup | engine | copy | JS 側 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -35,7 +35,7 @@
 
 ## 4. 入力の変換の整数化と、引数の読み取りの近道（`171dc4a`、実機）
 
-結果を変えない 2 つの変更（コミット `171dc4a`）: `ksn_shiki_from_double` を double のビット列の整数演算に（libm の形と 1,250 万件でビット単位に一致、`tools/kasane_contract/test_shiki_from_double.c`）、`js_draw` が引数で渡された数を型タグから直接読む。ログ: [logs/shiki-drawcost-20261101-171dc4a.txt](logs/shiki-drawcost-20261101-171dc4a.txt)。
+結果を変えない 2 つの変更（コミット `171dc4a`）: `ksn_shiki_from_double` を double のビット列の整数演算に（libm の形と 1,250 万件でビット単位に一致、`tools/kasane_contract/test_shiki_from_double.c`）、`js_draw` が引数で渡された数を型タグから直接読む。ログ: logs/shiki-drawcost-20261101-171dc4a.txt。
 
 | 変種 | total 前 → 後 | µs 後 | parse 前 → 後 | engine 前 → 後 |
 | --- | --- | ---: | --- | --- |
@@ -62,7 +62,7 @@
 
 ## 6. 束ねの効果（実機、`ad10726`）
 
-ログ: [logs/shiki-drawcost-20261101-ad10726.txt](logs/shiki-drawcost-20261101-ad10726.txt)。1 draw あたりのサイクル（同じ 200 回、5 回の最小）。
+ログ: logs/shiki-drawcost-20261101-ad10726.txt。1 draw あたりのサイクル（同じ 200 回、5 回の最小）。
 
 | 入力 | 1 回ずつ `draw()` | `drawMany`（`Float64Array`） | `drawMany`（`Int32Array`、変換なし） |
 | --- | ---: | ---: | ---: |

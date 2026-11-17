@@ -392,7 +392,7 @@ group4 vs group8: differing=16,881 (13.025%) worst_step=33
 
 規則: `row` が `int16_t*` のとき `(row+x)` が16バイト整列 ⟺ `x == phase (mod 8)`、
 `phase = ((-(uintptr_t)row)/2)&7`（どの行アドレスにも存在する）。`grid` を「`lo` 以上の最初の
-`phase` の列」とし、`[lo,grid)` の**先頭の端数グループ（最大7列）**だけをスカラーで処理、
+`phase` の列」とし、`lo,grid)` の**先頭の端数グループ（最大7列）**だけをスカラーで処理、
 以降は `grid` からグループ幅ずつ進める＝**全ての8画素グループが整列する**。芯クリップ
 （`cl=center-(half/2-6)`）で切られたグループは先頭の端数と同じ扱い（8画素未満＝スカラー）で、
 そのあとは位相に**戻す**（`if(x>=grid){int off=(x-phase)&7;if(off)x+=8-off;}`）。戻さないと
@@ -523,7 +523,7 @@ T3 の一式（上の 1〜10 番目のコミット）は `vm/main`（実機が�
 しても 0.987 … 表では多項式の 0.27 に届かない）、シーン 84,661,200 画素の比較で**差は 14 画素**
 （flower 5 / solar_sail 9、すべて 1 段の陰影差、輪郭の移動 0）。線形補間では同じ規則
 （動く画素 ≤0.1% かつ最大段差 ≤1）に入らず、9,104 B/2,276 エントリでも 32 画素・段差 11 だったため
-**2次補間が採用条件**。掃引表と決定の記録は [trig-lut.md](../archive/perf/trig-lut.md)、生成器は `tools/gen_fx_lut.py`。
+**2次補間が採用条件**。掃引表と決定の記録は [trig-lut.md、生成器は `tools/gen_fx_lut.py`。
 
 **VM の中断・復帰（`codex/vm-improve` の3本、2026-09-16 追加）**: QuickJS VM の中断と遅延復帰
 （L2c stage 3a）＋ `tools/vmtest` の整備（segment growth / tco / async audit / build failures /

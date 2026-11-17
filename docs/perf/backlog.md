@@ -31,5 +31,5 @@
 - [flower-perf.md](flower-perf.md)：FLOWER の実測内訳表（2026-09-19）と、shade・行不変量・棄却実験の記録。`sqrtf` の整数平方根置き換えは実機 A/B で却下済み（整数版が遅い。flower-perf.md の shade 節 §6）。
 
 - [pie-simd.md](pie-simd.md)：カーネルを書くときの知識と、既に測った結果。
-- [compiler-builtins.md](../archive/perf/compiler-builtins.md)：リンクマップの「会員を取り込んだ理由」は1本しか出ないので、会員（cgu.13 = 10,244 B）を落とせるかはクロスリファレンス表で判断すること。`__fixdfsi` の参照を消しても 1 B も動かないという実測つき。
+- compiler-builtins.md：リンクマップの「会員を取り込んだ理由」は1本しか出ないので、会員（cgu.13 = 10,244 B）を落とせるかはクロスリファレンス表で判断すること。`__fixdfsi` の参照を消しても 1 B も動かないという実測つき。
 - `docs/archive/perf/flower-optimisation-options.md`（`perf/flower-decor` ブランチ）：装飾光線・`sqrtf`のPIE化候補の詳細設計。このリポジトリの `main` 系列にはまだ無い。

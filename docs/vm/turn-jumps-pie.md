@@ -2,7 +2,7 @@
 
 [VMの文書](README.md)
 
-> 60 fps への道のり全体の要約は [perf/60fps-roadmap.md](../perf/60fps-roadmap.md) にある。
+> 60 fps への道のり全体の要約は perf/60fps-roadmap.md にある。
 
 「QuickJS の本体はジャンプしまくりだろうから、分岐を減らせないか。SIMD 化（PIE）や複数命令を PIE にまとめることも検討して」への答え。実測（XTPERF、`CONFIG_POCKET_VM_TURNPERF`）、コード（逆アセンブル）、推定を分けて書く。記録は [logs/turn-jumps-20261105.txt](logs/turn-jumps-20261105.txt)。
 
@@ -53,7 +53,7 @@ l8ui a3, pc, 0 / l32r a9, <表> / addi pc, pc, 1 / addx4 a9, a3, a9 / l32i a9, a
 
 **値段の見積もり（推定）**: 減るのはオペコードごとの `j` 1 回 = 3 サイクル。STRESS 4,300 × 3 = 1.3 万サイクル/ターン（0.8%）、DERBY 11,100 × 3 = 3.3 万（1.8%）。ただし増えた 1.2 KB は、すでに 32 KiB を超えている 1 ターンの作業集合（42 KiB、[turn-icache.md](turn-icache.md)）に乗る。得はビルド間の配置の揺れ（15%）の中にあり、同一バイナリの A/B もできない（関数属性はビルド時に決まる）ので、実機では測らず採らない（arm D はビルドしたが焼いていない）。
 
-**なぜ少ないのか**: STRESS の 1 ターンは QuickJS のバイトコードを 4,300 命令しか実行しない。時間の多くは、そこから呼ばれる C（Shiki の JIT の描画、commit、プロパティ・atom・数値の helper）と、そのコードを flash から取ってくる待ち。host の命令数でも `JS_CallInternal` はターンの 8%（[logs](../kasane/logs/stress-js-turn-prof-20261104.txt)）。
+**なぜ少ないのか**: STRESS の 1 ターンは QuickJS のバイトコードを 4,300 命令しか実行しない。時間の多くは、そこから呼ばれる C（Shiki の JIT の描画、commit、プロパティ・atom・数値の helper）と、そのコードを flash から取ってくる待ち。host の命令数でも `JS_CallInternal` はターンの 8%（logs）。
 
 ## 4. PIE（SIMD）と「複数命令をまとめる」
 
@@ -70,4 +70,4 @@ l8ui a3, pc, 0 / l32r a9, <表> / addi pc, pc, 1 / addx4 a9, a3, a9 / l32i a9, a
 
 ## 6. 再現
 
-`sdkconfig.turnperf.defaults` を重ねたビルド（[turn-cpi.md](turn-cpi.md) §1）で、`TURNPERF insn_jx` / `insn_brj` / `insn_callret` / `insn_ntaken` が出る（`main/app_session.c` の `turnperf_events`）。30 ターンに 1 事象ずつ巡回するので、全 30 事象を 1 回りするのに 30 秒（STRESS、30 fps）。
+`sdkconfig.variant.turnperf` を重ねたビルド（[turn-cpi.md](turn-cpi.md) §1）で、`TURNPERF insn_jx` / `insn_brj` / `insn_callret` / `insn_ntaken` が出る（`main/app_session.c` の `turnperf_events`）。30 ターンに 1 事象ずつ巡回するので、全 30 事象を 1 回りするのに 30 秒（STRESS、30 fps）。

@@ -633,4 +633,4 @@ PAINT render_ms=9.52 kernel_ms=3.74 send_ms=21.9 accel=53 software=2
 - 実装: `main/hal/board.c`（バイトスワップ）、`main/ui/shell.c`（海面・波）、`main/scene/render_accel.c`（fill・blend）、`main/scene/canopy_pie.c`（canopy）。
 - 検証・解析ツール: [tools/pie/](../../tools/pie/README.md)（命令レベルシミュレータ、静的ストール解析、総当たりモデル）。
 - 未着手の最適化候補: [docs/perf/backlog.md](backlog.md)。
-- [ハードウェア仕様と制約](../platform/hardware-constraints.md)、[ホームUI設計](../scenes/home-ui.md)、[過去の背景実験の知見](../archive/findings.md)。
+- [ハードウェア仕様と制約](../platform/hardware-constraints.md)、[ホームUI設計](../scenes/home-ui.md)、過去の背景実験の知見。

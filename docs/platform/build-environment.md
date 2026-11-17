@@ -20,7 +20,7 @@
 | Node（IDF の外） | v24.19.0、`C:\Program Files\Volta\node.exe`（Volta）。IDF の環境を有効化した後も PATH にある。WSL は `bash -lc` のときだけ PATH に入る（`~/.local/bin/node`、v26） |
 
 PocketJS調査版のIDF要求 `>=6.0,<6.2` にv6.0.1は含まれる。このバージョンを最初のビルド基準とする。
-依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み（当時の知見は[archive/findings.md](../archive/findings.md)）。
+依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み（当時の知見はarchive/findings.md）。
 
 ## 方法A: 現在のPowerShellを有効化（確認済み）
 

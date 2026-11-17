@@ -1,6 +1,6 @@
 # FP・非FPタスク配置チケット管理部
 
-> 実装は [standalone/fp_ticket/](../../standalone/fp_ticket/)。設計の経緯は [task-allocation-facade.md](task-allocation-facade.md)。
+> 実装は [tools/fp_ticket/](../../tools/fp_ticket/)。設計の経緯は [task-allocation-facade.md](task-allocation-facade.md)。
 
 既存アプリ・デコーダー・FreeRTOS・ビルド設定から独立したC11モジュール。
 ファームへの組み込み、タスク作成、コア固定、実機書き込みは行わない。
@@ -69,7 +69,7 @@ FP各コア1個はこの管理部の配置方針であり、ハードウェア�
 
 ## 単独検証
 
-`standalone/fp_ticket/` で実行する。既存ファームのビルド設定は不要。
+`tools/fp_ticket/` で実行する。既存ファームのビルド設定は不要。
 
 ```sh
 gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined \
