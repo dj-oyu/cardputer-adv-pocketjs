@@ -353,7 +353,7 @@ menu "Pocket VM (diagnostics)"
         bool "Probe: per-frame breakdown of a guest frame (JS/render/send/other/wait)"
         default n
         help
-            Diagnostic (docs/perf/60fps-roadmap.md). Times every frame() period
+            Diagnostic (docs/perf/frame-breakdown.md). Times every frame() period
             of a running guest and logs one "FRAME_BD" line per 60 frames:
             averages of the JS turn, render, send, the rest of app_tick, the
             rest of the UI loop and the wait, plus the worst period and how

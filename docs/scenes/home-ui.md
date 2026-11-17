@@ -1,6 +1,6 @@
 # ホームUI設計
 
-文字主体のXMB風ホーム。アイコンは使わず、名称と設定値へ表示幅を割く。花の背景（FLOWER）は他の背景と同じ枠組みに載る1つの選択肢で、方式・メモリ・検証範囲は[FLOWER背景](flower.md)を参照。XMB の設計経緯は[archive/findings.md](../archive/findings.md)。
+文字主体のXMB風ホーム。アイコンは使わず、名称と設定値へ表示幅を割く。花の背景（FLOWER）は他の背景と同じ枠組みに載る1つの選択肢で、方式・メモリ・検証範囲は[FLOWER背景](flower.md)を参照。XMB の設計経緯はarchive/findings.md。
 
 ## 操作と情報構造
 

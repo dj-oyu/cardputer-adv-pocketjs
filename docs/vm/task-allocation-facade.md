@@ -5,7 +5,7 @@
 
 ## 実装範囲
 
-配置・チケット管理は [standalone/fp_ticket](../../standalone/fp_ticket/)（契約と限界は [fp-ticket.md](fp-ticket.md)） に実装済み。
+配置・チケット管理は [tools/fp_ticket](../../tools/fp_ticket/)（契約と限界は [fp-ticket.md](fp-ticket.md)） に実装済み。
 名称は `fp_ticket` だが非FPタスクも対象とする。既存ファームとビルド設定には接続していない。
 FreeRTOSのタスク作成・登録・終了をまとめる接続層は未実装で、本書のライフサイクル契約に従って追加する。
 本書の「接続層が行う」は今後の実装要件を示す。
@@ -67,7 +67,7 @@ Core 0のFP枠使用は `live_mask & fp_mask & ~core1_mask`、Core 1は
 
 ## チケットAPI（実装済み）
 
-公開型とシグネチャは [fp_ticket.h](../../standalone/fp_ticket/fp_ticket.h) を参照。
+公開型とシグネチャは [fp_ticket.h](../../tools/fp_ticket/fp_ticket.h) を参照。
 
 | API | 動作 |
 | --- | --- |

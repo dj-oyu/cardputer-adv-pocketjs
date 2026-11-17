@@ -2,7 +2,7 @@
 
 > 吸収した旧文書: `kasane-image-transform-step.md`、`kasane-image-transform-anchor.md`、`kasane-image-transform-reject.md`、`kasane-image-transform-stretch-step.md`。各節の中の節番号（§N）は旧文書のものを保つ。
 
-`main/ui/kasane/ksn_render.c` の画像スパン（回転と拡大縮小）から、画素ごとの除算・アンカー計算・域外判定を順に外した4段の記録。どれも切替つき・厳密（出力画素は変わらない）・既定は有効で、出荷済み。調査と候補の判断は [kasane-image-transform-recon.md](../archive/perf/kasane-image-transform-recon.md)。
+`main/ui/kasane/ksn_render.c` の画像スパン（回転と拡大縮小）から、画素ごとの除算・アンカー計算・域外判定を順に外した4段の記録。どれも切替つき・厳密（出力画素は変わらない）・既定は有効で、出荷済み。調査と候補の判断は kasane-image-transform-recon.md。
 
 読む順は step（回転の商・剰余ステップ）→ anchor（アンカー表）→ reject（域外判定）。stretch-step は拡大縮小側の step と同型の仕事。
 

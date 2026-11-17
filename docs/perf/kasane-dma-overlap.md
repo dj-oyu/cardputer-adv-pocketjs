@@ -2,7 +2,7 @@
 
 > **既定 ON（2026-10-30）**: MEGADEMO の実機 A/B（末尾の節）で send が約 5 ms/frame 減り、turn・render・heap は不変だったので、PR #111 で既定を ON にした。OFF は `-D KASANE_DMA_OVERLAP=OFF` で残る。以下の「既定 OFF」は当時の記述。
 >
-> **比較の状態（2026-10-29）**: source-selected ON 比較の #99 は比較未完で closed / unmerged。既定 ON の実機優位は未確認で、性能不良を理由とする不採用ではない。[終了理由と再比較の条件](../archive/proposals/dma-source-on-pr99.md)。既定 OFF を維持する。
+> **比較の状態（2026-10-29）**: source-selected ON 比較の #99 は比較未完で closed / unmerged。既定 ON の実機優位は未確認で、性能不良を理由とする不採用ではない。終了理由と再比較の条件。既定 OFF を維持する。
 
 
 #37 head `578d552384c992cb852822d40e2635e7b317d498` から DMA の copied submit/finish、

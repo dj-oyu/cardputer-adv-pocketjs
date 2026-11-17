@@ -23,7 +23,7 @@ idf.py -B build_l3a_reloc -D SDKCONFIG="build_l3a_reloc/sdkconfig" `
        -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.reloc" build
 ```
 
-`sdkconfig.reloc` は `CONFIG_POCKET_VM_RELOC=y` の1行だけ。**`-D SDKCONFIG` でビルド
+`sdkconfig.reloc`（削除済み。`CONFIG_POCKET_VM_RELOC=y` と `CONFIG_POCKET_VM_PROBE=y` の2行。必要なら作り直す）。**`-D SDKCONFIG` でビルド
 ディレクトリごとに分けるのが必須**で、既定の `sdkconfig` はツリーで1本しか無いため、
 片方のビルドが立てた `RELOC=y` をもう片方が黙って拾う（この節を書く途中で実際に踏んだ）。
 

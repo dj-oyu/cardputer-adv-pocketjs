@@ -1,6 +1,6 @@
 # VM L1 設計: ジョブ境界の実行制御と起床（`vm/l1-host-sched`）
 
-対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §6（L1）。根拠は [vm-L0-report.md](vm-L0-report.md) §2.1（実機の基準値）・§2.2（予算案）と [vm-ledger/03-jobs-interrupts.md](vm-ledger/03-jobs-interrupts.md)（1 ティックの実際の順序）。2026-09-12 時点。
+対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §6（L1）。根拠は [vm-L0-report.md](vm-L0-report.md) §2.1（実機の基準値）・§2.2（予算案）と vm-ledger/03-jobs-interrupts.md（1 ティックの実際の順序）。2026-09-12 時点。
 
 本書は実装者が従う文書で、調査ではなく**決定**を書く。各決定には理由と、それを検査する項目（§7）を付ける。数値は **実測**（L0 §2.1、device / build / host を区別）か **推定** かを毎回明記する。
 

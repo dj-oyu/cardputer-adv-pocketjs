@@ -1,6 +1,6 @@
 # 08 スラブ方式と最大空きブロック
 
-対象: JS オブジェクトのヒープ全体に所有者を置く案。L2a のセグメント層（[07](07-segment-g6.md)）は VM フレーム専用で、`js_malloc_rt` → `guest_malloc` → IDF TLSF（Rust UI・taffy と共有）の上に載っている。JS オブジェクトのヒープには所有者がおらず、`guest.c` は要求サイズヘッダを付けて `heap_caps_malloc` へ流しているだけ（[05](05-allocation.md) §1）。台帳06 §5 では、実行中に最大空きブロックを 59,296B（taffy 34ノード段）以上保てたトレースが tlsf・estalloc とも 0/16 だった。
+対象: JS オブジェクトのヒープ全体に所有者を置く案。L2a のセグメント層（07）は VM フレーム専用で、`js_malloc_rt` → `guest_malloc` → IDF TLSF（Rust UI・taffy と共有）の上に載っている。JS オブジェクトのヒープには所有者がおらず、`guest.c` は要求サイズヘッダを付けて `heap_caps_malloc` へ流しているだけ（[05](05-allocation.md) §1）。台帳06 §5 では、実行中に最大空きブロックを 59,296B（taffy 34ノード段）以上保てたトレースが tlsf・estalloc とも 0/16 だった。
 
 **問い: 区分スラブは、同じプールで tlsf より最大空きブロックを保てるか。**
 

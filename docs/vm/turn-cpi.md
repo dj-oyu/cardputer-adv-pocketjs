@@ -14,7 +14,7 @@ R3 の後、STRESS LV1 の JS は 1 フレーム約 7 ms（`turn_ms`）と言わ
 
 ```powershell
 idf.py -B build_turnperf -D SDKCONFIG=build_turnperf/sdkconfig `
-    -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.turnperf.defaults" build
+    -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.variant.turnperf" build
 python tools\stress_app.py --port COM3 --seconds 60 --log <log>
 ```
 

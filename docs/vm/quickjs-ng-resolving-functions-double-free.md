@@ -1,6 +1,6 @@
 # quickjs-ng: resolving-functions allocation failure leaves a dangling value, double-freed by `js_async_function_call`
 
-> 関連: [vm-L2-design.md](vm-L2-design.md) D41。パッチ本体は `reports/upstream/` に残してある。
+> 関連: [vm-L2-design.md](vm-L2-design.md) D41。パッチ本体は同じディレクトリの `.patch`。
 
 Status: **not sent upstream**. Filed locally for reference; the fix below is
 applied in this fork (`vm/l2c-oomfix`) but no issue/PR has been opened against
@@ -414,7 +414,7 @@ reproduced defect.
 
 ## Patch
 
-See [`quickjs-ng-resolving-functions-double-free.patch`](../../reports/upstream/quickjs-ng-resolving-functions-double-free.patch)
+See [`quickjs-ng-resolving-functions-double-free.patch`](quickjs-ng-resolving-functions-double-free.patch)
 (`git format-patch` output against this fork's vendored copy of quickjs-ng
 0.14.0, commit `8511f6b` on branch `vm/l2c-oomfix`).
 

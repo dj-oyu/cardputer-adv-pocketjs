@@ -1,6 +1,6 @@
 # アプリと機能の文書
 
-[文書トップ](../README.md) / [過去の調査・実験](../archive/README.md)
+[文書トップ](../README.md)
 
 仕様・設計にも将来案や当時の値が含まれる。採用範囲・既定値・未確認条件は本文の状態表示を優先する。
 
@@ -13,7 +13,6 @@
 | [japanese-input.md](japanese-input.md) | 仕様 | SKK 日本語入力と `pocket.input.text` |
 | [player-overlay.md](player-overlay.md) | 設計 | ホーム画面プレイヤー: オーバーレイの仕組みと費用の管理 |
 | [pet-companion.md](pet-companion.md) | 仕様 | Pet Companion: PC 連携、API、実装メモ |
-| [pet-asset-design.md](pet-asset-design.md) | 設計 | ペット画像の省容量化（PPT2 形式） |
 | [lcd-catch.md](lcd-catch.md) | 設計・記録 | LCD CATCH: 固定セグメントの液晶ゲーム。Kasane の ref 32・コマンド 80 に収める設計、host の台本再生、実機で調整する項目 |
 | [derby-watch.md](derby-watch.md) | 設計・記録 | DERBY WATCH: 線画の疑似 3D で観る競馬、再現できるレースのモデル、起動ごとの種、較正したオッズ、場面ごとの plan、host の全画素検証、`pocket.app.load` のチャンクへの分割、楕円コースのカーブ補正とオッズの較正（host の Monte Carlo、中・(c)）、馬ごとの横位置 `lz`（q26）、首振りの描画順の受入条件、場内マップの大型画面の見え方 |
 | [derby-integer.md](derby-integer.md) | 設計 | DERBY WATCH の JS から double を無くす: 受け入れ条件（opprof の float の組は列挙した境目だけ、静的検査 0、境目は int だけ）、前の計測（float の組 776〜1,250/ターン）、double の発生源、QuickJS で int のままでいる規則、2 進の固定小数の m、割り算の行き先（定数の逆数・`pocket.derby` の C・整数の長除法。Shiki に除算は足さない）、段階（表示が先、モデルが最後）、SLOW のレビューと対応（2026-11-01、実装前） |
@@ -30,7 +29,6 @@
 
 | 文書 | 種別 | 内容 |
 | --- | --- | --- |
-| [mp3-implementation.md](mp3-implementation.md) | 記録 | MP3 実装と実測 |
 | [opus-feasibility.md](opus-feasibility.md) | 記録 | Opus 復号の実現性調査と、実装後の答え合わせ |
 | [derby-camera-history.md](derby-camera-history.md) | 記録 | DERBY WATCH の首振り・投影カメラの経緯（Shiki 以前、2026-09-30〜10-19）: 計算コストの見積もり（JS 41.8 µs/点、VM の Newton 逆数、観客の単価）、段階 3 のゲストヒープの内訳と受け入れ条件、楕円（段階 4）の実装・曲線の fps を上げた手順・評価の余裕とゲスト最大の経過（CLAUDE.md が引く値）、WIDE 2 の 1 フレームの命令プロファイルと較正式（実機 = 1.253 × 推定 + 4.22 ms）、trig-cull と u=14 の実機結果、ネイティブ化の候補調査（S1b の根拠）、既定 OFF の `POCKET_DERBY_COURSE_CACHE`・`POCKET_DERBY_PROJECT_BATCH` の実験 |
 | [derby-pan-camera-cost.md](derby-pan-camera-cost.md) | 移動 | スタブ。→ derby-camera-history.md §1（JS のコメントが引くため残す） |
