@@ -256,6 +256,11 @@ transforms in the inventory are snapshots and must be recomputed or proved
 constant for the active frame. Parented bones, arbitrary constraints and scale
 do not silently fall back to this candidate.
 
+`rig_binding_sweep.py` compares evaluated mesh-to-rig matrices over supplied
+driver samples in a trusted Blender source, verifies model identity and records
+the input sample hash. It provides sampled evidence only: identical results do
+not prove the transform invariant for arbitrary controls or animation.
+
 Host GCC/x86-64 `-fstack-usage` comparison with the same external callback wrapper:
 before, O2 provider 1,664 bytes plus wrapper 8; after, the inlined wrapper is
 384 bytes. O0 provider + validation/gather frames changed from 864 + 896 to
