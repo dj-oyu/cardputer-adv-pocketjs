@@ -31,6 +31,12 @@
 #include "pocket_shiki_frame.h"
 #include "ui/kasane/ksn_shiki_jit.h"
 #include "ui/kasane/ksn_runtime.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+#include "ayatsuri/ayatsuri_pose_dma_probe.h"
+#endif
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
 #endif
@@ -1019,6 +1025,9 @@ bool app_stop(void) {
     stop_pending=true;
     /* Before any hook, source reset, guest destruction or shared-strip reuse. */
     if(!app_drain_display())return false;
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if(!stop_prepared&&!ayatsuri_pose_dma_probe_close_after_drain())return false;
+#endif
     bool p0_had_guest=guest!=NULL;
     if(!stop_prepared){
 #ifdef KASANE_P2_REPAIR_PROBE

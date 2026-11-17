@@ -13,5 +13,7 @@ bool ay_live_model_prepare(unsigned pose, unsigned *packets, bool *fast, uint32_
 bool ay_live_model_row(unsigned y, uint16_t pixels[240]);
 /* A successful drain also accepts an idle frame. An uncertain drain retains it. */
 bool ay_live_model_finish(bool drained);
+/* Releases the runtime while idle. A pinned frame prevents closure. */
+bool ay_live_model_close(void);
 
 #endif

@@ -81,6 +81,13 @@ static bool finish_pose(bool drained)
     return released;
 }
 
+bool ayatsuri_pose_dma_probe_close_after_drain(void)
+{
+    if (!finish_pose(true) || !ay_live_model_close()) return false;
+    probe.generation = 0;
+    return true;
+}
+
 static bool prepare_pose(unsigned pose, pose_frame *frame)
 {
     if (waiting_for_drain && !finish_pose(board_present_finish() == ESP_OK)) return false;
