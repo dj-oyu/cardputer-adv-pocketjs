@@ -4,7 +4,7 @@ Run against an already opened trusted blend with --disable-autoexec. Input
 headers/DLLs must be built from the same inventory and routes; their identity
 must be checked externally. Only aggregate numeric results are printed.
 """
-import bpy,ctypes as c,hashlib,json,pathlib,sys,tempfile
+import bpy,ctypes as c,hashlib,json,pathlib,random,sys,tempfile
 
 args=sys.argv[sys.argv.index('--')+1:]
 if len(args)!=6:raise SystemExit('expected inventory, material routes, source package, driver bindings, driver DLL, alpha DLL')
@@ -24,6 +24,9 @@ camera_data=bpy.data.cameras.new('diagnostic-camera');camera_data.type='ORTHO';c
 camera=bpy.data.objects.new('diagnostic-camera',camera_data);scene.collection.objects.link(camera);scene.camera=camera
 mesh=bpy.data.meshes.new('diagnostic-plane');obj=bpy.data.objects.new('diagnostic-plane',mesh);scene.collection.objects.link(obj)
 cases=0;worst=0.;errors=0;fractional=0;low=1.;high=0.;observed={}
+rng=random.Random(6405)
+controls=[[v]*len(bindings['inputs']) for v in (0.,.003,.01,.019,1.)]
+controls += [[rng.random() for _ in bindings['inputs']] for _ in range(8)]
 with tempfile.TemporaryDirectory() as tmp:
  scene.render.filepath=str(pathlib.Path(tmp)/'alpha-oracle.exr')
  for mid,record in enumerate(inventory['materials']):
@@ -34,8 +37,8 @@ with tempfile.TemporaryDirectory() as tmp:
   source_mesh=next(m for m in package['meshes'] if record['name'] in m['material_slots']);vertices=source_mesh['vertices'];n=len(vertices)
   if not n:raise ValueError('empty sampled mesh')
   samples=[tuple(map(float,vertices[i])) for i in (0,n//3,(2*n)//3,n-1)]+[(100.,0.,100.)]
-  for control in (0.,.003,.01,.019,1.):
-   inputs=(c.c_double*len(bindings['inputs']))(*([control]*len(bindings['inputs'])));scratch=(c.c_double*len(bindings['programs']))();values=(c.c_double*len(bindings['programs']))()
+  for control in controls:
+   inputs=(c.c_double*len(bindings['inputs']))(*control);scratch=(c.c_double*len(bindings['programs']))();values=(c.c_double*len(bindings['programs']))()
    if not driver(inputs,len(inputs),scratch,values):raise ValueError('driver evaluation')
    material=bpy.data.materials[record['name']].copy();tree=material.node_tree
    if tree.animation_data:tree.animation_data_clear()

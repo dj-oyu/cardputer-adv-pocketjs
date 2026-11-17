@@ -234,6 +234,11 @@ interpolation or alpha-compositing admission, and no target cost is established.
 barycentric interpolation of a preclipped triangle's deformed object-local XYZ.
 It returns an unlit fragment, not a shaded/rasterized frame; callers must
 preserve local attributes through clipping and freeze driver values per frame.
+`alpha_graph_raster_candidate.h` composes preclipped graph fragments against a
+caller-supplied full opaque-depth image, with whole-frame preflight and bounded
+four-fragment sorting. Its RGB remains unlit, and it is a host-only diagnostic:
+source clipping, shared row-depth ownership, lighting, DMA, publication and
+target memory/time have not been integrated.
 
 `shrinkwrap_route_plan.py` records nearest-surface dependencies and rejects
 cycles and unsupported modes. `native_wrap_candidate.c` transforms current
