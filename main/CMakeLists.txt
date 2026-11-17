@@ -680,6 +680,8 @@ if(CONFIG_AYATSURI_POSE_DMA_PROBE)
             "${CMAKE_SOURCE_DIR}/tools/hone/source_package/native_wedge_lut_candidate.c")
         target_sources(${COMPONENT_LIB} PRIVATE ${live_sources})
         target_include_directories(${COMPONENT_LIB} PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/ayatsuri"
+            "${CMAKE_SOURCE_DIR}/tools/ayatsuri/provider"
             "${CMAKE_SOURCE_DIR}/tools/hone/source_package")
         target_add_binary_data(${COMPONENT_LIB} "ayatsuri/private/assets/live/hone_live_model.aynm" BINARY)
         set_property(SOURCE ${live_sources} APPEND PROPERTY
