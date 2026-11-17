@@ -656,7 +656,11 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.hello","HELLO WORLD",NULL,NULL,5),
     NATIVE_APP("local.imucal","IMU CALIBRATION",imucal_start,imucal_end,7),
     NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,5),
+#else
     NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,7),
+#endif
     NATIVE_APP("local.stress","STRESS TEST",stress_start,stress_end,5),
     NATIVE_APP("local.shikitest","SHIKI TEST",shiki_test_start,shiki_test_end,5),
     NATIVE_APP("local.shikidata","SHIKI DATA",shiki_data_test_start,shiki_data_test_end,5),
@@ -955,6 +959,12 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+static bool pose_companion_active(void) {
+    return running && strcmp(app_registry_current()->id, "local.companion") == 0;
+}
+#endif
+
 static void tick_run(bool have, const keystroke_t *stroke) {
     if(transition_pending())return;
     // The three pickers below keep the guest from being ticked, so its
@@ -1007,6 +1017,19 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
     esp_err_t e=ESP_OK;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(pose_companion_active()) {
+        if(leave) {
+            end_run(ESP_OK);
+        } else {
+            bool shot=atomic_exchange(&capture,false);
+            if(shot) board_capture(true);
+            ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, shot);
+            if(shot) board_capture(false);
+        }
+        return;
+    }
+#endif
     // An app that can be kept goes to sleep instead (docs/vm/app-suspend-design
     // .md). Only from the menu: a Playground or tutorial run hands its buffer
     // back to the editor on the way out, which a kept guest would not. A
@@ -1128,6 +1151,9 @@ static bool native_stop(void);
 static uint8_t native_suspend(void) {
     if(transition_pending())return AC_BUSY;
     if(!running || home_modal() || pocket_text_active())return AC_BLOCKED;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(pose_companion_active())return AC_UNSUPPORTED;
+#endif
     if(!app_can_suspend())return AC_UNSUPPORTED;
     if(app_suspend()!=ESP_OK) {
         /* Suspension may already have released drivers. Follow the ordinary
@@ -1187,9 +1213,6 @@ static void ui_task(void *arg) {
 #endif
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
-#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
-    ayatsuri_pose_dma_probe_run();
-#endif
 #ifdef KASANE_P0_PROBE
     int64_t previous_overlay_frame_started=0;
 #endif

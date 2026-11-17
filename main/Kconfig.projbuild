@@ -256,7 +256,7 @@ menu "Pocket VM (diagnostics)"
             No model, real materials or LCD/DMA measurement is added.
 
     config AYATSURI_POSE_DMA_PROBE
-        bool "Measure six baked model poses through the physical LCD"
+        bool "Replace Pet Companion with the baked-model LCD benchmark"
         default n
         help
             Requires the authorized generated fixture at
