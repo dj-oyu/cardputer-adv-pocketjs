@@ -225,6 +225,11 @@ The scalar candidate is not a full shader: source color, specular/lighting,
 clipping and perspective-correct local-coordinate interpolation remain open.
 Its nonlinear factor must be evaluated at the appropriate fragment coordinate;
 interpolating per-vertex alpha would not preserve the graph.
+`base_color_compile.py` separately admits a bounded scalar/color graph with
+MIX and linear RGB ramps and produces candidate linear RGB input values.
+It uses three independent scalar programs and caller-owned scratch. This is
+not Principled specular/lighting, color-management, clipped attribute
+interpolation or alpha-compositing admission, and no target cost is established.
 
 `shrinkwrap_route_plan.py` records nearest-surface dependencies and rejects
 cycles and unsupported modes. `native_wrap_candidate.c` transforms current

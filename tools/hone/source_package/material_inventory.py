@@ -28,7 +28,7 @@ def sockets(items):
 def node_record(node):
     result=dict(name=node.name,type=node.bl_idname,inputs=sockets(node.inputs),outputs=sockets(node.outputs),
                 mute=bool(node.mute),active_output=getattr(node,'is_active_output',None))
-    for key in ('operation','blend_type','use_clamp','data_type','interpolation_type','from_instancer'):
+    for key in ('operation','blend_type','use_clamp','use_alpha','data_type','interpolation_type','from_instancer'):
         if hasattr(node,key):
             value=getattr(node,key)
             if type(value) in (str,bool,int,float):result[key]=value
