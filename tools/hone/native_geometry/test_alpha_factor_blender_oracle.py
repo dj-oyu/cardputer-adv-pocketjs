@@ -23,7 +23,7 @@ scene.render.image_settings.file_format='OPEN_EXR';scene.render.image_settings.c
 camera_data=bpy.data.cameras.new('diagnostic-camera');camera_data.type='ORTHO';camera_data.ortho_scale=.00001
 camera=bpy.data.objects.new('diagnostic-camera',camera_data);scene.collection.objects.link(camera);scene.camera=camera
 mesh=bpy.data.meshes.new('diagnostic-plane');obj=bpy.data.objects.new('diagnostic-plane',mesh);scene.collection.objects.link(obj)
-cases=0;worst=0.;errors=0;fractional=0;low=1.;high=0.
+cases=0;worst=0.;errors=0;fractional=0;low=1.;high=0.;observed={}
 with tempfile.TemporaryDirectory() as tmp:
  scene.render.filepath=str(pathlib.Path(tmp)/'alpha-oracle.exr')
  for mid,record in enumerate(inventory['materials']):
@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory() as tmp:
    if factor is None:raise ValueError('unlinked mix factor')
    emission=tree.nodes.new('ShaderNodeEmission');tree.links.new(factor,emission.inputs['Color']);tree.links.new(emission.outputs[0],output.inputs['Surface'])
    mesh.materials.clear();mesh.materials.append(material)
-   for xyz in samples:
+   for sample_index,xyz in enumerate(samples):
     x,y,z=xyz;epsilon=.01;mesh.clear_geometry();mesh.from_pydata([(x-epsilon,y-epsilon,z),(x+epsilon,y-epsilon,z),(x+epsilon,y+epsilon,z),(x-epsilon,y+epsilon,z)],[],[(0,1,2,3)]);mesh.update()
     camera.location=(x,y,z+1);camera.rotation_euler=(0,0,0)
     native=(c.c_float*3)(*xyz);result=c.c_float()
@@ -58,6 +58,8 @@ with tempfile.TemporaryDirectory() as tmp:
     if len(pixels)<4:raise ValueError('missing render sample')
     delta=abs(pixels[0]-result.value);worst=max(worst,delta);errors+=delta>1e-3;cases+=1
     fractional+=0.001<result.value<.999;low=min(low,result.value);high=max(high,result.value)
+    observed.setdefault((mid,sample_index),[]).append(result.value)
    mesh.materials.clear();bpy.data.materials.remove(material)
-print('ALPHA_GRAPH_RENDER_COMPARE cases',cases,'max_component_error',worst,'over_1e-3',errors,'fractional_cases',fractional,'range',low,high,'colors_and_full_render=unverified','runtime_ready',False)
+changing=sum(max(v)-min(v)>1e-4 for v in observed.values())
+print('ALPHA_GRAPH_RENDER_COMPARE cases',cases,'max_component_error',worst,'over_1e-3',errors,'fractional_cases',fractional,'varying_points',changing,'range',low,high,'colors_and_full_render=unverified','runtime_ready',False)
 if errors or not cases:raise SystemExit('alpha graph mismatch or no sampled materials')

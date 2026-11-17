@@ -230,6 +230,10 @@ MIX and linear RGB ramps and produces candidate linear RGB input values.
 It uses three independent scalar programs and caller-owned scratch. This is
 not Principled specular/lighting, color-management, clipped attribute
 interpolation or alpha-compositing admission, and no target cost is established.
+`alpha_graph_fragment_candidate.h` joins those programs to orthographic
+barycentric interpolation of a preclipped triangle's deformed object-local XYZ.
+It returns an unlit fragment, not a shaded/rasterized frame; callers must
+preserve local attributes through clipping and freeze driver values per frame.
 
 `shrinkwrap_route_plan.py` records nearest-surface dependencies and rejects
 cycles and unsupported modes. `native_wrap_candidate.c` transforms current

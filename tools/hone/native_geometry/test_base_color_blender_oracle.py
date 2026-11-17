@@ -23,7 +23,7 @@ scene.render.image_settings.file_format='OPEN_EXR';scene.render.image_settings.c
 camera_data=bpy.data.cameras.new('diagnostic-camera');camera_data.type='ORTHO';camera_data.ortho_scale=.00001
 camera=bpy.data.objects.new('diagnostic-camera',camera_data);scene.collection.objects.link(camera);scene.camera=camera
 mesh=bpy.data.meshes.new('diagnostic-plane');obj=bpy.data.objects.new('diagnostic-plane',mesh);scene.collection.objects.link(obj)
-cases=0;worst=0.;errors=0;non_grey=0
+cases=0;worst=0.;errors=0;non_grey=0;observed={}
 with tempfile.TemporaryDirectory() as tmp:
  scene.render.filepath=str(pathlib.Path(tmp)/'color-oracle.exr')
  for mid,record in enumerate(inventory['materials']):
@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory() as tmp:
    else:tree.links.new(linked,emission.inputs['Color'])
    tree.links.new(emission.outputs[0],tree.nodes[output['name']].inputs['Surface'])
    mesh.materials.clear();mesh.materials.append(material)
-   for xyz in samples:
+   for sample_index,xyz in enumerate(samples):
     x,y,z=xyz;epsilon=.01;mesh.clear_geometry();mesh.from_pydata([(x-epsilon,y-epsilon,z),(x+epsilon,y-epsilon,z),(x+epsilon,y+epsilon,z),(x-epsilon,y+epsilon,z)],[],[(0,1,2,3)]);mesh.update()
     camera.location=(x,y,z+1);camera.rotation_euler=(0,0,0)
     native=(c.c_float*3)(*xyz);result=(c.c_float*3)()
@@ -58,6 +58,8 @@ with tempfile.TemporaryDirectory() as tmp:
     if len(pixels)<4:raise ValueError('missing render sample')
     delta=max(abs(pixels[k]-result[k]) for k in range(3));worst=max(worst,delta);errors+=delta>1e-3;cases+=1
     non_grey+=max(result)-min(result)>1e-3
+    observed.setdefault((mid,sample_index),[]).append(tuple(result))
    mesh.materials.clear();bpy.data.materials.remove(material)
-print('BASE_COLOR_RENDER_COMPARE cases',cases,'max_component_error',worst,'over_1e-3',errors,'non_grey_cases',non_grey,'lighting_and_compositing=unverified','runtime_ready',False)
+changing=sum(any(max(v[k] for v in rows)-min(v[k] for v in rows)>1e-4 for k in range(3)) for rows in observed.values())
+print('BASE_COLOR_RENDER_COMPARE cases',cases,'max_component_error',worst,'over_1e-3',errors,'non_grey_cases',non_grey,'varying_points',changing,'lighting_and_compositing=unverified','runtime_ready',False)
 if errors or not cases:raise SystemExit('base color mismatch or no sampled materials')
