@@ -8,6 +8,13 @@
 #include "ui/kasane/ksn_source.h"
 #include "system/sys_notify.h"
 
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+/* Explicit diagnostic backdrop. Rejects competing native pending publications;
+ * uses the same renderer/completion/ACK path. Does not install a persistent source. */
+ksn_result pocket_kasane_present_stream_backdrop(const ksn_display_port*,
+    const ksn_display_completion*,ksn_render_stats*,ksn_backdrop_loader);
+#endif
+
 /* QuickJS-facing APP lease into the native Kasane runtime. Allocation is lazy
  * (first Kasane call, or pocket_kasane_prepare); reading features costs no arena. Reset detaches APP and releases its wrapper
  * bookkeeping; a native SYSTEM owner keeps the shared storage alive.

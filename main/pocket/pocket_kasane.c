@@ -3020,12 +3020,30 @@ void pocket_kasane_invalidate(void) {
     ksn_runtime_invalidate();
 }
 #ifdef KASANE_DMA_OVERLAP
+static ksn_result pocket_present_with_backdrop(const ksn_display_port*,
+    const ksn_display_completion*,ksn_render_stats*,ksn_backdrop_loader);
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     return pocket_kasane_present_complete(display,NULL,stats);
 }
 ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
                                           const ksn_display_completion *completion,
                                           ksn_render_stats *stats) {
+    return pocket_present_with_backdrop(display,completion,stats,NULL);
+}
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+ksn_result pocket_kasane_present_stream_backdrop(const ksn_display_port *display,
+    const ksn_display_completion *completion,ksn_render_stats *stats,ksn_backdrop_loader load){
+    if(!load||!completion||!completion->finish||!ksn_runtime_reserved_bytes())return KSN_INVALID;
+    /* An explicit native diagnostic presentation, never a competing procedural
+     * background or pending source publication. No guest actor is installed. */
+    if(pocket_proc_has_frame()||pocket_proc_pending()||pocket_grid_pending()||
+       pocket_video_pending()||pocket_pixel_pending())return KSN_BUSY;
+    ksn_runtime_invalidate();
+    return pocket_present_with_backdrop(display,completion,stats,load);
+}
+#endif
+static ksn_result pocket_present_with_backdrop(const ksn_display_port *display,
+    const ksn_display_completion *completion,ksn_render_stats *stats,ksn_backdrop_loader override){
 #else
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
 #endif
@@ -3052,8 +3070,8 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
     if(!pocket_kasane_needs_present()) return KSN_OK;
     bool proc_candidate=pocket_proc_pending();
 #ifdef KASANE_DMA_OVERLAP
-    ksn_backdrop_loader load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
-        pocket_proc_backdrop:NULL;
+    ksn_backdrop_loader load=override?override:
+        (pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?pocket_proc_backdrop:NULL);
     ksn_result result=ksn_runtime_present_complete(display,load,false,completion,stats);
 #else
     ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?

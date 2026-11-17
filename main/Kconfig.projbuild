@@ -236,6 +236,16 @@ menu "Pocket VM (diagnostics)"
             Caller still owns pending/ready snapshots and display completion.
             Experimental: host validation is not DMA, target RAM or FPS proof.
 
+    config AYATSURI_STREAM_DISPLAY_CANDIDATE
+        bool "Compile explicit native streaming display bridge"
+        default n
+        select AYATSURI_STREAM_CANDIDATE
+        help
+            Adds an explicitly called native diagnostic presenter using the
+            existing pocket/Kasane render and completion/ACK path. Requires
+            DMA overlap completion support. No boot hook, model, real material,
+            persistent actor registration or automatic display call is added.
+
     config AYATSURI_STREAM_DEVICE_PROBE
         bool "Run synthetic streaming CPU diagnostic once at UI boot"
         default n

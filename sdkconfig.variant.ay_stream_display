@@ -1,0 +1,2 @@
+# Compile-only bridge; no automatic invocation, model or asset deployment.
+CONFIG_AYATSURI_STREAM_DISPLAY_CANDIDATE=y

@@ -643,3 +643,13 @@ if(CONFIG_AYATSURI_STREAM_DEVICE_PROBE)
     set_property(SOURCE "ayatsuri/ayatsuri_stream_probe_core.c" "ayatsuri/ayatsuri_stream_device_probe.c"
         APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage")
 endif()
+
+if(CONFIG_AYATSURI_STREAM_DISPLAY_CANDIDATE)
+    if(NOT KASANE_DMA_OVERLAP)
+        message(FATAL_ERROR "Streaming display candidate requires KASANE_DMA_OVERLAP")
+    endif()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE AYATSURI_STREAM_DISPLAY_CANDIDATE=1)
+    target_sources(${COMPONENT_LIB} PRIVATE "pocket/pocket_stream_candidate.c")
+    set_property(SOURCE "pocket/pocket_stream_candidate.c" APPEND PROPERTY
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage")
+endif()
