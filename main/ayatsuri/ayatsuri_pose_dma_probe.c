@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -45,20 +46,28 @@ static struct {
 #ifndef CONFIG_AYATSURI_LIVE_DMA_PROBE
     float depth[WIDTH];
     float scratch[AY_POSE_DMA_FIXTURE_SCRATCH_COUNT];
-    hone_graph_bounds bounds[576];
-    uint16_t band_entries[1024];
 #endif
 } storage;
+
+#ifndef CONFIG_AYATSURI_LIVE_DMA_PROBE
+typedef struct {
+    hone_graph_band_payload payload;
+    hone_graph_band_work work;
+    hone_graph_band_index index;
+    hone_flat_plan flat;
+    hone_graph_bounds bounds[576];
+    uint16_t band_entries[1024];
+} baked_pose;
+
+static baked_pose *baked_poses[POSE_COUNT];
+#endif
 
 typedef struct {
     unsigned packets;
     uint32_t geometry_us;
     bool fast;
 #ifndef CONFIG_AYATSURI_LIVE_DMA_PROBE
-    hone_graph_band_payload payload;
-    hone_graph_band_work work;
-    hone_graph_band_index index;
-    hone_flat_plan flat;
+    baked_pose *baked;
 #endif
 } pose_frame;
 
@@ -107,10 +116,20 @@ static bool finish_pose(bool drained)
     return drained;
 }
 
-static bool prepare_pose(unsigned pose, pose_frame *frame)
+bool ayatsuri_pose_dma_probe_close_after_drain(void)
+{
+    for (unsigned pose = 0; pose < POSE_COUNT; ++pose) {
+        free(baked_poses[pose]);
+        baked_poses[pose] = NULL;
+    }
+    probe.generation = 0;
+    return true;
+}
+
+static bool init_baked_pose(unsigned pose, baked_pose *baked)
 {
     uint32_t generation = pose + 1;
-    frame->work = (hone_graph_band_work){
+    baked->work = (hone_graph_band_work){
         .binding = &storage,
         .generation = generation,
         .row = storage.row,
@@ -118,24 +137,42 @@ static bool prepare_pose(unsigned pose, pose_frame *frame)
         .scratch = storage.scratch,
         .scratch_count = AY_POSE_DMA_FIXTURE_SCRATCH_COUNT,
     };
-    // Every pose uses the same const packets on every replay. The index borrows
-    // this exact payload descriptor for one pose and owns no packet data.
-    if (!ay_pose_dma_fixture(pose, &storage, generation, &frame->payload) ||
-        !hone_graph_index_build(&frame->index, &frame->payload.graph, generation,
-                                storage.bounds, sizeof storage.bounds / sizeof storage.bounds[0],
-                                storage.band_entries, sizeof storage.band_entries / sizeof storage.band_entries[0]) ||
-        !hone_graph_index_band_valid(&opaque, &frame->payload, &frame->index, generation, &frame->work,
+    if (!ay_pose_dma_fixture(pose, &storage, generation, &baked->payload) ||
+        !hone_graph_index_build(&baked->index, &baked->payload.graph, generation,
+                                baked->bounds, sizeof baked->bounds / sizeof baked->bounds[0],
+                                baked->band_entries, sizeof baked->band_entries / sizeof baked->band_entries[0]) ||
+        !hone_graph_index_band_valid(&opaque, &baked->payload, &baked->index, generation, &baked->work,
                                      storage.band, WIDTH * BAND_ROWS)) return false;
-    frame->flat = hone_flat_prepare(&frame->payload, &frame->index, generation);
-    frame->packets = (unsigned)frame->payload.graph.count;
-    frame->fast = hone_flat_available(&opaque, &frame->flat);
+    baked->flat = hone_flat_prepare(&baked->payload, &baked->index, generation);
+    return true;
+}
+
+static bool prepare_pose(unsigned pose, pose_frame *frame)
+{
+    if (pose >= POSE_COUNT) return false;
+    baked_pose *baked = baked_poses[pose];
+    if (!baked) {
+        // Fix the descriptor's address before indexing. All packet data and all
+        // mutable buffer identities stay unchanged until app_stop drains LCD.
+        baked = calloc(1, sizeof *baked);
+        if (!baked) return false;
+        if (!init_baked_pose(pose, baked)) {
+            free(baked);
+            return false;
+        }
+        baked_poses[pose] = baked;
+    }
+    frame->baked = baked;
+    frame->packets = (unsigned)baked->payload.graph.count;
+    frame->fast = hone_flat_available(&opaque, &baked->flat);
     return true;
 }
 
 static bool render_pose_row(pose_frame *frame, unsigned y)
 {
-    if (frame->fast) return hone_flat_row(&frame->payload, &frame->flat, &frame->work, y);
-    return hone_graph_block_row(&opaque, &frame->payload, &frame->index, &frame->work, y);
+    baked_pose *baked = frame->baked;
+    if (frame->fast) return hone_flat_row(&baked->payload, &baked->flat, &baked->work, y);
+    return hone_graph_block_row(&opaque, &baked->payload, &baked->index, &baked->work, y);
 }
 #endif
 
@@ -193,11 +230,10 @@ static bool present_pose(int pose, const char *label, bool measure)
         if (!ok) break;
 
         paint_begin(storage.band, (int)y, (int)rows);
-        paint_fill(0, 0, WIDTH, 12, 0x0841);
+        paint_fill(0, 0, WIDTH, 30, 0x0841);
         paint_ascii(6, 3, MODEL_LABEL, 0xffff);
-        paint_fill(0, 113, WIDTH, HEIGHT - 113, 0x0841);
-        paint_ascii(6, 115, label, 0xffff);
-        paint_ascii(6, 125, "ENTER: RUN AGAIN   BACK: EXIT", 0x9d9f);
+        paint_ascii(6, 13, label, 0xffff);
+        paint_ascii(6, 22, "ENTER: RUN AGAIN   BACK: EXIT", 0x9d9f);
         const int64_t rendered = esp_timer_get_time();
         if (measure) probe.raster_us += rendered - started;
 
