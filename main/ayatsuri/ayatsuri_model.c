@@ -226,6 +226,7 @@ typedef struct {
     size_t route_cursor;
     ayatsuri_stream_position_provider positions;bool unlit;
 } model_stream_request;
+static bool stream_dispatch(void*,unsigned,unsigned,ayatsuri_skin_result*);
 static __attribute__((noinline)) bool model_stream_notify(model_stream_request*r,
     const ayatsuri_model*m,unsigned id,bool enabled,const ayatsuri_skin_result*geometry,
     const ksn_proc_gouraud_patch*p,const float*depth){
@@ -713,6 +714,9 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
             bool validate_normals=true;
 #ifdef AYATSURI_MODEL_STREAM_INTERNAL
             validate_normals=!((model_stream_request*)context)->unlit;
+            /* This adapter validates every position before copying any of them
+             * to slot. There is no callback between that copy and mesh_packet. */
+            if(validate_normals||provider!=stream_dispatch)
 #endif
             for(unsigned v=0;v<nv;v++){
                 double length=0;
