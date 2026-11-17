@@ -104,6 +104,8 @@ def main():
     parser.add_argument('--build-dir', type=Path, required=True)
     parser.add_argument('--opt', choices=['0', '2'], default='2')
     parser.add_argument('--sanitize', action='store_true')
+    parser.add_argument('--normals', choices=['exact', 'wedge'], default='exact',
+                        help='independent normal candidate; does not change runtime admission')
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     root = here.parents[2]
@@ -119,7 +121,10 @@ def main():
  return true;'''
     if source.count(anchor) != 1 or source.count(old) != 1:
         raise RuntimeError('provider fixture changed: review adapter anchors')
-    source = source.replace(anchor, '\n'+ADAPTER+anchor).replace(
+    adapter = ADAPTER
+    if args.normals == 'wedge':
+        adapter = adapter.replace('native_polygon_normals.c', 'native_wedge_lut_candidate.c')
+    source = source.replace(anchor, '\n'+adapter+anchor).replace(
         old, ' return hone_provide_geometry(p->frame,node,count,-(int)node==p->fail_node,slot);')
     # These inherited negative tests deliberately pass incompatible addresses
     # for pre-entry rejection, never dereference them as a skin-result array.

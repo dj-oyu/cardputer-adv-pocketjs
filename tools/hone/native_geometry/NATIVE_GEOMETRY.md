@@ -181,6 +181,11 @@ The total array is limited to 256 model nodes, including holes. The caller must
 derive and verify the actual scene node IDs and transforms: this tool does not
 construct the scene or claim runtime admission.
 
+`scene_preflight.py` reports geometry partitions and remaining slots before
+non-geometry nodes, along with source topology, weights and modifier counts.
+Missing normal or modifier inventory rejects. Its report is not a full scene
+budget or a modifier, material, animation or runtime admission decision.
+
 Host GCC/x86-64 `-fstack-usage` comparison with the same external callback wrapper:
 before, O2 provider 1,664 bytes plus wrapper 8; after, the inlined wrapper is
 384 bytes. O0 provider + validation/gather frames changed from 864 + 896 to
