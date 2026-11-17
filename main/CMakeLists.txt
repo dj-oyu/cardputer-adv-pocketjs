@@ -656,3 +656,17 @@ if(CONFIG_AYATSURI_STREAM_DISPLAY_CANDIDATE)
     set_property(SOURCE "pocket/pocket_stream_candidate.c" APPEND PROPERTY
         COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage")
 endif()
+
+if(CONFIG_AYATSURI_POSE_DMA_PROBE)
+    if(NOT KASANE_DMA_OVERLAP OR CONFIG_AYATSURI_STREAM_DEVICE_PROBE)
+        message(FATAL_ERROR "Pose DMA probe requires DMA overlap and exclusive boot measurement")
+    endif()
+    set(pose_dma_fixture "${CMAKE_CURRENT_LIST_DIR}/ayatsuri/private/assets/ay_pose_dma_fixture.h")
+    if(NOT EXISTS "${pose_dma_fixture}")
+        message(FATAL_ERROR "Pose DMA probe requires its authorized private fixture")
+    endif()
+    target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_pose_dma_probe.c")
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_SOURCE_DIR}/tools/hone/native_geometry")
+    set_property(SOURCE "ayatsuri/ayatsuri_pose_dma_probe.c" APPEND PROPERTY
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage;-fno-diagnostics-show-caret;-Wno-misleading-indentation")
+endif()

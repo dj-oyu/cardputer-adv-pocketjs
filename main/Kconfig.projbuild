@@ -255,6 +255,15 @@ menu "Pocket VM (diagnostics)"
             uses the existing eight-row raster path, with unchanged pixel math.
             No model, real materials or LCD/DMA measurement is added.
 
+    config AYATSURI_POSE_DMA_PROBE
+        bool "Measure six baked model poses through the physical LCD"
+        default n
+        help
+            Requires the authorized generated fixture at
+            main/ayatsuri/private/assets/ay_pose_dma_fixture.h.
+            Measures unlit rasterization and completed LCD DMA transfers of
+            baked poses. Live deformation and lighting are excluded.
+
     config AYATSURI_STREAM_DEVICE_PROBE
         bool "Run synthetic streaming CPU diagnostic once at UI boot"
         default n

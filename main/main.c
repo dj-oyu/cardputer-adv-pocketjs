@@ -43,6 +43,7 @@
 #include "esp_app_desc.h"
 #ifdef CONFIG_AYATSURI_STREAM_DEVICE_PROBE
 #include "ayatsuri/ayatsuri_stream_device_probe.h"
+#include "ayatsuri/ayatsuri_pose_dma_probe.h"
 #endif
 #include "esp_random.h"
 #include "pocket_text.h"
@@ -1186,6 +1187,9 @@ static void ui_task(void *arg) {
 #endif
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    ayatsuri_pose_dma_probe_run();
+#endif
 #ifdef KASANE_P0_PROBE
     int64_t previous_overlay_frame_started=0;
 #endif
