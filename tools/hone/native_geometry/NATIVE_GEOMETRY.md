@@ -239,6 +239,10 @@ caller-supplied full opaque-depth image, with whole-frame preflight and bounded
 four-fragment sorting. Its RGB remains unlit, and it is a host-only diagnostic:
 source clipping, shared row-depth ownership, lighting, DMA, publication and
 target memory/time have not been integrated.
+`alpha_graph_clip_candidate.h` clips an orthographic screen-space triangle to
+an explicit rectangle while interpolating depth and deformed object-local XYZ.
+It is a host-only candidate, not a camera/near-plane clipper or a packet-builder
+connected to the renderer; callers own disjoint output and immutable inputs.
 
 `shrinkwrap_route_plan.py` records nearest-surface dependencies and rejects
 cycles and unsupported modes. `native_wrap_candidate.c` transforms current
