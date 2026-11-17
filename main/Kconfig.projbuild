@@ -264,6 +264,15 @@ menu "Pocket VM (diagnostics)"
             Measures unlit rasterization and completed LCD DMA transfers of
             baked poses. Live deformation and lighting are excluded.
 
+    config AYATSURI_LIVE_DMA_PROBE
+        bool "Evaluate model deformation live in the Pet Companion benchmark"
+        default n
+        select AYATSURI_POSE_DMA_PROBE
+        select AYATSURI_STREAM_CANDIDATE
+        help
+            Uses the authorized restored-model runtime fixture. Timed frames
+            evaluate controls and geometry before drawing and LCD completion.
+
     config AYATSURI_STREAM_DEVICE_PROBE
         bool "Run synthetic streaming CPU diagnostic once at UI boot"
         default n

@@ -665,9 +665,30 @@ if(CONFIG_AYATSURI_POSE_DMA_PROBE)
     if(NOT KASANE_DMA_OVERLAP OR CONFIG_AYATSURI_STREAM_DEVICE_PROBE)
         message(FATAL_ERROR "Pet Companion benchmark requires DMA overlap and excludes the synthetic boot probe")
     endif()
-    set(pose_dma_fixture "${CMAKE_CURRENT_LIST_DIR}/ayatsuri/private/assets/ay_pose_dma_fixture.h")
-    if(NOT EXISTS "${pose_dma_fixture}")
-        message(FATAL_ERROR "Pose DMA probe requires its authorized private fixture")
+    if(CONFIG_AYATSURI_LIVE_DMA_PROBE)
+        set(live_asset_dir "${CMAKE_CURRENT_LIST_DIR}/ayatsuri/private/assets/live")
+        if(NOT EXISTS "${live_asset_dir}/ay_live_model_fixture.c" OR
+           NOT EXISTS "${live_asset_dir}/rig_wrapper.c" OR
+           NOT EXISTS "${live_asset_dir}/wrap.c" OR
+           NOT EXISTS "${live_asset_dir}/hone_live_model.aynm")
+            message(FATAL_ERROR "Live DMA probe requires its authorized model fixture")
+        endif()
+        set(live_sources
+            "${live_asset_dir}/ay_live_model_fixture.c"
+            "${live_asset_dir}/rig_wrapper.c"
+            "${live_asset_dir}/wrap.c"
+            "${CMAKE_SOURCE_DIR}/tools/hone/source_package/native_wedge_lut_candidate.c")
+        target_sources(${COMPONENT_LIB} PRIVATE ${live_sources})
+        target_include_directories(${COMPONENT_LIB} PRIVATE
+            "${CMAKE_SOURCE_DIR}/tools/hone/source_package")
+        target_add_binary_data(${COMPONENT_LIB} "ayatsuri/private/assets/live/hone_live_model.aynm" BINARY)
+        set_property(SOURCE ${live_sources} APPEND PROPERTY
+            COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage;-fno-diagnostics-show-caret;-Wno-misleading-indentation")
+    else()
+        set(pose_dma_fixture "${CMAKE_CURRENT_LIST_DIR}/ayatsuri/private/assets/ay_pose_dma_fixture.h")
+        if(NOT EXISTS "${pose_dma_fixture}")
+            message(FATAL_ERROR "Pose DMA probe requires its authorized private fixture")
+        endif()
     endif()
     target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_pose_dma_probe.c")
     target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_SOURCE_DIR}/tools/hone/native_geometry")
