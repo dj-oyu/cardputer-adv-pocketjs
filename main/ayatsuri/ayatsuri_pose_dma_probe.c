@@ -11,7 +11,7 @@
 #include "freertos/task.h"
 #include "hal/board.h"
 #include "ui/paint.h"
-#include "../../tools/hone/native_geometry/graph_block_band_candidate.h"
+#include "../../tools/hone/native_geometry/graph_flat_band_candidate.h"
 #include "private/assets/ay_pose_dma_fixture.h"
 
 enum {
@@ -36,13 +36,14 @@ typedef enum { PREFLIGHT, BENCHMARK, DEMO, FAILED } probe_phase;
 static struct {
     uint32_t generation;
     probe_phase phase;
-    unsigned checked, completed, demo_pose;
+    unsigned checked, completed, flat_completed, demo_pose;
     int64_t started, last_demo, index_us, raster_us, submit_us, finish_us;
     char result[40];
 } probe;
 
 static bool prepare_pose(unsigned pose, hone_graph_band_payload *payload,
-                         hone_graph_band_work *work, hone_graph_band_index *index)
+                         hone_graph_band_work *work, hone_graph_band_index *index,
+                         hone_flat_plan *flat)
 {
     uint32_t generation = pose + 1;
     *work = (hone_graph_band_work){
@@ -55,12 +56,22 @@ static bool prepare_pose(unsigned pose, hone_graph_band_payload *payload,
     };
     // Every pose uses the same const packets on every replay. The index borrows
     // this exact payload descriptor for one pose and owns no packet data.
-    return ay_pose_dma_fixture(pose, &storage, generation, payload) &&
-           hone_graph_index_build(index, &payload->graph, generation,
-                                  storage.bounds, MAX_POSE_PACKETS,
-                                  storage.band_entries, MAX_POSE_BAND_ENTRIES) &&
-           hone_graph_index_band_valid(&opaque, payload, index, generation, work,
-                                      storage.band, WIDTH * BAND_ROWS);
+    if (!ay_pose_dma_fixture(pose, &storage, generation, payload) ||
+        !hone_graph_index_build(index, &payload->graph, generation,
+                                storage.bounds, MAX_POSE_PACKETS,
+                                storage.band_entries, MAX_POSE_BAND_ENTRIES) ||
+        !hone_graph_index_band_valid(&opaque, payload, index, generation, work,
+                                     storage.band, WIDTH * BAND_ROWS)) return false;
+    *flat = hone_flat_prepare(payload, index, generation);
+    return true;
+}
+
+static bool render_pose_row(const hone_graph_band_payload *payload,
+                            const hone_flat_plan *flat, hone_graph_band_work *work,
+                            unsigned y)
+{
+    if (hone_flat_available(&opaque, flat)) return hone_flat_row(payload, flat, work, y);
+    return hone_graph_block_row(&opaque, payload, flat->index, work, y);
 }
 
 static bool check_pose(unsigned pose)
@@ -68,12 +79,13 @@ static bool check_pose(unsigned pose)
     hone_graph_band_payload payload;
     hone_graph_band_work work;
     hone_graph_band_index index;
-    if (!prepare_pose(pose, &payload, &work, &index) || !payload.graph.count) return false;
+    hone_flat_plan flat;
+    if (!prepare_pose(pose, &payload, &work, &index, &flat) || !payload.graph.count) return false;
 
     unsigned visible_pixels = 0;
     uint32_t hash = UINT32_C(2166136261);
     for (unsigned y = 0; y < HEIGHT; ++y) {
-        if (!hone_graph_block_row(&opaque, &payload, &index, &work, y)) return false;
+        if (!render_pose_row(&payload, &flat, &work, y)) return false;
         for (unsigned x = 0; x < WIDTH; ++x) {
             const uint16_t pixel = storage.row[x];
             visible_pixels += pixel != 0;
@@ -81,8 +93,9 @@ static bool check_pose(unsigned pose)
         }
         if ((y + 1) % BAND_ROWS == 0) vTaskDelay(1);
     }
-    ESP_LOGI(tag, "POSE pose=%u packets=%u visible_pixels=%u rgb565_hash=%08" PRIx32,
-             pose, (unsigned)payload.graph.count, visible_pixels, hash);
+    ESP_LOGI(tag, "POSE pose=%u packets=%u visible_pixels=%u rgb565_hash=%08" PRIx32 " flat=%u",
+             pose, (unsigned)payload.graph.count, visible_pixels, hash,
+             (unsigned)hone_flat_available(&opaque, &flat));
     return visible_pixels != 0;
 }
 
@@ -91,8 +104,9 @@ static bool present_pose(int pose, const char *label, bool measure)
     hone_graph_band_payload payload;
     hone_graph_band_work work;
     hone_graph_band_index index;
+    hone_flat_plan flat;
     const int64_t prepared = esp_timer_get_time();
-    if (pose >= 0 && !prepare_pose((unsigned)pose, &payload, &work, &index)) return false;
+    if (pose >= 0 && !prepare_pose((unsigned)pose, &payload, &work, &index, &flat)) return false;
     if (measure) probe.index_us += esp_timer_get_time() - prepared;
 
     bool ok = true;
@@ -103,7 +117,7 @@ static bool present_pose(int pose, const char *label, bool measure)
             memset(storage.band, 0, rows * sizeof storage.row);
         } else {
             for (unsigned row = 0; row < rows; ++row) {
-                if (!hone_graph_block_row(&opaque, &payload, &index, &work, y + row)) {
+                if (!render_pose_row(&payload, &flat, &work, y + row)) {
                     ok = false;
                     break;
                 }
@@ -133,6 +147,9 @@ static bool present_pose(int pose, const char *label, bool measure)
     const esp_err_t drained = board_present_finish();
     if (measure) probe.finish_us += esp_timer_get_time() - started;
     board_present_frame_end();
+    if (measure && ok && drained == ESP_OK && pose >= 0 && hone_flat_available(&opaque, &flat)) {
+        ++probe.flat_completed;
+    }
     return ok && drained == ESP_OK;
 }
 
@@ -141,7 +158,7 @@ static void begin_benchmark(uint32_t generation)
     memset(&probe, 0, sizeof probe);
     probe.generation = generation;
     const esp_app_desc_t *app = esp_app_get_description();
-    ESP_LOGI(tag, "BEGIN model_sha256=%s baked_poses=%u renderer=block16 live_deformation=false lighting=false "
+    ESP_LOGI(tag, "BEGIN model_sha256=%s baked_poses=%u renderer=flat_or_block16 live_deformation=false lighting=false "
              "elf_sha_prefix=%02x%02x%02x%02x%02x%02x%02x%02x",
              AY_POSE_DMA_FIXTURE_MODEL_SHA256, (unsigned)AY_POSE_DMA_FIXTURE_COUNT,
              app->app_elf_sha256[0], app->app_elf_sha256[1], app->app_elf_sha256[2],
@@ -159,9 +176,9 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
     else snprintf(probe.result, sizeof probe.result, "BENCHMARK FAILED  %u FRAMES", probe.completed);
     ESP_LOGI(tag, "RESULT status=%s dma_completed_frames=%u elapsed_us=%" PRId64
              " baked_pose_fps=%.3f index_us=%" PRId64 " raster_us=%" PRId64 " submit_us=%" PRId64
-             " final_drain_us=%" PRId64 " stack_hwm=%u free_internal=%u",
+             " final_drain_us=%" PRId64 " flat_frames=%u stack_hwm=%u free_internal=%u",
              ok ? "PASS" : "FAIL", probe.completed, elapsed_us, fps,
-             probe.index_us, probe.raster_us, probe.submit_us, probe.finish_us,
+             probe.index_us, probe.raster_us, probe.submit_us, probe.finish_us, probe.flat_completed,
              (unsigned)uxTaskGetStackHighWaterMark(NULL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
