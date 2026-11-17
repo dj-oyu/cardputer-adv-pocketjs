@@ -217,7 +217,35 @@ ayatsuri_model_status ayatsuri_model_find_node(const ayatsuri_model *m,const cha
 #ifdef AYATSURI_MODEL_STREAM_INTERNAL
 /* Used only by the separately compiled, explicitly opt-in streaming TU. */
 #include "../ui/kasane/ksn_mesh_depth.h"
-typedef struct {ayatsuri_model_geometry_provider provider;void *user;ksn_mesh_snapshot *pending;} model_stream_request;
+typedef struct {
+    ayatsuri_model_geometry_provider provider;void *user;ksn_mesh_snapshot *pending;
+    const ayatsuri_stream_routes *routes;ayatsuri_stream_attributed_sink sink;void *sink_context;
+    size_t route_cursor;
+} model_stream_request;
+static __attribute__((noinline)) bool model_stream_notify(model_stream_request*r,
+    const ayatsuri_model*m,unsigned id,bool enabled,const ayatsuri_skin_result*geometry,
+    const ksn_proc_gouraud_patch*p,const float*depth){
+    const ayatsuri_stream_route*route=&r->routes->routes[r->route_cursor++];
+    const uint8_t*d=row(m,9,route->mesh_id,32);unsigned nt=m16(d+6);
+    uint16_t source[64];bool used[64]={0};
+    /* Selection preserves each authored triple and stable ordering for equal
+     * centroid keys. First-unused matching therefore preserves duplicate faces
+     * and their source IDs, rather than collapsing identical index triples. */
+    for(unsigned t=0;t<p->header.triangles;t++){
+        unsigned original=nt;
+        for(unsigned j=0;j<nt;j++)if(!used[j]){
+            const uint8_t*cold=row(m,11,m16(d+4)+j,6);
+            if(p->indices[3*t]==m16(cold)&&p->indices[3*t+1]==m16(cold+2)&&p->indices[3*t+2]==m16(cold+4)){original=j;break;}
+        }
+        if(original==nt)return false;
+        used[original]=true;source[t]=(uint16_t)original;
+    }
+    ayatsuri_stream_attributed_mesh view={
+        (uint16_t)id,route->mesh_id,route->material_id,route->lane,enabled,
+        p->header.vertices,enabled?p->header.triangles:0,nt,geometry,p->vertices,depth,
+        enabled?p->indices:NULL,enabled?source:NULL};
+    return r->sink(r->sink_context,&view);
+}
 static size_t model_stream_shared_offset(const ayatsuri_model*m){
     return ((sizeof(model_node_state)*m->node_count+7u)&~(size_t)7u)+88u*m->node_count;
 }
@@ -640,11 +668,17 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
             memcpy((uint8_t*)i->arena+shared,work(i,j),84);
             states(i)[j].offset=(uint32_t)shared;
             bool ok=mesh_packet(i,j,right,down,forward,geometry);
-            if(ok&&states(i)[j].world_enabled){
+            if(ok){
                 const ksn_proc_gouraud_patch *patch=(const void*)((const uint8_t*)work(i,j)+84);
                 const float *xy=(const void*)((const uint8_t*)patch+sizeof *patch);
                 model_stream_request *request=context;
-                if(patch->header.triangles)ok=ksn_mesh_append(request->pending,patch,xy+2*patch->header.vertices,j);
+                bool append=true;
+                if(request->sink){
+                    append=request->routes->routes[request->route_cursor].lane==AYATSURI_STREAM_OPAQUE;
+                    ok=model_stream_notify(request,i->model,j,states(i)[j].world_enabled,geometry,patch,xy+2*patch->header.vertices);
+                }
+                if(ok&&append&&states(i)[j].world_enabled&&patch->header.triangles)
+                    ok=ksn_mesh_append(request->pending,patch,xy+2*patch->header.vertices,j);
             }
             states(i)[j].offset=saved_offset;
             if(!ok)return leave(i,AYATSURI_MODEL_RANGE);

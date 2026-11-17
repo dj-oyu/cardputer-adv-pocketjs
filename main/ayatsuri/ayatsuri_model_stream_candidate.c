@@ -72,8 +72,9 @@ static bool stream_disjoint(const ayatsuri_stream_candidate*c,const void*p,size_
  !overlaps(p,bytes,c->core.model,sizeof *c->core.model)&&!overlaps(p,bytes,c->core.model->data,c->core.model->bytes);
 }
 static bool stream_dispatch(void*opaque,unsigned node,unsigned count,ayatsuri_skin_result*slot){model_stream_request*r=opaque;return r->provider(r->user,node,count,slot);}
-ayatsuri_model_status ayatsuri_stream_candidate_frame(ayatsuri_stream_candidate*c,const void*owner,uint32_t generation,
- const float camera[9],const float light[6],ayatsuri_model_geometry_provider provider,void*user,ayatsuri_skin_result slot[32],ksn_mesh_snapshot*pending){
+static ayatsuri_model_status stream_frame(ayatsuri_stream_candidate*c,const void*owner,uint32_t generation,
+ const float camera[9],const float light[6],ayatsuri_model_geometry_provider provider,void*user,ayatsuri_skin_result slot[32],ksn_mesh_snapshot*pending,
+ const ayatsuri_stream_routes*routes,ayatsuri_stream_attributed_sink sink,void*sink_context){
  if(!stream_valid(c)||!owner||c->core.owner!=owner||!generation||c->core.generation!=generation)return AYATSURI_MODEL_STATE;
  if(c->core.busy)return AYATSURI_MODEL_BUSY;
  if(!provider||!camera||!light||!slot||!pending||!pending->enabled||
@@ -84,7 +85,34 @@ ayatsuri_model_status ayatsuri_stream_candidate_frame(ayatsuri_stream_candidate*
  overlaps(pending,sizeof *pending,slot,32*sizeof *slot)||overlaps(pending,sizeof *pending,camera,9*sizeof *camera)||overlaps(pending,sizeof *pending,light,6*sizeof *light)||
  overlaps(pending->packets.data,pending->packets.capacity,slot,32*sizeof *slot)||
  overlaps(pending->packets.data,pending->packets.capacity,camera,9*sizeof *camera)||overlaps(pending->packets.data,pending->packets.capacity,light,6*sizeof *light))return AYATSURI_MODEL_INVALID;
- model_stream_request request={provider,user,pending};
+ if(routes||sink){
+  if(!routes||!sink||routes->model!=c->core.model||routes->count>AYATSURI_MODEL_MAX_NODES||
+     (routes->count&&!routes->routes))return AYATSURI_MODEL_INVALID;
+  const void*spans[]={routes,routes->routes};size_t sizes[]={sizeof *routes,routes->count*sizeof *routes->routes};
+  for(unsigned k=0;k<2;k++)if(sizes[k]&&(!stream_buffer_valid(spans[k],sizes[k])||!stream_disjoint(c,spans[k],sizes[k])||
+      overlaps(spans[k],sizes[k],pending,sizeof *pending)||overlaps(spans[k],sizes[k],pending->packets.data,pending->packets.capacity)||
+      overlaps(spans[k],sizes[k],slot,32*sizeof *slot)))return AYATSURI_MODEL_INVALID;
+  size_t at=0;
+  for(unsigned id=0;id<c->core.model->node_count;id++){
+   const uint8_t*node=row(c->core.model,1,id,16);if(node[2]!=3)continue;
+   if(at>=routes->count)return AYATSURI_MODEL_INVALID;
+   const ayatsuri_stream_route*r=&routes->routes[at++];
+   if(r->node_id!=id||r->mesh_id!=m16(node+4)||r->material_id!=m16(node+8)||
+      (r->lane!=AYATSURI_STREAM_OPAQUE&&r->lane!=AYATSURI_STREAM_MATERIAL))return AYATSURI_MODEL_INVALID;
+  }
+  if(at!=routes->count)return AYATSURI_MODEL_INVALID;
+ }
+ model_stream_request request={provider,user,pending,routes,sink,sink_context,0};
  pending->packets.size=pending->packets.packets=pending->work=0;
  return stream_internal_ayatsuri_model_candidate_evaluate_provider(&c->core,owner,generation,camera,light,stream_dispatch,&request,slot);
+}
+ayatsuri_model_status ayatsuri_stream_candidate_frame(ayatsuri_stream_candidate*c,const void*owner,uint32_t generation,
+ const float camera[9],const float light[6],ayatsuri_model_geometry_provider provider,void*user,ayatsuri_skin_result slot[32],ksn_mesh_snapshot*pending){
+ return stream_frame(c,owner,generation,camera,light,provider,user,slot,pending,NULL,NULL,NULL);
+}
+ayatsuri_model_status ayatsuri_stream_candidate_frame_attributed(ayatsuri_stream_candidate*c,const void*owner,uint32_t generation,
+ const float camera[9],const float light[6],ayatsuri_model_geometry_provider provider,void*user,ayatsuri_skin_result slot[32],ksn_mesh_snapshot*pending,
+ const ayatsuri_stream_routes*routes,ayatsuri_stream_attributed_sink sink,void*sink_context){
+ if(!routes||!sink)return AYATSURI_MODEL_INVALID;
+ return stream_frame(c,owner,generation,camera,light,provider,user,slot,pending,routes,sink,sink_context);
 }

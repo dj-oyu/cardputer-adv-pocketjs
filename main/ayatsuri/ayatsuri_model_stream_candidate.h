@@ -7,6 +7,30 @@
  * Model/blob are borrowed immutable until dispose. Instance must start zeroed.
  * Do not access core or pass it to ordinary APIs. No retained mesh view exists. */
 typedef struct {ayatsuri_model_instance core;uint32_t tag;} ayatsuri_stream_candidate;
+enum { AYATSURI_STREAM_OPAQUE=0, AYATSURI_STREAM_MATERIAL=1 };
+typedef struct {uint16_t node_id,mesh_id,material_id;uint8_t lane;} ayatsuri_stream_route;
+typedef struct {
+ const ayatsuri_model *model;
+ const ayatsuri_stream_route *routes;
+ size_t count;
+} ayatsuri_stream_routes;
+/* Synchronous borrows valid ONLY during this callback. Copy all needed values;
+ * never retain pointers, mutate inputs, reenter or invoke script. local is the
+ * current provider's deformed object-local XYZ/normal, not reconstructed from
+ * screen coordinates. projected and depth use the evaluator's exact arithmetic.
+ * source_triangle[t] names the authored cold-mesh triangle BEFORE visibility
+ * selection/depth ordering. Hidden meshes have triangle_count=0 and NULL indices.
+ * Material lane copies into caller-owned pending payload, never visible READY. */
+typedef struct {
+ uint16_t node_id,mesh_id,material_id;
+ uint8_t lane;bool enabled;
+ unsigned vertex_count,triangle_count,authored_triangle_count;
+ const ayatsuri_skin_result *local;
+ const ksn_proc_gouraud_vertex *projected;
+ const float *depth;
+ const uint16_t *indices,*source_triangle;
+} ayatsuri_stream_attributed_mesh;
+typedef bool (*ayatsuri_stream_attributed_sink)(void*,const ayatsuri_stream_attributed_mesh*);
 /* Open immutable group/mesh provider-only capability; out unchanged on failure. */
 ayatsuri_model_status ayatsuri_stream_candidate_open(const void*,size_t,ayatsuri_model*);
 size_t ayatsuri_stream_candidate_bytes(const ayatsuri_model *model);
@@ -23,4 +47,12 @@ ayatsuri_model_status ayatsuri_stream_candidate_dispose(ayatsuri_stream_candidat
 ayatsuri_model_status ayatsuri_stream_candidate_frame(ayatsuri_stream_candidate*,const void*,uint32_t,
  const float camera[9],const float light[6],ayatsuri_model_geometry_provider,void*,
  ayatsuri_skin_result slot[32],ksn_mesh_snapshot *pending);
+/* Explicit route-checked extension. Exact model identity and one ordered route
+ * for EVERY mesh are required. OPAQUE retains the usual append; MATERIAL skips
+ * that append to avoid duplicate opaque occlusion. Sink failure leaves private
+ * pending geometry/payload partial, never published. Programs/source-package
+ * hashes and per-polygon material provenance require separate admission. */
+ayatsuri_model_status ayatsuri_stream_candidate_frame_attributed(ayatsuri_stream_candidate*,const void*,uint32_t,
+ const float[9],const float[6],ayatsuri_model_geometry_provider,void*,ayatsuri_skin_result[32],
+ ksn_mesh_snapshot*,const ayatsuri_stream_routes*,ayatsuri_stream_attributed_sink,void*);
 #endif
