@@ -127,6 +127,14 @@ that representative once per source vertex, not once per duplicated corner.
 UINT32_MAX means an isolated source vertex without a prepared representative;
 it must never be dereferenced. A polygon referencing such a vertex rejects.
 
+`native_deform.h` composes the existing morph and DQ point candidates into a
+source-vertex pass using that representative. The caller supplies resolved
+same-frame values and vertex-major key masks, chooses skin only after modifier
+admission, and owns disjoint unpublished output scratch. Failure may leave
+scratch partially written. Isolated vertices are copied unchanged and must not
+be used in polygons or modifier dependencies. Drivers, shrinkwrap, modifier
+ordering and frame publication remain outside this candidate.
+
 Compute normals on the full original polygon mesh before gathering into 32-vertex
 parts. Recomputing normals independently per part would break smoothing at part
 boundaries. These fields preserve the necessary topology; they do not admit the
@@ -138,3 +146,46 @@ must only index buffers sized by `source_corner_count`, never the packed count.
 Both spans are bounded. Polygons with fewer than three vertices reject; polygons
 larger than quads remain source data and are not implicitly admitted by the
 triangle/quad-only normal candidate.
+
+`native_gather.h` is a separate candidate for gathering up to 32 prepared corners
+from one deformed source mesh and its full-mesh packed polygon normals. The
+generated `corner_polygon` maps prepared corners to faces; `source_polygon`
+continues to map triangles to faces. Sparse original loop IDs are resolved within
+their polygon, not used as packed normal offsets. Invalid indices or non-unit
+normals leave the entire output unchanged. Inputs must be disjoint and remain
+alive for the call. Generated descriptors and spans are trusted complete and
+immutable; this is not a binary parser. Compile without fast/finite-only math.
+Validation builds a local 32-entry source/normal index plan (256 bytes), then
+copies fields only after the whole plan succeeds. No vertex staging array is
+needed. The input data must remain immutable between validation and copying;
+the plan is internal scratch, never retained or reused across calls/frames.
+This does not perform deformation, admit the normal candidate,
+or register the provider; real-model equivalence and target costs remain open.
+
+`native_provider.h` connects an already prepared frame and explicit node-to-part
+map to the existing `ayatsuri_model_geometry_provider` signature. It checks node,
+mesh and vertex counts and supplies the slot only after a whole gather succeeds.
+The map is indexed by model node ID, including non-mesh IDs; the compact geometry
+list produced by `provider_binding.py` cannot be used directly as that map.
+It does not allocate, deform or commit a frame. The synthetic pipeline test calls
+the real provider type, but does not call the complete model evaluator or display
+path. The provider shares the validation pass and copies directly into the
+correctly typed slot, without casting between vertex structs. Its private index
+plan replaces both former 768-byte vertex staging arrays. A late invalid vertex,
+nonfinite position/normal or non-unit normal leaves the entire slot unchanged.
+
+`provider_node_map.py` emits private provider bindings from the partition plan
+and an explicit array indexed by actual model node ID. Null entries reserve
+non-geometry nodes; every geometry partition must be assigned exactly once.
+The total array is limited to 256 model nodes, including holes. The caller must
+derive and verify the actual scene node IDs and transforms: this tool does not
+construct the scene or claim runtime admission.
+
+Host GCC/x86-64 `-fstack-usage` comparison with the same external callback wrapper:
+before, O2 provider 1,664 bytes plus wrapper 8; after, the inlined wrapper is
+384 bytes. O0 provider + validation/gather frames changed from 864 + 896 to
+352 + 128 bytes (the wrapper remains 48). These are host compiler frame sizes,
+not ESP32 stack high-water or timing results; caller-owned slot storage and model
+evaluation frames are additional. Target stack headroom is not established.
+The pipeline test runs O0/O2 with strict aliasing, checks full 32-entry mappings,
+late failures and retry, and retains the full-mesh-normal-before-gather sequence.

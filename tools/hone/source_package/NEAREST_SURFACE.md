@@ -58,6 +58,15 @@ seam test, NOT the restored full character, firmware integration or target timin
 Full-character cold chunk identity, deformed corner normals, visibility/alpha and
 near clipping still need the scene adapter before runtime admission can open.
 
+`nearest_batch_offset_candidate.c` applies the ON_SURFACE offset to all queries
+after one validated batch search/refit. Inputs, targets and offset must already
+be in a common compatible coordinate space; this helper does not evaluate
+transforms, modifier ordering, masks or animation. Output is unpublished scratch
+and may be partially modified on failure. `test_nearest_batch_offset.c` compares
+the batch result with the single-point reference and checks failure/retry. Host
+agreement does not establish device runtime, stack use or frame time. Compile
+without fast-math or finite-math-only assumptions.
+
 ## Precision diagnosis and image evidence
 
 For query-to-surface gap d and nonzero offset h, direction normalization can

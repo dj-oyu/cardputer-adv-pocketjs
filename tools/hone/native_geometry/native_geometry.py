@@ -20,7 +20,7 @@ typedef struct { uint32_t first, count; } hone_input_range;
 typedef struct {
  uint32_t vertices, triangles, morphs, groups, relative_morph;
  const float *position, *normal;
- const uint32_t *index, *source_vertex, *source_corner, *source_polygon;
+ const uint32_t *index, *source_vertex, *source_corner, *source_polygon, *corner_polygon;
  const uint8_t *smooth;
  const hone_input_range *weight_ranges;
  const hone_input_weight *weights;
@@ -64,6 +64,15 @@ def emit(package):
         ints('index', [x for t in mesh['triangles'] for x in t])
         for dest, src in [('source_vertex','source_vertices'),('source_corner','source_corners'),('source_polygon','source_polygons'),('smooth','polygon_smooth')]:
             ints(dest, mesh[src], 'uint8_t' if dest == 'smooth' else 'uint32_t')
+        corner_polygon=[None]*count
+        for triangle, face in zip(mesh['triangles'],mesh['source_polygons']):
+            for corner in triangle:
+                if corner_polygon[corner] is not None and corner_polygon[corner]!=face:
+                    raise ValueError('prepared corner has multiple polygon owners')
+                corner_polygon[corner]=face
+        if any(face is None for face in corner_polygon):
+            raise ValueError('prepared corner without polygon owner')
+        ints('corner_polygon',corner_polygon)
         ranges=[]; weights=[]
         for row in mesh['weights']:
             ranges.append('{'+str(len(weights))+','+str(len(row))+'}')
@@ -99,7 +108,7 @@ def emit(package):
         ints('source_representative',reps);ints('polygon_offsets',offsets)
         ints('polygon_vertices',polygon_vertices);ints('polygon_corners',polygon_corners)
         ints('polygon_smooth',polygon_smooth,'uint8_t')
-        fields=['position','normal','index','source_vertex','source_corner','source_polygon','smooth','weight_ranges','weights','morph_positions','morph_relative']
+        fields=['position','normal','index','source_vertex','source_corner','source_polygon','corner_polygon','smooth','weight_ranges','weights','morph_positions','morph_relative']
         records.append('{'+','.join([str(count),str(len(mesh['triangles'])),str(len(keys)),str(len(original['vertex_groups'])),str(int(bool(mesh['shape_keys'] and mesh['shape_keys'].get('use_relative') is True)))]+[prefix+'_'+x for x in fields]+[str(len(original['vertices'])),str(len(original['polygons'])),str(len(polygon_vertices)),str(len(original['corner_normals']))]+[prefix+'_'+x for x in ['source_position','source_representative','polygon_offsets','polygon_vertices','polygon_corners','polygon_smooth']])+'}')
     array('hone_input_mesh','hone_input_meshes',records or ['{0}'])
     out.append(f'static const uint32_t hone_input_mesh_count = {len(records)};\n')

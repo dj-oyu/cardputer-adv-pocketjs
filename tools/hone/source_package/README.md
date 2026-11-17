@@ -8,6 +8,23 @@ Do NOT replace this contract with global smooth normals. Flat faces need indepen
 
 Not yet preserved: material node graphs and opacity evaluation, full modifier properties, animation actions/drivers/constraint definitions. These are explicit unresolved gates, not silently accepted defaults. Retain the original .blend as authoritative input. The JSON alone cannot reproduce the whole scene.
 
+`driver_inventory.py`, run separately in Blender, records driver expressions,
+variable bindings and currently resolved scalar target values for objects, shape
+keys, materials and their node trees. Embedded shader trees retain their material
+owner to avoid name collisions. The inventory is private and is not a complete
+material graph, constraint evaluator, control mapping or executable runtime
+package. Unresolved/non-scalar bindings are reported, not silently evaluated.
+`test_driver_inventory.py` checks object and material-node bindings synthetically.
+
+`material_inventory.py` separately records nodes, socket positions/defaults,
+links and selected math, blend and ramp parameters for scene mesh materials.
+It does not implement shader semantics or claim a complete node-property export;
+unsupported socket values are marked. The output is private and not runtime
+admission. `test_material_inventory.py` checks a synthetic linked math/ramp graph.
+It does not preserve nested group internals or identity, muted-node internal
+links, active-output selection, image/UV/attribute settings, multi-input link
+order, linked-library provenance, or the complete object/slot/polygon binding.
+
 Synthetic validation: mixed smooth/flat two-face fixture, morph coordinate roundtrip, reject missing morph vertex and invalid corner index. This contract does not imply same-head firmware build, runtime image equivalence or real-device FPS results.
 
 Private outputs (`*.private.json`, real input names/content, logs binding the source) must not be published. Only generic exporter, synthetic test and generalized contract may be considered for public code checkpoints after normal review.
