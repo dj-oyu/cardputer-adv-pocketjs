@@ -221,6 +221,7 @@ typedef struct {
     ayatsuri_model_geometry_provider provider;void *user;ksn_mesh_snapshot *pending;
     const ayatsuri_stream_routes *routes;ayatsuri_stream_attributed_sink sink;void *sink_context;
     size_t route_cursor;
+    ayatsuri_stream_position_provider positions;bool unlit;
 } model_stream_request;
 static __attribute__((noinline)) bool model_stream_notify(model_stream_request*r,
     const ayatsuri_model*m,unsigned id,bool enabled,const ayatsuri_skin_result*geometry,
@@ -534,7 +535,7 @@ static void mesh_select_sided(const float *xy,const float *depth,const uint16_t 
     out->header.triangles=(uint8_t)count;
 }
 /* Keep mesh-only scratch out of the nonmesh evaluator stack frame. */
-static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3],const ayatsuri_skin_result *geometry){
+static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3],const ayatsuri_skin_result *geometry,bool unlit){
     const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*d=row(model,9,m16(node+4),32),
         *material=row(model,5,m16(node+8),72);
     const unsigned nv=m16(d+2),nt=m16(d+6);const bool sided=mesh_double(model,node);float *m=work(i,id);
@@ -557,7 +558,7 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
     }
     for(unsigned r=0;r<12;r++)if(!isfinite(projection[r]))return false;
     for(unsigned r=0;r<8;r++)coeff[r]=mf(material+4*r);
-    ayatsuri_shade_basis shade;if(!ayatsuri_shade_prepare(i->lighting,&shade))return false;
+    ayatsuri_shade_basis shade={0};if(!unlit&&!ayatsuri_shade_prepare(i->lighting,&shade))return false;
     memset(p,0,sizeof *p);p->header.vertices=(uint8_t)nv;p->header.holes=d[10];
     for(unsigned v=0;v<nv;v++){
         const uint8_t *cold=row(model,10,m16(d)+v,28);ksn_proc_gouraud_vertex *out=p->vertices+v;
@@ -566,6 +567,11 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
             if(!mesh_project_xyz(projection,xyz[0],xyz[1],xyz[2],xy+2*v,xy+2*v+1,depth+v))return false;
         }else if(!mesh_project(projection,cold,xy+2*v,xy+2*v+1,depth+v))return false;
         out->x=xy[2*v];out->y=xy[2*v+1];out->mask=mf(cold+24);
+        if(unlit){
+            out->color_a=out->color_b=0;
+            if(sided){uint16_t *back=mesh_back_colors(i,id,nv)+2*v;back[0]=back[1]=0;}
+            continue;
+        }
         const float nx=geometry?geometry[v].normal[0]:mf(cold+12),
             ny=geometry?geometry[v].normal[1]:mf(cold+16),nz=geometry?geometry[v].normal[2]:mf(cold+20);
         const double x=normal[0]*nx+normal[1]*ny+normal[2]*nz,
@@ -648,14 +654,18 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
         if(provider&&node[2]==3){
             const uint8_t *d=row(i->model,9,m16(node+4),32);unsigned nv=m16(d+2);
             if(!provider(context,j,nv,slot))return leave(i,AYATSURI_MODEL_INVALID);
+            bool validate_normals=true;
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+            validate_normals=!((model_stream_request*)context)->unlit;
+#endif
             for(unsigned v=0;v<nv;v++){
                 double length=0;
                 for(unsigned r=0;r<3;r++){
-                    if(!isfinite(slot[v].position[r])||fabsf(slot[v].position[r])>4096||!isfinite(slot[v].normal[r]))
+                    if(!isfinite(slot[v].position[r])||fabsf(slot[v].position[r])>4096||(validate_normals&&!isfinite(slot[v].normal[r])))
                         return leave(i,AYATSURI_MODEL_INVALID);
-                    length+=(double)slot[v].normal[r]*slot[v].normal[r];
+                    if(validate_normals)length+=(double)slot[v].normal[r]*slot[v].normal[r];
                 }
-                if(fabs(length-1)>1e-4)return leave(i,AYATSURI_MODEL_INVALID);
+                if(validate_normals&&fabs(length-1)>1e-4)return leave(i,AYATSURI_MODEL_INVALID);
             }
             geometry=slot;
         }
@@ -667,7 +677,7 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
             const size_t shared=model_stream_shared_offset(i->model);
             memcpy((uint8_t*)i->arena+shared,work(i,j),84);
             states(i)[j].offset=(uint32_t)shared;
-            bool ok=mesh_packet(i,j,right,down,forward,geometry);
+            bool ok=mesh_packet(i,j,right,down,forward,geometry,((model_stream_request*)context)->unlit);
             if(ok){
                 const ksn_proc_gouraud_patch *patch=(const void*)((const uint8_t*)work(i,j)+84);
                 const float *xy=(const void*)((const uint8_t*)patch+sizeof *patch);
@@ -682,11 +692,12 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
             }
             states(i)[j].offset=saved_offset;
             if(!ok)return leave(i,AYATSURI_MODEL_RANGE);
-            add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);
+            add_count(&i->stats.projection_updates,1);
+            if(!((model_stream_request*)context)->unlit)add_count(&i->stats.shade_updates,1);
         }
 #else
         if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward))||
-           (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry)))
+           (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry,false)))
             return leave(i,AYATSURI_MODEL_RANGE);
         if(node[2]){add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);}
 #endif

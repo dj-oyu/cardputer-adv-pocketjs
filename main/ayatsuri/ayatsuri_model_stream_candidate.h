@@ -55,4 +55,16 @@ ayatsuri_model_status ayatsuri_stream_candidate_frame(ayatsuri_stream_candidate*
 ayatsuri_model_status ayatsuri_stream_candidate_frame_attributed(ayatsuri_stream_candidate*,const void*,uint32_t,
  const float[9],const float[6],ayatsuri_model_geometry_provider,void*,ayatsuri_skin_result[32],
  ksn_mesh_snapshot*,const ayatsuri_stream_routes*,ayatsuri_stream_attributed_sink,void*);
+/* Explicit unlit material-only capability. Caller must admit exact constant
+ * opaque programs before publication. No lighting/normal validation is promised.
+ * Existing APIs remain strict. Sink local.normal contains NaN sentinels and must
+ * never be consumed; projected colors are zero. XYZ, topology and visibility
+ * retain their ordinary meaning. All mesh routes must be MATERIAL, even hidden.
+ * Typed provider writes object-local positions only; synchronous borrow rules
+ * and pending rollback/ownership requirements above remain unchanged. */
+typedef struct {float position[3];} ayatsuri_stream_position;
+typedef bool (*ayatsuri_stream_position_provider)(void*,unsigned,unsigned,ayatsuri_stream_position*);
+ayatsuri_model_status ayatsuri_stream_candidate_frame_attributed_unlit(ayatsuri_stream_candidate*,const void*,uint32_t,
+ const float[9],const float[6],ayatsuri_stream_position_provider,void*,ayatsuri_skin_result[32],
+ ksn_mesh_snapshot*,const ayatsuri_stream_routes*,ayatsuri_stream_attributed_sink,void*);
 #endif
