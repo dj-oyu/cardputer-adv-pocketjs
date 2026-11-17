@@ -1,5 +1,6 @@
 import copy,unittest
 from shrinkwrap_route_plan import plan
+from emit_wrap_targets import emit
 
 
 def modifier(target):
@@ -21,6 +22,10 @@ class TestShrinkwrapRoutes(unittest.TestCase):
         p,h=self.fixture();result=plan(p,h)
         self.assertFalse(result['runtime_ready'])
         self.assertEqual([(x['source_mesh'],x['target_mesh']) for x in result['routes']],[(1,2),(0,1)])
+        header,summary=emit(result);self.assertEqual(summary['wrap_routes'],2)
+        self.assertIn('hone_wrap_route_count = 2',header)
+        result['routes'].reverse()
+        with self.assertRaises(ValueError):emit(result)
     def test_reject_cycle_mask_and_mismatch(self):
         p,h=self.fixture();bad=copy.deepcopy(p);bad['meshes'][1]['modifiers'][0]['shrinkwrap']['target']='0'
         with self.assertRaises(ValueError):plan(bad,h)

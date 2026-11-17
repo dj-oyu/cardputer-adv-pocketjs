@@ -15,4 +15,9 @@ assert m['operation']=='MULTIPLY' and m['inputs'][1]['default']['value']==.25
 assert abs(r['color_ramp']['elements'][0]['position']-.1)<1e-6
 links=[l for l in records[0]['links'] if l['source_node']==math.name and l['target_node']==ramp.name]
 assert len(links)==1 and links[0]['source_socket']==0 and links[0]['target_socket']==0
+assert m['mute'] is False and m['inputs'][0]['is_multi_input'] is False
+assert len([n for n in nodes.values() if n['type']=='ShaderNodeOutputMaterial' and n['active_output'] is True])==1
+assert records[0]['uses']==[dict(object='object',mesh='mesh',slot=0,slot_link='DATA',polygons=[0])]
+math.mute=True;bpy.context.view_layer.update();muted={n['name']:n for n in mod.inventory()[0]['nodes']}[math.name]
+assert muted['mute'] is True and isinstance(muted['internal_links'],list)
 print('PASS material node, duplicate socket index, link and ramp inventory')

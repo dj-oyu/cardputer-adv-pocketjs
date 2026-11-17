@@ -8,7 +8,7 @@ here=pathlib.Path(__file__).resolve().parent;root=here.parents[2];out=a.out.reso
 cmd=[sys.executable,str(here/'test_provider_streaming.py'),'--out',str(out/'synthetic')]
 if a.sanitize:cmd+=['--sanitize']
 subprocess.run(cmd,check=True)
-for name in ['geometry.h','provider_nodes.h','driver_nodes.h','driver_programs.h','scene_pose.h','morph_targets.h']:
+for name in ['geometry.h','provider_nodes.h','driver_nodes.h','driver_programs.h','scene_pose.h','morph_targets.h','rig_targets.h','wrap_targets.h']:
     source=a.headers/name
     if source.exists():shutil.copyfile(source,out/name)
 s=(root/'tools/hone/native_geometry/scene_provider_probe.c').read_text()
@@ -69,13 +69,24 @@ replace(' free(work);free(meshes);free(arena);free(blob);return 0;', ''' free(wo
  assert(stream_ayatsuri_model_instance_dispose(&streamed,&owner,1)==AYATSURI_MODEL_OK);free(stream_arena);free(blob);
  /* Both model arenas AND deformed source/normal buffers are gone. */
  stream_render(&stream_ready,pixels);assert(!memcmp(pixels,reference_pixels,sizeof pixels));
+#ifdef HONE_PROBE_WRAP
+ printf("PASS private streaming frames=%u mesh_calls_per_frame=%zu arena=%zu->%zu snapshot_max=%zu rollback=%u packet_raster_bitwise=true ready_outlives_source=true materials=placeholder rig=sampled_transform wrap=applied runtime_ready=false\\n",stream_frames,expected_calls,arena_bytes,stream_bytes,maximum_snapshot,stream_failures);
+#elif defined(HONE_PROBE_RIG_DRIVER)
+ printf("PASS private streaming frames=%u mesh_calls_per_frame=%zu arena=%zu->%zu snapshot_max=%zu rollback=%u packet_raster_bitwise=true ready_outlives_source=true materials=placeholder rig=sampled_transform shrinkwrap=unapplied runtime_ready=false\\n",stream_frames,expected_calls,arena_bytes,stream_bytes,maximum_snapshot,stream_failures);
+#else
  printf("PASS private streaming frames=%u mesh_calls_per_frame=%zu arena=%zu->%zu snapshot_max=%zu rollback=%u packet_raster_bitwise=true ready_outlives_source=true materials=placeholder rig_shrinkwrap=unapplied runtime_ready=false\\n",stream_frames,expected_calls,arena_bytes,stream_bytes,maximum_snapshot,stream_failures);
+#endif
  free(stream_ready.packets.data);free(stream_pending.packets.data);free(stream_oracle.packets.data);return 0;''')
 (out/'scene_stream.c').write_text(s)
 sources=['main/ayatsuri/ayatsuri_model.c','main/ayatsuri/ayatsuri_visibility.c','main/ayatsuri/compact_opaque.c','main/ui/kasane/ksn_shiki_frame.c','main/ui/kasane/ksn_mesh_depth.c','tools/hone/source_package/native_wedge_lut_candidate.c','tools/hone/source_package/rigid_dq_candidate.c']
+if (out/'wrap_targets.h').exists():
+    if not (out/'rig_targets.h').exists():raise ValueError('wrap probe requires rig')
+    sources.append('tools/hone/native_geometry/native_wrap_candidate.c')
 binary=out/('scene-stream.exe' if os.name=='nt' else 'scene-stream')
 cmd=[os.environ.get('CC','cc'),'-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-ffp-contract=off','-fno-fast-math','-DAYATSURI_MODEL_EXPERIMENTAL_PROVIDER','-I'+str(out),'-I'+str(root/'tools/hone/native_geometry'),'-I'+str(root/'tools/hone/source_package'),'-I'+str(root/'main'),'-I'+str(root/'main/ayatsuri'),'-I'+str(root/'tools/hostshim'),*[str(root/s) for s in sources],str(out/'synthetic/stream_model.c'),str(out/'scene_stream.c'),'-lm','-o',str(binary)]
 if (out/'driver_nodes.h').exists():cmd.insert(1,'-DHONE_PROBE_NODE_DRIVER')
 if (out/'morph_targets.h').exists():cmd.insert(1,'-DHONE_PROBE_MORPH_DRIVER')
+if (out/'rig_targets.h').exists():cmd.insert(1,'-DHONE_PROBE_RIG_DRIVER')
+if (out/'wrap_targets.h').exists():cmd.insert(1,'-DHONE_PROBE_WRAP')
 if a.sanitize:cmd[1:1]=['-fsanitize=address,undefined','-fno-omit-frame-pointer']
 subprocess.run(cmd,check=True);subprocess.run([str(binary),str(a.blob.resolve())],check=True)

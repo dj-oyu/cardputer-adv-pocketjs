@@ -1,8 +1,34 @@
 /* Host candidate for an admitted nearest-surface ON_SURFACE wrap. This does
  * not establish modifier order, rig state, frame publication, or target speed. */
 #include "../source_package/nearest_batch_offset_candidate.c"
+#include "native_wrap_candidate.h"
 #include <float.h>
 #include <stdint.h>
+#include <string.h>
+
+size_t hone_native_wrap_box_bytes(size_t triangle_count){
+ if(!triangle_count||triangle_count>SIZE_MAX-7)return 0;
+ size_t n=(triangle_count+7)/8;return n>SIZE_MAX/sizeof(nearest_box)?0:n*sizeof(nearest_box);
+}
+/* output = inverse(target) * source, row-major affine 3x4. Output commits
+ * only after all finite/nonsingular checks pass. Wrap admission separately
+ * rejects non-rigid relative transforms. */
+int hone_native_relative_transform(const float target[12],const float source[12],double output[12]){
+ if(!target||!source||!output)return 0;
+ for(unsigned k=0;k<12;k++)if(!isfinite(target[k])||!isfinite(source[k]))return 0;
+ const double a=target[0],b=target[1],c=target[2],d=target[4],e=target[5],f=target[6],g=target[8],h=target[9],i=target[10];
+ const double det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);
+ if(!isfinite(det)||fabs(det)<1e-12)return 0;
+ const double inv[9]={(e*i-f*h)/det,(c*h-b*i)/det,(b*f-c*e)/det,
+                      (f*g-d*i)/det,(a*i-c*g)/det,(c*d-a*f)/det,
+                      (d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det};
+ double out[12];
+ for(unsigned r=0;r<3;r++)for(unsigned k=0;k<4;k++){
+  double v=0;for(unsigned j=0;j<3;j++)v+=inv[r*3+j]*(source[j*4+k]-(k==3?target[j*4+3]:0));
+  if(!isfinite(v))return 0;out[r*4+k]=v;
+ }
+ memcpy(output,out,sizeof out);return 1;
+}
 
 /* All spans are trusted complete, pairwise disjoint and exclusively owned.
  * Mat is source-to-target affine, row-major 3x4. Rigid transforms only:

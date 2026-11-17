@@ -21,9 +21,11 @@ links and selected math, blend and ramp parameters for scene mesh materials.
 It does not implement shader semantics or claim a complete node-property export;
 unsupported socket values are marked. The output is private and not runtime
 admission. `test_material_inventory.py` checks a synthetic linked math/ramp graph.
-It does not preserve nested group internals or identity, muted-node internal
-links, active-output selection, image/UV/attribute settings, multi-input link
-order, linked-library provenance, or the complete object/slot/polygon binding.
+It records active output flags, mute/internal links, group/image identity,
+library paths, multi-input sort metadata when Blender provides it, and
+object/slot/polygon uses. Nested group contents, image/UV/attribute semantics
+and a material evaluator remain outside this inventory. Captured names, paths
+and graph contents are source data and belong with the source asset.
 
 Synthetic validation: mixed smooth/flat two-face fixture, morph coordinate roundtrip, reject missing morph vertex and invalid corner index. This contract does not imply same-head firmware build, runtime image equivalence or real-device FPS results.
 

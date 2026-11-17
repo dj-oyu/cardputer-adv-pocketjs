@@ -215,6 +215,17 @@ The result excludes model/snapshot arenas, rig, alpha, display, ABI padding and
 stack. Pending geometry remains owned and live for the whole provider pass;
 these estimates are not target memory or performance measurements.
 
+`material_route_plan.py` checks polygon/slot ownership, graph links and
+shader-driver socket identities. It retains unsupported graph features as
+explicit pending work; it does not evaluate colors, opacity or lighting.
+`alpha_factor_compile.py` additionally admits a restricted white-transparent /
+opaque-principled mix and compiles the scalar factor with object-local XYZ and
+driver values. Division by zero, invalid roots and nonfinite inputs reject.
+The scalar candidate is not a full shader: source color, specular/lighting,
+clipping and perspective-correct local-coordinate interpolation remain open.
+Its nonlinear factor must be evaluated at the appropriate fragment coordinate;
+interpolating per-vertex alpha would not preserve the graph.
+
 `shrinkwrap_route_plan.py` records nearest-surface dependencies and rejects
 cycles and unsupported modes. `native_wrap_candidate.c` transforms current
 source positions into the current target's coordinates, requires a rigid
@@ -222,6 +233,14 @@ relative transform, applies the admitted ON_SURFACE offset and converts back.
 Target deformation, bone evaluation, modifier ordering, workspace ownership
 and normals remain caller responsibilities. Candidate output is unpublished and
 may be partially written on failure; no target timing is established.
+
+`rig_root_inventory.py`, `emit_root_rig_targets.py` and
+`rig_root_palette_candidate.h` admit a restricted rig with root-only,
+constraint-free, unscaled deform bones and explicit group mapping. Driver
+rotation outputs feed a staged quaternion/translation palette. Mesh/rig space
+transforms in the inventory are snapshots and must be recomputed or proved
+constant for the active frame. Parented bones, arbitrary constraints and scale
+do not silently fall back to this candidate.
 
 Host GCC/x86-64 `-fstack-usage` comparison with the same external callback wrapper:
 before, O2 provider 1,664 bytes plus wrapper 8; after, the inlined wrapper is
