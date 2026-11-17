@@ -42,6 +42,12 @@ transition rule or justify introducing a fitted threshold into native code.
 
 ## Integration status
 
+The following is the historical baseline before the coordinate-dependent
+transition and driver-input boundary were identified. The newer bounded
+63-pose result and remaining restrictions are in [F32_FRAME_BOUNDARIES.md](F32_FRAME_BOUNDARIES.md).
+The original diagnostic remains useful for exposing the mismatch of ordinary
+normalize-then-scale arithmetic; its completion is still not an admission test.
+
 The broader host experiment remains experimental: 57 of 63 independently varied
 or mixed poses passed the existing position and corner-normal gates; six failed
 the normal gate, while all passed the position gate. Four simultaneous-input
