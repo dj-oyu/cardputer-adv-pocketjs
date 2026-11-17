@@ -11,10 +11,13 @@
 #include "freertos/task.h"
 #include "hal/board.h"
 #include "ui/paint.h"
-#include "../../tools/hone/native_geometry/alpha_graph_occlusion_band_candidate.h"
+#include "../../tools/hone/native_geometry/graph_index_band_candidate.h"
 #include "private/assets/ay_pose_dma_fixture.h"
 
-enum { WIDTH = 240, HEIGHT = 135, BAND_ROWS = 8, MEASURE_FRAMES = 60 };
+enum {
+    WIDTH = 240, HEIGHT = 135, BAND_ROWS = 8, MEASURE_FRAMES = 60,
+    MAX_POSE_PACKETS = 576, MAX_POSE_BAND_ENTRIES = 1024,
+};
 static const int64_t measure_limit_us = INT64_C(12000000);
 static const int64_t demo_interval_us = INT64_C(120000);
 static const char *const tag = "ay_pose_dma";
@@ -25,6 +28,8 @@ static struct {
     uint16_t band[WIDTH * BAND_ROWS];
     float depth[WIDTH];
     float scratch[AY_POSE_DMA_FIXTURE_SCRATCH_COUNT];
+    hone_graph_bounds bounds[MAX_POSE_PACKETS];
+    uint16_t band_entries[MAX_POSE_BAND_ENTRIES];
 } storage;
 
 typedef enum { PREFLIGHT, BENCHMARK, DEMO, FAILED } probe_phase;
@@ -32,12 +37,12 @@ static struct {
     uint32_t generation;
     probe_phase phase;
     unsigned checked, completed, demo_pose;
-    int64_t started, last_demo, raster_us, submit_us, finish_us;
+    int64_t started, last_demo, index_us, raster_us, submit_us, finish_us;
     char result[40];
 } probe;
 
 static bool prepare_pose(unsigned pose, hone_graph_band_payload *payload,
-                         hone_graph_band_work *work)
+                         hone_graph_band_work *work, hone_graph_band_index *index)
 {
     uint32_t generation = pose + 1;
     *work = (hone_graph_band_work){
@@ -48,20 +53,27 @@ static bool prepare_pose(unsigned pose, hone_graph_band_payload *payload,
         .scratch = storage.scratch,
         .scratch_count = AY_POSE_DMA_FIXTURE_SCRATCH_COUNT,
     };
+    // Every pose uses the same const packets on every replay. The index borrows
+    // this exact payload descriptor for one pose and owns no packet data.
     return ay_pose_dma_fixture(pose, &storage, generation, payload) &&
-           hone_graph_band_valid(&opaque, payload, work, storage.band, WIDTH * BAND_ROWS);
+           hone_graph_index_build(index, &payload->graph, generation,
+                                  storage.bounds, MAX_POSE_PACKETS,
+                                  storage.band_entries, MAX_POSE_BAND_ENTRIES) &&
+           hone_graph_index_band_valid(&opaque, payload, index, generation, work,
+                                      storage.band, WIDTH * BAND_ROWS);
 }
 
 static bool check_pose(unsigned pose)
 {
     hone_graph_band_payload payload;
     hone_graph_band_work work;
-    if (!prepare_pose(pose, &payload, &work) || !payload.graph.count) return false;
+    hone_graph_band_index index;
+    if (!prepare_pose(pose, &payload, &work, &index) || !payload.graph.count) return false;
 
     unsigned visible_pixels = 0;
     uint32_t hash = UINT32_C(2166136261);
     for (unsigned y = 0; y < HEIGHT; ++y) {
-        if (!hone_graph_occlusion_band_row(&opaque, &payload, &work, y)) return false;
+        if (!hone_graph_index_band_row(&opaque, &payload, &index, pose + 1, &work, y)) return false;
         for (unsigned x = 0; x < WIDTH; ++x) {
             const uint16_t pixel = storage.row[x];
             visible_pixels += pixel != 0;
@@ -78,7 +90,10 @@ static bool present_pose(int pose, const char *label, bool measure)
 {
     hone_graph_band_payload payload;
     hone_graph_band_work work;
-    if (pose >= 0 && !prepare_pose((unsigned)pose, &payload, &work)) return false;
+    hone_graph_band_index index;
+    const int64_t prepared = esp_timer_get_time();
+    if (pose >= 0 && !prepare_pose((unsigned)pose, &payload, &work, &index)) return false;
+    if (measure) probe.index_us += esp_timer_get_time() - prepared;
 
     bool ok = true;
     for (unsigned y = 0; y < HEIGHT; y += BAND_ROWS) {
@@ -88,7 +103,8 @@ static bool present_pose(int pose, const char *label, bool measure)
             memset(storage.band, 0, rows * sizeof storage.row);
         } else {
             for (unsigned row = 0; row < rows; ++row) {
-                if (!hone_graph_occlusion_band_row(&opaque, &payload, &work, y + row)) {
+                if (!hone_graph_index_band_row(&opaque, &payload, &index,
+                                                (unsigned)pose + 1, &work, y + row)) {
                     ok = false;
                     break;
                 }
@@ -143,10 +159,10 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
     if (ok) snprintf(probe.result, sizeof probe.result, "%.2f FPS  %u LCD FRAMES", fps, probe.completed);
     else snprintf(probe.result, sizeof probe.result, "BENCHMARK FAILED  %u FRAMES", probe.completed);
     ESP_LOGI(tag, "RESULT status=%s dma_completed_frames=%u elapsed_us=%" PRId64
-             " baked_pose_fps=%.3f raster_us=%" PRId64 " submit_us=%" PRId64
+             " baked_pose_fps=%.3f index_us=%" PRId64 " raster_us=%" PRId64 " submit_us=%" PRId64
              " final_drain_us=%" PRId64 " stack_hwm=%u free_internal=%u",
              ok ? "PASS" : "FAIL", probe.completed, elapsed_us, fps,
-             probe.raster_us, probe.submit_us, probe.finish_us,
+             probe.index_us, probe.raster_us, probe.submit_us, probe.finish_us,
              (unsigned)uxTaskGetStackHighWaterMark(NULL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
