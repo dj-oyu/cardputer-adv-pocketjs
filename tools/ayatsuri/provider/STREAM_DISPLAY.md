@@ -1,5 +1,9 @@
 # Explicit pocket/Kasane streaming diagnostic presenter
 
+The separate APP-bound registration API now described in `STREAM_RESIDENT.md`
+can retain this producer across normal redraws. This document describes the
+original explicit one-shot bridge; its calls alone do not register an actor.
+
 `CONFIG_AYATSURI_STREAM_DISPLAY_CANDIDATE` defaults OFF. Broker variant
 `ay_stream_display` compiles the bridge and streaming API; it does not invoke
 them at startup, load a model, write persistent data or register a guest actor.

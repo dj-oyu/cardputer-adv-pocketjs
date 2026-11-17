@@ -13,7 +13,8 @@ typedef struct {
     ayatsuri_stream_frame_owner *frame;
     ayatsuri_stream_frame_token token;
     float *depth;
-    bool held,busy;
+    bool held,busy,ready_borrow;
+    const ksn_mesh_snapshot *snapshot;
 } pocket_stream_candidate;
 
 ksn_result pocket_stream_candidate_present(pocket_stream_candidate*,
@@ -23,4 +24,10 @@ ksn_result pocket_stream_candidate_present(pocket_stream_candidate*,
 /* Retry ONLY the authoritative display drain; never replay or ACK the failed
  * candidate. On successful drain roll back its pin and invalidate for repair. */
 ksn_result pocket_stream_candidate_recover(pocket_stream_candidate*,const ksn_display_completion*);
+/* Redraw committed packets without generating or promoting a new frame. An
+ * unsuccessful physical drain retains the committed borrow and blocks produce. */
+ksn_result pocket_stream_candidate_redraw(pocket_stream_candidate*,
+    ayatsuri_stream_frame_owner*,const void*,uint32_t,float depth[240],
+    ayatsuri_stream_frame_preflight,void*,const ksn_display_port*,
+    const ksn_display_completion*,ksn_render_stats*);
 #endif

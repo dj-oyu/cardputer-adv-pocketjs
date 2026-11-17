@@ -11,14 +11,14 @@ static uint16_t diag_tx[240*8];static unsigned diag_y,diag_rows;
 static bool diag_dma;
 static ayatsuri_stream_frame_owner*diag_frame;
 static ksn_result diag_send(void*ctx,uint16_t y,uint16_t rows,const uint16_t*p){
- (void)ctx;assert(diag_frame->pinned);diag_sends++;
+ (void)ctx;assert(diag_frame->pinned||diag_frame->busy);diag_sends++;
  if(diag_dma)memcpy(panel_pixels+diag_y*240,diag_tx,diag_rows*240*2);
  memcpy(diag_tx,p,rows*240*2);diag_y=y;diag_rows=rows;diag_dma=true;
  return diag_send_fail&&y>=8?KSN_INVALID:KSN_OK;
 }
 static ksn_result diag_finish(void*ctx){
  (void)ctx;diag_finishes++;
- if(diag_dma)assert(diag_frame->pinned);
+ if(diag_dma)assert(diag_frame->pinned||diag_frame->busy);
  if(diag_drain_fail)return KSN_BUSY;
  if(diag_dma)memcpy(panel_pixels+diag_y*240,diag_tx,diag_rows*240*2);
  diag_dma=false;return KSN_OK;
@@ -77,6 +77,36 @@ static void stream_diag_tests(void){
  }
  diag_grid_pending=false;diag_send_fail=false;diag_reject=false;
  assert(!bridge.held&&!f.pinned);
+ /* Bind to the real APP lease and use the NORMAL presentation entry. */
+ pocket_kasane_prepare();
+ assert(pocket_kasane_stream_actor_bind(&f,&id,1,depth,diag_preflight,NULL)==KSN_OK);
+ assert(pocket_kasane_stream_actor_bound()&&pocket_kasane_needs_present());
+ assert(pocket_kasane_stream_actor_bind(&f,&id,1,depth,diag_preflight,NULL)==KSN_BUSY);
+ diag_sends=0;completion.finish=diag_finish;
+ assert(pocket_kasane_present_complete(&port,&completion,&stats)==KSN_OK&&diag_sends==17);
+ const ksn_mesh_snapshot*resident=ayatsuri_stream_frame_ready(&f,&id,1);assert(resident);
+ memset(panel_pixels,0xa5,sizeof panel_pixels);pocket_kasane_invalidate();diag_sends=0;
+ assert(pocket_kasane_present_complete(&port,&completion,&stats)==KSN_OK&&diag_sends==17);
+ uint16_t row[240];float z[240];
+ for(unsigned y=0;y<135;y++){memset(row,0,sizeof row);assert(ksn_mesh_render(resident,row,y,1,z,1));assert(!memcmp(row,panel_pixels+y*240,sizeof row));}
+ diag_sends=0;
+ assert(pocket_kasane_present_complete(&port,&completion,&stats)==KSN_OK&&!diag_sends);
+ pocket_kasane_invalidate();diag_sends=0;completion.finish=diag_finish_after_submit;
+ assert(pocket_kasane_present_complete(&port,&completion,&stats)==KSN_BUSY&&f.busy);
+ assert(!pocket_kasane_reset()&&pocket_kasane_stream_actor_bound());
+ assert(ayatsuri_stream_frame_produce(&f,&id,1,camera,light,diag_provider,NULL,slot)==AYATSURI_MODEL_STATE);
+ completion.finish=diag_finish;
+ assert(pocket_kasane_stream_actor_unbind(&completion)==KSN_BUSY&&pocket_kasane_stream_actor_bound());
+ diag_drain_fail=false;
+ assert(pocket_kasane_stream_actor_unbind(&completion)==KSN_OK&&!f.busy&&!diag_dma);
+ assert(!pocket_kasane_stream_actor_bound()&&ayatsuri_stream_frame_ready(&f,&id,1)==resident);
+ assert(pocket_kasane_stream_actor_bind(&f,&id,1,depth,diag_preflight,NULL)==KSN_OK);
+ diag_drain_fail=true;
+ assert(pocket_kasane_stream_actor_unbind(&completion)==KSN_BUSY&&f.busy);
+ assert(!pocket_kasane_reset());diag_drain_fail=false;
+ assert(pocket_kasane_stream_actor_unbind(&completion)==KSN_OK&&!f.busy);
+ assert(pocket_kasane_stream_actor_bind(&f,&id,1,depth,diag_preflight,NULL)==KSN_OK);
+ assert(pocket_kasane_reset()&&!pocket_kasane_stream_actor_bound());
  assert(ayatsuri_stream_candidate_dispose(&stream,&id,1)==AYATSURI_MODEL_OK);
  free(arena);free(bytes);diag_frame=NULL;
  /* Drain recovery left normal runtime repair to its existing owner. */
@@ -85,5 +115,5 @@ static void stream_diag_tests(void){
  unsigned finished=diag_finishes;
  assert(pocket_kasane_present_complete(&port,&completion,&repair)==KSN_OK&&diag_finishes==finished+1);
  assert(ksn_runtime_shutdown()==KSN_OK);
- puts("STREAM_DISPLAY PASS actual_pocket_runtime synthetic_DMA success/send_failure/drain_failure/preflight/conflict rollback");
+ puts("STREAM_DISPLAY PASS actual_pocket_runtime synthetic_DMA resident_redraw/reset/unbind success/send_failure/drain_failure/preflight/conflict rollback");
 }

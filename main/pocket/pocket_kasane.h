@@ -9,6 +9,14 @@
 #include "system/sys_notify.h"
 
 #ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+#include "ayatsuri/ayatsuri_stream_frame_owner_candidate.h"
+/* Explicit APP-lease-bound native actor. Frame/model/scratch/preflight context
+ * remain caller-owned until successful unbind or reset. Unknown drain retains
+ * registration. No data loader, driver scheduler or materials are installed. */
+ksn_result pocket_kasane_stream_actor_bind(ayatsuri_stream_frame_owner*,const void*,
+    uint32_t,float depth[240],ayatsuri_stream_frame_preflight,void*);
+ksn_result pocket_kasane_stream_actor_unbind(const ksn_display_completion*);
+bool pocket_kasane_stream_actor_bound(void);
 /* Explicit diagnostic backdrop. Rejects competing native pending publications;
  * uses the same renderer/completion/ACK path. Does not install a persistent source. */
 ksn_result pocket_kasane_present_stream_backdrop(const ksn_display_port*,

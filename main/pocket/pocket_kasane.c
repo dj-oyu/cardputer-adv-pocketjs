@@ -9,6 +9,19 @@
 #include "esp_log.h"
 #endif
 #include "ui/kasane/ksn_runtime.h"
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+#include "pocket_stream_candidate.h"
+static struct {
+    pocket_stream_candidate bridge;
+    ayatsuri_stream_frame_owner *frame;
+    const void *identity;
+    uint32_t generation;
+    ksn_app_lease lease;
+    float *depth;
+    ayatsuri_stream_frame_preflight preflight;
+    void *context;
+} stream_actor;
+#endif
 #include "app_notice.h"
 #include "app_view_provider.h"
 #include "ui/kasane/ksn_schema_session.h"
@@ -2873,11 +2886,18 @@ JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *regi
 static bool dormant;
 
 bool pocket_kasane_reset(void) {
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+    if(stream_actor.frame&&(stream_actor.bridge.held||stream_actor.bridge.busy||
+       stream_actor.frame->busy||stream_actor.frame->pinned))return false;
+#endif
     dormant=false;
     const pocket_app_view_provider *provider=state?state->provider:NULL;
     void *provider_state=state?state->provider_state:NULL;
     schema_state *schema=state?state->schema:NULL;
     if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return false;
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+    memset(&stream_actor,0,sizeof stream_actor);
+#endif
     pocket_proc_reset();
     pocket_grid_reset();
     pocket_video_reset();
@@ -3008,6 +3028,9 @@ void pocket_kasane_set_animation_time(uint64_t now_us){
     ksn_runtime_set_animation_time(now_us);
 }
 bool pocket_kasane_needs_present(void) {
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+    if(stream_actor.frame&&(stream_actor.bridge.held||(!dormant&&stream_actor.frame->produced)))return true;
+#endif
     return ksn_runtime_needs_present();
 }
 void pocket_kasane_invalidate_bands(uint32_t bands) {
@@ -3028,11 +3051,70 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
 ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
                                           const ksn_display_completion *completion,
                                           ksn_render_stats *stats) {
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+    if(stream_actor.frame){
+        if(!state||state->lease.value!=stream_actor.lease.value||
+           !ksn_runtime_app_view(stream_actor.lease))return KSN_STALE;
+        if(stream_actor.bridge.held){
+            ksn_result recovered=pocket_stream_candidate_recover(&stream_actor.bridge,completion);
+            if(recovered!=KSN_OK)return recovered;
+        }
+        if(dormant)return pocket_present_with_backdrop(display,completion,stats,NULL);
+        return stream_actor.frame->produced?
+            pocket_stream_candidate_present(&stream_actor.bridge,stream_actor.frame,
+                stream_actor.identity,stream_actor.generation,stream_actor.depth,
+                stream_actor.preflight,stream_actor.context,display,completion,stats):
+            pocket_stream_candidate_redraw(&stream_actor.bridge,stream_actor.frame,
+                stream_actor.identity,stream_actor.generation,stream_actor.depth,
+                stream_actor.preflight,stream_actor.context,display,completion,stats);
+    }
+#endif
     return pocket_present_with_backdrop(display,completion,stats,NULL);
 }
 #ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+ksn_result pocket_kasane_stream_actor_bind(ayatsuri_stream_frame_owner*f,const void*id,
+    uint32_t generation,float depth[240],ayatsuri_stream_frame_preflight preflight,void*context){
+    if(stream_actor.frame)return KSN_BUSY;
+    if(!state||!ksn_runtime_app_view(state->lease)||!ay_stream_owner_valid(f,id,generation)||
+       f->pinned||(!f->ready&&!f->produced)||!depth||!preflight)return KSN_INVALID;
+    if(pocket_proc_has_frame()||pocket_proc_pending()||pocket_grid_pending()||
+       pocket_video_pending()||pocket_pixel_pending())return KSN_BUSY;
+    stream_actor.frame=f;stream_actor.identity=id;stream_actor.generation=generation;
+    stream_actor.lease=state->lease;stream_actor.depth=depth;
+    stream_actor.preflight=preflight;stream_actor.context=context;
+    state->active=true;ksn_runtime_app_activate(state->lease);ksn_runtime_invalidate();
+    return KSN_OK;
+}
+ksn_result pocket_kasane_stream_actor_unbind(const ksn_display_completion*completion){
+    if(!stream_actor.frame)return KSN_STALE;
+    if(!completion||!completion->finish||stream_actor.bridge.busy||
+       (!stream_actor.bridge.held&&(stream_actor.frame->busy||stream_actor.frame->pinned)))return KSN_BUSY;
+    ksn_result result=stream_actor.bridge.held?
+        pocket_stream_candidate_recover(&stream_actor.bridge,completion):
+        ksn_runtime_finish_display(completion);
+    if(result!=KSN_OK){
+        /* Even an unexpected failed drain during unbind retains the producer
+         * lock; a later explicit recovery must confirm completion. */
+        if(!stream_actor.bridge.held){
+            stream_actor.frame->busy=true;stream_actor.bridge.frame=stream_actor.frame;
+            stream_actor.bridge.ready_borrow=true;stream_actor.bridge.held=true;
+        }
+        return result;
+    }
+    memset(&stream_actor,0,sizeof stream_actor);ksn_runtime_invalidate();return KSN_OK;
+}
+bool pocket_kasane_stream_actor_bound(void){return stream_actor.frame!=NULL;}
+ksn_result pocket_kasane_redraw_stream_backdrop(const ksn_display_port *display,
+    const ksn_display_completion *completion,ksn_render_stats *stats,ksn_backdrop_loader load){
+    if(stream_actor.frame&&!stream_actor.bridge.busy)return KSN_BUSY;
+    if(!load||!completion||!completion->finish||!ksn_runtime_reserved_bytes())return KSN_INVALID;
+    if(pocket_proc_has_frame()||pocket_proc_pending()||pocket_grid_pending()||
+       pocket_video_pending()||pocket_pixel_pending())return KSN_BUSY;
+    return pocket_present_with_backdrop(display,completion,stats,load);
+}
 ksn_result pocket_kasane_present_stream_backdrop(const ksn_display_port *display,
     const ksn_display_completion *completion,ksn_render_stats *stats,ksn_backdrop_loader load){
+    if(stream_actor.frame&&!stream_actor.bridge.busy)return KSN_BUSY;
     if(!load||!completion||!completion->finish||!ksn_runtime_reserved_bytes())return KSN_INVALID;
     /* An explicit native diagnostic presentation, never a competing procedural
      * background or pending source publication. No guest actor is installed. */
@@ -3097,6 +3179,9 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
                                           ksn_backdrop_loader load,bool occlusion_safe,
                                           ksn_render_stats *stats) {
+#ifdef AYATSURI_STREAM_DISPLAY_CANDIDATE
+    if(stream_actor.frame)return KSN_BUSY;
+#endif
     if(!stats||!load)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     if(!pocket_kasane_needs_present()){
