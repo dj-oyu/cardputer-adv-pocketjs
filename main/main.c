@@ -41,6 +41,9 @@
 #include "pocket_bridge.h"
 #include "app_control.h"
 #include "esp_app_desc.h"
+#ifdef CONFIG_AYATSURI_STREAM_DEVICE_PROBE
+#include "ayatsuri/ayatsuri_stream_device_probe.h"
+#endif
 #include "esp_random.h"
 #include "pocket_text.h"
 #include "jsconsole.h"
@@ -1177,6 +1180,10 @@ static void ui_task(void *arg) {
     // Before anything can post: every producer of a completion runs on a task
     // this one starts, or on an interrupt armed from it.
     vm_wake_bind();
+#ifdef CONFIG_AYATSURI_STREAM_DEVICE_PROBE
+    /* Synthetic CPU-only probe runs once before guest/UI submissions. */
+    ayatsuri_stream_device_probe_run();
+#endif
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
 #ifdef KASANE_P0_PROBE

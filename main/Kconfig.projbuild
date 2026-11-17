@@ -236,4 +236,15 @@ menu "Pocket VM (diagnostics)"
             Caller still owns pending/ready snapshots and display completion.
             Experimental: host validation is not DMA, target RAM or FPS proof.
 
+    config AYATSURI_STREAM_DEVICE_PROBE
+        bool "Run synthetic streaming CPU diagnostic once at UI boot"
+        default n
+        select AYATSURI_STREAM_CANDIDATE
+        help
+            Runs 32 public synthetic frames through the real streaming API on
+            the UI owner. Logs ELF identity, time, internal heap largest block,
+            and task stack high-water mark. No LCD/DMA submission, guest/model
+            registration, persistent data write, or real-model FPS claim.
+            Diagnostic firmware only; restore the normal variant with broker.
+
 endmenu
