@@ -179,13 +179,17 @@ static bool render_pose_row(pose_frame *frame, unsigned y)
 static bool check_pose(unsigned pose)
 {
     pose_frame frame = {0};
-    if (!prepare_pose(pose, &frame)) return false;
+    if (!prepare_pose(pose, &frame)) {
+        ESP_LOGE(tag, "FAIL phase=prepare pose=%u", pose);
+        return false;
+    }
 
     unsigned visible_pixels = 0;
     uint32_t hash = UINT32_C(2166136261);
     bool ok = frame.packets != 0;
     for (unsigned y = 0; ok && y < HEIGHT; ++y) {
         if (!render_pose_row(&frame, y)) {
+            ESP_LOGE(tag, "FAIL phase=raster_preflight pose=%u row=%u", pose, y);
             ok = false;
             break;
         }
@@ -196,9 +200,14 @@ static bool check_pose(unsigned pose)
         }
         if ((y + 1) % BAND_ROWS == 0) vTaskDelay(1);
     }
-    if (!finish_pose(true) || !ok) return false;
+    if (!finish_pose(true)) {
+        ESP_LOGE(tag, "FAIL phase=release_preflight pose=%u", pose);
+        return false;
+    }
+    if (!ok) return false;
     ESP_LOGI(tag, "POSE pose=%u packets=%u visible_pixels=%u rgb565_hash=%08" PRIx32 " flat=%u",
              pose, frame.packets, visible_pixels, hash, (unsigned)frame.fast);
+    if (!visible_pixels) ESP_LOGE(tag, "FAIL phase=empty_pose pose=%u", pose);
     return visible_pixels != 0;
 }
 
@@ -240,6 +249,7 @@ static bool present_pose(int pose, const char *label, bool measure)
         const esp_err_t result = board_present_submit(0, (int)y, WIDTH, (int)rows, storage.band);
         if (measure) probe.submit_us += esp_timer_get_time() - rendered;
         if (result != ESP_OK) {
+            ESP_LOGE(tag, "FAIL phase=lcd_submit pose=%d row=%u error=%d", pose, y, (int)result);
             ok = false;
             break;
         }
@@ -247,6 +257,7 @@ static bool present_pose(int pose, const char *label, bool measure)
 
     const int64_t started = esp_timer_get_time();
     const esp_err_t drained = board_present_finish();
+    if (drained != ESP_OK) ESP_LOGE(tag, "FAIL phase=lcd_drain pose=%d error=%d", pose, (int)drained);
     if (measure) probe.finish_us += esp_timer_get_time() - started;
     board_present_frame_end();
     const bool released = pose < 0 || finish_pose(drained == ESP_OK);
@@ -300,9 +311,9 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, bool captur
         (void)present_pose(pose, label, false);
         if (probe.phase == BENCHMARK) begin_benchmark(generation);
     } else if (probe.phase == PREFLIGHT) {
-        if ((probe.checked == 0 && !present_pose(-1, "CHECKING SIX POSES", false)) ||
-            !check_pose(probe.checked)) {
-            ESP_LOGE(tag, "FAIL preflight pose=%u", probe.checked);
+        const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING SIX POSES", false);
+        if (!banner_ready || !check_pose(probe.checked)) {
+            if (!banner_ready) ESP_LOGE(tag, "FAIL phase=preflight_banner");
             end_benchmark(false, 0);
             (void)present_pose(-1, probe.result, false);
         } else if (++probe.checked == CHECK_POSES) {
