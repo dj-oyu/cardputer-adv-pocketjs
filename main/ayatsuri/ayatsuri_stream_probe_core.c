@@ -17,7 +17,7 @@ static bool render(const ksn_mesh_snapshot*s,ayatsuri_stream_probe_work*w,uint32
  uint32_t hash=2166136261u;
  for(unsigned y=0;y<135;y+=8){unsigned rows=135-y<8?135-y:8;
   for(unsigned j=0;j<240*rows;j++)w->band[j]=17;
-  if(!ksn_mesh_render(s,w->band,y,rows,w->depth,1))return false;
+  if(!ksn_mesh_render(s,w->band,y,rows,w->depth,AY_STREAM_PROBE_DEPTH_ROWS))return false;
   for(unsigned j=0;j<240*rows;j++){hash^=w->band[j];hash*=16777619u;}
  }
  *out=hash;return true;

@@ -3,10 +3,16 @@
 #include "ayatsuri_model_stream_candidate.h"
 #define AY_STREAM_PROBE_FRAMES 32u
 #define AY_STREAM_PROBE_PACKET_CAPACITY 8192u
+#ifndef AY_STREAM_PROBE_DEPTH_ROWS
+#define AY_STREAM_PROBE_DEPTH_ROWS 1
+#endif
+#if AY_STREAM_PROBE_DEPTH_ROWS != 1 && AY_STREAM_PROBE_DEPTH_ROWS != 8
+#error "Synthetic probe depth rows must be 1 or 8"
+#endif
 /* Caller-owned internal CPU memory; no DMA submission is made by this probe. */
 typedef struct {
  unsigned char ready_bytes[AY_STREAM_PROBE_PACKET_CAPACITY],pending_bytes[AY_STREAM_PROBE_PACKET_CAPACITY],saved[AY_STREAM_PROBE_PACKET_CAPACITY];
- ayatsuri_skin_result slot[32];float depth[240];uint16_t band[240*8];
+ ayatsuri_skin_result slot[32];float depth[240*AY_STREAM_PROBE_DEPTH_ROWS];uint16_t band[240*8];
 } ayatsuri_stream_probe_work;
 typedef struct {
  unsigned frames,provider_calls,rollbacks;size_t arena_bytes,workspace_bytes,snapshot_peak;

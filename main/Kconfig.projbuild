@@ -246,6 +246,15 @@ menu "Pocket VM (diagnostics)"
             DMA overlap completion support. No boot hook, model, real material,
             persistent actor registration or automatic display call is added.
 
+    config AYATSURI_STREAM_PROBE_DEPTH8
+        bool "Use eight depth rows in the synthetic streaming CPU probe"
+        default n
+        select AYATSURI_STREAM_DEVICE_PROBE
+        help
+            Diagnostic A/B only. Adds 6720 bytes of internal depth scratch and
+            uses the existing eight-row raster path, with unchanged pixel math.
+            No model, real materials or LCD/DMA measurement is added.
+
     config AYATSURI_STREAM_DEVICE_PROBE
         bool "Run synthetic streaming CPU diagnostic once at UI boot"
         default n

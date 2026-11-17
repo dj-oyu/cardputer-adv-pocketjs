@@ -638,6 +638,9 @@ if(AYATSURI_STREAM_CANDIDATE OR CONFIG_AYATSURI_STREAM_CANDIDATE)
 endif()
 
 if(CONFIG_AYATSURI_STREAM_DEVICE_PROBE)
+    if(CONFIG_AYATSURI_STREAM_PROBE_DEPTH8)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE AY_STREAM_PROBE_DEPTH_ROWS=8)
+    endif()
     target_sources(${COMPONENT_LIB} PRIVATE
         "ayatsuri/ayatsuri_stream_probe_core.c" "ayatsuri/ayatsuri_stream_device_probe.c")
     set_property(SOURCE "ayatsuri/ayatsuri_stream_probe_core.c" "ayatsuri/ayatsuri_stream_device_probe.c"
