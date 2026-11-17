@@ -629,3 +629,10 @@ if(KASANE_MESH_EDGE4_PROTOTYPE)
     set_source_files_properties(ui/kasane/pie_edge4.c ui/kasane/pie_edge4_raw.c PROPERTIES
         COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
 endif()
+
+# Opt-in trusted-native streaming producer; no actor/model registration.
+if(AYATSURI_STREAM_CANDIDATE OR CONFIG_AYATSURI_STREAM_CANDIDATE)
+    target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_model_stream_candidate.c")
+    set_property(SOURCE "ayatsuri/ayatsuri_model_stream_candidate.c" APPEND PROPERTY
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage")
+endif()

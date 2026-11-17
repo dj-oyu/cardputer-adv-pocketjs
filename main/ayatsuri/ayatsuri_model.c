@@ -214,8 +214,32 @@ ayatsuri_model_status ayatsuri_model_find_node(const ayatsuri_model *m,const cha
         if(m16(b+2)==bytes&&!memcmp(row(m,7,m32(b+4),1),name,bytes)){*out=m16(b);return AYATSURI_MODEL_OK;}}
     return AYATSURI_MODEL_DONE;
 }
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+/* Used only by the separately compiled, explicitly opt-in streaming TU. */
+#include "../ui/kasane/ksn_mesh_depth.h"
+typedef struct {ayatsuri_model_geometry_provider provider;void *user;ksn_mesh_snapshot *pending;} model_stream_request;
+static size_t model_stream_shared_offset(const ayatsuri_model*m){
+    return ((sizeof(model_node_state)*m->node_count+7u)&~(size_t)7u)+88u*m->node_count;
+}
+#endif
 size_t ayatsuri_model_instance_bytes(const ayatsuri_model *m){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    if(!m||!m->data||!m->provider_only)return 0;
+    size_t maximum=0;
+    for(unsigned j=0;j<m->node_count;j++){
+        const uint8_t *node=row(m,1,j,16);
+        if(node[2]!=0&&node[2]!=3)return 0;
+        if(node[2]==3){
+            const uint8_t*d=row(m,9,m16(node+4),32);
+            if(mesh_double(m,node)||d[10]||m16(d+2)>32)return 0;
+            size_t bytes=node_slot_bytes(m,j,node);if(bytes>maximum)maximum=bytes;
+        }
+    }
+    size_t base=model_stream_shared_offset(m);
+    return maximum>SIZE_MAX-base?0:base+maximum;
+#else
     return m&&m->data?((sizeof(model_node_state)*m->node_count+7u)&~(size_t)7u)+m->slot_bytes:0;
+#endif
 }
 static model_node_state *states(ayatsuri_model_instance *i){return i->arena;}
 static float *work(ayatsuri_model_instance *i,unsigned node){return (float *)((uint8_t *)i->arena+states(i)[node].offset);}
@@ -247,7 +271,11 @@ ayatsuri_model_status ayatsuri_model_instance_init(const ayatsuri_model *m,void 
             if(node[2]==1){work(&result,j)[63]=work(&result,j)[64]=1;}
             else work(&result,j)[77]=mf(node+12);
         }
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+        offset+=88;
+#else
         offset+=node_slot_bytes(m,j,node);
+#endif
     }
     *out=result;return AYATSURI_MODEL_OK;
 }
@@ -604,10 +632,30 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
             geometry=slot;
         }
 #endif
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+        (void)ellipse_packet;(void)blend_packet; /* Unsupported types rejected at init. */
+        if(node[2]==3){
+            const uint32_t saved_offset=states(i)[j].offset;
+            const size_t shared=model_stream_shared_offset(i->model);
+            memcpy((uint8_t*)i->arena+shared,work(i,j),84);
+            states(i)[j].offset=(uint32_t)shared;
+            bool ok=mesh_packet(i,j,right,down,forward,geometry);
+            if(ok&&states(i)[j].world_enabled){
+                const ksn_proc_gouraud_patch *patch=(const void*)((const uint8_t*)work(i,j)+84);
+                const float *xy=(const void*)((const uint8_t*)patch+sizeof *patch);
+                model_stream_request *request=context;
+                if(patch->header.triangles)ok=ksn_mesh_append(request->pending,patch,xy+2*patch->header.vertices,j);
+            }
+            states(i)[j].offset=saved_offset;
+            if(!ok)return leave(i,AYATSURI_MODEL_RANGE);
+            add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);
+        }
+#else
         if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward))||
            (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry)))
             return leave(i,AYATSURI_MODEL_RANGE);
         if(node[2]){add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);}
+#endif
     }
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
     i->mesh_overridden=count!=0||provider!=NULL;i->evaluated=true;return leave(i,AYATSURI_MODEL_OK);
@@ -663,6 +711,11 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate_meshes(ayatsuri_model_ins
 }
 ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,uint32_t *cursor,ayatsuri_model_packet *out){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    (void)cursor;(void)out;
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    return leave(i,AYATSURI_MODEL_INVALID);
+#else
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
     if(!i->evaluated)return leave(i,AYATSURI_MODEL_STATE);
     if(!cursor||!out||overlaps(cursor,sizeof *cursor,out,sizeof *out)||
@@ -680,10 +733,16 @@ ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *i,co
             *cursor=j+1;return leave(i,AYATSURI_MODEL_OK);
         }}
     *cursor=i->model->node_count;return leave(i,AYATSURI_MODEL_DONE);
+#endif
 }
 
 ayatsuri_model_status ayatsuri_model_instance_mesh_view(ayatsuri_model_instance *i,
         const void *owner,uint32_t generation,uint16_t id,ayatsuri_model_mesh_view *out){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    (void)id;(void)out;
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    return leave(i,AYATSURI_MODEL_INVALID);
+#else
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
     if(!i->evaluated)return leave(i,AYATSURI_MODEL_STATE);
     if(!out||id>=i->model->node_count||
@@ -696,10 +755,16 @@ ayatsuri_model_status ayatsuri_model_instance_mesh_view(ayatsuri_model_instance 
     const float *xy=(const float *)((const uint8_t *)p+sizeof *p);
     *out=(ayatsuri_model_mesh_view){p,xy+2*p->header.vertices,id,p->header.vertices};
     return leave(i,AYATSURI_MODEL_OK);
+#endif
 }
 
 ayatsuri_model_status ayatsuri_model_instance_sided_mesh_view(ayatsuri_model_instance *i,
         const void *owner,uint32_t generation,uint16_t id,ayatsuri_model_sided_mesh_view *out){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    (void)id;(void)out;
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    return leave(i,AYATSURI_MODEL_INVALID);
+#else
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
     if(!i->evaluated)return leave(i,AYATSURI_MODEL_STATE);
     if(!out||id>=i->model->node_count||overlaps(out,sizeof *out,i,sizeof *i)||
@@ -712,6 +777,7 @@ ayatsuri_model_status ayatsuri_model_instance_sided_mesh_view(ayatsuri_model_ins
     const uint16_t *back=mesh_back_colors(i,id,p->header.vertices);
     *out=(ayatsuri_model_sided_mesh_view){p,xy+2*p->header.vertices,back,(const uint8_t *)(back+2*p->header.vertices),id,p->header.vertices};
     return leave(i,AYATSURI_MODEL_OK);
+#endif
 }
 
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER

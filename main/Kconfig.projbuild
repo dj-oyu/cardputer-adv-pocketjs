@@ -226,4 +226,14 @@ menu "Pocket VM (diagnostics)"
             xTaskCreatePinnedToCore() is the only call site either way -- so a
             measurement across them is not confounded by a code-path change.
 
+    config AYATSURI_STREAM_CANDIDATE
+        bool "Compile isolated AYATSURI streaming producer candidate"
+        default n
+        help
+            Compiles the explicit native provider-only streaming API and emits
+            compiler stack-usage files. Does not load a model, allocate buffers,
+            register a JS entry, publish a frame or change default rendering.
+            Caller still owns pending/ready snapshots and display completion.
+            Experimental: host validation is not DMA, target RAM or FPS proof.
+
 endmenu
