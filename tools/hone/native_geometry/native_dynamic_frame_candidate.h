@@ -58,9 +58,15 @@ static inline bool hone_dynamic_frame_init(hone_dynamic_frame*f,const void*owner
  *f=value;f->normal.source=&f->context;return true;
 }
 static inline bool hone_dynamic_owned(const hone_dynamic_frame*f,const void*owner,uint32_t gen){return f&&f->alive&&!f->busy&&owner&&f->owner==owner&&gen&&f->generation==gen;}
-static inline bool hone_dynamic_frame_begin(hone_dynamic_frame*f,const void*owner,uint32_t gen,uint64_t revision){
+/* Retain the position arena. The owner must replace every stale mesh before
+ * sealing this revision. Normals are derived again for the new positions. */
+static inline bool hone_dynamic_frame_begin_retained(hone_dynamic_frame*f,const void*owner,uint32_t gen,uint64_t revision){
  if(!hone_dynamic_owned(f,owner,gen)||!revision||revision<=f->revision)return false;
  f->sealed=false;f->revision=revision;f->normal.valid=false;
+ return true;
+}
+static inline bool hone_dynamic_frame_begin(hone_dynamic_frame*f,const void*owner,uint32_t gen,uint64_t revision){
+ if(!hone_dynamic_frame_begin_retained(f,owner,gen,revision))return false;
  for(size_t i=0;i<f->mesh_count;i++)if(f->cold[i].source_vertex_count)memcpy((void*)f->meshes[i].source_positions,f->cold[i].source_position,12*(size_t)f->cold[i].source_vertex_count);
  return true;
 }

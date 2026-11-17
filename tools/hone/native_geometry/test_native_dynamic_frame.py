@@ -59,8 +59,17 @@ int main(void){
   for(unsigned node=0;node<2;node++){assert(hone_native_provider(&ctx,node,3,expected));assert(hone_dynamic_frame_provider(&dynamic,node,3,actual));assert(!memcmp(expected,actual,sizeof actual));}
   assert(!hone_dynamic_frame_provider(&dynamic,0,3,arena));
  }
+ assert(!hone_dynamic_frame_begin_retained(&dynamic,&owner,2,25));
+ assert(hone_dynamic_frame_begin_retained(&dynamic,&owner,1,25));
+ assert(!hone_dynamic_frame_begin_retained(&dynamic,&owner,1,25));
+ float *retained=hone_dynamic_frame_positions(&dynamic,&owner,1,0);
+ assert(retained&&!memcmp(retained,positions,sizeof positions));
+ assert(!hone_dynamic_frame_provider(&dynamic,0,3,actual));
+ retained[11]=.125f;memcpy(positions,retained,sizeof positions);
+ assert(compute(NULL,m,positions,normal));assert(hone_dynamic_frame_seal(&dynamic,&owner,1));
+ for(unsigned node=0;node<2;node++){assert(hone_native_provider(&ctx,node,3,expected));assert(hone_dynamic_frame_provider(&dynamic,node,3,actual));assert(!memcmp(expected,actual,sizeof actual));}
  assert(!hone_dynamic_frame_dispose(&dynamic,&owner,2));assert(hone_dynamic_frame_dispose(&dynamic,&owner,1));assert(!hone_dynamic_frame_provider(&dynamic,0,3,actual));free(arena);
- printf("DYNAMIC_FRAME PASS frames=24 arena_bytes=%zu init_capacity/owner/revision/seal_finite/slot_alias/dispose\n",bytes);
+ printf("DYNAMIC_FRAME PASS frames=25 arena_bytes=%zu init_capacity/owner/revision/retain/seal_finite/slot_alias/dispose\n",bytes);
  stream.busy=true;assert(!hone_normal_stream_begin(&stream,25));assert(!hone_normal_stream_provider(&stream,0,3,actual));stream.busy=false;
  puts("NORMAL_STREAM PASS frames=24 exact_provider_values frame_invalidation/cache_reuse/failure_slot_rollback/capacity/alias");
 }
