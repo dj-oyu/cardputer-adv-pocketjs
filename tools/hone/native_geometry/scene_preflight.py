@@ -2,8 +2,10 @@
 import collections
 import json
 import pathlib
+import struct
 import sys
 from provider_binding import binding_plan
+from consumer_plan import prepare
 
 
 def inspect(package):
@@ -29,11 +31,25 @@ def inspect(package):
                 modifiers[mod['type']] += 1
             if mod['viewport'] != mod['render']:
                 counts['viewport_render_modifier_differences'] += 1
+    # Match the cold packer's binary32 input before checking nonzero area.
+    # Degenerate source triangles must not be dropped: morphs may unfold them.
+    for mesh in prepare(package)['meshes']:
+        positions = [[struct.unpack('<f', struct.pack('<f',v))[0] for v in point]
+                     for point in mesh['positions']]
+        for triangle in mesh['triangles']:
+            a,b,c = (positions[i] for i in triangle)
+            u = [b[i]-a[i] for i in range(3)]
+            v = [c[i]-a[i] for i in range(3)]
+            cross = (u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])
+            counts['triangles'] += 1
+            counts['cold_zero_area_triangles'] += all(x == 0 for x in cross)
     n = plan['geometry_nodes']
     return dict(schema='hone.scene-preflight.v1', runtime_ready=False,
                 source_sha256=package.get('source_sha256'), geometry_nodes=n,
                 model_node_limit=256, remaining_slots_before_other_nodes=max(0, 256-n),
-                geometry_exceeds_limit=n > 256, counts=dict(counts),
+                geometry_exceeds_limit=n > 256,
+                cold_nonzero_area_check_passes=counts['cold_zero_area_triangles']==0,
+                counts=dict(counts),
                 viewport_modifiers=dict(modifiers),
                 pending=['non-geometry node assignment and full node budget',
                          'modifier semantics and evaluation order', 'dynamic controls and rig',

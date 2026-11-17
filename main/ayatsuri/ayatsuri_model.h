@@ -32,6 +32,10 @@ typedef struct {
      * Required extension 13: material sidedness U8 + three zero bytes,
      * one 4-byte row per material; absent means legacy single-sided. */
     ayatsuri_model_section section[13];
+    /* Native capability, never serialized. True forbids every cold fallback.
+     * Model and cold span remain immutable throughout instance lifetime.
+     * Appended C ABI field: rebuild all callers; never persist raw handles. */
+    bool provider_only;
 } ayatsuri_model;
 
 typedef struct {

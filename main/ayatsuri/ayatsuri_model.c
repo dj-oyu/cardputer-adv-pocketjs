@@ -51,7 +51,7 @@ static bool float_rows_valid(const uint8_t *data,uint32_t count,unsigned floats,
 }
 /* Every mesh row is validated, including unused cold rows. Offsets are row
  * indices, not pointers; the original byte span may be unaligned. */
-static bool meshes_valid(const ayatsuri_model *m){
+static bool meshes_valid(const ayatsuri_model *m,bool provider_only){
     for(uint32_t k=0;k<m->section[9].count;k++){
         const uint8_t *v=row(m,10,k,28);double length=0;
         for(unsigned j=0;j<7;j++){
@@ -84,12 +84,12 @@ static bool meshes_valid(const ayatsuri_model *m){
             const double ux=(double)mf(vb)-mf(va),uy=(double)mf(vb+4)-mf(va+4),uz=(double)mf(vb+8)-mf(va+8),
                 vx=(double)mf(vc)-mf(va),vy=(double)mf(vc+4)-mf(va+4),vz=(double)mf(vc+8)-mf(va+8),
                 x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx;
-            if(x==0&&y==0&&z==0)return false;
+            if(!provider_only&&x==0&&y==0&&z==0)return false;
         }
     }
     return true;
 }
-ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri_model *out){
+static ayatsuri_model_status model_open(const void *data,size_t bytes,ayatsuri_model *out,bool provider_only){
     const uint32_t endian=1;
     if(*(const uint8_t *)&endian!=1)return AYATSURI_MODEL_ENDIAN;
     if(!data||!out||bytes<32||bytes>AYATSURI_MODEL_MAX_BYTES||overlaps(out,sizeof *out,data,bytes))
@@ -99,7 +99,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
        sections<7||sections>AYATSURI_MODEL_MAX_SECTIONS||m32(p+16)!=32||m32(p+20)!=20||m32(p+24)||m32(p+28)||
        sections>(bytes-32)/20)return AYATSURI_MODEL_INVALID;
     const uint32_t directory_end=32+20*sections;
-    ayatsuri_model candidate={.data=p,.bytes=(uint32_t)bytes};unsigned seen=0;
+    ayatsuri_model candidate={.data=p,.bytes=(uint32_t)bytes,.provider_only=provider_only};unsigned seen=0;
     static const uint32_t strides[13]={16,36,12,24,72,8,1,32,32,28,6,12,4};
     for(uint32_t i=0;i<sections;++i){
         const uint8_t *d=p+32+20*i;const uint16_t type=m16(d),flags=m16(d+2);
@@ -134,7 +134,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
         }
     }
     candidate.node_count=(uint16_t)count;
-    if(!meshes_valid(&candidate))return AYATSURI_MODEL_INVALID;
+    if(!meshes_valid(&candidate,provider_only))return AYATSURI_MODEL_INVALID;
     for(uint32_t k=0;k<candidate.section[6].count;++k){const uint8_t c=*row(&candidate,7,k,1);
         if(c<32||c>126)return AYATSURI_MODEL_INVALID;}
     if(!float_rows_valid(row(&candidate,2,0,36),count,9,9)||
@@ -199,6 +199,14 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
     }
     *out=candidate;return AYATSURI_MODEL_OK;
 }
+ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri_model *out){
+    return model_open(data,bytes,out,false);
+}
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+ayatsuri_model_status ayatsuri_model_open_provider(const void *data,size_t bytes,ayatsuri_model *out){
+    return model_open(data,bytes,out,true);
+}
+#endif
 ayatsuri_model_status ayatsuri_model_find_node(const ayatsuri_model *m,const char *name,size_t bytes,uint16_t *out){
     if(!m||!m->data||!name||!out||!bytes||bytes>127||overlaps(out,sizeof *out,m,sizeof *m)||
        overlaps(out,sizeof *out,m->data,m->bytes))return AYATSURI_MODEL_INVALID;
@@ -617,6 +625,7 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
 ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,const float camera[9],const float light[6]){
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    if(i->model->provider_only)return leave(i,AYATSURI_MODEL_INVALID);
     return evaluate_meshes(i,camera,light,NULL,0);
 }
 static bool geometry_span(const ayatsuri_model_instance *i,const void *p,size_t bytes,size_t align){
@@ -627,6 +636,7 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate_meshes(ayatsuri_model_ins
         uint32_t generation,const float camera[9],const float light[6],
         const ayatsuri_model_mesh_geometry *meshes,size_t count){
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    if(i->model->provider_only)return leave(i,AYATSURI_MODEL_INVALID);
     if(count>i->model->node_count||(count&&!geometry_span(i,meshes,count*sizeof *meshes,_Alignof(ayatsuri_model_mesh_geometry))))
         return leave(i,AYATSURI_MODEL_INVALID);
     for(size_t k=0;k<count;++k){

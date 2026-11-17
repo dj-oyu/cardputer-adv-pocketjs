@@ -16,6 +16,19 @@
 typedef bool (*ayatsuri_model_geometry_provider)(void *context,unsigned node_id,
         unsigned vertex_count,ayatsuri_skin_result *slot);
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+/* Explicit trusted-native admission: identical structural/value validation to
+ * ordinary open except cold triangles may have zero area. Distinct indices,
+ * finite bounded positions and unit normals remain required. Success creates
+ * an immutable provider-only model; ordinary evaluate/evaluate_meshes reject.
+ * All mesh geometry must come from the synchronous provider every evaluation.
+ * This capability is native-only, not a wire flag or a JS entry point. A failed
+ * open leaves out unchanged. Existing AYNM/open behavior is unaffected.
+ * Trusted callers must only use successfully opened handles and must never
+ * forge/clear the capability or mutate a model borrowed by a live instance.
+ * This is not a security boundary against arbitrary native memory writes; no
+ * script/untrusted code may supply or modify native handles. The wire format
+ * carries no capability: a source blob must explicitly be opened this way. */
+ayatsuri_model_status ayatsuri_model_open_provider(const void *data,size_t bytes,ayatsuri_model *out);
 /* Dedicated candidate only: this is NOT a ready-actor atomic update API.
  * Caller supplies an aligned, valid, writable 32-result slot disjoint from
  * candidate/model/arena/cold data/camera/light and externally ready storage.

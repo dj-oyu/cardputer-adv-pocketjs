@@ -185,6 +185,43 @@ construct the scene or claim runtime admission.
 non-geometry nodes, along with source topology, weights and modifier counts.
 Missing normal or modifier inventory rejects. Its report is not a full scene
 budget or a modifier, material, animation or runtime admission decision.
+It also checks whether the rest triangles have nonzero area after binary32
+rounding, as required by ordinary cold AYNM admission. Never remove collapsed
+triangles merely to pass this check: later morphs may unfold them.
+
+`scene_hierarchy_inventory.py` snapshots evaluated Blender object transforms
+and verifies source hashes, supported parent types, finite controls and absence
+of active object constraints. `scene_node_plan.py` assigns parent-first model
+nodes and explicit provider IDs; it does not evaluate later animation or infer
+camera, lights, material or rig semantics. `driver_route_plan.py` inventories
+every driver output and retains unbound routes explicitly. The candidate
+`driver_node_targets_candidate.h` stages admitted direct-XYZ parent pose and
+mesh-visibility outputs into caller-owned model target arrays. Input freeze,
+remaining rig/morph/shader outputs and whole-frame publication remain external.
+`emit_driver_morph_targets.py` separately routes admitted relative, unmasked,
+unmuted shape-key values into disjoint caller-owned storage. Masked, absolute,
+missing or muted source keys reject; it does not evaluate rig or modifiers.
+
+`scene_cold_probe.py`, `compile_provider_probe.cjs` and
+`run_scene_provider_probe.py` exercise a provider-only cold topology with explicit
+placeholder materials. They are host diagnostics, not firmware-ready assets or
+rendering correctness evidence. The probe must never be flashed or presented as
+the finished model. The provider-only open path rejects ordinary cold fallback;
+all active meshes must be supplied by the native provider every evaluation.
+
+`frame_memory_plan.py` counts explicitly sized candidate arrays, and
+`native_normals_batch.h` shares the normal workspace across sequential meshes.
+The result excludes model/snapshot arenas, rig, alpha, display, ABI padding and
+stack. Pending geometry remains owned and live for the whole provider pass;
+these estimates are not target memory or performance measurements.
+
+`shrinkwrap_route_plan.py` records nearest-surface dependencies and rejects
+cycles and unsupported modes. `native_wrap_candidate.c` transforms current
+source positions into the current target's coordinates, requires a rigid
+relative transform, applies the admitted ON_SURFACE offset and converts back.
+Target deformation, bone evaluation, modifier ordering, workspace ownership
+and normals remain caller responsibilities. Candidate output is unpublished and
+may be partially written on failure; no target timing is established.
 
 Host GCC/x86-64 `-fstack-usage` comparison with the same external callback wrapper:
 before, O2 provider 1,664 bytes plus wrapper 8; after, the inlined wrapper is

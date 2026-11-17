@@ -4,7 +4,7 @@ function int(v,a,b){if(!Number.isInteger(v)||v<a||v>b)throw TypeError('integer r
 function f32(v){if(typeof v!=='number'||!Number.isFinite(Math.fround(v)))throw TypeError('finite F32');return v;}
 function unit(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>1)throw TypeError('unit coefficient');return v;}
 function floats(a,n){if(!a||a.length!==n)throw TypeError('vector length');for(let i=0;i<n;i++)f32(a[i]);return a;}
-function meshRows(mesh,vertexStart,triangleStart,holeStart){
+function meshRows(mesh,vertexStart,triangleStart,holeStart,providerOnly){
   if(!mesh||typeof mesh!=='object')throw TypeError('mesh descriptor');
   const nv=int(mesh.vertices?.length/3,3,32),nt=int(mesh.indices?.length/3,1,64),
     xyz=Array.from(floats(mesh.vertices,nv*3),Math.fround),mask=Array.from(floats(mesh.mask,nv),Math.fround),
@@ -16,10 +16,12 @@ function meshRows(mesh,vertexStart,triangleStart,holeStart){
       ux=xyz[b]-xyz[a],uy=xyz[b+1]-xyz[a+1],uz=xyz[b+2]-xyz[a+2],
       vx=xyz[c]-xyz[a],vy=xyz[c+1]-xyz[a+1],vz=xyz[c+2]-xyz[a+2],
       n=[uy*vz-uz*vy,uz*vx-ux*vz,ux*vy-uy*vx];
-    if(n.every(v=>v===0))throw TypeError('degenerate mesh triangle');
+    if(providerOnly&&new Set(ids).size!==3)throw TypeError('repeated mesh triangle index');
+    if(!providerOnly&&n.every(v=>v===0))throw TypeError('degenerate mesh triangle');
     // Match each authoring Float32 accumulation, then the final Float32 store.
     for(const id of ids)for(let j=0;j<3;j++)normals[id*3+j]+=n[j];
   }
+  if(providerOnly&&mesh.normals===undefined)throw TypeError('provider cold normals required');
   if(mesh.normals!==undefined)normals.set(floats(mesh.normals,nv*3));
   else for(let v=0;v<nv;v++){
     const at=v*3,length=Math.hypot(Math.hypot(normals[at],normals[at+1]),normals[at+2]);
@@ -51,7 +53,7 @@ function meshRows(mesh,vertexStart,triangleStart,holeStart){
   indices.forEach((v,j)=>triangles.writeUInt16LE(v,j*2));holeXYZ.forEach((v,j)=>holeBytes.writeFloatLE(v,j*4));
   return {descriptor,vertices,triangles,holeBytes,nv,nt,nh:holeXYZ.length/3};
 }
-function compile(m){
+function compileInternal(m,providerOnly){
   if(!m||!['ayatsuri-native-model-design-v1','ayatsuri-native-model-design-v2'].includes(m.schema)||!Array.isArray(m.nodes))throw TypeError('manifest');
   const count=int(m.nodes.length,1,256),nodes=Buffer.alloc(count*16),poses=Buffer.alloc(count*36),radii=[],lobes=[],materials=[],sides=[],bindings=Buffer.alloc(count*8),names=[],regions=[],meshes=[],meshVertices=[],meshTriangles=[],meshHoles=[];
   let nameBytes=0,ellipseCount=0,lobeCount=0,meshVertexCount=0,meshTriangleCount=0,meshHoleCount=0;
@@ -84,7 +86,7 @@ function compile(m){
       material=materials.findIndex((b,j)=>b.equals(mat)&&sides[j]===side);if(material<0){material=materials.length;materials.push(mat);sides.push(side);}
       if(kind===1){floats(n.radii,3);n.radii.forEach(v=>{if(!(Math.fround(v)>0))throw TypeError('radii');});shape=ellipseCount++;const b=Buffer.alloc(12);n.radii.forEach((v,k)=>b.writeFloatLE(v,k*4));radii.push(b);}
       else if(kind===3){
-        const mesh=meshRows(n.mesh,meshVertexCount,meshTriangleCount,meshHoleCount);shape=meshes.length;meshes.push(mesh.descriptor);
+        const mesh=meshRows(n.mesh,meshVertexCount,meshTriangleCount,meshHoleCount,providerOnly);shape=meshes.length;meshes.push(mesh.descriptor);
         meshVertices.push(mesh.vertices);meshTriangles.push(mesh.triangles);meshHoles.push(mesh.holeBytes);
         meshVertexCount+=mesh.nv;meshTriangleCount+=mesh.nt;meshHoleCount+=mesh.nh;
       }else{lc=int(n.lobes.length/6,1,8);floats(n.lobes,lc*6);shape=lobeCount;lobeCount+=lc;blend=f32(n.blend);if(blend<0||blend>128)throw TypeError('blend');
@@ -110,4 +112,9 @@ function compile(m){
   const out=Buffer.alloc(total);out.write('AYNM');out.writeUInt16LE(1,4);out.writeUInt16LE(32,6);out.writeUInt32LE(total,8);out.writeUInt32LE(sections.length,12);out.writeUInt32LE(32,16);out.writeUInt32LE(20,20);
   sections.forEach((s,i)=>{const o=32+i*20;out.writeUInt16LE(s.type||i+1,o);out.writeUInt16LE(1,o+2);[s.offset,s.data.length,s.count,s.stride].forEach((v,k)=>out.writeUInt32LE(v,o+4+k*4));s.data.copy(out,s.offset);});return out;
 }
-module.exports={compile};
+function compile(m){return compileInternal(m,false);}
+// Explicit native-provider authoring. Topology is preserved, including collapsed
+// triangles. No invented positions/normals; caller must supply unit cold normals.
+// Use open_provider for the immutable native capability. No wire extension.
+function compileProvider(m){return compileInternal(m,true);}
+module.exports={compile,compileProvider};
