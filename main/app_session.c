@@ -1011,6 +1011,7 @@ void app_report(void) {
 static uint32_t run_generation;
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
 static bool companion_running;
+static bool companion_heap_monitor;
 
 static void companion_heap_log(const char *stage) {
     const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
@@ -1042,6 +1043,13 @@ bool app_stop(void) {
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
     if(companion_running) {
         if(board_present_finish()!=ESP_OK||!ayatsuri_pose_dma_probe_close_after_drain())return false;
+        if(companion_heap_monitor) {
+            const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+            ESP_LOGI("app","COMPANION_HEAP_LOW free_internal=%u",
+                     (unsigned)heap_caps_get_minimum_free_size(caps));
+            heap_caps_monitor_local_minimum_free_size_stop();
+            companion_heap_monitor=false;
+        }
         companion_running=false;
         stop_pending=false;
         companion_heap_log("stopped");
@@ -1530,6 +1538,7 @@ esp_err_t app_start_test(char test) {
         jsconsole_clear();
         if(++run_generation==0)++run_generation;
         companion_running=true;
+        companion_heap_monitor=heap_caps_monitor_local_minimum_free_size_start()==ESP_OK;
         companion_heap_log("ready");
         ESP_LOGI("app","AYATSURI_COMPANION_READY");
         return ESP_OK;
