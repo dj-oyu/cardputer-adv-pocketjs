@@ -95,7 +95,11 @@ static struct {
     probe_phase phase;
     unsigned checked, completed, flat_completed, demo_pose;
     int displayed_pose, held_pose;
-    int64_t started, last_demo, prepare_us, geometry_us, raster_us, submit_us, finish_us;
+    int64_t started, next_demo, prepare_us, geometry_us, raster_us, submit_us, finish_us;
+#ifdef AY_COMPANION_MOTION_POSES
+    int64_t demo_first_drain, demo_last_drain, demo_longest_interval;
+    unsigned demo_intervals;
+#endif
     char result[40];
 } probe;
 
@@ -416,7 +420,30 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
-void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect_pose, bool capture)
+#ifdef AY_COMPANION_MOTION_POSES
+static void demo_completed(int64_t drained)
+{
+    if (!probe.demo_first_drain) {
+        probe.demo_first_drain = drained;
+    } else {
+        const int64_t interval = drained - probe.demo_last_drain;
+        if (interval > probe.demo_longest_interval) probe.demo_longest_interval = interval;
+        if (++probe.demo_intervals == MEASURE_FRAMES) {
+            const int64_t elapsed = drained - probe.demo_first_drain;
+            ESP_LOGI(tag, "DEMO_RATE drain_intervals=%u elapsed_us=%" PRId64
+                     " displayed_fps=%.3f longest_interval_us=%" PRId64,
+                     probe.demo_intervals, elapsed, probe.demo_intervals * 1000000.0 / elapsed,
+                     probe.demo_longest_interval);
+            probe.demo_first_drain = drained;
+            probe.demo_intervals = 0;
+            probe.demo_longest_interval = 0;
+        }
+    }
+    probe.demo_last_drain = drained;
+}
+#endif
+
+int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect_pose, bool capture)
 {
     if (generation != probe.generation || restart) begin_benchmark(generation);
 
@@ -424,13 +451,23 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
     const bool is_capture = capture || board_capture_active();
     if (!is_capture) board_async_set(1);
 #ifdef AY_COMPANION_MOTION_POSES
-    if (inspect_pose == AY_COMPANION_RESUME_DEMO && probe.phase == DEMO)
+    if (inspect_pose == AY_COMPANION_RESUME_DEMO && probe.phase == DEMO && probe.held_pose >= 0) {
         probe.held_pose = -1;
+        probe.next_demo = 0;
+    }
 #endif
     const bool select_pose = inspect_pose >= 0 && inspect_pose < (int)POSE_COUNT &&
                              inspect_pose != probe.held_pose;
     char pose_label[16];
 
+#ifdef AY_COMPANION_MOTION_POSES
+    if (select_pose || is_capture) {
+        probe.demo_first_drain = 0;
+        probe.demo_intervals = 0;
+        probe.demo_longest_interval = 0;
+        probe.next_demo = 0;
+    }
+#endif
     if (is_capture) {
         const int pose = probe.phase == DEMO ? probe.displayed_pose : -1;
         const char *label = probe.phase >= DEMO ? probe.result : "RUNNING";
@@ -465,7 +502,7 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
             if (probe.phase == FAILED) (void)present_pose(-1, probe.result, false);
         }
     } else if (probe.phase == DEMO && (select_pose ||
-               (probe.held_pose < 0 && esp_timer_get_time() - probe.last_demo >= demo_interval_us))) {
+               (probe.held_pose < 0 && esp_timer_get_time() >= probe.next_demo))) {
         const int pose = select_pose ? inspect_pose : (int)probe.demo_pose;
         const char *label = probe.result;
         if (select_pose) label = inspection_label(pose, pose_label);
@@ -482,12 +519,23 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
             else probe.demo_pose = FIRST_MOTION_POSE +
                     (probe.demo_pose - FIRST_MOTION_POSE + 1) % (POSE_COUNT - FIRST_MOTION_POSE);
 #ifdef AY_COMPANION_MOTION_POSES
-            probe.last_demo = demo_begin;
+            if (!select_pose) {
+                /* Keep the clock phase across ordinary tick jitter. Following
+                 * a long stall, resume at this pose without skipping a pose. */
+                if (!probe.next_demo || demo_begin - probe.next_demo >= demo_interval_us)
+                    probe.next_demo = demo_begin;
+                probe.next_demo += demo_interval_us;
+                demo_completed(esp_timer_get_time());
+            }
 #else
-            probe.last_demo = esp_timer_get_time();
+            probe.next_demo = esp_timer_get_time() + demo_interval_us;
 #endif
         }
     }
 
     if (!is_capture) board_async_set(original_async);
+#ifdef AY_COMPANION_MOTION_POSES
+    if (probe.phase == DEMO && probe.held_pose < 0 && !is_capture) return probe.next_demo;
+#endif
+    return 0;
 }

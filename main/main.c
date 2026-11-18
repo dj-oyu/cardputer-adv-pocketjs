@@ -963,6 +963,7 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+static int64_t companion_deadline;
 static bool pose_companion_active(void) {
     return running && strcmp(app_registry_current()->id, "local.companion") == 0;
 }
@@ -1033,7 +1034,7 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 #else
             const int inspect_pose=key==KEY_LEFT?0:key==KEY_RIGHT?3:-1;
 #endif
-            ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, inspect_pose, shot);
+            companion_deadline = ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, inspect_pose, shot);
             if(shot) board_capture(false);
         }
         return;
@@ -1227,6 +1228,9 @@ static void ui_task(void *arg) {
 #endif
     int deferred_diagnostic=0;
     while(1) {
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+        companion_deadline=0;
+#endif
         if(!retry_transitions()) { vTaskDelay(pdMS_TO_TICKS(10));continue; }
         native_observe();
         app_control_pump((uint64_t)esp_timer_get_time()/1000);
@@ -1562,6 +1566,21 @@ static void ui_task(void *arg) {
         // it removes is the "up to one frame period" term of completion
         // latency, and nothing else.
         if(running) {
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+            if(companion_deadline) {
+                int64_t now=esp_timer_get_time(),remaining=companion_deadline-now;
+                if(remaining>0) {
+                    /* Keep the UI responsive to its polled key queue even
+                     * when renders become much shorter than the frame period. */
+                    if(remaining>VM_MIN_PERIOD_MS*1000)remaining=VM_MIN_PERIOD_MS*1000;
+                    uint32_t ticks=(uint32_t)((remaining*configTICK_RATE_HZ+999999)/1000000);
+                    ticks=sys_device_wait_ticks(now,ticks,configTICK_RATE_HZ);
+                    vm_wake_wait(pocket_kasane_source_wait_ticks(now,ticks,configTICK_RATE_HZ));
+                } else vTaskDelay(1);
+                period_began=esp_timer_get_time();
+                continue;
+            }
+#endif
             // THE RULE (docs/vm/vm-L1-report.md sec.2.4): the display period
             // paces PICTURES, so it is charged once per frame() and from the
             // start of that frame's period -- not once per turn. A turn that
