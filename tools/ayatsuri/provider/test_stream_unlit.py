@@ -26,8 +26,23 @@ static bool observe_unlit(void*ctx,const ayatsuri_stream_attributed_mesh*v){
  return true;
 }
 static uint16_t load16(const uint8_t*p){return (uint16_t)(p[0]|p[1]<<8);}
+static void check_winding_modes(void){
+ const float xy[]={0,0,1,0,0,1},depth[]={0,0,0};
+ const uint16_t triangles[]={0,1,2,0,2,1,0,0,2};
+ uint16_t out[9]={0};
+ uint32_t counts[3]={0};
+ for(unsigned mode=AYATSURI_VISIBILITY_POSITIVE;mode<=AYATSURI_VISIBILITY_BOTH;mode++){
+  assert(ayatsuri_visibility_select_faces(xy,depth,3,triangles,3,AYATSURI_VISIBILITY_AUTHORED,
+          (ayatsuri_visibility_faces)mode,out,9,counts)==AYATSURI_VISIBILITY_OK);
+  unsigned start=mode==AYATSURI_VISIBILITY_NEGATIVE?3:0;
+  unsigned selected=mode==AYATSURI_VISIBILITY_BOTH?2:1;
+  assert(counts[0]==selected&&counts[1]==2-selected&&counts[2]==1);
+  assert(!memcmp(out,triangles+start,3*selected*sizeof *out));
+ }
+}
 '''
 source=source.replace('int main(int argc,char**argv){',helpers+'\nint main(int argc,char**argv){')
+source=source.replace(' assert(argc==2);', ' check_winding_modes();assert(argc==2);')
 anchor='size_t used=ready.packets.size;memcpy(saved,ready.packets.data,used);ksn_mesh_snapshot ready_before=ready;'
 assert source.count(anchor)==1
 source=source.replace(anchor,anchor+r'''
@@ -44,7 +59,16 @@ source=source.replace(anchor,anchor+r'''
   assert(ayatsuri_stream_candidate_frame_attributed_unlit(&stream,&owner,1,camera,light,positions_only,&p,slot,&pending,&manifest,observe_unlit,NULL)==AYATSURI_MODEL_INVALID);
   routes[0].lane=AYATSURI_STREAM_MATERIAL;
   assert(ayatsuri_stream_candidate_frame_attributed_unlit(&stream,&owner,1,camera,light,positions_only,&p,slot,&pending,&manifest,NULL,NULL)==AYATSURI_MODEL_INVALID);
+  ayatsuri_visibility_faces faces[23];
+  for(size_t i=0;i<nr;i++)faces[i]=AYATSURI_VISIBILITY_BOTH;
+  const float upright[]={0,-400,100,0,0,0,1,120,67};
+  assert(ayatsuri_stream_candidate_frame_attributed_z_up(&stream,&owner,1,upright,light,positions_only,&p,slot,&pending,&manifest,faces,nr-1,observe_unlit,NULL)==AYATSURI_MODEL_INVALID);
+  faces[0]=0;
+  assert(ayatsuri_stream_candidate_frame_attributed_z_up(&stream,&owner,1,upright,light,positions_only,&p,slot,&pending,&manifest,faces,nr,observe_unlit,NULL)==AYATSURI_MODEL_INVALID);
   assert(p.calls==old_calls&&!memcmp(&old_pending,&pending,sizeof pending));
+  faces[0]=AYATSURI_VISIBILITY_BOTH;
+  assert(ayatsuri_stream_candidate_frame_attributed_z_up(&stream,&owner,1,upright,light,positions_only,&p,slot,&pending,&manifest,faces,nr,observe_unlit,NULL)==AYATSURI_MODEL_OK);
+  assert(p.calls==old_calls+nr&&!pending.packets.size);
   for(position_bad=1;position_bad<=3;position_bad++)assert(ayatsuri_stream_candidate_frame_attributed_unlit(&stream,&owner,1,camera,light,positions_only,&p,slot,&pending,&manifest,observe_unlit,NULL)!=AYATSURI_MODEL_OK);
   position_bad=0;sink_bad=1;
   assert(ayatsuri_stream_candidate_frame_attributed_unlit(&stream,&owner,1,camera,light,positions_only,&p,slot,&pending,&manifest,observe_unlit,NULL)!=AYATSURI_MODEL_OK);sink_bad=0;

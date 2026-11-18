@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, bool capture);
+void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect_pose, bool capture);
 /* The UI owner must confirm its display drain before releasing the live model. */
 bool ayatsuri_pose_dma_probe_close_after_drain(void);
 

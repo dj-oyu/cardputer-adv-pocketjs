@@ -40,7 +40,9 @@ def plan(package, hierarchy):
         parent_id=add_group(row['parent'],visiting) if row['parent'] is not None else -1
         visiting.remove(name)
         index=len(nodes);group_ids[name]=index
-        nodes.append(dict(index=index,kind='group',parent=parent_id,pose=pose(row),enabled=not row['hide_render'],source_object=name))
+        # Blender hide_render is per object. This transform-only group has no
+        # geometry, while disabling it in Ayatsuri hides all its descendants.
+        nodes.append(dict(index=index,kind='group',parent=parent_id,pose=pose(row),enabled=True,source_object=name))
         assignment.append(None)
         return index
     for row in meshes:

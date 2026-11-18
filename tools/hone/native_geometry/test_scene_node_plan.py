@@ -36,6 +36,14 @@ class TestSceneNodePlan(unittest.TestCase):
         for h in cases:
             with self.subTest(h=h), self.assertRaises(ValueError):plan(package,h)
 
+    def test_hidden_transform_ancestor_keeps_visible_mesh(self):
+        package, hierarchy = self.fixture()
+        hierarchy['parents'][0]['hide_render'] = True
+        hierarchy['meshes'][0]['hide_render'] = False
+        result = plan(package, hierarchy)
+        self.assertEqual([n['parent'] for n in result['nodes']], [-1, 0, 0])
+        self.assertEqual([n['enabled'] for n in result['nodes']], [True, True, True])
+
     def test_total_nodes_not_just_geometry_must_fit(self):
         package, hierarchy = self.fixture()
         with patch('scene_node_plan.binding_plan',return_value={'nodes':[{'source_mesh':0}]*256}):

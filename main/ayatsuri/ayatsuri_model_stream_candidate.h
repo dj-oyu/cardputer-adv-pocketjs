@@ -1,6 +1,7 @@
 #ifndef AYATSURI_MODEL_STREAM_CANDIDATE_H
 #define AYATSURI_MODEL_STREAM_CANDIDATE_H
 #include "ayatsuri_model_provider.h"
+#include "ayatsuri_visibility.h"
 #include "../ui/kasane/ksn_mesh_depth.h"
 /* Explicit native-only prototype. Compile ayatsuri_model_stream_candidate.c
  * separately; not a default model API, wire flag, JS entry or runtime admission.
@@ -67,4 +68,11 @@ typedef bool (*ayatsuri_stream_position_provider)(void*,unsigned,unsigned,ayatsu
 ayatsuri_model_status ayatsuri_stream_candidate_frame_attributed_unlit(ayatsuri_stream_candidate*,const void*,uint32_t,
  const float[9],const float[6],ayatsuri_stream_position_provider,void*,ayatsuri_skin_result[32],
  ksn_mesh_snapshot*,const ayatsuri_stream_routes*,ayatsuri_stream_attributed_sink,void*);
+/* Z-up orthographic view for sources authored with +Z up. Use one winding
+ * selector per material route, in route order. The span is borrowed until
+ * return. The sink owns material admission and depth/alpha composition. */
+ayatsuri_model_status ayatsuri_stream_candidate_frame_attributed_z_up(ayatsuri_stream_candidate*,const void*,uint32_t,
+ const float[9],const float[6],ayatsuri_stream_position_provider,void*,ayatsuri_skin_result[32],
+ ksn_mesh_snapshot*,const ayatsuri_stream_routes*,const ayatsuri_visibility_faces*,size_t,
+ ayatsuri_stream_attributed_sink,void*);
 #endif

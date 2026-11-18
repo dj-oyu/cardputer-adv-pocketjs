@@ -225,6 +225,7 @@ typedef struct {
     const ayatsuri_stream_routes *routes;ayatsuri_stream_attributed_sink sink;void *sink_context;
     size_t route_cursor;
     ayatsuri_stream_position_provider positions;bool unlit;
+    const ayatsuri_visibility_faces *faces;
 } model_stream_request;
 static bool stream_dispatch(void*,unsigned,unsigned,ayatsuri_skin_result*);
 static __attribute__((noinline)) bool model_stream_notify(model_stream_request*r,
@@ -578,7 +579,7 @@ static bool mesh_prepare_projection(const ayatsuri_model_instance *i,const float
 }
 /* The optional projection cache belongs to one unlit evaluation. The camera
  * basis is fixed throughout that evaluation and the key includes signed zero. */
-static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3],const ayatsuri_skin_result *geometry,mesh_projection_cache *cache){
+static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3],const ayatsuri_skin_result *geometry,mesh_projection_cache *cache,ayatsuri_visibility_faces faces){
     const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*d=row(model,9,m16(node+4),32),
         *material=row(model,5,m16(node+8),72);
     const unsigned nv=m16(d+2),nt=m16(d+6);const bool sided=mesh_double(model,node),unlit=cache!=NULL;float *m=work(i,id);
@@ -595,7 +596,11 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
     }
     if(!unlit)for(unsigned r=0;r<8;r++)coeff[r]=mf(material+4*r);
     ayatsuri_shade_basis shade={0};if(!unlit&&!ayatsuri_shade_prepare(i->lighting,&shade))return false;
-    memset(p,0,sizeof *p);p->header.vertices=(uint8_t)nv;p->header.holes=d[10];
+    /* The unlit material callback borrows only declared vertices/depth and
+     * selected indices. Each is fully written below. No full patch escapes. */
+    if(unlit)memset(&p->header,0,sizeof p->header);
+    else memset(p,0,sizeof *p);
+    p->header.vertices=(uint8_t)nv;p->header.holes=d[10];
     for(unsigned v=0;v<nv;v++){
         const uint8_t *cold=row(model,10,m16(d)+v,28);ksn_proc_gouraud_vertex *out=p->vertices+v;
         if(geometry){
@@ -627,6 +632,9 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
             back[1]=ayatsuri_shade_sample(snorm,m16(d+16),d[18],i->lighting,coeff,&shade);
         }
     }
+    /* A hidden unlit mesh still supplies validated local/projected vertices
+     * to its sink. The view always has zero visible triangles and no indices. */
+    if(unlit&&!states(i)[id].world_enabled&&!sided&&!d[10])return true;
     /* Decode cold U16 indices instead of assuming the caller's span alignment. */
     uint16_t indices[3*KSN_PROC_GOURAUD_TRIANGLES];uint32_t counts[3];
     for(unsigned t=0;t<nt;t++)for(unsigned v=0;v<3;v++)indices[3*t+v]=m16(row(model,11,m16(d+4)+t,6)+2*v);
@@ -634,7 +642,8 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
         uint8_t *bits=(uint8_t *)(mesh_back_colors(i,id,nv)+2*nv);
         mesh_select_sided(xy,depth,indices,nt,d[11],reflected,p,bits);counts[0]=p->header.triangles;
     }else{
-        if(ayatsuri_visibility_select(xy,depth,nv,indices,nt,(ayatsuri_visibility_order)d[11],p->indices,3*nt,counts)!=AYATSURI_VISIBILITY_OK)return false;
+        if(ayatsuri_visibility_select_faces(xy,depth,nv,indices,nt,(ayatsuri_visibility_order)d[11],
+                                           faces,p->indices,3*nt,counts)!=AYATSURI_VISIBILITY_OK)return false;
         p->header.triangles=(uint8_t)counts[0];
     }
     unsigned hole_at=m16(d+8);
@@ -674,8 +683,21 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
     fx/=distance;fy/=distance;fz/=distance;
     double rx=fz,rz=-fx,length=hypot(rx,rz);
     if(length<1e-6){rx=1;rz=0;length=1;}rx/=length;rz/=length;
-    const float forward[3]={(float)fx,(float)fy,(float)fz},right[3]={(float)rx,0,(float)rz},
+    const float forward[3]={(float)fx,(float)fy,(float)fz};
+    float right[3]={(float)rx,0,(float)rz},
         down[3]={(float)(fy*rz),(float)(fz*rx-fx*rz),(float)(-fy*rx)};
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    model_stream_request *request=context;
+    if(request&&request->faces){
+        /* Blender world Z points up. Right × forward points down in the
+         * image, and depth still increases toward the viewer. */
+        const double horizontal=hypot(fx,fy);
+        const double x=horizontal<1e-6?1:-fy/horizontal;
+        const double y=horizontal<1e-6?0:fx/horizontal;
+        right[0]=(float)x;right[1]=(float)y;right[2]=0;
+        down[0]=(float)(y*fz);down[1]=(float)(-x*fz);down[2]=(float)(x*fy-y*fx);
+    }
+#endif
     for(unsigned k=0;k<3;++k){i->lighting[k]=light[k];i->lighting[3+k]=forward[k];i->lighting[6+k]=light[3+k];}
 #ifdef AYATSURI_MODEL_STREAM_INTERNAL
     int previous_parent=-2;
@@ -737,11 +759,12 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
             const size_t shared=model_stream_shared_offset(i->model);
             memcpy((uint8_t*)i->arena+shared,work(i,j),84);
             states(i)[j].offset=(uint32_t)shared;
-            bool ok=mesh_packet(i,j,right,down,forward,geometry,((model_stream_request*)context)->unlit?&projection_cache:NULL);
+            const ayatsuri_visibility_faces faces=request->faces?
+                request->faces[request->route_cursor]:AYATSURI_VISIBILITY_POSITIVE;
+            bool ok=mesh_packet(i,j,right,down,forward,geometry,request->unlit?&projection_cache:NULL,faces);
             if(ok){
                 const ksn_proc_gouraud_patch *patch=(const void*)((const uint8_t*)work(i,j)+84);
                 const float *xy=(const void*)((const uint8_t*)patch+sizeof *patch);
-                model_stream_request *request=context;
                 bool append=true;
                 if(request->sink){
                     append=request->routes->routes[request->route_cursor].lane==AYATSURI_STREAM_OPAQUE;
@@ -757,7 +780,7 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
         }
 #else
         if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward))||
-           (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry,NULL)))
+           (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry,NULL,AYATSURI_VISIBILITY_POSITIVE)))
             return leave(i,AYATSURI_MODEL_RANGE);
         if(node[2]){add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);}
 #endif

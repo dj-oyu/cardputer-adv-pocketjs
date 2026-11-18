@@ -24,7 +24,7 @@
 static ay_damage_history displayed;
 #define MODEL_SHA256 AY_LIVE_MODEL_SHA256
 #define POSE_COUNT AY_LIVE_MODEL_POSE_COUNT
-#define MODEL_RENDERER "compact_opaque"
+#define MODEL_RENDERER "compact_opaque_eye_masks"
 #define LIVE_DEFORMATION "true"
 #define MODEL_LABEL "AYATSURI  /  LIVE MODEL"
 #define MEASURE_FRAMES 126u
@@ -80,6 +80,7 @@ static struct {
     uint32_t generation;
     probe_phase phase;
     unsigned checked, completed, flat_completed, demo_pose;
+    int displayed_pose, held_pose;
     int64_t started, last_demo, prepare_us, geometry_us, raster_us, submit_us, finish_us;
     char result[40];
 } probe;
@@ -266,10 +267,17 @@ static bool present_pose(int pose, const char *label, bool measure)
             continue;
         }
         paint_begin(storage.band, (int)y, (int)rows);
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+        paint_fill(160, 0, 80, 30, 0x0841);
+        paint_ascii(164, 3, "AYATSURI", 0xffff);
+        paint_ascii(164, 13, label, 0xffff);
+        paint_ascii(164, 22, "L/R: POSE", 0x9d9f);
+#else
         paint_fill(0, 0, WIDTH, 30, 0x0841);
         paint_ascii(6, 3, MODEL_LABEL, 0xffff);
         paint_ascii(6, 13, label, 0xffff);
         paint_ascii(6, 22, "ENTER: RUN AGAIN   BACK: EXIT", 0x9d9f);
+#endif
         const int64_t rendered = esp_timer_get_time();
         if (measure) probe.raster_us += rendered - started;
 
@@ -317,6 +325,7 @@ static void begin_benchmark(uint32_t generation)
 #endif
     memset(&probe, 0, sizeof probe);
     probe.generation = generation;
+    probe.displayed_pose = probe.held_pose = -1;
     const esp_app_desc_t *app = esp_app_get_description();
     ESP_LOGI(tag, "BEGIN model_sha256=%s poses=%u renderer=" MODEL_RENDERER " live_deformation=" LIVE_DEFORMATION " lighting=false "
              "elf_sha_prefix=%02x%02x%02x%02x%02x%02x%02x%02x",
@@ -332,8 +341,13 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
     const double fps = elapsed_us > 0 ? probe.completed * 1000000.0 / elapsed_us : 0;
     ok = ok && probe.completed >= CHECK_POSES;
     probe.phase = ok ? DEMO : FAILED;
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if (ok) snprintf(probe.result, sizeof probe.result, "%.2f FPS", fps);
+    else snprintf(probe.result, sizeof probe.result, "FAILED");
+#else
     if (ok) snprintf(probe.result, sizeof probe.result, "%.2f FPS  %u LCD FRAMES", fps, probe.completed);
     else snprintf(probe.result, sizeof probe.result, "BENCHMARK FAILED  %u FRAMES", probe.completed);
+#endif
     ESP_LOGI(tag, "RESULT status=%s dma_completed_frames=%u elapsed_us=%" PRId64
              " model_fps=%.3f prepare_us=%" PRId64 " geometry_us=%" PRId64
              " raster_us=%" PRId64 " submit_us=%" PRId64 " final_drain_us=%" PRId64
@@ -345,21 +359,28 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
-void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, bool capture)
+void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect_pose, bool capture)
 {
     if (generation != probe.generation || restart) begin_benchmark(generation);
 
     const int original_async = board_async_get();
     const bool is_capture = capture || board_capture_active();
     if (!is_capture) board_async_set(1);
+    const bool select_pose = inspect_pose >= 0 && inspect_pose < (int)POSE_COUNT &&
+                             inspect_pose != probe.held_pose;
+    char pose_label[16];
 
     if (is_capture) {
-        const int pose = probe.phase == DEMO ? (int)probe.demo_pose : -1;
-        const char *label = probe.phase >= DEMO ? probe.result : "BENCHMARK RUNNING";
+        const int pose = probe.phase == DEMO ? probe.displayed_pose : -1;
+        const char *label = probe.phase >= DEMO ? probe.result : "RUNNING";
+        if (probe.phase == DEMO && probe.held_pose >= 0) {
+            snprintf(pose_label, sizeof pose_label, "POSE %02u", (unsigned)probe.held_pose);
+            label = pose_label;
+        }
         (void)present_pose(pose, label, false);
         if (probe.phase == BENCHMARK) begin_benchmark(generation);
     } else if (probe.phase == PREFLIGHT) {
-        const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING SIX POSES", false);
+        const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING", false);
         if (!banner_ready || !check_pose(probe.checked)) {
             if (!banner_ready) ESP_LOGE(tag, "FAIL phase=preflight_banner");
             end_benchmark(false, 0);
@@ -370,20 +391,29 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, bool captur
     } else if (probe.phase == BENCHMARK) {
         if (!probe.completed) probe.started = esp_timer_get_time();
         const unsigned pose = probe.completed % POSE_COUNT;
-        const bool ok = present_pose((int)pose, "BENCHMARK RUNNING", true);
+        const bool ok = present_pose((int)pose, "RUNNING", true);
         if (ok) ++probe.completed;
         const int64_t elapsed = esp_timer_get_time() - probe.started;
         if (!ok || probe.completed == MEASURE_FRAMES || elapsed >= measure_limit_us) {
             end_benchmark(ok, elapsed);
             if (probe.phase == FAILED) (void)present_pose(-1, probe.result, false);
         }
-    } else if (probe.phase == DEMO && esp_timer_get_time() - probe.last_demo >= demo_interval_us) {
-        if (!present_pose((int)probe.demo_pose, probe.result, false)) {
+    } else if (probe.phase == DEMO && (select_pose ||
+               (probe.held_pose < 0 && esp_timer_get_time() - probe.last_demo >= demo_interval_us))) {
+        const int pose = select_pose ? inspect_pose : (int)probe.demo_pose;
+        const char *label = probe.result;
+        if (select_pose) {
+            snprintf(pose_label, sizeof pose_label, "POSE %02u", (unsigned)pose);
+            label = pose_label;
+        }
+        if (!present_pose(pose, label, false)) {
             ESP_LOGE(tag, "FAIL demo_transfer");
             probe.phase = FAILED;
-            (void)present_pose(-1, "DISPLAY TRANSFER FAILED", false);
+            (void)present_pose(-1, "LCD FAILED", false);
         } else {
-            probe.demo_pose = (probe.demo_pose + 1) % POSE_COUNT;
+            probe.displayed_pose = pose;
+            if (select_pose) probe.held_pose = pose;
+            else probe.demo_pose = (probe.demo_pose + 1) % POSE_COUNT;
             probe.last_demo = esp_timer_get_time();
         }
     }

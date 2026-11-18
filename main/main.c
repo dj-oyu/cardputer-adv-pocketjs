@@ -1024,7 +1024,8 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         } else {
             bool shot=atomic_exchange(&capture,false);
             if(shot) board_capture(true);
-            ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, shot);
+            const int inspect_pose=key==KEY_LEFT?0:key==KEY_RIGHT?3:-1;
+            ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, inspect_pose, shot);
             if(shot) board_capture(false);
         }
         return;
