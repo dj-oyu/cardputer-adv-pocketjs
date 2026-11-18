@@ -194,7 +194,9 @@ extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
 // The two shipped apps the probe can start ('<' and '>'), so that the heaviest
 // real frames can be measured under the contention conditions.
 extern const char pet_start[] asm("_binary_pet_js_start");
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
 extern const char companion_start[] asm("_binary_companion_js_start");
+#endif
 // The contention conditions, applied on top of whichever workload is running.
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
@@ -1006,9 +1008,23 @@ void app_report(void) {
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)stats.heap_used,frames);
 }
-static uint32_t guest_generation;
-bool app_guest_present(void) { return guest!=NULL; }
-uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
+static uint32_t run_generation;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+static bool companion_running;
+
+static void companion_heap_log(const char *stage) {
+    const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    ESP_LOGI("app","COMPANION_HEAP stage=%s guest=%u free_internal=%u largest_internal=%u",
+             stage,(unsigned)(guest!=NULL),(unsigned)heap_caps_get_free_size(caps),
+             (unsigned)heap_caps_get_largest_free_block(caps));
+}
+#endif
+uint32_t app_run_generation(void) {
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(companion_running)return run_generation;
+#endif
+    return guest?run_generation:0;
+}
 
 static bool stop_pending,stop_prepared,stop_av_stopped;
 bool app_stop_pending(void) { return stop_pending; }
@@ -1023,11 +1039,18 @@ static bool app_drain_display(void) {
 }
 bool app_stop(void) {
     stop_pending=true;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(companion_running) {
+        if(board_present_finish()!=ESP_OK||!ayatsuri_pose_dma_probe_close_after_drain())return false;
+        companion_running=false;
+        stop_pending=false;
+        companion_heap_log("stopped");
+        ESP_LOGI("app","APP_STOPPED");
+        return true;
+    }
+#endif
     /* Before any hook, source reset, guest destruction or shared-strip reuse. */
     if(!app_drain_display())return false;
-#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
-    if(!stop_prepared&&!ayatsuri_pose_dma_probe_close_after_drain())return false;
-#endif
     bool p0_had_guest=guest!=NULL;
     if(!stop_prepared){
 #ifdef KASANE_P2_REPAIR_PROBE
@@ -1495,7 +1518,23 @@ static void hp_report(const char *phase, esp_err_t err) {
 #endif
 
 esp_err_t app_start_test(char test) {
-    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
+    /* Unlike menu starts, USB diagnostics arrive without source setup. */
+    if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(app_registry_current()->runtime==APP_RUNTIME_NATIVE) {
+        if(user_source||overlay_session)return ESP_ERR_INVALID_STATE;
+        shell_release_background_frames();
+        scene_mem_release();
+        frameless=false;
+        jsconsole_clear();
+        if(++run_generation==0)++run_generation;
+        companion_running=true;
+        companion_heap_log("ready");
+        ESP_LOGI("app","AYATSURI_COMPANION_READY");
+        return ESP_OK;
+    }
+#endif
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
@@ -1507,11 +1546,6 @@ esp_err_t app_start_test(char test) {
     vm_storage_active=test=='Y';
     vm_storage_leaving=vm_storage_parked=false;
 #endif
-    // The USB diagnostics call this directly, so they are the one caller that
-    // has not set these three. Left over from the boot overlay, overlay_session
-    // skipped the test's source and its renderer, and the session died on its
-    // first tick with no error line -- every diagnostic run after boot did.
-    if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     kasane_presented=false;
 #if KASANE_STRESS_REACH_AB
     reach_ab_window=0;g_ksn_tile_reach=1;
@@ -1595,7 +1629,7 @@ esp_err_t app_start_test(char test) {
         }
     }
     TRY(pocketjs_guest_create(&gc,&guest));
-    if(++guest_generation==0)++guest_generation;
+    if(++run_generation==0)++run_generation;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
     // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
@@ -1890,7 +1924,9 @@ source_ready:;
         case 'A': source=vmp_sync_start; break;
         case 'X': source=hello_start; break;
         case '<': source=pet_start; break;
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
         case '>': source=companion_start; break;
+#endif
         case 'B': source=vmp_recur_start; break;
         case 'C': source=vmp_closures_start; break;
         case 'D': source=vmp_promise_start; break;
@@ -2035,13 +2071,13 @@ fail:
     app_stop();return err;
 }
 esp_err_t app_start(void) {
-    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
     user_source=NULL; user_prelude=NULL; overlay_session=false;
     return app_start_test(0);
 }
 
 esp_err_t app_start_overlay(const char *source, size_t length) {
-    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
     overlay_guest_last_us=0;
     user_source=source; user_length=length;
     user_prelude=NULL; overlay_session=true;
@@ -2171,7 +2207,7 @@ esp_err_t app_overlay_tick(void) {
 
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length) {
-    if(guest||stop_pending)return ESP_ERR_INVALID_STATE;
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
     user_source=source; user_length=length;
     user_prelude=prelude; user_prelude_length=prelude_length;
     overlay_session=false;

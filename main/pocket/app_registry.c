@@ -80,8 +80,8 @@ static const app_manifest_t MANIFESTS[] = {
      .required=CAPS_KV, .optional=CAPS_PET_OPT, .works=APP_WORKS_NONE},
 
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
-    {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/benchmark/companion.js",
-     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+    {.id="local.companion", .title="PET COMPANION", .entry="native:ayatsuri",
+     .runtime=APP_RUNTIME_NATIVE,
      .required=CAPS_NONE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 #else
     {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/companion.js",

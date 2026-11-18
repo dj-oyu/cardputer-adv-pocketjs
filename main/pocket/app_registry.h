@@ -21,12 +21,9 @@
 // use the same information model, and nothing here assumes the table is static
 // except the table itself.
 
-// Section 2 had the existing apps on an old execution mode (ui.createNode and
-// globalThis.frame) until each moved to the common API explicitly. Every app
-// has moved and the old mode is gone from the firmware, so one runtime is
-// left; the field stays because the API range check is keyed on it.
 typedef enum {
     APP_RUNTIME_POCKET = 1,   // pocket.* — the surface of docs/api/common-api.md
+    APP_RUNTIME_NATIVE,       // UI task lifecycle without a guest VM
 } app_runtime_t;
 
 // What the host lets an app do with the works library (section 3's `access`,

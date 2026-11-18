@@ -70,11 +70,12 @@ typedef int esp_err_t;typedef int screen_id_t;
 #define atomic_store(p,v) (*(p)=(v))
 static bool allow,app_pending,overlay_pending,running=true;
 static int close_count,open_count,release_count,ended_count,restore_count,queue_count,start_count;
-static int text_screen,keys,screen,owner,run_started,native_generation;
+static int text_screen,keys,screen,owner,run_started;
+static uint32_t native_generation,active_generation;
 static const char *home_error;
 static bool app_stop_pending(void){return app_pending;}
 static bool overlay_stop_pending(void){return overlay_pending;}
-static bool app_stop(void){app_pending=!allow;return allow;}
+static bool app_stop(void){app_pending=!allow;if(allow)active_generation=0;return allow;}
 static bool overlay_release(void){overlay_pending=!allow;return allow;}
 static bool overlay_retry_stop(void){if(!overlay_pending)return true;return overlay_release();}
 static void close_screen(void){close_count++;}
@@ -90,8 +91,7 @@ static const char*app_error(void){return "fault";}
 static bool app_frameless(void){return false;}
 static void sound_play(int i){(void)i;}
 static void take_pending_run(void){}
-static bool app_guest_present(void){return app_pending;}
-static int app_guest_generation(void){return native_generation;}
+static uint32_t app_run_generation(void){return active_generation;}
 static char got_id[32],got_src[32];
 static void begin_run(const char*i,const char*p,size_t pn,const char*s,size_t sn){(void)p;(void)pn;start_count++;strcpy(got_id,i);memcpy(got_src,s,sn);got_src[sn]=0;}
 '''
@@ -105,6 +105,11 @@ test='''int main(void){
  char id[]="local.demo",src[]="test source";assert(defer_start(id,NULL,0,src,11));id[0]='X';src[0]='X';
  assert(retry_transitions());assert(start_count==1&&!strcmp(got_id,"local.demo")&&!strcmp(got_src,"test source"));
  assert(defer_start("x",NULL,0,"y",1));cancel_deferred_start();assert(!pending_start.active&&!pending_start.storage);
+ native_generation=1;active_generation=2;running=true;
+ assert(!native_stop() && running && active_generation==2 && !native_stop_pending);
+ native_generation=2;allow=false;
+ assert(!native_stop() && running && active_generation==2 && native_stop_pending);
+ allow=true;assert(retry_transitions() && !running && !active_generation && !native_stop_pending);
  puts("actual main transition snippets: deferred screen/end-run/source ownership PASS");
 }
 '''

@@ -473,8 +473,10 @@ extern const char imucal_start[] asm("_binary_imucal_js_start");
 extern const char imucal_end[]   asm("_binary_imucal_js_end");
 extern const char pet_start[] asm("_binary_pet_js_start");
 extern const char pet_end[] asm("_binary_pet_js_end");
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
 extern const char companion_start[] asm("_binary_companion_js_start");
 extern const char companion_end[] asm("_binary_companion_js_end");
+#endif
 // Heap churn + drawing load (apps/stress/README.md), a test app kept on the menu.
 extern const char stress_start[] asm("_binary_stress_js_start");
 // Shiki's on-device differential test (apps/shikitest): launched only by the
@@ -604,7 +606,11 @@ static bool home_key(const keystroke_t *k) {
         case 3: enter(SCREEN_TUTORIAL); break;
         case 4: begin_run("local.imucal",NULL,0,imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
         case 5: begin_run("local.pet",NULL,0,pet_start,(size_t)(pet_end-pet_start-1)); break;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+        case 6: begin_run("local.companion",NULL,0,NULL,0); break;
+#else
         case 6: begin_run("local.companion",NULL,0,companion_start,(size_t)(companion_end-companion_start-1)); break;
+#endif
         case 7: begin_run("local.stress",NULL,0,stress_start,(size_t)(stress_end-stress_start-1)); break;
         case 8: begin_run("local.megademo",NULL,0,proc_megademo_start,
                           (size_t)(proc_megademo_end-proc_megademo_start-1)); break;
@@ -660,7 +666,7 @@ static const native_app_t native_apps[]={
     NATIVE_APP("local.imucal","IMU CALIBRATION",imucal_start,imucal_end,7),
     NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
-    NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,5),
+    NATIVE_APP("local.companion","PET COMPANION",NULL,NULL,5),
 #else
     NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,7),
 #endif
@@ -705,7 +711,7 @@ static uint8_t native_start(const char *id,bool resume) {
     } else if(app_dormant_id()[0]&&!app_stop())return AC_BUSY;
     home_error=NULL;
     begin_run(id,NULL,0,d->source,d->source?(size_t)(d->end-d->source-1):0);
-    if(running && run_started==ESP_OK)native_generation=app_guest_generation();
+    if(running && run_started==ESP_OK)native_generation=app_run_generation();
     if(app_stop_pending()||overlay_stop_pending()) {
         /* AC_BUSY does not accept a future start or allocate a generation.
          * Finish retained teardown, but let the controller retry the start. */
@@ -965,7 +971,7 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
 static int64_t companion_deadline;
 static bool pose_companion_active(void) {
-    return running && strcmp(app_registry_current()->id, "local.companion") == 0;
+    return running && app_registry_current()->runtime==APP_RUNTIME_NATIVE;
 }
 #endif
 
@@ -1034,7 +1040,7 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 #else
             const int inspect_pose=key==KEY_LEFT?0:key==KEY_RIGHT?3:-1;
 #endif
-            companion_deadline = ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, inspect_pose, shot);
+            companion_deadline = ayatsuri_pose_dma_probe_step(app_run_generation(), key==KEY_ENTER, inspect_pose, shot);
             if(shot) board_capture(false);
         }
         return;
@@ -1142,11 +1148,11 @@ static bool ui_key_receive(keystroke_t *stroke) {
 }
 
 static void native_observe(void) {
-    app_control_observe(running,app_dormant_id(),app_registry_current()->id,app_guest_generation());
+    app_control_observe(running,app_dormant_id(),app_registry_current()->id,app_run_generation());
 }
 static uint8_t native_tap(uint8_t action) {
     if(transition_pending())return AC_BUSY;
-    if(!running || app_guest_generation()!=native_generation || home_modal() || pocket_text_active() ||
+    if(!running || app_run_generation()!=native_generation || home_modal() || pocket_text_active() ||
        pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return AC_BLOCKED;
     static const board_key_t nav[]={KEY_NONE,KEY_ENTER,KEY_BACK,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
     if(action<1 || action>6)return AC_UNSUPPORTED;
@@ -1175,13 +1181,13 @@ static uint8_t native_suspend(void) {
     suspend_run();return AC_OK;
 }
 static bool native_stop(void) {
-    /* app_stop destroys the guest before returning, including dormant guests.
-     * No BACK/HOME marker is interpreted as a teardown acknowledgment. */
-    if(app_guest_present() && (!native_generation || app_guest_generation()!=native_generation))return false;
+    /* Teardown must release the instance that the controller started. */
+    uint32_t generation=app_run_generation();
+    if(generation && generation!=native_generation)return false;
     if(!app_stop()) { native_stop_pending=true;return false; }
     native_stop_pending=false;running=false;xQueueReset(keys);
     if(screen!=SCREEN_HOME)enter(SCREEN_HOME);
-    return !app_guest_present();
+    return app_run_generation()==0;
 }
 static bool retry_transitions(void) {
     if(!overlay_retry_stop())return false;
@@ -1567,8 +1573,9 @@ static void ui_task(void *arg) {
         // latency, and nothing else.
         if(running) {
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
-            if(companion_deadline) {
-                int64_t now=esp_timer_get_time(),remaining=companion_deadline-now;
+            if(pose_companion_active()) {
+                int64_t now=esp_timer_get_time();
+                int64_t remaining=companion_deadline?companion_deadline-now:(int64_t)rest*1000;
                 if(remaining>0) {
                     /* Keep the UI responsive to its polled key queue even
                      * when renders become much shorter than the frame period. */
@@ -1716,7 +1723,7 @@ void app_main(void) {
         .catalog_count=native_catalog_count,.catalog=native_catalog,.start=native_start,
         .tap=native_tap,.suspend=native_suspend,.stop=native_stop,.emit=native_emit,
         .fingerprint=native_fingerprint,
-        .instance=app_guest_generation,
+        .instance=app_run_generation,
         .clock_ms=native_clock_ms,
     };
     uint64_t boot_id=((uint64_t)esp_random()<<32)|esp_random();
