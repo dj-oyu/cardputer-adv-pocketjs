@@ -111,6 +111,8 @@ static struct {
     int64_t started, next_demo;
     frame_timing benchmark_timing;
 #ifdef AY_COMPANION_MOTION_POSES
+    uint16_t demo_cost_us[POSE_COUNT - FIRST_MOTION_POSE];
+    int64_t demo_target_drain;
     int64_t demo_first_drain, demo_last_drain, demo_last_work;
     unsigned demo_intervals, demo_over_55ms;
     demo_gap demo_worst;
@@ -473,6 +475,29 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
 }
 
 #ifdef AY_COMPANION_MOTION_POSES
+static void demo_observe_cost(unsigned pose, int64_t elapsed)
+{
+    /* The table represents normal work on the way from the preceding pose.
+     * Bound a single timer outlier and smooth later observations. */
+    unsigned sample = elapsed > UINT16_MAX ? UINT16_MAX : (unsigned)elapsed;
+    uint16_t *estimate = &probe.demo_cost_us[pose - FIRST_MOTION_POSE];
+    *estimate = *estimate ? (3u * *estimate + sample + 2u) / 4u : sample;
+}
+
+static void demo_schedule(unsigned pose, int64_t started, int64_t drained)
+{
+    const int64_t work = drained - started;
+    if (probe.next_demo) demo_observe_cost(pose, work);
+    /* Start the next render early enough to drain on its clock edge. A
+     * fresh sequence or a full-period stall anchors to the actual drain. */
+    if (!probe.next_demo || drained - probe.demo_target_drain >= demo_interval_us)
+        probe.demo_target_drain = drained;
+    probe.demo_target_drain += demo_interval_us;
+    unsigned estimate = probe.demo_cost_us[probe.demo_pose - FIRST_MOTION_POSE];
+    if (!estimate) estimate = (unsigned)(work < demo_interval_us ? work : demo_interval_us);
+    probe.next_demo = probe.demo_target_drain - estimate;
+}
+
 static void demo_completed(unsigned from, unsigned pose, int64_t due,
                            int64_t started, int64_t drained, const frame_timing *timing)
 {
@@ -566,9 +591,16 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int insp
     } else if (probe.phase == BENCHMARK) {
         if (!probe.completed) probe.started = esp_timer_get_time();
         const unsigned pose = FIRST_MOTION_POSE + probe.completed % (POSE_COUNT - FIRST_MOTION_POSE);
+#ifdef AY_COMPANION_MOTION_POSES
+        const int64_t frame_start = esp_timer_get_time();
+#endif
         const bool ok = present_pose((int)pose, "RUNNING", &probe.benchmark_timing);
         if (ok) ++probe.completed;
-        const int64_t elapsed = esp_timer_get_time() - probe.started;
+        const int64_t finished = esp_timer_get_time();
+#ifdef AY_COMPANION_MOTION_POSES
+        if (ok) demo_observe_cost(pose, finished - frame_start);
+#endif
+        const int64_t elapsed = finished - probe.started;
         if (!ok || probe.completed == MEASURE_FRAMES || elapsed >= measure_limit_us) {
             end_benchmark(ok, elapsed);
             if (probe.phase == FAILED) (void)present_pose(-1, probe.result, NULL);
@@ -597,13 +629,10 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int insp
                     (probe.demo_pose - FIRST_MOTION_POSE + 1) % (POSE_COUNT - FIRST_MOTION_POSE);
 #ifdef AY_COMPANION_MOTION_POSES
             if (!select_pose) {
-                /* Keep the clock phase across ordinary tick jitter. Following
-                 * a long stall, resume at this pose without skipping a pose. */
-                if (!probe.next_demo || demo_begin - probe.next_demo >= demo_interval_us)
-                    probe.next_demo = demo_begin;
-                probe.next_demo += demo_interval_us;
+                const int64_t drained = esp_timer_get_time();
+                demo_schedule((unsigned)pose, demo_begin, drained);
                 demo_completed((unsigned)previous_pose, (unsigned)pose, demo_due,
-                               demo_begin, esp_timer_get_time(), &timing);
+                               demo_begin, drained, &timing);
             }
 #else
             probe.next_demo = esp_timer_get_time() + demo_interval_us;
