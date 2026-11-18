@@ -44,9 +44,6 @@ static inline void ay_exact_begin(ay_exact_history *s) {
     if(!s->compare)s->read=s->write=0;
 }
 #if defined(AY_COMPANION_COMPACT_HISTORY) && AY_COMPANION_COMPACT_HISTORY
-static inline void ay_exact_put(ay_exact_history *s,unsigned value) {
-    s->bytes[s->write++ & (AY_EXACT_BYTES-1)]=(uint8_t)value;
-}
 static inline unsigned ay_exact_get(const ay_exact_history *s,uint32_t *pos) {
     return s->bytes[(*pos)++ & (AY_EXACT_BYTES-1)];
 }
@@ -65,6 +62,15 @@ typedef struct { unsigned left,right,color; } ay_exact_segment;
 static inline ay_exact_segment ay_exact_decode(const ay_exact_history *s,uint32_t *pos,
                                                uint32_t end,unsigned previous) {
     if(*pos==end)return (ay_exact_segment){240,240,0};
+    unsigned index=*pos&(AY_EXACT_BYTES-1);
+    unsigned header=s->bytes[index];
+    if((header&15)!=15 && header<240 && index<=AY_EXACT_BYTES-3) {
+        const uint8_t *token=s->bytes+index;
+        unsigned left=previous+(header>>4);
+        unsigned color=token[1]|((unsigned)token[2]<<8);
+        *pos+=3;
+        return (ay_exact_segment){left,left+(header&15)+1,color};
+    }
     unsigned control=ay_exact_get(s,pos), gap=control>>4, length=control&15;
     if(gap==15)gap=ay_exact_get(s,pos);
     if(length==15)length=ay_exact_get(s,pos);
@@ -103,21 +109,35 @@ static inline ay_damage_span ay_exact_row(ay_exact_history *s,unsigned y,const u
         s->overflow=true;return fallback;
     }
     uint32_t old_end=s->read+(s->compare?s->counts[y]:0), start=s->write;
+    uint32_t write=start;
     unsigned previous=0;
     for(unsigned x=current.left;x<current.right;) {
         unsigned left=x;uint16_t color=pixels[x++];
         while(x<current.right && pixels[x]==color)++x;
         if(!color)continue;
         unsigned gap=left-previous, length=x-left-1;
-        unsigned size=3+(gap>=15)+(length>=15);
-        if(s->write-s->read>AY_EXACT_BYTES-size){s->overflow=true;return fallback;}
-        ay_exact_put(s,((gap<15?gap:15)<<4)|(length<15?length:15));
-        if(gap>=15)ay_exact_put(s,gap);
-        if(length>=15)ay_exact_put(s,length);
-        ay_exact_put(s,color);
-        ay_exact_put(s,color>>8);
+        unsigned control=((gap<15?gap:15)<<4)|(length<15?length:15);
+        unsigned index=write&(AY_EXACT_BYTES-1);
+        if(gap<15 && length<15 && index<=AY_EXACT_BYTES-3) {
+            if(write-s->read>AY_EXACT_BYTES-3){s->overflow=true;return fallback;}
+            uint8_t *token=s->bytes+index;
+            token[0]=(uint8_t)((gap<<4)|length);
+            token[1]=(uint8_t)color;
+            token[2]=(uint8_t)(color>>8);
+            write+=3;
+        } else {
+            unsigned size=3+(gap>=15)+(length>=15);
+            if(write-s->read>AY_EXACT_BYTES-size){s->overflow=true;return fallback;}
+            s->bytes[write++&(AY_EXACT_BYTES-1)]=(uint8_t)control;
+            if(gap>=15)s->bytes[write++&(AY_EXACT_BYTES-1)]=(uint8_t)gap;
+            if(length>=15)s->bytes[write++&(AY_EXACT_BYTES-1)]=(uint8_t)length;
+            s->bytes[write++&(AY_EXACT_BYTES-1)]=(uint8_t)color;
+            s->bytes[write++&(AY_EXACT_BYTES-1)]=(uint8_t)(color>>8);
+        }
         previous=x;
     }
+
+    s->write=write;
     ay_damage_span change=force || !s->compare ? fallback :
         ay_exact_compact_changes(s,s->read,old_end,start,s->write);
     s->read=old_end;s->counts[y]=(uint16_t)(s->write-start);s->next++;
