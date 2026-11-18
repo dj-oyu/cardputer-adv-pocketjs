@@ -53,4 +53,20 @@ static inline void hone_companion_apply(const hone_companion_morph *morph,
     }
 }
 
+/* The mouth strip stores each column as an upper/lower vertex pair.
+ * Ease the depth bias out toward the center without moving either contour. */
+static inline void hone_companion_bias_mouth_corners(float projected[][3],
+                                                    unsigned columns, float depth_bias)
+{
+    if (!(depth_bias > 0.0f)) return;
+    for (unsigned column = 0; column < columns; ++column) {
+        const unsigned from_right = columns - 1 - column;
+        const unsigned from_corner = column < from_right ? column : from_right;
+        if (from_corner >= 4) continue;
+        const float lift = depth_bias * ((4 - from_corner) * 0.25f);
+        projected[2 * column][2] += lift;
+        projected[2 * column + 1][2] += lift;
+    }
+}
+
 #endif
