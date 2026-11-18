@@ -56,6 +56,11 @@ static const int64_t demo_interval_us = INT64_C(120000);
 #ifndef FIRST_MOTION_POSE
 #define FIRST_MOTION_POSE 0u
 #endif
+#ifdef AY_COMPANION_COLORED_LIGHT
+#define MODEL_LIGHTING "baked_rgb_diffuse"
+#else
+#define MODEL_LIGHTING "false"
+#endif
 _Static_assert(POSE_COUNT > FIRST_MOTION_POSE, "demo requires playable poses");
 static const char *const tag = "ay_pose_dma";
 
@@ -262,16 +267,33 @@ static const char *const inspection_labels[] = {"JOY", "SURPRISE", "CONCERN"};
 static void report_face_band(int pose, unsigned y, unsigned rows)
 {
     enum { FACE_LEFT = 88, FACE_WIDTH = 64, FACE_TOP = 34, FACE_BOTTOM = 86 };
+#ifdef AY_COMPANION_COLORED_LIGHT
+    enum { MODEL_LEFT = 48, MODEL_WIDTH = 104, MODEL_TOP = 20, MODEL_BOTTOM = 135 };
+    const bool lighting_sample = pose == 0;
+    const unsigned left = lighting_sample ? MODEL_LEFT : FACE_LEFT;
+    const unsigned width = lighting_sample ? MODEL_WIDTH : FACE_WIDTH;
+    const unsigned top = lighting_sample ? MODEL_TOP : FACE_TOP;
+    const unsigned bottom = lighting_sample ? MODEL_BOTTOM : FACE_BOTTOM;
+    char hex[MODEL_WIDTH * 4 + 1];
+#else
+    const unsigned left = FACE_LEFT, width = FACE_WIDTH, top = FACE_TOP, bottom = FACE_BOTTOM;
+    char hex[FACE_WIDTH * 4 + 1];
+#endif
     static const char symbols[] = "0123456789abcdef";
     for (unsigned row = 0; row < rows; ++row) {
-        if (y + row < FACE_TOP || y + row >= FACE_BOTTOM) continue;
-        char hex[FACE_WIDTH * 4 + 1];
-        for (unsigned i = 0; i < FACE_WIDTH; ++i) {
-            const uint16_t value = storage.band[row * WIDTH + FACE_LEFT + i];
+        if (y + row < top || y + row >= bottom) continue;
+        for (unsigned i = 0; i < width; ++i) {
+            const uint16_t value = storage.band[row * WIDTH + left + i];
             for (unsigned nibble = 0; nibble < 4; ++nibble)
                 hex[4 * i + nibble] = symbols[(value >> (12 - 4 * nibble)) & 15];
         }
-        hex[FACE_WIDTH * 4] = '\0';
+        hex[width * 4] = '\0';
+#ifdef AY_COMPANION_COLORED_LIGHT
+        if (lighting_sample) {
+            ESP_LOGI(tag, "LIGHT_ROW pose=0 y=%u rgb=%s", y + row, hex);
+            continue;
+        }
+#endif
         ESP_LOGI(tag, "FACE_ROW pose=%d y=%u rgb=%s", pose, y + row, hex);
     }
 }
@@ -438,7 +460,7 @@ static void begin_benchmark(uint32_t generation)
     ESP_LOGI(tag, "OVERLAY sha256=%s motion_first=%u", AY_COMPANION_OVERLAY_SHA256, FIRST_MOTION_POSE);
 #endif
     const esp_app_desc_t *app = esp_app_get_description();
-    ESP_LOGI(tag, "BEGIN model_sha256=%s poses=%u renderer=" MODEL_RENDERER " live_deformation=" LIVE_DEFORMATION " lighting=false "
+    ESP_LOGI(tag, "BEGIN model_sha256=%s poses=%u renderer=" MODEL_RENDERER " live_deformation=" LIVE_DEFORMATION " lighting=" MODEL_LIGHTING " "
              "elf_sha_prefix=%02x%02x%02x%02x%02x%02x%02x%02x",
              MODEL_SHA256, (unsigned)POSE_COUNT,
              app->app_elf_sha256[0], app->app_elf_sha256[1], app->app_elf_sha256[2],

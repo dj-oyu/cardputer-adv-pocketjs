@@ -10,6 +10,7 @@ _Static_assert(sizeof(hone_projected_material)==16,"projected material ABI");
 typedef struct {
  hone_projected_packet*packets;size_t count,capacity;
  const hone_projected_material*materials;size_t material_count;
+ const uint16_t *packet_rgb565;
  const void*owner;uint32_t generation;uint64_t revision;
  bool initialized,building,ready,pinned,failed;
 } hone_projected_snapshot;
@@ -32,6 +33,15 @@ static inline bool hone_projected_snapshot_init(hone_projected_snapshot*s,const 
   !hone_alpha_disjoint(s,sizeof *s,packets,capacity*sizeof *packets)||!hone_alpha_disjoint(s,sizeof *s,materials,material_count*sizeof *materials)||
   !hone_alpha_disjoint(packets,capacity*sizeof *packets,materials,material_count*sizeof *materials))return false;
  *s=(hone_projected_snapshot){.packets=packets,.capacity=capacity,.materials=materials,.material_count=material_count,.owner=owner,.generation=generation,.initialized=true};return true;
+}
+/* The native emitter writes one color for each appended packet. The optional
+ * array is stable under the same READY/pin ownership as the packet array. */
+static inline bool hone_projected_bind_rgb565(hone_projected_snapshot *s,const uint16_t *colors,size_t count){
+ if(!s||!s->initialized||s->revision||!colors||count!=s->capacity||
+    !hone_alpha_disjoint(colors,count*sizeof *colors,s,sizeof *s)||
+    !hone_alpha_disjoint(colors,count*sizeof *colors,s->packets,s->capacity*sizeof *s->packets)||
+    !hone_alpha_disjoint(colors,count*sizeof *colors,s->materials,s->material_count*sizeof *s->materials))return false;
+ s->packet_rgb565=colors;return true;
 }
 static inline bool hone_projected_begin(hone_projected_snapshot*s,const void*owner,uint32_t generation,uint64_t revision){
  if(!s||!s->initialized||s->pinned||s->owner!=owner||s->generation!=generation||!revision||revision<=s->revision)return false;

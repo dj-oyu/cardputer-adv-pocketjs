@@ -15,10 +15,14 @@ static inline uint16_t hone_compact_tile_rgb(const hone_projected_snapshot *s,ui
     if (slot->material!=m) {
         const float *c=s->materials[m].rgb;
         slot->material=m;
-        slot->rgb=(uint16_t)(((unsigned)floorf(c[0]*31+.5f)<<11) |
-                            ((unsigned)floorf(c[1]*63+.5f)<<5) | (unsigned)floorf(c[2]*31+.5f));
+        slot->rgb=hone_compact_material_rgb565(c);
     }
     return slot->rgb;
+}
+static inline uint16_t hone_compact_tile_packet_rgb(const hone_projected_snapshot *s,unsigned id,
+                                                    hone_compact_tile_color cache[4]) {
+    return s->packet_rgb565 ? s->packet_rgb565[id] :
+           hone_compact_tile_rgb(s,s->packets[id].material,cache);
 }
 /* Keep binary64 sampling out of the common integer/FPU span. */
 static __attribute__((noinline)) bool hone_compact_nearer_exact(const hone_compact_index *idx,
@@ -174,7 +178,7 @@ static inline void hone_compact_tile_strip(const hone_compact_index *idx,hone_co
             uint16_t *row=pixels+r*240;
             for (unsigned x=tile;x<=last;x++) {
                 unsigned id=row[x];
-                row[x]=id==UINT16_MAX ? 0 : hone_compact_tile_rgb(idx->source,idx->source->packets[id].material,cache);
+                row[x]=id==UINT16_MAX ? 0 : hone_compact_tile_packet_rgb(idx->source,id,cache);
             }
         }
     }

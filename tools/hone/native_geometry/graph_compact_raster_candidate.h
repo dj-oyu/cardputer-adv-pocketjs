@@ -25,7 +25,12 @@ static inline bool hone_compact_readable(const hone_projected_snapshot *s) {
 static inline bool hone_compact_source_disjoint(const hone_projected_snapshot *s,const void *ptr,size_t n) {
     return !n || (ptr && hone_alpha_disjoint(ptr,n,s,sizeof *s) &&
            hone_alpha_disjoint(ptr,n,s->packets,s->capacity*sizeof *s->packets) &&
+           (!s->packet_rgb565 || hone_alpha_disjoint(ptr,n,s->packet_rgb565,s->capacity*sizeof *s->packet_rgb565)) &&
            hone_alpha_disjoint(ptr,n,s->materials,s->material_count*sizeof *s->materials));
+}
+static inline uint16_t hone_compact_material_rgb565(const float c[3]) {
+    return (uint16_t)(((unsigned)floorf(c[0]*31+.5f)<<11) |
+                     ((unsigned)floorf(c[1]*63+.5f)<<5) | (unsigned)floorf(c[2]*31+.5f));
 }
 /* Build into exclusive scratch. On failure, scratch may contain a partial
  * build and the index is invalidated after passing the alias checks. */
@@ -176,9 +181,8 @@ static inline bool hone_compact_render(const hone_compact_index *idx,const void 
             hone_compact_bounds b=idx->bounds[id];
             if (yy<b.y0 || yy>b.y1) continue;
             const hone_projected_packet *p=&s->packets[id];
-            const float *c=s->materials[p->material].rgb;
-            uint16_t color=(uint16_t)(((unsigned)floorf(c[0]*31+.5f)<<11) |
-                           ((unsigned)floorf(c[1]*63+.5f)<<5) | (unsigned)floorf(c[2]*31+.5f));
+            uint16_t color=s->packet_rgb565 ? s->packet_rgb565[id] :
+                          hone_compact_material_rgb565(s->materials[p->material].rgb);
             if (b.grid) hone_compact_grid_span(idx,w,id,b,yy,color,row);
             else for (unsigned x=b.x0;x<=b.x1;x++) {
                 float z;

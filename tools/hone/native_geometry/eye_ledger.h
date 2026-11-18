@@ -258,7 +258,7 @@ static inline bool hone_eye_render_band(const hone_eye_ledger *s,const hone_comp
         unsigned id=pixels[i];
         if(id==UINT16_MAX)pixels[i]=0;
         else if(id&0x8000u)pixels[i]=s->slots[id&0x7fffu].color;
-        else pixels[i]=hone_compact_tile_rgb(idx->source,idx->source->packets[id].material,cache);
+        else pixels[i]=hone_compact_tile_packet_rgb(idx->source,id,cache);
     }
     return true;
 }

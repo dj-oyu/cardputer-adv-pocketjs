@@ -5,7 +5,11 @@
 /* Each nonblack constant run is represented by [left,right) and RGB565.
  * One FIFO holds the unconsumed tail of the old frame and the new prefix.
  * A full FIFO disables narrowing until a whole new frame is captured. */
+#ifdef AY_COMPANION_COLORED_LIGHT
+enum { AY_EXACT_RUNS=4096, AY_EXACT_HEIGHT=135 };
+#else
 enum { AY_EXACT_RUNS=1024, AY_EXACT_HEIGHT=135 };
+#endif
 typedef struct {
     uint32_t runs[AY_EXACT_RUNS], read, write;
     uint8_t counts[AY_EXACT_HEIGHT], next;
