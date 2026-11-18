@@ -4,6 +4,12 @@
 #include "ayatsuri/ayatsuri_visibility.h"
 #include <stdbool.h>
 #include <stdint.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(HONE_SOURCE_PROJECTION_PORTABLE)
+#include "source_projection_s3.h"
+#endif
 
 typedef struct {
     float axis[3][3], pivot[3], zoom, center[2];
@@ -56,6 +62,9 @@ static inline bool hone_source_projection(const hone_source_camera *camera,const
 static inline bool hone_source_project_vertices(const float p[12],const float *local,
                                                  size_t count,float out[][3]) {
     if(!p||!local||!out||!count||count>256)return false;
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(HONE_SOURCE_PROJECTION_PORTABLE)
+    return hone_source_project_s3(p,local,count,out);
+#else
     for(size_t n=0;n<count;n++,local+=3){
         float a=local[0],b=local[1],c=local[2];
         if(!(fabsf(a)<=4096 && fabsf(b)<=4096 && fabsf(c)<=4096))return false;
@@ -63,6 +72,7 @@ static inline bool hone_source_project_vertices(const float p[12],const float *l
         if(!(fabsf(out[n][0])<=4096 && fabsf(out[n][1])<=4096 && isfinite(out[n][2])))return false;
     }
     return true;
+#endif
 }
 
 /* The authored-order filtered test mirrors ayatsuri_visibility_select_faces:

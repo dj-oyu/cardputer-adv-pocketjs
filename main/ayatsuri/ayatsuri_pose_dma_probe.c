@@ -19,6 +19,7 @@
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
 #include "ayatsuri_live_model_fixture_api.h"
 #include "ayatsuri_exact_damage.h"
+#include "strip_copy_s3.h"
 #include "pet/pet_hub.h"
 #include "hal/sound.h"
 static ay_damage_history displayed;
@@ -66,7 +67,7 @@ static const char *const tag = "ay_pose_dma";
 
 static struct {
     uint16_t row[WIDTH];
-    uint16_t band[WIDTH * BAND_ROWS];
+    _Alignas(16) uint16_t band[WIDTH * BAND_ROWS];
 #ifndef CONFIG_AYATSURI_LIVE_DMA_PROBE
     float depth[WIDTH];
     float scratch[AY_POSE_DMA_FIXTURE_SCRATCH_COUNT];
@@ -410,7 +411,7 @@ static bool present_pose(int pose, const char *label, frame_timing *timing)
             unsigned x=strip_window.left,w=strip_window.right-x;
             if(!w)continue;
             uint16_t *strip=board_strip_next();
-            memcpy(strip,storage.band+off*WIDTH,n*sizeof storage.row);
+            hone_strip_copy(strip,storage.band+off*WIDTH,n*sizeof storage.row);
             result=board_present_submit((int)x,(int)(y+off),(int)w,(int)n,strip);
             if(result==ESP_OK){
                 submitted=true;

@@ -683,6 +683,8 @@ if(CONFIG_AYATSURI_POSE_DMA_PROBE)
             "${CMAKE_SOURCE_DIR}/tools/ayatsuri/provider"
             "${CMAKE_SOURCE_DIR}/tools/hone/source_package")
         target_add_binary_data(${COMPONENT_LIB} "ayatsuri/private/assets/live/hone_live_model.aynm" BINARY)
+        set_property(SOURCE "ayatsuri/ayatsuri_pose_dma_probe.c" APPEND PROPERTY
+            COMPILE_DEFINITIONS HONE_PIE_STRIP_COPY=1)
         set_property(SOURCE ${live_sources} APPEND PROPERTY
             COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage;-fno-diagnostics-show-caret;-Wno-misleading-indentation")
     else()
