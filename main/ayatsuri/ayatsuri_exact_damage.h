@@ -5,6 +5,17 @@
 /* Each nonblack constant run is represented by [left,right) and RGB565.
  * One FIFO holds the unconsumed tail of the old frame and the new prefix.
  * A full FIFO disables narrowing until a whole new frame is captured. */
+#if defined(AY_COMPANION_COMPACT_HISTORY) && AY_COMPANION_COMPACT_HISTORY
+#include <string.h>
+enum { AY_EXACT_BYTES=8192, AY_EXACT_HEIGHT=135 };
+typedef struct {
+    uint8_t bytes[AY_EXACT_BYTES];
+    uint16_t counts[AY_EXACT_HEIGHT];
+    uint32_t read,write;
+    uint8_t next;
+    bool valid,compare,overflow;
+} ay_exact_history;
+#else
 #ifdef AY_COMPANION_COLORED_LIGHT
 enum { AY_EXACT_RUNS=4096, AY_EXACT_HEIGHT=135 };
 #else
@@ -15,6 +26,8 @@ typedef struct {
     uint8_t counts[AY_EXACT_HEIGHT], next;
     bool valid, compare, overflow;
 } ay_exact_history;
+
+#endif
 
 static inline ay_damage_span ay_exact_union(ay_damage_span a, ay_damage_span b) {
     if(b.left>=b.right)return a;
@@ -30,6 +43,87 @@ static inline void ay_exact_begin(ay_exact_history *s) {
     s->overflow=false;
     if(!s->compare)s->read=s->write=0;
 }
+#if defined(AY_COMPANION_COMPACT_HISTORY) && AY_COMPANION_COMPACT_HISTORY
+static inline void ay_exact_put(ay_exact_history *s,unsigned value) {
+    s->bytes[s->write++ & (AY_EXACT_BYTES-1)]=(uint8_t)value;
+}
+static inline unsigned ay_exact_get(const ay_exact_history *s,uint32_t *pos) {
+    return s->bytes[(*pos)++ & (AY_EXACT_BYTES-1)];
+}
+static inline bool ay_exact_encoded_equal(const ay_exact_history *s,uint32_t a,uint32_t b,
+                                            unsigned size) {
+    while(size) {
+        unsigned x=a&(AY_EXACT_BYTES-1), y=b&(AY_EXACT_BYTES-1);
+        unsigned contiguous=AY_EXACT_BYTES-(x>y?x:y);
+        if(contiguous>size)contiguous=size;
+        if(memcmp(s->bytes+x,s->bytes+y,contiguous))return false;
+        a+=contiguous;b+=contiguous;size-=contiguous;
+    }
+    return true;
+}
+typedef struct { unsigned left,right,color; } ay_exact_segment;
+static inline ay_exact_segment ay_exact_decode(const ay_exact_history *s,uint32_t *pos,
+                                               uint32_t end,unsigned previous) {
+    if(*pos==end)return (ay_exact_segment){240,240,0};
+    unsigned control=ay_exact_get(s,pos), gap=control>>4, length=control&15;
+    if(gap==15)gap=ay_exact_get(s,pos);
+    if(length==15)length=ay_exact_get(s,pos);
+    unsigned color=ay_exact_get(s,pos);
+    color|=ay_exact_get(s,pos)<<8;
+    unsigned left=previous+gap;
+    return (ay_exact_segment){left,left+length+1,color};
+}
+/* Compare the constant-colour intervals between successive run boundaries. */
+static inline ay_damage_span ay_exact_compact_changes(const ay_exact_history *s,
+        uint32_t a,uint32_t end_a,uint32_t b,uint32_t end_b) {
+    if(end_a-a==end_b-b && ay_exact_encoded_equal(s,a,b,end_a-a))return (ay_damage_span){0,0};
+    ay_exact_segment old=ay_exact_decode(s,&a,end_a,0);
+    ay_exact_segment cur=ay_exact_decode(s,&b,end_b,0);
+    unsigned x=old.left<cur.left?old.left:cur.left, left=240, right=0;
+    while(x<240) {
+        bool in_old=x>=old.left, in_cur=x>=cur.left;
+        unsigned old_boundary=in_old?old.right:old.left;
+        unsigned cur_boundary=in_cur?cur.right:cur.left;
+        unsigned next=old_boundary<cur_boundary?old_boundary:cur_boundary;
+        if((in_old?old.color:0)!=(in_cur?cur.color:0)) {
+            if(left==240)left=x;
+            right=next;
+        }
+        x=next;
+        if(x==old.right)old=ay_exact_decode(s,&a,end_a,old.right);
+        if(x==cur.right)cur=ay_exact_decode(s,&b,end_b,cur.right);
+    }
+    if(right==0)return (ay_damage_span){0,0};
+    return (ay_damage_span){(uint8_t)(left&~15u),(uint8_t)((right+15u)&~15u)};
+}
+static inline ay_damage_span ay_exact_row(ay_exact_history *s,unsigned y,const uint16_t *pixels,
+        ay_damage_span current,ay_damage_span fallback,bool force) {
+    if(s->overflow)return fallback;
+    if(y!=s->next || y>=AY_EXACT_HEIGHT || current.left>current.right || current.right>240){
+        s->overflow=true;return fallback;
+    }
+    uint32_t old_end=s->read+(s->compare?s->counts[y]:0), start=s->write;
+    unsigned previous=0;
+    for(unsigned x=current.left;x<current.right;) {
+        unsigned left=x;uint16_t color=pixels[x++];
+        while(x<current.right && pixels[x]==color)++x;
+        if(!color)continue;
+        unsigned gap=left-previous, length=x-left-1;
+        unsigned size=3+(gap>=15)+(length>=15);
+        if(s->write-s->read>AY_EXACT_BYTES-size){s->overflow=true;return fallback;}
+        ay_exact_put(s,((gap<15?gap:15)<<4)|(length<15?length:15));
+        if(gap>=15)ay_exact_put(s,gap);
+        if(length>=15)ay_exact_put(s,length);
+        ay_exact_put(s,color);
+        ay_exact_put(s,color>>8);
+        previous=x;
+    }
+    ay_damage_span change=force || !s->compare ? fallback :
+        ay_exact_compact_changes(s,s->read,old_end,start,s->write);
+    s->read=old_end;s->counts[y]=(uint16_t)(s->write-start);s->next++;
+    return change;
+}
+#else
 static inline uint32_t ay_exact_run(const ay_exact_history *s,uint32_t i) {
     return s->runs[i&(AY_EXACT_RUNS-1)];
 }
@@ -75,6 +169,7 @@ static inline ay_damage_span ay_exact_row(ay_exact_history *s,unsigned y,const u
     s->read+=prior;s->counts[y]=(uint8_t)count;s->next++;
     return change;
 }
+#endif
 static inline void ay_exact_finish(ay_exact_history *s,bool completed) {
     s->valid=completed && !s->overflow && s->next==AY_EXACT_HEIGHT;
 }
