@@ -598,7 +598,9 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int insp
         if (ok) ++probe.completed;
         const int64_t finished = esp_timer_get_time();
 #ifdef AY_COMPANION_MOTION_POSES
-        if (ok) demo_observe_cost(pose, finished - frame_start);
+        /* Preflight does not end on the last motion pose. The first benchmark
+         * sample may therefore have different geometry and cache reuse. */
+        if (ok && probe.completed > 1) demo_observe_cost(pose, finished - frame_start);
 #endif
         const int64_t elapsed = finished - probe.started;
         if (!ok || probe.completed == MEASURE_FRAMES || elapsed >= measure_limit_us) {
