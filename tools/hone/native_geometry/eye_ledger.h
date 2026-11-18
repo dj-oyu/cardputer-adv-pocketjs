@@ -86,10 +86,13 @@ fail:
  * Edges and the area are exact integers < 2^53: multiplying either operand
  * of the reference weight division by the common factor 2^36 leaves the
  * correctly rounded binary64 result unchanged. */
-static bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t,unsigned material,
-        unsigned order,hone_eye_shader shade,void *shader_context) {
+/* A proven shader may omit unused local components (0/2 for X/Z), or supply
+ * a constant opaque RGB565 result over the declared triangle's local domain.
+ * The general path retains the full shader on nongrid or unbounded input. */
+static bool hone_eye_emit_masked(hone_eye_ledger *s,const hone_graph_triangle *t,unsigned material,
+        unsigned order,hone_eye_shader shade,void *shader_context,unsigned mask,int solid) {
     if(!s || s->failed || s->sealed)return false;
-    if(!t || !t->alpha || !t->color || !shade || order>=UINT16_MAX ||
+    if(!t || !t->alpha || !t->color || !shade || mask>7 || solid< -1 || solid>UINT16_MAX || order>=UINT16_MAX ||
        (s->has_order && order<=s->last_order))goto fail;
     hone_flat_vertex v[3];const hone_graph_vertex *src[3]={t->v,t->v+1,t->v+2};
     int32_t xmin=INT32_MAX,xmax=0,ymin=INT32_MAX,ymax=0;
@@ -131,20 +134,26 @@ static bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t,unsign
         for(unsigned x=x0;x<=x1;x++){
             if(e[0]>=limit[0] && e[1]>=limit[1] && e[2]>=limit[2]){
                 double weight[3]={(double)e[0]/den,(double)e[1]/den,(double)e[2]/den};
-                float xyz[4];
-                for(unsigned j=0;j<4;j++){
-                    double value=0.;
-                    for(unsigned k=0;k<3;k++)value+=weight[k]*attr[k][j];
-                    xyz[j]=(float)value;
+                float xyz[3]={0},alpha=1.f,rgb[3];
+                if(solid<0){
+                    for(unsigned j=0;j<3;j++)if(mask&(1u<<j)){
+                        double value=0.;
+                        for(unsigned k=0;k<3;k++)value+=weight[k]*attr[k][j];
+                        xyz[j]=(float)value;
+                    }
+                    if(!shade(shader_context,material,xyz,&alpha,rgb))goto fail;
                 }
-                float alpha,rgb[3];
-                if(!shade(shader_context,material,xyz,&alpha,rgb))goto fail;
                 if(alpha!=0.f){
                     if(alpha!=1.f)goto fail;
-                    for(unsigned j=0;j<3;j++)if(!(rgb[j]>=0.f && rgb[j]<=1.f))goto fail;
-                    uint16_t packed=(uint16_t)(((unsigned)floorf(rgb[0]*31+.5f)<<11)|
-                            ((unsigned)floorf(rgb[1]*63+.5f)<<5)|(unsigned)floorf(rgb[2]*31+.5f));
-                    if(!hone_eye_store(s,x,y,order,xyz[3],packed))return false;
+                    int packed=solid;
+                    if(packed<0){
+                        for(unsigned j=0;j<3;j++)if(!(rgb[j]>=0.f && rgb[j]<=1.f))goto fail;
+                        packed=(int)(((unsigned)floorf(rgb[0]*31+.5f)<<11)|
+                                ((unsigned)floorf(rgb[1]*63+.5f)<<5)|(unsigned)floorf(rgb[2]*31+.5f));
+                    }
+                    double z=0.;
+                    for(unsigned k=0;k<3;k++)z+=weight[k]*attr[k][3];
+                    if(!hone_eye_store(s,x,y,order,(float)z,(uint16_t)packed))return false;
                 }
             }
             for(unsigned k=0;k<3;k++)e[k]+=dx[k];
@@ -154,6 +163,11 @@ static bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t,unsign
     return true;
 fail:
     s->failed=true;return false;
+}
+
+static inline bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t,unsigned material,
+        unsigned order,hone_eye_shader shade,void *ctx){
+    return hone_eye_emit_masked(s,t,material,order,shade,ctx,7,-1);
 }
 
 static inline bool hone_eye_seal(hone_eye_ledger *s){

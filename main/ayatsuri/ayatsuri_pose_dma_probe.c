@@ -18,10 +18,11 @@
 
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
 #include "ayatsuri_live_model_fixture_api.h"
-#include "ayatsuri_dma_damage.h"
+#include "ayatsuri_exact_damage.h"
 #include "pet/pet_hub.h"
 #include "hal/sound.h"
 static ay_damage_history displayed;
+static ay_exact_history exact_pixels;
 #define MODEL_SHA256 AY_LIVE_MODEL_SHA256
 #define POSE_COUNT AY_LIVE_MODEL_POSE_COUNT
 #define MODEL_RENDERER "compact_opaque_eye_masks"
@@ -99,6 +100,9 @@ static struct {
 #ifdef AY_COMPANION_MOTION_POSES
     int64_t demo_first_drain, demo_last_drain, demo_longest_interval;
     unsigned demo_intervals;
+#endif
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    unsigned drained_rects, drained_pixels, cache_overflows;
 #endif
     char result[40];
 } probe;
@@ -278,10 +282,17 @@ static bool present_pose(int pose, const char *label, bool measure)
 
     bool ok = true;
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    unsigned frame_rects=0,frame_pixels=0;
     bool submitted=false;
+    ay_exact_begin(&exact_pixels);
     bool overlay=pet_hub_overlay_visible() || sound_capture_active();
+    bool force_full=board_capture_active() || pose<0;
+#ifdef AY_COMPANION_MOTION_POSES
+    /* Transmit the full inspection frame used by the RGB565 comparison. */
+    force_full=force_full || (probe.phase==PREFLIGHT && pose>=0 && pose<3);
+#endif
     ay_damage_frame damage=ay_damage_begin(&displayed,board_panel_write_epoch(),label,overlay,
-                                          board_capture_active() || pose<0);
+                                          force_full);
 #endif
     for (unsigned y = 0; y < HEIGHT; y += BAND_ROWS) {
         const unsigned rows = HEIGHT - y < BAND_ROWS ? HEIGHT - y : BAND_ROWS;
@@ -295,10 +306,21 @@ static bool present_pose(int pose, const char *label, bool measure)
 #endif
         ay_damage_span window=ay_damage_plan(&displayed,&damage,y/BAND_ROWS,
                                              (ay_damage_span){(uint8_t)left,(uint8_t)right});
-        unsigned x=window.left,cols=window.right-window.left;
-        /* A completed benchmark frame always includes an acknowledged transfer,
-         * even when both the previous and current scene are empty. */
-        if (!cols && !submitted && y+rows==HEIGHT) { x=0; cols=16; }
+        ay_damage_span row_damage[BAND_ROWS];
+        bool mandatory=damage.full || (y<32 && damage.header) ||
+                       (y<48 && (damage.overlay || displayed.overlay));
+        ay_damage_span changed={0,0};
+        for(unsigned row=0;row<rows;row++) {
+            row_damage[row]=ay_exact_row(&exact_pixels,y+row,storage.band+row*WIDTH,
+                    (ay_damage_span){left,right},window,mandatory);
+            changed=ay_exact_union(changed,row_damage[row]);
+        }
+        /* An identical frame still requires a successful LCD transaction. */
+        if (!changed.right && !submitted && y+rows==HEIGHT) {
+            row_damage[rows-1]=(ay_damage_span){0,16};
+            changed=row_damage[rows-1];
+        }
+        unsigned cols=changed.right-changed.left;
 #else
         unsigned x=0,cols=WIDTH;
         if (pose < 0) {
@@ -342,13 +364,20 @@ static bool present_pose(int pose, const char *label, bool measure)
         /* On boards with two 4-row draw halves, use the lent DMA source.
          * A private narrow strip otherwise uses one synchronous SPI call per row. */
         esp_err_t result=ESP_OK;
-        submitted=true;
         const unsigned step=(unsigned)board_strip_rows();
         for (unsigned off=0;off<rows && result==ESP_OK;off+=step) {
             unsigned n=rows-off<step ? rows-off : step;
+            ay_damage_span strip_window={0,0};
+            for(unsigned row=0;row<n;row++)strip_window=ay_exact_union(strip_window,row_damage[off+row]);
+            unsigned x=strip_window.left,w=strip_window.right-x;
+            if(!w)continue;
             uint16_t *strip=board_strip_next();
             memcpy(strip,storage.band+off*WIDTH,n*sizeof storage.row);
-            result=board_present_submit((int)x,(int)(y+off),(int)cols,(int)n,strip);
+            result=board_present_submit((int)x,(int)(y+off),(int)w,(int)n,strip);
+            if(result==ESP_OK){
+                submitted=true;
+                frame_rects++;frame_pixels+=n*w;
+            }
         }
 #else
         const esp_err_t result = board_present_submit((int)x, (int)y, (int)cols, (int)rows, storage.band);
@@ -368,6 +397,11 @@ static bool present_pose(int pose, const char *label, bool measure)
     board_present_frame_end();
     const bool released = pose < 0 || finish_pose(drained == ESP_OK);
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if(measure && ok && drained==ESP_OK && released){
+        probe.drained_rects+=frame_rects;probe.drained_pixels+=frame_pixels;
+        probe.cache_overflows+=exact_pixels.overflow;
+    }
+    ay_exact_finish(&exact_pixels,ok && drained==ESP_OK && released && !board_capture_active());
     ay_damage_finish(&displayed,&damage,board_panel_write_epoch(),label,
                      ok && drained==ESP_OK && released && !board_capture_active());
 #endif
@@ -403,6 +437,8 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
     ok = ok && probe.completed >= CHECK_POSES;
     probe.phase = ok ? DEMO : FAILED;
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    ESP_LOGI(tag,"DAMAGE drained_rects=%u drained_pixels=%u history_overflows=%u",
+             probe.drained_rects,probe.drained_pixels,probe.cache_overflows);
     if (ok) snprintf(probe.result, sizeof probe.result, "%.2f FPS", fps);
     else snprintf(probe.result, sizeof probe.result, "FAILED");
 #else
