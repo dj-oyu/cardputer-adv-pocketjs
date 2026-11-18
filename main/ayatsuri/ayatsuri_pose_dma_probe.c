@@ -90,16 +90,30 @@ typedef struct {
 #endif
 } pose_frame;
 
+typedef struct {
+    int64_t prepare_us, geometry_us, raster_us, submit_us, finish_us;
+} frame_timing;
+
+#ifdef AY_COMPANION_MOTION_POSES
+typedef struct {
+    unsigned from, to;
+    int64_t interval_us, idle_us, late_us, work_us, previous_work_us;
+    frame_timing timing;
+} demo_gap;
+#endif
+
 typedef enum { PREFLIGHT, BENCHMARK, DEMO, FAILED } probe_phase;
 static struct {
     uint32_t generation;
     probe_phase phase;
     unsigned checked, completed, flat_completed, demo_pose;
     int displayed_pose, held_pose;
-    int64_t started, next_demo, prepare_us, geometry_us, raster_us, submit_us, finish_us;
+    int64_t started, next_demo;
+    frame_timing benchmark_timing;
 #ifdef AY_COMPANION_MOTION_POSES
-    int64_t demo_first_drain, demo_last_drain, demo_longest_interval;
-    unsigned demo_intervals;
+    int64_t demo_first_drain, demo_last_drain, demo_last_work;
+    unsigned demo_intervals, demo_over_55ms;
+    demo_gap demo_worst;
 #endif
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
     unsigned drained_rects, drained_pixels, cache_overflows;
@@ -270,14 +284,14 @@ static const char *inspection_label(int pose, char buffer[16])
     return buffer;
 }
 
-static bool present_pose(int pose, const char *label, bool measure)
+static bool present_pose(int pose, const char *label, frame_timing *timing)
 {
     pose_frame frame = {0};
     const int64_t prepared = esp_timer_get_time();
     if (pose >= 0 && !prepare_pose((unsigned)pose, &frame)) return false;
-    if (measure) {
-        probe.prepare_us += esp_timer_get_time() - prepared;
-        probe.geometry_us += frame.geometry_us;
+    if (timing) {
+        timing->prepare_us += esp_timer_get_time() - prepared;
+        timing->geometry_us += frame.geometry_us;
     }
 
     bool ok = true;
@@ -338,7 +352,7 @@ static bool present_pose(int pose, const char *label, bool measure)
 #endif
 
         if (!cols) {
-            if (measure) probe.raster_us+=esp_timer_get_time()-started;
+            if (timing) timing->raster_us+=esp_timer_get_time()-started;
             continue;
         }
         paint_begin(storage.band, (int)y, (int)rows);
@@ -358,7 +372,7 @@ static bool present_pose(int pose, const char *label, bool measure)
         paint_ascii(6, 22, "ENTER: RUN AGAIN   BACK: EXIT", 0x9d9f);
 #endif
         const int64_t rendered = esp_timer_get_time();
-        if (measure) probe.raster_us += rendered - started;
+        if (timing) timing->raster_us += rendered - started;
 
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
         /* On boards with two 4-row draw halves, use the lent DMA source.
@@ -382,7 +396,7 @@ static bool present_pose(int pose, const char *label, bool measure)
 #else
         const esp_err_t result = board_present_submit((int)x, (int)y, (int)cols, (int)rows, storage.band);
 #endif
-        if (measure) probe.submit_us += esp_timer_get_time() - rendered;
+        if (timing) timing->submit_us += esp_timer_get_time() - rendered;
         if (result != ESP_OK) {
             ESP_LOGE(tag, "FAIL phase=lcd_submit pose=%d row=%u error=%d", pose, y, (int)result);
             ok = false;
@@ -393,11 +407,11 @@ static bool present_pose(int pose, const char *label, bool measure)
     const int64_t started = esp_timer_get_time();
     const esp_err_t drained = board_present_finish();
     if (drained != ESP_OK) ESP_LOGE(tag, "FAIL phase=lcd_drain pose=%d error=%d", pose, (int)drained);
-    if (measure) probe.finish_us += esp_timer_get_time() - started;
+    if (timing) timing->finish_us += esp_timer_get_time() - started;
     board_present_frame_end();
     const bool released = pose < 0 || finish_pose(drained == ESP_OK);
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
-    if(measure && ok && drained==ESP_OK && released){
+    if(timing==&probe.benchmark_timing && ok && drained==ESP_OK && released){
         probe.drained_rects+=frame_rects;probe.drained_pixels+=frame_pixels;
         probe.cache_overflows+=exact_pixels.overflow;
     }
@@ -405,7 +419,7 @@ static bool present_pose(int pose, const char *label, bool measure)
     ay_damage_finish(&displayed,&damage,board_panel_write_epoch(),label,
                      ok && drained==ESP_OK && released && !board_capture_active());
 #endif
-    if (measure && ok && released && frame.fast) ++probe.flat_completed;
+    if (timing==&probe.benchmark_timing && ok && released && frame.fast) ++probe.flat_completed;
     return ok && drained == ESP_OK && released;
 }
 
@@ -450,32 +464,53 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
              " raster_us=%" PRId64 " submit_us=%" PRId64 " final_drain_us=%" PRId64
              " flat_frames=%u stack_hwm=%u free_internal=%u largest_internal=%u",
              ok ? "PASS" : "FAIL", probe.completed, elapsed_us, fps,
-             probe.prepare_us, probe.geometry_us, probe.raster_us, probe.submit_us, probe.finish_us, probe.flat_completed,
+             probe.benchmark_timing.prepare_us, probe.benchmark_timing.geometry_us,
+             probe.benchmark_timing.raster_us, probe.benchmark_timing.submit_us,
+             probe.benchmark_timing.finish_us, probe.flat_completed,
              (unsigned)uxTaskGetStackHighWaterMark(NULL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
 #ifdef AY_COMPANION_MOTION_POSES
-static void demo_completed(int64_t drained)
+static void demo_completed(unsigned from, unsigned pose, int64_t due,
+                           int64_t started, int64_t drained, const frame_timing *timing)
 {
+    const int64_t work = drained - started;
     if (!probe.demo_first_drain) {
         probe.demo_first_drain = drained;
     } else {
         const int64_t interval = drained - probe.demo_last_drain;
-        if (interval > probe.demo_longest_interval) probe.demo_longest_interval = interval;
+        if (interval > 55000) ++probe.demo_over_55ms;
+        if (interval > probe.demo_worst.interval_us) {
+            probe.demo_worst = (demo_gap){
+                .from = from, .to = pose, .interval_us = interval,
+                .idle_us = started - probe.demo_last_drain, .late_us = due ? started - due : 0,
+                .work_us = work, .previous_work_us = probe.demo_last_work, .timing = *timing,
+            };
+        }
         if (++probe.demo_intervals == MEASURE_FRAMES) {
             const int64_t elapsed = drained - probe.demo_first_drain;
             ESP_LOGI(tag, "DEMO_RATE drain_intervals=%u elapsed_us=%" PRId64
-                     " displayed_fps=%.3f longest_interval_us=%" PRId64,
+                     " displayed_fps=%.3f longest_interval_us=%" PRId64 " over_55ms=%u",
                      probe.demo_intervals, elapsed, probe.demo_intervals * 1000000.0 / elapsed,
-                     probe.demo_longest_interval);
+                     probe.demo_worst.interval_us, probe.demo_over_55ms);
+            const demo_gap *gap = &probe.demo_worst;
+            ESP_LOGI(tag, "DEMO_GAP from=%u to=%u interval_us=%" PRId64 " idle_us=%" PRId64
+                     " late_us=%" PRId64 " previous_work_us=%" PRId64 " work_us=%" PRId64
+                     " prepare_us=%" PRId64 " geometry_us=%" PRId64 " raster_us=%" PRId64
+                     " submit_us=%" PRId64 " finish_us=%" PRId64,
+                     gap->from, gap->to, gap->interval_us, gap->idle_us, gap->late_us,
+                     gap->previous_work_us, gap->work_us, gap->timing.prepare_us, gap->timing.geometry_us,
+                     gap->timing.raster_us, gap->timing.submit_us, gap->timing.finish_us);
             probe.demo_first_drain = drained;
             probe.demo_intervals = 0;
-            probe.demo_longest_interval = 0;
+            probe.demo_over_55ms = 0;
+            probe.demo_worst = (demo_gap){0};
         }
     }
     probe.demo_last_drain = drained;
+    probe.demo_last_work = work;
 }
 #endif
 
@@ -500,7 +535,8 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int insp
     if (select_pose || is_capture) {
         probe.demo_first_drain = 0;
         probe.demo_intervals = 0;
-        probe.demo_longest_interval = 0;
+        probe.demo_over_55ms = 0;
+        probe.demo_worst = (demo_gap){0};
         probe.next_demo = 0;
     }
 #endif
@@ -509,46 +545,51 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int insp
         const char *label = probe.phase >= DEMO ? probe.result : "RUNNING";
         if (probe.phase == DEMO && probe.held_pose >= 0)
             label = inspection_label(probe.held_pose, pose_label);
-        (void)present_pose(pose, label, false);
+        (void)present_pose(pose, label, NULL);
         if (probe.phase == BENCHMARK) begin_benchmark(generation);
     } else if (probe.phase == PREFLIGHT) {
-        const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING", false);
+        const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING", NULL);
         bool verified_pose = banner_ready && check_pose(probe.checked);
 #ifdef AY_COMPANION_MOTION_POSES
         if (verified_pose && probe.checked < 3) {
-            verified_pose = present_pose((int)probe.checked, inspection_labels[probe.checked], false);
+            verified_pose = present_pose((int)probe.checked, inspection_labels[probe.checked], NULL);
             if (verified_pose) ESP_LOGI(tag, "FACE_DMA pose=%u status=PASS", probe.checked);
         }
 #endif
         if (!verified_pose) {
             if (!banner_ready) ESP_LOGE(tag, "FAIL phase=preflight_banner");
             end_benchmark(false, 0);
-            (void)present_pose(-1, probe.result, false);
+            (void)present_pose(-1, probe.result, NULL);
         } else if (++probe.checked == CHECK_POSES) {
             probe.phase = BENCHMARK;
         }
     } else if (probe.phase == BENCHMARK) {
         if (!probe.completed) probe.started = esp_timer_get_time();
         const unsigned pose = FIRST_MOTION_POSE + probe.completed % (POSE_COUNT - FIRST_MOTION_POSE);
-        const bool ok = present_pose((int)pose, "RUNNING", true);
+        const bool ok = present_pose((int)pose, "RUNNING", &probe.benchmark_timing);
         if (ok) ++probe.completed;
         const int64_t elapsed = esp_timer_get_time() - probe.started;
         if (!ok || probe.completed == MEASURE_FRAMES || elapsed >= measure_limit_us) {
             end_benchmark(ok, elapsed);
-            if (probe.phase == FAILED) (void)present_pose(-1, probe.result, false);
+            if (probe.phase == FAILED) (void)present_pose(-1, probe.result, NULL);
         }
     } else if (probe.phase == DEMO && (select_pose ||
                (probe.held_pose < 0 && esp_timer_get_time() >= probe.next_demo))) {
         const int pose = select_pose ? inspect_pose : (int)probe.demo_pose;
         const char *label = probe.result;
         if (select_pose) label = inspection_label(pose, pose_label);
+        frame_timing *record = NULL;
 #ifdef AY_COMPANION_MOTION_POSES
+        frame_timing timing = {0};
+        if (!select_pose) record = &timing;
         const int64_t demo_begin = esp_timer_get_time();
+        const int64_t demo_due = probe.next_demo;
+        const int previous_pose = probe.displayed_pose;
 #endif
-        if (!present_pose(pose, label, false)) {
+        if (!present_pose(pose, label, record)) {
             ESP_LOGE(tag, "FAIL demo_transfer");
             probe.phase = FAILED;
-            (void)present_pose(-1, "LCD FAILED", false);
+            (void)present_pose(-1, "LCD FAILED", NULL);
         } else {
             probe.displayed_pose = pose;
             if (select_pose) probe.held_pose = pose;
@@ -561,7 +602,8 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int insp
                 if (!probe.next_demo || demo_begin - probe.next_demo >= demo_interval_us)
                     probe.next_demo = demo_begin;
                 probe.next_demo += demo_interval_us;
-                demo_completed(esp_timer_get_time());
+                demo_completed((unsigned)previous_pose, (unsigned)pose, demo_due,
+                               demo_begin, esp_timer_get_time(), &timing);
             }
 #else
             probe.next_demo = esp_timer_get_time() + demo_interval_us;
