@@ -42,6 +42,9 @@
 #include "app_control.h"
 #include "esp_app_desc.h"
 #include "ayatsuri/ayatsuri_pose_dma_probe.h"
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+#include "ayatsuri/ayatsuri_live_model_fixture_api.h"
+#endif
 #ifdef CONFIG_AYATSURI_STREAM_DEVICE_PROBE
 #include "ayatsuri/ayatsuri_stream_device_probe.h"
 #endif
@@ -1024,7 +1027,12 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         } else {
             bool shot=atomic_exchange(&capture,false);
             if(shot) board_capture(true);
+#ifdef AY_COMPANION_MOTION_POSES
+            const int inspect_pose=key==KEY_LEFT?0:key==KEY_UP?1:key==KEY_RIGHT?2:
+                                   key==KEY_DOWN?AY_COMPANION_RESUME_DEMO:-1;
+#else
             const int inspect_pose=key==KEY_LEFT?0:key==KEY_RIGHT?3:-1;
+#endif
             ayatsuri_pose_dma_probe_step(app_guest_generation(), key==KEY_ENTER, inspect_pose, shot);
             if(shot) board_capture(false);
         }

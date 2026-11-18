@@ -164,20 +164,28 @@ static inline bool hone_eye_seal(hone_eye_ledger *s){
 /* Resolve after the compact kernel writes ordinary winner IDs, before RGB565
  * conversion. output is a private full-width band; errors can change private
  * scratch only. Includes masks outside every ordinary opaque packet bound. */
-static inline bool hone_eye_resolve(hone_eye_ledger const *s,hone_compact_index const *idx,
-        unsigned y,unsigned rows,uint16_t *pixels){
-    for(unsigned at=s->heads[y/8];at!=HONE_EYE_EMPTY;at=s->slots[at].next){
+/* The depth tile still contains the winning opaque estimate. Its certified
+ * margin also bounds comparison against an already-rounded, exact eye z.
+ * Only inconclusive comparisons need the binary64 reference. */
+static inline bool hone_eye_resolve_tile(const hone_eye_ledger *s,const hone_compact_index *idx,
+        unsigned y,unsigned rows,unsigned tile,unsigned last,const hone_compact_tile_work *w,
+        uint16_t *pixels) {
+    for(unsigned at=s->heads[y/8];at!=HONE_EYE_EMPTY;at=s->slots[at].next) {
         const hone_eye_pixel *p=s->slots+at;
-        unsigned key=p->xy-1,yy=key/240;
-        if(yy<y || yy>=y+rows)continue;
-        unsigned x=key%240;uint16_t *id=pixels+(yy-y)*240+x;
-        if(*id!=UINT16_MAX) {
-            const hone_projected_packet *flat=idx->source->packets+*id;
+        unsigned key=p->xy-1,yy=key/240,x=key%240;
+        if(yy<y || yy>=y+rows || x<tile || x>last)continue;
+        uint16_t *winner=pixels+(yy-y)*240+x;
+        if(*winner==UINT16_MAX)continue;
+        float delta=w->depth[(yy-y)*HONE_COMPACT_TILE_W+x-tile]-p->z;
+        if(fabsf(delta)>idx->margin) {
+            if(delta>0)continue;
+        } else {
+            const hone_projected_packet *flat=idx->source->packets+*winner;
             float z;
             if(!hone_compact_sample(flat,x,yy,&z))return false;
             if(z>p->z || (z==p->z && flat->order<p->order))continue;
         }
-        *id=(uint16_t)(0x8000u|at);
+        *winner=(uint16_t)(0x8000u|at);
     }
     return true;
 }
@@ -221,8 +229,15 @@ static inline bool hone_eye_render_band(const hone_eye_ledger *s,const hone_comp
                 }
             }
         }
+        if(!hone_eye_resolve_tile(s,idx,y,rows,tile,last,w,pixels))return false;
     }
-    if(!hone_eye_resolve(s,idx,y,rows,pixels))return false;
+    /* An eye can extend beyond the entire ordinary band. */
+    for(unsigned at=s->heads[y/8];at!=HONE_EYE_EMPTY;at=s->slots[at].next) {
+        unsigned key=s->slots[at].xy-1,yy=key/240;
+        if(yy<y || yy>=y+rows)continue;
+        uint16_t *winner=pixels+(yy-y)*240+key%240;
+        if(*winner==UINT16_MAX)*winner=(uint16_t)(0x8000u|at);
+    }
     hone_compact_tile_color cache[4];
     for(unsigned k=0;k<4;k++)cache[k].material=UINT32_MAX;
     for(unsigned i=0;i<rows*240;i++) {

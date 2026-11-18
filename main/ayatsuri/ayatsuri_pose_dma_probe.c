@@ -27,7 +27,12 @@ static ay_damage_history displayed;
 #define MODEL_RENDERER "compact_opaque_eye_masks"
 #define LIVE_DEFORMATION "true"
 #define MODEL_LABEL "AYATSURI  /  LIVE MODEL"
+#ifdef AY_COMPANION_MOTION_POSES
+#define MEASURE_FRAMES (AY_COMPANION_MOTION_POSES - AY_COMPANION_INSPECTION_POSES)
+#define FIRST_MOTION_POSE AY_COMPANION_INSPECTION_POSES
+#else
 #define MEASURE_FRAMES 126u
+#endif
 #else
 #include "../../tools/hone/native_geometry/graph_flat_band_candidate.h"
 #include "private/assets/ay_pose_dma_fixture.h"
@@ -40,8 +45,17 @@ static ay_damage_history displayed;
 #endif
 
 enum { WIDTH = 240, HEIGHT = 135, BAND_ROWS = 8, CHECK_POSES = 6 };
+#ifdef AY_COMPANION_MOTION_POSES
+static const int64_t measure_limit_us = INT64_C(16000000);
+static const int64_t demo_interval_us = INT64_C(50000);
+#else
 static const int64_t measure_limit_us = INT64_C(12000000);
 static const int64_t demo_interval_us = INT64_C(120000);
+#endif
+#ifndef FIRST_MOTION_POSE
+#define FIRST_MOTION_POSE 0u
+#endif
+_Static_assert(POSE_COUNT > FIRST_MOTION_POSE, "demo requires playable poses");
 static const char *const tag = "ay_pose_dma";
 
 static struct {
@@ -216,6 +230,38 @@ static bool check_pose(unsigned pose)
     return visible_pixels != 0;
 }
 
+#ifdef AY_COMPANION_MOTION_POSES
+static const char *const inspection_labels[] = {"JOY", "SURPRISE", "CONCERN"};
+
+/* Record the same RGB565 pixels that are sent to the LCD during preflight.
+ * Keep this outside the measured section and exclude the right-hand HUD. */
+static void report_face_band(int pose, unsigned y, unsigned rows)
+{
+    enum { FACE_LEFT = 88, FACE_WIDTH = 64, FACE_TOP = 34, FACE_BOTTOM = 86 };
+    static const char symbols[] = "0123456789abcdef";
+    for (unsigned row = 0; row < rows; ++row) {
+        if (y + row < FACE_TOP || y + row >= FACE_BOTTOM) continue;
+        char hex[FACE_WIDTH * 4 + 1];
+        for (unsigned i = 0; i < FACE_WIDTH; ++i) {
+            const uint16_t value = storage.band[row * WIDTH + FACE_LEFT + i];
+            for (unsigned nibble = 0; nibble < 4; ++nibble)
+                hex[4 * i + nibble] = symbols[(value >> (12 - 4 * nibble)) & 15];
+        }
+        hex[FACE_WIDTH * 4] = '\0';
+        ESP_LOGI(tag, "FACE_ROW pose=%d y=%u rgb=%s", pose, y + row, hex);
+    }
+}
+#endif
+
+static const char *inspection_label(int pose, char buffer[16])
+{
+#ifdef AY_COMPANION_MOTION_POSES
+    if (pose >= 0 && pose < 3) return inspection_labels[pose];
+#endif
+    snprintf(buffer, 16, "POSE %02u", (unsigned)pose);
+    return buffer;
+}
+
 static bool present_pose(int pose, const char *label, bool measure)
 {
     pose_frame frame = {0};
@@ -240,6 +286,9 @@ static bool present_pose(int pose, const char *label, bool measure)
         unsigned left=0,right=0;
         if (pose>=0 && !ay_live_model_band(y,storage.band,&left,&right)) {ok=false; break;}
         if (pose<0) memset(storage.band,0,rows*sizeof storage.row);
+#ifdef AY_COMPANION_MOTION_POSES
+        if (probe.phase == PREFLIGHT && pose >= 0 && pose < 3) report_face_band(pose, y, rows);
+#endif
         ay_damage_span window=ay_damage_plan(&displayed,&damage,y/BAND_ROWS,
                                              (ay_damage_span){(uint8_t)left,(uint8_t)right});
         unsigned x=window.left,cols=window.right-window.left;
@@ -271,7 +320,11 @@ static bool present_pose(int pose, const char *label, bool measure)
         paint_fill(160, 0, 80, 30, 0x0841);
         paint_ascii(164, 3, "AYATSURI", 0xffff);
         paint_ascii(164, 13, label, 0xffff);
+#ifdef AY_COMPANION_MOTION_POSES
+        paint_ascii(164, 22, "L/U/R: FACE", 0x9d9f);
+#else
         paint_ascii(164, 22, "L/R: POSE", 0x9d9f);
+#endif
 #else
         paint_fill(0, 0, WIDTH, 30, 0x0841);
         paint_ascii(6, 3, MODEL_LABEL, 0xffff);
@@ -326,6 +379,10 @@ static void begin_benchmark(uint32_t generation)
     memset(&probe, 0, sizeof probe);
     probe.generation = generation;
     probe.displayed_pose = probe.held_pose = -1;
+    probe.demo_pose = FIRST_MOTION_POSE;
+#ifdef AY_COMPANION_MOTION_POSES
+    ESP_LOGI(tag, "OVERLAY sha256=%s motion_first=%u", AY_COMPANION_OVERLAY_SHA256, FIRST_MOTION_POSE);
+#endif
     const esp_app_desc_t *app = esp_app_get_description();
     ESP_LOGI(tag, "BEGIN model_sha256=%s poses=%u renderer=" MODEL_RENDERER " live_deformation=" LIVE_DEFORMATION " lighting=false "
              "elf_sha_prefix=%02x%02x%02x%02x%02x%02x%02x%02x",
@@ -366,6 +423,10 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
     const int original_async = board_async_get();
     const bool is_capture = capture || board_capture_active();
     if (!is_capture) board_async_set(1);
+#ifdef AY_COMPANION_MOTION_POSES
+    if (inspect_pose == AY_COMPANION_RESUME_DEMO && probe.phase == DEMO)
+        probe.held_pose = -1;
+#endif
     const bool select_pose = inspect_pose >= 0 && inspect_pose < (int)POSE_COUNT &&
                              inspect_pose != probe.held_pose;
     char pose_label[16];
@@ -373,15 +434,20 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
     if (is_capture) {
         const int pose = probe.phase == DEMO ? probe.displayed_pose : -1;
         const char *label = probe.phase >= DEMO ? probe.result : "RUNNING";
-        if (probe.phase == DEMO && probe.held_pose >= 0) {
-            snprintf(pose_label, sizeof pose_label, "POSE %02u", (unsigned)probe.held_pose);
-            label = pose_label;
-        }
+        if (probe.phase == DEMO && probe.held_pose >= 0)
+            label = inspection_label(probe.held_pose, pose_label);
         (void)present_pose(pose, label, false);
         if (probe.phase == BENCHMARK) begin_benchmark(generation);
     } else if (probe.phase == PREFLIGHT) {
         const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING", false);
-        if (!banner_ready || !check_pose(probe.checked)) {
+        bool verified_pose = banner_ready && check_pose(probe.checked);
+#ifdef AY_COMPANION_MOTION_POSES
+        if (verified_pose && probe.checked < 3) {
+            verified_pose = present_pose((int)probe.checked, inspection_labels[probe.checked], false);
+            if (verified_pose) ESP_LOGI(tag, "FACE_DMA pose=%u status=PASS", probe.checked);
+        }
+#endif
+        if (!verified_pose) {
             if (!banner_ready) ESP_LOGE(tag, "FAIL phase=preflight_banner");
             end_benchmark(false, 0);
             (void)present_pose(-1, probe.result, false);
@@ -390,7 +456,7 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
         }
     } else if (probe.phase == BENCHMARK) {
         if (!probe.completed) probe.started = esp_timer_get_time();
-        const unsigned pose = probe.completed % POSE_COUNT;
+        const unsigned pose = FIRST_MOTION_POSE + probe.completed % (POSE_COUNT - FIRST_MOTION_POSE);
         const bool ok = present_pose((int)pose, "RUNNING", true);
         if (ok) ++probe.completed;
         const int64_t elapsed = esp_timer_get_time() - probe.started;
@@ -402,10 +468,10 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
                (probe.held_pose < 0 && esp_timer_get_time() - probe.last_demo >= demo_interval_us))) {
         const int pose = select_pose ? inspect_pose : (int)probe.demo_pose;
         const char *label = probe.result;
-        if (select_pose) {
-            snprintf(pose_label, sizeof pose_label, "POSE %02u", (unsigned)pose);
-            label = pose_label;
-        }
+        if (select_pose) label = inspection_label(pose, pose_label);
+#ifdef AY_COMPANION_MOTION_POSES
+        const int64_t demo_begin = esp_timer_get_time();
+#endif
         if (!present_pose(pose, label, false)) {
             ESP_LOGE(tag, "FAIL demo_transfer");
             probe.phase = FAILED;
@@ -413,8 +479,13 @@ void ayatsuri_pose_dma_probe_step(uint32_t generation, bool restart, int inspect
         } else {
             probe.displayed_pose = pose;
             if (select_pose) probe.held_pose = pose;
-            else probe.demo_pose = (probe.demo_pose + 1) % POSE_COUNT;
+            else probe.demo_pose = FIRST_MOTION_POSE +
+                    (probe.demo_pose - FIRST_MOTION_POSE + 1) % (POSE_COUNT - FIRST_MOTION_POSE);
+#ifdef AY_COMPANION_MOTION_POSES
+            probe.last_demo = demo_begin;
+#else
             probe.last_demo = esp_timer_get_time();
+#endif
         }
     }
 

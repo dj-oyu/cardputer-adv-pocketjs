@@ -4,7 +4,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#if __has_include("private/assets/live/companion_motion_config.h")
+#include "private/assets/live/companion_motion_config.h"
+#define AY_LIVE_MODEL_POSE_COUNT AY_COMPANION_MOTION_POSES
+#define AY_COMPANION_RESUME_DEMO (-2)
+#else
 #define AY_LIVE_MODEL_POSE_COUNT 63u
+#endif
 #define AY_LIVE_MODEL_SHA256 "384ada0c37da16d625b1e6612a0d2f7ca538c29fe0d8dff43a929841ec63fba8"
 
 /* A successful prepare pins one generated frame until a confirmed drain.
