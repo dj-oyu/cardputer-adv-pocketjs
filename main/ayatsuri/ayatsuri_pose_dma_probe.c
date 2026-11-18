@@ -410,9 +410,15 @@ static bool present_pose(int pose, const char *label, frame_timing *timing)
             for(unsigned row=0;row<n;row++)strip_window=ay_exact_union(strip_window,row_damage[off+row]);
             unsigned x=strip_window.left,w=strip_window.right-x;
             if(!w)continue;
-            uint16_t *strip=board_strip_next();
-            hone_strip_copy(strip,storage.band+off*WIDTH,n*sizeof storage.row);
-            result=board_present_submit((int)x,(int)(y+off),(int)w,(int)n,strip);
+            if (w==WIDTH || board_capture_active() || pet_hub_overlay_visible() ||
+                sound_capture_active()) {
+                uint16_t *strip=board_strip_next();
+                hone_strip_copy(strip,storage.band+off*WIDTH,n*sizeof storage.row);
+                result=board_present_submit((int)x,(int)(y+off),(int)w,(int)n,strip);
+            } else {
+                result=board_present_submit_source((int)x,(int)(y+off),(int)w,(int)n,
+                                                   storage.band+off*WIDTH);
+            }
             if(result==ESP_OK){
                 submitted=true;
                 frame_rects++;frame_pixels+=n*w;

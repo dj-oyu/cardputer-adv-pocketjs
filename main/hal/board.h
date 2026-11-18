@@ -64,6 +64,8 @@ esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pi
 // until finish. Never acknowledge a frame until finish succeeds. A non-timeout
 // driver error without descriptor return quarantines TX until a later finish.
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
+// Copy full-stride source rows into a board-owned strip; source remains caller-owned.
+esp_err_t board_present_submit_source(int x,int y,int cols,int rows,const uint16_t *source);
 esp_err_t board_present_finish(void);
 #endif
 // Measurement build (docs/platform/lcd-dma-driver.md, S0b): two panel buffers

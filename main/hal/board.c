@@ -866,7 +866,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
 // outside the window is identical to what is already on the glass, because the
 // frame that put it there was full width (an overlay's own change comes through
 // app_force_redraw(), which asks for whole bands).
-esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels) {
+static esp_err_t present_rect(int x, int y, int cols, int rows, uint16_t *pixels, bool packed) {
     if (x<0 || cols<1 || x+cols>LCD_W ||
         y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) {
         next_row=-1;return ESP_ERR_INVALID_ARG;
@@ -875,8 +875,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
     if (panel_write_epoch!=UINT32_MAX) ++panel_write_epoch;
 #endif
-    pet_hub_overlay(pixels,y,rows);
-    pocket_capture_overlay(pixels,y,rows);
+    if (!packed) {
+        pet_hub_overlay(pixels,y,rows);
+        pocket_capture_overlay(pixels,y,rows);
+    }
     // No capture arm: board_capture dumps whole rows and the columns outside
     // the window hold the previous band, so a caller that is capturing must not
     // narrow. board_capture_active() is how it finds that out.
@@ -942,7 +944,7 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // A lent half, packed in place: row r moves from r*240+x down to r*cols,
     // never past a row still to be read.
     uint16_t *panel = pixels;
-    for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
+    if (!packed) for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
     if (0)
 #elif defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     uint16_t *panel = tx_slot_buf[tx_next];
@@ -1010,6 +1012,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     return e;
 }
 
+esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels) {
+    return present_rect(x,y,cols,rows,pixels,false);
+}
+
 esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels) {
     esp_err_t e=tx_reap();
     if(e==ESP_OK) e=board_present_rect(x,y,cols,rows,pixels);
@@ -1034,6 +1040,30 @@ esp_err_t board_present_finish(void) {
     do { e=tx_reap(); } while(e==ESP_ERR_TIMEOUT);
     if(e!=ESP_OK)next_row=-1;
     return e;
+}
+esp_err_t board_present_submit_source(int x,int y,int cols,int rows,const uint16_t *source) {
+    if (!source || x<0 || cols<1 || cols>LCD_W || x>LCD_W-cols || y<0 || rows<1 ||
+        rows>board_strip_rows() || y>LCD_H-rows) return ESP_ERR_INVALID_ARG;
+    uint16_t *strip=board_strip_next();
+#if BOARD_STRIP_HALF && !BOARD_BUF_AB && !BOARD_LCD_DEPTH2
+    /* Overlays and screenshots require whole, 240-pixel-stride rows. */
+    if (cols<LCD_W && !board_capture_active() && !pet_hub_overlay_visible() &&
+        !sound_capture_active()) {
+        for (int r=0;r<rows;r++)
+            memcpy(strip+r*cols,source+r*LCD_W+x,(size_t)cols*sizeof(*strip));
+        esp_err_t e=board_present_finish();
+        if(e==ESP_OK) {
+            const bool needs_full_rows=board_capture_active() || pet_hub_overlay_visible() ||
+                                       sound_capture_active();
+            if(needs_full_rows) memcpy(strip,source,(size_t)rows*LCD_W*sizeof(*strip));
+            e=present_rect(x,y,cols,rows,strip,!needs_full_rows);
+        }
+        if(e!=ESP_OK) next_row=-1;
+        return e;
+    }
+#endif
+    memcpy(strip,source,(size_t)rows*LCD_W*sizeof(*strip));
+    return board_present_submit(x,y,cols,rows,strip);
 }
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
