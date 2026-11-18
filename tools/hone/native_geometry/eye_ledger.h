@@ -40,7 +40,7 @@ typedef bool (*hone_eye_shader)(void *,unsigned,const float[3],float *,float[3])
  * have been validated before viewport clipping and remain finite after it.
  * The shader must return alpha exactly zero/one (fractional rejects atomically).
  * Every covered fragment is evaluated, including fragments behind opaque ones. */
-static inline bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t,unsigned material,
+static __attribute__((noinline)) bool hone_eye_emit_general(hone_eye_ledger *s,const hone_graph_triangle *t,unsigned material,
         unsigned order,hone_eye_shader shade,void *shader_context) {
     if(!s || s->failed || s->sealed) return false;
     if(!t || !shade || order>=UINT16_MAX || (s->has_order && order<=s->last_order)) goto fail;
@@ -82,6 +82,80 @@ static inline bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t
 fail:
     s->failed=true;return false;
 }
+/* Q18 coverage and all graph interpolation use the same winding/order.
+ * Edges and the area are exact integers < 2^53: multiplying either operand
+ * of the reference weight division by the common factor 2^36 leaves the
+ * correctly rounded binary64 result unchanged. */
+static bool hone_eye_emit(hone_eye_ledger *s,const hone_graph_triangle *t,unsigned material,
+        unsigned order,hone_eye_shader shade,void *shader_context) {
+    if(!s || s->failed || s->sealed)return false;
+    if(!t || !t->alpha || !t->color || !shade || order>=UINT16_MAX ||
+       (s->has_order && order<=s->last_order))goto fail;
+    hone_flat_vertex v[3];const hone_graph_vertex *src[3]={t->v,t->v+1,t->v+2};
+    int32_t xmin=INT32_MAX,xmax=0,ymin=INT32_MAX,ymax=0;
+    for(unsigned k=0;k<3;k++){
+        const hone_graph_vertex *a=src[k];
+        if(!hone_flat_coord(a->x)||!hone_flat_coord(a->y) || !(fabsf(a->z)<=1e20f))
+            return hone_eye_emit_general(s,t,material,order,shade,shader_context);
+        for(unsigned j=0;j<3;j++)if(!(fabsf(a->local[j])<=1e20f))
+            return hone_eye_emit_general(s,t,material,order,shade,shader_context);
+        int32_t ix=(int32_t)(a->x*HONE_FLAT_SCALE),iy=(int32_t)(a->y*HONE_FLAT_SCALE);
+        v[k]=(hone_flat_vertex){ix,iy,a->z};
+        if(ix<xmin)xmin=ix;if(ix>xmax)xmax=ix;
+        if(iy<ymin)ymin=iy;if(iy>ymax)ymax=iy;
+    }
+    s->has_order=true;s->last_order=(uint16_t)order;
+    unsigned x0=(unsigned)(xmin+HONE_FLAT_SCALE-1)/HONE_FLAT_SCALE,x1=(unsigned)xmax/HONE_FLAT_SCALE;
+    unsigned y0=(unsigned)(ymin+HONE_FLAT_SCALE-1)/HONE_FLAT_SCALE,y1=(unsigned)ymax/HONE_FLAT_SCALE;
+    if(x1>239)x1=239;if(y1>134)y1=134;
+    if(x0>x1 || y0>y1)return true;
+    int64_t area=hone_flat_edge(v[0],v[1],v[2].x,v[2].y);
+    if(!area)return true;
+    if(area<0){
+        hone_flat_vertex temp=v[1];v[1]=v[2];v[2]=temp;
+        const hone_graph_vertex *a=src[1];src[1]=src[2];src[2]=a;
+        area=-area;
+    }
+    double attr[3][4],den=(double)area;
+    int64_t first[3],dx[3],dy[3],limit[3];
+    for(unsigned k=0;k<3;k++){
+        hone_flat_vertex a=v[(k+1)%3],b=v[(k+2)%3];
+        first[k]=hone_flat_edge(a,b,x0*HONE_FLAT_SCALE,y0*HONE_FLAT_SCALE);
+        dx[k]=(int64_t)(a.y-b.y)*HONE_FLAT_SCALE;
+        dy[k]=(int64_t)(b.x-a.x)*HONE_FLAT_SCALE;
+        limit[k]=!(b.y<a.y || (b.y==a.y && b.x>a.x));
+        attr[k][0]=src[k]->local[0];attr[k][1]=src[k]->local[1];attr[k][2]=src[k]->local[2];attr[k][3]=src[k]->z;
+    }
+    for(unsigned y=y0;y<=y1;y++){
+        int64_t e[3]={first[0],first[1],first[2]};
+        for(unsigned x=x0;x<=x1;x++){
+            if(e[0]>=limit[0] && e[1]>=limit[1] && e[2]>=limit[2]){
+                double weight[3]={(double)e[0]/den,(double)e[1]/den,(double)e[2]/den};
+                float xyz[4];
+                for(unsigned j=0;j<4;j++){
+                    double value=0.;
+                    for(unsigned k=0;k<3;k++)value+=weight[k]*attr[k][j];
+                    xyz[j]=(float)value;
+                }
+                float alpha,rgb[3];
+                if(!shade(shader_context,material,xyz,&alpha,rgb))goto fail;
+                if(alpha!=0.f){
+                    if(alpha!=1.f)goto fail;
+                    for(unsigned j=0;j<3;j++)if(!(rgb[j]>=0.f && rgb[j]<=1.f))goto fail;
+                    uint16_t packed=(uint16_t)(((unsigned)floorf(rgb[0]*31+.5f)<<11)|
+                            ((unsigned)floorf(rgb[1]*63+.5f)<<5)|(unsigned)floorf(rgb[2]*31+.5f));
+                    if(!hone_eye_store(s,x,y,order,xyz[3],packed))return false;
+                }
+            }
+            for(unsigned k=0;k<3;k++)e[k]+=dx[k];
+        }
+        for(unsigned k=0;k<3;k++)first[k]+=dy[k];
+    }
+    return true;
+fail:
+    s->failed=true;return false;
+}
+
 static inline bool hone_eye_seal(hone_eye_ledger *s){
     if(!s || s->failed || s->sealed)return false;
     s->sealed=true;return true;
