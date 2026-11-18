@@ -1,5 +1,6 @@
 """Offline mesh-attached fill for an art-directed face lighting palette."""
 
+from colorsys import hls_to_rgb, rgb_to_hls
 from fnmatch import fnmatchcase
 from math import hypot
 
@@ -44,4 +45,47 @@ def apply_face_fill(shaded, albedo, key_cosine, weight):
     return tuple(
         color * (1.0 - weight) + reflectance * tint * exposure * weight
         for color, reflectance, tint in zip(shaded, albedo, warm, strict=True)
+    )
+
+
+def _linear(channel):
+    return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+
+def _srgb(channel):
+    return 12.92 * channel if channel <= 0.0031308 else 1.055 * channel ** (1 / 2.4) - 0.055
+
+
+def _luminance(rgb):
+    return sum(weight * _linear(value) for weight, value in zip((0.2126, 0.7152, 0.0722), rgb, strict=True))
+
+
+def harmonize_face_color(rgb, fill_weight):
+    """Use the selected warm-coat grade without lowering the eye fill."""
+    if fill_weight <= 0.0:
+        return rgb
+    hue, lightness, saturation = rgb_to_hls(*rgb)
+    if 45 / 360 < hue < 344 / 360 or saturation <= 0.25 or not 0.19 < lightness < 0.71:
+        return rgb
+    strength = _smoothstep(fill_weight / 0.28)
+    hue = (hue - strength * 8 / 360) % 1
+    saturation *= 1 - 0.30 * strength
+    target = _luminance(rgb)
+    low, high = 0.0, 1.0
+    for _ in range(20):
+        mid = (low + high) / 2
+        if _luminance(hls_to_rgb(hue, mid, saturation)) < target:
+            low = mid
+        else:
+            high = mid
+    return hls_to_rgb(hue, (low + high) / 2, saturation)
+
+
+def apply_face_highlight(rgb, color, weight):
+    """Mix the authored highlight in linear light before RGB565 quantization."""
+    if weight <= 0.0:
+        return rgb
+    return tuple(
+        _srgb(_linear(base) * (1.0 - weight) + _linear(highlight) * weight)
+        for base, highlight in zip(rgb, color, strict=True)
     )
