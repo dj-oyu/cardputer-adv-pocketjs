@@ -9,6 +9,7 @@ revision authority; no independent dependency lock or branch tracking is added.
 | third_party/bmi270 | https://github.com/boschsensortec/BMI270_SensorAPI.git | 41129fcfe39c583ee5462d79195741945d51c1fe, unchanged from prepare_dependencies.py |
 | third_party/minimp3 | https://github.com/lieff/minimp3.git | ea99364f61c14656440e8d77e9c233ccf3124633, unchanged from prepare_minimp3.py |
 | third_party/opus | https://github.com/xiph/opus.git | 22244de5a79bd1d6d623c32e72bf1954b56235be, existing v1.6.1 annotated tag a5d6c1b6f4e582df97390f9ac5c6e7c51cbffffe |
+| components/quickjs-ng/quickjs-ng | https://github.com/dj-oyu/quickjs.git | Fork of quickjs-ng. The first pin (53c61211b0ec9bd20848993c7d8712375a997c06) is byte-identical to the tree that was vendored here; see docs/vm/vm-branching.md. Its own `test262` submodule is `update = none` and is not fetched by a recursive checkout. |
 
 ```sh
 git submodule update --init --recursive --checkout
@@ -26,14 +27,15 @@ unchanged, and each upstream submodule retains its own license files.
 
 For broker snapshots, the importer materializes the same fixed Gitlinks without
 Git metadata and records repository/commit/tree/archive/content hashes. Register
-all three upstream repositories in source_repository.submodule_repositories.
+all four repositories (BMI270, minimp3, libopus, dj-oyu/quickjs) in
+source_repository.submodule_repositories.
 Do not invoke preparation during SDK build.
 
 Other clean-checkout inputs:
 
 | Input | Status and consumer |
 | --- | --- |
-| QuickJS / PocketJS | Tracked under components/quickjs-ng and components/pocketjs_guest. No historical PocketJS Rust/UI archive is required by current root CMake. |
+| QuickJS / PocketJS | The QuickJS sources are the components/quickjs-ng/quickjs-ng submodule above; the ESP-IDF wrapper (components/quickjs-ng/CMakeLists.txt, port/) and components/pocketjs_guest stay tracked here. No historical PocketJS Rust/UI archive is required by current root CMake. |
 | dependencies.lock | Tracked historical component-manager metadata still contains old .cache/PocketJS entries. It is not the source dependency authority. Broker builds use IDF_COMPONENT_MANAGER=0; standard builds resolve the current tracked IDF manifests. This PR does not regenerate that metadata. |
 | ESP-IDF / tools | External ESP-IDF **6.0.1**, its Python/CMake/Ninja/Xtensa tools; no SDK is bundled. |
 | Node | External Node 16+ for tracked DERBY @plan generators. Those generators need no node_modules install. |

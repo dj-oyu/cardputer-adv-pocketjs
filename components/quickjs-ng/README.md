@@ -74,8 +74,8 @@ This component vendors the QuickJS-NG source from:
 
 https://github.com/quickjs-ng/quickjs
 
-The vendored upstream source is kept under `quickjs-ng/`.
+The upstream source under `quickjs-ng/` is a Git submodule: the fork https://github.com/dj-oyu/quickjs, which carries the pocketjs engine changes on top of Espressif's formatting of v0.14.0 (`ports/esp-idf/reformat.sh` in the fork reproduces that formatting). This directory keeps only the ESP-IDF wrapper.
 
 ### License
 
-The vendored QuickJS-NG source is licensed under the MIT license. The ESP-IDF port files are licensed under Apache-2.0.
+The QuickJS-NG source (the submodule) is licensed under the MIT license. The ESP-IDF port files are licensed under Apache-2.0.

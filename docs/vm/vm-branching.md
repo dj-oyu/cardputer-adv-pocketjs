@@ -21,8 +21,10 @@ vm/l2a-segments    ●──●          ●──●  vm/l2b-frames …     段
 
 ## QuickJS とゲストの取り込み
 
-- quickjs-ng は `vm/p0-foundation` でリポジトリへ取り込む。**最初のコミットは Espressif Registry 0.14.0 と同じバイト列**にし、以降の改変はすべて別コミットにする。`git diff <取り込みコミット>..vm/main -- <取り込み先>` が改変の全体になる。
-- 上流を更新するときは、取り込みコミットの上に新しい版を置き、改変をその上に載せ直す。
+- **2026-11-20 から、quickjs-ng のソースは fork [dj-oyu/quickjs](https://github.com/dj-oyu/quickjs) の submodule**（`components/quickjs-ng/quickjs-ng`、パスは以前と同じ）。ESP-IDF の外枠（`components/quickjs-ng/CMakeLists.txt`、`port/`）と、ソースに縛られた道具（`tools/qjs_hotcold/profile.json`、`main/vm/helper_iram8.lf`、`tools/vmtest/floor/gen_rom_*`）はこのリポジトリに残す。
+- fork の積み方: 上流タグ `v0.14.0` → `ports/esp-idf/reformat.sh`（ESP-IDF 既定の astyle 3.4.7。Espressif Registry 0.14.0 の整形を再現する）→ Registry 版の残り（綴りの修正と `quickjs-libc.c` の `ESP_PLATFORM` 分岐）→ この repo の `10f51850..80188e44` の改変 85 コミットを、作者・日付・メッセージのまま `git am` で再生。再生後の `53c6121` は、submodule 化の直前にこの repo にあった 27 ファイルとバイト単位で一致する（確認済み）。それより前の改変の履歴は、この repo の `git log -- components/quickjs-ng/quickjs-ng` にも残っている。
+- **エンジンの変更は fork でコミット・push し、この repo では gitlink を上げるコミットを作る。** 2つを1つの変更として扱い、gitlink を上げるコミットのメッセージに fork 側の範囲（`<旧>..<新>`）を書く。`quickjs.c` が変わったら `tools/qjs_hotcold/train.sh` で学習し直す。
+- **上流を更新するときは、新しい版にも `reformat.sh` をかけてから fork へマージする。** 整形の差（`quickjs.c` だけで約 1.4 万行）を除いて、意味のある変更だけを衝突させるため。fork の改変の本体は `quickjs.c` で約 7,650 行（空白込みの diff 行数、v0.14.0＋整形との比較）。
 - `.cache/` と `managed_components/` の直接編集を成果物にしない（仕様 §3-8）。
 
 ## 作業ツリー

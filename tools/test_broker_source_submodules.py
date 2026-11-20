@@ -13,10 +13,17 @@ from cardputer_mcp.config import BuildProject, Settings, SourceRepository
 from cardputer_mcp.source_snapshot import SourceSnapshots, download, file_receipt
 
 ROOT = Path(__file__).resolve().parents[1]
+PATHS = (
+    "third_party/bmi270",
+    "third_party/minimp3",
+    "third_party/opus",
+    "components/quickjs-ng/quickjs-ng",
+)
 REPOSITORIES = [
     "boschsensortec/BMI270_SensorAPI",
     "lieff/minimp3",
     "xiph/opus",
+    "dj-oyu/quickjs",
 ]
 
 
@@ -30,7 +37,7 @@ def main() -> None:
         ["git", "-C", str(ROOT), "rev-parse", "HEAD^{tree}"], text=True,
     ).strip()
     expected = {}
-    for path in ("third_party/bmi270", "third_party/minimp3", "third_party/opus"):
+    for path in PATHS:
         entry = subprocess.check_output(
             ["git", "-C", str(ROOT), "ls-tree", "HEAD", "--", path], text=True,
         ).split()
@@ -57,9 +64,7 @@ def main() -> None:
         )
         def transport(url, deadline, live, limit):
             data = download(url, deadline, live, limit)
-            for path, repository in zip(
-                ("third_party/bmi270", "third_party/minimp3", "third_party/opus"), REPOSITORIES
-            ):
+            for path, repository in zip(PATHS, REPOSITORIES):
                 if not url.startswith("https://codeload.github.com/" + repository + "/zip/"):
                     continue
                 tracked = {}
@@ -98,6 +103,7 @@ def main() -> None:
         for required in (
             "third_party/bmi270/bmi2.c", "third_party/bmi270/bmi270.c",
             "third_party/minimp3/minimp3.h", "third_party/opus/include/opus.h",
+            "components/quickjs-ng/quickjs-ng/quickjs.c",
         ):
             assert (source / required).is_file(), required
         assert not (root / "worktree").exists()

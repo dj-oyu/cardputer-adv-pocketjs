@@ -4,7 +4,8 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PATHS = ("third_party/bmi270", "third_party/minimp3", "third_party/opus")
+PATHS = ("third_party/bmi270", "third_party/minimp3", "third_party/opus",
+         "components/quickjs-ng/quickjs-ng")
 
 
 def prepare_submodule(path: str) -> None:
