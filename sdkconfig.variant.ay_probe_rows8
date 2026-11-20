@@ -1,0 +1,2 @@
+# Synthetic CPU-only row-batching comparison, not real-model/DMA evidence.
+CONFIG_AYATSURI_STREAM_PROBE_DEPTH8=y

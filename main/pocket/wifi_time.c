@@ -18,8 +18,77 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+#include "esp_timer.h"
+#include <inttypes.h>
+#endif
 
 static const char *TAG = "wifi";
+
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+// The two planned link cycles take about 50 edges. Keep UART, allocations and
+// task enumeration out of the measured intervals. All times use the band
+// worker's esp_timer clock, including events delivered on a different task.
+enum radio_stage {
+    NVS_READ, RADIO_UP, DRIVER_INIT, STA_CONFIG, DRIVER_START, ASSOC_RESERVATION,
+    STA_CONNECT, TEAR_DOWN, STA_DISCONNECT, DRIVER_STOP, DRIVER_DEINIT, INIT_RESERVATION
+};
+static const char *const trace_stage_names[] = {
+    "nvs_read", "radio_up", "driver_init", "sta_config", "driver_start",
+    "assoc_reservation", "sta_connect", "tear_down", "sta_disconnect",
+    "driver_stop", "driver_deinit", "init_reservation"
+};
+static struct {
+    uint32_t elapsed_us;
+    uintptr_t task;
+    uint8_t stage, core;
+    bool begin;
+} trace_edges[64];
+static portMUX_TYPE trace_lock = portMUX_INITIALIZER_UNLOCKED;
+static int64_t trace_origin;
+static unsigned trace_count, trace_dropped;
+static bool trace_armed;
+
+void wifi_time_probe_trace_begin(void) {
+    taskENTER_CRITICAL(&trace_lock);
+    trace_count=0;
+    trace_dropped=0;
+    trace_origin=esp_timer_get_time();
+    trace_armed=true;
+    taskEXIT_CRITICAL(&trace_lock);
+}
+
+static void trace_edge(enum radio_stage stage, bool begin) {
+    taskENTER_CRITICAL(&trace_lock);
+    if(trace_armed) {
+        const int64_t elapsed=esp_timer_get_time()-trace_origin;
+        if(trace_count<sizeof trace_edges/sizeof trace_edges[0] && elapsed<=UINT32_MAX) {
+            trace_edges[trace_count].elapsed_us=(uint32_t)elapsed;
+            trace_edges[trace_count].task=(uintptr_t)xTaskGetCurrentTaskHandle();
+            trace_edges[trace_count].stage=stage;
+            trace_edges[trace_count].core=xPortGetCoreID();
+            trace_edges[trace_count].begin=begin;
+            ++trace_count;
+        } else ++trace_dropped;
+    }
+    taskEXIT_CRITICAL(&trace_lock);
+}
+
+void wifi_time_probe_trace_report(void) {
+    taskENTER_CRITICAL(&trace_lock);
+    trace_armed=false;
+    taskEXIT_CRITICAL(&trace_lock);
+    for(unsigned i=0;i<trace_count;++i) {
+        ESP_LOGI("AY_NET_PROBE","RADIO_EDGE stage=%s edge=%s us=%" PRId64 " core=%u task=%" PRIuPTR,
+                 trace_stage_names[trace_edges[i].stage],trace_edges[i].begin?"begin":"end",
+                 trace_origin+trace_edges[i].elapsed_us,(unsigned)trace_edges[i].core,
+                 trace_edges[i].task);
+    }
+    ESP_LOGI("AY_NET_PROBE","RADIO_TRACE edges=%u dropped=%u",trace_count,trace_dropped);
+}
+#else
+#define trace_edge(stage, begin) ((void)0)
+#endif
 
 #define WIFI_NAMESPACE "wifi"
 #define WIFI_KEY_SSID  "ssid"
@@ -206,6 +275,61 @@ static bool hold_link, linked;
 static atomic_bool link_stop_req;
 static atomic_int  link_owner_v;     // wifi_time_link_owner_t, 0 when no link
 
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+/* Only the renderer and this radio link use this advisory reservation. */
+enum { CORE0_PAIRED_FRAME = 1u, CORE0_WIFI_ASSOC = 2u, CORE0_WIFI_INIT = 4u };
+static atomic_uint core0_offload;
+
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+static atomic_bool probe_reserve_init;
+
+void wifi_time_probe_reserve_init(bool enabled) {
+    atomic_store(&probe_reserve_init, enabled);
+}
+#endif
+
+bool wifi_time_try_render_core0(void) {
+    unsigned idle = 0;
+    return atomic_compare_exchange_strong(&core0_offload, &idle, CORE0_PAIRED_FRAME);
+}
+
+void wifi_time_release_render_core0(void) {
+    atomic_fetch_and(&core0_offload, ~CORE0_PAIRED_FRAME);
+}
+
+static void wifi_release_core0(void) {
+    if (atomic_fetch_and(&core0_offload, ~CORE0_WIFI_ASSOC) & CORE0_WIFI_ASSOC)
+        trace_edge(ASSOC_RESERVATION, false);
+}
+
+/* A Wi-Fi bit is already set, so only the frame that won the preceding CAS
+ * can hold borrowed render data. Let its owner complete the final join. */
+static bool wait_paired_frame(unsigned previous) {
+    if (!(previous & CORE0_PAIRED_FRAME)) return true;
+    const TickType_t start = xTaskGetTickCount();
+    while (atomic_load(&core0_offload) & CORE0_PAIRED_FRAME) {
+        if (xTaskGetTickCount() - start >= pdMS_TO_TICKS(120)) return false;
+        vTaskDelay(1);
+    }
+    return true;
+}
+#endif
+
+static void wifi_connect_station(void) {
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    const unsigned previous = atomic_fetch_or(&core0_offload, CORE0_WIFI_ASSOC);
+    if (!(previous & CORE0_WIFI_ASSOC)) trace_edge(ASSOC_RESERVATION, true);
+    if (!wait_paired_frame(previous)) {
+        wifi_release_core0();
+        xEventGroupSetBits(events, BIT_GIVEN_UP);
+        return;
+    }
+#endif
+    trace_edge(STA_CONNECT, true);
+    esp_wifi_connect();
+    trace_edge(STA_CONNECT, false);
+}
+
 // The disconnect reason is the only evidence of what actually went wrong, and
 // the split below is what the UI needs: "the network is not there" sends the
 // user to the SSID field, "the network said no" sends them to the password.
@@ -233,10 +357,13 @@ static bool terminal_reason(uint8_t reason) {
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg; (void)base;
     if(id==WIFI_EVENT_STA_START) {
-        if(auto_connect) esp_wifi_connect();
+        if(auto_connect) wifi_connect_station();
     } else if(id==WIFI_EVENT_STA_CONNECTED) {
         // Associated and authenticated; anything that fails from here is the
         // address, not the credentials.
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+        wifi_release_core0();
+#endif
         status_stage(WIFI_TIME_STAGE_DHCP,0);
     } else if(id==WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *e=data;
@@ -250,7 +377,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
             xEventGroupSetBits(events,BIT_GIVEN_UP);
         } else {
             attempts_left--;
-            esp_wifi_connect();
+            wifi_connect_station();
         }
     }
 }
@@ -292,7 +419,27 @@ static esp_err_t radio_up(bool connect) {
     // AUTOSYNC_MIN_LARGEST is waiting to be replaced by.
     size_t largest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+    const bool reserve_init=connect && atomic_load(&probe_reserve_init);
+    if (reserve_init) {
+        const unsigned previous=atomic_fetch_or(&core0_offload, CORE0_WIFI_INIT);
+        trace_edge(INIT_RESERVATION,true);
+        if (!wait_paired_frame(previous)) {
+            atomic_fetch_and(&core0_offload, ~CORE0_WIFI_INIT);
+            trace_edge(INIT_RESERVATION,false);
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+#endif
+    trace_edge(DRIVER_INIT,true);
     err=esp_wifi_init(&init);
+    trace_edge(DRIVER_INIT,false);
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+    if (reserve_init) {
+        atomic_fetch_and(&core0_offload, ~CORE0_WIFI_INIT);
+        trace_edge(INIT_RESERVATION,false);
+    }
+#endif
     size_t after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     ESP_LOGI(TAG,"RADIO_INIT %s free=%u->%u cost=%d largest=%u",
              err==ESP_OK?"ok":esp_err_to_name(err),
@@ -337,10 +484,19 @@ static void sntp_give(void) { xSemaphoreGive(sntp_lock); }
 // SNTP goes first and under its lock: its sync callback posts to the default
 // event loop, which the last line may delete.
 static void tear_down(void) {
+    trace_edge(TEAR_DOWN,true);
     sntp_take();
     esp_netif_sntp_deinit();
     sntp_give();
-    if(wifi_started) { esp_wifi_disconnect(); esp_wifi_stop(); wifi_started=false; }
+    if(wifi_started) {
+        trace_edge(STA_DISCONNECT,true);
+        esp_wifi_disconnect();
+        trace_edge(STA_DISCONNECT,false);
+        trace_edge(DRIVER_STOP,true);
+        esp_wifi_stop();
+        trace_edge(DRIVER_STOP,false);
+        wifi_started=false;
+    }
     if(ip_handler) {
         esp_event_handler_instance_unregister(IP_EVENT,IP_EVENT_STA_GOT_IP,ip_handler);
         ip_handler=NULL;
@@ -349,10 +505,19 @@ static void tear_down(void) {
         esp_event_handler_instance_unregister(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_handler);
         wifi_handler=NULL;
     }
-    if(wifi_inited) { esp_wifi_deinit(); wifi_inited=false; }
+    if(wifi_inited) {
+        trace_edge(DRIVER_DEINIT,true);
+        esp_wifi_deinit();
+        trace_edge(DRIVER_DEINIT,false);
+        wifi_inited=false;
+    }
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    wifi_release_core0();
+#endif
     if(sta_netif) { esp_netif_destroy_default_wifi(sta_netif); sta_netif=NULL; }
     if(owns_event_loop) { esp_event_loop_delete_default(); owns_event_loop=false; }
     wifi_time_stack_report("radio_down");
+    trace_edge(TEAR_DOWN,false);
 }
 
 // The stored network, read the same way for the clock and for a lease. One copy
@@ -393,7 +558,9 @@ static esp_err_t load_credentials(char *ssid, size_t ssid_size,
 // the stage in `status` already says which of those it was; any other error is
 // bring-up and carries its own esp_err_t.
 static esp_err_t associate_and_wait(const char *ssid, const char *psk) {
+    trace_edge(RADIO_UP,true);
     esp_err_t err=radio_up(true);
+    trace_edge(RADIO_UP,false);
     if(err!=ESP_OK) return err;
 
     wifi_config_t cfg={0};
@@ -406,12 +573,16 @@ static esp_err_t associate_and_wait(const char *ssid, const char *psk) {
     // guest AP and on WPA3; the AP decides, and a threshold here would only turn
     // a working network into an unexplained "not found".
     cfg.sta.threshold.authmode=WIFI_AUTH_OPEN;
+    trace_edge(STA_CONFIG,true);
     err=esp_wifi_set_config(WIFI_IF_STA,&cfg);
+    trace_edge(STA_CONFIG,false);
     memset(&cfg,0,sizeof cfg);
     if(err!=ESP_OK) return err;
 
     status_stage(WIFI_TIME_STAGE_ASSOC,0);
+    trace_edge(DRIVER_START,true);
     err=esp_wifi_start();          // STA_START connects; see on_wifi()
+    trace_edge(DRIVER_START,false);
     if(err!=ESP_OK) return err;
     wifi_started=true;
 
@@ -742,7 +913,9 @@ static void do_link(void) {
     char ssid[WIFI_TIME_SSID_MAX+1]="";
     // Zeroed again before this frame goes away; see the wipe at the end.
     char psk[WIFI_TIME_PSK_MAX+1]="";
+    trace_edge(NVS_READ,true);
     err=load_credentials(ssid,sizeof ssid,psk,sizeof psk);
+    trace_edge(NVS_READ,false);
     if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_NVS,(int)err); goto done; }
 
     // The SSID is what the AP broadcasts; the key appears nowhere, at no level.

@@ -30,6 +30,13 @@
 #include "pocket_kasane.h"
 #include "pocket_shiki_frame.h"
 #include "ui/kasane/ksn_shiki_jit.h"
+#include "ui/kasane/ksn_runtime.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+#include "ayatsuri/ayatsuri_pose_dma_probe.h"
+#endif
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
 #endif
@@ -204,7 +211,9 @@ extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
 // The two shipped apps the probe can start ('<' and '>'), so that the heaviest
 // real frames can be measured under the contention conditions.
 extern const char pet_start[] asm("_binary_pet_js_start");
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
 extern const char companion_start[] asm("_binary_companion_js_start");
+#endif
 // The contention conditions, applied on top of whichever workload is running.
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
@@ -1233,13 +1242,58 @@ void app_report(void) {
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)stats.heap_used,frames);
 }
-static uint32_t guest_generation;
-bool app_guest_present(void) { return guest!=NULL; }
-uint32_t app_guest_generation(void) { return guest?guest_generation:0; }
+static uint32_t run_generation;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+static bool companion_running;
+static bool companion_heap_monitor;
 
-void app_stop(void) {
-    (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+static void companion_heap_log(const char *stage) {
+    const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    ESP_LOGI("app","COMPANION_HEAP stage=%s guest=%u free_internal=%u largest_internal=%u",
+             stage,(unsigned)(guest!=NULL),(unsigned)heap_caps_get_free_size(caps),
+             (unsigned)heap_caps_get_largest_free_block(caps));
+}
+#endif
+uint32_t app_run_generation(void) {
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(companion_running)return run_generation;
+#endif
+    return guest?run_generation:0;
+}
+
+static bool stop_pending,stop_prepared,stop_av_stopped;
+bool app_stop_pending(void) { return stop_pending; }
+static bool app_drain_display(void) {
+    if (present_settle() != ESP_OK) return false;
+#ifdef KASANE_DMA_OVERLAP
+    return board_present_finish() == ESP_OK;
+#else
+    return true;
+#endif
+}
+bool app_stop(void) {
+    stop_pending=true;
+    /* Join the display task and drain LCD borrows before releasing a run. */
+    if(!app_drain_display())return false;
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(companion_running) {
+        if(!ayatsuri_pose_dma_probe_close_after_drain())return false;
+        if(companion_heap_monitor) {
+            const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+            ESP_LOGI("app","COMPANION_HEAP_LOW free_internal=%u",
+                     (unsigned)heap_caps_get_minimum_free_size(caps));
+            heap_caps_monitor_local_minimum_free_size_stop();
+            companion_heap_monitor=false;
+        }
+        companion_running=false;
+        stop_pending=false;
+        companion_heap_log("stopped");
+        ESP_LOGI("app","APP_STOPPED");
+        return true;
+    }
+#endif
     bool p0_had_guest=guest!=NULL;
+    if(!stop_prepared){
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage)board_capture(false);
     p2_repair_stage=0;
@@ -1278,7 +1332,7 @@ void app_stop(void) {
     // S5: an overlay that is giving the display away (not being stopped) hands
     // a playing player to the host before its audio is reset.
     if(keep_music_once && overlay_session) pocket_av_detach_background();
-    bool av_stopped=pocket_av_reset();
+    stop_av_stopped=pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
     // codec's ADC, and a read still waiting holds a promise slot.
     pocket_capture_reset();
@@ -1296,9 +1350,14 @@ void app_stop(void) {
     shiki_memstat_report();
     // Holds no guest values (docs/apps/derby-ser-native.md section 3).
     pocket_derby_reset();
-    if(pocket_kasane_reset()){
+    stop_prepared=true;
+    }
+    /* A reentrant refusal must not fall through into guest/source destruction.
+     * Prepared resets and the stop hook are never repeated on the next retry. */
+    if(!pocket_kasane_reset())return false;
+    {
         pocket_clock_reset();
-        pocket_av_output_source_reset(av_stopped);
+        pocket_av_output_source_reset(stop_av_stopped);
         pocket_av_playback_source_reset();
 #ifdef KASANE_P0_PROBE
         pocket_pool_probe_reset();
@@ -1360,6 +1419,9 @@ void app_stop(void) {
     shiki_memstat_reset();
     ESP_LOGI("app","APP_STOPPED");
     wifi_time_stack_report("app_stop");
+    stop_pending=stop_prepared=false;
+    keep_music_once=false;
+    return true;
 }
 
 // ------------------------------------------------------ resident suspension
@@ -1384,14 +1446,13 @@ void app_stop(void) {
 
 // The overlay's way out when it is giving the display away rather than being
 // stopped: music that is playing goes on as the host's (S5).
-void app_stop_keep_music(void) {
-    keep_music_once=true;
-    app_stop();
-    keep_music_once=false;
+bool app_stop_keep_music(void) {
+    if(!stop_prepared)keep_music_once=true;
+    return app_stop();
 }
 
 bool app_can_suspend(void) {
-    return guest && !overlay_session && !atomic_load(&stop_requested) &&
+    return guest && !stop_pending && !overlay_session && !atomic_load(&stop_requested) &&
            pocket_app_can_suspend();
 }
 
@@ -1416,6 +1477,7 @@ static bool settle_all(int64_t until_us) {
 esp_err_t app_suspend(void) {
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
     if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
+    if(!app_drain_display()){stop_pending=true;return ESP_ERR_TIMEOUT;}
     int64_t began=esp_timer_get_time();
     // The Back turn's arming: its deadline bounds the hook, and yield is off,
     // so nothing below can be parked half way.
@@ -1482,6 +1544,7 @@ esp_err_t app_suspend(void) {
 
 esp_err_t app_resume(void) {
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    if(stop_pending)return ESP_ERR_INVALID_STATE;
     if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
         return ESP_ERR_INVALID_STATE;
     // The identity is global and a host screen may have moved it; the stores
@@ -1715,6 +1778,24 @@ static void js_join_hook(JSContext *ctx) {
 
 esp_err_t app_start_test(char test) {
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
+    /* Unlike menu starts, USB diagnostics arrive without source setup. */
+    if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    if(app_registry_current()->runtime==APP_RUNTIME_NATIVE) {
+        if(user_source||overlay_session)return ESP_ERR_INVALID_STATE;
+        shell_release_background_frames();
+        scene_mem_release();
+        frameless=false;
+        jsconsole_clear();
+        if(++run_generation==0)++run_generation;
+        companion_running=true;
+        companion_heap_monitor=heap_caps_monitor_local_minimum_free_size_start()==ESP_OK;
+        companion_heap_log("ready");
+        ESP_LOGI("app","AYATSURI_COMPANION_READY");
+        return ESP_OK;
+    }
+#endif
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_init();
@@ -1726,11 +1807,6 @@ esp_err_t app_start_test(char test) {
     vm_storage_active=test=='Y';
     vm_storage_leaving=vm_storage_parked=false;
 #endif
-    // The USB diagnostics call this directly, so they are the one caller that
-    // has not set these three. Left over from the boot overlay, overlay_session
-    // skipped the test's source and its renderer, and the session died on its
-    // first tick with no error line -- every diagnostic run after boot did.
-    if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     kasane_presented=false;
 #if KASANE_STRESS_REACH_AB
     reach_ab_window=0;g_ksn_tile_reach=1;
@@ -1821,7 +1897,7 @@ esp_err_t app_start_test(char test) {
     if(!overlay_session)heap_map("pre");
 #endif
     TRY(pocketjs_guest_create(&gc,&guest));
-    if(++guest_generation==0)++guest_generation;
+    if(++run_generation==0)++run_generation;
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
     // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
@@ -2144,7 +2220,9 @@ source_ready:;
         case 'A': source=vmp_sync_start; break;
         case 'X': source=hello_start; break;
         case '<': source=pet_start; break;
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
         case '>': source=companion_start; break;
+#endif
         case 'B': source=vmp_recur_start; break;
         case 'C': source=vmp_closures_start; break;
         case 'D': source=vmp_promise_start; break;
@@ -2292,11 +2370,13 @@ fail:
     app_stop();return err;
 }
 esp_err_t app_start(void) {
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
     user_source=NULL; user_prelude=NULL; overlay_session=false;
     return app_start_test(0);
 }
 
 esp_err_t app_start_overlay(const char *source, size_t length) {
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
     overlay_guest_last_us=0;
     user_source=source; user_length=length;
     user_prelude=NULL; overlay_session=true;
@@ -2313,6 +2393,7 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
     (void)present_settle();   // two-core-pipeline.md sec.2.3 C: no present in flight past here
+    if(stop_pending)return ESP_ERR_INVALID_STATE;
     if(!guest) return ESP_ERR_INVALID_STATE;
     sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
@@ -2426,6 +2507,7 @@ esp_err_t app_overlay_tick(void) {
 
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length) {
+    if(app_run_generation()||stop_pending)return ESP_ERR_INVALID_STATE;
     user_source=source; user_length=length;
     user_prelude=prelude; user_prelude_length=prelude_length;
     overlay_session=false;
@@ -2555,6 +2637,7 @@ esp_err_t app_tick(uint32_t buttons) {
     return e;
 }
 static esp_err_t app_tick_body(uint32_t buttons) {
+    if(stop_pending)return ESP_ERR_INVALID_STATE;
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
     // later turn for a deferred 0x2000 to be delivered on. sec.5.2 says so in
@@ -2852,7 +2935,7 @@ void app_vm_back_selftest(void) {
             if(!err && !aborting) err=app_tick(0x2000);
         }
         app_request_stop();
-        app_stop();
+        if(!app_stop()) { ESP_LOGE("app","VM_BACK stop drain pending"); return; }
         const unsigned expected=aborting?156:123456;
         bool passed=!err && vm_back_trace==expected;
         ESP_LOGI("app","VM_BACK mode=%d abort=%d trace=%u expected=%u err=%d %s",

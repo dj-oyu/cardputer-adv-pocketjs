@@ -69,7 +69,10 @@ void overlay_tick(uint32_t frame_us);
 
 // Ends the session. Called before anything else takes the guest -- a foreground
 // app, a diagnostic, another screen -- and idempotent.
-void overlay_release(void);
+bool overlay_release(void);
+// Retry a retained stop/release before any owner-loop drawing or new start.
+bool overlay_stop_pending(void);
+bool overlay_retry_stop(void);
 
 // Stands the overlay down because something else needs the memory now. NOT a
 // fault and not a budget stop: the overlay was well behaved and is getting out

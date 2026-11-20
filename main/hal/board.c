@@ -191,7 +191,13 @@ static esp_err_t tx_reap_one(void) {
     spi_transaction_t *want = tx_slot_desc[(tx_next + 2 - tx_queued) & 1], *done = NULL;
     DD_SCOPE(DD_TX_REAP);
     DD_ADD(DD_TX_REAPS,1);
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+    const int64_t probe_wait = lcd_spi_probe_wait_begin();
+#endif
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+    lcd_spi_probe_wait_end(probe_wait);
+#endif
     if (e == ESP_OK && done != want) e = ESP_ERR_INVALID_STATE;
     DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
     if (done == want) tx_queued--;
@@ -238,7 +244,13 @@ static esp_err_t tx_reap(void) {
     int64_t began=esp_timer_get_time();
 #endif
     spi_transaction_t *done = NULL;
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+    const int64_t probe_wait = lcd_spi_probe_wait_begin();
+#endif
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+    lcd_spi_probe_wait_end(probe_wait);
+#endif
     /* A successful driver status without our descriptor is still a failed
      * reap. Normalize before counting, while retaining the driver's borrow. */
     if(e==ESP_OK&&done!=&tx_pending)e=ESP_ERR_INVALID_STATE;
@@ -766,7 +778,15 @@ static bool key_decode(uint8_t event, board_keyevent_t *out) {
 // board.h: the host's overlays on every strip, unless a present on the
 // display task (which may not read their state) turned them off.
 bool board_host_overlays = true;
+/* The UI owner serializes panel writes. Saturation forces full transfers. */
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+static uint32_t panel_write_epoch;
+uint32_t board_panel_write_epoch(void) { return panel_write_epoch; }
+#endif
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if (panel_write_epoch!=UINT32_MAX) ++panel_write_epoch;
+#endif
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
     if (board_host_overlays) pet_hub_overlay(pixels,y,rows);
     // docs/api/common-api.md 9 makes showing that the microphone is live the
@@ -970,13 +990,16 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
 // outside the window is identical to what is already on the glass, because the
 // frame that put it there was full width (an overlay's own change comes through
 // app_force_redraw(), which asks for whole bands).
-esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels) {
+static esp_err_t present_rect(int x, int y, int cols, int rows, uint16_t *pixels, bool packed) {
     if (x<0 || cols<1 || x+cols>LCD_W ||
         y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) {
         next_row=-1;return ESP_ERR_INVALID_ARG;
     }
     if (cols==LCD_W) return board_present(y,rows,pixels);
-    if (board_host_overlays) {
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+    if (panel_write_epoch!=UINT32_MAX) ++panel_write_epoch;
+#endif
+    if (!packed && board_host_overlays) {
         pet_hub_overlay(pixels,y,rows);
         pocket_capture_overlay(pixels,y,rows);
     }
@@ -1045,7 +1068,7 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // A lent half, packed in place: row r moves from r*240+x down to r*cols,
     // never past a row still to be read.
     uint16_t *panel = pixels;
-    for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
+    if (!packed) for (int r=0;r<rows;r++) memmove(panel+r*cols,pixels+r*LCD_W+x,(size_t)cols*2u);
     if (0)
 #elif defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2
     uint16_t *panel = tx_slot_buf[tx_next];
@@ -1114,6 +1137,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     return e;
 }
 
+esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels) {
+    return present_rect(x,y,cols,rows,pixels,false);
+}
+
 esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels) {
     esp_err_t e=tx_reap();
     if(e==ESP_OK) e=board_present_rect(x,y,cols,rows,pixels);
@@ -1138,6 +1165,30 @@ esp_err_t board_present_finish(void) {
     do { e=tx_reap(); } while(e==ESP_ERR_TIMEOUT);
     if(e!=ESP_OK)next_row=-1;
     return e;
+}
+esp_err_t board_present_submit_source(int x,int y,int cols,int rows,const uint16_t *source) {
+    if (!source || x<0 || cols<1 || cols>LCD_W || x>LCD_W-cols || y<0 || rows<1 ||
+        rows>board_strip_rows() || y>LCD_H-rows) return ESP_ERR_INVALID_ARG;
+    uint16_t *strip=board_strip_next();
+#if BOARD_STRIP_HALF && !BOARD_BUF_AB && !BOARD_LCD_DEPTH2
+    /* Overlays and screenshots require whole, 240-pixel-stride rows. */
+    if (cols<LCD_W && !board_capture_active() && !pet_hub_alert_shown() &&
+        !sound_capture_active()) {
+        for (int r=0;r<rows;r++)
+            memcpy(strip+r*cols,source+r*LCD_W+x,(size_t)cols*sizeof(*strip));
+        esp_err_t e=board_present_finish();
+        if(e==ESP_OK) {
+            const bool needs_full_rows=board_capture_active() || pet_hub_alert_shown() ||
+                                       sound_capture_active();
+            if(needs_full_rows) memcpy(strip,source,(size_t)rows*LCD_W*sizeof(*strip));
+            e=present_rect(x,y,cols,rows,strip,!needs_full_rows);
+        }
+        if(e!=ESP_OK) next_row=-1;
+        return e;
+    }
+#endif
+    memcpy(strip,source,(size_t)rows*LCD_W*sizeof(*strip));
+    return board_present_submit(x,y,cols,rows,strip);
 }
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
 #if defined(BOARD_LCD_DEPTH2)&&BOARD_LCD_DEPTH2

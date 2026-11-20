@@ -13,7 +13,7 @@ enum { AYATSURI_MODEL_MAX_NODES=256, AYATSURI_MODEL_MAX_BYTES=1024*1024,
 typedef enum {
     AYATSURI_MODEL_OK, AYATSURI_MODEL_INVALID, AYATSURI_MODEL_RANGE,
     AYATSURI_MODEL_STATE, AYATSURI_MODEL_BUSY, AYATSURI_MODEL_DONE,
-    AYATSURI_MODEL_ENDIAN
+    AYATSURI_MODEL_ENDIAN, AYATSURI_MODEL_UNSUPPORTED
 } ayatsuri_model_status;
 typedef struct { uint32_t offset, count; } ayatsuri_model_section;
 typedef struct {
@@ -32,6 +32,10 @@ typedef struct {
      * Required extension 13: material sidedness U8 + three zero bytes,
      * one 4-byte row per material; absent means legacy single-sided. */
     ayatsuri_model_section section[13];
+    /* Native capability, never serialized. True forbids every cold fallback.
+     * Model and cold span remain immutable throughout instance lifetime.
+     * Appended C ABI field: rebuild all callers; never persist raw handles. */
+    bool provider_only;
 } ayatsuri_model;
 
 typedef struct {
@@ -45,7 +49,108 @@ typedef struct {
     bool alive, busy, evaluated;
     /* Internal cache key: ordinary evaluate must restore cold geometry. */
     bool mesh_overridden;
+    uint8_t evaluation_outputs;
+    uint64_t evaluation_serial;
 } ayatsuri_model_instance;
+
+/* Camera-independent native evaluation of ordinary AYNM v1 models.
+ * Handles and the cold byte span remain caller-owned. Names and row spans
+ * may be unaligned; their lengths exclude any terminator. */
+enum {
+    AYATSURI_OUTPUT_POSE = 1, AYATSURI_OUTPUT_DRAWABLES = 2,
+    AYATSURI_OUTPUT_BOTH = 3, AYATSURI_NO_CLIP = -1
+};
+typedef enum {
+    AYATSURI_CONTROL_POSITION, AYATSURI_CONTROL_ROTATION,
+    AYATSURI_CONTROL_SCALE, AYATSURI_CONTROL_VISIBLE
+} ayatsuri_model_property;
+typedef union { float xyz[3]; uint8_t visible; } ayatsuri_model_value;
+typedef struct { uint16_t id; ayatsuri_model_value value; } ayatsuri_model_control;
+typedef struct {
+    uint16_t format_version, max_nodes, max_mesh_vertices, max_mesh_triangles;
+    uint32_t max_asset_bytes;
+    uint8_t outputs;
+    bool clips_supported;
+} ayatsuri_model_caps;
+typedef struct { uint16_t nodes, controls, clips; } ayatsuri_model_info;
+typedef struct {
+    const char *name;
+    uint16_t name_bytes, id;
+    int16_t parent_id; /* -1 for a root */
+    uint8_t kind; /* 0 group, 1 ellipsoid, 2 blend, 3 mesh */
+} ayatsuri_model_node_info;
+typedef struct {
+    uint16_t id, node_id;
+    /* Name is (node name, property). Position/rotation are finite binary32
+     * triples, rotation in radians. Scale additionally excludes zero.
+     * Visible is an integer boolean in [0,1]. */
+    ayatsuri_model_property property;
+    ayatsuri_model_value default_value;
+} ayatsuri_model_control_info;
+ayatsuri_model_caps ayatsuri_model_capabilities(void);
+ayatsuri_model_status ayatsuri_model_describe(const ayatsuri_model*, ayatsuri_model_info*);
+ayatsuri_model_status ayatsuri_model_describe_node(const ayatsuri_model*, uint16_t id, ayatsuri_model_node_info*);
+ayatsuri_model_status ayatsuri_model_describe_control(const ayatsuri_model*, uint16_t id, ayatsuri_model_control_info*);
+
+typedef struct {
+    double time_seconds; /* finite; v1 has no time-dependent tracks */
+    int32_t clip_id; /* AYATSURI_NO_CLIP */
+    uint8_t outputs;
+    const ayatsuri_model_control *controls;
+    size_t control_count;
+} ayatsuri_model_input;
+typedef struct {
+    ayatsuri_model_instance *instance;
+    const void *owner;
+    uint32_t generation;
+    uint64_t serial;
+} ayatsuri_model_evaluation;
+typedef struct {
+    const float *local_trs; /* nine floats, position, Euler XYZ, scale */
+    bool local_visible, visible; /* visible includes all parents */
+} ayatsuri_model_pose_view;
+/* A span of little-endian AYNM v1 records. Use byte loads or memcpy. */
+typedef struct { const uint8_t *data; uint16_t count, stride; } ayatsuri_model_rows;
+typedef struct {
+    uint16_t node_id, material_id;
+    uint8_t kind;
+    const float *to_model; /* row-major 3x4, object-local to model space */
+    /* Object-local records: ellipsoid radii XYZ or blend lobes (center XYZ,
+     * radii XYZ); blend is the authored smooth union parameter. A localPlane
+     * record is the optional AYNM section 8 row (mode at byte 2, normal XYZ
+     * at 4, offset at 16, feather at 20, alternate RGB888 at 24). */
+    ayatsuri_model_rows shape, local_plane;
+    float blend;
+    /* Mesh vertices are XYZ, normal XYZ, mask (7 F32). Triangles are three
+     * vertex indices (U16). Hole points are XYZ F32, in loop order. */
+    ayatsuri_model_rows vertices, triangles, hole_points;
+    uint8_t hole_sizes[2], triangle_order, mesh_thickness;
+    uint16_t albedo_rgb565[2];
+    bool double_sided;
+    /* Material is the original Shiki 11-F32 lighting vector, RGB888,
+     * thickness, opacity and edge softness in [0,1]. */
+    float lighting[11];
+    uint32_t rgb;
+    double thickness, opacity, edge_softness;
+} ayatsuri_model_drawable;
+/* Controls are unique model-local IDs, in any order. Each call starts from
+ * authored defaults, including visibility and material. Entry rejection keeps
+ * the last result; a hierarchy overflow during evaluation invalidates it.
+ * Output pointers are synchronous borrows until the next accepted evaluation,
+ * changed legacy target batch or disposal. A projected-packet evaluate also
+ * expires the borrow on entry to its evaluation stage. Keep instance storage
+ * alive while using the result. Reinitialization requires a fresh generation. */
+ayatsuri_model_status ayatsuri_model_evaluate_input(ayatsuri_model_instance*, const void *owner,
+        uint32_t generation, const ayatsuri_model_input*, ayatsuri_model_evaluation*);
+ayatsuri_model_status ayatsuri_model_evaluation_pose(const ayatsuri_model_evaluation*, uint16_t node,
+        ayatsuri_model_pose_view*);
+ayatsuri_model_status ayatsuri_model_evaluation_next(const ayatsuri_model_evaluation*, uint32_t *cursor,
+        ayatsuri_model_drawable*); /* start at zero; skips groups and hidden nodes */
+/* Project the same drawables into the instance's legacy packet cache, for
+ * consumers of instance_next/mesh_view. Another projection replaces packets.
+ * Model-space drawables and pose remain valid across all such projections. */
+ayatsuri_model_status ayatsuri_model_evaluation_project(const ayatsuri_model_evaluation*,
+        const float camera[9],const float light[6]);
 enum {
     AYATSURI_TARGET_POSITION=1, AYATSURI_TARGET_ROTATION=2,
     AYATSURI_TARGET_SCALE=4, AYATSURI_TARGET_VISIBLE=8,

@@ -39,4 +39,7 @@ const mixed=structuredClone(fixture);mixed.nodes.push({...structuredClone(patch)
   pattern:{kind:'localPlane',normal:[0,1,0],offset:0,feather:0,color:0xff0000}});
 const combined=compile(mixed);assert.equal(combined.readUInt32LE(12),12);assert.equal(section(combined,8).length,32);
 const out=path.resolve('.cache/ayatsuri-native/mesh.aynm');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,bytes);
+mixed.nodes.push({...structuredClone(mixed.nodes[2]),index:3,name:'paired',kind:'blendEllipsoids',
+  lobes:[0,0,0,1,2,3,4,0,0,2,3,4],blend:2,opacity:.5});
+fs.writeFileSync(path.join(path.dirname(out),'framework-shapes.aynm'),compile(mixed));
 console.log('AYNM_MESH_PACK_PASS',JSON.stringify({bytes:bytes.length,nodes:2,triangles:2,rejected,sha256:crypto.createHash('sha256').update(bytes).digest('hex')}));

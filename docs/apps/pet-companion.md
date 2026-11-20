@@ -77,3 +77,25 @@ PC↔デバイスの双方向通信は`pocket.pet`ではなく`pocket.bridge`（
 ## 検証
 
 `python -B tools/test_pet_companion.py` はスナップショット、未知の窓、Claude累計の扱い、重複・部分transcript、CRCを確認します。`node tools/test_pet.cjs` は育成・命名・保存復元を確認します。`idf.py -B build_pet_companion build` はフラッシュ制限内で成功しています。
+
+### ネイティブ描画の改善ループ
+
+まず実機で遅いフレームを特定し、計測区間に対応する実装を読みます。使われていない機能や重複処理を削れるかを最初に調べます。残る処理には、誤差を評価した近似や代数的に等価な式、ESP32-S3のPIE命令、別コアへの委譲を検討します。コアをまたぐ場合は、データ移動、同期、通信との競合も測ります。
+
+broker MCPで同じモデルと通信条件を使い、HTTPSのストリーミングとWi-Fi再接続を実機で比較します。平均FPSに加え、LCDのDMA転送完了間隔の最大値、50 ms超の回数、最低空き内部RAMを記録します。描画を変更した場合は、基準フレームとの画素差を確認します。
+
+### Blenderモデルとモーションの書き出し
+
+2k bilateralモデルの書き出しには [`export_companion_track.py`](../../tools/ayatsuri/asset/export_companion_track.py) を使います。Blenderの評価済みメッシュから、ボーン・シェイプキー・表情・漫画記号を含む姿勢をサンプリングします。目の周囲の補助光と補色寄りの影を焼き、フレーム間で共有する頂点と面をまとめます。
+
+```text
+blender -b fox-2k-bilateral.blend --disable-autoexec --python-exit-code 1 --python tools/ayatsuri/asset/export_companion_track.py -- OUTPUT_DIRECTORY
+```
+
+brokerのモデル入りソースには、生成した `hone_track_asset.h` と `companion_motion_config.h` を `main/ayatsuri/private/assets/live/` に置き、CMakeの `AYATSURI_TRACK_MODEL` を有効にします。実機ではキーの間を補間し、各フレームで三角形の深度を使って各帯を描画します。生成された `asset-report.json` の元モデルとトラックのハッシュを、ELFと起動ログで照合します。
+
+ネイティブ版は起動するとモーションを再生します。←／→でモーション内の8つの姿勢を、↑／↓で6つの表情プリセットを順に選びます。選んだ姿勢や表情は画面に保持され、Spaceで再生に戻ります。Enterを押すと描画ベンチマークを開始します。通信計測を組み込んだビルドでは、続いてWi-Fi再接続とHTTPSの負荷をかけます。
+
+### ラスター背景の検証
+
+`python tools/hone/make_companion_raster_test.py --header main/ayatsuri/private/assets/live/companion_raster_test_pixels.h` で背景画像を生成し、CMakeの `AYATSURI_RASTER_TEST` を有効にします。起動後は左側に縦線が往復します。`T` で縦線を切り替え、`Enter` で静止背景を重ねたまま性能を計測できます。アセット用リポジトリに同じテスト画像とRGB565への変換手順があります。[LCD背景テスト画像](https://github.com/dj-oyu/cardputer-development-archive/tree/main/backgrounds/lcd-test-chart)

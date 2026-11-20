@@ -159,7 +159,7 @@ CASES = r'''int main(void){
 
 HARNESS=HARNESS.replace('@TX_DECL@',re.search(r'^static uint16_t tx_buf\[.*?;',source,re.M).group())
 parts=[function(s) for s in ['static void put_strip(uint16_t *out,uint16_t *in,int count){', 'static esp_err_t tx_reap(', 'static esp_err_t command(',
-    'esp_err_t board_present(', 'esp_err_t board_present_rect(',
+    'esp_err_t board_present(', 'static esp_err_t present_rect(', 'esp_err_t board_present_rect(',
     'esp_err_t board_present_sync(', 'esp_err_t board_present_rect_sync(',
     'esp_err_t board_present_finish(', 'esp_err_t board_present_submit(']]
 with tempfile.TemporaryDirectory(prefix='kasane-dma-board-') as temp:

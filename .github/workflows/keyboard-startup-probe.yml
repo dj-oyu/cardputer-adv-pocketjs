@@ -84,6 +84,20 @@ jobs:
               i=next(i for i,l in enumerate(lines) if l.startswith(off))
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
+          # Drop only the new opt-in Ayatsuri switches from the product pin.
+          # The dependent settings are hidden while these switches are off.
+          for name in (
+              'AYATSURI_STREAM_CANDIDATE',
+              'AYATSURI_STREAM_PROBE_DEPTH8',
+              'AYATSURI_POSE_DMA_PROBE',
+              'AYATSURI_LIVE_DMA_PROBE',
+              'AYATSURI_STREAM_DEVICE_PROBE',
+          ):
+              off=f'# CONFIG_{name} is not set\n'
+              assert lines.count(off)==1, f'{name} must be disabled in the product'
+              i=lines.index(off)
+              del lines[i]
+              if i and lines[i-1].startswith('# default:'):del lines[i-1]
           digest=hashlib.sha256(''.join(lines).encode()).hexdigest();print('sdkconfig pin',digest)
           assert digest=='40794fa4e16f09ef6449a01a7c6bd8c6ff17a91b472b2c4eaf184102a5bc9c24'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'

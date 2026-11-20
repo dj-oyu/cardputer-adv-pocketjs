@@ -34,6 +34,7 @@ set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c")
 list(APPEND KASANE_SOURCES
+    "hone/hone_frame.c" "hone/aynm_mesh.c"
     "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
     "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
     "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_derby.c" "pocket/derby_ser_int.c" "pocket/derby_ser_pie.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
@@ -200,6 +201,9 @@ set(POCKET_LDFRAGMENTS "")
 if(CONFIG_POCKET_VM_HELPER_IRAM)
     list(APPEND POCKET_LDFRAGMENTS "vm/helper_iram8.lf")
 endif()
+if(NOT CONFIG_AYATSURI_POSE_DMA_PROBE)
+    set(COMPANION_APP_SOURCE "../apps/companion/companion.js")
+endif()
 idf_component_register(SRCS "hal/usb_console.c" "hal/rtc_task.c" "hal/fpu_latency.c" "hal/int_latency.c" "hal/icache_ab.c" "hal/frame_bd.c" "hal/disp.c"
         "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "hal/lcd_spi.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/app_control.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
@@ -212,7 +216,7 @@ idf_component_register(SRCS "hal/usb_console.c" "hal/rtc_task.c" "hal/fpu_latenc
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" ${POCKET_SHIKI_DEBUG_APPS} "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" ${COMPANION_APP_SOURCE} "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" ${POCKET_SHIKI_DEBUG_APPS} "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
     LDFRAGMENTS ${POCKET_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
@@ -624,6 +628,7 @@ set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "po
 set_source_files_properties(ayatsuri/ayatsuri_model.c ayatsuri/ayatsuri_visibility.c ui/kasane/ksn_mesh_depth.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 set_property(SOURCE ui/kasane/ksn_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-ffp-contract=off")
 
+
 # Preserve the external raw-assembly ABI boundary and exact reference FP order.
 if(KASANE_MESH_PREPARED_PROTOTYPE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_PROTOTYPE=1)
@@ -651,4 +656,129 @@ if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
     set_source_files_properties(ui/kasane/ksn_mesh_q7_preflight.c PROPERTIES
         COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
     set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+endif()
+
+# Opt-in trusted-native streaming producer; no actor/model registration.
+if(AYATSURI_STREAM_CANDIDATE OR CONFIG_AYATSURI_STREAM_CANDIDATE)
+    target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_model_stream_candidate.c")
+    set_property(SOURCE "ayatsuri/ayatsuri_model_stream_candidate.c" APPEND PROPERTY
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage")
+endif()
+
+if(CONFIG_AYATSURI_STREAM_DEVICE_PROBE)
+    if(CONFIG_AYATSURI_STREAM_PROBE_DEPTH8)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE AY_STREAM_PROBE_DEPTH_ROWS=8)
+    endif()
+    target_sources(${COMPONENT_LIB} PRIVATE
+        "ayatsuri/ayatsuri_stream_probe_core.c" "ayatsuri/ayatsuri_stream_device_probe.c")
+    set_property(SOURCE "ayatsuri/ayatsuri_stream_probe_core.c" "ayatsuri/ayatsuri_stream_device_probe.c"
+        APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage")
+endif()
+
+if(CONFIG_AYATSURI_POSE_DMA_PROBE)
+    if(NOT KASANE_DMA_OVERLAP OR CONFIG_AYATSURI_STREAM_DEVICE_PROBE)
+        message(FATAL_ERROR "Pet Companion benchmark requires DMA overlap and excludes the synthetic boot probe")
+    endif()
+    if(CONFIG_AYATSURI_LIVE_DMA_PROBE)
+        set(live_asset_dir "${CMAKE_CURRENT_LIST_DIR}/ayatsuri/private/assets/live")
+        option(AYATSURI_RASTER_TEST "Show the RGB565 LCD test chart in Pet Companion" OFF)
+        if(AYATSURI_RASTER_TEST OR CONFIG_AYATSURI_RASTER_TEST)
+            if(NOT EXISTS "${live_asset_dir}/companion_raster_test_pixels.h")
+                message(FATAL_ERROR "Generate the raster chart with tools/hone/make_companion_raster_test.py")
+            endif()
+            target_compile_definitions(${COMPONENT_LIB} PRIVATE AYATSURI_RASTER_TEST=1)
+            target_include_directories(${COMPONENT_LIB} PRIVATE "${live_asset_dir}")
+        endif()
+        option(AYATSURI_TRACK_MODEL "Render a preprojected companion motion track" OFF)
+        if(AYATSURI_TRACK_MODEL OR CONFIG_AYATSURI_TRACK_MODEL)
+            if(CONFIG_AYATSURI_RENDER_TAIL_AB)
+                message(FATAL_ERROR "Render-tail A/B requires the live rig provider")
+            endif()
+            if(NOT EXISTS "${live_asset_dir}/hone_track_asset.h" OR
+               NOT EXISTS "${live_asset_dir}/companion_motion_config.h")
+                message(FATAL_ERROR "Track model requires its exported geometry and motion configuration")
+            endif()
+            set(live_sources "hone/track_model.c")
+            target_compile_definitions(${COMPONENT_LIB} PRIVATE AYATSURI_TRACK_MODEL=1)
+            target_include_directories(${COMPONENT_LIB} PRIVATE "${live_asset_dir}")
+        else()
+            if(NOT EXISTS "${live_asset_dir}/ay_live_model_fixture.c" OR
+               NOT EXISTS "${live_asset_dir}/rig_wrapper.c" OR
+               NOT EXISTS "${live_asset_dir}/wrap.c" OR
+               NOT EXISTS "${live_asset_dir}/hone_live_model.aynm")
+                message(FATAL_ERROR "Live DMA probe requires its authorized model fixture")
+            endif()
+            set(live_sources
+                "${live_asset_dir}/ay_live_model_fixture.c"
+                "${live_asset_dir}/rig_wrapper.c"
+                "${live_asset_dir}/wrap.c"
+                "${CMAKE_SOURCE_DIR}/tools/hone/source_package/native_wedge_lut_candidate.c")
+            target_add_binary_data(${COMPONENT_LIB} "ayatsuri/private/assets/live/hone_live_model.aynm" BINARY)
+        endif()
+        target_sources(${COMPONENT_LIB} PRIVATE ${live_sources})
+        if(CONFIG_AYATSURI_COMPANION_NET_PROBE)
+            target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_companion_net_probe.c"
+                "ayatsuri/ayatsuri_https_hw_profile.c")
+            foreach(hook IN ITEMS sha_hal_set_mode sha_hal_hash_block sha_hal_hash_dma
+                    aes_hal_transform_block aes_hal_transform_dma_start mpi_hal_start_op
+                    hmac_hal_start ds_hal_start_sign esp_crypto_shared_gdma_start_axi_ahb
+                    esp_crypto_sha_aes_lock_acquire esp_crypto_sha_aes_lock_release mbedtls_ssl_handshake
+                    mbedtls_x509_crt_verify_restartable mbedtls_pk_verify_restartable
+                    psa_generate_key psa_export_public_key psa_raw_key_agreement mbedtls_mpi_mul_mpi)
+                target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=${hook}")
+            endforeach()
+            if(CONFIG_AYATSURI_CERT_HEAP_TRACE)
+                target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_cert_heap_trace.c")
+                target_link_libraries(${COMPONENT_LIB} PRIVATE idf::spi_flash)
+                foreach(hook IN ITEMS multi_heap_malloc multi_heap_realloc multi_heap_aligned_alloc_offs)
+                    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=${hook}")
+                endforeach()
+            endif()
+            if(CONFIG_AYATSURI_CERT_INV_SCRATCH)
+                target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_cert_inv_scratch.c")
+                target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=mbedtls_mpi_gcd_modinv_odd")
+            endif()
+            if(CONFIG_AYATSURI_P384_PROFILE)
+                target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_p384_profile.c"
+                    "ayatsuri/ayatsuri_p384_vector.c")
+                foreach(hook IN ITEMS mbedtls_ecdsa_verify mbedtls_ecp_muladd_restartable
+                        mbedtls_mpi_add_mpi mbedtls_mpi_sub_mpi)
+                    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=${hook}")
+                endforeach()
+                if(NOT CONFIG_AYATSURI_CERT_INV_SCRATCH)
+                    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=mbedtls_mpi_gcd_modinv_odd")
+                endif()
+            endif()
+            if(CONFIG_AYATSURI_SHA_DMA_PROBE)
+                target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_sha_dma_probe.c")
+                target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sha_hal_wait_idle")
+            endif()
+            if(CONFIG_AYATSURI_LCD_GDMA_PRIORITY)
+                target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_lcd_gdma_load.c")
+            endif()
+            if(CONFIG_AYATSURI_CHAT_STREAM_PROBE)
+                set(chat_json "${live_asset_dir}/chat_json")
+                target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_chat_stream_probe.c" "${chat_json}/cJSON.c")
+                target_include_directories(${COMPONENT_LIB} PRIVATE "${chat_json}")
+                set_property(SOURCE "${chat_json}/cJSON.c" APPEND PROPERTY COMPILE_DEFINITIONS CJSON_NESTING_LIMIT=16)
+            endif()
+        endif()
+        target_include_directories(${COMPONENT_LIB} PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/ayatsuri"
+            "${CMAKE_SOURCE_DIR}/tools/ayatsuri/provider"
+            "${CMAKE_SOURCE_DIR}/tools/hone/source_package")
+        set_property(SOURCE "ayatsuri/ayatsuri_pose_dma_probe.c" APPEND PROPERTY
+            COMPILE_DEFINITIONS HONE_PIE_STRIP_COPY=1 AY_COMPANION_COMPACT_HISTORY=1)
+        set_property(SOURCE ${live_sources} APPEND PROPERTY
+            COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage;-fno-diagnostics-show-caret;-Wno-misleading-indentation")
+    else()
+        set(pose_dma_fixture "${CMAKE_CURRENT_LIST_DIR}/ayatsuri/private/assets/ay_pose_dma_fixture.h")
+        if(NOT EXISTS "${pose_dma_fixture}")
+            message(FATAL_ERROR "Pose DMA probe requires its authorized private fixture")
+        endif()
+    endif()
+    target_sources(${COMPONENT_LIB} PRIVATE "ayatsuri/ayatsuri_pose_dma_probe.c")
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_SOURCE_DIR}/tools/hone/native_geometry")
+    set_property(SOURCE "ayatsuri/ayatsuri_pose_dma_probe.c" APPEND PROPERTY
+        COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math;-fstack-usage;-fno-diagnostics-show-caret;-Wno-misleading-indentation")
 endif()

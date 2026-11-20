@@ -199,3 +199,18 @@ void wifi_time_link_ip(char *out, size_t size);
 esp_err_t wifi_time_link_sntp_start(void);
 esp_err_t wifi_time_link_sntp_wait(unsigned slice_ms);
 void      wifi_time_link_sntp_stop(void);
+
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+/* A paired frame holds the optional Core 0 renderer until its last join. */
+bool wifi_time_try_render_core0(void);
+void wifi_time_release_render_core0(void);
+#endif
+
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+// Opt in before starting the measured link. Defaults to false. A link samples
+// this once immediately before driver init, and releases its own reservation.
+void wifi_time_probe_reserve_init(bool enabled);
+// The probe owner starts one short capture, then prints it after the last frame.
+void wifi_time_probe_trace_begin(void);
+void wifi_time_probe_trace_report(void);
+#endif

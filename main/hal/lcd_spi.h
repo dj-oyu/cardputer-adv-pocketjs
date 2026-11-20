@@ -12,6 +12,24 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "sdkconfig.h"
+
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+// Elapsed UI time waiting for LCD pixel-transfer completion or a free DMA slot.
+void lcd_spi_probe_begin(void);
+uint32_t lcd_spi_probe_end(void);
+int64_t lcd_spi_probe_wait_begin(void);
+void lcd_spi_probe_wait_end(int64_t began);
+#endif
+
+#ifdef CONFIG_AYATSURI_LCD_GDMA_PRIORITY
+enum lcd_gdma_crypto { LCD_GDMA_AES, LCD_GDMA_SHA, LCD_GDMA_CRYPTO_COUNT };
+esp_err_t lcd_spi_gdma_probe_start(bool high);
+void lcd_spi_gdma_probe_finish(void);
+bool lcd_spi_gdma_probe_lcd_busy(void);
+void lcd_spi_gdma_probe_sample(enum lcd_gdma_crypto engine);
+void lcd_spi_gdma_probe_frame(uint32_t hits[LCD_GDMA_CRYPTO_COUNT]);
+#endif
 
 esp_err_t lcd_spi_direct_init(void);
 // Enter/leave direct use. Entering masks the SPI's transfer-done interrupt so

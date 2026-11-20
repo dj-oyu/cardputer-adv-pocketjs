@@ -61,14 +61,19 @@ static void clean(void) {
 static void wrote(int fd, const char *s) { assert(vfs.write(fd,s,strlen(s))==(ssize_t)strlen(s)); }
 
 // Actual main.c teardown, with guest/screen ports replaced by deterministic ones.
-static bool running, frameless;
+static bool running, frameless, end_pending, drain_fails;
+static esp_err_t pending_tick_error;
 static int keys,owner,restored,pending_calls;
 static const char *home_error;
 static int run_started, ended_status;
 static bool app_frameless(void) { return frameless; }
 typedef struct {void (*run_restore)(void);void (*ended)(int,const char *);} screen_ops_t;
 static screen_ops_t SCREENS[2];
-static void app_stop(void) { wrote(1,"APP_STOPPED\n"); }
+static bool app_stop(void) {
+    if(drain_fails)return false;
+    wrote(1,"APP_STOPPED\n");
+    return true;
+}
 static void xQueueReset(int q) { (void)q; }
 static const char *app_error(void) { return ""; }
 static void sound_play(int n) { (void)n; }
@@ -137,8 +142,12 @@ int main(void) {
     wrote(1,"d\n");
     assert(last_ticks>0);                      /* and the budget is back */
     clean();owner=0;running=true;SCREENS[0].run_restore=restore;
+    drain_fails=true;end_run(ESP_OK);
+    assert(end_pending && pending_tick_error==ESP_OK && running);
+    assert(!restored && !pending_calls && !used);
+    drain_fails=false;
     end_run(ESP_OK);
-    assert(!running && restored==1 && pending_calls==1);
+    assert(!end_pending && !running && restored==1 && pending_calls==1);
     assert(!strcmp(wire,"APP_STOPPED\nHOME_READY\n"));
     clean();owner=1;running=true;SCREENS[1].ended=editor_ended;
     end_run(ESP_OK);

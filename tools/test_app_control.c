@@ -20,6 +20,7 @@ static unsigned inject_remaining;
 static void inject_status(void);
 static uint32_t generation;
 static bool blocked,stop_fails,write_fails,jump_on_tap,jump_on_accepted;
+static bool drain_fails,native_stop_pending;
 static uint64_t now_ms;
 static bool test_native_suspend,running,guest_present,can_suspend,services_suspended;
 static unsigned suspend_calls,suspend_runs,queue_resets,home_entries;
@@ -32,9 +33,13 @@ static bool home_modal(void) { return false; }
 static bool pocket_text_active(void) { return false; }
 static bool app_can_suspend(void) { return can_suspend; }
 static esp_err_t app_suspend(void) { suspend_calls++;services_suspended=true;return suspend_result; }
-static bool app_guest_present(void) { return guest_present; }
-static uint32_t app_guest_generation(void) { return guest_present?generation+(stop_fails?1:0):0; }
-static void app_stop(void) { stops++;guest_present=false;services_suspended=false; }
+static uint32_t app_run_generation(void) { return guest_present?generation+(stop_fails?1:0):0; }
+static bool transition_pending(void) { return native_stop_pending; }
+static bool app_stop(void) {
+    if(drain_fails)return false;
+    stops++;guest_present=false;services_suspended=false;
+    return true;
+}
 static const char *app_dormant_id(void) { return ""; }
 static const app_control_descriptor_t *app_registry_current(void) {
     static const app_control_descriptor_t app={"local.hello","HELLO WORLD",5};return &app;
@@ -97,6 +102,7 @@ static void reset(void) {
     reply_count=starts=taps=stops=0;generation=0;
     inject_remaining=0;
     blocked=stop_fails=write_fails=jump_on_tap=jump_on_accepted=false;now_ms=0;
+    drain_fails=native_stop_pending=false;
     test_native_suspend=running=guest_present=services_suspended=false;can_suspend=true;
     suspend_calls=suspend_runs=queue_resets=home_entries=0;suspend_result=ESP_OK;
     native_generation=0;screen=SCREEN_HOME;
@@ -212,6 +218,12 @@ int main(void) {
     suspend_result=ESP_ERR_TIMEOUT;stop_fails=true;send(AC_SUSPEND,2,2,1,0,NULL);
     assert(result()==AC_TEARDOWN_FAILED && state()==AC_NEEDS_REVIEW && guest_present && !stops);
     send(AC_TAP,3,3,1,1,NULL);assert(result()==AC_BLOCKED && !taps);
+    reset();open_session();send(AC_START,1,1,0,0,"local.hello");test_native_suspend=true;
+    suspend_result=ESP_ERR_TIMEOUT;drain_fails=true;send(AC_SUSPEND,2,2,1,0,NULL);
+    assert(result()==AC_TEARDOWN_FAILED && native_stop_pending && running && guest_present && !stops);
+    assert(!queue_resets && !home_entries);
+    drain_fails=false;assert(native_stop());
+    assert(!native_stop_pending && !running && !guest_present && stops==1);
     reset();open_session();send(AC_START,1,1,0,0,"local.hello");test_native_suspend=true;
     send(AC_SUSPEND,2,2,1,0,NULL);
     assert(result()==AC_OK && state()==AC_SUSPENDED && !running && guest_present);

@@ -10,6 +10,9 @@ typedef struct {
     double opacity;
     uint32_t offset, color;
     uint8_t enabled, world_enabled;
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    bool world_valid;
+#endif
 } model_node_state;
 
 static uint16_t m16(const uint8_t *p){return (uint16_t)((uint16_t)p[0]|(uint16_t)p[1]<<8);}
@@ -51,7 +54,7 @@ static bool float_rows_valid(const uint8_t *data,uint32_t count,unsigned floats,
 }
 /* Every mesh row is validated, including unused cold rows. Offsets are row
  * indices, not pointers; the original byte span may be unaligned. */
-static bool meshes_valid(const ayatsuri_model *m){
+static bool meshes_valid(const ayatsuri_model *m,bool provider_only){
     for(uint32_t k=0;k<m->section[9].count;k++){
         const uint8_t *v=row(m,10,k,28);double length=0;
         for(unsigned j=0;j<7;j++){
@@ -84,12 +87,12 @@ static bool meshes_valid(const ayatsuri_model *m){
             const double ux=(double)mf(vb)-mf(va),uy=(double)mf(vb+4)-mf(va+4),uz=(double)mf(vb+8)-mf(va+8),
                 vx=(double)mf(vc)-mf(va),vy=(double)mf(vc+4)-mf(va+4),vz=(double)mf(vc+8)-mf(va+8),
                 x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx;
-            if(x==0&&y==0&&z==0)return false;
+            if(!provider_only&&x==0&&y==0&&z==0)return false;
         }
     }
     return true;
 }
-ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri_model *out){
+static ayatsuri_model_status model_open(const void *data,size_t bytes,ayatsuri_model *out,bool provider_only){
     const uint32_t endian=1;
     if(*(const uint8_t *)&endian!=1)return AYATSURI_MODEL_ENDIAN;
     if(!data||!out||bytes<32||bytes>AYATSURI_MODEL_MAX_BYTES||overlaps(out,sizeof *out,data,bytes))
@@ -99,7 +102,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
        sections<7||sections>AYATSURI_MODEL_MAX_SECTIONS||m32(p+16)!=32||m32(p+20)!=20||m32(p+24)||m32(p+28)||
        sections>(bytes-32)/20)return AYATSURI_MODEL_INVALID;
     const uint32_t directory_end=32+20*sections;
-    ayatsuri_model candidate={.data=p,.bytes=(uint32_t)bytes};unsigned seen=0;
+    ayatsuri_model candidate={.data=p,.bytes=(uint32_t)bytes,.provider_only=provider_only};unsigned seen=0;
     static const uint32_t strides[13]={16,36,12,24,72,8,1,32,32,28,6,12,4};
     for(uint32_t i=0;i<sections;++i){
         const uint8_t *d=p+32+20*i;const uint16_t type=m16(d),flags=m16(d+2);
@@ -134,7 +137,7 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
         }
     }
     candidate.node_count=(uint16_t)count;
-    if(!meshes_valid(&candidate))return AYATSURI_MODEL_INVALID;
+    if(!meshes_valid(&candidate,provider_only))return AYATSURI_MODEL_INVALID;
     for(uint32_t k=0;k<candidate.section[6].count;++k){const uint8_t c=*row(&candidate,7,k,1);
         if(c<32||c>126)return AYATSURI_MODEL_INVALID;}
     if(!float_rows_valid(row(&candidate,2,0,36),count,9,9)||
@@ -199,6 +202,14 @@ ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri
     }
     *out=candidate;return AYATSURI_MODEL_OK;
 }
+ayatsuri_model_status ayatsuri_model_open(const void *data,size_t bytes,ayatsuri_model *out){
+    return model_open(data,bytes,out,false);
+}
+#ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
+ayatsuri_model_status ayatsuri_model_open_provider(const void *data,size_t bytes,ayatsuri_model *out){
+    return model_open(data,bytes,out,true);
+}
+#endif
 ayatsuri_model_status ayatsuri_model_find_node(const ayatsuri_model *m,const char *name,size_t bytes,uint16_t *out){
     if(!m||!m->data||!name||!out||!bytes||bytes>127||overlaps(out,sizeof *out,m,sizeof *m)||
        overlaps(out,sizeof *out,m->data,m->bytes))return AYATSURI_MODEL_INVALID;
@@ -206,11 +217,83 @@ ayatsuri_model_status ayatsuri_model_find_node(const ayatsuri_model *m,const cha
         if(m16(b+2)==bytes&&!memcmp(row(m,7,m32(b+4),1),name,bytes)){*out=m16(b);return AYATSURI_MODEL_OK;}}
     return AYATSURI_MODEL_DONE;
 }
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+/* Used only by the separately compiled, explicitly opt-in streaming TU. */
+#include "../ui/kasane/ksn_mesh_depth.h"
+typedef struct {
+    ayatsuri_model_geometry_provider provider;void *user;ksn_mesh_snapshot *pending;
+    const ayatsuri_stream_routes *routes;ayatsuri_stream_attributed_sink sink;void *sink_context;
+    size_t route_cursor;
+    ayatsuri_stream_position_provider positions;bool unlit;
+    const ayatsuri_visibility_faces *faces;
+} model_stream_request;
+static bool stream_dispatch(void*,unsigned,unsigned,ayatsuri_skin_result*);
+static __attribute__((noinline)) bool model_stream_notify(model_stream_request*r,
+    const ayatsuri_model*m,unsigned id,bool enabled,const ayatsuri_skin_result*geometry,
+    const ksn_proc_gouraud_patch*p,const float*depth){
+    const ayatsuri_stream_route*route=&r->routes->routes[r->route_cursor++];
+    const uint8_t*d=row(m,9,route->mesh_id,32);unsigned nt=m16(d+6);
+    uint16_t source[64];bool used[64]={0};
+    /* Selection preserves each authored triple and stable ordering for equal
+     * centroid keys. First-unused matching therefore preserves duplicate faces
+     * and their source IDs, rather than collapsing identical index triples. */
+    unsigned first=0;
+    for(unsigned t=0;t<p->header.triangles;t++){
+        unsigned original=nt;
+        for(unsigned j=first;j<nt;j++)if(!used[j]){
+            const uint8_t*cold=row(m,11,m16(d+4)+j,6);
+            if(p->indices[3*t]==m16(cold)&&p->indices[3*t+1]==m16(cold+2)&&p->indices[3*t+2]==m16(cold+4)){original=j;break;}
+        }
+        if(original==nt)return false;
+        used[original]=true;source[t]=(uint16_t)original;
+        /* Authored order is a stable subsequence of the cold index triples. */
+        if(d[11]==AYATSURI_VISIBILITY_AUTHORED&&!d[10])first=original+1;
+    }
+    ayatsuri_stream_attributed_mesh view={
+        (uint16_t)id,route->mesh_id,route->material_id,route->lane,enabled,
+        p->header.vertices,enabled?p->header.triangles:0,nt,geometry,p->vertices,depth,
+        enabled?p->indices:NULL,enabled?source:NULL};
+    return r->sink(r->sink_context,&view);
+}
+static size_t model_stream_shared_offset(const ayatsuri_model*m){
+    return ((sizeof(model_node_state)*m->node_count+7u)&~(size_t)7u)+88u*m->node_count;
+}
+#endif
 size_t ayatsuri_model_instance_bytes(const ayatsuri_model *m){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    if(!m||!m->data||!m->provider_only)return 0;
+    size_t maximum=0;
+    for(unsigned j=0;j<m->node_count;j++){
+        const uint8_t *node=row(m,1,j,16);
+        if(node[2]!=0&&node[2]!=3)return 0;
+        if(node[2]==3){
+            const uint8_t*d=row(m,9,m16(node+4),32);
+            if(mesh_double(m,node)||d[10]||m16(d+2)>32)return 0;
+            size_t bytes=node_slot_bytes(m,j,node);if(bytes>maximum)maximum=bytes;
+        }
+    }
+    size_t base=model_stream_shared_offset(m);
+    return maximum>SIZE_MAX-base?0:base+maximum;
+#else
     return m&&m->data?((sizeof(model_node_state)*m->node_count+7u)&~(size_t)7u)+m->slot_bytes:0;
+#endif
 }
 static model_node_state *states(ayatsuri_model_instance *i){return i->arena;}
 static float *work(ayatsuri_model_instance *i,unsigned node){return (float *)((uint8_t *)i->arena+states(i)[node].offset);}
+static bool update_world_transform(ayatsuri_model_instance *instance,unsigned node,int parent){
+    float *world=work(instance,node);
+    ayatsuri_pose local;
+    ayatsuri_transform parent_world,result;
+    memcpy(&local,world+12,sizeof local);
+    if(parent>=0)memcpy(&parent_world,work(instance,(unsigned)parent),sizeof parent_world);
+    if(ayatsuri_transform_evaluate(&local,parent<0?NULL:&parent_world,&result)!=AYATSURI_OK)return false;
+    memcpy(world,&result,sizeof result);
+    return true;
+}
+static void update_world_visible(ayatsuri_model_instance *instance,unsigned node,int parent){
+    model_node_state *state=states(instance);
+    state[node].world_enabled=state[node].enabled&&(parent<0||state[parent].world_enabled);
+}
 static ayatsuri_model_status enter(ayatsuri_model_instance *i,const void *owner,uint32_t generation){
     if(!i||!i->alive||!owner||i->owner!=owner||i->generation!=generation)return AYATSURI_MODEL_STATE;
     if(i->busy)return AYATSURI_MODEL_BUSY;
@@ -239,7 +322,11 @@ ayatsuri_model_status ayatsuri_model_instance_init(const ayatsuri_model *m,void 
             if(node[2]==1){work(&result,j)[63]=work(&result,j)[64]=1;}
             else work(&result,j)[77]=mf(node+12);
         }
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+        offset+=88;
+#else
         offset+=node_slot_bytes(m,j,node);
+#endif
     }
     *out=result;return AYATSURI_MODEL_OK;
 }
@@ -270,13 +357,19 @@ ayatsuri_model_status ayatsuri_model_instance_targets(ayatsuri_model_instance *i
         bool node_changed=false;
         for(unsigned k=0;k<9;++k)if((flags&(1u<<(k/3)))&&pose[k]!=t->pose[j*9+k]){
             pose[k]=t->pose[j*9+k];node_changed=true;add_count(&i->stats.target_copy_bytes,4);}
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+        /* Nodes are parent-first. Invalidate descendants here, before evaluation
+         * can fail in a provider or sink midway through the hierarchy. */
+        const int parent=parent_id(row(i->model,1,j,16));
+        if(node_changed||(parent>=0&&!states(i)[parent].world_valid))s->world_valid=false;
+#endif
         if((flags&24)&&s->enabled!=!!(flags&8)){s->enabled=!!(flags&8);node_changed=true;add_count(&i->stats.target_copy_bytes,1);}
         if((flags&32)&&s->color!=t->color[j]){s->color=t->color[j];node_changed=true;add_count(&i->stats.target_copy_bytes,4);}
         if(flags&64){const double value=md((const uint8_t *)t->opacity+8*j);
             if(s->opacity!=value){s->opacity=value;node_changed=true;add_count(&i->stats.target_copy_bytes,8);}}
         if(node_changed){changed=true;add_count(&i->stats.target_changed,1);}
     }
-    if(changed){add_count(&i->mutation_epoch,1);i->evaluated=false;}
+    if(changed){add_count(&i->mutation_epoch,1);i->evaluated=false;i->evaluation_outputs=0;}
     return leave(i,AYATSURI_MODEL_OK);
 }
 ayatsuri_model_status ayatsuri_model_instance_node_kind(ayatsuri_model_instance *i,const void *owner,
@@ -469,22 +562,26 @@ static void mesh_select_sided(const float *xy,const float *depth,const uint16_t 
     }
     out->header.triangles=(uint8_t)count;
 }
-/* Keep mesh-only scratch out of the nonmesh evaluator stack frame. */
-static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3],const ayatsuri_skin_result *geometry){
-    const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*d=row(model,9,m16(node+4),32),
-        *material=row(model,5,m16(node+8),72);
-    const unsigned nv=m16(d+2),nt=m16(d+6);const bool sided=mesh_double(model,node);float *m=work(i,id);
-    ksn_proc_gouraud_patch *p=(ksn_proc_gouraud_patch *)((uint8_t *)m+84);
-    float *xy=(float *)((uint8_t *)p+sizeof *p),*depth=xy+2*nv;
+typedef struct {
+    float world[12], projection[12];
+    bool valid, reflected;
+} mesh_projection_cache;
+static bool mesh_prepare_projection(const ayatsuri_model_instance *i,const float m[12],
+        const float right[3],const float down[3],const float forward[3],
+        float projection[12],double *normal,bool *reflected){
     const double a=m[0],b=m[1],c=m[2],e=m[4],f=m[5],g=m[6],h=m[8],j=m[9],k=m[10],
         det=a*(f*k-g*j)-b*(e*k-g*h)+c*(e*j-f*h);
     if(!isfinite(det)||det==0)return false;
     /* Inverse-transpose preserves authored outward normals under any nonsingular
      * TRS. Reflection never rewrites winding; selection can cull the whole sheet. */
-    const double normal[9]={(f*k-g*j)/det,(g*h-e*k)/det,(e*j-f*h)/det,
-        (c*j-b*k)/det,(a*k-c*h)/det,(b*h-a*j)/det,
-        (b*g-c*f)/det,(c*e-a*g)/det,(a*f-b*e)/det};
-    float projection[12],coeff[8];const float *basis[3]={right,down,forward};
+    *reflected=det<0;
+    if(normal){
+        const double inverse_transpose[9]={(f*k-g*j)/det,(g*h-e*k)/det,(e*j-f*h)/det,
+            (c*j-b*k)/det,(a*k-c*h)/det,(b*h-a*j)/det,
+            (b*g-c*f)/det,(c*e-a*g)/det,(a*f-b*e)/det};
+        memcpy(normal,inverse_transpose,sizeof inverse_transpose);
+    }
+    const float *basis[3]={right,down,forward};
     for(unsigned r=0;r<3;r++){
         const float zoom=r<2?i->camera[6]:1;
         for(unsigned col=0;col<3;col++)projection[4*r+col]=zoom*(basis[r][0]*m[col]+basis[r][1]*m[4+col]+basis[r][2]*m[8+col]);
@@ -492,9 +589,32 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
         if(r<2)projection[4*r+3]+=i->camera[7+r];
     }
     for(unsigned r=0;r<12;r++)if(!isfinite(projection[r]))return false;
-    for(unsigned r=0;r<8;r++)coeff[r]=mf(material+4*r);
-    ayatsuri_shade_basis shade;if(!ayatsuri_shade_prepare(i->lighting,&shade))return false;
-    memset(p,0,sizeof *p);p->header.vertices=(uint8_t)nv;p->header.holes=d[10];
+    return true;
+}
+/* The optional projection cache belongs to one unlit evaluation. The camera
+ * basis is fixed throughout that evaluation and the key includes signed zero. */
+static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,unsigned id,const float right[3],const float down[3],const float forward[3],const ayatsuri_skin_result *geometry,mesh_projection_cache *cache,ayatsuri_visibility_faces faces){
+    const ayatsuri_model *model=i->model;const uint8_t *node=row(model,1,id,16),*d=row(model,9,m16(node+4),32),
+        *material=row(model,5,m16(node+8),72);
+    const unsigned nv=m16(d+2),nt=m16(d+6);const bool sided=mesh_double(model,node),unlit=cache!=NULL;float *m=work(i,id);
+    ksn_proc_gouraud_patch *p=(ksn_proc_gouraud_patch *)((uint8_t *)m+84);
+    float *xy=(float *)((uint8_t *)p+sizeof *p),*depth=xy+2*nv;
+    double normal[9];
+    float local_projection[12],coeff[8],*projection=cache?cache->projection:local_projection;
+    bool reflected;
+    if(cache&&cache->valid&&!memcmp(cache->world,m,sizeof cache->world)){
+        reflected=cache->reflected;
+    }else{
+        if(!mesh_prepare_projection(i,m,right,down,forward,projection,unlit?NULL:normal,&reflected))return false;
+        if(cache){memcpy(cache->world,m,sizeof cache->world);cache->reflected=reflected;cache->valid=true;}
+    }
+    if(!unlit)for(unsigned r=0;r<8;r++)coeff[r]=mf(material+4*r);
+    ayatsuri_shade_basis shade={0};if(!unlit&&!ayatsuri_shade_prepare(i->lighting,&shade))return false;
+    /* The unlit material callback borrows only declared vertices/depth and
+     * selected indices. Each is fully written below. No full patch escapes. */
+    if(unlit)memset(&p->header,0,sizeof p->header);
+    else memset(p,0,sizeof *p);
+    p->header.vertices=(uint8_t)nv;p->header.holes=d[10];
     for(unsigned v=0;v<nv;v++){
         const uint8_t *cold=row(model,10,m16(d)+v,28);ksn_proc_gouraud_vertex *out=p->vertices+v;
         if(geometry){
@@ -502,6 +622,11 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
             if(!mesh_project_xyz(projection,xyz[0],xyz[1],xyz[2],xy+2*v,xy+2*v+1,depth+v))return false;
         }else if(!mesh_project(projection,cold,xy+2*v,xy+2*v+1,depth+v))return false;
         out->x=xy[2*v];out->y=xy[2*v+1];out->mask=mf(cold+24);
+        if(unlit){
+            out->color_a=out->color_b=0;
+            if(sided){uint16_t *back=mesh_back_colors(i,id,nv)+2*v;back[0]=back[1]=0;}
+            continue;
+        }
         const float nx=geometry?geometry[v].normal[0]:mf(cold+12),
             ny=geometry?geometry[v].normal[1]:mf(cold+16),nz=geometry?geometry[v].normal[2]:mf(cold+20);
         const double x=normal[0]*nx+normal[1]*ny+normal[2]*nz,
@@ -521,14 +646,18 @@ static __attribute__((noinline)) bool mesh_packet(ayatsuri_model_instance *i,uns
             back[1]=ayatsuri_shade_sample(snorm,m16(d+16),d[18],i->lighting,coeff,&shade);
         }
     }
+    /* A hidden unlit mesh still supplies validated local/projected vertices
+     * to its sink. The view always has zero visible triangles and no indices. */
+    if(unlit&&!states(i)[id].world_enabled&&!sided&&!d[10])return true;
     /* Decode cold U16 indices instead of assuming the caller's span alignment. */
     uint16_t indices[3*KSN_PROC_GOURAUD_TRIANGLES];uint32_t counts[3];
     for(unsigned t=0;t<nt;t++)for(unsigned v=0;v<3;v++)indices[3*t+v]=m16(row(model,11,m16(d+4)+t,6)+2*v);
     if(sided){
         uint8_t *bits=(uint8_t *)(mesh_back_colors(i,id,nv)+2*nv);
-        mesh_select_sided(xy,depth,indices,nt,d[11],det<0,p,bits);counts[0]=p->header.triangles;
+        mesh_select_sided(xy,depth,indices,nt,d[11],reflected,p,bits);counts[0]=p->header.triangles;
     }else{
-        if(ayatsuri_visibility_select(xy,depth,nv,indices,nt,(ayatsuri_visibility_order)d[11],p->indices,3*nt,counts)!=AYATSURI_VISIBILITY_OK)return false;
+        if(ayatsuri_visibility_select_faces(xy,depth,nv,indices,nt,(ayatsuri_visibility_order)d[11],
+                                           faces,p->indices,3*nt,counts)!=AYATSURI_VISIBILITY_OK)return false;
         p->header.triangles=(uint8_t)counts[0];
     }
     unsigned hole_at=m16(d+8);
@@ -552,6 +681,10 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
         const float camera[9],const float light[6],const ayatsuri_model_mesh_geometry *meshes,size_t count){
 #endif
     add_count(&i->stats.eval_calls,1);
+#ifndef AYATSURI_MODEL_STREAM_INTERNAL
+    const bool world_ready=(i->evaluation_outputs&AYATSURI_OUTPUT_DRAWABLES)!=0;
+#endif
+    i->evaluation_outputs=0;
     bool same=i->evaluated&&!count&&!i->mesh_overridden;
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
     same=same&&!provider;
@@ -568,38 +701,101 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
     fx/=distance;fy/=distance;fz/=distance;
     double rx=fz,rz=-fx,length=hypot(rx,rz);
     if(length<1e-6){rx=1;rz=0;length=1;}rx/=length;rz/=length;
-    const float forward[3]={(float)fx,(float)fy,(float)fz},right[3]={(float)rx,0,(float)rz},
+    const float forward[3]={(float)fx,(float)fy,(float)fz};
+    float right[3]={(float)rx,0,(float)rz},
         down[3]={(float)(fy*rz),(float)(fz*rx-fx*rz),(float)(-fy*rx)};
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    model_stream_request *request=context;
+    if(request&&request->faces){
+        /* Blender world Z points up. Right × forward points down in the
+         * image, and depth still increases toward the viewer. */
+        const double horizontal=hypot(fx,fy);
+        const double x=horizontal<1e-6?1:-fy/horizontal;
+        const double y=horizontal<1e-6?0:fx/horizontal;
+        right[0]=(float)x;right[1]=(float)y;right[2]=0;
+        down[0]=(float)(y*fz);down[1]=(float)(-x*fz);down[2]=(float)(x*fy-y*fx);
+    }
+#endif
     for(unsigned k=0;k<3;++k){i->lighting[k]=light[k];i->lighting[3+k]=forward[k];i->lighting[6+k]=light[3+k];}
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    int previous_parent=-2;
+    mesh_projection_cache projection_cache={0};
+#endif
     for(unsigned j=0;j<i->model->node_count;++j){
         const uint8_t *node=row(i->model,1,j,16);const int parent=parent_id(node);
-        ayatsuri_pose pose;ayatsuri_transform p,result;memcpy(&pose,work(i,j)+12,36);
-        if(parent>=0)memcpy(&p,work(i,(unsigned)parent),48);
-        if(ayatsuri_transform_evaluate(&pose,parent<0?NULL:&p,&result)!=AYATSURI_OK)return leave(i,AYATSURI_MODEL_RANGE);
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+        float *world=work(i,j);
+        if(!states(i)[j].world_valid){
+            /* Split draws often have identical local poses and parent. Compare
+             * the stored binary32 bytes, including the sign of zero. */
+            if(previous_parent==parent&&!memcmp(world+12,work(i,j-1)+12,sizeof(ayatsuri_pose))){
+                memcpy(world,work(i,j-1),sizeof(ayatsuri_transform));
+            }else if(!update_world_transform(i,j,parent))return leave(i,AYATSURI_MODEL_RANGE);
+            states(i)[j].world_valid=true;
+        }
+        previous_parent=parent;
+#else
+        if(!world_ready&&!update_world_transform(i,j,parent))return leave(i,AYATSURI_MODEL_RANGE);
+#endif
         add_count(&i->stats.geometry_updates,1);
-        memcpy(work(i,j),&result,48);states(i)[j].world_enabled=states(i)[j].enabled&&(parent<0||states(i)[parent].world_enabled);
+        update_world_visible(i,j,parent);
         const ayatsuri_skin_result *geometry=NULL;
         for(size_t k=0;k<count;++k)if(meshes[k].node_id==j){geometry=meshes[k].vertices;break;}
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
         if(provider&&node[2]==3){
             const uint8_t *d=row(i->model,9,m16(node+4),32);unsigned nv=m16(d+2);
             if(!provider(context,j,nv,slot))return leave(i,AYATSURI_MODEL_INVALID);
+            bool validate_normals=true;
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+            validate_normals=!((model_stream_request*)context)->unlit;
+            /* This adapter validates every position before copying any of them
+             * to slot. There is no callback between that copy and mesh_packet. */
+            if(validate_normals||provider!=stream_dispatch)
+#endif
             for(unsigned v=0;v<nv;v++){
                 double length=0;
                 for(unsigned r=0;r<3;r++){
-                    if(!isfinite(slot[v].position[r])||fabsf(slot[v].position[r])>4096||!isfinite(slot[v].normal[r]))
+                    if(!isfinite(slot[v].position[r])||fabsf(slot[v].position[r])>4096||(validate_normals&&!isfinite(slot[v].normal[r])))
                         return leave(i,AYATSURI_MODEL_INVALID);
-                    length+=(double)slot[v].normal[r]*slot[v].normal[r];
+                    if(validate_normals)length+=(double)slot[v].normal[r]*slot[v].normal[r];
                 }
-                if(fabs(length-1)>1e-4)return leave(i,AYATSURI_MODEL_INVALID);
+                if(validate_normals&&fabs(length-1)>1e-4)return leave(i,AYATSURI_MODEL_INVALID);
             }
             geometry=slot;
         }
 #endif
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+        (void)ellipse_packet;(void)blend_packet; /* Unsupported types rejected at init. */
+        if(node[2]==3){
+            const uint32_t saved_offset=states(i)[j].offset;
+            const size_t shared=model_stream_shared_offset(i->model);
+            memcpy((uint8_t*)i->arena+shared,work(i,j),84);
+            states(i)[j].offset=(uint32_t)shared;
+            const ayatsuri_visibility_faces faces=request->faces?
+                request->faces[request->route_cursor]:AYATSURI_VISIBILITY_POSITIVE;
+            bool ok=mesh_packet(i,j,right,down,forward,geometry,request->unlit?&projection_cache:NULL,faces);
+            if(ok){
+                const ksn_proc_gouraud_patch *patch=(const void*)((const uint8_t*)work(i,j)+84);
+                const float *xy=(const void*)((const uint8_t*)patch+sizeof *patch);
+                bool append=true;
+                if(request->sink){
+                    append=request->routes->routes[request->route_cursor].lane==AYATSURI_STREAM_OPAQUE;
+                    ok=model_stream_notify(request,i->model,j,states(i)[j].world_enabled,geometry,patch,xy+2*patch->header.vertices);
+                }
+                if(ok&&append&&states(i)[j].world_enabled&&patch->header.triangles)
+                    ok=ksn_mesh_append(request->pending,patch,xy+2*patch->header.vertices,j);
+            }
+            states(i)[j].offset=saved_offset;
+            if(!ok)return leave(i,AYATSURI_MODEL_RANGE);
+            add_count(&i->stats.projection_updates,1);
+            if(!((model_stream_request*)context)->unlit)add_count(&i->stats.shade_updates,1);
+        }
+#else
         if((node[2]==1&&!ellipse_packet(i,j,right,down))||(node[2]==2&&!blend_packet(i,j,right,down,forward))||
-           (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry)))
+           (node[2]==3&&!mesh_packet(i,j,right,down,forward,geometry,NULL,AYATSURI_VISIBILITY_POSITIVE)))
             return leave(i,AYATSURI_MODEL_RANGE);
         if(node[2]){add_count(&i->stats.projection_updates,1);add_count(&i->stats.shade_updates,1);}
+#endif
     }
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
     i->mesh_overridden=count!=0||provider!=NULL;i->evaluated=true;return leave(i,AYATSURI_MODEL_OK);
@@ -617,6 +813,7 @@ static ayatsuri_model_status evaluate_meshes(ayatsuri_model_instance *i,
 ayatsuri_model_status ayatsuri_model_instance_evaluate(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,const float camera[9],const float light[6]){
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    if(i->model->provider_only)return leave(i,AYATSURI_MODEL_INVALID);
     return evaluate_meshes(i,camera,light,NULL,0);
 }
 static bool geometry_span(const ayatsuri_model_instance *i,const void *p,size_t bytes,size_t align){
@@ -627,6 +824,7 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate_meshes(ayatsuri_model_ins
         uint32_t generation,const float camera[9],const float light[6],
         const ayatsuri_model_mesh_geometry *meshes,size_t count){
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    if(i->model->provider_only)return leave(i,AYATSURI_MODEL_INVALID);
     if(count>i->model->node_count||(count&&!geometry_span(i,meshes,count*sizeof *meshes,_Alignof(ayatsuri_model_mesh_geometry))))
         return leave(i,AYATSURI_MODEL_INVALID);
     for(size_t k=0;k<count;++k){
@@ -653,6 +851,11 @@ ayatsuri_model_status ayatsuri_model_instance_evaluate_meshes(ayatsuri_model_ins
 }
 ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *i,const void *owner,
         uint32_t generation,uint32_t *cursor,ayatsuri_model_packet *out){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    (void)cursor;(void)out;
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    return leave(i,AYATSURI_MODEL_INVALID);
+#else
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
     if(!i->evaluated)return leave(i,AYATSURI_MODEL_STATE);
     if(!cursor||!out||overlaps(cursor,sizeof *cursor,out,sizeof *out)||
@@ -670,10 +873,16 @@ ayatsuri_model_status ayatsuri_model_instance_next(ayatsuri_model_instance *i,co
             *cursor=j+1;return leave(i,AYATSURI_MODEL_OK);
         }}
     *cursor=i->model->node_count;return leave(i,AYATSURI_MODEL_DONE);
+#endif
 }
 
 ayatsuri_model_status ayatsuri_model_instance_mesh_view(ayatsuri_model_instance *i,
         const void *owner,uint32_t generation,uint16_t id,ayatsuri_model_mesh_view *out){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    (void)id;(void)out;
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    return leave(i,AYATSURI_MODEL_INVALID);
+#else
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
     if(!i->evaluated)return leave(i,AYATSURI_MODEL_STATE);
     if(!out||id>=i->model->node_count||
@@ -686,10 +895,16 @@ ayatsuri_model_status ayatsuri_model_instance_mesh_view(ayatsuri_model_instance 
     const float *xy=(const float *)((const uint8_t *)p+sizeof *p);
     *out=(ayatsuri_model_mesh_view){p,xy+2*p->header.vertices,id,p->header.vertices};
     return leave(i,AYATSURI_MODEL_OK);
+#endif
 }
 
 ayatsuri_model_status ayatsuri_model_instance_sided_mesh_view(ayatsuri_model_instance *i,
         const void *owner,uint32_t generation,uint16_t id,ayatsuri_model_sided_mesh_view *out){
+#ifdef AYATSURI_MODEL_STREAM_INTERNAL
+    (void)id;(void)out;
+    ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
+    return leave(i,AYATSURI_MODEL_INVALID);
+#else
     ayatsuri_model_status status=enter(i,owner,generation);if(status)return status;
     if(!i->evaluated)return leave(i,AYATSURI_MODEL_STATE);
     if(!out||id>=i->model->node_count||overlaps(out,sizeof *out,i,sizeof *i)||
@@ -702,6 +917,7 @@ ayatsuri_model_status ayatsuri_model_instance_sided_mesh_view(ayatsuri_model_ins
     const uint16_t *back=mesh_back_colors(i,id,p->header.vertices);
     *out=(ayatsuri_model_sided_mesh_view){p,xy+2*p->header.vertices,back,(const uint8_t *)(back+2*p->header.vertices),id,p->header.vertices};
     return leave(i,AYATSURI_MODEL_OK);
+#endif
 }
 
 #ifdef AYATSURI_MODEL_EXPERIMENTAL_PROVIDER
@@ -726,3 +942,202 @@ ayatsuri_model_status ayatsuri_model_candidate_evaluate_provider(ayatsuri_model_
 }
 
 #endif /* AYATSURI_MODEL_EXPERIMENTAL_PROVIDER */
+
+/* The stream candidate uses a different arena and a geometry provider; its
+ * per-mesh results expire during the callback, before a frame is complete. */
+#ifndef AYATSURI_MODEL_STREAM_INTERNAL
+enum { CONTROLS_PER_NODE=AYATSURI_CONTROL_VISIBLE+1 };
+
+ayatsuri_model_caps ayatsuri_model_capabilities(void){
+    return (ayatsuri_model_caps){
+        .format_version=1,.max_nodes=AYATSURI_MODEL_MAX_NODES,.max_mesh_vertices=32,
+        .max_mesh_triangles=64,.max_asset_bytes=AYATSURI_MODEL_MAX_BYTES,
+        .outputs=AYATSURI_OUTPUT_BOTH,.clips_supported=false
+    };
+}
+static bool model_output(const ayatsuri_model *m,const void *out,size_t bytes){
+    return m&&m->data&&out&&bytes<=UINTPTR_MAX-(uintptr_t)out&&
+        !overlaps(out,bytes,m,sizeof *m)&&!overlaps(out,bytes,m->data,m->bytes);
+}
+ayatsuri_model_status ayatsuri_model_describe(const ayatsuri_model *m,ayatsuri_model_info *out){
+    if(!model_output(m,out,sizeof *out))return AYATSURI_MODEL_INVALID;
+    *out=(ayatsuri_model_info){.nodes=m->node_count,.controls=m->node_count*CONTROLS_PER_NODE,.clips=0};
+    return AYATSURI_MODEL_OK;
+}
+ayatsuri_model_status ayatsuri_model_describe_node(const ayatsuri_model *m,uint16_t id,ayatsuri_model_node_info *out){
+    if(!model_output(m,out,sizeof *out)||id>=m->node_count)return AYATSURI_MODEL_INVALID;
+    const uint8_t *node=row(m,1,id,16);
+    const uint8_t *binding=row(m,6,m16(node+10),8);
+    *out=(ayatsuri_model_node_info){
+        .id=id,.kind=node[2],.parent_id=parent_id(node),
+        .name=(const char *)row(m,7,m32(binding+4),1),.name_bytes=m16(binding+2)
+    };
+    return AYATSURI_MODEL_OK;
+}
+ayatsuri_model_status ayatsuri_model_describe_control(const ayatsuri_model *m,uint16_t id,ayatsuri_model_control_info *out){
+    const uint16_t node=id/CONTROLS_PER_NODE;
+    if(!model_output(m,out,sizeof *out)||node>=m->node_count)return AYATSURI_MODEL_INVALID;
+    ayatsuri_model_control_info info={.id=id,.node_id=node,.property=id%CONTROLS_PER_NODE};
+    if(info.property==AYATSURI_CONTROL_VISIBLE)info.default_value.visible=row(m,1,node,16)[3];
+    else memcpy(info.default_value.xyz,row(m,2,node,36)+12*info.property,12);
+    *out=info;
+    return AYATSURI_MODEL_OK;
+}
+static bool valid_controls(const ayatsuri_model *model,const ayatsuri_model_control *controls,size_t count){
+    uint8_t seen[(AYATSURI_MODEL_MAX_NODES*CONTROLS_PER_NODE+7)/8]={0};
+    for(size_t j=0;j<count;j++){
+        const unsigned id=controls[j].id,property=id%CONTROLS_PER_NODE;
+        if(id>=model->node_count*CONTROLS_PER_NODE)return false;
+        const uint8_t bit=(uint8_t)(1u<<(id%8));
+        if(seen[id/8]&bit)return false;
+        seen[id/8]|=bit;
+        if(property==AYATSURI_CONTROL_VISIBLE){
+            if(controls[j].value.visible>1)return false;
+        }else for(unsigned axis=0;axis<3;axis++){
+            const float v=controls[j].value.xyz[axis];
+            if(!isfinite(v)||(property==AYATSURI_CONTROL_SCALE&&v==0))return false;
+        }
+    }
+    return true;
+}
+ayatsuri_model_status ayatsuri_model_evaluate_input(ayatsuri_model_instance *i,const void *owner,
+        uint32_t generation,const ayatsuri_model_input *input,ayatsuri_model_evaluation *out){
+    ayatsuri_model_status status=enter(i,owner,generation);
+    if(status)return status;
+    if(!geometry_span(i,input,sizeof *input,_Alignof(ayatsuri_model_input))||
+       !geometry_span(i,out,sizeof *out,_Alignof(ayatsuri_model_evaluation))||
+       !model_output(i->model,out,sizeof *out)||overlaps(input,sizeof *input,out,sizeof *out)||
+       !isfinite(input->time_seconds)||!input->outputs||(input->outputs&~AYATSURI_OUTPUT_BOTH))
+        return leave(i,AYATSURI_MODEL_INVALID);
+    if(i->model->provider_only||input->clip_id!=AYATSURI_NO_CLIP)return leave(i,AYATSURI_MODEL_UNSUPPORTED);
+    if(input->control_count>(size_t)i->model->node_count*CONTROLS_PER_NODE)return leave(i,AYATSURI_MODEL_INVALID);
+    const size_t bytes=input->control_count*sizeof *input->controls;
+    if(bytes&&(!geometry_span(i,input->controls,bytes,_Alignof(ayatsuri_model_control))||
+               overlaps(input->controls,bytes,out,sizeof *out)||
+               !valid_controls(i->model,input->controls,input->control_count)))
+        return leave(i,AYATSURI_MODEL_INVALID);
+    if(i->evaluation_serial==UINT64_MAX)return leave(i,AYATSURI_MODEL_RANGE);
+    i->evaluation_outputs=0;
+    i->evaluated=false;
+    ++i->evaluation_serial;
+    add_count(&i->stats.eval_calls,1);
+    add_count(&i->mutation_epoch,1);
+    for(unsigned j=0;j<i->model->node_count;j++){
+        const uint8_t *node=row(i->model,1,j,16);
+        model_node_state *s=states(i)+j;
+        memcpy(work(i,j)+12,row(i->model,2,j,36),36);
+        s->enabled=node[3];
+        if(node[2]==1||node[2]==2){
+            const uint8_t *material=row(i->model,5,m16(node+8),72);
+            s->color=m32(material+44);
+            s->opacity=md(material+56);
+        }
+    }
+    for(size_t j=0;j<input->control_count;j++){
+        const ayatsuri_model_control *control=input->controls+j;
+        const unsigned node=control->id/CONTROLS_PER_NODE,property=control->id%CONTROLS_PER_NODE;
+        if(property==AYATSURI_CONTROL_VISIBLE)states(i)[node].enabled=control->value.visible;
+        else memcpy(work(i,node)+12+3*property,control->value.xyz,12);
+    }
+    for(unsigned j=0;j<i->model->node_count;j++){
+        const int parent=parent_id(row(i->model,1,j,16));
+        update_world_visible(i,j,parent);
+        if(input->outputs&AYATSURI_OUTPUT_DRAWABLES){
+            if(!update_world_transform(i,j,parent))return leave(i,AYATSURI_MODEL_RANGE);
+            add_count(&i->stats.geometry_updates,1);
+        }
+    }
+    i->evaluation_outputs=input->outputs;
+    *out=(ayatsuri_model_evaluation){i,owner,generation,i->evaluation_serial};
+    return leave(i,AYATSURI_MODEL_OK);
+}
+static ayatsuri_model_status enter_evaluation(const ayatsuri_model_evaluation *e,unsigned output){
+    if(!e)return AYATSURI_MODEL_INVALID;
+    ayatsuri_model_status status=enter(e->instance,e->owner,e->generation);
+    if(status)return status;
+    if(e->instance->evaluation_serial!=e->serial||!(e->instance->evaluation_outputs&output))
+        return leave(e->instance,AYATSURI_MODEL_STATE);
+    return AYATSURI_MODEL_OK;
+}
+static bool evaluation_output(const ayatsuri_model_evaluation *e,void *out,size_t size,size_t align){
+    return model_output(e->instance->model,out,size)&&geometry_span(e->instance,out,size,align)&&
+        !overlaps(e,sizeof *e,out,size);
+}
+ayatsuri_model_status ayatsuri_model_evaluation_project(const ayatsuri_model_evaluation *e,
+        const float camera[9],const float light[6]){
+    ayatsuri_model_status status=enter_evaluation(e,AYATSURI_OUTPUT_DRAWABLES);
+    if(status)return status;
+    ayatsuri_model_instance *i=e->instance;
+    if(!geometry_span(i,camera,9*sizeof *camera,_Alignof(float))||
+       !geometry_span(i,light,6*sizeof *light,_Alignof(float)))return leave(i,AYATSURI_MODEL_INVALID);
+    const uint8_t outputs=i->evaluation_outputs;
+    status=evaluate_meshes(i,camera,light,NULL,0);
+    /* Projection reuses the evaluation's world matrices and only writes
+     * view-dependent scratch, so a failed projection also preserves it. */
+    i->evaluation_outputs=outputs;
+    return status;
+}
+ayatsuri_model_status ayatsuri_model_evaluation_pose(const ayatsuri_model_evaluation *e,uint16_t node,
+        ayatsuri_model_pose_view *out){
+    ayatsuri_model_status status=enter_evaluation(e,AYATSURI_OUTPUT_POSE);
+    if(status)return status;
+    ayatsuri_model_instance *i=e->instance;
+    if(node>=i->model->node_count||!evaluation_output(e,out,sizeof *out,_Alignof(ayatsuri_model_pose_view)))
+        return leave(i,AYATSURI_MODEL_INVALID);
+    *out=(ayatsuri_model_pose_view){work(i,node)+12,states(i)[node].enabled,states(i)[node].world_enabled};
+    return leave(i,AYATSURI_MODEL_OK);
+}
+static ayatsuri_model_rows model_rows(const ayatsuri_model *m,unsigned section,unsigned first,
+        uint16_t count,uint16_t stride){
+    return (ayatsuri_model_rows){count?row(m,section,first,stride):NULL,count,stride};
+}
+static void describe_mesh(const ayatsuri_model *m,const uint8_t *node,ayatsuri_model_drawable *out){
+    const uint8_t *d=row(m,9,m16(node+4),32);
+    out->vertices=model_rows(m,10,m16(d),m16(d+2),28);
+    out->triangles=model_rows(m,11,m16(d+4),m16(d+6),6);
+    out->hole_points=model_rows(m,12,m16(d+8),d[12]+d[13],12);
+    memcpy(out->hole_sizes,d+12,2);
+    out->triangle_order=d[11];
+    out->albedo_rgb565[0]=m16(d+14);
+    out->albedo_rgb565[1]=m16(d+16);
+    out->mesh_thickness=d[18];
+    out->double_sided=mesh_double(m,node);
+}
+ayatsuri_model_status ayatsuri_model_evaluation_next(const ayatsuri_model_evaluation *e,uint32_t *cursor,
+        ayatsuri_model_drawable *out){
+    ayatsuri_model_status status=enter_evaluation(e,AYATSURI_OUTPUT_DRAWABLES);
+    if(status)return status;
+    ayatsuri_model_instance *i=e->instance;
+    const ayatsuri_model *m=i->model;
+    if(!evaluation_output(e,out,sizeof *out,_Alignof(ayatsuri_model_drawable))||
+       !evaluation_output(e,cursor,sizeof *cursor,_Alignof(uint32_t))||
+       overlaps(cursor,sizeof *cursor,out,sizeof *out)||*cursor>m->node_count)
+        return leave(i,AYATSURI_MODEL_INVALID);
+    for(unsigned j=*cursor;j<m->node_count;j++){
+        const uint8_t *node=row(m,1,j,16);
+        if(!node[2]||!states(i)[j].world_enabled)continue;
+        const uint16_t material_id=m16(node+8);
+        const uint8_t *mat=row(m,5,material_id,72);
+        ayatsuri_model_drawable drawable={
+            .node_id=j,.material_id=material_id,.kind=node[2],.to_model=work(i,j),
+            .rgb=m32(mat+44),.thickness=md(mat+48),.opacity=md(mat+56),.edge_softness=md(mat+64)
+        };
+        memcpy(drawable.lighting,mat,sizeof drawable.lighting);
+        if(node[2]==3)describe_mesh(m,node,&drawable);
+        else{
+            if(node[2]==1)drawable.shape=model_rows(m,3,m16(node+4),1,12);
+            else{
+                drawable.shape=model_rows(m,4,m16(node+4),m16(node+6),24);
+                drawable.blend=mf(node+12);
+            }
+            const uint8_t *plane=node_region(m,j);
+            if(plane)drawable.local_plane=(ayatsuri_model_rows){plane,1,32};
+        }
+        *out=drawable;
+        *cursor=j+1;
+        return leave(i,AYATSURI_MODEL_OK);
+    }
+    *cursor=m->node_count;
+    return leave(i,AYATSURI_MODEL_DONE);
+}
+#endif

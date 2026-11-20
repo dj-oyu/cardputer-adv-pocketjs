@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 typedef int esp_err_t;
-enum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_TIMEOUT=-2,KSN_INPUT_APP,KSN_INPUT_BLOCKED};
+enum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_TIMEOUT=-2,ESP_ERR_INVALID_STATE=-3,KSN_INPUT_APP,KSN_INPUT_BLOCKED};
 typedef int ksn_result;
 enum { KSN_OK, KSN_BUSY };
 typedef struct {size_t struct_size;uint32_t buttons,analog;const uint32_t *touches;
@@ -16,7 +16,7 @@ typedef struct {int id;} sys_notice;
 static void *guest;
 static bool turn_continued,pending,remain,activate,need_present,submission;
 static bool runaway,exit_requested,stopped,cont_submits;
-static bool proc_commits,proc_pending;
+static bool proc_commits,proc_pending,stop_pending;
 static ksn_result presenter_result;
 static atomic_bool stop_requested;
 static unsigned continuation_turns,ticks;
@@ -116,12 +116,13 @@ static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;
     native_animation=system_pending=false;board_capture(false);
     runaway=exit_requested=stopped=turn_continued=cont_submits=frame_parks=proc_commits=proc_pending=false;scope=KSN_INPUT_APP;
-    jobs_left=frame_met_pending=false;
+    jobs_left=frame_met_pending=stop_pending=false;
     presenter_result=KSN_OK;
     deferred_buttons=delivered=armed=continuation_turns=ticks=0;
     guest_error=0;now=40000;last_present_us=0;turn_sum=0;
 }
 int main(void){
+    reset();stop_pending=true;assert(app_tick(0)==ESP_ERR_INVALID_STATE);assert(!calls[0]);
     // An ordinary turn: pumps, frame(), then the Kasane present. There is no
     // UI core tick or draw between frame() and the present any more.
     reset();assert(app_tick(0x4000)==0);assert(delivered==0x4000&&armed==0x4000);

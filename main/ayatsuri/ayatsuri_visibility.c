@@ -18,15 +18,34 @@ static bool visibility_range(const void *p,size_t bytes,visibility_span *span){
 static bool visibility_overlap(visibility_span a,visibility_span b){
     return a.bytes&&b.bytes&&(a.address<=b.address?b.address-a.address<a.bytes:a.address-b.address<b.bytes);
 }
-ayatsuri_visibility_status ayatsuri_visibility_select(
+static int visibility_side_exact(const float *a,const float *b,const float *c){
+    const double area=((double)b[0]-a[0])*((double)c[1]-a[1])-
+                      ((double)b[1]-a[1])*((double)c[0]-a[0]);
+    return (area>1e-5)-(area< -1e-5);
+}
+static int visibility_side_authored(const float *a,const float *b,const float *c){
+    const float left=(b[0]-a[0])*(c[1]-a[1]),right=(b[1]-a[1])*(c[0]-a[0]);
+    const float estimate=left-right;
+    /* XY is bounded by 4096. Each product rounds two differences and one
+     * multiply. The final subtract contributes at most another binary32
+     * roundoff times |left|+|right|. Use 32 roundoffs and round the absolute
+     * threshold upward; both allowances also cover subnormal terms and the
+     * binary64 reference's rounding. Ambiguous signs use the original test. */
+    const float limit=1.000001e-5f+0x1p-19f*(fabsf(left)+fabsf(right));
+    if(estimate>limit)return 1;
+    if(estimate< -limit)return -1;
+    return visibility_side_exact(a,b,c);
+}
+ayatsuri_visibility_status ayatsuri_visibility_select_faces(
     const float *xy,const float *depth,size_t vertices,
     const uint16_t *indices,size_t triangles,ayatsuri_visibility_order order,
-    uint16_t *out,size_t capacity,uint32_t counts[3]){
+    ayatsuri_visibility_faces faces,uint16_t *out,size_t capacity,uint32_t counts[3]){
     if(!xy||!depth||!indices||!out||!counts||
        (uintptr_t)xy%_Alignof(float)||(uintptr_t)depth%_Alignof(float)||
        (uintptr_t)indices%_Alignof(uint16_t)||(uintptr_t)out%_Alignof(uint16_t)||
        (uintptr_t)counts%_Alignof(uint32_t)||
-       (order!=AYATSURI_VISIBILITY_AUTHORED&&order!=AYATSURI_VISIBILITY_CENTROID_DEPTH))
+       (order!=AYATSURI_VISIBILITY_AUTHORED&&order!=AYATSURI_VISIBILITY_CENTROID_DEPTH)||
+       faces<AYATSURI_VISIBILITY_POSITIVE||faces>AYATSURI_VISIBILITY_BOTH)
         return AYATSURI_VISIBILITY_INVALID;
     if(!vertices||vertices>AYATSURI_VISIBILITY_VERTICES||!triangles||
        triangles>AYATSURI_VISIBILITY_TRIANGLES||capacity<3*triangles||capacity>SIZE_MAX/sizeof *out)
@@ -51,19 +70,30 @@ ayatsuri_visibility_status ayatsuri_visibility_select(
     uint32_t result[3]={0,0,0};
     for(size_t triangle=0;triangle<triangles;triangle++){
         const uint16_t *v=indices+3*triangle;
-        const double ax=xy[2*v[0]],ay=xy[2*v[0]+1],
-            bx=xy[2*v[1]],by=xy[2*v[1]+1],cx=xy[2*v[2]],cy=xy[2*v[2]+1],
-            area=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
-        if(area>1e-5){
-            const double key=(double)depth[v[0]]+depth[v[1]]+depth[v[2]];
+        const float *a=xy+2*v[0],*b=xy+2*v[1],*c=xy+2*v[2];
+        const int side=order==AYATSURI_VISIBILITY_AUTHORED?
+            visibility_side_authored(a,b,c):visibility_side_exact(a,b,c);
+        const unsigned winding=side>0?AYATSURI_VISIBILITY_POSITIVE:
+                               side<0?AYATSURI_VISIBILITY_NEGATIVE:0;
+        if(faces&winding){
             unsigned at=result[0]++;
             /* Stable insertion keeps source-ID ties without changing winding. */
-            if(order==AYATSURI_VISIBILITY_CENTROID_DEPTH)
+            if(order==AYATSURI_VISIBILITY_CENTROID_DEPTH){
+                const double key=(double)depth[v[0]]+depth[v[1]]+depth[v[2]];
                 while(at&&keys[at-1]>key){keys[at]=keys[at-1];ids[at]=ids[at-1];--at;}
-            keys[at]=key;ids[at]=(uint8_t)triangle;
-        }else ++result[area < -1e-5?1:2];
+                keys[at]=key;
+            }
+            ids[at]=(uint8_t)triangle;
+        }else ++result[winding?1:2];
     }
     /* Nothing below can fail; disjoint output cannot corrupt unread indices. */
     for(unsigned i=0;i<result[0];i++)memcpy(out+3*i,indices+3*ids[i],3*sizeof *out);
     memcpy(counts,result,sizeof result);return AYATSURI_VISIBILITY_OK;
+}
+ayatsuri_visibility_status ayatsuri_visibility_select(
+    const float *xy,const float *depth,size_t vertices,
+    const uint16_t *indices,size_t triangles,ayatsuri_visibility_order order,
+    uint16_t *out,size_t capacity,uint32_t counts[3]){
+    return ayatsuri_visibility_select_faces(xy,depth,vertices,indices,triangles,order,
+                                            AYATSURI_VISIBILITY_POSITIVE,out,capacity,counts);
 }
