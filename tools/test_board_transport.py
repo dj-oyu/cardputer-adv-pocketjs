@@ -263,7 +263,7 @@ int main(void){
 '''
 parts = [function(x) for x in ('static void put_strip(uint16_t *out,uint16_t *in,int count){', 'uint16_t *board_strip(', 'static esp_err_t tx_reap(',
     'void board_capture(', 'bool board_capture_take_turn(', 'static esp_err_t command(',
-    'esp_err_t board_present(', 'esp_err_t board_present_rect(')]
+    'esp_err_t board_present(', 'static esp_err_t present_rect(', 'esp_err_t board_present_rect(')]
 if CONTINUATION:
     parts.append(function('void board_present_frame_end('))
 with tempfile.TemporaryDirectory(prefix='board-transport-') as tmp:

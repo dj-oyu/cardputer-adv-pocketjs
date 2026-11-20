@@ -210,7 +210,7 @@ parts = [function(x) for x in (
     'static void put_strip(uint16_t *out,uint16_t *in,int count){', 'int board_strip_rows(',
     'uint16_t *board_strip_next(', 'static esp_err_t tx_reap(', 'void board_capture(',
     'bool board_capture_take_turn(', 'static esp_err_t command(', 'esp_err_t board_present(',
-    'esp_err_t board_present_rect(', 'void board_present_frame_end(',
+    'static esp_err_t present_rect(', 'esp_err_t board_present_rect(', 'void board_present_frame_end(',
     'esp_err_t board_present_finish(', 'esp_err_t board_present_submit(')]
 with tempfile.TemporaryDirectory(prefix='board-half-') as tmp:
     path = Path(tmp) / 'test.c'
