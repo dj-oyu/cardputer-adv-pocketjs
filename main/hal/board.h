@@ -51,6 +51,8 @@ extern int g_board_swap_into;
 int board_async_get(void);
 void board_async_set(int on);
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
+/* Owner-task invalidation token for incremental native LCD presentation. */
+uint32_t board_panel_write_epoch(void);
 // Columns [x, x+cols) of `rows` strip rows, each row read at pixels+row*240+x.
 // The rest of the strip is not read and not sent, which is the point: a caller
 // that recomposited six columns of a band pays for six columns on the wire. The
@@ -67,6 +69,8 @@ esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pi
 // until finish. Never acknowledge a frame until finish succeeds. A non-timeout
 // driver error without descriptor return quarantines TX until a later finish.
 esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
+// Copy full-stride source rows into a board-owned strip; source remains caller-owned.
+esp_err_t board_present_submit_source(int x,int y,int cols,int rows,const uint16_t *source);
 esp_err_t board_present_finish(void);
 #endif
 // Measurement build (docs/platform/lcd-dma-driver.md, S0b): two panel buffers

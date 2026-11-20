@@ -1,5 +1,6 @@
 /* Synthetic host probe: actual model evaluation and owned mesh depth snapshot. */
 #include "ayatsuri/ayatsuri_model.h"
+#include "hone/aynm_mesh.h"
 #include "ui/kasane/ksn_mesh_depth.h"
 #include <assert.h>
 #include <math.h>
@@ -20,10 +21,30 @@ int main(int argc,char **argv){
   ayatsuri_model_mesh_view view;assert(ayatsuri_model_instance_mesh_view(&instance,&owner,1,(uint16_t)n,&view)==AYATSURI_MODEL_OK);
   assert(ksn_mesh_append(&snapshot,view.patch,view.depth,(uint16_t)n));
  }
- /* Snapshot must not retain the source actor, arena or cold bytes. */
+ /* Exercise the public evaluation -> Hone submission independently of that
+  * legacy copy. Both snapshots must survive the producer and cold bytes. */
+ hone_frame frame={0};hone_entry entry;hone_aynm_mesh source={0};uint8_t owned[65536];
+ hone_frame_options options={HONE_OPAQUE_RGB565,240,135,0,sizeof frame+sizeof entry,1,64800};
+ ayatsuri_model_input input={.clip_id=AYATSURI_NO_CLIP,.outputs=AYATSURI_OUTPUT_DRAWABLES};
+ ayatsuri_model_evaluation evaluation;
+ assert(ayatsuri_model_evaluate_input(&instance,&owner,1,&input,&evaluation)==AYATSURI_MODEL_OK);
+ assert(hone_frame_begin(&frame,&options,&entry,1)==HONE_OK);
+ assert(hone_frame_submit_aynm_mesh(&frame,&evaluation,camera,light,NULL,&source,owned,1,8000000)==HONE_LIMIT_EXCEEDED);
+ assert(!source.held && !frame.count);
+ assert(hone_frame_submit_aynm_mesh(&frame,&evaluation,camera,light,NULL,&source,owned,sizeof owned,8000000)==HONE_OK);
+ assert(hone_frame_commit(&frame)==HONE_OK);
  assert(ayatsuri_model_instance_dispose(&instance,&owner,1)==AYATSURI_MODEL_OK);free(arena);free(bytes);
  uint16_t one[240*135]={0},eight[240*135]={0};float scratch[240*8];
  assert(ksn_mesh_render(&snapshot,one,0,135,scratch,1));assert(ksn_mesh_render(&snapshot,eight,0,135,scratch,8));assert(!memcmp(one,eight,sizeof one));
+ memset(eight,0xa5,sizeof eight);
+ hone_target target={eight,240,135,480,sizeof eight,HONE_RGB565_NATIVE};
+ assert(hone_snapshot_render(&frame,(hone_rect){0,0,240,135},&target,NULL)==HONE_OK);
+ assert(!memcmp(one,eight,sizeof one));
+ uint16_t crop[3][12];hone_target sub={&crop[0][0],10,3,sizeof crop[0],sizeof crop,HONE_RGB565_NATIVE};
+ memset(crop,0xa5,sizeof crop);
+ assert(hone_snapshot_render(&frame,(hone_rect){116,66,10,3},&sub,NULL)==HONE_OK);
+ for(unsigned y=0;y<3;++y){assert(!memcmp(crop[y],one+240*(66+y)+116,20));assert(crop[y][10]==0xa5a5);}
+ assert(hone_snapshot_dispose(&frame)==HONE_OK && !source.held);
  f=fopen(argv[2],"wb");assert(f);for(unsigned i=0;i<240*135;i++){assert(fputc(one[i]&255,f)!=EOF);assert(fputc(one[i]>>8,f)!=EOF);}assert(!fclose(f));
  printf("SOURCE_NATIVE_RENDER_PASS arena=%zu records=%u row1_row8=equal\n",size,snapshot.packets.packets);
  return 0;

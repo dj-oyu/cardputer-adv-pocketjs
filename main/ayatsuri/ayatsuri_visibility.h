@@ -17,6 +17,12 @@ typedef enum ayatsuri_visibility_status {
     AYATSURI_VISIBILITY_OVERLAP
 } ayatsuri_visibility_status;
 
+typedef enum ayatsuri_visibility_faces {
+    AYATSURI_VISIBILITY_POSITIVE = 1,
+    AYATSURI_VISIBILITY_NEGATIVE = 2,
+    AYATSURI_VISIBILITY_BOTH = 3
+} ayatsuri_visibility_faces;
+
 /* Caller-owned, naturally aligned arrays, borrowed only during this call.
  * vertices: 1..32; triangles: 1..64; capacity counts uint16_t elements and
  * must cover 3*triangles. Every declared output byte must be disjoint from
@@ -36,6 +42,12 @@ ayatsuri_visibility_status ayatsuri_visibility_select(
     const float *xy,const float *depth,size_t vertices,
     const uint16_t *indices,size_t triangles,ayatsuri_visibility_order order,
     uint16_t *out,size_t capacity,uint32_t counts[3]);
+/* Use the requested projected winding. Counts are selected, culled, and
+ * degenerate. Source indices and the stable ordering are preserved. */
+ayatsuri_visibility_status ayatsuri_visibility_select_faces(
+    const float *xy,const float *depth,size_t vertices,
+    const uint16_t *indices,size_t triangles,ayatsuri_visibility_order order,
+    ayatsuri_visibility_faces faces,uint16_t *out,size_t capacity,uint32_t counts[3]);
 #ifdef __cplusplus
 }
 #endif

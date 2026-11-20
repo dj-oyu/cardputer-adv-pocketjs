@@ -21,7 +21,12 @@ def main(extra_flags=(), cache_name="mesh-shiki-contract"):
   if not obj.exists():run(['cc',*flags,*includes,'-w','-c',QJS/(name+'.c'),'-o',obj])
  rom=out/'rom.c';rom.write_text('#include "ksn_shiki.h"\nconst ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *n){*n=0;return 0;}\n')
  shared=[ROOT/'main/ui/kasane'/f for f in ['ksn_shiki_frame.c','ksn_core.c','ksn_render.c','ksn_blend_pie.c','ksn_shiki.c','ksn_mesh_depth.c']]+[ROOT/'main/ayatsuri'/f for f in ['ayatsuri_model.c','ayatsuri_visibility.c','compact_opaque.c']]+[ROOT/'main/pocket'/f for f in ['pocket_shiki_frame.c','pocket_shape.c','pocket_shiki_api.c','shiki_heap.c']]+[ROOT/'tools/kasane_contract/proc_native_weak.c',rom]
- core=out/'core';run(['cc',*flags,*includes,'-Wall','-Wextra','-Werror',ROOT/'main/ayatsuri/ayatsuri_model.c',ROOT/'main/ayatsuri/ayatsuri_visibility.c',ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/ui/kasane/ksn_shiki_frame.c',ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'tools/ayatsuri/model/test_sidedness.c','-lm','-o',core]);run([core])
+ core_sources=[ROOT/'main/ayatsuri'/f for f in ['ayatsuri_model.c','ayatsuri_visibility.c','compact_opaque.c']]+[ROOT/'main/ui/kasane'/f for f in ['ksn_shiki_frame.c','ksn_mesh_depth.c']]
+ mesh_fixtures=ROOT/'.cache/ayatsuri-native'
+ for test,args in [('test_sidedness',[]),('test_model_mesh',[mesh_fixtures/'mesh.aynm',mesh_fixtures/'framework-shapes.aynm'])]:
+  binary=out/test
+  run(['cc',*flags,*includes,'-Wall','-Wextra','-Werror',*core_sources,ROOT/'tools/ayatsuri/model'/(test+'.c'),'-lm','-o',binary])
+  run([binary,*args])
  # Pinned public a426 codec: compare old bytes and old-reader rejection.
  old=ROOT/'tools/kasane_contract/fixtures/compact_opaque_a426f7a.c'
  data=old.read_bytes();assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()=='e1c37f77f1dffa3ecdea094897b53169def4a840'

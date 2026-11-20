@@ -2,6 +2,9 @@
 #include "utf8.h"
 #include <stdio.h>
 #include <string.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
 
 // ------------------------------------------------------------------ the table
 //
@@ -47,7 +50,9 @@ static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 // gets the session pocket.pet at all (app_session.c installs it only then).
 static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", "pet.companion", NULL};
 static const char *const CAPS_WORK[]   = {"workspace", NULL};
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
 static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", "pet.companion", NULL};
+#endif
 static const char *const CAPS_NET[]    = {"net.wifi", "net.http", NULL};
 static const char *const CAPS_OVERLAY[]= {"ui.overlay", "display.kasane", "time", NULL};
 static const char *const CAPS_PLAY[]    = {"ui.overlay", "display.kasane",
@@ -77,9 +82,15 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KV, .optional=CAPS_PET_OPT, .works=APP_WORKS_NONE},
 
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    {.id="local.companion", .title="PET COMPANION", .entry="native:ayatsuri",
+     .runtime=APP_RUNTIME_NATIVE,
+     .required=CAPS_NONE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+#else
     {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/companion.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_2,
      .required=CAPS_KV, .optional=CAPS_COMP, .works=APP_WORKS_NONE},
+#endif
 
     // A test app (apps/stress/README.md): it draws and churns its own heap,
     // and reads assets: through pocket.fs, which every session has. Its own

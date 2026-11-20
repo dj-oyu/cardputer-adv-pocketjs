@@ -1,0 +1,2 @@
+# Synthetic CPU-only diagnostic; no model asset or LCD/DMA calls.
+CONFIG_AYATSURI_STREAM_DEVICE_PROBE=y

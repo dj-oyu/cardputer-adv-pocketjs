@@ -14,6 +14,9 @@ project(cardputer_pocketjs)
 # -552 B and -144 B of .bss.
 idf_component_get_property(_lwip_lib lwip COMPONENT_LIB)
 target_compile_definitions(${_lwip_lib} PRIVATE DNS_TABLE_SIZE=2 ARP_TABLE_SIZE=4)
+if(CONFIG_AYATSURI_P384_G_TABLE)
+    include("${CMAKE_SOURCE_DIR}/tools/ayatsuri/p384_table.cmake")
+endif()
 # Profile-guided QuickJS (docs/vm/qjs-pgo.md), off by default.
 include("${CMAKE_SOURCE_DIR}/tools/pgo/qjs_pgo.cmake")
 if(CONFIG_POCKET_VM_QJS_PGO)

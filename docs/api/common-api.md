@@ -1,6 +1,6 @@
 # Pocket共通JS API仕様
 
-`globalThis.pocket` の公開契約。型表記は説明用TypeScriptで、デバイスのアプリは素のJavaScriptとする。`main/pocket/` がこの文書の実装で、土台（capability登録・エラー・非同期契約）は `pocket_api.c`、各面はその他の `pocket_*.c` にある。節番号はコード・アプリ・tools から `docs/api/common-api.md section N` の形で約58箇所参照されているため、**この文書の節番号は動かさない**。
+`globalThis.pocket` の公開契約。型表記は説明用TypeScriptで、デバイスのアプリは素のJavaScriptとする。`main/pocket/` にJS APIの実装があり、土台（capability登録・エラー・非同期契約）は `pocket_api.c`、各面はその他の `pocket_*.c` にある。19節はHoneとAyatsuriの言語非依存の設計案。節番号はコード・アプリ・tools から `docs/api/common-api.md section N` の形で約58箇所参照されているため、**この文書の節番号は動かさない**。
 
 ## 実装状況（節ごと）
 
@@ -30,8 +30,9 @@
 | 12 | ble.central／ble.peripheral | **未実装（意図的）**。名前空間はあるが全メソッドがUNSUPPORTEDを返す | `pocket_ble.c`（76行、capabilityは登録しない設計） |
 | 13 | bridge（PC link、USB transport） | 実装済み | `pocket_bridge.c`、`tools/pocket_bridge.py` |
 | 14 | 資源上限 | 一部は`limits`として実測値を公開、残りは初期案のまま | 各面の`limits` |
+| 19 | Hone／Ayatsuri フレームワーク | 統合後のAPI設計とC実装の対応範囲 | `main/ayatsuri/ayatsuri_model.h`、`main/hone/hone_frame.h` |
 
-BLE（12節）だけが「未実装」で、`pocket_ble.c` は意図的に全メソッドをUNSUPPORTEDにして名前空間だけ生かしている。それ以外はfeature-testを通れば実際に動く。「必須」はこのAPI版を提供するときの契約。`limits` に出す値のうち「初期上限案」と書いたものは実測前の見積りで、コードが強制している値だけを`limits`が返すという規則（CLAUDE.md）は変わらない。Wi-Fi/BLEを含む全機能の同時搭載・同時利用を約束しない。
+現行JS APIのBLE（12節）は名前空間を提供し、`pocket_ble.c` の全メソッドがUNSUPPORTEDを返す。現行JS APIの利用可否はfeature-testで確認できる。「必須」はこのAPI版を提供するときの契約。`limits` に出す値のうち「初期上限案」と書いたものは実測前の見積りで、コードが強制している値だけを`limits`が返すという規則（CLAUDE.md）は変わらない。Wi-Fi/BLEを含む全機能の同時搭載・同時利用を約束しない。
 
 未実装・未決の残件は[docs/api/backlog.md](backlog.md)にまとめた。ハードウェア前提は[ハードウェア制約](../platform/hardware-constraints.md)、プラットフォーム全体の構成は[プラットフォーム設計](../platform/architecture.md)を参照する。
 
@@ -1138,3 +1139,114 @@ p.app.start({
 BLEスタック候補と共存の制約はIDF v6.0.1を基準に確認した。NimBLEはBLE向けの軽量スタックとして記載されているが、本ファームウェアでの実測採用は未実施。[IDF Bluetooth API](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-reference/bluetooth/index.html)
 
 残件（BLE以外）は[docs/api/backlog.md](backlog.md)にまとめた。後段機能はこの仕様の保証を緩めず、版とcapabilityを増やして追加する。
+
+## 19. HoneとAyatsuriのフレームワークAPI
+
+この節では、統合後のAPIを呼び出し言語に依存しない形で定義する。C実装の対応範囲は19.5節に示す。
+既存のJS実装は `pocket.ayatsuri` とShikiにある。[既存の実装契約](../ayatsuri/character-lifecycle.md) · [Shiki API](../kasane/shiki-spec.md#9-js-api)
+
+Ayatsuriは、モデルと明示的な入力から姿勢や描画対象を求める。Honeは描画対象からフレームを作る。
+評価結果には、形状・座標系・材質の意味、参照範囲、有効期間を持たせる。利用者は評価結果だけを使える。
+Honeは同じ契約を満たす別の生成元からも入力を受け付ける。時刻の進め方、入力の解釈、複数の結果の組合せ、
+提示周期は呼び出し側が決める。
+
+### 19.1 AyatsuriのAPI
+
+| API | 入出力と契約 |
+| --- | --- |
+| `Ayatsuri.capabilities() → Capabilities` | 評価器が扱う資産形式の版、機能、上限を返す。 |
+| `Ayatsuri.openModel(asset) → Model` | 資産本体と付随データの整合、必要機能、参照範囲を検証し、読み取り専用のモデルを開く。実装は資産を複製するか、参照する期間だけ保持する。 |
+| `Model.describe() → ModelInfo` | ノード・制御値・クリップの名前とID、制御値の型・範囲・既定値、クリップの時間範囲を取得する。IDはそのモデルに属する。 |
+| `Model.instance() → Instance` | モデルを共有し、独立した状態と作業領域を持つインスタンスを作る。 |
+| `Instance.evaluate(input) → Evaluation` | 指定時刻の姿勢と表示状態を計算し、要求された結果を返す。姿勢だけ、描画対象だけ、または両方を選べる。 |
+| `Instance.dispose()` | インスタンスの参照を閉じ、評価結果の借用を終了する。 |
+| `Model.dispose()` | モデルの新規利用を閉じる。既存インスタンスはモデルを保持し、最後の参照が消えた時点で資産を解放する。 |
+
+`asset` は実行用パッケージの読み取り専用バイト列。`ModelInfo` はノードの親IDも返し、ルートの親IDは空とする。
+`input` は `{time, clip?, controls, outputs}`。`time` は有限の秒数、`clip` はモデル内のクリップID。
+クリップを指定したときは時間範囲内の値を渡す。省略時はクリップを重ねず、モデルの既定状態から評価する。
+`controls` はIDと値の組。モデルの既定値にクリップの値を適用し、続けて `controls` で指定した値を適用する。
+`outputs` は `pose`、`drawables`、`both` のいずれか。時計の進行、ループ、シークは時刻を渡す側が決める。
+
+`Evaluation` は指定された出力を返す。`pose` はノードIDごとの親相対変換と表示状態、`drawables` は
+形状・モデル空間への変換・材質を持つ読み取り専用の列。評価結果は借用で、次に評価処理が始まる時点か
+インスタンス解放まで有効。入口の検証で拒否された場合は最後の結果を保ち、評価に入って失敗した場合は
+そのインスタンスの結果を無効にする。他のインスタンスと確定済みフレームは独立している。
+同じモデルと入力を評価した結果は、別インスタンスの評価順や提示の有無に依存しない。
+
+### 19.2 HoneのAPI
+
+| API | 入出力と契約 |
+| --- | --- |
+| `Hone.capabilities() → Capabilities` | 描画プロファイルと、その描画器が扱う機能・上限を返す。 |
+| `Hone.beginFrame(options) → Frame` | `{profile, view, clear, budget}` を検証し、フレームの組み立てを始める。視点、描画範囲、初期色、容量と作業量の予算は呼び出し側が指定する。 |
+| `Frame.submit(drawables, options?)` | 評価結果や直接生成した描画対象を追加する。追加単位で検証と容量の確保を行う。必要に応じて対象の変換とクリップ範囲を指定できる。 |
+| `Frame.commit() → Snapshot` | フレーム全体を検証し、読み取り専用のスナップショットを確定する。成功すると組み立てを終了する。失敗した場合は `cancel()` で候補を解放できる。 |
+| `Frame.cancel()` | 組み立て中のフレームを破棄し、確保した資源を返す。 |
+| `Snapshot.render(region, target)` | ビューポート内の指定矩形を、呼び出し側の出力バッファの左上へ同期描画する。書き込みの前に形式・行間隔・容量を検証する。 |
+| `Snapshot.dispose()` | 確定フレームを解放する。描画中や提示操作が保持している間は `BUSY`。 |
+
+`view` はカメラとビューポート、`clear` は初期色。`budget` は `{maxBytes, maxDrawables, maxWork}` で、
+`maxWork` の単位と算定規則はプロファイルが定める。`submit` の `options` は `{transform?, clip?}` で、
+入力のモデル空間からフレーム空間への変換、ビューポート内のクリップ矩形を指定できる。
+`region` とクリップ矩形はそれぞれ `{x, y, width, height}` を整数ピクセルで指定する。
+`target` は `{pixels, width, height, strideBytes, format}`。
+
+`submit` は成功した時点で必要なデータを複製するか、変更されない世代を保持する。確定した
+スナップショットは、元の評価結果を再評価や解放で更新しても、その内容で描画できる。
+複数の入力は呼び出し順に追加し、合成と深度の規則はプロファイルが定める。追加が失敗した場合は、
+その呼び出しによる変更を取り消す。確定に失敗した候補は提示できず、最後に成功したフレームを保つ。
+
+### 19.3 提示アダプターの契約
+
+| API | 入出力と契約 |
+| --- | --- |
+| `Presenter.present(snapshot) → Presentation` | 確定フレームの提示を開始する。完了までスナップショットと提示に使うバッファを保持する。 |
+| `Presentation.poll() → PresentationState` | 同じ提示操作の状態を確認する。状態は `pending`、`presented`、`failed` のいずれか。`failed` は失敗理由を伴う。終端状態では提示側が保持した借用を解放済み。 |
+
+提示が `pending` の間は同じ操作を照会する。`presented` の確認で表示履歴を更新し、
+`failed` の確認後は同じスナップショットから提示を再試行できる。部分的な描画で表示内容を
+確定できなくなった場合は、表示履歴を無効にして再描画する。
+
+評価結果を1フレーム分提示する呼び出し例。`presenter` は表示先のアダプターを表す。
+
+```text
+model = Ayatsuri.openModel(asset)
+instance = model.instance()
+result = instance.evaluate({time, controls, outputs: "drawables"})
+frame = Hone.beginFrame({profile, view, clear, budget})
+frame.submit(result.drawables)
+snapshot = frame.commit()
+presentation = presenter.present(snapshot)
+state = presentation.poll()
+```
+
+### 19.4 機能選択とエラー
+
+`Capabilities` は対応機能の識別子、対応する版、実装が強制する上限を返す。動作・材質・描画方式は
+資産やプロファイルが使う機能を宣言し、必要なものだけを有効にする。制作時に確定できる計算は
+書き出し時に済ませる。資産形式、言語バインディング、描画バックエンドは、それぞれの契約を版管理する。
+
+| エラー | 意味 |
+| --- | --- |
+| `INVALID_ARGUMENT` / `CORRUPT_DATA` | 入力の型・範囲・参照が不正、または資産が破損している。 |
+| `UNSUPPORTED` | 要求された形式、機能、描画プロファイルに対応していない。 |
+| `LIMIT_EXCEEDED` / `OUT_OF_MEMORY` | 宣言済みの上限を超えた、または必要な領域を確保できない。 |
+| `BUSY` / `CLOSED` | 所有権が使用中、またはハンドルが解放済み。 |
+| `IO_ERROR` | 提示に失敗した。完了が未確定の操作は提示アダプターが保持する。 |
+
+互換性は、資産、利用側のバインディング、描画実装を独立に差し替えて確認する。同じ意味の
+入力に対する評価結果、プロファイルが定める描画結果、容量超過と提示失敗からの復旧を契約試験で
+検証する。処理時間と資源使用量は、選んだプロファイルと表示先の予算に照らして評価する。
+
+### 19.5 C実装の対応範囲
+
+| 仕様 | 対応範囲 |
+| --- | --- |
+| Ayatsuriの資産、記述、評価 | `ayatsuri_model_capabilities()`、`ayatsuri_model_open()`、`ayatsuri_model_describe*()` と `ayatsuri_model_evaluate_input()`。AYNM v1で、ノードの親子関係と制御値の既定値を読める。呼び出し側が時刻と位置・回転・スケール・可視性を渡し、姿勢とモデル空間の描画対象を必要な組合せで借用する。 |
+| Honeの構築、描画、提示 | `hone_frame_*()`、`hone_snapshot_*()`、`hone_present()` と `hone_presentation_*()`。不透明RGB565プロファイルで、クリップ付き合成、部分矩形描画、完了までの提示借用を提供する。呼び出し側がフレームと描画領域のメモリを確保する。 |
+| 評価結果の取り込み | `hone_frame_submit_aynm_mesh()` は穴のないAYNMメッシュを投影し、フレーム所有の領域へ記録する。確定したフレームは、元の資産・インスタンスの解放後も描画できる。既存のバンド描画器も、変更されない世代を供給すれば同じHone APIを利用できる。 |
+
+C版のAYNM v1はクリップを持たず、制御値を時刻に応じて作る処理は呼び出し側が持つ。C版では
+Modelと資産の寿命も呼び出し側が管理する。クリップの評価、Modelの参照管理、合成時の入力変換と
+言語バインディングは今後の実装範囲。対応する出力、形式、上限は各C APIのcapabilitiesで確認できる。

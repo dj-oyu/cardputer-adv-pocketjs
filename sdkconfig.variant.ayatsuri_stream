@@ -1,0 +1,2 @@
+# Compile-only native streaming producer; no model or display registration.
+CONFIG_AYATSURI_STREAM_CANDIDATE=y

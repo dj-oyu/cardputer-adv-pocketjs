@@ -2,6 +2,7 @@
 #include "ayatsuri/ayatsuri_shade.h"
 #include "ui/kasane/ksn_shiki_frame.h"
 #include <assert.h>
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +29,126 @@ static void rejected(const uint8_t *blob,size_t bytes){
     ayatsuri_model sentinel,out;memset(&sentinel,0xa5,sizeof sentinel);out=sentinel;
     assert(ayatsuri_model_open(blob,bytes,&out)==AYATSURI_MODEL_INVALID);assert(!memcmp(&out,&sentinel,sizeof out));
 }
+static void framework_contract(const ayatsuri_model *model,const ksn_proc_gouraud_patch *reference,
+        const float camera[9],const float light[6]){
+    ayatsuri_model_caps caps=ayatsuri_model_capabilities();
+    assert(caps.format_version==1&&caps.max_nodes>=2&&!caps.clips_supported&&caps.outputs==AYATSURI_OUTPUT_BOTH);
+    ayatsuri_model_info info;
+    assert(ayatsuri_model_describe(model,&info)==AYATSURI_MODEL_OK&&info.nodes==2&&info.controls==8&&!info.clips);
+    ayatsuri_model_node_info node;
+    assert(ayatsuri_model_describe_node(model,0,&node)==AYATSURI_MODEL_OK&&node.parent_id==-1);
+    assert(ayatsuri_model_describe_node(model,1,&node)==AYATSURI_MODEL_OK&&node.parent_id==0&&node.kind==3);
+    assert(node.name_bytes==5&&!memcmp(node.name,"patch",5));
+    uint16_t by_name;
+    assert(ayatsuri_model_find_node(model,node.name,node.name_bytes,&by_name)==AYATSURI_MODEL_OK&&by_name==node.id);
+    ayatsuri_model_control_info ci;
+    assert(ayatsuri_model_describe_control(model,6,&ci)==AYATSURI_MODEL_OK&&ci.node_id==1);
+    assert(ci.property==AYATSURI_CONTROL_SCALE&&ci.default_value.xyz[0]==1);
+    assert(ayatsuri_model_describe_control(model,7,&ci)==AYATSURI_MODEL_OK&&ci.default_value.visible==1);
+    assert(ayatsuri_model_describe_control(model,8,&ci)==AYATSURI_MODEL_INVALID);
+
+    ayatsuri_model_instance i;
+    const size_t size=ayatsuri_model_instance_bytes(model);
+    void *arena=malloc(size);
+    unsigned owner=1;
+    assert(ayatsuri_model_instance_init(model,arena,size,&owner,1,&i)==AYATSURI_MODEL_OK);
+    ayatsuri_model_control controls[]={{4,{.xyz={0,2,0}}},{0,{.xyz={7,0,0}}}};
+    ayatsuri_model_input input={.time_seconds=1,.outputs=AYATSURI_OUTPUT_BOTH,.clip_id=AYATSURI_NO_CLIP,
+        .controls=controls,.control_count=2};
+    ayatsuri_model_evaluation a,b;
+    ayatsuri_model_pose_view pose;
+    ayatsuri_model_drawable draw;
+    uint32_t cursor=0;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&a)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_pose(&a,1,&pose)==AYATSURI_MODEL_OK&&pose.local_trs[1]==2&&pose.visible);
+    assert(ayatsuri_model_evaluation_next(&a,&cursor,&draw)==AYATSURI_MODEL_OK);
+    assert(draw.to_model[3]==7&&draw.to_model[7]==2&&draw.kind==3&&draw.node_id==1);
+    assert(draw.vertices.count==4&&draw.vertices.stride==28&&draw.triangles.count==2&&draw.triangles.stride==6);
+    assert(draw.hole_points.count==3&&draw.hole_sizes[0]==3&&draw.rgb==0xe47b30&&draw.mesh_thickness==175);
+    assert(draw.albedo_rgb565[0]==0xe3c6&&draw.albedo_rgb565[1]==0xff57&&!draw.double_sided);
+    assert(ayatsuri_model_evaluation_next(&a,&cursor,&draw)==AYATSURI_MODEL_DONE);
+    controls[0].id=0;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&b)==AYATSURI_MODEL_INVALID);
+    input.control_count=0;input.clip_id=0;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&b)==AYATSURI_MODEL_UNSUPPORTED);
+    input.clip_id=AYATSURI_NO_CLIP;input.time_seconds=NAN;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&b)==AYATSURI_MODEL_INVALID);
+    assert(ayatsuri_model_evaluation_pose(&a,1,&pose)==AYATSURI_MODEL_OK&&pose.local_trs[1]==2);
+    input.time_seconds=-10;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&b)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_pose(&a,0,&pose)==AYATSURI_MODEL_STATE);
+    assert(ayatsuri_model_evaluation_pose(&b,1,&pose)==AYATSURI_MODEL_OK&&pose.local_trs[1]==0);
+    assert(ayatsuri_model_evaluation_project(&b,camera,light)==AYATSURI_MODEL_OK);
+    const ksn_proc_gouraud_patch projected=copy_patch(&i,&owner);
+    assert(!memcmp(&projected,reference,sizeof projected));
+    float invalid_view[9]={0};
+    assert(ayatsuri_model_evaluation_project(&b,invalid_view,light)==AYATSURI_MODEL_INVALID);
+    assert(ayatsuri_model_evaluation_pose(&b,1,&pose)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_project(&b,camera,light)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_instance_evaluate(&i,&owner,1,camera,light)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_pose(&b,1,&pose)==AYATSURI_MODEL_STATE);
+    controls[0]=(ayatsuri_model_control){3,{.visible=0}};
+    input.control_count=1;input.outputs=AYATSURI_OUTPUT_POSE;
+    const uint32_t updates=i.stats.geometry_updates;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&a)==AYATSURI_MODEL_OK);
+    assert(updates==i.stats.geometry_updates);
+    assert(ayatsuri_model_evaluation_pose(&a,1,&pose)==AYATSURI_MODEL_OK&&pose.local_visible&&!pose.visible);
+    assert(ayatsuri_model_evaluation_next(&a,&cursor,&draw)==AYATSURI_MODEL_STATE);
+    controls[0]=(ayatsuri_model_control){2,{.xyz={FLT_MAX,1,1}}};
+    controls[1]=(ayatsuri_model_control){6,{.xyz={2,1,1}}};
+    input.control_count=2;input.outputs=AYATSURI_OUTPUT_DRAWABLES;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&b)==AYATSURI_MODEL_RANGE);
+    assert(ayatsuri_model_evaluation_pose(&a,0,&pose)==AYATSURI_MODEL_STATE);
+    input.control_count=0;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&a)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_pose(&a,0,&pose)==AYATSURI_MODEL_STATE);
+    assert(ayatsuri_model_instance_dispose(&i,&owner,1)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_next(&a,&cursor,&draw)==AYATSURI_MODEL_STATE);
+    free(arena);
+}
+static void framework_analytic_shapes(const char *path){
+    FILE *f=fopen(path,"rb");
+    assert(f&&!fseek(f,0,SEEK_END));
+    const long bytes=ftell(f);
+    assert(bytes>0);
+    rewind(f);
+    void *blob=malloc(bytes);
+    assert(blob&&fread(blob,1,bytes,f)==(size_t)bytes&&!fclose(f));
+    ayatsuri_model m;
+    assert(ayatsuri_model_open(blob,bytes,&m)==AYATSURI_MODEL_OK);
+    const size_t size=ayatsuri_model_instance_bytes(&m);
+    void *arena=malloc(size);
+    ayatsuri_model_instance i;
+    int owner=1;
+    assert(ayatsuri_model_instance_init(&m,arena,size,&owner,1,&i)==AYATSURI_MODEL_OK);
+    ayatsuri_model_input input={.outputs=AYATSURI_OUTPUT_BOTH,.clip_id=AYATSURI_NO_CLIP};
+    ayatsuri_model_evaluation e;
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&e)==AYATSURI_MODEL_OK);
+    ayatsuri_model_drawable d;
+    uint32_t cursor=0;
+    assert(ayatsuri_model_evaluation_next(&e,&cursor,&d)==AYATSURI_MODEL_OK&&d.kind==3);
+    assert(ayatsuri_model_evaluation_next(&e,&cursor,&d)==AYATSURI_MODEL_OK&&d.kind==1);
+    assert(d.shape.stride==12&&d.shape.count==1&&d.local_plane.count==1&&d.local_plane.data[2]==4);
+    float xyz[3];memcpy(xyz,d.shape.data,sizeof xyz);
+    assert(xyz[0]==1&&xyz[1]==2&&xyz[2]==3);
+    assert(ayatsuri_model_evaluation_next(&e,&cursor,&d)==AYATSURI_MODEL_OK&&d.kind==2);
+    assert(d.shape.stride==24&&d.shape.count==2&&d.blend==2&&d.local_plane.data[2]==5&&d.opacity==.5);
+    assert(ayatsuri_model_evaluation_next(&e,&cursor,&d)==AYATSURI_MODEL_DONE);
+    const uint8_t flags[4]={0,0,0,AYATSURI_TARGET_OPACITY};
+    const float poses[36]={0};const uint32_t colors[4]={0};const double opacity[4]={0};
+    ayatsuri_model_targets targets={flags,poses,colors,opacity,4};
+    assert(ayatsuri_model_instance_targets(&i,&owner,1,&targets)==AYATSURI_MODEL_OK);
+    assert(ayatsuri_model_evaluation_next(&e,&cursor,&d)==AYATSURI_MODEL_STATE);
+    assert(ayatsuri_model_evaluate_input(&i,&owner,1,&input,&e)==AYATSURI_MODEL_OK);
+    cursor=3;
+    assert(ayatsuri_model_evaluation_next(&e,&cursor,&d)==AYATSURI_MODEL_OK&&d.opacity==.5);
+    assert(ayatsuri_model_instance_dispose(&i,&owner,1)==AYATSURI_MODEL_OK);
+    free(arena);free(blob);
+}
 int main(int argc,char **argv){
-    assert(argc==2);FILE *file=fopen(argv[1],"rb");assert(file);assert(!fseek(file,0,SEEK_END));const long size=ftell(file);assert(size>0);rewind(file);
+    assert(argc==2||argc==3);
+    if(argc==3)framework_analytic_shapes(argv[2]);
+    FILE *file=fopen(argv[1],"rb");assert(file);assert(!fseek(file,0,SEEK_END));const long size=ftell(file);assert(size>0);rewind(file);
     const size_t bytes=(size_t)size;uint8_t *allocation=malloc(bytes+1),*mut=malloc(bytes),*original=malloc(bytes);assert(allocation&&mut&&original);
     uint8_t *blob=allocation+1;assert(fread(blob,1,bytes,file)==bytes);assert(!fclose(file));memcpy(original,blob,bytes);
     ayatsuri_model model;assert(ayatsuri_model_open(blob,bytes,&model)==AYATSURI_MODEL_OK);
@@ -90,6 +209,7 @@ int main(int argc,char **argv){
     assert(ayatsuri_model_instance_mesh_view(&first,&owner,1,1,&view)==AYATSURI_MODEL_OK&&view.vertices==4&&view.node_id==1);
     assert(view.depth[0]==0&&view.patch==packet(&first,&owner).storage+84);
     const ksn_proc_gouraud_patch stable=copy_patch(&first,&owner);ksn_proc_gouraud_patch actual=copy_patch(&second,&second_owner);
+    framework_contract(&model,&stable,camera,light);
     assert(!memcmp(&stable,&actual,sizeof stable));assert(stable.header.vertices==4&&stable.header.triangles==2&&stable.header.holes==1);
     assert(stable.vertices[0].x==110&&stable.vertices[0].y==68&&stable.vertices[3].x==130&&stable.vertices[3].y==88);
     assert(stable.vertices[0].mask==-10&&stable.vertices[2].mask==10);

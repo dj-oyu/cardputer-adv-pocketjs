@@ -586,4 +586,151 @@ menu "Pocket VM (diagnostics)"
             xTaskCreatePinnedToCore() is the only call site either way -- so a
             measurement across them is not confounded by a code-path change.
 
+    config AYATSURI_STREAM_CANDIDATE
+        bool "Compile isolated AYATSURI streaming producer candidate"
+        default n
+        help
+            Compiles the explicit native provider-only streaming API and emits
+            compiler stack-usage files. Does not load a model, allocate buffers,
+            register a JS entry, publish a frame or change default rendering.
+            Caller still owns pending/ready snapshots and display completion.
+            Experimental: host validation is not DMA, target RAM or FPS proof.
+
+    config AYATSURI_STREAM_PROBE_DEPTH8
+        bool "Use eight depth rows in the synthetic streaming CPU probe"
+        default n
+        select AYATSURI_STREAM_DEVICE_PROBE
+        help
+            Diagnostic A/B only. Adds 6720 bytes of internal depth scratch and
+            uses the existing eight-row raster path, with unchanged pixel math.
+            No model, real materials or LCD/DMA measurement is added.
+
+    config AYATSURI_POSE_DMA_PROBE
+        bool "Replace Pet Companion with the baked-model LCD benchmark"
+        default n
+        help
+            Requires the authorized generated fixture at
+            main/ayatsuri/private/assets/ay_pose_dma_fixture.h.
+            Measures unlit rasterization and completed LCD DMA transfers of
+            baked poses. Live deformation and lighting are excluded.
+
+    config AYATSURI_LIVE_DMA_PROBE
+        bool "Evaluate model deformation live in the Pet Companion benchmark"
+        default n
+        select AYATSURI_POSE_DMA_PROBE
+        select AYATSURI_STREAM_CANDIDATE
+        help
+            Uses the authorized restored-model runtime fixture. Timed frames
+            evaluate controls and geometry before drawing and LCD completion.
+
+    config AYATSURI_TRACK_MODEL
+        bool "Use the exported Companion motion track"
+        depends on AYATSURI_LIVE_DMA_PROBE
+        default n
+        help
+            Use the exported geometry, motion and RGB565 material tracks from
+            Blender. The runtime interpolates the track and rasterizes it in
+            bands.
+
+    config AYATSURI_RASTER_TEST
+        bool "Display the Companion RGB565 background test chart"
+        depends on AYATSURI_LIVE_DMA_PROBE
+        default n
+        help
+            Load the generated chart from flash. T toggles the moving stripe.
+
+    config AYATSURI_COMPANION_NET_PROBE
+        bool "Measure Wi-Fi and HTTPS during the native Companion demo"
+        depends on AYATSURI_LIVE_DMA_PROBE
+        default n
+        help
+            Enter starts the normal draw benchmark, followed by HTTPS and a
+            controlled Wi-Fi reconnect on the saved network profile.
+            Records LCD completion intervals and internal heap during each phase.
+
+    config AYATSURI_CERT_HEAP_TRACE
+        bool "Trace allocations that lower the heap during certificate verification"
+        depends on AYATSURI_COMPANION_NET_PROBE && IDF_TARGET_ESP32S3 && HEAP_POISONING_DISABLED && !HEAP_TLSF_USE_ROM_IMPL
+        default n
+        help
+            Diagnostic trace for the ESP32-S3 Companion build. Records
+            allocation sizes and call sites while verifying a certificate chain.
+
+    config AYATSURI_CERT_INV_SCRATCH
+        bool "Compare stack scratch for ECDSA certificate inverse"
+        depends on AYATSURI_COMPANION_NET_PROBE && IDF_TARGET_ESP32S3
+        default n
+        help
+            Compare the stock allocator against bounded stack scratch for
+            the measured P-384 modular inverse inside certificate validation.
+
+    config AYATSURI_P384_PROFILE
+        bool "Attribute P-384 signature verification on the Companion"
+        depends on AYATSURI_COMPANION_NET_PROBE && IDF_TARGET_ESP32S3
+        default n
+        help
+            Measures individual P-384 signatures and the point and field
+            operations inside them, and checks a public verification vector.
+
+    config AYATSURI_P384_G_TABLE
+        bool "Compare use of the upstream P-384 generator table"
+        depends on AYATSURI_P384_PROFILE
+        default n
+        help
+            Enables the P-384-only comparison in the Companion diagnostic.
+            Both modes carry the same read-only table in flash.
+
+    config AYATSURI_P384_MODEXP
+        bool "Compare hardware inversion during P-384 verification"
+        depends on AYATSURI_P384_G_TABLE && MBEDTLS_HARDWARE_MPI && MBEDTLS_MPI_USE_INTERRUPT
+        default n
+        help
+            With the P-384 generator table enabled in both modes, compare
+            CPU and RSA-peripheral field inverses during public verification.
+
+    config AYATSURI_LCD_GDMA_PRIORITY
+        bool "Compare LCD transmit DMA priority during crypto transfers"
+        depends on AYATSURI_P384_MODEXP && MBEDTLS_HARDWARE_AES && MBEDTLS_HARDWARE_SHA
+        default n
+        help
+            Compare the existing SPI2 transmit GDMA priority with priority 5.
+            Both modes retain the P-384 offload and Wi-Fi init reservation.
+
+    config AYATSURI_RENDER_TAIL_AB
+        bool "Compare Companion render preparation during Wi-Fi and HTTPS"
+        depends on AYATSURI_P384_MODEXP && !AYATSURI_LCD_GDMA_PRIORITY && !AYATSURI_TRACK_MODEL
+        default n
+        help
+            Compare render preparation with the same model and draw timings.
+            Both modes retain P-384 offload and Wi-Fi init reservation.
+
+    config AYATSURI_CHAT_STREAM_PROBE
+        bool "Measure Companion drawing during a simulated chat stream"
+        depends on AYATSURI_P384_MODEXP && !AYATSURI_LCD_GDMA_PRIORITY && !AYATSURI_RENDER_TAIL_AB
+        default n
+        help
+            Use a pinned, locally provisioned HTTPS test server. Receive
+            streamed replies across reused TLS connections and recover from
+            a deliberately truncated response and a Wi-Fi reconnect.
+
+    config AYATSURI_SHA_DMA_PROBE
+        bool "Compare polling and IRQ waits for SHA DMA while drawing"
+        depends on AYATSURI_COMPANION_NET_PROBE && IDF_TARGET_ESP32S3 && MBEDTLS_HARDWARE_SHA
+        select FREERTOS_GENERATE_RUN_TIME_STATS
+        default n
+        help
+            Down first runs four isolated SHA-256 windows on the network worker,
+            then runs the usual Wi-Fi and HTTPS measurements.
+
+    config AYATSURI_STREAM_DEVICE_PROBE
+        bool "Run synthetic streaming CPU diagnostic once at UI boot"
+        default n
+        select AYATSURI_STREAM_CANDIDATE
+        help
+            Runs 32 public synthetic frames through the real streaming API on
+            the UI owner. Logs ELF identity, time, internal heap largest block,
+            and task stack high-water mark. No LCD/DMA submission, guest/model
+            registration, persistent data write, or real-model FPS claim.
+            Diagnostic firmware only; restore the normal variant with broker.
+
 endmenu

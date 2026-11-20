@@ -79,7 +79,7 @@ esp_err_t app_resume(void);
 const char *app_dormant_id(void);
 // S5: app_stop() for an overlay giving the display away; its playing music
 // becomes the host's background music instead of stopping.
-void app_stop_keep_music(void);
+bool app_stop_keep_music(void);
 // One turn of an overlay session. Guest JavaScript is advanced and its Kasane
 // transaction is closed here. Presentation remains shell-owned so it can load
 // the native scene into each strip before composing the APP layer.
@@ -113,10 +113,11 @@ bool app_turn_continued(void);
 // main.c ends it after the turn.
 bool app_frameless(void);
 bool app_frameless_done(void);
-void app_stop(void);
-// Owner task teardown proof; does not infer completion from console output.
-bool app_guest_present(void);
-uint32_t app_guest_generation(void);
+/* False retains run ownership; retry before any screen/guest reuse. */
+bool app_stop(void);
+bool app_stop_pending(void);
+// Nonzero while a foreground or dormant run owns an instance.
+uint32_t app_run_generation(void);
 void app_request_stop(void);
 // Swap the predicate QuickJS's single interrupt slot answers with
 // (docs/vm/vm-L1-design.md sec.5.3). The registration itself lives in the guest;

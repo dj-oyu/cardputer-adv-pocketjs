@@ -1,5 +1,8 @@
 # キャラクター評価とShiki frameの責務
 
+この文書はShikiの現行実装を扱う。統合後のフレームワークの公開契約は
+[共通API仕様 §19](../api/common-api.md#19-honeとayatsuriのフレームワークapi) にある。
+
 現在の公開mesh経路は `pocket.ayatsuri.modelOpen(buffer)`、共有Modelからの
 独立instance、`pocket.kasane.shiki` のframe APIを使う。
 PR #110のnative sceneと軽量motionは[optional JS層](scene-motion.md)として抽出した。
@@ -44,3 +47,5 @@ retry/ACK、depth-only damageとresetを実C/QuickJS、ASan/UBSanで検査する
 `run_meshbench_app.py` と `run_mesh_memory.py` は公開合成入力の描画・要求メモリを測る。
 これらはPR #110 JS utilityとの全評価意味論の同一性、私的foxの品質、実機速度や
 総RAM fit、HOME background adapter実装の証明ではない。
+
+関連資料は [Shiki の既存描画経路](pr117-native-mesh.md) と [提示完了を確認できないときの所有権](../hone/DRAIN_LIFETIME.md) にある。

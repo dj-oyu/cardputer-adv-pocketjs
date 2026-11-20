@@ -1,0 +1,132 @@
+"""Compile source corner geometry to immutable C data; not runtime admission.
+
+No material, rig, transform, modifier or animation semantics are inferred.
+The original source package remains authoritative and is required alongside it.
+"""
+import hashlib
+import json
+import math
+import pathlib
+import struct
+from consumer_plan import prepare
+
+HEADER = '''/* Generated private geometry candidate. Do not publish asset payloads.
+ * Not runtime-ready: source package and semantic adapters remain required. */
+#ifndef HONE_PRIVATE_GEOMETRY_CANDIDATE_H
+#define HONE_PRIVATE_GEOMETRY_CANDIDATE_H
+#include <stdint.h>
+typedef struct { uint32_t group; float weight; } hone_input_weight;
+typedef struct { uint32_t first, count; } hone_input_range;
+typedef struct {
+ uint32_t vertices, triangles, morphs, groups, relative_morph;
+ const float *position, *normal;
+ const uint32_t *index, *source_vertex, *source_corner, *source_polygon, *corner_polygon;
+ const uint8_t *smooth;
+ const hone_input_range *weight_ranges;
+ const hone_input_weight *weights;
+ const float *morph_positions;
+ const uint32_t *morph_relative;
+ uint32_t source_vertex_count, polygon_count, polygon_corner_count, source_corner_count;
+ const float *source_position;
+ const uint32_t *source_representative, *polygon_offsets, *polygon_vertices, *polygon_corners;
+ const uint8_t *polygon_smooth;
+} hone_input_mesh;
+'''
+
+def f32(x):
+    try:
+        value = struct.unpack('<f', struct.pack('<f', x))[0]
+    except (OverflowError, struct.error) as error:
+        raise ValueError('float32 overflow') from error
+    if not math.isfinite(value):
+        raise ValueError('nonfinite float32')
+    return value.hex() + 'f'
+
+def emit(package):
+    plan = prepare(package)
+    if len(plan['meshes']) > 1024:
+        raise ValueError('mesh bound')
+    out = [HEADER]
+    records = []
+    def array(kind, name, values):
+        # A standard C nonzero sentinel for empty arrays, never included in count.
+        out.append(f'static const {kind} {name}[] = {{' + ','.join(values or ['0']) + '};\n')
+    for n, (mesh, original) in enumerate(zip(plan['meshes'], package['meshes'])):
+        prefix = f'hone_input_{n}'
+        count = len(mesh['positions'])
+        if not count or count > 1000000 or len(mesh['triangles']) > 1000000:
+            raise ValueError('geometry bound')
+        def floats(key, data):
+            array('float', prefix+'_'+key, [f32(x) for row in data for x in row])
+        def ints(key, data, kind='uint32_t'):
+            array(kind, prefix+'_'+key, [str(int(x)) for x in data])
+        floats('position', mesh['positions']); floats('normal', mesh['rest_corner_normals'])
+        ints('index', [x for t in mesh['triangles'] for x in t])
+        for dest, src in [('source_vertex','source_vertices'),('source_corner','source_corners'),('source_polygon','source_polygons'),('smooth','polygon_smooth')]:
+            ints(dest, mesh[src], 'uint8_t' if dest == 'smooth' else 'uint32_t')
+        corner_polygon=[None]*count
+        for triangle, face in zip(mesh['triangles'],mesh['source_polygons']):
+            for corner in triangle:
+                if corner_polygon[corner] is not None and corner_polygon[corner]!=face:
+                    raise ValueError('prepared corner has multiple polygon owners')
+                corner_polygon[corner]=face
+        if any(face is None for face in corner_polygon):
+            raise ValueError('prepared corner without polygon owner')
+        ints('corner_polygon',corner_polygon)
+        ranges=[]; weights=[]
+        for row in mesh['weights']:
+            ranges.append('{'+str(len(weights))+','+str(len(row))+'}')
+            weights.extend('{'+str(g)+','+f32(w)+'}' for g,w in row)
+        array('hone_input_range',prefix+'_weight_ranges',ranges)
+        array('hone_input_weight',prefix+'_weights',weights or ['{0,0}'])
+        keys=mesh['shape_keys']['blocks'] if mesh['shape_keys'] else []
+        if len(keys)>4096:
+            raise ValueError('morph bound')
+        names=[k['name'] for k in keys]
+        floats('morph_positions',[p for k in keys for p in k['positions']])
+        ints('morph_relative',[names.index(k['relative_key']) for k in keys])
+        # Preserve original polygon topology before corner splitting/partitioning.
+        # UINT32_MAX identifies an unused source vertex, never a valid representative.
+        reps=[4294967295]*len(original['vertices'])
+        for prepared_index,source_index in enumerate(mesh['source_vertices']):
+            if reps[source_index]==4294967295: reps[source_index]=prepared_index
+        offsets=[0]; polygon_vertices=[]; polygon_corners=[]; polygon_smooth=[]
+        for polygon in original['polygons']:
+            if len(polygon['vertices'])<3:
+                raise ValueError('source polygon requires at least three vertices')
+            if type(polygon['smooth']) is not bool:
+                raise ValueError('source polygon smooth mode')
+            if any(reps[v]==4294967295 for v in polygon['vertices']):
+                raise ValueError('polygon vertex has no deformation representative')
+            polygon_vertices.extend(polygon['vertices'])
+            polygon_corners.extend(polygon['loops'])
+            polygon_smooth.append(int(bool(polygon['smooth'])))
+            offsets.append(len(polygon_vertices))
+        if len(original['vertices'])>1000000 or len(polygon_vertices)>3000000 or len(original['corner_normals'])>3000000:
+            raise ValueError('source topology bound')
+        floats('source_position',original['vertices'])
+        ints('source_representative',reps);ints('polygon_offsets',offsets)
+        ints('polygon_vertices',polygon_vertices);ints('polygon_corners',polygon_corners)
+        ints('polygon_smooth',polygon_smooth,'uint8_t')
+        fields=['position','normal','index','source_vertex','source_corner','source_polygon','corner_polygon','smooth','weight_ranges','weights','morph_positions','morph_relative']
+        records.append('{'+','.join([str(count),str(len(mesh['triangles'])),str(len(keys)),str(len(original['vertex_groups'])),str(int(bool(mesh['shape_keys'] and mesh['shape_keys'].get('use_relative') is True)))]+[prefix+'_'+x for x in fields]+[str(len(original['vertices'])),str(len(original['polygons'])),str(len(polygon_vertices)),str(len(original['corner_normals']))]+[prefix+'_'+x for x in ['source_position','source_representative','polygon_offsets','polygon_vertices','polygon_corners','polygon_smooth']])+'}')
+    array('hone_input_mesh','hone_input_meshes',records or ['{0}'])
+    out.append(f'static const uint32_t hone_input_mesh_count = {len(records)};\n')
+    out.append('#endif\n')
+    return ''.join(out)
+
+def build(source, target):
+    raw=pathlib.Path(source).read_bytes()
+    content=emit(json.loads(raw)).encode()
+    # No overwrite: a new candidate cannot silently replace a published input.
+    with pathlib.Path(target).open('xb') as stream:
+        stream.write(content)
+    return {'runtime_ready':False,'source_package_sha256':hashlib.sha256(raw).hexdigest(),
+            'candidate_sha256':hashlib.sha256(content).hexdigest(),'bytes':len(content),
+            'numeric_format':'IEEE754 float32, explicit rounding',
+            'remaining':['material/opacity','transform and skin evaluation','morph controls','normal recomputation','runtime registration and lifetime','same-head build and hardware']}
+
+if __name__ == '__main__':
+    import argparse
+    p=argparse.ArgumentParser();p.add_argument('source');p.add_argument('output');a=p.parse_args()
+    print(json.dumps(build(a.source,a.output),indent=2))

@@ -1,0 +1,22 @@
+# Called after project(), when IDF's upstream TF-PSA targets are available.
+if(CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM OR NOT CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED)
+    message(FATAL_ERROR "P-384 table A/B requires secp384r1 and global fixed-point optimization off")
+endif()
+get_target_property(_p384_builtin builtin SOURCE_DIR)
+set(_p384_src "${_p384_builtin}/src")
+set(_p384_gen "${CMAKE_BINARY_DIR}/generated/p384-table")
+set(_p384_script "${CMAKE_CURRENT_LIST_DIR}/p384_table.py")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${_p384_script}" "${_p384_src}/ecp.c" "${_p384_src}/ecp_curves.c")
+execute_process(COMMAND "${PYTHON}" "${_p384_script}" "${_p384_src}" "${_p384_gen}"
+    COMMAND_ERROR_IS_FATAL ANY)
+get_target_property(_p384_sources builtin SOURCES)
+foreach(_name ecp.c ecp_curves.c)
+    list(FIND _p384_sources "src/${_name}" _pos)
+    if(_pos EQUAL -1)
+        message(FATAL_ERROR "Cannot replace TF-PSA builtin source src/${_name}")
+    endif()
+    list(REMOVE_AT _p384_sources ${_pos})
+    list(INSERT _p384_sources ${_pos} "${_p384_gen}/${_name}")
+endforeach()
+set_property(TARGET builtin PROPERTY SOURCES ${_p384_sources})

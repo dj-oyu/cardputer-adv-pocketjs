@@ -33,14 +33,16 @@ def main():
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
     sources = [ASSET / 'render_source_probe.c'] + [ROOT / 'main' / x for x in (
-        'ayatsuri/ayatsuri_model.c', 'ayatsuri/ayatsuri_visibility.c',
+        'ayatsuri/ayatsuri_model.c', 'ayatsuri/ayatsuri_visibility.c', 'hone/hone_frame.c', 'hone/aynm_mesh.c',
         'ayatsuri/compact_opaque.c', 'ui/kasane/ksn_shiki_frame.c',
         'ui/kasane/ksn_mesh_depth.c')]
     dependencies = sorted(set(sources + list((ROOT / 'main/ayatsuri').glob('*.h')) +
+                              list((ROOT / 'main/hone').glob('*.h')) +
                               list((ROOT / 'main/ui/kasane').glob('*.h')) +
                               list(ASSET.glob('*.cjs')) +
                               list((ASSET / 'compact_opaque').glob('*.cjs')) +
-                              [ASSET.parent / 'model/pack_model.cjs', Path(__file__)]))
+                              [ASSET.parent / 'model/pack_model.cjs', ROOT / 'tools/hone/test_frame.c',
+                               Path(__file__)]))
     before = {str(f.relative_to(ROOT)): digest(f) for f in dependencies}
     report = {'scope': 'SYNTHETIC PLANAR HOST REGRESSION, NOT FOX/BLENDER/DEVICE',
               'passed': False, 'cases': [], 'sourceSha256': before,
@@ -59,6 +61,9 @@ def main():
         flags = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-ffp-contract=off']
         if args.asan:
             flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+        run(['cc', *flags, '-I', ROOT / 'main', ROOT / 'tools/hone/test_frame.c',
+             ROOT / 'main/hone/hone_frame.c', '-o', out / 'hone-frame'], 'compile-hone-frame')
+        run([out / 'hone-frame'], 'hone-frame')
         run(['cc', *flags, '-I', ROOT / 'main', *sources, '-lm', '-o', out / 'render'], 'compile')
         report['lineageSha256'] = digest(out / 'lineage.json')
         report['sourceIRSha256'] = digest(out / 'source.ir.json')
