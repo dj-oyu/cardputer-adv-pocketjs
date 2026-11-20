@@ -48,4 +48,4 @@ retry/ACK、depth-only damageとresetを実C/QuickJS、ASan/UBSanで検査する
 これらはPR #110 JS utilityとの全評価意味論の同一性、私的foxの品質、実機速度や
 総RAM fit、HOME background adapter実装の証明ではない。
 
-関連資料は [Shiki の既存描画経路](pr117-native-mesh.md) と [提示完了を確認できないときの所有権](../hone/DRAIN_LIFETIME.md) にある。
+関連資料は [Shiki の既存描画経路](pr117-native-mesh.md) と [Honeのフレーム提示と所有権](../api/common-api.md#19-honeとayatsuriのフレームワークapi) にある。
