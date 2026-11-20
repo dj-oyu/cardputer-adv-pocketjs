@@ -9,7 +9,7 @@ revision authority; no independent dependency lock or branch tracking is added.
 | third_party/bmi270 | https://github.com/boschsensortec/BMI270_SensorAPI.git | 41129fcfe39c583ee5462d79195741945d51c1fe, unchanged from prepare_dependencies.py |
 | third_party/minimp3 | https://github.com/lieff/minimp3.git | ea99364f61c14656440e8d77e9c233ccf3124633, unchanged from prepare_minimp3.py |
 | third_party/opus | https://github.com/xiph/opus.git | 22244de5a79bd1d6d623c32e72bf1954b56235be, existing v1.6.1 annotated tag a5d6c1b6f4e582df97390f9ac5c6e7c51cbffffe |
-| components/quickjs-ng/quickjs-ng | https://github.com/dj-oyu/quickjs.git | Fork of quickjs-ng. The first pin (53c61211b0ec9bd20848993c7d8712375a997c06) is byte-identical to the tree that was vendored here; see docs/vm/vm-branching.md. Its own `test262` submodule is `update = none` and is not fetched by a recursive checkout. |
+| components/quickjs-ng/quickjs-ng | https://github.com/dj-oyu/quickjs.git | Fork of quickjs-ng. The first pin (53c61211b0ec9bd20848993c7d8712375a997c06) is byte-identical to the tree that was vendored here; see docs/vm/vm-branching.md. The fork has no submodules of its own (test262 is fetched by its `fetch-test262.sh`), because the broker materializes nested submodules from the same allowlist. |
 
 ```sh
 git submodule update --init --recursive --checkout
