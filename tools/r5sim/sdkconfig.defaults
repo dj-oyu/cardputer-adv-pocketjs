@@ -14,3 +14,6 @@ CONFIG_ESP_INT_WDT=n
 CONFIG_FREERTOS_HZ=1000
 # QEMU models the S3; a fresh -B/-DSDKCONFIG would otherwise default to esp32.
 CONFIG_IDF_TARGET="esp32s3"
+# As the firmware (sdkconfig.defaults): a non-debug build, so the object code
+# the hot/cold profile is trained on matches.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y

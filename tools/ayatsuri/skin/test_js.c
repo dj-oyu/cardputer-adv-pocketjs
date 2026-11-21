@@ -11,10 +11,10 @@ static JSValue detach_buffer(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 static JSValue freeze_buffer(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)ctx;(void)self;CHECK(argc==1&&JS_SetImmutableArrayBuffer(argv[0],true)==0);return JS_UNDEFINED;
 }
-static void foreign_free(JSRuntime *rt,void *opaque,void *data){(void)rt;(void)data;free(opaque);}
+static void *foreign_free(JSRuntime *rt,void *opaque,void *data,size_t size){(void)rt;(void)data;if(!size)free(opaque);return NULL;}
 static void install_foreign(JSContext *ctx,const char *name,size_t n){
     uint8_t *p=malloc(n+1);CHECK(p);memset(p,0,n+1);
-    JSValue b=JS_NewArrayBuffer(ctx,p+1,n,foreign_free,p,false);CHECK(!JS_IsException(b));
+    JSValue b=JS_NewArrayBuffer(ctx,p+1,n,0,foreign_free,p,false);CHECK(!JS_IsException(b));
     JSValue g=JS_GetGlobalObject(ctx);CHECK(JS_SetPropertyStr(ctx,g,name,b)>=0);JS_FreeValue(ctx,g);
 }
 static uint8_t *load_fixture(const char *dir,const char *name,size_t *bytes){

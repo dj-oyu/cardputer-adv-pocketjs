@@ -727,8 +727,8 @@ static const JSMallocFunctions GUEST_ALLOCATOR = {
     .js_malloc_usable_size = guest_usable_size,
 };
 
-static int guest_interrupt(JSRuntime *runtime, void *opaque) {
-  (void)runtime;
+static int guest_interrupt(JSContext *context, void *opaque) {
+  (void)context;
   pocketjs_guest_t *guest = opaque;
   if (guest == NULL)
     return 0;

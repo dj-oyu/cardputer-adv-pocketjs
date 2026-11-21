@@ -60,7 +60,6 @@ static list_t lists[LISTS];
 static uint32_t list_generation;
 static JSContext *owner;     // the guest the windows belong to (for the reset)
 
-static void free_nothing(JSRuntime *rt,void *opaque,void *ptr){(void)rt;(void)opaque;(void)ptr;}
 
 static JSValue failure(JSContext *ctx,const char *op,const char *code,const char *message){
     return pocket_api_throw(ctx,code,op,message,false,POCKET_OUTCOME_NOT_APPLIED);
@@ -132,7 +131,7 @@ static JSValue js_data(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     void *mem=shiki_heap_aligned(bytes);
     if(!mem)return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"the Shiki heap's budget");
     memset(mem,0,bytes);
-    JSValue buffer=JS_NewArrayBuffer(ctx,mem,bytes,free_nothing,NULL,false);
+    JSValue buffer=JS_NewArrayBuffer(ctx,mem,bytes,0,NULL,NULL,false);
     if(JS_IsException(buffer)){shiki_heap_free(mem);return buffer;}
     static const JSTypedArrayEnum KIND[]={JS_TYPED_ARRAY_INT16,JS_TYPED_ARRAY_UINT16,JS_TYPED_ARRAY_INT32};
     JSValueConst targs[3]={buffer,JS_NewInt32(ctx,0),JS_NewInt32(ctx,(int32_t)elements)};

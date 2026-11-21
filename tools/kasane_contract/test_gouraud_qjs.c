@@ -46,7 +46,7 @@ static void band_equal(void){
   memset(actual,0,sizeof actual);for(unsigned y=0;y<135;y+=height){unsigned n=height;if(n>135-y)n=135-y;REQUIRE(pocket_proc_backdrop(NULL,y,n,actual+y*240)==KSN_OK);}REQUIRE(!memcmp(expected,actual,sizeof expected));
  }
 }
-static void odd_free(JSRuntime *rt,void *opaque,void *data){(void)rt;(void)data;free(opaque);}
+static void *odd_free(JSRuntime *rt,void *opaque,void *data,size_t size){(void)rt;(void)data;if(!size)free(opaque);return NULL;}
 static unsigned ga_encode(ksn_proc_segment *data,const ksn_proc_gouraud_patch *p){
  unsigned words=(unsigned)KSN_PROC_GOURAUD_WORDS(p->header.vertices,p->header.triangles,p->header.holes);uint8_t *out=(uint8_t *)data;memset(out,0,words*sizeof *data);memcpy(out,&p->header,8);out+=8;
  size_t bytes=p->header.vertices*sizeof p->vertices[0];memcpy(out,p->vertices,bytes);out+=bytes;bytes=p->header.triangles*6u;memcpy(out,p->indices,bytes);out+=bytes;memcpy(out,p->clips,p->header.holes*sizeof p->clips[0]);return words;
@@ -171,7 +171,7 @@ static void visibility_contracts(JSContext *ctx){
  const size_t shared_sizes[5]={32,16,24,24,12};
  for(unsigned k=0;k<5;k++){
   uint8_t *raw=calloc(1,shared_sizes[k]);REQUIRE(raw);
-  g=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,g,"forcedShared",JS_NewArrayBuffer(ctx,raw,shared_sizes[k],odd_free,raw,true))>=0);
+  g=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,g,"forcedShared",JS_NewArrayBuffer(ctx,raw,shared_sizes[k],0,odd_free,raw,true))>=0);
   JS_FreeValue(ctx,g);eval_ok(ctx,shared_calls[k]);
   for(size_t i=0;i<shared_sizes[k];i++)REQUIRE(raw[i]==0);
  }
@@ -185,7 +185,7 @@ static void visibility_contracts(JSContext *ctx){
  eval_ok(ctx,"vo.fill(65535);let rejectedCounts=false;try{V.selectVisible(vxy,vz,vi,vo,vc,0)}catch(e){rejectedCounts=true}if(!rejectedCounts||vo.some(x=>x!==65535))throw Error('readonly counts')");
  immutable_named(ctx,"vc",false);immutable_named(ctx,"vxy",false);immutable_named(ctx,"vz",false);immutable_named(ctx,"vi",false);
  uint8_t *odd=malloc(33);REQUIRE(odd);const float xy[8]={10,10,30,10,30,30,10,30};memcpy(odd+1,xy,32);
- g=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,g,"visibilityOdd",JS_NewArrayBuffer(ctx,odd+1,32,odd_free,odd,false))>=0);JS_FreeValue(ctx,g);
+ g=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,g,"visibilityOdd",JS_NewArrayBuffer(ctx,odd+1,32,0,odd_free,odd,false))>=0);JS_FreeValue(ctx,g);
  eval_ok(ctx,"vbad(()=>V.selectVisible(new Float32Array(visibilityOdd),vz,vi,vo,vc,0));"
   "{let x=new Float32Array([1,1]),z=new Float32Array([0]),i=new Uint16Array([0,0,0]),o=new Uint16Array(3),c=new Uint32Array(3);"
   "V.selectVisible(x,z,i,o,c,0);if(c.join()!=='0,0,1')throw Error('minimum');}"
@@ -243,7 +243,7 @@ int main(void){
  /* Hole changes are evaluated from a numeric snapshot; no remembered clip. */
  eval_ok(ctx,"init();hxy=new Float32Array([14,14,26,14,26,26,14,26]);hc=new Uint8Array([4]);P.beginFrame(2016);draw();P.commit()");band_equal();REQUIRE(expected[20*240+20]==2016&&expected[12*240+12]==63488);eval_ok(ctx,"hxy.fill(NaN)");REQUIRE(pocket_proc_backdrop(NULL,0,135,actual)==KSN_OK&&!memcmp(expected,actual,sizeof expected));pocket_proc_present_result(KSN_OK);
  /* Unaligned foreign Float32 backing is read using memcpy. */
- uint8_t *odd=malloc(33);REQUIRE(odd);const float initial[8]={10,10,30,10,30,30,10,30};memcpy(odd+1,initial,32);global=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,global,"oddBuffer",JS_NewArrayBuffer(ctx,odd+1,32,odd_free,odd,false))>=0);JS_FreeValue(ctx,global);
+ uint8_t *odd=malloc(33);REQUIRE(odd);const float initial[8]={10,10,30,10,30,30,10,30};memcpy(odd+1,initial,32);global=JS_GetGlobalObject(ctx);REQUIRE(JS_SetPropertyStr(ctx,global,"oddBuffer",JS_NewArrayBuffer(ctx,odd+1,32,0,odd_free,odd,false))>=0);JS_FreeValue(ctx,global);
  eval_ok(ctx,"init();xy=new Float32Array(oddBuffer);P.beginFrame(2016);draw();P.commit()");band_equal();pocket_proc_present_result(KSN_OK);
  /* The foreign buffer above was a readonly native input. Restore normal
   * backing before exercising JS typed-array writes in subsequent fixtures.

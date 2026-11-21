@@ -172,9 +172,12 @@ def main():
                 if mode == 'baseline' and debug == 'strip' and not a.m32:
                     # The shared expectations describe debug metadata and exact
                     # allocation indices; stripping changes both in the old code.
+                    # oom_callsite_double_free: since fork 0d281e1 a stripped
+                    # build emits no OP_source_loc, so its --fail-alloc target
+                    # falls on another allocation (docs/vm/upstream-v018.md sec.7).
                     failures = set(re.findall(r'^FAIL (\S+)', log.read_text(), re.M))
-                    assert failures == {'error_toplevel', 'job_throw', 'math_fast_call', 'oom_resolving_functions',
-                                        'oom_with_resolvers', 'try_finally'}, failures
+                    assert failures == {'error_toplevel', 'job_throw', 'math_fast_call', 'oom_callsite_double_free',
+                                        'oom_resolving_functions', 'oom_with_resolvers', 'try_finally'}, failures
                 if mode != 'baseline':
                     baseline = OUT / f'{"m32" if a.m32 else "native"}-baseline-{debug}-{variant}' / ('actual-' + variant)
                     for name in sorted(expected_names):

@@ -67,8 +67,8 @@ static JSValue start_request(JSContext *ctx, JSValueConst self,
     return JS_UNDEFINED;
 }
 
-static int producer_watchdog(JSRuntime *rt, void *opaque) {
-    (void)rt;
+static int producer_watchdog(JSContext *ctx, void *opaque) {
+    (void)ctx;
     return ++*(unsigned *)opaque > 10000;
 }
 
@@ -113,8 +113,8 @@ static void check_concurrent_requests(void) {
     }
     puts("lifecycle concurrent requests=10 OK");
 }
-static int watchdog(JSRuntime *rt, void *opaque) {
-    (void)rt;
+static int watchdog(JSContext *ctx, void *opaque) {
+    (void)ctx;
     ++*(int *)opaque;
     return 1;
 }

@@ -422,7 +422,7 @@ static void emit_shape(FILE *f, int si)
     uint32_t H = sh->prop_hash_mask + 1;
     uint32_t *head = calloc(H, sizeof *head), *next = calloc(n + 1, sizeof *next);
     for (int j = 0; j < n; j++) {
-        uint32_t h = sh->prop[idx[j]].atom & (H - 1);
+        uint32_t h = (uint32_t)hash_atom(sh->prop[idx[j]].atom, H - 1);   /* quickjs.c, as find_own_property */
         next[j] = head[h];
         head[h] = j + 1;
     }

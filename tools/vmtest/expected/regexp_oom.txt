@@ -27,7 +27,7 @@ sticky1 true
 global1 a,b,c,
 u1 true
 u2 true
-v1-unsupported SyntaxError
+v1 true
 replace1 23/09/2026
 replaceAll1 a_b_c
 replFn aBc

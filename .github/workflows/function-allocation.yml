@@ -2,7 +2,11 @@ name: Function allocation leaf
 on:
   pull_request:
     paths:
+      # The engine is a submodule: a bump changes the gitlink itself, which
+      # the '/**' pattern does not match.
+      - 'components/quickjs-ng/quickjs-ng'
       - 'components/quickjs-ng/quickjs-ng/**'
+      - 'tools/vmtest/engine_pin.py'
       - 'tools/vmtest/function_allocation/**'
       - '.github/workflows/function-allocation.yml'
   workflow_dispatch:

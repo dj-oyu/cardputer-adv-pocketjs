@@ -99,7 +99,7 @@ static size_t used(void) {
     return u;
 }
 
-static int spin_interrupt(JSRuntime *r, void *opaque) { (void)r; return *(int *)opaque; }
+static int spin_interrupt(JSContext *c, void *opaque) { (void)c; return *(int *)opaque; }
 
 static void write_file(const char *path, const char *text) {
     FILE *f=fopen(path,"w");

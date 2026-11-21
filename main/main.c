@@ -1817,7 +1817,9 @@ void app_main(void) {
 #if POCKET_PROBES
     { extern void sd_probe(void); sd_probe(); }
 #endif
-    keys=xQueueCreate(16,sizeof(keystroke_t));configASSERT(keys);
+    // Not configASSERT: a non-debug build (NDEBUG) compiles that away, and
+    // a startup without its queue and tasks must stop here, not run on.
+    keys=xQueueCreate(16,sizeof(keystroke_t));if(!keys)abort();
     const app_control_hooks_t native_hooks={
         .catalog_count=native_catalog_count,.catalog=native_catalog,.start=native_start,
         .tap=native_tap,.suspend=native_suspend,.stop=native_stop,.emit=native_emit,
@@ -1832,13 +1834,13 @@ void app_main(void) {
     /* The system's slow tasks take RTC fast memory (8 KB, APB clock) at boot so
      * the JIT's code can never land there: 3x slower (shiki-jit.md sec.15).
      * input 2 KB here, wifi 3 KB and timesync 2 KB in their own inits. */
-    configASSERT(rtc_task_create(input_task,"input",2048,6));
+    if(!rtc_task_create(input_task,"input",2048,6))abort();
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
     // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
     // and nothing else -- the three settings are one binary family, which is
     // what makes a measurement across them mean anything. Why it exists:
     // CCOUNT is per core, so a budget that reads it needs a task that cannot
     // migrate between two reads (docs/vm/vm-L1-report.md sec.8).
-    configASSERT(xTaskCreatePinnedToCore(ui_task,"ui",32768,NULL,5,NULL,
-        CONFIG_POCKET_UI_TASK_CORE<0?tskNO_AFFINITY:CONFIG_POCKET_UI_TASK_CORE)==pdPASS);
+    if(xTaskCreatePinnedToCore(ui_task,"ui",32768,NULL,5,NULL,
+        CONFIG_POCKET_UI_TASK_CORE<0?tskNO_AFFINITY:CONFIG_POCKET_UI_TASK_CORE)!=pdPASS)abort();
 }

@@ -19,6 +19,8 @@ idf.py -B build_api -p COM3 monitor
 
 **ビルドディレクトリは作業ごとに分ける。** 複数セッションが1つのツリーを共有するため、`build/` を同時に使うと `ninja: failed recompaction: Permission denied` になる。`build_*` は `.gitignore` 済み。`sdkconfig` も追跡外で、`sdkconfig.defaults` の変更は**全ビルドディレクトリの次回ビルドに効く**。 **ルートの `sdkconfig` はビルドディレクトリ間で共有される**ので、`sdkconfig.stripdebug.defaults` のようにオプションを重ねるビルドは `-DSDKCONFIG=<dir>/sdkconfig` でディレクトリごとに分ける（重ねたビルドがルートに書いた値が、あとの「既定のつもり」のビルドに残った事故があった）。
 
+**製品のファームはデバッグオフ**（アサーションなし＝`NDEBUG`、QuickJS は行番号表も作らない。`docs/vm/upstream-v018.md` §6）。デバッグが要るときだけ `sdkconfig.debug.defaults` を重ねた別ディレクトリでビルドする（ファイル先頭のコマンド）。**`assert()` / `configASSERT()` の中に副作用を書かない**（デバッグオフでは式ごと消える。UI タスクの生成が消えた事故があった）。
+
 `idf.py -B <dir> size` / `size-files` / `size-components` がサイズ計測の入口。`tools/check_flash.py` がSKK辞書・フォント領域の侵食をビルド時に止める。
 
 初回セットアップ: `python tools/prepare_dependencies.py`（BMI270・libopus・minimp3・QuickJS を固定revisionで取得）。**QuickJS のソース（`components/quickjs-ng/quickjs-ng/`）は fork [dj-oyu/quickjs](https://github.com/dj-oyu/quickjs) の submodule。** エンジンの変更は fork 側でコミット・push し、このリポジトリでは gitlink を上げるコミットを作る（パスは submodule 化の前と同じなので、`tools/` の直書きはそのまま動く）。gitlink を上げて `quickjs.c` が変わったら hot/cold の学習し直し（下記）を忘れない。運用は `docs/vm/vm-branching.md`。Rust UIアーカイブとPocketJS上流のcheckoutは不要（旧UI経路は削除済み）。
