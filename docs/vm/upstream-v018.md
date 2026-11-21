@@ -43,4 +43,20 @@ host の試験で見つけたもの。どれもマージの衝突の外にあっ
 - host: tests.conf 0/122、api-test 合格、test262（v0.18 の pin）60 件失敗のうち、マージ前の fork が通るものは 0 件（844 件が新たに通る）。vmtest コーパス 88/88（ASan）。ROM 版（`asan-rom`、`--harden`）は 16 件落ちるが、マージ前と同じ 16 件で中身も同じ（列番号の 2 件を除く）。
 - vmtest の期待出力を更新したもの: `generators`・`yield_async_from_sync`（上流 d5a59c3・f2da139: for-await の break で `return()` を待つ）、`lazy_builtins`・`lazy_intrinsics`（新しい組み込み、DOMException の `name`/`message`/`code` が列挙可能なアクセサに）、`regexp_oom`（`v` フラグが使える）。`--fail-alloc` の番号は 4 件とも振り直し、`oom_targets.sh` と修正を戻したコピーで ASan に当たることを確かめた（約 +39〜45 回、増えた atom と組み込みの分）。
 - ファーム（ESP-IDF 6.0.1）: イメージ 2,635,184 B（v0.14 版より約 +33 KB）、DIRAM 172,856 B（−24 B）。hot/cold は学習し直して quickjs.c 191 関数・不一致 0。
-- 実機の速度・ゲストの床・評価の余裕は未測定。
+
+## 5. 実機（2026-11-21、ブローカー、同じ機体で v0.18 → v0.14 の順）
+
+v0.18 は 50b5fe4e（fork 55b82c7）、v0.14 は f5fe594a（fork cd51ea7）。各 30 秒、`KASANE_PAINT turn_ms` の平均（最初の 1 本を除く）。
+
+| | v0.14 | v0.18 | 差 |
+| --- | ---: | ---: | ---: |
+| STRESS turn_ms | 5.361 | 5.436 | +1.4% |
+| DERBY turn_ms（パドック） | 2.99 | 3.03 | +1.3% |
+| DERBY 読み込み後の js | 91,232 | 92,604 | +1,372 B |
+| MEGADEMO | 起動（`MEM free=32892` まで） | **起動失敗**: `chunk 'wake' did not compile: out of memory` | |
+| `GUEST_ARENA`（MEGADEMO 起動時） | 65,536 | 57,344 | −8 KiB |
+| ホームの空き（`MEM free`、前のアプリ停止時） | 164,512 | 163,760 | −752 B |
+
+- **MEGADEMO が起動しない（退行）。** arena は起動時の空きで 8 KiB 刻みに決まる（`guest.c`、空き ≥ 希望 + 56 KiB）。v0.18 はゲストが約 1.1〜1.4 KB 多く（host の床 24,792 → 25,948 B、`floor32.sh`）、起動時の空きが約 750 B 少なく、段が 64 → 56 KiB に下がった。v0.14 でも MEGADEMO は読み込み直後に空き 0 の MEM_PRESSURE を出しており、余裕はもともと無かった。
+- **速度の +1.3〜1.4% は原因未特定。** 命令キャッシュの配置だけでビルド間 15% 動く機体なので、この差はまだエンジンのせいと言えない。候補は shape のハッシュ（`hash32(atom) >> shift`、v0.14 は `atom & mask`）、呼び出しごとの `is_constructor` のストア、コードの増加（+33 KB）による flash キャッシュのヒット率の低下。XTPERF で命令数とキャッシュ待ちを分けて測る。
+- 機器は計測後に元の LKG（a806b21f）へ戻した。
