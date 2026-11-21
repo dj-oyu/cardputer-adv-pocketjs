@@ -482,7 +482,7 @@ menu "Pocket VM (diagnostics)"
         bool "DERBY ser(): chord-end rotation and chord cull in PIE"
         default y
         help
-            Builds main/pocket/derby_ser_pie.c: the int16 chord-end rotation
+            Builds main/apps/derby/derby_ser_pie.c: the int16 chord-end rotation
             and chord cull (ou()) as PIE kernels next to their scalar integer
             reference (docs/apps/derby-ser-division.md sec.10, sec.13).
             pocket.derby's view() rotates the oval's chord ends with it once a
@@ -500,7 +500,7 @@ menu "Pocket VM (diagnostics)"
         default n
         help
             Places dsp_set_camera, dsp_rotate_pie, dsp_cull_frame,
-            dsp_cull_series and dsp_cull_pie (main/pocket/derby_ser_pie.c) in
+            dsp_cull_series and dsp_cull_pie (main/apps/derby/derby_ser_pie.c) in
             IRAM instead of flash, so that view()'s rotation and culls (one
             batch a frame, docs/apps/derby-ser-division.md sec.14) pay no
             flash cache misses for them. IRAM is the same pool as DRAM:
@@ -525,7 +525,7 @@ menu "Pocket VM (diagnostics)"
         bool "Measurement: DERBY ser() path and cycles, one DERBY_SER line a KASANE_PAINT window"
         default n
         help
-            Counts, in main/pocket/pocket_derby.c, which path view() and ser()
+            Counts, in main/apps/derby/pocket_derby.c, which path view() and ser()
             took (PIE or scalar: the up key's A/B), the inputs clamped into the
             integer series' range (L, s, w/g0, the camera), the chord tables
             that could not be made (malloc, range), and their cycles with the
@@ -545,7 +545,7 @@ menu "Pocket VM (diagnostics)"
         default n
         help
             Places the integer series' per-frame functions
-            (main/pocket/derby_ser_int.c: derby_ser_chord_q, the cull, the
+            (main/apps/derby/derby_ser_int.c: derby_ser_chord_q, the cull, the
             rotation and their helpers) in IRAM instead of flash, to tell
             the flash cache's share of their cost (docs/apps/derby-ser-division.md
             sec.12). +6,552 B of DIRAM measured (IRAM is the same pool as

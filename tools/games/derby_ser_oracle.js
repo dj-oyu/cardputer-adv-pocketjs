@@ -1,6 +1,6 @@
 // Host only (test_derby_host.c with DERBY_SER_ORACLE=1; docs/apps/derby-ser-native.md
 // section 8). The JS ser(), ou(), lim(), inr() and pan()'s VE/VC of vm/main
-// fac3552 (apps/derby/derby_pan.js), the specification main/pocket/pocket_derby.c
+// fac3552 (apps/derby/derby_pan.js), the specification main/apps/derby/pocket_derby.c
 // translates. Each pocket.derby.ser() call runs this first; its draws (handle
 // and the eight doubles) are compared with the ones the C passed to draw(),
 // bit for bit (__sercmp). __serfuzz(n) compares n random cameras, courses and

@@ -1,0 +1,7 @@
+# Native code that only one app uses lives in main/apps/<app>/ (CLAUDE.md).
+# Keep it out of clangd's background index so that completion in system code
+# does not offer an app's internals; system files include only main/apps/apps.h.
+If:
+  PathMatch: main/apps/.*
+Index:
+  Background: Skip

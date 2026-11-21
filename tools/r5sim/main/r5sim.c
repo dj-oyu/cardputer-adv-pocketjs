@@ -187,7 +187,7 @@ static void key_edge(const char *name,bool pressed){
 static void key_tap(const char *name){key_edge(name,true);key_edge(name,false);}
 #endif
 #ifdef R5SIM_APP_DERBY
-#include "pocket_derby.h"
+#include "apps/apps.h"
 #include "pocket_app_load.h"
 #include "app_registry.h"
 #endif

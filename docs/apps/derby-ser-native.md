@@ -8,7 +8,7 @@
 
 ## 1. 境目（JS に残す分 / native に下ろす分）
 
-| | JS に残す | native に下ろす（`main/pocket/pocket_derby.c`） |
+| | JS に残す | native に下ろす（`main/apps/derby/pocket_derby.c`） |
 | --- | --- | --- |
 | コース | `OC`・`CH`・`pose()`（`wide`・`shot`・距離標・走者・大型画面が使う） | 同じ表の写し（レースの最初に 1 回渡す）と、その上の `pose()` の C |
 | 1 フレーム | カメラ `pc` の決定（`shot()`）、`zf`・`L` の決定、系列の呼び出し 5 回、大型画面・距離標・走者・HUD | 弦の端のカメラ座標 `VE` と視野に入る弦 `VC`（今の `pan()` の 82〜88 行） |

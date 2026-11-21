@@ -49,7 +49,7 @@
 | `pocket.kasane.grid` | `register`・`registration`・`registerResize`・`registerResizeSource`・`run`・`profile`・`measure`・`resource`・`explain` | 同上（capability なし、`limits` なし） | `main/pocket/pocket_grid.c` |
 | グローバル `gridFold`（api-reorg P5 で消した。`pocket.kasane.grid.fold/index/view`） | `fold`・`index`・`view`（初回使用時に JS の前段を読む） | — | 同上 |
 | `pocket.shapes` | `project`・`fill`・`outline` | `kasane.shapes`（manifest で宣言したアプリだけ）。`maxPoints` 1024・`maxPolygonPoints` 256・`maxHoles` 6 | `main/pocket/pocket_shape.c`、[shapes.md](../api/shapes.md) |
-| `pocket.derby` | `course`・`view`・`ser`（`project` は実験フラグ `POCKET_DERBY_PROJECT_BATCH`、既定 OFF） | `derby.series`（DERBY だけ）。`maxEnds` 32・`maxSections` 4 | `main/pocket/pocket_derby.c`、[derby-ser-native.md](../apps/derby-ser-native.md) |
+| `pocket.derby` | `course`・`view`・`ser`（`project` は実験フラグ `POCKET_DERBY_PROJECT_BATCH`、既定 OFF） | `derby.series`（DERBY だけ）。`maxEnds` 32・`maxSections` 4 | `main/apps/derby/pocket_derby.c`、[derby-ser-native.md](../apps/derby-ser-native.md) |
 
 ### 2.2 `procedural`（線の式）の呼び出し
 
@@ -291,7 +291,7 @@ PIE の経路とスカラーの経路が**ビット単位で同じ結果**を出
 - 誤差は 1/16〜1/200 になり、すべて 0.05 px 未満。float32 より 1 桁大きいが、画素に丸めて変わる端点は 0.1% 未満（境目のちょうど上にある点だけ）。
 - 演算の途中の飽和は `pt` のランダムな入力で 68 回（状態と線分の数は double と同じ）。実ゲームの入力では 0。
 - **§5.4 の 1 の結論: 値の幅を扱う命令（`RECIP`／`PROJECT`）は、DERBY の遠近には要らない。** 要るのは、変数ごとに倍率（Q 形式）を選べること。（2026-10-30 ユーザー決定: 書き手が `@q` で宣言する。[shiki-spec.md](shiki-spec.md) §8.3。§5.6.1 で、この宣言だけで同じ結果になることを確かめた。）今回の倍率は、捕獲した入力の範囲から人が選んだ。
-- 実機の C（`pocket.derby.ser()`、`main/pocket/pocket_derby.c`）は `z`・`dz`・`farZ` を 256 倍して渡す必要がある。**出荷している式と C は変えていない。**
+- 実機の C（`pocket.derby.ser()`、`main/apps/derby/pocket_derby.c`）は `z`・`dz`・`farZ` を 256 倍して渡す必要がある。**出荷している式と C は変えていない。**
 
 ### 5.6.1 仕様の規則で測り直した結果（host、2026-10-30、草案 2）
 

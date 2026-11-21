@@ -1,4 +1,4 @@
-/* The arithmetic layer for main/pocket/derby_ser_pie.c (tools/pie/README.md):
+/* The arithmetic layer for main/apps/derby/derby_ser_pie.c (tools/pie/README.md):
  * is the int16 cull a safe stand-in for pocket_derby.c's double ou()?
  *
  * Claim checked: for every chord whose bit is in `valid`, the integer answer
@@ -17,8 +17,8 @@
 #define DERBY_SERPIE_HOST 1
 #include <stdio.h>
 #include <stdlib.h>
-#include "../../../main/pocket/derby_ser_pie.c"
-#include "../../../main/pocket/derby_ser_pie_vec.h"
+#include "../../../main/apps/derby/derby_ser_pie.c"
+#include "../../../main/apps/derby/derby_ser_pie_vec.h"
 
 static void wide_case(dspv_case *K, unsigned index) {
     uint32_t s = 0xa11ceu ^ (index * 2246822519u);

@@ -22,7 +22,7 @@ LEDGER_FILES = ('main/app_session.c', 'main/pocket/pocket_api.c', 'main/pocket/p
                 'main/pocket/pocket_kasane_scene.inc',
                 'main/pocket/pocket_fs.c', 'main/pocket/pocket_storage.c', 'main/pocket/pocket_net.c',
                 'main/pocket/pocket_text.c', 'main/pocket/pocket_workspace.c',
-                'main/pocket/app_music_view.c',
+                'main/apps/player/app_music_view.c',
                 'main/pocket/pocket_ayatsuri_model.inc')
 EXPECTED_OWNERS = {
     'main/pocket/pocket_api.c': ('hub_owner', 'token_owner'),
@@ -34,7 +34,7 @@ EXPECTED_OWNERS = {
     'main/pocket/pocket_net.c': ('lease_owner', 'response_owner'),
     'main/pocket/pocket_text.c': ('session_owner',),
     'main/pocket/pocket_workspace.c': ('ref_owner',),
-    'main/pocket/app_music_view.c': ('music_owner',),
+    'main/apps/player/app_music_view.c': ('music_owner',),
     'main/pocket/pocket_ayatsuri_model.inc': ('pocket_model_class_owner', 'pocket_model_instance_class_owner'),
 }
 

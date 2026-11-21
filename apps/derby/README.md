@@ -159,7 +159,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 
 ## 列を C で（`pocket.derby`、2026-10-02）
 
-首振りの列（`ser()` と、その中の `ou()`・`lim()`・`inr()`、弦の端 `VE` と視野の弦 `VC`）は firmware の C（`main/pocket/pocket_derby.c`）にある。JS の `ser()` を倍精度の同じ演算順で写したもので、`draw` に渡す入力は JS とビット単位で同じ（host の oracle、`tools/games/derby_ser_oracle.js`）。画素と結果は変わらない。設計と実測は docs の [derby-ser-native.md](../../docs/apps/derby-ser-native.md)。
+首振りの列（`ser()` と、その中の `ou()`・`lim()`・`inr()`、弦の端 `VE` と視野の弦 `VC`）は firmware の C（`main/apps/derby/pocket_derby.c`）にある。JS の `ser()` を倍精度の同じ演算順で写したもので、`draw` に渡す入力は JS とビット単位で同じ（host の oracle、`tools/games/derby_ser_oracle.js`）。画素と結果は変わらない。設計と実測は docs の [derby-ser-native.md](../../docs/apps/derby-ser-native.md)。
 
 - **入口**: `S = pocket.derby`。`S.course(CH, OC か 0, DNR)` をパドックで 1 回、`S.view(pc, zf, t, live.hl, live.crowd, KN[tier][0], KN[3][5])` を首振りのフレームごとに 1 回、`S.ser(live.prail, w, s, g0, L, a, b)` を列ごとに（`b` を省くと芝）。描く順は JS が呼ぶ順のまま。
 - **DERBY のセッションにだけある**（manifest の optional に `derby.series`。`pocket.pet` と同じ作り）。capability `derby.series`、limits は `maxEnds` 32・`maxSections` 4。
