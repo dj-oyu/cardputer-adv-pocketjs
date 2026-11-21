@@ -83,3 +83,11 @@ v0.18 は 50b5fe4e（fork 55b82c7）、v0.14 は f5fe594a（fork cd51ea7）。�
 | ホームの空き（起動直後、player の後） | — | 168,960 | **179,328** |
 
 速度は v0.14 と同等〜わずかに速い（15% の配置の揺れの内側なので「同等」と読む）。メモリは v0.14 より約 9 KB 多く空く（DIRAM −11 KB が効いている）。
+
+## 7. A/B の検査の基準を fork に移した（2026-11-21）
+
+`tools/vmtest/mixed_numeric/compare.py` と `tools/vmtest/function_allocation/compare_main.py` は、基準のエンジンをこのリポジトリの dd36a29（v0.14、submodule 化の前）から `git show` で取り出していた。v0.18 の `quickjs.h`（`JS_NewArrayBuffer`、割り込みのハンドラ）では、その `quickjs.c` がコンパイルできない（PR #137 の CI）。基準は fork の commit にして、submodule の履歴から読む（`tools/vmtest/engine_pin.py`）。
+
+- **基準は fork `0d281e1`。** v0.18 のマージ（`55b82c7`、実機で測ったもの）に、strip のビルドで `OP_source_loc` を出さない変更を足したもの。`55b82c7` を基準にすると、function_allocation の `o2 --strip` で `oom_callsite_double_free` が別の出力になる（`--fail-alloc 1455` が狙う確保の前で、確保の回数が減るため。strip の変種は期待出力を強制しない）。意図した変更なので、dd36a29 の三角関数と同じく基準を進めた。後の `cbf7803`（AND のハッシュ）は確保の順を変えない。
+- **v0.14 → v0.18 は一度だけ別に確かめた。** 古い木（pocketjs 86bbcf55、fork cd51ea7）と新しい木（fork cbf7803）で mixed_numeric（x64）を走らせ、`numeric.log`・BIG WAVE の `app-behaviour.log`・`panels.bin`（7,279 枚、471,679,200 B）がバイト単位で一致した。
+- 同じ実行のゲストのヒープ（host 64 bit、TLSF のモデル）: 評価後 124,624 → 128,148 B、評価中のピーク 153,944 → 178,968 B。host は `NDEBUG` が無いので行番号表を作り、v0.18 の d90ab51 は識別子を読むたびに `OP_source_loc` を出す（§6）。デバッグオンの数字で、ファームの数字ではない。

@@ -11,14 +11,16 @@ import sys
 ROOT = Path(__file__).resolve().parents[3]
 # Both VM translation units must use the adopted header/ROM ABI.
 # The historical e0 A/B remains separate recorded evidence.
-# dd36a29 adopted Math.sin/cos/tan from Shiki's sine table (pocket_trig.h,
-# max error 1.1e-5, accepted by the owner), which changes BIG WAVE's panels
-# on purpose; it was 06523d9 before. Every VM change since leaves numeric.log,
-# BIG WAVE's behaviour and its panels byte for byte (checked 2026-11-13).
-BASE = 'dd36a294f6ca4710e3cee83118bfd87e83cebf74'
+# The base is the pinned fork engine (tools/vmtest/engine_pin.py). Every VM
+# change since must leave numeric.log, BIG WAVE's behaviour and its panels
+# byte for byte. Before v0.18 the pin was pocketjs dd36a29, which adopted
+# Math.sin/cos/tan from Shiki's sine table (pocket_trig.h, max error 1.1e-5,
+# accepted by the owner) and changed BIG WAVE's panels on purpose.
 QJS = ROOT / 'components/quickjs-ng/quickjs-ng'
 sys.path.insert(0, str(ROOT / 'tools/games'))
+sys.path.insert(0, str(ROOT / 'tools/vmtest'))
 import run_big_wave as bw
+from engine_pin import ENGINE_BASE as BASE, base_file
 
 
 def command(args, **kwargs):
@@ -89,18 +91,7 @@ def main():
     if(fwrite(panel,sizeof panel,1,numeric_panels)!=1)abort();
 ''')
     (out / 'app.c').write_text(harness)
-    baseline = subprocess.check_output(
-        ['git', 'show', BASE + ':components/quickjs-ng/quickjs-ng/quickjs.c'], cwd=ROOT)
-    if b'JS_SetCFunctionMark' not in baseline:
-        # The join mark (docs/perf/two-core-pipeline.md sec.2.3 A) is newer
-        # than BASE, and the firmware's surfaces call it at install. It only
-        # tells a display task which native calls must wait for a present;
-        # the host has none, so the baseline arm gets marks that do nothing.
-        # Numbers and panels are what this comparison checks.
-        baseline += (b'\nJSCFunctionMark JS_SetCFunctionMark(JSRuntime *rt, bool on)'
-                     b'{ (void)rt; (void)on; return (JSCFunctionMark){0, NULL}; }\n'
-                     b'void JS_RestoreCFunctionMark(JSRuntime *rt, JSCFunctionMark saved)'
-                     b'{ (void)rt; (void)saved; }\n')
+    baseline = base_file('quickjs.c')
     sources = {'base': baseline, 'candidate': (QJS / 'quickjs.c').read_bytes()}
     for mode, source in sources.items():
         folder = out / mode

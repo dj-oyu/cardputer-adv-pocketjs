@@ -6,14 +6,16 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 from run import ROOT, QJS, run
 
-# dd36a29 adopted Math.sin/cos/tan from Shiki's sine table (pocket_trig.h,
-# accepted by the owner; math_fast_call's expected sin/cos were re-blessed
-# there). It descends from the earlier pin 05f472e, so every VM change since
-# that pin other than the trig is still checked byte for byte.
-BASE = 'dd36a294f6ca4710e3cee83118bfd87e83cebf74'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The pinned fork engine (tools/vmtest/engine_pin.py). Every VM change since
+# is checked byte for byte. Before v0.18 the pin was pocketjs dd36a29
+# (Math.sin/cos/tan from Shiki's sine table; math_fast_call's expected
+# sin/cos were re-blessed there).
+from engine_pin import ENGINE_BASE as BASE, base_file
 
 
 def main():
@@ -33,9 +35,7 @@ def main():
         shutil.copytree(QJS, source, dirs_exist_ok=True)
         if mode == 'main':
             for name in ['quickjs.c', 'quickjs-vmstack.h', 'quickjs-rom-intrinsics.h']:
-                path = QJS.relative_to(ROOT) / name
-                (source / name).write_bytes(subprocess.check_output(
-                    ['git', 'show', f'{BASE}:{path}'], cwd=ROOT))
+                (source / name).write_bytes(base_file(name))
         env = dict(os.environ, VMTEST_QJS=str(source), VMTEST_OUT=str(directory),
                    VMTEST_CFLAGS='-DCONFIG_POCKET_VM_STRIP_DEBUG=1' if args.strip else '')
         run(label + '-build', ['bash', 'tools/vmtest/build.sh', variant], env)
