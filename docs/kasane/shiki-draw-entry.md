@@ -125,7 +125,7 @@ Shiki の heap とゲストの heap は変わらない（§5）。
 
 ## 8. 実機の手順と見込み
 
-**手順**（親が broker で）: [derby-ser-division.md](../apps/derby-ser-division.md) §13.6 の 4 と同じ。`main/pocket/pocket_derby.h` の `#ifdef ESP_PLATFORM` の行の**直前**に次の 1 行を足した一時の `measure:` コミットで組み、DERBY のデモのレースで楕円の重い CAM WIDE 2 の窓を取る。測り終えたらコミットを取り消す。
+**手順**（親が broker で）: [derby-ser-division.md](../apps/derby-ser-division.md) §13.6 の 4 と同じ。`main/apps/apps.h` の `#ifdef ESP_PLATFORM` の行の**直前**に次の 1 行を足した一時の `measure:` コミットで組み、DERBY のデモのレースで楕円の重い CAM WIDE 2 の窓を取る。測り終えたらコミットを取り消す。
 
 ```c
 #define POCKET_DERBY_SER_PROBE 1

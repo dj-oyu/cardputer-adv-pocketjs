@@ -110,9 +110,9 @@ static int64_t hp_eval_t0;
 #endif
 #include "app_registry.h"
 #include "pet_hub.h"
-#include "pocket_derby.h"
+#include "apps/apps.h"
 #ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
-#include "derby_ser_pie.h"
+#include "apps/derby/derby_ser_pie.h"
 #endif
 #ifdef CONFIG_POCKET_SHIKI_DEBUG
 #include "pocket_shiki.h"

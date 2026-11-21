@@ -1,4 +1,4 @@
-"""Run the asm of main/pocket/derby_ser_pie.c (dsp_rotate_pie, dsp_cull_pie)
+"""Run the asm of main/apps/derby/derby_ser_pie.c (dsp_rotate_pie, dsp_cull_pie)
 through piesim.py on the same vectors the device self-test uses, and compare
 every output bit with the scalar reference in the same file.
 
@@ -19,7 +19,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-SRC = os.path.join(ROOT, 'main', 'pocket', 'derby_ser_pie.c')
+SRC = os.path.join(ROOT, 'main', 'apps', 'derby', 'derby_ser_pie.c')
 sys.path.insert(0, HERE)
 from piesim import Sim, extract_asm, store16, load16  # noqa: E402
 from run_models import compiler  # noqa: E402

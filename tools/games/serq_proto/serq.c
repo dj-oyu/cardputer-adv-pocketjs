@@ -59,7 +59,7 @@ static void rdraw(int kind,const double*in){if(rn<MAXD){RD[rn].kind=kind;for(int
 static i64 sat32(i64 v){return v>2147483647?2147483647:v<-2147483648LL?-2147483648LL:v;}
 static long sat_events;
 static void idraw(int kind,const i64*in){if(in_<MAXD){ID[in_].kind=kind;for(int i=0;i<8;i++){if(in[i]!=sat32(in[i]))sat_events++;ID[in_].in[i]=(double)sat32(in[i])/ldexp(1,QF[kind][i]);}in_++;}}
-// ---- reference: main/pocket/pocket_derby.c js_ser (L != 0 only)
+// ---- reference: main/apps/derby/pocket_derby.c js_ser (L != 0 only)
 static double jr(double a){return floor(a+.5);} // Math.round for the values here
 static bool inr(const double q[2],double U,double V,double e){const double z=q[1]+e*U,x=(q[0]+e*V)/z;return z>.02&&x>-400&&x<640;}
 static void lim(double*lo,double*hi,double c0,double c1){if(c1>0){double v=-c0/c1;if(v>*lo)*lo=v;}else if(c1<0){double v=-c0/c1;if(v<*hi)*hi=v;}else if(c0<0)*hi=-1e9;}

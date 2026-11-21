@@ -50,7 +50,7 @@ elseif(R5SIM_APP STREQUAL "derby")
     set(R5SIM_CHUNK_FILES ${APP_CHUNK_FILES})
     set(R5SIM_APP_JS "${R}/apps/derby/derby_watch.js")
     set(R5SIM_APP_SOURCES "${_g}/app_chunks.c" "${R}/main/pocket/pocket_app_load.c"
-        "${R}/main/pocket/app_registry.c" "${R}/main/pocket/pocket_derby.c" "${R}/main/pocket/derby_ser_int.c"
+        "${R}/main/pocket/app_registry.c" "${R}/main/apps/derby/pocket_derby.c" "${R}/main/apps/derby/derby_ser_int.c"
         "${R}/main/pocket/shiki_memstat.c")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${R}/apps/derby/chunks.txt"
         "${R}/apps/derby/derby_prog.js")
@@ -107,7 +107,7 @@ idf_component_register(
         "${R}/main/pocket/pocket_clock_source.c" "${R}/main/pocket/pocket_clock.c"
         "${R}/main/pocket/pocket_av_playback_source.c" "${R}/main/pocket/pocket_av_output_source.c"
         "${R}/main/pocket/app_view_assets.c" "${R}/main/pocket/app_view_provider.c"
-        "${R}/main/pocket/app_music_view.c" "${R}/main/pocket/app_legacy_presenter.c"
+        "${R}/main/apps/player/app_music_view.c" "${R}/main/pocket/app_legacy_presenter.c"
         "${R}/main/pocket/pocket_kasane.c" "${R}/main/pocket/app_notice.c"
         "${R}/main/ui/kasane/ksn_runtime.c" "${R}/main/ui/kasane/ksn_schema.c"
         "${R}/main/ui/kasane/ksn_schema_session.c" "${R}/main/ui/kasane/ksn_source.c"
@@ -213,7 +213,7 @@ set_property(SOURCE "${R}/main/text/ksn_font.c" "${R}/main/ui/kasane/ksn_render.
 # DERBY's integer series as the firmware builds it (-O2; pocket_derby.c itself
 # stays at this image's -Os, as the r5sim figures before it were taken).
 if(R5SIM_APP STREQUAL "derby")
-    set_property(SOURCE "${R}/main/pocket/derby_ser_int.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
+    set_property(SOURCE "${R}/main/apps/derby/derby_ser_int.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
 endif()
 # Training the native hot/cold profile (TARGET=native train.sh) needs the
 # firmware's object code: a function's profile applies only where its
@@ -221,7 +221,7 @@ endif()
 # functions never matched the firmware's -O2 build and were left as GCC wrote
 # them (docs/vm/qjs-hotcold.md sec.13.7).
 if(POCKET_NATIVE_HOTCOLD STREQUAL "gen")
-    set_property(SOURCE "${R}/main/pocket/pocket_derby.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
+    set_property(SOURCE "${R}/main/apps/derby/pocket_derby.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
 endif()
 if(R5SIM_SHIKI_ROM)
     set_property(SOURCE "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/ui/kasane/ksn_shiki.c"

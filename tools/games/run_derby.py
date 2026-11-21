@@ -24,7 +24,7 @@ then runs:
      150 m deep and f held at 200, so that a panning unit sees it (its face,
      feed and occlusion checked; the side units' faces are not, the screen
      being out of place for them).
-The series run in C, in integers (pocket.derby, main/pocket/pocket_derby.c and
+The series run in C, in integers (pocket.derby, main/apps/derby/pocket_derby.c and
 derby_ser_int.c; the rotation and cull on the PIE path, here the kernels'
 scalar reference derby_ser_pie.c with DERBY_SERPIE_HOST): three runs of the
 64-bit build (MID, and LIGHT and HEAVY panning for every WIDE, the director
@@ -87,7 +87,7 @@ EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c
          "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c",
          # pocket.derby, the series in C (docs/apps/derby-ser-native.md), and
          # its integer path (docs/apps/derby-ser-division.md)
-         "main/pocket/pocket_derby.c", "main/pocket/derby_ser_int.c", "main/pocket/derby_ser_pie.c",
+         "main/apps/derby/pocket_derby.c", "main/apps/derby/derby_ser_int.c", "main/apps/derby/derby_ser_pie.c",
          # pocket.kasane.shiki: the runners and HEAD ON's horses (derby_prog.js @shiki)
          "main/pocket/pocket_shiki_api.c"]
 
@@ -134,7 +134,7 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
                            cwd=ROOT, check=True)
         objects.append(str(obj))
     binary = cache / "test-derby"
-    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
+    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/apps/derby", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     experiment_flags = []
     if camera_cache:
@@ -286,14 +286,14 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
 
 def check_serq(flags: list[str], cases: int = 10000) -> None:
     """Stage S0 of docs/apps/derby-ser-division.md: the integer ser()
-    (main/pocket/derby_ser_int.c, both culls: the scalar one and the PIE
-    kernels' reference, main/pocket/derby_ser_pie.c) against the double series
+    (main/apps/derby/derby_ser_int.c, both culls: the scalar one and the PIE
+    kernels' reference, main/apps/derby/derby_ser_pie.c) against the double series
     on the app's cameras and random ones (tools/games/test_derby_serq.c)."""
     out = CACHE / "test-derby-serq"
     CACHE.mkdir(parents=True, exist_ok=True)
     subprocess.run(["gcc", "-std=gnu11", "-O2", "-g", *flags, "-ffp-contract=off", "-Wall", "-Wextra", "-Werror",
-                    "-DDERBY_SER_CHECK", "-DDERBY_SER_COUNT", "-DDERBY_SERPIE_HOST", "-Imain/pocket",
-                    "tools/games/test_derby_serq.c", "main/pocket/derby_ser_int.c", "main/pocket/derby_ser_pie.c",
+                    "-DDERBY_SER_CHECK", "-DDERBY_SER_COUNT", "-DDERBY_SERPIE_HOST", "-Imain/apps/derby",
+                    "tools/games/test_derby_serq.c", "main/apps/derby/derby_ser_int.c", "main/apps/derby/derby_ser_pie.c",
                     "-lm", "-o", str(out)], cwd=ROOT, check=True)
     print(f"==== integer ser() against the double (test_derby_serq, {cases} random cameras)", flush=True)
     if subprocess.run([str(out), str(cases)], cwd=ROOT).returncode:

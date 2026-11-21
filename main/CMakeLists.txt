@@ -32,12 +32,12 @@ set(POCKET_INPUT_SOURCES "pocket/pocket_input.c")
 set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.c" "system/sys_notify.c" "system/sys_timer.c" "system/sys_ringer.c" "system/sys_wall.c" "pocket/pocket_power.c" "pocket/pocket_clock_source.c" "pocket/pocket_clock.c" "pocket/pocket_mutex_arena.c" "pocket/pocket_av_output_source.c" "pocket/pocket_av_playback_source.c")
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
-set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c")
+set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "apps/player/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c")
 list(APPEND KASANE_SOURCES
     "hone/hone_frame.c" "hone/aynm_mesh.c"
     "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
     "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
-    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "pocket/pocket_derby.c" "pocket/derby_ser_int.c" "pocket/derby_ser_pie.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "apps/derby/pocket_derby.c" "apps/derby/derby_ser_int.c" "apps/derby/derby_ser_pie.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
@@ -570,13 +570,13 @@ set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn
 set_source_files_properties(pocket/pocket_shiki_frame.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
-set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(apps/derby/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # The ser() PIE kernels (CONFIG_POCKET_DERBY_SER_PIE, default y; empty when
 # off): their scalar reference is timed against them, at pocket_derby.c's level.
-set_source_files_properties(pocket/derby_ser_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(apps/derby/derby_ser_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 # Its integer path (docs/apps/derby-ser-division.md sec.4): integers only but
 # for the chord tables' doubles, made once a series.
-set_source_files_properties(pocket/derby_ser_int.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(apps/derby/derby_ser_int.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # pocket.shapes: the same scan conversion on host and device (no fused madd.s).
 set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # Shiki (docs/kasane/shiki-spec.md): integer engine; the only floating point is
@@ -584,7 +584,7 @@ set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O
 # for bit, so no contraction there either.
 set_source_files_properties(ui/kasane/ksn_shiki.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
-    set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+    set_property(SOURCE apps/derby/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
 
 # The VM probe (docs/vm/quickjs-freertos-vm-spec.md sec.5), off by default

@@ -34,7 +34,7 @@
 #include "pocket_av.h"
 #include "pocket_video_sd_stream.h"
 #ifdef KASANE_P0_PROBE
-#include "pocket/app_music_view.h"
+#include "apps/apps.h"
 #include "pocket_mutex_arena.h"
 #include "ui/kasane/ksn_schema_session.h"
 #endif

@@ -1,6 +1,6 @@
 # DERBY WATCH: `ser()` の除算と倍精度をやめる設計（固定小数、PIE の扱い）
 
-2026-11-13、設計（SLOW）。**同日、S0・S1 と S2 の `view()` を実装した（§10、STEADY）: r5sim の重い WIDE 2 は 229,120 → 145,550 カウント/ターン（−36.5%、実測）、実機は未測定。** **§12: 実機で差が見えなかった件の診断（直線のコースでは r5sim −9.0%、計装 `DERBY_SER`）。**[derby-ser-cost.md](derby-ser-cost.md) の続きで、重い CAM WIDE 2 の `pocket.derby.ser()`（`main/pocket/pocket_derby.c`）の倍精度の計算（r5sim で 1 ターン約 76k カウント、実機換算の推定で約 3.7 ms）を減らす方法を比べ、推奨と段階を決める。
+2026-11-13、設計（SLOW）。**同日、S0・S1 と S2 の `view()` を実装した（§10、STEADY）: r5sim の重い WIDE 2 は 229,120 → 145,550 カウント/ターン（−36.5%、実測）、実機は未測定。** **§12: 実機で差が見えなかった件の診断（直線のコースでは r5sim −9.0%、計装 `DERBY_SER`）。**[derby-ser-cost.md](derby-ser-cost.md) の続きで、重い CAM WIDE 2 の `pocket.derby.ser()`（`main/apps/derby/pocket_derby.c`）の倍精度の計算（r5sim で 1 ターン約 76k カウント、実機換算の推定で約 3.7 ms）を減らす方法を比べ、推奨と段階を決める。
 
 利用者の方針（2026-11-13）: 有望さは (c) 固定小数・整数 ＞ (b) float32 ＞ (d) 構造の変更 ＞ (a) ビット一致のまま。**精度にはこだわらない**（画素と oracle のビット一致は必須ではない）。(c) で作れるなら PIE も一緒に考える。PIE の実証は実機で行い、asm を書くときは esp32s3-hw MCP を使う。
 
@@ -296,9 +296,9 @@ fuzz は今と同じ分布で回す。`L = 0` の呼び出しは倍精度の経�
 
 | ファイル | 中身 |
 | --- | --- |
-| `main/pocket/derby_ser_pie.h` | 入力の形（int16 の SoA、8 端ずつのブロック、16 B 整列）、定数の並び、範囲、API |
-| `main/pocket/derby_ser_pie.c` | 設定（スカラー: Q16/Q30 → Q3/Q14、範囲の検査、`valid`、定数の計算）、**スカラーの整数の参照**（`dsp_rotate_ref`・`dsp_cull_ref`。これが仕様）、**PIE の核**（`dsp_rotate_pie`・`dsp_cull_pie`、C の中の asm）、実機の自己検査（`dsp_selftest`） |
-| `main/pocket/derby_ser_pie_vec.h` | 固定の検査ベクトル（DERBY の楕円の弦の端 19 個、LCG のカメラ）と、`pocket_derby.c` の `ou()` の倍精度の写し。実機と host が同じ入力を使う |
+| `main/apps/derby/derby_ser_pie.h` | 入力の形（int16 の SoA、8 端ずつのブロック、16 B 整列）、定数の並び、範囲、API |
+| `main/apps/derby/derby_ser_pie.c` | 設定（スカラー: Q16/Q30 → Q3/Q14、範囲の検査、`valid`、定数の計算）、**スカラーの整数の参照**（`dsp_rotate_ref`・`dsp_cull_ref`。これが仕様）、**PIE の核**（`dsp_rotate_pie`・`dsp_cull_pie`、C の中の asm）、実機の自己検査（`dsp_selftest`） |
+| `main/apps/derby/derby_ser_pie_vec.h` | 固定の検査ベクトル（DERBY の楕円の弦の端 19 個、LCG のカメラ）と、`pocket_derby.c` の `ou()` の倍精度の写し。実機と host が同じ入力を使う |
 | `tools/pie/models/derby_cull_model.c` | 第 1 層（算術）: 整数の除外が倍精度の `ou()` の安全側か（`run_models.py derbycull`） |
 | `tools/pie/test_derby_ser_pie.py`、`tools/pie/derby_ser_pie_dump.c` | 第 2 層（asm）: `piesim.py` で asm を実行し、参照と全ビット比較 |
 | `tools/pie/piesim.py`・`stalls.py` | `WUR.SAR_BYTE`・`EE.ZERO.ACCX`・`EE.VMULAS.S16.ACCX`・`RUR.ACCX_0`・`S8I` を足した（ACCX は QACC と別の 40 ビットのレジスタとして持つ。TRM p.45） |
@@ -344,7 +344,7 @@ fuzz は今と同じ分布で回す。`L = 0` の呼び出しは倍精度の経�
 | 算術（`python3 tools/pie/run_models.py derbycull`） | 整数の除外が「外」と言った弦は、倍精度の `ou()` も「外」か。自己検査のベクトル 20 万ケースと、範囲の端の広いベクトル 20 万ケース（`f` 1〜4,090 px、`m` 0〜64 m、`w` ±128 m、カメラ 2,900 m まで外れ） | 240 万呼び出し、範囲の中の弦 3,354 万本で**安全側でない判定 0**。端の値の誤差は最大 2.38（回転）・3.65（`w` を足した後）Q3 単位で、予算 4.4 の中。倍精度が外とした弦のうち、整数が余白のために残したのは 0.39% |
 | asm（`python3 tools/pie/test_derby_ser_pie.py`） | `piesim.py` で asm の文字列そのものを実行し、参照と比較。幾何のベクトル 512 ケース（実機と同じ）と、ランダムなレーン・定数のベクトル 512 ケース（弦 32 本、全部 `valid`。幾何では起きにくい「片端が手前・片端が奥」なども作る） | 回転 1,024 ケース・除外 6,144 呼び出しで**不一致 0**。命令数（実行した数）: 端のブロック 4 で回転 100・除外 224、5 で 124・279 |
 | 検査が効くか | 核に 8 種類の誤りを 1 つずつ入れて同じ検査を回した（手前のビットを奥と同じにする、右の面の `−F·l` を 1 回にする、回転の符号、奥の比較の向き、`SAR_BYTE = 0`、`AND` → `OR`、左右の重みの入れ替え、前のブロックを更新しない） | **8 種類とも検出。** 最初の 1 つは幾何のベクトルだけでは見逃したので、ランダムなベクトルを足した |
-| 停止（`python3 tools/pie/stalls.py main/pocket/derby_ser_pie.c "uint32_t dsp_cull_pie("`、回転も同様） | 表 1.7-2 の QR の段 | 両方とも 0。MCP `analyze_sequence` は除外の本体に QACC の停止 4 を予測するが、4 つとも `VMULAS.S16.QACC → SRCMB.S16.QACC` で、MCP `measured_timing`（実機）は 0 サイクル |
+| 停止（`python3 tools/pie/stalls.py main/apps/derby/derby_ser_pie.c "uint32_t dsp_cull_pie("`、回転も同様） | 表 1.7-2 の QR の段 | 両方とも 0。MCP `analyze_sequence` は除外の本体に QACC の停止 4 を予測するが、4 つとも `VMULAS.S16.QACC → SRCMB.S16.QACC` で、MCP `measured_timing`（実機）は 0 サイクル |
 | アセンブラ | 使った命令すべてを MCP `check_asm`（binutils 2.45, esp-15.2.0_20251204）で組めることを確認。MCP `manual_errata` の 6 命令（`EE.VLDBC.32.IP`・`MV.QR` ほか）は使っていない（コピーは `MV.QR` ではなく `EE.ORQ q7, q2, q2`）。`EE.SRC.Q` の第 1 被演算子が下位（MCP `example_measured_semantics`、実機）。`SAR_BYTE` は独立の 4 ビットのレジスタで `WUR.SAR_BYTE` で書く（TRM p.47・p.64）。ファームを ON で組んで通る（§10.6） |
 | 実機 | 下の自己検査 | **未実施**（親の作業者が broker で取る） |
 
@@ -395,7 +395,7 @@ SERPIE ok=3072 mismatch=0 scalar_cy=8967 pie_cy=1908 rot_mismatch=0 unsafe=0 cas
 
 ### 11.1 入れたもの
 
-- **`main/pocket/derby_ser_int.c`・`derby_ser_int.h`（新規）**: QuickJS に依存しない整数の系列。§4 のとおり位置 Q16・向き Q30・64 ビットの積、系列ごとの弦の表（最初の呼び出しで倍精度の `pose()` から作る。1 系列 18 本 × 32 B、8 系列まで、いちばん古いものを捨てる）、`lim()` の 4 面（符号の違う面だけ除算 1 回）、LOD（`isqrt` は正確な床。§11.3）、draw の入力を plan の Q 形式のまま `pocket_proc_draw_fixed()` へ。
+- **`main/apps/derby/derby_ser_int.c`・`derby_ser_int.h`（新規）**: QuickJS に依存しない整数の系列。§4 のとおり位置 Q16・向き Q30・64 ビットの積、系列ごとの弦の表（最初の呼び出しで倍精度の `pose()` から作る。1 系列 18 本 × 32 B、8 系列まで、いちばん古いものを捨てる）、`lim()` の 4 面（符号の違う面だけ除算 1 回）、LOD（`isqrt` は正確な床。§11.3）、draw の入力を plan の Q 形式のまま `pocket_proc_draw_fixed()` へ。
 - **`view()` も整数に（S2 の前半）**: 弦の端の姿勢（Q16 の位置、Q14・Q30 の接線）を `course()` で 1 回だけ作り、毎フレームはカメラとの差を Q3 の int16 に落として回転し、弦の除外（`ou()`）を int16 の列の上で行う。結果は視野の弦のビットの集合（`qvc`）。`ser()` も同じ除外を系列ごとに使う。
 - **PIE の境目**（§6.3、並行の PIE の作業向け）: `derby_ends_soa`（SoA、16 B 整列、レーンは 8 の倍数）と、スカラーの参照 `derby_ser_rotate_ref()`（回転と 1 レーンずらした写し）・`derby_ser_cull_ref()`（4 面の判定 → 残す弦のマスク）。どちらも床のシフトと飽和を含めて整数で定義してあり（ヘッダのコメント）、PIE の核はこの 2 つと全入力でビット一致すれば差し替えられる。±10 km の端（Q3 の範囲外、「wide」）に触れる弦は核に渡さず、`derby_ser_cull_wide()`（int64・Q16）で判定する。除外の余白は `m + 3 m`（Q3 の位置・Q14 の向き・Q3 の `f` の誤差の和を上から抑えた値）で、倍精度の `ou()` が残す弦は必ず残す（host で 0 本の取りこぼし。候補は約 4% 増える）。
 - **倍精度の経路はそのまま残した**: `pocket.derby.mode(1)` で `view()` から先が前の倍精度の経路になる（`ser()` の弦の本体は関数 `ser_chord()` に切り出しただけで、式と順は同じ）。整数の範囲外の呼び出し（`L = 0`、`s` が 0.25〜32 m の外、カメラが ±6,000 m の外、`f` が 32〜4,095 px の外、plan の Q 形式が想定と違う）は、整数の `view()` の後でも倍精度で描く（候補は整数の除外のマスク）。
@@ -571,7 +571,7 @@ SERPIE ok=3072 mismatch=0 scalar_cy=8967 pie_cy=1908 rot_mismatch=0 unsafe=0 cas
 
 ### 12.5 入れたもの
 
-- **`CONFIG_POCKET_DERBY_SER_PROBE`（既定 n）**: `main/pocket/pocket_derby.c` に計数と時間。既定の像では何も入らない（`SERP()`・`SERP_DRAW()` は空、関数表も前のまま。既定の像は Flash Code +4 B（下の直しの分）、DIRAM 0、実測）。ON の像は `KASANE_PAINT` の行の直後に 1 行:
+- **`CONFIG_POCKET_DERBY_SER_PROBE`（既定 n）**: `main/apps/derby/pocket_derby.c` に計数と時間。既定の像では何も入らない（`SERP()`・`SERP_DRAW()` は空、関数表も前のまま。既定の像は Flash Code +4 B（下の直しの分）、DIRAM 0、実測）。ON の像は `KASANE_PAINT` の行の直後に 1 行:
 
   ```
   DERBY_SER mode=INT ticks=30 views=30/0 vfb=mode:0,qok:0,pos:0,f:0,zf:0 int=150 dbl=0
@@ -592,7 +592,7 @@ SERPIE ok=3072 mismatch=0 scalar_cy=8967 pie_cy=1908 rot_mismatch=0 unsafe=0 cas
 
 broker は既定の Kconfig でしか組めないので、一時の `measure:` コミットでマクロを直接立てる（`sdkconfig` が残っていても効く）。
 
-1. **像 M1（計装）**: `main/pocket/pocket_derby.h` の `#ifdef ESP_PLATFORM` の直前に `#define POCKET_DERBY_SER_PROBE 1` を 1 行足したコミット（`measure: DERBY_SER probe`）。`main/Kconfig.projbuild` の `POCKET_DERBY_SER_PROBE` の `default n` を `y` にしても同じだが、ビルドディレクトリの `sdkconfig` に `# … is not set` が残っていると効かない。
+1. **像 M1（計装）**: `main/apps/apps.h` の `#ifdef ESP_PLATFORM` の直前に `#define POCKET_DERBY_SER_PROBE 1` を 1 行足したコミット（`measure: DERBY_SER probe`）。`main/Kconfig.projbuild` の `POCKET_DERBY_SER_PROBE` の `default n` を `y` にしても同じだが、ビルドディレクトリの `sdkconfig` に `# … is not set` が残っていると効かない。
 2. broker の `app_session` で DERBY を開き、デモのレースを待つ。レースの間 `KASANE_PAINT` の直後に `DERBY_SER` が出る（パンの無い窓では出ない）。
 3. WIDE 1/2/3 の間に `up` を押して `DERBY AB DOUBLE`、もう 1 回で `INT`。切り替えた直後の 1 窓は捨てる（`views=` が両方 0 でない窓）。
 4. 読む値:
@@ -601,7 +601,7 @@ broker は既定の Kconfig でしか組めないので、一時の `measure:` �
    - 幾何のサイクル `int_cy − int_draw` と `dbl_cy − dbl_draw`（1 フレーム）。r5sim の見込み（直線、推定）は整数が倍精度より約 0.5 ms（約 12 万サイクル）少ない。
    - `int_ist − int_ist(draw)` と `dbl_ist − dbl_ist(draw)`: 幾何の命令フェッチの停止。`int_insn` が `dbl_insn` より大きく減っているのに `cy` が減っていなければ、停止の分が食っている。
    - `ticks` が `views` より多い窓は、フレームが予算で続きに分かれている（`turn_ms` の分母が増える）。
-5. **像 M2（IRAM、M1 で幾何のサイクルが減っていなかったときだけ）**: M1 に加えて `main/pocket/derby_ser_int.h` の先頭（`#include` より前）に `#define POCKET_DERBY_SER_IRAM 1`。同じ手順で、整数の幾何のサイクルと `int_ist` を M1 と比べる（像が違うので配置の揺れ ±15% がある。比べるのは同じ像の中の倍精度との差）。
+5. **像 M2（IRAM、M1 で幾何のサイクルが減っていなかったときだけ）**: M1 に加えて `main/apps/derby/derby_ser_int.h` の先頭（`#include` より前）に `#define POCKET_DERBY_SER_IRAM 1`。同じ手順で、整数の幾何のサイクルと `int_ist` を M1 と比べる（像が違うので配置の揺れ ±15% がある。比べるのは同じ像の中の倍精度との差）。
 6. 終わったら通常の像に戻す。
 
 ### 12.7 確信の低い点
@@ -623,7 +623,7 @@ broker は既定の Kconfig でしか組めないので、一時の `measure:` �
 
 ### 13.1 入れたもの
 
-- **PIE の核を `view()`・`ser()` につないだ**（`main/pocket/pocket_derby.c`）。`course()` で `dsp_set_course()`（法線は `qt30` の (−tz, tx)）、`view()` で `dsp_set_camera()` と `dsp_rotate_pie()` を 1 回、`ser()` ごとに `dsp_cull_consts()` ＋ `dsp_cull_pie()`。核の範囲（端がカメラから ±2,047 m）の外の弦（楕円の ±10 km の直線の弦 0・17 と、カメラが遠いときの弦）は `E.valid` から外れ、今までどおり `derby_ser_cull_wide()`（int64、Q16）で判定する。核のレーン（`dsp_ends` 656 B と回転の定数 16 B）は `course()` の塊の中に手で 16 B 整列して置いた（malloc の整列はそれより小さい）。
+- **PIE の核を `view()`・`ser()` につないだ**（`main/apps/derby/pocket_derby.c`）。`course()` で `dsp_set_course()`（法線は `qt30` の (−tz, tx)）、`view()` で `dsp_set_camera()` と `dsp_rotate_pie()` を 1 回、`ser()` ごとに `dsp_cull_consts()` ＋ `dsp_cull_pie()`。核の範囲（端がカメラから ±2,047 m）の外の弦（楕円の ±10 km の直線の弦 0・17 と、カメラが遠いときの弦）は `E.valid` から外れ、今までどおり `derby_ser_cull_wide()`（int64、Q16）で判定する。核のレーン（`dsp_ends` 656 B と回転の定数 16 B）は `course()` の塊の中に手で 16 B 整列して置いた（malloc の整列はそれより小さい）。
 - **`CONFIG_POCKET_DERBY_SER_PIE` は既定 y。** 自己検査（`dsp_selftest`、`SERPIE` の行）は新しい `CONFIG_POCKET_DERBY_SER_PIE_SELFTEST`（既定 n）の後ろに移した。検査の写し（`.bss` 約 1.5 KB）も一緒に外れるので、製品の像の DIRAM は変わらない（§13.4）。
 - **`dsp_set_camera()` に `stride` を足した**（端の位置を `qpos[i][0]`・`qpos[i][1]` の組からそのまま読む。道具の 2 か所は `stride = 1`）。
 - **`dsp_cull_consts()` から 64 ビットの除算を外した。** `ser()` 1 回に 1 回（1 フレーム 6 回）呼ぶので、`ceil_div`・`floor_div`（int64、ROM の `__divdi3`）を、正の値の切り上げのシフトと 32 ビットの除算 1 回（`quos`）に書き換えた。値は式どおりの床・天井で、元の式と 1,820 万ケースで全部一致（host、実測）。関数は 613 → 309 B、ELF の中の呼び出しは `memset` だけ（`objdump`、実測）。
@@ -699,7 +699,7 @@ r5sim は**スカラーの経路**（PIE の核は走らない）。前（`a3efd
 1. 通常の像を焼く。broker の `app_session` で DERBY を開き、15 秒待ってデモのレースを始めさせる。
 2. レースの WIDE 1/2/3 の間に `action: up` を押す。ログに `DERBY AB SCALAR`、もう 1 回で `DERBY AB PIE`。broker の up はデモを止めない。
 3. 切り替えの直後の 1 窓を捨て、A・B を交互に 4 窓以上取り、draws の揃う窓どうしで `KASANE_PAINT turn_ms` の中央値を比べる。差は窓の揺れより小さい見込み（§13.5）。見た目は両方で同じはず（host で画素一致）。
-4. **計装 `DERBY_SER` を取るには、一時の `measure:` コミットが要る。** broker は既定の Kconfig でしか組めないので、`main/pocket/pocket_derby.h` の `#ifdef ESP_PLATFORM` の行の**直前**に次の 1 行を足したコミットを作る（§12.6 と同じ。ビルドディレクトリの `sdkconfig` の `# … is not set` に左右されない）:
+4. **計装 `DERBY_SER` を取るには、一時の `measure:` コミットが要る。** broker は既定の Kconfig でしか組めないので、`main/apps/apps.h` の `#ifdef ESP_PLATFORM` の行の**直前**に次の 1 行を足したコミットを作る（§12.6 と同じ。ビルドディレクトリの `sdkconfig` の `# … is not set` に左右されない）:
 
    ```c
    #define POCKET_DERBY_SER_PROBE 1
@@ -803,13 +803,13 @@ r5sim は**スカラーの経路**（PIE の核は走らない）。前（`a3efd
 
 ### 14.6 実機の手順（親が broker で。既定の Kconfig の像）
 
-1. 一時の `measure:` コミットで、`main/pocket/pocket_derby.h` の `#ifdef ESP_PLATFORM` の行の**直前**に `#define POCKET_DERBY_SER_PROBE 1` を足す（§13.6 と同じ）。焼いて、broker の `app_session` で DERBY を開き、楕円のレースの WIDE 2 を待つ。
+1. 一時の `measure:` コミットで、`main/apps/apps.h` の `#ifdef ESP_PLATFORM` の行の**直前**に `#define POCKET_DERBY_SER_PROBE 1` を足す（§13.6 と同じ）。焼いて、broker の `app_session` で DERBY を開き、楕円のレースの WIDE 2 を待つ。
 2. `DERBY_SER` の行で見るもの（`X/Y` は PIE/スカラー）:
    - `rot_cy`・`cull_cy`: 両方の経路の同じフレームの値。**順番を毎フレーム入れ替えるので、§13.x の数字（いつも PIE が先）とは直接比べない。**
    - **`first_cy`: その経路が先に走ったフレームだけの「回転＋バッチの除外」。製品の像の値に近い。見込みは PIE 約 30〜32k、スカラー 約 36〜38k（§14.5）。PIE < スカラー なら目標は達した。**
    - `cull1_cy`: バッチの最初の除外（冷えた 1 回）。`cull_cy` の大半がここに出れば、§14.1 の「冷えたラインが支配」の確認になる（見込み: PIE の `cull1_cy` は `cull_cy` の 6〜8 割）。
    - `pre=<表>/<その場>`: 楕円で `pre` の左がほぼ全部（窓あたり `ser` の数 − 最初のフレームの 4）。`culls` は 1 フレーム 5（前は 6）、`chords`・`draws` は §13.x と同じ形。
-3. IRAM の効き目を見たいときは、同じ `measure:` コミットに `main/pocket/derby_ser_pie.h` の `#if defined(CONFIG_POCKET_DERBY_SER_PIE_IRAM)` の行の直前へ `#define POCKET_DERBY_SER_PIE_IRAM 1` を足した像をもう 1 つ作る。見込みは PIE の `first_cy` 約 17〜19k（スカラーは変わらない）。
+3. IRAM の効き目を見たいときは、同じ `measure:` コミットに `main/apps/derby/derby_ser_pie.h` の `#if defined(CONFIG_POCKET_DERBY_SER_PIE_IRAM)` の行の直前へ `#define POCKET_DERBY_SER_PIE_IRAM 1` を足した像をもう 1 つ作る。見込みは PIE の `first_cy` 約 17〜19k（スカラーは変わらない）。
 4. 測り終えたら `measure:` コミットを取り消す。
 
 ### 14.7 確信の低い点

@@ -1,5 +1,5 @@
 /* Host side of tools/pie/test_derby_ser_pie.py: runs the scalar reference of
- * main/pocket/derby_ser_pie.c on the shared vectors (derby_ser_pie_vec.h) and
+ * main/apps/derby/derby_ser_pie.c on the shared vectors (derby_ser_pie_vec.h) and
  * prints, per case, the kernel inputs and the reference outputs as integers,
  * so piesim.py can run the asm on the same inputs and compare.
  *
@@ -15,8 +15,8 @@
 #define DERBY_SERPIE_HOST 1
 #include <stdio.h>
 #include <stdlib.h>
-#include "../../main/pocket/derby_ser_pie.c"
-#include "../../main/pocket/derby_ser_pie_vec.h"
+#include "../../main/apps/derby/derby_ser_pie.c"
+#include "../../main/apps/derby/derby_ser_pie_vec.h"
 
 int main(int argc, char **argv) {
     const unsigned n = argc > 1 ? (unsigned)atoi(argv[1]) : 512;

@@ -1,5 +1,5 @@
 #include "app_view_provider.h"
-#include "app_music_view.h"
+#include "apps/apps.h"
 #include <string.h>
 
 /* Composition root: Kasane consumes only the type-erased provider contract. */

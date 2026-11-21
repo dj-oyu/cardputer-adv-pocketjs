@@ -52,7 +52,7 @@ endfunction()
 # trains and the firmware lay out the same files.
 set(POCKET_NATIVE_HOTCOLD_FILES
     ui/kasane/ksn_shiki.c pocket/pocket_kasane.c ui/kasane/ksn_core.c pocket/pocket_shiki_frame.c
-    pocket/pocket_shiki_api.c pocket/derby_ser_int.c pocket/pocket_derby.c ui/kasane/ksn_view.c
+    pocket/pocket_shiki_api.c apps/derby/derby_ser_int.c apps/derby/pocket_derby.c ui/kasane/ksn_view.c
     pocket/pocket_input.c)
 
 # pocket_native_hotcold(<main dir>): the launcher on main's sources, when

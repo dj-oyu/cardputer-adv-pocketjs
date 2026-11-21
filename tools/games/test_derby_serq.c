@@ -1,4 +1,4 @@
-/* The integer pocket.derby.ser() (main/pocket/derby_ser_int.c) against the
+/* The integer pocket.derby.ser() (main/apps/derby/derby_ser_int.c) against the
  * double series on the host: docs/apps/derby-ser-division.md stage S0 (sec.4.3,
  * sec.5). Grown from the design's prototype (tools/games/serq_proto/serq.c):
  * the double side is pocket_derby.c's ser() as it was (VE/VC, ou(), lim(),
@@ -14,7 +14,7 @@
  * matched both ways (nearest point, max of |dx|, |dy|, on-screen points only).
  *
  * The cull runs on both integer paths, the PIE kernels' (their scalar
- * reference, main/pocket/derby_ser_pie.c with DERBY_SERPIE_HOST: margin
+ * reference, main/apps/derby/derby_ser_pie.c with DERBY_SERPIE_HOST: margin
  * m + 1 m) and the scalar one (derby_ser_int.c: m + 3 m); the integer side
  * draws with the PIE path's, the product's default (sec.13).
  *
@@ -25,8 +25,8 @@
  * nothing, and calls with a point over 2 px apart (a tie flipped: one post
  * or stripe) at most 1 in 10,000. The distances are recorded, not gated.
  *
- *   gcc -O2 -DDERBY_SER_CHECK -DDERBY_SER_COUNT -DDERBY_SERPIE_HOST -Imain/pocket tools/games/test_derby_serq.c \
- *       main/pocket/derby_ser_int.c main/pocket/derby_ser_pie.c -lm -o test-derby-serq && ./test-derby-serq [fuzz cases]
+ *   gcc -O2 -DDERBY_SER_CHECK -DDERBY_SER_COUNT -DDERBY_SERPIE_HOST -Imain/apps/derby tools/games/test_derby_serq.c \
+ *       main/apps/derby/derby_ser_int.c main/apps/derby/derby_ser_pie.c -lm -o test-derby-serq && ./test-derby-serq [fuzz cases]
  * (tools/games/run_derby.py builds and runs it with 10,000 fuzz cases; the
  * full 40,000 of the design's table by hand.) */
 #include "derby_ser_int.h"

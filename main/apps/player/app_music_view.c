@@ -1,4 +1,4 @@
-#include "app_music_view.h"
+#include "apps/apps.h"
 #include "app_legacy_presenter.h"
 #include "pocket_api.h"
 #include "pocket_av.h"

@@ -79,7 +79,7 @@ r5sim は flash の待ちが無く、Shiki の engine を C のモデルで回�
 
 ## 6. A・B を入れた（2026-11-13、ブランチ `derby-ser-hoist`、`106bee4` から）
 
-`main/pocket/pocket_derby.c` の 2 か所。どちらも同じ式を同じ順で、計算する場所だけを動かした（ビット単位で同じ）。
+`main/apps/derby/pocket_derby.c` の 2 か所。どちらも同じ式を同じ順で、計算する場所だけを動かした（ビット単位で同じ）。
 
 - **A:** `view` の構造体に `fr` を足し、`aim()` が `pc[4]` を決めた直後に `fr = sqrt(pc[4]*pc[4]+25600)` を 1 回。`ou()` は `k = m*view.fr`。`ou()` が呼ばれるのは `view()` と `ser()` の中だけで、どちらも `aim()` の後（`cam.aimed`・`view.set` の判定）なので、`fr` が古いことは無い。host の fuzz（4,000 カメラ × 8）も `S.aim()` を通る。
 - **B:** `ser()` の入口で `zp = zf/pc[4]`、`lim()` の 2 本目は `zp - q[1]`。
