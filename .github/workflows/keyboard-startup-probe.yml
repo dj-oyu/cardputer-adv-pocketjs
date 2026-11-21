@@ -80,6 +80,11 @@ jobs:
           # this pin was taken and is default y since the device A/B.
           # POCKET_NATIVE_HOTCOLD (the same layout on main/, qjs-hotcold.md
           # sec.13, default y) is dropped likewise.
+          # CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y (sdkconfig.defaults,
+          # the non-debug firmware of PR 137, docs/vm/upstream-v018.md) moved the
+          # pin: the assertion choice, the three ASSERTION_LEVELs 2 -> 0 and
+          # LWIP_ESP_LWIP_ASSERT. The old pin reproduces from the same tree with
+          # only that defaults line removed; this one locally and in CI at d57ce0d.
           lines=(b/'sdkconfig').read_text().splitlines(keepends=True)
           for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set',('# CONFIG_POCKET_VM_QJS_HOTCOLD is not set','CONFIG_POCKET_VM_QJS_HOTCOLD=y'),('# CONFIG_POCKET_NATIVE_HOTCOLD is not set','CONFIG_POCKET_NATIVE_HOTCOLD=y'), '# CONFIG_POCKET_KASANE_AB is not set', '# CONFIG_POCKET_FIXED_RANDOM_SEED is not set', '# CONFIG_POCKET_SHIKI_DEBUG is not set', ('# CONFIG_POCKET_DERBY_SER_PIE is not set', 'CONFIG_POCKET_DERBY_SER_PIE=y'), '# CONFIG_POCKET_DERBY_SER_PIE_IRAM is not set', '# CONFIG_POCKET_DERBY_SER_PIE_SELFTEST is not set', '# CONFIG_POCKET_DERBY_SER_PROBE is not set', '# CONFIG_POCKET_DERBY_SER_IRAM is not set'):
               i=next(i for i,l in enumerate(lines) if l.startswith(off))
@@ -100,7 +105,7 @@ jobs:
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
           digest=hashlib.sha256(''.join(lines).encode()).hexdigest();print('sdkconfig pin',digest)
-          assert digest=='40794fa4e16f09ef6449a01a7c6bd8c6ff17a91b472b2c4eaf184102a5bc9c24'
+          assert digest=='6ee0da722e4c304186d67ad1f471ce77a109b9058ac6e5149778c1b51067d325'
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
           for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
