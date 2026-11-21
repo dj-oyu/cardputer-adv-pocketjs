@@ -1,0 +1,135 @@
+TURNPERF on pocketjs main d3300996 (docs/vm/turn-cpi.md sec.6), 2026-11-21. All figures measured on the device.
+Build: the broker's variant sdkconfig.variant.turnperf (CONFIG_POCKET_VM_TURNPERF=y, CONFIG_POCKET_FIXED_RANDOM_SEED=y)
+of d3300996 (fork ff809dd, non-debug firmware), firmware sha256 35dbdf6d19f349029e93e9e0362155c8ca717717ff60b998871d3c6d35aa1cda.
+Same Cardputer as docs/vm/upstream-v018.md sec.9. app_session start=fresh, no input: local.stress 30 s (tp-stress-1),
+local.derby 45 s twice (tp-derby-1, tp-derby-2); the event rotation carries over between sessions.
+Each line: one 30-turn window of the ordinary turn; PM0 = cycles (cy), PM1 = the named event (ev).
+Windows are sorted by phase from the app's own log lines (DERBY: pad = paddock before DEMO START,
+race = after DERBY GO). Windows that straddle a launch or a phase change are listed apart and not used.
+
+==== STRESS LV1 (one full rotation)
+insn cy=41526085 ev=20692989 n=30 us=177439 cont_n=1 cont_us=833
+istall cy=36747127 ev=11380043 n=30 us=157517 cont_n=0 cont_us=0
+dstall cy=37157807 ev=1002955 n=30 us=159562 cont_n=0 cont_us=0
+bubbles cy=37109734 ev=6566377 n=30 us=158870 cont_n=0 cont_us=0
+exr cy=37024520 ev=32070 n=30 us=159008 cont_n=0 cont_us=0
+icachemiss cy=37120983 ev=0 n=30 us=159293 cont_n=0 cont_us=0
+istall_miss cy=36955878 ev=0 n=30 us=159211 cont_n=0 cont_us=0
+istall_busy cy=37170637 ev=10785714 n=30 us=160106 cont_n=0 cont_us=0
+istall_pif cy=36988825 ev=0 n=30 us=159750 cont_n=0 cont_us=0
+istall_run cy=37026098 ev=0 n=30 us=159909 cont_n=0 cont_us=0
+istall_unc cy=36992680 ev=0 n=30 us=160307 cont_n=0 cont_us=0
+istall_l32r cy=36936735 ev=1209118 n=30 us=160008 cont_n=0 cont_us=0
+istall_idiv cy=36902152 ev=27275 n=30 us=160167 cont_n=0 cont_us=0
+istall_imul cy=36757999 ev=0 n=30 us=159814 cont_n=0 cont_us=0
+dstall_busy cy=37142034 ev=967598 n=30 us=162069 cont_n=0 cont_us=0
+dstall_pif cy=37231643 ev=0 n=30 us=162385 cont_n=0 cont_us=0
+dstall_sbuf cy=36967818 ev=60 n=30 us=161729 cont_n=0 cont_us=0
+dstall_bank cy=36905556 ev=23365 n=30 us=161170 cont_n=0 cont_us=0
+regdep cy=37150617 ev=918549 n=30 us=163184 cont_n=0 cont_us=0
+cti cy=37365195 ev=5780078 n=30 us=164132 cont_n=0 cont_us=0
+memw cy=37072783 ev=1055 n=30 us=163186 cont_n=0 cont_us=0
+exr_window cy=36838150 ev=38897 n=30 us=161653 cont_n=0 cont_us=0
+exr_replay cy=37592680 ev=207 n=30 us=162631 cont_n=0 cont_us=0
+load cy=37091805 ev=3865504 n=30 us=159158 cont_n=0 cont_us=0
+imem_hit cy=37144966 ev=0 n=30 us=159822 cont_n=0 cont_us=0
+insn_jx cy=36781095 ev=65879 n=30 us=158075 cont_n=0 cont_us=0
+insn_brj cy=36862683 ev=2091581 n=30 us=158770 cont_n=0 cont_us=0
+insn_callret cy=37110369 ev=627892 n=30 us=159996 cont_n=0 cont_us=0
+insn_ntaken cy=37187825 ev=1119698 n=30 us=160658 cont_n=0 cont_us=0
+
+==== DERBY paddock (steady windows of both sessions)
+dstall cy=21302251 ev=920121 n=30 us=90642 cont_n=0 cont_us=0
+bubbles cy=21224778 ev=2613588 n=30 us=90316 cont_n=0 cont_us=0
+exr cy=21159023 ev=14943 n=30 us=90038 cont_n=0 cont_us=0
+icachemiss cy=21403528 ev=0 n=30 us=91094 cont_n=0 cont_us=0
+istall_miss cy=21180775 ev=0 n=30 us=90139 cont_n=0 cont_us=0
+istall_busy cy=21145840 ev=11501886 n=30 us=89990 cont_n=0 cont_us=0
+istall_pif cy=21144675 ev=0 n=30 us=89989 cont_n=0 cont_us=0
+istall_run cy=21150066 ev=0 n=30 us=90001 cont_n=0 cont_us=0
+istall_unc cy=21162109 ev=0 n=30 us=90062 cont_n=0 cont_us=0
+istall_l32r cy=21138863 ev=915749 n=30 us=89964 cont_n=0 cont_us=0
+istall_idiv cy=21282227 ev=77795 n=30 us=90568 cont_n=0 cont_us=0
+istall_imul cy=21389300 ev=0 n=30 us=91007 cont_n=0 cont_us=0
+dstall_busy cy=21446868 ev=922520 n=30 us=91242 cont_n=0 cont_us=0
+dstall_sbuf cy=21049032 ev=1 n=30 us=89585 cont_n=0 cont_us=0
+dstall_bank cy=21251232 ev=3013 n=30 us=90701 cont_n=0 cont_us=0
+regdep cy=21287824 ev=384436 n=30 us=90586 cont_n=0 cont_us=0
+cti cy=21299850 ev=2220965 n=30 us=90629 cont_n=0 cont_us=0
+memw cy=21167278 ev=1201 n=30 us=90073 cont_n=0 cont_us=0
+exr_window cy=21152126 ev=12678 n=30 us=90017 cont_n=0 cont_us=0
+exr_replay cy=21156144 ev=2155 n=30 us=90039 cont_n=0 cont_us=0
+load cy=21126370 ev=1372988 n=30 us=89915 cont_n=0 cont_us=0
+imem_hit cy=21137526 ev=0 n=30 us=89958 cont_n=0 cont_us=0
+insn_jx cy=21164312 ev=48122 n=30 us=90075 cont_n=0 cont_us=0
+insn_brj cy=21137976 ev=666671 n=30 us=89959 cont_n=0 cont_us=0
+insn_callret cy=21177783 ev=382976 n=30 us=90123 cont_n=0 cont_us=0
+insn_ntaken cy=21152556 ev=360005 n=30 us=90029 cont_n=0 cont_us=0
+insn cy=21349069 ev=6249580 n=30 us=90847 cont_n=0 cont_us=0
+istall cy=21350602 ev=12101410 n=30 us=90853 cont_n=0 cont_us=0
+bubbles cy=21218670 ev=2538852 n=30 us=90303 cont_n=0 cont_us=0
+
+==== DERBY race (steady windows of both sessions)
+memw cy=41158870 ev=1357 n=30 us=175452 cont_n=0 cont_us=0
+exr_window cy=41421286 ev=18371 n=30 us=176415 cont_n=0 cont_us=0
+exr_replay cy=37698931 ev=6094 n=30 us=160662 cont_n=0 cont_us=0
+load cy=36674691 ev=3826130 n=30 us=156339 cont_n=0 cont_us=0
+imem_hit cy=36435177 ev=0 n=30 us=155319 cont_n=0 cont_us=0
+insn_jx cy=36436428 ev=201304 n=30 us=155324 cont_n=0 cont_us=0
+insn_brj cy=37988514 ev=1764911 n=30 us=161905 cont_n=0 cont_us=0
+insn_callret cy=37689984 ev=947454 n=30 us=160607 cont_n=0 cont_us=0
+insn_ntaken cy=37685561 ev=785048 n=30 us=160578 cont_n=0 cont_us=0
+insn cy=37668636 ev=16079085 n=30 us=160495 cont_n=0 cont_us=0
+istall cy=37631196 ev=13820465 n=30 us=160335 cont_n=0 cont_us=0
+dstall cy=37353158 ev=968849 n=30 us=159172 cont_n=0 cont_us=0
+bubbles cy=37050319 ev=6711509 n=30 us=157906 cont_n=0 cont_us=0
+exr cy=36990442 ev=24975 n=30 us=157655 cont_n=0 cont_us=0
+icachemiss cy=37523306 ev=0 n=30 us=159888 cont_n=0 cont_us=0
+istall_miss cy=37683906 ev=0 n=30 us=160575 cont_n=0 cont_us=0
+istall_busy cy=41340454 ev=14647317 n=30 us=176142 cont_n=0 cont_us=0
+istall_pif cy=39309310 ev=0 n=30 us=167547 cont_n=0 cont_us=0
+istall_run cy=36479959 ev=0 n=30 us=155535 cont_n=0 cont_us=0
+istall_unc cy=35533278 ev=0 n=30 us=151503 cont_n=0 cont_us=0
+istall_l32r cy=35500392 ev=1197174 n=30 us=151315 cont_n=0 cont_us=0
+istall_idiv cy=40066048 ev=91387 n=30 us=170725 cont_n=0 cont_us=0
+istall_imul cy=41176589 ev=0 n=30 us=175419 cont_n=0 cont_us=0
+dstall_busy cy=36331768 ev=971523 n=30 us=154759 cont_n=0 cont_us=0
+dstall_pif cy=40286537 ev=0 n=30 us=171605 cont_n=0 cont_us=0
+istall_busy cy=40356276 ev=14545551 n=30 us=172020 cont_n=0 cont_us=0
+istall_pif cy=41318424 ev=0 n=30 us=176037 cont_n=0 cont_us=0
+istall_run cy=37167986 ev=0 n=30 us=158481 cont_n=0 cont_us=0
+istall_unc cy=36799395 ev=0 n=30 us=156926 cont_n=0 cont_us=0
+istall_l32r cy=36409576 ev=1250126 n=30 us=155255 cont_n=0 cont_us=0
+istall_idiv cy=36465140 ev=62865 n=30 us=155483 cont_n=0 cont_us=0
+istall_imul cy=37835484 ev=0 n=30 us=161266 cont_n=0 cont_us=0
+dstall_busy cy=37781696 ev=974490 n=30 us=161018 cont_n=0 cont_us=0
+dstall_pif cy=37729842 ev=0 n=30 us=160812 cont_n=0 cont_us=0
+dstall_sbuf cy=37751674 ev=36 n=30 us=160884 cont_n=0 cont_us=0
+dstall_bank cy=37703846 ev=1120 n=30 us=160673 cont_n=0 cont_us=0
+regdep cy=37316167 ev=923679 n=30 us=159026 cont_n=0 cont_us=0
+cti cy=37208529 ev=5799048 n=30 us=158614 cont_n=0 cont_us=0
+memw cy=37109441 ev=1210 n=30 us=158178 cont_n=0 cont_us=0
+exr_window cy=37660447 ev=18108 n=30 us=160484 cont_n=0 cont_us=0
+exr_replay cy=37957803 ev=8056 n=30 us=161795 cont_n=0 cont_us=0
+load cy=41393534 ev=4238543 n=30 us=176367 cont_n=0 cont_us=0
+imem_hit cy=39217958 ev=0 n=30 us=167167 cont_n=0 cont_us=0
+insn_jx cy=36778832 ev=201724 n=30 us=156826 cont_n=0 cont_us=0
+insn_brj cy=35478078 ev=1559788 n=30 us=151245 cont_n=0 cont_us=0
+insn_callret cy=35473573 ev=954966 n=30 us=151237 cont_n=0 cont_us=0
+insn_ntaken cy=40521163 ev=868616 n=30 us=172716 cont_n=0 cont_us=0
+insn cy=40856702 ev=17286947 n=30 us=174142 cont_n=0 cont_us=0
+istall cy=36475394 ev=14062777 n=30 us=155457 cont_n=0 cont_us=0
+dstall cy=40488367 ev=1122043 n=30 us=172539 cont_n=0 cont_us=0
+
+==== not used (launch / phase change)
+insn cy=37747495 ev=17628406 n=30 us=164129 cont_n=0 cont_us=0   (launch window)
+istall cy=28353899 ev=15567770 n=30 us=121995 cont_n=0 cont_us=0 (launch+pad)
+dstall_pif cy=25854903 ev=0 n=30 us=111857 cont_n=0 cont_us=0    (DEMO START)
+regdep cy=33869153 ev=762342 n=30 us=145863 cont_n=0 cont_us=0   (gate, before GO)
+cti cy=36993817 ev=5356814 n=30 us=158278 cont_n=0 cont_us=0     (gate -> GO at 1/3)
+dstall_sbuf cy=41685875 ev=129 n=30 us=179074 (launch)
+dstall_bank cy=25936565 ev=23598 n=30 us=111336 (launch->pad)
+dstall cy=25900625 ev=1064487 n=30 us=112077 (DEMO START)
+exr cy=22940756 ev=19206 n=30 us=98539 (gate)
+icachemiss cy=31669904 ev=0 n=30 us=136078 (gate->GO)
+istall_miss cy=37370241 ev=0 n=30 us=159979 (GO at 0.7 of window; ev=0 anyway)
