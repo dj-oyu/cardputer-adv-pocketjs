@@ -15,10 +15,10 @@ JSON isRawJSON,parse,rawJSON,stringify,Symbol(Symbol.toStringTag)
 Date.prototype valueOf,toString,toUTCString,toGMTString,toISOString,toDateString,toTimeString,toLocaleString,toLocaleDateString,toLocaleTimeString,getTimezoneOffset,getTime,getFullYear,getUTCFullYear,getMonth,getUTCMonth,getDate,getUTCDate,getHours,getUTCHours,getMinutes,getUTCMinutes,getSeconds,getUTCSeconds,getMilliseconds,getUTCMilliseconds,getDay,getUTCDay,setTime,setMilliseconds,setUTCMilliseconds,setSeconds,setUTCSeconds,setMinutes,setUTCMinutes,setHours,setUTCHours,setDate,setUTCDate,setMonth,setUTCMonth,setYear,setFullYear,setUTCFullYear,toJSON,constructor,Symbol(Symbol.toPrimitive)
 RegExp.prototype flags,source,global,ignoreCase,multiline,dotAll,unicode,unicodeSets,sticky,hasIndices,exec,compile,test,toString,constructor,Symbol(Symbol.replace),Symbol(Symbol.match),Symbol(Symbol.matchAll),Symbol(Symbol.search),Symbol(Symbol.split)
 Set.prototype add,has,delete,clear,size,forEach,isDisjointFrom,isSubsetOf,isSupersetOf,intersection,difference,symmetricDifference,union,values,keys,entries,constructor,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
-Symbol length,name,for,keyFor,toPrimitive,iterator,match,matchAll,replace,search,split,toStringTag,isConcatSpreadable,hasInstance,species,unscopables,asyncIterator,prototype
+Symbol length,name,for,keyFor,toPrimitive,iterator,match,matchAll,replace,search,split,toStringTag,isConcatSpreadable,hasInstance,species,unscopables,asyncIterator,dispose,asyncDispose,prototype
 Function.prototype length,name,caller,arguments,call,apply,bind,toString,fileName,lineNumber,columnNumber,constructor,Symbol(Symbol.hasInstance)
-Error.prototype toString,name,message,constructor
-Iterator.prototype drop,filter,flatMap,map,take,every,find,forEach,some,reduce,toArray,constructor,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
+Error.prototype toString,name,message,stack,constructor
+Iterator.prototype chunks,drop,filter,flatMap,map,take,windows,every,find,forEach,some,includes,join,reduce,toArray,constructor,Symbol(Symbol.dispose),Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
 desc functionWC getC number number functionWC function functionC
 identity true true true true
 has true true false true false

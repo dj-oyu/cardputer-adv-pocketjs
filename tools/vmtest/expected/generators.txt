@@ -39,9 +39,9 @@
 38 ag finally
 39 ag finally after await
 40 for-await 6
-41 for-await-break-done
-42 ag finally
-43 ag finally after await
+41 ag finally
+42 ag finally after await
+43 for-await-break-done
 44 ag finally
 45 ag finally after await
 46 ag throw into-ag

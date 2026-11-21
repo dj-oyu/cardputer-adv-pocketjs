@@ -306,8 +306,8 @@ static guest_t G;
 // exit() is honoured observable -- see host_exit() below.
 static bool host_stopping;
 
-static int vm_interrupt(JSRuntime *rt, void *opaque) {
-  (void)rt;
+static int vm_interrupt(JSContext *ctx, void *opaque) {
+  (void)ctx;
   (void)opaque;
   return host_stopping ? 1 : 0;
 }

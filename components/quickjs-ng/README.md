@@ -4,7 +4,7 @@
 
 QuickJS-NG is a small JavaScript engine. This component provides an ESP-IDF port of QuickJS-NG so applications can create a JavaScript runtime, evaluate scripts, and use the QuickJS C API from ESP-IDF projects.
 
-The component vendors QuickJS-NG v0.14.0 and adds an ESP-IDF port layer for newlib compatibility and unsupported host operating system APIs.
+The component carries QuickJS-NG v0.18.0 (without the arena allocator) and adds an ESP-IDF port layer for newlib compatibility and unsupported host operating system APIs.
 
 ### Add Component to Your Project
 
@@ -74,7 +74,7 @@ This component vendors the QuickJS-NG source from:
 
 https://github.com/quickjs-ng/quickjs
 
-The upstream source under `quickjs-ng/` is a Git submodule: the fork https://github.com/dj-oyu/quickjs, which carries the pocketjs engine changes on top of Espressif's formatting of v0.14.0 (`ports/esp-idf/reformat.sh` in the fork reproduces that formatting). This directory keeps only the ESP-IDF wrapper.
+The upstream source under `quickjs-ng/` is a Git submodule: the fork https://github.com/dj-oyu/quickjs, which carries the pocketjs engine changes on top of Espressif's formatting of v0.14.0, merged with upstream v0.18.0 (`ports/esp-idf/reformat.sh` in the fork reproduces that formatting). This directory keeps only the ESP-IDF wrapper.
 
 ### License
 

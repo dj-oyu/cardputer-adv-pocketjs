@@ -987,7 +987,7 @@ static void demo_phase(void){
  * what the device hit; without it the harness would hang instead of failing. */
 static double eval_deadline;
 static double now_s(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
-static int eval_interrupt(JSRuntime *r,void *u){(void)r;(void)u;return eval_deadline>0&&now_s()>eval_deadline;}
+static int eval_interrupt(JSContext *c,void *u){(void)c;(void)u;return eval_deadline>0&&now_s()>eval_deadline;}
 
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
