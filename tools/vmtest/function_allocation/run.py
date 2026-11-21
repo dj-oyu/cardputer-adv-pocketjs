@@ -76,9 +76,10 @@ def main():
     memcpy(dst, src, test_n); \\
 } while (0)
     assert(cpool_offset == sizeof(*b));
-    assert(vardefs_offset == cpool_offset + fd->cpool_count * sizeof(*fd->cpool));
-    /* docs/vm/compact-vars.md: a hardened context keeps 2 B per variable. */
-    assert(closure_var_offset == vardefs_offset + (ctx->harden ?
+    /* The variables follow the constant pool (quickjs.c no longer names that
+       offset: fork 2a113e8 dropped the unused vardefs_offset).
+       docs/vm/compact-vars.md: a hardened context keeps 2 B per variable. */
+    assert(closure_var_offset == cpool_offset + fd->cpool_count * sizeof(*fd->cpool) + (ctx->harden ?
            js_compact_vars_size(fd->arg_count + fd->var_count) :
            (fd->arg_count + fd->var_count) * sizeof(*fa_vardefs(b))));
     assert(byte_code_offset == closure_var_offset +

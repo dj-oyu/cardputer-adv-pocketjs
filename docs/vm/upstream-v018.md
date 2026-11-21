@@ -91,3 +91,15 @@ v0.18 は 50b5fe4e（fork 55b82c7）、v0.14 は f5fe594a（fork cd51ea7）。�
 - **基準は fork `0d281e1`。** v0.18 のマージ（`55b82c7`、実機で測ったもの）に、strip のビルドで `OP_source_loc` を出さない変更を足したもの。`55b82c7` を基準にすると、function_allocation の `o2 --strip` で `oom_callsite_double_free` が別の出力になる（`--fail-alloc 1455` が狙う確保の前で、確保の回数が減るため。strip の変種は期待出力を強制しない）。意図した変更なので、dd36a29 の三角関数と同じく基準を進めた。後の `cbf7803`（AND のハッシュ）は確保の順を変えない。
 - **v0.14 → v0.18 は一度だけ別に確かめた。** 古い木（pocketjs 86bbcf55、fork cd51ea7）と新しい木（fork cbf7803）で mixed_numeric（x64）を走らせ、`numeric.log`・BIG WAVE の `app-behaviour.log`・`panels.bin`（7,279 枚、471,679,200 B）がバイト単位で一致した。
 - 同じ実行のゲストのヒープ（host 64 bit、TLSF のモデル）: 評価後 124,624 → 128,148 B、評価中のピーク 153,944 → 178,968 B。host は `NDEBUG` が無いので行番号表を作り、v0.18 の d90ab51 は識別子を読むたびに `OP_source_loc` を出す（§6）。デバッグオンの数字で、ファームの数字ではない。
+
+## 8. fork の `main` に上げた（2026-11-21、fork `ff809dd`）
+
+fork の作業ブランチを `main`（`v0.14.0` から切った pocket の系統。`master` は上流の写しのまま）へマージした（fork PR #1、マージコミット。`cbf7803` は `main` から辿れる）。上流の CI（130 件）を初めて通すために直したもの:
+
+- **`JS_UPSTREAM_COMPAT`。** fork 自身のビルド（CMakeLists.txt・meson.build、amalgam の CI）だけが定義し、上流の挙動に戻す: どのビルドでも行番号表を作る（`NDEBUG` で落とさない）、関数のソースを保つ、`Math.sin/cos/tan` は libm。pocketjs は `quickjs.c` を自分でコンパイルし、これを定義しない。
+- **`gen/*.c` を作り直した。** 上流の qjsc が上流の atom 番号で書いたバイトコードのままで、standalone と REPL が atom を別の atom として読んでいた。
+- **`libunicode-table.h` の綴り。** ESP-IDF 形式への整形の綴り直しが、script の別名 `Beng`・`Maka` を `Being`・`Make` にしていた。`\p{Script=Bengali}`・`\p{Script=Makasar}` が実機でも「unknown unicode script」だった。このファームで直る。
+- 使われない変数（`-Werror`）、`quickjs-vm.c` と pocket の見出しを amalgam と meson に、構造体の大きさの assert を実機の配置（32 bit・NaN boxing・int64 が 8 境界・GCC/Clang・Windows 以外）に限る、`ATOMIC_CHAR_LOCK_FREE` は tcc と MSVC で検査しない、`vmtest_seg_alloc_hint` の weak 参照は ELF だけ。
+- CI の Windows（clang-cl + ASan の debug）は、上流 v0.18.0 でも同じく落ちていた（runner の Visual Studio 同梱の ASan DLL が先に読まれる）。リンクした DLL を実行ファイルの隣に置いた。
+
+**実機のコードは変わらない。** このファームの `quickjs.c` を cbf7803 と ff809dd で同じコマンド（`build/compile_commands.json`）でコンパイルし、コードとデータのバイトが一致した（text 509,248 B）。hot/cold は quickjs.c 190 関数・不一致 0 のまま。変わるのは Unicode の表の 2 つの文字列だけ。
