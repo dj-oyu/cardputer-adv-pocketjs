@@ -465,3 +465,19 @@ A は quickjs ON・native OFF、B は両方 ON、B'' は B の熱い領域を 20
 r5sim は `pocket_derby.c` を `-Os` のまま組んでいた（それ以前の r5sim の数字と比べられるように）が、ファームは `-O2 -ffp-contract=off`。プロファイルは命令が一致する関数にしか当たらないので、**このファイルの 22 関数のうち 21 はファームで一度も並べ替えられていなかった**（ビルドのログ `hc_cc: pocket_derby.c: 1 functions laid out ... (21 ... did not match)`）。学習のビルド（`POCKET_NATIVE_HOTCOLD=gen`）だけファームと同じ指定にした（`tools/r5sim/main/CMakeLists.txt`）。一致は 17 / 22（残りは r5sim 自身の `#if` で命令が違う）。同時に、merge と commit の箱の変更で古くなった `pocket_shiki_frame.c`（15 中 7 が不一致）も学習し直した。
 
 実機（DERBY のレース、`sdkconfig.variant.turnperf` = TURNPERF ＋ `POCKET_FIXED_RANDOM_SEED`、2 ビルド、同じ 24 窓 × 30 ターン、実測）: 旧プロファイル（af0033a）1.2537 M → 新（aa9713d）1.2516 M サイクル/ターン（**−0.17%**、窓ごとの中央値 −0.16%、幅 −1.1〜+0.8%）。退役命令は同じ（`insn` 15.54 M / 30 ターン）、I-cache の待ち（`istall`）−0.4%、`istall_busy` −2.3%。**効果は誤差の範囲**（命令キャッシュの配置だけで同じカーネルが 15% 動く機体なので、これは「害はない」の確認）。新しいプロファイルは今のコードに一致するので、そのまま使う。
+
+## 14. 行番号の定数でプロファイルが外れる問題（2026-11-21）
+
+QuickJS を fork（`dj-oyu/quickjs`）の submodule に移した後、fork 側で `JS_NewObjectFrom` を直した版（submodule `cd51ea7`）を実機で測ると、JS のターンが STRESS で +2.5%、DERBY で +3.6% 遅かった（A/B/A、各 20 秒、実測。MEGADEMO は ±0。A1 と A2 の差は 0.1〜1.2%）。
+
+**原因（確認済み、手元の ESP-IDF 6.0.1 で両方をビルドして比較）:** 修正で `quickjs.c` の行が 16 行ずれ、その後ろの `assert()` が `__assert_func` に渡す `__LINE__` の即値が変わった。GCC は行番号を命令の即値で作る（`movi a11, 0xd9` ＋ `addmi a11, a11, 0x5b00` = 23513 行。リテラル表ではない）。関数の照合（§3 のハッシュ）は命令の引数まで含めていたので、行番号が変わっただけでプロファイルに当たらなくなり、**`JS_CallInternal` を含む 7 関数が GCC の並びのまま残った**（ビルドのログ `hc_cc: quickjs.c: 181 functions laid out (7 ... did not match)`、修正前は 188 / 0）。アプリ本体が 816 B 小さかったのも、`JS_NewObjectFrom` ではなく、この 7 関数がつなぎのジャンプを持たなかったため。
+
+**対策:** `hc_asm.py` の `Func.hash` で、`movi`・`movi.n`・`addmi` の即値をハッシュから外し、`movi.n` を `movi` と同じに扱う。これらは定数を運ぶだけで、基本ブロックの形を決めない。定数だけが変わった関数は、プロファイルの並べ方をそのまま当てても正しい（ブロックの数は別に照合している）。プロファイルの `h` は、古いハッシュが今のアセンブリと一致した項目だけを新しい方式に書き換えた（`profile.json` 188 / 188、`profile_native.json` 99 / 110。残る 11 は以前から一致していなかったもの）。
+
+**確認（手元のビルド、実測）:**
+
+- A（`80188e44`）: 古い道具＋古いプロファイルと、新しい道具＋新しいプロファイルで、`quickjs.c` とネイティブ 9 ファイルの並べ替え後のアセンブリが同一。A には何も起きない。
+- B（submodule `cd51ea7`）: `quickjs.c` 188 関数すべてを並べ替え（0 不一致）。アプリ本体 2,601,584 B（A より +16 B）。
+- `selftest.py`（identity、ランダム階層 3 回）通過。
+
+行番号以外の理由で命令が変わった関数は、今までどおり外れる。`quickjs.c` の中身を変えたら、`hc_cc` の「did not match」の数を見て、0 でなければ `train.sh` で学習し直す。
