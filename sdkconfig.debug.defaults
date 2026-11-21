@@ -1,0 +1,9 @@
+# Debug build overlay: assertions on (no NDEBUG), and with them QuickJS line
+# tables, so a runtime error names the line that threw (docs/vm/upstream-v018.md
+# sec.6). The product build is non-debug; turn this on only while debugging.
+# Its own build directory and sdkconfig, as sdkconfig.vmprobe.defaults explains:
+#   idf.py -B build_debug -D SDKCONFIG=build_debug/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.debug.defaults" build
+# The hot/cold profiles are trained on the non-debug object code, so this build
+# lays out fewer functions (hc_cc prints how many) and runs slower.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
