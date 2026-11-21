@@ -1,0 +1,43 @@
+Device baseline of pocketjs main d3300996 (PR #139 merged: fork main ff809dd, non-debug
+firmware, main/apps/), 2026-11-21, docs/vm/upstream-v018.md sec.9.
+USB device broker, the same Cardputer as sec.5/sec.6: fetch -> build -> flash of d3300996,
+then app_session (start=fresh, 30 s, no input) local.stress -> local.derby -> local.megademo,
+then restore to the LKG image. Firmware sha256 46810cdf89508c29f088b750be72f85fd7782ec476ff6447c76573ac0f4ad189.
+All figures are measured on the device (KASANE_PAINT is one line per 30 frames, about 1 s).
+Lines below are copied from the app log; SHIKI_SAT / SHIKI_TURN lines are left out.
+
+==== STRESS (base-main-stress)
+I (120530) app: MEM free=182244 largest=73728 js=0 frames=3550          (home, before launch)
+I (120532) guest: GUEST_ARENA bytes=65536
+I (120630) app: MEM free=91772 largest=31744 js=42800 frames=0         (after load)
+turn_ms, 1 s windows, first (5.71, the launch window) excluded:
+5.22 5.31 5.19 5.32 5.28 5.30 5.24 5.33 5.26 5.31 5.26 5.39 5.29 5.34
+5.32 5.41 5.33 5.42 5.38 5.41 5.34 5.41 5.20 5.32 5.23 5.27 5.25 5.37
+n=28 mean=5.311 sd=0.066 min=5.19 max=5.42
+STRESS f=840 ... oom=0 err=0 (last line before stop)
+
+==== DERBY (base-main-derby)
+I (245035) app: MEM free=181596 largest=73728 js=0 frames=2806          (home, before launch)
+I (245037) guest: GUEST_ARENA bytes=65536
+APP_LOAD compile_us: prog 8360, view 34145, scene 38030, pan 3994, play 24287, demo 4663
+I (245205) app: MEM free=65340 largest=31744 js=91276 frames=0         (after load)
+turn_ms, paddock (pad), 1 s windows after the first two (5.52, 4.08):
+3.00 2.99 3.00 3.02 2.99 3.00 3.00 2.99 3.02 3.05 3.03 2.99 2.99 3.00
+n=14 mean=3.005 sd=0.018
+(demo start 3.63, 2.95; gate; DERBY GO)
+turn_ms, race (DERBY GO -> stop), including the first window after GO (4.66 excluded):
+5.79 5.78 5.40 5.16 5.18 5.20 5.35 5.40 5.34 5.34
+n=10 mean=5.394 sd=0.224 (camera changes: WIDE 1, WIDE, FIELD)
+
+==== MEGADEMO (base-main-megademo)
+I (336054) app: MEM free=181596 largest=73728 js=0 frames=1803          (home, before launch)
+I (336055) guest: GUEST_ARENA bytes=65536
+APP_LOAD compile_us: act1 5155, act2 71463, set 41844, brief 38381, wake 26404, view 7450, loop 9156
+I (336285) app: MEM free=40980 largest=31744 js=104488 frames=0        (after load)
+I (336285) memory: MEM_PRESSURE mask=0x1 was=0x0 free=0 largest=0 guest_free=25560 episode=1
+turn_ms by scene (1 s windows; scene changes inside a window are not split):
+WAKE   7.06 12.24 12.19
+NEWS   4.40 3.43 5.46 5.42 5.68 5.72 5.90 5.63
+TWIST  4.82 6.57 6.63 6.74 3.94 4.90 4.51 4.89
+ZENITH 3.56 3.19 3.21 3.15 3.36 3.35 3.60
+CORE   5.65 6.51 8.79 8.70

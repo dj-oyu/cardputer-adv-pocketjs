@@ -11,7 +11,7 @@
 | [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) | 仕様 | L0〜L5 の全体仕様。各段の現状と、実装で確定した値 |
 | [tools/vmtest/README.md](../../tools/vmtest/README.md) | 手順書 | VM 改造のホスト側判定基盤の使い方: コーパス・Test262 部分集合・割り当てトレース・時間の基準、`vmrun`、`run.sh` の各フラグ、既知の脆さ（`floor/`・`prof/` の手順は各ディレクトリの README） |
 | [vm-branching.md](vm-branching.md) | 仕様 | `vm/*` ブランチとワークツリーの運用 |
-| [upstream-v018.md](upstream-v018.md) | 記録 | 上流 v0.18.0 の取り込み（2026-11-21）: arena アロケータを戻した理由（空のスクリプトで +90 KB、実測 host）、pocket の挙動を残した所（捕まえられる OOM ほか）、マージで直した不具合（`hash_atom` の幅、ROM の表）、結果 |
+| [upstream-v018.md](upstream-v018.md) | 記録 | 上流 v0.18.0 の取り込み（2026-11-21）: arena アロケータを戻した理由（空のスクリプトで +90 KB、実測 host）、pocket の挙動を残した所（捕まえられる OOM ほか）、マージで直した不具合（`hash_atom` の幅、ROM の表）、結果。§9 は main `d3300996` の実機ベースライン（STRESS 5.311 ms・DERBY パドック 3.005 ms、ログの抜粋つき） |
 | [vm-L1-design.md](vm-L1-design.md) | 設計 | L1: ジョブ境界の実行制御と起床 |
 | [vm-L2-design.md](vm-L2-design.md) | 設計 | L2: 移動しない VM スタックと中断・再開。決定表 D1〜D43、整列（§2.2） |
 | [vm-L3-design.md](vm-L3-design.md) | 設計 | L3: 相対参照と移動可能スタック。決定表 D44〜D55、移動は中断中のみ（§2）、差分表（§3） |
