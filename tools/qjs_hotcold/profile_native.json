@@ -491,7 +491,7 @@
 ],
 "hot": 0.5,
 "hot_classes": 7,
-"note": "r5sim -DR5SIM_DEVICE=1, workloads: shiki derby hud, f5fe594a",
+"note": "r5sim -DR5SIM_DEVICE=1, workloads: shiki derby hud, ee7b8884",
 "runs": [
 {
 "elf": "r5sim.elf",

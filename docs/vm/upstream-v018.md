@@ -60,3 +60,10 @@ v0.18 は 50b5fe4e（fork 55b82c7）、v0.14 は f5fe594a（fork cd51ea7）。�
 - **MEGADEMO が起動しない（退行）。** arena は起動時の空きで 8 KiB 刻みに決まる（`guest.c`、空き ≥ 希望 + 56 KiB）。v0.18 はゲストが約 1.1〜1.4 KB 多く（host の床 24,792 → 25,948 B、`floor32.sh`）、起動時の空きが約 750 B 少なく、段が 64 → 56 KiB に下がった。v0.14 でも MEGADEMO は読み込み直後に空き 0 の MEM_PRESSURE を出しており、余裕はもともと無かった。
 - **速度の +1.3〜1.4% は原因未特定。** 命令キャッシュの配置だけでビルド間 15% 動く機体なので、この差はまだエンジンのせいと言えない。候補は shape のハッシュ（`hash32(atom) >> shift`、v0.14 は `atom & mask`）、呼び出しごとの `is_constructor` のストア、コードの増加（+33 KB）による flash キャッシュのヒット率の低下。XTPERF で命令数とキャッシュ待ちを分けて測る。
 - 機器は計測後に元の LKG（a806b21f）へ戻した。
+
+## 6. デバッグオフとハッシュ（2026-11-21、fork `0d281e1`・`cbf7803`）
+
+- **デバッグの切り替えを 1 つにした。** ファームはアサーションを切る（`sdkconfig.defaults` の `CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE`、`NDEBUG`）。fork は `NDEBUG` のとき行番号表を作らず、`OP_source_loc` も出さない（`JS_NO_LINE_TABLES`）。それまでの strip は最後の表を省くだけで、1 段目には `OP_source_loc`（9 B）を全部書いて捨てていた。v0.18 の d90ab51 は識別子を読むたびにそれを出すので、MEGADEMO のコンパイルのピークが 134,064 → 149,256 B に上がっていた（host m32、TLSF）。出さないと 132,432 B。アプリの `option strip-debug`（MEGADEMO・DERBY）は外した（仕組みは残る）。host のビルドは `NDEBUG` を付けないので、表を作る。
+- **アサーションなしのファーム**（ローカルのビルド）: イメージ 2,635,184 → 2,500,951 B（−134 KB）、DIRAM 172,856 → 161,819 B（−11.0 KB）。`assert()` の中に副作用のある式は無いことを確かめた（全部、値を調べるだけ）。r5sim（hot/cold の学習）も同じ設定にした。
+- **shape のハッシュは AND に戻した。** v0.18 の cad311e は `hash32(atom) >> shift`。r5sim（QEMU icount、同じ木・同じプロファイル、デバッグオフ）で DERBY 100,139 → 99,562 サイクル/ターン（−0.58%）、HUD 10,941 → 10,853（−0.80%）、Shiki 144,614 → 144,340（−0.19%）。atom は連番の索引なので AND で偏らない。
+- hot/cold は最終の構成で学習し直した（quickjs.c 190 関数・不一致 0）。
