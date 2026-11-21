@@ -25,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          submodules: true
           ref: ${{ env.LEAF_HEAD }}
           persist-credentials: false
       - name: Record exact source head
@@ -76,6 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          submodules: true
           ref: ${{ env.LEAF_HEAD }}
           fetch-depth: 0
           persist-credentials: false

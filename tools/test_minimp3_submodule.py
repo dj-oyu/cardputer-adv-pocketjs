@@ -5,7 +5,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PATHS = ("third_party/bmi270", "third_party/minimp3", "third_party/opus")
+PATHS = ("third_party/bmi270", "third_party/minimp3", "third_party/opus",
+         "components/quickjs-ng/quickjs-ng")
 
 
 def configure(source: Path, output: Path) -> subprocess.CompletedProcess[str]:

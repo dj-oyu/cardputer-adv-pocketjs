@@ -7,3 +7,6 @@
 [submodule "opus"]
 	path = third_party/opus
 	url = https://github.com/xiph/opus.git
+[submodule "components/quickjs-ng/quickjs-ng"]
+	path = components/quickjs-ng/quickjs-ng
+	url = https://github.com/dj-oyu/quickjs.git

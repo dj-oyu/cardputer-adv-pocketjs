@@ -29,7 +29,15 @@ inverted (when its target is what follows now) or a `j` is appended.
 
 A function is matched to its profile by a hash of its instructions (labels
 renumbered), so a profile taken from other object code leaves that function
-alone instead of mislabelling its blocks.
+alone instead of mislabelling its blocks. The immediates of movi/movi.n/addmi
+are left out of that hash (and movi.n counts as movi): they carry constants,
+not control flow, and the most common of them is assert()'s __LINE__, which
+GCC builds as `movi a11, lo; addmi a11, a11, hi`. Hashing it made an edit
+anywhere above a function drop that function's layout: a 16-line change in
+quickjs.c left JS_CallInternal and six other profiled functions in GCC's order
+(JS turns +2.5-3.6% on the device, docs/vm/qjs-hotcold.md sec.14). A function
+whose constants change but whose blocks do not keeps a valid layout; one whose
+blocks change still fails the hash or the block count.
 
 What is not kept: the address ranges of the debug information's scopes and
 variable locations inside the moved functions (label differences across
@@ -56,6 +64,8 @@ SWITCH = re.compile(r'^\t\.(section|text|data|bss|pushsection|popsection|previou
 LOCAL_REF = re.compile(r'\.L(?:C)?\d+(?:_LEND)?')
 
 UNCOND = {'j', 'jx', 'ret', 'ret.n', 'retw', 'retw.n'}
+# Constant loads whose immediate is not part of a function's identity (Func.hash).
+CONST_IMM = {'movi': 'movi', 'movi.n': 'movi', 'addmi': 'addmi'}
 INVERT = {}
 for _a, _b in (('beq', 'bne'), ('blt', 'bge'), ('bltu', 'bgeu'), ('beqi', 'bnei'), ('blti', 'bgei'),
                ('bltui', 'bgeui'), ('beqz', 'bnez'), ('bltz', 'bgez'), ('bany', 'bnone'), ('ball', 'bnall'),
@@ -96,7 +106,11 @@ class Func:
         h = hashlib.sha1()
         for b in self.blocks:
             for _, mn, ops in b.insns:
-                h.update((mn + ' ' + LOCAL_REF.sub(sub, ops or '') + '\n').encode())
+                ops = LOCAL_REF.sub(sub, ops or '')
+                if mn in CONST_IMM:
+                    mn = CONST_IMM[mn]
+                    ops = ops.rsplit(',', 1)[0] + ', #'
+                h.update((mn + ' ' + ops + '\n').encode())
             h.update(b'--\n')
         return h.hexdigest()[:16]
 

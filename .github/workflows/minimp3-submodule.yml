@@ -6,6 +6,7 @@ on:
       - 'third_party/**'
       - 'components/minimp3/**'
       - 'components/opus/**'
+      - 'components/quickjs-ng/**'
       - 'main/CMakeLists.txt'
       - 'tools/prepare*'
       - 'tools/test_minimp3_submodule.py'
@@ -18,6 +19,7 @@ on:
       - 'third_party/**'
       - 'components/minimp3/**'
       - 'components/opus/**'
+      - 'components/quickjs-ng/**'
 permissions:
   contents: read
 # New pushes replace a PR's older run; main runs finish so their caches are saved.
