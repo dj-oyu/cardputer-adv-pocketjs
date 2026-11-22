@@ -13,6 +13,10 @@ typedef enum {
     AY_COMPANION_PLAY,
     AY_COMPANION_BENCHMARK,
     AY_COMPANION_RASTER_TOGGLE,
+    AY_COMPANION_NEXT_EMOTE,
+    AY_COMPANION_NEXT_CHARACTER,
+    AY_COMPANION_NEXT_CLIP,
+    AY_COMPANION_NEXT_BACKGROUND,
 } ay_companion_command;
 
 /* A positive deadline requests a UI turn for free-running Companion playback. */

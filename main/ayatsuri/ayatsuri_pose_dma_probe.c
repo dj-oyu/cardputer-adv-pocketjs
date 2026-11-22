@@ -28,15 +28,28 @@
 #include "strip_copy_s3.h"
 #include "pet/pet_hub.h"
 #include "hal/sound.h"
+#ifdef AYATSURI_CHARACTERS
+#include "hone/track_character.h"
+#endif
 #ifdef AYATSURI_RASTER_TEST
 #include "ayatsuri_raster_test.h"
 #include "companion_raster_test_pixels.h"
 #endif
 static ay_damage_history displayed;
 static ay_exact_history exact_pixels;
+#ifdef AYATSURI_CHARACTERS
+/* Runtime-sized pose space: the active character decides every count below. */
+#define MODEL_SHA256 ay_character_sha256()
+#define POSE_COUNT ay_character_pose_count()
+#define POSE_CAP 320u
+#else
 #define MODEL_SHA256 AY_LIVE_MODEL_SHA256
 #define POSE_COUNT AY_LIVE_MODEL_POSE_COUNT
-#ifdef AYATSURI_TRACK_MODEL
+#endif
+#if defined(AYATSURI_CHARACTERS)
+#define MODEL_RENDERER "indexed_rgb565_character_track"
+#define LIVE_DEFORMATION "false"
+#elif defined(AYATSURI_TRACK_MODEL)
 #define MODEL_RENDERER "indexed_rgb565_motion_track"
 #define LIVE_DEFORMATION "false"
 #else
@@ -51,7 +64,17 @@ extern void ay_live_model_projection_reuse(bool enabled) __attribute__((weak));
 void ay_live_model_phase_us(uint32_t out[7]);
 #endif
 #endif
-#ifdef AY_COMPANION_MOTION_POSES
+#if defined(AYATSURI_CHARACTERS)
+#define COMPANION_MOTION 1
+#define OVERLAY_SHA ay_character_sha256()
+#define FIRST_MOTION_POSE ay_character_inspection_count()
+#define MEASURE_FRAMES (POSE_COUNT - FIRST_MOTION_POSE)
+#ifndef AY_COMPANION_COLORED_LIGHT
+#define AY_COMPANION_COLORED_LIGHT 1
+#endif
+#elif defined(AY_COMPANION_MOTION_POSES)
+#define COMPANION_MOTION 1
+#define OVERLAY_SHA AY_COMPANION_OVERLAY_SHA256
 #define MEASURE_FRAMES (AY_COMPANION_MOTION_POSES - AY_COMPANION_INSPECTION_POSES)
 #define FIRST_MOTION_POSE AY_COMPANION_INSPECTION_POSES
 #else
@@ -72,9 +95,12 @@ enum { WIDTH = 240, HEIGHT = 135, BAND_ROWS = 8, CHECK_POSES = 6 };
 #ifdef AYATSURI_RASTER_TEST
 _Static_assert(AY_RASTER_WIDTH == WIDTH && AY_RASTER_HEIGHT == HEIGHT, "LCD chart dimensions");
 #endif
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
 static const int64_t measure_limit_us = INT64_C(16000000);
-#if defined(AY_COMPANION_FPS_TRIAL) || defined(AYATSURI_TRACK_MODEL)
+#if defined(AYATSURI_CHARACTERS)
+/* Each clip states its own frame period. */
+#define demo_interval_us ((int64_t)ay_character_period_ms() * INT64_C(1000))
+#elif defined(AY_COMPANION_FPS_TRIAL) || defined(AYATSURI_TRACK_MODEL)
 /* The acceptance deadline remains 50 ms. Give the UI tick and DMA timing
  * variance room on the render clock while preserving the ordered poses. */
 static const int64_t demo_interval_us = INT64_C(48000);
@@ -95,7 +121,9 @@ static const int64_t demo_interval_us = INT64_C(120000);
 #else
 #define MODEL_LIGHTING "false"
 #endif
+#ifndef AYATSURI_CHARACTERS
 _Static_assert(POSE_COUNT > FIRST_MOTION_POSE, "demo requires playable poses");
+#endif
 static const char *const tag = "ay_pose_dma";
 
 static struct {
@@ -134,7 +162,7 @@ typedef struct {
     bool serial;
 } frame_timing;
 
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
 typedef struct {
     unsigned from, to;
     int64_t interval_us, idle_us, late_us, work_us, previous_work_us;
@@ -143,7 +171,14 @@ typedef struct {
 #endif
 
 typedef enum { PREFLIGHT, BENCHMARK, DEMO, FAILED } probe_phase;
+#ifdef AYATSURI_CHARACTERS
+#define MOTION_POSES (POSE_COUNT - FIRST_MOTION_POSE)
+#define POSE_STOPS (MOTION_POSES < 8u ? MOTION_POSES : 8u)
+#define DEMO_COST_SLOTS POSE_CAP
+#else
 enum { MOTION_POSES = POSE_COUNT - FIRST_MOTION_POSE, POSE_STOPS = MOTION_POSES < 8 ? MOTION_POSES : 8 };
+#define DEMO_COST_SLOTS (POSE_COUNT - FIRST_MOTION_POSE)
+#endif
 static struct {
     uint32_t generation;
     probe_phase phase;
@@ -156,8 +191,8 @@ static struct {
     ay_net_request network_requested;
     unsigned serial_penalty_us;
 #endif
-#ifdef AY_COMPANION_MOTION_POSES
-    uint16_t demo_cost_us[POSE_COUNT - FIRST_MOTION_POSE];
+#ifdef COMPANION_MOTION
+    uint16_t demo_cost_us[DEMO_COST_SLOTS];
     int64_t demo_target_drain;
     int64_t demo_first_drain, demo_last_drain, demo_last_work;
     unsigned demo_intervals, demo_over_55ms;
@@ -376,7 +411,9 @@ static const char *const inspection_labels[] = {"JOY", "SURPRISE", "CONCERN"
     , "BLINK", "INHALE", "GLANCE"
 #endif
 };
+#endif
 
+#ifdef COMPANION_MOTION
 /* Record the same RGB565 pixels that are sent to the LCD during preflight.
  * Keep this outside the measured section and exclude the right-hand HUD. */
 static void report_face_band(int pose, unsigned y, unsigned rows)
@@ -416,7 +453,10 @@ static void report_face_band(int pose, unsigned y, unsigned rows)
 
 static const char *inspection_label(int pose, char buffer[16])
 {
-#ifdef AY_COMPANION_MOTION_POSES
+#if defined(AYATSURI_CHARACTERS)
+    if (pose >= 0 && (unsigned)pose < ay_character_inspection_count())
+        return ay_character_face_label((unsigned)pose);
+#elif defined(COMPANION_MOTION)
     if (pose >= 0 && (unsigned)pose < sizeof inspection_labels / sizeof *inspection_labels)
         return inspection_labels[pose];
 #endif
@@ -427,6 +467,67 @@ static const char *inspection_label(int pose, char buffer[16])
     snprintf(buffer, 16, "POSE %02u", (unsigned)pose);
     return buffer;
 }
+
+#ifdef AYATSURI_CHARACTERS
+/* 0 is no backdrop; 1..n pick a background from the store. */
+static unsigned background;
+
+static const uint16_t *background_pixels(void)
+{
+    return background ? ay_background_pixels(background - 1) : NULL;
+}
+
+#define face_text(index) ay_character_face_label(index)
+#define PREFLIGHT_POSES (ay_character_inspection_count() < CHECK_POSES ? ay_character_inspection_count() : (unsigned)CHECK_POSES)
+
+static void upper_copy(char *out, size_t size, const char *text)
+{
+    size_t i = 0;
+    for (; text[i] && i + 1 < size; ++i) out[i] = text[i] >= 'a' && text[i] <= 'z' ? (char)(text[i] - 32) : text[i];
+    out[i] = '\0';
+}
+
+/* Append with truncation; the HUD lines are short and clipped on purpose. */
+static void append(char *out, size_t size, const char *text)
+{
+    size_t used = strlen(out);
+    for (size_t i = 0; text[i] && used + 1 < size; ++i) out[used++] = text[i];
+    out[used] = '\0';
+}
+
+/* Four status lines for the HUD, plus the string that decides whether the
+ * header bands need repainting. Every dynamic line sits in rows 0..31. */
+static void hud_compose(const char *label, char hud[4][13], char key[48])
+{
+    char name[13], clip[13], face[13], emote[13];
+    /* Asking a character anything unpacks it, which takes seconds on the first run:
+     * the "loading" banner has to be drawn without touching the store. */
+    const bool known = ay_character_store_ready();
+    upper_copy(name, sizeof name, known ? ay_character_name(ay_character_current()) : "");
+    upper_copy(clip, sizeof clip, known && ay_character_clip_count() > 1 ? ay_character_clip_label(ay_character_clip()) : "");
+    upper_copy(face, sizeof face, known ? ay_character_face_label(ay_character_face()) : "");
+    upper_copy(emote, sizeof emote, known ? ay_character_emote_label(ay_character_emote()) : "");
+    hud[0][0] = '\0';
+    append(hud[0], sizeof hud[0], name);
+    if (clip[0]) {
+        append(hud[0], sizeof hud[0], " ");
+        append(hud[0], sizeof hud[0], clip);
+    }
+    upper_copy(hud[1], sizeof hud[1], face);
+    hud[2][0] = '\0';
+    append(hud[2], sizeof hud[2], emote[0] ? "+" : "NO EMOTE");
+    append(hud[2], sizeof hud[2], emote);
+    upper_copy(hud[3], sizeof hud[3], label);
+    key[0] = '\0';
+    for (unsigned i = 0; i < 4; ++i) {
+        if (i) append(key, 48, "|");
+        append(key, 48, hud[i]);
+    }
+}
+#else
+#define face_text(index) inspection_labels[index]
+#define PREFLIGHT_POSES CHECK_POSES
+#endif
 
 static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
 {
@@ -439,6 +540,13 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
     }
 
     bool ok = true;
+#ifdef AYATSURI_CHARACTERS
+    char hud[4][13], damage_key[48];
+    hud_compose(label, hud, damage_key);
+#define DAMAGE_LABEL damage_key
+#else
+#define DAMAGE_LABEL label
+#endif
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
     if (hone_present(&snapshot, &presentation) != HONE_OK) {
         finish_pose(true, false);
@@ -449,11 +557,11 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
     ay_exact_begin(&exact_pixels);
     bool overlay=pet_hub_alert_shown() || sound_capture_active();
     bool force_full=board_capture_active() || pose<0;
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
     /* Transmit the full inspection frame used by the RGB565 comparison. */
     force_full=force_full || (probe.phase==PREFLIGHT && pose>=0 && pose<3);
 #endif
-    ay_damage_frame damage=ay_damage_begin(&displayed,board_panel_write_epoch(),label,overlay,
+    ay_damage_frame damage=ay_damage_begin(&displayed,board_panel_write_epoch(),DAMAGE_LABEL,overlay,
                                           force_full);
 #ifdef AYATSURI_RASTER_TEST
     bool scan = probe.raster_scan && probe.phase == DEMO && pose >= (int)FIRST_MOTION_POSE;
@@ -474,7 +582,7 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
         hone_span span;
         if (!render_live_region(y, rows, storage.band, &span)) {ok=false; break;}
         unsigned left = span.left, right = span.right;
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
         if (probe.phase == PREFLIGHT && pose >= 0 && pose < 3) report_face_band(pose, y, rows);
 #endif
         ay_damage_span window=ay_damage_plan(&displayed,&damage,y/BAND_ROWS,
@@ -523,12 +631,38 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
                                 ay_raster_pixels + (y + row) * WIDTH, changed, marker);
         }
 #endif
+#ifdef AYATSURI_CHARACTERS
+        if (background_pixels()) {
+            /* A model pixel of zero is empty: the backdrop shows through, as for the test chart. */
+            for (unsigned row = 0; row < rows; ++row) {
+                const uint16_t *source = background_pixels() + (y + row) * WIDTH;
+                uint16_t *model = storage.band + row * WIDTH;
+                for (unsigned x = changed.left; x < changed.right; ++x) {
+                    if (!model[x]) model[x] = source[x];
+                }
+            }
+        }
+#endif
         paint_begin(storage.band, (int)y, (int)rows);
-#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+#if defined(AYATSURI_CHARACTERS)
+        /* Left-hand panel: the right side belongs to the emote marks. */
+        paint_fill(0, 0, 72, 88, 0x0841);
+        paint_ascii(3, 1, hud[0], 0xffff);
+        paint_ascii(3, 9, hud[1], 0xffff);
+        paint_ascii(3, 17, hud[2], 0x9d9f);
+        paint_ascii(3, 25, hud[3], 0x9d9f);
+        paint_ascii(3, 33, "L/R POSE", 0x9d9f);
+        paint_ascii(3, 41, "U/D FACE", 0x9d9f);
+        paint_ascii(3, 49, "E EMOTE", 0x9d9f);
+        paint_ascii(3, 57, "C CHAR", 0x9d9f);
+        paint_ascii(3, 65, "M MOTION", 0x9d9f);
+        paint_ascii(3, 73, "B BACKDROP", 0x9d9f);
+        paint_ascii(3, 81, "SPC ENT", 0x9d9f);
+#elif defined(CONFIG_AYATSURI_LIVE_DMA_PROBE)
         paint_fill(176, 0, 64, 40, 0x0841);
         paint_ascii(180, 1, label, 0xffff);
         paint_ascii(180, 9, "L/R POSE", 0x9d9f);
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
         paint_ascii(180, 17, "U/D FACE", 0x9d9f);
 #endif
         paint_ascii(180, 25, "SPC PLAY", 0x9d9f);
@@ -608,7 +742,7 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
     }
 #endif
     ay_exact_finish(&exact_pixels,completed);
-    ay_damage_finish(&displayed,&damage,board_panel_write_epoch(),label,completed);
+    ay_damage_finish(&displayed,&damage,board_panel_write_epoch(),DAMAGE_LABEL,completed);
 #endif
     if (timing==&probe.benchmark_timing && ok && released && frame.fast) ++probe.flat_completed;
     return ok && drained == ESP_OK && released;
@@ -629,6 +763,10 @@ static bool present_pose(int pose, const char *label, frame_timing *timing)
     return present_pose_impl(pose, label, timing);
 }
 
+#ifdef AYATSURI_CHARACTERS
+static unsigned benchmark_face, benchmark_emote;
+#endif
+
 static void begin_companion(uint32_t generation, probe_phase phase)
 {
 #ifdef AYATSURI_RASTER_TEST
@@ -644,6 +782,14 @@ static void begin_companion(uint32_t generation, probe_phase phase)
 #endif
 #endif
 #endif
+#ifdef AYATSURI_CHARACTERS
+    /* The benchmark walks every face; the person's choice comes back after. */
+    if (phase == PREFLIGHT) {
+        benchmark_face = ay_character_face();
+        benchmark_emote = ay_character_emote();
+        (void)ay_character_set_emote(0);
+    }
+#endif
     memset(&probe, 0, sizeof probe);
     probe.generation = generation;
     probe.phase = phase;
@@ -653,8 +799,8 @@ static void begin_companion(uint32_t generation, probe_phase phase)
     probe.raster_marker = -1;
     probe.raster_scan = raster_scan;
 #endif
-#ifdef AY_COMPANION_MOTION_POSES
-    ESP_LOGI(tag, "OVERLAY sha256=%s motion_first=%u", AY_COMPANION_OVERLAY_SHA256, FIRST_MOTION_POSE);
+#ifdef COMPANION_MOTION
+    ESP_LOGI(tag, "OVERLAY sha256=%s motion_first=%u", OVERLAY_SHA, (unsigned)FIRST_MOTION_POSE);
 #endif
     const esp_app_desc_t *app = esp_app_get_description();
     ESP_LOGI(tag, "BEGIN model_sha256=%s poses=%u renderer=" MODEL_RENDERER " live_deformation=" LIVE_DEFORMATION " lighting=" MODEL_LIGHTING " "
@@ -665,7 +811,7 @@ static void begin_companion(uint32_t generation, probe_phase phase)
              app->app_elf_sha256[6], app->app_elf_sha256[7]);
 }
 
-#if defined(AY_COMPANION_MOTION_POSES) && defined(CONFIG_AYATSURI_COMPANION_NET_PROBE)
+#if defined(COMPANION_MOTION) && defined(CONFIG_AYATSURI_COMPANION_NET_PROBE)
 static ay_net_request network_benchmark(void)
 {
 #if defined(CONFIG_AYATSURI_CHAT_STREAM_PROBE)
@@ -690,10 +836,14 @@ static ay_net_request network_benchmark(void)
 
 static void end_benchmark(bool ok, int64_t elapsed_us)
 {
+#ifdef AYATSURI_CHARACTERS
+    (void)ay_character_set_face(benchmark_face);
+    (void)ay_character_set_emote(benchmark_emote);
+#endif
     const double fps = elapsed_us > 0 ? probe.completed * 1000000.0 / elapsed_us : 0;
     ok = ok && probe.completed >= CHECK_POSES;
     probe.phase = ok ? DEMO : FAILED;
-#if defined(AY_COMPANION_MOTION_POSES) && defined(CONFIG_AYATSURI_COMPANION_NET_PROBE)
+#if defined(COMPANION_MOTION) && defined(CONFIG_AYATSURI_COMPANION_NET_PROBE)
     if (ok) probe.network_requested = network_benchmark();
 #endif
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
@@ -718,7 +868,7 @@ static void end_benchmark(bool ok, int64_t elapsed_us)
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
 static void demo_observe_cost(unsigned pose, int64_t elapsed)
 {
     /* The table represents normal work on the way from the preceding pose.
@@ -797,15 +947,72 @@ static void demo_completed(unsigned from, unsigned pose, int64_t due,
 }
 #endif
 
+#ifdef AYATSURI_CHARACTERS
+/* Any change of character or clip waits for the previous frame to drain, as
+ * prepare_pose does, because the player refuses to switch while a frame is pinned. */
+static bool quiesce(void)
+{
+    return snapshot.phase == HONE_IDLE || finish_pose(board_present_finish() == ESP_OK, false);
+}
+
+static void restart_playback(void)
+{
+    probe.pose_stop = 0;
+    probe.expression = 0;
+    probe.demo_pose = FIRST_MOTION_POSE;
+    probe.held_pose = -1;
+    probe.next_demo = 0;
+    probe.result[0] = '\0';
+    memset(probe.demo_cost_us, 0, sizeof probe.demo_cost_us);
+    displayed.known = false;
+}
+
+static void change_character(ay_companion_command command)
+{
+    if (!quiesce()) return;
+    if (command == AY_COMPANION_NEXT_CHARACTER) {
+        const unsigned count = ay_character_count();
+        if (count < 2 || !ay_character_select((ay_character_current() + 1) % count)) return;
+    } else {
+        const unsigned count = ay_character_clip_count();
+        if (count < 2 || !ay_character_set_clip((ay_character_clip() + 1) % count)) return;
+    }
+    restart_playback();
+    ESP_LOGI(tag, "CHARACTER name=%s clip=%s poses=%u faces=%u emotes=%u period_ms=%u",
+             ay_character_name(ay_character_current()), ay_character_clip_label(ay_character_clip()),
+             ay_character_pose_count(), ay_character_inspection_count(), ay_character_emote_count(),
+             ay_character_period_ms());
+}
+#endif
+
 static int navigate(ay_companion_command command)
 {
     switch (command) {
+#ifdef AYATSURI_CHARACTERS
+    case AY_COMPANION_NEXT_BACKGROUND: {
+        const unsigned count = ay_background_count();
+        if (!count) return -1;
+        background = (background + 1) % (count + 1);
+        displayed.known = false;  /* the whole screen changes */
+        probe.next_demo = 0;
+        ESP_LOGI(tag, "BACKGROUND %u %s", background, background ? ay_background_name(background - 1) : "NONE");
+        return -1;
+    }
+    case AY_COMPANION_NEXT_EMOTE:
+        (void)ay_character_set_emote((ay_character_emote() + 1) % (ay_character_emote_count() + 1));
+        ESP_LOGI(tag, "EMOTE %u %s", ay_character_emote(), ay_character_emote_label(ay_character_emote()));
+        return -1;
+    case AY_COMPANION_NEXT_CHARACTER:
+    case AY_COMPANION_NEXT_CLIP:
+        change_character(command);
+        return -1;
+#endif
     case AY_COMPANION_PREVIOUS_POSE:
     case AY_COMPANION_NEXT_POSE:
         probe.pose_stop = (probe.pose_stop + (command == AY_COMPANION_NEXT_POSE ? 1 : POSE_STOPS - 1))
                           % POSE_STOPS;
         return FIRST_MOTION_POSE + MOTION_POSES * probe.pose_stop / POSE_STOPS;
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
     case AY_COMPANION_PREVIOUS_EXPRESSION:
     case AY_COMPANION_NEXT_EXPRESSION:
         probe.expression = (probe.expression + (command == AY_COMPANION_NEXT_EXPRESSION ? 1 : FIRST_MOTION_POSE - 1))
@@ -837,6 +1044,16 @@ static const char *playback_label(void)
 int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command command, bool capture)
 {
     if (generation != probe.generation) begin_companion(generation, DEMO);
+#ifdef AYATSURI_CHARACTERS
+    if (!ay_character_store_ready()) {
+        /* The first boot of a firmware with new characters unpacks them into flash. */
+        (void)present_pose(-1, "LOADING", NULL);
+        ESP_LOGI(tag, "CHARACTER_STORE installing");
+        const bool installed = ay_character_store_install();
+        ESP_LOGI(tag, "CHARACTER_STORE %s", installed ? "ready" : "failed");
+        if (!installed) (void)present_pose(-1, "NO CHARACTERS", NULL);
+    }
+#endif
     const int original_async = board_async_get();
     const bool is_capture = capture || board_capture_active();
     bool testing = probe.phase == PREFLIGHT || probe.phase == BENCHMARK;
@@ -867,15 +1084,21 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
     }
     if (!is_capture) board_async_set(1);
     bool select_pose = inspect_pose >= 0 && inspect_pose != probe.held_pose;
+    /* A held still has to be drawn again when a toggle changes how it looks. */
+    bool redraw_held = false;
 #ifdef AYATSURI_RASTER_TEST
-    if (!is_capture && !testing && command == AY_COMPANION_RASTER_TOGGLE && probe.held_pose >= 0) {
+    redraw_held = redraw_held || command == AY_COMPANION_RASTER_TOGGLE;
+#endif
+#ifdef AYATSURI_CHARACTERS
+    redraw_held = redraw_held || command == AY_COMPANION_NEXT_EMOTE || command == AY_COMPANION_NEXT_BACKGROUND;
+#endif
+    if (!is_capture && !testing && redraw_held && probe.held_pose >= 0) {
         inspect_pose = probe.held_pose;
         select_pose = true;
     }
-#endif
     char pose_label[16];
 
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
     if (select_pose || is_capture) {
         probe.demo_first_drain = 0;
         probe.demo_intervals = 0;
@@ -895,9 +1118,9 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
     } else if (probe.phase == PREFLIGHT) {
         const bool banner_ready = probe.checked != 0 || present_pose(-1, "CHECKING", NULL);
         bool verified_pose = banner_ready && check_pose(probe.checked);
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
         if (verified_pose && probe.checked < 3) {
-            verified_pose = present_pose((int)probe.checked, inspection_labels[probe.checked], NULL);
+            verified_pose = present_pose((int)probe.checked, face_text(probe.checked), NULL);
             if (verified_pose) ESP_LOGI(tag, "FACE_DMA pose=%u status=PASS", probe.checked);
         }
 #endif
@@ -905,19 +1128,19 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
             if (!banner_ready) ESP_LOGE(tag, "FAIL phase=preflight_banner");
             end_benchmark(false, 0);
             (void)present_pose(-1, probe.result, NULL);
-        } else if (++probe.checked == CHECK_POSES) {
+        } else if (++probe.checked == PREFLIGHT_POSES) {
             probe.phase = BENCHMARK;
         }
     } else if (probe.phase == BENCHMARK) {
         if (!probe.completed) probe.started = esp_timer_get_time();
         const unsigned pose = FIRST_MOTION_POSE + probe.completed % (POSE_COUNT - FIRST_MOTION_POSE);
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
         const int64_t frame_start = esp_timer_get_time();
 #endif
         const bool ok = present_pose((int)pose, "RUNNING", &probe.benchmark_timing);
         if (ok) ++probe.completed;
         const int64_t finished = esp_timer_get_time();
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
         /* Preflight does not end on the last motion pose. The first benchmark
          * sample may therefore have different geometry and cache reuse. */
         if (ok && probe.completed > 1) demo_observe_cost(pose, finished - frame_start);
@@ -933,7 +1156,7 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
         const char *label = playback_label();
         if (select_pose) label = inspection_label(pose, pose_label);
         frame_timing *record = NULL;
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
         frame_timing timing = {0};
         if (!select_pose) record = &timing;
 #ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
@@ -949,7 +1172,7 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
         const int previous_pose = probe.displayed_pose;
 #endif
         const bool presented = present_pose(pose, label, record);
-#if defined(AY_COMPANION_MOTION_POSES) && defined(CONFIG_AYATSURI_COMPANION_NET_PROBE)
+#if defined(COMPANION_MOTION) && defined(CONFIG_AYATSURI_COMPANION_NET_PROBE)
         const int64_t drained = esp_timer_get_time();
         const uint32_t lcd_wait = measure ? lcd_spi_probe_end() : 0;
         ay_net_measure_frame = false;
@@ -967,7 +1190,7 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
             } else {
                 probe.demo_pose = FIRST_MOTION_POSE + (probe.demo_pose - FIRST_MOTION_POSE + 1) % MOTION_POSES;
             }
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
             if (!select_pose) {
 #ifndef CONFIG_AYATSURI_COMPANION_NET_PROBE
                 const int64_t drained = esp_timer_get_time();
@@ -1012,7 +1235,7 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
     }
 
     if (!is_capture) board_async_set(original_async);
-#ifdef AY_COMPANION_MOTION_POSES
+#ifdef COMPANION_MOTION
     if (probe.phase == DEMO && probe.held_pose < 0 && !is_capture) return probe.next_demo;
 #endif
     return 0;

@@ -96,6 +96,70 @@ brokerのモデル入りソースには、生成した `hone_track_asset.h` と 
 
 ネイティブ版は起動するとモーションを再生します。←／→でモーション内の8つの姿勢を、↑／↓で6つの表情プリセットを順に選びます。選んだ姿勢や表情は画面に保持され、Spaceで再生に戻ります。Enterを押すと描画ベンチマークを開始します。通信計測を組み込んだビルドでは、続いてWi-Fi再接続とHTTPSの負荷をかけます。
 
+### キャラクターの切り替え（HCA）
+
+`AYATSURI_CHARACTERS` を有効にしたビルド（`sdkconfig.variant.ay_characters`）は、`assets/characters/*.hcz` をすべてファームに埋め込み、実行中に切り替える。狐の書き出し（`AYATSURI_TRACK_MODEL`）も併用でき、その場合は先頭のキャラクターになる。
+
+| キー | 動作 |
+| --- | --- |
+| ←／→ | モーション内の8つの姿勢 |
+| ↑／↓ | 表情（キャラクターごとの一覧） |
+| E | 漫符（なし → 各記号 → なし）。表情・モーションと同時に重ねられる |
+| B | 背景（なし → 7種 → なし） |
+| C | 次のキャラクター |
+| M | 次のモーション（クリップ） |
+| Space／Enter | 再生に戻る／ベンチマーク |
+
+左上の4行に、キャラクターとクリップ、表情、漫符、状態を出す。右側は漫符の置き場なので空けてある。ベンチマーク中は漫符を外し、終わると表情と漫符を元に戻す。
+
+`.hca` は [`export_character_track.py`](../../tools/ayatsuri/asset/export_character_track.py) が Blender の評価済みメッシュから作る。`pip install bpy`（Blender 5.1 でも 4.3 製の `.blend` が開ける）か `blender -b` で動く。
+
+```text
+python tools/ayatsuri/asset/export_character_track.py cloud.blend cloud OUTPUT_DIRECTORY
+python tools/ayatsuri/asset/export_character_track.py fox-2k-bilateral.blend fox OUTPUT_DIRECTORY
+python tools/ayatsuri/asset/export_character_track.py head-turn-seated.blend human OUTPUT_DIRECTORY ARCHIVE_ROOT/human-assets
+```
+
+- メッシュは基準姿勢で1回だけ削減する。ほかのキーは、元の頂点の変位を最近傍の逆距離重みで写すので、トポロジーは変わらない。
+- 表情と漫符はキーに焼かず、グループごとの「表情マスク」と「漫符条件」で実行時に決める。どの表情でも、どのクリップでも使える。
+- クリップは別の `.blend` からも取り込める。リグと頂点順が同じなら動き、そのファイルに無い物体（ポップの顔の差分など）は最近傍の頂点の動きに乗せる。
+- 陰影の動きが表示の1段階以内の三角形は、色を1つにまとめる。雲（2クリップ・表情6・漫符3）で166 KB。
+- 書き出しは `.hca`（展開後）と `.hcz`（deflate済み。ファームが埋め込むのはこちら）の両方を作る。雲＋人間（15クリップ）＋狐（2クリップ）で、アプリ領域には 77,133 B + 257,430 B + 28,213 B（実測、`check_flash.py` の余裕 200 KB）。
+- 人間は、顔の絵（頭の160三角形にテクスチャで貼られている）を、絵のある三角形だけ細分割して表情ごとの色に焼く。漫符は元のカメラ前提の位置にあるので、頭の右上に向きと大きさをそろえて置き直す。立位のクリップでは椅子を畳む。
+- 狐は、表情（普通・喜び・驚き・困り・まばたき・横目）と漫符を実行時に選ぶ。目とまぶたは、三角形ごとの表示と色を、表情ごとに元の目の材質で評価して焼く（`export_companion_track.py` の `EyeMaterial` を再利用）。クリップは旋回＋呼吸（168フレーム）と呼吸だけのループ（96フレーム）。`fox-2k-bilateral.blend` から 65,136 B。
+- 動作の差分（63%）と色の時系列（29%）が大半で、表情の色は 0.5%。左右対称にしても、姿勢ごとの動きが左右非対称なので、データはほとんど減らない。
+
+ホストでは `tools/ayatsuri/model/test_track_character.c` が、ファームと同じ帯の入口で全表情・全漫符・全フレームを描いてPPMに書く。
+
+```text
+cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hone/track_model.c -o t
+./t cloud.hca OUTPUT_DIRECTORY
+```
+
+元の `.blend` は [cardputer-development-archive](https://github.com/dj-oyu/cardputer-development-archive) が公開している。そこから作った `.hcz`（雲・人間・狐、計363 KB）は `assets/characters/` に追跡して置くので、brokerの fetch→build でそのまま埋め込まれる。`.hca`（展開後）はホストの確認用で、リポジトリには入れない。再書き出しすると数百 KB が履歴に積まれるので、更新は確定版だけにする。
+
+#### データ領域 `ay_chars`
+
+展開後の `.hca` は 1 MiB に近いので、RAM にも app 領域にも置かない。ファームは `.hcz` を埋め込み、初回の起動で `ay_chars` パーティション（0x650000 から 0x1B0000。`storage` の使われていない末尾）へ展開し、以後は1体ずつ mmap で読む（`main/hone/track_store.c`）。
+
+- `storage` は 0x270000 から 0xC0000 に縮めた。使っているのは先頭の 0xA6000 まで（ソース保存・`pocket.fs`・下書き）で、位置は変わらない。
+- 展開は新しいデータを焼いた後の最初の起動で1回（数秒から十数秒。「LOADING」を出す）。ディレクトリを最後に書くので、途中で電源が切れても次の起動でやり直す。
+- 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。3体と背景で 1.69 MiB（27ページ）を使い、0x1B0000 にちょうど収まる。キャラクターを足すなら、`storage` をさらに縮めるか、パーティションを見直す。
+- パーティション表の変更はbrokerの書き込みに含まれる（ブートローダ・表・アプリだけを書く経路）。データ領域そのものはbrokerでは書けないので、この方式にした。
+
+### 背景（バックドロップ）
+
+`assets/backgrounds/backgrounds.hcz` に、アーカイブの [stage-assets](https://github.com/dj-oyu/cardputer-development-archive/tree/main/backgrounds/stage-assets-20261120) の7種（子供部屋・ビーチ・恐竜の森・Pipe Dream 倉庫・Vaporwave Temple・初期 Mac・夕暮れの入江）を入れた。B で順に切り替える（なし → 7種 → なし）。
+
+```text
+python tools/ayatsuri/asset/pack_backgrounds.py assets/backgrounds/backgrounds.hcz "CHILD ROOM=child-room/background.png" ...
+```
+
+- 各 240×135、不透明の PNG を RGB565（64,800 B）にして、1つのコンテナ（`HBG1`）にまとめる。隣のピクセルとの差分にして deflate した（`HCZ2`）。7枚で 453,728 B が 163,896 B。
+- キャラクターと同じ `ay_chars` に展開し、描画では mmap したピクセルを行ごとに合成する（RAM は使わない）。モデルの色が 0 のピクセルは「空」で、背景が見える（ラスター背景の検証と同じ規則）。
+- 背景を切り替えると、画面全体を描き直す。
+- **アプリ領域の余裕は 35,200 B しかない**（3体＋背景で 3,110,528 B / 3 MiB）。次に足すなら、先に何かを削る。
+
 ### ラスター背景の検証
 
 `python tools/hone/make_companion_raster_test.py --header main/ayatsuri/private/assets/live/companion_raster_test_pixels.h` で背景画像を生成し、CMakeの `AYATSURI_RASTER_TEST` を有効にします。起動後は左側に縦線が往復します。`T` で縦線を切り替え、`Enter` で静止背景を重ねたまま性能を計測できます。アセット用リポジトリに同じテスト画像とRGB565への変換手順があります。[LCD背景テスト画像](https://github.com/dj-oyu/cardputer-development-archive/tree/main/backgrounds/lcd-test-chart)
