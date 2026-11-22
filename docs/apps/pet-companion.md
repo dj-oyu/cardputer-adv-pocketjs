@@ -96,6 +96,42 @@ brokerのモデル入りソースには、生成した `hone_track_asset.h` と 
 
 ネイティブ版は起動するとモーションを再生します。←／→でモーション内の8つの姿勢を、↑／↓で6つの表情プリセットを順に選びます。選んだ姿勢や表情は画面に保持され、Spaceで再生に戻ります。Enterを押すと描画ベンチマークを開始します。通信計測を組み込んだビルドでは、続いてWi-Fi再接続とHTTPSの負荷をかけます。
 
+### キャラクターの切り替え（HCA）
+
+`AYATSURI_CHARACTERS` を有効にしたビルド（`sdkconfig.variant.ay_characters`）は、`main/ayatsuri/private/assets/characters/*.hca` をすべてファームに埋め込み、実行中に切り替える。狐の書き出し（`AYATSURI_TRACK_MODEL`）も併用でき、その場合は先頭のキャラクターになる。
+
+| キー | 動作 |
+| --- | --- |
+| ←／→ | モーション内の8つの姿勢 |
+| ↑／↓ | 表情（キャラクターごとの一覧） |
+| E | 漫符（なし → 各記号 → なし）。表情・モーションと同時に重ねられる |
+| C | 次のキャラクター |
+| M | 次のモーション（クリップ） |
+| Space／Enter | 再生に戻る／ベンチマーク |
+
+左上の4行に、キャラクターとクリップ、表情、漫符、状態を出す。右側は漫符の置き場なので空けてある。ベンチマーク中は漫符を外し、終わると表情と漫符を元に戻す。
+
+`.hca` は [`export_character_track.py`](../../tools/ayatsuri/asset/export_character_track.py) が Blender の評価済みメッシュから作る。`pip install bpy`（Blender 5.1 でも 4.3 製の `.blend` が開ける）か `blender -b` で動く。
+
+```text
+python tools/ayatsuri/asset/export_character_track.py cloud.blend cloud OUTPUT_DIRECTORY
+```
+
+- メッシュは基準姿勢で1回だけ削減する。ほかのキーは、元の頂点の変位を最近傍の逆距離重みで写すので、トポロジーは変わらない。
+- 表情と漫符はキーに焼かず、グループごとの「表情マスク」と「漫符条件」で実行時に決める。どの表情でも、どのクリップでも使える。
+- クリップは別の `.blend` からも取り込める。リグと頂点順が同じなら動き、そのファイルに無い物体（ポップの顔の差分など）は最近傍の頂点の動きに乗せる。
+- 陰影の動きが表示の1段階以内の三角形は、色を1つにまとめる。雲（2クリップ・表情6・漫符3）で166 KB。
+- フラッシュの余裕は約396 KB（アプリ領域3 MiBに対し 2,749,264 B）。キャラクターを足すときは `asset-report.json` の `bytes` を合算して確かめる。
+
+ホストでは `tools/ayatsuri/model/test_track_character.c` が、ファームと同じ帯の入口で全表情・全漫符・全フレームを描いてPPMに書く。
+
+```text
+cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hone/track_model.c -o t
+./t cloud.hca OUTPUT_DIRECTORY
+```
+
+`.hca` は非公開の資産なので、リポジトリには入れない（`.gitignore` 済み）。brokerで焼くビルドは、このディレクトリに `.hca` を置いたソースで作る。
+
 ### ラスター背景の検証
 
 `python tools/hone/make_companion_raster_test.py --header main/ayatsuri/private/assets/live/companion_raster_test_pixels.h` で背景画像を生成し、CMakeの `AYATSURI_RASTER_TEST` を有効にします。起動後は左側に縦線が往復します。`T` で縦線を切り替え、`Enter` で静止背景を重ねたまま性能を計測できます。アセット用リポジトリに同じテスト画像とRGB565への変換手順があります。[LCD背景テスト画像](https://github.com/dj-oyu/cardputer-development-archive/tree/main/backgrounds/lcd-test-chart)
