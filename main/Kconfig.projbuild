@@ -639,7 +639,7 @@ menu "Pocket VM (diagnostics)"
         help
             Embeds every Hone character asset (*.hca, written by
             tools/ayatsuri/asset/export_character_track.py) found in
-            main/ayatsuri/private/assets/characters and lets the Companion
+            assets/characters and lets the Companion
             switch between them (C), their clips (M), face presets (Up/Down)
             and emote overlays (E). May be combined with the exported fox
             track, which then appears as the first character.

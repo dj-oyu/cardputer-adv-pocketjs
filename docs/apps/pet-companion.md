@@ -98,7 +98,7 @@ brokerのモデル入りソースには、生成した `hone_track_asset.h` と 
 
 ### キャラクターの切り替え（HCA）
 
-`AYATSURI_CHARACTERS` を有効にしたビルド（`sdkconfig.variant.ay_characters`）は、`main/ayatsuri/private/assets/characters/*.hcz` をすべてファームに埋め込み、実行中に切り替える。狐の書き出し（`AYATSURI_TRACK_MODEL`）も併用でき、その場合は先頭のキャラクターになる。
+`AYATSURI_CHARACTERS` を有効にしたビルド（`sdkconfig.variant.ay_characters`）は、`assets/characters/*.hcz` をすべてファームに埋め込み、実行中に切り替える。狐の書き出し（`AYATSURI_TRACK_MODEL`）も併用でき、その場合は先頭のキャラクターになる。
 
 | キー | 動作 |
 | --- | --- |
@@ -135,7 +135,7 @@ cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hon
 ./t cloud.hca OUTPUT_DIRECTORY
 ```
 
-`.hca`／`.hcz` は非公開の資産なので、リポジトリには入れない（`.gitignore` 済み）。brokerで焼くビルドは、このディレクトリに `.hcz` を置いたソースで作る。
+元の `.blend` は [cardputer-development-archive](https://github.com/dj-oyu/cardputer-development-archive) が公開している。そこから作った `.hcz`（雲・人間・狐、計363 KB）は `assets/characters/` に追跡して置くので、brokerの fetch→build でそのまま埋め込まれる。`.hca`（展開後）はホストの確認用で、リポジトリには入れない。再書き出しすると数百 KB が履歴に積まれるので、更新は確定版だけにする。
 
 #### データ領域 `ay_chars`
 
