@@ -121,6 +121,112 @@ HUMAN = {
     "clips": [],
 }
 
+# Fox: low-poly already, so nothing is decimated. Eyes and lids decide their own visibility
+# and color per triangle from the authored eye material, evaluated once per face preset.
+FOX_FACES = [("NORMAL", {}),
+             ("JOY", {"mouth_open_smile": 1, "happy_eyes": 1}),
+             ("SURPRISE", {"mouth_open_smile": .75, "eye_blank_both": .32, "brow_worry": .18}),
+             ("CONCERN", {"brow_worry": .95, "gaze_x": -.50}),
+             ("BLINK", {"blink_both": 1}),
+             ("GLANCE", {"gaze_x": .8})]
+FOX_FACE_PROPS = ("gaze_x", "blink_both", "blink_left", "blink_right", "brow_worry", "mouth_smile",
+                  "eye_blank_both", "eye_blank_left", "eye_blank_right", "mouth_open_smile", "happy_eyes")
+FOX_MARK_PROPS = ("sweat", "confusion", "anger")
+
+
+def fox_apply(rig, preset, emote):
+    face = FOX_FACES[preset][1]
+    controls = rig.scene.objects["Gaze material controls"]
+    for prop in FOX_FACE_PROPS:
+        controls[prop] = float(face.get(prop, 0))
+    controls.update_tag()
+    marks = rig.scene.objects["Manga marks controls"]
+    for prop in FOX_MARK_PROPS:
+        marks[prop] = 1.0 if prop == emote else 0.0
+    marks.update_tag()
+    breathing = rig.scene.objects["Breathing"]
+    breathing["Tension"] = .23 + .63 * max(face.get("mouth_open_smile", 0), face.get("brow_worry", 0))
+    breathing.update_tag()
+
+
+def fox_setup(rig):
+    # The shape-key drivers stay; the export supplies its own breathing clock.
+    rig.scene.objects["Breathing"].animation_data.action = None
+    rig.textures = {}
+    for image in bpy.data.images:
+        if image.name.startswith(("Gaze eye", "Blink fixed")):
+            width, height = image.size
+            pixels = np.empty(width * height * 4, np.float32)
+            image.pixels.foreach_get(pixels)
+            rig.textures[image.name] = pixels.reshape((height, width, 4))
+
+
+def fox_tri_hook(rig, ev, mesh, preset):
+    names = [m.name if m else "" for m in mesh.materials]
+    if not any(n.startswith(("Gaze eye", "Blink upper lid")) for n in names):
+        return None
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from export_companion_track import EyeMaterial
+    face = {p: float(FOX_FACES[preset][1].get(p, 0)) for p in FOX_FACE_PROPS}
+    ids = np.array([t.material_index for t in mesh.loop_triangles])
+    loops = np.array([tuple(t.loops) for t in mesh.loop_triangles])
+    keep = np.ones(len(ids), bool)
+    rgb = np.full((len(ids), 3), np.nan)
+    for i, name in enumerate(names):
+        which = np.flatnonzero(ids == i)
+        if not len(which):
+            continue
+        if name.startswith("Gaze eye"):
+            data = mesh.uv_layers.active.data
+            uv = np.array([[data[loop].uv for loop in loops[j]] for j in which])
+            # Three interior samples per triangle keep the pupil contrast on authored geometry.
+            sample = uv.mean(axis=-2, keepdims=True) * .36 + uv * .64
+            colors, alpha = EyeMaterial(mesh.materials[i], rig.textures).sample(sample, face)
+            keep[which] &= np.mean(alpha, axis=-1) >= .5
+            rgb[which] = np.sum(colors * alpha[..., None], axis=-2) / np.maximum(np.sum(alpha, axis=-1)[..., None], 1)
+        elif name.startswith("Blink upper lid"):
+            side = "left" if "-1" in name else "right"
+            keep[which] &= max(face["blink_both"], face["blink_" + side]) >= .13
+    return keep, rgb
+
+
+def fox_clip(rig, clip, f, preset):
+    scene = rig.scene
+    if clip == "turn":
+        phase = f / 168
+        frame = scene.frame_start + (scene.frame_end - scene.frame_start) * (.5 - .5 * np.cos(2 * np.pi * phase))
+        cycle = .5 - .5 * np.cos(4 * np.pi * phase)
+    else:
+        frame = scene.frame_start
+        cycle = .5 - .5 * np.cos(2 * np.pi * f / 96)
+    scene.frame_set(int(frame), subframe=float(frame % 1))
+    breathing = scene.objects["Breathing"]
+    breathing["Cycle"] = float(cycle)
+    breathing.update_tag()
+
+
+FOX = {
+    "name": "fox",
+    "presets": [f[0] for f in FOX_FACES],
+    "emotes": ["sweat", "confusion", "anger"],
+    "camera": None,
+    "select": lambda o: o.type in ("MESH", "CURVE"),
+    "cap": lambda name: None,
+    "apply": fox_apply,
+    "setup": fox_setup,
+    "tri_hook": fox_tri_hook,
+    "clip_hook": fox_clip,
+    "synthetic": {"turn": 168, "breath": 96},
+    "albedo": "material",
+    "layered": ("Manga",),
+    "light": (-.40, .55, .75),
+    "quant": (4, 64),
+    "color_tol": (3, 6, 3),
+    "view": (-.31, -.95, .16),
+    "clips": [("turn", None, None, 48, 8), ("breath", None, None, 48, 8)],
+}
+
+
 BODY_BANDS = [tuple((1 - i / 6) * u + (i / 6) * v for u, v in zip((.99, .983, 1.0), (.52, .71, 1.0)))
               for i in range(7)]
 RAINBOW = [(.85, .71, .98), (.72, .85, .99), (.70, .92, .96), (.98, .81, .88), (.99, .89, .79)]
@@ -174,10 +280,14 @@ class Rig:
         self.controls = controls
         self.objects = [o for o in self.scene.objects if config["select"](o)]
 
-    def pose(self, frame, preset, emote):
+    def pose(self, frame, preset, emote, clip=None):
         self.scene.frame_set(frame)
+        self.preset = preset
         if self.controls:
             self.config["apply"](self, preset, emote)
+            hook = self.config.get("clip_hook")
+            if hook and clip is not None:
+                hook(self, clip, frame, preset)
         bpy.context.view_layer.update()
 
     def evaluate(self, wanted):
@@ -190,15 +300,17 @@ class Rig:
             mesh = ev.to_mesh()
             try:
                 mesh.calc_loop_triangles()
-                world = np.array([ev.matrix_world @ v.co for v in mesh.vertices], dtype=np.float64)
+                world = np.array([ev.matrix_world @ v.co for v in mesh.vertices], dtype=np.float64).reshape(-1, 3)
                 polys = [tuple(p.vertices) for p in mesh.polygons]
                 tris = np.array([t.vertices for t in mesh.loop_triangles], dtype=np.int64).reshape(-1, 3)
                 matidx = np.array([t.material_index for t in mesh.loop_triangles], dtype=np.int64)
                 matcolors = [tuple(m.diffuse_color[:3]) if m else (.5, .5, .5) for m in mesh.materials] or [(.5, .5, .5)]
                 color = matcolors[0]
+                hook = self.config.get("tri_hook")
+                extra = hook(self, ev, mesh, getattr(self, "preset", 0)) if hook else None
             finally:
                 ev.to_mesh_clear()
-            out[obj.name] = (world, polys, tris, color, visible, matidx, matcolors)
+            out[obj.name] = (world, polys, tris, color, visible, matidx, matcolors, extra)
         return out
 
 
@@ -336,6 +448,19 @@ def lattice(n):
     return points, tris
 
 
+def per_tri_states(config, r, states):
+    """Per-triangle visibility and color for each face preset (the fox's eyes and lids)."""
+    faces = len(config["presets"])
+    keep = np.stack([states[p][0] for p in range(faces)], axis=1)          # (tris, faces)
+    r["tri_mask"] = (keep * (1 << np.arange(faces))).sum(axis=1).astype(int)
+    colors = [states[p][1] for p in range(faces)]
+    if all(c is not None for c in colors):
+        stack = np.stack(colors, axis=1)                                      # (tris, faces, 3) sRGB
+        varies = np.abs(stack - stack[:, :1]).max(axis=(1, 2)) > 1 / 64
+        for t in np.flatnonzero(varies & (r["tri_mask"] != 0)):
+            r["art"][int(t)] = stack[t]
+
+
 def face_art(config, obj, r):
     """Replace the head's reduced mesh by one whose front triangles are subdivided where the
     face art has detail, with one sampled color per face preset on those triangles."""
@@ -438,12 +563,17 @@ def export(config, output, sheet=True):
 
     # 1. which pose shows each source object?
     ref_frame = scene.frame_start
+    if config.get("setup"):
+        config["setup"](rig)
     visible_in = {}
     reference = {}
+    tri_states = {}
     for state in states:
         rig.pose(ref_frame, *state)
         for name, data in rig.evaluate(rig.objects).items():
             visible_in.setdefault(name, {})[state] = data[4]
+            if data[7] is not None and state[1] is None:
+                tri_states.setdefault(name, {})[state[0]] = data[7]
             if data[4] and name not in reference:
                 reference[name] = (state, data)
     live = [o for o in rig.objects if o.name in reference]
@@ -452,7 +582,7 @@ def export(config, output, sheet=True):
     # 2. reduce each object once; derive transfer weights from the reference pose
     reduced = {}
     for obj in live:
-        state, (world, polys, tris, color, _, matidx, matcolors) = reference[obj.name]
+        state, (world, polys, tris, color, _, matidx, matcolors, _extra) = reference[obj.name]
         budget = config["cap"](obj.name)
         if budget is None:
             # Already low-poly and skinned: keep every vertex, so the transfer is exact.
@@ -468,6 +598,8 @@ def export(config, output, sheet=True):
         art = config.get("face_art")
         if art and obj.name == art["object"]:
             face_art(config, obj, reduced[obj.name])
+        if obj.name in tri_states:
+            per_tri_states(config, reduced[obj.name], tri_states[obj.name])
     print("reduced triangles", sum(len(r["tris"]) for r in reduced.values()))
 
     # 3. sample keys, clip by clip. Keys are shared by index; a pose blends two keys of one clip.
@@ -498,27 +630,39 @@ def export(config, output, sheet=True):
     key_clip = []     # key -> (clip index, frame)
     clip_keys = []    # clip -> [key indices]
     clip_span = []    # clip -> number of frames in its loop
-    frames = clip_frames(scene.frame_start, scene.frame_end, config["clips"][0][4])
-    clip_keys.append([])
-    clip_span.append(scene.frame_end - scene.frame_start)
-    for frame in frames:
-        row = {}
-        for state, names in by_state.items():
-            rig.pose(frame, *state)
-            got = rig.evaluate([objects_by_name[n] for n in names])
-            for n in names:
-                r = reduced[n]
-                displacement = got[n][0] - r["rest"]
-                row[n] = r["verts"] + np.einsum("vk,vkc->vc", r["weight"], displacement[r["index"]])
-        clip_keys[0].append(len(samples))
-        key_clip.append((0, frame))
-        samples.append(row)
-        print("key", frame, flush=True)
+    synthetic = config.get("synthetic", {})
+
+    def sample_main(ci, cname, first, last, step):
+        """sample a clip of the open file; a synthetic clip maps its own frame count to the rig"""
+        clip_keys.append([])
+        clip_span.append(last - first)
+        for frame in clip_frames(first, last, step):
+            row = {}
+            for state, names in by_state.items():
+                rig.pose(frame, *state, clip=cname if cname in synthetic else None)
+                got = rig.evaluate([objects_by_name[n] for n in names])
+                for n in names:
+                    r = reduced[n]
+                    displacement = got[n][0] - r["rest"]
+                    row[n] = r["verts"] + np.einsum("vk,vkc->vc", r["weight"], displacement[r["index"]])
+            clip_keys[ci].append(len(samples))
+            key_clip.append((ci, frame))
+            samples.append(row)
+            print("key", frame, flush=True)
+
+    first_name, _, _, _, first_step = config["clips"][0]
+    if first_name in synthetic:
+        sample_main(0, first_name, 0, synthetic[first_name], first_step)
+    else:
+        sample_main(0, first_name, scene.frame_start, scene.frame_end, first_step)
 
     # Further clips come from other files that share the rig and the geometry
     # but not every object (a pop clip has no alternative faces or emotes).
     # Objects that are missing ride the nearest vertices that are present.
     for ci, (cname, relative, _, _, step) in enumerate(config["clips"][1:], start=1):
+        if relative is None:
+            sample_main(ci, cname, 0, synthetic[cname], step)  # same file, driven by the clip hook
+            continue
         turntable = relative.startswith("turntable::")
         bpy.ops.wm.open_mainfile(filepath=str(resolve_clip(config, source_path, relative.removeprefix("turntable::"))))
         other = Rig(config)
@@ -601,6 +745,8 @@ def export(config, output, sheet=True):
                     emote_req |= 1 << e
             preset_mask = (1 << preset_count) - 1
         group_of[name] = groups.setdefault((preset_mask, emote_req), len(groups))
+        if "tri_mask" in reduced[name]:
+            reduced[name]["tri_group"] = [groups.setdefault((int(m), 0), len(groups)) for m in reduced[name]["tri_mask"]]
     assert len(groups) <= 256
 
     world_to_camera = np.linalg.inv(camera_matrix)
@@ -707,7 +853,7 @@ def export(config, output, sheet=True):
         for k in range(keys):
             positions[k, base:base + len(r["verts"])] = to_screen(samples[k][name])
         tri_list.append(r["tris"] + base)
-        tri_group.extend([group_of[name]] * len(r["tris"]))
+        tri_group.extend(r.get("tri_group") or [group_of[name]] * len(r["tris"]))
         tri_object.extend([name] * len(r["tris"]))
         if name == "Cloud body" or name.startswith("Floating hand"):
             z = r["verts"][r["tris"]][:, :, 2].mean(axis=1)
@@ -920,6 +1066,8 @@ if __name__ == "__main__":
     root = argv[2] if len(argv) > 2 else None
     if argv[0] == "cloud":
         config = CLOUD
+    elif argv[0] == "fox":
+        config = FOX
     elif argv[0] == "human":
         config = dict(HUMAN, clips=human_clips(), root=root)
         if os.environ.get("HUMAN_VIEW"):

@@ -115,14 +115,17 @@ brokerのモデル入りソースには、生成した `hone_track_asset.h` と 
 
 ```text
 python tools/ayatsuri/asset/export_character_track.py cloud.blend cloud OUTPUT_DIRECTORY
+python tools/ayatsuri/asset/export_character_track.py fox-2k-bilateral.blend fox OUTPUT_DIRECTORY
+python tools/ayatsuri/asset/export_character_track.py head-turn-seated.blend human OUTPUT_DIRECTORY ARCHIVE_ROOT/human-assets
 ```
 
 - メッシュは基準姿勢で1回だけ削減する。ほかのキーは、元の頂点の変位を最近傍の逆距離重みで写すので、トポロジーは変わらない。
 - 表情と漫符はキーに焼かず、グループごとの「表情マスク」と「漫符条件」で実行時に決める。どの表情でも、どのクリップでも使える。
 - クリップは別の `.blend` からも取り込める。リグと頂点順が同じなら動き、そのファイルに無い物体（ポップの顔の差分など）は最近傍の頂点の動きに乗せる。
 - 陰影の動きが表示の1段階以内の三角形は、色を1つにまとめる。雲（2クリップ・表情6・漫符3）で166 KB。
-- 書き出しは `.hca`（展開後）と `.hcz`（deflate済み。ファームが埋め込むのはこちら）の両方を作る。雲＋人間（15クリップ）で、アプリ領域には 77,133 B + 257,430 B（実測、`check_flash.py` の余裕 228 KB）。
+- 書き出しは `.hca`（展開後）と `.hcz`（deflate済み。ファームが埋め込むのはこちら）の両方を作る。雲＋人間（15クリップ）＋狐（2クリップ）で、アプリ領域には 77,133 B + 257,430 B + 28,213 B（実測、`check_flash.py` の余裕 200 KB）。
 - 人間は、顔の絵（頭の160三角形にテクスチャで貼られている）を、絵のある三角形だけ細分割して表情ごとの色に焼く。漫符は元のカメラ前提の位置にあるので、頭の右上に向きと大きさをそろえて置き直す。立位のクリップでは椅子を畳む。
+- 狐は、表情（普通・喜び・驚き・困り・まばたき・横目）と漫符を実行時に選ぶ。目とまぶたは、三角形ごとの表示と色を、表情ごとに元の目の材質で評価して焼く（`export_companion_track.py` の `EyeMaterial` を再利用）。クリップは旋回＋呼吸（168フレーム）と呼吸だけのループ（96フレーム）。`fox-2k-bilateral.blend` から 65,136 B。
 - 動作の差分（63%）と色の時系列（29%）が大半で、表情の色は 0.5%。左右対称にしても、姿勢ごとの動きが左右非対称なので、データはほとんど減らない。
 
 ホストでは `tools/ayatsuri/model/test_track_character.c` が、ファームと同じ帯の入口で全表情・全漫符・全フレームを描いてPPMに書く。
@@ -140,7 +143,7 @@ cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hon
 
 - `storage` は 0x270000 から 0x100000 に縮めた。使っているのは先頭の約 0xAC000 まで（ソース保存・`pocket.fs`・下書き）で、位置は変わらない。
 - 展開は新しいデータを焼いた後の最初の起動で1回（数秒から十数秒。「LOADING」を出す）。ディレクトリを最後に書くので、途中で電源が切れても次の起動でやり直す。
-- 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。雲＋人間で約 1.19 MiB を使う。
+- 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。3体で約 1.25 MiB を使う。
 - パーティション表の変更はbrokerの書き込みに含まれる（ブートローダ・表・アプリだけを書く経路）。データ領域そのものはbrokerでは書けないので、この方式にした。
 
 ### ラスター背景の検証
