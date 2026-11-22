@@ -17,10 +17,11 @@
  * by a still pose stays in force while a clip plays, and an emote overlay
  * applies to every pose. */
 
+/* begin/end rather than a length: the linker knows both addresses, but not their difference. */
 typedef struct {
     const char *name;
-    const uint8_t *data;
-    size_t size;
+    const uint8_t *begin;
+    const uint8_t *end;
 } ay_character_blob;
 
 /* Provided by the build (a generated table) or by the host test. */
@@ -40,6 +41,7 @@ unsigned ay_character_inspection_count(void);
 /* Face presets are selected with the still poses; labels are for the HUD. */
 const char *ay_character_face_label(unsigned preset);
 unsigned ay_character_face(void);
+bool ay_character_set_face(unsigned preset);
 
 /* Emote overlays: 0 is none, 1..emote_count are the character's marks. */
 unsigned ay_character_emote_count(void);

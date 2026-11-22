@@ -76,7 +76,7 @@ int main(int argc, char **argv)
     printf("check: %s\n", why ? why : "ok");
     if (why) return 1;
     /* The table is const in the library; this test swaps it through the symbol. */
-    ((ay_character_blob *)ay_character_blobs)[0] = (ay_character_blob){"test", data, size};
+    ((ay_character_blob *)ay_character_blobs)[0] = (ay_character_blob){"test", data, data + size};
     *(unsigned *)&ay_character_blob_count = 1;
     if (!ay_character_select(0)) { puts("select failed"); return 1; }
     printf("name=%s sha=%s poses=%u faces=%u emotes=%u clips=%u period=%u\n", ay_character_name(0), ay_character_sha256(),

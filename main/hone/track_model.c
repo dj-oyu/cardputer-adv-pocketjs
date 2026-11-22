@@ -124,7 +124,7 @@ static const char *hca_parse(const uint8_t *data, size_t size, track_asset *out)
         memcpy(clip->name, c, 16);
         clip->name[16] = 0;
         clip->first_pose = rd16(c + 16); clip->poses = rd16(c + 18); clip->period_ms = rd16(c + 20);
-        if (!clip->poses || (unsigned)clip->first_pose + clip->poses > n[6]) return "clip outside poses";
+        if (!clip->poses || clip->poses > 256 || (unsigned)clip->first_pose + clip->poses > n[6]) return "clip outside poses";
     }
     memcpy(out->name, data + 116, 16);
     for (unsigned i = 0; i < 32; ++i) {
@@ -215,7 +215,8 @@ static const char *character_view(unsigned index, track_asset *out)
         blob = index - 1;
     }
     if (blob >= ay_character_blob_count) return "no such character";
-    return hca_parse(ay_character_blobs[blob].data, ay_character_blobs[blob].size, out);
+    return hca_parse(ay_character_blobs[blob].begin,
+                     (size_t)(ay_character_blobs[blob].end - ay_character_blobs[blob].begin), out);
 }
 
 unsigned ay_character_count(void) { return ay_character_blob_count + (fox_present() ? 1u : 0u); }
@@ -287,6 +288,13 @@ unsigned ay_character_pose_count(void)
 
 unsigned ay_character_inspection_count(void) { return ensure() ? asset.faces : 0; }
 unsigned ay_character_face(void) { return face; }
+
+bool ay_character_set_face(unsigned preset)
+{
+    if (!ensure() || preset >= asset.faces) return false;
+    face = preset;
+    return true;
+}
 
 const char *ay_character_face_label(unsigned preset)
 {
