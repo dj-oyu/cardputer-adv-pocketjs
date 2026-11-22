@@ -1,0 +1,14 @@
+dtoa/atod 128-bit Schubfach / Eisel-Lemire on the S3 (2026-11-22)
+Device: M5Stack Cardputer ADV (ESP32-S3FN8, 240 MHz, no PSRAM), firmware without debug (NDEBUG), tools through the broker
+Benchmark: a throwaway app in `hello` (16 mixed floats x 40 rounds per item, pocket.time.now(), run once per build, ~1 s after HELLO_READY)
+  floats: LCG seed 12345, x = (seed/2^31) * 10^((i%9)-4) + i/7; strings = String(x)
+  'empty' is the loop alone (s += i, 16 per round); every item includes it
+
+A2  cardputer 14e4a9d, QuickJS = fork main 5cc5724 (PR #2 merged; no __int128 on Xtensa, so the multi-precision dtoa still ran)
+I (109292) js: NUMBENCH str 74.9us parse 26.8us num 27.6us toFixed 16.3us upper4k 3353.1us indexOf4k 185.6us empty 5.1us 825383.2666310046
+
+B2  cardputer f6cf49b, QuickJS = fork b85cc94 (= 5cc5724 + the dtoa.c change of fork PR #5)
+I (125750) js: NUMBENCH str 62.8us parse 25.4us num 25.4us toFixed 16.8us upper4k 3343.6us indexOf4k 184.8us empty 5.1us 825383.2666310046
+
+The trailing number is a checksum of the results; it is identical.
+The two firmwares differ only in dtoa.c. Flashed with no baseline (the LKG gate refused: partition layout differed from the LKG left by another session).
