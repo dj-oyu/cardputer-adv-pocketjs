@@ -40,7 +40,7 @@ typedef struct {
 } directory_t;
 _Static_assert(sizeof(directory_t) <= SECTOR, "directory must fit one sector");
 
-typedef struct { uint32_t raw_size, crc; const uint8_t *deflate; size_t deflate_size; } container_t;
+typedef struct { uint32_t raw_size, crc; const uint8_t *deflate; size_t deflate_size; bool delta; } container_t;
 
 static const esp_partition_t *partition;
 static bool checked, ready;
@@ -51,32 +51,42 @@ static unsigned mapped_blob = UINT_MAX;
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint32_t pages(uint32_t bytes) { return (bytes + PAGE - 1) / PAGE * PAGE; }
 
-static bool container(unsigned blob, container_t *out)
+/* Entries are the characters in order, then the backdrop container if there is one. */
+static unsigned entry_count(void) { return ay_character_blob_count + (ay_background_blob_count ? 1u : 0u); }
+
+static const ay_character_blob *entry_blob(unsigned entry)
 {
-    if (blob >= ay_character_blob_count) return false;
-    const uint8_t *p = ay_character_blobs[blob].begin;
-    size_t size = (size_t)(ay_character_blobs[blob].end - p);
-    if (size < 12 || memcmp(p, "HCZ1", 4)) return false;
+    return entry < ay_character_blob_count ? &ay_character_blobs[entry] : &ay_background_blob[0];
+}
+
+static bool container(unsigned entry, container_t *out)
+{
+    if (entry >= entry_count()) return false;
+    const uint8_t *p = entry_blob(entry)->begin;
+    size_t size = (size_t)(entry_blob(entry)->end - p);
+    /* "HCZ2" is HCZ1 with the data stored as differences of successive 16-bit words (images). */
+    if (size < 12 || (memcmp(p, "HCZ1", 4) && memcmp(p, "HCZ2", 4))) return false;
+    out->delta = p[3] == '2';
     out->raw_size = rd32(p + 4);
     out->crc = rd32(p + 8);
     out->deflate = p + 12;
     out->deflate_size = size - 12;
-    return out->raw_size >= 144;
+    return out->raw_size >= 144 && (!out->delta || !(out->raw_size & 1u));
 }
 
 /* Where each blob goes, in order. False when the set cannot fit. */
 static bool plan(entry_t *entries, unsigned *count)
 {
-    if (!partition || ay_character_blob_count > MAX_ENTRIES) return false;
+    if (!partition || entry_count() > MAX_ENTRIES) return false;
     uint32_t cursor = PAGE;
-    for (unsigned i = 0; i < ay_character_blob_count; ++i) {
+    for (unsigned i = 0; i < entry_count(); ++i) {
         container_t c;
         if (!container(i, &c)) return false;
         entries[i] = (entry_t){c.raw_size, c.crc, cursor, 0};
         cursor += pages(c.raw_size);
         if (cursor > partition->size) return false;
     }
-    *count = ay_character_blob_count;
+    *count = entry_count();
     return true;
 }
 
@@ -92,26 +102,48 @@ static bool directory_matches(const entry_t *want, unsigned count)
 typedef struct {
     uint8_t *stage;
     uint32_t written, fill, crc;
-    bool failed;
+    bool failed, delta, odd;
+    uint8_t low;
+    uint16_t sum;
 } sink_t;
 
-static int sink(const void *data, int length, void *user)
+static void emit(sink_t *s, const uint8_t *p, uint32_t length)
 {
-    sink_t *s = user;
-    const uint8_t *p = data;
     while (length > 0 && !s->failed) {
         uint32_t take = SECTOR - s->fill;
-        if (take > (uint32_t)length) take = (uint32_t)length;
+        if (take > length) take = length;
         memcpy(s->stage + s->fill, p, take);
         s->crc = (uint32_t)mz_crc32(s->crc, p, take);
         s->fill += take;
         p += take;
-        length -= (int)take;
+        length -= take;
         if (s->fill == SECTOR) {
             s->failed = esp_partition_write(partition, s->written, s->stage, SECTOR) != ESP_OK;
             s->written += SECTOR;
             s->fill = 0;
             vTaskDelay(1); /* the watchdog and the idle task still have to run */
+        }
+    }
+}
+
+static int sink(const void *data, int length, void *user)
+{
+    sink_t *s = user;
+    const uint8_t *p = data;
+    if (!s->delta) {
+        emit(s, p, (uint32_t)length);
+        return !s->failed;
+    }
+    /* Difference coding: each little-endian word is stored minus the word before it. */
+    for (int i = 0; i < length && !s->failed; ++i) {
+        if (!s->odd) {
+            s->low = p[i];
+            s->odd = true;
+        } else {
+            s->sum = (uint16_t)(s->sum + (s->low | p[i] << 8));
+            const uint8_t word[2] = {(uint8_t)s->sum, (uint8_t)(s->sum >> 8)};
+            emit(s, word, 2);
+            s->odd = false;
         }
     }
     return !s->failed;
@@ -121,7 +153,7 @@ static int sink(const void *data, int length, void *user)
  * way to use tinfl: the window is also the output buffer, flushed as it fills. */
 static bool unpack(const container_t *c, uint32_t offset)
 {
-    sink_t s = {.stage = malloc(SECTOR), .written = offset};
+    sink_t s = {.stage = malloc(SECTOR), .written = offset, .delta = c->delta};
     tinfl_decompressor *state = malloc(sizeof *state);
     uint8_t *window = malloc(TINFL_LZ_DICT_SIZE);
     bool good = false;
@@ -165,7 +197,8 @@ static void open_partition(void)
     entry_t want[MAX_ENTRIES];
     unsigned count;
     ready = plan(want, &count) && directory_matches(want, count);
-    ESP_LOGI(TAG, "%u characters, %s", ay_character_blob_count, ready ? "already unpacked" : "need unpacking");
+    ESP_LOGI(TAG, "%u characters + %u backdrop sets, %s", ay_character_blob_count, ay_background_blob_count,
+             ready ? "already unpacked" : "need unpacking");
 }
 
 bool ay_character_store_ready(void)
@@ -185,6 +218,7 @@ bool ay_character_store_install(void)
         return false;
     }
     ay_character_image_release();
+    ay_background_release();
     /* Invalidate first: the directory is the last thing written. */
     if (esp_partition_erase_range(partition, 0, SECTOR) != ESP_OK) return false;
     for (unsigned i = 0; i < count; ++i) {
@@ -193,7 +227,7 @@ bool ay_character_store_install(void)
         const uint32_t span = (c.raw_size + SECTOR - 1) / SECTOR * SECTOR;
         if (esp_partition_erase_range(partition, want[i].offset, span) != ESP_OK || !unpack(&c, want[i].offset))
             return false;
-        ESP_LOGI(TAG, "%s: %" PRIu32 " bytes at 0x%" PRIx32, ay_character_blobs[i].name, c.raw_size, want[i].offset);
+        ESP_LOGI(TAG, "%s: %" PRIu32 " bytes at 0x%" PRIx32, entry_blob(i)->name, c.raw_size, want[i].offset);
     }
     directory_t dir = {.magic = DIR_MAGIC, .version = 1, .count = count};
     memcpy(dir.entry, want, count * sizeof *want);
@@ -207,6 +241,11 @@ bool ay_character_store_install(void)
     return ready;
 }
 
+static const void *bg_mapped;
+static esp_partition_mmap_handle_t bg_handle;
+static unsigned bg_count;
+static char bg_names[16][16];
+
 void ay_character_image_release(void)
 {
     if (mapped) esp_partition_munmap(handle);
@@ -214,12 +253,18 @@ void ay_character_image_release(void)
     mapped_blob = UINT_MAX;
 }
 
+void ay_background_release(void)
+{
+    if (bg_mapped) esp_partition_munmap(bg_handle);
+    bg_mapped = NULL;
+}
+
 const uint8_t *ay_character_image(unsigned blob, size_t *size)
 {
     if (!ay_character_store_ready() && !ay_character_store_install()) return NULL;
     entry_t want[MAX_ENTRIES];
     unsigned count;
-    if (!plan(want, &count) || blob >= count) return NULL;
+    if (!plan(want, &count) || blob >= ay_character_blob_count) return NULL;
     if (mapped && mapped_blob == blob) {
         *size = want[blob].raw_size;
         return mapped;
@@ -233,4 +278,48 @@ const uint8_t *ay_character_image(unsigned blob, size_t *size)
     mapped_blob = blob;
     *size = want[blob].raw_size;
     return mapped;
+}
+
+/* "HBG1": 16-byte header (count at +4, size at +8), a 16-byte name per image, then the images. */
+static const uint8_t *background_base(void)
+{
+    if (bg_mapped) return bg_mapped;
+    if (!ay_background_blob_count) return NULL;
+    if (!ay_character_store_ready() && !ay_character_store_install()) return NULL;
+    entry_t want[MAX_ENTRIES];
+    unsigned count;
+    if (!plan(want, &count)) return NULL;
+    const unsigned entry = ay_character_blob_count;
+    if (esp_partition_mmap(partition, want[entry].offset, pages(want[entry].raw_size), ESP_PARTITION_MMAP_DATA,
+                           &bg_mapped, &bg_handle) != ESP_OK) {
+        bg_mapped = NULL;
+        return NULL;
+    }
+    const uint8_t *p = bg_mapped;
+    bool good = !memcmp(p, "HBG1", 4) && rd32(p + 4) >= 1 && rd32(p + 4) <= 16 &&
+                rd32(p + 4) * 64800u + 16u + rd32(p + 4) * 16u <= want[entry].raw_size;
+    if (!good) {
+        ay_background_release();
+        return NULL;
+    }
+    bg_count = rd32(p + 4);
+    for (unsigned i = 0; i < bg_count; ++i) {
+        memcpy(bg_names[i], p + 16 + 16 * i, 15);
+        bg_names[i][15] = '\0';
+    }
+    return bg_mapped;
+}
+
+unsigned ay_background_count(void) { return background_base() ? bg_count : 0; }
+
+const char *ay_background_name(unsigned index)
+{
+    return background_base() && index < bg_count ? bg_names[index] : "";
+}
+
+const uint16_t *ay_background_pixels(unsigned index)
+{
+    const uint8_t *p = background_base();
+    if (!p || index >= bg_count) return NULL;
+    return (const uint16_t *)(p + 16 + 16 * bg_count + (size_t)index * 64800u);
 }

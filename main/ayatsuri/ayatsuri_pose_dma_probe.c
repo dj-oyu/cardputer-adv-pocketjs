@@ -469,6 +469,14 @@ static const char *inspection_label(int pose, char buffer[16])
 }
 
 #ifdef AYATSURI_CHARACTERS
+/* 0 is no backdrop; 1..n pick a background from the store. */
+static unsigned background;
+
+static const uint16_t *background_pixels(void)
+{
+    return background ? ay_background_pixels(background - 1) : NULL;
+}
+
 #define face_text(index) ay_character_face_label(index)
 #define PREFLIGHT_POSES (ay_character_inspection_count() < CHECK_POSES ? ay_character_inspection_count() : (unsigned)CHECK_POSES)
 
@@ -623,10 +631,22 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
                                 ay_raster_pixels + (y + row) * WIDTH, changed, marker);
         }
 #endif
+#ifdef AYATSURI_CHARACTERS
+        if (background_pixels()) {
+            /* A model pixel of zero is empty: the backdrop shows through, as for the test chart. */
+            for (unsigned row = 0; row < rows; ++row) {
+                const uint16_t *source = background_pixels() + (y + row) * WIDTH;
+                uint16_t *model = storage.band + row * WIDTH;
+                for (unsigned x = changed.left; x < changed.right; ++x) {
+                    if (!model[x]) model[x] = source[x];
+                }
+            }
+        }
+#endif
         paint_begin(storage.band, (int)y, (int)rows);
 #if defined(AYATSURI_CHARACTERS)
         /* Left-hand panel: the right side belongs to the emote marks. */
-        paint_fill(0, 0, 72, 80, 0x0841);
+        paint_fill(0, 0, 72, 88, 0x0841);
         paint_ascii(3, 1, hud[0], 0xffff);
         paint_ascii(3, 9, hud[1], 0xffff);
         paint_ascii(3, 17, hud[2], 0x9d9f);
@@ -636,7 +656,8 @@ static bool present_pose_impl(int pose, const char *label, frame_timing *timing)
         paint_ascii(3, 49, "E EMOTE", 0x9d9f);
         paint_ascii(3, 57, "C CHAR", 0x9d9f);
         paint_ascii(3, 65, "M MOTION", 0x9d9f);
-        paint_ascii(3, 73, "SPC ENT", 0x9d9f);
+        paint_ascii(3, 73, "B BACKDROP", 0x9d9f);
+        paint_ascii(3, 81, "SPC ENT", 0x9d9f);
 #elif defined(CONFIG_AYATSURI_LIVE_DMA_PROBE)
         paint_fill(176, 0, 64, 40, 0x0841);
         paint_ascii(180, 1, label, 0xffff);
@@ -968,6 +989,15 @@ static int navigate(ay_companion_command command)
 {
     switch (command) {
 #ifdef AYATSURI_CHARACTERS
+    case AY_COMPANION_NEXT_BACKGROUND: {
+        const unsigned count = ay_background_count();
+        if (!count) return -1;
+        background = (background + 1) % (count + 1);
+        displayed.known = false;  /* the whole screen changes */
+        probe.next_demo = 0;
+        ESP_LOGI(tag, "BACKGROUND %u %s", background, background ? ay_background_name(background - 1) : "NONE");
+        return -1;
+    }
     case AY_COMPANION_NEXT_EMOTE:
         (void)ay_character_set_emote((ay_character_emote() + 1) % (ay_character_emote_count() + 1));
         ESP_LOGI(tag, "EMOTE %u %s", ay_character_emote(), ay_character_emote_label(ay_character_emote()));
@@ -1060,7 +1090,7 @@ int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command c
     redraw_held = redraw_held || command == AY_COMPANION_RASTER_TOGGLE;
 #endif
 #ifdef AYATSURI_CHARACTERS
-    redraw_held = redraw_held || command == AY_COMPANION_NEXT_EMOTE;
+    redraw_held = redraw_held || command == AY_COMPANION_NEXT_EMOTE || command == AY_COMPANION_NEXT_BACKGROUND;
 #endif
     if (!is_capture && !testing && redraw_held && probe.held_pose >= 0) {
         inspect_pose = probe.held_pose;

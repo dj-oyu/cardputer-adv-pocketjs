@@ -30,6 +30,17 @@ typedef struct {
 extern const ay_character_blob ay_character_blobs[];
 extern const unsigned ay_character_blob_count;
 
+/* Backdrops: opaque 240x135 RGB565 images kept in the same store (assets/backgrounds,
+ * packed by tools/ayatsuri/asset/pack_backgrounds.py). The build provides 0 or 1 container. */
+extern const ay_character_blob ay_background_blob[];
+extern const unsigned ay_background_blob_count;
+
+unsigned ay_background_count(void);
+const char *ay_background_name(unsigned index);
+/* Rows are 240 pixels, top first. Valid until ay_background_release(); NULL if unavailable. */
+const uint16_t *ay_background_pixels(unsigned index);
+void ay_background_release(void);
+
 /* The plain HCA image of a blob, mapped read-only until the next call or release.
  * NULL when it cannot be unpacked. */
 const uint8_t *ay_character_image(unsigned blob, size_t *size);

@@ -105,6 +105,7 @@ brokerのモデル入りソースには、生成した `hone_track_asset.h` と 
 | ←／→ | モーション内の8つの姿勢 |
 | ↑／↓ | 表情（キャラクターごとの一覧） |
 | E | 漫符（なし → 各記号 → なし）。表情・モーションと同時に重ねられる |
+| B | 背景（なし → 7種 → なし） |
 | C | 次のキャラクター |
 | M | 次のモーション（クリップ） |
 | Space／Enter | 再生に戻る／ベンチマーク |
@@ -139,12 +140,25 @@ cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hon
 
 #### データ領域 `ay_chars`
 
-展開後の `.hca` は 1 MiB に近いので、RAM にも app 領域にも置かない。ファームは `.hcz` を埋め込み、初回の起動で `ay_chars` パーティション（`storage` の使われていない末尾 0x170000）へ展開し、以後は1体ずつ mmap で読む（`main/hone/track_store.c`）。
+展開後の `.hca` は 1 MiB に近いので、RAM にも app 領域にも置かない。ファームは `.hcz` を埋め込み、初回の起動で `ay_chars` パーティション（0x650000 から 0x1B0000。`storage` の使われていない末尾）へ展開し、以後は1体ずつ mmap で読む（`main/hone/track_store.c`）。
 
-- `storage` は 0x270000 から 0x100000 に縮めた。使っているのは先頭の約 0xAC000 まで（ソース保存・`pocket.fs`・下書き）で、位置は変わらない。
+- `storage` は 0x270000 から 0xC0000 に縮めた。使っているのは先頭の 0xA6000 まで（ソース保存・`pocket.fs`・下書き）で、位置は変わらない。
 - 展開は新しいデータを焼いた後の最初の起動で1回（数秒から十数秒。「LOADING」を出す）。ディレクトリを最後に書くので、途中で電源が切れても次の起動でやり直す。
-- 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。3体で約 1.25 MiB を使う。
+- 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。3体と背景で 1.69 MiB（27ページ）を使い、0x1B0000 にちょうど収まる。キャラクターを足すなら、`storage` をさらに縮めるか、パーティションを見直す。
 - パーティション表の変更はbrokerの書き込みに含まれる（ブートローダ・表・アプリだけを書く経路）。データ領域そのものはbrokerでは書けないので、この方式にした。
+
+### 背景（バックドロップ）
+
+`assets/backgrounds/backgrounds.hcz` に、アーカイブの [stage-assets](https://github.com/dj-oyu/cardputer-development-archive/tree/main/backgrounds/stage-assets-20261120) の7種（子供部屋・ビーチ・恐竜の森・Pipe Dream 倉庫・Vaporwave Temple・初期 Mac・夕暮れの入江）を入れた。B で順に切り替える（なし → 7種 → なし）。
+
+```text
+python tools/ayatsuri/asset/pack_backgrounds.py assets/backgrounds/backgrounds.hcz "CHILD ROOM=child-room/background.png" ...
+```
+
+- 各 240×135、不透明の PNG を RGB565（64,800 B）にして、1つのコンテナ（`HBG1`）にまとめる。隣のピクセルとの差分にして deflate した（`HCZ2`）。7枚で 453,728 B が 163,896 B。
+- キャラクターと同じ `ay_chars` に展開し、描画では mmap したピクセルを行ごとに合成する（RAM は使わない）。モデルの色が 0 のピクセルは「空」で、背景が見える（ラスター背景の検証と同じ規則）。
+- 背景を切り替えると、画面全体を描き直す。
+- **アプリ領域の余裕は 35,200 B しかない**（3体＋背景で 3,110,528 B / 3 MiB）。次に足すなら、先に何かを削る。
 
 ### ラスター背景の検証
 

@@ -1011,6 +1011,7 @@ static ay_companion_command companion_command(const keystroke_t *stroke) {
         if (stroke->text[0] == 'e' || stroke->text[0] == 'E') return AY_COMPANION_NEXT_EMOTE;
         if (stroke->text[0] == 'c' || stroke->text[0] == 'C') return AY_COMPANION_NEXT_CHARACTER;
         if (stroke->text[0] == 'm' || stroke->text[0] == 'M') return AY_COMPANION_NEXT_CLIP;
+        if (stroke->text[0] == 'b' || stroke->text[0] == 'B') return AY_COMPANION_NEXT_BACKGROUND;
 #endif
 #ifdef AYATSURI_RASTER_TEST
         if (stroke->text[0] == 't' || stroke->text[0] == 'T') return AY_COMPANION_RASTER_TOGGLE;
