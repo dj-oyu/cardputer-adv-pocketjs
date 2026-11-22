@@ -106,6 +106,20 @@ int main(int argc, char **argv)
             snprintf(name, sizeof name, "frame%03u", p - faces); write_ppm(argv[2], name);
         }
     }
+    for (unsigned c = 1; c < ay_character_clip_count(); ++c) {
+        ay_character_set_clip(c);
+        total = ay_character_pose_count();
+        printf("clip %u %s poses=%u\n", c, ay_character_clip_label(c), total);
+        for (unsigned p = faces; p < total; ++p) {
+            int n = render(p);
+            if (n < 0) ++bad;
+            if ((p - faces) % 9 == 0) {
+                printf("  clip%u frame %u packets=%d crc=%08x\n", c, p - faces, n, crc);
+                snprintf(name, sizeof name, "clip%u_%03u", c, p - faces); write_ppm(argv[2], name);
+            }
+        }
+    }
+    ay_character_set_clip(0);
     /* a face chosen by a still pose must persist through the clip */
     render(3);
     render(faces + 10);

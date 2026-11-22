@@ -36,6 +36,10 @@ CLOUD = {
     "camera": "Primary 15 degrees",
     "skip": ("Stage",),
     "key_step": 4,
+    # name, source blend relative to the main one (None = same file), frame range, period
+    # name, other blend (None = the main one), unused, period ms, frames per key
+    "clips": [("idle", None, None, 42, 8),
+              ("pop", "../pop-chain-01/cloud-pop-chain.blend", None, 42, 4)],
     "period_ms": 42,
     "light": (-.40, .55, .75),
 }
@@ -87,20 +91,22 @@ def color565(colors):
 
 
 class Rig:
-    def __init__(self, config):
+    def __init__(self, config, controls=True):
         self.config = config
         self.scene = bpy.context.scene
-        self.face = self.scene.objects[config["face_controls"]]
-        self.emote = self.scene.objects[config["emote_controls"]]
+        self.face = self.scene.objects.get(config["face_controls"]) if controls else None
+        self.emote = self.scene.objects.get(config["emote_controls"]) if controls else None
         self.objects = [o for o in self.scene.objects if o.type in ("MESH", "CURVE") and o.name not in config["skip"]]
 
     def pose(self, frame, preset, emote):
         self.scene.frame_set(frame)
-        self.face[self.config["face_property"]] = float(preset)
-        self.face.update_tag()
-        for name in self.config["emotes"]:
-            self.emote[name] = 1.0 if name == emote else 0.0
-        self.emote.update_tag()
+        if self.face is not None:
+            self.face[self.config["face_property"]] = float(preset)
+            self.face.update_tag()
+        if self.emote is not None:
+            for name in self.config["emotes"]:
+                self.emote[name] = 1.0 if name == emote else 0.0
+            self.emote.update_tag()
         bpy.context.view_layer.update()
 
     def evaluate(self, wanted):
@@ -121,6 +127,10 @@ class Rig:
                 ev.to_mesh_clear()
             out[obj.name] = (world, polys, tris, color, visible)
         return out
+
+
+def names_all(reduced):
+    return list(reduced)
 
 
 def reduce_mesh(world, polys, budget, scene):
@@ -177,8 +187,10 @@ def vertex_shade_normals(verts, tris):
 
 
 def shade(albedo, normal_cam, light):
-    key = np.clip(normal_cam @ unit(np.asarray(light)), 0, 1)
-    fill = np.clip(normal_cam @ unit(np.array([.55, -.35, .75])), 0, 1)
+    # Light terms are held to 1/14 steps: a triangle whose lit value barely moves
+    # then keeps one color for several keys, which lets color tracks be shared.
+    key = np.round(np.clip(normal_cam @ unit(np.asarray(light)), 0, 1) * 14) / 14
+    fill = np.round(np.clip(normal_cam @ unit(np.array([.55, -.35, .75])), 0, 1) * 14) / 14
     base = linear_to_srgb(albedo)
     body = (.74 + .20 * key + .06 * fill)[..., None]
     cool = np.array([.62, .72, 1.0])
@@ -248,17 +260,28 @@ def export(config, output, sheet=True):
                              "index": index, "weight": weight, "color": color}
     print("reduced triangles", sum(len(r["tris"]) for r in reduced.values()))
 
-    # 3. sample keys
-    start, end = scene.frame_start, scene.frame_end
-    key_frames = list(range(start, end + 1, config["key_step"]))
-    if key_frames[-1] != end:
-        key_frames.append(end)
+    # 3. sample keys, clip by clip. Keys are shared by index; a pose blends two keys of one clip.
+    source_path = Path(bpy.data.filepath)
+    camera_matrix = np.array(scene.objects[config["camera"]].matrix_world)
     by_state = {}
     for name, r in reduced.items():
         by_state.setdefault(r["state"], []).append(name)
     objects_by_name = {o.name: o for o in live}
-    samples = []  # key -> name -> (verts world)
-    for frame in key_frames:
+
+    def clip_frames(first, last, step):
+        frames = list(range(first, last + 1, step))
+        if frames[-1] != last:
+            frames.append(last)
+        return frames
+
+    samples = []      # key -> name -> reduced world vertices
+    key_clip = []     # key -> (clip index, frame)
+    clip_keys = []    # clip -> [key indices]
+    clip_span = []    # clip -> number of frames in its loop
+    frames = clip_frames(scene.frame_start, scene.frame_end, config["clips"][0][4])
+    clip_keys.append([])
+    clip_span.append(scene.frame_end - scene.frame_start)
+    for frame in frames:
         row = {}
         for state, names in by_state.items():
             rig.pose(frame, *state)
@@ -267,11 +290,49 @@ def export(config, output, sheet=True):
                 r = reduced[n]
                 displacement = got[n][0] - r["rest"]
                 row[n] = r["verts"] + np.einsum("vk,vkc->vc", r["weight"], displacement[r["index"]])
+        clip_keys[0].append(len(samples))
+        key_clip.append((0, frame))
         samples.append(row)
         print("key", frame, flush=True)
 
+    # Further clips come from other files that share the rig and the geometry
+    # but not every object (a pop clip has no alternative faces or emotes).
+    # Objects that are missing ride the nearest vertices that are present.
+    for ci, (cname, relative, _, _, step) in enumerate(config["clips"][1:], start=1):
+        bpy.ops.wm.open_mainfile(filepath=str((source_path.parent / relative).resolve()))
+        other = Rig(config, controls=False)
+        scene2 = other.scene
+        present = {o.name: o for o in other.objects}
+        usable = {}
+        for name, obj in present.items():
+            if name in reduced and len(other.evaluate([obj])[name][0]) == len(reduced[name]["rest"]):
+                usable[name] = obj
+        missing = [n for n in names_all(reduced) if n not in usable]
+        print("clip", cname, "objects present", len(usable), "borrowed", len(missing))
+        rest_cloud = np.concatenate([reduced[n]["rest"] for n in usable])
+        borrow = {n: transfer_weights(reduced[n]["verts"], rest_cloud) for n in missing}
+        frames = clip_frames(scene2.frame_start, scene2.frame_end, step)
+        clip_keys.append([])
+        clip_span.append(scene2.frame_end - scene2.frame_start)
+        for frame in frames:
+            other.pose(frame, 0, None)
+            got = other.evaluate(list(usable.values()))
+            cloud = np.concatenate([got[n][0] - reduced[n]["rest"] for n in usable])
+            row = {}
+            for n, r in reduced.items():
+                if n in usable:
+                    displacement = got[n][0] - r["rest"]
+                    row[n] = r["verts"] + np.einsum("vk,vkc->vc", r["weight"], displacement[r["index"]])
+                else:
+                    index, weight = borrow[n]
+                    row[n] = r["verts"] + np.einsum("vk,vkc->vc", weight, cloud[index])
+            clip_keys[ci].append(len(samples))
+            key_clip.append((ci, frame))
+            samples.append(row)
+        print("clip", cname, "keys", len(frames), flush=True)
+
     # 4. groups, triangles, camera
-    names = [o.name for o in live]
+    names = list(reduced)  # same order as `live`; the Blender objects may be gone by now
     preset_count = len(config["presets"])
     groups = {}
     group_of = {}
@@ -291,8 +352,7 @@ def export(config, output, sheet=True):
         group_of[name] = groups.setdefault((preset_mask, emote_req), len(groups))
     assert len(groups) <= 256
 
-    cam = scene.objects[config["camera"]]
-    world_to_camera = np.array(cam.matrix_world.inverted())
+    world_to_camera = np.linalg.inv(camera_matrix)
     rot, off = world_to_camera[:3, :3], world_to_camera[:3, 3]
 
     def to_camera(points):
@@ -318,7 +378,7 @@ def export(config, output, sheet=True):
         return np.stack([p[:, 0] * scale * 16 + WIDTH * 8, -p[:, 1] * scale * 16 + HEIGHT * 8 + 8,
                          p[:, 2] * zscale], axis=1)
 
-    keys = len(key_frames)
+    keys = len(samples)
     positions = np.zeros((keys, total, 3))
     tri_list, tri_group, tri_albedo, tri_object = [], [], [], []
     for name in names:
@@ -358,6 +418,12 @@ def export(config, output, sheet=True):
         normal[flip] *= -1
         colors[k] = color565(shade(albedo, normal, config["light"]))
 
+    # Shading that never moves by more than one display step is stored once.
+    r5, g6, b5 = colors >> 11, (colors >> 5) & 63, colors & 31
+    flat = ((r5.max(0) - r5.min(0)) <= 1) & ((g6.max(0) - g6.min(0)) <= 2) & ((b5.max(0) - b5.min(0)) <= 1)
+    colors[:, flat] = colors[len(colors) // 2, flat]
+    print("constant colour triangles", int(flat.sum()), "of", len(flat))
+
     # 6. channel encoding (identical scheme to export_companion_track.emit)
     raw = np.rint(positions).astype(np.int32)
     assert np.abs(raw[:, :, :2]).max() < 8000 and np.abs(raw[:, :, 2]).max() < 32767
@@ -389,16 +455,20 @@ def export(config, output, sheet=True):
         color_ref.append((seq[0], c))
     assert len(channel_map) < 65536 and len(color_pool) < 65536
 
-    # 7. poses: one per frame of the clip, blending between neighbouring keys
-    span = end - start
-    poses = []
-    for f in range(span):
-        frame = start + f
-        idx = max(i for i, kf in enumerate(key_frames) if kf <= frame)
-        idx = min(idx, keys - 2)
-        a, b = key_frames[idx], key_frames[idx + 1]
-        poses.append((idx, idx + 1, int(round(255 * (frame - a) / (b - a)))))
-    clips = [("idle", 0, len(poses), config["period_ms"])]
+    # 7. poses: one per frame of each clip, blending between neighbouring keys of that clip
+    poses, clips = [], []
+    for ci, (cname, _, _, period, _) in enumerate(config["clips"]):
+        first = len(poses)
+        ids = clip_keys[ci]
+        frames_of = [key_clip[k][1] for k in ids]
+        for f in range(clip_span[ci]):
+            frame = frames_of[0] + f
+            idx = max(i for i, kf in enumerate(frames_of) if kf <= frame)
+            idx = min(idx, len(ids) - 2)
+            a, b = frames_of[idx], frames_of[idx + 1]
+            poses.append((ids[idx], ids[idx + 1], int(round(255 * (frame - a) / (b - a)))))
+        clips.append((cname, first, len(poses) - first, period))
+    span = len(poses)
 
     # 8. serialise
     vert_bytes = b"".join(struct.pack("<3h3H", *base_key[v].tolist(), *channels[v].tolist()) for v in range(total))
@@ -419,7 +489,7 @@ def export(config, output, sheet=True):
         cursor = (cursor + 3) & ~3
         offsets.append(cursor)
         cursor += len(t)
-    source_sha = hashlib.sha256(Path(bpy.data.filepath).read_bytes()).digest()
+    source_sha = hashlib.sha256(source_path.read_bytes()).digest()
     header = struct.pack("<4sHH10I9I32s16s", MAGIC, 1, 0,
                          total, len(tris), keys, len(pool), len(groups), len(color_pool), len(poses), len(clips),
                          preset_count, len(config["emotes"]), *offsets, source_sha, config["name"].encode())
@@ -433,10 +503,10 @@ def export(config, output, sheet=True):
 
     report = {"name": config["name"], "bytes": len(blob), "vertices": total, "triangles": len(tris), "keys": keys,
               "channels": len(pool), "groups": len(groups), "color_channels": len(color_pool), "poses": len(poses),
-              "frames": span, "period_ms": config["period_ms"], "presets": config["presets"], "emotes": config["emotes"],
+              "frames": span, "presets": config["presets"], "emotes": config["emotes"],
               "triangles_per_object": {n: len(reduced[n]["tris"]) for n in names},
               "source_sha256": source_sha.hex(), "hca_sha256": hashlib.sha256(bytes(blob)).hexdigest(),
-              "key_frames": key_frames}
+              "clips": [list(c) for c in clips], "key_frames": [list(k) for k in key_clip]}
 
     # 9. preview sheet from the exported tables themselves
     if sheet:
