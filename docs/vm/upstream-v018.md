@@ -125,3 +125,23 @@ PR #139（アプリ専用のネイティブを `main/apps/` へ）までを main
 - MEGADEMO は読み込み直後に `MEM_PRESSURE mask=0x1`（`guest_free=25560`）を出す。§6 でも同じで、起動と描画は通る。
 - MEGADEMO の turn_ms は場面で 3〜12 ms と大きく違うので、一つの平均にしない。場面ごとの値はログの抜粋。
 - 同じ木の TURNPERF（JS のターンの性能カウンタの内訳）は [turn-cpi.md](turn-cpi.md) §6。
+
+## 10. fork の dtoa/atod を 32 bit で動かした（2026-11-22、fork `b716bd1`）
+
+fork の `main` に入った PR #2（NEON と 128 bit の dtoa/atod）は、`__int128` が要り、`ESP_PLATFORM` を除いていたので、この機体では従来の多倍長の dtoa が動き続けた。PR #5 が両方の制限を外し、64×64→128 の積を 32×32→64 の 4 本で組んだ（`dtoa.c` だけの変更）。gitlink を `b716bd1`（#5 のマージコミット）に上げた。
+
+- **host（実機ではない）。** 移植前の `dtoa.c` と約 600 万件を比べた。`js_atod` はビット単位で同じ。`js_dtoa`（`FORMAT_FREE`、10 進）は 2 の冪 54 個（と負数）だけ違い、移植前が最短でない長い文字列を出していた（例 2^-1017）。全出力が元の値に戻る。`__int128` の経路と `JS_DTOA_NO_INT128` の経路は同じ結果。
+- **コードの形（コンパイルの確認で、実行ではない）。** Espressif の `xtensa-esp32s3-elf-gcc`（`-Os -mlongcalls`）で `dtoa.o` の text は 6,310 → 18,965 B（+12.6 KB、うち 10.7 KB が 10 の冪の表で flash）。`js_dtoa`/`js_atod` に `mull`/`muluh` がインラインで入り、新しい経路からの `__muldi3`/`__udivdi3` は無い。
+- **実機（各 1 回）。** 同じベンチを fork main `5cc5724`（A2）と `b85cc94`（B2）で走らせた。生ログは [logs/dtoa-schubfach-20261122.txt](logs/dtoa-schubfach-20261122.txt)。
+
+| µs/回（空ループ 5.1 を含む） | A2 | B2 | |
+| --- | ---: | ---: | ---: |
+| `String(float)` | 74.9 | 62.8 | −16% |
+| `parseFloat(str)` | 26.8 | 25.4 | −5% |
+| `Number(str)` | 27.6 | 25.4 | −8% |
+| `toFixed(3)`（変更の外） | 16.3 | 16.8 | +3% |
+| `toUpperCase` 4 KB（変更の外） | 3353.1 | 3343.6 | −0.3% |
+| `indexOf` 4 KB（変更の外） | 185.6 | 184.8 | −0.4% |
+
+- **読み方。** 変更の外の項目は ±3% 以内。ビルドのアラインメントだけで同じコードが 15% 動くことがあるので、1 回ずつの 16% は幅の中に入る。しかしチェックサムは同じで、外の項目が動いていない。各値には JS 呼び出しの費用が入るので、dtoa の取り分はこれより小さい。PR #2 の 12 倍は Cortex-A53 の値で、この機体では `String(float)` が約 16%。`toFixed`/`toExponential`/`toString(radix)` は別の形式で、変わらない。
+- **測っていないもの。** (1) gitlink の `b716bd1` は PR #3（配列の遅延コピー、`quickjs.c` +568 行）を含み、A2/B2 の木にはない。S3 のヒープと速度への影響は未測定。(2) `quickjs.c` が変わったので、hot/cold を学習し直す必要がある（`tools/qjs_hotcold/train.sh`）。未実施。(3) ファーム全体の flash の増分（+12.6 KB は `dtoa.o` 単体）。
