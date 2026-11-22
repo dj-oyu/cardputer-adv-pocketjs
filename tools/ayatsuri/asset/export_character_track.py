@@ -413,16 +413,16 @@ def export(config, output, sheet=True):
     labels = [*config["presets"], *[e.upper() for e in config["emotes"]]]
     label_bytes = b"".join(l.encode()[:LABEL_BYTES - 1].ljust(LABEL_BYTES, b"\0") for l in labels)
     tables = [vert_bytes, tri_bytes, delta_bytes, scale_bytes, color_bytes, group_bytes, pose_bytes, clip_bytes, label_bytes]
-    header_size = 128
+    header_size = 144
     offsets, cursor = [], header_size
     for t in tables:
         cursor = (cursor + 3) & ~3
         offsets.append(cursor)
         cursor += len(t)
     source_sha = hashlib.sha256(Path(bpy.data.filepath).read_bytes()).digest()
-    header = struct.pack("<4sHH9I9I32s16s", MAGIC, 1, 0,
+    header = struct.pack("<4sHH10I9I32s16s", MAGIC, 1, 0,
                          total, len(tris), keys, len(pool), len(groups), len(color_pool), len(poses), len(clips),
-                         preset_count, *offsets, source_sha, config["name"].encode())
+                         preset_count, len(config["emotes"]), *offsets, source_sha, config["name"].encode())
     header = header.ljust(header_size, b"\0")
     blob = bytearray(header)
     for t, off in zip(tables, offsets):
