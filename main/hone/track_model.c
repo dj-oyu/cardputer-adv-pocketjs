@@ -55,12 +55,19 @@ static unsigned words;
 static span extents[BANDS];
 static bool active;
 static unsigned cached_y = HEIGHT;
-static uint16_t cached_pixels[ROWS * WIDTH];
-static float local_depth[ROWS * WIDTH];
+/* Raster scratch (19 KB with two cores). Held on the heap only while a character is open,
+ * so the firmware does not carry it as static DRAM when the Companion is not running. */
+typedef struct {
+    uint16_t cached_pixels[ROWS * WIDTH];
+    float local_depth[ROWS * WIDTH];
+#if defined(ESP_PLATFORM) && CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+    float worker_depth[ROWS * WIDTH];
+#endif
+} scratch_t;
+static scratch_t *scratch;
 static uint32_t wait_us;
 #if defined(ESP_PLATFORM) && CONFIG_FREERTOS_NUMBER_OF_CORES > 1
 static ay_band_worker worker;
-static float worker_depth[ROWS * WIDTH];
 static bool serial_raster;
 #endif
 
@@ -277,8 +284,14 @@ static bool open_character(unsigned index)
     position *v = grab((size_t)next.vertices * sizeof *v);
     uint16_t *c = grab(((size_t)next.colors + next.preset_colors) * sizeof *c);
     uint32_t *m = grab((size_t)BANDS * word_count * sizeof *m);
-    if (!v || !c || !m) {
+    const bool fresh_scratch = !scratch;
+    if (fresh_scratch) scratch = grab(sizeof *scratch);
+    if (!v || !c || !m || !scratch) {
         drop(v); drop(c); drop(m);
+        if (fresh_scratch) {
+            drop(scratch);
+            scratch = NULL;
+        }
         reattach();
         return false;
     }
@@ -519,7 +532,7 @@ static void raster_band(unsigned y, float *depth, uint16_t *pixels)
 static bool render_worker(void *unused, unsigned y)
 {
     (void)unused;
-    raster_band(y, worker_depth, cached_pixels);
+    raster_band(y, scratch->worker_depth, scratch->cached_pixels);
     return true;
 }
 
@@ -562,13 +575,13 @@ bool ay_live_model_band(unsigned y, uint16_t *pixels, unsigned *left, unsigned *
         !join_worker()) return false;
     if (cached_y == y) {
         size_t rows = (size_t)minimum(y + ROWS, HEIGHT) - y;
-        memcpy(pixels, cached_pixels, rows * WIDTH * sizeof *pixels);
+        memcpy(pixels, scratch->cached_pixels, rows * WIDTH * sizeof *pixels);
     } else {
 #if defined(ESP_PLATFORM) && CONFIG_FREERTOS_NUMBER_OF_CORES > 1
         if (!serial_raster && y % (2 * ROWS) == 0 && y + ROWS < HEIGHT &&
             ay_band_worker_start(&worker, render_worker, NULL, y + ROWS)) cached_y = HEIGHT;
 #endif
-        raster_band(y, local_depth, pixels);
+        raster_band(y, scratch->local_depth, pixels);
     }
     *left = extents[y / ROWS].first;
     *right = extents[y / ROWS].end;
@@ -580,10 +593,10 @@ bool ay_live_model_row(unsigned y, uint16_t pixels[240])
     if (!active || y >= HEIGHT || !pixels || !join_worker()) return false;
     unsigned top = y - y % ROWS;
     if (cached_y != top) {
-        raster_band(top, local_depth, cached_pixels);
+        raster_band(top, scratch->local_depth, scratch->cached_pixels);
         cached_y = top;
     }
-    memcpy(pixels, &cached_pixels[(y - top) * WIDTH], WIDTH * sizeof *pixels);
+    memcpy(pixels, &scratch->cached_pixels[(y - top) * WIDTH], WIDTH * sizeof *pixels);
     return true;
 }
 
@@ -612,6 +625,8 @@ bool ay_live_model_close(void)
     ay_band_worker_close(&worker);
 #endif
     release_buffers();
+    drop(scratch);
+    scratch = NULL;
     ay_character_image_release();
     return true;
 }

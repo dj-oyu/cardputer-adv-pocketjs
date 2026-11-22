@@ -35,8 +35,6 @@
 #include "ayatsuri_raster_test.h"
 #include "companion_raster_test_pixels.h"
 #endif
-static ay_damage_history displayed;
-static ay_exact_history exact_pixels;
 #ifdef AYATSURI_CHARACTERS
 /* Runtime-sized pose space: the active character decides every count below. */
 #define MODEL_SHA256 ay_character_sha256()
@@ -126,14 +124,14 @@ _Static_assert(POSE_COUNT > FIRST_MOTION_POSE, "demo requires playable poses");
 #endif
 static const char *const tag = "ay_pose_dma";
 
-static struct {
+typedef struct {
     uint16_t row[WIDTH];
     _Alignas(16) uint16_t band[WIDTH * BAND_ROWS];
 #ifndef CONFIG_AYATSURI_LIVE_DMA_PROBE
     float depth[WIDTH];
     float scratch[AY_POSE_DMA_FIXTURE_SCRATCH_COUNT];
 #endif
-} storage;
+} storage_t;
 
 #ifndef CONFIG_AYATSURI_LIVE_DMA_PROBE
 typedef struct {
@@ -179,7 +177,7 @@ typedef enum { PREFLIGHT, BENCHMARK, DEMO, FAILED } probe_phase;
 enum { MOTION_POSES = POSE_COUNT - FIRST_MOTION_POSE, POSE_STOPS = MOTION_POSES < 8 ? MOTION_POSES : 8 };
 #define DEMO_COST_SLOTS (POSE_COUNT - FIRST_MOTION_POSE)
 #endif
-static struct {
+typedef struct {
     uint32_t generation;
     probe_phase phase;
     unsigned checked, completed, flat_completed, demo_pose;
@@ -206,7 +204,35 @@ static struct {
     bool raster_scan, raster_motion_logged;
 #endif
     char result[40];
-} probe;
+} probe_t;
+
+/* Everything the Companion keeps between frames, about 14 KB. It lives on the heap while the
+ * Companion runs and is released when it closes: as static DRAM it was carried by every
+ * firmware with this feature compiled in, including while other apps run. The accessors below
+ * keep the code that uses these names unchanged. */
+typedef struct {
+    ay_damage_history displayed;
+    ay_exact_history exact_pixels;
+    storage_t storage;
+    probe_t probe;
+} workspace_t;
+static workspace_t *ws;
+#define displayed (ws->displayed)
+#define exact_pixels (ws->exact_pixels)
+#define storage (ws->storage)
+#define probe (ws->probe)
+
+static bool workspace_open(void)
+{
+    if (!ws) ws = heap_caps_aligned_calloc(16, 1, sizeof *ws, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    return ws != NULL;
+}
+
+static void workspace_close(void)
+{
+    heap_caps_free(ws);
+    ws = NULL;
+}
 
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
 static hone_frame snapshot;
@@ -259,7 +285,7 @@ bool ayatsuri_pose_dma_probe_close_after_drain(void)
     if (!ayatsuri_companion_net_reset()) return false;
 #endif
     if (!finish_pose(true, false) || !ay_live_model_close()) return false;
-    probe.generation = 0;
+    workspace_close();
     return true;
 }
 
@@ -315,7 +341,7 @@ bool ayatsuri_pose_dma_probe_close_after_drain(void)
         free(baked_poses[pose]);
         baked_poses[pose] = NULL;
     }
-    probe.generation = 0;
+    workspace_close();
     return true;
 }
 
@@ -1043,6 +1069,7 @@ static const char *playback_label(void)
 
 int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command command, bool capture)
 {
+    if (!workspace_open()) return 0;
     if (generation != probe.generation) begin_companion(generation, DEMO);
 #ifdef AYATSURI_CHARACTERS
     if (!ay_character_store_ready()) {

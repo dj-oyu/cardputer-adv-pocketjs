@@ -138,6 +138,14 @@ cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hon
 
 元の `.blend` は [cardputer-development-archive](https://github.com/dj-oyu/cardputer-development-archive) が公開している。そこから作った `.hcz`（雲・人間・狐、計363 KB）は `assets/characters/` に追跡して置くので、brokerの fetch→build でそのまま埋め込まれる。`.hca`（展開後）はホストの確認用で、リポジトリには入れない。再書き出しすると数百 KB が履歴に積まれるので、更新は確定版だけにする。
 
+#### DRAM
+
+`ay_characters` を有効にしても、Companion を開いていない間は静的 DRAM をほとんど使わない（既定の構成との差は +1,280 B。実測、`idf.py size` の DIRAM: 163,343 → 164,623）。Companion が使う作業領域は、開いている間だけヒープに取る。
+
+- 描画の作業バッファ（`local_depth`・`worker_depth`・`cached_pixels`、2コアで 19.2 KB）: `track_model.c` が、最初のキャラクターを開くときに確保し、`ay_live_model_close()` で解放する。
+- プローブの状態（`displayed`・`exact_pixels`・`storage`・`probe`、約 14 KB）: `ayatsuri_pose_dma_probe.c` のワークスペースが、最初のフレームで確保し、`ayatsuri_pose_dma_probe_close_after_drain()` で解放する。`storage.band` は DMA の転送元なので、16 バイトに揃えた内部 RAM に置く。
+- 以前はこの約 33 KB が静的 DRAM で、`ay_characters` のファームでは他のアプリ（DERBY など）のヒープを、常に減らしていた。DERBY では `demo` チャンクのコンパイルが OOM になった。
+
 #### データ領域 `ay_chars`
 
 展開後の `.hca` は 1 MiB に近いので、RAM にも app 領域にも置かない。ファームは `.hcz` を埋め込み、初回の起動で `ay_chars` パーティション（0x650000 から 0x1B0000。`storage` の使われていない末尾）へ展開し、以後は1体ずつ mmap で読む（`main/hone/track_store.c`）。
