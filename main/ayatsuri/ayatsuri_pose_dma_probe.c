@@ -41,7 +41,7 @@ static ay_exact_history exact_pixels;
 /* Runtime-sized pose space: the active character decides every count below. */
 #define MODEL_SHA256 ay_character_sha256()
 #define POSE_COUNT ay_character_pose_count()
-#define POSE_CAP 256u
+#define POSE_CAP 320u
 #else
 #define MODEL_SHA256 AY_LIVE_MODEL_SHA256
 #define POSE_COUNT AY_LIVE_MODEL_POSE_COUNT

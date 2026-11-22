@@ -98,7 +98,7 @@ brokerのモデル入りソースには、生成した `hone_track_asset.h` と 
 
 ### キャラクターの切り替え（HCA）
 
-`AYATSURI_CHARACTERS` を有効にしたビルド（`sdkconfig.variant.ay_characters`）は、`main/ayatsuri/private/assets/characters/*.hca` をすべてファームに埋め込み、実行中に切り替える。狐の書き出し（`AYATSURI_TRACK_MODEL`）も併用でき、その場合は先頭のキャラクターになる。
+`AYATSURI_CHARACTERS` を有効にしたビルド（`sdkconfig.variant.ay_characters`）は、`main/ayatsuri/private/assets/characters/*.hcz` をすべてファームに埋め込み、実行中に切り替える。狐の書き出し（`AYATSURI_TRACK_MODEL`）も併用でき、その場合は先頭のキャラクターになる。
 
 | キー | 動作 |
 | --- | --- |
@@ -121,7 +121,9 @@ python tools/ayatsuri/asset/export_character_track.py cloud.blend cloud OUTPUT_D
 - 表情と漫符はキーに焼かず、グループごとの「表情マスク」と「漫符条件」で実行時に決める。どの表情でも、どのクリップでも使える。
 - クリップは別の `.blend` からも取り込める。リグと頂点順が同じなら動き、そのファイルに無い物体（ポップの顔の差分など）は最近傍の頂点の動きに乗せる。
 - 陰影の動きが表示の1段階以内の三角形は、色を1つにまとめる。雲（2クリップ・表情6・漫符3）で166 KB。
-- フラッシュの余裕は約396 KB（アプリ領域3 MiBに対し 2,749,264 B）。キャラクターを足すときは `asset-report.json` の `bytes` を合算して確かめる。
+- 書き出しは `.hca`（展開後）と `.hcz`（deflate済み。ファームが埋め込むのはこちら）の両方を作る。雲＋人間（15クリップ）で、アプリ領域には 77,133 B + 257,430 B（実測、`check_flash.py` の余裕 228 KB）。
+- 人間は、顔の絵（頭の160三角形にテクスチャで貼られている）を、絵のある三角形だけ細分割して表情ごとの色に焼く。漫符は元のカメラ前提の位置にあるので、頭の右上に向きと大きさをそろえて置き直す。立位のクリップでは椅子を畳む。
+- 動作の差分（63%）と色の時系列（29%）が大半で、表情の色は 0.5%。左右対称にしても、姿勢ごとの動きが左右非対称なので、データはほとんど減らない。
 
 ホストでは `tools/ayatsuri/model/test_track_character.c` が、ファームと同じ帯の入口で全表情・全漫符・全フレームを描いてPPMに書く。
 
@@ -130,7 +132,16 @@ cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hon
 ./t cloud.hca OUTPUT_DIRECTORY
 ```
 
-`.hca` は非公開の資産なので、リポジトリには入れない（`.gitignore` 済み）。brokerで焼くビルドは、このディレクトリに `.hca` を置いたソースで作る。
+`.hca`／`.hcz` は非公開の資産なので、リポジトリには入れない（`.gitignore` 済み）。brokerで焼くビルドは、このディレクトリに `.hcz` を置いたソースで作る。
+
+#### データ領域 `ay_chars`
+
+展開後の `.hca` は 1 MiB に近いので、RAM にも app 領域にも置かない。ファームは `.hcz` を埋め込み、初回の起動で `ay_chars` パーティション（`storage` の使われていない末尾 0x170000）へ展開し、以後は1体ずつ mmap で読む（`main/hone/track_store.c`）。
+
+- `storage` は 0x270000 から 0x100000 に縮めた。使っているのは先頭の約 0xAC000 まで（ソース保存・`pocket.fs`・下書き）で、位置は変わらない。
+- 展開は新しいデータを焼いた後の最初の起動で1回（数秒から十数秒。「LOADING」を出す）。ディレクトリを最後に書くので、途中で電源が切れても次の起動でやり直す。
+- 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。雲＋人間で約 1.19 MiB を使う。
+- パーティション表の変更はbrokerの書き込みに含まれる（ブートローダ・表・アプリだけを書く経路）。データ領域そのものはbrokerでは書けないので、この方式にした。
 
 ### ラスター背景の検証
 

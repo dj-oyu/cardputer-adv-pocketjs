@@ -128,7 +128,7 @@ static const char *hca_parse(const uint8_t *data, size_t size, track_asset *out)
         memcpy(clip->name, c, 16);
         clip->name[16] = 0;
         clip->first_pose = rd16(c + 16); clip->poses = rd16(c + 18); clip->period_ms = rd16(c + 20);
-        if (!clip->poses || clip->poses > 256 || (unsigned)clip->first_pose + clip->poses > n[6]) return "clip outside poses";
+        if (!clip->poses || clip->poses > 320 || (unsigned)clip->first_pose + clip->poses > n[6]) return "clip outside poses";
     }
     memcpy(out->name, data + 124, 16);
     for (unsigned i = 0; i < 32; ++i) {

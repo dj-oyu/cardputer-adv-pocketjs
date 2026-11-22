@@ -59,9 +59,10 @@ def cloud_apply(rig, preset, emote):
 
 
 CLOUD["select"] = lambda o: o.type in ("MESH", "CURVE") and o.name not in ("Stage",)
-CLOUD["cap"] = lambda name: cap(name)
+CLOUD["cap"] = lambda name: None if name.startswith("Cloud emote") else cap(name)
 CLOUD["apply"] = cloud_apply
 CLOUD["albedo"] = "object"
+CLOUD["layered"] = ("Cloud emote",)
 
 
 # Human: the figure is rigged and already low-poly, so nothing is decimated. The
@@ -104,6 +105,9 @@ HUMAN = {
     "quant": tuple(int(x) for x in os.environ.get("HUMAN_QUANT", "4,64").split(",")),
     "color_tol": (3, 6, 3),
     "view": (-.31, -.95, .16),
+    # The comic marks were composed for another camera and sit far from the head. Stand each one
+    # up facing this camera at the head's upper right, following the head through every key.
+    "billboard": ("Comic emote", "Sculpted cheeks, jaw and cranium", (1.30, 0.75)),
     "face_art": {
         "object": "Sculpted cheeks, jaw and cranium",
         "uv": "FaceGraphic_Ortho_512",
@@ -515,24 +519,51 @@ def export(config, output, sheet=True):
     # but not every object (a pop clip has no alternative faces or emotes).
     # Objects that are missing ride the nearest vertices that are present.
     for ci, (cname, relative, _, _, step) in enumerate(config["clips"][1:], start=1):
-        bpy.ops.wm.open_mainfile(filepath=str(resolve_clip(config, source_path, relative)))
-        other = Rig(config, controls=False)
+        turntable = relative.startswith("turntable::")
+        bpy.ops.wm.open_mainfile(filepath=str(resolve_clip(config, source_path, relative.removeprefix("turntable::"))))
+        other = Rig(config)
         scene2 = other.scene
         present = {o.name: o for o in other.objects}
         usable = {}
         for name, obj in present.items():
             if name in reduced and len(other.evaluate([obj])[name][0]) == len(reduced[name]["rest"]):
                 usable[name] = obj
+        # Each object is read in the pose where it is shown (an emote mark only with its emote on).
+        groups = {}
+        for n in usable:
+            groups.setdefault(reduced[n]["state"], []).append(n)
+
+        def sample_frame(frame):
+            got = {}
+            for state, ns in groups.items():
+                other.pose(frame, *state)
+                got.update(other.evaluate([usable[n] for n in ns]))
+            return got
+
         missing = [n for n in names_all(reduced) if n not in usable]
         print("clip", cname, "objects present", len(usable), "borrowed", len(missing))
         rest_cloud = np.concatenate([reduced[n]["rest"] for n in usable])
         borrow = {n: transfer_weights(reduced[n]["verts"], rest_cloud) for n in missing}
-        frames = clip_frames(scene2.frame_start, scene2.frame_end, step)
+        first_frame, last_frame = (1, 276) if turntable else (scene2.frame_start, scene2.frame_end)
+        frames = clip_frames(first_frame, last_frame, step)
         clip_keys.append([])
-        clip_span.append(scene2.frame_end - scene2.frame_start)
+        clip_span.append(last_frame - first_frame)
+        if turntable:
+            # The seated pose of frame 84 turns once about the vertical axis through the chair
+            # post, on a short ease in and out; the stationary base does not move.
+            seated = sample_frame(84)
+            pivot = np.array([0.0, 0.0, 0.12])
         for frame in frames:
-            other.pose(frame, 0, None)
-            got = other.evaluate(list(usable.values()))
+            if turntable:
+                q = min(1.0, max(0.0, (frame - 1 - 54) / (246 - 54)))
+                yaw = 2 * np.pi * (.80 * q + .20 * (q * q * (3 - 2 * q)))
+                c, sn = np.cos(yaw), np.sin(yaw)
+                turn = np.array([[c, -sn, 0], [sn, c, 0], [0, 0, 1]])
+                got = {n: ((seated[n][0] if n.startswith("Chair • stationary")
+                            else (seated[n][0] - pivot) @ turn.T + pivot), None, None, None, True)
+                       for n in usable}
+            else:
+                got = sample_frame(frame)
             cloud = np.concatenate([got[n][0] - reduced[n]["rest"] for n in usable])
             row = {}
             for n, r in reduced.items():
@@ -578,6 +609,72 @@ def export(config, output, sheet=True):
     def to_camera(points):
         return points @ rot.T + off
 
+    billboard = config.get("billboard")
+    if billboard:
+        prefix, head_name, (right_offset, up_offset) = billboard
+        world_up = np.array([0.0, 0.0, 1.0])
+        toward_viewer = rot[2]
+        for name in names:
+            if not name.startswith(prefix):
+                continue
+            glyph = reduced[name]["verts"]
+            centre = glyph.mean(axis=0)
+            _, _, axes = np.linalg.svd(glyph - centre)
+            # A mark is a stack of thin sheets, the ink outline behind and the colors in front. Face the
+            # stack toward the viewer with the ink at the back, whichever way it was drawn.
+            normal = axes[2]
+            shade_of = np.array([sum(reduced[name]["matcolors"][min(int(m), len(reduced[name]["matcolors"]) - 1)])
+                                 for m in reduced[name]["matidx"]])
+            depth = glyph[reduced[name]["tris"]].mean(axis=1) @ normal
+            ink = shade_of <= shade_of.min() + 1e-6
+            if ink.any() and (~ink).any() and depth[ink].mean() > depth[~ink].mean():
+                normal = -normal  # the dark outline sheet must sit behind the colored ones
+            if normal @ toward_viewer < 0:
+                # Looking at its back: the stack order still holds, so mirror instead of turning.
+                mirror = True
+            else:
+                mirror = False
+            up = world_up - (world_up @ normal) * normal
+            up = unit(up) if np.linalg.norm(up) > 1e-6 else unit(axes[1])
+            right = np.cross(up, normal)
+            local = np.stack([(glyph - centre) @ right, (glyph - centre) @ up, (glyph - centre) @ normal], axis=1)
+            if mirror:
+                local[:, 0] *= -1  # a back view reads reversed; undo it
+            # The sheets are coplanar, and equal depths go to whichever triangle comes first, so
+            # give each material its own small depth step, darkest at the back.
+            order = {v: i for i, v in enumerate(np.unique(shade_of.round(4)))}
+            tri_rank = np.array([order[v] for v in shade_of.round(4)])
+            vertex_rank = np.zeros(len(glyph))
+            for corners, rank in zip(reduced[name]["tris"], tri_rank):
+                vertex_rank[corners] = np.maximum(vertex_rank[corners], rank)
+            local[:, 2] = vertex_rank * 0.02 * np.ptp(local[:, 1])
+            # Marks were drawn for a closer camera: size each one to the head it floats beside.
+            head0 = to_camera(samples[0][head_name])
+            local *= 1.1 * ((head0.max(axis=0) - head0.min(axis=0))[1]) / max(np.ptp(local[:, 1]), 1e-6)
+            for k, row in enumerate(samples):
+                head = to_camera(row[head_name])
+                head_centre = head.mean(axis=0)
+                half = (head.max(axis=0) - head.min(axis=0)) / 2
+                placed = head_centre + np.array([right_offset * half[0], up_offset * half[1], half[2] * 1.2]) + local
+                row[name] = (placed - off) @ rot
+
+    # Marks drawn as coplanar sheets (ink, then colors) need an explicit depth order: equal
+    # depths go to the triangle that comes first, which hides the colors behind the ink.
+    for name in names:
+        if not name.startswith(tuple(config.get("layered", ()))) or name.startswith(
+                (billboard or ("\0",))[0]):
+            continue
+        r = reduced[name]
+        shade_of = np.array([sum(r["matcolors"][min(int(m), len(r["matcolors"]) - 1)]) for m in r["matidx"]])
+        order = {v: i for i, v in enumerate(np.unique(shade_of.round(4)))}
+        vertex_rank = np.zeros(len(r["verts"]))
+        for corners, v in zip(r["tris"], shade_of.round(4)):
+            vertex_rank[corners] = np.maximum(vertex_rank[corners], order[v])
+        for row in samples:
+            cam_points = to_camera(row[name])
+            cam_points[:, 2] += vertex_rank * 0.02 * np.ptp(cam_points[:, :2].reshape(-1))
+            row[name] = (cam_points - off) @ rot
+
     all_pts = []
     vertex_base = {}
     total = 0
@@ -618,7 +715,7 @@ def export(config, output, sheet=True):
             albedo = [BODY_BANDS[max(0, min(6, round((1 - v) * 5.45)))] for v in t]
         elif name.startswith("Halo vapor"):
             albedo = [RAINBOW[int(name.split()[-1]) % len(RAINBOW)]] * len(r["tris"])
-        elif config["albedo"] == "material":
+        elif config["albedo"] == "material" or name.startswith(tuple(config.get("layered", ()))):
             albedo = [r["matcolors"][min(int(m), len(r["matcolors"]) - 1)] for m in r["matidx"]]
         else:
             albedo = [r["color"]] * len(r["tris"])
@@ -803,13 +900,15 @@ def human_clips():
             ("hands-stand", ik + "girl-overhead-stretch-v124.blend", None, 48, STEP),
             ("thumb-stand", ik + "girl-thumb-nose-v106.blend", None, 48, STEP),
             ("twist-stand", r125 + "girl-waist-twist-standing-v103.blend", None, 48, STEP),
+            ("step-stand", ik + "standing-right-step-and-reaction-v113.zip::right-step-waist.blend", None, 48, STEP),
             ("lean-seat", r125 + "forward-lean-seated-v115.blend", None, 48, STEP),
             ("hands-seat", r125 + "hands-to-head-seated-v124.blend", None, 48, STEP),
             ("thumb-seat", r125 + "thumb-near-nose-seated-v106.blend", None, 48, STEP),
             ("knee-lean", "gaming-chair-seated-lean-rigid-head-76/chair-idle-lean-rigid-head-v76.blend", None, 48, STEP),
             ("knee-cross", "gaming-chair-knee-thigh-yaw-90/chair-knee-thigh-yaw-v90.blend", None, 48, STEP),
             ("sit", "gaming-chair-quick-release-sit-100/chair-quick-release-v100.blend", None, 48, STEP),
-            ("stand-up", "gaming-chair-earlier-hands-stand-99/chair-stand-earlier-hands-v99.blend", None, 48, STEP)]
+            ("stand-up", "gaming-chair-earlier-hands-stand-99/chair-stand-earlier-hands-v99.blend", None, 48, STEP),
+            ("turntable", "turntable::human-character-20261120/chair-back-topdown-v109/chair-rear-topdown-v109.blend", None, 48, 9)]
 
 
 if __name__ == "__main__":
