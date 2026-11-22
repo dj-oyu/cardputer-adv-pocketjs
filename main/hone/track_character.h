@@ -24,9 +24,21 @@ typedef struct {
     const uint8_t *end;
 } ay_character_blob;
 
-/* Provided by the build (a generated table) or by the host test. */
+/* Provided by the build (a generated table) or by the host test. In firmware each
+ * blob is an HCZ container (a deflated HCA) that track_store.c unpacks into the
+ * ay_chars partition; the host test supplies plain HCA images. */
 extern const ay_character_blob ay_character_blobs[];
 extern const unsigned ay_character_blob_count;
+
+/* The plain HCA image of a blob, mapped read-only until the next call or release.
+ * NULL when it cannot be unpacked. */
+const uint8_t *ay_character_image(unsigned blob, size_t *size);
+void ay_character_image_release(void);
+
+/* True when every embedded character is already unpacked in flash. Installing
+ * erases and rewrites the partition (seconds, once per firmware with new data). */
+bool ay_character_store_ready(void);
+bool ay_character_store_install(void);
 
 unsigned ay_character_count(void);
 const char *ay_character_name(unsigned index);

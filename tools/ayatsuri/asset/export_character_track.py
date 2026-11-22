@@ -15,6 +15,7 @@ emote requirement that the player evaluates, so any face works with any clip.
 
 import hashlib
 import json
+import os
 import struct
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ import numpy as np
 
 WIDTH, HEIGHT = 240, 135
 MAGIC = b"HCA1"
+VERSION = 2
 LABEL_BYTES = 12
 
 CLOUD = {
@@ -42,6 +44,77 @@ CLOUD = {
               ("pop", "../pop-chain-01/cloud-pop-chain.blend", None, 42, 4)],
     "period_ms": 42,
     "light": (-.40, .55, .75),
+}
+
+def cloud_apply(rig, preset, emote):
+    face = rig.scene.objects.get(rig.config["face_controls"])
+    marks = rig.scene.objects.get(rig.config["emote_controls"])
+    if face is not None:
+        face[rig.config["face_property"]] = float(preset)
+        face.update_tag()
+    if marks is not None:
+        for name in rig.config["emotes"]:
+            marks[name] = 1.0 if name == emote else 0.0
+        marks.update_tag()
+
+
+CLOUD["select"] = lambda o: o.type in ("MESH", "CURVE") and o.name not in ("Stage",)
+CLOUD["cap"] = lambda name: cap(name)
+CLOUD["apply"] = cloud_apply
+CLOUD["albedo"] = "object"
+
+
+# Human: the figure is rigged and already low-poly, so nothing is decimated. The
+# face is a texture on a 160-triangle head; its art is baked into subdivided
+# triangles with one color per face preset. Set pieces (the engine bay) are left out.
+HUMAN_FACES = [("NORMAL", 0, 0, 0), ("WORRIED", 1, 0, 0), ("SURPRISED", 2, 0, 0), ("GAG", 3, 0, 0),
+               ("SLEEPY", 4, 0, 0), ("SMILE", 0, 0, 1), ("BLINK", 0, 1, 0)]
+
+
+def human_select(o):
+    if o.type not in ("MESH", "CURVE"):
+        return False
+    if any(m.type == "ARMATURE" for m in o.modifiers):
+        return True
+    return o.name.startswith(("Comic emote", "Engine chair", "Chair • stationary"))
+
+
+def human_apply(rig, preset, emote):
+    arm = rig.scene.objects.get("Provisional anatomical joints")
+    if arm is None:
+        return
+    _, expression, blink, smile = HUMAN_FACES[preset]
+    arm["Face Expression"] = expression
+    arm["Face Blink"] = blink
+    arm["Face Smile"] = smile
+    arm["Comic Emote"] = rig.config["emotes"].index(emote) + 1 if emote else 0
+    arm.update_tag()
+
+
+HUMAN = {
+    "name": "human",
+    "presets": [f[0] for f in HUMAN_FACES],
+    "emotes": ["sweat", "confusion", "anger"],
+    "camera": None,
+    "select": human_select,
+    "cap": lambda name: None,
+    "apply": human_apply,
+    "albedo": "material",
+    "light": (-.40, .55, .75),
+    "quant": tuple(int(x) for x in os.environ.get("HUMAN_QUANT", "4,64").split(",")),
+    "color_tol": (3, 6, 3),
+    "view": (-.31, -.95, .16),
+    "face_art": {
+        "object": "Sculpted cheeks, jaw and cranium",
+        "uv": "FaceGraphic_Ortho_512",
+        "weight": "FaceGraphic_front_weight",
+        "skin": (.95, .80, .70),
+        "images": {"NORMAL": "Packed face neutral larger eyes", "WORRIED": "Packed face expression worried",
+                   "SURPRISED": "Packed face expression surprised", "GAG": "Packed Gekiga GPT Image face with original inner crease",
+                   "SLEEPY": "Packed face expression sleepy", "SMILE": "Packed face smile", "BLINK": "Packed face blink"},
+    },
+    # name, file under the archive root, unused, period ms, frames per key
+    "clips": [],
 }
 
 BODY_BANDS = [tuple((1 - i / 6) * u + (i / 6) * v for u, v in zip((.99, .983, 1.0), (.52, .71, 1.0)))
@@ -94,23 +167,17 @@ class Rig:
     def __init__(self, config, controls=True):
         self.config = config
         self.scene = bpy.context.scene
-        self.face = self.scene.objects.get(config["face_controls"]) if controls else None
-        self.emote = self.scene.objects.get(config["emote_controls"]) if controls else None
-        self.objects = [o for o in self.scene.objects if o.type in ("MESH", "CURVE") and o.name not in config["skip"]]
+        self.controls = controls
+        self.objects = [o for o in self.scene.objects if config["select"](o)]
 
     def pose(self, frame, preset, emote):
         self.scene.frame_set(frame)
-        if self.face is not None:
-            self.face[self.config["face_property"]] = float(preset)
-            self.face.update_tag()
-        if self.emote is not None:
-            for name in self.config["emotes"]:
-                self.emote[name] = 1.0 if name == emote else 0.0
-            self.emote.update_tag()
+        if self.controls:
+            self.config["apply"](self, preset, emote)
         bpy.context.view_layer.update()
 
     def evaluate(self, wanted):
-        """world positions and visibility for the wanted objects in the current pose"""
+        """world positions, topology and materials of the wanted objects in the current pose"""
         dg = bpy.context.evaluated_depsgraph_get()
         out = {}
         for obj in wanted:
@@ -122,11 +189,28 @@ class Rig:
                 world = np.array([ev.matrix_world @ v.co for v in mesh.vertices], dtype=np.float64)
                 polys = [tuple(p.vertices) for p in mesh.polygons]
                 tris = np.array([t.vertices for t in mesh.loop_triangles], dtype=np.int64).reshape(-1, 3)
-                color = tuple(mesh.materials[0].diffuse_color[:3]) if len(mesh.materials) and mesh.materials[0] else (.5, .5, .5)
+                matidx = np.array([t.material_index for t in mesh.loop_triangles], dtype=np.int64)
+                matcolors = [tuple(m.diffuse_color[:3]) if m else (.5, .5, .5) for m in mesh.materials] or [(.5, .5, .5)]
+                color = matcolors[0]
             finally:
                 ev.to_mesh_clear()
-            out[obj.name] = (world, polys, tris, color, visible)
+            out[obj.name] = (world, polys, tris, color, visible, matidx, matcolors)
         return out
+
+
+def resolve_clip(config, main, relative):
+    """a clip file: relative to the root (or the main file), or 'archive.zip::inner.blend'"""
+    root = Path(config.get("root") or main.parent)
+    if "::" in relative:
+        import tempfile
+        import zipfile
+        archive, inner = relative.split("::", 1)
+        target = Path(tempfile.gettempdir()) / "hca-clips" / Path(archive).stem
+        target.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(root / archive) as z:
+            z.extract(inner, target)
+        return (target / inner).resolve()
+    return (root / relative).resolve()
 
 
 def names_all(reduced):
@@ -230,12 +314,123 @@ def rasterize(pos, tris, colors, visible, size=(WIDTH, HEIGHT)):
     return image
 
 
+def srgb_to_linear(rgb):
+    rgb = np.asarray(rgb, dtype=np.float64)
+    return np.where(rgb <= .04045, rgb / 12.92, ((rgb + .055) / 1.055) ** 2.4)
+
+
+def lattice(n):
+    """barycentric points and triangles of an n x n subdivision"""
+    points = [(a, b) for a in range(n + 1) for b in range(n + 1 - a)]
+    index = {p: i for i, p in enumerate(points)}
+    tris = []
+    for a in range(n):
+        for b in range(n - a):
+            tris.append((index[(a, b)], index[(a + 1, b)], index[(a, b + 1)]))
+            if a + b < n - 1:
+                tris.append((index[(a + 1, b)], index[(a + 1, b + 1)], index[(a, b + 1)]))
+    return points, tris
+
+
+def face_art(config, obj, r):
+    """Replace the head's reduced mesh by one whose front triangles are subdivided where the
+    face art has detail, with one sampled color per face preset on those triangles."""
+    spec = config["face_art"]
+    names = config["presets"]
+    dg = bpy.context.evaluated_depsgraph_get()
+    ev = obj.evaluated_get(dg)
+    mesh = ev.to_mesh()
+    try:
+        mesh.calc_loop_triangles()
+        layer = mesh.uv_layers[spec["uv"]].data
+        tri_uv = np.array([[layer[loop].uv for loop in t.loops] for t in mesh.loop_triangles], dtype=np.float64)
+        weights = np.array([d.value for d in mesh.attributes[spec["weight"]].data], dtype=np.float64)
+    finally:
+        ev.to_mesh_clear()
+    tris = r["tris"]
+    front = weights[tris].mean(axis=1) > .5
+
+    def pixels(name):
+        im = bpy.data.images[name]
+        w, h = im.size
+        return np.array(im.pixels[:], dtype=np.float32).reshape(h, w, 4)
+
+    images = {n: pixels(spec["images"][n]) for n in names}
+    h, w = images[names[0]].shape[:2]
+    skin = np.asarray(spec["skin"], dtype=np.float32)
+
+    def box(img, pad=24):
+        ys, xs = np.nonzero(img[..., 3] > .05)
+        mask = np.zeros(img.shape[:2], bool)
+        mask[max(ys.min() - pad, 0):ys.max() + pad, max(xs.min() - pad, 0):xs.max() + pad] = True
+        return mask
+
+    def over(base, layer_img):
+        a = layer_img[..., 3:4]
+        return base * (1 - a) + layer_img[..., :3] * a
+
+    neutral = images["NORMAL"]
+    comp = {}
+    for name in names:
+        base = np.broadcast_to(skin, (h, w, 3)).copy()
+        if name in ("SMILE", "BLINK"):
+            erased = neutral.copy()
+            erased[box(images[name]), 3] = 0
+            base = over(base, erased)
+        comp[name] = over(base, images[name])
+    art = np.max([im[..., 3] for im in images.values()], axis=0) > .08
+
+    def at(uv):
+        x = np.clip((uv[..., 0] * w).astype(int), 0, w - 1)
+        y = np.clip((uv[..., 1] * h).astype(int), 0, h - 1)
+        return x, y
+
+    grid = [(i / 6, j / 6) for i in range(7) for j in range(7 - i)]
+    new_verts, new_index, new_weight, new_tris, new_mat, new_art = [], [], [], [], [], {}
+    for t in range(len(tris)):
+        src = tris[t]
+        uv = tri_uv[t]
+        n = 1
+        if front[t]:
+            pts = np.array([(1 - a - b) * uv[0] + a * uv[1] + b * uv[2] for a, b in grid])
+            x, y = at(pts)
+            coverage = art[y, x].mean()
+            n = 1 if coverage < .03 else 2 if coverage < .3 else 3
+        points, sub = lattice(n)
+        base = len(new_verts)
+        corner = r["verts"][src]
+        for a, b in points:
+            bary = np.array([1 - (a + b) / n, a / n, b / n])
+            new_verts.append(bary @ corner)
+            new_index.append(src)
+            new_weight.append(bary)
+        for tri in sub:
+            index = len(new_tris)
+            new_tris.append([base + i for i in tri])
+            new_mat.append(0)
+            if n > 1:
+                centre = np.mean([points[i] for i in tri], axis=0)
+                samples = []
+                for a, b in [centre, *[(centre + (np.array(points[i]) - centre) * .5) for i in tri]]:
+                    q = ((1 - (a + b) / n) * uv[0] + a / n * uv[1] + b / n * uv[2])[None]
+                    x, y = at(q)
+                    samples.append([comp[name][y[0], x[0]] for name in names])
+                new_art[index] = np.mean(samples, axis=0)  # (faces, 3) sRGB
+    r["verts"] = np.asarray(new_verts)
+    r["tris"] = np.asarray(new_tris, dtype=np.int64)
+    r["index"] = np.asarray(new_index, dtype=np.int64)
+    r["weight"] = np.asarray(new_weight)
+    r["matidx"] = np.asarray(new_mat, dtype=np.int64)
+    r["matcolors"] = [tuple(srgb_to_linear(skin))]
+    r["art"] = new_art
+    print("face art: head triangles", len(tris), "->", len(new_tris), "with presets on", len(new_art))
+
+
 def export(config, output, sheet=True):
     output.mkdir(parents=True, exist_ok=True)
     rig = Rig(config)
     scene = rig.scene
-    states = [(0, None), (1, None), (2, None), (3, None), (4, None), (5, None),
-              (0, config["emotes"][0]), (0, config["emotes"][1]), (0, config["emotes"][2])]
+    states = [(p, None) for p in range(len(config["presets"]))] + [(0, e) for e in config["emotes"]]
 
     # 1. which pose shows each source object?
     ref_frame = scene.frame_start
@@ -253,16 +448,37 @@ def export(config, output, sheet=True):
     # 2. reduce each object once; derive transfer weights from the reference pose
     reduced = {}
     for obj in live:
-        state, (world, polys, tris, color, _) = reference[obj.name]
-        verts, rtris = reduce_mesh(world, polys, cap(obj.name), scene)
-        index, weight = transfer_weights(verts, world)
-        reduced[obj.name] = {"state": state, "rest": world, "verts": verts, "tris": rtris,
-                             "index": index, "weight": weight, "color": color}
+        state, (world, polys, tris, color, _, matidx, matcolors) = reference[obj.name]
+        budget = config["cap"](obj.name)
+        if budget is None:
+            # Already low-poly and skinned: keep every vertex, so the transfer is exact.
+            verts, rtris = world, tris
+            index, weight = np.arange(len(world))[:, None], np.ones((len(world), 1))
+            rmat = matidx
+        else:
+            verts, rtris = reduce_mesh(world, polys, budget, scene)
+            index, weight = transfer_weights(verts, world)
+            rmat = np.zeros(len(rtris), dtype=np.int64)
+        reduced[obj.name] = {"state": state, "rest": world, "verts": verts, "tris": rtris, "index": index,
+                             "weight": weight, "color": color, "matidx": rmat, "matcolors": matcolors, "art": {}}
+        art = config.get("face_art")
+        if art and obj.name == art["object"]:
+            face_art(config, obj, reduced[obj.name])
     print("reduced triangles", sum(len(r["tris"]) for r in reduced.values()))
 
     # 3. sample keys, clip by clip. Keys are shared by index; a pose blends two keys of one clip.
     source_path = Path(bpy.data.filepath)
-    camera_matrix = np.array(scene.objects[config["camera"]].matrix_world)
+    if config.get("view"):
+        # A fixed three-quarter view: sight points from the subject toward the viewer.
+        sight = unit(np.asarray(config["view"], dtype=np.float64))
+        right = unit(np.cross((0, 0, 1), sight))
+        up = np.cross(sight, right)
+        w2c = np.eye(4)
+        w2c[:3, :3] = (right, up, sight)
+        camera_matrix = np.linalg.inv(w2c)
+    else:
+        camera_object = scene.objects[config["camera"]] if config["camera"] else scene.camera
+        camera_matrix = np.array(camera_object.matrix_world)
     by_state = {}
     for name, r in reduced.items():
         by_state.setdefault(r["state"], []).append(name)
@@ -299,7 +515,7 @@ def export(config, output, sheet=True):
     # but not every object (a pop clip has no alternative faces or emotes).
     # Objects that are missing ride the nearest vertices that are present.
     for ci, (cname, relative, _, _, step) in enumerate(config["clips"][1:], start=1):
-        bpy.ops.wm.open_mainfile(filepath=str((source_path.parent / relative).resolve()))
+        bpy.ops.wm.open_mainfile(filepath=str(resolve_clip(config, source_path, relative)))
         other = Rig(config, controls=False)
         scene2 = other.scene
         present = {o.name: o for o in other.objects}
@@ -323,6 +539,10 @@ def export(config, output, sheet=True):
                 if n in usable:
                     displacement = got[n][0] - r["rest"]
                     row[n] = r["verts"] + np.einsum("vk,vkc->vc", r["weight"], displacement[r["index"]])
+                    if not got[n][4]:
+                        # Hidden in this clip (the chair when standing): fold it to a point
+                        # so its triangles have no area and are skipped.
+                        row[n] = np.tile(row[n].mean(axis=0), (len(row[n]), 1))
                 else:
                     index, weight = borrow[n]
                     row[n] = r["verts"] + np.einsum("vk,vkc->vc", weight, cloud[index])
@@ -381,9 +601,12 @@ def export(config, output, sheet=True):
     keys = len(samples)
     positions = np.zeros((keys, total, 3))
     tri_list, tri_group, tri_albedo, tri_object = [], [], [], []
+    tri_offset, running = {}, 0
     for name in names:
         r = reduced[name]
         base = vertex_base[name]
+        tri_offset[name] = running
+        running += len(r["tris"])
         for k in range(keys):
             positions[k, base:base + len(r["verts"])] = to_screen(samples[k][name])
         tri_list.append(r["tris"] + base)
@@ -395,6 +618,8 @@ def export(config, output, sheet=True):
             albedo = [BODY_BANDS[max(0, min(6, round((1 - v) * 5.45)))] for v in t]
         elif name.startswith("Halo vapor"):
             albedo = [RAINBOW[int(name.split()[-1]) % len(RAINBOW)]] * len(r["tris"])
+        elif config["albedo"] == "material":
+            albedo = [r["matcolors"][min(int(m), len(r["matcolors"]) - 1)] for m in r["matidx"]]
         else:
             albedo = [r["color"]] * len(r["tris"])
         tri_albedo.extend(albedo)
@@ -417,10 +642,25 @@ def export(config, output, sheet=True):
         flip = normal[:, 2] < 0  # two-sided surfaces keep a lit side toward the viewer
         normal[flip] *= -1
         colors[k] = color565(shade(albedo, normal, config["light"]))
+        if k == 0:
+            normal0 = normal.copy()
+
+    # Face-art triangles take their color from the face preset, lit once on the first key.
+    art_tris = {tri_offset[n] + i: rgb for n in names for i, rgb in reduced[n]["art"].items()}
+    preset565 = {}
+    if art_tris:
+        idx = np.array(sorted(art_tris))
+        lin = srgb_to_linear(np.stack([art_tris[i] for i in idx]))
+        faces = len(config["presets"])
+        table = np.stack([color565(shade(lin[:, f], normal0[idx], config["light"])) for f in range(faces)], axis=1)
+        for row, i in enumerate(idx):
+            preset565[int(i)] = [int(x) for x in table[row]]
+            colors[:, i] = table[row, 0]
 
     # Shading that never moves by more than one display step is stored once.
     r5, g6, b5 = colors >> 11, (colors >> 5) & 63, colors & 31
-    flat = ((r5.max(0) - r5.min(0)) <= 1) & ((g6.max(0) - g6.min(0)) <= 2) & ((b5.max(0) - b5.min(0)) <= 1)
+    tol = config.get("color_tol", (1, 2, 1))
+    flat = ((r5.max(0) - r5.min(0)) <= tol[0]) & ((g6.max(0) - g6.min(0)) <= tol[1]) & ((b5.max(0) - b5.min(0)) <= tol[2])
     colors[:, flat] = colors[len(colors) // 2, flat]
     print("constant colour triangles", int(flat.sum()), "of", len(flat))
 
@@ -429,7 +669,10 @@ def export(config, output, sheet=True):
     assert np.abs(raw[:, :, :2]).max() < 8000 and np.abs(raw[:, :, 2]).max() < 32767
     base_key = raw[0]
     displacement = raw - base_key
-    steps = np.maximum(1, (np.max(np.abs(displacement), axis=0) + 126) // 127)
+    # The quantum per axis is a floor on the step, so quiet vertices collapse to static
+    # channels and similar motions share one. Depth only decides occlusion order.
+    quantum = np.array([*config.get("quant", (1, 1))[:1] * 2, config.get("quant", (1, 1))[1]])
+    steps = np.maximum(quantum, (np.max(np.abs(displacement), axis=0) + 126) // 127)
     delta = np.rint(displacement / steps).astype(np.int8)
     pool = [(1, (0,) * keys)]
     channel_map = {pool[0]: 0}
@@ -445,7 +688,12 @@ def export(config, output, sheet=True):
     color_pool = [(0,) * keys]
     color_map = {}
     color_ref = []
+    preset_rows = {}
     for i in range(len(tris)):
+        if i in preset565:
+            row = tuple(preset565[i])
+            color_ref.append((row[0], 0x8000 | preset_rows.setdefault(row, len(preset_rows))))
+            continue
         seq = tuple(int(x) for x in colors[:, i])
         c = 0
         if len(set(seq)) > 1:
@@ -482,7 +730,9 @@ def export(config, output, sheet=True):
     clip_bytes = b"".join(struct.pack("<16sHHHH", n.encode(), s, c, p, 0) for n, s, c, p in clips)
     labels = [*config["presets"], *[e.upper() for e in config["emotes"]]]
     label_bytes = b"".join(l.encode()[:LABEL_BYTES - 1].ljust(LABEL_BYTES, b"\0") for l in labels)
-    tables = [vert_bytes, tri_bytes, delta_bytes, scale_bytes, color_bytes, group_bytes, pose_bytes, clip_bytes, label_bytes]
+    preset_bytes = b"".join(struct.pack(f"<{preset_count}H", *row) for row in preset_rows)
+    tables = [vert_bytes, tri_bytes, delta_bytes, scale_bytes, color_bytes, group_bytes, pose_bytes, clip_bytes,
+              label_bytes, preset_bytes]
     header_size = 144
     offsets, cursor = [], header_size
     for t in tables:
@@ -490,9 +740,10 @@ def export(config, output, sheet=True):
         offsets.append(cursor)
         cursor += len(t)
     source_sha = hashlib.sha256(source_path.read_bytes()).digest()
-    header = struct.pack("<4sHH10I9I32s16s", MAGIC, 1, 0,
+    header = struct.pack("<4sHH11I10I32s16s", MAGIC, VERSION, 0,
                          total, len(tris), keys, len(pool), len(groups), len(color_pool), len(poses), len(clips),
-                         preset_count, len(config["emotes"]), *offsets, source_sha, config["name"].encode())
+                         preset_count, len(config["emotes"]), len(preset_rows), *offsets, source_sha,
+                         config["name"].encode())
     header = header.ljust(header_size, b"\0")
     blob = bytearray(header)
     for t, off in zip(tables, offsets):
@@ -500,13 +751,19 @@ def export(config, output, sheet=True):
         blob.extend(t)
     path = output / f"{config['name']}.hca"
     path.write_bytes(bytes(blob))
+    # The firmware embeds the deflated form; track_store.c unpacks it into flash once.
+    import zlib
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    packed = packer.compress(bytes(blob)) + packer.flush()
+    (output / f"{config['name']}.hcz").write_bytes(
+        struct.pack("<4sII", b"HCZ1", len(blob), zlib.crc32(bytes(blob))) + packed)
 
     report = {"name": config["name"], "bytes": len(blob), "vertices": total, "triangles": len(tris), "keys": keys,
               "channels": len(pool), "groups": len(groups), "color_channels": len(color_pool), "poses": len(poses),
               "frames": span, "presets": config["presets"], "emotes": config["emotes"],
               "triangles_per_object": {n: len(reduced[n]["tris"]) for n in names},
               "source_sha256": source_sha.hex(), "hca_sha256": hashlib.sha256(bytes(blob)).hexdigest(),
-              "clips": [list(c) for c in clips], "key_frames": [list(k) for k in key_clip]}
+              "preset_color_rows": len(preset_rows), "clips": [list(c) for c in clips], "key_frames": [list(k) for k in key_clip]}
 
     # 9. preview sheet from the exported tables themselves
     if sheet:
@@ -521,7 +778,10 @@ def export(config, output, sheet=True):
             for i in range(len(tris)):
                 m, e = group_list[group[i]]
                 vis[i] = bool(m & (1 << preset)) and (e == 0 or bool(emote and e & (1 << config["emotes"].index(emote))))
-            tiles.append(Image.fromarray(rasterize(pos, tris, colors[key], vis)))
+            shown_colors = colors[key].copy()
+            for i, row in preset565.items():
+                shown_colors[i] = row[preset]
+            tiles.append(Image.fromarray(rasterize(pos, tris, shown_colors, vis)))
         cols = 4
         sheet_img = Image.new("RGB", (cols * WIDTH, ((len(tiles) + cols - 1) // cols) * HEIGHT))
         for i, t in enumerate(tiles):
@@ -531,12 +791,40 @@ def export(config, output, sheet=True):
     print(json.dumps({k: v for k, v in report.items() if k not in ("triangles_per_object", "key_frames")}))
 
 
+STEP = int(os.environ.get("HUMAN_STEP", "12"))
+
+
+def human_clips():
+    r125 = "human-character-20261120/motion-review-v125/"
+    ik = "human-character-20261120/standing-ik-20261121/"
+    return [("turn-seat", None, None, 48, STEP),
+            ("turn-stand", r125 + "head-turn-standing.blend", None, 48, STEP),
+            ("lean-stand", ik + "girl-forward-lean-sync-v115.blend", None, 48, STEP),
+            ("hands-stand", ik + "girl-overhead-stretch-v124.blend", None, 48, STEP),
+            ("thumb-stand", ik + "girl-thumb-nose-v106.blend", None, 48, STEP),
+            ("twist-stand", r125 + "girl-waist-twist-standing-v103.blend", None, 48, STEP),
+            ("lean-seat", r125 + "forward-lean-seated-v115.blend", None, 48, STEP),
+            ("hands-seat", r125 + "hands-to-head-seated-v124.blend", None, 48, STEP),
+            ("thumb-seat", r125 + "thumb-near-nose-seated-v106.blend", None, 48, STEP),
+            ("knee-lean", "gaming-chair-seated-lean-rigid-head-76/chair-idle-lean-rigid-head-v76.blend", None, 48, STEP),
+            ("knee-cross", "gaming-chair-knee-thigh-yaw-90/chair-knee-thigh-yaw-v90.blend", None, 48, STEP),
+            ("sit", "gaming-chair-quick-release-sit-100/chair-quick-release-v100.blend", None, 48, STEP),
+            ("stand-up", "gaming-chair-earlier-hands-stand-99/chair-stand-earlier-hands-v99.blend", None, 48, STEP)]
+
+
 if __name__ == "__main__":
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
     blend = None
-    if len(argv) == 3:
+    if len(argv) >= 3:
         blend, argv = argv[0], argv[1:]
         bpy.ops.wm.open_mainfile(filepath=blend)
-    if argv[0] != "cloud":
+    root = argv[2] if len(argv) > 2 else None
+    if argv[0] == "cloud":
+        config = CLOUD
+    elif argv[0] == "human":
+        config = dict(HUMAN, clips=human_clips(), root=root)
+        if os.environ.get("HUMAN_VIEW"):
+            config["view"] = tuple(float(x) for x in os.environ["HUMAN_VIEW"].split(","))
+    else:
         raise SystemExit("unknown character " + argv[0])
-    export(CLOUD, Path(argv[1]).resolve())
+    export(config, Path(argv[1]).resolve())

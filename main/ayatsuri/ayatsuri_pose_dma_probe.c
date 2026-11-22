@@ -492,10 +492,13 @@ static void append(char *out, size_t size, const char *text)
 static void hud_compose(const char *label, char hud[4][13], char key[48])
 {
     char name[13], clip[13], face[13], emote[13];
-    upper_copy(name, sizeof name, ay_character_name(ay_character_current()));
-    upper_copy(clip, sizeof clip, ay_character_clip_count() > 1 ? ay_character_clip_label(ay_character_clip()) : "");
-    upper_copy(face, sizeof face, ay_character_face_label(ay_character_face()));
-    upper_copy(emote, sizeof emote, ay_character_emote_label(ay_character_emote()));
+    /* Asking a character anything unpacks it, which takes seconds on the first run:
+     * the "loading" banner has to be drawn without touching the store. */
+    const bool known = ay_character_store_ready();
+    upper_copy(name, sizeof name, known ? ay_character_name(ay_character_current()) : "");
+    upper_copy(clip, sizeof clip, known && ay_character_clip_count() > 1 ? ay_character_clip_label(ay_character_clip()) : "");
+    upper_copy(face, sizeof face, known ? ay_character_face_label(ay_character_face()) : "");
+    upper_copy(emote, sizeof emote, known ? ay_character_emote_label(ay_character_emote()) : "");
     hud[0][0] = '\0';
     append(hud[0], sizeof hud[0], name);
     if (clip[0]) {
@@ -1011,6 +1014,16 @@ static const char *playback_label(void)
 int64_t ayatsuri_pose_dma_probe_step(uint32_t generation, ay_companion_command command, bool capture)
 {
     if (generation != probe.generation) begin_companion(generation, DEMO);
+#ifdef AYATSURI_CHARACTERS
+    if (!ay_character_store_ready()) {
+        /* The first boot of a firmware with new characters unpacks them into flash. */
+        (void)present_pose(-1, "LOADING", NULL);
+        ESP_LOGI(tag, "CHARACTER_STORE installing");
+        const bool installed = ay_character_store_install();
+        ESP_LOGI(tag, "CHARACTER_STORE %s", installed ? "ready" : "failed");
+        if (!installed) (void)present_pose(-1, "NO CHARACTERS", NULL);
+    }
+#endif
     const int original_async = board_async_get();
     const bool is_capture = capture || board_capture_active();
     bool testing = probe.phase == PREFLIGHT || probe.phase == BENCHMARK;

@@ -17,6 +17,16 @@
 const ay_character_blob ay_character_blobs[1] __attribute__((section(".data"))) = {{0}};
 const unsigned ay_character_blob_count __attribute__((section(".data"))) = 0;
 
+/* Host stand-ins for the firmware's character store: the blobs are plain HCA images here. */
+const uint8_t *ay_character_image(unsigned blob, size_t *size)
+{
+    *size = (size_t)(ay_character_blobs[blob].end - ay_character_blobs[blob].begin);
+    return ay_character_blobs[blob].begin;
+}
+void ay_character_image_release(void) {}
+bool ay_character_store_ready(void) { return true; }
+bool ay_character_store_install(void) { return true; }
+
 static uint8_t *slurp(const char *path, size_t *size)
 {
     FILE *f = fopen(path, "rb");

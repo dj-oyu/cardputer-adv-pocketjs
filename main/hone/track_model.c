@@ -17,24 +17,25 @@
 #endif
 
 enum { WIDTH = 240, HEIGHT = 135, ROWS = 8, BANDS = (HEIGHT + ROWS - 1) / ROWS,
-       MAX_GROUPS = 256, HCA_HEADER = 144, LABEL = 12, MAX_CHARACTERS = 16 };
+       MAX_GROUPS = 256, HCA_HEADER = 144, HCA_COUNTS = 11, HCA_OFFSETS = 10, LABEL = 12, MAX_CHARACTERS = 16 };
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 /* One character, either parsed from an HCA image or described by the
  * compile-time fox tables. The raster path only ever sees this view. */
 typedef struct { uint16_t first_pose, poses, period_ms; char name[17]; } track_clip;
 typedef struct {
-    uint16_t vertices, triangles, keys, channels, groups, colors, poses, faces, emotes, clips;
+    uint16_t vertices, triangles, keys, channels, groups, colors, poses, faces, emotes, clips, preset_colors;
     const hone_track_vertex *vertex;
     const hone_track_triangle *triangle;
     const int8_t *delta;          /* [channels][keys] */
     const uint16_t *scale;        /* [channels] */
     const uint16_t *color;        /* [colors][keys] */
+    const uint16_t *preset_color; /* HCA: [preset_colors][faces], chosen by the face */
     const uint8_t *visible;       /* fox: [keys][(groups+7)/8] */
     const uint16_t *group_mask;   /* HCA: {preset mask, emote requirement} per group */
     const hone_track_pose *pose;  /* fox: every pose; HCA: clip frames */
     const char *labels;           /* HCA: faces then emotes, LABEL bytes each */
-    track_clip clip[8];
+    track_clip clip[16];
     char name[17];
     char sha[65];
 } track_asset;
@@ -89,27 +90,29 @@ static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
 static const char *hca_parse(const uint8_t *data, size_t size, track_asset *out)
 {
     if (!data || size < HCA_HEADER) return "short header";
-    if (memcmp(data, "HCA1", 4) || rd16(data + 4) != 1) return "bad magic or version";
+    if (memcmp(data, "HCA1", 4) || rd16(data + 4) != 2) return "bad magic or version";
     if ((uintptr_t)data & 3u) return "image is not word aligned";
-    uint32_t n[10], off[9];
-    for (unsigned i = 0; i < 10; ++i) n[i] = rd32(data + 8 + 4 * i);
-    for (unsigned i = 0; i < 9; ++i) off[i] = rd32(data + 48 + 4 * i);
-    /* n: vertices triangles keys channels groups colors poses clips faces emotes */
+    uint32_t n[HCA_COUNTS], off[HCA_OFFSETS];
+    for (unsigned i = 0; i < HCA_COUNTS; ++i) n[i] = rd32(data + 8 + 4 * i);
+    for (unsigned i = 0; i < HCA_OFFSETS; ++i) off[i] = rd32(data + 52 + 4 * i);
+    /* n: vertices triangles keys channels groups colors poses clips faces emotes preset_colors */
     if (!n[0] || n[0] > UINT16_MAX || !n[1] || n[1] > UINT16_MAX || !n[2] || n[2] > UINT16_MAX ||
-        !n[3] || n[3] > UINT16_MAX || !n[4] || n[4] > MAX_GROUPS || !n[5] || n[5] > UINT16_MAX ||
-        !n[6] || n[6] > UINT16_MAX || !n[7] || n[7] > COUNT(out->clip) || !n[8] || n[8] > 32 || n[9] > 32)
+        !n[3] || n[3] > UINT16_MAX || !n[4] || n[4] > MAX_GROUPS || !n[5] || n[5] > 0x7fff ||
+        !n[6] || n[6] > UINT16_MAX || !n[7] || n[7] > COUNT(out->clip) || !n[8] || n[8] > 32 || n[9] > 32 ||
+        n[10] > 0x7fff)
         return "count out of range";
-    uint64_t need[9] = {(uint64_t)n[0] * sizeof(hone_track_vertex), (uint64_t)n[1] * sizeof(hone_track_triangle),
+    uint64_t need[HCA_OFFSETS] = {(uint64_t)n[0] * sizeof(hone_track_vertex), (uint64_t)n[1] * sizeof(hone_track_triangle),
                         (uint64_t)n[3] * n[2], (uint64_t)n[3] * 2, (uint64_t)n[5] * n[2] * 2,
                         (uint64_t)n[4] * 4, (uint64_t)n[6] * sizeof(hone_track_pose), (uint64_t)n[7] * 24,
-                        (uint64_t)(n[8] + n[9]) * LABEL};
-    for (unsigned i = 0; i < 9; ++i) {
+                        (uint64_t)(n[8] + n[9]) * LABEL, (uint64_t)n[10] * n[8] * 2};
+    for (unsigned i = 0; i < HCA_OFFSETS; ++i) {
         if (off[i] & 3u || off[i] < HCA_HEADER || (uint64_t)off[i] + need[i] > size) return "table outside image";
     }
     memset(out, 0, sizeof *out);
     out->vertices = (uint16_t)n[0]; out->triangles = (uint16_t)n[1]; out->keys = (uint16_t)n[2];
     out->channels = (uint16_t)n[3]; out->groups = (uint16_t)n[4]; out->colors = (uint16_t)n[5];
     out->poses = (uint16_t)n[6]; out->clips = (uint16_t)n[7]; out->faces = (uint16_t)n[8]; out->emotes = (uint16_t)n[9];
+    out->preset_colors = (uint16_t)n[10];
     out->vertex = (const hone_track_vertex *)(data + off[0]);
     out->triangle = (const hone_track_triangle *)(data + off[1]);
     out->delta = (const int8_t *)(data + off[2]);
@@ -118,6 +121,7 @@ static const char *hca_parse(const uint8_t *data, size_t size, track_asset *out)
     out->group_mask = (const uint16_t *)(data + off[5]);
     out->pose = (const hone_track_pose *)(data + off[6]);
     out->labels = (const char *)(data + off[8]);
+    out->preset_color = (const uint16_t *)(data + off[9]);
     for (unsigned i = 0; i < n[7]; ++i) {
         const uint8_t *c = data + off[7] + 24 * i;
         track_clip *clip = &out->clip[i];
@@ -126,11 +130,11 @@ static const char *hca_parse(const uint8_t *data, size_t size, track_asset *out)
         clip->first_pose = rd16(c + 16); clip->poses = rd16(c + 18); clip->period_ms = rd16(c + 20);
         if (!clip->poses || clip->poses > 256 || (unsigned)clip->first_pose + clip->poses > n[6]) return "clip outside poses";
     }
-    memcpy(out->name, data + 116, 16);
+    memcpy(out->name, data + 124, 16);
     for (unsigned i = 0; i < 32; ++i) {
         static const char hex[] = "0123456789abcdef";
-        out->sha[2 * i] = hex[data[84 + i] >> 4];
-        out->sha[2 * i + 1] = hex[data[84 + i] & 15];
+        out->sha[2 * i] = hex[data[92 + i] >> 4];
+        out->sha[2 * i + 1] = hex[data[92 + i] & 15];
     }
     return NULL;
 }
@@ -175,7 +179,9 @@ static const char *valid_asset(const track_asset *a)
     for (unsigned i = 0; i < a->triangles; ++i) {
         const hone_track_triangle *t = &a->triangle[i];
         if (t->vertex[0] >= a->vertices || t->vertex[1] >= a->vertices || t->vertex[2] >= a->vertices ||
-            t->color_channel >= a->colors || t->group >= a->groups) return "triangle reference out of range";
+            t->group >= a->groups ||
+            ((t->color_channel & 0x8000) ? (t->color_channel & 0x7fff) >= a->preset_colors : t->color_channel >= a->colors))
+            return "triangle reference out of range";
     }
     for (unsigned i = 0; i < a->vertices; ++i) {
         const hone_track_vertex *v = &a->vertex[i];
@@ -215,8 +221,10 @@ static const char *character_view(unsigned index, track_asset *out)
         blob = index - 1;
     }
     if (blob >= ay_character_blob_count) return "no such character";
-    return hca_parse(ay_character_blobs[blob].begin,
-                     (size_t)(ay_character_blobs[blob].end - ay_character_blobs[blob].begin), out);
+    size_t size = 0;
+    const uint8_t *image = ay_character_image(blob, &size);
+    if (!image) return "character image unavailable";
+    return hca_parse(image, size, out);
 }
 
 unsigned ay_character_count(void) { return ay_character_blob_count + (fox_present() ? 1u : 0u); }
@@ -240,21 +248,38 @@ const char *ay_character_check(const uint8_t *data, size_t size)
     return why ? why : valid_asset(&probe);
 }
 
+/* Mapping a different image replaces the mapping the loaded asset points into.
+ * After a failed switch, point the loaded asset at the mapping again. */
+static void reattach(void)
+{
+    track_asset again;
+    if (loaded && !character_view(selected, &again)) {
+        asset = again;
+    }
+}
+
 static bool open_character(unsigned index)
 {
     if (index >= ay_character_count() || index >= MAX_CHARACTERS) return false;
     track_asset next;
-    if (character_view(index, &next)) return false;
+    if (character_view(index, &next)) {
+        reattach();
+        return false;
+    }
     if (!validated[index]) {
-        if (valid_asset(&next)) return false;
+        if (valid_asset(&next)) {
+            reattach();
+            return false;
+        }
         validated[index] = true;
     }
     unsigned word_count = (next.triangles + 31u) / 32u;
     position *v = grab((size_t)next.vertices * sizeof *v);
-    uint16_t *c = grab((size_t)next.colors * sizeof *c);
+    uint16_t *c = grab(((size_t)next.colors + next.preset_colors) * sizeof *c);
     uint32_t *m = grab((size_t)BANDS * word_count * sizeof *m);
     if (!v || !c || !m) {
         drop(v); drop(c); drop(m);
+        reattach();
         return false;
     }
     release_buffers();
@@ -409,6 +434,8 @@ static unsigned index_frame(hone_track_pose pose)
     for (unsigned i = 1; i < asset.colors; ++i)
         colors[i] = mix_color(asset.color[(size_t)i * asset.keys + pose.first],
                               asset.color[(size_t)i * asset.keys + pose.second], pose.blend);
+    for (unsigned i = 0; i < asset.preset_colors; ++i)
+        colors[asset.colors + i] = asset.preset_color[(size_t)i * asset.faces + face];
     memset(masks, 0, (size_t)BANDS * words * sizeof *masks);
     memset(extents, 0, sizeof extents);
     select_groups(pose);
@@ -455,7 +482,8 @@ static void raster_triangle(const hone_track_triangle *t, unsigned first_y, unsi
     float inv = 1.0f / (float)area;
     float z1 = (float)(b.z - a.z) * inv, z2 = (float)(c.z - a.z) * inv;
     int limit0 = edge_min(b,c), limit1 = edge_min(c,a), limit2 = edge_min(a,b);
-    uint16_t rgb = t->color_channel ? colors[t->color_channel] : t->rgb565;
+    const unsigned cc = t->color_channel;
+    uint16_t rgb = !cc ? t->rgb565 : colors[(cc & 0x8000) ? asset.colors + (cc & 0x7fff) : cc];
     for (unsigned row = top; row < bottom; ++row) {
         int w0 = e0, w1 = e1, w2 = e2;
         unsigned i = (row - first_y) * WIDTH + xs.first;
@@ -584,5 +612,6 @@ bool ay_live_model_close(void)
     ay_band_worker_close(&worker);
 #endif
     release_buffers();
+    ay_character_image_release();
     return true;
 }
