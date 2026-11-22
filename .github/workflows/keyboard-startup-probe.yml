@@ -106,7 +106,11 @@ jobs:
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
           digest=hashlib.sha256(''.join(lines).encode()).hexdigest();print('sdkconfig pin',digest)
           assert digest=='6ee0da722e4c304186d67ad1f471ce77a109b9058ac6e5149778c1b51067d325'
-          assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
+          # The partition table moved with the Companion characters: storage shrank from
+          # 0x270000 to 0xC0000 and the unused tail became ay_chars (0x650000, 0x1B0000).
+          # The old pin (5acbaec1...) is the table built from the previous partitions.csv;
+          # this one is gen_esp32part.py on the new csv, 8 MiB, checked against the build.
+          assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='e41a9e40229f9e08820e778968f1521560ebfe1b067f06729c797bc6c2645183'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
           for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
               assert k+':BOOL=OFF' in cache,k
