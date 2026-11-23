@@ -47,6 +47,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 SELF = os.path.relpath(HERE, ROOT).replace(os.sep, '/') + '/'
 
+# Where a macro's name starts: after anything but an identifier character, or
+# right after -D (-DPOCKET_VM_X=1: \b does not see a boundary between D and P).
+START = r'(?:(?<=-D)|(?<![A-Za-z0-9_]))'
+
 # --- the engine's options --------------------------------------------------
 # Read by the fork (as CONFIG_POCKET_VM_X today): firmware Kconfig X becomes
 # QJS_LEAN_X (so CONFIG_QJS_LEAN_X), the fork reads QJS_LEAN_X, and
@@ -72,8 +76,8 @@ FIRMWARE_KCONFIG = {
 FORK_API = [
     (r'\bJS_Pocket(\w+)', r'JS_Lean\1'),
     (r'\bJS_DEF_POCKET_', 'JS_DEF_LEAN_'),
-    (r'\bPOCKET_GC_STATS\b', 'QJS_LEAN_GC_STATS'),
-    (r'\bPOCKET_TRIG_WEAK\b', 'QJS_LEAN_TRIG_WEAK'),
+    (START + r'POCKET_GC_STATS\b', 'QJS_LEAN_GC_STATS'),
+    (START + r'POCKET_TRIG_WEAK\b', 'QJS_LEAN_TRIG_WEAK'),
     (r'pocket_trig', 'lean_trig'),       # also inside tools/check_pocket_trig_table.py
     (r'pocket_gc_', 'lean_gc_'),
     (r'\bpocket_(sin|cos|tan)(_q16)?\b', r'lean_\1\2'),
@@ -108,14 +112,15 @@ UNKNOWN_VM = set()
 
 def build_rules(fork):
     """(name, regex, replacement) in order. Placeholders keep what must not change."""
-    r = [('kconfig', re.compile(r'\b(CONFIG_)?POCKET_VM_([A-Z0-9_]+)'), kconfig_sub(fork))]
+    r = [('kconfig', re.compile(START + r'(CONFIG_)?POCKET_VM_([A-Z0-9_]+)'), kconfig_sub(fork))]
     r += [('fork-api', re.compile(p), s) for p, s in FORK_API]
     if fork:
         r += [('fork-POCKET:', re.compile(r'\bPOCKET:'), 'QJS_LEAN:'),   # provenance tags in comments
               # the firmware's names, in the fork's comments
               ('fork-firmware-ref', re.compile(r'\bpocketjs_'), 'kobako_'),
               ('fork-firmware-ref', re.compile(r'_pocket'), '_kobako'),
-              ('fork-POCKET_', re.compile(r'\bPOCKET_'), 'QJS_LEAN_'),
+              ('fork-firmware-ref', re.compile(r'\bpocket\.'), 'kobako.'),   # the firmware's JS API
+              ('fork-POCKET_', re.compile(START + r'POCKET_'), 'QJS_LEAN_'),
               ('fork-_POCKET_', re.compile(r'_POCKET_'), '_LEAN_'),
               ('fork-Pocket', re.compile(r'Pocket(?!JS)'), 'Lean'),
               ('fork-pocket', re.compile(r'(?<!_)pocket(?!js)'), 'lean')]
@@ -133,6 +138,23 @@ def build_rules(fork):
 JS_RULES = [('js-Pocket', re.compile(r'Pocket(?!JS)'), 'Kobako'),
             ('js-POCKET', re.compile(r'POCKET(?!JS)'), 'KOBAKO'),
             ('js-pocket', re.compile(r'pocket(?!js)'), 'kobako')]
+
+def js_engine_names(text, counts):
+    """Engine option names in JS (comments of the OOM corpus): the real new
+    name is shorter (POCKET_VM_X -> QJS_LEAN_X), so the line gets the missing
+    bytes back as trailing spaces and the file keeps its length."""
+    rx = re.compile(START + r'(CONFIG_)?POCKET_VM_([A-Z0-9_]+)')
+    out = []
+    for line in text.split('\n'):
+        new = line
+        def sub(m):
+            if m.group(2) in ENGINE_KCONFIG or m.group(2) in ENGINE_INTERNAL:
+                counts['js-engine-name'] += 1
+                return 'QJS_LEAN_' + m.group(2)
+            return m.group(0)
+        new = rx.sub(sub, line)
+        out.append(new + ' ' * (len(line.encode()) - len(new.encode())))
+    return '\n'.join(out)
 
 def git(repo, *args):
     return subprocess.run(['git', '-C', repo] + list(args), check=True,
@@ -289,7 +311,8 @@ def run(repo, fork, apply, counts, review, moves, notes, length_errors):
             if apply:
                 open(full, 'w', newline='').write(out)
             continue
-        out = rewrite(text, JS_RULES if is_js else rules, counts, review, f'{os.path.basename(repo)}:{q}')
+        src = js_engine_names(text, counts) if is_js else text
+        out = rewrite(src, JS_RULES if is_js else rules, counts, review, f'{os.path.basename(repo)}:{q}')
         if is_js:
             if len(out.encode()) != len(raw):
                 length_errors.append(q)
@@ -319,6 +342,9 @@ def check(repo, fork_dir):
                     if re.fullmatch(r'(?i)pocketjs', m.group(0)):
                         continue        # a word: in review.txt
                     bad.append(f'{os.path.basename(repo_)}:{p}:{ln}: {m.group(0)}')
+            for m in re.finditer(r'KOBAKO_(?:VM_)?([A-Z0-9_]+)', text):
+                if m.group(1) in ENGINE_KCONFIG or m.group(1) in ENGINE_INTERNAL:
+                    bad.append(f'{os.path.basename(repo_)}:{p}: engine option under the firmware name {m.group(0)}')
             if is_fork and p != 'quickjs-lean-config.h':
                 for m in re.finditer(r'CONFIG_[A-Z0-9_]*', text):
                     if m.group(0).startswith(('CONFIG_QJS_LEAN', 'CONFIG_POCKET')):
