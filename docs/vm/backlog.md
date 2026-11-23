@@ -2,6 +2,16 @@
 
 未完了の TODO・未検証の項目だけを置く。決定・事実は各設計文書・台帳に残す（ここに複製しない）。終わった項目は消す。
 
+## fork main が落ち着いたら（2026-11-23〜）
+
+fork（dj-oyu/quickjs）の main にさらに PR が入る予定なので、gitlink を上げる作業と、ROM の組み込み（R2、2026-10-27 から既定 y）で役目が変わった最適化の見直しを、そのときにまとめて行う。出典: [pr8-cold-outline.md](pr8-cold-outline.md)、[upstream-v018.md](upstream-v018.md) §10。
+
+- **gitlink を上げて hot/cold を学習し直す。** 今のファーム（`b716bd1`）は fork PR #4 の後 `JS_CallInternal` が並べ替えられていない。`train.sh` の後、ビルドのログで外れ 0 を確かめ、`b716bd1` を A にして実機の A/B（pr8-cold-outline.md §1 と同じ手順）。PR #8 を含む木の学習には `hc_asm.py` の `.text.unlikely` の修正（`58f9544`）が要る。
+- **PR #8 の熱い 7 命令**（`push_atom_value`・`get_var_ref_check`・`put_var_ref_check`・`for_of_start`・`for_of_next`・`iterator_close`・`set_name`、pr8-cold-outline.md §3）を `JS_CallInternal` に戻すか。STRESS の +0.7% はこれの呼び出しの値段と読んでいる。
+- **ROM の組み込みの下での F2・F3 の残りを棚卸しする。** RD7（[rom-intrinsics.md](rom-intrinsics.md)）でエンジンの組み込みからは外したが、`quickjs.c` の中で ROM の構成でも走っている部分（F3 の `class_proto` の判定、F2 の登録の経路）が残っていないか、残っているなら S3 で要るかを確かめる。F2 は `pocket.*` の面にだけ要る。
+- **遅延を切った構成の不具合（未修正、fork 側）。** `JS_NewObjectFromShape` が強化の印（`js_obj_set_locked(p, false)`）を戻す行が `#ifdef POCKET_VM_LAZY_BUILTINS` の中にあり、遅延を切ると使い回したメモリの印が残る。ホストの `tests/`（`bug1318.js` ほか）で、ふつうの `{}` が WeakMap のキー・FinalizationRegistry の対象として断られる（2026-11-23、ホストで確認。行を `#endif` の外へ出すと消える）。ROM の atom の表の生成器もこの構成で動く。
+- **CM0（cz-js）の遅延の扱い。** cz-js は ROM の組み込みを使わず、`Object.prototype` の外れのたびに `js_lazy_touch` が表を走査する（CM0 の PMU で `toJSON` の探索の 13.5%）。案: `lazy_eligible` で `Object.prototype` を外す（S3 の既定には効かない）、またはビルドオプション化（21 か所の `#ifdef` を `#if` に直し、両方の構成を CI で回すことが前提）。ROM の組み込み無しの構成がホストの検査で回っているかも確かめる。
+
 ## L2（移動しない VM スタックと中断・再開）
 
 出典: `docs/vm/vm-L2-design.md`。状態は 2026-09-23 時点。
