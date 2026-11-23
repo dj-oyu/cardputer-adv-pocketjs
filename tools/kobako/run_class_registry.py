@@ -14,7 +14,10 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = '791c95df6ff90a4e15819bc11c8a2790df77f80a'
-BASELINE_FRAGMENT_SHA = 'f8dfa56305913117158e7ab449d422710c41e8afb4395dfcc535d4696c2d520e'
+# The fixture as renamed by tools/rename/kobako_rename.py (f4eb867): the
+# tool's rules applied to the original fixture give this file byte for byte,
+# and the original's fragment was f8dfa563...2d520e (the pin before the rename).
+BASELINE_FRAGMENT_SHA = '82183f67938d80c5ee998f4603e311fac504b9a235b3de627faa19083767b9ad'
 LEGACY_FIXTURE = ROOT / 'tools/kobako/fixtures/class_registry_16.inc'
 SCENARIOS = ('reuse', 'history1-instance17', 'history2-model17', 'full-ledger', 'reset-bounded', 'overflow')
 LEDGER_FILES = ('main/app_session.c', 'main/kobako/kobako_api.c', 'main/kobako/kobako_api.h',

@@ -103,11 +103,14 @@ jobs:
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig build
+          # A base from before the kobako rename (f4eb867) names its image cardputer_pocketjs.*
+          # and its options POCKET_*; copy the image to the new names and accept either prefix.
+          for f in build_image/cardputer_pocketjs.*; do if [ -e "$f" ]; then cp "$f" "${f/cardputer_pocketjs/cardputer_kobako}"; fi; done
           ccache -s || true
           git rev-parse HEAD > build_image/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_image/sdkconfig
-          grep -qx 'KOBAKO_DERBY_COURSE_CACHE:BOOL=OFF' build_image/CMakeCache.txt
-          grep -qx 'KOBAKO_DERBY_PROJECT_BATCH:BOOL=OFF' build_image/CMakeCache.txt
+          grep -Eqx '(KOBAKO|POCKET)_DERBY_COURSE_CACHE:BOOL=OFF' build_image/CMakeCache.txt
+          grep -Eqx '(KOBAKO|POCKET)_DERBY_PROJECT_BATCH:BOOL=OFF' build_image/CMakeCache.txt
           python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_image/expected-partition.bin
           cmp build_image/expected-partition.bin build_image/partition_table/partition-table.bin
           python -c 'from pathlib import Path; e=Path("build_image/cardputer_kobako.elf").read_bytes(); assert b"Application information:" in e; c=Path("build_image/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'

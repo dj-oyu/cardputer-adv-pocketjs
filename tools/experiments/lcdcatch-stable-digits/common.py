@@ -8,11 +8,20 @@ BASE='6db9244d585fa3caad899853ff8c7fbe96c5d7d3'
 def once(s,a,b):
  assert s.count(a)==1,a[:100]
  return s.replace(a,b)
+def renamed(data):
+ # BASE predates the pocket -> kobako rename (f4eb867); the harness now
+ # installs kobako.*. The rename's JS rules are same-length, so the renamed
+ # baseline parses into the same heap as the original.
+ sys.path.insert(0,str(R/'tools/rename'));import kobako_rename as k
+ t=data.decode('utf8');n={}
+ for _,rx,rep in k.JS_RULES:t=rx.sub(rep,t)
+ out=t.encode('utf8');assert len(out)==len(data);return out
 def inputs(out):
- changed=set(subprocess.check_output(['git','diff','--name-only',BASE,'--','apps/lcdcatch'],cwd=R,text=True).splitlines());assert changed=={'apps/lcdcatch/lcd_catch.js'},changed
+ # README.md changed only by the rename (pocket.* -> kobako.* in its prose).
+ changed=set(subprocess.check_output(['git','diff','--name-only',BASE,'--','apps/lcdcatch'],cwd=R,text=True).splitlines());assert changed<={'apps/lcdcatch/lcd_catch.js','apps/lcdcatch/README.md'} and 'apps/lcdcatch/lcd_catch.js' in changed,changed
  out.mkdir(parents=True,exist_ok=True)
  rows={}
- for mode,data in [('baseline',subprocess.check_output(['git','show',BASE+':apps/lcdcatch/lcd_catch.js'],cwd=R)),('candidate',(R/'apps/lcdcatch/lcd_catch.js').read_bytes())]:
+ for mode,data in [('baseline',renamed(subprocess.check_output(['git','show',BASE+':apps/lcdcatch/lcd_catch.js'],cwd=R))),('candidate',(R/'apps/lcdcatch/lcd_catch.js').read_bytes())]:
   p=out/(mode+'.js');p.write_bytes(data);rows[mode]=p
  return rows
 
