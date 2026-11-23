@@ -136,7 +136,7 @@ def main():
                         '                 js_malloc(ctx, size + JS_FUNCTION_RESERVE);\n'
                         '    fa_function_allocation_active = 0;')
                     (frame_source / 'quickjs.c').write_text(frame_code)
-                    command = ['gcc', '-std=gnu11', '-w', '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
+                    command = ['gcc', '-std=gnu11', '-w', '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
                         '-I', str(OUT / label / 'include'), '-I', str(frame_source), *cflags,
                         *shlex.split(env['VMTEST_CFLAGS']),
                         *(['-DFA_EXPECT_ALIGN8'] if a.m32 else []),

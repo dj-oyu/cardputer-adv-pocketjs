@@ -8,7 +8,7 @@ mkdir -p "$CACHE"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
-    gcc -std=gnu11 -c -O1 -g -w -DQUICKJS_NG_BUILD -D_GNU_SOURCE \
+    gcc -std=gnu11 -c -O1 -g -w -DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE \
       -I "$QJS" -I components/pocketjs_guest/include "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done

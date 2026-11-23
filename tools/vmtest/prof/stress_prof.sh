@@ -22,7 +22,7 @@ import pathlib, sys
 data = pathlib.Path('apps/pet/assets/pets-compact.bin').read_bytes()
 pathlib.Path(sys.argv[1]).write_text('static const uint8_t pet_test_data[] = {' + ','.join(map(str, data)) + '};\n')
 PY
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE ${PROF_DEFS:-}"
+DEFS="-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE ${PROF_DEFS:-}"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   gcc -std=gnu11 -c -O2 -g -w $F $DEFS -I "$QJS" -I components/pocketjs_guest/include \
       "$QJS/$f.c" -o "$CACHE/$f.o"

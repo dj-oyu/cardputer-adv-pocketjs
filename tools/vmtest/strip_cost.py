@@ -49,7 +49,7 @@ def build(tag, extra):
     out = ROOT / '.cache/strip_cost' / tag
     (out / 'include').mkdir(parents=True, exist_ok=True)
     (out / 'include/sdkconfig.h').write_text('/* host */\n')
-    cflags = ['-std=gnu11', '-O1', '-g', '-fno-pie', *flags, *extra, '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
+    cflags = ['-std=gnu11', '-O1', '-g', '-fno-pie', *flags, *extra, '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
               '-I', str(out / 'include'), '-I', str(QJS), '-I', str(ROOT / 'components/pocketjs_guest/include')]
     objs = []
     for name in ('dtoa', 'libregexp', 'libunicode', 'quickjs', 'quickjs-libc', 'quickjs-vm'):

@@ -24,7 +24,7 @@ def main() -> int:
                ROOT / "main/pocket/pocket_shape.c", ROOT / "main/ayatsuri/ayatsuri_model.c", ROOT / "main/ayatsuri/ayatsuri_visibility.c", ROOT / "main/ayatsuri/compact_opaque.c", ROOT / "main/ui/kasane/ksn_mesh_depth.c", ROOT / "main/ui/kasane/ksn_shiki_frame.c", ROOT / "tools/kasane_contract/proc_native_weak.c", ROOT / "tools/hostshim/pocket_api_stub.c",
                ROOT / "tools/kasane_contract/test_pocket_shape.c"]
     subprocess.run([cc, "-std=gnu11", "-O1", "-g", "-ffp-contract=off", "-fsanitize=address,undefined",
-                    "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE", "-I", str(QJS), "-I", str(ROOT / "main/pocket"),
+                    "-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE", "-I", str(QJS), "-I", str(ROOT / "main/pocket"),
                     "-I", str(ROOT / "main"), "-I", str(ROOT / "main/ui/kasane"), "-I", str(ROOT / "tools/hostshim"),
                     *map(str, sources), "-lm", "-o", str(binary)], cwd=ROOT, check=True)
     return subprocess.run([str(binary), str(ROOT / "tools/kasane_contract/shape_contract.js")], cwd=ROOT,

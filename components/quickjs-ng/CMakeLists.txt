@@ -27,6 +27,10 @@ idf_component_register(
 # (docs/vm/interpreter-stages.md sec.4.1).
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     QUICKJS_NG_BUILD
+    # F2 (docs/vm/builtin-floor-plan.md): the pocket.* surfaces keep their
+    # function lists in flash. The fork defaults it off since its PR #11 (a
+    # target with RAM to spare); this one has none to spare.
+    POCKET_VM_LAZY_BUILTINS=1
     QJS_DISABLE_DUMPS
     _GNU_SOURCE
 )

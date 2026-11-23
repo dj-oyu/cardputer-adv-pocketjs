@@ -74,7 +74,7 @@ def build(flags: list[str]) -> Path:
     a = api.index("// ----------------------------------------------------------- subscriptions")
     b = api.index("// ------------------------------------------------------- async completions", a)
     (obj_dir / "pocket_sub_impl.inc").write_text(api[a:b])
-    defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
+    defs = ["-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     qjs = run_derby.QJS
     objects = []
     for name, src in (("dtoa", ROOT / qjs / "dtoa.c"), ("libregexp", ROOT / qjs / "libregexp.c"),

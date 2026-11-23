@@ -48,7 +48,7 @@ def build(flags: list[str], cache: Path) -> Path:
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
     (cache / "kasane_pet_test_data.h").write_text(
         "static const uint8_t pet_test_data[] = {" + ",".join(map(str, data)) + "};\n")
-    defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
+    defs = ["-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     objects = []
     for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
         obj = cache / f"{name}.o"

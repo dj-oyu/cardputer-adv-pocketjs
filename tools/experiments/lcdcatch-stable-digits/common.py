@@ -26,14 +26,14 @@ def build(out,harness,m32=False,sanitize=False):
  compiler=subprocess.check_output(['gcc','--version'],text=True).splitlines()[0]
  qjs=R/game.QJS
  sources=sorted(set([qjs/(n+'.c') for n in ('dtoa','libregexp','libunicode','quickjs','quickjs-vm')]+list(qjs.rglob('*.h'))+list((R/'components/pocketjs_guest/include').rglob('*.h'))))
- fingerprint={'compiler':compiler,'flags':flags,'defines':['QUICKJS_NG_BUILD','_GNU_SOURCE'],'inputs':{str(p.relative_to(R)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
+ fingerprint={'compiler':compiler,'flags':flags,'defines':['QUICKJS_NG_BUILD','POCKET_VM_LAZY_BUILTINS=1','_GNU_SOURCE'],'inputs':{str(p.relative_to(R)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
  stamp=out/'engine-build.json'
  if not stamp.exists() or json.loads(stamp.read_text())!=fingerprint:
   for name in ('dtoa','libregexp','libunicode','quickjs','quickjs-vm'):(out/(name+'.o')).unlink(missing_ok=True)
  objects=[]
  for name in ('dtoa','libregexp','libunicode','quickjs','quickjs-vm'):
   obj=out/(name+'.o')
-  if not obj.exists():subprocess.run(['gcc','-std=gnu11','-c','-g','-w',*flags,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-I',game.QJS,'-I','components/pocketjs_guest/include',game.QJS+'/'+name+'.c','-o',str(obj)],cwd=R,check=True)
+  if not obj.exists():subprocess.run(['gcc','-std=gnu11','-c','-g','-w',*flags,'-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1','-D_GNU_SOURCE','-I',game.QJS,'-I','components/pocketjs_guest/include',game.QJS+'/'+name+'.c','-o',str(obj)],cwd=R,check=True)
   objects.append(str(obj))
  stamp.write_text(json.dumps(fingerprint,sort_keys=True,indent=2)+'\n')
  binary=out/'test-lcd7'

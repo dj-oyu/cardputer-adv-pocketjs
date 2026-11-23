@@ -162,7 +162,7 @@ def main():
         defines = ['-DCLASS_REGISTRY_LEGACY'] if legacy else []
         objects = []
         if not legacy:
-            definitions = ['-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE']
+            definitions = ['-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE']
             upstream = sorted(p for p in qjs.rglob('*') if p.is_file() and p.suffix in ('.c', '.h', '.inc'))
             compiler_version = subprocess.check_output(['gcc', '--version'], text=True)
             key = sha(json.dumps([flags, definitions, includes, compiler_version,

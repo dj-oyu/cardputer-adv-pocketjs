@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix='session-query-headers-') as directory:
         test = temp / 'test.c'
         test.write_text('#include <stdbool.h>\n' + text + '\n' + calls)
         command = cc + ['-std=c11', '-O2', '-Werror=implicit-function-declaration',
-                        '-Werror=incompatible-pointer-types', '-DQUICKJS_NG_BUILD']
+                        '-Werror=incompatible-pointer-types', '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1']
         for include in (temp, ROOT / 'main', ROOT / 'main/pocket', ROOT / 'main/hal',
                         ROOT / 'components/quickjs-ng/quickjs-ng'):
             command += ['-I', str(include)]

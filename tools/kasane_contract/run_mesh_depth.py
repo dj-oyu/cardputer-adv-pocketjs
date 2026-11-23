@@ -6,7 +6,7 @@ QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 def main(extra_flags=(), cache_name="mesh-shiki-contract"):
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--opt',choices=['0','2'],default='2');a=p.parse_args()
  out=ROOT/'.cache'/cache_name;out.mkdir(parents=True,exist_ok=True)
- flags=['-std=gnu11','-O'+a.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-omit-frame-pointer','-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST']
+ flags=['-std=gnu11','-O'+a.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-omit-frame-pointer','-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST']
  # Include opt-in flags before hashing AND compiling QuickJS objects.
  flags += list(extra_flags)
  includes=['-I'+str(x) for x in [QJS,ROOT/'main',ROOT/'main/pocket',ROOT/'main/ui/kasane',ROOT/'main/ayatsuri',ROOT/'tools/kasane_contract',ROOT/'tools/hostshim']]

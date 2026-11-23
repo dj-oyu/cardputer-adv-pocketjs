@@ -18,7 +18,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[2]
 QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 OUT=ROOT/'.cache/kasane_pocket_proc_turn_qjs'
-DEFS=['-DQUICKJS_NG_BUILD','-D_GNU_SOURCE']
+DEFS=['-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1','-D_GNU_SOURCE']
 
 def main():
     cc=shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')

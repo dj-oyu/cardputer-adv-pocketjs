@@ -37,7 +37,7 @@ def main():
              ROOT/'tools/kasane_contract/proc_native_weak.c',rom,
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
     command=[cc,'-std=gnu11','-O'+args.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-sanitize-recover',
-             '-DQUICKJS_NG_BUILD','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST',
+             '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),
              '-I',str(ROOT/'tools/hostshim'),

@@ -57,7 +57,7 @@ build_variant() {
   # which is the shipping default. Written only if absent so objects are not
   # rebuilt for nothing.
   [ -f "$OUT/include/sdkconfig.h" ] || echo "/* vmtest host stub: no CONFIG_* set */" > "$OUT/include/sdkconfig.h"
-  # QUICKJS_NG_BUILD/_GNU_SOURCE/QJS_DISABLE_DUMPS: the same defines components/quickjs-ng/CMakeLists.txt passes.
+  # QUICKJS_NG_BUILD/POCKET_VM_LAZY_BUILTINS/_GNU_SOURCE/QJS_DISABLE_DUMPS: the same defines components/quickjs-ng/CMakeLists.txt passes.
   # GUEST: from L1 on the harness LINKS the firmware's scheduler
   # (components/pocketjs_guest/src/vm_sched.c, vm_clock.c) instead of copying
   # it, so a change to the drain cannot pass here and fail there. Those two
@@ -73,7 +73,7 @@ build_variant() {
   # POCKET_VM_IMMORTAL_TEST: the host-only JS_PocketImmortalizeIntrinsics
   # behind vmrun --immortal (docs/vm/rom-intrinsics.md R1). An extra entry
   # point only; the firmware never defines it.
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc $rom -DPOCKET_VM_IMMORTAL_TEST -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE $dumps $reloc $rom -DPOCKET_VM_IMMORTAL_TEST -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,

@@ -13,7 +13,7 @@ QJS=components/quickjs-ng/quickjs-ng
 OUT=.cache/vmtest-floor/genri
 mkdir -p "$OUT/include"
 [ -f "$OUT/include/sdkconfig.h" ] || echo "/* host stub */" > "$OUT/include/sdkconfig.h"
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DQJS_DISABLE_DUMPS -DPOCKET_VM_IMMORTAL_TEST -DPOCKET_VM_GEN_ROM_INTRINSICS"
+DEFS="-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE -DQJS_DISABLE_DUMPS -DPOCKET_VM_IMMORTAL_TEST -DPOCKET_VM_GEN_ROM_INTRINSICS"
 INC="-I $OUT/include -I components/pocketjs_guest/include -I $QJS"
 for f in dtoa libregexp libunicode quickjs-vm; do
   gcc -std=gnu11 -c -O1 -g -w $DEFS $INC $QJS/$f.c -o "$OUT/$f.o"

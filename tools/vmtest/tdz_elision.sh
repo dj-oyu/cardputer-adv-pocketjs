@@ -8,7 +8,7 @@ QJS=${VMTEST_QJS:-components/quickjs-ng/quickjs-ng}
 OUT=${VMTEST_OUT:-$(pwd)/.cache/vmtest}
 mkdir -p "$OUT/tdz" "$OUT/include"
 [ -f "$OUT/include/sdkconfig.h" ] || echo "/* vmtest host stub: no CONFIG_* set */" > "$OUT/include/sdkconfig.h"
-defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -I $OUT/include -I components/pocketjs_guest/include -I $QJS"
+defs="-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE -I $OUT/include -I components/pocketjs_guest/include -I $QJS"
 objs=()
 for f in dtoa libregexp libunicode quickjs-vm; do
   gcc -std=gnu11 -c -O1 -g -w $defs "$QJS/$f.c" -o "$OUT/tdz/$f.o"

@@ -26,7 +26,7 @@ def main():
                ROOT / "main/ui/kasane/ksn_proc_grid_resize.c",
                ROOT / "main/pocket/pocket_grid.c",
                ROOT / "tools/kasane_contract/test_pocket_grid_qjs.c"]
-    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
+    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE",
                "-DKSN_GRID_PIE_MODEL", "-DKSN_GRID_APP_HOST_TEST",
                "-I", str(QJS), "-I", str(ROOT / "main"),
                "-I", str(ROOT / "main/pocket"),

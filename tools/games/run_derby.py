@@ -123,7 +123,7 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     a = api.index("// ----------------------------------------------------------- subscriptions")
     b = api.index("// ------------------------------------------------------- async completions", a)
     (cache / "pocket_sub_impl.inc").write_text(api[a:b])
-    defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
+    defs = ["-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     objects = []
     for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
         obj = cache / f"{name}.o"

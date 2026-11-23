@@ -10,7 +10,7 @@ F=$(bash tools/vmtest/m32_sysroot.sh)
 OUT=$PWD/.cache/vmtest32
 QJS=components/quickjs-ng/quickjs-ng
 obj=$OUT/obj-o2
-gcc -std=gnu11 -O2 $F -w -DQUICKJS_NG_BUILD -D_GNU_SOURCE -DQJS_DISABLE_DUMPS -I "$OUT/include" -I components/pocketjs_guest/include -I $QJS \
+gcc -std=gnu11 -O2 $F -w -DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE -DQJS_DISABLE_DUMPS -I "$OUT/include" -I components/pocketjs_guest/include -I $QJS \
   "$SP/rom_walk.c" components/pocketjs_guest/src/vm_sched.c components/pocketjs_guest/src/vm_clock.c \
   $obj/libregexp.o $obj/libunicode.o $obj/dtoa.o $obj/quickjs-vm.o -lm -lpthread -ldl -o "$OUT/rom_walk"
 "$OUT/rom_walk"

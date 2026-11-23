@@ -62,7 +62,7 @@ def main():
               'host_model_only': True, 'commands': [], 'variants': {}}
 
     def compile_c(source, obj):
-        cmd = ['gcc', '-std=gnu11', '-w', *flags, '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
+        cmd = ['gcc', '-std=gnu11', '-w', *flags, '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
                '-I' + str(QJS), '-Icomponents/pocketjs_guest/include',
                '-c', str(source), '-o', str(obj)]
         result['commands'].append(cmd)

@@ -26,7 +26,7 @@ def main():
                ROOT / "main/ui/kasane/ksn_blend_pie.c",
                ROOT / "main/pocket/pocket_pixel.c",
                ROOT / "tools/kasane_contract/test_pocket_pixel_qjs.c"]
-    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
+    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE",
                "-I", str(QJS), "-I", str(ROOT / "main"),
                "-I", str(ROOT / "main/pocket"),
                "-I", str(ROOT / "main/ui/kasane"),

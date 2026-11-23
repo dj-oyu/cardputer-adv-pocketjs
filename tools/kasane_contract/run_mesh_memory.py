@@ -19,7 +19,7 @@ def main():
     qjs = ROOT / 'components/quickjs-ng/quickjs-ng'
     flags = ['-std=gnu11', '-O2', '-g', '-ffp-contract=off',
              '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-             '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
+             '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
     includes = ['-I'+str(p) for p in [qjs, ROOT/'main', ROOT/'main/pocket',
                 ROOT/'main/ui/kasane', ROOT/'main/ayatsuri',
                 ROOT/'tools/kasane_contract', ROOT/'tools/hostshim']]

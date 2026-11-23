@@ -7,7 +7,7 @@ CACHE=${CACHE:-/tmp/qjs-kasane-host}
 mkdir -p "$CACHE"
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE"
+DEFS="-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then

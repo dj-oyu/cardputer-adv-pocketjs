@@ -15,7 +15,7 @@ python3 tools/make_font.py "$CACHE/gen" >/dev/null
 # The VM levels added quickjs-vm.c (quickjs.c calls js_vm_leave from it) and
 # two default-y Kconfig switches the host has no sdkconfig for. Same defines
 # as tools/vmtest/build.sh, so this tests the call path the firmware ships.
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE"
+DEFS="-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   # A changed header or a changed define list must not leave a stale object.
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
