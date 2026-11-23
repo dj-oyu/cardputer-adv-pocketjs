@@ -90,6 +90,11 @@ void sound_capture_level(unsigned *peak, bool *clipping) {
 bool sound_capture_active(void) { return mic_open; }
 uint32_t sound_capture_frames(void) { return (uint32_t)mic_next; }
 
+// open() ends the MUSIC overlay's background player first, so it does not hold
+// the speaker (pocket_av.c, S5). No background music plays on this host, and
+// the real one is a no-op when none does.
+void pocket_av_background_stop(const char *why) { (void)why; }
+
 // ---- the engine ------------------------------------------------------------
 
 static JSRuntime *rt;

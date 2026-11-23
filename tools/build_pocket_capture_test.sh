@@ -5,8 +5,8 @@
 #
 # What is real here: main/pocket/pocket_capture.c, main/pocket/pocket_api.c
 # (promise slots, cancel tokens, capabilities, the pump) and main/ui/paint.c,
-# which draws the recording indicator. What is faked: the microphone and the
-# clock, both in the test file itself.
+# which draws the recording indicator. What is faked: the microphone, the
+# clock and pocket_av_background_stop(), all in the test file itself.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 QJS=components/quickjs-ng/quickjs-ng
