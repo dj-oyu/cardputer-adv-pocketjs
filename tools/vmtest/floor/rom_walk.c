@@ -6,10 +6,10 @@
 // tlsf block length (4 B rounding, 12 B minimum; js= on the device adds
 // MALLOC_OVERHEAD 8 B per block on top, reported as `blocks`).
 //
-//   gcc -std=gnu11 -O2 $F -DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE -DQJS_DISABLE_DUMPS \
-//     -I .cache/vmtest32/include -I components/pocketjs_guest/include -I $QJS \
-//     tools/vmtest/floor/rom_walk.c components/pocketjs_guest/src/vm_sched.c \
-//     components/pocketjs_guest/src/vm_clock.c $obj/libregexp.o $obj/libunicode.o \
+//   gcc -std=gnu11 -O2 $F -DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE -DQJS_DISABLE_DUMPS \
+//     -I .cache/vmtest32/include -I components/kobako_guest/include -I $QJS \
+//     tools/vmtest/floor/rom_walk.c components/kobako_guest/src/vm_sched.c \
+//     components/kobako_guest/src/vm_clock.c $obj/libregexp.o $obj/libunicode.o \
 //     $obj/dtoa.o $obj/quickjs-vm.o -lm -o .cache/vmtest32/rom_walk
 //   .cache/vmtest32/rom_walk [touch-script.js]
 #include "quickjs.c"

@@ -1,7 +1,7 @@
-// MEGADEMO chunk: the pocket.kasane view's resources and tables (room,
-// HUD, story text). Loaded only with pocket.kasane.
+// MEGADEMO chunk: the kobako.kasane view's resources and tables (room,
+// HUD, story text). Loaded only with kobako.kasane.
 'use strict';
-const V = pocket.kasane, H = V.shiki, G = V.grid;
+const V = kobako.kasane, H = V.shiki, G = V.grid;
 // Surface 0's frames sized for 768 segments (the busiest frame, TWIST at
 // HEAVY, is 648): 2 x 7.7 KB instead of 2 x 10.2 KB, in smaller holes.
 // Firmware without the option (and the baseline the contracts compare
@@ -18,7 +18,7 @@ const lives = V.cache.create([[0, 2, 9, 7], [0, 0, 2, 2], [7, 0, 9, 2]].map(b =>
 // LOAD[1] plans a frame, while the internal heap has LOAD[2] bytes free
 // (a registration dips it by up to 14 KB on the device); the rest
 // registers over the scene's first frames, which skip unloaded plans.
-const LOAD = [16, 1, 22528], MEM = pocket.memory;
+const LOAD = [16, 1, 22528], MEM = kobako.memory;
 // The room (built only while the camera is off the screen) and the news
 // HUD: "x0 y0 x1 y1 rrggbbaa radius|-stroke|opacity" (a text when 5 has
 // letters). Window, moon, stars, desk, monitor, keyboard, cushion. One

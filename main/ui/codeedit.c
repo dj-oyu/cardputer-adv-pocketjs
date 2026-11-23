@@ -76,9 +76,9 @@ static code_state_t state;
 #define HSCROLL_EDGE 24
 
 // Draws something on the first frame, so a run that works looks like it did.
-// It draws through pocket.kasane, as apps/hello/main.js does at greater length.
+// It draws through kobako.kasane, as apps/hello/main.js does at greater length.
 static const char TEMPLATE[] =
-    "const view = pocket.kasane;\n"
+    "const view = kobako.kasane;\n"
     "let n = 0, t;\n"
     "view.replace(tx => {\n"
     "  tx.background(0x071425ff);\n"
@@ -182,7 +182,7 @@ void code_open_lesson(unsigned lesson, const char *seed, size_t seed_len) {
 // next open, and the next open reads it out of flash -- so an edit that was
 // never saved has to be written somewhere first. It goes to the draft record,
 // which is why `:q!` and the force stop no longer cost the work, and why the
-// person can run POCKET PET in the middle of writing a program and come back
+// person can run KOBAKO PET in the middle of writing a program and come back
 // to the half-written line. A document with no unsaved change drops any draft
 // instead: whatever is parked would be older than the record.
 void code_close(void) {
@@ -343,7 +343,7 @@ bool code_key(const keystroke_t *k) {
     if(!k->len) return true;
 
     // The editor's own three keys, in every mode, because the footer promises
-    // them and tools/pocket_bridge.py drives the editor with them. They are
+    // them and tools/kobako_bridge.py drives the editor with them. They are
     // taken before the IME so a save is never swallowed by a conversion.
     if(k->text[0]) switch(k->text[0]) {
         case 0x13: do_save(); return true;   // C-s

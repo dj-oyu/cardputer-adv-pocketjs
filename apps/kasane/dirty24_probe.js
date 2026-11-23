@@ -23,7 +23,7 @@
     color: 0xff8040ff, visible: {slot: 'show'}});
   nodes.push({type: 'rect', bounds: [0, 132, 240, 135],
     color: 0x40ff80ff, page: {slot: 'page'}, pageEquals: 1});
-  const view = pocket.kasane.mount({version: 1, background: 0x071425ff,
+  const view = kobako.kasane.mount({version: 1, background: 0x071425ff,
     slots: slots, nodes: nodes}, initial);
   let stage = 0;
   console.log('KSN_DIRTY24 READY slots=24 nodes=24 stage=0');

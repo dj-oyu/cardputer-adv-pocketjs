@@ -1,17 +1,17 @@
 /* Loads the real apps/imucal/imucal.js against the real QuickJS + Kasane
- * fixture, with pocket.* stubbed in JS. Only exercises the NO_IMU path (no
+ * fixture, with kobako.* stubbed in JS. Only exercises the NO_IMU path (no
  * hardware in this harness): confirms the Kasane port parses, builds its
  * scene without throwing, and presents -- the real risk in this port was
  * scene/text argument mistakes, not the sensor math (unchanged from the
  * legacy version and covered by reading the source). */
 #define main kasane_imucal_test_main
-#include "test_pocket_kasane.c"
+#include "test_kobako_kasane.c"
 #undef main
 
 int main(void) {
     check(open_fault_runtime(
         "globalThis.console={log(){}};"
-        "globalThis.pocket={kasane:kasane,"
+        "globalThis.kobako={kasane:kasane,"
         "capabilities:{get(name){return {supported:true,available:false,reason:'NO_DEVICE'};}}};"),
         "imucal fixture opens with NO_IMU capability");
 
@@ -36,7 +36,7 @@ int main(void) {
     check(open_fault_runtime(
         "globalThis.__logs=[];globalThis.console={log(m){__logs.push(String(m));}};"
         "globalThis.__store={};globalThis.__imuCb=null;"
-        "globalThis.pocket={kasane:kasane,"
+        "globalThis.kobako={kasane:kasane,"
         "capabilities:{get(n){return {supported:true,available:true,reason:null};}},"
         "sensors:{imu:{latest(){return null;},"
         "watch(o,cb){globalThis.__imuCb=cb;return {close(){globalThis.__imuCb=null;}};}}},"
@@ -44,7 +44,7 @@ int main(void) {
         "else rej({code:'NOT_FOUND'});});},"
         "set(k,v){return new Promise((res)=>{__store[k]=v;res();});}},"
         "audio:{tone(){return Promise.resolve();}},"
-        /* pocket.app as the host has it: onFrame is what frame() delivers to,
+        /* kobako.app as the host has it: onFrame is what frame() delivers to,
          * and the hooks are kept so a resume can be driven mid-walk. */
         "app:{start(h){globalThis.__hooks=h;},onFrame(f){globalThis.frame=()=>f();}}};"
         /* setAccel is a no-op once report() closes the subscription -- a real
@@ -81,8 +81,8 @@ int main(void) {
     check(run("if(__logs.indexOf('IMUCAL_MAP #define MAP_X(ax,ay,az) (-ax)')===-1)"
               "throw Error('missing MAP_X: '+__logs.join('|'));"),
           "IMUCAL_MAP for X matches the driven orientations");
-    check(run("if(!('axes' in __store))throw Error('report did not persist to pocket.storage');"),
-          "report() saved the result through pocket.storage");
+    check(run("if(!('axes' in __store))throw Error('report did not persist to kobako.storage');"),
+          "report() saved the result through kobako.storage");
     close_fault_runtime();
     check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"imucal test teardown frees memory");
 

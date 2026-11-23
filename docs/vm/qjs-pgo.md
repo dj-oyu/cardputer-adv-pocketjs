@@ -5,7 +5,7 @@
 QEMU で STRESS を流して取った実行回数で QuickJS をコンパイルし直す（`-fprofile-use`）。ねらいは
 [turn-icache.md](turn-icache.md) §3 で見つけた「取り込んだ行の 4 割が走らないバイト」を減らすこと。
 
-**状態: 試行（既定 OFF、`CONFIG_POCKET_VM_QJS_PGO`）。** 実機の 4 アプリで、効果は測れる大きさに無かった（§5、実測）。
+**状態: 試行（既定 OFF、`CONFIG_KOBAKO_QJS_PGO`）。** 実機の 4 アプリで、効果は測れる大きさに無かった（§5、実測）。
 
 ## 0. 結論
 
@@ -43,12 +43,12 @@ QEMU で STRESS を流して取った実行回数で QuickJS をコンパイル�
 | 計装 | r5sim の QuickJS を `-fprofile-generate -fprofile-update=single -fprofile-info-section` で組む。数え先（64 bit、約 220 KB）は DRAM に入らないので QEMU の PSRAM（`-m 4M`）へ | `tools/pgo/qjs_pgo.cmake`、`tools/r5sim/main/gcov_info.lf`、`tools/r5sim/sdkconfig.pgo_gen.defaults` |
 | 学習 | QEMU で STRESS 120 フレーム。終わりに libgcov の `__gcov_info_to_gcda` で gcda の流れを 16 進でシリアルへ | `tools/r5sim/main/r5sim.c`（`R5SIM_PGO_GEN`） |
 | 復元 | 16 進をバイトに戻し、`gcov-tool merge-stream` で `.gcda` に。`tools/pgo/qjs/` へ写す | `tools/pgo/train.sh` |
-| 利用 | `.gcda` を各オブジェクトの隣に写し、素の `-fprofile-use` で組む | `tools/pgo/qjs_pgo.cmake`、`CONFIG_POCKET_VM_QJS_PGO` |
+| 利用 | `.gcda` を各オブジェクトの隣に写し、素の `-fprofile-use` で組む | `tools/pgo/qjs_pgo.cmake`、`CONFIG_KOBAKO_QJS_PGO` |
 
 ### 1.1 決めたことと理由
 
 - **r5sim の QuickJS をファームと同じ目的コードにした。** r5sim は `main/Kconfig.projbuild` を持たないので、
-  `CONFIG_POCKET_VM_ROM_INTRINSICS`（ファームの既定 y）が無く、コンテキストの組み立ての関数がファームと違っていた。
+  `CONFIG_QJS_LEAN_ROM_INTRINSICS`（ファームの既定 y）が無く、コンテキストの組み立ての関数がファームと違っていた。
   プロファイルがその関数を欠き、ファームのビルドが `Missing counts for called function`（`-Werror` で止まる）に
   なった。r5sim は今、この定義を QuickJS に付ける。`quickjs.c.obj` の逆アセンブルはファームと一致
   （確認済み）。**この変更で r5sim の記録は以前と比べられなくなった**（触る行は 1,305 → 1,281 前後）。
@@ -77,7 +77,7 @@ QEMU で STRESS を流して取った実行回数で QuickJS をコンパイル�
 - **`-Wmissing-profile` は警告で残す。** `.gcda` が見つからない・読めないときにファイルごとに出る。ファームの
   ビルドでは 0 件（r5sim に無い関数が 0 になったため）。
 - **計装と利用で同じコード生成の指定。** 早い段のインライン展開の後でプロファイルを読むので、`-Os` で学習して
-  `-O2` で使うと数が合わない（実際に `Missing counts` で止まった）。`POCKET_QJS_PGO_OPTS` を両方に渡す。
+  `-O2` で使うと数が合わない（実際に `Missing counts` で止まった）。`KOBAKO_QJS_PGO_OPTS` を両方に渡す。
 - **`-fno-reorder-functions`。** プロファイルがあると GCC は関数を `.text.hot.<名前>` / `.text.unlikely.<名前>` に
   入れる。`main/vm/helper_iram8.lf` は `.text.<名前>` で 93 個の helper を IRAM へ写すので、そのままだと黙って
   flash に残る（JS が約 13% 遅くなる側。docs/vm/p1-iram-placement.md §9）。

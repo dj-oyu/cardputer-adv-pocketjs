@@ -41,7 +41,7 @@ node IDの`valueOf`を呼ばず、借用中にJS callbackを実行しない。
 
 joint globalとinverse bindは**対象mesh nodeのlocal空間**で作る。親子jointのglobalは
 callerが先に合成し、skin後にModel側のnode/hierarchy TRSが一度だけ適用される。
-`pocket.ayatsuri.compose(pose, parent, output)` と再利用するsubarrayでjointのposeを
+`kobako.ayatsuri.compose(pose, parent, output)` と再利用するsubarrayでjointのposeを
 更新できる。world jointからmesh-localへの変換はcallerの責任。
 
 bindVerticesはcaller所有のrest geometryであり、Modelのcold geometryとの一致を

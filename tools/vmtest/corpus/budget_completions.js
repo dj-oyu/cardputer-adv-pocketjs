@@ -3,7 +3,7 @@
 // L1 invariant 6 (docs/vm-L1-design.md sec.7): a completion recorded while the
 // queue is still being worked off is neither lost nor delivered early.
 //
-// host.request(k) is vmrun's stand-in for pocket_api_complete(): the host
+// host.request(k) is vmrun's stand-in for kobako_api_complete(): the host
 // records the completion at the k-th job boundary, from outside JavaScript,
 // which on the device can happen in an ISR or another task at any moment. What
 // settles it is the host's pump -- and the design's rule is that the pump does

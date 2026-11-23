@@ -1,5 +1,5 @@
-// pocket.shapes contract checks (docs/api/shapes.md), run by
-// tools/kasane_contract/test_pocket_shape.c.
+// kobako.shapes contract checks (docs/api/shapes.md), run by
+// tools/kasane_contract/test_kobako_shape.c.
 'use strict';
 const eq = (got, want, what) => { if (got !== want) throw Error(what + ': got ' + got + ', want ' + want); };
 const near = (got, want, what) => { if (!(Math.abs(got - want) < 1e-5)) throw Error(what + ': got ' + got + ', want ' + want); };

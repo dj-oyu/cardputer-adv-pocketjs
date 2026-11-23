@@ -3,8 +3,8 @@ param([string]$DiagBuild='build_proc_grid_scan_device',
       [switch]$CombinedFaults,[switch]$AudioTone,[switch]$SdMp3)
 $ErrorActionPreference='Stop'
 $py='C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe'
-$diag=Join-Path $DiagBuild 'cardputer_pocketjs.bin'
-$normal='build_megademo_install\cardputer_pocketjs.bin'
+$diag=Join-Path $DiagBuild 'cardputer_kobako.bin'
+$normal='build_megademo_install\cardputer_kobako.bin'
 $cache=Join-Path $DiagBuild 'CMakeCache.txt'
 $homeCheck='tools\kasane_contract\check_home.py'
 $esp=@('-m','esptool','--chip','esp32s3','--port','COM3',

@@ -1,5 +1,5 @@
 /* apps/kasane/proc_megademo.js as the firmware runs it, on the host: the real
- * QuickJS, the real pocket.kasane (view, shiki, grid resize, pixel) and
+ * QuickJS, the real kobako.kasane (view, shiki, grid resize, pixel) and
  * the real renderer presenting into a 240x135 panel after every frame().
  *
  * What it proves before a flash (no device, no serial port):
@@ -17,18 +17,18 @@
  *
  *   python3 tools/kasane_contract/run_megademo_app_host.py
  */
-#include "pocket_shape.h"
-#include "pocket_kasane.h"
-#include "pocket_shiki_frame.h"
-#include "pocket_shiki_api.h"
+#include "kobako_shape.h"
+#include "kobako_kasane.h"
+#include "kobako_shiki_frame.h"
+#include "kobako_shiki_api.h"
 #include "shiki_heap.h"
-#include "pocket_video.h"
+#include "kobako_video.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
 #include "text/ksn_font.h"
 #include "sound.h"
-#include "pocket_av.h"
+#include "kobako_av.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,8 +62,8 @@ static size_t pk_usable(const void *p){return p?tlsf_len(((const pk_hdr *)p-1)->
 static const JSMallocFunctions PEAK_MF={pk_calloc,pk_malloc,pk_free,pk_realloc,pk_usable};
 
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out;return false;}
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){(void)id;(void)out;return false;}
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
@@ -71,11 +71,11 @@ void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr){__real_free(ptr);}
 void *__wrap_calloc(size_t count,size_t size){return __real_calloc(count,size);}
-/* The app does not use pocket.kasane.video (it needs a streamed source). */
-esp_err_t pocket_video_install(JSContext *ctx,JSValueConst kasane){(void)ctx;(void)kasane;return ESP_OK;}
-void pocket_video_reset(void){}
-bool pocket_video_pending(void){return false;}
-void pocket_video_present_result(ksn_result result){(void)result;}
+/* The app does not use kobako.kasane.video (it needs a streamed source). */
+esp_err_t kobako_video_install(JSContext *ctx,JSValueConst kasane){(void)ctx;(void)kasane;return ESP_OK;}
+void kobako_video_reset(void){}
+bool kobako_video_pending(void){return false;}
+void kobako_video_present_result(ksn_result result){(void)result;}
 /* grid.fold/index/view load this lazily; the app never calls them. */
 const char grid_fold_js_start[] asm("_binary_grid_fold_js_start") = "({});";
 const char grid_fold_js_end[] asm("_binary_grid_fold_js_end") = "";
@@ -121,17 +121,17 @@ static bool eval(const char *source,size_t len,const char *name){
     JSContext *c;
     while(JS_ExecutePendingJob(rt,&c)>0){}
     /* The turn is over: the firmware returns the cached frame segments
-     * (components/pocketjs_guest/src/guest.c, D43). */
+     * (components/kobako_guest/src/guest.c, D43). */
     JS_VMStackTrim(rt);
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
     return ok;
 }
-/* pocket.app.load() as main/pocket/pocket_app_load.c does it for this app:
+/* kobako.app.load() as main/kobako/kobako_app_load.c does it for this app:
  * apps/kasane/chunks.txt names the chunks; each loads once, as its own
  * global script, so the compile peak is per chunk (docs/vm/eval-peak.md 7). */
 static struct {char name[32],path[512];bool done;} chunk[16];
 static unsigned chunks;
-static bool strip_debug;   /* chunks.txt `option strip-debug`, as pocket_app_load.c */
+static bool strip_debug;   /* chunks.txt `option strip-debug`, as kobako_app_load.c */
 static void read_chunks(void){
     /* MEGA_CHUNKS: another chunks.txt (the runner's baseline, extracted). */
     const char *list=getenv("MEGA_CHUNKS");if(!list)list="apps/kasane/chunks.txt";
@@ -160,9 +160,9 @@ static JSValue js_load(JSContext *c,JSValueConst self,int argc,JSValueConst *arg
     FILE *f=fopen(chunk[i].path,"rb");if(!f)return JS_ThrowReferenceError(c,"no file");
     static char body[1<<16];size_t n=fread(body,1,sizeof body-1,f);fclose(f);body[n]=0;
     chunk[i].done=true;
-    JS_PocketSetStripDebug(c,strip_debug);
+    JS_LeanSetStripDebug(c,strip_debug);
     JSValue v=JS_Eval(c,body,n,chunk[i].path,JS_EVAL_TYPE_GLOBAL);
-    JS_PocketSetStripDebug(c,0);
+    JS_LeanSetStripDebug(c,0);
     if(JS_IsException(v))return v;
     JS_FreeValue(c,v);
     return JS_TRUE;
@@ -172,14 +172,14 @@ static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pi
     (void)o;memcpy(panel+y*240,pixels,rows*240*sizeof *pixels);panel_bytes+=rows*240u*2u;return KSN_OK;
 }
 static void present(uint64_t now_us){
-    pocket_kasane_set_animation_time(now_us);
-    (void)pocket_kasane_advance(now_us);
+    kobako_kasane_set_animation_time(now_us);
+    (void)kobako_kasane_advance(now_us);
     ksn_display_port port={.strip=get_strip,.present=send_strip,
                            .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
     ksn_render_stats stats;
-    ksn_result r=pocket_kasane_present(&port,&stats);
+    ksn_result r=kobako_kasane_present(&port,&stats);
     if(r!=KSN_OK)present_failures++;
-    else pocket_kasane_animations_presented(now_us);
+    else kobako_kasane_animations_presented(now_us);
 }
 static void ppm(const char *dir,unsigned tick){
     char name[512];snprintf(name,sizeof name,"%s/app_%04u.ppm",dir,tick);
@@ -211,15 +211,15 @@ static size_t heap_req(void){
 }
 
 /* Counts live, peak and cumulative plans and host time in register(),
- * without changing what the app sees. pocket.memory.info() stands in for the
+ * without changing what the app sees. kobako.memory.info() stands in for the
  * device's sampled internal free heap, which gates the app's prefetch: a
  * line fitted to the device's turn-boundary values (31 KB free with no plans
  * down to ~15 KB with ZENITH's 16, docs/kasane/megademo-limits.md). */
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
+    "globalThis.kobako={kasane:globalThis.kasane,shapes:globalThis.shapes,app:{load:globalThis.__load},memory:{info(){"
     "return {internalFreeBytes:31000-1000*globalThis.__mega.live}}}};"
-    "(function(){const P=pocket.kasane.shiki,R=P.register,U=P.unregister,D=P.draw;"
+    "(function(){const P=kobako.kasane.shiki,R=P.register,U=P.unregister,D=P.draw;"
     "const M=globalThis.__mega={live:0,peak:0,total:0,frameReg:0,maxFrameReg:0,"
     "regNs:0,frameDrawNs:0,unreg:0,frameUnreg:0};"
     "P.register=function(){const t=__now();const h=R.apply(P,arguments);"
@@ -244,7 +244,7 @@ int main(int argc,char **argv){
     if(!f){printf("cannot open %s\n",path);return 2;}
     static char src[1<<16];size_t n=fread(src,1,sizeof src-1,f);fclose(f);src[n]=0;
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
-    /* MEGA_HEAP_LIMIT=163840 reproduces pocketjs_guest_create(): the limit
+    /* MEGA_HEAP_LIMIT=163840 reproduces kobako_guest_create(): the limit
      * and the collector's first threshold at half of it. With glibc's
      * coarser rounding this is stricter than the device's TLSF. */
     const char *limit_env=getenv("MEGA_HEAP_LIMIT");
@@ -256,8 +256,8 @@ int main(int argc,char **argv){
     /* MEGADEMO names kasane.shiki: its session takes the Shiki heap before
      * the guest (app_session.c), and kasane then has shiki. */
     if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
-    pocket_kasane_install(ctx,NULL);
-    pocket_shape_install(ctx,NULL);
+    kobako_kasane_install(ctx,NULL);
+    kobako_shape_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
@@ -392,7 +392,7 @@ int main(int argc,char **argv){
     printf("panel: %llu bytes sent over %u frames (%.0f a frame; a whole frame is 64800)\n",
            panel_bytes,frames,frames?(double)panel_bytes/frames:0.0);
     ok=ok&&!exceptions&&!present_failures;
-    pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    kobako_shiki_api_reset();kobako_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",ok?"MEGADEMO_HOST PASS":"MEGADEMO_HOST FAIL");
     return ok?0:1;
 }

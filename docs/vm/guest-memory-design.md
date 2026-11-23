@@ -14,7 +14,7 @@ QEMU の値は命令列で、時間を含まない。もとの記録は [lv3-hea
 
 ### 1.1 確保の経路
 
-ゲスト（QuickJS）の確保は 1 ブロックずつ `guest_malloc`（`components/pocketjs_guest/src/guest.c:448`）へ来る。
+ゲスト（QuickJS）の確保は 1 ブロックずつ `guest_malloc`（`components/kobako_guest/src/guest.c:448`）へ来る。
 QuickJS は「大きな塊を取って中で管理する」ことをしない。オブジェクト 1 個、文字列 1 本が、それぞれ 1 回の確保である。
 
 | 段 | 何か | 場所 |
@@ -78,7 +78,7 @@ A より約 40 KB 多くメモリを持っていた。この A/B は「溢れに
 天井は約 158.7 KB、物理的な行き止まりは約 140 KB。生存量が約 92 KB を超えると 1.5 倍の閾値も 138 KB を超える。
 以後 GC は一度も走らない（A: LV3 に入ってから 1 回）。STRESS は 5 回に 1 回循環を作る（`apps/stress/stress.js:102`）ので、
 循環ごみが溜まり続け、床が上がる。拒否の後に GC させると床は上がらなくなった（§2.1）。
-実機の床 95 → 138 KB が同じ仕組みかは、実機の `CONFIG_POCKET_OOM_GC_PROBE` の `guest=..->..` で確かめる（未測定）。
+実機の床 95 → 138 KB が同じ仕組みかは、実機の `CONFIG_KOBAKO_OOM_GC_PROBE` の `guest=..->..` で確かめる（未測定）。
 
 **(c) 入口の OOM（コードから確定、実機の行との対応は推定）。**
 `frame()` が 2 本目のスタック片まで潜るアプリは、ターンの終わりにその片を返し（D43）、次のフレームの入口で取り直す。
@@ -120,13 +120,13 @@ B でも刈り込み後の最大ブロックは 25 → 8 KB と縮む。ゲス�
 
 ### 4.3 上限の追従
 
-`pocketjs_guest_fit_limit`（`guest.c:1507`）。ネイティブの標本（100 ms ごと、`sample_memory_pressure`、`main/app_session.c:270`）で:
+`kobako_guest_fit_limit`（`guest.c:1507`）。ネイティブの標本（100 ms ごと、`sample_memory_pressure`、`main/app_session.c:270`）で:
 
 ```
 上限 = min(160 KiB, 使用量 ＋ アリーナの空き ＋ ブロックキャッシュの保持分 ＋ max(0, システムの空き − 床))
 ```
 
-床は `CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB`（既定 16、0 で固定の上限に戻る）。
+床は `CONFIG_KOBAKO_GUEST_NATIVE_FLOOR_KB`（既定 16、0 で固定の上限に戻る）。
 GC の天井と後退の予算は上限からの割合なので、上限が下がれば GC の起動点も一緒に下がる。VM の変更は無い。
 
 ### 4.4 結果（実測(QEMU)、アリーナ 24 KiB）
@@ -155,7 +155,7 @@ GC の天井と後退の予算は上限からの割合なので、上限が下�
 
 ## 5. 伸びるアリーナ（塊）— 試して、設計のままでは不採用
 
-> **結果（§5.7）:** 実装して（`7767f64`、`CONFIG_POCKET_VM_GUEST_CHUNK_KB`、既定 0）QEMU と実機で測った。
+> **結果（§5.7）:** 実装して（`7767f64`、`CONFIG_KOBAKO_GUEST_CHUNK_KB`、既定 0）QEMU と実機で測った。
 > QEMU では良く見え、実機では悪かった。§5.1〜§5.6 は当初の設計の記録として残す。コードは残すが、既定は固定のアリーナ。
 
 4.3 で「尽き方」は直る。残るのは方針 1 と 4: 小さなアプリが 24〜64 KiB のアリーナを抱える件と、
@@ -167,7 +167,7 @@ GC の天井と後退の予算は上限からの割合なので、上限が下�
 共有ヒープから見えるゲストは、同じ大きさの少数のブロックになる。同じ大きさなので、返した穴は次の塊がそのまま使える。
 
 ```c
-/* pocketjs_guest の中。静的 DRAM は増えない。 */
+/* kobako_guest の中。静的 DRAM は増えない。 */
 struct guest_chunk { multi_heap_handle_t heap; uint8_t *lo, *hi; uint32_t empty_free; };
 struct guest_chunk chunk[GUEST_CHUNKS];   /* 12 */
 uint8_t chunk_n, chunk_cur;
@@ -199,7 +199,7 @@ uint8_t chunk_n, chunk_cur;
 **返す（ターンの終わり、所有タスク）。** 12 本の空きを読み、`multi_heap_free_size == empty_free` の塊を返す。
 
 - ふだんは空の塊を 1 本だけ予備に残す（上限の近くで取って返してを繰り返さないため）。
-- ネイティブの圧迫（FREE・LARGEST のビット、`main/pocket/pocket_memory.c:19-22`）のときは、ブロックキャッシュを流してから、空の塊を全部返す。
+- ネイティブの圧迫（FREE・LARGEST のビット、`main/kobako/kobako_memory.c:19-22`）のときは、ブロックキャッシュを流してから、空の塊を全部返す。
 - 予備の 1 本は方針 1 に反するので、N ターン（出発点 30）使われなければ返す。
 
 **上限。** 4.3 の式の「アリーナの空き」を「全部の塊の空き ＋ 床の上で取れる塊の分」に置き換える。
@@ -280,7 +280,7 @@ QEMU で良く見えた 3 点（上限 +5 KiB、GC −40 回、命令数 −8.6%
 ### 6.1 返却の入口
 
 「ブロックキャッシュを流し、空の塊を返す」1 つの関数（所有タスク、ターンの間）を、次の 3 か所から呼ぶ。
-**改訂:** 関数は入った（`pocketjs_guest_release_memory`、`7767f64`）。塊が既定で無いので、今はブロックキャッシュを流すだけである。
+**改訂:** 関数は入った（`kobako_guest_release_memory`、`7767f64`）。塊が既定で無いので、今はブロックキャッシュを流すだけである。
 ネイティブの圧迫に入ったときと休止のときに呼んでいる。無線の起動の前に呼ぶ件は未実装（§10 の 5）。
 表の「空の塊を返す」は、塊を使わない限り効果が無い。
 
@@ -288,7 +288,7 @@ QEMU で良く見えた 3 点（上限 +5 KiB、GC −40 回、命令数 −8.6%
 | --- | --- | --- |
 | ネイティブの圧迫 | キャッシュの深さを 4 にする（`sample_memory_pressure`） | 空の塊を全部返す |
 | 休止（Back でアプリを残す） | GC ＋ キャッシュを流す（`guest.c:1152-1171`） | GC の後で空の塊を返す。今のアリーナは休止中も丸ごと持つ |
-| 無線の起動 | 空きが 56 KiB 未満なら `LOW_MEMORY`（`main/pocket/pocket_net.c:1438`） | 判定の前に返却を 1 回。ゲストから呼ばれる経路なので、返却はターンの間に限る（要設計） |
+| 無線の起動 | 空きが 56 KiB 未満なら `LOW_MEMORY`（`main/kobako/kobako_net.c:1438`） | 判定の前に返却を 1 回。ゲストから呼ばれる経路なので、返却はターンの間に限る（要設計） |
 
 無線の 56 KiB は予約しない。今も、アリーナの生成時に見るだけで、その後の溢れが食う（`guest.c:800`）。同じ扱いを保つ。
 
@@ -328,13 +328,13 @@ QEMU で良く見えた 3 点（上限 +5 KiB、GC −40 回、命令数 −8.6%
 | | できる | できない |
 | --- | --- | --- |
 | 循環ごみの回収 | できる。これが唯一の仕事 | — |
-| 生きたデータの解放 | — | できない。アプリが参照を捨てる（圧迫の通知、`pocket.memory.onPressure`）しかない |
+| 生きたデータの解放 | — | できない。アプリが参照を捨てる（圧迫の通知、`kobako.memory.onPressure`）しかない |
 | 断片化の解消 | — | できない（移動しない） |
 | 小分けの実行 | — | できない。停止型で、全 GC オブジェクトを歩く。増分にするのは VM の大きな改造で、採らない |
 
 ### 7.3 それでも変えること
 
-**G1: GC の時間（測定済み）。** 実機、`CONFIG_POCKET_GC_STATS`（[lv3-heap-exhaustion.md](lv3-heap-exhaustion.md) §6.2）。
+**G1: GC の時間（測定済み）。** 実機、`CONFIG_KOBAKO_GC_STATS`（[lv3-heap-exhaustion.md](lv3-heap-exhaustion.md) §6.2）。
 
 - 1 回 1.3〜1.8 ms（生存 約 120 KB、LV3）。最大は LV2 の 3.3 ms（20 KB の循環を回収した 1 回）。実測(device)。
   設計時の推定（約 150 KB で 2.5〜5 ms）より短い。
@@ -393,11 +393,11 @@ GC は 1 秒に 5〜18 回から 1〜2 回へ下がる見込み。r5sim の 105 
 | 同: GC の時間 | 約 16.6 ms/秒 | **約 4.2 ms/秒** |
 | 同: OOM | 約 1.3 回/秒 | 約 1.2 回/秒 |
 
-（実測。前は `378aad2`、後は `0825262` の計測ビルド。どちらも `CONFIG_POCKET_GC_STATS=y`。）受け入れ条件（§8.2）の「1 秒に 3 回以下」は、
+（実測。前は `378aad2`、後は `0825262` の計測ビルド。どちらも `CONFIG_KOBAKO_GC_STATS=y`。）受け入れ条件（§8.2）の「1 秒に 3 回以下」は、
 平均ではわずかに超える（3.3 回）。1 秒で 5〜6 回の窓が残り、そこは OOM の後の GC と天井の GC が重なっている。OOM は増えていない。
 
 元の G3（閾値を「合わせた上限」に対して決める、循環の多いアプリで後退を一般化する）は、この後に回す。
-DERBY と MEGADEMO の循環ごみの量（`POCKET_GC_STATS` の回数と回収量）を測ってから決めることは変わらない。
+DERBY と MEGADEMO の循環ごみの量（`QJS_LEAN_GC_STATS` の回数と回収量）を測ってから決めることは変わらない。
 
 **G4: 空き時間の GC（採らない。条件が揃えば再検討）。** P2a（[two-core-pipeline.md](../perf/two-core-pipeline.md) §7.3）で
 UI のコアに 1 フレーム 6〜8 ms の空きがある。そこで GC を回す案には、次の問題がある。
@@ -495,10 +495,10 @@ UI のコアに 1 フレーム 6〜8 ms の空きがある。そこで GC を回
 | 形（shape）と形のハッシュ表 | 動かすのに要る。共有でメモリを減らす | 同じ並びのオブジェクトが 1 つの形を共有する。参照カウント。途中の形は、使うオブジェクトが無ければ残らない |
 | ローカル変数の名前（vardefs） | すでに落としてある | harden の後にコンパイルした関数は、名前を捨てて 2 B の表にしている（`js_create_function` の `compact`、[compact-vars.md](compact-vars.md)）。代償は TDZ のエラーの名前と `eval` |
 | 関数のソースの文字列 | すでに持たない | `fd->source` を設定する所が無い（[strip-debug.md](strip-debug.md)）。代償は `Function.prototype.toString` |
-| 行番号表（pc2line） | **パージ可能**（デバッグ用） | `JS_PocketSetStripDebug`（アプリのチャンクごとの設定）と `CONFIG_POCKET_VM_STRIP_DEBUG`。代償は実行時エラーの位置が関数の先頭行になること。STRESS で 677 B（実測(QEMU)）、DERBY で 2.7〜3.2 KB（実測(device)、[strip-debug.md](strip-debug.md)） |
+| 行番号表（pc2line） | **パージ可能**（デバッグ用） | `JS_LeanSetStripDebug`（アプリのチャンクごとの設定）と `CONFIG_QJS_LEAN_STRIP_DEBUG`。代償は実行時エラーの位置が関数の先頭行になること。STRESS で 677 B（実測(QEMU)）、DERBY で 2.7〜3.2 KB（実測(device)、[strip-debug.md](strip-debug.md)） |
 | atom の配列・atom のハッシュ表・形のハッシュ表 | 速さのため。**伸びるだけで縮まない** | `JS_ResizeAtomHash`・`resize_shape_hash` は新しい表を取って移す。縮める道は無い。ただし評価の後に atom も形も減らないので、縮めても戻るのは余りの分だけ。atom の配列は最小 711 個 × 4 B（コード）。量は未測定、小さいと見る（**推定**） |
 | 1.5 倍で伸びる配列の余り（プロパティ、形、配列の要素） | 速さのため（伸長の償却） | 詰める `realloc` を足せば戻るが、次の追加でまた伸びる。量は未測定（§8.3 の 17） |
-| ブロックキャッシュ（階級ごとに 16 本、252 B まで） | 速さのため | いつでも流せる（`pocketjs_guest_release_memory`）。止めると JS のターンが 7〜13% 遅くなる（実測(device)、[frame-breakdown.md](../perf/frame-breakdown.md) §7）。圧迫時は深さ 4。`JS_ComputeMemoryUsage` には出ない（ゲストの会計の外） |
+| ブロックキャッシュ（階級ごとに 16 本、252 B まで） | 速さのため | いつでも流せる（`kobako_guest_release_memory`）。止めると JS のターンが 7〜13% 遅くなる（実測(device)、[frame-breakdown.md](../perf/frame-breakdown.md) §7）。圧迫時は深さ 4。`JS_ComputeMemoryUsage` には出ない（ゲストの会計の外） |
 | VM のスタック片 1 本（D44、1,024 B） | 動かすのに要る | 落とすと、フレームの入口の OOM（§2.2 (c)）が戻る |
 | ランタイム・コンテキスト・組み込み（18,276 B、アプリの前） | 動かすのに要る | アプリより前に確保されるので、まとまって置かれる。塊を留めた原因ではない |
 

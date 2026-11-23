@@ -71,9 +71,9 @@ def main():
         report['working_tree'] = subprocess.check_output(['git', 'status', '--short'], cwd=ROOT, text=True)
         host('system-host', 'bash tools/build_power_test.sh')
         host('kasane-native', 'bash tools/kasane_contract/run.sh')
-        host('kasane-js-sanitized', 'bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane')
-        host('kasane-js-optimized', 'CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 '
-             'bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane-o2')
+        host('kasane-js-sanitized', 'bash tools/build_kasane_test.sh && /tmp/test-kobako-kasane')
+        host('kasane-js-optimized', 'CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-kobako-kasane-o2 '
+             'bash tools/build_kasane_test.sh && /tmp/test-kobako-kasane-o2')
         if args.host_only:
             report['status'] = 'HOST_PASS_DEVICE_NOT_RUN'
             return 0
@@ -89,7 +89,7 @@ def main():
         if 'CONFIG_KSN_DEVICE_PROBE=y' not in config or 'CONFIG_SPIRAM=y' in config:
             raise RuntimeError('requires native probe enabled and PSRAM disabled')
         stage('taffy-exclusion', [sys.executable, 'tools/check_kasane_link.py', '--build', str(build), '--nm', args.nm])
-        report['firmware_sha256'] = hashlib.sha256((build / 'cardputer_pocketjs.bin').read_bytes()).hexdigest()
+        report['firmware_sha256'] = hashlib.sha256((build / 'cardputer_kobako.bin').read_bytes()).hexdigest()
         flashed = True  # Attempt cleanup even if flashing fails part way through.
         stage('flash', [sys.executable, '-m', 'esptool', '--chip', 'esp32s3', '--port', args.port,
               '--baud', '460800', '--before', 'default-reset', '--after', 'hard-reset',

@@ -1,7 +1,7 @@
-/* The integer pocket.derby.ser() (main/apps/derby/derby_ser_int.c) against the
+/* The integer kobako.derby.ser() (main/apps/derby/derby_ser_int.c) against the
  * double series on the host: docs/apps/derby-ser-division.md stage S0 (sec.4.3,
  * sec.5). Grown from the design's prototype (tools/games/serq_proto/serq.c):
- * the double side is pocket_derby.c's ser() as it was (VE/VC, ou(), lim(),
+ * the double side is kobako_derby.c's ser() as it was (VE/VC, ou(), lim(),
  * the LOD and the draws, L >= 1), the integer side is the firmware's own code
  * (tables, the int16 lanes' rotation and cull, the chord), on
  *   1. the app's cameras: three panning units, the leader every 0.37 m from
@@ -84,7 +84,7 @@ static void course(bool oval){
     nslot=0;
 }
 
-/* ---- The camera: aim() and view() of pocket_derby.c, doubles, and camq. */
+/* ---- The camera: aim() and view() of kobako_derby.c, doubles, and camq. */
 static double pc[6],fr,zf,VE[32*4],cells=2.5;
 static int vc[32],in_view,hl_lines=4;
 static derby_cam_q cq;
@@ -101,7 +101,7 @@ static bool ou(int j,double w,double m,double zf_){
     return (d<.02*f-m&&D<.02*f-m)||(d>zf_+m&&D>zf_+m)||(160*d+l*f<-k&&160*D+L*f<-k)||(160*d-l*f<-k&&160*D-L*f<-k);
 }
 static long cull_calls,cull_lost,cull_extra,cull_kept,pie_lost,pie_extra,pie_scalar_diff;
-/* pocket_derby.c's cull() on both paths. */
+/* kobako_derby.c's cull() on both paths. */
 static uint32_t cull_path(bool pie,int32_t w,int32_t m){
     const unsigned chords=(unsigned)nends-1u;
     const uint32_t all=(1u<<chords)-1u;
@@ -151,7 +151,7 @@ static void view(double extra){
         }
         for(int j=1;j<nends;j++)if(!ou(j-1,25.5,30,zf))vc[in_view++]=j-1;
     }else vc[in_view++]=0;
-    /* camq as pocket_derby.c's cam_q(). */
+    /* camq as kobako_derby.c's cam_q(). */
     cq.ex=(int32_t)floor(pc[0]*65536+.5);cq.ez=(int32_t)floor(pc[1]*65536+.5);
     cq.dx=(int32_t)floor(pc[2]*1073741824.0+.5);cq.dz=(int32_t)floor(pc[3]*1073741824.0+.5);
     cq.cx=(int16_t)floor(pc[2]*16384+.5);cq.cz=(int16_t)floor(pc[3]*16384+.5);
@@ -181,7 +181,7 @@ static int emit(void *u,uint32_t h,const int32_t in[8]){
     if(in_<MAXD){ID[in_].kind=kind;for(int i=0;i<8;i++)ID[in_].in[i]=in[i]/ldexp(1,QF[kind][i]);in_++;}
     return 0;
 }
-/* pocket_derby.c's double ser() for one call (L != 0). */
+/* kobako_derby.c's double ser() for one call (L != 0). */
 static double jr(double a){return floor(a+.5);}
 static bool inr(const double q[2],double U,double V,double e){const double z=q[1]+e*U,x=(q[0]+e*V)/z;return z>.02&&x>-400&&x<640;}
 static void lim(double *lo,double *hi,double c0,double c1){
@@ -225,7 +225,7 @@ static void ser_ref(bool turf,double w,double s,double g0,double L,double a,doub
         }
     }
 }
-/* The integer call, as pocket_derby.c's ser_q() (tables by (w, s, g0)). */
+/* The integer call, as kobako_derby.c's ser_q() (tables by (w, s, g0)). */
 static derby_ser_stats st;
 static void ser_int(bool turf,int32_t w,int32_t s,int32_t g0,int32_t L,int32_t a,int32_t b){
     int k=0;

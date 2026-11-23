@@ -1,4 +1,4 @@
-// MEASUREMENT HARNESS -- worktree only, never committed, never part of pocket.ble.
+// MEASUREMENT HARNESS -- worktree only, never committed, never part of kobako.ble.
 //
 // Answers the half of the BLE question a link map cannot: what the NimBLE host
 // and the BLE controller take from the HEAP when the stack is actually started.

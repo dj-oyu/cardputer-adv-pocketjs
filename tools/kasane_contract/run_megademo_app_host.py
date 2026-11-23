@@ -1,4 +1,4 @@
-"""Run MEGADEMO through the real QuickJS and the real pocket.kasane on the host.
+"""Run MEGADEMO through the real QuickJS and the real kobako.kasane on the host.
 
 Builds tools/kasane_contract/test_megademo_app_host.c from the source list of
 tools/build_kasane_test.sh plus the grid resize and pixel adapters the app
@@ -27,18 +27,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from megademo_chunks import shiki_table  # noqa: E402
 CACHE = ROOT / ".cache/kasane_megademo_app"
 QJS = "components/quickjs-ng/quickjs-ng"
-EXTRA = ["main/pocket/pocket_grid.c", "main/ui/kasane/ksn_proc_grid.c",
+EXTRA = ["main/kobako/kobako_grid.c", "main/ui/kasane/ksn_proc_grid.c",
          "main/ui/kasane/ksn_proc_grid_pie.c", "main/ui/kasane/ksn_proc_grid_image.c",
-         "main/ui/kasane/ksn_proc_grid_resize.c", "main/pocket/pocket_pixel.c",
+         "main/ui/kasane/ksn_proc_grid_resize.c", "main/kobako/kobako_pixel.c",
          "main/ui/kasane/ksn_pixel_function.c", "main/ui/kasane/ksn_pixel_span.c",
-         "main/pocket/pocket_shape.c"]
+         "main/kobako/kobako_shape.c"]
 
 
 def kasane_sources() -> list[str]:
     """The .c list of tools/build_kasane_test.sh (minus the test and QuickJS)."""
     text = (ROOT / "tools/build_kasane_test.sh").read_text()
     return [s for s in re.findall(r"(?:main|tools)/[\w/]+\.c", text)
-            if not s.startswith("tools/test_pocket_kasane")]
+            if not s.startswith("tools/test_kobako_kasane")]
 
 
 def build(flags: list[str], cache: Path) -> Path:
@@ -48,18 +48,18 @@ def build(flags: list[str], cache: Path) -> Path:
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
     (cache / "kasane_pet_test_data.h").write_text(
         "static const uint8_t pet_test_data[] = {" + ",".join(map(str, data)) + "};\n")
-    defs = ["-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
+    defs = ["-DQUICKJS_NG_BUILD", "-DQJS_LEAN_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     objects = []
     for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
         obj = cache / f"{name}.o"
         src = ROOT / QJS / f"{name}.c"
         if not obj.exists() or src.stat().st_mtime > obj.stat().st_mtime:
             subprocess.run(["gcc", "-std=gnu11", "-c", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
-                            "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)],
+                            "-I", "components/kobako_guest/include", str(src), "-o", str(obj)],
                            cwd=ROOT, check=True)
         objects.append(str(obj))
     binary = cache / "test-megademo-app"
-    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
+    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/kobako", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     # KSN_HOST_CFLAGS: extra flags for a profiling build, e.g.
     # -DKSN_SHIKI_OPSTATS (docs/kasane/shiki-jit.md sec.10).
@@ -67,7 +67,7 @@ def build(flags: list[str], cache: Path) -> Path:
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *extra, "-DKSN_GRID_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/kasane_contract/test_megademo_app_host.c", *kasane_sources(), *EXTRA,
-                    "main/pocket/pocket_shiki_api.c", str(shiki_table(cache / "ksn_shiki_rom.c")),
+                    "main/kobako/kobako_shiki_api.c", str(shiki_table(cache / "ksn_shiki_rom.c")),
                     *objects, "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -138,7 +138,7 @@ def main() -> None:
                                      cwd=ROOT, capture_output=True, check=True)
                 (base / words[1]).write_bytes(got.stdout)
         base_list = base / "chunks.txt"
-    extra = ["-DPOCKET_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
+    extra = ["-DKOBAKO_PROC_NO_BAND_DAMAGE"] if args.no_band_damage else []
     if args.m32:
         # A sysroot under .cache survives WSL restarts, which empty /tmp.
         sysroot = dict(os.environ, M32_SYSROOT=str(CACHE / "m32sys"))

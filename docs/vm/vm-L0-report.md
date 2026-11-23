@@ -15,8 +15,8 @@
 
 | 項目 | 状態 | ファイル |
 | --- | --- | --- |
-| quickjs-ng 0.14.0 とゲストの取り込み | コミット済み（`10f5185` 無改変の取り込み → `6de51f4` immutable-buffer パッチ → `d9ef1f9` リンク先の切り替え） | `components/quickjs-ng/`、`components/pocketjs_guest/` |
-| L0 プローブ（`CONFIG_POCKET_VM_PROBE`、既定 n） | コミット済み | [main/Kconfig.projbuild](../../main/Kconfig.projbuild)、[sdkconfig.vmprobe.defaults](../../sdkconfig.vmprobe.defaults)、[main/pocket/vmprobe.c](../../main/pocket/vmprobe.c) / `.h`、`quickjs.c` の `VM_PROBE` ブロック 4 つ + [quickjs-vmprobe.h](../../components/quickjs-ng/quickjs-ng/quickjs-vmprobe.h)、`app_session.c` / `main.c` / `pocket_api.c` / `main/CMakeLists.txt` の `#ifdef` 部分 |
+| quickjs-ng 0.14.0 とゲストの取り込み | コミット済み（`10f5185` 無改変の取り込み → `6de51f4` immutable-buffer パッチ → `d9ef1f9` リンク先の切り替え） | `components/quickjs-ng/`、`components/kobako_guest/` |
+| L0 プローブ（`CONFIG_QJS_LEAN_PROBE`、既定 n） | コミット済み | [main/Kconfig.projbuild](../../main/Kconfig.projbuild)、[sdkconfig.vmprobe.defaults](../../sdkconfig.vmprobe.defaults)、[main/kobako/vmprobe.c](../../main/kobako/vmprobe.c) / `.h`、`quickjs.c` の `VM_PROBE` ブロック 4 つ + [quickjs-vmprobe.h](../../components/quickjs-ng/quickjs-ng/quickjs-vmprobe.h)、`app_session.c` / `main.c` / `kobako_api.c` / `main/CMakeLists.txt` の `#ifdef` 部分 |
 | 実機用ワークロード 6 本（USB の `A`〜`F` だけで起動し、ホームの一覧には出ない） | L0完了後に一度削除、2026-09-12 に本線へ復帰（常設） | [apps/vmprobe/](../../apps/vmprobe/) |
 | 競合条件 5 種（USB の `P`〜`W`。UI・音声・Wi-Fi を実物の面で動かす） | 同上 | [apps/vmprobe/condition.js](../../apps/vmprobe/condition.js)・README、`main.c` / `app_session.c` / `vmprobe.h` の該当部分 |
 | 実機の採取スクリプト（行列・再起動・厳密な統計） | 同上 | [tools/vm_l0_capture.py](../../tools/vm_l0_capture.py) |
@@ -83,8 +83,8 @@ bash tools/vmalloc/build.sh && bash tools/vmalloc/run_all.sh   # トレース採
 するため。仕様書 §2）。タグから毎回戻す運用は、L1 が `vmprobe.h` から競合条件の宣言を削った
 時点で既に壊れていた（`VMPROBE_COND_ALL` 未定義でコンパイル不能。probe-off ビルドは当該ファイルを
 ビルドしないので誰も気づかなかった）。プローブ本体
-（`main/pocket/vmprobe.c` のサンプリングと `VMPROBE STATIC` / `VMPROBE WINDOW` の報告）は
-一貫して残っていて、`CONFIG_POCKET_VM_PROBE` を有効にしたビルドで動く任意のアプリを測る。
+（`main/kobako/vmprobe.c` のサンプリングと `VMPROBE STATIC` / `VMPROBE WINDOW` の報告）は
+一貫して残っていて、`CONFIG_QJS_LEAN_PROBE` を有効にしたビルドで動く任意のアプリを測る。
 
 `build_vm_l0`（プローブ有効）を COM3 の実機に 1 度だけ書き込み、`tools/vm_l0_capture.py` で
 **6 ワークロード × 5 条件 × 3 反復 = 90 マス**を各 15 秒採取した。生データは
@@ -180,7 +180,7 @@ DIRAM（実測(build)）: **プローブ無効 115,372 B（本作業の前後で
   base の 0.32〜0.51 ms が ui 条件で 0.93〜1.49 ms になる。UI を足しても JS の時間は変わらない。
 - **音声はフレーム時間をほとんど動かさないが、完了遅延を作る。** audio 条件の `lat` は
   ワークロードのターン長そのもので、A（turn 118 ms）で中央値 98.58 ms、B（turn 0.73 ms）で
-  15.40 ms。**完了は次の `pocket_api_pump()` まで待つので、遅延の下限はターン長**という関係が
+  15.40 ms。**完了は次の `kobako_api_pump()` まで待つので、遅延の下限はターン長**という関係が
   そのまま出ている。L1 の時間予算がそのまま応答遅延の上限になる、という根拠。
 - **Wi-Fi はヒープを削り、稀に長いフレームを作る。** 空きヒープ最小は base の約 105 KiB から
   wifi で 23〜34 KiB、all で 14.8〜37.8 KiB まで落ち、最大空きブロック最小は **5,632 B**
@@ -212,8 +212,8 @@ DIRAM（実測(build)）: **プローブ無効 115,372 B（本作業の前後で
 | 条件 | 字 | 実際に動いていたもの | 実測での確認 |
 | --- | --- | --- | --- |
 | base | `P` | ワークロードだけ | — |
-| ui | `Q` | 画面（rect 1 + text 1）を毎フレーム `setText`。2026-09-23 に `pocket.kasane` へ書き直した（採取当時は `pocket.ui`） | `VMCOND ui on` |
-| audio | `R` | `pocket.audio.tone` 440 Hz 1 秒を完了から張り直す（合成も I2S も本物、音声タスクは優先度 7） | `VMCOND tone 5/10/15`（15 秒で 14〜15 音） |
+| ui | `Q` | 画面（rect 1 + text 1）を毎フレーム `setText`。2026-09-23 に `kobako.kasane` へ書き直した（採取当時は `kobako.ui`） | `VMCOND ui on` |
+| audio | `R` | `kobako.audio.tone` 440 Hz 1 秒を完了から張り直す（合成も I2S も本物、音声タスクは優先度 7） | `VMCOND tone 5/10/15`（15 秒で 14〜15 音） |
 | wifi | `T` | リンクを走行中ずっと保持し、3 秒ごとに LAN ゲートウェイへ平文 GET、本文を EOF まで読む | `VMCOND wifi connected 192.168.1.42 -> http://192.168.1.1/`、`VMCOND http 200 56 …ms` |
 | all | `W` | 上の 3 つ同時 | 上記すべて |
 
@@ -259,7 +259,7 @@ DIRAM（実測(build)）: **プローブ無効 115,372 B（本作業の前後で
 | 最大キュー長 | 満たす | `qpeak_max`（窓ごとの最大、`JS_EnqueueJob` / `JS_ExecutePendingJob` を数えた実物） |
 | drain 時間 | 満たす | `drain`（取り込み済み `guest.c` で計測、`frame()` と分けて全標本） |
 | I/O 完了からハンドラ実行までの遅延 | **一部** | `lat` は完了記録 → resolve/reject まで。ハンドラ実行までは同じターンの drain に入るので**上界 = `lat` + `call` + `drain`**。この上界は出せるが、ハンドラ到達の直接計測ではない |
-| フレーム時間 | 満たす | `frame`（`pocketjs_ui_turn` 全体、全標本） |
+| フレーム時間 | 満たす | `frame`（`kobako_ui_turn` 全体、全標本） |
 | C スタック最大使用量 | **一部** | `stack_hw`（ui タスクの残りの最小値、1 マスごとの起動以来）。ホーム画面の描画の方が深い場合はそちらが出る。**JS の到達段数は測っていない** |
 | 静的 RAM | 満たす | `tools/memlog.py`、プローブ無効 115,372 B / 有効 119,692 B |
 | 空きヒープ・最大空きブロック・JS メモリ使用量 | 満たす | `heap_free_min` / `heap_largest_min` / `js_used_max`（4 Hz 標本の窓内極値） |
@@ -306,7 +306,7 @@ python tools\vm_l0_capture.py --port COM3 --workloads D --conditions wifi       
 
 読むときの注意:
 
-- **`frame` はフレーム全体（`pocketjs_ui_turn`）の時間で、`call` と `drain` はその内訳。** 内訳は取り込み済みの `guest.c` で測っており（`pocketjs_guest_vmprobe_take`）、`frame` −（`call`+`drain`）が UI コアの tick と draw、および引数の作成と解放になる。
+- **`frame` はフレーム全体（`kobako_ui_turn`）の時間で、`call` と `drain` はその内訳。** 内訳は取り込み済みの `guest.c` で測っており（`kobako_guest_vmprobe_take`）、`frame` −（`call`+`drain`）が UI コアの tick と draw、および引数の作成と解放になる。
 - **すべて壁時計。** 仕様 §5 は「精度のある CPU 実行時間が取れない場合は壁時計値として報告する」と書いており、これはその側。`CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS` はこのビルドでも無効で、ui タスクが他タスクに奪われた時間は分離していない。**分離の代わりが条件の行列**で、同じバイナリの base と ui / audio / wifi の差が、そのまま OS 競合の量になる。
 - **`stack_hw` は起動以来の最小値。** 採取は 1 マスごとに再起動するので「この回の起動以来」になるが、ホーム画面の描画がより深ければ JS 側の値はそこに隠れる。プローブ自身の flush も含む。
 - **`lat` はハンドラが走るまでの時間ではない。** 測っているのは、完了が記録されてから resolve/reject を呼ぶまで。`.then` のハンドラが実際に走るのは同じターンの drain で、**上界は `lat` + `call` + `drain`**（`app_tick()` は pump → `frame()` → drain の順で、reaction はその drain に入る）。
@@ -333,7 +333,7 @@ python tools\vm_l0_capture.py --port COM3 --workloads D --conditions wifi       
 - 実機で本当に GC が 1 回も走らないか（ログでの確認）。
 - estalloc の `assert` がこのビルドで有効かどうか。
 
-**本報告の作成時に解消した項目:** 03 の「`pocketjs_ui_turn` の実装が見当たらない」。本体は `pocketjs_ui_qjs/src/ui_qjs.c:818` にあり、`pocketjs_guest_frame` を呼んでから UI の tick と draw を行う。03 の fact 62 の順序は正しい。台帳自体はまだ直していない。
+**本報告の作成時に解消した項目:** 03 の「`kobako_ui_turn` の実装が見当たらない」。本体は `kobako_ui_qjs/src/ui_qjs.c:818` にあり、`kobako_guest_frame` を呼んでから UI の tick と draw を行う。03 の fact 62 の順序は正しい。台帳自体はまだ直していない。
 
 **台帳の食い違い4件**（04 の箇所数、06 のトレースの内訳、`vmprobe.h` のコメント、vmtest の README）は、コミット前に直した。
 
@@ -379,7 +379,7 @@ L2 の価値は、長いジョブの中断のほかに、20 KiB スタックで�
 1. **L0 の完了の承認。** §2.3 の点検表で、§5 の項目のうち 2 つ（I/O 完了から**ハンドラ実行まで**の直接計測、JS が使った C スタックの段数）だけが「一部」で、残りは満たしている。この 2 つを L0 の範囲外と認めるか、追加で測るかを決める。
 2. **L1 の予算と上限の値**（仕様 §11「L0 完了時に記録」）。**§2.2 に実測から引いた提案を置いた**（件数 16、時間 8 ms、遅延 p95 8 ms / 最大 20 ms、DIRAM +8 KiB、低下 +5% 以内）。採否はユーザーが決める。
 3. **割り込みハンドラを 1 本にする。** 今は `app_session` の 250 ms の壁時計 deadline だけが生きていて、guest.c の epoch 方式は死んでいる。L1 の予算判定をどちらに載せるか決める。
-4. **drain の制御点。** `drain_jobs` は取り込み済みの guest.c にあるので改変できる。一方、`frame()` → drain → UI の順序を決めているのは、取り込んでいない `pocketjs_ui_qjs`（共有の `.cache`、読み取り専用）。L1 で順序を変えるなら、`pocketjs_ui_qjs` も取り込む必要がある。
+4. **drain の制御点。** `drain_jobs` は取り込み済みの guest.c にあるので改変できる。一方、`frame()` → drain → UI の順序を決めているのは、取り込んでいない `kobako_ui_qjs`（共有の `.cache`、読み取り専用）。L1 で順序を変えるなら、`kobako_ui_qjs` も取り込む必要がある。
 5. **runtime の所有タスク。** 初期構成のまま `ui_task` にするか、専用タスクにするか。専用タスクにすれば、そのスタック分だけ DRAM が減る。
 6. **L0 で見つかった既存の不具合の扱い**（VM の改造とは独立していて、`main` にも効く）:
    - GC 閾値が上限を超えている件。`JS_SetGCThreshold` を 1 行呼べば済む。

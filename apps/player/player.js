@@ -1,6 +1,6 @@
-// The home screen's music player. Kasane owns the picture; pocket.overlay owns keys.
+// The home screen's music player. Kasane owns the picture; kobako.overlay owns keys.
 (function () {
-  var host = pocket.overlay, ui = pocket.kasane;
+  var host = kobako.overlay, ui = kobako.kasane;
   var view = ui.mount('music');
   var EXT = ['.mp3', '.wav', '.pok'];
 
@@ -26,7 +26,7 @@
     drop();
     path = src; busy = true;
     view.set({title: leaf(src), message: 'OPENING'});
-    pocket.audio.player.open({ source: src }).then(function (h) {
+    kobako.audio.player.open({ source: src }).then(function (h) {
       attach(h);
       console.log('PLAYER_OPEN ' + src + ' durationMs=' + h.info().durationMs);
       if (play) h.play().then(null, function (e) { fail('PLAY', e); });
@@ -48,7 +48,7 @@
   function next() {
     if (!path) return;
     busy = true;
-    pocket.fs.nextFile(path, { extensions: EXT, wrap: true }).then(function (n) {
+    kobako.fs.nextFile(path, { extensions: EXT, wrap: true }).then(function (n) {
       busy = false;
       if (n) open(n, true); else say('END OF FOLDER');
     }, function (e) { fail('NEXT', e); });
@@ -59,16 +59,16 @@
   // The grant screen on its own key. README.md.
   function share() {
     busy = true; say('CHOOSING FOLDER');
-    pocket.fs.requestFolder('sd').then(function (r) {
+    kobako.fs.requestFolder('sd').then(function (r) {
       if (!r) { busy = false; say('NO FOLDER SHARED'); return; }
-      return pocket.fs.pickFile('sd', { extensions: EXT }).then(chose);
+      return kobako.fs.pickFile('sd', { extensions: EXT }).then(chose);
     }, function (e) { fail('SHARE', e); });
   }
 
   // pickFile first, the grant screen only if it refuses. README.md.
   function pick() {
     busy = true; say('CHOOSING');
-    pocket.fs.pickFile('sd', { extensions: EXT }).then(chose, function (e) {
+    kobako.fs.pickFile('sd', { extensions: EXT }).then(chose, function (e) {
       if (e && e.code === 'PERMISSION_DENIED') share(); else fail('PICK', e);
     });
   }
@@ -85,7 +85,7 @@
     // publishes from the audio task but this probe does not bind its fields.
     if (globalThis.KSN_P1_OUTPUT_OVERLAY_PROBE && e.action === 'up') {
       if (!outputProbe) {
-        outputProbe = pocket.audio.outputSource({sampleMs: 33});
+        outputProbe = kobako.audio.outputSource({sampleMs: 33});
         console.log('KSN_P1_OUTPUT_OVERLAY ACTIVE sampleMs=33');
       }
       return;
@@ -108,7 +108,7 @@
 
   view.set({title: 'NO TRACK', message: 'ENTER TO CHOOSE'});
   // Music the host kept playing while this overlay was away (S5). README.md.
-  var kept = pocket.audio.player.current();
+  var kept = kobako.audio.player.current();
   if (kept) {
     path = kept.info().source; state = 'playing'; attach(kept);
     view.set({title: leaf(path), message: ''});

@@ -1,6 +1,6 @@
 """Where a function's spill traffic is. NOT which values are spilling.
 
-    python tools/pie/spills.py build_pie/cardputer_pocketjs.elf ray_row --all
+    python tools/pie/spills.py build_pie/cardputer_kobako.elf ray_row --all
 
 **Read this first: a stack slot is not a value.** GCC allocates slots by live
 range and puts several non-overlapping temporaries in the same one, so `a1+0

@@ -6,10 +6,10 @@ QJS=ROOT/'components/quickjs-ng/quickjs-ng'
 def main(extra_flags=(), cache_name="mesh-shiki-contract"):
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--opt',choices=['0','2'],default='2');a=p.parse_args()
  out=ROOT/'.cache'/cache_name;out.mkdir(parents=True,exist_ok=True)
- flags=['-std=gnu11','-O'+a.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-omit-frame-pointer','-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST']
+ flags=['-std=gnu11','-O'+a.opt,'-g','-ffp-contract=off','-fsanitize=address,undefined','-fno-omit-frame-pointer','-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1','-D_GNU_SOURCE','-DKSN_PROC_HOST_TEST']
  # Include opt-in flags before hashing AND compiling QuickJS objects.
  flags += list(extra_flags)
- includes=['-I'+str(x) for x in [QJS,ROOT/'main',ROOT/'main/pocket',ROOT/'main/ui/kasane',ROOT/'main/ayatsuri',ROOT/'tools/kasane_contract',ROOT/'tools/hostshim']]
+ includes=['-I'+str(x) for x in [QJS,ROOT/'main',ROOT/'main/kobako',ROOT/'main/ui/kasane',ROOT/'main/ayatsuri',ROOT/'tools/kasane_contract',ROOT/'tools/hostshim']]
  env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
  def run(cmd): subprocess.run(list(map(str,cmd)),cwd=ROOT,env=env,check=True)
  for f in ['tools/ayatsuri/asset/test_import.cjs','tools/ayatsuri/asset/compact_opaque/test_batch.cjs','tools/ayatsuri/model/test_pack_mesh.cjs','tools/kasane_contract/mesh_depth_fixture.cjs']:run(['node',f])
@@ -20,7 +20,7 @@ def main(extra_flags=(), cache_name="mesh-shiki-contract"):
   obj=out/(key+'-'+name+'.o');objects.append(obj)
   if not obj.exists():run(['cc',*flags,*includes,'-w','-c',QJS/(name+'.c'),'-o',obj])
  rom=out/'rom.c';rom.write_text('#include "ksn_shiki.h"\nconst ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *n){*n=0;return 0;}\n')
- shared=[ROOT/'main/ui/kasane'/f for f in ['ksn_shiki_frame.c','ksn_core.c','ksn_render.c','ksn_blend_pie.c','ksn_shiki.c','ksn_mesh_depth.c']]+[ROOT/'main/ayatsuri'/f for f in ['ayatsuri_model.c','ayatsuri_visibility.c','compact_opaque.c']]+[ROOT/'main/pocket'/f for f in ['pocket_shiki_frame.c','pocket_shape.c','pocket_shiki_api.c','shiki_heap.c']]+[ROOT/'tools/kasane_contract/proc_native_weak.c',rom]
+ shared=[ROOT/'main/ui/kasane'/f for f in ['ksn_shiki_frame.c','ksn_core.c','ksn_render.c','ksn_blend_pie.c','ksn_shiki.c','ksn_mesh_depth.c']]+[ROOT/'main/ayatsuri'/f for f in ['ayatsuri_model.c','ayatsuri_visibility.c','compact_opaque.c']]+[ROOT/'main/kobako'/f for f in ['kobako_shiki_frame.c','kobako_shape.c','kobako_shiki_api.c','shiki_heap.c']]+[ROOT/'tools/kasane_contract/proc_native_weak.c',rom]
  core_sources=[ROOT/'main/ayatsuri'/f for f in ['ayatsuri_model.c','ayatsuri_visibility.c','compact_opaque.c']]+[ROOT/'main/ui/kasane'/f for f in ['ksn_shiki_frame.c','ksn_mesh_depth.c']]
  mesh_fixtures=ROOT/'.cache/ayatsuri-native'
  for test,args in [('test_sidedness',[]),('test_model_mesh',[mesh_fixtures/'mesh.aynm',mesh_fixtures/'framework-shapes.aynm'])]:
@@ -33,8 +33,8 @@ def main(extra_flags=(), cache_name="mesh-shiki-contract"):
  oldobj=out/'old-codec.o';renames=['-D'+n+'=legacy_'+n for n in ['co_append','co_read','co_vertex_at','co_triangle_at']]
  run(['cc',*flags,*includes,*renames,'-c',old,'-o',oldobj])
  side=out/'side-record';run(['cc',*flags,*includes,ROOT/'main/ayatsuri/compact_opaque.c',ROOT/'main/ui/kasane/ksn_mesh_depth.c',ROOT/'main/ui/kasane/ksn_shiki_frame.c',ROOT/'tools/kasane_contract/test_mesh_side_record.c',oldobj,'-lm','-o',side]);run([side])
- for test in ['test_mesh_depth_qjs','test_gouraud_qjs','test_pocket_proc_qjs']:
-  sources=[x for x in shared if test!='test_pocket_proc_qjs' or x.name!='pocket_shape.c']
+ for test in ['test_mesh_depth_qjs','test_gouraud_qjs','test_kobako_proc_qjs']:
+  sources=[x for x in shared if test!='test_kobako_proc_qjs' or x.name!='kobako_shape.c']
   binary=out/test;run(['cc',*flags,*includes,*sources,*objects,ROOT/'tools/kasane_contract'/(test+'.c'),'-lm','-o',binary]);run([binary])
  print('SHIKI_NATIVE_MESH_PASS current_frame_api mesh_gouraud managed_both_submit lifecycle existing_frame_suite')
 if __name__=='__main__':main()

@@ -41,7 +41,7 @@ t('delete-global-JSON', () => delete globalThis.JSON);
 t('isFrozen-Array.prototype', () => Object.isFrozen(Array.prototype));
 t('isFrozen-Math', () => Object.isFrozen(Math));
 t('shadow-toString', () => { const o = {}; o.toString = () => 'mine'; return String(o); });
-t('shadow-name', () => { const e = Object.create(Error.prototype); e.name = 'PocketError'; return e.name; });
+t('shadow-name', () => { const e = Object.create(Error.prototype); e.name = 'KobakoError'; return e.name; });
 t('own-write', () => { const o = {a: 1}; o.a = 2; o.b = 3; return o.a + o.b; });
 t('user-freeze-throws', () => { const o = Object.freeze({a: 1}); o.a = 2; return o.a; });
 t('user-proto-mutable', () => { function F() {} F.prototype.m = () => 5; return new F().m(); });

@@ -8,11 +8,11 @@
 シェルは画面を手放さない。ゲストの寿命を所有するのはホーム画面で、その一点だけが
 `main/app_session.c` の契約から変わった（同ファイル `overlay_session` のコメントに書いてある）。
 
-描画は`pocket.kasane`。通常appと同じAPP layerを使うが、overlay profileでは背景色で帯を
+描画は`kobako.kasane`。通常appと同じAPP layerを使うが、overlay profileでは背景色で帯を
 消去しない。シェルが現在のnative sceneをbackdropとして帯へ描き、その上へKasane commandを
 source-over合成する。`ui.mount('clock')`でアプリ所有assetとnative sourceを選び、
 時刻の読取り・UTC書式はアプリ側producer、固定板と文字命令は汎用Kasaneが担当する。
-`pocket.overlay`の旧display listは使わない。
+`kobako.overlay`の旧display listは使わない。
 
 座標は96×22のregion相対。adapterがLCD座標へ変換しregionでclipするので、guestはregion外の
 画素を指定できない。OVERLAYという第三layerやfull-frame bufferは追加していない。
@@ -27,7 +27,7 @@ source-over合成する。`ui.mount('clock')`でアプリ所有assetとnative so
 
 ## 時刻の出どころ
 
-nativeの`sys_device_clock_read()`。JSは`pocket.time.wall()`を毎frame呼ばない。
+nativeの`sys_device_clock_read()`。JSは`kobako.time.wall()`を毎frame呼ばない。
 `main/scene/solar_time.c` が時刻源で、
 `solar_time_set_synchronized(true)` は SNTP 成功時にしか呼ばれない。
 clock snapshotが無効なら `--:--` と `NO SYNC`、PC由来の時刻なら値と `NO SYNC` を出す。
@@ -39,12 +39,12 @@ clock snapshotが無効なら `--:--` と `NO SYNC`、PC由来の時刻なら値
 `main/ui/overlay.c` の `DESKCLOCK.region` = `{140, 46, 96, 22}`。
 regionは表示の所有境界でもある。シェルはXMBを終了してoverlayをその場所に立たせ、FPS/音量など
 shell-owned surfaceだけをKasaneの後へ重ねる。region外を守るのは見栄えや描画順ではなく、
-`pocket_kasane_set_viewport()`によるadapter側のclipである。
+`kobako_kasane_set_viewport()`によるadapter側のclipである。
 
 ## 入力
 
 受け取らない。3.1 の既定であり、この時計に必要もない。
-残りキーの委譲は`pocket.overlay.onKey`で実装済みだが、この時計は購読しない。
+残りキーの委譲は`kobako.overlay.onKey`で実装済みだが、この時計は購読しない。
 
 ## Kasane overlay（CP28）
 

@@ -155,7 +155,7 @@
 
 ### 実機
 
-- **image**: 診断用（`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`、MID）。dce2e78 に、コミットしない一時変更を当てたもの。
+- **image**: 診断用（`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DKOBAKO_KEYTEST=ON`、MID）。dce2e78 に、コミットしない一時変更を当てたもの。
 - **一時変更**:
   - デモの種を `0xdaa66d13` に固定した（直線、930 m 以降で 1・2 着の差が 1.5 m 未満なので HEAD ON が出る）。
   - デモのレース番号 mod 3 で「全部あり／効果なし／脚の補間なし」を切り替えた。

@@ -44,7 +44,7 @@ static spi_transaction_t tx_pending;
 static int lcd, queues, reaps, command_calls, fail_queue;
 static const void *borrow; static size_t borrowed_bytes;
 static void pet_hub_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
-static void pocket_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
+static void kobako_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
 static void swap_scalar(uint16_t *out,const uint16_t *in,int n){
  for(int i=0;i<n;i++)out[i]=(uint16_t)((in[i]>>8)|(in[i]<<8));
 }

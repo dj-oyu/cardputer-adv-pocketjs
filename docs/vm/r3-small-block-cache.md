@@ -2,7 +2,7 @@
 
 吸収した旧文書: allocator-cost.md（§7。出典となったアロケータの値段の実機測定）。
 
-> **現状（2026-09-27）**: `CONFIG_POCKET_VM_BLOCK_CACHE` として実装した。ホストの関所は通過、実機でアロケータの
+> **現状（2026-09-27）**: `CONFIG_KOBAKO_VM_BLOCK_CACHE` として実装した。ホストの関所は通過、実機でアロケータの
 > 時間は 1.57 → 0.92 ms（−41%）。有効にすると STRESS の LV3 で Kasane の `BUSY` が出ていたが、原因はキャッシュではなく
 > `app_tick` の継続ターンの穴で、修正後はキャッシュ有りで 3/3 回 PASS（§6.2、backlog R3a）。これを受けて既定を y にした。
 > 同日、ビルドオプションではなくなり常に入る（backlog「ビルドオプションの整理」）。
@@ -86,9 +86,9 @@
 - **ゲストを壊すとき**: `JS_FreeRuntime` の後で全部 `heap_caps_free`。
 - **確保に失敗したとき**: `heap_caps_malloc` が NULL を返し、キャッシュに保持分があれば全部返してから一度だけやり直す
   （抱えた小ブロックが隣と合体できずに大きな確保を落とす、を避ける）。
-- **システムのメモリが逼迫したとき**: `pocket_memory` の逼迫のうち `FREE`（内部 RAM の空き）と `LARGEST`（最大の
+- **システムのメモリが逼迫したとき**: `kobako_memory` の逼迫のうち `FREE`（内部 RAM の空き）と `LARGEST`（最大の
   連続空き）のいずれかに入ったら返し、両方の逼迫が解消するまで後続の free も保持しない。回復は既存の
-  `pocket_memory` の EXIT 値と500 msのヒステリシスに従い、新しい閾値は加えない。`GUEST`（ゲストの上限までの余裕）
+  `kobako_memory` の EXIT 値と500 msのヒステリシスに従い、新しい閾値は加えない。`GUEST`（ゲストの上限までの余裕）
   だけでは切り替えない。ブロックは QuickJS から見て解放済みで `malloc_size` に入っていないので、返しても
   上限までの余裕は変わらない。ネイティブ側（Kasane・Wi-Fi）の確保は失敗してもこちらのやり直しを通らないため、
   不要な保持を続けない。逼迫中はキャッシュの加速も失う。ネイティブ標本は100 msより短い間隔では採らず、
@@ -107,7 +107,7 @@
 
 STRESS の LV1: malloc 166 回・free 165 回のうち 6 割がキャッシュから出入りすると、1 回あたり
 （1,270 → 数十）と（620 → 数十）の差で約 18 万サイクル、読み戻しの直読みで約 4 万サイクル、合わせて
-**約 0.9 ms / フレーム（ターン 7.6 ms の 1 割強）**。実機で測って確かめる（`CONFIG_POCKET_VM_ALLOCPROBE` の同じ窓）。
+**約 0.9 ms / フレーム（ターン 7.6 ms の 1 割強）**。実機で測って確かめる（`CONFIG_KOBAKO_VM_ALLOCPROBE` の同じ窓）。
 
 ## 5. 関所と未決
 
@@ -123,7 +123,7 @@ STRESS の LV1: malloc 166 回・free 165 回のうち 6 割がキャッシュ�
 
 ## 6. 実装と結果（2026-09-27）
 
-- `components/pocketjs_guest/src/block_cache.c`（ESP-IDF に依存しない）、`guest.c`（実機の結線、tlsf ヘッダの直読みと自己検査、
+- `components/kobako_guest/src/block_cache.c`（ESP-IDF に依存しない）、`guest.c`（実機の結線、tlsf ヘッダの直読みと自己検査、
   所有タスクの判定、壊すときに返す）、`app_session.c`（`FREE`/`LARGEST` の逼迫に入ったら返す）、`vmrun.c`（記憶域の層に同じ
   モジュール。`--fail-alloc` の番号・トレース・計上は変わらない）、`build.sh` の `-bc`。
 - ホスト: `tools/test_block_cache.c`（ASan/UBSan、乱数 40 万手の確保・解放を模型と突き合わせ、失敗時の返却とやり直し、漏れ無し）
@@ -131,7 +131,7 @@ STRESS の LV1: malloc 166 回・free 165 回のうち 6 割がキャッシュ�
   コーパス（`asan-bc`・`o2-bc`・ROM なし・F2 なし・遅延 intrinsic なし・`o2-bc-keepsrc`・`--force-yield`）すべて **79/79**、
   Test262（`asan-bc`・`o2-bc`）退行 0。
 
-### 6.1 実機（`CONFIG_POCKET_VM_ALLOCPROBE` 付き、STRESS、30 フレームの窓の中央値）
+### 6.1 実機（`CONFIG_KOBAKO_VM_ALLOCPROBE` 付き、STRESS、30 フレームの窓の中央値）
 
 | | キャッシュ無し（2 回＋前回） | キャッシュ有り（3 回） |
 | --- | --- | --- |
@@ -146,15 +146,15 @@ STRESS の LV1: malloc 166 回・free 165 回のうち 6 割がキャッシュ�
 
 ### 6.2 解決: キャッシュ有りで LV3 に Kasane の `BUSY`（R3a）
 
-修正前、キャッシュ有りの 3 回とも `STRESS_APP_FAIL`（`STRESS_FAIL frame PocketError: BUSY` が 1〜4 回）、無しの 2 回は PASS。
+修正前、キャッシュ有りの 3 回とも `STRESS_APP_FAIL`（`STRESS_FAIL frame KobakoError: BUSY` が 1〜4 回）、無しの 2 回は PASS。
 どの回も、確保失敗（`app: OOM n=9 first_req=1059` など）の約 55 ms 後に次の `patch` が `BUSY` になっていた。
 
 **計装（実機）**: `BUSY` を返した時点の Kasane の状態を記録すると `op=kasane.patch building=0 presenting=0
 core_submission=1`、つまり前の frame の提出が消費されずに残っていた。直前の OOM の報告時点で `submission=1` だが、
 これは frame が patch を出した後の通常の状態で、それだけでは `BUSY` にならない（同じ状態で出ない回もあった）。
 
-**原因（コード）**: VM は frame() を途中で止められる（L2c、`POCKET_VM_YIELD=y`）。止まった frame() の残りは次の tick の
-継続ターン（`pocketjs_guest_continue`）が走らせ、そこで patch が提出される。継続でキューが空になると `app_tick` は
+**原因（コード）**: VM は frame() を途中で止められる（L2c、`QJS_LEAN_YIELD=y`）。止まった frame() の残りは次の tick の
+継続ターン（`kobako_guest_continue`）が走らせ、そこで patch が提出される。継続でキューが空になると `app_tick` は
 そのまま通常の経路へ落ち、**present を挟まずに次の frame() を呼ぶ**ので、その patch が `BUSY` になる。OOM の後は
 GC と例外の処理でターンが長くなり、frame() の途中で止まりやすい。キャッシュは止まる位置をずらしただけで、ブロックの
 解放後使用ではない。この穴はキャッシュと無関係に既存のもので、Kasane 側のツリーの `app_session.c` にも同じ形である。
@@ -168,7 +168,7 @@ GC と例外の処理でターンが長くなり、frame() の途中で止まり
 
 ## 7. 設計の出典: ゲストのアロケータの値段（旧 allocator-cost.md、2026-09-27、`vm/runtime-speed`）
 
-計装は `CONFIG_POCKET_VM_ALLOCPROBE`（既定 n）: `components/pocketjs_guest/src/guest.c` のアロケータの入口
+計装は `CONFIG_KOBAKO_VM_ALLOCPROBE`（既定 n）: `components/kobako_guest/src/guest.c` のアロケータの入口
 （malloc/calloc・free・realloc・ブロック長の読み戻し）の中で使ったサイクルと回数を数え、`KASANE_PAINT` と同じ
 30 描画フレームの区切りで `ALLOCPROBE ...` として JS のターン時間と並べて出す。USB の `)` は `heap_caps` の
 マイクロベンチ（`ALLOCBENCH ...`）。
@@ -206,4 +206,4 @@ STRESS（`stress_app.py`、各段階 20 秒、30 フレームの区切りごと�
 1 回あたり: malloc 約 1,270 サイクル、free 約 620、realloc 約 1,100、読み戻し約 110（全体の 1 割強）。
 アロケータの外に出るほど遅い経路は無く、**呼び出しの回数そのもの**が値段になっている。
 
-計装 `CONFIG_POCKET_VM_ALLOCPROBE` は常時有効ではなく計測用（既定 n）。この測定から R3（本文 §3）とブロック長の直読み（§3.2）が生まれた。
+計装 `CONFIG_KOBAKO_VM_ALLOCPROBE` は常時有効ではなく計測用（既定 n）。この測定から R3（本文 §3）とブロック長の直読み（§3.2）が生まれた。

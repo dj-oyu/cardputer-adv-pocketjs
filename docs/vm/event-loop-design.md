@@ -2,23 +2,23 @@
 
 状態: **設計・素案（2026-10-27）。** E1 を実装（2026-10-28、`vm/event-loop-design`）。SLOW（Fable）の独立レビュー中。
 発端は issue #98（`frame()` の無いプログラムが評価直後に終わり、Promise のジョブを捨てる）と、
-そこから辿った「`pocket.*` は非同期 API なのに、合流点が同期的」という指摘。
+そこから辿った「`kobako.*` は非同期 API なのに、合流点が同期的」という指摘。
 
 この文書は、なぜそうなっているのかを根拠つきで掘り（§2）、既にある決定とどこで衝突するかを確かめ（§3）、
 ui_task のままで成立する形を示し（§4〜§7）、段階と決めることを並べる（§8・§9）。
 事実には file:line か文書の節を付け、推測・推定はそう書く。**file:line は main `05f472ec`（E1 の前）の行**で、
-E1 のコミットで `app_session.c` と `pocket_api.c` の行はずれている。ずれた先は関数名で引く。
+E1 のコミットで `app_session.c` と `kobako_api.c` の行はずれている。ずれた先は関数名で引く。
 
 ---
 
 ## 0. 要約
 
-- **同期的なのは合流点だけではなく、3 層ある**（§1）。実行そのものが同期（`pocket.fs` は SD でも
+- **同期的なのは合流点だけではなく、3 層ある**（§1）。実行そのものが同期（`kobako.fs` は SD でも
   JS の呼び出しの中で `fread` まで済ませ、解決済みの Promise を返す）、合流が同期（完了を拾うのは
   `app_tick()` の決まった pump 段だけ）、ループの中心が `frame()`（表示の周期が合流を回す）。
 - **根本原因は「ターン」の過積載**（§2、R1）。1 つのターンが JS 実行・資源の会計・入力の配送・描画の
   4 役を兼ねている。DIRAM の制約（R3、変えられない）が強いるのは「JS の所有タスクは 1 つ」までで、
-  「ループの中心が `frame()`」ではない。後者は歴史の順番（frame ループが先、`pocket.*` の非同期と L1 が後）。
+  「ループの中心が `frame()`」ではない。後者は歴史の順番（frame ループが先、`kobako.*` の非同期と L1 が後）。
 - **目標の形**（§4）: ui_task のまま、ループの中心をイベントループにする。1 周 = 待つ → マクロタスク 1 つ →
   マイクロタスクの checkpoint →（予算の範囲で繰り返す）→ 描画の機会。`frame()` は requestAnimationFrame と
   同じく描画の機会の 1 つに降格する。セッションの生存は参照カウント（Node と同じ）で決める。
@@ -36,12 +36,12 @@ E1 のコミットで `app_session.c` と `pocket_api.c` の行はずれてい�
 
 ### 1.1 実行そのものが同期
 
-`pocket_api_promise_open()`（完了テーブルの枠を取る、本当に非同期な経路）の呼び出しは 14 箇所
-（file_picker・pocket_app の sleep・pocket_av ×2・pocket_bridge・pocket_capture・pocket_io ×2・
-pocket_net ×4・pocket_workspace・sd_picker）。一方 `pocket_api_settled()`（C で処理を済ませてから
-解決済みの Promise を返す）は `pocket_fs.c` だけで 32 箇所ある（`grep -c`、2026-10-27）。
+`kobako_api_promise_open()`（完了テーブルの枠を取る、本当に非同期な経路）の呼び出しは 14 箇所
+（file_picker・kobako_app の sleep・kobako_av ×2・kobako_bridge・kobako_capture・kobako_io ×2・
+kobako_net ×4・kobako_workspace・sd_picker）。一方 `kobako_api_settled()`（C で処理を済ませてから
+解決済みの Promise を返す）は `kobako_fs.c` だけで 32 箇所ある（`grep -c`、2026-10-27）。
 
-例: `sd_read_text`（`main/pocket/pocket_fs.c:3762`）は `stat` → `malloc` → `fopen` → `fread` →
+例: `sd_read_text`（`main/kobako/kobako_fs.c:3762`）は `stat` → `malloc` → `fopen` → `fread` →
 `fclose` → UTF-8 検査を JS の呼び出しの中で行う。その間 ui_task は止まり、ゲスト・描画・キー入力・
 オーバーレイがすべて待つ。
 
@@ -51,10 +51,10 @@ pocket_net ×4・pocket_workspace・sd_picker）。一方 `pocket_api_settled()`
 
 ### 1.2 合流が同期
 
-本当に非同期な操作でも、完了が JS に入るのは `pocket_api_pump()`（`pocket_api.c:501`）だけで、
+本当に非同期な操作でも、完了が JS に入るのは `kobako_api_pump()`（`kobako_api.c:501`）だけで、
 これは `run_pumps()`（`app_session.c:2055`）の決まった位置から、通常ターンでだけ呼ばれる。
 
-- 同じターンに複数の完了が揃っていると、settle は**枠の番号順**（`for i<POCKET_MAX_PROMISES`）で、
+- 同じターンに複数の完了が揃っていると、settle は**枠の番号順**（`for i<KOBAKO_MAX_PROMISES`）で、
   届いた順ではない。面をまたぐと pump の並び順が順序を決める。
 - 継続ターン（キューが残っているターン）では pump が呼ばれないので、完了は「キューが空になったターン」まで
   待つ（L1 の互換モード、`vm-L1-design.md` §2.1）。
@@ -82,7 +82,7 @@ Promise のジョブは「jobs dropped at stop」で捨てられる（#98、実�
 | 2. なぜ入口がターンしか無いか | 仕様が 1 ターンを 1 本の順序で定義し、多くの規則がこの単位に結び付いているから: 予算と暴走ガード（`arm_turn`）、ネイティブ heap の標本（ターンの始めだけ、`sample_memory_pressure`）、`exit()` の処理（空のキューで始まるターンだけ）、Kasane の提出チケット（1 ターン 1 枚）、`deferred_buttons`、離脱ターン | `common-api.md:266`、`app_session.c:2117-2330` |
 | 3. なぜターンと描画が一体か | JS と描画が受け渡しの境界なしに状態を共有しているから（Kasane のシーン、ストリップバッファ 1 本）。同じタスクで決まった順に回せば、ロック無しで一貫する | `quickjs-freertos-vm-spec.md:106`「専用タスク化する場合は…受け渡しを設計する」 |
 | 4. なぜ受け渡しを作らず同じタスクのままか | 専用タスクはスタックで静的 DIRAM +24〜32 KiB（推定）、L0 の上限 +8 KiB を超えるから。PSRAM が無く、ゲストの heap と食い合う | `vm-L1-design.md` §4.1、仕様 `:144` |
-| 5. なぜその妥協が構造として残ったか | 順番の問題。`frame()` のゲームループが先にあり（画面ループの統一 `f17c8d54` 2026-09-06）、`pocket.*` の非同期（`c4b61710` 2026-09-07）と L1（2026-09-12）は pump として後から乗った。「イベントが無いときだけ待つ」は設計ではなく「充足と認めるか」の判断として backlog に置かれた | git log、`backlog.md` 表の 2 |
+| 5. なぜその妥協が構造として残ったか | 順番の問題。`frame()` のゲームループが先にあり（画面ループの統一 `f17c8d54` 2026-09-06）、`kobako.*` の非同期（`c4b61710` 2026-09-07）と L1（2026-09-12）は pump として後から乗った。「イベントが無いときだけ待つ」は設計ではなく「充足と認めるか」の判断として backlog に置かれた | git log、`backlog.md` 表の 2 |
 
 **なぜ今まで表に出なかったか**: 出荷アプリはすべて `frame()` を持つ常時描画の型で、`frame()` の無い
 経路は PLAYGROUND の実機試験くらいでしか通らない。L1 の測定ワークロード（A〜F）もすべて `frame()` を持つ。
@@ -91,7 +91,7 @@ Promise のジョブは「jobs dropped at stop」で捨てられる（#98、実�
 
 | なぜ | 答え | 根拠 |
 | --- | --- | --- |
-| 1. なぜ SD の読み込みが ui_task を止めるか | `sd_read_text` などが呼び出しの中で I/O を済ませ、`pocket_api_settled()` で返すから | `pocket_fs.c:3762` |
+| 1. なぜ SD の読み込みが ui_task を止めるか | `sd_read_text` などが呼び出しの中で I/O を済ませ、`kobako_api_settled()` で返すから | `kobako_fs.c:3762` |
 | 2. なぜその形か | `app:` 側のストア（索引とブロック走査）がスレッド安全でなく ui_task 専用だから。SD 側も同じ形に揃えたと見られる（**推測**） | `common-api.md:607` |
 | 3. なぜ仕様どおり worker に出していないか | 理由は記録に無い。完了テーブルの枠（4）、worker のスタック（DIRAM）、実装の手間のどれか（**推測**） | `filesystem-api.md:210` と実装の差 |
 | 4. なぜずれに気づかないか | SD の読み込みが ui_task を止める時間を誰も測っていないから。試験で読むのは小さなファイル | 測定記録が無い |
@@ -169,15 +169,15 @@ L1 §4.2 の決定: 「早く起きたターンは `app_tick()` を普通に回�
 **判定基準: JS に戻ってくる経路（コールバック・settle・配送）が残っているか。** Node の ref と同じ考え方で、
 E1 の実装（`frameless_alive()`、`main/app_session.c`）は次のどれかが残っている間セッションを生かす:
 
-- QuickJS のジョブキュー、または中断中の連鎖（`pocketjs_guest_work_pending`、`JS_IsJobPending`）
-- 完了待ちの枠（`pocket_api_open_count()`）。sleep・ピッカー・UART・ネットの完了はここに入る
-- 購読（`pocket_api_sub_live()`、E1 で足した全テーブルの合計）
-- `pocket.text` の入力欄（`pocket_text_active()`）。`onSubmit` / `onCancel` は面が自分で持ち、上の 2 つに入らない
+- QuickJS のジョブキュー、または中断中の連鎖（`kobako_guest_work_pending`、`JS_IsJobPending`）
+- 完了待ちの枠（`kobako_api_open_count()`）。sleep・ピッカー・UART・ネットの完了はここに入る
+- 購読（`kobako_api_sub_live()`、E1 で足した全テーブルの合計）
+- `kobako.text` の入力欄（`kobako_text_active()`）。`onSubmit` / `onCancel` は面が自分で持ち、上の 2 つに入らない
 - 提出済みでまだパネルに出ていない絵（Kasane）。最後に描いたものを出してから終わるため
 
 **生存理由にしないもの:** アニメの進行（毎段が新しい提出になり、loop / pingpong は終わらない。`app_tick()` の
 `prior_submission` と同じ除外）、再生中の音（`play()` はすぐ settle し、コールバックが無い。音は終了で切れる）、
-`memory.onPressure`。`pocket.app` の hook は `frame()` 無しでは起動エラーなので、この経路に乗らない。
+`memory.onPressure`。`kobako.app` の hook は `frame()` 無しでは起動エラーなので、この経路に乗らない。
 
 すべて無くなったら正常終了（`EVALUATED (NO frame)` と同じ終わり方）。Back（Esc）で止めたときは
 `STOPPED (NO frame)` と出す（待ちを切ったので、終わったようには見せない）。明示的な `frame = null` との
@@ -186,12 +186,12 @@ E1 の実装（`frameless_alive()`、`main/app_session.c`）は次のどれか�
 **E1 で変わる見え方:** 最上位で `replace()` だけをした source は、以前は出ないまま終わったが、E1 では 1 回
 present してから終わる（一瞬絵が出てからコンソール）。
 
-**残る穴（小）:** `pocket.app.onFrame(cb)` を `start()` 無しで呼ぶと、配送されない（RUNNING のときだけ配る）
+**残る穴（小）:** `kobako.app.onFrame(cb)` を `start()` 無しで呼ぶと、配送されない（RUNNING のときだけ配る）
 まま購読が 1 つ残り、Back まで生きる。
 
 ### 4.3 届いた順の保存
 
-`pocket_api_complete()` で atomic の通し番号を振り（`atomic_fetch_add`、ISR 安全）、settle を番号順にする。
+`kobako_api_complete()` で atomic の通し番号を振り（`atomic_fetch_add`、ISR 安全）、settle を番号順にする。
 追加は枠ごとに 4 B 程度（推定）。面をまたいだ順序（UART の受信と sleep の完了など）もこれで揃う。
 ui_task 自身が転記する完了（§6.1 の (b)）は転記した順になる。
 
@@ -201,12 +201,12 @@ ui_task 自身が転記する完了（§6.1 の (b)）は転記した順にな�
 
 | 種類 | 今の入口 | イベントループでの扱い |
 | --- | --- | --- |
-| Promise の完了（別タスク・ISR） | `pocket_api_complete()` → `vm_wake_post()` → 次の通常ターンの `pocket_api_pump()` | 通知で起き、通し番号の順に 1 件ずつ settle |
-| Promise の完了（ui_task が転記） | pump の中で期限・リング・状態を見て `pocket_api_complete()`（§6.1 (b)） | 期限を「次の期限」に登録し、来たら転記して 1 件 |
-| 購読の配送 | 各 pump の `pocket_api_sub_deliver()` | 1 配送 = 1 マクロタスク（今は 1 pump の中でまとめて呼ぶ。分けるかは D-E2b） |
-| キー入力 | `pocket_input_pump(buttons)`、`deferred_buttons`、`pocket_text_pump()` | 1 打鍵 = 1 マクロタスク。融合問題（`backlog.md` 表の 1）が解ける可能性がある |
+| Promise の完了（別タスク・ISR） | `kobako_api_complete()` → `vm_wake_post()` → 次の通常ターンの `kobako_api_pump()` | 通知で起き、通し番号の順に 1 件ずつ settle |
+| Promise の完了（ui_task が転記） | pump の中で期限・リング・状態を見て `kobako_api_complete()`（§6.1 (b)） | 期限を「次の期限」に登録し、来たら転記して 1 件 |
+| 購読の配送 | 各 pump の `kobako_api_sub_deliver()` | 1 配送 = 1 マクロタスク（今は 1 pump の中でまとめて呼ぶ。分けるかは D-E2b） |
+| キー入力 | `kobako_input_pump(buttons)`、`deferred_buttons`、`kobako_text_pump()` | 1 打鍵 = 1 マクロタスク。融合問題（`backlog.md` 表の 1）が解ける可能性がある |
 | `frame()` | ターンの中心 | 描画の機会（§4.1 の 5） |
-| hook（start / suspend / resume / stop） | `pocket_app_pump()`、`pocket_app_run_suspend()` | 今と同じ場所に残す（セッションの状態遷移なので） |
+| hook（start / suspend / resume / stop） | `kobako_app_pump()`、`kobako_app_run_suspend()` | 今と同じ場所に残す（セッションの状態遷移なので） |
 
 ---
 
@@ -216,11 +216,11 @@ ui_task 自身が転記する完了（§6.1 の (b)）は転記した順にな�
 
 - **(a) 別タスク・ISR が完了を書く**（音声、録音、ネットの一部、ブリッジ）: `vm_wake_post()` が既にある。
   イベントループでそのまま起きる。
-- **(b) ui_task が pump の中で拾って転記する**（sleep の期限 `pocket_app.c:723`、UART の受信 `pocket_io_pump`、
-  ネットのリンク・スキャン `pocket_net_pump`、ピッカーの結果）: L1 §4.2 のとおり、自タスクの投稿は起床を出さない。
+- **(b) ui_task が pump の中で拾って転記する**（sleep の期限 `kobako_app.c:723`、UART の受信 `kobako_io_pump`、
+  ネットのリンク・スキャン `kobako_net_pump`、ピッカーの結果）: L1 §4.2 のとおり、自タスクの投稿は起床を出さない。
   これらは**期限**（sleep の `due_us`）か**定期の見回り**（UART のリング）としてループの待ち時間に入れる。
   UART・ネットを別タスクからの投稿に変えられるかは個別に調べる（**未調査**）。
-- **(c) 呼び出しの中で同期に済ませる**（`pocket.fs` の大半、`pocket_storage`）: 合流の問題ではなく実行の問題。
+- **(c) 呼び出しの中で同期に済ませる**（`kobako.fs` の大半、`kobako_storage`）: 合流の問題ではなく実行の問題。
   E3 で SD を worker へ出す。`app:` ストアは ui_task 専用のまま（スレッド安全でない、`common-api.md:607`）で、
   1 回の読み出しが短いことを測って確かめる。
 
@@ -234,7 +234,7 @@ ui_task 自身が転記する完了（§6.1 の (b)）は転記した順にな�
 ### 6.3 消せないポーリング
 
 - **キーボード**: TCA8418 の INT は GPIO 11 に配線されている（2026-11-11 に実機で確認。キーの辺のたびに Low になった）。
-  `board_key_event()`（`main/hal/board.c`）は INT が High で前回の件数が残っていなければ I2C を読まない（`CONFIG_POCKET_KEY_INT_GPIO`、
+  `board_key_event()`（`main/hal/board.c`）は INT が High で前回の件数が残っていなければ I2C を読まない（`CONFIG_KOBAKO_KEY_INT_GPIO`、
   安全網として 20 周に 1 回は件数を読む）。5 ms ごとに起きる周回そのものはまだ残っていて、GPIO の割り込みで起こす形にすれば通知にできる。
 - **ホーム・ペット・オーバーレイの描画**: ゲストが居ない周、およびオーバーレイを出している周は今と同じく
   フレームで回る。眠れるのは「前面に `frame()` の無いセッションだけ」の間。
@@ -254,7 +254,7 @@ ui_task 自身が転記する完了（§6.1 の (b)）は転記した順にな�
 | Kasane の提出チケット | 1 ターン 1 枚、未消費なら次の `frame()` で BUSY | 描画の機会で消費。**マクロタスクの中の `.then` が提出したら、次の提出の前に present が要る** | `app_session.c:2262` 付近の BUSY 対策と同じ問題が、`frame()` の外でも起きる。「提出済み」を描画の機会の条件に入れる（§4.1 の 5） |
 | `deferred_buttons` | 継続ターン中のキーを OR で保持 | 打鍵ごとのマクロタスクにすれば不要（D-E2c） | `backlog.md` 表の 1 と同時に決める |
 | 離脱ターン（Back、`0x2000`） | 広い予算で `frame(0x2000)` まで | 同じ。`frame()` の無いセッションは stop hook だけ | |
-| 中断（suspend） | `pocket_api_cancel_all()`、`APP_SUSPEND_REFUSED work pending` | 同じ。参照カウント（§4.2）が「仕事が残っている」の定義を兼ねる | |
+| 中断（suspend） | `kobako_api_cancel_all()`、`APP_SUSPEND_REFUSED work pending` | 同じ。参照カウント（§4.2）が「仕事が残っている」の定義を兼ねる | |
 | オーバーレイ | `app_overlay_tick()`、`budget_us` と `over_limit` | 前面と同じループ関数。描画の機会は `shell_draw()` が出す | 2 系統の骨格を 1 つにまとめる |
 
 ---
@@ -273,7 +273,7 @@ ui_task 自身が転記する完了（§6.1 の (b)）は転記した順にな�
 ### 8.1 E0 の結果
 
 **未測定。** E3 の根拠は数値ではなく仕様違反に置く: `filesystem-api.md:210` は「同期的な長時間SD待ちを
-JSタスクへ持ち込まない」と定めるが、`sd_read_text`（`pocket_fs.c:3762`）は ui_task の上で stat・fopen・fread を
+JSタスクへ持ち込まない」と定めるが、`sd_read_text`（`kobako_fs.c:3762`）は ui_task の上で stat・fopen・fread を
 済ませる。ただし仕様の文は「初期案」の節にあり、禁じているのは「長時間」の待ちなので、E3 の対象は長い操作
 （copy・一覧・大きな read）から始め、短い操作まで動かすかは仕様の文言を確定させてから決める。
 数値が決めるのは、E3 を他の段より先にやるかの優先順位と、どこからを「長時間」とみなすかの線。

@@ -24,9 +24,9 @@ depth-only damage、全submit rollback、image IO retry/ACK、backdrop修復を�
 ```sh
 python tools/kasane_contract/run_mesh_depth.py --opt 2
 bash tools/kasane_contract/run.sh
-python tools/pocket/run_class_registry.py
-python tools/kasane_contract/run_pocket_proc_turn_qjs.py
-python tools/kasane_contract/run_pocket_shiki_api_qjs.py
+python tools/kobako/run_class_registry.py
+python tools/kasane_contract/run_kobako_proc_turn_qjs.py
+python tools/kasane_contract/run_kobako_shiki_api_qjs.py
 python tools/test_board_half.py
 idf.py -B build_main122 -D SDKCONFIG="$PWD/build_main122/sdkconfig" build size
 ```
@@ -114,7 +114,7 @@ S3の静的DIRAM 181,200 Bとは別の測定で、host値と合算して実機fi
 後続の専用公開workloadは [MESH BENCH](../../apps/meshbench/README.md)。
 既存のModel/Instanceとapp登録だけを使い、privateデータ・別rendererやbroker API変更を要しない。
 
-`pocket.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`
+`kobako.kasane.shiki.beginMeshFrame(color, bytes, work, rows[, surface])`
 opens an explicit opaque shared-depth scope. Limits remain 65536 bytes,
 8000000 work, 256 records, rows1 or8. Use ordinary `shiki.beginFrame` for
 Shiki line plans and native painter packets. Mixing a Shiki draw or painter
@@ -148,9 +148,9 @@ require their own product decision; this change does not add security overrides.
 
 ```
 python3 tools/kasane_contract/run_mesh_depth.py --opt 2
-python3 tools/pocket/run_class_registry.py
-python3 tools/kasane_contract/run_pocket_proc_turn_qjs.py
-python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py
+python3 tools/kobako/run_class_registry.py
+python3 tools/kasane_contract/run_kobako_proc_turn_qjs.py
+python3 tools/kasane_contract/run_kobako_shiki_api_qjs.py
 ```
 
 The mesh runner uses actual C/QuickJS with ASan/UBSan: import/batch/pack, core

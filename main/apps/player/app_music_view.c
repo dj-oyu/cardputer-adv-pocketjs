@@ -1,10 +1,10 @@
 #include "apps/apps.h"
 #include "app_legacy_presenter.h"
-#include "pocket_api.h"
-#include "pocket_av.h"
-#include "pocket_av_playback_source.h"
+#include "kobako_api.h"
+#include "kobako_av.h"
+#include "kobako_av_playback_source.h"
 #ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
-#include "pocket_av_output_source.h"
+#include "kobako_av_output_source.h"
 #include "sound.h"
 #endif
 #include "ui/kasane/ksn_p0_probe.h"
@@ -50,7 +50,7 @@ typedef struct {
     uint32_t output_probe_patch_calls,output_probe_replace_calls;
     uint32_t output_probe_light_calls,output_probe_fast_calls;
 #endif
-    pocket_av_ui_snapshot audio_cache;
+    kobako_av_ui_snapshot audio_cache;
     uint64_t audio_revision;
 #ifdef KASANE_P0_PROBE
     uint64_t read_total_us,read_cache_us,read_borrow_us;
@@ -67,16 +67,16 @@ _Static_assert(sizeof(music_state)<=1280,"Music view allocation budget");
 #endif
 
 static music_state *active;
-static pocket_app_view_host current_host;
+static kobako_app_view_host current_host;
 static uint32_t music_serial;
 static JSClassID music_class;
-static pocket_class_owner_t music_owner;
+static kobako_class_owner_t music_owner;
 static const JSClassDef music_def={.class_name="Kasane"};
 #if defined(KASANE_P0_PROBE) && !defined(KASANE_P1_OUTPUT_OVERLAY_PROBE)
 static uint32_t p0_time_light_patch,p0_time_light_same,p0_time_light_fallback;
 #endif
 #ifdef KASANE_P0_PROBE
-void pocket_app_music_view_probe_reset_counters(void){
+void kobako_app_music_view_probe_reset_counters(void){
     music_state *p=active;
     if(!p)return;
     p->read_total_us=p->read_cache_us=p->read_borrow_us=0;
@@ -105,23 +105,23 @@ static void music_submitted(ksn_tx ticket,ksn_update_mode mode){
 static const char *music_result_code(ksn_result result) {
     switch(result) {
     case KSN_OK: return "OK";
-    case KSN_INVALID: return POCKET_ERR_INVALID_ARGUMENT;
-    case KSN_LIMIT: return POCKET_ERR_LIMIT_EXCEEDED;
-    case KSN_OOM: return POCKET_ERR_OUT_OF_MEMORY;
-    case KSN_STALE: return POCKET_ERR_CLOSED;
-    case KSN_BUSY: return POCKET_ERR_BUSY;
-    case KSN_UNSUPPORTED: return POCKET_ERR_UNSUPPORTED;
-    case KSN_IO: return POCKET_ERR_IO_ERROR;
-    case KSN_CANCELLED: return POCKET_ERR_CANCELLED;
+    case KSN_INVALID: return KOBAKO_ERR_INVALID_ARGUMENT;
+    case KSN_LIMIT: return KOBAKO_ERR_LIMIT_EXCEEDED;
+    case KSN_OOM: return KOBAKO_ERR_OUT_OF_MEMORY;
+    case KSN_STALE: return KOBAKO_ERR_CLOSED;
+    case KSN_BUSY: return KOBAKO_ERR_BUSY;
+    case KSN_UNSUPPORTED: return KOBAKO_ERR_UNSUPPORTED;
+    case KSN_IO: return KOBAKO_ERR_IO_ERROR;
+    case KSN_CANCELLED: return KOBAKO_ERR_CANCELLED;
     }
-    return POCKET_ERR_CONFLICT;
+    return KOBAKO_ERR_CONFLICT;
 }
 
 static JSValue music_throw_result(JSContext *ctx, ksn_result result, const char *op) {
     const char *code=music_result_code(result);
-    return pocket_api_throw(ctx,code,op,code,
+    return kobako_api_throw(ctx,code,op,code,
                             result==KSN_BUSY||result==KSN_OOM||result==KSN_IO,
-                            POCKET_OUTCOME_NOT_APPLIED);
+                            KOBAKO_OUTCOME_NOT_APPLIED);
 }
 
 static bool music_number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
@@ -165,7 +165,7 @@ static bool presenter_can_patch(const music_state *p,const ksn_presenter_plan *p
 }
 static bool music_fast_light_eligible(const music_state *p){
     return p->have_key&&p->have_refs&&!p->manual&&p->reactive&&!p->help&&
-           p->audio_live&&p->audio_cache.state==POCKET_AV_UI_PLAYING&&
+           p->audio_live&&p->audio_cache.state==KOBAKO_AV_UI_PLAYING&&
            !p->audio_cache.duration_ms&&p->playback_revision&&
            *p->playback_revision&&*p->playback_revision==p->audio_revision&&
            p->playback_subscription.has_validated&&
@@ -175,7 +175,7 @@ static bool music_fast_light_eligible(const music_state *p){
            p->key[0]==(uint64_t)(1u<<9)&&
            p->key[1]==presenter_viewport_key()&&p->key[2]==0&&
            p->key[3]==p->title_revision&&p->key[4]==3&&
-           p->key[5]==POCKET_AV_UI_PLAYING&&
+           p->key[5]==KOBAKO_AV_UI_PLAYING&&
            p->key[6]==p->audio_cache.position_ms/1000u&&p->key[7]==0&&
            p->key[9]==2&&p->key[11]==0;
 }
@@ -343,7 +343,7 @@ static ksn_result music_time_fast_refresh(music_state *p,bool *handled){
 }
 #endif
 static ksn_result music_audio_read(music_state *p,
-                                   const pocket_av_ui_snapshot **audio,
+                                   const kobako_av_ui_snapshot **audio,
                                    bool *live,ksn_source_lease *lease){
     *live=false;
     *audio=NULL;
@@ -354,11 +354,11 @@ static ksn_result music_audio_read(music_state *p,
     const ksn_schema_value *fields=lease->snapshot.fields;
     if((lease->valid_slots&63u)==63u&&
        fields[5].data.wide_number==(uint32_t)p->playback_id){
-        if(fields[0].data.number>POCKET_AV_UI_ERROR){
+        if(fields[0].data.number>KOBAKO_AV_UI_ERROR){
             ksn_source_release(lease);return KSN_INVALID;
         }
-        p->audio_cache=(pocket_av_ui_snapshot){
-            .state=(pocket_av_ui_state)fields[0].data.number,
+        p->audio_cache=(kobako_av_ui_snapshot){
+            .state=(kobako_av_ui_state)fields[0].data.number,
             .position_ms=fields[1].data.wide_number,
             .duration_ms=fields[2].data.wide_number,
             .underruns=fields[3].data.wide_number
@@ -394,7 +394,7 @@ static ksn_result music_refresh(void) {
     uint64_t key[12]={0};
     key[0]=((uint64_t)p->manual<<8)|((uint64_t)p->reactive<<9);
     key[1]=presenter_viewport_key();
-    const pocket_av_ui_snapshot *audio=NULL;
+    const kobako_av_ui_snapshot *audio=NULL;
     ksn_source_lease source_lease={0};
 #ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
     ksn_source_lease output_lease={0};
@@ -463,7 +463,7 @@ static ksn_result music_refresh(void) {
                 uint64_t fill=(uint64_t)audio->position_ms*(unsigned)(width-24)/audio->duration_ms;
                 key[10]=fill>(uint64_t)(width-24)?(uint64_t)(width-24):fill;
                 if(key[10])key[9]=1;
-            }else if(live&&audio->state==POCKET_AV_UI_PLAYING){
+            }else if(live&&audio->state==KOBAKO_AV_UI_PLAYING){
                 uint32_t phase=(uint32_t)(music_now_us()/66667u);
 #ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
                 if(output_live)phase=output_frames/(SOUND_SAMPLE_RATE/30u);
@@ -498,7 +498,7 @@ static ksn_result music_refresh(void) {
         if(live){
             values.position_ms=audio->position_ms;
             values.duration_ms=audio->duration_ms;
-            values.playing=audio->state==POCKET_AV_UI_PLAYING;
+            values.playing=audio->state==KOBAKO_AV_UI_PLAYING;
             if(!values.bytes[1]){
                 static const char *const names[]={"READY","PLAYING","PAUSED","ENDED","ERROR"};
                 if((unsigned)audio->state>=sizeof(names)/sizeof(names[0])){
@@ -526,7 +526,7 @@ static ksn_result music_refresh(void) {
         }
         values.phase=(uint32_t)(music_now_us()/66667u);
 #ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
-        if(output_live&&live&&audio->state==POCKET_AV_UI_PLAYING&&
+        if(output_live&&live&&audio->state==KOBAKO_AV_UI_PLAYING&&
            !audio->duration_ms)
             values.phase=output_frames/(SOUND_SAMPLE_RATE/30u);
 #endif
@@ -658,7 +658,7 @@ static bool presenter_text(JSContext *ctx,JSValueConst model,const char *name,
     if(JS_IsException(value))return false;
     if(!JS_IsString(value)){
         JS_FreeValue(ctx,value);
-        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.view.update",
+        kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,"kasane.view.update",
                          "presenter text must be a string",false,NULL);
         return false;
     }
@@ -685,7 +685,7 @@ static bool presenter_number(JSContext *ctx,JSValueConst model,const char *name,
     double n;bool ok=music_number_in(ctx,value,0,UINT32_MAX,&n);
     JS_FreeValue(ctx,value);
     if(ok){*out=(uint32_t)n;return true;}
-    pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.view.update",
+    kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,"kasane.view.update",
                      "presenter number must be a nonnegative integer",false,NULL);
     return false;
 }
@@ -694,7 +694,7 @@ static bool presenter_bool(JSContext *ctx,JSValueConst model,const char *name,bo
     if(JS_IsException(value))return false;
     if(!JS_IsBool(value)){
         JS_FreeValue(ctx,value);
-        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.view.update",
+        kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,"kasane.view.update",
                          "presenter flag must be boolean",false,NULL);
         return false;
     }
@@ -706,7 +706,7 @@ static JSValue js_presenter_update(JSContext *ctx,JSValueConst self,int argc,JSV
         return music_throw_result(ctx,KSN_STALE,"kasane.view.update");
     if(active->reactive)return music_throw_result(ctx,KSN_BUSY,"kasane.view.update");
     JSValueConst model=argc?argv[0]:JS_UNDEFINED;
-    if(!JS_IsObject(model))return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,
+    if(!JS_IsObject(model))return kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,
                          "kasane.view.update","model must be an object",false,NULL);
     ksn_presenter_values values={0};
     ksn_presenter_kind kind=KSN_PRESENTER_MUSIC;
@@ -749,7 +749,7 @@ static bool presenter_optional_text(JSContext *ctx,JSValueConst model,const char
     if(JS_IsUndefined(value)){JS_FreeValue(ctx,value);return true;}
     if(!JS_IsString(value)){
         JS_FreeValue(ctx,value);
-        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.view.set",
+        kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,"kasane.view.set",
                          "slot value must be a string",false,NULL);
         return false;
     }
@@ -774,7 +774,7 @@ static JSValue js_presenter_set(JSContext *ctx,JSValueConst self,int argc,JSValu
     if(!p)return music_throw_result(ctx,KSN_STALE,"kasane.view.set");
     if(p->manual)return music_throw_result(ctx,KSN_BUSY,"kasane.view.set");
         JSValueConst model=argc?argv[0]:JS_UNDEFINED;
-    if(!JS_IsObject(model))return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,
+    if(!JS_IsObject(model))return kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,
                          "kasane.view.set","slots must be an object",false,NULL);
     ksn_presenter_values candidate=p->owned;
     ksn_p0_probe_copy(KSN_P0_MUSIC_MODEL_COPY,sizeof(candidate));
@@ -802,7 +802,7 @@ static JSValue js_presenter_bind(JSContext *ctx,JSValueConst self,int argc,JSVal
     if(!p)return music_throw_result(ctx,KSN_STALE,"kasane.view.bind");
     if(p->manual)return music_throw_result(ctx,KSN_BUSY,"kasane.view.bind");
     const char *source=argc&&JS_IsString(argv[0])?JS_ToCString(ctx,argv[0]):NULL;
-    if(!source)return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.view.bind",
+    if(!source)return kobako_api_throw(ctx,KOBAKO_ERR_INVALID_ARGUMENT,"kasane.view.bind",
                                      "source must be playback",false,NULL);
     bool playback=strcmp(source,"playback")==0;
 #ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
@@ -814,7 +814,7 @@ static JSValue js_presenter_bind(JSContext *ctx,JSValueConst self,int argc,JSVal
         if(p->output_subscription)return JS_UNDEFINED;
         ksn_source_registry *registry=NULL;
         ksn_source_handle handle={0};
-        ksn_result result=pocket_av_output_source_existing(&registry,&handle);
+        ksn_result result=kobako_av_output_source_existing(&registry,&handle);
         if(result!=KSN_OK)return music_throw_result(ctx,result,"kasane.view.bind");
         ksn_source_subscription *subscription=calloc(1,sizeof(*subscription));
         if(!subscription)return music_throw_result(ctx,KSN_OOM,"kasane.view.bind");
@@ -842,20 +842,20 @@ static JSValue js_presenter_bind(JSContext *ctx,JSValueConst self,int argc,JSVal
 #endif
     if(!playback)
         return music_throw_result(ctx,KSN_UNSUPPORTED,"kasane.view.bind");
-    int32_t id=pocket_av_ui_current_player();
-    if(!id)return pocket_api_throw(ctx,POCKET_ERR_NOT_AVAILABLE,"kasane.view.bind",
+    int32_t id=kobako_av_ui_current_player();
+    if(!id)return kobako_api_throw(ctx,KOBAKO_ERR_NOT_AVAILABLE,"kasane.view.bind",
                                   "no open player",false,NULL);
     p->playback_id=id;
     ksn_source_registry *registry=NULL;
     ksn_source_handle source_handle={0};
-    ksn_result source_result=pocket_av_playback_source_open(&registry,&source_handle);
+    ksn_result source_result=kobako_av_playback_source_open(&registry,&source_handle);
     if(source_result!=KSN_OK)return music_throw_result(ctx,source_result,"kasane.view.bind");
     ksn_source_subscription subscription={0};
     source_result=ksn_source_subscribe(registry,source_handle,p->handle,
         &playback_schema,playback_bindings,6,&subscription);
     if(source_result!=KSN_OK)return music_throw_result(ctx,source_result,"kasane.view.bind");
     p->playback_registry=registry;
-    p->playback_revision=pocket_av_playback_source_revision_ref(source_handle);
+    p->playback_revision=kobako_av_playback_source_revision_ref(source_handle);
     p->playback_subscription=subscription;
     p->audio_revision=0;
     p->audio_live=false;
@@ -895,7 +895,7 @@ static const JSCFunctionListEntry presenter_methods[]={
 
 static bool music_class_ready(JSContext *ctx){
     JSRuntime *rt=JS_GetRuntime(ctx);
-    if(!pocket_api_class_ready(rt,&music_owner,&music_class)){
+    if(!kobako_api_class_ready(rt,&music_owner,&music_class)){
         JS_NewClassID(rt,&music_class);
         if(JS_NewClass(rt,music_class,&music_def)<0)return false;
     }
@@ -914,7 +914,7 @@ static bool music_class_ready(JSContext *ctx){
     return true;
 }
 
-static JSValue music_mount(JSContext *ctx,const pocket_app_view_host *host,void **out){
+static JSValue music_mount(JSContext *ctx,const kobako_app_view_host *host,void **out){
     if(!host||!out||!host->view||!host->now_us||
        !host->busy||!host->submitted||active)
         return music_throw_result(ctx,KSN_BUSY,"kasane.mount");
@@ -959,7 +959,7 @@ static void music_destroy(void *instance){
         (unsigned long)(p->read_borrow_calls?p->read_borrow_us/p->read_borrow_calls:0),
         (unsigned long)p->read_borrow_max_us);
 #endif
-    if(instance==active){active=NULL;current_host=(pocket_app_view_host){0};}
+    if(instance==active){active=NULL;current_host=(kobako_app_view_host){0};}
 #ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
     if(instance){
         music_state *p=instance;
@@ -973,7 +973,7 @@ static void music_destroy(void *instance){
 #endif
     free(instance);
 }
-const pocket_app_view_provider pocket_app_music_view={
+const kobako_app_view_provider kobako_app_music_view={
     .name="music",.mount=music_mount,.settle=music_settle,.step=music_step,
     .host_status=music_host_status,.native_bytes=music_native_bytes,
     .destroy=music_destroy

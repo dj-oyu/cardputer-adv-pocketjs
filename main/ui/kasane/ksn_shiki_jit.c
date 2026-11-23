@@ -1018,9 +1018,9 @@ __asm__(
 extern const uint8_t ksn_jit_chk_add[],ksn_jit_chk_sub[],ksn_jit_chk_add_fast[],ksn_jit_chk_sub_fast[];
 _Static_assert(offsetof(ksn_jit_run,ra)==28&&offsetof(ksn_jit_run,alias)==32,"the checker's offsets");
 
-/* Measurement build (shiki-jit.md sec.15): -DPOCKET_SHIKI_JIT_EXECMAP logs
+/* Measurement build (shiki-jit.md sec.15): -DKOBAKO_SHIKI_JIT_EXECMAP logs
  * where executable memory goes (EXECMAP lines). */
-#ifdef POCKET_SHIKI_JIT_EXECMAP
+#ifdef KOBAKO_SHIKI_JIT_EXECMAP
 #include "esp_log.h"
 #include "esp_timer.h"
 /* Where the JIT's code landed: [0] DIRAM from the system heap, [1]
@@ -1752,7 +1752,7 @@ uint32_t ksn_shiki_jit_run(const ksn_shiki_plan *plan,const int32_t *in,unsigned
         /* heat: draws so far; INT8_MIN never again; negative: waiting
          * to retry after a full budget or heap. */
         if(p->heat==INT8_MIN||++p->heat<(int8_t)JIT_HEAT)return 0;
-#ifdef POCKET_SHIKI_JIT_EXECMAP
+#ifdef KOBAKO_SHIKI_JIT_EXECMAP
         static bool first=true;
         if(first){first=false;EXECMAP_REPORT("first");}
 #endif

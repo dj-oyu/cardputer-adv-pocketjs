@@ -15,13 +15,13 @@ function setup(){
     V[v*6]=(v%3)*30-30;V[v*6+1]=v<3?-15:15;V[v*6+5]=1;J[v*4+1]=1;
     W[v*4+1]=v%3===0?0:v%3===1?21845:65535;W[v*4]=65535-W[v*4+1];
   }
-  M=pocket.ayatsuri.modelOpen(fixture);A=M.instance();B=M.instance();
-  H=pocket.ayatsuri.modelOpen(holes);D=pocket.ayatsuri.modelOpen(sided);
+  M=kobako.ayatsuri.modelOpen(fixture);A=M.instance();B=M.instance();
+  H=kobako.ayatsuri.modelOpen(holes);D=kobako.ayatsuri.modelOpen(sided);
   A.evaluate(C,L);B.evaluate(C,L);A.stats(stats);check(stats.skinWorkBytes===0);
 }
 function poseAt(frame){
   pose[1]=8*Math.sin(frame*.07);pose[2]=12*Math.sin(frame*.13);pose[4]=.7*Math.sin(frame*.11);
-  pocket.ayatsuri.compose(pose,null,child);
+  kobako.ayatsuri.compose(pose,null,child);
 }
 function evaluateOnly(frame){poseAt(frame);A.evaluateSkin(C,L,1,G,IB,V,J,W);}
 function drawA(){P.beginMeshFrame(17,2048,200000,1);A.submit();P.commit();}
@@ -87,7 +87,7 @@ function pendingThenDispose(){
   A=B=M=H=D=null;fixture=holes=sided=null;
 }
 function implicitRelease(){
-  let m=pocket.ayatsuri.modelOpen(cycleFixture),a=m.instance();
+  let m=kobako.ayatsuri.modelOpen(cycleFixture),a=m.instance();
   identity(G);identity(IB);IB[15]=-15;
   for(let v=0;v<6;v++){V[v*6]=(v%3)*30-30;V[v*6+1]=v<3?-15:15;V[v*6+2]=V[v*6+3]=V[v*6+4]=0;V[v*6+5]=1;for(let j=0;j<4;j++)J[v*4+j]=W[v*4+j]=0;W[v*4]=65535;}
   a.evaluateSkin(C,L,1,G,IB,V,J,W);a.cycle=m;m.cycle=a;

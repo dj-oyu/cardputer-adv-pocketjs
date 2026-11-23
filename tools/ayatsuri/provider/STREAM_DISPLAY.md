@@ -1,4 +1,4 @@
-# Explicit pocket/Kasane streaming diagnostic presenter
+# Explicit kobako/Kasane streaming diagnostic presenter
 
 The separate APP-bound registration API now described in `STREAM_RESIDENT.md`
 can retain this producer across normal redraws. This document describes the
@@ -12,11 +12,11 @@ the entry point. Build/flash/physical validation remain broker operations.
 
 ## Actual connection and ownership
 
-The explicit native `pocket_stream_candidate_present` entry acquires the frame
+The explicit native `kobako_stream_candidate_present` entry acquires the frame
 owner after caller preflight, and passes its pinned snapshot as an opaque black
-background through the **real** pocket/Kasane backdrop renderer. The existing
-pocket native-source ACKs and Kasane core ACK stay in their original order.
-Normal `pocket_kasane_present_complete` calls still use the ordinary backdrop.
+background through the **real** kobako/Kasane backdrop renderer. The existing
+kobako native-source ACKs and Kasane core ACK stay in their original order.
+Normal `kobako_kasane_present_complete` calls still use the ordinary backdrop.
 
 The explicit backdrop helper rejects an existing procedural frame or a pending
 proc/grid/video/pixel publication. It requires an existing runtime and invalidates
@@ -32,9 +32,9 @@ successful return is the drain evidence. No token, elapsed timeout, successful
 send return or assumed byte count substitutes for completion.
 
 On a drained successful presentation, the candidate snapshot is promoted after
-the pocket/Kasane function returns. On a drained failure, the old READY survives.
+the kobako/Kasane function returns. On a drained failure, the old READY survives.
 If completion fails, both snapshots remain pinned and subsequent generation is
-blocked. `pocket_stream_candidate_recover` accepts a fresh real completion context,
+blocked. `kobako_stream_candidate_recover` accepts a fresh real completion context,
 retries **only drain**, then rolls back the failed candidate and invalidates for
 normal repair. It never replays or ACKs the failed frame. The adapter retains no
 stack-local port/completion pointer. Its state, frame owner and scratch must stay
@@ -70,8 +70,8 @@ Run on Linux with the existing QuickJS host prerequisites:
 python3 tools/ayatsuri/provider/test_stream_display.py --out /tmp/stream-display-new --sanitize
 ```
 
-This links actual pocket, QuickJS, Kasane runtime/render and streaming source.
-It keeps the original pocket regression suite and adds public synthetic geometry
+This links actual kobako, QuickJS, Kasane runtime/render and streaming source.
+It keeps the original kobako regression suite and adds public synthetic geometry
 with a copied asynchronous-display simulation. Checks cover panel/raster parity,
 send failure, failed final completion retaining the pin, repeated failed recovery,
 successful drain followed by rollback, preflight rejection, competing pending

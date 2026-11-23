@@ -265,7 +265,7 @@ Test262 の `language/expressions` `language/statements` `language/arguments-obj
 - `JS_NewContextRaw`: 早い失敗で、GC リストに繋がったままのコンテキストを解放していた。
 - `js_std_init_handlers`: 確保失敗で **`exit(1)`（実機では再起動）**、終了処理の登録失敗で 160 B の漏れ。
 
-`pocketjs_guest_create` と vmrun は、`js_std_add_helpers` の後にもカナリアを見て、失敗した
+`kobako_guest_create` と vmrun は、`js_std_add_helpers` の後にもカナリアを見て、失敗した
 ゲストを `ESP_ERR_NO_MEM` で断る。
 
 ### 8.2 Error が作れないと `null` を投げていた（`vm/oom-fix-ctornull`）

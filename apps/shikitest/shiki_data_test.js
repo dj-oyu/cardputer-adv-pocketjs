@@ -65,8 +65,8 @@ globalThis.shikiHash = function (s) {
   for (let k = 0; k < s.length; k++) h = Math.imul(h ^ s.charCodeAt(k), 16777619);
   return (h >>> 0).toString(16).padStart(8, '0');
 };
-if (typeof pocket !== 'undefined') {
-  const D = pocket.shikiDebug, N = 600, SEED = 1, next = shikiDataGen(SEED);
+if (typeof kobako !== 'undefined') {
+  const D = kobako.shikiDebug, N = 600, SEED = 1, next = shikiDataGen(SEED);
   let i = 0, out = '';
   console.log('SD BEGIN seed ' + SEED + ' cases ' + N);
   globalThis.frame = function () {

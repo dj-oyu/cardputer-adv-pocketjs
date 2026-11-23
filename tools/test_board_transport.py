@@ -116,7 +116,7 @@ static esp_err_t spi_device_get_trans_result(int device,spi_transaction_t **done
  pixels(borrowed,borrow_bytes);return ESP_OK;
 }
 static void pet_hub_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
-static void pocket_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
+static void kobako_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
 static void swap_scalar(uint16_t *out,const uint16_t *in,int n){
  check_borrow();
  if(bus_pending){

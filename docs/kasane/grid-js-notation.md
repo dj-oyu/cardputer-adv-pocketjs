@@ -1,6 +1,6 @@
 # Grid JS 記法
 
-`pocket.kasane.grid.fold(spec, build)`（以下、`grid` は `pocket.kasane.grid`。グローバルの `gridFold` は api-reorg P5 で消した） は登録時に一度だけ `build` を実行し、型付き int16 grid IR を作る。描画中の出力座標・tap の反復と命令の実行は native 側が行う。`pocket.kasane.grid.register(program)` はその IR を解析し、`run(handle, buffers, params)` は合法性と費用を見て scalar/PIE を選ぶ。JS の式形だけでは PIE 使用を保証しない。
+`kobako.kasane.grid.fold(spec, build)`（以下、`grid` は `kobako.kasane.grid`。グローバルの `gridFold` は api-reorg P5 で消した） は登録時に一度だけ `build` を実行し、型付き int16 grid IR を作る。描画中の出力座標・tap の反復と命令の実行は native 側が行う。`kobako.kasane.grid.register(program)` はその IR を解析し、`run(handle, buffers, params)` は合法性と費用を見て scalar/PIE を選ぶ。JS の式形だけでは PIE 使用を保証しない。
 
 ## 座標と入力
 

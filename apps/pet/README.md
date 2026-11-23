@@ -1,4 +1,4 @@
-# Pocket Pet
+# Kobako Pet
 
 Cardputer ADV向けの同梱JSペットアプリ。ホームのAPPS末尾にあります。
 
@@ -22,29 +22,29 @@ Escで保存してホームへ戻ります。アプリは終了せずに眠り�
 ## 実装
 
 `pet.js`が育成ロジックと入力判断を所有し、Kasaneのnative presenterが画面構成を所有します。共通の方向ボタン（PSPビット配置）と
-`pocket.storage`を利用します。ホストは`local.pet`名前空間を割り当てます。
-入力は`pocket.input.onAction`、毎フレームの処理は`pocket.app.onFrame`で受けます。`pocket.app.start`の`suspend`と`stop`で保存し、`resume`で経過時間の基準を取り直します（[常駐中断](../../docs/vm/app-suspend-design.md)）。
+`kobako.storage`を利用します。ホストは`local.pet`名前空間を割り当てます。
+入力は`kobako.input.onAction`、毎フレームの処理は`kobako.app.onFrame`で受けます。`kobako.app.start`の`suspend`と`stop`で保存し、`resume`で経過時間の基準を取り直します（[常駐中断](../../docs/vm/app-suspend-design.md)）。
 描画時刻はフレーム数ではなく単調時計を使用し、入力でフレーム数が増えても育成速度を変えません。
 
-2026-09-23、`pocket.kasane.mount('pet')`へ移行しました。JSは育成値・操作・
+2026-09-23、`kobako.kasane.mount('pet')`へ移行しました。JSは育成値・操作・
 保存を扱い、`view.set()`で表示値だけを渡します。画像資源、固定配置、バー、吹き出し、
 差分判定、提出と再試行はnative presenterが担当します。variantが0–11の配色番号、
-frameが表情0–5で、旧`pocket.pet.place`の第1引数・第4引数とそれぞれ対応します。
+frameが表情0–5で、旧`kobako.pet.place`の第1引数・第4引数とそれぞれ対応します。
 ロード前は画像を置かず、ロード後の最新値から再構築します。
 吹き出しの文字送り時刻はJSのdomain時計から渡し、文字のrevealはKasaneが適用します。
 枠と内側の二色塗りだった旧デザインは単色1枚に簡略化しています（`KSN-MISSING`参照）。
 英数字UIは`font:'caption'`で日本語フォントアトラスの増加を避けます。
 
-ブラウザプレビュー`preview.html`は旧`ui`/`pocket.pet.place/say`をモックしており、
-この移植後の`pet.js`とは非互換です（`pocket.kasane`を呼ぶため即エラーになります）。
-`pocket.kasane`のブラウザ側モックは未着手で、修正はこのコミットに含めていません。
+ブラウザプレビュー`preview.html`は旧`ui`/`kobako.pet.place/say`をモックしており、
+この移植後の`pet.js`とは非互換です（`kobako.kasane`を呼ぶため即エラーになります）。
+`kobako.kasane`のブラウザ側モックは未着手で、修正はこのコミットに含めていません。
 
 ### Kasane missing
 
 移植時点でKasaneに無く、JS側で代替した／簡略化した点です。
 
 - `KSN-MISSING(text.animate)`: 文字列のreveal（文字送り）を進める native track が無く、
-  JSが経過時間から表示文字数を渡しています。旧`pocket.pet.say`は
+  JSが経過時間から表示文字数を渡しています。旧`kobako.pet.say`は
   ネイティブ側が70ms刻みで進めていました。
 - 吹き出しの二色塗り（外枠+内側ハイライト）は単色矩形1枚に簡略化しました。Kasane側の
   制約ではなく、ゲストソースのバイト数予算（移植元以下を維持）を優先した判断です。

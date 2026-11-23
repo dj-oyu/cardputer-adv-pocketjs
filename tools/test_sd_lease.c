@@ -1,4 +1,4 @@
-// Host: compile this file together with main/pocket/sd_lease.c using C11.
+// Host: compile this file together with main/kobako/sd_lease.c using C11.
 #include <stdio.h>
 #include "sd_lease.h"
 

@@ -134,7 +134,7 @@ bool board_capture_active(void);
 // One app display turn per BEGIN/END scope, including press/release wrappers.
 // UI-owner only, like board_capture(); the next scope resets the allowance.
 bool board_capture_take_turn(void);
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+#ifdef CONFIG_KOBAKO_FRAME_BREAKDOWN
 // Strips queued to the SPI driver since the last call (FRAME_BD).
 uint32_t board_lcd_tx_take(void);
 #endif

@@ -19,5 +19,5 @@ after 6
 after 7
 after 8
 caught: caught eight jobs later
-E pocketjs_guest: Unhandled Promise rejection: Error: nobody catches this
+E kobako_guest: Unhandled Promise rejection: Error: nobody catches this
 exit=2

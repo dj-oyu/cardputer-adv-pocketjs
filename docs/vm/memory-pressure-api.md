@@ -13,9 +13,9 @@ offers one listener per guest. The implementation installs it for foreground
 and overlay guests (only one guest is active at a time):
 
 ```js
-pocket.memory.pressure()             // current integer mask, no result object
-pocket.memory.info()                 // allocating diagnostic snapshot; may OOM
-const subscription = pocket.memory.onPressure((mask, episode) => { /* trim */ });
+kobako.memory.pressure()             // current integer mask, no result object
+kobako.memory.info()                 // allocating diagnostic snapshot; may OOM
+const subscription = kobako.memory.onPressure((mask, episode) => { /* trim */ });
 subscription.close();
 ```
 
@@ -45,7 +45,7 @@ block are observations, **not** a guarantee that an allocation will succeed.
 An underlying QuickJS allocator failure may increment both allocatorFailures
 and nativeFailures through ESP-IDF's global failure hook; they are diagnostic
 views, not disjoint event totals.
-`pocket.device.metrics()` remains a 500 ms cached, allocating diagnostic API;
+`kobako.device.metrics()` remains a 500 ms cached, allocating diagnostic API;
 its `JS_ComputeMemoryUsage()` object walk is unsuitable for pressure sampling.
 
 ## Detection and delivery
@@ -136,7 +136,7 @@ JS side effects in an app's build callback.
 Implement in order: (1) reason-aware canary and cheap accounting, (2) host
 latch/query and tests, (3) listener delivery with the safe-point tests, then
 (4) optional native reclaimers only if measured system-DRAM pressure warrants
-them. This entails a lazy `pocket.memory` namespace, session-owned listener
+them. This entails a lazy `kobako.memory` namespace, session-owned listener
 init/reset/GC marking, single canary fan-out in `report_oom_if_any()`, and a
 no-format pressure pump outside FAIR mid-drain delivery. The owner is the
 existing paced UI loop, not a new guest scheduler. Do not block the query/latch

@@ -1,7 +1,7 @@
 // Deadline uses turn start; elapsed must exclude work before this drain.
 #include <assert.h>
 #include <stdio.h>
-#include "pocketjs/vm_sched.h"
+#include "kobako/vm_sched.h"
 #include "quickjs.h"
 
 static vm_tick_t ticks;

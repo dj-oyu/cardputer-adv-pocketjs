@@ -1,7 +1,7 @@
 // USB diagnostic 7. The app supplies only a generic schema and a source-to-slot
 // map; no JS frame reconstructs the displayed time.
 (function () {
-  const view = pocket.kasane.mount({version: 1,
+  const view = kobako.kasane.mount({version: 1,
     slots: {face: {type: 'text', capacity: 5},
             tag: {type: 'text', capacity: 7}},
     nodes: [
@@ -9,7 +9,7 @@
       {type: 'text', bounds: [4, 4, 48, 16], text: {slot: 'face'}, color: 0xe2f0ffff},
       {type: 'text', bounds: [50, 12, 94, 24], text: {slot: 'tag'}, color: 0x63d6ddff}
     ]}, {face: 'BASE', tag: 'BASE'});
-  const source = pocket.time.wallSource();
+  const source = kobako.time.wallSource();
   let bound = false;
   globalThis.frame = function () {
     if (bound) return;
@@ -20,6 +20,6 @@
       throw error;
     }
     bound = true;
-    console.log('KSN_WALL_SOURCE BOUND unixMs=' + pocket.time.wall().unixMs);
+    console.log('KSN_WALL_SOURCE BOUND unixMs=' + kobako.time.wall().unixMs);
   };
 })();

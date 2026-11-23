@@ -18,7 +18,7 @@
 
 | 分野 | 内容 |
 | --- | --- |
-| [API](api/README.md) | `pocket.*` の仕様、capability、未実装の面 |
+| [API](api/README.md) | `kobako.*` の仕様、capability、未実装の面 |
 | [基盤・開発環境](platform/README.md) | 取得、ビルド、テスト、ハードウェア、起動・終了・入力 |
 | [ホームと背景](scenes/README.md) | XMB、設定、FLOWER・SOLAR SAIL・LEVEL WAVE |
 | [アプリと機能](apps/README.md) | 操作・機能設計、DERBY・MEGADEMO・音声の実装と比較記録 |

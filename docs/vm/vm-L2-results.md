@@ -6,7 +6,7 @@
 
 ## 1. L2a: フレームセグメント（2026-09-13、`vm/l2a`）
 
-実装は `quickjs-vmstack.h`（ヘッダオンリー）と `quickjs.c` の差分。`CONFIG_POCKET_VM_SEGFRAMES`（実機）/ `-alloca` バリアント（ホスト）で旧経路へ戻せる。
+実装は `quickjs-vmstack.h`（ヘッダオンリー）と `quickjs.c` の差分。`CONFIG_QJS_LEAN_SEGFRAMES`（実機）/ `-alloca` バリアント（ホスト）で旧経路へ戻せる。
 
 ### 1.1 関所（実測(host)、統合後に再走）
 
@@ -67,7 +67,7 @@ D10（[vm-L2-design.md](vm-L2-design.md) §9）実装前に「3つの期待値�
 
 ## 3. L2b: フラット呼び出しの着地（2026-09-13、`vm/l2b`）
 
-実装は `JS_CallInternal` の `flat_call:` ブロック、共有プロローグ、`JS_SF_FLAT` 復帰と `quickjs-vmstack.h`（`JSVMLink`、`JS_SF_*`、`JS_RET_*`）。スイッチは `CONFIG_POCKET_VM_FLATCALLS`。対象は通常のバイトコード関数への `OP_call`系（[vm-L2-design.md](vm-L2-design.md) §10）。
+実装は `JS_CallInternal` の `flat_call:` ブロック、共有プロローグ、`JS_SF_FLAT` 復帰と `quickjs-vmstack.h`（`JSVMLink`、`JS_SF_*`、`JS_RET_*`）。スイッチは `CONFIG_QJS_LEAN_FLATCALLS`。対象は通常のバイトコード関数への `OP_call`系（[vm-L2-design.md](vm-L2-design.md) §10）。
 
 ### 3.1 H7実験: モジュール本体の扱い（実測(host)、`-O1`、segframes）
 
@@ -95,7 +95,7 @@ D10（[vm-L2-design.md](vm-L2-design.md) §9）実装前に「3つの期待値�
 | `--force-yield` | 3/41 | 同左、出力43件バイト一致・safepoint数一致 | — |
 | G6 `verify_all.sh` | exit 0 | | |
 
-既定onにした理由: (1) 上の関所がすべて通り3経路とも期待値無変更、(2) `stack_limit=20KiB` がフラットではJSの深さに対する予算だけを意味するようになった（§2の窓の中）、(3) 戻す手段が `CONFIG_POCKET_VM_FLATCALLS=n` の1行。
+既定onにした理由: (1) 上の関所がすべて通り3経路とも期待値無変更、(2) `stack_limit=20KiB` がフラットではJSの深さに対する予算だけを意味するようになった（§2の窓の中）、(3) 戻す手段が `CONFIG_QJS_LEAN_FLATCALLS=n` の1行。
 
 **呼び出し経路の速度差は検出できなかった**（実測(host)、`timing.py -n 20`、flat/recur/alloca を交互2周）。周回間のぶれ（最大約30%）が経路間の差より大きく、主張できない。同一バイナリでの切り替え比較（別ビルドの配置差と交絡しないもの）が無いと速度差は主張できない。実機の速度は未計測。
 
@@ -125,7 +125,7 @@ main 3607e84（改変なし）と vm/main 983eabe（L2b、フラット既定on�
 
 ### 3.5 同一バイナリ内のflat/recur速度比較（2026-09-16）
 
-`CONFIG_POCKET_VM_CALLBENCH`（既定n、FLATCALLS必須・YIELD禁止）で、idle runtimeの
+`CONFIG_KOBAKO_VM_CALLBENCH`（既定n、FLATCALLS必須・YIELD禁止）で、idle runtimeの
 通常call/method callを既存の`JS_CallInternal`再帰fallbackへ切り替える口を追加した。
 通常ビルドではフィールド・分岐・APIを前処理で除去する。これは同じflatインタープリタの
 dispatch比較であり、コンパイル時にFLATCALLSを外したL2a全体との同一性は主張しない。
@@ -166,7 +166,7 @@ selector=recurのclosure/generator/promise/job重点9件はo2/ASan各9/9。
 
 ### 3.6 復帰時のcall inputs遅延復元の試作（2026-09-16、既定OFF）
 
-`CONFIG_POCKET_VM_LAZY_INPUTS`を追加。flat returnで`argc/argv/this/new.target`を即時復元せず、
+`CONFIG_KOBAKO_VM_LAZY_INPUTS`を追加。flat returnで`argc/argv/this/new.target`を即時復元せず、
 無効フラグだけ置く。読者は`push_this/special_object/rest/check_ctor/init_ctor`の5 opcode入口。
 必要時に現在のsf・floor・async所有者・TCO保持スロットから復元してその命令へ直接戻る。
 命令の再dispatch・debug dump・poll・確保・JS実行は増やさない。default引数のcall後にrest等を
@@ -290,7 +290,7 @@ Stage Aの攻撃で見つかった二重解放（`JS_NewPromiseCapability` の2�
 
 ### 4.3 段3a: ホスト所有SEG鎖の保存・再開（実測(host)、2026-09-16）
 
-`CONFIG_POCKET_VM_YIELD`（既定n）を追加し、`JS_VMCall` / global の`JS_VMEval`から入ったSEG床と、その上のフラットSEG・最初の同期区間にいるflat asyncフレームを、分類Aの7地点で保存・再開する本体を実装した。yieldは例外を作らず、`cur_pc` / `cur_sp`と鎖を公開して`JS_EXCEPTION`を返す。再開時は同じフレーム鎖を`restart:`へ戻す。床は実行開始時に関数・`this`・`new.target`・渡された全引数を所有するため、yield地点での確保はない。モジュール本体はD17rどおり対象外。
+`CONFIG_QJS_LEAN_YIELD`（既定n）を追加し、`JS_VMCall` / global の`JS_VMEval`から入ったSEG床と、その上のフラットSEG・最初の同期区間にいるflat asyncフレームを、分類Aの7地点で保存・再開する本体を実装した。yieldは例外を作らず、`cur_pc` / `cur_sp`と鎖を公開して`JS_EXCEPTION`を返す。再開時は同じフレーム鎖を`restart:`へ戻す。床は実行開始時に関数・`this`・`new.target`・渡された全引数を所有するため、yield地点での確保はない。モジュール本体はD17rどおり対象外。
 
 停止中のSEGフレームは`JS_MarkContext`からmarkし、鎖の途中のflat asyncフレームは既存の`async_func_mark`へ分担する。最初の同期区間を終えたasyncフレームは、まだasync所有者側の再開囲いを実装していないため`MAY_YIELD`を落とす。
 
@@ -324,7 +324,7 @@ Test262の読み違いを1件記録する: 作業ツリーの `.cache/test262` �
 
 実機コンパイラのELF型情報: `sizeof(JSRuntime)=344`、`JSStackFrame=48`、`JSAsyncFunctionData=104` bytes。終了フラグはoffset 173で、入口トークン172と床の値176の間の詰め物に収まる。フレームは増えていない。yield時とDiscardは確保を行わない。async/async-generator所有床、保留job、要求ビットと実機スケジューラ接続は次工程。
 
-**実測(device、ESP32-S3、240 MHz、ESP-IDF 6.0.1):** `CONFIG_POCKET_VM_YIELD=y, POCKET_VM_SELFTEST=y`、独立した`build_vm_l2c_selftest/sdkconfig`でビルドし、COM3の実機へアプリ領域のみを書き込んで確認した。
+**実測(device、ESP32-S3、240 MHz、ESP-IDF 6.0.1):** `CONFIG_QJS_LEAN_YIELD=y, KOBAKO_VM_SELFTEST=y`、独立した`build_vm_l2c_selftest/sdkconfig`でビルドし、COM3の実機へアプリ領域のみを書き込んで確認した。
 
 | 関所 | 結果 |
 | --- | --- |
@@ -369,7 +369,7 @@ ELF型情報は`JSRuntime=376`、`JSStackFrame=48`、`JSAsyncFunctionData=104`B�
 
 ### 4.7 D24r/D28r: guestの再開・実行ターンtimer（2026-09-16）
 
-guestに`suspended`とorigin（FRAME/JOB_HELD/JOB_ASYNC）を追加し、`work_pending`で継続を選ぶ。frameの呼び直しを拒否し、保留jobはtail完了後に一度だけ数える。FAIRも中断中はpumpしない。frame/continue APIの内側だけで残り予算のone-shot timerを張り、出口で解除する。callbackはguestポインタを保持せず、共有runtimeスロットのロックで解放競合を避ける。Backターンはtimerを無効化し、`pocket_app_reset`は中断鎖を先にTerminate/Resumeする。Cスタック不足でasync ownerの再開が拒まれた場合はDiscardで閉じる。
+guestに`suspended`とorigin（FRAME/JOB_HELD/JOB_ASYNC）を追加し、`work_pending`で継続を選ぶ。frameの呼び直しを拒否し、保留jobはtail完了後に一度だけ数える。FAIRも中断中はpumpしない。frame/continue APIの内側だけで残り予算のone-shot timerを張り、出口で解除する。callbackはguestポインタを保持せず、共有runtimeスロットのロックで解放競合を避ける。Backターンはtimerを無効化し、`kobako_app_reset`は中断鎖を先にTerminate/Resumeする。Cスタック不足でasync ownerの再開が拒まれた場合はDiscardで閉じる。
 
 累積frame時間と従来250ms相当のguardを追加（閾値の調律実測は未完了）。drainの締切と実行時間を分離した。従来の`budget.elapsed`はターン開始からを測り、frameやresumeを含んでいたので、call開始からへ訂正して二重計上を防いだ。`sched_clock.c`で先行処理を除くこと・32bit wrap・count modeでclockを読まないことを固定した。
 
@@ -643,15 +643,15 @@ SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Co
 - helloは生存量が小さく、フレーム中にGCが走らないので、上のbenchmarkは前後比較になっていない（下の追加計測で確認）。
 
 **実機の追加計測（実測(device)、2026-09-16）**: 前=`8ef5b25`、後=`6fa205d`。それぞれに計測パッチ（コミットしない。`js_trigger_gc`のGC回数・時間、`malloc_size`のピーク・GC後の生存量、`app_tick`1回の時間の0.25ms刻みヒストグラム。`app_stop`で`GCPROBE`行を出す）を当てて、別worktreeでビルドした。
-- 対象の2本: 5本（hello／IMU CALIBRATION／POCKET PET／PET COMPANION／Kasane demo）を無操作で20秒ずつ走らせ、ゲストヒープのピークが大きい2本を選んだ。IMU CALIBRATION 129,562B、POCKET PET 127,735B（以下Kasane demo 115,654B、companion 111,977B、hello 99,921B）。
+- 対象の2本: 5本（hello／IMU CALIBRATION／KOBAKO PET／PET COMPANION／Kasane demo）を無操作で20秒ずつ走らせ、ゲストヒープのピークが大きい2本を選んだ。IMU CALIBRATION 129,562B、KOBAKO PET 127,735B（以下Kasane demo 115,654B、companion 111,977B、hello 99,921B）。
 - 手順: 無操作で30秒走らせて終了。p99は`app_tick`時間の最近順位法で、0.25ms刻みの上端。
 
 | ビルド | アプリ（周回数） | frame max | frame p99 | GC回数（うちフレーム中） | GC 1回 |
 | --- | --- | --- | --- | --- | --- |
 | 前 | IMU CALIBRATION（6） | 26.9〜27.5ms | 20.75〜21.75ms | 0（0） | — |
 | 後 | IMU CALIBRATION（14） | 27.0〜28.8ms | 20.75〜22.75ms | 各1（0） | 1.03〜1.22ms |
-| 前 | POCKET PET（6） | 26.9〜56.2ms | 7.5〜8.5ms | 0（0） | — |
-| 後 | POCKET PET（6） | 26.5〜58.4ms | 7.75〜8.75ms | 各1（0） | 1.03〜1.18ms |
+| 前 | KOBAKO PET（6） | 26.9〜56.2ms | 7.5〜8.5ms | 0（0） | — |
+| 後 | KOBAKO PET（6） | 26.5〜58.4ms | 7.75〜8.75ms | 各1（0） | 1.03〜1.18ms |
 
 - 修正後のGCは、アプリ起動時のソース評価中に走る1回だけ（初期閾値80KiBを越えた時点）。フレーム中のGCは0回で、max/p99の差は周回間のばらつきの範囲。PETの56〜58msのmaxは修正前にもある。
 - 毎回GC領域（155KiB超）: GC後の生存量は最大81,881B、ピークは129,562Bで、2本とも届かない。無操作での値で、操作中の生存量は測っていない。
@@ -681,7 +681,7 @@ SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Co
 | --- | --- | --- | --- | --- | --- | --- |
 | IMU CALIBRATION | 前 | 85,164 / 31,744 | 106,371 | 66,824〜66,848 | 5,543〜5,550 / 全数 / 252,805 | 27.2〜27.5 / 20.75〜21.0ms |
 | | 後 | 91,560〜91,596 / 31,744 | 108,932〜108,980 | 73,820〜73,868 | 5,507〜5,520 / 3,602〜3,942 / 142,740〜170,828 | 27.2〜27.3 / 20.75ms |
-| POCKET PET | 前 | 82,196〜82,224 / 36,864 | 112,548 | 77,568〜77,584 | 1,413 / 全数 / 104,757 | 26.3〜56.5 / 8.5ms |
+| KOBAKO PET | 前 | 82,196〜82,224 / 36,864 | 112,548 | 77,568〜77,584 | 1,413 / 全数 / 104,757 | 26.3〜56.5 / 8.5ms |
 | | 後 | 89,116〜89,132 / 45,056 | 115,440〜115,456 | 84,504〜84,520 | 1,371〜1,372 / 570〜579 / 62,636〜62,964 | 26.6〜55.2 / 8.5ms |
 
 - 空きは IMU で +6.4〜7.0 KiB、PET で +6.9 KiB。PET の最大連続は +8 KiB。コピー量は IMU −32〜44%、PET −40%。移動は IMU で約3割、PET で約6割減った。realloc の呼び出し回数は IMU −0.8%、PET −2.9% で、slack で消えた分は少ない。
@@ -942,7 +942,7 @@ live最大は全方針でhello456B、A148B、B20460B、C172B、D148B、E160B、F
 
 上流の QuickJS は、関数を1つ解析するたびにその全文を `js_strndup` で複写して `JSFunctionBytecode.source` に持つ（内側の関数の本文は親の複写にも入るので二重に持つ）。読むのは `Function.prototype.toString` とデバッグ出力だけ。Kasane 移植の計測（[判断台帳](../kasane/decisions.md)）で、この複写がアプリあたり 2.5〜7.1 KiB と分かったので、出荷の既定で作らないようにした。
 
-- **切替**: `CONFIG_POCKET_VM_STRIP_FN_SOURCE`（`main/Kconfig.projbuild`、既定 y）。`quickjs.c` の複写3箇所（通常関数、式本体のアロー、クラス）を飛ばす。n にすると上流と同じ。
+- **切替**: `CONFIG_QJS_LEAN_STRIP_FN_SOURCE`（`main/Kconfig.projbuild`、既定 y）。`quickjs.c` の複写3箇所（通常関数、式本体のアロー、クラス）を飛ばす。n にすると上流と同じ。
 - **失うもの**: JS 関数の `toString()` は、上流にもともとある「ソース無し」の分岐を通って `"function " + name + "() {\n    [native code]\n}"` を返す（`js_function_toString`）。この分岐では `func_kind` が更新されないので、async・ジェネレータ・アロー・クラスも接頭辞は `function ` になる。呼び出し、エラーメッセージ、スタックトレース、行番号は変わらない。
 
 ### 6.1 実機（実測(device)、vm/main 同一ソースで切替だけ変えた2ビルド、各2回）
@@ -1018,7 +1018,7 @@ live最大は全方針でhello456B、A148B、B20460B、C172B、D148B、E160B、F
 
 ## 8. YIELD 既定化の判断材料（backlog #11、2026-09-23、`vm/l2c-integration`）
 
-`vm/main` の `afb2c89` を基点に、worktree で `build_y`（`CONFIG_POCKET_VM_YIELD=y`、FAIR/TCO は n）と
+`vm/main` の `afb2c89` を基点に、worktree で `build_y`（`CONFIG_QJS_LEAN_YIELD=y`、FAIR/TCO は n）と
 `build_n`（既定、YIELD=n）を作って比べた。どちらも同じソース・同じ `sdkconfig.defaults` で、
 違いは YIELD の1行だけ。COM3 へ交互に焼いて測った。
 
@@ -1033,16 +1033,16 @@ frame ガードは `VM_FRAME_RUNAWAY_US`（250,000µs）に対して1回の `fra
 | --- | ---: | --- | ---: | ---: |
 | HELLO WORLD | 911 / 916 / 960 | 262 / 344 / 990 | 0 | 0 |
 | IMU CALIBRATION | 901 / 897 / 951 | 6,283 / 5,702 / 5,822 | 0 | 0 |
-| POCKET PET | 893 / 894 / 892 | 47,426 / 18,404 / 18,314 | 1回目のみ1 | 0 |
+| KOBAKO PET | 893 / 894 / 892 | 47,426 / 18,404 / 18,314 | 1回目のみ1 | 0 |
 | PET COMPANION | 887 / 888 / 889 | 3,307 / 3,183 / 3,637 | 0 | 0 |
 | KASANE DEMO（`K`） | 851 / 851 | 5,605 / 5,490 | 0 | 0 |
 
-- 最大は POCKET PET の 47.4ms で、閾値の 5.3 分の1。2回目以降は 18.4ms で再現しないので、
+- 最大は KOBAKO PET の 47.4ms で、閾値の 5.3 分の1。2回目以降は 18.4ms で再現しないので、
   起動直後の一度きりの費用と読める（何の費用かは特定していない）。
 - 多ターンに跨る drain は全アプリ・全回で 0 件（`drain_max_us=0`）。`VM_RUNAWAY_US` 側は
   この5本では一度も働く場面が無い。
 - キー操作の回は 0.5 秒ごとに `e`/`u`/`d`/Enter を送った。効果音が鳴るので音声との競合を含む。
-  POCKET PET と PET COMPANION は保存データを変えないため無操作のままにした。
+  KOBAKO PET と PET COMPANION は保存データを変えないため無操作のままにした。
   KASANE DEMO はキーでデモ自体が終わるので、この回の値は無い。
 - 無操作と軽いキー操作だけの条件であり、Wi-Fi 通信・音声再生・SD 読みを統制した競合条件では
   測っていない。**この5本で余裕が5倍あることは、あらゆる負荷での安全余裕の証明ではない。**
@@ -1093,8 +1093,8 @@ JS ターンが +0.05ms（+29%）で、3回とも同じ値だった。render と
 - 2026-09-16 のファーム（関数ソース保持あり、旧UI経路あり、Kasane 以前の画面）で見えた揺れの原因は、**特定していない**。
   現行で再現しないという事実であって、当時の原因が分かったのではない。同じ現象が再び出たら、その時点のバイナリで採り直す。
 
-再現: `python tools/memlog.py --map <build>/cardputer_pocketjs.map --port COM3 --check` を繰り返す。
-窓ごとの値は `CONFIG_POCKET_VM_PROBE=y` のビルドで `VMPROBE WINDOW` 行を読む。
+再現: `python tools/memlog.py --map <build>/cardputer_kobako.map --port COM3 --check` を繰り返す。
+窓ごとの値は `CONFIG_QJS_LEAN_PROBE=y` のビルドで `VMPROBE WINDOW` 行を読む。
 
 ### 8.4 閾値の近くと競合条件（実測(device)、2026-09-23）
 
@@ -1120,14 +1120,14 @@ USB へ 20ms ごとにバイトを送る負荷では 239,699µs（+約 50µs、0
 | wifi（リンク＋3秒ごとの GET） | 1.32 ms | 1.64 | 9.39 |
 
 ガードは横取りされた時間も数えるので、この増分はそのまま余裕を削る。中央値で +2%（audio）/ +8%（wifi）、
-**1フレームの最悪値で +2.0ms（audio）/ +8.1ms（wifi）**。§8.1 の最も重い実アプリのフレーム（POCKET PET 47.4ms）へ
+**1フレームの最悪値で +2.0ms（audio）/ +8.1ms（wifi）**。§8.1 の最も重い実アプリのフレーム（KOBAKO PET 47.4ms）へ
 足し合わせると 50〜59ms で、250ms までなお4倍以上ある。ただしこれは**別の負荷で測った増分を別の負荷へ当てた推定**であり、
 実アプリを競合条件下で測った値ではない。倍率で外挿していないのは、横取りは長いフレームほど比例して増えるのではなく
 期間あたりの CPU 取り分として乗るため。
 
-**条件スクリプトの欠損（記録）**: `apps/vmprobe/condition.js` の UI 条件（mask 1）は旧 `pocket.ui` を呼ぶ。
+**条件スクリプトの欠損（記録）**: `apps/vmprobe/condition.js` の UI 条件（mask 1）は旧 `kobako.ui` を呼ぶ。
 CP24–25 でその API は削除されたので、`ui` と `all` の条件は現在そのまま走らせても UI 負荷を作らない。
-本節が audio と wifi を単独で使ったのはそのため。直すなら `pocket.kasane` で書き直す。
+本節が audio と wifi を単独で使ったのはそのため。直すなら `kobako.kasane` で書き直す。
 
 ### 8.5 総合関所（実測(device)、2026-09-23、`d54f753`）
 
@@ -1148,10 +1148,10 @@ firmware SHA-256 `68b23d90ef141ca8a338bb0e011e807afc6d8166bb111ffa51902bce0c8c9c
 
 ### 8.6 L2c を既定にする（2026-09-23、`main/Kconfig.projbuild`）
 
-`CONFIG_POCKET_VM_YIELD` を `default n` から `default y` にした。根拠は §8.1〜8.5 の実測で、
+`CONFIG_QJS_LEAN_YIELD` を `default n` から `default y` にした。根拠は §8.1〜8.5 の実測で、
 値段（JSターン +0.05ms、Flash +3,784B、DIRAM +32B）と、持ち込む frame ガードの余裕
 （実アプリ最大 47.4ms に対し閾値 250ms、239.6ms は完走・256.0ms で停止）を測ったうえでの切り替え。
-`POCKET_VM_TCO` と `POCKET_VM_FAIR` は n のまま — 前者は `Error.stack` と再帰上限を、
+`KOBAKO_VM_TCO` と `KOBAKO_VM_FAIR` は n のまま — 前者は `Error.stack` と再帰上限を、
 後者は JS から観測できるジョブ順序を変えるので、値段ではなく互換性の判断が要る。
 
 新しい既定での総合関所（`--cycles 30`）: **FULL_PASS、全10段階**。
@@ -1170,7 +1170,7 @@ YIELD も一緒に落とす（Kconfig の `depends on` と同じ規則）。コ�
 `app_session.c` の条件適用を `'X'`（hello）にも広げ、**UI ビットだけは落とす**
 （hello は自分の Kasane scene で APP 層を持つので、条件側が2枚目を建てることになる）。
 `vm_l0_capture.py` の「hello は base だけ」という拒否も、`ui` を含むときだけに変えた。
-どちらも `CONFIG_POCKET_VM_PROBE` の中で、出荷ビルドには入らない。
+どちらも `CONFIG_QJS_LEAN_PROBE` の中で、出荷ビルドには入らない。
 
 | 条件 | frame 中央値 | p95 | 最大 | 完了遅延 p95 |
 | --- | ---: | ---: | ---: | ---: |
@@ -1182,21 +1182,21 @@ YIELD も一緒に落とす（Kconfig の `depends on` と同じ規則）。コ�
 - **最悪の1フレームは 9.90ms**で、frame ガードの 250ms まで25倍ある。
 - 増分（base比 +9.7ms）は §8.4 が deep_recursion で測った +8.1ms と同じ桁で、
   「横取りは期間あたりの取り分として乗る」という読みと整合する。
-- §8.1 の最も重い実アプリのフレーム（POCKET PET 47.4ms）は**この条件下では測っていない**。
+- §8.1 の最も重い実アプリのフレーム（KOBAKO PET 47.4ms）は**この条件下では測っていない**。
   同じ増分を当てれば約 57ms（4.4倍の余裕）だが、それは推定のまま。
   PET と COMPANION は probe の入口を持たないため、測るには同じ拡張をもう一段必要とする。
 
-### 8.8 POCKET PET と PET COMPANION を競合条件下で（実測(device)、2026-09-23、VM_PROBEビルド）
+### 8.8 KOBAKO PET と PET COMPANION を競合条件下で（実測(device)、2026-09-23、VM_PROBEビルド）
 
 §8.7 で残っていた「いちばん重いフレームを持つアプリ」を測るため、probe の入口を2本足した
-（`'<'` POCKET PET、`'>'` PET COMPANION）。この2本は**自分の manifest で起動する** —
+（`'<'` KOBAKO PET、`'>'` PET COMPANION）。この2本は**自分の manifest で起動する** —
 capability の注入（`pet.companion`）と保存の持ち主が manifest で決まるので、hello の身元では
 どちらも得られない。UI ビットは hello と同じ理由で落とす。probe ビルド限定で、出荷には入らない。
 **この2本は自分の保存データを普通に書く**（PET の autosave）。
 
 | アプリ | 条件 | frame 中央値 | p95 | 最大 |
 | --- | --- | ---: | ---: | ---: |
-| POCKET PET | base / audio / wifi / all | 0.95 / 1.00 / 1.08 / 1.14 ms | 3.71 / 3.85 / 4.04 / 4.26 | 4.17 / 4.17 / **12.90** / 9.79 |
+| KOBAKO PET | base / audio / wifi / all | 0.95 / 1.00 / 1.08 / 1.14 ms | 3.71 / 3.85 / 4.04 / 4.26 | 4.17 / 4.17 / **12.90** / 9.79 |
 | PET COMPANION | base / audio / wifi / all | 0.23 / 0.28 / 0.36 / 0.41 ms | 0.41 / 1.76 / 0.67 / 2.77 | 2.65 / 3.13 / 3.46 / **10.34** |
 
 - **最悪の1フレームは PET の 12.90ms**（Wi-Fi 条件）で、frame ガードの 250ms まで19倍ある。
@@ -1260,7 +1260,7 @@ L2c の入力まわりはすべて USB の1バイトで駆動してきた。そ�
 | F async_generator | frame 中央値 / p95 | 3.97 / 7.80 ms | 3.72 / 7.21 ms |
 | E io_wait | 完了遅延 中央値 / p95 | 0.03 / 0.05 ms | 0.07 / 0.07 ms |
 | hello | frame 中央値 | 0.12 ms | 0.16 ms |
-| POCKET PET | frame 中央値 | 0.97 ms | 1.05 ms |
+| KOBAKO PET | frame 中央値 | 0.97 ms | 1.05 ms |
 | PET COMPANION | frame 中央値 | 0.23 ms | 0.21 ms |
 
 - **L1 §9.5 の「F型で完了遅延が中央値3〜7倍改善」は、今の負荷では再現できない。** F は完了イベントを

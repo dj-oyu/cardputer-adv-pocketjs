@@ -1,7 +1,7 @@
 """Move the frame segments on the device and check nothing else changed.
 
 L3a's device gate (docs/vm/vm-L3-design.md sec.8, docs/vm/vm-L3-results.md
-sec.3). Needs a CONFIG_POCKET_VM_RELOC=y build; a normal build has no '&' key
+sec.3). Needs a CONFIG_QJS_LEAN_RELOC=y build; a normal build has no '&' key
 and the run below fails at VM_RELOC_ARMED, which is the honest failure -- the
 firmware cannot relocate, so a green run would be a lie.
 
@@ -131,7 +131,7 @@ def main():
     parser.add_argument("--port", required=True)
     parser.add_argument("--app", default="<",
                         help="USB app letter: '<' pet, '>' companion (needs "
-                             "CONFIG_POCKET_VM_PROBE). The digits are FAILURE "
+                             "CONFIG_QJS_LEAN_PROBE). The digits are FAILURE "
                              "diagnostics -- '1' is a deliberate syntax error "
                              "and '3' an endless frame -- so none of them is a "
                              "default worth having here.")

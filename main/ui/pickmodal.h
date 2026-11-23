@@ -102,7 +102,7 @@ const pick_row_t *pickmodal_current(const pickmodal_t *p);
 void pickmodal_reload(pickmodal_t *p);
 
 // True when the deadline has passed. Checked from the draw path, because
-// pocket_api_pump() does not run while the guest is not ticked -- so nothing
+// kobako_api_pump() does not run while the guest is not ticked -- so nothing
 // else would notice a promise whose time ran out while a person read the list.
 bool pickmodal_expired(const pickmodal_t *p, int64_t now_us);
 

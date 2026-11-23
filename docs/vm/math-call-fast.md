@@ -95,6 +95,6 @@ native のフレームを省いても見分けがつかない理由:
 ## 6. 結果と残り
 
 - コード（Xtensa `-Os` の再現コンパイル）: `JS_CallInternal` 27,172 → 27,240 B（+68）。`js_call_math_fast` は 308 B。text の合計は +399 B（flash）。DRAM とゲストのヒープは増えない。
-- 推定: 1回あたり C の呼び出しが8回減り、`JS_CallInternal` への再入（300 B のウィンドウフレームと、その入口のキャッシュ行）が無くなる。呼び出しの深さも1〜2段浅くなるので、ウィンドウのあふれも減る見込み。実機の差は、[derby-camera-history.md](../apps/derby-camera-history.md) §1 の `sqrt` / `sin` / `M.sin` のベンチで測る（未実施）。命令キャッシュの配置だけで15%動くので、`CONFIG_POCKET_VM_TURNPERF` で同じ配置どうしを比べること。
+- 推定: 1回あたり C の呼び出しが8回減り、`JS_CallInternal` への再入（300 B のウィンドウフレームと、その入口のキャッシュ行）が無くなる。呼び出しの深さも1〜2段浅くなるので、ウィンドウのあふれも減る見込み。実機の差は、[derby-camera-history.md](../apps/derby-camera-history.md) §1 の `sqrt` / `sin` / `M.sin` のベンチで測る（未実施）。命令キャッシュの配置だけで15%動くので、`CONFIG_KOBAKO_TURNPERF` で同じ配置どうしを比べること。
 - 次の一手（未実施）: 引数が数値なら `JS_FreeValue` を呼ばない。関数の参照を減らす処理をインライン化する。§4.4 の「`JS_FreeValue` のインライン化」と同じ話。
 - `mx.apply(null, xs)`（`OP_apply`、5回/フレーム）は対象外。

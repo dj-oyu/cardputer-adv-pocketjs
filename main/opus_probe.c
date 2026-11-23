@@ -1,4 +1,4 @@
-// MEASUREMENT HARNESS -- worktree only, never committed, never part of pocket.audio.
+// MEASUREMENT HARNESS -- worktree only, never committed, never part of kobako.audio.
 //
 // Answers the one number the host could not: what an Opus frame costs to decode
 // on this part. Everything else about Opus was measurable without a board (state

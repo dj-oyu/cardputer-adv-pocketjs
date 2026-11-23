@@ -1,7 +1,7 @@
 // Diagnostic only: JS frames over the native FLOWER backdrop through the
 // ordinary Kasane image resource. The 96x22 deskclock viewport stays small.
 (() => {
-  const view = pocket.kasane;
+  const view = kobako.kasane;
   const video = view.video;
   const width = 32, height = 8;
   const resource = video.open(width, height);
@@ -13,18 +13,18 @@
     console.log('D6_SD_MP3_ERROR stage=' + stage + ' code=' +
                 ((error && error.code) || error));
   }
-  pocket.overlay.onKey(function (event) {
+  kobako.overlay.onKey(function (event) {
     if (event.action !== 'accept' || audioRequested) return;
     audioRequested = true;
     console.log('D6_SD_MP3_REQUEST');
-    pocket.fs.requestFolder('sd').then(function (root) {
+    kobako.fs.requestFolder('sd').then(function (root) {
       if (root !== 'sd:/') throw new Error('grant declined');
       console.log('D6_SD_MP3_GRANTED');
-      return pocket.fs.pickFile('sd', {extensions: ['.mp3']});
+      return kobako.fs.pickFile('sd', {extensions: ['.mp3']});
     }).then(function (path) {
       if (!path) throw new Error('file declined');
       console.log('D6_SD_MP3_PICKED ' + path);
-      return pocket.audio.player.open({source: path});
+      return kobako.audio.player.open({source: path});
     }).then(function (handle) {
       player = handle;
       const info = handle.info();

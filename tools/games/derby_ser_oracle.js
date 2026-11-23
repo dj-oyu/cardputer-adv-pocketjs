@@ -1,7 +1,7 @@
 // Host only (test_derby_host.c with DERBY_SER_ORACLE=1; docs/apps/derby-ser-native.md
 // section 8). The JS ser(), ou(), lim(), inr() and pan()'s VE/VC of vm/main
-// fac3552 (apps/derby/derby_pan.js), the specification main/apps/derby/pocket_derby.c
-// translates. Each pocket.derby.ser() call runs this first; its draws (handle
+// fac3552 (apps/derby/derby_pan.js), the specification main/apps/derby/kobako_derby.c
+// translates. Each kobako.derby.ser() call runs this first; its draws (handle
 // and the eight doubles) are compared with the ones the C passed to draw(),
 // bit for bit (__sercmp). __serfuzz(n) compares n random cameras, courses and
 // series, the draws not run (__serdry). Changes from the original are marked
@@ -10,7 +10,7 @@
 // arguments, which outside the fuzz must equal the app's own values.
 //
 // Since the integer interface (docs/apps/derby-integer.md) the app gives the
-// course, the unit and the series as Q16 integers and pocket.derby holds the
+// course, the unit and the series as Q16 integers and kobako.derby holds the
 // camera (aim()); the oracle captures those calls and keeps its own doubles
 // (CH, the sections, pc), converted exactly as the C converts them, and its
 // own pose() (the vm/main JS).
@@ -21,7 +21,7 @@
 // plan). The C's double series is gone (sec.13) and the C clamps L to 1 or
 // more, so the JS is given that L too (L = 0 was a pattern mode no app uses).
 (function () {
-  const S = pocket.derby, NV = S.view, NS = S.ser, NC = S.course, NA = S.aim, q16 = v => v / 65536,
+  const S = kobako.derby, NV = S.view, NS = S.ser, NC = S.course, NA = S.aim, q16 = v => v / 65536,
     flo = M.floor, rnd = M.round, PI = M.PI;
   let VE, VC, Lo, Hi, ZF, T, HL, CR, HC, CE, rec, fuzz = 0, pc, CH, SEC, DN;
   function pose(g, w) {

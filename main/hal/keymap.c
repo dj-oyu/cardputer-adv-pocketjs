@@ -39,14 +39,14 @@ static void token(keystroke_t *k, const char *name) {
 }
 static void byte(keystroke_t *k, char c) { k->text[0]=c; k->len=1; }
 
-#ifdef POCKET_KEYTEST
+#ifdef KOBAKO_KEYTEST
 static bool inject_take(board_keyevent_t *e);
 #endif
 
 bool keymap_poll(keystroke_t *out) {
     board_keyevent_t e;
     if(!board_key_event(&e)
-#ifdef POCKET_KEYTEST
+#ifdef KOBAKO_KEYTEST
        && !inject_take(&e)
 #endif
       ) return false;
@@ -122,7 +122,7 @@ bool keymap_poll(keystroke_t *out) {
 
 // ------------------------------------------------------------- key names
 //
-// pocket.input.keys names a key by what its cap says, derived from PLAIN so
+// kobako.input.keys names a key by what its cap says, derived from PLAIN so
 // the matrix is described once: a printing character is its own name, the
 // four control bytes and the modifier cells get a word. Letters are the lower
 // case; Shift is a key of its own and does not rename the others.
@@ -171,13 +171,13 @@ int keymap_key_index(const char *name) {
     return -1;
 }
 
-#ifdef POCKET_KEYTEST
+#ifdef KOBAKO_KEYTEST
 // ------------------------------------------------- USB key injection (diag)
 //
 // A host script presses and releases keys as the keyboard would: the event is
 // queued here and keymap_poll() takes it when the FIFO is empty, so it reaches
 // keystate AND the translation above -- an injected Ctrl+Alt+Del stops the
-// app. Diagnostic builds only (POCKET_KEYTEST in main/CMakeLists.txt): the
+// app. Diagnostic builds only (KOBAKO_KEYTEST in main/CMakeLists.txt): the
 // shipping USB byte table stays what tools/*.py already rely on.
 //
 // Frame: US(0x1f) 'K' op hex hex LF, op '+' press or '-' release, hex the key

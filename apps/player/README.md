@@ -26,7 +26,7 @@
 `-` と `=` はシェルが取る。プレイヤーを見ながら押せば音量は変わるが、
 **変えているのはシェルであってこのアプリではない**し、どのアプリにもできない。
 自分で音量を上げられるアプリは、誰も見ていないあいだに上げられるアプリである。
-だから `pocket.audio` に音量は無い。
+だから `kobako.audio` に音量は無い。
 
 表示もシェルが出す（右上に1.5秒バーが出る）。overlayの上に描かれるが、
 3.1の規則に穴を開けてはいない — 規則は「overlayがシェルの**同意の面**を覆えない」で、
@@ -50,9 +50,9 @@ Kasane native presenter が計算し、JS は表示値だけを渡す。
 
 ## Kasane overlay
 
-CP28で描画を`pocket.kasane`へ移植した。通常appと同じAPP layerを使い、シェルが各帯へ
+CP28で描画を`kobako.kasane`へ移植した。通常appと同じAPP layerを使い、シェルが各帯へ
 native sceneをbackdropとして供給してから合成する。OVERLAYという第三layerはない。
-`pocket.overlay`はregion limitsとkey listenerのためだけに残る。
+`kobako.overlay`はregion limitsとkey listenerのためだけに残る。
 
 `ui.mount('music')` で native presenter を取得する。JSは選曲・再生操作と
 `view.set({title,message})` だけを担当し、open後に `view.bind('playback')` する。
@@ -78,7 +78,7 @@ MP3の `durationMs` は再生が終わるまで `null` で、`seekable:false`。
 
 ## 次の曲を誰が持つか
 
-ホストが持つ（`pocket.fs.nextFile`）。理由は2つある。
+ホストが持つ（`kobako.fs.nextFile`）。理由は2つある。
 
 **判断が1つの場所に残る。** 拡張子フィルター、`.` 始まりの除外、
 `sd_name_reserved`——「再生できるファイルとは何か」の判定は全部
@@ -94,7 +94,7 @@ MP3の `durationMs` は再生が終わるまで `null` で、`seekable:false`。
 ## 進捗の見せ方が2つあるのはなぜか
 
 **長さが分かるときだけバーを描く。** MP3の総フレーム数はXing/Info/VBRIタグに
-正確に書かれていて、それを読めば `durationMs` が出る（`pocket_mp3_total_frames`）。
+正確に書かれていて、それを読めば `durationMs` が出る（`kobako_mp3_total_frames`）。
 無い場合は**推測しない** — CBR前提の「バイト数÷ビットレート」は定ビットレートなら
 正確で可変なら黙って外れ、どちらかをファイルは教えてくれない。
 
@@ -107,7 +107,7 @@ MP3の `durationMs` は再生が終わるまで `null` で、`seekable:false`。
 
 ## 移植前の実測（2026-09-09、実機）
 
-以下は旧`pocket.overlay` display list時代のbaselineであり、Kasane overlay移植後は未測定。
+以下は旧`kobako.overlay` display list時代のbaselineであり、Kasane overlay移植後は未測定。
 
 ```
 overlay: OVERLAY_COST free_before=268708 free_after=158840 floor=57344

@@ -11,13 +11,13 @@
 // it needs no lock: the display task sees only `job` and writes `job_result`.
 #include "disp.h"
 #include <stddef.h>
-#ifdef CONFIG_POCKET_DISP_TASK
+#ifdef CONFIG_KOBAKO_DISP_TASK
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #endif
-#ifdef CONFIG_POCKET_DISP_ASSERT
+#ifdef CONFIG_KOBAKO_DISP_ASSERT
 #include <assert.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -37,8 +37,8 @@ static bool in_flight;      // handed to the task, not yet waited for
 static bool pending;        // finish step not run yet
 static esp_err_t job_result;
 
-#ifdef CONFIG_POCKET_DISP_TASK
-#define DISP_STACK CONFIG_POCKET_DISP_STACK
+#ifdef CONFIG_KOBAKO_DISP_TASK
+#define DISP_STACK CONFIG_KOBAKO_DISP_STACK
 static StaticTask_t task_storage;
 static StackType_t task_stack[DISP_STACK / sizeof(StackType_t)];
 static StaticSemaphore_t done_storage;
@@ -63,7 +63,7 @@ esp_err_t disp_init(void) {
      * per task on the core the task runs on. Priority 5, the UI task's: it
      * stays below sfx (7). */
     task=xTaskCreateStaticPinnedToCore(disp_task,"disp",DISP_STACK/sizeof(StackType_t),NULL,5,
-                                       task_stack,&task_storage,CONFIG_POCKET_DISP_CORE);
+                                       task_stack,&task_storage,CONFIG_KOBAKO_DISP_CORE);
     return task ? ESP_OK : ESP_FAIL;
 }
 
@@ -90,7 +90,7 @@ void disp_start(disp_job_fn fn, disp_finish_fn finish, bool on_task) {
     disp_join();
     pending_finish=finish;
     pending=true;
-#ifdef CONFIG_POCKET_DISP_TASK
+#ifdef CONFIG_KOBAKO_DISP_TASK
     if(task && on_task) {
         job=fn;
         in_flight=true;
@@ -106,7 +106,7 @@ void disp_start(disp_job_fn fn, disp_finish_fn finish, bool on_task) {
 void disp_join(void) {
     if(!pending) return;
     check_owner();
-#ifdef CONFIG_POCKET_DISP_TASK
+#ifdef CONFIG_KOBAKO_DISP_TASK
     if(in_flight) {
         // A present takes milliseconds; a second means the task is stuck
         // (an SPI send that never completes), which should say so (F14).

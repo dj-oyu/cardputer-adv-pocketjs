@@ -1,6 +1,6 @@
 # Shiki 仕様書 v1.5
 
-版: **v1.5（2026-11-02 凍結、ユーザー承認）**。経緯: 草案 → SLOW の独立レビュー（`674c3c9`、重大 2・中 5・軽微 4、反映済み）→ 実機で JS API 60/60 → DERBY の走者・正面の馬と表示の三角関数で使用（仕様の変更は不要。DERBY の投影の割り算は Shiki に `DIV` を足さず `pocket.derby` の C で行った、[derby-integer.md](../apps/derby-integer.md) §5.2）。v1.4 からの変更: 複数の draw を 1 回で行う `drawMany`（§9.4。入力は型付き配列で、`Int32Array` なら Q 形式の値そのもの、§2.4）、capability の `maxDrawsPerCall`（§9.1）、`SIN` 命令を JS から使う整数だけの `sin`・`cos`・`sinMany`（§9.4）。理由と計測は [shiki-bundle.md](shiki-bundle.md)。以下は v1.4: **v1.4（2026-11-01 凍結、ユーザー承認）**。経緯: 草案 `598ae56` → SLOW の独立レビュー（重大 1・中 5・軽微 6、`6fb348a` で反映）→ 詰め物は不変（ユーザー決定）と別の用途の議論（[shiki.md](shiki.md) §5.18）→ 実機で JS API 40/40・データ領域 600/600。v1.3 からの変更: データ領域の並びを欄ごとの面（SoA）だけにした（§5.1・§5.4 の 6。AoS は廃止。ユーザー決定、理由と計測は [shiki-jit.md](shiki-jit.md) §24.6 と [shiki.md](shiki.md) §5.16）。これに伴い、`LOOKUP` の端はレコードの数で決める（§5.2・§5.4 の 5）、`shiki.data()` はレコードの数を受け取る（§9.3）、`shiki.fields()` を足した（§9.3）、検証の行の領域の中身は欄ごとに並べる（§10.1）。バイト列の版は `1` のまま（§3）。以下は v1.3: **v1.3（2026-10-31 凍結、ユーザー承認）**。v1.2 からの変更: データ領域の実行の細部（§5.4）、`EACH` に件数のレジスタ（§5.2、ユーザー決定）、型付きの点（`points`）をデータ領域に吸収して `register` から外した（§9.4、ユーザー決定）、登録の待ち行列は作らず予算で判定する（§9.4、ユーザー決定）、予算の既定値は実測の後に決める（§9.2、§12、ユーザー決定）。経緯: 草案 `2d2053a` → SLOW の独立レビュー（重大 2・中 6・軽微 8）→ 反映（`ecdd43d`。`for...of` の名前の Q 形式と §8.2 の欄の決め方、§10 の領域の検証、`k_rec`、`transfer` の門、窓の強い参照、レコードの数 1〜65,535）→ 差分レビュー（重大 0・中 3・軽微 7）→ 反映（PIE に下ろすのは本体全体が列の `EACH` だけ、結果の書式を 10 進の並びに固定、`put` の写し方）。以下は v1.2: **v1.2（2026-10-31 凍結、ユーザー承認）**。v1.1 からの変更: §12 の未決のうち 3 つを決めた（ユーザー決定、[shiki.md](shiki.md) §5.10）。`CUBIC` の整数の手順（§4.6、t を Q16 にして §2.2 の `MUL`・`ADD` で計算）と分割数の欄を `a` から `imm` へ（引数を当てはめられるように）、`LINE_PATTERN` の整数の手順（§4.7、旧 API の構造のまま整数で。切れ目の模様の座標は 32 ビットの割り算に収めるため小さい方の重みを 13 ビットに正規化、模様の座標は ±2^29）、実行時の割り算は 32 ビットに限る（§2.2、実測に基づく）、色を受けるレジスタの範囲外は失敗のまま・常駐中断の間は区画を保つ（§9.2）。v1.1 の変更は §4.5 の座標の丸めだけ（変換器が足していた 0.5 をエンジンが足す。DERBY の式で座標ごとに 1 命令かかり、4 本が 64 命令・16 レジスタに収まらなかったため、[shiki.md](shiki.md) §5.9）。v1（2026-10-31 凍結、ユーザー承認）の経緯: 草案 1（`5fc813d`）→ SLOW の独立レビュー（重大 4・中 7）と 16 ビット幅を v1 に入れる決定 → 草案 2（`ebc55cb`）→ 再レビュー（重大 1・中 8）→ 草案 3（`594553c`）→ 差分レビュー（N1 を直せば凍結可）→ `4df7ebe` で N1 と軽微 5 件を反映。§12 の未決は未決のまま凍結した。v1.2 の経緯: 草案 `2312529` → SLOW の独立レビュー（重大 0・中 5・軽微 6、`fe4bd01` で反映）→ 整数の命令の実測（[int-latency.md](../perf/int-latency.md)）で実行時の割り算を 32 ビットに（`02918a6`）→ 差分レビュー（重大 0・中 3・軽微 4。重みを小さい方で正規化する変更はユーザー決定）→ 反映して凍結。凍結後の明確化（意味は変えない）: §4.8（2026-10-31）、§5.1 の渡す領域の数と順（v1.3、2026-10-31）、§8.2 の `put` の写しを同じレジスタなら省いてよい（v1.3、2026-10-31、ユーザー決定）。v1 を変える変更は版を上げ、変更点をこの行に記録する。経緯・理由・計測は [shiki.md](shiki.md)、この文書は**規範**だけを置く。旧 API（`pocket.kasane.procedural` の float の plan）は [js-to-ir.md](js-to-ir.md)・[flash-plan.md](flash-plan.md)・コードが仕様で、この文書の対象外（§11 の移行で消す）。
+版: **v1.5（2026-11-02 凍結、ユーザー承認）**。経緯: 草案 → SLOW の独立レビュー（`674c3c9`、重大 2・中 5・軽微 4、反映済み）→ 実機で JS API 60/60 → DERBY の走者・正面の馬と表示の三角関数で使用（仕様の変更は不要。DERBY の投影の割り算は Shiki に `DIV` を足さず `kobako.derby` の C で行った、[derby-integer.md](../apps/derby-integer.md) §5.2）。v1.4 からの変更: 複数の draw を 1 回で行う `drawMany`（§9.4。入力は型付き配列で、`Int32Array` なら Q 形式の値そのもの、§2.4）、capability の `maxDrawsPerCall`（§9.1）、`SIN` 命令を JS から使う整数だけの `sin`・`cos`・`sinMany`（§9.4）。理由と計測は [shiki-bundle.md](shiki-bundle.md)。以下は v1.4: **v1.4（2026-11-01 凍結、ユーザー承認）**。経緯: 草案 `598ae56` → SLOW の独立レビュー（重大 1・中 5・軽微 6、`6fb348a` で反映）→ 詰め物は不変（ユーザー決定）と別の用途の議論（[shiki.md](shiki.md) §5.18）→ 実機で JS API 40/40・データ領域 600/600。v1.3 からの変更: データ領域の並びを欄ごとの面（SoA）だけにした（§5.1・§5.4 の 6。AoS は廃止。ユーザー決定、理由と計測は [shiki-jit.md](shiki-jit.md) §24.6 と [shiki.md](shiki.md) §5.16）。これに伴い、`LOOKUP` の端はレコードの数で決める（§5.2・§5.4 の 5）、`shiki.data()` はレコードの数を受け取る（§9.3）、`shiki.fields()` を足した（§9.3）、検証の行の領域の中身は欄ごとに並べる（§10.1）。バイト列の版は `1` のまま（§3）。以下は v1.3: **v1.3（2026-10-31 凍結、ユーザー承認）**。v1.2 からの変更: データ領域の実行の細部（§5.4）、`EACH` に件数のレジスタ（§5.2、ユーザー決定）、型付きの点（`points`）をデータ領域に吸収して `register` から外した（§9.4、ユーザー決定）、登録の待ち行列は作らず予算で判定する（§9.4、ユーザー決定）、予算の既定値は実測の後に決める（§9.2、§12、ユーザー決定）。経緯: 草案 `2d2053a` → SLOW の独立レビュー（重大 2・中 6・軽微 8）→ 反映（`ecdd43d`。`for...of` の名前の Q 形式と §8.2 の欄の決め方、§10 の領域の検証、`k_rec`、`transfer` の門、窓の強い参照、レコードの数 1〜65,535）→ 差分レビュー（重大 0・中 3・軽微 7）→ 反映（PIE に下ろすのは本体全体が列の `EACH` だけ、結果の書式を 10 進の並びに固定、`put` の写し方）。以下は v1.2: **v1.2（2026-10-31 凍結、ユーザー承認）**。v1.1 からの変更: §12 の未決のうち 3 つを決めた（ユーザー決定、[shiki.md](shiki.md) §5.10）。`CUBIC` の整数の手順（§4.6、t を Q16 にして §2.2 の `MUL`・`ADD` で計算）と分割数の欄を `a` から `imm` へ（引数を当てはめられるように）、`LINE_PATTERN` の整数の手順（§4.7、旧 API の構造のまま整数で。切れ目の模様の座標は 32 ビットの割り算に収めるため小さい方の重みを 13 ビットに正規化、模様の座標は ±2^29）、実行時の割り算は 32 ビットに限る（§2.2、実測に基づく）、色を受けるレジスタの範囲外は失敗のまま・常駐中断の間は区画を保つ（§9.2）。v1.1 の変更は §4.5 の座標の丸めだけ（変換器が足していた 0.5 をエンジンが足す。DERBY の式で座標ごとに 1 命令かかり、4 本が 64 命令・16 レジスタに収まらなかったため、[shiki.md](shiki.md) §5.9）。v1（2026-10-31 凍結、ユーザー承認）の経緯: 草案 1（`5fc813d`）→ SLOW の独立レビュー（重大 4・中 7）と 16 ビット幅を v1 に入れる決定 → 草案 2（`ebc55cb`）→ 再レビュー（重大 1・中 8）→ 草案 3（`594553c`）→ 差分レビュー（N1 を直せば凍結可）→ `4df7ebe` で N1 と軽微 5 件を反映。§12 の未決は未決のまま凍結した。v1.2 の経緯: 草案 `2312529` → SLOW の独立レビュー（重大 0・中 5・軽微 6、`fe4bd01` で反映）→ 整数の命令の実測（[int-latency.md](../perf/int-latency.md)）で実行時の割り算を 32 ビットに（`02918a6`）→ 差分レビュー（重大 0・中 3・軽微 4。重みを小さい方で正規化する変更はユーザー決定）→ 反映して凍結。凍結後の明確化（意味は変えない）: §4.8（2026-10-31）、§5.1 の渡す領域の数と順（v1.3、2026-10-31）、§8.2 の `put` の写しを同じレジスタなら省いてよい（v1.3、2026-10-31、ユーザー決定）。v1 を変える変更は版を上げ、変更点をこの行に記録する。経緯・理由・計測は [shiki.md](shiki.md)、この文書は**規範**だけを置く。旧 API（`kobako.kasane.procedural` の float の plan）は [js-to-ir.md](js-to-ir.md)・[flash-plan.md](flash-plan.md)・コードが仕様で、この文書の対象外（§11 の移行で消す）。
 
 ## 0. 読み方
 
@@ -63,7 +63,7 @@
 ### 2.4 JS との境目
 
 - JS の数 `v`（double）を Q 形式 `f` の `fixed` へ変えるときは、`x = min(max(v · 2^f, −2^31), 2^31−1)` を double で求め、`sign(x) · ⌊|x| + 0.5⌋`（半分は 0 から遠い方）とする。有限でない `v` は `INVALID_ARGUMENT`。
-- 入力・引数の Q 形式は式が宣言する（§3）。JS は実数のまま渡し、変換は native が行う。例外は `drawMany` に `Int32Array` で渡す入力（§9.4、v1.5）で、各入力の Q 形式の `fixed` の値そのものとして読み、この変換をしない（Q 形式への換算は JS の責任。データ領域と同じ）。`pocket.derby.ser()` のような native の呼び出し元も、実数を渡して同じ変換を通す。
+- 入力・引数の Q 形式は式が宣言する（§3）。JS は実数のまま渡し、変換は native が行う。例外は `drawMany` に `Int32Array` で渡す入力（§9.4、v1.5）で、各入力の Q 形式の `fixed` の値そのものとして読み、この変換をしない（Q 形式への換算は JS の責任。データ領域と同じ）。`kobako.derby.ser()` のような native の呼び出し元も、実数を渡して同じ変換を通す。
 - データ領域は、JS が要素の型のまま（`Int16Array` などの生の整数で）書く。Q 形式への換算は JS の責任。
 
 ## 3. 式のバイト列
@@ -281,7 +281,7 @@ v1 の凍結後、2 つの独立した実装（C のエンジンと参照実装�
 
 ## 7. 格子の式
 
-v1 では、今の `pocket.kasane.grid` の int16 の IR（`CONST`・`LOAD`・`ADD`・`MUL`・`MIN`、[grid-js-notation.md](grid-js-notation.md)）を、意味を変えずに `pocket.kasane.shiki.grid` へ移す、としていた。**実装は移さず、`pocket.kasane.grid` のまま使う**（api-reorg P5、2026-11-13 で、写しの `shiki.grid` を消した。入口は 1 つ）。線の式との番地の規則の統一は v2。
+v1 では、今の `kobako.kasane.grid` の int16 の IR（`CONST`・`LOAD`・`ADD`・`MUL`・`MIN`、[grid-js-notation.md](grid-js-notation.md)）を、意味を変えずに `kobako.kasane.shiki.grid` へ移す、としていた。**実装は移さず、`kobako.kasane.grid` のまま使う**（api-reorg P5、2026-11-13 で、写しの `shiki.grid` を消した。入口は 1 つ）。線の式との番地の規則の統一は v2。
 
 ## 8. `@shiki` の記法
 
@@ -367,7 +367,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 - **領域の解放**: `shiki.release(窓)` で行う。窓は `shiki.data()` が返したオブジェクトそのもの（別の view は `INVALID_ARGUMENT`）、解放済みの窓は `CLOSED`。結び付いた handle が残っていれば `BUSY`。残っていなければ、Shiki は**窓を detach し（`free_func` がこの中で同期に呼ばれる）→ 自分の参照を捨てる → 簿記を更新 → 区画の中の領域を解放**の順に行う。`release` しない領域はセッションの終わりまで残り、`maxSessionDataRegions` と予算を使い続ける。
 - **簿記**（領域ごとの、窓の参照・結び付いた handle の数）は区画の外、`.bss` の固定表（`maxSessionDataRegions` 個）に置く。
 - `free_func` は何もしない。`data == NULL` でも呼ばれ、何度呼ばれてもよい（Shiki の detach の中、ゲストを壊すとき、`release` で参照を捨てた後の finalizer でも呼ばれる。`js_array_buffer_finalizer` は detach 済みかを見ずに呼ぶ）。解放は Shiki が別に行う。
-- **終了**: `app_stop()` は、Shiki の handle とフレームを片付ける reset を今の位置（ゲストを壊す前）で行い、そこで全領域の窓を detach して参照を捨てる。**区画の解放はゲストを壊した後**（`pocketjs_guest_destroy()` の後）の別の呼び出しで行う。
+- **終了**: `app_stop()` は、Shiki の handle とフレームを片付ける reset を今の位置（ゲストを壊す前）で行い、そこで全領域の窓を detach して参照を捨てる。**区画の解放はゲストを壊した後**（`kobako_guest_destroy()` の後）の別の呼び出しで行う。
 - 常駐中断（common-api §5）の間は、区画を保つ（v1.2 で決定）。中断してよいかの空きの判定には、予算を含める。
 
 ### 9.3 データ領域の窓
@@ -378,7 +378,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 - `shiki.fields(窓)` は、欄ごとの view（窓と同じ型の型付き配列、長さ `R`、`c` 番目が欄 `c` の面）を `k_rec` 個の配列で返す。呼ぶたびに新しい view を作る（窓ごとに常に持つとゲストのヒープを使うため、要るときだけ作る）。view は窓と同じメモリを指すが、**同一性の比較（`register` の `options.data`、`release`）には使えない**（窓そのものを渡す。別の view と同じく `INVALID_ARGUMENT`）。`release` の後の view は長さ 0（ArrayBuffer が detach されるため）。窓が解放済みなら `CLOSED`、`data()` の窓でなければ `INVALID_ARGUMENT`。
 - 同じ窓を 1 つの handle の `options.data` に 2 回渡してよく、結び付いた handle の数は handle ごとに 1 と数える（`release` の `BUSY` の判定は「この窓を使う handle が残っているか」）。
 - 窓は外部メモリを指す ArrayBuffer で、伸びない（resizable ではない）。
-- **要件: 外部メモリの ArrayBuffer の長さを変える経路は、外部メモリを realloc してはならない。** 対象は `transfer`・`transferToFixedLength`・`transferToImmutable`（QuickJS-ng ではどれも `js_array_buffer_transfer` で、長さが違えば `js_realloc` する。コードで確認）。`ArrayBuffer.prototype` は ROM の組み込み（`CONFIG_POCKET_VM_ROM_INTRINSICS`、既定 y）で、これらの属性は消せない（non-configurable）ので、メソッドを消す方法は取れない。実装は `js_array_buffer_transfer` に門を足す: **`free_func` が `js_array_buffer_free` でない ArrayBuffer への `transfer`・`transferToFixedLength`・`transferToImmutable` は、長さに関わらず（0・同じ・違う）`TypeError`**。門は `detached` の検査の直後、長さ 0 の分岐の前に置く（`js_array_buffer_transfer` は新しい長さが 0 のとき、長さを比べる前に `JS_DetachArrayBuffer` へ分岐するので、「長さが変わるなら」の門を realloc の直前に置くと `transfer(0)` がすり抜け、窓が detach されても Shiki の参照と結び付いた handle が残る）。同じ長さの `transfer` は外部メモリと `free_func` を新しい ArrayBuffer へ渡すので、これも拒む（Shiki の強い参照が古い ArrayBuffer を指したままになるため）。`resize` は今のコードが外部メモリを拒むので、門は要らない。
+- **要件: 外部メモリの ArrayBuffer の長さを変える経路は、外部メモリを realloc してはならない。** 対象は `transfer`・`transferToFixedLength`・`transferToImmutable`（QuickJS-ng ではどれも `js_array_buffer_transfer` で、長さが違えば `js_realloc` する。コードで確認）。`ArrayBuffer.prototype` は ROM の組み込み（`CONFIG_QJS_LEAN_ROM_INTRINSICS`、既定 y）で、これらの属性は消せない（non-configurable）ので、メソッドを消す方法は取れない。実装は `js_array_buffer_transfer` に門を足す: **`free_func` が `js_array_buffer_free` でない ArrayBuffer への `transfer`・`transferToFixedLength`・`transferToImmutable` は、長さに関わらず（0・同じ・違う）`TypeError`**。門は `detached` の検査の直後、長さ 0 の分岐の前に置く（`js_array_buffer_transfer` は新しい長さが 0 のとき、長さを比べる前に `JS_DetachArrayBuffer` へ分岐するので、「長さが変わるなら」の門を realloc の直前に置くと `transfer(0)` がすり抜け、窓が detach されても Shiki の参照と結び付いた handle が残る）。同じ長さの `transfer` は外部メモリと `free_func` を新しい ArrayBuffer へ渡すので、これも拒む（Shiki の強い参照が古い ArrayBuffer を指したままになるため）。`resize` は今のコードが外部メモリを拒むので、門は要らない。
 
 ### 9.4 呼び出し
 
@@ -393,8 +393,8 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 | `sin(t)`・`cos(t)`・`sinMany(t, out, offset?)`（v1.5） | 下の注 | 下の注 |
 | `heap()` | | |
 | `data(desc)`・`release(窓)` | §9.3、§9.2 | 予算・領域の数: `LIMIT_EXCEEDED`。結び付いた handle が残る: `BUSY`。別の view: `INVALID_ARGUMENT`。解放済み: `CLOSED` |
-| `fields(窓)` | §9.3 | 別の view（`fields()` の view を含む）: `INVALID_ARGUMENT`。解放済み: `CLOSED`。view を作るゲストのメモリが足りなければ、QuickJS の例外（`PocketError` ではない） |
-| `grid.*` | **無い**。格子は §7 のとおり `pocket.kasane.grid`（`fold`・`index`・`view`・`register`…）を使う。`shiki.grid` は、`pocket.kasane.grid` と同じオブジェクトの写しだったが、api-reorg P5（2026-11-13）で消した（読むと `undefined`） | — |
+| `fields(窓)` | §9.3 | 別の view（`fields()` の view を含む）: `INVALID_ARGUMENT`。解放済み: `CLOSED`。view を作るゲストのメモリが足りなければ、QuickJS の例外（`KobakoError` ではない） |
+| `grid.*` | **無い**。格子は §7 のとおり `kobako.kasane.grid`（`fold`・`index`・`view`・`register`…）を使う。`shiki.grid` は、`kobako.kasane.grid` と同じオブジェクトの写しだったが、api-reorg P5（2026-11-13）で消した（読むと `undefined`） | — |
 
 **`drawMany(handles, inputs, stride)`（v1.5）**: 複数の draw を 1 回の呼び出しで行う。
 
@@ -403,7 +403,7 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 - 読む時: draw `i` の handle と入力は、**draw `i` の始めに**読む。したがって `handles`・`inputs` がデータ領域の窓（またはその ArrayBuffer の上の view）なら、前の draw の `PUT` の書き込みが後の draw の handle と入力に映る。呼び出しの途中で JS は動かないので、配列の長さと detach の状態は始めに一度だけ検査する。
 - **`count`（v2.0 の草案に入れる追加。[api-reorg.md](api-reorg.md) P3、2026-11-13、凍結前）**: 省く（または `undefined`）と上のとおり。渡すと、`handles` の**先頭の `count` 個**だけを描く（`count` は 0〜`handles.length` の整数）。`inputs` は `count × stride` 個**以上**あればよい（ちょうどでなくてよい。先頭から読む）。上限の検査（`maxDrawsPerCall`）は `count` に対して行う。可変の個数を詰めた使い回しの配列から `subarray` の view を毎回作らずに描くため（view 1 つでゲストの確保が 2 回前後）。`count` が整数でない・範囲外 → `INVALID_ARGUMENT`。
 - 検査の順と誤り（どれも、どの draw も行わずに投げる）: `handles` が `Uint32Array` でない、`stride` が 0〜8 の整数でない、`count` が上のとおりでない → `INVALID_ARGUMENT`。`handles.length` が `maxDrawsPerCall` を超える → `LIMIT_EXCEEDED`。`stride ≥ 1` で `inputs` が `Float64Array`・`Int32Array` でない、長さが `handles.length × stride` でない、detach されている → `INVALID_ARGUMENT`。`handles.length = 0` なら何もせず戻る（`beginFrame` が無くても誤りにしない）。
-- draw の誤り: draw `i` の誤りは、`draw()` と同じ `PocketError`（`code`・`operation` `"kasane.shiki.draw"`・`retryable`・`outcome`）に、**何番目の draw か（0 から）を読み取り専用の `index` プロパティで付けて**投げ、残りの draw は行わない（`index` は common-api §4 の、面が足すプロパティ）。`outcome` は失敗した draw 自身を指す。`handles[i]` が登録された Shiki の handle でない（0、別の種類の handle、2^31 以上を含む）なら `CLOSED`（`draw()` は範囲外の値を `INVALID_ARGUMENT` にするので、ここは `draw()` と違う）。フレームの扱いは `draw()` の失敗と同じで、そのフレームは捨てられる（前の draw の線分も）。前の draw がデータ領域に書いた値は残る（§5.3 の 3）。誤りがオブジェクトでない（ゲストのメモリが尽きた例外など）か、`index` を付けられなかった場合、`index` は無い。
+- draw の誤り: draw `i` の誤りは、`draw()` と同じ `KobakoError`（`code`・`operation` `"kasane.shiki.draw"`・`retryable`・`outcome`）に、**何番目の draw か（0 から）を読み取り専用の `index` プロパティで付けて**投げ、残りの draw は行わない（`index` は common-api §4 の、面が足すプロパティ）。`outcome` は失敗した draw 自身を指す。`handles[i]` が登録された Shiki の handle でない（0、別の種類の handle、2^31 以上を含む）なら `CLOSED`（`draw()` は範囲外の値を `INVALID_ARGUMENT` にするので、ここは `draw()` と違う）。フレームの扱いは `draw()` の失敗と同じで、そのフレームは捨てられる（前の draw の線分も）。前の draw がデータ領域に書いた値は残る（§5.3 の 3）。誤りがオブジェクトでない（ゲストのメモリが尽きた例外など）か、`index` を付けられなかった場合、`index` は無い。
 - 割り込み: `drawMany` はネイティブの中で回り、その間はゲストの割り込みの検査（停止の要求、ターンの期限）が走らない。draw と draw の間でも確かめない（2026-11-01 ユーザー決定。draw ごとの確認の費用を払うほどの害が無いため）。したがって 1 回の呼び出しは、最悪で `maxDrawsPerCall`（256）回 × 1 回の draw の上限（最大 `maxSteps` のステップ、推定 3〜4.5 ms）＝**約 1 秒（推定、未測定）止められない**。起きるのは、停止（Back・外からの停止）への応答の遅れと、そのフレームの遅れ。止めるのは呼び出しが戻った後の、ゲストの次の割り込みの検査。
 - 型付き配列にする理由（実測、[shiki-bundle.md](shiki-bundle.md) §3・§6）: JS からネイティブを 1 回呼ぶ費用は 約 1,200 サイクル、配列の要素の読み取りは 1 つ 約 400 サイクル。型付き配列ならポインタを 1 回取り、入力は 1 つずつのメモリの読み出しになる。入力 8 の draw は、1 回ずつ 19.5 µs、`Float64Array` で 7.7 µs、`Int32Array` で 2.5 µs。
 
@@ -427,10 +427,10 @@ v1.3 で PIE に下ろしてよいのは、次をすべて満たす `EACH` だ�
 
 1. Shiki エンジン（32 ビットと `.H`）、参照実装、§3 のバイト列と §6.1 の検査、試験。旧 API は並べて残す。
 2. `@shiki` の変換器（§8.3）。
-3. DERBY の式の移行（`prail`・`pt` は `@q` を足す）。`pocket.derby.ser()` は実数のまま渡す（§2.4）。MEGADEMO・BIG WAVE。
+3. DERBY の式の移行（`prail`・`pt` は `@q` を足す）。`kobako.derby.ser()` は実数のまま渡す（§2.4）。MEGADEMO・BIG WAVE。
 4. データ領域（`EACH`・`FETCH`・`PUT`・`LOOKUP`）と Shiki のヒープ、`js_array_buffer_transfer` の門。旧 API の型付きの点（`points`）を使う式は、`i16` の領域と `EACH`・`FETCH`・`PLOT` に書き直す。
 5. `.H` の列の PIE への下ろし。
-6. すべてのアプリが移ったら、旧 API（float の plan、`pocket.kasane.procedural`、グローバルの `gridFold`）を消す。float の plan と `procedural` は Shiki v2.0、`gridFold` のグローバルと `shiki.grid` は api-reorg P5 で消した（`fold`・`index`・`view` は `pocket.kasane.grid` の中）。
+6. すべてのアプリが移ったら、旧 API（float の plan、`kobako.kasane.procedural`、グローバルの `gridFold`）を消す。float の plan と `procedural` は Shiki v2.0、`gridFold` のグローバルと `shiki.grid` は api-reorg P5 で消した（`fold`・`index`・`view` は `kobako.kasane.grid` の中）。
 
 ## 12. 未決の一覧
 

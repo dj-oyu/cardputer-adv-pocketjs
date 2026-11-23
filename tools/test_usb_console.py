@@ -36,7 +36,7 @@ def run(idf=None):
         # the repair. Protect the existing q/Esc and shared HOME teardown path.
         assert "else if(c=='q'||c==27)k->nav=KEY_BACK;" in main
         assert main.index("usb_console_init()") < main.index('ESP_LOGI("boot","Cardputer')
-        bridge = (ROOT / "main/pocket/pocket_bridge.c").read_text()
+        bridge = (ROOT / "main/kobako/kobako_bridge.c").read_text()
         assert "return usb_console_frame(wire,at);" in bridge
         assert "usb_serial_jtag_write_bytes" not in bridge
         for flags in (["-O1", "-g", "-fsanitize=address,undefined"], ["-O2", "-fstrict-aliasing"]):

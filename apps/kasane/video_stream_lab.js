@@ -2,7 +2,7 @@
 // remove only the exclusive test file below. Never replace an existing file.
 (() => {
   const path = 'sd:/__ksn_d5_stream_probe_20260928.ksv';
-  const view = pocket.kasane;
+  const view = kobako.kasane;
   const video = view.video;
   const width = 32, height = 8, frames = 60;
   const resource = video.open(width, height);
@@ -53,13 +53,13 @@
     if (!owned) return;
     for (let attempt = 0; attempt < 40; ++attempt) {
       try {
-        await pocket.fs.remove(path);
+        await kobako.fs.remove(path);
         owned = false;
         console.log('D5_STREAM REMOVED');
         return;
       } catch (error) {
         if (error.code !== 'BUSY' || attempt === 39) throw error;
-        await pocket.time.sleep(50);
+        await kobako.time.sleep(50);
       }
     }
   }
@@ -75,30 +75,30 @@
   }
   async function prepare() {
     try {
-      const grant = await pocket.fs.requestFolder('sd');
+      const grant = await kobako.fs.requestFolder('sd');
       if (grant !== 'sd:/') throw new Error('folder grant declined');
       try {
-        await pocket.fs.stat(path);
+        await kobako.fs.stat(path);
         throw new Error('test filename already exists; refusing collision');
       } catch (error) {
         if (error.code !== 'NOT_FOUND') throw error;
       }
-      file = await pocket.fs.open(path,
+      file = await kobako.fs.open(path,
                                   {mode: 'create', durability: 'synced'});
       await file.write(header());
-      await pocket.time.sleep(20);
+      await kobako.time.sleep(20);
       for (let i = 0; i < frames; ++i) {
         await file.write(framePacket(i));
         // A real timer keeps each generated frame and write out of the same
         // QuickJS promise drain; a plain await can settle in that drain.
-        await pocket.time.sleep(20);
+        await kobako.time.sleep(20);
         if ((i + 1) % 10 === 0)
           console.log('D5_STREAM WRITE frames=' + (i + 1));
       }
       await file.commit(); file = null; owned = true;
       console.log('D5_STREAM CREATED bytes=' + (16 + frames * (12 + width * height * 2)));
       video.streamStart(path); stream = true;
-      readyAt = pocket.time.now();
+      readyAt = kobako.time.now();
       console.log('D5_STREAM START');
     } catch (error) {
       console.log('D5_STREAM ERROR prepare ' + ((error && error.code) || error));
@@ -108,7 +108,7 @@
   globalThis.frame = function () {
     if (!started) { started = true; prepare(); }
     if (!stream || finishing || !readyAt) return;
-    const elapsed = pocket.time.now() - readyAt;
+    const elapsed = kobako.time.now() - readyAt;
     if (!paused && elapsed >= 700) {
       video.streamPause(true); paused = true;
       console.log('D5_STREAM PAUSE');

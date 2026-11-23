@@ -6,7 +6,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
 async function stage(collision = false) {
   const writes = [], logs = [], events = [];
-  const pocket = {
+  const kobako = {
     kasane: {replace: () => {}},
     fs: {
       requestFolder: async () => 'sd:/',
@@ -26,7 +26,7 @@ async function stage(collision = false) {
     },
     time: {sleep: tick},
   };
-  const context = {pocket, console: {log: line => logs.push(line)}};
+  const context = {kobako, console: {log: line => logs.push(line)}};
   vm.runInNewContext(source('video_sd_av_stage'), context);
   context.frame();
   for (let i = 0; i < 1500 && !events.includes('commit') &&
@@ -48,7 +48,7 @@ async function stage(collision = false) {
 async function overlay(bytes) {
   const events = [], logs = [];
   let onKey, now = 1, clock = -1;
-  const pocket = {
+  const kobako = {
     kasane: {
       video: {
         open: () => 1,
@@ -77,7 +77,7 @@ async function overlay(bytes) {
     }}},
     time: {now: () => now},
   };
-  const context = {pocket, console: {log: line => logs.push(line)}};
+  const context = {kobako, console: {log: line => logs.push(line)}};
   vm.runInNewContext(source('overlay_video_sd_stream_probe'), context);
   onKey({action: 'accept'});
   for (let i = 0; i < 100 && !events.includes('play'); ++i) await tick();
@@ -94,7 +94,7 @@ async function overlay(bytes) {
 async function cleanup(bytes) {
   const logs = [];
   let at = 0, removed = 0, closed = 0;
-  const pocket = {
+  const kobako = {
     kasane: {replace: () => {}},
     fs: {
       requestFolder: async () => 'sd:/',
@@ -112,7 +112,7 @@ async function cleanup(bytes) {
     },
     time: {sleep: tick},
   };
-  const context = {pocket, console: {log: line => logs.push(line)}};
+  const context = {kobako, console: {log: line => logs.push(line)}};
   vm.runInNewContext(source('video_sd_av_cleanup'), context);
   context.frame();
   for (let i = 0; i < 1500 && !logs.some(line =>

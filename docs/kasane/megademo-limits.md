@@ -40,11 +40,11 @@
 
 ## 4. plan の読み込み（`LOAD = [16, 1, 22528]`）
 
-切替の 16 フレーム前から、1 フレーム 1 本、`pocket.memory.info().internalFreeBytes` が 22,528 B 以上のときだけ次の場面を先読みする。切替フレームで旧場面の全 handle を `unregister` し、残りは場面の最初のフレームから 1 本ずつ登録する。未登録の plan の draw は飛ばす（その間、層が 1 つずつ現れる）。段階変更（UP/DOWN）と `DEGRADE` は先読み中の集合も外してから入れ直し、LEFT/RIGHT は先読み中の集合が目的の場面ならそれを使う。
+切替の 16 フレーム前から、1 フレーム 1 本、`kobako.memory.info().internalFreeBytes` が 22,528 B 以上のときだけ次の場面を先読みする。切替フレームで旧場面の全 handle を `unregister` し、残りは場面の最初のフレームから 1 本ずつ登録する。未登録の plan の draw は飛ばす（その間、層が 1 つずつ現れる）。段階変更（UP/DOWN）と `DEGRADE` は先読み中の集合も外してから入れ直し、LEFT/RIGHT は先読み中の集合が目的の場面ならそれを使う。
 
 - **1 フレーム 1 本にした理由。** 時間の大半は JS 側のプログラムテキストの解読だった: `prog()` 104 本で 3〜35 ms（中央値 12 ms、1 命令あたり約 0.54 ms）、`register()` のネイティブ側は 1 本あたり中央値 0.83 ms（最大 1.5 ms、120 点の点列付きで 4.3 ms）、`ksn_proc_plan_prepare`（解析のみ）は中央値 0.19 ms。host（x86）の同じ QuickJS では 1 本 36 µs 程度で、実機との差は約 360 倍。ネイティブ→JS のコールバック（`split(',').map(f)`）は 1 回約 5.7 ms と特に遅く、JSON.parse ベースの解読に替えても 466→602 ms/37 本と遅くなった。旧方式（6 フレーム前から 4 本ずつ、切替時に残り全部）は成り立たなかった。
 - **22,528 B の根拠（計算）。** 登録フレームの余分な heap 使用は最大 14.6 KB、空きの標本は最長 100 ms（3 フレーム）古いので最大 3 本分（約 3 KB）行き過ぎる。22.5 − 3 − 14.6 ≈ 5 KB がターン内に残る。実測のターン内最小は 6.8 KB（HEAVY 6 周）。
-- **`pocket.memory.pressure()` の FREE ビットは使わなかった。** 24 KB 未満で立ち 36 KB 以上が 500 ms 続くまで下りないので、ZENITH を一度通ると以後の先読みがすべて止まった（実測）。
+- **`kobako.memory.pressure()` の FREE ビットは使わなかった。** 24 KB 未満で立ち 36 KB 以上が 500 ms 続くまで下りないので、ZENITH を一度通ると以後の先読みがすべて止まった（実測）。
 - **副作用。** 2 周目以降の最初の NEWS は最初の 5 フレームが部分描画になる（Act I の C 参照との一致は起動直後の 1 周目で成り立ち、試験もそこを見ている）。ZENITH は 7〜11 フレームが部分描画。旧・新を全部共存させる設計はメモリで、切替時に一度に登録する設計は時間で成り立たず、1 本ずつは両方の境界の内側に入る唯一の形だった。
 - **登録の時間の残り。** 登録した 1 フレームの JS は中央値 20 ms、最大 57 ms。
 
@@ -88,7 +88,7 @@ HEAVY 95 秒（2,237 フレーム、約 6 周、plan の登録 327 回）: 2 周
 
 ## 10. 使わなかった API とその理由
 
-`mount`/`view.set`/`bind` は REPLACE/PATCH と同じ APP lease で混ぜない契約（[architecture.md](architecture.md)）。`createScene` は描画される内容が増えない。`tx.modal.open` は Enter と矢印の操作を保つため使わない（overlay では UNSUPPORTED）。`grid.*` は入力をゲストの配列で渡す面で手続き描画のストレスとは別、`grid.fold/index/view` は初回呼び出しで約 6 KB の JS フロントエンドをゲストに読み込む。`video.*` は JS から `push` すると 240×135 の 1 フレームで 64,800 B をゲストに持つ。`pocket.overlay` は FLOWER 背景の overlay 専用。`cache.release` は instance が表示から消えた後でないと呼べない（寿命の契約）。
+`mount`/`view.set`/`bind` は REPLACE/PATCH と同じ APP lease で混ぜない契約（[architecture.md](architecture.md)）。`createScene` は描画される内容が増えない。`tx.modal.open` は Enter と矢印の操作を保つため使わない（overlay では UNSUPPORTED）。`grid.*` は入力をゲストの配列で渡す面で手続き描画のストレスとは別、`grid.fold/index/view` は初回呼び出しで約 6 KB の JS フロントエンドをゲストに読み込む。`video.*` は JS から `push` すると 240×135 の 1 フレームで 64,800 B をゲストに持つ。`kobako.overlay` は FLOWER 背景の overlay 専用。`cache.release` は instance が表示から消えた後でないと呼べない（寿命の契約）。
 
 ## 11. 人が実パネルで確かめること
 
@@ -107,4 +107,4 @@ HEAVY 95 秒（2,237 フレーム、約 6 周、plan の登録 327 回）: 2 周
 
 - **ネイティブを変えなかった。** 面1の確保失敗は起動時の確保で、plan の同時数は読み込み方式で、どちらもアプリ側で避けられた。帯キャッシュを面ごとに持つ変更（+3.8 KB）は回転そのものの取り替え（1 つの面の中で行ごとに帯をまたぐ）を減らさないので効果が薄く、メモリは最も足りない資源なので見送った。
 - **Act I を残した。** 既存の 48 フレームの C 参照・実機ハッシュとの比較を壊さないため、Act I の programs/inputs は同一のまま。
-- **host の `pocket.memory.info()` は実機のターン境界の空きに合わせた直線で代用する**（31,000 − 1,000×live B）。評価中の実機は `null` を返すので、host の台本も同じ値を返す必要がある（CLAUDE.md）。
+- **host の `kobako.memory.info()` は実機のターン境界の空きに合わせた直線で代用する**（31,000 − 1,000×live B）。評価中の実機は `null` を返すので、host の台本も同じ値を返す必要がある（CLAUDE.md）。

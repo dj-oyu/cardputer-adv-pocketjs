@@ -41,8 +41,8 @@ The API is not thread/ISR safe and is not a security boundary against native
 handle forgery. Successful production only completes pending. It does not
 preflight a complete composed display frame, swap ready, pin a frame, or ACK.
 
-The existing pocket path performs display completion before presentation ACK,
-including the no-damage path (`pocket_kasane_present_complete`). Its pending versus
+The existing kobako path performs display completion before presentation ACK,
+including the no-damage path (`kobako_kasane_present_complete`). Its pending versus
 committed snapshots and retry/repair ownership must remain authoritative. A
 future caller may transfer a completed pending snapshot only through that owner;
 it must not replace a packet allocation while rendering or a display submission

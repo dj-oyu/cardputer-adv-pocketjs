@@ -5,7 +5,7 @@
   const blocks = 11;
   const blockBytes = 2048;
   const perBlock = 1 + (blockBytes - 4) * 2;
-  const view = pocket.kasane.mount('music');
+  const view = kobako.kasane.mount('music');
   view.set({title: 'BAR TEST', message: ''});
   let started = false;
   let readyAt = 0;
@@ -46,7 +46,7 @@
     if (player) { player.close(); player = null; }
     if (file) { file.close(); file = null; }
     if (ownedFile) {
-      await pocket.fs.remove(path);
+      await kobako.fs.remove(path);
       ownedFile = false;
       console.log('KSN_MUSIC_BAR REMOVED');
     }
@@ -62,12 +62,12 @@
   async function prepare() {
     try {
       try {
-        await pocket.fs.stat(path);
+        await kobako.fs.stat(path);
         throw new Error('the diagnostic file already exists');
       } catch (error) {
         if (error.code !== 'NOT_FOUND') throw error;
       }
-      file = await pocket.fs.open(path, {mode: 'create'});
+      file = await kobako.fs.open(path, {mode: 'create'});
       ownedFile = true;
       await file.write(header());
       const half = new Uint8Array(1024);
@@ -75,7 +75,7 @@
       await file.commit();
       file = null;
       console.log('KSN_MUSIC_BAR CREATED bytes=' + (48 + blocks * blockBytes));
-      player = await pocket.audio.player.open({source: path});
+      player = await kobako.audio.player.open({source: path});
       const info = player.info();
       if (info.codec !== 'wav/ima-adpcm' || !info.seekable ||
           info.durationMs < 1800 || info.durationMs > 1900)
@@ -85,7 +85,7 @@
       if (status.state !== 'ready' || status.positionMs !== 1120)
         throw new Error('seek did not hold the ready position');
       view.bind('playback');
-      readyAt = pocket.time.now();
+      readyAt = kobako.time.now();
       console.log('KSN_MUSIC_BAR READY positionMs=' + status.positionMs +
                   ' durationMs=' + info.durationMs);
     } catch (error) { fail('PREPARE', error); }
@@ -93,16 +93,16 @@
   globalThis.frame = function () {
     if (!started) { started = true; prepare(); }
     if (readyAt && !closed && !transitionStarted &&
-        pocket.time.now() - readyAt > 13000) {
+        kobako.time.now() - readyAt > 13000) {
       transitionStarted = true;
       player.seek(0).then(function () { return player.play(); })
         .then(function () {
-          playAt = pocket.time.now();
+          playAt = kobako.time.now();
           console.log('KSN_MUSIC_BAR PLAYING');
-          return pocket.time.sleep(120);
+          return kobako.time.sleep(120);
         })
         .then(function () {
-          const elapsed = pocket.time.now() - playAt;
+          const elapsed = kobako.time.now() - playAt;
           const state = player.status().state;
           console.log('KSN_MUSIC_BAR SLEEP_DONE elapsedMs=' + elapsed +
                       ' state=' + state);
@@ -118,7 +118,7 @@
           console.log('KSN_MUSIC_BAR PAUSED positionMs=' + status.positionMs);
         }).catch(function (error) { fail('PAUSE_SEEK', error); });
     }
-    if (readyAt && !closed && pocket.time.now() - readyAt > 38000)
+    if (readyAt && !closed && kobako.time.now() - readyAt > 38000)
       finish().catch(function (error) { fail('REMOVE', error); });
   };
 })();

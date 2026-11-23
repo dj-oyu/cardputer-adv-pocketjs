@@ -20,7 +20,7 @@
       ? 0xffe0 : (((frame & 31) << 11) | 0x03ff);
     return (color >>> (((inside - 12) % 2) * 8)) & 255;
   }
-  pocket.kasane.replace(tx => {
+  kobako.kasane.replace(tx => {
     tx.background(0x061322ff);
     tx.text({bounds: [8, 2, 232, 18], text: 'D6 SD AV CLEANUP',
              font: 'caption', color: 0xe7f4ffff});
@@ -28,12 +28,12 @@
   async function run() {
     try {
       console.log('D6_CLEANUP GRANT_REQUEST');
-      if (await pocket.fs.requestFolder('sd') !== 'sd:/')
+      if (await kobako.fs.requestFolder('sd') !== 'sd:/')
         throw new Error('folder grant declined');
       console.log('D6_CLEANUP GRANTED');
       let entry;
       try {
-        entry = await pocket.fs.stat(path);
+        entry = await kobako.fs.stat(path);
       } catch (error) {
         if (error.code !== 'NOT_FOUND') throw error;
         console.log('D6_CLEANUP ABSENT');
@@ -41,7 +41,7 @@
       }
       if (entry.sizeBytes < 1 || entry.sizeBytes > size)
         throw new Error('size mismatch; refusing removal');
-      file = await pocket.fs.open(path, {mode: 'read'});
+      file = await kobako.fs.open(path, {mode: 'read'});
       for (let at = 0; at < entry.sizeBytes;) {
         const chunk = await file.read(Math.min(1024, entry.sizeBytes - at));
         if (!chunk || !chunk.length)
@@ -50,12 +50,12 @@
           if (chunk[j] !== expected(at + j))
             throw new Error('content mismatch; refusing removal');
         at += chunk.length;
-        await pocket.time.sleep(20);
+        await kobako.time.sleep(20);
       }
       if (await file.read(1) !== null)
         throw new Error('trailing bytes; refusing removal');
       file.close(); file = null;
-      await pocket.fs.remove(path);
+      await kobako.fs.remove(path);
       console.log('D6_CLEANUP REMOVED bytes=' + entry.sizeBytes);
     } catch (error) {
       console.log('D6_CLEANUP REFUSED ' + ((error && error.code) || error));

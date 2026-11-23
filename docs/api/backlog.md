@@ -1,11 +1,11 @@
-# pocket.* の未解決事項
+# kobako.* の未解決事項
 
 `docs/api/common-api.md` と `docs/api/filesystem-api.md` からの、現時点で本当に開いている作業だけを集める。完了した項目・陳腐化した項目はここに置かない（元の記述から削除する）。各行に出典と現在の状態を書く。
 
 ## BLE（common-api.md 12節）
 
-- **BLE Centralが未実装。** `main/pocket/pocket_ble.c` は名前空間とメソッドだけを持ち、全メソッドが `UNSUPPORTED` を返す（意図的な設計。`ble.central` の `supported=false` は builtins テーブルが既にstage Aから返している）。NimBLE採用時のRAM実測が未実施。
-  出典: common-api.md 12節、`main/pocket/pocket_ble.c`。
+- **BLE Centralが未実装。** `main/kobako/kobako_ble.c` は名前空間とメソッドだけを持ち、全メソッドが `UNSUPPORTED` を返す（意図的な設計。`ble.central` の `supported=false` は builtins テーブルが既にstage Aから返している）。NimBLE採用時のRAM実測が未実施。
+  出典: common-api.md 12節、`main/kobako/kobako_ble.c`。
 - **BLE Peripheral** は仕様のみで着手前。`open({name,services})`、GATT定義、notify、HID、Mesh、長距離PHY、Central/Peripheral同時運用は未検証。
   出典: common-api.md 12節。
 
@@ -38,7 +38,7 @@
   出典: filesystem-api.md 10節「進捗（2026-09-08）」。
 - **`crashSafeReplace` は `sd:` で常に `false`。** 電源断試験を通していないため。試験実施か、試験しない方針の明文化が必要。
   出典: filesystem-api.md 6節、10節。
-- **`sd:` の帯域は算術のみで実機計時者がいない。** 400kHzでの実転送速度、`pocket_fs_read_at()` のディレクトリ走査コストは未計測。
+- **`sd:` の帯域は算術のみで実機計時者がいない。** 400kHzでの実転送速度、`kobako_fs_read_at()` のディレクトリ走査コストは未計測。
   出典: filesystem-api.md 3節「この機体のSD」。
 - **未採用と明記されている機能**（着手条件なし、将来アプリが現れたら検討）: 再帰削除、任意format、ファイルwatch、書込seek、メモリマップのJS公開、POSIX互換、圧縮アーカイブ展開、別volumeの原子的move。
   出典: filesystem-api.md 10節。

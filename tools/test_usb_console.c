@@ -43,11 +43,11 @@ int usb_serial_jtag_write_bytes(const void *p, size_t n, uint32_t ticks) {
     now+=1000;return (int)n;
 }
 esp_err_t esp_vfs_register(const char *path, const esp_vfs_t *p, void *ctx) {
-    assert(!strcmp(path,"/dev/pocketusb") && ctx==NULL);vfs=*p;return ESP_OK;
+    assert(!strcmp(path,"/dev/kobakousb") && ctx==NULL);vfs=*p;return ESP_OK;
 }
 FILE *host_freopen(const char *p, const char *mode, FILE *stream) {
     assert(!strcmp(mode,"w"));
-    assert(!strcmp(p,stream==stdout?"/dev/pocketusb/out":"/dev/pocketusb/err"));
+    assert(!strcmp(p,stream==stdout?"/dev/kobakousb/out":"/dev/kobakousb/err"));
     stream_count++;return stream;
 }
 int host_setvbuf(FILE *stream, char *p, int mode, size_t size) {

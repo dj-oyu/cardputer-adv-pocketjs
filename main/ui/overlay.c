@@ -2,9 +2,9 @@
 #include "overlay_core.h"
 #include "app_session.h"
 #include "app_registry.h"
-#include "pocket_overlay.h"
-#include "pocket_av.h"
-#include "pocket_kasane.h"
+#include "kobako_overlay.h"
+#include "kobako_av.h"
+#include "kobako_kasane.h"
 #include "kasane/ksn_p0_probe.h"
 #include "board.h"
 #include "nvs.h"
@@ -272,7 +272,7 @@ bool overlay_release(void) {
     }
     if(flag_stored) flag_set(false);
     budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
-    pocket_overlay_reset();
+    kobako_overlay_reset();
     pending_exit=OVERLAY_EXIT_NONE;
     return true;
 }
@@ -297,7 +297,7 @@ bool overlay_retry_stop(void) {
 // WHAT THE RISK ACTUALLY IS. 3.1 asks for a reservation because the Rust UI
 // core does not report running out of memory -- it panics and reboots. That
 // hazard is not present here: an overlay session has no Rust UI core (see
-// pocket_overlay.h for why it was left out), and a guest allocator that runs
+// kobako_overlay.h for why it was left out), and a guest allocator that runs
 // short raises an OutOfMemory exception, which comes back through
 // app_start_overlay() as an ordinary error and is refused below. The overlay
 // cannot take the device down by running out of room.
@@ -309,12 +309,12 @@ bool overlay_retry_stop(void) {
 // makes the second one obviously necessary and the first one obviously
 // insufficient.
 //
-// THE FLOOR. NET_RADIO_MIN_FREE in pocket/pocket_net.c: 56 KiB, measured on
+// THE FLOOR. NET_RADIO_MIN_FREE in kobako/kobako_net.c: 56 KiB, measured on
 // the board on 2026-09-07, the cost of bringing the radio up. It is the
 // largest recurring claim anything on this device makes, so an overlay that
 // leaves at least that much has not taken away an ability the machine had
 // before it started. The number is repeated here rather than shared through a
-// header because pocket_net.c is another agent's file and is in flight; if
+// header because kobako_net.c is another agent's file and is in flight; if
 // that constant moves, this one has to move with it, and that duplication is a
 // debt to settle rather than a design.
 #define OVERLAY_FREE_FLOOR (56*1024)
@@ -331,7 +331,7 @@ static uint32_t free_internal(void) {
 //
 // DERIVED, NOT MEASURED, and labelled so deliberately. It comes from the two
 // recorded analogues -- 85,602 bytes of guest heap for hello/main.js before
-// the pocket surfaces existed (app_session.c), and js=86,233 read off the
+// the kobako surfaces existed (app_session.c), and js=86,233 read off the
 // board for a running app -- rounded up for the parse peak. The overlay's own
 // figure has never been taken, because the first attempt to take it refused
 // before it got there. app_report() logs `js=` at the end of every start, so
@@ -357,7 +357,7 @@ static uint32_t free_internal(void) {
 
 static uint32_t overlay_needs(const overlay_app_t *o) {
     uint32_t need=OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR;
-    if(o->adopts_music && pocket_av_background_active()) need-=OVERLAY_BG_MUSIC_CREDIT;
+    if(o->adopts_music && kobako_av_background_active()) need-=OVERLAY_BG_MUSIC_CREDIT;
     return need;
 }
 
@@ -388,8 +388,8 @@ static void start(void) {
         say("NO FLAG");
         return;
     }
-    pocket_overlay_set_region(&o->region);
-    pocket_kasane_set_viewport(o->region.x,o->region.y,o->region.w,o->region.h);
+    kobako_overlay_set_region(&o->region);
+    kobako_kasane_set_viewport(o->region.x,o->region.y,o->region.w,o->region.h);
     app_registry_select(o->id);
     // The -1 is the NUL that EMBED_TXTFILES appends and the guest must not see.
     esp_err_t err=app_start_overlay(*o->source,
@@ -468,7 +468,7 @@ void overlay_tick(uint32_t frame_us) {
     }
     /* A submitted or repairing bank must reach the shell-owned display port
      * before guest code or its queued input can mutate application state. */
-    if(pocket_kasane_needs_present()) {
+    if(kobako_kasane_needs_present()) {
         if(overlay_kasane_active())budget_frame_pending=true;
         return;
     }
@@ -507,7 +507,7 @@ void overlay_tick(uint32_t frame_us) {
 // Every check above is a guess about a future claimant taken at overlay start.
 // The alternative is to stop guessing: let the claimant say so at the moment it
 // actually needs the room, which is a single identifiable point in its own code
-// -- esp_wifi_init in pocket_net.c, the decoder's buffers in pocket_av.c. An
+// -- esp_wifi_init in kobako_net.c, the decoder's buffers in kobako_av.c. An
 // overlay that yields there needs no forecast at all, because by then the
 // question is not "will something need this" but "this needs it now".
 //
@@ -525,22 +525,22 @@ void overlay_yield(const char *claimant, bool keep_music) {
 }
 
 bool overlay_kasane_active(void) {
-    return state==OVERLAY_RUNNING&&!overlay_stop_pending()&&!app_stop_pending()&&pocket_kasane_active();
+    return state==OVERLAY_RUNNING&&!overlay_stop_pending()&&!app_stop_pending()&&kobako_kasane_active();
 }
 
 ksn_result overlay_kasane_present(const ksn_display_port *port,ksn_backdrop_loader load,
                                   bool host_top_dynamic,ksn_render_stats *stats) {
     if(!overlay_kasane_active()||!port||!load||!stats)return KSN_INVALID;
     uint64_t now=(uint64_t)esp_timer_get_time();
-    ksn_result result=pocket_kasane_advance(now);
+    ksn_result result=kobako_kasane_advance(now);
     if(result!=KSN_OK&&result!=KSN_BUSY)return result;
     /* A fully opaque SYSTEM band hides the animated backdrop. Its own
      * transaction damage still repaints it on post/clear; dynamic host HUD
      * content above Kasane opts out of this occlusion shortcut. */
-    uint32_t covered=host_top_dynamic?0:pocket_kasane_opaque_system_bands();
-    pocket_kasane_invalidate_bands(KSN_BANDS_ALL&~covered);
-    result=pocket_kasane_present_backdrop(port,load,!host_top_dynamic,stats);
-    if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
+    uint32_t covered=host_top_dynamic?0:kobako_kasane_opaque_system_bands();
+    kobako_kasane_invalidate_bands(KSN_BANDS_ALL&~covered);
+    result=kobako_kasane_present_backdrop(port,load,!host_top_dynamic,stats);
+    if(result==KSN_OK)kobako_kasane_animations_presented((uint64_t)esp_timer_get_time());
     return result;
 }
 
@@ -553,8 +553,8 @@ bool overlay_starting(void) { return state==OVERLAY_STARTING; }
 // site rather than a filter this file could get wrong.
 void overlay_key(const keystroke_t *k) {
     if(state!=OVERLAY_RUNNING||!k) return;
-    if(pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return;
-    pocket_overlay_key(k);
+    if(kobako_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return;
+    kobako_overlay_key(k);
 }
 
 void overlay_kasane_charge(uint32_t composite_us) {

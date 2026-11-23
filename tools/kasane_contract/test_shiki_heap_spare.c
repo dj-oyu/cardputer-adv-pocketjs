@@ -1,4 +1,4 @@
-/* The Shiki region's spare room (main/pocket/shiki_heap.h, docs/kasane/
+/* The Shiki region's spare room (main/kobako/shiki_heap.h, docs/kasane/
  * shiki-jit.md sec.15): a spare block is refused when it would leave less
  * than keep bytes in one piece, and when one of the region's own
  * allocations fails, the reclaim hook gives spare blocks back, one call at

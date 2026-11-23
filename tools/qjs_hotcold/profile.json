@@ -685,23 +685,23 @@
 "h": "738e6c6cc358f4c3",
 "t": "66888666666666686"
 },
-"pocket_sin": {
+"lean_sin": {
 "h": "fcb4007b10c66616",
 "t": "686668"
 },
-"pocket_trig_not_finite": {
+"lean_trig_not_finite": {
 "h": "087f06b970d3e5d3",
 "t": "6"
 },
-"pocket_trig_phase_of": {
+"lean_trig_phase_of": {
 "h": "453dfc1d13db7b20",
 "t": "66866688"
 },
-"pocket_trig_sin_of_phase": {
+"lean_trig_sin_of_phase": {
 "h": "b6ca366a3a27936b",
 "t": "666"
 },
-"pocket_trig_sin_q30": {
+"lean_trig_sin_q30": {
 "h": "78798d3cdceb0aa7",
 "t": "6666666"
 },

@@ -1,4 +1,4 @@
-"""Generate the pocket.app.load() chunk table (main/pocket/app_chunks.h).
+"""Generate the kobako.app.load() chunk table (main/kobako/app_chunks.h).
 
   python tools/make_app_chunks.py OUTDIR LIST [LIST ...]
 
@@ -6,7 +6,7 @@ Each LIST is a chunks.txt:
 
   # comment
   app local.derby            <- the app_registry.c id the chunks belong to
-  scene  derby_scene.js      <- a name for pocket.app.load(), then a file
+  scene  derby_scene.js      <- a name for kobako.app.load(), then a file
   demo   derby_demo.js          relative to the chunks.txt
 
 A file ending in .mjs is an ES module: the app's module entry reaches it with
@@ -43,12 +43,12 @@ build without @shiki needs no Node. The float VM's @plan functions and
 `rom-text` templates went with the VM (Shiki v2.0); either is refused.
 
 `option strip-debug` compiles the app's chunks without line tables
-(JS_PocketSetStripDebug, docs/vm/strip-debug.md): a runtime error then names
+(JS_LeanSetStripDebug, docs/vm/strip-debug.md): a runtime error then names
 each function's first line, and the app keeps less heap.
 
 Refused, so the build fails at configure rather than the app at run time:
 a name that is not 1..31 of [A-Za-z0-9_.-], a name twice in one app, more than
-32 chunks in one app (pocket_app_load.c keeps a bit per chunk), a missing file,
+32 chunks in one app (kobako_app_load.c keeps a bit per chunk), a missing file,
 and two chunk files with the same base name (ESP-IDF writes each embed to
 build/<base name>.S, so the second would overwrite the first).
 """
@@ -239,7 +239,7 @@ def main():
           'set(APP_CHUNK_SHIKI_C "' + (out / ('ksn_shiki_rom.c' if shiki else 'ksn_shiki_rom_none.c')).as_posix() + '")']
     write(out / 'app_chunks.cmake', '\n'.join(cm) + '\n')
     if not shiki:
-        # Always a definition to link: a weak default in pocket_shiki_api.c
+        # Always a definition to link: a weak default in kobako_shiki_api.c
         # would win over the generated table, which sits in the same static
         # archive and is never pulled in to replace an already-defined symbol.
         write(out / 'ksn_shiki_rom_none.c',

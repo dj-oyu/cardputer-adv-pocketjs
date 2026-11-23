@@ -4,7 +4,7 @@
   var s={v:1,selected:0,pets:[]}, ready=false, lf=false, mode=1, choice=0, action=0;
   var last=__petNow(), saved=last, anim=0, note='LOADING', until=0, pos=0, draft='';
   var chars=' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  var art=pocket.kasane.resource('pets'), V=pocket.kasane.mount('pet');
+  var art=kobako.kasane.resource('pets'), V=kobako.kasane.mount('pet');
   function render(){
     if(!ready){V.set({foot:lf?note:''});return;}
     var now=__petNow(), id=mode===1?choice:s.selected, p=s.pets[id];
@@ -27,9 +27,9 @@
   function save(){
     if(!ready)return;
     saved=__petNow();
-    pocket.storage.set('pet.v1',s).then(function(){},function(){message('SAVE FAILED');render();});
+    kobako.storage.set('pet.v1',s).then(function(){},function(){message('SAVE FAILED');render();});
   }
-  pocket.storage.get('pet.v1').then(function(r){
+  kobako.storage.get('pet.v1').then(function(r){
     var v=r&&r.value;
     if(v&&v.v===1&&Array.isArray(v.pets)&&v.pets.length===12){
       s.selected=Number.isInteger(v.selected)&&v.selected>=0&&v.selected<12?v.selected:0;
@@ -42,7 +42,7 @@
       ['food','fun','energy'].forEach(function(k){p[k]=typeof p[k]==='number'&&isFinite(p[k])?Math.max(0,Math.min(100,p[k])):80;});
       p.sleep=p.sleep===true;s.pets[i]=p;
     }
-    s.selected=pocket.pet.select();choice=s.selected;ready=true;last=__petNow();
+    s.selected=kobako.pet.select();choice=s.selected;ready=true;last=__petNow();
     render();
     console.log('PET_READY '+s.selected);
   },function(){lf=true;note='LOAD FAILED: ESC TO RETRY';render();});
@@ -50,7 +50,7 @@
     var now=__petNow();
     if(!ready)return;
     var p=pet(), dt=Math.max(0,Math.min(5,(now-last)/1000));last=now;
-    var gift=pocket.pet.rewards(s.selected),was=typeof p.gift==='number'?p.gift:0;
+    var gift=kobako.pet.rewards(s.selected),was=typeof p.gift==='number'?p.gift:0;
     if(gift>was){p.food=Math.min(100,p.food+gift-was);p.gift=gift;message('TOKEN SNACK!');}
     p.food=Math.max(0,p.food-dt/90);p.fun=Math.max(0,p.fun-dt/120);
     p.energy=Math.max(0,Math.min(100,p.energy+dt*(p.sleep?0.8:-1/150)));
@@ -59,7 +59,7 @@
       if(edge&0x20)choice=Math.floor(choice/4)*4+(choice+1)%4;
       if(edge&0x10)choice=(choice+8)%12;
       if(edge&0x40)choice=(choice+4)%12;
-      if(edge&0x4000){try{pocket.pet.select(choice);}catch(e){message('SAVE FAILED');}s.selected=choice;mode=0;save();console.log('PET_SELECTED '+choice);}
+      if(edge&0x4000){try{kobako.pet.select(choice);}catch(e){message('SAVE FAILED');}s.selected=choice;mode=0;save();console.log('PET_SELECTED '+choice);}
     }else if(mode===2){
       if(edge&0x80)pos=(pos+7)%8;
       if(edge&0x20)pos=(pos+1)%8;
@@ -83,7 +83,7 @@
     if(now-anim>=100||edge){anim=now;render();}
   }
   var B={left:0x80,right:0x20,up:0x10,down:0x40,accept:0x4000};
-  pocket.input.onAction(function(e){if(e.phase==='press'&&B[e.action])step(B[e.action]);});
-  pocket.app.start({suspend:save,stop:save,resume:function(){last=__petNow();render();}});
-  pocket.app.onFrame(function(){step(0);});
+  kobako.input.onAction(function(e){if(e.phase==='press'&&B[e.action])step(B[e.action]);});
+  kobako.app.start({suspend:save,stop:save,resume:function(){last=__petNow();render();}});
+  kobako.app.onFrame(function(){step(0);});
 })();

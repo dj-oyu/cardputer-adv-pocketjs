@@ -1,10 +1,10 @@
-# `pocket.shapes` — 平面のベクター描画
+# `kobako.shapes` — 平面のベクター描画
 
-Shiki の面（`pocket.kasane.shiki` の `beginFrame` から `commit` まで）の、組み立て中のフレームへ、塗りと線を C で描く。点は呼び出し側の型付き配列に置き、番号で指す（フレームごとに配列を作らない）。設計の経緯は [megademo-shapes.md](../apps/megademo-shapes.md)、実装は `main/pocket/pocket_shape.c`、契約の試験は `tools/kasane_contract/run_pocket_shape.py`。
+Shiki の面（`kobako.kasane.shiki` の `beginFrame` から `commit` まで）の、組み立て中のフレームへ、塗りと線を C で描く。点は呼び出し側の型付き配列に置き、番号で指す（フレームごとに配列を作らない）。設計の経緯は [megademo-shapes.md](../apps/megademo-shapes.md)、実装は `main/kobako/kobako_shape.c`、契約の試験は `tools/kasane_contract/run_kobako_shape.py`。
 
 ## 使えるアプリ
 
-manifest の `required` か `optional` に `kasane.shapes` があるセッションにだけ入る（共通 API ではない。`pocket.derby` と同じ）。`pocket.capabilities.get('kasane.shapes')` の limits:
+manifest の `required` か `optional` に `kasane.shapes` があるセッションにだけ入る（共通 API ではない。`kobako.derby` と同じ）。`kobako.capabilities.get('kasane.shapes')` の limits:
 
 | 名前 | 値 | 意味 |
 | --- | ---: | --- |

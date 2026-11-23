@@ -11,7 +11,7 @@
  * so that ends cross the +-2,047 m range edge. Each case has six ou() series:
  * view()'s (25.5 m, 30 m) and five ser()-like (w -30..60 m, m 0.25..40 m).
  *
- * dsp_vec_ou_double() is pocket_derby.c's ou() on the same Q16/Q30 inputs in
+ * dsp_vec_ou_double() is kobako_derby.c's ou() on the same Q16/Q30 inputs in
  * double: the integer cull must never call out a chord this calls in. */
 #ifndef DERBY_SER_PIE_VEC_H
 #define DERBY_SER_PIE_VEC_H
@@ -102,7 +102,7 @@ static inline void dspv_case_make(dspv_case *K, unsigned index) {
     }
 }
 
-/* pocket_derby.c's view() rotation and ou(j, w, m, zf), in double, on the
+/* kobako_derby.c's view() rotation and ou(j, w, m, zf), in double, on the
  * case's own fixed-point inputs. fr is the exact sqrt, not the case's ceiling. */
 static inline bool dspv_ou_double(const dspv_course *C, const dspv_case *K, unsigned j, int series) {
     const double cx = K->cx / 1073741824.0, cz = K->cz / 1073741824.0;

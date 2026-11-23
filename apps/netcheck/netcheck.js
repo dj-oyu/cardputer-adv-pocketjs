@@ -1,6 +1,6 @@
-// pocket.net self-check; README.md reads the output. URL=null keeps it offline.
+// kobako.net self-check; README.md reads the output. URL=null keeps it offline.
 (function(){
-  var N = pocket.net, T = pocket.time, URL = 'https://example.com/';
+  var N = kobako.net, T = kobako.time, URL = 'https://example.com/';
   function say(t){ console.log('NETCHK '+t); }
   // The message carries the numbers a refusal was made on; without it a
   // LOW_MEMORY or OUT_OF_MEMORY says only that something did not fit.
@@ -8,7 +8,7 @@
                                           (e.message?' :: '+e.message:'')); }; }
   function yes(t){ return function(){ say(t+' NOT REJECTED'); }; }
   function cap(n){
-    var c = pocket.capabilities.get(n);
+    var c = kobako.capabilities.get(n);
     say('CAP '+n+' '+c.supported+'/'+c.available+' '+c.reason+' '+
         JSON.stringify(c.limits));
   }
@@ -60,7 +60,7 @@
           (r.networks.length?' top='+r.networks[0].rssiDbm:''));
     }, function(e){ say(tag+' '+e.code+' after='+Math.round(T.now()-t)+'ms'); });
   }
-  pocket.app.start({
+  kobako.app.start({
     start: function(){
       cap('net.wifi'); cap('net.http');
       return ask(undefined,URL,'GET',0).then(yes('NOLEASE'),no('NOLEASE'))
@@ -69,7 +69,7 @@
         })
         .then(function(){ return scan('SCAN'); })
         .then(function(){
-          var s = pocket.cancel.source(), p = scan('CANCEL',{cancel:s.token});
+          var s = kobako.cancel.source(), p = scan('CANCEL',{cancel:s.token});
           s.cancel();
           return p;
         })

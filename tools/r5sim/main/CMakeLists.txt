@@ -12,16 +12,16 @@ execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../pet_header.py"
 #   (unset)  the R5 records' Kasane-retained STRESS (stress_r5.js), no Shiki.
 #            docs/vm/qjs-observe.md sec.12.
 #   shiki    today's STRESS (apps/stress/stress.js, drawn with
-#            pocket.kasane.shiki), as tools/build_stress_app_test.sh builds it
+#            kobako.kasane.shiki), as tools/build_stress_app_test.sh builds it
 #            on the host: the app's Shiki programs become the built-in table
 #            (Node 16+).
 #            (A frozen copy of the pre-reorg STRESS, "shiki_v1", ran here until
 #            api-reorg P5 removed the calls it exercised.)
 #   derby    DERBY WATCH's demo race (apps/derby, its chunks lowered and its
 #            @shiki programs compiled as main/CMakeLists.txt does), with
-#            pocket.derby, pocket.app.load and pocket.input; counts per scene.
+#            kobako.derby, kobako.app.load and kobako.input; counts per scene.
 #   hud      LCD CATCH (apps/lcdcatch): retained mode only (replace/patch,
-#            refs, cache), no Shiki; pocket.input fed by a bot.
+#            refs, cache), no Shiki; kobako.input fed by a bot.
 set(R5SIM_APP_SOURCES "")
 set(R5SIM_APP_JS "${CMAKE_CURRENT_LIST_DIR}/stress_r5.js")
 set(R5SIM_SHIKI_SOURCES "")
@@ -31,7 +31,7 @@ if(R5SIM_APP STREQUAL "shiki")
     set(R5SIM_SHIKI_ROM "stress=apps/stress/stress_prog.js")
     set(R5SIM_APP_JS "${R}/apps/stress/stress.js")
 elseif(R5SIM_APP STREQUAL "derby")
-    # pocket.app.load()'s table for local.derby alone, as main/CMakeLists.txt
+    # kobako.app.load()'s table for local.derby alone, as main/CMakeLists.txt
     # makes it; the prog chunk without its @shiki functions (lower_plans.mjs),
     # done here at configure time (this image has no other chunk to rebuild).
     find_program(R5SIM_NODE node REQUIRED)
@@ -49,9 +49,9 @@ elseif(R5SIM_APP STREQUAL "derby")
     set(R5SIM_SHIKI_ROM ${APP_CHUNK_SHIKI})
     set(R5SIM_CHUNK_FILES ${APP_CHUNK_FILES})
     set(R5SIM_APP_JS "${R}/apps/derby/derby_watch.js")
-    set(R5SIM_APP_SOURCES "${_g}/app_chunks.c" "${R}/main/pocket/pocket_app_load.c"
-        "${R}/main/pocket/app_registry.c" "${R}/main/apps/derby/pocket_derby.c" "${R}/main/apps/derby/derby_ser_int.c"
-        "${R}/main/pocket/shiki_memstat.c")
+    set(R5SIM_APP_SOURCES "${_g}/app_chunks.c" "${R}/main/kobako/kobako_app_load.c"
+        "${R}/main/kobako/app_registry.c" "${R}/main/apps/derby/kobako_derby.c" "${R}/main/apps/derby/derby_ser_int.c"
+        "${R}/main/kobako/shiki_memstat.c")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${R}/apps/derby/chunks.txt"
         "${R}/apps/derby/derby_prog.js")
 elseif(R5SIM_APP STREQUAL "hud")
@@ -64,34 +64,34 @@ if(R5SIM_SHIKI_ROM)
     execute_process(COMMAND "${R5SIM_NODE}" "${R}/tools/kasane_ir/emit_shiki_rom.mjs"
         "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c" ${R5SIM_SHIKI_ROM}
         WORKING_DIRECTORY "${R}" OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
-    set(R5SIM_SHIKI_SOURCES "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/pocket/shiki_heap.c"
+    set(R5SIM_SHIKI_SOURCES "${R}/main/kobako/kobako_shiki_frame.c" "${R}/main/kobako/shiki_heap.c"
         "${R}/main/ui/kasane/ksn_shiki.c" "${R}/main/ui/kasane/ksn_shiki_frame.c"
-        "${R}/main/pocket/pocket_shiki_api.c"
-        # pocket_shiki_frame.c draws opaque mesh depth (beginMeshFrame).
+        "${R}/main/kobako/kobako_shiki_api.c"
+        # kobako_shiki_frame.c draws opaque mesh depth (beginMeshFrame).
         "${R}/main/ui/kasane/ksn_mesh_depth.c" "${R}/main/ayatsuri/compact_opaque.c")
     list(APPEND R5SIM_APP_SOURCES ${R5SIM_SHIKI_SOURCES} "${CMAKE_BINARY_DIR}/generated/stress_shiki_rom.c")
 endif()
 if(R5SIM_APP STREQUAL "derby" OR R5SIM_APP STREQUAL "hud")
-    # pocket.input.keys, real (keymap + keystate), with pocket_api.c's
+    # kobako.input.keys, real (keymap + keystate), with kobako_api.c's
     # subscription code verbatim as the host harnesses take it
-    # (tools/games/run_lcd_catch.sh): r5sim.c includes pocket_sub_impl.inc.
-    file(READ "${R}/main/pocket/pocket_api.c" _api)
+    # (tools/games/run_lcd_catch.sh): r5sim.c includes kobako_sub_impl.inc.
+    file(READ "${R}/main/kobako/kobako_api.c" _api)
     string(FIND "${_api}" "// ----------------------------------------------------------- subscriptions" _a)
     string(FIND "${_api}" "// ------------------------------------------------------- async completions" _b)
     if(_a LESS 0 OR _b LESS _a)
-        message(FATAL_ERROR "pocket_api.c: the subscriptions section moved; update tools/r5sim/main/CMakeLists.txt")
+        message(FATAL_ERROR "kobako_api.c: the subscriptions section moved; update tools/r5sim/main/CMakeLists.txt")
     endif()
     math(EXPR _n "${_b} - ${_a}")
     string(SUBSTRING "${_api}" ${_a} ${_n} _sub)
-    file(WRITE "${CMAKE_BINARY_DIR}/generated/pocket_sub_impl.inc" "${_sub}")
-    list(APPEND R5SIM_APP_SOURCES "${R}/main/pocket/pocket_input.c" "${R}/main/hal/keymap.c"
+    file(WRITE "${CMAKE_BINARY_DIR}/generated/kobako_sub_impl.inc" "${_sub}")
+    list(APPEND R5SIM_APP_SOURCES "${R}/main/kobako/kobako_input.c" "${R}/main/hal/keymap.c"
         "${R}/main/hal/keystate.c")
 endif()
 set(R5SIM_LDFRAGMENTS "")
 # R5SIM_HELPER_IRAM=0 leaves them in flash, to choose the list again from a
 # trace (tools/r5sim/icache.py --iram-kib; docs/vm/qjs-observe.md sec.14).
 if(R5SIM_DEVICE AND NOT (DEFINED R5SIM_HELPER_IRAM AND NOT R5SIM_HELPER_IRAM))
-    # The firmware's CONFIG_POCKET_VM_HELPER_IRAM=y (default): its QuickJS
+    # The firmware's CONFIG_KOBAKO_QJS_HELPER_IRAM=y (default): its QuickJS
     # helpers in IRAM, so the trace runs them from where the device does.
     list(APPEND R5SIM_LDFRAGMENTS "${R}/main/vm/helper_iram8.lf")
 endif()
@@ -100,15 +100,15 @@ if(R5SIM_PGO STREQUAL "generate")
 endif()
 idf_component_register(
     SRCS "r5sim.c"
-        "${R}/tools/hostshim/pocket_api_stub.c" "${R}/tools/hostshim/jpfont.c"
+        "${R}/tools/hostshim/kobako_api_stub.c" "${R}/tools/hostshim/jpfont.c"
         "${R}/tools/hostshim/ksn_pet_builtin.c"
         "${R}/main/text/ksn_font.c" "${R}/main/pet/ksn_pet.c" "${R}/main/pet/pet_pixels.c"
-        "${R}/main/pocket/pocket_memory.c"
-        "${R}/main/pocket/pocket_clock_source.c" "${R}/main/pocket/pocket_clock.c"
-        "${R}/main/pocket/pocket_av_playback_source.c" "${R}/main/pocket/pocket_av_output_source.c"
-        "${R}/main/pocket/app_view_assets.c" "${R}/main/pocket/app_view_provider.c"
-        "${R}/main/apps/player/app_music_view.c" "${R}/main/pocket/app_legacy_presenter.c"
-        "${R}/main/pocket/pocket_kasane.c" "${R}/main/pocket/app_notice.c"
+        "${R}/main/kobako/kobako_memory.c"
+        "${R}/main/kobako/kobako_clock_source.c" "${R}/main/kobako/kobako_clock.c"
+        "${R}/main/kobako/kobako_av_playback_source.c" "${R}/main/kobako/kobako_av_output_source.c"
+        "${R}/main/kobako/app_view_assets.c" "${R}/main/kobako/app_view_provider.c"
+        "${R}/main/apps/player/app_music_view.c" "${R}/main/kobako/app_legacy_presenter.c"
+        "${R}/main/kobako/kobako_kasane.c" "${R}/main/kobako/app_notice.c"
         "${R}/main/ui/kasane/ksn_runtime.c" "${R}/main/ui/kasane/ksn_schema.c"
         "${R}/main/ui/kasane/ksn_schema_session.c" "${R}/main/ui/kasane/ksn_source.c"
         "${R}/main/ui/kasane/ksn_source_pool.c" "${R}/main/ui/kasane/ksn_source_pool_adapter.c"
@@ -117,19 +117,19 @@ idf_component_register(
         "${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kasane/ksn_blend_pie.c"
         "${R}/main/hal/disp.c"
         ${R5SIM_APP_SOURCES}
-    INCLUDE_DIRS "." "${R}/main" "${R}/components/pocketjs_guest/include" "${R}/main/pocket" "${R}/main/ui" "${R}/main/ui/kasane"
+    INCLUDE_DIRS "." "${R}/main" "${R}/components/kobako_guest/include" "${R}/main/kobako" "${R}/main/ui" "${R}/main/ui/kasane"
         "${R}/main/text" "${R}/main/hal" "${CMAKE_BINARY_DIR}/generated"
-    REQUIRES quickjs-ng pocketjs_guest esp_timer esp_hw_support log esp_driver_i2c esp_driver_gpio esp_driver_spi esp_driver_i2s
+    REQUIRES quickjs-ng kobako_guest esp_timer esp_hw_support log esp_driver_i2c esp_driver_gpio esp_driver_spi esp_driver_i2s
     # stress_r5.js is apps/stress/stress.js as of 51f5feb, byte for byte (the
     # Kasane retained scene, before STRESS moved to Shiki): the workload of the
     # R5 records (docs/vm/turn-icache.md). This image does
     # not link Shiki, and the records stay comparable.
     EMBED_TXTFILES "${R5SIM_APP_JS}"
     LDFRAGMENTS ${R5SIM_LDFRAGMENTS})
-# The native hot/cold layout, as the firmware does it (-DPOCKET_NATIVE_HOTCOLD=
+# The native hot/cold layout, as the firmware does it (-DKOBAKO_NATIVE_HOTCOLD=
 # use|gen; this image has no Kconfig, so it is off unless asked for).
 include("${R}/tools/qjs_hotcold/hotcold.cmake")
-pocket_native_hotcold("${R}/main")
+kobako_native_hotcold("${R}/main")
 if(R5SIM_PGO STREQUAL "generate")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_PGO_GEN)
 endif()
@@ -139,13 +139,13 @@ foreach(_chunk IN LISTS R5SIM_CHUNK_FILES)
 endforeach()
 if(R5SIM_APP STREQUAL "derby")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_DERBY)
-    # -DR5SIM_DERBY_PROF=1: cycles a turn in each pocket.derby function (and
+    # -DR5SIM_DERBY_PROF=1: cycles a turn in each kobako.derby function (and
     # the Shiki draws inside it), "R5SIM prof" lines per scene.
     if(R5SIM_DERBY_PROF)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_DERBY_PROF)
     endif()
     # The series run the scalar integer path here: QEMU has no PIE, and this
-    # image has no CONFIG_POCKET_DERBY_SER_PIE (docs/apps/derby-ser-division.md
+    # image has no CONFIG_KOBAKO_DERBY_SER_PIE (docs/apps/derby-ser-division.md
     # sec.13). The double series of before (R5SIM_DERBY_SER_DOUBLE) is gone.
 elseif(R5SIM_APP STREQUAL "hud")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_HUD)
@@ -159,7 +159,7 @@ if(R5SIM_GUEST_ALLOC)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE "R5SIM_CLASSES=${R5SIM_CLASSES}")
     endif()
 endif()
-# -DR5SIM_DEVICE=1: the whole firmware session (components/pocketjs_guest)
+# -DR5SIM_DEVICE=1: the whole firmware session (components/kobako_guest)
 # plus the helper-IRAM fragment (docs/vm/qjs-observe.md sec.7).
 if(R5SIM_DEVICE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_DEVICE)
@@ -187,16 +187,16 @@ endif()
 if(R5SIM_GC_ON_OOM)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_GC_ON_OOM)
 endif()
-# -DR5SIM_FIT_LIMIT_KIB=16: the firmware's pocketjs_guest_fit_limit every turn,
-# with that native floor (CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB).
+# -DR5SIM_FIT_LIMIT_KIB=16: the firmware's kobako_guest_fit_limit every turn,
+# with that native floor (CONFIG_KOBAKO_GUEST_NATIVE_FLOOR_KB).
 if(R5SIM_FIT_LIMIT_KIB)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_FIT_LIMIT_KIB=${R5SIM_FIT_LIMIT_KIB})
 endif()
 if(R5SIM_SHIKI_ROM)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE R5SIM_APP_SHIKI)
-    # pocket_kasane.c reaches pocket.kasane.shiki through weak references,
-    # which do not pull pocket_shiki_api.c out of the archive by themselves.
-    target_link_libraries(${COMPONENT_LIB} INTERFACE "-u pocket_shiki_api_install" "-u pocket_shiki_api_register")
+    # kobako_kasane.c reaches kobako.kasane.shiki through weak references,
+    # which do not pull kobako_shiki_api.c out of the archive by themselves.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-u kobako_shiki_api_install" "-u kobako_shiki_api_register")
 endif()
 # The Shiki engine takes its C model too (no PIE, no JIT): the draw's
 # instructions are not the device's, the JS turn's are.
@@ -208,23 +208,23 @@ set_source_files_properties("${R}/main/ui/kasane/ksn_render.c" "${R}/main/ui/kas
 # ksn_shiki.c into a libgcc call (3,000 a Shiki STRESS turn), -O2 inlines them
 # (docs/vm/qjs-observe.md sec.12). Appended, so the scalar -include above stays.
 set_property(SOURCE "${R}/main/text/ksn_font.c" "${R}/main/ui/kasane/ksn_render.c"
-    "${R}/main/ui/kasane/ksn_core.c" "${R}/main/pocket/pocket_kasane.c"
+    "${R}/main/ui/kasane/ksn_core.c" "${R}/main/kobako/kobako_kasane.c"
     APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
-# DERBY's integer series as the firmware builds it (-O2; pocket_derby.c itself
+# DERBY's integer series as the firmware builds it (-O2; kobako_derby.c itself
 # stays at this image's -Os, as the r5sim figures before it were taken).
 if(R5SIM_APP STREQUAL "derby")
     set_property(SOURCE "${R}/main/apps/derby/derby_ser_int.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
 endif()
 # Training the native hot/cold profile (TARGET=native train.sh) needs the
 # firmware's object code: a function's profile applies only where its
-# instructions match. At -Os here, 21 of pocket_derby.c's 22 profiled
+# instructions match. At -Os here, 21 of kobako_derby.c's 22 profiled
 # functions never matched the firmware's -O2 build and were left as GCC wrote
 # them (docs/vm/qjs-hotcold.md sec.13.7).
-if(POCKET_NATIVE_HOTCOLD STREQUAL "gen")
-    set_property(SOURCE "${R}/main/apps/derby/pocket_derby.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
+if(KOBAKO_NATIVE_HOTCOLD STREQUAL "gen")
+    set_property(SOURCE "${R}/main/apps/derby/kobako_derby.c" APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
 endif()
 if(R5SIM_SHIKI_ROM)
-    set_property(SOURCE "${R}/main/pocket/pocket_shiki_frame.c" "${R}/main/ui/kasane/ksn_shiki.c"
+    set_property(SOURCE "${R}/main/kobako/kobako_shiki_frame.c" "${R}/main/ui/kasane/ksn_shiki.c"
         APPEND PROPERTY COMPILE_OPTIONS "-O2;-ffp-contract=off")
     set_property(SOURCE "${R}/main/ui/kasane/ksn_shiki_frame.c" APPEND PROPERTY COMPILE_OPTIONS "-O2")
 endif()

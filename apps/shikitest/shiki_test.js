@@ -1,5 +1,5 @@
 // Shiki on-device differential test (README.md). The case generator is
-// shared: tools/kasane_ir/shiki_device.mjs loads this file without pocket.
+// shared: tools/kasane_ir/shiki_device.mjs loads this file without kobako.
 'use strict';
 globalThis.shikiGen = function (seed) {
   let st = seed >>> 0 || 1;
@@ -73,8 +73,8 @@ globalThis.shikiHash = function (s) {
   for (let k = 0; k < s.length; k++) h = Math.imul(h ^ s.charCodeAt(k), 16777619);
   return (h >>> 0).toString(16).padStart(8, '0');
 };
-if (typeof pocket !== 'undefined') {
-  const D = pocket.shikiDebug, N = 600, SEED = 1, next = shikiGen(SEED);
+if (typeof kobako !== 'undefined') {
+  const D = kobako.shikiDebug, N = 600, SEED = 1, next = shikiGen(SEED);
   let i = 0;
   console.log('SK BEGIN seed ' + SEED + ' cases ' + N);
   // A case takes 30-60 ms of JS here, and a turn over budget is interrupted:

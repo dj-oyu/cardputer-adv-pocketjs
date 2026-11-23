@@ -20,7 +20,7 @@ poseAt=function(frame){
   check(Math.abs(value.z-12*Math.sin(frame*.13))<1e-10);
   check(Math.abs(value.angle-.7*Math.sin(frame*.11))<1e-10);
   pose[1]=value.y;pose[2]=value.z;pose[4]=value.angle;
-  pocket.ayatsuri.compose(pose,null,child); // mesh-local globals, bind offset in IB
+  kobako.ayatsuri.compose(pose,null,child); // mesh-local globals, bind offset in IB
 };
 function invalidMotion(){
   poseAt(30);const saved=G.slice(), previous=borrowedMotion.y;

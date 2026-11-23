@@ -53,7 +53,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', type=Path, required=True)
     args = parser.parse_args()
-    elf = args.build / 'cardputer_pocketjs.elf'
+    elf = args.build / 'cardputer_kobako.elf'
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     expected = os.environ.get('SOURCE_HEAD', head)
     if head != expected:

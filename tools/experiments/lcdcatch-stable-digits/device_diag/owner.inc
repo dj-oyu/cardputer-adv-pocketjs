@@ -6,9 +6,9 @@ extern void lcd_diag_finish(const char *);
 static bool diag_owner_active,diag_owner_ran;
 static int64_t diag_owner_deadline;
 static const char diag_prelude[]=
-    "pocket.random.seed=()=>20260929;"
-    "pocket.storage.get=()=>Promise.resolve({value:null,revision:0});"
-    "pocket.storage.set=()=>Promise.resolve();"
+    "kobako.random.seed=()=>20260929;"
+    "kobako.storage.get=()=>Promise.resolve({value:null,revision:0});"
+    "kobako.storage.set=()=>Promise.resolve();"
     "(()=>{let n=0;const log=console.log;console.log=(...a)=>{if(n++<16)log(...a)}})();";
 static void diag_owner_step(void){
     if(!diag_owner_ran){
@@ -20,7 +20,7 @@ static void diag_owner_step(void){
     const int64_t diag_now=esp_timer_get_time();
     if(diag_owner_active&&(lcd_diag_finished()||!running||diag_now>=diag_owner_deadline)){
         const char *status=!running?"app_error":diag_now>=diag_owner_deadline?"timeout":!lcd_diag_finished()?"timeout":
-            !lcd_diag_valid()?"input_mismatch":pocket_kasane_needs_present()?"present_pending":"complete";
+            !lcd_diag_valid()?"input_mismatch":kobako_kasane_needs_present()?"present_pending":"complete";
         lcd_diag_finish(status);
         if(running)end_run(ESP_OK);
         diag_owner_active=false;

@@ -4,14 +4,14 @@ vm/trig-device's trig_device.py, docs/apps/derby-camera-history.md).
   run  --bin X.bin --boot DIR --out log [--seconds 420] [--heavy] [--no-flash]
        flash (bootloader and partition table from --boot), wait 6 s, open
        DERBY (row 12), press tab once at the paddock if --heavy (USB key
-       injection, POCKET_KEYTEST), let the demo run, Back, save the raw log.
+       injection, KOBAKO_KEYTEST), let the demo run, Back, save the raw log.
   sum  log... : per (tier, course, camera) of the race turns, after 3 settling
        turns: frame rate, JS, VM draw, least mn, most gu; per tier the least
        mn (all turns and gate turns) and per race the guest maximum (S/O);
        --finish prints each race's FINISH line (order, every digit of the
        times) to compare images.
 
-The image: -DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON.
+The image: -DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DKOBAKO_KEYTEST=ON.
 ESP-IDF Python (pyserial, esptool).
 """
 import argparse, re, statistics, subprocess, sys, time

@@ -1,10 +1,10 @@
-// pocket.app / pocket.time / pocket.log self-check. APPCHK lines go to USB,
+// kobako.app / kobako.time / kobako.log self-check. APPCHK lines go to USB,
 // log tag `js`. What each one proves is in README.md beside this file.
 (function () {
-  var T = pocket.time, L = pocket.log, frames = 0;
+  var T = kobako.time, L = kobako.log, frames = 0;
   function say(t) { console.log('APPCHK ' + t); }
   function cap(n) {
-    var c = pocket.capabilities.get(n);
+    var c = kobako.capabilities.get(n);
     say('CAP ' + n + ' ' + c.supported + '/' + c.available +
         ' ' + JSON.stringify(c.limits));
   }
@@ -30,7 +30,7 @@
     for (var j = 0; j < 24; j++) L.write('info', long);
     say('LOG FLOOD dropped=' + tail().dropped);
   }
-  pocket.app.start({
+  kobako.app.start({
     start: function () {
       cap('app'); cap('time'); cap('log');
       say('FRAME ' + typeof globalThis.frame);
@@ -38,7 +38,7 @@
       say('WALL ' + w.source + ' ' + w.unixMs);
       return T.sleep(150).then(function () {
         say('SLEEP ' + Math.round(T.now() - t0) + 'ms frames=' + frames);
-        var s = pocket.cancel.source(), p = T.sleep(500, { cancel: s.token });
+        var s = kobako.cancel.source(), p = T.sleep(500, { cancel: s.token });
         s.cancel();
         return p.then(function () { say('CANCEL NOT REJECTED'); },
                       function (e) { say('CANCEL ' + e.code + ' ' + e.outcome); });
@@ -52,15 +52,15 @@
     },
     stop: function (r) { say('STOP ' + r + ' frames=' + frames); }
   });
-  pocket.app.onFrame(function (f) {
+  kobako.app.onFrame(function (f) {
     if (++frames === 1) say('FIRST t=' + Math.round(f.timeMs) + ' d=' + f.deltaMs);
     if (frames !== 30) return;
     say('FRAME30 delta=' + Math.round(f.deltaMs));
     logCheck();
-    var m = pocket.device.metrics();
+    var m = kobako.device.metrics();
     say('METRICS heap=' + m.heapFreeBytes + ' big=' + m.largestFreeBlockBytes +
         ' js=' + m.jsHeapBytes + ' fps=' + Math.round(m.fps) + ' io=' + m.ioDropped);
-    pocket.app.exit();
+    kobako.app.exit();
     say('AFTER EXIT');
   });
 })();

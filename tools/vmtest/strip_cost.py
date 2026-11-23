@@ -1,8 +1,8 @@
-"""What CONFIG_POCKET_VM_STRIP_DEBUG saves per app (host, WSL only).
+"""What CONFIG_QJS_LEAN_STRIP_DEBUG saves per app (host, WSL only).
 
 Builds tools/vmtest/retain_cost.c twice against the vendored quickjs-ng
 -m32 (the device's object sizes), once as the firmware builds it and once
-with -DCONFIG_POCKET_VM_STRIP_DEBUG=1 (no pc2line tables), compiles each
+with -DCONFIG_QJS_LEAN_STRIP_DEBUG=1 (no pc2line tables), compiles each
 shipping app's scripts (COMPILE_ONLY, the functions kept) and prints the
 charged bytes of both (TLSF lengths, as the device charges them).
 
@@ -49,8 +49,8 @@ def build(tag, extra):
     out = ROOT / '.cache/strip_cost' / tag
     (out / 'include').mkdir(parents=True, exist_ok=True)
     (out / 'include/sdkconfig.h').write_text('/* host */\n')
-    cflags = ['-std=gnu11', '-O1', '-g', '-fno-pie', *flags, *extra, '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
-              '-I', str(out / 'include'), '-I', str(QJS), '-I', str(ROOT / 'components/pocketjs_guest/include')]
+    cflags = ['-std=gnu11', '-O1', '-g', '-fno-pie', *flags, *extra, '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
+              '-I', str(out / 'include'), '-I', str(QJS), '-I', str(ROOT / 'components/kobako_guest/include')]
     objs = []
     for name in ('dtoa', 'libregexp', 'libunicode', 'quickjs', 'quickjs-libc', 'quickjs-vm'):
         o = out / f'{name}.o'
@@ -80,7 +80,7 @@ def charged(binary, files):
 
 
 def main():
-    off, on = build('off', []), build('on', ['-DCONFIG_POCKET_VM_STRIP_DEBUG=1'])
+    off, on = build('off', []), build('on', ['-DCONFIG_QJS_LEAN_STRIP_DEBUG=1'])
     derby = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'apps/derby'
     apps = dict(APPS, **{"DERBY WATCH": [str(derby / c) for c in DERBY]})
     print(f"{'app':<14} {'source B':>9} {'kept B':>8} {'stripped B':>10} {'saved B':>8} {'pc2line B':>9}")

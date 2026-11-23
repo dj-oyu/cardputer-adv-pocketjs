@@ -4,15 +4,15 @@
 // signal is lost (LOST); then wakes again, one sortie later.
 // Story: docs/apps/megademo-story.md; limits: docs/kasane/megademo-limit-scenes.md
 // The app is in chunks (apps/kasane/chunks.txt), loaded here one parse at a
-// time, the big ones first. This entry names pocket.kasane, so the session
+// time, the big ones first. This entry names kobako.kasane, so the session
 // reserves its arena.
 'use strict';
-pocket.app.load('act1');
-pocket.app.load('act2');
-if (pocket.kasane && pocket.kasane.shiki) pocket.app.load('set');
-pocket.app.load('brief');
-pocket.app.load('wake');
-if (pocket.kasane && pocket.kasane.shiki) {
-  pocket.app.load('view');
-  pocket.app.load('loop');
+kobako.app.load('act1');
+kobako.app.load('act2');
+if (kobako.kasane && kobako.kasane.shiki) kobako.app.load('set');
+kobako.app.load('brief');
+kobako.app.load('wake');
+if (kobako.kasane && kobako.kasane.shiki) {
+  kobako.app.load('view');
+  kobako.app.load('loop');
 }

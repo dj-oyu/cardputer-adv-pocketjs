@@ -1,4 +1,4 @@
-// pocket.app.load() on the host: the REAL pocket_app_load.c, pocket_api.c and
+// kobako.app.load() on the host: the REAL kobako_app_load.c, kobako_api.c and
 // app_registry.c on the real QuickJS, with the chunk table read from
 // apps/heapprobe/appload_chunks.txt (the list the device check embeds) through
 // tools/hostshim/app_chunks_host.c, plus a few chunks this test writes itself.
@@ -6,7 +6,7 @@
 // What it settles, per docs/vm/eval-peak.md section 7: the capability and its
 // limits without building the namespace; loads from the evaluation's top
 // level and from a later call (frame()); idempotence; every refusal and its
-// PocketError (code, outcome, retryable, cause, the chunk's file:line in the
+// KobakoError (code, outcome, retryable, cause, the chunk's file:line in the
 // message); global let/const/var/function shared across scripts; a failed
 // compile retried, a failed run refused; a heap too small, then big enough;
 // the watchdog's uncatchable error passing through untouched; an app with no
@@ -14,8 +14,8 @@
 // only reference gives back to the heap.
 //
 //   wsl -e bash -lc "cd /mnt/c/.../cardputer-adv-pocketjs && bash tools/build_app_load_test.sh"
-#include "pocket_api.h"
-#include "pocket_app_load.h"
+#include "kobako_api.h"
+#include "kobako_app_load.h"
 #include "app_registry.h"
 #include "app_chunks_host.h"
 #include "esp_app_desc.h"
@@ -61,7 +61,7 @@ static JSValue call(const char *name) {
     return r;
 }
 
-// The shared assertion helper and a PocketError checker, in the realm.
+// The shared assertion helper and a KobakoError checker, in the realm.
 static const char PRELUDE[]=
     "globalThis.check=(c,m)=>{if(!c)throw Error('check failed: '+m)};"
     "globalThis.err=f=>{try{f();return null}catch(e){return e}};"
@@ -77,16 +77,16 @@ static void session_begin(const char *app_id) {
     ctx=JS_NewContext(rt);
     REQUIRE(ctx);
     app_registry_select(app_id);
-    REQUIRE(pocket_api_install(ctx,NULL)==ESP_OK);
-    // pocket_app_install() calls this in the firmware; the rest of pocket.app
-    // is pocket_app.c's and does not enter into what is tested here.
-    REQUIRE(pocket_app_load_install(ctx)==ESP_OK);
+    REQUIRE(kobako_api_install(ctx,NULL)==ESP_OK);
+    // kobako_app_install() calls this in the firmware; the rest of kobako.app
+    // is kobako_app.c's and does not enter into what is tested here.
+    REQUIRE(kobako_app_load_install(ctx)==ESP_OK);
     run("prelude.js",PRELUDE);
 }
 
 static void session_end(void) {
     JS_RunGC(rt);
-    pocket_api_reset();
+    kobako_api_reset();
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
     ctx=NULL; rt=NULL;
@@ -155,18 +155,18 @@ int main(void) {
     // loads succeed again in a fresh realm.
     for(int session=0;session<3;session++) {
         session_begin("local.hello");
-        // Section 2: the capability is readable without building pocket.app.
+        // Section 2: the capability is readable without building kobako.app.
         run("cap.js",
-            "check(typeof Object.getOwnPropertyDescriptor(pocket,'app').get==='function','app is lazy');"
-            "const c=pocket.capabilities.get('app.load');"
+            "check(typeof Object.getOwnPropertyDescriptor(kobako,'app').get==='function','app is lazy');"
+            "const c=kobako.capabilities.get('app.load');"
             "check(c.supported&&c.available,'supported');"
             "check(c.limits.maxChunks===32&&c.limits.maxNameBytes===31,'limits '+JSON.stringify(c.limits));"
-            "check(typeof Object.getOwnPropertyDescriptor(pocket,'app').get==='function','still lazy');"
-            "check(typeof pocket.app.load==='function','load');"
-            "check(Object.getOwnPropertyDescriptor(pocket,'app').get===undefined,'built on read');");
+            "check(typeof Object.getOwnPropertyDescriptor(kobako,'app').get==='function','still lazy');"
+            "check(typeof kobako.app.load==='function','load');"
+            "check(Object.getOwnPropertyDescriptor(kobako,'app').get===undefined,'built on read');");
         // The evaluation's top level: the shape a split app's entry has.
         run("entry.js",
-            "const L=pocket.app.load;"
+            "const L=kobako.app.load;"
             "check(L('ok')===true,'first load');check(L('ok')===false,'idempotent');"
             "check(alS===10&&alC.n===2&&alV===3&&alG===4&&alF()===12,'shared names');"
             "alS=20;check(alF()===22,'one binding, not a copy');"
@@ -182,9 +182,9 @@ int main(void) {
         REQUIRE(!JS_ToInt32(ctx,&sum,r) && sum>0);
         JS_FreeValue(ctx,r);
         checks++;
-        // Refusals, each a PocketError with a section 4 code.
+        // Refusals, each a KobakoError with a section 4 code.
         run("refuse.js",
-            "const R=pocket.app.load;"
+            "const R=kobako.app.load;"
             "pe(err(()=>R('nope')),'NOT_FOUND','not-applied',false);"
             "pe(err(()=>R('y'.repeat(31))),'NOT_FOUND','not-applied',false);"
             "for(const a of [undefined,3,'','x'.repeat(32),'a\\0b',{toString(){return 'ok'}}])"
@@ -209,7 +209,7 @@ int main(void) {
             "check(e.cause instanceof SyntaxError&&/redeclaration/.test(e.message),e.message);"
             "check(alS===20,'untouched');"
             "globalThis.uncaught=()=>R('bad');");
-        // Uncaught, the PocketError reaches the host naming the chunk's line.
+        // Uncaught, the KobakoError reaches the host naming the chunk's line.
         r=call("uncaught");
         REQUIRE(JS_IsException(r));
         JSValue e=JS_GetException(ctx);
@@ -228,14 +228,14 @@ int main(void) {
     {
         session_begin("local.player");
         run("strip.js",
-            "check(pocket.app.load('sthr')===true,'loads');"
+            "check(kobako.app.load('sthr')===true,'loads');"
             "let s='';try{sdCall()}catch(e){s=String(e.stack)}"
             "check(/appload_sthrow\\.js:5/.test(s)&&!/appload_sthrow\\.js:7/.test(s),s);");
         printf("  strip-debug: a runtime error names the function's first line\n");
         session_end();
         session_begin("local.hello");
         run("exact.js",
-            "let e=null;try{pocket.app.load('thr')}catch(x){e=x}"
+            "let e=null;try{kobako.app.load('thr')}catch(x){e=x}"
             "check(/appload_throw\\.js:4/.test(e.message),'exact line without the option '+e.message);");
         session_end();
     }
@@ -244,9 +244,9 @@ int main(void) {
     // back: `mid` keeps its 48 methods behind one var.
     {
         session_begin("local.hello");
-        run("warm.js","pocket.app.load('ok');var alMid;");
+        run("warm.js","kobako.app.load('ok');var alMid;");
         const size_t before=used();
-        run("load.js","pocket.app.load('mid');check(alMid.sum()>0,'runs')");
+        run("load.js","kobako.app.load('mid');check(alMid.sum()>0,'runs')");
         const size_t with=used();
         run("drop.js","alMid=null;");
         const size_t dropped=used();
@@ -255,7 +255,7 @@ int main(void) {
                (ssize_t)(with-before),(ssize_t)(with-dropped));
         REQUIRE(with>before && dropped<before+(with-before)/4);
         // Idempotent even after the drop: the chunk is not evaluated again.
-        run("again.js","check(pocket.app.load('mid')===false&&alMid===null,'not reloaded')");
+        run("again.js","check(kobako.app.load('mid')===false&&alMid===null,'not reloaded')");
         session_end();
     }
 
@@ -263,25 +263,25 @@ int main(void) {
     // declared -- and the same load succeeds once the heap is big enough.
     {
         session_begin("local.hello");
-        run("warm.js","pocket.app.load('ok');var alMid;");
+        run("warm.js","kobako.app.load('ok');var alMid;");
         const size_t base=used();
         JS_SetMemoryLimit(rt,base+6000);
         run("oom.js",
-            "pe(err(()=>pocket.app.load('mid')),'OUT_OF_MEMORY','not-applied',true);"
+            "pe(err(()=>kobako.app.load('mid')),'OUT_OF_MEMORY','not-applied',true);"
             "check(alMid===undefined,'nothing declared');");
         JS_SetMemoryLimit(rt,0);
-        run("retry.js","check(pocket.app.load('mid')===true&&alMid.sum()>0,'loaded on retry')");
+        run("retry.js","check(kobako.app.load('mid')===true&&alMid.sum()>0,'loaded on retry')");
         printf("  a limit of used+6000 B: OUT_OF_MEMORY, retryable; loaded once the limit went\n");
         session_end();
     }
 
     // The watchdog: its uncatchable error must pass through load(), not
-    // become a PocketError a try/catch could swallow.
+    // become a KobakoError a try/catch could swallow.
     {
         session_begin("local.hello");
         int stop=0;
         JS_SetInterruptHandler(rt,spin_interrupt,&stop);
-        run("arm.js","globalThis.caught=0;globalThis.go=()=>{try{pocket.app.load('spin')}catch(e){caught++}};");
+        run("arm.js","globalThis.caught=0;globalThis.go=()=>{try{kobako.app.load('spin')}catch(e){caught++}};");
         stop=1;
         JSValue r=call("go");
         REQUIRE(JS_IsException(r));
@@ -291,7 +291,7 @@ int main(void) {
         stop=0;
         JS_SetInterruptHandler(rt,NULL,NULL);
         run("after.js","check(caught===0,'not caught');check(alSpun>0,'it ran');"
-            "pe(err(()=>pocket.app.load('spin')),'CORRUPT_DATA','not-applied',false);");
+            "pe(err(()=>kobako.app.load('spin')),'CORRUPT_DATA','not-applied',false);");
         printf("  interrupted load: the uncatchable error passed through; the chunk is refused after\n");
         session_end();
     }
@@ -301,8 +301,8 @@ int main(void) {
     {
         session_begin("local.playground");
         run("playground.js",
-            "check(pocket.capabilities.get('app.load').supported,'supported');"
-            "pe(err(()=>pocket.app.load('ok')),'NOT_FOUND','not-applied',false);");
+            "check(kobako.capabilities.get('app.load').supported,'supported');"
+            "pe(err(()=>kobako.app.load('ok')),'NOT_FOUND','not-applied',false);");
         session_end();
     }
 

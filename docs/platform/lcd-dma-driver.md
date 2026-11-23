@@ -153,8 +153,8 @@
 
 ### 3.9 変えないもの（呼び出し側から見て）
 
-- 公開の関数と意味: `board_strip`・`board_present`・`board_present_rect`・`board_present_sync`・`board_present_rect_sync`・`board_present_submit`・`board_present_finish`・`board_present_frame_end`・`board_capture*`。呼び出し元（`app_session.c`、`shell.c`、`editor.c`、`codeedit.c`、`tutorial.c`、`wifi_ui.c`、`pocket_workspace.c`、`pickmodal_draw.c`、`pocket_capture.c`、各 probe）は変えない。
-- 送る前の上書き（`pet_hub_overlay`・`pocket_capture_overlay`）と画面の取り込み（`PIX` は入れ替え前の画素）は、`shared` の上で今の順に行う。
+- 公開の関数と意味: `board_strip`・`board_present`・`board_present_rect`・`board_present_sync`・`board_present_rect_sync`・`board_present_submit`・`board_present_finish`・`board_present_frame_end`・`board_capture*`。呼び出し元（`app_session.c`、`shell.c`、`editor.c`、`codeedit.c`、`tutorial.c`、`wifi_ui.c`、`kobako_workspace.c`、`pickmodal_draw.c`、`kobako_capture.c`、各 probe）は変えない。
+- 送る前の上書き（`pet_hub_overlay`・`kobako_capture_overlay`）と画面の取り込み（`PIX` は入れ替え前の画素）は、`shared` の上で今の順に行う。
 - `BOARD_ENDIAN_PROBE`（RAMCTRL の切り替え）、`KASANE_P0_BUS_PROBE` の計測点（相当の位置に置き直す）。
 
 ## 4. メモリ
@@ -310,7 +310,7 @@ DERBY WATCH のデモレース。今の方式（写しあり）・1'・2 を 30 
 
 **B:** 確定のときに `band_signature` が、帯ごとに「掛かる最初の entry」と「最後の entry の終わり」を覚える（1 シグネチャ 68 B、計 272 B）。帯や半分の帯を描くときは、その範囲だけをたどる（`ksn_proc_render_band_range`）。たどる順は変わらないので、画素は同じ（STRESS・DERBY の host digest が、範囲あり／なし × 8 行／4 行で一致）。
 
-host で数えた、1 フレームで見る entry の数（`POCKET_PROC_VISIT_STATS`）:
+host で数えた、1 フレームで見る entry の数（`KOBAKO_PROC_VISIT_STATS`）:
 
 | | 全部（今） | B（範囲） | A（掛かるものだけ） |
 | --- | --- | --- | --- |
@@ -337,7 +337,7 @@ host で数えた、1 フレームで見る entry の数（`POCKET_PROC_VISIT_ST
 - `tx_buf`（3,840 B）を外した。描画用の帯は `shared` 1 本（8 行）だけ。
 - **Kasane（アプリ）、ホーム画面のシーンの描画ループ、オーバーレイ（`shell.c` の Kasane ポート）:** `board_strip_next()` で 4 行の半分を交互に受け取り、描いた場所から送る。送っている半分とは別の半分に描く。
 - **ほかの画面（エディタ、codeedit、wifi、tutorial、pickmodal、workspace、probe）:** 自分の 8 行の帯（`shared`）をそのまま渡す。board はそれを送り、送り終えてから戻る（同期）。狭い窓は、呼び出し元の帯を書き換えないよう、行ごとに送る。これらの画面は送信と描画が重ならなくなるので、そのぶん遅くなる。
-- B（帯ごとの範囲）は既定で有効（`g_pocket_proc_ranges` 1）。
+- B（帯ごとの範囲）は既定で有効（`g_kobako_proc_ranges` 1）。
 - host の検査 `tools/test_board_half.py`（CI の copied-dma-extraction にも追加）: board の実際の関数で、半分の帯を交互に送るフレーム（全幅・狭い窓）、画面自身の帯（全幅・狭い窓）、その混在を流す。偽のドライバは、積んだ時のデータを控え、送信中にそこへ書き込みがないかを、回収のたびと描画のたびに確かめる。わざと同じ半分を渡すように壊すと失敗することも確かめた。
 - `0` にすると、従来の写しの経路（`tx_buf`）に戻る。従来の host 検査（`test_board_transport.py` ほか）はこちらを検査している。
 - `tools/report_board_transport.py` は map に `tx_buf` 3,840 B があることを前提にしている（ビルドには組み込まれていない）。設計 0 の map では合わない。
@@ -380,7 +380,7 @@ host で数えた、1 フレームで見る entry の数（`POCKET_PROC_VISIT_ST
 **2. 前半の帯が、後半に掛かる entry を覚える（carry）。** `ksn_proc_render_band_carry`: 帯の頭から始まる 4 行の描画が、[first, end) を帯全体（8 行）で判定し、掛かる entry だけを前半・後半に振り分ける。後半に掛かるものは 1,024 bit（128 B）のビット表に印を付け、続く後半の描画（同じフレーム・同じ範囲・残りの行）は印の entry だけを同じ順にたどる。帯に掛からない大多数の entry の判定は 8 行のときと同じ 1 回になる。
 
 - メモリ: 144 B（ビット表 128 B と鍵）。Shiki の領域から、4 行の帯を初めて描くときに取る（8 行の port では取らない。`beginFrame` が取るのは今までどおりフレーム 2 枚だけ）。取れなければ carry なしで今までどおり全部たどる。
-- 鍵（フレーム、件数、行、範囲）が合わない呼び出しは全部たどり、carry を無効にする。フレームの entry が変わりうるところ（beginFrame、commit、present の結果、reset）で、持ち主の `pocket_proc` が捨てる。
+- 鍵（フレーム、件数、行、範囲）が合わない呼び出しは全部たどり、carry を無効にする。フレームの entry が変わりうるところ（beginFrame、commit、present の結果、reset）で、持ち主の `kobako_proc` が捨てる。
 - 画素は同じ: `tools/kasane_contract/test_procedural_carry.c`（模様線あり・なし、部分範囲、前半と後半のあいだに別フレーム、捨てられた carry、後半を 2 回、任意の行から。369,031 回の呼び出しを `ksn_proc_render_band_range` と比較、ASan/UBSan でも）。STRESS の host digest は不変。DERBY の host は 4 行・8 行の 14 本の digest がすべて一致（先頭 `f2d667e3` は §9.5 と同じ）。
 - host（callgrind、STRESS、4 行）: 線の描画 433M → 359M 命令（8 行は 293M）。4 行の増え方は +130M → +66M、全体では +174M → +110M（+8.1%）。
 - 実機（STRESS、同じバイナリで carry あり／なしを窓ごとに交互、`g_ksn_prof` で Shiki の画像の時間を計測）: Shiki の画像 1 回あたり 24,843 → 22,393 サイクル（中央値、−9.9%）、描画 8.19 → 8.00 ms（中央値、−0.19 ms）。記録は同じファイルの CARRY_AB。MEGADEMO は数秒ごとに場面が変わり、場面の中でも画像の重さが動くので、窓の対では結論が出なかった。
@@ -391,9 +391,9 @@ host で数えた、1 フレームで見る entry の数（`POCKET_PROC_VISIT_ST
 
 ### 9.10 帯のハッシュ（`band_signature`）の点検（2026-11-04）
 
-`commit` は帯ごとに、掛かる entry の並び（10 B ずつ）の 32 bit FNV-1a を作り、表示中のフレームの値と同じ帯は描き直しも送信もしない（`pocket_proc_band_damage`）。§9.9 の後、JS のターンの 18.5%（host、STRESS）がこの `commit` だったので、手を入れる前にハッシュそのものを点検した。
+`commit` は帯ごとに、掛かる entry の並び（10 B ずつ）の 32 bit FNV-1a を作り、表示中のフレームの値と同じ帯は描き直しも送信もしない（`kobako_proc_band_damage`）。§9.9 の後、JS のターンの 18.5%（host、STRESS）がこの `commit` だったので、手を入れる前にハッシュそのものを点検した。
 
-host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 同じバイト列に splitmix64 の連鎖を並べて「本当に違うか」の基準にし、比べた帯ごとに数える。記録は `docs/kasane/logs/proc-band-hash-check-20261104.txt`。
+host の点検（`-DKOBAKO_PROC_SIG_CHECK`、ファームには入らない）: 同じバイト列に splitmix64 の連鎖を並べて「本当に違うか」の基準にし、比べた帯ごとに数える。記録は `docs/kasane/logs/proc-band-hash-check-20261104.txt`。
 
 - **前提（同じ値の帯は同じ絵）は成り立っている:** 4 アプリで、値が同じで飛ばした帯 89,768 本を両方のフレームで描いて比べ、画素の不一致 0。
 - **32 bit の衝突は 0:** 中身が違う帯 333,176 回の比較で、FNV の値が一致したことはない。
@@ -411,7 +411,7 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 **1. ハッシュを entry ごとに 1 回（987f395）。** 帯をまたぐたびに entry の 10 B を FNV にかけ直していたのを、entry ごとに murmur3 の混ぜで 32 bit を 1 回作り、帯ごとには回転・xor・奇数の掛け算の 1 段だけにした。§9.10 の点検を同じ 4 アプリで通した（32 bit の衝突 0、下位/上位 16 bit はランダムと同じ率、DERBY の下位 8 bit の偏り 2,718 → 673（ランダムで 720）、飛ばした帯の画素一致）。実機の効果は小さかった: STRESS の `band_signature` 約 1.37 → 1.24 ms（同じバイナリの A/B）。
 
-**2. 二つの歩きを `-O2` で、模様線の無いフレームは欄を直接読む（5535bea）。** `pocket_shiki_frame.c` はプロジェクト既定の `-Os` で、entry ごとに `ksn_proc_frame_next` を通っていた。entry を 1 回読むだけの歩きは 0.055 ms（STRESS、約 900 entry）なので、遅さはメモリではなくコード。関数属性で `-O2` にし、模様線の無いフレームは欄を直接読む（模様線のあるフレームは今までどおり `ksn_proc_frame_next`、こちらも `-O2`）。
+**2. 二つの歩きを `-O2` で、模様線の無いフレームは欄を直接読む（5535bea）。** `kobako_shiki_frame.c` はプロジェクト既定の `-Os` で、entry ごとに `ksn_proc_frame_next` を通っていた。entry を 1 回読むだけの歩きは 0.055 ms（STRESS、約 900 entry）なので、遅さはメモリではなくコード。関数属性で `-O2` にし、模様線の無いフレームは欄を直接読む（模様線のあるフレームは今までどおり `ksn_proc_frame_next`、こちらも `-O2`）。
 
 | | 今まで（`-Os`） | 変更後 |
 | --- | --- | --- |
@@ -424,11 +424,11 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 出荷版（5535bea）に計時だけを足した版で確認: STRESS 0.89〜0.96 ms（01c81e2 では 2.74〜2.81）、DERBY のレース 0.42〜0.51 ms（同 0.93〜1.15。模様線のあるフレームの道）、パドック 0.26 ms（同 0.48）。
 
-**読み:** 実機の時間を食っていたのはハッシュの計算量より、サイズ最適化のコードだった（1 だけでは −0.12 ms、2 で −1.2 ms）。`pocket_shiki_frame.c` のほかの毎フレームの道（描画の `render_rows` の周り、`image_span`）も同じ `-Os` で走っている。
+**読み:** 実機の時間を食っていたのはハッシュの計算量より、サイズ最適化のコードだった（1 だけでは −0.12 ms、2 で −1.2 ms）。`kobako_shiki_frame.c` のほかの毎フレームの道（描画の `render_rows` の周り、`image_span`）も同じ `-Os` で走っている。
 
 ### 9.12 描画と転送の毎フレームの道を `-O2` に（2026-11-05）
 
-§9.11 の読みどおり、`-Os` のまま毎フレーム走るファイルを `-O2` にした。対象は `text/ksn_font.c`・`ui/kasane/ksn_render.c`・`ui/kasane/ksn_core.c`・`pocket/pocket_kasane.c`・`pocket/pocket_shiki_frame.c`（`-ffp-contract=off` 付き。浮動小数の結果を `-Os` 版と同じに保つため、積和の融合を禁じる）。3 つのビルドを実機で比べた（`docs/kasane/logs/o2-render-ab-20261105.txt`。ビルド間の比較なので命令キャッシュの配置で約 15% 揺れる。同じバイナリの A/B ではない）。
+§9.11 の読みどおり、`-Os` のまま毎フレーム走るファイルを `-O2` にした。対象は `text/ksn_font.c`・`ui/kasane/ksn_render.c`・`ui/kasane/ksn_core.c`・`kobako/kobako_kasane.c`・`kobako/kobako_shiki_frame.c`（`-ffp-contract=off` 付き。浮動小数の結果を `-Os` 版と同じに保つため、積和の融合を禁じる）。3 つのビルドを実機で比べた（`docs/kasane/logs/o2-render-ab-20261105.txt`。ビルド間の比較なので命令キャッシュの配置で約 15% 揺れる。同じバイナリの A/B ではない）。
 
 | render_ms（1 フレーム） | A: 今まで（`-Os`） | B: 5 ファイル `-O2` | C: B ＋ `render_group` だけ `-Os` |
 | --- | --- | --- | --- |
@@ -473,7 +473,7 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 
 ### 9.15 汚れた帯のうち画素が変わっていないもの（host の計数、2026-11-14）
 
-§9.10 の点検の逆向き: ハッシュが「違う」とした帯を両方のフレームで描いて比べた（`-DPOCKET_PROC_SIG_CHECK` の `SIG_DIRTY`・`SIG_SEND`、ファームには入らない）。ハッシュの入力は切り詰め前の entry なので、画面外の座標だけが動く線は、見える画素が同じでも帯を汚す。どれだけあるかを数えた。Shiki の面だけで、HUD の損傷は入っていない。
+§9.10 の点検の逆向き: ハッシュが「違う」とした帯を両方のフレームで描いて比べた（`-DKOBAKO_PROC_SIG_CHECK` の `SIG_DIRTY`・`SIG_SEND`、ファームには入らない）。ハッシュの入力は切り詰め前の entry なので、画面外の座標だけが動く線は、見える画素が同じでも帯を汚す。どれだけあるかを数えた。Shiki の面だけで、HUD の損傷は入っていない。
 
 | | STRESS（900 フレーム） | DERBY（host の 20 本、MID の 1 本） |
 | --- | ---: | ---: |
@@ -489,7 +489,7 @@ host の点検（`-DPOCKET_PROC_SIG_CHECK`、ファームには入らない）: 
 ### 9.16 線の歩みと commit の損傷（2026-11-14）
 
 - **`plain_walk`**（`ksn_shiki_frame.c` `plain_entry`）: 帯の判定を yy が動いたときだけにし、行のポインタで書き、x が画面外へ遠ざかる側に出たら止める（x は単調）。旧の歩み（`plain_entry_ref`）は A/B の腕と、帯の手前から入る線の受け皿として残した。`test_plain_walk.c` が 60,000 本 × 全帯 × 帯の高さ 1〜8 で両者を比較。実機（STRESS、同じバイナリ）で Shiki の画像の 1 呼び出しあたりのサイクルが off で +10〜12%、描画 約 −0.3 ms。DERBY のパドックは線が少なく差なし。
-- **`box_reuse`**（`pocket_shiki_frame.c`）: commit の外接矩形を `band_signature` の歩みで取り、表示中のフレームの矩形はそれ自身の commit のときの値を持つ。全 entry を 2 回余分に歩かない。host の `POCKET_PROC_SIG_CHECK` が毎 commit で旧の歩みと比べる（STRESS 897 回、DERBY 全場面で不一致 0）。host の命令数で commit 116 → 93 M（STRESS）。実機の turn は DERBY のパドック 3.16 → 3.02 ms、STRESS 約 −0.1〜0.27 ms。
+- **`box_reuse`**（`kobako_shiki_frame.c`）: commit の外接矩形を `band_signature` の歩みで取り、表示中のフレームの矩形はそれ自身の commit のときの値を持つ。全 entry を 2 回余分に歩かない。host の `KOBAKO_PROC_SIG_CHECK` が毎 commit で旧の歩みと比べる（STRESS 897 回、DERBY 全場面で不一致 0）。host の命令数で commit 116 → 93 M（STRESS）。実機の turn は DERBY のパドック 3.16 → 3.02 ms、STRESS 約 −0.1〜0.27 ms。
 
 ### 9.17 描画を速くして、まだフレームが縮む分（2026-11-14）
 

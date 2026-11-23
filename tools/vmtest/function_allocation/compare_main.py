@@ -37,7 +37,7 @@ def main():
             for name in ['quickjs.c', 'quickjs-vmstack.h', 'quickjs-rom-intrinsics.h']:
                 (source / name).write_bytes(base_file(name))
         env = dict(os.environ, VMTEST_QJS=str(source), VMTEST_OUT=str(directory),
-                   VMTEST_CFLAGS='-DCONFIG_POCKET_VM_STRIP_DEBUG=1' if args.strip else '')
+                   VMTEST_CFLAGS='-DCONFIG_QJS_LEAN_STRIP_DEBUG=1' if args.strip else '')
         run(label + '-build', ['bash', 'tools/vmtest/build.sh', variant], env)
         log = run(label + '-corpus', ['bash', 'tools/vmtest/run.sh', '--variant', variant],
                   env, allow_expected_difference=args.strip or args.rom)

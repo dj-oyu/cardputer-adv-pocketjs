@@ -1,6 +1,6 @@
 """The shipped apps that keep themselves asleep on Back (docs/vm/app-suspend-design.md).
 
-For each of IMU CALIBRATION, POCKET PET and PET COMPANION: open it from the
+For each of IMU CALIBRATION, KOBAKO PET and PET COMPANION: open it from the
 menu, Back (it must go to sleep, not stop), open the same row (it must resume
 the same session -- no second *_READY), Back again, then open HELLO WORLD,
 which must end the sleeping app with stop("evict").

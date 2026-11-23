@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Train the hot/cold profile of quickjs.c (docs/vm/qjs-hotcold.md sec.4):
 # build tools/r5sim with a symbol in front of every basic block
-# (-DPOCKET_QJS_HOTCOLD=gen), run each workload in QEMU with a block trace,
+# (-DKOBAKO_QJS_HOTCOLD=gen), run each workload in QEMU with a block trace,
 # and write tools/qjs_hotcold/profile.json.
 #
 #   tools/qjs_hotcold/train.sh [<build root>]        (default .cache/hc_train)
@@ -24,10 +24,10 @@ QEMU=${QEMU:-$(ls -d "$HOME"/.espressif/tools/tools/qemu-xtensa/*/qemu/bin/qemu-
 WORKLOADS=${WORKLOADS:-shiki derby hud}
 TARGET=${TARGET:-quickjs}
 if [ "$TARGET" = native ]; then
-    GEN=(-DPOCKET_QJS_HOTCOLD=use -DPOCKET_NATIVE_HOTCOLD=gen)
+    GEN=(-DKOBAKO_QJS_HOTCOLD=use -DKOBAKO_NATIVE_HOTCOLD=gen)
     PROFILE=$R/tools/qjs_hotcold/profile_native.json
 else
-    GEN=(-DPOCKET_QJS_HOTCOLD=gen)
+    GEN=(-DKOBAKO_QJS_HOTCOLD=gen)
     PROFILE=$R/tools/qjs_hotcold/profile.json
 fi
 mkdir -p "$B"

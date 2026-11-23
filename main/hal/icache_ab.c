@@ -11,7 +11,7 @@
 // The ROM's autoload calls are documented as internal to ESP-IDF. They only
 // write the EXTMEM autoload registers; the cache itself stays enabled.
 #include "icache_ab.h"
-#ifdef CONFIG_POCKET_ICACHE_AB
+#ifdef CONFIG_KOBAKO_ICACHE_AB
 #include <stdint.h>
 #include "esp_attr.h"
 #include "esp_log.h"

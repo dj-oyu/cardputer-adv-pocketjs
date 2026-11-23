@@ -1,10 +1,10 @@
 #ifndef DERBY_SER_INT_H
 #define DERBY_SER_INT_H
 /* DERBY WATCH's panning series in integers (docs/apps/derby-ser-division.md
- * sec.4, stage S1): pocket.derby.ser() without software doubles. Positions
+ * sec.4, stage S1): kobako.derby.ser() without software doubles. Positions
  * are Q16 m, directions Q30, products int64, and the draws' inputs go to the
- * plans already in their Q formats (pocket_proc_draw_fixed). No QuickJS here:
- * pocket_derby.c binds it, and tools/games/test_derby_serq.c checks it
+ * plans already in their Q formats (kobako_proc_draw_fixed). No QuickJS here:
+ * kobako_derby.c binds it, and tools/games/test_derby_serq.c checks it
  * against the double series on the host (stage S0).
  *
  * The boundary for the PIE kernel (sec.6.3, P1). The chord ends' rotation into
@@ -24,13 +24,13 @@
 #include "sdkconfig.h"
 #endif
 /* The integer path's per-frame functions in IRAM instead of flash: a
- * measurement build only (CONFIG_POCKET_DERBY_SER_IRAM, default n, or
- * POCKET_DERBY_SER_IRAM defined here; +6.5 KB of DIRAM taken from every
+ * measurement build only (CONFIG_KOBAKO_DERBY_SER_IRAM, default n, or
+ * KOBAKO_DERBY_SER_IRAM defined here; +6.5 KB of DIRAM taken from every
  * app, docs/apps/derby-ser-division.md sec.12). */
-#if defined(CONFIG_POCKET_DERBY_SER_IRAM) && !defined(POCKET_DERBY_SER_IRAM)
-#define POCKET_DERBY_SER_IRAM 1
+#if defined(CONFIG_KOBAKO_DERBY_SER_IRAM) && !defined(KOBAKO_DERBY_SER_IRAM)
+#define KOBAKO_DERBY_SER_IRAM 1
 #endif
-#if defined(POCKET_DERBY_SER_IRAM) && defined(ESP_PLATFORM)
+#if defined(KOBAKO_DERBY_SER_IRAM) && defined(ESP_PLATFORM)
 #include "esp_attr.h"
 #define DERBY_SER_HOT IRAM_ATTR
 #else

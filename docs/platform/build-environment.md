@@ -95,7 +95,7 @@ eim run 'idf.py -B build build' v6.0.1 | Out-Host
 
 - IDF（EIM）は Node を入れない。別に入れる（このPCは Volta の Node v24.19.0）。確認は IDF を有効化したシェルで `node --version`。
 - 16 未満は動かない: Node 14 は `??=` の構文エラーで止まった。16・18・26 は同じ生成物をバイト単位で出した（2026-09-30、host。当時は `@plan`）。
-- 無い・古いと、configure が「`@shiki` を含むチャンク（`local.derby:prog` のように）、Node 16 以上が PATH に要ること、見つけた node の版」を出して止まる。PATH を直して `idf.py -B <dir> reconfigure`。PATH を変えずに `-DPOCKET_NODE=<node のパス>` を渡してもよい。止まったときは見つけた値を CMake のキャッシュから消すので、次の configure で探し直す。
+- 無い・古いと、configure が「`@shiki` を含むチャンク（`local.derby:prog` のように）、Node 16 以上が PATH に要ること、見つけた node の版」を出して止まる。PATH を直して `idf.py -B <dir> reconfigure`。PATH を変えずに `-DKOBAKO_NODE=<node のパス>` を渡してもよい。止まったときは見つけた値を CMake のキャッシュから消すので、次の configure で探し直す。
 - 仕組み（`main/CMakeLists.txt`、`tools/make_app_chunks.py`）: configure で `make_app_chunks.py` が `@shiki` を含むチャンクを見つけ、そのチャンクの埋め込み元を `build_*/generated/apps/<アプリのディレクトリ>/<同じファイル名>` に差し替える。変換はビルド時の `add_custom_command`（`node tools/kasane_ir/lower_plans.mjs --rom <アプリ> --file 元 生成物`）。ファイル名が同じなので埋め込みシンボル（`_binary_derby_prog_js_start`）とチャンク表は変わらない。チャンクを編集すれば再 configure なしで作り直す。**チャンクに初めて `@shiki` を書いたときだけ** `reconfigure` が要る。`@shiki` があるのに `/** @planDecoder rom */` が 1 つでなければ configure が止まる。
 - 今 `@shiki` を持つのは DERBY WATCH（`apps/derby/derby_prog.js`）、BIG WAVE（`apps/bigwave/big_wave_prog.js`）、MEGADEMO（`apps/kasane/megademo_prog.js`）の `prog` チャンク。
 - float の VM の `@plan`（詰めた IR の文字列）と、`chunks.txt` の `rom-text` は Shiki v2.0（2026-11-02）で VM と一緒に消えた。書くと configure が止まる。

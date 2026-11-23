@@ -15,15 +15,15 @@ def prepare(dst):
  head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=dst,text=True).strip();modified=[]
  def read(p):return (dst/p).read_text()
  def write(p,s):(dst/p).write_text(s);modified.append(p)
- write('main/pocket/pocket_input.c',input_source(read('main/pocket/pocket_input.c')))
- s=read('components/pocketjs_guest/src/guest.c');wrappers='''extern unsigned lcd_diag_alloc,lcd_diag_bytes,lcd_diag_realloc;
+ write('main/kobako/kobako_input.c',input_source(read('main/kobako/kobako_input.c')))
+ s=read('components/kobako_guest/src/guest.c');wrappers='''extern unsigned lcd_diag_alloc,lcd_diag_bytes,lcd_diag_realloc;
 static void *diag_malloc(void *p,size_t n){++lcd_diag_alloc;lcd_diag_bytes+=n;return guest_malloc(p,n);}
 static void *diag_calloc(void *p,size_t c,size_t n){++lcd_diag_alloc;lcd_diag_bytes+=c*n;return guest_calloc(p,c,n);}
 static void *diag_realloc(void *p,void *v,size_t n){++lcd_diag_realloc;lcd_diag_bytes+=n;return guest_realloc(p,v,n);}
 '''
  s=change(s,'static const JSMallocFunctions GUEST_ALLOCATOR = {',wrappers+'\nstatic const JSMallocFunctions GUEST_ALLOCATOR = {')
  for n in ('malloc','calloc','realloc'):s=change(s,f'.js_{n} = guest_{n},',f'.js_{n} = diag_{n},')
- write('components/pocketjs_guest/src/guest.c',s)
+ write('components/kobako_guest/src/guest.c',s)
  owner=(TEMPLATE/'owner.inc').read_text().replace('@WORKLOAD@',WORKLOAD).replace('@SOURCE@',head)
  s=change(read('main/main.c'),'static void ui_task(void *arg) {',owner+'\nstatic void ui_task(void *arg) {')
  s=change(s,'        /* App teardown can time out while an SD read is in progress. Reap its\n','        diag_owner_step();\n        /* App teardown can time out while an SD read is in progress. Reap its\n')

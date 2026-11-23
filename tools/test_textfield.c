@@ -3,7 +3,7 @@
 //     -I main/text tools/test_textfield.c main/text/textfield.c
 //     -o /tmp/test-textfield && /tmp/test-textfield
 //
-// pocket.input.text cannot be run anywhere but the device; every decision the
+// kobako.input.text cannot be run anywhere but the device; every decision the
 // section 6 paragraph actually makes -- Enter, Escape, maxBytes on UTF-8, and
 // the stale-commit rule -- is a function of one keystroke and is settled here.
 #include "../main/text/textfield.h"

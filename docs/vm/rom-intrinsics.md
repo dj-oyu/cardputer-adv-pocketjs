@@ -1,6 +1,6 @@
 # ROM intrinsics: 固めた組み込みオブジェクトを flash に置く（考察と設計、2026-10-26）
 
-**状態: R1・R2 を実装し `main` に入った（PR #85）。`CONFIG_POCKET_VM_ROM_INTRINSICS` は既定 y（2026-10-27〜）。実機の DERBY でゲストが −19.0 KB、速さは落ちない（§12）。以下の §1〜§11 は実装前の考察で、数字は当時の推定のまま。** F 系列（[builtin-floor-plan.md](builtin-floor-plan.md)、F1 ROM atom・F2 遅延索引・F3 群の遅延）の次の段で、
+**状態: R1・R2 を実装し `main` に入った（PR #85）。`CONFIG_QJS_LEAN_ROM_INTRINSICS` は既定 y（2026-10-27〜）。実機の DERBY でゲストが −19.0 KB、速さは落ちない（§12）。以下の §1〜§11 は実装前の考察で、数字は当時の推定のまま。** F 系列（[builtin-floor-plan.md](builtin-floor-plan.md)、F1 ROM atom・F2 遅延索引・F3 群の遅延）の次の段で、
 `vm/harden`（アプリの context を「生まれた時点で読み取り専用の intrinsic」にする線。設計書は未着手）に依存する。
 数字はすべて **実測(host, 実機レイアウト)**（`-m32 -malign-double`、JSValue 8 B・ポインタ 4 B、tlsf のブロック長で課金）／
 **実測(device)**（他文書からの引用、出典つき）／**計算**／**推定** のどれかを付ける。再現は §11。
@@ -35,7 +35,7 @@ flash に焼く。ROM のオブジェクトは「不死」で、GC リストに�
    SEGV として必ず出る。** 検出器を別に作らずに済む（F1 の N1b と同じ流儀）。
 
 副産物として F2（遅延索引）・F3（群の遅延）・F1 の脱出キャッシュ `rom_cache` は engine の intrinsic については要らなくなる（§6.7）。
-ファームの `pocket.*` の面は RAM のまま（capability の値が実機ごとに違う。§9 の段 R4）。
+ファームの `kobako.*` の面は RAM のまま（capability の値が実機ごとに違う。§9 の段 R4）。
 
 ### 1.3 代償とリスク（§7、§10）
 
@@ -247,10 +247,10 @@ WeakMap の値は鍵の `mark_children` → `mark_weak_map_value` 経由でし�
 **前提**: `js_lazy_touch`（44625 行）は外れたときに関数リストの項目を shape と prop 配列に**書き足す**。`rt->lazy` が対象をアドレスで持つ。
 
 **変更**: ROM のグラフは**全展開済み**なので、engine の intrinsic に F2 は要らない。`JS_SetPropertyFunctionList` が遅延登録するのは
-ファームの `pocket.*` の面（RAM、`lazy_eligible` 44871 行）だけになる。snapshot の生成は F2 の全展開（`js_lazy_all`）と AUTOINIT の解決を
+ファームの `kobako.*` の面（RAM、`lazy_eligible` 44871 行）だけになる。snapshot の生成は F2 の全展開（`js_lazy_all`）と AUTOINIT の解決を
 host で一度だけ走らせて行う（2.3 の手順そのもの）。
 
-**侵襲**: 0 行（生成器が使う）。将来 `pocket.*` も snapshot にすれば F2 は丸ごと消せる（§9 R4）。
+**侵襲**: 0 行（生成器が使う）。将来 `kobako.*` も snapshot にすれば F2 は丸ごと消せる（§9 R4）。
 
 ### 4.8 AUTOINIT の記録
 
@@ -315,7 +315,7 @@ ROM の `Array` コンストラクタに「初回に RAM へ書く」プロパ�
 **RD6. weak の対象に ROM は取れない**（§4.6）。TypeError。
 
 **RD7. F2・F3・`rom_cache` は engine の intrinsic から外す**（§4.7、§5-(d)）。ROM atom の文字列値は flash の `JSString` を直接返す
-（`__JS_AtomToValue` の脱出が確保 0）。F2 は `pocket.*` の面にだけ残す。F3 の `LAZY_CLASS_MISSING` 判定（`class_proto` の 4 箇所）は不要になる。
+（`__JS_AtomToValue` の脱出が確保 0）。F2 は `kobako.*` の面にだけ残す。F3 の `LAZY_CLASS_MISSING` 判定（`class_proto` の 4 箇所）は不要になる。
 
 **RD8. hot な ROM の行を DRAM に置く手は、実機の `D_STALL` を見てから**（§7.2）。P1 と同じく DRAM は 1:1 で払うので、
 数字が出る前には決めない。
@@ -379,7 +379,7 @@ ROM intrinsic が変えるのは次の 3 点:
    `function sin(){}` で隠した場合は外れて汎用経路）。
 2. **S0（コンパイル時）に畳める。** `Math.sin` という式は、`Math` が ROM の global 束縛に解決され、どのチャンクにも `let Math` の
    グローバル lexical 宣言が無ければ、`push_const <ROM の値>` に畳める（guard 不要: 不死なので参照数も無効化も無い）。
-   `pocket.app.load` の後のチャンクが `let Math` を宣言すると前提が崩れるので、**harden に「intrinsic の名前をグローバル lexical で
+   `kobako.app.load` の後のチャンクが `let Math` を宣言すると前提が崩れるので、**harden に「intrinsic の名前をグローバル lexical で
    宣言しない」規則を足す**（宣言したチャンクは読み込み時に拒否。構造的に不可能にする側）。
 3. **`std_array_prototype` が定数 true になる**（§4.9）。`OP_get_array_el` などの判定（12175・21912・48576 行）が消せる。
 
@@ -388,7 +388,7 @@ ROM の shape の番地はビルド時定数で、**IC の shape 比較も定数
 
 ## 9. 段階と関所
 
-各段は `CONFIG_POCKET_VM_ROM_INTRINSICS`（既定 n → 関所後 y）で従来経路へ戻せる。関所は F 系列と同じ「既存の合格項目を維持 ＋
+各段は `CONFIG_QJS_LEAN_ROM_INTRINSICS`（既定 n → 関所後 y）で従来経路へ戻せる。関所は F 系列と同じ「既存の合格項目を維持 ＋
 新しい機構ごとの負の対照」。**harden（`vm/harden`）が `vm/main` に入ってから R2 以降に進む。R1 は harden 無しで進められる。**
 
 ### R0（この文書、完了）
@@ -411,7 +411,7 @@ ROM の shape の番地はビルド時定数で、**IC の shape 比較も定数
 1. `tools/vmtest/floor/gen_rom_intrinsics.sh`: harden した context を作り、F2 の全展開 ＋ AUTOINIT の解決（§2.3 の手順）→ 到達可能な
    グラフが閉じていることを検査（§4.4）→ C ソースを出す（RD4）。`--check` で陳腐化を検出。
 2. `JS_NewContext` を「ROM の配線 ＋ global object の生成」に置き換える（従来の `JS_AddIntrinsic*` は生成器のビルドにだけ入る）。
-3. ROM atom の `JSString` 化と `rom_cache` の撤去（RD7）。F2 の `lazy_eligible` を `pocket.*` だけに。
+3. ROM atom の `JSString` 化と `rom_cache` の撤去（RD7）。F2 の `lazy_eligible` を `kobako.*` だけに。
 4. **関所（host）**: コーパス（harden 版の期待値）バイト一致、test262（harden の基準線）同一。生成器の再実行で差分 0。
    - **N-R2a（負の対照、書き込み）**: 処置を 1 つ外した（例: `JS_PreventExtensions` の `if` を抜いた）ビルドで `Object.freeze(Math)` が
      **SEGV する**ことを見せ、全部入れた状態で全変種を通す。「落ちない検出器」を信用しない。
@@ -435,8 +435,8 @@ ROM の shape の番地はビルド時定数で、**IC の shape 比較も定数
 
 ### R4（任意）: ファームの面
 
-`pocket.*` の面（実機で約 6.2 KB、plan §14.1）のうち、関数リスト由来の部分は同じ生成器で ROM にできる。capability の値
-（`pocket.capabilities`、実機ごと）と `console` は RAM。入れれば F2 は丸ごと消える。R3 の実測の後で判断。
+`kobako.*` の面（実機で約 6.2 KB、plan §14.1）のうち、関数リスト由来の部分は同じ生成器で ROM にできる。capability の値
+（`kobako.capabilities`、実機ごと）と `console` は RAM。入れれば F2 は丸ごと消える。R3 の実測の後で判断。
 
 ## 10. 計測の穴（正直に）
 
@@ -446,7 +446,7 @@ ROM の shape の番地はビルド時定数で、**IC の shape 比較も定数
 | `D_STALL` の増分 | 推定のみ（§7.2）。ヒット時の遅延、ターン間の追い出しの有無は未測定 |
 | dup/free の回数/ターン | 未計測。+0.5〜1% は dispatch の構成からの推定 |
 | harden の最終形 | ブランチ未マージ・設計書なし。§0 の 4 規則とこの文書が足す 2 規則（store 前の拒否、intrinsic 名のグローバル lexical 宣言の禁止）が受け入れられるか |
-| 触る名前の受け手 | `rom_touch/*.js` は grep の名前に受け手の型を手で当てた近似。Kasane の面経由で触るもの（`pocket.kasane` が返すオブジェクトのメソッド）は数えていない |
+| 触る名前の受け手 | `rom_touch/*.js` は grep の名前に受け手の型を手で当てた近似。Kasane の面経由で触るもの（`kobako.kasane` が返すオブジェクトのメソッド）は数えていない |
 | flash の増分 | raw の和 64,264 B は実測(host)、文字列と `JS_AddIntrinsic*` の撤去分の相殺は推定。app partition は 3 MB（`partitions.csv`）、image は 2,175,184 B（実測(device)、keystate.md、時点が古い） |
 | 先行例 | Espruino・mJS は一次資料で未確認。XS の「ROM Colors」は索引の記述だけ |
 | test262 の別 realm | RD2 の「呼び手の realm」が `$262.createRealm` の試験で差を出すか未確認 |
@@ -471,14 +471,14 @@ R1 と R2 を実装した。区分は §0 と同じ（実測(host)／実測(devi
 - GC の子のコールバック 3 つは、解放しない子を数えない。
 - C 関数の `realm` が NULL なら呼び手の context で動く（`js_cfunc_realm`。Math の速い経路は `ctx` を受け取るようにした）。
 - 先に検査してから書く: `is_prototype`、`extensible`。直列化（`tmp_mark`）は拒否。弱参照の対象にできない（RD6）。**harden で固めた組み込みも弱参照の対象から外した**。ROM の有無で JS から見える答えが変わらないようにするため。
-- host の検査: `vmrun --harden --immortal` は、全組み込みを作ってから RAM のまま「解放しない」にする（`JS_PocketImmortalizeIntrinsics`、host のみ）。コーパスは harden のみの出力と 3 変種で一致した。違うのは `--fail-alloc` の 3 件だけで、これは番号をずらすと同じ出力になる（539・447・557）。test262 の合格の集合も一致（20,459）。負の対照 `r1_faults.sh`: 守りを外したエンジン 3 つが、どれも検出された。
+- host の検査: `vmrun --harden --immortal` は、全組み込みを作ってから RAM のまま「解放しない」にする（`JS_LeanImmortalizeIntrinsics`、host のみ）。コーパスは harden のみの出力と 3 変種で一致した。違うのは `--fail-alloc` の 3 件だけで、これは番号をずらすと同じ出力になる（539・447・557）。test262 の合格の集合も一致（20,459）。負の対照 `r1_faults.sh`: 守りを外したエンジン 3 つが、どれも検出された。
 - `--immortal=lazy`（組み込みを作らずに適用）は、最初の遅延生成が「解放しない」shape に書いて assert で落ちる。ROM では起きない書き込みを、検査が拾っている。
 
 ### 12.2 F1 の表の欠け（`b211e5b6`）
 
 `Math`・`JSON`・`Atomics` は AUTOINIT で、中身は最初の読みで作られる。F1 の生成器はそれを作らずに名前を集めていたので、メソッド名 67 個が表に無かった（`Math` を触るアプリは、今のファームでもその分の heap atom を作っていた）。表は 558 → 625 番（flash 約 +0.8 KB）。ROM では、表に無い atom は番号が実行時に決まるので焼けない。
 
-### 12.3 R2: 生成器と ROM の context（`28b31c9b`、`CONFIG_POCKET_VM_ROM_INTRINSICS`、既定 n）
+### 12.3 R2: 生成器と ROM の context（`28b31c9b`、`CONFIG_QJS_LEAN_ROM_INTRINSICS`、既定 n）
 
 - `tools/vmtest/floor/gen_rom_intrinsics.sh` が `quickjs-rom-intrinsics.h` を書く。オブジェクト 613（C 関数 548）、shape 101、プロパティ 1,861、文字列 531、Symbol 13、global の束縛 65。欄は名前で書くので、64 bit の host と NaN boxing の実機で同じ生成物がコンパイルできる。NaN boxing でポインタを持つ JSValue は 64 bit 整数の定数にできないので、2 語の union の欄（`JSProperty.u.getset`、`JSObject.u.array`）を通して「下位にアドレス、上位にタグ」で書く。C 関数は生成器自身のシンボル表（`nm`）から名前で書く。`--check` で陳腐化を止める。
 - ROM の context: `JS_NewContext` は ROM の番地を配り、RAM の部分だけを作る。global object（65 の束縛を表から）、`global_var_obj`、雛形 shape 5 個、`JS_AddIntrinsic*` が兼ねていた runtime のクラス登録（RawJSON、Proxy、Promise と async 群、WeakRef、FinalizationRegistry、CallSite、DOMException）、`performance`。
@@ -518,7 +518,7 @@ R1 と R2 を実装した。区分は §0 と同じ（実測(host)／実測(devi
 
 ### 12.5 R2 の実機（R3 の一部、実測(device)、2026-10-26）
 
-測定用の枝 `vm/r2-tp`（`28b31c9b` ＋ 固定の種 ＋ TURNPERF ＋ `CONFIG_POCKET_VM_ROM_INTRINSICS=y`）。手順は §12.4 と同じ（`derby`、レース 1000001、種 A27C59EB、着順は 3 本とも 3,5,1,2,8,6,4,7）。
+測定用の枝 `vm/r2-tp`（`28b31c9b` ＋ 固定の種 ＋ TURNPERF ＋ `CONFIG_QJS_LEAN_ROM_INTRINSICS=y`）。手順は §12.4 と同じ（`derby`、レース 1000001、種 A27C59EB、着順は 3 本とも 3,5,1,2,8,6,4,7）。
 
 **ヒープ（DERBY）**
 

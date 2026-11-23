@@ -35,7 +35,7 @@ ANCHOR = "  globalThis.frame = function (b) {\n"
 CALL = "    try { attract(b); frame_(); }"
 PROBE = """  let scN = 0, scMin = 1e9, scLg = 1e9;
   function scap() {
-    const m = pocket.memory.info(), f = m.internalFreeBytes, g = m.internalLargestBytes;
+    const m = kobako.memory.info(), f = m.internalFreeBytes, g = m.internalLargestBytes;
     if (f === null) return;
     if (++scN > 1) { if (f < scMin) scMin = f; if (g < scLg) scLg = g; }
     if (scN === 1) {
@@ -47,11 +47,11 @@ PROBE = """  let scN = 0, scMin = 1e9, scLg = 1e9;
   }
 """
 SIZE = """(function () {
-  const H = pocket.kasane.procedural, log = m => console.log('DERBY ' + m);
+  const H = kobako.kasane.procedural, log = m => console.log('DERBY ' + m);
   let n = 0, st = 0, at = 0, s = 0;
   globalThis.frame = function () {
     ++n;
-    const m = pocket.memory.info(), f = m.internalFreeBytes, g = m.internalLargestBytes;
+    const m = kobako.memory.info(), f = m.internalFreeBytes, g = m.internalLargestBytes;
     if (f === null || n - at < 8 || st > 4) return;
     at = n;
     log('SCAP size ' + 'ABCDE'[st] + ' free=' + f + ' lg=' + g);

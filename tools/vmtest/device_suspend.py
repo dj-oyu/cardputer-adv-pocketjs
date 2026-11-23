@@ -1,6 +1,6 @@
 """Resident suspension on the device (docs/vm/app-suspend-design.md).
 
-Needs a CONFIG_POCKET_VM_SELFTEST build: USB 'S' starts a diagnostic app that
+Needs a CONFIG_KOBAKO_VM_SELFTEST build: USB 'S' starts a diagnostic app that
 registers suspend/resume/stop hooks, holds a 20 s sleep, an IMU watch and a
 file handle, and counts frames. Per cycle:
 

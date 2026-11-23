@@ -1,4 +1,4 @@
-// Heap probe variants (POCKET_HEAPPROBE only; docs/vm/spread-eval-oom.md).
+// Heap probe variants (KOBAKO_HEAPPROBE only; docs/vm/spread-eval-oom.md).
 // NOT one program: each "//@ name" line starts a separate source, evaluated
 // alone in a fresh guest ('Q<index>[,<limit>]\n' over USB, from 0).
 // Every variant defines frame() so it runs as an app; X is the construct,
@@ -9,13 +9,13 @@
 // "@derby-flat" / "@derby-split3|4": the same app unwrapped into one global
 // script, or cut into 3 or 4 loaded by __hpLoad(k) (tools/heapprobe_split.py).
 // alias-*: the other int / int32_t pointer sites of quickjs.c, as checks.
-// "@derby-load3|4": the same 3 or 4 scripts through pocket.app.load('s3c1')..
-// appload-*: pocket.app.load() itself (docs/vm/eval-peak.md sec.7), on the
+// "@derby-load3|4": the same 3 or 4 scripts through kobako.app.load('s3c1')..
+// appload-*: kobako.app.load() itself (docs/vm/eval-peak.md sec.7), on the
 // chunks of apps/heapprobe/appload_chunks.txt and `big` (derby's first third).
 // appload-oom wants a limit ('Q44,80000'): `big` must not fit beside the
 // ballast, and must once the ballast is gone.
 // "@imp-single|load3|import3": one generated 32 KB program as one script,
-// three scripts through pocket.app.load(), three modules through static import
+// three scripts through kobako.app.load(), three modules through static import
 // (tools/heapprobe_import_gen.py; docs/vm/eval-peak.md sec.9). "@module" on a
 // section's first line evaluates it as a module entry; import-*: its checks,
 // on apps/heapprobe/import_chunks.txt.
@@ -109,21 +109,21 @@ let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 20)
 //@ derby-load4
 @derby-load4
 //@ appload-api
-(() => { const L = pocket.app.load, R = []; function t(n, f) { try { R.push(n + '=' + f()); } catch (e) { R.push(n + '=' + e.code + '/' + e.outcome + '/' + e.retryable); } }
-t('cap', () => JSON.stringify(pocket.capabilities.get('app.load').limits)); t('ok', () => L('ok')); t('ok2', () => L('ok')); t('use', () => alF() + alV + alG + alC.n + alS);
+(() => { const L = kobako.app.load, R = []; function t(n, f) { try { R.push(n + '=' + f()); } catch (e) { R.push(n + '=' + e.code + '/' + e.outcome + '/' + e.retryable); } }
+t('cap', () => JSON.stringify(kobako.capabilities.get('app.load').limits)); t('ok', () => L('ok')); t('ok2', () => L('ok')); t('use', () => alF() + alV + alG + alC.n + alS);
 t('nf', () => L('nope')); t('arg', () => L(3)); t('bad', () => L('bad')); t('thr', () => L('thr')); t('thr2', () => L('thr')); t('self', () => L('self') + alSelf);
 console.log('HP_EVAL ' + R.slice(0, 6).join(' ')); console.log('HP_EVAL2 ' + R.slice(6).join(' ')); let n = 0;
 globalThis.frame = () => { if (++n === 10) { const t0 = Date.now(), a = L('mid'), t1 = Date.now(); let b; try { b = L('big'); } catch (e) { b = e.code + ' ' + e.message; }
 console.log('HP_FRAME ok mid=' + a + ' ' + (t1 - t0) + 'ms sum=' + alMid.sum() + ' big=' + b + ' ' + (Date.now() - t1) + 'ms'); } else if (n === 40) console.log('HP_ALIVE ' + n); }; })();
 //@ appload-oom
-(() => { const L = pocket.app.load; let n = 0, ballast = new Uint8Array(20000), a = 'none', b = 'none'; console.log('HP_EVAL ok');
+(() => { const L = kobako.app.load; let n = 0, ballast = new Uint8Array(20000), a = 'none', b = 'none'; console.log('HP_EVAL ok');
 globalThis.frame = () => { ++n; if (n === 12) console.log('HP_FRAME ok first=' + a + ' retry=' + b); if (n === 40) console.log('HP_ALIVE ' + n); if (n !== 10) return;
 try { L('big'); a = 'loaded'; } catch (e) { a = e === null ? 'null' : e.code + '/' + e.retryable + '/' + e.outcome; }
 ballast = null; try { L('big'); b = 'loaded'; } catch (e) { b = e === null ? 'null' : e.code; } }; })();
 //@ appload-uncaught
-let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 5) pocket.app.load('bad'); };
+let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 5) kobako.app.load('bad'); };
 //@ appload-evalerr
-pocket.app.load('thr'); globalThis.frame = () => {};
+kobako.app.load('thr'); globalThis.frame = () => {};
 //@ alias-parseint2
 const v = [parseInt('z', 36), parseInt('10', 37), parseInt('0x1f'), parseInt('12', 0), parseInt('-7f', 16), parseInt('11', 1)]; console.log('HP_EVAL ok ' + v); globalThis.frame = () => {};
 //@ alias-promise-settled
@@ -151,7 +151,7 @@ const ia = new Int32Array(new SharedArrayBuffer(8)); const r = [Atomics.notify(i
 //@ import-api
 @module
 import { count, bump, name } from 'imok'; import { base } from 'imbase'; import * as cyc from 'imcycb';
-bump(); let lm; try { pocket.app.load('imok'); lm = 'loaded'; } catch (e) { lm = e.code; }
+bump(); let lm; try { kobako.app.load('imok'); lm = 'loaded'; } catch (e) { lm = e.code; }
 console.log('HP_EVAL ok count=' + count + ' base=' + base + ' runs=' + globalThis.imBaseRuns + ' cyc=' + cyc.cab() + ' ' + name + ' loadModule=' + lm);
 let n = 0, dyn = 'pending'; import('imbase').then(() => { dyn = 'resolved'; }, e => { dyn = String(e); });
 globalThis.frame = () => { if (++n === 10) console.log('HP_FRAME ok count=' + count + ' dyn=' + dyn); else if (n === 40) console.log('HP_ALIVE ' + n); };

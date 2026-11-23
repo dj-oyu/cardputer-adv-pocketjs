@@ -156,7 +156,7 @@ def analyze(args) -> int:
         text = path.read_bytes().decode("utf-8", "replace")
         print(f"== {path.name}")
         for line in text.splitlines():
-            if any(s in line for s in ("DEGRADE", "PocketError", "MEM free", "MDT_LIMIT",
+            if any(s in line for s in ("DEGRADE", "KobakoError", "MEM free", "MDT_LIMIT",
                                        "APP_ID", "START_FAILED", "OOM", "RUNAWAY")):
                 print("  " + line.strip()[:200])
         turns = []           # (scene key, dict)
@@ -289,7 +289,7 @@ W, H = 240, 135
 # Distinct host frames per scene (the app holds each news beat for two
 # beats, so a news frame t matches host frame t % 16).
 # (TWIST and ZENITH as of 2026-10-29; the NEWS entries predate Act I's
-# pocket.shapes rewrite and still need updating.)
+# kobako.shapes rewrite and still need updating.)
 LENS = {"NEWS0": 16, "NEWS1": 16, "NEWS2": 16, "TWIST": 240, "ZENITH": 216, "CORE": 226, "LOST": 24,
         "WAKE": 104}
 TOTAL = {"NEWS0": 5, "NEWS1": 5, "NEWS2": 5, "TWIST": 16, "ZENITH": 15, "CORE": 8, "LOST": 2, "WAKE": 4}

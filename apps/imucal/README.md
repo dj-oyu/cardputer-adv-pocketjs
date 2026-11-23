@@ -27,7 +27,7 @@ gravity lands in. The app walks six of them, two per published axis.
 
 Two of the six positions cannot be reached with USB plugged in, so the run that
 produces the answer is the one run whose log nobody can read. The result is
-therefore written to the screen in full and saved through `pocket.storage`;
+therefore written to the screen in full and saved through `kobako.storage`;
 reopening the app with the cable back on prints it as `IMUCAL_LAST`.
 
 ## Why it does not ask for a key press
@@ -60,7 +60,7 @@ It also refuses a mapping where two published axes came from one board axis
 
 ## What it checks about the API itself
 
-This was the first program written against `pocket.*`, and it doubles as that
+This was the first program written against `kobako.*`, and it doubles as that
 surface's acceptance test:
 
 - `capabilities.get('sensors.imu')` reports its limits, and asking `watch()` for
@@ -86,7 +86,7 @@ exists so the reasoning does not have to live inside the budget.
 
 ## Kasane presenter
 
-`imucal.js` calls `pocket.kasane.mount('imucal')`. The guest owns sensor
+`imucal.js` calls `kobako.kasane.mount('imucal')`. The guest owns sensor
 measurements and sends the five visible strings (`head`, `live`, `stat`, `spin`,
 `foot`) with `view.set()`. The native presenter owns layout, text capacity,
 submission acknowledgement, and REPLACE/PATCH selection. `frame()` only

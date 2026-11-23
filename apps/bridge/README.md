@@ -1,15 +1,15 @@
-# bridge — `pocket.bridge` のデモ
+# bridge — `kobako.bridge` のデモ
 
 `docs/api/common-api.md` §13 の PC link を、ケーブル1本だけで一往復させるためのアプリ。
-実装は `main/pocket_bridge.c` / `main/pocket_bridge.h`、PC側は `tools/pocket_bridge.py`。
+実装は `main/kobako_bridge.c` / `main/kobako_bridge.h`、PC側は `tools/kobako_bridge.py`。
 
 ## 動かす
 
 ```powershell
-python tools\pocket_bridge.py selftest                # 実機不要。コーデックとアダプターの検査
-python tools\pocket_bridge.py demo --port COM3        # Playgroundへ流し込んで実行し、そのまま応答する
-python tools\pocket_bridge.py demo --port COM3 --no-type   # 2回目以降。保存済みのソースを実行するだけ
-python tools\pocket_bridge.py serve --port COM3       # すでに動いているアプリに応答するだけ
+python tools\kobako_bridge.py selftest                # 実機不要。コーデックとアダプターの検査
+python tools\kobako_bridge.py demo --port COM3        # Playgroundへ流し込んで実行し、そのまま応答する
+python tools\kobako_bridge.py demo --port COM3 --no-type   # 2回目以降。保存済みのソースを実行するだけ
+python tools\kobako_bridge.py serve --port COM3       # すでに動いているアプリに応答するだけ
 ```
 
 `demo` はホーム → APPS → PLAYGROUND と辿り、C-n で空にし、ソースを打ち込み、C-r で実行してから
@@ -54,16 +54,16 @@ BRIDGE_ERROR CONNECT TIMEOUT outcome=unknown
 | 触っている面 | どこで |
 | --- | --- |
 | `capabilities.get('bridge.pc')` と `limits` | 冒頭の `BRIDGE_CAP` |
-| `connect()` の Promise と `timeoutMs` | `pocket.bridge.connect` |
+| `connect()` の Promise と `timeoutMs` | `kobako.bridge.connect` |
 | `request()` の往復とJSON | `host.info` / `agent.submit` |
 | `onEvent()` の購読と `sequence` | `agent.job` |
-| `PocketError` の `code` / `outcome` | `fail()` |
+| `KobakoError` の `code` / `outcome` | `fail()` |
 
 ノードは root を入れて8個。`CLAUDE.md` の段差（16以下 → 2,048 B）の内側に収まっている。
 
 ## PCアダプターがやらないこと
 
-`tools/pocket_bridge.py` は `host.*` と `agent.*` を**自分で**答える。モデルもシェルも起動しない。
+`tools/kobako_bridge.py` は `host.*` と `agent.*` を**自分で**答える。モデルもシェルも起動しない。
 §13 が「APIキーやPCのシェル実行権限をデバイスに複製しない」と言っているのはこの向きの話で、
 端末から名前を送ればPC側で何かが実行される、という経路をそもそも作らない。`agent.submit` は
 jobId を返してイベントを2本流すだけで、`result` には「このアダプターはモデルを動かさない」と書いてある。

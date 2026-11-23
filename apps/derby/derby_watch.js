@@ -1,6 +1,6 @@
 // DERBY WATCH: a night race on a 1000 m straight in pseudo-3D line art.
 // Why and numbers: apps/derby/README.md, docs/apps/derby-watch.md
-// This entry is the race model; the game (pocket.kasane) is in the
+// This entry is the race model; the game (kobako.kasane) is in the
 // chunks.txt scripts, loaded while this evaluates: one parse at a time.
 'use strict';
 const M = Math, mx = M.max, mn = M.min;
@@ -123,5 +123,5 @@ function odds(h, o) {
 // Tenths as text: 225 '22.5', 290 '29' ('29.0' with d), 11 '1.1'.
 const ot = (v, d) => { const s = '' + v; return s.slice(0, -1) + (d || v % 10 ? '.' + s.slice(-1) : ''); };
 globalThis.derby = {OV: OV, field: field, race: race, step: step, order: order, odds: odds, idiv: idiv, fdiv: fdiv, D: D};
-if (typeof pocket !== 'undefined')
-  pocket.app.load('prog'), pocket.app.load('view'), pocket.app.load('scene'), pocket.app.load('pan'), pocket.app.load('play');
+if (typeof kobako !== 'undefined')
+  kobako.app.load('prog'), kobako.app.load('view'), kobako.app.load('scene'), kobako.app.load('pan'), kobako.app.load('play');

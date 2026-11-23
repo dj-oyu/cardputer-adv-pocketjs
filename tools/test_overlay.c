@@ -87,7 +87,7 @@ static void boot_valve(void) {
 // one contiguous 48 KiB block, which QuickJS never asks for because it grows
 // in many small allocations, and it said nothing about what was LEFT. What
 // matters is not that the overlay fitted; it is that the machine can still do
-// what it could do before -- 56 KiB free is what pocket_net.c measured the
+// what it could do before -- 56 KiB free is what kobako_net.c measured the
 // radio needs to come up.
 
 #define FLOOR (56*1024)
@@ -225,7 +225,7 @@ static void home_survives_without_the_overlay(void) {
     // ordered.
     CHECK(occurrences(shell,"overlay_paint(")==0,
           "the display-list compositor is gone (api-reorg P5)");
-    CHECK(occurrences(shell,"pocket_overlay_")==0,
+    CHECK(occurrences(shell,"kobako_overlay_")==0,
           "the shell does not reach past ui/overlay.c into the JS surface");
     CHECK(occurrences(shell,"app_overlay_tick")==0 &&
           occurrences(shell,"app_start_overlay")==0,
@@ -261,10 +261,10 @@ static void home_survives_without_the_overlay(void) {
 
     char *session=slurp("main/app_session.c");
     char *owner=slurp("main/ui/overlay.c");
-    CHECK(session&&strstr(session,"if(pocket_kasane_needs_present())return ESP_OK;"),
+    CHECK(session&&strstr(session,"if(kobako_kasane_needs_present())return ESP_OK;"),
           "overlay guest waits for submission presentation and repair");
-    const char *queue=owner?strstr(owner,"pocket_overlay_key(k)"):NULL;
-    const char *blocked=owner?strstr(owner,"pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED"):NULL;
+    const char *queue=owner?strstr(owner,"kobako_overlay_key(k)"):NULL;
+    const char *blocked=owner?strstr(owner,"kobako_kasane_input_scope(false)==KSN_INPUT_BLOCKED"):NULL;
     CHECK(queue&&blocked&&blocked<queue,
           "blocked Kasane input is dropped before entering the overlay queue");
     const char *tick=strstr(main_c,"overlay_tick(");
@@ -304,7 +304,7 @@ static void home_survives_without_the_overlay(void) {
           "the folder picker is driven from the home loop as well as tick_run");
     CHECK(occurrences(main_c,"file_picker_modal()")>=2,
           "and the file picker");
-    CHECK(occurrences(main_c,"pocket_workspace_modal()")>=2,
+    CHECK(occurrences(main_c,"kobako_workspace_modal()")>=2,
           "and the works picker");
     free(owner);free(session);free(main_c);free(shell);
 }

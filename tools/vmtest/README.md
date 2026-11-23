@@ -14,7 +14,7 @@
 ```bash
 # WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
 bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（ファームと同じ唯一の経路）
-bash tools/vmtest/build.sh asan-reloc          # + CONFIG_POCKET_VM_RELOC（L3a、--force-reloc 用）
+bash tools/vmtest/build.sh asan-reloc          # + CONFIG_QJS_LEAN_RELOC（L3a、--force-reloc 用）
 bash tools/vmtest/build.sh o2
 python3 tools/vmtest/segment_growth_probe.py  # 同一バイナリ、D42の6サイズ方針×6 workload（host値）
 # --vm-seg-growth FIRST MAX はcache方針を保持。固定サイズ用 --vm-seg-size と併用不可。
@@ -39,7 +39,7 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 
 ## vmrun
 
-`vmrun.c` は `components/pocketjs_guest/src/guest.c` の挙動を決める部分を**写したもの**で、作り直していない。ただし **drain のループ本体だけは L1 から写しではなく同じもの**で、`components/pocketjs_guest/src/vm_sched.c` と `vm_clock.c` を `build.sh` がそのままリンクする（この 2 ファイルは esp ヘッダを含めない）。つまり予算・yield・継続の判定はファームと同一のコードで検査される。
+`vmrun.c` は `components/kobako_guest/src/guest.c` の挙動を決める部分を**写したもの**で、作り直していない。ただし **drain のループ本体だけは L1 から写しではなく同じもの**で、`components/kobako_guest/src/vm_sched.c` と `vm_clock.c` を `build.sh` がそのままリンクする（この 2 ファイルは esp ヘッダを含めない）。つまり予算・yield・継続の判定はファームと同一のコードで検査される。
 
 | 項目 | ゲストと同じ点 |
 | --- | --- |
@@ -48,7 +48,7 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 | 初期化順 | `JS_NewRuntime2` → 上限 → rejection tracker → `js_std_init_handlers` → `JS_NewContext` → `js_std_add_helpers(ctx, 0, NULL)` |
 | drain | `vm_sched_drain()` そのもの。キューが空になるまで実行し、**空になった境界でだけ**未処理 rejection を報告。予算で切れた境界では報告せず継続する。ジョブ自体が例外を投げたら dump して即座に失敗を返し、残りのキューと報告は次の drain に回る |
 | ターンの順序 | 継続 drain が空になるまで、ホスト側の完了配送（`--host-events` の `host.request`）も `frame()` も呼ばない。`docs/vm/vm-L1-design.md` §2.1 の規則そのもの |
-| 報告文言 | `E pocketjs_guest: Unhandled Promise rejection: <reason>`（ESP_LOGE の時刻部分を除いたもの） |
+| 報告文言 | `E kobako_guest: Unhandled Promise rejection: <reason>`（ESP_LOGE の時刻部分を除いたもの） |
 
 意図した差分（すべて観測結果を変えないか、明示フラグ）:
 
@@ -70,8 +70,8 @@ L1 の予算まわり:
 | `--gaps` | G5。JS 実行中の連続する停止機会（セーフポイント／ホストからの進入／最外フレームの復帰）の間隔を VM 側で記録し、最大値と上位 8 件を `#info g5 ...` に出す（`--force-yield` 中は常時オン）。単位は ns（ホスト時計）。理由と読み方は G5 の節 |
 | `--runaway-jobs N` | **1 本の論理 drain**（予算で切られた drain + その継続群）が N 件走ってもキューが空にならなければ終了コード 5。**既定は無効**。ファームの判定は時間（`VM_RUNAWAY_US`）が主で件数（`VM_RUNAWAY_JOBS`）は時計が死んだときの受け皿だが、件数モードのホストでは時計を読まないので、写せるのは件数の側。ターン数では**ない** — ターンは backstop でも終わるので、長いだけの正直な drain を暴走と見なしてしまう（vm-L1-design §5.2・§11.1）|
 | `--stop-turns N` | N 回の継続ターンでセッションを**終わらせる**（終了コード 0、キューは実行せず破棄）。`app_stop()` がキューを残したまま呼ばれる場合の代役で、設計 §3.2 の検査に要るがそこでは機構を指定していなかったため、ここで足したもの |
-| `host.exit()`（`--host-events` に同梱）| `pocket.app.exit()` の写し。停止要求は割り込み経由で届くので、**キューが空になったターンでだけ**読まれる（vm-L1-design §11.2）。`corpus/budget_exit_midchain.js` がその順序を固定する |
-| `--host-events` | `host.request(k)` を入れる。k 番目のジョブ境界で「完了が記録され」、**キューが空になったターンでだけ**配送される Promise を返す。`pocket_api_complete()` / `pocket_api_pump()` の縮小模型 |
+| `host.exit()`（`--host-events` に同梱）| `kobako.app.exit()` の写し。停止要求は割り込み経由で届くので、**キューが空になったターンでだけ**読まれる（vm-L1-design §11.2）。`corpus/budget_exit_midchain.js` がその順序を固定する |
+| `--host-events` | `host.request(k)` を入れる。k 番目のジョブ境界で「完了が記録され」、**キューが空になったターンでだけ**配送される Promise を返す。`kobako_api_complete()` / `kobako_api_pump()` の縮小模型 |
 
 `#info turns=… max_run_turns=… jobs_dropped=…` は常に出る（`--stats` 不要）。`run.sh` と `test262.py` はどちらも `#info` 行を diff と判定から外す。
 
@@ -106,7 +106,7 @@ L2c（中断と再開）は2026-09-23から既定で、2026-09-27にビルドオ
 
 `bash tools/vmtest/lifecycle.sh asan`（先に同変種をbuild）で、7種類の所有形態（ホスト、await復帰、async generator、通常/async Promise handler、thenable、microtask）の各22〜23中断位置を再開・Terminate・Discard・runtime解放・OOM下のTerminateの5モードで検査する（計790ケース）。中断ごとにGCを走らせ、キューの先頭が拒否時に失われないこと、破棄後も捕捉変数が有効なこと、終了時にcatch/finallyを実行しないことを確認する。分岐だけの無限ループでwatchdogが動くことも検査する。
 
-同じCテストを実機で走らせるには、独立sdkconfigで`SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vm-l2c-selftest.defaults"`を使ってビルドする。`CONFIG_POCKET_VM_SELFTEST=y`のときだけUSBの`L`が有効になり、`python tools/vmtest/device_lifecycle.py --port COM3 --cycles 3`で駆動できる。通常ビルドにはテスト本体もUSBコマンドも入らない。
+同じCテストを実機で走らせるには、独立sdkconfigで`SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vm-l2c-selftest.defaults"`を使ってビルドする。`CONFIG_KOBAKO_VM_SELFTEST=y`のときだけUSBの`L`が有効になり、`python tools/vmtest/device_lifecycle.py --port COM3 --cycles 3`で駆動できる。通常ビルドにはテスト本体もUSBコマンドも入らない。
 
 同じビルドのUSB `M`は`python tools/vmtest/device_lifecycle.py --port COM3 --back --cycles 3`で駆動する。実際の`app_tick(0x2000)`→`app_request_stop()`→`app_stop()`を使い、通常frame・保留Promise job・asyncの中断から再開完了、Back保存相当のマーカーとPromise完了、stop hookとそのPromise完了が`123456`順になることを検査する。中断中にBackターンなしで終了する場合は`156`（残りの本体を実行しない）を要求する。開始直後の中断状態も検査するため、中断せずたまたま順序が合った走行は成功しない。NVSには書かず、実際の保存内容や物理キー入力の検証を代替しない。`L`/`M`はホームでアプリが動いていないときだけ受理する。
 
@@ -115,7 +115,7 @@ L2c（中断と再開）は2026-09-23から既定で、2026-09-27にビルドオ
 実機の`L`には`guest_lifecycle.c`も含む。実際のguest APIを使い、4起点×4モード（再開・停止・中断中destroy・スタック不足下の停止）の16ケースと、100µsの実タイマーでの完走・leave相当の無効化・途中停止を検査する。短予算検査は2万反復を最終値で検査し、1万回の再開を上限とする（初期上限1千回では実機で16,421反復までしか進まず、検査上限を見直した）。ホストの`sched_clock.c`はdrain実行時間から先行処理を除くこと、32bit wrap、count modeの時計読み取りゼロを固定する。
 
 ```bash
-gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Icomponents/quickjs-ng/quickjs-ng tools/vmtest/sched_clock.c components/pocketjs_guest/src/vm_sched.c components/pocketjs_guest/src/vm_clock.c -o .cache/vmtest/sched-clock
+gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/kobako_guest/include -Icomponents/quickjs-ng/quickjs-ng tools/vmtest/sched_clock.c components/kobako_guest/src/vm_sched.c components/kobako_guest/src/vm_clock.c -o .cache/vmtest/sched-clock
 .cache/vmtest/sched-clock
 ```
 
@@ -237,7 +237,7 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 
 `timing-baseline.txt`。各ベンチを 30 回ずつ逐次に走らせ、vmrun の `#info time_ns`（eval + drain + frame、プロセス起動とランタイム生成を除く）の中央値・p95・最大・最小を ms で記録。**実測(host)**: Intel Core Ultra 7 258V、WSL、gcc 13.3 -O2。実機（Xtensa、-Os）の値について何も言わない。同じホスト・同じフラグで L0 と比べるためのもので、実行間のばらつき（p95 と中央値の差）より小さい差は結果と呼ばない。
 
-記録時の `quickjs.c` の sha1 は `271d718782c1`。これは作業ツリーの他作業による未コミットの VM_PROBE 追加を含むファイルで、`CONFIG_POCKET_VM_PROBE` 未定義のため該当部分はコンパイルされていない。
+記録時の `quickjs.c` の sha1 は `271d718782c1`。これは作業ツリーの他作業による未コミットの VM_PROBE 追加を含むファイルで、`CONFIG_QJS_LEAN_PROBE` 未定義のため該当部分はコンパイルされていない。
 
 ## L0 で分かったこと
 
@@ -249,9 +249,9 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 
 ## ビルドの注意
 
-- ASan 版は QuickJS 自体も計装する（`tools/build_pocket_text_test.sh` は QuickJS を計装しない）。L1 以降で変わるのは `quickjs.c` だからで、変更した呼び出し経路の use-after-free を報告させるため。
+- ASan 版は QuickJS 自体も計装する（`tools/build_kobako_text_test.sh` は QuickJS を計装しない）。L1 以降で変わるのは `quickjs.c` だからで、変更した呼び出し経路の use-after-free を報告させるため。
 - `quickjs-vmprobe.h` は `__has_include("sdkconfig.h")` で分岐し、ホストでは `CONFIG_*` が未定義 = 出荷時の既定になる。`build.sh` が `.cache/vmtest/include/` に置く空の `sdkconfig.h` は、この分岐が入る前の名残で、なくても動く。
-- **エンジンの経路は1本**（2026-09-27）: L1〜L2c・関数ソースの除去・F1〜F3・R3 はビルドオプションではなくなり、ホストもファームと同じものを必ず検査する。経路を切り替えていた変種（`-alloca` / `-recur` / `-flat` / `-noyield` / `-keepsrc` / `-norom` / `-nolb` / `-noli` / `-bc` / `-tco` / `-callbench` / `-lazy` / `-eager`）と `expected-fair/` / `expected-keepsrc/` は無くなった。比較が要るときは `5db834f` を別の作業ツリーに出す。コーパスの先頭行に残る `// vmrun-keepsrc-flags:` などは、書き換えるとソース長が変わり `--fail-alloc` の番号がずれるので消していない。F1〜F3 だけは `quickjs.c` 内部のマクロとして残り、ROM アトム表の生成器（`floor/gen_rom_atoms.sh`、`-DPOCKET_VM_GEN_ROM_ATOMS`）だけが切る。G1 はフラットで `bytes_per_call=0.000 … NOT_PROPORTIONAL`（当時の `-recur` は 528.000、`-alloca` は 672.000、いずれも実測(host) o2）。
+- **エンジンの経路は1本**（2026-09-27）: L1〜L2c・関数ソースの除去・F1〜F3・R3 はビルドオプションではなくなり、ホストもファームと同じものを必ず検査する。経路を切り替えていた変種（`-alloca` / `-recur` / `-flat` / `-noyield` / `-keepsrc` / `-norom` / `-nolb` / `-noli` / `-bc` / `-tco` / `-callbench` / `-lazy` / `-eager`）と `expected-fair/` / `expected-keepsrc/` は無くなった。比較が要るときは `5db834f` を別の作業ツリーに出す。コーパスの先頭行に残る `// vmrun-keepsrc-flags:` などは、書き換えるとソース長が変わり `--fail-alloc` の番号がずれるので消していない。F1〜F3 だけは `quickjs.c` 内部のマクロとして残り、ROM アトム表の生成器（`floor/gen_rom_atoms.sh`、`-DQJS_LEAN_GEN_ROM_ATOMS`）だけが切る。G1 はフラットで `bytes_per_call=0.000 … NOT_PROPORTIONAL`（当時の `-recur` は 528.000、`-alloca` は 672.000、いずれも実測(host) o2）。
 - **L2b-async（設計 §12.2、D32〜D34、D38）は同じ `-flat` / 無印の中**: JS から呼ぶ async 関数（`OP_call` 系）の最初の同期区間もフラットで走る。関所が 2 本増えた。(1) `stack_probe.sh 2000 o2 stack_probe_async.js` — 第 3 引数がプローブファイル（既定 `stack_probe.js`）。await の無い async 再帰で、flat は `0.000 … NOT_PROPORTIONAL`、`-recur` は PROPORTIONAL（実測は設計 §12.2 末尾の「段 A の着地」）。(2) `budget_probe.sh` の 11 項目目 `deep_async_recursion`（`tools/vmtest/deep_async_recursion.js`、コーパス外）: async の同期再帰は C スタックにもセグメントにも積まれないので予算が答えず（`budget_hits=0`）、ヒープ枯渇で終わる。**その終わり方は設計の予想（InternalError が `.catch` に届く）より汚い** — 実測(host、`--profile device`)では 77 段目で止まり、エラーオブジェクトを作る余裕も無いので理由は `null`、巻き戻しの途中で自分の `await` の反応登録に失敗した段の promise が未処理のまま残って終了コード 2。`-recur` は `RangeError` で終了コード 0。期待値は build ごとに別ファイル（`expected/deep_async_recursion.txt` = flat、`expected/deep_async_recursion-recur.txt`）で、diff するのは「同期 `try` に届かない」「外側の async の catch が見たクラス」「終了コード」だけ、深さと未処理件数は情報行。じわじわ型 OOM なので asan 変種で `build_backtrace` の ASan 報告が出たら失敗ではなく `known/oom_backtrace_uaf` の再現として記録する（o2 変種だけが拘束）。
 - **L2a のセグメント**（`quickjs-ng/quickjs-vmstack.h`、ヘッダのみ）: `vmrun --stats` が `#info vmstack seg_size=… depth_max=… live_max=… frame_max=… seg_live_max=… seg_mallocs=… dedicated=… fallbacks=… resident_max~=…` を出す。`--vm-seg-size N[K]` で標準セグメントを変えられる（最初の JS 呼び出しの前にだけ効く）。`live_max` はフレームが実際に使った最大バイト、`resident_max~` はその瞬間にセグメントが占めていた概算（ヘッダと整列の余白込み）。ホストの数字は 64bit の値であって実機の値ではない。
 - **L2a のセグメントは asan 版で毒を塗る**: `quickjs-vmstack.h` は ASan ビルドでセグメントの空き領域を `__asan_poison_memory_region` で毒にし、push した分だけ解毒、pop で再び毒にする。返却済みフレームへの生ポインタ（`close_var_refs` が閉じ損ねた `JSVarRef`、死んだフレームを歩くウォーカー、呼び出し先の argv を持ち越した呼び出し元）は、コーパスと Test262 の asan 走行で use-after-poison として鳴る。台帳07 §6 が「確保履歴では検査できない」と書いた、実物のフレームに対する検査がこれ。o2 と実機では何も展開されない。

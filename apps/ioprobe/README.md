@@ -1,6 +1,6 @@
-# ioprobe — `pocket.io` の実装を実機で確かめる
+# ioprobe — `kobako.io` の実装を実機で確かめる
 
-`main/pocket_io.c` が**実際に強制している**ことだけを一つずつ叩いて、期待するコードと突き合わせる。
+`main/kobako_io.c` が**実際に強制している**ことだけを一つずつ叩いて、期待するコードと突き合わせる。
 各行は `OK <名前> -> <結果>` か `HUH <名前> -> <結果>` を出す。`HUH` は実装か本READMEのどちらかが間違っている。
 
 ## 何も繋がっていない機体で安全である理由
@@ -14,7 +14,7 @@
 
 ## 走らせ方
 
-このアプリは `main/shell.c` の一覧には入っていない（このセッションは `main/pocket_io.c` と `main/pocket_io.h` 以外を触らない約束）。走らせる方法は2つ:
+このアプリは `main/shell.c` の一覧には入っていない（このセッションは `main/kobako_io.c` と `main/kobako_io.h` 以外を触らない約束）。走らせる方法は2つ:
 
 1. **Playground に貼る** — Playgroundのコードエディタに `ioprobe.js` の中身を貼って実行する。出力は Console 画面に出る。
 2. **埋め込む** — 一覧に載せたい人が3行足す:
@@ -43,7 +43,7 @@
 | `spi 4B` | `ok 4B` | 送信長と同じ長さが返る。MISOがフローティングなので中身は不定 |
 | `spi 1024B in 1ms` | `TIMEOUT` | 4MHzで1024バイトは2.05ms。**転送前に**長さと clock から所要時間を計算して断る（`maxHoldMs`=20） |
 | `ir 5kHz carrier` | `INVALID_ARGUMENT` | キャリアは20〜60kHz |
-| `ir NEC lead-in` | `ok` | RMTで実際に送出し、完了割込みが `pocket_api_complete()` を打ってJSタスクがPromiseを解決する |
+| `ir NEC lead-in` | `ok` | RMTで実際に送出し、完了割込みが `kobako_api_complete()` を打ってJSタスクがPromiseを解決する |
 
 ## 出力例で見るべきところ
 

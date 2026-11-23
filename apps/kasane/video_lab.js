@@ -1,6 +1,6 @@
 // Small RGB565 frame stream inside ordinary Kasane UI. No decoder is involved.
 (() => {
-  const view = pocket.kasane;
+  const view = kobako.kasane;
   const video = view.video;
   const width = 64, height = 48;
   const resource = video.open(width, height);
@@ -19,7 +19,7 @@
     tx.text({bounds: [8, 119, 232, 134], text: 'ARROWS: SELECT  /  RGB565',
              font: 'caption', color: 0x80d9e8ff});
   });
-  pocket.input.onAction(event => {
+  kobako.input.onAction(event => {
     if (event.phase === 'release') return;
     const step = event.action === 'left' || event.action === 'up' ? -1 :
                  event.action === 'right' || event.action === 'down' ? 1 : 0;

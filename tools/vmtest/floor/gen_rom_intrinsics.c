@@ -2,7 +2,7 @@
 // as C const data, components/quickjs-ng/quickjs-ng/quickjs-rom-intrinsics.h.
 //
 // Built with quickjs.c included, so the heap is read from inside. The graph
-// is the one a device context ends up with: JS_NewContext, JS_PocketHarden,
+// is the one a device context ends up with: JS_NewContext, JS_LeanHarden,
 // then every lazy builtin built and every AUTOINIT slot resolved (the
 // js_immortal_resolve that vmrun --immortal uses). What is emitted:
 //   - every object reachable from the context's intrinsic fields and from the
@@ -676,7 +676,7 @@ int main(int argc, char **argv)
     JSRuntime *rt = JS_NewRuntime();
     JSContext *ctx = JS_NewContext(rt);
     G_ctx = ctx;
-    if (!ctx || JS_PocketHarden(ctx) < 0 || js_immortal_resolve(ctx) < 0) {
+    if (!ctx || JS_LeanHarden(ctx) < 0 || js_immortal_resolve(ctx) < 0) {
         fprintf(stderr, "gen_rom_intrinsics: context setup failed\n");
         return 1;
     }

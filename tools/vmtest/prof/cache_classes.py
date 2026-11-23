@@ -7,7 +7,7 @@
 Traces are tools/test_stress_app.c's STRESS_ALLOC_TRACE format ("m <usable>
 <id>", "f <id>", "r <old> <new> <usable>", "F <frame>"), from -m32 builds so
 the sizes are the device's (tools/games/test_derby_host.c writes the same
-with DERBY_ALLOC_TRACE). The replay is components/pocketjs_guest/src/
+with DERBY_ALLOC_TRACE). The replay is components/kobako_guest/src/
 block_cache.c's rule, not alloc_sim.py's: at most 8 classes, a class is one
 exact usable length, K blocks a class; malloc of a class length pops, free
 pushes while the class holds < K; realloc goes to the heap.

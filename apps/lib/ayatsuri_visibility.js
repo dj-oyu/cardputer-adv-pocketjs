@@ -26,7 +26,7 @@ globalThis.AyatsuriVisibility=(()=>{
     if(!Number.isInteger(n)||n<1||n>32||!(source instanceof Uint16Array)||!source.length||source.length%3||source.length>192)
       fail('1..32 vertices and 1..64 Uint16 index triples required');
     if(order!=='authored'&&order!=='centroid-depth')fail('order must be authored or centroid-depth');
-    const backend=pocket.ayatsuri;
+    const backend=kobako.ayatsuri;
     const output=new Uint16Array(source.length),counts=new Uint32Array(3),xy=new Float32Array(n*2),depth=new Float32Array(n);
     // Native validation rejects shared/detached/unaligned input before copying.
     backend.selectVisible(xy,depth,source,output,counts,0);

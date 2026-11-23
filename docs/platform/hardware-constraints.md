@@ -86,7 +86,7 @@ SKKの状態サイズと辞書・字形の予算は[日本語入力設計](../ap
 - 割り込みはJSループ対策になるが、停止しないネイティブ関数の代わりにはならない。I/Oには期限を設ける。
 - JSX、TypeScript、Vue SFCには変換工程が必要。本体の素のJS編集とPC側の変換を区別する。
 - Node.jsやブラウザーAPIが自動で使えるわけではない。実装済みのデバイスAPIだけをDocsに掲載する。
-- `.pocket` のABIとhost profileを検証する。QuickJS bytecodeを将来使う場合もエンジン版の互換性を仮定しない。
+- `.kobako` のABIとhost profileを検証する。QuickJS bytecodeを将来使う場合もエンジン版の互換性を仮定しない。
 - SD保存では書き込み失敗・電源断・カード抜去を想定し、将来のEditorで元データを失わない保存手順を設計する。
 - 8MB Flashのpartitionはfirmwareサイズ確認後に決定する。M1でOTAを約束しない。
 - PocketJS調査基準はIDF `>=6.0,<6.2`。既存ADV公式デモの5.4.2とは異なり、移植時にドライバー互換性を確認する。
@@ -102,7 +102,7 @@ PocketJSのRust側レイアウト（taffy）はノードを1本の倍々Vecに�
 
 アプリ実行中の最大連続空きは実測で23.5KiB前後しかない。したがって**段差を跨ぐ画面は確保に失敗し、Rust側がabortして再起動する**。ESP-IDF側にNULLが返るのではなくabortなので、アプリからは「文字を増やしたら再起動した」としか見えない。`ui.createNode`で直接組んでも同じで、34ノード以上はこの機体では到達不能。
 
-`pocket.ui`は`safeNodes`（この値までは必ず作れる）と`maxNodes`を公開し、段差を跨ぐ生成を`OUT_OF_MEMORY`で事前に断る。焼く前の確認は`tools/uibudget/`で行う。
+`kobako.ui`は`safeNodes`（この値までは必ず作れる）と`maxNodes`を公開し、段差を跨ぐ生成を`OUT_OF_MEMORY`で事前に断る。焼く前の確認は`tools/uibudget/`で行う。
 
 ## 決着した項目・まだ動く項目
 

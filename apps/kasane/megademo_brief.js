@@ -1,5 +1,5 @@
 // MEGADEMO chunk: Act I (the briefing) and TWIST's overlays, drawn with
-// pocket.shapes into WAKE's arrays: a cockpit display, the world (floor
+// kobako.shapes into WAKE's arrays: a cockpit display, the world (floor
 // grid, the route's gates, LETHE) under a HUD on one beat. CALL boots it,
 // ROUTE lights the gates, VOYAGE cranes over the route and drops in behind
 // the ship (docs/apps/megademo-story.md; dense code: its bytecode is heap).

@@ -6,11 +6,11 @@
 
 fork（dj-oyu/quickjs）の main にさらに PR が入る予定なので、gitlink を上げる作業と、ROM の組み込み（R2、2026-10-27 から既定 y）で役目が変わった最適化の見直しを、そのときにまとめて行う。出典: [pr8-cold-outline.md](pr8-cold-outline.md)、[upstream-v018.md](upstream-v018.md) §10。
 
-- **改名（2026-11-23 に決定）: プロジェクトと JS の名前空間 `pocket` → `kobako`、fork のエンジンのオプション `POCKET_VM_*` → `QJS_LEAN_*`。** 本家の PocketJS（第三者の OSS）と無関係なのに名前が重なっていたため。道具は `tools/rename/kobako_rename.py`（`plan` が既定で何も書かない、`apply` がファームと fork を同時に書き換える、`check` が残りを数える）。順番は「gitlink を上げる → 改名 → 学習し直し → 実機の A/B」（hot/cold のプロファイルは関数名とファイル名を鍵に持つので、改名の後に学習する）。2026-11-23 に main ＋ `b716bd1` の写しで試した結果: 186 本の移動、`.bin`・Flash Code・Flash Data・DIRAM が改名前とバイト単位で同じ（hot/cold を切って比較）、ROM の組み込みの記号 697 個は同じ、ELF の `pocket` の記号 0、`check_docs.py` 0 エラー、fork の `tests/` 0/122、`build_kobako_text_test.sh`・`build_kobako_random_test.sh` 通過。実機では未確認。残る判断: (1) 画面とログの文言 4 つ（起動時の `Cardputer ADV PocketJS M1`、`JAVASCRIPT / POCKETJS`、`PocketJS ESP-IDF guest`、`legacy-pocketjs`）は「PocketJS」を語として残したので手で直す（`.cache/kobako_rename/review.txt` の約 160 行に含まれる）、(2) `components/pocketjs_guest` は本家 PocketJS の MIT の部品から派生している（`idf_component.yml` の `repository`）。改名しても出どころとライセンスの表示を残す（部品に LICENSE の写しが無いのは改名の前からの問題）、(3) GitHub のリポジトリ名、(4) ブローカーの登録が成果物の名前（`cardputer_pocketjs.bin` → `cardputer_kobako.bin`）に依っていないか、(5) fork 側の変更は fork でコミットしてから gitlink を上げる。改名を実行したらこの項目は消す（道具がこの項目の文も書き換えるため）。
+- **改名の残り（改名は 2026-11-23 に実施: ファームは `kobako`、fork のオプションは `QJS_LEAN_*`）。** (1) 画面とログの文言 4 つ（起動時の `Cardputer ADV PocketJS M1`、`JAVASCRIPT / POCKETJS`、`PocketJS ESP-IDF guest`、`legacy-pocketjs`）は、本家を指す語と区別できないので道具が残した。`legacy-pocketjs` は古い保存済みプログラムを見分ける識別子かもしれないので、変える前に確かめる。(2) `components/kobako_guest` は本家 PocketJS の MIT の部品 `pocketjs_guest` から派生している（`idf_component.yml` の `repository`）。出どころとライセンスの表示を残す（部品に LICENSE の写しが無いのは改名の前からの問題）。(3) GitHub のリポジトリ名（URL は旧名のまま）。(4) ブローカーの登録が成果物の名前（今は `cardputer_kobako.bin`）に依っていないか。(5) fork 側の改名（`c7d48fd`、fork のブランチ）を fork の main に入れる。
 - **gitlink を上げて hot/cold を学習し直す。** 今のファーム（`b716bd1`）は fork PR #4 の後 `JS_CallInternal` が並べ替えられていない。`train.sh` の後、ビルドのログで外れ 0 を確かめ、`b716bd1` を A にして実機の A/B（pr8-cold-outline.md §1 と同じ手順）。PR #8 を含む木の学習には `hc_asm.py` の `.text.unlikely` の修正（`58f9544`）が要る。
 - **PR #8 の熱い 7 命令**（`push_atom_value`・`get_var_ref_check`・`put_var_ref_check`・`for_of_start`・`for_of_next`・`iterator_close`・`set_name`、pr8-cold-outline.md §3）を `JS_CallInternal` に戻すか。STRESS の +0.7% はこれの呼び出しの値段と読んでいる。
-- **ROM の組み込みの下での F2・F3 の残りを棚卸しする。** RD7（[rom-intrinsics.md](rom-intrinsics.md)）でエンジンの組み込みからは外したが、`quickjs.c` の中で ROM の構成でも走っている部分（F3 の `class_proto` の判定、F2 の登録の経路）が残っていないか、残っているなら S3 で要るかを確かめる。F2 は `pocket.*` の面にだけ要る。
-- **遅延を切った構成の不具合（未修正、fork 側）。** `JS_NewObjectFromShape` が強化の印（`js_obj_set_locked(p, false)`）を戻す行が `#ifdef POCKET_VM_LAZY_BUILTINS` の中にあり、遅延を切ると使い回したメモリの印が残る。ホストの `tests/`（`bug1318.js` ほか）で、ふつうの `{}` が WeakMap のキー・FinalizationRegistry の対象として断られる（2026-11-23、ホストで確認。行を `#endif` の外へ出すと消える）。ROM の atom の表の生成器もこの構成で動く。
+- **ROM の組み込みの下での F2・F3 の残りを棚卸しする。** RD7（[rom-intrinsics.md](rom-intrinsics.md)）でエンジンの組み込みからは外したが、`quickjs.c` の中で ROM の構成でも走っている部分（F3 の `class_proto` の判定、F2 の登録の経路）が残っていないか、残っているなら S3 で要るかを確かめる。F2 は `kobako.*` の面にだけ要る。
+- **遅延を切った構成の不具合（未修正、fork 側）。** `JS_NewObjectFromShape` が強化の印（`js_obj_set_locked(p, false)`）を戻す行が `#ifdef QJS_LEAN_LAZY_BUILTINS` の中にあり、遅延を切ると使い回したメモリの印が残る。ホストの `tests/`（`bug1318.js` ほか）で、ふつうの `{}` が WeakMap のキー・FinalizationRegistry の対象として断られる（2026-11-23、ホストで確認。行を `#endif` の外へ出すと消える）。ROM の atom の表の生成器もこの構成で動く。
 - **CM0（cz-js）の遅延の扱い。** cz-js は ROM の組み込みを使わず、`Object.prototype` の外れのたびに `js_lazy_touch` が表を走査する（CM0 の PMU で `toJSON` の探索の 13.5%）。案: `lazy_eligible` で `Object.prototype` を外す（S3 の既定には効かない）、またはビルドオプション化（21 か所の `#ifdef` を `#if` に直し、両方の構成を CI で回すことが前提）。ROM の組み込み無しの構成がホストの検査で回っているかも確かめる。
 
 ## L2（移動しない VM スタックと中断・再開）
@@ -38,7 +38,7 @@ fork（dj-oyu/quickjs）の main にさらに PR が入る予定なので、gitl
 
 L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D58）も含めて採らない。L3a と L4a のコードは
 既定 n のまま残す（台帳 09 と毒化は、将来フレームを動かす必要が出たときの出発点）。**再開する条件**:
-出荷アプリで G12 の `segfix=1` が出ること（`CONFIG_POCKET_VM_OOMPROBE`、`tools/vmtest/device_g12.py`）。
+出荷アプリで G12 の `segfix=1` が出ること（`CONFIG_QJS_LEAN_OOMPROBE`、`tools/vmtest/device_g12.py`）。
 
 旧 #2（D8: 駐機中のネイティブ確保が飛地を増やすか）・#3（出荷アプリは駐機しない）・#4（D55 の緩和）は、
 動かさない方針では問いにならないので閉じた。
@@ -55,10 +55,10 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | F1-6 | JS ターンの速さを同一バイナリ内で比べる | plan §14.3 | 済: 実行時の ROM 検索（文字列→キー）は ROM に無い名前より遅くない |
 | F2-3 | 外れ 1 回の単価を同一バイナリ内で実測 | plan §14.3 | 済: 8.5 µs（`Object.prototype`）〜30 µs（`Math`）。推定の 10〜30 倍 |
 | F2-4 | 全展開の誘発元の計装 | plan §14.2 | 済: 出荷アプリとデモすべてで 0 回 |
-| F0-a | 床のうちファーム側（`pocket.*` の面など） | plan §14.1・§16.1 | 済: 約 6.2 KB（`pocket` の土台 3.2 KB、他は各 0.3 KB 以下）。作成直後とホスト計算の差 4.8 KB は `MALLOC_OVERHEAD`（8 B/確保）と `js_std` の helper |
+| F0-a | 床のうちファーム側（`kobako.*` の面など） | plan §14.1・§16.1 | 済: 約 6.2 KB（`kobako` の土台 3.2 KB、他は各 0.3 KB 以下）。作成直後とホスト計算の差 4.8 KB は `MALLOC_OVERHEAD`（8 B/確保）と `js_std` の helper |
 | F0-c | 160 KiB の上限の数え方: QuickJS は確保ごとに 8 B 足すが tlsf の実ヘッダは 4 B（床だけで約 1.8 KB 多く数え、アプリのブロック数に比例） | plan §16.1 | 未着手（上限の意味を変える判断が要る） |
 | F3c | Map/Set（1.8 KB）・DOMException（1.4 KB）・WeakRef（0.7 KB）を F3b と同じ仕組みで遅延に | plan §18 | 済（2026-09-27）: 実機で各アプリ `js=` さらに −4.5〜4.9 KB（hello 38,248）、smoke・settings・memlog・stress 通過 |
-| F3d | ネイティブが `Uint8Array` を先に作る経路の実機確認（`pocket.fs` の read を使うアプリで） | plan §17.3・`apps/stress/README.md` | 済（2026-09-26）: STRESS TEST が JS より先に `pocket.fs` で読んだ `Uint8Array` の prototype・constructor がグローバルと一致（`STRESS_NATIVE ok`、実機） |
+| F3d | ネイティブが `Uint8Array` を先に作る経路の実機確認（`kobako.fs` の read を使うアプリで） | plan §17.3・`apps/stress/README.md` | 済（2026-09-26）: STRESS TEST が JS より先に `kobako.fs` で読んだ `Uint8Array` の prototype・constructor がグローバルと一致（`STRESS_NATIVE ok`、実機） |
 | F0-d | Kasane の使い勝手（STRESS TEST で踏んだ）: `replace` の背景なし・コマンド数超過・半径超過がすべて理由なしの `INVALID_ARGUMENT`、キャッシュのコマンド 48 がビュー合計、インスタンスがシーンの 80 を使う、既定の clip が作成時の bounds、半径 8 まで・円や線が無い | `apps/stress/README.md` | Kasane の線（`feature/kasane`）へ渡す |
 | F0-b | Kasane デモの外れ回数 | plan §14.2 | 済: 2.4 回/フレーム（最多は imucal の 8.7） |
 | F2-5 | 外れを安くする | plan §15 | 済: 比べ方を直して外れ 1 回 4.0 µs（`Object.prototype`）〜10.5 µs（`Math`）、2〜3 倍。メモリ 0、コード +132 B |
@@ -72,7 +72,7 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | --- | --- | --- |
 | S-D | 設計の決めること 4 つ | 決定（2026-09-27、設計書 §8）: `resume` 登録アプリだけ／中断アプリの音声は一時停止・music オーバーレイは鳴り続ける／中断中はオーバーレイを起動しない／同じ行で再開・一時停止アイコン |
 | S0〜S3 | ゲストの休眠、フック、main.c の経路・一時停止の印、各面の中断・再開 | 実装・実機で確認（2026-09-27、設計書 §11）。無線・SD・マイク・I/O を使っている最中の中断の実機の筋書きは未 |
-| S4 | 出荷アプリの参加 | 済（2026-09-27、設計書 §11.1）: IMU CALIBRATION・POCKET PET・PET COMPANION。HELLO と STRESS は終了のまま。`tools/test_app_resume.py` |
+| S4 | 出荷アプリの参加 | 済（2026-09-27、設計書 §11.1）: IMU CALIBRATION・KOBAKO PET・PET COMPANION。HELLO と STRESS は終了のまま。`tools/test_app_resume.py` |
 | S4a | `tools/test_kasane_imucal.c` が `vm/main` の時点で落ちている（模擬の Kasane が `BUSY`、IMU が無い経路から）。CLAUDE.md の一覧外で誰も回していなかった | 未着手 |
 | S5 | music の再生をオーバーレイのセッションから切り離す | 済（2026-09-28、設計書 §11.3）: 前景のアプリを越えて鳴り続け、次の曲へ進み、音（tone）で止まり、メニューの Back で止まり、MUSIC が `player.current()` で引き取る。capture と SD の前景での停止は実機未確認 |
 | S5a | 曲の切り替えで UI が約 0.2 秒止まる（次の曲を探す走査と open が UI のタスクで走る、実測 185〜213 ms） | 未着手 |
@@ -88,21 +88,21 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | R2 | 普段のターン（LV1/LV2）の内訳 | [r3-small-block-cache.md](r3-small-block-cache.md) §7 | 計測済み（2026-09-27、実機）: **アロケータが JS のターンの 20.6%**（7.63 ms 中 1.56 ms、1 フレーム約 340 回、malloc 1 回約 1,270 サイクル） |
 | R3 | 小さいブロックの再利用とブロック長の直読み | [r3-small-block-cache.md](r3-small-block-cache.md) | 実装済み・**既定 y**（2026-09-27、R3a 解決後）: 実機でアロケータ 1.57 → 0.92 ms、LV1 のターン 7.62 → 7.08 ms |
 | R3a | キャッシュ有りで STRESS LV3 に Kasane の `BUSY`（3/3 回、無しでは 0/2）。frame の外の確保失敗の約 2 フレーム後 | r3-small-block-cache.md §6.2 | **解決**: キャッシュでなく `app_tick` の穴。中断された frame() を継続ターンが終えて提出したまま次の frame() を呼んでいた。修正後 実機 3/3 PASS |
-| R4 | ターンのサイクルの内訳（性能カウンタ、`CONFIG_POCKET_VM_TURNPERF`） | [turn-cpi.md](turn-cpi.md) | 済（2026-09-27、実機）: **IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち**。flash を QIO にして（既定）LV1 の 1 フレームの JS 10.78 → 7.25 ms、描画 6.61 → 6.16 ms。旧 `turn_ms` 7.1 ms は予算で切られた通常＋継続の平均で、実際の合計は 10.8 ms だった |
+| R4 | ターンのサイクルの内訳（性能カウンタ、`CONFIG_KOBAKO_TURNPERF`） | [turn-cpi.md](turn-cpi.md) | 済（2026-09-27、実機）: **IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち**。flash を QIO にして（既定）LV1 の 1 フレームの JS 10.78 → 7.25 ms、描画 6.61 → 6.16 ms。旧 `turn_ms` 7.1 ms は予算で切られた通常＋継続の平均で、実際の合計は 10.8 ms だった |
 | R5 | QIO の後も 57% がミス待ち。ホットな関数の連続配置・一部 IRAM・flash 120 MHz | [turn-icache.md](turn-icache.md) §1 | 模型で評価済み（2026-09-27、QEMU＋キャッシュ模型、推定）: 1 ターンが触るのは 45.5 KiB でキャッシュ超え、衝突は 15% 程度。**並べ替えは実リンクで −0.6%、不採用**。IRAM 8 KiB は**実機で 1 フレームの JS 7.00 → 5.93 ms（−15%）、空き −8.7 KiB。見送り**（払う DRAM に対して戻りが軽い、ユーザーの判断）。候補は `tools/r5sim/candidates/` |
-| R4a | `pocket.fs` の open が OOM すると File のスロットが戻らない（`pocket_api_settled` の Promise 生成失敗で File が消え、ファイナライザ無し）。STRESS LV3 60 秒で 474 回 `two files are already open` | turn-cpi.md §4.1 | **解決**（2026-09-27）: `file_settled()` が失敗時にスロットを閉じ、`pocket_api_settled` は失敗を例外で返す。実機の負荷 `^`（OOMPROBE）で修正なし 5/5 漏れ → 修正あり 5/5 OK |
+| R4a | `kobako.fs` の open が OOM すると File のスロットが戻らない（`kobako_api_settled` の Promise 生成失敗で File が消え、ファイナライザ無し）。STRESS LV3 60 秒で 474 回 `two files are already open` | turn-cpi.md §4.1 | **解決**（2026-09-27）: `file_settled()` が失敗時にスロットを閉じ、`kobako_api_settled` は失敗を例外で返す。実機の負荷 `^`（OOMPROBE）で修正なし 5/5 漏れ → 修正あり 5/5 OK |
 | R4d | 解決した File を受け取る継続が OOM で登録できないと、File が参照を失いスロットが戻らない（ファイナライザ無しの設計） | turn-cpi.md §4.2 | **解決**（2026-09-27）: ファイナライザが印を付け、次の pump が破棄として閉じる。実機の負荷 `^` 段 1 で無し 3/3 漏れ → 有り 5/5 OK |
-| R4b | F2 の遅延の索引が、初回の読みの OOM で名前を失う（`fs.open` が "not a function" に、ホストでは `Object.fromEntries`）。`pocket.*` の名前空間も対象 | turn-cpi.md §4.1 | **解決**（2026-09-27）: 失敗時に「済み」の印を戻す。コーパス `lazy_touch_oom.js`（陰性対照で 18 中 13 が消える） |
+| R4b | F2 の遅延の索引が、初回の読みの OOM で名前を失う（`fs.open` が "not a function" に、ホストでは `Object.fromEntries`）。`kobako.*` の名前空間も対象 | turn-cpi.md §4.1 | **解決**（2026-09-27）: 失敗時に「済み」の印を戻す。コーパス `lazy_touch_oom.js`（陰性対照で 18 中 13 が消える） |
 | R4c | `oom_sweep.sh -n 2500 lazy_builtins.js` の 1,075 番で終了時に `gc_obj_list` が空でない assert（修正前の quickjs.c でも同じ） | turn-cpi.md §4.1 | 未着手 |
 
 ## ビルドオプションの整理（2026-09-27）
 
 VM 系の Kconfig を、出荷経路の切り替えではなく診断だけに絞った。**`5db834f` が外す前の最後の木**で、比較が要るときはそこを別の作業ツリーに出す。
 
-- **固定した（常に入る）**: `SCHED` `SEGFRAMES` `FLATCALLS` `YIELD` `LAZY_INPUTS` `STRIP_FN_SOURCE` `ROM_ATOMS` `LAZY_BUILTINS` `LAZY_INTRINSICS` `BLOCK_CACHE`。`#ifdef` は `unifdef` で機械的に畳んだ。F1〜F3 の3つだけは `quickjs.c` 内部のマクロ `POCKET_VM_*` として残り、ROM アトム表の生成器（`tools/vmtest/floor/gen_rom_atoms.sh`、`-DPOCKET_VM_GEN_ROM_ATOMS`）だけが切る — 表は熱心な `JS_NewContext` が作るものを写す必要があるため。`--check` で表がバイト一致することを確かめた。
+- **固定した（常に入る）**: `SCHED` `SEGFRAMES` `FLATCALLS` `YIELD` `LAZY_INPUTS` `STRIP_FN_SOURCE` `ROM_ATOMS` `LAZY_BUILTINS` `LAZY_INTRINSICS` `BLOCK_CACHE`。`#ifdef` は `unifdef` で機械的に畳んだ。F1〜F3 の3つだけは `quickjs.c` 内部のマクロ `KOBAKO_VM_*` として残り、ROM アトム表の生成器（`tools/vmtest/floor/gen_rom_atoms.sh`、`-DQJS_LEAN_GEN_ROM_ATOMS`）だけが切る — 表は熱心な `JS_NewContext` が作るものを写す必要があるため。`--check` で表がバイト一致することを確かめた。
 - **削除した（採らなかった実験）**: `TCO` `FAIR` `CCOUNT`。
 - **削除した（決着した計測）**: `ALLOCPROBE`（R2）、`FLOORPROBE`（F 系列）、`CALLBENCH`、`L1_CLOCKBENCH`。R3a の計装（`R3A_*`）は ALLOCPROBE の下にあったので一緒に消えた。
-- **残した（診断）**: `SELFTEST` `KSN_DEVICE_PROBE` `PROBE` `RELOC` `OOMPROBE`、および `POCKET_UI_TASK_CORE`。
+- **残した（診断）**: `SELFTEST` `KSN_DEVICE_PROBE` `PROBE` `RELOC` `OOMPROBE`、および `KOBAKO_UI_TASK_CORE`。
 - **ホスト側**: `tools/vmtest/build.sh` の変種は `asan` / `o2`（と `-reloc`）だけになり、`expected-fair/` `expected-keepsrc/`、`sdkconfig.vm*.defaults` のうち消したオプション用の8本、TCO・callbench・async_audit・lazyfloor/lazyprobe・`device_floor.py` を削除した。
 - **確認（ホストと実機ビルド、2026-09-27）**: 出荷構成のファームは `vm/main` の既定ビルドと同じ 2,043,744 B、静的 DIRAM は ±0、flash は −12 B（assert の行番号）。残した診断5つを全部有効にしたビルドも通る。コーパス 79/79（asan・o2・`--force-yield`・`--budget-jobs 3`・`--vm-seg-size 88`・`asan-reloc`）、中断鎖の寿命 900/900、陰性対照 F1 4/4・F2 7/7・F3 4/4・R1 2/2、STRESS・テキスト入力・input・memory のホスト検査は PASS。実機: `smoke_device.py` 20 サイクル SMOKE_OK、`stress_app.py` 3/3 PASS（BUSY 0、LV1〜3 は 29.2〜29.7 fps、LV1 のターン 7.12〜7.14 ms）。
 - **この作業の前から落ちていたもの**（2026-09-27 に `vm/fix-host-checks` で直した。ホストだけの変更で、ファームのソースは触っていない）:
@@ -110,8 +110,8 @@ VM 系の Kconfig を、出荷経路の切り替えではなく診断だけに�
   - `oom_canary_probe.sh`: 先頭行の `--fail-alloc` しか読まず、F1〜F3 で確保が減った後は番号が走行の終わりより先になって何も注入していなかった。`run.sh` と同じく `// vmrun-rom-lb-li-flags:` を足して読む。
   - **`corpus/oom_callsite_double_free.js` は F1 以降、何も検査せずに通っていた**（`--fail-alloc 1455` に対して走行全体で確保 527 回）。再固定の行がこのファイルだけ抜けていた。失敗の分岐に計装したコピーで掃いて `671`（添字 0、675 が添字 1 で、旧 1458/1462 と同じ間隔）を見つけ、ヘッダに足した後も番号が動かないこと、上流の修正を戻すと ASan で落ちることを確かめた。上の canary の検査（注入するファイルは必ず発火する）が本来これを捕まえるはずだった。
   - `tools/test_session_dispatch.py`: `app_tick` に後から入った呼び出し（メモリ圧、presenter、P0 計測など）の代役が無かった。足したうえで、R3a の場合（継続が中断中の `frame()` を終えて提出したら、次の `frame()` の前に present する）と presenter の失敗の2件を加えた。R3a の修正を外すと落ちることも確かめた。
-  - `build_lessons_test.sh` / `build_power_test.sh`: 音の observer の代役と `esp_err.h` の include が無かった。`pocket_clock.c` が Kasane の source を登録するようになった分は、呼ばれたら止まる代役で済ませた（この検査は `wall()` だけを見る）。
-  - ビルドオプションの整理の取りこぼし: `pocket_api.c` などの `vm_wake_post()` がもう条件付きでないので、ホストの `vm_wake.h` の代役に空の定義を置いた。`quickjs-vm.c` をリンクしていなかった `build_pocket_capture_test.sh` / `build_pocket_random_test.sh` / `build_class_ids.sh` / `build_js_ledger.sh` / `build_lazy_test.sh` に足した（あわせて `/tmp` の共有キャッシュがヘッダの変更で作り直されるようにした）。`lifecycle.sh` は無印の `asan` に消毒器のフラグを付けていなかった。
+  - `build_lessons_test.sh` / `build_power_test.sh`: 音の observer の代役と `esp_err.h` の include が無かった。`kobako_clock.c` が Kasane の source を登録するようになった分は、呼ばれたら止まる代役で済ませた（この検査は `wall()` だけを見る）。
+  - ビルドオプションの整理の取りこぼし: `kobako_api.c` などの `vm_wake_post()` がもう条件付きでないので、ホストの `vm_wake.h` の代役に空の定義を置いた。`quickjs-vm.c` をリンクしていなかった `build_kobako_capture_test.sh` / `build_kobako_random_test.sh` / `build_class_ids.sh` / `build_js_ledger.sh` / `build_lazy_test.sh` に足した（あわせて `/tmp` の共有キャッシュがヘッダの変更で作り直されるようにした）。`lifecycle.sh` は無印の `asan` に消毒器のフラグを付けていなかった。
 
 ## 確保失敗時のコンパイル経路（VM の段とは独立）
 
@@ -131,7 +131,7 @@ L1 とは独立に見つかった既存の不具合。
 | --- | --- | --- | --- |
 | 1 | `deferred_buttons` が継続ターン中の 2 打鍵を 1 マスクに融合する。受け入れて文書化するか、キュー化する（離鍵フレームの対の作り直しを伴う）か、継続ターン中は最初の 1 つだけ保持するかが未決 | vm-L1-report.md §5.2-1 | 未決（実装は現状維持） |
 | 2 | 仕様 §6「未処理ジョブもイベントも無い場合だけ待機する」を、専用タスク化なし（現状: `ui_task` のフレーム待ちを完了通知で早く抜けるだけ）で充足と認めるかどうか。専用タスク化は静的 DIRAM +24〜32 KiB 推定で、L0 の RAM 上限 +8 KiB を超える | vm-L1-report.md §4.1・§3 | 未決 |
-| 3 | 公平モード（`CONFIG_POCKET_VM_FAIR`、既定 off）を既定にするかどうか。**2026-09-23に n で確定**: 実機で測り直したところ、L1 §9.5 の「F型で完了遅延が中央値3〜7倍改善」は今の負荷では再現しない（F は完了イベントを持たず、E は drain が予算に収まるため公平モードのコードに到達しない）。観測できるのは費用だけで、仕様 §12 の順序互換を崩す理由が無い。出荷アプリに「予算超過の drain ＋ 待っている完了」が現れたら測り直す | vm-L1-report.md §9.5, vm-L2-results.md §9 | 完了（n で確定） |
+| 3 | 公平モード（`CONFIG_KOBAKO_VM_FAIR`、既定 off）を既定にするかどうか。**2026-09-23に n で確定**: 実機で測り直したところ、L1 §9.5 の「F型で完了遅延が中央値3〜7倍改善」は今の負荷では再現しない（F は完了イベントを持たず、E は drain が予算に収まるため公平モードのコードに到達しない）。観測できるのは費用だけで、仕様 §12 の順序互換を崩す理由が無い。出荷アプリに「予算超過の drain ＋ 待っている完了」が現れたら測り直す | vm-L1-report.md §9.5, vm-L2-results.md §9 | 完了（n で確定） |
 | 5 | GC 閾値（初期値 256 KiB）がゲストの上限（160 KiB）より大きく、循環参照のゴミが回収されなかった。`quickjs.c` の比較時キャップ（上限−上限/32）と `guest.c` の初期閾値（上限/2）で修正。回帰は `tools/vmtest/corpus/gc_threshold_{device,near_limit}.js`。生存量が上限の31/32を超えると毎オブジェクト生成でGCする点は未計測（実機） | vm-L0-report.md §2、結果は vm-L2-results.md §4.19 | 完了（host・実機smoke/memlog/benchで確認） |
 | 6 | 上流 quickjs-ng の use-after-free: バックトレース組み立て中に確保が失敗する経路。上流 e1c1e416 を移植して修正。同じ関数の CallSite 二重解放（上流 c846cb13）も移植。回帰は `oom_creep_backtrace.js`・`oom_callsite_double_free.js`（再現元の `known/oom_backtrace_uaf.js` も asan で UAF なし） | vm-L0-report.md §2、結果は vm-L2-results.md §4.21 | 完了 |
 | 7 | 中断された `await` の Promise が永久に pending のまま残る（割り込みが捕捉不能な例外として実装されているため）。L1 は予算切れではこれを作らないが、暴走ガードと `stop_interrupt` の経路では今も起きる | quickjs-freertos-vm-spec.md §7「非対応事項」、vm-ledger/03 事実39-41 | 未着手（L2 の中断設計と併せて扱う想定） |
@@ -143,4 +143,4 @@ L1 とは独立に見つかった既存の不具合。
 | 13 | 上流 quickjs-ng 7955cfd49e（中断中コルーチンが closure 経由でしか届かないと GC に回収される UAF）。JSStackFrame 48B・JSAsyncFunctionData 104B を保つ形（`coro_kind` をパディングに置き、所有者は container_of）で移植（`aa602e1`、本文の訂正は §4.23）。回帰は `coro_closure_gc.js`（修正前は6変種すべて UAF）と `coro_prologue_gc.js`（プロローグ単独のケースは修正前も鳴らず、誤った移植を UBSan で検出するガード。プロローグと本体 closure の混在循環は修正前に6変種すべて UAF）。修正後はいずれもクリーン。修正前後の差は `coro_closure_gc` だけ。実機は Flash +320B、DIRAM・空きは不変 | vm-L2-results.md §4.22、結果は §4.23 | 完了 |
 | 14 | 上流の低優先修正（v0.14.0 以降、未移植）: 大きさ計算の整数オーバーフロー a65377157e / e2c45218f6 / e93cca6119 / 252209d99c / 610b90842d、循環 re-export のクラッシュ ef7a3a748b。該当コードはあるが、160 KiB 上限下ではほぼ届かないか、モジュール使用時だけ | vm-L2-results.md §4.22 | 記録のみ |
 | 15 | 7955cfd49e 移植の関所で、修正前とバイト一致で落ちていた既存の失敗2件。どちらも VM の不具合ではなかった。`seg_oom_boundary` はテストが名目どおりの形になっていなかった。`new Array(1<<14).fill()` が1.5倍ずつ伸びて 162,500/163,840 B まで詰め、InternalError を作る余地が約1.3KBしか残らなかった。2回目は1回目の Error が catch 束縛に残る分だけさらに狭く、-keepsrc で `null` になった。`Array.apply` の1回確保（`memory_device.js` と同じ）に替え、余裕は約58KB。`tco_guards` は毎中断GCが深さに比例して、予算に対し2乗で伸びる（512K 2.2秒→1M 7.1秒→2M 31秒、7MiB既定で366秒完走・出力一致）。300秒の打ち切りは時間切れで、ハングではない | vm-L2-results.md §7 | 完了 |
-| 16 | 関数ソースの複写（`js_strndup` で全関数の本文を保持）をやめる。`CONFIG_POCKET_VM_STRIP_FN_SOURCE`（既定 y）。toString は上流の「ソース無し」の形を返す。実機: hello −2,780 / imucal −4,740 / companion −2,576 / pet −4,124 B（ゲスト）、smoke 20 周 OK。Test262 部分集合の退行 0、toString ディレクトリで新たに 5 ファイル×2 モードが落ちる（計算名・private メソッド）。vmtest は `-keepsrc` 変種、`expected-keepsrc/`、`--fail-alloc` 番号をトレースで再配置 | [Kasane判断台帳](../kasane/decisions.md)、結果は vm-L2-results.md §6 | 完了 |
+| 16 | 関数ソースの複写（`js_strndup` で全関数の本文を保持）をやめる。`CONFIG_QJS_LEAN_STRIP_FN_SOURCE`（既定 y）。toString は上流の「ソース無し」の形を返す。実機: hello −2,780 / imucal −4,740 / companion −2,576 / pet −4,124 B（ゲスト）、smoke 20 周 OK。Test262 部分集合の退行 0、toString ディレクトリで新たに 5 ファイル×2 モードが落ちる（計算名・private メソッド）。vmtest は `-keepsrc` 変種、`expected-keepsrc/`、`--fail-alloc` 番号をトレースで再配置 | [Kasane判断台帳](../kasane/decisions.md)、結果は vm-L2-results.md §6 | 完了 |

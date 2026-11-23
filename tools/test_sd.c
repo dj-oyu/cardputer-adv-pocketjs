@@ -1,9 +1,9 @@
 // Host test for the half of fs.volume.sd that decides what an app may reach.
-// No card, no driver, no IDF: main/pocket/sd_path.c compiled by the host gcc,
+// No card, no driver, no IDF: main/kobako/sd_path.c compiled by the host gcc,
 // line for line the same file the firmware links.
 //
-//   gcc -O2 -Wall -Wextra -Werror -I main/pocket tools/test_sd.c
-//       main/pocket/sd_path.c -o .cache/test_sd.exe && .cache/test_sd.exe
+//   gcc -O2 -Wall -Wextra -Werror -I main/kobako tools/test_sd.c
+//       main/kobako/sd_path.c -o .cache/test_sd.exe && .cache/test_sd.exe
 //
 // The escape cases are the point. A grant that can be walked out of is worse
 // than no SD support at all, and it is the failure least likely to show up by
@@ -34,7 +34,7 @@ int main(void) {
     CHECK(build(&m, "a", buf, sizeof buf) == SD_PATH_NO_GRANT, "no grant not refused");
 
     // ---- grant before media: still refuses, and with the ungranted reason ----
-    CHECK(sd_media_grant(&m, "pocket", 6), "grant rejected");
+    CHECK(sd_media_grant(&m, "kobako", 6), "grant rejected");
     CHECK(build(&m, "a", buf, sizeof buf) == SD_PATH_DISCONNECTED,
           "granted but absent should be DISCONNECTED");
 
@@ -46,16 +46,16 @@ int main(void) {
     CHECK(!sd_generation_valid(&m, 2), "future generation accepted");
 
     // ---- translation ---------------------------------------------------------
-    CHECK(build(&m, "", buf, sizeof buf) == SD_PATH_OK && !strcmp(buf, "/sd/pocket"),
+    CHECK(build(&m, "", buf, sizeof buf) == SD_PATH_OK && !strcmp(buf, "/sd/kobako"),
           "root -> %s", buf);
-    CHECK(build(&m, "a", buf, sizeof buf) == SD_PATH_OK && !strcmp(buf, "/sd/pocket/a"),
+    CHECK(build(&m, "a", buf, sizeof buf) == SD_PATH_OK && !strcmp(buf, "/sd/kobako/a"),
           "one component -> %s", buf);
     CHECK(build(&m, "a/b/c", buf, sizeof buf) == SD_PATH_OK &&
-          !strcmp(buf, "/sd/pocket/a/b/c"), "three components -> %s", buf);
+          !strcmp(buf, "/sd/kobako/a/b/c"), "three components -> %s", buf);
     // UTF-8 passes through untouched: the encoding is FATFS_API_ENCODING_UTF_8
     // precisely so a name is not rewritten on its way to the card.
     CHECK(build(&m, "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e", buf, sizeof buf) == SD_PATH_OK &&
-          !strcmp(buf, "/sd/pocket/\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"),
+          !strcmp(buf, "/sd/kobako/\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"),
           "utf-8 mangled -> %s", buf);
 
     // ---- escapes: every one of these must be refused -------------------------
@@ -122,7 +122,7 @@ int main(void) {
 
     // ---- a mounted card that answered wrongly is not ABSENT --------------------
     sd_media_reset(&m);
-    sd_media_grant(&m, "pocket", 6);
+    sd_media_grant(&m, "kobako", 6);
     sd_media_mounted(&m);
     sd_media_failed(&m);
     CHECK(!sd_media_usable(&m), "failed media usable");

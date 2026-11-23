@@ -1,6 +1,6 @@
 // USB diagnostic z. One producer field drives two independent text nodes.
 (function () {
-  const view = pocket.kasane.mount({version: 1,
+  const view = kobako.kasane.mount({version: 1,
     slots: {elapsed: {type: 'text', capacity: 8},
             frames: {type: 'u32'}, starved: {type: 'u32'}, streamId: {type: 'u32'}},
     nodes: [
@@ -8,13 +8,13 @@
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff},
       {type: 'text', bounds: [100, 4, 188, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
     ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
-  const source = pocket.audio.outputSource();
+  const source = kobako.audio.outputSource();
   let bound = false;
   let playerHandle = null;
   let playStartMs = 0;
   let closed = false;
   globalThis.frame = function () {
-    if (playStartMs && !closed && pocket.time.now() - playStartMs >= 45000) {
+    if (playStartMs && !closed && kobako.time.now() - playStartMs >= 45000) {
       closed = true;
       const status = playerHandle.status();
       console.log('KSN_OUTPUT_SOURCE FINAL positionMs=' + status.positionMs +
@@ -31,9 +31,9 @@
     }
     bound = true;
     console.log('KSN_OUTPUT_SOURCE BOUND');
-    pocket.fs.requestFolder('sd').then(function (root) {
+    kobako.fs.requestFolder('sd').then(function (root) {
       if (root !== 'sd:/') throw new Error('SD folder not granted');
-      return pocket.audio.player.open({
+      return kobako.audio.player.open({
         source: 'sd:/KAKATO/KARA OK 2nd Edition/02 インザハウス.mp3'
       });
     }).then(function (player) {
@@ -43,7 +43,7 @@
         console.log('KSN_OUTPUT_SOURCE STATE ' + event.state);
       });
       player.play().then(function () {
-        playStartMs = pocket.time.now();
+        playStartMs = kobako.time.now();
         console.log('KSN_OUTPUT_SOURCE PLAY');
       }, function (error) {
         console.log('KSN_OUTPUT_SOURCE ERROR PLAY ' + error);

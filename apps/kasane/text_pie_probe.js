@@ -3,7 +3,7 @@
 (function () {
   const a = ['あいうえおかきくけこさしすせそ', 'たちつてとなにぬねのはひふへほ'];
   const b = ['まみむめもやゆよらりるれろわを', 'がぎぐげござじずぜぞだぢづでど'];
-  const view = pocket.kasane.mount({
+  const view = kobako.kasane.mount({
     version: 1,
     background: 0x10283dff,
     slots: {top: {type: 'text', capacity: 47}, bottom: {type: 'text', capacity: 47}},

@@ -71,19 +71,19 @@ jobs:
           idf.py -B build_numeric -D SDKCONFIG=build_numeric/sdkconfig build
           git rev-parse HEAD > build_numeric/source-head.txt
           grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_numeric/sdkconfig
-          grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_numeric/CMakeCache.txt
-          grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_numeric/CMakeCache.txt
+          grep -qx 'KOBAKO_DERBY_COURSE_CACHE:BOOL=OFF' build_numeric/CMakeCache.txt
+          grep -qx 'KOBAKO_DERBY_PROJECT_BATCH:BOOL=OFF' build_numeric/CMakeCache.txt
           python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_numeric/expected-partition.bin
           cmp build_numeric/expected-partition.bin build_numeric/partition_table/partition-table.bin
-          python -c 'from pathlib import Path; e=Path("build_numeric/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e; c=Path("build_numeric/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
-          sha256sum build_numeric/cardputer_pocketjs.bin build_numeric/cardputer_pocketjs.elf build_numeric/bootloader/bootloader.bin build_numeric/partition_table/partition-table.bin > build_numeric/SHA256SUMS
+          python -c 'from pathlib import Path; e=Path("build_numeric/cardputer_kobako.elf").read_bytes(); assert b"Application information:" in e; c=Path("build_numeric/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+          sha256sum build_numeric/cardputer_kobako.bin build_numeric/cardputer_kobako.elf build_numeric/bootloader/bootloader.bin build_numeric/partition_table/partition-table.bin > build_numeric/SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: qjs-mixed-numeric-product-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
           path: |
-            build_numeric/cardputer_pocketjs.bin
-            build_numeric/cardputer_pocketjs.elf
-            build_numeric/cardputer_pocketjs.map
+            build_numeric/cardputer_kobako.bin
+            build_numeric/cardputer_kobako.elf
+            build_numeric/cardputer_kobako.map
             build_numeric/bootloader/bootloader.bin
             build_numeric/partition_table/partition-table.bin
             build_numeric/ota_data_initial.bin

@@ -22,10 +22,10 @@ arena は空のスクリプトで約 +90 KB（約 24 の size class が 1 ペー
 
 fork では 9de2921 を v0.18.0 に対して戻したもの（`89df4c3`、整形して `e08d22d`）をマージした。後から arena のマクロを使っていた 7955cfd と 849220c は残し、マクロの代わりにヘッダの欄を直接使う。上流の tests.conf（0/122）と test262（40/82,220、同じ 40 件）は arena の有無で変わらない。
 
-## 2. pocket の挙動を残したところ
+## 2. kobako の挙動を残したところ
 
 - **InternalError（out of memory を含む）は JS から捕まえられる。** 上流 90aa2c4・db0fe52 はこれを捕まえられなくした。固定のヒープで確保に失敗したアプリが捕まえて続けられることが、OOM まわりの硬化（[oom-parse-safety.md](oom-parse-safety.md)、`tools/vmtest/corpus/memory_device.js` と `oom_*`）の前提なので、fork の既定は捕まえられる方。`-DJS_UNCATCHABLE_INTERNAL_ERRORS=1` で上流の挙動になる。"interrupted" はどちらでも捕まえられない。
-- **`JSStackFrame` は 48 B のまま。** 上流の `cur_gc_obj` は入れず、pocket の `coro_kind` で持ち主を求める。上流が `CallSite.isConstructor` のために足した `is_constructor` は、最後の詰め物の 1 バイト（FLATCALLS で offset 39）に置いた。共有の prologue では `flags` が呼び出し側の値のことがあるので、C からの入口と flat call でそれぞれ書く。
+- **`JSStackFrame` は 48 B のまま。** 上流の `cur_gc_obj` は入れず、kobako の `coro_kind` で持ち主を求める。上流が `CallSite.isConstructor` のために足した `is_constructor` は、最後の詰め物の 1 バイト（FLATCALLS で offset 39）に置いた。共有の prologue では `flags` が呼び出し側の値のことがあるので、C からの入口と flat call でそれぞれ書く。
 - **関数のソースは捨てたまま。** 上流が `using` のために書き換えた関数本体の構文解析でも保存しない。
 - **ArrayBuffer の transfer。** v0.18 で外部メモリの API が `free_func` から `realloc_func` になった（`JS_NewArrayBuffer` の引数も変わる）。Shiki の窓は `realloc_func = NULL`（誰も解放しない）で作り、その種類の ArrayBuffer だけを transfer できなくした（[shiki-spec.md](../kasane/shiki-spec.md) §9.3）。`realloc_func` が所有するものは上流どおり transfer できる。
 
@@ -34,7 +34,7 @@ fork では 9de2921 を v0.18.0 に対して戻したもの（`89df4c3`、整形
 host の試験で見つけたもの。どれもマージの衝突の外にあった。
 
 - **`hash_atom` の幅。** v0.18 は shape のプロパティの位置を `uintptr_t` の幅の乗算ハッシュで決める（cad311e）。64 bit の host と 32 bit の実機で別のバケットになり、host で作る ROM の shape の表が実機で引けない。fork はどの host でも 32 bit の式にした。
-- **pocket の 2 か所が古いハッシュのまま。** 遅延組み込みの並べ直し（`lazy_reorder`）と ROM の生成器（`tools/vmtest/floor/gen_rom_intrinsics.c`）が `atom & mask` で表を作っていた。前者は `Array.prototype` を全部展開した後の引き当てをすべて外し（for-in と `Object.keys` が壊れる）、後者は ROM 版のコンテキストで組み込みのメソッドを全部 `undefined` にした（実機の構成。r5sim の hot/cold の学習で見つかった）。
+- **kobako の 2 か所が古いハッシュのまま。** 遅延組み込みの並べ直し（`lazy_reorder`）と ROM の生成器（`tools/vmtest/floor/gen_rom_intrinsics.c`）が `atom & mask` で表を作っていた。前者は `Array.prototype` を全部展開した後の引き当てをすべて外し（for-in と `Object.keys` が壊れる）、後者は ROM 版のコンテキストで組み込みのメソッドを全部 `undefined` にした（実機の構成。r5sim の hot/cold の学習で見つかった）。
 - 遅延の Uint8Array に base64/hex のメソッドが付かない、DOMException の 2 度目の登録で abort する、遅延の DOMException の `length` が 2 のまま、ROM 版のコンテキストが消えた `js_random_init` を呼ぶ（実機のビルドだけが通る経路）。
 - `to_propkey_obj`（最後の命令）を外した。上流 0db3949 が代入の ToPropertyKey を右辺の後にしたので、使う場所がなくなった。
 
@@ -94,12 +94,12 @@ v0.18 は 50b5fe4e（fork 55b82c7）、v0.14 は f5fe594a（fork cd51ea7）。�
 
 ## 8. fork の `main` に上げた（2026-11-21、fork `ff809dd`）
 
-fork の作業ブランチを `main`（`v0.14.0` から切った pocket の系統。`master` は上流の写しのまま）へマージした（fork PR #1、マージコミット。`cbf7803` は `main` から辿れる）。上流の CI（130 件）を初めて通すために直したもの:
+fork の作業ブランチを `main`（`v0.14.0` から切った kobako の系統。`master` は上流の写しのまま）へマージした（fork PR #1、マージコミット。`cbf7803` は `main` から辿れる）。上流の CI（130 件）を初めて通すために直したもの:
 
 - **`JS_UPSTREAM_COMPAT`。** fork 自身のビルド（CMakeLists.txt・meson.build、amalgam の CI）だけが定義し、上流の挙動に戻す: どのビルドでも行番号表を作る（`NDEBUG` で落とさない）、関数のソースを保つ、`Math.sin/cos/tan` は libm。pocketjs は `quickjs.c` を自分でコンパイルし、これを定義しない。
 - **`gen/*.c` を作り直した。** 上流の qjsc が上流の atom 番号で書いたバイトコードのままで、standalone と REPL が atom を別の atom として読んでいた。
 - **`libunicode-table.h` の綴り。** ESP-IDF 形式への整形の綴り直しが、script の別名 `Beng`・`Maka` を `Being`・`Make` にしていた。`\p{Script=Bengali}`・`\p{Script=Makasar}` が実機でも「unknown unicode script」だった。このファームで直る。
-- 使われない変数（`-Werror`）、`quickjs-vm.c` と pocket の見出しを amalgam と meson に、構造体の大きさの assert を実機の配置（32 bit・NaN boxing・int64 が 8 境界・GCC/Clang・Windows 以外）に限る、`ATOMIC_CHAR_LOCK_FREE` は tcc と MSVC で検査しない、`vmtest_seg_alloc_hint` の weak 参照は ELF だけ。
+- 使われない変数（`-Werror`）、`quickjs-vm.c` と kobako の見出しを amalgam と meson に、構造体の大きさの assert を実機の配置（32 bit・NaN boxing・int64 が 8 境界・GCC/Clang・Windows 以外）に限る、`ATOMIC_CHAR_LOCK_FREE` は tcc と MSVC で検査しない、`vmtest_seg_alloc_hint` の weak 参照は ELF だけ。
 - CI の Windows（clang-cl + ASan の debug）は、上流 v0.18.0 でも同じく落ちていた（runner の Visual Studio 同梱の ASan DLL が先に読まれる）。リンクした DLL を実行ファイルの隣に置いた。
 
 **実機のコードは変わらない。** このファームの `quickjs.c` を cbf7803 と ff809dd で同じコマンド（`build/compile_commands.json`）でコンパイルし、コードとデータのバイトが一致した（text 509,248 B）。hot/cold は quickjs.c 190 関数・不一致 0 のまま。変わるのは Unicode の表の 2 つの文字列だけ。

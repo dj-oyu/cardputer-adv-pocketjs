@@ -1,7 +1,7 @@
 // STRESS's turns on the chip, for QEMU (docs/vm/turn-icache.md sec.1). The setup is
-// tools/test_stress_app.c's -- real QuickJS, real pocket.kasane, a pocket.fs
+// tools/test_stress_app.c's -- real QuickJS, real kobako.kasane, a kobako.fs
 // stub -- but frame() is called as app_tick calls it (JS_Call, then the job
-// queue drained, then pocket_kasane_end_turn), not through JS_Eval, so the
+// queue drained, then kobako_kasane_end_turn), not through JS_Eval, so the
 // parser does not run inside a turn the way it does on the host.
 //
 // -DR5SIM_APP picks the app (tools/r5sim/main/CMakeLists.txt): STRESS in
@@ -13,9 +13,9 @@
 // are the only code at theirs, so tools/r5sim/icache.py cuts the fetch stream
 // at them without any clock or output having to line up.
 #include "esp_heap_caps.h"
-#include "pocket_kasane.h"
-#include "pocket_memory.h"
-#include "pocket_av.h"
+#include "kobako_kasane.h"
+#include "kobako_memory.h"
+#include "kobako_av.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
@@ -26,50 +26,50 @@
 #include <string.h>
 
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out;return false;}
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){(void)id;(void)out;return false;}
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
-// pocket_kasane.c now installs and polls the proc/grid/video/pixel surfaces.
+// kobako_kasane.c now installs and polls the proc/grid/video/pixel surfaces.
 // STRESS uses none of them, and their real sources pull in the DERBY runner
 // and PIE kernels, so they are stubbed as tools/test_keytest_app.c does. On
 // the device each per-turn call is a flag test of a few instructions.
-#include "pocket_shiki_frame.h"
-esp_err_t pocket_proc_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-#ifndef R5SIM_APP_SHIKI   // pocket_shiki_frame.c has the real ones
-void pocket_proc_end_turn(void){}
-bool pocket_proc_has_frame(void){return false;}
-bool pocket_proc_pending(void){return false;}
-bool pocket_proc_backdrop_pending(void){return false;}
-bool pocket_proc_is_image_mode(void){return false;}
-void pocket_proc_prepare_render(unsigned strip_rows){(void)strip_rows;}
-ksn_result pocket_proc_backdrop(void *o,uint16_t y,uint16_t rows,uint16_t *px){(void)o;(void)y;(void)rows;(void)px;return KSN_OK;}
-void pocket_proc_present_result(ksn_result r){(void)r;}
+#include "kobako_shiki_frame.h"
+esp_err_t kobako_proc_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+#ifndef R5SIM_APP_SHIKI   // kobako_shiki_frame.c has the real ones
+void kobako_proc_end_turn(void){}
+bool kobako_proc_has_frame(void){return false;}
+bool kobako_proc_pending(void){return false;}
+bool kobako_proc_backdrop_pending(void){return false;}
+bool kobako_proc_is_image_mode(void){return false;}
+void kobako_proc_prepare_render(unsigned strip_rows){(void)strip_rows;}
+ksn_result kobako_proc_backdrop(void *o,uint16_t y,uint16_t rows,uint16_t *px){(void)o;(void)y;(void)rows;(void)px;return KSN_OK;}
+void kobako_proc_present_result(ksn_result r){(void)r;}
 #endif
-esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_grid_reset(void){}
-bool pocket_grid_pending(void){return false;}
-void pocket_grid_present_result(ksn_result r){(void)r;}
-void pocket_grid_source_invalidated(uint32_t id){(void)id;}
-esp_err_t pocket_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_video_reset(void){}
-bool pocket_video_pending(void){return false;}
-void pocket_video_present_result(ksn_result r){(void)r;}
-esp_err_t pocket_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_pixel_reset(void){}
-bool pocket_pixel_pending(void){return false;}
-void pocket_pixel_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_grid_reset(void){}
+bool kobako_grid_pending(void){return false;}
+void kobako_grid_present_result(ksn_result r){(void)r;}
+void kobako_grid_source_invalidated(uint32_t id){(void)id;}
+esp_err_t kobako_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_video_reset(void){}
+bool kobako_video_pending(void){return false;}
+void kobako_video_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_pixel_reset(void){}
+bool kobako_pixel_pending(void){return false;}
+void kobako_pixel_present_result(ksn_result r){(void)r;}
 
 #ifdef R5SIM_GUEST_ALLOC
-// The firmware guest's allocator (components/pocketjs_guest/src/guest.c,
+// The firmware guest's allocator (components/kobako_guest/src/guest.c,
 // -DR5SIM_GUEST_ALLOC=1): the R3 small-block cache over heap_caps, same
 // classes, block length read from the tlsf header. Without it the image runs
 // JS_NewRuntime's malloc -> tlsf + heap lock on every allocation, which was
 // 44% of a turn's instructions (docs/vm/qjs-observe.md sec.2) -- a cost the
 // device does not pay on a cache hit.
 #include "esp_heap_caps.h"
-#include "pocketjs/block_cache.h"
+#include "kobako/block_cache.h"
 #define R5_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 static block_cache_t r5_cache;
 static size_t r5_len(const void *p){ return *(const uint32_t *)((const char *)p-4)&~(uint32_t)3U; }
@@ -160,16 +160,16 @@ extern const char stress_js_end[] asm("_binary_stress_r5_js_end");
 #error "R5SIM_APP=derby and hud run the firmware's session: add -DR5SIM_DEVICE=1"
 #endif
 #if defined(R5SIM_APP_DERBY) || defined(R5SIM_APP_HUD)
-// pocket.input.keys as the firmware builds it (pocket_input.c, keymap.c,
+// kobako.input.keys as the firmware builds it (kobako_input.c, keymap.c,
 // keystate.c), its key edges fed here in place of the keyboard matrix, and
-// pocket_api.c's subscriptions verbatim (generated by CMakeLists.txt).
-#include "pocket_input.h"
-#include "pocket_api.h"
+// kobako_api.c's subscriptions verbatim (generated by CMakeLists.txt).
+#include "kobako_input.h"
+#include "kobako_api.h"
 #include "keymap.h"
 #include "board.h"
 #include "esp_log.h"
-#include "pocket_sub_impl.inc"
-bool pocket_text_active(void){return false;}
+#include "kobako_sub_impl.inc"
+bool kobako_text_active(void){return false;}
 static board_keyevent_t key_fifo[8];
 static unsigned key_n,key_at;
 bool board_key_event(board_keyevent_t *out){
@@ -188,7 +188,7 @@ static void key_tap(const char *name){key_edge(name,true);key_edge(name,false);}
 #endif
 #ifdef R5SIM_APP_DERBY
 #include "apps/apps.h"
-#include "pocket_app_load.h"
+#include "kobako_app_load.h"
 #include "app_registry.h"
 #endif
 
@@ -205,32 +205,32 @@ static JSRuntime *rt;
 static JSContext *ctx;
 #ifdef R5SIM_DEVICE
 // -DR5SIM_DEVICE=1: the session as the firmware builds it, through the same
-// component -- pocketjs_guest_create (allocator with the R3 block cache,
+// component -- kobako_guest_create (allocator with the R3 block cache,
 // memory limit, GC threshold, stack limit, hardened context, interrupt
-// handler), pocketjs_guest_eval, and per turn arm_turn()'s watchdog deadline
-// and job budget around pocketjs_guest_frame (main/app_session.c). With the
+// handler), kobako_guest_eval, and per turn arm_turn()'s watchdog deadline
+// and job budget around kobako_guest_frame (main/app_session.c). With the
 // firmware's helper-IRAM fragment linked (tools/r5sim/main/CMakeLists.txt).
-#include "pocketjs/guest.h"
-#include "pocketjs/guest_quickjs.h"
-#include "pocketjs/vm_sched.h"
+#include "kobako/guest.h"
+#include "kobako/guest_quickjs.h"
+#include "kobako/vm_sched.h"
 #include "esp_timer.h"
-static pocketjs_guest_t *guest;
+static kobako_guest_t *guest;
 static int64_t r5_deadline;
 static int r5_watchdog(void *o){(void)o;return esp_timer_get_time()>r5_deadline;}  // app_session.c interrupt()
 static vm_budget_t r5_budget;
 static void r5_arm_turn(void){                                                     // app_session.c arm_turn()
     r5_deadline=esp_timer_get_time()+250000;
     vm_budget_begin(&r5_budget,VM_TURN_BUDGET_US);
-    pocketjs_guest_budget(guest,&r5_budget);
-    pocketjs_guest_yield_enabled(guest,true);
+    kobako_guest_budget(guest,&r5_budget);
+    kobako_guest_yield_enabled(guest,true);
 }
 #endif
 #ifdef R5SIM_GC_TRACE
-bool pocket_proc_pending(void);
-void JS_PocketGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before, size_t *last_after);
-void JS_PocketGCTime(uint64_t *total, uint32_t *max_run);
+bool kobako_proc_pending(void);
+void JS_LeanGCStats(uint32_t *runs, uint64_t *freed, size_t *last_before, size_t *last_after);
+void JS_LeanGCTime(uint64_t *total, uint32_t *max_run);
 #include "esp_cpu.h"
-uint32_t pocket_gc_clock(void) { return esp_cpu_get_cycle_count(); }
+uint32_t lean_gc_clock(void) { return esp_cpu_get_cycle_count(); }
 #endif
 static uint16_t strip_pixels[240*8];
 static unsigned oom_lines, fail_lines;
@@ -299,7 +299,7 @@ static JSValue js_nop(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
 static void drain(void) {
     JSContext *c;
     while(JS_ExecutePendingJob(rt,&c)>0) {}
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
 }
 #ifdef R5SIM_MEMUSAGE
 static void memusage(const char *name) {
@@ -345,11 +345,11 @@ static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pi
     (void)o;(void)y;(void)rows;(void)pixels; return KSN_OK;
 }
 static bool present(void) {
-    if(!pocket_kasane_needs_present()) return true;
+    if(!kobako_kasane_needs_present()) return true;
     ksn_display_port port={.strip=get_strip,.present=send_strip,
                            .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
     ksn_render_stats stats;
-    ksn_result r=pocket_kasane_present(&port,&stats);
+    ksn_result r=kobako_kasane_present(&port,&stats);
 #ifdef R5SIM_GC_TRACE
     if(r!=KSN_OK)
         printf("R5SIM PRESENT_FAIL r=%u sys_free=%u sys_largest=%u\n",(unsigned)r,
@@ -362,12 +362,12 @@ static bool present(void) {
 #if defined(R5SIM_APP_DERBY)
 // tools/games/test_derby_host.c's PRELUDE without its checking wrappers: the
 // same store (1500 points, race 3), the same hardware seed (0x2545f491), a
-// silent audio, every capability present. pocket.time.now() is the clock
-// this file drives (__now); pocket.memory is the real one.
+// silent audio, every capability present. kobako.time.now() is the clock
+// this file drives (__now); kobako.memory is the real one.
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:3}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,"
+    "globalThis.kobako={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,"
     "derby:globalThis.derby,memory:globalThis.memory,time:{now:globalThis.__now},"
     "capabilities:{get:n=>({name:n,supported:true,available:true})},"
     "random:{seed:()=>625341585},"
@@ -379,7 +379,7 @@ static const char FS_STUB[]=
 // xorshift32-v1 seeded with a constant.
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};globalThis.__kv=null;"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
+    "globalThis.kobako={kasane:globalThis.kasane,input:globalThis.input,"
     "capabilities:{get:n=>({name:n,supported:true,available:true})},"
     "audio:{tone(s){return Promise.resolve()}},"
     "storage:{get(k){return Promise.resolve(__kv===null?null:{value:JSON.parse(__kv),revision:1})},"
@@ -388,16 +388,16 @@ static const char FS_STUB[]=
     "const n=()=>{x^=x<<13;x>>>=0;x^=x>>>17;x^=x<<5;return x>>>=0};"
     "return{nextUint32:n,nextFloat:()=>(n()>>>8)/16777216}}}};";
 #else
-// tools/test_stress_app.c's pocket.fs stub, without its fault-injection hooks.
+// tools/test_stress_app.c's kobako.fs stub, without its fault-injection hooks.
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,fs:{open:async function(){let n=0;"
+    "globalThis.kobako={kasane:globalThis.kasane,fs:{open:async function(){let n=0;"
     "return{read:async function(m){__readStarted();let c=++n>3?null:new Uint8Array(m);"
     "__readFinished();return c},close:function(){}}}},memory:globalThis.memory};";
 #endif
 
 #ifdef R5SIM_APP_DERBY
-// The wall clock pocket.time.now() reads: 33.3 ms a turn from 1 s, and 15 s
+// The wall clock kobako.time.now() reads: 33.3 ms a turn from 1 s, and 15 s
 // more at DERBY_DEMO_AT so the demo starts there instead of 450 turns of
 // paddock later (test_derby_host.c's jump_start).
 #define DERBY_DEMO_AT 91u
@@ -436,15 +436,15 @@ static void hud_bot(unsigned t) {
 // small-block cache counts every guest_malloc (a hit or a miss) whatever the
 // build, so reading its counters adds nothing to a turn. Frees are what is
 // left once the live block count (QuickJS's malloc_count) has moved.
-void pocketjs_guest_alloc_counts(const pocketjs_guest_t *guest,uint32_t *mallocs,uint32_t *kept);
-static uint32_t r5_mallocs(void){ uint32_t m=0,k=0; pocketjs_guest_alloc_counts(guest,&m,&k); return m; }
+void kobako_guest_alloc_counts(const kobako_guest_t *guest,uint32_t *mallocs,uint32_t *kept);
+static uint32_t r5_mallocs(void){ uint32_t m=0,k=0; kobako_guest_alloc_counts(guest,&m,&k); return m; }
 static int64_t r5_live(void){ JSMemoryUsage u; JS_ComputeMemoryUsage(rt,&u); return u.malloc_count; }
 #endif
 #ifdef R5SIM_APP_DERBY
 // Per scene: turns, their counts (sum, max) and guest allocations; and the
 // split of a turn: frame() (js, which includes the native calls it makes),
-// the Shiki draws inside it (shk: pocket_shiki_turn's total, the whole native
-// draw) and pocket_kasane_end_turn (end), with the Shiki draws a turn.
+// the Shiki draws inside it (shk: kobako_shiki_turn's total, the whole native
+// draw) and kobako_kasane_end_turn (end), with the Shiki draws a turn.
 // pat: LINE_PATTERN calls (the crowd's rows) inside the turn's Shiki draws,
 // as SHIKI_TURN's pat= on the device. The panning units are also filed a
 // second time under wide1/wide2/wide3 (the oval's WIDE 2 is the heavy one).
@@ -457,7 +457,7 @@ typedef struct { const char *name; unsigned n; uint64_t cc, max, allocs, js, shk
 } r5_scene;
 #ifdef R5SIM_DERBY_PROF
 extern uint32_t derby_prof_cy[12],derby_prof_shk[12],derby_prof_n[12],derby_prof_draws[12],derby_prof_eng[12];
-extern pocket_shiki_turn derby_prof_carry;
+extern kobako_shiki_turn derby_prof_carry;
 static uint32_t r5_pcy0[12],r5_pshk0[12],r5_pn0[12],r5_pdr0[12],r5_peng0[12];
 extern uint32_t derby_ser_cy[9];
 static uint32_t r5_ser0[9];
@@ -518,22 +518,22 @@ static void gcov_dump(void) {
 
 void app_main(void) {
 #ifdef R5SIM_APP_DERBY
-    app_registry_select("local.derby");   // pocket.app.load's chunk set, as app_session.c
+    app_registry_select("local.derby");   // kobako.app.load's chunk set, as app_session.c
 #endif
 #ifdef R5SIM_APP_SHIKI
     // The manifest names kasane.shiki: the session takes the Shiki heap before
-    // the guest (app_session.c), and pocket.kasane then has shiki.
+    // the guest (app_session.c), and kobako.kasane then has shiki.
     if(!shiki_heap_begin(0)){ printf("R5SIM shiki heap FAIL\n"); return; }
 #endif
 #if defined(R5SIM_DEVICE)
     {
-        pocketjs_guest_config_t gc;
-        pocketjs_guest_config_defaults(&gc);
+        kobako_guest_config_t gc;
+        kobako_guest_config_defaults(&gc);
         gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;  // app_session.c
-        if(pocketjs_guest_create(&gc,&guest)!=ESP_OK){ printf("R5SIM guest_create FAIL\n"); return; }
-        pocketjs_guest_set_watchdog(guest,r5_watchdog,NULL);
+        if(kobako_guest_create(&gc,&guest)!=ESP_OK){ printf("R5SIM guest_create FAIL\n"); return; }
+        kobako_guest_set_watchdog(guest,r5_watchdog,NULL);
         r5_deadline=esp_timer_get_time()+2000000;   // app_session.c: 2 s for the evaluation
-        ctx=pocketjs_guest_quickjs_context(guest);
+        ctx=kobako_guest_quickjs_context(guest);
         rt=JS_GetRuntime(ctx);
         printf("R5SIM device session\n");
     }
@@ -557,37 +557,37 @@ void app_main(void) {
     ctx=JS_NewContext(rt);
 #endif
     host_capabilities_clear();
-    pocket_kasane_install(ctx,NULL);
+    kobako_kasane_install(ctx,NULL);
     // Rendering only has to consume each submission; a 16x8 viewport keeps the
     // scalar renderer from filling the trace with pixels.
-    pocket_kasane_set_viewport(0,0,16,8);
-    pocket_memory_install(ctx,NULL);
+    kobako_kasane_set_viewport(0,0,16,8);
+    kobako_memory_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_nop,"readStarted",0));
     JS_SetPropertyStr(ctx,g,"__readFinished",JS_NewCFunction(ctx,js_nop,"readFinished",0));
 #if defined(R5SIM_APP_DERBY) || defined(R5SIM_APP_HUD)
-    pocket_input_install(ctx,NULL);
+    kobako_input_install(ctx,NULL);
 #endif
 #ifdef R5SIM_APP_DERBY
-    if(pocket_derby_install(ctx,NULL)!=ESP_OK||pocket_app_load_install(ctx)!=ESP_OK){ printf("R5SIM derby install FAIL\n"); return; }
+    if(kobako_derby_install(ctx,NULL)!=ESP_OK||kobako_app_load_install(ctx)!=ESP_OK){ printf("R5SIM derby install FAIL\n"); return; }
     JS_SetPropertyStr(ctx,g,"__now",JS_NewCFunction(ctx,js_now,"now",0));
 #endif
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
 #ifdef R5SIM_DEVICE
-    // pocketjs_guest_eval binds globalThis.frame and drains, as app_start_test.
-    bool ok=pocketjs_guest_eval(guest,stress_js_start,(size_t)(stress_js_end-stress_js_start-1),
+    // kobako_guest_eval binds globalThis.frame and drains, as app_start_test.
+    bool ok=kobako_guest_eval(guest,stress_js_start,(size_t)(stress_js_end-stress_js_start-1),
                                 R5SIM_APP_NAME)==ESP_OK;
 #ifdef R5SIM_MEMUSAGE
     memusage(R5SIM_APP_NAME);
 #endif
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
     ok=ok&&present();
     unsigned conts=0,frame_err=0;
-    pocketjs_guest_frame_t input={.struct_size=sizeof(input),.buttons=0,.analog=0x8080};
+    kobako_guest_frame_t input={.struct_size=sizeof(input),.buttons=0,.analog=0x8080};
 #else
     bool ok=eval(stress_js_start,(size_t)(stress_js_end-stress_js_start-1),R5SIM_APP_NAME)&&present();
-    // The device's arrangement (main/app_session.c, pocketjs_guest_create).
+    // The device's arrangement (main/app_session.c, kobako_guest_create).
     JS_SetMemoryLimit(rt,160*1024);
     JS_SetGCThreshold(rt,80*1024);
     JSValue frame=JS_GetPropertyStr(ctx,g,"frame");
@@ -616,7 +616,7 @@ void app_main(void) {
     // CCOUNT is their instruction count up to one constant -- read without
     // the -d trace (seconds instead of half an hour). Turns 61..120 as the
     // trace records use.
-    uint64_t r5_cc=0, r5_cc_max=0, r5_cc_end=0;   // r5_cc_end: pocket_kasane_end_turn's share
+    uint64_t r5_cc=0, r5_cc_max=0, r5_cc_end=0;   // r5_cc_end: kobako_kasane_end_turn's share
     unsigned r5_cc_n=0, r5_last=0;
 #ifdef R5SIM_DEVICE
     uint64_t r5_alloc=0, r5_alloc_max=0;
@@ -626,7 +626,7 @@ void app_main(void) {
     for(unsigned t=1;ok&&t<=R5SIM_FRAMES;t++) {
         r5_last=t;
 #if defined(R5SIM_APP_DERBY) || defined(R5SIM_APP_HUD)
-        // The keys of this turn, then pocket.input's pump (app_tick runs the
+        // The keys of this turn, then kobako.input's pump (app_tick runs the
         // pumps before frame()); both outside the count.
 #ifdef R5SIM_APP_HUD
         hud_bot(t);
@@ -635,7 +635,7 @@ void app_main(void) {
         if(t==DERBY_DEMO_AT) derby_now_ms+=15000;
         derby_nlines=0;
 #endif
-        pocket_input_pump(0);
+        kobako_input_pump(0);
 #endif
 #ifdef R5SIM_DEVICE
         const uint32_t m0=r5_mallocs();
@@ -658,22 +658,22 @@ void app_main(void) {
 #endif
         r5_arm_turn();
         r5_turn_begin(t);
-        if(pocketjs_guest_frame(guest,&input)!=ESP_OK) frame_err++;
+        if(kobako_guest_frame(guest,&input)!=ESP_OK) frame_err++;
         // A frame() cut by the 8 ms budget finishes in continuation turns on
         // the device's next ticks; here they stay inside this turn's marks so
         // a turn is a frame's whole JS. Counted, and normally 0 under QEMU.
-        while(pocketjs_guest_work_pending(guest)) { conts++; r5_arm_turn(); pocketjs_guest_continue(guest); }
+        while(kobako_guest_work_pending(guest)) { conts++; r5_arm_turn(); kobako_guest_continue(guest); }
         const uint32_t cc_js=esp_cpu_get_cycle_count();
 #ifdef R5SIM_APP_DERBY
-        pocket_shiki_turn r5_shk;
-        pocket_shiki_turn_take(&r5_shk);
+        kobako_shiki_turn r5_shk;
+        kobako_shiki_turn_take(&r5_shk);
 #ifdef R5SIM_DERBY_PROF
         r5_shk.draws+=derby_prof_carry.draws; r5_shk.total_cy+=derby_prof_carry.total_cy;
-        r5_shk.engine_cy+=derby_prof_carry.engine_cy; derby_prof_carry=(pocket_shiki_turn){0};
+        r5_shk.engine_cy+=derby_prof_carry.engine_cy; derby_prof_carry=(kobako_shiki_turn){0};
 #endif
         const uint32_t cc_end0=esp_cpu_get_cycle_count();
 #endif
-        pocket_kasane_end_turn();
+        kobako_kasane_end_turn();
         if(t>60) r5_cc_end+=esp_cpu_get_cycle_count()-cc_js;
 #ifdef R5SIM_APP_DERBY
         const uint32_t cc_end=esp_cpu_get_cycle_count()-cc_end0;
@@ -714,26 +714,26 @@ void app_main(void) {
         R5_CC_TAKE();
 #endif
 #if defined(R5SIM_FIT_LIMIT_KIB) && defined(R5SIM_DEVICE)
-        pocketjs_guest_fit_limit(guest,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        kobako_guest_fit_limit(guest,heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                                  (size_t)R5SIM_FIT_LIMIT_KIB*1024u);
 #endif
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
-        if(canary.count) pocket_memory_oom(&canary,(uint64_t)t*33333u);
+        if(canary.count) kobako_memory_oom(&canary,(uint64_t)t*33333u);
         size_t used=0,limit=0;
         JS_GetMemoryCounters(rt,&used,&limit);
 #ifdef R5SIM_GC_TRACE
         {
             static uint32_t runs_seen; static uint64_t freed_seen;
             uint32_t runs; uint64_t freed; size_t lb,la;
-            JS_PocketGCStats(&runs,&freed,&lb,&la);
+            JS_LeanGCStats(&runs,&freed,&lb,&la);
             static uint64_t ticks_seen; uint64_t ticks; uint32_t tmax;
-            JS_PocketGCTime(&ticks,&tmax);
+            JS_LeanGCTime(&ticks,&tmax);
             unsigned ck_n; size_t ck_b; uint32_t ck_t,ck_r;
-            pocketjs_guest_chunk_stats(guest,&ck_n,&ck_b,&ck_t,&ck_r);
+            kobako_guest_chunk_stats(guest,&ck_n,&ck_b,&ck_t,&ck_r);
 #ifdef R5SIM_CHUNK_TRACE
-            { void pocketjs_guest_chunk_trace(pocketjs_guest_t *, unsigned);
-              if(canary.count||t%50==0) pocketjs_guest_chunk_trace(guest,t); }
+            { void kobako_guest_chunk_trace(kobako_guest_t *, unsigned);
+              if(canary.count||t%50==0) kobako_guest_chunk_trace(guest,t); }
 #endif
             const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
             printf("R5SIM GC t=%u used=%u lim=%u thr=%u gc=%u(+%u) freed=+%u last=%u->%u "
@@ -744,8 +744,8 @@ void app_main(void) {
                    (unsigned)canary.count,(unsigned)canary.quota_count,(unsigned)canary.allocator_count,
                    (unsigned)canary.first_req,(unsigned)heap_caps_get_free_size(caps),
                    (unsigned)heap_caps_get_largest_free_block(caps),
-                   (int)pocket_proc_pending(),(int)pocket_kasane_needs_present(),
-                   (int)pocket_kasane_has_submission(),(unsigned)(ticks-ticks_seen),(unsigned)tmax,
+                   (int)kobako_proc_pending(),(int)kobako_kasane_needs_present(),
+                   (int)kobako_kasane_has_submission(),(unsigned)(ticks-ticks_seen),(unsigned)tmax,
                    ck_n,(unsigned)ck_b,(unsigned)ck_t,(unsigned)ck_r);
             runs_seen=runs; freed_seen=freed; ticks_seen=ticks;
         }
@@ -762,20 +762,20 @@ void app_main(void) {
 #endif
 #ifdef R5SIM_APP_DERBY
         // DERBY loads its plans only above a native floor it reads from
-        // pocket.memory (internalFreeBytes): the device samples the heap at
+        // kobako.memory (internalFreeBytes): the device samples the heap at
         // every turn's start, so here too (QEMU's heap: far more free).
-        pocket_memory_sample((uint64_t)t*33333u,used,limit,true,
+        kobako_memory_sample((uint64_t)t*33333u,used,limit,true,
                              heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
 #else
-        pocket_memory_sample((uint64_t)t*33333u,used,limit,false,0,0);
+        kobako_memory_sample((uint64_t)t*33333u,used,limit,false,0,0);
 #endif
-        pocket_memory_pump(false);
+        kobako_memory_pump(false);
 #ifdef R5SIM_FULL_RENDER
         // The whole panel from frame 59, to observe the render itself
         // (docs/vm/qjs-observe.md sec.21) without paying for it in the trace
         // of the first 58 frames.
-        if(t==59) pocket_kasane_set_viewport(0,0,240,135);
+        if(t==59) kobako_kasane_set_viewport(0,0,240,135);
 #endif
         r5_render_begin(t);
         if(!present()) bad_present++;
@@ -788,9 +788,9 @@ void app_main(void) {
 #endif
     }
 #ifdef R5SIM_DEVICE
-    pocketjs_guest_stats_t st={0};
+    kobako_guest_stats_t st={0};
     st.struct_size=sizeof(st);
-    pocketjs_guest_stats(guest,&st);
+    kobako_guest_stats(guest,&st);
     printf("R5SIM device frames=%u frame_errors=%u yields=%u continuations=%u(%u) heap_used=%u\n",
            (unsigned)st.frames,(unsigned)st.frame_errors,(unsigned)st.yields,
            (unsigned)st.continuations,conts,(unsigned)st.heap_used);

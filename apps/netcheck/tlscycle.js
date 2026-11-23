@@ -3,7 +3,7 @@
 // defragmentation the app can perform itself; if it does not, the fragmentation
 // outlives the radio and only a connection that is held can avoid it.
 (function(){
-  var N = pocket.net, T = pocket.time;
+  var N = kobako.net, T = kobako.time;
   function say(t){ console.log('CYC '+t); }
   var URL = 'https://example.com/';
   function round(w, i, n){
@@ -21,7 +21,7 @@
       throw e;
     });
   }
-  pocket.app.start({
+  kobako.app.start({
     start: function(){
       var first;
       return acquire(10).then(function(w){

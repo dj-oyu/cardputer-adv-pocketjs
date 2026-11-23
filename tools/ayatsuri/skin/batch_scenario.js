@@ -19,13 +19,13 @@ function batchSetup(){
   }
   const back=[-35,-20,35,-20,35,20,-35,20];
   for(let v=0;v<4;v++){BV[(v+6)*6]=back[v*2];BV[(v+6)*6+1]=back[v*2+1];BV[(v+6)*6+5]=1;BW[(v+6)*4]=65535;}
-  M=pocket.ayatsuri.modelOpen(fixture);A=M.instance();B=M.instance();A.evaluate(BC,BL);B.evaluate(BC,BL);
+  M=kobako.ayatsuri.modelOpen(fixture);A=M.instance();B=M.instance();A.evaluate(BC,BL);B.evaluate(BC,BL);
   A.stats(BS);check(BS.skinWorkBytes===0);
 }
 function batchPose(frame){
   P0[1]=8*Math.sin(frame*.07);P0[2]=12*Math.sin(frame*.13);P0[4]=.7*Math.sin(frame*.11);
   P1[0]=7*Math.sin(frame*.09);P1[1]=3*Math.cos(frame*.08);P1[2]=9*Math.cos(frame*.12);P1[5]=.15*Math.sin(frame*.06);
-  pocket.ayatsuri.compose(P0,null,child0);pocket.ayatsuri.compose(P1,null,child1);
+  kobako.ayatsuri.compose(P0,null,child0);kobako.ayatsuri.compose(P1,null,child1);
 }
 function batchEvaluate(frame){batchPose(frame);A.evaluateSkins(BC,BL,BD,BG,BI,BV,BJ,BW);}
 function batchDraw(){P.beginMeshFrame(17,2048,200000,1);A.submit();P.commit();}
@@ -65,7 +65,7 @@ function batchInvalid(){
   const bad=BC.slice();bad[6]=1000;rejects(()=>A.evaluateSkins(bad,BL,BD,BG,BI,BV,BJ,BW));rejects(()=>A.submit());
   A.evaluateSkins(BC,BL,BD,BG,BI,BV,BJ,BW);
   for(const bytes of [holes,sided]){
-    const model=pocket.ayatsuri.modelOpen(bytes),actor=model.instance();actor.evaluate(BC,BL);
+    const model=kobako.ayatsuri.modelOpen(bytes),actor=model.instance();actor.evaluate(BC,BL);
     actor.stats(BS);check(BS.skinWorkBytes===0);rejects(()=>actor.evaluateSkins(BC,BL,BD,BG,BI,BV,BJ,BW));
     actor.stats(BS);check(BS.evaluated&&BS.skinWorkBytes===0);actor.dispose();model.dispose();
   }
@@ -94,7 +94,7 @@ function batchRelease(){
   A=B=M=null;fixture=holes=sided=null;BV.fill(NaN);BG.fill(NaN);BW.fill(0);
 }
 function batchLimits(){
-  const model=pocket.ayatsuri.modelOpen(limitFixture),actor=model.instance();actor.evaluate(BC,BL);
+  const model=kobako.ayatsuri.modelOpen(limitFixture),actor=model.instance();actor.evaluate(BC,BL);
   const desc=new Uint16Array([1,32,127,2,32,127]),mat=new Float32Array(12*257),vertices=new Float32Array(64*6);
   const indices=new Uint16Array(64*4),weights=new Uint16Array(64*4);ident(mat);
   for(let v=0;v<64;v++){vertices[v*6]=20*Math.cos((v%32)*2*Math.PI/32);vertices[v*6+1]=20*Math.sin((v%32)*2*Math.PI/32);vertices[v*6+5]=1;weights[v*4]=65535;}
@@ -106,13 +106,13 @@ function batchLimits(){
   desc[5]=129;limitRejects(()=>actor.evaluateSkins(BC,BL,desc,mat,mat,vertices,indices,weights));
   actor.stats(BS);check(BS.skinWorkBytes===batchNearLimit&&BS.evaluated);
   actor.dispose();model.dispose();limitFixture=null;
-  const small=pocket.ayatsuri.modelOpen(cycleFixture),a=small.instance();a.evaluate(BC,BL);
+  const small=kobako.ayatsuri.modelOpen(cycleFixture),a=small.instance();a.evaluate(BC,BL);
   const jointLimit=new Uint16Array([1,6,129,2,4,128]);
   limitRejects(()=>a.evaluateSkins(BC,BL,jointLimit,mat,mat,vertices.subarray(0,60),indices.subarray(0,40),weights.subarray(0,40)));
   a.stats(BS);check(BS.evaluated&&BS.skinWorkBytes===0);a.dispose();small.dispose();
 }
 function batchCycle(){
-  const model=pocket.ayatsuri.modelOpen(cycleFixture),actor=model.instance();ident(BG);ident(BI);
+  const model=kobako.ayatsuri.modelOpen(cycleFixture),actor=model.instance();ident(BG);ident(BI);
   for(let v=0;v<10;v++){BV[v*6]=v<6?(v%3)*30-30:(v%2?35:-35);BV[v*6+1]=v%2?15:-15;BV[v*6+2]=BV[v*6+3]=BV[v*6+4]=0;BV[v*6+5]=1;for(let j=0;j<4;j++)BJ[v*4+j]=BW[v*4+j]=0;BW[v*4]=65535;}
   actor.evaluateSkins(BC,BL,BD,BG,BI,BV,BJ,BW);actor.cycle=model;model.cycle=actor;model.dispose();globalThis.cycleBatch=model;
 }

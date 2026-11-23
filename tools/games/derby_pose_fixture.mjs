@@ -12,7 +12,7 @@ export function makePanFixture(watch, view, sceneSource, panSource, assert) {
     let cx=0, slow=0, scene='race', disp=0, t=0, tier=1;
     let F,rs,lz,zo,photoX,ro,ph=Array(8).fill(0),vr=null,von=11;
     const KN=[[0,0,0,0,12,10],[0,0,0,0,12,10],[0,0,0,0,12,10],[0,0,0,0,0,1]];
-    const live={}, pocket={derby:{view(){},ser(){}}}, dr=()=>{};
+    const live={}, kobako={derby:{view(){},ser(){}}}, dr=()=>{};
     let drawn=[],feedDrawn=[],inFeed=false,feedCalls=0,projectionCalls=0;
     const rin=(l,X,S,Y,a)=>(inFeed?feedDrawn:drawn).push({l,X,S,Y,a});
     ` +

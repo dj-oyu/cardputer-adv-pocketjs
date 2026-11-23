@@ -85,9 +85,9 @@ PSRAM 帯域やキャッシュミスの類の候補は本調査に無い。
 `setReveal`、`setText`）。実機診断は 300 tick で、`KASANE_TICK` が commands=9〜12 を出す
 （`design-device-probe.md:23`）。
 
-ネイティブ側の入口は `main/pocket/pocket_kasane.c` で、1 呼び出しあたり:
+ネイティブ側の入口は `main/kobako/kobako_kasane.c` で、1 呼び出しあたり:
 
-- `mutate()` が `JS_GetOpaque` で ticket を検証（`pocket_kasane.c:673-686`）
+- `mutate()` が `JS_GetOpaque` で ticket を検証（`kobako_kasane.c:673-686`）
 - `parse_draw_base` がプロパティ 3 つ（`bounds`/`clip`/`opacity`）を `JS_GetPropertyStr` で取り、
   `bounds` は配列 4 要素を `JS_GetPropertyUint32` で読んで各々 `JS_ToFloat64`（`:207-275`）
 - 種別ごとに `color`/`font`/`text`/`capacity`/`from`/`to`/`axis`/`dither` を追加で取得（`:291-333,447-478`）
@@ -99,7 +99,7 @@ PSRAM 帯域やキャッシュミスの類の候補は本調査に無い。
 
 ### 既に済んでいること
 
-- ticket/layer/世代の検証は opaque 値 1 個の比較で、1 呼び出しあたり分岐数本（`pocket_kasane.c:673-686`）。
+- ticket/layer/世代の検証は opaque 値 1 個の比較で、1 呼び出しあたり分岐数本（`kobako_kasane.c:673-686`）。
 - 文字列は上限（128 UTF-16 単位）を先に見てから QuickJS に確保させる（`:436-445`）。
 - REPLACE/PATCH の rollback は例外 1 つで `ksn_view_cancel` に落ちる（`:681-685`）。
 
@@ -107,7 +107,7 @@ PSRAM 帯域やキャッシュミスの類の候補は本調査に無い。
 
 | 候補 | 大きさ | リスク | 撤退線 | 実機なしの検証 |
 | --- | --- | --- | --- | --- |
-| **1a. プロパティ読みのまとめ取り**（1 プリミティブで 8〜12 回の getter を、既知の形のオブジェクトなら 1 回の走査に） | 小。`turn_ms` 3.21 ms の数 % 以下。**per-call 14〜25 µs の native 側は変わらない** | 低（受け付ける形を変えない） | 無し（既存の `test_pocket_kasane.c` と JS 診断で同値） | `tools/build_kasane_test.sh` のホスト JS テストで戻り値・例外コードを比較。数は「JS→native 呼び出しごとの getter 回数」をホストで数えて契約にする（時間には翻訳しない、`pie-simd.md:524`） |
+| **1a. プロパティ読みのまとめ取り**（1 プリミティブで 8〜12 回の getter を、既知の形のオブジェクトなら 1 回の走査に） | 小。`turn_ms` 3.21 ms の数 % 以下。**per-call 14〜25 µs の native 側は変わらない** | 低（受け付ける形を変えない） | 無し（既存の `test_kobako_kasane.c` と JS 診断で同値） | `tools/build_kasane_test.sh` のホスト JS テストで戻り値・例外コードを比較。数は「JS→native 呼び出しごとの getter 回数」をホストで数えて契約にする（時間には翻訳しない、`pie-simd.md:524`） |
 | **1b. `core_begin` の bank 全コピーをやめる**（PATCH でも毎回 3,072+1,024 B をコピーし、REPLACE では追加で 2,560+896 B を memset。`ksn_core.c:113-126`） | 中。4,096 B ≒ 1,000〜2,000 cycles ≒ **4〜8 µs/フレーム**（推定）。14 µs/サイクルの実測の主因と考えるのが自然 | 中（表示 bank と候補 bank の独立性という契約に関わる。`ksn_core.h:59-63`） | 無し（コピーを遅延するなら bank 分離 tests が判定） | `tools/kasane_contract/test_core.c` と `test_runtime.c`（bank 独立性・reset のアドレス保持）。時間は実機の `KASANE_PAINT turn_ms`（性質上 0.1% 台） |
 
 **この面はレバーではない。** 実機で `turn_ms` 3.21 ms に対し `render_ms` 12.59 ms、

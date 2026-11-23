@@ -1,7 +1,7 @@
 """G12: does fragmentation make allocations fail on the device?
 
 The device half of the L3/L4 decision (docs/vm/backlog.md, L3/L4 item 1;
-docs/vm/vm-L3-results.md). Needs a CONFIG_POCKET_VM_OOMPROBE=y build: without
+docs/vm/vm-L3-results.md). Needs a CONFIG_QJS_LEAN_OOMPROBE=y build: without
 it there is no "G12 SESSION" line and the run stops at the first app, which
 is the honest failure -- a probe-off build cannot see a refusal, so a clean
 report from it would say nothing.
@@ -170,7 +170,7 @@ def main():
             # first -- usually the boot overlay, before this script listens --
             # so the per-session line is what proves the build.
             if not results and "G12 SESSION" not in text:
-                raise RuntimeError("no 'G12 SESSION': not a CONFIG_POCKET_VM_OOMPROBE build")
+                raise RuntimeError("no 'G12 SESSION': not a CONFIG_QJS_LEAN_OOMPROBE build")
             results.append(summarize(name, text))
             port.write(b"q")
             pump(port, 3, log, "HOME_READY")

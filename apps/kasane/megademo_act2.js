@@ -130,7 +130,7 @@ function zen(z, t) {
 }
 // CORE: an icosahedral shell opens round a pulsing core (cube and
 // octahedron); grey flashes, scan noise and a dolly zoom build to 100
-// (docs/apps/megademo-story.md). pocket.shapes projects (pr), the plans
+// (docs/apps/megademo-story.md). kobako.shapes projects (pr), the plans
 // draw lines. Icosahedron: vertices as sign/golden-ratio codes (i = -1,
 // p/q = +/-phi), faces as hex vertex triples; Q: the cube's and
 // octahedron's quads (cube corner i is the bits of i, octahedron corner i
@@ -169,7 +169,7 @@ const FC = new Float32Array(425), QV = FC.subarray(260, 344), SV = FC.subarray(3
 }
 // The projection: yaw (Ycy, Ysy), pitch (Pcp, Psp), depth Dd, roll (Rc,
 // Rs). pr() puts it, with the yaw (cw, sa) and screen scale K at depth
-// Dd, as pocket.shapes' matrix into WQ (x Rc - w Rs, x Rs + w Rc over
+// Dd, as kobako.shapes' matrix into WQ (x Rc - w Rs, x Rs + w Rc over
 // Dd + q, round (120, 67)), and projects n points of WM from i into WP.
 let Ycy, Ysy, Pcp, Psp, Dd, Rc = 1, Rs = 0;
 function pr(cw, sa, K, i, n) {

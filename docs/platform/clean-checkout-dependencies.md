@@ -35,7 +35,7 @@ Other clean-checkout inputs:
 
 | Input | Status and consumer |
 | --- | --- |
-| QuickJS / PocketJS | The QuickJS sources are the components/quickjs-ng/quickjs-ng submodule above; the ESP-IDF wrapper (components/quickjs-ng/CMakeLists.txt, port/) and components/pocketjs_guest stay tracked here. No historical PocketJS Rust/UI archive is required by current root CMake. |
+| QuickJS / PocketJS | The QuickJS sources are the components/quickjs-ng/quickjs-ng submodule above; the ESP-IDF wrapper (components/quickjs-ng/CMakeLists.txt, port/) and components/kobako_guest stay tracked here. No historical PocketJS Rust/UI archive is required by current root CMake. |
 | dependencies.lock | Tracked historical component-manager metadata still contains old .cache/PocketJS entries. It is not the source dependency authority. Broker builds use IDF_COMPONENT_MANAGER=0; standard builds resolve the current tracked IDF manifests. This PR does not regenerate that metadata. |
 | ESP-IDF / tools | External ESP-IDF **6.0.1**, its Python/CMake/Ninja/Xtensa tools; no SDK is bundled. |
 | Node | External Node 16+ for tracked DERBY @plan generators. Those generators need no node_modules install. |

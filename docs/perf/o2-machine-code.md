@@ -4,7 +4,7 @@
 
 > 60 fps への道のり全体の要約は 60fps-roadmap.md にある。
 
-[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12 で、描画と転送の毎フレームの道（`ksn_font.c`・`ksn_render.c`・`ksn_core.c`・`pocket_kasane.c`・`pocket_shiki_frame.c`）を `-O2` にし、`render_group` だけ `-Os` に戻した。この文書は「なぜ速くなったか」を、逆アセンブルと XTPERF の実測で分けたもの。数字の区分は 3 つ: **実測**（実機の XTPERF）、**コード**（逆アセンブルで数えた事実）、**推定**。
+[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12 で、描画と転送の毎フレームの道（`ksn_font.c`・`ksn_render.c`・`ksn_core.c`・`kobako_kasane.c`・`kobako_shiki_frame.c`）を `-O2` にし、`render_group` だけ `-Os` に戻した。この文書は「なぜ速くなったか」を、逆アセンブルと XTPERF の実測で分けたもの。数字の区分は 3 つ: **実測**（実機の XTPERF）、**コード**（逆アセンブルで数えた事実）、**推定**。
 
 - 逆アセンブルは host の Xtensa GCC 15.2（`-mlongcalls -ffunction-sections -fdata-sections -fstrict-volatile-bitfields`、契約テストのスタブのヘッダ）で単体コンパイルしたもの。**ファームの ELF ではない**（形は同じはずだが、行数・番地は目安）。
 - 実測は、出荷版と、5 ファイルだけ `-Os` に戻した版の 2 ビルド（`59319d2` / `896e9fc`、計測後に revert 済み）。`render_rects_body` を囲み、その中の `display->present` を引いた区間で、PM0 = cycles、PM1 = 1 窓（30 フレーム）に 1 イベントで巡回（[ray-stall-census.md](ray-stall-census.md) と同じ方法）。記録は [logs/o2-xtperf-20261105.txt](logs/o2-xtperf-20261105.txt)。
@@ -98,7 +98,7 @@ objdump を読み、関数ごとに `entry a1, N` からフレームを取り、
 
 ```bash
 python tools/frame_lint.py build_api/esp-idf/main --far-only     # main/ の関数だけ
-python tools/frame_lint.py build_api/cardputer_pocketjs.elf --top 20   # ELF 全体（ESP-IDF・QuickJS も）
+python tools/frame_lint.py build_api/cardputer_kobako.elf --top 20   # ELF 全体（ESP-IDF・QuickJS も）
 ```
 
 出荷版のファーム（`e318f9f`、broker の `fl-build`）で `main/` に遠いアクセスが残る関数は 16 本、合計 726 か所（余分な命令 1,484、静的な箇所数）。それを `tools/frame_lint_baseline.txt` に書いた。
@@ -106,11 +106,11 @@ python tools/frame_lint.py build_api/cardputer_pocketjs.elf --top 20   # ELF 全
 | 関数 | 遠い読み書き | フレーム | 走る頻度 |
 | --- | ---: | ---: | --- |
 | `ksn_shiki_jit_scalar` | 169 | 1,600 B | JIT のコンパイラ。plan ごとに 1 回（冷たい） |
-| `run_impl`（`pocket_grid.c`） | 98 | 1,168 B | grid の run ごと（熱い可能性） |
-| `js_run`（`pocket_shiki.c`） | 95 | 1,616 B | Shiki の draw の呼び出しごと（熱い可能性） |
-| `js_list`・`js_open`・`js_write_text`・`js_copy`・`js_rename`・`js_file_read`（`pocket_fs.c`） | 12〜84 | 1.1〜1.5 KB | ファイル操作ごと（冷たい） |
+| `run_impl`（`kobako_grid.c`） | 98 | 1,168 B | grid の run ごと（熱い可能性） |
+| `js_run`（`kobako_shiki.c`） | 95 | 1,616 B | Shiki の draw の呼び出しごと（熱い可能性） |
+| `js_list`・`js_open`・`js_write_text`・`js_copy`・`js_rename`・`js_file_read`（`kobako_fs.c`） | 12〜84 | 1.1〜1.5 KB | ファイル操作ごと（冷たい） |
 | `flower_draw`（`flower.c`） | 53 | 1,632 B | FLOWER の行ごと（熱い） |
-| `measure_impl`・`register_resize_source_impl`・`register_resize_impl`（`pocket_grid.c`） | 10〜37 | 1.3〜2.0 KB | 登録・計測ごと |
+| `measure_impl`・`register_resize_source_impl`・`register_resize_impl`（`kobako_grid.c`） | 10〜37 | 1.3〜2.0 KB | 登録・計測ごと |
 | `perform_accel_foc`（BMI270） | 15 | 1,600 B | 較正（冷たい） |
 | `ksn_pixel_span_eval`・`file_picker_next_path` | 4・1 | 3,904・2,464 B | |
 

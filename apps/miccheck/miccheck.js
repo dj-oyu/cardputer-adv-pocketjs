@@ -1,10 +1,10 @@
-// pocket.audio.capture on the board. Every line is one claim; README.md reads
+// kobako.audio.capture on the board. Every line is one claim; README.md reads
 // them. Three recordings in one session, because whether a second one works is
 // the open question and only an app can answer it.
 (function(){
   function say(t){ console.log('MICCHK '+t); }
   function no(w){ return function(e){ say(w+' '+e.code); }; }
-  var c = pocket.capabilities.get('audio.capture');
+  var c = kobako.capabilities.get('audio.capture');
   var rec=null;
   // clip is counted, not inferred from peak: a peak of 32767 could be one
   // sample or a thousand, and how often it hits the rail is the question.
@@ -26,14 +26,14 @@
     return step();
   }
   function take(tag){
-    return pocket.audio.capture.open({sampleRate:c.limits.sampleRate,channels:1})
+    return kobako.audio.capture.open({sampleRate:c.limits.sampleRate,channels:1})
       .then(function(r){ rec=r; say(tag+' open'); return read(tag); }, no(tag));
   }
-  pocket.app.start({
+  kobako.app.start({
     start:function(){
       say('CAP '+c.supported+'/'+c.available+' '+c.reason);
       say('LIM '+c.limits.sampleRate+'/'+c.limits.channels+'/'+c.limits.maxReadFrames);
-      return pocket.audio.capture.open({sampleRate:16000})
+      return kobako.audio.capture.open({sampleRate:16000})
         .then(function(){ say('RATE16 opened'); }, no('RATE16'))
         .then(function(){ return take('REC1'); })
         .then(function(){ return take('REC2'); })

@@ -129,7 +129,7 @@ jobs:
           . "$IDF_PATH/export.sh"
           # PR #133 makes Shiki diagnostics opt-in; this profile exercises them.
           mkdir -p build_q7
-          printf 'CONFIG_POCKET_SHIKI_DEBUG=y\n' > build_q7/shiki-debug.defaults
+          printf 'CONFIG_KOBAKO_SHIKI_DEBUG=y\n' > build_q7/shiki-debug.defaults
           idf.py -B build_q7 -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;build_q7/shiki-debug.defaults' -D SDKCONFIG=build_q7/sdkconfig -D KASANE_MESH_PREPARED_PROTOTYPE=ON -D KASANE_MESH_Q7_CERTIFIED_PROTOTYPE=ON -D KASANE_MESH_Q7_BENCH_PREFLIGHT=ON -D KASANE_MESH_EDGE4_PROTOTYPE=OFF build
           test '${{ steps.source.outputs.commit }}' = "$SOURCE_HEAD"
           printf '%s\n' '${{ steps.source.outputs.commit }}' > build_q7/source-head.txt
@@ -137,11 +137,11 @@ jobs:
             grep -qx "$key:BOOL=ON" build_q7/CMakeCache.txt
           done
           grep -qx 'KASANE_MESH_EDGE4_PROTOTYPE:BOOL=OFF' build_q7/CMakeCache.txt
-          xtensa-esp32s3-elf-nm -S build_q7/cardputer_pocketjs.elf > build_q7/symbols.txt
+          xtensa-esp32s3-elf-nm -S build_q7/cardputer_kobako.elf > build_q7/symbols.txt
           grep 'ksn_mesh_q7_render' build_q7/symbols.txt
-          grep 'pocket_shiki_debug_reset' build_q7/symbols.txt
-          grep -qx 'CONFIG_POCKET_SHIKI_DEBUG=y' build_q7/sdkconfig
-          sha256sum main/ui/kasane/ksn_mesh_q7_certified.c build_q7/cardputer_pocketjs.bin build_q7/cardputer_pocketjs.elf > build_q7/SHA256SUMS
+          grep 'kobako_shiki_debug_reset' build_q7/symbols.txt
+          grep -qx 'CONFIG_KOBAKO_SHIKI_DEBUG=y' build_q7/sdkconfig
+          sha256sum main/ui/kasane/ksn_mesh_q7_certified.c build_q7/cardputer_kobako.bin build_q7/cardputer_kobako.elf > build_q7/SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -153,6 +153,6 @@ jobs:
             build_q7/compile_commands.json
             build_q7/symbols.txt
             build_q7/SHA256SUMS
-            build_q7/cardputer_pocketjs.map
+            build_q7/cardputer_kobako.map
             build_q7/**/*.su
           retention-days: 14

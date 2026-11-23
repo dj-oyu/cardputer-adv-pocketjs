@@ -1,11 +1,11 @@
-// pocket.input.keys diagnostic. See README.md.
+// kobako.input.keys diagnostic. See README.md.
 (function () {
-  const V = pocket.kasane, K = pocket.input.keys;
+  const V = kobako.kasane, K = kobako.input.keys;
   const N = '`1234567890-=qwertyuiop[]\\asdfghjkl;\'zxcvbnm,./'.split('')
     .concat(['del', 'tab', 'enter', 'space', 'fn', 'shift', 'ctrl', 'opt', 'alt']);
   const INK = 0x101820ff, SUN = 0xfffb96ff, MINT = 0x05ffa1ff, CYAN = 0x01cdfeff;
   let p = 0, r = 0, most = 0, f = 0, row = [];
-  const c = pocket.capabilities.get('input.keys');
+  const c = kobako.capabilities.get('input.keys');
   console.log('KEYTEST_READY cap=' + c.supported + '/' + c.available + ' keys=' + N.length);
 
   function scene(tx) {

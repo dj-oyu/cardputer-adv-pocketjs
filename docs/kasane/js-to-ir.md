@@ -17,9 +17,9 @@
 
 **JS → IR のコンパイラ・アセンブラ・逆アセンブラはリポジトリに無い。** あるのは 1 命令 1 文字のテキストを配列にする 10 行の `prog()` で、DERBY（[derby_prog.js](../../apps/derby/derby_prog.js)）、MEGADEMO（[proc_megademo.js](../../apps/kasane/proc_megademo.js)、`U` の短縮つき）、BIG WAVE（[big_wave.js](../../apps/bigwave/big_wave.js)）がそれぞれ写しを持つ。文字 → op の表引きと `$n` の置換だけで、検査は native の登録に任せている。[grid_fold.js](../../apps/kasane/grid_fold.js) は symbolic な式 builder だが、対象は型付きメモリ IR（`ksn_proc_grid`）で、この float VM ではない。
 
-**登録時コンパイラ（D3a）はソース言語を持たない。** 入力は数値の行（`[op,dst,a,b,value,color]`）で、`pocket_shiki_frame.c` の `register_impl()` が読んで `ksn_proc_plan_prepare()`（ksn_proc_plan.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_plan.c`））に渡す。prepare がするのは、IR を plan の `code[64]` へ写す、ksn_proc_analysis.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_analysis.c`） で有界 CFG・def-use・生存・失敗条件を取る、同じ基本ブロックで依存のある隣り合った算術 2 命令に融合の印（`fused_at`）を付ける、の 3 つだけ。命令の移動・削除・レジスタの割り当ては無い（「No code is moved or elided」）。PIE の選択は型付き Q14 点列（`affineQ14Points`）と grid の IR に対してで、この float IR には掛からない。
+**登録時コンパイラ（D3a）はソース言語を持たない。** 入力は数値の行（`[op,dst,a,b,value,color]`）で、`kobako_shiki_frame.c` の `register_impl()` が読んで `ksn_proc_plan_prepare()`（ksn_proc_plan.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_plan.c`））に渡す。prepare がするのは、IR を plan の `code[64]` へ写す、ksn_proc_analysis.c（v2.0 で削除。`427b308` の `main/ui/kasane/ksn_proc_analysis.c`） で有界 CFG・def-use・生存・失敗条件を取る、同じ基本ブロックで依存のある隣り合った算術 2 命令に融合の印（`fused_at`）を付ける、の 3 つだけ。命令の移動・削除・レジスタの割り当ては無い（「No code is moved or elided」）。PIE の選択は型付き Q14 点列（`affineQ14Points`）と grid の IR に対してで、この float IR には掛からない。
 
-**命令セット**（[ksn_shiki_frame.h](../../main/ui/kasane/ksn_shiki_frame.h)、15 op）: `SET INPUT ADD MUL SIN REPEAT END MOVE PLOT LINE REPEAT_REG BREAK_IF_GT PLOT_COLOR_REG LINE_COLOR_REG CUBIC`。除算・減算・比較分岐・sqrt・floor・レジスタ間の MOV は無い（減算は `×−1` と加算、コピーは `+0`）。`CUBIC` は r0..r7 の 4 点を読む（dst=0 固定、分割 1..64）。制約: レジスタ 16、入力 8、1 plan 64 命令、ループの深さ 8、`REPEAT` 1..255（0 は検証で拒否）、`REPEAT_REG` 0..255 の整数（0 は本体を飛ばす）、1 draw の step 10,000・線分 1,024・ラスタ 8,192、座標 −480..720。`draw()` のたびに `begin` がプログラムを VM へ写して検証し直し、**レジスタは毎回 +0 から始まる**（`pocket_shiki_frame.c` は状態を持ち越す `begin_state` を使わない）。算術の結果が非有限、`REPEAT_REG`・色レジスタが範囲外の整数でない、座標が範囲外、のどれでも draw 全体が失敗する。
+**命令セット**（[ksn_shiki_frame.h](../../main/ui/kasane/ksn_shiki_frame.h)、15 op）: `SET INPUT ADD MUL SIN REPEAT END MOVE PLOT LINE REPEAT_REG BREAK_IF_GT PLOT_COLOR_REG LINE_COLOR_REG CUBIC`。除算・減算・比較分岐・sqrt・floor・レジスタ間の MOV は無い（減算は `×−1` と加算、コピーは `+0`）。`CUBIC` は r0..r7 の 4 点を読む（dst=0 固定、分割 1..64）。制約: レジスタ 16、入力 8、1 plan 64 命令、ループの深さ 8、`REPEAT` 1..255（0 は検証で拒否）、`REPEAT_REG` 0..255 の整数（0 は本体を飛ばす）、1 draw の step 10,000・線分 1,024・ラスタ 8,192、座標 −480..720。`draw()` のたびに `begin` がプログラムを VM へ写して検証し直し、**レジスタは毎回 +0 から始まる**（`kobako_shiki_frame.c` は状態を持ち越す `begin_state` を使わない）。算術の結果が非有限、`REPEAT_REG`・色レジスタが範囲外の整数でない、座標が範囲外、のどれでも draw 全体が失敗する。
 
 **メモリ**: `ksn_proc_inst` 12 B、`ksn_proc_plan` **872 B**（`code[64]` 768 B ＋ `fused_at[64]` ＋点列の係数）。Xtensa の `-Os` オブジェクトの `nm -S` で 0x368 = 872 B、m32 host でも同じ（ビルド確認）。plan は `calloc(1, sizeof *plan)` なので、1 命令の plan（DERBY の点列用 `S0,0` が 7 本）も 872 B を取る。VM（996 B）とフレームは共有で、plan の数に比例しない。（その後 plan-sized-alloc.md で、`register()` の plan を 40 + 12n B にした。）
 
@@ -143,19 +143,19 @@ repeat (96) {
 
 ### A. plan を命令数ぶんだけ確保する（API 不変）
 
-- `ksn_proc_plan` の `code[]` を末尾へ移し（`fused_at` はその前）、`pocket_shiki_frame.c` だけが `offsetof(ksn_proc_plan, code) + count × 12` を確保する。prepare の失敗時の `memset(plan, 0, sizeof *plan)` を、確保した長さを越えない形に直す。プローブ（`ksn_proc_limits_device_probe.c` など）と試験は値で持つ 872 B の plan のままでよい。
+- `ksn_proc_plan` の `code[]` を末尾へ移し（`fused_at` はその前）、`kobako_shiki_frame.c` だけが `offsetof(ksn_proc_plan, code) + count × 12` を確保する。prepare の失敗時の `memset(plan, 0, sizeof *plan)` を、確保した長さを越えない形に直す。プローブ（`ksn_proc_limits_device_probe.c` など）と試験は値で持つ 872 B の plan のままでよい。
 - DERBY: 25 本・686 命令で 21,800 → 10,832 B（**−10,968 B**）、段階 3 は 30 本・916 命令で 26,160 → 14,112 B（**−12,048 B**）。推定（`sizeof` × 個数、TLSF の 1 ブロックの付加は今と同数）。
 - 危険: 同じ 872 B の塊が再利用されていたのが、大きさの違う塊になる。断片化で最大連続が下がりうる（実機で `largest free` を見る）。
-- 変更: `ksn_proc_plan.h/.c`、`pocket_shiki_frame.c`、`tools/kasane_contract/test_proc_plan.c`（構造体のコピーの契約は値で持つ plan だけに残す）。工数 0.5〜1 日＋実機測定（推定）。
+- 変更: `ksn_proc_plan.h/.c`、`kobako_shiki_frame.c`、`tools/kasane_contract/test_proc_plan.c`（構造体のコピーの契約は値で持つ plan だけに残す）。工数 0.5〜1 日＋実機測定（推定）。
 
 ### B. 組み込みアプリの plan を flash に置き、id で登録する
 
 - **ビルド**: `tools/kasane_ir` が `plans/*.kjs` をコンパイルして C の表（`static const ksn_proc_inst ...[]`、`$n` の欄は「pc・欄・引数番号」の patch 表、名前 `"derby.rail"`）を生成する。Node は IDF のビルドに無いので、生成した `.c` をコミットし、host の検査で `.kjs` との一致を見る（`check_flash.py` と同じ流儀）。DERBY 13 本で Xtensa の `.rodata` 5,740 B＋名前 145 B（ビルド確認）。アプリの JS からは plan の文字列 約 3.2 KB が消える。
-- **API**: `pocket.kasane.procedural.register('derby.rail', args?, points?)`。第 1 引数が配列なら今の経路（互換）、文字列なら組み込み表を引く。未知の名前は `INVALID_ARGUMENT`。`args` は 8 個以下の数で、patch 表の数と合わなければ拒否。feature-test 用に capability の `limits` か `builtinPlans: true` を出す（実装した面だけ true、CLAUDE.md の規則）。
+- **API**: `kobako.kasane.procedural.register('derby.rail', args?, points?)`。第 1 引数が配列なら今の経路（互換）、文字列なら組み込み表を引く。未知の名前は `INVALID_ARGUMENT`。`args` は 8 個以下の数で、patch 表の数と合わなければ拒否。feature-test 用に capability の `limits` か `builtinPlans: true` を出す（実装した面だけ true、CLAUDE.md の規則）。
 - **native の RAM**: slot が「表への参照・引数 8 個（32 B）・融合の印」を持つ。融合の印は IR から決まるので、ビルド時に表へ入れれば RAM に要らない。1 本 約 48〜72 B → DERBY 25 本で約 1.2〜1.8 KB（**−20 KB 前後**、段階 3 で約 −24 KB、推定）。VM は draw のたびに flash から `owned_code` へ写し（今も plan から写している）、そこで patch を当ててから今までどおり検証する。`ksn_proc_plan_run()` の「VM のコードが plan と同じか」の `memcmp` は、patch 後のコードとは一致しないので、plan の識別子（ポインタと世代）で比べる形に変える。
 - **ゲスト**: §2 の最後の行（−7.1 / −8.1 KB、host）と、登録の一時的なピーク（最大 10 KB）が消える。
-- **host 契約試験への影響**: `run_pocket_proc_qjs.py`（登録の引数の型と誤りの文言）、`run_pocket_proc_limits_qjs.py`（32 本の上限は slot 数なので不変）、`test_proc_plan.c`（plan の所有と構造体のコピー）、`tools/games/test_derby_host.c`（表をリンクする）、`run_megademo_app_host.py`（配列の経路のまま、不変）。追加: 未知の名前、引数の数の不一致、patch 後の検証失敗、同じ名前の多重登録。
-- **変更するファイル**: `main/pocket/pocket_shiki_frame.c`、`main/ui/kasane/ksn_proc_plan.h/.c`、`ksn_shiki_frame.c/.h`（patch つきの begin）、生成物 `main/ui/kasane/ksn_rom_plans.c/.h`（`main/CMakeLists.txt`）、`docs/api/common-api.md`、`apps/derby/derby_prog.js`・`derby_view.js`（`spec()` が名前と引数を返す）、上の試験。
+- **host 契約試験への影響**: `run_kobako_proc_qjs.py`（登録の引数の型と誤りの文言）、`run_kobako_proc_limits_qjs.py`（32 本の上限は slot 数なので不変）、`test_proc_plan.c`（plan の所有と構造体のコピー）、`tools/games/test_derby_host.c`（表をリンクする）、`run_megademo_app_host.py`（配列の経路のまま、不変）。追加: 未知の名前、引数の数の不一致、patch 後の検証失敗、同じ名前の多重登録。
+- **変更するファイル**: `main/kobako/kobako_shiki_frame.c`、`main/ui/kasane/ksn_proc_plan.h/.c`、`ksn_shiki_frame.c/.h`（patch つきの begin）、生成物 `main/ui/kasane/ksn_rom_plans.c/.h`（`main/CMakeLists.txt`）、`docs/api/common-api.md`、`apps/derby/derby_prog.js`・`derby_view.js`（`spec()` が名前と引数を返す）、上の試験。
 - **工数**: A を済ませた上で 2〜3 日（生成器と同期検査 0.5、native 1〜1.5、試験 0.5、DERBY の移行 0.5）＋実機測定 0.5 日（推定）。
 - **制約**: flash の plan は組み込みアプリにしか使えない（SD やエディタから入れたプログラムは配列の経路のまま）。plan を直すにはファームの再ビルドが要る。
 
@@ -234,7 +234,7 @@ const T = {
 - **DERBY 全体**（`python3 tools/games/run_derby.py` と `--m32`）: 全 13 回（8 回の台本、デモ 3 本の手での再現、種の 2 回）の着順・完走時刻・デモ・種・オッズ・全画素ハッシュ（8 本）が、現行 e9b88bc と**全桁一致**（ASan と m32 の両方、結果の行 429 行が同一）。循環コレクタだけが解放したバイト数は全 40 場面で 0。
 - **移行の検査**（`python3 tools/kasane_ir/check_lowered.py`）: 変換後のコピーと、同じコピーの `derby_prog.js` を手書き IR の詰めた形に差し替えたものを、LIGHT・MID・HEAVY の全台本で比べた。フレームごとの描画の統計と着順が同一（`LOWERED PASS`）、VM の実行ステップは −0.6〜−1.1%、登録 20 巡でも循環コレクタだけのゴミは 0 B。
 - **大きさ**（host m32）: 評価後のゲスト 106,404 → 106,424 B（+20 B）、評価のピーク 120,816 → 120,836 B（+20 B）。コンパイルした IR は詰めると 1,109 B で、手書き（1,082 B）より 27 B 長い（命令は少ないのに長い理由は調べていない）。**plan を `function` の形で書いてグローバルの `const` にすると、評価のピークが +1,492 B**（評価後は同じ。トップレベルの束縛 14 個の解析用の構造が評価の終わりまで残るためと推測、確かめていない）。DERBY をメソッドの形にしたのはこのため。
-- **ESP-IDF のビルド**（`build_irjs`）: 通る。埋め込みシンボル 46 個（`_binary_*`）とチャンク表（`app_chunks.c`、パスのコメントを除く）が e9b88bc のビルドと同一。ビルドのログに `Compiling the @plan functions of .../apps/derby/derby_prog.js`。PATH に node が無いと configure が止まり（`The app chunks local.derby:prog have @plan functions ... needs Node 16 or later on PATH (no node on PATH)`）、`-DPOCKET_NODE` に v14 を返すものを渡しても `... is v14.21.3` で止まる（確認済み）。
+- **ESP-IDF のビルド**（`build_irjs`）: 通る。埋め込みシンボル 46 個（`_binary_*`）とチャンク表（`app_chunks.c`、パスのコメントを除く）が e9b88bc のビルドと同一。ビルドのログに `Compiling the @plan functions of .../apps/derby/derby_prog.js`。PATH に node が無いと configure が止まり（`The app chunks local.derby:prog have @plan functions ... needs Node 16 or later on PATH (no node on PATH)`）、`-DKOBAKO_NODE` に v14 を返すものを渡しても `... is v14.21.3` で止まる（確認済み）。
 
 **実機**（2026-09-30、COM3。基準は同じ日に焼いた e9b88bc の image。各 1〜2 回）
 
@@ -257,7 +257,7 @@ const T = {
 ### 5.4 ビルドへの組み込み
 
 - **どこで変換するか**: configure 時に [`make_app_chunks.py`](../../tools/make_app_chunks.py) が、ファイルに `/** ... @plan` を含むチャンクを見つけ、そのチャンクの埋め込み元を `build_*/generated/apps/<アプリのディレクトリ>/<同じファイル名>` に差し替えた `APP_CHUNK_FILES` と、元と生成物の組 `APP_CHUNK_LOWER`、チャンク名 `APP_CHUNK_PLANS` を書く。変換そのものは `main/CMakeLists.txt` のビルド時の `add_custom_command`（`node tools/kasane_ir/lower_plans.mjs --file 元 生成物`、`DEPENDS` に元と `lower_plans/plan_js/kir/pack.mjs`）。生成物は元と同じ base name なので、埋め込みのシンボル（`_binary_derby_prog_js_start`）とチャンク表は変わらない。チャンクを編集すれば再 configure なしで変換し直す。チャンクに**初めて** `@plan` を書いたときだけ `reconfigure` が要る。アプリに `@plan` があって `@planDecoder` が 1 つでなければ configure が止まる。
-- **Node**（`@plan` を含むチャンクがあるときだけ）: `find_program(POCKET_NODE node)` と `node --version` を確かめ、無いか 16 未満なら、チャンク名、Node 16 以上を PATH に入れること、見つけた版、docs/platform/build-environment.md を出して止める（見つけた値はキャッシュから消し、次の configure で探し直す）。**最小は Node 16**: 変換器が使う一番新しい構文は `??=`（Node 15）で、Node 14 は構文エラーで止まり、16・18・26 は同じ生成物をバイト単位で出した（host、`npx node@N`）。`@plan` が無ければ Node は探さない。見送った案: 変換器を Python に移す（約 1,000 行）、生成物をコミットして host で同期を見る。
+- **Node**（`@plan` を含むチャンクがあるときだけ）: `find_program(KOBAKO_NODE node)` と `node --version` を確かめ、無いか 16 未満なら、チャンク名、Node 16 以上を PATH に入れること、見つけた版、docs/platform/build-environment.md を出して止める（見つけた値はキャッシュから消し、次の configure で探し直す）。**最小は Node 16**: 変換器が使う一番新しい構文は `??=`（Node 15）で、Node 14 は構文エラーで止まり、16・18・26 は同じ生成物をバイト単位で出した（host、`npx node@N`）。`@plan` が無ければ Node は探さない。見送った案: 変換器を Python に移す（約 1,000 行）、生成物をコミットして host で同期を見る。
 - **生成物はコミットしない**: `apps/derby/derby_prog.js` は `@plan` の原本だけで、出荷形は各ビルドディレクトリの `generated/` にだけある（e9b88bc までコミットしていた `pack.mjs` の生成物と、その原本 `derby_prog_text.js` は無くなった。原本の手書き IR は `tools/kasane_ir/derby_hand_ir.js` に凍結して等価性の検査に使う）。
 - **入口のファイル**: `EMBED_TXTFILES` で埋め込む入口（`derby_watch.js`）には plan を書けない（変換しない）。書くなら `DERBY_WATCH_SOURCE` と同じく生成物のパスへ差し替える変更が要る。
 - **host のツールも同じ変換を通す**: `tools/games/test_derby_host.c` は `DERBY_APP_DIR`（入口とチャンク表の場所、既定 `apps/derby`）を読み、`tools/games/run_derby.py` の `lower()` が `lower_plans.mjs` で `.cache/derby_host/lowered/apps/derby` を作ってそこを渡す。`check_equivalence.py`（捕獲）、`derby_heap.py`（`lowered` の行が増えた）、`check_lowered.py` も `lower()` を通したコピーを走らせる。`tools/games/bgcost`・`pancost`、`apps/heapprobe/derby_v0` は凍結したコピーなので変えていない。

@@ -204,7 +204,7 @@ static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
 }
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
 /* The same, looking only at entries [first, end): the caller knows no entry
- * outside them touches rows y..y+height-1 (pocket_proc's per-band ranges,
+ * outside them touches rows y..y+height-1 (kobako_proc's per-band ranges,
  * docs/platform/lcd-dma-driver.md 9.5). first must start an entry. The
  * pixels are those of ksn_proc_render_band. end must also fall on a logical
  * entry boundary; native packet payload words are never separate entries. */

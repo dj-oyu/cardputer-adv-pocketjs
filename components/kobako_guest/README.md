@@ -1,0 +1,17 @@
+# kobako_guest
+
+Caller-driven QuickJS guest for ESP-IDF.
+
+- Public headers: `kobako/guest.h`, `kobako/guest_quickjs.h`
+- Targets: ESP32-P4 and ESP32-S3
+- Dependency: `espressif/quickjs-ng` 0.14.0
+- Ownership: one caller-selected owner task invokes every API except
+  `kobako_guest_interrupt`, which is safe to call from a stopping task
+
+The component creates no FreeRTOS task and mounts no PocketJS capability by
+itself. `kobako_guest_frame` calls `globalThis.frame` once and drains the
+pending job queue. An explicit `globalThis.frame = null` selects event-driven
+mode: each host turn still drains jobs but skips the JS frame call and argument
+allocation. A missing frame is still rejected. The QuickJS header is a
+version-pinned extension surface;
+ordinary firmware includes only `guest.h`.

@@ -27,7 +27,7 @@ delete-global-JSON TypeError could not delete property
 isFrozen-Array.prototype ok true
 isFrozen-Math ok true
 shadow-toString ok mine
-shadow-name ok PocketError
+shadow-name ok KobakoError
 own-write ok 5
 user-freeze-throws TypeError 'a' is read-only
 user-proto-mutable ok 5

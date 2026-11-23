@@ -1,9 +1,9 @@
 // VM_PROBE L0 contention conditions (spec sec.5), evaluated after a workload.
 // globalThis.VMC is the mask: 1 UI, 2 audio, 4 Wi-Fi. Reasons: README.md.
-// The UI load is a Kasane scene since CP24-25 deleted pocket.ui (2026-09-23).
+// The UI load is a Kasane scene since CP24-25 deleted kobako.ui (2026-09-23).
 (function () {
   var m = globalThis.VMC | 0, f = globalThis.frame, log = console.log;
-  var P = pocket, t = null;
+  var P = kobako, t = null;
   if (m & 1) {
     var st = {n: 0}, V = P.kasane, tt;
     V.replace(function (tx) {

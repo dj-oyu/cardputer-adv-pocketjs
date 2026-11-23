@@ -170,7 +170,7 @@ bool srcstore_save(unsigned slot, const char *text, size_t len) {
 // Same record shape as a slot's, with the owning slot appended and a magic of
 // its own so that a draft can never be mistaken for a source record (or the
 // other way round, if the two regions were ever to meet). The region sits at
-// SRCSTORE_DRAFT_BASE, past pocket.fs -- see the note in srcstore.h.
+// SRCSTORE_DRAFT_BASE, past kobako.fs -- see the note in srcstore.h.
 #define DRAFT_MAGIC 0x31445253u   // "SRD1"
 
 typedef struct {

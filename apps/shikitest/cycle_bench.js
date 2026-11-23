@@ -3,7 +3,7 @@
 // so a case runs only every other frame: the frame between lets the last
 // picture's transfer finish before the next measurement starts.
 'use strict';
-const D = pocket.shikiDebug, V = pocket.kasane, total = D.benchCount();
+const D = kobako.shikiDebug, V = kobako.kasane, total = D.benchCount();
 const INK = 0x101820ff, SUN = 0xfffb96ff, MINT = 0x05ffa1ff, DIM = 0x2a3a4aff;
 const BAR = [8, 72, 232, 84];
 let i = 0, f = 0, done = false, count, bar, note;

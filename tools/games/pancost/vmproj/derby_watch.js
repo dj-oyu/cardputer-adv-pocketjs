@@ -43,7 +43,7 @@
       ' M9,7,5 S7,' + HY + ' A9,9,7 R$0 S6,.3 S8,0 A8,8,12 R$1 N7,6 M7,7,13 A7,7,8 p11,7,9 A8,8,10 A6,6,14 M11,11,4 A11,11,15 E' +
       ' S7,-50 M7,7,5 A9,9,7 E A0,0,1 A2,2,3 E'
   };
-  const V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
+  const V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
   H.beginFrame(0);
   const res = H.resource(), P = {post: H.register(prog(SRC.post)), stripe: H.register(prog(SRC.stripe)),
     bay1: H.register(prog(SRC.bay, [1, 1, 150])), bay32: H.register(prog(SRC.bay, [4, 8, 150])),

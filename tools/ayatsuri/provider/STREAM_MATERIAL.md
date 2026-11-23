@@ -17,7 +17,7 @@ to overwrite either arena. A promoted old payload may be reclaimed only once
 the prior READY is no longer borrowed; successful unbind/reset ends actor borrows.
 Raw native pointers and generation checks are not authentication or source hashes.
 
-`pocket_kasane_stream_actor_bind_material` copies trusted backend callbacks into
+`kobako_kasane_stream_actor_bind_material` copies trusted backend callbacks into
 the APP-bound registration. The backend receives the exact snapshot and payload
 selected by the frame owner, for both preflight and each absolute-y band. It must
 preflight the whole frame before first submission, fill every output pixel,
@@ -51,7 +51,7 @@ not draw placeholder opaque geometry underneath the same material geometry.
 the retained full-screen graph reference across 1/2/4/8-row calls and checks
 clipped nonlinear local-coordinate alpha, alias rejection, package binding and
 fragment/span overflow. Windows O0/O2 passed. `test_stream_display.py --sanitize`
-also links the actual pocket/Kasane actor with this backend: distinct immutable
+also links the actual kobako/Kasane actor with this backend: distinct immutable
 driver payloads, clipped graph triangles, old-material redraw after failed drain,
 successful joint promotion and wrong-binding rejection before any send. These
 are public synthetic fixtures, not a restored-model appearance result.

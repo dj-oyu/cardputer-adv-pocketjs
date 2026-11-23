@@ -8,7 +8,7 @@ typedef struct {
     ksn_cache *cache;
     ksn_core_animation_block *animations;
     ksn_app_lease app;
-    /* The APP owner's control state (pocket_kasane.c's kasane_state): inside
+    /* The APP owner's control state (kobako_kasane.c's kasane_state): inside
      * this block when the block was created for the APP, else its own calloc. */
     void *tail;
     uint32_t tail_capacity;

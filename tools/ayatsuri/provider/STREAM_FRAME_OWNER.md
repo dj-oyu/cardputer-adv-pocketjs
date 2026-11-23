@@ -80,7 +80,7 @@ placeholder materials; this ownership test does not extend that result to new
 controls or real materials. A real material/alpha lane must be admitted, frozen
 and preflighted atomically with its opaque snapshot under the authoritative frame
 owner, including clipping/interpolation and overflow policy. Merely accepting a
-material callback or token is insufficient. The default pocket/Kasane owner must
+material callback or token is insufficient. The default kobako/Kasane owner must
 remain authoritative when the adapter is connected. Physical memory fit, task
 high-water marks, LCD/DMA lifetime and target-model FPS require broker builds and
 device validation; none is claimed here.

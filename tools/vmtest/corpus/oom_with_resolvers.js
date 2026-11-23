@@ -10,7 +10,7 @@
 // vmrun-skip-variants: asan-alloca o2-alloca asan-alloca-keepsrc o2-alloca-keepsrc -- no frame segment on these builds, so the allocation numbers differ
 // vmrun-keepsrc-flags: --fail-alloc 1370
 // vmrun-rom-keepsrc-flags: --fail-alloc 932
-// 1370 -> 1369 with CONFIG_POCKET_VM_STRIP_FN_SOURCE: 1 function source copy fewer before the target (allocator traces aligned, docs/vm/vm-L2-results.md sec.6). The numbers below are the -keepsrc ones.
+// 1370 -> 1369 with QJS_LEAN_STRIP_FN_SOURCE: 1 function source copy fewer before the target (allocator traces aligned, docs/vm/vm-L2-results.md sec.6). The numbers below are the -keepsrc ones.        
 // Regression for upstream quickjs-ng 49131a6315 ("Fix reference count bug in
 // Promise.withResolvers"). JS_DefinePropertyValue consumes its value even when
 // it fails, but js_promise_withResolvers only cleared its local after a

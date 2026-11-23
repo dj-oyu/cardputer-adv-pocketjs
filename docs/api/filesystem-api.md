@@ -1,12 +1,12 @@
 # ファイルシステムAPI仕様
 
-[共通API](common-api.md)7節（`pocket.fs`）を具体化する正規仕様。**`app:`/`assets:`/`sd:`の3ボリュームとも実装済み**（`main/pocket/pocket_fs.c`、`sd_media.c`、`sd_path.c`、`sd_picker.c`）。公開名は `pocket.fs` に統一し、初稿の `pocket.files` は採用しなかった。現行srcstore（`pocket.workspace`のバックエンド）はこの`pocket.fs`とは別の保存領域。未実装・未決の残件は[docs/api/backlog.md](backlog.md)を参照。
+[共通API](common-api.md)7節（`kobako.fs`）を具体化する正規仕様。**`app:`/`assets:`/`sd:`の3ボリュームとも実装済み**（`main/kobako/kobako_fs.c`、`sd_media.c`、`sd_path.c`、`sd_picker.c`）。公開名は `kobako.fs` に統一し、初稿の `kobako.files` は採用しなかった。現行srcstore（`kobako.workspace`のバックエンド）はこの`kobako.fs`とは別の保存領域。未実装・未決の残件は[docs/api/backlog.md](backlog.md)を参照。
 
 ## 1. 役割と境界
 
-- `pocket.storage`: ペットの状態や設定など、小さなJSON値の保存。
-- `pocket.fs`: ファイル・ディレクトリ、逐次読書き、メディア、ログ、素材の管理。
-- `pocket.workspace`: ソース作品のID・名前・版・教材コピー・実行の管理。内部ファイルの配置は公開しない。
+- `kobako.storage`: ペットの状態や設定など、小さなJSON値の保存。
+- `kobako.fs`: ファイル・ディレクトリ、逐次読書き、メディア、ログ、素材の管理。
+- `kobako.workspace`: ソース作品のID・名前・版・教材コピー・実行の管理。内部ファイルの配置は公開しない。
 
 どれもアプリIDとセッションに所有者を持つ。FSを使って別アプリのKV、教材の原本、workspaceの管理情報へ迂回アクセスできないようにする。ネイティブアプリ・プレイヤー・PC転送も同じホストのアクセス検査と媒体管理を利用する。
 
@@ -28,12 +28,12 @@
 
 ## 3. 共通契約と媒体情報
 
-全ての待ちを伴う関数はPromise。共通のOptions、CancelToken、PocketError、Subscriptionは[共通API](common-api.md)に従う。同期なのはキャッシュ取得のvolumesとハンドルの状態取得／closeだけ。
+全ての待ちを伴う関数はPromise。共通のOptions、CancelToken、KobakoError、Subscriptionは[共通API](common-api.md)に従う。同期なのはキャッシュ取得のvolumesとハンドルの状態取得／closeだけ。
 
 ```ts
 type FsOptions = Options;
-pocket.fs.volumes(): VolumeInfo[];
-pocket.fs.onVolumeChange(fn:(volume:VolumeInfo)=>void):Subscription;
+kobako.fs.volumes(): VolumeInfo[];
+kobako.fs.onVolumeChange(fn:(volume:VolumeInfo)=>void):Subscription;
 type VolumeInfo = {
   id: "app"|"assets"|"sd";
   state: "ready"|"absent"|"unmounted"|"error";
@@ -48,11 +48,11 @@ type VolumeInfo = {
     replace:boolean;atomicReplace:boolean;crashSafeReplace:boolean;
     append:boolean;rename:boolean};
 };
-pocket.fs.space(path:string,options?:FsOptions):Promise<VolumeInfo>;
-pocket.fs.requestFolder(volumeId:"sd",options?:FsOptions):Promise<string|null>;
-pocket.fs.pickFile(volumeId:"sd",
+kobako.fs.space(path:string,options?:FsOptions):Promise<VolumeInfo>;
+kobako.fs.requestFolder(volumeId:"sd",options?:FsOptions):Promise<string|null>;
+kobako.fs.pickFile(volumeId:"sd",
   options?:FsOptions&{extensions?:string[]}):Promise<string|null>;
-pocket.fs.nextFile(path:string,
+kobako.fs.nextFile(path:string,
   options?:{extensions?:string[];wrap?:boolean}):Promise<string|null>;
 ```
 
@@ -95,14 +95,14 @@ type Entry = {
   sizeBytes:number|null; modifiedUnixMs:number|null;
   revision:string; accessible:boolean;
 };
-pocket.fs.stat(path:string,options?:FsOptions):Promise<Entry>;
-pocket.fs.list(path:string,options?:FsOptions & {
+kobako.fs.stat(path:string,options?:FsOptions):Promise<Entry>;
+kobako.fs.list(path:string,options?:FsOptions & {
   limit?:number; cursor?:string;
 }):Promise<{entries:Entry[];nextCursor:string|null}>;
-pocket.fs.mkdir(path:string,options?:FsOptions & {recursive?:boolean}):Promise<void>;
-pocket.fs.remove(path:string,options?:FsOptions & {ifRevision?:string}):Promise<void>;
-pocket.fs.rename(from:string,to:string,options?:FsOptions & {ifRevision?:string}):Promise<void>;
-pocket.fs.copy(from:string,to:string,options?:FsOptions):Promise<Entry>;
+kobako.fs.mkdir(path:string,options?:FsOptions & {recursive?:boolean}):Promise<void>;
+kobako.fs.remove(path:string,options?:FsOptions & {ifRevision?:string}):Promise<void>;
+kobako.fs.rename(from:string,to:string,options?:FsOptions & {ifRevision?:string}):Promise<void>;
+kobako.fs.copy(from:string,to:string,options?:FsOptions):Promise<Entry>;
 ```
 
 statの未存在はNOT_FOUND。ディレクトリのsizeはnull。時刻未同期・媒体に値がない場合のmodifiedUnixMsもnull。revisionは内容hashではなくホストの不透明な版トークン。同一マウント世代・ホスト経由の変更に対して有効で、再起動後の比較用途には使わない。外部からの同時更新を検出できないバックエンドは共有書込を禁止する。将来USB mass storageを有効にするときはホストFSをアンマウントして所有権を切り替える。
@@ -120,7 +120,7 @@ copyはファイルだけで、上書きしない。別volumeも許可するが�
 ## 5. ファイルハンドル
 
 ```ts
-pocket.fs.open(path:string,options:FsOptions & {
+kobako.fs.open(path:string,options:FsOptions & {
   mode:"read"|"create"|"replace"|"append";
   ifRevision?:string;
   durability?:"synced"|"crash-safe";
@@ -180,8 +180,8 @@ PC由来の一般的なSDファイルシステムにrenameがあるだけでcras
 ## 7. 小さいテキスト用の便利関数
 
 ```ts
-pocket.fs.readText(path:string,options:FsOptions & {maxBytes:number}):Promise<string>;
-pocket.fs.writeText(path:string,text:string,options?:FsOptions & {
+kobako.fs.readText(path:string,options:FsOptions & {maxBytes:number}):Promise<string>;
+kobako.fs.writeText(path:string,text:string,options?:FsOptions & {
   mode?:"create"|"replace";
   ifRevision?:string;
   durability?:"synced"|"crash-safe";
@@ -192,7 +192,7 @@ readTextは最大8192bytes、maxBytes必須。途中で上限超過した場合�
 
 ```js
 // 提案APIの例。空ファイルも正常に保存・読込できる。
-const fs = pocket.fs;
+const fs = kobako.fs;
 await fs.mkdir('app:/notes');
 const saved = await fs.writeText('app:/notes/旅.txt', '海を見た。', {mode: 'create'});
 await fs.writeText(saved.path, '海と波を見た。', {
@@ -227,11 +227,11 @@ PC転送はcreate/replaceの一時版へ分割writeし、長さ・hash・対応�
 
 導入は5段階で計画した: (1) volume／path／所有者／世代／errorの定義とassetsの読取経路、(2) SD read-only、(3) appの永続バックエンド（create/replace/commit）、(4) SDのmkdir/copy/rename/remove/append、(5) workspace・プレイヤー・PC bridgeの接続。(1)〜(4)はSDのcopy以外実装済み、(5)も接続済み（common-api.md 7節・9節・13節）。未実装・未決の残件は[docs/api/backlog.md](backlog.md)に集約した。
 
-**実機検証の到達点（2026-09-09時点の記録）。** 実機で動いたのは**ドライバ**（マウント・アンマウント・ルート列挙・作成/書込/削除）と、2026-09-08時点の `stat`/`list` まで。**その後に足した面は一度も実機で走っていない**——picker、open、書込、commit、mkdir/remove/rename、volumes/space、pump、nativeのranged read。ホスト側で検査できるのは認可規則だけ（`tools/test_sd.c`）で、残りはカードが要る。`apps/pocketfs/README.md` にカードと人が要る5手順を書いた。
+**実機検証の到達点（2026-09-09時点の記録）。** 実機で動いたのは**ドライバ**（マウント・アンマウント・ルート列挙・作成/書込/削除）と、2026-09-08時点の `stat`/`list` まで。**その後に足した面は一度も実機で走っていない**——picker、open、書込、commit、mkdir/remove/rename、volumes/space、pump、nativeのranged read。ホスト側で検査できるのは認可規則だけ（`tools/test_sd.c`）で、残りはカードが要る。`apps/kobakofs/README.md` にカードと人が要る5手順を書いた。
 
-**400kHzが決めること。** バス帯域は約50,000バイト/秒。24kHzモノラルPCM16は48,000バイト/秒なので、**カードからの実時間ストリーミングは成立しない**（Opusなら約1/30で余裕がある）。2,048バイトの1回読みは約41msで、これは呼んだフレームの中で消える時間である。以上は**計算であって実測ではない**——この機体でカード読み出しを計時した者はまだいない。速度を上げるのは編集ではなく測定で、`main/pocket/sd_media.c` の `max_freq_khz` に理由を書いた。
+**400kHzが決めること。** バス帯域は約50,000バイト/秒。24kHzモノラルPCM16は48,000バイト/秒なので、**カードからの実時間ストリーミングは成立しない**（Opusなら約1/30で余裕がある）。2,048バイトの1回読みは約41msで、これは呼んだフレームの中で消える時間である。以上は**計算であって実測ではない**——この機体でカード読み出しを計時した者はまだいない。速度を上げるのは編集ではなく測定で、`main/kobako/sd_media.c` の `max_freq_khz` に理由を書いた。
 
-**`onVolumeChange` は配信される（2026-09-09）。** sd:の状態は許可の瞬間と抜去の観測時に動くが、その2箇所はどちらもネイティブのfs呼び出しの内側で、そこからゲストのcallbackを回すと、いま処理中のハンドルをlistenerが閉じられてしまう。そこで配信は `pocket_fs_pump()`（`app_tick()` から毎フレーム）へ寄せた:状態が最後に通知した値と違えば1回だけ配る。**1フレーム内で動いて戻った変化は通知しない**——§3が状態を観測値と定めている以上、誰も観測していない。picker表示中はゲストがtickされないので、許可は**人が選んだ次のフレーム**、すなわちアプリが最初に行動できるフレームで届く。
+**`onVolumeChange` は配信される（2026-09-09）。** sd:の状態は許可の瞬間と抜去の観測時に動くが、その2箇所はどちらもネイティブのfs呼び出しの内側で、そこからゲストのcallbackを回すと、いま処理中のハンドルをlistenerが閉じられてしまう。そこで配信は `kobako_fs_pump()`（`app_tick()` から毎フレーム）へ寄せた:状態が最後に通知した値と違えば1回だけ配る。**1フレーム内で動いて戻った変化は通知しない**——§3が状態を観測値と定めている以上、誰も観測していない。picker表示中はゲストがtickされないので、許可は**人が選んだ次のフレーム**、すなわちアプリが最初に行動できるフレームで届く。
 
 **進捗（2026-09-08）。** 1と2は完了。3のうちappのcreate/replace/commit・空ファイル・quotaは動作（電源断復旧は未検証）。4のSDはread/write両方が通り、`requestFolder`・stat・list・open(read/create/replace/append)・readText/writeText・mkdir/remove/renameを実装、`fs.volume.sd` は `supported=true`。未実装は**SDを含むcopy**（1ターンで400kHzの全量転送をすると入力が止まるため、将来のjob APIへ回す。UNSUPPORTEDで断る）と**crashSafeReplace**（電源断試験が未実施なのでfalseのまま）。`caseSensitive` はSDだけ **false**——FatFsは長い名前の照合で大小文字を畳むので、アプリが別名だと思う2つが同じ1ファイルになる。
 

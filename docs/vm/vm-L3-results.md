@@ -10,7 +10,7 @@ smoke 20 周。ただし**出荷アプリは一度も駐機しないので、こ
 
 ## 1. L3a の着地（2026-09-23、実測(host)）
 
-`CONFIG_POCKET_VM_RELOC`、既定 n。移動は駐機のたびに、再開の直前に、生きている
+`CONFIG_QJS_LEAN_RELOC`、既定 n。移動は駐機のたびに、再開の直前に、生きている
 セグメント鎖を丸ごと新しい番地へ写す。受け口は2つ:
 
 - **ホスト**: `tools/vmtest/build.sh asan-reloc` / `o2-reloc`、`vmrun --force-reloc`。
@@ -23,7 +23,7 @@ idf.py -B build_l3a_reloc -D SDKCONFIG="build_l3a_reloc/sdkconfig" `
        -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.reloc" build
 ```
 
-`sdkconfig.reloc`（削除済み。`CONFIG_POCKET_VM_RELOC=y` と `CONFIG_POCKET_VM_PROBE=y` の2行。必要なら作り直す）。**`-D SDKCONFIG` でビルド
+`sdkconfig.reloc`（削除済み。`CONFIG_QJS_LEAN_RELOC=y` と `CONFIG_QJS_LEAN_PROBE=y` の2行。必要なら作り直す）。**`-D SDKCONFIG` でビルド
 ディレクトリごとに分けるのが必須**で、既定の `sdkconfig` はツリーで1本しか無いため、
 片方のビルドが立てた `RELOC=y` をもう片方が黙って拾う（この節を書く途中で実際に踏んだ）。
 
@@ -41,7 +41,7 @@ idf.py -B build_l3a_reloc -D SDKCONFIG="build_l3a_reloc/sdkconfig" `
 
 ```text
 quickjs.c.obj              T JS_VMStackRelocate …   在る
-cardputer_pocketjs.elf     （1つも無い）            無い
+cardputer_kobako.elf     （1つも無い）            無い
 ```
 
 ファームに呼び出し元が1つも無いので `--gc-sections` が丸ごと落としていた。
@@ -56,11 +56,11 @@ cardputer_pocketjs.elf     （1つも無い）            無い
 
 ## 3. 実機の呼び出し元（2026-09-23）
 
-**1箇所だけ。** `components/pocketjs_guest/src/guest.c` の `guest_continue_impl()`、
+**1箇所だけ。** `components/kobako_guest/src/guest.c` の `guest_continue_impl()`、
 `JS_VMResume()` の直前。ここはファームが**これから走らせ続けるつもりの鎖**を再開する
 唯一の場所で、vmrun の `resume_until_done` に対応する。
 
-`pocketjs_guest_prepare_stop()` にも駐機中の再開が在るが、**そちらには入れない** —
+`kobako_guest_prepare_stop()` にも駐機中の再開が在るが、**そちらには入れない** —
 終了させるための再開なので、解放される途中のバイトを写すことになる。
 `vm_sched_drain()` は再開しない（`VM_DRAIN_SUSPENDED` を返すだけ）。
 
@@ -75,7 +75,7 @@ cardputer_pocketjs.elf     （1つも無い）            無い
 **1つも重ならないため**。置き場は FPU プローブより後 — `F` を先に取ったせいで
 プローブの第6ワークロードが黙って到達不能になった件（`c073f8a`）と同じ失敗を避けるため。
 
-**ホーム画面でしか取らない**理由: アプリ実行中のバイトは `pocket_bridge_usb()` と
+**ホーム画面でしか取らない**理由: アプリ実行中のバイトは `kobako_bridge_usb()` と
 `pet_hub_usb()` に先に渡されるので、`&` を要求するアプリがあれば黙って奪われる。
 
 **既定 `n` なので、出荷ビルドにこの経路は1バイトも入らない。**
@@ -108,7 +108,7 @@ cardputer_pocketjs.elf     （1つも無い）            無い
 
 ### 3.2 実機の結果（2026-09-23、実測(device)、COM3）
 
-ビルドは `CONFIG_POCKET_VM_RELOC=y` + `CONFIG_POCKET_VM_PROBE=y`
+ビルドは `CONFIG_QJS_LEAN_RELOC=y` + `CONFIG_QJS_LEAN_PROBE=y`
 （`sdkconfig.reloc`）。design §8.1 の D1〜D9 に対応する。
 
 | # | 目標 | 結果 |
@@ -181,8 +181,8 @@ gap_max=232 gap_segments=5
 ### 3.5 途中で踏んだ罠
 
 - **`SDKCONFIG_DEFAULTS` は既存の `sdkconfig` に再適用されない。** 種にしかならないので、
-  `CONFIG_POCKET_VM_PROBE=y` を足しても前のビルドの `sdkconfig` が残っていると効かない。
-  `<` が無反応で、`grep -c CONFIG_POCKET_VM_PROBE=y build_l3a_reloc/sdkconfig` が **0** を
+  `CONFIG_QJS_LEAN_PROBE=y` を足しても前のビルドの `sdkconfig` が残っていると効かない。
+  `<` が無反応で、`grep -c CONFIG_QJS_LEAN_PROBE=y build_l3a_reloc/sdkconfig` が **0** を
   返して初めて分かった。**`-D SDKCONFIG` で分けるだけでは足りず、変えたら消す。**
 - **診断 `'1'` は「わざと構文エラーを出す」もの**（`"(() => {"`）。`device_reloc.py` の
   既定値をそれにしていたので、最初の実行は `START_FAILED` で終わった。`'1'`〜`'6'` は
@@ -557,7 +557,7 @@ L3/L4 が動かせるのはセグメントだけなので、実機の答えは�
 
 ### 15.1 何を測ったか
 
-`CONFIG_POCKET_VM_OOMPROBE`（`main/pocket/oomprobe.c`、既定 n）。ヒープの確保失敗フック
+`CONFIG_QJS_LEAN_OOMPROBE`（`main/kobako/oomprobe.c`、既定 n）。ヒープの確保失敗フック
 （`heap_caps_register_failed_alloc_callback`）に登録し、**拒否されたその瞬間に**ヒープを
 `heap_caps_walk` で歩く。ゲストだけでなくネイティブ（Kasane、JSON、Wi-Fi）の確保も同じフックに来る。
 1件ごとに3段で判定する:
@@ -574,7 +574,7 @@ QuickJS の上限（160 KiB）で断られてヒープまで来ない拒否は `
 
 負荷（`tools/vmtest/device_g12.py`、各 20 秒）:
 
-- 出荷の JS アプリをメニューから: HELLO、IMU CALIBRATION、POCKET PET、PET COMPANION。負荷の前後に2巡
+- 出荷の JS アプリをメニューから: HELLO、IMU CALIBRATION、KOBAKO PET、PET COMPANION。負荷の前後に2巡
   （2巡目は負荷が残したヒープから始まる）。放置のみで、キー操作・Wi-Fi 同期は含まない。
 - Kasane のデモ（`K`）。
 - わざと OOM にする負荷（USB キー）: `!` 大小の確保を混ぜて3つに1つを捨て続け、毎フレーム 8 KiB 刻みで
@@ -635,7 +635,7 @@ QuickJS の上限（160 KiB）で断られてヒープまで来ない拒否は `
 
 ### 15.5 範囲の外
 
-- 出荷アプリは放置だけ。POCKET PET の操作、COMPANION の Wi-Fi 同期・アラーム、MUSIC（SD）は走らせて
+- 出荷アプリは放置だけ。KOBAKO PET の操作、COMPANION の Wi-Fi 同期・アラーム、MUSIC（SD）は走らせて
   いない。
 - ヒープの走査はフックの中で最大 990 µs かかる。計測専用で、既定ビルドには入らない。既定ビルドは
   計装前（`b199d36`）と**ロードされる全セクションの大きさ、全シンボルの番地と大きさが一致**（違いは

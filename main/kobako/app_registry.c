@@ -1,0 +1,388 @@
+#include "app_registry.h"
+#include "utf8.h"
+#include <stdio.h>
+#include <string.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
+// ------------------------------------------------------------------ the table
+//
+// One row per thing this firmware can start. The names are the ones section 3
+// uses in its example, and every capability listed below is a name kobako_api.c
+// answers for — a manifest that asks for a capability nobody registers refuses
+// its own app at start, which is the point, but it should refuse because the
+// board cannot do it and not because of a typo here.
+
+static const char *const CAPS_NONE[]   = {NULL};
+static const char *const CAPS_KASANE[] = {"display.kasane", "input.action", NULL};
+// Games read held keys (kobako.input.keys, docs/platform/keystate.md) and make sound.
+static const char *const CAPS_GAME[]   = {"display.kasane", "input.action", "input.keys", NULL};
+// DERBY WATCH's panning series run in C (kobako.derby, docs/apps/derby-ser-native.md);
+// naming it is what gets the session that surface, as pet.companion does.
+static const char *const CAPS_DERBY_OPT[]= {"audio.tone", "derby.series", "kasane.shiki", NULL};
+// BIG WAVE draws with Shiki's built-in programs (apps/bigwave/big_wave_prog.js):
+// naming kasane.shiki is what gets its session the Shiki heap.
+static const char *const CAPS_BIGWAVE_OPT[]= {"audio.tone", "kasane.shiki", NULL};
+// MEGADEMO draws with Shiki's built-in programs (apps/kasane/megademo_prog.js)
+// and kobako.shapes.
+static const char *const CAPS_MEGADEMO_OPT[]= {"kasane.shapes", "kasane.shiki", NULL};
+// STRESS TEST draws its sea with Shiki's built-in programs (apps/stress/
+// stress_prog.js) and has no other way to draw it, so Shiki is required.
+static const char *const CAPS_STRESS[]= {"display.kasane", "input.action", "kasane.shiki", NULL};
+#ifdef CONFIG_KOBAKO_SHIKI_DEBUG
+// The Shiki test (apps/shikitest): the engine through its test-only surface.
+static const char *const CAPS_SHIKI_TEST[]= {"display.kasane", "input.action", "kasane.shiki.debug", NULL};
+// The Shiki API self-check (apps/shikitest/shiki_api_test.js): a kasane.shiki
+// app, so its session takes the Shiki heap (default budget).
+static const char *const CAPS_SHIKI_API[]= {"display.kasane", "kasane.shiki", NULL};
+// The draw cost probe (apps/shikitest/draw_cost.js): the Shiki API and the
+// test surface's cycle counter and draw profile.
+static const char *const CAPS_SHIKI_COST[]= {"display.kasane", "kasane.shiki", "kasane.shiki.debug", NULL};
+static const char *const CAPS_MESH_BENCH[]= {"display.kasane", "kasane.shiki", "kasane.shapes", "kasane.shiki.debug", NULL};
+#endif
+// LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
+static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
+static const char *const CAPS_KV[]     = {"storage.kv", NULL};
+static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
+// pet.companion is optional rather than required so that a board without NVS
+// still starts the pet and shows why it cannot save, but naming it is what
+// gets the session kobako.pet at all (app_session.c installs it only then).
+static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", "pet.companion", NULL};
+static const char *const CAPS_WORK[]   = {"workspace", NULL};
+#ifndef CONFIG_AYATSURI_POSE_DMA_PROBE
+static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", "pet.companion", NULL};
+#endif
+static const char *const CAPS_NET[]    = {"net.wifi", "net.http", NULL};
+static const char *const CAPS_OVERLAY[]= {"ui.overlay", "display.kasane", "time", NULL};
+static const char *const CAPS_PLAY[]    = {"ui.overlay", "display.kasane",
+                                           "audio.playback", "fs.volume.sd", NULL};
+
+// The one range this build knows. It is written out per row rather than shared
+// so that a row can be moved forward on its own, which is what a version range
+// per app is for.
+#define API_0_2 ">=0.2.0 <0.3.0"
+
+static const app_manifest_t MANIFESTS[] = {
+    // The built-in Kasane demo, no storage or works: it draws and counts.
+    {.id="local.hello", .title="HELLO WORLD", .entry="apps/hello/main.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The calibration program exists for a board whose sensor is wrong, so the
+    // sensor is required: starting it without one would show axes that are not
+    // measurements.
+    {.id="local.imucal", .title="IMU CALIBRATION", .entry="apps/imucal/imucal.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_IMU, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The pet keeps state between runs, so its store is required; the tilt and
+    // the sound are what make it pleasant and not what make it work.
+    {.id="local.pet", .title="KOBAKO PET", .entry="apps/pet/pet.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_KV, .optional=CAPS_PET_OPT, .works=APP_WORKS_NONE},
+
+#ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
+    {.id="local.companion", .title="PET COMPANION", .entry="native:ayatsuri",
+     .runtime=APP_RUNTIME_NATIVE,
+     .required=CAPS_NONE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+#else
+    {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/companion.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_KV, .optional=CAPS_COMP, .works=APP_WORKS_NONE},
+#endif
+
+    // A test app (apps/stress/README.md): it draws and churns its own heap,
+    // and reads assets: through kobako.fs, which every session has. Its own
+    // row so its fs owner is not hello's.
+    {.id="local.stress", .title="STRESS TEST", .entry="apps/stress/stress.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_STRESS, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+#ifdef CONFIG_KOBAKO_SHIKI_DEBUG
+    // The on-device half of Shiki's differential test (apps/shikitest/README.md,
+    // docs/kasane/shiki-spec.md sec.10): not on the menu, started by the USB
+    // broker's app_session; it logs one hash per generated case.
+    {.id="local.shikitest", .title="SHIKI TEST", .entry="apps/shikitest/shiki_test.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The data-region half of the same test (apps/shikitest/shiki_data_test.js,
+    // spec v1.3 sec.5): the same way, one hash per case with its regions.
+    {.id="local.shikidata", .title="SHIKI DATA", .entry="apps/shikitest/shiki_data_test.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // kobako.kasane.shiki's self-check (apps/shikitest/shiki_api_test.js,
+    // spec sec.9): the same way, "SA ..." lines and "SA END pass= fail=".
+    {.id="local.shikiapi", .title="SHIKI API", .entry="apps/shikitest/shiki_api_test.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_SHIKI_API, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The integer instruction latency probe (apps/shikitest/cycle_bench.js,
+    // docs/perf/int-latency.md): not on the menu, started by the USB broker;
+    // it logs one line of cycle counts per case.
+    {.id="local.cyclebench", .title="CYCLE BENCH", .entry="apps/shikitest/cycle_bench.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_SHIKI_TEST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // What one Shiki draw costs, by stage (apps/shikitest/draw_cost.js,
+    // docs/kasane/shiki-bundle.md): not on the menu, started by the broker.
+    {.id="local.drawcost", .title="DRAW COST", .entry="apps/shikitest/draw_cost.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_SHIKI_COST, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // Bounded public synthetic mesh workload, launched by the existing app API.
+    {.id="local.meshbench", .title="MESH BENCH", .entry="apps/meshbench/mesh_bench.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_MESH_BENCH, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+#endif
+    // kobako.net's self-check and the HTTPS cycle (apps/netcheck/README.md):
+    // not on the menu, started by the USB broker. Both draw nothing; they log
+    // NETCHK / CYC lines, and the session's end logs the tcpip thread's stack
+    // low mark (NET_STACK).
+    {.id="local.netcheck", .title="NET CHECK", .entry="apps/netcheck/netcheck.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_NET, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+    {.id="local.tlscycle", .title="TLS CYCLE", .entry="apps/netcheck/tlscycle.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_NET, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // MEGADEMO is an ordinary foreground app. Leaving it with Back and
+    // reopening starts a new session with fresh Shiki programs.
+    {.id="local.megademo", .title="MEGADEMO", .entry="apps/kasane/proc_megademo.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_KASANE, .optional=CAPS_MEGADEMO_OPT, .works=APP_WORKS_NONE},
+
+    {.id="local.gridlab", .title="GRID LAB", .entry="apps/kasane/grid_lab.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    {.id="local.videolab", .title="VIDEO LAB", .entry="apps/kasane/video_lab.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The three games. One row each, kept apart so that each game can change
+    // its own capabilities without touching its neighbours.
+    {.id="local.lcdcatch", .title="LCD CATCH", .entry="apps/lcdcatch/lcd_catch.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_GAME, .optional=CAPS_LCD_OPT, .works=APP_WORKS_NONE},
+
+    {.id="local.derby", .title="DERBY WATCH", .entry="apps/derby/derby_watch.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_GAME, .optional=CAPS_DERBY_OPT, .works=APP_WORKS_NONE},
+
+    {.id="local.bigwave", .title="BIG WAVE", .entry="apps/bigwave/big_wave.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_GAME, .optional=CAPS_BIGWAVE_OPT, .works=APP_WORKS_NONE},
+
+    // Both of its capabilities are REQUIRED rather than optional, and that is
+    // not strictness for its own sake: without the card there is nothing to
+    // choose and without playback there is nothing to do with a choice, so an
+    // admitted-but-useless session would only be able to draw its own excuse.
+    //
+    // It is also the first of the audio apps to have a row at all. Until now
+    // local.streamplay, local.opusplay, local.mp3play and local.opusfit all
+    // fell through app_registry_select() to local.hello and ran under HELLO
+    // WORLD's identity -- which is why the log said "APP_ID local.hello" while
+    // this app's own source was running. That matters here in a way it did not
+    // for them: identity is what kobako_fs_set_owner() and
+    // kobako_storage_set_owner() are given, so a player that ever remembers a
+    // track would have remembered it as hello's. The other four are left as
+    // they are rather than fixed in passing; each is a diagnostic whose owner
+    // has never mattered, and changing an app's identity moves its stored
+    // files.
+    {.id="local.player", .title="MUSIC PLAYER", .entry="apps/player/player.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_PLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The Playground runs whatever the person typed, so it is the one identity
+    // that may reach the whole library: the picker is the person choosing their
+    // own work, on the screen they were already editing on.
+    {.id="local.playground", .title="PLAYGROUND", .entry="src:0",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_PICK},
+
+    // A lesson copies a worked example into its own chapter slot and never
+    // opens the person's library: section 3 asks in as many words that opening
+    // a sample must not overwrite a user's work, and APP_WORKS_SELF is that
+    // sentence with teeth. create() still works, so a chapter that teaches
+    // saving has something to save into.
+    {.id="local.tutorial", .title="TUTORIAL", .entry="src:1",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_SELF},
+
+    // The overlay of section 3.1. Its runtime is not one of the two above --
+    // it is "kobako-overlay" in the document -- but nothing in this file reads
+    // the runtime except the API range check, and an overlay is a kobako-API
+    // app in every way that check cares about. Both capabilities are REQUIRED
+    // rather than optional on purpose: a clock with no clock and an overlay
+    // with nowhere to draw are not degraded, they are pointless, and 3.1 asks
+    // for that to be said before the guest is built rather than after.
+    {.id="local.deskclock", .title="DESK CLOCK", .entry="apps/deskclock/deskclock.js",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_OVERLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // A work started by kobako.workspace.run(). Its own identity, so its
+    // storage is its own and the Playground's is out of reach.
+    {.id=APP_ID_WORK, .title="WORK", .entry="src:work",
+     .runtime=APP_RUNTIME_KOBAKO, .api=API_0_2,
+     .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_PICK},
+};
+
+#define MANIFEST_N (sizeof(MANIFESTS)/sizeof(MANIFESTS[0]))
+
+uint32_t app_registry_owner_hash(const char *id) {
+    uint32_t hash=2166136261u;
+    for(const char *p=id?id:"";*p;p++) { hash^=(unsigned char)*p; hash*=16777619u; }
+    // 0 is reserved for "the host owns this", so an id that hashes there is
+    // nudged rather than allowed to claim it.
+    return hash?hash:1u;
+}
+
+const app_manifest_t *app_registry_find(const char *id) {
+    if(!id || !id[0]) return NULL;
+    for(size_t i=0;i<MANIFEST_N;i++)
+        if(!strcmp(MANIFESTS[i].id,id)) return &MANIFESTS[i];
+    return NULL;
+}
+
+// Four bytes of .data, and they are the session's identity.
+static const app_manifest_t *current = &MANIFESTS[0];
+
+void app_registry_select(const char *id) {
+    const app_manifest_t *m=app_registry_find(id);
+    if(!m) m=app_registry_find(APP_ID_DEFAULT);
+    current=m?m:&MANIFESTS[0];
+}
+
+const app_manifest_t *app_registry_current(void) { return current; }
+
+// ------------------------------------------------------------- version ranges
+
+// Parses a dotted triple, stopping at `end`. Returns false on anything that is
+// not exactly three decimal fields; a two-field version is refused rather than
+// read as x.y.0, because guessing the missing field is how "0.2" comes to
+// satisfy "<0.2.0".
+static bool parse_version(const char *s, const char *end, unsigned out[3]) {
+    for(int field=0;field<3;field++) {
+        if(s>=end || *s<'0' || *s>'9') return false;
+        unsigned value=0;
+        while(s<end && *s>='0' && *s<='9') {
+            value=value*10+(unsigned)(*s-'0');
+            if(value>99999) return false;
+            s++;
+        }
+        out[field]=value;
+        if(field<2) { if(s>=end || *s!='.') return false; s++; }
+    }
+    return s==end;
+}
+
+static int compare(const unsigned a[3], const unsigned b[3]) {
+    for(int i=0;i<3;i++) if(a[i]!=b[i]) return a[i]<b[i]?-1:1;
+    return 0;
+}
+
+bool app_registry_api_ok(const char *range, const char *version) {
+    if(!range || !range[0]) return true;
+    unsigned have[3];
+    if(!version || !parse_version(version,version+strlen(version),have)) return false;
+
+    const char *p=range;
+    while(*p) {
+        while(*p==' '||*p=='\t'||*p==',') p++;
+        if(!*p) break;
+        // The operator, longest form first: ">=" must not be read as ">".
+        int op;   // -2 <, -1 <=, 0 =, 1 >=, 2 >
+        if(p[0]=='>'&&p[1]=='=')      { op=1;  p+=2; }
+        else if(p[0]=='<'&&p[1]=='=') { op=-1; p+=2; }
+        else if(p[0]=='>')            { op=2;  p+=1; }
+        else if(p[0]=='<')            { op=-2; p+=1; }
+        else if(p[0]=='='&&p[1]=='=') { op=0;  p+=2; }
+        else if(p[0]=='=')            { op=0;  p+=1; }
+        else return false;            // a bare version is not this grammar
+        const char *end=p;
+        while(*end && *end!=' ' && *end!='\t' && *end!=',') end++;
+        unsigned want[3];
+        if(!parse_version(p,end,want)) return false;
+        int c=compare(have,want);
+        bool ok = op==1?c>=0 : op==2?c>0 : op==-1?c<=0 : op==-2?c<0 : c==0;
+        if(!ok) return false;
+        p=end;
+    }
+    return true;
+}
+
+bool app_registry_wants(const app_manifest_t *manifest, const char *capability) {
+    if(!manifest || !capability || !capability[0]) return false;
+    for(int which=0;which<2;which++) {
+        const char *const *names=which?manifest->optional:manifest->required;
+        if(!names) continue;
+        for(;*names;names++) if(!strcmp(*names,capability)) return true;
+    }
+    return false;
+}
+
+// ----------------------------------------------------------------- admission
+
+bool app_registry_admit(const app_manifest_t *manifest, const char *api_version,
+                        bool (*supported)(const char *name, void *user), void *user,
+                        char *reason, size_t reason_size) {
+    if(reason && reason_size) reason[0]=0;
+    if(!manifest) return true;   // nothing registered is nothing to refuse
+
+    // Every app is held to the version range it declares.
+    if(manifest->runtime==APP_RUNTIME_KOBAKO &&
+       !app_registry_api_ok(manifest->api,api_version)) {
+        if(reason && reason_size)
+            snprintf(reason,reason_size,"NEEDS API %s",manifest->api?manifest->api:"?");
+        return false;
+    }
+    if(!supported || !manifest->required) return true;
+    for(const char *const *name=manifest->required;*name;name++) {
+        if(supported(*name,user)) continue;
+        if(reason && reason_size) snprintf(reason,reason_size,"NEEDS %s",*name);
+        return false;
+    }
+    // The optional list is not checked on purpose. Section 2 has an app
+    // feature-test what it can live without, and a host that refused to start
+    // over an optional name would have made it required.
+    return true;
+}
+
+// ---------------------------------------------------------------- permissions
+
+bool app_registry_may_work(app_works_t level, app_work_op_t op,
+                           bool owned, bool picked) {
+    if(level==APP_WORKS_NONE) return false;
+    switch(op) {
+        case APP_WORK_PICK:   return level>=APP_WORKS_PICK;
+        case APP_WORK_CREATE: return true;   // into its own works only
+        case APP_WORK_READ:
+        case APP_WORK_SAVE:
+        case APP_WORK_RUN:
+            // Its own work always. Anything else only because the person chose
+            // it here, in this session, on a host screen — which is section 3's
+            // "対象・目的を示すホスト画面" and section 7's "明示的な選択".
+            return owned || (picked && level>=APP_WORKS_PICK);
+    }
+    return false;
+}
+
+// --------------------------------------------------------------------- titles
+
+size_t app_registry_clean_title(const char *in, size_t length,
+                                char *out, size_t out_size) {
+    if(!in || !out || out_size==0) return 0;
+    out[0]=0;
+    if(length==0 || length>=out_size) return 0;
+    if(!utf8_valid(in,length)) return 0;
+    for(size_t i=0;i<length;i++) {
+        unsigned char c=(unsigned char)in[i];
+        if(c<0x20 || c==0x7f) return 0;
+    }
+    memcpy(out,in,length);
+    out[length]=0;
+    return length;
+}

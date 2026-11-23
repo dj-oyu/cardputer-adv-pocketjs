@@ -1,10 +1,10 @@
 # 05 メモリ確保台帳（allocator置き換え / L2aセグメント向け）
 
-対象: `components/quickjs-ng/quickjs-ng/quickjs.c`（quickjs-ng 0.14.0 + immutable-buffer patch）と、ゲスト側の実装 `components/pocketjs_guest/src/guest.c`。すべて事実（コードが何をしているか）を記す。判断・推奨は末尾の「L2/L3/L5 に効く点」にのみ短くまとめる。
+対象: `components/quickjs-ng/quickjs-ng/quickjs.c`（quickjs-ng 0.14.0 + immutable-buffer patch）と、ゲスト側の実装 `components/kobako_guest/src/guest.c`。すべて事実（コードが何をしているか）を記す。判断・推奨は末尾の「L2/L3/L5 に効く点」にのみ短くまとめる。
 
 ## 1. ゲスト側アロケータ（`JSMallocFunctions` の実装）
 
-- `components/pocketjs_guest/src/guest.c:15-18` `allocation_header_t` は `union { size_t size; max_align_t alignment; }`。すべての確保の直前に1個置かれる自前ヘッダで、サイズを記録するだけ（ケーパビリティやマジックナンバーは持たない）。
+- `components/kobako_guest/src/guest.c:15-18` `allocation_header_t` は `union { size_t size; max_align_t alignment; }`。すべての確保の直前に1個置かれる自前ヘッダで、サイズを記録するだけ（ケーパビリティやマジックナンバーは持たない）。
 - `guest.c:47-65` `guest_malloc`: `total = sizeof(allocation_header_t) + size` を `heap_caps_malloc()` で確保し、ヘッダに `size`（＝ユーザーが要求したバイト数そのもの、ヘッダやアロケータ内部の丸め込み分は含まない）を書き込み、`header + 1` を返す。`size == 0` または `size > SIZE_MAX - sizeof(header)` は `NULL`。
 - `guest.c:54-59` PSRAM優先フラグ `guest->prefer_psram` が真なら `MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT` を先に試し、失敗（`NULL`）した場合のみ `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` にフォールバックする。`guest == NULL` のときもフォールバックのみ実行される（`JS_NewRuntime2` 内で `rt = mf->js_calloc(...)` を呼ぶ際、`opaque` はまだ有効な `guest` なので実際には `guest == NULL` 分岐は通常路には現れない）。
 - 本ファームの実運用: `main/app_session.c:257` がメインアプリ用ゲストに `gc.prefer_psram=false` を明示しているため、メインアプリの全確保は常に `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` 一本槍（PSRAMは搭載されていないのでこの機体ではどのみち内部DRAMのみ）。
@@ -18,7 +18,7 @@
 - `main/app_session.c:257` メインアプリ: `gc.heap_limit = 160*1024`（=163,840バイト）、`gc.stack_limit = 20*1024`、`gc.prefer_psram=false`。
 - `main/app_session.h:49` `OVERLAY_GUEST_HEAP = (160*1024)`、`main/app_session.c:267` がオーバーレイセッションでも同じ値を上書き設定。
 - **CLAUDE.mdの「JSゲストの上限は144KiB」という記述は、現在のソース値（160KiB=163,840B）と一致しない**（実測ではなくソース読み取りによる事実）。144KiBという数字自体がどこから来たか今回のスコープでは確認していない（未確認セクション参照）。
-- `heap_limit` は `pocketjs_guest_create()`（`guest.c:230`）内で `JS_SetMemoryLimit(guest->runtime, config->heap_limit)` に渡り、`quickjs.c:2084-2087` の `rt->malloc_state.malloc_limit = limit;` にそのまま入る。`quickjs.c:1604,1630,1681` の上限チェックはすべて `malloc_size + 追加分 > malloc_limit - 1` で判定するため、実際に確保を拒否され始めるのは `malloc_size`（quickjs側のトラッキング値。後述）が `heap_limit - 1` を超えた瞬間であり、ESP-IDFヒープの実消費量そのものではない。
+- `heap_limit` は `kobako_guest_create()`（`guest.c:230`）内で `JS_SetMemoryLimit(guest->runtime, config->heap_limit)` に渡り、`quickjs.c:2084-2087` の `rt->malloc_state.malloc_limit = limit;` にそのまま入る。`quickjs.c:1604,1630,1681` の上限チェックはすべて `malloc_size + 追加分 > malloc_limit - 1` で判定するため、実際に確保を拒否され始めるのは `malloc_size`（quickjs側のトラッキング値。後述）が `heap_limit - 1` を超えた瞬間であり、ESP-IDFヒープの実消費量そのものではない。
 
 ## 2. `js_malloc` / `js_realloc` / `js_free_rt` と `JSMallocState` の会計
 
@@ -36,7 +36,7 @@
 
 - `quickjs.c:1563-1582` `js_trigger_gc(rt, size)`: `force_gc = (malloc_size + size) > malloc_gc_threshold`。真なら `JS_RunGC(rt)` を呼び、その後 `malloc_gc_threshold = malloc_size + (malloc_size >> 1)`（GC後の生存量の1.5倍を次の閾値にする、典型的な世代非依存インクリメンタル閾値）。
 - **`js_trigger_gc` の呼び出し箇所は `quickjs.c:5916` 一箇所のみ**（`JS_NewObjectFromShape` の先頭、`sizeof(JSObject)` を渡す）。つまり自動GCは「新規オブジェクト生成のたび」にしかチェックされない。文字列確保・配列拡張・シェイプ拡張・Promise生成など、オブジェクトを直接作らない確保経路は GC 発火のトリガにならない（それらの確保でヒープが逼迫しても、次にオブジェクトが1個作られるまで閾値チェックが走らない）。
-- `main/app_session.c` と `components/pocketjs_guest/` を検索した限り、**`JS_SetGCThreshold()` も `JS_RunGC()` の手動呼び出しも本ファームのどこにも存在しない**（`grep -rn "SetGCThreshold\|GCThreshold\|JS_RunGC" main/ components/pocketjs_guest/` は0件、2026-09-12実施）。
+- `main/app_session.c` と `components/kobako_guest/` を検索した限り、**`JS_SetGCThreshold()` も `JS_RunGC()` の手動呼び出しも本ファームのどこにも存在しない**（`grep -rn "SetGCThreshold\|GCThreshold\|JS_RunGC" main/ components/kobako_guest/` は0件、2026-09-12実施）。
 - 初期閾値256KiBは、メインアプリの `heap_limit=160*1024`（160KiB）より大きい。`malloc_limit` による確保拒否は `malloc_size` が `heap_limit-1` を超えた時点で起きるため、**`malloc_size` が256KiBの閾値に到達する前に必ず160KiBの上限に先に当たる**。閾値を下げる呼び出しがどこにも無い以上、`js_trigger_gc` 内の `force_gc` 判定は「実行中ずっと false のまま」になる可能性が高い（＝閾値ベースの自動サイクルGCは通常運用では一度も発火しない）。この機体でオブジェクトの循環参照（弱参照で切れない循環）を解放できるのは、明示的な `JS_RunGC` 呼び出しが無い限り、参照カウントが0になる即時解放だけ、ということになる。**この結論は「呼び出し箇所を全部grepした」という事実からの直接の帰結であり、実測ではなくコード読解によるもの** — 動作中に本当に一度もGCが走らないかどうかは実機ログで確認していない。
 - `quickjs.c:7283-7294` `JS_RunGC` 自体は `gc_decref` → `gc_scan` → `gc_free_cycles` の3パスで、いずれも既存の `rt->gc_obj_list` を走査するだけで新規確保を行わない（マーク&スイープが自分自身のために追加メモリを要求することはない、という設計）。ヒープが逼迫した状態でも安全に呼べる操作という前提が成り立っている。
 
@@ -128,7 +128,7 @@
 - `js_realloc_rt` の61件のうち、パーサ/コンパイラ由来に分類したものが本当にすべて「`JS_Eval` 完了までに解放される一時領域」であるか、個別に最後の解放コードまで追ってはいない（`js_free_function_def` 相当の後始末関数は名前ベースで存在を確認していない）。
 - ~~`sizeof(max_align_t)`（`allocation_header_t` のサイズを決める）をESP32-S3のツールチェーンヘッダで実際に確認していない。8バイトだろうという推定~~ → **確認済み（2026-09-15）: 16バイト**（`xtensa-esp32s3-elf-gcc`、`_Alignof` は8。[vm-L2-design.md](../vm-L2-design.md) §2.2 と同じ値）。推定の8は外れで、ヘッダは1ブロック16B。中身は `size` の4Bだけなので12Bが余分。影響と直し方は [vm/backlog.md](../backlog.md) の項目8（VM とは独立の不具合）。
 - CLAUDE.mdに書かれている「JSゲストの上限は144KiB」という数値の出どころ（過去のコミット、別のビルド構成、単なる書き間違い）は未調査。現在の `main/app_session.c` / `app_session.h` の値（160KiB）とだけ突き合わせた。
-- `rt->class_array`/`ctx->class_proto` の拡張（`quickjs.c:3897-3924`）が、`pocket_api_register()` などケーパビリティ登録のたびに実際何回発火するか（＝ `JS_CLASS_INIT_COUNT` の初期値と実際登録されるクラス数の関係)は未確認。
+- `rt->class_array`/`ctx->class_proto` の拡張（`quickjs.c:3897-3924`）が、`kobako_api_register()` などケーパビリティ登録のたびに実際何回発火するか（＝ `JS_CLASS_INIT_COUNT` の初期値と実際登録されるクラス数の関係)は未確認。
 - Map/Set の `map_hash_resize`（`quickjs.c:54377-54393`）が失敗時に「エラー報告なしで諦める」とコメントされている動作が、`malloc_limit` 到達時に実際どう見えるか（例外にならず単に古いハッシュテーブルのまま動き続けるのか）を実機・ホストいずれでも検証していない。
 - GCが実行中一度も発火しない、という3章の結論は静的なgrep・コードパスの読解のみに基づく（推定ではなく事実の連鎖からの論理的帰結だが、実機ログでの確認はしていない）。
 - **本台帳群の行番号の基準:** 本ファイルの`quickjs.c`引用は `git rev-parse HEAD`（本ワークツリーでは `d9ef1f9`）に、`apps/vmprobe/` 計測フック用の未コミット差分（`quickjs.c`に+59行）が当たった状態を読んで書かれている（追記分は本追記時点のセッションで直接確認、既存部分がどの版を見て書かれたかは記録が無い）。この差分は今後コミットされる、あるいは別セッションが `quickjs.c` を編集すれば再びずれるので、file:line は不変の参照先として扱わないこと。

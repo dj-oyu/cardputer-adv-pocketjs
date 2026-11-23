@@ -45,8 +45,8 @@ static void batch_oom(JSRuntime *rt,JSContext *ctx){
 }
 int main(int argc,char **argv){
     CHECK(argc==4);strip_rows=(unsigned)atoi(argv[1]);g_ksn_image_rows=atoi(argv[2]);delayed=true;CHECK(strip_rows==4||strip_rows==8);
-    JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
-    host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(pocket_kasane_install(ctx,NULL)==ESP_OK);CHECK(pocket_shape_install(ctx,NULL)==ESP_OK);
+    JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_LeanHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
+    host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(kobako_kasane_install(ctx,NULL)==ESP_OK);CHECK(kobako_shape_install(ctx,NULL)==ESP_OK);
     JSValue global=JS_GetGlobalObject(ctx);
     CHECK(JS_SetPropertyStr(ctx,global,"detachBuffer",JS_NewCFunction(ctx,detach_buffer,"detachBuffer",1))>=0);
     CHECK(JS_SetPropertyStr(ctx,global,"freezeBuffer",JS_NewCFunction(ctx,freeze_buffer,"freezeBuffer",1))>=0);
@@ -56,7 +56,7 @@ int main(int argc,char **argv){
     install_foreign(ctx,"foreignD",12);install_foreign(ctx,"foreignBG",144);
     expose_fixture(ctx,argv[3],"plain","fixture");expose_fixture(ctx,argv[3],"holes","holes");expose_fixture(ctx,argv[3],"sided","sided");
     expose_fixture(ctx,argv[3],"plain","cycleFixture");expose_fixture(ctx,argv[3],"limit","limitFixture");
-    eval(ctx,"globalThis.pocket={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
+    eval(ctx,"globalThis.kobako={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
     FILE *f=fopen("tools/ayatsuri/skin/batch_scenario.js","rb");CHECK(f);static char source[16384];size_t count=fread(source,1,sizeof source-1,f);CHECK(feof(f)&&fclose(f)==0);source[count]=0;eval(ctx,source);eval(ctx,"batchSetup()");
     size_t bytes;uint8_t *blob=load_fixture(argv[3],"plain",&bytes);ayatsuri_model model;CHECK(ayatsuri_model_open(blob,bytes,&model)==AYATSURI_MODEL_OK);
     size_t arena_bytes=ayatsuri_model_instance_bytes(&model);void *arena=malloc(arena_bytes);CHECK(arena);unsigned owner=0;ayatsuri_model_instance direct;
@@ -66,8 +66,8 @@ int main(int argc,char **argv){
     for(unsigned visit=0;visit<240;++visit){
         unsigned frame=visit<120?visit:239-visit;size_t before=alloc_calls;
         call(ctx,evaluate,JS_NewInt32(ctx,(int)frame));warm_eval+=alloc_calls-before;batch_oracle(ctx,&direct,&owner,false);
-        before=alloc_calls;call(ctx,draw,JS_UNDEFINED);if(visit==37){fail_send=true;CHECK(present()==KSN_IO&&pocket_proc_pending());}
-        CHECK(present()==KSN_OK&&!pocket_proc_pending()&&!memcmp(panel,reference,sizeof panel));warm_submit+=alloc_calls-before;
+        before=alloc_calls;call(ctx,draw,JS_UNDEFINED);if(visit==37){fail_send=true;CHECK(present()==KSN_IO&&kobako_proc_pending());}
+        CHECK(present()==KSN_OK&&!kobako_proc_pending()&&!memcmp(panel,reference,sizeof panel));warm_submit+=alloc_calls-before;
         uint32_t hash=2166136261u;for(unsigned j=0;j<240*135;++j)hash=(hash^panel[j])*16777619u;
         if(visit<120)hashes[frame]=hash;else CHECK(hash==hashes[frame]);
         size_t used,limit;JS_GetMemoryCounters(rt,&used,&limit);CHECK(limit==160*1024);if(used>guest_peak)guest_peak=used;
@@ -87,9 +87,9 @@ int main(int argc,char **argv){
     eval(ctx,"batchSingleA();batchInspect(batchBytes);batchDraw()");batch_oracle(ctx,&direct,&owner,true);CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
     call(ctx,evaluate,JS_NewInt32(ctx,30));batch_oracle(ctx,&direct,&owner,false);
     CHECK(ayatsuri_model_instance_dispose(&direct,&owner,1)==AYATSURI_MODEL_OK);free(arena);free(blob);
-    eval(ctx,"batchRelease()");JS_RunGC(rt);CHECK(pocket_proc_pending()&&present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
+    eval(ctx,"batchRelease()");JS_RunGC(rt);CHECK(kobako_proc_pending()&&present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
     eval(ctx,"batchLimits();batchCycle();cycleBatch.stats(MS);check(MS.instances===1);cycleBatch=null");JS_RunGC(rt);
     printf("SKIN_BATCH_HOST rows=%u direct=%d frames=240 meshV=6,4 meshJ=2,1 work=%zu near_limit=%zu ceiling=16384 warm_eval_alloc=%zu submit_present_alloc=%zu guest_frame_peak=%zu requested_peak=%zu\n",strip_rows,g_ksn_image_rows,batch_bytes,near_limit,warm_eval,warm_submit,guest_peak,peak_bytes);
-    JS_FreeValue(ctx,evaluate);JS_FreeValue(ctx,draw);pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks);
+    JS_FreeValue(ctx,evaluate);JS_FreeValue(ctx,draw);kobako_shiki_api_reset();kobako_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks);
     puts("SKIN_BATCH_PASS native_multi_mesh duplicate_late_invalid_atomic aliases_reverse detach_alignment busy OOM independent_actor subset_empty_single_restore pending_dispose bounds GC release0");return 0;
 }

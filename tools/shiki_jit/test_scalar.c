@@ -6,7 +6,7 @@
  * test_encoder.py checks against the assembler) and gives each instruction
  * the ISA's meaning; it is the half of this test that is written from the
  * manual, so a wrong reading there and the same one in the compiler would
- * agree. The device check (pocket_shiki.c's jit lines) runs the real CPU.
+ * agree. The device check (kobako_shiki.c's jit lines) runs the real CPU.
  *
  * What must match: the status, and for DONE the registers, the segments,
  * the pen and the step count; for any other status the registers and the
@@ -14,7 +14,7 @@
  * block's end: sec.11).
  *
  * The programs are ksn_shiki_bench_random()'s, which the device check
- * (pocket_shiki.c, "CB jit scalar") runs as well.
+ * (kobako_shiki.c, "CB jit scalar") runs as well.
  *
  *   cc -std=gnu11 -O1 -Imain/ui/kasane main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_bench.c \
  *      main/ui/kasane/ksn_shiki_jit.c tools/shiki_jit/test_scalar.c -o t && ./t [TRIALS]

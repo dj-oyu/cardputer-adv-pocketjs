@@ -16,8 +16,8 @@ args = parser.parse_args()
 build = args.build.resolve()
 description = json.loads((build / 'project_description.json').read_text())
 for component in description['build_components']:
-    assert not re.search(r'taffy|pocketjs_(ui_core|ui_qjs|render_rgb565)', component, re.I), component
-for filename in ('cardputer_pocketjs.map', 'build.ninja', 'compile_commands.json'):
+    assert not re.search(r'taffy|kobako_(ui_core|ui_qjs|render_rgb565)', component, re.I), component
+for filename in ('cardputer_kobako.map', 'build.ninja', 'compile_commands.json'):
     # The build and source directories' own names are not evidence, and neither
     # is a branch name build.ninja lists as a dependency (kasane/remove-taffy):
     # taffy counts only as a crate path, version or symbol path.
@@ -27,9 +27,9 @@ for filename in ('cardputer_pocketjs.map', 'build.ninja', 'compile_commands.json
             data = data.replace(spelling, '<dir>')
     assert not re.search(r'libpocketjs_idf_|libpocketjs_ui_|libpocketjs_render_|'
                          r'(?<![a-z_])taffy(?:[\\/]|-\d|::)', data, re.I), filename
-    assert not re.search(r'(?:jsfont|pet_assets|pocket_ui|render_accel)\.c(?:[.\\/"\s])', data), filename
-symbols = subprocess.check_output([args.nm, '-C', str(build / 'cardputer_pocketjs.elf')], text=True)
-assert not re.search(r'pocketjs_(?:ui_|rgb565_)|taffy', symbols, re.I), 'legacy symbol in ELF'
-for required in ('ksn_core_init', 'pocket_input_install', 'pocketjs_guest_frame'):
+    assert not re.search(r'(?:jsfont|pet_assets|kobako_ui|render_accel)\.c(?:[.\\/"\s])', data), filename
+symbols = subprocess.check_output([args.nm, '-C', str(build / 'cardputer_kobako.elf')], text=True)
+assert not re.search(r'kobako_(?:ui_|rgb565_)|taffy', symbols, re.I), 'legacy symbol in ELF'
+for required in ('ksn_core_init', 'kobako_input_install', 'kobako_guest_frame'):
     assert required in symbols, 'missing ' + required
 print('KASANE_LINK PASS: component graph, link/map, source list and ELF symbols')

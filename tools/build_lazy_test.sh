@@ -11,7 +11,7 @@ qjs="$here/../components/quickjs-ng/quickjs-ng"
 # One object per source, cached, because quickjs.c alone is close to a minute.
 out="$here/.lazytest"
 mkdir -p "$out"
-flags="-O1 -g -I$qjs -I$here/../components/pocketjs_guest/include -DCONFIG_VERSION=\"host-test\" -Wno-unused-parameter"
+flags="-O1 -g -I$qjs -I$here/../components/kobako_guest/include -DCONFIG_VERSION=\"host-test\" -Wno-unused-parameter"
 # quickjs-vm: the VM hooks quickjs.c calls (L2c is not optional any more).
 for src in quickjs quickjs-vm libregexp libunicode cutils dtoa xsum; do
     [ -f "$qjs/$src.c" ] || continue

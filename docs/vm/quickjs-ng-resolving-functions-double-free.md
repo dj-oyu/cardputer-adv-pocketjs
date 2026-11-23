@@ -184,7 +184,7 @@ overflow) long before an allocation failure can occur, so upstream never
 sees this in practice.
 
 That assumption is only half true, and this repo's own architecture makes it
-concretely false. This fork's `CONFIG_POCKET_VM_FLATCALLS` path
+concretely false. This fork's `CONFIG_QJS_LEAN_FLATCALLS` path
 (`js_vm_flat_callable()`) special-cases a **direct bytecode call**
 (`OP_call`/`OP_call_method`) to an async function to skip the C recursion
 entirely -- but every call that reaches the async function through
@@ -203,7 +203,7 @@ So on **this fork's shipped default configuration** (flat calls on),
 `asyncFn.apply(null, [])` reaches `js_async_function_call` at recursion depth
 1 -- no deep recursion needed. Confirmed on this fork's host harness
 (`tools/vmtest/vmrun.c --fail-alloc N`, ASan build, default variant i.e.
-`CONFIG_POCKET_VM_FLATCALLS=1`):
+`CONFIG_QJS_LEAN_FLATCALLS=1`):
 
 ```js
 async function f() {}
@@ -292,7 +292,7 @@ previously allocated by thread T0 here:
 The same report, with the same three frames
 (`js_async_function_call` -> `js_async_function_free` -> `js_async_function_free0`
 -> `JS_FreeValueRT`) at the top, was also produced with the plain, direct
-call `f()` (no `.apply`) when built with `CONFIG_POCKET_VM_FLATCALLS`
+call `f()` (no `.apply`) when built with `CONFIG_QJS_LEAN_FLATCALLS`
 disabled (this fork's "recur" build variant, closer to upstream's control
 flow, at `--fail-alloc 1308` for that build's allocation sequence), and by
 failing any of the *earlier* sub-allocations inside the second

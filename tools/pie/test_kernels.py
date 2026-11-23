@@ -440,11 +440,11 @@ class TestCanopyKernel(unittest.TestCase):
             # assert about a pointer the assembly does not advance.
 
 
-FIR = os.path.join(ROOT, 'main', 'pocket', 'fir_pie.c')
+FIR = os.path.join(ROOT, 'main', 'kobako', 'fir_pie.c')
 
 
 class FirKernel(unittest.TestCase):
-    """fir8_pie against the scalar form it replaces (main/pocket/mp3_decode.c).
+    """fir8_pie against the scalar form it replaces (main/kobako/mp3_decode.c).
 
     Eight outputs in one pass, one tap at a time, with the window read as the
     unaligned pair of aligned blocks (EE.LD.128.USAR.IP + EE.SRC.Q). The

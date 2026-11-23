@@ -3,20 +3,15 @@ dependencies:
     source:
       type: idf
     version: 6.0.1
-  pocket-stack/pocketjs_guest:
-    dependencies:
-    - name: idf
-      version: '>=6.0,<6.2'
+  kobako_guest:
+    dependencies: []
     source:
-      path: components/pocketjs_guest
+      path: components/kobako_guest
       type: local
-    targets:
-    - esp32p4
-    - esp32s3
     version: 0.1.0
 direct_dependencies:
 - idf
-- pocket-stack/pocketjs_guest
-manifest_hash: b3cea3f8ffc693b7fe290af18bbf8b4925f8992799afd496d5a6aa62c25c2666
+- kobako_guest
+manifest_hash: 256c45f2cbdd3da18b437febede119445ad2d544cef65353c71f2d50701dc733
 target: esp32s3
 version: 3.0.0

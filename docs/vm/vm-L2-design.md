@@ -8,12 +8,12 @@
 
 | 段 | 内容 | 状態 |
 | --- | --- | --- |
-| L2a | 非移動フレームセグメント | 実装済み（`CONFIG_POCKET_VM_SEGFRAMES`） |
+| L2a | 非移動フレームセグメント | 実装済み（`CONFIG_QJS_LEAN_SEGFRAMES`） |
 | L2a 追補 | セグメントサイズの線形成長・ターン単位キャッシュ（D42/D43） | 実装済み |
-| L2b | 通常関数のフラット呼び出し | 実装済み（`CONFIG_POCKET_VM_FLATCALLS`、既定 on） |
+| L2b | 通常関数のフラット呼び出し | 実装済み（`CONFIG_QJS_LEAN_FLATCALLS`、既定 on） |
 | L2b 拡張 | JS から呼ぶ async 関数のフラット化（D31〜D38） | 実装済み |
 | L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（`-noyield` 変種が旧経路の対照） |
-| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | 実装済み（分類A/B、GC保護、Terminate/Discard。実測は results §4.5）。**2026-09-23 に `CONFIG_POCKET_VM_YIELD=y` が既定** |
+| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | 実装済み（分類A/B、GC保護、Terminate/Discard。実測は results §4.5）。**2026-09-23 に `CONFIG_QJS_LEAN_YIELD=y` が既定** |
 | L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | **完了**（tag `vm-L2`）。frame ガードの余裕・競合条件・総合関所・物理キーは results §8 |
 | TCO | 末尾呼び出しでのフレーム再利用 | 実験実装・host/device検証済み。観測可能な挙動維持のため既定 n で確定（[vm-tco-design.md](vm-tco-design.md) §6〜10、results §9.3） |
 | FAIR | 継続ターンでも pump を回す公平順序 | 実装済み・既定 n で確定。実機では利益が観測できず費用だけが見えた（results §9.2） |
@@ -134,7 +134,7 @@ N1〜N4を機構で埋めない決定はD3（§15）。
 
 帰結:
 
-- ウォッチドッグ述語（`pocketjs_guest_set_watchdog`）の返り値は「止めるか否か」の真偽値から「どの種別で止めるか」に広げる必要がある。ホストは唯一の `JS_SetInterruptHandler` 呼び出し口（`guest.c`）で述語だけ差し替えるので、変更はその型と読み手1箇所で済む。
+- ウォッチドッグ述語（`kobako_guest_set_watchdog`）の返り値は「止めるか否か」の真偽値から「どの種別で止めるか」に広げる必要がある。ホストは唯一の `JS_SetInterruptHandler` 呼び出し口（`guest.c`）で述語だけ差し替えるので、変更はその型と読み手1箇所で済む。
 - **YIELDは確保をしてはならない。** `build_backtrace` を通らないことが要件で、これは上流のOOM時use-after-free（[backlog.md](backlog.md) の独立の不具合 項目6）をYIELD経路については構造的に避けることにもなる。
 - **YIELDでfinallyを走らせない**のは仕様どおりだが、TERMINATEとの違いは「後で走る」か「二度と走らない」か。TERMINATEがfinallyを飛ばす現状はL2では直さない。
 - `await` 中断でPromiseがpendingのまま固まる問題（台帳03）はYIELDについては起きなくなる（例外にならないため）。**TERMINATEでは残る。**
@@ -384,7 +384,7 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 
 **この節はL2c全体の設計であり、部分実装済み**（実装状況は文書冒頭の表、実機統合はbacklog.md #11）。「実測」と明記していない数字は計算値または推定。前提（既決、変えない）: D1（YIELDは`done_generator`形の返り値で確保しない）、D2（`JSStackFrame`48B）、D4（所有者と`l2_flags`の専用ビット）、D8（Aの7地点とB=push後）、D9（JSValue表現を触らない）、D10（予算は文字どおりセグメントのバイト数、D38によりフラットasyncフレームは対象外）、D11・D12、床の持ち物4つ（§9.3）、D31〜D41。
 
-スイッチ: L2b拡張は既存の`CONFIG_POCKET_VM_FLATCALLS`の中。L2c本体は新設の`CONFIG_POCKET_VM_YIELD`（`depends on POCKET_VM_FLATCALLS`）で、offならA地点のslow pathは今の`JS_ThrowInterrupted`のまま。
+スイッチ: L2b拡張は既存の`CONFIG_QJS_LEAN_FLATCALLS`の中。L2c本体は新設の`CONFIG_QJS_LEAN_YIELD`（`depends on QJS_LEAN_FLATCALLS`）で、offならA地点のslow pathは今の`JS_ThrowInterrupted`のまま。
 
 ### 11.1 用語
 
@@ -482,7 +482,7 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 
 **実装時補足:** timerはguestのframe/continue APIを実行している間だけ張る（同じターンの残り予算）。pump・描画・起動evalでは張らず、API出口で必ず止める。timer callbackはguestを引数に保持せず、短いcritical section内のruntimeスロットだけに要求を送る。終了側も同じロックでスロットを空にしてからtimerを止め、runtime解放との競合を防ぐ。古いcallbackが遅れて来ても、新しいdeadlineより前には要求しない。stop準備はTerminate/Resumeし、asyncのC入口がスタック不足で再開を拒んだ場合にはDiscardで閉じてからhookへ進む。`vm_sched_drain`の締切はターン開始基準のまま、`budget.elapsed`は呼び出し開始からの時間へ訂正し、resume時間の二重計上を防ぐ。count modeではdrain累積時間を0のままにする。
 
-**D24r: guestの3状態と3起点。** `suspended`/`jobs_pending`の2ビットと`origin`（FRAME/JOB_HELD/JOB_ASYNC）。`jobs_pending = JS_IsJobPending(rt) || origin==JOB_HELD`（保留ジョブはリストに無いが論理的には先頭）。FAIRの`run_pumps`は`jobs_pending && !suspended`。実機の起動時evalは`JS_Eval`のままにする（§11.9）。**Backターン・stop hookの扱い**: `pocket_app_reset`のstop hook呼び出し（`run_hook`とペンディングジョブのdrainループ）はleaveターンと同様に武装しない・中断中なら先に鎖を完了させる・後ろ盾（中断中なら`JS_VMTerminate`+`JS_VMResume`で畳んでから進む）の3点で保護する。
+**D24r: guestの3状態と3起点。** `suspended`/`jobs_pending`の2ビットと`origin`（FRAME/JOB_HELD/JOB_ASYNC）。`jobs_pending = JS_IsJobPending(rt) || origin==JOB_HELD`（保留ジョブはリストに無いが論理的には先頭）。FAIRの`run_pumps`は`jobs_pending && !suspended`。実機の起動時evalは`JS_Eval`のままにする（§11.9）。**Backターン・stop hookの扱い**: `kobako_app_reset`のstop hook呼び出し（`run_hook`とペンディングジョブのdrainループ）はleaveターンと同様に武装しない・中断中なら先に鎖を完了させる・後ろ盾（中断中なら`JS_VMTerminate`+`JS_VMResume`で畳んでから進む）の3点で保護する。
 
 ### 11.9 閉じられなかったもの（設計上の恒久的な制約）
 

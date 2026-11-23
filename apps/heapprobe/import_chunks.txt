@@ -1,5 +1,5 @@
 # Static import's device and host checks (docs/vm/eval-peak.md section 9).
-# Embedded only in a POCKET_HEAPPROBE image (main/CMakeLists.txt); the host
+# Embedded only in a KOBAKO_HEAPPROBE image (main/CMakeLists.txt); the host
 # test tools/test_app_import.c reads this same list. .mjs = a module.
 app local.hello
 imok     import_ok.mjs

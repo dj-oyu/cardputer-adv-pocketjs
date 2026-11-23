@@ -164,7 +164,7 @@
 "t": "3883"
 }
 },
-"pocket_derby.c": {
+"kobako_derby.c": {
 "cull$isra$0": {
 "h": "60855e85c84f09d0",
 "t": "55585555"
@@ -229,19 +229,19 @@
 "h": "3cd63a8ed39da6d6",
 "t": "557877578"
 },
-"pocket_cos": {
+"lean_cos": {
 "h": "daef7737a8d813b2",
 "t": "585"
 },
-"pocket_sin": {
+"lean_sin": {
 "h": "f56668b15710fcb6",
 "t": "585558"
 },
-"pocket_trig_phase_of": {
+"lean_trig_phase_of": {
 "h": "0d861bc5644d1c8c",
 "t": "55885775"
 },
-"pocket_trig_sin_of_phase": {
+"lean_trig_sin_of_phase": {
 "h": "1a8c731399479335",
 "t": "55558555"
 },
@@ -258,7 +258,7 @@
 "t": "555555555"
 }
 },
-"pocket_input.c": {
+"kobako_input.c": {
 "js_key_query": {
 "h": "60ca04b1d628ca00",
 "t": "118811181"
@@ -272,7 +272,7 @@
 "t": "1"
 }
 },
-"pocket_kasane.c": {
+"kobako_kasane.c": {
 "apply_outcome": {
 "h": "727d72aa313eb216",
 "t": "00033777777777778888"
@@ -329,15 +329,15 @@
 "h": "a708e0830b683c5b",
 "t": "55557887777778"
 },
-"pocket_kasane_end_turn": {
+"kobako_kasane_end_turn": {
 "h": "6812f1c5eb7b34e4",
 "t": "000"
 },
-"pocket_kasane_needs_present": {
+"kobako_kasane_needs_present": {
 "h": "17a5c00f84050e8c",
 "t": "3"
 },
-"pocket_kasane_proc_publish_at": {
+"kobako_kasane_proc_publish_at": {
 "h": "f94de20deca5f629",
 "t": "3333338388833383"
 },
@@ -362,7 +362,7 @@
 "t": "333333333"
 }
 },
-"pocket_shiki_api.c": {
+"kobako_shiki_api.c": {
 "int32_arg": {
 "h": "cb727f72d8bbc009",
 "t": "555588888"
@@ -400,7 +400,7 @@
 "t": "333333338"
 }
 },
-"pocket_shiki_frame.c": {
+"kobako_shiki_frame.c": {
 "begin_impl": {
 "h": "fd1a0c3995f493e3",
 "t": "33333333333333735388537888888888888"
@@ -425,35 +425,35 @@
 "h": "10ded3c8763d8aa5",
 "t": "555555555555555555555885558888888888888888888888888888888888"
 },
-"pocket_proc_band_damage": {
+"kobako_proc_band_damage": {
 "h": "e8b92934b4155ef7",
 "t": "333333333338333337"
 },
-"pocket_proc_draw_fixed": {
+"kobako_proc_draw_fixed": {
 "h": "abb91a63fa31c9c3",
 "t": "55588555558555888855888855558588888888888888858858888888888888888"
 },
-"pocket_proc_draw_numbers": {
+"kobako_proc_draw_numbers": {
 "h": "200aa8214dd8d40d",
 "t": "5558"
 },
-"pocket_proc_end_turn": {
+"kobako_proc_end_turn": {
 "h": "cf9224624f3d05d6",
 "t": "3"
 },
-"pocket_proc_present_result": {
+"kobako_proc_present_result": {
 "h": "cfa681d6ee45849b",
 "t": "3833383377888888888"
 },
-"pocket_proc_shiki_draw": {
+"kobako_proc_shiki_draw": {
 "h": "bcea901e81f18975",
 "t": "5"
 },
-"pocket_proc_shiki_draw_inputs": {
+"kobako_proc_shiki_draw_inputs": {
 "h": "688bc523bb1132aa",
 "t": "338883333835363338888335383888888888888385555558877885588858"
 },
-"pocket_shiki_turn_take": {
+"kobako_shiki_turn_take": {
 "h": "25a161ec71eb67cd",
 "t": "5"
 }

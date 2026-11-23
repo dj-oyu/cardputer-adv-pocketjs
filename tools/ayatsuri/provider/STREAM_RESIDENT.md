@@ -1,17 +1,17 @@
 # APP-bound native streaming actor candidate
 
 The existing default-OFF `AYATSURI_STREAM_DISPLAY_CANDIDATE` option now also
-offers `pocket_kasane_stream_actor_bind`, `unbind` and `bound`. No automatic boot
-hook or data asset is added. The caller prepares the pocket APP lease, initializes
+offers `kobako_kasane_stream_actor_bind`, `unbind` and `bound`. No automatic boot
+hook or data asset is added. The caller prepares the kobako APP lease, initializes
 the streaming owner, produces an initial frame, and explicitly binds the owner,
 identity/generation, depth scratch and immutable preflight context. Binding
 activates that APP and refuses a second registration or a competing procedural
 background/pending native publication.
 
-Normal `pocket_kasane_present_complete` then uses the candidate when `produced`
+Normal `kobako_kasane_present_complete` then uses the candidate when `produced`
 is set, otherwise the committed READY snapshot. Producing a new frame makes
-`pocket_kasane_needs_present` true, without a separate caller invalidation. UI
-damage redraws the committed geometry through the actual pocket/Kasane renderer;
+`kobako_kasane_needs_present` true, without a separate caller invalidation. UI
+damage redraws the committed geometry through the actual kobako/Kasane renderer;
 no-damage presentation performs completion without rasterizing a full frame.
 READY redraw temporarily locks the frame owner against production. Failed drain
 retains that lock, even though no new snapshot was being promoted.
@@ -62,7 +62,7 @@ measured cost attribution or a speedup claim.
 
 ## Host verification
 
-`test_stream_display.py --sanitize --out <new-dir>` retains the actual pocket
+`test_stream_display.py --sanitize --out <new-dir>` retains the actual kobako
 regression harness and adds APP binding, normal-entry frame presentation, READY
 repaint pixel equality, no-damage completion, redraw drain failure, refusal of
 reset/unbind/production while borrowed, recovery, explicit unbind and reset

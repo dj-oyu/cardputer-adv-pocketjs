@@ -27,16 +27,16 @@ async function boot(initial, failRead=false, failWrite=false) {
   let time=0, saved=initial, writes=0, selected=initial&&initial.selected<12?initial.selected:0, reward=0;
   const k=makeKasane();
   const ctx={console:{log(){}},__petNow:()=>time,
-    pocket:{kasane:k.view,pet:{select:(n)=>{if(n!==undefined){if(failWrite)throw Object.assign(Error(),{code:'IO_ERROR',outcome:'not-applied'});selected=n;}return selected;},rewards:()=>reward},
+    kobako:{kasane:k.view,pet:{select:(n)=>{if(n!==undefined){if(failWrite)throw Object.assign(Error(),{code:'IO_ERROR',outcome:'not-applied'});selected=n;}return selected;},rewards:()=>reward},
       storage:{get:()=>failRead?Promise.reject(Error()):Promise.resolve(initial?{value:structuredClone(initial)}:null),
         set:(key,v)=>{assert.equal(key,'pet.v1');if(failWrite)return Promise.reject(Error());saved=JSON.parse(JSON.stringify(v));writes++;return Promise.resolve();}}}};
   // The host's side of a turn, as pet.js now registers for it: each set button
-  // bit is a press delivered to pocket.input.onAction, Back is the suspend hook
+  // bit is a press delivered to kobako.input.onAction, Back is the suspend hook
   // (the app keeps itself asleep on Back and saves there), then one onFrame.
   const ACT=[[L,'left'],[R,'right'],[U,'up'],[D,'down'],[E,'accept']];
   let hooks={},onFrame=null,onAction=null;
-  ctx.pocket.input={onAction(f){onAction=f;}};
-  ctx.pocket.app={start(h){hooks=h;},onFrame(f){onFrame=f;}};
+  ctx.kobako.input={onAction(f){onAction=f;}};
+  ctx.kobako.app={start(h){hooks=h;},onFrame(f){onFrame=f;}};
   ctx.frame=(b)=>{
     if(b&B){hooks.suspend();return;}
     for(const [bit,action] of ACT)if(b&bit)onAction({action,phase:'press'});

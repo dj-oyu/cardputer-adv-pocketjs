@@ -29,7 +29,7 @@ async function run() {
     },
     time: {sleep: async () => {++sleeps; await tick();}, now: () => 1},
   };
-  const context = {pocket: diagnostic, console: {log: () => {}}};
+  const context = {kobako: diagnostic, console: {log: () => {}}};
   vm.runInNewContext(lab, context);
   context.frame();
   for (let i = 0; i < 200 && !streamStarted; ++i) await tick();
@@ -44,7 +44,7 @@ async function run() {
   async function recovery(bytes) {
     let at = 0, removed = 0, closed = 0;
     const logs = [];
-    const pocket = {
+    const kobako = {
       fs: {
         requestFolder: async () => 'sd:/',
         stat: async () => ({sizeBytes: bytes.length}),
@@ -61,7 +61,7 @@ async function run() {
       },
       time: {sleep: tick},
     };
-    await vm.runInNewContext(recover, {pocket, console: {log: value => logs.push(value)}});
+    await vm.runInNewContext(recover, {kobako, console: {log: value => logs.push(value)}});
     return {removed, closed, logs};
   }
   const matched = await recovery(data);

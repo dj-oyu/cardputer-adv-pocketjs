@@ -12,7 +12,7 @@
 // periods: an average cannot tell a steady 16.5 ms from 16/17 alternating.
 #include "frame_bd.h"
 #include <stdatomic.h>
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+#ifdef CONFIG_KOBAKO_FRAME_BREAKDOWN
 #include "esp_log.h"
 #include "usb_console.h"
 #include "disp.h"
@@ -25,15 +25,15 @@
 #define NMODES 3u
 #define HIST 11u  /* <15, 15..23, >=24 ms */
 static const char *const MODE_NAME[NMODES]={"old","noyield","deadline"};
-/* POCKET_FRAME_BD_PRESS_AB: the block cache's pressure as measured, forced on,
- * forced off. POCKET_FRAME_BD_LOG_AB: whole-line log writes on/off. */
+/* KOBAKO_FRAME_BD_PRESS_AB: the block cache's pressure as measured, forced on,
+ * forced off. KOBAKO_FRAME_BD_LOG_AB: whole-line log writes on/off. */
 static const char *const PRESS_NAME[3]={"asis","on","off"};
 static uint32_t cur_js,cur_rn,cur_sd,cur_tick;
 static bool cur_press;
 static uint64_t s_js,s_rn,s_sd,s_tick,s_held,s_period;
 static uint32_t max_period,max_held,max_js,max_log,late16,late33,n,press,yields;
 static uint16_t hist[HIST];
-#ifdef CONFIG_POCKET_FRAME_BD_PACE_AB
+#ifdef CONFIG_KOBAKO_FRAME_BD_PACE_AB
 static unsigned mode=FRAME_BD_PACE_OLD;
 #else
 static unsigned mode=FRAME_BD_PACE_NOYIELD;
@@ -44,10 +44,10 @@ bool frame_bd_disp_on_task(void){return disp_task_on;}
 /* P1: DISP_AB rotates inline, task at 5, task at 6 (input_task's priority:
  * equal priority does not preempt, so a poll waits for the task to block). */
 static unsigned disp_mode=1;
-/* POCKET_FRAME_BD_LCD_DIRECT_AB (BOARD_LCD_DIRECT builds): the LCD send path,
+/* KOBAKO_FRAME_BD_LCD_DIRECT_AB (BOARD_LCD_DIRECT builds): the LCD send path,
  * flipped every 3 windows so each display mode sees both. Starts direct, as
  * board.c does. */
-#if defined(CONFIG_POCKET_FRAME_BD_LCD_DIRECT_AB)&&defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+#if defined(CONFIG_KOBAKO_FRAME_BD_LCD_DIRECT_AB)&&defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
 static int lcd_direct=1;
 #define LCD_PATH_NAME (lcd_direct?"direct":"queue")
 #else
@@ -182,23 +182,23 @@ void frame_bd_period(uint32_t held,uint32_t period){
     max_period=max_held=max_js=max_log=late16=late33=n=press=yields=0;
     for(unsigned i=0;i<HIST;i++)hist[i]=0;
     window++;
-#ifdef CONFIG_POCKET_FRAME_BD_PACE_AB
+#ifdef CONFIG_KOBAKO_FRAME_BD_PACE_AB
     mode=(mode+1u)%NMODES;
 #endif
-#ifdef CONFIG_POCKET_FRAME_BD_DISP_AB
+#ifdef CONFIG_KOBAKO_FRAME_BD_DISP_AB
     disp_mode=(disp_mode+1u)%3u;
     disp_task_on=disp_mode!=0u;
     if(disp_task_on)disp_set_priority(disp_mode==1u?5u:6u);
 #endif
-#if defined(CONFIG_POCKET_FRAME_BD_LCD_DIRECT_AB)&&defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
+#if defined(CONFIG_KOBAKO_FRAME_BD_LCD_DIRECT_AB)&&defined(BOARD_LCD_DIRECT)&&BOARD_LCD_DIRECT
     /* Between frames on the UI task; P1 joins the display task at once, so
      * nothing is in flight that board_lcd_direct_set would not reap. */
     if(window%3u==0u)lcd_direct=board_lcd_direct_set(!lcd_direct);
 #endif
-#ifdef CONFIG_POCKET_FRAME_BD_PRESS_AB
+#ifdef CONFIG_KOBAKO_FRAME_BD_PRESS_AB
     press_mode=(press_mode+1u)%3u;
 #endif
-#ifdef CONFIG_POCKET_FRAME_BD_LOG_AB
+#ifdef CONFIG_KOBAKO_FRAME_BD_LOG_AB
     /* Flipped every 3 windows so each press mode sees both. */
     if(window%3u==0u){log_whole^=1u;usb_console_log_whole(log_whole!=0);}
 #endif

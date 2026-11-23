@@ -126,7 +126,7 @@ int main(void){
     CHECK(memcmp(panel,committed,sizeof(panel))==0);
 
     /* A banded invalidate repaints its bands and nothing else. This is the
-     * contract the text field of pocket_text.c depends on: it composites over
+     * contract the text field of kobako_text.c depends on: it composites over
      * the strip, so Kasane cannot see its damage, and telling Kasane
      * "everything" made one keystroke a 64,800-byte repaint. The panel is
      * scribbled over first so a band that is NOT redrawn stays visibly wrong --

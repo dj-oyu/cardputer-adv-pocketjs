@@ -2,7 +2,7 @@
 #define main retained_meshbench_main
 #include "test_meshbench_app.c"
 #undef main
-#include "pocket_app_load.h"
+#include "kobako_app_load.h"
 #include "app_chunks_host.h"
 #include <time.h>
 static bool scene_double_sided;
@@ -19,7 +19,7 @@ static void phase(JSRuntime *rt,const char *name){
 }
 static void call_time(JSContext *ctx,JSValueConst fn,double time){
  JSValue arg=JS_NewFloat64(ctx,time),result=JS_Call(ctx,fn,JS_UNDEFINED,1,&arg);
- CHECK(!JS_IsException(result));JS_FreeValue(ctx,result);JS_FreeValue(ctx,arg);pocket_kasane_end_turn();
+ CHECK(!JS_IsException(result));JS_FreeValue(ctx,result);JS_FreeValue(ctx,arg);kobako_kasane_end_turn();
 }
 static void resources(JSContext *ctx){
  eval(ctx,"S.stats(statsOut);M.stats(modelOut)");JSValue g=JS_GetGlobalObject(ctx),s=JS_GetPropertyStr(ctx,g,"statsOut"),m=JS_GetPropertyStr(ctx,g,"modelOut");
@@ -56,13 +56,13 @@ int main(int argc,char **argv){
  app_registry_select("local.meshbench");CHECK(app_registry_current()&&strcmp(app_registry_current()->id,"local.meshbench")==0);
  size_t host_table_before=live_bytes;CHECK(app_chunks_host_read("tools/ayatsuri/model/scene_motion_chunks.txt")==0);size_t host_table_bytes=live_bytes-host_table_before;
  printf("SCENE_HOST_CHUNKS requested_bytes=%zu file_buffers_names_paths host_only_immutable_flash_in_firmware\n",host_table_bytes);
- JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
- host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(pocket_kasane_install(ctx,NULL)==ESP_OK);CHECK(pocket_shape_install(ctx,NULL)==ESP_OK);
- eval(ctx,"globalThis.pocket={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
- phase(rt,"baseline");CHECK(pocket_app_load_install(ctx)==ESP_OK);
+ JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_LeanHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
+ host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(kobako_kasane_install(ctx,NULL)==ESP_OK);CHECK(kobako_shape_install(ctx,NULL)==ESP_OK);
+ eval(ctx,"globalThis.kobako={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
+ phase(rt,"baseline");CHECK(kobako_app_load_install(ctx)==ESP_OK);
  /* The retained namespace shim contributes eagerly to globals. Match its
-  * ordinary pocket alias, while the chunk loader itself is production C. */
- eval(ctx,"pocket.app=app;pocket.app.load('native-scene');pocket.app.load('motion');const sameBuilder=AyatsuriNative;pocket.app.load('native-scene');if(sameBuilder!==AyatsuriNative)throw Error('chunk reload')");
+  * ordinary kobako alias, while the chunk loader itself is production C. */
+ eval(ctx,"kobako.app=app;kobako.app.load('native-scene');kobako.app.load('motion');const sameBuilder=AyatsuriNative;kobako.app.load('native-scene');if(sameBuilder!==AyatsuriNative)throw Error('chunk reload')");
  load_script(ctx,"tools/kasane_contract/scene_motion_scenario.js");phase(rt,"libraries");
  JSValue global=JS_GetGlobalObject(ctx),direct=JS_GetPropertyStr(ctx,global,"tickDirect"),scene=JS_GetPropertyStr(ctx,global,"tickScene");JS_FreeValue(ctx,global);
  static const double times[]={0,1.2,2.8,4.1,10.5,31,79.5,80,40,2.9,2.9,0};
@@ -73,8 +73,8 @@ int main(int argc,char **argv){
    double t=times[k%12];size_t before=alloc_calls;call_time(ctx,direct,t);CHECK(present()==KSN_OK);if(k>=24)warm_direct+=alloc_calls-before;memcpy(reference,panel,sizeof panel);
    if(k%12==0||k%12==2){unsigned red=0,blue=0;for(unsigned i=0;i<240*135;i++){red+=panel[i]==0xf800;blue+=panel[i]==0x001f;}CHECK(red>20);if(k%12==0)CHECK(blue>20);else CHECK(!blue);}
    before=alloc_calls;call_time(ctx,scene,t);
-   if(k==37){fail_send=true;CHECK(present()==KSN_IO&&pocket_proc_pending());}
-   CHECK(present()==KSN_OK&&!pocket_proc_pending()&&!memcmp(panel,reference,sizeof panel));
+   if(k==37){fail_send=true;CHECK(present()==KSN_IO&&kobako_proc_pending());}
+   CHECK(present()==KSN_OK&&!kobako_proc_pending()&&!memcmp(panel,reference,sizeof panel));
    if(k>=24)warm_scene+=alloc_calls-before;
    uint32_t hash=2166136261u;for(unsigned i=0;i<240*135;i++){hash^=panel[i];hash*=16777619u;}
    if(!cycle&&k<12)stable[k]=hash;else CHECK(stable[k%12]==hash);
@@ -92,14 +92,14 @@ int main(int argc,char **argv){
   printf("SCENE_SCALE_PASS nonuniform reflected=%s restore original_single_winding_preserved\n",scene_double_sided?"explicit_double_visible":"single_culled");
   eval(ctx,"invalidSetters()");CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
   eval(ctx,"noHiddenClock()");CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
-  eval(ctx,"failedEvaluate()");CHECK(!pocket_proc_pending());CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
+  eval(ctx,"failedEvaluate()");CHECK(!kobako_proc_pending());CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
   eval(ctx,"secondScene()");CHECK(present()==KSN_OK&&memcmp(panel,reference,sizeof panel));
   eval(ctx,"recover();callbackGuard()");CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
   eval(ctx,"tickScene(0);closeScenes()");JS_RunGC(rt);phase(rt,"disposed_sources_pending_frame");CHECK(present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
   eval(ctx,"forgetScenes()");JS_RunGC(rt);phase(rt,"unloaded");
  }
- pocket_proc_mesh_bytes memory;pocket_proc_mesh_memory(&memory);
+ kobako_proc_mesh_bytes memory;kobako_proc_mesh_memory(&memory);
  printf("SCENE_MOTION_HOST_PASS cycles=3 frames_per_cycle=120 strip=%u direct_rows=%d double=%u requested_peak=%zu snapshot_capacity=%zu workspace=%zu metadata=%zu rigid_hierarchy independent_instances asymmetric_seek pause IO_retry_ACK dispose\n",strip_rows,g_ksn_image_rows,scene_double_sided,peak_bytes,memory.candidate+memory.committed,memory.workspace,memory.metadata);
- JS_FreeValue(ctx,scene);JS_FreeValue(ctx,direct);pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();app_chunks_host_clear();CHECK(!live_bytes&&!live_blocks);
+ JS_FreeValue(ctx,scene);JS_FreeValue(ctx,direct);kobako_shiki_api_reset();kobako_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();app_chunks_host_clear();CHECK(!live_bytes&&!live_blocks);
  puts("SCENE_MOTION_RELEASE_PASS tracked_live=0 blocks=0");return 0;
 }

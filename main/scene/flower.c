@@ -1,7 +1,7 @@
 #include "flower_parts.h"
 #include "scene_mem.h"
 #include "garden.h"
-#include "../pocket/random_stream.h"
+#include "../kobako/random_stream.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -313,7 +313,7 @@ static flower_species_t bloom_species=FLOWER_VALLEY;
 
 // Independent streams: changing botanical draws cannot change the weather.
 // Host seed acquisition is fixed; the device acquires a seed once at first use.
-static pocket_random_t bloom_rng,bloom_layout_rng;
+static kobako_random_t bloom_rng,bloom_layout_rng;
 static uint32_t bloom_weather_seed;
 static float bloom_weather_time;
 static bool bloom_random_ready;
@@ -321,7 +321,7 @@ static uint32_t bloom_garden_seed,bloom_garden_old_seed;
 static unsigned bloom_garden_mix=256;
 #define FLOWER_GARDEN_FADE_S 3.0f
 static uint32_t bloom_random(void) {
-    return pocket_random_next(&bloom_rng);
+    return kobako_random_next(&bloom_rng);
 }
 // One of the other botanicals, so a draw never repeats the plant already up:
 // a rotation that shows the same flower twice looks like it has stopped.
@@ -616,13 +616,13 @@ void flower_prepare_rotating(float dt,int tilt_x,int tilt_y) {
     if(!isfinite(dt)||dt<0)dt=0;
     dt=fminf(dt,.1f);
     if(!bloom_random_ready) {
-        pocket_random_t root;
-        pocket_random_init(&root,pocket_random_seed());
+        kobako_random_t root;
+        kobako_random_init(&root,kobako_random_seed());
         // Domain tags avoid starting the consumers one adjacent PRNG step apart.
-        pocket_random_init(&bloom_rng,pocket_random_next(&root)^0xA511E9B3u);
-        pocket_random_init(&bloom_layout_rng,pocket_random_next(&root)^0x63D83595u);
-        bloom_weather_seed=pocket_random_next(&root)^0xB5297A4Du;
-        bloom_garden_seed=bloom_garden_old_seed=pocket_random_next(&bloom_layout_rng);
+        kobako_random_init(&bloom_rng,kobako_random_next(&root)^0xA511E9B3u);
+        kobako_random_init(&bloom_layout_rng,kobako_random_next(&root)^0x63D83595u);
+        bloom_weather_seed=kobako_random_next(&root)^0xB5297A4Du;
+        bloom_garden_seed=bloom_garden_old_seed=kobako_random_next(&bloom_layout_rng);
         bloom_random_ready=true;
     }
     // The garden's own 128-second phase wrap is seamless. Do not use the
@@ -660,7 +660,7 @@ void flower_prepare_rotating(float dt,int tilt_x,int tilt_y) {
                 bloom_view=0;
                 bloom_species=bloom_next(bloom_species);
                 bloom_garden_old_seed=bloom_garden_seed;
-                bloom_garden_seed=pocket_random_next(&bloom_layout_rng);
+                bloom_garden_seed=kobako_random_next(&bloom_layout_rng);
             }
             bloom_elapsed=0;
         }

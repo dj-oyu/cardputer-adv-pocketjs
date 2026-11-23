@@ -1,6 +1,6 @@
 // Host check, no board involved:
 //   gcc -std=c11 -O1 -Wall -Wextra -fsanitize=address,undefined -I main/text
-//       tools/test_app_registry.c main/pocket/app_registry.c -o /tmp/test-registry
+//       tools/test_app_registry.c main/kobako/app_registry.c -o /tmp/test-registry
 //   /tmp/test-registry
 //
 // app_registry.c is the part of section 3 that decides things: whether an app
@@ -9,7 +9,7 @@
 // of them are the kind that is wrong in one corner rather than everywhere — a
 // ">=" read as ">", a picked work still refused, a title carrying a newline
 // into the picker's row. They are settled here.
-#include "../main/pocket/app_registry.h"
+#include "../main/kobako/app_registry.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,7 +75,7 @@ static void test_admission(void) {
     const app_manifest_t *play=app_registry_find("local.playground");
     const app_manifest_t *hello=app_registry_find("local.hello");
     const app_manifest_t *megademo=app_registry_find("local.megademo");
-    CHECK(hello&&hello->runtime==APP_RUNTIME_POCKET);
+    CHECK(hello&&hello->runtime==APP_RUNTIME_KOBAKO);
     CHECK(megademo && !strcmp(megademo->title,"MEGADEMO"));
     CHECK(megademo && !strcmp(megademo->entry,"apps/kasane/proc_megademo.js"));
     CHECK(megademo && megademo->works==APP_WORKS_NONE);
@@ -112,11 +112,11 @@ static void test_admission(void) {
     // The pet's IMU is optional, so the same absent capability does not stop it.
     CHECK(app_registry_admit(pet,"0.1.0",supported,NULL,reason,sizeof reason));
 
-    // Every app is a pocket-app now (the legacy runtime is gone), so every app
+    // Every app is a kobako-app now (the legacy runtime is gone), so every app
     // is held to its API range -- the pet included.
     missing=NULL;
     CHECK(!app_registry_admit(pet,"9.9.9",supported,NULL,reason,sizeof reason));
-    CHECK(pet&&pet->runtime==APP_RUNTIME_POCKET);
+    CHECK(pet&&pet->runtime==APP_RUNTIME_KOBAKO);
     CHECK(!app_registry_admit(play,"0.2.0",supported,NULL,reason,sizeof reason));
     CHECK(!strncmp(reason,"NEEDS API",9));
     CHECK(app_registry_admit(play,"0.1.0",supported,NULL,reason,sizeof reason));
@@ -159,7 +159,7 @@ static void test_wants(void) {
     CHECK(!app_registry_wants(companion,"net.wifi"));   // named neither list
     CHECK(!app_registry_wants(pet,"net.http"));
     CHECK(app_registry_wants(pet,"sensors.imu"));
-    // pocket.pet is installed only for the manifests that name pet.companion
+    // kobako.pet is installed only for the manifests that name pet.companion
     // (app_session.c); every other app must not be handed it.
     CHECK(app_registry_wants(pet,"pet.companion"));
     CHECK(app_registry_wants(companion,"pet.companion"));

@@ -930,7 +930,7 @@ static int garden_layout_shape(unsigned seed,int component) {
     return (int)(h%(unsigned)(range*2+1))-range;
 }
 void garden_random_init(GardenFrame *f,uint32_t seed) {
-    pocket_random_init(&f->decor_rng,seed);
+    kobako_random_init(&f->decor_rng,seed);
     f->decor_ready=false;
 }
 static void garden_decor_prepare(GardenFrame *f) {
@@ -938,7 +938,7 @@ static void garden_decor_prepare(GardenFrame *f) {
     for(int slot=0;slot<4;slot++) {
         unsigned cycle=(((unsigned)f->phase+(unsigned)slot*4317u)&65535u)>>14;
         if(!f->decor_ready||f->decor_cycle[slot]!=cycle) {
-            f->decor_seed[slot]=pocket_random_next(&f->decor_rng);
+            f->decor_seed[slot]=kobako_random_next(&f->decor_rng);
             f->decor_cycle[slot]=(uint8_t)cycle;
         }
     }

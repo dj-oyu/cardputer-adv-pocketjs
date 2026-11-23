@@ -15,7 +15,7 @@ USB の 1 バイトだけで起動する（`main/main.c` の `usb_stroke()`、`m
 | B | `deep_recursion.js` | 起動時に測った上限の 3/4 まで再帰。C スタックの経路 |
 | C | `closures.js` | クロージャ 500 個を作って呼ぶ。`JSVarRef` の経路 |
 | D | `promise_chain.js` | 長さ 40 の `.then` 連鎖。ジョブ件数とキュー長 |
-| E | `io_wait.js` | `pocket.time.sleep(10)` を自分の `.then` から張り直す。完了遅延 |
+| E | `io_wait.js` | `kobako.time.sleep(10)` を自分の `.then` から張り直す。完了遅延 |
 | F | `async_generator.js` | `for await` で async generator を 20 回。中断・再開と await の往復 |
 
 **`F` の取り合い（2026-09-23に解消）**: ホーム画面の `F` は FPU 遅延計測にも割り当てられていて、`usb_stroke()` の並び順のせいでワークロードに届いていなかった。この字での採取は、FPU 計測が入ってから 2026-09-23 までのあいだ、窓が出ないまま失敗していた（`main/main.c` で順序を直した）。
@@ -40,15 +40,15 @@ USB文字は順に`G H I J K O`。キャッシュ方針は変更せず、実行�
 
 `P` + マスク（1=UI、2=音声、4=Wi-Fi）。**ワークロードの字とは別で、指定は残る** ——
 1 つの条件で 6 本を続けて走らせるため。`condition.js` がワークロードの `frame()` を包み、
-`app_session.c` がワークロードの評価の**後**に評価する（`pocketjs_guest_eval` が毎回
+`app_session.c` がワークロードの評価の**後**に評価する（`kobako_guest_eval` が毎回
 `globalThis.frame` を読み直すので、包んだ関数がそのまま呼ばれる）。
 
 | 条件 | 字 | 実際に動くもの |
 | --- | --- | --- |
 | base | `P` | ワークロードだけ |
-| ui | `Q` | `pocket.kasane` の scene（background + rect + text）を作り、**毎フレーム** `setText` して submit。合成と転送が毎ターンに入る（2026-09-23に旧 `pocket.ui` から書き直した。その API は CP24–25 で削除済み） |
-| audio | `R` | `pocket.audio.tone` 440Hz 1 秒を完了から張り直す。合成も I2S も本物で、優先度 7 の音声タスクが優先度 5 の ui タスクを止める |
-| wifi | `T` | `pocket.net.wifi.acquire` で走行中ずっとリンクを保持し、3 秒ごとに GET を 1 回、本文を EOF まで読む |
+| ui | `Q` | `kobako.kasane` の scene（background + rect + text）を作り、**毎フレーム** `setText` して submit。合成と転送が毎ターンに入る（2026-09-23に旧 `kobako.ui` から書き直した。その API は CP24–25 で削除済み） |
+| audio | `R` | `kobako.audio.tone` 440Hz 1 秒を完了から張り直す。合成も I2S も本物で、優先度 7 の音声タスクが優先度 5 の ui タスクを止める |
+| wifi | `T` | `kobako.net.wifi.acquire` で走行中ずっとリンクを保持し、3 秒ごとに GET を 1 回、本文を EOF まで読む |
 | all | `W` | 上の 3 つ同時 |
 
 条件の側が失敗したときは `VMCOND` の行を出して**続ける**（セッションは落とさない）。採取
@@ -65,7 +65,7 @@ QuickJS が投げる値。バグではなく、内部 RAM が足りないとい�
 
 いまの宛先は**この機体自身のアドレスから作った LAN のゲートウェイ**
 （`192.168.1.42` → `http://192.168.1.1/`）。平文 HTTP は private address にだけ許されており
-（`main/pocket/pocket_net.c` の `url_check`）、時計の同期も PC 側のサーバーも要らない。
+（`main/kobako/kobako_net.c` の `url_check`）、時計の同期も PC 側のサーバーも要らない。
 それでも要求は `NET_PLAIN_MIN_FREE`（12KiB）の門で断られることがあり、その回は
 `VMCOND http OUT_OF_MEMORY ...` として残る。
 

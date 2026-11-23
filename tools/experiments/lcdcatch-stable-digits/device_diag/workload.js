@@ -1,5 +1,5 @@
 // Disposable diagnostic only. Native key query is unchanged; _diag seeds one press.
-const diagFrame=globalThis.frame,diagMark=pocket.input._diag;
+const diagFrame=globalThis.frame,diagMark=kobako.input._diag;
 let diagTurn=0,diagFrames=0;
 globalThis.frame=function(){
   ++diagTurn;

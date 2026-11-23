@@ -5,7 +5,7 @@
 泡、ヤシの葉の縁を流れる光、走査線と VHS のトラッキングのノイズ）。メニューの index 7。
 
 **2026-11-03 に描画を Shiki に移した。** それまでは Kasane の保持シーン（75 コマンド、キャッシュの
-テンプレートとインスタンス、半透明の図形）で海を描いていた。いまは画面の全体を `pocket.kasane.shiki` の
+テンプレートとインスタンス、半透明の図形）で海を描いていた。いまは画面の全体を `kobako.kasane.shiki` の
 組み込みの式 12 本（`stress_prog.js`）が毎フレーム描き、式は実機では JIT の対象になる
 （[docs/kasane/shiki-jit.md](../../docs/kasane/shiki-jit.md)）。保持シーンは Shiki の画面（`tx.image`）と
 その上の HUD（題字・段階・状態の 2 行・メーター）の 9 コマンドだけ。下の「実測」以降の節は、移す前の版の記録。
@@ -19,10 +19,10 @@
   - LV3 は実際に確保失敗まで積み、捕まえてすべて捨て、また積む（`STRESS_OOM`）。確保失敗は
     `app_session.c` がログに残すだけで、アプリは続く。途中で失敗した `replace` は参照をすべて古くするので、
     失敗したフレームの次はシーンを作り直す。途中で失敗した Shiki のフレームは、次の `beginFrame` が捨て直す。
-  - `pocket.memory.onPressure` はレベル・原因を購読する。LV3 では割り当て失敗 bit の通知時に
+  - `kobako.memory.onPressure` はレベル・原因を購読する。LV3 では割り当て失敗 bit の通知時に
     保持プールを破棄する。初回 OOM を意図的に残し、通知 callback 内ではログや追加配列を作らない。
 - **ネイティブの `Uint8Array`**（F3b の実機確認、`docs/vm/builtin-floor-plan.md` §17.3）: 2 フレームに 1 回
-  `assets:/hello.js` を 1 KB ずつ `pocket.fs` で読む。読んだ塊もメモリの負荷に入る。最初の塊で、JS がまだ
+  `assets:/hello.js` を 1 KB ずつ `kobako.fs` で読む。読んだ塊もメモリの負荷に入る。最初の塊で、JS がまだ
   グローバルの `Uint8Array` を読んでいない状態から、ネイティブが作ったものの `prototype`・`constructor` が
   グローバルと一致するかを確かめる（`STRESS_NATIVE ok|NG`）。
 - **描画**: 1 フレームに `drawMany` 1 回で 18 回の draw（奥から手前へ、1 回の入力は 5 個）。空と海は 1 行おきに
@@ -36,7 +36,7 @@
   行う換算（[shiki-spec.md](../../docs/kasane/shiki-spec.md) §2.4、半分は 0 から遠い方）と同じ丸めで換算するので、
   式に届く値は前の版と同じ。整数の座標はシフトだけ。VHS が画面外で待つ間は `drawMany` の `count` で最後の draw を
   省く。HUD は段階と `native` の行を変わった時だけ `setText` し、`setRect` は整数 4 つ。ターンの中で配列・
-  クロージャを作らない（残る確保は `load()` の塊と `pocket.fs` の読み取りで、それが試験の負荷）。
+  クロージャを作らない（残る確保は `load()` の塊と `kobako.fs` の読み取りで、それが試験の負荷）。
   `onPressure` の callback は確保をしない。LV3 は本当の割り当て失敗の時だけ保持プールを捨て、最初の OOM と
   その回復の確認を残す。
 
@@ -94,7 +94,7 @@
   画面を確認するときは `--launch-only` を付ける。`STRESS_READY` と60フレーム進行を確認して
   ポートを閉じ、アプリは終了しない。
 - ホスト: `bash tools/build_stress_app_test.sh && /tmp/test-stress-app`（WSL、Node 16 以上）。実物の QuickJS・
-  `pocket.kasane`・`pocket.kasane.shiki`（式は firmware と同じ組み込みの表）で 900 フレーム回し、
+  `kobako.kasane`・`kobako.kasane.shiki`（式は firmware と同じ組み込みの表）で 900 フレーム回し、
   Kasane の検証に通らないシーン、Shiki の draw の失敗、例外を焼く前に見つける。
   `STRESS_PPM=<prefix>` で 90・240・420 フレーム目の画面を PPM に書く。
   - `M32=1 bash tools/build_stress_app_test.sh && /tmp/test-stress-app-m32` は実機と同じ 8 B の JSValue・4 B のポインタ

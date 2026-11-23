@@ -1,14 +1,14 @@
 // USB diagnostic b: another SD track with 16 KiB deliberately retained by JS.
 (function () {
   const folder = 'sd:/KAKATO/KARA OK 2nd Edition';
-  const view = pocket.kasane.mount({version: 1,
+  const view = kobako.kasane.mount({version: 1,
     slots: {elapsed: {type: 'text', capacity: 8},
             frames: {type: 'u32'}, starved: {type: 'u32'}, streamId: {type: 'u32'}},
     nodes: [
       {type: 'rect', bounds: [0, 0, 96, 24], color: 0x060c1aff},
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
     ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
-  const source = pocket.audio.outputSource({sampleMs: 33});
+  const source = kobako.audio.outputSource({sampleMs: 33});
   let pressure = null;
   let bound = false;
   let playerHandle = null;
@@ -19,7 +19,7 @@
   async function chooseTrack() {
     let cursor = null;
     for (let page = 0; page < 8; page++) {
-      const listed = await pocket.fs.list(folder,
+      const listed = await kobako.fs.list(folder,
         cursor ? {limit: 16, cursor: cursor} : {limit: 16});
       for (const entry of listed.entries) {
         if (entry.kind === 'file' && entry.accessible &&
@@ -41,14 +41,14 @@
   }
   async function prepare() {
     try {
-      const root = await pocket.fs.requestFolder('sd');
+      const root = await kobako.fs.requestFolder('sd');
       if (root !== 'sd:/') throw new Error('SD folder not granted');
       const track = await chooseTrack();
       console.log('KSN_OUTPUT_SOURCE TRACK ' + track);
       pressure = new Uint8Array(16384);
       for (let at = 0; at < pressure.length; at += 4096) pressure[at] = 0x5a;
       console.log('KSN_OUTPUT_SOURCE LOW_HEAP bytes=' + pressure.length);
-      playerHandle = await pocket.audio.player.open({source: track});
+      playerHandle = await kobako.audio.player.open({source: track});
       const info = playerHandle.info();
       console.log('KSN_OUTPUT_SOURCE OPEN codec=' + info.codec +
                   ' durationMs=' + info.durationMs);
@@ -58,12 +58,12 @@
         if (event.state === 'error') fail('PLAYBACK', event.error);
       });
       await playerHandle.play();
-      playStartMs = pocket.time.now();
+      playStartMs = kobako.time.now();
       console.log('KSN_OUTPUT_SOURCE PLAY');
     } catch (error) { fail('PREPARE', error); }
   }
   globalThis.frame = function () {
-    if (playStartMs && !closed && pocket.time.now() - playStartMs >= 46000) {
+    if (playStartMs && !closed && kobako.time.now() - playStartMs >= 46000) {
       closed = true;
       const status = playerHandle.status();
       console.log('KSN_OUTPUT_SOURCE FINAL positionMs=' + status.positionMs +

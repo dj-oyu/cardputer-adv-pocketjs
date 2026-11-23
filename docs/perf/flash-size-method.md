@@ -50,8 +50,8 @@
 ```bash
 . /opt/esp-idf/export.sh
 idf.py -B build_base build && git checkout -- dependencies.lock
-cp build_base/cardputer_pocketjs.map /workspace/knscratch/size/base/<commit>.map
-python3 tools/memlog.py --map build_base/cardputer_pocketjs.map    # flash / DIRAM の基準
+cp build_base/cardputer_kobako.map /workspace/knscratch/size/base/<commit>.map
+python3 tools/memlog.py --map build_base/cardputer_kobako.map    # flash / DIRAM の基準
 T=tools/size
 python3 $T/member_bytes.py <map> --total                           # 画像全体の配置合計
 ```
@@ -61,7 +61,7 @@ python3 $T/member_bytes.py <map> --total                           # 画像全�
 python3 $T/member_bytes.py <map> compiler_builtins     # 会員ごとのバイト
 python3 $T/map_census.py <map> --member compiler_builtins --top 20
 ```
-`included` 節を会員ごとに読むと「ours:libmain.a(pocket_bridge.c.obj)(__fixdfsi)」のように
+`included` 節を会員ごとに読むと「ours:libmain.a(kobako_bridge.c.obj)(__fixdfsi)」のように
 **我々のファイルとシンボル名**が出る。ここが入口リスト。会員名の cgu 番号も控える。
 
 ### Step 2: 参照元の分類で薄さランキングを出す
@@ -97,8 +97,8 @@ xtensa-esp-elf-addr2line -f -e $O 0x50                          # → ソース�
 trig を 0.0f に）。挙動は壊れてよい。**この実装はコミットしない**。
 ```bash
 idf.py -B build_stub build && git checkout -- main/ dependencies.lock
-python3 $T/member_bytes.py build_stub/cardputer_pocketjs.map compiler_builtins
-python3 $T/member_bytes.py build_stub/cardputer_pocketjs.map --total
+python3 $T/member_bytes.py build_stub/cardputer_kobako.map compiler_builtins
+python3 $T/member_bytes.py build_stub/cardputer_kobako.map --total
 ```
 落ちない場合の典型: ② の理由（他の参照元がいる）／内部連鎖の別入口が生きている／
 その会員が別の我々のコードの別シンボルも提供している。**落ちなければここで止める**（書き換えない）。
@@ -112,9 +112,9 @@ python3 $T/member_bytes.py build_stub/cardputer_pocketjs.map --total
 ### Step 6: 本実装のビルドで実測してコミット
 ```bash
 idf.py -B build_new build && git checkout -- dependencies.lock
-python3 $T/member_bytes.py build_new/cardputer_pocketjs.map compiler_builtins   # 会員の前後
-python3 tools/memlog.py --map build_new/cardputer_pocketjs.map                  # flash / DIRAM
-stat -c %s build_new/cardputer_pocketjs.bin
+python3 $T/member_bytes.py build_new/cardputer_kobako.map compiler_builtins   # 会員の前後
+python3 tools/memlog.py --map build_new/cardputer_kobako.map                  # flash / DIRAM
+stat -c %s build_new/cardputer_kobako.bin
 ```
 コミットメッセージには「何を選んだか・実測値（bin / flash / DIRAM / 落ちた会員とバイト数）・
 実機で未確認の点」を書く。1 関心 1 コミット。
@@ -133,8 +133,8 @@ memlog の flash は −1,312 B しか動かなかった。**主張に使うの�
 
 ```
 我々が入口になっている compiler_builtins 会員
-  cgu.13  10,244 B  <- main/pocket/pocket_bridge.c の __fixdfsi（double→int 変換）
-  cgu.04   2,248 B  <- main/pocket/pocket_av.c の __gedf2（double の比較）
+  cgu.13  10,244 B  <- main/kobako/kobako_bridge.c の __fixdfsi（double→int 変換）
+  cgu.04   2,248 B  <- main/kobako/kobako_av.c の __gedf2（double の比較）
                         └ 内部で sinf を呼ぶため、これが居る限り trig も落ちない
   cgu.08   1,188 B  <- main/ui/shell.c の __divdf3（double の除算）
   ＋内部連鎖の会員が 25,338 B（cgu.14/.09/.11/.01/.06/.02/.15/.03）─ 上のどれかにぶら下がる
@@ -149,14 +149,14 @@ libgcc は 102 B（_ffsdi2.o 35 B ← GPIO、_popcountsi2.o 67 B ← efuse。ど
 
 **スタブビルドで確定したこと（前例）**: シーンの trig 参照を全部外すと `cosf` −2,402 B と
 `tanf` −1,925 B は落ち、`sinf` は ±0 B で残った ── 残った理由は cgu.04 の内部呼び出しで、
-cgu.04 は我々の `pocket_av.c` の `__gedf2` が入口だった。「薄い＝落ちる」ではなく
+cgu.04 は我々の `kobako_av.c` の `__gedf2` が入口だった。「薄い＝落ちる」ではなく
 「**入口が全部消えて、かつ生き残る会員が内部で呼んでいない**」が落ちる条件である。
 
 ### 3.1 薄さランキングの外にあった最大の獲物（公開 CA 束 = データの塊）
 
 ```
 69,730 B = libmbedtls.a(x509_crt_bundle.S.obj) 67,536 + libmbedtls.a(esp_crt_bundle.c.obj) 2,194
-入口は main/pocket/pocket_net.c の1箇所だけ:
+入口は main/kobako/kobako_net.c の1箇所だけ:
     .crt_bundle_attach = http.tls ? esp_crt_bundle_attach : NULL
 スタブ実測（その1行を NULL に差し替えて 1 ビルド）:
     bin        2,142,864 -> 2,072,240   （−70,624 B = 画像の 3.3%）

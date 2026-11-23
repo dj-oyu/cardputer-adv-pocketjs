@@ -34,7 +34,7 @@ resource reads through the same logical frame, so all such nodes move to the
 new slot together. APP reset detaches the resource before releasing the pool.
 
 The host QuickJS/renderer contract is
-`python tools/kasane_contract/run_pocket_pixel_qjs.py`. It exercises JS
+`python tools/kasane_contract/run_kobako_pixel_qjs.py`. It exercises JS
 registration and validation, two retained nodes, a second-band I/O failure,
 same-candidate retry, and the next generation. The pre-existing span
 equivalence and device diagnostic measurements are recorded in

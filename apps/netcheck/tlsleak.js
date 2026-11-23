@@ -1,9 +1,9 @@
 // The same host, many times, to tell a leak from pools reaching a steady state.
 // A leak loses a roughly constant amount per request; pools lose a lot at first
-// and then stop. pocket.net's TLSCOST line reports free before each handshake,
+// and then stop. kobako.net's TLSCOST line reports free before each handshake,
 // which is the settled figure after the previous request closed.
 (function(){
-  var N = pocket.net, T = pocket.time;
+  var N = kobako.net, T = kobako.time;
   function say(t){ console.log('LEAK '+t); }
   var URL = 'https://example.com/', ROUNDS = 12;
   function round(w, i){
@@ -18,7 +18,7 @@
       return T.sleep(500).then(function(){ return round(w, i+1); });
     });
   }
-  pocket.app.start({
+  kobako.app.start({
     start: function(){
       function acquire(left){
         return N.wifi.acquire({profileId:'default'}).then(function(w){

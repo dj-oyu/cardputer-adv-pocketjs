@@ -21,7 +21,7 @@ V8 と同じく、熱いコードほど上の段で走らせる。ただし機�
 | 枠 | 予算 |
 |---|---|
 | インタプリタの実行パス | 約14 KiB |
-| native の境界（Kasane の提出、`pocket.*`、アロケータ） | 約12 KiB |
+| native の境界（Kasane の提出、`kobako.*`、アロケータ） | 約12 KiB |
 | 衝突と出入りの余裕 | 約6 KiB |
 
 **原則：外れのコストは外れたときだけ払う（ヒーリング）。** 外れを想定した防衛（カウンタ、epoch、アサーション）は持たない。それ自体が毎ターン作業集合を増やすからである。guard の失敗だけを信号にして、少ない手間で直す。
@@ -134,8 +134,8 @@ deopt は使わない。V8 では、フレームを作り直す重い処理を�
 | **S0 読み込み** | 解析・コンパイル・トップレベルの評価、`frame` の取得 | アプリにつき1回（2 s の期限、予算は無制限） | `app_session.c:1503-1983`、`guest.c:637-789` |
 | **S1 ターン入口** | メモリの標本、pump 12本、`arm_turn`、FRAME_WRAP | 毎フレーム | `app_session.c:2266-2458` |
 | **S2 実行** | オペコードの dispatch と速い経路 | 毎フレーム約3.8万命令（DERBY、実測 host） | `quickjs.c` の `JS_CallInternal` |
-| **S3 境界** | ネイティブ呼び出しと引数の変換（Math、`pocket.*`） | 毎フレーム数百回 | `js_call_c_function`（`quickjs.c:19542`）、`pocket_derby.c`、`pocket_kasane.c` |
-| **S4 ターン出口** | ジョブの消化、`JS_VMStackTrim`、`pocket_kasane_end_turn`、OOM canary の回収 | 毎フレーム | `guest.c:576-621`、`app_session.c:2466-2486` |
+| **S3 境界** | ネイティブ呼び出しと引数の変換（Math、`kobako.*`） | 毎フレーム数百回 | `js_call_c_function`（`quickjs.c:19542`）、`kobako_derby.c`、`kobako_kasane.c` |
+| **S4 ターン出口** | ジョブの消化、`JS_VMStackTrim`、`kobako_kasane_end_turn`、OOM canary の回収 | 毎フレーム | `guest.c:576-621`、`app_session.c:2466-2486` |
 | （描画） | `present_frame` → 帯ごとに描画 → `board_present_sync` | 毎フレーム | ゲストの外 |
 
 境界はコード上ほぼできている。S1 から S4 は `app_tick` 1本が順番に呼んでいる。ただし次の2つは、S4 ではなく S2 の確保の中で動いている（コード）。
@@ -258,7 +258,7 @@ S2 から解放の連鎖とアロケータが抜ける。ただし、溜めた�
 
 ## 7. 次の一手（案）
 
-1. **§4.1 を外したビルドで、`JS_CallInternal` のサイズと STRESS のターン時間を比べる。** 同じ配置で比べるため、`CONFIG_POCKET_VM_TURNPERF` を使う。命令キャッシュの配置だけで15%動くので、それより大きな差が出ないかぎり主張しない。
+1. **§4.1 を外したビルドで、`JS_CallInternal` のサイズと STRESS のターン時間を比べる。** 同じ配置で比べるため、`CONFIG_KOBAKO_TURNPERF` を使う。命令キャッシュの配置だけで15%動くので、それより大きな差が出ないかぎり主張しない。
 2. §6-1 と §6-2 の単価を取り、§4.2〜4.5 の順位を実測で付け直す。
 3. この素案は、設計の独立レビュー（SLOW）を受けてから実装に入る。
 

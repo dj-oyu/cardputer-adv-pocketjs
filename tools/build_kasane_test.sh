@@ -2,8 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 QJS=components/quickjs-ng/quickjs-ng
-OUT=${OUT:-/tmp/test-pocket-kasane}
-TEST_SOURCE=${TEST_SOURCE:-tools/test_pocket_kasane.c}
+OUT=${OUT:-/tmp/test-kobako-kasane}
+TEST_SOURCE=${TEST_SOURCE:-tools/test_kobako_kasane.c}
 CACHE=${CACHE:-/tmp/qjs-kasane-host}
 mkdir -p "$CACHE"
 python3 tools/make_font.py "$CACHE"
@@ -16,23 +16,23 @@ PY
 # sysroot's flags here and in CFLAGS, with its own CACHE).
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
-DEFS=(-DQUICKJS_NG_BUILD -DPOCKET_VM_LAZY_BUILTINS=1 -D_GNU_SOURCE)
+DEFS=(-DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE)
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
-    gcc -std=gnu11 -c -O1 -g -w ${QJS_CFLAGS:-} "${DEFS[@]}" -I "$QJS" -I components/pocketjs_guest/include \
+    gcc -std=gnu11 -c -O1 -g -w ${QJS_CFLAGS:-} "${DEFS[@]}" -I "$QJS" -I components/kobako_guest/include \
         "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done
 gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Werror \
-  -fno-omit-frame-pointer -DPOCKET_KASANE_TEST_HOOKS \
-  -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
+  -fno-omit-frame-pointer -DKOBAKO_KASANE_TEST_HOOKS \
+  -I "$QJS" -I tools/hostshim -I main -I main/kobako -I main/ui -I main/ui/kasane \
   -I main/text -I main/hal -I "$CACHE" \
-  "$TEST_SOURCE" ${EXTRA_SOURCES:-} tools/hostshim/pocket_api_stub.c tools/hostshim/pocket_surface_stubs.c \
+  "$TEST_SOURCE" ${EXTRA_SOURCES:-} tools/hostshim/kobako_api_stub.c tools/hostshim/kobako_surface_stubs.c \
   main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
-  main/pocket/pocket_clock_source.c main/pocket/pocket_clock.c main/pocket/pocket_av_playback_source.c main/pocket/pocket_av_output_source.c main/pocket/app_view_assets.c main/pocket/app_view_provider.c main/apps/player/app_music_view.c main/pocket/app_legacy_presenter.c main/pocket/pocket_kasane.c main/pocket/pocket_shiki_frame.c main/ayatsuri/ayatsuri_model.c main/ayatsuri/ayatsuri_visibility.c main/ayatsuri/compact_opaque.c main/ui/kasane/ksn_mesh_depth.c main/pocket/shiki_heap.c main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c main/ui/kasane/ksn_source_pool_adapter.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
-  main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/pocket/app_notice.c \
+  main/kobako/kobako_clock_source.c main/kobako/kobako_clock.c main/kobako/kobako_av_playback_source.c main/kobako/kobako_av_output_source.c main/kobako/app_view_assets.c main/kobako/app_view_provider.c main/apps/player/app_music_view.c main/kobako/app_legacy_presenter.c main/kobako/kobako_kasane.c main/kobako/kobako_shiki_frame.c main/ayatsuri/ayatsuri_model.c main/ayatsuri/ayatsuri_visibility.c main/ayatsuri/compact_opaque.c main/ui/kasane/ksn_mesh_depth.c main/kobako/shiki_heap.c main/ui/kasane/ksn_shiki.c main/ui/kasane/ksn_shiki_frame.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c main/ui/kasane/ksn_source_pool_adapter.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
+  main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/kobako/app_notice.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
   "$CACHE/quickjs-vm.o" \
   -Wl,--wrap=calloc -Wl,--wrap=free -lm -o "$OUT"

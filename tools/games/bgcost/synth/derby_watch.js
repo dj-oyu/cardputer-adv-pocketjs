@@ -32,7 +32,7 @@
   for (const g of GEO) for (let n = 0; n <= 1000; n += 100) CASES.push(['g', g, n]);
   for (const k of ['alu', 'plot', 'line']) for (const d of [0, 1, 2, 4, 8]) CASES.push(['v', k, d]);
   for (const a of [1, 30, 100, 300, 1000, 3000, 30000]) CASES.push(['s', 'sin', a]);
-  const HOLD = 40, V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
+  const HOLD = 40, V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
   H.beginFrame(0);
   const res = H.resource(), P = {};
   for (const k in SRC) P[k] = H.register(prog(SRC[k]));

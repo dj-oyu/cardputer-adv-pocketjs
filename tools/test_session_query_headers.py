@@ -18,12 +18,12 @@ match = re.search(r'(#if[^\n]*(?:\\\n[^\n]*)*\n(?:(?!#endif).)*?'
                   r'#include "sound.h"\n#endif)', after_display, re.S)
 assert match, 'host-query header block not found'
 block = match.group(1)
-for header in ('pocket_pixel.h', 'pocket_grid.h', 'pocket_video.h', 'sound.h'):
+for header in ('kobako_pixel.h', 'kobako_grid.h', 'kobako_video.h', 'sound.h'):
     assert f'#include "{header}"' in block, header
 # Restore the original narrow guard as a negative control. The exact P2a-only
 # configuration must diagnose unavailable declarations instead of passing vacuously.
 body = block[block.index('/*'):]
-narrow = '#ifdef CONFIG_POCKET_FRAME_BREAKDOWN\n' + body
+narrow = '#ifdef CONFIG_KOBAKO_FRAME_BREAKDOWN\n' + body
 cc = shlex.split(os.environ.get('CC', 'cc'))
 with tempfile.TemporaryDirectory(prefix='session-query-headers-') as directory:
     temp = Path(directory)
@@ -36,21 +36,21 @@ with tempfile.TemporaryDirectory(prefix='session-query-headers-') as directory:
         active = frame or (defer and dma)
         calls = ('''bool query_types(void) {
     bool (*sound)(void) = sound_capture_active;
-    bool (*pixel)(void) = pocket_pixel_pending;
-    bool (*video)(void) = pocket_video_pending;
-    bool (*grid)(void) = pocket_grid_pending;
+    bool (*pixel)(void) = kobako_pixel_pending;
+    bool (*video)(void) = kobako_video_pending;
+    bool (*grid)(void) = kobako_grid_pending;
     return sound() || pixel() || video() || grid();
 }
 ''' if active else 'int no_queries;\n')
         test = temp / 'test.c'
         test.write_text('#include <stdbool.h>\n' + text + '\n' + calls)
         command = cc + ['-std=c11', '-O2', '-Werror=implicit-function-declaration',
-                        '-Werror=incompatible-pointer-types', '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1']
-        for include in (temp, ROOT / 'main', ROOT / 'main/pocket', ROOT / 'main/hal',
+                        '-Werror=incompatible-pointer-types', '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1']
+        for include in (temp, ROOT / 'main', ROOT / 'main/kobako', ROOT / 'main/hal',
                         ROOT / 'components/quickjs-ng/quickjs-ng'):
             command += ['-I', str(include)]
-        for enabled, name in zip(flags, ('CONFIG_POCKET_FRAME_BREAKDOWN',
-                                        'CONFIG_POCKET_DISP_DEFER', 'KASANE_DMA_OVERLAP')):
+        for enabled, name in zip(flags, ('CONFIG_KOBAKO_FRAME_BREAKDOWN',
+                                        'CONFIG_KOBAKO_DISP_DEFER', 'KASANE_DMA_OVERLAP')):
             if enabled:
                 command.append('-D' + name + '=1')
         return subprocess.run(command + ['-c', str(test), '-o', str(temp / 'test.o')],

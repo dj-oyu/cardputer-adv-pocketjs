@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 /* Typed memory IR, independent of the float procedural VM. Apps can register
- * it through pocket.kasane.grid. The outer rectangular
+ * it through kobako.kasane.grid. The outer rectangular
  * domain visits y, then x; the inner domain visits tap_y, then tap_x.
  * Prepare copies the program; keep the plan immutable while an execution
  * refers to it. Begin freezes parameters, pointers, and counts, not contents.

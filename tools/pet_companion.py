@@ -176,7 +176,7 @@ class CodexReader:
             self.lines.put(None)
         threading.Thread(target=read, daemon=True).start()
         try:
-            self.request('initialize', {'clientInfo': {'name': 'pocket_pet', 'version': '0.1.0'},
+            self.request('initialize', {'clientInfo': {'name': 'kobako_pet', 'version': '0.1.0'},
                                        'capabilities': {'experimentalApi': True}})
             self.process.stdin.write('{"method":"initialized"}\n'); self.process.stdin.flush()
         except Exception:

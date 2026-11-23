@@ -1,13 +1,13 @@
 // Stress test, vaporwave surf at dusk: heap churn + a full-screen Shiki frame. See README.md.
 (function () {
-  const V = pocket.kasane, P = V.shiki, fs = pocket.fs, CAP = [15, 35, 1e9];
+  const V = kobako.kasane, P = V.shiki, fs = kobako.fs, CAP = [15, 35, 1e9];
   const rgb = v => (v >> 19 & 31) << 11 | (v >> 10 & 63) << 5 | (v >> 3 & 31);
   const PINK = 0xff71ceff, CYAN = 0x01cdfeff, MINT = 0x05ffa1ff, SUN = 0xfffb96ff, INK = 0x1a0033ff;
   const FULL = [0, 0, 240, 135], BG = rgb(INK >>> 8);
   let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, suspect = 0, cyc = 0, err = 0;
   let pressure = 0, pressureEvents = 0, pressureTrims = 0;
   // Allocation-free; LV3 sheds the pool only on a real failure (README).
-  const memory = pocket.memory;
+  const memory = kobako.memory;
   if (memory) memory.onPressure(function (mask) {
     pressure = mask;
     pressureEvents++;

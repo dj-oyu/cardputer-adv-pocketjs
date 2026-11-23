@@ -8,7 +8,7 @@ the addresses of a firmware ELF.
     qemu-system-xtensa ... -d exec,nochain,in_asm -dfilter 0x42000000..0x43ffffff -D r5.log
     python tools/r5sim/icache.py extract r5.log tools/r5sim/build/r5sim.elf turns.pkl.gz
     # then any number of layouts and variants, in seconds
-    python tools/r5sim/icache.py model turns.pkl.gz tools/r5sim/build/r5sim.elf build_x/cardputer_pocketjs.elf
+    python tools/r5sim/icache.py model turns.pkl.gz tools/r5sim/build/r5sim.elf build_x/cardputer_kobako.elf
         [--full]  [--iram-kib N]  [--pack-kib N]
 
 What it rests on:

@@ -5,9 +5,9 @@ R3 の後、STRESS LV1 の JS は 1 フレーム約 7 ms（`turn_ms`）と言わ
 約 170 万サイクルなので、命令あたり 5 サイクル近くどこかで待っている計算になる。R4 はその待ちの正体を
 実機のカウンタで測った。
 
-## 1. 計装（`CONFIG_POCKET_VM_TURNPERF`、既定 n、診断）
+## 1. 計装（`CONFIG_KOBAKO_TURNPERF`、既定 n、診断）
 
-`app_tick` の通常のターン（`dispatch_guest(false)` と `pocket_kasane_end_turn`）を Xtensa の性能カウンタで
+`app_tick` の通常のターン（`dispatch_guest(false)` と `kobako_kasane_end_turn`）を Xtensa の性能カウンタで
 挟む。PM0 はサイクル、PM1 は 30 ターンごとに入れ替わる事象（26 種）。構え方は `main/scene/garden.c` と
 同じ（`kernelcnt 0` で割り込みを除く）。30 ターンごとに `TURNPERF <事象> cy= ev= n= us= cont_n= cont_us=`
 を出す。継続ターン（8 ms の予算で切られた frame() の残り）は時間だけを足す。
@@ -70,28 +70,28 @@ QIO は 4 ビットなので、ミス 1 回でキャッシュラインを埋め�
 
 ## 4. 見つけたもの（R4 とは別件）
 
-QIO の計装ビルドで各段 60 秒走らせた 1 回目、LV3 の途中から `STRESS_FAIL read PocketError: two files are
-already open` が出続けた（474 回）。`pocket.fs` の read の OOM の後で、File のスロットが 2 本とも戻らなくなって
-いる。コードで見える経路: `js_open` はスロットを取って `file_wrap` した後に `pocket_api_settled` を呼び、その
+QIO の計装ビルドで各段 60 秒走らせた 1 回目、LV3 の途中から `STRESS_FAIL read KobakoError: two files are
+already open` が出続けた（474 回）。`kobako.fs` の read の OOM の後で、File のスロットが 2 本とも戻らなくなって
+いる。コードで見える経路: `js_open` はスロットを取って `file_wrap` した後に `kobako_api_settled` を呼び、その
 中の `JS_NewPromiseCapability` が OOM で失敗すると File を解放する。File には意図的にファイナライザが無い
-（`pocket_fs.c` の `file_class_def` の注記）ので、そのスロットはアプリが終わるまで戻らない。QIO が作った不具合
+（`kobako_fs.c` の `file_class_def` の注記）ので、そのスロットはアプリが終わるまで戻らない。QIO が作った不具合
 ではなく、ターンが短くなって OOM の落ちる位置がずれただけと見ている（DIO の 60 秒走行と、QIO の既定 20 秒走行は
 PASS）。
 
 ### 4.1 R4a: 修正（2026-09-27、`vm/fs-open-oom`）
 
-**直したもの 1（fs）**: `file_wrap` と `pocket_api_settled` を `file_settled()` に束ね、Promise を作れなかったら
-スロットを番号で探して閉じる。同時に、`pocket_api_settled` が resolve の呼び出しの失敗を握りつぶして
-「決して決着しない Promise と、文脈に残った例外」を返していたのを、例外として返すようにした（`pocket_api.h` の
+**直したもの 1（fs）**: `file_wrap` と `kobako_api_settled` を `file_settled()` に束ね、Promise を作れなかったら
+スロットを番号で探して閉じる。同時に、`kobako_api_settled` が resolve の呼び出しの失敗を握りつぶして
+「決して決着しない Promise と、文脈に残った例外」を返していたのを、例外として返すようにした（`kobako_api.h` の
 契約に書いた）。`file_wrap` の失敗時に例外値そのものを `settled` に渡していた経路も同じ関数で消えた。
 
 **直したもの 2（VM、実機の負荷を作る途中で見つけた）**: 負荷の最初の版は `fs.open` を満杯のヒープで初めて読み、
 そのセッションの間ずっと `fs.open` が `undefined`（"not a function"）になった。F2 の遅延の索引
-（`POCKET_VM_LAZY_BUILTINS`）が、項目に「済み」の印を付けてから shape へ入れる順で、`add_property` が OOM で
+（`QJS_LEAN_LAZY_BUILTINS`）が、項目に「済み」の印を付けてから shape へ入れる順で、`add_property` が OOM で
 失敗すると名前が shape にも一覧にも無くなっていた。`js_lazy_touch`・`js_lazy_all`・別名の登録の 3 箇所で、
 失敗したら印を戻す（`lazy_undo_done`。確保中の GC が `rt->lazy` を詰め直すので、一覧は（オブジェクト, 表）で
 探し直す。`js_lazy_all` の添字も同じ理由で取り直す）。上流の autoinit の同種の穴は以前に直してあった
-（`JS_AutoInitProperty` の注記）が、こちらで足した遅延の経路に同じ規則が無かった。**`pocket.*` の名前空間も
+（`JS_AutoInitProperty` の注記）が、こちらで足した遅延の経路に同じ規則が無かった。**`kobako.*` の名前空間も
 この一覧に乗るので、最初の読みがヒープの端に当たったアプリはその API を失っていた。**
 
 | 検査 | 結果 |
@@ -99,9 +99,9 @@ PASS）。
 | ホスト: `--fail-alloc` 1〜3000 の掃引（5 つの遅延の名前を読んで型を見る） | 修正前は 707・708 番で `Object.fromEntries` が `undefined`、修正後は穴 0、ASan クリーン |
 | ホスト: 新しいコーパス `lazy_touch_oom.js`（`--profile device`、18 の名前を満杯の縁で初めて読む） | 修正後はすべて function。**陰性対照（修正前の quickjs.c）で 18 中 13 が `undefined`** |
 | ホスト: コーパス | asan・o2・`--force-yield` とも 80/80 |
-| 実機: `CONFIG_POCKET_VM_OOMPROBE` の USB `^`（ヒープを埋め、0〜23 ブロック返して open を 10 巡、最後に 2 本同時に open） | **fs の修正なし 5/5 `FSOOM leak two files are already open`**、修正あり 5/5 `FSOOM ok`（漏れの拒否 0、File 以外の解決値 0） |
+| 実機: `CONFIG_QJS_LEAN_OOMPROBE` の USB `^`（ヒープを埋め、0〜23 ブロック返して open を 10 巡、最後に 2 本同時に open） | **fs の修正なし 5/5 `FSOOM leak two files are already open`**、修正あり 5/5 `FSOOM ok`（漏れの拒否 0、File 以外の解決値 0） |
 | 実機: 出荷構成 | smoke 20 周・故障回復 6 種、settings、editor draft、`stress_app.py --seconds 60` PASS（29.4〜29.8 fps）、memlog 予算内・DIRAM ±0 |
-| ホスト: `pocket_api.c` をリンクする検査 | input・capture・random PASS |
+| ホスト: `kobako_api.c` をリンクする検査 | input・capture・random PASS |
 
 **残したもの**（→ §4.2 で解決）: JS の側で、解決した File を受け取る継続（`await` の再開）自体が OOM で
 走れない場合は、File はどこにも届かず、ファイナライザが無いのでスロットは戻らない。
@@ -110,11 +110,11 @@ PASS）。
 
 §4.1 の残りは「JS が OOM から復帰できない」状況ではなく、アプリは動き続けたまま File 1 個が誰からも参照されなく
 なる状況だった（解決済みの Promise に継続を登録する確保が失敗し、File が Promise ごと捨てられる）。アプリを落とせば
-`pocket_fs_reset()` がスロットを閉じるが、それを判断するには「File が消えた」ことを知る必要があり、それを知らせる
+`kobako_fs_reset()` がスロットを閉じるが、それを判断するには「File が消えた」ことを知る必要があり、それを知らせる
 のがファイナライザなので、スロットだけを閉じれば足りる。
 
 - File にファイナライザを付けた。GC の中では印（`orphan`）を付けるだけで、`fclose`・`unlink`・セクタの解放は
-  次の `pocket_fs_pump()`（毎 tick、frame() の前、GC の外）が破棄として行う。
+  次の `kobako_fs_pump()`（毎 tick、frame() の前、GC の外）が破棄として行う。
 - 以前の「ファイナライザ無し」の理由は「変数を落としたアプリが書き込み中のファイルを予測できない時点で失う」
   だったが、参照の無い File はもう commit も close もできないので、失うものは `app_stop()` で失うものと同じ。
   変わるのは、スロットと同じパスへの BUSY がアプリ終了まで続かなくなることだけ。

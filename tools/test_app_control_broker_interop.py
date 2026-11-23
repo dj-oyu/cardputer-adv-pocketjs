@@ -18,8 +18,8 @@ root=pathlib.Path(__file__).resolve().parents[1]
 temporary=tempfile.TemporaryDirectory(prefix="app-control-interop-")
 library=pathlib.Path(temporary.name)/"interop.so"
 subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror","-shared","-fPIC",
-                "-I",str(root/"main/pocket"),str(root/"tools/test_app_control_interop.c"),
-                str(root/"main/pocket/app_control.c"),"-o",str(library)],check=True)
+                "-I",str(root/"main/kobako"),str(root/"tools/test_app_control_interop.c"),
+                str(root/"main/kobako/app_control.c"),"-o",str(library)],check=True)
 lib=ctypes.CDLL(str(library))
 lib.transact.argtypes=[ctypes.c_void_p,ctypes.c_uint,ctypes.c_ulonglong,ctypes.c_void_p]
 lib.transact.restype=ctypes.c_uint

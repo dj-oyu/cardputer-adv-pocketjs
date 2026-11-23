@@ -1,6 +1,6 @@
 /* The MP3 downsample FIR: the arithmetic the PIE kernel will implement.
  *
- * main/pocket/mp3_decode.c runs, per output sample,
+ * main/kobako/mp3_decode.c runs, per output sample,
  *
  *     sum = sum(history[(cursor-k)&31] * filter[k], k=0..31);
  *     sample = sum >> 14;   clamp to int16

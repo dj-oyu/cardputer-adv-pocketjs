@@ -65,7 +65,7 @@ CONFIG_ESP_PHY_ENABLE_USB=y
 # demand is the 16 KiB SSL_IN_CONTENT_LEN plus 4 KiB out plus the context, and
 # the supply cannot be raised by 20 KiB on a 341,760 byte board with no PSRAM.
 # The dynamic buffer shrinks the record buffers once the handshake is over,
-# which suits pocket.net's one-request-at-a-time shape, and unlike lowering
+# which suits kobako.net's one-request-at-a-time shape, and unlike lowering
 # SSL_IN_CONTENT_LEN it does not decide in advance which servers this device can
 # talk to.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
@@ -75,7 +75,7 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 # fatfs out of the build unless a component asks for them, and a CONFIG_ whose
 # Kconfig never loads is dropped in silence. That is how the first BLE
 # measurement here came back as +48 bytes, so it is worth saying once: these
-# three lines change nothing until pocket_fs.c requires fatfs.
+# three lines change nothing until kobako_fs.c requires fatfs.
 #
 # NOT set here: any sector-size override. Measured on the board 2026-09-08, a
 # mount costs 7,036 bytes at FF_MAX_SS=512 and 7,048 at 4096 -- twelve bytes,
@@ -91,7 +91,7 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 # then defeated by the dynamic buffers. An earlier version of this comment
 # claimed ~12 KiB of savings from arithmetic on ffconf.h. The board said 12
 # bytes. Sector size is a non-issue on this hardware.
-# pocket_fs.c's name_ok() already refuses a name that would "become a different
+# kobako_fs.c's name_ok() already refuses a name that would "become a different
 # name on an SD card later". The default ANSI/OEM encoding does exactly that,
 # silently, to every non-ASCII name. The validator and the encoding have to
 # agree or the validation is theatre.
@@ -139,7 +139,7 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 # graph against the device's symbol sizes). A quad read moves a line in half the
 # clocks of a dual one, and on the same binary layout (JS_CallInternal at the
 # same address) STRESS LV1's JS per frame went 10.78 -> 7.25 ms and render
-# 6.61 -> 6.16 ms, measured with CONFIG_POCKET_VM_TURNPERF (docs/vm/turn-cpi.md).
+# 6.61 -> 6.16 ms, measured with CONFIG_KOBAKO_TURNPERF (docs/vm/turn-cpi.md).
 # The part is an XMC 0x4017 with the eFuse flash type set to quad (esptool
 # flash-id). No code and no DRAM: the bootloader switches the mode.
 #

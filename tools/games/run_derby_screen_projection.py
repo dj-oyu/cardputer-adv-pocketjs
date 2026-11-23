@@ -41,13 +41,13 @@ __attribute__((destructor)) static void screen_close(void){if(screen_times)fclos
         for(unsigned i=0;i<350;i++)frame(0);
         REQ(!strcmp(scene,race?"race":"pad")&&!exceptions&&!bad_present&&!framefails);
         printf("SCREEN_BENCH heap_after_eval=%zu eval_peak=%zu total_peak=%zu\\n",after_eval,eval_peak,peak_bytes);
-        pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        kobako_input_reset();kobako_kasane_reset();kobako_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
         puts("SCREEN_BENCH PASS");return 0;
     }''')
     s=replace(s,'static void present(uint64_t now_us){','''static uint64_t screen_panel=1469598103934665603ull;
 __attribute__((destructor)) static void screen_panel_done(void){if(getenv("SCREEN_CAPTURE"))printf("SCREEN_PANEL %016llx\\n",(unsigned long long)screen_panel);}
 static void present(uint64_t now_us){''')
-    s=replace(s,'    else pocket_kasane_animations_presented(now_us);','''    else pocket_kasane_animations_presented(now_us);
+    s=replace(s,'    else kobako_kasane_animations_presented(now_us);','''    else kobako_kasane_animations_presented(now_us);
     if(getenv("SCREEN_CAPTURE"))for(unsigned i=0;i<sizeof panel;i++){screen_panel^=((unsigned char*)panel)[i];screen_panel*=1099511628211ull;}''')
     p=out/'harness.c';p.write_text(s);return p
 

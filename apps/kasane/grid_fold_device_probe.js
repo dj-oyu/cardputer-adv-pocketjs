@@ -1,7 +1,7 @@
 // The same symbolic frontend and 2x2 box expression as grid_fold_examples.js.
 // The device probe reads this generated IR through QuickJS, then prepares it
 // with the native grid compiler and measures AUTO against forced gather.
-const grid = pocket.kasane.grid;
+const grid = kobako.kasane.grid;
 globalThis.gridFoldDeviceProgram = grid.fold(
   {width: 16, height: 12, tapWidth: 2, tapHeight: 2, shift: 2,
    output: grid.index({x: 1, y: {param: 1}})},

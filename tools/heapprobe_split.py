@@ -1,14 +1,14 @@
 """Split an app written as one immediately invoked function into global scripts.
 
 The evaluation heap probe's chunk variants (docs/vm/spread-eval-oom.md,
-POCKET_HEAPPROBE only). QuickJS keeps every JSFunctionDef of one script alive
+KOBAKO_HEAPPROBE only). QuickJS keeps every JSFunctionDef of one script alive
 until the whole script is parsed, so an app's parse peak is one number for
 the whole source; evaluated as N scripts in one realm it is paid N times,
 each over what the earlier ones left. This makes those N scripts
 mechanically, from apps/derby/derby_watch.js, without touching the app:
 
   - the `(function () {` / `})();` wrapper and the host-only early return
-    (`if (typeof pocket === 'undefined') return;`) are dropped; every chunk
+    (`if (typeof kobako === 'undefined') return;`) are dropped; every chunk
     starts with the wrapper's 'use strict'. The body's top-level const/let
     become the realm's global lexical bindings, visible to the later
     scripts (and to the earlier scripts' functions, once they exist);
@@ -33,7 +33,7 @@ def unwrap(lines):
     body = []
     for i, l in enumerate(lines):
         if i <= start or i >= end or l.strip() in ("'use strict';",
-                                                   "if (typeof pocket === 'undefined') return;"):
+                                                   "if (typeof kobako === 'undefined') return;"):
             body.append('')
         else:
             body.append(l)

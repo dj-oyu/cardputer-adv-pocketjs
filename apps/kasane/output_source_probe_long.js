@@ -1,14 +1,14 @@
 // USB diagnostic y. Play the entire MP3 with two timed pause/resume cycles.
 // Kasane consumes the native output source; JS never writes elapsed text.
 (function () {
-  const view = pocket.kasane.mount({version: 1,
+  const view = kobako.kasane.mount({version: 1,
     slots: {elapsed: {type: 'text', capacity: 8},
             frames: {type: 'u32'}, starved: {type: 'u32'}, streamId: {type: 'u32'}},
     nodes: [
       {type: 'rect', bounds: [0, 0, 96, 24], color: 0x060c1aff},
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
     ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
-  const source = pocket.audio.outputSource({sampleMs: 33});
+  const source = kobako.audio.outputSource({sampleMs: 33});
   const pauseAtMs = [45000, 140000];
   let bound = false;
   let playerHandle = null;
@@ -39,7 +39,7 @@
   }
   globalThis.frame = function () {
     if (playStartMs && !closed) {
-      const now = pocket.time.now();
+      const now = kobako.time.now();
       const elapsed = now - playStartMs;
       if (elapsed >= nextTickMs) {
         console.log('KSN_OUTPUT_SOURCE TICK wallMs=' + elapsed +
@@ -52,7 +52,7 @@
         console.log('KSN_OUTPUT_SOURCE PAUSE_REQUEST cycle=' + cycle +
                     ' wallMs=' + elapsed);
         playerHandle.pause().then(function () {
-          pauseWallMs = pocket.time.now();
+          pauseWallMs = kobako.time.now();
           pausePositionMs = playerHandle.status().positionMs;
           phase = 'paused';
           console.log('KSN_OUTPUT_SOURCE PAUSED cycle=' + cycle +
@@ -66,7 +66,7 @@
         playerHandle.play().then(function () {
           phase = 'resuming';
           console.log('KSN_OUTPUT_SOURCE RESUME_ACCEPT cycle=' + cycle +
-                      ' latencyMs=' + (pocket.time.now() - resumeWallMs));
+                      ' latencyMs=' + (kobako.time.now() - resumeWallMs));
         }, function (error) { fail('RESUME', error); });
       } else if (phase === 'resuming' &&
                  playerHandle.status().positionMs >= pausePositionMs + 50) {
@@ -85,9 +85,9 @@
     }
     bound = true;
     console.log('KSN_OUTPUT_SOURCE BOUND');
-    pocket.fs.requestFolder('sd').then(function (root) {
+    kobako.fs.requestFolder('sd').then(function (root) {
       if (root !== 'sd:/') throw new Error('SD folder not granted');
-      return pocket.audio.player.open({
+      return kobako.audio.player.open({
         source: 'sd:/KAKATO/KARA OK 2nd Edition/02 インザハウス.mp3'
       });
     }).then(function (player) {
@@ -110,7 +110,7 @@
         }
         console.log('KSN_OUTPUT_SOURCE SEEK_UNSUPPORTED code=' + error.code);
         player.play().then(function () {
-          playStartMs = pocket.time.now();
+          playStartMs = kobako.time.now();
           console.log('KSN_OUTPUT_SOURCE PLAY');
         }, function (reason) { fail('PLAY', reason); });
       });

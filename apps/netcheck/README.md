@@ -1,11 +1,11 @@
-# netcheck — `pocket.net`（Wi-Fiリースと HTTP）の自己検査
+# netcheck — `kobako.net`（Wi-Fiリースと HTTP）の自己検査
 
 `docs/api/common-api.md` §11 と、§4 の期限・キャンセル契約が実機で仕様どおりかを、1回の
-起動で確かめる。実装は `main/pocket_net.c` と `main/wifi_time.c` のリンク部分。
+起動で確かめる。実装は `main/kobako_net.c` と `main/wifi_time.c` のリンク部分。
 
 `netcheck.js` と `tlscycle.js` は `EMBED_TXTFILES` に入り、`local.netcheck` /
 `local.tlscycle` として USB broker の `app_session` から起動できる（メニューの行は無い。
-`main/main.c` の `native_apps[]`、`main/pocket/app_registry.c`）。`tlshosts.js` と
+`main/main.c` の `native_apps[]`、`main/kobako/app_registry.c`）。`tlshosts.js` と
 `tlsleak.js` は今も配線していないので、**Playground に貼って実行する**。ソースは 3,055 バイトで、ゲストの解析コストは実測の
 閾値（6.5KB でゲスト107KiB）より十分小さい。
 
@@ -28,7 +28,7 @@ USBログの `js` タグに `NETCHK ...` として出る。無線側の `LINK_ST
 
 | 行 | 主張 |
 | --- | --- |
-| `CAP net.wifi true/true null {...}` | capability が supported で、`limits` が `pocket_net.c` の**強制値**と一致する（§14 の提案値ではない） |
+| `CAP net.wifi true/true null {...}` | capability が supported で、`limits` が `kobako_net.c` の**強制値**と一致する（§14 の提案値ではない） |
 | `CAP net.http ...` | 同上。`maxReadBytes` `maxResponseBytes` `tlsMinFreeBytes` などが公開されている |
 | `NOLEASE INVALID_ARGUMENT not-applied` | 有効な lease なしの `request` は拒否。§11 の「有効なlease必須」 |
 | `PROFILE NOT_FOUND not-applied` | `profileId` はホスト設定への参照。存在しない名前は NOT_FOUND で、アプリが接続先を作れない |
@@ -55,7 +55,7 @@ USBログの `js` タグに `NETCHK ...` として出る。無線側の `LINK_ST
 
 - `DONE` の直後に `wifi` タグの `LINK_DOWN free=` が出て、`LINK_UP free=` との差が
   リースを持っていた間のコスト。アプリが終了した場合も `app_stop()` →
-  `pocket_net_reset()` が同じ経路を通る。
+  `kobako_net_reset()` が同じ経路を通る。
 - 途中で **戻る** キーを押してアプリを殺しても、`LINK_DOWN` は必ず出る。出なければ
   リースが漏れている。
 
@@ -84,7 +84,7 @@ USBログの `js` タグに `NETCHK ...` として出る。無線側の `LINK_ST
 
 そしてこれは報告のされ方の欠陥でもある。証明書の検証失敗がアプリには
 `IO_ERROR :: the request did not reach a response` として届く。§11 は TLS の失敗を
-`TLS_ERROR` として区別するよう定めており `pocket_net.c` にもその判定はあるが、
+`TLS_ERROR` として区別するよう定めており `kobako_net.c` にもその判定はあるが、
 `esp_http_client_open` が `ESP_ERR_HTTP_CONNECT` に丸めるため判定に届いていない。
 **アプリからは「電波が悪い」「証明書が信用できない」「メモリ不足」が同じに見える。**
 

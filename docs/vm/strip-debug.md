@@ -1,10 +1,10 @@
-# ゲストの行番号表を落とす（`CONFIG_POCKET_VM_STRIP_DEBUG`、2026-09-30）
+# ゲストの行番号表を落とす（`CONFIG_QJS_LEAN_STRIP_DEBUG`、2026-09-30）
 
 ブランチ `vm/strip-debug`（`vm/main` b692f0c から）。DERBY WATCH の首振りカメラ（段階 3、ブランチ `vm/pan-camera` の `docs/apps/derby-camera-history.md`）が DRAM に収まらなかったので、「最後の手」として、ゲストの JS を行番号表（pc2line）なしでコンパイルする選択肢を入れて測った。**数値は種別を明記する**（実機の実測／host m32 の実測／推定）。
 
 ## 結論
 
-- **Kconfig `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）**。ON で、パーサが関数ごとの行番号表を作らない（`quickjs.c` の `compute_pc2line_info` を飛ばし、`JSFunctionBytecode` に表のブロックを持たない）。アプリの評価（`app_session.c`）もチャンク（`pocket_app_load.c`）も import も同じパーサを通るので、1 か所で全部に効く。ローカル変数名は残す（クロージャと TDZ のエラーの名前に使う）。
+- **Kconfig `CONFIG_QJS_LEAN_STRIP_DEBUG`（既定 OFF）**。ON で、パーサが関数ごとの行番号表を作らない（`quickjs.c` の `compute_pc2line_info` を飛ばし、`JSFunctionBytecode` に表のブロックを持たない）。アプリの評価（`app_session.c`）もチャンク（`kobako_app_load.c`）も import も同じパーサを通るので、1 か所で全部に効く。ローカル変数名は残す（クロージャと TDZ のエラーの名前に使う）。
 - **効果**: DERBY WATCH の評価の余裕が **29,969 → 32,709 B（+2.7 KB、実機）**、評価後のゲストが 116,408 → 113,256 B（−3.2 KB、実機の `heapprobe`）。host（m32、コンパイル済みの常駐）では DERBY −2.8 KB、BIG WAVE −2.1、MEGADEMO −1.9、stress −0.8、LCD CATCH −0.7 KB（表）。先の見積もり（DERBY −3.7〜−4.8 KB）は多すぎた（見積もりはデモのチャンクと `STRIP_SOURCE` のファイル名を含み、実機への 1.3 倍の換算もしていた）。
 - **段階 3（首振り）は、これを足しても受け入れ条件に届かない**（実機）: 評価の余裕 15,242 → 19,009 B（条件 20 KB に −1.5 KB）、ゲストの最大 139,056 B（条件 140 KB を満たす）、**ターン内の空きの最小 5,016 B（条件 11,208 B に −6.2 KB）、毎レース `GO LOADSTALL`**。plan の場面入れ替えは、境目ではない（−6 KB）ので試していない（入れ替えで空くのは plan 3〜4 本 = 約 3 KB が上限、推定）。
 - **失うもの**: 実行時エラーのスタックの位置が「関数の先頭の行」になる（`at f (rt.js:2:1)`、トップレベルは `<eval> (file:1:1)`）。**構文エラーの位置は正確なまま**（トークナイザが出すので表に依らない）。ファイル名は残る。
@@ -14,11 +14,11 @@
 
 | 場所 | 変更 |
 | --- | --- |
-| `components/quickjs-ng/quickjs-ng/quickjs.c` | `compute_pc2line_info()` の頭で `#ifdef CONFIG_POCKET_VM_STRIP_DEBUG return;`。`js_create_function()` で `b->pc2line_buf = NULL; b->pc2line_len = 0`（長さ 0 の `js_realloc` もブロックを 1 つ取るので呼ばない）。`find_line_num()` は表が無いと関数の先頭行を返す（既存の分岐）。 |
-| `main/Kconfig.projbuild` | `POCKET_VM_STRIP_DEBUG`（既定 n）。設定は `quickjs-vmstack.h` が取り込む `sdkconfig.h` から届く |
+| `components/quickjs-ng/quickjs-ng/quickjs.c` | `compute_pc2line_info()` の頭で `#ifdef CONFIG_QJS_LEAN_STRIP_DEBUG return;`。`js_create_function()` で `b->pc2line_buf = NULL; b->pc2line_len = 0`（長さ 0 の `js_realloc` もブロックを 1 つ取るので呼ばない）。`find_line_num()` は表が無いと関数の先頭行を返す（既存の分岐）。 |
+| `main/Kconfig.projbuild` | `QJS_LEAN_STRIP_DEBUG`（既定 n）。設定は `quickjs-vmstack.h` が取り込む `sdkconfig.h` から届く |
 | `sdkconfig.stripdebug.defaults` | ON の上書き。共有の `sdkconfig` を汚さないよう、`-D SDKCONFIG=<dir>/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.stripdebug.defaults"` で別のディレクトリに作る（`sdkconfig.vmprobe.defaults` と同じ作法） |
 
-**既存の `CONFIG_POCKET_VM_STRIP_FN_SOURCE` との関係**: `quickjs.c` の `js_function_toString` の注記が名前を出しているが、**その Kconfig は存在しない**（`main/Kconfig.projbuild` に無い）。関数のソースを持たない変更は無条件で入っている（`fd->source` を設定する所が無い）。今回の選択肢はそれとは独立で、ソースは元から無く、行番号表だけを落とす。
+**既存の `CONFIG_QJS_LEAN_STRIP_FN_SOURCE` との関係**: `quickjs.c` の `js_function_toString` の注記が名前を出しているが、**その Kconfig は存在しない**（`main/Kconfig.projbuild` に無い）。関数のソースを持たない変更は無条件で入っている（`fd->source` を設定する所が無い）。今回の選択肢はそれとは独立で、ソースは元から無く、行番号表だけを落とす。
 
 ## 測定
 
@@ -65,7 +65,7 @@ ON で段階 3 のゲストは 3〜4 KB 減ったが、ターン内の最小は�
 | 場所 | ON での出力 |
 | --- | --- |
 | `app_session.c` の `EVAL_ERROR`（例外の文字列＋スタックの 1 行目） | 構文エラーは `at file:line:col` のまま。実行時エラーは `at <eval> (file:1:1)` や `at f (file:関数の先頭行:1)` |
-| `pocket_app_load.c` の `APP_LOAD ... failed`（`describe()`）と import の失敗 | 同上（構文エラーは正確、実行時は関数の先頭行） |
+| `kobako_app_load.c` の `APP_LOAD ... failed`（`describe()`）と import の失敗 | 同上（構文エラーは正確、実行時は関数の先頭行） |
 | アプリ自身の `FRAMEFAIL` などのログ（例: DERBY の `log('FRAMEFAIL ' + e)`） | メッセージだけを出すものは変わらない。`e.stack` を出すものは関数の先頭行 |
 | host の試験 `tools/test_app_load.c`（`appload_throw.js`）・`tools/test_app_import.c`（`imthrow`） | ON でビルドすると、投げた行を確かめる検査が落ちる（試した: `appload_throw.js:1:1`）。`appload_bad.js:3` などの構文エラーの検査は通る。今の試験のビルドは `sdkconfig.h` を持たないので OFF のまま |
 | Playground（実行時にソースを受け取る） | 実行時エラーの行が関数の先頭になる。構文エラーは正確 |
@@ -81,8 +81,8 @@ ON で段階 3 のゲストは 3〜4 KB 減ったが、ターン内の最小は�
 
 Kconfig は全アプリに効く。行番号を残したいアプリ（開発中のもの、Playground）を巻き込まずに、DRAM が足りないアプリだけで表を落とせるように、チャンクの一覧で指定できるようにした。
 
-- **`chunks.txt` に `option strip-debug`** と書くと、そのアプリのチャンク（`pocket.app.load()` と静的 `import`）を、行番号表なしでコンパイルする。入口のファイルと、他のアプリは今までどおり。
-- 作り: `JSContext` の 1 ビット（`strip_debug`）と `JS_PocketSetStripDebug(ctx, on)`（`quickjs.c`）。`compute_pc2line_info()` と `js_create_function()` は、Kconfig のときと同じ道を通る。`tools/make_app_chunks.py` が `app_chunk_set_t.strip_debug` に書き、`pocket_app_load.c` がチャンクの `JS_Eval` の前後でだけ立てる。host の `tools/hostshim/app_chunks_host.c` も同じ行を読む。
+- **`chunks.txt` に `option strip-debug`** と書くと、そのアプリのチャンク（`kobako.app.load()` と静的 `import`）を、行番号表なしでコンパイルする。入口のファイルと、他のアプリは今までどおり。
+- 作り: `JSContext` の 1 ビット（`strip_debug`）と `JS_LeanSetStripDebug(ctx, on)`（`quickjs.c`）。`compute_pc2line_info()` と `js_create_function()` は、Kconfig のときと同じ道を通る。`tools/make_app_chunks.py` が `app_chunk_set_t.strip_debug` に書き、`kobako_app_load.c` がチャンクの `JS_Eval` の前後でだけ立てる。host の `tools/hostshim/app_chunks_host.c` も同じ行を読む。
 - 検査: `tools/test_app_load.c` が、指定した集合の実行時エラーが関数の先頭行（5）を指し、投げた行（7）を指さないこと、指定のない集合は正確な行のままであること、知らない `option` を断ることを確かめる。
 - 使っているアプリ: MEGADEMO（`apps/kasane/chunks.txt`）。host（m32）で評価後 −6.8 KB（136,476 → 129,660 B）、上限で通る最小の heap −6.9 KB（153,125 → 146,250 B）。
 

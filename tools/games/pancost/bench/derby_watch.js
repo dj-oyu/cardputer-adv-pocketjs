@@ -74,7 +74,7 @@
   // REPEAT_REG runs at most 255 times; typed batches hold at most 128 points.
   for (const n of [0, 64, 128, 240]) CASES.push(['p', 'newton', n]);
   for (const n of [0, 32, 64, 128]) CASES.push(['p', 'treg', n]);
-  const HOLD = 40, V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
+  const HOLD = 40, V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
   H.beginFrame(0);
   const res = H.resource();
   P = {};

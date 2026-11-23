@@ -39,8 +39,8 @@ bool motion_latest(motion_sample_t *out);
 // gyroscope is off after motion_init because it draws several times the
 // accelerometer's current (datasheet figure, not measured here).
 void motion_request_gyro(bool on);
-// Whether a running program reads the IMU. pocket_imu.c sets it when the
-// program first reads pocket.sensors and clears it when the run ends. The
+// Whether a running program reads the IMU. kobako_imu.c sets it when the
+// program first reads kobako.sensors and clears it when the run ends. The
 // home wallpaper needs no call: motion_get() itself keeps the sensor read for
 // a short while. With neither, motion_poll() reads nothing, and
 // motion_latest() reports no sample until a fresh one has been read.

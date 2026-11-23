@@ -1,4 +1,4 @@
-// What pocket_api.c's lazy namespaces do, run on the host against the same
+// What kobako_api.c's lazy namespaces do, run on the host against the same
 // quickjs-ng the firmware links.
 //
 // The mechanism is small but its observable edges are not obvious from reading
@@ -6,7 +6,7 @@
 // accessor really becomes a plain property, what a second contributor sees, and
 // what an app gets when a build refuses. None of that can be checked on the
 // device without flashing, and this file is the answer -- js_lazy_namespace()
-// and pocket_api_lazy() below are transcribed from main/pocket/pocket_api.c, minus the
+// and kobako_api_lazy() below are transcribed from main/kobako/kobako_api.c, minus the
 // ESP logging. They are a copy, so a change there needs the same change here;
 // the alternative was no coverage of the one part of the refactor that is a
 // QuickJS semantics question rather than a C one.
@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define POCKET_MAX_LAZY 28
+#define KOBAKO_MAX_LAZY 28
 
 typedef int (*contribute_fn)(JSContext *ctx, JSValueConst ns, void *user);
 
@@ -29,17 +29,17 @@ typedef struct {
     void         *user;
 } lazy_t;
 
-static lazy_t   lazy[POCKET_MAX_LAZY];
+static lazy_t   lazy[KOBAKO_MAX_LAZY];
 static unsigned lazy_count;
 
-static JSValue pocket_root(JSContext *ctx) {
+static JSValue kobako_root(JSContext *ctx) {
     JSValue global=JS_GetGlobalObject(ctx);
-    JSValue root=JS_GetPropertyStr(ctx,global,"pocket");
+    JSValue root=JS_GetPropertyStr(ctx,global,"kobako");
     JS_FreeValue(ctx,global);
     return root;
 }
 
-// The firmware throws a PocketError here; the shape that matters to this test
+// The firmware throws a KobakoError here; the shape that matters to this test
 // is the code and the operation, so a plain Error carrying both is enough.
 static JSValue throw_oom(JSContext *ctx, const char *name) {
     JSValue error=JS_NewError(ctx);
@@ -70,7 +70,7 @@ static JSValue js_lazy_namespace(JSContext *ctx, JSValueConst this_val,
 
 static int lazy_register(JSContext *ctx, const char *name,
                          contribute_fn contribute, void *user) {
-    if(lazy_count>=POCKET_MAX_LAZY) return -1;
+    if(lazy_count>=KOBAKO_MAX_LAZY) return -1;
     bool first=true;
     for(unsigned i=0;i<lazy_count;i++)
         if(!strcmp(lazy[i].name,name)) { first=false; break; }
@@ -79,7 +79,7 @@ static int lazy_register(JSContext *ctx, const char *name,
     lazy_count++;
     if(!first) return 0;
 
-    JSValue root=pocket_root(ctx);
+    JSValue root=kobako_root(ctx);
     if(!JS_IsObject(root)) { JS_FreeValue(ctx,root); lazy_count--; return -1; }
     JSValue getter=JS_NewCFunctionMagic(ctx,js_lazy_namespace,name,0,
                                         JS_CFUNC_generic_magic,(int)slot);
@@ -175,7 +175,7 @@ int main(void) {
     JSValue root=JS_NewObject(ctx);
     JS_SetPropertyStr(ctx,root,"apiVersion",JS_NewString(ctx,"0.1.0"));
     JSValue global=JS_GetGlobalObject(ctx);
-    JS_DefinePropertyValueStr(ctx,global,"pocket",root,JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,global,"kobako",root,JS_PROP_ENUMERABLE);
     JS_FreeValue(ctx,global);
 
     lazy_register(ctx,"storage",build_storage,NULL);
@@ -185,19 +185,19 @@ int main(void) {
 
     // 1. An untouched namespace is still there to be found.
     check(storage_calls==0,"registering builds nothing");
-    check(eval_true(ctx,"'storage' in pocket"),"'in' finds an unbuilt namespace");
-    check(eval_true(ctx,"Object.keys(pocket).indexOf('storage')>=0"),
+    check(eval_true(ctx,"'storage' in kobako"),"'in' finds an unbuilt namespace");
+    check(eval_true(ctx,"Object.keys(kobako).indexOf('storage')>=0"),
           "Object.keys lists an unbuilt namespace");
     check(eval_true(ctx,
-          "(function(){var n=0;for(var k in pocket)n++;return n===4})()"),
+          "(function(){var n=0;for(var k in kobako)n++;return n===4})()"),
           "for-in sees all four names, built or not");
     check(storage_calls==0,"none of that built anything");
 
     // 2. The first read builds it, once.
-    check(eval_true(ctx,"typeof pocket.storage.get==='function'"),
+    check(eval_true(ctx,"typeof kobako.storage.get==='function'"),
           "the first read builds the namespace");
     check(storage_calls==1,"the contributor ran once");
-    check(eval_true(ctx,"pocket.storage===pocket.storage"),
+    check(eval_true(ctx,"kobako.storage===kobako.storage"),
           "a second read is the same object");
     check(storage_calls==1,"the contributor did not run again");
 
@@ -205,34 +205,34 @@ int main(void) {
     check(eval_true(ctx,
           "(function(d){return d.value!==undefined&&d.get===undefined&&"
           "d.enumerable===true&&d.writable===false&&d.configurable===false})"
-          "(Object.getOwnPropertyDescriptor(pocket,'storage'))"),
+          "(Object.getOwnPropertyDescriptor(kobako,'storage'))"),
           "the accessor became an enumerable, frozen data property");
 
     // 4. Two contributors, in registration order, on one object.
     check(eval_true(ctx,
-          "typeof pocket.pet.select==='function'&&typeof pocket.pet.show==='function'"),
+          "typeof kobako.pet.select==='function'&&typeof kobako.pet.show==='function'"),
           "both contributors filled the same namespace");
     check(pet_hub_calls==1&&pet_assets_calls==1,"each contributor ran once");
 
     // 5. A refusal reaches the app as an error, leaves nothing half-built, and
     //    does not poison the property.
     const char *thrown=eval_text(ctx,
-        "(function(){try{pocket.flaky;return 'no throw';}"
+        "(function(){try{kobako.flaky;return 'no throw';}"
         "catch(e){return e.code+'/'+e.operation;}})()");
     check(!strcmp(thrown,"OUT_OF_MEMORY/flaky"),
           "a contributor's refusal throws OUT_OF_MEMORY for that namespace");
     check(eval_true(ctx,
-          "Object.getOwnPropertyDescriptor(pocket,'flaky').get!==undefined"),
+          "Object.getOwnPropertyDescriptor(kobako,'flaky').get!==undefined"),
           "the accessor survives a refusal");
-    check(eval_true(ctx,"Object.keys(pocket).indexOf('flaky')>=0"),
+    check(eval_true(ctx,"Object.keys(kobako).indexOf('flaky')>=0"),
           "a refused namespace still enumerates");
     flaky_refuses=false;
-    check(eval_true(ctx,"pocket.flaky.half===1"),"a later read succeeds");
+    check(eval_true(ctx,"kobako.flaky.half===1"),"a later read succeeds");
     check(flaky_calls==2,"the retry re-ran the contributor from scratch");
 
     // 6. Whole-object operations do not trip over what is left.
-    check(eval_true(ctx,"typeof JSON.stringify(pocket)==='string'"),
-          "JSON.stringify(pocket) builds the rest and does not throw");
+    check(eval_true(ctx,"typeof JSON.stringify(kobako)==='string'"),
+          "JSON.stringify(kobako) builds the rest and does not throw");
 
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);

@@ -11,7 +11,7 @@
  *          JS_ReadObject, the compiled one freed (precompiled bytecode with
  *          its line tables);
  *   strip  the same, written with STRIP_DEBUG | STRIP_SOURCE;
- *   harden as src in a hardened context (JS_PocketHarden first), as the
+ *   harden as src in a hardened context (JS_LeanHarden first), as the
  *          device compiles an app: compact variables, docs/vm/compact-vars.md.
  * The write buffer is freed before measuring (JS_ReadObject copies it: the
  * bytecode is rewritten for the runtime's atoms, docs/vm/eval-peak.md 3.5).
@@ -81,11 +81,11 @@ int main(int argc, char **argv) {
                                              : JS_WRITE_OBJ_BYTECODE;
     JSRuntime *rt = JS_NewRuntime2(&MF, NULL);
     JSContext *ctx = JS_NewContext(rt);
-    /* harden: the app's context as the device makes it (JS_PocketHarden
+    /* harden: the app's context as the device makes it (JS_LeanHarden
        before any app code), so functions compile with compact variables
        (docs/vm/compact-vars.md); otherwise as src. */
     const bool harden = !strcmp(mode, "harden");
-    if (harden && JS_PocketHarden(ctx) < 0) { fprintf(stderr, "JS_PocketHarden failed\n"); return 1; }
+    if (harden && JS_LeanHarden(ctx) < 0) { fprintf(stderr, "JS_LeanHarden failed\n"); return 1; }
     JS_RunGC(rt);
     const size_t before = cur;
     JSValue keep[64];

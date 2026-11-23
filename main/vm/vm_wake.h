@@ -16,7 +16,7 @@
 // and nothing else.
 //
 // Why a counting task notification and not a queue or a semaphore: the
-// completion record already exists in pocket_api.c's promises[] table (no
+// completion record already exists in kobako_api.c's promises[] table (no
 // allocation, ISR-safe), so a queue would be a second copy of it. The counter
 // is also what makes the pre-wait race unlosable -- see vm_wake_wait().
 

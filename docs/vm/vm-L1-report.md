@@ -34,7 +34,7 @@
 | 完了（`await` の解決）の届き方 | resolve / reject の配送も継続ターン中は**保留**される（§6 が求める互換モード）。したがって **F 型アプリの JS 完了遅延は縮まない。むしろ `frame()` と同じく約 4 ターンに 1 回にまとまる**（実測(device): F の完了遅延中央値は audio で 9.22 → 69.13 ms、§2.4） | 設計 §1.2 が明記している L1 の限界。縮むのは「ターン長」であって「JS ハンドラ到達時刻」ではない |
 | フレーム周期 | 他タスク・ISR からの完了で `vTaskDelay` を早く抜ける（`vm_wake_*`、FreeRTOS 直接タスク通知）。ただし下限 `VM_MIN_PERIOD_MS=8` ms | UART / ネット / 音声の完了を待つアプリ。`frame()` の回数を時計代わりにするアプリは速くなりうる |
 | キー入力 | 継続ターン中の押下は落とさず `deferred_buttons` に保持し、最初の通常ターンで配る。**ただし 2 つの打鍵が 1 マスクに融合しうる**（§5 の残存危険 2） | 継続ターンが続く忙しいアプリのみ |
-| `pocket.input.text` の打鍵 | ホスト側（IME・バッファ・キャレット・再描画）は従来どおり即座。**ゲストの onEdit/onSubmit/onCancel は `app_tick()` の pump 段に遅延**（同じフレーム内） | 観測差は通常無し。1 本の論理 drain の途中に JS が割り込まなくなる |
+| `kobako.input.text` の打鍵 | ホスト側（IME・バッファ・キャレット・再描画）は従来どおり即座。**ゲストの onEdit/onSubmit/onCancel は `app_tick()` の pump 段に遅延**（同じフレーム内） | 観測差は通常無し。1 本の論理 drain の途中に JS が割り込まなくなる |
 | 暴走 | 「1 本の論理 drain が `vm_sched_drain` の中で使った時間」が 250 ms（`VM_RUNAWAY_US`）を超えるとセッション終了。例外は投げない（`finally` を飛ばさない、`await` を永久 pending にしない）。時計が死んだときの受け皿が 10 万件（`VM_RUNAWAY_JOBS`） | `function f(){Promise.resolve().then(f)} f()` のような「空にならないキュー」。**旧 250 ms 壁時計ガードより必ず緩い**（`frame()`・pump・描画・転送を数えないため） |
 | 離脱（Back） | 離脱ターンは広い予算（`VM_LEAVE_BUDGET_US=50000` / backstop 256）で継続を走らせ、**空にならなくても** `frame(0x2000)` へ抜ける。ゲストの最後の保存機会を保つ | 忙しいアプリ（= 保存が最も要る側） |
 
@@ -44,7 +44,7 @@
 
 | 名前 | 既定 | 意味 |
 | --- | --- | --- |
-| `CONFIG_POCKET_VM_SCHED` | **y** | L1 の全体。`n` にすると予算が無制限になり、drain は中断できず、継続ターンが存在せず、未処理 rejection の報告地点は L1 前と同じ、フレームキャップは旧来の無条件 `vTaskDelay` に戻る |
+| `CONFIG_KOBAKO_VM_SCHED` | **y** | L1 の全体。`n` にすると予算が無制限になり、drain は中断できず、継続ターンが存在せず、未処理 rejection の報告地点は L1 前と同じ、フレームキャップは旧来の無条件 `vTaskDelay` に戻る |
 | `sdkconfig.vmsched_off.defaults` | — | 上記を `n` にするための重ね方（`-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vmsched_off.defaults"`） |
 
 仕様 §12（各段階は revert 可能、`main` の既定挙動を変えない）を 1 つの Kconfig で満たしている。off ビルドは実測(build)で成立を確認済み（§2.2）。
@@ -53,12 +53,12 @@
 
 `quickjs.c` は **1 バイトも変更していない**（§6 完了条件 1）。新設・改変は次のとおり。
 
-- `components/pocketjs_guest/…/vm_clock.[ch]` — 時計抽象（既定は device で `esp_timer_get_time()`、host で `clock_gettime`）
-- `components/pocketjs_guest/…/vm_sched.[ch]` — `vm_sched_drain()` と `vm_budget_t`、全定数。**esp ヘッダを含まない**ので `tools/vmtest/vmrun.c` が写さずに**リンク**する（= ハーネスは出荷するスケジューラそのものを検査する）
-- `guest.c` — `drain_jobs` を `vm_sched_drain` 経由に、`pocketjs_guest_continue/_jobs_pending/_budget/_set_watchdog/_drain_total`、stats に `yields`/`continuations`/`jobs_pending`/`jobs_dropped`
-- `components/pocketjs_ui_qjs/` — **新規に取り込み**（`77095b0` が無改変のバイト列、以後が改変）。`pocketjs_ui_turn_continue()` を追加
+- `components/kobako_guest/…/vm_clock.[ch]` — 時計抽象（既定は device で `esp_timer_get_time()`、host で `clock_gettime`）
+- `components/kobako_guest/…/vm_sched.[ch]` — `vm_sched_drain()` と `vm_budget_t`、全定数。**esp ヘッダを含まない**ので `tools/vmtest/vmrun.c` が写さずに**リンク**する（= ハーネスは出荷するスケジューラそのものを検査する）
+- `guest.c` — `drain_jobs` を `vm_sched_drain` 経由に、`kobako_guest_continue/_jobs_pending/_budget/_set_watchdog/_drain_total`、stats に `yields`/`continuations`/`jobs_pending`/`jobs_dropped`
+- `components/kobako_ui_qjs/` — **新規に取り込み**（`77095b0` が無改変のバイト列、以後が改変）。`kobako_ui_turn_continue()` を追加
 - `main/app_session.c` — 継続の骨格、`arm_turn()` / `present_frame()` / `drain_runaway()` / `final_stats`
-- `main/vm/vm_wake.[ch]`、`main/main.c`、`main/pocket/pocket_api.c`、`main/pocket/pocket_app.c`、`main/pocket/pocket_text.c`（`pocket_text_pump()`）
+- `main/vm/vm_wake.[ch]`、`main/main.c`、`main/kobako/kobako_api.c`、`main/kobako/kobako_app.c`、`main/kobako/kobako_text.c`（`kobako_text_pump()`）
 - `tools/vmtest/` — `--budget-jobs` / `--force-yield` / `--runaway-jobs` / `--stop-turns` / `--host-events`、新規コーパス 10 件
 
 ---
@@ -68,7 +68,7 @@
 ### 2.1 何をどう測ったか
 
 Cardputer ADV / COM3、ブランチ `vm/l1-host-sched`、ワークツリー `…-vm`。**L1-new と L1-legacy は
-同じツリー・同じコンパイラ・同じ日のセッションで作り直した 2 本**で、違いは `CONFIG_POCKET_VM_SCHED`
+同じツリー・同じコンパイラ・同じ日のセッションで作り直した 2 本**で、違いは `CONFIG_KOBAKO_VM_SCHED`
 の y/n だけ（`build_l1_dev_probe_on` / `build_l1_dev_probe_legacy`、どちらも §8 の決定どおり
 core 1 pin・`VM_JOB_STRIDE=1`・esp_timer）。6 ワークロード × base/all × 3 反復、加えて
 ジョブの重い D/F × ui/audio/wifi × 3 反復。生データは `.cache/vm/l1-new.jsonl` /
@@ -163,7 +163,7 @@ unsigned rest = (unsigned)held<cap?cap-held:1;
 いない**（62 ジョブ × 0.49 ms ≒ 30 ms のまま）。伸びたのは**待ち時間だけ**である。
 
 完了遅延の悪化も同じ 1 個の原因から出る。F の audio 条件で 9.22 → 69.13 ms なのは、
-完了が `pocket_api_pump()` に届くのが「キューが空になったターン」＝ 133 ms に 1 回だから。
+完了が `kobako_api_pump()` に届くのが「キューが空になったターン」＝ 133 ms に 1 回だから。
 §5.1 が「互換モードなので F 型の遅延は縮まない」と予告していたのは**方向としては当たったが、
 量の原因は互換モードではなく待ち方**である。
 
@@ -192,7 +192,7 @@ unsigned rest = (unsigned)held<cap?cap-held:1;
    **実行中の空きヒープは比較にならない。** D の base で legacy 106,544 → new 83,760 B、
    `js_used_max` が 86,320 → 103,032 B（3 反復 42 窓すべてで完全に平坦、ばらつき 0）。
    これは漏れではなく**測る場所が動いた**結果である: heap / `js_used` の標本は
-   `vmprobe_frame_sample()` の中でしか採られない（`main/pocket/vmprobe.c:181`）ので、
+   `vmprobe_frame_sample()` の中でしか採られない（`main/kobako/vmprobe.c:181`）ので、
    legacy では「41 段の連鎖を drain し終えた後」、new では「8 件だけ流して 33 段が生きて
    いる最中」を見ている。差の 16,712 B は**生きている連鎖そのもの**で、legacy でも同じものが
    同じ瞬間に存在していた — 標本がその瞬間を一度も踏まなかっただけである（42 窓すべてが
@@ -284,7 +284,7 @@ I (13578) app: VMWAIT cont n=90 held=8 cap=33 wait=23 | norm n=30 held=13 cap=33
 #### 実機の結果（D と F × base/audio/wifi/all × 3 反復、`build_l1_dev_probe_on` で修正前後を焼き直し）
 
 生データは `.cache/vm/l1-fix-before.jsonl` / `.cache/vm/l1-fix-after.jsonl`（git 管理外）。
-`legacy` の列は §2.3 と同じ値（`CONFIG_POCKET_VM_SCHED=n`、本セッションでは測り直していない）。
+`legacy` の列は §2.3 と同じ値（`CONFIG_KOBAKO_VM_SCHED=n`、本セッションでは測り直していない）。
 
 **`frame()` 到達率（/s）— 答えるべき問い**
 
@@ -390,7 +390,7 @@ drain 時間に速く到達する。ガードが数えるのは `vm_sched_drain`
 | --- | --- | --- | --- |
 | 1 | **VM 本体の変更なしで動作する** | **満たした** | `quickjs.c` は 1 バイトも変更していない。判定は `JS_ExecutePendingJob()` の呼び出しと呼び出しの**間**だけ（`vm_sched.c`）。ジョブを割らない・二重に入らない・飛ばさないことは構造（`list_del` してから実行、`jobs_pending` が唯一の再開ゲート）とコーパス（`generators.js` / `try_finally.js` / `closures.js` を `--force-yield` で、ASan/UBSan/LSan 報告 0、実測(host)）の両方で確認 |
 | 2 | **FIFO、then/catch/finally の観測順序が基準と一致** | **満たした（ホストで厳密、実機で挙動確認）** | コーパス 33 件 × {asan, o2} × {予算なし, `--force-yield`, `--budget-jobs 1/3/7/16`} = 12 通りで**全件バイト一致**。既存 `expected/*.txt` は `runaway_jobs.txt` 1 件（暴走の判定文の変更に伴う）を除き書き換えていない。Test262 `--force-yield` は asan/o2 とも 7,501 pass / 194 fail / 0 skip、`regressions: 0`（実測(host)）。**実機経路のみで通る順序**（`app_tick` の pump 順、overlay 経路、離脱ターン）はバイト一致では検査できないが、2026-09-12 の実機走行で全 6 ワークロード × 5 条件が意味論の破れ無しに完走し（§2）、`test_settings.py` / `smoke_device.py --cycles 20` / `capture_home.py` も回帰無し（§2.6）。**「順序が違う」ことを実機で捕まえる検査は存在しない**ので、ここはホストのバイト一致が根拠のままである |
-| 3 | **完了通知の集中・満杯・停止直後・通知と待機の競合で取りこぼし / 永久待機がない** | **満たした（ホストで証明、実機で確認）** | 記録は確保無しの `promises[]`、`done` の公開が `vm_wake_post()` より**前**なので「記録が無いのに通知だけ」は起きず、「記録はあるのに通知が無い」は待機直前の check が拾う（設計 §4.3 の証明）。カウント型通知なので check と Take の間の Give も失われない。ISR 文脈は `xPortInIsrContext()` で分岐。停止直後は `pocket_api_reset()` が armed を settle せず解放（従来どおり）。ホスト検査は `budget_completions.js` / `budget_boundary_exact.js`（記録順に 1 回ずつ、キューが空になったターンでのみ配送）。実機では `all` 条件（UI + 音 + Wi-Fi/HTTP が同時に完了を投げる）で全ワークロードが完走し、`lat_drop` は 1 件も出ていない。停止時の取りこぼしは §2.7 の診断 `6` で `jobs dropped at stop:` が正しく出ることを確認（実測(device)） |
+| 3 | **完了通知の集中・満杯・停止直後・通知と待機の競合で取りこぼし / 永久待機がない** | **満たした（ホストで証明、実機で確認）** | 記録は確保無しの `promises[]`、`done` の公開が `vm_wake_post()` より**前**なので「記録が無いのに通知だけ」は起きず、「記録はあるのに通知が無い」は待機直前の check が拾う（設計 §4.3 の証明）。カウント型通知なので check と Take の間の Give も失われない。ISR 文脈は `xPortInIsrContext()` で分岐。停止直後は `kobako_api_reset()` が armed を settle せず解放（従来どおり）。ホスト検査は `budget_completions.js` / `budget_boundary_exact.js`（記録順に 1 回ずつ、キューが空になったターンでのみ配送）。実機では `all` 条件（UI + 音 + Wi-Fi/HTTP が同時に完了を投げる）で全ワークロードが完走し、`lat_drop` は 1 件も出ていない。停止時の取りこぼしは §2.7 の診断 `6` で `jobs dropped at stop:` が正しく出ることを確認（実測(device)） |
 | 4 | **追加タスクのスタックを含む RAM 増分と応答遅延の変化を実測する** | **満たした（実測は揃った。ただし結果は回帰を 1 件示している）** | 2026-09-12 実施、§2。RAM: 追加タスクは**作っていない**（§4.1）ので追加スタックは 0 B、静的 DIRAM +96 B（§8 の pin/stride を足しても +0 B）、`stack_hw` は全ワークロードで legacy と一致。応答遅延: D は改善（audio 22.91 → 3.52 ms 中央値）、**F は 3〜8 倍の悪化**（audio 9.22 → 69.13 ms）。ターン長は目的どおり短縮（F の all で p95 45.77 → 14.37 ms）。**実行中の空きヒープの増減だけは、この器械では比較できない** — 標本点が通常ターン末尾に固定されており、L1-new ではそこが「連鎖が生きている最中」に変わるため（§2.5-4、backlog.md） |
 
 **総合判定: §6 の 4 条件は 4 つとも満たした。** 仕様の文面上、L1 は完了している。
@@ -422,7 +422,7 @@ F 型の `frame()` 到達率 28.20 → 7.72 fps と、それに連動する完�
 | **exit() が同じ drain の続きを殺さない** | **`budget_exit_midchain.js`**（vmrun に `host.exit()` と停止要求後に 1 を返す割り込みハンドラを入れ、実機経路を写した） | exit の行で出力が切れる（= 冒頭読みに戻した状態。実際に戻して落ちることを確認済み） |
 | Test262 の合格集合が減らない | `test262.py --force-yield`（asan / o2） | `regressions` が 0 でない |
 | 予算無効時の費用 | `timing.py`（-O2、予算オフ） | 中央値が基準の p95 を、基準自身の p95−中央値より大きく超える |
-| `pocket.input.text` が `app_tick()` の外から JS を呼ばない | `tools/test_pocket_text.c` case 8 / 9（9/9 通過、ASan/UBSan/LSan） | 打鍵時点でコールバックが走る、teardown で発火する、リーク |
+| `kobako.input.text` が `app_tick()` の外から JS を呼ばない | `tools/test_kobako_text.c` case 8 / 9（9/9 通過、ASan/UBSan/LSan） | 打鍵時点でコールバックが走る、teardown で発火する、リーク |
 
 **検査の設計上の要**: 期待値ファイルは既存のものを書き換えない（`tools/vmtest/README` の規則）。新規は `--bless`。予算を変えても**出力がバイト一致**という形にしているので、「予算に依存する挙動」を導入した瞬間に落ちる。
 
@@ -516,7 +516,7 @@ L0・L1 はタグ `vm-L0` / `vm-L1` を打って完了している（`vm-branchi
 | --- | --- |
 | `deferred_buttons` の 2 打鍵融合（受け入れる／キュー化する／切り捨てる） | §5.2-1、backlog.md |
 | 「未処理ジョブもイベントも無い場合だけ待機する」を専用タスク化なしで充足と認めるか | §4.1、backlog.md |
-| 公平モード（`CONFIG_POCKET_VM_FAIR`）を既定にするかどうかの再検討 | §9.5、backlog.md |
+| 公平モード（`CONFIG_KOBAKO_VM_FAIR`）を既定にするかどうかの再検討 | §9.5、backlog.md |
 | L0 で見つかった VM 非依存の既存不具合（GC 閾値・OOM 時 UAF・中断された `await` が pending のまま残る） | backlog.md |
 | 測定器の穴: `vmprobe_frame_sample()` が継続ターンを標本しない（§5.4・backlog.md） | backlog.md |
 
@@ -532,11 +532,11 @@ L0・L1 はタグ `vm-L0` / `vm-L1` を打って完了している（`vm-branchi
 
 §5.3 が残した「clockbench の 3 結論を取り込むか」を実機で測って決めた。
 §8.8 の「pin したビルドの実行時コストは未測定」も
-ここで埋まっている。測定はすべて `CONFIG_POCKET_VM_PROBE=y` + `tools/vm_l0_capture.py`
+ここで埋まっている。測定はすべて `CONFIG_QJS_LEAN_PROBE=y` + `tools/vm_l0_capture.py`
 （配置の比較はワークロード A/D/F × 条件 base/audio/all、時計と stride の比較は
 ジョブの重い D/F × base/all、いずれも反復 2 × 15 秒）と、ホーム画面の
 `PERF` 行を 12 秒のウォームアップ後 60 秒プールしたもの。**決定の結果は
-`CONFIG_POCKET_UI_TASK_CORE=1` / `CONFIG_POCKET_VM_CCOUNT=n` / `VM_JOB_STRIDE=1`** で、
+`CONFIG_KOBAKO_UI_TASK_CORE=1` / `CONFIG_KOBAKO_VM_CCOUNT=n` / `VM_JOB_STRIDE=1`** で、
 実機検査（§8.5）はその組み合わせの素のビルドで走らせている。
 
 **3 つの配置は同じ 1 本のバイナリ族**で、`xTaskCreatePinnedToCore()` の即値だけが違う
@@ -551,7 +551,7 @@ L0・L1 はタグ `vm-L0` / `vm-L1` を打って完了している（`vm-branchi
 | promise_chain / all turn 中央値 | 13.04 ms | 13.08 ms | **14.03 ms (+7.6%)** |
 | async_generator / all turn 中央値 | 8.16 ms | 8.00 ms | **9.19 ms (+12.6%)** |
 | LCD 転送 `PERF send` 中央値 | 7.66–7.70 ms (5 boot) | 7.67–7.70 ms (5 boot) | **8.25–8.34 ms (3 boot、範囲が重ならない)** |
-| 他コアの仕事: LAN gateway への HTTP GET（`pocket_http` タスク、JS 実行中） | 422 ms (n=14) | 428 ms | **488 ms (+15.6%)** |
+| 他コアの仕事: LAN gateway への HTTP GET（`kobako_http` タスク、JS 実行中） | 422 ms (n=14) | 428 ms | **488 ms (+15.6%)** |
 | 音の再武装回数（tone 完了から再発行、15 秒） | 10 | 10 | 10 |
 | 空きヒープ最小（promise_chain/base） | 83,760 B | 83,760 B | 83,760 B |
 | 静的 DIRAM | 119,788 B | 119,788 B | 119,788 B |
@@ -564,7 +564,7 @@ fps でどちらが速いとは言わない。**分離できたのは `send` と
 
 **core 0 が高いのは構造的**: ESP-IDF は Wi-Fi ドライバタスクを core 0 に固定して作る
 （起動ログ `wifi driver task: ..., core=0`、§8.8）。
-ファーム自身のワーカー（`sfx` 優先度 7、`pocket_http`、`wifi_*`）はすべて `xTaskCreate`
+ファーム自身のワーカー（`sfx` 優先度 7、`kobako_http`、`wifi_*`）はすべて `xTaskCreate`
 = 無指定なので、ui を core 1 に置くと OS が空いている側へ流せる。core 0 に置くと
 描画・JS・無線が 1 つのコアに積まれ、**JS のターンだけでなく他コアの仕事（HTTP +15.6%）
 まで悪くなる**。
@@ -600,7 +600,7 @@ esp_timer の 833 ns（実測、§8.7）を掛けて 7.5 µs / 27.5 µs、
 
 ### 8.3 決定
 
-1. **`ui_task` を core 1 に pin する（採用）。** `CONFIG_POCKET_UI_TASK_CORE` の既定を
+1. **`ui_task` を core 1 に pin する（採用）。** `CONFIG_KOBAKO_UI_TASK_CORE` の既定を
    `1` にした。実測で core 1 は無 pin と区別できない（sync_loop と promise_chain の
    ターン中央値は 0.1% 以内、async_generator は 1.5〜2% で反復間ばらつきと同程度、
    転送 0.04% 以内、DIRAM 0 B）、core 0 は 5.6〜15.6% 高い。無 pin は「OS が選ぶ」
@@ -638,8 +638,8 @@ esp_timer の 833 ns（実測、§8.7）を掛けて 7.5 µs / 27.5 µs、
    費用は測定に出ない: promise_chain は 1 ターン 41 ジョブで、stride 4→1 の drain は
    730 → 731 µs（同じ器械が CCOUNT との 8 µs 差は分離している）。
 
-4. **実装は残す。** `CONFIG_POCKET_VM_CCOUNT`（既定 `n`）として入っており、
-   `CONFIG_POCKET_UI_TASK_CORE < 0` では**コンパイルを拒否する**（`vm_clock.c` の
+4. **実装は残す。** `CONFIG_KOBAKO_VM_CCOUNT`（既定 `n`）として入っており、
+   `CONFIG_KOBAKO_UI_TASK_CORE < 0` では**コンパイルを拒否する**（`vm_clock.c` の
    `#error`）。採らない判断を、次に誰かが測り直せる形で残すため。
 
 ### 8.4 単位と折り返し（採否に関わらず正しくした）
@@ -697,7 +697,7 @@ CCOUNT は 32 bit で、240 MHz では 2^32/240e6 ≒ **17.9 秒で一周する*
 ### 8.7 時計読み出しコストの実測（`vm/l1-clockbench` ブランチでの計測）
 
 上の §8.2/§8.3 が使う「CCOUNT 25 ns、esp_timer 833 ns」の出どころ。計装は `main/main.c` の
-`CONFIG_POCKET_VM_L1_CLOCKBENCH`（既定 n、使い捨てのベンチで出荷コードではない。off のビルドは
+`CONFIG_KOBAKO_VM_L1_CLOCKBENCH`（既定 n、使い捨てのベンチで出荷コードではない。off のビルドは
 1 バイトも変わらない）。
 
 手法: ループ本体なしの純粋なオーバーヘッド測定。`esp_cpu_get_cycle_count()`（CCOUNT、`RSR CCOUNT`、
@@ -762,7 +762,7 @@ pin したビルドの静的コスト: `xTaskCreatePinnedToCore(ui_task,...,1)` 
 
 ---
 
-## 9. 公平モード（`CONFIG_POCKET_VM_FAIR`、既定 off、2026-09-12）
+## 9. 公平モード（`CONFIG_KOBAKO_VM_FAIR`、既定 off、2026-09-12）
 
 ### 9.1 何のためにあるか
 
@@ -812,7 +812,7 @@ pump が完了を settle する手段は resolve 関数の `JS_Call` で、resol
 `corpus/fair_reject_point.js` が両モードで「報告は誰も捕まえない 1 件だけ」を固定する）と
 **暴走ガードの集計**（`vm_sched_drain()` が消費した時間だけを足す規則は同じ）。
 
-`deferred_buttons` は公平モードでは使われない。`pocket_ui_pump()` が継続ターンで走るので
+`deferred_buttons` は公平モードでは使われない。`kobako_ui_pump()` が継続ターンで走るので
 押下はその場で届き、§5.2-1 の「2 打鍵が 1 マスクに融合する」危険は公平モードでは
 発生しない。
 
@@ -823,7 +823,7 @@ pump が完了を settle する手段は resolve 関数の `JS_Call` で、resol
 
 ### 9.4 実機の結果（2026-09-12、すべて実測(device)）
 
-同一ツリー・同一日・`CONFIG_POCKET_VM_FAIR` の y/n だけが違う 2 本のプローブビルド
+同一ツリー・同一日・`CONFIG_KOBAKO_VM_FAIR` の y/n だけが違う 2 本のプローブビルド
 （`build_fair_on_probe` / `build_fair_off_probe`、どちらも core 1 pin・`VM_JOB_STRIDE=1`・
 esp_timer）。ワークロードは **D promise_chain** と **F async_generator** の 2 本のみ、
 条件 base / audio / wifi / all、各 3 反復、1 反復 15 s。生データは
@@ -911,7 +911,7 @@ L1 の完了条件（旧来と同じ drain 順序）を満たすのは互換モ�
 
 ### 9.7 出荷既定での実機再検査（公平 off）
 
-素の L1 ビルド（プローブ無し、`CONFIG_POCKET_VM_FAIR=n`）で、実測(device):
+素の L1 ビルド（プローブ無し、`CONFIG_KOBAKO_VM_FAIR=n`）で、実測(device):
 
 | 検査 | 結果 |
 | --- | --- |
@@ -924,9 +924,9 @@ L1 の完了条件（旧来と同じ drain 順序）を満たすのは互換モ�
 
 ## 10. スケジューラ定数の調律（`VM_JOB_FLOOR` / `VM_JOB_STRIDE`、2026-09-12）
 
-vm-L1-design.md §1（予算の設計）と本書 §8.6「開いたまま残る問い」が残していた 2 つの疑問（出荷値 `VM_JOB_FLOOR=8` / `VM_JOB_STRIDE=1` は本当にそのとおり効いているか）を実機で決着させた。数値はすべて実測(device)、`tools/vm_l0_capture.py`（`CONFIG_POCKET_VM_PROBE=y`、`CONFIG_POCKET_UI_TASK_CORE=1`）。ワークロードは D `promise_chain`（40 件の `.then` 連鎖）・F `async_generator`（`for await` 20 回）、条件は base・all、各 3 反復。
+vm-L1-design.md §1（予算の設計）と本書 §8.6「開いたまま残る問い」が残していた 2 つの疑問（出荷値 `VM_JOB_FLOOR=8` / `VM_JOB_STRIDE=1` は本当にそのとおり効いているか）を実機で決着させた。数値はすべて実測(device)、`tools/vm_l0_capture.py`（`CONFIG_QJS_LEAN_PROBE=y`、`CONFIG_KOBAKO_UI_TASK_CORE=1`）。ワークロードは D `promise_chain`（40 件の `.then` 連鎖）・F `async_generator`（`for await` 20 回）、条件は base・all、各 3 反復。
 
-**結論: どちらも出荷値のまま。** `vm_sched.h` への変更は無い。新しく足したのは 1 本のプローブ（`vm_sched_drain()` 呼び出しごとの `ran` を生のまま記録するリング、`drain_jobs()` に `CONFIG_POCKET_VM_PROBE` 時のみ、容量 128）と、それが出す生データだけ。既存の `VMPROBE S ... jobs ...` 行（`app_tick()` 1 回あたりの合計）は継続ターンを合算してしまい、「floor で 8 件だけ実行して yield → 継続ターンで残り 33 件を 1 回で完走」のような 2 ターンの内訳を「41 件が 1 回で実行された」場合とビットレベルで区別できない。この盲点のせいで、以下の 2 点は測るまで確かめようがなかった。
+**結論: どちらも出荷値のまま。** `vm_sched.h` への変更は無い。新しく足したのは 1 本のプローブ（`vm_sched_drain()` 呼び出しごとの `ran` を生のまま記録するリング、`drain_jobs()` に `CONFIG_QJS_LEAN_PROBE` 時のみ、容量 128）と、それが出す生データだけ。既存の `VMPROBE S ... jobs ...` 行（`app_tick()` 1 回あたりの合計）は継続ターンを合算してしまい、「floor で 8 件だけ実行して yield → 継続ターンで残り 33 件を 1 回で完走」のような 2 ターンの内訳を「41 件が 1 回で実行された」場合とビットレベルで区別できない。この盲点のせいで、以下の 2 点は測るまで確かめようがなかった。
 
 **疑問 A: `VM_JOB_FLOOR=8` は時間予算を無効にしているか — 無効になっていない。** `vm_sched_drain()` 呼び出し 1 回あたりの `ran` の分布（stride=1・floor=8、base+all、3 反復）:
 

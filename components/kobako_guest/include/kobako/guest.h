@@ -1,0 +1,239 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+#include "kobako/vm_sched.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define KOBAKO_GUEST_ABI_VERSION 1U
+#define KOBAKO_GUEST_MAX_TOUCHES 8U
+
+typedef struct kobako_guest kobako_guest_t;
+
+typedef struct {
+  size_t struct_size;
+  size_t heap_limit;
+  size_t stack_limit;
+  bool prefer_psram;
+  /** Bytes of internal RAM taken at creation as the guest's private arena
+   * (docs/vm/qjs-observe.md sec.20); 0 for none. A caller built against the
+   * shorter struct gets kobako_guest_config_defaults()'s value. */
+  size_t arena_bytes;
+} kobako_guest_config_t;
+
+typedef struct {
+  size_t struct_size;
+  uint32_t buttons;
+  /** (x << 8) | y, with both normalized axes in 0..255 and 128 centered. */
+  uint32_t analog;
+  const uint32_t *touches;
+  const int32_t *touch_hits;
+  size_t touch_count;
+} kobako_guest_frame_t;
+
+typedef struct {
+  size_t struct_size;
+  uint32_t frames;
+  uint32_t frame_errors;
+  uint32_t jobs;
+  size_t heap_used;
+  size_t heap_limit;
+  /* L1 (docs/vm/vm-L1-design.md). struct_size guards the ABI: a caller built
+   * against the shorter struct asks for the shorter struct and gets it. */
+  uint32_t yields;         /* drains cut by the budget */
+  uint32_t continuations;  /* turns that began by finishing a previous drain */
+  bool jobs_pending;       /* the last drain ended with the queue non-empty */
+  bool jobs_dropped;       /* jobs were queued when the session ended */
+} kobako_guest_stats_t;
+
+void kobako_guest_config_defaults(kobako_guest_config_t *config);
+
+esp_err_t kobako_guest_create(const kobako_guest_config_t *config,
+                                kobako_guest_t **out_guest);
+
+/** Evaluate one global IIFE. Surfaces must be installed before this call. */
+esp_err_t kobako_guest_eval(kobako_guest_t *guest, const char *source,
+                              size_t source_size, const char *label);
+
+/** Call globalThis.frame(...) once and drain pending Promise jobs. An explicit
+ * globalThis.frame = null selects event-driven mode: jobs still drain, but no
+ * JS frame call or argument allocation occurs. A missing frame is an error. */
+esp_err_t kobako_guest_frame(kobako_guest_t *guest,
+                               const kobako_guest_frame_t *frame);
+
+/** Puts a guest whose source defined no frame into the event-driven mode an
+ * explicit globalThis.frame = null selects, without touching the global, and
+ * drains the jobs its evaluation queued (docs/vm/event-loop-design.md E1).
+ * ESP_ERR_INVALID_STATE if a frame function is bound. */
+esp_err_t kobako_guest_run_without_frame(kobako_guest_t *guest);
+
+/** Arm this turn's job budget (docs/vm/vm-L1-design.md sec.1.3). NULL, or a
+ * budget with limit_us <= 0, restores the pre-L1 "drain until empty"
+ * behaviour exactly. Call once per turn, before any call into the guest. */
+void kobako_guest_budget(kobako_guest_t *guest, const vm_budget_t *budget);
+
+/** True when the last drain stopped on the budget with jobs still queued.
+ * The host must finish them with kobako_guest_continue() at the top of the
+ * next turn, BEFORE delivering anything new into JavaScript (sec.2.1). */
+bool kobako_guest_jobs_pending(const kobako_guest_t *guest);
+
+/** A bytecode chain is parked: no new JS entry or host pump is allowed. */
+bool kobako_guest_suspended(const kobako_guest_t *guest);
+/** Either a parked chain or pending jobs must finish before a new frame. */
+bool kobako_guest_work_pending(const kobako_guest_t *guest);
+/** Resident suspension (docs/vm/app-suspend-design.md). true refuses with
+ * ESP_ERR_INVALID_STATE while work is pending, otherwise collects garbage,
+ * returns the small-block cache and puts the guest to sleep: eval, frame,
+ * continue and install then return ESP_ERR_INVALID_STATE without entering
+ * JavaScript, and the interrupt handler stops any entry that gets past them.
+ * false wakes it. Destroying a dormant guest is allowed. */
+esp_err_t kobako_guest_set_dormant(kobako_guest_t *guest, bool dormant);
+bool kobako_guest_dormant(const kobako_guest_t *guest);
+/** Accumulated time inside the current parked frame call, not host waits. */
+int64_t kobako_guest_frame_total(const kobako_guest_t *guest);
+#ifdef CONFIG_KOBAKO_VM_SELFTEST
+/** Log the next completed frame's accumulated call time, excluding host waits.
+ * Includes preemption and native calls; not a CPU-time measurement. */
+void kobako_guest_trace_frame(kobako_guest_t *guest);
+#endif
+#ifdef CONFIG_QJS_LEAN_RELOC
+/** L3a: move the frame segments to new addresses at every park from now on,
+ * and reset the counters. Off until this is called, so a RELOC build that is
+ * never armed takes the same path as a build without it. Arming does not
+ * change what the guest computes -- if it does, that is the bug this is for
+ * (docs/vm/vm-L3-design.md sec.8, gate G7). */
+void kobako_guest_reloc_arm(kobako_guest_t *guest, bool on);
+/** Log VM_RELOC with what the moves since arming cost. Silent when unarmed. */
+void kobako_guest_reloc_report(const kobako_guest_t *guest);
+#endif
+/** Stop the yield producer first. Close a parked chain without catch/finally
+ * before entering a shutdown hook; queued jobs remain queued. */
+void kobako_guest_prepare_stop(kobako_guest_t *guest);
+/** Enable per-call timer delivery; disable for the final Back/leave turn. */
+void kobako_guest_yield_enabled(kobako_guest_t *guest, bool enabled);
+
+/** What the current LOGICAL drain has cost: microseconds spent inside
+ * vm_sched_drain() plus resumed jobs, and jobs completed, summed over the drain the budget cut
+ * and every continuation of it, both cleared when the queue empties. The host
+ * runaway guard (docs/vm/vm-L1-design.md sec.5.2) is a predicate on these; it
+ * cannot be a turn count, because a turn ends for reasons -- the backstop, a
+ * contended machine shortening the wall-clock budget -- that say nothing about
+ * how much work the guest asked for. `*us` is 0 whenever the budget runs in
+ * count mode (limit_us <= 0), where drain time is not charged. */
+void kobako_guest_drain_total(const kobako_guest_t *guest, int64_t *us,
+                                uint64_t *jobs);
+
+/** Continue the drain the budget cut. Same queue, same order, no frame() and
+ * no new host events in between: this is the rest of one logical drain. */
+esp_err_t kobako_guest_continue(kobako_guest_t *guest);
+
+/** Install the host's interrupt predicate (sec.5.3). QuickJS has ONE handler
+ * slot and three callers used to overwrite one another; the registration now
+ * lives in the guest and the host swaps only the predicate. NULL restores the
+ * guest's own epoch-based handler. Returns 1 to interrupt, like QuickJS. */
+void kobako_guest_set_watchdog(kobako_guest_t *guest, int (*fn)(void *),
+                                 void *opaque);
+
+/** Ask the current or next JavaScript turn to stop through QuickJS's handler.
+ * This is the only guest API that may be called outside the owner task. */
+void kobako_guest_interrupt(kobako_guest_t *guest);
+
+esp_err_t kobako_guest_stats(kobako_guest_t *guest,
+                               kobako_guest_stats_t *out_stats);
+
+/** Read-and-clear count of allocation rejections (QuickJS's malloc_limit
+ * check OR the underlying allocator, either one -- see JS_TakeOOMCanary in
+ * quickjs.h) since the last call, plus the first one's requested size and the
+ * heap usage at that moment. Any argument may be NULL. Call once per turn,
+ * after the turn's JS has run, so a `null` exception thrown that turn can be
+ * told apart from the script's own `throw null` (both look identical from
+ * inside the guest once JS_ThrowOutOfMemory's own allocation also fails). */
+void kobako_guest_take_oom(kobako_guest_t *guest, uint32_t *count,
+                             size_t *first_req, size_t *first_used);
+
+/* Detailed destructive read. The host calls only one variant per turn. */
+#include "quickjs.h"
+void kobako_guest_take_oom_detail(kobako_guest_t *guest, JSOOMCanary *out);
+
+/* R3 (docs/vm/r3-small-block-cache.md): give the small blocks the guest's
+ * allocator keeps for reuse back to the heap -- when the system, not the
+ * guest, is short (kobako_memory FREE/LARGEST). A no-op from any task but the
+ * one that created the guest. */
+void kobako_guest_block_cache_flush(kobako_guest_t *guest);
+
+/* Shrink small-block retention to BLOCK_CACHE_PRESSURE_DEPTH per class while
+ * native free/contiguous RAM is under pressure (the excess goes back to the
+ * heap at once); false restores the full depth after the host's recovery
+ * hysteresis.
+ * Owner-task only, and never enables a cache rejected at guest creation.
+ * This does not change the guest's live allocation accounting or heap limit. */
+void kobako_guest_block_cache_set_pressure(kobako_guest_t *guest,
+                                            bool pressured);
+
+/* Fit the guest's memory limit to what it can really get (docs/vm/
+ * lv3-heap-exhaustion.md sec.5): its current bytes, the room left in its arena
+ * and small-block cache, and whatever of `system_free` lies above
+ * `native_floor` (the working room natives need), capped at the configured
+ * limit. Past that point an allocation used to reach the shared heap and be
+ * refused there -- uncatchable at a frame's entry, and below the GC's
+ * trigger, so cyclic garbage was never collected. With the limit there the
+ * refusal is a quota OOM the app can catch, and the GC cap (a fraction of the
+ * limit) is reachable again. Returns the limit set. Between turns only. */
+size_t kobako_guest_fit_limit(kobako_guest_t *guest, size_t system_free,
+                                size_t native_floor);
+
+/* Give the system what the guest holds but does not use (docs/vm/
+ * guest-memory-design.md sec.6.1): the small-block cache, and every empty
+ * chunk of the growable arena. Owner task, between turns; a no-op elsewhere.
+ * For native pressure, dormancy and a radio start. */
+void kobako_guest_release_memory(kobako_guest_t *guest);
+
+/* The growable arena's state: chunks held, their bytes, and chunks taken and
+ * returned since creation. All zero without chunks. */
+void kobako_guest_chunk_stats(const kobako_guest_t *guest, unsigned *chunks,
+                                size_t *bytes, uint32_t *taken, uint32_t *returned);
+
+void kobako_guest_destroy(kobako_guest_t *guest);
+
+/* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare
+ * include: this header is also compiled on the host by tools/vmtest, where
+ * there is no sdkconfig.h. Absent config == probe off, the shipping default. */
+#if defined(__has_include)
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+#else
+#include "sdkconfig.h"
+#endif
+
+#ifdef CONFIG_QJS_LEAN_PROBE
+/** The split sec.5 asks for that main/kobako/vmprobe.c cannot take from
+ * outside: kobako_ui_turn() is frame() + drain + the UI core's tick and
+ * draw, and only guest.c sees the boundary between the first two. Both
+ * counters accumulate over every kobako_guest_frame() since the previous
+ * take (one per frame today) and are zeroed by it, so the caller reads
+ * "this frame's". Two clock reads per frame, not per job. */
+void kobako_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us);
+
+/** vm-l1-tuning: raw `ran` from every vm_sched_drain() call (drain_jobs(),
+ * the choke point both kobako_guest_frame() and kobako_guest_continue()
+ * share) since the last take, up to `cap` entries -- oldest-first, FIFO by
+ * insertion. Returns how many were written into `out` (NULL to just drain and
+ * count); `*dropped` is how many more happened than the internal buffer
+ * (128) could hold. Resets both counters. This is the ONLY way to see a
+ * continuation call's job count: it never reaches vmprobe_frame_sample(),
+ * whose per-turn "jobs" sample only covers calls a frame() tick made and
+ * folds an unreported continuation into whichever later tick does call it. */
+unsigned kobako_guest_vmprobe_drain_calls(uint16_t *out, unsigned cap,
+                                            unsigned *dropped);
+#endif
+
+#ifdef __cplusplus
+}
+#endif

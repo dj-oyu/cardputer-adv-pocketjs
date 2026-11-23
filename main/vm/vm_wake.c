@@ -14,9 +14,9 @@ void vm_wake_post(void) {
     return;
   // A completion the OWNER records during its own turn must not shorten the
   // frame cap. Most completions are posted from this very task -- elapsed
-  // sleeps in pocket_app_pump(), UART bytes in pocket_io_pump(), link and scan
-  // results in pocket_net_pump(), a picker's answer in tick_run() -- and
-  // pocket_api_pump() settles every one of them later in the SAME turn. A
+  // sleeps in kobako_app_pump(), UART bytes in kobako_io_pump(), link and scan
+  // results in kobako_net_pump(), a picker's answer in tick_run() -- and
+  // kobako_api_pump() settles every one of them later in the SAME turn. A
   // notification from here would still be sitting in the counter when the loop
   // reaches vm_wake_wait(), so the wait would return at once and the guest
   // would run its next frame() 8 ms after the last one instead of 33: an app
@@ -27,9 +27,9 @@ void vm_wake_post(void) {
   // lets through.
   if (!xPortInIsrContext() && xTaskGetCurrentTaskHandle() == task)
     return;
-  // The context test is not defensive tidiness: pocket_api_complete() is
+  // The context test is not defensive tidiness: kobako_api_complete() is
   // documented as ISR-safe and IS called from one (the RMT transmit-done
-  // callback in pocket_io.c), and xTaskNotifyGive() from an ISR is an abort.
+  // callback in kobako_io.c), and xTaskNotifyGive() from an ISR is an abort.
   // Putting the branch here rather than at the call site keeps the producers
   // from having to know which of them can be an ISR.
   if (xPortInIsrContext()) {

@@ -7,48 +7,48 @@
 **数値の区別**（この文書の全体に適用）:
 
 - **コード**: 該当行を読んで確かめた事実。file:line を付ける。
-- **map**: `4840504` のファームの map（`.cache/base/fw/cardputer_pocketjs.map`、親セッションが 2026-11-13 に組んだもの）を、筆者がオブジェクト別・セクション別に集計した値。「バイナリに入っているか」はこれで確かめた。
+- **map**: `4840504` のファームの map（`.cache/base/fw/cardputer_kobako.map`、親セッションが 2026-11-13 に組んだもの）を、筆者がオブジェクト別・セクション別に集計した値。「バイナリに入っているか」はこれで確かめた。
 - **実測（引用）**: 既存の文書の実機・QEMU の値。出典を付ける。その文書の image と workload に限る。
 - **推定**: 上の値からの計算、または見込み。**§3 の「期待効果」はすべて推定で、P0 のベースラインの後に各段で測り直す。**
 
 ## 0. 結論（先に）
 
-1. **API の表面は、使われ方に対して広すぎる。** `pocket.kasane` を最初に読むと、アプリが使わない `cache`・`grid`・`video`・`pixel` とグローバルの `gridFold` まで一度に作る（コード、§1.1）。出荷アプリが 1 つも使わない入口が 12 個ある（§1.3）。
+1. **API の表面は、使われ方に対して広すぎる。** `kobako.kasane` を最初に読むと、アプリが使わない `cache`・`grid`・`video`・`pixel` とグローバルの `gridFold` まで一度に作る（コード、§1.1）。出荷アプリが 1 つも使わない入口が 12 個ある（§1.3）。
 2. **毎ターンの経路に、API の形が原因の確保が残っている。** `replace`/`patch` は呼ぶたびに JS オブジェクトを 3 つ作る。`drawMany` は件数を受けないので、DERBY は `subarray` を毎回 2 つ作る。`setRect` は配列を受ける（コード、§1.4）。
 3. **ただし、API の形だけを直しても、実機の `turn_ms` に見える差（ビルド間の揺れ 15% を超える差）は出ない見込み。** STRESS で数十 µs / 6.2 ms（推定、§3.6）。見えるのは r5sim のカウント、ゲストヒープ、静的 DRAM、flash。**速さの大きな余地は「アプリの毎ターンの JS の仕事を、状態の領域と `drawList` で native へ移す」側**（v2.0 で API は実装済み、DERBY は未移行。効果は未測定、§5）。だから P0 で DERBY を r5sim に載せ、JS 側の内訳を先に見る。
-4. **静的 DRAM は `pocket.kasane.grid` の表 7,200 B が、grid を使わない全セッションで常駐している**（map）。使うセッションだけが払う形にすると、ホームの空きが同じだけ増える（推定）。
-5. **flash は、診断用の `pocket.shikiDebug` と試験アプリ 6 本で約 47 KB**（map の合計）。製品 image から外すかは利用者の判断（§7）。
-6. **ファイルの移動・改名は最後に回す。** `tools/` の 126 ファイルが `main/` のパスを直書きしている（コード）。`pocket_kasane.c` の分割は、同じ翻訳単位のまま `.inc` に分ける（機械語を変えない。§4.2）。
+4. **静的 DRAM は `kobako.kasane.grid` の表 7,200 B が、grid を使わない全セッションで常駐している**（map）。使うセッションだけが払う形にすると、ホームの空きが同じだけ増える（推定）。
+5. **flash は、診断用の `kobako.shikiDebug` と試験アプリ 6 本で約 47 KB**（map の合計）。製品 image から外すかは利用者の判断（§7）。
+6. **ファイルの移動・改名は最後に回す。** `tools/` の 126 ファイルが `main/` のパスを直書きしている（コード）。`kobako_kasane.c` の分割は、同じ翻訳単位のまま `.inc` に分ける（機械語を変えない。§4.2）。
 
 ## 1. 現状の棚卸し
 
 ### 1.1 入口と、作られる時
 
-`pocket_kasane_install`（`main/pocket/pocket_kasane.c:2845`）が capability `display.kasane` を登録し、`pocket.kasane` を遅延名前空間にする。アプリが `pocket.kasane` を**最初に読んだ時**に `build_kasane`（同 `:2786`）が走り、次を一度に作る（コード）。
+`kobako_kasane_install`（`main/kobako/kobako_kasane.c:2845`）が capability `display.kasane` を登録し、`kobako.kasane` を遅延名前空間にする。アプリが `kobako.kasane` を**最初に読んだ時**に `build_kasane`（同 `:2786`）が走り、次を一度に作る（コード）。
 
 | 作るもの | 所 | 中身 |
 | --- | --- | --- |
-| クラス 10 個の登録 | `pocket_kasane.c:2789-2798` | tx・modal・ref・instance・animation・template・image・ticket・scene・schema |
+| クラス 10 個の登録 | `kobako_kasane.c:2789-2798` | tx・modal・ref・instance・animation・template・image・ticket・scene・schema |
 | 直下の関数 10 個 | `:2730-2738` | `resource` `mount` `createScene` `replace` `patch` `poll` `cancel` `features` `stats` `inputScope` |
 | `cache` | `:2812-2822` | `create` `release` |
-| `grid` とグローバル `gridFold` | `:2823`、`pocket_grid.c:1045-1053`・`:1063-1072` | `register` `registration` `registerResize` `registerResizeSource` `run` `profile` `measure` `resource` `explain`、`gridFold.{fold,index,view}` |
-| `video` | `:2824`、`pocket_video.c:290-299` | `open` `push` `select` `selectAudio` `resetTimeline` `streamStart` `streamPoll` `streamPause` `streamState` `streamStop` |
-| `pixel` | `:2825`、`pocket_pixel.c:135` | `open` `stage` |
-| `shiki`（Shiki heap のあるセッションだけ） | `:2829-2830`、`pocket_shiki_api.c:563-593`、`pocket_shiki_frame.c:1320-1327` | 下の §1.2 |
+| `grid` とグローバル `gridFold` | `:2823`、`kobako_grid.c:1045-1053`・`:1063-1072` | `register` `registration` `registerResize` `registerResizeSource` `run` `profile` `measure` `resource` `explain`、`gridFold.{fold,index,view}` |
+| `video` | `:2824`、`kobako_video.c:290-299` | `open` `push` `select` `selectAudio` `resetTimeline` `streamStart` `streamPoll` `streamPause` `streamState` `streamStop` |
+| `pixel` | `:2825`、`kobako_pixel.c:135` | `open` `stage` |
+| `shiki`（Shiki heap のあるセッションだけ） | `:2829-2830`、`kobako_shiki_api.c:563-593`、`kobako_shiki_frame.c:1320-1327` | 下の §1.2 |
 
-`capabilities` と `apiVersion` 以外は遅延（CLAUDE.md）だが、**`pocket.kasane` の中は遅延でない**。`mount('hello')` しか呼ばない HELLO も、`grid`・`video`・`pixel`・`cache` のオブジェクトと `gridFold` を持つ。ゲストヒープの費用は未測定（§3.6 に推定、P0 で測る）。
+`capabilities` と `apiVersion` 以外は遅延（CLAUDE.md）だが、**`kobako.kasane` の中は遅延でない**。`mount('hello')` しか呼ばない HELLO も、`grid`・`video`・`pixel`・`cache` のオブジェクトと `gridFold` を持つ。ゲストヒープの費用は未測定（§3.6 に推定、P0 で測る）。
 
-`gridFold` は [shiki-v2.md](shiki-v2.md) §2.2 が「消す」とした項目だが、今も `pocket_grid.c:1072` でグローバルに置かれている（コード）。同じ節が「`share()` をやめる」とした写しも、`grid` について残っている（`pocket_shiki_api.c:557-561`・`:591`）。
+`gridFold` は [shiki-v2.md](shiki-v2.md) §2.2 が「消す」とした項目だが、今も `kobako_grid.c:1072` でグローバルに置かれている（コード）。同じ節が「`share()` をやめる」とした写しも、`grid` について残っている（`kobako_shiki_api.c:557-561`・`:591`）。
 
 ### 1.2 面の一覧
 
-「使うアプリ」は `apps/` の検索（2026-11-13）。別名（`const V = pocket.kasane` など）を追って数えた。**太字は `main/pocket/app_registry.c` に行がある、メニューから起動できるアプリ。** `apps/kasane/*_probe.js` などの検査用は「検査」とまとめた。
+「使うアプリ」は `apps/` の検索（2026-11-13）。別名（`const V = kobako.kasane` など）を追って数えた。**太字は `main/kobako/app_registry.c` に行がある、メニューから起動できるアプリ。** `apps/kasane/*_probe.js` などの検査用は「検査」とまとめた。
 
 **保持型の画面（capability `display.kasane`）**
 
 | API | 実装 | 使うアプリ |
 | --- | --- | --- |
-| `mount(name)`・`mount({version:1,slots,nodes}, initial)`、`view.set/bind/unbind` | `pocket_kasane.c:2688`・`:2403`・`:2398-2400`、`ksn_schema*.c`、`app_view_assets.c`、`app_view_provider.c` | **hello・deskclock・imucal・pet・companion・player**、bridge（埋め込みなし）、検査。`unbind` はどこも呼ばない |
+| `mount(name)`・`mount({version:1,slots,nodes}, initial)`、`view.set/bind/unbind` | `kobako_kasane.c:2688`・`:2403`・`:2398-2400`、`ksn_schema*.c`、`app_view_assets.c`、`app_view_provider.c` | **hello・deskclock・imucal・pet・companion・player**、bridge（埋め込みなし）、検査。`unbind` はどこも呼ばない |
 | `resource(name)` | `:1056` | **pet・companion** |
 | `replace(fn)`・`patch(fn)`、tx の `background` `rect` `roundRect` `strokeRect` `gradient` `text` `image` `group` `instantiate` | `:1733`・`:1744`・`:2012-2020`、`ksn_core.c`・`ksn_view.c`・`ksn_render.c` | **stress・derby・bigwave・lcdcatch・megademo・meshbench・shikitest 系**、keytest。`group` は megademo と demo.js だけ |
 | ref の `setRect` `setClip` `setColor` `setVisible` `setText` `setReveal` `setImageFrame` `setRotation` `animate` | `:2026-2031` | `setText`・`setRect` は上の全部。`setClip`・`setVisible`・`setColor` は derby・lcdcatch。`setReveal`・`setImageFrame` は megademo と demo.js。`animate` は demo.js だけ。**`setRotation` はどこも呼ばない** |
@@ -56,36 +56,36 @@
 | `modal.open/close`、`inputScope()` | `:2023`・`:2003`、`ksn_modal.c` | demo.js だけ |
 | `createScene`（`invalidate` `flush`） | `:2047`・`:2075-2080` | `create_scene.js`、vmprobe の `condition.js` だけ |
 | `poll()`・`cancel(ticket)` | `:1908`・`:1925` | `poll` は demo.js と検査 1 本。**`cancel` はどこも呼ばない** |
-| `features()` | `:1937-1969` | **どこも呼ばない**（`apps/` の `.features()` は `pocket.fs` の 1 件だけ） |
+| `features()` | `:1937-1969` | **どこも呼ばない**（`apps/` の `.features()` は `kobako.fs` の 1 件だけ） |
 | `stats()` | `:1971` | **stress**（60 フレームごと）、検査 |
 
 **Shiki（capability `kasane.shiki`、manifest が名指ししたセッションだけ）**
 
 | API | 実装 | 使うアプリ |
 | --- | --- | --- |
-| `beginFrame` `commit` `resource({maxSegments,spare})` | `pocket_shiki_frame.c:1320-1326` | **stress・derby・bigwave・megademo**、shikitest 系 |
+| `beginFrame` `commit` `resource({maxSegments,spare})` | `kobako_shiki_frame.c:1320-1326` | **stress・derby・bigwave・megademo**、shikitest 系 |
 | `createSurface` | 同 `:1326` | shikitest の API 試験だけ |
 | `beginMeshFrame` | 同 `:1323` | **meshbench** |
-| `register` `unregister` `draw` | `pocket_shiki_api.c:566-568` | 上の 4 本（stress は `draw` を使わず `drawMany` だけ） |
+| `register` `unregister` `draw` | `kobako_shiki_api.c:566-568` | 上の 4 本（stress は `draw` を使わず `drawMany` だけ） |
 | `drawMany(handles, inputs, stride)` | `:573` | **stress**（`Float64Array`）、**derby**（`Int32Array`） |
 | `data` `release` | `:570-571` | 上の 4 本 |
 | `fields` | `:572` | API 試験だけ |
 | `sin` `cos` `sinMany` | `:574-576` | **derby** |
 | `list` `setList` `drawList` `releaseList` | `:577-580` | **API 試験だけ**（どのアプリも未使用） |
 | `heap()` | `:569` | stress（60 フレームごと） |
-| `grid`（`pocket.kasane.grid` の写し） | `:591` | megademo（`megademo_view.js:4`） |
+| `grid`（`kobako.kasane.grid` の写し） | `:591` | megademo（`megademo_view.js:4`） |
 
 **その他の面**
 
 | 名前空間 | capability | 実装 | 使うアプリ |
 | --- | --- | --- | --- |
-| `pocket.kasane.grid`、`gridFold` | なし（`display.kasane` の中） | `pocket_grid.c`、`ksn_proc_grid*.c` | **gridlab・megademo**、検査 |
-| `pocket.kasane.video` | なし | `pocket_video*.c`、`ksn_video_frames.c` | **videolab**、検査 |
-| `pocket.kasane.pixel` | なし | `pocket_pixel.c`、`ksn_pixel_function.c`・`ksn_pixel_span.c` | `pixel_lab_probe.js` だけ |
-| `pocket.shapes`、`pocket.ayatsuri` | `kasane.shapes` | `pocket_shape.c:244-247`・`:672-680`、`pocket_ayatsuri_model.inc`、`main/ayatsuri/` | **megademo・meshbench** |
-| `pocket.derby` | `derby.series` | `pocket_derby.c:713-725` | **derby** |
-| `pocket.shikiDebug` | `kasane.shiki.debug` | `pocket_shiki.c:488-500`、`ksn_shiki_bench.c` | **shikitest・drawcost・cyclebench・meshbench** |
-| `pocket.overlay` | `ui.overlay` | `pocket_overlay.c:322-325` | **player** は `onKey` だけ。**`begin`・`rect`・`text` はどこも呼ばない** |
+| `kobako.kasane.grid`、`gridFold` | なし（`display.kasane` の中） | `kobako_grid.c`、`ksn_proc_grid*.c` | **gridlab・megademo**、検査 |
+| `kobako.kasane.video` | なし | `kobako_video*.c`、`ksn_video_frames.c` | **videolab**、検査 |
+| `kobako.kasane.pixel` | なし | `kobako_pixel.c`、`ksn_pixel_function.c`・`ksn_pixel_span.c` | `pixel_lab_probe.js` だけ |
+| `kobako.shapes`、`kobako.ayatsuri` | `kasane.shapes` | `kobako_shape.c:244-247`・`:672-680`、`kobako_ayatsuri_model.inc`、`main/ayatsuri/` | **megademo・meshbench** |
+| `kobako.derby` | `derby.series` | `kobako_derby.c:713-725` | **derby** |
+| `kobako.shikiDebug` | `kasane.shiki.debug` | `kobako_shiki.c:488-500`、`ksn_shiki_bench.c` | **shikitest・drawcost・cyclebench・meshbench** |
+| `kobako.overlay` | `ui.overlay` | `kobako_overlay.c:322-325` | **player** は `onKey` だけ。**`begin`・`rect`・`text` はどこも呼ばない** |
 
 `grid`・`video`・`pixel` は専用の capability を持たず、上限が `limits` に出ていない（[shiki.md](shiki.md) §3 の 6 が指摘した点。今も同じ。コード）。
 
@@ -99,10 +99,10 @@
 
 | 所 | 何が起きるか |
 | --- | --- |
-| `run_build`（`pocket_kasane.c:1663`） | `replace`/`patch` のたびに ticket（`:1681`）・tx（`:1684`）・modal（`:1686`）の 3 オブジェクトを作り、tx に `modal` を自前のプロパティで足す（`:1688`）。出荷アプリは戻り値の ticket を使わない |
+| `run_build`（`kobako_kasane.c:1663`） | `replace`/`patch` のたびに ticket（`:1681`）・tx（`:1684`）・modal（`:1686`）の 3 オブジェクトを作り、tx に `modal` を自前のプロパティで足す（`:1688`）。出荷アプリは戻り値の ticket を使わない |
 | `drawMany` の引数 | 件数を受けない（`handles.length` が件数）。DERBY は `BH.subarray(0, bn)`・`BI.subarray(0, bn * bs)` を flush のたびに作る（`apps/derby/derby_view.js:222`、flush の呼び出しは 4 か所） |
 | `ref.setRect(tx, [x0,y0,x1,y1])` | 配列を受ける。STRESS は毎フレーム配列リテラルを 1 つ作る（`apps/stress/stress.js:178`） |
-| `poll()`・`stats()`・`heap()` | 呼ぶたびにオブジェクト（`poll` は文字列 3 つも）を作る（`:1908-1923`・`:1971-2001`、`pocket_shiki_api.c:549-551`）。毎ターンは呼ばれていない |
+| `poll()`・`stats()`・`heap()` | 呼ぶたびにオブジェクト（`poll` は文字列 3 つも）を作る（`:1908-1923`・`:1971-2001`、`kobako_shiki_api.c:549-551`）。毎ターンは呼ばれていない |
 | STRESS の `drawMany` の入力 | `Float64Array`（`stress.js:76`）。入力 1 つ約 156 サイクルの変換が残る（実測（引用）、[shiki-bundle.md](shiki-bundle.md) §6） |
 
 ### 1.5 重複・旧経路・ビルドに入らないファイル
@@ -112,26 +112,26 @@
 | `ksn_shiki_surface.c`・`ksn_shiki_layers.c`・`ksn_shiki_present.c` | `main/CMakeLists.txt:89-95` の `KASANE_PROC_DEVICE_PROBE` の中だけで加わるが、その option は `:69-73` で `FATAL_ERROR`。ファームには入らない。`tools/kasane_contract/` の host 検査 5 本が使う | コード |
 | `ksn_pixel_span_device_probe.c`（378 行）・`ksn_grid_scan_cost_device_probe.c`（139 行） | 同じ到達できない塊の中。`tools/` からの参照は 0 | コード |
 | `main/CMakeLists.txt:118-124`・`:566-571` | D2 の probe の option（`FATAL_ERROR`）と、到達できない `-O2` の指定 | コード |
-| `ksn_device_probe.c`・`ksn_stress_probe.c`・`ksn_frost.c` | `KASANE_SOURCES`（`:35`）に無条件で入る。`ksn_device_probe.c` は全体が `#ifdef CONFIG_KSN_DEVICE_PROBE`。3 つとも `4840504` の map にオブジェクトが無い（`--gc-sections` で落ちている）。`features().frosted` は常に `false`（`pocket_kasane.c:1955`） | コード・map |
-| `ksn_shiki_bench.c`・`pocket_shiki.c`（`pocket.shikiDebug`） | 無条件でリンクされる。`.flash.text` 6,043 B と 5,880 B、`.flash.rodata` 46 B と 552 B。`.bss` は無い | map |
+| `ksn_device_probe.c`・`ksn_stress_probe.c`・`ksn_frost.c` | `KASANE_SOURCES`（`:35`）に無条件で入る。`ksn_device_probe.c` は全体が `#ifdef CONFIG_KSN_DEVICE_PROBE`。3 つとも `4840504` の map にオブジェクトが無い（`--gc-sections` で落ちている）。`features().frosted` は常に `false`（`kobako_kasane.c:1955`） | コード・map |
+| `ksn_shiki_bench.c`・`kobako_shiki.c`（`kobako.shikiDebug`） | 無条件でリンクされる。`.flash.text` 6,043 B と 5,880 B、`.flash.rodata` 46 B と 552 B。`.bss` は無い | map |
 | 試験アプリの JS | `shiki_test.js` 5,431・`shiki_data_test.js` 5,147・`shiki_api_test.js` 12,738・`cycle_bench.js` 1,817・`draw_cost.js` 3,024・`mesh_bench.js` 6,681 B（`.flash.rodata`、計 34,838 B） | map |
-| `pocket_grid.c` の `slots` | `.bss` 7,200 B が常駐（`pocket_grid.c:115`）。grid のコードは `pocket_grid.c` 12,057 B ＋ `ksn_proc_grid*.c` 13,048 B（`.flash.text`） | map |
-| `pocket_overlay.c` の `items` | `.bss` 1,440 B（`:35`、24 項目）。`begin`・`rect`・`text` の描画経路は生きている（`main/ui/overlay.c:495` が `pocket_overlay_paint` を呼ぶ）が、呼ぶアプリが無い | コード・map |
-| handle の表が 2 つ | `slots[PROC_HANDLES]`（`pocket_shiki_frame.c:109`）と `binds[BINDS]`（`pocket_shiki_api.c:50`、「one per slot」）。同じ handle の簿記を 2 か所で持つ | コード |
+| `kobako_grid.c` の `slots` | `.bss` 7,200 B が常駐（`kobako_grid.c:115`）。grid のコードは `kobako_grid.c` 12,057 B ＋ `ksn_proc_grid*.c` 13,048 B（`.flash.text`） | map |
+| `kobako_overlay.c` の `items` | `.bss` 1,440 B（`:35`、24 項目）。`begin`・`rect`・`text` の描画経路は生きている（`main/ui/overlay.c:495` が `kobako_overlay_paint` を呼ぶ）が、呼ぶアプリが無い | コード・map |
+| handle の表が 2 つ | `slots[PROC_HANDLES]`（`kobako_shiki_frame.c:109`）と `binds[BINDS]`（`kobako_shiki_api.c:50`、「one per slot」）。同じ handle の簿記を 2 か所で持つ | コード |
 | `features()` | 返す真偽は `modal`（overlay かどうか）以外すべて定数。`capacity`・`cache` は `display.kasane` の `limits`（`:2833-2839`）と同じ定数の写し | コード |
-| 名前の食い違い | `ksn_shiki_frame.c` は Shiki のエンジンではなく、線分のフレームの帯ラスタライザで、公開名は `ksn_proc_*`。`pocket_shiki.c` は診断（`shikiDebug`）、API は `pocket_shiki_api.c`、フレームは `pocket_shiki_frame.c`（公開名は `pocket_proc_*`）。`main/` の中の出現は `ksn_proc_` 532・`pocket_proc_` 238・`KSN_PROC_` 265 | コード（grep） |
-| 診断の `#ifdef` | `main/CMakeLists.txt:68-180` に Kasane の probe の option が約 40 個。`pocket_shiki_frame.c` の中に `KASANE_PROC_JS_DIAGNOSTIC`（7 か所）・`KASANE_MEGADEMO_TRACE`（4）・`KSN_MESH_PREPARED_PROTOTYPE`（7）・`POCKET_PROC_SIG_CHECK`（8）ほか | コード |
+| 名前の食い違い | `ksn_shiki_frame.c` は Shiki のエンジンではなく、線分のフレームの帯ラスタライザで、公開名は `ksn_proc_*`。`kobako_shiki.c` は診断（`shikiDebug`）、API は `kobako_shiki_api.c`、フレームは `kobako_shiki_frame.c`（公開名は `kobako_proc_*`）。`main/` の中の出現は `ksn_proc_` 532・`kobako_proc_` 238・`KSN_PROC_` 265 | コード（grep） |
+| 診断の `#ifdef` | `main/CMakeLists.txt:68-180` に Kasane の probe の option が約 40 個。`kobako_shiki_frame.c` の中に `KASANE_PROC_JS_DIAGNOSTIC`（7 か所）・`KASANE_MEGADEMO_TRACE`（4）・`KSN_MESH_PREPARED_PROTOTYPE`（7）・`KOBAKO_PROC_SIG_CHECK`（8）ほか | コード |
 | 文書の古い参照 | [architecture.md](architecture.md) の末尾が挙げる `ksn_presenter.c` は存在しない | コード |
 
 **推測（未確認）:** 上の probe の option のうち、今も組めるものがどれかは確かめていない（`FATAL_ERROR` と明記された 3 つ以外）。P1 で 1 つずつ configure して確かめる。
 
 ### 1.6 大きさ（map、`4840504`）
 
-Kasane・Shiki・関連の面（`ksn_*`、`pocket_kasane`・`pocket_shiki*`・`pocket_grid`・`pocket_shape`・`pocket_video*`・`pocket_pixel`・`pocket_derby`・`pocket_overlay`・`shiki_*`・`app_*view*`・`ayatsuri*`）の合計: `.flash.text` 316,391 B、`.flash.rodata` 70,152 B（うち Shiki の ROM の表 29,176 B、試験の JS 23,316 B を含む）、`.dram0.bss` 32,030 B、`.iram0.text` 4,277 B。
+Kasane・Shiki・関連の面（`ksn_*`、`kobako_kasane`・`kobako_shiki*`・`kobako_grid`・`kobako_shape`・`kobako_video*`・`kobako_pixel`・`kobako_derby`・`kobako_overlay`・`shiki_*`・`app_*view*`・`ayatsuri*`）の合計: `.flash.text` 316,391 B、`.flash.rodata` 70,152 B（うち Shiki の ROM の表 29,176 B、試験の JS 23,316 B を含む）、`.dram0.bss` 32,030 B、`.iram0.text` 4,277 B。
 
-`.bss` の上位: `ksn_render.c` 11,412（`decoded` 5,572、ブレンドの LUT 2,048 × 2）、`ksn_pet.c` 8,208、**`pocket_grid.c` 7,206**、`pocket_overlay.c` 1,630、`pocket_shiki_frame.c` 1,247、`pocket_shiki_api.c` 1,000、`shiki_heap.c` 533。
+`.bss` の上位: `ksn_render.c` 11,412（`decoded` 5,572、ブレンドの LUT 2,048 × 2）、`ksn_pet.c` 8,208、**`kobako_grid.c` 7,206**、`kobako_overlay.c` 1,630、`kobako_shiki_frame.c` 1,247、`kobako_shiki_api.c` 1,000、`shiki_heap.c` 533。
 
-`.flash.text` の上位: `pocket_kasane.c` 35,418、`ayatsuri_model.c` 33,364、`pocket_shape.c` 29,906、`pocket_derby.c` 22,769、`ksn_render.c` 20,061、`ksn_core.c` 18,248、`ksn_shiki_frame.c` 18,200、`ksn_shiki.c` 14,976（＋ IRAM 2,589）、`ksn_shiki_jit.c` 14,809。
+`.flash.text` の上位: `kobako_kasane.c` 35,418、`ayatsuri_model.c` 33,364、`kobako_shape.c` 29,906、`kobako_derby.c` 22,769、`ksn_render.c` 20,061、`ksn_core.c` 18,248、`ksn_shiki_frame.c` 18,200、`ksn_shiki.c` 14,976（＋ IRAM 2,589）、`ksn_shiki_jit.c` 14,809。
 
 ## 2. 整理の原則
 
@@ -144,7 +144,7 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 | G3 | **数は整数で、まとめて渡すなら型付き配列で。** double を境界に通さない | S3 に double の演算器は無い。`__divdf3` は 1 回 392 命令（[qjs-observe.md](../vm/qjs-observe.md) §3.1）。入力の変換は 1 つ 147〜390 サイクル、Q 形式の整数なら 0（[shiki-bundle.md](shiki-bundle.md) §4・§6）。JS の配列の要素の読み取りは 1 つ約 400 サイクル、引数は約 47（同 §3・§4）。`parse_i16` の整数の早道で r5sim −2.2%（[qjs-observe.md](../vm/qjs-observe.md) §11） |
 | G4 | **重い仕事は登録の時に 1 回、できればビルドの時に。** ゲストに持たせないものは flash に置き、名前で引く | 式を flash の表にして、native 9.9 → 1.2 KB（推定）、ゲスト −3.1〜5.7 KB（host 実測）、登録 1,252 → 570 µs（実機）（[flash-plan.md](flash-plan.md)）。リストは handle の検査を作る時の 1 回にする（[shiki-v2.md](shiki-v2.md) §5）。JIT は登録の時（[shiki-jit.md](shiki-jit.md)） |
 | G5 | **アプリのソースを小さく、クロージャを少なく書ける API にする。** 評価のピークは定常の約 2 倍 | ソースのバイト数がヒープを食う（6.5 KB のアプリでゲスト 107 KiB）。クロージャ 1 つで評価のピーク約 0.3〜0.5 KB。1 関数のバイトコードが大きいと連続 1 ブロック（26 KB）で落ちる（CLAUDE.md、[eval-peak.md](../vm/eval-peak.md)、[shiki-v2.md](shiki-v2.md) §11.1） |
-| G6 | **状態はデータ領域に、順番はリストに。** JS は窓に整数を書き、native が回す | [shiki-v2.md](shiki-v2.md) §4・§5（実装済み、アプリは未移行、効果は未測定）。`pocket.derby.ser()` を native にして評価余裕 22.7 → 30.6 KB、ゲスト最大 138.7 → 133.3 KB（実機、CLAUDE.md） |
+| G6 | **状態はデータ領域に、順番はリストに。** JS は窓に整数を書き、native が回す | [shiki-v2.md](shiki-v2.md) §4・§5（実装済み、アプリは未移行、効果は未測定）。`kobako.derby.ser()` を native にして評価余裕 22.7 → 30.6 KB、ゲスト最大 138.7 → 133.3 KB（実機、CLAUDE.md） |
 | G7 | **使わない面を、作らない・載せない。** 名前空間の中も遅延にし、検査用・実験用の面は manifest が名指ししたセッションだけに載せる | 「capability を足すたびにゲストの部屋が減る」（CLAUDE.md）。`kasane.shapes`・`derby.series`・`kasane.shiki.debug` は既に manifest の門がある（`main/app_session.c:1913-1927`） |
 | G8 | **`limits` はコードで強制している値だけ。同じ事実の入口は 1 つ。** | CLAUDE.md。`features()` は `limits` の写し（§1.5） |
 | G9 | **毎ターンの native は、途中で確保しない。** 大きさは最初に宣言する | 追加領域をやめて予備を宣言に（[qjs-observe.md](../vm/qjs-observe.md) §25.6）。途中の確保は Shiki heap の空きを分ける |
@@ -158,18 +158,18 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 
 | 今 | 後 | 理由 |
 | --- | --- | --- |
-| `pocket.kasane` 直下 10 個 | `mount` `resource` `replace` `patch` `stats` の 5 個を残す。`features` は消す。`poll`・`cancel`・`inputScope`・`createScene` は §7 の判断 | G8、§1.3 |
-| `pocket.kasane.cache` | 残す。**最初に読んだ時に作る** | G7。lcdcatch が使う |
-| `pocket.kasane.grid` とグローバル `gridFold` | capability `kasane.grid` を新設し、manifest が名指ししたセッションだけに載せる。`gridFold` は `pocket.kasane.grid.fold/index/view` へ移し、グローバルをやめる。`slots` の 7,200 B は、最初の `register` で 1 回確保する | G7、G8、[shiki-v2.md](shiki-v2.md) §2.2 |
-| `pocket.kasane.shiki.grid`（写し） | やめる。`pocket.kasane.grid` を使う | 入口は 1 つ（G8） |
-| `pocket.kasane.video` | capability `kasane.video`、manifest の門 | G7 |
-| `pocket.kasane.pixel` | capability `kasane.pixel`、manifest の門 | G7 |
-| `pocket.kasane.shiki` | 残す（§3.3） | |
-| `pocket.shikiDebug`、試験アプリ 6 本 | Kconfig `CONFIG_POCKET_SHIKI_DEBUG`（既定は §7 の判断）で、面と `ksn_shiki_bench.c` と JS の埋め込みを一緒に外せるようにする | G7 |
-| `pocket.overlay.begin/rect/text` | §7 の判断（消すと `.bss` 1,440 B と描画経路が消える） | §1.5 |
-| `pocket.shapes`・`pocket.ayatsuri`・`pocket.derby` | 変えない | 既に manifest の門がある。ayatsuri は別の作業の範囲 |
+| `kobako.kasane` 直下 10 個 | `mount` `resource` `replace` `patch` `stats` の 5 個を残す。`features` は消す。`poll`・`cancel`・`inputScope`・`createScene` は §7 の判断 | G8、§1.3 |
+| `kobako.kasane.cache` | 残す。**最初に読んだ時に作る** | G7。lcdcatch が使う |
+| `kobako.kasane.grid` とグローバル `gridFold` | capability `kasane.grid` を新設し、manifest が名指ししたセッションだけに載せる。`gridFold` は `kobako.kasane.grid.fold/index/view` へ移し、グローバルをやめる。`slots` の 7,200 B は、最初の `register` で 1 回確保する | G7、G8、[shiki-v2.md](shiki-v2.md) §2.2 |
+| `kobako.kasane.shiki.grid`（写し） | やめる。`kobako.kasane.grid` を使う | 入口は 1 つ（G8） |
+| `kobako.kasane.video` | capability `kasane.video`、manifest の門 | G7 |
+| `kobako.kasane.pixel` | capability `kasane.pixel`、manifest の門 | G7 |
+| `kobako.kasane.shiki` | 残す（§3.3） | |
+| `kobako.shikiDebug`、試験アプリ 6 本 | Kconfig `CONFIG_KOBAKO_SHIKI_DEBUG`（既定は §7 の判断）で、面と `ksn_shiki_bench.c` と JS の埋め込みを一緒に外せるようにする | G7 |
+| `kobako.overlay.begin/rect/text` | §7 の判断（消すと `.bss` 1,440 B と描画経路が消える） | §1.5 |
+| `kobako.shapes`・`kobako.ayatsuri`・`kobako.derby` | 変えない | 既に manifest の門がある。ayatsuri は別の作業の範囲 |
 
-名前空間の中の遅延は、土台に入れる: `pocket_api.c` に「遅延名前空間の中の、遅延の子」を 1 つ足す（今の `pocket_api_lazy` は `pocket.<name>` だけ。`main/pocket/pocket_api.h:157`）。「新しい面は `pocket_api.c` を編集しない」規則の例外ではなく、土台の機能の追加として 1 回だけ行う。**STEADY の仕事**（アクセサの差し替えと OOM の再試行の規則を、子でも保つ）。
+名前空間の中の遅延は、土台に入れる: `kobako_api.c` に「遅延名前空間の中の、遅延の子」を 1 つ足す（今の `kobako_api_lazy` は `kobako.<name>` だけ。`main/kobako/kobako_api.h:157`）。「新しい面は `kobako_api.c` を編集しない」規則の例外ではなく、土台の機能の追加として 1 回だけ行う。**STEADY の仕事**（アクセサの差し替えと OOM の再試行の規則を、子でも保つ）。
 
 ### 3.2 保持型の画面（`display.kasane`）
 
@@ -197,9 +197,9 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 ### 3.4 capability と `apiVersion`
 
 - 新設: `kasane.grid`・`kasane.video`・`kasane.pixel`（`supported: true`、`available` は manifest が名指ししたセッションで true。`limits` は各面が強制している値だけを P3 で洗い出して載せる）。
-- `kasane.shiki.debug`: `CONFIG_POCKET_SHIKI_DEBUG=n` の image では登録しない（`supported` を問えば false）。
+- `kasane.shiki.debug`: `CONFIG_KOBAKO_SHIKI_DEBUG=n` の image では登録しない（`supported` を問えば false）。
 - `kasane.shiki.limits`: 変えない。
-- `apiVersion`: 今は `"0.1.0"`（`main/pocket/pocket_api.h:21`）。**足す段（P3）では上げない。消す段（P5）で `"0.2.0"` に上げる。** feature-test は capability で行う規則（common-api）なので、アプリは版の文字列を見ない。
+- `apiVersion`: 今は `"0.1.0"`（`main/kobako/kobako_api.h:21`）。**足す段（P3）では上げない。消す段（P5）で `"0.2.0"` に上げる。** feature-test は capability で行う規則（common-api）なので、アプリは版の文字列を見ない。
 
 ### 3.5 互換
 
@@ -210,7 +210,7 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 
 | 変更 | ゲストヒープ | ネイティブ DRAM | flash | ターン時間 |
 | --- | --- | --- | --- | --- |
-| `pocket.kasane` の中を遅延に、`grid`・`video`・`pixel`・`gridFold` を manifest の門に | Kasane を使う全セッションで −1〜1.5 KB（オブジェクト 5 個・プロパティ 26 個・名前の atom の見積もり。未測定） | 0 | +0.2 KB 程度（土台の子の遅延） | 0 |
+| `kobako.kasane` の中を遅延に、`grid`・`video`・`pixel`・`gridFold` を manifest の門に | Kasane を使う全セッションで −1〜1.5 KB（オブジェクト 5 個・プロパティ 26 個・名前の atom の見積もり。未測定） | 0 | +0.2 KB 程度（土台の子の遅延） | 0 |
 | grid の `slots` を使う時に確保 | 0 | **静的 −7,200 B**（map の大きさ）。grid を使わないセッションの空き +7.2 KB、使うセッションは同じ | ±0 | 0 |
 | `replace`/`patch` が確保しない | 定常は 0（ごみが減る） | 0 | ±0 | 1 回の `patch` で確保 4 回前後が消える＝約 4,300 サイクル（18 µs）。STRESS の 6.2 ms の 0.3% |
 | `drawMany` の `count` | 0 | 0 | ±0 | flush 1 回で `subarray` 2 個（確保 4 回前後）＝約 18 µs。DERBY で 1 ターン 3〜6 回なら 54〜108 µs（7.2 ms の 0.7〜1.5%）。flush の回数は P0 で数える |
@@ -234,25 +234,25 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 | 描画 | `ksn_render.c`・`ksn_blend_pie.c`・`text/ksn_font.c`、`ksn_shiki_frame.c`（線分の帯ラスタライザ） | 帯の合成。PIE はここに閉じる |
 | schema・source | `ksn_schema*.c`・`ksn_source*.c` | descriptor の展開、slot、source |
 | Shiki のエンジン | `ksn_shiki.c`・`ksn_shiki_jit.c` | 式の検査・実行・JIT。JS を知らない |
-| JS の束ね | `pocket_kasane.c`、`pocket_shiki_api.c`・`pocket_shiki_frame.c`、`pocket_grid.c`・`pocket_video.c`・`pocket_pixel.c` | 引数の検査、handle、ゲストの寿命 |
-| アプリ別 | `pocket_derby.c`・`pocket_shape.c`・`app_music_view.c` ほか | core に入れないアプリの意味 |
+| JS の束ね | `kobako_kasane.c`、`kobako_shiki_api.c`・`kobako_shiki_frame.c`、`kobako_grid.c`・`kobako_video.c`・`kobako_pixel.c` | 引数の検査、handle、ゲストの寿命 |
+| アプリ別 | `kobako_derby.c`・`kobako_shape.c`・`app_music_view.c` ほか | core に入れないアプリの意味 |
 
 [architecture.md](architecture.md) の境界のとおりで、今回はここを動かさない。直すのは、境界の内側の散らかり（§1.5）。
 
-### 4.2 `pocket_kasane.c`（3,209 行）の分割 — 同じ翻訳単位のまま `.inc` に
+### 4.2 `kobako_kasane.c`（3,209 行）の分割 — 同じ翻訳単位のまま `.inc` に
 
-`pocket_kasane.c` は `-O2`（`main/CMakeLists.txt:551-552`）で、毎ターンの経路（`mutate`・`parse_i16`・`parse_rect_mode`）が IRAM の一覧に**オブジェクト名つき**で載っている（`main/vm/helper_iram8.lf:100-103`）。別の `.c` に分けると、(a) `static` の関数の間のインライン展開が変わる、(b) `.lf` の行がオブジェクト名で外れる、(c) host の検査の組み立て（`tools/` の 10 ファイルが `pocket_kasane.c` を名指しし、そこから組む検査はさらに多い）に全部ファイルを足す必要がある。命令キャッシュの配置が動けば、15% の揺れの中で前後を比べられなくなる（G10）。
+`kobako_kasane.c` は `-O2`（`main/CMakeLists.txt:551-552`）で、毎ターンの経路（`mutate`・`parse_i16`・`parse_rect_mode`）が IRAM の一覧に**オブジェクト名つき**で載っている（`main/vm/helper_iram8.lf:100-103`）。別の `.c` に分けると、(a) `static` の関数の間のインライン展開が変わる、(b) `.lf` の行がオブジェクト名で外れる、(c) host の検査の組み立て（`tools/` の 10 ファイルが `kobako_kasane.c` を名指しし、そこから組む検査はさらに多い）に全部ファイルを足す必要がある。命令キャッシュの配置が動けば、15% の揺れの中で前後を比べられなくなる（G10）。
 
-そこで、**`pocket_kasane.c` が `#include` する `.inc` に分ける**（先例: `pocket_shape.c:171` の `pocket_ayatsuri_model.inc`）。翻訳単位は 1 つのままなので、機械語は変わらない見込み（合格基準で確かめる）。
+そこで、**`kobako_kasane.c` が `#include` する `.inc` に分ける**（先例: `kobako_shape.c:171` の `kobako_ayatsuri_model.inc`）。翻訳単位は 1 つのままなので、機械語は変わらない見込み（合格基準で確かめる）。
 
 | ファイル | 中身（今の行のおよその範囲） |
 | --- | --- |
-| `pocket_kasane.c` | 状態・クラス・`ensure_state`・`build_kasane`・install・reset・capability（1〜270、2740〜2850、2905〜2980） |
-| `pocket_kasane_parse.inc` | 引数の検査と読み取り（270〜970） |
-| `pocket_kasane_tx.inc` | tx の命令、ref、animation、instance、modal（972〜1630） |
-| `pocket_kasane_scene.inc` | `run_build`、scene、cache、`poll`・`cancel`・`features`・`stats`（1630〜2046） |
-| `pocket_kasane_schema.inc` | `mount`、schema、source capability（2047〜2730、2851〜2904） |
-| `pocket_kasane_present.inc` | present・ターンの終わり・invalidate（2980〜3209） |
+| `kobako_kasane.c` | 状態・クラス・`ensure_state`・`build_kasane`・install・reset・capability（1〜270、2740〜2850、2905〜2980） |
+| `kobako_kasane_parse.inc` | 引数の検査と読み取り（270〜970） |
+| `kobako_kasane_tx.inc` | tx の命令、ref、animation、instance、modal（972〜1630） |
+| `kobako_kasane_scene.inc` | `run_build`、scene、cache、`poll`・`cancel`・`features`・`stats`（1630〜2046） |
+| `kobako_kasane_schema.inc` | `mount`、schema、source capability（2047〜2730、2851〜2904） |
+| `kobako_kasane_present.inc` | present・ターンの終わり・invalidate（2980〜3209） |
 
 `mount`・schema の部分（登録の時だけ走る約 700 行）を別の `-Os` の翻訳単位に出すと flash が数 KB 減る見込み（推定、未測定）だが、配置が動くので今回は**やらない**。やるなら単独の段として、同じバイナリの A/B で測る。
 
@@ -262,9 +262,9 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 | --- | --- |
 | 到達できない CMake の塊（`:68-73`・`:89-95`・`:118-124`・`:566-571`）と、そこでしか使わない 2 ファイル | 消す。`ksn_shiki_surface.c`・`_layers.c`・`_present.c` は host の検査が使うので、**場所を動かさず**残し、先頭のコメントに「ファームには入らない、host の検査用」と書く |
 | `ksn_device_probe.c`・`ksn_stress_probe.c`・`ksn_frost.c` | `KASANE_SOURCES` から外し、`if(CONFIG_KSN_DEVICE_PROBE)` の中で足す。今も map に無いので、バイナリは変わらない見込み |
-| `pocket.shikiDebug`（`pocket_shiki.c`・`ksn_shiki_bench.c`）と試験アプリ 6 本 | `main/Kconfig.projbuild` に `CONFIG_POCKET_SHIKI_DEBUG` を足し、ソース・`EMBED_TXTFILES`・`app_registry.c` の行・`shell.c` のメニューの行を一緒に切る。**メニューの行が変わるので、`tools/test_settings.py`・`tools/capture_home.py`（押下回数を数える）を同じ変更で直す**（CLAUDE.md）。既定を `y` のままにすれば、この 2 つは動かない |
+| `kobako.shikiDebug`（`kobako_shiki.c`・`ksn_shiki_bench.c`）と試験アプリ 6 本 | `main/Kconfig.projbuild` に `CONFIG_KOBAKO_SHIKI_DEBUG` を足し、ソース・`EMBED_TXTFILES`・`app_registry.c` の行・`shell.c` のメニューの行を一緒に切る。**メニューの行が変わるので、`tools/test_settings.py`・`tools/capture_home.py`（押下回数を数える）を同じ変更で直す**（CLAUDE.md）。既定を `y` のままにすれば、この 2 つは動かない |
 | Kasane の probe の option 約 40 個 | P1 で 1 つずつ configure し、組めないものは option ごと消す。組めるものは残す（消すかどうかは持ち主の判断。§7 の 1） |
-| `pocket_shiki_frame.c` の中の診断の `#ifdef` | 触らない（host の検査が使うものが混ざる。`POCKET_PROC_SIG_CHECK` など）。P2 で一覧を先頭のコメントにまとめるだけ |
+| `kobako_shiki_frame.c` の中の診断の `#ifdef` | 触らない（host の検査が使うものが混ざる。`KOBAKO_PROC_SIG_CHECK` など）。P2 で一覧を先頭のコメントにまとめるだけ |
 
 オプションを重ねるビルドは `-DSDKCONFIG=<dir>/sdkconfig` で分ける（CLAUDE.md。ルートの `sdkconfig` に値が残る事故の再発を防ぐ）。
 
@@ -276,7 +276,7 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 
 | 今 | 後 | 理由 |
 | --- | --- | --- |
-| `pocket_shiki.c`・`.h` | `pocket_shiki_debug.c`・`.h` | 中身は `shikiDebug` |
+| `kobako_shiki.c`・`.h` | `kobako_shiki_debug.c`・`.h` | 中身は `shikiDebug` |
 | `ksn_shiki_frame.c`・`.h` | `ksn_seg_frame.c`・`.h` | Shiki のエンジンではなく、線分のフレームの帯ラスタライザ |
 
 シンボルは、各ヘッダの先頭に「`proc` は Shiki の旧名（procedural）。[shiki.md](shiki.md) §1.3」と 1 行書くに留める。
@@ -287,10 +287,10 @@ QuickJS-ng と Shiki の最適化の記録から、API の形に効くものだ�
 
 | 順 | アプリ | 変えること | ラベル |
 | --- | --- | --- | --- |
-| 1 | shikitest（`shiki_api_test.js`） | 新しい形の検査を足す: `drawMany` の `count`、整数 4 つの `setRect`、`pocket.kasane.grid.fold`、`replace`/`patch` の戻り値、`features` が無いこと（P5 の後）。古い形の検査は P5 まで残す | Sonnet |
+| 1 | shikitest（`shiki_api_test.js`） | 新しい形の検査を足す: `drawMany` の `count`、整数 4 つの `setRect`、`kobako.kasane.grid.fold`、`replace`/`patch` の戻り値、`features` が無いこと（P5 の後）。古い形の検査は P5 まで残す | Sonnet |
 | 2 | stress | `setRect` を整数 4 つに。`P.grid` は使っていないので変更なし。**r5sim の負荷なので、書き換える前の `stress.js` を固定の写しとして残す**（§6 P0）。`Float64Array` → `Int32Array` は別の小さな段（画素が変わりうるので、host の digest を取り直す） | Sonnet（`Int32Array` は Opus） |
 | 3 | bigwave、lcdcatch、keytest | `setRect` の形、`patch` の戻り値に依存していないことの確認 | Sonnet |
-| 4 | megademo、gridlab | `gridFold` → `pocket.kasane.grid.fold`、`H.grid` → `V.grid`、manifest に `kasane.grid` | Sonnet |
+| 4 | megademo、gridlab | `gridFold` → `kobako.kasane.grid.fold`、`H.grid` → `V.grid`、manifest に `kasane.grid` | Sonnet |
 | 5 | videolab、pixel の検査 | manifest に `kasane.video`・`kasane.pixel` | Sonnet |
 | 6 | derby（その 1） | `bflush` を `drawMany(BH, BI, bs, bn)` に（`subarray` をやめる）。`setRect`・`setClip` を整数に | Sonnet（差分は小さいが、評価余裕と host の 19 本の検査を通す） |
 | 7 | derby（その 2、§7 の 10） | 走者（`legs`・`run` の 16 draw）を、状態の領域と `drawList` へ（[shiki-v2.md](shiki-v2.md) §4.3・§5.1 の例のとおり）。式 `run`・`legs`・`frl`・`frb` を `DRAW_INDEX` と `LOAD` で書き直す | **Opus**（評価余裕 約 28.9 KB・ゲスト最大 134.1〜134.8 KB・Shiki heap の最も厳しい窓の空き 2,492 B の中で行う。式の書き直しは画素の一致が要る） |
@@ -329,48 +329,48 @@ heapprobe の DERBY（評価の余裕の二分探索）は、6・7 の後に今�
 コードの振る舞いは変えない。
 
 1. **r5sim に負荷を 2 つ足す。**
-   - `-DR5SIM_APP=derby`（[qjs-observe.md](../vm/qjs-observe.md) §16 の宿題）: DERBY のデモのレースを固定の種で回す。部品は host の `tools/games/test_derby_host.c` と同じ（チャンクの読み込み、`pocket.derby`、入力の台本、時間の進め方）。Shiki の表は `derby_prog.js` から `emit_shiki_rom.mjs` で作る（STRESS の `-DR5SIM_APP=shiki` と同じ道）。**場面ごとに区切って出す**: `R5SIM ccount scene=<wait|wide|field|vision|headon> per_turn=`。場面の境目は JS のログ（`DERBY ...`）から取る。評価中の `pocket.memory.info().internalFreeBytes` は実機と同じく `null` を返す（CLAUDE.md）。
-   - `-DR5SIM_APP=hud`: 保持型だけの負荷。LCD CATCH を固定の入力の台本で回す（`tools/games/test_lcd_catch_host.c` の部品）。`replace`/`patch`・ref・cache の経路（`pocket_kasane.c`）を、Shiki の描画に埋もれさせずに見る。
+   - `-DR5SIM_APP=derby`（[qjs-observe.md](../vm/qjs-observe.md) §16 の宿題）: DERBY のデモのレースを固定の種で回す。部品は host の `tools/games/test_derby_host.c` と同じ（チャンクの読み込み、`kobako.derby`、入力の台本、時間の進め方）。Shiki の表は `derby_prog.js` から `emit_shiki_rom.mjs` で作る（STRESS の `-DR5SIM_APP=shiki` と同じ道）。**場面ごとに区切って出す**: `R5SIM ccount scene=<wait|wide|field|vision|headon> per_turn=`。場面の境目は JS のログ（`DERBY ...`）から取る。評価中の `kobako.memory.info().internalFreeBytes` は実機と同じく `null` を返す（CLAUDE.md）。
+   - `-DR5SIM_APP=hud`: 保持型だけの負荷。LCD CATCH を固定の入力の台本で回す（`tools/games/test_lcd_catch_host.c` の部品）。`replace`/`patch`・ref・cache の経路（`kobako_kasane.c`）を、Shiki の描画に埋もれさせずに見る。
 2. **STRESS の固定の写し。** `tools/r5sim/main/` に、`4840504` の `apps/stress/stress.js` の写しを `stress_shiki_v1.js` として置き、`-DR5SIM_APP=shiki_v1` で回せるようにする。アプリを書き換えた後も、「古い呼び方のままの負荷」でファームの退行を見るため（P5 で古い呼び方を消す時に、この負荷も終わる）。
 3. **確保の回数を速い計測で出す。** `-DR5SIM_DEVICE=1` でも 1 ターンあたりの確保・解放の回数を数えて `R5SIM alloc per_turn=` で出す（今は `-DR5SIM_GUEST_ALLOC=1` の版だけが大きさ別に数える）。
-4. **名前空間を作る費用の host の検査。** `pocket.kasane` を読む前後の `malloc_size` の差を出す小さな検査を `tools/` に足す（§3.6 の 1 行目の見積もりを実測に置き換える）。
+4. **名前空間を作る費用の host の検査。** `kobako.kasane` を読む前後の `malloc_size` の差を出す小さな検査を `tools/` に足す（§3.6 の 1 行目の見積もりを実測に置き換える）。
 5. **1 回で回すスクリプト** `tools/r5sim/reorg.sh`: 負荷 4 つ（`shiki`・`shiki_v1`・`derby`・`hud`）の `fast.sh` と、ファームの `size` を回し、`docs/kasane/logs/api-reorg-perf.md` の形の 1 行を出す。
-6. **ベースラインを取る。** Q1〜Q5 を `4840504` で。Q3（トレース）は `shiki` と `derby` の 2 本。**DERBY のトレースで、JS 側の内訳（quickjs.c・アロケータ・`pocket_derby.c`・libgcc）と、1 ターンの確保と native の呼び出しの回数を出す**（§5 の 7 の見積もりの材料）。
+6. **ベースラインを取る。** Q1〜Q5 を `4840504` で。Q3（トレース）は `shiki` と `derby` の 2 本。**DERBY のトレースで、JS 側の内訳（quickjs.c・アロケータ・`kobako_derby.c`・libgcc）と、1 ターンの確保と native の呼び出しの回数を出す**（§5 の 7 の見積もりの材料）。
 7. **実機のベースライン**（D1〜D3）: DERBY（待機画面とデモのレース 1 本、90 秒）、STRESS LV1（60 秒）、BIG WAVE（60 秒）、ホームの `idle_free`、DERBY の評価余裕。起動を変えて 2 回ずつ。
 
 受け入れ基準: (a) 4 つの負荷が r5sim で `frames=120 oom=0 fail=0 bad_present=0` 相当で終わり、2 回走らせて同じカウント。(b) `shiki` のカウントが 154,595 と一致する（計測の道具を足しただけで、負荷が変わっていないこと）。(c) ベースラインの表が sha つきで記録されている。(d) 実機の値が [qjs-observe.md](../vm/qjs-observe.md) §25.5・§25.6 の値（DERBY 待機画面 3.91〜3.94 ms、STRESS 6.2 ms 前後）と 15% 以内で合う。合わなければ、先に理由を調べる。
 
 ### P1 — ビルドに入らないものを消し、診断を門の中へ（Sonnet、STEADY が合格を判定）
 
-**実施済み（§7.3 の決定により `CONFIG_POCKET_SHIKI_DEBUG` の既定は `n`。下の「既定 `y` で足すだけ」「メニューは変わらない」は、メニューが元々変わらない（試験アプリはホームの行ではなく `native_apps`／`app_registry` の行）ことを除いて置き換わった）。** 実測（map、`.flash.text`／`.flash.rodata`／`.dram0.bss`／`.iram0.text`）: `CONFIG_POCKET_SHIKI_DEBUG=y` の image は P0 の `4840504` とバイト単位で同一（1,722,132／822,644／76,640／81,771）。`=n` の image は `.flash.text` −27,324 B、`.flash.rodata` −39,200 B、`.dram0.bss` −16 B、`.iram0.text` ±0（合計 −66,540 B。§3.6 の見積もり −47.3 KB より大きいのは、診断だけが呼んでいた関数も `--gc-sections` で落ちたため）。
+**実施済み（§7.3 の決定により `CONFIG_KOBAKO_SHIKI_DEBUG` の既定は `n`。下の「既定 `y` で足すだけ」「メニューは変わらない」は、メニューが元々変わらない（試験アプリはホームの行ではなく `native_apps`／`app_registry` の行）ことを除いて置き換わった）。** 実測（map、`.flash.text`／`.flash.rodata`／`.dram0.bss`／`.iram0.text`）: `CONFIG_KOBAKO_SHIKI_DEBUG=y` の image は P0 の `4840504` とバイト単位で同一（1,722,132／822,644／76,640／81,771）。`=n` の image は `.flash.text` −27,324 B、`.flash.rodata` −39,200 B、`.dram0.bss` −16 B、`.iram0.text` ±0（合計 −66,540 B。§3.6 の見積もり −47.3 KB より大きいのは、診断だけが呼んでいた関数も `--gc-sections` で落ちたため）。
 
-範囲: §4.3 の表の上 4 行。`CONFIG_POCKET_SHIKI_DEBUG` は**既定 `y` で足すだけ**（メニューは変わらない）。[architecture.md](architecture.md) の `ksn_presenter.c` の参照を直す。
+範囲: §4.3 の表の上 4 行。`CONFIG_KOBAKO_SHIKI_DEBUG` は**既定 `y` で足すだけ**（メニューは変わらない）。[architecture.md](architecture.md) の `ksn_presenter.c` の参照を直す。
 
-受け入れ基準: (a) ファームの `.flash.text`・`.flash.rodata`・`.dram0.bss`・`.iram0.text` の大きさが P0 と**同一**（Q4。消したのはリンクされていなかったものだけ、という主張の確認）。(b) r5sim の 4 負荷のカウントが同一。(c) `tools/kasane_contract/run.sh` と host の検査一式が通る。(d) `CONFIG_POCKET_SHIKI_DEBUG=n` で組めて、flash の減りが §3.6 の 47.3 KB と合う（別のビルドディレクトリと `-DSDKCONFIG=`）。(e) `python tools/check_docs.py`。実機: (d) の image は焼かない（既定は変えていない）。
+受け入れ基準: (a) ファームの `.flash.text`・`.flash.rodata`・`.dram0.bss`・`.iram0.text` の大きさが P0 と**同一**（Q4。消したのはリンクされていなかったものだけ、という主張の確認）。(b) r5sim の 4 負荷のカウントが同一。(c) `tools/kasane_contract/run.sh` と host の検査一式が通る。(d) `CONFIG_KOBAKO_SHIKI_DEBUG=n` で組めて、flash の減りが §3.6 の 47.3 KB と合う（別のビルドディレクトリと `-DSDKCONFIG=`）。(e) `python tools/check_docs.py`。実機: (d) の image は焼かない（既定は変えていない）。
 
-### P2 — `pocket_kasane.c` を `.inc` に分ける（Sonnet、STEADY がレビュー）
+### P2 — `kobako_kasane.c` を `.inc` に分ける（Sonnet、STEADY がレビュー）
 
-**実施済み。** 分割は元の順番のまま、連続した区間を `.inc` にした: `pocket_kasane.c` 955 行（旧 1〜701 と 2730〜2978）、`pocket_kasane_parse.inc`（旧 702〜971）、`_tx.inc`（972〜1622）、`_scene.inc`（1623〜2040）、`_schema.inc`（2041〜2729）、`_present.inc`（2979〜3209）。§4.2 の表と違い、`functions[]`・`build_kasane`・install・reset・source capability は順番を守るため `.c` に残した。`scene_owner` が `_scene.inc` に移ったので `tools/pocket/run_class_registry.py` の台帳を直した。実測: `pocket_kasane.c.obj` の全セクション（デバッグ以外）と ELF の `.flash.text`／`.flash.rodata`／`.iram0.text`／`.dram0.data` がバイト単位で同一、`mutate`・`parse_i16`・`parse_rect_mode` のアドレスも同一。
+**実施済み。** 分割は元の順番のまま、連続した区間を `.inc` にした: `kobako_kasane.c` 955 行（旧 1〜701 と 2730〜2978）、`kobako_kasane_parse.inc`（旧 702〜971）、`_tx.inc`（972〜1622）、`_scene.inc`（1623〜2040）、`_schema.inc`（2041〜2729）、`_present.inc`（2979〜3209）。§4.2 の表と違い、`functions[]`・`build_kasane`・install・reset・source capability は順番を守るため `.c` に残した。`scene_owner` が `_scene.inc` に移ったので `tools/kobako/run_class_registry.py` の台帳を直した。実測: `kobako_kasane.c.obj` の全セクション（デバッグ以外）と ELF の `.flash.text`／`.flash.rodata`／`.iram0.text`／`.dram0.data` がバイト単位で同一、`mutate`・`parse_i16`・`parse_rect_mode` のアドレスも同一。
 
 範囲: §4.2。関数の順番を変えない（順番が変わると配置が動く）。
 
-受け入れ基準: (a) `pocket_kasane.c.obj` の各セクションの大きさが同一、ファームの大きさが同一。(b) r5sim の 4 負荷のカウントが同一。(c) `helper_iram8.lf` の `pocket_kasane:` の 3 行が今も当たっている（map で `mutate`・`parse_i16`・`parse_rect_mode` が `.iram0.text` にある）。(d) host の検査一式。実機: 起動と HELLO・STRESS の動作だけ（数値は取らなくてよい。大きさとカウントが同一なら機械語は同じ）。
+受け入れ基準: (a) `kobako_kasane.c.obj` の各セクションの大きさが同一、ファームの大きさが同一。(b) r5sim の 4 負荷のカウントが同一。(c) `helper_iram8.lf` の `kobako_kasane:` の 3 行が今も当たっている（map で `mutate`・`parse_i16`・`parse_rect_mode` が `.iram0.text` にある）。(d) host の検査一式。実機: 起動と HELLO・STRESS の動作だけ（数値は取らなくてよい。大きさとカウントが同一なら機械語は同じ）。
 
 ### P3 — API を足す（非破壊）（Opus）
 
 **実施（2026-11-13、ブランチ `p3-api`。数は [logs/api-reorg-perf.md](logs/api-reorg-perf.md) §6）。** 足したもの:
 
-- `replace`/`patch` の tx・modal を使い回す。前の呼び出しのものを、**アプリが手元に残していなければ**（参照の数が 1）次の呼び出しで使い、残していれば手放して次は新しく作る。だから残した tx は、後の別のコールバックの中でも `CLOSED` のまま（R4 の「世代の番号」の代わりに参照の数で保った。既存の検査「foreign transaction tokens」がこれを求めていた）。`tx.modal` は prototype の getter。2 つは `pocket_kasane_reset()`（`app_stop()`）の最初に手放す。ticket は uint32 の**数**で返す（§3.2 の「`undefined`」ではなく、`cancel(ticket)` の古い呼び方が動くように。`cancel` は数を受け、`poll().ticket` も数）。ticket のクラスは登録したまま（P5 で `poll`・`cancel` と一緒に消す。`tools/pocket/run_class_registry.py` の台帳もその時に）。
+- `replace`/`patch` の tx・modal を使い回す。前の呼び出しのものを、**アプリが手元に残していなければ**（参照の数が 1）次の呼び出しで使い、残していれば手放して次は新しく作る。だから残した tx は、後の別のコールバックの中でも `CLOSED` のまま（R4 の「世代の番号」の代わりに参照の数で保った。既存の検査「foreign transaction tokens」がこれを求めていた）。`tx.modal` は prototype の getter。2 つは `kobako_kasane_reset()`（`app_stop()`）の最初に手放す。ticket は uint32 の**数**で返す（§3.2 の「`undefined`」ではなく、`cancel(ticket)` の古い呼び方が動くように。`cancel` は数を受け、`poll().ticket` も数）。ticket のクラスは登録したまま（P5 で `poll`・`cancel` と一緒に消す。`tools/kobako/run_class_registry.py` の台帳もその時に）。
 - `ref.setRect`・`setClip` の整数 4 つ（配列の形と同じ検査）。
-- `cache`・`grid`・`video`・`pixel` の遅延は、§3.1 の「土台に子の遅延を足す」ではなく、QuickJS の fork の遅延リスト（`JS_OBJECT_DEF`、[builtin-floor-plan.md](../vm/builtin-floor-plan.md) §13）の項目にした。触るまでゲストの確保が 0 で、`pocket_api.c` も変えずに済む。`gridFold` のグローバルは eager のまま（グローバルオブジェクトは遅延リストを持てず、`grid` を読む前に `gridFold.fold` を呼ぶプログラムが動くように）。`shiki.grid` は最初に読んだ時に `pocket.kasane.grid` に置き換わる getter。
-- `pocket.kasane.grid.fold/index/view`。
-- grid の `slots`（7,200 B）を最初の `register*` で確保し、`pocket_grid_reset()` で返す。
+- `cache`・`grid`・`video`・`pixel` の遅延は、§3.1 の「土台に子の遅延を足す」ではなく、QuickJS の fork の遅延リスト（`JS_OBJECT_DEF`、[builtin-floor-plan.md](../vm/builtin-floor-plan.md) §13）の項目にした。触るまでゲストの確保が 0 で、`kobako_api.c` も変えずに済む。`gridFold` のグローバルは eager のまま（グローバルオブジェクトは遅延リストを持てず、`grid` を読む前に `gridFold.fold` を呼ぶプログラムが動くように）。`shiki.grid` は最初に読んだ時に `kobako.kasane.grid` に置き換わる getter。
+- `kobako.kasane.grid.fold/index/view`。
+- grid の `slots`（7,200 B）を最初の `register*` で確保し、`kobako_grid_reset()` で返す。
 - `display.kasane.limits` に `textBytes`・`animations`・`cacheCommands`。
 - `shiki.drawMany(handles, inputs, stride, count?)`（[shiki-spec.md](shiki-spec.md) §9.4 に v2.0 の草案として）。
 
-**行わなかったもの:** (1) capability `kasane.grid`・`kasane.video`・`kasane.pixel` と manifest の門。§7.2 の 4（PLAYGROUND・WORK に何を与えるか）が未決で、門を入れると今の manifest の gridlab・megademo・videolab と保存済みのプログラムが P4 の前に動かなくなる。また capability の表（`POCKET_MAX_REGISTERED` 32）には、ソースに 33 の名前の登録がある（`kasane.shiki.debug` は既定で登録しない。セッションごとに実際にいくつ登録されるかは確かめていない）。門と一緒に P4 で入れる。(2) handle の表の統合（§3.3）。`binds` は 384 B（32 × 12 B）で、統合すると毎 draw の `lookup`（`pocket_shiki_frame.c`）とリストの参照の数の簿記に触る。得る `.bss` が小さく、毎ターンの経路の変更を P3 に混ぜないことにした。
+**行わなかったもの:** (1) capability `kasane.grid`・`kasane.video`・`kasane.pixel` と manifest の門。§7.2 の 4（PLAYGROUND・WORK に何を与えるか）が未決で、門を入れると今の manifest の gridlab・megademo・videolab と保存済みのプログラムが P4 の前に動かなくなる。また capability の表（`KOBAKO_MAX_REGISTERED` 32）には、ソースに 33 の名前の登録がある（`kasane.shiki.debug` は既定で登録しない。セッションごとに実際にいくつ登録されるかは確かめていない）。門と一緒に P4 で入れる。(2) handle の表の統合（§3.3）。`binds` は 384 B（32 × 12 B）で、統合すると毎 draw の `lookup`（`kobako_shiki_frame.c`）とリストの参照の数の簿記に触る。得る `.bss` が小さく、毎ターンの経路の変更を P3 に混ぜないことにした。
 
-範囲: §3.1 の遅延と manifest の門（土台の「子の遅延」を含む）、grid の `slots` を使う時に確保、§3.2 の `replace`/`patch` の確保の除去と整数の `setRect`・`setClip`、`limits` の追加、§3.3 の `drawMany` の `count` と handle の表の統合、`pocket.kasane.grid.fold/index/view`（`gridFold` は残す）。仕様の文書（[shiki-spec.md](shiki-spec.md) §9、common-api）を同じ変更で直す。
+範囲: §3.1 の遅延と manifest の門（土台の「子の遅延」を含む）、grid の `slots` を使う時に確保、§3.2 の `replace`/`patch` の確保の除去と整数の `setRect`・`setClip`、`limits` の追加、§3.3 の `drawMany` の `count` と handle の表の統合、`kobako.kasane.grid.fold/index/view`（`gridFold` は残す）。仕様の文書（[shiki-spec.md](shiki-spec.md) §9、common-api）を同じ変更で直す。
 
 Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の `lookup`（1 draw 約 107〜138 サイクル、実測（引用））、静的 DRAM、ゲストの寿命（使い回す tx のオブジェクトと `app_stop()` の reset の順）に触る。
 
@@ -379,7 +379,7 @@ Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の
 - host: 契約試験一式、API の自己試験（新しい形の検査を足したもの）、`replace` が OOM で途中で失敗した後の再構築（STRESS の LV3 の経路）、`app_stop()` の後に tx のオブジェクトが残らないこと（ASan）。
 - Q1・Q2: `hud` で 1 ターンの確保が 3 回以上減る。`shiki_v1`（古い呼び方）のカウントが増えない（+0.5% 以内）。`derby` は変わらないか減る。
 - Q4: 静的 DRAM が約 7.2 KB 減る（`memlog.py --map`）。flash の増加は 1 KB 以内。
-- Q5: HELLO・DERBY・STRESS の評価後のゲストヒープが増えない。P0 の検査（名前空間を作る費用）で、`pocket.kasane` の最初の読み取りの費用が減る。
+- Q5: HELLO・DERBY・STRESS の評価後のゲストヒープが増えない。P0 の検査（名前空間を作る費用）で、`kobako.kasane` の最初の読み取りの費用が減る。
 - 実機: ホームの `idle_free` が約 7 KB 増える（D3）。DERBY・STRESS の `turn_ms` が 15% を超えて悪化しない（D1）。DERBY の評価余裕とゲスト最大が悪化しない（D3）。GRID LAB・MEGADEMO・VIDEO LAB が起動して動く（grid の確保が使う時に通ること。**物理の表示の確認を依頼する**）。
 
 ### P4 — アプリを移す（§5 の 1〜6: Sonnet／STRESS の `Int32Array`: Opus）
@@ -392,9 +392,9 @@ Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の
 
 ### P4b — DERBY の走者を状態の領域と `drawList` へ（Opus。§7 の 10 で行うと決めた場合）
 
-**実施（2026-11-13、[derby-runners-native.md](../apps/derby-runners-native.md)）: 状態の領域と `drawList` ではなく、`pocket.derby.runners()`（C）1 回に下ろした（同文書 §4 で比較）。r5sim の `derby` のレースの場面 −8.8〜−18.3%、確保 78 → 66 回/ターン、host の全フレームの画素一致。トレースの代わりに、走者の経路を落とした 2 つの変種の r5sim の差で経路の重さを測った（同 §1）。実機の A/B は未実施（同 §7）。DERBY は `drawMany` を使わなくなったので、§5 の 6 の `bflush` の項は不要になった。**
+**実施（2026-11-13、[derby-runners-native.md](../apps/derby-runners-native.md)）: 状態の領域と `drawList` ではなく、`kobako.derby.runners()`（C）1 回に下ろした（同文書 §4 で比較）。r5sim の `derby` のレースの場面 −8.8〜−18.3%、確保 78 → 66 回/ターン、host の全フレームの画素一致。トレースの代わりに、走者の経路を落とした 2 つの変種の r5sim の差で経路の重さを測った（同 §1）。実機の A/B は未実施（同 §7）。DERBY は `drawMany` を使わなくなったので、§5 の 6 の `bflush` の項は不要になった。**
 
-範囲: §5 の 7。先に P0 の DERBY のトレースで、走者の経路（`rin`・`bput`・`bflush`・`pocket.derby.lanes`）が JS 側の何 % かを出し、**見込みが小さければ行わない**（見積もりを文書に残して終える）。
+範囲: §5 の 7。先に P0 の DERBY のトレースで、走者の経路（`rin`・`bput`・`bflush`・`kobako.derby.lanes`）が JS 側の何 % かを出し、**見込みが小さければ行わない**（見積もりを文書に残して終える）。
 
 受け入れ基準: (a) host の 19 本の検査で画素が一致、(b) r5sim の `derby` のカウントが場面ごとに P4 より小さい、(c) 実機: 同じバイナリの中で新旧の JS を切り替えた A/B で `turn_ms` を比べる（15% 未満の差を主張するため）。`SHIKI_TURN` の `shk=` の最大の空き塊が、最も厳しい窓（HEAD ON・FINISH）で 2,492 B を下回らない。評価余裕とゲスト最大が悪化しない。レースを FINISH・写真判定まで走り、予備不足・`FRAMEFAIL`・OOM が 0。
 
@@ -404,7 +404,7 @@ Opus とする理由: 毎ターンの経路の確保（`run_build`）、draw の
 
 受け入れ基準: (a) `apps/` と `main/` に、消した名前の呼び出しが無い（grep）。(b) Q4: flash の減りを測って記録する。`overlay` の項目を消した場合は静的 DRAM −1,440 B。(c) r5sim の `shiki`・`derby`・`hud` のカウントが増えない。(d) host の検査一式、`tools/test_settings.py`・`capture_home.py`（メニューの行を変えた場合）。(e) 実機: smoke（`smoke_device.py`）、player の overlay（`onKey` が動く）、HELLO、DERBY、STRESS。
 
-**実施（2026-11-13、`p5-remove`）。** 消したもの: `features`、`poll`・`cancel`・ticket（`replace`/`patch` は何も返さない。ticket の JS クラスと owner 台帳 2 件 `ticket_owner`・`scene_owner` も消し、`tools/pocket/run_class_registry.py` の台帳は 22 → 20）、`createScene`（ネイティブの scene 制御器ごと。参照モデルの `apps/kasane/create_scene.js` も消した）、`inputScope`、グローバルの `gridFold`（`grid_fold.js` は `{fold, index, view}` を評価値として返し、`pocket_grid.c` が `pocket.kasane.grid` の裏で保持する）、`shiki.grid`、`pocket.overlay.begin/rect/text`（`items[24]` と合成の経路 `overlay_paint`）。`modal` は残した。`apiVersion` は `"0.2.0"`、manifest の範囲は `>=0.2.0 <0.3.0`。起動前の拒否は足していない（§7.3）。r5sim の `shiki_v1` は外した（[計測記録](logs/api-reorg-perf.md) §5）。実測: ファームの DIRAM −1,488 B（174,064 → 172,576）、Flash Code −5,184 B（1,696,768 → 1,691,584）、r5sim の `shiki`/`hud`/`derby` のカウントは揺れの内（+5/−3/+3）。host の検査は、`poll`/`cancel` の復旧経路を試験する `tools/test_pocket_kasane.c` のために、`POCKET_KASANE_TEST_HOOKS`（`tools/build_kasane_test.sh` だけが定義し、ファームには入らない）の `pocket_kasane_test_poll/cancel` を足した。実機の検査（smoke・player・HELLO・DERBY・STRESS）は未実施。
+**実施（2026-11-13、`p5-remove`）。** 消したもの: `features`、`poll`・`cancel`・ticket（`replace`/`patch` は何も返さない。ticket の JS クラスと owner 台帳 2 件 `ticket_owner`・`scene_owner` も消し、`tools/kobako/run_class_registry.py` の台帳は 22 → 20）、`createScene`（ネイティブの scene 制御器ごと。参照モデルの `apps/kasane/create_scene.js` も消した）、`inputScope`、グローバルの `gridFold`（`grid_fold.js` は `{fold, index, view}` を評価値として返し、`kobako_grid.c` が `kobako.kasane.grid` の裏で保持する）、`shiki.grid`、`kobako.overlay.begin/rect/text`（`items[24]` と合成の経路 `overlay_paint`）。`modal` は残した。`apiVersion` は `"0.2.0"`、manifest の範囲は `>=0.2.0 <0.3.0`。起動前の拒否は足していない（§7.3）。r5sim の `shiki_v1` は外した（[計測記録](logs/api-reorg-perf.md) §5）。実測: ファームの DIRAM −1,488 B（174,064 → 172,576）、Flash Code −5,184 B（1,696,768 → 1,691,584）、r5sim の `shiki`/`hud`/`derby` のカウントは揺れの内（+5/−3/+3）。host の検査は、`poll`/`cancel` の復旧経路を試験する `tools/test_kobako_kasane.c` のために、`KOBAKO_KASANE_TEST_HOOKS`（`tools/build_kasane_test.sh` だけが定義し、ファームには入らない）の `kobako_kasane_test_poll/cancel` を足した。実機の検査（smoke・player・HELLO・DERBY・STRESS）は未実施。
 
 ### P6 — ファイルの改名（任意。Sonnet、機械的）
 
@@ -428,7 +428,7 @@ P0 → P1 → P2 → P3 → P4 →（P4b）→ P5 →（P6）。P1 と P2 は順
 | R4 | tx のオブジェクトを使い回すと、アプリが tx を `patch` の外へ持ち出した時の扱いが変わる | 今も呼び出しの終わりに opaque を `NULL` にしている（`:1694`）。持ち出した tx は次の `patch` の間だけ再び有効になるので、「コールバックの外で使った tx は `CLOSED`」を世代の番号で保つ。P3 の検査に入れる |
 | R5 | manifest の門で、PLAYGROUND・WORK のプログラムが `grid`・`video`・`pixel` を使えなくなる | §7.2 の 4 |
 | R6 | DERBY は評価余裕 約 28.9 KB、ゲスト最大まで約 5.2 KB、Shiki heap の最も厳しい窓の空き 2,492 B（CLAUDE.md、[qjs-observe.md](../vm/qjs-observe.md) §25.6） | DERBY は最後に移す。1 変更ごとに実機で heapprobe |
-| R7 | メニューの行が変わると `test_settings.py`・`capture_home.py` が黙って別の行を押す | 行を変える変更（`CONFIG_POCKET_SHIKI_DEBUG=n` を既定にする場合）は、同じ変更で 2 つを直す |
+| R7 | メニューの行が変わると `test_settings.py`・`capture_home.py` が黙って別の行を押す | 行を変える変更（`CONFIG_KOBAKO_SHIKI_DEBUG=n` を既定にする場合）は、同じ変更で 2 つを直す |
 | R8 | host の台本が、実機で `null` になる値を固定値で返す | r5sim の DERBY の負荷も `null` を返す（P0） |
 | R9 | 複数セッションが作業ツリーを共有する | worktree と、blob を直接 staging するコミットの手順（CLAUDE.md） |
 | R10 | 実機の操作が broker 経由に限られる（DERBY・app_session・capture） | §7.2 の 9 |
@@ -437,7 +437,7 @@ P0 → P1 → P2 → P3 → P4 →（P4b）→ P5 →（P6）。P1 と P2 は順
 
 | | 決めること | 推す案 |
 | --- | --- | --- |
-| 1 | 診断（`pocket.shikiDebug`、試験アプリ 6 本、probe の option）を製品 image から外すか。`CONFIG_POCKET_SHIKI_DEBUG` の既定 | 既定は `y` のまま（実機の照合に使う）。flash が要る時に `n` にできる状態にする。組めない probe の option は消す |
+| 1 | 診断（`kobako.shikiDebug`、試験アプリ 6 本、probe の option）を製品 image から外すか。`CONFIG_KOBAKO_SHIKI_DEBUG` の既定 | 既定は `y` のまま（実機の照合に使う）。flash が要る時に `n` にできる状態にする。組めない probe の option は消す |
 | 2 | `poll()`・`cancel()`・ticket の戻り値を消すか | 消す。出荷アプリは使っていない。提出の成否が要るアプリが出たら、整数を返す `status()` を 1 つ足す |
 | 3 | `createScene`・`inputScope`・`modal` を消すか | `createScene` は消す（[architecture.md](architecture.md) が escape hatch と呼び、検査の JS しか使わない）。`modal`・`inputScope` は残す（製品の機能として検証済みで、使う予定があるなら）。**使う予定の有無を教えてほしい** |
 | 4 | `grid`・`video`・`pixel` を manifest の門に入れるか。PLAYGROUND・WORK のプログラムにどの capability を与えるか | 門に入れる。PLAYGROUND・WORK には今と同じ面を与える（`kasane.grid` などを名指しする）かどうかは、エディタで grid を書く使い方があるかで決める |
@@ -447,12 +447,12 @@ P0 → P1 → P2 → P3 → P4 →（P4b）→ P5 →（P6）。P1 と P2 は順
 | 8 | 保存済みのユーザーのプログラムの互換。P5 で消す名前を使うプログラムが実機にあるか | 無ければ、起動前に断る検査は足さない。あれば `APP_LEGACY_UI` と同じ形の検査を 1 つ足す |
 | 9 | 実機の計測の経路。broker で STRESS・BIG WAVE の 60 秒のログと `memlog.py --port` 相当が取れるか。取れなければ、直接のシリアルを使ってよいか | P0 の前に確認したい。取れない指標は、段の区切り（P0・P3・P4・P5）だけ直接のシリアルで取る |
 | 10 | DERBY の走者を状態の領域と `drawList` へ移す（P4b）を、この作業に含めるか | P0 の DERBY のトレースの結果を見てから決める。含めない場合も、P4 までで API の整理は完結する |
-| 11 | `pocket.overlay.begin/rect/text` を消すか | 消す（呼ぶアプリが無く、`.bss` 1,440 B が全セッションで常駐）。overlay のアプリを Kasane で描く方針（player の先頭のコメント）と合う |
+| 11 | `kobako.overlay.begin/rect/text` を消すか | 消す（呼ぶアプリが無く、`.bss` 1,440 B が全セッションで常駐）。overlay のアプリを Kasane で描く方針（player の先頭のコメント）と合う |
 
 ### 7.3 利用者の決定（2026-11-13）
 
 - **未使用の入口（§7.2 の 2・3・11）:** `modal` 以外は P5 で消す。`poll`・`cancel`・ticket の戻り値、`createScene`、`inputScope`、`overlay.begin/rect/text`、`gridFold` のグローバル、`shiki.grid` の写しが対象。`modal` は残す。
-- **診断（§7.2 の 1）:** 製品 image から**既定で外す**（`CONFIG_POCKET_SHIKI_DEBUG` の既定は `n`）。メニューの行が変わるので、`tools/test_settings.py` と `tools/capture_home.py` を同じ変更で直す。
+- **診断（§7.2 の 1）:** 製品 image から**既定で外す**（`CONFIG_KOBAKO_SHIKI_DEBUG` の既定は `n`）。メニューの行が変わるので、`tools/test_settings.py` と `tools/capture_home.py` を同じ変更で直す。
 - **DERBY の P4b（§7.2 の 10）:** この作業に**含める**。P0 のトレースは見込みの記録として残すが、実施の可否の門にはしない。
 - **保持型の一本化（§7.2 の 6）:** **調査だけ**行う（別の文書。実装はしない）。
 - 9（実機の経路）は broker の `derby`・`app_session` で取れる範囲を使い、取れない指標は段の区切りで別に相談する。
@@ -461,4 +461,4 @@ P0 → P1 → P2 → P3 → P4 →（P4b）→ P5 →（P6）。P1 と P2 は順
 
 - Kasane: [README.md](README.md)、[architecture.md](architecture.md)、[decisions.md](decisions.md)、[shiki.md](shiki.md) §2・§3、[shiki-spec.md](shiki-spec.md) §9、[shiki-v2.md](shiki-v2.md)、[shiki-bundle.md](shiki-bundle.md)、[flash-plan.md](flash-plan.md)・plan-sized-alloc.md・[surface-segment-cap.md](surface-segment-cap.md)・[image-rows.md](image-rows.md)（索引の要約と該当の節）。
 - VM: [qjs-observe.md](../vm/qjs-observe.md)（§0〜§2、§9〜§12、§15〜§20、§23、§25）、[turn-cpi.md](../vm/turn-cpi.md)・[gc-cap-backoff.md](../vm/gc-cap-backoff.md)・[math-call-fast.md](../vm/math-call-fast.md)・[memory-pressure-api.md](../vm/memory-pressure-api.md)・[function-allocation.md](../vm/function-allocation.md)（冒頭）。[eval-peak.md](../vm/eval-peak.md)・[guest-memory-design.md](../vm/guest-memory-design.md) は CLAUDE.md の要約に拠り、本文は読んでいない。
-- 実装: `main/pocket/pocket_kasane.c`・`pocket_shiki_api.c`・`pocket_shiki_frame.c`・`pocket_shiki.c`・`pocket_grid.c`・`pocket_video.c`・`pocket_pixel.c`・`pocket_shape.c`・`pocket_derby.c`・`pocket_overlay.c` の入口と表、`main/CMakeLists.txt`、`main/app_session.c` の install の順、`main/vm/helper_iram8.lf`、`apps/` の全 JS の API の呼び出し。**読んでいない所:** `ksn_core.c`・`ksn_render.c`・`ksn_shiki.c`・`ksn_shiki_jit.c` の本体、`pocket_kasane.c` の引数の検査（270〜970 行）の詳細、`main/ayatsuri/`。§4.2 の行の範囲はおよその値で、分割の時に関数の境目で決める。
+- 実装: `main/kobako/kobako_kasane.c`・`kobako_shiki_api.c`・`kobako_shiki_frame.c`・`kobako_shiki.c`・`kobako_grid.c`・`kobako_video.c`・`kobako_pixel.c`・`kobako_shape.c`・`kobako_derby.c`・`kobako_overlay.c` の入口と表、`main/CMakeLists.txt`、`main/app_session.c` の install の順、`main/vm/helper_iram8.lf`、`apps/` の全 JS の API の呼び出し。**読んでいない所:** `ksn_core.c`・`ksn_render.c`・`ksn_shiki.c`・`ksn_shiki_jit.c` の本体、`kobako_kasane.c` の引数の検査（270〜970 行）の詳細、`main/ayatsuri/`。§4.2 の行の範囲はおよその値で、分割の時に関数の境目で決める。

@@ -1,7 +1,7 @@
 """The hot-function linker fragment (docs/vm/turn-icache.md sec.1) from a list of names.
 
     python tools/r5sim/icache.py model ... --pack-kib 8 --emit hot.txt
-    python tools/r5sim/gen_hot_lf.py hot.txt build_x/cardputer_pocketjs.map > main/r5_hot.lf
+    python tools/r5sim/gen_hot_lf.py hot.txt build_x/cardputer_kobako.map > main/r5_hot.lf
 
 Each name becomes a mapping entry to flash_text with an ALIGN flag. The flag
 is the point, not the alignment: a function mapped to where it already goes

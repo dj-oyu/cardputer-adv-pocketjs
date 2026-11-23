@@ -39,7 +39,7 @@ D10 の予算は使用量が一度減ってから増えるだけなので、自�
 - **既存の期待値への影響。** `try_finally.js`のsloppyな`s1() { return s2(); }`はスタック文字列を丸ごと固定しており、sloppyへのTCO適用は既存契約を壊す。`budget_probe.sh`が使う`seg_oom_boundary.js`の`pileOnce`もsloppyな末尾再帰で、480B予算の陰性対照が現行のフレーム積み上げに依存する。したがって両方とも無変更で維持する。`deep_recursion{,_device}.js`の無限`dive()`は`return dive()`ではなく、`dive2()`は戻り値に加算があるため、明示的な末尾呼び出しではない。これは該当ファイルのソース監査であり、最適化実装後の全コーパス実行を代替しない。
 - **Test262 の見込み（未測定）。** 通常・メソッド呼び出しの2本に加え、`tco-non-eval-{function-dynamic,function,global,with}.js`の4本も再帰する`f`自体は`"use strict"`を持つ。`flags: [noStrict]`はテスト全体の実行モードであり、sloppyな末尾呼び出しを要求するテストではない（固定Test262 revisionのソース監査、2026-09-16）。従来の「sloppyの4本」という分類は誤り。`try`/`catch`/`finally`の3本は、コンパイラが該当位置で末尾命令を出すかの確認を引き続き要する。
 - **検査の形。** 末尾再帰の深さを2通りに変えても VM スタックの使用バイトが一定であること（G1 と同じ「深さに比例しない」判定）を関所にする。
-- **切り替え。** `CONFIG_POCKET_VM_TCO`（既定 n）で入れ、関所が通ってから既定を決める。
+- **切り替え。** `CONFIG_KOBAKO_VM_TCO`（既定 n）で入れ、関所が通ってから既定を決める。
 
 ## 5. 足場（コードに入れたもの、挙動不変）
 
@@ -49,7 +49,7 @@ D10 の予算は使用量が一度減ってから増えるだけなので、自�
 
 ## 6. 第1実装（2026-09-16、実験スイッチ）
 
-`CONFIG_POCKET_VM_TCO`はYIELDに依存し既定n。hostは`build.sh o2-tco` / `asan-tco`。strictなflat SEG呼び出し元の`OP_tail_call`/`OP_tail_call_method`だけが対象。通常bytecode関数へ、実引数8個以下で、置換後のフレームが現在のセグメントと使用量予算に収まる場合に再利用する。native/bound/Proxy/async/generator、床、大きな引数列や容量不足は通常経路に戻す。
+`CONFIG_KOBAKO_VM_TCO`はYIELDに依存し既定n。hostは`build.sh o2-tco` / `asan-tco`。strictなflat SEG呼び出し元の`OP_tail_call`/`OP_tail_call_method`だけが対象。通常bytecode関数へ、実引数8個以下で、置換後のフレームが現在のセグメントと使用量予算に収まる場合に再利用する。native/bound/Proxy/async/generator、床、大きな引数列や容量不足は通常経路に戻す。
 
 当初案のpop/pushではなく、同じブロックをその場でresizeする。これによりsegment先頭のpopによる返却・再確保を避け、適格性検査と割り込みpollの後には失敗しうる確保を行わない。関数・this・引数を小さいC一時配列へdupし、旧var refsを閉じ、旧local/operandを解放してから、所有スロット`[func,this,args...,vars...,stack...]`を構築する。補助関数をnoinlineにし、一時配列を通常のVM活性全体へ広げない。`JS_SF_TAIL`でresume時のargv/this復元を区別する。親link・ret_shape・caller_ctxはそのままなので、引数個数・method形が変わっても元の親のoperand片付けを変更しない。cur_funcは所有slotへの借用で、既存のGC/Discardスロット走査に含まれる。中間状態には中断点を置かず、完全置換後にB地点を通す。
 

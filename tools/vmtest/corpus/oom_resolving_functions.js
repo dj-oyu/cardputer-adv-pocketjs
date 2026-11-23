@@ -9,7 +9,7 @@
 // vmrun-rom-flags: --fail-alloc 913
 // vmrun-keepsrc-flags: --fail-alloc 1352
 // vmrun-rom-keepsrc-flags: --fail-alloc 914
-// 1352 -> 1351 with CONFIG_POCKET_VM_STRIP_FN_SOURCE: 1 function source copy fewer before the target (allocator traces aligned, docs/vm/vm-L2-results.md sec.6).
+// 1352 -> 1351 with QJS_LEAN_STRIP_FN_SOURCE: 1 function source copy fewer before the target (allocator traces aligned, docs/vm/vm-L2-results.md sec.6).        
 // Regression for the resolving-functions double-free (reports/upstream/
 // quickjs-ng-resolving-functions-double-free.md). js_create_resolving_
 // functions() used to leave a dangling value in resolving_funcs[0] when the
@@ -23,7 +23,7 @@
 // function. Every call that reaches JS_Call() from native glue --
 // Function.prototype.apply/call/bind, Reflect.apply, a Proxy trap, a
 // builtin's callback -- goes through js_async_function_call regardless of
-// CONFIG_POCKET_VM_FLATCALLS, so this bug is reachable in the SHIPPED
+// QJS_LEAN_FLATCALLS, so this bug is reachable in the SHIPPED        
 // default build (flatcalls on) at recursion depth 1, not only through the
 // deep synchronous recursion that flat calls turn into heap exhaustion
 // (docs/vm-L2-design.md sec.10.3 D38, see budget_probe.sh's

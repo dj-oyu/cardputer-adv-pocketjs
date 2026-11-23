@@ -26,7 +26,7 @@ def main(trace_path=None, fused=False):
                ROOT / "main/ui/kasane/ksn_proc_grid.c",
                ROOT / "main/ui/kasane/ksn_proc_grid_pie.c",
                ROOT / "tools/kasane_contract/test_proc_grid_fold_qjs.c"]
-    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-DPOCKET_VM_LAZY_BUILTINS=1", "-D_GNU_SOURCE",
+    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-DQJS_LEAN_LAZY_BUILTINS=1", "-D_GNU_SOURCE",
                "-DKSN_GRID_PIE_MODEL", "-I", str(QJS),
                "-I", str(ROOT / "main/ui/kasane"),
                *(str(source) for source in sources), "-lm", "-o", str(binary)]

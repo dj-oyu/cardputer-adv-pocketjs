@@ -1,10 +1,10 @@
 # BIG WAVE — 線分の疑似3Dで大波に乗る
 
-2026-09-29、ブランチ `vm/game-wave`（`vm/main` 026e8c7 から）。対象は [apps/bigwave/big_wave.js](../../apps/bigwave/big_wave.js)（APPS の BIG WAVE、`local.bigwave`）。**この文書の数値はすべて host（実物の QuickJS・`pocket.kasane`・`pocket.input.keys` をホストで動かしたもの）か計算で、実機では1つも測っていない。** 種別は各表に書いた。美的な評価はしない（見比べ用の画像を置いた）。
+2026-09-29、ブランチ `vm/game-wave`（`vm/main` 026e8c7 から）。対象は [apps/bigwave/big_wave.js](../../apps/bigwave/big_wave.js)（APPS の BIG WAVE、`local.bigwave`）。**この文書の数値はすべて host（実物の QuickJS・`kobako.kasane`・`kobako.input.keys` をホストで動かしたもの）か計算で、実機では1つも測っていない。** 種別は各表に書いた。美的な評価はしない（見比べ用の画像を置いた）。
 
 ## 結論
 
-- 崩れていく大波の面を TPS 視点で滑るゲームを作った。見せ方は `pocket.kasane.procedural` の線分だけ。**波は「世界に固定した断面（スライス）の列」で、1 断面を CUBIC 1 本（谷 → 面 → リップ）で描く。** 断面の形はカールの量と高さの区分線形関数で決まり、JS は区分ごとに 1 回 `draw` し、VM が区分の中の断面を回して透視・ロール・形の補間をする。
+- 崩れていく大波の面を TPS 視点で滑るゲームを作った。見せ方は `kobako.kasane.procedural` の線分だけ。**波は「世界に固定した断面（スライス）の列」で、1 断面を CUBIC 1 本（谷 → 面 → リップ）で描く。** 断面の形はカールの量と高さの区分線形関数で決まり、JS は区分ごとに 1 回 `draw` し、VM が区分の中の断面を回して透視・ロール・形の補間をする。
 - **VM に割り算が無いので、透視の 1/d を断面ごとに級数で進める**（`y ← y(1 − u + u² − u³)`、`u = D·y`）。先頭の 1/d だけ JS が正確に渡す。誤差は計算で最大 3.1 px（10 m 横の点、奥行き 7 m）。
 - host で、台本（タイトル → 開始 → E/S/A/D・急旋回・ポップ・チューブ → 波頭・岩・他のサーファー・崩れるセクション・着地失敗の各ワイプアウト → 一時停止 → ゲームオーバー → 再挑戦）と、**キーだけで操作するボットが 3 セットをワイプアウト 0 回でクリア**するまでを流し、29 項目の物理・規則の期待がすべて通った。全 7,256 フレーム・63,883 draw を plan／デバッグ単歩の plan／単歩の VM の3通りで実行してビット一致、帯ごとの再描画と一括の再描画で全画素一致（2.35 億画素）。
 - 負荷（host 計数、MID 段、走行中）: 1 フレームの線分最大 361、ラスタ 8,195、VM ステップ 3,889、draw 16。MEGADEMO の TWIST HEAVY（実機 29.8 fps: 線分 566、ラスタ 19,190、ステップ 6,571、draw 7）より VM と描画は軽く、**draw の数（＝JS の呼び出し）は多い**。30 fps に届くかは実機で測るまで分からない。
@@ -102,7 +102,7 @@ x += v·cos(h)·Δt、  p += v·sin(h)·Δt / K.face、  xc += vw·Δt
 | `K.turn` / `K.carve` / `K.cost` / `K.relax` / `K.head` | 1.9 / 3.6 rad/s / 2.5 / 1.4 / 1.05 rad | 旋回の効き、急旋回の代償、手を離したときの戻り、最大の角 |
 | `K.face` | 7 m | 面の幅（p の動きの速さ） |
 | `K.pop` / `K.g` / `K.land` / `K.air` | 5.5 m/s / 13 / 0.8 rad / 4 m/s | ジャンプの高さと滞空、着地の許容、波頭から自動で飛ぶ速さ |
-| `K.tube` / `K.pocket` / `K.sh` / `K.taper` / `K.hmin` | 7 / 22 / 34 / 40 m / 0.3 | 波の区間 |
+| `K.tube` / `K.kobako` / `K.sh` / `K.taper` / `K.hmin` | 7 / 22 / 34 / 40 m / 0.3 | 波の区間 |
 | `K.tuck` / `K.grace` / `K.hitX` / `K.hitP` | 0.6 / 8 f / 1.3 m / 0.12 | チューブの判定、当たり判定 |
 | `K.vw` / `K.H` / `K.len` / `K.rock` / `K.sec` / `K.rid` | セットごと | 難度（波速・高さ・距離・岩／セクション／他のサーファーの間隔） |
 | `C` | V (160,56)、F 150、8 m / 2.2 m / 2.6 m、最近 5.2 m、D 1.8 m | カメラと格子（D は plan に焼く） |
@@ -128,7 +128,7 @@ plan の登録: 起動時に 6 本（波・海・空・泡・線）、残りの 
 
 ## host の再生結果
 
-`python3 tools/games/run_big_wave.py`（WSL）。実物の QuickJS、`pocket.kasane`（view と procedural）、`pocket.input.keys`（キーの辺は実物の `keymap_poll()` と `keystate` を通す）。台本はキーを押す・離すだけで、障害物の試験だけは開始位置を状態に書き込む（書いたことを表に示す）。ボットは状態を読んでキーを押すだけで、状態を書かない。乱数の種が固定なので、毎回同じ結果になる。
+`python3 tools/games/run_big_wave.py`（WSL）。実物の QuickJS、`kobako.kasane`（view と procedural）、`kobako.input.keys`（キーの辺は実物の `keymap_poll()` と `keystate` を通す）。台本はキーを押す・離すだけで、障害物の試験だけは開始位置を状態に書き込む（書いたことを表に示す）。ボットは状態を読んでキーを押すだけで、状態を書かない。乱数の種が固定なので、毎回同じ結果になる。
 
 | 操作（台本） | 結果（host の実測） |
 | --- | --- |
@@ -161,7 +161,7 @@ plan の登録: 起動時に 6 本（波・海・空・泡・線）、残りの 
 
 ### 全画素の検証
 
-全フレーム（7,256 フレーム、63,883 draw）で、各 draw を `ksn_proc_plan_run`（`pocket_shiki_frame.c` が回す経路）、同じ plan のデバッグ単歩、`ksn_proc_step` の単歩の3通りで実行し、線分・ラスタ歩数・ステップ数・レジスタがビット一致。型付き点列はスカラー・PIE の模型・ディスパッチャの3通りが一致。フレームを plan の線分から一括で、VM の線分から 8 行の帯ごとに描いて全画素一致（235,094,400 画素）。失敗 0。手順は test_proc_megademo_scenes.c（v2.0 で削除。`427b308` の `tools/kasane_contract/test_proc_megademo_scenes.c`） と同じ。
+全フレーム（7,256 フレーム、63,883 draw）で、各 draw を `ksn_proc_plan_run`（`kobako_shiki_frame.c` が回す経路）、同じ plan のデバッグ単歩、`ksn_proc_step` の単歩の3通りで実行し、線分・ラスタ歩数・ステップ数・レジスタがビット一致。型付き点列はスカラー・PIE の模型・ディスパッチャの3通りが一致。フレームを plan の線分から一括で、VM の線分から 8 行の帯ごとに描いて全画素一致（235,094,400 画素）。失敗 0。手順は test_proc_megademo_scenes.c（v2.0 で削除。`427b308` の `tools/kasane_contract/test_proc_megademo_scenes.c`） と同じ。
 
 ## 負荷と上限
 

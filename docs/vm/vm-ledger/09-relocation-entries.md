@@ -26,7 +26,7 @@ L3 が動かすのはこの payload であり、**動かす対象は3種類し�
                                      [stack_buf: stack_size][var_refs: var_ref_count]
 ```
 
-- `JSVMLink` は `CONFIG_POCKET_VM_FLATCALLS` のときだけ在り、`JS_VM_FRAME_PREFIX` バイト前置される。
+- `JSVMLink` は `CONFIG_QJS_LEAN_FLATCALLS` のときだけ在り、`JS_VM_FRAME_PREFIX` バイト前置される。
 - `sf` はブロック先頭ではなく `JSVMLink` の直後。`(JSVMLink *)sf - 1` で link に戻る
   （`quickjs.c:2968` が実際にそうしている）。
 - `arg_buf` は `arg_allocated_size == 0` のとき**ブロック外**（呼び出し元の `argv` を直接指す、
@@ -204,7 +204,7 @@ E1 が有効な状態（`JS_CallInternal` が実行中）では、C の自動変
   機械的な全走査ではない。抜けを捕まえるのは実装側の毒化（移動後に旧 payload を毒で埋め、
   古い番地への touch を ASan と実機の両方で検出する）であって、この文書ではない。
 - **ゲスト側とファームは監査済みで、入口は無い。** `grep -rn
-  "JSStackFrame\|current_stack_frame\|JSVarRef" components/pocketjs_guest main/ tools/vmtest/`
+  "JSStackFrame\|current_stack_frame\|JSVarRef" components/kobako_guest main/ tools/vmtest/`
   の一致は 5 件すべて散文（`main/Kconfig.projbuild` の説明 4 件、`tools/vmtest/vmrun.c:524`
   のコメント 1 件）で、**フレームやセグメントを保持するコードは quickjs.c と
   quickjs-vmstack.h の外に 1 箇所も無い**。E1〜E14 が VM の中で閉じているという意味で、

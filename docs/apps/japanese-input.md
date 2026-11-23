@@ -1,7 +1,7 @@
 # 日本語入力: SKK移植の設計と現状
 
 対象: ネイティブSKK変換（かな→漢字）と、それをJSアプリへつなぐ経路。
-確定済み実装（commit `2b053b7` 以降）: skk_core/ime_core移植、SKK Practice、Playgroundへのネイティブ日本語入力、JSノードへの日本語表示、および汎用の`pocket.input.text`（[common-api.md](../api/common-api.md) §6、`main/pocket/pocket_text.c`）。
+確定済み実装（commit `2b053b7` 以降）: skk_core/ime_core移植、SKK Practice、Playgroundへのネイティブ日本語入力、JSノードへの日本語表示、および汎用の`kobako.input.text`（[common-api.md](../api/common-api.md) §6、`main/kobako/kobako_text.c`）。
 本書のメモリ・辞書サイズ表は調査時・実装時の測定であり、`tools/memlog.py`が記録する最新実測を優先する。
 
 ## 目的と役割分担
@@ -12,10 +12,10 @@ Editor、SKK Practice、Playgroundは同じ変換エンジン（skk_core/ime_cor
 | 経路 | 用途 | 実装 |
 | --- | --- | --- |
 | ネイティブ編集画面 | Editor / SKK Practice / Playgroundの自前バッファ | `main/ui/editor.c`, `main/ui/codeedit.c`が確定結果を直接編集バッファへ挿入 |
-| `pocket.input.text` | 任意のJSアプリの入力欄（Wi-Fiパスワード欄を含む） | `main/pocket/pocket_text.c`（JS面）+ `main/text/textfield.c`（編集ロジック、ホストテスト可能） |
+| `kobako.input.text` | 任意のJSアプリの入力欄（Wi-Fiパスワード欄を含む） | `main/kobako/kobako_text.c`（JS面）+ `main/text/textfield.c`（編集ロジック、ホストテスト可能） |
 
 どちらも同じSKKセッション（`skk_session.c`）とキー配列を使うが、バッファの所有者と描画経路は別。
-ネイティブ編集画面は専用の全画面レイアウトを持ち、`pocket.input.text`は呼び出したアプリの画面に1つのフィールドを合成する（`pocket_text_overlay()`）。
+ネイティブ編集画面は専用の全画面レイアウトを持ち、`kobako.input.text`は呼び出したアプリの画面に1つのフィールドを合成する（`kobako_text_overlay()`）。
 
 ## 再利用元と範囲
 
@@ -88,7 +88,7 @@ JIS第1水準を12pxで丸ごと積むと490KB必要で、アプリ終了後の�
 | ネイティブのIMEオーバーレイ、Shell、テキスト入力欄 | strip合成時に自前で1bpp→RGB565展開 | Flashをmmapして直接参照 |
 | JSノード内の日本語表示 | ui.setTextを包み、実行中に出現した文字を累積してDCFAを再構築 | SRAM、上限160字。未使用文字の追い出しはない |
 
-編集画面は独立したネイティブ描画で、`pocket.input.text`のオーバーレイ（`pocket_text_overlay()`）はrender_stripとboard_presentの間で合成し、閉じた領域の再描画を管理する。
+編集画面は独立したネイティブ描画で、`kobako.input.text`のオーバーレイ（`kobako_text_overlay()`）はrender_stripとboard_presentの間で合成し、閉じた領域の再描画を管理する。
 
 新しい文字を含む`ui.setText`呼び出しごとにアトラスを再ロードする。layoutとrasterの更新による再描画負荷がある。
 1グリフあたりcoverage 144byteとcmap 8byteで152byte。
@@ -152,7 +152,7 @@ IME切替操作は押下エッジのみ、文字と候補送りには意図し�
 QuickJS contextはアプリタスクのみが触る。制御タスクからJSコールバックを直接呼ばない。
 ime_text/preedit/candの借用ポインタをタスク間キューへ入れない。次のime_feed等で無効になるため、その場で長さ付きコピーを作る。
 
-`pocket.input.text`のセッションは`textfield.c`の`generation`カウンタでフォーカス世代を持ち、`tf_refocus()`が古い世代のcommitを捨てる。ネイティブ編集画面（editor.c/codeedit.c）は画面ごとに専用バッファを持つため世代は不要。
+`kobako.input.text`のセッションは`textfield.c`の`generation`カウンタでフォーカス世代を持ち、`tf_refocus()`が古い世代のcommitを捨てる。ネイティブ編集画面（editor.c/codeedit.c）は画面ごとに専用バッファを持つため世代は不要。
 フォーカス喪失・アプリ終了では未確定文字を破棄し、勝手に確定しない。確定済みの編集内容は保持する。
 
 キュー満杯時のoverflow表示・キー保持状態の再同期は未実装。`main/main.c`の`xQueueSend(keys,&k,0)`は失敗を無視するため、入力欠落が検知されない（[backlog](backlog.md)）。
@@ -160,9 +160,9 @@ ime_text/preedit/candの借用ポインタをタスク間キューへ入れな�
 
 ## 表示とJS API
 
-`pocket.input.text`は[common-api.md](../api/common-api.md) §6の実装で、以下を提供する（`main/pocket/pocket_text.c`）。
+`kobako.input.text`は[common-api.md](../api/common-api.md) §6の実装で、以下を提供する（`main/kobako/kobako_text.c`）。
 
-- 入力欄がフォーカス取得時に`pocket.input.text.open()`でセッションを開始し、終了時に閉じる。
+- 入力欄がフォーカス取得時に`kobako.input.text.open()`でセッションを開始し、終了時に閉じる。
 - アプリはonEdit/onSubmit/onCancelでUTF-8確定文字列を受け取り、キーストローク・preedit・候補は受け取らない。
 - preeditや候補選択はプラットフォーム（ネイティブIMEオーバーレイ）が表示し、アプリの文字列にはまだ入れない。
 - 編集はUTF-8境界で行う。全角文字を1byte/1pixelとして扱わない。
@@ -205,4 +205,4 @@ skk_core・ime_core・kbd_coreの全コミットは本プロジェクトと同�
 - [ime_coreの契約](https://github.com/dj-oyu/esp32p4-mqjs/blob/a901d0e685dbc4cf48c505dabeaeb46532cc8679/components/ime_core/include/ime_core.h)
 - [skk_coreの契約](https://github.com/dj-oyu/esp32p4-mqjs/blob/a901d0e685dbc4cf48c505dabeaeb46532cc8679/components/skk_core/include/skk_core.h)
 - [再利用元のライセンス記録](https://github.com/dj-oyu/esp32p4-mqjs/blob/a901d0e685dbc4cf48c505dabeaeb46532cc8679/THIRD_PARTY_NOTICES.md)
-- [`pocket.input.text`の共通API契約](../api/common-api.md) §6
+- [`kobako.input.text`の共通API契約](../api/common-api.md) §6

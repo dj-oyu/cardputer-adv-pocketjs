@@ -1,6 +1,6 @@
 # プラットフォーム設計
 
-Cardputer ADV上でQuickJS版PocketJSのアプリを起動・操作・終了する土台の設計。短い制約の要約は`CLAUDE.md`にあり、本書はその詳細（責務分担・状態遷移・起動/停止の手順）を持つ。ハードウェアの前提は[ハードウェア仕様と開発制約](hardware-constraints.md)、`pocket.*` APIの契約は[共通JS API仕様](../api/common-api.md)を参照する。本書はどちらとも重複させず、プラットフォームの構造だけを扱う。
+Cardputer ADV上でQuickJS版PocketJSのアプリを起動・操作・終了する土台の設計。短い制約の要約は`CLAUDE.md`にあり、本書はその詳細（責務分担・状態遷移・起動/停止の手順）を持つ。ハードウェアの前提は[ハードウェア仕様と開発制約](hardware-constraints.md)、`kobako.*` APIの契約は[共通JS API仕様](../api/common-api.md)を参照する。本書はどちらとも重複させず、プラットフォームの構造だけを扱う。
 
 対象はESP32-S3FN8、240×135 LCD、PSRAMなし。8MB Flashは保存領域でありJSヒープには数えない。QuickJSとMicroQuickJSは異なるエンジンで、PocketJS上流が使うquickjs-ngを使用する。Pocket VaporのCへの事前変換は使用しない。
 
@@ -11,7 +11,7 @@ Cardputer ADV上でQuickJS版PocketJSのアプリを起動・操作・終了す�
 | ディレクトリ | 内容 |
 | --- | --- |
 | `hal/` | LCD・TCA8418キーボード・IMU（BMI270）・音声（ES8311） |
-| `pocket/` | `pocket.*` API本体（`pocket_api.c`が土台）とWi-Fi、`app_registry.c` |
+| `kobako/` | `kobako.*` API本体（`kobako_api.c`が土台）とWi-Fi、`app_registry.c` |
 | `pet/` | Pet Companionアプリのネイティブ側資産 |
 | `ui/` | 画面（shell、エディタ、オーバーレイ、ピッカー）と描画 |
 | `text/` | フォント・字句解析（`jslex.c`）・SKK・ソース保存（`srcstore.c`） |
@@ -22,7 +22,7 @@ Cardputer ADV上でQuickJS版PocketJSのアプリを起動・操作・終了す�
 
 調査基準はPocketJSコミット`6a0a1b6c91a506c473fc37a0256a47b12eceeca8`。そのESP-IDFコンポーネントはIDF `>=6.0,<6.2`と`espressif/quickjs-ng 0.14.0`を宣言し、本プロジェクトはEIMのIDF v6.0.1を使う（[環境とコマンド](build-environment.md)）。S3用RustアーカイブはWSLで`tools/build_native.sh`によりソースビルドする。公式ADVデモのIDF 5.4.2設定はそのまま流用せず、ドライバーの参考としてのみ扱う。
 
-S3では`pocketjs_package`、`pocketjs_ui_qjs`、`pocketjs_render_rgb565`とその依存を使用する。P4専用PPAは組み込まない。液晶転送とADVの入力は本プロジェクトが担当する。
+S3では`kobako_package`、`kobako_ui_qjs`、`kobako_render_rgb565`とその依存を使用する。P4専用PPAは組み込まない。液晶転送とADVの入力は本プロジェクトが担当する。
 
 ## 責務と所有権
 
@@ -56,19 +56,19 @@ stateDiagram-v2
 
 起動要求の連打はStarting以降では受理しない。Stoppingから新しいアプリを起動しない。画面所有者の切り替えは前の転送完了後に行い、同じLCDへ複数タスクが直接描画しない。
 
-オーバーレイアプリ（`pocket.overlay`、[common-api.md 3.1](../api/common-api.md)）はホーム画面そのものになる別の遷移を持つ。XMBを終了させて立ち上がり、シェル予約の戻るキーで降りる。詳細と安全弁は共通API仕様3.1節を正規参照とする。
+オーバーレイアプリ（`kobako.overlay`、[common-api.md 3.1](../api/common-api.md)）はホーム画面そのものになる別の遷移を持つ。XMBを終了させて立ち上がり、シェル予約の戻るキーで降りる。詳細と安全弁は共通API仕様3.1節を正規参照とする。
 
 ## 実行モデル
 
 `input_task`がキー・IMU・USB診断を読み、停止フラグと16件のキューを扱う。`ui_task`がShell、ネイティブ編集画面、QuickJS、PocketJS、LCD転送を直列に所有する。専用アプリタスクはない。別タスクからQuickJS contextを操作せず、停止は割り込みで確認する。JS呼び出しが戻ってから`ui_task`が解放する。音声は専用タスクで合成・再生・録音する（`hal/sound.c`、再生中だけ生きる`opusdec`/MP3復号タスク）。
 
-1回の処理は、入力の取り込み、JSフレームとPromiseジョブ、PocketJS DrawList生成、描画、転送の順。tick目標は30Hz。初期評価の期限は2秒、tickの期限は250ms。処理中のネイティブ関数は短時間で返すか、タイムアウト付きの非同期処理にする（`pocket_api.c`の購読テーブル・Promise完了テーブル）。
+1回の処理は、入力の取り込み、JSフレームとPromiseジョブ、PocketJS DrawList生成、描画、転送の順。tick目標は30Hz。初期評価の期限は2秒、tickの期限は250ms。処理中のネイティブ関数は短時間で返すか、タイムアウト付きの非同期処理にする（`kobako_api.c`の購読テーブル・Promise完了テーブル）。
 
 ## 起動と解放
 
-アプリ登録は`main/pocket/app_registry.c`の静的テーブルで、各エントリが`app_manifest_t`（id、title、entry、`runtime`=`APP_RUNTIME_LEGACY`/`APP_RUNTIME_POCKET`、`api`範囲、`access`の works レベル）を持つ。legacyランタイムは`ui.createNode`と`globalThis.frame`を使う旧アプリ、pocketランタイムは`pocket.*`のみを使うアプリで、`app_registry_admit()`がAPI範囲適合を検査してから起動する。`.pocket`形式・動的インストーラーはまだ受け入れない。
+アプリ登録は`main/kobako/app_registry.c`の静的テーブルで、各エントリが`app_manifest_t`（id、title、entry、`runtime`=`APP_RUNTIME_LEGACY`/`APP_RUNTIME_KOBAKO`、`api`範囲、`access`の works レベル）を持つ。legacyランタイムは`ui.createNode`と`globalThis.frame`を使う旧アプリ、kobakoランタイムは`kobako.*`のみを使うアプリで、`app_registry_admit()`がAPI範囲適合を検査してから起動する。`.kobako`形式・動的インストーラーはまだ受け入れない。
 
-guest生成 → `pocketjs_guest_quickjs_install_once()`で各ネイティブ面を注入 → UIコア・バインディング・レンダラ生成、の順に組み立て、`app_stop()`が逆順に壊す（`app_session.c`）。どの段階で失敗しても生成済み資源だけを解放する。エラー文字列はguestを破棄する前に上限付きでコピーする。
+guest生成 → `kobako_guest_quickjs_install_once()`で各ネイティブ面を注入 → UIコア・バインディング・レンダラ生成、の順に組み立て、`app_stop()`が逆順に壊す（`app_session.c`）。どの段階で失敗しても生成済み資源だけを解放する。エラー文字列はguestを破棄する前に上限付きでコピーする。
 
 停止手順は上流の寿命規則に従う。
 
@@ -81,15 +81,15 @@ guest生成 → `pocketjs_guest_quickjs_install_once()`で各ネイティブ面�
 
 単なる生成順の逆順にしない。上流はguestをbindingより先に破棄することを要求する。**ゲストのコールバックを保持するモジュールは、ゲストが死ぬ前に`app_stop()`から reset される必要がある。** 描画結果の借用ポインタは次のtickやmutationを越えて保存しない。停止確認が取れないタスクのメモリを先に解放しない。復帰不能時の最終手段はwatchdogによる再起動とし、通常のJSエラーからの復帰とは区別する。
 
-## pocket.* API
+## kobako.* API
 
-`main/pocket/pocket_api.c`が土台（capability登録、`PocketError`、cancelトークン、購読テーブル、Promise完了テーブル、遅延名前空間、`pocket_api_pump()`）で、各面（`pocket_imu.c`/`pocket_av.c`/`pocket_storage.c`/`pocket_fs.c`/`pocket_ui.c`/`pocket_net.c`/`pocket_io.c`/`pocket_bridge.c`/`pocket_capture.c`/`pocket_workspace.c`/`pocket_random.c`/`pocket_ble.c`/`pocket_overlay.c`/`pocket_text.c`他）が乗る。名前空間はアプリが最初に読んだときに構築される（`pocket_api_lazy()`）。`capabilities`と`apiVersion`だけがeager。新しい面は`pocket_api_register()`でcapabilityを差し替えるだけで、`pocket_api.c`自体は編集しない。
+`main/kobako/kobako_api.c`が土台（capability登録、`KobakoError`、cancelトークン、購読テーブル、Promise完了テーブル、遅延名前空間、`kobako_api_pump()`）で、各面（`kobako_imu.c`/`kobako_av.c`/`kobako_storage.c`/`kobako_fs.c`/`kobako_ui.c`/`kobako_net.c`/`kobako_io.c`/`kobako_bridge.c`/`kobako_capture.c`/`kobako_workspace.c`/`kobako_random.c`/`kobako_ble.c`/`kobako_overlay.c`/`kobako_text.c`他）が乗る。名前空間はアプリが最初に読んだときに構築される（`kobako_api_lazy()`）。`capabilities`と`apiVersion`だけがeager。新しい面は`kobako_api_register()`でcapabilityを差し替えるだけで、`kobako_api.c`自体は編集しない。
 
 契約・章立て・実装状況の一覧は[共通JS API仕様](../api/common-api.md)の冒頭表を正規参照とする。要約すると、BLE Central/Peripheral（同仕様12節）を除く全面が実装済み。
 
 Hello Worldは素のJSを編集用ソースにし、ビルド時にPocketJSのホストAPIへ接続する起動コードと束ねる。上流guestは`globalThis.frame`を要求するため、単独の`print()`のみではアプリとして成立しない。JSX/TSXやVue SFCはQuickJSでは直接評価できず、使用する場合はPCで変換する。
 
-入力はキー入力・IMU・時刻に加え、`pocket.input`の方向・決定・TextCommit APIを持つ。Ctrl+Alt+DelでForceStopを検出し、編集欄では通常キーをIME優先で処理する。変換中のEscをアプリ終了に使わず、Enter確定を改行や送信へ二重配送しない。詳細は[SKK日本語入力設計](../apps/japanese-input.md)を参照する。
+入力はキー入力・IMU・時刻に加え、`kobako.input`の方向・決定・TextCommit APIを持つ。Ctrl+Alt+DelでForceStopを検出し、編集欄では通常キーをIME優先で処理する。変換中のEscをアプリ終了に使わず、Enter確定を改行や送信へ二重配送しない。詳細は[SKK日本語入力設計](../apps/japanese-input.md)を参照する。
 
 ## メモリと描画
 
@@ -111,11 +111,11 @@ QuickJS heap limitはRust製core、renderer、フォントなどのメモリを�
 
 `partitions.csv`を容量の基準とする。factoryは0x10000から3MiB、skk_dictは0x310000から2MiB、jp_fontは0x510000から512KiB、storageは0x590000から2496KiB。旧storage先頭0x710000からの自動移行はない。
 
-srcstoreは最大8192bytesのソースを16スロットで保存する（0はユーザー、1以降は教材用）。各スロットは12KiBブロック×2面の24KiB、全体384KiB。CRC付き二面保存。`pocket.storage`と`pocket.workspace`（[common-api.md](../api/common-api.md) 7節）はこのsrcstoreを公開APIの背後に隠すバックエンドとして使う。汎用ファイルシステムやwear levelingではない。
+srcstoreは最大8192bytesのソースを16スロットで保存する（0はユーザー、1以降は教材用）。各スロットは12KiBブロック×2面の24KiB、全体384KiB。CRC付き二面保存。`kobako.storage`と`kobako.workspace`（[common-api.md](../api/common-api.md) 7節）はこのsrcstoreを公開APIの背後に隠すバックエンドとして使う。汎用ファイルシステムやwear levelingではない。
 
-エディタの**未保存の文書は、画面を閉じるときに下書きとして flash へ置かれる**（2026-09-23）。バッファは8KiBのheapで、`code_close()`が解放し次の`code_open()`がflashから読み直すので、保存していない編集は画面を離れた時点で消えていた。下書きは所属スロットを持つ1件だけの記録で、スロットを1つ増やすのではなく`pocket.fs`の後ろ（`SRCSTORE_DRAFT_BASE`=0xa0000、2面で24KiB）に置く — `pocket_fs.c`が`SRC_SLOT_COUNT`からファイルシステムの先頭を計算しており、スロットを増やすと保存済みのファイルが全部ずれるため。保存に成功したとき、実行前の保存が通ったとき、そのスロットを`srcstore_clear()`で忘れるときに消える。実機の検査は`tools/test_editor_draft.py`。
+エディタの**未保存の文書は、画面を閉じるときに下書きとして flash へ置かれる**（2026-09-23）。バッファは8KiBのheapで、`code_close()`が解放し次の`code_open()`がflashから読み直すので、保存していない編集は画面を離れた時点で消えていた。下書きは所属スロットを持つ1件だけの記録で、スロットを1つ増やすのではなく`kobako.fs`の後ろ（`SRCSTORE_DRAFT_BASE`=0xa0000、2面で24KiB）に置く — `kobako_fs.c`が`SRC_SLOT_COUNT`からファイルシステムの先頭を計算しており、スロットを増やすと保存済みのファイルが全部ずれるため。保存に成功したとき、実行前の保存が通ったとき、そのスロットを`srcstore_clear()`で忘れるときに消える。実機の検査は`tools/test_editor_draft.py`。
 
-**この下書きの範囲は本文だけで、意図的にそこで止める**（2026-09-23の判断）。カーソル位置とundo履歴は戻さない — 完全な復元が目的ではなく、打った文字が消えないことが目的。SKK練習や設定・Wi-Fi画面の入力途中は対象外で、それらは「編集中」という状態を持たない。JSアプリの途中状態も保存しない（保存したいアプリは`pocket.storage`を自分で使う。POCKET PETがそうしている）。`pocket.fs`（同7節、[filesystem-api.md](../api/filesystem-api.md)）は別の保存領域（`app:`/`assets:`/`sd:`）を持つ。
+**この下書きの範囲は本文だけで、意図的にそこで止める**（2026-09-23の判断）。カーソル位置とundo履歴は戻さない — 完全な復元が目的ではなく、打った文字が消えないことが目的。SKK練習や設定・Wi-Fi画面の入力途中は対象外で、それらは「編集中」という状態を持たない。JSアプリの途中状態も保存しない（保存したいアプリは`kobako.storage`を自分で使う。KOBAKO PETがそうしている）。`kobako.fs`（同7節、[filesystem-api.md](../api/filesystem-api.md)）は別の保存領域（`app:`/`assets:`/`sd:`）を持つ。
 
 ## 未解決事項
 

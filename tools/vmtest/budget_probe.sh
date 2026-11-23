@@ -89,7 +89,7 @@ check() {
 }
 
 # Which guard the shipped configuration lets answer depends on the build:
-# "#info vmstack flat=1" (CONFIG_POCKET_VM_FLATCALLS, L2b) means a JS-to-JS
+# "#info vmstack flat=1" (CONFIG_QJS_LEAN_FLATCALLS, L2b) means a JS-to-JS
 # call consumes no C stack, so under run.sh's limits only the budget can end
 # a deep recursion (budget_hits>0 is then the proof that the budget took the
 # C-stack guard's place); flat=0 means C recursion remains and the C-stack
@@ -157,12 +157,12 @@ check_async() {
   (eval "$stack_cmd"; timeout 300 "$VMRUN" --stats --profile device "$name.js") > "$raw" 2>&1
   echo "exit=$?" >> "$raw"
   # The unhandled-rejection report lines are counted, not diffed.
-  grep -vE '^(#info|vmrun: note:|E pocketjs_guest: Unhandled Promise rejection:)' "$raw" > "$txt"
+  grep -vE '^(#info|vmrun: note:|E kobako_guest: Unhandled Promise rejection:)' "$raw" > "$txt"
   local hits depth unhandled oomn match caught
   # On flat the outer catch's line is info too, for the reason given at the
   # canary below: it has now flipped twice on bytes alone ("caught null" ->
   # nothing with D42/D43, nothing -> "caught null" with
-  # CONFIG_POCKET_VM_STRIP_FN_SOURCE, docs/vm/vm-L2-results.md sec.6). On
+  # CONFIG_QJS_LEAN_STRIP_FN_SOURCE, docs/vm/vm-L2-results.md sec.6). On
   # -recur it stays diffed: RangeError there is the C-stack guard, not luck.
   if [ "$flat" = 1 ]; then
     caught=$(grep -m1 '^caught ' "$txt" || true)
@@ -170,7 +170,7 @@ check_async() {
   fi
   hits=$(sed -n 's/.*budget_hits=\([0-9]*\).*/\1/p' "$raw")
   depth=$(sed -n 's/^#info max_depth=\([0-9]*\).*/\1/p' "$raw" | head -n1)
-  unhandled=$(grep -c '^E pocketjs_guest: Unhandled Promise rejection:' "$raw")
+  unhandled=$(grep -c '^E kobako_guest: Unhandled Promise rejection:' "$raw")
   # OOM canary (quickjs.h JS_TakeOOMCanary): on flat the descent ends in heap
   # exhaustion, and the canary is the positive evidence of that. The output
   # alone cannot carry it: whether the outer catch even manages to print

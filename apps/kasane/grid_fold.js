@@ -2,7 +2,7 @@
 // Values are immutable expressions. Only the returned expression updates acc;
 // native code runs the rectangular loops after registration.
 // The script evaluates to the frozen {fold, index, view} object: the firmware
-// keeps it behind pocket.kasane.grid and there is no gridFold global.
+// keeps it behind kobako.kasane.grid and there is no gridFold global.
 (function () {
   const CONST = 1, LOAD = 2, ADD = 3, MUL = 4, MIN = 5, NO_PARAM = 255;
   const int = (n, low, high) => {

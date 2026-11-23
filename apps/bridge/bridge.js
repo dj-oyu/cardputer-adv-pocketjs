@@ -1,8 +1,8 @@
 (function () {
-  var view = pocket.kasane.mount('bridge');
+  var view = kobako.kasane.mount('bridge');
   view.set({st: 'CONNECTING...', info: '', job: '', seen: ''});
   function show(f, t) { var slot = {}; slot[f] = t; view.set(slot); }
-  var cap = pocket.capabilities.get('bridge.pc');
+  var cap = kobako.capabilities.get('bridge.pc');
   console.log('BRIDGE_CAP supported=' + cap.supported + ' available=' + cap.available +
     ' maxFrameBytes=' + cap.limits.maxFrameBytes + ' maxPayloadBytes=' + cap.limits.maxPayloadBytes);
   var link = null, busy = false;
@@ -11,7 +11,7 @@
     show('st', where + ' ' + c);
     console.log('BRIDGE_ERROR ' + where + ' ' + c + ' outcome=' + ((e && e.outcome) || 'none'));
   }
-  pocket.bridge.connect({transport: 'usb', peerId: 'pocket-bridge-demo'}, {timeoutMs: 10000})
+  kobako.bridge.connect({transport: 'usb', peerId: 'kobako-bridge-demo'}, {timeoutMs: 10000})
     .then(function (b) {
       link = b;
       show('st', 'LINKED ' + b.sessionId);
@@ -26,7 +26,7 @@
       show('info', 'HOST ' + r.host);
       console.log('BRIDGE_INFO ' + r.host + ' ' + r.system);
     }, function (e) { fail('CONNECT', e); });
-  pocket.input.onAction(function (e) {
+  kobako.input.onAction(function (e) {
     if (e.action !== 'accept' || e.phase !== 'press' || !link || busy) return;
     busy = true;
     show('job', 'SUBMITTING...');

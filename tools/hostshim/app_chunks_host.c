@@ -1,4 +1,4 @@
-// The host side of main/pocket/app_chunks.h: see app_chunks_host.h.
+// The host side of main/kobako/app_chunks.h: see app_chunks_host.h.
 #include "app_chunks_host.h"
 #include <ctype.h>
 #include <stdbool.h>

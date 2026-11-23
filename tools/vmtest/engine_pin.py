@@ -6,7 +6,7 @@ submodule's own history.
 
 0d281e1 is the fork's upstream v0.18.0 merge (55b82c7, pocketjs 50b5fe4e,
 docs/vm/upstream-v018.md) plus one deliberate change: a stripped build
-(CONFIG_POCKET_VM_STRIP_DEBUG or NDEBUG) no longer emits OP_source_loc, so it
+(CONFIG_QJS_LEAN_STRIP_DEBUG or NDEBUG) no longer emits OP_source_loc, so it
 allocates less and the --fail-alloc targets move in strip builds (the strip
 variants' expectations are not enforced, function_allocation/run.py). The
 pin before it, pocketjs dd36a29 (Math.sin/cos/tan from Shiki's sine table),

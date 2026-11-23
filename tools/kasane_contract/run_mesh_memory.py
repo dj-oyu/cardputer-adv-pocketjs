@@ -19,8 +19,8 @@ def main():
     qjs = ROOT / 'components/quickjs-ng/quickjs-ng'
     flags = ['-std=gnu11', '-O2', '-g', '-ffp-contract=off',
              '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-             '-DQUICKJS_NG_BUILD', '-DPOCKET_VM_LAZY_BUILTINS=1', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
-    includes = ['-I'+str(p) for p in [qjs, ROOT/'main', ROOT/'main/pocket',
+             '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
+    includes = ['-I'+str(p) for p in [qjs, ROOT/'main', ROOT/'main/kobako',
                 ROOT/'main/ui/kasane', ROOT/'main/ayatsuri',
                 ROOT/'tools/kasane_contract', ROOT/'tools/hostshim']]
     compiler = subprocess.check_output(['cc', '--version'], text=True)
@@ -45,7 +45,7 @@ def main():
                'ksn_render.c', 'ksn_blend_pie.c', 'ksn_shiki.c', 'ksn_mesh_depth.c']]
     sources += [ROOT/'main/ayatsuri'/n for n in ['ayatsuri_model.c',
                 'ayatsuri_visibility.c', 'compact_opaque.c']]
-    sources += [ROOT/'main/pocket'/n for n in ['pocket_shiki_frame.c', 'pocket_shiki_api.c', 'shiki_heap.c']]
+    sources += [ROOT/'main/kobako'/n for n in ['kobako_shiki_frame.c', 'kobako_shiki_api.c', 'shiki_heap.c']]
     sources += [ROOT/'tools/kasane_contract/proc_native_weak.c', rom,
                 ROOT/'tools/kasane_contract/test_mesh_memory_qjs.c']
     binary = out/'mesh-memory'

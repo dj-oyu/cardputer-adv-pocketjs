@@ -2,7 +2,7 @@
 
 `interpreter-stages.md` §9 の続き。P0（guard の要らない T0 の変更）で、DERBY の命令の数から見える取り分はおおむね取った（dispatch −4.9%、host）。残る大きな手は、1ターンに触るコードを flash の命令キャッシュから外すこと（P1）。**数字は実測（実機）/ 実測（host・静的）/ 模型 / 推定を書き分ける。今日の変更は実機ではまだ何も測っていない。**
 
-**決定（2026-10-26）: helper 群 8 KiB を IRAM に置く（`CONFIG_POCKET_VM_HELPER_IRAM`、既定 y、`main/vm/helper_iram8.lf`）。** 実機の DERBY で JS −13%、空き −7.8 KB（§9）。
+**決定（2026-10-26）: helper 群 8 KiB を IRAM に置く（`CONFIG_KOBAKO_QJS_HELPER_IRAM`、既定 y、`main/vm/helper_iram8.lf`）。** 実機の DERBY で JS −13%、空き −7.8 KB（§9）。
 
 v1（同日）を SLOW（Fable）がレビューし、予算の見積もりと、比べる相手の選び方に重大な誤りがあった。v2 はそれを直した版。指摘の要約は §8。
 
@@ -24,7 +24,7 @@ v1（同日）を SLOW（Fable）がレビューし、予算の見積もりと�
 | 同じ 8 KiB は見送り（ユーザーの判断、2026-09-27）。再開の条件は 30 fps に届かないアプリで、模型を回し直して候補を選び直す | 記録 | `turn-icache.md` §1.4 |
 | 同一バイナリでも揺れる: R5 の基準 1 → 基準 2 で LV3 が 7.09 → 7.75 ms（+9%）。アラインメントだけで同じカーネルが 15% 動く | 実測（実機） | `turn-icache.md` §1.3.4、`CLAUDE.md` |
 
-注意: 41.8 KiB と core の床（約 6 KiB）は STRESS の値で、DERBY の host opprof と同じアプリの数字ではない。r5sim は今 STRESS しか回せない（DERBY は `pocket.derby` などの面が無い）。
+注意: 41.8 KiB と core の床（約 6 KiB）は STRESS の値で、DERBY の host opprof と同じアプリの数字ではない。r5sim は今 STRESS しか回せない（DERBY は `kobako.derby` などの面が無い）。
 
 ## 2. 調べたこと
 
@@ -166,7 +166,7 @@ BREAK;
 ### 5.1 実機の前（模型）
 
 1. 今のブランチの ELF で `case_sizes` を取り直す（比較命令の帰属を直し、ダンプ無しで）。§3.1 の `no_inline` の前後も。
-2. `icache.py model --iram-kib` で「本体」「R5 の候補を選び直したもの」「両方」を、同じ DRAM の予算で比べる（STRESS）。DERBY で決めるなら、先に r5sim に DERBY を載せる（`pocket.derby` などの面）。
+2. `icache.py model --iram-kib` で「本体」「R5 の候補を選び直したもの」「両方」を、同じ DRAM の予算で比べる（STRESS）。DERBY で決めるなら、先に r5sim に DERBY を載せる（`kobako.derby` などの面）。
 
 ### 5.2 実機（模型で勝った構成だけ）
 
@@ -199,7 +199,7 @@ BREAK;
 
 ## 9. 実機の結果と決定（2026-10-26）
 
-DERBY のデモを、種を固定した測定用ビルドで A/B/A（P0 → P0＋iram8 → P0）。TURNPERF 版（`CONFIG_POCKET_VM_TURNPERF=y`）で、レース区間（GO..FINISH）の窓だけを集め、1 ターンあたりの中央値。各脚 2 レース、各イベント 4 窓。3 脚とも同じ種・同じ着順。**実測（実機）。**
+DERBY のデモを、種を固定した測定用ビルドで A/B/A（P0 → P0＋iram8 → P0）。TURNPERF 版（`CONFIG_KOBAKO_TURNPERF=y`）で、レース区間（GO..FINISH）の窓だけを集め、1 ターンあたりの中央値。各脚 2 レース、各イベント 4 窓。3 脚とも同じ種・同じ着順。**実測（実機）。**
 
 | 脚 | JS 時間/フレーム | サイクル/ターン | 退役命令 | `I_STALL_BUSY` | 空き heap（起動時） |
 | --- | --- | --- | --- | --- | --- |
@@ -212,4 +212,4 @@ DERBY のデモを、種を固定した測定用ビルドで A/B/A（P0 → P0�
 - 1 KiB あたり約 0.19 ms は、この 1 点を 8 で割っただけ。4 KiB・14.5 KB の候補は実機で測っていない。
 - 配置の揺れ（§5.2 の padding の分布）は取っていない。A/B/A は同じバイナリの再現を見ただけで、ビルド間の配置の揺れは消せない。ただし差（−13%）は命令数が同じまま `I_STALL_BUSY` の減少で説明でき、配置の偶然では説明しにくい。
 - 決定: 8 KiB を入れる（ユーザー、2026-10-26）。前例（R5、2026-09-27、STRESS −1.07 ms 対 −8.7 KiB）は見送りだった。今回は DERBY で −1.57 ms。
-- 手順の記録: 測定用ブランチ `vm/tiered-interp-fs-tp-p0`（`f594152e`）、`vm/tiered-interp-fs-tp-iram8`（`6bb550a0`）。種の固定は `main/pocket/random_seed.c` を定数にした 1 行で、マージしない。
+- 手順の記録: 測定用ブランチ `vm/tiered-interp-fs-tp-p0`（`f594152e`）、`vm/tiered-interp-fs-tp-iram8`（`6bb550a0`）。種の固定は `main/kobako/random_seed.c` を定数にした 1 行で、マージしない。

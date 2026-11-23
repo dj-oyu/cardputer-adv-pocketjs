@@ -65,7 +65,7 @@ static void decode_whole(const uint8_t *data, uint32_t bytes, uint16_t block,
 // ---- the product path: a producer and the audio task's walk, interleaved
 //
 // The producer gets a turn once every WALK_PERIOD samples, because that is what
-// it gets in the firmware: player_feed() runs from pocket_av_pump(), once a UI
+// it gets in the firmware: player_feed() runs from kobako_av_pump(), once a UI
 // frame, and 800 samples is 33 ms at 24 kHz. Giving it a turn per sample -- the
 // first version of this file -- made a "late" producer impossible to starve and
 // reported zero underruns for a case whose whole purpose was to underrun.
@@ -91,7 +91,7 @@ static walk_t walk(const uint8_t *data, uint32_t bytes, uint16_t block,
     uint32_t fed=0, tick=0;
     bool stopped=false;   // the source stopped answering, once
     for(;;) {
-        // The producer, standing in for pocket_av.c's player_feed().
+        // The producer, standing in for kobako_av.c's player_feed().
         bool turn=(tick++%WALK_PERIOD)==0;
         if(turn&&!(lateness&&(next_byte()&15)<lateness)) {
             for(;;) {
@@ -137,7 +137,7 @@ static void case_adpcm(const char *label, uint16_t block, uint32_t blocks,
     uint32_t bytes=blocks*block+tail;
     uint8_t *data=malloc(bytes);
     for(uint32_t i=0;i<bytes;i++) data[i]=next_byte();
-    // What pocket_av.c's wav_parse computes for the same payload.
+    // What kobako_av.c's wav_parse computes for the same payload.
     uint32_t per_block=(uint32_t)(block-4)*2+1;
     uint32_t frames=blocks*per_block;
     if(tail>=4) frames+=1+(tail-4)*2;
@@ -211,7 +211,7 @@ static void case_truncated(void) {
 int main(void) {
     printf("sound_stream.h: slots must not change the samples\n");
     // A block of 256 bytes is what an encoder produces for 24 kHz mono and what
-    // pocket_av.c's seekBlockAligned is stated against; 1024 exercises a slot
+    // kobako_av.c's seekBlockAligned is stated against; 1024 exercises a slot
     // that holds two blocks, and 2048 one that holds exactly one -- the largest
     // block wav_parse accepts.
     case_adpcm("adpcm 256, prompt",      256, 40, 0, 0);

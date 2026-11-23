@@ -1,13 +1,13 @@
 // The firmware's built-in Shiki programs: an app's @shiki functions compiled
 // (shiki_compile.mjs, spec sec.8) to const C, so that
-// pocket.kasane.shiki.register('APP.name', args) finds them in flash and the
+// kobako.kasane.shiki.register('APP.name', args) finds them in flash and the
 // guest neither holds their bytes nor evaluates their source (lower_plans.mjs
 // --rom removes the functions from the shipped chunk). Host only (Node 16+).
 //
 //   node tools/kasane_ir/emit_shiki_rom.mjs OUT.c APP=FILE.js [APP=FILE.js ...]
 //
 // OUT.c defines ksn_shiki_rom_table() over a static table, overriding the
-// weak empty one in main/pocket/pocket_shiki_api.c. Names are 'APP.name' and unique; a function
+// weak empty one in main/kobako/kobako_shiki_api.c. Names are 'APP.name' and unique; a function
 // the compiler refuses stops the build with its message.
 import fs from 'node:fs';
 import {findPlans} from './plan_js.mjs';

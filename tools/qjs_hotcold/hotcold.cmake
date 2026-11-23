@@ -1,7 +1,7 @@
 # The hot/cold layout's compiler launcher, for any component
 # (docs/vm/qjs-hotcold.md; quickjs-ng and main use it).
 #
-#   pocket_hotcold(MODE use|gen PROFILE <json> [PAD <bytes>]
+#   kobako_hotcold(MODE use|gen PROFILE <json> [PAD <bytes>]
 #                  ONLY <basename>... SOURCES <path>... [KEEP_OUT <lf>...] [NAME <label>])
 #
 # Puts tools/qjs_hotcold/hc_cc.py in front of the C compiler of
@@ -10,9 +10,9 @@
 # same files as paths: they get the tools and the profile as dependencies, so
 # a new profile recompiles them. KEEP_OUT: linker fragments whose functions,
 # placed by name, must stay in their own sections.
-get_filename_component(POCKET_HOTCOLD_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+get_filename_component(KOBAKO_HOTCOLD_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
 
-function(pocket_hotcold)
+function(kobako_hotcold)
     cmake_parse_arguments(HC "" "MODE;PROFILE;PAD;NAME" "ONLY;SOURCES;KEEP_OUT" ${ARGN})
     if(NOT HC_PAD)
         set(HC_PAD 0)
@@ -35,9 +35,9 @@ function(pocket_hotcold)
     endif()
     # -B: the build must not write a __pycache__ into the source tree.
     set_property(TARGET ${COMPONENT_LIB} PROPERTY C_COMPILER_LAUNCHER
-        "${_python}" -B "${POCKET_HOTCOLD_DIR}/hc_cc.py" --mode "${HC_MODE}" --profile "${_profile}"
+        "${_python}" -B "${KOBAKO_HOTCOLD_DIR}/hc_cc.py" --mode "${HC_MODE}" --profile "${_profile}"
         --pad "${HC_PAD}" ${_keep} ${_wrap} --only "${_only}" --)
-    set(_deps "${POCKET_HOTCOLD_DIR}/hc_cc.py" "${POCKET_HOTCOLD_DIR}/hc_asm.py")
+    set(_deps "${KOBAKO_HOTCOLD_DIR}/hc_cc.py" "${KOBAKO_HOTCOLD_DIR}/hc_asm.py")
     if(HC_MODE STREQUAL "use")
         list(APPEND _deps "${_profile}")
     endif()
@@ -50,37 +50,37 @@ endfunction()
 # the DERBY demo race, docs/vm/qjs-hotcold.md sec.13). Shared by
 # main/CMakeLists.txt and tools/r5sim/main/CMakeLists.txt, so the image that
 # trains and the firmware lay out the same files.
-set(POCKET_NATIVE_HOTCOLD_FILES
-    ui/kasane/ksn_shiki.c pocket/pocket_kasane.c ui/kasane/ksn_core.c pocket/pocket_shiki_frame.c
-    pocket/pocket_shiki_api.c apps/derby/derby_ser_int.c apps/derby/pocket_derby.c ui/kasane/ksn_view.c
-    pocket/pocket_input.c)
+set(KOBAKO_NATIVE_HOTCOLD_FILES
+    ui/kasane/ksn_shiki.c kobako/kobako_kasane.c ui/kasane/ksn_core.c kobako/kobako_shiki_frame.c
+    kobako/kobako_shiki_api.c apps/derby/derby_ser_int.c apps/derby/kobako_derby.c ui/kasane/ksn_view.c
+    kobako/kobako_input.c)
 
-# pocket_native_hotcold(<main dir>): the launcher on main's sources, when
-# CONFIG_POCKET_NATIVE_HOTCOLD or -DPOCKET_NATIVE_HOTCOLD=use|gen asks for it
-# (-DPOCKET_NATIVE_HOTCOLD=off overrides the Kconfig).
-function(pocket_native_hotcold main_dir)
+# kobako_native_hotcold(<main dir>): the launcher on main's sources, when
+# CONFIG_KOBAKO_NATIVE_HOTCOLD or -DKOBAKO_NATIVE_HOTCOLD=use|gen asks for it
+# (-DKOBAKO_NATIVE_HOTCOLD=off overrides the Kconfig).
+function(kobako_native_hotcold main_dir)
     set(_mode "")
-    if(DEFINED POCKET_NATIVE_HOTCOLD)
-        if(POCKET_NATIVE_HOTCOLD STREQUAL "use" OR POCKET_NATIVE_HOTCOLD STREQUAL "gen")
-            set(_mode "${POCKET_NATIVE_HOTCOLD}")
+    if(DEFINED KOBAKO_NATIVE_HOTCOLD)
+        if(KOBAKO_NATIVE_HOTCOLD STREQUAL "use" OR KOBAKO_NATIVE_HOTCOLD STREQUAL "gen")
+            set(_mode "${KOBAKO_NATIVE_HOTCOLD}")
         endif()
-    elseif(CONFIG_POCKET_NATIVE_HOTCOLD)
+    elseif(CONFIG_KOBAKO_NATIVE_HOTCOLD)
         set(_mode "use")
     endif()
     if(NOT _mode)
         return()
     endif()
-    if(NOT POCKET_NATIVE_HOTCOLD_PROFILE)
-        set(POCKET_NATIVE_HOTCOLD_PROFILE "${POCKET_HOTCOLD_DIR}/profile_native.json")
+    if(NOT KOBAKO_NATIVE_HOTCOLD_PROFILE)
+        set(KOBAKO_NATIVE_HOTCOLD_PROFILE "${KOBAKO_HOTCOLD_DIR}/profile_native.json")
     endif()
     set(_only "")
     set(_paths "")
-    foreach(f ${POCKET_NATIVE_HOTCOLD_FILES})
+    foreach(f ${KOBAKO_NATIVE_HOTCOLD_FILES})
         get_filename_component(_b "${f}" NAME)
         list(APPEND _only "${_b}")
         list(APPEND _paths "${main_dir}/${f}")
     endforeach()
-    pocket_hotcold(NAME main MODE "${_mode}" PROFILE "${POCKET_NATIVE_HOTCOLD_PROFILE}"
-        PAD "${POCKET_NATIVE_HOTCOLD_PAD}" ONLY ${_only} SOURCES ${_paths}
+    kobako_hotcold(NAME main MODE "${_mode}" PROFILE "${KOBAKO_NATIVE_HOTCOLD_PROFILE}"
+        PAD "${KOBAKO_NATIVE_HOTCOLD_PAD}" ONLY ${_only} SOURCES ${_paths}
         KEEP_OUT "${main_dir}/vm/helper_iram8.lf")
 endfunction()

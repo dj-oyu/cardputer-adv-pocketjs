@@ -33,7 +33,7 @@ def main():
     pad = int(opts[opts.index('--pad') + 1]) if '--pad' in opts else 0
     keep_out = opts[opts.index('--keep-out') + 1].split(',') if '--keep-out' in opts else []
     # --wrap: the build's own compile launcher (ESP-IDF's RULE_LAUNCH_COMPILE,
-    # ccache), which pocket_hotcold() takes off the target so that it runs
+    # ccache), which kobako_hotcold() takes off the target so that it runs
     # here, in front of the compiler. In front of this script, ccache took
     # Python for the compiler, and on Windows a long command reached Python as
     # `python @response-file`, which Python reads as a script name.
