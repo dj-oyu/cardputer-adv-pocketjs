@@ -144,4 +144,4 @@ fork の `main` に入った PR #2（NEON と 128 bit の dtoa/atod）は、`__i
 | `indexOf` 4 KB（変更の外） | 185.6 | 184.8 | −0.4% |
 
 - **読み方。** 変更の外の項目は ±3% 以内。ビルドのアラインメントだけで同じコードが 15% 動くことがあるので、1 回ずつの 16% は幅の中に入る。しかしチェックサムは同じで、外の項目が動いていない。各値には JS 呼び出しの費用が入るので、dtoa の取り分はこれより小さい。PR #2 の 12 倍は Cortex-A53 の値で、この機体では `String(float)` が約 16%。`toFixed`/`toExponential`/`toString(radix)` は別の形式で、変わらない。
-- **測っていないもの。** (1) gitlink の `b716bd1` は PR #3（配列の遅延コピー、`quickjs.c` +568 行）を含み、A2/B2 の木にはない。S3 のヒープと速度への影響は未測定。(2) `quickjs.c` が変わったので、hot/cold を学習し直す必要がある（`tools/qjs_hotcold/train.sh`）。未実施。(3) ファーム全体の flash の増分（+12.6 KB は `dtoa.o` 単体）。
+- **測っていないもの。** (1) gitlink の `b716bd1` は PR #3（配列の遅延コピー、`quickjs.c` +568 行）を含み、A2/B2 の木にはない。S3 のヒープと速度への影響は未測定。(2) `quickjs.c` が変わったので、hot/cold を学習し直す必要がある（`tools/qjs_hotcold/train.sh`）。未実施（2026-11-22 に確かめた: PR #4 で `JS_CallInternal`・`build_arg_list`・`js_function_apply` が外れ、今のファームでは `JS_CallInternal` が並べ替えられていない。fork main が落ち着いてから学習し直す。[pr8-cold-outline.md](pr8-cold-outline.md) §4）。(3) ファーム全体の flash の増分（+12.6 KB は `dtoa.o` 単体）。
