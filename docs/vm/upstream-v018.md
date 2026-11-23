@@ -145,3 +145,25 @@ fork の `main` に入った PR #2（NEON と 128 bit の dtoa/atod）は、`__i
 
 - **読み方。** 変更の外の項目は ±3% 以内。ビルドのアラインメントだけで同じコードが 15% 動くことがあるので、1 回ずつの 16% は幅の中に入る。しかしチェックサムは同じで、外の項目が動いていない。各値には JS 呼び出しの費用が入るので、dtoa の取り分はこれより小さい。PR #2 の 12 倍は Cortex-A53 の値で、この機体では `String(float)` が約 16%。`toFixed`/`toExponential`/`toString(radix)` は別の形式で、変わらない。
 - **測っていないもの。** (1) gitlink の `b716bd1` は PR #3（配列の遅延コピー、`quickjs.c` +568 行）を含み、A2/B2 の木にはない。S3 のヒープと速度への影響は未測定。(2) `quickjs.c` が変わったので、hot/cold を学習し直す必要がある（`tools/qjs_hotcold/train.sh`）。未実施（2026-11-22 に確かめた: PR #4 で `JS_CallInternal`・`build_arg_list`・`js_function_apply` が外れ、今のファームでは `JS_CallInternal` が並べ替えられていない。fork main が落ち着いてから学習し直す。[pr8-cold-outline.md](pr8-cold-outline.md) §4）。(3) ファーム全体の flash の増分（+12.6 KB は `dtoa.o` 単体）。
+
+## 11. fork の `main` `4492bd1` に上げ、改名し、hot/cold を学習し直した（2026-11-23、fork `c7d48fd`）
+
+gitlink を `b716bd1` から fork の PR #6〜#11 の後（`4492bd1`）へ上げ、同時にプロジェクトを `pocket` から `kobako` へ、fork のオプションを `POCKET_VM_*` から `QJS_LEAN_*` へ改名した（`tools/rename/kobako_rename.py`、fork 側は `c7d48fd`）。そのあと `quickjs.c` と `main/` の hot/cold を学習し直した。
+
+- **F2 は S3 では 1 のまま。** fork の PR #11 が `POCKET_VM_LAZY_BUILTINS`（今の `QJS_LEAN_LAZY_BUILTINS`）の既定を 0 にしたので、`components/quickjs-ng/CMakeLists.txt` と、`quickjs.c` をコンパイルする `tools/` の道具 37 本が 1 を渡す（ROM の atom の表の生成器だけは除く）。STRESS の起動直後のゲストは A・B とも `js=42800` で同じ（実測（実機））。
+- **プロファイル。** `quickjs.c` は 192 関数がすべて当たる（外れ 0）。`main/` の側は `kobako_derby.c` 5・`ksn_shiki.c` 3 が外れ、改名前と同じ数（[qjs-hotcold.md](qjs-hotcold.md) §13.7）。今の main（A）の `JS_CallInternal` は、fork の PR #4 から並べ替えが外れていた（§10）。
+- **改名だけの差は 0。** hot/cold を切って改名の前後を組むと、`.bin`・Flash Code・Flash Data・DIRAM がバイト単位で同じ（実測（静的））。
+
+実機の A/B（TURNPERF、固定の種、焼き順 B → A → B）。A は今の main（`e0ecbd9`、fork `b716bd1`）、B は上の木（`e245a78`）。B の 2 回は DERBY・STRESS とも 0.03% 以内で一致し、3 回とも DERBY の着順・タイムが同じ。生ログは [logs/fork-c7d48fd-ab-20261123.txt](logs/fork-c7d48fd-ab-20261123.txt)。
+
+| 実測（実機）、1 ターンあたり | DERBY A | DERBY B | 差 | STRESS A | STRESS B | 差 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| サイクル | 1,314,802 | 1,226,910 | **−6.7%** | 1,265,106 | 1,240,796 | **−1.9%** |
+| 時間 | 5.58 ms | 5.20 ms | −6.7% | 5.49 ms | 5.38 ms | −1.9% |
+| 退役命令 | 487,257 | 468,827 | −3.8% | 599,396 | 602,760 | +0.6% |
+| `istall` | 519,084 | 469,493 | −9.6% | 418,815 | 385,651 | −7.9% |
+| 振り分け（`insn_jx`） | 6,988 | 6,833 | −2.2% | 2,190 | 2,128 | −2.8% |
+| `dstall` | 38,058 | 30,799 | −19.1% | 36,070 | 31,785 | −11.9% |
+
+- **読み方。** 振り分けの減り（−2〜−3%）は fork の PR #6・#7 の比較と分岐の融合（2 命令を 1 回の振り分けで済ませる）、`istall` の減り（−8〜−10%）は `JS_CallInternal` の並べ替えが戻ったことと読む（推定。2 つを分けて測ってはいない）。どちらも配置の偶然では説明しにくい（命令と振り分けの数そのものが減っている）が、CLAUDE.md のビルド間の揺れ（15%）より小さいので、熱い領域をずらした像（[qjs-hotcold.md](qjs-hotcold.md) §7 の B''）では確かめていない。
+- **測っていないもの。** DERBY の評価の余裕とゲスト最大（heapprobe）、smoke と設定の試験（`smoke_device.py`・`test_settings.py` はブローカーからは走らない）、STRESS 以外の出荷アプリ。
