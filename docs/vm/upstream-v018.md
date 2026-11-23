@@ -176,3 +176,12 @@ gitlink を `b716bd1` から fork の PR #6〜#11 の後（`4492bd1`）へ上げ
 - 停止後のホームの空きは 221,368 → … → 220,544 B で、後半の 6 本は同じ値（漏れは見えない）。下がった 2 段（STRESS −580 B で最大の連続領域が 73,728 → 65,536、NET CHECK −496 B）は、Shiki のヒープと無線を初めて使った時と重なる（推定）。TLS CYCLE の直後だけ 186,776 B だが、次のアプリの前には戻っている（無線の後片付けが停止の行より後に走ると読む。推定）。
 - MEGADEMO と DERBY は `MEM_PRESSURE`（情報の行）を出したが、拒否も失敗も無い。
 - **走らせていないもの**: ブローカーが起動できないアプリ（MUSIC PLAYER は常駐の overlay、PLAYGROUND・TUTORIAL・WORK は動的ソース、DESK CLOCK は overlay、VM PROBE）と、目録に無い SHIKI TEST/DATA/API・CYCLE BENCH・DRAW COST・MESH BENCH。`smoke_device.py`（20 周の起動・停止）、`test_settings.py`、heapprobe（DERBY の評価の余裕）は生のシリアルのコマンドが要り、ブローカーからは走らせられない。
+
+### 11.2 fork PR #13（`f1d02d8`、`d857533`）の実機の確認（2026-11-23）
+
+`turnperf` 構成の像を 1 回焼き、DERBY のデモレースと STRESS を各 1 回、§11 の B（`e245a78`、同じ日の同じ機体の 2 回）と窓ごとに比べた（実測）。
+
+- 1 ターンのサイクル: DERBY +0.4%（B1 比 +0.38%、B2 比 +0.41%）、STRESS +0.3%。退役命令 ±0.1% 以内、振り分けの回数（`insn_jx`）は 6,833 / 2,128 で同じ。差は `istall` などの待ちの事象（1〜2 窓ずつ）に出ていて、CLAUDE.md のビルド間の揺れ（15%）よりずっと小さいので、変化なしと読む（同じ像の比較ではない）。
+- DERBY の着順・タイムは B と同じ（`order=1,6,2,3,5,7,8,4`）。STRESS は `oom=0 err=0`、評価後のゲストは `js=42832`（B は 42,800）。
+- smoke（同じ像、各 15 秒、キー入力なし）: HELLO・PET・MEGADEMO・GRID LAB・LCD CATCH・BIG WAVE・NET CHECK が最後まで動き、エラーの行は無い。停止後のホームの空きは 220,776 B で毎回同じ。PET の `jobs dropped at stop` と MEGADEMO の `MEM_PRESSURE` は §11.1 と同じ（この変更より前から）。
+- 実機は計測前の像（`60c4d8f`、`ay_characters`）に戻した。
