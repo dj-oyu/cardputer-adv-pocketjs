@@ -25,7 +25,5 @@ from `pocketjs_guest` to `kobako_guest` in 2026-11 together with the rest of
 the firmware's `pocket` names. The upstream revision it was copied from is not
 recorded here (the design survey pinned `6a0a1b6c91a506c473fc37a0256a47b12eceeca8`).
 
-The MIT terms require the upstream copyright notice and permission text to
-travel with the code. They belong in `licenses/PocketJS.txt`, next to the other
-third-party notices; that copy is still missing (it was missing before the
-rename too).
+The upstream copyright notice and MIT permission text are in
+`licenses/PocketJS.txt`, next to the other third-party notices.
