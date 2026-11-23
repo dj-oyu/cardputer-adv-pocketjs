@@ -167,3 +167,12 @@ gitlink を `b716bd1` から fork の PR #6〜#11 の後（`4492bd1`）へ上げ
 
 - **読み方。** 振り分けの減り（−2〜−3%）は fork の PR #6・#7 の比較と分岐の融合（2 命令を 1 回の振り分けで済ませる）、`istall` の減り（−8〜−10%）は `JS_CallInternal` の並べ替えが戻ったことと読む（推定。2 つを分けて測ってはいない）。どちらも配置の偶然では説明しにくい（命令と振り分けの数そのものが減っている）が、CLAUDE.md のビルド間の揺れ（15%）より小さいので、熱い領域をずらした像（[qjs-hotcold.md](qjs-hotcold.md) §7 の B''）では確かめていない。
 - **測っていないもの。** DERBY の評価の余裕とゲスト最大（heapprobe）、smoke と設定の試験（`smoke_device.py`・`test_settings.py` はブローカーからは走らない）、STRESS 以外の出荷アプリ。
+
+### 11.1 出荷アプリの smoke（2026-11-23、`665ad09`、fork `b227ff8`）
+
+ブローカーの `app_session`（新しく起動、20 秒、DERBY は 60 秒、キー入力なし、終わりに停止）で、ブローカーの目録で起動できる 13 本を 1 本ずつ回した。生ログの抜き出しは [logs/smoke-665ad09-20261123.txt](logs/smoke-665ad09-20261123.txt)。
+
+- 13 本とも `app_session_duration_elapsed` で終わり、ログに ERROR・EXECUTION FAILED・OOM・例外・Guru・abort・`E (` は無い（実測）。HELLO・IMU CAL・PET・COMPANION・STRESS・NET CHECK・TLS CYCLE・MEGADEMO・GRID LAB・VIDEO LAB・LCD CATCH・DERBY（デモレースが FINISH まで）・BIG WAVE。
+- 停止後のホームの空きは 221,368 → … → 220,544 B で、後半の 6 本は同じ値（漏れは見えない）。下がった 2 段（STRESS −580 B で最大の連続領域が 73,728 → 65,536、NET CHECK −496 B）は、Shiki のヒープと無線を初めて使った時と重なる（推定）。TLS CYCLE の直後だけ 186,776 B だが、次のアプリの前には戻っている（無線の後片付けが停止の行より後に走ると読む。推定）。
+- MEGADEMO と DERBY は `MEM_PRESSURE`（情報の行）を出したが、拒否も失敗も無い。
+- **走らせていないもの**: ブローカーが起動できないアプリ（MUSIC PLAYER は常駐の overlay、PLAYGROUND・TUTORIAL・WORK は動的ソース、DESK CLOCK は overlay、VM PROBE）と、目録に無い SHIKI TEST/DATA/API・CYCLE BENCH・DRAW COST・MESH BENCH。`smoke_device.py`（20 周の起動・停止）、`test_settings.py`、heapprobe（DERBY の評価の余裕）は生のシリアルのコマンドが要り、ブローカーからは走らせられない。
